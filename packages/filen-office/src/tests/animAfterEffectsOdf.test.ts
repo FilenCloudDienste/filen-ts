@@ -2,12 +2,15 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { LayerState, TimeNode, TimingTree } from "../core/anim/model"
+import { readOdpTiming } from "../core/anim/odf"
 import { compile, instantiate } from "../core/anim/timegraph"
-import type { SlideNode } from "../core/presentation/model"
+import { Fragment } from "../core/odp/read/context"
+import type { ShapeNode, SlideNode } from "../core/presentation/model"
 import { readTiming } from "../core/pptx/read/timing"
 import { PartReader } from "../core/pptx/read/xml"
-import { encodeUtf8, parseXml } from "../core/xml/index"
+import { Namespaces, encodeUtf8, parseXml } from "../core/xml/index"
 import { BUDGETS, animatedSlide, shape } from "./animFixtures"
+import { ODP_NS } from "./odpFixtures"
 import { freshFromPptx } from "./odpWriteFreshFixtures"
 import { entriesOf, openOdpDeck, saveDeck, shapeNamed, slideAt, text, touched } from "./odpWriteFixtures"
 import { buildPptx, sp, xfrm } from "./pptxFixtures"
@@ -237,4 +240,82 @@ describe("after-effects through ODP", () => {
 			expect((await saveDeck(reopened)).outcome.kind).toBe("unchanged")
 		}
 	)
+})
+
+describe("media playback beside after-effects in ODP", () => {
+	const EFFECT =
+		'<anim:par smil:begin="0s" smil:fill="hold" xml:id="fx" presentation:node-type="on-click" presentation:preset-class="entrance" presentation:preset-id="ooo-entrance-appear">' +
+		'<anim:set smil:begin="0s" smil:dur="0.001s" smil:fill="hold" smil:targetElement="id1" smil:attributeName="visibility" smil:to="visible"/></anim:par>'
+	// Hide after animation, the page's last anim element: it holds the largest ids read.
+	const HIDE =
+		'<anim:par smil:fill="hold" presentation:master-element="fx"><anim:set smil:begin="0.5s" smil:dur="0.001s" smil:fill="hold" smil:targetElement="id1" smil:attributeName="visibility" smil:to="hidden"/></anim:par>'
+	const timing = (after: string): string =>
+		'<anim:par smil:dur="indefinite" smil:restart="never" presentation:node-type="timing-root"><anim:seq smil:dur="indefinite" presentation:node-type="main-sequence">' +
+		`<anim:par smil:begin="indefinite" smil:fill="hold"><anim:par smil:begin="0s" smil:fill="hold">${EFFECT}${after}</anim:par></anim:par></anim:seq></anim:par>`
+
+	function readPage(content: string): TimingTree {
+		const document = parseXml(
+			encodeUtf8(
+				`<office:fragment ${ODP_NS}><draw:page draw:name="p1">` +
+					'<draw:frame draw:id="id1" xml:id="id1" svg:x="1cm" svg:y="1cm" svg:width="5cm" svg:height="2cm"><draw:text-box/></draw:frame>' +
+					'<draw:frame draw:id="id2" xml:id="id2" svg:x="8cm" svg:y="1cm" svg:width="5cm" svg:height="2cm"><draw:plugin xlink:href="Media/a.mp4"><draw:param draw:name="Loop" draw:value="true"/></draw:plugin></draw:frame>' +
+					`${content}</draw:page></office:fragment>`
+			)
+		)
+		const fragment = new Fragment(document, new Namespaces(document, { lenient: true }), "content.xml", 100, "content", 0)
+		const page = document.firstChildElement(document.documentElement())
+		const text = document.firstChildElement(page)
+		const media = document.nextSiblingElement(text)
+		const shapes: ShapeNode[] = [
+			{ id: 1, name: "", hidden: false, kind: "sp", src: fragment.src(text) },
+			{
+				id: 2,
+				name: "",
+				hidden: false,
+				kind: "sp",
+				src: fragment.src(media),
+				frame: { kind: "media", media: { kind: "video", contentType: "video/mp4" } }
+			}
+		]
+		const tree = readOdpTiming(fragment, page, shapes, BUDGETS)
+
+		if (tree === undefined) throw new Error("no timing")
+
+		return tree
+	}
+
+	function ids(tree: TimingTree): number[] {
+		const out: number[] = []
+		const stack: TimeNode[] = [tree.root]
+
+		for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+			out.push(node.ctn.id)
+			stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+		}
+
+		return out
+	}
+
+	it("numbers a looping medium past the ids of after-effects", () => {
+		const tree = readPage(timing(HIDE))
+		const all = ids(tree)
+
+		const read = ids({ ...tree, root: { ...tree.root, ctn: { ...tree.root.ctn, children: tree.root.ctn.children.slice(0, -1) } } })
+
+		expect(subsOf(tree)).toHaveLength(1)
+		expect(tree.root.ctn.children.at(-1)?.ctn.repeatCount).toBe("indefinite")
+		expect(new Set(all).size).toBe(all.length)
+		expect(tree.root.ctn.children.at(-1)?.ctn.id).toBe(Math.max(...read) + 1)
+	})
+
+	it("numbers a medium on a page without after-effects as before", () => {
+		const tree = readPage(timing(""))
+		const all = ids(tree)
+
+		const read = ids({ ...tree, root: { ...tree.root, ctn: { ...tree.root.ctn, children: tree.root.ctn.children.slice(0, -1) } } })
+
+		expect(new Set(all).size).toBe(all.length)
+		// The medium takes the next id after those read.
+		expect(tree.root.ctn.children.at(-1)?.ctn.id).toBe(Math.max(...read) + 1)
+	})
 })

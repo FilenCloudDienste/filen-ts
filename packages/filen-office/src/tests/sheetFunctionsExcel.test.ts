@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { FormulaEngine, type EngineSheet } from "../core/sheet/formula/index"
 import { absoluteCell, engineCellFormula, engineFormula, holdsBracket } from "../core/sheet/refs/formulaRefs"
+import { budget } from "./timing"
 
 // The engine against Excel's own reading of formulas, where HyperFormula alone differs: each case is Excel's result
 // per the function's page on support.microsoft.com (cited by the test).
@@ -846,6 +847,303 @@ describe("arguments Excel truncates", () => {
 			"ROMAN(0)": "",
 			"ROMAN(-1)": "!#VALUE!",
 			"ROMAN(4000)": "!#VALUE!"
+		})
+	})
+})
+
+// support.microsoft.com "Using wildcard characters in searches": ? is any one character, * any run, ~ makes the next
+// character literal. Matched without backtracking: a pattern of many stars over a long text takes no longer than one.
+describe("wildcard criteria and SEARCH", () => {
+	it("match ?, *, ~ and case as Excel does, anchored in criteria and found anywhere by SEARCH", () => {
+		expect(
+			calculate([
+				["abc", '=COUNTIF(A1:A7,"a?c")', '=COUNTIF(A1:A7,"a~*c")', '=COUNTIF(A1:A7,"a~?c")', '=COUNTIF(A1:A7,"*b*")', 1],
+				["ac", '=COUNTIF(A1:A7,"b")', '=COUNTIF(A1:A7,"<>a*")', '=COUNTIF(A1:A7,"a*c")', '=COUNTIF(A1:A7,"~a?c")', 2],
+				["abbc", '=SEARCH("b?d","abcbxd")', '=SEARCH("c*x","abcbxd")', '=SEARCH("~*","a*b")', '=SEARCH("B*D","abcbxd")', 3],
+				["ABC", '=SEARCH("x?","abc")', '=SEARCH("b*","abc",3)', '=SEARCH("?","abc",2)', '=SUMIF(A1:A7,"a?c",F1:F7)', 4],
+				["a*c", '=COUNTIFS(A1:A7,"*~*c")', '=SEARCH("c*~?","abc?d")', null, null, 5],
+				["a?c", null, null, null, null, 6],
+				["xyz", null, null, null, null, 7]
+			])
+		).toEqual({
+			B1: 4,
+			C1: 1,
+			D1: 1,
+			E1: 3,
+			B2: 0,
+			C2: 1,
+			D2: 6,
+			E2: 4,
+			B3: 4,
+			C3: 3,
+			D3: 2,
+			E3: 2,
+			B4: "!#VALUE!",
+			C4: "!#VALUE!",
+			D4: 2,
+			E4: 16,
+			B5: 1,
+			C5: 3
+		})
+	})
+
+	it("take no time to tell that ten stars do not match a long text", () => {
+		const long = "a".repeat(30_000)
+		const pattern = `${"*a".repeat(9)}*b`
+		const start = performance.now()
+		const results = calculate([
+			[long, `=COUNTIF(A1,"${pattern}")`, `=SEARCH("${pattern}",A1)`, `=COUNTIF(A1,"${pattern.slice(0, -1)}")`]
+		])
+
+		expect(performance.now() - start).toBeLessThan(budget(2_000))
+		expect(results).toEqual({ B1: 0, C1: "!#VALUE!", D1: 1 })
+	})
+})
+
+describe("array sizes bounded before they are built", () => {
+	it("gives TEXTSPLIT's over-cap error before padding a split of hundreds of millions of cells", () => {
+		const start = performance.now()
+		const out = calculate([
+			[
+				'=ROWS(TEXTSPLIT(REPT(",",16000)&REPT(";",16000),",",";"))',
+				'=COLUMNS(TEXTSPLIT(REPT(",",20000),","))',
+				'=ROWS(TEXTSPLIT(REPT(",",400)&REPT(";",400),",",";"))',
+				'=COLUMNS(TEXTSPLIT(REPT(",",400)&REPT(";",400),",",";"))'
+			]
+		])
+
+		expect(performance.now() - start).toBeLessThan(budget(2_000))
+		expect(out).toEqual({ A1: "!#ERROR!", B1: "!#NUM!", C1: 401, D1: 401 })
+	})
+
+	it("refuses an oversized MUNIT behind a defined name", () => {
+		const names = [
+			{ name: "Big", expression: engineFormula("MUNIT(3000)") },
+			{ name: "Mid", expression: engineFormula("MUNIT(400)") }
+		]
+		const engine = new FormulaEngine(
+			[
+				{
+					name: "S",
+					rows: [
+						[engineCellFormula("SUM(Big)") ?? "", engineCellFormula("SUM(Mid)") ?? "", engineCellFormula("SUM(MUNIT(3))") ?? ""]
+					],
+					formulas: []
+				}
+			],
+			names
+		)
+		const start = performance.now()
+
+		try {
+			expect([0, 1, 2].map(col => engine.result(0, 0, col))).toEqual([
+				{ value: "#VALUE!", error: true },
+				{ value: 400 },
+				{ value: 3 }
+			])
+		} finally {
+			engine.destroy()
+		}
+
+		expect(performance.now() - start).toBeLessThan(budget(1_000))
+	})
+
+	it("refuses an oversized SEQUENCE behind a defined name", () => {
+		const names = [
+			{ name: "Big", expression: engineFormula("SEQUENCE(3000,3000)") },
+			{ name: "Mid", expression: engineFormula("SEQUENCE(400,400)") }
+		]
+		const engine = new FormulaEngine(
+			[
+				{
+					name: "S",
+					rows: [
+						[
+							engineCellFormula("SUM(Big)") ?? "",
+							engineCellFormula("SUM(Mid)") ?? "",
+							engineCellFormula("SUM(SEQUENCE(2,3,10,2))") ?? ""
+						]
+					],
+					formulas: []
+				}
+			],
+			names
+		)
+		const start = performance.now()
+
+		try {
+			expect([0, 1, 2].map(col => engine.result(0, 0, col))).toEqual([
+				{ value: "#VALUE!", error: true },
+				{ value: 12_800_080_000 },
+				{ value: 90 }
+			])
+		} finally {
+			engine.destroy()
+		}
+
+		expect(performance.now() - start).toBeLessThan(budget(1_000))
+	})
+
+	it("sorts by each line once, the first key on a line deciding its direction", () => {
+		const rows: Typed[][] = Array.from({ length: 20_000 }, (_, row) => [(row * 7919) % 20_000, row])
+
+		rows[0]?.push(
+			"=INDEX(SORT(A1:B20000,SEQUENCE(20000,1,1,0)),1,2)",
+			"=INDEX(SORT(A1:B20000,1),1,2)",
+			"=INDEX(SORT(A1:B20000,SEQUENCE(20000,1,1,0)),20000,2)",
+			"=INDEX(SORT(A1:B20000,1),20000,2)"
+		)
+
+		const start = performance.now()
+		const out = calculate(rows)
+
+		expect(performance.now() - start).toBeLessThan(budget(3_000))
+		expect(out["C1"]).toBe(out["D1"])
+		expect(out["E1"]).toBe(out["F1"])
+
+		expect(
+			calculate([
+				["b", 2, "x"],
+				["a", 2, "y"],
+				["a", 1, "z"],
+				[
+					"=CONCAT(SORT(A1:C3,{1,2,1}))",
+					"=CONCAT(SORT(A1:C3,{1,2}))",
+					"=CONCAT(SORT(A1:C3,{1,1,2},{-1,1,1}))",
+					"=CONCAT(SORT(A1:C3,{1,2},{-1,1}))"
+				]
+			])
+		).toEqual({ A4: "a1za2yb2x", B4: "a1za2yb2x", C4: "b2xa1za2y", D4: "b2xa1za2y" })
+	})
+})
+
+describe("TREND's fit whatever the units of x", () => {
+	it("fits x of any scale as it fits x unscaled", () => {
+		const fitted = (xs: string): string[] => [1, 2, 3].map(row => `=INDEX(TREND({1;2;4},${xs}),${String(row)},1)`)
+
+		expect(
+			rounded(calculate([fitted("{1;2;3}"), fitted("{0.0000001;0.0000002;0.0000003}"), fitted("{10000000;20000000;30000000}")]))
+		).toEqual({
+			A1: 0.833333333,
+			B1: 2.333333333,
+			C1: 3.833333333,
+			A2: 0.833333333,
+			B2: 2.333333333,
+			C2: 3.833333333,
+			A3: 0.833333333,
+			B3: 2.333333333,
+			C3: 3.833333333
+		})
+		expect(
+			rounded(
+				calculate([
+					[
+						"=INDEX(TREND({1;2;3},{0.0000001;0.0000002;0.0000003}),3,1)",
+						"=FORECAST(0.0000002,{1;2;3},{0.0000001;0.0000002;0.0000003})"
+					]
+				])
+			)
+		).toEqual({ A1: 3, B1: 2 })
+	})
+
+	it("gives #NUM! for collinear predictors, small or large", () => {
+		expect(
+			calculate([
+				[1, 1, 2, 10000001, 130000003],
+				[3, 2, 4, 10000002, 130000006],
+				[2, 3, 6, 10000003, 130000009],
+				[5, 4, 8, 10000004, 130000012],
+				["=INDEX(TREND(A1:A4,B1:C4),1,1)", "=INDEX(TREND(A1:A4,D1:E4),1,1)"]
+			])
+		).toEqual({ A5: "!#NUM!", B5: "!#NUM!" })
+	})
+
+	it("keeps the fit through the origin without const", () => {
+		expect(rounded(calculate([["=INDEX(TREND({2;4;7},{1;2;3},{4},FALSE),1,1)"]]))).toEqual({ A1: 8.857142857 })
+	})
+
+	it("fits several predictors of different units as it fits them unscaled", () => {
+		const ys = [3, 5, 4, 8, 7, 10]
+		const us = [1, 2, 3, 4, 5, 6]
+		const vs = [2, 1, 4, 3, 6, 8]
+		// Nearly u (1 - R² about 1e-8): independent still.
+		const ws = us.map((u, row) => u + [20, -20, 0, 0, -20, 20][row]! / 100_000)
+		// Columns A y; B:C u, v; D:E at 1e-7 and 1e7; F:G at 1 and 1e13; H:I at 0.001 and 1e9; J:K u, w; L:M u, w at 1e5.
+		const data: Typed[][] = ys.map((y, row) => {
+			const u = us[row]!
+			const v = vs[row]!
+			const w = ws[row]!
+
+			return [y, u, v, u * 1e-7, v * 1e7, u, v * 1e13, u * 0.001, v * 1e9, u, w, u, w * 100_000]
+		})
+		const fits = [
+			"TREND(A1:A6,B1:C6)",
+			"TREND(A1:A6,D1:E6)",
+			"TREND(A1:A6,F1:G6)",
+			"TREND(A1:A6,B1:C6,B1:C6,FALSE)",
+			"TREND(A1:A6,H1:I6,H1:I6,FALSE)",
+			"TREND(A1:A6,J1:K6)",
+			"TREND(A1:A6,L1:M6)"
+		]
+		const out = calculate([...data, ...ys.map((_, row) => fits.map(fit => `=INDEX(${fit},${String(row + 1)},1)`))])
+
+		for (let row = 7; row <= 12; row++) {
+			const [plain, small, large, origin, originScaled, near, nearScaled] = "ABCDEFG"
+				.split("")
+				.map(col => out[`${col}${String(row)}`])
+
+			expect(typeof plain).toBe("number")
+			expect(typeof origin).toBe("number")
+			expect(typeof near).toBe("number")
+			expect(small).toBeCloseTo(plain as number, 6)
+			expect(large).toBeCloseTo(plain as number, 6)
+			expect(originScaled).toBeCloseTo(origin as number, 6)
+			expect(nearScaled).toBeCloseTo(near as number, 5)
+		}
+	})
+})
+
+describe("INTERCEPT and FORECAST", () => {
+	it("pair the same values: INTERCEPT is FORECAST at 0", () => {
+		const out = calculate([
+			[1, "'a", 3, true, 7, 4],
+			[2, 4, null, 5, 9, 3],
+			["=INTERCEPT(A1:F1,A2:F2)", "=FORECAST(0,A1:F1,A2:F2)", "=INTERCEPT(A1:F1,A2:E2)", "=FORECAST(0,A1:F1,A2:E2)"]
+		])
+
+		expect(out["A3"]).toBe(out["B3"])
+		expect(rounded(out)).toEqual({ A3: 0.581395349, B3: 0.581395349, C3: "!#N/A", D3: "!#N/A" })
+	})
+})
+
+describe("TEXTBEFORE, TEXTAFTER and TEXTSPLIT ignoring case", () => {
+	it("keep their pieces where lower case lengthens a letter", () => {
+		expect(
+			calculate([
+				["'İstanbul-TR"],
+				['=TEXTBEFORE(A1,"-",1,1)', '=TEXTAFTER(A1,"-",1,1)', '=TEXTAFTER(A1,"-",-1,1)', '=TEXTBEFORE(A1,"-",-1,1)'],
+				['=TEXTAFTER("aİb-c","İB",1,1)', '=TEXTBEFORE("aİb-c","İB",1,1)', '=TEXTAFTER("aİb-c","İb",1,0)'],
+				[
+					'=INDEX(TEXTSPLIT("İxİ-İyİ-z","-",,,1),1,2)',
+					'=INDEX(TEXTSPLIT("İxİ-İyİ-z","-",,,1),1,3)',
+					'=INDEX(TEXTSPLIT("İaXİbxc","x",,,1),1,2)'
+				],
+				['=TEXTBEFORE("aXb","x",1,1)', '=TEXTAFTER("aXb","x",1,1)', '=TEXTBEFORE("aXb","x",1,0)']
+			])
+		).toEqual({
+			A2: "İstanbul",
+			B2: "TR",
+			C2: "TR",
+			D2: "İstanbul",
+			A3: "-c",
+			B3: "a",
+			C3: "-c",
+			A4: "İyİ",
+			B4: "z",
+			C4: "İb",
+			A5: "a",
+			B5: "b",
+			C5: "!#N/A"
 		})
 	})
 })

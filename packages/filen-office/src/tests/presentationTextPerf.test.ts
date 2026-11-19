@@ -96,4 +96,80 @@ describe("presentationTextPerf", () => {
 		Object.assign(task.meta, { perf: { presentationTextKeystrokeCpuMs: { value: best, budget: 4 } } })
 		expect(best).toBeLessThanOrEqual(budget(4))
 	})
+
+	it("lays out 20,000 picture-bullet paragraphs in at most 1500 ms CPU", { timeout: budget(60_000) }, async ({ task }) => {
+		const { context, environment, fonts } = pictureBulletSetup()
+		const body = pictureBulletBody(20_000, {})
+
+		await fonts.prepare(fontRequests(resolveBody(body, context)))
+
+		const start = cpuMs()
+		const laid = layoutBody(resolveBody(body, context), { width: 900, height: 600 }, environment)
+		const spent = cpuMs() - start
+
+		Object.assign(task.meta, { perf: { presentationTextPictureBulletsCpuMs: { value: spent, budget: 1500 } } })
+		expect(laid.page.page.objectCount).toBe(20_000)
+		expect(spent).toBeLessThanOrEqual(budget(1500))
+	})
+
+	it("places picture bullets of a horizontal and of a sideways body on their paragraphs' first lines", async () => {
+		const { context, environment, fonts } = pictureBulletSetup()
+		// Each bullet's x, top, width and height (px), as the per-bullet line scan placed them: on its paragraph's first
+		// line (the third paragraph wraps), mongolianVert's lines mirrored across the page.
+		const tops = {
+			horizontal: [3.504, 32.304, 61.104, 176.304],
+			eaVert: [3.504, 32.304, 61.104, 176.304],
+			mongolianVert: [274.704, 245.904, 217.104, 101.904]
+		}
+
+		for (const vert of ["horizontal", "eaVert", "mongolianVert"] as const) {
+			const body = pictureBulletBody(4, vert === "horizontal" ? {} : { vertical: vert })
+
+			await fonts.prepare(fontRequests(resolveBody(body, context)))
+
+			const page = layoutBody(resolveBody(body, context), { width: 200, height: 300 }, environment).page.page
+			const placed = Array.from({ length: page.objectCount }, (_, k) => Array.from(page.objectFloats.subarray(k * 4, k * 4 + 4)))
+
+			expect(page.objectCount).toBe(4)
+			expect(Array.from(page.objectInts.subarray(0, 12))).toEqual([0, 1, 0, 0, 1, 1, 0, 1, 2, 0, 1, 3])
+
+			for (const [k, [x, top, width, height]] of placed.entries()) {
+				expect(x).toBe(0)
+				expect(top).toBeCloseTo(tops[vert][k] ?? Number.NaN, 3)
+				expect(width).toBeCloseTo(16.8, 3)
+				expect(height).toBeCloseTo(16.8, 3)
+			}
+		}
+	})
 })
+
+function pictureBulletSetup(): { readonly context: BodyContext; readonly environment: TextEnvironment; readonly fonts: FontManager } {
+	const fonts = new FontManager(nodeFontHost, nodeFontAssets, undefined, "fotest")
+
+	return {
+		fonts,
+		environment: { fonts, cache: new MeasureCache(new HmtxMeasurer()) },
+		context: {
+			listStyles: [],
+			bodyPr: [],
+			fonts: { color: () => rgba("000000"), typeface: typeface => (typeface.startsWith("+") ? "Calibri" : typeface) }
+		}
+	}
+}
+
+// `count` one-run paragraphs, each with a picture bullet; the third wraps onto a second line.
+function pictureBulletBody(count: number, bodyPr: TextBody["bodyPr"]): TextBody {
+	return {
+		bodyPr,
+		paragraphs: Array.from({ length: count }, (_, k) => ({
+			pPr: { marL: 342900, indent: -342900, bullet: { kind: "blip" as const, part: "/ppt/media/image1.png" } },
+			runs: [
+				{
+					kind: "r" as const,
+					text: k % 4 === 2 ? "A paragraph 縦書きの段落 long enough to wrap onto a second line" : `Item 縦 ${String(k)}`,
+					rPr: { sz: 1800 }
+				}
+			]
+		}))
+	}
+}

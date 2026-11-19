@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { openOdp } from "../core/odp/read/document"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
+import type { SlideRef } from "../core/presentation/model"
 import { encryptedEntry } from "./odsFixtures"
 import { odpBytes, openOdpFixture, page, plainText, slideOf } from "./odpFixtures"
 
@@ -458,5 +459,73 @@ describe("ODP reader", () => {
 			kind: "fill",
 			fill: { kind: "solid" }
 		})
+	})
+
+	it("publishes a page with a chart only once its chart is read; a second caller waits for the same parse", async () => {
+		const chart =
+			'<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:chart="urn:oasis:names:tc:opendocument:xmlns:chart:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3"><office:body><office:chart><chart:chart chart:class="chart:bar"><chart:plot-area><chart:series chart:values-cell-range-address="local-table.$A$1:.$A$2"/></chart:plot-area><table:table table:name="local-table"><table:table-rows><table:table-row><table:table-cell office:value-type="float" office:value="1"/></table:table-row><table:table-row><table:table-cell office:value-type="float" office:value="2"/></table:table-row></table:table-rows></table:table></chart:chart></office:chart></office:body></office:document-content>'
+		const opened = await openOdpFixture({
+			extra: [{ name: "Object 1/content.xml", data: new TextEncoder().encode(chart), mediaType: "text/xml" }],
+			manifestEntries:
+				'<manifest:file-entry manifest:full-path="Object 1/" manifest:media-type="application/vnd.oasis.opendocument.chart"/>',
+			body: page('<draw:frame svg:width="8cm" svg:height="6cm"><draw:object xlink:href="./Object 1"/></draw:frame>')
+		})
+		const ref = opened.deck.slides[0]
+
+		if (ref === undefined) throw new Error("no slide")
+
+		const first = opened.parts.slide(ref)
+		const probe = opened.deck.nodes.get(ref)
+		const second = opened.parts.slide(ref)
+
+		expect(probe).toBeUndefined()
+
+		const [one, two] = await Promise.all([first, second])
+
+		expect(one).toBe(two)
+		expect(opened.deck.nodes.get(ref)).toBe(one)
+		expect(one.shapes[0]?.frame?.kind).toBe("chart")
+		expect(opened.parts.document("/Object 1/chart.xml")).toBeDefined()
+	})
+
+	it("resolves a master page's links to pages by name, the unnamed page's default name too", async () => {
+		const master =
+			'<style:master-page style:name="M" style:page-layout-name="PM1" draw:style-name="Mdp">' +
+			'<draw:rect svg:width="1cm" svg:height="1cm"><office:event-listeners><presentation:event-listener script:event-name="dom:click" presentation:action="show" xlink:href="#second"/></office:event-listeners></draw:rect>' +
+			'<draw:frame svg:width="1cm" svg:height="1cm"><draw:text-box><text:p><text:a xlink:href="#second">x</text:a></text:p></draw:text-box></draw:frame>' +
+			'<draw:rect svg:width="1cm" svg:height="1cm"><office:event-listeners><presentation:event-listener script:event-name="dom:click" presentation:action="show" xlink:href="#page3"/></office:event-listeners></draw:rect>' +
+			"</style:master-page>"
+		const opened = await openOdpFixture({
+			masters: master,
+			body: '<draw:page draw:name="first" draw:master-page-name="M"/><draw:page draw:name="second" draw:master-page-name="M"/><draw:page draw:master-page-name="M"/>'
+		})
+		const shapes = opened.deck.nodes.get(opened.deck.masters[0] ?? (-1 as SlideRef))?.shapes ?? []
+		const run = shapes[1]?.text?.paragraphs[0]?.runs[0]
+
+		expect(shapes[0]?.actions?.click).toEqual({ kind: "slide", slide: opened.deck.slides[1] })
+		expect(run?.kind === "r" && run.rPr.hlinkClick).toEqual({ kind: "slide", slide: opened.deck.slides[1] })
+		expect(shapes[2]?.actions?.click).toEqual({ kind: "slide", slide: opened.deck.slides[2] })
+	})
+
+	it("parses a page's start tag for its attributes without keeping the parse, and refuses a malformed one at open", async () => {
+		const opened = await openOdpFixture({
+			automatic:
+				'<style:style style:name="dp1" style:family="drawing-page"><style:drawing-page-properties presentation:visibility="hidden"/></style:style>',
+			body: '<draw:page draw:name="Intro" draw:style-name="dp1" draw:master-page-name="M"/>'
+		})
+		const ref = opened.deck.slides[0] ?? (-1 as SlideRef)
+		const span = opened.parts.span(ref)
+
+		expect(span).toBeDefined()
+		expect(Object.keys(span ?? {}).includes("head")).toBe(false)
+		expect(opened.parts.pageName(ref)).toBe("Intro")
+		expect(opened.deck.hiddenSlides?.has(ref)).toBe(true)
+		expect((await slideOf(opened, 0)).parent).toBe(opened.deck.layouts[0])
+
+		const malformed = await openOdp(
+			bytesSource(odpBytes({ body: '<draw:page draw:name="a" draw:name="b" draw:master-page-name="M"/>' }))
+		)
+
+		expect(malformed.kind === "refused" && malformed.reason).toBe("malformed")
 	})
 })

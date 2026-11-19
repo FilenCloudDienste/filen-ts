@@ -1,6 +1,7 @@
 import type { TextBodyProps } from "../../drawingml/index"
 import { parseLength, parsePercent, type OdfElement, type OdfProperties } from "../../odf/index"
 import type { ColorModel, Effect, EffectList, FillProps, LineEnd, LineProps } from "../../presentation/model"
+import { own } from "../../tables"
 
 // Graphic properties (ODF 1.3 Part 3 §17.21 style:graphic-properties, §17.25 style:drawing-page-properties) as the
 // model's fills, lines, effects and text body properties. Colours are kept as sRGB (ODF has no theme slots); the
@@ -235,7 +236,7 @@ function bitmapFill(element: OdfElement, attributes: Attributes, sizes: PictureS
 				sx: tileScale(attributes.get("draw:fill-image-width"), size?.width),
 				sy: tileScale(attributes.get("draw:fill-image-height"), size?.height),
 				flip: "none",
-				algn: REF_POINTS[attributes.get("draw:fill-image-ref-point") ?? ""] ?? "tl"
+				algn: own(REF_POINTS, attributes.get("draw:fill-image-ref-point") ?? "") ?? "tl"
 			}
 		}
 	}
@@ -416,7 +417,7 @@ const ANCHORS: Readonly<Record<string, TextBodyProps["anchor"]>> = { top: "t", m
 export function bodyPrOf(properties: OdfProperties, paragraph: OdfProperties | undefined, wrap?: boolean): Partial<TextBodyProps> {
 	const attributes = properties.attributes
 	const inset = (side: string): number => (parseLength(attributes.get(`fo:padding-${side}`)) ?? 0) * PX_PER_PT
-	const anchor = ANCHORS[attributes.get("draw:textarea-vertical-align") ?? "top"] ?? "t"
+	const anchor = own(ANCHORS, attributes.get("draw:textarea-vertical-align") ?? "top") ?? "t"
 	const fit = attributes.get("draw:fit-to-size")
 	const shrink = attributes.get("style:shrink-to-fit") === "true" || fit === "shrink-to-fit"
 	const writing = paragraph?.attributes.get("style:writing-mode") ?? attributes.get("style:writing-mode")

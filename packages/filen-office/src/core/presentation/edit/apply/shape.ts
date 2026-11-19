@@ -20,9 +20,10 @@ import {
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, findShape, sameDigest } from "../changes"
-import type { CarriedRelationship, DeckOp, OpOf, ShapeOp } from "../ops"
-import { xmlSafeText } from "../xmlText"
+import { heldBytes, type CarriedRelationship, type DeckOp, type OpOf, type ShapeOp } from "../ops"
+import { xmlCarries } from "../xmlText"
 import { isRefused } from "../../refusal"
+import { namesLostImage } from "./picture"
 import { sameBytes } from "../../../docx/write/bytes"
 
 // The shape ops on the model, in place. Inverses follow ops.ts: typed values where the prior state was an edit
@@ -142,9 +143,7 @@ function clone<T>(value: T): T {
 function rawOf(shape: ShapeNode, context: ApplyContext): Uint8Array | Refused | undefined {
 	if (shape.src === undefined) return undefined
 
-	const bytes = context.sourceBytes(shape.src)
-
-	return isRefused(bytes) ? bytes : bytes.slice()
+	return heldBytes(context, shape.src)
 }
 
 // The op that puts `shape` back as it is now at (parent, index): its typed state, and its source bytes when it has
@@ -165,6 +164,19 @@ function reinsert(slide: SlideRef, shape: ShapeNode, parent: number, index: numb
 	}
 }
 
+// The delete an inverse makes to put shapes back as they were (a delete, then an insert of the same ids): it leaves the
+// slide's timing as it is, since the insert after it brings back what the timing animates. Known by the op object:
+// an inverse is the worker's own (the history holds it as made), and an op the page sends is never one of these.
+const REPLACING = new WeakSet<object>()
+
+export function replacingDelete(slide: SlideRef, shapes: readonly number[]): DeckOp {
+	const op: DeckOp = { family: "shape", kind: "delete", slide, shapes }
+
+	REPLACING.add(op)
+
+	return op
+}
+
 function inverseOf(ops: readonly DeckOp[]): Inverse {
 	let bytes = 0
 
@@ -181,7 +193,7 @@ function replaceInverse(slide: SlideRef, at: At, context: ApplyContext): Inverse
 
 	if (isRefused(back)) return back
 
-	return inverseOf([{ family: "shape", kind: "delete", slide, shapes: [at.shape.id] }, back])
+	return inverseOf([replacingDelete(slide, [at.shape.id]), back])
 }
 
 // A re-read shape takes the typed state it had (children matched by matchShapes); the source backing comes from the bytes. Text and
@@ -482,7 +494,7 @@ function group(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "group" 
 	const y = Math.round(Math.min(...bounds.map(box => box.y)))
 	const cx = Math.round(Math.max(...bounds.map(box => box.x + box.cx))) - x
 	const cy = Math.round(Math.max(...bounds.map(box => box.y + box.cy))) - y
-	const back: DeckOp[] = [{ family: "shape", kind: "delete", slide: node.ref, shapes: [id] }]
+	const back: DeckOp[] = [replacingDelete(node.ref, [id])]
 
 	for (const item of ordered) {
 		const put = reinsert(node.ref, item.shape, item.parent, item.index, context)
@@ -567,7 +579,7 @@ function ungroup(node: SlideNode, op: OpOf<"shape"> & { kind: "ungroup" }, conte
 
 	if (siblings === undefined) return refused("notFound", `group ${String(at.parent)}`)
 
-	const back: DeckOp[] = children.map(child => ({ family: "shape", kind: "delete", slide: node.ref, shapes: [child.id] }))
+	const back: DeckOp[] = children.map(child => replacingDelete(node.ref, [child.id]))
 	const put = reinsert(node.ref, at.shape, at.parent, at.index, context)
 
 	if (isRefused(put)) return put
@@ -651,7 +663,7 @@ function zOrder(node: SlideNode, op: OpOf<"shape"> & { kind: "zOrder" }, context
 
 	// The inverse takes the moved shapes out and puts each back at its index, lowest first.
 	const ascending = [...placed].sort((a, b) => a.index - b.index)
-	const back: DeckOp[] = ascending.map(item => ({ family: "shape", kind: "delete", slide: node.ref, shapes: [item.shape.id] }))
+	const back: DeckOp[] = ascending.map(item => replacingDelete(node.ref, [item.shape.id]))
 
 	for (const item of ascending) {
 		const put = reinsert(node.ref, item.shape, item.parent, item.index, context)
@@ -1012,6 +1024,8 @@ function paste(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "paste" 
 		copies.push(copy)
 	}
 
+	if (namesLostImage(deck, copies)) return refused("notFound", "an image no longer held")
+
 	const used = idsOf(node.shapes)
 	let next = context.newShapeId(node.ref)
 	const fresh = (): number => {
@@ -1097,9 +1111,10 @@ function remove(node: SlideNode, op: OpOf<"shape"> & { kind: "delete" }, context
 	for (const item of removed) collectIds(item.shape, gone)
 
 	const timing = node.timing
-	let heldBytes = 0
+	let timingBytes = 0
 
-	if (timing !== undefined && timingTargets(timing, gone)) {
+	// An inverse's delete the same inverse puts the shapes back after keeps their effects.
+	if (timing !== undefined && !REPLACING.has(op) && timingTargets(timing, gone)) {
 		const roots: TimeNode[] = []
 		const pruned = withoutShapes(timing, gone, roots)
 		// The inverse keeps a copy of its own (the live tree shares the nodes the pruning kept). In it, each removed
@@ -1111,11 +1126,11 @@ function remove(node: SlideNode, op: OpOf<"shape"> & { kind: "delete" }, context
 			delete held.ctn.raw
 
 			if (removedRoots.has(live)) {
-				const bytes = live.ctn.src === undefined ? undefined : context.sourceBytes(live.ctn.src)
+				const bytes = live.ctn.src === undefined ? undefined : heldBytes(context, live.ctn.src)
 				const raw = bytes instanceof Uint8Array ? bytes : (live.ctn.raw ?? new Uint8Array(0))
 
 				holdMarkup(held.ctn, raw)
-				heldBytes += raw.length
+				timingBytes += raw.length
 
 				return
 			}
@@ -1146,7 +1161,7 @@ function remove(node: SlideNode, op: OpOf<"shape"> & { kind: "delete" }, context
 
 	const inverse = inverseOf(back)
 
-	return { kind: "applied", inverse: { ops: inverse.ops, bytes: inverse.bytes + heldBytes }, op }
+	return { kind: "applied", inverse: { ops: inverse.ops, bytes: inverse.bytes + timingBytes }, op }
 }
 
 function collectIds(shape: ShapeNode, into: Set<number>): void {
@@ -1320,7 +1335,7 @@ function setXfrms(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrms" }, con
 }
 
 function carries(text: string | undefined): boolean {
-	return text === undefined || xmlSafeText(text) === text
+	return text === undefined || xmlCarries(text)
 }
 
 // The slide-space centres (EMU) of the shapes in `ids`: each one's box (a placeholder without its own takes the one
@@ -1461,7 +1476,7 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 
 	switch (op.kind) {
 		case "insert":
-			return insert(node, op, context)
+			return namesLostImage(deck, op.shape) ? refused("notFound", "an image no longer held") : insert(node, op, context)
 		case "delete":
 			return fitted(deck, node, op.shapes, context, () => remove(node, op, context))
 		case "setXfrm":
@@ -1480,7 +1495,10 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 		case "restore":
 			return restore(node, op, context)
 		case "setProps":
-			return setProps(node, op, context, deck.format)
+			// A fill or line the page held (a picture fill naming an image the registry let go of) no save could write.
+			return namesLostImage(deck, op.props)
+				? refused("notFound", "an image no longer held")
+				: setProps(node, op, context, deck.format)
 		case "setStyle":
 			return applied(
 				setField(

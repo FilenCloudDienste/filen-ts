@@ -51,6 +51,12 @@ interface CommonStyle {
 	readonly reasons: readonly OdtLossyReason[]
 }
 
+// Run properties mapped once, with what they approximate (given again to each run that asks).
+interface RunStyle {
+	readonly rPr: string
+	readonly reasons: readonly OdtLossyReason[]
+}
+
 const NO_REASONS: readonly OdtLossyReason[] = []
 
 export interface StyleOptions {
@@ -77,7 +83,7 @@ export class StyleMapper {
 	private readonly resolver: OdfStyleResolver
 	private readonly options: StyleOptions
 	private readonly paragraphCache = new Map<string, ParagraphStyle>()
-	private readonly runCache = new Map<string, string>()
+	private readonly runCache = new Map<string, RunStyle>()
 	private readonly commonCache = new Map<string, CommonStyle>()
 	private readonly chainCache = new Map<string, readonly OdtLossyReason[]>()
 	private readonly tabsCache = new Map<string, InheritedTabs | null>()
@@ -183,14 +189,23 @@ export class StyleMapper {
 	// rPr for text with `attributes` direct (merged paragraph and span properties), cached by key.
 	runProperties(key: string, styleId: string | undefined, attributes: Attributes, fontSize: number, sink: PropsSink): string {
 		const cacheKey = `${styleId ?? ""}\u0000${key}`
-		let rPr = this.runCache.get(cacheKey)
+		let run = this.runCache.get(cacheKey)
 
-		if (rPr === undefined) {
-			rPr = `${styleId === undefined ? "" : `<w:rStyle w:val="${esc(styleId)}"/>`}${runProperties(this.sheet, attributes, sink, fontSize)}`
-			this.runCache.set(cacheKey, rPr)
+		if (run === undefined) {
+			const reasons = new Set<OdtLossyReason>()
+			const collect: PropsSink = { lossy: reason => reasons.add(reason) }
+			const rPr = `${styleId === undefined ? "" : `<w:rStyle w:val="${esc(styleId)}"/>`}${runProperties(this.sheet, attributes, collect, fontSize)}`
+
+			run = { rPr, reasons: reasons.size === 0 ? NO_REASONS : [...reasons] }
+
+			if (this.runCache.size >= (this.options.keepAtMost ?? Infinity)) this.runCache.clear()
+
+			this.runCache.set(cacheKey, run)
 		}
 
-		return rPr
+		for (const reason of run.reasons) sink.lossy(reason)
+
+		return run.rPr
 	}
 
 	// A span's own font size given as a percent: of the paragraph's size (an automatic text style has no parent).

@@ -93,6 +93,28 @@ async function load(fontFace: FontFaceLike, timeoutMs: number | undefined): Prom
 	}
 }
 
+// Listeners per FontFaceSet for the faces hosts add to it. A face added already loaded starts no load, so its set
+// fires no "loadingdone": a copy of the set elsewhere (the presenter's popup) follows it through these.
+const addedListeners = new WeakMap<object, Set<(face: object) => void>>()
+
+// Calls `listener` with each face a font host adds to `fonts` from now on; the returned function stops it.
+export function onFontFaceAdded(fonts: object, listener: (face: object) => void): () => void {
+	let listeners = addedListeners.get(fonts)
+
+	if (listeners === undefined) {
+		listeners = new Set()
+		addedListeners.set(fonts, listeners)
+	}
+
+	const set = listeners
+
+	set.add(listener)
+
+	return () => {
+		set.delete(listener)
+	}
+}
+
 export function fontFaceHost(scope: FontFaceScope): FontHost {
 	const faces = new Map<string, FontFaceLike[]>()
 	// Families removed while one of their faces was still loading: that face must not be added after.
@@ -111,6 +133,8 @@ export function fontFaceHost(scope: FontFaceScope): FontHost {
 		if (removed.has(face.family)) return false
 
 		scope.fonts.add(fontFace)
+
+		for (const listener of addedListeners.get(scope.fonts) ?? []) listener(fontFace)
 
 		const list = faces.get(face.family)
 

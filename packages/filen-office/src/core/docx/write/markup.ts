@@ -130,20 +130,32 @@ export class Out {
 		this.used = at
 	}
 
-	// Bytes [from, to) of what was written.
+	// Bytes [from, to) of what was written, a copy. Walked back from the end, so reading the tail (writeTop's
+	// use) costs the chunks it covers, not every chunk written before it.
 	slice(from: number, to: number): Uint8Array {
-		const out = new Uint8Array(Math.max(0, to - from))
-		let at = 0
+		const start = Math.max(0, from)
+		const end = Math.min(this.length, to)
+		const out = new Uint8Array(Math.max(0, end - start))
 
-		for (const chunk of [...this.chunks, this.scratch.subarray(0, this.used)]) {
-			const end = at + chunk.length
+		if (end <= start) return out
 
-			if (end > from && at < to)
-				out.set(chunk.subarray(Math.max(0, from - at), Math.min(chunk.length, to - at)), Math.max(0, at - from))
+		const piece = (chunk: Uint8Array, at: number): void => {
+			const chunkEnd = at + chunk.length
 
-			at = end
+			if (chunkEnd > start && at < end)
+				out.set(chunk.subarray(Math.max(0, start - at), Math.min(chunk.length, end - at)), Math.max(0, at - start))
+		}
+		let at = this.length - this.used
 
-			if (at >= to) break
+		piece(this.scratch.subarray(0, this.used), at)
+
+		for (let index = this.chunks.length - 1; index >= 0 && at > start; index--) {
+			const chunk = this.chunks[index]
+
+			if (chunk === undefined) break
+
+			at -= chunk.length
+			piece(chunk, at)
 		}
 
 		return out

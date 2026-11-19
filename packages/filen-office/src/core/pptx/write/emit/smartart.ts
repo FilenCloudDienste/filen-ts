@@ -1,5 +1,7 @@
 import { partKey } from "../../../opc/index"
 import { refused, type FrameRef, type Refused, type ShapeNode } from "../../../presentation/model"
+import { isRefused } from "../../../presentation/refusal"
+import { isRawPart } from "../../../presentation/edit/ops"
 import {
 	diagramDataHadPictures,
 	diagramDrawingRelId,
@@ -28,7 +30,7 @@ import { encodeUtf8, escapeAttribute, NodeKind, parseXml, type XmlDocument } fro
 import { G } from "../../read/xml"
 import { RELATIONSHIP_TYPES, type RelatingWithId } from "../parts"
 import type { EmitPiece, EmitResult, PartsApi, PptxEmitFamily, PptxPartKind } from "../types"
-import { attr, IMAGE_RELATIONSHIP, readerOf, shapeElement, sourceNode, xfrmXml, type EmitContext } from "./shape"
+import { bareCNvPr, IMAGE_RELATIONSHIP, newCNvPr, Pieces, readerOf, shapeElement, sourceNode, xfrmXml, type EmitContext } from "./shape"
 
 // A diagram's p:graphicFrame and its parts (ECMA-376 §21.4: dgm:relIds names the data, layout, quick style and
 // colours parts; MS-ODRAWXML §2.3.4: the data part's dsp:dataModelExt names the drawing cache, a relationship of the
@@ -58,16 +60,8 @@ const KINDS: Readonly<Record<DiagramPart, PptxPartKind>> = {
 // A part a later save may replace in place: PartsApi.replacePart where the writer has it (false: no such part).
 type Replacing = PartsApi & { replacePart?: (part: string, content: Uint8Array) => boolean }
 
-function isRefusal(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
-}
-
-function isHeld(part: string): boolean {
-	return part.startsWith("raw:")
-}
-
 function heldParts(frame: DiagramFrame): boolean {
-	return ROLES.some(role => isHeld(frame[role]))
+	return ROLES.some(role => isRawPart(frame[role]))
 }
 
 // The dgm:relIds of the source frame, and its a:graphic element.
@@ -145,6 +139,33 @@ function packageDataDrawing(deck: EmitContext["deck"], part: string): { readonly
 
 export function noteSharedDiagramParts(deck: object, parts: ReadonlySet<string>): void {
 	sharedParts.set(deck, parts)
+}
+
+// The saves and slide exports of each deck in flight: the shared parts and package data above live while one is.
+const inFlight = new WeakMap<object, number>()
+
+export function beginDiagramFacts(deck: object): void {
+	inFlight.set(deck, (inFlight.get(deck) ?? 0) + 1)
+}
+
+// The last save or export of the deck ended: its parsed package data is dropped (the known targets stay).
+export function endDiagramFacts(deck: object): void {
+	const left = (inFlight.get(deck) ?? 1) - 1
+
+	if (left > 0) {
+		inFlight.set(deck, left)
+
+		return
+	}
+
+	inFlight.delete(deck)
+	packageData.delete(deck)
+	sharedParts.delete(deck)
+}
+
+// Whether a save's diagram facts are held for the deck.
+export function diagramFactsHeld(deck: object): boolean {
+	return packageData.has(deck) || sharedParts.has(deck)
 }
 
 function sameName(a: string | undefined, b: string | undefined): boolean {
@@ -273,7 +294,7 @@ function writeAsItWas(context: EmitContext, shape: ShapeNode, frame: DiagramFram
 
 	const target = parts.target(relId)
 
-	if (isHeld(drawing)) {
+	if (isRawPart(drawing)) {
 		const held = context.rawDocument?.(drawing)
 
 		if (held === undefined) return undefined
@@ -322,7 +343,7 @@ function writeParts(context: EmitContext, shape: ShapeNode, frame: DiagramFrame,
 
 		if (part === "") return refused("malformed", `a diagram without its ${role} part`)
 
-		if (!isHeld(part)) {
+		if (!isRawPart(part)) {
 			const id = source?.ids[role]
 
 			if (role === "data") {
@@ -349,7 +370,7 @@ function writeParts(context: EmitContext, shape: ShapeNode, frame: DiagramFrame,
 				let related: boolean
 
 				// A drawing an undo holds again (the package lost it): written back as a part under the id the data names.
-				if (isHeld(target)) {
+				if (isRawPart(target)) {
 					const document = context.rawDocument?.(target)
 
 					if (document === undefined) return refused("stale", `the diagram part ${target} is no longer held`)
@@ -373,7 +394,7 @@ function writeParts(context: EmitContext, shape: ShapeNode, frame: DiagramFrame,
 				if (!related) {
 					const copied = writeDataCopy(context, shape, frame, part, target)
 
-					if (isRefusal(copied)) return copied
+					if (isRefused(copied)) return copied
 
 					relating.letGo?.(part)
 					ids.data = copied.data
@@ -402,7 +423,7 @@ function writeParts(context: EmitContext, shape: ShapeNode, frame: DiagramFrame,
 		if (pendingImageIds(document).length > 0) {
 			const written = writePictureData(context, shape, frame, document)
 
-			if (isRefusal(written)) return written
+			if (isRefused(written)) return written
 
 			ids.data = written.data
 			drawing = written.drawing
@@ -449,7 +470,7 @@ function writeParts(context: EmitContext, shape: ShapeNode, frame: DiagramFrame,
 			const targets = diagramRelationshipTargets(context.deck, part) ?? owned
 			const pended = targets === undefined ? undefined : pendDataRelationships(document, id => targets.get(id))
 
-			if (pended === undefined || isRefusal(pended))
+			if (pended === undefined || isRefused(pended))
 				return refused("failed", "a diagram with pictures whose own data part cannot take the edit")
 
 			let pictured: XmlDocument
@@ -462,7 +483,7 @@ function writeParts(context: EmitContext, shape: ShapeNode, frame: DiagramFrame,
 
 			const written = writePictureData(context, shape, frame, pictured)
 
-			if (isRefusal(written)) return written
+			if (isRefused(written)) return written
 
 			ids.data = written.data
 			drawing = written.drawing
@@ -561,16 +582,23 @@ function writePictureData(context: EmitContext, shape: ShapeNode, frame: Diagram
 }
 
 // A new frame (Insert ▸ SmartArt): written whole from the model (a copy of one names its parts by `ids` too).
-export function newFrame(shape: ShapeNode, ids: Readonly<Record<DefinitionRole, string>>): EmitResult {
+// `cNvPr`: its non-visual properties (newCNvPr in a save, which writes its actions too).
+export function newFrame(
+	shape: ShapeNode,
+	ids: Readonly<Record<DefinitionRole, string>>,
+	cNvPr: readonly EmitPiece[] = [bareCNvPr(shape)]
+): EmitResult {
 	const xfrm = shape.xfrm
 
 	if (xfrm === undefined) return refused("malformed", "a new diagram without its box")
 
-	const markup =
-		`<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr${attr("id", shape.id)}${attr("name", shape.name)}${attr("descr", shape.alt?.descr)}${attr("title", shape.alt?.title)}${shape.hidden ? ' hidden="1"' : ""}/>` +
-		`<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${xfrmXml("p:xfrm", xfrm, false)}${graphicXml("a:", ids)}</p:graphicFrame>`
-
-	return { kind: "markup", pieces: [markup] }
+	return new Pieces()
+		.text("<p:graphicFrame><p:nvGraphicFramePr>")
+		.append(cNvPr)
+		.text(
+			`<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${xfrmXml("p:xfrm", xfrm, false)}${graphicXml("a:", ids)}</p:graphicFrame>`
+		)
+		.markup()
 }
 
 // Whether the frame names the parts its source's dgm:relIds name (on a duplicated slide, this save's copies of them):
@@ -600,7 +628,7 @@ function emitDiagram(context: EmitContext, shape: ShapeNode): EmitResult {
 
 	const written = writeParts(context, shape, frame, source)
 
-	if (isRefusal(written)) return written
+	if (isRefused(written)) return written
 
 	if (heldParts(frame)) noteDiagramFrameWritten(frame)
 
@@ -609,7 +637,9 @@ function emitDiagram(context: EmitContext, shape: ShapeNode): EmitResult {
 	if (source === undefined) {
 		if (sourceNode(context, shape.src) >= 0) return refused("malformed", "a diagram frame without dgm:relIds")
 
-		return newFrame(shape, ids)
+		const cNvPr = newCNvPr(context, shape)
+
+		return isRefused(cNvPr) ? cNvPr : newFrame(shape, ids, cNvPr)
 	}
 
 	const element = shapeElement(context, shape)
@@ -648,7 +678,7 @@ function writeDataCopy(context: EmitContext, shape: ShapeNode, frame: DiagramFra
 	if (dataHasRelationships(data.document)) {
 		const pended = pendDataRelationships(data.document, id => data.targets.get(id))
 
-		if (pended === undefined || isRefusal(pended)) return refused("failed", `the pictures of the diagram data ${part}`)
+		if (pended === undefined || isRefused(pended)) return refused("failed", `the pictures of the diagram data ${part}`)
 
 		let own: XmlDocument
 
@@ -739,7 +769,7 @@ function releaseUnnamed(context: EmitContext, shape: ShapeNode, source: SourceGr
 
 			if (each === shape || other?.kind !== "smartart") return
 
-			if (isHeld(other.data)) {
+			if (isRawPart(other.data)) {
 				const data = context.rawDocument?.(other.data)
 
 				if (data === undefined) known = false

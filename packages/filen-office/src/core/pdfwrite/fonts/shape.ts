@@ -434,7 +434,10 @@ export class ShapingFace {
 	readonly gsub: LayoutTable | undefined
 	readonly gpos: LayoutTable | undefined
 	readonly gdef: GlyphDefinitions
+	// Plans by script, direction and document language, and by the OpenType language system they resolve to: a plan
+	// is built once per language system, however many document languages name it.
 	private readonly plans = new Map<string, Plan>()
+	private readonly systemPlans = new Map<string, Plan>()
 	private readonly glyphs = new Map<number, number>()
 	private substitution: SubstitutionApplier | null = null
 	private positioning: PositioningApplier | null = null
@@ -443,6 +446,8 @@ export class ShapingFace {
 	private originY = new Float64Array(0)
 	// Whether layout tables failed to parse or apply; the face then shapes with cmap and hmtx only.
 	broken = false
+	// The first error a layout table raised, for diagnostics.
+	failure: unknown = undefined
 
 	constructor(font: SfntFont) {
 		this.font = font
@@ -454,7 +459,7 @@ export class ShapingFace {
 			if (range === undefined) return undefined
 
 			try {
-				return new LayoutTable(view, range.offset, extension)
+				return new LayoutTable(view, range.offset, extension, font.numGlyphs)
 			} catch {
 				return undefined
 			}
@@ -483,9 +488,14 @@ export class ShapingFace {
 		return this.glyphOf(cp) !== 0
 	}
 
-	// GDEF class, or one derived from the character when the font has none.
+	// GDEF class, or one derived from the character when the font has none (or its GlyphClassDef cannot be read,
+	// which glyphClass() finds and drops).
 	classOf(glyph: number, cp: number): number {
-		if (this.gdef.hasClasses) return this.gdef.glyphClass(glyph)
+		if (this.gdef.hasClasses) {
+			const glyphClass = this.gdef.glyphClass(glyph)
+
+			if (this.gdef.hasClasses) return glyphClass
+		}
 
 		return isMark(cp) ? GlyphClass.MARK : GlyphClass.BASE
 	}
@@ -495,26 +505,61 @@ export class ShapingFace {
 		const key = `${script}|${rtl ? 1 : 0}|${language ?? ""}`
 		let plan = this.plans.get(key)
 
+		if (plan !== undefined) return plan
+
+		const system = openTypeLanguage(language)
+		const systemKey = `${script}|${rtl ? 1 : 0}|${system ?? ""}`
+
+		plan = this.systemPlans.get(systemKey)
+
 		if (plan === undefined) {
 			const shaper = shaperFor(script)
 			const builder = new PlanBuilder(script, rtl)
 
 			collectPlan(builder, shaper)
-			plan = builder.build(this, shaper, openTypeLanguage(language))
-			this.plans.set(key, plan)
+
+			try {
+				if (!this.broken) plan = builder.build(this, shaper, system)
+			} catch (error) {
+				this.fail(error)
+			}
+
+			// A face whose layout tables cannot be read gets a plan without lookups, cached like any other.
+			plan ??= {
+				script,
+				rtl,
+				shaper,
+				masks: new Map(),
+				globalMask: GLOBAL_MASK,
+				gsub: [],
+				gpos: [],
+				face: this,
+				gsubFeatures: new Map(),
+				gsubScript: undefined
+			}
+			this.systemPlans.set(systemKey, plan)
 		}
+
+		this.plans.set(key, plan)
 
 		return plan
 	}
 
+	private fail(error: unknown): void {
+		this.broken = true
+		this.failure ??= error
+	}
+
 	// Shapes the run into `buffer` (logical order) and returns origins and the total advance, font units.
-	// `limited`: the run went past the shaping limits and is drawn with cmap and hmtx only.
+	// `limited`: the run went past the shaping limits and is drawn with cmap and hmtx only. `broken`: the face's
+	// layout tables failed to read or apply (now or before), so the run is drawn with cmap and hmtx only.
 	shape(input: ShapeInput): {
 		readonly buffer: GlyphBuffer
 		readonly x: Float64Array
 		readonly y: Float64Array
 		readonly width: number
 		readonly limited: boolean
+		readonly broken: boolean
 	} {
 		const plan = this.plan(input.script, input.rtl, input.language)
 		const buffer = this.buffer
@@ -532,7 +577,7 @@ export class ShapingFace {
 			} catch (error) {
 				// Past the limits only this run is unshaped; a table that fails to apply stays off for the face.
 				if (error instanceof ShapingLimitError) limited = true
-				else this.broken = true
+				else this.fail(error)
 
 				buffer.unlimit()
 				this.fill(input, plan)
@@ -553,7 +598,7 @@ export class ShapingFace {
 
 		const width = resolveOrigins(buffer, input.rtl, this.originX, this.originY)
 
-		return { buffer, x: this.originX, y: this.originY, width, limited }
+		return { buffer, x: this.originX, y: this.originY, width, limited, broken: this.broken }
 	}
 
 	private fill(input: ShapeInput, plan: Plan): void {

@@ -1,6 +1,8 @@
+import { MessageChannel } from "node:worker_threads"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
+import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit/budget"
 import {
 	composeWriteOptions,
 	heldAfterSave,
@@ -12,7 +14,13 @@ import {
 	type PdfSecurityChoice
 } from "../../core/pdfedit/security"
 import { describeSecurity, heldAccessAtOpen, planDocumentSecurity, readEncryptFields, unlockOwner } from "../../dom/pdfedit/security"
+import { buildPdfCms, type PdfSigningIdentity } from "../../core/pdfsign"
+import { cmsCapacity } from "../../core/pdfsign/cmsBuild"
+import type { PdfSignPort } from "../../dom/pdfedit/protocol"
 import { makePdf } from "./fixtures"
+import { startEngine, stopEngines, upload } from "./harness"
+import { loadIdentity, signingSubtle, verifySigned } from "../pdfSignCreateFixtures"
+import { budget } from "../timing"
 
 // The security block against real MuPDF: each Protect choice saved as the editor saves (full rewrite, garbage=compact),
 // then reopened in MuPDF and in pdf.js. RC4 inputs are made here with MuPDF's own writer.
@@ -322,4 +330,122 @@ describe("PDF security engine", () => {
 		expect(held(document, "ﬁx")).toMatchObject({ password: "fix", openPassword: true })
 		document.destroy()
 	})
+})
+
+// Answers the engine's digests with the CMS, as the page relays them to the signer worker.
+function signerPort(identity: PdfSigningIdentity): PdfSignPort {
+	const channel = new MessageChannel()
+
+	channel.port2.on("message", (message: { digest: Uint8Array }) => {
+		void buildPdfCms(identity, message.digest, signingSubtle).then(
+			cms => {
+				channel.port2.postMessage({ cms })
+			},
+			(error: unknown) => {
+				channel.port2.postMessage({ error: String(error) })
+			}
+		)
+	})
+
+	return channel.port1 as unknown as PdfSignPort
+}
+
+describe("a password SASLprep changes, in the engine", () => {
+	afterEach(stopEngines)
+
+	const TIMEOUT = budget(60_000)
+	// AES-256 compares the SASLprep'd password: the file holds "fix", the user types the ligature.
+	const TYPED = "\uFB01x"
+	const PREPARED = "fix"
+	const shape = { command: "annotations.shape", args: { page: 0, author: "Ann", kind: "Square", rect: [300, 300, 400, 400] } } as const
+
+	it(
+		"reopens a plain save in place and encrypts an extract with the form that unlocked the file",
+		async () => {
+			const bytes = makePdf({ pages: 2, userPassword: PREPARED, ownerPassword: "owner" })
+			const engine = startEngine(bytes)
+
+			expect(await engine.open(TYPED)).toMatchObject({ status: "open", access: "user" })
+
+			await engine.client.call("dispatch", shape)
+
+			const begun = await engine.client.call("saveBegin", {
+				inputBytes: bytes.length,
+				memory: PDF_DESKTOP_MEMORY,
+				invalidateConfirmed: false
+			})
+
+			expect(begun.status).toBe("written")
+			expect((await upload(engine.client)).uploaded).toBe(true)
+			expect((await engine.client.call("saveEnd", { outcome: "saved", next: "adopt" })).history).toBe("reset")
+
+			const extract = await engine.client.call("extractBegin", {
+				pages: [0],
+				protect: true,
+				inputBytes: bytes.length,
+				memory: PDF_DESKTOP_MEMORY
+			})
+
+			expect(extract.status).toBe("written")
+
+			const extracted = await upload(engine.client)
+
+			await engine.client.call("saveEnd", { outcome: "copied", next: "continue" })
+
+			const copy = open(extracted.bytes)
+
+			expect(copy.needsPassword()).toBe(true)
+			expect(copy.authenticatePassword(PREPARED)).not.toBe(0)
+			copy.destroy()
+		},
+		TIMEOUT
+	)
+
+	it(
+		"signs on a rewrite of unsaved changes and verifies the signed file's revisions",
+		async () => {
+			const identity = await loadIdentity("rsa2048")
+			const bytes = makePdf({ pages: 1, userPassword: PREPARED, ownerPassword: "owner" })
+			const engine = startEngine(bytes)
+
+			expect(await engine.open(TYPED)).toMatchObject({ status: "open" })
+
+			await engine.client.call("dispatch", shape)
+			await engine.client.call("dispatch", {
+				command: "sign.addField",
+				args: {
+					placement: { kind: "rect", page: 0, rect: [320, 100, 520, 160] },
+					visual: null,
+					lines: ["Signed by Fixture"],
+					name: "Fixture Signer",
+					reason: "Approval",
+					location: null,
+					time: Date.UTC(2026, 10, 14, 12),
+					certify: null,
+					capacity: cmsCapacity(identity)
+				}
+			})
+
+			const signer = signerPort(identity)
+			const begun = await engine.client.call(
+				"signBegin",
+				{ inputBytes: bytes.length, memory: PDF_DESKTOP_MEMORY, digest: identity.scheme.digest, signer },
+				[signer]
+			)
+
+			expect(begun.status).toBe("written")
+
+			const signed = (await upload(engine.client)).bytes
+
+			expect((await verifySigned(signed, PREPARED)).signatures.map(signature => signature.state)).toEqual(["unchanged"])
+			expect((await engine.client.call("saveEnd", { outcome: "saved", next: "adopt" })).history).toBe("reset")
+
+			const fields = await engine.client.call("signatureHints", {})
+
+			expect((await engine.client.call("verifySignatures", { fields })).signatures.map(signature => signature.state)).toEqual([
+				"unchanged"
+			])
+		},
+		TIMEOUT
+	)
 })

@@ -223,12 +223,13 @@ describe("the review reader under hostile comments", () => {
 		})
 	}
 
-	for (const [kind, text] of [
-		["oversized", "x".repeat(1_000_001)],
-		["deep", `${"<a:b>".repeat(100_000)}${"</a:b>".repeat(100_000)}`],
-		["malformed", "<a:b>"]
+	// A legacy comment's text is read without a depth bound, so deep nesting reads and that slide duplicates.
+	for (const [kind, text, refused] of [
+		["oversized", "x".repeat(1_000_001), "tooLarge"],
+		["deep", `${"<a:b>".repeat(100_000)}${"</a:b>".repeat(100_000)}`, undefined],
+		["malformed", "<a:b>", "malformed"]
 	] as const) {
-		it(`duplicates any other slide of a deck where one slide's comments refuse to read (pptx, ${kind}), never that slide`, async () => {
+		it(`duplicates any other slide of a deck with hostile comments (pptx, ${kind}), and that slide only if they read`, async () => {
 			const bytes = buildPptx({
 				slides: [{ shapes: "" }, { shapes: "", rels: [["rIdC", "comments", "../comments/comment1.xml"] as const] }, { shapes: "" }],
 				presentationRels: [["rId81", "commentAuthors", "commentAuthors.xml"]],
@@ -245,16 +246,11 @@ describe("the review reader under hostile comments", () => {
 			})
 			const s = await driveSession(bytes, "pptx")
 			const [plain, bad] = [...s.session.deck.slides] as SlideRef[]
-			let reviewed: unknown
+			const reason = await refusal(() => review(s.context, bad as SlideRef))
 
-			try {
-				await review(s.context, bad as SlideRef)
-			} catch (error) {
-				reviewed = error
-			}
-
+			expect(reason).toBe(refused)
 			expect((await s.command({ family: "slide", kind: "duplicate", slide: plain as SlideRef })).ok).toBe(true)
-			expect((await s.command({ family: "slide", kind: "duplicate", slide: bad as SlideRef })).ok).toBe(reviewed === undefined)
+			expect((await s.command({ family: "slide", kind: "duplicate", slide: bad as SlideRef })).ok).toBe(reason === undefined)
 			expect((await s.command({ family: "slide", kind: "duplicate", slide: plain as SlideRef })).ok).toBe(true)
 		})
 	}

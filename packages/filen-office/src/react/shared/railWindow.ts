@@ -8,27 +8,6 @@ export interface RailRange {
 	readonly last: number
 }
 
-export function railRange(count: number, extent: number, offset: number, size: number, overscan: number): RailRange {
-	if (count <= 0 || extent <= 0) return { first: 0, last: -1 }
-
-	const first = Math.max(0, Math.min(count - 1, Math.floor(Math.max(0, offset) / extent) - overscan))
-	const last = Math.min(count - 1, Math.max(first, Math.ceil((Math.max(0, offset) + Math.max(0, size)) / extent) - 1 + overscan))
-
-	return { first, last }
-}
-
-// The scroll offset that brings item `index` fully into view, or undefined when it already is.
-export function revealOffset(index: number, extent: number, offset: number, size: number): number | undefined {
-	const start = index * extent
-	const end = start + extent
-
-	if (start < offset) return start
-
-	if (end > offset + size) return Math.max(0, end - size)
-
-	return undefined
-}
-
 // The item a key moves to from `current`, or undefined for a key the rail does not handle. In a grid (`columns` > 1,
 // vertical) the left and right arrows step one item, up and down one row, and `page` counts rows.
 export function railKeyTarget(

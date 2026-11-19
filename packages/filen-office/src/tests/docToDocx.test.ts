@@ -44,6 +44,20 @@ describe("Word binary to WordprocessingML", () => {
 		expect(docxBodyText(await reopen(result))).toBe("plain bold")
 	})
 
+	it("writes a run's language as its tag, or as four hex digits when it has none", async () => {
+		const result = await convert({
+			pieces: [{ text: "uno dos tres\r" }],
+			runs: [
+				{ start: 0, end: 4, grpprl: prl.u16(0x4873, 0x2c0a) },
+				{ start: 4, end: 8, grpprl: prl.u16(0x4873, 0x7c0a) },
+				{ start: 8, end: 13, grpprl: prl.u16(0x4873, 0x0400) }
+			]
+		})
+		const langs = [...part(result, "word/document.xml").matchAll(/<w:lang w:val="([^"]+)"\/>/gu)].map(match => match[1])
+
+		expect(langs).toEqual(["es-AR", "7C0A"])
+	})
+
 	it("maps the kashida and Thai sprmPJc values to their ST_Jc names", async () => {
 		const result = await convert({
 			pieces: [{ text: "a\rb\rc\rd\r" }],
@@ -445,6 +459,162 @@ describe("Word binary to WordprocessingML", () => {
 		await expect(convertDocToDocx(bytesSource(legacy))).rejects.toMatchObject({ name: "DocError", code: "legacyVersion" })
 		await expect(convertDocToDocx(bytesSource(encrypted))).rejects.toMatchObject({ code: "encrypted", encryption: "rc4" })
 		await expect(convertDocToDocx(bytesSource(new Uint8Array(64)))).rejects.toBeInstanceOf(DocError)
+	})
+})
+
+// Little-endian bytes for the table-stream structures these tests build.
+function le16(value: number): number[] {
+	return [value & 0xff, (value >>> 8) & 0xff]
+}
+
+function le32(value: number): number[] {
+	return [...le16(value & 0xffff), ...le16(value >>> 16)]
+}
+
+// An extended STTB of UTF-16 strings, each followed by `extra`.
+function sttb(entries: readonly string[], extra: (k: number) => readonly number[] = () => []): Uint8Array {
+	const cbExtra = entries.length === 0 ? 0 : extra(0).length
+
+	return Uint8Array.from([
+		...le16(0xffff),
+		...le16(entries.length),
+		...le16(cbExtra),
+		...entries.flatMap((text, k) => [...le16(text.length), ...[...text].flatMap(char => le16(char.charCodeAt(0))), ...extra(k)])
+	])
+}
+
+// PlcfBkf + PlcfBkl + SttbfBkmk for bookmarks [name, start, end] given in start order.
+function bookmarks(
+	entries: readonly (readonly [string, number, number])[],
+	last: number
+): Partial<Record<"sttbfBkmk" | "plcfBkf" | "plcfBkl", Uint8Array>> {
+	const ends = entries.map(([, , end], k) => [end, k] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1])
+	const ibkl = (k: number): number => ends.findIndex(([, index]) => index === k)
+
+	return {
+		sttbfBkmk: sttb(entries.map(([name]) => name)),
+		plcfBkf: plc(
+			[...entries.map(([, start]) => start), last],
+			entries.map((_, k) => [...le16(ibkl(k)), 0, 0])
+		),
+		plcfBkl: plc([...ends.map(([end]) => end), last])
+	}
+}
+
+describe("Word binary range markup at story boundaries", () => {
+	// Main "See\u0002\r" (CPs 0–4), the footnote "\u0002 note\r" (5–11), the final paragraph mark (12).
+	const footnoted = (entries: readonly (readonly [string, number, number])[]): DocSpec => ({
+		pieces: [{ text: "See\u0002\r\u0002 note\r\r" }],
+		ccp: { text: 5, ftn: 7 },
+		paragraphs: [{ end: 5 }, { end: 12 }, { end: 13 }],
+		structures: { plcffndRef: plc([3, 5], [[1, 0]]), plcffndTxt: plc([0, 7, 8]), ...bookmarks(entries, 13) }
+	})
+	const ids = (xml: string, name: string): readonly [string | undefined, boolean] => {
+		const id = new RegExp(`<w:bookmarkStart w:id="(\\d+)" w:name="${name}"/>`, "u").exec(xml)?.[1]
+
+		return [id, id !== undefined && xml.includes(`<w:bookmarkEnd w:id="${id}"/>`)]
+	}
+
+	it("keeps a bookmark that starts at a footnote's first CP in the footnote", async () => {
+		const result = await convert(footnoted([["Note", 5, 9]]))
+		const footnotes = part(result, "word/footnotes.xml")
+		const document = part(result, "word/document.xml")
+
+		expect(ids(footnotes, "Note")).toEqual(["0", true])
+		expect(document).not.toContain("w:bookmark")
+	})
+
+	it("keeps an empty bookmark at a footnote's first CP in the footnote", async () => {
+		const result = await convert(footnoted([["Empty", 5, 5]]))
+
+		expect(ids(part(result, "word/footnotes.xml"), "Empty")).toEqual(["0", true])
+		expect(part(result, "word/document.xml")).not.toContain("w:bookmark")
+	})
+
+	it("closes a bookmark that ends at the main text's end in the body", async () => {
+		const result = await convert(footnoted([["Body", 0, 5]]))
+
+		expect(ids(part(result, "word/document.xml"), "Body")).toEqual(["0", true])
+		expect(part(result, "word/footnotes.xml")).not.toContain("w:bookmark")
+	})
+
+	it("closes a bookmark that opens in one footnote and ends at the next one's end in the footnotes", async () => {
+		// Main "Ab\u0002\u0002\r" (CPs 0–4), the footnotes "\u0002 one\r" (5–10) and "\u0002 two\r" (11–16), the final
+		// paragraph mark (17).
+		for (const [start, end] of [
+			[6, 17],
+			[5, 17]
+		] as const) {
+			const result = await convert({
+				pieces: [{ text: "Ab\u0002\u0002\r\u0002 one\r\u0002 two\r\r" }],
+				ccp: { text: 5, ftn: 13 },
+				paragraphs: [{ end: 5 }, { end: 11 }, { end: 17 }, { end: 18 }],
+				structures: {
+					plcffndRef: plc(
+						[2, 3, 5],
+						[
+							[1, 0],
+							[1, 0]
+						]
+					),
+					plcffndTxt: plc([0, 6, 12, 13]),
+					...bookmarks([["Across", start, end]], 18)
+				}
+			})
+
+			expect(ids(part(result, "word/footnotes.xml"), "Across")).toEqual(["0", true])
+			expect(part(result, "word/document.xml")).not.toContain("w:bookmark")
+		}
+	})
+
+	it("closes a bookmark that ends at the main text's end in the body when a text box story follows", async () => {
+		// Main "\u0008ab\r" (CPs 0–3) anchoring text box 2000 at CP 0; its story "Boxed\r" (4–9) starts at the main
+		// text's end and is written, nested, while the body paragraph is still open; the final mark (10).
+		const ftxbxs = (spid: number): number[] => [...le32(1), ...le32(0), ...le16(0), ...le32(0), ...le32(spid), ...le32(0)]
+		const fspa = [...le32(2000), ...le32(0), ...le32(0), ...le32(1440), ...le32(1440), ...le16(3 << 5), ...le32(0)]
+		const result = await convert({
+			pieces: [{ text: "\u0008ab\rBoxed\r\r" }],
+			runs: [{ start: 0, end: 1, grpprl: prl.toggle(0x0855, 1) }],
+			ccp: { text: 4, txbx: 6 },
+			structures: {
+				dggInfo: drawing([2000, 202]),
+				plcSpaMom: plc([0, 11], [fspa]),
+				plcftxbxTxt: plc([0, 6, 7], [ftxbxs(2000), ftxbxs(0)]),
+				...bookmarks([["Body", 0, 4]], 11)
+			}
+		})
+		const xml = part(result, "word/document.xml")
+		const box = /<w:txbxContent>[\s\S]*?<\/w:txbxContent>/u.exec(xml)?.[0] ?? ""
+
+		expect(box).toContain(">Boxed<")
+		expect(box).not.toContain("w:bookmark")
+		expect(ids(xml.replace(box, ""), "Body")).toEqual(["0", true])
+	})
+
+	it("keeps a comment range that starts at a header story's first CP in that header", async () => {
+		// Main "Body\r" (0–4); the odd header "Hd\r" (5–7), written first, and the first-page header "Y\u0005\r" (8–10), then
+		// a final mark (11); the comment "\u0005C\r" (12–14).
+		const hdd = [0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 6, 6, 7]
+		const atrd = [...le16(1), ...le16(0x41), ...new Array<number>(16).fill(0), ...le16(0), 0, 0, 0, 0, 7, 0, 0, 0]
+		const result = await convert({
+			pieces: [{ text: "Body\rHd\rY\u0005\r\r\u0005C\r\r" }],
+			ccp: { text: 5, hdd: 7, atn: 3 },
+			paragraphs: [{ end: 5 }, { end: 8 }, { end: 11 }, { end: 12 }, { end: 15 }, { end: 16 }],
+			structures: {
+				plcfHdd: plc(hdd),
+				plcfandRef: plc([9, 16], [atrd]),
+				plcfandTxt: plc([0, 3]),
+				grpXstAtnOwners: Uint8Array.from([...le16(3), ...[..."Ann"].flatMap(char => le16(char.charCodeAt(0)))]),
+				sttbfAtnBkmk: sttb([""], () => [0, 0, 7, 0, 0, 0, 0, 0, 0, 0]),
+				plcfAtnBkf: plc([8, 16], [[0, 0, 0, 0]]),
+				plcfAtnBkl: plc([9, 16])
+			}
+		})
+		const headers = [...result.parts.keys()].filter(name => /^word\/header\d+\.xml$/u.test(name)).map(name => part(result, name))
+
+		expect(headers).toHaveLength(2)
+		expect(headers.filter(xml => xml.includes("<w:commentRangeStart"))).toEqual(headers.filter(xml => xml.includes(">Y<")))
+		expect(headers.filter(xml => xml.includes("<w:commentRangeEnd"))).toEqual(headers.filter(xml => xml.includes(">Y<")))
 	})
 })
 

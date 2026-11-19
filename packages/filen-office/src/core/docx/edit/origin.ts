@@ -25,9 +25,16 @@ const built = new WeakMap<DocxEditContext, Built>()
 // block shares (until its attributes change; one with a source is its block's own): see asBuilt.
 const builtBlocks = new WeakMap<object, Node>()
 
-// A block (or story) the builder made from `part`.
-export function builtFrom(context: DocxEditContext, node: Node, part: number): void {
+// A block (or story) the builder made from `part`. `eager`: its origins are recorded now, never queued (a
+// document built for a while only, such as Find's, is not held until a paste).
+export function builtFrom(context: DocxEditContext, node: Node, part: number, eager = false): void {
 	if (hasSource(node.attrs)) builtBlocks.set(node.attrs, node)
+
+	if (eager) {
+		tagOrigin(node, part)
+
+		return
+	}
 
 	let state = built.get(context)
 

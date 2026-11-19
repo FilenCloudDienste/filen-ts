@@ -2,7 +2,7 @@ import type { Node } from "prosemirror-model"
 import { describe, expect, it, vi } from "vitest"
 import { Region, SOURCE_INTS, SourceInt, type PageDisplayList } from "@filen/office/core/docx"
 import { docxSchema } from "@filen/office/core/docx/edit"
-import { PagedGeometry } from "@filen/office/core/docx/paged"
+import { MarkBoxes, PagedGeometry, type PageRect } from "@filen/office/core/docx/paged"
 import { HitTester, LINE_FLOATS, LINE_INTS, LineFlag, LineInt } from "@filen/office/core/text"
 import { buildDocx } from "./docxSynthetic"
 import { readBytes } from "./layoutFixtures"
@@ -11,6 +11,36 @@ import { editedLayout, type EditedLayout } from "./pagedFixtures"
 // Positions of the editing document and points on the laid-out pages map onto each other exactly.
 
 const FIXTURES = new URL("./fixtures/", import.meta.url).pathname
+
+// The boxes rangesBoxes() gives for `ranges` on page `page`, as rects() gives them, the index of each box's range
+// added to `owners`.
+function boxesOf(
+	geometry: PagedGeometry,
+	ranges: readonly { readonly from: number; readonly to: number }[],
+	longest: number,
+	page: number,
+	owners: number[] = []
+): PageRect[] {
+	const boxes = new MarkBoxes()
+	const out: PageRect[] = []
+
+	geometry.rangesBoxes(ranges, longest, page, boxes)
+
+	for (let b = 0; b < boxes.count; b++) {
+		const at = b * 4
+
+		out.push({
+			page,
+			x: boxes.values[at + 2] ?? 0,
+			y: boxes.values[at] ?? 0,
+			width: boxes.values[at + 3] ?? 0,
+			height: boxes.values[at + 1] ?? 0
+		})
+		owners.push(boxes.owners[b] ?? -1)
+	}
+
+	return out
+}
 
 function geometryOf(edited: EditedLayout): PagedGeometry {
 	return new PagedGeometry(edited.story, edited.index, { page: index => edited.layout.pages[index] }, new HitTester(edited.layout.styles))
@@ -288,7 +318,7 @@ describe("paged geometry", () => {
 
 			for (let page = 0; page < edited.layout.pages.length; page++) {
 				const owners: number[] = []
-				const many = geometry.rangesRects(ranges, longest, page, [], owners)
+				const many = boxesOf(geometry, ranges, longest, page, owners)
 
 				boxes += many.length
 
@@ -329,7 +359,7 @@ describe("paged geometry", () => {
 		const measured = vi.spyOn(geometry.tester, "xAtOffset")
 		let boxes = 0
 
-		for (let page = 0; page < edited.layout.pages.length; page++) boxes += geometry.rangesRects(ranges, longest, page).length
+		for (let page = 0; page < edited.layout.pages.length; page++) boxes += boxesOf(geometry, ranges, longest, page).length
 
 		expect(boxes).toBeGreaterThan(200)
 		expect(measured.mock.calls.length).toBeLessThan(boxes / 4)

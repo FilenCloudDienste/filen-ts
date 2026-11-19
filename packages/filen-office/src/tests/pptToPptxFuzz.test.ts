@@ -3,7 +3,7 @@ import { CfbFile, cfbBytes } from "../core/cfb/index"
 import { bytesSource, type ByteSink } from "../core/opc/index"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { openPptxPackage } from "../core/pptx/package"
-import { PresentationError } from "../core/presentation/model"
+import { PresentationError, type PresentationRefusal } from "../core/presentation/model"
 import { pptAsPptx } from "./pptConvertFixtures"
 import { RICH_BUILD, RICH_TAG, RICH_TRANSITION, richDeck } from "./pptFixtures"
 import { budget, cpuMs } from "./timing"
@@ -11,6 +11,32 @@ import { budget, cpuMs } from "./timing"
 // Damaged decks holding every reader past the slides (time tree, comment, transition sound, Office 97 build, linked
 // movie, embedded object storage, sound collection), through conversion, the pptx reader and Download as .pptx (convertPresentation): each answers with
 // a saved copy or a typed refusal, never an untyped error, and each round stays cheap.
+
+// Every refusal the converter or the save may answer with, typed by the union so a renamed or removed reason fails to
+// compile. A converted deck the pptx reader refuses is a converter bug, so no `pptx:` key is allowed.
+const REFUSALS: Record<PresentationRefusal, true> = {
+	notImplemented: true,
+	tooLarge: true,
+	tooDeep: true,
+	malformed: true,
+	unsupported: true,
+	encrypted: true,
+	needsPassword: true,
+	wrongPassword: true,
+	passwordUnsupported: true,
+	rightsManaged: true,
+	unsupportedEncryption: true,
+	damagedEncryption: true,
+	viewOnly: true,
+	locked: true,
+	proofFailed: true,
+	notFound: true,
+	stale: true,
+	aborted: true,
+	closed: true,
+	failed: true
+}
+const ALLOWED = new Set(["saved", ...Object.keys(REFUSALS).flatMap(reason => [reason, `save:${reason}`])])
 
 // A small deterministic generator (xorshift32), so a failure reproduces from its seed.
 function random(seed: number): () => number {
@@ -87,7 +113,9 @@ describe("ppt Download as .pptx fuzz", () => {
 
 		expect(regions.every(region => region.at >= 0)).toBe(true)
 
-		const seen = new Map<string, number>()
+		// Each outcome with the first seed and round that produced it.
+		const seen = new Map<string, string>()
+		let saved = 0
 		let worst = 0
 
 		for (const seed of [11, 12, 13, 14]) {
@@ -119,12 +147,13 @@ describe("ppt Download as .pptx fuzz", () => {
 				}
 
 				worst = Math.max(worst, cpuMs() - start)
-				seen.set(result, (seen.get(result) ?? 0) + 1)
+				if (result === "saved") saved++
+				if (!seen.has(result)) seen.set(result, `seed ${String(seed)} round ${String(round)}`)
 			}
 		}
 
-		expect([...seen.keys()].every(key => key === "saved" || !key.includes(" "))).toBe(true)
-		expect(seen.get("saved") ?? 0).toBeGreaterThan(600)
+		expect([...seen].filter(([key]) => !ALLOWED.has(key)).map(([key, first]) => `${key} (${first})`)).toEqual([])
+		expect(saved).toBeGreaterThan(600)
 		expect(worst).toBeLessThan(budget(250))
 	})
 })

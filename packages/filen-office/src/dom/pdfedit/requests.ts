@@ -73,36 +73,41 @@ function access(result: number): PdfAccess {
 	return (result & 4) !== 0 ? "owner" : (result & 2) !== 0 ? "user" : "none"
 }
 
-function opened(document: Mupdf.PDFDocument, password: string | undefined): PdfOpenResult {
+// The open's answer, and the form of the password that authenticated (as typed or SASLprep'd): what every later open
+// of the same bytes authenticates with. Undefined when no password did.
+interface Opened {
+	readonly result: PdfOpenResult
+	readonly password: string | undefined
+}
+
+function opened(document: Mupdf.PDFDocument, password: string | undefined): Opened {
 	if (!document.needsPassword()) {
-		if (password === undefined) return { status: "open", document: summary(document), access: "none" }
+		if (password === undefined) return { result: { status: "open", document: summary(document), access: "none" }, password: undefined }
 
 		// A file that opens without a password may still be given its owner password (one the session unlocked, or the
 		// owner password a save just set): it lifts the restrictions. A failed attempt drops all access, which the empty
 		// password gives back.
 		for (const candidate of passwordCandidates(password)) {
 			if ((document.authenticatePassword(candidate) & 4) !== 0)
-				return { status: "open", document: summary(document), access: "owner" }
+				return { result: { status: "open", document: summary(document), access: "owner" }, password: candidate }
 		}
 
 		document.authenticatePassword("")
 
-		return { status: "open", document: summary(document), access: "none" }
+		return { result: { status: "open", document: summary(document), access: "none" }, password: undefined }
 	}
 
-	if (password === undefined) return { status: "password" }
+	if (password === undefined) return { result: { status: "password" }, password: undefined }
 
 	// As typed, then SASLprep'd (an AES-256 password, PDF 32000-2 §7.6.4.3.3): each attempt authenticates anew, so the
 	// last one decides the document's access.
-	let result = 0
-
 	for (const candidate of passwordCandidates(password)) {
-		result = document.authenticatePassword(candidate)
+		const result = document.authenticatePassword(candidate)
 
-		if (result !== 0) break
+		if (result !== 0) return { result: { status: "open", document: summary(document), access: access(result) }, password: candidate }
 	}
 
-	return result === 0 ? { status: "password" } : { status: "open", document: summary(document), access: access(result) }
+	return { result: { status: "password" }, password: undefined }
 }
 
 function passwordCandidates(password: string): string[] {
@@ -157,41 +162,46 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 		// page loaded, which reads blocks all over a file whose pages lie between their images (a scan).
 		document.setPageTreeCache(false)
 
-		const result = opened(document, password)
+		const { result, password: accepted } = opened(document, password)
+		// The editor's journal starts once the document is unlocked (its objects are read to know the form).
+		const edit =
+			role === "edit" && result.status === "open"
+				? startEdit(document, result, accepted, fileRevisions(mupdf, reader, accepted), memory, channel.length)
+				: null
 
 		context.setCurrent({
 			document,
 			reader,
 			role,
 			renderer: new TileRenderer(mupdf, document, host.maxDisplayLists),
-			// The editor's journal starts once the document is unlocked (its objects are read to know the form).
-			edit:
-				role === "edit" && result.status === "open"
-					? startEdit(document, result, password, fileRevisions(mupdf, reader, password), memory, channel.length)
-					: null,
+			edit,
 			heap: null,
 			base: null,
-			memory
+			memory,
+			password: edit === null ? accepted : edit.password
 		})
 
 		return { value: result }
 	},
 	authenticate: (context, { password }) => {
 		const current = context.open()
-		const result = opened(current.document, password)
+		const { result, password: accepted } = opened(current.document, password)
 
-		if (current.role === "edit" && current.edit === null && result.status === "open")
-			context.setCurrent({
-				...current,
-				edit: startEdit(
-					current.document,
-					result,
-					password,
-					fileRevisions(context.mupdf, current.reader, password),
-					current.memory ?? PDF_DESKTOP_MEMORY,
-					current.reader.length
-				)
-			})
+		if (result.status !== "open" || current.edit !== null) return { value: result }
+
+		const edit =
+			current.role === "edit"
+				? startEdit(
+						current.document,
+						result,
+						accepted,
+						fileRevisions(context.mupdf, current.reader, accepted),
+						current.memory ?? PDF_DESKTOP_MEMORY,
+						current.reader.length
+					)
+				: null
+
+		context.setCurrent({ ...current, edit, password: edit === null ? accepted : edit.password })
 
 		return { value: result }
 	},

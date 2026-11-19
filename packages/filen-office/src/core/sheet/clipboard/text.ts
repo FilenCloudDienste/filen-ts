@@ -3,16 +3,19 @@ import { csvCellView } from "../csv/csvView"
 import { EN_US_LOCALE, localizedNumber } from "../input/locale"
 import { SHEET_MAX_COLS, SHEET_MAX_EDIT_CELLS, SHEET_MAX_ROWS, type SheetLocale } from "../protocol"
 import { defineSheetFeature } from "../registry"
-import { textFeature, type TextSheetDocument } from "../text"
+import { ownTextClip, textFeature, type TextSheetDocument } from "../text"
 import { clipboardHtml, MAX_HTML_COPY_CELLS, MAX_HTML_COPY_LENGTH, parseClipboardHtml, type ClipOutCell, type ClipValue } from "./html"
 import { pasteRepeats } from "./tsv"
 
 // Clipboard HTML over a text file: a copy's table of the fields as they are, and a paste of a table's values (a
-// text file keeps no formats or formulas: a formula's shown value is not on the clipboard, so its text is pasted).
+// text file keeps no formats or formulas: a formula's shown value is not on the clipboard, so its text is pasted;
+// a Google Sheets formula, in R1C1, shows the empty value it has instead). The session's own copy pastes as its
+// text does, a cut moving its cells.
 
-// A field as the view shows it: a number where it shows a plain one (read in the session's locale, as typed there);
+// A field as the view shows it: a number where it shows a plain one that writes back as the same text (read in the
+// session's locale, as typed there), so "007", "1.50" or a 20-digit id never comes back from a number as other text;
 // text where an entry would turn it into what it does not show (a formula, a number); else read as typed where it
-// lands (a date, a grouped or percent number keeps the format it implies).
+// lands (a date, a grouped or percent number keeps the format it implies, "007" reads as a workbook reads it).
 function fieldValue(text: string, locale: SheetLocale | undefined): ClipValue {
 	if ((text.startsWith("=") && text.length > 1) || text.startsWith("'")) return { kind: "text", text }
 
@@ -21,7 +24,9 @@ function fieldValue(text: string, locale: SheetLocale | undefined): ClipValue {
 	if (number === null) return { kind: "typed", text }
 	if (csvCellView(text)?.numeric !== true) return { kind: "text", text }
 
-	return number.impliedFormat === undefined ? { kind: "number", value: number.value } : { kind: "typed", text }
+	return number.impliedFormat === undefined && String(number.value) === text.trim()
+		? { kind: "number", value: number.value }
+		: { kind: "typed", text }
 }
 
 export const textClipboardHtmlFeature = defineSheetFeature<TextSheetDocument>({
@@ -30,12 +35,16 @@ export const textClipboardHtmlFeature = defineSheetFeature<TextSheetDocument>({
 		"clipboard.pasteHtml": {
 			info: { write: true },
 			run: (context, command) => {
-				const table = parseClipboardHtml(command.html, SHEET_MAX_EDIT_CELLS)
 				const paste = textFeature.commands?.["clipboard.paste"]
 				const set = textFeature.commands?.["cells.set"]
 
-				if (table === "tooLarge") return { refused: { reason: "tooLarge" } }
 				if (paste === undefined || set === undefined) return { refused: { reason: "unsupported" } }
+
+				// The session's own copy pastes its fields exactly (a cut moving them), its HTML never parsed.
+				const own = ownTextClip(context.doc, command.clip, command.text) !== null
+				const table = own ? null : parseClipboardHtml(command.html, SHEET_MAX_EDIT_CELLS)
+
+				if (table === "tooLarge") return { refused: { reason: "tooLarge" } }
 
 				if (table === null)
 					return paste.run(context, {
@@ -67,7 +76,7 @@ export const textClipboardHtmlFeature = defineSheetFeature<TextSheetDocument>({
 						case "boolean":
 							return value.value ? "TRUE" : "FALSE"
 						case "empty":
-							return cell.formula?.text ?? ""
+							return cell.formula === null || cell.formula.kind === "r1c1" ? "" : cell.formula.text
 					}
 				})
 				// The table once per copy over the paste area; a text file keeps no formulas to move.

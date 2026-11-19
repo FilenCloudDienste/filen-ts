@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
 import { PDF_STORE_SHRINK_INTERVAL_MS, PDF_STORE_SHRINK_HEAP_BYTES, TileRenderer, wasmHeapBytes } from "../../dom/pdfedit/render"
 import type { MupdfModule } from "../../dom/pdfedit/protocol"
+import { isFatalEngineError, PdfEngineRefusal } from "../../dom/pdfedit/context"
 import { makePdf } from "./fixtures"
 
 // The tile renderer's caches, with the real MuPDF on this thread.
@@ -107,6 +108,71 @@ describe("TileRenderer", () => {
 		expect(shrinkStore).toHaveBeenCalledWith(50)
 
 		grown.destroy()
+		renderer.destroy()
+		document.destroy()
+	})
+
+	it("frees the tile's pixmap and device, and the loaded page, when a draw or a list build throws", () => {
+		const document = open(2)
+		const load = document.loadPage.bind(document)
+		const loaded: mupdf.PDFPage[] = []
+
+		document.loadPage = (index: number) => {
+			const page = load(index)
+
+			page.run = () => {
+				throw new Error("read failed")
+			}
+			page.toDisplayList = () => {
+				throw new Error("read failed")
+			}
+			vi.spyOn(page, "destroy")
+			loaded.push(page)
+
+			return page
+		}
+
+		const pixmapDestroy = vi.spyOn(mupdf.Pixmap.prototype, "destroy")
+		const deviceDestroy = vi.spyOn(mupdf.DrawDevice.prototype, "destroy")
+		const deviceClose = vi.spyOn(mupdf.DrawDevice.prototype, "close")
+		const renderer = new TileRenderer(mupdf, document, 4)
+
+		try {
+			// A thumbnail draws straight from the page.
+			expect(() => renderer.render(0, 0.1, 0, TILE, undefined, true)).toThrow("read failed")
+			expect(pixmapDestroy).toHaveBeenCalledTimes(1)
+			expect(deviceDestroy).toHaveBeenCalledTimes(1)
+			expect(deviceClose).not.toHaveBeenCalled()
+			expect(loaded[0]?.destroy).toHaveBeenCalledTimes(1)
+
+			expect(() => renderer.render(1, 0.1, 0, TILE)).toThrow("read failed")
+			expect(loaded[1]?.destroy).toHaveBeenCalledTimes(1)
+		} finally {
+			pixmapDestroy.mockRestore()
+			deviceDestroy.mockRestore()
+			deviceClose.mockRestore()
+			renderer.destroy()
+			document.destroy()
+		}
+	})
+
+	it("refuses a tile outside the page without poisoning the engine", () => {
+		const document = open(1)
+		const renderer = new TileRenderer(mupdf, document, 4)
+		let thrown: unknown = null
+
+		try {
+			renderer.render(0, 0.1, 0, [1000, 1000, 1100, 1100])
+		} catch (error) {
+			thrown = error
+		}
+
+		expect(thrown).toBeInstanceOf(PdfEngineRefusal)
+		expect(thrown instanceof PdfEngineRefusal ? thrown.failure : null).toBe("badRequest")
+		expect(isFatalEngineError(thrown)).toBe(false)
+		// The renderer still draws.
+		expect(renderer.render(0, 0.1, 0, TILE).width).toBeGreaterThan(0)
+
 		renderer.destroy()
 		document.destroy()
 	})

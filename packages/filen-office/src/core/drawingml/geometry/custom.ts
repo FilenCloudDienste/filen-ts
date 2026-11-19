@@ -13,6 +13,8 @@ import {
 } from "./program"
 
 const NUMBER = /^-?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?$/
+// No valid coordinate or guide literal is longer; the guard keeps NUMBER's backtracking off huge tokens.
+const MAX_NUMBER_LENGTH = 32
 
 // Compiles a:custGeom (§20.1.9.8) into a geometry program. Unknown guide names and malformed formulas read
 // as 0, as Office treats them; nothing throws.
@@ -22,7 +24,7 @@ export function compileCustomGeometry(reader: DrawingReader, node: number): Geom
 	let next = BUILTIN_COUNT
 	const argument = (token: string | undefined): number => {
 		if (token === undefined || token === "") return pool.ref(0)
-		if (NUMBER.test(token)) return pool.ref(Number(token))
+		if (token.length <= MAX_NUMBER_LENGTH && NUMBER.test(token)) return pool.ref(Number(token))
 
 		const builtin = builtinIndex(token)
 
@@ -30,8 +32,6 @@ export function compileCustomGeometry(reader: DrawingReader, node: number): Geom
 
 		return slots.get(token) ?? pool.ref(0)
 	}
-	const adjustNames: string[] = []
-	const adjustDefaults: number[] = []
 	const guides: number[] = []
 	const formula = (gd: number): [number, number, number, number] => {
 		const [name, ...args] = (reader.attr(gd, "fmla") ?? "").trim().split(/\s+/)
@@ -45,8 +45,8 @@ export function compileCustomGeometry(reader: DrawingReader, node: number): Geom
 	}
 	const adjustList = reader.child(node, D.A, "avLst")
 	// Adjust values of a custom shape are plain guides whose formula is usually "val n"; they are compiled
-	// as guides so any formula works, and listed by name for overrides that never come (custom shapes have
-	// no external avLst).
+	// as guides so any formula works, not listed as adjusts (custom shapes have no external avLst to
+	// override them).
 	const definitions = [...reader.children(adjustList, D.A, "gd"), ...reader.children(reader.child(node, D.A, "gdLst"), D.A, "gd")]
 
 	for (const gd of definitions) {
@@ -132,8 +132,8 @@ export function compileCustomGeometry(reader: DrawingReader, node: number): Geom
 	}
 
 	return {
-		adjustNames,
-		adjustDefaults: Float64Array.from(adjustDefaults),
+		adjustNames: [],
+		adjustDefaults: new Float64Array(0),
 		slotCount: next,
 		guides: Int32Array.from(guides),
 		guideCount: guides.length / 4,

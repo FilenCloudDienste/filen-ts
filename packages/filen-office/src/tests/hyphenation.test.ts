@@ -200,6 +200,45 @@ describe("the library", () => {
 		expect(reads).toBe(1)
 	})
 
+	it("reports a failed load and loads the language again after retryFailed", async () => {
+		const failure = new Error("offline")
+		const errors: [unknown, string][] = []
+		let reads = 0
+		const library = new HyphenationLibrary(
+			{
+				read: file => {
+					reads++
+
+					return reads === 1 ? Promise.reject(failure) : files.read(file)
+				}
+			},
+			(error, file) => errors.push([error, file])
+		)
+		const de = hyphenationLanguage("de")
+		const unknown = HYPHENATION_LANGUAGES.length + 1
+
+		library.request(de)
+		await library.whenLoaded()
+
+		expect(library.request(de)).toBe(false)
+		expect(errors).toEqual([[failure, HYPHENATION_LANGUAGES[de - 1]?.file]])
+		expect(library.request(unknown)).toBe(false)
+
+		library.retryFailed()
+
+		expect(library.request(unknown)).toBe(false)
+		expect(library.loading).toBe(false)
+		expect(library.request(de)).toBe(false)
+		expect(library.loading).toBe(true)
+
+		await library.whenLoaded()
+
+		expect(library.request(de)).toBe(true)
+		expect(library.patterns(de)).not.toBeNull()
+		expect(reads).toBe(2)
+		expect(errors).toHaveLength(1)
+	})
+
 	it("takes files a server already inflated", async () => {
 		const { gunzipSync } = await import("node:zlib")
 		const library = new HyphenationLibrary({ read: async file => new Uint8Array(gunzipSync(await files.read(file))) })

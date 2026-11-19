@@ -53,7 +53,11 @@ async function animatedSession(format: Format) {
 	expect(await h.command(op)).toMatchObject({ ok: true })
 
 	const part = format === "pptx" ? "ppt/slides/slide1.xml" : "content.xml"
-	const partOf = async (saved: Uint8Array | undefined): Promise<string> => text((await entriesOf(saved ?? bytes)).get(part))
+	const partOf = async (saved: Uint8Array | undefined): Promise<string> => {
+		if (saved === undefined) throw new Error("no bytes")
+
+		return text((await entriesOf(saved)).get(part))
+	}
 	const rows = async (): Promise<unknown> => {
 		const effects = slideEffects((await slide()).timing)
 
@@ -188,10 +192,11 @@ describe("by-paragraph effects across text edits", () => {
 
 		for (const saveBetween of [false, true])
 			it(`undoes the edit's timing exactly (${format}, a save between: ${String(saveBetween)})`, async () => {
-				const { h, edit, partOf, rows } = await animatedSession(format)
+				const { h, slide, edit, partOf, rows } = await animatedSession(format)
 				const before = await h.save()
 				const want = timingOf(format, await partOf(before.bytes))
 				const effects = await rows()
+				const timing = (await slide()).timing
 
 				expect(want).toBeDefined()
 				await edit(paragraphs => void paragraphs.splice(0, 1))
@@ -203,7 +208,14 @@ describe("by-paragraph effects across text edits", () => {
 
 				const after = await h.save()
 
-				expect(timingOf(format, await partOf(after.bytes ?? before.bytes))).toBe(want)
+				if (saveBetween) {
+					expect(after.result.kind).toBe("written")
+					expect(timingOf(format, await partOf(after.bytes))).toBe(want)
+				} else {
+					// The undo returns the history to the saved marker: nothing to write, and the model is the one saved.
+					expect(after.result.kind).toBe("unchanged")
+					expect((await slide()).timing).toEqual(timing)
+				}
 			})
 	}
 

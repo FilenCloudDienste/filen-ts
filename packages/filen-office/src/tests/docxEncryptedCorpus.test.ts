@@ -88,6 +88,8 @@ async function viewerGate(bytes: Uint8Array, host?: DocxHost): Promise<readonly 
 	return opened?.type === "opened" && !events.some(event => event.type === "error") ? opened.info.gate : undefined
 }
 
+const MSO2013_SAMPLE = join(CORPUS_DIR, "docx/lo__Encrypted_MSO2013_abc.docx")
+
 describe.skipIf(SAMPLES.length === 0)("encrypted docx corpus", () => {
 	let harness: WorkerHarness | undefined
 
@@ -145,12 +147,8 @@ describe.skipIf(SAMPLES.length === 0)("encrypted docx corpus", () => {
 		}
 	)
 
-	it("writes the DataSpaces streams Word 2013 writes, byte for byte", async () => {
-		const path = join(CORPUS_DIR, "docx/lo__Encrypted_MSO2013_abc.docx")
-
-		if (!existsSync(path)) return
-
-		const cfb = await CfbFile.open(bytesSource(new Uint8Array(readFileSync(path))))
+	it.skipIf(!existsSync(MSO2013_SAMPLE))("writes the DataSpaces streams Word 2013 writes, byte for byte", async () => {
+		const cfb = await CfbFile.open(bytesSource(new Uint8Array(readFileSync(MSO2013_SAMPLE))))
 
 		for (const stream of passwordDataSpaces()) expect(await cfb.read(stream.path), stream.path.join("/")).toEqual(stream.bytes)
 	})

@@ -3,10 +3,9 @@ import { concatMatrix, invertMatrix, type PdfMatrix, transformPoint } from "../.
 import { contentStrings } from "../../../core/pdfedit/contentStream"
 import {
 	forEachCoveredPixel,
-	foldCase,
 	glyphCore,
 	intersectRects,
-	matchTerm,
+	matchedTerm,
 	pdfTextString,
 	quadBounds,
 	quadOverlapsRect,
@@ -27,14 +26,18 @@ import {
 import type { MupdfModule } from "../protocol"
 import { removeAlternates } from "./content"
 import { pageText } from "./find"
+import { childDictRole, indirectDictRoles, type PdfDictRole } from "./sanitize"
+import { isUserNameValue, userNames } from "./structure"
 
 // The redaction verifier, run on the saved file (opened read-only in its own engine, so it may change the open
 // document in memory: it enables every optional content group and unhides every annotation, and never saves). All
 // must hold, else the first failure is returned:
 // - one revision; with sanitize, no metadata, attachments, scripts or page pieces; on redacted pages, no thumbnails
 //   or alternate images;
-// - no searched term in any page's text (all layers on) nor in any decoded string, name or non-image stream of any
-//   object (annotations, fields, bookmarks, destinations, URIs, tags, page labels, XMP, attachment names, …);
+// - every page a mark was on is still there (a scrub that broke the page tree must not pass);
+// - no searched term in any page's text (all layers on) nor in any decoded string or non-image stream of any object
+//   (annotations, fields, bookmarks, destinations, URIs, tags, page labels, XMP, attachment names, …), nor in any name
+//   a person chose (structure.ts userNames; the format's own names and keys are not searched);
 // - no word the marks covered in the structure tree (its text alternatives would still spell it out);
 // - no glyph (filled, stroked, clipping or invisible; in forms, patterns and annotation appearances) inside a mark;
 // - every pixel of every image drawn over a mark is the redaction fill (white, opaque; unpainted for stencils);
@@ -105,41 +108,45 @@ function placeOf(dict: Mupdf.PDFObject, infoNumber: number, number: number): Red
 	return "file"
 }
 
-function hasTerm(text: string, terms: readonly RedactionTerm[]): RedactionTerm | null {
-	if (text.length === 0) return null
+function scanText(text: string, scan: Scan, place: RedactionPlace): void {
+	const term = matchedTerm(text, scan.terms)
 
-	const folded = foldCase(text)
-
-	return terms.find(term => matchTerm(text, term, folded).length > 0) ?? null
+	if (term !== null) scan.fail({ code: "term", term: term.text, place })
 }
 
-// Strings, names and keys of a direct object tree (indirect references are scanned as their own objects).
+// Strings of a direct object tree, and the names in it a person chose (indirect references are scanned as their own
+// objects).
 function scanValue(value: Mupdf.PDFObject, scan: Scan, place: RedactionPlace, depth: number): void {
 	if (scan.failed() || depth > 64 || value.isIndirect()) return
 
-	let text: string | null = null
-
-	if (value.isString()) text = `${value.asString()}\n${pdfTextString(value.asByteString())}`
-	else if (value.isName()) text = value.asName()
-
-	if (text !== null) {
-		const term = hasTerm(text, scan.terms)
-
-		if (term !== null) scan.fail({ code: "term", term: term.text, place })
+	if (value.isString()) {
+		scanText(`${value.asString()}\n${pdfTextString(value.asByteString())}`, scan, place)
 
 		return
 	}
 
 	if (value.isDictionary() || value.isArray()) {
 		value.forEach((child, key) => {
-			if (typeof key === "string") {
-				const term = hasTerm(key, scan.terms)
-
-				if (term !== null) scan.fail({ code: "term", term: term.text, place })
-			}
-
-			scanValue(child, scan, place, depth + 1)
+			if (!child.isName()) scanValue(child, scan, place, depth + 1)
+			else if (!scan.failed() && isUserNameValue(value, key, child.asName())) scanText(child.asName(), scan, place)
 		})
+	}
+}
+
+// The names a person chose that only their place in the document tells (dictionary keys, tags).
+function scanUserNames(document: Mupdf.PDFDocument, scan: Scan, tagScan: Scan): void {
+	const chosen = userNames(document)
+
+	for (const { dict, fixed, place } of chosen.keys) {
+		dict.forEach((_, key) => {
+			if (typeof key === "string" && !fixed.has(key) && !scan.failed()) scanText(key, place === "tags" ? tagScan : scan, place)
+		})
+	}
+
+	for (const { holder, key, place } of chosen.values) {
+		const value = holder.get(key)
+
+		if (value.isName() && !scan.failed()) scanText(value.asName(), place === "tags" ? tagScan : scan, place)
 	}
 }
 
@@ -167,12 +174,15 @@ function checkDict(dict: Mupdf.PDFObject, scan: Scan): void {
 		scan.fail({ code: "metadata", what: "scripts" })
 }
 
-function scanDicts(value: Mupdf.PDFObject, scan: Scan, depth: number): void {
+// `role` as sanitize gives it: the keys of a resources map or name map are names, which the rules skip.
+function scanDicts(value: Mupdf.PDFObject, scan: Scan, depth: number, role: PdfDictRole): void {
 	if (scan.failed() || depth > 64 || value.isIndirect()) return
-	if (value.isDictionary()) checkDict(value, scan)
+	if (value.isDictionary() && role !== "names") checkDict(value, scan)
 	if (value.isDictionary() || value.isArray()) {
-		value.forEach(child => {
-			scanDicts(child, scan, depth + 1)
+		const dict = value.isDictionary()
+
+		value.forEach((child, key) => {
+			scanDicts(child, scan, depth + 1, dict ? childDictRole(role, key) : null)
 		})
 	}
 }
@@ -221,13 +231,13 @@ function scanStream(stream: Mupdf.PDFObject, number: number, scan: Scan, place: 
 	}
 
 	for (const reading of streamReadings(bytes)) {
-		const term = hasTerm(reading, scan.terms)
+		const term = matchedTerm(reading, scan.terms)
 
 		if (term !== null) return report(term)
 	}
 
 	for (const string of contentStrings(bytes)) {
-		const term = hasTerm(pdfTextString(string), scan.terms)
+		const term = matchedTerm(pdfTextString(string), scan.terms)
 
 		if (term !== null) return report(term)
 	}
@@ -247,14 +257,20 @@ function scanObjects(document: Mupdf.PDFDocument, scan: Scan): void {
 	const tagScan: Scan = { ...scan, terms: scan.tagTerms }
 	// The encryption dictionary and the file identifier are binary.
 	const encryption = trailer.get("Encrypt").asIndirect()
+	// Only the sanitized check reads the roles (checkDict).
+	const roles: ReadonlyMap<number, PdfDictRole> = scan.sanitized ? indirectDictRoles(document) : new Map()
 	// `reference` answers stream questions (a resolved object no longer knows it is a stream); `object` is walked.
 	const visit = (object: Mupdf.PDFObject, reference: Mupdf.PDFObject, number: number): void => {
 		if (scan.failed() || (number !== 0 && number === encryption)) return
-		if (!(object.isDictionary() || object.isArray() || object.isString() || object.isName())) return
+		// A name alone is the format's (its place is what would make it a person's).
+		if (!(object.isDictionary() || object.isArray() || object.isString())) return
+		// A cross-reference stream's dictionary is the trailer: the file identifier and, often direct, the encryption
+		// dictionary, both random binary.
+		if (object.isDictionary() && object.get("Type").asName() === "XRef") return
 
 		const place = object.isDictionary() ? placeOf(object, scan.infoNumber, number) : "file"
 
-		scanDicts(object, scan, 0)
+		scanDicts(object, scan, 0, roles.get(number) ?? null)
 
 		const target = place === "tags" ? tagScan : scan
 
@@ -269,6 +285,8 @@ function scanObjects(document: Mupdf.PDFDocument, scan: Scan): void {
 
 		visit(reference.resolve(), reference, number)
 	}
+
+	if (!scan.failed() && (scan.terms.length > 0 || tagScan.terms.length > 0)) scanUserNames(document, scan, tagScan)
 }
 
 // ——— Pages ———
@@ -710,6 +728,13 @@ export function verifyRedactedPdf(mupdf: MupdfModule, document: Mupdf.PDFDocumen
 
 	const contentPages = new Map<number, number>()
 	const pageCount = document.countPages()
+	let lastPage = -1
+
+	for (const region of manifest.regions) lastPage = Math.max(lastPage, region.page)
+
+	// A file without pages, or without a page a mark was on, lost its page tree.
+	if (pageCount === 0 || lastPage >= pageCount)
+		return { ok: false, failure: { code: "unreadable", page: Math.max(lastPage, pageCount) + 1 } }
 
 	for (let index = 0; index < pageCount; index++) {
 		const contents = document.findPage(index).get("Contents")
@@ -768,7 +793,7 @@ export function verifyRedactedPdf(mupdf: MupdfModule, document: Mupdf.PDFDocumen
 			}
 
 			if (!failed() && manifest.terms.length > 0) {
-				const term = hasTerm(pageText(page).text, manifest.terms)
+				const term = matchedTerm(pageText(page).text, manifest.terms)
 
 				if (term !== null) fail({ code: "term", term: term.text, place: "page", page: index + 1 })
 			}

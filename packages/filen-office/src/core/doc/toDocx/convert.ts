@@ -1,5 +1,5 @@
 import { appendAll } from "../../arrays"
-import type { DocModel, DocBlock, DocParagraph, DocPlaceholder, DocRun, DocStoryKind, DocTable, DocTextBox } from "../model"
+import type { DocModel, DocBlock, DocPlaceholder, DocRun, DocStoryKind, DocTable, DocTextBox } from "../model"
 import type { DocChar, DocCell, DocRevision, DocRow, DocWidth } from "../props"
 import type { DocFile } from "../read"
 import { anchorBox, isConnector, shapeGeometry } from "../../ppt/officeArt"
@@ -20,7 +20,7 @@ import {
 	type ShapeLook,
 	type Transform
 } from "./drawing"
-import { crop, inlinePicture, type MediaStore, shapeBlip } from "./media"
+import { crop, inlinePicture, type MediaStore, type PendingBlip, shapeBlip } from "./media"
 import { type ArtContent, type ArtRect, type ArtShape, artColor, booleanProperty, complexText, PID } from "./officeArt"
 import { type PropsContext, border, paragraphProperties, runProperties, shading } from "./props"
 import type { ConversionReport } from "./report"
@@ -88,7 +88,7 @@ export interface Conversion {
 	readonly sectionEnds: ReadonlyMap<number, number>
 	readonly sectionReferences: readonly HeaderReferences[]
 	// Range markup (bookmarks, comment ranges) to write before the character at each CP, and those CPs sorted.
-	readonly events: Map<number, string[]>
+	readonly events: Map<number, RangeMarkup[]>
 	readonly eventCps: readonly number[]
 	// ffData of form fields by the CP of their field begin.
 	readonly formFields: ReadonlyMap<number, string>
@@ -96,6 +96,10 @@ export interface Conversion {
 	readonly objectPreviews: ReadonlyMap<number, string>
 	// Text boxes a group's text box shows (the others show from their own anchor, or after the body).
 	readonly shownBoxes: Set<number>
+	// Text boxes being written (an anchor in a box's own text naming it again is a cycle) and written: a box's story
+	// is written once, so anchors nesting boxes cannot multiply the output.
+	readonly openBoxes: Set<number>
+	readonly writtenBoxes: Set<number>
 }
 
 const GTEXT_UNICODE = 0x00c0
@@ -118,6 +122,13 @@ function revisionAttrs(conversion: Conversion, revision: DocRevision): string {
 	const author = conversion.model.revisionAuthors[revision.author] ?? "Unknown"
 
 	return `${attr("w:id", conversion.ids.revision++)}${attr("w:author", author === "" ? "Unknown" : author)}${revision.date === undefined ? "" : attr("w:date", `${revision.date}Z`)}`
+}
+
+// Stories are contiguous in CP space: one range's end is the next one's start. `owner` is the CP where the range
+// opens, so markup at a range's end CP that opens there belongs to the range that follows.
+export interface RangeMarkup {
+	readonly owner: number
+	readonly markup: string
 }
 
 // One story range written as block content.
@@ -199,10 +210,29 @@ export class StoryWriter {
 			const cp = eventCps[this.eventIndex] ?? 0
 			const markup = events.get(cp)
 
-			if (markup !== undefined) {
-				out += markup.join("")
+			if (markup === undefined) continue
+
+			if (cp > this.start && cp < this.end) {
+				for (const entry of markup) out += entry.markup
+
 				events.delete(cp)
+				continue
 			}
+
+			// The range's first and end CP are shared with the ranges before and after it (written in either order). At the
+			// first CP the ends of ranges opened earlier belong to the range that ends there; at the end CP every range
+			// opened before it closes here (also one opened in an earlier range of the same story), and what opens there
+			// belongs to the next range. An empty range takes neither.
+			const rest: RangeMarkup[] = []
+			const from = cp === this.start ? this.start : -Infinity
+
+			for (const entry of markup) {
+				if (this.start < this.end && entry.owner >= from && entry.owner < this.end) out += entry.markup
+				else rest.push(entry)
+			}
+
+			if (rest.length === 0) events.delete(cp)
+			else events.set(cp, rest)
 		}
 
 		return out
@@ -332,7 +362,7 @@ export class StoryWriter {
 
 		if (events !== "") out.push(events)
 
-		this.content(paragraph, Math.max(paragraph.start, this.start), Math.min(contentEnd, this.end), styleIstd)
+		this.content(Math.max(paragraph.start, this.start), Math.min(contentEnd, this.end), styleIstd)
 
 		const after = this.takeEvents(Math.min(paragraph.end, this.end + 1))
 
@@ -343,7 +373,7 @@ export class StoryWriter {
 		return true
 	}
 
-	private content(paragraph: DocParagraph, from: number, to: number, styleIstd: number): void {
+	private content(from: number, to: number, styleIstd: number): void {
 		const conversion = this.conversion
 		const { model } = conversion
 		const runs = model.runs
@@ -469,7 +499,7 @@ export class StoryWriter {
 
 				// fSpec marks special characters; other text in such a run is plain text.
 				if (run.props.special && (code < 0x20 || code === 0x28)) {
-					this.special(run, cp, code, own, paragraph)
+					this.special(run, cp, code, own)
 					continue
 				}
 
@@ -522,13 +552,13 @@ export class StoryWriter {
 		}
 	}
 
-	private special(run: DocRun, cp: number, code: number, own: (markup: string) => void, paragraph: DocParagraph): void {
+	private special(run: DocRun, cp: number, code: number, own: (markup: string) => void): void {
 		const conversion = this.conversion
 
 		switch (code) {
 			case 0x01:
 			case 0x08: {
-				const drawing = this.drawing(cp, paragraph)
+				const drawing = this.drawing(cp)
 
 				if (drawing !== undefined) own(drawing)
 
@@ -622,7 +652,7 @@ export class StoryWriter {
 		}
 	}
 
-	private drawing(cp: number, paragraph: DocParagraph): string | undefined {
+	private drawing(cp: number): string | undefined {
 		const conversion = this.conversion
 		const placeholder = conversion.placeholders.get(cp)
 
@@ -636,15 +666,14 @@ export class StoryWriter {
 
 		if (placeholder.kind === "picture") {
 			const picture = inlinePicture(conversion.file, placeholder.dataOffset, conversion.art)
+			const rel = picture?.blip === undefined ? undefined : this.picture({ blip: picture.blip, source: picture.source })
 
-			if (picture === undefined || picture.blip === undefined) {
+			if (picture === undefined || rel === undefined) {
 				conversion.report.note("picture")
 
 				return this.placeholderDrawing((picture?.width ?? 1440) * EMU_PER_TWIP, (picture?.height ?? 1440) * EMU_PER_TWIP, undefined)
 			}
 
-			const media = conversion.media.add(picture.source, picture.blip)
-			const rel = this.part.add(REL_IMAGE, media.part.slice("word/".length))
 			const width = Math.max(1, picture.width) * EMU_PER_TWIP
 			const height = Math.max(1, picture.height) * EMU_PER_TWIP
 			const name = this.name("Picture", complexText(picture.shape?.properties.get(PID.description)))
@@ -664,14 +693,12 @@ export class StoryWriter {
 			return inline(pictureGraphic(rel, size, size, name, undefined), size, size, name)
 		}
 
-		return this.floating(placeholder, paragraph)
+		return this.floating(placeholder)
 	}
 
-	private floating(placeholder: Extract<DocPlaceholder, { kind: "shape" }>, paragraph: DocParagraph): string {
+	private floating(placeholder: Extract<DocPlaceholder, { kind: "shape" }>): string {
 		const conversion = this.conversion
 		const shape = conversion.art.shapes.get(placeholder.spid)
-
-		void paragraph
 
 		// The FSPA rectangle holds a shape turned by 45°–135° or 225°–315° turned by 90° (MS-ODRAW §2.3.18.5).
 		const box = anchorBox(placeholder, shape === undefined ? 0 : rotationOf(shape))
@@ -696,18 +723,12 @@ export class StoryWriter {
 			return anchor(groupGraphic(width, height, boxOf(spaceOf(shape)), members, transform), width, height, name, placement)
 		}
 
-		const picture = shape.shapeType === 75 || shape.properties.has(PID.pib) ? shapeBlip(conversion.art, shape) : undefined
+		const rel = this.shapePicture(shape)
 
-		if (picture !== undefined) {
+		if (rel !== undefined) {
 			const name = this.name("Picture", description)
 
-			return anchor(
-				pictureGraphic(this.picture(picture), width, height, name, crop(shape), transform),
-				width,
-				height,
-				name,
-				placement
-			)
+			return anchor(pictureGraphic(rel, width, height, name, crop(shape), transform), width, height, name, placement)
 		}
 
 		const drawn = this.drawn(shape, false)
@@ -727,10 +748,23 @@ export class StoryWriter {
 		)
 	}
 
-	private picture(picture: NonNullable<ReturnType<typeof shapeBlip>>): string {
+	// The relationship of a picture's media part; undefined for one that does not decode or that the media budget
+	// leaves out.
+	private picture(picture: { readonly blip: PendingBlip; readonly source: string }): string | undefined {
 		const media = this.conversion.media.add(picture.source, picture.blip)
 
-		return this.part.add(REL_IMAGE, media.part.slice("word/".length))
+		return media === undefined ? undefined : this.part.add(REL_IMAGE, media.part.slice("word/".length))
+	}
+
+	// What a picture shape (or a shape filled with a picture) shows; undefined to draw it as a shape. A shape whose
+	// picture is not written loses it, counted (a picture frame is counted where nothing draws it).
+	private shapePicture(shape: ArtShape): string | undefined {
+		const picture = shape.shapeType === 75 || shape.properties.has(PID.pib) ? shapeBlip(this.conversion.art, shape) : undefined
+		const rel = picture === undefined ? undefined : this.picture(picture)
+
+		if (picture !== undefined && rel === undefined && shape.shapeType !== 75) this.conversion.report.note("picture")
+
+		return rel
 	}
 
 	// What a shape other than a picture or group draws: its geometry with its text box's story or its WordArt text;
@@ -765,9 +799,21 @@ export class StoryWriter {
 		if (box !== undefined) {
 			if (member) conversion.shownBoxes.add(shape.spid)
 
-			content = new StoryWriter(conversion, this.part, box.story.kind, box.story.start, box.story.end).write()
+			if (conversion.openBoxes.has(shape.spid) || conversion.writtenBoxes.has(shape.spid)) {
+				// A box reached again (from its own text, or a second anchor): the shape without its text, counted.
+				conversion.report.note("shape")
+			} else {
+				conversion.openBoxes.add(shape.spid)
+				conversion.writtenBoxes.add(shape.spid)
 
-			if (!content.includes("<w:p>") && !content.includes("<w:p/>")) content += "<w:p/>"
+				try {
+					content = new StoryWriter(conversion, this.part, box.story.kind, box.story.start, box.story.end).write()
+				} finally {
+					conversion.openBoxes.delete(shape.spid)
+				}
+
+				if (!content.includes("<w:p>") && !content.includes("<w:p/>")) content += "<w:p/>"
+			}
 		}
 
 		return {
@@ -795,10 +841,10 @@ export class StoryWriter {
 			}
 
 			const description = complexText(member.properties.get(PID.description))
-			const picture = member.shapeType === 75 || member.properties.has(PID.pib) ? shapeBlip(this.conversion.art, member) : undefined
+			const rel = this.shapePicture(member)
 
-			if (picture !== undefined) {
-				out += pictureElement(this.picture(picture), box, this.name("Picture", description), crop(member), transform)
+			if (rel !== undefined) {
+				out += pictureElement(rel, box, this.name("Picture", description), crop(member), transform)
 				continue
 			}
 
@@ -868,7 +914,7 @@ export class StoryWriter {
 					if (left !== undefined && right !== undefined && right > left) span = right - left
 				}
 
-				// Horizontally merged cells (§2.9.? TCGRF horzMerge 2/3) join the first of their range.
+				// Horizontally merged cells (TCGRF horzMerge 2, 3) join the first of their range.
 				const previous = cells.at(-1)
 
 				if (cell !== undefined && (cell.horzMerge === 2 || cell.horzMerge === 3) && previous !== undefined) {
@@ -1112,8 +1158,7 @@ function shapeLook(shape: ArtShape, geometry: string, textBox: boolean): ShapeLo
 	const lined = booleanProperty(props, PID.lineStyleBooleans, 3) ?? true
 	// Lines and connectors (MSOSPT 20, 32–40) have no inside to fill.
 	const line = shape.shapeType === 20 || isConnector(shape.shapeType)
-	const fill =
-		filled && !line ? (artColor(props.get(PID.fillColor)?.value) ?? (props.has(PID.fillColor) ? 0xffffff : 0xffffff)) : undefined
+	const fill = filled && !line ? (artColor(props.get(PID.fillColor)?.value) ?? 0xffffff) : undefined
 
 	return {
 		geometry,

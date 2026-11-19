@@ -19,10 +19,12 @@ import {
 	type LayoutEvent,
 	type LayoutOptions
 } from "@filen/office/core/docx"
+import { Area } from "../core/docx/layout/flow"
 import { CORPUS_DIR } from "./corpusDir"
 import { NUMBERING_PART, STYLES_PART } from "./docxEditFixtures"
 import { buildDocx, type SyntheticDocx } from "./docxSynthetic"
 import { HmtxMeasurer, layOut, layoutDigest, loadDocx, pageLines, type LineInfo } from "./layoutFixtures"
+import { finishLayout, pageDigest, pagedEditor } from "./pagedFixtures"
 import { wordLikeDocument } from "./wordLike"
 import { ZIP_ENTRY_TIME } from "./zipTime"
 import { budget, cpuMs } from "./timing"
@@ -103,6 +105,10 @@ const NUMBERING = {
 }
 
 describe("pages", () => {
+	it("allocates no page output for a new area until its owner assigns one", () => {
+		expect(new Area().page).toBe(new Area().page)
+	})
+
 	it("fills pages line by line and delivers them incrementally", async () => {
 		const loaded = await loadDocx(buildDocx({ body: lines(150) + SECTION }))
 		const events: LayoutEvent[] = []
@@ -1234,6 +1240,76 @@ describe("notes", () => {
 		expect(texts(body(result, 1)).at(-1)).toBe("two1")
 	})
 
+	it("numbers a reference tried at a page bottom and moved on from the page it lands on", async () => {
+		const note = (id: number, text: string, extra = ""): string =>
+			`<w:footnote w:id="${String(id)}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> ${text}</w:t></w:r></w:p>${extra}</w:footnote>`
+		const result = await layout({
+			body:
+				`<w:p><w:r><w:t>one</w:t></w:r>${reference(1)}</w:p>` +
+				lines(52) +
+				`<w:p><w:r><w:t>two</w:t></w:r>${reference(2)}</w:p>` +
+				`<w:p><w:r><w:t>three</w:t></w:r>${reference(3)}</w:p>`,
+			footnotes:
+				footnotes.slice(0, footnotes.indexOf('<w:footnote w:id="1">')) + note(1, "a") + note(2, "b", lines(3)) + note(3, "c"),
+			settings: '<w:footnotePr><w:numRestart w:val="eachPage"/><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>'
+		})
+		const notes = pageLines(result, 1)
+			.filter(line => line.region === Region.FOOTNOTE && /^\d/.test(line.text))
+			.map(line => line.text)
+
+		expect(texts(body(result, 0))[0]).toBe("one1")
+		expect(texts(body(result, 0))).not.toContain("two2")
+		expect(texts(body(result, 1))).toEqual(["two1", "three2"])
+		expect(notes).toEqual(["1 b", "2 c"])
+	})
+
+	it("numbers a reference in a paragraph with a page break before from the page it lands on", async () => {
+		const note = (id: number, text: string): string =>
+			`<w:footnote w:id="${String(id)}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> ${text}</w:t></w:r></w:p></w:footnote>`
+		const result = await layout({
+			body:
+				`<w:p><w:r><w:t>one</w:t></w:r>${reference(1)}</w:p>` +
+				lines(5) +
+				`<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>two</w:t></w:r>${reference(2)}</w:p>` +
+				`<w:p><w:r><w:t>three</w:t></w:r>${reference(3)}</w:p>`,
+			footnotes: footnotes.slice(0, footnotes.indexOf('<w:footnote w:id="1">')) + note(1, "a") + note(2, "b") + note(3, "c"),
+			settings: '<w:footnotePr><w:numRestart w:val="eachPage"/><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>'
+		})
+		const notes = pageLines(result, 1)
+			.filter(line => line.region === Region.FOOTNOTE && /^\d/.test(line.text))
+			.map(line => line.text)
+
+		expect(texts(body(result, 0))[0]).toBe("one1")
+		expect(texts(body(result, 1))).toEqual(["two1", "three2"])
+		expect(notes).toEqual(["1 b", "2 c"])
+	})
+
+	it("gives a page break before paragraph with a PAGE field the same page when layout restarts at its page", async () => {
+		const note = (id: number, text: string): string =>
+			`<w:footnote w:id="${String(id)}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> ${text}</w:t></w:r></w:p></w:footnote>`
+		const { editor } = await pagedEditor(
+			buildDocx({
+				body:
+					`<w:p><w:r><w:t>one</w:t></w:r>${reference(1)}</w:p>` +
+					lines(5) +
+					'<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t xml:space="preserve">two p</w:t></w:r><w:fldSimple w:instr=" PAGE "><w:r><w:t>9</w:t></w:r></w:fldSimple>' +
+					`${reference(2)}</w:p>` +
+					`<w:p><w:r><w:t>three</w:t></w:r>${reference(3)}</w:p>` +
+					SECTION,
+				footnotes: footnotes.slice(0, footnotes.indexOf('<w:footnote w:id="1">')) + note(1, "a") + note(2, "b") + note(3, "c"),
+				settings: '<w:footnotePr><w:numRestart w:val="eachPage"/><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>'
+			})
+		)
+		const paged = editor.layout
+		const first = pageDigest(paged)
+
+		paged.beginEdit(1, undefined)
+		await finishLayout(paged)
+
+		expect(pageDigest(paged)).toEqual(first)
+		editor.dispose()
+	})
+
 	it("collects endnotes at the end of the document", async () => {
 		const result = await layout({
 			body: '<w:p><w:r><w:t>text</w:t></w:r><w:r><w:endnoteReference w:id="1"/></w:r></w:p>',
@@ -1373,6 +1449,34 @@ describe("objects", () => {
 		expect(inside?.top).toBe(500)
 	})
 
+	// Text boxes inside one another, each anchored to a character after text, `depth` levels deep.
+	const nested = (level: number, depth: number): string =>
+		level > depth
+			? ""
+			: '<w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:anchor behindDoc="0" allowOverlap="1" layoutInCell="1" relativeHeight="1" simplePos="0" locked="0"><wp:simplePos x="0" y="0"/>' +
+				'<wp:positionH relativeFrom="character"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="line"><wp:posOffset>0</wp:posOffset></wp:positionV>' +
+				`<wp:extent cx="1905000" cy="952500"/><wp:wrapNone/><wp:docPr id="${String(level + 2)}" name="t"/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">` +
+				`<wps:wsp><wps:txbx><w:txbxContent><w:p><w:r><w:t xml:space="preserve">level ${String(level)} </w:t></w:r>${nested(level + 1, depth)}</w:p></w:txbxContent></wps:txbx><wps:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/></wps:wsp>` +
+				"</a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent></w:r>"
+	const levels = (result: DocumentLayout): string[] =>
+		pageLines(result, 0)
+			.filter(line => line.region === Region.TEXTBOX)
+			.map(line => line.text.replace(/[^\w ]/g, "").trim())
+
+	it("lays out every level of text boxes nested a few deep", async () => {
+		const result = await layout({ body: `<w:p><w:r><w:t xml:space="preserve">body </w:t></w:r>${nested(1, 3)}</w:p>` })
+
+		expect(new Set(levels(result))).toEqual(new Set(["level 1", "level 2", "level 3"]))
+	})
+
+	it("leaves text boxes nested beyond the cap empty, in bounded time", async () => {
+		const started = cpuMs()
+		const result = await layout({ body: `<w:p><w:r><w:t xml:space="preserve">body </w:t></w:r>${nested(1, 20)}</w:p>` })
+
+		expect(new Set(levels(result))).toEqual(new Set(Array.from({ length: 8 }, (_, k) => `level ${String(k + 1)}`)))
+		expect(cpuMs() - started).toBeLessThan(budget(3000))
+	})
+
 	it("sizes equations from their structure", async () => {
 		const run = (text: string): string => `<m:r><m:t>${text}</m:t></m:r>`
 		const fraction = `<m:f><m:num>${run("a+b")}</m:num><m:den>${run("c")}</m:den></m:f>`
@@ -1451,5 +1555,29 @@ describe("objects", () => {
 		// Lines beside the letter start right of it, later lines at the margin.
 		expect(all[1]?.x).toBeGreaterThan(96 + 20)
 		expect(all[all.length - 1]?.x).toBe(96)
+	})
+
+	const cap = (size: number): string =>
+		p(
+			"D",
+			'<w:framePr w:dropCap="drop" w:lines="3" w:wrap="around" w:vAnchor="text" w:hAnchor="text"/>',
+			`<w:sz w:val="${String(size)}"/>`
+		)
+
+	it("moves a drop cap without room for its height on with its paragraph", async () => {
+		const result = await layout({ body: lines(54) + cap(72) + p(words(120)) })
+		const first = body(result, 0)
+		const second = body(result, 1)
+
+		expect(texts(first)).toEqual(texts(first).filter(text => text.startsWith("line ")))
+		expect(Math.max(...first.map(line => line.bottom))).toBeLessThanOrEqual(96 + 864 + 0.01)
+		expect(second[0]?.text).toBe("D")
+		expect(second[1]?.top).toBe(second[0]?.top)
+	})
+
+	it("places a drop cap taller than the page at the top of an empty one", async () => {
+		const result = await layout({ body: cap(1600) + p(words(20)) })
+
+		expect(body(result, 0)[0]?.text).toBe("D")
 	})
 })

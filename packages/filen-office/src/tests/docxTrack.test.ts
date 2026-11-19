@@ -169,6 +169,27 @@ describe("docx tracked changes: recording", () => {
 		expect(texts(session)[0]).toMatch(/^\[\+xz\+\]one/)
 	})
 
+	it("deletes a whole character outside the BMP beyond deleted text, backward and forward", async () => {
+		const deleted = '<w:del w:id="11" w:author="Bob" w:date="2026-01-01T00:00:00Z"><w:r><w:delText>gone</w:delText></w:r></w:del>'
+		const doc = await tracked({ body: `<w:p>${run("A\u{1F600}")}${deleted}${run("\u{1F600}B")}</w:p>` })
+		const session = doc.session
+		const isDeleted = (pos: number): boolean => marks.deletion.isInSet(session.state.doc.nodeAt(pos)?.marks ?? []) !== undefined
+
+		// "A" 1, the first emoji 2-3, "gone" 4-7, the second emoji 8-9, "B" 10. Backspace after the deleted text.
+		select(session, 8)
+		session.dispatch(session.state.tr.delete(7, 8))
+		expect(isDeleted(2)).toBe(true)
+		expect(isDeleted(1)).toBe(false)
+		expect(session.state.selection.head).toBe(2)
+
+		// Delete before the deleted text: the emoji after it.
+		select(session, 4)
+		session.dispatch(session.state.tr.delete(4, 5))
+		expect(isDeleted(8)).toBe(true)
+		expect(isDeleted(10)).toBe(false)
+		expect(session.state.doc.textContent).toBe("A\u{1F600}gone\u{1F600}B")
+	})
+
 	it("puts what replaces a selection after the deleted text", async () => {
 		const doc = await tracked({ body: p("one two three") })
 		const session = doc.session
@@ -948,11 +969,12 @@ function targets(doc: Node, count: number): number[] {
 	return out.slice(0, count).reverse()
 }
 
-// Tracked edits from the end of the document back (positions hold whether deleted text stays or not).
-function corpusEdits(session: DocxEditorSession): void {
+// Tracked edits from the end of the document back (positions hold whether deleted text stays or not). False when
+// the document has fewer than four targets and nothing was edited.
+function corpusEdits(session: DocxEditorSession): boolean {
 	const [a, b, c, d] = targets(session.state.doc, 4)
 
-	if (a === undefined || b === undefined || c === undefined || d === undefined) return
+	if (a === undefined || b === undefined || c === undefined || d === undefined) return false
 
 	select(session, a + 1, a + 5)
 	session.execute({ type: "format.bold" })
@@ -961,17 +983,33 @@ function corpusEdits(session: DocxEditorSession): void {
 	session.dispatch(session.state.tr.split(b + 4))
 	session.dispatch(session.state.tr.insertText("NEW ", c + 1))
 	session.dispatch(session.state.tr.delete(d + 2, d + 5))
+
+	return true
 }
 
 const CORPUS = CORPUS_DIR
+// TRACKED_FILES without four target paragraphs, which corpusEdits leaves alone.
+const UNEDITED_FILES = [
+	"oxpt__RP015-MoveFrom-MoveTo.docx",
+	"oxsdk__trackChange.docx",
+	"lo__tdf104797.docx",
+	"lo__tdf151954.docx",
+	"lo__TC-table-DnD-move.docx",
+	"lo__redline-range-comment.docx"
+]
 
 describe.skipIf(!existsSync(join(CORPUS, "docx", TRACKED_FILES[0] as string)))("docx tracked changes over the corpus", () => {
 	it("rejecting everything after tracked edits gives what rejecting everything gives, and both save", { timeout: 300_000 }, async () => {
+		let checked = 0
+		let edits = 0
+
 		for (const name of TRACKED_FILES) {
 			const bytes = new Uint8Array(readFileSync(join(CORPUS, "docx", name)))
 			const plain = await openBytes(bytes)
 
 			if (plain.context.gate.length > 0) continue
+
+			checked++
 
 			const reference = new DocxEditorSession(plain.context)
 
@@ -984,8 +1022,18 @@ describe.skipIf(!existsSync(join(CORPUS, "docx", TRACKED_FILES[0] as string)))("
 
 			const session = new DocxEditorSession(edited.context)
 
-			corpusEdits(session)
-			expect(storyReviewIndex(session).revisionCount, name).toBeGreaterThan(0)
+			const before = storyReviewIndex(session).revisionCount
+
+			const ran = corpusEdits(session)
+
+			expect(ran, name).toBe(!UNEDITED_FILES.includes(name))
+
+			if (ran) {
+				edits++
+				// The edits were recorded as tracked changes.
+				expect(storyReviewIndex(session).revisionCount, name).toBeGreaterThan(before)
+			}
+
 			await expect(save(edited, [session]), name).resolves.toBeDefined()
 			session.dispatch(resolveChanges(session, storyReviewIndex(session), { all: true }, false).tr ?? session.state.tr)
 			if (process.env["DBG"] !== undefined) {
@@ -1001,14 +1049,22 @@ describe.skipIf(!existsSync(join(CORPUS, "docx", TRACKED_FILES[0] as string)))("
 			expect(storyReviewIndex(session).revisionCount, name).toBe(storyReviewIndex(reference).revisionCount)
 			await expect(save(edited, [session]), name).resolves.toBeDefined()
 		}
+
+		expect(checked).toBeGreaterThan(0)
+		expect(edits).toBeGreaterThan(0)
 	})
 
 	it("accepting everything after tracked edits gives the untracked edits with everything accepted", { timeout: 300_000 }, async () => {
+		let checked = 0
+		let edits = 0
+
 		for (const name of TRACKED_FILES) {
 			const bytes = new Uint8Array(readFileSync(join(CORPUS, "docx", name)))
 			const plain = await openBytes(bytes)
 
 			if (plain.context.gate.length > 0) continue
+
+			checked++
 
 			setIdentity(plain.context, "Ann")
 			plain.context.review.tracking = false
@@ -1016,7 +1072,7 @@ describe.skipIf(!existsSync(join(CORPUS, "docx", TRACKED_FILES[0] as string)))("
 			const untracked = new DocxEditorSession(plain.context)
 
 			untracked.dispatch(resolveChanges(untracked, storyReviewIndex(untracked), { all: true }, true).tr ?? untracked.state.tr)
-			corpusEdits(untracked)
+			const untrackedEdited = corpusEdits(untracked)
 			// What the first pass left (marks that could not join then) is resolved alike.
 			untracked.dispatch(resolveChanges(untracked, storyReviewIndex(untracked), { all: true }, true).tr ?? untracked.state.tr)
 
@@ -1028,7 +1084,13 @@ describe.skipIf(!existsSync(join(CORPUS, "docx", TRACKED_FILES[0] as string)))("
 			const session = new DocxEditorSession(edited.context)
 
 			session.dispatch(resolveChanges(session, storyReviewIndex(session), { all: true }, true).tr ?? session.state.tr)
-			corpusEdits(session)
+			const trackedEdited = corpusEdits(session)
+
+			expect(trackedEdited, name).toBe(untrackedEdited)
+			expect(trackedEdited, name).toBe(!UNEDITED_FILES.includes(name))
+
+			if (trackedEdited) edits++
+
 			session.dispatch(resolveChanges(session, storyReviewIndex(session), { all: true }, true).tr ?? session.state.tr)
 
 			if (process.env["DBG"] !== undefined) {
@@ -1042,6 +1104,9 @@ describe.skipIf(!existsSync(join(CORPUS, "docx", TRACKED_FILES[0] as string)))("
 			expect(texts(session), name).toEqual(texts(untracked))
 			await expect(save(edited, [session]), name).resolves.toBeDefined()
 		}
+
+		expect(checked).toBeGreaterThan(0)
+		expect(edits).toBeGreaterThan(0)
 	})
 })
 

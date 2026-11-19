@@ -77,6 +77,23 @@ describe.skipIf(PRESENT.length === 0)("OOXML presentation corpus", () => {
 		expect(opened.length).toBe(PRESENT.filter(file => file.password === undefined).length)
 	})
 
+	it("has the hidden flags at open, before any slide is parsed", { timeout: 120_000 }, async () => {
+		const { opened } = await corpus()
+
+		expect(opened.length).toBeGreaterThan(0)
+
+		for (const entry of opened) {
+			const fresh = await openPptx(bytesSource(entry.bytes))
+
+			if (fresh.kind !== "opened") throw new Error(fresh.reason)
+
+			expect(
+				fresh.deck.slides.map(ref => fresh.parts.hiddenAtOpen.has(ref)),
+				entry.path
+			).toEqual(entry.deck.slides.map(ref => node(entry.deck, ref)?.hidden))
+		}
+	})
+
 	describe.skipIf(CACHE === undefined)("against LibreOffice 7.5", () => {
 		it("has the slide count, hidden flags and slide size of every deck", { timeout: 120_000 }, async () => {
 			const { opened } = await corpus()
@@ -97,21 +114,6 @@ describe.skipIf(PRESENT.length === 0)("OOXML presentation corpus", () => {
 			}
 
 			expect(compared.length).toBe(opened.length)
-		})
-
-		it("has the hidden flags at open, before any slide is parsed", { timeout: 120_000 }, async () => {
-			const { opened } = await corpus()
-
-			for (const entry of opened) {
-				const fresh = await openPptx(bytesSource(entry.bytes))
-
-				if (fresh.kind !== "opened") throw new Error(fresh.reason)
-
-				expect(
-					fresh.deck.slides.map(ref => fresh.parts.hiddenAtOpen.has(ref)),
-					entry.path
-				).toEqual(entry.deck.slides.map(ref => node(entry.deck, ref)?.hidden))
-			}
 		})
 
 		it("names each slide's layout as LibreOffice names its master page", { timeout: 120_000 }, async () => {

@@ -11,7 +11,8 @@ import {
 	type SheetCellPointer,
 	type SheetEntryVerdict,
 	type SheetGridExtension,
-	type SheetGridHandle
+	type SheetGridHandle,
+	type SheetGridLayer
 } from "../react/sheet/index"
 import { RecordingCanvas } from "./sheetGridCanvas"
 import { IMMEDIATE, buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
@@ -407,5 +408,35 @@ describe("grid extensions", () => {
 		const box = decorated.handle.cellRect({ row: 0, col: 0 })
 
 		expect((one?.args[1] as number) - (box?.x ?? 0)).toBeGreaterThanOrEqual(40)
+	})
+
+	it("keep the cells canvas over a chrome-only frame with a pure cells layer, and draw it again with any other", async () => {
+		for (const pure of [true, undefined]) {
+			const painted = vi.fn()
+			const layer: SheetGridLayer = { id: "layer", stage: "cells", ...(pure !== undefined && { pure }), paint: painted }
+			const mounted = await mount([{ id: "layered", layers: [layer] }])
+
+			painted.mockClear()
+			// A selection move changes the chrome only.
+			select(mounted, 1, 1)
+
+			expect(painted).toHaveBeenCalledTimes(pure === true ? 0 : 1)
+
+			// A layout change (a row resized) draws the cells again either way.
+			painted.mockClear()
+			await act(async () => {
+				await mounted.model.command({
+					type: "axis.resize",
+					sheet: 0,
+					axis: "rows",
+					indices: Uint32Array.of(0),
+					sizes: Float32Array.of(40)
+				})
+			})
+			await settle()
+			mounted.paint()
+
+			expect(painted).toHaveBeenCalled()
+		}
 	})
 })

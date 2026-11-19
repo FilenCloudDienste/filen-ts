@@ -8,7 +8,7 @@ import { G } from "./xml"
 // master lists, sizes, the default text style, embedded fonts and the write reservation.
 
 export interface ListedPart {
-	// p:sldId/@id, p:sldMasterId/@id (absent for notes and handout masters).
+	// p:sldId/@id or p:sldMasterId/@id; 0 when the entry has none.
 	readonly id: number
 	readonly part: string
 }

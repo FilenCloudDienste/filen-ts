@@ -117,11 +117,11 @@ export function effectText(text: DrawingText, effect: ColorEffect): DrawingText 
 	}
 }
 
-// An embedded bitmap with the picture's effects: the colour change applied to its pixels (a JPEG keeps
-// its own, having no exact colours to match), the rest as fields the renderer applies.
 // Recoloured bitmaps per source bytes and colour change: a picture placed many times is recoloured once.
 const recolourCache = new WeakMap<Uint8Array, Map<string, Uint8Array | null>>()
 
+// An embedded bitmap with the picture's effects: the colour change applied to its pixels (a JPEG keeps
+// its own, having no exact colours to match), the rest as fields the renderer applies.
 export function effectImage(image: DrawingImage, picture: DrawingImage, budget: PixelBudget): DrawingImage {
 	let bytes = image.bytes
 	let format = image.format

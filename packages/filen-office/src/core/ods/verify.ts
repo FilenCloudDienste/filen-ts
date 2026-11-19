@@ -1,10 +1,12 @@
 import type { ByteSource } from "../opc/io"
 import type { InflateHook } from "../opc/zipReader"
 import { RenderStyleTable } from "../sheet/session"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../sheet/protocol"
+import { cellName } from "../sheet/refs/cellRef"
 import { XlsxDocument } from "../xlsx/edit/document"
 import { ColFlag, RowFlag, type XlsxSheetModel } from "../xlsx/model/types"
 import { openOds } from "./open"
-import { sameContent } from "./write/cells"
+import { sameContent, Value } from "./write/cells"
 import { sameShown } from "./write/dataStyle"
 import { SheetView } from "./write/sheet"
 import { currentLinks, currentNotes, currentSection, currentValidations, sectionText } from "./write/features"
@@ -15,15 +17,19 @@ import { sameView } from "./write/settings"
 import { printRanges } from "./write/content"
 import { odsSource } from "./source"
 import { cellPrint, unheldDifference } from "./unheld"
+import { sourceTableOf } from "./workbook"
 import type { SheetStyles } from "../sheet/style/resolve"
 import { runSliced, type SliceClock } from "../slicing"
 import { canonicalFormula } from "./formula/toOf"
 
 // The proof of an OpenDocument save: the written file read back by the reader, every sheet compared with the
 // session's model as the cells show (values, formulas, formats as they look), rows, columns and merges. A save whose
-// file reads back otherwise is refused, naming the first difference.
+// file reads back otherwise is refused, naming the first difference. The message (which a refused save answers, and
+// hosts log) names where and what kind of difference only, never a cell's text or formula: what the two sides held is
+// on `detail`, for tests and debugging, which a save does not pass on.
 
-export type OdsProof = { readonly ok: true } | { readonly ok: false; readonly message: string }
+export type OdsRefusal = { readonly ok: false; readonly message: string; readonly detail?: string }
+export type OdsProof = { readonly ok: true } | OdsRefusal
 
 // What a format shows of itself, but its number format (compared by what values show through it).
 function lookKey(styles: SheetStyles, xf: number): string {
@@ -87,10 +93,13 @@ function rowBounds(view: SheetView, into: Set<number>): void {
 		into.add(row + 1)
 	}
 
-	view.model.styleRuns?.forEach({ startRow: 0, startCol: 0, endRow: 0xfffff, endCol: 0x3fff }, (startRow, _c, endRow) => {
-		into.add(startRow)
-		into.add(endRow + 1)
-	})
+	view.model.styleRuns?.forEach(
+		{ startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: SHEET_MAX_COLS - 1 },
+		(startRow, _c, endRow) => {
+			into.add(startRow)
+			into.add(endRow + 1)
+		}
+	)
 
 	for (const run of view.model.rowRuns ?? []) {
 		into.add(run.first)
@@ -99,18 +108,15 @@ function rowBounds(view: SheetView, into: Set<number>): void {
 }
 
 // A generator: it yields after each row, for the caller to give the host a turn when the slice is up.
-function* compareSheet(name: string, a: SheetView, b: SheetView, styles: Styles): Generator<void, string | null> {
+function* compareSheet(name: string, a: SheetView, b: SheetView, styles: Styles): Generator<void, string | OdsRefusal | null> {
 	const bounds = new Set<number>([0])
 
 	rowBounds(a, bounds)
 	rowBounds(b, bounds)
 
 	const rows = [...bounds].sort((x, y) => x - y)
-	const last = Math.max(rows[rows.length - 1] ?? 0, 0)
 
 	for (const row of rows) {
-		if (row > last) break
-
 		const propsA = a.rowProps(row)
 		const propsB = b.rowProps(row)
 		const mask = RowFlag.HIDDEN | RowFlag.OUTLINE_MASK
@@ -130,12 +136,17 @@ function* compareSheet(name: string, a: SheetView, b: SheetView, styles: Styles)
 		}
 
 		for (const col of [...cols].sort((x, y) => x - y)) {
-			if (col > 0x3fff) continue
+			if (col > SHEET_MAX_COLS - 1) continue
 
 			const left = a.cell(row, col)
 			const right = b.cell(row, col)
 
-			if (!sameContent(left, right)) return `${name} ${cellName(row, col)}: ${describe(left)} → ${describe(right)}`
+			if (!sameContent(left, right))
+				return {
+					ok: false,
+					message: `${name} ${cellName(row, col)}: ${contentDifference(left, right)}`,
+					detail: `${describe(left)} → ${describe(right)}`
+				}
 			if (!styles.same(left.xf, right.xf)) return `${name} ${cellName(row, col)}: format`
 		}
 
@@ -152,7 +163,7 @@ function* compareSheet(name: string, a: SheetView, b: SheetView, styles: Styles)
 		}
 
 	for (const col of colBounds) {
-		if (col > 0x3fff) continue
+		if (col > SHEET_MAX_COLS - 1) continue
 
 		const left = column(a, col)
 		const right = column(b, col)
@@ -179,20 +190,22 @@ export function column(view: SheetView, col: number): { px: number; hidden: bool
 	return { px: view.defaultColumnPx(), hidden: false, style: 0 }
 }
 
-function cellName(row: number, col: number): string {
-	let text = ""
+type ComparedCell = Parameters<typeof sameContent>[0]
 
-	for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
+// What kind of difference two cells sameContent tells apart have, without what either holds (lengths at most).
+function contentDifference(a: ComparedCell, b: ComparedCell): string {
+	if (a.value !== b.value) return `value kind ${a.value} → ${b.value}`
+	if ((a.formula === null) !== (b.formula === null)) return a.formula === null ? "formula read back" : "formula not read back"
+	if (a.formula !== null && b.formula !== null && a.formula !== b.formula && canonicalFormula(a.formula) !== canonicalFormula(b.formula))
+		return `formula (length ${a.formula.length} → ${b.formula.length})`
+	if ((a.value === Value.NUMBER || a.value === Value.BOOLEAN) && !Object.is(a.number, b.number) && a.number !== b.number) return "number"
+	if ((a.value === Value.TEXT || a.value === Value.ERROR || a.value === Value.RICH) && a.text !== b.text)
+		return `text (length ${a.text.length} → ${b.text.length})`
 
-	return `${text}${row + 1}`
+	return "array or text runs"
 }
 
-function describe(cell: {
-	readonly value: number
-	readonly number: number
-	readonly text: string
-	readonly formula: string | null
-}): string {
+function describe(cell: ComparedCell): string {
 	return JSON.stringify([cell.value, cell.number, cell.text.slice(0, 40), cell.formula?.slice(0, 60) ?? null])
 }
 
@@ -242,7 +255,7 @@ function namesKey(document: XlsxDocument): string {
 export async function verifyOds(document: XlsxDocument, written: ByteSource, inflate?: InflateHook, clock?: SliceClock): Promise<OdsProof> {
 	const opened = await openOds(written, { ...(inflate !== undefined && { inflate }), ...(clock !== undefined && { slicing: clock }) })
 
-	if (!opened.ok) return { ok: false, message: `The save does not open: ${opened.reason}: ${opened.message}` }
+	if (!opened.ok) return { ok: false, message: `The save does not open: ${opened.reason}`, detail: opened.message }
 
 	const again = new XlsxDocument(opened.workbook, new RenderStyleTable(), { kind: document.kind })
 	const styles = new Styles(document.styles, again.styles)
@@ -269,7 +282,7 @@ export async function verifyOds(document: XlsxDocument, written: ByteSource, inf
 			clock
 		)
 
-		if (difference !== null) return { ok: false, message: difference }
+		if (difference !== null) return typeof difference === "string" ? { ok: false, message: difference } : difference
 
 		if (!sameView(modelA.view, modelB.view)) return { ok: false, message: `${entryA.name}: view (panes, position, active cell, zoom)` }
 		if (protectionKey(modelA.protection) !== protectionKey(modelB.protection))
@@ -306,12 +319,8 @@ export async function verifyOds(document: XlsxDocument, written: ByteSource, inf
 				return { ok: false, message: `${entryA.name}: filter` }
 
 			// Conditional formats of a source table (a new one's are a conversion's, which reports what it could not say).
-			const table = sourceA.tables[entryA.id]
-
 			if (
-				table !== undefined &&
-				table.id === entryA.id &&
-				"rowAxis" in modelA &&
+				sourceTableOf(sourceA, entryA) !== null &&
 				!sameConditions(
 					currentConditions(document.workbook, modelA),
 					document.workbook.styles.dxfs,
@@ -345,7 +354,8 @@ export async function verifyOds(document: XlsxDocument, written: ByteSource, inf
 			cellPrint(document.workbook.sheets.find(entry => entry.name === sheet)?.model, document.workbook.sharedStrings, row, col)
 		)
 
-		if (stale !== null) return { ok: false, message: stale }
+		// Its difference may quote a formula or a range as written (string literals in it): on detail only.
+		if (stale !== null) return { ok: false, message: "References kept outside the cells read back otherwise", detail: stale }
 	}
 
 	return { ok: true }

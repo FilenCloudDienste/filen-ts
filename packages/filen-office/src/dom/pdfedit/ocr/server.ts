@@ -1,5 +1,5 @@
 import { OCR_ORIENTATION_CONFIDENCE, OCR_STRIP_DPI, type QuarterTurns } from "../../../core/pdfedit/ocrGeometry"
-import { isFatalEngineError } from "../server"
+import { isFatalEngineError } from "../context"
 import { textStrip, rotateGray, type GrayImage } from "./pixels"
 import { isToOcr, type FromOcr, type OcrFailure, type OcrModel, type OcrOp, type OcrPageResult, type OcrRecogniseArgs } from "./protocol"
 import { wasmMemoryOf, type TessBaseApi, type TesseractCore, type TesseractModule, type WasmMemoryLike } from "./tesseract"

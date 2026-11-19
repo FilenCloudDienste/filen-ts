@@ -11,7 +11,7 @@ import { buildFixture, openWorkbook } from "./xlsxWriteFixtures"
 
 const ROWS = 40_000
 
-async function draftOfRows(): Promise<XlsxDraft> {
+async function buildDraft(): Promise<XlsxDraft> {
 	const workbook = await openWorkbook(buildFixture({ sheets: [{ name: "Data", body: "<sheetData/>" }] }))
 	const model = await workbook.load(0)
 
@@ -21,6 +21,13 @@ async function draftOfRows(): Promise<XlsxDraft> {
 	workbook.changes.sheetRows(0)
 
 	return writeXlsx({ opc: workbook.opc, workbook })
+}
+
+// Built once, by whichever test runs first: the check only reads a draft, and tests derive variants with tampered().
+let shared: Promise<XlsxDraft> | undefined
+
+function draftOfRows(): Promise<XlsxDraft> {
+	return (shared ??= buildDraft())
 }
 
 // The draft with rows at `at` given new bytes.

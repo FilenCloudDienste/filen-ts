@@ -11,7 +11,7 @@ import { nodeFontAssets, pdfBytes } from "./sheetPdfFixtures"
 
 async function page(draw: (canvas: PdfCanvas, shapes: PdfShapeCache) => Promise<void> | void): Promise<string> {
 	const writer = await PdfWriter.create({ tagged: true, deterministic: true, deflate: null })
-	const fonts = new PdfFontSet({ assets: nodeFontAssets, deterministic: true })
+	const fonts = new PdfFontSet({ assets: nodeFontAssets })
 	const shapes = new PdfShapeCache(fonts)
 	const probe = new PdfCanvas({ page: null, shapes, base: [1, 0, 0, 1, 0, 0], gray: false, tagged: true })
 
@@ -181,7 +181,7 @@ describe("drawings on a PDF page", () => {
 		list.height = 50
 
 		const writer = await PdfWriter.create({ deterministic: true, deflate: null })
-		const fonts = new PdfFontSet({ assets: nodeFontAssets, deterministic: true })
+		const fonts = new PdfFontSet({ assets: nodeFontAssets })
 		const pdfPage = writer.beginPage(200, 200)
 
 		// The drawing as a worker answers it: no clips, so no clip table.

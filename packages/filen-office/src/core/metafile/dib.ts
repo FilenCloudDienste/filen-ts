@@ -1,6 +1,7 @@
 import { zlibSync } from "fflate"
 import type { Rgba } from "../drawingml/displayList"
 import { crc32 } from "../opc/crc32"
+import { imageDimensions } from "../opc/mediaPolicy"
 import type { Bytes } from "./bytes"
 import { MAX_DECODE_PIXELS } from "./limits"
 import type { EmbeddedImage } from "./output"
@@ -420,67 +421,19 @@ export function sniffImage(bytes: Uint8Array): "png" | "jpeg" | "gif" | "bmp" | 
 	return undefined
 }
 
-// The pixel dimensions an encoded image declares (what a browser allocates to decode it), or undefined
-// when they cannot be read.
-export function encodedSize(bytes: Uint8Array, format: "png" | "jpeg" | "gif" | "bmp"): [number, number] | undefined {
-	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-	const length = bytes.length
-
-	switch (format) {
-		case "png":
-			return length >= 24 ? [view.getUint32(16), view.getUint32(20)] : undefined
-		case "gif":
-			return length >= 10 ? [view.getUint16(6, true), view.getUint16(8, true)] : undefined
-		case "bmp": {
-			if (length < 26) return undefined
-
-			const header = view.getUint32(14, true)
-
-			return header === 12
-				? [view.getUint16(18, true), view.getUint16(20, true)]
-				: length >= 26
-					? [Math.abs(view.getInt32(18, true)), Math.abs(view.getInt32(22, true))]
-					: undefined
-		}
-		case "jpeg": {
-			// The first start-of-frame marker (SOF0..SOF15 but DHT, JPG and DAC).
-			let at = 2
-
-			while (at + 9 < length) {
-				if (bytes[at] !== 0xff) return undefined
-
-				const marker = bytes[at + 1] ?? 0
-
-				if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-					at += 2
-					continue
-				}
-
-				if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc)
-					return [view.getUint16(at + 7), view.getUint16(at + 5)]
-
-				at += 2 + view.getUint16(at + 2)
-			}
-
-			return undefined
-		}
-	}
-}
-
 // An encoded image to pass through: shown only when its declared size is within the per-image bound and
 // the conversion's decoding budget.
 export function passThrough(bytes: Uint8Array, budget: PixelBudget): EmbeddedImage | undefined {
 	const format = sniffImage(bytes)
-	const size = format === undefined ? undefined : encodedSize(bytes, format)
+	const size = format === undefined ? undefined : imageDimensions(bytes)
 
 	if (format === undefined || size === undefined) return undefined
 
-	const pixels = size[0] * size[1]
+	const pixels = size.width * size.height
 
 	return pixels > 0 && pixels <= MAX_DECODE_PIXELS && budget.spend(pixels) ? { format, bytes } : undefined
 }
 
-// The bitmap as an image to embed, or undefined when it cannot be shown.
 // Pixel changes of a raster operation: inverted (NOTSRCCOPY, MERGEPAINT), multiplied by the brush colour
 // (MERGECOPY).
 export interface PixelAdjust {
@@ -505,6 +458,7 @@ function adjustPixels(rgba: Uint8Array, adjust: PixelAdjust): void {
 	}
 }
 
+// The bitmap as an image to embed, or undefined when it cannot be shown.
 export function dibImage(
 	dib: Dib,
 	transparency: DibTransparency,
@@ -521,8 +475,7 @@ export function dibImage(
 
 	const rgba = decodeDib(dib, transparency.kind === "alpha", budget, lookup)
 
-	if (rgba === undefined)
-		return plain && wrappable(dib) && budget.spend(dib.width * dib.height) ? { format: "bmp", bytes: wrapBmp(dib) } : undefined
+	if (rgba === undefined) return undefined
 
 	applyTransparency(rgba, dib.width, dib.height, transparency, budget)
 

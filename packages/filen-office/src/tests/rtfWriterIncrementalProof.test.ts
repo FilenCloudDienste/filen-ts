@@ -134,8 +134,46 @@ describe("RTF writer, span proof", () => {
 		const whole = await writeRtf(source, change, { span: false })
 
 		expect(written.written).toBe(1)
+		expect(written.path).toBe("span")
+		expect(whole.path).toBe("whole")
 		expect(written.bytes).toEqual(whole.bytes)
 		expect(await proveWritten(source, change, written.bytes)).toEqual({ span: true, whole: "done" })
+	})
+
+	it("writes the whole file where the span's writing throws, and reports what it threw", async () => {
+		const source = await open(spelled(400))
+		const change = edits(await typed(source, 200, "Edited "))
+		const checkpoints = source.read.checkpoints
+		const injected = new TypeError("injected")
+		let thrown = false
+
+		// The span's writer reads the checkpoints first: that first read throws, the whole file's reads go on.
+		Object.defineProperty(source.read, "checkpoints", {
+			configurable: true,
+			get: () => {
+				if (thrown) return checkpoints
+
+				thrown = true
+
+				throw injected
+			}
+		})
+
+		const fallbacks: unknown[] = []
+		const written = await writeRtf(source, change, { onFallback: error => fallbacks.push(error) })
+
+		expect(fallbacks).toEqual([injected])
+		expect(written.path).toBe("whole")
+		expect(written.bytes).toEqual((await writeRtf(source, change, { span: false })).bytes)
+	})
+
+	it("reports no fallback where the span's writing refuses", async () => {
+		const source = await open(spelled(400))
+		const fallbacks: unknown[] = []
+		const change = { parts: new Map([...edits(await typed(source, 200, "Edited ")).parts, ["word/settings.xml", latin1("<x/>")]]) }
+
+		await expect(writeRtf(source, change, { onFallback: error => fallbacks.push(error) })).rejects.toThrow(RtfWriteRefusal)
+		expect(fallbacks).toEqual([])
 	})
 
 	it("proves edits of the first and the last paragraph", async () => {
@@ -200,6 +238,7 @@ describe("RTF writer, span proof", () => {
 
 	it("reads the same groups open from a checkpoint as from the start", async () => {
 		const sources = [carrying(400), spelled(400)]
+		const synthetic = sources.length
 		const directory = join(CORPUS_DIR, "rtf")
 
 		if (existsSync(directory))
@@ -209,20 +248,29 @@ describe("RTF writer, span proof", () => {
 				.slice(0, 12))
 				sources.push(new Uint8Array(readFileSync(join(directory, name))))
 
-		for (const bytes of sources) {
+		for (const [index, bytes] of sources.entries()) {
 			const read = await readRtf(bytes)
+
+			if (index < synthetic) expect(read.ok).toBe(true)
 
 			if (!read.ok) continue
 
 			const checkpoints = (read.checkpoints?.list ?? []).filter(checkpoint => checkpoint.paragraphEnd >= 0 && !checkpoint.end)
 			const positions = read.paragraphs.map(paragraph => paragraph.start).filter(start => start >= 0)
 			const all = openGroups(bytes, positions)
+			let compared = 0
 
 			for (const position of positions) {
 				const from = checkpoints.filter(checkpoint => checkpoint.offset <= position).at(-1) as Checkpoint | undefined
 
-				if (from !== undefined) expect(openGroups(bytes, [position], from).get(position)).toEqual(all.get(position))
+				if (from === undefined) continue
+
+				expect(openGroups(bytes, [position], from).get(position)).toEqual(all.get(position))
+
+				compared++
 			}
+
+			if (index < synthetic) expect(compared).toBeGreaterThan(0)
 		}
 	})
 

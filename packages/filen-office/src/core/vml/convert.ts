@@ -211,37 +211,45 @@ interface Parent {
 	readonly frame: Box
 }
 
-const DASH_STYLES: Readonly<Record<string, DashPreset>> = {
-	solid: "solid",
-	shortdash: "sysDash",
-	shortdot: "sysDot",
-	shortdashdot: "sysDashDot",
-	shortdashdotdot: "sysDashDotDot",
-	dot: "dot",
-	dash: "dash",
-	longdash: "lgDash",
-	dashdot: "dashDot",
-	longdashdot: "lgDashDot",
-	longdashdotdot: "lgDashDotDot"
-}
+const DASH_STYLES: ReadonlyMap<string, DashPreset> = new Map<string, DashPreset>([
+	["solid", "solid"],
+	["shortdash", "sysDash"],
+	["shortdot", "sysDot"],
+	["shortdashdot", "sysDashDot"],
+	["shortdashdotdot", "sysDashDotDot"],
+	["dot", "dot"],
+	["dash", "dash"],
+	["longdash", "lgDash"],
+	["dashdot", "dashDot"],
+	["longdashdot", "lgDashDot"],
+	["longdashdotdot", "lgDashDotDot"]
+])
 
-const COMPOUNDS: Readonly<Record<string, Stroke["compound"]>> = {
-	single: "sng",
-	thinthin: "dbl",
-	thinthick: "thinThick",
-	thickthin: "thickThin",
-	thickbetweenthin: "tri"
-}
+const COMPOUNDS: ReadonlyMap<string, Stroke["compound"]> = new Map<string, Stroke["compound"]>([
+	["single", "sng"],
+	["thinthin", "dbl"],
+	["thinthick", "thinThick"],
+	["thickthin", "thickThin"],
+	["thickbetweenthin", "tri"]
+])
 
-const ARROWS: Readonly<Record<string, ArrowType>> = {
-	block: "triangle",
-	classic: "stealth",
-	oval: "oval",
-	diamond: "diamond",
-	open: "arrow"
-}
-const ARROW_WIDTHS: Readonly<Record<string, number>> = { narrow: 2, medium: 3, wide: 5 }
-const ARROW_LENGTHS: Readonly<Record<string, number>> = { short: 2, medium: 3, long: 5 }
+const ARROWS: ReadonlyMap<string, ArrowType> = new Map<string, ArrowType>([
+	["block", "triangle"],
+	["classic", "stealth"],
+	["oval", "oval"],
+	["diamond", "diamond"],
+	["open", "arrow"]
+])
+const ARROW_WIDTHS: ReadonlyMap<string, number> = new Map<string, number>([
+	["narrow", 2],
+	["medium", 3],
+	["wide", 5]
+])
+const ARROW_LENGTHS: ReadonlyMap<string, number> = new Map<string, number>([
+	["short", 2],
+	["medium", 3],
+	["long", 5]
+])
 
 function clamp01(value: number): number {
 	return value < 0 ? 0 : value > 1 ? 1 : value
@@ -643,7 +651,7 @@ class VmlWalker {
 			BLACK
 		const paint = list.paint({ kind: "solid", color: rgba(color, this.opacity(props.childAttr("stroke", "opacity"))) })
 		const dashText = (props.childAttr("stroke", "dashstyle") ?? "solid").trim()
-		const preset = DASH_STYLES[dashText.toLowerCase()]
+		const preset = DASH_STYLES.get(dashText.toLowerCase())
 		let customDash: Float32Array | null = null
 
 		if (preset === undefined) {
@@ -666,7 +674,7 @@ class VmlWalker {
 			cap: cap === "round" ? "round" : cap === "square" ? "square" : "flat",
 			join: join === "bevel" ? "bevel" : join === "miter" ? "miter" : "round",
 			miterLimit: Number.parseFloat(props.childAttr("stroke", "miterlimit") ?? "8") || 8,
-			compound: COMPOUNDS[(props.childAttr("stroke", "linestyle") ?? "single").toLowerCase()] ?? "sng",
+			compound: COMPOUNDS.get((props.childAttr("stroke", "linestyle") ?? "single").toLowerCase()) ?? "sng",
 			inset: false
 		}
 
@@ -952,14 +960,14 @@ function geometryPath(segment: VmlSegment): GeometryPath {
 }
 
 function arrow(props: ShapeProps, end: "start" | "end"): LineEnd | undefined {
-	const type = ARROWS[(props.childAttr("stroke", `${end}arrow`) ?? "none").toLowerCase()]
+	const type = ARROWS.get((props.childAttr("stroke", `${end}arrow`) ?? "none").toLowerCase())
 
 	if (type === undefined) return undefined
 
 	return {
 		type,
-		width: ARROW_WIDTHS[(props.childAttr("stroke", `${end}arrowwidth`) ?? "medium").toLowerCase()] ?? 3,
-		length: ARROW_LENGTHS[(props.childAttr("stroke", `${end}arrowlength`) ?? "medium").toLowerCase()] ?? 3
+		width: ARROW_WIDTHS.get((props.childAttr("stroke", `${end}arrowwidth`) ?? "medium").toLowerCase()) ?? 3,
+		length: ARROW_LENGTHS.get((props.childAttr("stroke", `${end}arrowlength`) ?? "medium").toLowerCase()) ?? 3
 	}
 }
 

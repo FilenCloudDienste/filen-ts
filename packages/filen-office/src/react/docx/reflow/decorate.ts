@@ -3,7 +3,7 @@ import { Decoration, DecorationSet } from "prosemirror-view"
 import { DocxEditorSession, docxSchema } from "../../../core/docx/edit/index"
 import type { RevisionView } from "../../../core/docx/model/kinds"
 import { markerText, type StoryCounters } from "../../../core/docx/reflow/counters"
-import { paragraphCss, runCss, type CssFaces } from "../../../core/docx/reflow/css"
+import { casesText, paragraphCss, runCss, type CssFaces } from "../../../core/docx/reflow/css"
 import { cellTables, tableLook, type LaidTable } from "../../../core/docx/reflow/tables"
 import { ReviewKind, reviewIndexKept } from "../../../core/docx/review/index"
 import { SECTION_SHIFT, sectionBreakFlags } from "../../../core/docx/layout/output"
@@ -81,18 +81,26 @@ function interned(key: string, make: () => Readonly<Record<string, string>>): Re
 	return ATTRS.get(key, make)
 }
 
-function styleAttrs(css: string): Readonly<Record<string, string>> {
-	return interned(`style:${css}`, () => ({ style: css }))
+// `cases`: the run cases its text (casesText), drawn in the neutral language the pages measured it in.
+function styleAttrs(css: string, cases = false): Readonly<Record<string, string>> {
+	return cases ? interned(`cased:${css}`, () => ({ style: css, lang: "" })) : interned(`style:${css}`, () => ({ style: css }))
 }
 
-// The CSS of a paragraph's element: its own look and its runs' common one (what the paragraph style gives).
-export function paragraphStyle(session: ReflowSource, node: Node, faces: CssFaces): string {
+// The look of a paragraph's element: the CSS of its own look and its runs' common one (what the paragraph style
+// gives), and whether that common one cases its text (casesText).
+export interface ParagraphStyle {
+	readonly css: string
+	readonly cases: boolean
+}
+
+export function paragraphStyle(session: ReflowSource, node: Node, faces: CssFaces): ParagraphStyle {
 	const formats = session.formats
 	const format = formats.paragraph(node)
-	const base = runCss(formats.styleRun(format, []), faces)
+	const run = formats.styleRun(format, [])
+	const base = runCss(run, faces)
 	const own = paragraphCss(format)
 
-	return own.length === 0 ? base : base.length === 0 ? own : `${own}; ${base}`
+	return { css: own.length === 0 ? base : base.length === 0 ? own : `${own}; ${base}`, cases: casesText(run) }
 }
 
 // Contextual spacing (w:contextualSpacing) as the pages lay it out: between two paragraphs of the same style, the
@@ -133,9 +141,10 @@ function runLooks(session: ReflowSource, paragraph: Node, faces: CssFaces, faces
 	paragraph.forEach((child, at) => {
 		if (child.marks.length === 0 && child.isText) return
 
-		const css = runCss(formats.resolvedRun(format, child.marks), faces)
+		const run = formats.resolvedRun(format, child.marks)
+		const css = runCss(run, faces)
 
-		if (css !== base) locals.push({ from: 1 + at, to: 1 + at + child.nodeSize, node: false, attrs: styleAttrs(css) })
+		if (css !== base) locals.push({ from: 1 + at, to: 1 + at + child.nodeSize, node: false, attrs: styleAttrs(css, casesText(run)) })
 	})
 
 	paragraphLooks.set(paragraph, { faces: facesVersion, locals })
@@ -544,7 +553,8 @@ function sectionAttrs(label: string): Readonly<Record<string, string>> {
 	return interned(`section:${label}`, () => ({ "data-fo-section": label }))
 }
 
-function markerElement(text: string, css: string): () => HTMLElement {
+// `cases`: as for styleAttrs.
+function markerElement(text: string, css: string, cases: boolean): () => HTMLElement {
 	return () => {
 		const element = document.createElement("span")
 
@@ -553,6 +563,7 @@ function markerElement(text: string, css: string): () => HTMLElement {
 		element.textContent = text
 
 		if (css.length > 0) element.setAttribute("style", css)
+		if (cases) element.setAttribute("lang", "")
 
 		return element
 	}
@@ -658,7 +669,7 @@ export function storyDecorations(input: StoryDecorations): DecorationSet {
 				const css = run === undefined ? "" : runCss(run, faces)
 
 				decorations.push(
-					Decoration.widget(pos, markerElement(shown, css), {
+					Decoration.widget(pos, markerElement(shown, css, run !== undefined && casesText(run)), {
 						side: -1,
 						key: `m${shown}\u0000${css}`,
 						marks: [],

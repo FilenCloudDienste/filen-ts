@@ -1,4 +1,4 @@
-import { detectDelimiter, detectsStably, parseCsvRecords, writeCsv, type CsvLimits } from "./csvParse"
+import { detectDelimiter, detectsStably, parseCsvRecords, utf8Length, writeCsv, type CsvLimits } from "./csvParse"
 import {
 	decodeUtf16,
 	decodeUtf8Strict,
@@ -40,13 +40,19 @@ const UTF8_BOM = [0xef, 0xbb, 0xbf]
 const UTF16LE_BOM = [0xff, 0xfe]
 const UTF16BE_BOM = [0xfe, 0xff]
 
-function withBom(bom: readonly number[], body: Uint8Array): Uint8Array {
-	const out = new Uint8Array(bom.length + body.length)
+// `text` as UTF-8, after a byte order mark when `bom`: encoded straight into one buffer of the final size, so a large
+// file's body is never copied to make room for the mark.
+export function encodeUtf8(text: string, bom: boolean): Uint8Array {
+	const encoder = new TextEncoder()
 
-	out.set(bom)
-	out.set(body, bom.length)
+	if (!bom) return encoder.encode(text)
 
-	return out
+	const bytes = new Uint8Array(UTF8_BOM.length + utf8Length(text))
+
+	bytes.set(UTF8_BOM)
+	encoder.encodeInto(text, bytes.subarray(UTF8_BOM.length))
+
+	return bytes
 }
 
 // A non-fatal windows-1252 decode maps the bytes the encoding leaves undefined to C1 control code points
@@ -171,6 +177,8 @@ export function parseCsvFile(
 	const delimiter = tabSeparated ? "\t" : text.length === 0 ? "," : detectDelimiter(text, options.listSeparator)
 	const lineSeparator = detectLineSeparator(text)
 	const limits = options.limits ?? {}
+	// The last character alone, not a search of the whole text (NaN for an empty one).
+	const lastCode = text.charCodeAt(text.length - 1)
 	// Every value stays the text it was: a CSV's "007" or "1e5" is not a number until someone says so. Past the
 	// grid's last column, cells would take the keys of the next row's (cellKey).
 	const { rows, complete } = parseCsvRecords(text, delimiter, {
@@ -186,7 +194,7 @@ export function parseCsvFile(
 			stable: !tabSeparated && detectsStably(text, delimiter),
 			lineSeparator,
 			bom,
-			trailingNewline: /[\r\n]$/.test(text),
+			trailingNewline: lastCode === 0x0a || lastCode === 0x0d,
 			encoding,
 			writable
 		}
@@ -212,11 +220,11 @@ export function serializeCsv(rows: readonly (readonly string[])[], format: CsvFo
 	}
 
 	if (format.encoding === "utf-16le") {
-		return withBom(UTF16LE_BOM, encodeUtf16(text, true))
+		return encodeUtf16(text, true, UTF16LE_BOM)
 	}
 
 	if (format.encoding === "utf-16be") {
-		return withBom(UTF16BE_BOM, encodeUtf16(text, false))
+		return encodeUtf16(text, false, UTF16BE_BOM)
 	}
 
 	if (format.encoding === "windows-1252") {
@@ -232,13 +240,7 @@ export function serializeCsv(rows: readonly (readonly string[])[], format: CsvFo
 		return encoded
 	}
 
-	const body = new TextEncoder().encode(text)
-
-	if (!format.bom) {
-		return body
-	}
-
-	return withBom(UTF8_BOM, body)
+	return encodeUtf8(text, format.bom)
 }
 
 const NUMERIC = /^[-+]?(\d+([.,]\d+)?|\d{1,3}([.,]\d{3})+([.,]\d+)?)%?$/

@@ -63,7 +63,7 @@ import {
 	type SheetGridExtension
 } from "./layers"
 import { fillDownTo, fillHandleShown, fillLeft, fillTarget, sameRange } from "./fill"
-import { canEditSnapshot, celllessSheet, type GridResizeDraft, type SheetGridModel, type SheetGridSizes } from "./model"
+import { TEXT_KINDS, canEditSnapshot, celllessSheet, type GridResizeDraft, type SheetGridModel, type SheetGridSizes } from "./model"
 import { keyMove, stepFrom } from "./navigation"
 import { GridRenderer, type GridHit } from "./renderer"
 import {
@@ -76,6 +76,7 @@ import {
 	type GridPoint,
 	type GridSelection
 } from "./selection"
+import { settled } from "./settled"
 import { entryInput, entryText } from "./tiles"
 import {
 	DOUBLE_TAP_MS,
@@ -119,7 +120,7 @@ export interface SheetGridHandle {
 	// in-cell editor handles it: Enter and Tab step as in the grid, Ctrl+Enter fills the selection, Alt+Enter breaks
 	// the line, F4 cycles a reference, the date and time shortcuts type at the caret.
 	editorKey(event: KeyboardEvent<HTMLTextAreaElement>): void
-	// The renderer's frame costs while `measure` is on (perf harness).
+	// The grid's renderer: what the drawings and the app's overlays place themselves by.
 	readonly renderer: GridRenderer
 }
 
@@ -236,8 +237,6 @@ const EDGE_SLOP = 4
 // Selection drag past the edge scrolls this share of the overshoot per frame.
 const AUTOSCROLL_RATE = 0.4
 
-const TEXT_KINDS: ReadonlySet<string> = new Set(["csv", "tsv", "tab"])
-
 const FORMAT_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 	"bold",
 	"italic",
@@ -280,12 +279,6 @@ const CELLLESS_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 
 // Cells a move on a protected sheet passes over looking for one it may select.
 const MAX_PROTECTED_STEPS = 1024
-
-// A command whose answer the grid needs nothing from: a refusal reaches onRefusal, a session that died its
-// "failed" event.
-function settled(promise: Promise<unknown>): void {
-	promise.then(undefined, () => undefined)
-}
 
 function defaultDescription(name: string, text: string): string {
 	return text === "" ? name : `${name} ${text}`
@@ -331,6 +324,23 @@ function rangeName(range: SheetRange): string {
 	return `${cellName(range.startRow, range.startCol)}:${cellName(range.endRow, range.endCol)}`
 }
 
+// Whether the engine sizes the editor to its entry (css/sheet.css, field-sizing: content; Chrome 123, Firefox 152,
+// Safari 26.2). Where it does not, the editor measures its entry itself.
+const FIELD_SIZING = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content")
+
+// Sizes `input` to its entry where field-sizing does not: shrunk to its min sizes, then as large as what it scrolls
+// (border-box, no border: the scroll size is the box's); the CSS min and max sizes clamp what is written.
+function sizeToEntry(input: HTMLTextAreaElement): void {
+	input.style.width = "0px"
+	input.style.height = "0px"
+
+	const width = input.scrollWidth
+	const height = input.scrollHeight
+
+	input.style.width = `${String(width)}px`
+	input.style.height = `${String(height)}px`
+}
+
 // The in-cell editor. It exists only while an entry is typed, and takes focus as it appears (in the same task, so
 // a composition started by the key that opened it lands here), with the caret after what it starts from. The
 // renderer places its box, which the textarea sizes; a backdrop fills the same box with the same font and padding
@@ -363,6 +373,27 @@ function CellEditor({ id, label, text, invalid, backdrop, element, onText, onKey
 		if (input !== null && layer !== null)
 			layer.style.transform = `translate(${String(-input.scrollLeft)}px, ${String(-input.scrollTop)}px)`
 	}
+
+	// Without field-sizing: sized to the entry as it changes, and again as the renderer places the box anew (its font
+	// and the min and max sizes follow the zoom and the scroll).
+	useLayoutEffect(() => {
+		const input = inputRef.current
+
+		if (!FIELD_SIZING && input !== null) sizeToEntry(input)
+	}, [text])
+
+	useLayoutEffect(() => {
+		const box = boxRef.current
+		const input = inputRef.current
+
+		if (FIELD_SIZING || box === null || input === null) return
+
+		const observer = new MutationObserver(() => sizeToEntry(input))
+
+		observer.observe(box, { attributes: true, attributeFilter: ["style"] })
+
+		return () => observer.disconnect()
+	}, [])
 
 	// A backdrop appearing over an editor already scrolled starts where it is.
 	useLayoutEffect(() => {

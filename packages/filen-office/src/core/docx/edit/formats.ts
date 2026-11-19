@@ -173,6 +173,12 @@ export interface RunPiece {
 	readonly cell: boolean
 }
 
+// Inline content formatting applies to: run-level content, and a field that can hold formatting (§17.16.4.3; an
+// empty w:fldSimple holds none).
+export function takesFormatting(node: Node): boolean {
+	return inlineLevel(node) === "run" || (node.type === nodes.field && holdsFormatting(node))
+}
+
 export function runPieces(state: EditorState, ranges?: readonly { readonly from: number; readonly to: number }[]): RunPiece[] {
 	return runPiecesIn(state.doc, ranges ?? state.selection.ranges.map(range => ({ from: range.$from.pos, to: range.$to.pos })))
 }
@@ -192,11 +198,7 @@ export function runPiecesIn(doc: Node, ranges: readonly { readonly from: number;
 			}
 
 			// A field takes formatting as its runs do (§17.16.4.3; the writer gives them what changed).
-			if (
-				parent !== null &&
-				parent.type === nodes.paragraph &&
-				(inlineLevel(node) === "run" || (node.type === nodes.field && holdsFormatting(node)))
-			) {
+			if (parent !== null && parent.type === nodes.paragraph && takesFormatting(node)) {
 				const start = Math.max(from, pos)
 				const end = Math.min(to, pos + node.nodeSize)
 
@@ -240,6 +242,20 @@ export interface ParagraphAt {
 	readonly pos: number
 	// In a table (see RunPiece.cell).
 	readonly cell: boolean
+}
+
+// What clearing direct formatting removes (Word's Ctrl+Space, Clear All Formatting): everything but the language
+// and highlighting, which Word keeps.
+export const CLEARED_TYPES: readonly MarkType[] = FORMATTING_MARKS.filter(name => name !== "lang" && name !== "highlight").map(
+	name => marks[name]
+)
+
+// The id of the Normal paragraph style: null when Normal is the default paragraph style.
+export function normalStyleId(context: DocxEditContext): string | null {
+	const styles = context.styles
+	const normal = styles.defaultOf("paragraph")
+
+	return normal === undefined || normal.canonicalName === "normal" ? null : (styles.byName("normal", "paragraph")?.id ?? null)
 }
 
 // The paragraphs the selection touches, in document order.

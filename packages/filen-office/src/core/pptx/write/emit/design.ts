@@ -8,7 +8,7 @@ import { filenTheme } from "../../../templates/themes/catalog"
 import { LAYOUT_TYPES, layoutXml, masterXml, themeXml } from "../../../templates/themes/pptx"
 import { decodeUtf8, encodeUtf8, escapeAttribute, type XmlDocument } from "../../../xml/index"
 import { G, P_MAIN, partReader } from "../../read/xml"
-import { PART_CONTENT_TYPES, RELATIONSHIPS, zipName, type PackageWriter, type PendingRelationship } from "../parts"
+import { PART_CONTENT_TYPES, RELATIONSHIPS, XML_DECLARATION, zipName, type PackageWriter, type PendingRelationship } from "../parts"
 import type { EmitPiece, PptxEmitFamily } from "../types"
 import { imageId } from "./picture"
 import { listStyleXml } from "./text"
@@ -20,7 +20,6 @@ import { URIS, type EmitContext } from "./shape"
 // deck's size), the masters it dropped (with the parts only they used), the master list (p:sldMasterIdLst) and each
 // slide's relationship to its layout. A slide part itself is never rewritten by a theme change.
 
-const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 const SLIDE_MASTER_RELATIONSHIP = `${RELATIONSHIPS}slideMaster`
 const SLIDE_LAYOUT_RELATIONSHIP = `${RELATIONSHIPS}slideLayout`
 const THEME_RELATIONSHIP = `${RELATIONSHIPS}theme`

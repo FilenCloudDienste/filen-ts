@@ -1,11 +1,13 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { strFromU8, unzipSync } from "fflate"
+import type { Transaction } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import type { DocxEditorSession } from "@filen/office/core/docx/edit"
+import { DocxSaveError } from "@filen/office/core/docx/write"
 import { readRtf } from "../core/rtf/index"
 import { RtfWriteRefusal } from "../core/rtf/write/out"
-import { writeRtf } from "../core/rtf/write/writer"
+import { writeRtf, type RtfEdits } from "../core/rtf/write/writer"
 import { CORPUS_DIR } from "./corpusDir"
 import { rng, type Rand } from "./fuzz/config"
 import { baseOps } from "./fuzz/ops/base"
@@ -18,7 +20,8 @@ import { editRtf, editsOf, latin1 } from "./rtfWriteFixtures"
 // styles, tables, undo) on RTF documents, each saved through the RTF writer. A save either reads back as the
 // edit made it, checked here independently of the writer's own proof (every paragraph's text in order), or is
 // refused with a reason: no proof failure goes unreported. FILEN_OFFICE_RTF_FUZZ_RUNS sets the seeds per file
-// (default 3); corpus files are added where the corpus exists.
+// (default 3); corpus files are added where the corpus exists. An op, dispatch or command that throws, or a save
+// preparation that fails other than with the docx writer's refusal, fails the run with its file, seed and op log.
 
 const RUNS = Number(process.env["FILEN_OFFICE_RTF_FUZZ_RUNS"] ?? 3)
 const STEPS = 12
@@ -46,32 +49,50 @@ function corpusSample(): { name: string; bytes: Uint8Array }[] {
 	return readdirSync(directory)
 		.filter(name => name.endsWith(".rtf"))
 		.sort()
-		.map(name => ({ name, bytes: new Uint8Array(readFileSync(join(directory, name))) }))
-		.filter(file => file.bytes.length < 120_000)
+		.filter(name => statSync(join(directory, name)).size < 120_000)
 		.filter((_, index) => index % 4 === 0)
+		.map(name => ({ name, bytes: new Uint8Array(readFileSync(join(directory, name))) }))
 }
 
-function context(session: DocxEditorSession, rand: Rand): OpContext {
+function errorText(error: unknown): string {
+	return (error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error)).slice(0, 800)
+}
+
+// A transaction that cannot be built for this document is expected and only logged; a dispatch or command that
+// throws is an editor crash, recorded through `crashed`.
+function context(session: DocxEditorSession, rand: Rand, crashed: (what: string, error: unknown) => void): OpContext {
 	return {
 		rand,
 		session,
 		editor: undefined,
 		numIds: [],
 		styleIds: [],
-		transact(_label, build) {
-			try {
-				const tr = build(session.state.tr)
+		transact(label, build) {
+			let tr: Transaction | void
 
-				return tr === undefined ? "noop" : String(session.dispatch(tr))
+			try {
+				tr = build(session.state.tr)
 			} catch (error) {
-				return `threw ${String(error)}`
+				return `build threw ${String(error).slice(0, 60)}`
+			}
+
+			if (tr === undefined) return "noop"
+
+			try {
+				return String(session.dispatch(tr))
+			} catch (error) {
+				crashed(`dispatch ${label}`, error)
+
+				return "dispatch threw"
 			}
 		},
-		execute(_label, command) {
+		execute(label, command) {
 			try {
 				return String(session.execute(command))
 			} catch (error) {
-				return `threw ${String(error)}`
+				crashed(`execute ${label}`, error)
+
+				return "execute threw"
 			}
 		}
 	}
@@ -94,15 +115,20 @@ describe("RTF writer fuzz", () => {
 		const files = [{ name: "synthetic", bytes: SYNTHETIC }, ...corpusSample()]
 		const outcomes = { saved: 0, refused: 0, steps: 0 }
 		const reasons = new Map<string, number>()
+		const findings: string[] = []
 
 		for (const file of files) {
 			for (let run = 0; run < RUNS; run++) {
-				const rand = rng(0x5eed + run * 7919 + file.bytes.length)
+				const seed = 0x5eed + run * 7919 + file.bytes.length
+				const rand = rng(seed)
 				const editing = await editRtf(file.bytes)
 
 				editing.opened.context.identity.author = "Fuzz"
 
 				const log: string[] = []
+				const crashed = (what: string, error: unknown): void => {
+					findings.push(`${file.name} run ${run} seed ${seed}: ${what} threw ${errorText(error)}\n${log.join("\n")}`)
+				}
 
 				for (let step = 0; step < STEPS; step++) {
 					const op = OPS[Math.floor(rand() * OPS.length)]
@@ -110,30 +136,46 @@ describe("RTF writer fuzz", () => {
 					if (op === undefined) continue
 
 					try {
-						log.push(`${op.name}: ${await op.run(context(editing.session, rand))}`)
-					} catch {
-						// An op that cannot apply to this document.
+						log.push(
+							`${op.name}: ${await op.run(context(editing.session, rand, (what, error) => crashed(`op ${op.name} ${what}`, error)))}`
+						)
+					} catch (error) {
+						crashed(`op ${op.name}`, error)
 					}
 
 					outcomes.steps++
 				}
 
-				const edits = await editsOf(editing).catch(() => undefined)
+				let edits: RtfEdits
 
-				if (edits === undefined) continue
+				try {
+					edits = await editsOf(editing)
+				} catch (error) {
+					if (!(error instanceof DocxSaveError)) {
+						crashed("save preparation", error)
+
+						continue
+					}
+
+					// The docx writer's gates refused the edited document: a refusal with its reason.
+					outcomes.refused++
+					reasons.set(`docx ${error.reason}`, (reasons.get(`docx ${error.reason}`) ?? 0) + 1)
+
+					continue
+				}
 
 				try {
 					const written = await writeRtf(editing.source, edits)
 					const read = await readRtf(written.bytes)
 
-					expect(read.ok, file.name).toBe(true)
+					expect(read.ok, `${file.name} run ${run} seed ${seed}`).toBe(true)
 
 					if (!read.ok) continue
 
 					const expected = edits.parts.get("word/document.xml") ?? unzipSync(editing.source.read.docx)["word/document.xml"]
 					const actual = unzipSync(read.docx)["word/document.xml"]
 
-					expect(bodyText(strFromU8(actual ?? new Uint8Array())), `${file.name} run ${run}`).toBe(
+					expect(bodyText(strFromU8(actual ?? new Uint8Array())), `${file.name} run ${run} seed ${seed}\n${log.join("\n")}`).toBe(
 						bodyText(strFromU8(expected ?? new Uint8Array()))
 					)
 					outcomes.saved++
@@ -142,7 +184,7 @@ describe("RTF writer fuzz", () => {
 
 					outcomes.refused++
 					if (process.env["RTF_FUZZ_LOG"] !== undefined && error.reason === process.env["RTF_FUZZ_LOG"])
-						console.log(file.name, run, log, error.message)
+						console.log(file.name, run, log, error.message, error.detail ?? "")
 					reasons.set(error.message.slice(0, 700), (reasons.get(error.message.slice(0, 700)) ?? 0) + 1)
 				}
 			}
@@ -150,6 +192,7 @@ describe("RTF writer fuzz", () => {
 
 		console.log("rtf fuzz", outcomes, Object.fromEntries(reasons))
 
+		expect(findings.slice(0, 10)).toEqual([])
 		expect(outcomes.saved).toBeGreaterThan(0)
 	})
 })

@@ -152,6 +152,8 @@ export interface StashedSizes {
 // Undos kept: an older one just re-inserts at the default sizes.
 const STASH_LIMIT = 50
 
+const NO_SIZES: ReadonlyMap<number, number> = new Map()
+
 // A CSV's rows or columns moved: the sheet's sizes move with them, and an undone delete gets back the
 // sizes it took out.
 export function followShift(
@@ -161,15 +163,16 @@ export function followShift(
 	stash: readonly StashedSizes[]
 ): { layer: SizeLayer; stash: StashedSizes[] } {
 	const sizes = layer.get(sheet)
-	const axisSizes = shift.axis === "cols" ? sizes?.cols : sizes?.rows
+	const axisSizes = (shift.axis === "cols" ? sizes?.cols : sizes?.rows) ?? NO_SIZES
+	// Undoing an insert deletes the run again; undoing a delete inserts it back.
+	const kind = shift.revert ? (shift.type === "insert" ? "delete" : "insert") : shift.type
 
-	if (axisSizes === undefined || axisSizes.size === 0) {
+	// An undone delete still looks in the stash: the delete may have taken the axis' last sizes.
+	if (axisSizes.size === 0 && !(shift.revert && kind === "insert")) {
 		return { layer, stash: [...stash] }
 	}
 
 	const id = `${String(sheet)}:${shift.axis}:${String(shift.at)}:${String(shift.count)}`
-	// Undoing an insert deletes the run again; undoing a delete inserts it back.
-	const kind = shift.revert ? (shift.type === "insert" ? "delete" : "insert") : shift.type
 	const moved = shiftSizes(axisSizes, kind, shift.at, shift.count)
 	let next = moved.sizes
 	let nextStash = [...stash]
@@ -185,6 +188,8 @@ export function followShift(
 		if (entry !== undefined) {
 			next = restoreSizes(next, shift.at, entry.removed)
 			nextStash = nextStash.filter((_, at) => at !== index)
+		} else if (axisSizes.size === 0) {
+			return { layer, stash: nextStash }
 		}
 	}
 

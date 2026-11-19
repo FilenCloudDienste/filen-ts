@@ -70,6 +70,33 @@ describe("persistence", () => {
 		expect(kvStore.get("spreadsheet.sizes.index.v1")).toHaveLength(SIZE_LAYER_LIMIT)
 	})
 
+	it("keeps one index entry for a file saved again", async () => {
+		const layer = updateLayer(EMPTY_LAYER, 0, "cols", [[0, 70]])
+
+		await saveLayer(storage, { kind: "stable", id: "a" }, layer)
+		await saveLayer(storage, { kind: "stable", id: "a" }, updateLayer(layer, 0, "cols", [[1, 80]]))
+
+		expect(kvStore.get("spreadsheet.sizes.index.v1")).toEqual(["a"])
+	})
+
+	it("counts a file saved again as the most recent", async () => {
+		const layer = updateLayer(EMPTY_LAYER, 0, "cols", [[0, 70]])
+
+		for (let index = 0; index < SIZE_LAYER_LIMIT; index++) {
+			await saveLayer(storage, { kind: "stable", id: `f${String(index)}` }, layer)
+		}
+
+		await saveLayer(storage, { kind: "stable", id: "f0" }, layer)
+		await saveLayer(storage, { kind: "stable", id: "new" }, layer)
+
+		const index = kvStore.get("spreadsheet.sizes.index.v1")
+
+		expect(kvStore.has("spreadsheet.sizes.v1.f0")).toBe(true)
+		expect(kvStore.has("spreadsheet.sizes.v1.f1")).toBe(false)
+		expect(index).toHaveLength(SIZE_LAYER_LIMIT)
+		expect((index as string[]).slice(-2)).toEqual(["f0", "new"])
+	})
+
 	it("deletes a file's entry once its layer is empty", async () => {
 		await saveLayer(storage, { kind: "stable", id: "s2" }, updateLayer(EMPTY_LAYER, 0, "cols", [[0, 70]]))
 		await saveLayer(storage, { kind: "stable", id: "s2" }, EMPTY_LAYER)
@@ -126,6 +153,24 @@ describe("followShift", () => {
 			[3, 50],
 			[5, 60]
 		])
+	})
+
+	it("gives an undone delete back the axis' only sizes", () => {
+		const one = updateLayer(EMPTY_LAYER, 0, "cols", [[2, 150]])
+		const deleted = followShift(one, 0, { axis: "cols", type: "delete", at: 2, count: 1, revert: false }, [])
+
+		expect(deleted.layer.has(0)).toBe(false)
+
+		const undone = followShift(deleted.layer, 0, { axis: "cols", type: "delete", at: 2, count: 1, revert: true }, deleted.stash)
+
+		expect([...(undone.layer.get(0)?.cols ?? [])]).toEqual([[2, 150]])
+		expect(undone.stash).toEqual([])
+	})
+
+	it("keeps the same layer when an undone delete has nothing stashed", () => {
+		const next = followShift(EMPTY_LAYER, 0, { axis: "cols", type: "delete", at: 2, count: 1, revert: true }, [])
+
+		expect(next.layer).toBe(EMPTY_LAYER)
 	})
 
 	it("leaves a sheet with no sizes on that axis alone", () => {

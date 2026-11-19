@@ -2,7 +2,7 @@ import type { SheetId, SheetRange } from "../protocol"
 import type { SheetStore } from "../../xlsx/model/store"
 import { CellKind, SLOT_BLOCK, type XlsxSheetModel } from "../../xlsx/model/types"
 import { cellKeyOf } from "../../xlsx/edit/history"
-import { dateSerial } from "../numfmt/date"
+import { dateSerial, isoSerial } from "../numfmt/date"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import type { FormulaHost } from "./formula/evaluate"
 import { FormulaError, Unsupported, type FormulaRef, type Scalar } from "./formula/values"
@@ -10,21 +10,7 @@ import { FormulaError, Unsupported, type FormulaRef, type Scalar } from "./formu
 // What a rule's formula reads from a workbook: its cells' values (a formula cell's result as the session shows it),
 // its sheets by name, its defined names and today's date from the session's clock.
 
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/u
 const DAY_MS = 86_400_000
-
-function isoSerial(text: string, date1904: boolean): number | null {
-	const match = ISO_DATE.exec(text)
-
-	if (match === null) return null
-
-	const [, year = "", month = "", day = "", hours = "0", minutes = "0", seconds = "0"] = match
-
-	return (
-		dateSerial(Number(year), Number(month), Number(day), date1904) +
-		(Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)) / 86_400
-	)
-}
 
 // A model's cell value at a slot, or of a formula cell whose result the session shows without storing it.
 export function slotValue(document: XlsxDocument, model: XlsxSheetModel, row: number, col: number, slot: number): Scalar {
@@ -50,8 +36,9 @@ export function slotValue(document: XlsxDocument, model: XlsxSheetModel, row: nu
 			return FormulaError.of(model.store.strings.text(value))
 		case CellKind.DATE: {
 			const text = model.store.strings.text(value)
+			const serial = isoSerial(text, document.date1904)
 
-			return isoSerial(text, document.date1904) ?? text
+			return Number.isNaN(serial) ? text : serial
 		}
 		default: {
 			if ((block.formulas?.[at] ?? -1) < 0) return null

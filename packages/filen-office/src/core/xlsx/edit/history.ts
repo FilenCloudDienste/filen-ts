@@ -1,4 +1,4 @@
-import type { SheetId } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, type SheetId } from "../../sheet/protocol"
 import type { RowBlock, SheetStore } from "../model/store"
 import { CellKind, ROW_MARKS, SLOT_BLOCK, type XlsxSheetStore } from "../model/types"
 
@@ -36,7 +36,7 @@ export const ABSENT: CellState = { present: false, kind: CellKind.EMPTY, value: 
 
 // A cell's key in a sheet: exact as a double for any cell of the grid.
 export function cellKeyOf(row: number, col: number): number {
-	return row * 16_384 + col
+	return row * SHEET_MAX_COLS + col
 }
 
 export function cellState(store: XlsxSheetStore, row: number, col: number, shown: ShownResult | undefined): CellState {

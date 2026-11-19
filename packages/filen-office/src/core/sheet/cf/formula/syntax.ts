@@ -1,5 +1,6 @@
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../protocol"
 import { columnIndex } from "../../refs/cellRef"
+import { CELL, COLUMN, ROW, isWordChar, readWord } from "../../refs/scan"
 import { FormulaError, Unsupported, type Scalar } from "./values"
 
 // A rule's formula (as the file stores it: en-US syntax, "," between arguments, no "=") read into a tree once,
@@ -39,7 +40,7 @@ export type BinaryOperator = "+" | "-" | "*" | "/" | "^" | "&" | "=" | "<>" | "<
 export interface ParsedFormula {
 	readonly root: FormulaNode
 	// Whether any reference moves with the cell (its result can differ cell by cell), or the formula reads the
-	// cell's position (ROW() and COLUMN() without arguments).
+	// cell's position (ROW() and COLUMN() without arguments), or reads a defined name (evaluated at the cell).
 	readonly relative: boolean
 	// Whether it calls a function whose result changes without its inputs changing (TODAY, NOW, RAND).
 	readonly volatile: boolean
@@ -60,25 +61,8 @@ const MAX_DEPTH = 64
 
 const ERRORS = ["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!", "#GETTING_DATA"]
 
-const CELL = /^(\$?)([A-Za-z]{1,3})(\$?)(\d{1,7})$/u
-const COLUMN = /^(\$?)([A-Za-z]{1,3})$/u
-const ROW = /^(\$?)(\d{1,7})$/u
 const VOLATILE = new Set(["TODAY", "NOW", "RAND", "RANDBETWEEN", "RANDARRAY", "OFFSET", "INDIRECT", "CELL", "INFO"])
 const POSITIONAL = new Set(["ROW", "COLUMN"])
-
-function isWordChar(code: number): boolean {
-	return (
-		(code >= 65 && code <= 90) ||
-		(code >= 97 && code <= 122) ||
-		(code >= 48 && code <= 57) ||
-		code === 95 ||
-		code === 46 ||
-		code === 36 ||
-		code === 92 ||
-		code === 63 ||
-		code >= 128
-	)
-}
 
 function cellPart(text: string): { row: number; col: number; rowAbs: boolean; colAbs: boolean } | null {
 	const match = CELL.exec(text)
@@ -362,10 +346,7 @@ class Lexer {
 	private word(sheet: string | null): void {
 		const text = this.text
 		const start = this.index
-		let end = start
-
-		while (end < text.length && isWordChar(text.charCodeAt(end))) end++
-
+		const end = readWord(text, start)
 		const word = text.slice(start, end)
 
 		if (text[end] === "!") {
@@ -386,10 +367,7 @@ class Lexer {
 
 		// A cell range "A1:B2" or a column range "A:C".
 		if (text[end] === ":") {
-			let next = end + 1
-
-			while (next < text.length && isWordChar(text.charCodeAt(next))) next++
-
+			const next = readWord(text, end + 1)
 			const area = areaOf(text.slice(start, next), sheet)
 
 			if (area !== null) {
@@ -576,6 +554,9 @@ class Parser {
 				const upper = token.text.toUpperCase()
 
 				if (token.sheet === null && (upper === "TRUE" || upper === "FALSE")) return { kind: "value", value: upper === "TRUE" }
+
+				// A name is evaluated at each cell, and its formula may read relative to it.
+				this.relative = true
 
 				return { kind: "name", sheet: token.sheet, name: token.text }
 			}

@@ -52,7 +52,7 @@ import {
 } from "./output"
 import { DecorationTable, RunStyles, borderWidth, type DecorationValue, type FontSource, type RunStyleInfo } from "./styles"
 import { laidRows, sameNumbers, type TableSnapshot } from "./table"
-import { EPSILON, twips } from "./units"
+import { EPSILON, points, twips } from "./units"
 
 export interface LayoutOptions {
 	// Which tracked changes show (default Final, as Word's Simple Markup lays out).
@@ -163,6 +163,7 @@ export class DocumentLayout {
 	readonly pageFirstLines: number[] = []
 	final = false
 	cancelled = false
+	// What the last layout run threw (cleared once a later run completes); listeners hear it (onError).
 	error: unknown = undefined
 	// Pages laid out again after the layout first delivered them (page count fields).
 	readonly dirty = new Set<number>()
@@ -171,6 +172,7 @@ export class DocumentLayout {
 	done: Promise<void> = Promise.resolve()
 	private readonly runStyles: RunStyles
 	private readonly listeners = new Set<(event: LayoutEvent) => void>()
+	private readonly errorListeners = new Set<(error: unknown) => void>()
 
 	constructor(model: DocxModel, styles: StyleTable, runStyles: RunStyles, objects: ObjectTable) {
 		this.model = model
@@ -197,6 +199,23 @@ export class DocumentLayout {
 		return () => {
 			this.listeners.delete(listener)
 		}
+	}
+
+	// Hears a layout run that threw: a run in the background (continue(), resume(), an edit's) has no one
+	// awaiting it.
+	onError(listener: (error: unknown) => void): () => void {
+		this.errorListeners.add(listener)
+
+		return () => {
+			this.errorListeners.delete(listener)
+		}
+	}
+
+	// A layout run threw `error` (layoutDocument's runs report here).
+	fail(error: unknown): void {
+		this.error = error
+
+		for (const listener of this.errorListeners) listener(error)
 	}
 
 	cancel(): void {
@@ -338,9 +357,21 @@ export class DocumentLayout {
 
 	// Lays out synchronously until `deadline` (the clock passed in LayoutOptions.now) or until pages up to
 	// `through` are laid out: "done" when the layout is complete, "fonts" when fonts must load first
-	// (prepareFonts()).
+	// (prepareFonts()). A throw is reported (onError) and rethrown to the caller.
 	advance(deadline: number, through = Infinity): AdvanceResult {
-		return this.driver?.advance(deadline, through) ?? "done"
+		let result: AdvanceResult
+
+		try {
+			result = this.driver?.advance(deadline, through) ?? "done"
+		} catch (error) {
+			this.fail(error)
+
+			throw error
+		}
+
+		if (result === "done") this.error = undefined
+
+		return result
 	}
 
 	prepareFonts(): Promise<void> {
@@ -394,7 +425,11 @@ export class DocumentLayout {
 
 		const run = this.relayout(Math.max(0, page))
 
-		this.done = run.then(() => undefined)
+		// The caller hears a failure through `run` (and listeners through onError): `done` only settles.
+		this.done = run.then(
+			() => undefined,
+			() => undefined
+		)
 
 		return run
 	}
@@ -1722,7 +1757,7 @@ class Paginator {
 		const decorations = this.engine.decorations
 		const fromPage = borders.offsetFrom === "page"
 		const layer = borders.zOrder === "back" ? Layer.BEHIND : Layer.TEXT
-		const space = (border: { readonly space?: number } | undefined): number => ((border?.space ?? 0) * 4) / 3
+		const space = (border: { readonly space?: number } | undefined): number => points(border?.space ?? 0)
 		const top = resolver.border(borders.top)
 		const bottom = resolver.border(borders.bottom)
 		const left = resolver.border(borders.left)
@@ -3463,7 +3498,8 @@ export class LayoutDriver {
 				layout.final = true
 				layout.notify(0, layout.pages.length, true)
 
-				if (this.wantCompact && through >= 0) void this.continue()
+				// In the background: a failure is heard through onError.
+				if (this.wantCompact && through >= 0) this.continue().catch(ignoreFailure)
 
 				return "done"
 			}
@@ -3498,8 +3534,13 @@ export class LayoutDriver {
 		const edits = this.paginator.edits
 		const parts = edits?.retiredParts?.()
 
-		if (parts === undefined || parts.size === 0) return
+		if (parts !== undefined && parts.size > 0) edits?.compacted?.(this.shownOf(parts))
 
+		this.releaseObjects()
+	}
+
+	// Those of `parts` a page shows.
+	private shownOf(parts: ReadonlySet<number>): Set<number> {
 		const shown = new Set<number>()
 
 		for (const page of this.layout.pages) {
@@ -3510,7 +3551,22 @@ export class LayoutDriver {
 			}
 		}
 
-		edits?.compacted?.(shown)
+		return shown
+	}
+
+	// The objects of overlay parts the edits dropped keep their ids alone (ObjectTable.release).
+	private releaseObjects(): void {
+		const parts = this.layout.model.parts
+		const objects = this.layout.objects
+		let gone: Set<number> | undefined
+
+		for (const part of objects.heldParts()) if (parts[part] === undefined) (gone ??= new Set()).add(part)
+
+		if (gone === undefined) return
+
+		const shown = this.shownOf(gone)
+
+		objects.release(part => gone.has(part) && !shown.has(part))
 	}
 
 	// A merge due starts in `ms` unless an edit comes first (begin()), later while a save holds it off.
@@ -3540,7 +3596,7 @@ export class LayoutDriver {
 			}
 
 			this.wantCompact = true
-			void this.continue()
+			this.continue().catch(ignoreFailure)
 		}, ms)
 	}
 
@@ -3677,6 +3733,11 @@ export class LayoutDriver {
 	}
 }
 
+// A background run's rejection, already reported (DocumentLayout.onError).
+function ignoreFailure(): undefined {
+	return undefined
+}
+
 // performance.now where there is one (the clock an editor reads its budgets on, see PagedEditor), else Date.now.
 function monotonicNow(): () => number {
 	const performance: unknown = Reflect.get(globalThis, "performance")
@@ -3737,7 +3798,8 @@ export function layoutDocument(
 
 		return engine
 	}
-	let paginator = new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
+	const paginatorOf = (): Paginator => new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
+	let paginator = paginatorOf()
 	const slice = options.sliceMs ?? 8
 	const now = options.now ?? monotonicNow()
 	const pause = options.yield ?? defaultYield
@@ -3752,9 +3814,21 @@ export function layoutDocument(
 		try {
 			if (scan) {
 				for (let next = 0; next >= 0;) {
+					if (layout.cancelled || options.signal?.aborted === true) {
+						layout.cancelled = true
+
+						return
+					}
+
 					next = paginator.scanStories(next, now() + slice, now)
 
 					if (next >= 0) await pause()
+				}
+
+				if (layout.cancelled || options.signal?.aborted === true) {
+					layout.cancelled = true
+
+					return
 				}
 
 				await runStyles.prepareMissing()
@@ -3785,8 +3859,10 @@ export function layoutDocument(
 
 				await pause()
 			}
+
+			layout.error = undefined
 		} catch (error) {
-			layout.error = error
+			layout.fail(error)
 
 			throw error
 		} finally {
@@ -3812,7 +3888,7 @@ export function layoutDocument(
 		driver,
 		next => {
 			view = next
-			paginator = new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
+			paginator = paginatorOf()
 			driver.use(paginator)
 		},
 		(next, fresh) => {
@@ -3825,7 +3901,7 @@ export function layoutDocument(
 				return
 			}
 
-			paginator = new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
+			paginator = paginatorOf()
 			driver.use(paginator)
 		},
 		{
@@ -3840,7 +3916,7 @@ export function layoutDocument(
 					return
 				}
 
-				paginator = new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
+				paginator = paginatorOf()
 				driver.use(paginator)
 			}
 		}

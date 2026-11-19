@@ -138,6 +138,23 @@ describe("core annotation helpers", () => {
 		expect(richTextToPlain("broken <p")).toBe("broken ")
 	})
 
+	it("takes an entity only when its ';' is at most 12 characters away", () => {
+		expect(richTextToPlain("a & b")).toBe("a & b")
+		expect(richTextToPlain("&amp;x;")).toBe("&x;")
+		// ";" 12 characters after "&": an (unknown) entity, dropped.
+		expect(richTextToPlain("x&abcdefghijk;y")).toBe("xy")
+		// 13 characters: literal text.
+		expect(richTextToPlain("x&abcdefghijkl;y")).toBe("x&abcdefghijkl;y")
+	})
+
+	it("reads a megabyte of '&' without ';' in linear time", () => {
+		const rich = "&".repeat(1 << 20)
+		const started = performance.now()
+
+		expect(richTextToPlain(rich)).toBe(rich)
+		expect(performance.now() - started).toBeLessThan(1000)
+	})
+
 	it("converts colours", () => {
 		expect(rgbToHex([1, 0.5, 0])).toBe("FF8000")
 		expect(hexToRgb("#ff8000")).toEqual([1, 128 / 255, 0])

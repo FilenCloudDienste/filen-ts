@@ -9,7 +9,7 @@ import {
 	type ReactNode,
 	type RefObject
 } from "react"
-import type { SheetId } from "../../../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId } from "../../../core/sheet/protocol"
 import type { DrawingAnchor } from "../../../core/xlsx/drawings/anchor"
 import type { SheetDrawingObject, SheetDrawings } from "../../../core/xlsx/drawings/feature"
 import type { DrawingRender } from "../../../core/xlsx/drawings/render"
@@ -17,8 +17,10 @@ import type { DocxMedia } from "../../../dom/docx/protocol"
 import { rasterOpaque, rasterSize } from "../../../core/docx/objects/images"
 import { DocxMediaCache } from "../../docx/media"
 import { drawingImages, imageMime, inlineImageUrls, paintDrawing } from "../../docx/paint/drawing"
+import { textMeasurer } from "../../docx/paint/objects"
 import type { SheetGridModel } from "../model"
 import type { SheetGridHandle } from "../SheetGrid"
+import { settled } from "../settled"
 import {
 	canvasPicture,
 	drawPicture,
@@ -447,8 +449,9 @@ export function SheetObjects(props: SheetObjectsProps) {
 			element.focus({ preventScroll: true })
 	}, [selected, drawings])
 
+	// A frame for the frame listeners (place) to draw the objects again: no cell changed, so the cells' version stays.
 	const repaint = (): void => {
-		grid.repaint()
+		handle.current?.renderer.schedule()
 	}
 
 	const begin = (event: PointerEvent<HTMLElement>, object: SheetDrawingObject, part: Handle | null): void => {
@@ -517,20 +520,24 @@ export function SheetObjects(props: SheetObjectsProps) {
 		}
 
 		const shown = draft.current
+		const clear = (): void => {
+			if (draft.current !== shown) return
 
-		void props.onMove(current.object, anchorOf(current.object.anchor, box, axes, { rows: 1_048_576, cols: 16_384 })).then(moved => {
-			const clear = (): void => {
-				if (draft.current !== shown) return
+			draft.current = null
+			repaint()
+		}
 
-				draft.current = null
-				repaint()
+		// Refused, or the session closed or failed: the object goes back where it is. Kept: the new listing replaces the
+		// draft, or, when the listing did not change, the next frame does.
+		props.onMove(current.object, anchorOf(current.object.anchor, box, axes, { rows: SHEET_MAX_ROWS, cols: SHEET_MAX_COLS })).then(
+			moved => {
+				if (!moved) clear()
+				else requestAnimationFrame(clear)
+			},
+			() => {
+				clear()
 			}
-
-			// Refused: the object goes back where it is. Kept: the new listing replaces the draft, or, when the listing did
-			// not change, the next frame does.
-			if (!moved) clear()
-			else requestAnimationFrame(clear)
-		})
+		)
 	}
 
 	const key = (event: KeyboardEvent<HTMLElement>, object: SheetDrawingObject): void => {
@@ -572,9 +579,14 @@ export function SheetObjects(props: SheetObjectsProps) {
 				const box = anchorBox(object.anchor, axes)
 				const dx = grid.layout(sheet)?.rightToLeft === true ? -move[0] : move[0]
 
-				props.onMove(
-					object,
-					anchorOf(object.anchor, { ...box, x: box.x + dx, y: box.y + move[1] }, axes, { rows: 1_048_576, cols: 16_384 })
+				settled(
+					props.onMove(
+						object,
+						anchorOf(object.anchor, { ...box, x: box.x + dx, y: box.y + move[1] }, axes, {
+							rows: SHEET_MAX_ROWS,
+							cols: SHEET_MAX_COLS
+						})
+					)
 				)
 			}
 		} else if (event.key === "Tab") {
@@ -592,7 +604,7 @@ export function SheetObjects(props: SheetObjectsProps) {
 			}
 		} else if (shortcut === "undo" || shortcut === "redo" || shortcut === "redoOrRepeat") {
 			// Undo and redo on the keys the grid has them on.
-			void (shortcut === "undo" ? grid.undo() : grid.redo())
+			settled(shortcut === "undo" ? grid.undo() : grid.redo())
 		} else if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) {
 			return
 		}
@@ -838,27 +850,6 @@ function ObjectPlaceholder() {
 	)
 }
 
-// Advance widths through a canvas (text the painter wraps); NaN without one.
-function measurer(): (text: string, font: string) => number {
-	let context: CanvasRenderingContext2D | null | undefined
-
-	return (text, font) => {
-		if (context === undefined) {
-			try {
-				context = document.createElement("canvas").getContext("2d")
-			} catch {
-				context = null
-			}
-		}
-
-		if (context === null) return Number.NaN
-
-		context.font = font
-
-		return context.measureText(text).width
-	}
-}
-
 function deviceRatio(): number {
 	return typeof window === "undefined" ? 1 : window.devicePixelRatio || 1
 }
@@ -1093,7 +1084,7 @@ function ObjectDrawing(props: {
 			const svg = paintDrawing(rendered.drawing, {
 				document,
 				idPrefix: paintId(),
-				measureText: measurer(),
+				measureText: textMeasurer(document),
 				imageUrl: image => inline.get(image) ?? partUrls.get(image.svgPartName ?? image.partName ?? "")
 			})
 

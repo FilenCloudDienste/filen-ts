@@ -27,6 +27,7 @@ import {
 	OpcError,
 	ZipError
 } from "../../opc/index"
+import { RelationshipIds } from "../../opc/relationships"
 import { XmlError, decodeUtf8, encodeUtf8, escapeAttribute, type XmlDocument } from "../../xml/index"
 import type { Node } from "prosemirror-model"
 import type { DocxEditContext, NewStory } from "../edit/context"
@@ -50,7 +51,15 @@ import {
 } from "./newStory"
 import { NUMBERING_CONTENT_TYPE, planNumbering } from "./numbering"
 import { orphanedRelationships } from "./orphans"
-import { noteCopySource, noteCopyTarget, orphanedNotes, readNoteReferences, relationshipIdsOf, relationshipUses } from "./parts/notes"
+import {
+	noteCopySource,
+	noteCopyTarget,
+	openedRoot,
+	orphanedNotes,
+	readNoteReferences,
+	relationshipIdsOf,
+	relationshipUses
+} from "./parts/notes"
 import { Out } from "./markup"
 import { PART_CONTRIBUTORS, type PartContributor, type RootDeclarations, type SaveParts } from "./parts/index"
 import { DocxWriteError, StoryWriter, type StoryDraft, type StoryOutput, type WriteEnvironment } from "./story"
@@ -158,29 +167,19 @@ async function checksum(bytes: PartBytes, clock: SliceClock | undefined): Promis
 
 // Relationships of one source part with new ones planned, ids allocated as addRelationships gives them.
 class RelationshipPlan {
-	private readonly taken = new Set<string>()
-	private highest = 0
+	private readonly allocated = new RelationshipIds()
 	readonly additions: NewRelationship[] = []
 	readonly ids: string[] = []
 	// Existing relationships the part no longer uses, to take out.
 	readonly removals = new Set<string>()
 
 	constructor(existing: readonly string[]) {
-		for (const id of existing) {
-			this.taken.add(id)
-
-			const numbered = /^rId(\d+)$/.exec(id)
-
-			if (numbered !== null) this.highest = Math.max(this.highest, Number(numbered[1]))
-		}
+		for (const id of existing) this.allocated.take(id)
 	}
 
 	add(relationship: NewRelationship): string {
-		let id = `rId${++this.highest}`
+		const id = this.allocated.next()
 
-		while (this.taken.has(id)) id = `rId${++this.highest}`
-
-		this.taken.add(id)
 		this.additions.push(relationship)
 		this.ids.push(id)
 
@@ -358,6 +357,9 @@ async function assemble(
 	const replaced: Replaced[] = cuts.map(cut => ({ ...cut, bytes: new Uint8Array() }))
 
 	if (open !== undefined) replaced.push({ from: document.start(root), to: document.openEnd(root), bytes: encodeUtf8(open) })
+	// A self-closing root opened (`open`, the whole root) for new stories: closed after them.
+	if (open !== undefined && document.isSelfClosing(root))
+		replaced.push({ from: document.end(root), to: document.end(root), bytes: encodeUtf8(`</${document.name(root)}>`) })
 
 	// A new container goes before a container replaced at the same place.
 	const ordered = [...drafted, ...replaced].sort((a, b) => a.from - b.from || a.to - b.to)
@@ -718,8 +720,8 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 		return out
 	}
 	// A copied note's draft (write/parts/notes.ts noteCopyTarget) with the parts it owns: each relationship id it
-	// names one by (COPIED_RELATIONSHIP, in the relationships namespace only) becomes that of a relationship of
-	// the notes part `into` to a copy of the part, or to the part itself where nothing else uses it any more.
+	// names one by (COPIED_RELATIONSHIP, in any attribute namesRelationship reads) becomes that of a relationship
+	// of the notes part `into` to a copy of the part, or to the part itself where nothing else uses it any more.
 	const withCopiedParts = async (draft: StoryDraft, from: StoryPart, into: StoryPart): Promise<StoryDraft> => {
 		const placeholders = new Map(from.relationships.all.filter(r => r.id.startsWith(COPIED_RELATIONSHIP)).map(r => [r.id, r]))
 
@@ -897,8 +899,10 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 			if (container === undefined) continue
 
 			const to = container.to ?? container.at
+			// A self-closing root (a part holding no story yet) is opened for it: it goes at the root's end.
+			const opened = document.isSelfClosing(root) && container.at === document.end(root)
 
-			if (to === container.at ? !isInsertionPoint(document, container.at) : !wholeRoot(container.at, to))
+			if (to === container.at ? !opened && !isInsertionPoint(document, container.at) : !wholeRoot(container.at, to))
 				throw new DocxWriteError("unsupported", `A new story of ${target.name} goes inside another element`)
 
 			return container
@@ -1066,7 +1070,11 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 
 	for (const part of new Set([...drafted.keys(), ...cuts.keys()])) {
 		const list = drafted.get(part) ?? []
-		const open = list.length === 0 ? undefined : declared.get(part)?.open
+		const document = part.document
+		const open =
+			list.length === 0
+				? undefined
+				: (declared.get(part)?.open ?? (document.isSelfClosing(document.documentElement()) ? openedRoot(document) : undefined))
 		const result = await assemble(part, list, cuts.get(part) ?? [], open, clock)
 		const made = created.get(partKey(part.name))
 

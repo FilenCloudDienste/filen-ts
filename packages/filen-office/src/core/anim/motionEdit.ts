@@ -1,5 +1,6 @@
 import { DEFAULT_PRESENTATION_BUDGETS } from "../presentation/budget"
 import { refused, type Refused } from "../presentation/model"
+import { CURVE_STEPS, MOTION_PATH_TOKEN } from "./motion"
 import type { Behavior, TimeNode, TimingTree } from "./model"
 import { motion } from "./presets/effects/build"
 import type { EffectPreset } from "./presets/effects/types"
@@ -104,20 +105,18 @@ function lineControls(controls: Float64Array, segment: number, ax: number, ay: n
 
 // --- Reading and writing the attribute ---
 
-const TOKENS = /[A-Za-z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/gu
-// The chords the player flattens a curve into (motion.ts).
-const CURVE_CHORDS = 16
+const TOKENS = new RegExp(MOTION_PATH_TOKEN, "gu")
 
 // The path attribute (and its ptsTypes) as an editable path; a path of more than one subpath, or with nothing to
 // edit, is refused (it stays as the file wrote it), and so is one of more flattened segments (a line one, a curve
-// CURVE_CHORDS, the close one) than `maxSegments`, the most an edit may write, read only that far.
+// CURVE_STEPS, the close one) than `maxSegments`, the most an edit may write, read only that far.
 export function readEditablePath(
 	path: string,
 	ptsTypes?: string,
 	maxSegments: number = DEFAULT_PRESENTATION_BUDGETS.timing.motionSegments
 ): EditablePath | Refused {
 	// Tokens are read one at a time, so a path past the bound is refused before the rest of it is split.
-	const scan = new RegExp(TOKENS.source, "uy")
+	const scan = new RegExp(MOTION_PATH_TOKEN, "uy")
 	let token: string | undefined
 	let at = 0
 	// The next token; characters that start none are passed over.
@@ -241,7 +240,7 @@ export function readEditablePath(
 
 				const [x1 = 0, y1 = 0, x2 = 0, y2 = 0, x3 = 0, y3 = 0] = values
 
-				if (grow(CURVE_CHORDS)) return tooMany()
+				if (grow(CURVE_STEPS)) return tooMany()
 
 				curves.push(1)
 				controls.push(ox + x1, oy + y1, ox + x2, oy + y2)

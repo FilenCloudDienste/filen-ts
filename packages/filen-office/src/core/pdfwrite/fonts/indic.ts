@@ -76,6 +76,10 @@ const BASIC = ["nukt", "akhn", "rphf", "rkrf", "pref", "blwf", "abvf", "half", "
 const PRESENTATION = ["init", "pres", "abvs", "blws", "psts", "haln"] as const
 const NON_GLOBAL = new Set(["rphf", "pref", "blwf", "abvf", "half", "pstf", "init"])
 
+// Backward walks over a syllable cost one operation per this many glyphs walked: a MultipleSubst copies the
+// syllable to every glyph it emits, so a font can make one syllable as long as the run's length limit.
+const WALK_PER_OP = 32
+
 const bit = (category: number): number => 1 << category
 const CONSONANTS = bit(C.C) | bit(C.CS) | bit(C.Ra) | bit(C.CM) | bit(C.V) | bit(C.PLACEHOLDER) | bit(C.DOTTEDCIRCLE)
 const JOINERS = bit(C.ZWJ) | bit(C.ZWNJ)
@@ -542,13 +546,18 @@ function reorderSyllable(buffer: GlyphBuffer, plan: Plan, start: number, end: nu
 			position[i] = lastPosition
 
 			if (cat === C.H && position[i] === P.PRE_M) {
-				// The halant does not move with a left matra.
-				for (let j = i; j > start; j--) {
+				// The halant does not move with a left matra. A font can multiply left matras into a long
+				// syllable, so the walk is charged to the run.
+				let j = i
+
+				for (; j > start; j--) {
 					if (position[j - 1] !== P.PRE_M) {
 						position[i] = position[j - 1] ?? 0
 						break
 					}
 				}
+
+				buffer.spend(Math.floor((i - j) / WALK_PER_OP))
 			}
 		} else if (position[i] !== P.SMVD) {
 			lastPosition = position[i] ?? 0
@@ -667,6 +676,9 @@ function reorderSyllable(buffer: GlyphBuffer, plan: Plan, start: number, end: nu
 			j--
 			buffer.mask[j] = (buffer.mask[j] ?? 0) & ~halfMask
 		} while (j > start && !isConsonant(buffer, j))
+
+		// A font can multiply ZWNJs into a long syllable, so the walk is charged to the run.
+		buffer.spend(Math.floor((i - j) / WALK_PER_OP))
 	}
 }
 

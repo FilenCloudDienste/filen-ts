@@ -3,7 +3,8 @@ import { relationshipKind, type DocxPackage } from "../package"
 import type { StoryPart } from "../model/index"
 import type { DocxEditContext } from "../edit/context"
 import { corePropertiesPart } from "../../opc/coreProperties"
-import { Namespaces, type XmlDocument } from "../../xml/index"
+import { OpcError, ZipError } from "../../opc/errors"
+import { Namespaces, XmlError, type XmlDocument } from "../../xml/index"
 import { controlKey, controlOf, simpleBinding, sourceControl, storeId, type ControlInfo, type SimpleBinding } from "./controls"
 import { formatControlDate, parseControlDate, storedDate } from "./dates"
 
@@ -115,32 +116,37 @@ export class BindingStores {
 		const out = new Map<string, string>()
 
 		for (const item of this.pkg.parts("customXml")) {
-			const relationships = await this.pkg.relationships(item)
-			const props = relationships.all.find(
-				relationship =>
-					!relationship.external &&
-					relationshipKind(relationship.type) === "customXmlProps" &&
-					relationship.partName !== undefined
-			)
+			// An item that cannot be read maps no store; the others still do.
+			try {
+				const relationships = await this.pkg.relationships(item)
+				const props = relationships.all.find(
+					relationship =>
+						!relationship.external &&
+						relationshipKind(relationship.type) === "customXmlProps" &&
+						relationship.partName !== undefined
+				)
 
-			if (props?.partName === undefined || !this.pkg.has(props.partName)) continue
+				if (props?.partName === undefined || !this.pkg.has(props.partName)) continue
 
-			const document = await this.pkg.xml(props.partName)
-			const root = document.documentElement()
-			const namespaces = new Namespaces(document, { lenient: true })
-			const id = root < 0 ? undefined : namespaces.attribute(root, CUSTOM_XML, "itemID")
+				const document = await this.pkg.xml(props.partName)
+				const root = document.documentElement()
+				const namespaces = new Namespaces(document, { lenient: true })
+				const id = root < 0 ? undefined : namespaces.attribute(root, CUSTOM_XML, "itemID")
 
-			if (id !== undefined && !out.has(storeId(id))) out.set(storeId(id), item)
+				const data = await this.pkg.xml(item)
+				const dataRoot = data.documentElement()
 
-			const data = await this.pkg.xml(item)
-			const dataRoot = data.documentElement()
+				if (id !== undefined && !out.has(storeId(id))) out.set(storeId(id), item)
 
-			if (
-				dataRoot >= 0 &&
-				!out.has(COVER_PAGE_NAMESPACE) &&
-				new Namespaces(data, { lenient: true }).elementUri(dataRoot) === COVER_PAGE_NAMESPACE
-			)
-				out.set(COVER_PAGE_NAMESPACE, item)
+				if (
+					dataRoot >= 0 &&
+					!out.has(COVER_PAGE_NAMESPACE) &&
+					new Namespaces(data, { lenient: true }).elementUri(dataRoot) === COVER_PAGE_NAMESPACE
+				)
+					out.set(COVER_PAGE_NAMESPACE, item)
+			} catch (error) {
+				if (!unreadable(error)) throw error
+			}
 		}
 
 		return out
@@ -148,6 +154,11 @@ export class BindingStores {
 }
 
 const CUSTOM_XML = "http://schemas.openxmlformats.org/officeDocument/2006/customXml"
+
+// Whether `error` is a part of the package that cannot be read (malformed XML, a damaged entry).
+function unreadable(error: unknown): boolean {
+	return error instanceof XmlError || error instanceof OpcError || error instanceof ZipError
+}
 
 // ---- bound controls of a document -----------------------------------------------------------------------
 
@@ -363,8 +374,17 @@ async function findUnmapped(context: DocxEditContext, out: Set<string>): Promise
 
 			seen.add(binding.key)
 
-			const name = await stores.part(binding.store)
-			const document = name === undefined ? undefined : await pkg.xml(name)
+			let document: XmlDocument | undefined
+
+			try {
+				const name = await stores.part(binding.store)
+
+				document = name === undefined ? undefined : await pkg.xml(name)
+			} catch (error) {
+				// A store that cannot be read maps no control.
+				if (!unreadable(error)) throw error
+			}
+
 			const node = document === undefined ? -1 : boundNode(document, new Namespaces(document, { lenient: true }), binding)
 
 			if (document === undefined || node < 0 || document.firstChildElement(node) >= 0) out.add(binding.key)

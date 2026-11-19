@@ -1,6 +1,6 @@
 import type { PDFDocument, PDFObject } from "mupdf"
 import type { PdfMatrix } from "../../../core/pdfedit/matrix"
-import { at, deref, name as nameOf, ref } from "../fields"
+import { at, deref, lazyPages, name as nameOf, ref } from "../fields"
 
 // Object access shared by the page operations. MuPDF's null object has no document, so every read of a value that may
 // be missing goes through these instead of PDFObject.get.
@@ -67,25 +67,9 @@ export function shallowCopy(doc: PDFDocument, dict: PDFObject, skip: ReadonlySet
 	return copy
 }
 
-// The object numbers of the page objects in page order.
-export function pageNums(doc: PDFDocument): number[] {
-	const count = doc.countPages()
-	const out: number[] = []
-
-	for (let index = 0; index < count; index++) out.push(numOf(doc.findPage(index)) ?? -1)
-
-	return out
-}
-
-// Page index by page object number.
+// Page index by page object number (one walk of the page tree, fields.ts lazyPages).
 export function pageIndexByNum(doc: PDFDocument): Map<number, number> {
-	const map = new Map<number, number>()
-
-	pageNums(doc).forEach((num, index) => {
-		if (num >= 0) map.set(num, index)
-	})
-
-	return map
+	return lazyPages(doc)()
 }
 
 // The annotation objects of a page (unresolved references, or direct dictionaries).
@@ -179,27 +163,18 @@ export function targetDest(holder: PDFObject): PDFObject | null {
 }
 
 // Appends drawing to a page's content: the existing content wrapped in q/Q (so a CTM it leaves behind does not move
-// what follows), then `content`, with `resources` merged into the page's XObject resources.
+// what follows), then `content`, with `xobjects` merged into the page's XObject resources. The page gets its own
+// copy of its resources, inherited from the page tree or shared with other pages, before an entry is added.
 export function appendPageContent(doc: PDFDocument, page: PDFObject, content: string, xobjects: ReadonlyMap<string, PDFObject>): void {
 	const resolved = deref(page)
-	const resources = at(resolved, "Resources")
-	let own = resources
-
-	if (!own.isDictionary()) {
-		own = doc.newDictionary()
-		resolved.put("Resources", own)
-	} else if (ref(resolved, "Resources").isIndirect()) {
-		// Resources shared with other pages: this page gets its own copy before an entry is added.
-		own = shallowCopy(doc, resources)
-		resolved.put("Resources", own)
-	}
-
+	const own = shallowCopy(doc, resolved.getInheritable("Resources"))
 	const existing = at(own, "XObject")
 	const xobject = existing.isDictionary() ? shallowCopy(doc, existing) : doc.newDictionary()
 
 	for (const [key, value] of xobjects) xobject.put(key, value)
 
 	own.put("XObject", xobject)
+	resolved.put("Resources", own)
 
 	const contents = doc.newArray()
 
@@ -215,9 +190,9 @@ export function appendPageContent(doc: PDFDocument, page: PDFObject, content: st
 	resolved.put("Contents", contents)
 }
 
-// An XObject resource name not yet used on the page.
+// An XObject resource name not yet used on the page (its own or inherited resources).
 export function freeXObjectName(page: PDFObject, prefix: string, taken: Set<string>): string {
-	const existing = at(page, "Resources", "XObject")
+	const existing = at(deref(page).getInheritable("Resources"), "XObject")
 
 	for (let index = 1; ; index++) {
 		const candidate = `${prefix}${String(index)}`

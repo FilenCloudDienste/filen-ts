@@ -1,3 +1,4 @@
+import { imageDimensions } from "../opc/mediaPolicy"
 import { sliceClock, type SliceClock, type Slicing } from "../slicing"
 import { ByteWriter, concat } from "./bytes"
 import { platformRandom, securityOfKey, standardSecurity, type PdfSecurityKey, type RandomBytes, type SecurityHandler } from "./crypto"
@@ -132,6 +133,9 @@ interface OutlineItem {
 	readonly level: number
 	readonly target: PdfDestinationTarget | string
 }
+
+// Bytes read for the pixel size a GIF, BMP or WebP header declares (PNG and JPEG sizes come from their own readers).
+const IMAGE_HEADER_BYTES = 32
 
 // Mesh streams the writer holds to share them (a document's distinct scenes; more are written again each time).
 const MESH_SHARE_BYTES = 16 * 1024 * 1024
@@ -749,9 +753,13 @@ export class PdfWriter implements PdfObjectSink {
 		}
 		let orientation = 1
 		const transform = source.transform
+		// The size the header declares, checked before decoding; undefined: not known, left to the decoded size.
+		let declared: { readonly width: number; readonly height: number } | undefined
 
 		if (format === "jpeg") {
 			const jpeg = await readJpeg(bytes)
+
+			declared = jpeg
 
 			if (jpeg !== undefined) orientation = jpeg.orientation
 
@@ -776,6 +784,8 @@ export class PdfWriter implements PdfObjectSink {
 			}
 		} else if (format === "png") {
 			const png = await readPng(bytes)
+
+			declared = png
 
 			if (png !== undefined && pngPassthrough(png) && transform === undefined) {
 				const colors = png.colorType === 2 ? 3 : 1
@@ -810,6 +820,12 @@ export class PdfWriter implements PdfObjectSink {
 		}
 
 		if (this.decoder === undefined) throw new PdfWriteError("imageUnsupported", `No decoder for this ${format} image`)
+
+		declared ??= imageDimensions(await bytes.read(0, IMAGE_HEADER_BYTES))
+
+		if (declared !== undefined && declared.width * declared.height > this.maxImagePixels) {
+			throw new PdfWriteError("imageTooLarge", `The image declares ${declared.width * declared.height} pixels`)
+		}
 
 		const decoded = await this.decoder.decode(source.data, format, this.maxImagePixels)
 

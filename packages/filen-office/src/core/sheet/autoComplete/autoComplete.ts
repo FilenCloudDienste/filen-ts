@@ -20,8 +20,13 @@ export interface AutoCompleteCells {
 	text(row: number, col: number): string | null
 }
 
+// The most cells read each way from the edited one: the entries are gathered for every entry typed, so a run
+// hundreds of thousands of rows long is read only as far as this. Ordinary sheets never reach it.
+export const AUTO_COMPLETE_REACH = 10_000
+
 // The distinct text entries of the run of filled cells round (row, col) in its column (the cell itself left out),
-// with the row each was first found at: up from the cell, then down. `rows`: the sheet's row extent.
+// with the row each was first found at: up from the cell, then down, at most AUTO_COMPLETE_REACH cells each way.
+// `rows`: the sheet's row extent.
 export function columnEntries(
 	cells: AutoCompleteCells,
 	row: number,
@@ -43,8 +48,11 @@ export function columnEntries(
 		out.push({ row: at, text })
 	}
 
-	for (let at = row - 1; at >= 0 && cells.filled(at, col); at--) visit(at)
-	for (let at = row + 1; at < rows && cells.filled(at, col); at++) visit(at)
+	const top = Math.max(0, row - AUTO_COMPLETE_REACH)
+	const bottom = Math.min(rows, row + 1 + AUTO_COMPLETE_REACH)
+
+	for (let at = row - 1; at >= top && cells.filled(at, col); at--) visit(at)
+	for (let at = row + 1; at < bottom && cells.filled(at, col); at++) visit(at)
 
 	return out
 }

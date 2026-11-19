@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { Regex, RegexSyntaxError, RegexUnsupportedError } from "../core/sheet/formula/regex/index"
+import { Regex, RegexBudgetError, RegexSyntaxError, RegexUnsupportedError } from "../core/sheet/formula/regex/index"
 import { budget } from "./timing"
 
 // The linear-time PCRE2 engine behind REGEXTEST, REGEXEXTRACT and REGEXREPLACE. Expected values are PCRE2's
@@ -367,5 +367,23 @@ describe("regex engine: linear time", () => {
 		const subject = "a".repeat(30_000)
 
 		expect(() => [...regex.matches(subject)]).toThrow(RegexUnsupportedError)
+	})
+
+	it("stops a search whose threads take no steps but copy captures or follow alternatives at every position", () => {
+		const subject = "a".repeat(32_767)
+		const groups = compile("()".repeat(706))
+		const alternatives = Regex.compile("|".repeat(4_999))
+
+		expect(() => [...groups.matches(subject)]).toThrow(RegexBudgetError)
+		expect(() => [...alternatives.matches(subject)]).toThrow(RegexBudgetError)
+	})
+
+	it("refuses a program whose nested repeats count past any number, repeated no times too", () => {
+		const nested = `${"(?:".repeat(65)}a{65535}${"){65535}".repeat(65)}`
+
+		for (const pattern of [nested, `(?:${nested}){0}`, `(?:${"(?:".repeat(64)}a{65535}${"){65535}".repeat(64)}){0}`]) {
+			expect(kind(pattern)).toBe("unsupported")
+			expect(() => Regex.compile(pattern)).toThrow(RegexUnsupportedError)
+		}
 	})
 })

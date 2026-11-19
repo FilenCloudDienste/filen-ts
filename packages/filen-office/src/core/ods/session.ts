@@ -10,7 +10,7 @@ import { openOds } from "./open"
 import { odsWriter } from "./write/writer"
 
 // An OpenDocument spreadsheet as a session of the xlsx document: every sheet read at open (content.xml is one
-// stream), view-only. An encrypted package is refused as core/odf refuses it.
+// stream), editable and saved through odsWriter. An encrypted package is refused as core/odf refuses it.
 export type OdsSessionOpen = XlsxSessionOpen | { readonly kind: "refused"; readonly reason: "unsupported" }
 
 export async function openOdsSession(

@@ -3,14 +3,19 @@ import {
 	FRAGMENT_FLOATS,
 	FRAGMENT_INTS,
 	FRAGMENT_KIND_MASK,
+	FragmentFloat,
+	FragmentInt,
 	FragmentKind,
 	LINE_FLOATS,
 	LINE_INTS,
 	LineFlag,
+	LineFloat,
+	LineInt,
 	TextLayout,
 	nextCluster,
 	splitUpright as splitUprightClusters
 } from "../../text/index"
+import { DecorationFloat } from "../../text/displayList"
 import type { TextPage } from "../output"
 import type { BodySession } from "./body"
 import { pageOf } from "./page"
@@ -55,26 +60,26 @@ export function stackUpright(
 	for (let line = 0; line < out.lineCount; line++) {
 		const lf = line * LINE_FLOATS
 		const li = line * LINE_INTS
-		const top = out.lineFloats[lf] ?? 0
-		const height = out.lineFloats[lf + 1] ?? 0
-		const flags = out.lineInts[li + 4] ?? 0
-		const source = out.lineInts[li + 5] ?? 0
+		const top = out.lineFloats[lf + LineFloat.TOP] ?? 0
+		const height = out.lineFloats[lf + LineFloat.HEIGHT] ?? 0
+		const flags = out.lineInts[li + LineInt.FLAGS] ?? 0
+		const source = out.lineInts[li + LineInt.SOURCE] ?? 0
 		const text = texts[source] ?? ""
 		const columnX = leftToRight ? top : across - top - height
 		const center = columnX + height / 2
-		const first = out.lineInts[li] ?? 0
-		const count = out.lineInts[li + 1] ?? 0
-		let y = out.lineFloats[lf + 3] ?? 0
+		const first = out.lineInts[li + LineInt.FIRST_FRAGMENT] ?? 0
+		const count = out.lineInts[li + LineInt.FRAGMENT_COUNT] ?? 0
+		let y = out.lineFloats[lf + LineFloat.X] ?? 0
 
 		for (let k = first; k < first + count; k++) {
 			const fi = k * FRAGMENT_INTS
-			const start = out.fragmentInts[fi] ?? 0
-			const end = out.fragmentInts[fi + 1] ?? 0
-			const style = out.fragmentInts[fi + 2] ?? 0
-			const info = out.fragmentInts[fi + 3] ?? 0
+			const start = out.fragmentInts[fi + FragmentInt.TEXT_START] ?? 0
+			const end = out.fragmentInts[fi + FragmentInt.TEXT_END] ?? 0
+			const style = out.fragmentInts[fi + FragmentInt.STYLE] ?? 0
+			const info = out.fragmentInts[fi + FragmentInt.INFO] ?? 0
 
 			if ((info & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT) {
-				y += out.fragmentFloats[k * FRAGMENT_FLOATS + 1] ?? 0
+				y += out.fragmentFloats[k * FRAGMENT_FLOATS + FragmentFloat.WIDTH] ?? 0
 				continue
 			}
 
@@ -110,17 +115,18 @@ export function splitUpright(out: TextLayout, texts: readonly string[], session:
 export function mirrorLines(out: TextLayout, height: number): void {
 	for (let line = 0; line < out.lineCount; line++) {
 		const lf = line * LINE_FLOATS
-		const top = out.lineFloats[lf] ?? 0
-		const dy = height - (out.lineFloats[lf + 1] ?? 0) - 2 * top
+		const top = out.lineFloats[lf + LineFloat.TOP] ?? 0
+		const dy = height - (out.lineFloats[lf + LineFloat.HEIGHT] ?? 0) - 2 * top
 
-		out.lineFloats[lf] = top + dy
-		out.lineFloats[lf + 2] = (out.lineFloats[lf + 2] ?? 0) + dy
+		out.lineFloats[lf + LineFloat.TOP] = top + dy
+		out.lineFloats[lf + LineFloat.BASELINE] = (out.lineFloats[lf + LineFloat.BASELINE] ?? 0) + dy
 
-		const firstDecoration = out.lineInts[line * LINE_INTS + 6] ?? 0
-		const endDecoration = line + 1 < out.lineCount ? (out.lineInts[(line + 1) * LINE_INTS + 6] ?? 0) : out.decorationCount
+		const firstDecoration = out.lineInts[line * LINE_INTS + LineInt.FIRST_DECORATION] ?? 0
+		const endDecoration =
+			line + 1 < out.lineCount ? (out.lineInts[(line + 1) * LINE_INTS + LineInt.FIRST_DECORATION] ?? 0) : out.decorationCount
 
 		for (let d = firstDecoration; d < endDecoration; d++) {
-			const at = d * DECORATION_FLOATS + 1
+			const at = d * DECORATION_FLOATS + DecorationFloat.Y
 
 			out.decorationFloats[at] = (out.decorationFloats[at] ?? 0) + dy
 		}

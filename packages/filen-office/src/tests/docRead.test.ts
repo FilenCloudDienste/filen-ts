@@ -195,6 +195,36 @@ describe("Word binary structures", () => {
 		expect(docText(model)).toBe("1. a\n1.a) b\n1.b) c\n2. d\n")
 	})
 
+	it("bounds hostile list start values and keeps small labels", async () => {
+		const labels = async (start: number, nfc: number, count = 2): Promise<(string | undefined)[]> => {
+			const { plfLst, lstLength, plfLfo } = lists([{ nfc, text: "\u0000.", start }])
+
+			const model = await read({
+				pieces: [{ text: "a\r".repeat(count) }],
+				structures: { plfLst, plfLfo },
+				lengths: { plfLst: lstLength },
+				paragraphs: Array.from({ length: count }, (_, k) => ({
+					end: 2 * (k + 1),
+					grpprl: [...prl.u16(0x460b, 1), ...prl.u8(0x260a, 0)]
+				}))
+			})
+
+			return model.paragraphs.map(paragraph => paragraph.list?.text)
+		}
+
+		// Word caps start values at 32767 and stops counting there; roman and letters fall back to decimal.
+		expect(await labels(0x7fffffff, 2)).toEqual(["32767.", "32767."])
+		expect(await labels(0x7fffffff, 4)).toEqual(["32767.", "32767."])
+		expect(await labels(3999, 1)).toEqual(["MMMCMXCIX.", "4000."])
+		expect(await labels(26 * 30, 4)).toEqual([`${"z".repeat(30)}.`, "781."])
+		expect(await labels(-5, 4)).toEqual([".", "a."])
+		expect(await labels(-5, 2)).toEqual([".", "i."])
+		expect(await labels(1, 5, 3)).toEqual(["1st.", "2nd.", "3rd."])
+		expect(await labels(4, 3)).toEqual(["D.", "E."])
+		expect(await labels(9, 0x16)).toEqual(["09.", "10."])
+		expect(await labels(1, 0xff)).toEqual([".", "."])
+	})
+
 	it("labels auto-numbered footnote references", async () => {
 		const model = await read({
 			pieces: [{ text: "Note\u0002 here\r\u0002 text\r\r" }],

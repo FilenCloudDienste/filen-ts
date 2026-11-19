@@ -215,7 +215,7 @@ export class Gdi {
 	private inPath = false
 	private widened = false
 	private cached: number[] | null = null
-	private readonly penStrokes = new WeakMap<PenObject, { width: number; index: number }>()
+	private readonly penStrokes = new WeakMap<PenObject, { width: number; miterLimit: number; index: number }>()
 	private textChars = 0
 	// No slot below this one is free.
 	private freeFrom = 0
@@ -701,7 +701,14 @@ export class Gdi {
 		const width = Math.max(this.devicePx, cosmetic ? this.devicePx : pen.width * scaleOf(m))
 		const cached = this.penStrokes.get(pen)
 
-		if (cached !== undefined && cached.width === width && this.dc.rop2 !== R2_BLACK && this.dc.rop2 !== R2_WHITE) return cached.index
+		if (
+			cached !== undefined &&
+			cached.width === width &&
+			cached.miterLimit === this.dc.miterLimit &&
+			this.dc.rop2 !== R2_BLACK &&
+			this.dc.rop2 !== R2_WHITE
+		)
+			return cached.index
 
 		let dash: DashPreset = "solid"
 		let customDash: Float32Array | null = null
@@ -755,7 +762,8 @@ export class Gdi {
 		}
 		const index = this.out.stroke(stroke)
 
-		if (this.dc.rop2 !== R2_BLACK && this.dc.rop2 !== R2_WHITE) this.penStrokes.set(pen, { width, index })
+		if (this.dc.rop2 !== R2_BLACK && this.dc.rop2 !== R2_WHITE)
+			this.penStrokes.set(pen, { width, miterLimit: this.dc.miterLimit, index })
 
 		return index
 	}

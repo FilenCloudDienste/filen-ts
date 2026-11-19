@@ -1,5 +1,6 @@
+import { MAC_ROMAN } from "../fonts/sfnt"
 import { Bytes } from "./bytes"
-import { encodePng, sniffImage } from "./dib"
+import { encodePng, passThrough, sniffImage } from "./dib"
 import { Gdi, RegionMode, solidPen, type BrushObject } from "./gdi"
 import { MAX_DECODE_PIXELS, MetafileLimit } from "./limits"
 import { Output } from "./output"
@@ -55,10 +56,7 @@ const OLD_COLORS: ReadonlyMap<number, number> = new Map([
 	[69, 0xffff00]
 ])
 
-// Mac OS Roman 0x80–0xFF (Unicode's ROMAN.TXT mapping).
-const MAC_ROMAN =
-	"ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›ﬁﬂ‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ"
-
+// Mac OS Roman text; a byte the table lacks reads as "?".
 function macRoman(bytes: Uint8Array): string {
 	let out = ""
 
@@ -417,7 +415,7 @@ class Player {
 			if (pixmap === undefined) throw new MetafileLimit("pattern")
 
 			this.colorTable(reader, pixmap)
-			this.skipPixels(reader, pixmap)
+			this.skipRows(reader, pixmap)
 		}
 
 		return { cover, color: undefined }
@@ -554,8 +552,29 @@ class Player {
 		return out
 	}
 
-	private skipPixels(reader: Reader, pixmap: Pixmap): void {
-		this.rows(reader, pixmap)
+	// Steps over the pixel rows without unpacking them (a pattern is drawn as its colour); stops at the end of a
+	// picture too short for them, as rows() does.
+	private skipRows(reader: Reader, pixmap: Pixmap): void {
+		const { rowBytes, height } = pixmap
+		const direct32 = pixmap.pixmap && pixmap.pixelSize === 32
+
+		if (rowBytes < 8 || (direct32 && pixmap.packType === 1) || (direct32 && pixmap.packType === 2)) {
+			const size = (direct32 && pixmap.packType === 2 ? pixmap.width * 3 : rowBytes) * height
+
+			if (reader.need(size)) reader.skip(size)
+
+			return
+		}
+
+		if (!reader.need(height)) return
+
+		for (let row = 0; row < height; row++) {
+			const count = rowBytes > 250 ? reader.u16() : reader.u8()
+
+			if (!reader.need(count)) return
+
+			reader.skip(count)
+		}
 	}
 
 	// The rows as top-down RGBA.
@@ -728,13 +747,16 @@ class Player {
 
 		reader.at = end
 
-		if (kind !== "jpeg" && kind !== "png") {
+		// Only JPEG and PNG, copied once sniffed and shown within the per-image bound and the decoding budget.
+		const passed = kind === "jpeg" || kind === "png" ? passThrough(data.slice(), this.out) : undefined
+
+		if (passed === undefined) {
 			this.out.unsupported++
 
 			return
 		}
 
-		const image = this.out.embed({ format: kind, bytes: data.slice() })
+		const image = this.out.embed(passed)
 		const sw = (source[3] ?? 0) - (source[1] ?? 0)
 		const sh = (source[2] ?? 0) - (source[0] ?? 0)
 

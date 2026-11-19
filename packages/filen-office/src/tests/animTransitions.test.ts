@@ -7,8 +7,10 @@ import {
 	transitionToOdf,
 	type TransitionFrame
 } from "../core/anim/transitions"
-import { playableTransition } from "../core/anim/presets/transitions/catalog"
+import { odfPageTransition, playableTransition } from "../core/anim/presets/transitions/catalog"
+import { readTransition as readOdpTransition } from "../core/odp/read/transitions"
 import { stageDraws } from "../dom/presentation/engine/show"
+import { budget, cpuMs } from "./timing"
 
 // The ECMA transitions' progress functions at t = 0, 0.5 and 1: the share of the slide the incoming slide shows, or
 // the slides' offsets, scale and opacity.
@@ -115,5 +117,71 @@ describe("transition progress", () => {
 			reverse: false
 		})
 		expect(transitionToOdf("vortex", {})).toBeUndefined()
+	})
+
+	it("takes the defaults for file names that are members of Object.prototype", () => {
+		expect(transitionToOdf("push", { dir: "constructor" })).toEqual({ type: "pushWipe", subtype: "fromRight", reverse: false })
+		expect(transitionToOdf("cover", { dir: "__proto__" })).toEqual(transitionToOdf("cover", {}))
+
+		for (const kind of ["valueOf", "__proto__", "toString"]) {
+			const odd = odfPageTransition({ kind, namespace: "p14", options: {}, advance: { onClick: true } })
+
+			expect(odd).toMatchObject({ exact: false })
+			expect(typeof odd?.odf.subtype).toBe("string")
+		}
+
+		expect(odfPageTransition({ kind: "vortex", namespace: "p14", options: {}, advance: { onClick: true } })).toMatchObject({
+			exact: true
+		})
+	})
+
+	it("reads .odp transition names that are members of Object.prototype as the defaults", () => {
+		const page = new Map([["presentation:transition-speed", "constructor"]])
+
+		for (const type of ["pushWipe", "slideWipe"]) {
+			const read = readOdpTransition(
+				page,
+				new Map([
+					["smil:type", type],
+					["smil:subtype", "constructor"]
+				])
+			)
+
+			expect(read?.options["dir"]).toBe("r")
+			expect(read?.durationMs).toBeUndefined()
+			expect(() => structuredClone(read)).not.toThrow()
+		}
+
+		const wheel = readOdpTransition(
+			page,
+			new Map([
+				["smil:type", "pinWheelWipe"],
+				["smil:subtype", "__proto__"]
+			])
+		)
+
+		expect(wheel?.options["spokes"]).toBe("4")
+		expect(() => structuredClone(wheel)).not.toThrow()
+	})
+
+	it("draws a wheel of at most 8 spokes whatever the file asks for", () => {
+		const points = (spokes: string): number => {
+			const reveal = transitionFrame("wheel", { spokes }, 0.5).reveal
+
+			return reveal?.kind === "polygon" ? reveal.points.length : 0
+		}
+		const eight = points("8")
+
+		for (const spokes of ["1000000000", "Infinity", "-3", "abc"]) {
+			const start = cpuMs()
+
+			expect(points(spokes)).toBeLessThanOrEqual(eight)
+			expect(cpuMs() - start).toBeLessThan(budget(20))
+		}
+
+		expect(transitionFrame("wheel", { spokes: "1000000000" }, 0.5)).toEqual(transitionFrame("wheel", { spokes: "8" }, 0.5))
+		expect(transitionFrame("wheel", { spokes: "Infinity" }, 0.5)).toEqual(transitionFrame("wheel", { spokes: "4" }, 0.5))
+		expect(transitionFrame("wheel", { spokes: true }, 0.5)).toEqual(transitionFrame("wheel", { spokes: "1" }, 0.5))
+		expect(new Set(["1", "2", "3", "4", "8"].map(points)).size).toBe(5)
 	})
 })

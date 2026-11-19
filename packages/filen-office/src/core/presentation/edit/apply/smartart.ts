@@ -18,7 +18,7 @@ import { refused, type Deck, type FrameRef, type Refused, type ShapeNode, type S
 import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import { findShape } from "../changes"
 import { matcherOf } from "../find"
-import type { DeckOp, RawPart, SmartArtDefRef, SmartArtOp } from "../ops"
+import { isRawPart, type DeckOp, type RawPart, type SmartArtDefRef, type SmartArtOp } from "../ops"
 import { INSERTED_IMAGE_ID } from "../../../smartart/emit"
 import { imageWithinBudget } from "../../../opc/mediaPolicy"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
@@ -70,7 +70,6 @@ type Op = SmartArtOp | SmartArtReplace
 type DiagramFrame = Extract<FrameRef, { kind: "smartart" }>
 
 // The names the session holds parts under (the writer's raw sources).
-const HELD_PREFIX = "raw:"
 const DEFINITION_ROOTS = { layout: "layoutDef", style: "styleDef", colors: "colorsDef" } as const
 const MAX_GROUP_DEPTH = 128
 const NO_INVERSE = { ops: [], bytes: 0 } as const
@@ -266,10 +265,6 @@ function holdData(reading: SmartArtSourceReading, bytes: Uint8Array): string | R
 	}
 }
 
-function isHeld(part: string): boolean {
-	return part.startsWith(HELD_PREFIX)
-}
-
 // Points the frame at its new parts; the held parts it named before that no diagram names now are dropped (bounded
 // memory over a long editing session: an inverse keeps their bytes).
 function setFrame(deck: Deck, reading: SmartArtSourceReading, node: SlideNode, shape: ShapeNode, frame: DiagramFrame): void {
@@ -288,7 +283,7 @@ function setFrame(deck: Deck, reading: SmartArtSourceReading, node: SlideNode, s
 	for (const part of DIAGRAM_PARTS) {
 		const name = before[part]
 
-		if (name !== undefined && isHeld(name) && !named.has(name)) reading.releaseDiagram(name)
+		if (name !== undefined && isRawPart(name) && !named.has(name)) reading.releaseDiagram(name)
 	}
 }
 
@@ -316,7 +311,7 @@ export function diagramDataHadPictures(deck: Deck, part: string): boolean {
 }
 
 function notePictured(deck: Deck, reading: SmartArtSourceReading, frame: DiagramFrame): void {
-	if (isHeld(frame.data)) return
+	if (isRawPart(frame.data)) return
 
 	const document = reading.diagramDocument(frame.data)
 
@@ -506,7 +501,7 @@ function noteOwner(deck: Deck, held: string, owner: string | undefined): void {
 // one its held edit keeps them through. Where the slide's own part is not that one, the writer writes the edit into
 // parts of its own that relate the pictures themselves (emit/smartart.ts).
 function pictureOwner(data: string, deck: Deck): string | Refused {
-	const owner = isHeld(data) ? diagramRelationshipOwner(deck, data) : data
+	const owner = isRawPart(data) ? diagramRelationshipOwner(deck, data) : data
 
 	return owner ?? refused("unsupported", "a diagram with pictures whose data part is not the package's")
 }
@@ -652,7 +647,7 @@ function setPicture(deck: Deck, op: SmartArtSetPicture, context: ApplyContext): 
 	if (isRefused(back)) return back
 
 	if (dataHasRelationships(data)) {
-		const owner = isHeld(found.frame.data) ? diagramRelationshipOwner(deck, found.frame.data) : found.frame.data
+		const owner = isRawPart(found.frame.data) ? diagramRelationshipOwner(deck, found.frame.data) : found.frame.data
 		const target = reading.diagramRelationshipTarget
 
 		if (owner === undefined || target === undefined) return refused("unsupported", "a diagram whose pictures cannot be read")
@@ -734,14 +729,14 @@ function restore(deck: Deck, op: SmartArtOp & { readonly kind: "restore" }, cont
 		}
 
 		// A package data part a save has rewritten since is held once the drawing is known (below).
-		if (role === "data" && !isHeld(part.name)) {
+		if (role === "data" && !isRawPart(part.name)) {
 			rewritten = part
 
 			continue
 		}
 
 		// A held part comes back under its own name (the frame is as it was, saved state included).
-		const name = isHeld(part.name) ? hold(reading, part.bytes, part.name) : hold(reading, part.bytes)
+		const name = isRawPart(part.name) ? hold(reading, part.bytes, part.name) : hold(reading, part.bytes)
 
 		if (isRefused(name)) return name
 
@@ -981,7 +976,7 @@ export function diagramPartsOf(deck: Deck, op: DeckOp): string[] {
 			for (const role of DIAGRAM_PARTS) {
 				const part = frame[role]
 
-				if (part !== undefined && part !== "" && !isHeld(part)) out.push(part)
+				if (part !== undefined && part !== "" && !isRawPart(part)) out.push(part)
 			}
 
 		return out
@@ -997,11 +992,11 @@ export function diagramPicturePartsOf(deck: Deck, op: DeckOp): string[] {
 		const out: string[] = []
 
 		for (const frame of diagramFrames(deck.nodes.get(op.slide)?.shapes ?? [])) {
-			const owner = isHeld(frame.data) ? diagramRelationshipOwner(deck, frame.data) : frame.data
+			const owner = isRawPart(frame.data) ? diagramRelationshipOwner(deck, frame.data) : frame.data
 
 			if (owner !== undefined) out.push(owner)
 			// The drawing's own pictures, for a copy written as a part of its own.
-			if (frame.drawing !== undefined && !isHeld(frame.drawing)) out.push(frame.drawing)
+			if (frame.drawing !== undefined && !isRawPart(frame.drawing)) out.push(frame.drawing)
 		}
 
 		return out
@@ -1015,7 +1010,7 @@ export function diagramPicturePartsOf(deck: Deck, op: DeckOp): string[] {
 
 	if (frame?.kind !== "smartart") return []
 
-	const owner = isHeld(frame.data) ? diagramRelationshipOwner(deck, frame.data) : frame.data
+	const owner = isRawPart(frame.data) ? diagramRelationshipOwner(deck, frame.data) : frame.data
 
 	return owner === undefined ? [] : [owner]
 }
@@ -1075,20 +1070,20 @@ export function holdDiagramCopies(deck: Deck, shapes: readonly ShapeNode[], cont
 
 				// A drawing names its pictures by relationships of its own part: their targets go with the copy.
 				if (role === "drawing") {
-					const targets = isHeld(part) ? diagramRelationshipTargets(deck, part) : undefined
+					const targets = isRawPart(part) ? diagramRelationshipTargets(deck, part) : undefined
 
 					if (targets !== undefined) relationshipTargets.get(deck)?.set(name, targets)
-					else if (!isHeld(part)) noteTargets(deck, name, document, part, reading)
+					else if (!isRawPart(part)) noteTargets(deck, name, document, part, reading)
 				}
 
 				if (role !== "data") continue
-				if (!isHeld(part) || diagramDataAsItWas(deck, part)) noteAsItWas(deck, name)
+				if (!isRawPart(part) || diagramDataAsItWas(deck, part)) noteAsItWas(deck, name)
 
-				const owner = isHeld(part) ? diagramRelationshipOwner(deck, part) : dataHasRelationships(document) ? part : undefined
+				const owner = isRawPart(part) ? diagramRelationshipOwner(deck, part) : dataHasRelationships(document) ? part : undefined
 
 				noteOwner(deck, name, owner)
 
-				const targets = isHeld(part) ? diagramRelationshipTargets(deck, part) : undefined
+				const targets = isRawPart(part) ? diagramRelationshipTargets(deck, part) : undefined
 
 				if (targets !== undefined) relationshipTargets.get(deck)?.set(name, targets)
 				else noteTargets(deck, name, document, owner, reading)

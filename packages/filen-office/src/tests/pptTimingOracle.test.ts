@@ -4,10 +4,13 @@ import { describe, expect, it } from "vitest"
 import type { PresetClass, TimeNode, TimingTree } from "../core/anim/model"
 import { presetToOdf } from "../core/anim/odf"
 import { bytesSource } from "../core/opc/index"
+import { pp10Records } from "../core/ppt/anim"
 import { openPptFile, readDocument } from "../core/ppt/document"
+import { RecordCounter, RT, type PptRecord } from "../core/ppt/records"
 import { readSlides } from "../core/ppt/slides"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
+import { PresentationError } from "../core/presentation/model"
 import { openPptxPackage } from "../core/pptx/package"
 import { readTiming } from "../core/pptx/read/timing"
 import { partReader } from "../core/pptx/read/xml"
@@ -198,6 +201,17 @@ function tally(): Tally {
 	return { effects: 0, equal: 0, slides: 0, sameCount: 0, decks: 0, misses: [] }
 }
 
+// A PowerPoint 2002 time tree (§2.8.15 ExtTimeNodeContainer) in the slide's "___PPT10" tag; a damaged tag holds none.
+function hasTimeTree(data: Uint8Array, slide: PptRecord): boolean {
+	try {
+		return pp10Records(data, slide, new RecordCounter())?.some(record => record.type === RT.extTimeNode) === true
+	} catch (error) {
+		if (error instanceof PresentationError && error.reason === "malformed") return false
+
+		throw error
+	}
+}
+
 describe("ppt animations against LibreOffice's animation trees", () => {
 	it.skipIf(cache === undefined)(
 		"reads ≥ 98% of the corpus's ppt effects as LibreOffice does, both trees and Office 97 builds",
@@ -219,7 +233,9 @@ describe("ppt animations against LibreOffice's animation trees", () => {
 				if (timings === undefined) continue
 
 				const file97 = await openPptFile(bytesSource(bytes))
-				const target = readSlides(readDocument(file97)).slides.some(slide => slide.timeNodes) ? trees : builds
+				const target = readSlides(readDocument(file97)).slides.some(slide => hasTimeTree(file97.stream, slide.record))
+					? trees
+					: builds
 
 				if (target === builds && loEffects.every(list => list.length === 0) && timings.every(slide => slide.tree === undefined))
 					continue

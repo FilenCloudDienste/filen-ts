@@ -30,6 +30,12 @@ const MAX_SECTIONS = 4096
 const MAX_SECTION_BYTES = 64 * 1024 * 1024
 const FIRST_WINDOW = 64 * 1024
 const MAX_OBJECTS = 8_388_607
+// Rows the whole chain may hold: one entry per row is built, so a file pays for its rows with its own length. A row
+// budget of twice the file's bytes leaves room for incremental saves that each rewrite the full table.
+const MIN_CHAIN_ROWS = 65_536
+const CHAIN_ROWS_PER_BYTE = 2
+// Deflate's largest expansion: a 258-byte match per two bits of input.
+const MAX_INFLATE_RATIO = 1032
 
 const STARTXREF = asciiBytes("startxref")
 
@@ -62,25 +68,30 @@ export async function readXrefChain(source: PdfByteSource): Promise<XrefChain | 
 	const sections: XrefSection[] = []
 	const seen = new Set<number>()
 	let next: number | null = found.offset
+	let rowsLeft = Math.max(MIN_CHAIN_ROWS, source.length * CHAIN_ROWS_PER_BYTE)
 
 	while (next !== null) {
 		if (seen.has(next) || sections.length >= MAX_SECTIONS || next < 0 || next >= source.length) return null
 
 		seen.add(next)
 
-		const parsed = await readSection(source, next)
+		const parsed = await readSection(source, next, rowsLeft)
 
 		if (parsed === null) return null
 
-		const entries = new Map(parsed.entries)
+		rowsLeft -= parsed.rows
+
+		const entries = parsed.entries
 
 		// A hybrid file's /XRefStm adds entries to the same section.
 		if (parsed.xrefStm !== null && !seen.has(parsed.xrefStm)) {
 			seen.add(parsed.xrefStm)
 
-			const hybrid = await readSection(source, parsed.xrefStm)
+			const hybrid = await readSection(source, parsed.xrefStm, rowsLeft)
 
 			if (hybrid === null) return null
+
+			rowsLeft -= hybrid.rows
 
 			for (const [num, entry] of hybrid.entries) if (!entries.has(num)) entries.set(num, entry)
 		}
@@ -104,32 +115,37 @@ export function xrefEntry(chain: XrefChain, num: number): XrefEntry | null {
 }
 
 interface ParsedSection {
-	readonly entries: ReadonlyMap<number, XrefEntry>
+	// Fresh per parse, so the chain keeps it as it is.
+	readonly entries: Map<number, XrefEntry>
+	// Rows read, duplicates included.
+	readonly rows: number
 	readonly prev: number | null
 	readonly xrefStm: number | null
 }
 
-async function readSection(source: PdfByteSource, offset: number): Promise<ParsedSection | null> {
+// `maxRows` is what is left of the chain's row budget; a section with more rows is refused.
+async function readSection(source: PdfByteSource, offset: number, maxRows: number): Promise<ParsedSection | null> {
 	for (let window = FIRST_WINDOW; ; window *= 4) {
 		const length = Math.min(window, source.length - offset)
 		const bytes = await readExactly(source, offset, length)
-		const parsed = parseSection(bytes)
+		const parsed = parseSection(bytes, maxRows)
 
 		if (parsed !== "truncated") return parsed
 		if (offset + length >= source.length || window >= MAX_SECTION_BYTES) return null
 	}
 }
 
-function parseSection(bytes: Uint8Array): ParsedSection | null | "truncated" {
+function parseSection(bytes: Uint8Array, maxRows: number): ParsedSection | null | "truncated" {
 	const lexer = new PdfLexer(bytes)
 
-	if (lexer.expect("xref")) return parseTable(lexer)
+	if (lexer.expect("xref")) return parseTable(lexer, maxRows)
 
-	return parseStream(lexer)
+	return parseStream(lexer, maxRows)
 }
 
-function parseTable(lexer: PdfLexer): ParsedSection | null | "truncated" {
+function parseTable(lexer: PdfLexer, maxRows: number): ParsedSection | null | "truncated" {
 	const entries = new Map<number, XrefEntry>()
+	let rows = 0
 
 	for (;;) {
 		const at = lexer.position
@@ -142,7 +158,11 @@ function parseTable(lexer: PdfLexer): ParsedSection | null | "truncated" {
 		const count = lexer.integer()
 
 		if (first === null || count === null) return lexer.position >= lexer.bytes.length ? "truncated" : null
-		if (first + count > MAX_OBJECTS) return null
+		if (count < 0 || first + count > MAX_OBJECTS) return null
+
+		rows += count
+
+		if (rows > maxRows) return null
 
 		for (let i = 0; i < count; i++) {
 			const offset = lexer.integer()
@@ -162,10 +182,10 @@ function parseTable(lexer: PdfLexer): ParsedSection | null | "truncated" {
 	if (trailer === null) return "truncated"
 	if (trailer.type !== "dict") return null
 
-	return { entries, prev: dictNumber(trailer.entries, "Prev"), xrefStm: dictNumber(trailer.entries, "XRefStm") }
+	return { entries, rows, prev: dictNumber(trailer.entries, "Prev"), xrefStm: dictNumber(trailer.entries, "XRefStm") }
 }
 
-function parseStream(lexer: PdfLexer): ParsedSection | null | "truncated" {
+function parseStream(lexer: PdfLexer, maxRows: number): ParsedSection | null | "truncated" {
 	if (lexer.integer() === null || lexer.integer() === null || !lexer.expect("obj")) return null
 
 	const dict = lexer.value()
@@ -179,21 +199,76 @@ function parseStream(lexer: PdfLexer): ParsedSection | null | "truncated" {
 	if (bytes[start] === 0x0d) start++
 	if (bytes[start] === 0x0a) start++
 
+	const layout = streamLayout(dict.entries, maxRows)
+
+	if (layout === null) return null
+
 	const length = dictNumber(dict.entries, "Length")
 
 	if (length === null || length < 0) return null
 	if (start + length > bytes.length) return "truncated"
 
-	const data = decodeXrefStream(bytes.subarray(start, start + length), dict.entries)
+	const data = decodeXrefStream(bytes.subarray(start, start + length), dict.entries, layout.rows * layout.rowBytes)
 
 	if (data === null) return null
 
-	const entries = xrefStreamEntries(data, dict.entries)
+	const entries = xrefStreamEntries(data, layout)
 
-	return entries === null ? null : { entries, prev: dictNumber(dict.entries, "Prev"), xrefStm: null }
+	return entries === null ? null : { entries, rows: layout.rows, prev: dictNumber(dict.entries, "Prev"), xrefStm: null }
 }
 
-function decodeXrefStream(raw: Uint8Array, dict: ReadonlyMap<string, PdfValue>): Uint8Array | null {
+interface StreamLayout {
+	readonly widths: readonly [number, number, number]
+	readonly rowBytes: number
+	// Flat [first, count] pairs from /Index, or [0, /Size].
+	readonly ranges: readonly number[]
+	readonly rows: number
+}
+
+// /W and /Index, read before the stream is decoded so the rows they declare bound how much it may inflate to.
+function streamLayout(dict: ReadonlyMap<string, PdfValue>, maxRows: number): StreamLayout | null {
+	const w = dict.get("W")
+
+	if (w?.type !== "array" || w.items.length !== 3) return null
+
+	const widths = w.items.map(item =>
+		item.type === "number" && Number.isInteger(item.value) && item.value >= 0 && item.value <= 8 ? item.value : -1
+	)
+
+	if (widths.includes(-1)) return null
+
+	const [w0 = 0, w1 = 0, w2 = 0] = widths
+	const size = dictNumber(dict, "Size")
+	const index = dict.get("Index")
+	const ranges: number[] = []
+
+	if (index?.type === "array") {
+		for (const item of index.items) {
+			if (item.type !== "number") return null
+
+			ranges.push(item.value)
+		}
+	} else if (size !== null) ranges.push(0, size)
+	else return null
+
+	let rows = 0
+
+	for (let r = 0; r + 1 < ranges.length; r += 2) {
+		const first = ranges[r] ?? 0
+		const count = ranges[r + 1] ?? 0
+
+		if (!Number.isInteger(first) || !Number.isInteger(count) || first < 0 || count < 0 || first + count > MAX_OBJECTS) return null
+
+		rows += count
+	}
+
+	if (rows > MAX_OBJECTS || rows > maxRows) return null
+
+	return { widths: [w0, w1, w2], rowBytes: w0 + w1 + w2, ranges, rows }
+}
+
+// `expected` is the decoded size the rows need; nothing past it is kept.
+function decodeXrefStream(raw: Uint8Array, dict: ReadonlyMap<string, PdfValue>, expected: number): Uint8Array | null {
 	const filter = dict.get("Filter")
 	const name =
 		filter?.type === "array"
@@ -206,18 +281,7 @@ function decodeXrefStream(raw: Uint8Array, dict: ReadonlyMap<string, PdfValue>):
 					? ""
 					: null
 
-	if (name === null) return null
-
-	let data: Uint8Array
-
-	if (name === "") data = raw
-	else if (name === "FlateDecode") {
-		try {
-			data = unzlibSync(raw)
-		} catch {
-			return null
-		}
-	} else return null
+	if (name === null || (name !== "" && name !== "FlateDecode")) return null
 
 	const parmsValue = dict.get("DecodeParms")
 	const parms =
@@ -227,17 +291,33 @@ function decodeXrefStream(raw: Uint8Array, dict: ReadonlyMap<string, PdfValue>):
 				? parmsValue.items[0].entries
 				: null
 	const predictor = parms === null ? 1 : (dictNumber(parms, "Predictor") ?? 1)
+	const columns = parms === null ? 1 : (dictNumber(parms, "Columns") ?? 1)
 
-	if (predictor === 1) return data
-	if (predictor < 10 || parms === null) return null
+	if (predictor !== 1 && (predictor < 10 || !Number.isInteger(columns) || columns < 1 || columns > 1 << 16)) return null
 
-	return unpredictPng(data, dictNumber(parms, "Columns") ?? 1)
+	// PNG-predicted data carries a filter byte before every row of /Columns bytes.
+	const encoded = predictor === 1 ? expected : Math.ceil(expected / columns) * (columns + 1)
+	let data: Uint8Array
+
+	if (name === "") data = raw
+	else if (encoded === 0) data = raw.subarray(0, 0)
+	else {
+		// Given an output array, inflate never grows it and drops what does not fit; the array is no larger than the
+		// stream can fill.
+		const out = new Uint8Array(Math.min(encoded, raw.length * MAX_INFLATE_RATIO))
+
+		try {
+			data = unzlibSync(raw, { out })
+		} catch {
+			return null
+		}
+	}
+
+	return predictor === 1 ? data : unpredictPng(data, columns)
 }
 
 // PNG row filters (predictors 10-15), one byte per sample as xref streams use.
 function unpredictPng(data: Uint8Array, columns: number): Uint8Array | null {
-	if (columns < 1 || columns > 1 << 16) return null
-
 	const rows = Math.floor(data.length / (columns + 1))
 	const out = new Uint8Array(rows * columns)
 
@@ -286,40 +366,16 @@ function unpredictPng(data: Uint8Array, columns: number): Uint8Array | null {
 	return out
 }
 
-function xrefStreamEntries(data: Uint8Array, dict: ReadonlyMap<string, PdfValue>): Map<number, XrefEntry> | null {
-	const w = dict.get("W")
-
-	if (w?.type !== "array" || w.items.length !== 3) return null
-
-	const widths = w.items.map(item =>
-		item.type === "number" && Number.isInteger(item.value) && item.value >= 0 && item.value <= 8 ? item.value : -1
-	)
-
-	if (widths.includes(-1)) return null
-
-	const [w0 = 0, w1 = 0, w2 = 0] = widths
-	const size = dictNumber(dict, "Size")
-	const index = dict.get("Index")
-	const ranges: number[] = []
-
-	if (index?.type === "array") {
-		for (const item of index.items) {
-			if (item.type !== "number") return null
-
-			ranges.push(item.value)
-		}
-	} else if (size !== null) ranges.push(0, size)
-	else return null
-
-	const row = w0 + w1 + w2
+function xrefStreamEntries(data: Uint8Array, layout: StreamLayout): Map<number, XrefEntry> | null {
+	const [w0, w1, w2] = layout.widths
+	const { ranges } = layout
+	const row = layout.rowBytes
 	const entries = new Map<number, XrefEntry>()
 	let at = 0
 
 	for (let r = 0; r + 1 < ranges.length; r += 2) {
 		const first = ranges[r] ?? 0
 		const count = ranges[r + 1] ?? 0
-
-		if (first < 0 || count < 0 || first + count > MAX_OBJECTS) return null
 
 		for (let i = 0; i < count; i++) {
 			if (at + row > data.length) return null

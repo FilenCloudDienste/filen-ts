@@ -1,5 +1,6 @@
 import type * as Mupdf from "mupdf"
 import type { PdfSignatureState, PdfToolClass } from "../../../core/pdfedit/signaturePolicy"
+import { PdfEngineRefusal } from "../context"
 import type { MupdfModule } from "../protocol"
 
 // The editor's commands: each feature module exports a table of them (commands/<feature>.ts), composed in
@@ -64,4 +65,66 @@ export function isIndex(value: unknown): value is number {
 // A string of at most `max` UTF-16 code units.
 export function isText(value: unknown, max: number): value is string {
 	return typeof value === "string" && value.length <= max
+}
+
+export function isFiniteNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value)
+}
+
+// An array of `length` finite numbers, each within `min`..`max`.
+export function isFiniteTuple(value: unknown, length: number, min = -Infinity, max = Infinity): value is readonly number[] {
+	return Array.isArray(value) && value.length === length && value.every(item => isFiniteNumber(item) && item >= min && item <= max)
+}
+
+export function parseRect(value: unknown, min?: number, max?: number): [number, number, number, number] | null {
+	if (!isFiniteTuple(value, 4, min, max)) return null
+
+	const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = value
+
+	return [x0, y0, x1, y1]
+}
+
+export function parseQuad(value: unknown): [number, number, number, number, number, number, number, number] | null {
+	if (!isFiniteTuple(value, 8)) return null
+
+	const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0] = value
+
+	return [a, b, c, d, e, f, g, h]
+}
+
+// A colour: three components, each 0..1.
+export function parseRgb(value: unknown): [number, number, number] | null {
+	if (!isFiniteTuple(value, 3, 0, 1)) return null
+
+	const [r = 0, g = 0, b = 0] = value
+
+	return [r, g, b]
+}
+
+// The most pages one command names.
+export const MAX_PAGES = 100_000
+
+// A non-empty list of at most MAX_PAGES page indices.
+export function isPageList(value: unknown): value is readonly number[] {
+	return Array.isArray(value) && value.length > 0 && value.length <= MAX_PAGES && value.every(isIndex)
+}
+
+// The arguments of a command that takes none: an empty record.
+export function parseNoArgs(args: unknown): Record<string, never> | null {
+	return isRecord(args) && Object.keys(args).length === 0 ? {} : null
+}
+
+// Whether `page` is the index of one of the document's pages.
+export function isPageOf(document: { countPages(): number }, page: unknown): page is number {
+	return isIndex(page) && page < document.countPages()
+}
+
+// Refuses ("badRequest", with `message` when given) a page the document does not have.
+export function checkPage(document: { countPages(): number }, page: unknown, message?: string): asserts page is number {
+	if (!isPageOf(document, page)) throw new PdfEngineRefusal("badRequest", message)
+}
+
+// A command's page check: refused as "no such page".
+export function requirePage(context: PdfCommandContext, page: number): void {
+	checkPage(context.document, page, "no such page")
 }

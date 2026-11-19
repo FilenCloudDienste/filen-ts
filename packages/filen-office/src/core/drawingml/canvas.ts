@@ -24,6 +24,7 @@ import {
 	ItemFloat,
 	ItemInt,
 	ItemKind,
+	multiply,
 	pathGradientCircle,
 	PATH_COMMAND_COORDS,
 	PathCommand,
@@ -357,18 +358,6 @@ function matrixAt(values: ArrayLike<number>, at: number = 0): Matrix {
 	]
 }
 
-// m1 then m2: the matrix that applies m2 inside m1's space (canvas transform() order).
-function times(m1: Matrix, m2: Matrix): Matrix {
-	return [
-		m1[0] * m2[0] + m1[2] * m2[1],
-		m1[1] * m2[0] + m1[3] * m2[1],
-		m1[0] * m2[2] + m1[2] * m2[3],
-		m1[1] * m2[2] + m1[3] * m2[3],
-		m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
-		m1[1] * m2[4] + m1[3] * m2[5] + m1[5]
-	]
-}
-
 function invert(m: Matrix): Matrix | null {
 	const det = m[0] * m[3] - m[1] * m[2]
 
@@ -653,11 +642,41 @@ interface BodyLine {
 
 type Box = readonly [number, number, number, number]
 
+// Copies a raster's last column, last row and corner one pixel outwards on a larger (reused) scratch, so a filtered,
+// scaled draw of the used rect samples its edge colour there (as clamp-to-edge did on a surface of its own size).
+function edgeGutter<I extends CanvasSized>(surface: CanvasSurface<I>, rgba: Uint8Array, width: number, height: number): void {
+	const wider = surface.canvas.width > width
+	const taller = surface.canvas.height > height
+
+	if (wider) {
+		const column = surface.context.createImageData(1, height)
+
+		for (let row = 0; row < height; row++)
+			column.data.set(rgba.subarray((row * width + width - 1) * 4, (row * width + width) * 4), row * 4)
+
+		surface.context.putImageData(column, width, 0)
+	}
+
+	if (taller) {
+		const last = (height - 1) * width * 4
+		const row = surface.context.createImageData(wider ? width + 1 : width, 1)
+
+		row.data.set(rgba.subarray(last, last + width * 4))
+
+		if (wider) row.data.set(rgba.subarray(last + (width - 1) * 4, last + width * 4), width * 4)
+
+		surface.context.putImageData(row, 0, height)
+	}
+}
+
 class CanvasDrawingPainter<I extends CanvasSized> {
 	private runsLeft = MAX_RUNS
 	private readonly chains = new Map<number, readonly number[] | undefined>()
 	private readonly patterns = new Map<number, CanvasPatternLike | null>()
 	private readonly recolored = new Map<DrawingImage, I | null>()
+	// The scratch canvas masked outlines and meshes draw on, grown as they need (never tiles or recoloured pictures,
+	// which stay referenced).
+	private scratchSurface: CanvasSurface<I> | undefined = undefined
 	// The context drawn on: a scratch layer's while a masked outline is drawn (maskedStroke).
 	private ctx: Canvas2DLike<I>
 	private readonly data: DrawingData
@@ -676,6 +695,23 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 	private place(m: Matrix): void {
 		this.ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5])
+	}
+
+	// The held scratch canvas when it is at least `width` x `height`, else a larger one in its place (the union of both
+	// sizes within the budget, the size asked for beyond it). Only its top-left `width` x `height` is in use.
+	private scratch(width: number, height: number): CanvasSurface<I> | undefined {
+		const held = this.scratchSurface
+
+		if (held !== undefined && held.canvas.width >= width && held.canvas.height >= height) return held
+
+		const wide = Math.max(width, held?.canvas.width ?? 0)
+		const high = Math.max(height, held?.canvas.height ?? 0)
+		const grown = wide <= MAX_SURFACE_SIDE && high <= MAX_SURFACE_SIDE && wide * high <= MAX_SURFACE_PIXELS
+		const surface = grown ? this.context.surface?.(wide, high) : this.context.surface?.(width, height)
+
+		if (surface !== undefined) this.scratchSurface = surface
+
+		return surface
 	}
 
 	paint(): void {
@@ -826,7 +862,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		for (const shape of shapes) {
 			if (shape === undefined || shape === null) continue
 
-			const m = times(this.base, matrixAt(Array.isArray(shape.matrix) ? shape.matrix : []))
+			const m = multiply(this.base, matrixAt(Array.isArray(shape.matrix) ? shape.matrix : []))
 
 			if (this.appendRange(m, index(shape.firstCommand), index(shape.commandCount), index(shape.firstCoord))) any = true
 		}
@@ -928,7 +964,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 			}
 
 			this.shadow(index(data.itemInts[i + ItemInt.SHADOW]))
-			this.local = times(this.base, matrixAt(data.itemFloats, f))
+			this.local = multiply(this.base, matrixAt(data.itemFloats, f))
 
 			switch (data.itemInts[i + ItemInt.KIND]) {
 				case ItemKind.PATH:
@@ -1108,7 +1144,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 				// The unit circle placed as the gradient's ellipse; the fill covers the box (whose sides lie within 1 / rx and
 				// 1 / ry of the centre).
-				this.place(times(this.local, [rx * width, 0, 0, ry * height, x + cx * width, y + cy * height]))
+				this.place(multiply(this.local, [rx * width, 0, 0, ry * height, x + cx * width, y + cy * height]))
 
 				const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
 				const reach = Math.min(1e6, 2 / Math.min(rx, ry))
@@ -1123,7 +1159,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 				const [minX, minY, maxX, maxY] = boundsThrough(m, x, y, Math.max(width, 1), Math.max(height, 1))
 				const spread = paint.spread === "reflect" ? 1 : paint.spread === "repeat" ? 2 : 0
 
-				this.place(times(this.local, m))
+				this.place(multiply(this.local, m))
 
 				if (paint.type === "linear") {
 					const from = spread === 0 ? 0 : Math.max(Math.floor(minX), -MAX_PERIODS / 2)
@@ -1177,7 +1213,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 					paint.points instanceof Float32Array && paint.colors instanceof Uint32Array
 						? shadeRaster(paint.points, paint.colors, paint.ramp, scaleOf(this.local), MAX_SURFACE_PIXELS / 4)
 						: undefined
-				const surface = raster === undefined ? undefined : this.context.surface?.(raster.width, raster.height)
+				const surface = raster === undefined ? undefined : this.scratch(raster.width, raster.height)
 
 				if (raster === undefined || surface === undefined) {
 					this.place(this.local)
@@ -1188,10 +1224,22 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 				const pixels = surface.context.createImageData(raster.width, raster.height)
 
+				// putImageData replaces the rect outright (no transform, alpha, compositing or clip apply).
 				pixels.data.set(raster.rgba)
 				surface.context.putImageData(pixels, 0, 0)
+				edgeGutter(surface, raster.rgba, raster.width, raster.height)
 				this.place(this.local)
-				ctx.drawImage(surface.canvas, raster.bounds[0], raster.bounds[1], raster.bounds[2], raster.bounds[3])
+				ctx.drawImage(
+					surface.canvas,
+					0,
+					0,
+					raster.width,
+					raster.height,
+					raster.bounds[0],
+					raster.bounds[1],
+					raster.bounds[2],
+					raster.bounds[3]
+				)
 				break
 			}
 			default:
@@ -1204,7 +1252,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const { ctx } = this
 		const width = clamp(tile.width, 0, MAX_COORD, 0)
 		const height = clamp(tile.height, 0, MAX_COORD, 0)
-		const m = times(this.local, matrixAt(Array.isArray(tile.matrix) ? tile.matrix : []))
+		const m = multiply(this.local, matrixAt(Array.isArray(tile.matrix) ? tile.matrix : []))
 
 		if (!(width > 0 && height > 0)) return
 
@@ -1387,11 +1435,23 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const scale = Math.min(1, MAX_SURFACE_SIDE / width, MAX_SURFACE_SIDE / height, Math.sqrt(MAX_SURFACE_PIXELS / (width * height)))
 		const pixelsWide = Math.max(1, Math.round(width * scale))
 		const pixelsHigh = Math.max(1, Math.round(height * scale))
-		const surface = this.context.surface(pixelsWide, pixelsHigh)
+		const surface = this.scratch(pixelsWide, pixelsHigh)
 
 		if (surface === undefined) return false
 
 		const layer = surface.context
+
+		// A reused scratch keeps the last outline's state and pixels.
+		layer.setTransform(1, 0, 0, 1, 0, 0)
+		layer.globalCompositeOperation = "source-over"
+		layer.globalAlpha = 1
+		layer.setLineDash([])
+		layer.shadowColor = "rgba(0, 0, 0, 0)"
+		layer.shadowBlur = 0
+		layer.shadowOffsetX = 0
+		layer.shadowOffsetY = 0
+		// One pixel past the used rect too: a scaled draw may filter in that neighbour, transparent as the old edge.
+		layer.clearRect(0, 0, Math.min(surface.canvas.width, pixelsWide + 1), Math.min(surface.canvas.height, pixelsHigh + 1))
 		const sx = pixelsWide / width
 		const sy = pixelsHigh / height
 		const layered = (strokes: CompoundMask["outer"]): void => {
@@ -1403,7 +1463,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		}
 
 		this.ctx = layer
-		this.local = times([sx, 0, 0, sy, -left * sx, -top * sy], m)
+		this.local = multiply([sx, 0, 0, sy, -left * sx, -top * sy], m)
 
 		try {
 			this.path(i)
@@ -1435,7 +1495,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		}
 
 		ctx.setTransform(1, 0, 0, 1, 0, 0)
-		ctx.drawImage(surface.canvas, left, top, width, height)
+		ctx.drawImage(surface.canvas, 0, 0, pixelsWide, pixelsHigh, left, top, width, height)
 
 		return true
 	}
@@ -1629,8 +1689,8 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 	// Draws `text` with the pen at (x, y) on the baseline in the current font; underline and strike as bars.
 	private show(text: string, run: TextRun, x: number, y: number, size: number, style: unknown): number {
 		const { ctx } = this
-		const letter = clamp(run.spacing, -100, 100, 0) * PX_PER_PT
-		const width = ctx.measureText(text).width + (ctx.letterSpacing === undefined ? 0 : letter * text.length)
+		// measureText applies the context's letter spacing as fillText does; without it the glyphs are drawn unspaced.
+		const width = ctx.measureText(text).width
 
 		if (style === null) return width
 
@@ -1765,7 +1825,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 				// Laid out at the natural width, then scaled on x to the rectangle's.
 				stretch = width / widest
 				width = widest
-				this.place(times(this.local, [stretch, 0, 0, 1, 0, 0]))
+				this.place(multiply(this.local, [stretch, 0, 0, 1, 0, 0]))
 			}
 		}
 
@@ -1891,7 +1951,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 			const cos = Math.cos(radians)
 			const sin = Math.sin(radians)
 
-			this.place(times(this.local, [cos, sin, -sin, cos, cx - cos * cx + sin * cy, cy - sin * cx - cos * cy]))
+			this.place(multiply(this.local, [cos, sin, -sin, cos, cx - cos * cx + sin * cy, cy - sin * cx - cos * cy]))
 		}
 
 		this.ctx.textAlign = "left"
@@ -2248,7 +2308,7 @@ class CanvasTextPainter<I> {
 
 	// This painter turned 90° counter-clockwise about (cx, cy).
 	private turned(cx: number, cy: number): CanvasTextPainter<I> {
-		return new CanvasTextPainter(this.ctx, this.text, times(this.base, [0, -1, 1, 0, cx - cy, cy + cx]), this.faces)
+		return new CanvasTextPainter(this.ctx, this.text, multiply(this.base, [0, -1, 1, 0, cx - cy, cy + cx]), this.faces)
 	}
 
 	private fragment(
@@ -2269,7 +2329,6 @@ class CanvasTextPainter<I> {
 		const rtl = (info >> FRAGMENT_LEVEL_SHIFT) % 2 === 1
 		const ascent = Math.max(0, finite(style?.ascent, 0))
 		const box: Box = [x, y - ascent, Math.max(0, width), ascent + Math.max(0, finite(style?.descent, 0))]
-		// Opacity of a fill-less style's colour (a paint's stops carry their own).
 		// Opacity of a fill-less style's colour, the glyph fill only (a paint's stops carry their own; outlines and
 		// shadows keep theirs).
 		const alpha = style?.paint === undefined ? clamp(style?.alpha, 0, 1, 1) : 1
@@ -2288,12 +2347,10 @@ class CanvasTextPainter<I> {
 		ctx.font = font
 		ctx.direction = rtl ? "rtl" : "ltr"
 
-		if (scaleX !== 1) {
-			// Scaled about the fragment's start, as CSS scaleX on a left-anchored span.
-			const m = times(this.base, [scaleX, 0, 0, 1, x - scaleX * x, 0])
+		// Scaled about the fragment's start, as CSS scaleX on a left-anchored span; effects place their copies under it.
+		const placed = scaleX !== 1 ? multiply(this.base, [scaleX, 0, 0, 1, x - scaleX * x, 0]) : this.base
 
-			ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5])
-		}
+		if (scaleX !== 1) ctx.setTransform(placed[0], placed[1], placed[2], placed[3], placed[4], placed[5])
 
 		// Pieces drawn in one font each: small capitals split out of the lower-case letters.
 		const pieces: [string, string][] = []
@@ -2323,7 +2380,7 @@ class CanvasTextPainter<I> {
 		}
 
 		const draw = (piece: string, at: number): void => {
-			if (effects !== undefined) this.effects(effects, piece, at, y, fill)
+			if (effects !== undefined) this.effects(effects, placed, piece, at, y, fill)
 
 			if (fill !== null) {
 				ctx.fillStyle = fill
@@ -2331,7 +2388,7 @@ class CanvasTextPainter<I> {
 			}
 
 			if (outline !== undefined && outline !== null) this.outline(outline, piece, at, y)
-			if (effects !== undefined) this.reflection(effects, style, piece, at, y, fill)
+			if (effects !== undefined) this.reflection(effects, placed, style, piece, at, y, fill)
 		}
 
 		let pen = x
@@ -2385,7 +2442,9 @@ class CanvasTextPainter<I> {
 
 	// Shadows and glows behind the glyphs, as the DOM painter's text-shadow draws them (a glow: two unoffset shadows at
 	// its radius and half of it): each the canvas shadow of a copy drawn far off the canvas, so only the shadow lands.
-	private effects(effects: CanvasTextEffects, text: string, x: number, y: number, fill: unknown): void {
+	// `placed` is the transform the copy is drawn under (the base with the fragment's width scale); the shadow offset is
+	// a device-space distance, so the copy's displacement comes from `placed` and the shadow's own from the base.
+	private effects(effects: CanvasTextEffects, placed: Matrix, text: string, x: number, y: number, fill: unknown): void {
 		const { ctx } = this
 		const m = this.base
 		const scale = scaleOf(m)
@@ -2397,8 +2456,8 @@ class CanvasTextPainter<I> {
 			ctx.save()
 			ctx.shadowColor = canvasColor(color)
 			ctx.shadowBlur = Math.max(0, blur) * scale
-			ctx.shadowOffsetX = m[0] * (dx + away) + m[2] * dy
-			ctx.shadowOffsetY = m[1] * (dx + away) + m[3] * dy
+			ctx.shadowOffsetX = placed[0] * away + m[0] * dx + m[2] * dy
+			ctx.shadowOffsetY = placed[1] * away + m[1] * dx + m[3] * dy
 			ctx.fillStyle = fill === null ? "#000000" : fill
 			ctx.fillText(text, x - away, y)
 			ctx.restore()
@@ -2428,6 +2487,7 @@ class CanvasTextPainter<I> {
 	// endPos of the box's height.
 	private reflection(
 		effects: CanvasTextEffects,
+		placed: Matrix,
 		style: DocxTextStyle | undefined,
 		text: string,
 		x: number,
@@ -2445,13 +2505,13 @@ class CanvasTextPainter<I> {
 
 		const ascent = Math.max(0, finite(style?.ascent, 0))
 		const descent = Math.max(0, finite(style?.descent, 0))
-		const lineHeight = Number(/\/\s*([\d.]+)px/.exec(style?.font ?? "")?.[1] ?? Number.NaN)
-		const height = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : ascent + descent
+		// The page's span line-height is ascent + descent.
+		const height = ascent + descent
 		const bottom = y + descent + (height - ascent - descent) / 2
 		const axis = bottom + clamp(effect.distance, 0, MAX_COORD, 0) / 2
 		const fade = endPos * height
 		const { ctx } = this
-		const m = times(this.base, [1, 0, 0, -1, 0, 2 * axis])
+		const m = multiply(placed, [1, 0, 0, -1, 0, 2 * axis])
 		const reach = Math.max(
 			clamp(this.text.page.width, 0, MAX_COORD, 0),
 			Math.abs(x) + Math.abs(finite(this.ctx.measureText(text).width, 0)),

@@ -124,6 +124,21 @@ describe("grid tiles", () => {
 		expect(cache.patch({ ...tile(4, 0, [], 6), mode: "merge" })).toBe(false)
 	})
 
+	it("drops a replace patch for a tile it released, so no tile the session stops patching is cached", () => {
+		const cache = new TileCache()
+		const key = tileKey(1, 0, 0)
+
+		cache.put(tile(0, 0, [[0, 0, "v1"]], 1))
+		cache.put(tile(1, 0, [], 1))
+		cache.evict(1, new Set([tileKey(1, 1, 0)]))
+
+		expect([...(cache.takeReleased() ?? [])]).toEqual([key])
+		// A change built while the tile was still held answers after its release was sent.
+		expect(cache.patch({ ...tile(0, 0, [[0, 0, "v2"]], 2), mode: "replace" })).toBe(false)
+		expect(cache.has(key)).toBe(false)
+		expect(cache.size).toBe(1)
+	})
+
 	it("drops the tiles a region covers unless a patch of the same change replaced them", () => {
 		const cache = new TileCache()
 

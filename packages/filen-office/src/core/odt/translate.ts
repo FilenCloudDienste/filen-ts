@@ -31,11 +31,12 @@ import {
 } from "../xml/index"
 import { paragraph } from "./flow"
 import { hyphenationSettings } from "./hyphenation"
-import { imageKind } from "./frames"
+import { NUMBER_FORMATS } from "./lists"
+import { IMAGE_KINDS, imageKind, SNIFF_LENGTH, type ImageKind } from "./frames"
 import { GeometryError } from "./geometry"
 import { readContentPrologueSliced } from "../odf/prologue"
 import { BodyFlow } from "./pages"
-import { BodyScanner, inflateChunks, OdtScanError, type BodyBatch } from "./scan"
+import { BodyScanner, OdtScanError, type BodyBatch } from "./scan"
 import { Translator, type TranslatorSettings } from "./translator"
 import type { OdtOrigin, OdtTranslateResult, OdtTranslation } from "./types"
 import { PART_NAMESPACES, REL, twips, XML_DECLARATION } from "./wml"
@@ -52,25 +53,6 @@ export interface OdtTranslateOptions {
 	readonly strict?: boolean
 }
 
-const IMAGE_TYPES: Readonly<Record<string, string>> = {
-	png: "image/png",
-	jpeg: "image/jpeg",
-	gif: "image/gif",
-	bmp: "image/bmp",
-	webp: "image/webp",
-	svg: "image/svg+xml",
-	wmf: "image/x-wmf",
-	emf: "image/x-emf",
-	tiff: "image/tiff"
-}
-
-const NOTE_FORMATS: Readonly<Record<string, string>> = {
-	"1": "decimal",
-	a: "lowerLetter",
-	A: "upperLetter",
-	i: "lowerRoman",
-	I: "upperRoman"
-}
 const NOTE_RESTARTS: Readonly<Record<string, string>> = { document: "continuous", chapter: "eachSect", page: "eachPage" }
 
 // Automatic styles, their resolutions and mappings kept while translating (a body uses most of its automatic styles
@@ -91,7 +73,7 @@ function mayBePicture(name: string): boolean {
 	)
 }
 
-// The first bytes of a stream, inflating no more than one step.
+// The first SNIFF_LENGTH bytes of a stream (fewer where it is shorter), inflating no further than they reach.
 async function head(odf: OdfPackage, name: string, clock: SliceClock | undefined): Promise<Uint8Array> {
 	const entry = odf.archive.get(name)
 
@@ -100,18 +82,30 @@ async function head(odf: OdfPackage, name: string, clock: SliceClock | undefined
 	if (entry.method === METHOD_STORED) {
 		const { dataOffset } = await odf.archive.layout(entry)
 
-		return odf.archive.source.read(dataOffset, Math.min(64, entry.compressedSize))
+		return odf.archive.source.read(dataOffset, Math.min(SNIFF_LENGTH, entry.compressedSize))
 	}
 
+	// A step can inflate nothing (a stored deflate block not yet whole) or less than the sniff needs: chunks are
+	// copied in (each is the caller's only until the stream moves on) until it is held.
+	const out = new Uint8Array(Math.min(SNIFF_LENGTH, entry.uncompressedSize))
+	let held = 0
+
 	try {
-		for await (const chunk of inflateChunks(odf.archive, entry, clock)) return chunk.subarray(0, 64)
+		for await (const chunk of odf.archive.stream(entry, clock)) {
+			const take = Math.min(chunk.length, out.length - held)
+
+			out.set(chunk.subarray(0, take), held)
+			held += take
+
+			if (held === out.length) break
+		}
 	} catch (error) {
 		if (error instanceof ZipError) return new Uint8Array(0)
 
 		throw error
 	}
 
-	return new Uint8Array(0)
+	return out.subarray(0, held)
 }
 
 export function configBoolean(settings: XmlDocument | undefined, name: string): boolean | undefined {
@@ -262,7 +256,7 @@ async function translate(odf: OdfPackage, options: OdtTranslateOptions): Promise
 	// document lets LibreOffice place them past it.
 	const floatsOnPage = !(configBoolean(settingsXml, "DoNotCaptureDrawObjsOnPage") ?? false)
 	const gap = lineGap(configurationSettings(settingsXml))
-	const kinds = new Map<string, ReturnType<typeof imageKind>>()
+	const kinds = new Map<string, ImageKind>()
 
 	for (const entry of odf.archive.entries) {
 		if (mayBePicture(entry.name) && kinds.size < 10_000) kinds.set(entry.name, imageKind(await head(odf, entry.name, clock)))
@@ -331,7 +325,7 @@ async function translate(odf: OdfPackage, options: OdtTranslateOptions): Promise
 	let offset = 0
 	let looked = 0
 
-	for await (const chunk of inflateChunks(odf.archive, content, clock)) {
+	for await (const chunk of odf.archive.stream(content, clock)) {
 		if (scanner !== undefined) {
 			await take(scanner.push(chunk, offset))
 			offset += chunk.length
@@ -447,7 +441,7 @@ function notesProperties(translator: Translator, noteClass: "footnote" | "endnot
 
 	if (configuration === undefined) return ""
 
-	const format = NOTE_FORMATS[configuration.get("style:num-format") ?? "1"]
+	const format = NUMBER_FORMATS[configuration.get("style:num-format") ?? "1"]
 	const start = Number(configuration.get("text:start-value") ?? "0")
 	const restart = noteClass === "footnote" ? NOTE_RESTARTS[configuration.get("text:start-numbering-at") ?? "document"] : undefined
 
@@ -605,8 +599,8 @@ function assemble(
 		)
 	)
 
-	const defaultsXml = Object.entries(IMAGE_TYPES)
-		.map(([extension, type]) => `<Default Extension="${extension}" ContentType="${type}"/>`)
+	const defaultsXml = Object.values(IMAGE_KINDS)
+		.map(kind => `<Default Extension="${kind.extension}" ContentType="${kind.contentType}"/>`)
 		.join("")
 
 	parts.set(

@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import { isPageOf } from "./commands/types"
 import { PdfEngineRefusal, type PdfEngineContext } from "./context"
 import type { PdfPageInfo, PdfRenderArgs, PdfRenderValue } from "./protocol"
 import type { TileRenderer } from "./render"
@@ -26,7 +27,7 @@ export async function drawTile(
 	renderer: TileRenderer,
 	{ page, scale, rotation, tile, print, priority }: PdfRenderArgs
 ): Promise<{ readonly value: PdfRenderValue; readonly transfer: readonly unknown[] }> {
-	if (!Number.isInteger(page) || page < 0 || page >= document.countPages() || !(scale > 0)) throw new PdfEngineRefusal("badRequest")
+	if (!isPageOf(document, page) || !(scale > 0)) throw new PdfEngineRefusal("badRequest")
 
 	const drawn = renderer.render(
 		page,

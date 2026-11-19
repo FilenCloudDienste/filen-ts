@@ -9,6 +9,7 @@ import {
 	type WriteZipReport,
 	type ZipPlanItem
 } from "../opc/index"
+import { storedByType } from "../opc/mediaPolicy"
 import type { LinkedPart } from "../opc/package"
 import { PresentationError, refused, type Refused } from "../presentation/model"
 import { tooLarge } from "../presentation/refusal"
@@ -311,6 +312,8 @@ interface PartContext {
 	readonly placeholderRulers: ReadonlyMap<number, Ruler>
 	// The id of the next shape (cNvPr ids stay unique when spids repeat).
 	readonly ids: Set<number>
+	// Table cells (grid slots) written into the part, against cellsPerSlide.
+	readonly cells: { count: number }
 }
 
 function rotationOf(chain: PropertyChain): number {
@@ -332,6 +335,8 @@ class Converter {
 	private mediaCount = 0
 	// Characters written across the deck (a body of the slide list may be referenced by many shapes), §1.12.
 	private characters = 0
+	// Table cells (grid slots, each an a:tc) written across the deck.
+	private cells = 0
 
 	readonly document: PptDocument
 	readonly pictures: readonly (Picture | undefined)[]
@@ -827,7 +832,10 @@ class Converter {
 		const columns = xs.length - 1
 		const rows = ys.length - 1
 
-		if (columns < 1 || rows < 1 || columns * rows > 100_000) return undefined
+		const budgets = this.document.file.deckBudgets
+
+		// A table over its own bound stays a group; cells past the slide's or the deck's bound refuse the deck.
+		if (columns < 1 || rows < 1 || columns * rows > budgets.cellsPerTable) return undefined
 
 		const grid: (PptShape | undefined)[] = new Array<PptShape | undefined>(columns * rows)
 		const spans = new Map<PptShape, { readonly r0: number; readonly c0: number; readonly r1: number; readonly c1: number }>()
@@ -853,6 +861,12 @@ class Converter {
 
 			spans.set(cell, { r0, c0, r1, c1 })
 		}
+
+		context.cells.count += columns * rows
+		this.cells += columns * rows
+
+		if (context.cells.count > budgets.cellsPerSlide) tooLarge("table cells per slide", budgets.cellsPerSlide)
+		if (this.cells > budgets.cellsPerDeck) tooLarge("table cells per deck", budgets.cellsPerDeck)
 
 		const scaleX = space.right - space.left === 0 ? 1 : box.w / (space.right - space.left)
 		const scaleY = space.bottom - space.top === 0 ? 1 : box.h / (space.bottom - space.top)
@@ -1097,9 +1111,6 @@ function streams(part: Uint8Array | LinkedPart): part is LinkedPart & ByteChunks
 	return !(part instanceof Uint8Array) && "chunks" in part
 }
 
-// Extensions of parts whose content is compressed already: stored as they are, not deflated again.
-const STORED = new Set(["png", "jpeg", "jpg", "gif", "mp3", "mp4", "m4a", "wma", "wmv", "avi", "mov"])
-
 // The converted package as a .pptx file (Save as): its parts read one at a time (pictures decrypted and the embedded
 // objects' storages inflated as they are reached) and zipped to `sink`, [Content_Types].xml first. The same deck
 // always gives the same bytes.
@@ -1112,15 +1123,16 @@ export async function writePptConversion(
 	const ordered = [...names.filter(name => name === "[Content_Types].xml"), ...names.filter(name => name !== "[Content_Types].xml")]
 
 	const held = streamedParts.get(pptx)
+	const types = await pptx.contentTypes()
 
 	async function* items(): AsyncIterable<ZipPlanItem> {
 		for (const name of ordered) {
-			const extension = name.slice(name.lastIndexOf(".") + 1).toLowerCase()
 			const part = held?.get(name)
 			// A part that streams its pieces (an embedded object's storage) is never joined.
 			const bytes = part !== undefined && streams(part) ? part : await pptx.read(name)
 
-			yield { kind: "data", name, bytes, compress: !STORED.has(extension) }
+			// Media compressed already are stored as they are, not deflated again.
+			yield { kind: "data", name, bytes, compress: !storedByType(types.typeOf(name) ?? "", bytes.length) }
 		}
 	}
 
@@ -1283,7 +1295,8 @@ class PackageWriter {
 			masterShapes,
 			text: this.textContext(master, scheme, explicitColors, slideNumber, hf, rels),
 			placeholderRulers,
-			ids: new Set([1])
+			ids: new Set([1]),
+			cells: { count: 0 }
 		}
 	}
 

@@ -4,6 +4,7 @@ import type { XmlDocument } from "../../xml/index"
 import { D, drawingReader, type DrawingReader } from "../reader"
 import { plainParagraph, readTextBody, type TextDefaults } from "../text"
 import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type LineDefault, type Rect } from "./builder"
+import { MAX_POINTS, MAX_SERIES, pointBudget, type PointBudget } from "./data"
 import { formatNumber } from "./format"
 import { backgroundColor, mutedText, seriesColor, textColor } from "./palette"
 import { computeScale, scaleTicks, type Scale } from "./scale"
@@ -21,10 +22,15 @@ export interface ChartexConversion {
 	readonly unsupported: string[]
 }
 
-// Points read from one dimension level, and the leaves a hierarchy chart lays out.
-const MAX_POINTS = 1 << 20
-// The most boxes a treemap or sunburst draws.
+// The most boxes a treemap or sunburst draws, and the leaves it lays out.
 const MAX_CELLS = 20000
+// Category levels read per dimension.
+const MAX_LEVELS = 16
+// Points a level holds past its last written point, up to its declared ptCount: blank trailing categories show,
+// but a huge ptCount allocates nothing.
+const MAX_TRAILING_POINTS = 4096
+// Categories a waterfall, funnel, column chart or box-and-whisker chart draws: one bar, label and connector each.
+const MAX_DRAWN_CATEGORIES = 4096
 
 const DRAWN: ReadonlySet<string> = new Set(["waterfall", "funnel", "clusteredColumn", "paretoLine", "boxWhisker", "treemap", "sunburst"])
 
@@ -77,25 +83,36 @@ function numberAttr(reader: DrawingReader, node: number, local: string): number 
 	return Number.isFinite(value) ? value : undefined
 }
 
-function readLevel(reader: DrawingReader, level: number, into: (index: number, text: string) => void): number {
-	let count = Math.max(0, Math.min(MAX_POINTS, Math.floor(reader.number(level, "ptCount", 0))))
+// The points of a level, as the classic chart caches count them (chart/data.ts): within MAX_POINTS and the chart's
+// remaining budget, which it consumes; a level with no point written holds none.
+function readLevel(reader: DrawingReader, level: number, budget: PointBudget, into: (index: number, text: string) => void): number {
+	const limit = Math.max(0, Math.min(MAX_POINTS, budget.remaining))
 	const document = reader.document
+	let written = 0
 
 	for (let pt = document.firstChildElement(level); pt >= 0; pt = document.nextSiblingElement(pt)) {
 		if (!reader.is(pt, D.Cx, "pt")) continue
 
 		const index = Math.floor(reader.number(pt, "idx", -1))
 
-		if (index < 0 || index >= MAX_POINTS) continue
+		if (!(index >= 0 && index < limit)) continue
 
 		into(index, reader.text(pt))
-		count = Math.max(count, index + 1)
+		written = Math.max(written, index + 1)
 	}
+
+	if (written === 0) return 0
+
+	const declared = Math.floor(reader.number(level, "ptCount", 0))
+	const trailing = Number.isFinite(declared) ? Math.min(declared, written + MAX_TRAILING_POINTS) : 0
+	const count = Math.min(limit, Math.max(written, trailing))
+
+	budget.remaining -= count
 
 	return count
 }
 
-function readDimension(reader: DrawingReader, data: number): Dimension {
+function readDimension(reader: DrawingReader, data: number, budget: PointBudget): Dimension {
 	const levels: string[][] = []
 	let values = new Float64Array(0)
 	let count = 0
@@ -109,14 +126,16 @@ function readDimension(reader: DrawingReader, data: number): Dimension {
 
 		const type = reader.attr(child, "type") ?? (numeric ? "val" : "cat")
 
+		if (budget.remaining <= 0) break
+
 		if (type === "cat") {
-			for (const level of reader.children(child, D.Cx, "lvl")) {
+			for (const level of reader.children(child, D.Cx, "lvl").slice(0, MAX_LEVELS)) {
 				const labels: string[] = []
 				const code = reader.attr(level, "formatCode") ?? "General"
-				const n = readLevel(reader, level, (index, text) => {
+				const n = readLevel(reader, level, budget, (index, text) => {
 					const value = Number(text.trim())
 
-					labels[index] = numeric && text.trim() !== "" && Number.isFinite(value) ? formatNumber(value, code) : text
+					labels[index] = numeric && text.trim() !== "" && Number.isFinite(value) ? formatNumber(value, code, false) : text
 				})
 
 				count = Math.max(count, n)
@@ -135,7 +154,7 @@ function readDimension(reader: DrawingReader, data: number): Dimension {
 		valueRank = rank
 
 		const read: number[] = []
-		const n = readLevel(reader, level, (index, text) => {
+		const n = readLevel(reader, level, budget, (index, text) => {
 			const value = Number(text.trim())
 
 			read[index] = text.trim() !== "" && Number.isFinite(value) ? value : Number.NaN
@@ -152,13 +171,28 @@ function readDimension(reader: DrawingReader, data: number): Dimension {
 	return { levels, values, count, format }
 }
 
-function readData(reader: DrawingReader, root: number): Map<number, Dimension> {
-	const out = new Map<number, Dimension>()
+// The cx:data of the chart by id, read on first use: only data a drawn series names is read, each once, and all of
+// it within one point budget.
+function dataReader(reader: DrawingReader, root: number): (id: number) => Dimension {
+	const nodes = new Map<number, number>()
+	const read = new Map<number, Dimension>()
+	const budget = pointBudget()
 
 	for (const data of reader.children(reader.child(root, D.Cx, "chartData"), D.Cx, "data"))
-		out.set(Math.floor(reader.number(data, "id", 0)), readDimension(reader, data))
+		nodes.set(Math.floor(reader.number(data, "id", 0)), data)
 
-	return out
+	return id => {
+		let dimension = read.get(id)
+
+		if (dimension === undefined) {
+			const node = nodes.get(id)
+
+			dimension = node === undefined ? EMPTY : readDimension(reader, node, budget)
+			read.set(id, dimension)
+		}
+
+		return dimension
+	}
 }
 
 function textOf(reader: DrawingReader, tx: number): string {
@@ -206,7 +240,7 @@ function readAxes(builder: ChartBuilder, plotArea: number, base: TextDefaults): 
 	})
 }
 
-// The fill of a point: its own c:dataPt spPr, else its series', else `color`.
+// The fill of a point: its own cx:dataPt spPr, else its series', else `color`.
 function fillOf(builder: ChartBuilder, point: number, series: number, color: number): number {
 	const own = point < 0 ? -1 : builder.fill(point, undefined)
 
@@ -360,7 +394,7 @@ export function histogramBins(values: Float64Array, binning: Binning, format: st
 		counts[index] = (counts[index] ?? 0) + 1
 	}
 
-	const edge = (v: number): string => formatNumber(Number(v.toPrecision(12)), format)
+	const edge = (v: number): string => formatNumber(Number(v.toPrecision(12)), format, false)
 	const out: Bin[] = []
 
 	if (binning.underflow !== undefined) out.push({ label: `${binning.right ? "≤" : "<"}${edge(low)}`, count: under })
@@ -549,7 +583,7 @@ function pointLabel(labels: Labels, category: string, value: number, format: str
 	const parts: string[] = []
 
 	if (labels.category && category !== "") parts.push(category)
-	if (labels.value && Number.isFinite(value)) parts.push(formatNumber(value, labels.format ?? format))
+	if (labels.value && Number.isFinite(value)) parts.push(formatNumber(value, labels.format ?? format, false))
 
 	return parts.join("\n")
 }
@@ -596,7 +630,7 @@ function cartesian(
 	})
 	const ticks = scaleTicks(scale)
 	const valueFormat = valueAxis?.format ?? format
-	const tickText = ticks.map(tick => formatNumber(tick, valueFormat))
+	const tickText = ticks.map(tick => formatNumber(tick, valueFormat, false))
 	let left = 0
 
 	if (showValues) for (const text of tickText) left = Math.max(left, estimateWidth(text, valueText.size) + 6)
@@ -696,7 +730,7 @@ function drawWaterfall(frame: Frame, series: Series): void {
 		subtotals.add(Math.floor(reader.number(idx, "val", -1)))
 
 	const connectors = reader.bool(reader.child(series.layoutPr, D.Cx, "visibility"), "connectorLines", true)
-	const count = data.count
+	const count = Math.min(data.count, MAX_DRAWN_CATEGORIES)
 	const starts = new Float64Array(count)
 	const ends = new Float64Array(count)
 	let running = 0
@@ -776,7 +810,7 @@ function drawWaterfall(frame: Frame, series: Series): void {
 function drawFunnel(frame: Frame, series: Series): void {
 	const { builder, area } = frame
 	const data = series.data
-	const count = data.count
+	const count = Math.min(data.count, MAX_DRAWN_CATEGORIES)
 	const axis = axisFor(frame.axes, true)
 	const text = axis?.text ?? frame.axisText
 	const showCategories = axis === undefined || (!axis.hidden && axis.tickLabels)
@@ -876,12 +910,15 @@ function drawColumns(frame: Frame, series: Series, pareto: Series | undefined): 
 			const v = data.values[k] ?? Number.NaN
 			const name = categoryAt(data, k)
 
-			sums.set(name, (sums.get(name) ?? 0) + (Number.isFinite(v) ? v : 0))
+			if (sums.size < MAX_DRAWN_CATEGORIES || sums.has(name)) sums.set(name, (sums.get(name) ?? 0) + (Number.isFinite(v) ? v : 0))
 		}
 
 		bins = [...sums].map(([label, count]) => ({ label, count }))
 	} else {
-		bins = Array.from({ length: data.count }, (_, k) => ({ label: categoryAt(data, k), count: data.values[k] ?? Number.NaN }))
+		bins = Array.from({ length: Math.min(data.count, MAX_DRAWN_CATEGORIES) }, (_, k) => ({
+			label: categoryAt(data, k),
+			count: data.values[k] ?? Number.NaN
+		}))
 	}
 
 	// A Pareto chart's columns run largest first.
@@ -970,7 +1007,7 @@ function drawBoxes(frame: Frame, all: readonly Series[]): void {
 		for (let k = 0; k < series.data.count; k++) {
 			const name = series.data.levels[0]?.[k] ?? ""
 
-			if (!groupIndex.has(name)) {
+			if (!groupIndex.has(name) && groups.length < MAX_DRAWN_CATEGORIES) {
 				groupIndex.set(name, groups.length)
 				groups.push(name)
 			}
@@ -992,9 +1029,12 @@ function drawBoxes(frame: Frame, all: readonly Series[]): void {
 		for (let k = 0; k < series.data.count; k++) {
 			const v = series.data.values[k] ?? Number.NaN
 
-			if (!Number.isFinite(v)) continue
+			const group = groupIndex.get(series.data.levels[0]?.[k] ?? "")
 
-			buckets[groupIndex.get(series.data.levels[0]?.[k] ?? "") ?? 0]?.push(v)
+			// Points of the groups past the drawn ones are left out.
+			if (!Number.isFinite(v) || group === undefined) continue
+
+			buckets[group]?.push(v)
 			min = Math.min(min, v)
 			max = Math.max(max, v)
 		}
@@ -1360,8 +1400,8 @@ function seriesOf(reader: DrawingReader, root: number) {
 	return { nodes, visible, primary, layout }
 }
 
-// Whether drawChartex draws a part (a cx:chartSpace with a visible series of a drawn layout) at a non-empty size,
-// read without converting it: hosts choose a chartex mc:Choice over its Fallback by it.
+// Whether drawChartex draws a part (a cx:chartSpace with a visible series of a drawn layout), read without
+// converting it: hosts choose a chartex mc:Choice over its Fallback by it.
 export function chartexDrawable(document: XmlDocument): boolean {
 	const reader = drawingReader(document)
 	const root = document.documentElement()
@@ -1398,9 +1438,9 @@ export function drawChartex(
 		...builder.text,
 		color: builder.text.color === base.color ? mutedText(theme, 0.65) : builder.text.color
 	}
-	const data = readData(reader, root)
+	const data = dataReader(reader, root)
 	const hierarchical = layout === "treemap" || layout === "sunburst"
-	const series: Series[] = visible.map((node, position) => {
+	const series: Series[] = visible.slice(0, MAX_SERIES).map((node, position) => {
 		const points = new Map<number, number>()
 
 		for (const point of reader.children(node, D.Cx, "dataPt"))
@@ -1412,7 +1452,7 @@ export function drawChartex(
 			node,
 			layout: reader.attr(node, "layoutId") ?? "",
 			name: name === "" ? `Series${String(position + 1)}` : name,
-			data: data.get(Math.floor(reader.number(reader.child(node, D.Cx, "dataId"), "val", 0))) ?? EMPTY,
+			data: data(Math.floor(reader.number(reader.child(node, D.Cx, "dataId"), "val", 0))),
 			spPr: reader.child(node, D.Cx, "spPr"),
 			points,
 			labels: readLabels(builder, reader.child(node, D.Cx, "dataLabels"), hierarchical, builder.text),

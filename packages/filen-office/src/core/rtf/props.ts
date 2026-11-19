@@ -1,4 +1,4 @@
-import { languageIdentifier, languageTag } from "../docx/forms/dates"
+import { languageIdentifier, lcidHex, lcidTag } from "../docx/forms/dates"
 import { escapeAttribute } from "../xml/index"
 
 // Character, paragraph, section, row and cell properties as RTF states them (Microsoft RTF Specification
@@ -750,10 +750,9 @@ function fit(start: number, end: number, size: number): [number, number] {
 // A language identifier as w:lang gives it: its BCP 47 tag (ST_Lang, ECMA-376 Part 1 §22.9.2.6) where that tag
 // names this identifier and no other, else the identifier as four hex digits (the legacy form readers know).
 export function lcidCode(lcid: number): string {
-	const hex = lcid.toString(16).toUpperCase().padStart(4, "0")
-	const tag = languageTag(hex)
+	const tag = lcidTag(lcid)
 
-	return tag !== undefined && languageIdentifier(tag) === lcid ? tag : hex
+	return tag !== undefined && languageIdentifier(tag) === lcid ? tag : lcidHex(lcid)
 }
 
 export function clamp(value: number, min: number, max: number): number {

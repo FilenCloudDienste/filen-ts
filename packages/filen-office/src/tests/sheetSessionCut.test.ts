@@ -247,6 +247,26 @@ function refusal(result: SheetCommandResult): { reason: string; detail?: string 
 	return result.ok ? null : result.refusal
 }
 
+// A table over A1:B3, its header row A1:B1.
+const TABLE: Fixture = {
+	sheets: [
+		{
+			name: "One",
+			body:
+				'<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>K</t></is></c><c r="B1" t="inlineStr"><is><t>V</t></is></c></row>' +
+				'<row r="2"><c r="A2"><v>1</v></c><c r="B2"><v>2</v></c></row><row r="3"><c r="A3"><v>3</v></c><c r="B3"><v>4</v></c></row></sheetData>' +
+				'<tableParts count="1"><tablePart r:id="rId1"/></tableParts>',
+			rels: relationship("rId1", "table", "../tables/table1.xml")
+		}
+	],
+	parts: {
+		"xl/tables/table1.xml": {
+			text: `${DECLARATION}<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="A1:B3"><autoFilter ref="A1:B3"/><tableColumns count="2"><tableColumn id="1" name="K"/><tableColumn id="2" name="V"/></tableColumns></table>`,
+			type: TYPES.table
+		}
+	}
+}
+
 describe("sheet session: what else refers to cut cells", () => {
 	it("moves conditional format and validation formulas that read the cut cells, and undo saves the source", async () => {
 		const { session, result, bytes } = await cutOne(
@@ -486,24 +506,8 @@ describe("sheet session: ordinary cuts", () => {
 	})
 
 	it("cuts a data cell out of a table, as LibreOffice does, and refuses a header cell", async () => {
-		const fixture: Fixture = {
-			sheets: [
-				{
-					name: "One",
-					body:
-						'<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>K</t></is></c><c r="B1" t="inlineStr"><is><t>V</t></is></c></row>' +
-						'<row r="2"><c r="A2"><v>1</v></c><c r="B2"><v>2</v></c></row><row r="3"><c r="A3"><v>3</v></c><c r="B3"><v>4</v></c></row></sheetData>' +
-						'<tableParts count="1"><tablePart r:id="rId1"/></tableParts>',
-					rels: relationship("rId1", "table", "../tables/table1.xml")
-				}
-			],
-			parts: {
-				"xl/tables/table1.xml": {
-					text: `${DECLARATION}<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="A1:B3"><autoFilter ref="A1:B3"/><tableColumns count="2"><tableColumn id="1" name="K"/><tableColumn id="2" name="V"/></tableColumns></table>`,
-					type: TYPES.table
-				}
-			}
-		}
+		const fixture = TABLE
+
 		const data = await cutOne(fixture, range(2, 0), { row: 2, col: 4 })
 		const header = await cutOne(fixture, range(0, 0), { row: 0, col: 4 })
 
@@ -512,5 +516,27 @@ describe("sheet session: ordinary cuts", () => {
 		expect(refusal(header.result)?.reason).toBe("tableHeader")
 		data.session.close()
 		header.session.close()
+	})
+
+	it("clears a table's data cells and formats, as a cut clears them, and refuses to empty a header cell", async () => {
+		const { session, info } = await openFixture(TABLE)
+		const one = info.sheets[0]!.id
+		const clear = (ranges: readonly SheetRange[], what: "contents" | "formats" | "all"): Promise<SheetCommandResult> =>
+			session.command({ type: "cells.clear", sheet: one, ranges, what })
+
+		expect(refusal(await clear([range(0, 0)], "contents"))?.reason).toBe("tableHeader")
+		expect(refusal(await clear([range(0, 0, 2, 1)], "all"))?.reason).toBe("tableHeader")
+		expect(refusal(await clear([range(0, 0, 1_048_575, 0)], "contents"))?.reason).toBe("tableHeader")
+		expect(tileEntry(await firstTile(session, one), 0, 0)?.text).toBe("K")
+		changeOf(await clear([range(0, 0)], "formats"))
+		changeOf(await clear([range(1, 0, 2, 1)], "contents"))
+		expect(tileEntry(await firstTile(session, one), 1, 0)?.text ?? "").toBe("")
+		expect(tileEntry(await firstTile(session, one), 0, 0)?.text).toBe("K")
+		session.close()
+
+		const plain = await openFixture(SHARED)
+
+		changeOf(await plain.session.command({ type: "cells.clear", sheet: plain.info.sheets[0]!.id, ranges: [range(0, 0)], what: "all" }))
+		plain.session.close()
 	})
 })

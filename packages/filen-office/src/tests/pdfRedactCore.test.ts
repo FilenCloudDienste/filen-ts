@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { contentStrings, parseContent, sectionEnd, spliceContent, writeOperation } from "../core/pdfedit/contentStream"
 import {
 	coveredWords,
 	decodeXmlText,
+	foldCase,
 	hiddenTerms,
 	forEachCoveredPixel,
 	glyphCore,
+	matchedTerm,
 	matchPreset,
 	matchTerm,
 	pdfTextString,
@@ -16,6 +18,7 @@ import {
 	verifiedTerms,
 	type RedactionFinding
 } from "../core/pdfedit/redactVerify"
+import { budget } from "./timing"
 
 const bytes = (text: string): Uint8Array => Uint8Array.from(text, char => char.charCodeAt(0))
 const text = (data: Uint8Array): string => String.fromCharCode(...data)
@@ -134,7 +137,130 @@ describe("decoding", () => {
 
 		const utf16le = Uint8Array.of(0, ...Array.from("Hi", char => [char.charCodeAt(0), 0]).flat())
 
-		expect(streamReadings(utf16le).some(reading => reading.includes("Hi"))).toBe(true)
+		expect([...streamReadings(utf16le)].some(reading => reading.includes("Hi"))).toBe(true)
+	})
+
+	// The string-at-a-time loops the decoders replaced, as the reference they must agree with.
+	const reference = {
+		utf16(bytes: Uint8Array, from: number, littleEndian: boolean): string {
+			let out = ""
+
+			for (let index = from; index + 1 < bytes.length; index += 2) {
+				const high = bytes[index] ?? 0
+				const low = bytes[index + 1] ?? 0
+
+				out += String.fromCharCode(littleEndian ? low * 256 + high : high * 256 + low)
+			}
+
+			return out
+		},
+		utf8(bytes: Uint8Array): string {
+			let out = ""
+			let index = 0
+
+			while (index < bytes.length) {
+				const first = bytes[index] ?? 0
+				let length =
+					first < 0x80
+						? 1
+						: first >= 0xc2 && first < 0xe0
+							? 2
+							: first >= 0xe0 && first < 0xf0
+								? 3
+								: first >= 0xf0 && first < 0xf5
+									? 4
+									: 0
+				let code = length === 1 ? first : length === 2 ? first & 0x1f : length === 3 ? first & 0x0f : first & 0x07
+
+				for (let next = 1; next < length; next++) {
+					const byte = bytes[index + next]
+
+					if (byte === undefined || (byte & 0xc0) !== 0x80) {
+						length = 0
+
+						break
+					}
+
+					code = code * 64 + (byte & 0x3f)
+				}
+
+				if (length === 0 || code > 0x10ffff) {
+					out += String.fromCharCode(first)
+					index++
+				} else {
+					out += String.fromCodePoint(code)
+					index += length
+				}
+			}
+
+			return out
+		},
+		fold(text: string): string {
+			let out = ""
+
+			for (const char of text) {
+				const lower = char.toLowerCase()
+
+				out += lower.length === char.length ? lower : char
+			}
+
+			return out
+		}
+	}
+	const mixed = "Größe ΟΔΟΣ ΣΑΣ İstanbul 𝐀𐐀😀 \u{10400}x ẞ ǅ"
+	const encoder = new TextEncoder()
+
+	it("decodes and folds exactly as the string-at-a-time loops did", () => {
+		const utf8 = Uint8Array.of(...encoder.encode(mixed), 0xff, 0xc0, 0x80, 0xe2, 0x82, 0xf4, 0x90, 0x80, 0x80, 0xed, 0xa0, 0x80, 0x41)
+		const random = Uint8Array.from({ length: 40_000 }, (_, index) => (index * 2_654_435_761) >>> 24)
+
+		for (const bytes of [utf8, random, Uint8Array.of(), Uint8Array.of(0x41)]) {
+			expect(utf8Text(bytes)).toBe(reference.utf8(bytes))
+
+			const readings = [...streamReadings(bytes)]
+			const expected = [bytes.reduce((out, byte) => out + String.fromCharCode(byte), ""), decodeXmlText(reference.utf8(bytes))]
+
+			if (bytes.length >= 2) {
+				expected.push(
+					reference.utf16(bytes, 0, false),
+					reference.utf16(bytes, 1, false),
+					reference.utf16(bytes, 0, true),
+					reference.utf16(bytes, 1, true)
+				)
+			}
+
+			expect(readings).toEqual(expected)
+		}
+
+		for (const text of [mixed, "plain ascii", "ΣΑΣ", "İ", "", mixed.repeat(50)]) expect(foldCase(text)).toBe(reference.fold(text))
+	})
+
+	// The string-at-a-time loops took over 20 s for this (and gigabytes of heap); the bound leaves room for a busy machine.
+	it("reads and folds a 16 MiB stream in every encoding quickly", { timeout: budget(30_000) }, () => {
+		const bytes = new Uint8Array(16 * 1024 * 1024)
+
+		for (let index = 0; index < bytes.length; index++) bytes[index] = (index * 2_654_435_761) >>> 24
+
+		const start = performance.now()
+		let length = 0
+
+		for (const reading of streamReadings(bytes)) length += foldCase(reading).length
+
+		expect(length).toBeGreaterThan(16 * 1024 * 1024 * 3)
+		expect(performance.now() - start).toBeLessThan(budget(4000))
+	})
+
+	it("folds a text only when a term ignores case", () => {
+		const lower = vi.spyOn(String.prototype, "toLowerCase")
+
+		try {
+			expect(matchedTerm("Top Secret", [{ text: "Secret", matchCase: true, wholeWord: false }])?.text).toBe("Secret")
+			expect(lower).not.toHaveBeenCalled()
+			expect(matchedTerm("Top Secret", [{ text: "secret", matchCase: false, wholeWord: false }])?.text).toBe("secret")
+			expect(lower).toHaveBeenCalled()
+		} finally {
+			lower.mockRestore()
+		}
 	})
 })
 

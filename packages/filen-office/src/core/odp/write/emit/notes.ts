@@ -1,11 +1,11 @@
 import { notesBody } from "../../../presentation/notes"
-import { refused, type Refused, type SlideNode } from "../../../presentation/model"
+import { refused, type Refused, type SlideNode, type Xfrm } from "../../../presentation/model"
 import { escapeAttribute, type XmlEditor } from "../../../xml/index"
 import { isAnnotation } from "../../read/annotations"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
 import { OdpStyles, styleChanges } from "../styles"
-import { boxAttributes, markupOf } from "./shape"
+import { boxMarkup, markupOf } from "./shape"
 
 // A page's presentation:notes (ODF 1.3 Part 3 §10.3.4 page thumbnail, §16.9 presentation:notes) when the session made
 // the notes (apply/notes.ts): a page thumbnail and a notes frame (presentation:class "notes", §19.432), placed as the
@@ -17,14 +17,10 @@ export const emitOdpNotes: OdpEmitFamily = {
 }
 
 // The shape's name (the reader takes draw:name as it) and its box.
-function boxMarkup(shape: { readonly name: string; readonly xfrm?: Parameters<typeof boxAttributes>[0] }): string {
-	let out = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
-
-	if (shape.xfrm === undefined) return out
-
-	for (const { name, value } of boxAttributes(shape.xfrm)) if (value !== null) out += ` ${name}="${escapeAttribute(value)}"`
-
-	return out
+function nameAndBox(shape: { readonly name: string; readonly xfrm?: Xfrm }): string {
+	return (
+		(shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`) + (shape.xfrm === undefined ? "" : boxMarkup(shape.xfrm))
+	)
 }
 
 // The presentation style a notes frame takes: its master's "<master>-notes" (§16.16 presentation styles name their
@@ -76,11 +72,11 @@ export function odpNotesMarkup(slide: SlideNode, notes: SlideNode, pageNumber: n
 	const thumbnail =
 		image === undefined
 			? ""
-			: `<draw:page-thumbnail${boxMarkup(image)} draw:page-number="${String(pageNumber)}" presentation:class="page"/>`
+			: `<draw:page-thumbnail${nameAndBox(image)} draw:page-number="${String(pageNumber)}" presentation:class="page"/>`
 	const frame =
 		body === undefined
 			? ""
-			: `<draw:frame presentation:style-name="${escapeAttribute(style)}"${boxMarkup(body)} presentation:class="notes"${holdsText ? "" : ' presentation:placeholder="true"'}>${text === "" ? "<draw:text-box/>" : `<draw:text-box>${text}</draw:text-box>`}</draw:frame>`
+			: `<draw:frame presentation:style-name="${escapeAttribute(style)}"${nameAndBox(body)} presentation:class="notes"${holdsText ? "" : ' presentation:placeholder="true"'}>${text === "" ? "<draw:text-box/>" : `<draw:text-box>${text}</draw:text-box>`}</draw:frame>`
 
 	return `<presentation:notes>${thumbnail}${frame}</presentation:notes>`
 }

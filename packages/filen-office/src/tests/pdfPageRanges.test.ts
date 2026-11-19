@@ -25,6 +25,32 @@ describe("page ranges", () => {
 		])
 	})
 
+	it("reads full-width forms, other digits, dashes, the minus sign and other commas as their ASCII forms", () => {
+		const expected = ranges("1-3,5", 9)
+
+		for (const text of [
+			"\uff11\uff0d\uff13\uff0c\uff15",
+			"1\u20143,5",
+			"1\u22123,5",
+			"1\u30fc3\u30015",
+			"1-3\u060c5",
+			"1-3\u061b5",
+			"\u0661-\u0663,\u0665",
+			"\u06f1-\u06f3,\u06f5",
+			"\u0967-\u0969,\u096b",
+			"\u09e7-\u09e9,\u09eb",
+			"\u0e51-\u0e53,\u0e55",
+			"1\u3000-\u30003\uff0c 5"
+		])
+			expect(ranges(text, 9)).toEqual(expected)
+	})
+
+	it("reports a part as typed", () => {
+		expect(ranges("\uff11\uff0d\uff12\uff0d\uff13", 5)).toEqual({ kind: "syntax", part: "\uff11\uff0d\uff12\uff0d\uff13" })
+		expect(ranges("1, \uff18", 5)).toEqual({ kind: "outOfRange", part: "\uff18" })
+		expect(ranges("\u0661\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0660", 5)).toMatchObject({ kind: "syntax" })
+	})
+
 	it("sorts and merges overlapping and adjacent ranges", () => {
 		expect(ranges("7, 1-3, 2-5, 6", 9)).toEqual([{ first: 1, last: 7 }])
 		expect(

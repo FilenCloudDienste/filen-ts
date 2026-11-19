@@ -1355,3 +1355,83 @@ describe("format painter and revisions", () => {
 		editor.dispose()
 	})
 })
+
+describe("the session's toggles and alignment", () => {
+	const BOLD = (text: string): string => `<w:r><w:rPr><w:b/></w:rPr><w:t>${text}</w:t></w:r>`
+	const PAGE =
+		'<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
+		'<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+
+	function textPos(session: DocxEditorSession, text: string): number {
+		let at = -1
+
+		session.state.doc.descendants((node, pos) => {
+			if (at < 0 && node.isText && node.text?.includes(text) === true) at = pos + (node.text.indexOf(text) ?? 0)
+
+			return at < 0
+		})
+
+		if (at < 0) throw new Error(`no ${text}`)
+
+		return at
+	}
+
+	it("counts a field the same in a paragraph selected whole or in part, as Bold then finds it", async () => {
+		const body = `<w:p>${BOLD("One")}</w:p><w:p>${BOLD("Bold")}${PAGE}</w:p><w:p>${BOLD("Three")}</w:p>`
+		const whole = (await open(body)).session
+
+		// The middle paragraph wholly selected.
+		select(whole, textPos(whole, "One") + 1, textPos(whole, "Three") + 2)
+		expect(whole.snapshot().formats.bold).toBe("mixed")
+
+		const part = (await open(body)).session
+
+		// The middle paragraph partly selected, the selection reached by shrinking a larger one.
+		select(part, textPos(part, "One"), textPos(part, "Three") + 2)
+		part.snapshot()
+		select(part, textPos(part, "Bold") + 1, textPos(part, "Three") + 2)
+		expect(part.snapshot().formats.bold).toBe("mixed")
+
+		// Bold finds the field not bold and turns bold on everywhere.
+		expect(run(whole, { type: "format.bold" })).toBe(true)
+		expect(whole.snapshot().formats.bold).toBe("on")
+	})
+
+	it("turns bold off over a selection holding a w:fldSimple without a result", async () => {
+		const doc = await open(`<w:p>${BOLD("Bold")}<w:fldSimple w:instr=" PAGE "/>${BOLD("After")}</w:p>`)
+		const session = doc.session
+
+		session.dispatch(session.state.tr.setSelection(new AllSelection(session.state.doc)))
+		expect(session.snapshot().formats.bold).toBe("on")
+		expect(run(session, { type: "format.bold" })).toBe(true)
+		expect(markOf(textAt(session, textPos(session, "Bold")), "bold")).toBeUndefined()
+		expect(session.snapshot().formats.bold).toBe("off")
+	})
+
+	it("writes a direct alignment in a cell, whose table style the resolver does not see", async () => {
+		const doc = await open(
+			'<w:tbl><w:tblPr><w:tblStyle w:val="Centred"/><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid><w:tr><w:tc>' +
+				p("Cell") +
+				"</w:tc></w:tr></w:tbl>" +
+				p("After"),
+			{
+				parts: [
+					STYLES_PART(
+						'<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+							'<w:style w:type="table" w:styleId="Centred"><w:name w:val="Centred"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>'
+					)
+				]
+			}
+		)
+		const session = doc.session
+
+		select(session, textPos(session, "Cell") + 2, textPos(session, "After") + 2)
+		expect(run(session, { type: "align.start" })).toBe(true)
+
+		const xml = body(await saved(doc))
+
+		expect(xml).toMatch(/<w:jc w:val="(left|start)"\/><\/w:pPr><w:r><w:t[^>]*>Cell/)
+		// Outside a table, what the paragraph style gives is left to it.
+		expect(xml).not.toMatch(/<w:jc[^>]*\/><\/w:pPr><w:r><w:t[^>]*>After/)
+	})
+})

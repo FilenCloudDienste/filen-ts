@@ -54,9 +54,12 @@ export class HyphenationLibrary {
 	private readonly state = new Uint8Array(HYPHENATION_LANGUAGES.length)
 	private readonly sets: (HyphenationPatterns | undefined)[] = []
 	private readonly loads = new Set<Promise<void>>()
+	private readonly onError: ((error: unknown, file: string) => void) | undefined
 
-	constructor(assets: HyphenationAssets) {
+	// `onError` hears why a language's patterns failed to load (its text is laid out without hyphenation).
+	constructor(assets: HyphenationAssets, onError?: (error: unknown, file: string) => void) {
 		this.assets = assets
+		this.onError = onError
 	}
 
 	// A language's compiled patterns (see hyphenationLanguage), or null until loaded (and for one that failed to).
@@ -91,15 +94,24 @@ export class HyphenationLibrary {
 				newline < 0 ? "" : text.slice(newline + 1)
 			)
 			this.state[index] = Load.READY
-		})().catch(() => {
-			// Text in the language is laid out without automatic hyphenation.
+		})().catch((error: unknown) => {
+			// Text in the language is laid out without automatic hyphenation until retryFailed.
 			this.state[index] = Load.FAILED
+			this.onError?.(error, entry?.file ?? String(language))
 		})
 
 		this.loads.add(load)
 		void load.then(() => this.loads.delete(load))
 
 		return false
+	}
+
+	// Languages that failed to load are requested anew on their next use. Never per word: once per document, so
+	// an offline realm does not refetch in a loop.
+	retryFailed(): void {
+		for (let index = 0; index < this.state.length; index++) {
+			if (this.state[index] === Load.FAILED && HYPHENATION_LANGUAGES[index] !== undefined) this.state[index] = Load.NONE
+		}
 	}
 
 	// Some language is still loading.

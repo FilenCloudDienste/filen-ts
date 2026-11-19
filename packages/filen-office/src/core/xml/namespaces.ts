@@ -1,12 +1,17 @@
 import { NodeKind, type XmlDocument } from "./document"
 import { sliceClock, type Slicing } from "../slicing"
 import { decodeCharacterData } from "./entities"
+import { XmlError } from "./errors"
 import { decodeUtf8 } from "./utf8"
 
 export const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 export const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/"
 
 const NO_BINDINGS: ReadonlyMap<string, string> = new Map()
+
+// In-scope bindings copied across all declaring elements, past which a part is refused: each copy holds its
+// parent's whole scope, so nested or repeated new prefixes would otherwise grow memory quadratically.
+const SCOPE_ENTRY_BUDGET = 4_000_000
 
 // Elements whose start tag contains "xmlns" among the hits in bytes [from, to), added to `found`: found by a
 // native scan of the part for the byte sequence, each hit mapped to its node by binary search over the
@@ -60,7 +65,8 @@ function declarations(document: XmlDocument, node: number): Map<string, string> 
 // OOXML binds the usual ones to different URIs, so names are only ever compared as (URI, local name).
 // Each declaring element gets its complete in-scope map once. When declarations sit only on the root (the
 // usual case) every lookup uses that one map; otherwise each node's nearest declaring element is recorded
-// in one pass, so no lookup walks an ancestor chain.
+// in one pass, so no lookup walks an ancestor chain. An element whose own bindings are all in scope already
+// with the same URI shares its parent's map.
 export class Namespaces {
 	readonly document: XmlDocument
 	// Declaring element -> its own bindings (prefix, "" for the default namespace -> URI, "" undeclares).
@@ -125,6 +131,7 @@ export class Namespaces {
 		const scopeOf = new Int32Array(count)
 		let next = 0
 		let nextNode = declared[0] ?? count
+		let copied = 0
 
 		scopeOf[0] = -1
 
@@ -137,13 +144,38 @@ export class Namespaces {
 				continue
 			}
 
-			const scope = new Map(inherited < 0 ? NO_BINDINGS : (this.scopes.get(inherited) ?? NO_BINDINGS))
+			const parentScope = inherited < 0 ? NO_BINDINGS : (this.scopes.get(inherited) ?? NO_BINDINGS)
+			const own = this.own.get(node) ?? NO_BINDINGS
+			let redundant = true
 
-			for (const [prefix, uri] of this.own.get(node) ?? NO_BINDINGS) scope.set(prefix, uri)
+			for (const [prefix, uri] of own) {
+				if (parentScope.get(prefix) !== uri) {
+					redundant = false
+
+					break
+				}
+			}
+
+			nextNode = declared[++next] ?? count
+
+			if (redundant) {
+				scopeOf[node] = inherited
+
+				continue
+			}
+
+			const scope = new Map(parentScope)
+
+			for (const [prefix, uri] of own) scope.set(prefix, uri)
+
+			copied += scope.size
+
+			if (copied > SCOPE_ENTRY_BUDGET) {
+				throw new XmlError("invalidContent", "Too many namespace bindings in scope", document.start(node))
+			}
 
 			this.scopes.set(node, scope)
 			scopeOf[node] = node
-			nextNode = declared[++next] ?? count
 		}
 
 		this.scopeOf = scopeOf

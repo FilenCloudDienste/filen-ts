@@ -5,7 +5,7 @@ import { NO_SOURCE, docxSchema } from "../../edit/schema"
 import type { DocxEditorSession } from "../../edit/session"
 import { Item, type StoryPart } from "../../model/index"
 import type { SliceClock } from "../../../opc/index"
-import { NodeKind, decodeUtf8, encodeUtf8, parseXml } from "../../../xml/index"
+import { NodeKind, decodeUtf8, encodeUtf8, parseXml, type XmlDocument } from "../../../xml/index"
 import { partReader } from "../../model/reader"
 import { W_NAMESPACE } from "../source"
 import { DocxWriteError } from "../values"
@@ -80,8 +80,9 @@ const R_URIS: ReadonlySet<string> = new Set([
 const O_URI = "urn:schemas-microsoft-com:office:office"
 
 // Whether attribute `name` of element `node` names a relationship: one of the relationships namespace, or VML's
-// o:relid (v:imagedata, v:fill).
-function namesRelationship(namespaces: ReturnType<typeof partReader>["namespaces"], node: number, name: string): boolean {
+// o:relid (v:imagedata, v:fill). The one rule of the save, its orphan search and gate 2 and of a note's copy
+// (stories/clone.ts).
+export function namesRelationship(namespaces: ReturnType<typeof partReader>["namespaces"], node: number, name: string): boolean {
 	const colon = name.indexOf(":")
 
 	if (colon <= 0 || name.startsWith("xmlns")) return false
@@ -91,12 +92,22 @@ function namesRelationship(namespaces: ReturnType<typeof partReader>["namespaces
 	return R_URIS.has(uri) || (uri === O_URI && name.slice(colon + 1) === "relid")
 }
 
+// The root start tag of a self-closing root (a part holding no story yet) as an open tag: its "/>" made ">", every
+// other byte as the source has it.
+export function openedRoot(document: XmlDocument): string {
+	const root = document.documentElement()
+
+	return `${decodeUtf8(document.bytes, document.start(root), document.end(root) - 2)}>`
+}
+
 // The values of attributes naming relationships (namesRelationship) in markup `bytes` written for `part` (whose root
 // declares what it uses), each a relationship id, with the byte span of the value: [from, to] by id.
 export function relationshipUses(part: StoryPart, bytes: Uint8Array): Map<string, number[]> {
 	const document = part.document
 	const root = document.documentElement()
-	const open = document.bytes.subarray(document.start(root), document.openEnd(root))
+	const open = document.isSelfClosing(root)
+		? encodeUtf8(openedRoot(document))
+		: document.bytes.subarray(document.start(root), document.openEnd(root))
 	const close = encodeUtf8(`</${document.name(root)}>`)
 	const whole = new Uint8Array(open.length + bytes.length + close.length)
 
@@ -134,14 +145,19 @@ export function relationshipUses(part: StoryPart, bytes: Uint8Array): Map<string
 
 // The relationship ids a whole part's markup `bytes` names (namesRelationship).
 export function relationshipIdsOf(bytes: Uint8Array): Set<string> {
-	const parsed = parseXml(bytes)
-	const namespaces = partReader(parsed).namespaces
+	return relationshipIdsIn(parseXml(bytes))
+}
+
+// The relationship ids parsed markup `document` names (namesRelationship).
+export function relationshipIdsIn(document: XmlDocument): Set<string> {
+	const bytes = document.bytes
+	const namespaces = partReader(document).namespaces
 	const out = new Set<string>()
 
-	for (let node = 0; node < parsed.count; node++) {
-		if (parsed.kinds[node] !== NodeKind.Element) continue
+	for (let node = 0; node < document.count; node++) {
+		if (document.kinds[node] !== NodeKind.Element) continue
 
-		const spans = parsed.attributeSpans(node)
+		const spans = document.attributeSpans(node)
 
 		for (let k = 0; k < spans.length; k += 4) {
 			if (namesRelationship(namespaces, node, decodeUtf8(bytes, spans[k] ?? 0, spans[k + 1] ?? 0)))
@@ -340,7 +356,10 @@ export function orphanedNotes(
 		for (const [id, story] of kind === "footnote" ? model.footnotes : model.endnotes) {
 			if (story.noteType !== "normal" || story.item < 0) continue
 
-			const key = `${kind}:${id}`
+			// A reference a written story's own nodes make keeps the note: asked first, as it is one lookup per
+			// story, where the search below scans every held range.
+			if (referencedAnywhere(`${kind}:${id}`)) continue
+
 			let found = false
 			let referenced = false
 
@@ -362,7 +381,7 @@ export function orphanedNotes(
 				}
 			}
 
-			if (!found || referenced || referencedAnywhere(key)) continue
+			if (!found || referenced) continue
 
 			const part = model.parts[story.part]
 

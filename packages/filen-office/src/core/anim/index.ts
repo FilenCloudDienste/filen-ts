@@ -12,7 +12,6 @@ export {
 	type TimeCondition,
 	type TimeEvent,
 	type TimeEventName,
-	type TimegraphEngine,
 	type TimegraphInstance,
 	type TimegraphSnapshot,
 	type TimegraphSource,

@@ -116,11 +116,16 @@ export function canonicalStyleName(name: string): string {
 
 const HEADING_NAME = /^heading ([1-9])$/
 
-// The level of a built-in heading style ("heading 1".."heading 9"), by canonical name.
-export function headingLevel(style: StyleDef): number | undefined {
-	const match = style.canonicalName === undefined ? null : HEADING_NAME.exec(style.canonicalName)
+// The level of the built-in heading style ("heading 1".."heading 9") canonical name `name` names.
+export function headingLevelOfName(name: string): number | undefined {
+	const match = HEADING_NAME.exec(name)
 
 	return match === null ? undefined : Number(match[1])
+}
+
+// The level of a built-in heading style, by canonical name.
+export function headingLevel(style: StyleDef): number | undefined {
+	return style.canonicalName === undefined ? undefined : headingLevelOfName(style.canonicalName)
 }
 
 // Deeper basedOn chains are cut: Word documents use a handful of levels, hostile ones thousands.

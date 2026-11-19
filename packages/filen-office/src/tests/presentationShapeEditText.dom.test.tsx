@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { isMacPlatform } from "@filen/shared/keymap"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -38,8 +39,8 @@ const BINDINGS: ObjectKeyBindings = {
 	bringForward: "mod+]",
 	sendBackward: "mod+["
 }
-const APPLE = /Mac|iPhone|iPad/u.test(String(Reflect.get(globalThis.navigator, "platform")))
-const MOD = APPLE ? { metaKey: true } : { ctrlKey: true }
+// Mod as the app keymap's own Mac test reads it, as the canvas does.
+const mod = (): KeyboardEventInit => (isMacPlatform() ? { metaKey: true } : { ctrlKey: true })
 
 interface Shape {
 	readonly xfrm: Xfrm
@@ -288,7 +289,7 @@ describe("the formatting keys on shapes selected as objects", () => {
 			selection.set([2, 3, 4])
 		})
 
-		const pressed = key({ key: "b", code: "KeyB", ...MOD })
+		const pressed = key({ key: "b", code: "KeyB", ...mod() })
 
 		expect(pressed.defaultPrevented).toBe(true)
 		await settle()
@@ -316,7 +317,7 @@ describe("the formatting keys on shapes selected as objects", () => {
 	it("an object binding wins where the keys collide, and a non-formatting body key does nothing", async () => {
 		mount([{ xfrm: box(100, 100, 200, 100), body: "shape" }])
 		click(150, 150)
-		key({ key: "a", code: "KeyA", ...MOD })
+		key({ key: "a", code: "KeyA", ...mod() })
 		key({ key: "Enter", code: "Enter", shiftKey: true })
 		await settle()
 		expect(ops).toEqual([])
@@ -350,7 +351,7 @@ describe("Escape and refusals", () => {
 		act(() => {
 			selection.set([2, 3])
 		})
-		key({ key: "g", code: "KeyG", ...MOD })
+		key({ key: "g", code: "KeyG", ...mod() })
 		await settle()
 		expect(ops).toHaveLength(1)
 		expect(selection.getSnapshot()).toEqual({ slide: ref, ids: [2, 3] })

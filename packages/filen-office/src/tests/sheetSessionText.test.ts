@@ -102,6 +102,68 @@ describe("text sessions", () => {
 		session.close()
 	})
 
+	it("moves a cut over a block it overlaps, and undo puts the file back", async () => {
+		const bytes = utf8("a,b,c\r\nd,e,f\r\n")
+		const session = await open(bytes)
+		const copied = await session.query("copy", { sheet: 0, range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 }, cut: true })
+
+		if ("refused" in copied) throw new Error("refused")
+
+		changeOf(await session.command({ type: "clipboard.paste", sheet: 0, at: { row: 1, col: 1 }, text: copied.text, clip: copied.clip }))
+		expect(new TextDecoder().decode(await savedBytes(session))).toBe(",,c\r\n,a,b\r\n,d,e\r\n")
+		changeOf(await session.undo())
+		expect(equalBytes(await savedBytes(session), bytes)).toBe(true)
+		session.close()
+	})
+
+	// A block `rows` by `cols`, every field filled.
+	const block = (rows: number, cols: number): Uint8Array =>
+		utf8(
+			Array.from({ length: rows }, (_, row) =>
+				Array.from({ length: cols }, (_, col) => `${String(row)}.${String(col)}`).join(",")
+			).join("\n") + "\n"
+		)
+
+	it("moves a 100,000-cell cut, and undo puts it back", async () => {
+		const bytes = block(10_000, 10)
+		const session = await open(bytes)
+		const copied = await session.query("copy", { sheet: 0, range: { startRow: 0, startCol: 0, endRow: 9_999, endCol: 9 }, cut: true })
+
+		if ("refused" in copied) throw new Error("refused")
+
+		changeOf(
+			await session.command({ type: "clipboard.paste", sheet: 0, at: { row: 0, col: 10 }, text: copied.text, clip: copied.clip })
+		)
+
+		const tile = await firstTile(session, 0)
+
+		expect(tileTexts(tile).get("0,0")).toBeUndefined()
+		expect(tileTexts(tile).get("0,10")).toBe("0.0")
+		changeOf(await session.undo())
+		expect(equalBytes(await savedBytes(session), bytes)).toBe(true)
+		session.close()
+	})
+
+	it("refuses a cut whose emptied and pasted cells pass what one edit may name, writing nothing", async () => {
+		const bytes = block(15_000, 10)
+		const session = await open(bytes)
+		const copied = await session.query("copy", { sheet: 0, range: { startRow: 0, startCol: 0, endRow: 14_999, endCol: 9 }, cut: true })
+
+		if ("refused" in copied) throw new Error("refused")
+
+		const result = await session.command({
+			type: "clipboard.paste",
+			sheet: 0,
+			at: { row: 0, col: 10 },
+			text: copied.text,
+			clip: copied.clip
+		})
+
+		expect(result.ok ? null : result.refusal.reason).toBe("tooLarge")
+		expect(equalBytes(await savedBytes(session), bytes)).toBe(true)
+		session.close()
+	})
+
 	it("refuses formats and sizes, which a text file does not hold", async () => {
 		const session = await open(utf8("a\n"))
 		const format = await session.command({

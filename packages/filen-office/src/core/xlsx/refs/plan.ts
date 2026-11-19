@@ -42,7 +42,7 @@ import {
 } from "./parts"
 import { MODEL_SECTIONS, PLAIN_SECTIONS, rewriteSection, sectionKnown } from "./sections"
 import { formatRef, parseRef } from "./sqref"
-import { liveRelationships, refState } from "./state"
+import { liveRelationships, refState, type RefState } from "./state"
 import { readTable, rewriteTable, shiftTable, tableEdit, withoutTableParts, type TableInfo, type TableShift } from "./tables"
 import type { TableEdit } from "./structured"
 import { shiftCols, shiftMerges, shiftRowRuns, shiftView } from "./views"
@@ -253,12 +253,25 @@ interface OwnedPart {
 	readonly relationship: Relationship | null
 }
 
-interface Step {
+// One reversible write of a reference edit.
+export interface Step {
 	readonly apply: () => void
 	readonly revert: () => void
 }
 
-function lastSegment(type: string): string {
+// Writes a part's new bytes; the revert puts back what the session held for it (nothing: the source's).
+function partStep(state: RefState, part: OwnedPart, after: Uint8Array): Step {
+	const held = state.heldPart(part.name)
+	const contentType = part.contentType
+
+	return {
+		apply: () => state.setPart(part.name, contentType, after),
+		revert: () => state.setPart(part.name, contentType, held)
+	}
+}
+
+// A relationship type's last segment (".../pivotTable": "pivotTable").
+export function lastSegment(type: string): string {
 	return type.slice(type.lastIndexOf("/") + 1)
 }
 
@@ -578,7 +591,10 @@ async function plan(workbook: XlsxWorkbookModel, edit: RefEdit): Promise<RefPlan
 					break
 				}
 
-				rewrite = () => rewriteTable(table, moved, job)
+				// rewriteTable hands back the bytes it read when nothing changed; the part is not read again.
+				const after = rewriteTable(table, moved, job)
+
+				if (after !== table.bytes) steps.push(partStep(state, part, after))
 				break
 			}
 			case "externalLink":
@@ -598,13 +614,7 @@ async function plan(workbook: XlsxWorkbookModel, edit: RefEdit): Promise<RefPlan
 
 		if (after === before) continue
 
-		const held = state.heldPart(part.name)
-		const contentType = part.contentType
-
-		steps.push({
-			apply: () => state.setPart(part.name, contentType, after),
-			revert: () => state.setPart(part.name, contentType, held)
-		})
+		steps.push(partStep(state, part, after))
 	}
 
 	if (removedTables.length > 0) planTableRemovals(workbook, removedTables, steps, touch)

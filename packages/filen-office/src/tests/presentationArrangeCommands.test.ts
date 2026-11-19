@@ -1,4 +1,6 @@
+import { EditorState, TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
+import { importLayout } from "../core/presentation/edit/apply/slide"
 import { alignOp, distributeOp } from "../core/presentation/edit/commands/align"
 import { canZOrder, zOrderOp } from "../core/presentation/edit/commands/arrange"
 import { canGroup, canUngroup, groupOp, ungroupOps } from "../core/presentation/edit/commands/group"
@@ -18,7 +20,9 @@ import {
 	turnedXfrm,
 	xfrmsOp
 } from "../core/presentation/edit/commands/shape"
-import { slideRef, type Xfrm } from "../core/presentation/model"
+import { backspaceAtStart, levelOf } from "../core/presentation/edit/commands/text"
+import { slideRef, type Deck, type SlideNode, type SlideRef, type TextBody, type Xfrm } from "../core/presentation/model"
+import { bodyToDoc, presentationTextSchema } from "../core/presentation/text/schema"
 
 const slide = slideRef(256)
 const box = (x: number, y: number, cx: number, cy: number, rot = 0): Xfrm => ({ x, y, cx, cy, rot, flipH: false, flipV: false })
@@ -255,5 +259,86 @@ describe("presentation arrange commands", () => {
 			action: undefined
 		})
 		expect(actionOp(target, "click", { kind: "internal", jump: "next" })).toMatchObject({ action: { kind: "internal", jump: "next" } })
+	})
+})
+
+describe("presentation text and slide command builders", () => {
+	// A body of paragraphs at the given levels, the caret at the start of paragraph `at`.
+	function caretAt(levels: readonly number[], at: number): EditorState {
+		const body: TextBody = {
+			bodyPr: {},
+			paragraphs: levels.map((lvl, k) => ({ pPr: lvl === 0 ? {} : { lvl }, runs: [{ kind: "r", text: `P${String(k)}`, rPr: {} }] }))
+		}
+		const state = EditorState.create({ doc: bodyToDoc(body).doc, schema: presentationTextSchema })
+		let pos = 1
+
+		for (let k = 0; k < at; k++) pos += state.doc.child(k).nodeSize
+
+		return state.apply(state.tr.setSelection(TextSelection.create(state.doc, pos)))
+	}
+
+	function run(state: EditorState): { readonly handled: boolean; readonly state: EditorState } {
+		let next = state
+		const handled = backspaceAtStart()(state, tr => {
+			next = state.apply(tr)
+		})
+
+		return { handled, state: next }
+	}
+
+	it("Backspace at a paragraph's start outdents a level first, joins at level 0, and does nothing on the first", () => {
+		const outdented = run(caretAt([0, 2], 1))
+
+		expect(outdented.handled).toBe(true)
+		expect(outdented.state.doc.childCount).toBe(2)
+		expect(levelOf(outdented.state.doc.child(1))).toBe(1)
+
+		const joined = run(caretAt([0, 0], 1))
+
+		expect(joined.handled).toBe(true)
+		expect(joined.state.doc.childCount).toBe(1)
+		expect(joined.state.doc.child(0).textContent).toBe("P0P1")
+
+		const first = caretAt([0, 0], 0)
+		const none = run(first)
+
+		expect(none.handled).toBe(true)
+		expect(none.state).toBe(first)
+	})
+
+	it("an imported slide takes the layout of its type and name, its type, its name, the content layout, else the first", () => {
+		const master = (n: number): SlideRef => slideRef(n)
+		const layout = (n: number, parent: SlideRef, layoutType: string, name: string): SlideNode =>
+			({ ref: slideRef(n), kind: "layout", parent, layoutType, name }) as unknown as SlideNode
+		const layouts = [
+			layout(11, master(1), "title", "Title Slide"),
+			layout(12, master(1), "obj", "Title and Content"),
+			layout(13, master(1), "twoObj", "Two"),
+			layout(14, master(1), "twoObj", "Custom"),
+			layout(21, master(2), "title", "Other title"),
+			layout(22, master(2), "tx", "Custom")
+		]
+		const slides = [
+			{ ref: slideRef(101), kind: "slide", parent: slideRef(11) },
+			{ ref: slideRef(102), kind: "slide", parent: slideRef(21) }
+		] as unknown as SlideNode[]
+		const deck = {
+			slides: slides.map(slide => slide.ref),
+			masters: [master(1), master(2)],
+			layouts: layouts.map(each => each.ref),
+			nodes: new Map([...layouts, ...slides].map(node => [node.ref, node]))
+		} as unknown as Deck
+
+		// After slide 1 (master 1).
+		expect(importLayout(deck, { type: "twoObj", name: " custom " }, 1)).toBe(slideRef(14))
+		expect(importLayout(deck, { type: "twoObj" }, 1)).toBe(slideRef(13))
+		expect(importLayout(deck, { name: "CUSTOM" }, 1)).toBe(slideRef(14))
+		expect(importLayout(deck, { type: "chart" }, 1)).toBe(slideRef(12))
+		expect(importLayout(deck, { type: "cust", name: "nothing" }, 1)).toBe(slideRef(12))
+		// At the start the slide it goes before gives the master; after slide 2, master 2, which has no content layout.
+		expect(importLayout(deck, { type: "title" }, 0)).toBe(slideRef(11))
+		expect(importLayout(deck, { type: "title" }, 2)).toBe(slideRef(21))
+		expect(importLayout(deck, { name: "custom" }, 2)).toBe(slideRef(22))
+		expect(importLayout(deck, { name: "nothing" }, 2)).toBe(slideRef(21))
 	})
 })

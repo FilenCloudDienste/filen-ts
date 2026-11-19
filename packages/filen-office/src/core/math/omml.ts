@@ -84,21 +84,21 @@ const INTEGRAL_LAST = 0x2233
 
 // Accent characters written as combining marks, by the spacing form a MathML mover draws.
 const SPACING_ACCENTS: ReadonlyMap<string, string> = new Map([
-	["̀", "`"],
-	["́", "´"],
-	["̂", "^"],
-	["̃", "~"],
-	["̄", "¯"],
-	["̅", "¯"],
-	["̆", "˘"],
-	["̇", "˙"],
-	["̈", "¨"],
-	["̊", "˚"],
-	["̋", "˝"],
-	["̌", "ˇ"],
-	["⃖", "←"],
-	["⃗", "→"],
-	["⃡", "↔"]
+	["\u0300", "`"],
+	["\u0301", "´"],
+	["\u0302", "^"],
+	["\u0303", "~"],
+	["\u0304", "¯"],
+	["\u0305", "¯"],
+	["\u0306", "˘"],
+	["\u0307", "˙"],
+	["\u0308", "¨"],
+	["\u030a", "˚"],
+	["\u030b", "˝"],
+	["\u030c", "ˇ"],
+	["\u20d6", "←"],
+	["\u20d7", "→"],
+	["\u20e1", "↔"]
 ])
 
 const namespaceCache = new WeakMap<XmlDocument, Namespaces>()
@@ -142,6 +142,23 @@ function unwrap(node: MathElement): readonly MathElement[] {
 
 function operator(text: string, attributes?: MathAttributes): MathElement {
 	return element("mo", [text], attributes)
+}
+
+// Turns leading and trailing U+0020 runs into no-break spaces, leaving inner spaces alone.
+function keepEdgeSpaces(text: string): string {
+	let lead = 0
+
+	while (lead < text.length && text.charCodeAt(lead) === 0x20) lead++
+
+	if (lead === text.length) return "\u00a0".repeat(lead)
+
+	let trail = 0
+
+	while (text.charCodeAt(text.length - 1 - trail) === 0x20) trail++
+
+	if (lead === 0 && trail === 0) return text
+
+	return "\u00a0".repeat(lead) + text.slice(lead, text.length - trail) + "\u00a0".repeat(trail)
 }
 
 class Converter {
@@ -571,7 +588,8 @@ class Converter {
 		}
 
 		// Token content is trimmed by MathML; edge spaces become no-break spaces to survive.
-		const kept = text.replace(/^ +| +$/g, spaces => " ".repeat(spaces.length))
+		// Index scans, not a regex: an unanchored " +$" backtracks over every inner run of spaces.
+		const kept = keepEdgeSpaces(text)
 
 		if (kept !== "") out.push(element("mtext", [kept], color === undefined ? undefined : { color }))
 	}
@@ -806,13 +824,13 @@ class Converter {
 		if (emptyName) return argument
 		if (emptyArgument) return name
 
-		return element("mrow", [name, operator("⁡"), argument])
+		return element("mrow", [name, operator("\u2061"), argument])
 	}
 
 	accent(node: number): MathElement {
 		const base = this.slot(node, "e", 0)
 		const properties = this.child(node, "accPr")
-		const character = this.child(properties, "chr") < 0 ? "̂" : (this.value(properties, "chr") ?? "")
+		const character = this.child(properties, "chr") < 0 ? "\u0302" : (this.value(properties, "chr") ?? "")
 
 		if (character === "") return base
 

@@ -240,6 +240,9 @@ function reasonOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
 }
 
+// Reads of one bundled face before its failure is final.
+const MAX_ASSET_READS = 3
+
 export class FontManager {
 	private readonly host: FontHost
 	private readonly assets: FontAssets
@@ -263,6 +266,8 @@ export class FontManager {
 	// Asset file -> load result.
 	private readonly assetLoads = new Map<string, Promise<boolean>>()
 	private readonly loadedAssets = new Set<string>()
+	// Asset file -> reads that failed.
+	private readonly assetReadFailures = new Map<string, number>()
 
 	private readonly registered: FaceRegistration[] = []
 	// Family as requested -> results by requestIndex().
@@ -697,20 +702,37 @@ export class FontManager {
 
 			load = this.assets
 				.read(face.file)
-				.then(data => (this.disposed ? false : this.host.addBytes(descriptor, data)))
-				.then(added => {
-					if (!this.settled(descriptor.family, added)) return false
+				.then(
+					async data => {
+						if (!this.settled(descriptor.family, this.disposed ? false : await this.host.addBytes(descriptor, data)))
+							return false
 
-					this.loadedAssets.add(face.file)
-					this.registered.push({ ...descriptor, source: "asset", file: face.file })
+						this.loadedAssets.add(face.file)
+						this.registered.push({ ...descriptor, source: "asset", file: face.file })
 
-					return true
-				})
+						return true
+					},
+					() => {
+						this.readFailed(face.file)
+
+						return false
+					}
+				)
 				.catch(() => false)
 			this.assetLoads.set(face.file, load)
 		}
 
 		return load
+	}
+
+	// A failed read (a dropped connection, say) is forgotten so a later prepare() reads again, up to
+	// MAX_ASSET_READS times; a face the platform rejects stays rejected.
+	private readFailed(file: string): void {
+		const failures = (this.assetReadFailures.get(file) ?? 0) + 1
+
+		this.assetReadFailures.set(file, failures)
+
+		if (!this.disposed && failures < MAX_ASSET_READS) this.assetLoads.delete(file)
 	}
 
 	private compute(request: FontRequest): ResolvedFont {

@@ -3,7 +3,7 @@ import type { LinkedPart } from "../opc/package"
 import type { ByteChunks } from "../opc/pieces"
 import { PresentationError } from "../presentation/model"
 import { persistRecord, type PptFile } from "./document"
-import { children, u32, utf16Text, type PptRecord } from "./records"
+import { children, RT, u32, utf16Text, type PptRecord } from "./records"
 import type { PptReport } from "./report"
 import { xmlText } from "./text"
 
@@ -15,14 +15,6 @@ import { xmlText } from "./text"
 // takes it. A storage that turns out damaged then keeps that size (what inflated, then zeros) and is counted.
 // Linked objects and ActiveX controls stay their preview pictures (a link the reader would have to follow, a control
 // it would have to run).
-
-const RT = {
-	externalObjectList: 0x0409,
-	cString: 0x0fba,
-	oleEmbed: 0x0fcc,
-	oleObjectAtom: 0x0fc3,
-	oleObjectStorage: 0x1011
-} as const
 
 // What all of a deck's storages together may state they hold (a zip entry's limit, core/opc DEFAULT_ZIP_LIMITS).
 const MAX_STORAGE = 512 * 1024 * 1024
@@ -152,10 +144,10 @@ export class PptOle {
 			const list = this.document.find(record => record.type === RT.externalObjectList)
 
 			for (const record of list === undefined ? [] : this.kids(list)) {
-				if (record.type !== RT.oleEmbed) continue
+				if (record.type !== RT.externalOleEmbed) continue
 
 				const kids = this.kids(record)
-				const atom = kids.find(child => child.type === RT.oleObjectAtom)
+				const atom = kids.find(child => child.type === RT.externalOleObjectAtom)
 
 				if (atom === undefined || atom.end - atom.start < 24) continue
 
@@ -189,7 +181,7 @@ export class PptOle {
 		let record: PptRecord
 
 		try {
-			record = persistRecord(this.file, embed.persistIdRef, RT.oleObjectStorage)
+			record = persistRecord(this.file, embed.persistIdRef, RT.externalOleObjectStorage)
 		} catch (error) {
 			if (error instanceof PresentationError) return undefined
 

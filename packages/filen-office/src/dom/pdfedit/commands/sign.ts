@@ -1,8 +1,9 @@
 import type * as Mupdf from "mupdf"
 import { BYTE_RANGE_SENTINEL } from "../../../core/pdfsign/placeholder"
 import { PdfEngineRefusal } from "../context"
+import { insertedImageBytes } from "../pages/organise"
 import { addPdfSignatureField, PdfSignRefusal, type PdfSignaturePlacement, type PdfVisualSignatureInput } from "../sign"
-import { isIndex, isRecord, isText, type PdfCommandTable } from "./types"
+import { isFiniteNumber, isFiniteTuple, isIndex, isRecord, isText, parseRect, type PdfCommandTable } from "./types"
 
 // Signing with a certificate, its first half: the signature field placed (a drawn rectangle, or an empty signature
 // field of the form), its appearance and its /V dictionary with the placeholder (sign.ts addPdfSignatureField). The
@@ -34,10 +35,6 @@ export interface PdfSignCommands {
 	"sign.addField": PdfSignFieldArgs
 }
 
-function isNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value)
-}
-
 function optionalText(value: unknown): string | null | undefined {
 	return value === null ? null : isText(value, MAX_TEXT) ? value : undefined
 }
@@ -48,15 +45,15 @@ function parsePlacement(value: unknown): PdfSignaturePlacement | null {
 	if (value["kind"] === "field")
 		return isText(value["name"], MAX_TEXT) && value["name"].length > 0 ? { kind: "field", name: value["name"] } : null
 
-	const rect = value["rect"]
+	const rect = parseRect(value["rect"])
 
-	if (value["kind"] !== "rect" || !isIndex(value["page"]) || !Array.isArray(rect) || rect.length !== 4) return null
+	if (value["kind"] !== "rect" || !isIndex(value["page"]) || rect === null) return null
 
-	const [x0, y0, x1, y1] = rect as unknown[]
+	const [x0, y0, x1, y1] = rect
 
-	if (!isNumber(x0) || !isNumber(y0) || !isNumber(x1) || !isNumber(y1) || !(x1 > x0) || !(y1 > y0)) return null
+	if (!(x1 > x0) || !(y1 > y0)) return null
 
-	return { kind: "rect", page: value["page"], rect: [x0, y0, x1, y1] }
+	return { kind: "rect", page: value["page"], rect }
 }
 
 function parseVisual(value: unknown): PdfVisualSignatureInput | null | undefined {
@@ -71,9 +68,16 @@ function parseVisual(value: unknown): PdfVisualSignatureInput | null | undefined
 
 	const { width, height, lineWidth, color, strokes } = value
 
-	if (value["kind"] !== "strokes" || !isNumber(width) || !isNumber(height) || !(width > 0) || !(height > 0) || !isNumber(lineWidth))
+	if (
+		value["kind"] !== "strokes" ||
+		!isFiniteNumber(width) ||
+		!isFiniteNumber(height) ||
+		!(width > 0) ||
+		!(height > 0) ||
+		!isFiniteNumber(lineWidth)
+	)
 		return undefined
-	if (!Array.isArray(color) || color.length !== 3 || !color.every(isNumber)) return undefined
+	if (!isFiniteTuple(color, 3)) return undefined
 	if (!Array.isArray(strokes) || strokes.length > MAX_STROKES) return undefined
 
 	let points = 0
@@ -85,9 +89,9 @@ function parseVisual(value: unknown): PdfVisualSignatureInput | null | undefined
 		const line: (readonly [number, number])[] = []
 
 		for (const point of stroke as unknown[]) {
-			if (!Array.isArray(point) || point.length !== 2 || !isNumber(point[0]) || !isNumber(point[1])) return undefined
+			if (!isFiniteTuple(point, 2)) return undefined
 
-			line.push([point[0], point[1]])
+			line.push([point[0] ?? 0, point[1] ?? 0])
 		}
 
 		points += line.length
@@ -97,7 +101,7 @@ function parseVisual(value: unknown): PdfVisualSignatureInput | null | undefined
 		parsed.push(line)
 	}
 
-	const [r = 0, g = 0, b = 0] = color as number[]
+	const [r = 0, g = 0, b = 0] = color
 
 	return { kind: "strokes", width, height, lineWidth, color: [r, g, b], strokes: parsed }
 }
@@ -115,8 +119,8 @@ export function parseSignFieldArgs(args: unknown): PdfSignFieldArgs | null {
 
 	if (placement === null || visual === undefined || name === undefined || reason === undefined || location === undefined) return null
 	if (!Array.isArray(lines) || lines.length > MAX_LINES || !lines.every((line: unknown) => isText(line, MAX_TEXT))) return null
-	if (!isNumber(time) || !(certify === null || certify === 1 || certify === 2 || certify === 3)) return null
-	if (!isNumber(capacity) || !Number.isSafeInteger(capacity) || capacity <= 0 || capacity > MAX_CAPACITY) return null
+	if (!isFiniteNumber(time) || !(certify === null || certify === 1 || certify === 2 || certify === 3)) return null
+	if (!isFiniteNumber(capacity) || !Number.isSafeInteger(capacity) || capacity <= 0 || capacity > MAX_CAPACITY) return null
 
 	return { placement, visual, lines: lines as string[], name, reason, location, time, certify, capacity }
 }
@@ -125,6 +129,9 @@ export const SIGN_COMMANDS: PdfCommandTable<PdfSignCommands> = {
 	"sign.addField": {
 		tool: "sign",
 		parse: parseSignFieldArgs,
+		// An image signature's picture, decoded pixels included, so a flat picture of huge dimensions is refused as over
+		// budget before it is decoded.
+		bytes: ({ visual }, mupdf) => (visual?.kind === "image" ? insertedImageBytes(mupdf, visual.png) : 0),
 		run: (context, args) => {
 			try {
 				return addPdfSignatureField(context.mupdf, context.document, { ...args, time: new Date(args.time) }).pages

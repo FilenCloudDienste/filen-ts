@@ -68,8 +68,46 @@ function number(value: number): string {
 	return String(Math.round(value * 100) / 100)
 }
 
+// Text and attribute values for markup parsed as XML: escaped, and every character XML 1.0 forbids (C0 controls but
+// tab, line feed and carriage return; U+FFFE, U+FFFF; a lone surrogate) drawn as a space, as a canvas draws it, so
+// a page holding one still parses.
 export function escapeSvgText(text: string): string {
-	return text.replace(/[&<>"]/g, char => (char === "&" ? "&amp;" : char === "<" ? "&lt;" : char === ">" ? "&gt;" : "&quot;"))
+	return xmlChars(text).replace(/[&<>"]/g, char => (char === "&" ? "&amp;" : char === "<" ? "&lt;" : char === ">" ? "&gt;" : "&quot;"))
+}
+
+// `text` with the characters XML 1.0's Char production leaves out replaced by spaces (the same string when none).
+export function xmlChars(text: string): string {
+	let out: string | null = null
+	let from = 0
+
+	for (let i = 0; i < text.length; i++) {
+		const code = text.charCodeAt(i)
+		let allowed: boolean
+
+		if (code < 0x20) {
+			allowed = code === 0x09 || code === 0x0a || code === 0x0d
+		} else if (code >= 0xd800 && code <= 0xdfff) {
+			const next = text.charCodeAt(i + 1)
+
+			// A high surrogate with its low one is a character; either alone is not.
+			if (code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+				i++
+
+				continue
+			}
+
+			allowed = false
+		} else {
+			allowed = code !== 0xfffe && code !== 0xffff
+		}
+
+		if (allowed) continue
+
+		out = `${out ?? ""}${text.slice(from, i)} `
+		from = i + 1
+	}
+
+	return out === null ? text : out + text.slice(from)
 }
 
 const ANCHORS: Readonly<Record<GridCanvas["textAlign"], string>> = {
@@ -457,8 +495,9 @@ export class SvgCanvas implements GridCanvas {
 		}
 	}
 
+	// What fillText writes is measured: the characters XML forbids as the spaces they are written as.
 	measureText(text: string): { readonly width: number } {
-		return { width: this.measure(this.state.font, text) }
+		return { width: this.measure(this.state.font, xmlChars(text)) }
 	}
 
 	createPattern(): object | null {

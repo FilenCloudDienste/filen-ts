@@ -1,5 +1,6 @@
 import { isOcrCandidate } from "../../core/pdfedit/ocrGeometry"
 import type { PdfFontAssets } from "../../core/pdfwrite/fonts"
+import { checkPage } from "./commands/types"
 import { PdfEngineRefusal, type PdfEngineContext } from "./context"
 import { ocrPageSummary, renderPageForOcr } from "./ocr/page"
 import type { PdfRequestHandler } from "./requests"
@@ -17,7 +18,7 @@ type Handlers = { readonly [K in ToolOp]: PdfRequestHandler<K> }
 const MAX_TEXT = 100_000
 
 function pageIndex(context: PdfEngineContext, page: number): number {
-	if (!Number.isInteger(page) || page < 0 || page >= context.open().document.countPages()) throw new PdfEngineRefusal("badRequest")
+	checkPage(context.open().document, page)
 
 	return page
 }

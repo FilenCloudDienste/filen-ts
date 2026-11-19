@@ -6,9 +6,10 @@ import { D, drawingReader } from "../core/drawingml/reader"
 import { parseXml } from "../core/xml/index"
 import { RenderReport, layerEffects } from "../core/presentation/render/effects"
 import { resolveTextEffects } from "../core/presentation/text/color"
-import type { TableModel } from "../core/presentation/model"
+import type { SlideNode, TableModel } from "../core/presentation/model"
 import { renderSlide } from "../core/presentation/render/slide"
 import { renderTable, renderTableSteps } from "../core/presentation/render/table"
+import { effectiveClrMap, resolveColor } from "../core/presentation/theme"
 import { NS, SLIDE, THEME, THEME_PART, body, deckOf, renderServices, xfrm } from "./fixtures/presentation/renderDeck"
 import { budget, cpuMs } from "./timing"
 
@@ -181,5 +182,21 @@ describe("hostile text effects", () => {
 		)
 
 		expect(resolved.map(effect => effect.kind)).toEqual(["glow", "softEdge"])
+	})
+})
+
+describe("hostile colour names", () => {
+	const context = { theme: undefined, clrMap: effectiveClrMap(new Map(), { parent: undefined } as unknown as SlideNode) }
+
+	it("resolves a system or preset name that is an Object.prototype member to no colour", () => {
+		for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+			expect(resolveColor({ kind: "system", name }, context)).toBeUndefined()
+			expect(resolveColor({ kind: "preset", name }, context)).toBeUndefined()
+		}
+	})
+
+	it("still resolves known system colours and lastClr", () => {
+		expect(resolveColor({ kind: "system", name: "btnShadow" }, context)).toEqual({ hex: "A0A0A0", alpha: 1 })
+		expect(resolveColor({ kind: "system", name: "constructor", lastColor: "123456" }, context)).toEqual({ hex: "123456", alpha: 1 })
 	})
 })

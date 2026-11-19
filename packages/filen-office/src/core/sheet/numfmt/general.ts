@@ -43,7 +43,8 @@ export function isPlainGeneral(format: NumFmt): boolean {
 	)
 }
 
-function plain(d: Digits, decimal: string): string {
+// The digits as a decimal number, every digit shown, with `decimal` as the point.
+export function plainDigits(d: Digits, decimal: string): string {
 	const integer = integerDigits(d) || "0"
 	const fraction = d.point >= 0 ? d.digits.slice(d.point + 1) : "0".repeat(-d.point - 1) + d.digits
 
@@ -76,7 +77,7 @@ export function generalWithin(value: number, chars: number, decimal = "."): stri
 	if (point >= 0) {
 		// The integer digits, and one character for the point when a fraction digit fits after them.
 		if (point < chars && point < GENERAL_CHARS) {
-			const text = plain(roundDigits(d, point + 1 === chars ? chars : chars - 1), decimal)
+			const text = plainDigits(roundDigits(d, point + 1 === chars ? chars : chars - 1), decimal)
 
 			if (text.length <= chars) return text
 		}
@@ -91,7 +92,7 @@ export function generalWithin(value: number, chars: number, decimal = "."): stri
 		const rounded = roundDigits(d, keep)
 
 		if (rounded.digits !== "") {
-			const text = plain(rounded, decimal)
+			const text = plainDigits(rounded, decimal)
 
 			if (text.length <= chars) return text
 		}

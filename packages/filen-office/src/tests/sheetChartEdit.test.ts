@@ -180,6 +180,35 @@ describe("chart editing", () => {
 		other.close()
 	})
 
+	it.each([
+		["stacked", false],
+		["percentStacked", false],
+		["clustered", true]
+	] as const)("drops an outside-end label position a %s grouping does not allow", async (grouping, kept) => {
+		const { session, sheet } = await edited({
+			kind: "labels",
+			plot: null,
+			labels: { value: true, category: false, series: false, percent: false, position: "outEnd" }
+		})
+
+		expect(await saved(session)).toContain('<c:dLblPos val="outEnd"/>')
+		changeOf(
+			await session.command({
+				type: "chart.edit",
+				sheet,
+				part: CHART_PART,
+				edit: { kind: "type", plot: 0, type: "column", grouping }
+			})
+		)
+
+		const text = await saved(session)
+
+		valid(text)
+		expect(info(text).plots[0]?.grouping).toBe(grouping)
+		expect(text.includes('<c:dLblPos val="outEnd"/>')).toBe(kept)
+		session.close()
+	})
+
 	it("changes a column chart into a line chart, keeping series ids and their cells", async () => {
 		const extension =
 			'<c:extLst><c:ext uri="{C3380CC4-5D6E-409C-BE32-E72D297353CC}" xmlns:c16="http://schemas.microsoft.com/office/drawing/2014/chart"><c16:uniqueId val="{00000000-0001}"/></c:ext></c:extLst>'

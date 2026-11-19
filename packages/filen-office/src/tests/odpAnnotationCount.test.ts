@@ -98,6 +98,7 @@ describe("counting a page's comment characters", () => {
 
 	it.skipIf(!existsSync(join(CORPUS_DIR, "odp")))("counts every corpus page as the reader reads it", { timeout: 300_000 }, async () => {
 		const directory = join(CORPUS_DIR, "odp")
+		const unopened: Record<string, string> = {}
 		let pages = 0
 		let scanned = 0
 
@@ -106,7 +107,9 @@ describe("counting a page's comment characters", () => {
 
 			try {
 				opened = await pagesOf(new Uint8Array(readFileSync(join(directory, file))))
-			} catch {
+			} catch (error) {
+				unopened[file] = String(error)
+
 				continue
 			}
 
@@ -122,6 +125,8 @@ describe("counting a page's comment characters", () => {
 			}
 		}
 
+		// Every corpus deck opens, so a deck that stops opening is named rather than left out.
+		expect(unopened).toEqual({})
 		expect(pages).toBeGreaterThan(0)
 		expect(scanned / pages).toBeGreaterThan(0.9)
 	})

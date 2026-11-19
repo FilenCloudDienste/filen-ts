@@ -356,6 +356,25 @@ describe("morph descriptors", () => {
 		expect(match.pairs).toEqual(to.map((_, k) => [k, k]))
 	})
 
+	it("past the pair bound matches a group whose earlier group was matched by name", () => {
+		const count = 300
+		const at = (k: number): [number, number] => [(k * 37) % 1280, (k * 91) % 720]
+		const from = [
+			shape("Background", "sp", 0, 0, "rect", 1280, 720),
+			...Array.from({ length: count }, (_, k) => shape(`From ${String(k)}`, "sp", ...at(k), "ellipse", 10, 10))
+		]
+		const to = [
+			shape("Background", "sp", 0, 0, "rect", 1280, 720),
+			...Array.from({ length: count }, (_, k) => shape(`To ${String(k)}`, "sp", at(k)[0] + 2, at(k)[1] - 1, "ellipse", 10, 10))
+		]
+		const match = matchMorph(from, to)
+
+		expect(count * count).toBeGreaterThan(MORPH_MAX_PAIRS)
+		expect(match.pairs).toHaveLength(count + 1)
+		expect(match.pairs).toContainEqual([0, 0])
+		expect(match.pairs.every(([f, t]) => f === t)).toBe(true)
+	})
+
 	it("matches every object of its own kind only when the slides are billions of px apart", () => {
 		const count = Math.sqrt(MORPH_MAX_PAIRS)
 		const from = [

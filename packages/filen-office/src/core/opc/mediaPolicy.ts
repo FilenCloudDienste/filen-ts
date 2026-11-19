@@ -1,4 +1,4 @@
-import type { ContentTypes } from "./contentTypes"
+import { CONTENT_TYPES_PART, type ContentTypes } from "./contentTypes"
 import { partKey } from "./partNames"
 import type { Relationships } from "./relationships"
 import type { ZipEntry, ZipLimits } from "./zipReader"
@@ -41,6 +41,20 @@ export const MEDIA_LIMITS: MediaLimits = {
 
 export type EntryClass = "media" | "image" | "other"
 
+// A media part larger than this is stored as it is: deflating it would hold its whole deflated content.
+export const DEFLATE_HELD = 16 * MIB
+
+// Media whose content is compressed already (raster formats with their own coding, video, and audio but uncompressed
+// WAV); bitmaps, TIFF, metafiles, SVG and WAV deflate.
+const COMPRESSED_MEDIA = /^(?:image\/(?:png|jpe?g|gif|webp|avif|hei[cf]|jxl)|video\/|audio\/(?!(?:x-|vnd\.)?wave?$))/iu
+const MEDIA_TYPE = /^(?:image|video|audio)\//iu
+
+// Whether a written part of `contentType` and `size` bytes is stored rather than deflated: media compressed already,
+// and any media part over DEFLATE_HELD.
+export function storedByType(contentType: string, size: number): boolean {
+	return COMPRESSED_MEDIA.test(contentType) || (size > DEFLATE_HELD && MEDIA_TYPE.test(contentType))
+}
+
 // Relationship types whose targets are media (ECMA-376 Part 1 §15.2.x audio and video, and PowerPoint 2010's
 // p14:media), transitional and Strict.
 const MEDIA_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set([
@@ -82,10 +96,15 @@ function isImageType(contentType: string | undefined): boolean {
 	return contentType !== undefined && contentType.toLowerCase().startsWith("image/")
 }
 
+const CONTENT_TYPES_KEY = partKey(CONTENT_TYPES_PART)
+
 // The parts a package's reader reads before it knows any content type: [Content_Types].xml and the relationships
-// parts (OPC, ECMA-376 Part 2). Never media, whatever type they are given.
+// parts (OPC, ECMA-376 Part 2). Never media, whatever type they are given. Matched by part key, as the package finds
+// them (any ASCII case, percent-encoded or not).
 export function isStructurePart(name: string): boolean {
-	return name === "[Content_Types].xml" || name.toLowerCase().endsWith(".rels")
+	const key = partKey(name)
+
+	return key === CONTENT_TYPES_KEY || key.endsWith(".rels")
 }
 
 // Whether an entry needs the media relationships to be classified (an audio/* or video/* content type).
@@ -359,8 +378,9 @@ function jpegDimensions(head: Uint8Array): { readonly width: number; readonly he
 			return { width: uint16be(head, at + 7), height: uint16be(head, at + 5) }
 		}
 
-		// Start of scan or end of image: no frame header came first.
-		if (marker === 0xda || marker === 0xd9) return undefined
+		// Start of scan or end of image: no frame header came first. FF 00 (a stuffed zero) and the reserved 02-BF
+		// are no segments a decoder skips by a length (ITU-T T.81 §B.1.1).
+		if (marker === 0xda || marker === 0xd9 || marker === 0x00 || (marker >= 0x02 && marker <= 0xbf)) return undefined
 
 		const length = uint16be(head, at + 2)
 

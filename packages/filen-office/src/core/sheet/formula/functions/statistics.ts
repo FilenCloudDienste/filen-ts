@@ -1,7 +1,86 @@
-import type { CellError } from "hyperformula"
-import { divError, naError, numError } from "./plugin"
+import { CellError, EmptyValue, type SimpleRangeValue } from "hyperformula"
+import { divError, naError, numError, rawNumber, type PluginScalar } from "./plugin"
 
-// Statistics over plain numbers, as the Excel functions of the same names define them (support.microsoft.com).
+// Statistics over plain numbers, as the Excel functions of the same names define them (support.microsoft.com), and
+// the readings of ranges they share.
+
+// The numbers of a range or array: text, logical values and empty cells left out; the first error raised.
+export function rangeNumbers(rows: readonly (readonly PluginScalar[])[], out: number[]): CellError | null {
+	for (const row of rows)
+		for (const value of row) {
+			if (value instanceof CellError) return value
+
+			const number = rawNumber(value)
+
+			if (number !== undefined) out.push(number)
+		}
+
+	return null
+}
+
+// The value at `index` of a range or array read row by row.
+export function at(value: SimpleRangeValue, index: number): PluginScalar {
+	const width = value.width()
+
+	return value.data[Math.floor(index / width)]?.[index % width] ?? EmptyValue
+}
+
+export interface LinearFit {
+	readonly slope: number
+	readonly xMean: number
+	readonly yMean: number
+}
+
+// The least-squares line through the paired numbers of two arrays of one size, by position (row by row), centred on
+// the means; a pair is left out where either is not a number. Arrays of different sizes, or no pairs, are #N/A; the
+// first error of a pair raised; no spread in x is #DIV/0!. Two passes, nothing copied.
+export function linearFit(ys: SimpleRangeValue, xs: SimpleRangeValue): LinearFit | CellError {
+	const size = ys.width() * ys.height()
+
+	if (size !== xs.width() * xs.height()) return naError()
+
+	let count = 0
+	let ySum = 0
+	let xSum = 0
+
+	for (let index = 0; index < size; index++) {
+		const y = at(ys, index)
+		const x = at(xs, index)
+
+		if (y instanceof CellError) return y
+		if (x instanceof CellError) return x
+
+		const yNumber = rawNumber(y)
+		const xNumber = rawNumber(x)
+
+		if (yNumber === undefined || xNumber === undefined) continue
+
+		count++
+		ySum += yNumber
+		xSum += xNumber
+	}
+
+	if (count === 0) return naError()
+
+	const yMean = ySum / count
+	const xMean = xSum / count
+	let covariance = 0
+	let variance = 0
+
+	for (let index = 0; index < size; index++) {
+		const yNumber = rawNumber(at(ys, index))
+		const xNumber = rawNumber(at(xs, index))
+
+		if (yNumber === undefined || xNumber === undefined) continue
+
+		covariance += (xNumber - xMean) * (yNumber - yMean)
+		variance += (xNumber - xMean) ** 2
+	}
+
+	if (variance === 0) return divError()
+
+	return { slope: covariance / variance, xMean, yMean }
+}
 
 export function mean(numbers: readonly number[]): number {
 	let total = 0

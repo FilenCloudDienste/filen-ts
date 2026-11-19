@@ -6,8 +6,8 @@ import {
 	naError,
 	nullError,
 	SheetFunctionPlugin,
+	unwrap,
 	valueError,
-	type PluginAst,
 	type PluginCall,
 	type PluginScalar,
 	type PluginState
@@ -29,14 +29,6 @@ const ERROR_NUMBERS: Readonly<Partial<Record<ErrorType, number>>> = {
 
 // Functions that give a reference (each one area here).
 const REFERENCE_FUNCTIONS: ReadonlySet<string> = new Set(["INDEX", "OFFSET", "INDIRECT", OFFSET_FUNCTION, RANGE_FUNCTION])
-
-function unwrap(ast: PluginAst): PluginAst {
-	let node = ast
-
-	while (node.type === ("PARENTHESES" as PluginAst["type"]) && "expression" in node) node = node.expression
-
-	return node
-}
 
 export class MiscFunctions extends SheetFunctionPlugin {
 	static override implementedFunctions: ImplementedFunctions = {

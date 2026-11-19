@@ -10,9 +10,11 @@ import {
 	type DrawingList
 } from "../core/drawingml/displayList"
 import type { ImageResolver } from "../core/drawingml/picture"
-import { convertVml, emitVmlPath, evaluateFormulas, parseVmlColor, tokenizePath, type VmlConversion } from "../core/vml/index"
+import { convertVml, emitVmlPath, evaluateFormulas, parseLength, parseVmlColor, tokenizePath, type VmlConversion } from "../core/vml/index"
 import { MAX_PATH_COMMANDS } from "../core/vml/path"
-import { encodeUtf8, parseXml, type XmlDocument } from "../core/xml/index"
+import { readVml, showNoteShape } from "../core/xlsx/comments/vml"
+import { decodeUtf8, encodeUtf8, parseXml, type XmlDocument } from "../core/xml/index"
+import { budget, cpuMs } from "./timing"
 
 const NAMESPACES = [
 	'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
@@ -395,6 +397,43 @@ describe("hostile VML", () => {
 		expect(result?.list.itemCount).toBe(0)
 	})
 
+	it("reads prototype member names as unknown dash, compound, arrow and colour values", () => {
+		const plain = convert('<v:line from="0,0" to="40px,0"><v:stroke endarrow="block"/></v:line>').list
+
+		for (const name of ["constructor", "__proto__", "toString"]) {
+			const { list } = convert(
+				`<v:rect style="width:10px;height:10px" fillcolor="${name}"><v:stroke dashstyle="${name}" linestyle="${name}" startarrow="${name}"/></v:rect>`
+			)
+			const stroke = list.strokes[0]
+
+			expect(fillOf(list, 0)).toEqual({ kind: "solid", color: rgba("FFFFFF") })
+			expect(stroke).toMatchObject({ dash: "solid", compound: "sng" })
+			expect(kinds(list)).toEqual([ItemKind.PATH])
+			expect(() => structuredClone(stroke)).not.toThrow()
+
+			// An unknown width or length is the medium default.
+			const sized = convert(
+				`<v:line from="0,0" to="40px,0"><v:stroke endarrow="block" endarrowwidth="${name}" endarrowlength="${name}"/></v:line>`
+			).list
+
+			expect(kinds(sized)).toEqual(kinds(plain))
+			expect(path(sized, 0)).toEqual(path(plain, 0))
+			expect(path(sized, 2)).toEqual(path(plain, 2))
+		}
+	})
+
+	it("refuses over-long lengths and colours without backtracking on them", () => {
+		const digits = "1".repeat(400000)
+		const spaces = `fill${" ".repeat(400000)}x`
+		const brackets = "[".repeat(400000)
+		const start = cpuMs()
+
+		expect(parseLength(`${digits}x`)).toBeUndefined()
+		expect(parseVmlColor(spaces, undefined, "FF0000")).toBeUndefined()
+		expect(parseVmlColor(brackets)).toBeUndefined()
+		expect(cpuMs() - start).toBeLessThan(budget(100))
+	})
+
 	it("bounds the commands of a huge path", () => {
 		const list = new DrawingListClass()
 
@@ -408,6 +447,46 @@ describe("hostile VML", () => {
 		)
 
 		expect(list.commandCount).toBeLessThanOrEqual(MAX_PATH_COMMANDS + 1)
+	})
+
+	it("bounds an arc whose sweep is many turns or infinite", () => {
+		const emit = (path: string, formulas: number[] = [], adjust: number[] = []): DrawingList => {
+			const list = new DrawingListClass()
+
+			emitVmlPath(list, path, { originX: 0, originY: 0, scaleX: 1, scaleY: 1 }, Float64Array.from(formulas), adjust, () => undefined)
+
+			return list
+		}
+		const start = cpuMs()
+
+		for (const list of [
+			emit(`al 0,0,10,10,0,${"9".repeat(20)}`),
+			emit(`ae 0,0,10,10,0,-${"9".repeat(20)}`),
+			emit("al 0,0,10,10,0,@0", [Infinity]),
+			emit("al 0,0,10,10,0,#0", [], [-Infinity]),
+			emit("al 0,0,10,10,0,@0", [Number.NaN])
+		]) {
+			// A move to the start and at most four quarter-turn cubics.
+			expect(list.commandCount).toBeLessThanOrEqual(5)
+			expect(Array.from(list.coords.slice(0, list.coordCount)).every(Number.isFinite)).toBe(true)
+		}
+
+		expect(cpuMs() - start).toBeLessThan(budget(100))
+
+		// 720 degrees draws the same closed ellipse as 360, in the same direction.
+		const turn = 360 * 65536
+		const once = emit(`al 0,0,10,10,0,${turn}`)
+		const twice = emit(`al 0,0,10,10,0,${2 * turn}`)
+		const reverse = emit(`al 0,0,10,10,0,${-2 * turn}`)
+
+		expect(once.commandCount).toBe(5)
+		expect(Array.from(twice.commands.slice(0, twice.commandCount))).toEqual(Array.from(once.commands.slice(0, once.commandCount)))
+		expect(Array.from(twice.coords.slice(0, twice.coordCount))).toEqual(Array.from(once.coords.slice(0, once.coordCount)))
+		expect(Array.from(reverse.coords.slice(0, reverse.coordCount))).toEqual(
+			Array.from(emit(`al 0,0,10,10,0,${-turn}`).coords.slice(0, once.coordCount))
+		)
+		// The first cubic heads the other way when the sweep is reversed.
+		expect(Math.sign(twice.coords[3] ?? 0)).toBe(-Math.sign(reverse.coords[3] ?? 0))
 	})
 })
 
@@ -428,6 +507,31 @@ describe("VML values", () => {
 				formats: undefined
 			})
 		).toBe("4472C4")
+	})
+
+	it("parses every CSS colour name, case-insensitively", () => {
+		expect(parseVmlColor("cornflowerblue")).toBe("6495ED")
+		expect(parseVmlColor("orchid")).toBe("DA70D6")
+		expect(parseVmlColor("firebrick")).toBe("B22222")
+		expect(parseVmlColor("CornflowerBlue")).toBe("6495ED")
+		expect(parseVmlColor("constructor")).toBeUndefined()
+		expect(parseVmlColor("__proto__")).toBeUndefined()
+
+		// The names the parser knew before it shared the DrawingML table.
+		const known =
+			"black 000000 white FFFFFF red FF0000 green 008000 lime 00FF00 blue 0000FF yellow FFFF00 aqua 00FFFF cyan 00FFFF fuchsia FF00FF magenta FF00FF gray 808080 grey 808080 silver C0C0C0 maroon 800000 navy 000080 olive 808000 purple 800080 teal 008080 orange FFA500 brown A52A2A pink FFC0CB gold FFD700 darkred 8B0000 darkblue 00008B darkgreen 006400 darkgray A9A9A9 darkgrey A9A9A9 lightgray D3D3D3 lightgrey D3D3D3 lightblue ADD8E6 lightgreen 90EE90 lightyellow FFFFE0 darkcyan 008B8B darkmagenta 8B008B darkorange FF8C00 indigo 4B0082 violet EE82EE beige F5F5DC ivory FFFFF0 tan D2B48C coral FF7F50 salmon FA8072 khaki F0E68C crimson DC143C turquoise 40E0D0 skyblue 87CEEB steelblue 4682B4 slategray 708090 whitesmoke F5F5F5 gainsboro DCDCDC"
+		const words = known.split(" ")
+
+		for (let index = 0; index + 1 < words.length; index += 2) expect(parseVmlColor(words[index])).toBe(words[index + 1])
+	})
+
+	it("parses lengths", () => {
+		expect(parseLength(".5pt")).toEqual({ value: 0.5 * PT, unit: true })
+		expect(parseLength("5pt")).toEqual({ value: 5 * PT, unit: true })
+		expect(parseLength("1.5in")).toEqual({ value: 144, unit: true })
+		expect(parseLength("1e2px")).toEqual({ value: 100, unit: true })
+		expect(parseLength("5.pt")).toBeUndefined()
+		expect(parseVmlColor("fill darken(118) [64]", undefined, "FFFFFF")).toBe("767676")
 	})
 
 	it("tokenises paths with empty members and @ references", () => {
@@ -480,3 +584,41 @@ describe("VML values", () => {
 })
 
 const FONTS = { latin: "", eastAsia: "", complex: "" }
+
+const NOTES_VML =
+	'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">'
+
+function noteShape(row: number, visible: string): string {
+	return `<v:shape id="_x0000_s${String(1025 + row)}" type="#_x0000_t202" style="visibility:hidden"><x:ClientData ObjectType="Note"><x:Row>${String(row)}</x:Row><x:Column>0</x:Column>${visible}</x:ClientData></v:shape>`
+}
+
+describe("VML note shapes", () => {
+	const part = readVml(
+		parseXml(
+			encodeUtf8(
+				`${NOTES_VML}${noteShape(0, "<x:Visible>False</x:Visible>")}${noteShape(1, "<x:Visible>True</x:Visible>")}${noteShape(2, "<x:Visible/>")}${noteShape(3, "<x:Visible>f</x:Visible>")}${noteShape(4, "")}</xml>`
+			)
+		)
+	)
+	const shown = [...part.notes.values()].map(shape => shape.shown)
+
+	it("reads x:Visible by its value", () => {
+		expect(shown).toEqual([false, true, true, false, false])
+	})
+
+	it("shows a false-valued note with exactly one empty x:Visible and hides it again", () => {
+		const key = [...part.notes.keys()][0] ?? -1
+		const out = showNoteShape(part, key, true)
+		const first = (bytes: Uint8Array | null): string => decodeUtf8(bytes ?? new Uint8Array()).split("</v:shape>")[0] ?? ""
+		const text = first(out)
+
+		expect(text.match(/Visible/g)).toHaveLength(1)
+		expect(text).toContain("<x:Column>0</x:Column><x:Visible/></x:ClientData>")
+
+		const reread = readVml(parseXml(out ?? new Uint8Array()))
+
+		expect(reread.notes.get(key)?.shown).toBe(true)
+
+		expect(first(showNoteShape(reread, key, false))).not.toContain("Visible")
+	})
+})

@@ -1,9 +1,8 @@
-import { kids, persistRecord, readHeadersFootersOf, type HeadersFooters, type PptDocument, type PptFile } from "./document"
+import { kids, persistRecord, readHeadersFooters, type HeadersFooters, type PptDocument, type PptFile } from "./document"
 import { readDrawing, type Drawing } from "./officeArt"
 import { tooLarge } from "../presentation/refusal"
-import { PresentationError } from "../presentation/model"
 import { malformed, RT, u16, u32, utf16Text, type PptRecord } from "./records"
-import { pp9Records, readMasterStyle, readMasterStyle9, RT_TEXT_MASTER_STYLE9, type MasterStyle, type ParaProps } from "./text"
+import { pp9Records, readMasterStyle, readMasterStyle9, type MasterStyle, type ParaProps } from "./text"
 
 // Slides, main masters, title masters and notes ([MS-PPT] §2.5): each persist object's atoms (SlideAtom §2.5.10,
 // NotesAtom §2.5.12), colour scheme (§2.5.14), text styles (a main master's TextMasterStyleAtoms), headers and
@@ -43,10 +42,6 @@ export interface PptSlide {
 	readonly show: SlideShowInfo | undefined
 	readonly name: string | undefined
 	readonly drawing: Drawing
-	// A PowerPoint 2002 time tree (§2.8.15 ExtTimeNodeContainer) and Comment10 records (§2.5.25) in the slide's
-	// PP10 programmable tag: what the conversion reports until timing and comments are read.
-	readonly timeNodes: boolean
-	readonly comments: number
 	readonly record: PptRecord
 }
 
@@ -124,12 +119,11 @@ export function readSlide(file: PptFile, persistId: number, kind: PptSlideKind):
 	for (const child of records) if (child.type === RT.textMasterStyleAtom) styles.set(child.instance, readMasterStyle(data, child))
 
 	const nameAtom = records.find(child => child.type === RT.cString && child.instance === 3)
-	const extension = pp10(file, records)
 	const styles9 = new Map<number, readonly (ParaProps | undefined)[]>()
 
 	if (actualKind === "mainMaster" || actualKind === "titleMaster")
 		for (const child of pp9Records(data, records, kid => kids(file, kid)))
-			if (child.type === RT_TEXT_MASTER_STYLE9) styles9.set(child.instance, readMasterStyle9(data, child))
+			if (child.type === RT.textMasterStyle9Atom) styles9.set(child.instance, readMasterStyle9(data, child))
 
 	return {
 		kind: actualKind,
@@ -146,7 +140,7 @@ export function readSlide(file: PptFile, persistId: number, kind: PptSlideKind):
 		),
 		styles,
 		...(styles9.size === 0 ? {} : { styles9 }),
-		headersFooters: readHeadersFootersOf(
+		headersFooters: readHeadersFooters(
 			file,
 			records.find(child => child.type === RT.headersFooters)
 		),
@@ -159,49 +153,8 @@ export function readSlide(file: PptFile, persistId: number, kind: PptSlideKind):
 			file,
 			records.find(child => child.type === RT.drawing)
 		),
-		...extension,
 		record
 	}
-}
-
-const RT_PROG_BINARY_TAG = 0x138a
-const RT_BINARY_TAG_DATA_BLOB = 0x138b
-const RT_EXT_TIME_NODE_CONTAINER = 0xf144
-
-// §2.5.22–§2.5.24: the "___PPT10" binary tag of a slide's SlideProgTagsContainer and what it holds; a damaged tag
-// holds nothing (the conversion reports the slide's timing and comments lost).
-function pp10(file: PptFile, records: readonly PptRecord[]): { readonly timeNodes: boolean; readonly comments: number } {
-	try {
-		return pp10Contents(file, records)
-	} catch (error) {
-		if (error instanceof PresentationError && error.reason === "malformed") return { timeNodes: false, comments: 0 }
-
-		throw error
-	}
-}
-
-function pp10Contents(file: PptFile, records: readonly PptRecord[]): { readonly timeNodes: boolean; readonly comments: number } {
-	let timeNodes = false
-	let comments = 0
-
-	for (const tags of records) {
-		if (tags.type !== RT.progTags) continue
-
-		for (const tag of kids(file, tags)) {
-			if (tag.type !== RT_PROG_BINARY_TAG) continue
-
-			for (const blob of kids(file, tag)) {
-				if (blob.type !== RT_BINARY_TAG_DATA_BLOB) continue
-
-				for (const record of kids(file, blob)) {
-					if (record.type === RT_EXT_TIME_NODE_CONTAINER) timeNodes = true
-					else if (record.type === RT.comment10) comments++
-				}
-			}
-		}
-	}
-
-	return { timeNodes, comments }
 }
 
 export interface PptSlides {

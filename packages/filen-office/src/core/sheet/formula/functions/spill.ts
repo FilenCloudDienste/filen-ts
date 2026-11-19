@@ -9,6 +9,7 @@ import {
 } from "hyperformula"
 import { ANCHOR_FUNCTION, SPILL_FUNCTION } from "../../functions/engineNames"
 import { MAX_COLUMNS, MAX_ROWS } from "../../model/model"
+import { MAX_ARRAY_CELLS } from "../../refs/formulaRefs"
 import { cellRange, recordRead } from "./indirect"
 import { refError, SheetFunctionPlugin, type PluginAst, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
 
@@ -50,9 +51,6 @@ export function withSpill<T>(next: SpillHost | null, work: () => T): T {
 		host = previous
 	}
 }
-
-// The most values one formula may spill, as the array functions are bounded (refs/formulaRefs.ts).
-const MAX_CELLS = 200_000
 
 export function spillError(): CellError {
 	return new CellError(ErrorType.SPILL)
@@ -107,7 +105,7 @@ export class SpillFunctions extends SheetFunctionPlugin {
 		recordRead(anchor, reach)
 
 		const blocked =
-			height * width > MAX_CELLS ||
+			height * width > MAX_ARRAY_CELLS ||
 			anchor.row + height > MAX_ROWS ||
 			anchor.col + width > MAX_COLUMNS ||
 			(height * width > 1 && spilling.blocks(anchor, height, width)) ||

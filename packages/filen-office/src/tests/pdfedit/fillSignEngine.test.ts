@@ -1,13 +1,18 @@
 import { readFileSync } from "node:fs"
 import { MessageChannel } from "node:worker_threads"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY, type PdfWidgetSummary } from "../../core/pdfedit"
 import { normalizeStrokes } from "../../core/pdfedit/visualSignature"
 import { pdfSignatureFields, type PdfSignatureFieldHint } from "../../dom/pdf"
+import { flattenAnnotations } from "../../dom/pdfedit/annotations/flatten"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
+import { missingRequiredFields, placeVisualSignature, resetForm, setFieldValue } from "../../dom/pdfedit/fillSign"
+import { cropPages, outsideCropRects } from "../../dom/pdfedit/pages/crop"
+import { addPdfSignatureField } from "../../dom/pdfedit/sign"
+import { makeFormPdf, makePdf } from "./fixtures"
 import { startEngine, stopEngines } from "./harness"
 import { budget } from "../timing"
 
@@ -95,8 +100,8 @@ async function pdfjsAnnotations(bytes: Uint8Array): Promise<Record<string, unkno
 	return pages
 }
 
-function pngSignature(): Uint8Array {
-	const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 90, 30], false)
+function pngSignature(width = 90, height = 30): Uint8Array {
+	const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], false)
 
 	pixmap.clear(40)
 
@@ -429,4 +434,263 @@ describe("Fill & Sign commands", () => {
 		},
 		TIMEOUT
 	)
+})
+
+describe("signature pictures and the memory budget", () => {
+	const memory = { ...PDF_DESKTOP_MEMORY, editMaxBytes: 8 * 1024 * 1024 }
+
+	const signFieldArgs = (png: Uint8Array) => ({
+		placement: { kind: "rect", page: 0, rect: [320, 100, 520, 160] },
+		visual: { kind: "image", png },
+		lines: [],
+		name: null,
+		reason: null,
+		location: null,
+		time: 0,
+		certify: null,
+		capacity: 1024
+	})
+
+	it(
+		"refuses a flat signature picture whose decoded pixels exceed the budget, in both commands, and keeps the engine usable",
+		async () => {
+			const engine = startEngine(makePdf({ pages: 1 }))
+
+			await engine.open(undefined, memory)
+
+			// A few kilobytes of PNG, 16 MB of pixels (RGB and an alpha channel's worth).
+			const flat = pngSignature(2000, 2000)
+
+			expect(flat.length).toBeLessThan(1024 * 1024)
+			await expect(
+				engine.client.call("dispatch", {
+					command: "fillSign.signature",
+					args: {
+						page: 0,
+						author: "",
+						box: [100, 450, 220, 490],
+						role: "signature",
+						signature: { kind: "image", png: flat, width: 1, height: 1 }
+					}
+				})
+			).rejects.toMatchObject({ failure: "overBudget" })
+			await expect(engine.client.call("dispatch", { command: "sign.addField", args: signFieldArgs(flat) })).rejects.toMatchObject({
+				failure: "overBudget"
+			})
+
+			// Not poisoned: a picture of a signature's size is placed by either command.
+			const placed = await engine.client.call("dispatch", {
+				command: "fillSign.signature",
+				args: {
+					page: 0,
+					author: "",
+					box: [100, 450, 220, 490],
+					role: "initials",
+					signature: { kind: "image", png: pngSignature(), width: 90, height: 30 }
+				}
+			})
+
+			expect(placed.pages).toEqual([0])
+
+			const field = await engine.client.call("dispatch", { command: "sign.addField", args: signFieldArgs(pngSignature()) })
+
+			expect(field.pages).toEqual([0])
+		},
+		TIMEOUT
+	)
+
+	it("destroys the signature picture when stamping it throws", () => {
+		const document = new mupdf.PDFDocument(makePdf({ pages: 1 }))
+		const destroy = vi.spyOn(mupdf.Image.prototype, "destroy")
+
+		vi.spyOn(mupdf.PDFAnnotation.prototype, "setStampImage").mockImplementation(() => {
+			throw new Error("out of memory")
+		})
+
+		try {
+			expect(() =>
+				placeVisualSignature(
+					mupdf,
+					document.loadPage(0),
+					{ kind: "image", png: pngSignature(), width: 90, height: 30 },
+					{
+						box: [100, 450, 220, 490],
+						role: "signature",
+						author: "",
+						date: new Date(0)
+					}
+				)
+			).toThrow("out of memory")
+			expect(destroy).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.restoreAllMocks()
+			document.destroy()
+		}
+	})
+
+	it("destroys the signature field's picture when adding it to the document throws", () => {
+		const document = new mupdf.PDFDocument(makePdf({ pages: 1 }))
+		const destroy = vi.spyOn(mupdf.Image.prototype, "destroy")
+
+		vi.spyOn(document, "addImage").mockImplementation(() => {
+			throw new Error("out of memory")
+		})
+
+		try {
+			expect(() =>
+				addPdfSignatureField(mupdf, document, {
+					placement: { kind: "rect", page: 0, rect: [320, 100, 520, 160] },
+					visual: { kind: "image", png: pngSignature() },
+					lines: [],
+					name: null,
+					reason: null,
+					location: null,
+					time: new Date(0),
+					certify: null,
+					capacity: 1024
+				})
+			).toThrow("out of memory")
+			expect(destroy).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.restoreAllMocks()
+			document.destroy()
+		}
+	})
+})
+
+describe("pages the form and page tools load", () => {
+	// The fills of pure red the page draws with its annotations: one per square, drawn or baked.
+	function redFills(page: mupdf.PDFPage): number {
+		let fills = 0
+		const device = new mupdf.Device({
+			fillPath: (_path, _evenOdd, _ctm, _colorspace, color) => {
+				if (color[0] === 1 && color[1] === 0 && color[2] === 0) fills++
+			}
+		})
+
+		page.run(device, mupdf.Matrix.identity)
+		device.close()
+
+		return fills
+	}
+
+	// The form fixture with a red square annotation on each page.
+	function formWithSquares(): mupdf.PDFDocument {
+		const document = new mupdf.PDFDocument(makeFormPdf())
+
+		for (let index = 0; index < document.countPages(); index++) {
+			const page = document.loadPage(index)
+			const square = page.createAnnotation("Square")
+
+			square.setRect([300, 300, 400, 400])
+			square.setInteriorColor([1, 0, 0])
+			square.setColor([1, 0, 0])
+			square.update()
+			page.destroy()
+		}
+
+		return document
+	}
+
+	function expectFlattened(document: mupdf.PDFDocument): void {
+		for (let index = 0; index < document.countPages(); index++) {
+			const page = document.loadPage(index)
+
+			expect(page.getAnnotations()).toEqual([])
+			expect(redFills(page)).toBe(1)
+			page.destroy()
+		}
+	}
+
+	it("leaves no page open after the required-fields check, so a flatten shows at once", () => {
+		const document = formWithSquares()
+
+		missingRequiredFields(document)
+		resetForm(document)
+		flattenAnnotations(document)
+		expectFlattened(document)
+	})
+
+	it("leaves no page open after a crop, so a flatten shows at once", () => {
+		const document = formWithSquares()
+
+		cropPages(document, [0, 1], { top: 10, right: 10, bottom: 10, left: 10 })
+		outsideCropRects(document, [0, 1], { top: 10, right: 10, bottom: 10, left: 10 })
+		flattenAnnotations(document)
+		expectFlattened(document)
+	})
+
+	it("updates every widget of a field on every page with one walk of the page tree", () => {
+		const pages = 20
+		const document = new mupdf.PDFDocument(makePdf({ pages }))
+		const font = document.addSimpleFont(new mupdf.Font("Helvetica"))
+		const field = document.addObject({ FT: "Tx", T: document.newString("initials"), DA: document.newString("/Helv 10 Tf 0 g") })
+		const kids = document.newArray()
+
+		for (let index = 0; index < pages; index++) {
+			const page = document.findPage(index)
+			const widget = document.addObject({ Type: "Annot", Subtype: "Widget", F: 4, Parent: field, P: page, Rect: [72, 72, 172, 92] })
+
+			page.put("Annots", [widget])
+			kids.push(widget)
+		}
+
+		field.put("Kids", kids)
+		document
+			.getTrailer()
+			.get("Root")
+			.put("AcroForm", document.addObject({ Fields: [field], DR: { Font: { Helv: font } } }))
+
+		const first = document.loadPage(0)
+		const widget = first.getWidgets()[0]
+
+		if (widget === undefined) throw new Error("no widget")
+
+		const findPage = vi.spyOn(document, "findPage")
+		const touched = setFieldValue(document, first, 0, widget.getObject().asIndirect(), { kind: "text", text: "AB" })
+
+		expect(findPage.mock.calls.length).toBeLessThanOrEqual(pages)
+		expect(touched.sort((a, b) => a - b)).toEqual(Array.from({ length: pages }, (_, index) => index))
+		first.destroy()
+
+		for (let index = 0; index < pages; index++) {
+			const page = document.loadPage(index)
+
+			expect(page.getWidgets()[0]?.getValue()).toBe("AB")
+			expect(page.getWidgets()[0]?.getObject().get("AP", "N").readStream().asString()).toContain("AB")
+			page.destroy()
+		}
+	})
+
+	it("signs into a field whose widget names no page, found through the page's annotations", () => {
+		const document = new mupdf.PDFDocument(makePdf({ pages: 2 }))
+		const widget = document.addObject({
+			Type: "Annot",
+			Subtype: "Widget",
+			FT: "Sig",
+			T: document.newString("Sig1"),
+			F: 4,
+			Rect: [72, 72, 272, 132]
+		})
+
+		document.findPage(1).put("Annots", [widget])
+		document
+			.getTrailer()
+			.get("Root")
+			.put("AcroForm", document.addObject({ Fields: [widget] }))
+
+		const draft = addPdfSignatureField(mupdf, document, {
+			placement: { kind: "field", name: "Sig1" },
+			visual: null,
+			lines: ["Signed"],
+			name: null,
+			reason: null,
+			location: null,
+			time: new Date(0),
+			certify: null,
+			capacity: 1024
+		})
+
+		expect(draft.pages).toEqual([1])
+	})
 })

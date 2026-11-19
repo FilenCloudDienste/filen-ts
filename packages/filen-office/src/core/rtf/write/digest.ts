@@ -1,4 +1,5 @@
 import { NodeKind, type XmlDocument } from "../../xml/index"
+import { OFF, TEXT, descendant, preserves } from "./wml"
 
 // What a block of WordprocessingML means, as a string two blocks share exactly when a reader shows and edits them
 // alike: properties in a canonical form (attributes sorted, toggles and synonyms normalized, revision-session ids
@@ -37,7 +38,6 @@ const TOGGLES = new Set([
 	"titlePg",
 	"bidiVisual"
 ])
-const OFF = new Set(["0", "false", "off"])
 const THEME_REFERENCES = new Set([
 	"w:themeColor",
 	"w:themeShade",
@@ -51,7 +51,6 @@ const THEME_REFERENCES = new Set([
 	"w:cstheme"
 ])
 const SKIPPED = new Set(["proofErr", "lastRenderedPageBreak"])
-const TEXT = new Set(["t", "delText", "instrText", "delInstrText"])
 const WRAPPERS = new Set(["ins", "del", "moveFrom", "moveTo", "hyperlink", "smartTag", "customXml", "fldSimple", "dir", "bdo"])
 // Attributes that number or date an editing session, never meaning.
 const DROPPED = /^(w:rsid|w14:|w:id$|w15:)/u
@@ -148,16 +147,6 @@ function singleColumn(document: XmlDocument, node: number): boolean {
 	const count = document.attribute(node, "w:num")
 
 	return count === undefined || Number(count) <= 1
-}
-
-function preserves(document: XmlDocument, node: number): boolean {
-	for (let at = node; at > 0; at = document.parent(at)) {
-		const space = document.attribute(at, "xml:space")
-
-		if (space !== undefined) return space === "preserve"
-	}
-
-	return false
 }
 
 // A text element's text as Word reads it: edge whitespace only under xml:space="preserve".
@@ -378,18 +367,6 @@ class ParagraphDigest {
 	}
 }
 
-function descendant(document: XmlDocument, node: number, local: string): number {
-	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-		if (document.localName(child) === local) return child
-
-		const found = descendant(document, child, local)
-
-		if (found >= 0) return found
-	}
-
-	return -1
-}
-
 function inlinePicture(document: XmlDocument, drawing: number, context: DigestContext): string | undefined {
 	const inline = descendant(document, drawing, "inline")
 	const data = inline < 0 ? -1 : descendant(document, inline, "graphicData")
@@ -578,7 +555,7 @@ function tableProperties(document: XmlDocument, tblPr: number): string {
 	return `<tblPr>${[...entries.values()].sort().join("")}${JSON.stringify(margins)}`
 }
 
-export function rowDigest(document: XmlDocument, row: number, context: DigestContext, bookmarks = new Map<string, string>()): string {
+function rowDigest(document: XmlDocument, row: number, context: DigestContext, bookmarks = new Map<string, string>()): string {
 	let out = "R"
 
 	for (let child = document.firstChildElement(row); child >= 0; child = document.nextSiblingElement(child)) {

@@ -135,3 +135,43 @@ export function classifyAction(input: ActionInput, context: ActionContext): Acti
 			return { kind: "refused", what: "scheme", raw: verb }
 	}
 }
+
+// What classifyHyperlink reads of a PresentationML part: an element's r:id and attributes, and the part's
+// relationships (pptx PartReader and OPC Relationships).
+export interface HyperlinkReader {
+	rel(node: number, local: string): string | undefined
+	attr(node: number, local: string): string | undefined
+}
+
+export interface HyperlinkRelationships {
+	byId(id: string): { readonly external: boolean; readonly target: string; readonly partName?: string | undefined } | undefined
+}
+
+// An a:hlinkClick / a:hlinkHover element classified: its r:id relationship's target and its action verb. `slideOf`
+// is the caller's: which part names are slides it may jump to.
+export function classifyHyperlink(
+	reader: HyperlinkReader,
+	relationships: HyperlinkRelationships,
+	node: number,
+	slideOf: ActionContext["slideOf"]
+): Action | undefined {
+	const id = reader.rel(node, "id")
+	const target = id === undefined || id === "" ? undefined : relationships.byId(id)
+	const action = reader.attr(node, "action")
+
+	return classifyAction(
+		{
+			...(action === undefined ? {} : { action }),
+			...(target === undefined
+				? {}
+				: {
+						target: {
+							external: target.external,
+							target: target.target,
+							...(target.partName === undefined ? {} : { partName: `/${target.partName}` })
+						}
+					})
+		},
+		{ slideOf }
+	)
+}

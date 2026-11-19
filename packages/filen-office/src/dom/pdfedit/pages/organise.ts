@@ -287,7 +287,10 @@ function neighbourSize(doc: PDFDocument, at_: number): readonly [number, number]
 
 	if (count === 0) return [595.28, 841.89]
 
-	const [x0, y0, x1, y1] = doc.loadPage(Math.max(0, Math.min(count - 1, at_ - 1))).getBounds()
+	const page = doc.loadPage(Math.max(0, Math.min(count - 1, at_ - 1)))
+	const [x0, y0, x1, y1] = page.getBounds()
+
+	page.destroy()
 
 	return [Math.max(1, x1 - x0), Math.max(1, y1 - y0)]
 }
@@ -314,6 +317,39 @@ export function insertBlankPages(doc: PDFDocument, at_: number, count = 1): Page
 	return insertedResult(doc, pages, start, count)
 }
 
+// A JPEG, JP2 or raw JPEG 2000 codestream: addImage writes its file as it is (DCTDecode, JPXDecode).
+function passesThrough(bytes: Uint8Array): boolean {
+	if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true
+	if (bytes[0] === 0xff && bytes[1] === 0x4f && bytes[2] === 0xff && bytes[3] === 0x51) return true
+
+	return bytes[0] === 0 && bytes[1] === 0 && bytes[2] === 0 && bytes[3] === 0x0c && bytes[4] === 0x6a && bytes[5] === 0x50
+}
+
+// What inserting a picture adds to the document: its file, and for every other format the decoded samples, an alpha
+// channel's worth included. addImage keeps those unfiltered in the document (a 160 KB flat PNG becomes a 27 MB
+// stream) and an incremental save writes them as they are, so they count until the next save as well as against the
+// insert: a small file of a huge, flat picture decodes to more than the heap holds. A file MuPDF cannot read counts as
+// its size (insertImagePage refuses it).
+export function insertedImageBytes(mupdf: MupdfModule, bytes: Uint8Array): number {
+	if (passesThrough(bytes)) return bytes.length
+
+	let image: Image
+
+	try {
+		image = new mupdf.Image(bytes)
+	} catch {
+		return bytes.length
+	}
+
+	try {
+		const channelBytes = Math.ceil(image.getBitsPerComponent() / 8)
+
+		return bytes.length + image.getWidth() * image.getHeight() * (image.getNumberOfComponents() + 1) * Math.max(1, channelBytes)
+	} finally {
+		image.destroy()
+	}
+}
+
 // Inserts an image (bytes MuPDF can decode: JPEG, PNG, GIF, BMP, TIFF, JPEG 2000, JBIG2, PNM) as a new page before page
 // `at`: the page is sized like its neighbour, turned to the image's orientation, the image fitted and centred.
 export function insertImagePage(mupdf: MupdfModule, doc: PDFDocument, bytes: Uint8Array, at_: number): PageOpResult {
@@ -327,30 +363,33 @@ export function insertImagePage(mupdf: MupdfModule, doc: PDFDocument, bytes: Uin
 		throw new PageOpError("badImage")
 	}
 
-	const imageWidth = image.getWidth()
-	const imageHeight = image.getHeight()
+	try {
+		const imageWidth = image.getWidth()
+		const imageHeight = image.getHeight()
 
-	if (imageWidth <= 0 || imageHeight <= 0) throw new PageOpError("badImage")
+		if (imageWidth <= 0 || imageHeight <= 0) throw new PageOpError("badImage")
 
-	const [neighbourWidth, neighbourHeight] = neighbourSize(doc, start)
-	const landscape = imageWidth > imageHeight
-	const width = landscape === neighbourWidth > neighbourHeight ? neighbourWidth : neighbourHeight
-	const height = width === neighbourWidth ? neighbourHeight : neighbourWidth
-	const scale = Math.min(width / imageWidth, height / imageHeight)
-	const drawWidth = imageWidth * scale
-	const drawHeight = imageHeight * scale
-	const x = (width - drawWidth) / 2
-	const y = (height - drawHeight) / 2
-	const resources = doc.newDictionary()
-	const xobjects = doc.newDictionary()
+		const [neighbourWidth, neighbourHeight] = neighbourSize(doc, start)
+		const landscape = imageWidth > imageHeight
+		const width = landscape === neighbourWidth > neighbourHeight ? neighbourWidth : neighbourHeight
+		const height = width === neighbourWidth ? neighbourHeight : neighbourWidth
+		const scale = Math.min(width / imageWidth, height / imageHeight)
+		const drawWidth = imageWidth * scale
+		const drawHeight = imageHeight * scale
+		const x = (width - drawWidth) / 2
+		const y = (height - drawHeight) / 2
+		const resources = doc.newDictionary()
+		const xobjects = doc.newDictionary()
 
-	xobjects.put("Im1", doc.addImage(image))
-	resources.put("XObject", xobjects)
+		xobjects.put("Im1", doc.addImage(image))
+		resources.put("XObject", xobjects)
 
-	const content = `q ${drawWidth.toFixed(4)} 0 0 ${drawHeight.toFixed(4)} ${x.toFixed(4)} ${y.toFixed(4)} cm /Im1 Do Q`
+		const content = `q ${drawWidth.toFixed(4)} 0 0 ${drawHeight.toFixed(4)} ${x.toFixed(4)} ${y.toFixed(4)} cm /Im1 Do Q`
 
-	doc.insertPage(start, doc.addPage([0, 0, width, height], 0, resources, content))
-	image.destroy()
+		doc.insertPage(start, doc.addPage([0, 0, width, height], 0, resources, content))
+	} finally {
+		image.destroy()
+	}
 
 	return insertedResult(doc, pages, start, 1)
 }

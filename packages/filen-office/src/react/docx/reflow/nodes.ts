@@ -11,6 +11,7 @@ import type { CssFaces } from "../../../core/docx/reflow/css"
 import { docxNotes } from "../../../core/docx/stories/notes"
 import { symbolTable, symbolToUnicode } from "../../../core/fonts/index"
 import { attrText, fieldText } from "../edit/clipboard"
+import { EMU_PER_PAGE_PX } from "../edit/objects"
 import { gapRowCount, isGap } from "../edit/window"
 import { paintMath } from "../paint/math"
 import { paintObjects } from "../paint/objects"
@@ -20,8 +21,6 @@ import { paragraphStyle, type ReflowSource } from "./decorate"
 // The reflowed view's nodes: paragraphs and runs styled from their resolved properties, tables as HTML tables
 // that scroll sideways, pictures and equations painted as on the pages and scaled to the width, text boxes and
 // notes as nested editing views of their stories, gaps (blocks not held) as empty boxes of the blocks' height.
-
-const EMU_PER_PX = 9525
 
 // A story shown in a node: `release` takes it down, `relabel` names it again (its mark changed).
 export interface NestedStory {
@@ -111,9 +110,14 @@ export function reflowNodeViews(host: ReflowNodeHost, session: ReflowSource): Re
 			const dom = element("p", "fo-docx-reflow-p")
 			let shown = node
 			const restyle = (): void => {
-				const css = paragraphStyle(session, shown, host.faces)
+				const { css, cases } = paragraphStyle(session, shown, host.faces)
 
 				if (dom.getAttribute("style") !== css) dom.setAttribute("style", css)
+				// Cased text in the neutral language the pages measured it in (casesText).
+				if (cases !== dom.hasAttribute("lang")) {
+					if (cases) dom.setAttribute("lang", "")
+					else dom.removeAttribute("lang")
+				}
 			}
 			const stop = host.live(restyle)
 
@@ -417,8 +421,8 @@ function drawingView(host: ReflowNodeHost, session: ReflowSource, node: Node, ge
 	const state = drawingState(context, node)
 	const objects = editor.layout.objects
 	const id = isNewPicture(node) ? -1 : objects.idOf(session.story.part.index, node.attrs["src"] as number)
-	const width = state.cx > 0 ? state.cx / EMU_PER_PX : (objects.widths[id] ?? 0)
-	const height = state.cy > 0 ? state.cy / EMU_PER_PX : (objects.heights[id] ?? 0)
+	const width = state.cx > 0 ? state.cx / EMU_PER_PAGE_PX : (objects.widths[id] ?? 0)
+	const height = state.cy > 0 ? state.cy / EMU_PER_PAGE_PX : (objects.heights[id] ?? 0)
 	// Its text boxes' stories, from the document (whether or not the layout has seen the drawing).
 	const source = sourceDrawing(context, node)
 	const sourcePart = source === undefined || source.textboxes === 0 ? undefined : editor.edits.model.parts[source.part]

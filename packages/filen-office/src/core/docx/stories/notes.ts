@@ -230,9 +230,7 @@ function customMarkSize(doc: Node, pos: number): number {
 	const after = doc.resolve(pos + 1).nodeAfter
 	const style = reference.marks.find(mark => mark.type === marks.char_style || mark.type === marks.vert_align)
 
-	return after?.isText === true && style !== undefined && style.isInSet(after.marks) !== undefined
-		? Math.min(after.nodeSize, MAX_NOTE_MARK)
-		: 0
+	return after?.isText === true && style?.isInSet(after.marks) === true ? Math.min(after.nodeSize, MAX_NOTE_MARK) : 0
 }
 
 const STORES = new WeakMap<PagedEditor, DocxNotes>()

@@ -1,4 +1,4 @@
-import type { SheetAxisLayout, SheetLayout, SheetRange } from "../../../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetAxisLayout, type SheetLayout, type SheetRange } from "../../../core/sheet/protocol"
 import type { SheetPrintNote } from "../../../core/sheet/print/xlsx"
 import type { SheetDrawingObject } from "../../../core/xlsx/drawings/feature"
 import type { GridAxis } from "../axis"
@@ -27,7 +27,7 @@ function whole(sizes: SheetAxisLayout, count: number): GridAxis {
 // The sheet's whole axes at 100 % (built once per layout: every page's objects are placed on them). `rows`: the sizes
 // the pages were cut by, when they are not the layout's.
 export function wholeAxes(layout: SheetLayout, rows: SheetAxisLayout = layout.rows): { rows: GridAxis; cols: GridAxis; scale: number } {
-	return { rows: whole(rows, 1_048_576), cols: whole(layout.cols, 16_384), scale: 1 }
+	return { rows: whole(rows, SHEET_MAX_ROWS), cols: whole(layout.cols, SHEET_MAX_COLS), scale: 1 }
 }
 
 export // Where a note shown all the time stands: its legacy drawing's anchor (columns and rows, offsets in px).

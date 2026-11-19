@@ -1,5 +1,6 @@
 import type { SheetLocale } from "../protocol"
 import { TERRITORY_CURRENCIES } from "./currencies.generated"
+import { skipQuoted } from "../refs/scan"
 
 // Entries as typed in the user's locale, and the file's own syntax shown back in it. Files always store en-US syntax
 // and English function names (ECMA-376 Part 1 §18.17: the formula grammar's "," between arguments, "." in numbers);
@@ -19,26 +20,6 @@ export const EN_US_LOCALE: SheetLocale = { decimal: ".", group: ",", argument: "
 // Whether the locale types formulas and numbers as en-US does.
 export function plainLocale(locale: SheetLocale | undefined): boolean {
 	return locale === undefined || (locale.decimal === "." && locale.argument === ",")
-}
-
-// The end of a quoted run (string or sheet name) starting at `start`, its doubled quotes inside.
-function quotedEnd(text: string, start: number, quote: number): number {
-	let index = start + 1
-
-	while (index < text.length) {
-		if (text.charCodeAt(index) === quote) {
-			if (text.charCodeAt(index + 1) === quote) {
-				index += 2
-				continue
-			}
-
-			return index + 1
-		}
-
-		index++
-	}
-
-	return text.length
 }
 
 function bracketEnd(text: string, start: number): number {
@@ -78,7 +59,7 @@ function mapSeparators(
 		const code = formula.charCodeAt(index)
 
 		if (code === QUOTE || code === APOSTROPHE) {
-			const end = quotedEnd(formula, index, code)
+			const end = skipQuoted(formula, index, code)
 
 			out += formula.slice(index, end)
 			index = end
@@ -194,9 +175,10 @@ function numberReader(locale: SheetLocale): NumberReader {
 		const group = /\s/u.test(locale.group) ? "[\\s\\u00a0\\u202f]" : escaped(locale.group)
 
 		reader = {
-			plain: new RegExp(`^[-+]?(\\d+${point}?\\d*|${point}\\d+)(e[-+]?\\d+)?$`, "i"),
+			// The whole and fraction digits cannot share a run of digits (linear on a long run that fails).
+			plain: new RegExp(`^[-+]?(\\d+(?:${point}\\d*)?|${point}\\d+)(e[-+]?\\d+)?$`, "i"),
 			grouped: new RegExp(`^[-+]?\\d{1,3}(${group}\\d{3})+(${point}\\d+)?$`),
-			percent: new RegExp(`^[-+]?(\\d+${point}?\\d*|${point}\\d+)%$`),
+			percent: new RegExp(`^[-+]?(\\d+(?:${point}\\d*)?|${point}\\d+)%$`),
 			point: new RegExp(point),
 			decimal: locale.decimal,
 			group: locale.group

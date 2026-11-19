@@ -169,6 +169,10 @@ describe.skipIf(!existsSync(CORPUS))("metafiles over the real-world corpus", () 
 
 		expect(failures).toEqual([])
 		expect(privateUse).toEqual([])
+		// Fewer means lost coverage: the corpus holds about 200 distinct metafiles.
+		expect(unique.size).toBeGreaterThanOrEqual(190)
+		// The documents holding them reach the bridge: about 5180 drawn items.
+		expect(bridged["items"] ?? 0).toBeGreaterThanOrEqual(4900)
 
 		if (mathTypeFiles > 0) expect(mathRuns).toBeGreaterThan(mathTypeFiles / 2)
 	})

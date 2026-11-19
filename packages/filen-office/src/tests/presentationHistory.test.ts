@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest"
-import type { Touch } from "../core/presentation/edit/apply"
+import { heldBytesOf, type Touch } from "../core/presentation/edit/apply"
 import { digestOf, sameDigest } from "../core/presentation/edit/changes"
-import { DeckHistory, touchKey, type Fingerprint, type HistoryLimits } from "../core/presentation/edit/history"
+import {
+	DeckHistory,
+	opBytesOf,
+	touchKey,
+	UNKNOWN_FINGERPRINT,
+	type Fingerprint,
+	type HistoryLimits,
+	type HistoryStep
+} from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
-import { slideRef } from "../core/presentation/model"
+import { slideRef, type SlideRef } from "../core/presentation/model"
+import { sessionEdits } from "../dom/presentation/engine/edit"
+import { review } from "../dom/presentation/engine/review"
+import { odpBytes, page } from "./odpFixtures"
+import { driveSession } from "./odpWriteDrive"
+import { buildPptx } from "./pptxFixtures"
+import { editDeckOptions } from "./presentationEditFixtures"
 import { budget, cpuMs } from "./timing"
 
 // The deck history over a toy model (a map of key → value): each step sets keys, its inverse sets them back.
@@ -245,5 +259,87 @@ describe("sameDigest", () => {
 		]
 
 		for (const a of values) for (const b of values) expect([a, b, sameDigest(a, b)]).toEqual([a, b, digestOf(a) === digestOf(b)])
+	})
+})
+
+// What a step holds off its ops (an ODP design step's copied pages, a comment restore's comments) counts toward the
+// history's byte limit with what its ops hold, and is counted once.
+describe("a step's held bytes", () => {
+	type Drive = Awaited<ReturnType<typeof driveSession>>
+
+	const lastStep = (d: Drive): HistoryStep => sessionEdits(d.session).history.steps().at(-1) as HistoryStep
+	const sum = (step: HistoryStep, of: (op: DeckOp) => number): number => step.inverse.ops.reduce((total, op) => total + of(op), 0)
+
+	// The step on its own in a history whose byte limit it passes only by what it holds off its ops: trimmed.
+	function trimmedByHeld(step: HistoryStep, held: number): void {
+		const history = new DeckHistory(() => UNKNOWN_FINGERPRINT, { maxBytes: step.bytes - Math.ceil(held / 2), maxSteps: 500 })
+		const { id: _id, ...rest } = step
+
+		history.push(rest)
+		expect(history.size.steps).toBe(0)
+	}
+
+	it("counts an ODP size change's held pages, trimmed by them, the same after an undo and a redo", async () => {
+		const box = (name: string): string =>
+			`<draw:frame draw:name="${name}" svg:x="1cm" svg:y="1cm" svg:width="8cm" svg:height="2cm"><draw:text-box><text:p>${name}</text:p></draw:text-box></draw:frame>`
+		const d = await driveSession(odpBytes({ body: page(box("One")) + page(box("Two")) + page(box("Three")) }))
+
+		for (const slide of d.session.deck.slides) await review(d.context, slide)
+
+		const size = d.session.deck.size
+
+		expect(
+			(await d.command({ family: "design", kind: "setSize", scale: "ensureFit", cx: size.cx / 2, cy: size.cy / 2 } as DeckOp)).ok
+		).toBe(true)
+
+		const step = lastStep(d)
+		const held = sum(step, heldBytesOf)
+
+		expect(held).toBeGreaterThan(0)
+		expect(step.inverse.bytes).toBe(sum(step, opBytesOf) + held)
+		trimmedByHeld(step, held)
+
+		const total = sessionEdits(d.session).history.size.bytes
+
+		expect((await d.undo()).ok).toBe(true)
+		expect((await d.redo()).ok).toBe(true)
+		expect(sessionEdits(d.session).history.size.bytes).toBe(total)
+	})
+
+	it("counts a comment restore's held comments", async () => {
+		const d = await driveSession(buildPptx(editDeckOptions()), "pptx")
+		const slide = d.session.deck.slides[0] as SlideRef
+		const id = "{66666666-6666-4666-8666-666666666666}"
+
+		expect(
+			(
+				await d.command({
+					family: "comment",
+					kind: "add",
+					slide,
+					comment: { id, author: "{22222222-2222-4222-8222-222222222222}", text: "First", created: "2026-10-28T08:00:00.000Z" },
+					authorName: "Cy Doe"
+				})
+			).ok
+		).toBe(true)
+		expect((await d.command({ family: "comment", kind: "edit", slide, id, text: "Second ".repeat(200) })).ok).toBe(true)
+
+		const step = lastStep(d)
+		const held = sum(step, heldBytesOf)
+
+		expect(held).toBeGreaterThan(0)
+		expect(step.inverse.bytes).toBe(sum(step, opBytesOf) + held)
+		trimmedByHeld(step, held)
+	})
+
+	it("counts a slide delete's held parts once, on its ops", async () => {
+		const d = await driveSession(buildPptx(editDeckOptions()), "pptx")
+
+		expect((await d.command({ family: "slide", kind: "delete", slides: [d.session.deck.slides[1] as SlideRef] })).ok).toBe(true)
+
+		const step = lastStep(d)
+
+		expect(sum(step, heldBytesOf)).toBe(0)
+		expect(step.inverse.bytes).toBe(sum(step, opBytesOf))
 	})
 })

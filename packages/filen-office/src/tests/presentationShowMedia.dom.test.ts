@@ -3,7 +3,9 @@ import { hasHeldPause } from "@filen/shared/heldPause"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SlideLayer, SlideMediaInfo } from "../core/presentation/output"
 import type { PresentationSessionApi } from "../dom/presentation/protocol"
+import { layerTree } from "../react/presentation/show/layers"
 import { showMediaMount, type ShowMediaStreams } from "../react/presentation/show/media"
+import { buildStageSlide, type ShowMediaHandle, type StageTargets } from "../react/presentation/show/stage"
 
 // A medium in the show: a deflated one still preparing shows its progress and plays once it is ready, and a stream
 // the service worker dropped while the element sat paused is asked for again once.
@@ -582,5 +584,71 @@ describe("show media: hide while not playing and play full screen", () => {
 		handle.release()
 		slide.remove()
 		play.mockRestore()
+	})
+})
+
+describe("show media: keyboard hotspots", () => {
+	it("gives each medium a labelled hotspot that presses it (or runs its trigger) without reaching the slide", () => {
+		const media = (id: number, alt?: string, kind: SlideMediaInfo["kind"] = "video"): SlideLayer =>
+			({
+				shape: { slide: 1, id },
+				drawing: { width: 100, height: 50 },
+				matrix: [1, 0, 0, 1, id * 100, 0],
+				role: "media",
+				...(alt === undefined ? {} : { alt }),
+				media: { ...MEDIA, kind }
+			}) as unknown as SlideLayer
+		const render = { ref: 1, layers: [media(4, "Intro"), media(5, undefined, "audio"), media(6, "Trailer")] } as never
+		const pressed: number[] = []
+		const triggered: number[] = []
+		const handles = new Map<number, ShowMediaHandle>()
+		const targets: StageTargets = {
+			action: () => undefined,
+			trigger: shape => triggered.push(shape),
+			link: () => undefined,
+			session: undefined,
+			mediaEvents: () => EVENTS,
+			media: {
+				mount: (_box, layer) => {
+					const handle = { command: () => undefined, click: () => pressed.push(layer.shape.id), release: () => undefined }
+
+					handles.set(layer.shape.id, handle)
+
+					return handle
+				}
+			},
+			labels: {
+				action: () => "",
+				trigger: () => "",
+				link: () => ""
+			}
+		}
+		const stage = buildStageSlide(document, { w: 1280, h: 720 }, [], layerTree(Int32Array.of(), Int32Array.of()), 0)
+		const advance = vi.fn()
+
+		document.body.append(stage.element)
+		stage.element.addEventListener("click", advance)
+		// Shape 6 plays from its own click trigger.
+		stage.targets(render, () => -1, new Set([6]), targets)
+
+		const keys = [...stage.element.querySelectorAll<HTMLButtonElement>("button[data-fo-media]")]
+
+		// Without the host's label: the shape's description, else its kind.
+		expect(keys.map(key => key.getAttribute("aria-label"))).toEqual(["Intro", "audio", "Trailer"])
+		expect(keys.map(key => key.style.pointerEvents)).toEqual(["none", "none", "none"])
+
+		for (const key of keys) key.click()
+
+		expect(pressed).toEqual([4, 5])
+		expect(triggered).toEqual([6])
+		expect(advance).not.toHaveBeenCalled()
+
+		// A focused hotspot names its medium; one taken off the slide (playing on past it) takes its hotspot along.
+		expect(stage.mediaAt(keys[1] ?? null)).toBe(handles.get(5))
+		expect(stage.take(5)).toBeDefined()
+		expect(keys[1]?.isConnected).toBe(false)
+		expect(stage.mediaAt(keys[1] ?? null)).toBeUndefined()
+
+		stage.release()
 	})
 })

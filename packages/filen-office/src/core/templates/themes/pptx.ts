@@ -1,3 +1,4 @@
+import { escapeAttribute, escapeText } from "../../xml/entities"
 import { THEME_COLOR_SLOTS, themeName, type FilenTheme, type ThemeDecoration, type ThemeVariant } from "./model"
 
 // A Filen theme as PresentationML: the theme part (a:theme, ECMA-376 Part 1 §20.1.6), a slide master (§19.3.1.42)
@@ -57,24 +58,33 @@ const SLIDE_NUMBER_FIELD = "{5D3A0F6E-2E7B-4C8A-9F1D-6B1E2A7C4F10}"
 const DATE_FIELD = "{8C1B6E2A-4F3D-4E9B-A2C7-1D5E6F7A8B90}"
 
 // A box in fractions of the slide.
-interface Box {
+export interface Box {
 	readonly x: number
 	readonly y: number
 	readonly w: number
 	readonly h: number
 }
 
+// The master's geometry, shared with the ODF master (themes/odp.ts) so both formats place placeholders alike.
 const MARGIN_X = 0.06875
 const CONTENT_W = 1 - 2 * MARGIN_X
-const TITLE: Box = { x: MARGIN_X, y: 0.0532, w: CONTENT_W, h: 0.1933 }
-const BODY: Box = { x: MARGIN_X, y: 0.2662, w: CONTENT_W, h: 0.6345 }
+export const TITLE: Box = { x: MARGIN_X, y: 0.0532, w: CONTENT_W, h: 0.1933 }
+export const BODY: Box = { x: MARGIN_X, y: 0.2662, w: CONTENT_W, h: 0.6345 }
 const FOOTER_Y = 0.9268
 const FOOTER_H = 0.0532
-const DATE: Box = { x: MARGIN_X, y: FOOTER_Y, w: 0.225, h: FOOTER_H }
-const FOOTER: Box = { x: 0.33125, y: FOOTER_Y, w: 0.3375, h: FOOTER_H }
-const NUMBER: Box = { x: 0.70625, y: FOOTER_Y, w: 0.225, h: FOOTER_H }
-const HALF_W = (CONTENT_W - 0.0187) / 2
-const RIGHT_X = MARGIN_X + HALF_W + 0.0187
+export const DATE: Box = { x: MARGIN_X, y: FOOTER_Y, w: 0.225, h: FOOTER_H }
+export const FOOTER: Box = { x: 0.33125, y: FOOTER_Y, w: 0.3375, h: FOOTER_H }
+export const NUMBER: Box = { x: 0.70625, y: FOOTER_Y, w: 0.225, h: FOOTER_H }
+// The two columns of the Two Content layout.
+export const HALF_W = (CONTENT_W - 0.0187) / 2
+export const RIGHT_X = MARGIN_X + HALF_W + 0.0187
+// The Title Slide layout's title and subtitle.
+export const TITLE_SLIDE: { readonly title: Box; readonly subtitle: Box } = {
+	title: { x: 0.125, y: 0.1637, w: 0.75, h: 0.3481 },
+	subtitle: { x: 0.125, y: 0.5252, w: 0.75, h: 0.2414 }
+}
+// The body text's outline levels 1–9, in points.
+export const BODY_SIZES_PT: readonly number[] = [28, 24, 20, 18, 18, 18, 18, 18, 18]
 
 function emu(value: number): string {
 	return String(Math.round(value))
@@ -87,14 +97,10 @@ function xfrm(box: Box, size: SlideSize): string {
 	)
 }
 
-function escape(text: string): string {
-	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;")
-}
-
 // --- the theme part ---
 
 function fontXml(tag: "majorFont" | "minorFont", typeface: string): string {
-	return `<a:${tag}><a:latin typeface="${escape(typeface)}"/><a:ea typeface=""/><a:cs typeface=""/></a:${tag}>`
+	return `<a:${tag}><a:latin typeface="${escapeAttribute(typeface)}"/><a:ea typeface=""/><a:cs typeface=""/></a:${tag}>`
 }
 
 const PH = '<a:schemeClr val="phClr"/>'
@@ -119,7 +125,7 @@ const FORMAT_SCHEME =
 
 export function themeXml(theme: FilenTheme, variantIndex: number): string {
 	const variant = variantOf(theme, variantIndex)
-	const name = escape(themeName(theme, variantIndex))
+	const name = escapeAttribute(themeName(theme, variantIndex))
 	const colors = THEME_COLOR_SLOTS.map(slot => `<a:${slot}><a:srgbClr val="${variant.colors[slot]}"/></a:${slot}>`).join("")
 
 	return (
@@ -204,12 +210,17 @@ interface Placeholder {
 	readonly paragraph?: string
 }
 
-function placeholderXml(ph: Placeholder, id: number, size: SlideSize, master: boolean): string {
-	const attributes =
+// The p:ph attributes of a placeholder (§19.3.1.36).
+function phAttributes(ph: Placeholder): string {
+	return (
 		(ph.type === undefined ? "" : ` type="${ph.type}"`) +
 		(ph.orient === undefined ? "" : ` orient="${ph.orient}"`) +
 		(ph.sz === undefined ? "" : ` sz="${ph.sz}"`) +
 		(ph.idx === undefined ? "" : ` idx="${String(ph.idx)}"`)
+	)
+}
+
+function placeholderXml(ph: Placeholder, id: number, size: SlideSize, master: boolean): string {
 	const geometry = ph.box === undefined ? "" : xfrm(ph.box, size) + (master ? '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' : "")
 	const bodyPr =
 		"<a:bodyPr" +
@@ -225,8 +236,8 @@ function placeholderXml(ph: Placeholder, id: number, size: SlideSize, master: bo
 	const paragraph = ph.paragraph ?? '<a:p><a:endParaRPr lang="en-US"/></a:p>'
 
 	return (
-		`<p:sp><p:nvSpPr><p:cNvPr id="${String(id)}" name="${escape(ph.name)}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
-		`<p:nvPr><p:ph${attributes}/></p:nvPr></p:nvSpPr><p:spPr>${geometry}</p:spPr>` +
+		`<p:sp><p:nvSpPr><p:cNvPr id="${String(id)}" name="${escapeAttribute(ph.name)}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
+		`<p:nvPr><p:ph${phAttributes(ph)}/></p:nvPr></p:nvSpPr><p:spPr>${geometry}</p:spPr>` +
 		`<p:txBody>${bodyPr}${lstStyle}${paragraph}</p:txBody></p:sp>`
 	)
 }
@@ -254,7 +265,8 @@ function runFont(size: number, font: "mj" | "mn", color = "tx1"): string {
 	)
 }
 
-const BODY_SIZES = [2800, 2400, 2000, 1800, 1800, 1800, 1800, 1800, 1800]
+// Hundredths of a point (ST_TextFontSize, §20.1.10.72).
+const BODY_SIZES = BODY_SIZES_PT.map(pt => pt * 100)
 
 function textStylesXml(): string {
 	const title =
@@ -341,7 +353,7 @@ export function masterXml(
 	const list = layouts.map(layout => `<p:sldLayoutId id="${String(layout.id)}" r:id="${layout.rId}"/>`).join("")
 
 	return (
-		`<p:sldMaster ${ROOT_NS}><p:cSld name="${escape(themeName(theme, variantIndex))}">${backgroundXml(variant)}` +
+		`<p:sldMaster ${ROOT_NS}><p:cSld name="${escapeAttribute(themeName(theme, variantIndex))}">${backgroundXml(variant)}` +
 		spTree(decoration + placeholders) +
 		`</p:cSld><p:clrMap ${clrMapAttributes(variant.dark)} ${CLR_MAP_REST}/>` +
 		`<p:sldLayoutIdLst>${list}</p:sldLayoutIdLst>${textStylesXml()}</p:sldMaster>`
@@ -367,7 +379,7 @@ function layoutPlaceholders(type: FilenLayoutType): Placeholder[] {
 				{
 					type: "ctrTitle",
 					name: "Title 1",
-					box: { x: 0.125, y: 0.1637, w: 0.75, h: 0.3481 },
+					box: TITLE_SLIDE.title,
 					anchor: "b",
 					lstStyle: '<a:lvl1pPr algn="ctr"><a:defRPr sz="6000"/></a:lvl1pPr>'
 				},
@@ -375,7 +387,7 @@ function layoutPlaceholders(type: FilenLayoutType): Placeholder[] {
 					type: "subTitle",
 					idx: 1,
 					name: "Subtitle 2",
-					box: { x: 0.125, y: 0.5252, w: 0.75, h: 0.2414 },
+					box: TITLE_SLIDE.subtitle,
 					lstStyle: NO_BULLET_CENTER
 				}
 			]
@@ -493,7 +505,7 @@ export function layoutXml(type: FilenLayoutType, size: SlideSize): string {
 	const shapes = [...layoutPlaceholders(type), ...LAYOUT_FOOTERS].map((ph, index) => placeholderXml(ph, index + 2, size, false)).join("")
 
 	return (
-		`<p:sldLayout ${ROOT_NS} type="${type}" preserve="1"><p:cSld name="${escape(LAYOUT_NAMES[type])}">${spTree(shapes)}</p:cSld>` +
+		`<p:sldLayout ${ROOT_NS} type="${type}" preserve="1"><p:cSld name="${escapeAttribute(LAYOUT_NAMES[type])}">${spTree(shapes)}</p:cSld>` +
 		"<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
 	)
 }
@@ -506,17 +518,12 @@ export function slideXml(type: FilenLayoutType, title?: string, lang = "en-US"):
 		.map((ph, index) => {
 			const text =
 				index === 0 && title !== undefined && title !== ""
-					? `<a:p><a:r><a:rPr lang="${escape(lang)}" dirty="0"/><a:t>${escape(title)}</a:t></a:r></a:p>`
-					: `<a:p><a:endParaRPr lang="${escape(lang)}" dirty="0"/></a:p>`
-			const attributes =
-				(ph.type === undefined ? "" : ` type="${ph.type}"`) +
-				(ph.orient === undefined ? "" : ` orient="${ph.orient}"`) +
-				(ph.sz === undefined ? "" : ` sz="${ph.sz}"`) +
-				(ph.idx === undefined ? "" : ` idx="${String(ph.idx)}"`)
+					? `<a:p><a:r><a:rPr lang="${escapeAttribute(lang)}" dirty="0"/><a:t>${escapeText(title)}</a:t></a:r></a:p>`
+					: `<a:p><a:endParaRPr lang="${escapeAttribute(lang)}" dirty="0"/></a:p>`
 
 			return (
-				`<p:sp><p:nvSpPr><p:cNvPr id="${String(index + 2)}" name="${escape(ph.name)}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
-				`<p:nvPr><p:ph${attributes}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${text}</p:txBody></p:sp>`
+				`<p:sp><p:nvSpPr><p:cNvPr id="${String(index + 2)}" name="${escapeAttribute(ph.name)}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
+				`<p:nvPr><p:ph${phAttributes(ph)}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${text}</p:txBody></p:sp>`
 			)
 		})
 		.join("")
@@ -541,7 +548,7 @@ export function relationshipsXml(entries: readonly { readonly id: string; readon
 	return (
 		`<Relationships xmlns="${PACKAGE_RELATIONSHIPS}">` +
 		entries
-			.map(entry => `<Relationship Id="${entry.id}" Type="${RELATIONSHIP}/${entry.type}" Target="${escape(entry.target)}"/>`)
+			.map(entry => `<Relationship Id="${entry.id}" Type="${RELATIONSHIP}/${entry.type}" Target="${escapeAttribute(entry.target)}"/>`)
 			.join("") +
 		"</Relationships>"
 	)

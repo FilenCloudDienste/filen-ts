@@ -12,11 +12,6 @@ export interface CoreProperties {
 
 const NO_PROPERTIES: CoreProperties = { title: undefined, author: undefined, subject: undefined, keywords: undefined }
 
-// The title a package's core properties give (dc:title). A missing or malformed core part names none.
-export async function coreTitle(opc: OpcPackage): Promise<string | undefined> {
-	return (await coreProperties(opc)).title
-}
-
 // The core part read once. A missing or malformed core part names nothing.
 export async function coreProperties(opc: OpcPackage): Promise<CoreProperties> {
 	try {

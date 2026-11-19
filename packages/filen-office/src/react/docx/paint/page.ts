@@ -1,7 +1,27 @@
-import { SOURCE_INTS, SOURCE_MARK_FLOATS, SourceInt, type DecorationValue } from "../../../core/docx/layout/index"
+import {
+	GRAPHIC_FLOATS,
+	GRAPHIC_INTS,
+	Layer,
+	OBJECT_FLOATS,
+	OBJECT_INTS,
+	PageGraphic,
+	SOURCE_INTS,
+	SOURCE_MARK_FLOATS,
+	SourceInt,
+	type DecorationValue
+} from "../../../core/docx/layout/index"
 import { borderLines } from "../../../core/docx/layout/borderLines"
 import { runEffectCss, type Emphasis, type RunEffect } from "../../../core/docx/layout/effects"
-import { TurnInt, turnCss, turnMatrixAt, turnTransform, turnsOf, type TurnMatrix } from "../../../core/docx/layout/turns"
+import {
+	TURN_FLOATS,
+	TURN_INTS,
+	TurnInt,
+	turnCss,
+	turnMatrixAt,
+	turnTransform,
+	turnsOf,
+	type TurnMatrix
+} from "../../../core/docx/layout/turns"
 import {
 	DECORATION_FLOATS,
 	DECORATION_INTS,
@@ -26,26 +46,6 @@ import type { DocxTables } from "../store"
 // find and screen readers work), boxes for fills, borders and decorations, and empty containers for
 // objects, filled later from the session. Only numbers the layout produced and values checked here reach
 // styles; document text reaches the DOM only as text nodes.
-
-// The page's layers (Layer in the layout's output), bottom to top.
-const LAYER_BEHIND = 0
-const LAYER_TEXT = 1
-const LAYER_FRONT = 2
-
-const GRAPHIC_FLOATS = 4
-const GRAPHIC_INTS = 3
-const OBJECT_FLOATS = 4
-const OBJECT_INTS = 3
-
-const Graphic = {
-	SHADING: 1,
-	BORDER: 2,
-	COLUMN_SEPARATOR: 3,
-	NOTE_SEPARATOR: 4,
-	REVISION_BAR: 5,
-	DIAGONAL_DOWN: 6,
-	DIAGONAL_UP: 7
-} as const
 
 const HEX = /^[0-9A-Fa-f]{6}$/
 // cssFont() output: optional italic, weight, size, then an internal alias and a generic family, or a
@@ -83,6 +83,9 @@ export interface LineLook {
 export interface PaintedLine {
 	readonly look: LineLook
 	readonly top: number
+	// The line's first text offset in its source (the layout's, objects and empty pieces included): what a patch
+	// shifts its texts' ranges by.
+	readonly start: number
 	readonly text: HTMLElement
 	readonly under: HTMLElement | undefined
 	readonly over: HTMLElement | undefined
@@ -109,8 +112,6 @@ interface PageParts {
 	// Graphics per layer (behind, with the text, in front), and placed objects the same way.
 	readonly graphics: readonly [HTMLElement, HTMLElement, HTMLElement]
 	readonly objects: readonly [HTMLElement, HTMLElement, HTMLElement]
-	readonly graphicsKey: string
-	readonly objectsKey: string
 }
 
 function px(value: number | undefined): number {
@@ -515,14 +516,14 @@ function paintGraphic(
 	const height = page.graphicFloats[f + 3] ?? 0
 	const kind = page.graphicInts[i] ?? 0
 	const value = decorations[(page.graphicInts[i + 1] ?? 0) - 1]
-	const layer = layers[page.graphicInts[i + 2] ?? LAYER_TEXT] ?? layers[LAYER_TEXT]
+	const layer = layers[page.graphicInts[i + 2] ?? Layer.TEXT] ?? layers[Layer.TEXT]
 
 	if (layer === undefined || !(width > 0 && height > 0)) return
 
 	let extra: string
 
 	switch (kind) {
-		case Graphic.SHADING: {
+		case PageGraphic.SHADING: {
 			const color = decorationColor(value)
 
 			if (color === undefined) return
@@ -531,7 +532,7 @@ function paintGraphic(
 
 			break
 		}
-		case Graphic.BORDER: {
+		case PageGraphic.BORDER: {
 			const color = decorationColor(value) ?? "var(--fo-auto-text, #000)"
 			const style = value?.kind === "border" ? borderStyle(value.style) : "solid"
 			const lines = value?.kind === "border" ? borderLines(value.style) : undefined
@@ -551,16 +552,16 @@ function paintGraphic(
 
 			break
 		}
-		case Graphic.REVISION_BAR:
+		case PageGraphic.REVISION_BAR:
 			extra = "background:var(--fo-revision-bar, #000);"
 
 			break
-		case Graphic.DIAGONAL_DOWN:
-		case Graphic.DIAGONAL_UP: {
+		case PageGraphic.DIAGONAL_DOWN:
+		case PageGraphic.DIAGONAL_UP: {
 			// A line corner to corner of the box: the middle stop of a gradient towards the other two corners.
 			const color = decorationColor(value) ?? "var(--fo-auto-text, #000)"
 			const half = px(Math.max(1, value?.kind === "border" ? value.width : 1) / 2)
-			const toward = kind === Graphic.DIAGONAL_DOWN ? "top" : "bottom"
+			const toward = kind === PageGraphic.DIAGONAL_DOWN ? "top" : "bottom"
 
 			extra = `background:linear-gradient(to ${toward} right,transparent calc(50% - ${half}px),${color} calc(50% - ${half}px),${color} calc(50% + ${half}px),transparent calc(50% + ${half}px));`
 
@@ -712,6 +713,8 @@ function appendSmallCaps(document: Document, span: HTMLElement, text: string, sm
 
 			small.style.font = smallFont
 			small.style.textTransform = "uppercase"
+			// Upper-cased as layout measured it (FragmentFlag.SMALL_CAPS), not as the page's language would.
+			small.setAttribute("lang", "")
 			small.textContent = piece
 			span.appendChild(small)
 		} else {
@@ -770,30 +773,6 @@ function markLink(element: HTMLElement, link: number, tables: DocxTables): void 
 	element.tabIndex = 0
 
 	if (target.tooltip !== undefined) element.title = target.tooltip
-}
-
-const SPACES = /^\s+$/
-
-// What copying puts after a line: a newline at a paragraph end or break, nothing after a hyphenated line,
-// else the spaces between this line's last character and the next line's first (a space at least).
-function lineSeparator(page: DocxPageData, line: number, flags: number, text: string, end: number): string {
-	if ((flags & (LineFlag.LAST | LineFlag.LINE_BREAK | LineFlag.PAGE_BREAK | LineFlag.COLUMN_BREAK)) !== 0) return "\n"
-	if ((flags & LineFlag.HYPHENATED) !== 0) return ""
-
-	const source = page.lineInts[line * LINE_INTS + 5]
-	let next = page.lineInts[line * LINE_INTS + 3] ?? end
-
-	for (let other = line + 1; other < page.lineCount; other++) {
-		if (page.lineInts[other * LINE_INTS + 5] === source) {
-			next = page.lineInts[other * LINE_INTS + 2] ?? next
-
-			break
-		}
-	}
-
-	const gap = text.slice(end, next)
-
-	return SPACES.test(gap) ? gap : " "
 }
 
 // lineLook()'s output, reused line after line: its numbers, and the text it shows as [start, end) ranges of
@@ -917,7 +896,7 @@ function lineLook(page: DocxPageData, line: number, links: Map<number, number[]>
 		lookValue(n++, round(page.decorationFloats[df + 3]))
 	}
 
-	// The separator (lineSeparator): a newline, nothing, the spaces after the line, or a space.
+	// The separator (separatorOf): a newline, nothing, the spaces after the line, or a space.
 	const separator = separatorOf(page, line, flags, text, lastEnd)
 
 	lookValue(n++, separator.kind)
@@ -934,8 +913,10 @@ const SEPARATOR_SPACES = 2
 const SEPARATOR_SPACE = 3
 const SEPARATOR_SCRATCH = { kind: SEPARATOR_SPACE, start: 0, end: 0 }
 
-// lineSeparator() as a kind and, for the spaces after the line, their range in the source text (one reused
-// object: no string per line).
+// What copying puts after a line, as a kind: a newline at a paragraph end or break, nothing after a hyphenated
+// line, else the spaces between this line's last character and the next line's first with their range in the
+// source text, or a single space when there are none. One reused object: no string per line (paintLine makes the
+// one it paints from it).
 function separatorOf(page: DocxPageData, line: number, flags: number, text: string, end: number): typeof SEPARATOR_SCRATCH {
 	const out = SEPARATOR_SCRATCH
 
@@ -967,7 +948,7 @@ function separatorOf(page: DocxPageData, line: number, flags: number, text: stri
 	return out
 }
 
-// What SPACES matches (\s, as JavaScript defines it).
+// Whether a character is white space (\s, as JavaScript defines it).
 function isSpace(code: number): boolean {
 	return (
 		(code >= 0x09 && code <= 0x0d) ||
@@ -1033,12 +1014,20 @@ function round(value: number | undefined): number {
 	return Math.round((value ?? 0) * 100) / 100
 }
 
-function arraysKey(...arrays: ArrayLike<number>[]): string {
-	const out: string[] = []
+// Whether the first `length` numbers of two arrays differ (an array on one side only differs). Page data
+// arrays are copies the layout made for the page, never written again: equal content draws the same.
+function differs(a: ArrayLike<number> | undefined, b: ArrayLike<number> | undefined, length: number): boolean {
+	if (a === b) return false
+	if (a === undefined || b === undefined) return true
 
-	for (const array of arrays) out.push(Array.prototype.join.call(array, ","))
+	for (let k = 0; k < length; k++) {
+		const x = a[k]
+		const y = b[k]
 
-	return out.join("|")
+		if (x !== y && !(Number.isNaN(x) && Number.isNaN(y))) return true
+	}
+
+	return false
 }
 
 function group(document: Document, top: number): HTMLElement {
@@ -1127,10 +1116,16 @@ function paintLine(
 				extra += `transform:${scaled};`
 			}
 			if ((info >> FRAGMENT_LEVEL_SHIFT) % 2 === 1) extra += "direction:rtl;unicode-bidi:bidi-override;"
-			if ((info & FragmentFlag.CAPS) !== 0) extra += "text-transform:uppercase;"
+			const caps = (info & FragmentFlag.CAPS) !== 0
+
+			if (caps) extra += "text-transform:uppercase;"
 
 			span.className = "fo-docx-run"
 			span.style.cssText = css.base + extra + drawingTextCss(style, paints)
+
+			// Upper-cased as layout measured it (FragmentFlag.CAPS), not as the page's language would (a Turkish
+			// page would dot the capital I).
+			if (caps) span.setAttribute("lang", "")
 
 			const pieces = linkPieces(page, sourceLinks, start, end)
 			const smallCaps = (info & FragmentFlag.SMALL_CAPS) !== 0
@@ -1164,7 +1159,16 @@ function paintLine(
 	for (const mirror of mirrors) textGroup.appendChild(mirror)
 
 	if (lineTexts.length > 0) {
-		const separator = lineSeparator(page, line, flags, text, lineTexts[lineTexts.length - 1]?.end ?? 0)
+		// What copying puts after the line (separatorOf; read before anything else uses its scratch).
+		const found = separatorOf(page, line, flags, text, lineTexts[lineTexts.length - 1]?.end ?? 0)
+		const separator =
+			found.kind === SEPARATOR_NEWLINE
+				? "\n"
+				: found.kind === SEPARATOR_NONE
+					? ""
+					: found.kind === SEPARATOR_SPACES
+						? text.slice(found.start, found.end)
+						: " "
 
 		// Copying a selection keeps paragraph breaks, line breaks and the space a soft wrap swallowed.
 		if (separator.length > 0) {
@@ -1188,7 +1192,7 @@ function paintLine(
 		paintDecoration(document, target, page, tables, d, fill, lineTop)
 	}
 
-	return { look, top: lineTop, text: textGroup, under, over, texts: lineTexts, turn: "" }
+	return { look, top: lineTop, start: page.lineInts[li + 2] ?? 0, text: textGroup, under, over, texts: lineTexts, turn: "" }
 }
 
 // The page's sideways text (layout/turns.ts): the turn each line and graphic is drawn through (-1 for none) and
@@ -1253,20 +1257,18 @@ function paintGraphics(
 	}
 }
 
-const NO_NUMBERS = new Int32Array(0)
+// Whether what the graphics are drawn from changed (they are repainted only then): the used part of their arrays
+// and of the turns they are drawn through, compared number by number (no key strings per patch).
+function graphicsChanged(old: DocxPageData, page: DocxPageData): boolean {
+	const turns = page.turnCount ?? 0
 
-// What the graphics and the placed objects are drawn from, to repaint them only when it changed.
-function graphicsKeyOf(page: DocxPageData): string {
-	return arraysKey(page.graphicFloats, page.graphicInts, page.turnFloats ?? NO_NUMBERS, page.turnInts ?? NO_NUMBERS)
-}
-
-function objectsKeyOf(page: DocxPageData): string {
-	return arraysKey(
-		page.objectFloats,
-		page.objectInts,
-		page.objectKinds,
-		page.objectTurns ?? NO_NUMBERS,
-		page.objectTurns === undefined ? NO_NUMBERS : (page.turnFloats ?? NO_NUMBERS)
+	return (
+		old.graphicCount !== page.graphicCount ||
+		(old.turnCount ?? 0) !== turns ||
+		differs(old.graphicFloats, page.graphicFloats, page.graphicCount * GRAPHIC_FLOATS) ||
+		differs(old.graphicInts, page.graphicInts, page.graphicCount * GRAPHIC_INTS) ||
+		differs(old.turnFloats, page.turnFloats, turns * TURN_FLOATS) ||
+		differs(old.turnInts, page.turnInts, turns * TURN_INTS)
 	)
 }
 
@@ -1287,20 +1289,20 @@ function stacking(page: DocxPageData): Stacking {
 	let front = 0
 
 	for (let o = 0; o < page.objectCount; o++) {
-		const layer = page.objectInts[o * OBJECT_INTS + 1] ?? LAYER_TEXT
+		const layer = page.objectInts[o * OBJECT_INTS + 1] ?? Layer.TEXT
 
-		if (layer === LAYER_BEHIND) behind++
+		if (layer === Layer.BEHIND) behind++
 	}
 
 	const boxes = new Map<number, string>()
 	let seenBehind = 0
 
 	for (let o = 0; o < page.objectCount; o++) {
-		const layer = page.objectInts[o * OBJECT_INTS + 1] ?? LAYER_TEXT
+		const layer = page.objectInts[o * OBJECT_INTS + 1] ?? Layer.TEXT
 		const id = page.objectInts[o * OBJECT_INTS] ?? -1
-		const z = layer === LAYER_BEHIND ? -2 * (behind - seenBehind++) : layer === LAYER_FRONT ? 2 * front++ + 2 : 0
+		const z = layer === Layer.BEHIND ? -2 * (behind - seenBehind++) : layer === Layer.FRONT ? 2 * front++ + 2 : 0
 
-		objects.push(layer === LAYER_TEXT ? "" : String(z))
+		objects.push(layer === Layer.TEXT ? "" : String(z))
 
 		if (!boxes.has(id)) boxes.set(id, String(z + 1))
 	}
@@ -1321,6 +1323,40 @@ function stackLine(line: PaintedLine, z: string): void {
 	if (line.over !== undefined && line.over.style.zIndex !== z) line.over.style.zIndex = z
 }
 
+// A placed object's box (empty, to be filled from the session), where `page` places it, and its layer.
+function placedBox(document: Document, page: DocxPageData, o: number, stack: Stacking): PaintedObject {
+	const f = o * OBJECT_FLOATS
+	const x = page.objectFloats[f] ?? 0
+	const y = page.objectFloats[f + 1] ?? 0
+	const width = page.objectFloats[f + 2] ?? 0
+	const height = page.objectFloats[f + 3] ?? 0
+	const matrix = objectMatrix(page, o)
+	const element = box(document, "fo-docx-object", x, y, width, height, matrix === undefined ? "" : turnCss(matrix, x, y))
+	const id = page.objectInts[o * OBJECT_INTS] ?? -1
+
+	element.dataset["foObject"] = String(id)
+
+	if ((stack.objects[o] ?? "") !== "") element.style.zIndex = stack.objects[o] ?? ""
+
+	return { element, id, kind: page.objectKinds[o] ?? 0, width, height }
+}
+
+// The turn an object is drawn through (undefined for an upright one).
+function objectMatrix(page: DocxPageData, o: number): TurnMatrix | undefined {
+	const turn = page.objectTurns?.[o] ?? -1
+	const turnFloats = page.turnFloats
+	const turnInts = page.turnInts
+
+	return turn < 0 || turnFloats === undefined || turnInts === undefined ? undefined : turnMatrixAt(turnFloats, turnInts, turn)
+}
+
+// Which of the page's object containers (behind, with the text, in front) object `o` goes in.
+function slotOf(page: DocxPageData, o: number): 0 | 1 | 2 {
+	const layer = page.objectInts[o * OBJECT_INTS + 1] ?? Layer.TEXT
+
+	return layer === Layer.BEHIND ? 0 : layer === Layer.FRONT ? 2 : 1
+}
+
 function paintPlaced(
 	document: Document,
 	page: DocxPageData,
@@ -1328,32 +1364,127 @@ function paintPlaced(
 	stack: Stacking
 ): PaintedObject[] {
 	const objects: PaintedObject[] = []
-	const turns = page.objectTurns
-	const turnFloats = page.turnFloats
-	const turnInts = page.turnInts
 
 	for (let o = 0; o < page.objectCount; o++) {
-		const f = o * OBJECT_FLOATS
-		const i = o * OBJECT_INTS
-		const x = page.objectFloats[f] ?? 0
-		const y = page.objectFloats[f + 1] ?? 0
-		const width = page.objectFloats[f + 2] ?? 0
-		const height = page.objectFloats[f + 3] ?? 0
-		const turn = turns?.[o] ?? -1
-		const extra =
-			turn < 0 || turnFloats === undefined || turnInts === undefined ? "" : turnCss(turnMatrixAt(turnFloats, turnInts, turn), x, y)
-		const element = box(document, "fo-docx-object", x, y, width, height, extra)
-		const layer = page.objectInts[i + 1] ?? LAYER_TEXT
-		const id = page.objectInts[i] ?? -1
+		const object = placedBox(document, page, o, stack)
 
-		element.dataset["foObject"] = String(id)
-
-		if ((stack.objects[o] ?? "") !== "") element.style.zIndex = stack.objects[o] ?? ""
-		;(layer === LAYER_BEHIND ? into[0] : layer === LAYER_FRONT ? into[2] : into[1]).appendChild(element)
-		objects.push({ element, id, kind: page.objectKinds[o] ?? 0, width, height })
+		into[slotOf(page, o)].appendChild(object.element)
+		objects.push(object)
 	}
 
 	return objects
+}
+
+// Whether a painted box shows object `o` of `page` as it is drawn now: the same object (ids name one object for
+// the layout's life) of the same kind and size (a drawing is painted for its size).
+function showsObject(painted: PaintedObject, page: DocxPageData, o: number): boolean {
+	const f = o * OBJECT_FLOATS
+
+	return (
+		painted.id === (page.objectInts[o * OBJECT_INTS] ?? -1) &&
+		painted.kind === (page.objectKinds[o] ?? 0) &&
+		round(painted.width) === round(page.objectFloats[f + 2]) &&
+		round(painted.height) === round(page.objectFloats[f + 3])
+	)
+}
+
+function setStyle(element: HTMLElement, name: "left" | "top" | "transform" | "transformOrigin" | "zIndex", value: string): void {
+	if (element.style[name] !== value) element.style[name] = value
+}
+
+// Brings the placed objects to `page`: a box that shows the same object at the same size is kept with what fills
+// it, moved, stacked and turned as `page` places it; the others are made anew (`added`, to be filled) or taken away
+// (`removed`, to be released). Equals paintPlaced() box for box.
+function patchPlaced(
+	document: Document,
+	page: DocxPageData,
+	into: readonly [HTMLElement, HTMLElement, HTMLElement],
+	stack: Stacking,
+	old: readonly PaintedObject[]
+): { objects: PaintedObject[]; added: PaintedObject[]; removed: PaintedObject[] } {
+	const byId = new Map<number, number[]>()
+	const used = new Uint8Array(old.length)
+	const objects: PaintedObject[] = []
+	const added: PaintedObject[] = []
+	const removed: PaintedObject[] = []
+
+	for (let index = 0; index < old.length; index++) {
+		const id = old[index]?.id ?? -1
+		const list = byId.get(id)
+
+		if (list === undefined) byId.set(id, [index])
+		else list.push(index)
+	}
+
+	for (let o = 0; o < page.objectCount; o++) {
+		let kept: PaintedObject | undefined
+		const candidates = byId.get(page.objectInts[o * OBJECT_INTS] ?? -1)
+
+		if (candidates !== undefined) {
+			for (const index of candidates) {
+				const candidate = old[index]
+
+				if (used[index] === 1 || candidate === undefined || !showsObject(candidate, page, o)) continue
+
+				used[index] = 1
+				kept = candidate
+
+				break
+			}
+		}
+
+		if (kept === undefined) {
+			const object = placedBox(document, page, o, stack)
+
+			objects.push(object)
+			added.push(object)
+
+			continue
+		}
+
+		const f = o * OBJECT_FLOATS
+		const x = page.objectFloats[f] ?? 0
+		const y = page.objectFloats[f + 1] ?? 0
+		const matrix = objectMatrix(page, o)
+		const element = kept.element
+
+		setStyle(element, "left", `${px(x)}px`)
+		setStyle(element, "top", `${px(y)}px`)
+		setStyle(element, "transform", matrix === undefined ? "" : turnTransform(matrix, x, y))
+		setStyle(element, "transformOrigin", matrix === undefined ? "" : "0 0")
+		setStyle(element, "zIndex", stack.objects[o] ?? "")
+		objects.push(kept)
+	}
+
+	// Boxes that are gone, before the rest is put in order (as patchPage does with lines).
+	for (let index = 0; index < old.length; index++) {
+		const object = old[index]
+
+		if (used[index] === 1 || object === undefined) continue
+
+		object.element.remove()
+		removed.push(object)
+	}
+
+	// Each layer's boxes in page order: new ones go where they belong, one that changed layer moves.
+	const previous: (HTMLElement | null)[] = [null, null, null]
+
+	for (let o = 0; o < objects.length; o++) {
+		const element = objects[o]?.element
+
+		if (element === undefined) continue
+
+		const slot = slotOf(page, o)
+		const layer = into[slot]
+		const before = previous[slot] ?? null
+		const after: ChildNode | null = before === null ? layer.firstChild : before.nextSibling
+
+		if (element !== after) layer.insertBefore(element, after)
+
+		previous[slot] = element
+	}
+
+	return { objects, added, removed }
 }
 
 function container(document: Document, className: string): HTMLElement {
@@ -1371,7 +1502,7 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 	root.className = "fo-docx-page-content"
 	root.style.cssText = `width:${px(page.width)}px;height:${px(page.height)}px;`
 
-	const layers = [LAYER_BEHIND, LAYER_TEXT, LAYER_FRONT].map(layer => {
+	const layers = [Layer.BEHIND, Layer.TEXT, Layer.FRONT].map(layer => {
 		const element = document.createElement("div")
 
 		element.className = "fo-docx-layer"
@@ -1379,9 +1510,9 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 
 		return element
 	})
-	const behind = layers[LAYER_BEHIND] ?? root
-	const textLayer = layers[LAYER_TEXT] ?? root
-	const front = layers[LAYER_FRONT] ?? root
+	const behind = layers[Layer.BEHIND] ?? root
+	const textLayer = layers[Layer.TEXT] ?? root
+	const front = layers[Layer.FRONT] ?? root
 	const fills = container(document, "fo-docx-layer")
 	const textElements = container(document, "fo-docx-layer fo-docx-text")
 	const overLines = container(document, "fo-docx-layer")
@@ -1445,21 +1576,20 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 			textElements,
 			overLines,
 			graphics,
-			objects: placed,
-			graphicsKey: graphicsKeyOf(page),
-			objectsKey: objectsKeyOf(page)
+			objects: placed
 		}
 	}
 }
 
 // Brings a painted page to `page` (the same page laid out again) by repainting only the lines that look
-// different and moving those that only moved; graphics and placed objects are repainted when they changed
-// (`objectsChanged`: their boxes are new and need filling). Line-for-line it equals a fresh paintPage.
+// different and moving those that only moved; graphics are repainted when they changed, and placed objects are
+// kept, moved or made anew one by one (`added`: new boxes that need filling; `removed`: boxes taken away, whose
+// fills can be released). Line-for-line it equals a fresh paintPage.
 export function patchPage(
 	painted: PaintedPage,
 	page: DocxPageData,
 	context: PagePaintContext
-): { painted: PaintedPage; objectsChanged: boolean } {
+): { painted: PaintedPage; added: readonly PaintedObject[]; removed: readonly PaintedObject[] } {
 	const { document, tables } = context
 	const parts = painted.parts
 	const links = linksBySource(page)
@@ -1522,7 +1652,7 @@ export function patchPage(
 			next = paintLine(document, page, tables, line, links, keptLook(hash, count, text), context.paints)
 		} else {
 			const start = page.lineInts[line * LINE_INTS + 2] ?? 0
-			const shift = start - (kept.texts[0]?.start ?? start)
+			const shift = start - kept.start
 
 			if (kept.top !== top) {
 				const value = `${px(top)}px`
@@ -1540,6 +1670,7 @@ export function patchPage(
 					: {
 							look: kept.look,
 							top,
+							start,
 							text: kept.text,
 							under: kept.under,
 							over: kept.over,
@@ -1587,9 +1718,7 @@ export function patchPage(
 		previous = line.text
 	}
 
-	const graphicsKey = graphicsKeyOf(page)
-
-	if (graphicsKey !== parts.graphicsKey) {
+	if (graphicsChanged(painted.page, page)) {
 		for (const element of parts.graphics) element.replaceChildren()
 
 		paintGraphics(document, page, tables, parts.graphics, turns)
@@ -1597,21 +1726,14 @@ export function patchPage(
 
 	parts.graphics[0].style.zIndex = stack.behindGraphics
 
-	const objectsKey = objectsKeyOf(page)
-	const objectsChanged = objectsKey !== parts.objectsKey
-	let objects = painted.objects
-
-	if (objectsChanged) {
-		for (const element of parts.objects) element.replaceChildren()
-
-		objects = paintPlaced(document, page, parts.objects, stack)
-	}
+	const { objects, added, removed } = patchPlaced(document, page, parts.objects, stack, painted.objects)
 
 	painted.root.style.width = `${px(page.width)}px`
 	painted.root.style.height = `${px(page.height)}px`
 
 	return {
-		painted: { root: painted.root, texts, objects, lines, page, parts: { ...parts, graphicsKey, objectsKey } },
-		objectsChanged
+		painted: { root: painted.root, texts, objects, lines, page, parts },
+		added,
+		removed
 	}
 }

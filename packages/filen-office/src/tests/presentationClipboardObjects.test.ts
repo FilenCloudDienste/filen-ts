@@ -143,6 +143,22 @@ function frames(d: Drive, slide: SlideRef, kind: string): ShapeNode[] {
 	return nodeOf(d, slide).shapes.filter(shape => shape.frame?.kind === kind || (kind === "ink" && shape.kind === "ink"))
 }
 
+// The slide's first chart frame, never a stand-in id when it has none.
+function chartId(d: Drive, slide: SlideRef): number {
+	const id = frames(d, slide, "chart")[0]?.id
+
+	if (id === undefined) throw new Error(`no chart frame on slide ${String(slide)}`)
+
+	return id
+}
+
+// The ids of the slide's own shapes a render drew as layers (a layout's or master's shapes name their own node).
+async function drawnIds(d: Drive, slide: SlideRef): Promise<number[]> {
+	const [render] = await viewCapability.render(d.context, [slide])
+
+	return (render?.layers ?? []).flatMap(layer => (layer.shape.slide === slide ? [layer.shape.id] : []))
+}
+
 async function copied(d: Drive, slide: SlideRef, ids: readonly number[]): Promise<ShapeClip> {
 	const result = await clip(d.context, { kind: "shapes", slide, shapes: ids })
 
@@ -198,7 +214,7 @@ async function withChart(): Promise<{ readonly d: Drive; readonly slide: SlideRe
 
 	expect(await d.command(insertChartOp(d.session.deck, slide, 0, "column", CELLS))).toMatchObject({ ok: true })
 
-	return { d, slide, id: frames(d, slide, "chart")[0]?.id ?? 0 }
+	return { d, slide, id: chartId(d, slide) }
 }
 
 describe("presentation clipboard: objects that own parts", () => {
@@ -256,9 +272,7 @@ describe("presentation clipboard: objects that own parts", () => {
 		expect(await other.command(await pasted(other, made, target, d))).toMatchObject({ ok: true })
 
 		// The pasted chart draws before any save.
-		const rendered = await viewCapability.render(other.context, [target])
-
-		expect(rendered).toBeDefined()
+		expect(await drawnIds(other, target)).toContain(chartId(other, target))
 
 		const [own, theirs] = [await saved(d), await saved(other)] as const
 
@@ -316,7 +330,14 @@ describe("presentation clipboard: objects that own parts", () => {
 
 		await viewCapability.render(other.context, [target])
 		expect(await other.command(await pasted(other, made, target, d))).toMatchObject({ ok: true })
-		expect(await viewCapability.render(other.context, [target])).toBeDefined()
+
+		const drawn = await drawnIds(other, target)
+		const pastedIds = nodeOf(other, target)
+			.shapes.filter(shape => ["Diagram 3", "Object 6", "Ink 7", "Ink 8"].includes(shape.name))
+			.map(shape => shape.id)
+
+		expect(pastedIds).toHaveLength(4)
+		expect(drawn).toEqual(expect.arrayContaining(pastedIds))
 
 		const own = await saved(d)
 		const theirs = await saved(other)
@@ -415,7 +436,7 @@ describe("presentation clipboard: objects that own parts", () => {
 
 		expect(await other.command(await pasted(other, made, target, d))).toMatchObject({ ok: true })
 
-		const chart = frames(other, target, "chart")[0]?.id ?? 0
+		const chart = chartId(other, target)
 
 		expect(
 			await other.command({
@@ -472,10 +493,11 @@ describe("presentation clipboard: objects that own parts", () => {
 
 		expect(await other.command(await pasted(other, made, target, d))).toMatchObject({ ok: true })
 
-		const pasteId = frames(other, target, "chart")[0]?.id ?? 0
-		const data = await chartData(other.context, { slide: target, id: pasteId })
+		const data = await chartData(other.context, { slide: target, id: chartId(other, target) })
 
-		expect(data).toBeDefined()
+		// The chart part read from what the paste carried: its series are the copied chart's (the sample's third column
+		// has no name).
+		expect(data.info?.plots.flatMap(plot => plot.series.map(series => series.name))).toEqual(["North", "South", ""])
 	})
 })
 
@@ -565,7 +587,7 @@ describe("presentation clipboard: slides into another deck", () => {
 		expect(layout?.name).toBe("Title and Content")
 		expect(node.shapes.find(shape => shape.name === "Content Placeholder 2")?.ph?.idx).toBe(7)
 		expect(node.notes).toBeDefined()
-		expect(await viewCapability.render(to.context, [pasted])).toBeDefined()
+		expect(await drawnIds(to, pasted)).toContain(chartId(to, pasted))
 
 		const bytes = await saved(to)
 		const zip = files(bytes)

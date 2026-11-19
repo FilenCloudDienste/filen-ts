@@ -1,5 +1,20 @@
+import { escapeAttribute } from "../../xml/entities"
 import { languageAttributes } from "../odf"
-import { decorationOf, variantOf, type SlideSize } from "./pptx"
+import {
+	BODY,
+	BODY_SIZES_PT,
+	DATE,
+	FOOTER,
+	HALF_W,
+	NUMBER,
+	RIGHT_X,
+	TITLE,
+	TITLE_SLIDE,
+	decorationOf,
+	variantOf,
+	type Box,
+	type SlideSize
+} from "./pptx"
 import type { FilenTheme, ThemeColorSlot } from "./model"
 
 // A Filen theme as ODF presentation styles (ODF 1.3 Part 3): a master page (§16.9) with its drawing-page style
@@ -30,10 +45,6 @@ export function cm(emu: number): string {
 
 function box(x: number, y: number, w: number, h: number, size: SlideSize): string {
 	return `svg:x="${cm(x * size.cx)}" svg:y="${cm(y * size.cy)}" svg:width="${cm(w * size.cx)}" svg:height="${cm(h * size.cy)}"`
-}
-
-function escape(text: string): string {
-	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;")
 }
 
 // The colour a theme slot takes on this variant's master (the master's colour map applied).
@@ -72,7 +83,7 @@ export function fontFace(face: string): string {
 		face === "Courier New" ? "modern" : face === "Cambria" || face === "Georgia" || face === "Times New Roman" ? "roman" : "swiss"
 	const pitch = face === "Courier New" ? "fixed" : "variable"
 
-	return `<style:font-face style:name="${escape(face)}" svg:font-family="'${escape(face)}'" style:font-family-generic="${generic}" style:font-pitch="${pitch}"/>`
+	return `<style:font-face style:name="${escapeAttribute(face)}" svg:font-family="'${escapeAttribute(face)}'" style:font-family-generic="${generic}" style:font-pitch="${pitch}"/>`
 }
 
 // office:font-face-decls entries for the theme's two fonts (once when they are the same).
@@ -80,27 +91,26 @@ export function fontFaces(theme: FilenTheme): string {
 	return themeFaces(theme).map(fontFace).join("")
 }
 
-// The fractions of the PresentationML master (themes/pptx.ts), so both formats place placeholders alike.
-const MARGIN_X = 0.06875
-const CONTENT_W = 1 - 2 * MARGIN_X
-const TITLE = [MARGIN_X, 0.0532, CONTENT_W, 0.1933] as const
-const BODY = [MARGIN_X, 0.2662, CONTENT_W, 0.6345] as const
-const FOOTERS = [
-	["date-time", MARGIN_X, 0.225, "start"],
-	["footer", 0.33125, 0.3375, "center"],
-	["page-number", 0.70625, 0.225, "end"]
-] as const
-export const ODP_TITLE_SLIDE = { title: [0.125, 0.1637, 0.75, 0.3481], subtitle: [0.125, 0.5252, 0.75, 0.2414] } as const
-// The content layouts' boxes, as the PresentationML master's Title and Content and Two Content layouts place them.
-const HALF_W = (CONTENT_W - 0.0187) / 2
-export const ODP_CONTENT_SLIDE = {
-	title: TITLE,
-	body: BODY,
-	left: [MARGIN_X, BODY[1], HALF_W, BODY[3]],
-	right: [MARGIN_X + HALF_W + 0.0187, BODY[1], HALF_W, BODY[3]]
-} as const
+// The boxes of the PresentationML master (themes/pptx.ts) as [x, y, w, h], so both formats place placeholders alike.
+type Frame = readonly [number, number, number, number]
 
-const BODY_SIZES = [28, 24, 20, 18, 18, 18, 18, 18, 18]
+function frameOf(b: Box): Frame {
+	return [b.x, b.y, b.w, b.h]
+}
+
+const FOOTERS = [
+	["date-time", DATE, "start"],
+	["footer", FOOTER, "center"],
+	["page-number", NUMBER, "end"]
+] as const
+export const ODP_TITLE_SLIDE = { title: frameOf(TITLE_SLIDE.title), subtitle: frameOf(TITLE_SLIDE.subtitle) } as const
+// The content layouts' boxes, as the PresentationML master's Title and Content and Two Content layouts place them.
+export const ODP_CONTENT_SLIDE = {
+	title: frameOf(TITLE),
+	body: frameOf(BODY),
+	left: frameOf({ x: BODY.x, y: BODY.y, w: HALF_W, h: BODY.h }),
+	right: frameOf({ x: RIGHT_X, y: BODY.y, w: HALF_W, h: BODY.h })
+} as const
 
 // The text insets of the PresentationML placeholders (0.1 in sides, 0.05 in top and bottom, §20.1.2.1.1), written so
 // every reader lays the text out alike (LibreOffice's own default differs).
@@ -109,8 +119,8 @@ const INSETS = 'fo:padding-top="0.127cm" fo:padding-bottom="0.127cm" fo:padding-
 // `locale`: languageAttributes of the deck's language, or "" for none.
 function textProperties(font: string, sizePt: number, color: string, locale: string): string {
 	return (
-		`<style:text-properties fo:color="${color}" style:font-name="${escape(font)}" fo:font-size="${String(sizePt)}pt"${locale} ` +
-		`style:font-name-asian="${escape(font)}" style:font-size-asian="${String(sizePt)}pt" style:font-name-complex="${escape(font)}" style:font-size-complex="${String(sizePt)}pt"/>`
+		`<style:text-properties fo:color="${color}" style:font-name="${escapeAttribute(font)}" fo:font-size="${String(sizePt)}pt"${locale} ` +
+		`style:font-name-asian="${escapeAttribute(font)}" style:font-size-asian="${String(sizePt)}pt" style:font-name-complex="${escapeAttribute(font)}" style:font-size-complex="${String(sizePt)}pt"/>`
 	)
 }
 
@@ -149,8 +159,8 @@ export function odpThemeStyles(
 ): OdpThemeStyles {
 	const variant = variantOf(theme, variantIndex)
 	const locale = language === undefined || language === "" ? "" : languageAttributes(language)
-	const m = escape(names.master)
-	const p = names.prefix
+	const m = escapeAttribute(names.master)
+	const p = escapeAttribute(names.prefix)
 	const text = odpColor(theme, variantIndex, "tx1")
 	const background = odpColor(theme, variantIndex, "bg1")
 	const accent = odpColor(theme, variantIndex, "accent1")
@@ -162,8 +172,8 @@ export function odpThemeStyles(
 		`<style:style style:name="${m}-outline1" style:family="presentation"><style:graphic-properties draw:stroke="none" draw:fill="none" ${INSETS}>` +
 		`${outlineListStyle(`${p}L`, text)}</style:graphic-properties>` +
 		'<style:paragraph-properties fo:margin-top="0.25cm" fo:margin-bottom="0cm" fo:line-height="90%" style:font-independent-line-spacing="true"/>' +
-		`${textProperties(theme.minor, BODY_SIZES[0] ?? 28, text, locale)}</style:style>` +
-		BODY_SIZES.slice(1)
+		`${textProperties(theme.minor, BODY_SIZES_PT[0] ?? 28, text, locale)}</style:style>` +
+		BODY_SIZES_PT.slice(1)
 			.map(
 				(points, index) =>
 					`<style:style style:name="${m}-outline${String(index + 2)}" style:family="presentation" style:parent-style-name="${m}-outline${String(index + 1)}">` +
@@ -205,7 +215,7 @@ export function odpThemeStyles(
 					: `draw:stroke="none" draw:fill="solid" draw:fill-color="${accent}"`) +
 				"/></style:style>") +
 		FOOTERS.map(
-			([kind, , , align]) =>
+			([kind, , align]) =>
 				`<style:style style:name="${p}${kind}" style:family="presentation" style:parent-style-name="${m}-backgroundobjects">` +
 				'<style:graphic-properties draw:textarea-vertical-align="middle"/>' +
 				`<style:paragraph-properties fo:text-align="${align}" style:font-independent-line-spacing="true"/>${textProperties(theme.minor, 12, footerColor, locale)}</style:style>`
@@ -220,11 +230,11 @@ export function odpThemeStyles(
 	const frame = (cls: string, style: string, [x, y, w, h]: readonly number[]): string =>
 		`<draw:frame presentation:style-name="${style}" draw:layer="backgroundobjects" ${box(x ?? 0, y ?? 0, w ?? 0, h ?? 0, size)} presentation:class="${cls}" presentation:placeholder="true"><draw:text-box/></draw:frame>`
 	const master =
-		`<style:master-page style:name="${m}"${names.displayName === undefined ? "" : ` style:display-name="${escape(names.displayName)}"`} style:page-layout-name="${p}PM" draw:style-name="${p}dp">` +
+		`<style:master-page style:name="${m}"${names.displayName === undefined ? "" : ` style:display-name="${escapeAttribute(names.displayName)}"`} style:page-layout-name="${p}PM" draw:style-name="${p}dp">` +
 		decorationShape +
-		frame("title", `${m}-title`, TITLE) +
-		frame("outline", `${m}-outline1`, BODY) +
-		FOOTERS.map(([kind, x, w]) => frame(kind, `${p}${kind}`, [x, 0.9268, w, 0.0532])).join("") +
+		frame("title", `${m}-title`, ODP_CONTENT_SLIDE.title) +
+		frame("outline", `${m}-outline1`, ODP_CONTENT_SLIDE.body) +
+		FOOTERS.map(([kind, footer]) => frame(kind, `${p}${kind}`, frameOf(footer))).join("") +
 		"</style:master-page>"
 
 	return { styles, automatic, master }
@@ -233,7 +243,7 @@ export function odpThemeStyles(
 // office:styles children shared by every ODP master: the gradient a gradient background names, the default style.
 export function odpGradient(theme: FilenTheme, variantIndex: number, prefix: string): string {
 	return variantOf(theme, variantIndex).background === "gradient"
-		? `<draw:gradient draw:name="${prefix}g" draw:style="linear" draw:angle="0" draw:border="0%" ` +
+		? `<draw:gradient draw:name="${escapeAttribute(prefix)}g" draw:style="linear" draw:angle="0" draw:border="0%" ` +
 				`draw:start-color="${odpColor(theme, variantIndex, "bg1")}" draw:end-color="${odpColor(theme, variantIndex, "bg2")}" draw:start-intensity="100%" draw:end-intensity="100%"/>`
 		: ""
 }

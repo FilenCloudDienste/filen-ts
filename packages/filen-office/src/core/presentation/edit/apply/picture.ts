@@ -30,6 +30,9 @@ const IMAGE_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "im
 // never reused (a freed id stays an alias), so `next` only grows.
 interface ImageRegistry {
 	readonly images: Map<number, InsertedImage>
+	// The id each held image has, by its own object: ops arrive by structured clone, so one object is one image, and a
+	// redo of an op whose applied form names no id (Change Picture, a poster) registers it again under that id.
+	readonly ids: WeakMap<InsertedImage, number>
 	// Images a committed save wrote: their bytes are the package's now (see commitInsertedImages).
 	readonly written: Map<number, WrittenImage>
 	// The images freed into an alias, by their own object (an op redone after the save names it again).
@@ -43,7 +46,7 @@ function registryOf(deck: Deck): ImageRegistry {
 	let registry = registries.get(deck)
 
 	if (registry === undefined) {
-		registry = { images: new Map(), written: new Map(), writtenFrom: new WeakMap(), next: 1 }
+		registry = { images: new Map(), ids: new WeakMap(), written: new Map(), writtenFrom: new WeakMap(), next: 1 }
 		registries.set(deck, registry)
 	}
 
@@ -54,18 +57,96 @@ export function insertedImage(deck: Deck, id: number): InsertedImage | undefined
 	return registries.get(deck)?.images.get(id)
 }
 
-// An image into the deck's registry: `id` when the op as applied names it already (a redo), else a new id.
+// An image into the deck's registry: the id it has already (a redo: still held, or written by a save since, its
+// alias), `id` when the op as applied names it held, else a new id.
 export function registerInsertedImage(deck: Deck, image: InsertedImage, id: number | undefined): number {
 	const registry = registryOf(deck)
+	const written = registry.writtenFrom.get(image)
 
-	// A redo names the image its op inserted: the id again, still held or written by a save since (its alias).
-	if (id !== undefined && id > 0 && (registry.images.get(id) === image || registry.writtenFrom.get(image) === id)) return id
+	if (written !== undefined) return written
+
+	const held = registry.ids.get(image)
+
+	if (held !== undefined && registry.images.get(held) === image) return held
+	if (id !== undefined && id > 0 && registry.images.get(id) === image) return id
 
 	const next = registry.next++
 
 	registry.images.set(next, image)
+	registry.ids.set(image, next)
 
 	return next
+}
+
+// Lets go of every held image whose id `reachable` does not hold (nothing in the deck or the history names it any
+// more). Never between a save's emit and its commit: the commit finds what the save wrote among the held images.
+export function pruneInsertedImages(deck: Deck, reachable: ReadonlySet<number>): void {
+	const registry = registries.get(deck)
+
+	if (registry === undefined) return
+
+	for (const [id, image] of registry.images) {
+		if (reachable.has(id)) continue
+
+		registry.images.delete(id)
+		registry.ids.delete(image)
+	}
+}
+
+// An image a cut's slides took along, back under the id the registry let go of: ids are never reused, so no other
+// image ever had it, and every fill and held markup naming it ("inserted:<id>") names it again. An id held or written
+// is left as it is.
+export function reinstateInsertedImage(deck: Deck, id: number, image: InsertedImage): void {
+	const registry = registryOf(deck)
+
+	if (!Number.isInteger(id) || id <= 0 || id >= registry.next || registry.images.has(id) || registry.written.has(id)) return
+
+	registry.images.set(id, image)
+	registry.ids.set(image, id)
+}
+
+// The deepest a lost image is looked for (a slide's nodes nest far less).
+const MAX_LOST_DEPTH = 64
+
+// Whether `value` (shapes, a slide's nodes) names by a picture fill anywhere in it (a shape's, a child's, a line's, a
+// cell's, the background's) an inserted image the registry let go of and no save wrote, but for those `carried` (an
+// op brings them back itself): a copy kept outside the deck and the history (the page's clipboard) after the steps
+// naming it were let go of. No save could write a slide that names it. A deck that never held an inserted image names
+// none.
+export function namesLostImage(deck: Deck, value: unknown, carried?: ReadonlySet<number>): boolean {
+	const registry = registries.get(deck)
+
+	if (registry === undefined) return false
+
+	const lost = (item: unknown, depth: number): boolean => {
+		if (typeof item !== "object" || item === null || depth > MAX_LOST_DEPTH || ArrayBuffer.isView(item)) return false
+
+		if (Array.isArray(item)) return item.some(each => lost(each, depth + 1))
+
+		const record = item as Record<string, unknown>
+		const fill = item as { readonly kind?: unknown; readonly inserted?: unknown }
+		const id = fill.inserted
+
+		if (
+			fill.kind === "picture" &&
+			typeof id === "number" &&
+			!registry.images.has(id) &&
+			!registry.written.has(id) &&
+			carried?.has(id) !== true
+		)
+			return true
+
+		for (const name in record) if (Object.hasOwn(record, name) && lost(record[name], depth + 1)) return true
+
+		return false
+	}
+
+	return lost(value, 0)
+}
+
+// Whether the deck holds any inserted image a save has not written (what a prune could let go of).
+export function holdsInsertedImages(deck: Deck): boolean {
+	return (registries.get(deck)?.images.size ?? 0) > 0
 }
 
 // An inserted image a committed save wrote, once its registry entry was freed: the part it lives in from then on
@@ -121,6 +202,7 @@ export function commitInsertedImages(
 		if (image === undefined) continue
 
 		registry.images.delete(id)
+		registry.ids.delete(image)
 		registry.writtenFrom.set(image, id)
 		registry.written.set(id, {
 			part,

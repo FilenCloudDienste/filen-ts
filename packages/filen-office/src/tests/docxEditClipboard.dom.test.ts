@@ -142,7 +142,6 @@ describe("EditSink clipboard commands", () => {
 			for (const mark of node.marks) expect(JSON.stringify(mark.attrs)).not.toMatch(/https?:|javascript:/)
 		})
 		expect(document.querySelector("img, iframe, script[src]")).toBeNull()
-		expect(docxSchema.nodes.paragraph).toBeDefined()
 		sink.destroy()
 	})
 

@@ -11,6 +11,10 @@ import { AMP, BANG, COLON, GT, LT, QUESTION, SLASH, Scanner, bytesAre, isSpace, 
 // store: one pass, no node per element, each row's byte span kept for the splice writer. Values are read as the
 // file writes them (§18.3.1.4 c, §18.18.11 ST_CellType); formulas as written, with their ids.
 
+// <c> elements one row may hold: twice the grid's width, as the store's row scratch tolerates repeated columns
+// (last wins). A row past it is malformed, read as one uninterrupted stretch it would hold the thread.
+const MAX_ROW_CELLS = SHEET_MAX_COLS * 2
+
 const T_NUMBER = 0
 const T_SHARED = 1
 const T_BOOLEAN = 2
@@ -162,6 +166,8 @@ export class SheetDataReader {
 	private previousRow = -1
 	// Cells taken from the lease so far.
 	private taken = 0
+	// <c> elements read so far: a step's bound, as the builder's own count drops when a row's repeated columns fold.
+	private cellsRead = 0
 
 	// `start`: just after the <sheetData> start tag.
 	constructor(scanner: Scanner, start: number, context: SheetDataContext) {
@@ -188,9 +194,9 @@ export class SheetDataReader {
 	private read(rows: number, cells: number): boolean {
 		const bytes = this.bytes
 		const scanner = this.scanner
-		const until = this.builder.totalCells + cells
+		const until = this.cellsRead + cells
 
-		for (let read = 0; read < rows && this.builder.totalCells < until; read++) {
+		for (let read = 0; read < rows && this.cellsRead < until; read++) {
 			const lt = bytes.indexOf(LT, this.at)
 
 			if (lt < 0) scanner.fail("sheetData is not closed", this.at)
@@ -324,6 +330,7 @@ export class SheetDataReader {
 
 		let at = tagEnd
 		let lastCol = -1
+		let cells = 0
 
 		if (!empty) {
 			for (;;) {
@@ -363,6 +370,8 @@ export class SheetDataReader {
 						: nameEnd(bytes, lt + 1)
 
 				if ((next === 99 && cellName === lt + 2) || localIs(bytes, lt + 1, cellName, "c")) {
+					if (++cells > MAX_ROW_CELLS) scanner.fail("A row holds more cells than the grid has columns", start)
+
 					at = this.cell(lt, cellName, lastCol)
 					lastCol = this.lastCol
 
@@ -389,6 +398,7 @@ export class SheetDataReader {
 		builder.endRow(row, start, at, flags, height, style)
 		this.previousRow = row
 		this.at = at
+		this.cellsRead += cells
 	}
 
 	// Set by cell(): the column it read, and its reference's row (-1 for none).

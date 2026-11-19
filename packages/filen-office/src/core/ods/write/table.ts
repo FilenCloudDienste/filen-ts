@@ -12,6 +12,7 @@ import { annotationMarkup, NO_FEATURES, type SheetFeatures } from "./features"
 import { tagAttribute, tagAttributes } from "./stream"
 import { DEFAULT_ROW_PT } from "../read/sheet"
 import { patchAttributes, type Shifter } from "../unheld"
+import { OdsSheet } from "../workbook"
 
 // One table:table as the writer emits it. A source row element whose rows an edit left alone is copied as its bytes;
 // a repeated one an edit cut into is split into copies of itself around what changed; a changed row is written
@@ -356,6 +357,12 @@ export class TableWriter {
 	private nextTarget = 0
 	// Source rows gone through.
 	private sourceRow = 0
+
+	// The source rows its row elements held so far.
+	get sourceRowsSeen(): number {
+		return this.sourceRow
+	}
+
 	// The source's columns (table:table-column elements and their wrappers) as written, for reading rows back.
 	columnsMarkup: Uint8Array = new Uint8Array(0)
 	// How many columns the source declares (its table:table-column repeats).
@@ -406,12 +413,13 @@ export class TableWriter {
 		this.view = view
 		this.source = source
 
-		const axes = model as { rowAxis?: SourceAxis; colAxis?: SourceAxis }
+		// A model with a source table is an OdsSheet (sourceTableOf).
+		const sheet = source === null || !(model instanceof OdsSheet) ? null : model
 
-		this.rowAxis = source === null ? SourceAxis.identity(0) : (axes.rowAxis ?? SourceAxis.identity(SHEET_MAX_ROWS))
-		this.colAxis = source === null ? SourceAxis.identity(0) : (axes.colAxis ?? SourceAxis.identity(SHEET_MAX_COLS))
+		this.rowAxis = sheet === null ? SourceAxis.identity(0) : sheet.rowAxis
+		this.colAxis = sheet === null ? SourceAxis.identity(0) : sheet.colAxis
 		this.columnsMoved = !this.colAxis.identity
-		this.movedFrom = (model as { movedFrom?: number }).movedFrom ?? SHEET_MAX_ROWS
+		this.movedFrom = model instanceof OdsSheet ? model.movedFrom : SHEET_MAX_ROWS
 	}
 
 	// --- Columns ---
@@ -558,25 +566,21 @@ export class TableWriter {
 
 	// Those of respanned() in [from, to).
 	private respannedIn(from: number, to: number): number[] {
-		const rows = this.respanned()
+		return sortedIn(this.respanned(), from, to)
+	}
 
-		if (rows.length === 0 || to <= from) return []
+	// The rows of features, ascending, for the features they were sorted from (sorted once, not per row element).
+	private featureRowsOf: SheetFeatures | null = null
+	private featureRowsSorted: number[] = []
 
-		let low = 0
-		let high = rows.length
-
-		while (low < high) {
-			const mid = (low + high) >> 1
-
-			if ((rows[mid] ?? 0) < from) low = mid + 1
-			else high = mid
+	// Those of features.rows in [from, to).
+	private featureRowsIn(from: number, to: number): number[] {
+		if (this.featureRowsOf !== this.features) {
+			this.featureRowsOf = this.features
+			this.featureRowsSorted = [...this.features.rows].sort((a, b) => a - b)
 		}
 
-		const out: number[] = []
-
-		for (let k = low; k < rows.length && (rows[k] ?? 0) < to; k++) out.push(rows[k] ?? 0)
-
-		return out
+		return sortedIn(this.featureRowsSorted, from, to)
 	}
 
 	private sourceProps(tag: Uint8Array, outline: number): SourceRowProps {
@@ -736,7 +740,7 @@ export class TableWriter {
 			const respanned = this.respannedIn(target, stop)
 			const special = new Set<number>([...this.view.storeRowsIn(target, stop), ...this.view.markedIn(target, stop), ...respanned])
 
-			for (const row of this.features.rows) if (row >= target && row < stop) special.add(row)
+			for (const row of this.featureRowsIn(target, stop)) special.add(row)
 
 			if (this.movedFrom > target && this.movedFrom < stop) special.add(this.movedFrom)
 
@@ -1979,4 +1983,25 @@ function sourceFormulaOf(row: Uint8Array, cell: SourceCell, model: CellValue, re
 		return undefined
 
 	return tagAttribute(row.subarray(cell.start, cell.openEnd), "table:formula")
+}
+
+// Those of ascending `rows` in [from, to), found by binary search.
+function sortedIn(rows: readonly number[], from: number, to: number): number[] {
+	if (rows.length === 0 || to <= from) return []
+
+	let low = 0
+	let high = rows.length
+
+	while (low < high) {
+		const mid = (low + high) >> 1
+
+		if ((rows[mid] ?? 0) < from) low = mid + 1
+		else high = mid
+	}
+
+	const out: number[] = []
+
+	for (let k = low; k < rows.length && (rows[k] ?? 0) < to; k++) out.push(rows[k] ?? 0)
+
+	return out
 }

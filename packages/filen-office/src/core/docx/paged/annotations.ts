@@ -2,6 +2,7 @@ import type { Mark, Node } from "prosemirror-model"
 import { SOURCE_INTS, SourceInt, type PageDisplayList, type RevisionAuthors } from "../layout/index"
 import { modelAuthors } from "../layout/styles"
 import { equationChangeOf, storyHasTrackedEquations } from "../math/edit"
+import { MAX_COMMENT_CHARS, MAX_PREVIEW, MAX_RECTS, dateOf, preview } from "../model/comments"
 import { RevisionFlag } from "../model/index"
 import { reviewIndexWanted, storyReviewIndex } from "../review/accept"
 import { docxComments, type DocxComment as StoreComment, type DocxComments } from "../review/comments"
@@ -83,12 +84,8 @@ export interface EditAnnotationData {
 	readonly rectFloats: Float32Array
 }
 
-const MAX_PREVIEW = 160
 // Text read for a preview (a long insertion is not read whole).
 const PREVIEW_READ = 4 * MAX_PREVIEW
-const MAX_COMMENT_CHARS = 20_000
-// Boxes kept per comment or change.
-const MAX_RECTS = 512
 // Numbers per box while gathering: page, x, y, width, height.
 const BOX = 5
 // Past this many comments in a story, those outside the page are passed over before boxing.
@@ -155,6 +152,16 @@ interface KeptBoxes {
 	readonly boxes: readonly number[]
 }
 
+// The boxes of a page's changes by their ranges' places from the page's first position, kept while the page is
+// laid out as before: those of the last read that boxed any, and those of the read before (moved over when used;
+// the rest dropped).
+interface KeptChangeBoxes {
+	readonly list: PageDisplayList
+	read: number
+	current: Map<string, readonly number[]>
+	previous: Map<string, readonly number[]>
+}
+
 interface StoryPage {
 	readonly list: PageDisplayList | undefined
 	readonly doc: Node
@@ -162,16 +169,6 @@ interface StoryPage {
 	readonly changes: readonly { readonly key: string; readonly change: Change; readonly boxes: readonly number[] }[]
 }
 const NO_STAMP: Stamp = { author: undefined, date: undefined }
-
-function preview(text: string): string {
-	const flat = text.replace(/\s+/g, " ").trim()
-
-	return flat.length > MAX_PREVIEW ? `${flat.slice(0, MAX_PREVIEW - 1)}…` : flat
-}
-
-function dateOf(value: string | undefined): string {
-	return value !== undefined && value.length <= 40 && !Number.isNaN(Date.parse(value)) ? value : ""
-}
 
 // A comment's plain text (paragraphs on line feeds, line breaks U+2028) as paragraphs of one run each.
 function plainParagraphs(text: string): EditAnnotationRun[][] {
@@ -265,8 +262,8 @@ export class EditAnnotations {
 	private readonly storyPages = new WeakMap<PagedGeometry, Map<number, StoryPage>>()
 	// What a story holds, kept while the story is unchanged (a relayout of its page boxes it again only).
 	private readonly storyReviews = new WeakMap<Node, StoryReview>()
-	// Boxes of a change's few ranges per page, kept while the page and their places are the same.
-	private readonly storyBoxes = new WeakMap<PagedGeometry, Map<number, KeptBoxes>>()
+	// Boxes of each change's few ranges per page, kept while the page and their places are the same.
+	private readonly storyBoxes = new WeakMap<PagedGeometry, Map<number, KeptChangeBoxes>>()
 	// Boxes of the comments of the body (or the story being edited) per page (see commentBoxesOf).
 	private readonly commentPages = new WeakMap<PagedGeometry, Map<number, KeptBoxes>>()
 	// The store's comments in order, kept while it is unchanged.
@@ -277,6 +274,7 @@ export class EditAnnotations {
 	}
 	private readonly formats = new WeakMap<Node, { readonly style: string | undefined; readonly format: readonly EditFormatItem[] }>()
 	private global = 0
+	private reads = 0
 	private queued = false
 	private disposed = false
 
@@ -309,6 +307,8 @@ export class EditAnnotations {
 
 	// The annotations now, with boxes on pages `pages` (the ones mounted) only.
 	read(pages: readonly number[]): EditAnnotationData {
+		this.reads++
+
 		const located = this.located(pages)
 		const version = this.store.version
 
@@ -686,10 +686,10 @@ export class EditAnnotations {
 		if (ranges.length === 0) return
 
 		// A change of few ranges is boxed without finding first what of the story the page shows (that reads
-		// every line of the page as boxing does), and its boxes on a page are kept while neither the page nor
-		// its places change.
+		// every line of the page as boxing does), and its boxes on a page are kept while the page is laid out as
+		// before. They are kept by the ranges' places from the page's first position: typing on an earlier page
+		// moves the page's places without laying it out again, which keeps its boxes and changes no other key.
 		const small = ranges.length <= FILTERED
-		const key = small ? ranges.map(range => `${String(range.from)}:${String(range.to)}:${String(range.owner)}`).join(",") : ""
 		let kept = small ? this.storyBoxes.get(geometry) : undefined
 
 		if (small && kept === undefined) {
@@ -698,18 +698,30 @@ export class EditAnnotations {
 		}
 
 		for (const page of pages) {
-			const list = this.editor.page(page)
-			const cached = kept?.get(page)
-			let found: readonly number[]
+			const list = kept === undefined ? undefined : this.editor.page(page)
+			const start = list === undefined ? undefined : geometry.pageRange(page)?.from
 
-			if (list !== undefined && cached?.list === list && cached.key === key) {
-				found = cached.boxes
-			} else {
-				found = this.pageBoxes(geometry, ranges, page, small)
+			if (kept === undefined || list === undefined || start === undefined) {
+				addBoxes(this.pageBoxes(geometry, ranges, page, small), out)
 
-				if (list !== undefined) kept?.set(page, { list, key, boxes: found })
+				continue
 			}
 
+			let slot = kept.get(page)
+
+			if (slot?.list !== list) {
+				slot = { list, read: this.reads, current: new Map(), previous: new Map() }
+				kept.set(page, slot)
+			} else if (slot.read !== this.reads) {
+				slot.previous = slot.current
+				slot.current = new Map()
+				slot.read = this.reads
+			}
+
+			const key = ranges.map(range => `${String(range.from - start)}:${String(range.to - start)}:${String(range.owner)}`).join(",")
+			const found = slot.current.get(key) ?? slot.previous.get(key) ?? this.pageBoxes(geometry, ranges, page, small)
+
+			slot.current.set(key, found)
 			addBoxes(found, out)
 		}
 	}
@@ -974,8 +986,6 @@ function place(change: Change, doc: Node, entry: ReviewEntry): void {
 	else change.points.push(block.start)
 }
 
-// Each comment's range in a story (its start to its end marker; its reference where it has no range), sorted
-// by `from`, owned by the comment's place in `order`.
 // Boxes found (each its owner, then page, x, y, width, height) added to their owners' lists.
 function addBoxes(found: readonly number[], out: number[][]): void {
 	for (let k = 0; k + BOX < found.length; k += BOX + 1) {
@@ -985,6 +995,8 @@ function addBoxes(found: readonly number[], out: number[][]): void {
 	}
 }
 
+// Each comment's range in a story (its start to its end marker; its reference where it has no range), sorted
+// by `from`, owned by the comment's place in `order`.
 function commentRanges(index: ReviewIndex, order: ReadonlyMap<string, number>): Range[] {
 	if (index.commentCount === 0) return []
 

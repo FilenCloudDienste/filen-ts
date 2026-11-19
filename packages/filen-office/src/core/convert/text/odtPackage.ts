@@ -1,6 +1,7 @@
 import { PARAGRAPH_MARK_PROPERTIES, PARAGRAPH_PROPERTIES, RUN_PROPERTIES } from "../../docx/write/order.generated"
-import { decodeUtf8, encodeUtf8, escapeAttribute, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
+import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
 import type { LossyCounts } from "./report"
+import { relsName, STORY } from "./shared"
 
 // The ODT translation as a standalone .docx. The translation is the viewer's and the ODT writer's (which reads it back
 // against the source), so it keeps what serves them; written out as a file it is made to stand on its own:
@@ -32,7 +33,6 @@ import type { LossyCounts } from "./report"
 // - each header, footer, notes and comments part with the relationships it names (the translator records them all on
 //   the main document part).
 
-const STORY = /^word\/(?:document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/u
 const PROPERTY_PARTS = new Set(["word/styles.xml", "word/numbering.xml"])
 const SETTINGS = "word/settings.xml"
 const DOCUMENT_RELS = "word/_rels/document.xml.rels"
@@ -225,7 +225,7 @@ function rewrite(walk: Walk, node: number): string | undefined {
 		const text = document.textContent(node)
 		const to = renamed(text, state.bookmarks)
 
-		if (to !== text) return `${attributesMarkup(document, node, changes)}${escapeTextContent(to)}</${document.name(node)}>`
+		if (to !== text) return `${attributesMarkup(document, node, changes)}${escapeText(to)}</${document.name(node)}>`
 	}
 
 	// Property children in schema order.
@@ -302,7 +302,7 @@ function rewrite(walk: Walk, node: number): string | undefined {
 			flush()
 
 			const link = child.node
-			const linkOpen = markup.slice(0, markup.indexOf(">") + 1)
+			const linkOpen = markup.slice(0, startTagEnd(markup) + 1)
 			const inner = markup.slice(linkOpen.length, markup.length - `</${document.name(link)}>`.length)
 
 			out += linkOpen.endsWith("/>") ? linkOpen : `${linkOpen}${open()}${inner}${close}</${document.name(link)}>`
@@ -336,12 +336,24 @@ function contentOf(walk: Walk, node: number): string {
 	return out
 }
 
-function isHyperlink(document: XmlDocument, node: number): boolean {
-	return document.kind(node) === NodeKind.Element && document.prefix(node) === "w" && document.localName(node) === "hyperlink"
+// Where an element's start tag ends: its first ">" outside an attribute value ("…" or '…', which may hold ">").
+function startTagEnd(markup: string): number {
+	let quote = ""
+
+	for (let at = 0; at < markup.length; at++) {
+		const char = markup[at]
+
+		if (quote !== "") {
+			if (char === quote) quote = ""
+		} else if (char === '"' || char === "'") quote = char
+		else if (char === ">") return at
+	}
+
+	return -1
 }
 
-function escapeTextContent(text: string): string {
-	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;")
+function isHyperlink(document: XmlDocument, node: number): boolean {
+	return document.kind(node) === NodeKind.Element && document.prefix(node) === "w" && document.localName(node) === "hyperlink"
 }
 
 function rewritePart(walk: Walk): Uint8Array | undefined {
@@ -434,12 +446,6 @@ function relationshipsOf(bytes: Uint8Array | undefined): Relationship[] {
 	return out
 }
 
-function relsName(part: string): string {
-	const slash = part.lastIndexOf("/")
-
-	return `${part.slice(0, slash)}/_rels/${part.slice(slash + 1)}.rels`
-}
-
 const FLOW_WITH_TEXT = /<w:compatSetting w:name="flow-with-text" w:uri="[^"]*" w:val="false"\/>/u
 const ANCHOR = encodeUtf8("<wp:anchor")
 const OBJECT_LINES = /<w:compatSetting w:name="object-line-height" w:uri="[^"]*" w:val="objects"\/>/u
@@ -449,6 +455,7 @@ const LINE_GAP = /<w:compatSetting w:name="line-gap" w:uri="[^"]*" w:val="[a-z]+
 // ODF's hyphenation character counts; WordprocessingML has no setting for them.
 const HYPHENATION = /<w:compatSetting w:name="hyphenation-chars" w:uri="[^"]*" w:val="[\d ]+"\/>/u
 const PADDING = /<w:compatSetting w:name="paragraph-padding" w:uri="[^"]*" w:val="borders"\/>/u
+const PARAGRAPH_BORDERS = encodeUtf8("<w:pBdr>")
 
 function includes(bytes: Uint8Array, needle: Uint8Array): boolean {
 	for (let at = bytes.indexOf(needle[0] ?? 0); at >= 0; at = bytes.indexOf(needle[0] ?? 0, at + 1)) {
@@ -466,6 +473,8 @@ function includes(bytes: Uint8Array, needle: Uint8Array): boolean {
 // setting where Word lays them out otherwise: one at the start or end (inside the indents, not outside), or one that
 // draws nothing with spacing (padding beside no line).
 function padded(bytes: Uint8Array): boolean {
+	if (!includes(bytes, PARAGRAPH_BORDERS)) return false
+
 	for (const match of decodeUtf8(bytes).matchAll(/<w:pBdr>(.*?)<\/w:pBdr>/gsu)) {
 		const borders = match[1] ?? ""
 

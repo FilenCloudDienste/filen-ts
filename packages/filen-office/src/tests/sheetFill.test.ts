@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { XlsxDocument } from "../core/xlsx/edit/document"
 import { entryCells, fillPlan } from "../core/sheet/fill/fill"
 import {
 	CellFlag,
@@ -12,6 +13,7 @@ import { createGridAxis } from "../react/sheet/axis"
 import { fillDownTo, fillHandleShown, fillLeft, fillTarget } from "../react/sheet/fill"
 import { firstTile, savedBytes, tileEntry } from "./sheetSessionFixtures"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
+import { relationship, TYPES } from "./xlsxRefsFixtures"
 
 function fill(
 	session: SheetSessionApi,
@@ -75,6 +77,40 @@ describe("fill.copy", () => {
 		expect(c3?.text).toBe("10")
 		expect(d3?.text).toBe(d1?.text)
 		expect(d3?.style).toBe(d1?.style)
+	})
+
+	it("reads each source formula once and a source's text only for a table header target", async () => {
+		const table =
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="F1:G3"><autoFilter ref="F1:G3"/><tableColumns count="2"><tableColumn id="1" name="K"/><tableColumn id="2" name="V"/></tableColumns></table>'
+		const { session } = await openKeys({
+			sheets: [
+				{
+					name: "One",
+					body:
+						'<sheetData><row r="1"><c r="A1"><v>5</v></c><c r="B1"><f>A1*2</f><v>10</v></c><c r="C1"><f>A1+1</f><v>6</v></c>' +
+						'<c r="F1" t="inlineStr"><is><t>K</t></is></c><c r="G1" t="inlineStr"><is><t>V</t></is></c></row></sheetData>' +
+						'<tableParts count="1"><tablePart r:id="rId1"/></tableParts>',
+					rels: relationship("rId1", "table", "../tables/table1.xml")
+				}
+			],
+			parts: { "xl/tables/table1.xml": { text: table, type: TYPES.table } }
+		})
+		const formulaText = vi.spyOn(XlsxDocument.prototype, "formulaText")
+		const cellView = vi.spyOn(XlsxDocument.prototype, "cellView")
+
+		try {
+			expect((await fill(session, { startRow: 0, startCol: 1, endRow: 2000, endCol: 2 }, "down")).ok).toBe(true)
+			// The sources' row, once each for the engine and the fill: the cells written are read again as they recalculate.
+			expect(formulaText.mock.calls.filter(call => call[2] === 0).length).toBeLessThan(10)
+			expect(cellView.mock.calls.filter(call => call[1] === 0).length).toBe(0)
+		} finally {
+			formulaText.mockRestore()
+			cellView.mockRestore()
+		}
+
+		expect((await cell(session, 15, 1))?.input).toBe("=A16*2")
+		expect((await cell(session, 2, 2))?.input).toBe("=A3+1")
+		session.close()
 	})
 
 	it("fills right from the first column", async () => {

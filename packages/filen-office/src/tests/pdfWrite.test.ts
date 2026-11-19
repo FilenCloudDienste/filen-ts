@@ -289,6 +289,21 @@ describe("PDF writer", () => {
 		expect(text).toMatch(/\/SMask \d+ 0 R/)
 	})
 
+	it("refuses an image whose header declares more pixels than the budget before decoding it, but passes a JPEG through", async () => {
+		const decoder = new TestDecoder()
+		const writer = await PdfWriter.create({ deterministic: true, deflate: null, decoder, maxImagePixels: 100 })
+		const gif = Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0xe8, 0x03, 0xe8, 0x03, 0, 0, 0, 0x3b])
+
+		await expect(
+			writer.image({ data: encodePng({ width: 20, height: 20, colorType: 6, pixel: () => [1, 2, 3, 128] }) })
+		).rejects.toMatchObject({
+			reason: "imageTooLarge"
+		})
+		await expect(writer.image({ data: gif })).rejects.toMatchObject({ reason: "imageTooLarge" })
+		await expect(writer.image({ data: JPEG_32x24 })).resolves.toMatchObject({ width: 32, height: 24 })
+		expect(decoder.calls).toBe(0)
+	})
+
 	it("keeps one transparent palette entry as a colour key and decodes partial palette alpha", async () => {
 		const decoder: PdfImageDecoder = { decode: () => Promise.reject(new PdfWriteError("imageUnsupported", "test")) }
 		const writer = await PdfWriter.create({ deterministic: true, deflate: null, decoder })

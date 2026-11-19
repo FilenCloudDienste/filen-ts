@@ -6,6 +6,7 @@ import { Item, RevisionView, type Story, type StoryPart } from "../model/index"
 import { shownFieldText } from "../layout/fields"
 import { Region, SOURCE_INTS, SourceInt, type PageDisplayList } from "../layout/index"
 import { Ns } from "../model/namespaces"
+import { MAX_STYLE_DEPTH, canonicalStyleName, headingLevelOfName } from "../styles/styles"
 import type { PagedEditor } from "./editor"
 
 // Questions an app asks about the whole document now and then (a word count, the headings to navigate by):
@@ -137,43 +138,35 @@ function hiddenTypes(view: RevisionView): readonly MarkType[] {
 	return view === RevisionView.Original ? [marks.insertion, marks.move_to] : [marks.deletion, marks.move_from]
 }
 
-function countInline(counter: Counter, node: Node): void {
+// The text inline node `node` shows ("" for none; a line break is no character either).
+function inlineText(node: Node): string {
 	switch (node.type) {
 		case nodes.text:
-			counter.text(node.text ?? "")
-
-			break
+			return node.text ?? ""
 		case nodes.tab:
-			counter.text("\t")
-
-			break
-		case nodes.break:
-			counter.gap()
-
-			break
+			return "\t"
 		case nodes.hyphen:
-			if (node.attrs["soft"] !== true) counter.text("‑")
-
-			break
+			return node.attrs["soft"] === true ? "" : "‑"
 		case nodes.symbol: {
 			const char = node.attrs["char"] as number
 
 			// A w:sym without a valid w:char shows nothing (as layout draws it).
-			if (char > 0 && char <= 0x10ffff) counter.text(String.fromCodePoint(char))
-
-			break
+			return char > 0 && char <= 0x10ffff ? String.fromCodePoint(char) : ""
 		}
 		// What it shows: a MACROBUTTON without a result its display text.
 		case nodes.field:
-			counter.text(shownFieldText(node.attrs["result"] as string, node.attrs["instruction"] as string))
-
-			break
+			return shownFieldText(node.attrs["result"] as string, node.attrs["instruction"] as string)
 		case nodes.run_object:
 		case nodes.opaque_inline:
-			counter.text(node.attrs["text"] as string)
-
-			break
+			return node.attrs["text"] as string
+		default:
+			return ""
 	}
+}
+
+function countInline(counter: Counter, node: Node): void {
+	if (node.type === nodes.break) counter.gap()
+	else counter.text(inlineText(node))
 }
 
 // The paragraphs inside source item `item` (a block, or a story's container) as the file has them.
@@ -308,13 +301,18 @@ export async function docxWordCount(
 	counter.add(await countSession(editor.body.session, view, slicing))
 
 	if (options.notesAndTextBoxes === true) {
+		const edits = editor.edits
 		const open = new Map<Story, DocxEditorSession>()
 
 		for (const session of editor.sessions) open.set(session.story.story, session)
 
-		for (const story of editor.edits.model.stories) {
+		for (const story of edits.model.stories) {
 			if (story === undefined || !NOTE_KINDS.has(story.kind) || (story.noteType !== undefined && story.noteType !== "normal"))
 				continue
+
+			// Stories of overlay parts lay out edited blocks of the document's own (counted there), except text
+			// boxes no source story stands for.
+			if (story.index >= edits.storyCount && !edits.addedStory(story.index) && !edits.overlayTextbox(story.index)) continue
 
 			const session = open.get(story)
 
@@ -498,9 +496,6 @@ export interface DocxOutline {
 
 // Characters of a heading an outline shows.
 const MAX_HEADING = 255
-const HEADING_STYLE = /^heading ([1-9])$/
-// Styles followed up a basedOn chain (a cycle stops there).
-const MAX_STYLE_DEPTH = 16
 const OUTLINES: readonly WeakMap<Node, DocxOutline>[] = [new WeakMap(), new WeakMap(), new WeakMap()]
 
 // The body's headings (paragraphs with an outline level, from their style or direct formatting), in document
@@ -527,10 +522,11 @@ export function docxOutline(editor: PagedEditor): DocxOutline {
 
 		for (let depth = 0; id !== null && depth < MAX_STYLE_DEPTH; depth++) {
 			const style = styles.byId(id)
-			const name = style?.canonicalName ?? newStyles.get(id)?.toLowerCase()
-			const heading = name === undefined ? null : HEADING_STYLE.exec(name)
+			const added = newStyles.get(id)
+			const name = style?.canonicalName ?? (added === undefined ? undefined : canonicalStyleName(added))
+			const heading = name === undefined ? undefined : headingLevelOfName(name)
 
-			if (heading !== null) return Number(heading[1]) - 1
+			if (heading !== undefined) return heading - 1
 
 			id = style?.basedOn ?? null
 		}
@@ -569,11 +565,13 @@ export function docxOutline(editor: PagedEditor): DocxOutline {
 		if (level !== undefined && level < 9) {
 			let text = ""
 
+			// A tab or line break reads as a space.
 			node.forEach(child => {
-				if (child.isText && !hidden.some(type => type.isInSet(child.marks) !== undefined)) text += child.text ?? ""
+				if (!hidden.some(type => type.isInSet(child.marks) !== undefined))
+					text += child.type === nodes.break ? " " : inlineText(child)
 			})
 
-			text = text.trim()
+			text = text.replace(/\s+/g, " ").trim()
 
 			if (text !== "") entries.push(Object.freeze({ level, text: text.slice(0, MAX_HEADING), pos }))
 		}

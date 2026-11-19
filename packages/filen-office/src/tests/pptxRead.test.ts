@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { openPptx, type PptxParts } from "../core/pptx/package"
 import type { Deck, ShapeNode, SlideNode } from "../core/presentation/model"
+import { TIMING_XML } from "./animFixtures"
 import { body, buildPptx, para, sp, xfrm, type FixtureOptions } from "./pptxFixtures"
 
 // The PresentationML reader into the shared model: every level stores what its source wrote, nothing resolved.
@@ -575,7 +576,8 @@ describe("pptx presentation part", () => {
 			showNarration: true,
 			showAnimation: true,
 			useTimings: false,
-			range: { kind: "range", start: 2, end: 3 },
+			// The file's range ends past the deck's two slides: it ends at the last.
+			range: { kind: "range", start: 2, end: 2 },
 			penColor: { kind: "preset", name: "red" },
 			restartMs: 60000
 		})
@@ -588,4 +590,74 @@ describe("pptx presentation part", () => {
 			{ id: "{AAA}", name: "Bo", initials: "B", userId: "bo@x", providerId: "AD" }
 		])
 	})
+})
+
+// A slide whose notes part cannot be read is refused whole, on every call: it never stays parsed with a notes ref that
+// has no node, nor holds its node without its share of the deck's budgets.
+describe("a slide whose notes cannot be read", () => {
+	const NOTES_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"
+
+	async function refusedTwice(options: FixtureOptions): Promise<void> {
+		const result = await openPptx(bytesSource(buildPptx(options)))
+
+		if (result.kind !== "opened") throw new Error(result.reason)
+
+		const ref = result.deck.slides[0] ?? fail("slide")
+		const before = result.parts.tally.characters
+
+		for (let attempt = 0; attempt < 2; attempt++) {
+			await expect(result.parts.slide(ref)).rejects.toMatchObject({ reason: "malformed" })
+			expect(result.deck.nodes.has(ref)).toBe(false)
+			expect(result.parts.tally.characters).toBe(before)
+		}
+	}
+
+	it("is refused as malformed when its notesSlide part is damaged XML", async () => {
+		await refusedTwice({
+			slides: [
+				{
+					shapes: sp(2, "TextBox 1", undefined, xfrm(0, 0, 100, 100), body(para("Kept"))),
+					rels: [["rId91", "notesSlide", "../notesSlides/bad.xml"]]
+				}
+			],
+			parts: {
+				"ppt/notesSlides/bad.xml": {
+					data: '<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld>',
+					type: NOTES_TYPE
+				}
+			}
+		})
+	})
+
+	it("is refused when it relates itself as its notesSlide", async () => {
+		await refusedTwice({
+			slides: [
+				{
+					shapes: sp(2, "TextBox 1", undefined, xfrm(0, 0, 100, 100), body(para("Kept"))),
+					rels: [["rId91", "notesSlide", "slide1.xml"]]
+				}
+			]
+		})
+	})
+})
+
+// A damaged character reference in an animation's attribute name flags the part as malformed (the deck view-only), as
+// the same damage in shape text does; the slide still opens.
+it("opens a slide whose p:attrName holds an invalid character reference, flagged malformed", async () => {
+	const timing = TIMING_XML.replace("<p:attrName>ppt_x</p:attrName>", "<p:attrName>ppt&#0;x</p:attrName>")
+
+	if (timing === TIMING_XML) throw new Error("fixture changed")
+
+	const { deck, slides } = await open({
+		slides: [
+			{
+				shapes: [2, 3, 4].map(id => sp(id, `Shape ${String(id)}`, undefined, xfrm(0, 0, 100, 100), body(para("A")))).join(""),
+				after: timing
+			}
+		]
+	})
+
+	expect(slides).toHaveLength(1)
+	expect(slides[0]?.timing).toBeDefined()
+	expect(deck.gate).toContain("malformed")
 })

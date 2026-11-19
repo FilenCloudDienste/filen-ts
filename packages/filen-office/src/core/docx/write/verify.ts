@@ -24,6 +24,7 @@ import {
 	encodeUtf8,
 	parseXml,
 	parseXmlSliced,
+	type Namespaces,
 	type XmlDocument
 } from "../../xml/index"
 import { runSliced } from "../../slicing"
@@ -42,13 +43,14 @@ import { parseStyles, type DocxStyles } from "../styles/index"
 import { equalBytes, sameBytes } from "./bytes"
 import { canonicalElement, canonicalFragment } from "./canonical"
 import { DOCX_CHECKS, checkDone, checkPart, type CheckInput, type DocxCheck, type DocxFact } from "./checks/index"
+import { REVISION_ELEMENTS } from "./checks/revisions"
 import { DocxVerifyError, type VerifyFailure } from "./failure"
 import { isInsertionPoint } from "./newStory"
 import { writtenJustification } from "./paragraph"
 
 export { DocxVerifyError, type VerifyFailure } from "./failure"
 import type { DocxChanges, StoryChange } from "./save"
-import { cellWithin, inCell, originalBlock, sectionWritten, type StoryOutput } from "./story"
+import { cellWithin, inCell, originalBlock, sectionWritten, type StoryOutput, type WrittenContainer } from "./story"
 import { writtenLinkTarget } from "../edit/commands/insert"
 
 // Gate 2: the written file is checked before it may be uploaded, in two halves.
@@ -69,28 +71,11 @@ const R_URIS = [
 	"http://purl.oclc.org/ooxml/officeDocument/relationships"
 ]
 const O_URI = "urn:schemas-microsoft-com:office:office"
-// Elements whose w:id must be unique, per kind.
-const REVISION_ELEMENTS = new Set([
-	"ins",
-	"del",
-	"moveFrom",
-	"moveTo",
-	"rPrChange",
-	"pPrChange",
-	"sectPrChange",
-	"tblPrChange",
-	"trPrChange",
-	"tcPrChange",
-	"tblGridChange",
-	"tblPrExChange",
-	"numberingChange",
-	"cellIns",
-	"cellDel",
-	"cellMerge",
-	"moveFromRangeStart",
-	"moveToRangeStart"
-])
 const PLACEHOLDER = encodeUtf8("<_/>")
+// Copied containers' bytes parsed at a time, each in a wrapper of its own (checkContainers).
+const CONTAINER_BATCH_BYTES = 256 * 1024
+const WRAPPER_OPEN = encodeUtf8("<_>")
+const WRAPPER_CLOSE = encodeUtf8("</_>")
 const STYLES_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
 
 // Whether a part typed `type` is XML (a picture is not, an SVG picture included: it is checked as media).
@@ -764,10 +749,11 @@ function storyRange(name: string, part: StoryPart, story: StoryChange, inPackage
 
 	if (range === undefined) return fail("content", `${name}: a new story has no place in its part`)
 
-	// Inserted between elements, or the root of a part the save creates (a header).
+	// Inserted between elements, at the end of a self-closing root (opened for it, a part holding no story yet), or
+	// the root of a part the save creates (a header).
 	const placed =
 		range.from === range.to
-			? isInsertionPoint(document, range.from)
+			? isInsertionPoint(document, range.from) || (document.isSelfClosing(root) && range.from === document.end(root))
 			: !inPackage && range.from === document.start(root) && range.to === document.end(root)
 
 	if (!placed) fail("content", `${name}: a new story is not between elements of its part`)
@@ -780,6 +766,7 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 	const { original, context, changes } = input
 	const clock = slicing === undefined ? undefined : sliceClock(slicing)
 	const checks = input.checks ?? DOCX_CHECKS
+	const newMarkupChecks = checks.filter(check => check.newMarkupOnly === true)
 	const scope: FactScope =
 		checks === DOCX_CHECKS ? { hooks: FACT_HOOKS, cached: true, clock } : { hooks: factHooks(checks), cached: false, clock }
 	const model = context.model
@@ -990,8 +977,7 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 				const { from, to } = storyRange(name, part, story, true)
 
 				await replacedFacts(part.document, from, to, story.output.trusted, after, scope)
-
-				checkContainers(part, root, story.output)
+				await checkContainers(part, root, story.output, clock)
 			}
 
 			for (const cut of cuts) await replacedFacts(part.document, cut.from, cut.to, [], after, scope)
@@ -1052,6 +1038,13 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 			}
 
 			await checkPart(checks, checkInput, { name, part, document, skeleton: false })
+
+			// A story part with namespaces declared below its root: what judges only the save's own markup reads it
+			// in the skeleton, as on a flat part (the checks above left the source's copies alone).
+			if (part !== undefined && skeletonDocument !== undefined && original.has(name)) {
+				await checkContainersWritten(name, part, stories ?? [], skeletonDocument, clock)
+				await checkPart(newMarkupChecks, checkInput, { name, part, document: skeletonDocument, skeleton: true })
+			}
 
 			const type = types.typeOf(name)
 
@@ -1141,17 +1134,160 @@ function numberingDuplicates(document: XmlDocument): Set<string> {
 	return duplicates
 }
 
-// A container written as a copy keeps its source's properties, without the children carrying ids.
-function checkContainers(part: StoryPart, root: string | undefined, output: StoryOutput): void {
+// A container written as a copy keeps its source's properties, without the children carrying ids. Containers
+// are parsed a batch at a time under the part's root, each in a wrapper of its own (a flat part: every
+// declaration is the root's, where the copy and its source are alike).
+async function checkContainers(
+	part: StoryPart,
+	root: string | undefined,
+	output: StoryOutput,
+	clock: SliceClock | undefined
+): Promise<void> {
+	// One with no bytes and no properties compares nothing with nothing.
+	const containers = output.containers.filter(container => container.from < container.to || container.properties.length > 0)
+
+	if (containers.length === 0) return
+
 	const { open, close } = rootTags(part.document, root)
+	const source = part.document
+	let index = 0
 
-	for (const container of output.containers) {
-		const expected = container.properties.map(node => canonicalElement(part.document, node, false, new Set(container.strip))).join("\n")
-		const document = parseChecked(part.name, join([open, output.bytes.subarray(container.from, container.to), close]))
-		const actual = canonicalFragment(document, document.documentElement())
+	while (index < containers.length) {
+		const batch: WrittenContainer[] = []
+		const chunks: Uint8Array[] = [open]
+		let size = 0
 
-		if (actual !== expected) fail("content", `A copied container of ${part.name} lost its properties`)
+		while (index < containers.length && (batch.length === 0 || size < CONTAINER_BATCH_BYTES)) {
+			const container = containers[index++] as WrittenContainer
+			const bytes = output.bytes.subarray(container.from, container.to)
+
+			chunks.push(WRAPPER_OPEN, bytes, WRAPPER_CLOSE)
+			size += bytes.length
+			batch.push(container)
+		}
+
+		chunks.push(close)
+
+		const document = await parseCheckedSliced(part.name, join(chunks), clock)
+		let wrapper = document.firstChildElement(document.documentElement())
+
+		for (const container of batch) {
+			const expected = container.properties.map(node => canonicalElement(source, node, false, new Set(container.strip))).join("\n")
+
+			if (wrapper < 0 || canonicalFragment(document, wrapper) !== expected)
+				fail("content", `A copied container of ${part.name} lost its properties`)
+
+			wrapper = document.nextSiblingElement(wrapper)
+		}
+
+		// A container's bytes that closed its wrapper and opened another.
+		if (wrapper >= 0) fail("content", `A copied container of ${part.name} lost its properties`)
+
+		if (clock?.due === true) await clock.pause()
 	}
+}
+
+// On a part with declarations below its root, a container copy is judged where it was written: in `written`,
+// the skeleton (each story's new markup under the root as written, in the order of `stories`). Its properties
+// must read as the source's, every name in the namespace it had there: a prefix the copy took out of the scope
+// that bound it means something else (or nothing) where it went.
+async function checkContainersWritten(
+	name: string,
+	part: StoryPart,
+	stories: readonly StoryChange[],
+	written: XmlDocument,
+	clock: SliceClock | undefined
+): Promise<void> {
+	const source = part.document
+	const sourceNamespaces = part.reader.namespaces
+	const writtenNamespaces = partReader(written).namespaces
+	let element = written.firstChildElement(written.documentElement())
+
+	for (const story of stories) {
+		if (element < 0) fail("content", `${name}: a rewritten story is missing`)
+
+		const base = written.start(element)
+		const trusted = story.output.trusted
+		// Bytes the copies before a container gave up for their placeholders in the skeleton.
+		let shrunk = 0
+		let copy = 0
+
+		for (const container of story.output.containers) {
+			if (container.from >= container.to && container.properties.length === 0) continue
+
+			while (copy < trusted.length && (trusted[copy + 1] ?? 0) <= container.from) {
+				shrunk += (trusted[copy + 1] ?? 0) - (trusted[copy] ?? 0) - PLACEHOLDER.length
+				copy += 4
+			}
+
+			const from = base + container.from - shrunk
+			const to = from + container.to - container.from
+			const strip = new Set(container.strip)
+			let node = nodeAt(written, from)
+
+			for (const property of container.properties) {
+				if (node < 0 || node >= written.count || written.kinds[node] !== NodeKind.Element || written.end(node) > to)
+					fail("content", `A copied container of ${name} lost its properties`)
+
+				if (
+					canonicalElement(written, node) !== canonicalElement(source, property, false, strip) ||
+					namespaceSignature(written, writtenNamespaces, node, undefined) !==
+						namespaceSignature(source, sourceNamespaces, property, strip)
+				)
+					fail("content", `A copied container of ${name} lost its properties`)
+
+				node = written.nextSiblingElement(node)
+			}
+
+			// More elements written than the source's properties.
+			if (node >= 0 && written.start(node) < to) fail("content", `A copied container of ${name} lost its properties`)
+
+			if (clock?.due === true) await clock.pause()
+		}
+
+		element = written.nextSiblingElement(element)
+	}
+}
+
+// Every element and prefixed attribute name of a subtree with the namespace it is in, in document order;
+// `skip`: local names of the element's own children to leave out.
+function namespaceSignature(document: XmlDocument, namespaces: Namespaces, node: number, skip: ReadonlySet<string> | undefined): string {
+	const out: string[] = []
+	const end = document.end(node)
+
+	for (let at = node; at < document.count && document.start(at) < end; at++) {
+		if (document.kinds[at] !== NodeKind.Element) continue
+
+		if (skip !== undefined && document.parent(at) === node && skip.has(document.localName(at))) {
+			at = lastDescendant(document, at)
+
+			continue
+		}
+
+		out.push(`<{${namespaces.elementUri(at) ?? ""}}${document.localName(at)}`)
+
+		for (const attribute of document.attributes(at)) {
+			const colon = attribute.name.indexOf(":")
+
+			if (colon < 0) continue
+
+			const prefix = attribute.name.slice(0, colon)
+
+			if (prefix !== "xmlns") out.push(`@{${namespaces.uri(at, prefix) ?? ""}}${attribute.name.slice(colon + 1)}`)
+		}
+	}
+
+	return out.join(" ")
+}
+
+// The last node inside `node` (itself when it has no children): nodes are in document order.
+function lastDescendant(document: XmlDocument, node: number): number {
+	const end = document.end(node)
+	let last = node
+
+	while (last + 1 < document.count && document.start(last + 1) < end) last++
+
+	return last
 }
 
 // The rebuilt paragraphs, read back by the model in a document of their own, must be what the editor holds.
@@ -1236,6 +1372,16 @@ async function checkAssembly(
 			from: document.start(rootNode),
 			to: document.openEnd(rootNode),
 			output: encodeUtf8(root),
+			trusted: []
+		})
+
+	// A self-closing root opened for new stories (`root` its whole element): closed after them.
+	if (root !== undefined && document.isSelfClosing(rootNode))
+		replaced.push({
+			story: undefined,
+			from: document.end(rootNode),
+			to: document.end(rootNode),
+			output: encodeUtf8(`</${document.name(rootNode)}>`),
 			trusted: []
 		})
 
@@ -1656,8 +1802,28 @@ function compareReadBack(input: VerifyPartsInput, story: Rewritten, index: numbe
 
 	const expected = paragraphSignature(paragraph, input.changes.numIds, story.sections[index], input.context, story.part)
 
-	if (expected !== actual)
-		fail("content", `A rewritten paragraph of ${story.part.name} reads back differently:\n${actual}\n!=\n${expected}`)
+	if (expected === actual) return
+
+	// The message names where the paragraph differs, never what it holds: it is logged, and a signature carries the
+	// paragraph's text. Both signatures are on the error's detail.
+	const actualEntries = actual.split("\n")
+	const expectedEntries = expected.split("\n")
+	let entry = 0
+
+	while (entry < actualEntries.length && actualEntries[entry] === expectedEntries[entry]) entry++
+
+	// An entry's node type is what comes before its attributes or marks; the first entry is the paragraph's own.
+	// Only a known type name is named: a raw line break in a mark's attribute (an author, a link target) would
+	// start a line with whatever follows it.
+	const type = /^[a-z_]*/i.exec(actualEntries[entry] ?? expectedEntries[entry] ?? "")?.[0] ?? ""
+	const kind = entry === 0 ? "paragraph" : type === "t" || Object.hasOwn(nodes, type) ? type : "unknown"
+
+	throw new DocxVerifyError(
+		"content",
+		`A rewritten paragraph of ${story.part.name} (#${String(index)}) reads back differently at entry ${String(entry)} (${kind}), ` +
+			`${String(actualEntries.length)} entries written, ${String(expectedEntries.length)} expected`,
+		`${actual}\n!=\n${expected}`
+	)
 }
 
 // How many fields spanning paragraphs a paragraph opens (begins less ends of its field characters).

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { autoCompleteIndex, autoCompletion, columnEntries, type AutoCompleteCells } from "../core/sheet/autoComplete/autoComplete"
+import {
+	AUTO_COMPLETE_REACH,
+	autoCompleteIndex,
+	autoCompletion,
+	columnEntries,
+	type AutoCompleteCells
+} from "../core/sheet/autoComplete/autoComplete"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
 
 // A column from cells: text, numbers, or null for empty.
@@ -23,6 +29,28 @@ describe("AutoComplete entries", () => {
 		expect(texts(columnEntries(cells, 6, 0, 11))).toEqual(["Banana", "apple", "Cherry", "Date"])
 		// The edited cell itself is left out.
 		expect(texts(columnEntries(cells, 4, 0, 11))).toEqual(["Apple", "Banana"])
+	})
+
+	it("reads a long run only AUTO_COMPLETE_REACH cells each way, nearest first", () => {
+		const rows = 3 * AUTO_COMPLETE_REACH
+		const row = Math.floor(rows / 2)
+		const visited = new Set<number>()
+		const cells: AutoCompleteCells = {
+			filled: () => true,
+			text: at => {
+				visited.add(at)
+
+				return `entry ${at}`
+			}
+		}
+		const found = columnEntries(cells, row, 0, rows)
+
+		expect(visited.size).toBe(2 * AUTO_COMPLETE_REACH)
+		expect(Math.min(...visited)).toBe(row - AUTO_COMPLETE_REACH)
+		expect(Math.max(...visited)).toBe(row + AUTO_COMPLETE_REACH)
+		expect(found).toHaveLength(2 * AUTO_COMPLETE_REACH)
+		expect(found[0]).toEqual({ row: row - 1, text: `entry ${row - 1}` })
+		expect(found[AUTO_COMPLETE_REACH]).toEqual({ row: row + 1, text: `entry ${row + 1}` })
 	})
 
 	it("completes only when exactly one entry starts with what is typed", () => {

@@ -1,14 +1,22 @@
 import { partKey } from "../../opc/partNames"
-import type { SheetColorInput, SheetId, SheetState } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, type SheetColorInput, type SheetId, type SheetState } from "../../sheet/protocol"
 import { defineSheetFeature, type SheetChangeSink, type SheetHandled } from "../../sheet/registry"
 import { ChangeLog } from "../model/changes"
+import { FormulaTable } from "../model/formulas"
 import type { SheetStore } from "../model/store"
-import type { XlsxColor, XlsxDefinedName, XlsxPartWrite, XlsxSheetEntry, XlsxWorkbookModel } from "../model/types"
+import {
+	FormulaKind,
+	type XlsxColor,
+	type XlsxDefinedName,
+	type XlsxPartWrite,
+	type XlsxSheetEntry,
+	type XlsxWorkbookModel
+} from "../model/types"
 import { planRefEdit, type RefPlan } from "../refs/plan"
 import { liveRelationships } from "../refs/state"
 import type { XlsxDocument } from "./document"
 import { reportLogged, xlsxColor } from "./format"
-import { CellLog } from "./history"
+import { CellLog, cellState } from "./history"
 import { cellBounds, planBytes, planCellsOf } from "./structure-basic"
 import { setSheetView } from "./structure-view"
 
@@ -106,7 +114,7 @@ export async function ownedParts(workbook: XlsxWorkbookModel, entry: XlsxSheetEn
 }
 
 // The defined names an edit changed or dropped, upper case: `before` against the workbook's names now.
-function changedNames(document: XlsxDocument, before: readonly XlsxDefinedName[]): Set<string> {
+export function changedNames(document: XlsxDocument, before: readonly XlsxDefinedName[]): Set<string> {
 	const key = (name: XlsxDefinedName): string => `${name.name.toUpperCase()}\n${String(name.sheet)}`
 	const after = new Map(document.workbook.definedNames.map(name => [key(name), name.formula]))
 	const changed = new Set<string>()
@@ -116,27 +124,101 @@ function changedNames(document: XlsxDocument, before: readonly XlsxDefinedName[]
 	return changed
 }
 
+// `names` (upper case) with every defined name whose formula names one of them, through any number of others (Total =
+// SUM(N) changes with N): what reads those is read by the same test of a formula's text. Over-inclusive as that test is
+// (text, not tokens), which costs a recalculation, never a missed one.
+function withReaders(document: XlsxDocument, names: ReadonlySet<string>): Set<string> {
+	const all = new Set(names)
+	const defined = document.workbook.definedNames.map(name => ({ name: name.name.toUpperCase(), text: name.formula.toUpperCase() }))
+
+	for (let added = true; added;) {
+		added = false
+
+		for (const { name, text } of defined) {
+			if (all.has(name)) continue
+
+			for (const known of all) {
+				if (!text.includes(known)) continue
+
+				all.add(name)
+				added = true
+
+				break
+			}
+		}
+	}
+
+	return all
+}
+
 // After the engine's sheets changed (a sheet deleted or added, formulas rewritten): it is built again, and the
-// formulas the plan rewrote, those naming a changed name and those calling INDIRECT (whose sheet names may name
-// another sheet now) are recalculated (logged); with none of them the next edit builds it.
-function rebuildEngine(document: XlsxDocument, plan: RefPlan, names: ReadonlySet<string>, log: CellLog, changes: SheetChangeSink): void {
+// formulas the plan rewrote, those naming a changed name (or a name defined through one) and those calling INDIRECT
+// (whose sheet names may name another sheet now) are recalculated (logged), with every formula reading any of them
+// whose stored result is no longer the engine's; with none of them the next edit builds it.
+export function rebuildEngine(
+	document: XlsxDocument,
+	plan: RefPlan,
+	changed: ReadonlySet<string>,
+	log: CellLog,
+	changes: SheetChangeSink
+): void {
 	const cells = document.indirectCells()
 
 	document.dropEngine()
 
-	if ((plan.formulaCells.size === 0 && names.size === 0 && cells.size === 0) || !document.hasFormulas || !document.allReady) return
+	if ((plan.formulaCells.size === 0 && changed.size === 0 && cells.size === 0) || !document.hasFormulas || !document.allReady) return
+
+	// What the session shows before the build: the build shows results of its own (volatile formulas calculated
+	// again, formulas the file stores none for), logged here as they were so an undo gives those back too.
+	const shownBefore = new Map([...document.shownResults].map(([sheet, shown]) => [sheet, new Map(shown)]))
 
 	document.buildEngine(changes)
 
+	for (const [sheet, shown] of document.shownResults) {
+		const model = document.model(sheet)
+		const before = shownBefore.get(sheet)
+
+		if (model === null) continue
+
+		for (const [key, result] of shown) {
+			const was = before?.get(key)
+
+			if (
+				was !== undefined &&
+				was.value === result.value &&
+				was.error === result.error &&
+				was.edited === result.edited &&
+				was.recalculated === result.recalculated
+			)
+				continue
+
+			const row = Math.floor(key / SHEET_MAX_COLS)
+			const col = key % SHEET_MAX_COLS
+
+			log.touch(sheet, row, col, () => cellState(model.store, row, col, was), false)
+		}
+	}
+
 	for (const [sheet] of plan.formulaCells) cells.set(sheet, [...(cells.get(sheet) ?? []), ...planCellsOf(plan, sheet)])
 
-	if (names.size > 0) {
+	if (changed.size > 0) {
+		const named = [...withReaders(document, changed)]
+		const naming = (text: string): boolean => {
+			const upper = text.toUpperCase()
+
+			return named.some(name => upper.includes(name))
+		}
+
 		for (const entry of document.workbook.sheets) {
 			const store = entry.model?.store as SheetStore | undefined
 
 			if (store === undefined) continue
 
 			const list = cells.get(entry.id) ?? []
+			const formulas = store.formulas
+			// A shared formula's cells by its index, tested once on the master's text: a child stores none, and a
+			// defined name is not moved with the relative references.
+			const sharedNaming = new Map<number, boolean>()
 
 			for (const block of store.blocks) {
 				if (block.formulas === null) continue
@@ -147,10 +229,22 @@ function rebuildEngine(document: XlsxDocument, plan: RefPlan, names: ReadonlySet
 
 						if (id < 0) continue
 
-						const text = store.formulas.text(id).toUpperCase()
+						const kind = formulas.kind(id)
+						let hit: boolean
 
-						if ([...names].some(name => text.includes(name)))
-							list.push({ row: block.firstRow + (block.rows[i] ?? 0), col: block.cols[k] ?? 0 })
+						if (kind === FormulaKind.SHARED_CHILD || kind === FormulaKind.SHARED_MASTER) {
+							const shared = formulas.sharedIndex(id)
+							const known = sharedNaming.get(shared)
+
+							if (known === undefined) {
+								const master = formulas instanceof FormulaTable ? formulas.master(shared) : id
+
+								hit = naming(master < 0 ? "" : formulas.text(master))
+								sharedNaming.set(shared, hit)
+							} else hit = known
+						} else hit = naming(formulas.text(id))
+
+						if (hit) list.push({ row: block.firstRow + (block.rows[i] ?? 0), col: block.cols[k] ?? 0 })
 					}
 				}
 			}
@@ -158,6 +252,10 @@ function rebuildEngine(document: XlsxDocument, plan: RefPlan, names: ReadonlySet
 			if (list.length > 0) cells.set(entry.id, list)
 		}
 	}
+
+	// The engine built again holds the new values already: setting these cells reports them only, so what reads them
+	// (a changed name or formula, through any number of others) is compared with the store here.
+	for (const [sheet, list] of document.staleReaders(cells)) cells.set(sheet, [...(cells.get(sheet) ?? []), ...list])
 
 	for (const [sheet, list] of cells) document.recalculate(sheet, list, log, changes)
 
@@ -274,8 +372,7 @@ export async function deleteSheet(document: XlsxDocument, sheet: SheetId, change
 
 			if (results !== undefined) document.shownResults.set(sheet, results)
 
-			if (relationship !== undefined)
-				changeLog.addRelationship(workbook.workbookPart, { type: relationship.type, target: relationship.target })
+			if (relationship !== undefined) changeLog.readdRelationship(workbook.workbookPart, relationship)
 			else if (changeLog instanceof ChangeLog) changeLog.restoreRelationship(workbook.workbookPart, entry.relationshipId)
 
 			for (const { name, write } of previous) {

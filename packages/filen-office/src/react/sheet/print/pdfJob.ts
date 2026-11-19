@@ -10,7 +10,8 @@ import { SHEET_PDF_JOB, type SheetPdfJobArgs, type SheetPdfJobResult } from "./p
 
 const PROGRESS_MS = 100
 
-// Slices of 8 ms between macrotask turns: an abort from the page is heard between pages.
+// Slices of 8 ms between macrotask turns: an abort from the page is heard between pages and, on a large page drawn in
+// slices, between its slices and table rows; the session serves the grid in the same turns.
 const WORKER_SLICING: Slicing = {
 	sliceMs: 8,
 	now: () => performance.now(),

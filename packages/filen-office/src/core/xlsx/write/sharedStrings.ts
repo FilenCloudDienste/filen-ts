@@ -1,16 +1,12 @@
 import { encodeUtf8, escapeText } from "../../xml/index"
 import type { XlsxSharedStrings } from "../model/types"
-import { Pieces, attr, findAttribute, lastIndexOfText, qualify, rootTag, spliceTag } from "./markup"
+import { Pieces, attr, findAttribute, lastIndexOfText, preserved, qualify, rootTag, spliceTag } from "./markup"
 import { fontChildren } from "./records"
 
 // sharedStrings.xml with the entries edits appended before its end (or its extLst), count and uniqueCount
 // updated in place. The part can be large: it is never parsed here, only its root tag and its end are found.
 
 export const SHARED_STRINGS_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
-
-function preserved(text: string): string {
-	return text.length > 0 && /^\s|\s$/.test(text) ? ' xml:space="preserve"' : ""
-}
 
 // The markup of entries [from, to).
 function sharedStringsMarkup(strings: XlsxSharedStrings, from: number, to: number, prefix: string): string {

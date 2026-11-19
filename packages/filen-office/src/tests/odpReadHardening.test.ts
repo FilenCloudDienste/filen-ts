@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "../core/opc/io"
+import { MAX_CELLS, MAX_SERIES } from "../core/odp/localTable"
 import { openOdp } from "../core/odp/read/document"
-import { pageFragment, scanPages } from "../core/odp/read/scan"
+import { pageFragment, pageHead, scanPages } from "../core/odp/read/scan"
 import { PresentationError } from "../core/presentation/model"
 import { encodeUtf8 } from "../core/xml/index"
 import { ODP_NS, odpBytes, openOdpFixture, page, plainText, slideOf } from "./odpFixtures"
@@ -81,11 +82,10 @@ describe("odp page scan", () => {
 
 		expect(fragment.name(pageNode)).toBe("d:page")
 		expect(fragment.attributes(pageNode).map(attribute => attribute.name)).toEqual(["d:name", "xmlns:d", "xmlns"])
-		expect(second.head.attributes(second.head.firstChildElement(second.head.documentElement())).map(a => a.name)).toEqual([
-			"d:name",
-			"xmlns:d",
-			"xmlns"
-		])
+		const head = pageHead(scanned, second)
+
+		expect("head" in second).toBe(false)
+		expect(head.attributes(head.firstChildElement(head.documentElement())).map(a => a.name)).toEqual(["d:name", "xmlns:d", "xmlns"])
 	})
 
 	it("ignores an element named page in another namespace", () => {
@@ -207,5 +207,166 @@ describe("odp font-independent line spacing", () => {
 				text: '<text:p text:style-name="P1">x</text:p>'
 			})
 		).toEqual({ level: false, paragraph: undefined })
+	})
+})
+
+// A chart object (§11.1) holding `plot` in its plot area and `rows` in its own table.
+function chartDeck(plot: string, rows: string): Uint8Array {
+	const chart = `<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:chart="urn:oasis:names:tc:opendocument:xmlns:chart:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3"><office:body><office:chart><chart:chart chart:class="chart:bar"><chart:plot-area>${plot}</chart:plot-area><table:table table:name="local-table"><table:table-rows>${rows}</table:table-rows></table:table></chart:chart></office:chart></office:body></office:document-content>`
+
+	return odpBytes({
+		extra: [{ name: "Object 1/content.xml", data: encodeUtf8(chart), mediaType: "text/xml" }],
+		manifestEntries:
+			'<manifest:file-entry manifest:full-path="Object 1/" manifest:media-type="application/vnd.oasis.opendocument.chart"/>',
+		body: page('<draw:frame svg:width="8cm" svg:height="6cm"><draw:object xlink:href="./Object 1"/></draw:frame>')
+	})
+}
+
+describe("odp chart object bounds", () => {
+	async function frameOf(bytes: Uint8Array): Promise<{ readonly kind: string | undefined; readonly ms: number }> {
+		const opened = await openOdp(bytesSource(bytes))
+
+		if (opened.kind !== "opened") throw new Error(opened.reason)
+
+		const start = cpuMs()
+		const slide = await slideOf(opened, 0)
+
+		return { kind: slide.shapes[0]?.frame?.kind, ms: cpuMs() - start }
+	}
+
+	it("shows the replacement picture for a chart of more series than a table holds", async () => {
+		const series = '<chart:series chart:values-cell-range-address="local-table.$A$1:.$A$10000"/>'.repeat(100_000)
+		const read = await frameOf(chartDeck(series, '<table:table-row><table:table-cell office:value="1"/></table:table-row>'))
+
+		expect(read.kind).toBe("ole")
+		expect(read.ms).toBeLessThan(budget(2000))
+	}, 60_000)
+
+	it("shows the replacement picture for a table of more cells than a chart reads", async () => {
+		const rows = '<table:table-row><table:table-cell table:number-columns-repeated="1000" office:value="1"/></table:table-row>'.repeat(
+			10_000
+		)
+		const read = await frameOf(chartDeck('<chart:series chart:values-cell-range-address="local-table.$A$1:.$A$3"/>', rows))
+
+		expect(read.kind).toBe("ole")
+		expect(read.ms).toBeLessThan(budget(2000))
+	}, 60_000)
+
+	it("shows the replacement picture for series whose rows and columns lay out more cells than a table holds", async () => {
+		const series = '<chart:series chart:values-cell-range-address="local-table.$A$1:.$A$10000"/>'.repeat(200)
+		const read = await frameOf(chartDeck(series, '<table:table-row><table:table-cell office:value="1"/></table:table-row>'))
+
+		expect(read.kind).toBe("ole")
+	}, 60_000)
+
+	it("shows the replacement picture for a series name joined from a long repeated cell", async () => {
+		const rows = `<table:table-row><table:table-cell table:number-columns-repeated="1000"><text:p>${"x".repeat(700_000)}</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell office:value="1"/></table:table-row>`
+		const read = await frameOf(
+			chartDeck(
+				'<chart:series chart:label-cell-address="local-table.$A$1:.$ALL$1" chart:values-cell-range-address="local-table.$A$2:.$A$2"/>',
+				rows
+			)
+		)
+
+		expect(read.kind).toBe("ole")
+		expect(read.ms).toBeLessThan(budget(2000))
+	}, 60_000)
+
+	it("shows the replacement picture for categories taken from long repeated cells", async () => {
+		const text = `<table:table-row><table:table-cell table:number-columns-repeated="1000"><text:p>${"x".repeat(20_000)}</text:p></table:table-cell></table:table-row>`
+		const rows = `${text.repeat(10)}<table:table-row><table:table-cell office:value="1"/></table:table-row>`
+		const read = await frameOf(
+			chartDeck(
+				'<chart:axis chart:dimension="x"><chart:categories table:cell-range-address="local-table.$A$1:.$ALL$10"/></chart:axis><chart:series chart:values-cell-range-address="local-table.$A$11:.$A$11"/>',
+				rows
+			)
+		)
+
+		expect(read.kind).toBe("ole")
+		expect(read.ms).toBeLessThan(budget(2000))
+	}, 60_000)
+
+	it("reads a row number past any grid as the grid's end, not a range of no size", async () => {
+		const huge = "9".repeat(400)
+		const series = `<chart:series chart:values-cell-range-address="local-table.$A$${huge}:.$A$${huge}"/>`.repeat(MAX_SERIES)
+		const read = await frameOf(chartDeck(series, '<table:table-row><table:table-cell office:value="1"/></table:table-row>'))
+
+		expect(read.kind).toBe("chart")
+		expect(read.ms).toBeLessThan(budget(2000))
+	}, 60_000)
+
+	it("draws a table of exactly the cells the writer lays out at its limit", async () => {
+		// chartObject.ts's layout: names in row 1, categories in column A, a column per series; 9,999 points of 99
+		// series is (9,999 + 1) * (99 + 1) = MAX_CELLS cells.
+		const points = 9_999
+		const count = MAX_CELLS / (points + 1) - 1
+		const letter = (index: number): string =>
+			index < 26
+				? String.fromCharCode(65 + index)
+				: String.fromCharCode(64 + Math.floor(index / 26)) + String.fromCharCode(65 + (index % 26))
+		const series = Array.from({ length: count }, (_, index) => {
+			const col = letter(index + 1)
+
+			return `<chart:series chart:label-cell-address="local-table.$${col}$1" chart:values-cell-range-address="local-table.$${col}$2:.$${col}$${points + 1}"/>`
+		}).join("")
+		const header = `<table:table-row><table:table-cell/><table:table-cell table:number-columns-repeated="${count}"><text:p>s</text:p></table:table-cell></table:table-row>`
+		const row = `<table:table-row><table:table-cell><text:p>c</text:p></table:table-cell><table:table-cell table:number-columns-repeated="${count}" office:value-type="float" office:value="1"/></table:table-row>`
+		const read = await frameOf(
+			chartDeck(
+				`<chart:axis chart:dimension="x"><chart:categories table:cell-range-address="local-table.$A$2:.$A$${points + 1}"/></chart:axis>${series}`,
+				header + row.repeat(points)
+			)
+		)
+
+		expect(read.kind).toBe("chart")
+	}, 120_000)
+
+	it("still draws a chart within the bounds", async () => {
+		const read = await frameOf(
+			chartDeck(
+				'<chart:series chart:values-cell-range-address="local-table.$A$1:.$A$2"/>',
+				'<table:table-row><table:table-cell office:value-type="float" office:value="1"/></table:table-row><table:table-row><table:table-cell office:value-type="float" office:value="2"/></table:table-row>'
+			)
+		)
+
+		expect(read.kind).toBe("chart")
+	})
+})
+
+describe("odp lookups by names from the file", () => {
+	it('reads presentation:class="constructor" as no placeholder', async () => {
+		const opened = await openOdpFixture({
+			body: page(
+				'<draw:frame presentation:class="constructor" svg:x="1cm" svg:y="1cm" svg:width="2cm" svg:height="2cm"><draw:text-box><text:p>x</text:p></draw:text-box></draw:frame>'
+			)
+		})
+		const shape = (await slideOf(opened, 0)).shapes[0]
+
+		expect(shape?.ph).toBeUndefined()
+		expect(plainText(shape)).toBe("x")
+	})
+
+	it("gives a picture named a.constructor the type its bytes say", async () => {
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array<number>(300).fill(0)])
+		const opened = await openOdpFixture({
+			extra: [{ name: "Pictures/a.constructor", data: png }],
+			body: page('<draw:frame svg:width="2cm" svg:height="2cm"><draw:image xlink:href="Pictures/a.constructor"/></draw:frame>')
+		})
+		const slide = await slideOf(opened, 0)
+
+		expect(slide.shapes.length).toBe(1)
+		expect(opened.parts.contentTypes.typeOf("Pictures/a.constructor")).toBe("image/png")
+		expect(opened.parts.contentTypes.typeOf("Pictures/b.toString")).toBeUndefined()
+	})
+
+	it('reads fo:text-align="__proto__" as the default alignment', async () => {
+		const opened = await openOdpFixture({
+			automatic:
+				'<style:style style:name="P1" style:family="paragraph"><style:paragraph-properties fo:text-align="__proto__"/></style:style>',
+			body: page(frame('<text:p text:style-name="P1">x</text:p>'))
+		})
+		const paragraph = (await slideOf(opened, 0)).shapes[0]?.text?.paragraphs[0]
+
+		expect(paragraph?.pPr.algn).toBeUndefined()
 	})
 })

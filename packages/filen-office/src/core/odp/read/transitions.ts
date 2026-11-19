@@ -1,5 +1,6 @@
 import type { Transition } from "../../anim/model"
 import { kindFromOdf } from "../../anim/presets/transitions/catalog"
+import { own } from "../../tables"
 
 // A drawing page's slide transition (ODF 1.3 Part 3 §17.25 style:drawing-page-properties: smil:type, smil:subtype,
 // smil:direction, smil:fadeColor, presentation:transition-speed, presentation:transition-type and presentation:duration;
@@ -14,7 +15,7 @@ const SPEEDS: Readonly<Record<string, number>> = { slow: 1000, medium: 750, fast
 function seconds(value: string | undefined): number | undefined {
 	if (value === undefined) return undefined
 
-	const match = /^\s*(?:PT)?(\d+(?:\.\d*)?)S?\s*$/iu.exec(value) ?? /^\s*(\d+(?:\.\d*)?)s\s*$/u.exec(value)
+	const match = /^\s*(?:PT)?(\d+(?:\.\d*)?)S?\s*$/iu.exec(value)
 
 	if (match !== null) return Number(match[1]) * 1000
 
@@ -70,10 +71,10 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 		case "pushWipe":
 			return subtype === "combHorizontal" || subtype === "combVertical"
 				? { kind: "comb", options: { dir: subtype === "combVertical" ? "vert" : "horz" } }
-				: { kind: "push", options: { dir: MOVES[subtype] ?? "r" } }
+				: { kind: "push", options: { dir: own(MOVES, subtype) ?? "r" } }
 		case "slideWipe":
 			// The eight directions of cover and pull (ST_TransitionEightDirectionType).
-			return { kind: reverse ? "pull" : "cover", options: { dir: MOVES[subtype] ?? "r" } }
+			return { kind: reverse ? "pull" : "cover", options: { dir: own(MOVES, subtype) ?? "r" } }
 		case "irisWipe":
 			if (subtype === "rectangle") return { kind: "zoom", options: { dir: reverse ? "in" : "out" } }
 			if (subtype === "diamond") return { kind: "diamond", options: {} }
@@ -85,7 +86,7 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 		case "clockWipe":
 			return { kind: "wheel", options: { spokes: subtype === "fourBlade" ? "4" : "1" } }
 		case "pinWheelWipe":
-			return { kind: "wheel", options: { spokes: SPOKES[subtype] ?? "4" } }
+			return { kind: "wheel", options: { spokes: own(SPOKES, subtype) ?? "4" } }
 		case "fanWipe":
 		case "singleSweepWipe":
 		case "doubleFanWipe":
@@ -141,7 +142,7 @@ export function readTransition(
 	const after = seconds(page.get("presentation:duration"))
 	const automatic = advanceType === "automatic" || advanceType === "semi-automatic"
 	const speed = page.get("presentation:transition-speed")
-	const duration = seconds(source.get("smil:dur")) ?? (speed === undefined ? undefined : SPEEDS[speed])
+	const duration = seconds(source.get("smil:dur")) ?? (speed === undefined ? undefined : own(SPEEDS, speed))
 
 	if (type === undefined && !automatic) return undefined
 

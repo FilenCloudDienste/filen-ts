@@ -4,7 +4,7 @@ import type { DeckOp } from "../core/presentation/edit/ops"
 import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { DEFAULTS, setShow } from "./showSettingsFixtures"
+import { DEFAULTS, pptxBytes, setShow } from "./showSettingsFixtures"
 
 // The Set Up Slide Show range through slide edits: a range never ends past the last slide (pptx p:sldRg), an ODF
 // range runs from its start page to the last slide, and undo puts the range back with the slides.
@@ -50,8 +50,9 @@ describe("the show's slide range through slide edits", () => {
 			let saved = await drive.save()
 
 			expect(saved.result.kind).toBe("written")
-			expect(await writtenShow(format, saved.bytes)).toMatch(
-				format === "odp" ? /presentation:start-page="/u : /<p:sldRg st="2" end="2"\/>/u
+			// ODF names the start page (slide 2 is the page "Two") and has no end: the range runs to the last slide.
+			expect(await writtenShow(format, saved.bytes)).toBe(
+				format === "odp" ? '<presentation:settings presentation:start-page="Two">' : '<p:sldRg st="2" end="2"/>'
 			)
 
 			// Undo: the slide and the range as set.
@@ -65,4 +66,96 @@ describe("the show's slide range through slide edits", () => {
 			expect(saved.result.kind).toBe("written")
 		}, 60_000)
 	}
+})
+
+// A file whose own show range the deck cannot hold (a p:sldRg ending past the last slide, a p:custShow naming no custom
+// show): read as the deck can hold it, so the inverse a slide edit or Set Up Slide Show stores applies on undo.
+describe("a pptx show range the file states past the deck", () => {
+	const STALE_RANGE = '<p:showPr><p:present/><p:sldRg st="2" end="12"/></p:showPr>'
+	const UNKNOWN_SHOW = '<p:showPr><p:present/><p:custShow id="7"/></p:showPr>'
+	const kioskRestart = (restart: string): string => `<p:showPr><p:kiosk restart="${restart}"/><p:sldRg st="2" end="4"/></p:showPr>`
+	const NEGATIVE_RESTART = kioskRestart("-5")
+	const HUGE_RESTART = kioskRestart("99999999999")
+
+	async function presProps(bytes: Uint8Array): Promise<string> {
+		const zip = await ZipArchive.open(bytesSource(bytes))
+		const entry = zip.get("ppt/presProps.xml")
+
+		return entry === undefined ? "(none)" : new TextDecoder().decode(await zip.read(entry))
+	}
+
+	it("ends a stale p:sldRg at the last slide, and undo of a slide delete brings the slide back", async () => {
+		const drive = await driveSession(pptxBytes(STALE_RANGE), "pptx")
+		const slides = [...drive.session.deck.slides]
+
+		expect(drive.session.deck.show.range).toEqual({ kind: "range", start: 2, end: 4 })
+		expect((await drive.command({ family: "slide", kind: "delete", slides: [slides[3]] } as DeckOp)).ok).toBe(true)
+		expect(drive.session.deck.show.range).toEqual({ kind: "range", start: 2, end: 3 })
+		expect((await drive.undo()).ok).toBe(true)
+		expect(drive.session.deck.slides).toEqual(slides)
+		expect(drive.session.deck.show.range).toEqual({ kind: "range", start: 2, end: 4 })
+	}, 60_000)
+
+	it("plays all slides for an unknown p:custShow, and undo of Set Up Slide Show applies", async () => {
+		const drive = await driveSession(pptxBytes(UNKNOWN_SHOW), "pptx")
+
+		expect(drive.session.deck.show.range).toEqual({ kind: "all" })
+		expect((await drive.command(setShow({ ...DEFAULTS, loop: true }))).ok).toBe(true)
+		expect((await drive.undo()).ok).toBe(true)
+		expect(drive.session.deck.show).toEqual(DEFAULTS)
+	}, 60_000)
+
+	for (const [name, showPr] of [
+		["a negative", NEGATIVE_RESTART],
+		["an over-unsignedInt", HUGE_RESTART]
+	] as const) {
+		it(`reads ${name} p:kiosk restart as the default, and undo of Set Up Slide Show applies`, async () => {
+			const drive = await driveSession(pptxBytes(showPr), "pptx")
+			const read = drive.session.deck.show
+
+			expect(read.restartMs).toBe(300_000)
+			expect((await drive.command(setShow({ ...read, loop: true }))).ok).toBe(true)
+			expect((await drive.undo()).ok).toBe(true)
+			expect(drive.session.deck.show).toEqual(read)
+		}, 60_000)
+
+		it(`undoes a range-shrinking slide delete beside ${name} p:kiosk restart`, async () => {
+			const drive = await driveSession(pptxBytes(showPr), "pptx")
+			const slides = [...drive.session.deck.slides]
+
+			expect((await drive.command({ family: "slide", kind: "delete", slides: [slides[3]] } as DeckOp)).ok).toBe(true)
+			expect(drive.session.deck.show.range).toEqual({ kind: "range", start: 2, end: 3 })
+			expect((await drive.undo()).ok).toBe(true)
+			expect(drive.session.deck.slides).toEqual(slides)
+			expect(drive.session.deck.show.range).toEqual({ kind: "range", start: 2, end: 4 })
+		}, 60_000)
+	}
+
+	for (const [name, showPr] of [
+		["a stale p:sldRg", STALE_RANGE],
+		["an unknown p:custShow", UNKNOWN_SHOW],
+		["a negative p:kiosk restart", NEGATIVE_RESTART],
+		["an over-unsignedInt p:kiosk restart", HUGE_RESTART]
+	] as const)
+		it(`keeps presProps.xml byte-identical when the show is not edited (${name})`, async () => {
+			const bytes = pptxBytes(showPr)
+			const drive = await driveSession(bytes, "pptx")
+
+			// An edit outside the show: the first slide hidden.
+			expect(
+				(
+					await drive.command({
+						family: "slide",
+						kind: "hide",
+						slides: drive.session.deck.slides.slice(0, 1),
+						hidden: true
+					} as DeckOp)
+				).ok
+			).toBe(true)
+
+			const saved = await drive.save()
+
+			expect(saved.result.kind).toBe("written")
+			expect(saved.bytes === undefined ? "(none)" : await presProps(saved.bytes)).toBe(await presProps(bytes))
+		})
 })

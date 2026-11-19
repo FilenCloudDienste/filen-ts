@@ -4,13 +4,13 @@ import { PdfEngineError, type PdfEngineClient } from "../../dom/pdfedit/client"
 import { MUPDF_FORMATS, type MupdfFormat } from "../../dom/pdfedit/formats"
 import type { PdfEngineArgs, PdfEngineOp, PdfOpenResult, PdfRenderArgs } from "../../dom/pdfedit/protocol"
 import { PDF_ENGINE_REQUESTS } from "../../dom/pdfedit/requests"
-import { READ_REQUESTS } from "../../dom/pdfedit/readRequests"
+import { ENCRYPTION_XML_MAX_BYTES, encryptionAlgorithms, READ_REQUESTS } from "../../dom/pdfedit/readRequests"
 import { localEngine, stopLocalEngines } from "./localEngine"
 import { startEngine, stopEngines } from "./harness"
 import { EPUB_CHAPTERS, makeEpub, makeFb2, makeMobi } from "./readFixtures"
 import { makePdf } from "./fixtures"
 import { budget } from "../timing"
-import { strToU8, zipSync } from "fflate"
+import { strToU8, unzipSync, zipSync } from "fflate"
 
 afterEach(() => {
 	stopLocalEngines()
@@ -219,6 +219,51 @@ describe("the read role", () => {
 		expect(await failure(openBytes(localEngine(), "mobi", makeMobi(2)))).toBe("notSupported")
 		expect(await failure(openBytes(localEngine(), "epub", new Uint8Array(100)))).toBe("notSupported")
 		expect(await failure(openBytes(localEngine(), "mobi", new Uint8Array(100)))).toBe("notSupported")
+	})
+
+	it("reads encryption.xml's algorithms in one linear pass", () => {
+		expect(
+			encryptionAlgorithms(
+				[
+					'<enc:EncryptionMethod Algorithm="a"/>',
+					"<EncryptionMethod Algorithm = 'b' />",
+					'<x-y:EncryptionMethod xmlns:x-y="u" Algorithm="c">',
+					'<EncryptionMethodX Algorithm="no"/>',
+					"<EncryptionMethod/>",
+					'<<<EncryptionMethod Algorithm="d">',
+					'<EncryptionMethod Algorithm="unclosed'
+				].join("")
+			)
+		).toEqual(["a", "b", "c", "d"])
+
+		// A quadratic scan takes minutes over these.
+		for (const hostile of ["<EncryptionMethod ", '<EncryptionMethod Algorithm="', "<"]) {
+			const xml = hostile.repeat(Math.ceil((4 * 1024 * 1024) / hostile.length))
+			const started = performance.now()
+
+			encryptionAlgorithms(xml)
+			encryptionAlgorithms(`${xml}>`)
+			expect(performance.now() - started).toBeLessThan(budget(500))
+		}
+	})
+
+	it("answers a cap-sized hostile encryption.xml quickly and counts an oversized one as locked", async () => {
+		const withEncryptionXml = (xml: string): Uint8Array => {
+			const files = unzipSync(makeEpub())
+
+			files["META-INF/encryption.xml"] = strToU8(xml)
+
+			return zipSync(files)
+		}
+		const hostile = "<EncryptionMethod ".repeat(Math.floor(ENCRYPTION_XML_MAX_BYTES / 18))
+		const started = performance.now()
+
+		// No algorithm is named, so the DRM check passes it on; MuPDF's own open then refuses the file.
+		expect(await failure(openBytes(localEngine(), "epub", withEncryptionXml(hostile)))).toBe("notSupported")
+		expect(performance.now() - started).toBeLessThan(budget(2000))
+		expect(await failure(openBytes(localEngine(), "epub", withEncryptionXml(" ".repeat(ENCRYPTION_XML_MAX_BYTES + 1))))).toBe(
+			"notSupported"
+		)
 	})
 
 	it("refuses a page whose image is over the pixel budget without decoding it", async () => {

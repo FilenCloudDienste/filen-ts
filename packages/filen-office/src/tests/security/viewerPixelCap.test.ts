@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { DocxEngine } from "@filen/office/dom/docx"
-import { rasterPixels, viewable } from "../../core/docx/objects/images"
+import { rasterPixels, sniffImage, viewable, type DocxImageInfo } from "../../core/docx/objects/images"
 import { buildDocx } from "../docxSynthetic"
 import { engineServices, png } from "./generate"
 
@@ -37,6 +37,41 @@ function jpegWithStrayByte(): Uint8Array {
 	const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, 0xea, 0x60, 0xea, 0x60, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]
 
 	return new Uint8Array([0xff, 0xd8, ...app0, 0x00, ...sof, 0xff, 0xd9])
+}
+
+// A JPEG whose FF 00 (a stuffed zero, no segment) a walk by length would skip to a 1 x 1 frame header hidden in a
+// comment, past the real SOF0 declaring 23000 x 23000 that a decoder reads.
+function jpegWithStuffedZero(): Uint8Array {
+	const sof = (size: number): number[] => [
+		0xff,
+		0xc0,
+		0x00,
+		0x11,
+		0x08,
+		size >> 8,
+		size & 0xff,
+		size >> 8,
+		size & 0xff,
+		0x03,
+		0x01,
+		0x22,
+		0x00,
+		0x02,
+		0x11,
+		0x01,
+		0x03,
+		0x11,
+		0x01
+	]
+	const head = [0xff, 0xd8, 0xff, 0x00, 0x00, 0x20, ...sof(23_000)]
+	const padding = [0, 0, 0, 0, 0, 0, 0]
+	const comment = [0xff, 0xfe, 0x00, 2 + padding.length + 19, ...padding, ...sof(1)]
+	const bytes = new Uint8Array([...head, ...comment, 0xff, 0xd9])
+
+	// The fake frame header lies where a length walk from the FF 00 lands.
+	if (bytes[36] !== 0xff || bytes[37] !== 0xc0) throw new Error("fake SOF misplaced")
+
+	return bytes
 }
 
 function u32be(value: number): number[] {
@@ -127,6 +162,31 @@ describe("viewer pixel cap", () => {
 		expect(await engine.media("word/media/tiff.png")).toBeNull()
 		expect(await engine.media("word/media/junk.png")).toBeNull()
 		expect(await engine.media("word/media/drawing.svg")).not.toBeNull()
+	})
+
+	it("refuses a JPEG whose FF 00 would lead a length walk to a fake frame header", () => {
+		expect(rasterPixels(jpegWithStuffedZero())).toBeUndefined()
+		expect(viewable(jpegWithStuffedZero(), 50_000_000)).toBe(false)
+		expect(sniffImage(jpegWithStuffedZero())).toBe("corrupt")
+		// Stray bytes before a marker are still read past.
+		expect(rasterPixels(jpegWithStrayByte())).toBe(3_600_000_000)
+	})
+
+	it("reads SVG lengths in time linear in their size, and ordinary ones as before", () => {
+		const digits = "1".repeat(60_000)
+		const hostile = new TextEncoder().encode(`<svg width="${digits}x" height="${digits}x"/>`)
+		const started = performance.now()
+
+		expect(viewable(hostile, 50_000_000)).toBe(true)
+		expect(sniffImage(hostile)).toMatchObject({ format: "svg", width: 300, height: 150 })
+		expect(performance.now() - started).toBeLessThan(100)
+
+		const size = (width: string, height: string): DocxImageInfo =>
+			sniffImage(new TextEncoder().encode(`<svg width="${width}" height="${height}"/>`)) as DocxImageInfo
+
+		expect(size("100", "1e2px")).toMatchObject({ width: 100, height: 100 })
+		expect(size("1.5in", ".5cm")).toMatchObject({ width: 144, height: 19 })
+		expect(size("2.", "-3")).toMatchObject({ width: 300, height: 150 })
 	})
 
 	it("caps a GIF by its first frame when that is larger than its logical screen", () => {

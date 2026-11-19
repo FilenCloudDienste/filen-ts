@@ -1,6 +1,6 @@
 import { maxOf } from "../../arrays"
 import { sniffImage } from "../../docx/objects/images"
-import { RtfOut, RtfWriteRefusal } from "./out"
+import { RtfOut, RtfWriteRefusal, latin1Bytes } from "./out"
 import { encodeText } from "./encode"
 
 // A picture the edit inserted, as Word writes one (RTF 1.9.1, "Pictures"): {\*\shppict{\pict ...\pngblip|\jpegblip
@@ -8,25 +8,41 @@ import { encodeText } from "./encode"
 // whose one META_STRETCHDIB record holds the same bytes as a device-independent bitmap compressed as PNG or JPEG
 // ([MS-WMF] 2.3.1.3.4 META_STRETCHDIB, 2.2.2.9 DeviceIndependentBitmap, 2.1.1.7 Compression BI_PNG / BI_JPEG).
 
-const HEX = "0123456789abcdef"
+// Each byte's two lower-case hex digits, as ASCII: high << 8 | low.
+const HEX_PAIRS = (() => {
+	const digits = "0123456789abcdef"
+	const pairs = new Uint16Array(256)
 
+	for (let byte = 0; byte < 256; byte++) pairs[byte] = (digits.charCodeAt(byte >> 4) << 8) | digits.charCodeAt(byte & 15)
+
+	return pairs
+})()
+
+// The bytes in hex, CR LF and 64 bytes a line, as Word writes them (line breaks are not text): written straight into
+// the bytes they end as.
 function hex(bytes: Uint8Array, out: RtfOut): void {
-	// 64 bytes a line, as Word writes them; line breaks are not text.
-	for (let from = 0; from < bytes.length; from += 64) {
-		let line = "\r\n"
+	if (bytes.length === 0) return
 
-		for (let k = from; k < Math.min(bytes.length, from + 64); k++) {
-			const byte = bytes[k] ?? 0
+	const text = new Uint8Array(bytes.length * 2 + Math.ceil(bytes.length / 64) * 2)
+	let at = 0
 
-			line += (HEX[byte >> 4] ?? "0") + (HEX[byte & 15] ?? "0")
+	for (let k = 0; k < bytes.length; k++) {
+		if (k % 64 === 0) {
+			text[at++] = 0x0d
+			text[at++] = 0x0a
 		}
 
-		out.rtf(line)
+		const pair = HEX_PAIRS[bytes[k] ?? 0] ?? 0
+
+		text[at++] = pair >> 8
+		text[at++] = pair & 0xff
 	}
+
+	out.bytes(text)
 }
 
 // The metafile: header, window origin and extent, the bitmap stretched over it, end.
-export function stretchDibMetafile(image: Uint8Array, format: "png" | "jpeg", width: number, height: number): Uint8Array {
+function stretchDibMetafile(image: Uint8Array, format: "png" | "jpeg", width: number, height: number): Uint8Array {
 	const header = 40
 	const dibBytes = header + image.length + (image.length % 2)
 	// Words: size (2), function (1), raster operation (2), colour usage (1), 8 coordinates, the DIB.
@@ -124,7 +140,7 @@ export function writeNewPicture(picture: NewPicture, codepage: number, out: RtfO
 
 		out.rtf("{\\*").word("picprop").rtf("{").word("sp").rtf("{").word("sn").rtf("wzDescription}{").word("sv")
 		if (encoded.unicode) out.word("uc", 1)
-		out.bytes(Uint8Array.from(encoded.rtf, character => character.charCodeAt(0))).rtf("}}}")
+		out.bytes(latin1Bytes(encoded.rtf)).rtf("}}}")
 	}
 
 	out.word(blip).word("picw", info.width).word("pich", info.height).word("picwgoal", goalW).word("pichgoal", goalH)

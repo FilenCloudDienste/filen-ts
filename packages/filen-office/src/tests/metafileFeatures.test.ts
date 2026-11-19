@@ -12,7 +12,7 @@ import {
 	type Paint,
 	type ShadeRamp
 } from "../core/drawingml/displayList"
-import { encodePng } from "../core/metafile/dib"
+import { encodePng, passThrough } from "../core/metafile/dib"
 import { effectImage } from "../core/metafile/effects"
 import { expandMetafiles } from "../core/metafile/index"
 import { combineRects, normalizeRects } from "../core/metafile/region"
@@ -192,6 +192,37 @@ describe("bitmaps and raster operations", () => {
 		expect(blendOf(list, 1)).toBe(ItemFlag.BLEND_DIFFERENCE)
 		expect(list.kind(2)).toBe(ItemKind.IMAGE)
 		expect(blendOf(list, 2)).toBe(ItemFlag.BLEND_MULTIPLY)
+	})
+
+	it("reads a passed-through image's size as decoders do: JPEG fill bytes, no WebP", () => {
+		const budget = { spend: () => true }
+		const frame = (height: number, width: number): number[] => [
+			0xff,
+			0xc0,
+			0x00,
+			0x11,
+			0x08,
+			height >> 8,
+			height & 255,
+			width >> 8,
+			width & 255
+		]
+		const filled = Uint8Array.from([0xff, 0xd8, 0xff, ...frame(10, 10), ...new Array<number>(16).fill(0)])
+		// A fill byte, then a frame far over the per-image bound; a walk that reads the fill byte as a marker
+		// lands on the small frame planted where the frame's bytes, read as a length, point.
+		const planted = new Uint8Array(4 + 0xc000 + 32)
+
+		planted.set([0xff, 0xd8, 0xff, ...frame(8000, 8000)])
+		planted.set(frame(10, 10), 4 + 0xc000)
+
+		const webp = new Uint8Array(32)
+
+		webp.set(new TextEncoder().encode("RIFF\0\0\0\0WEBPVP8X"))
+		webp.set([9, 0, 0, 9, 0, 0], 24)
+
+		expect(passThrough(filled, budget)?.format).toBe("jpeg")
+		expect(passThrough(planted, budget)).toBeUndefined()
+		expect(passThrough(webp, budget)).toBeUndefined()
 	})
 
 	it("passes PNG bitmaps through without a colour table and refuses dimension bombs", () => {
@@ -473,6 +504,35 @@ describe("EMF+ paints, pens and text", () => {
 		const paint = paintOf(list, 0)
 
 		expect(paint?.kind === "image" && paint.tile).toMatchObject({ flip: "xy", width: 2, height: 1 })
+	})
+
+	it("sizes compressed bitmaps from their encoded stream: texture brushes and cropped DrawImage", () => {
+		// Width, Height, Stride and PixelFormat left zero, as writers do for a compressed bitmap.
+		const png = encodePng(new Uint8Array(4 * 2 * 4).fill(255), 4, 2)
+		const bitmap = (writer: ByteWriter): ByteWriter => writer.u32(0xdbc01002).u32(1).i32(0).i32(0).i32(0).u32(0).u32(1).raw(png)
+		const texture = brushObject(0, writer => bitmap(writer.u32(2).u32(0).u32(0)))
+		const textured = converted(
+			new EmfBuilder()
+				.plus([plusHeader(false)])
+				.plus([texture, fillRect(0, 0, 0, 10, 10)])
+				.build()
+		)
+		const paint = paintOf(textured.list, 0)
+
+		expect(textured.unsupported).toBe(0)
+		expect(paint?.kind === "image" && paint.tile).toMatchObject({ width: 4, height: 2 })
+
+		const image = plusRecord(0x4008, 0x0500, writer => bitmap(writer))
+		const draw = plusRecord(0x401a, 0x0000, writer => writer.u32(1).u32(2).f32(0).f32(0).f32(2).f32(2).f32(0).f32(0).f32(20).f32(20))
+		const drawn = converted(
+			new EmfBuilder()
+				.plus([plusHeader(false)])
+				.plus([image, draw])
+				.build()
+		).list
+
+		expect(drawn.kind(0)).toBe(ItemKind.IMAGE)
+		expect(drawn.images[drawn.itemInt(0, ItemInt.REF)]?.crop).toEqual({ left: 0, top: 0, right: 0.5, bottom: 0 })
 	})
 
 	it("expands anchor caps into filled geometry", () => {
@@ -779,6 +839,20 @@ describe("WMF fixture sanity", () => {
 })
 
 describe("caches and surfaces", () => {
+	it("keys a pen's cached stroke on the miter limit as well as the width", () => {
+		const builder = emf()
+			.record(38, writer => writer.u32(1).u32(0x2000).i32(4).i32(0).u32(0))
+			.record(37, writer => writer.u32(1))
+
+		rectangle(builder, 0, 0, 100, 100)
+		builder.record(58, writer => writer.u32(3))
+		rectangle(builder, 0, 0, 100, 100)
+
+		const list = converted(builder.build()).list
+
+		expect([0, 1].map(item => list.strokes[list.itemInt(item, ItemInt.STROKE)]?.miterLimit)).toEqual([10, 3])
+	})
+
 	it("makes a path-gradient brush's paint once however many shapes it fills", () => {
 		const polygon = brushObject(1, writer => {
 			writer.u32(3).u32(0).u32(0).u32(0xffffffff).f32(5).f32(5).u32(3).u32(0xffff0000).u32(0xff00ff00).u32(0xff0000ff)

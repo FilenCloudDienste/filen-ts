@@ -401,7 +401,6 @@ export function inThreadEditingHost(
 	let writing: { readonly slicing: Slicing; readonly zipper: DocxZipper } | undefined
 	// Overlay merges wait while a save reads the sessions (DocumentEdits.holdCompaction).
 	let holdMerges: () => () => void = () => () => undefined
-	// `checksums`: a trial (nothing zipped) skips the parts' CRCs.
 	// What an IME composition typed is marked as tracked before anything is written (it would be written as
 	// untracked text). A composition still going on is written marked as it stands, the session left as it is
 	// (a transaction now would end the composition in the view); it is marked when the composition ends.
@@ -433,6 +432,7 @@ export function inThreadEditingHost(
 			release()
 		}
 	}
+	// `checksums`: a trial (nothing zipped) skips the parts' CRCs.
 	const prepare = (
 		sessions: readonly DocxEditorSession[] | undefined,
 		checksums: boolean,

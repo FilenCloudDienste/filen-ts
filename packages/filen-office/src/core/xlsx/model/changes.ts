@@ -36,8 +36,9 @@ export class ChangeLog implements XlsxChangeLog {
 	fullCalcOnLoad = false
 	// Highest numeric rId handed out per source part (removed ones included), so an id is never reused.
 	private readonly highest = new Map<string, number>()
-	// Added relationships removed again, by source and identity: added once more (a redo), each gets its id back.
-	private readonly retired = new Map<string, Relationship>()
+	// Added relationships removed again, by source and identity, latest last: added once more without an id, each
+	// gets one of theirs back; readdRelationship puts back the very one a step recorded.
+	private readonly retired = new Map<string, Relationship[]>()
 	// Every part written or given relationships since open, removed again or not (partKey).
 	private readonly named = new Set<string>()
 	private readonly relationshipsOf: (source: string) => Relationships | undefined
@@ -175,10 +176,12 @@ export class ChangeLog implements XlsxChangeLog {
 		this.named.add(partKey(source))
 
 		const identity = retiredKey(source, relationship.type, relationship.target, relationship.external === true)
-		const retired = this.retired.get(identity)
+		const pool = this.retired.get(identity)
+		const retired = pool?.pop()
+
+		if (pool?.length === 0) this.retired.delete(identity)
 
 		if (retired !== undefined) {
-			this.retired.delete(identity)
 			this.relationshipChanges(source).added.push(retired)
 
 			return retired
@@ -227,6 +230,26 @@ export class ChangeLog implements XlsxChangeLog {
 		return added
 	}
 
+	// The undo or redo of an add or remove a step recorded: `relationship` (as addRelationship returned it) is added
+	// back under its own id, which the step's markup names, whatever was retired since.
+	readdRelationship(source: string, relationship: Relationship): void {
+		this.named.add(partKey(source))
+
+		const identity = retiredKey(source, relationship.type, relationship.target, relationship.external)
+		const pool = this.retired.get(identity)
+		const at = pool?.indexOf(relationship) ?? -1
+
+		if (pool !== undefined && at >= 0) {
+			pool.splice(at, 1)
+
+			if (pool.length === 0) this.retired.delete(identity)
+		}
+
+		const changes = this.relationshipChanges(source)
+
+		if (!changes.added.some(added => added.id === relationship.id)) changes.added.push(relationship)
+	}
+
 	removeRelationship(source: string, id: string): void {
 		const changes = this.relationshipChanges(source)
 		const index = changes.added.findIndex(relationship => relationship.id === id)
@@ -235,7 +258,11 @@ export class ChangeLog implements XlsxChangeLog {
 
 		if (added !== undefined) {
 			changes.added.splice(index, 1)
-			this.retired.set(retiredKey(source, added.type, added.target, added.external), added)
+			const identity = retiredKey(source, added.type, added.target, added.external)
+			const pool = this.retired.get(identity)
+
+			if (pool === undefined) this.retired.set(identity, [added])
+			else pool.push(added)
 		} else {
 			changes.removed.add(id)
 		}

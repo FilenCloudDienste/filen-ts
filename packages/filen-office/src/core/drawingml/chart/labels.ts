@@ -95,15 +95,16 @@ export function labelText(
 	category: string,
 	value: number,
 	valueFormat: string,
-	share: number
+	share: number,
+	date1904: boolean
 ): string {
 	const parts: string[] = []
 
 	if (config.series) parts.push(seriesName)
 	if (config.category) parts.push(category)
-	if (config.value) parts.push(formatNumber(value, config.format ?? valueFormat))
+	if (config.value) parts.push(formatNumber(value, config.format ?? valueFormat, date1904))
 	if (config.percent && Number.isFinite(share))
-		parts.push(formatNumber(share, config.format !== undefined && config.format.includes("%") ? config.format : "0%"))
+		parts.push(formatNumber(share, config.format !== undefined && config.format.includes("%") ? config.format : "0%", date1904))
 
 	return parts.join(config.separator)
 }

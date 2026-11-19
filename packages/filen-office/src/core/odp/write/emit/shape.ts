@@ -13,7 +13,7 @@ import {
 import { NodeKind, decodeUtf8, encodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
 import { inScope, rootScope } from "../../../anim/prune"
 import type { Fragment } from "../../read/context"
-import type { OdpEmitContext, OdpEmitFamily } from "../emit"
+import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { odpTargetId, odpTargetIds } from "../../../anim/odf"
 import {
 	OdpStyles,
@@ -25,12 +25,13 @@ import {
 	FILL_PROPERTIES,
 	fillChanges,
 	lineChanges,
+	setChild,
 	setProperty,
 	styleChanges,
 	type StyleChanges
 } from "../styles"
 import { odfCustomAttributes, odfPresetAttributes, odfPresetGeometry, presetDependsOnSize } from "../../../odf/presetShapes"
-import { parseLength } from "../../../odf/index"
+import { canonicalName, parseLength } from "../../../odf/index"
 import { transformMatrix, xfrmOf } from "../../read/shapes"
 import { resourceFillChanges, resourceLineChanges } from "../resources"
 import { LENGTHS, changedLengths, emuOf } from "./box"
@@ -391,8 +392,10 @@ export class OdpShapeWriter {
 	}
 
 	// One shape's markup under the mapping `m` of its groups. `aspects` overrides what changed (a direct emit).
-	element(shape: ShapeNode, m: Affine, aspects?: Aspects, force = false): EmitPiece[] | Refused {
-		const pieces = this.shapeElement(shape, m, aspects, force)
+	// `extraStyle`: style changes a family of its own adds to the source element's (a picture's crop and adjustments),
+	// derived in one style with the writer's own (a picture's mirror).
+	element(shape: ShapeNode, m: Affine, aspects?: Aspects, force = false, extraStyle?: StyleChanges): EmitPiece[] | Refused {
+		const pieces = this.shapeElement(shape, m, aspects, force, extraStyle)
 
 		if (
 			isRefused(pieces) ||
@@ -424,7 +427,7 @@ export class OdpShapeWriter {
 		})
 	}
 
-	private shapeElement(shape: ShapeNode, m: Affine, aspects?: Aspects, force = false): EmitPiece[] | Refused {
+	private shapeElement(shape: ShapeNode, m: Affine, aspects?: Aspects, force = false, extraStyle?: StyleChanges): EmitPiece[] | Refused {
 		if (shape.synthetic === true) return []
 
 		const node = this.sourceNode(shape)
@@ -441,7 +444,13 @@ export class OdpShapeWriter {
 
 			if (foreign === undefined || foreign === this.fragment) return this.whole(shape, m)
 
-			const pieces = new OdpShapeWriter(this.context, foreign, this.slide, this.aspectsOf).element(shape, m, aspects, force)
+			const pieces = new OdpShapeWriter(this.context, foreign, this.slide, this.aspectsOf).element(
+				shape,
+				m,
+				aspects,
+				force,
+				extraStyle
+			)
 
 			if (isRefused(pieces)) return pieces
 
@@ -481,11 +490,11 @@ export class OdpShapeWriter {
 			}
 		}
 
-		const changed = hasAspects(own) || moved || force
+		const changed = hasAspects(own) || moved || force || extraStyle !== undefined
 
 		if (!changed && (shape.kind !== "grpSp" || !this.membersChanged(shape))) return [{ hole: this.outerNode(node) }]
 
-		return this.patch(shape, node, m, moved ? { ...own, xfrm: true } : own)
+		return this.patch(shape, node, m, moved ? { ...own, xfrm: true } : own, extraStyle)
 	}
 
 	// Whether a group's members (or their order) differ from its source.
@@ -512,7 +521,7 @@ export class OdpShapeWriter {
 
 	// --- A source element patched. ---
 
-	private patch(shape: ShapeNode, node: number, m: Affine, aspects: Aspects): EmitPiece[] | Refused {
+	private patch(shape: ShapeNode, node: number, m: Affine, aspects: Aspects, extraStyle?: StyleChanges): EmitPiece[] | Refused {
 		const fragment = this.fragment as Fragment
 		const document = fragment.document
 		const name = fragment.name(node)
@@ -547,10 +556,12 @@ export class OdpShapeWriter {
 		// The box the element holds: the shape's own placed by the groups it moved with (a mirrored group mirrors it).
 		const box = shape.xfrm === undefined ? undefined : placed(shape.xfrm, m)
 		// A picture holds its flips as its graphic style's style:mirror (ODF 1.3 Part 3 §20.355), as canonicalBox says.
+		// Without the source shape, the mirror the source element's style holds is the flip it had.
 		const before = aspects.pristine?.xfrm === undefined ? undefined : canonicalBox(shape, aspects.pristine.xfrm)
 		const held = box === undefined ? undefined : canonicalBox(shape, box)
+		const flippedBefore = (): boolean => before?.flipH ?? (this.ownMirror(node) ?? "").includes("horizontal")
 		const mirror =
-			shape.kind === "pic" && aspects.xfrm === true && held !== undefined && held.flipH !== (before?.flipH ?? false)
+			shape.kind === "pic" && aspects.xfrm === true && held !== undefined && held.flipH !== flippedBefore()
 				? this.mirrorSpelling(shape, "style:mirror", this.ownMirror(node), pictureMirror(held), held.flipH)
 				: undefined
 		// A presentation object is a placeholder exactly while it is a prompt (LibreOffice writes the flag on one without
@@ -573,7 +584,7 @@ export class OdpShapeWriter {
 				changes.push({ name: "presentation:placeholder", value: "true" })
 		}
 
-		const style = this.styleChange(shape, node, styleAspects, mirror)
+		const style = this.styleChange(shape, node, styleAspects, mirror, extraStyle)
 
 		if (isRefused(style)) return style
 		if (style !== undefined) changes.push(style)
@@ -643,31 +654,50 @@ export class OdpShapeWriter {
 		return pieces
 	}
 
-	// The element's start tag with attribute changes (and the namespace declarations new attributes need).
+	// The element's start tag with attribute changes (and the namespace declarations new attributes need). Changes are
+	// matched to the element's attributes by expanded name, so an attribute the file spells under another prefix is
+	// changed in place, never written a second time.
 	private startTag(node: number, changes: readonly AttributeChange[], selfClose: boolean): string {
 		const fragment = this.fragment as Fragment
 		const document = fragment.document
+		const namespaces = fragment.namespaces
+		// Canonical name ("draw:style-name") -> value.
 		const wanted = new Map<string, string | null>()
+
+		for (const change of changes) wanted.set(change.name, change.value)
+
 		const declarations = new Map<string, string>()
-
-		for (const change of changes) {
-			const colon = change.name.indexOf(":")
-			const prefix = change.name.slice(0, colon)
+		// A new attribute's name under the prefix the document binds its namespace to (declared when it binds none).
+		const spelled = (canonical: string): string => {
+			const colon = canonical.indexOf(":")
+			const prefix = canonical.slice(0, colon)
 			const uri = WRITTEN_NAMESPACES[prefix]
-			let actual = uri === undefined ? undefined : fragment.namespaces.prefixFor(node, uri)
 
-			if (actual === undefined && uri !== undefined) {
+			if (uri === undefined) return canonical
+
+			let actual = namespaces.prefixFor(node, uri)
+
+			if (actual === undefined) {
 				actual = prefix
 				declarations.set(prefix, uri)
 			}
 
-			wanted.set(`${actual ?? prefix}:${change.name.slice(colon + 1)}`, change.value)
+			return `${actual}:${canonical.slice(colon + 1)}`
 		}
+		const attributes = document.attributes(node)
+		const canonicals = attributes.map(({ name }) => {
+			const colon = name.indexOf(":")
 
+			if (colon < 0 || name.startsWith("xmlns:")) return name
+
+			const prefix = name.slice(0, colon)
+
+			return prefix === "xml" ? name : canonicalName(namespaces.uri(node, prefix), name.slice(colon + 1))
+		})
 		let out = `<${document.name(node)}`
 		// A box attribute the element lacks goes where LibreOffice writes it, before the first of the box's later ones the
 		// element has (svg:x and svg:y back before svg:width, as they were before a turn took them out).
-		const present = new Set(document.attributes(node).map(attribute => attribute.name))
+		const present = new Set(canonicals)
 		const placeBefore = (name: string): void => {
 			const at = BOX_ORDER.indexOf(name)
 
@@ -680,17 +710,19 @@ export class OdpShapeWriter {
 
 				wanted.delete(qualified)
 
-				if (value !== null) out += ` ${qualified}="${escapeAttribute(value)}"`
+				if (value !== null) out += ` ${spelled(qualified)}="${escapeAttribute(value)}"`
 			}
 		}
 
-		for (const attribute of document.attributes(node)) {
-			placeBefore(attribute.name)
+		for (const [k, attribute] of attributes.entries()) {
+			const canonical = canonicals[k] ?? attribute.name
 
-			if (wanted.has(attribute.name)) {
-				const value = wanted.get(attribute.name)
+			placeBefore(canonical)
 
-				wanted.delete(attribute.name)
+			if (wanted.has(canonical)) {
+				const value = wanted.get(canonical)
+
+				wanted.delete(canonical)
 
 				if (value === null || value === undefined) continue
 
@@ -702,8 +734,12 @@ export class OdpShapeWriter {
 			out += ` ${attribute.name}="${escapeAttribute(attribute.value)}"`
 		}
 
+		let added = ""
+
+		for (const [canonical, value] of wanted) if (value !== null) added += ` ${spelled(canonical)}="${escapeAttribute(value)}"`
 		for (const [prefix, uri] of declarations) out += ` xmlns:${prefix}="${escapeAttribute(uri)}"`
-		for (const [qualified, value] of wanted) if (value !== null) out += ` ${qualified}="${escapeAttribute(value)}"`
+
+		out += added
 
 		return `${out}${selfClose ? "/>" : ">"}`
 	}
@@ -972,12 +1008,24 @@ export class OdpShapeWriter {
 
 	// --- Style. ---
 
-	private styleChange(shape: ShapeNode, node: number, aspects: Aspects, mirror?: string | null): AttributeChange | Refused | undefined {
+	private styleChange(
+		shape: ShapeNode,
+		node: number,
+		aspects: Aspects,
+		mirror?: string | null,
+		extra?: StyleChanges
+	): AttributeChange | Refused | undefined {
 		const groups = (["fill", "ln", "effects", "bodyPr"] as const).filter(group => aspects[group] === true)
 
-		if (groups.length === 0 && aspects.text !== true && mirror === undefined) return undefined
+		if (groups.length === 0 && aspects.text !== true && mirror === undefined && extra === undefined) return undefined
 
 		const changes = styleChanges()
+
+		if (extra !== undefined) {
+			for (const [kind, properties] of extra.attributes)
+				for (const [name, value] of properties) setProperty(changes, kind, name, value)
+			for (const [kind, children] of extra.children) for (const [name, markup] of children) setChild(changes, kind, name, markup)
+		}
 
 		if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
 		const props = shape.props ?? {}
@@ -1129,10 +1177,13 @@ export class OdpShapeWriter {
 		return fresh ?? null
 	}
 
-	// A picture's own style:mirror (its graphic style's), as the file writes it.
+	// A picture's own style:mirror, as the file writes it: in the style the frame is styled through (its presentation
+	// style when it has one, the one styleChange derives from, else its graphic style).
 	private ownMirror(node: number): string | undefined {
-		const name = (this.fragment as Fragment).attributes(node).get("draw:style-name")
-		const style = name === undefined ? undefined : this.styles.style("graphic", name)
+		const attributes = (this.fragment as Fragment).attributes(node)
+		const presentation = attributes.get("presentation:style-name")
+		const name = presentation ?? attributes.get("draw:style-name")
+		const style = name === undefined ? undefined : this.styles.style(presentation === undefined ? "graphic" : "presentation", name)
 
 		return style?.properties.get("graphic")?.attributes.get("style:mirror")
 	}
@@ -1296,24 +1347,11 @@ export class OdpShapeWriter {
 	private newShape(shape: ShapeNode, m: Affine): string | Refused {
 		if (shape.lock !== undefined) return refused("locked", shape.lock)
 
-		const common = this.commonAttributes(shape)
+		const shared = newElementCommon(shape, this.styles, this.targetIdOf(shape))
 
-		if (isRefused(common)) return common
+		if (isRefused(shared.listeners)) return shared.listeners
 
-		const alt =
-			(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
-			(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
-		let listeners = ""
-
-		if (shape.actions?.hover !== undefined) return refused("unsupported", "a hover action")
-
-		if (shape.actions?.click !== undefined) {
-			const listener = listenerMarkup(shape.actions.click, this.styles)
-
-			if (isRefused(listener)) return listener
-
-			listeners = `<office:event-listeners>${listener}</office:event-listeners>`
-		}
+		const { attributes: common, alt, listeners } = shared
 
 		switch (shape.kind) {
 			case "grpSp": {
@@ -1381,12 +1419,7 @@ export class OdpShapeWriter {
 		if (xfrm === undefined) return refused("unsupported", "a new shape without a box")
 
 		const box = placed(xfrm, m)
-		const markupOf = (held: Xfrm): string =>
-			boxAttributes(held)
-				.filter(change => change.value !== null)
-				.map(change => ` ${change.name}="${escapeAttribute(change.value as string)}"`)
-				.join("")
-		const boxMarkup = markupOf(box)
+		const held = boxMarkup(box)
 		const text = shape.text === undefined ? "" : this.text(shape)
 
 		if (isRefused(text)) return text
@@ -1412,7 +1445,7 @@ export class OdpShapeWriter {
 					? ""
 					: ` presentation:class="${placeholder}"${isPrompt(shape) ? ' presentation:placeholder="true"' : ""} presentation:user-transformed="true"`
 
-			return `<draw:frame${common}${style}${classes}${boxMarkup}><draw:text-box>${text}</draw:text-box>${listeners}${alt}</draw:frame>`
+			return `<draw:frame${common}${style}${classes}${held}><draw:text-box>${text}</draw:text-box>${listeners}${alt}</draw:frame>`
 		}
 
 		if (placeholder !== undefined) return refused("unsupported", "a placeholder with an outline")
@@ -1432,9 +1465,9 @@ export class OdpShapeWriter {
 		// The turn as LibreOffice reads it under the outline's mirrors (mirrorTurn).
 		const mirrored = (attribute: string): boolean => enhanced.includes(` ${attribute}="true"`)
 		const turned = mirrored("draw:mirror-horizontal") !== mirrored("draw:mirror-vertical") && box.rot !== 0
-		const held = turned ? markupOf({ ...box, rot: (21_600_000 - box.rot) % 21_600_000 }) : boxMarkup
+		const written = turned ? boxMarkup({ ...box, rot: (21_600_000 - box.rot) % 21_600_000 }) : held
 
-		return `<draw:custom-shape${common}${style}${held}>${alt}${listeners}${text}${enhanced}</draw:custom-shape>`
+		return `<draw:custom-shape${common}${style}${written}>${alt}${listeners}${text}${enhanced}</draw:custom-shape>`
 	}
 
 	// The box a new placeholder takes from its layout or master (the model leaves it to inheritance): written, so the
@@ -1483,19 +1516,6 @@ export class OdpShapeWriter {
 		const at = (tag[1] ?? "").length
 
 		return `${markup.slice(0, at)} xml:id="${escapeAttribute(target)}" draw:id="${escapeAttribute(target)}"${markup.slice(at)}`
-	}
-
-	private commonAttributes(shape: ShapeNode): string | Refused {
-		let out = ""
-
-		if (shape.name !== "") out += ` draw:name="${escapeAttribute(shape.name)}"`
-
-		const target = this.targetIdOf(shape)
-
-		if (target !== undefined) out += ` xml:id="${escapeAttribute(target)}" draw:id="${escapeAttribute(target)}"`
-		if (shape.hidden) out += ' draw:display="none"'
-
-		return out
 	}
 
 	// A new shape's graphic style: its fill, line, shadow and text area.
@@ -1704,6 +1724,15 @@ export function boxAttributes(box: Xfrm): AttributeChange[] {
 	return [{ name: "svg:x", value: null }, { name: "svg:y", value: null }, ...size, { name: "draw:transform", value: transform }]
 }
 
+// A new element's box attributes (boxAttributes, those it writes).
+export function boxMarkup(box: Xfrm): string {
+	let out = ""
+
+	for (const { name, value } of boxAttributes(box)) if (value !== null) out += ` ${name}="${escapeAttribute(value)}"`
+
+	return out
+}
+
 // A preset's draw:enhanced-geometry for its box (an outline evaluated for a box depends on its size).
 function presetMarkup(geometry: Geometry, box: Xfrm | undefined): string | Refused {
 	if (geometry.kind !== "preset") {
@@ -1760,6 +1789,46 @@ function listenerMarkup(action: Action, styles: OdpStyles): string | Refused {
 		default:
 			return refused("unsupported", `a ${action.kind} action`)
 	}
+}
+
+// A shape's svg:title and svg:desc (§10.3.2, §10.3.3), each left out when empty.
+export function altMarkup(shape: ShapeNode): string {
+	return (
+		(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
+		(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
+	)
+}
+
+// What every element a save writes new shares: its name, the ids `target` names it by and its visibility (§19.124
+// draw:display) as attributes; its title and description; its click action as office:event-listeners (§10.4.2). A hover
+// action (ODF has none) and a click action without an ODF form are refused in `listeners`: a save refuses the shape,
+// the fresh writer leaves the action off and counts it.
+export interface NewElementCommon {
+	readonly attributes: string
+	readonly alt: string
+	readonly listeners: string | Refused
+}
+
+export function newElementCommon(shape: ShapeNode, styles: OdpStylesApi, target?: string): NewElementCommon {
+	let attributes = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
+
+	if (target !== undefined) attributes += ` xml:id="${escapeAttribute(target)}" draw:id="${escapeAttribute(target)}"`
+	if (shape.hidden) attributes += ' draw:display="none"'
+
+	return { attributes, alt: altMarkup(shape), listeners: listenersMarkup(shape, styles) }
+}
+
+function listenersMarkup(shape: ShapeNode, styles: OdpStylesApi): string | Refused {
+	if (shape.actions?.hover !== undefined) return refused("unsupported", "a hover action")
+
+	const click = shape.actions?.click
+
+	if (click === undefined) return ""
+	if (!(styles instanceof OdpStyles)) return refused("failed", "the save's styles")
+
+	const listener = listenerMarkup(click, styles)
+
+	return isRefused(listener) ? listener : `<office:event-listeners>${listener}</office:event-listeners>`
 }
 
 export function markupOf(result: EmitResult): string | Refused {

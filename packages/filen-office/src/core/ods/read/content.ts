@@ -1,6 +1,5 @@
 import { runSliced, type SliceClock } from "../../slicing"
 import type { SharedStrings } from "../../xlsx/model/sharedStrings"
-import { SHEET_MAX_COLS } from "../../sheet/protocol"
 import { CellKind } from "../../xlsx/model/types"
 import { volatileFormula } from "../../sheet/functions/volatile"
 import { translateFormula } from "../formula/toXlsx"
@@ -9,7 +8,7 @@ import type { OdsCellStyles } from "../styles/cell"
 import { OdsReadError } from "./errors"
 import { A, E, OdsScanner, UNKNOWN, type ScanHandler } from "./scan"
 import { OdsSheetBuilder, OdsValueType, type OdsBuiltSheet, type OdsCellInput, type OdsRowInput } from "./sheet"
-import { capturedElement, capturedValidationsSteps } from "./captured"
+import { capturedElement, capturedValidationsSteps, MAX_SPACE_RUN } from "./captured"
 import { dateValue, durationValue, nullDate, NULL_DATE_1899, NULL_DATE_1904 } from "./values"
 import type { OdfElement } from "../../odf/tree"
 import { decodeUtf8 } from "../../xml/index"
@@ -60,12 +59,18 @@ export interface OdsContent {
 	readonly protectionKey: string | undefined
 	readonly protectionAlgorithm: string | undefined
 	readonly cells: number
+	// A table inside a cell or marked as a sub-table, which the model does not hold.
+	readonly subTables: boolean
 	// What names cells by address that the model does not carry (unheld.ts); names are added as features are read.
 	readonly unheld: UnheldCollector
 }
 
 // Bytes of content.xml read between two looks at the slice clock.
 const READ_SLICE = 64 * 1024
+// The most spaces the text:s elements in cells stand for together: each stands for up to MAX_SPACE_RUN from a few bytes,
+// which neither the part's size limit nor the cell budget bounds. Far past what real files hold (LibreOffice writes a
+// text:s for a run of spaces).
+const MAX_CELL_SPACES = 64 * 1024 * 1024
 
 const WHITE_SPACE = /[ \t\r\n]+/
 // Whether text holds what §6.1.2 collapses: a tab or line end, two spaces, or a space at either end. A loop, not a
@@ -152,6 +157,7 @@ export class ContentReader implements ScanHandler {
 	// office:date-value keeps its calendar date through display and save.
 	private dateBase = NULL_DATE_1899
 	private structureProtected = false
+	private subTables = false
 	private protectionKey: string | undefined
 	private protectionAlgorithm: string | undefined
 	private inSpreadsheet = false
@@ -196,6 +202,8 @@ export class ContentReader implements ScanHandler {
 	private valueType = NONE
 	private stringValue: string | undefined
 	private wantsText = false
+	// The spaces text:s elements may still stand for in cells, all of them together (MAX_CELL_SPACES).
+	private spacesLeft = MAX_CELL_SPACES
 	private paragraphs = 0
 	private cellText = ""
 	private hasTextContent = false
@@ -294,6 +302,7 @@ export class ContentReader implements ScanHandler {
 			protectionKey: this.protectionKey,
 			protectionAlgorithm: this.protectionAlgorithm,
 			cells: this.cellCount,
+			subTables: this.subTables,
 			unheld: this.unheld
 		}
 	}
@@ -476,7 +485,7 @@ export class ContentReader implements ScanHandler {
 			}
 			case E["table:content-validations"]:
 				// Read once the stream is through, in steps (a sheet's many validations are one element).
-				this.pendingValidations = { markup: markup.slice(), prefixes }
+				this.pendingValidations = { markup, prefixes }
 				break
 			case E["table:named-expressions"]:
 				if (this.table === null) this.names.push(capturedElement(markup, prefixes))
@@ -494,13 +503,12 @@ export class ContentReader implements ScanHandler {
 			case E["table:shapes"]:
 				this.issues.add("drawing", this.table?.name, "shapes", Math.max(1, countShapes(markup)))
 
-				if (this.table !== null) this.table.shapes = markup.slice()
+				if (this.table !== null) this.table.shapes = markup
 				break
 			case E["draw:frame"]: {
 				const table = this.table
 
-				if (table !== null)
-					table.frames.push({ row: table.builder.currentRow, col: table.builder.currentCol, markup: markup.slice() })
+				if (table !== null) table.frames.push({ row: table.builder.currentRow, col: table.builder.currentCol, markup })
 				break
 			}
 			case E["office:forms"]:
@@ -635,7 +643,10 @@ export class ContentReader implements ScanHandler {
 			headerColumns: false
 		}
 
-		if (scanner.is(A["table:is-sub-table"], "true")) this.issues.add("subTable", name)
+		if (scanner.is(A["table:is-sub-table"], "true")) {
+			this.subTables = true
+			this.issues.add("subTable", name)
+		}
 
 		if (selfClosing) {
 			this.endTable()
@@ -942,6 +953,7 @@ export class ContentReader implements ScanHandler {
 				this.ignore(selfClosing)
 				break
 			case E["table:table"]:
+				this.subTables = true
 				this.issues.add("subTable", this.table?.name)
 				this.ignore(selfClosing)
 				break
@@ -973,7 +985,15 @@ export class ContentReader implements ScanHandler {
 	private openInParagraph(element: number, selfClosing: boolean): void {
 		switch (element) {
 			case E["text:s"]:
-				if (this.wantsText) this.emit(" ".repeat(Math.min(SHEET_MAX_COLS, this.scanner.count(A["text:c"], 1))))
+				if (this.wantsText) {
+					const count = Math.min(MAX_SPACE_RUN, this.scanner.count(A["text:c"], 1))
+
+					this.spacesLeft -= count
+
+					if (this.spacesLeft < 0) throw new OdsReadError("tooLarge", "The spreadsheet's cells hold more spaces than the limit")
+
+					this.emit(" ".repeat(count))
+				}
 				break
 			case E["text:tab"]:
 				if (this.wantsText) this.emit("\t")

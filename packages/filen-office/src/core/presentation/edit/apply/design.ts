@@ -11,7 +11,7 @@ import type { DesignThemeInfo, PresentationDesignInfo } from "../commands/design
 import type { DeckOp, DesignOp, InsertedImage } from "../ops"
 import { ContentScaler, holdsLock, statedValues, statesWithin } from "./designScale"
 import { onHeldPage, pageMarkup, sourceReading } from "./heldPage"
-import { registerInsertedImage } from "./picture"
+import { namesLostImage, registerInsertedImage } from "./picture"
 import { moveLock } from "./shape"
 import { isRefused } from "../../refusal"
 import { decodeUtf8 } from "../../../xml/utf8"
@@ -1150,6 +1150,9 @@ function setBackground(deck: Deck, op: SetBackground, context: ApplyContext): Ap
 
 	if (given?.kind === "fill" && given.fill.kind === "picture" && given.fill.part === undefined && given.fill.inserted === undefined)
 		return refused("malformed", "a picture background without its image")
+	// One naming an image the registry let go of (held outside the deck and the history) no save could write.
+	if (given?.kind === "fill" && given.fill.kind === "picture" && namesLostImage(deck, given))
+		return refused("notFound", "an image no longer held")
 
 	const inverse: DeckOp[] = []
 	let bytes = 0
@@ -1210,6 +1213,23 @@ function backgroundTouches(op: SetBackground): Touch[] {
 				slideTouch(slide, { kind: "slidePart", part: "background" }),
 				...(op.hideGraphics === undefined ? [] : [slideTouch(slide, { kind: "slidePart", part: "attributes" })])
 			])
+}
+
+// What a theme, variant or every-slide background change will touch, before it applies (the engine reads each key's
+// state before the op): a theme or variant change, every node themeTouches can name (each slide, and each master and
+// layout it may drop; those it adds are absent before); a background on every slide, each slide's background.
+export function predictedDesignTouches(deck: Deck, op: DeckOp): Touch[] {
+	if (op.family !== "design") return []
+
+	switch (op.kind) {
+		case "setTheme":
+		case "setVariant":
+			return [...deck.slides, ...deck.layouts, ...deck.masters].map(ref => slideTouch(ref, { kind: "node" }))
+		case "setBackground":
+			return op.slides === "all" ? backgroundTouches({ ...op, slides: deck.slides }) : []
+		case "setSize":
+			return []
+	}
 }
 
 function applyOne(deck: Deck, op: DesignOp, context: ApplyContext): ApplyResult<DesignOp> {
@@ -1370,10 +1390,21 @@ function applyOdp(deck: Deck, op: DesignOp, context: ApplyContext): ApplyResult<
 	return { ...result, inverse: { ops, bytes: result.inverse.bytes + bytes + (stylesBytes?.length ?? 0) } }
 }
 
+// What an inverse holds off its ops: an ODP inverse's copied pages and styles.xml, a scaled size's prior values.
+function heldBytes(op: DesignOp): number {
+	const holds = HOLDS.get(op)
+	let bytes = 16 * (RESTORE.get(op)?.values.length ?? 0) + (holds?.styles?.bytes?.length ?? 0)
+
+	for (const [, markup] of holds?.pages ?? []) bytes += 16 + markup.length
+
+	return bytes
+}
+
 export const applyDesign: ApplyFamily<DesignOp> = {
 	apply(deck, op, context): ApplyResult<DesignOp> {
 		return deck.format === "odp" ? applyOdp(deck, op, context) : applyOne(deck, op, context)
 	},
+	held: heldBytes,
 	// Before an op applies, what it names; once applied (and for its inverse), all it touched.
 	touches(op) {
 		const known = TOUCHES.get(op)

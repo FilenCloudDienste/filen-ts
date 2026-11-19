@@ -139,6 +139,22 @@ function replacementParts(replacement: string, regex: Regex): ReplacementPart[] 
 	return parts
 }
 
+// The occurrence-th match (from the end when negative), or undefined for none; counted from the start, the search
+// stops at it.
+function nthMatch(regex: Regex, text: string, occurrence: number): Int32Array | undefined {
+	if (occurrence < 0) {
+		const all = [...regex.matches(text)]
+
+		return all[all.length + occurrence]
+	}
+
+	let count = 0
+
+	for (const slots of regex.matches(text)) if (++count === occurrence) return slots
+
+	return undefined
+}
+
 // The replacement for one match; null where it names a group that took no part (PCRE2 leaves that to an option
 // Excel's setting of is unknown).
 function replaced(text: string, slots: Int32Array, parts: readonly ReplacementPart[]): string | null {
@@ -257,8 +273,7 @@ export class RegexFunctions extends SheetFunctionPlugin {
 				if (regex instanceof CellError) return regex
 
 				return searched(() => {
-					const all = [...regex.matches(text)]
-					const chosen = occurrence === 0 ? all : [all[occurrence > 0 ? occurrence - 1 : all.length + occurrence]]
+					const chosen = occurrence === 0 ? [...regex.matches(text)] : [nthMatch(regex, text, occurrence)]
 					let out = ""
 					let at = 0
 

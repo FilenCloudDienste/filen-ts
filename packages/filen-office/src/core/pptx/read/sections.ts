@@ -8,7 +8,7 @@ import { G } from "./xml"
 // relationship in custom shows; references to slides the deck does not list are dropped from the list only (the
 // markup is kept).
 
-const SECTIONS_EXT = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"
+export const SECTIONS_EXT = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"
 
 export function readSections(context: ReadContext, presentation: number, bySlideId: ReadonlyMap<number, SlideRef>): Section[] {
 	const r = context.reader

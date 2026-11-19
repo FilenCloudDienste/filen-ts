@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto"
 import { deflateRawSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
-import { ZipArchive, ZipError, bytesSource, type InflateHook, type ZipEntry } from "@filen/office/core/opc"
-import { buildZip, sameBytes, text } from "./zipBuilder"
+import { ZipArchive, ZipError, bytesSource, sliceClock, type InflateHook, type ZipEntry } from "@filen/office/core/opc"
+import { translateOdt } from "../core/odt/index"
+import { odtBytes } from "./odtFixtures"
+import { buildZip, sameBytes, text, type BuildEntry } from "./zipBuilder"
 
 // ZipArchive.stream: an entry's content in chunks, never whole, checked as read() checks it.
 
@@ -124,9 +127,130 @@ describe("ZipArchive.stream", () => {
 		expect(seen).toBeLessThanOrEqual(1000)
 	})
 
+	for (const [label, inflate] of [
+		["fflate", undefined],
+		["a native inflate", nativeInflate]
+	] as const) {
+		it(`gives the host its turns between steps of a highly compressible entry through ${label}`, async () => {
+			const zeros = new Uint8Array(16 * 1024 * 1024)
+			const archive = await ZipArchive.open(
+				bytesSource(buildZip([{ name: "zeros", data: zeros }])),
+				inflate === undefined ? {} : { inflate }
+			)
+			const events: string[] = []
+			// Always due: a turn after every step.
+			const clock = sliceClock({ sliceMs: 0, now: () => 0, pause: async () => void events.push("pause") })
+			let largest = 0
+			let total = 0
+
+			for await (const chunk of archive.stream(entryOf(archive, "zeros"), clock)) {
+				events.push("chunk")
+				largest = Math.max(largest, chunk.length)
+				total += chunk.length
+			}
+
+			expect(total).toBe(zeros.length)
+			expect(events[0]).toBe("chunk")
+			expect(events.filter(event => event === "pause").length).toBeGreaterThan(4)
+			expect(events.join(" ")).not.toContain("pause pause")
+			expect(largest).toBeLessThanOrEqual(2 * 1024 * 1024)
+		})
+	}
+
+	it("passes what the host's turn throws through as it is", async () => {
+		const archive = await ZipArchive.open(bytesSource(buildZip([{ name: "big.xml", data: BIG }])))
+		const cancelled = new Error("cancelled")
+		const clock = sliceClock({ sliceMs: 0, now: () => 0, pause: () => Promise.reject(cancelled) })
+		let caught: unknown
+
+		try {
+			for await (const chunk of archive.stream(entryOf(archive, "big.xml"), clock)) void chunk
+		} catch (error) {
+			caught = error
+		}
+
+		expect(caught).toBe(cancelled)
+	})
+
 	it("refuses a compression method it does not read", async () => {
 		const archive = await ZipArchive.open(bytesSource(buildZip([{ name: "m", data: text("x"), method: 99 }])))
 
 		expect(await failure(() => collect(archive, "m"))).toBe(await failure(() => archive.read(entryOf(archive, "m"))))
+	})
+
+	it("classes a deflated picture of incompressible bytes whose first steps inflate nothing", async () => {
+		// zlib writes incompressible data as stored deflate blocks: nothing inflates until a whole block is in, so the
+		// first chunks stream() yields are empty.
+		const image = new Uint8Array(200_000)
+
+		for (let at = 0; at < image.length; at += 32) {
+			image.set(
+				createHash("sha256")
+					.update(String(at))
+					.digest()
+					.subarray(0, image.length - at),
+				at
+			)
+		}
+
+		image.set([0xff, 0xd8, 0xff, 0xe0])
+
+		const source = await ZipArchive.open(
+			bytesSource(
+				odtBytes({
+					body: '<text:p><draw:frame text:anchor-type="as-char" svg:width="1cm" svg:height="1cm"><draw:image xlink:href="Pictures/a.jpg"/></draw:frame></text:p>'
+				})
+			)
+		)
+		const zip = buildZip([
+			...(await Promise.all(
+				source.entries.map(async item => ({
+					name: item.name,
+					data: await source.read(item),
+					method: item.method === 0 ? (0 as const) : (8 as const)
+				}))
+			)),
+			{ name: "Pictures/a.jpg", data: image, compressed: deflateRawSync(image) }
+		])
+		const archive = await ZipArchive.open(bytesSource(zip))
+		const first = await archive.stream(entryOf(archive, "Pictures/a.jpg"))[Symbol.asyncIterator]().next()
+
+		expect(first.done === true ? -1 : first.value.length).toBe(0)
+
+		const result = await translateOdt(bytesSource(zip))
+
+		if (!result.ok) throw new Error(result.message)
+
+		expect(result.translation.parts.has("word/media/image1.jpeg")).toBe(true)
+	})
+
+	it("fails an ODT whose content.xml is damaged or the wrong size with the errors read() gives", async () => {
+		const source = await ZipArchive.open(bytesSource(odtBytes({ body: "<text:p>Hello, hello, hello</text:p>" })))
+		const content = await source.read(entryOf(source, "content.xml"))
+		const odt = async (entry: Omit<BuildEntry, "name" | "data">): Promise<Uint8Array> =>
+			buildZip(
+				await Promise.all(
+					source.entries.map(async item => ({
+						name: item.name,
+						data: await source.read(item),
+						method: item.method === 0 ? (0 as const) : (8 as const),
+						...(item.name === "content.xml" ? entry : {})
+					}))
+				)
+			)
+		const cases = [
+			await odt({ compressed: new Uint8Array([0xff, 0xff, 0xff]) }),
+			await odt({ uncompressedSize: content.length + 5 }),
+			await odt({ uncompressedSize: content.length - 5 })
+		]
+
+		for (const zip of cases) {
+			const archive = await ZipArchive.open(bytesSource(zip))
+			const read = await failure(() => archive.read(entryOf(archive, "content.xml")))
+			const result = await translateOdt(bytesSource(zip))
+
+			expect(read).toMatch(/^corrupt: /u)
+			expect(result.ok ? "no error" : `corrupt: ${result.message}`).toBe(read)
+		}
 	})
 })

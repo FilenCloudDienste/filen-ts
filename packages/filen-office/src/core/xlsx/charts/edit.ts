@@ -1064,14 +1064,13 @@ function editType(
 
 	const target = TARGET_ELEMENT[type]
 	const to = SERIES_KIND[target] ?? "bar"
+	const groupingIn = plotType(context, plot).grouping
 	const groupingOut: ChartGrouping | null =
 		type === "column" || type === "bar"
 			? grouping === "stacked" || grouping === "percentStacked"
 				? grouping
-				: grouping === undefined &&
-					  (plotType(context, plot).grouping === "stacked" || plotType(context, plot).grouping === "percentStacked") &&
-					  from === "bar"
-					? (plotType(context, plot).grouping as ChartGrouping)
+				: grouping === undefined && (groupingIn === "stacked" || groupingIn === "percentStacked") && from === "bar"
+					? groupingIn
 					: "clustered"
 			: type === "line" || type === "area"
 				? grouping === "stacked" || grouping === "percentStacked" || grouping === "standard"
@@ -1082,7 +1081,9 @@ function editType(
 	const series = reader.children(plot, D.C, "ser")
 	const plotLabels = chartChild(context, plot, "dLbls")
 	const changedKind = to !== from || target !== element
-	const labels = plotLabels < 0 ? "" : changedKind ? withoutPositions(context, plotLabels) : raw(context, plotLabels)
+	// A new grouping allows other positions (outEnd is for clustered bars only): they go, as on a new kind.
+	const labels =
+		plotLabels < 0 ? "" : changedKind || groupingIn !== groupingOut ? withoutPositions(context, plotLabels) : raw(context, plotLabels)
 	const seriesMarkup = series.map(node => convertSeries(context, node, from, to, stacked)).join("")
 	const axisIds = reader.children(plot, D.C, "axId").map(node => reader.number(node, "val", -1))
 	const allAxes = axisNodes(reader, plotArea)

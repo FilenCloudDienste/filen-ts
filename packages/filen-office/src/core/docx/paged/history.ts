@@ -73,17 +73,6 @@ export class DocumentHistory<S> {
 	nextRedo(redoable: (story: S) => boolean): S | undefined {
 		return next(this.redos, redoable)
 	}
-
-	// Forgets a story (its session is gone).
-	forget(story: S): void {
-		this.depths.delete(story)
-
-		for (const stack of [this.undos, this.redos]) {
-			for (let index = stack.length - 1; index >= 0; index--) if (stack[index] === story) stack.splice(index, 1)
-		}
-
-		this.versionValue++
-	}
 }
 
 function move<S>(from: S[], to: S[], story: S): void {

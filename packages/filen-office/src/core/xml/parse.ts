@@ -1,4 +1,4 @@
-import { NodeKind, XmlDocument, type XmlEncoding } from "./document"
+import { NodeKind, PAIRWISE_DUPLICATE_LIMIT, XmlDocument, type XmlEncoding } from "./document"
 import { XmlError } from "./errors"
 import { sliceClock, type Slicing } from "../slicing"
 import { decodeUtf8, transcodeUtf16 } from "./utf8"
@@ -128,7 +128,7 @@ function sameName(bytes: Uint8Array, spans: Int32Array, a: number, b: number): b
 // Whether two of a start tag's attribute names are the same bytes. Pairwise for the few attributes real tags
 // carry; hashed above that, so a hostile tag with thousands of attributes stays linear.
 function repeatsName(bytes: Uint8Array, spans: Int32Array, count: number): boolean {
-	if (count > 8) {
+	if (count > PAIRWISE_DUPLICATE_LIMIT) {
 		const seen = new Map<number, number[]>()
 
 		for (let a = 0; a < count; a++) {

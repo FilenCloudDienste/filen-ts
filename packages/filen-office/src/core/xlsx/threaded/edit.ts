@@ -1,6 +1,7 @@
 import { relativeTarget } from "../../opc/partNames"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRefusal } from "../../sheet/protocol"
 import type { SheetChangeSink, SheetHandled } from "../../sheet/registry"
+import { cellKeyCol, cellKeyRow } from "../../sheet/model/model"
 import { parseXml } from "../../xml/index"
 import { noteTarget, writeSheetNotes, MAX_NOTE_TEXT, type NoteTarget } from "../comments/edit"
 import { removeNotes } from "../comments/notes"
@@ -292,8 +293,8 @@ export async function editThreadComment(
 
 	writes.setPart(name, THREADED_TYPE, bytes)
 
-	const row = Math.floor(found.key / SHEET_MAX_COLS)
-	const col = found.key % SHEET_MAX_COLS
+	const row = cellKeyRow(found.key)
+	const col = cellKeyCol(found.key)
 	const rootId = found.comment.parentId ?? found.comment.id
 
 	return finish(writes, await syncPlaceholder(document, target, row, col, rootId, writes), look(sheet, row, col), changes)
@@ -321,8 +322,8 @@ export async function deleteThreadComment(
 
 	writes.setPart(name, THREADED_TYPE, removeComments(part, new Set([found.comment.id])))
 
-	const row = Math.floor(found.key / SHEET_MAX_COLS)
-	const col = found.key % SHEET_MAX_COLS
+	const row = cellKeyRow(found.key)
+	const col = cellKeyCol(found.key)
 
 	return finish(
 		writes,

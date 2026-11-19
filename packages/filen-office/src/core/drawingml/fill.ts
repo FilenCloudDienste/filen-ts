@@ -1,12 +1,13 @@
 import { colorChild, readColor, readColorIn, type DrawingTheme } from "./color"
 import {
+	dashPreset,
+	isTileAlign,
+	patternPreset,
 	rgba,
-	type DashPreset,
 	type DrawingList,
 	type GradientStops,
 	type ImageTile,
 	type Inset,
-	type PatternPreset,
 	type Rgba,
 	type Shadow,
 	type Stroke
@@ -19,88 +20,15 @@ export interface PaintContext {
 	readonly list: DrawingList
 	readonly theme: DrawingTheme
 	readonly images: ImageResolver
-	// Draw a:outerShdw effects (off by default: shadows are optional).
+	// Draw a:outerShdw effects.
 	readonly effects: boolean
 }
 
-// A resolved fill: a paint index, NONE, or INHERIT (a:grpFill: the enclosing group's fill).
+// A resolved fill: a paint index, NO_PAINT, or GROUP_PAINT (a:grpFill: the enclosing group's fill).
 export const NO_PAINT = -1
 export const GROUP_PAINT = -2
 
 const FILL_ELEMENTS: ReadonlySet<string> = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"])
-
-const PATTERNS: ReadonlySet<string> = new Set([
-	"pct5",
-	"pct10",
-	"pct20",
-	"pct25",
-	"pct30",
-	"pct40",
-	"pct50",
-	"pct60",
-	"pct70",
-	"pct75",
-	"pct80",
-	"pct90",
-	"horz",
-	"vert",
-	"ltHorz",
-	"ltVert",
-	"dkHorz",
-	"dkVert",
-	"narHorz",
-	"narVert",
-	"dashHorz",
-	"dashVert",
-	"cross",
-	"dnDiag",
-	"upDiag",
-	"ltDnDiag",
-	"ltUpDiag",
-	"dkDnDiag",
-	"dkUpDiag",
-	"wdDnDiag",
-	"wdUpDiag",
-	"dashDnDiag",
-	"dashUpDiag",
-	"diagCross",
-	"smCheck",
-	"lgCheck",
-	"smGrid",
-	"lgGrid",
-	"dotGrid",
-	"smConfetti",
-	"lgConfetti",
-	"horzBrick",
-	"diagBrick",
-	"solidDmnd",
-	"openDmnd",
-	"dotDmnd",
-	"plaid",
-	"sphere",
-	"weave",
-	"divot",
-	"shingle",
-	"wave",
-	"trellis",
-	"zigZag"
-])
-
-const DASHES: ReadonlySet<string> = new Set([
-	"solid",
-	"dot",
-	"dash",
-	"lgDash",
-	"dashDot",
-	"lgDashDot",
-	"lgDashDotDot",
-	"sysDash",
-	"sysDot",
-	"sysDashDot",
-	"sysDashDotDot"
-])
-
-const TILE_ALIGNS: ReadonlySet<string> = new Set(["tl", "t", "tr", "l", "ctr", "r", "bl", "b", "br"])
 
 const BLACK = rgba("000000")
 const WHITE = rgba("FFFFFF")
@@ -182,7 +110,7 @@ export function readFillElement(context: PaintContext, reader: DrawingReader, fi
 
 			return list.paint({
 				kind: "pattern",
-				pattern: (PATTERNS.has(preset) ? preset : "pct50") as PatternPreset,
+				pattern: patternPreset(preset),
 				foreground: readColorIn(reader, reader.child(fill, D.A, "fgClr"), context.theme, placeholder) ?? BLACK,
 				background: readColorIn(reader, reader.child(fill, D.A, "bgClr"), context.theme, placeholder) ?? WHITE
 			})
@@ -204,7 +132,7 @@ export function readFillElement(context: PaintContext, reader: DrawingReader, fi
 					sx: reader.fraction(tile, "sx", 1),
 					sy: reader.fraction(tile, "sy", 1),
 					flip: flip === "x" || flip === "y" || flip === "xy" ? flip : "none",
-					align: (TILE_ALIGNS.has(align) ? align : "tl") as ImageTile["align"]
+					align: isTileAlign(align) ? align : "tl"
 				}
 
 				return list.paint({ kind: "image", image, stretch: undefined, tile: placement })
@@ -259,6 +187,10 @@ export function shapeFill(context: PaintContext, reader: DrawingReader, spPr: nu
 
 const ARROW_SIZES: Readonly<Record<string, number>> = { sm: 2, med: 3, lg: 5 }
 
+function arrowSize(size: string | undefined): number {
+	return size !== undefined && Object.hasOwn(ARROW_SIZES, size) ? (ARROW_SIZES[size] ?? 3) : 3
+}
+
 export type ArrowType = "triangle" | "stealth" | "diamond" | "oval" | "arrow"
 
 export interface LineEnd {
@@ -280,7 +212,7 @@ function lineEnd(reader: DrawingReader, node: number): LineEnd | undefined {
 	if (node < 0 || type === undefined || type === "none") return undefined
 	if (type !== "triangle" && type !== "stealth" && type !== "diamond" && type !== "oval" && type !== "arrow") return undefined
 
-	return { type, width: ARROW_SIZES[reader.attr(node, "w") ?? "med"] ?? 3, length: ARROW_SIZES[reader.attr(node, "len") ?? "med"] ?? 3 }
+	return { type, width: arrowSize(reader.attr(node, "w")), length: arrowSize(reader.attr(node, "len")) }
 }
 
 // a:ln properties, each falling back to the referenced theme line (and its phClr colour).
@@ -336,7 +268,7 @@ export function shapeLine(context: PaintContext, reader: DrawingReader, ln: numb
 		// A zero width is the thinnest line the device draws.
 		width: width > 0 ? width : 1,
 		paint,
-		dash: (dash !== undefined && DASHES.has(dash) ? dash : "solid") as DashPreset,
+		dash: dashPreset(dash),
 		customDash,
 		cap: cap === "rnd" ? "round" : cap === "sq" ? "square" : "flat",
 		join: join ?? "round",

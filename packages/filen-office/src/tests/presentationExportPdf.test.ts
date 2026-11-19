@@ -4,9 +4,11 @@ import { standardSecurityKey } from "../core/pdfwrite/crypto"
 import { fitBox, handoutPage, pageCount, type HandoutsPerPage } from "../core/presentation/pages"
 import { JPEG_32x24 } from "./pdfWriteFixtures"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { deckPdf, installTestRealm, openDeck } from "./presentationExportFixtures"
+import { deckPdf, installTestRealm, jobSession, openDeck } from "./presentationExportFixtures"
 import { installPresentationRealm, type RealmCanvas } from "../dom/presentation/services"
-import { openPdf, pageText, structRoles } from "./docxPdfFixtures"
+import { openPdf, pageText, pdfAssets, structRoles } from "./docxPdfFixtures"
+import { pdfJob } from "../dom/presentation/jobs/pdf"
+import { installJobsRealm } from "../dom/presentation/raster"
 
 // Slides as a tagged PDF: text drawn and extractable, the structure (H1 title, list items, Figure with alt text,
 // artifacts for layout art and footers), only http/https/mailto and slide links, picture bullets drawn, handouts in
@@ -219,6 +221,39 @@ describe("presentation PDF export", () => {
 
 		expect(pdf.numPages).toBe(3)
 		expect(new TextDecoder("latin1").decode(bytes)).toContain("/V 5")
+	})
+
+	it("refuses a protected PDF of a deck with no password with the typed password reason", { timeout: 60_000 }, async () => {
+		const context = await openDeck(deck())
+		const reader = jobSession(context)
+		let written = 0
+
+		installJobsRealm({ assets: pdfAssets, lang: "en-GB" })
+
+		try {
+			const outcome = await pdfJob.run(
+				{ layout: "slides", includeHidden: true, protect: true },
+				{
+					session: reader.session,
+					output: {
+						write: chunk => {
+							written += chunk.length
+
+							return Promise.resolve()
+						},
+						close: () => Promise.resolve()
+					},
+					signal: { aborted: false, onAbort: () => undefined },
+					progress: () => undefined
+				}
+			)
+
+			expect(outcome).toMatchObject({ kind: "refused", reason: "passwordUnsupported" })
+			expect(written).toBe(0)
+		} finally {
+			reader.close()
+			installJobsRealm(undefined)
+		}
 	})
 
 	it("writes the same bytes for the same deck", { timeout: 60_000 }, async () => {

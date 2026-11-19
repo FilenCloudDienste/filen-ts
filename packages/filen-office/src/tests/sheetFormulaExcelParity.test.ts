@@ -90,10 +90,12 @@ describe("criteria functions", () => {
 						}
 					}
 				).engine.dependencyGraph.rangeMapping.rangeMapping
+				const vertices = [...(ranges.get(0)?.values() ?? [])] as { readonly criterionFunctionCache: Map<unknown, unknown> }[]
 				let cached = 0
 
-				for (const vertex of ranges.get(0)?.values() ?? [])
-					cached += (vertex as { readonly criterionFunctionCache: Map<unknown, unknown> }).criterionFunctionCache.size
+				expect(vertices.length).toBeGreaterThan(0)
+
+				for (const vertex of vertices) cached += vertex.criterionFunctionCache.size
 
 				expect(cached).toBe(0)
 				expect(engine.result(0, rows - 1, 2).value).toBe(1 + rows - 1)

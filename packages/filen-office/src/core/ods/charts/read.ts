@@ -1,12 +1,15 @@
 import type { OdfPackage } from "../../odf/package"
 import { elementName, readElement, type OdfElement } from "../../odf/tree"
 import { parseLength } from "../../odf/units"
+import type { ChartLabels } from "../../xlsx/charts/model"
 import type { XlsxSection } from "../../xlsx/model/types"
 import { Namespaces, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
 import { rangeAddress } from "../formula/toXlsx"
 import type { OdsIssues } from "../issues"
-import { parseCaptured } from "../read/captured"
+import type { SliceClock } from "../../slicing"
+import { parseCaptured, spaceCount } from "../read/captured"
 import type { OdsCellFrame } from "../read/content"
+import { OdsReadError } from "../read/errors"
 
 // ODF charts (chart:chart objects, ODF 1.3 Part 3 §11) as the sheet's DrawingML charts (ECMA-376 Part 1 §21.2), so
 // the chart features show and edit them as they do a workbook's: each chart object a frame embeds becomes a chart
@@ -28,6 +31,8 @@ export interface OdsChartInput {
 	readonly prefixes: ReadonlyMap<string, string>
 	readonly tables: readonly OdsChartTable[]
 	readonly issues: OdsIssues
+	readonly clock?: SliceClock | undefined
+	readonly signal?: { readonly aborted: boolean } | undefined
 }
 
 // A sheet's charts: the relationships its part needs and the sections naming them, given the ids they got.
@@ -86,6 +91,8 @@ const CHART_CONTENT = "application/vnd.openxmlformats-officedocument.drawingml.c
 // Chart objects one workbook shows, and the bytes one object may take: past them the rest are left out (an issue).
 const MAX_CHARTS = 1024
 const MAX_OBJECT_BYTES = 16 * 1024 * 1024
+// The objects' content one workbook reads, all told (each object once, however many frames show it).
+export const MAX_CHART_BYTES = 64 * 1024 * 1024
 const MAX_POINT_STYLES = 4096
 export const EMU_PER_PT = 12_700
 
@@ -128,6 +135,9 @@ export function children(element: OdfElement | undefined, name: string): OdfElem
 	return element === undefined ? [] : element.children.filter(candidate => candidate.name === name)
 }
 
+// The most spaces one text:s of a chart stands for.
+const CHART_SPACE_RUN = 1024
+
 // The text of an element, paragraphs on lines of their own (text:p, text:h), text:s and text:tab as themselves.
 export function elementText(element: OdfElement): string {
 	const lines: string[] = []
@@ -135,7 +145,8 @@ export function elementText(element: OdfElement): string {
 		into.push(node.text)
 
 		for (const inner of node.children) {
-			if (inner.name === "text:s") into.push(" ".repeat(Math.min(1024, Number(inner.attributes.get("text:c") ?? "1") || 1)))
+			// Chart text is never written back as text:s: a short run is enough to show.
+			if (inner.name === "text:s") into.push(" ".repeat(spaceCount(inner.attributes.get("text:c"), CHART_SPACE_RUN)))
 			else if (inner.name === "text:tab") into.push("\t")
 			else if (inner.name === "text:line-break") into.push("\n")
 			else walk(inner, into)
@@ -233,7 +244,7 @@ function shapeProperties(graphic: ReadonlyMap<string, string>, line: boolean): s
 }
 
 // chart:label-position (§20.71) as c:dLblPos (§21.2.3.11), and the positions each plot takes.
-const LABEL_POSITIONS: ReadonlyMap<string, string> = new Map([
+export const LABEL_POSITIONS: ReadonlyMap<string, string> = new Map([
 	["avoid-overlap", "bestFit"],
 	["center", "ctr"],
 	["top", "t"],
@@ -333,6 +344,23 @@ export const LEGENDS: ReadonlyMap<string, string> = new Map([
 	["bottom", "b"],
 	["top-end", "tr"]
 ])
+// The inverses, for the writers: c:dLblPos as chart:label-position, c:legendPos as chart:legend-position.
+export const ODF_LABEL_POSITIONS: ReadonlyMap<string, string> = new Map([...LABEL_POSITIONS].map(([odf, drawing]) => [drawing, odf]))
+export const ODF_LEGENDS: ReadonlyMap<string, string> = new Map([...LEGENDS].map(([odf, drawing]) => [drawing, odf]))
+
+// A chart's or series' data labels as the chart properties saying them (none shown for null labels).
+export function labelProperties(labels: ChartLabels | null): [string, string | undefined][] {
+	const value = labels?.value === true
+	const percent = labels?.percent === true
+	const position = labels?.position ?? null
+
+	return [
+		["chart:data-label-number", value && percent ? "value-and-percentage" : value ? "value" : percent ? "percentage" : "none"],
+		["chart:data-label-text", labels?.category === true ? "true" : "false"],
+		["chart:data-label-series", labels?.series === true ? "true" : "false"],
+		["chart:label-position", position === null ? undefined : ODF_LABEL_POSITIONS.get(position)]
+	]
+}
 // chart:treat-empty-cells (§20.83) as c:dispBlanksAs (§21.2.3.5).
 const BLANKS: ReadonlyMap<string, string> = new Map([
 	["leave-gap", "gap"],
@@ -798,12 +826,48 @@ export async function objectChart(
 	return found === null ? null : { ...found, content }
 }
 
+// An object as read: its chart and translation (null when it holds none), or why it was not read.
+type ObjectOutcome =
+	| { readonly kind: "chart"; readonly content: Uint8Array; readonly translated: Translated; readonly markup: Uint8Array }
+	| { readonly kind: "none" }
+	| { readonly kind: "unread" }
+	| { readonly kind: "overBudget" }
+
 export async function readOdsCharts(input: OdsChartInput): Promise<OdsChartParts> {
 	const parts = new Map<string, Uint8Array>()
 	const overrides: string[] = []
 	const sheets = new Map<number, OdsSheetCharts>()
 	const charts: OdsChartSource[] = []
+	// Each object read, parsed and translated once: frames naming one share it.
+	const objects = new Map<string, ObjectOutcome>()
+	let bytes = 0
 	let count = 0
+
+	const objectOutcome = async (path: string, size: number): Promise<ObjectOutcome> => {
+		if (input.signal?.aborted === true) throw new OdsReadError("aborted", "Opening was aborted")
+		if (input.clock?.due === true) await input.clock.pause()
+
+		// Past MAX_OBJECT_BYTES objectChart reads nothing: nothing charged.
+		if (size <= MAX_OBJECT_BYTES) {
+			if (bytes + size > MAX_CHART_BYTES) return { kind: "overBudget" }
+
+			bytes += size
+		}
+
+		let found: Awaited<ReturnType<typeof objectChart>>
+
+		try {
+			found = await objectChart(input.odf, path)
+		} catch {
+			return { kind: "unread" }
+		}
+
+		if (found === null) return { kind: "none" }
+
+		const translated = translateChart(found.chart, found.styles)
+
+		return { kind: "chart", content: found.content, translated, markup: encoder.encode(translated.markup) }
+	}
 
 	for (const table of input.tables) {
 		if (table.shapes === undefined && table.frames.length === 0) continue
@@ -824,8 +888,9 @@ export async function readOdsCharts(input: OdsChartInput): Promise<OdsChartParts
 
 		for (const { frame, place } of frames) {
 			const path = objectPath(frame)
+			const entry = path === undefined ? undefined : input.odf.archive.get(`${path}/content.xml`)
 
-			if (path === undefined || input.odf.archive.get(`${path}/content.xml`) === undefined) continue
+			if (path === undefined || entry === undefined) continue
 
 			if (count >= MAX_CHARTS) {
 				input.issues.add("drawing", table.name, "charts past the limit")
@@ -833,17 +898,27 @@ export async function readOdsCharts(input: OdsChartInput): Promise<OdsChartParts
 				continue
 			}
 
-			let found: Awaited<ReturnType<typeof objectChart>>
+			let found = objects.get(path)
 
-			try {
-				found = await objectChart(input.odf, path)
-			} catch {
+			if (found === undefined) {
+				found = await objectOutcome(path, entry.uncompressedSize)
+
+				objects.set(path, found)
+			}
+
+			if (found.kind === "overBudget") {
+				input.issues.add("drawing", table.name, "charts past the limit")
+
+				continue
+			}
+
+			if (found.kind === "unread") {
 				input.issues.add("drawing", table.name, `chart ${path} does not read`)
 
 				continue
 			}
 
-			if (found === null) continue
+			if (found.kind === "none") continue
 
 			const anchor = anchorOf(frame, place)
 
@@ -855,13 +930,13 @@ export async function readOdsCharts(input: OdsChartInput): Promise<OdsChartParts
 
 			count++
 
-			const translated = translateChart(found.chart, found.styles)
+			const translated = found.translated
 			const part = `xl/charts/chart${count}.xml`
 			const id = `rId${relationships.length + 1}`
 
 			for (const issue of translated.issues) input.issues.add("drawing", table.name, `chart: ${issue}`)
 
-			parts.set(part, encoder.encode(translated.markup))
+			parts.set(part, found.markup)
 			overrides.push(`<Override PartName="/${part}" ContentType="${CHART_CONTENT}"/>`)
 			relationships.push({ id, type: CHART_RELATIONSHIP, target: `../charts/chart${count}.xml` })
 			anchors.push(

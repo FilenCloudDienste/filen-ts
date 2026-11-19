@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url"
 export const VALIDATOR = process.env["FILEN_OFFICE_OOXML_VALIDATOR"] ?? ""
 const DOTNET = process.env["FILEN_OFFICE_DOTNET"] || "dotnet"
 const ALLOW = fileURLToPath(new URL("../../../tools/openxml-validate/allow.json", import.meta.url))
+// How long close() waits for the validator to exit on EOF before killing it.
+const CLOSE_GRACE_MS = 5000
 
 // The extensions the validator opens as each package kind (tools/openxml-validate/Program.cs); it opens any other
 // path as a word-processing document, so a caller validates only these and decrypts encrypted packages first.
@@ -69,6 +71,8 @@ export class OpenXmlSdk {
 			env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: "1", DOTNET_NOLOGO: "1" }
 		})
 		this.lines = createInterface({ input: this.child.stdout })[Symbol.asyncIterator]()
+		// A write to a validator that already exited fails with EPIPE; validate() reports the exit from stdout.
+		this.child.stdin.on("error", () => undefined)
 	}
 
 	async validate(file: string): Promise<SdkResult> {
@@ -87,11 +91,22 @@ export class OpenXmlSdk {
 		return result
 	}
 
-	async close(): Promise<void> {
-		const exited = new Promise<void>(resolve => this.child.once("exit", () => resolve()))
+	// Ends the validator's input and waits for it to exit, killing it after `graceMs`; at once when it already exited.
+	async close(graceMs = CLOSE_GRACE_MS): Promise<void> {
+		const child = this.child
 
-		this.child.stdin.end()
-		await exited
+		if (child.exitCode !== null || child.signalCode !== null) return
+
+		const exited = new Promise<void>(resolve => child.once("exit", () => resolve()))
+		const timer = setTimeout(() => child.kill("SIGKILL"), graceMs)
+
+		child.stdin.end()
+
+		try {
+			await exited
+		} finally {
+			clearTimeout(timer)
+		}
 	}
 }
 

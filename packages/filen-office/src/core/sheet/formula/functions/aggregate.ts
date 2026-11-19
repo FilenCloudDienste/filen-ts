@@ -17,6 +17,7 @@ import {
 	ROW_SHOWN,
 	rowStateOf,
 	SheetFunctionPlugin,
+	unwrap,
 	valueError,
 	wholeTail,
 	type PluginAst,
@@ -43,14 +44,6 @@ interface Cell {
 	readonly value: PluginScalar
 	// Where it is, for a value read from a reference.
 	readonly address?: SimpleCellAddress
-}
-
-function unwrap(ast: PluginAst): PluginAst {
-	let node = ast
-
-	while (node.type === ("PARENTHESES" as PluginAst["type"]) && "expression" in node) node = node.expression
-
-	return node
 }
 
 // What one aggregate counts.

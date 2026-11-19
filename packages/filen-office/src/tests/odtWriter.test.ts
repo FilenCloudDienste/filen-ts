@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { TextSelection } from "prosemirror-state"
 import { ZipArchive, bytesSource } from "@filen/office/core/opc"
-import { decodeUtf8 } from "@filen/office/core/xml"
-import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
+import { decodeUtf8, encodeUtf8, parseXml, type XmlDocument } from "@filen/office/core/xml"
+import { docxSchema, type DocxEditorCommand } from "@filen/office/core/docx/edit"
 import { translateOdt } from "../core/odt/index"
 import { OdtWriteRefusal, proveOdt, writeOdt } from "../core/odt/write/writer"
 import { odtBytes, type OdtParts } from "./odtFixtures"
@@ -78,6 +78,38 @@ describe("ODT writer", () => {
 		expect(await bodyText(written.bytes)).toBe("Filen One|Two |three")
 	})
 
+	it("pairs the unchanged paragraphs of a long document edited at both ends with themselves", async () => {
+		// 2,500 distinct paragraphs, a paragraph inserted near the start and one removed near the end: the middle is
+		// too large to compare cell by cell, so blocks pair greedily, each with its own text one place on.
+		const count = 2500
+		const texts = Array.from({ length: count }, (_unused, k) => `Paragraph ${k}`)
+		const editing = await editOdt(document(texts.map(text => `<text:p>${text}</text:p>`).join("")))
+		const all = paragraphs(editing.session.state.doc)
+		const first = all[0]
+		const removed = all[count - 2]
+		const last = all[count - 1]
+
+		if (first === undefined || removed === undefined || last === undefined) throw new Error("no paragraph")
+
+		editing.session.dispatch(editing.session.state.tr.insertText("Last ", last.pos + 1))
+		editing.session.dispatch(editing.session.state.tr.delete(removed.pos, removed.pos + removed.node.nodeSize))
+		editing.session.dispatch(
+			editing.session.state.tr.insert(
+				first.pos + first.node.nodeSize,
+				docxSchema.nodes.paragraph.create(null, docxSchema.text("Inserted"))
+			)
+		)
+		editing.session.dispatch(editing.session.state.tr.insertText("First ", first.pos + 1))
+
+		const written = await saveOdt(editing)
+
+		// The four blocks the edit changed (a positional pairing of the middle rewrites all 2,500).
+		expect(written.written).toBe(4)
+		expect(await bodyText(written.bytes)).toBe(
+			[`First ${texts[0] ?? ""}`, "Inserted", ...texts.slice(1, -2), `Last ${texts[count - 1] ?? ""}`].join("|")
+		)
+	}, 30_000)
+
 	it("writes new formatting as a new automatic style named past the ones the file has", async () => {
 		const bytes = document('<text:p text:style-name="P1">One two</text:p>', {
 			automatic: `${AUTOMATIC}<style:style style:name="T2" style:family="text"/>`
@@ -128,6 +160,54 @@ describe("ODT writer", () => {
 
 		expect(content).toContain(
 			'<table:table-row><table:table-cell table:style-name="C1" office:value-type="string"><text:p/></table:table-cell><table:table-cell office:value-type="string"><text:p/></table:table-cell></table:table-row></table:table>'
+		)
+	})
+
+	it("proves and saves a table whose cells repeat past the column limit in bounded time", async () => {
+		const table =
+			'<table:table table:name="T"><table:table-column table:number-columns-repeated="2"/>' +
+			'<table:table-row><table:table-cell table:number-columns-repeated="1000000000"><text:p/></table:table-cell></table:table-row>' +
+			'<table:table-row><table:table-cell><text:p>a</text:p></table:table-cell><table:covered-table-cell table:number-columns-repeated="1e300"/></table:table-row>' +
+			"</table:table>"
+		const bytes = document(`<text:p>Before</text:p>${table}`)
+		const editing = await editOdt(bytes)
+		const first = paragraphs(editing.session.state.doc)[0]
+
+		if (first === undefined) throw new Error("no paragraph")
+
+		editing.session.dispatch(editing.session.state.tr.insertText("x", first.pos + 1))
+
+		const content = await entry((await saveOdt(editing)).bytes, "content.xml")
+
+		expect(content).toContain(`<text:p>xBefore</text:p>${table}`)
+	}, 10_000)
+
+	it("writes a table with repeated cells as before", async () => {
+		const table =
+			'<table:table table:name="T"><table:table-column table:number-columns-repeated="3"/>' +
+			'<table:table-row><table:table-cell table:style-name="C1" table:number-columns-repeated="2" office:value-type="string"><text:p>a</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>b</text:p></table:table-cell></table:table-row>' +
+			'<table:table-row><table:table-cell table:number-columns-spanned="2" office:value-type="string"><text:p>c</text:p></table:table-cell><table:covered-table-cell/><table:table-cell office:value-type="string"><text:p>ddd</text:p></table:table-cell></table:table-row>' +
+			"</table:table>"
+		const bytes = document(`<text:p>Before</text:p>${table}`, {
+			automatic: `${AUTOMATIC}<style:style style:name="C1" style:family="table-cell"><style:table-cell-properties fo:background-color="#ffff00"/></style:style>`
+		})
+		const editing = await editOdt(bytes)
+
+		expect(editing.locked).toBe(0)
+
+		const cell = paragraphs(editing.session.state.doc, true).find(paragraph => paragraph.node.textContent === "ddd")
+
+		if (cell === undefined) throw new Error("no cell")
+
+		editing.session.dispatch(editing.session.state.tr.insertText("x", cell.pos + 1))
+
+		const content = await entry((await saveOdt(editing)).bytes, "content.xml")
+
+		expect(content).toContain(
+			'<table:table-row><table:table-cell table:style-name="C1" table:number-columns-repeated="2" office:value-type="string"><text:p>a</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>b</text:p></table:table-cell></table:table-row>'
+		)
+		expect(content).toContain(
+			'<table:covered-table-cell/><table:table-cell office:value-type="string"><text:p>xddd</text:p></table:table-cell>'
 		)
 	})
 
@@ -499,6 +579,63 @@ describe("ODT writer", () => {
 		expect(removed).not.toContain('text:style-name="P1"')
 	})
 
+	it("starts no page style at a note paragraph whose node number is a body paragraph's starting one", async () => {
+		const bytes = odtBytes({
+			body: '<text:p>One</text:p><text:p>Two<text:note text:id="ftn1" text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>Note text</text:p><text:p>Second note</text:p></text:note-body></text:note></text:p><text:p>Three</text:p>'
+		})
+		const editing = await editOdt(bytes)
+		const first = paragraphs(editing.session.state.doc)[0]
+
+		if (first === undefined) throw new Error("no paragraph")
+
+		select(editing, first.pos + 3)
+		expect(await editing.editor.execute({ type: "insert.sectionBreak", kind: "nextPage" } as DocxEditorCommand)).toBe(true)
+
+		const edits = await odtEditsOf(editing)
+		const body = decodeUtf8(edits.parts.get("word/document.xml") as Uint8Array)
+		const notes = decodeUtf8(editing.source.translation.parts.get("word/footnotes.xml") as Uint8Array).replace(
+			"Second note",
+			"Second note changed"
+		)
+		const nth = (document: XmlDocument, local: string, n: number): number => {
+			let found = -1
+			let count = 0
+			const walk = (node: number): void => {
+				for (let child = document.firstChildElement(node); child >= 0 && found < 0; child = document.nextSiblingElement(child)) {
+					if (document.localName(child) === local && count++ === n) found = child
+					else walk(child)
+				}
+			}
+
+			walk(document.documentElement())
+
+			return found
+		}
+		// The paragraph the break starts a page style at, numbered as the note's second paragraph is in its part.
+		const starting = nth(parseXml(encodeUtf8(body)), "p", 1)
+		const second = nth(parseXml(encodeUtf8(notes)), "p", 3)
+
+		expect(second).toBeGreaterThanOrEqual(starting)
+
+		const shifted = body.replace("<w:body>", `<w:body>${"<!---->".repeat(second - starting)}`)
+
+		expect(nth(parseXml(encodeUtf8(shifted)), "p", 1)).toBe(second)
+
+		const content = await entry(
+			(
+				await writeOdt(editing.source, {
+					...edits,
+					parts: new Map([...edits.parts, ["word/document.xml", encodeUtf8(shifted)], ["word/footnotes.xml", encodeUtf8(notes)]])
+				})
+			).bytes,
+			"content.xml"
+		)
+
+		expect(content).toMatch(/<style:style style:name="P1" style:family="paragraph" style:master-page-name="Standard_1"\/>/u)
+		expect(content).toContain('<text:p text:style-name="P1">e</text:p>')
+		expect(content).toContain("<text:p>Note text</text:p><text:p>Second note changed</text:p>")
+	})
+
 	it("writes a changed paragraph style where it is, keeping its name and what else it states", async () => {
 		const bytes = document('<text:h text:style-name="Heading_20_1" text:outline-level="1">Title</text:h><text:p>Body</text:p>')
 		const editing = await editOdt(bytes)
@@ -657,6 +794,27 @@ describe("ODT writer", () => {
 
 		expect(proof.locked).toHaveLength(1)
 		expect(editing.locked).toBe(1)
+	})
+
+	it("refuses an edit in any paragraph of an automatic style with a text effect, not only the first", async () => {
+		const automatic =
+			'<style:style style:name="P3" style:family="paragraph"><style:text-properties fo:text-transform="lowercase"/></style:style>'
+
+		for (const index of [0, 1]) {
+			const editing = await editOdt(
+				document('<text:p text:style-name="P3">One</text:p><text:p text:style-name="P3">Two</text:p>', { automatic }),
+				{
+					prove: false
+				}
+			)
+			const target = paragraphs(editing.session.state.doc)[index]
+
+			if (target === undefined) throw new Error("no paragraph")
+
+			editing.session.dispatch(editing.session.state.tr.insertText("x", target.pos + 1))
+
+			await expect(saveOdt(editing)).rejects.toBeInstanceOf(OdtWriteRefusal)
+		}
 	})
 
 	it("refuses an edit in a block it cannot rewrite", async () => {

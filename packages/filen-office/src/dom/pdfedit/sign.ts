@@ -378,12 +378,16 @@ function buildAppearance(
 
 	if (visual?.kind === "image") {
 		const image = new mupdf.Image(visual.png)
-		const xobjects = document.newDictionary()
 
-		xobjects.put("Im1", document.addImage(image))
-		resources.put("XObject", xobjects)
-		contents += imageContent(image, pad, pad, visualW, innerH)
-		image.destroy()
+		try {
+			const xobjects = document.newDictionary()
+
+			xobjects.put("Im1", document.addImage(image))
+			resources.put("XObject", xobjects)
+			contents += imageContent(image, pad, pad, visualW, innerH)
+		} finally {
+			image.destroy()
+		}
 	}
 
 	if (lines.length > 0) {
@@ -439,127 +443,131 @@ export function addPdfSignatureField(mupdf: MupdfModule, document: PDFDocument, 
 	let fieldDict: PDFObject
 	let fieldName: string
 	let newField: PDFObject | null = null
+	// Loaded once and closed at the end: MuPDF keeps a page open while a wrapper of it lives. The widget belongs to it.
+	let page: Mupdf.PDFPage | null = null
 
-	if (request.placement.kind === "field") {
-		const { name } = request.placement
-		const field = fields.find(item => item.name === name && item.type === "Sig")
-		const first = field?.widgets[0]
+	try {
+		if (request.placement.kind === "field") {
+			const { name } = request.placement
+			const field = fields.find(item => item.name === name && item.type === "Sig")
+			const first = field?.widgets[0]
 
-		if (field === undefined || first === undefined) return refuse("fieldNotFound")
-		if (!deref(field.dict.get("V")).isNull()) refuse("fieldSigned")
+			if (field === undefined || first === undefined) return refuse("fieldNotFound")
+			if (!deref(field.dict.get("V")).isNull()) refuse("fieldSigned")
 
-		pageIndex = pageOf(document, first)
+			pageIndex = pageOf(document, first)
+			page = document.loadPage(pageIndex)
+			widget = findPlacedWidget(page, first.asIndirect())
+			fieldDict = field.ref
+			fieldName = field.name
+		} else {
+			const { page: index, rect } = request.placement
 
-		const page = document.loadPage(pageIndex)
+			if (!Number.isInteger(index) || index < 0 || index >= document.countPages()) refuse("pageOutOfRange")
 
-		widget = findPlacedWidget(page, first.asIndirect())
-		fieldDict = field.ref
-		fieldName = field.name
-	} else {
-		const { page: index, rect } = request.placement
+			pageIndex = index
+			fieldName = uniqueFieldName(fields)
 
-		if (!Number.isInteger(index) || index < 0 || index >= document.countPages()) refuse("pageOutOfRange")
+			page = document.loadPage(index)
 
-		pageIndex = index
-		fieldName = uniqueFieldName(fields)
+			const annot = page.createAnnotation("Widget")
+			const object = annot.getObject()
 
-		const page = document.loadPage(index)
-		const annot = page.createAnnotation("Widget")
-		const object = annot.getObject()
-
-		object.put("FT", document.newName("Sig"))
-		object.put("T", document.newString(fieldName))
-		object.put("F", WIDGET_FLAGS)
-		annot.setRect(rect)
-		widget = annot
-		fieldDict = object
-		newField = object
-	}
-
-	const page = document.loadPage(pageIndex)
-	const rotation = pageRotation(page)
-	const [x0, y0, x1, y1] = widget.getRect()
-	// The box as the reader sees it; the appearance turns with the page so its text stays upright.
-	const width = Math.abs(x1 - x0)
-	const height = Math.abs(y1 - y0)
-	const appearance = buildAppearance(mupdf, document, request, width, height)
-	const radians = (rotation * Math.PI) / 180
-	const cos = Math.round(Math.cos(radians))
-	const sin = Math.round(Math.sin(radians))
-
-	widget.setAppearance(null, null, [cos, sin, -sin, cos, 0, 0], [0, 0, width, height], appearance.resources, appearance.contents)
-	widget.update()
-
-	// The signature dictionary.
-	const signature = document.newDictionary()
-
-	signature.put("Type", document.newName("Sig"))
-	signature.put("Filter", document.newName("Adobe.PPKLite"))
-	signature.put("SubFilter", document.newName("ETSI.CAdES.detached"))
-	signature.put("ByteRange", sentinelRange(document))
-	signature.put("Contents", document.newByteString(new Uint8Array(request.capacity)))
-	signature.put("M", document.newString(pdfDate(request.time)))
-
-	if (request.name !== null) signature.put("Name", document.newString(request.name))
-	if (request.reason !== null) signature.put("Reason", document.newString(request.reason))
-	if (request.location !== null) signature.put("Location", document.newString(request.location))
-
-	if (request.certify !== null) {
-		const params = document.newDictionary()
-		const reference = document.newDictionary()
-		const references = document.newArray()
-
-		params.put("Type", document.newName("TransformParams"))
-		params.put("P", request.certify)
-		params.put("V", document.newName("1.2"))
-		reference.put("Type", document.newName("SigRef"))
-		reference.put("TransformMethod", document.newName("DocMDP"))
-		reference.put("TransformParams", params)
-		references.push(reference)
-		signature.put("Reference", references)
-	}
-
-	const signatureRef = document.addObject(signature)
-
-	fieldDict.put("V", signatureRef)
-
-	// The form: the new field listed, SigFlags set (only when different, so a signed document's form is not rewritten).
-	let acroForm = root.get("AcroForm")
-
-	if (acroForm.isNull()) {
-		acroForm = document.addObject(document.newDictionary())
-		root.put("AcroForm", acroForm)
-	}
-
-	const form = deref(acroForm)
-
-	if (newField !== null) {
-		let list = form.get("Fields")
-
-		if (list.isNull()) {
-			list = document.newArray()
-			form.put("Fields", list)
+			object.put("FT", document.newName("Sig"))
+			object.put("T", document.newString(fieldName))
+			object.put("F", WIDGET_FLAGS)
+			annot.setRect(rect)
+			widget = annot
+			fieldDict = object
+			newField = object
 		}
 
-		deref(list).push(newField)
-	}
+		const rotation = pageRotation(page)
+		const [x0, y0, x1, y1] = widget.getRect()
+		// The box as the reader sees it; the appearance turns with the page so its text stays upright.
+		const width = Math.abs(x1 - x0)
+		const height = Math.abs(y1 - y0)
+		const appearance = buildAppearance(mupdf, document, request, width, height)
+		const radians = (rotation * Math.PI) / 180
+		const cos = Math.round(Math.cos(radians))
+		const sin = Math.round(Math.sin(radians))
 
-	const flags = deref(form.get("SigFlags"))
+		widget.setAppearance(null, null, [cos, sin, -sin, cos, 0, 0], [0, 0, width, height], appearance.resources, appearance.contents)
+		widget.update()
 
-	if (!flags.isNumber() || flags.asNumber() !== SIG_FLAGS) form.put("SigFlags", SIG_FLAGS)
+		// The signature dictionary.
+		const signature = document.newDictionary()
 
-	if (request.certify !== null) {
-		let perms = root.get("Perms")
+		signature.put("Type", document.newName("Sig"))
+		signature.put("Filter", document.newName("Adobe.PPKLite"))
+		signature.put("SubFilter", document.newName("ETSI.CAdES.detached"))
+		signature.put("ByteRange", sentinelRange(document))
+		signature.put("Contents", document.newByteString(new Uint8Array(request.capacity)))
+		signature.put("M", document.newString(pdfDate(request.time)))
 
-		if (perms.isNull()) {
-			perms = document.newDictionary()
-			root.put("Perms", perms)
+		if (request.name !== null) signature.put("Name", document.newString(request.name))
+		if (request.reason !== null) signature.put("Reason", document.newString(request.reason))
+		if (request.location !== null) signature.put("Location", document.newString(request.location))
+
+		if (request.certify !== null) {
+			const params = document.newDictionary()
+			const reference = document.newDictionary()
+			const references = document.newArray()
+
+			params.put("Type", document.newName("TransformParams"))
+			params.put("P", request.certify)
+			params.put("V", document.newName("1.2"))
+			reference.put("Type", document.newName("SigRef"))
+			reference.put("TransformMethod", document.newName("DocMDP"))
+			reference.put("TransformParams", params)
+			references.push(reference)
+			signature.put("Reference", references)
 		}
 
-		deref(perms).put("DocMDP", signatureRef)
-	}
+		const signatureRef = document.addObject(signature)
 
-	return { pages: [pageIndex], field: fieldName, signatureNum: signatureRef.asIndirect() }
+		fieldDict.put("V", signatureRef)
+
+		// The form: the new field listed, SigFlags set (only when different, so a signed document's form is not rewritten).
+		let acroForm = root.get("AcroForm")
+
+		if (acroForm.isNull()) {
+			acroForm = document.addObject(document.newDictionary())
+			root.put("AcroForm", acroForm)
+		}
+
+		const form = deref(acroForm)
+
+		if (newField !== null) {
+			let list = form.get("Fields")
+
+			if (list.isNull()) {
+				list = document.newArray()
+				form.put("Fields", list)
+			}
+
+			deref(list).push(newField)
+		}
+
+		const flags = deref(form.get("SigFlags"))
+
+		if (!flags.isNumber() || flags.asNumber() !== SIG_FLAGS) form.put("SigFlags", SIG_FLAGS)
+
+		if (request.certify !== null) {
+			let perms = root.get("Perms")
+
+			if (perms.isNull()) {
+				perms = document.newDictionary()
+				root.put("Perms", perms)
+			}
+
+			deref(perms).put("DocMDP", signatureRef)
+		}
+
+		return { pages: [pageIndex], field: fieldName, signatureNum: signatureRef.asIndirect() }
+	} finally {
+		page?.destroy()
+	}
 }
 
 // ---- the signed save ----

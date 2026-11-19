@@ -28,7 +28,7 @@ import { XlsxSheet } from "../read/index"
 import { RefRefused } from "../refs/catalogue"
 import { FormulaShift } from "../refs/formulas"
 import { rewriteChart } from "../refs/parts"
-import { nameWithFormula } from "../refs/plan"
+import { lastSegment, nameWithFormula } from "../refs/plan"
 import { liveRelationships, refState } from "../refs/state"
 import { renameTables } from "../refs/structured"
 import { relationshipType } from "../write/index"
@@ -84,17 +84,25 @@ function refused(detail: string): { refused: SheetRefusal } {
 	return { refused: { reason: "structureLocked", detail } }
 }
 
-function lastSegment(type: string): string {
-	return type.slice(type.lastIndexOf("/") + 1)
-}
-
-// A name no sheet has: `base` itself, else "base (2)", "base (3)", ... cut to fit 31 characters.
+// A name no sheet has: "base (2)", "base (3)", ... cut to fit 31 characters. A base Excel would refuse (read from
+// a file that did not keep its rules) has its forbidden characters replaced first, since no suffix cures them; a
+// candidate refused for anything but being taken is returned as it is, for the caller to refuse.
 export function copyName(document: XlsxDocument, base: string): string {
+	const cleaned = base.replace(/[\\/?*[\]:]/g, "_").replace(/^'+/, "")
+	// "History" is reserved only bare; the suffix cures it.
+	const usable = cleaned.length === 0 ? "Sheet" : cleaned
+
 	for (let n = 2; ; n++) {
 		const suffix = ` (${String(n)})`
-		const name = base.slice(0, 31 - suffix.length) + suffix
+		let head = usable.slice(0, 31 - suffix.length)
+		const last = head.charCodeAt(head.length - 1)
 
-		if (sheetNameRefusal(document, name, null) === null) return name
+		// Never half a surrogate pair.
+		if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1)
+
+		const name = head + suffix
+
+		if (sheetNameRefusal(document, name, null)?.detail !== "taken") return name
 	}
 }
 
@@ -586,7 +594,7 @@ export async function duplicateSheet(
 				: model instanceof XlsxSheet && model.rootOpenEnd > model.rootStart
 					? decodeUtf8(sourcePart.subarray(model.rootStart, model.rootOpenEnd))
 					: (/<[A-Za-z_][^>]*>/.exec(decodeUtf8(sourcePart.subarray(0, Math.min(sourcePart.length, 8192))))?.[0] ?? "")
-	const sourcePrefix = model instanceof XlsxSheet ? model.prefix : ""
+	const sourcePrefix = model.prefix
 	const prefixes = relationshipPrefixes(rootTag)
 	const uids = revisionPrefixes(rootTag)
 	const copied: { name: string; markup: string; own: boolean }[] = []
@@ -722,26 +730,29 @@ export async function duplicateSheet(
 		// Held by the catalogue, so later structure edits move them as they move the source's.
 		for (const op of plan.parts) state.setPart(op.name, op.contentType, op.bytes)
 
-		added.length = 0
-
-		const sheetRelationship = changeLog.addRelationship(workbook.workbookPart, {
-			type: relationshipType(workbook.strict, "worksheet"),
-			target: relativeTarget(workbook.workbookPart, part)
-		})
-
-		added.push({ source: workbook.workbookPart, relationship: sheetRelationship })
-
-		for (const op of [...relationships, ...plan.relationships])
-			added.push({
-				source: op.source,
-				relationship: changeLog.addRelationship(op.source, {
-					type: op.type,
-					target: op.target,
-					...(op.external && { external: true })
-				})
+		// A redo puts back the very relationships the copy's markup names by id.
+		if (added.length > 0) {
+			for (const { source, relationship } of added) changeLog.readdRelationship(source, relationship)
+		} else {
+			const sheetRelationship = changeLog.addRelationship(workbook.workbookPart, {
+				type: relationshipType(workbook.strict, "worksheet"),
+				target: relativeTarget(workbook.workbookPart, part)
 			})
 
-		;(entry as { relationshipId: string }).relationshipId = sheetRelationship.id
+			added.push({ source: workbook.workbookPart, relationship: sheetRelationship })
+
+			for (const op of [...relationships, ...plan.relationships])
+				added.push({
+					source: op.source,
+					relationship: changeLog.addRelationship(op.source, {
+						type: op.type,
+						target: op.target,
+						...(op.external && { external: true })
+					})
+				})
+
+			;(entry as { relationshipId: string }).relationshipId = sheetRelationship.id
+		}
 		sheets.splice(at, 0, entry)
 		workbook.activeTab = activeAfter
 		changeLog.workbookSection("sheets")

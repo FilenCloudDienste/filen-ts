@@ -1,6 +1,11 @@
 import { D, type DrawingReader } from "../reader"
 import { formatNumber } from "./format"
 
+// Whether the chart part uses the 1904 date system (c:date1904 on its c:chartSpace).
+export function chartDate1904(reader: DrawingReader): boolean {
+	return reader.bool(reader.child(reader.document.documentElement(), D.C, "date1904"), "val", false)
+}
+
 // Cached chart data (§21.2.2: c:numCache, c:strCache, c:numLit, c:strLit, c:multiLvlStrCache). Charts are
 // drawn from the values Office cached in the part; the workbook is never opened.
 
@@ -31,13 +36,21 @@ export interface CachedValues {
 
 const EMPTY: CachedValues = { count: 0, numbers: null, strings: null, formatCode: "General" }
 
+// A c:pt's idx as a whole index (default: its position); a fractional idx floors, a negative or non-finite one
+// reads as -1 so it is skipped and never lowers the highest index.
+export function pointIndex(reader: DrawingReader, pt: number, position: number): number {
+	const index = Math.floor(reader.number(pt, "idx", position))
+
+	return index >= 0 ? index : -1
+}
+
 // The points a cache holds: up to the highest point written (a declared c:ptCount beyond the last point
 // is not allocated), within c:ptCount, MAX_POINTS and the chart's remaining budget, which it consumes.
 function pointCount(reader: DrawingReader, cache: number, points: readonly number[], budget: PointBudget): number {
 	let highest = -1
 
 	points.forEach((pt, position) => {
-		highest = Math.max(highest, reader.number(pt, "idx", position))
+		highest = Math.max(highest, pointIndex(reader, pt, position))
 	})
 
 	const declared = Math.floor(reader.number(reader.child(cache, D.C, "ptCount"), "val", highest + 1))
@@ -54,7 +67,7 @@ function readNumbers(reader: DrawingReader, cache: number, budget: PointBudget):
 	const numbers = new Float64Array(count).fill(Number.NaN)
 
 	points.forEach((pt, position) => {
-		const index = reader.number(pt, "idx", position)
+		const index = pointIndex(reader, pt, position)
 
 		if (!(index >= 0 && index < count)) return
 
@@ -73,7 +86,7 @@ function readStrings(reader: DrawingReader, cache: number, budget: PointBudget):
 	const strings: string[] = new Array<string>(count).fill("")
 
 	points.forEach((pt, position) => {
-		const index = reader.number(pt, "idx", position)
+		const index = pointIndex(reader, pt, position)
 
 		if (index >= 0 && index < count) strings[index] = reader.text(reader.child(pt, D.C, "v"))
 	})
@@ -218,7 +231,9 @@ export function readSeries(
 			node: ser,
 			index,
 			order: reader.number(reader.child(ser, D.C, "order"), "val", index),
-			name: name.strings?.[0] ?? (name.numbers === null ? "" : formatNumber(name.numbers[0] ?? Number.NaN, name.formatCode)),
+			name:
+				name.strings?.[0] ??
+				(name.numbers === null ? "" : formatNumber(name.numbers[0] ?? Number.NaN, name.formatCode, chartDate1904(reader))),
 			categories: readCache(reader, reader.child(ser, D.C, scatter ? "xVal" : "cat"), budget),
 			values: readCache(reader, reader.child(ser, D.C, scatter ? "yVal" : "val"), budget),
 			...(bubble ? { sizes: readCache(reader, reader.child(ser, D.C, "bubbleSize"), budget) } : {}),

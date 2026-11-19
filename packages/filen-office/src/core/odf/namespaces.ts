@@ -46,6 +46,11 @@ export type OdfPrefix = keyof typeof OdfNs
 
 const PREFIX_BY_URI: ReadonlyMap<string, string> = new Map(Object.entries(OdfNs).map(([prefix, uri]) => [uri, prefix]))
 
+// The prefix this table gives a namespace URI; undefined for one it does not know.
+export function odfPrefixOf(uri: string): string | undefined {
+	return PREFIX_BY_URI.get(uri)
+}
+
 // The namespaces of the StarOffice/OpenOffice.org 1.x XML formats (.sxw, .sxc), which are not ODF.
 export const LEGACY_OFFICE_NAMESPACE = "http://openoffice.org/2000/office"
 

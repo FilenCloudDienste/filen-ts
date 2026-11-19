@@ -1,9 +1,10 @@
 import type { ByteSource } from "../../core/opc/index"
 import type { Format, PresentationRefusal } from "../../core/presentation/model"
+import { clearTimer, setTimer } from "@filen/shared/savePort"
 import { servePresentation, type EngineServices, type OpenCapability, type PresentationEndpoint, type ServeOptions } from "./engine"
 import { presentationTextServices } from "./engine/view"
 import { realmScheduler } from "./scheduler"
-import { clearTimer, isBitmap, offerSvgPort, setTimer, workerSvgRasterizer, type SvgPortMessage } from "./svgPort"
+import { isBitmap, offerSvgPort, workerSvgRasterizer, type SvgPortMessage } from "./svgPort"
 import { installPresentationRealm, type PresentationRealm } from "./services"
 import {
 	PRESENTATION_METHODS,

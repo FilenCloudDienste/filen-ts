@@ -14,11 +14,16 @@ export type VerifyFailure =
 
 export class DocxVerifyError extends Error {
 	readonly reason: VerifyFailure
+	// What the refusal compared, for tests and local debugging. It may hold document content, so it is never part
+	// of `message` (which is logged) and not enumerable (not copied by a spread or a structured log).
+	declare readonly detail?: string
 
-	constructor(reason: VerifyFailure, message: string) {
+	constructor(reason: VerifyFailure, message: string, detail?: string) {
 		super(message)
 		this.name = "DocxVerifyError"
 		this.reason = reason
+
+		if (detail !== undefined) Object.defineProperty(this, "detail", { value: detail, enumerable: false })
 	}
 }
 

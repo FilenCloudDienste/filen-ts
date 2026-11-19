@@ -28,7 +28,7 @@ import {
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, digestOf } from "../changes"
-import type { EffectTiming, OpOf, TimingOp } from "../ops"
+import { heldBytes, type EffectTiming, type OpOf, type TimingOp } from "../ops"
 
 // Applies the timing ops to the model. setTiming sets a slide's timing whole. The effect ops author one effect of a
 // slide's sequences (core/anim/presets/effects/sequence.ts): add one where it plays, remove it, move it within its
@@ -255,7 +255,7 @@ function heldWhole(
 	const hold = (node: TimeNode): TimeNode => {
 		if (kept.has(node)) return node
 
-		const source = node.ctn.src === undefined ? undefined : context.sourceBytes(node.ctn.src)
+		const source = node.ctn.src === undefined ? undefined : heldBytes(context, node.ctn.src)
 		const raw = source instanceof Uint8Array ? source : node.ctn.raw
 
 		if (raw === undefined || raw.length === 0) return node
@@ -278,7 +278,7 @@ function heldWhole(
 	const builds = prior.builds.map(build => {
 		if (liveBuilds.has(build) || build.src === undefined) return build
 
-		const source = context.sourceBytes(build.src)
+		const source = heldBytes(context, build.src)
 
 		if (!(source instanceof Uint8Array)) return build
 
@@ -289,7 +289,7 @@ function heldWhole(
 
 	// The mc:AlternateContent the prior timing sat in (MS-PPTX §2.2.2), as its bytes: an undo writes it back whole while
 	// the tree is what it reads as (its Fallback, which the model does not hold, included).
-	const alternate = prior.alternate === undefined ? undefined : context.sourceBytes(prior.alternate)
+	const alternate = prior.alternate === undefined ? undefined : heldBytes(context, prior.alternate)
 	const alternateRaw = alternate instanceof Uint8Array ? alternate : prior.alternateRaw
 
 	if (alternateRaw !== undefined) bytes += alternateRaw.length

@@ -3,9 +3,10 @@ import { AttachType } from "./buffer"
 import { GlyphClass, LookupFlag, classOf, coverageIndex } from "./otl"
 import { isDefaultIgnorable } from "./unicode"
 
-// GPOS lookup types 1-8 (OpenType 1.9 "GPOS — Glyph Positioning Table"). Device tables and contour-point
-// anchors are not used: PDF text is not hinted. Attachments are resolved to origins by resolveOrigins. The
-// cursive attachment convention (which glyph takes the cross-stream offset) is HarfBuzz's
+// GPOS lookup types 1-8 (OpenType 1.9 "GPOS — Glyph Positioning Table"), and type 9 extension subtables, which
+// LayoutTable (otl.ts) resolves to the type they wrap. Device tables and contour-point anchors are not used: PDF
+// text is not hinted. Attachments are resolved to origins by resolveOrigins. The cursive attachment convention
+// (which glyph takes the cross-stream offset) is HarfBuzz's
 // (src/OT/Layout/GPOS/CursivePosFormat1.hh, HarfBuzz 14.6.0, "Old MIT" licence, see THIRD_PARTY_NOTICES.md).
 
 export class PositioningApplier extends LookupApplier {
@@ -39,7 +40,7 @@ export class PositioningApplier extends LookupApplier {
 		}
 	}
 
-	// Adds a ValueRecord at `at` with `format` to glyph i. Returns the record's size.
+	// Adds a ValueRecord at `at` with `format` to glyph i.
 	private value(format: number, at: number, i: number): void {
 		const view = this.view
 		const buffer = this.buffer
@@ -221,11 +222,13 @@ export class PositioningApplier extends LookupApplier {
 	private previousBase(i: number): number {
 		const buffer = this.buffer
 
-		for (let k = i - 1; k >= 0; k--) {
-			if (buffer.glyphClass[k] !== GlyphClass.MARK) return k
-		}
+		let k = i - 1
 
-		return -1
+		while (k >= 0 && buffer.glyphClass[k] === GlyphClass.MARK) k--
+
+		this.visit(i - k)
+
+		return k
 	}
 
 	private attachMark(i: number, base: number, markArray: number, markIndex: number, baseAnchor: number): number {
@@ -316,13 +319,21 @@ export class PositioningApplier extends LookupApplier {
 		const buffer = this.buffer
 		const flag = this.lookup.flag & ~(LookupFlag.IGNORE_BASE_GLYPHS | LookupFlag.IGNORE_LIGATURES | LookupFlag.IGNORE_MARKS)
 
-		for (let k = i - 1; k >= 0; k--) {
+		let found = -1
+		let k = i - 1
+
+		for (; k >= 0; k--) {
 			if (isDefaultIgnorable(buffer.cp[k] ?? 0)) continue
-			if (buffer.glyphClass[k] !== GlyphClass.MARK) return -1
-			if (!this.ignoredByFlag(k, flag, this.lookup.markFilteringSet)) return k
+			if (buffer.glyphClass[k] !== GlyphClass.MARK) break
+			if (!this.ignoredByFlag(k, flag, this.lookup.markFilteringSet)) {
+				found = k
+				break
+			}
 		}
 
-		return -1
+		this.visit(i - k)
+
+		return found
 	}
 
 	private markToMark(offset: number, i: number): number {

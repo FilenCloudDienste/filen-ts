@@ -400,9 +400,14 @@ export class DocxDocBuilder {
 	// Why the table being built cannot be edited, once something fails.
 	private tableFailure: LockReason | null = null
 	private drawings: readonly (DrawingInfo | undefined)[] | undefined = undefined
+	// Whether the origins of what it builds are recorded at once (see builtFrom).
+	private readonly eagerOrigins: boolean
 
-	constructor(context: DocxEditContext) {
+	// `origins`: "eager" for documents built to be read for a while (Find, notes shown), which then hold nothing
+	// for the context until a paste asks.
+	constructor(context: DocxEditContext, origins: "eager" | "deferred" = "deferred") {
 		this.context = context
+		this.eagerOrigins = origins === "eager"
 	}
 
 	// `part`: the story's part where the document's model does not have it (a story the editor added), with the
@@ -495,7 +500,7 @@ export class DocxDocBuilder {
 					? yield* this.tableSteps(item, pending ?? NO_MARKERS, resume)
 					: this.block(item, pending ?? NO_MARKERS)
 
-			builtFrom(this.context, block, part.index)
+			builtFrom(this.context, block, part.index, this.eagerOrigins)
 			unformattableFields.set(block, unformattable.found)
 			unformattable.found ||= found
 			blocks.push(block)
@@ -548,7 +553,7 @@ export class DocxDocBuilder {
 
 		const block = this.block(item, pending ?? NO_MARKERS)
 
-		builtFrom(this.context, block, part.index)
+		builtFrom(this.context, block, part.index, this.eagerOrigins)
 
 		return block
 	}

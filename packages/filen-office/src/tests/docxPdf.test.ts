@@ -1,12 +1,54 @@
 import { describe, expect, it } from "vitest"
 import { openPdf, pageText, paragraph, pdfOf, snapshotOf, structRoles, structuredDocx } from "./docxPdfFixtures"
-import { RevisionView } from "@filen/office/core/docx"
+import { ObjectKind, RevisionView } from "@filen/office/core/docx"
+import { bytesSource } from "@filen/office/core/opc"
+import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
+import { DocxEngine, type DocxEngineServices, type DocxPageData } from "@filen/office/dom/docx"
 import { cellOrder } from "../core/docx/pdf/paint"
 import type { DocxPdfCell, DocxPdfRole } from "../core/docx/pdf/types"
 import { bookmarkIndex } from "../dom/docx/links"
+import { docxPdfSnapshot } from "../dom/docx/pdfSnapshot"
 import { buildDocx } from "./docxSynthetic"
 import { layOut } from "./layoutFixtures"
 import { embeddedFontNames } from "./pdfWriteFixtures"
+
+const PICTURE = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+
+// A paragraph holding `count` inline pictures (each its own object).
+function pictures(count: number): string {
+	const picture = (id: number): string =>
+		`<w:r><w:drawing><wp:inline><wp:extent cx="190500" cy="190500"/><wp:docPr id="${id}" name="d${id}"/><a:graphic><a:graphicData uri="${PICTURE}">` +
+		`<pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="p${id}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+		'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="190500" cy="190500"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+
+	return `<w:p><w:r><w:t xml:space="preserve">Pictures </w:t></w:r>${Array.from({ length: count }, (_, k) => picture(k + 1)).join("")}</w:p>`
+}
+
+// A measurer without a browser: every character half an em wide.
+const measurer: TextMeasurer = {
+	kerningControl: true,
+	measure(font, _kerning, texts, count, widths) {
+		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
+
+		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
+	},
+	fontExtents(font): FontExtents {
+		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
+
+		return { ascent: size * 0.8, descent: size * 0.2 }
+	}
+}
+
+function engineServices(): DocxEngineServices {
+	return {
+		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
+		replayFonts: false,
+		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
+		measurer,
+		yield: () => Promise.resolve(),
+		sliceMs: Infinity
+	}
+}
 
 interface StructNode {
 	readonly role?: string
@@ -388,8 +430,8 @@ describe("DOCX to PDF", () => {
 		})
 		const text = await pageText(await openPdf((await pdfOf(await snapshotOf(docx))).bytes), 1)
 
-		expect(text.toLowerCase()).toContain("shout")
-		expect(text.toLowerCase()).toContain("small caps")
+		expect(text).toContain("shout")
+		expect(text).toContain("Small Caps")
 	})
 
 	it("keeps a header's hyperlink clickable on every page, its annotation under a Link element", async () => {
@@ -464,6 +506,147 @@ describe("DOCX to PDF", () => {
 		// The document's own language on the catalog only; French and German (a Windows identifier) on their runs.
 		expect(/\/Lang \(([^)]*)\)/.exec(text.slice(text.indexOf("/Type /Catalog")))?.[1]).toBe("en-GB")
 		expect(marked).toEqual(["fr-FR", "de-DE"])
+	})
+
+	it("tags legacy check boxes with their state as replacement text; untagged output draws them as before", async () => {
+		const form = (checked: boolean): string =>
+			`<w:r><w:fldChar w:fldCharType="begin"><w:ffData><w:name w:val="F"/><w:enabled/><w:checkBox><w:sizeAuto/><w:default w:val="${checked ? "1" : "0"}"/></w:checkBox></w:ffData></w:fldChar></w:r>` +
+			'<w:r><w:instrText xml:space="preserve"> FORMCHECKBOX </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+		const run = (text: string): string => `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`
+		const layout = await layOut(buildDocx({ body: `<w:p>${form(true)}${run(" Yes ")}${form(false)}${run(" No")}</w:p>` }), {
+			view: RevisionView.Final
+		})
+		const { model, resolver, store, fonts } = layout.loaded
+		const table = layout.objects
+		// The objects as the renderer sends them (the shared fixture sends placeholders).
+		const document = await docxPdfSnapshot(
+			{
+				model,
+				layout,
+				fonts,
+				resolver,
+				store,
+				view: RevisionView.Final,
+				objects: ids =>
+					Promise.resolve(
+						ids.map(id =>
+							table.kinds[id] === ObjectKind.CHECKBOX
+								? ({ kind: "checkbox", id, checked: table.indices[id] === 1 } as const)
+								: ({ kind: "placeholder", id, reason: "test" } as const)
+						)
+					),
+				media: () => Promise.resolve(null)
+			},
+			{ title: "Test document" }
+		)
+		const tagged = Buffer.from((await pdfOf(document, { deflate: null })).bytes).toString("latin1")
+		const spans = [...tagged.matchAll(/\/S \/Span[^]*?\/ActualText (<[0-9A-Fa-f]+>|\([^)]*\))/g)].map(match => match[1])
+		const roles = await structRoles(await openPdf((await pdfOf(document)).bytes), 1)
+
+		expect(spans.map(text => (text ?? "").toUpperCase())).toEqual(["<FEFF2612>", "<FEFF2610>"])
+		expect(roles.indexOf("P")).toBeLessThan(roles.indexOf("Span"))
+
+		const untagged = Buffer.from((await pdfOf(document, { deflate: null, tagged: false })).bytes).toString("latin1")
+
+		expect(untagged).not.toContain("/ActualText")
+		expect(untagged).not.toContain("/StructTreeRoot")
+	})
+
+	it("places the same objects as the viewer's pages, inline pictures included", async () => {
+		const pages: DocxPageData[] = []
+		const engine = new DocxEngine(
+			bytesSource(structuredDocx({ extraBody: pictures(3) })),
+			engineServices(),
+			event => {
+				if (event.type === "pages") for (const page of event.pages) pages[page.index] = page
+			},
+			{ retain: true, view: "final" }
+		)
+
+		await engine.run()
+
+		const live = engine.pdfSource()
+
+		expect(live).toBeDefined()
+
+		if (live === undefined) return
+
+		const document = await docxPdfSnapshot(live, { title: "Test document" })
+
+		engine.close()
+
+		expect(document.pages.length).toBe(pages.length)
+		expect(document.pages.reduce((sum, page) => sum + page.objectCount, 0)).toBeGreaterThanOrEqual(3)
+
+		for (const page of document.pages) {
+			const shown = pages[page.index]
+
+			expect(page.objectCount).toBe(shown?.objectCount)
+			expect(Array.from(page.objectFloats)).toEqual(Array.from(shown?.objectFloats ?? []))
+			expect(Array.from(page.objectInts)).toEqual(Array.from(shown?.objectInts ?? []))
+		}
+	})
+
+	it("asks for the objects a few at a time when sliced, giving the host turns, and stops between them when aborted", async () => {
+		const layout = await layOut(buildDocx({ body: pictures(40) }), { view: RevisionView.Final })
+		const { model, resolver, store, fonts } = layout.loaded
+		const asked: number[][] = []
+		let pauses = 0
+		const signal = { aborted: false }
+		const live = {
+			model,
+			layout,
+			fonts,
+			resolver,
+			store,
+			view: RevisionView.Final,
+			objects: (ids: readonly number[]) => {
+				asked.push([...ids])
+
+				return Promise.resolve(ids.map(id => ({ kind: "placeholder", id, reason: "test" }) as const))
+			},
+			media: () => Promise.resolve(null)
+		}
+		// Always due: every chance to give the host a turn is taken.
+		const slicing = {
+			sliceMs: 0,
+			now: () => 0,
+			pause: () => {
+				pauses++
+
+				return Promise.resolve()
+			}
+		}
+		const whole = await docxPdfSnapshot(live, { title: "Test document" })
+
+		expect(asked).toHaveLength(1)
+		expect(asked[0]?.length).toBe(40)
+
+		asked.length = 0
+
+		const sliced = await docxPdfSnapshot(live, { title: "Test document", slicing })
+
+		expect(asked.length).toBeGreaterThanOrEqual(5)
+		expect(asked.every(ids => ids.length <= 8)).toBe(true)
+		expect(asked.flat()).toEqual([...whole.objects.keys()])
+		expect([...sliced.objects.keys()]).toEqual([...whole.objects.keys()])
+		// One a page, one between chunks.
+		expect(pauses).toBe(sliced.pages.length + asked.length - 1)
+		expect((await pdfOf(sliced)).bytes).toEqual((await pdfOf(whole)).bytes)
+
+		asked.length = 0
+
+		const aborting = {
+			...live,
+			objects: (ids: readonly number[]) => {
+				signal.aborted = true
+
+				return live.objects(ids)
+			}
+		}
+
+		await expect(docxPdfSnapshot(aborting, { title: "Test document", slicing, signal })).rejects.toThrow(/aborted/)
+		expect(asked).toHaveLength(1)
 	})
 
 	it("embeds only subsets of the bundled faces", async () => {

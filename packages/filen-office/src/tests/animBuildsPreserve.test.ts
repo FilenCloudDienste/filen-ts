@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { effectPreset } from "../core/anim/presets/effects/index"
+import { cloneModel } from "../core/presentation/edit/changes"
 import { addEffectsOp, slideEffects } from "../core/presentation/edit/commands/timing"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { SlideNode } from "../core/presentation/model"
@@ -85,8 +86,11 @@ describe("build entries and exact timing undo", () => {
 		for (const saveBetween of [false, true])
 			it(`an undone ${step.name} saves the file's own timing (a save between: ${String(saveBetween)})`, async () => {
 				const { source, h, slide } = await session()
+				const live = await slide()
+				// A copy: the session's slide node is live and the command and the undo change it in place.
+				const held = cloneModel(live.timing)
 
-				expect(await h.command(step.op(await slide()))).toMatchObject({ ok: true })
+				expect(await h.command(step.op(live))).toMatchObject({ ok: true })
 
 				if (saveBetween) expect((await h.save()).result.kind).toBe("written")
 
@@ -94,6 +98,17 @@ describe("build entries and exact timing undo", () => {
 
 				const saved = await h.save()
 
-				expect(await timingOf(saved.bytes ?? source)).toBe(await timingOf(source))
+				if (saveBetween) {
+					// A save between changes the source provenance the model carries; the written timing is the check.
+					expect(saved.result.kind).toBe("written")
+
+					if (saved.bytes === undefined) throw new Error("no bytes")
+
+					expect(await timingOf(saved.bytes)).toBe(await timingOf(source))
+				} else {
+					// The undo returns the history to its clean marker and there is nothing to write.
+					expect(saved.result.kind).toBe("unchanged")
+					expect((await slide()).timing).toEqual(held)
+				}
 			})
 })

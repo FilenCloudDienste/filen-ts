@@ -1,7 +1,7 @@
 import { fieldEditable } from "../../../core/pdfedit/signaturePolicy"
 import { PdfEngineRefusal } from "../context"
 import { PdfFieldError, removeXfa, resetForm, setFieldValue, type PdfFieldValue } from "../fillSign"
-import { isIndex, isRecord, isText, type PdfCommandTable } from "./types"
+import { isIndex, isRecord, isText, parseNoArgs, requirePage, type PdfCommandTable } from "./types"
 
 // Filling in a form through the Fill & Sign block (fillSign/fields.ts, which owns every rule): one field set to a
 // value, the whole form reset, and a hybrid form's XFA data removed before its first save (the user confirmed). Each
@@ -57,10 +57,6 @@ function parseField(args: unknown): PdfFormCommands["forms.setField"] | null {
 	return value === null ? null : { page: args["page"], widget: args["widget"], value }
 }
 
-function parseNone(args: unknown): Record<string, never> | null {
-	return isRecord(args) && Object.keys(args).length === 0 ? {} : null
-}
-
 function refusal(error: PdfFieldError): PdfEngineRefusal {
 	return error.reason === "readOnly" || error.reason === "password"
 		? new PdfEngineRefusal("notAllowed", `the field cannot be changed (${error.reason})`)
@@ -73,7 +69,7 @@ export const FORM_COMMANDS: PdfCommandTable<PdfFormCommands> = {
 		target: "widget",
 		parse: parseField,
 		run: (context, args) => {
-			if (args.page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
+			requirePage(context, args.page)
 
 			const page = context.page(args.page)
 			const widget = page.getWidgets().find(candidate => {
@@ -87,7 +83,9 @@ export const FORM_COMMANDS: PdfCommandTable<PdfFormCommands> = {
 				throw new PdfEngineRefusal("notAllowed", "a signature locks the field")
 
 			try {
-				return setFieldValue(context.document, page, args.page, args.widget, args.value).sort((a, b) => a - b)
+				return setFieldValue(context.document, page, args.page, args.widget, args.value, pageObject =>
+					context.pageOf(pageObject)
+				).sort((a, b) => a - b)
 			} catch (error) {
 				throw error instanceof PdfFieldError ? refusal(error) : error
 			}
@@ -95,15 +93,15 @@ export const FORM_COMMANDS: PdfCommandTable<PdfFormCommands> = {
 	},
 	"forms.reset": {
 		tool: "formFill",
-		parse: parseNone,
-		run: context => resetForm(context.document)
+		parse: parseNoArgs,
+		run: context => resetForm(context.document, pageObject => context.pageOf(pageObject))
 	},
 	// Nothing is drawn differently: the AcroForm fields already show the values. Offered with form filling, but it changes
 	// the form itself, which no signer allowed: a signed document is rewritten, its signatures invalidated (asked first).
 	"forms.removeXfa": {
 		tool: "formFill",
 		saves: "content",
-		parse: parseNone,
+		parse: parseNoArgs,
 		run: context => {
 			removeXfa(context.document)
 

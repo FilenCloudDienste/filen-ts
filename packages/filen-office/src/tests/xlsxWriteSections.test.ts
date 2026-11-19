@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { XlsxWriteError } from "../core/xlsx/write/failure"
-import { writeXlsx } from "../core/xlsx/write/save"
+import { saveXlsx, writeXlsx } from "../core/xlsx/write/save"
+import { CellKind } from "../core/xlsx/model/types"
 import { verifyXlsxParts } from "../core/xlsx/verify/verify"
-import { buildFixture, openWorkbook } from "./xlsxWriteFixtures"
+import { buildFixture, openWorkbook, parts } from "./xlsxWriteFixtures"
 
 // The save's check counts each worksheet section against the model: a section written anew appears once (its
 // markup holds every child of its name), a copied one as often as the source holds it.
@@ -45,5 +46,60 @@ describe("the save check's section counts", () => {
 		workbook.changes.sheetRows(0)
 
 		await expect(verifyXlsxParts(await writeXlsx({ opc: workbook.opc, workbook }))).resolves.toBeUndefined()
+	})
+})
+
+describe("numbers the file cannot hold", () => {
+	async function format(defaultRowHeight: string) {
+		const workbook = await openWorkbook(
+			buildFixture({
+				sheets: [{ name: "Data", body: `<sheetFormatPr defaultRowHeight="${defaultRowHeight}" baseColWidth="1e999"/><sheetData/>` }]
+			})
+		)
+		const sheet = await workbook.load(0)
+
+		return { workbook, sheet }
+	}
+
+	it("write the model's value over a source attribute that is no number", async () => {
+		for (const source of ["abc", "1e999"]) {
+			const { workbook, sheet } = await format(source)
+
+			sheet.format = { ...sheet.format, defaultRowHeight: 18, baseColWidth: 10 }
+			workbook.changes.sheetSection(0, "sheetFormatPr")
+
+			const result = await saveXlsx({ opc: workbook.opc, workbook })
+
+			if (!result.ok) throw new Error(`${result.reason}: ${result.message}`)
+
+			const written = parts(result.bytes as Uint8Array)["xl/worksheets/sheet1.xml"] ?? ""
+
+			expect(written).toContain('defaultRowHeight="18"')
+			expect(written).toContain('baseColWidth="10"')
+		}
+	})
+
+	it("refuse naming the cell or the attribute that holds one", async () => {
+		const cell = await format("15")
+
+		cell.sheet.store.setCell(1, 2, CellKind.NUMBER, Number.NaN, 0, -1)
+		cell.workbook.changes.sheetRows(0)
+
+		expect(await saveXlsx({ opc: cell.workbook.opc, workbook: cell.workbook })).toMatchObject({
+			ok: false,
+			reason: "write",
+			message: "Cell C2 holds NaN"
+		})
+
+		const attribute = await format("15")
+
+		attribute.sheet.format = { ...attribute.sheet.format, defaultColWidth: Number.POSITIVE_INFINITY }
+		attribute.workbook.changes.sheetSection(0, "sheetFormatPr")
+
+		expect(await saveXlsx({ opc: attribute.workbook.opc, workbook: attribute.workbook })).toMatchObject({
+			ok: false,
+			reason: "write",
+			message: "defaultColWidth is Infinity"
+		})
 	})
 })

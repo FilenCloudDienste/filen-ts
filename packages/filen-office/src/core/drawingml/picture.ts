@@ -60,13 +60,14 @@ const FORMAT_BY_EXTENSION: Readonly<Record<string, ImageFormat>> = {
 }
 
 export function imageFormat(partName: string, contentType: string | undefined): ImageFormat {
-	const byType = contentType === undefined ? undefined : FORMAT_BY_TYPE[contentType.toLowerCase().split(";")[0]?.trim() ?? ""]
+	const type = contentType?.toLowerCase().split(";")[0]?.trim()
 
-	if (byType !== undefined) return byType
+	if (type !== undefined && Object.hasOwn(FORMAT_BY_TYPE, type)) return FORMAT_BY_TYPE[type] ?? "unknown"
 
 	const dot = partName.lastIndexOf(".")
+	const extension = dot < 0 ? "" : partName.slice(dot + 1).toLowerCase()
 
-	return dot < 0 ? "unknown" : (FORMAT_BY_EXTENSION[partName.slice(dot + 1).toLowerCase()] ?? "unknown")
+	return Object.hasOwn(FORMAT_BY_EXTENSION, extension) ? (FORMAT_BY_EXTENSION[extension] ?? "unknown") : "unknown"
 }
 
 export function imageHandling(format: ImageFormat): ImageHandling {

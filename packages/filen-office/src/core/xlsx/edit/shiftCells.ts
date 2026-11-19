@@ -8,6 +8,7 @@ import { planRefEdit } from "../refs/plan"
 import type { XlsxDocument } from "./document"
 import { reportLogged } from "./format"
 import { CellLog, StoreSnapshot, cellKeyOf, type CellState } from "./history"
+import { changedNames, rebuildEngine } from "./sheets"
 import { cellBounds, moveAxis, planBytes, planCellsOf } from "./structure-basic"
 
 // Excel's Insert and Delete of cells (support.microsoft.com, "Insert or delete cells, rows, and columns"): cells
@@ -128,6 +129,9 @@ export async function shiftCells(
 	})
 
 	if (visited > SHEET_MAX_EDIT_CELLS) return { refused: { reason: "tooLarge" } }
+
+	// An engine an earlier edit dropped is built from the cells as they stand, so this edit is what it recalculates.
+	await document.engineBeforeRows(changes)
 
 	const planned = await planRefEdit(document.workbook, { kind: "axis", sheet, shift })
 
@@ -272,11 +276,32 @@ export async function shiftCells(
 		}
 	}
 
+	const namesBefore = workbook.definedNames.slice()
+
 	plan.apply()
+
+	// A defined name the edit moved: the engine holds the names as it was built (named expressions, the text INDIRECT
+	// reads, a one-cell name spelled as its cell), and a cell move changes none of them. It is given the moved cells
+	// first, which settles the dynamic arrays' ranges and recalculates what reads the cells through other ranges, then
+	// built again from the workbook as it stands, with what reads the moved names recalculated and logged; on undo and
+	// redo it is built again once the cells are back. The session never stays without an engine: a structure edit
+	// after this one recalculates through it.
+	const names = changedNames(document, namesBefore)
+	const rebuild = (sink: SheetChangeSink): void => {
+		document.dropEngine()
+
+		if (document.hasFormulas && document.allReady) document.buildEngine(sink)
+	}
+
 	await settle(shift)
 	await turn(clockOf())
 	engineSync(post, changes)
+
+	if (names.size > 0) rebuildEngine(document, plan, names, post, changes)
+
+	// Sealed after a rebuild too, which returns unsealed when there is nothing to build.
 	post.seal((s, r, c) => document.state(s, r, c))
+
 	report(changes)
 
 	return {
@@ -292,7 +317,10 @@ export async function shiftCells(
 			for (const { row, col, state } of shown) document.write(sheet, row, col, state, true)
 
 			await turn(clockOf())
-			engineSync(null, sink)
+
+			if (names.size > 0) rebuild(sink)
+			else engineSync(null, sink)
+
 			report(sink)
 		},
 		redo: async sink => {
@@ -302,8 +330,17 @@ export async function shiftCells(
 			plan.apply()
 			await settle(shift)
 			await turn(clockOf())
-			engineSync(null, sink)
-			post.restore(document.restoreCell, "after")
+
+			if (names.size > 0) {
+				// The results first: built before them, the store holds each dynamic array at one cell and the
+				// engine keeps #SPILL! for it.
+				post.restore(document.restoreCell, "after")
+				rebuild(sink)
+			} else {
+				engineSync(null, sink)
+				post.restore(document.restoreCell, "after")
+			}
+
 			report(sink)
 		}
 	}

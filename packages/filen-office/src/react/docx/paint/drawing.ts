@@ -2157,6 +2157,15 @@ export function drawingImages(data: DrawingData): DrawingImage[] {
 			case ItemKind.IMAGE:
 				add(index(ints[i + ItemInt.REF]))
 				break
+			case ItemKind.TEXT: {
+				// A text's own paint (a picture or texture fill: VML word art) is drawn instead of its colour.
+				const textIndex = index(ints[i + ItemInt.REF])
+				const text = textIndex < 0 || !Array.isArray(data.texts) ? undefined : data.texts[textIndex]
+
+				if (text !== undefined && text !== null && (text.kind === "glyphs" || text.kind === "block")) addPaint(index(text.fill))
+
+				break
+			}
 			default:
 				break
 		}

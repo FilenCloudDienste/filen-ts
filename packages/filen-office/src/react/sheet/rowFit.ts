@@ -14,19 +14,16 @@ import {
 // The axis.fit command's type (erased: no core code comes with it).
 import type {} from "../../core/xlsx/edit/formatFeature"
 import type { SheetGridModel } from "./model"
-import { TEXT_PADDING } from "./paint/cells"
-import { layoutText, textFont, type TextMeasurer, type TextRun } from "./paint/text"
-import { entryRuns, entryText, regionHoldsTile, type GridTile } from "./tiles"
+import type { TextMeasurer } from "./paint/text"
+import { wrappedCellHeight } from "./rowHeight"
+import { settled } from "./settled"
+import { entryText, regionHoldsTile, type GridTile } from "./tiles"
 
 // Rows without a height of their own fit their wrapped text, as Excel fits them when wrapped text changes (wrap
 // turned on or off, an entry, a column's width): the core measures no text, so the grid measures the wrapped cells
 // of the rows an edit touched, as it draws them, and sends their heights (axis.fit), one step a user can undo. Only
 // rows whose tiles the grid holds (on screen or about to be) are measured, never the sheet at open: a file's
 // saved heights show as they are.
-
-// A line of text and the row's padding beyond its lines, as autofit measures them.
-const LINE_HEIGHT = 1.2
-const ROW_PADDING = 2
 
 export interface TextMeasure {
 	// Null while the grid draws nothing (no canvas yet).
@@ -285,16 +282,18 @@ export class RowFitter {
 			const fitted = measureRows(this.model, sheet, set, measurer, this.measure.font(), wrappedBefore)
 
 			if (fitted !== null)
-				void this.model.command(
-					{
-						type: "axis.fit",
-						sheet,
-						rows: fitted.rows,
-						heights: fitted.heights,
-						firstCol: fitted.firstCol,
-						lastCol: fitted.lastCol
-					},
-					false
+				settled(
+					this.model.command(
+						{
+							type: "axis.fit",
+							sheet,
+							rows: fitted.rows,
+							heights: fitted.heights,
+							firstCol: fitted.firstCol,
+							lastCol: fitted.lastCol
+						},
+						false
+					)
 				)
 		}
 	}
@@ -369,21 +368,9 @@ export function measureRows(
 				if (!wrapsText(style)) continue
 				if (rowMerges?.some(merge => col >= merge.startCol && col <= merge.endCol) === true) continue
 
-				const text = entryText(tile, i)
+				if (entryText(tile, i) === "") continue
 
-				if (text === "") continue
-
-				const raw = entryRuns(tile, i)
-				const runs: TextRun[] | null = raw === null ? null : []
-
-				for (let k = 0; raw !== null && runs !== null && k + 1 < raw.length; k += 2)
-					runs.push({ start: raw[k] ?? 0, style: model.style(raw[k + 1] ?? 0) })
-
-				const indent =
-					(style.indent ?? 0) > 0 ? (style.indent ?? 0) * measurer.width(textFont(style, base, fallback, 1).css, "   ") : 0
-				const width = Math.max(1, axes.cols.size(col) / axes.scale - 2 * TEXT_PADDING - 1 - indent)
-				const lines = layoutText(measurer, text, runs, style, { wrap: true, width, base, fallback, scale: 1 })
-				const height = lines.reduce((sum, line) => sum + Math.round(line.px * LINE_HEIGHT), 0) + ROW_PADDING
+				const height = wrappedCellHeight(model, tile, i, style, axes.cols.size(col) / axes.scale, measurer, base, fallback)
 
 				tallest = Number.isNaN(tallest) ? height : Math.max(tallest, height)
 			}

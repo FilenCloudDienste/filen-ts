@@ -1,10 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { gunzipSync, gzipSync, inflateSync } from "node:zlib"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { MAX_PRINT_PAGES } from "../core/sheet/print/paginate"
 import { DEFAULT_PAGE_SETUP, type SheetPageSetup } from "../core/sheet/print/setup"
 import type { SheetSessionApi, SheetWorkbookInfo } from "../core/sheet/protocol"
+import { canvasFont } from "../react/sheet/print/pdfCanvas"
 import { exportSheetPdf, type SheetPdfRequest } from "../react/sheet/print/pdfExport"
+import { listFont, type PrintJob } from "../react/sheet/print/printLayout"
 import { readSfnt } from "../core/fonts/sfnt"
 import type { PdfByteStream, PdfFontAssets } from "../core/pdfwrite/fonts/assets"
 import { directoryRecord, gsubTable, multiply } from "./pdfFontLimitsFixtures"
@@ -12,7 +14,34 @@ import { nodeFontAssets, pdfBytes } from "./sheetPdfFixtures"
 import { openFixture } from "./sheetSessionFixtures"
 import { buildFixture } from "./xlsxWriteFixtures"
 import { KEPT, SOLD, barChart, chartFixture, withChartsheet } from "./sheetChartFixtures"
+import { CHART_FRAME, wsDr } from "./sheetDrawingsFixtures"
+import { NOTES } from "./sheetNotesFixtures"
+import { TYPES } from "./xlsxRefsFixtures"
 import { unzipSync, zipSync } from "fflate"
+
+// The jobs the exports lay out, with each notes list line as the export's own measure takes it (its faces are closed
+// once the export ends).
+const jobs = vi.hoisted((): { job: PrintJob; widths: Map<string, number> }[] => [])
+
+vi.mock("../react/sheet/print/printLayout", async importOriginal => {
+	const actual = await importOriginal<typeof import("../react/sheet/print/printLayout")>()
+
+	return {
+		...actual,
+		layOutPrint: async (...args: Parameters<typeof actual.layOutPrint>) => {
+			const job = await actual.layOutPrint(...args)
+			const widths = new Map<string, number>()
+
+			for (const sheet of job.sheets)
+				for (const page of sheet.notesAtEnd)
+					for (const line of page.lines) widths.set(line.text, job.measure(actual.listFont(page.family), line.text))
+
+			jobs.push({ job, widths })
+
+			return job
+		}
+	}
+})
 
 const VALUES = { date: "1/2/2026", time: "10:00", file: "book.xlsx", path: "" }
 
@@ -336,6 +365,136 @@ describe("a sheet's print as a PDF", () => {
 		expect(text).toMatch(/\/MediaBox \[0 0 841\.89 595\.27\d\]/)
 		expect(text).toMatch(/\/S \/Figure/)
 		expect(text).toContain("(Chart: Graph)")
+
+		const labelled = await exportSheetPdf(
+			{
+				...request(info, 1, DEFAULT_PAGE_SETUP),
+				sheets: [
+					{
+						sheet: graph.id,
+						name: "Graph",
+						setup: settings?.setup ?? DEFAULT_PAGE_SETUP,
+						ranges: [],
+						used: null,
+						...(settings?.chart !== undefined && { chart: settings.chart }),
+						labels: {
+							cell: "Zelle: {cell}",
+							note: "Notiz: {note}",
+							chart: "Diagramm",
+							picture: "Bild",
+							chartSheet: "Diagramm: {name}"
+						}
+					}
+				]
+			},
+			{ session, assets: nodeFontAssets, deterministic: true }
+		)
+
+		if (!labelled.ok) throw new Error(labelled.reason)
+
+		expect(readable(pdfBytes(labelled.output.parts))).toContain("(Diagramm: Graph)")
 		session.close()
+	})
+
+	it("names a chart without alternative text or a name of its own by the label it is given", async () => {
+		const fixture = chartFixture(barChart([SOLD]))
+		const { session, info } = await openFixture(
+			buildFixture({
+				...fixture,
+				parts: {
+					...fixture.parts,
+					"xl/drawings/drawing1.xml": { text: wsDr(CHART_FRAME.replace('name="Chart 3"', 'name=""')), type: TYPES.drawing }
+				}
+			})
+		)
+
+		for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))
+
+		const ranges = [{ startRow: 0, startCol: 0, endRow: 20, endCol: 8 }]
+		const sheet = { sheet: 0, name: "Data", setup: DEFAULT_PAGE_SETUP, ranges, used: ranges[0] ?? null }
+		const labels = { cell: "Zelle: {cell}", note: "Notiz: {note}", chart: "Diagramm", picture: "Bild", chartSheet: "Diagramm: {name}" }
+		const english = await exportSheetPdf(
+			{ ...request(info, 1), sheets: [sheet] },
+			{ session, assets: nodeFontAssets, deterministic: true }
+		)
+		const german = await exportSheetPdf(
+			{ ...request(info, 1), sheets: [{ ...sheet, labels }] },
+			{ session, assets: nodeFontAssets, deterministic: true }
+		)
+
+		if (!english.ok || !german.ok) throw new Error("not exported")
+
+		expect(readable(pdfBytes(english.output.parts))).toContain("/Alt (Chart)")
+		expect(readable(pdfBytes(german.output.parts))).toContain("/Alt (Diagramm)")
+		session.close()
+	})
+
+	it("wraps the notes listed at the end in the font it draws them in, so no line runs past the margins", async () => {
+		const long = Array.from({ length: 40 }, (_, k) => `word${String(k)}`).join(" ") + " " + "W".repeat(30)
+		const fixture = {
+			...NOTES,
+			parts: {
+				...NOTES.parts,
+				"xl/comments1.xml": {
+					...(NOTES.parts?.["xl/comments1.xml"] ?? { type: TYPES.comments }),
+					text: (NOTES.parts?.["xl/comments1.xml"]?.text ?? "").replace("first note", long)
+				}
+			}
+		}
+		const { session, info } = await openFixture(buildFixture(fixture))
+
+		for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))
+
+		const ranges = [{ startRow: 0, startCol: 0, endRow: 4, endCol: 3 }]
+
+		jobs.length = 0
+
+		const result = await exportSheetPdf(
+			{
+				...request(info, 1),
+				sheets: [
+					{ sheet: 0, name: "One", setup: { ...DEFAULT_PAGE_SETUP, cellComments: "atEnd" }, ranges, used: ranges[0] ?? null }
+				]
+			},
+			{ session, assets: nodeFontAssets, deterministic: true }
+		)
+
+		if (!result.ok) throw new Error(result.reason)
+
+		const job = jobs[0]?.job
+		const widths = jobs[0]?.widths
+		const sheet = job?.sheets[0]
+		const notes = sheet?.notesAtEnd[0]
+
+		if (widths === undefined || sheet === undefined || notes === undefined) throw new Error("no notes list")
+
+		const font = listFont(notes.family)
+		// Points to px: the list is laid out in px.
+		const width = (sheet.pagination.area.width * 4) / 3
+		const text = notes.lines.filter(line => !line.bold && line.text !== "")
+
+		expect(long.length).toBeGreaterThanOrEqual(300)
+		expect(text.length).toBeGreaterThan(2)
+
+		for (const line of text) {
+			const measured = widths.get(line.text) ?? Number.POSITIVE_INFINITY
+
+			// Shaped by the face, not the half-em estimate of a face never loaded.
+			expect(measured).not.toBeCloseTo(line.text.length * canvasFont(font).px * 0.5, 3)
+			expect(measured).toBeLessThanOrEqual(width)
+		}
+
+		session.close()
+	})
+})
+
+describe("a PDF canvas's font shorthand", () => {
+	it("reads a size in points as the px a browser canvas draws it at", () => {
+		const points = canvasFont('10pt "Calibri", sans-serif')
+
+		expect(points.request).toEqual(canvasFont('13.333333333333334px "Calibri", sans-serif').request)
+		expect(points.px).toBeCloseTo(40 / 3)
+		expect(canvasFont("bold 12PT Arial").px).toBeCloseTo(16)
+		expect(canvasFont("10px Tahoma").px).toBe(10)
 	})
 })

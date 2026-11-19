@@ -11,7 +11,7 @@ import type { CheckedPart, CheckInput, DocxCheck } from "./index"
 // and commentsExtensible entries the save wrote name paragraph ids the story parts have, never twice, a
 // resolved state or parent of a paragraph that exists, durable ids that are unique and known; no entry is
 // left for a comment the save removed; people.xml lists each author once, and nothing writes an author's
-// e-mail, presence or foreign attributes (SuperDoc's mistakes). Gate 2 counts comment, range, reference and
+// e-mail, presence or foreign attributes. Gate 2 counts comment, range, reference and
 // paragraph ids itself (verify.ts); duplicates among them refuse there.
 
 interface Entry {
@@ -150,11 +150,17 @@ function namesOf(document: XmlDocument, local: string): Set<number> {
 	return out
 }
 
-// Counts the commentRangeEnd elements starting in bytes [from, to) of `document` into `into`, times `sign`.
-function rangeEnds(document: XmlDocument, into: Map<string, number>, sign: number, from = 0, to = Number.MAX_SAFE_INTEGER): void {
-	const names = namesOf(document, "commentRangeEnd")
-
-	if (names.size === 0) return
+// Counts the commentRangeEnd elements (`names`: their name ids in `document`) starting in bytes [from, to) of
+// `document` into `into`, times `sign`.
+function rangeEnds(
+	document: XmlDocument,
+	names: ReadonlySet<number>,
+	into: Map<string, number>,
+	sign: number,
+	from = 0,
+	to = Number.MAX_SAFE_INTEGER
+): void {
+	if (names.size === 0 || to <= from) return
 
 	const reader = partReader(document)
 	const starts = document.starts
@@ -178,6 +184,43 @@ function rangeEnds(document: XmlDocument, into: Map<string, number>, sign: numbe
 	}
 }
 
+// What a story's source range [from, to) lost to the rewrite, its copies (`trusted`) given back: the range less
+// every copy, as walking the whole range and then each copy would count it (a range copied twice counts once
+// more, a copy from outside the range whole). Only the gaps between the copies are walked, not the source the
+// copies cover.
+function replacedRangeEnds(
+	document: XmlDocument,
+	names: ReadonlySet<number>,
+	into: Map<string, number>,
+	from: number,
+	to: number,
+	trusted: readonly number[]
+): void {
+	const ranges: [number, number][] = []
+
+	for (let k = 0; k < trusted.length; k += 4) ranges.push([trusted[k + 2] ?? 0, trusted[k + 3] ?? 0])
+
+	ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1])
+
+	let at = from
+
+	for (const [start, end] of ranges) {
+		if (start < at || start >= to) {
+			// Copied before, or from outside the range: it counts once more.
+			rangeEnds(document, names, into, 1, start, end)
+
+			continue
+		}
+
+		rangeEnds(document, names, into, -1, at, start)
+		// What it copies past the range is not given back by a gap.
+		rangeEnds(document, names, into, 1, to, end)
+		at = Math.min(end, to)
+	}
+
+	rangeEnds(document, names, into, -1, at, to)
+}
+
 // Range ends a story part gained, counted as gate 2 counts ids: the new markup's (a skeleton: copies of
 // source nodes stand as placeholders) less what the rewritten stories replaced of the source, or a whole
 // part's against the source's. And attributes no writer of ours makes.
@@ -187,26 +230,29 @@ function storyPart(input: CheckInput, part: CheckedPart): void {
 	const source = part.part
 	const original = source !== undefined && input.original.has(part.name) ? source.document : undefined
 
-	rangeEnds(document, state.ends, 1)
+	rangeEnds(document, namesOf(document, "commentRangeEnd"), state.ends, 1)
 
-	if (original !== undefined && source !== undefined) {
-		if (!part.skeleton) {
-			rangeEnds(original, state.ends, -1)
-		} else {
-			for (const story of input.changes.stories) {
-				if (story.part !== source) continue
+	if (original === undefined || source === undefined) return
 
-				const item = story.session.story.story.item
-				const node = item >= 0 ? source.node(item) : -1
-				const from = node >= 0 ? original.start(node) : (story.range?.from ?? 0)
-				const to = node >= 0 ? original.end(node) : (story.range?.to ?? 0)
-				const trusted = story.output.trusted
+	const names = namesOf(original, "commentRangeEnd")
 
-				rangeEnds(original, state.ends, -1, from, to)
+	if (names.size === 0) return
 
-				for (let k = 0; k < trusted.length; k += 4) rangeEnds(original, state.ends, 1, trusted[k + 2] ?? 0, trusted[k + 3] ?? 0)
-			}
-		}
+	if (!part.skeleton) {
+		rangeEnds(original, names, state.ends, -1)
+
+		return
+	}
+
+	for (const story of input.changes.stories) {
+		if (story.part !== source) continue
+
+		const item = story.session.story.story.item
+		const node = item >= 0 ? source.node(item) : -1
+		const from = node >= 0 ? original.start(node) : (story.range?.from ?? 0)
+		const to = node >= 0 ? original.end(node) : (story.range?.to ?? 0)
+
+		replacedRangeEnds(original, names, state.ends, from, to, story.output.trusted)
 	}
 }
 

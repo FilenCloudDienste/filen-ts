@@ -60,3 +60,48 @@ describe("ODS split window panes", () => {
 		expect(text).toContain(item("PositionBottom", "int", "1"))
 	})
 })
+
+describe("a settings.xml without a view", () => {
+	const ROOT =
+		'<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.3">'
+	const frozen = { ...DEFAULT_VIEW, frozen: { rows: 1, cols: 0, topLeftRow: 1, topLeftCol: 0 } }
+
+	for (const [label, inner] of [
+		["no office:settings", ""],
+		["a self-closing office:settings", "<office:settings/>"]
+	] as const) {
+		it(`gets the view levels it lacks and the namespaces they need, with ${label}`, () => {
+			const written = writeSettings(strToU8(`${ROOT}${inner}</office:document-settings>`), "S", false, [
+				{ name: "S", sourceName: undefined, view: frozen, changed: true }
+			])
+			const text = strFromU8(written ?? new Uint8Array(0))
+
+			expect(text).toContain('xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"')
+			expect(text).toContain('xmlns:ooo="http://openoffice.org/2004/office"')
+			expect(text).toContain(
+				'<office:settings><config:config-item-set config:name="ooo:view-settings"><config:config-item-map-indexed config:name="Views"><config:config-item-map-entry>' +
+					item("ViewId", "string", "view1")
+			)
+			expect(text).toContain('<config:config-item-map-entry config:name="S">')
+			expect(text).toContain(item("VerticalSplitMode", "short", "2"))
+		})
+
+		it(`stays as it was when no view changes, with ${label}`, () => {
+			const bytes = strToU8(`${ROOT}${inner}</office:document-settings>`)
+
+			expect(writeSettings(bytes, "S", false, [{ name: "S", sourceName: "S", view: DEFAULT_VIEW, changed: false }])).toBeNull()
+		})
+	}
+
+	it("declares the config namespace under a free prefix when config is bound elsewhere", () => {
+		const bytes = strToU8(
+			'<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:config="urn:example:other"><office:settings/></office:document-settings>'
+		)
+		const text = strFromU8(
+			writeSettings(bytes, "S", false, [{ name: "S", sourceName: undefined, view: frozen, changed: true }]) ?? new Uint8Array(0)
+		)
+
+		expect(text).toContain('xmlns:config2="urn:oasis:names:tc:opendocument:xmlns:config:1.0"')
+		expect(text).toContain('<config2:config-item-set config2:name="ooo:view-settings">')
+	})
+})

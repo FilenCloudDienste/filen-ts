@@ -21,6 +21,8 @@ import { TURN_FLOATS, TURN_INTS, TurnInt, turnsOf, type TurnAngle } from "./turn
 export const GRAPHIC_FLOATS = 4
 export const GRAPHIC_INTS = 3
 
+export const GraphicInt = { KIND: 0, KEY: 1, LAYER: 2 } as const
+
 export const PageGraphic = {
 	// A fill: key is a DecorationTable colour key.
 	SHADING: 1,
@@ -59,6 +61,8 @@ export const CLIP_INTS = 4
 // objectFloats: x, y, width, height. objectInts: object id (DocumentLayout.objects), layer, source.
 export const OBJECT_FLOATS = 4
 export const OBJECT_INTS = 3
+
+export const ObjectInt = { ID: 0, LAYER: 1, SOURCE: 2 } as const
 
 // Where a source paragraph lives on the page.
 export const Region = {

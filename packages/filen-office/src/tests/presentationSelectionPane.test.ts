@@ -9,6 +9,8 @@ import {
 	visibilityAllOp,
 	visibilityOp
 } from "../core/presentation/edit/commands/selectionPane"
+import { insertPictureOp, insertTableOp } from "../core/presentation/edit/commands/insert"
+import type { DeckOp } from "../core/presentation/edit/ops"
 import { slideRef, type SlideNode, type SlideRef } from "../core/presentation/model"
 import { slideOutline, type OutlineShape } from "../core/presentation/outline"
 import { odpParts } from "../dom/presentation/engine/open/odp"
@@ -19,6 +21,7 @@ import type { CallContext } from "../dom/presentation/engine"
 import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { editDeck, shapeById } from "./presentationEditFixtures"
+import { image } from "./presentationObjectsFixtures"
 
 // The Selection Pane: its list (front-most first, groups with their members), Show All / Hide All and the eye
 // (cNvPr hidden; ODF draw:display), renaming (cNvPr name; ODF draw:name) and reordering by drag (z-order to an index),
@@ -296,6 +299,37 @@ describe("the Selection Pane's commands in an .odp", () => {
 		expect(read.shapes.map(each => [each.name, each.hidden])).toEqual([
 			["Box", true],
 			["Renamed", false]
+		])
+	})
+	it("writes a picture and a table inserted and hidden before the first save as hidden, and reads them back", async () => {
+		const d = await driveSession(odpBytes({ body: PAGE }), "odp")
+		const deck = d.session.deck
+		const ref = deck.slides[0] as SlideRef
+
+		await odpParts(deck)?.slide(ref)
+
+		expect((await d.command(insertPictureOp(deck, ref, image(40, 30), 0, "cat.png"))).ok).toBe(true)
+		expect((await d.command(insertTableOp(deck, ref, 2, 2, 0) as DeckOp)).ok).toBe(true)
+
+		const inserted = (deck.nodes.get(ref)?.shapes ?? []).slice(2)
+
+		expect(inserted.map(each => each.kind)).toEqual(["pic", "frame"])
+		expect(
+			(await d.command({ family: "shape", kind: "setHidden", slide: ref, shapes: inserted.map(each => each.id), hidden: true })).ok
+		).toBe(true)
+
+		const saved = await d.save()
+
+		expect(saved.result).toMatchObject({ kind: "written" })
+
+		const again = await driveSession(saved.bytes ?? new Uint8Array(), "odp")
+		const read = await (odpParts(again.session.deck) ?? (undefined as never)).slide(again.session.deck.slides[0] as SlideRef)
+
+		expect(read.shapes.map(each => [each.kind, each.hidden])).toEqual([
+			["sp", false],
+			["sp", false],
+			["pic", true],
+			["frame", true]
 		])
 	})
 })

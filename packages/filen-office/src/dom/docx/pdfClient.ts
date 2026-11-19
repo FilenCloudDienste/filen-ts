@@ -61,8 +61,9 @@ export interface DocxPdfExportOptions {
 	readonly untranslated?: number
 }
 
-// What is exported: the file's bytes (a copy of the caller's own: a buffer the bytes fill is transferred) (laid out in the worker, as every page shows them in the Final view), or a
-// snapshot of a document laid out where it is edited (unsaved edits included).
+// What is exported: the file's bytes, laid out in the worker as every page shows them in the Final view (a buffer the
+// bytes fill whole is transferred to the worker and detached, so a caller passes a copy it can lose), or a snapshot of
+// a document laid out where it is edited (unsaved edits included).
 export type DocxPdfInput =
 	| { readonly kind: "bytes"; readonly bytes: Uint8Array; readonly fontUrls?: Readonly<Record<string, string>> }
 	| { readonly kind: "snapshot"; readonly document: DocxPdfDocument }

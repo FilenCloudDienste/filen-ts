@@ -1,4 +1,5 @@
-import { DEFAULT_SLIDE_GRID, type Author, type ShowSettings, type SlideGrid } from "../../presentation/model"
+import { MAX_RESTART_MS } from "../../presentation/edit/apply/presentation"
+import { DEFAULT_SLIDE_GRID, type Author, type CustomShow, type ShowSettings, type SlideGrid } from "../../presentation/model"
 import { tooLarge } from "../../presentation/refusal"
 import { colorIn, type ReadContext } from "./drawing"
 import { G } from "./xml"
@@ -13,6 +14,8 @@ export const DEFAULT_SHOW: ShowSettings = {
 	useTimings: true,
 	range: { kind: "all" }
 }
+
+const DEFAULT_RESTART_MS = 300_000
 
 export function readShowSettings(context: ReadContext, presentationPr: number): ShowSettings {
 	const r = context.reader
@@ -41,8 +44,30 @@ export function readShowSettings(context: ReadContext, presentationPr: number): 
 					? { kind: "customShow", id: r.int(custom, "id") ?? 0 }
 					: { kind: "all" },
 		...(pen === undefined ? {} : { penColor: pen }),
-		// The kiosk restart (ST_Ms, default 300,000 ms).
-		...(kiosk >= 0 ? { restartMs: restart ?? 300_000 } : {})
+		// The kiosk restart (ST_Ms, an unsignedInt; default 300,000 ms). One outside it reads as the default, so the inverse
+		// Set Up Slide Show or a slide edit stores never holds a restart the setShow check refuses.
+		...(kiosk >= 0
+			? { restartMs: restart !== undefined && restart >= 0 && restart <= MAX_RESTART_MS ? restart : DEFAULT_RESTART_MS }
+			: {})
+	}
+}
+
+// The file's show range as the deck can hold it: a p:sldRg ending past the last slide ends at it, and one starting outside
+// the deck or after its end, or a p:custShow naming no custom show, plays all slides. The model then never holds a range
+// the setShow check refuses, so the inverse a slide edit or Set Up Slide Show stores always applies on undo.
+export function fitShowRange(range: ShowSettings["range"], slides: number, customShows: readonly CustomShow[]): ShowSettings["range"] {
+	switch (range.kind) {
+		case "range": {
+			const end = Math.min(range.end, slides)
+
+			if (range.start < 1 || range.start > end) return { kind: "all" }
+
+			return end === range.end ? range : { kind: "range", start: range.start, end }
+		}
+		case "customShow":
+			return customShows.some(custom => custom.id === range.id) ? range : { kind: "all" }
+		default:
+			return range
 	}
 }
 

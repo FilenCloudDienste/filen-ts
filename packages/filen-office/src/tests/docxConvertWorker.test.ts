@@ -103,7 +103,19 @@ describe("text conversions in the docx worker", () => {
 			controller.abort()
 
 			expect(await running).toEqual({ kind: "aborted" })
+
+			// The idle terminate runs in a timer even at 0 ms.
+			await new Promise(resolve => setTimeout(resolve, 0))
+			// Released: the aborted job no longer holds the worker.
+			expect(harness.terminated()).toBe(1)
 			expect(await harness.pool.convert.convert(RTF, "rtf", "docx", { signal: controller.signal })).toEqual({ kind: "aborted" })
+
+			// A fresh job starts a new worker and converts.
+			const result = await harness.pool.convert.convert(RTF, "rtf", "docx")
+
+			if (result.kind !== "converted") throw new Error(result.kind)
+
+			expect(part(result.bytes, "word/document.xml")).toContain("Hello from RTF.")
 		} finally {
 			harness.dispose()
 		}

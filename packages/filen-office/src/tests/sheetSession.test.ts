@@ -1,8 +1,9 @@
 import { unzipSync, zipSync } from "fflate"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { decodeUtf8, encodeUtf8 } from "../core/xml/index"
 import { CellFlag, type SheetChange, type SheetCommandResult, type SheetTile } from "../core/sheet/protocol"
 import { openXlsx } from "../core/xlsx/read/index"
+import { XlsxDocument } from "../core/xlsx/edit/document"
 import { bytesSource } from "../core/opc/index"
 import { changedEntries, equalBytes, parts } from "./xlsxWriteFixtures"
 import { BASIC, SML, buildFixture, cells, firstTile, openFixture, savedBytes, tileEntry, tileTexts } from "./sheetSessionFixtures"
@@ -617,5 +618,38 @@ describe("sheet session: text model", () => {
 			`<sst xmlns="${SML}" count="1" uniqueCount="1"><si><t>a_x0001_b _x005F_x0041_</t></si></sst>`
 		)
 		session.close()
+	})
+})
+
+describe("sheet session: save failures", () => {
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("reports a save that threw as failed, not closed", async () => {
+		const { session } = await openFixture(BASIC)
+
+		vi.spyOn(XlsxDocument.prototype, "save").mockRejectedValueOnce(new TypeError("Cannot read properties of undefined"))
+
+		expect(await session.save()).toEqual({ ok: false, reason: "failed", message: "Cannot read properties of undefined" })
+		expect((await session.save()).ok).toBe(true)
+		session.close()
+	})
+
+	it("reports a save that threw under an aborted signal as aborted", async () => {
+		const { session } = await openFixture(BASIC)
+
+		vi.spyOn(XlsxDocument.prototype, "save").mockRejectedValueOnce(new Error("stopped"))
+
+		expect(await session.save({ signal: { aborted: true } })).toEqual({ ok: false, reason: "aborted", message: "stopped" })
+		session.close()
+	})
+
+	it("reports a save of a closed session as closed", async () => {
+		const { session } = await openFixture(BASIC)
+
+		session.close()
+
+		expect(await session.save()).toMatchObject({ ok: false, reason: "closed" })
 	})
 })

@@ -193,6 +193,35 @@ describe("RC4 upgrade", () => {
 			)
 		).toMatchObject({ ok: true, options: { "user-password": "both", "owner-password": "both" } })
 	})
+
+	it("writes the held password in its SASLprep'd form", () => {
+		const held = { password: "pass² x", bits: PDF_AUTH_USER | PDF_AUTH_OWNER, openPassword: true }
+
+		expect(planSecurity(state({ method: "rc4-128", permissions: restricted, held }), { kind: "upgrade" })).toMatchObject({
+			ok: true,
+			options: { "user-password": "pass2 x", "owner-password": "pass2 x" }
+		})
+	})
+
+	it("refuses a held password SASLprep prohibits or maps to nothing", () => {
+		for (const password of ["a\u0007b", "­"]) {
+			const prohibited = state({ method: "rc4-128", held: { password, bits: PDF_AUTH_USER | PDF_AUTH_OWNER, openPassword: true } })
+
+			expect(upgradeRefusal(prohibited)).toBe("passwordRefused")
+			expect(planSecurity(prohibited, { kind: "upgrade" })).toEqual({ ok: false, reason: "passwordRefused" })
+		}
+	})
+
+	it("keeps an empty held password empty", () => {
+		const open = state({ method: "rc4-40", held: { password: "", bits: PDF_AUTH_USER | PDF_AUTH_OWNER, openPassword: false } })
+
+		expect(upgradeRefusal(open)).toBeNull()
+		expect(planSecurity(open, { kind: "upgrade" })).toEqual({
+			ok: true,
+			changes: true,
+			options: { encrypt: "aes-256", "user-password": "", "owner-password": "", permissions: PDF_PERMISSIONS_ALL }
+		})
+	})
 })
 
 describe("composeWriteOptions", () => {

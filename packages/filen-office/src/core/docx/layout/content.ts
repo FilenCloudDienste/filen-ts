@@ -9,9 +9,10 @@ import type { PropsStore } from "../props/store"
 import type { ResolvedRunProps, RunProps } from "../props/types"
 import type { CellFormat, ParagraphFormat, PropertyResolver } from "../styles/resolve"
 import { FieldKind, dateTimeText, fieldInfo, formFieldLook, macroButtonText, numberText, type FieldCodes, type FieldInfo } from "./fields"
+import { TAB_LEADERS } from "./geometry"
 import { objectAt, ObjectKind, type ObjectSizer, type ObjectTable } from "./objects"
 import { TrackedLook, revisionLook, shadingDark, type RunStyles } from "./styles"
-import { halfPoints, twips } from "./units"
+import { halfPoints, points, twips } from "./units"
 
 // Builds the text a paragraph lays out from the model: runs resolved to styles, fields shown as their
 // results (page fields and legacy form fields computed) or, in the field codes view, as their codes between
@@ -140,13 +141,8 @@ const FIELD_REPLACED = 2
 const FIELD_SHOWN = 3
 const FIELD_SHOWN_RESULT = 4
 
-const LEADERS: Readonly<Record<string, TabLeader>> = {
-	dot: TabLeader.DOT,
-	hyphen: TabLeader.HYPHEN,
-	underscore: TabLeader.UNDERSCORE,
-	heavy: TabLeader.HEAVY,
-	middleDot: TabLeader.MIDDLE_DOT
-}
+// Word's footnote separator is 144 pt wide (2 in); the continuation separator spans the column.
+export const NOTE_SEPARATOR_WIDTH = points(144)
 
 export interface ContentServices {
 	readonly model: DocxModel
@@ -761,7 +757,7 @@ export class ContentBuilder {
 		const node = part.node(item)
 		const alignment = reader.attr(node, Ns.W, "alignment") ?? "left"
 		const relative = reader.attr(node, Ns.W, "relativeTo") ?? "margin"
-		const leader = LEADERS[reader.attr(node, Ns.W, "leader") ?? "none"] ?? TabLeader.NONE
+		const leader = TAB_LEADERS[reader.attr(node, Ns.W, "leader") ?? "none"] ?? TabLeader.NONE
 		const indent = this.format?.props.indent
 		const start = relative === "indent" && indent !== undefined ? twips(indent.start) : 0
 		const end = this.columnWidth - (relative === "indent" && indent !== undefined ? twips(indent.end) : 0)
@@ -1022,8 +1018,7 @@ export class ContentBuilder {
 	private separator(continuation: boolean, run: ResolvedRunProps, revision: TrackedLook): void {
 		const services = this.services
 		const kind = continuation ? ObjectKind.CONTINUATION_SEPARATOR : ObjectKind.SEPARATOR
-		// Word's separator is 144 pt wide (2 in); the continuation separator spans the column.
-		const width = continuation ? this.columnWidth : Math.min(this.columnWidth, 192)
+		const width = continuation ? this.columnWidth : Math.min(this.columnWidth, NOTE_SEPARATOR_WIDTH)
 		const key = Math.round(width * 8) * 2 + (continuation ? 1 : 0)
 		let id = this.separators.get(key)
 

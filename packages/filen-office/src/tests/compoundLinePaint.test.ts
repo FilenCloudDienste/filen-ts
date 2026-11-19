@@ -24,26 +24,40 @@ function line(overrides: Partial<Stroke>): Stroke {
 	}
 }
 
-// A 100 x 50 rectangle at (10, 20), outlined in red; closed unless `open`.
-function outlined(stroke: Stroke, open = false, flags = 0): DrawingData & PdfDrawingData {
+// A 100 x 50 rectangle at (10, 20), outlined in red; closed unless `open`. `extra` adds further closed rectangles
+// [x, y, width, height] in the same outline.
+function outlined(
+	stroke: Stroke,
+	open = false,
+	flags = 0,
+	extra: readonly (readonly [number, number, number, number])[] = []
+): DrawingData & PdfDrawingData {
 	const list = new DrawingList()
 
 	list.width = 200
 	list.height = 100
 
 	const strokeIndex = list.stroke({ ...stroke, paint: list.paint({ kind: "solid", color: rgba("FF0000") }) })
-	const command = list.commandCount
-	const coord = list.coordCount
 
-	list.moveTo(10, 20)
-	list.lineTo(110, 20)
-	list.lineTo(110, 70)
-	list.lineTo(10, 70)
+	for (const [index, [x, y, width, height]] of [[10, 20, 100, 50] as const, ...extra].entries()) {
+		const command = list.commandCount
+		const coord = list.coordCount
 
-	if (!open) list.close()
+		list.moveTo(x, y)
+		list.lineTo(x + width, y)
+		list.lineTo(x + width, y + height)
+		list.lineTo(x, y + height)
 
-	list.addItem(ItemKind.PATH, IDENTITY, 10, 20, 100, 50, command, coord, -1, strokeIndex, -1, -1, flags, 0)
+		if (index > 0 || !open) list.close()
 
+		list.addItem(ItemKind.PATH, IDENTITY, x, y, width, height, command, coord, -1, strokeIndex, -1, -1, flags, 0)
+	}
+
+	return drawingData(list)
+}
+
+// A compacted list as the painters read it.
+function drawingData(list: DrawingList): DrawingData & PdfDrawingData {
 	const c = list.compact()
 
 	return {
@@ -118,8 +132,117 @@ describe("compound lines on canvas", () => {
 		// The outline's device bounds: the path at scale 2, padded by the miter reach (3 * 8 + 1 local units).
 		expect(layer?.ops("moveTo")[0]?.transform).toEqual([2, 0, 0, 2, 30, 10])
 		expect([layer?.width, layer?.height]).toEqual([300, 200])
-		expect(ctx.ops("drawImage")[0]?.args).toEqual(["surface0", -30, -10, 300, 200])
+		expect(ctx.ops("drawImage")[0]?.args).toEqual(["surface0", 0, 0, 300, 200, -30, -10, 300, 200])
 		expect(ctx.ops("drawImage")[0]?.transform).toEqual([1, 0, 0, 1, 0, 0])
+	})
+
+	it("reuses one scratch layer for every masked outline of a painting, cleared and reset before each", () => {
+		const ctx = new RecordingCanvas()
+		const surfaces = recordingSurfaces()
+
+		paintDrawingCanvas(ctx, outlined(line({ compound: "dbl", dash: "dash" }), false, 0, [[20, 30, 40, 20]]), IDENTITY, {
+			...NO_IMAGES,
+			surface: surfaces.surface
+		})
+
+		expect(surfaces.made).toHaveLength(1)
+
+		const layer = surfaces.made[0]
+		const ops = layer?.calls ?? []
+		const clears = ops.flatMap((call, at) => (call.op === "clearRect" ? [at] : []))
+
+		// The first outline: 100 x 50 plus a 25 unit miter reach each side; the second 40 x 20 plus the same, and one
+		// pixel past it on the larger layer.
+		expect(clears.map(at => ops[at]?.args)).toEqual([
+			[0, 0, 150, 100],
+			[0, 0, 91, 71]
+		])
+
+		const second = ops.slice(clears[1]).filter(call => call.op === "stroke")
+
+		expect(second.map(call => [call.lineWidth, call.composite, call.dash.length > 0])).toEqual([
+			[6, "source-over", false],
+			[2, "destination-out", false],
+			[6, "source-in", true]
+		])
+		expect(ops[clears[1] ?? 0]?.transform).toEqual([1, 0, 0, 1, 0, 0])
+		expect(ctx.ops("drawImage").map(call => call.args)).toEqual([
+			["surface0", 0, 0, 150, 100, -15, -5, 150, 100],
+			["surface0", 0, 0, 90, 70, -5, 5, 90, 70]
+		])
+	})
+
+	it("draws a shaded mesh after an outline on the same scratch layer, its edge copied one pixel outwards", () => {
+		const list = new DrawingList()
+
+		list.width = 200
+		list.height = 100
+
+		const strokeIndex = list.stroke({ ...line({ compound: "dbl" }), paint: list.paint({ kind: "solid", color: rgba("FF0000") }) })
+		const outline = list.commandCount
+		const outlineCoord = list.coordCount
+
+		list.moveTo(10, 20)
+		list.lineTo(110, 20)
+		list.lineTo(110, 70)
+		list.lineTo(10, 70)
+		list.close()
+		list.addItem(ItemKind.PATH, IDENTITY, 10, 20, 100, 50, outline, outlineCoord, -1, strokeIndex, -1, -1, 0, 0)
+
+		const points = Float32Array.of(0, 0, 20, 0, 0, 10, 20, 0, 20, 10, 0, 10)
+		const colors = Uint32Array.of(0xff0000ff, 0x00ff00ff, 0x0000ffff, 0x808080ff, 0x00ffffff, 0xffff00ff)
+		const mesh = list.commandCount
+		const meshCoord = list.coordCount
+
+		list.moveTo(0, 0)
+		list.lineTo(20, 0)
+		list.lineTo(20, 10)
+		list.lineTo(0, 10)
+		list.close()
+		list.addItem(
+			ItemKind.PATH,
+			IDENTITY,
+			0,
+			0,
+			20,
+			10,
+			mesh,
+			meshCoord,
+			list.paint({ kind: "shaded", points, colors, ramp: null }),
+			-1,
+			-1,
+			-1,
+			0,
+			0
+		)
+
+		const ctx = new RecordingCanvas()
+		const surfaces = recordingSurfaces()
+
+		paintDrawingCanvas(ctx, drawingData(list), IDENTITY, { ...NO_IMAGES, surface: surfaces.surface })
+
+		expect(surfaces.made).toHaveLength(1)
+
+		const layer = surfaces.made[0]
+
+		expect([layer?.width, layer?.height]).toEqual([150, 100])
+		expect(layer?.ops("putImageData").map(call => call.args)).toEqual([
+			[0, 0, 20, 10],
+			[20, 0, 1, 10],
+			[0, 10, 21, 1]
+		])
+		expect(ctx.ops("drawImage").map(call => call.args.slice(0, 5))).toEqual([
+			["surface0", 0, 0, 150, 100],
+			["surface0", 0, 0, 20, 10]
+		])
+
+		const pixel = (x: number, y: number): number[] => Array.from(layer?.pixels.subarray((y * 150 + x) * 4, (y * 150 + x + 1) * 4) ?? [])
+
+		for (let y = 0; y < 10; y++) expect(pixel(20, y)).toEqual(pixel(19, y))
+		for (let x = 0; x < 20; x++) expect(pixel(x, 10)).toEqual(pixel(x, 9))
+
+		expect(pixel(20, 10)).toEqual(pixel(19, 9))
+		expect(pixel(19, 9)[3]).toBe(255)
 	})
 
 	it("clears the interior and draws an inset pen's inner band inside the path", () => {
@@ -175,7 +298,7 @@ describe("compound lines on canvas", () => {
 
 async function pdfText(data: PdfDrawingData): Promise<string> {
 	const writer = await PdfWriter.create({ deterministic: true, deflate: null })
-	const fonts = new PdfFontSet({ assets: nodeFontAssets, deterministic: true })
+	const fonts = new PdfFontSet({ assets: nodeFontAssets })
 	const page = writer.beginPage(300, 200)
 
 	await paintDrawingPdf({ page, fonts, image: () => Promise.resolve(undefined), defaultFamily: "Calibri" }, data, [1, 0, 0, 1, 0, 0])

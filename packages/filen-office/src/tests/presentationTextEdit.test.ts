@@ -7,7 +7,8 @@ import { splitParagraph, toggleRunFlag } from "../core/presentation/edit/command
 import { sessionEdits } from "../dom/presentation/engine/edit"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { editHarness, shapeById } from "./presentationEditFixtures"
-import { changedParts, partsOf, saveEdits, text } from "./pptxWriteFixtures"
+import { pictureDeck } from "./presentationObjectsFixtures"
+import { differingParts, partsOf, saveEdits, text } from "./pptxWriteFixtures"
 
 // Text edits end to end in the worker: the editor's document converts back to a body that keeps every untouched
 // paragraph (and its source) as it was; setText puts a body on a shape, its undo restores the source body exactly,
@@ -109,7 +110,7 @@ describe("presentation text editing schema", () => {
 })
 
 describe("presentation text ops", () => {
-	it("typing mid-run in a title rewrites only that slide's text, and undo saves as unchanged", async () => {
+	it("typing mid-run in a title rewrites only that slide's text, and undo restores the title", async () => {
 		const h = await editHarness(deck(), EDIT)
 		const slide = await h.slide(0)
 		const title = shapeById(slide.shapes, 2) as ShapeNode
@@ -128,7 +129,7 @@ describe("presentation text ops", () => {
 		const before = deck()
 		const saved = await saveEdits(h, (result as { revision: number }).revision)
 
-		expect(await changedParts(before, saved)).toEqual(["ppt/slides/slide1.xml"])
+		expect(await differingParts(before, saved)).toEqual(["ppt/slides/slide1.xml"])
 
 		const xml = text((await partsOf(saved)).get("ppt/slides/slide1.xml"))
 
@@ -230,6 +231,55 @@ describe("presentation text ops", () => {
 		expect(await h.command({ family: "text", kind: "setText", target: { slide: slide.ref, id: 99 }, body: bad })).toEqual({
 			ok: false,
 			refusal: "notFound"
+		})
+		h.close()
+
+		// A picture holds no text body: refused, and nothing is put on it.
+		const pictures = await editHarness(pictureDeck(), EDIT)
+		const first = await pictures.slide(0)
+		const good: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text: "x", rPr: {} }] }] }
+
+		expect(await pictures.command({ family: "text", kind: "setText", target: { slide: first.ref, id: 4 }, body: good })).toEqual({
+			ok: false,
+			refusal: "unsupported"
+		})
+		expect(shapeById(first.shapes, 4)?.text).toBeUndefined()
+		pictures.close()
+	})
+
+	it("refuses a lone surrogate and a link the deck cannot carry, but not what the body it replaces already held", async () => {
+		const h = await editHarness(deck(), EDIT)
+		const slide = await h.slide(0)
+		const target = { slide: slide.ref, id: 3 }
+		const run = (text: string, href?: string): TextBody["paragraphs"][number]["runs"][number] => ({
+			kind: "r",
+			text,
+			rPr: href === undefined ? {} : { hlinkClick: { kind: "url", href } }
+		})
+		const of = (...runs: TextBody["paragraphs"][number]["runs"]): TextBody => ({ bodyPr: {}, paragraphs: [{ pPr: {}, runs }] })
+
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("half \ud83d of an emoji")) })).toEqual({
+			ok: false,
+			refusal: "malformed"
+		})
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("link", "javascript:alert(1)")) })).toEqual({
+			ok: false,
+			refusal: "malformed"
+		})
+
+		// A body that already holds a lone surrogate (as a file read by another path might): editing another of its runs
+		// re-sends that run as it is, and is accepted.
+		const shape = shapeById(slide.shapes, 3) as ShapeNode
+
+		shape.text = of(run("kept \ude00"), run(" edited"))
+
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("kept \ude00"), run(" typed")) })).toMatchObject({
+			ok: true
+		})
+		expect(shapeText(shapeById(slide.shapes, 3))).toEqual(["kept \ude00 typed"])
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("new \ude00")) })).toEqual({
+			ok: false,
+			refusal: "malformed"
 		})
 		h.close()
 	})

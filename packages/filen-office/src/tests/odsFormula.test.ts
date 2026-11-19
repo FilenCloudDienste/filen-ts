@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { rangeAddress, translateFormula } from "../core/ods/formula/toXlsx"
 import { wellFormedFormula } from "../core/sheet/refs/formulaRefs"
-import { budget } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // OpenFormula (ODF 1.3 Part 4) as the store's Excel grammar: the cases of Part 4 §5 the corpus lacks, and the ones it
 // has.
@@ -112,18 +112,19 @@ describe("OpenFormula to Excel's grammar", () => {
 
 	it("refuses a formula longer than a cell's at once, and reads the longest it takes in one pass", () => {
 		const long = (count: number): string => `of:=${Array.from({ length: count }, () => "SUM([.A1]~[.B1])").join("+")}`
-		let started = performance.now()
-
-		expect(refused(long(200_000))).toBe("formula too long")
-		expect(refused(`msoxl:=${"A1+".repeat(5_000)}1`)).toBe("formula too long")
-		expect(performance.now() - started).toBeLessThan(budget(100))
-
+		const huge = long(200_000)
+		const hugeExcel = `msoxl:=${"A1+".repeat(5_000)}1`
 		// Just under the source bound: read through, then refused for its translated length.
 		const longest = long(1_900)
+		let started = cpuMs()
 
-		started = performance.now()
+		expect(refused(huge)).toBe("formula too long")
+		expect(refused(hugeExcel)).toBe("formula too long")
+		expect(cpuMs() - started).toBeLessThan(budget(100))
+
+		started = cpuMs()
 		expect(refused(longest)).toBe("formula too long")
-		expect(performance.now() - started).toBeLessThan(budget(100))
+		expect(cpuMs() - started).toBeLessThan(budget(100))
 	})
 
 	it("spells functions as Excel stores them", () => {

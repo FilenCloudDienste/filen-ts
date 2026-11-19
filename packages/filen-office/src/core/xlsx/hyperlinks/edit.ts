@@ -1,5 +1,5 @@
 import { classifyLink } from "@filen/shared/linkPolicy"
-import { SHEET_MAX_CELL_TEXT, SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRange, type SheetRefusal } from "../../sheet/protocol"
+import { SHEET_MAX_CELL_TEXT, type SheetId, type SheetRange, type SheetRefusal } from "../../sheet/protocol"
 import type { SheetChangeSink, SheetEditStep, SheetHandled } from "../../sheet/registry"
 import { decodeUtf8 } from "../../xml/index"
 import { AnnotationWrites, hyperlinkRelationship } from "../comments/parts"
@@ -8,6 +8,7 @@ import type { XlsxDocument } from "../edit/document"
 import { applyFormat } from "../edit/format"
 import { RefRefused } from "../refs/catalogue"
 import { refState } from "../refs/state"
+import { inGrid } from "../refs/sqref"
 import type { XlsxSheetModel, XlsxWorkbookModel } from "../model/types"
 import { namespacesOf } from "../write/namespaces"
 import { cutLinks, editLinks, readLinks, subtract, type LinksSection } from "./links"
@@ -52,18 +53,6 @@ export function linksOf(workbook: XlsxWorkbookModel, model: XlsxSheetModel): Lin
 }
 
 export type LinkTarget = { readonly url: string } | { readonly location: string }
-
-function inGrid(range: SheetRange): boolean {
-	return (
-		[range.startRow, range.startCol, range.endRow, range.endCol].every(Number.isInteger) &&
-		range.startRow >= 0 &&
-		range.startCol >= 0 &&
-		range.startRow <= range.endRow &&
-		range.startCol <= range.endCol &&
-		range.endRow < SHEET_MAX_ROWS &&
-		range.endCol < SHEET_MAX_COLS
-	)
-}
 
 function combine(steps: readonly SheetEditStep[]): SheetEditStep {
 	return {
@@ -173,7 +162,7 @@ export async function setLinks(
 			display: text === undefined || text === "" ? null : text
 		})),
 		namespacesOf(workbook.strict).relationships,
-		prefixOf(prepared.model),
+		elementPrefix(prepared.model),
 		cut
 	)
 
@@ -240,7 +229,7 @@ export async function removeLinks(
 
 	const workbook = document.workbook
 	const writes = new AnnotationWrites(workbook)
-	const edited = editLinks(prepared.section, ranges, [], namespacesOf(workbook.strict).relationships, prefixOf(prepared.model))
+	const edited = editLinks(prepared.section, ranges, [], namespacesOf(workbook.strict).relationships, elementPrefix(prepared.model))
 
 	for (const id of edited.released) writes.removeRelationship(prepared.part, id)
 
@@ -264,10 +253,9 @@ export async function removeLinks(
 	return steps.length === 1 ? (steps[0] ?? null) : combine(steps)
 }
 
-function prefixOf(model: XlsxSheetModel): string {
-	const prefix = (model as { readonly prefix?: string }).prefix ?? ""
-
-	return prefix === "" ? "" : `${prefix}:`
+// The sheet's prefix as element names take it: "x:", or "" for the default namespace.
+function elementPrefix(model: XlsxSheetModel): string {
+	return model.prefix === "" ? "" : `${model.prefix}:`
 }
 
 function lookAt(sheet: SheetId, ranges: readonly SheetRange[]): (changes: SheetChangeSink) => void {

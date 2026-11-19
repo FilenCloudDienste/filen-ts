@@ -133,7 +133,8 @@ function random(seed: number): () => number {
 }
 
 // Overwrites bytes anywhere in the WordDocument, Table and Data streams (pictures, the drawing group and field data
-// included), the compound file rebuilt around them.
+// included), the compound file rebuilt around them. FILEN_OFFICE_DOC_FUZZ (rounds) and FILEN_OFFICE_DOC_FUZZ_SEED
+// replace the fixed count and seed, as in docFuzz.test.ts.
 function mutate(entries: readonly { readonly path: string; readonly bytes: Uint8Array }[], next: () => number): CfbWriteEntry[] {
 	return entries.map(entry => {
 		const bytes = entry.bytes.slice()
@@ -177,11 +178,13 @@ describe.skipIf(!fetched)("mutated Word binary documents to WordprocessingML", (
 			sources.push({ name: path, entries })
 		}
 
-		const next = random(23)
+		const seed = Number(process.env["FILEN_OFFICE_DOC_FUZZ_SEED"] || "23")
+		const rounds = Number(process.env["FILEN_OFFICE_DOC_FUZZ"] || "600")
+		const next = random(seed)
 		const untyped: string[] = []
 		let slowest = 0
 
-		for (let k = 0; k < 600; k++) {
+		for (let k = 0; k < rounds; k++) {
 			const source = sources[Math.floor(next() * sources.length)]
 
 			if (source === undefined) continue
@@ -195,13 +198,15 @@ describe.skipIf(!fetched)("mutated Word binary documents to WordprocessingML", (
 				for (const [name, part] of result.parts) if (name.endsWith(".xml") || name.endsWith(".rels")) parseXml(part)
 			} catch (error) {
 				if (!(error instanceof DocError))
-					untyped.push(`${source.name} #${k}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+					untyped.push(
+						`${source.name} #${k} (seed ${seed}): ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+					)
 			}
 
 			slowest = Math.max(slowest, performance.now() - started)
 		}
 
 		expect(untyped).toEqual([])
-		expect(slowest).toBeLessThan(budget(3000))
+		expect(slowest, `seed ${seed}`).toBeLessThan(budget(3000))
 	})
 })

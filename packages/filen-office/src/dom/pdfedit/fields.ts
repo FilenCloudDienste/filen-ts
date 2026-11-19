@@ -284,7 +284,6 @@ export function fieldType(dict: PDFObject): string | null {
 	return null
 }
 
-// The signed signature fields (a /Sig field with a value dictionary), in field order.
 // The signatures as hints (pdf.js's shape): each signed field's own name and byte range, for a file of `length`
 // bytes. Fields whose range or contents could not have been signed are left out, as pdf.js leaves them out.
 export function signatureFieldHints(fields: readonly SignatureField[], length: number): PdfSignatureFieldHint[] {
@@ -306,6 +305,7 @@ export function signatureFieldHints(fields: readonly SignatureField[], length: n
 	return hints
 }
 
+// The signed signature fields (a /Sig field with a value dictionary), in field order.
 export function signatureFieldsOf(document: PDFDocument, fields: readonly FieldRecord[]): SignatureField[] {
 	const pages = lazyPages(document)
 	const signatures: SignatureField[] = []

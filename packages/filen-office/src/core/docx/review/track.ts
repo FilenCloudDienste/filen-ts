@@ -18,6 +18,7 @@ import {
 } from "../edit/invariants/core"
 import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type IndentAttrs, type MarkerKind, type SpacingAttrs } from "../edit/schema"
 import { SetAttrsStep } from "../edit/attrs"
+import { insidePair } from "../edit/invariants/codePoints"
 import { MarkChanges, SetMarkSetsStep, SetMarksStep, markStepsOf, type MarkStep } from "../edit/marks"
 import { rowOverrides, type RowOverrides, type TrackStamp } from "../edit/tables/map"
 import type { DocxEditorSession } from "../edit/session"
@@ -110,19 +111,23 @@ export function paragraphChange(node: Node): ParagraphChange | undefined {
 	return marks.paragraph_change.isInSet(node.marks)?.attrs["value"] as ParagraphChange | undefined
 }
 
-// Sets (or, when empty, removes) the paragraph_change mark of the paragraph at `pos`.
-// `nodeMarks` with the paragraph_change mark holding `change` (none when it is empty).
-export function withParagraphChange(nodeMarks: readonly Mark[], change: ParagraphChange): readonly Mark[] {
-	const empty = change.props === undefined && change.inserted === undefined && change.deleted === undefined && change.source === undefined
-
-	return empty ? marks.paragraph_change.removeFromSet(nodeMarks) : marks.paragraph_change.create({ value: change }).addToSet(nodeMarks)
+// Whether `change` records nothing (a key holding undefined counts as absent).
+function emptyChange(change: ParagraphChange): boolean {
+	return change.props === undefined && change.inserted === undefined && change.deleted === undefined && change.source === undefined
 }
 
+// `nodeMarks` with the paragraph_change mark holding `change` (none when it is empty).
+export function withParagraphChange(nodeMarks: readonly Mark[], change: ParagraphChange): readonly Mark[] {
+	return emptyChange(change)
+		? marks.paragraph_change.removeFromSet(nodeMarks)
+		: marks.paragraph_change.create({ value: change }).addToSet(nodeMarks)
+}
+
+// Sets (or, when empty, removes) the paragraph_change mark of the paragraph at `pos`.
 export function setParagraphChange(tr: Transaction, pos: number, node: Node, change: ParagraphChange): void {
-	const empty = change.props === undefined && change.inserted === undefined && change.deleted === undefined && change.source === undefined
 	const existing = marks.paragraph_change.isInSet(node.marks)
 
-	if (empty) {
+	if (emptyChange(change)) {
 		if (existing !== undefined) tr.removeNodeMark(pos, existing)
 
 		return
@@ -234,6 +239,30 @@ export interface TrackPlan {
 	readonly cut?: boolean
 }
 
+// A plan recording nothing yet; `extra` gives what is known up front (ranges, a move source).
+function emptyPlan(
+	stamp: RevisionStamp,
+	session: DocxEditorSession,
+	composing: boolean,
+	extra: Partial<Pick<TrackPlan, "inserted" | "deleted" | "move" | "cut">> = {}
+): TrackPlan {
+	return {
+		stamp,
+		session,
+		inserted: [],
+		deleted: [],
+		marks: [],
+		equations: [],
+		rows: [],
+		formats: [],
+		settle: [],
+		props: [],
+		propsSeen: new Set(),
+		composing,
+		...extra
+	}
+}
+
 const plans = new WeakMap<Transaction, TrackPlan>()
 // The session of each user transaction (the stage moves paragraph mark revisions read from its part).
 const sessions = new WeakMap<Transaction, DocxEditorSession>()
@@ -267,6 +296,25 @@ interface Pending {
 const pending = new WeakMap<DocxEditorSession, Pending>()
 const following = new WeakSet<DocxEditorSession>()
 
+// Brings `entry`'s ranges through the transactions that follow its document.
+function mapPending(entry: Pending, transactions: readonly Transaction[]): void {
+	for (const tr of transactions) {
+		if (tr.before !== entry.doc) continue
+
+		const next: number[] = []
+
+		for (let k = 0; k < entry.ranges.length; k += 2) {
+			const from = tr.mapping.map(entry.ranges[k] ?? 0, 1)
+			const to = tr.mapping.map(entry.ranges[k + 1] ?? 0, -1)
+
+			if (to > from) next.push(from, to)
+		}
+
+		entry.ranges = next
+		entry.doc = tr.doc
+	}
+}
+
 function follow(session: DocxEditorSession): void {
 	if (following.has(session)) return
 
@@ -274,23 +322,7 @@ function follow(session: DocxEditorSession): void {
 	session.onApplied(transactions => {
 		const entry = pending.get(session)
 
-		if (entry === undefined) return
-
-		for (const tr of transactions) {
-			if (tr.before !== entry.doc) continue
-
-			const next: number[] = []
-
-			for (let k = 0; k < entry.ranges.length; k += 2) {
-				const from = tr.mapping.map(entry.ranges[k] ?? 0, 1)
-				const to = tr.mapping.map(entry.ranges[k + 1] ?? 0, -1)
-
-				if (to > from) next.push(from, to)
-			}
-
-			entry.ranges = next
-			entry.doc = tr.doc
-		}
+		if (entry !== undefined) mapPending(entry, transactions)
 	})
 }
 
@@ -306,23 +338,7 @@ function addPending(
 	const entry = pending.get(session)
 
 	// Ranges from before this batch are brought up to it first.
-	if (entry !== undefined) {
-		for (const tr of batch) {
-			if (tr.before !== entry.doc) continue
-
-			const next: number[] = []
-
-			for (let k = 0; k < entry.ranges.length; k += 2) {
-				const from = tr.mapping.map(entry.ranges[k] ?? 0, 1)
-				const to = tr.mapping.map(entry.ranges[k + 1] ?? 0, -1)
-
-				if (to > from) next.push(from, to)
-			}
-
-			entry.ranges = next
-			entry.doc = tr.doc
-		}
-	}
+	if (entry !== undefined) mapPending(entry, batch)
 
 	if (entry !== undefined && entry.doc === doc) appendAll(entry.ranges, ranges)
 	else pending.set(session, { ranges: [...ranges], doc, stamp })
@@ -881,7 +897,9 @@ function beyondDeleted(doc: Node, from: number, to: number, backward: boolean): 
 		if (node === null || !node.isInline) return undefined
 
 		if (!isDeleted(node) && markable(node)) {
-			const size = node.isText ? 1 : node.nodeSize
+			// A whole character: one outside the BMP is a surrogate pair, two positions (an edit splitting one is
+			// refused).
+			const size = !node.isText ? node.nodeSize : insidePair(doc, backward ? pos - 1 : pos + 1) ? 2 : 1
 
 			return backward ? [pos - size, pos] : [pos, pos + size]
 		}
@@ -995,20 +1013,7 @@ export function prebuiltTracking(
 		return out
 	}
 
-	plans.set(tr, {
-		stamp,
-		session,
-		inserted: ranges(inserted),
-		deleted: ranges(deleted),
-		marks: [],
-		equations: [],
-		rows: [],
-		formats: [],
-		settle: [],
-		props: [],
-		propsSeen: new Set(),
-		composing: false
-	})
+	plans.set(tr, emptyPlan(stamp, session, false, { inserted: ranges(inserted), deleted: ranges(deleted) }))
 	sessions.set(tr, session)
 	prebuilt.add(tr)
 
@@ -1058,20 +1063,7 @@ export function trackTransaction(tr: Transaction, session: DocxEditorSession): T
 	// Formatting and paragraph properties alone (a toolbar command over a selection): applied as they are, only
 	// recorded (a selection over a long document makes thousands of steps; nothing is copied for them).
 	if (tr.steps.every(step => markStepsOf(step) !== undefined || step instanceof AttrStep || step instanceof SetAttrsStep)) {
-		const plan: TrackPlan = {
-			stamp,
-			session,
-			inserted: [],
-			deleted: [],
-			marks: [],
-			equations: [],
-			rows: [],
-			formats: [],
-			settle: [],
-			props: [],
-			propsSeen: new Set(),
-			composing
-		}
+		const plan = emptyPlan(stamp, session, composing)
 
 		tr.steps.forEach((step, index) => {
 			const doc = tr.docs[index] as Node
@@ -1093,21 +1085,7 @@ export function trackTransaction(tr: Transaction, session: DocxEditorSession): T
 	const out = state.tr
 
 	sessions.set(out, session)
-	const plan: TrackPlan = {
-		stamp,
-		session,
-		inserted: [],
-		deleted: [],
-		marks: [],
-		equations: [],
-		rows: [],
-		formats: [],
-		settle: [],
-		props: [],
-		propsSeen: new Set(),
-		composing,
-		...moveSource(tr, session)
-	}
+	const plan = emptyPlan(stamp, session, composing, moveSource(tr, session))
 	const inverted: StepMap[] = []
 	let mapping = new Mapping()
 	let caret: number | undefined
@@ -1215,10 +1193,7 @@ function typedInsertion(step: ReplaceStep, doc: Node, plan: TrackPlan, alone: Ed
 
 	const stamp = plan.stamp
 
-	return (
-		continued(doc, step.from, step.to, marks.insertion, stamp) ??
-		marks.insertion.create({ src: NO_SOURCE, id: newChange(plan.session.context), author: stamp.author, date: stamp.date })
-	)
+	return continued(doc, step.from, step.to, marks.insertion, stamp) ?? newRevisionMark(marks.insertion, plan.session.context, stamp)
 }
 
 // What rewriteStep returns for a step whose tracked form could not be saved.
@@ -1762,7 +1737,7 @@ const REVISION_TYPES: readonly MarkType[] = [marks.insertion, marks.deletion, ma
 
 // Plans touching more ranges and paragraphs than this rebuild the blocks they touch in one step (a step per
 // piece would copy the document's block list for each of thousands of pieces).
-const BULK = 48
+export const MARK_BULK = 48
 
 // Marks added over [from, to): an insertion (copies of other changes there go; inline atoms at paragraph level
 // keep theirs), a deletion (on what is not deleted), a formatting change (where there is none). Only run content
@@ -1819,7 +1794,6 @@ function withoutStamps(change: ParagraphChange | undefined): ParagraphChange {
 	return rest
 }
 
-// The insertion of [from, to) by `stamp`: its mark, and the paragraph marks in it flagged inserted.
 // A mark of `type` by the stamp's author and minute on content next to [from, to) (or at its start): the change
 // that content continues, whose id it keeps.
 function continued(doc: Node, from: number, to: number, type: MarkType, stamp: RevisionStamp): Mark | undefined {
@@ -1848,7 +1822,13 @@ function newChange(context: DocxEditContext): number {
 	return context.ids.next("revision")
 }
 
-// `same`: the mark of the transaction's other insertions (what one transaction inserts is one change).
+// A new change's insertion or deletion mark (it takes a new change id).
+function newRevisionMark(type: MarkType, context: DocxEditContext, stamp: RevisionStamp): Mark {
+	return type.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+}
+
+// The insertion of [from, to) by `stamp`: its mark, and the paragraph marks in it flagged inserted. `same`: the
+// mark of the transaction's other insertions (what one transaction inserts is one change).
 function addInsertion(
 	doc: Node,
 	marking: Marking,
@@ -1859,10 +1839,7 @@ function addInsertion(
 	same?: Mark,
 	walk?: OrderedDoc
 ): Mark {
-	const mark =
-		same ??
-		continued(doc, from, to, marks.insertion, stamp) ??
-		marks.insertion.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+	const mark = same ?? continued(doc, from, to, marks.insertion, stamp) ?? newRevisionMark(marks.insertion, context, stamp)
 	const own: RevisionStamp = { author: stamp.author, date: stamp.date, id: mark.attrs["id"] as number }
 
 	const walker = walk ?? new OrderedDoc(doc)
@@ -2167,7 +2144,7 @@ function markBulk(tr: Transaction, marking: Marking): void {
 
 // Applies `marking`; true when it rebuilt blocks in one step (no invariant may see that step as a deletion).
 function applyMarking(tr: Transaction, marking: Marking): boolean {
-	if (marking.marks.length + marking.paragraphs.size + marking.rows.size <= BULK) {
+	if (marking.marks.length + marking.paragraphs.size + marking.rows.size <= MARK_BULK) {
 		markSteps(tr, marking)
 
 		return false
@@ -2262,8 +2239,7 @@ function applyPlan(
 		// One change for all of it, the one the first range continues (or a new one); the ranges marked in
 		// document order, by one walk of it.
 		const mark =
-			continued(doc, inserted[0] ?? 0, inserted[1] ?? 0, marks.insertion, stamp) ??
-			marks.insertion.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+			continued(doc, inserted[0] ?? 0, inserted[1] ?? 0, marks.insertion, stamp) ?? newRevisionMark(marks.insertion, context, stamp)
 		const pairs: [number, number][] = []
 		const walk = new OrderedDoc(doc)
 
@@ -2282,9 +2258,7 @@ function applyPlan(
 
 		if (at === undefined) continue
 
-		deletion ??=
-			continued(doc, at[0], at[1], marks.deletion, stamp) ??
-			marks.deletion.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+		deletion ??= continued(doc, at[0], at[1], marks.deletion, stamp) ?? newRevisionMark(marks.deletion, context, stamp)
 		marking.marks.push({ from: at[0], to: at[1], kind: "delete", mark: deletion })
 	}
 
@@ -2309,9 +2283,7 @@ function applyPlan(
 		const close = where + node.nodeSize - 1
 		const next = close + 2
 
-		deletion ??=
-			continued(doc, close, next, marks.deletion, stamp) ??
-			marks.deletion.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+		deletion ??= continued(doc, close, next, marks.deletion, stamp) ?? newRevisionMark(marks.deletion, context, stamp)
 
 		const own: RevisionStamp = { author: stamp.author, date: stamp.date, id: deletion.attrs["id"] as number }
 
@@ -2325,9 +2297,7 @@ function applyPlan(
 
 		if (node?.type !== nodes.math) continue
 
-		deletion ??=
-			continued(doc, where, where + 1, marks.deletion, stamp) ??
-			marks.deletion.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+		deletion ??= continued(doc, where, where + 1, marks.deletion, stamp) ?? newRevisionMark(marks.deletion, context, stamp)
 
 		const omml = trackedDeletion(node, plan.session.story.part, deletion.attrs["id"] as number, stamp)
 
@@ -2338,7 +2308,7 @@ function applyPlan(
 	for (const where of rowAt) {
 		if (blocks.get(where)?.type !== nodes.table_row) continue
 
-		deletion ??= marks.deletion.create({ src: NO_SOURCE, id: newChange(context), author: stamp.author, date: stamp.date })
+		deletion ??= newRevisionMark(marks.deletion, context, stamp)
 		marking.rows.set(where, {
 			flag: RevisionFlag.Deleted,
 			stamp: { author: stamp.author, date: stamp.date, id: deletion.attrs["id"] as number }

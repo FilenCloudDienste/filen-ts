@@ -1,6 +1,6 @@
 import type { XmlDocument } from "../../xml/index"
 import { ByteKeyMap } from "./byteKeys"
-import { readProps, type Props, type PropertyValue, type StyleChains } from "./meaning"
+import { childNamed, readProps, type Props, type PropertyValue, type StyleChains } from "./meaning"
 
 // A table as its cells show it (ECMA-376 Part 1 §17.4): each cell's borders and margins with the table's (its own
 // tblBorders and tblCellMar, else its style's) where the cell sets none — the outer edges from the table's
@@ -29,14 +29,6 @@ export interface EffectiveTable {
 
 const SIDES = ["top", "left", "bottom", "right"] as const
 const NO_BYTES = new Uint8Array(0)
-
-function childNamed(document: XmlDocument, node: number, local: string): number {
-	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-		if (document.localName(child) === local) return child
-	}
-
-	return -1
-}
 
 // Sides of a tcBorders/tcMar/tblBorders/tblCellMar value, start and end as left and right.
 function sides(value: PropertyValue | undefined): Map<string, Map<string, string>> {

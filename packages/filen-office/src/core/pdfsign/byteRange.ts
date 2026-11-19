@@ -77,7 +77,8 @@ export async function readContentsGap(source: PdfByteSource, range: ByteRange): 
 }
 
 // The DER object at the start of the zero-padded /Contents value, or null when it is malformed or followed by anything
-// but padding.
+// but padding. An indefinite-length (BER) object, as BouncyCastle-based signers write, is walked to the end-of-contents
+// octets that close it: the padding cannot be told apart from those octets, so its end is never searched for.
 export function trimDer(bytes: Uint8Array): Uint8Array | null {
 	if (bytes[0] !== 0x30 || bytes.length < 2) return null
 
@@ -85,7 +86,15 @@ export function trimDer(bytes: Uint8Array): Uint8Array | null {
 	let length: number
 	let header: number
 
-	if (first < 0x80) {
+	if (first === 0x80) {
+		const end = indefiniteEnd(bytes)
+
+		if (end === null) return null
+
+		for (let i = end; i < bytes.length; i++) if (bytes[i] !== 0) return null
+
+		return bytes.subarray(0, end)
+	} else if (first < 0x80) {
 		length = first
 		header = 2
 	} else {
@@ -107,4 +116,73 @@ export function trimDer(bytes: Uint8Array): Uint8Array | null {
 	for (let i = end; i < bytes.length; i++) if (bytes[i] !== 0) return null
 
 	return bytes.subarray(0, end)
+}
+
+// Deepest nesting of indefinite-length objects walked; CMS needs a handful.
+const MAX_BER_DEPTH = 32
+
+// The end of the indefinite-length object at the start of `bytes`: definite-length children are skipped by their
+// length, indefinite ones entered, until the end-of-contents octets that close the outer object. Null when anything
+// runs past the buffer.
+function indefiniteEnd(bytes: Uint8Array): number | null {
+	let at = 0
+	let depth = 0
+
+	for (;;) {
+		if (depth > 0 && bytes[at] === 0 && bytes[at + 1] === 0) {
+			at += 2
+			depth--
+
+			if (depth === 0) return at
+
+			continue
+		}
+
+		const tag = bytes[at]
+
+		if (tag === undefined) return null
+
+		at++
+
+		// High tag numbers continue while the top bit is set.
+		if ((tag & 0x1f) === 0x1f) {
+			let octets = 0
+
+			do {
+				if (at >= bytes.length || ++octets > 4) return null
+			} while (((bytes[at++] ?? 0) & 0x80) !== 0)
+		}
+
+		const first = bytes[at]
+
+		if (first === undefined) return null
+
+		at++
+
+		if (first === 0x80) {
+			// Only constructed encodings may be indefinite.
+			if ((tag & 0x20) === 0 || ++depth > MAX_BER_DEPTH) return null
+
+			continue
+		}
+
+		let length = first
+
+		if (first > 0x80) {
+			const count = first & 0x7f
+
+			if (count > 4 || at + count > bytes.length) return null
+
+			length = 0
+
+			for (let i = 0; i < count; i++) length = length * 256 + (bytes[at + i] ?? 0)
+
+			at += count
+		}
+
+		at += length
+
+		if (at > bytes.length) return null
+		if (depth === 0) return at
+	}
 }

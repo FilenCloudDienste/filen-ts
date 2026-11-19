@@ -76,10 +76,17 @@ export async function copyCells(
 	const rows = range.endRow - range.startRow + 1
 	const cols = range.endCol - range.startCol + 1
 
-	if (rows <= 0 || cols <= 0 || rows * cols > SHEET_MAX_COPY_CELLS) return { refused: "tooLarge" }
+	if (rows <= 0 || cols <= 0) return { refused: "tooLarge" }
 
 	// A sheet an edit took away while the request was on its way has nothing to copy.
 	if (document.workbook.sheet(sheet) === undefined) return { clip: document.nextClip++, text: "" }
+
+	// What the copy's text holds is bounded, not the range: a whole column, row or sheet selected copies the used cells.
+	const store = (await document.ready(sheet)).store as SheetStore
+	const usedRows = Math.min(rows, store.rowExtent - range.startRow)
+	const usedCols = Math.min(cols, store.colExtent - range.startCol)
+
+	if (usedRows > 0 && usedCols > 0 && usedRows * usedCols > SHEET_MAX_COPY_CELLS) return { refused: "tooLarge" }
 
 	// A copy of filtered data takes its visible rows only; a cut moves the whole range, hidden rows too, as Excel's does.
 	const clip = await clipOf(document, sheet, range, cut, document.nextClip++, !cut)
@@ -116,6 +123,21 @@ function copiedRows(document: XlsxDocument, model: XlsxSheetModel, range: SheetR
 	return { runs, sourceRows }
 }
 
+// How many of the ascending `sourceRows` lie above `rowExtent`.
+function usedSourceRows(sourceRows: Uint32Array, rowExtent: number): number {
+	let low = 0
+	let high = sourceRows.length
+
+	while (low < high) {
+		const mid = (low + high) >>> 1
+
+		if ((sourceRows[mid] ?? 0) < rowExtent) low = mid + 1
+		else high = mid
+	}
+
+	return low
+}
+
 // Each cell of `runs` with its row in the copy (the runs' rows one after the other).
 function forEachCopied(
 	store: SheetStore,
@@ -147,8 +169,14 @@ export async function clipOf(
 	const model = await document.ready(sheet)
 	const store = model.store as SheetStore
 	const { runs, sourceRows } = copiedRows(document, model, range, visibleOnly)
-	const rows = sourceRows?.length ?? range.endRow - range.startRow + 1
-	const lines: string[][] = Array.from({ length: rows }, () => new Array<string>(cols).fill(""))
+	// The text stops at the used cells (only stored cells are visited, and the rest are blank); the clip keeps the
+	// whole range, whose formats, merges and validations a cut moves.
+	const textCols = Math.max(0, Math.min(cols, store.colExtent - range.startCol))
+	const textRows =
+		sourceRows === undefined
+			? Math.max(0, Math.min(range.endRow - range.startRow + 1, store.rowExtent - range.startRow))
+			: usedSourceRows(sourceRows, store.rowExtent)
+	const lines: string[][] = Array.from({ length: textCols === 0 ? 0 : textRows }, () => new Array<string>(textCols).fill(""))
 	const inputs = new Map<number, string>()
 	const styles = new Map<number, number>()
 	const sources = new Map<number, XlsxSourceCell>()

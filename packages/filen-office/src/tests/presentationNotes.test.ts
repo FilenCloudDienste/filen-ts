@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { DeckOp } from "../core/presentation/edit/ops"
-import type { Deck, SlideRef, TextBody } from "../core/presentation/model"
-import { notesTarget } from "../core/presentation/notes"
+import { slideRef, type Deck, type SlideRef, type TextBody } from "../core/presentation/model"
+import { DEFAULT_NOTES_BOXES, DEFAULT_NOTES_PAGE, defaultNotesMaster, notesTarget } from "../core/presentation/notes"
+import { NOTES_SLIDE_BOX } from "../core/presentation/pages"
+import { DEFAULT_CLR_MAP } from "../core/presentation/theme"
 import { review } from "../dom/presentation/engine/review"
 import { odpBytes, page } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
@@ -222,5 +224,51 @@ describe("speaker notes", () => {
 			await review(back.context, each, { comments: false })
 			expect(notesText(back.session.deck, each)).toBe("Mine")
 		}
+	})
+})
+
+describe("the default notes master", () => {
+	it("refuses notes holding a lone surrogate, new or edited, in pptx and ODP", async () => {
+		const odp = odpBytes({
+			body: page(
+				'<draw:frame presentation:class="title" svg:x="2cm" svg:y="1cm" svg:width="24cm" svg:height="3cm"><draw:text-box><text:p>Hi</text:p></draw:text-box></draw:frame>'
+			)
+		})
+
+		for (const [bytes, format, index] of [
+			[buildPptx(editDeckOptions()), "pptx", 1],
+			[buildPptx(editDeckOptions()), "pptx", 0],
+			[odp, "odp", 0]
+		] as const) {
+			const s = await driveSession(bytes, format)
+			const slide = s.session.deck.slides[index] as SlideRef
+
+			await review(s.context, slide)
+
+			const before = notesText(s.session.deck, slide)
+
+			expect(await s.command(setNotes(slide, "half \ud83d of an emoji"))).toMatchObject({ ok: false, refusal: "malformed" })
+			expect(notesText(s.session.deck, slide)).toBe(before)
+		}
+	})
+
+	it("places the notes PDF page's slide image where the default notes master's sldImg is", () => {
+		expect(NOTES_SLIDE_BOX).toEqual({
+			x: DEFAULT_NOTES_BOXES.sldImg.x / DEFAULT_NOTES_PAGE.cx,
+			y: DEFAULT_NOTES_BOXES.sldImg.y / DEFAULT_NOTES_PAGE.cy,
+			width: DEFAULT_NOTES_BOXES.sldImg.cx / DEFAULT_NOTES_PAGE.cx,
+			height: DEFAULT_NOTES_BOXES.sldImg.cy / DEFAULT_NOTES_PAGE.cy
+		})
+		expect(NOTES_SLIDE_BOX).toEqual({ x: 1143000 / 6858000, y: 685800 / 9144000, width: 4572000 / 6858000, height: 3429000 / 9144000 })
+	})
+
+	it("gives each master its own copy of the default colour map", () => {
+		const deck = { notesSize: { cx: 6_858_000, cy: 9_144_000 } } as Deck
+		const one = defaultNotesMaster(deck, slideRef(1), "/ppt/notesMasters/notesMaster1.xml", undefined)
+		const two = defaultNotesMaster(deck, slideRef(2), "/ppt/notesMasters/notesMaster2.xml", undefined)
+
+		expect(one.clrMap).toEqual(DEFAULT_CLR_MAP)
+		expect(one.clrMap).not.toBe(two.clrMap)
+		expect(one.clrMap).not.toBe(DEFAULT_CLR_MAP)
 	})
 })

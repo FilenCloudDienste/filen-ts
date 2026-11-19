@@ -115,7 +115,6 @@ async function write(doc: DocxPdfDocument, options: DocxPdfOptions): Promise<Doc
 
 			return bundledSource(request)
 		},
-		deterministic: options.deterministic === true,
 		...(options.signal === undefined ? {} : { signal: options.signal })
 	})
 

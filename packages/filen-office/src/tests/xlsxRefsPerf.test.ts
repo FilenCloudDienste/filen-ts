@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { planRefEdit } from "../core/xlsx/refs/index"
 import { rows, sheetBody } from "./xlsxRefsFixtures"
-import { buildFixture, openWorkbook, saved } from "./xlsxWriteFixtures"
+import { buildFixture, openWorkbook } from "./xlsxWriteFixtures"
 import { budget, cpuMs } from "./timing"
 
 // Planning and applying a structure edit costs in proportion to what refers to cells: a sheet of 100,000 rows with
@@ -35,7 +35,7 @@ function body(formulas: boolean): string {
 	return data
 }
 
-async function time(formulas: boolean): Promise<{ plan: number; apply: number; save: number }> {
+async function time(formulas: boolean): Promise<{ plan: number; apply: number }> {
 	const workbook = await openWorkbook(buildFixture(sheetBody(body(formulas))))
 
 	await workbook.load(0)
@@ -46,15 +46,10 @@ async function time(formulas: boolean): Promise<{ plan: number; apply: number; s
 
 	if (!result.ok) throw new Error(JSON.stringify(result.refusal))
 
-	started = performance.now()
+	started = cpuMs()
 	result.plan.apply()
 
-	const apply = performance.now() - started
-
-	started = performance.now()
-	await saved(workbook)
-
-	return { plan, apply, save: performance.now() - started }
+	return { plan, apply: cpuMs() - started }
 }
 
 describe("structure edit cost", () => {
@@ -63,9 +58,13 @@ describe("structure edit cost", () => {
 		const rich = await time(true)
 
 		console.log(
-			`refs perf, ${ROWS} rows: plain plan ${plain.plan.toFixed(0)} ms apply ${plain.apply.toFixed(0)} ms save ${plain.save.toFixed(0)} ms; with ${ROWS * 2} formulas and 300 rules plan ${rich.plan.toFixed(0)} ms apply ${rich.apply.toFixed(0)} ms save ${rich.save.toFixed(0)} ms`
+			`refs perf, ${ROWS} rows: plain plan ${plain.plan.toFixed(0)} ms apply ${plain.apply.toFixed(0)} ms; with ${ROWS * 2} formulas and 300 rules plan ${rich.plan.toFixed(0)} ms apply ${rich.apply.toFixed(0)} ms`
 		)
 		// Nothing to move but cells: planning reads no row.
 		expect(plain.plan).toBeLessThan(budget(50))
+		expect(plain.apply).toBeLessThan(budget(50))
+		// About 100 ms to plan and 20 ms to apply on a desktop: a cost that grows faster than the formulas does not fit.
+		expect(rich.plan).toBeLessThan(budget(400))
+		expect(rich.apply).toBeLessThan(budget(150))
 	})
 })

@@ -143,25 +143,41 @@ describe("cell identity through edits", () => {
 			const xml = new TextDecoder().decode(unzipSync(saved.bytes)["xl/worksheets/sheet1.xml"])
 			const seen = new Map<number, string>()
 
-			for (const match of xml.matchAll(/<c r="([A-Z]+)(\d+)"[^>]*?\sown:id="(\d+)"/g)) {
-				const key = Number(match[3])
+			// Attributes are read from each start tag separately, so their order does not matter.
+			for (const [tag] of xml.matchAll(/<c\s[^>]*>/g)) {
+				const ref = /\sr="([A-Z]+\d+)"/.exec(tag)
+				const own = /\sown:id="(\d+)"/.exec(tag)
+
+				if (ref === null || own === null) continue
+
+				const key = Number(own[1])
 
 				if (seen.has(key)) failures.push(`run ${run}: id ${key} twice`)
 
-				seen.set(key, `${match[1]}${match[2]}`)
+				seen.set(key, ref[1]!)
 			}
 
 			const wrong: string[] = []
+			let live = 0
 
 			for (const [key, place] of expected) {
 				const at = seen.get(key)
 
 				if (place === null) {
 					if (at !== undefined) wrong.push(`${key}: deleted, found at ${at}`)
-				} else if (at !== undefined && at !== `${colName(place[1])}${place[0] + 1}`) {
-					wrong.push(`${key}: expected ${colName(place[1])}${place[0] + 1}, found at ${at}`)
+
+					continue
 				}
+
+				live++
+
+				const want = `${colName(place[1])}${place[0] + 1}`
+
+				if (at === undefined) wrong.push(`${key}: lost, expected ${want}`)
+				else if (at !== want) wrong.push(`${key}: expected ${want}, found at ${at}`)
 			}
+
+			if (seen.size !== live) wrong.push(`${seen.size} ids saved, ${live} cells live`)
 
 			if (wrong.length > 0) failures.push(`run ${run}: ${wrong.slice(0, 4).join("; ")}\n${log.join("\n")}`)
 		}

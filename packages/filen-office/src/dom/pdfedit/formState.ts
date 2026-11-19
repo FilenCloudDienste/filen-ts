@@ -3,7 +3,6 @@ import { fieldEditable, type PdfSignatureState } from "../../core/pdfedit/signat
 import type { PdfFormState, PdfRect, PdfWidgetSummary, PdfWidgetType } from "../../core/pdfedit/state"
 import type { PdfFieldLock } from "../../core/pdfsign/policy"
 import {
-	at,
 	collectFields,
 	deref,
 	locksOf,
@@ -195,9 +194,5 @@ function certificationOrLocked(
 	}
 }
 
-export function isTagged(document: Mupdf.PDFDocument): boolean {
-	const root = at(document.getTrailer(), "Root")
-	const marked = at(root, "MarkInfo", "Marked")
-
-	return marked.isBoolean() && marked.asBoolean() && at(root, "StructTreeRoot").isDictionary()
-}
+// The one rule for a tagged document, shared with the page operations' tags notice.
+export { isTaggedPdf as isTagged } from "./pages/organise"

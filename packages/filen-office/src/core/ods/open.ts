@@ -41,12 +41,10 @@ export interface OdsOpenOptions {
 }
 
 const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
-// Repeats past the caps that leave content out of the model (read/sheet.ts).
-const TRUNCATING: ReadonlySet<string> = new Set(["cell copies", "row copies", "rows past the last", "cells past the last column", "merges"])
 
-// Opens an OpenDocument spreadsheet (.ods, .ots) into the xlsx workbook model, read-only: the package and its styles,
-// then content.xml in one streamed pass that builds every sheet. Never throws: every failure is a typed result. An
-// encrypted package is refused ("encrypted"), as core/odf refuses it.
+// Opens an OpenDocument spreadsheet (.ods, .ots) into the xlsx workbook model, which odsWriter saves edits of: the
+// package and its styles, then content.xml in one streamed pass that builds every sheet. Never throws: every failure
+// is a typed result. An encrypted package is refused ("encrypted"), as core/odf refuses it.
 export async function openOds(source: ByteSource, options: OdsOpenOptions = {}): Promise<OdsOpenResult> {
 	try {
 		return await open(source, options)
@@ -140,7 +138,9 @@ async function open(source: ByteSource, options: OdsOpenOptions): Promise<OdsOpe
 		odf,
 		prefixes,
 		tables: content.tables.map((table, index) => ({ index, name: table.name, shapes: table.shapes, frames: table.frames })),
-		issues
+		issues,
+		clock,
+		signal: options.signal
 	})
 	const built: OdsWorkbookParts = await runSliced(buildSheetsSteps(content, styles, settings, issues, prefixes, charts), clock)
 	const opc = OpcPackage.fromParts(built.parts)
@@ -229,7 +229,7 @@ async function open(source: ByteSource, options: OdsOpenOptions): Promise<OdsOpe
 				protection: model?.protection ?? null,
 				defaultRowHeight: model?.format.defaultRowHeight ?? Number.NaN,
 				defaultColPx: model?.format.defaultColPx ?? Number.NaN,
-				truncated: read.some(issue => issue.kind === "repeat" && issue.sheet === table.name && TRUNCATING.has(issue.detail ?? "")),
+				truncated: table.built.truncated,
 				rows: table.built.rowCount,
 				columns: table.built.columnCount,
 				rowProps: table.built.rowProps,
@@ -243,6 +243,7 @@ async function open(source: ByteSource, options: OdsOpenOptions): Promise<OdsOpe
 		protection: built.protection,
 		activeTab: built.activeTab,
 		issues: read,
+		subTables: content.subTables,
 		unheld: withCached(content.unheld.result(), (sheet, row, col) =>
 			cellPrint(models.get(content.tables.findIndex(table => table.name === sheet)), sharedStrings, row, col)
 		)

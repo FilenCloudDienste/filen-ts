@@ -1,8 +1,8 @@
 import { relationshipKind } from "../../docx/index"
 import { Relationships, crc32, parseRelationships, partKey } from "../../opc/index"
-import { classifyAction } from "../../presentation/actions"
+import { classifyHyperlink } from "../../presentation/actions"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS } from "../../presentation/budget"
-import type { DeckChanges, Dirt, PartChanges } from "../../presentation/edit/apply"
+import type { PartChanges } from "../../presentation/edit/apply"
 import { creationId, nextSlideId } from "../../presentation/ids"
 import {
 	PresentationError,
@@ -16,11 +16,19 @@ import {
 	type Xfrm
 } from "../../presentation/model"
 import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument, type XmlEditor } from "../../xml/index"
+import { concatBytes } from "../../opc/pieces"
+import { SECTIONS_EXT } from "../read/sections"
 import { readSlidePart, SlidePartError } from "../read/slide"
 import { timingContainer } from "./emit/timing"
 import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
 import { emitFamilyOf, emitPptx } from "./emit"
-import { notePackageDiagramData, noteSharedDiagramParts, type PackageDiagramData } from "./emit/smartart"
+import {
+	beginDiagramFacts,
+	endDiagramFacts,
+	notePackageDiagramData,
+	noteSharedDiagramParts,
+	type PackageDiagramData
+} from "./emit/smartart"
 import { URIS, alternateUnit, childElements, sameModel, xfrmXml, type EmitContext, type Pristine } from "./emit/shape"
 import { slideRoot } from "./emit/slide"
 import { placeTransition } from "./emit/transition"
@@ -34,6 +42,7 @@ import {
 	PART_CONTENT_TYPES,
 	PackageWriter,
 	RELATIONSHIPS,
+	XML_DECLARATION,
 	heldDeckParts,
 	noteDeckReleased,
 	copiedKind,
@@ -43,7 +52,7 @@ import {
 	type PendingRelationship,
 	type SaveNotice
 } from "./parts"
-import type { RawPart } from "../../presentation/edit/ops"
+import { isRawPart, type RawPart } from "../../presentation/edit/ops"
 import { copiedWithoutNotes } from "../../presentation/edit/apply/slide"
 import { diagramDrawingRelId, diagramRelationshipOwner, notePackageDrawingRel } from "../../presentation/edit/apply/smartart"
 import type { EmitPiece, EmitRequest, EmitResult, PptxPartIndex, PptxSaveInput, PptxSnapshot, PptxSource } from "./types"
@@ -69,16 +78,11 @@ export interface RawSources {
 
 export type PptxSpliceSource = PptxSource & { readonly raw?: RawSources }
 
-export function isRawPart(part: string): boolean {
-	return part.startsWith("raw:")
-}
-
 const SLIDE_RELATIONSHIP = `${RELATIONSHIPS}slide`
 const DIAGRAM_DRAWING_RELATIONSHIP = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
 const MAX_DIAGRAM_DEPTH = 128
 const DIAGRAM_KINDS: ReadonlySet<string> = new Set(["diagramData", "diagramLayout", "diagramQuickStyle", "diagramColors", "diagramDrawing"])
 const LAYOUT_RELATIONSHIP = `${RELATIONSHIPS}slideLayout`
-const SECTIONS_EXT = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"
 const P14_URI = URIS["p14"] ?? ""
 
 export interface SpliceSnapshot extends PptxSnapshot {
@@ -351,33 +355,12 @@ function readPristine(
 		},
 		refOf: name => index.refOf(name),
 		themeOf: name => (node.theme !== undefined && partKey(node.theme.part) === partKey(name) ? node.theme : undefined),
-		action: (reader, rels, target) => {
-			const id = reader.rel(target, "id")
-			const relationship = id === undefined || id === "" ? undefined : rels.byId(id)
-			const action = reader.attr(target, "action")
+		action: (reader, rels, target) =>
+			classifyHyperlink(reader, rels, target, name => {
+				const ref = index.refOf(name)
 
-			return classifyAction(
-				{
-					...(action === undefined ? {} : { action }),
-					...(relationship === undefined
-						? {}
-						: {
-								target: {
-									external: relationship.external,
-									target: relationship.target,
-									...(relationship.partName === undefined ? {} : { partName: `/${relationship.partName}` })
-								}
-							})
-				},
-				{
-					slideOf: name => {
-						const ref = index.refOf(name)
-
-						return ref !== undefined && baseSlides.has(ref) ? ref : undefined
-					}
-				}
-			)
-		}
+				return ref !== undefined && baseSlides.has(ref) ? ref : undefined
+			})
 	})
 	const shapes = new Map<number, ShapeNode>()
 	const paragraphs = new Map<number, Paragraph>()
@@ -400,7 +383,6 @@ function deckIndex(deck: Deck): PptxPartIndex {
 	return {
 		epoch: [...deck.nodes.values()].find(node => node.src !== undefined)?.src?.epoch ?? 0,
 		partOf: ref => deck.nodes.get(ref)?.part,
-		slideId: () => undefined,
 		refOf: part => byPart.get(partKey(part))
 	}
 }
@@ -425,8 +407,6 @@ function dispatch(request: EmitRequest, context: EmitContext): EmitResult {
 	return emitPptx(emitFamilyOf(request), request, context)
 }
 
-const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
-
 class Splice {
 	readonly writer: PackageWriter
 	readonly input: PptxSaveInput
@@ -437,6 +417,10 @@ class Splice {
 	readonly notices: SaveNotice[] = []
 	private mainPart = ""
 	private baseSlides: BaseSlide[] = []
+	// The first base slide of each part key.
+	private readonly baseByKey = new Map<string, BaseSlide>()
+	// The changed parts by part key (the first of each), built on first use.
+	private changesByKey: Map<string, PartChanges> | undefined
 	private baseRefs = new Set<SlideRef>()
 	// Final slide parts (zip names) by ref.
 	private readonly finalParts = new Map<SlideRef, string>()
@@ -456,11 +440,21 @@ class Splice {
 	}
 
 	private changesOf(part: string): PartChanges | undefined {
-		const key = partKey(part)
+		let byKey = this.changesByKey
 
-		for (const [name, change] of this.input.changes.parts) if (partKey(name) === key) return change
+		if (byKey === undefined) {
+			byKey = new Map()
 
-		return undefined
+			for (const [name, change] of this.input.changes.parts) {
+				const key = partKey(name)
+
+				if (!byKey.has(key)) byKey.set(key, change)
+			}
+
+			this.changesByKey = byKey
+		}
+
+		return byKey.get(partKey(part))
 	}
 
 	// The part a slide is written to after this save (the model's name for one the index does not know).
@@ -493,7 +487,12 @@ class Splice {
 
 			if (target === undefined || target.external || !writer.opc.has(target.target)) continue
 
-			this.baseSlides.push({ id: r.int(entry, "id") ?? 0, rId: target.id, part: target.target, node: entry })
+			const slide: BaseSlide = { id: r.int(entry, "id") ?? 0, rId: target.id, part: target.target, node: entry }
+			const key = partKey(slide.part)
+
+			this.baseSlides.push(slide)
+
+			if (!this.baseByKey.has(key)) this.baseByKey.set(key, slide)
 
 			const ref = this.index.refOf(modelName(target.target))
 
@@ -553,7 +552,7 @@ class Splice {
 		for (const ref of deck.slides) {
 			const part = this.index.partOf(ref) ?? deck.nodes.get(ref)?.part
 			const name = part === undefined ? undefined : zipName(part)
-			const base = name === undefined ? undefined : this.baseSlides.find(slide => partKey(slide.part) === partKey(name))
+			const base = name === undefined ? undefined : this.baseByKey.get(partKey(name))
 
 			// The package's part is this slide's only when the index binds it to this slide: a slide the session holds
 			// under a name a save gave another node (deleted while that save landed, then restored) is written anew.
@@ -882,7 +881,7 @@ class Splice {
 
 		if (isRefused(result)) return result
 
-		writer.replace(name, concat(encodeUtf8(XML_DECLARATION), assemble(undefined, result)))
+		writer.replace(name, concatBytes([encodeUtf8(XML_DECLARATION), assemble(undefined, result)]))
 		this.expect(name, node)
 
 		// Relationships an element pasted onto the new slide names.
@@ -1130,11 +1129,11 @@ class Splice {
 
 		writer.replace(
 			name,
-			concat(
+			concatBytes([
 				document.bytes.subarray(0, document.start(root)),
 				assemble(document, result, overlay),
 				document.bytes.subarray(document.end(root))
-			)
+			])
 		)
 		this.expect(name, node)
 
@@ -1574,9 +1573,11 @@ class Splice {
 
 		this.writtenIds = ids
 
-		for (const ref of deck.slides) {
+		const bases = deck.slides.map(ref => this.baseByKey.get(partKey(this.finalParts.get(ref) ?? "")))
+
+		for (const [index, ref] of deck.slides.entries()) {
 			const part = this.finalParts.get(ref) ?? ""
-			const base = this.baseSlides.find(slide => partKey(slide.part) === partKey(part))
+			const base = bases[index]
 
 			if (base !== undefined) {
 				ids.set(ref, base.id)
@@ -1597,9 +1598,8 @@ class Splice {
 		if (listChanged) {
 			const list = r.child(root, G.P, "sldIdLst")
 			// A kept slide's entry is its source element (its p:extLst stays); a new one is written.
-			const entries: EmitPiece[] = deck.slides.map(ref => {
-				const part = this.finalParts.get(ref) ?? ""
-				const base = this.baseSlides.find(slide => partKey(slide.part) === partKey(part))
+			const entries: EmitPiece[] = deck.slides.map((ref, index) => {
+				const base = bases[index]
 
 				return base !== undefined
 					? { hole: base.node }
@@ -1793,10 +1793,10 @@ class Splice {
 		} else {
 			const p = r.namespaces.prefixFor(root, P_MAIN) ?? "p"
 			const q = (local: string): string => (p === "" ? local : `${p}:${local}`)
-			const markup = concat(encodeUtf8(`<${q("ext")} uri="${SECTIONS_EXT}">`), list, encodeUtf8(`</${q("ext")}>`))
+			const markup = concatBytes([encodeUtf8(`<${q("ext")} uri="${SECTIONS_EXT}">`), list, encodeUtf8(`</${q("ext")}>`)])
 
 			if (extLst >= 0) editor.append(extLst, markup)
-			else editor.append(root, concat(encodeUtf8(`<${q("extLst")}>`), markup, encodeUtf8(`</${q("extLst")}>`)))
+			else editor.append(root, concatBytes([encodeUtf8(`<${q("extLst")}>`), markup, encodeUtf8(`</${q("extLst")}>`)]))
 		}
 	}
 
@@ -2105,18 +2105,6 @@ function crcWord(text: string): number {
 	return hash >>> 0
 }
 
-function concat(...parts: readonly Uint8Array[]): Uint8Array {
-	const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
-	let offset = 0
-
-	for (const part of parts) {
-		out.set(part, offset)
-		offset += part.length
-	}
-
-	return out
-}
-
 // Serializes every changed part at revision R (bounded by the changed parts), before any copy streams.
 export async function spliceSnapshot(input: PptxSaveInput): Promise<SpliceSnapshot | Refused> {
 	// A gated deck (signed, strict, write-protected, malformed markup) is view-only: it saves only as a new file.
@@ -2128,6 +2116,7 @@ export async function spliceSnapshot(input: PptxSaveInput): Promise<SpliceSnapsh
 
 	writer.keepParts(input.keep ?? [])
 	writer.holdParts(heldDeckParts(input.deck))
+	beginDiagramFacts(input.deck)
 
 	try {
 		const snapshot = await new Splice(input, writer).run()
@@ -2139,6 +2128,8 @@ export async function spliceSnapshot(input: PptxSaveInput): Promise<SpliceSnapsh
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 
 		throw error
+	} finally {
+		endDiagramFacts(input.deck)
 	}
 }
 
@@ -2213,6 +2204,7 @@ export async function exportSlides(input: PptxSaveInput, refs: readonly SlideRef
 	const writer = new PackageWriter(input.source.package, await input.source.package.contentTypes())
 
 	writer.exportFor(input.deck)
+	beginDiagramFacts(input.deck)
 
 	try {
 		return await new Splice(input, writer).export(refs)
@@ -2220,10 +2212,10 @@ export async function exportSlides(input: PptxSaveInput, refs: readonly SlideRef
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 
 		throw error
+	} finally {
+		endDiagramFacts(input.deck)
 	}
 }
-
-export type { DeckChanges, Dirt }
 
 // Whether a held part's relationship target was already missing from the package it was held from.
 function inherited(part: RawPart, target: string): boolean {

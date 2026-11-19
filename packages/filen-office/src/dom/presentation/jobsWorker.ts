@@ -12,7 +12,7 @@ import {
 } from "./jobs/registry"
 import type { PortLike, PresentationSessionApi } from "./protocol"
 import { installJobsRealm, type JobsRealm } from "./raster"
-import { savePortReader, savePortWriter, type SavePortEnd, type SavePortReader } from "@filen/shared/savePort"
+import { clearTimer, savePortReader, savePortWriter, setTimer, type SavePortEnd, type SavePortReader } from "@filen/shared/savePort"
 import { offerSvgPort, workerSvgRasterizer, type SvgRasterizer } from "./svgPort"
 
 // A presentation jobs worker (one per export or conversion, terminated afterwards) and the page's handle on one. The
@@ -202,12 +202,16 @@ export function servePresentationJobsWorker(scope: PresentationJobsWorkerScope, 
 
 // --- Page side ---
 
-// A Worker as the page drives it.
+// A Worker as the page drives it: "error" (its script failed to load, or it threw) and "messageerror" carry no data.
 export interface PresentationJobsWorkerLike {
 	postMessage(message: unknown, transfer: readonly unknown[]): void
-	addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void
+	addEventListener(type: "message" | "error" | "messageerror", listener: (event: { readonly data: unknown }) => void): void
 	terminate(): void
 }
+
+// How long an aborted job waits for the worker's outcome before it ends as aborted anyway (a worker that never started
+// or hangs posts none).
+export const JOB_ABORT_GRACE_MS = 5_000
 
 interface ChannelLike {
 	readonly port1: SavePortEnd
@@ -251,15 +255,24 @@ export function presentationJobsClient(
 		const output = savePortReader(outputChannel.port2)
 		const id = 1
 		let settled = false
+		let grace: unknown
 		let finish: (outcome: JobOutcome) => void = () => undefined
 		const done = new Promise<JobOutcome>(resolve => {
 			finish = outcome => {
 				if (settled) return
 
 				settled = true
+				clearTimer(grace)
 				resolve(outcome)
 			}
 		})
+		// The worker failed (it never started, threw, or a message could not be read): no outcome is coming.
+		const fail = (): void => {
+			if (settled) return
+
+			output.abort("failed")
+			finish(refused("failed", "job"))
+		}
 
 		worker.addEventListener("message", event => {
 			const message = event.data as FromPresentationJobsWorker | null | undefined
@@ -269,6 +282,8 @@ export function presentationJobsClient(
 			if (message.t === "progress") onProgress?.(message.done, message.total)
 			else if (message.t === "done") finish(message.outcome)
 		})
+		worker.addEventListener("error", fail)
+		worker.addEventListener("messageerror", fail)
 
 		session.jobsPort(sessionChannel.port1 as PortLike).catch((error: unknown) => {
 			output.abort("failed")
@@ -287,6 +302,10 @@ export function presentationJobsClient(
 
 				worker.postMessage({ t: "abort", id } satisfies ToPresentationJobsWorker, [])
 				output.abort("cancelled")
+				clearTimer(grace)
+				grace = setTimer(() => {
+					finish(refused("aborted", "job"))
+				}, JOB_ABORT_GRACE_MS)
 			},
 			close() {
 				if (!settled) {

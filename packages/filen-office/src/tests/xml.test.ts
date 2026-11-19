@@ -16,6 +16,7 @@ import {
 import { budget } from "./timing"
 
 const encoder = new TextEncoder()
+const slicing = { pause: () => Promise.resolve(), sliceMs: 8, now: () => 0 }
 
 function parse(source: string): XmlDocument {
 	return parseXml(encoder.encode(source))
@@ -327,6 +328,34 @@ describe("Namespaces", () => {
 		expect(namespaces.prefixFor(w, "urn:1")).toBe("a")
 	})
 
+	it("keeps undeclaring and shadowing when a child repeats a binding in scope", async () => {
+		const bytes = encoder.encode(
+			'<a:r xmlns:a="urn:1" xmlns="urn:d"><a:x xmlns:a="urn:2"><a:y xmlns:a="urn:2"/><z xmlns=""><q xmlns=""/></z></a:x><a:w xmlns:a="urn:1"/></a:r>'
+		)
+
+		for (const namespaces of [new Namespaces(parseXml(bytes)), await Namespaces.sliced(parseXml(bytes), {}, slicing)]) {
+			const { document } = namespaces
+			const root = document.documentElement()
+			const x = document.firstChildElement(root)
+			const y = document.firstChildElement(x)
+			const z = document.nextSiblingElement(y)
+			const q = document.firstChildElement(z)
+			const w = document.nextSiblingElement(x)
+
+			expect(namespaces.elementUri(root)).toBe("urn:1")
+			expect(namespaces.elementUri(x)).toBe("urn:2")
+			expect(namespaces.elementUri(y)).toBe("urn:2")
+			expect(namespaces.elementUri(z)).toBeUndefined()
+			expect(namespaces.elementUri(q)).toBeUndefined()
+			expect(namespaces.elementUri(w)).toBe("urn:1")
+			expect(namespaces.inScope(y)).toBe(namespaces.inScope(x))
+			expect(namespaces.inScope(q)).toBe(namespaces.inScope(z))
+			expect(namespaces.inScope(w)).toBe(namespaces.inScope(root))
+			expect(namespaces.prefixFor(q, "urn:2")).toBe("a")
+			expect(namespaces.declarations().get(y)?.get("a")).toBe("urn:2")
+		}
+	})
+
 	it("reads namespaced attributes by URI", () => {
 		const document = parse(`<w:p xmlns:w="${W}" xmlns:x="${W}" w:val="1" x:other="2" val="3"/>`)
 		const namespaces = new Namespaces(document)
@@ -554,6 +583,51 @@ describe("linear time on hostile shapes", () => {
 				for (let k = 0; k < 100; k++) document.attribute(1, "a39999")
 			})
 		).toBeLessThan(budget(5000))
+	})
+
+	it("refuses nested elements that each declare a new prefix", async () => {
+		const depth = 20_000
+		const bytes = encoder.encode(
+			`${Array.from({ length: depth }, (_, k) => `<a xmlns:p${k}="u${k}">`).join("")}${"</a>".repeat(depth)}`
+		)
+
+		expect(
+			time(() => {
+				expect(codeOf(() => new Namespaces(parseXml(bytes)))).toBe("invalidContent")
+			})
+		).toBeLessThan(budget(2000))
+		await expect(Namespaces.sliced(parseXml(bytes), {}, slicing)).rejects.toBeInstanceOf(XmlError)
+	})
+
+	it("refuses many siblings that each extend a wide root scope", async () => {
+		const prefixes = Array.from({ length: 3000 }, (_, k) => ` xmlns:p${k}="u${k}"`).join("")
+		const bytes = encoder.encode(`<r${prefixes}>${'<c xmlns:z="v"/>'.repeat(100_000)}</r>`)
+
+		expect(
+			time(() => {
+				expect(codeOf(() => new Namespaces(parseXml(bytes)))).toBe("invalidContent")
+			})
+		).toBeLessThan(budget(2000))
+		await expect(Namespaces.sliced(parseXml(bytes), {}, slicing)).rejects.toBeInstanceOf(XmlError)
+	})
+
+	it("shares the scope of children that repeat a binding already in scope", async () => {
+		const prefixes = Array.from({ length: 3000 }, (_, k) => ` xmlns:p${k}="u${k}"`).join("")
+		const bytes = encoder.encode(`<r xmlns:a="urn:a"${prefixes}><x xmlns:q="urn:q">${'<a:c xmlns:a="urn:a"/>'.repeat(100_000)}</x></r>`)
+
+		for (const namespaces of [new Namespaces(parseXml(bytes)), await Namespaces.sliced(parseXml(bytes), {}, slicing)]) {
+			const { document } = namespaces
+			const x = document.firstChildElement(document.documentElement())
+			const first = document.firstChildElement(x)
+			const last = document.count - 1
+
+			expect(namespaces.elementUri(first)).toBe("urn:a")
+			expect(namespaces.elementUri(last)).toBe("urn:a")
+			expect(namespaces.uri(last, "q")).toBe("urn:q")
+			expect(namespaces.inScope(first)).toBe(namespaces.inScope(x))
+			expect(namespaces.inScope(last)).toBe(namespaces.inScope(x))
+			expect(namespaces.declarations().size).toBe(100_002)
+		}
 	})
 
 	it("checks 100,000 prefixed attributes for namespace duplicates in linear time", () => {

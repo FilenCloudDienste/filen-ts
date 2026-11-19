@@ -3,6 +3,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { slideRef } from "../core/presentation/model"
+import { fontFaceHost } from "../dom/fontFaceHost"
 import { InkLayer } from "../react/presentation/ink/InkLayer"
 import { createInkStore } from "../react/presentation/ink/store"
 import { audienceScreenOf, createScreenPlacement } from "../react/presentation/presenter/placement"
@@ -269,6 +270,74 @@ describe("presenter portal", () => {
 		expect(portal.window).toBeUndefined()
 		expect(portal.container).toBeUndefined()
 		expect(onChange).toHaveBeenCalledTimes(2)
+	})
+
+	it("carries a face the deck adds already loaded into the open popup, until the popup closes", async () => {
+		// A FontFaceSet that fires nothing on add (a loaded face starts no load, so no "loadingdone").
+		const fontSet = () => {
+			const faces = new Set<unknown>()
+
+			return {
+				faces,
+				add: (face: unknown) => faces.add(face),
+				delete: (face: unknown) => faces.delete(face),
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				[Symbol.iterator]: () => faces[Symbol.iterator]()
+			}
+		}
+		const pageFonts = fontSet()
+		const popupFonts = fontSet()
+		const popup = fakePopup()
+
+		const ownFonts = Object.getOwnPropertyDescriptor(document, "fonts")
+
+		Object.defineProperty(document, "fonts", { value: pageFonts, configurable: true })
+		Object.defineProperty(popup.document, "fonts", { value: popupFonts, configurable: true })
+
+		class LoadedFace {
+			readonly family: string
+
+			constructor(family: string) {
+				this.family = family
+			}
+
+			load(): Promise<void> {
+				return Promise.resolve()
+			}
+		}
+
+		const host = fontFaceHost({ FontFace: LoadedFace, fonts: pageFonts })
+		const portal = createPresenterPortal({
+			opener: Object.assign(Object.create(window) as Window, {
+				open: () => popup,
+				document,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn()
+			}),
+			title: "Presenter view",
+			features: () => "popup"
+		})
+
+		try {
+			expect(portal.open().kind).toBe("opened")
+			expect(await host.addBytes({ family: "fo-deck-1", weight: 400, italic: false }, new Uint8Array(4))).toBe(true)
+
+			const added = [...pageFonts.faces]
+
+			expect(added).toHaveLength(1)
+			expect([...popupFonts.faces]).toEqual(added)
+			expect(pageFonts.addEventListener).toHaveBeenCalledWith("loadingdone", expect.any(Function))
+
+			// Closed: a later face stays on the page.
+			portal.close()
+			expect(await host.addBytes({ family: "fo-deck-2", weight: 400, italic: false }, new Uint8Array(4))).toBe(true)
+			expect(pageFonts.faces.size).toBe(2)
+			expect([...popupFonts.faces]).toEqual(added)
+		} finally {
+			if (ownFonts === undefined) Reflect.deleteProperty(document, "fonts")
+			else Object.defineProperty(document, "fonts", ownFonts)
+		}
 	})
 
 	it("reports a blocked popup", () => {

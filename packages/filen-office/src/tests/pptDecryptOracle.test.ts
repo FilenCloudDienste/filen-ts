@@ -125,10 +125,10 @@ describe.skipIf(ENCRYPTED.length === 0)("encrypted ppt corpus", () => {
 		}
 	})
 
-	it("decrypts the encrypted Pictures stream into the PNG it holds", async () => {
+	it("decrypts the encrypted Pictures stream into the PNG it holds", async ({ skip }) => {
 		const file = ENCRYPTED.find(entry => entry.path.endsWith("ppt_with_png_encrypted.ppt"))
 
-		if (file === undefined) return
+		if (file === undefined) return skip()
 
 		const converted = await pptToPptx(bytesSource(new Uint8Array(readFileSync(join(CORPUS_DIR, file.path)))), {
 			decryption: decryption(file.password)

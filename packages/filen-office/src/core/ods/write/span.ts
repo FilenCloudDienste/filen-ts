@@ -7,7 +7,7 @@ import { SheetStyles } from "../../sheet/style/resolve"
 import type { SliceClock } from "../../slicing"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import { ColFlag, RowFlag, rowRunAt, type XlsxSheetModel } from "../../xlsx/model/types"
-import { SHEET_MAX_ROWS } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
 import { DEFAULT_ROW_PT } from "../read/sheet"
 import { encodeUtf8 } from "../../xml/index"
 import { OdsIssues } from "../issues"
@@ -138,7 +138,7 @@ function sameColumns(view: SheetView, read: DecodedRows, styles: Styles, digitPx
 	}
 
 	for (const col of bounds) {
-		if (col > 0x3fff) continue
+		if (col > SHEET_MAX_COLS - 1) continue
 
 		const left = column(view, col)
 		const range = cols.find(candidate => col >= candidate.first && col <= candidate.last)
@@ -183,10 +183,13 @@ function targetRows(view: SheetView, row: SpanRow): number[] {
 		if (run.last + 1 < end) rows.add(run.last + 1)
 	}
 
-	view.model.styleRuns?.forEach({ startRow: row.target, startCol: 0, endRow: end - 1, endCol: 0x3fff }, (startRow, _c, endRow) => {
-		rows.add(Math.max(row.target, startRow))
-		if (endRow + 1 < end) rows.add(endRow + 1)
-	})
+	view.model.styleRuns?.forEach(
+		{ startRow: row.target, startCol: 0, endRow: end - 1, endCol: SHEET_MAX_COLS - 1 },
+		(startRow, _c, endRow) => {
+			rows.add(Math.max(row.target, startRow))
+			if (endRow + 1 < end) rows.add(endRow + 1)
+		}
+	)
 
 	for (const merge of view.mergesBetween(row.target, end)) {
 		rows.add(Math.max(row.target, merge.startRow))
@@ -226,7 +229,7 @@ function decodedCols(read: DecodedRows, row: number, into: Set<number>): void {
 		into.add(range.last + 1)
 	}
 
-	read.built.styleRuns?.forEach({ startRow: row, startCol: 0, endRow: row, endCol: 0x3fff }, (_r0, startCol, _r1, endCol) => {
+	read.built.styleRuns?.forEach({ startRow: row, startCol: 0, endRow: row, endCol: SHEET_MAX_COLS - 1 }, (_r0, startCol, _r1, endCol) => {
 		into.add(startCol)
 		into.add(endCol + 1)
 	})
@@ -264,7 +267,7 @@ function sameRow(
 	}
 
 	for (const col of cols) {
-		if (col > 0x3fff) continue
+		if (col > SHEET_MAX_COLS - 1) continue
 
 		const left = view.cell(target, col)
 		const right = read.cell(index, col)

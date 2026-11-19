@@ -1,8 +1,8 @@
 import { equalBytes } from "../../docx/write/bytes"
 import { encodeUtf8 } from "../../xml/index"
-import type { SheetRange } from "../../sheet/protocol"
 import { runSliced, type SliceClock } from "../../slicing"
 import type { XlsxSection, XlsxSheetChanges, XlsxSheetEntry, XlsxSheetModel, XlsxWorkbookModel } from "../model/types"
+import { contains } from "../refs/moveRefs"
 import { assembleSections } from "./assemble"
 import { editedRange, namespacesCompatible, usedRange, writeSheetDataSteps, type CarriedPart, type WrittenRow } from "./cells"
 import { XlsxWriteError } from "./failure"
@@ -72,12 +72,6 @@ export interface WrittenSheet {
 	readonly rows: readonly WrittenRow[] | null
 	// A rewritten row added, changed or dropped a formula.
 	readonly formulasChanged: boolean
-}
-
-function contains(outer: SheetRange, inner: SheetRange): boolean {
-	return (
-		outer.startRow <= inner.startRow && outer.startCol <= inner.startCol && outer.endRow >= inner.endRow && outer.endCol >= inner.endCol
-	)
 }
 
 function sectionBytes(source: Uint8Array, section: XlsxSection): Uint8Array {

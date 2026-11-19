@@ -1,12 +1,14 @@
 import { DEFAULT_PALETTE } from "../style/palette"
 import { MAX_SERIAL_1900, MAX_SERIAL_1904, serialDate, type DateBase, type DateParts } from "./date"
 import { decompose, fractionDigits, integerDigits, roundDigits, type Digits } from "./decimal"
+import { plainDigits } from "./general"
 import { NUMFMT_EN_US, type NumFmtLocale } from "./locale"
 import {
 	LCID_SYSTEM_DATE,
 	LCID_SYSTEM_DATE_TIME,
 	LCID_SYSTEM_SHORT_DATE,
 	LCID_SYSTEM_TIME,
+	MAX_NUMFMT_LENGTH,
 	SectionKind,
 	Tok,
 	parseNumFmt,
@@ -47,8 +49,11 @@ const DEFAULT_OPTIONS: NumFmtOptions = {}
 const MAX_CACHE = 4096
 const cache = new Map<string, NumFmt>()
 
-// The compiled format of a code; each code is compiled once.
+// The compiled format of a code; each code is compiled once. One longer than a cell's format may be (a formula's TEXT
+// code) is compiled each time: kept, a few thousand of them would hold their text and tokens for the worker's life.
 export function numFmt(code: string): NumFmt {
+	if (code.length > MAX_NUMFMT_LENGTH) return parseNumFmt(code)
+
 	let compiled = cache.get(code)
 
 	if (compiled === undefined) {
@@ -111,13 +116,6 @@ function pad(value: number, width: number): string {
 // --- General (ECMA-376 Part 1 §18.8.30: at most 11 characters, sign excluded; exponential when a number does
 // not fit, or when it shows more digits than the decimal form below 1e-4) ---
 
-function plain(d: Digits, decimal: string): string {
-	const integer = integerDigits(d) || "0"
-	const fraction = d.point >= 0 ? d.digits.slice(d.point + 1) : "0".repeat(-d.point - 1) + d.digits
-
-	return fraction === "" ? integer : integer + decimal + fraction
-}
-
 function exponential(d: Digits, decimal: string): string {
 	roundDigits(d, 6)
 
@@ -140,15 +138,15 @@ export function formatGeneral(value: number, decimal = "."): string {
 	if (point >= 0) {
 		roundDigits(d, point === 10 ? 11 : 10)
 
-		return d.point >= 11 ? exponential(d, decimal) : plain(d, decimal)
+		return d.point >= 11 ? exponential(d, decimal) : plainDigits(d, decimal)
 	}
 
 	// "0." and the zeros before the first digit leave 10 + point digits.
 	const keep = 10 + point
 
-	if (point >= -4) return plain(roundDigits(d, keep), decimal)
+	if (point >= -4) return plainDigits(roundDigits(d, keep), decimal)
 
-	return d.digits.length <= keep ? plain(d, decimal) : exponential(d, decimal)
+	return d.digits.length <= keep ? plainDigits(d, decimal) : exponential(d, decimal)
 }
 
 // --- Sections ---

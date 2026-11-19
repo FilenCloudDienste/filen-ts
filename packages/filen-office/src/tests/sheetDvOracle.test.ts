@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { strFromU8, unzipSync } from "fflate"
 import type { SheetValidationRule } from "../core/sheet/dv/xlsx"
 import { readValidations } from "../core/sheet/dv/rules"
@@ -134,12 +134,6 @@ function validations(bytes: Uint8Array): string[] {
 		.sort()
 }
 
-const scratch = mkdtempSync(join(tmpdir(), "filen-dv-oracle-"))
-
-afterAll(() => {
-	rmSync(scratch, { recursive: true, force: true })
-})
-
 describe.skipIf(xsdOracleMissing() !== undefined)("validations set, against the SpreadsheetML schema", () => {
 	it("adds no validity error to the sheet", { timeout: 120_000 }, async () => {
 		const oracle = new XsdOracle()
@@ -160,6 +154,16 @@ describe.skipIf(xsdOracleMissing() !== undefined)("validations set, against the 
 const OFFICES = sheetOffices()
 
 describe.skipIf(OFFICES.length === 0)("validations set, against LibreOffice", () => {
+	let scratch: string
+
+	beforeAll(() => {
+		scratch = mkdtempSync(join(tmpdir(), "filen-dv-oracle-"))
+	})
+
+	afterAll(() => {
+		rmSync(scratch, { recursive: true, force: true })
+	})
+
 	it("keeps every validation through LibreOffice's re-save", { timeout: 300_000 }, async () => {
 		const saved = await edited()
 		const input = join(scratch, "edited.xlsx")

@@ -1635,6 +1635,66 @@ describe("paged layout of edits", { timeout: 60_000 }, () => {
 		editor.dispose()
 	})
 
+	it("lets go of the objects of overlay parts no page shows any more, keeping their ids", async () => {
+		const ns =
+			'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+			'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+			'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"'
+		const box =
+			'<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251659264" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">' +
+			'<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>' +
+			'<wp:extent cx="2743200" cy="914400"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapSquare wrapText="bothSides"/><wp:docPr id="3" name="Text Box 3"/><wp:cNvGraphicFramePr/>' +
+			'<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2743200" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></wps:spPr>' +
+			"<wps:txbx><w:txbxContent><w:p><w:r><w:t>boxed</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
+		const { editor, pkg, context } = await pagedEditor(
+			buildDocx({
+				document: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${ns}><w:body><w:p>${box}<w:r><w:t xml:space="preserve">holds the box</w:t></w:r></w:p><w:p><w:r><w:t>After</w:t></w:r></w:p><w:sectPr>${PAGE}</w:sectPr></w:body></w:document>`
+			})
+		)
+		const body = editor.body.session
+
+		// Typed into the box's paragraph a key at a time: each keystroke lays it out from a new overlay part.
+		for (let key = 0; key < 8; key++) {
+			body.dispatch(body.state.tr.insertText("x", body.state.doc.child(0).nodeSize - 1))
+			await settleAll(editor)
+		}
+
+		const objects = editor.layout.objects
+		const parts = editor.edits.model.parts
+		const shown = new Set<number>()
+
+		for (const page of editor.layout.pages) for (let s = 0; s < page.sourceCount; s++) shown.add(page.sourceParts[s] ?? -1)
+
+		let anchored = 0
+
+		expect(objects.count).toBeGreaterThan(2)
+
+		for (let id = 0; id < objects.count; id++) {
+			const part = objects.parts[id] ?? -1
+			const item = objects.items[id] ?? -1
+
+			if (parts[part] === undefined) {
+				expect(shown.has(part)).toBe(false)
+				expect([objects.floats[id], objects.textboxes[id], objects.insets[id]]).toEqual([undefined, undefined, undefined])
+				expect(objects.idOf(part, item)).toBe(-1)
+				// Sizes stay for an id an event already carried.
+				expect(objects.widths[id]).toBeGreaterThan(0)
+			} else {
+				expect(objects.idOf(part, item)).toBe(id)
+
+				if (objects.floats[id] !== undefined) anchored++
+			}
+		}
+
+		// The source's box and the one of the overlay part shown.
+		expect(anchored).toBeLessThanOrEqual(2)
+
+		const saved = await saveDocx({ pkg, context, sessions: editor.sessions })
+
+		expect(pageDigest(editor.layout)).toEqual(await savedDigest(saved.bytes as Uint8Array))
+		editor.dispose()
+	})
+
 	it("numbers a list paragraph in an edited text box anew when the body's list changes before it", async () => {
 		const ns =
 			'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
@@ -3392,4 +3452,116 @@ describe("overlay parts", () => {
 
 		expect(items(minimal.part, minimal.items[0] ?? -1)).toEqual(items(full.part, full.items[0] ?? -1))
 	})
+})
+
+describe("layout runs that fail or are cancelled", () => {
+	// Rejections nobody handled while `run` ran (a background layout's, say).
+	async function unhandled(run: () => Promise<void>): Promise<unknown[]> {
+		const seen: unknown[] = []
+		const hear = (reason: unknown): void => {
+			seen.push(reason)
+		}
+
+		process.on("unhandledRejection", hear)
+
+		try {
+			await run()
+			await new Promise(resolve => setTimeout(resolve, 10))
+		} finally {
+			process.off("unhandledRejection", hear)
+		}
+
+		return seen
+	}
+
+	it("rejects the first load's done when its run throws", async () => {
+		const loaded = await loadDocx(longDocument(30))
+		const layout = layoutDocument(loaded.model, loaded.resolver, loaded.fonts, new HmtxMeasurer(), {
+			store: loaded.store,
+			sliceMs: 2,
+			now: (() => {
+				let clock = 0
+
+				return () => clock++
+			})(),
+			yield: () => Promise.reject(new Error("broken slice"))
+		})
+
+		await expect(layout.done).rejects.toThrow("broken slice")
+		expect(layout.error).toBeInstanceOf(Error)
+	})
+
+	it("reports a background run that throws once, unhandled nowhere, and clears it when a later run completes", async () => {
+		const loaded = await loadDocx(longDocument(30))
+		let failing = false
+		let clock = 0
+		const layout = layoutDocument(loaded.model, loaded.resolver, loaded.fonts, new HmtxMeasurer(), {
+			store: loaded.store,
+			sliceMs: 2,
+			now: () => clock++,
+			yield: () => (failing ? Promise.reject(new Error("broken slice")) : Promise.resolve())
+		})
+
+		await layout.done
+
+		const errors: unknown[] = []
+
+		layout.onError(error => errors.push(error))
+		failing = true
+
+		const seen = await unhandled(async () => {
+			layout.beginEdit(0, undefined)
+			await expect(layout.continue()).rejects.toThrow("broken slice")
+			// A relayout's caller hears its failure; done only settles.
+			await expect(layout.relayoutFrom(0)).rejects.toThrow("broken slice")
+			await expect(layout.done).resolves.toBeUndefined()
+		})
+
+		expect(seen).toEqual([])
+		expect(errors).toHaveLength(2)
+		expect(layout.error).toBe(errors[1])
+
+		failing = false
+		layout.beginEdit(0, undefined)
+		await layout.continue()
+		expect(layout.final).toBe(true)
+		expect(layout.error).toBeUndefined()
+		expect(errors).toHaveLength(2)
+	})
+
+	for (const how of ["cancel", "abort"] as const) {
+		it(`stops scanning the note stories when ${how === "cancel" ? "cancelled" : "its signal aborts"}`, async () => {
+			const loaded = await loadDocx(notedDocument())
+			const signal = { aborted: false }
+			const prepare = vi.spyOn(RunStyles.prototype, "prepareMissing")
+			let clock = 0
+			let yields = 0
+			let stop = (): void => undefined
+			const layout = layoutDocument(loaded.model, loaded.resolver, loaded.fonts, new HmtxMeasurer(), {
+				store: loaded.store,
+				sliceMs: 2,
+				now: () => clock++,
+				signal,
+				// The first slice yields while layoutDocument has not returned yet: stopped once the host has its turn.
+				yield: () => {
+					yields++
+
+					return Promise.resolve().then(() => stop())
+				}
+			})
+
+			stop = how === "cancel" ? () => layout.cancel() : () => (signal.aborted = true)
+
+			try {
+				await layout.done
+				expect(layout.cancelled).toBe(true)
+				// The scan's first slice yielded and nothing ran after it: no other slice, no font wait, no page.
+				expect(yields).toBe(1)
+				expect(prepare).not.toHaveBeenCalled()
+				expect(layout.pages).toHaveLength(0)
+			} finally {
+				prepare.mockRestore()
+			}
+		})
+	}
 })

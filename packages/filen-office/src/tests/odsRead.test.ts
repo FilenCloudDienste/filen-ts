@@ -1,6 +1,12 @@
+import { unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { openOds } from "../core/ods/open"
+import { OdsReadError } from "../core/ods/read/errors"
+import { inThreadSheetHost } from "../dom/sheet/host"
+import { translateFormula } from "../core/ods/formula/toXlsx"
+import { convertSheet } from "../core/ods/convert/index"
+import { odsWriter } from "../core/ods/write/writer"
 import { HeldResult } from "../core/sheet/formula/formulaEngine"
 import { cellKeyOf } from "../core/xlsx/edit/history"
 import { CellKind, FormulaKind, RowFlag, type XlsxSheetModel } from "../core/xlsx/model/types"
@@ -9,6 +15,7 @@ import type { SheetStore } from "../core/xlsx/model/store"
 import { encryptedEntry, odsBytes, odsDocument, openOdsFixture, shownRows, table } from "./odsFixtures"
 import { buildZip, text } from "./zipBuilder"
 import { budget, cpuMs } from "./timing"
+import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // The OpenDocument spreadsheet reader: content.xml streamed into the xlsx sheet model, repeats never expanded where
 // only formats repeat, values and texts as ODF 1.3 Part 3 §19 writes them.
@@ -508,5 +515,388 @@ describe("the ODS reader", () => {
 		expect(result.workbook.activeTab).toBe(1)
 		expect(view.frozen).toEqual({ rows: 3, cols: 1, topLeftRow: 3, topLeftCol: 1 })
 		expect([view.activeRow, view.activeCol, view.zoom, view.gridLines]).toEqual([5, 2, 150, false])
+	})
+})
+
+describe("the ODS sheet's row runs", () => {
+	const HIDDEN = '<table:table-row table:visibility="collapse"><table:table-cell/></table:table-row>'
+	const FILLED = `<table:table-row>${CELL('office:value-type="float" office:value="1"', "1")}</table:table-row>`
+
+	it("keeps the runs apart from the stored rows, reusing the runs no stored row splits", async () => {
+		const result = await openOdsFixture({
+			body: table(
+				"S",
+				FILLED +
+					'<table:table-row table:visibility="collapse" table:number-rows-repeated="3"><table:table-cell/></table:table-row>' +
+					FILLED +
+					'<table:table-row table:visibility="collapse" table:number-rows-repeated="5"><table:table-cell/></table:table-row>'
+			)
+		})
+		const sheet = model(result)
+		const store = sheet.store as SheetStore
+		const before = sheet.rowRuns ?? []
+
+		expect(before.map(run => [run.first, run.last])).toEqual([
+			[1, 3],
+			[5, 9]
+		])
+
+		// A cell in the middle of the second run splits it; the first run stays the same object.
+		store.setCell(7, 0, CellKind.NUMBER, 2, 0, -1)
+		const after = sheet.rowRuns ?? []
+
+		expect(after.map(run => [run.first, run.last])).toEqual([
+			[1, 3],
+			[5, 6],
+			[8, 9]
+		])
+		expect(after[0]).toBe(before[0])
+	})
+
+	it("recomputes tens of thousands of runs beside as many stored rows in a few milliseconds", async () => {
+		const result = await openOdsFixture({ body: table("S", (FILLED + HIDDEN).repeat(30_000)) })
+		const sheet = model(result)
+		const store = sheet.store as SheetStore
+
+		expect(sheet.rowRuns?.length).toBe(30_000)
+
+		let least = Infinity
+
+		for (let round = 0; round < 3; round++) {
+			store.version++
+			const started = cpuMs()
+
+			expect(sheet.rowRuns?.length).toBe(30_000)
+			least = Math.min(least, cpuMs() - started)
+		}
+
+		expect(least).toBeLessThan(budget(10))
+	})
+})
+
+describe("the ODS reader's save guards", () => {
+	// More distinct issues than the report keeps (each error literal is one), before the sheet that needs a guard.
+	const noisy = table(
+		"Noise",
+		`<table:table-row>${Array.from({ length: 300 }, (_, k) => CELL(`table:formula="of:=#E${String(k).padStart(4, "0")}"`)).join("")}</table:table-row>`
+	)
+	const guarded = async (body: string): Promise<{ viewOnly: string | null; converted: string }> => {
+		const bytes = odsBytes({ body: noisy + body })
+		const result = await openOds(bytesSource(bytes))
+
+		if (!result.ok) throw new Error(result.reason)
+
+		const conversion = await convertSheet(bytes, "ods", "xlsx")
+
+		return { viewOnly: odsWriter(result.workbook, undefined).viewOnly, converted: conversion.ok ? "converted" : conversion.reason }
+	}
+
+	it("keeps a table's truncation after the issue report is full", async () => {
+		const opened = await openOdsFixture({ body: noisy })
+
+		expect(opened.issues.some(issue => issue.detail === "overflow")).toBe(true)
+
+		const past = `<table:table-row><table:table-cell table:number-columns-repeated="16384"/>${CELL('office:value-type="float" office:value="1"', "1")}</table:table-row>`
+
+		expect(await guarded(table("Wide", past))).toEqual({ viewOnly: "tooLarge", converted: "tooLarge" })
+	})
+
+	it("keeps a table inside a cell after the issue report is full", async () => {
+		const sub = '<table:table-row><table:table-cell><table:table table:name="Inner"/></table:table-cell></table:table-row>'
+
+		expect((await guarded(table("Nested", sub))).viewOnly).toBe("lossy")
+	})
+})
+
+describe("the ODS reader's repeated rich text", () => {
+	it("shares one shared string among a repeated row's copies of a rich cell, each copy still its own cell", async () => {
+		const rich = '<table:table-cell office:value-type="string"><text:p>one</text:p><text:p>two</text:p></table:table-cell>'
+		const result = await openOdsFixture({
+			body: table("S", `<table:table-row table:number-rows-repeated="1000">${rich}</table:table-row>`)
+		})
+		const sheet = model(result)
+		const store = sheet.store as SheetStore
+
+		expect(result.workbook.sharedStrings.length).toBe(1)
+		expect(cell(sheet, 0, 0)?.kind).toBe(CellKind.SHARED_STRING)
+		expect(cell(sheet, 999, 0)?.value).toBe(cell(sheet, 0, 0)?.value)
+
+		store.setCell(500, 0, CellKind.NUMBER, 7, 0, -1)
+
+		const rows = shownRows(odsDocument(result), 0)
+
+		expect(rows.length).toBe(1000)
+		expect(rows[500]).toEqual(["7"])
+		expect(rows.filter(row => row[0] === "one\ntwo")).toHaveLength(999)
+	})
+})
+
+describe("the ODS reader's CEILING and FLOOR literals", () => {
+	it("reads every literal number form as before", () => {
+		for (const literal of ["1", "1.", "1.5", ".5", "1e5", " + 2 ", "1.e5"])
+			expect(translateFormula(`of:=CEILING(${literal};-1)`)).toEqual({ text: "#VALUE!" })
+
+		expect(translateFormula("of:=FLOOR(-1.5E-3;1)")).toEqual({ text: "#VALUE!" })
+		expect(translateFormula("of:=CEILING(1.5;1)")).toEqual({ text: "_xlfn.CEILING.MATH(1.5,1)" })
+	})
+
+	it("translates a long digit or white-space run in an argument in a few milliseconds", () => {
+		const digits = `of:=CEILING(${"1".repeat(32_000)}+1;1)`
+		const spaces = `of:=CEILING(${" ".repeat(32_000)}x;1;${" ".repeat(32_000)}x)`
+		let least = Infinity
+
+		for (let round = 0; round < 3; round++) {
+			const started = cpuMs()
+
+			translateFormula(digits)
+			translateFormula(spaces)
+			least = Math.min(least, cpuMs() - started)
+		}
+
+		expect(least).toBeLessThan(budget(50))
+	})
+})
+
+// A tag or text run carried from one inflated chunk to the next is scanned again from its start each time: bounded,
+// so one huge node is refused at once instead of costing time quadratic in its size.
+describe("the ODS reader's carried tags and text", () => {
+	const MiB = 1024 * 1024
+
+	async function opened(body: string): Promise<string> {
+		const result = await openOds(bytesSource(odsBytes({ body: table("S", body) })))
+
+		return result.ok ? "opened" : result.reason
+	}
+
+	it("refuses an attribute value of several MiB and a cell text past the capture limit as too large", async () => {
+		expect(await opened(`<table:table-row><table:table-cell table:style-name="${"a".repeat(6 * MiB)}"/></table:table-row>`)).toBe(
+			"tooLarge"
+		)
+		expect(
+			await opened(
+				`<table:table-row><table:table-cell office:value-type="string"><text:p>${"a".repeat(65 * MiB)}</text:p></table:table-cell></table:table-row>`
+			)
+		).toBe("tooLarge")
+	}, 120_000)
+
+	it("opens a long cell text and a frame with inline binary data under the limits", async () => {
+		const long = "word ".repeat(80_000)
+		const frame = `<draw:frame draw:name="Image 1" svg:width="1cm" svg:height="1cm" svg:x="0cm" svg:y="0cm"><draw:image><office:binary-data>${"QUJD".repeat(2 * MiB)}</office:binary-data></draw:image></draw:frame>`
+		const result = await openOds(
+			bytesSource(
+				odsBytes({
+					body: table(
+						"S",
+						`<table:table-row><table:table-cell office:value-type="string"><text:p>${long}</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p>${frame}</table:table-cell></table:table-row>`
+					)
+				})
+			)
+		)
+
+		if (!result.ok) throw new Error(`${result.reason}: ${result.message}`)
+
+		expect(shownRows(odsDocument(result), 0)[0]?.[1]).toBe("1")
+	}, 120_000)
+})
+
+// A text:s stands for text:c spaces from a few bytes: one count is clamped, and what they come to together is bounded
+// (a note, a sheet's validation messages, the cells), so a small file cannot ask for strings past the heap.
+describe("the ODS reader's text:s counts", () => {
+	async function read(body: string): Promise<string> {
+		const result = await openOds(bytesSource(odsBytes({ body })))
+
+		if (!result.ok) return result.reason
+
+		try {
+			await odsDocument(result).readyAllSheets()
+		} catch (error) {
+			if (error instanceof OdsReadError) return error.code
+
+			throw error
+		}
+
+		return odsWriter(result.workbook, undefined).viewOnly ?? "writable"
+	}
+
+	const spaces = (count: string, times = 1): string => `<text:s text:c="${count}"/>`.repeat(times)
+	const noted = (inner: string): string =>
+		table(
+			"S",
+			`<table:table-row><table:table-cell office:value-type="float" office:value="1"><office:annotation><text:p>a${inner}b</text:p></office:annotation><text:p>1</text:p></table:table-cell></table:table-row>`
+		)
+	const validated = (inner: string): string =>
+		`<table:content-validations><table:content-validation table:name="val1" table:condition="of:cell-content-is-whole-number()" table:base-cell-address="S.A1"><table:help-message table:title="Help" table:display="true"><text:p>a${inner}b</text:p></table:help-message><table:error-message table:display="true"><text:p>e${inner}</text:p></table:error-message></table:content-validation></table:content-validations>` +
+		table(
+			"S",
+			'<table:table-row><table:table-cell table:content-validation-name="val1" office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell></table:table-row>'
+		)
+
+	it("opens a note and a validation message whose count asks for half a billion spaces, clamped", async () => {
+		expect(await read(noted(spaces("500000000")))).toBe("writable")
+		expect(await read(validated(spaces("500000000")))).toBe("writable")
+	})
+
+	it("reads a count that is not a number as one space", async () => {
+		expect(await read(validated(spaces("Infinity")))).toBe("writable")
+		expect(await read(noted(spaces("NaN")))).toBe("writable")
+	})
+
+	it("refuses a note or the validation messages whose spaces together pass the limit as too large", async () => {
+		expect(await read(noted(spaces("500000000", 600)))).toBe("tooLarge")
+		expect(await read(validated(spaces("500000000", 300)))).toBe("tooLarge")
+	}, 60_000)
+
+	it("refuses cells whose spaces together pass the limit, and opens a cell of 40,000 characters editable", async () => {
+		const cells = `<table:table-row><table:table-cell office:value-type="string"><text:p>a${spaces("500000000", 2100)}</text:p></table:table-cell></table:table-row>`
+
+		expect(await read(table("S", cells))).toBe("tooLarge")
+
+		const long = `<table:table-row><table:table-cell office:value-type="string"><text:p>${"word ".repeat(8000)}x</text:p></table:table-cell></table:table-row>`
+
+		expect(await read(table("S", long))).toBe("writable")
+	}, 60_000)
+
+	it("reads back a run of spaces longer than a sheet is wide that a save wrote", async () => {
+		const host = inThreadSheetHost()
+		const opened = await host.open(
+			odsBytes({
+				body: table(
+					"S",
+					'<table:table-row><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell></table:table-row>'
+				)
+			}),
+			{ kind: "ods", slicing: IMMEDIATE },
+			() => undefined
+		)
+
+		if (opened.kind !== "opened") throw new Error(opened.kind)
+
+		const text = `a${" ".repeat(20_000)}b`
+
+		expect(await opened.session.intent()).toEqual({ state: "writable" })
+		expect(
+			(
+				await opened.session.command({
+					type: "cells.set",
+					sheet: opened.info.sheets[0]?.id ?? 0,
+					cells: { rows: Uint32Array.of(0), cols: Uint16Array.of(1), inputs: [text] }
+				})
+			).ok
+		).toBe(true)
+
+		const saved = await opened.session.save()
+
+		opened.session.close()
+
+		if (!saved.ok) throw new Error(`${saved.reason}: ${saved.message}`)
+
+		const back = await openOds(bytesSource(saved.bytes))
+
+		if (!back.ok) throw new Error(back.reason)
+
+		expect(shownRows(odsDocument(back), 0)[0]?.[1]).toBe(text)
+	})
+})
+
+// A standard filter's criteria as SpreadsheetML says them: its filterColumns are joined by and, so only an and-group of
+// conditions or an or-group on one field has a form; any other nesting is reported and keeps no criteria.
+describe("the ODS reader's filter criteria", () => {
+	const condition = (field: number, operator: string, value: string): string =>
+		`<table:filter-condition table:field-number="${field}" table:value="${value}" table:operator="${operator.replace("<", "&lt;")}"/>`
+
+	async function criteria(filter: string): Promise<{ autoFilter: string; issues: string[] }> {
+		const rows = Array.from(
+			{ length: 4 },
+			(_, k) =>
+				`<table:table-row>${CELL(`office:value-type="float" office:value="${k}"`, String(k))}${CELL(`office:value-type="float" office:value="${k * 2}"`, String(k * 2))}</table:table-row>`
+		).join("")
+		const result = await openOdsFixture({
+			body: `${table("S", rows)}<table:database-ranges><table:database-range table:name="__Anonymous_Sheet_DB__0" table:target-range-address="S.A1:S.B4" table:display-filter-buttons="true"><table:filter>${filter}</table:filter></table:database-range></table:database-ranges>`
+		})
+
+		await odsDocument(result).readyAllSheets()
+
+		const section = model(result).sections.find(entry => entry.name === "autoFilter")
+
+		return {
+			autoFilter: new TextDecoder().decode(section?.bytes ?? new Uint8Array(0)).replace(/^<autoFilter[^>]*>|<\/autoFilter>$/g, ""),
+			issues: result.issues.filter(issue => issue.kind === "filter").map(issue => issue.detail ?? "")
+		}
+	}
+
+	it("reads a single condition", async () => {
+		expect(await criteria(condition(0, ">", "1"))).toEqual({
+			autoFilter:
+				'<filterColumn colId="0"><customFilters><customFilter operator="greaterThan" val="1"/></customFilters></filterColumn>',
+			issues: []
+		})
+	})
+
+	it("reads an and-group on distinct fields, two conditions on one field as an and pair", async () => {
+		expect(
+			await criteria(
+				`<table:filter-and>${condition(0, ">", "1")}${condition(0, "<", "3")}${condition(1, "=", "4")}</table:filter-and>`
+			)
+		).toEqual({
+			autoFilter:
+				'<filterColumn colId="0"><customFilters and="1"><customFilter operator="greaterThan" val="1"/><customFilter operator="lessThan" val="3"/></customFilters></filterColumn><filterColumn colId="1"><filters><filter val="4"/></filters></filterColumn>',
+			issues: []
+		})
+	})
+
+	it("reads an or-group on one field", async () => {
+		expect(await criteria(`<table:filter-or>${condition(0, ">", "2")}${condition(0, "<", "1")}</table:filter-or>`)).toEqual({
+			autoFilter:
+				'<filterColumn colId="0"><customFilters><customFilter operator="greaterThan" val="2"/><customFilter operator="lessThan" val="1"/></customFilters></filterColumn>',
+			issues: []
+		})
+		expect((await criteria(`<table:filter-or>${condition(0, "=", "1")}${condition(0, "=", "2")}</table:filter-or>`)).autoFilter).toBe(
+			'<filterColumn colId="0"><filters><filter val="1"/><filter val="2"/></filters></filterColumn>'
+		)
+	})
+
+	it("reports or across fields and an and-group under an or-group, and keeps no criteria for them", async () => {
+		expect(await criteria(`<table:filter-or>${condition(0, "=", "1")}${condition(1, "=", "4")}</table:filter-or>`)).toEqual({
+			autoFilter: "",
+			issues: ["nested criteria"]
+		})
+		expect(
+			await criteria(
+				`<table:filter-or><table:filter-and>${condition(0, ">", "5")}${condition(1, ">", "1")}</table:filter-and>${condition(0, "<", "10")}</table:filter-or>`
+			)
+		).toEqual({ autoFilter: "", issues: ["nested criteria"] })
+	})
+
+	it("keeps the source's criteria it cannot say through a save that leaves the filter alone", async () => {
+		const filter = `<table:filter><table:filter-or>${condition(0, "=", "1")}${condition(1, "=", "4")}</table:filter-or></table:filter>`
+		const host = inThreadSheetHost()
+		const opened = await host.open(
+			odsBytes({
+				body: `${table("S", `<table:table-row>${CELL('office:value-type="float" office:value="1"', "1")}</table:table-row>`)}<table:database-ranges><table:database-range table:name="__Anonymous_Sheet_DB__0" table:target-range-address="S.A1:S.B4" table:display-filter-buttons="true">${filter}</table:database-range></table:database-ranges>`
+			}),
+			{ kind: "ods", slicing: IMMEDIATE },
+			() => undefined
+		)
+
+		if (opened.kind !== "opened") throw new Error(opened.kind)
+
+		expect(await opened.session.intent()).toEqual({ state: "writable" })
+		expect(
+			(
+				await opened.session.command({
+					type: "cells.set",
+					sheet: opened.info.sheets[0]?.id ?? 0,
+					cells: { rows: Uint32Array.of(0), cols: Uint16Array.of(3), inputs: ["x"] }
+				})
+			).ok
+		).toBe(true)
+
+		const saved = await opened.session.save()
+
+		opened.session.close()
+
+		if (!saved.ok) throw new Error(`${saved.reason}: ${saved.message}`)
+
+		expect(new TextDecoder().decode(unzipSync(saved.bytes)["content.xml"])).toContain(filter)
 	})
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { APPLY_FAMILIES, applyOp, opTouches, type ApplyContext } from "../core/presentation/edit/apply"
-import { DECK_OP_FAMILIES, type DeckOpFamily, type OpOf } from "../core/presentation/edit/ops"
+import { APPLY_FAMILIES } from "../core/presentation/edit/apply"
+import { DECK_OP_FAMILIES, type DeckOpFamily } from "../core/presentation/edit/ops"
 import { PresentationError, slideRef, type ShapeNode, type ShapeRef } from "../core/presentation/model"
 import { emitFamilyOf, emitPptx, PPTX_EMIT_FAMILIES } from "../core/pptx/write/emit"
 import type { PartsApi, PptxEmitContext } from "../core/pptx/write/types"
@@ -19,7 +19,7 @@ import { PRESENTATION_JOBS, runPresentationJob, type JobContext } from "../dom/p
 import { PRESENTATION_METHODS, type PresentationMethod } from "../dom/presentation/protocol"
 import { bytesSource, memorySink } from "../core/opc/index"
 import { unavailablePresenterPortal, unavailableShowController } from "../react/presentation/show/controller"
-import { fixtureBody, fixtureDeck } from "./fixtures/presentation/deck"
+import { fixtureDeck } from "./fixtures/presentation/deck"
 
 // The dispatch seams of the presentation engine: every family and capability is registered, routed to its own file,
 // and, until its slice builds it, refuses with the typed reason notImplemented (never silently).
@@ -28,57 +28,7 @@ const slide = slideRef(10)
 const target: ShapeRef = { slide, id: 2 }
 const shape: ShapeNode = { id: 9, name: "Shape 8", hidden: false, kind: "sp" }
 
-// One op per family, so the table is exhaustive by type.
-const SAMPLE_OPS: { readonly [F in DeckOpFamily]: OpOf<F> } = {
-	slide: { family: "slide", kind: "hide", slides: [slide], hidden: true },
-	shape: { family: "shape", kind: "setXfrm", target, xfrm: { x: 0, y: 0, cx: 10, cy: 10, rot: 0, flipH: false, flipV: false } },
-	text: { family: "text", kind: "setText", target, body: fixtureBody(["Edited"]) },
-	table: { family: "table", kind: "insertRows", target, at: 1, count: 1 },
-	picture: { family: "picture", kind: "crop", target, crop: { l: 0, t: 0, r: 10_000, b: 0 } },
-	chart: { family: "chart", kind: "edit", target, edit: { kind: "title", text: "Sales" } },
-	media: { family: "media", kind: "setPlayback", target, playback: { loop: true } },
-	notes: { family: "notes", kind: "setNotes", slide, body: fixtureBody(["Speaker note"]) },
-	comment: { family: "comment", kind: "resolve", slide, id: "{1}", resolved: true },
-	timing: { family: "timing", kind: "removeEffect", slide, node: 5 },
-	transition: { family: "transition", kind: "set", slides: [slide], transition: undefined },
-	motionPath: { family: "motionPath", kind: "setPath", slide, node: 7, path: "M 0 0 L 0.25 0 E" },
-	design: { family: "design", kind: "setSize", cx: 9_144_000, cy: 6_858_000, scale: "ensureFit" },
-	smartart: { family: "smartart", kind: "setNodeText", target, node: "{A}", text: "Plan" },
-	ink: {
-		family: "ink",
-		kind: "add",
-		slide,
-		strokes: [{ points: new Float64Array([0, 0, 100, 100]), width: 9525, color: { kind: "srgb", rgb: "FF0000" }, highlighter: false }],
-		name: "Ink"
-	},
-	mediaTiming: { family: "mediaTiming", kind: "setTrim", target, startMs: 0, endMs: 1000 },
-	presentation: {
-		family: "presentation",
-		kind: "setShow",
-		show: { kind: "present", loop: false, showNarration: false, showAnimation: true, useTimings: true, range: { kind: "all" } }
-	}
-}
-
-// What the slices have built so far: the loops below cover only what still refuses as notImplemented.
-const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set([
-	"design",
-	"slide",
-	"shape",
-	"text",
-	"table",
-	"picture",
-	"smartart",
-	"ink",
-	"media",
-	"presentation",
-	"transition",
-	"chart",
-	"timing",
-	"motionPath",
-	"notes",
-	"comment",
-	"mediaTiming"
-])
+// What the slices have built so far: the emit loop covers only what still refuses as notImplemented.
 const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"design",
 	"shape",
@@ -115,6 +65,7 @@ const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"comment",
 	"mediaTiming"
 ])
+// Methods that answer a session without a deck with something other than notImplemented.
 const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"jobsPort",
 	"command",
@@ -137,12 +88,6 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"outline"
 ])
 
-const context: ApplyContext = {
-	sourceBytes: () => new Uint8Array(0),
-	newShapeId: () => 100,
-	newSlideRef: () => slideRef(99)
-}
-
 const parts: PartsApi = {
 	owner: "/ppt/slides/slide1.xml",
 	addPart: () => ({ part: "/ppt/media/image9.png", rId: "rId9" }),
@@ -159,22 +104,6 @@ describe("presentation dispatch seams", () => {
 		expect(Object.keys(APPLY_FAMILIES).sort()).toEqual([...DECK_OP_FAMILIES].sort())
 		expect(Object.keys(PPTX_EMIT_FAMILIES).sort()).toEqual([...DECK_OP_FAMILIES].sort())
 		expect(Object.keys(ODP_EMIT_FAMILIES).sort()).toEqual([...DECK_OP_FAMILIES].sort())
-	})
-
-	it("refuses every op family's apply not built yet as notImplemented, touching nothing and leaving the deck as it was", () => {
-		for (const family of DECK_OP_FAMILIES.filter(family => !BUILT_APPLY.has(family))) {
-			const deck = fixtureDeck()
-			const before = structuredClone(deck)
-			const op = SAMPLE_OPS[family]
-
-			// A family built in part names the kind it does not apply yet.
-			expect(applyOp(deck, op, context), family).toMatchObject({ kind: "refused", reason: "notImplemented" })
-			expect((applyOp(deck, op, context) as { readonly detail?: string }).detail, family).toMatch(
-				new RegExp(`^apply ${family}( |$)`, "u")
-			)
-			expect(opTouches(op), family).toEqual([])
-			expect(deck, family).toEqual(before)
-		}
 	})
 
 	it("refuses every family's pptx and ODP emit not built yet as notImplemented", () => {
@@ -267,7 +196,7 @@ describe("presentation dispatch seams", () => {
 		expect(emitFamilyOf({ slide: node, touch: { kind: "slide", slide, dirt: { kind: "node" } } })).toBe("slide")
 	})
 
-	it("routes every protocol method to a capability, each not built yet refusing as notImplemented", async () => {
+	it("routes every protocol method to a capability and refuses every method of a session without a deck as notImplemented", async () => {
 		const owned = [...Object.values(CAPABILITIES).flatMap(capability => Object.keys(capability)), "smartArtPreview", "smartArtInfo"]
 
 		expect(owned.sort()).toEqual([...PRESENTATION_METHODS].sort())

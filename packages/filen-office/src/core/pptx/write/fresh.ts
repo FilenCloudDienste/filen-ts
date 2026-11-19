@@ -10,20 +10,22 @@ import {
 	type Relationships,
 	type ZipPlanItem
 } from "../../opc/index"
-import { MEDIA_LIMITS } from "../../opc/mediaPolicy"
+import { DEFLATE_HELD, MEDIA_LIMITS, storedByType } from "../../opc/mediaPolicy"
 import type { ByteChunks } from "../../opc/pieces"
+import type { WriteZipReport } from "../../opc/zipWriter"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../presentation/budget"
 import { MIN_MASTER_LAYOUT_ID, MIN_SLIDE_ID } from "../../presentation/ids"
 import { PresentationError, refused, slideRef, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
 import { NodeKind, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
-import { G, partReader, type PartReader } from "../read/xml"
+import { SECTIONS_EXT } from "../read/sections"
+import { G, groupOf, partReader, type PartReader } from "../read/xml"
 import { IMAGE_RELATIONSHIP, PREFIXES, URIS, attr, type EmitContext, type SourceCopier } from "./emit/shape"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { slideRoot } from "./emit/slide"
 import { freshViewPr, spliceShowPr } from "./emit/presentation"
 import { listStyleXml } from "./emit/text"
 import { XLSX_CONTENT_TYPE } from "../../presentation/edit/apply/chart"
-import { PART_CONTENT_TYPES, PackageWriter, RELATIONSHIPS, modelName, zipName } from "./parts"
+import { PART_CONTENT_TYPES, PackageWriter, RELATIONSHIPS, XML_DECLARATION, modelName, zipName } from "./parts"
 import type { EmitPiece, EmitRequest, EmitResult, FreshPptx, PptxSaveOptions, PptxSaveOutcome, PptxSource } from "./types"
 
 // The fresh writer: a whole PresentationML package from the model, in a fixed order (presentation, masters, layouts,
@@ -35,8 +37,6 @@ import type { EmitPiece, EmitRequest, EmitResult, FreshPptx, PptxSaveOptions, Pp
 // Transitional). Every node must be parsed first.
 
 const P14 = URIS["p14"] ?? ""
-const SECTIONS_EXT = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"
-const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 const TRANSITIONAL_RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
 const STRICT_RELATIONSHIPS = "http://purl.oclc.org/ooxml/officeDocument/relationships/"
 const PACKAGE_RELATIONSHIPS = "http://schemas.openxmlformats.org/package/2006/relationships/"
@@ -98,23 +98,181 @@ const DEFAULT_COLOR_MAP: Required<NonNullable<SlideNode["clrMap"]>> = {
 
 // --- Copying source markup into another part ---
 
-// ST_Percentage and universal measures as Strict writes them ("50%", "2.5in") into Transitional integers.
+// Strict values that Transitional spells otherwise, by (namespace group, element, attribute), never by the value's
+// shape (a name, a description or a number format may read "100%" or "5in"): DrawingML and PresentationML
+// ST_Percentage-family values ("50%") as thousandths, coordinates written as universal measures ("2.5in") as EMU, and
+// the chart's percentage values ("150%") as the bare numbers Transitional's unions take (ST_GapAmount, ST_Overlap…).
+const Conversion = { Percent: 0, Measure: 1, ChartPercent: 2 } as const
+
+type Conversion = (typeof Conversion)[keyof typeof Conversion]
+
 const PERCENT = /^(-?\d+(?:\.\d+)?)%$/u
 const MEASURE = /^(-?\d+(?:\.\d+)?)(mm|cm|in|pt|pc|pi)$/u
 const EMU_PER: Readonly<Record<string, number>> = { mm: 36000, cm: 360000, in: 914400, pt: 12700, pc: 152400, pi: 152400 }
 
-function transitionalValue(value: string): string {
+type Rules = Readonly<Record<string, Conversion>>
+
+const PCT = Conversion.Percent
+const EMU = Conversion.Measure
+const RECT: Rules = { l: PCT, t: PCT, r: PCT, b: PCT }
+const POINT: Rules = { x: EMU, y: EMU }
+const SIZE: Rules = { cx: EMU, cy: EMU }
+const PARAGRAPH: Rules = { marL: EMU, marR: EMU, indent: EMU, defTabSz: EMU }
+const RUN: Rules = { baseline: PCT }
+const VECTOR: Rules = { dx: EMU, dy: EMU, dz: EMU }
+// Colour transforms (ECMA-376 Part 1 §20.1.2.3): val an ST_Percentage-family value; hue and hueOff are angles.
+const COLOR_TRANSFORMS = [
+	"alpha",
+	"alphaMod",
+	"alphaOff",
+	"blue",
+	"blueMod",
+	"blueOff",
+	"green",
+	"greenMod",
+	"greenOff",
+	"hueMod",
+	"lumMod",
+	"lumOff",
+	"red",
+	"redMod",
+	"redOff",
+	"sat",
+	"satMod",
+	"satOff",
+	"shade"
+] as const
+
+const DRAWING_RULES: Readonly<Record<string, Rules>> = {
+	...Object.fromEntries(COLOR_TRANSFORMS.map(name => [name, { val: PCT }])),
+	// a:tint and a:lum are colour transforms (val) and blip effects (amt; bright, contrast).
+	tint: { val: PCT, amt: PCT },
+	lum: { val: PCT, bright: PCT, contrast: PCT },
+	gs: { pos: PCT },
+	fillToRect: RECT,
+	fillRect: RECT,
+	srcRect: RECT,
+	tileRect: RECT,
+	tile: { sx: PCT, sy: PCT, tx: EMU, ty: EMU },
+	alphaModFix: { amt: PCT },
+	alphaBiLevel: { thresh: PCT },
+	biLevel: { thresh: PCT },
+	hsl: { sat: PCT, lum: PCT },
+	hslClr: { sat: PCT, lum: PCT },
+	scrgbClr: { r: PCT, g: PCT, b: PCT },
+	alphaRepl: { a: PCT },
+	alphaOutset: { rad: EMU },
+	blur: { rad: EMU },
+	glow: { rad: EMU },
+	softEdge: { rad: EMU },
+	outerShdw: { blurRad: EMU, dist: EMU, sx: PCT, sy: PCT },
+	innerShdw: { blurRad: EMU, dist: EMU },
+	prstShdw: { dist: EMU },
+	reflection: { blurRad: EMU, dist: EMU, stA: PCT, stPos: PCT, endA: PCT, endPos: PCT, sx: PCT, sy: PCT },
+	relOff: { tx: PCT, ty: PCT },
+	// a:xfrm is a shape's transform (no such attributes) and the transform effect.
+	xfrm: { sx: PCT, sy: PCT, tx: EMU, ty: EMU },
+	ds: { d: PCT, sp: PCT },
+	buSzPct: { val: PCT },
+	spcPct: { val: PCT },
+	normAutofit: { fontScale: PCT, lnSpcReduction: PCT },
+	rPr: RUN,
+	defRPr: RUN,
+	endParaRPr: RUN,
+	pPr: PARAGRAPH,
+	...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => [`lvl${String(level)}pPr`, PARAGRAPH])),
+	tab: { pos: EMU },
+	bodyPr: { lIns: EMU, tIns: EMU, rIns: EMU, bIns: EMU, spcCol: EMU },
+	off: POINT,
+	chOff: POINT,
+	ext: SIZE,
+	chExt: SIZE,
+	ln: { w: EMU },
+	miter: { lim: PCT },
+	tcPr: { marL: EMU, marR: EMU, marT: EMU, marB: EMU },
+	gridCol: { w: EMU },
+	tr: { h: EMU },
+	anchor: { x: EMU, y: EMU, z: EMU },
+	camera: { zoom: PCT },
+	norm: VECTOR,
+	up: VECTOR,
+	sp3d: { z: EMU, extrusionH: EMU, contourW: EMU },
+	bevelT: { w: EMU, h: EMU },
+	bevelB: { w: EMU, h: EMU },
+	flatTx: { z: EMU },
+	pt: POINT,
+	pos: POINT,
+	arcTo: { wR: EMU, hR: EMU },
+	path: { w: EMU, h: EMU },
+	// Custom geometry's text rectangle and adjust handles (ST_AdjCoordinate: a measure or a guide name).
+	rect: { l: EMU, t: EMU, r: EMU, b: EMU },
+	ahXY: { minX: EMU, maxX: EMU, minY: EMU, maxY: EMU },
+	ahPolar: { minR: EMU, maxR: EMU }
+}
+
+const POINT_PERCENT: Rules = { x: PCT, y: PCT }
+
+// PresentationML timing (§19.5): accelerations, speeds, key times, points, media volume and animated colour
+// transforms as percentages.
+const PRESENTATION_RULES: Readonly<Record<string, Rules>> = {
+	cTn: { accel: PCT, decel: PCT, spd: PCT },
+	cMediaNode: { vol: PCT },
+	rgb: { r: PCT, g: PCT, b: PCT },
+	hsl: { s: PCT, l: PCT },
+	tav: { tm: PCT },
+	tmPct: { val: PCT },
+	by: POINT_PERCENT,
+	from: POINT_PERCENT,
+	to: POINT_PERCENT,
+	rCtr: POINT_PERCENT
+}
+
+const CHART_PERCENT: Rules = { val: Conversion.ChartPercent }
+
+// Chart elements whose val is a percentage in Strict; every other chart attribute (formatCode, manual layout
+// fractions…) passes as it is.
+const CHART_RULES: Readonly<Record<string, Rules>> = Object.fromEntries(
+	[
+		"gapWidth",
+		"gapDepth",
+		"overlap",
+		"holeSize",
+		"bubbleScale",
+		"depthPercent",
+		"hPercent",
+		"secondPieSize",
+		"thickness",
+		"lblOffset"
+	].map(name => [name, CHART_PERCENT])
+)
+
+const STRICT_RULES: ReadonlyMap<number, Readonly<Record<string, Rules>>> = new Map([
+	[G.A, DRAWING_RULES],
+	[G.P, PRESENTATION_RULES],
+	[G.C, CHART_RULES]
+])
+
+// Own keys only: an element or attribute named "constructor" or "__proto__" has no rule.
+function ownRule<T>(table: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+	return table !== undefined && Object.hasOwn(table, key) ? table[key] : undefined
+}
+
+function transitionalValue(value: string, conversion: Conversion): string {
+	if (conversion === Conversion.Measure) {
+		const measure = MEASURE.exec(value)
+
+		return measure === null ? value : String(Math.round(Number(measure[1]) * (EMU_PER[measure[2] ?? ""] ?? 1)))
+	}
+
 	const percent = PERCENT.exec(value)
 
-	if (percent !== null) return String(Math.round(Number(percent[1]) * 1000))
+	if (percent === null) return value
 
-	const measure = MEASURE.exec(value)
-
-	return measure === null ? value : String(Math.round(Number(measure[1]) * (EMU_PER[measure[2] ?? ""] ?? 1)))
+	return conversion === Conversion.ChartPercent ? (percent[1] ?? value) : String(Math.round(Number(percent[1]) * 1000))
 }
 
 // A copied XML part: a Strict part as Transitional, anything else as it is.
-function transitionalPart(bytes: Uint8Array): Uint8Array {
+export function transitionalPart(bytes: Uint8Array): Uint8Array {
 	try {
 		const document = parseXml(bytes)
 		const root = partReader(document).namespaces.elementUri(document.documentElement()) ?? ""
@@ -187,14 +345,19 @@ class Copier implements SourceCopier {
 		}
 
 		let attributes = ""
+		const rules = this.strict ? ownRule(STRICT_RULES.get(groupOf(uri)), document.localName(node)) : undefined
 
 		for (const attribute of document.attributes(node)) {
 			if (attribute.name === "xmlns" || attribute.name.startsWith("xmlns:")) continue
 
 			const colon = attribute.name.indexOf(":")
-			let value = this.strict ? transitionalValue(attribute.value) : attribute.value
+			let value = attribute.value
 
 			if (colon < 0) {
+				const conversion = ownRule(rules, attribute.name)
+
+				if (conversion !== undefined) value = transitionalValue(value, conversion)
+
 				attributes += ` ${attribute.name}="${escapeAttribute(value)}"`
 
 				continue
@@ -300,21 +463,11 @@ class Copier implements SourceCopier {
 	}
 }
 
+// The group of a namespace the writer has a prefix for (Transitional or Strict URI), else undefined.
 function G_OF(uri: string): number | undefined {
-	for (const [group, prefix] of Object.entries(PREFIXES)) {
-		if (prefix !== undefined && (URIS[prefix] === uri || STRICT_URIS[prefix] === uri)) return Number(group)
-	}
+	const group = groupOf(uri)
 
-	return undefined
-}
-
-const STRICT_URIS: Readonly<Record<string, string>> = {
-	p: "http://purl.oclc.org/ooxml/presentationml/main",
-	a: "http://purl.oclc.org/ooxml/drawingml/main",
-	r: "http://purl.oclc.org/ooxml/officeDocument/relationships",
-	dgm: "http://purl.oclc.org/ooxml/drawingml/diagram",
-	c: "http://purl.oclc.org/ooxml/drawingml/chart",
-	pic: "http://purl.oclc.org/ooxml/drawingml/picture"
+	return PREFIXES[group] === undefined ? undefined : group
 }
 
 // Strict relationship names that differ from their Transitional ones (ECMA-376 Part 1, Strict and Transitional).
@@ -408,10 +561,6 @@ export interface FreshExtras {
 	readonly customProperties?: string
 }
 
-// Media whose content is compressed already: stored, not deflated again.
-const STORED_MEDIA = /^(?:image\/(?:png|jpeg|gif|webp)|video\/|audio\/)/u
-// A copied part larger than this is stored as it streams: deflating it would hold its whole deflated content.
-const DEFLATE_HELD = 16 * 1024 * 1024
 const XML_TYPE = /xml$/iu
 const CUSTOM_PROPERTIES_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
 const SVG_TYPE = "image/svg+xml"
@@ -512,7 +661,7 @@ class Fresh {
 		)
 
 		this.mapped.set(key, name)
-		this.writer.add(name, contentType, undefined, { compress: !STORED_MEDIA.test(contentType) })
+		this.writer.add(name, contentType, undefined, { compress: !storedByType(contentType, 0) })
 		this.foreignPending.push({ from: sourceName, to: name })
 
 		return name
@@ -781,12 +930,12 @@ class Fresh {
 	private streamed(name: string, contentType: string, part: StreamedPart): void {
 		checkCopy(name, contentType, part.length)
 		this.writer.add(name, contentType, part, {
-			compress: !STORED_MEDIA.test(contentType) && part.length <= DEFLATE_HELD,
+			compress: !storedByType(contentType, part.length) && part.length <= DEFLATE_HELD,
 			crc32: part.crc32
 		})
 	}
 
-	async run(sink: ByteSink): Promise<number> {
+	async run(sink: ByteSink, options: PptxSaveOptions): Promise<WriteZipReport> {
 		const deck = this.deck
 		const writer = this.writer
 
@@ -1075,7 +1224,7 @@ class Fresh {
 			}))
 		]
 
-		return (await writeZip({ items }, null, sink)).size
+		return writeZip({ items }, null, sink, options.slicing === undefined ? {} : { slicing: options.slicing })
 	}
 
 	private async mainOfSource(): Promise<string | undefined> {
@@ -1263,15 +1412,13 @@ export async function freshPptxWith(
 	options: PptxSaveOptions,
 	extras: FreshExtras = {}
 ): Promise<PptxSaveOutcome> {
-	void options
-
 	const empty: OpcPackageType = OpcPackage.fromParts(new Map([["[Content_Types].xml", encodeUtf8(CONTENT_TYPES)]]))
 	const writer = new PackageWriter(empty, await empty.contentTypes())
 
 	try {
-		const size = await new Fresh(deck, source, writer, extras).run(sink)
+		const report = await new Fresh(deck, source, writer, extras).run(sink, options)
 
-		return { kind: "written", report: { size, entries: 0, crcs: new Map(), copies: new Map() }, revision: deck.revision }
+		return { kind: "written", report, revision: deck.revision }
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 		// Markup copied from the source that does not decode (an attribute's invalid character reference): no

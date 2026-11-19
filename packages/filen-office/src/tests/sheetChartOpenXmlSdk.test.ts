@@ -118,15 +118,17 @@ describe.skipIf(MISSING !== undefined)("charts against the Open XML SDK validato
 
 	// Corpus workbooks with charts of many kinds: every chart's legend moved, saved, nothing new.
 	it.skipIf(!existsSync(join(CORPUS_DIR, "xlsx")))("adds no error to corpus charts it edits", { timeout: 300_000 }, async () => {
-		for (const relative of [
+		const present = [
 			"xlsx/poi__45544.xlsx",
 			"xlsx/oxsdk__3D_Bar-O12-XL-Charts.xlsx",
 			"xlsx/poi__45540_classic_Header.xlsx",
 			"xlsx/xlsxwriter__chart_combined10.xlsx"
-		]) {
-			const path = join(CORPUS_DIR, relative)
+		].filter(relative => existsSync(join(CORPUS_DIR, relative)))
 
-			if (!existsSync(path)) continue
+		expect(present.length, "none of the corpus chart workbooks is present").toBeGreaterThan(0)
+
+		for (const relative of present) {
+			const path = join(CORPUS_DIR, relative)
 
 			const { session, sheets } = await openCharts(new Uint8Array(readFileSync(path)))
 			let edited = 0

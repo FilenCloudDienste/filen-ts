@@ -25,6 +25,7 @@ import {
 	NO_SPAN,
 	RowFlag,
 	ROW_MARKS,
+	type XlsxColRange,
 	type XlsxFormula,
 	type XlsxRichRun,
 	type XlsxRowBlock,
@@ -57,9 +58,9 @@ import {
 	sameQuads,
 	sameView
 } from "../write/sections"
-import { sheetOrder, type WrittenSheet } from "../write/sheet"
+import { OWN_SHEET_SECTIONS, sheetOrder, type WrittenSheet } from "../write/sheet"
 import { SHEET_CONTENT_TYPES } from "../write/namespaces"
-import { boundPrefix, relationshipIdName } from "../write/workbook"
+import { boundPrefix, relationshipIdName, type WrittenWorkbook } from "../write/workbook"
 import { MAX_COLS, MAX_ROWS, cellRef, inSheet, parseCellRef, parseRangeRef, readBoolean } from "../write/text"
 
 // The part half of the save gate. Everything a save writes is read back independently of the model's reader
@@ -343,7 +344,7 @@ function referenceAt(bytes: Uint8Array, from: number, to: number): number {
 		row = row * 10 + digit
 	}
 
-	return row < 1 || row > MAX_ROWS ? -1 : (row - 1) * 16_384 + col - 1
+	return row < 1 || row > MAX_ROWS ? -1 : (row - 1) * MAX_COLS + col - 1
 }
 
 const REFERENCE = new Int32Array(4)
@@ -367,7 +368,7 @@ function checkRenumbered(name: string, block: XlsxRowBlock, index: number, bytes
 
 		const col = block.cols[slot] ?? -1
 
-		if ((tag[1] ?? -1) >= 0 && referenceAt(bytes, tag[1] ?? 0, tag[2] ?? 0) !== row * 16_384 + col)
+		if ((tag[1] ?? -1) >= 0 && referenceAt(bytes, tag[1] ?? 0, tag[2] ?? 0) !== row * MAX_COLS + col)
 			fail("model", `${name} ${cellRef(row, col)} is not where the store has it`)
 
 		slot++
@@ -407,16 +408,31 @@ function checkMerges(name: string, merges: Uint32Array): void {
 	}
 }
 
-function checkCols(name: string, sheet: XlsxSheetModel, styles: number): void {
+// Column ranges that start at or before the end of the one before them.
+function colOverlaps(cols: readonly XlsxColRange[]): number {
 	let last = -1
+	let overlaps = 0
 
-	for (const col of sheet.cols) {
-		if (col.first <= last || col.first > col.last || col.last >= MAX_COLS)
-			fail("reference", `${name}: column ranges overlap or leave the sheet`)
-		if (col.style > 0 && col.style >= styles) fail("reference", `${name}: a column has style ${col.style} of ${styles}`)
+	for (const col of cols) {
+		if (col.first <= last) overlaps++
 
 		last = col.last
 	}
+
+	return overlaps
+}
+
+// Overlaps the source's cols section already had are the file's, kept as written (`source`: that section).
+function checkCols(name: string, sheet: XlsxSheetModel, styles: number, source: Uint8Array | null): void {
+	for (const col of sheet.cols) {
+		if (col.first > col.last || col.last >= MAX_COLS) fail("reference", `${name}: column ranges overlap or leave the sheet`)
+		if (col.style > 0 && col.style >= styles) fail("reference", `${name}: a column has style ${col.style} of ${styles}`)
+	}
+
+	const overlaps = colOverlaps(sheet.cols)
+
+	if (overlaps > 0 && overlaps > (source === null ? 0 : colOverlaps(readCols(source))))
+		fail("reference", `${name}: column ranges overlap or leave the sheet`)
 }
 
 // A cell, a range, or whole columns ("A:C") or rows ("1:3"), within the sheet.
@@ -442,37 +458,117 @@ function referenceInSheet(text: string): boolean {
 const REF_ATTRIBUTE = /\s(sqref|ref)\s*=\s*"([^"]*)"/g
 const DXF_ATTRIBUTE = /\sdxfId\s*=\s*"([^"]*)"/g
 
+// A reference in written markup that does not resolve: the attribute as written (name and value) and the failure.
+interface Unresolved {
+	readonly attribute: string
+	readonly value: string
+	// A relationship id: the source part's relationships decide whether it was already dangling.
+	readonly relationship: boolean
+	readonly reason: XlsxSaveFailure
+	readonly message: string
+}
+
 // References in written markup: every sqref and ref names cells in the sheet, every dxfId a format, every
-// relationship id a relationship of the part.
-function checkMarkupReferences(
+// relationship id a relationship of the part. Those that do not resolve, null when all do.
+function unresolvedReferences(
 	name: string,
 	markup: Uint8Array,
 	dxfs: number,
 	relationships: Relationships,
 	relationshipsPrefix: string | null
-): void {
+): Unresolved[] | null {
 	const text = decodeUtf8(markup)
+	let out: Unresolved[] | null = null
 
 	for (const match of text.matchAll(REF_ATTRIBUTE)) {
-		for (const part of (match[2] ?? "").trim().split(/\s+/)) {
-			if (part === "") continue
+		const value = match[2] ?? ""
 
-			if (!referenceInSheet(part)) fail("reference", `${name}: ${match[1]}="${match[2]}" is not in the sheet`)
+		for (const part of value.trim().split(/\s+/)) {
+			if (part === "" || referenceInSheet(part)) continue
+
+			;(out ??= []).push({
+				attribute: match[1] ?? "",
+				value,
+				relationship: false,
+				reason: "reference",
+				message: `${name}: ${match[1]}="${value}" is not in the sheet`
+			})
+
+			break
 		}
 	}
 
 	for (const match of text.matchAll(DXF_ATTRIBUTE)) {
 		const id = Number(match[1])
 
-		if (!Number.isInteger(id) || id < 0 || id >= dxfs) fail("reference", `${name}: dxfId ${match[1]} of ${dxfs}`)
+		if (!Number.isInteger(id) || id < 0 || id >= dxfs)
+			(out ??= []).push({
+				attribute: "dxfId",
+				value: match[1] ?? "",
+				relationship: false,
+				reason: "reference",
+				message: `${name}: dxfId ${match[1]} of ${dxfs}`
+			})
 	}
 
-	if (relationshipsPrefix === null) return
+	if (relationshipsPrefix === null) return out
 
-	const pattern = new RegExp(`\\s${relationshipsPrefix}:[A-Za-z]+\\s*=\\s*"([^"]*)"`, "g")
+	const pattern = new RegExp(`\\s(${relationshipsPrefix}:[A-Za-z]+)\\s*=\\s*"([^"]*)"`, "g")
 
 	for (const match of text.matchAll(pattern)) {
-		if (relationships.byId(match[1] ?? "") === undefined) fail("relationship", `${name}: no relationship ${match[1]}`)
+		if (relationships.byId(match[2] ?? "") === undefined)
+			(out ??= []).push({
+				attribute: match[1] ?? "",
+				value: match[2] ?? "",
+				relationship: true,
+				reason: "relationship",
+				message: `${name}: no relationship ${match[2]}`
+			})
+	}
+
+	return out
+}
+
+// A written section's references, each resolving or written identically in the source's sections of that name
+// (re-serialised from source text: the file's, kept as written; a relationship id only when the source part's
+// relationships lacked it too). Sections the model writes itself get no such discount.
+async function checkSectionReferences(
+	written: WrittenSheet,
+	section: string,
+	markup: Uint8Array,
+	draft: XlsxDraft,
+	relationships: Relationships,
+	relationshipsPrefix: string | null
+): Promise<void> {
+	const unresolved = unresolvedReferences(
+		`${written.part} ${section}`,
+		markup,
+		draft.input.workbook.styles.dxfs.length,
+		relationships,
+		relationshipsPrefix
+	)
+
+	if (unresolved === null) return
+
+	const sources = OWN_SHEET_SECTIONS.has(section)
+		? []
+		: (written.entry.model?.sections ?? []).flatMap(candidate =>
+				candidate.name === section && candidate.bytes !== null ? [decodeUtf8(candidate.bytes)] : []
+			)
+	const opc = draft.input.opc
+	const before =
+		sources.length > 0 && unresolved.some(item => item.relationship) && opc.has(relationshipsPartName(written.part))
+			? await opc.relationships(written.part)
+			: undefined
+
+	for (const item of unresolved) {
+		const inherited =
+			sources.some(
+				text => text.includes(`${item.attribute}="${item.value}"`) || text.includes(`${item.attribute}='${item.value}'`)
+			) &&
+			(!item.relationship || before?.byId(item.value) === undefined)
+
+		if (!inherited) fail(item.reason, item.message)
 	}
 }
 
@@ -668,7 +764,6 @@ const EMPTY_DOCUMENT = parseXml(encodeUtf8("<empty/>"))
 const ROW_CHUNK_BYTES = 1 << 20
 
 async function checkSheet(written: WrittenSheet, draft: XlsxDraft, outcome: Outcome, clock: SliceClock | undefined): Promise<void> {
-	const workbook = draft.input.workbook
 	const sheet = written.entry.model as XlsxSheetModel
 	const name = written.part
 	const order = sheetOrder(written.entry)
@@ -775,9 +870,8 @@ async function checkSheet(written: WrittenSheet, draft: XlsxDraft, outcome: Outc
 	const relationships = await outcome.relationships(name)
 	const relationshipsPrefix = boundPrefix(join([open, close]))
 
-	for (const [section, markup] of written.written) {
-		checkMarkupReferences(`${name} ${section}`, markup, workbook.styles.dxfs.length, relationships, relationshipsPrefix)
-	}
+	for (const [section, markup] of written.written)
+		await checkSectionReferences(written, section, markup, draft, relationships, relationshipsPrefix)
 
 	if (written.rows !== null) {
 		await checkStore(sheet, name, draft.cellXfCount, draft.sharedStringCount, clock)
@@ -817,7 +911,7 @@ async function checkSheet(written: WrittenSheet, draft: XlsxDraft, outcome: Outc
 		if (cols.length !== sheet.cols.length || !cols.every((col, k) => sameCol(col, sheet.cols[k])))
 			fail("model", `${name}: columns read back differently`)
 
-		checkCols(name, sheet, draft.cellXfCount)
+		checkCols(name, sheet, draft.cellXfCount, sheet.sections.find(candidate => candidate.name === "cols")?.bytes ?? null)
 	}
 
 	if (replaced("sheetProtection") && !sameProtection(readProtection(section("sheetProtection")), sheet.protection)) {
@@ -843,6 +937,39 @@ async function checkSheet(written: WrittenSheet, draft: XlsxDraft, outcome: Outc
 // --- Workbook ---
 
 const SHEET_NAME_INVALID = /[[\]:*?/\\]/
+
+// The source's sheet records: each name by relationship id, and how many sheets share each name (lower case) and
+// each sheetId.
+interface SourceSheets {
+	readonly byRelationship: ReadonlyMap<string, string>
+	readonly names: ReadonlyMap<string, number>
+	readonly ids: ReadonlyMap<number, number>
+}
+
+function sourceSheets(written: WrittenWorkbook, id: string): SourceSheets {
+	const byRelationship = new Map<string, string>()
+	const names = new Map<string, number>()
+	const ids = new Map<number, number>()
+
+	if (written.sourceSheets === null) return { byRelationship, names, ids }
+
+	const document = parseXml(written.sourceSheets)
+
+	for (let node = document.firstChildElement(document.documentElement()); node >= 0; node = document.nextSiblingElement(node)) {
+		if (document.localName(node) !== "sheet") continue
+
+		const sheetName = document.attribute(node, "name") ?? ""
+		const sheetId = Number(document.attribute(node, "sheetId") ?? Number.NaN)
+		const relationship = document.attribute(node, id)
+
+		if (relationship !== undefined) byRelationship.set(relationship, sheetName)
+
+		names.set(sheetName.toLowerCase(), (names.get(sheetName.toLowerCase()) ?? 0) + 1)
+		ids.set(sheetId, (ids.get(sheetId) ?? 0) + 1)
+	}
+
+	return { byRelationship, names, ids }
+}
 
 function checkWorkbook(draft: XlsxDraft, workbookRelationships: Relationships): void {
 	const written = draft.workbook
@@ -877,8 +1004,10 @@ function checkWorkbook(draft: XlsxDraft, workbookRelationships: Relationships): 
 	if (read.length !== workbook.sheets.length || read.length === 0)
 		fail("model", `${name}: ${read.length} sheets read back, not ${workbook.sheets.length}`)
 
-	const names = new Set<string>()
-	const ids = new Set<number>()
+	const names = new Map<string, number>()
+	const ids = new Map<number, number>()
+	let source: SourceSheets | null = null
+	const held = (): SourceSheets => (source ??= sourceSheets(written, id))
 
 	workbook.sheets.forEach((sheet, index) => {
 		const back = read[index]
@@ -894,22 +1023,27 @@ function checkWorkbook(draft: XlsxDraft, workbookRelationships: Relationships): 
 		}
 
 		const key = sheet.name.toLowerCase()
+		const sameName = (names.get(key) ?? 0) + 1
+		const sameId = (ids.get(sheet.sheetId) ?? 0) + 1
 
+		names.set(key, sameName)
+		ids.set(sheet.sheetId, sameId)
+
+		// What the source already had (a name it gave this sheet, a name or sheetId as often shared) is the file's,
+		// kept as written; the source is read only for a sheet that fails.
 		if (
-			sheet.name === "" ||
-			sheet.name.length > 31 ||
-			SHEET_NAME_INVALID.test(sheet.name) ||
-			sheet.name.startsWith("'") ||
-			sheet.name.endsWith("'")
+			(sheet.name === "" ||
+				sheet.name.length > 31 ||
+				SHEET_NAME_INVALID.test(sheet.name) ||
+				sheet.name.startsWith("'") ||
+				sheet.name.endsWith("'")) &&
+			held().byRelationship.get(sheet.relationshipId) !== sheet.name
 		) {
 			fail("reference", `${name}: the sheet name "${sheet.name}" is not valid`)
 		}
 
-		if (names.has(key) || ids.has(sheet.sheetId))
+		if ((sameName > 1 && sameName > (held().names.get(key) ?? 0)) || (sameId > 1 && sameId > (held().ids.get(sheet.sheetId) ?? 0)))
 			fail("reference", `${name}: two sheets share the name ${sheet.name} or sheetId ${sheet.sheetId}`)
-
-		names.add(key)
-		ids.add(sheet.sheetId)
 
 		const target = workbookRelationships.byId(sheet.relationshipId)
 

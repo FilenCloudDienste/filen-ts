@@ -1,15 +1,26 @@
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../protocol"
+
 // What a spreadsheet worker hands the grid: a view of a workbook, never the workbook itself, which stays
 // in its worker (the app's workbook worker, or its text worker for CSV) so a save can write it back with
 // everything the view leaves out. Plain, structured-cloneable data only.
 
 export type SpreadsheetKind = "xlsx" | "xls" | "csv"
 
-// Excel's own grid size. Cell keys pack row and column into one number (cellKey).
-export const MAX_ROWS = 1_048_576
-export const MAX_COLUMNS = 16_384
+// Excel's own grid size (protocol.ts). Cell keys pack row and column into one number (cellKey).
+export const MAX_ROWS = SHEET_MAX_ROWS
+export const MAX_COLUMNS = SHEET_MAX_COLS
 
 export function cellKey(row: number, col: number): number {
 	return row * MAX_COLUMNS + col
+}
+
+// The row and the column a cellKey packs.
+export function cellKeyRow(key: number): number {
+	return Math.floor(key / MAX_COLUMNS)
+}
+
+export function cellKeyCol(key: number): number {
+	return key % MAX_COLUMNS
 }
 
 export interface CellView {

@@ -40,9 +40,7 @@ export const REVERTIBLE_UNITS: readonly RevertibleUnits[] = [BLOCKS, ...FEATURE_
 
 export interface UnsavableBlocks {
 	readonly session: DocxEditorSession
-	// Block positions in session.state.doc (from editedBlocks).
-	readonly positions: readonly number[]
-	// Every unit to take back, blocks included.
+	// Every unit to take back, blocks included: what a stand-in and a revert must take (withRevertedUnits).
 	readonly units: readonly RevertibleUnit[]
 }
 
@@ -57,6 +55,25 @@ export function withRevertedUnits(session: DocxEditorSession, units: readonly Re
 	}
 
 	return out
+}
+
+// The block positions among `units` (keys in the session's own document).
+export function blockPositions(units: readonly RevertibleUnit[]): number[] {
+	return units.filter(unit => unit.kind === BLOCKS.kind).map(unit => unit.key)
+}
+
+// Takes the feature units among `units` back in `session` itself, each kind as its own undoable step; the number
+// taken back. Blocks are left to the caller (block keys are positions, which move as the document is edited).
+export function revertFeatureUnits(session: DocxEditorSession, units: readonly RevertibleUnit[]): number {
+	let count = 0
+
+	for (const kind of REVERTIBLE_UNITS.slice(1)) {
+		const keys = units.filter(unit => unit.kind === kind.kind).map(unit => unit.key)
+
+		if (keys.length > 0) count += kind.revert(session, keys)
+	}
+
+	return count
 }
 
 export interface UnsavableSearchOptions {
@@ -149,7 +166,7 @@ export async function findUnsavableBlocks(
 			.map((session, index) => {
 				const units = found.filter(candidate => candidate.session === index).map(candidate => candidate.unit)
 
-				return { session, positions: units.filter(unit => unit.kind === BLOCKS.kind).map(unit => unit.key), units }
+				return { session, units }
 			})
 			.filter(entry => entry.units.length > 0)
 	} catch (error) {

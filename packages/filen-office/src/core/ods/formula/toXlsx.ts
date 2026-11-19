@@ -1,6 +1,7 @@
 import { functionPrefix } from "../../sheet/functions/catalogue"
 import { SHEET_MAX_COLS, SHEET_MAX_FORMULA_TEXT, SHEET_MAX_ROWS } from "../../sheet/protocol"
 import { prefixParameters, sheetNameNeedsQuotes, wellFormedFormula } from "../../sheet/refs/formulaRefs"
+import { columnName } from "../../sheet/refs/cellRef"
 
 // OpenFormula (ODF 1.3 Part 4) as the store's formula grammar (SpreadsheetML file syntax without "="): references
 // [.A1] [Sheet.A1:.B2] become A1 Sheet!A1:B2, ";" separates arguments as ",", inline arrays {1;2|3;4} become
@@ -77,14 +78,6 @@ function inGrid(address: Address): boolean {
 	const row = address.row.replace("$", "")
 
 	return (column === "" || columnIndex(column) >= 0) && (row === "" || Number(row) <= SHEET_MAX_ROWS)
-}
-
-function columnText(column: number): string {
-	let text = ""
-
-	for (let n = column + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-	return text
 }
 
 export function sheetRef(name: string): string {
@@ -165,7 +158,7 @@ function shifted(address: Address, shift: ReferenceShift): Address | null {
 
 		if (index < 0 || index >= SHEET_MAX_COLS) return null
 
-		column = columnText(index)
+		column = columnName(index)
 	}
 
 	if (row !== "" && !row.startsWith("$")) {
@@ -563,8 +556,11 @@ export function translateExpression(source: string, shift?: ReferenceShift): Tra
 	return wellFormedFormula(text) ? { text } : { refused: "syntax" }
 }
 
-// A literal number, signed (§5.10).
-const NUMBER = /^\s*([+-]?)\s*((?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*$/
+// A literal number, signed (§5.10), in trimmed text. Each part matches one way: no run of digits or white space
+// backtracks more than linearly (the text may be a formula's length).
+const NUMBER = /^([+-]?)\s*((?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$/
+// A mode argument the engine reads without calculating: none, TRUE() or FALSE(), in trimmed text.
+const PLAIN_MODE = /^(?:(?:TRUE|FALSE)\(\s*\))?$/i
 
 // Source text a guard may read twice: one-cell references, numbers and arithmetic, no calls (a volatile one would
 // give another value) and no ranges (SIGN over one would make an array).
@@ -613,7 +609,7 @@ function signGuarded(call: SignedCall, source: string, end: number, out: readonl
 			.join("")
 			.trim()
 	)
-	const [number, significance, mode] = sources.map(text => NUMBER.exec(text))
+	const [number, significance, mode] = sources.map(text => NUMBER.exec(text.trim()))
 	const modeText = sources[2] ?? ""
 
 	// Left out, the significance takes the number's sign (LibreOffice reads an empty one so too); the engine reads an
@@ -628,7 +624,7 @@ function signGuarded(call: SignedCall, source: string, end: number, out: readonl
 	if (n === 0 || s === 0) return null
 	if (n !== null && s !== null && Math.sign(n) === Math.sign(s)) return null
 
-	const modeKnown = count === 2 || mode !== null || /^\s*(?:(?:TRUE|FALSE)\(\s*\))?\s*$/i.test(modeText)
+	const modeKnown = count === 2 || mode !== null || PLAIN_MODE.test(modeText.trim())
 
 	if (n !== null && s !== null && modeKnown) return { text: "#VALUE!" }
 
@@ -642,7 +638,7 @@ function signGuarded(call: SignedCall, source: string, end: number, out: readonl
 }
 
 // A cell range address of table:cell-range-address or table:target-range-address (§19.595, no brackets): one or
-// more ranges separated by spaces, as Excel references (`absolute`: every part $-anchored as the source wrote it).
+// more ranges separated by spaces, as Excel references.
 export function rangeAddress(address: string): Translated {
 	const translated = rangeAddresses(address)
 
@@ -651,24 +647,9 @@ export function rangeAddress(address: string): Translated {
 
 // The same, each range on its own (a sheet name may hold the "," that joins them).
 export function rangeAddresses(address: string): { readonly parts: readonly string[] } | { readonly refused: string } {
-	const parts: string[] = []
-	let quoted = false
-	let start = 0
-
-	for (let k = 0; k <= address.length; k++) {
-		const c = address[k]
-
-		if (c === "'") quoted = !quoted
-		else if (!quoted && (c === " " || c === undefined)) {
-			if (k > start) parts.push(address.slice(start, k))
-
-			start = k + 1
-		}
-	}
-
 	const out: string[] = []
 
-	for (const part of parts) {
+	for (const part of splitOutsideQuotes(address, " ")) {
 		const translated = reference(part)
 
 		if ("refused" in translated) return translated
@@ -677,6 +658,26 @@ export function rangeAddresses(address: string): { readonly parts: readonly stri
 	}
 
 	return { parts: out }
+}
+
+// Text split at each `separator` outside '…' quotes (a sheet name may hold it), empty parts left out.
+export function splitOutsideQuotes(text: string, separator: string): string[] {
+	const parts: string[] = []
+	let quoted = false
+	let start = 0
+
+	for (let k = 0; k <= text.length; k++) {
+		const c = text[k]
+
+		if (c === "'") quoted = !quoted
+		else if (!quoted && (c === separator || c === undefined)) {
+			if (k > start) parts.push(text.slice(start, k))
+
+			start = k + 1
+		}
+	}
+
+	return parts
 }
 
 // A reference's cells without its sheet ("'a, b'!$A$1:$B$2" as "$A$1:$B$2"): past the last "!" outside quotes.
@@ -694,4 +695,4 @@ export function withoutSheet(reference: string): string {
 	return reference.slice(bang + 1)
 }
 
-export { columnText }
+export { columnName as columnText }

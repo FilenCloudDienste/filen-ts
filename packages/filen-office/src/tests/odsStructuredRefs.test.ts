@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveStructured, type SheetTable } from "../core/ods/convert/structured"
+import { readSheetTable, resolveStructured, type SheetTable } from "../core/ods/convert/structured"
 import { rewriteStructured, specifierColumns } from "../core/xlsx/refs/index"
 
 // A structured reference's column is the table column of that name exactly, letter case aside (ECMA-376 Part 1
@@ -50,5 +50,51 @@ describe("a structured reference's column", () => {
 		expect(specifierColumns("[#Headers],[Total ]:[Funded]")).toEqual(["Total ", "Funded"])
 		expect(specifierColumns(" Funded ")).toEqual(["Funded"])
 		expect(rewriteStructured("SUM(Data[[Total ]])+SUM(Data[[Total]])", null, tables)).toBe("SUM(#REF!)+SUM(Data[[Total]])")
+	})
+})
+
+describe("a table part's column names", () => {
+	const part = (root: string, columns: readonly string[]): Uint8Array =>
+		new TextEncoder().encode(
+			`<?xml version="1.0" encoding="UTF-8"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ${root}>` +
+				`<autoFilter ref="A1:B4"/><tableColumns count="${String(columns.length)}">${columns.join("")}</tableColumns></table>`
+		)
+	const resolved = (bytes: Uint8Array, formula: string): string | null => {
+		const table = readSheetTable(bytes, "S")
+
+		return table === null ? null : resolveStructured(formula, new Map([[table.name.toUpperCase(), table]]), HERE)
+	}
+
+	it("undoes a name's _xHHHH_ escapes, as a header with a line break is stored", () => {
+		const bytes = part('id="1" name="Table1" displayName="Table1" ref="A1:B4"', [
+			'<tableColumn id="1" name="Item"/>',
+			'<tableColumn id="2" name="Net_x000a_price"/>'
+		])
+
+		expect(readSheetTable(bytes, "S")?.columns).toEqual(["Item", "Net\nprice"])
+		expect(resolved(bytes, "SUM(Table1[Net\nprice])")).toBe("SUM($B$2:$B$4)")
+	})
+
+	it("decodes character references in names", () => {
+		const bytes = part('id="1" name="Table1" displayName="Table1" ref="A1:B4"', [
+			'<tableColumn id="1" name="A&amp;B"/>',
+			'<tableColumn id="2" name="Net&#10;price"/>'
+		])
+
+		expect(resolved(bytes, "SUM(Table1[Net\nprice])")).toBe("SUM($B$2:$B$4)")
+		expect(resolved(bytes, "SUM(Table1[A&B])")).toBe("SUM($A$2:$A$4)")
+	})
+
+	it("reads single-quoted attributes", () => {
+		const bytes = part("id='1' name='Table1' displayName='Table1' ref='A1:B4'", [
+			"<tableColumn id='1' name='Item'/>",
+			"<tableColumn id='2' name='Price'/>"
+		])
+
+		expect(resolved(bytes, "SUM(Table1[Price])")).toBe("SUM($B$2:$B$4)")
+	})
+
+	it("is no table when the part does not read", () => {
+		expect(readSheetTable(new TextEncoder().encode("<table ref="), "S")).toBeNull()
 	})
 })

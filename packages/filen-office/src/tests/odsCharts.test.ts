@@ -1,10 +1,14 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { strFromU8, unzipSync } from "fflate"
-import { describe, expect, it } from "vitest"
-import { bytesSource } from "../core/opc/index"
+import { deflateSync, strFromU8, unzipSync } from "fflate"
+import { describe, expect, it, vi } from "vitest"
+import { OdfPackage } from "../core/odf/package"
+import { bytesSource, crc32, ZipArchive } from "../core/opc/index"
+import { LABEL_POSITIONS, LEGENDS, MAX_CHART_BYTES, ODF_LABEL_POSITIONS, ODF_LEGENDS, readOdsCharts } from "../core/ods/charts/read"
 import { odsChartsRefusal } from "../core/ods/charts/write"
 import { openOds } from "../core/ods/open"
+import { OdsIssues } from "../core/ods/issues"
+import { OdsReadError } from "../core/ods/read/errors"
 import { odsSource } from "../core/ods/source"
 import { odsWriter } from "../core/ods/write/writer"
 import { XLSX_FEATURES } from "../core/sheet/commands"
@@ -13,6 +17,7 @@ import { sheetRegistry } from "../core/sheet/registry"
 import { RenderStyleTable, SheetSession, sessionFeature } from "../core/sheet/session"
 import type { SheetDrawings } from "../core/xlsx/drawings/feature"
 import { XlsxDocument } from "../core/xlsx/edit/document"
+import { XmlEditor } from "../core/xml/index"
 import { CORPUS_DIR } from "./corpusDir"
 import { odsBytes, table } from "./odsFixtures"
 import { IMMEDIATE } from "./sheetSessionFixtures"
@@ -77,7 +82,7 @@ function workbook(object: string): Uint8Array {
 
 // A session whose writer asks the charts, after each edit, whether the file can hold it (what the session's own
 // edit check asks of them).
-async function open(bytes: Uint8Array): Promise<{ session: SheetSessionApi; document: XlsxDocument; sheet: number }> {
+async function open(bytes: Uint8Array, checked = true): Promise<{ session: SheetSessionApi; document: XlsxDocument; sheet: number }> {
 	const opened = await openOds(bytesSource(bytes.slice()))
 
 	if (!opened.ok) throw new Error(opened.message)
@@ -90,6 +95,8 @@ async function open(bytes: Uint8Array): Promise<{ session: SheetSessionApi; docu
 		writer: {
 			...writer,
 			check: candidate => {
+				if (!checked) return null
+
 				const why = odsChartsRefusal(candidate)
 
 				return why === null ? null : { reason: "chartUnsupported", detail: why }
@@ -283,6 +290,207 @@ describe("ODF charts in an ODS session", () => {
 		expect(content).toContain('svg:x="72pt"')
 		expect(content).toContain('svg:width="200pt"')
 		session.close()
+	})
+})
+
+describe("ODF chart edits proved once", () => {
+	const set = (sheet: number, row: number, input: string) =>
+		({ type: "cells.set", sheet, cells: { rows: Uint32Array.of(row), cols: Uint16Array.of(3), inputs: [input] } }) as const
+
+	// XmlEditor serialisations while `run` runs: one per chart object patched (and per table:shapes written).
+	async function serialized(run: () => Promise<unknown>): Promise<number> {
+		const serialize = vi.spyOn(XmlEditor.prototype, "serialize")
+
+		try {
+			await run()
+
+			return serialize.mock.calls.length
+		} finally {
+			serialize.mockRestore()
+		}
+	}
+
+	it("does not patch an edited chart again for a later cell edit, and saves what it proved", async () => {
+		const { session, sheet } = await open(workbook(chartObject()))
+
+		expect((await session.command({ type: "chart.edit", sheet, part: PART, edit: { kind: "title", text: "Fruit sold" } })).ok).toBe(
+			true
+		)
+		expect(await serialized(async () => expect((await session.command(set(sheet, 0, "x"))).ok).toBe(true))).toBe(0)
+		expect(await serialized(async () => expect((await session.command(set(sheet, 1, "y"))).ok).toBe(true))).toBe(0)
+
+		// A second edit of the chart is proved again, from its new bytes.
+		expect(
+			await serialized(async () =>
+				expect((await session.command({ type: "chart.edit", sheet, part: PART, edit: { kind: "legend", position: "b" } })).ok).toBe(
+					true
+				)
+			)
+		).toBeGreaterThan(0)
+
+		const object = entry(await saved(session), "Object 1/content.xml")
+
+		expect(object).toContain("<chart:title><text:p>Fruit sold</text:p></chart:title>")
+		expect(object).toContain('chart:legend-position="bottom"')
+		session.close()
+	})
+
+	it("proves a chart again once a rename rewrites its references", async () => {
+		const { session, sheet } = await open(workbook(chartObject()))
+
+		expect((await session.command({ type: "chart.edit", sheet, part: PART, edit: { kind: "title", text: "Fruit sold" } })).ok).toBe(
+			true
+		)
+		expect((await session.command({ type: "sheet.rename", sheet, name: "Fruit" })).ok).toBe(true)
+		expect((await session.command(set(sheet, 0, "x"))).ok).toBe(true)
+
+		const object = entry(await saved(session), "Object 1/content.xml")
+
+		expect(object).toContain("<chart:title><text:p>Fruit sold</text:p></chart:title>")
+		expect(object).toContain('chart:values-cell-range-address="Fruit.B2:Fruit.B4"')
+		session.close()
+	})
+
+	it("keeps refusing a chart it refused, and lets later edits through once the refused one is undone", async () => {
+		const { session, document, sheet } = await open(workbook(chartObject({ threeD: true })), false)
+
+		expect((await session.command({ type: "chart.edit", sheet, part: PART, edit: { kind: "title", text: "New" } })).ok).toBe(true)
+
+		const why = odsChartsRefusal(document)
+
+		expect(why).toContain("three-dimensional")
+		expect(odsChartsRefusal(document)).toBe(why)
+		expect((await session.command(set(sheet, 0, "x"))).ok).toBe(true)
+		expect(odsChartsRefusal(document)).toBe(why)
+		session.close()
+
+		const checked = await open(workbook(chartObject()))
+
+		expect((await checked.session.command({ type: "chart.edit", sheet, part: PART, edit: { kind: "title", text: "" } })).ok).toBe(false)
+		expect((await checked.session.command(set(checked.sheet, 0, "x"))).ok).toBe(true)
+		expect((await checked.session.command({ type: "chart.edit", sheet, part: PART, edit: { kind: "title", text: "Kept" } })).ok).toBe(
+			true
+		)
+		expect(entry(await saved(checked.session), "Object 1/content.xml")).toContain("<chart:title><text:p>Kept</text:p></chart:title>")
+		checked.session.close()
+	})
+})
+
+// Page-anchored frames, the k-th showing objects[k].
+function framesNaming(objects: readonly string[]): string {
+	return `<table:shapes>${objects
+		.map(
+			(object, k) =>
+				`<draw:frame draw:z-index="${String(k)}" draw:name="Chart ${String(k + 1)}" svg:width="10cm" svg:height="6cm" svg:x="1cm" svg:y="2cm">` +
+				`<draw:object xlink:href="./${object}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/></draw:frame>`
+		)
+		.join("")}</table:shapes>`
+}
+
+// A workbook whose frames show `frames` (object names), holding `objects` (each one's content.xml, compressed once).
+function chartsWorkbook(frames: readonly string[], objects: readonly string[], data: Uint8Array): Uint8Array {
+	const compressed = deflateSync(data)
+	const crc = crc32(data)
+
+	return odsBytes({
+		body: table("Data", ROWS, `${framesNaming(frames)}<table:table-column table:number-columns-repeated="2"/>`),
+		extra: objects.map(object => ({ name: `${object}/content.xml`, data, compressed, crc })),
+		manifestEntries: objects
+			.map(
+				object =>
+					`<manifest:file-entry manifest:full-path="${object}/" manifest:media-type="application/vnd.oasis.opendocument.chart"/>`
+			)
+			.join("")
+	})
+}
+
+// Names of the object content.xml entries read while `run` runs.
+async function objectReads(run: () => Promise<unknown>): Promise<string[]> {
+	const read = vi.spyOn(ZipArchive.prototype, "read")
+	const names: string[] = []
+
+	try {
+		await run()
+
+		for (const [entry] of read.mock.calls)
+			if (entry.name.endsWith("/content.xml") && entry.name !== "content.xml") names.push(entry.name)
+	} finally {
+		read.mockRestore()
+	}
+
+	return names
+}
+
+describe("ODF chart objects as read", () => {
+	it("reads, parses and holds an object once however many frames show it", async () => {
+		const bytes = chartsWorkbook(["Object 1", "Object 1", "Object 1"], ["Object 1"], new TextEncoder().encode(chartObject()))
+		let charts: readonly { readonly content: Uint8Array }[] = []
+		const reads = await objectReads(async () => {
+			const opened = await openOds(bytesSource(bytes))
+
+			if (!opened.ok) throw new Error(opened.message)
+
+			charts = odsSource(opened.workbook)?.charts ?? []
+		})
+
+		expect(reads).toEqual(["Object 1/content.xml"])
+		expect(charts.length).toBe(3)
+		expect(charts.every(chart => chart.content === charts[0]?.content)).toBe(true)
+	})
+
+	it("stops reading objects once their content passes the workbook's budget", { timeout: 60_000 }, async () => {
+		// Each object under the per-object cap, four of them within the budget, the fifth past it.
+		const size = Math.floor(MAX_CHART_BYTES / 4.5)
+		const head = chartObject()
+		const data = new TextEncoder().encode(`${head}<!--${" ".repeat(size - head.length - 7)}-->`)
+		const objects = ["Object 1", "Object 2", "Object 3", "Object 4", "Object 5"]
+		const bytes = chartsWorkbook(objects, objects, data)
+		let issues: readonly { readonly kind: string; readonly detail: string | undefined }[] = []
+		let charts = 0
+		const reads = await objectReads(async () => {
+			const opened = await openOds(bytesSource(bytes))
+
+			if (!opened.ok) throw new Error(opened.message)
+
+			issues = opened.issues
+			charts = odsSource(opened.workbook)?.charts.length ?? 0
+		})
+
+		expect(reads).toEqual(objects.slice(0, 4).map(object => `${object}/content.xml`))
+		expect(charts).toBe(4)
+		expect(issues).toContainEqual(expect.objectContaining({ kind: "drawing", detail: "charts past the limit" }))
+	})
+
+	it("stops when aborted", async () => {
+		const opened = await OdfPackage.open(
+			bytesSource(chartsWorkbook(["Object 1"], ["Object 1"], new TextEncoder().encode(chartObject())))
+		)
+
+		if (!opened.ok) throw new Error(opened.message)
+
+		const prefixes = new Map([
+			["draw", "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"],
+			["svg", "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"],
+			["table", "urn:oasis:names:tc:opendocument:xmlns:table:1.0"],
+			["xlink", "http://www.w3.org/1999/xlink"]
+		])
+		const reading = readOdsCharts({
+			odf: opened.package,
+			prefixes,
+			tables: [{ index: 0, name: "Data", shapes: new TextEncoder().encode(framesNaming(["Object 1"])), frames: [] }],
+			issues: new OdsIssues(),
+			signal: { aborted: true }
+		})
+
+		await expect(reading).rejects.toBeInstanceOf(OdsReadError)
+		await expect(reading).rejects.toMatchObject({ code: "aborted" })
+	})
+
+	it("writes back every label and legend position it reads", () => {
+		for (const [odf, drawing] of LABEL_POSITIONS) expect(ODF_LABEL_POSITIONS.get(drawing)).toBe(odf)
+		for (const [odf, drawing] of LEGENDS) expect(ODF_LEGENDS.get(drawing)).toBe(odf)
+		expect(ODF_LABEL_POSITIONS.size).toBe(LABEL_POSITIONS.size)
+		expect(ODF_LEGENDS.size).toBe(LEGENDS.size)
 	})
 })
 

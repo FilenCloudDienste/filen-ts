@@ -1,3 +1,5 @@
+import { isNameChar, skipQuoted } from "../../sheet/refs/scan"
+
 // Structured references (MS-XLSX §2.2.2 Formulas, structure-reference): Table1[Col], Table1[[#Headers],[A]:[C]],
 // Table1[@Col], and inside a table's own formulas [@Col] with no table name. They name a table and its columns, so
 // a structure edit changes one only when the table, or a column it names, is deleted: it then becomes #REF!.
@@ -8,35 +10,6 @@ const QUOTE = 34
 const APOSTROPHE = 39
 const BRACKET_OPEN = 91
 const BRACKET_CLOSE = 93
-
-function isWordChar(code: number): boolean {
-	return (
-		(code >= 65 && code <= 90) ||
-		(code >= 97 && code <= 122) ||
-		(code >= 48 && code <= 57) ||
-		code === 95 ||
-		code === 46 ||
-		code === 92 ||
-		code === 63 ||
-		code >= 128
-	)
-}
-
-function skipQuoted(text: string, start: number, quote: number): number {
-	let index = start + 1
-
-	while (index < text.length) {
-		if (text.charCodeAt(index) === quote) {
-			if (text.charCodeAt(index + 1) !== quote) return index + 1
-
-			index++
-		}
-
-		index++
-	}
-
-	return text.length
-}
 
 // Past a bracketed run (nested; "'" escapes the next character), or -1 when it never closes.
 function bracketEnd(text: string, start: number): number {
@@ -135,7 +108,7 @@ export function rewriteStructured(text: string, context: string | null, tables: 
 		if (code === 35) {
 			// An error literal (#REF!, #N/A): its letters are not a name.
 			index++
-			while (index < text.length && (isWordChar(text.charCodeAt(index)) || text.charCodeAt(index) === 47)) index++
+			while (index < text.length && (isNameChar(text.charCodeAt(index)) || text.charCodeAt(index) === 47)) index++
 
 			continue
 		}
@@ -143,10 +116,10 @@ export function rewriteStructured(text: string, context: string | null, tables: 
 		const start = index
 		let table: string | null = null
 
-		if (isWordChar(code) && (code < 48 || code > 57)) {
+		if (isNameChar(code) && (code < 48 || code > 57)) {
 			let end = index
 
-			while (end < text.length && isWordChar(text.charCodeAt(end))) end++
+			while (end < text.length && isNameChar(text.charCodeAt(end))) end++
 
 			if (text.charCodeAt(end) !== BRACKET_OPEN) {
 				index = end
@@ -171,7 +144,7 @@ export function rewriteStructured(text: string, context: string | null, tables: 
 		// [1]Sheet1!A1 is a reference into another workbook, not a table.
 		let after = end
 
-		while (after < text.length && isWordChar(text.charCodeAt(after))) after++
+		while (after < text.length && isNameChar(text.charCodeAt(after))) after++
 
 		const external = text.charCodeAt(after) === 33
 
@@ -201,7 +174,7 @@ export function renameTables(text: string, names: ReadonlyMap<string, string>): 
 			continue
 		}
 
-		if (!isWordChar(code) || (code >= 48 && code <= 57) || code === 35) {
+		if (!isNameChar(code) || (code >= 48 && code <= 57) || code === 35) {
 			index++
 
 			continue
@@ -209,7 +182,7 @@ export function renameTables(text: string, names: ReadonlyMap<string, string>): 
 
 		let end = index
 
-		while (end < text.length && isWordChar(text.charCodeAt(end))) end++
+		while (end < text.length && isNameChar(text.charCodeAt(end))) end++
 
 		const renamed = text.charCodeAt(end) === BRACKET_OPEN ? names.get(text.slice(index, end).toUpperCase()) : undefined
 

@@ -1,5 +1,6 @@
 import { functionPrefix, functionSupport, functionVolatility, sheetFunction } from "../functions/catalogue"
 import { columnIndex, columnName } from "./cellRef"
+import { CELL, COLUMN, ROW, isWordChar, readWord, skipQuoted } from "./scan"
 import type { AxisEdit } from "../model/edits"
 import { MAX_COLUMNS, MAX_ROWS } from "../model/model"
 import {
@@ -60,49 +61,6 @@ const HASH = 35
 const BRACKET_OPEN = 91
 const BRACKET_CLOSE = 93
 
-function isWordChar(code: number): boolean {
-	return (
-		(code >= 65 && code <= 90) ||
-		(code >= 97 && code <= 122) ||
-		(code >= 48 && code <= 57) ||
-		code === 95 || // _
-		code === 46 || // .
-		code === 36 || // $
-		code === 92 || // \
-		code === 63 || // ?
-		code >= 128
-	)
-}
-
-function readWord(text: string, start: number): number {
-	let end = start
-
-	while (end < text.length && isWordChar(text.charCodeAt(end))) end++
-
-	return end
-}
-
-// Past a quoted run ("…" or '…', the quote doubled inside), or the end of the text when it never closes.
-function skipQuoted(text: string, start: number, quote: number): number {
-	let index = start + 1
-
-	while (index < text.length) {
-		if (text.charCodeAt(index) === quote) {
-			if (text.charCodeAt(index + 1) === quote) {
-				index += 2
-
-				continue
-			}
-
-			return index + 1
-		}
-
-		index++
-	}
-
-	return text.length
-}
-
 // Past a bracketed run, nested brackets included; inside a structured reference "'" escapes the next
 // character.
 function skipBracket(text: string, start: number): number {
@@ -151,10 +109,6 @@ function skipError(text: string, start: number): number {
 
 	return last === 33 || last === 63 ? index + 1 : index
 }
-
-const CELL = /^(\$?)([A-Za-z]{1,3})(\$?)([0-9]{1,7})$/
-const COLUMN = /^(\$?)([A-Za-z]{1,3})$/
-const ROW = /^(\$?)([0-9]{1,7})$/
 
 interface Point {
 	kind: "cell" | "cols" | "rows"
@@ -260,8 +214,20 @@ function parseArea(text: string, start: number): { area: RefArea; end: number } 
 // The functions taking a LAMBDA, where a function's name alone stands for one (BYROW(A1:B3,SUM)), which a file
 // stores as _xleta.SUM.
 const ETA_PREFIX = "_xleta."
-const HELPERS = new Set(["MAP", "REDUCE", "SCAN", "BYROW", "BYCOL", "MAKEARRAY", "GROUPBY", "PIVOTBY"])
-const HELPER_CALL = /\b(?:_xlfn\.)?(?:MAP|REDUCE|SCAN|BYROW|BYCOL|MAKEARRAY|GROUPBY|PIVOTBY)\s*\(/i
+export const LAMBDA_HELPERS: readonly string[] = ["MAP", "REDUCE", "SCAN", "BYROW", "BYCOL", "MAKEARRAY", "GROUPBY", "PIVOTBY"]
+const HELPERS: ReadonlySet<string> = new Set(LAMBDA_HELPERS)
+const HELPER_CALL = callPattern(LAMBDA_HELPERS)
+
+// Function names as one alternative of a pattern, the "." in a name (MODE.MULT) matched as itself.
+function namesPattern(names: Iterable<string>): string {
+	return [...names].map(name => name.replaceAll(".", "\\.")).join("|")
+}
+
+// A call to one of `names`, in any case, with or without the prefixes a file stores (_xlfn._xlws.FILTER(), and not the end
+// of a longer name (MyFilter()).
+function callPattern(names: Iterable<string>): RegExp {
+	return new RegExp(`(?<![\\w.])(?:_xlfn\\.)?(?:_xlws\\.)?(?:${namesPattern(names)})\\(`, "i")
+}
 
 // A function's name typed whole as an argument of a LAMBDA helper, as a file stores it: _xleta.SUM.
 function storedEta(formula: string): string {
@@ -316,16 +282,18 @@ function storedEta(formula: string): string {
 
 const SINGLE_CALL = "_xlfn.SINGLE("
 
-// The end of the operand starting at `start` (a reference, a name, or a call with its arguments), or `start` for none.
+// The end of the operand starting at `start`, or `start` for none: a reference, a name (with the workbook and sheet
+// before it, Sheet1!MyName, and a table's brackets after it, Table1[Amount]) or a call with its arguments.
 function operandEnd(formula: string, start: number): number {
 	const first = formulaParts(formula.slice(start))[0]
 
 	if (first !== undefined && typeof first !== "string" && first.ref.area !== null)
 		return start + first.prefix.length + first.areaText.length
 
-	const end = readWord(formula, start)
+	const end = nameEnd(formula, start)
 
-	if (end > start && formula.charCodeAt(end) === 40) return callArguments(formula, end)?.end ?? end
+	if (end < 0) return start
+	if (formula.charCodeAt(end) === 40) return callArguments(formula, end)?.end ?? end
 
 	return end
 }
@@ -351,6 +319,16 @@ function storedIntersections(formula: string): string {
 				text += formula.slice(index, end)
 				index = end
 			}
+
+			continue
+		}
+
+		// Inside a structured reference "@" is its own ([@Amount], Table1[@Amount]).
+		if (code === BRACKET_OPEN) {
+			const end = skipBracket(formula, index)
+
+			text += formula.slice(index, end)
+			index = end
 
 			continue
 		}
@@ -392,6 +370,15 @@ function shownIntersections(formula: string): string {
 			continue
 		}
 
+		if (code === BRACKET_OPEN) {
+			const end = skipBracket(formula, index)
+
+			text += formula.slice(index, end)
+			index = end
+
+			continue
+		}
+
 		if (lower.startsWith(call, index) && (index === 0 || !isWordChar(formula.charCodeAt(index - 1)))) {
 			const open = index + call.length - 1
 			const args = callArguments(formula, open)
@@ -421,74 +408,150 @@ function oneCell(part: RefPart): boolean {
 	return !part.ref.external && part.ref.lastSheet === null && area !== null && area.kind === "cell" && !area.range
 }
 
-// A spill range reference as typed (A1#, Sheet2!B3#) as a file stores it: _xlfn.ANCHORARRAY(A1) ([MS-XLSX] 2.2.2).
+// Whether a word may name a spill range by a defined name (MyName#): a name's first character is a letter, "_" or "\\".
+function spillName(word: string): boolean {
+	const code = word.charCodeAt(0)
+
+	return word !== "" && (code < 48 || code > 57) && code !== 46 && code !== 36 && code !== 63
+}
+
+// Whether a reference's sheet prefix is followed by a name a spill range reference may take (Sheet2!MyName#).
+function scopedName(part: RefPart): boolean {
+	return part.ref.area === null && !part.ref.external && part.ref.lastSheet === null
+}
+
+// What follows "#" after a reference or a name when it is a spill range operator rather than an error literal (#REF!).
+function spillsAt(text: string, at: number): boolean {
+	return text.charCodeAt(at) === HASH && !/^#[A-Z/0]/i.test(text.slice(at, at + 2))
+}
+
+// The names before "#" in a run of formula text outside any reference (SUM(MyName#)), as a file stores them:
+// _xlfn.ANCHORARRAY(MyName).
+function storedNameSpills(text: string): string {
+	let out = ""
+	let index = 0
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+		let end = index + 1
+
+		if (code === QUOTE || code === APOSTROPHE) end = skipQuoted(text, index, code)
+		else if (code === BRACKET_OPEN) end = skipBracket(text, index)
+		else if (code === HASH) end = skipError(text, index)
+		else if (isWordChar(code)) {
+			end = readWord(text, index)
+
+			const word = text.slice(index, end)
+
+			if (spillName(word) && spillsAt(text, end)) {
+				out += `${ANCHOR_CALL}${word})`
+				index = end + 1
+
+				continue
+			}
+		}
+
+		out += text.slice(index, end)
+		index = end
+	}
+
+	return out
+}
+
+// A spill range reference as typed (A1#, Sheet2!B3#, MyName#, Sheet2!MyName#) as a file stores it:
+// _xlfn.ANCHORARRAY(A1) ([MS-XLSX] 2.2.2).
 function storedSpillReferences(formula: string): string {
 	const parts = formulaParts(formula)
 	let text = ""
 
-	parts.forEach((part, index) => {
+	for (let index = 0; index < parts.length; index++) {
+		const part = parts[index]
+
+		if (part === undefined) continue
+
 		if (typeof part === "string") {
-			const before = parts[index - 1]
+			text += storedNameSpills(part)
 
-			text +=
-				before !== undefined && typeof before !== "string" && oneCell(before) && part.startsWith("#") ? `)${part.slice(1)}` : part
-
-			return
+			continue
 		}
 
 		const after = parts[index + 1]
-		const spill = oneCell(part) && typeof after === "string" && after.startsWith("#") && !/^#[A-Z/0]/i.test(after)
+		const written = `${part.prefix}${part.areaText}`
 
-		text += spill ? `${ANCHOR_CALL}${part.prefix}${part.areaText}` : `${part.prefix}${part.areaText}`
-	})
+		if (typeof after !== "string") {
+			text += written
+
+			continue
+		}
+
+		if (oneCell(part) && spillsAt(after, 0)) {
+			text += `${ANCHOR_CALL}${written})${storedNameSpills(after.slice(1))}`
+			index++
+
+			continue
+		}
+
+		// After a sheet prefix the name is the reference's own: wrapped with it, never alone.
+		const nameStop = part.ref.area === null ? readWord(after, 0) : 0
+		const name = after.slice(0, nameStop)
+
+		text +=
+			scopedName(part) && spillName(name) && spillsAt(after, nameStop)
+				? `${ANCHOR_CALL}${written}${name})${storedNameSpills(after.slice(nameStop + 1))}`
+				: `${written}${name}${storedNameSpills(after.slice(nameStop))}`
+		index++
+	}
 
 	return text
 }
 
-// _xlfn.ANCHORARRAY(A1) as it is typed and shown: A1#.
+// Whether the text is what a spill range reference stores in ANCHORARRAY: one cell of this workbook, or a defined name
+// with or without its sheet. The exact inverse of storedSpillReferences.
+function spillOperand(text: string): boolean {
+	const parts = formulaParts(text)
+	const [first, second] = parts
+
+	if (first === undefined) return false
+	if (typeof first === "string") return parts.length === 1 && readWord(first, 0) === first.length && spillName(first)
+	if (parts.length === 1) return oneCell(first) && `${first.prefix}${first.areaText}` === text
+
+	return (
+		parts.length === 2 && typeof second === "string" && scopedName(first) && readWord(second, 0) === second.length && spillName(second)
+	)
+}
+
+// _xlfn.ANCHORARRAY(A1) as it is typed and shown: A1#. A call of anything else is left as it is.
 function shownSpillReferences(formula: string): string {
-	const parts = formulaParts(formula)
+	const call = ANCHOR_CALL.slice(0, -1).toLowerCase()
 	let text = ""
+	let index = 0
 
-	parts.forEach((part, index) => {
-		if (typeof part !== "string") {
-			text += `${part.prefix}${part.areaText}`
+	while (index < formula.length) {
+		const code = formula.charCodeAt(index)
+		let end = index + 1
 
-			return
+		if (code === QUOTE || code === APOSTROPHE) end = skipQuoted(formula, index, code)
+		else if (code === BRACKET_OPEN) end = skipBracket(formula, index)
+		else if (isWordChar(code)) {
+			end = readWord(formula, index)
+
+			const args =
+				formula.charCodeAt(end) === 40 && formula.slice(index, end).toLowerCase() === call ? callArguments(formula, end) : null
+			const inner = args?.args.length === 1 ? (args.args[0] ?? "") : null
+
+			if (args !== null && inner !== null && spillOperand(inner)) {
+				text += `${inner}#`
+				index = args.end
+
+				continue
+			}
 		}
 
-		const before = parts[index - 1]
-		const after = parts[index + 1]
-		let piece = part
-
-		if (before !== undefined && typeof before !== "string" && oneCell(before) && piece.startsWith(")") && anchored(parts, index - 1))
-			piece = `#${piece.slice(1)}`
-		if (
-			after !== undefined &&
-			typeof after !== "string" &&
-			oneCell(after) &&
-			piece.toLowerCase().endsWith(ANCHOR_CALL.toLowerCase()) &&
-			closes(parts, index + 1)
-		)
-			piece = piece.slice(0, -ANCHOR_CALL.length)
-
-		text += piece
-	})
+		text += formula.slice(index, end)
+		index = end
+	}
 
 	return text
-}
-
-// Whether the reference at `index` is the whole argument of an ANCHORARRAY call before it, and so is closed after it.
-function anchored(parts: readonly Part[], index: number): boolean {
-	const before = parts[index - 1]
-
-	return typeof before === "string" && before.toLowerCase().endsWith(ANCHOR_CALL.toLowerCase())
-}
-
-function closes(parts: readonly Part[], index: number): boolean {
-	const after = parts[index + 1]
-
-	return typeof after === "string" && after.startsWith(")")
 }
 
 // The one A1 reference a text is and nothing else ("Sheet 2"!B3, A:A, $A$1:B9), as INDIRECT reads one; null for any
@@ -1422,12 +1485,12 @@ export function prefixParameters(formula: string): string {
 // A typed formula as a file stores it: newer functions with the prefix Excel requires, and the names LET
 // and LAMBDA bind with theirs.
 export function storedFormula(formula: string): string {
-	const operators = formula.includes("@") ? storedIntersections(formula) : formula
-
-	const spills = operators.includes("#") ? storedSpillReferences(operators) : operators
+	// Spill references first, so an operand of "@" takes its "#" (@A1# is _xlfn.SINGLE(_xlfn.ANCHORARRAY(A1))).
+	const spills = formula.includes("#") ? storedSpillReferences(formula) : formula
+	const operators = spills.includes("@") ? storedIntersections(spills) : spills
 
 	// After the LET and LAMBDA names are marked: a bound name in a helper's argument is no function's.
-	const bound = prefixParameters(spills)
+	const bound = prefixParameters(operators)
 
 	return mapWords(HELPER_CALL.test(bound) ? storedEta(bound) : bound, (name, called) => {
 		if (!called || name.startsWith("_")) return name
@@ -1442,10 +1505,12 @@ export function storedFormula(formula: string): string {
 // A prefix on a function it does not know stays, so nothing is lost by editing.
 export function shownFormula(formula: string): string {
 	if (!formula.includes("_xl")) return formula
-	if (/_xlfn\.SINGLE\(/i.test(formula)) return shownFormula(shownIntersections(formula))
-	if (/_xlfn\.ANCHORARRAY\(/i.test(formula)) return shownFormula(shownSpillReferences(formula))
 
-	return mapWords(formula, (name, called) => {
+	// One pass each: what neither can spell as "@" or "#" is left as a call (SINGLE(A1+B1), _xlfn.ANCHORARRAY(A1:B2)).
+	const operators = /_xlfn\.SINGLE\(/i.test(formula) ? shownIntersections(formula) : formula
+	const spills = /_xlfn\.ANCHORARRAY\(/i.test(operators) ? shownSpillReferences(operators) : operators
+
+	return mapWords(spills, (name, called) => {
 		if (!called && name.length > ETA_PREFIX.length && name.slice(0, ETA_PREFIX.length).toLowerCase() === ETA_PREFIX)
 			return name.slice(ETA_PREFIX.length)
 
@@ -2070,13 +2135,21 @@ export const ARRAY_RESULTS: ReadonlySet<string> = new Set([
 ])
 
 // A call to any of ARRAY_RESULTS, or to one of them but XLOOKUP, in any case: one test where each name would be one.
-const CALLS_ARRAY_RESULT = new RegExp(`(?:${[...ARRAY_RESULTS].map(name => name.replaceAll(".", "\\.")).join("|")})\\(`, "i")
-const BUILDS_ARRAY = new RegExp(`(?:${[...ARRAY_RESULTS].filter(name => name !== "XLOOKUP").join("|")})\\(`, "i")
-const CALLS_SIZED = /(?:SEQUENCE|RANDARRAY|MUNIT)\(/i
+const CALLS_ARRAY_RESULT = callPattern(ARRAY_RESULTS)
+const BUILDS_ARRAY = callPattern([...ARRAY_RESULTS].filter(name => name !== "XLOOKUP"))
+// The array-returning functions whose size their arguments give (SEQUENCE(1000,1000)).
+export const SIZED_FUNCTIONS: readonly string[] = ["SEQUENCE", "RANDARRAY", "MUNIT"]
+const CALLS_SIZED = callPattern(SIZED_FUNCTIONS)
+const SIZED_CALL = new RegExp(`(${namesPattern(SIZED_FUNCTIONS)})\\(\\s*(\\d+)\\s*(?:,\\s*(\\d+))?`, "g")
+const SIZED = new RegExp(`^(?:${namesPattern(SIZED_FUNCTIONS)})$`, "i")
 
 // The most cells an array a formula builds may hold: the engine keeps every value of it, a few hundred
 // bytes each.
-const MAX_ARRAY_CELLS = 200_000
+export const MAX_ARRAY_CELLS = 200_000
+
+// The most cells one range of a formula may cover: the engine reads a block's every cell, past the cells its sheet
+// holds too (a whole-column VLOOKUP over a sheet with a cell in its last row is twelve million).
+export const MAX_RANGE_CELLS = 2_097_152
 
 // Whether the formula calls an array-returning function over more cells than MAX_ARRAY_CELLS, going by
 // its literal sizes (SEQUENCE(1000,1000)) and the largest range it names.
@@ -2087,7 +2160,7 @@ function arrayTooLarge(formula: string): boolean {
 
 	const upper = formula.toUpperCase()
 
-	for (const [, name, rows = "1", cols = "1"] of upper.matchAll(/(SEQUENCE|RANDARRAY|MUNIT)\(\s*(\d+)\s*(?:,\s*(\d+))?/g)) {
+	for (const [, name, rows = "1", cols = "1"] of upper.matchAll(SIZED_CALL)) {
 		const size = name === "MUNIT" ? Number(rows) ** 2 : Number(rows) * Number(cols)
 
 		if (size > MAX_ARRAY_CELLS) return true
@@ -2104,8 +2177,6 @@ function arrayTooLarge(formula: string): boolean {
 	})
 }
 
-const SIZED = /^(SEQUENCE|RANDARRAY|MUNIT)$/i
-
 // The end of the call whose "(" is at `open`, and its top-level argument texts.
 function callArguments(text: string, open: number): { end: number; args: string[] } | null {
 	const args: string[] = []
@@ -2118,6 +2189,13 @@ function callArguments(text: string, open: number): { end: number; args: string[
 
 		if (code === QUOTE || code === APOSTROPHE) {
 			index = skipQuoted(text, index, code)
+
+			continue
+		}
+
+		// A structured reference's "," and parentheses are its own (Table1[[#This Row],[Amount]]).
+		if (code === BRACKET_OPEN) {
+			index = skipBracket(text, index)
 
 			continue
 		}
@@ -2239,7 +2317,9 @@ export function holdsArrayConstant(formula: string): boolean {
 // A cell's formula as HyperFormula takes it (with its "="), or null when it cannot be given to it: nested
 // past its parser's depth, or building an array too large to hold. Evaluated as Excel reads an ordinary
 // formula: an array result gives its first value (INDEX), and nothing spills.
-export function engineCellFormula(formula: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string | null {
+export function engineCellFormula(written: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string | null {
+	const formula = sameSheetEnds(rangeSpacing(written))
+
 	if (!engineCanParse(formula) || arrayTooLarge(formula)) {
 		return null
 	}
@@ -2255,7 +2335,9 @@ export function engineCellFormula(formula: string, aliases?: ReadonlyMap<string,
 }
 
 // A formula's text evaluated as an array, without spilling (ARRAYFORMULA): what FormulaEngine.givesArray reads.
-export function engineArrayFormula(formula: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string | null {
+export function engineArrayFormula(written: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string | null {
+	const formula = sameSheetEnds(rangeSpacing(written))
+
 	if (!engineCanParse(formula) || arrayTooLarge(formula)) return null
 
 	const read = engineFormula(RESIZED_CALL.test(formula) ? resizedSumRanges(formula) : formula, aliases, lambdas)
@@ -2265,7 +2347,9 @@ export function engineArrayFormula(formula: string, aliases?: ReadonlyMap<string
 
 // A dynamic-array formula's text as the engine takes it (with its "="): evaluated as an array and spilled
 // (SPILL_FUNCTION), or null when it cannot be given to it.
-export function engineSpillFormula(formula: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string | null {
+export function engineSpillFormula(written: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string | null {
+	const formula = sameSheetEnds(rangeSpacing(written))
+
 	if (!engineCanParse(formula) || arrayTooLarge(formula)) return null
 
 	const read = engineFormula(RESIZED_CALL.test(formula) ? resizedSumRanges(formula) : formula, aliases, lambdas)
@@ -2280,7 +2364,7 @@ const OPERATORS = new Set(["+", "-", "*", "/", "^", "&", "=", "<", ">", "%"])
 // range alone, or takes a range into an operation (A1:A9*2). A range given to a function's argument is read by the
 // function (SUM) and gives no array.
 export function mayReturnArray(formula: string): boolean {
-	if (CALLS_ARRAY_RESULT.test(formula) || rangeAlone(formula)) return true
+	if (matchesOutsideStrings(formula, CALLS_ARRAY_RESULT) || rangeAlone(formula)) return true
 	if (!formula.includes(":")) return false
 
 	const parts = intersected(formulaParts(formula))
@@ -2299,6 +2383,23 @@ export function mayReturnArray(formula: string): boolean {
 
 		return (left !== undefined && OPERATORS.has(left)) || (right !== undefined && OPERATORS.has(right))
 	})
+}
+
+// Whether `pattern` (not global) matches in a run of `formula` outside its strings.
+function matchesOutsideStrings(formula: string, pattern: RegExp): boolean {
+	if (!pattern.test(formula)) return false
+
+	let from = 0
+	let quote = formula.indexOf('"')
+
+	while (quote >= 0) {
+		if (pattern.test(formula.slice(from, quote))) return true
+
+		from = skipQuoted(formula, quote, QUOTE)
+		quote = formula.indexOf('"', from)
+	}
+
+	return pattern.test(formula.slice(from))
 }
 
 // Whether the formula is one reference to more than one cell (an intersection of two too), and nothing else.
@@ -2320,8 +2421,11 @@ function rangeAlone(formula: string): boolean {
 	return ref !== null && !ref.ref.external && area !== null && area !== undefined && (area.range || area.kind !== "cell")
 }
 
-const RESIZED_CALL = /(?:SUMIF|AVERAGEIF|LOOKUP)\(/i
-const RESIZED = /^(?:_xlfn\.)?(?:SUMIF|AVERAGEIF)$/i
+// The functions whose sum_range or average_range Excel reads at the size of their range, and LOOKUP, whose result_vector
+// it reads at the size of its lookup_vector.
+export const RESIZED_FUNCTIONS: readonly string[] = ["SUMIF", "AVERAGEIF"]
+const RESIZED_CALL = callPattern([...RESIZED_FUNCTIONS, "LOOKUP"])
+const RESIZED = new RegExp(`^(?:_xlfn\\.)?(?:${namesPattern(RESIZED_FUNCTIONS)})$`, "i")
 
 // The reference an argument is, alone, or null.
 function soleReference(text: string): RefPart | null {
@@ -2751,6 +2855,54 @@ interface Operand {
 	readonly args: string
 	// An OFFSET the engine resolves as it parses to one cell, which it reads at an end of a range too.
 	readonly staticCell: boolean
+	// The cells such an OFFSET gives, or a range written plain with one at an end spans; null otherwise.
+	readonly block: Block | null
+}
+
+// A block of cells, 0-based and inclusive (the start may lie past the end: OFFSET(A5,0,0):A1).
+interface Block {
+	readonly startRow: number
+	readonly startCol: number
+	readonly endRow: number
+	readonly endCol: number
+}
+
+// The cell OFFSET(base, rows, cols) gives, with the literal arguments staticOffset takes.
+function offsetCell(args: readonly string[]): Block | null {
+	const area = singleReference((args[0] ?? "").trim())?.area
+
+	if (area === null || area === undefined) return null
+
+	const row = area.startRow + Number((args[1] ?? "").trim())
+	const col = area.startCol + Number((args[2] ?? "").trim())
+
+	return { startRow: row, startCol: col, endRow: row, endCol: col }
+}
+
+// The block an end of a range spans: what a static OFFSET gives, or a literal reference's cells.
+function endBlock(operand: Operand): Block | null {
+	if (operand.block !== null) return operand.block
+	if (operand.call !== null) return null
+
+	const ref = singleReference(operand.text.trim())
+
+	return ref?.area?.kind === "cell" && !ref.external && ref.lastSheet === null ? ref.area : null
+}
+
+// The block from one end of a range to the other: null where it is past MAX_RANGE_CELLS (the engine reads a block it
+// resolves every address of) or an end is not known.
+function boundedSpan(left: Operand, right: Operand): Block | null {
+	const a = endBlock(left)
+	const b = endBlock(right)
+
+	if (a === null || b === null) return null
+
+	const startRow = Math.min(a.startRow, a.endRow, b.startRow, b.endRow)
+	const endRow = Math.max(a.startRow, a.endRow, b.startRow, b.endRow)
+	const startCol = Math.min(a.startCol, a.endCol, b.startCol, b.endCol)
+	const endCol = Math.max(a.startCol, a.endCol, b.startCol, b.endCol)
+
+	return (endRow - startRow + 1) * (endCol - startCol + 1) > MAX_RANGE_CELLS ? null : { startRow, startCol, endRow, endCol }
 }
 
 // Whether a text is one cell's reference (Sheet1!$A$1) and nothing else.
@@ -2773,7 +2925,9 @@ function staticOffset(args: readonly string[]): boolean {
 		/^[+-]?\d+$/.test(rows ?? "") &&
 		/^[+-]?\d+$/.test(cols ?? "") &&
 		(height === undefined || (/^\d+$/.test(height) && Number(height) > 0)) &&
-		(width === undefined || (/^\d+$/.test(width) && Number(width) > 0))
+		(width === undefined || (/^\d+$/.test(width) && Number(width) > 0)) &&
+		// The engine reads a block it resolves every address of: a larger one goes to OFFSET_FUNCTION, which refuses it.
+		Number(height ?? 1) * Number(width ?? 1) <= MAX_RANGE_CELLS
 	)
 }
 
@@ -2802,18 +2956,21 @@ function dynamicOperand(text: string, start: number): Operand | null {
 				const offset = name === "OFFSET"
 				const fixed = offset && staticOffset(call.args)
 
+				const staticCell = fixed && call.args.length <= 3
+
 				return {
 					text: `${offset && !fixed ? OFFSET_FUNCTION : text.slice(start, end)}(${args})`,
 					end: call.end,
 					call: name,
 					args,
-					staticCell: fixed && call.args.length <= 3
+					staticCell,
+					block: staticCell ? offsetCell(call.args) : null
 				}
 			}
 		}
 	} else return null
 
-	return { text: text.slice(start, end), end, call: null, args: "", staticCell: false }
+	return { text: text.slice(start, end), end, call: null, args: "", staticCell: false, block: null }
 }
 
 // An operand as an end of a range given to RANGE_FUNCTION: INDEX as the reference it gives.
@@ -2823,7 +2980,9 @@ function rangeEnd(operand: Operand): string {
 
 // A formula's text with each OFFSET the engine cannot resolve as it parses given to OFFSET_FUNCTION, and each range
 // with a function at an end (A1:INDEX(A:A,3), INDIRECT("A1"):B2, A1:OFFSET(A1,B1,0)) to RANGE_FUNCTION. A range of
-// two references, or of a cell and an OFFSET the engine resolves to one, stays as written.
+// two references, or of a cell and an OFFSET the engine resolves to one, stays as written: the latter only within
+// MAX_RANGE_CELLS (the engine resolves it as it parses, and no later bound sees it), past it to RANGE_FUNCTION, which
+// refuses it.
 function dynamicReferences(text: string): string {
 	let out = ""
 	let index = 0
@@ -2854,22 +3013,155 @@ function dynamicReferences(text: string): string {
 
 			if (right === null) break
 
-			const plain =
+			const written =
 				(left.call === null && right.call === null) ||
 				(left.staticCell && (right.staticCell || (right.call === null && oneCellReference(right.text)))) ||
 				(right.staticCell && left.call === null && oneCellReference(left.text))
+			const offsetEnd = left.block !== null || right.block !== null
+			const span = written && offsetEnd ? boundedSpan(left, right) : null
+			const plain = written && (!offsetEnd || span !== null)
 
 			operand = {
 				text: plain ? `${left.text}:${right.text}` : `${RANGE_FUNCTION}(${rangeEnd(left)},${rangeEnd(right)})`,
 				end: right.end,
 				call: plain ? null : RANGE_FUNCTION,
 				args: "",
-				staticCell: false
+				staticCell: false,
+				block: plain ? span : null
 			}
 		}
 
 		out += operand.text
 		index = operand.end
+	}
+
+	return out
+}
+
+// White space the engine reads past that may hide a range from the size bounds: beside a ":" (L1 : AO100000), or
+// between OFFSET and its "(", which the engine still resolves as it parses.
+const LOOSE_RANGE = /\s:|:\s|OFFSET\s+\(/i
+
+// White space the engine's lexer reads past (ignoreWhiteSpace "any": JavaScript's \s) that isSpace, kept to what
+// Excel writes, does not know: U+000B, U+000C and the Unicode spaces (U+00A0, U+3000, U+FEFF and the rest).
+const ENGINE_ONLY_SPACE = /[\v\f\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]/
+
+// The text with each such character written as a plain space, outside string literals, quoted sheet names and
+// brackets, wherever it stands: the engine reads it the same, and the size bounds (formulaInputs, whose words run on
+// over code points past 127) then end a reference there as the engine does.
+function plainSpaces(text: string): string {
+	let out = ""
+	let index = 0
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+
+		if (code === QUOTE || code === APOSTROPHE || code === BRACKET_OPEN) {
+			const end = code === BRACKET_OPEN ? skipBracket(text, index) : skipQuoted(text, index, code)
+
+			out += text.slice(index, end)
+			index = end
+		} else {
+			const char = text[index] ?? ""
+
+			out += ENGINE_ONLY_SPACE.test(char) ? " " : char
+			index++
+		}
+	}
+
+	return out
+}
+
+// A formula's text with the white space beside a range's ":" and before OFFSET's "(" taken out (and the engine's other
+// white space made plain first), outside string literals, quoted sheet names and brackets: the engine reads it the
+// same, and dynamicReferences and formulaInputs then see one range.
+function rangeSpacing(written: string): string {
+	const text = ENGINE_ONLY_SPACE.test(written) ? plainSpaces(written) : written
+
+	if (!LOOSE_RANGE.test(text)) return text
+
+	let out = ""
+	let index = 0
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+
+		if (code === QUOTE || code === APOSTROPHE || code === BRACKET_OPEN) {
+			const end = code === BRACKET_OPEN ? skipBracket(text, index) : skipQuoted(text, index, code)
+
+			out += text.slice(index, end)
+			index = end
+		} else if (isSpace(code)) {
+			let end = index
+
+			while (isSpace(text.charCodeAt(end))) end++
+
+			const before = text.charCodeAt(index - 1)
+			const after = text.charCodeAt(end)
+
+			if (!(after === 58 || before === 58 || (after === 40 && /(?:^|[^\w.$])OFFSET$/i.test(out)))) out += text.slice(index, end)
+
+			index = end
+		} else {
+			out += text[index] ?? ""
+			index++
+		}
+	}
+
+	return out
+}
+
+// A range whose second end names its sheet again (S!L1:S!AO100000, 'S'!L1:'s'!AO100000): the engine reads it as one
+// range of that sheet.
+const SECOND_SHEET = /!\$?[A-Za-z]{1,3}\$?\d+:(?:'|[\p{L}_])/u
+const SHEET_ENDS =
+	/(?:'((?:[^']|'')*)'|([\p{L}_][\p{L}\p{N}_.]*))!(\$?[A-Za-z]{1,3}\$?\d+):(?:'((?:[^']|'')*)'|([\p{L}_][\p{L}\p{N}_.]*))!(?=\$?[A-Za-z]{1,3}\$?\d+(?![\w.$(!]))/uy
+
+// The text with such a range written with the sheet at its first end alone, outside string literals and brackets, so
+// the size bounds (formulaInputs) read it as one block.
+function sameSheetEnds(text: string): string {
+	if (!SECOND_SHEET.test(text)) return text
+
+	let out = ""
+	let index = 0
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+
+		if (code === APOSTROPHE || (isWordChar(code) && !isWordChar(text.charCodeAt(index - 1)))) {
+			SHEET_ENDS.lastIndex = index
+
+			const match = SHEET_ENDS.exec(text)
+
+			if (match !== null) {
+				const first = match[1] === undefined ? (match[2] ?? "") : match[1].replaceAll("''", "'")
+				const last = match[4] === undefined ? (match[5] ?? "") : match[4].replaceAll("''", "'")
+
+				if (first.toUpperCase() === last.toUpperCase()) {
+					const firstEnd = (match[1] === undefined ? (match[2] ?? "").length : match[1].length + 2) + (match[3] ?? "").length + 2
+
+					out += text.slice(index, index + firstEnd)
+					index = SHEET_ENDS.lastIndex
+
+					continue
+				}
+			}
+		}
+
+		if (code === QUOTE || code === APOSTROPHE || code === BRACKET_OPEN) {
+			const end = code === BRACKET_OPEN ? skipBracket(text, index) : skipQuoted(text, index, code)
+
+			out += text.slice(index, end)
+			index = end
+		} else if (isWordChar(code)) {
+			const end = readWord(text, index)
+
+			out += text.slice(index, end)
+			index = end
+		} else {
+			out += text[index] ?? ""
+			index++
+		}
 	}
 
 	return out
@@ -2895,7 +3187,7 @@ function referenceOperators(formula: string): string {
 // result. A defined name in `aliases` (upper case) is spelled as its alias: the engine reads some names Excel
 // takes (CustomCost1, R2D2) as references.
 export function engineFormula(written: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string {
-	const source = referenceOperators(written)
+	const source = referenceOperators(rangeSpacing(written))
 	const trimmed = /_xlfn\._TRO_/i.test(source) ? engineTrimReferences(source) : source
 	const formula = DYNAMIC_REFERENCE.test(trimmed) ? dynamicReferences(trimmed) : trimmed
 	let text = ""
@@ -3044,7 +3336,7 @@ export function engineFormula(written: string, aliases?: ReadonlyMap<string, str
 		}
 	}
 
-	return text
+	return sameSheetEnds(text)
 }
 
 // The criteria arguments of the functions that take them, by position from 0. Each is given to the engine through

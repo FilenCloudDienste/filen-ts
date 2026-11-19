@@ -17,18 +17,12 @@ import {
 import { Namespaces, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import { heldStyles } from "../../presentation/edit/apply/design"
 import { inheritedDeclarations } from "../../presentation/edit/canonical"
+import { RAW_PART_PREFIX } from "../../presentation/edit/ops"
 
 // The source an ODP save writes from: the package the deck was read from, its pages in content order with their byte
 // spans, each page parsed again on demand as the fragment its nodes' refs index into, and a pristine reading of any
 // page (the reader's own, from the same bytes, never edited) that the writer compares the session's slides with.
 // Also what the edit session reads source markup through for its inverses (sourceBytes).
-
-// What the writer needs of the reader's parts beyond its public reading API (OdpParts gains these; until then they
-// are derived from a second reading, valid while the deck was never rebased).
-interface PageIndex {
-	pageRefs?(): readonly SlideRef[]
-	span?(ref: SlideRef): PageSpan | undefined
-}
 
 // Held markup names are unique in the worker: refs into one source's held markup stay distinct from another's.
 let heldNames = 0
@@ -40,6 +34,16 @@ export const PAGE_NODE = 2
 // Page fragments kept parsed at once (the touched pages of a save, the slides an inverse reads): the rest are parsed
 // again when asked for.
 const FRAGMENTS = 64
+
+// A page of the file as a save wrote or copied it: the slide node and its notes node it was saved from, at the
+// revisions that save read. The same nodes at the same revisions are the page as the file holds it; a node put back by
+// an undo is another object, so it has no baseline.
+export interface PageBaseline {
+	readonly node: SlideNode
+	readonly revision: number
+	readonly notes: SlideNode | undefined
+	readonly notesRevision: number
+}
 
 export class OdpWriteSource {
 	readonly parts: OdpParts
@@ -58,9 +62,11 @@ export class OdpWriteSource {
 	// The mirror attributes a save first changed (draw:mirror-*, a picture's style:mirror), by page, shape and name, with
 	// the value the file had (undefined: none): turned back to it (an undo), the source's own spelling is written again.
 	readonly mirrorValues = new Map<string, string | undefined>()
+	// Of each page, the nodes the save that made this file saved it from (rebase.ts sets them from the snapshot that
+	// landed): a page edited since is one whose nodes moved past them. A first reading has none.
+	readonly baselines = new Map<SlideRef, PageBaseline>()
 	private heldContextCache: { readonly size: number; readonly styles: Uint8Array | undefined; readonly context: OdpContext } | undefined
 	private shadow: Promise<{ readonly deck: Deck; readonly parts: OdpParts }> | undefined
-	private order: readonly SlideRef[] | undefined
 
 	constructor(parts: OdpParts) {
 		this.parts = parts
@@ -83,26 +89,7 @@ export class OdpWriteSource {
 
 	// The package's pages in content order, by the refs the deck names them with.
 	async pages(): Promise<readonly SlideRef[]> {
-		const index = this.parts as OdpParts & PageIndex
-
-		if (index.pageRefs !== undefined) return index.pageRefs()
-		if (this.order !== undefined) return this.order
-		if (this.parts.epoch !== 0) throw new PresentationError("notImplemented", "the page order of a rebased deck")
-
-		// A first reading allots page refs in content order, deterministically: the second reading's are the deck's.
-		this.order = [...(await this.pristineReading()).deck.slides]
-
-		return this.order
-	}
-
-	async span(ref: SlideRef): Promise<PageSpan | undefined> {
-		const index = this.parts as OdpParts & PageIndex
-
-		if (index.span !== undefined) return index.span(ref)
-
-		const at = (await this.pages()).indexOf(ref)
-
-		return at < 0 ? undefined : this.parts.content.pages[at]
+		return this.parts.pageRefs()
 	}
 
 	// The span starting at a byte offset of content.xml (a fragment offset of a SourceRef).
@@ -179,12 +166,30 @@ export class OdpWriteSource {
 	// Held markup as a fragment of its own (refs into it name "raw:N"; it is never stale: the inverse holds its bytes).
 	// `scope`: the stream whose styles it names (a master page a design op made names styles.xml's).
 	hold(document: XmlDocument, scope: StyleScope = "content"): Fragment {
-		const name = `raw:${String(++heldNames)}`
+		const name = `${RAW_PART_PREFIX}${String(++heldNames)}`
 		const fragment = new Fragment(document, new Namespaces(document, { lenient: true }), name, -1, scope, this.parts.epoch)
 
 		this.held.set(name, fragment)
 
 		return fragment
+	}
+
+	// Markup read once to compare (an inverse checking a shape against its source): a fragment of its own that no ref
+	// reaches, so it goes once the read does.
+	transient(document: XmlDocument, scope: StyleScope = "content"): Fragment {
+		return new Fragment(
+			document,
+			new Namespaces(document, { lenient: true }),
+			`${RAW_PART_PREFIX}${String(++heldNames)}`,
+			-1,
+			scope,
+			this.parts.epoch
+		)
+	}
+
+	// How many fragments of held markup the source keeps.
+	get heldCount(): number {
+		return this.held.size
 	}
 
 	// Held markup another source of the same deck kept (the one before a rebase): its refs still read.

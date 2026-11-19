@@ -751,7 +751,7 @@ function play(bytes: Bytes, head: Header, gdi: Gdi, plus: EmfPlus | undefined, n
 			case 118:
 				gradientFill(bytes, at, size, gdi)
 				break
-			// Brush origin, mapper flags, stretch mode, colour adjustment, meta region, palette realisation,
+			// Mapper flags, stretch mode, colour adjustment, meta region, palette realisation,
 			// flattening (curves are kept), ICM and colour spaces, layout, justification, OpenGL and escapes
 			// change nothing drawn here.
 			case 16:
@@ -825,7 +825,7 @@ function text(bytes: Bytes, at: number, emr: number, end: number, wide: boolean,
 	gdi.text(bytes.i32(emr), bytes.i32(emr + 4), units, dx !== null && units.length === count ? dx : null, stride, options, rect)
 }
 
-// GRADIENT_FILL_RECT_H / _V as linear gradients; triangles as their mean colour.
+// GRADIENT_FILL_RECT_H / _V as linear gradients; triangles as vertex-shaded paints.
 function gradientFill(bytes: Bytes, at: number, size: number, gdi: Gdi): void {
 	const vertices = Math.min(bytes.u32(at + 24), Math.floor((size - 36) / 16))
 	const shapes = bytes.u32(at + 28)

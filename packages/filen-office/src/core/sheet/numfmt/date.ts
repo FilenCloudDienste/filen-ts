@@ -64,6 +64,23 @@ export function dateSerial(year: number, month: number, day: number, date1904: D
 	return serial < 61 && date1904 !== ISO_1900 ? serial - 1 : serial
 }
 
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?)?/
+
+// A t="d" cell's ISO 8601 text (§18.17.4: a date, its time of day, seconds with their fraction) as a serial, NaN when
+// it does not read.
+export function isoSerial(text: string, date1904: DateBase): number {
+	const match = ISO_DATE.exec(text)
+
+	if (match === null) return Number.NaN
+
+	const [, year = "", month = "", day = "", hours = "0", minutes = "0", seconds = "0"] = match
+
+	return (
+		dateSerial(Number(year), Number(month), Number(day), date1904) +
+		(Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)) / 86_400
+	)
+}
+
 // The date of a whole serial day (>= 0, at most the system's maximum).
 export function serialDate(day: number, date1904: DateBase, out: DateParts): DateParts {
 	if (date1904 === ISO_1900) {

@@ -340,7 +340,7 @@ class TimingReader {
 		const attrNames: string[] = []
 
 		for (const name of r.children(r.child(cBhvr, G.P, "attrNameLst"), G.P, "attrName")) {
-			attrNames.push(r.document.textContent(name).trim())
+			attrNames.push(r.text(name).trim())
 		}
 
 		const optional = <T extends string>(local: string, values: readonly T[]): T | undefined => oneOf(r.attr(cBhvr, local), values)

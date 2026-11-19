@@ -1,4 +1,5 @@
 import { HyperFormula } from "hyperformula"
+import { rawValue } from "./functions/plugin"
 
 // The engine's exact search (VLOOKUP, HLOOKUP, MATCH and XLOOKUP without wildcards) folds accents whatever its
 // configuration says ("résumé" finds "resume"), where Excel compares text without case only, and builds an
@@ -15,10 +16,6 @@ interface SearchPrototype {
 
 // The key of the exact search running now, as its caller gave it.
 let searched: { readonly key: unknown } | null = null
-
-function raw(value: unknown): unknown {
-	return typeof value === "object" && value !== null && "val" in value ? (value as { readonly val: unknown }).val : value
-}
 
 let installed = false
 
@@ -48,7 +45,7 @@ export function installExactSearch(licenseKey: string): void {
 		}
 
 		prototype.findNormalizedValue = function (key, values, ifNoMatch = "returnNotFound", occurrence = "first") {
-			const given = searched === null ? undefined : raw(searched.key)
+			const given = searched === null ? undefined : rawValue(searched.key)
 
 			if (ifNoMatch !== "returnNotFound" || given === undefined || (typeof given === "string" && typeof key !== "string"))
 				return normalized.call(this, key, values, ifNoMatch, occurrence)
@@ -59,7 +56,7 @@ export function installExactSearch(licenseKey: string): void {
 
 			for (let step = 0; step < count; step++) {
 				const index = last ? count - 1 - step : step
-				const value = raw(values[index])
+				const value = rawValue(values[index])
 
 				if (text === null ? value === given : typeof value === "string" && value.toLowerCase() === text) return index
 			}

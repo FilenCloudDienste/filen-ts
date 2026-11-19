@@ -3,6 +3,7 @@ import type { ChartRender } from "../../../core/xlsx/charts/render"
 import type { DocxMedia } from "../../../dom/docx/protocol"
 import { DocxMediaCache } from "../../docx/media"
 import { drawingImages, imageMime, paintDrawing } from "../../docx/paint/drawing"
+import { textMeasurer } from "../../docx/paint/objects"
 
 // A chart drawn as SVG from its display list (the charts feature lays it out at its frame's size at 100 %; the SVG
 // scales with the frame, so zooming scales text and lines as Excel does). It asks again whenever `version` moves (an
@@ -34,27 +35,6 @@ function idPrefix(): string {
 	painted += 1
 
 	return `foc${String(painted)}-`
-}
-
-// Advance widths through a canvas (text the painter wraps); NaN without one.
-function measurer(): (text: string, font: string) => number {
-	let context: CanvasRenderingContext2D | null | undefined
-
-	return (text, font) => {
-		if (context === undefined) {
-			try {
-				context = document.createElement("canvas").getContext("2d")
-			} catch {
-				context = null
-			}
-		}
-
-		if (context === null) return Number.NaN
-
-		context.font = font
-
-		return context.measureText(text).width
-	}
 }
 
 export function SheetChart(props: SheetChartProps) {
@@ -115,7 +95,7 @@ export function SheetChart(props: SheetChartProps) {
 			const svg = paintDrawing(rendered.drawing, {
 				document,
 				idPrefix: idPrefix(),
-				measureText: measurer(),
+				measureText: textMeasurer(document),
 				imageUrl: image => urls.get(image.svgPartName ?? image.partName ?? "")
 			})
 

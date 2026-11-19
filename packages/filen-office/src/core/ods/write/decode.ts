@@ -1,12 +1,14 @@
 import { OdfNs } from "../../odf/namespaces"
 import { SharedStrings } from "../../xlsx/model/sharedStrings"
 import type { SheetStore } from "../../xlsx/model/store"
+import { CellKind } from "../../xlsx/model/types"
 import { OdsIssues } from "../issues"
 import { capturedText, parseCaptured } from "../read/captured"
 import { ContentReader } from "../read/content"
 import type { OdsBuiltSheet } from "../read/sheet"
 import type { OdsCellStyles } from "../styles/cell"
 import { EMPTY_CELL, storeValue, type CellValue } from "./cells"
+import { linkVisits } from "./features"
 
 // Source rows read back as the reader read them: the row elements (each once, repeats aside) after the table's
 // columns, through the reader itself, so a cell the writer compares is what the model was built from.
@@ -95,9 +97,17 @@ export function decodeRows(
 			for (let col = note.col; col <= note.endCol; col++) notes.set(`${row},${col}`, { text, author })
 	}
 
+	// On the cells holding text alone (a link is a text:a of its cell's text), not the whole block a repeated linked
+	// cell reads as.
+	const visited = linkVisits(store)
+
 	for (const link of built.links)
-		for (let row = link.row; row <= link.endRow; row++)
-			for (let col = link.col; col <= link.endCol; col++) links.set(`${row},${col}`, link.href)
+		store.forEachCell({ startRow: link.row, startCol: link.col, endRow: link.endRow, endCol: link.endCol }, (row, col, slot) => {
+			if (store.kind(slot) === CellKind.EMPTY) return
+
+			visited()
+			links.set(`${row},${col}`, link.href)
+		})
 
 	for (let k = 0; k + 3 < built.merges.length; k += 4)
 		merges.set(`${built.merges[k] ?? 0},${built.merges[k + 1] ?? 0}`, {

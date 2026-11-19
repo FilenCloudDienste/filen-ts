@@ -38,8 +38,8 @@ const NAME_TYPOGRAPHIC_SUBFAMILY = 17
 const WANTED_NAMES = new Set([NAME_FAMILY, NAME_SUBFAMILY, NAME_FULL, NAME_POSTSCRIPT, NAME_TYPOGRAPHIC_FAMILY, NAME_TYPOGRAPHIC_SUBFAMILY])
 const FAMILY_NAMES = new Set([NAME_FAMILY, NAME_TYPOGRAPHIC_FAMILY])
 
-// Mac Roman 0x80-0xFF, for fonts whose only names are Macintosh records.
-const MAC_ROMAN =
+// Mac OS Roman 0x80-0xFF (Unicode's ROMAN.TXT mapping): fonts whose only names are Macintosh records, PICT text.
+export const MAC_ROMAN =
 	"ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»…\u00A0ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›ﬁﬂ‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ"
 
 export interface SfntNames {

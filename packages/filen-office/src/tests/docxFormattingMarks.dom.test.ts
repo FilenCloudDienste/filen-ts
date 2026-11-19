@@ -4,8 +4,10 @@ import type { DocumentLayout, PageDisplayList } from "@filen/office/core/docx"
 import type { DocxPageData, DocxTextStyle } from "@filen/office/dom/docx"
 import { paintPage, patchPage, type DocxDocument, type DocxTables } from "@filen/office/react/docx"
 import { DOCX_MARK_LABELS, paintMarks } from "@filen/office/react/docx/editor"
+import { ObjectKind } from "../core/docx/layout/index"
 import { runCss } from "../core/docx/reflow/css"
 import { ReflowView, type ReflowViewOptions } from "../react/docx/reflow/view"
+import { FIXTURE_TABLES, fixturePage, objectFragment, paragraph, text } from "./docxPageFixture"
 import { buildDocx, p } from "./docxSynthetic"
 import { pagedEditor } from "./pagedDomFixtures"
 
@@ -206,5 +208,80 @@ describe("formatting marks in the reflowed view", () => {
 
 		view.destroy()
 		editor.dispose()
+	})
+})
+
+describe("formatting marks on a patched line that starts with an object", () => {
+	it("keeps the line's text ranges and draws its marks after an edit elsewhere", () => {
+		// "\ufffca b": an inline picture, then text with a space.
+		const line = paragraph(100, 0, 4, [objectFragment(0, 3), text(1, 4, 116)])
+		const page = (other: string) =>
+			fixturePage({
+				sources: ["\ufffca b", other],
+				lines: [line, paragraph(130, 1, other.length)],
+				objects: [{ id: 3, x: 96, y: 100, width: 20, height: 16 }]
+			})
+		const painted = paintPage(page("other"), { document, tables: FIXTURE_TABLES })
+		const ranges = painted.lines[0]?.texts.map(shown => [shown.start, shown.end])
+
+		expect(ranges).toEqual([[1, 4]])
+
+		// The second paragraph edited: the first line is kept as it was, twice over.
+		const once = patchPage(painted, page("othex"), { document, tables: FIXTURE_TABLES }).painted
+		const twice = patchPage(once, page("othey"), { document, tables: FIXTURE_TABLES }).painted
+
+		expect(twice.lines[0]?.text).toBe(painted.lines[0]?.text)
+		expect(twice.lines[0]?.texts.map(shown => [shown.start, shown.end])).toEqual(ranges)
+
+		const layer = paintMarks(twice, { document, tables: FIXTURE_TABLES, labels: DOCX_MARK_LABELS })
+		const first = layer.querySelector(".fo-docx-line")
+
+		expect(first?.querySelectorAll(".fo-docx-mark-space")).toHaveLength(1)
+	})
+})
+
+describe("formatting marks repainted after an edit", () => {
+	it("moves only the changed line's group and keeps the anchors while they stay", () => {
+		const page = (middle: string): DocxPageData => {
+			const data = fixturePage({
+				sources: ["a b", middle, "e f"],
+				lines: [paragraph(100, 0, 3), paragraph(130, 1, middle.length), paragraph(160, 2, 3)],
+				objects: [{ id: 3, x: 300, y: 100, width: 20, height: 16 }]
+			})
+
+			// A floating drawing anchored in the first paragraph.
+			return { ...data, objectInts: Int32Array.from([3, 1, 0]), objectKinds: Uint8Array.from([ObjectKind.DRAWING]) }
+		}
+		const painted = paintPage(page("c d"), { document, tables: FIXTURE_TABLES })
+		const layer = paintMarks(painted, { document, tables: FIXTURE_TABLES, labels: DOCX_MARK_LABELS })
+		const groups = [...layer.querySelectorAll(":scope > .fo-docx-line")]
+		const anchors = layer.lastElementChild
+
+		expect(groups).toHaveLength(3)
+		expect(anchors?.querySelectorAll(".fo-docx-mark-anchor")).toHaveLength(1)
+
+		const anchor = anchors?.firstElementChild
+		const observer = new MutationObserver(() => undefined)
+
+		observer.observe(layer, { childList: true })
+
+		const patched = patchPage(painted, page("c dx"), { document, tables: FIXTURE_TABLES }).painted
+
+		paintMarks(patched, { document, tables: FIXTURE_TABLES, labels: DOCX_MARK_LABELS }, layer)
+
+		const records = observer.takeRecords()
+		const removed = records.flatMap(record => [...record.removedNodes])
+		const added = records.flatMap(record => [...record.addedNodes])
+		const after = [...layer.querySelectorAll(":scope > .fo-docx-line")]
+
+		observer.disconnect()
+		expect(after).toHaveLength(3)
+		expect(after[0]).toBe(groups[0])
+		expect(after[2]).toBe(groups[2])
+		expect(after[1]).not.toBe(groups[1])
+		expect(removed).toEqual([groups[1]])
+		expect(added).toEqual([after[1]])
+		expect(layer.lastElementChild).toBe(anchors)
+		expect(anchors?.firstElementChild).toBe(anchor)
 	})
 })

@@ -2,7 +2,7 @@ import { appendAll } from "../../../arrays"
 import { Fragment, type ContentMatch, type Mark, type Node, type NodeType } from "prosemirror-model"
 import { closeHistory } from "prosemirror-history"
 import { TextSelection, type EditorState, type Transaction } from "prosemirror-state"
-import { Item, Revision, RevisionFlag, type StoryPart } from "../../model/index"
+import { Item, Revision, RevisionFlag, type Section, type StoryPart } from "../../model/index"
 import { Ns } from "../../model/namespaces"
 import type { PropsStore } from "../../props/index"
 import { minuteDate, paragraphChange, type ParagraphChange } from "../../review/track"
@@ -527,6 +527,26 @@ function tablesAnywhere(type: NodeType): boolean {
 	return known
 }
 
+// The body section holding the caret: the one of the nearest top-level block at or before it that has a source;
+// undefined in other stories (headers, notes, text boxes: no single section) and before any such block.
+function caretSection(state: EditorState, context: DocxEditContext): Section | undefined {
+	const model = context.model
+	const doc = state.doc
+	const $from = state.selection.$from
+
+	if (model.body === undefined || doc.attrs["story"] !== model.body.index || $from.depth < 1) return undefined
+
+	for (let index = $from.index(0); index >= 0; index--) {
+		const src = doc.child(index).attrs["src"] as number | undefined
+
+		if (src === undefined || src === NO_SOURCE) continue
+
+		return model.sections.find(section => section.start <= src && src < section.end)
+	}
+
+	return undefined
+}
+
 // The width a new table fills: the enclosing cell's less its table's cell margins, else the section's text width
 // (twips).
 function availableWidth(state: EditorState, context: DocxEditContext, part: StoryPart, store: PropsStore): number {
@@ -548,7 +568,7 @@ function availableWidth(state: EditorState, context: DocxEditContext, part: Stor
 
 	const model = context.model
 	const body = model.body === undefined ? undefined : model.parts[model.body.part]
-	const section = model.sections[model.sections.length - 1]
+	const section = caretSection(state, context) ?? model.sections[model.sections.length - 1]
 
 	if (body === undefined || section === undefined || section.sectPr < 0) return DEFAULT_TEXT_WIDTH
 

@@ -1,4 +1,4 @@
-import type { Slicing } from "../../core/slicing"
+import { SLICE_MS, type Slicing } from "../../core/slicing"
 import { macrotaskYield } from "../docx/host"
 import type { CallSignal, Lane, PresentationScheduler, Task } from "./engine"
 
@@ -9,7 +9,7 @@ import type { CallSignal, Lane, PresentationScheduler, Task } from "./engine"
 // run of thumbnails share the worker round robin. A priority call therefore waits at most for the background slice
 // already running.
 
-export const SLICE_MS = 8
+export { SLICE_MS }
 
 type Turn = () => Promise<void>
 

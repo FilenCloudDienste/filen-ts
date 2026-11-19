@@ -1,13 +1,11 @@
-import { paintDrawingPdf, pictureKey, pictureSource, type PdfDrawingData } from "../../core/drawingml/pdf"
+import { paintDrawingPdf, pictureKey, pictureSource } from "../../core/drawingml/pdf"
 import {
 	ITEM_FLOATS,
 	ITEM_INTS,
 	ItemFloat,
 	ItemInt,
 	ItemKind,
-	MISSING_IMAGE,
-	imageFormat,
-	imageHandling,
+	multiply,
 	type DrawingData,
 	type DrawingImage
 } from "../../core/drawingml/index"
@@ -43,9 +41,10 @@ import {
 	type NotesPageExport,
 	type SlideExport
 } from "../../core/presentation/pages"
-import { PICTURE_BULLET_OBJECT, toDocxPdfPage } from "../../core/presentation/text/page"
+import { PICTURE_BULLET_OBJECT, bulletImage, toDocxPdfPage } from "../../core/presentation/text/page"
 import type { Slicing } from "../../core/slicing"
 import type { DocxFontFace } from "../docx/protocol"
+import { MAX_SVG_SIDE } from "./svgPort"
 
 // A deck as a tagged PDF (PDF 1.7, ISO 14289-1 PDF/UA-1): slides one per page, notes pages, or handouts, each page
 // written as it is painted. A slide is its background, then each layer: its drawing by paintDrawingPdf under the
@@ -116,20 +115,12 @@ const ALLOWED_SCHEMES = /^(?:https?:|mailto:)/iu
 // pictures), its side rounded up to a step so near sizes share one raster, and at most the page rasteriser's side.
 const SVG_PIXELS_PER_PX = 2
 const SVG_SIDE_STEP = 128
-const MAX_SVG_SIDE = 4096
 
 const PARAGRAPH: DocxPdfRole = { kind: "paragraph", level: 0, list: -1, cells: [] }
 const HEADING: DocxPdfRole = { kind: "heading", level: 1, list: -1, cells: [] }
 const FOOTER: DocxPdfRole = { kind: "artifact", level: 0, list: -1, cells: [], artifact: "Footer" }
 const HEADER: DocxPdfRole = { kind: "artifact", level: 0, list: -1, cells: [], artifact: "Header" }
 const ART: DocxPdfRole = { kind: "artifact", level: 0, list: -1, cells: [] }
-
-function times(m1: readonly number[], m2: readonly number[]): Matrix {
-	const [a1 = 1, b1 = 0, c1 = 0, d1 = 1, e1 = 0, f1 = 0] = m1
-	const [a2 = 1, b2 = 0, c2 = 0, d2 = 1, e2 = 0, f2 = 0] = m2
-
-	return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1]
-}
 
 // How much `matrix` enlarges a length (its larger axis scale).
 function scaleOf(matrix: Matrix): number {
@@ -240,7 +231,6 @@ export class PresentationPdf {
 
 				return drawingSource(request)
 			},
-			deterministic: options.deterministic === true,
 			...(options.signal === undefined ? {} : { signal: options.signal })
 		})
 
@@ -447,7 +437,7 @@ export class PresentationPdf {
 	}
 
 	private async layer(page: PdfPage, layer: SlideLayer, kind: ExportLayerKind, placement: Matrix, slide: SlideExport): Promise<void> {
-		const matrix = times(placement, layer.matrix)
+		const matrix = multiply(placement, layer.matrix)
 		const text = layer.text
 		const alt = layer.alt?.trim() ?? ""
 		const figure = kind !== "art" && (kind === "picture" || text === undefined) && alt.length > 0
@@ -466,7 +456,7 @@ export class PresentationPdf {
 		}
 
 		if (text !== undefined && text.page.lineCount > 0)
-			await this.text(page, text, times(placement, layer.textMatrix ?? layer.matrix), this.rolesOf(text, kind), slide.render.ref)
+			await this.text(page, text, multiply(placement, layer.textMatrix ?? layer.matrix), this.rolesOf(text, kind), slide.render.ref)
 
 		this.action(page, layer, matrix, slide.render.ref)
 	}
@@ -504,7 +494,7 @@ export class PresentationPdf {
 	// A table frame: its fills and borders (the base layer's drawing) as artifacts, then a Table element, a row per
 	// row and a cell per merged area (TH in a header row), each cell's text inside.
 	private async table(page: PdfPage, base: SlideLayer, cells: readonly SlideLayer[], placement: Matrix): Promise<void> {
-		const matrix = times(placement, base.matrix)
+		const matrix = multiply(placement, base.matrix)
 		const structure = base.table
 
 		page.beginArtifact({ type: "Layout" })
@@ -544,7 +534,7 @@ export class PresentationPdf {
 			const layer = byCell.get(`${String(r)}:${String(c)}`)
 
 			if (layer !== undefined) {
-				const cellMatrix = times(placement, layer.matrix)
+				const cellMatrix = multiply(placement, layer.matrix)
 
 				page.beginArtifact({ type: "Layout" })
 				await this.drawing(page, layer.drawing, cellMatrix)
@@ -554,7 +544,7 @@ export class PresentationPdf {
 					await this.text(
 						page,
 						layer.text,
-						times(placement, layer.textMatrix ?? layer.matrix),
+						multiply(placement, layer.textMatrix ?? layer.matrix),
 						this.rolesOf(layer.text, "body"),
 						undefined
 					)
@@ -659,7 +649,7 @@ export class PresentationPdf {
 		this.measureSvgs(drawing, matrix)
 		await paintDrawingPdf(
 			{ page, fonts: this.fonts, image: image => this.image(image), defaultFamily: DRAWING_FAMILY },
-			pdfDrawing(drawing),
+			drawing,
 			matrix
 		)
 	}
@@ -692,7 +682,7 @@ export class PresentationPdf {
 
 			if (image?.format !== "svg" || image.partName === undefined) continue
 
-			const m = times(matrix, [
+			const m = multiply(matrix, [
 				floats[f + ItemFloat.A] ?? 1,
 				floats[f + ItemFloat.B] ?? 0,
 				floats[f + ItemFloat.C] ?? 0,
@@ -974,33 +964,6 @@ export class PresentationPdf {
 			page.endArtifact()
 		}
 	}
-}
-
-// The painter's view of a drawing (its tables as arrays of their own; the data itself is shared).
-function pdfDrawing(drawing: DrawingData): PdfDrawingData {
-	return {
-		width: drawing.width,
-		height: drawing.height,
-		commands: drawing.commands,
-		coords: drawing.coords,
-		itemCount: drawing.itemCount,
-		itemFloats: drawing.itemFloats,
-		itemInts: drawing.itemInts,
-		paints: [...drawing.paints],
-		strokes: [...drawing.strokes],
-		images: [...drawing.images],
-		texts: [...drawing.texts],
-		...(drawing.clips === undefined ? {} : { clips: [...drawing.clips] }),
-		...(drawing.itemClips === undefined ? {} : { itemClips: drawing.itemClips }),
-		...(drawing.background === undefined ? {} : { background: drawing.background })
-	}
-}
-
-// The picture a picture bullet shows, as a drawing image of its part.
-function bulletImage(part: string): DrawingImage {
-	const format = imageFormat(part, undefined)
-
-	return { ...MISSING_IMAGE, partName: part, format, handling: imageHandling(format) }
 }
 
 function pdfStyle(

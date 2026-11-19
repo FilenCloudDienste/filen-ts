@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -192,11 +192,17 @@ describe("every transition authored and saved", () => {
 	})
 
 	it.skipIf(ODF_VALIDATOR === "")("has no odfvalidator conformance error", { timeout: 300_000 }, () => {
+		expect(existsSync(ODF_VALIDATOR), ODF_VALIDATOR).toBe(true)
+
 		const run = spawnSync("java", ["-jar", ODF_VALIDATOR, "-1.3", join(scratch, "transitions.odp")], {
 			encoding: "utf8",
 			maxBuffer: 1 << 26
 		})
-		const errors = `${run.stdout}\n${run.stderr}`.split("\n").filter(line => /(?:Error|Fatal):/u.test(line))
+		// A validator that never ran (no java, a crash by signal) prints nothing the filter below would flag.
+		expect(run.error).toBeUndefined()
+		expect(run.status).not.toBeNull()
+
+		const errors = `${run.stdout}\n${run.stderr}`.split("\n").filter(line => /(?:Error|Fatal):|Exception/u.test(line))
 
 		expect(errors).toEqual([])
 	})

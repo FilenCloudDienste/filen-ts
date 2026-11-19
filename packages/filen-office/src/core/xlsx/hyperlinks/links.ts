@@ -3,6 +3,7 @@ import { decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } f
 import { encodeXstring } from "../edit/document"
 import { newGuid } from "../edit/sheetCopy"
 import { decodeXstring } from "../model/strings"
+import { intersects } from "../refs/moveRefs"
 import { parseRangeRef, rangeRef } from "../write/text"
 
 // A sheet's hyperlinks section (ECMA-376 Part 1 §18.3.1.47, §18.3.1.48): each link a range, an external target
@@ -118,10 +119,6 @@ export function linkAt(section: LinksSection | null, row: number, col: number): 
 		if (row >= link.range.startRow && row <= link.range.endRow && col >= link.range.startCol && col <= link.range.endCol) return link
 
 	return null
-}
-
-function intersects(a: SheetRange, b: SheetRange): boolean {
-	return a.startRow <= b.endRow && b.startRow <= a.endRow && a.startCol <= b.endCol && b.startCol <= a.endCol
 }
 
 // What is left of `range` once `cut` is taken out: up to four ranges (the rows above and below, then the columns

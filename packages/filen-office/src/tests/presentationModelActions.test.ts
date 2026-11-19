@@ -139,46 +139,46 @@ function actionsOf(shapes: readonly ShapeNode[], out: Action[]): void {
 }
 
 describe("actions in corpus decks", () => {
-	it.each([
-		["pptm/pypptx__act-props.pptm"],
-		["pptm/lo__macro.pptm"],
-		["pptm/poi__PPTWithAttachments.pptm"],
-		["pptx/tika__testWPSAttachment.pptx"]
-	])("classifies every action of %s, refusing programs, macros, OLE and files", async path => {
+	for (const path of [
+		"pptm/pypptx__act-props.pptm",
+		"pptm/lo__macro.pptm",
+		"pptm/poi__PPTWithAttachments.pptm",
+		"pptx/tika__testWPSAttachment.pptx"
+	]) {
 		const file = join(CORPUS_DIR, path)
 
-		if (!existsSync(file)) return
+		it.skipIf(!existsSync(file))(`classifies every action of ${path}, refusing programs, macros, OLE and files`, async () => {
+			const open = await openPptx(bytesSource(new Uint8Array(readFileSync(file))))
 
-		const open = await openPptx(bytesSource(new Uint8Array(readFileSync(file))))
+			if (open.kind !== "opened") throw new Error(open.reason)
 
-		if (open.kind !== "opened") throw new Error(open.reason)
+			await open.parts.parseAll()
 
-		await open.parts.parseAll()
+			const actions: Action[] = []
 
-		const actions: Action[] = []
+			for (const ref of open.deck.slides) actionsOf(open.deck.nodes.get(ref)?.shapes ?? [], actions)
 
-		for (const ref of open.deck.slides) actionsOf(open.deck.nodes.get(ref)?.shapes ?? [], actions)
+			const kinds = new Set(actions.map(action => (action.kind === "refused" ? `refused:${action.what}` : action.kind)))
+			const expected: Readonly<Record<string, readonly string[]>> = {
+				"pptm/pypptx__act-props.pptm": [
+					"slide",
+					"internal",
+					"customShow",
+					"url",
+					"refused:program",
+					"refused:macro",
+					"refused:ole",
+					"refused:file"
+				],
+				"pptm/lo__macro.pptm": ["refused:macro"],
+				"pptm/poi__PPTWithAttachments.pptm": ["refused:file"],
+				"pptx/tika__testWPSAttachment.pptx": ["refused:ole"]
+			}
 
-		const kinds = new Set(actions.map(action => (action.kind === "refused" ? `refused:${action.what}` : action.kind)))
-		const expected: Readonly<Record<string, readonly string[]>> = {
-			"pptm/pypptx__act-props.pptm": [
-				"slide",
-				"internal",
-				"customShow",
-				"url",
-				"refused:program",
-				"refused:macro",
-				"refused:ole",
-				"refused:file"
-			],
-			"pptm/lo__macro.pptm": ["refused:macro"],
-			"pptm/poi__PPTWithAttachments.pptm": ["refused:file"],
-			"pptx/tika__testWPSAttachment.pptx": ["refused:ole"]
-		}
+			for (const kind of expected[path] ?? []) expect(kinds, kind).toContain(kind)
 
-		for (const kind of expected[path] ?? []) expect(kinds, kind).toContain(kind)
-
-		// Nothing but http, https and mailto is ever a link.
-		for (const action of actions) if (action.kind === "url") expect(action.href).toMatch(/^(https?:\/\/|mailto:)/iu)
-	})
+			// Nothing but http, https and mailto is ever a link.
+			for (const action of actions) if (action.kind === "url") expect(action.href).toMatch(/^(https?:\/\/|mailto:)/iu)
+		})
+	}
 })

@@ -169,14 +169,19 @@ describe("inert content", () => {
 		const pictures = objects.flatMap(object =>
 			object.kind === "drawing" ? object.drawing.images.flatMap(image => [image.partName, image.svgPartName]) : []
 		)
+		const requested = pictures.filter(name => name !== undefined)
 
-		for (const partName of pictures) if (partName !== undefined) await engine.media(partName)
+		// The three objects' shapes name the embedded image, a signature stub that is not served; the external
+		// pictures name none.
+		for (const partName of requested) expect(await engine.media(partName), partName).toBeNull()
 
 		await engine.find("CACHED")
-		await engine.annotations?.()
+		await engine.annotations()
 
 		expect(trap.calls).toEqual([])
-		expect(pictures.filter(name => name !== undefined).every(name => name === "word/media/image1.png")).toBe(true)
+		// Object resolution and media serving ran: two blip pictures, the VML picture and the three objects.
+		expect(objects.map(object => object.kind)).toEqual(["drawing", "drawing", "drawing", "drawing", "drawing", "drawing"])
+		expect(requested).toEqual(["word/media/image1.png", "word/media/image1.png", "word/media/image1.png"])
 
 		for (const [name, [start, end]] of await payloadRanges(DOCUMENT)) expect(source.touched(start, end), name).toBe(false)
 

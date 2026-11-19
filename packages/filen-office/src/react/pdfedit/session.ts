@@ -90,9 +90,15 @@ export class PdfEditSessionModel {
 		return result
 	}
 
-	// One command as one undo step; a gesture's steps share `op.id`, the last with `final`.
-	dispatch<K extends PdfCommandName>(command: K, args: PdfCommandArgs[K], op?: PdfCommandOp): Promise<PdfCommandResult> {
-		return this.run(() => this.engine.call("dispatch", { command, args, ...(op === undefined ? {} : { op }) }))
+	// One command as one undo step; a gesture's steps share `op.id`, the last with `final`. `transfer` moves buffers in
+	// `args` to the engine instead of copying them: the caller must not read them afterwards.
+	dispatch<K extends PdfCommandName>(
+		command: K,
+		args: PdfCommandArgs[K],
+		op?: PdfCommandOp,
+		transfer?: Transferable[]
+	): Promise<PdfCommandResult> {
+		return this.run(() => this.engine.call("dispatch", { command, args, ...(op === undefined ? {} : { op }) }, transfer))
 	}
 
 	// `steps` back at once (one rebuild at most where the journal cannot take them back).

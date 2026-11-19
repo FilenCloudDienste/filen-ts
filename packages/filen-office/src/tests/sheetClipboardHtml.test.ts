@@ -356,6 +356,30 @@ describe("clipboard HTML in sessions", () => {
 		])
 	})
 
+	it("pastes a Google Sheets formula showing nothing into a text file as an empty field, an own formula as its text", async () => {
+		const { session } = await openKeys("x,y,z\n")
+		const html =
+			"<table><tr>" +
+			'<td data-sheets-value="{&quot;1&quot;:2,&quot;2&quot;:&quot;&quot;}" data-sheets-formula="=IF(R[0]C[1]=&quot;&quot;,&quot;&quot;,R[0]C[1]*2)"></td>' +
+			'<td data-filen-cell="0,1" data-filen-formula="=A1+1"></td>' +
+			"<td>kept</td>" +
+			"</tr></table>"
+
+		await session.command({ type: "clipboard.pasteHtml", sheet: 0, at: { row: 0, col: 0 }, html, text: "" })
+
+		expect(
+			await texts(session, [
+				[0, 0],
+				[0, 1],
+				[0, 2]
+			])
+		).toEqual([
+			{ text: "", input: null },
+			{ text: "=A1+1", input: null },
+			{ text: "kept", input: null }
+		])
+	})
+
 	it("keeps exact values and formulas in the file's syntax under a session locale, and reads typed text in it", async () => {
 		const { session } = await openKeys({ sheets: [{ name: "S", body: sheetBody([[{ f: "SUM(1,2.5)", v: 3.5 }]]) }] })
 

@@ -15,7 +15,7 @@ import {
 	tickLabels,
 	type AxisState
 } from "./axes"
-import type { ErrorBarData } from "./data"
+import { chartDate1904, type ErrorBarData } from "./data"
 import { drawChartex } from "./chartex"
 import { formatNumber } from "./format"
 import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type Rect } from "./builder"
@@ -313,7 +313,7 @@ export function convertChart(
 		}
 	}
 
-	const date1904 = reader.bool(reader.child(root, D.C, "date1904"), "val", false)
+	const date1904 = chartDate1904(reader)
 	const base: TextDefaults = { size: 10, color: textColor(theme), font: theme.minorFont.latin, bold: false, italic: false }
 	const probe = new ChartBuilder(paintContext, reader, 2, date1904, base)
 	const builder = new ChartBuilder(
@@ -884,7 +884,8 @@ export function convertChart(
 
 	for (const axisStateValue of cartesian) drawAxisLine(builder, axisStateValue)
 	for (const axisStateValue of cartesian)
-		if (tickLabels(axisStateValue).length > 0 || axisStateValue.axis.title >= 0) drawAxisLabels(builder, axisStateValue, inner)
+		if (tickLabels(axisStateValue, builder.date1904).length > 0 || axisStateValue.axis.title >= 0)
+			drawAxisLabels(builder, axisStateValue, inner)
 
 	emitLabels(builder, pending)
 

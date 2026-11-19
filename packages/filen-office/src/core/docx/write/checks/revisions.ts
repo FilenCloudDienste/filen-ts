@@ -15,7 +15,9 @@ const DELETIONS: ReadonlySet<string> = new Set(["del", "moveFrom"])
 const RUN_WRAPPERS: ReadonlySet<string> = new Set(["ins", "del", "moveFrom", "moveTo"])
 // Containers whose w:ins / w:del mark something (a paragraph mark, a row, a numbering) rather than wrap runs.
 const MARKERS_OF: ReadonlySet<string> = new Set(["rPr", "trPr", "numPr", "tcPr"])
-const REVISIONS: ReadonlySet<string> = new Set([
+// Revision elements: gate 2 counts their w:id as revision:<id> (verify.ts, a range's end shares its start's id),
+// and a new one must have an author and a date as above.
+export const REVISION_ELEMENTS: ReadonlySet<string> = new Set([
 	"ins",
 	"del",
 	"moveFrom",
@@ -31,7 +33,9 @@ const REVISIONS: ReadonlySet<string> = new Set([
 	"numberingChange",
 	"cellIns",
 	"cellDel",
-	"cellMerge"
+	"cellMerge",
+	"moveFromRangeStart",
+	"moveToRangeStart"
 ])
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/
 
@@ -64,7 +68,7 @@ function storyPart(input: CheckInput, part: CheckedPart): void {
 			continue
 		}
 
-		if (!REVISIONS.has(local)) continue
+		if (!REVISION_ELEMENTS.has(local)) continue
 
 		const id = reader.attr(node, Ns.W, "id")
 

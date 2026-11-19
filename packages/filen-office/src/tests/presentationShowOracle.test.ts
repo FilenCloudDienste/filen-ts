@@ -101,15 +101,29 @@ describe.skipIf(SDK_MISSING !== undefined && ODF_VALIDATOR === "" && OFFICE === 
 		})
 
 		it.skipIf(ODF_VALIDATOR === "")("adds no odfvalidator error to a saved ODP", { timeout: 300_000 }, () => {
+			expect(existsSync(ODF_VALIDATOR), ODF_VALIDATOR).toBe(true)
+
 			const errors = (file: string): Set<string> => {
 				const run = spawnSync("java", ["-jar", ODF_VALIDATOR, "-1.3", file], { encoding: "utf8", maxBuffer: 1 << 26 })
 				const out = new Set<string>()
+
+				// A validator that never ran (no java, a crash by signal) prints nothing the parse below would flag.
+				expect(run.error, basename(file)).toBeUndefined()
+				expect(run.status, basename(file)).not.toBeNull()
+
+				// A launcher failure (corrupt jar, uncaught exception) exits non-zero like a validator that found errors,
+				// so any failure text outside a per-file diagnostic line fails here.
+				const launcher: string[] = []
 
 				for (const line of `${run.stdout}\n${run.stderr}`.split("\n")) {
 					const match = /^.+?\.odp(\/[^[:]*)?(?:\[\d+,\d+\])?:\s+(?:Error|Fatal):\s+(.*)$/u.exec(line)
 
 					if (match !== null) out.add(`${match[1] ?? ""}: ${match[2] ?? ""}`)
+					else if (/(?:Error|Fatal|Exception)/u.test(line) && !/^.+?\.odp(?:\/[^[:]*)?(?:\[\d+,\d+\])?:\s+\w+:/u.test(line))
+						launcher.push(line)
 				}
+
+				expect(launcher, basename(file)).toEqual([])
 
 				return out
 			}

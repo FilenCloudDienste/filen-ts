@@ -3,7 +3,16 @@ import { Fragment, type Mark, type MarkType, type Node } from "prosemirror-model
 import { closeHistory } from "prosemirror-history"
 import type { EditorState, Transaction } from "prosemirror-state"
 import type { DocxEditContext } from "../edit/context"
-import { cellOverrides, ownItem, rowOverrides, sourceChanges, tableMap, tableOverrides } from "../edit/tables/map"
+import {
+	cellOverrides,
+	ownItem,
+	rowOverrides,
+	sourceChanges,
+	tableMap,
+	tableOverrides,
+	type CellOverrides,
+	type RowOverrides
+} from "../edit/tables/map"
 import {
 	canRemoveCells,
 	clearCellRevision,
@@ -34,6 +43,7 @@ import type { XmlDocument } from "../../xml/index"
 import { Item, Revision, RevisionFlag, type Section, type StoryPart } from "../model/index"
 import {
 	ReviewKind,
+	anonymousChangeId,
 	prepareReviewIndex,
 	reviewIndexKept,
 	revisionMarkId,
@@ -145,7 +155,7 @@ function targetOf(state: EditorState, index: ReviewIndex, scope: ReviewScope): T
 	if (entry === undefined) return undefined
 
 	// A change without an id of its own (neither the file's nor the editor's) is the range itself.
-	return entry.id === "#-1" || entry.id.startsWith("new:")
+	return anonymousChangeId(entry.id)
 		? { ranges: [[Math.min(entry.from, size), Math.min(Math.max(entry.to, entry.from + 1), size)]], id: entry.id }
 		: byId(entry.id)
 }
@@ -770,10 +780,8 @@ function goesWhole(node: Node, id: string | undefined, accept: boolean): boolean
 
 // The id a row's or a cell's tracked insertion or deletion counts under in the review index.
 function tableChangeId(node: Node): string {
-	const type = node.type === nodes.table_row ? marks.row_props : marks.cell_props
-	const value = type.isInSet(node.marks)?.attrs["value"] as
-		{ readonly ins?: { readonly id?: number }; readonly del?: { readonly id?: number } } | undefined
-	const id = value?.ins?.id ?? value?.del?.id
+	const value = node.type === nodes.table_row ? rowOverrides(node) : cellOverrides(node)
+	const id = value.ins?.id ?? value.del?.id
 
 	return id === undefined ? `#${String(node.attrs["src"])}` : String(id)
 }
@@ -1233,7 +1241,6 @@ function collectMoveMarkers(doc: Node, from: number, to: number, plan: Plan): vo
 
 // ---- applying -----------------------------------------------------------------------------------------------
 
-// Tables losing rows or cells, with the rows and the cells (outside those rows) that go.
 // A paragraph whose mark's change goes (an accepted deletion, a rejected insertion) between two tables that stay
 // keeps its place instead of joining the table after it: tables with no paragraph between them are one table to
 // Word and LibreOffice, which these pages would not show. Its change resolved, it is an untracked paragraph.
@@ -1255,6 +1262,7 @@ function keepBetweenTables(doc: Node, plan: Plan, removals: ReadonlyMap<number, 
 	}
 }
 
+// Tables losing rows or cells, with the rows and the cells (outside those rows) that go.
 function tableRemovals(plan: Plan): Map<number, { rows: number[]; cells: Plan["cells"] }> {
 	const out = new Map<number, { rows: number[]; cells: Plan["cells"] }>()
 	const of = (table: number): { rows: number[]; cells: Plan["cells"] } => {
@@ -1388,7 +1396,7 @@ function removeTableRows(tr: Transaction, pos: number, table: Node, rows: readon
 // Plans with more operations than this are applied as one rebuild of the blocks they touch: a step per
 // operation copies the document's block list for each (accepting a deletion of a long document that way runs
 // out of memory).
-const BULK = 64
+export const RESOLVE_BULK = 64
 
 function apply(state: EditorState, plan: Plan, accept: boolean, part: StoryPart, store: PropsStore): Transaction | null {
 	const count =
@@ -1408,7 +1416,7 @@ function apply(state: EditorState, plan: Plan, accept: boolean, part: StoryPart,
 	keepFeasibleRemovals(state, plan, accept, part, store, removals)
 	keepBetweenTables(state.doc, plan, removals)
 
-	if (count > BULK) return keepRanges(state.doc, applyBulk(state, plan, accept, part, store, removals), plan)
+	if (count > RESOLVE_BULK) return keepRanges(state.doc, applyBulk(state, plan, accept, part, store, removals), plan)
 
 	const tr = state.tr
 
@@ -1713,8 +1721,9 @@ function deletedAt(rebuild: Rebuild, pos: number): boolean {
 // A row or cell without its tracked insertion or deletion (`flags`), as clearRowRevision and clearCellRevision
 // leave it.
 function withoutRevision(node: Node, flags: number): Node {
-	const type = node.type === nodes.table_row ? marks.row_props : marks.cell_props
-	const value = (type.isInSet(node.marks)?.attrs["value"] ?? {}) as Record<string, unknown>
+	const row = node.type === nodes.table_row
+	const type = row ? marks.row_props : marks.cell_props
+	const value: RowOverrides | CellOverrides = row ? rowOverrides(node) : cellOverrides(node)
 	const rest: Record<string, unknown> = {}
 
 	for (const [key, entry] of Object.entries(value))

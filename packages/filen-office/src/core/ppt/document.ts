@@ -26,9 +26,6 @@ import {
 	readRuler,
 	readStyleTextProp9,
 	readTextBlocks,
-	RT_OUTLINE_TEXT_PROPS9,
-	RT_OUTLINE_TEXT_PROPS_HEADER,
-	RT_STYLE_TEXT_PROP9,
 	type MasterStyle,
 	type ParaProps,
 	type Ruler,
@@ -300,14 +297,14 @@ function readOutline9(file: PptFile, docInfo: PptRecord | undefined): Outline9 {
 	if (docInfo === undefined) return out
 
 	for (const container of pp9Records(file.stream, kids(file, docInfo), record => kids(file, record))) {
-		if (container.type !== RT_OUTLINE_TEXT_PROPS9) continue
+		if (container.type !== RT.outlineTextProps9) continue
 
 		let header: { readonly slideId: number; readonly index: number } | undefined
 
 		for (const child of kids(file, container)) {
-			if (child.type === RT_OUTLINE_TEXT_PROPS_HEADER && child.end - child.start >= 4) {
+			if (child.type === RT.outlineTextPropsHeader9Atom && child.end - child.start >= 4) {
 				header = { slideId: u32(file.stream, child.start), index: child.instance }
-			} else if (child.type === RT_STYLE_TEXT_PROP9 && header !== undefined) {
+			} else if (child.type === RT.styleTextProp9Atom && header !== undefined) {
 				const bodies = out.get(header.slideId) ?? new Map<number, readonly ParaProps[]>()
 
 				bodies.set(header.index, readStyleTextProp9(file.stream, child))
@@ -320,7 +317,7 @@ function readOutline9(file: PptFile, docInfo: PptRecord | undefined): Outline9 {
 	return out
 }
 
-function readHeadersFooters(file: PptFile, container: PptRecord | undefined): HeadersFooters | undefined {
+export function readHeadersFooters(file: PptFile, container: PptRecord | undefined): HeadersFooters | undefined {
 	if (container === undefined) return undefined
 
 	let formatId = 0
@@ -347,10 +344,6 @@ function readHeadersFooters(file: PptFile, container: PptRecord | undefined): He
 		...(header === undefined ? {} : { header }),
 		...(footer === undefined ? {} : { footer })
 	}
-}
-
-export function readHeadersFootersOf(file: PptFile, container: PptRecord | undefined): HeadersFooters | undefined {
-	return readHeadersFooters(file, container)
 }
 
 function readExObjects(file: PptFile, list: PptRecord | undefined): Pick<PptDocument, "hyperlinks" | "oleObjects" | "media"> {
@@ -414,7 +407,7 @@ function readExObjects(file: PptFile, list: PptRecord | undefined): Pick<PptDocu
 			case RT.externalWavAudioEmbedded:
 			case RT.externalWavAudioLink: {
 				// ExMediaAtom (§2.10.6) first in each: exObjId.
-				const atom = kids(file, record).find(child => child.type === 0x1004)
+				const atom = kids(file, record).find(child => child.type === RT.mediaAtom)
 
 				if (atom !== undefined && atom.end - atom.start >= 4) media.add(u32(file.stream, atom.start))
 				break
@@ -530,7 +523,7 @@ export function readDocument(file: PptFile): PptDocument {
 
 	for (const record of environmentRecords) {
 		if (record.type === RT.textMasterStyleAtom) styles.set(record.instance, readMasterStyle(data, record))
-		else if (record.type === 0x0fab) defaultRuler = readRuler(data, record.start, record.end)
+		else if (record.type === RT.defaultRulerAtom) defaultRuler = readRuler(data, record.start, record.end)
 	}
 
 	const lists = records.filter(record => record.type === RT.slideListWithText)

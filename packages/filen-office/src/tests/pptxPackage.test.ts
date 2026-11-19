@@ -181,20 +181,28 @@ describe("pptx gates", () => {
 		"lo__tdf119087.pptx"
 	]
 
-	it.each(signed)("opens the signed corpus deck %s view-only as signed", async name => {
+	const editable = "govuk__Shaping_the_Qualifications_Landscape.pptx"
+
+	it("names corpus decks the manifest lists", () => {
+		const listed = new Set(manifest.files.map(file => file.path))
+
+		expect([...signed, ...strict, editable].filter(name => !listed.has(`pptx/${name}`))).toEqual([])
+	})
+
+	it.for(signed)("opens the signed corpus deck %s view-only as signed", async (name, { skip }) => {
 		const bytes = corpusFile(`pptx/${name}`)
 
-		if (bytes === undefined) return
+		if (bytes === undefined) return skip()
 
 		const { deck } = opened(await openPptx(bytesSource(bytes)))
 
 		expect(deck.gate).toContain("signed")
 	})
 
-	it.each(strict)("opens the Strict corpus deck %s view-only as strict, with its slides read", async name => {
+	it.for(strict)("opens the Strict corpus deck %s view-only as strict, with its slides read", async (name, { skip }) => {
 		const bytes = corpusFile(`pptx/${name}`)
 
-		if (bytes === undefined) return
+		if (bytes === undefined) return skip()
 
 		const { deck, parts } = opened(await openPptx(bytesSource(bytes)))
 
@@ -207,10 +215,10 @@ describe("pptx gates", () => {
 		expect(shapes.length).toBeGreaterThan(0)
 	})
 
-	it("keeps unsigned, transitional corpus decks editable", async () => {
-		const bytes = corpusFile("pptx/govuk__Shaping_the_Qualifications_Landscape.pptx")
+	it("keeps unsigned, transitional corpus decks editable", async ({ skip }) => {
+		const bytes = corpusFile(`pptx/${editable}`)
 
-		if (bytes === undefined) return
+		if (bytes === undefined) return skip()
 
 		expect(opened(await openPptx(bytesSource(bytes))).deck.gate).toEqual([])
 	})
@@ -226,13 +234,13 @@ describe("encrypted pptx", () => {
 		])
 	})
 
-	it.each(encrypted.map(file => [file.path, file.password ?? ""] as const))(
+	it.for(encrypted.map(file => [file.path, file.password ?? ""] as const))(
 		"opens %s with its password and refuses a wrong one",
 		{ timeout: 60_000 },
-		async (path, password) => {
+		async ([path, password], { skip }) => {
 			const bytes = corpusFile(path)
 
-			if (bytes === undefined) return
+			if (bytes === undefined) return skip()
 
 			expect(await openPptx(bytesSource(bytes))).toMatchObject({ kind: "refused", reason: "encrypted" })
 

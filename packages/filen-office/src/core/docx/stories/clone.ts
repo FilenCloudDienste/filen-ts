@@ -9,6 +9,7 @@ import type { StoryPart } from "../model/index"
 import { newControlId } from "../forms/controls"
 import { planNested } from "../write/nested"
 import { COPIED_RELATIONSHIP, cloneRevisionIds, ownedByCopy } from "../write/newStory"
+import { namesRelationship, relationshipIdsIn } from "../write/parts/notes"
 import { DocxWriteError, StoryWriter, type WriteEnvironment } from "../write/story"
 
 // A header or footer copied into a part of its own, as Word copies the one a section showed when the section
@@ -57,7 +58,7 @@ const REVISIONS: ReadonlySet<string> = new Set([
 	"cellDel",
 	"cellMerge"
 ])
-const RANGES = /^(moveFrom|moveTo|customXmlInsRange|customXmlDelRange|customXmlMoveFromRange|customXmlMoveToRange)(Start|End)$/
+const RANGES = /^(moveFromRange|moveToRange|customXmlInsRange|customXmlDelRange|customXmlMoveFromRange|customXmlMoveToRange)(Start|End)$/
 
 // Placeholders the writer leaves where a save still has to place something (stories/sections.ts, the layout's
 // pictures and links): a story holding them cannot be written alone.
@@ -220,15 +221,15 @@ function attributeSpan(
 }
 
 // What a copy changes in the story's markup, in document order.
-// Attributes in the relationships namespace that name a relationship (c:chart r:id, o:OLEObject r:id, the
-// diagram parts of dgm:relIds, a picture's r:embed and r:link).
-const RELATIONSHIP_ATTRIBUTES: readonly string[] = ["id", "embed", "link", "pict", "href", "dm", "lo", "qs", "cs"]
-
-// `relink`: relationship ids the copy names otherwise (a part it owns, copied with it).
+// `relink`: relationship ids the copy names otherwise (a part it owns, copied with it), in every attribute that
+// names a relationship as the save reads them (write/parts/notes.ts namesRelationship).
 function cloneEdits(context: DocxEditContext, document: XmlDocument, relink?: ReadonlyMap<string, string>): Edit[] {
 	const reader = partReader(document)
+	const relinked = relink !== undefined && relink.size > 0 ? relink : undefined
 	const edits: Edit[] = []
 	const ranges = new Map<string, number>()
+	// Move range names made new, old to new: a move's two halves in the copy share one, apart from the original's.
+	const moves = new Map<string, string>()
 	// VML shape ids made new, old to new: an embedded object names its shape by them.
 	const shapes = new Map<string, string>()
 	let skipTo = -1
@@ -245,8 +246,19 @@ function cloneEdits(context: DocxEditContext, document: XmlDocument, relink?: Re
 		const group = reader.group(node)
 		const local = document.localName(node)
 
-		if (relink !== undefined && relink.size > 0)
-			for (const name of RELATIONSHIP_ATTRIBUTES) replace(node, Ns.R, name, value => relink.get(value))
+		if (relinked !== undefined) {
+			const spans = document.attributeSpans(node)
+
+			for (let k = 0; k < spans.length; k += 4) {
+				if (!namesRelationship(reader.namespaces, node, decodeUtf8(document.bytes, spans[k] ?? 0, spans[k + 1] ?? 0))) continue
+
+				const from = spans[k + 2] ?? 0
+				const to = spans[k + 3] ?? 0
+				const made = relinked.get(decodeUtf8(document.bytes, from, to))
+
+				if (made !== undefined) edits.push({ from, to, text: made })
+			}
+		}
 
 		if (group === Ns.WP && local === "docPr") {
 			const id = attributeSpan(reader, document, node, Ns.None, "id")
@@ -330,6 +342,16 @@ function cloneEdits(context: DocxEditContext, document: XmlDocument, relink?: Re
 
 			next = known ?? cloneRevisionIds(context, 1)
 			ranges.set(key, next)
+
+			// Named as the editor names a move it records (review/track.ts).
+			if (range[2] === "Start" && (range[1] === "moveFromRange" || range[1] === "moveToRange"))
+				replace(node, Ns.W, "name", value => {
+					const made = moves.get(value) ?? `move${String(next)}`
+
+					moves.set(value, made)
+
+					return made
+				})
 		}
 
 		edits.push({ from: id.value[0], to: id.value[1], text: String(next) })
@@ -412,8 +434,8 @@ const COPIED_RELATIONSHIPS = new WeakMap<DocxEditContext, number>()
 // around the note (now note `id`), made new where a document needs it unique as cloneStory makes a header,
 // what it holds as bytes kept; the parts it owns (charts, embedded objects) named by relationships of their own,
 // which the save makes copies of. With `into` (another notes part: a note converted to `kind`), its root around
-// the note, the note element of that kind, and every relationship named so (the save relates `into` to the same
-// targets). Undefined where the note cannot be written alone (see storyBytes) or `into` binds a prefix it uses
+// the note, the note element of that kind, and a placeholder for each relationship the note names (the save
+// relates `into` to the same targets). Undefined where the note cannot be written alone (see storyBytes) or `into` binds a prefix it uses
 // otherwise.
 export function cloneNote(
 	context: DocxEditContext,
@@ -442,8 +464,11 @@ export function cloneNote(
 	const added: Relationship[] = []
 	let counter = COPIED_RELATIONSHIPS.get(context) ?? 0
 
-	for (const relationship of part.relationships.all) {
-		if (target === undefined && !ownedByCopy(relationship, pkg)) continue
+	// Only what the note names gets a copy's placeholder: a converted note relates `into` to those targets alone.
+	for (const name of relationshipIdsIn(document)) {
+		const relationship = part.relationships.byId(name)
+
+		if (relationship === undefined || (target === undefined && !ownedByCopy(relationship, pkg))) continue
 
 		const copy = `${COPIED_RELATIONSHIP}${String(++counter)}`
 

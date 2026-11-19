@@ -71,6 +71,36 @@ describe("an ODT paragraph with tracked changes", () => {
 		expect((await editOdt(again)).locked).toBe(0)
 	})
 
+	it("records a new change where text:tracked-changes runs past 4 MiB", { timeout: 60_000 }, async () => {
+		const deleted = `<text:p>${"removed ".repeat(64)}</text:p>`.repeat(10_000)
+		const saved = await tracked(
+			odtBytes({
+				body: `<text:tracked-changes><text:changed-region xml:id="c1" text:id="c1"><text:deletion><office:change-info><dc:creator>Bob</dc:creator><dc:date>2020-01-01T00:00:00</dc:date></office:change-info>${deleted}</text:deletion></text:changed-region></text:tracked-changes><text:p>One two three</text:p><text:p>Last<text:change text:change-id="c1"/></text:p>`
+			})
+		)
+		const xml = await content(saved)
+
+		expect(deleted.length).toBeGreaterThan(4 * 1024 * 1024)
+		expect(xml.match(/<text:tracked-changes[ >]/gu)).toHaveLength(1)
+		expect(records(xml)).toHaveLength(3)
+		expect(xml).toContain(`${deleted}</text:deletion></text:changed-region>`)
+		expect(new Set(marks(xml))).toEqual(new Set(records(xml)))
+	})
+
+	it("keeps one text:tracked-changes after office:forms past 4 MiB", { timeout: 60_000 }, async () => {
+		const forms = `<office:forms xmlns:form="urn:oasis:names:tc:opendocument:xmlns:form:1.0"><form:form form:name="F"><!--${"x".repeat(5 * 1024 * 1024)}--></form:form></office:forms>`
+		const saved = await tracked(
+			odtBytes({
+				body: `${forms}<text:tracked-changes><text:changed-region xml:id="c1" text:id="c1"><text:deletion><office:change-info><dc:creator>Bob</dc:creator><dc:date>2020-01-01T00:00:00</dc:date></office:change-info><text:p>gone</text:p></text:deletion></text:changed-region></text:tracked-changes><text:p>One two three</text:p><text:p>Last<text:change text:change-id="c1"/></text:p>`
+			})
+		)
+		const xml = await content(saved)
+
+		expect(xml.match(/<text:tracked-changes[ >]/gu)).toHaveLength(1)
+		expect(xml).toContain(`${forms}<text:tracked-changes text:track-changes="true"><text:changed-region xml:id="c1" text:id="c1">`)
+		expect(records(xml)).toHaveLength(3)
+	})
+
 	it.each([
 		[
 			"an insertion over two paragraphs",

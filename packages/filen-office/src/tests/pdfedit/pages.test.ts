@@ -15,7 +15,7 @@ import {
 	topLevelBookmarkPages,
 	type PageOpResult
 } from "../../dom/pdfedit/pages"
-import { destPageNum, namedDests, pageIndexByNum, targetDest } from "../../dom/pdfedit/pages/objects"
+import { appendPageContent, destPageNum, freeXObjectName, namedDests, pageIndexByNum, targetDest } from "../../dom/pdfedit/pages/objects"
 import { moveBeforeOrder } from "../../core/pdfedit/pageOrder"
 import { openPdf, pageText } from "../docxPdfFixtures"
 import { makeOrganisedPdf, makeOtherPdf } from "./pageFixtures"
@@ -518,5 +518,63 @@ describe("extract", () => {
 
 	it("lists the top-level bookmarks' pages for a split", () => {
 		expect(topLevelBookmarkPages(open(makeOrganisedPdf()))).toEqual([0, 1, 2, 3, 4, 5])
+	})
+})
+
+describe("append page content", () => {
+	// A page whose fonts and images come from the /Pages node: text, a red square (inherited Im1), then the appended
+	// blue square drawn under a name that does not collide with the inherited one.
+	function inheritedResourcesPdf(): mupdf.PDFDocument {
+		const doc = new mupdf.PDFDocument()
+		const square = (color: string): mupdf.PDFObject =>
+			doc.addStream(`${color} rg 0 0 50 50 re f`, { Type: "XObject", Subtype: "Form", BBox: [0, 0, 50, 50] })
+		const resources = doc.addObject({ Font: { F1: doc.addSimpleFont(new mupdf.Font("Helvetica")) }, XObject: { Im1: square("1 0 0") } })
+
+		doc.insertPage(
+			-1,
+			doc.addPage([0, 0, 200, 200], 0, doc.newDictionary(), "BT /F1 24 Tf 20 150 Td (Hello) Tj ET q 1 0 0 1 20 20 cm /Im1 Do Q")
+		)
+
+		const page = doc.findPage(0)
+
+		page.delete("Resources")
+		page.get("Parent").put("Resources", resources)
+		doc.enableJournal()
+
+		return doc
+	}
+
+	function pixel(doc: mupdf.PDFDocument, x: number, y: number): number[] {
+		const pixmap = doc.loadPage(0).toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false)
+		const offset = (y * pixmap.getWidth() + x) * pixmap.getNumberOfComponents()
+		const samples = pixmap.getPixels()
+
+		return [samples[offset] ?? -1, samples[offset + 1] ?? -1, samples[offset + 2] ?? -1]
+	}
+
+	it("keeps the inherited fonts and images resolving and draws the appended content over the original", () => {
+		const doc = inheritedResourcesPdf()
+		const page = doc.findPage(0)
+		const key = freeXObjectName(page, "Im", new Set())
+
+		expect(key).toBe("Im2")
+
+		op(doc, "append", () => {
+			appendPageContent(
+				doc,
+				page,
+				`q 1 0 0 1 120 20 cm /${key} Do Q\n`,
+				new Map([[key, doc.addStream("0 0 1 rg 0 0 50 50 re f", { Type: "XObject", Subtype: "Form", BBox: [0, 0, 50, 50] })]])
+			)
+		})
+
+		const reopened = open(save(doc))
+
+		expect(reopened.loadPage(0).toStructuredText("").asText().trim()).toBe("Hello")
+		// Image space: y grows downwards on the 200pt page.
+		expect(pixel(reopened, 45, 155)).toEqual([255, 0, 0])
+		expect(pixel(reopened, 145, 155)).toEqual([0, 0, 255])
+		// The /Pages node's resources are untouched.
+		expect(reopened.findPage(0).get("Parent").get("Resources").get("XObject").get("Im2").isNull()).toBe(true)
 	})
 })

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { strFromU8, unzipSync } from "fflate"
 import { bytesSource } from "@filen/office/core/opc"
 import { convertSheet, canConvertSheet, sheetSourceFormat, type SheetConversion } from "../core/ods/convert/index"
@@ -16,6 +16,8 @@ import { IMMEDIATE } from "./sheetSessionFixtures"
 import { budget, cpuMs } from "./timing"
 import { cellRef } from "../core/xlsx/write/text"
 import { renameSheetInFormula } from "../core/sheet/refs/formulaRefs"
+import { PackageFiles } from "../core/ods/convert/drawings"
+import { XlsxParts } from "../core/xlsx/package/parts"
 
 function converted(result: SheetConversion): Extract<SheetConversion, { ok: true }> {
 	if (!result.ok) throw new Error(`${result.reason}: ${result.message}`)
@@ -571,7 +573,14 @@ describe("xlsx to ods", () => {
 				"xl/media/image1.png": png
 			}
 		})
+		const release = vi.spyOn(PackageFiles.prototype, "release")
 		const result = converted(await convertSheet(source, "xlsx", "ods"))
+
+		// The pictures read are let go once the intermediate package holds them.
+		expect(release).toHaveBeenCalledTimes(1)
+		expect((release.mock.contexts[0] as PackageFiles).files).toEqual([])
+		release.mockRestore()
+
 		const files = unzipSync(result.bytes)
 		const content = strFromU8(files["content.xml"] ?? new Uint8Array(0))
 
@@ -582,6 +591,44 @@ describe("xlsx to ods", () => {
 		expect(strFromU8(files["META-INF/manifest.xml"] ?? new Uint8Array(0))).toContain(
 			'manifest:full-path="Pictures/1_image1.png" manifest:media-type="image/png"'
 		)
+		expect(result.lossy).toEqual([])
+	})
+
+	it("reads a picture placed twice once and holds it once", async () => {
+		const png = Uint8Array.from(
+			atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="),
+			c => c.charCodeAt(0)
+		)
+		const anchor = (row: number, id: number): string =>
+			`<xdr:oneCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${String(row)}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="360000" cy="360000"/>` +
+			`<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${String(id)}" name="Logo ${String(id)}"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`
+		const source = buildWorkbook({
+			sheets: [{ name: "P", body: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><drawing r:id="rId1"/>' }],
+			extra: {
+				"[Content_Types].xml":
+					'<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>' +
+					'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+				"xl/worksheets/_rels/sheet1.xml.rels": `${RELS}<Relationship Id="rId1" Type="${REL}/drawing" Target="../drawings/drawing1.xml"/></Relationships>`,
+				"xl/drawings/_rels/drawing1.xml.rels": `${RELS}<Relationship Id="rId1" Type="${REL}/image" Target="../media/image1.png"/></Relationships>`,
+				"xl/drawings/drawing1.xml":
+					'<?xml version="1.0" encoding="UTF-8"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+					`${anchor(1, 2)}${anchor(4, 3)}</xdr:wsDr>`,
+				"xl/media/image1.png": png
+			}
+		})
+		const read = vi.spyOn(XlsxParts.prototype, "read")
+		const result = converted(await convertSheet(source, "xlsx", "ods"))
+		const pictureReads = read.mock.calls.filter(([name]) => name.endsWith("media/image1.png")).length
+
+		read.mockRestore()
+
+		expect(pictureReads).toBe(1)
+
+		const files = unzipSync(result.bytes)
+		const content = strFromU8(files["content.xml"] ?? new Uint8Array(0))
+
+		expect(content.match(/<draw:image xlink:href="Pictures\/1_image1\.png"/g)).toHaveLength(2)
+		expect(Object.keys(files).filter(name => name.startsWith("Pictures/"))).toEqual(["Pictures/1_image1.png"])
 		expect(result.lossy).toEqual([])
 	})
 
@@ -617,6 +664,45 @@ describe("xlsx to ods", () => {
 		const result = converted(await convertSheet(source, "xlsx", "ods"))
 
 		expect(result.lossy).toEqual([{ kind: "dataValidation", count: 1, sheets: ["S"] }])
+	})
+
+	it("converts a sheet whose validations element holds no rule, writing none", async () => {
+		for (const empty of [
+			'<dataValidations count="0"/>',
+			"<dataValidations/>",
+			'<dataValidations count="0"></dataValidations>',
+			'<dataValidations count="0"><extLst/></dataValidations>'
+		]) {
+			const source = buildWorkbook({
+				sheets: [{ name: "S", body: `<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>${empty}` }]
+			})
+			const result = converted(await convertSheet(source, "xlsx", "ods"))
+			const xml = strFromU8(unzipSync(result.bytes)["content.xml"] ?? new Uint8Array(0))
+
+			expect(result.lossy).toEqual([])
+			expect(xml).not.toContain("table:content-validation")
+		}
+	})
+
+	it("reads a validation's display flags spelled true as on", async () => {
+		const source = buildWorkbook({
+			sheets: [
+				{
+					name: "S",
+					body:
+						'<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><dataValidations count="1">' +
+						'<dataValidation type="list" allowBlank="true" showDropDown="true" showInputMessage="true" showErrorMessage="true" promptTitle="Pick" prompt="a or b" errorTitle="No" error="Not listed" sqref="A1:A3"><formula1>"a,b"</formula1></dataValidation></dataValidations>'
+				}
+			]
+		})
+		// convertSheet proves what it wrote: the rule read back from the ods is the source's.
+		const result = converted(await convertSheet(source, "xlsx", "ods"))
+		const xml = strFromU8(unzipSync(result.bytes)["content.xml"] ?? new Uint8Array(0))
+
+		expect(result.lossy).toEqual([])
+		expect(xml).toContain('table:allow-empty-cell="true" table:display-list="none"')
+		expect(xml).toMatch(/<table:help-message table:title="Pick" table:display="true">/)
+		expect(xml).toMatch(/<table:error-message table:message-type="stop" table:title="No" table:display="true">/)
 	})
 
 	it("writes an error as that error's formula, which LibreOffice shows, and an error OpenFormula has no name for as its text", async () => {
@@ -1030,22 +1116,26 @@ describe("xlsx to ods", () => {
 			expect(runs.every(run => run.result.ok)).toBe(true)
 			expect(Math.min(...runs.map(run => run.ms))).toBeLessThan(budget(1000))
 
-			// Aborted part way: the CPU time spent after the abort, at most a slice or two.
+			// Aborted part way, at an early turn whatever the machine's speed: the CPU time spent after the abort, at most a
+			// slice or two of real time.
 			const signal = { aborted: false }
+			let pauses = 0
+			let abortedAt = Number.NaN
 			const slicing = {
 				sliceMs: 20,
 				now: () => performance.now(),
-				pause: () => new Promise<void>(resolve => setTimeout(resolve, 0))
+				pause: () => {
+					if (++pauses === 3) {
+						signal.aborted = true
+						abortedAt = cpuMs()
+					}
+
+					return new Promise<void>(resolve => setTimeout(resolve, 0))
+				}
 			}
-			let abortedAt = Number.NaN
-
-			setTimeout(() => {
-				signal.aborted = true
-				abortedAt = cpuMs()
-			}, 300)
-
 			const aborted = await convertSheet(source, "xlsx", "ods", { turns: { signal, slicing } })
 
+			expect(pauses).toBeGreaterThanOrEqual(3)
 			expect(aborted.ok ? null : aborted.reason).toBe("aborted")
 			expect(cpuMs() - abortedAt).toBeLessThan(budget(100))
 		})
@@ -1116,6 +1206,21 @@ describe("ods to xlsx", () => {
 			count: 1,
 			sheets: ["Data"],
 			formulas: [{ sheet: "Data", cell: "C2", formula: "of:=FORMULA([.A1])" }]
+		})
+	})
+
+	it("reports a formula Excel cannot say under the name its sheet was renamed to for Excel", async () => {
+		const renamed = body.replace('table:name="Data"', 'table:name="Budget 2026: forecast and actuals"')
+		const result = converted(await convertSheet(odsBytes({ body: renamed }), "ods", "xlsx"))
+		const back = await readXlsx(result.bytes)
+		const name = back.workbook.sheets[0]?.name ?? ""
+
+		expect(name).not.toBe("Budget 2026: forecast and actuals")
+		expect(result.lossy).toContainEqual({
+			kind: "formula",
+			count: 1,
+			sheets: [name],
+			formulas: [{ sheet: name, cell: "C2", formula: "of:=FORMULA([.A1])" }]
 		})
 	})
 
@@ -1335,6 +1440,26 @@ describe("ods to xlsx", () => {
 		}
 	)
 
+	it("writes a quarter million bands formatted across the sheet in bounded time", { timeout: 120_000 }, async () => {
+		const automatic =
+			'<style:style style:name="ce1" style:family="table-cell"><style:table-cell-properties fo:background-color="#ff0000"/></style:style>'
+		// Bands of 3 red rows across every column, each followed by one row of none, down to the sheet's last row.
+		const band =
+			'<table:table-row table:number-rows-repeated="3"><table:table-cell table:style-name="ce1" table:number-columns-repeated="16384"/></table:table-row>' +
+			"<table:table-row><table:table-cell/></table:table-row>"
+		const source = odsBytes({ automatic, body: table("S", band.repeat(1048576 / 4)) })
+		const started = cpuMs()
+		const result = converted(await convertSheet(source, "ods", "xlsx"))
+
+		expect(cpuMs() - started).toBeLessThan(budget(4000))
+
+		const sheet = strFromU8(unzipSync(result.bytes)["xl/worksheets/sheet1.xml"] ?? new Uint8Array(0))
+
+		// Every column red, the rows between the bands their own (none).
+		expect(sheet).toMatch(/<cols><col min="1" max="16384"[^>]*style="(\d+)"/)
+		expect(sheet).toMatch(/<row r="4"[^>]*s="0"[^>]*customFormat="1"/)
+	})
+
 	it("refuses rows formatted across the sheet past the row budget before laying them out", { timeout: 120_000 }, async () => {
 		const automatic =
 			'<style:style style:name="ce1" style:family="table-cell" style:parent-style-name="Default"><style:text-properties fo:font-weight="bold"/></style:style>'
@@ -1524,4 +1649,61 @@ describe("saveAs.format on an open workbook", () => {
 			opened.session.close()
 		}
 	})
+})
+
+// A link over a whole column or the whole sheet is on the cells holding text in it, never one entry per cell.
+describe("converting xlsx links over huge ranges", () => {
+	it("links exactly the text cells of a whole-column and a whole-sheet link, quickly", async () => {
+		const source = buildWorkbook({
+			sheets: [
+				{
+					name: "S1",
+					body: '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="B2" t="s"><v>1</v></c></row><row r="5"><c r="A5" t="s"><v>2</v></c></row></sheetData><hyperlinks><hyperlink ref="A1:A1048576" location="S2!A1"/></hyperlinks>'
+				},
+				{
+					name: "S2",
+					body: '<sheetData><row r="1"><c r="A1" t="s"><v>3</v></c></row><row r="3"><c r="C3" t="s"><v>4</v></c></row></sheetData><hyperlinks><hyperlink ref="A1:XFD1048576" location="S1!A1"/></hyperlinks>'
+				}
+			],
+			sharedStrings: ["<t>a</t>", "<t>plain</t>", "<t>b</t>", "<t>d</t>", "<t>e</t>"]
+		})
+		const started = cpuMs()
+		const result = converted(await convertSheet(source, "xlsx", "ods"))
+		const spent = cpuMs() - started
+		const content = strFromU8(unzipSync(result.bytes)["content.xml"] ?? new Uint8Array(0))
+
+		expect(content.match(/<text:a xlink:href="#S2\.A1"[^>]*>(\w+)<\/text:a>/g)).toEqual([
+			'<text:a xlink:href="#S2.A1" xlink:type="simple">a</text:a>',
+			'<text:a xlink:href="#S2.A1" xlink:type="simple">b</text:a>'
+		])
+		expect(content.match(/<text:a xlink:href="#S1\.A1"[^>]*>(\w+)<\/text:a>/g)).toEqual([
+			'<text:a xlink:href="#S1.A1" xlink:type="simple">d</text:a>',
+			'<text:a xlink:href="#S1.A1" xlink:type="simple">e</text:a>'
+		])
+		expect(content).toContain("<text:p>plain</text:p>")
+		expect(spent).toBeLessThan(budget(2000))
+	}, 60_000)
+
+	it("refuses tens of thousands of overlapping whole-sheet links over the same cells, quickly", async () => {
+		let rows = ""
+
+		for (let row = 1; row <= 2000; row++) rows += `<row r="${row}"><c r="A${row}" t="s"><v>0</v></c></row>`
+
+		const source = buildWorkbook({
+			sheets: [
+				{
+					name: "S1",
+					body: `<sheetData>${rows}</sheetData><hyperlinks>${'<hyperlink ref="A1:XFD1048576" location="S1!A1"/>'.repeat(20_000)}</hyperlinks>`
+				}
+			],
+			sharedStrings: ["<t>a</t>"]
+		})
+		const started = cpuMs()
+		const result = await convertSheet(source, "xlsx", "ods")
+		const spent = cpuMs() - started
+
+		expect(result.ok).toBe(false)
+		expect(result.ok ? "" : `${result.reason}: ${result.message}`).toMatch(/^unsupported: .*links of a sheet overlap/)
+		expect(spent).toBeLessThan(budget(2000))
+	}, 60_000)
 })

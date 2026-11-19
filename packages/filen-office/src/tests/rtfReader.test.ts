@@ -372,6 +372,40 @@ describe("RTF reader", () => {
 		expect(texts(xml)).toBe("framedboxedtext")
 	})
 
+	it("keeps the authors and default font names holding $ as written", async () => {
+		const files = await parts(
+			"{\\rtf1\\deff0{\\fonttbl{\\f0 A$&B $$ C;}}{\\*\\defchp\\b}{\\*\\revtbl{Unknown;}{R$&D;}{Big $$ Inc;}{Q$`T;}}" +
+				"\\pard\\revised\\revauth1\\b one\\par\\revauth2 two\\par\\revauth3 three\\par}"
+		)
+		const document = files["word/document.xml"] ?? ""
+		const styles = files["word/styles.xml"] ?? ""
+
+		expect(document).toMatch(/<w:rPr><w:ins w:id="\d+" w:author="R\$&amp;D"/u)
+		expect(document).toMatch(/<w:rPr><w:ins w:id="\d+" w:author="Big \$\$ Inc"/u)
+		expect(document).toMatch(/<w:rPr><w:ins w:id="\d+" w:author="Q\$`T"/u)
+		expect(document).not.toMatch(/w:author="[^"]*</u)
+		expect(styles).toContain('<w:rFonts w:ascii="A$&amp;B $$ C" w:hAnsi="A$&amp;B $$ C"')
+	})
+
+	it("ignores a \\do repeated in its group, keeping the text box read under the first", async () => {
+		const started = performance.now()
+		const xml = await body(
+			`{\\rtf1 \\pard{\\*\\do\\dptxbx{\\dptxbxtext\\pard first\\par}${"\\do ".repeat(100_000)}{\\dptxbxtext\\pard second\\par}}text\\par}`
+		)
+
+		expect(performance.now() - started).toBeLessThan(budget(2_000))
+		expect(texts(xml)).toBe("firstsecondtext")
+	})
+
+	it("reads a Word 95 text box nested in another's text", async () => {
+		const xml = await body(
+			"{\\rtf1 \\pard{\\*\\do\\dptxbx{\\dptxbxtext\\pard outer{\\*\\do\\dptxbx{\\dptxbxtext\\pard inner\\par}}\\par}}text\\par}"
+		)
+
+		// The inner box's paragraph ends first, and comes first.
+		expect(texts(xml)).toBe("inneroutertext")
+	})
+
 	it("ignores bytes after the document's closing brace and reports them", async () => {
 		const result = await read("{\\rtf1 kept\\par}\r\n\u00ef\u00bf garbage{\\b more}")
 
@@ -444,6 +478,15 @@ describe("RTF reader on hostile input", () => {
 
 		expect(result.truncatedBinary).toBe(true)
 		expect(result.preserved.some(entry => entry.kind === "picture")).toBe(true)
+	})
+
+	it("finds an equation's first word once however much white space leads its group", async () => {
+		const rtf = `{\\rtf1 \\pard{${"\n".repeat(1_000_000)}\\mmath${"\\i".repeat(50_000)}{\\*\\moMath{\\mr x}}}\\par}`
+		const started = performance.now()
+		const result = await read(rtf)
+
+		expect(performance.now() - started).toBeLessThan(budget(3_000))
+		expect(result.preserved.some(entry => entry.kind === "math")).toBe(true)
 	})
 
 	it("reads unclosed groups to the end and reports them", async () => {

@@ -1,3 +1,4 @@
+import { equalBytes, sameBytes } from "../../docx/write/bytes"
 import type { ByteSource } from "../../opc/index"
 import { resolvePath, structuralPath, visitSources, type PathStep } from "../../pptx/sourcePath"
 import { NodeKind, type XmlDocument } from "../../xml/index"
@@ -7,7 +8,8 @@ import { openOdp, type OdpOpenOptions, type OdpParts } from "../read/document"
 import { readOdpTiming } from "../../anim/odf"
 import type { TimeCondition, TimeNode } from "../../anim/model"
 import type { Fragment } from "../read/context"
-import { latestSnapshotRevision, releaseSnapshotOrders, snapshotSlideOrder } from "./save"
+import type { PageSpan } from "../read/scan"
+import { latestSnapshotRevision, releaseSnapshotOrders, snapshotBaselines, snapshotSlideOrder } from "./save"
 import { odpWriteSource } from "./source"
 
 // A deck moved onto its saved file (§1.5.6): the saved package read again taking over the session's deck (its refs,
@@ -18,9 +20,6 @@ import { odpWriteSource } from "./source"
 // the new epoch as they are.
 
 const RESOURCE_FILLS: ReadonlySet<string> = new Set(["gradient", "pattern", "picture"])
-
-// What the open takes for a rebase (OdpOpenOptions gains `adopt`).
-type RebaseOptions = OdpOpenOptions & { readonly adopt: Deck }
 
 export async function rebaseOdpDeck(
 	deck: Deck,
@@ -34,7 +33,7 @@ export async function rebaseOdpDeck(
 	// pages are the slides its snapshot wrote (`order`): one deleted, added or moved since is the next save's.
 	const saved = revision ?? latestSnapshotRevision(deck)
 	const order = (saved === undefined ? undefined : snapshotSlideOrder(deck, saved)) ?? deck.slides
-	const options: RebaseOptions = {
+	const options: OdpOpenOptions = {
 		epoch: parts.epoch + 1,
 		budgets: parts.budgets,
 		adopt: deck,
@@ -44,7 +43,8 @@ export async function rebaseOdpDeck(
 	const opened = await openOdp(source, options)
 
 	if (opened.kind === "refused") return opened
-	if (opened.deck !== deck) return refused("notImplemented", "the reader cannot take over the deck (OdpOpenOptions.adopt)")
+	// The reader takes the deck over (OdpOpenOptions.adopt): a reading with a deck of its own cannot be rebased onto.
+	if (opened.deck !== deck) return refused("failed", "the saved file's reading did not take over the session's deck")
 
 	const before = odpWriteSource(parts)
 	const after = odpWriteSource(opened.parts)
@@ -55,10 +55,23 @@ export async function rebaseOdpDeck(
 	for (const [key, box] of before.placeholderBoxes) after.placeholderBoxes.set(key, box)
 	for (const [key, value] of before.mirrorValues) after.mirrorValues.set(key, value)
 	after.adoptHeld(before)
+
+	// The nodes the landed save wrote each page from, at the revisions it read: an edit made since (while the file
+	// uploaded) moved them past these, so the next save writes it.
+	const baselines = saved === undefined ? undefined : snapshotBaselines(deck, saved)
+
+	for (const ref of order) {
+		const baseline = baselines?.get(ref)
+
+		if (baseline !== undefined) after.baselines.set(ref, baseline)
+	}
+
 	// The charts translated for pages parsed before the save, whose objects the saved file holds unchanged.
 	opened.parts.carryCharts(parts)
 	const epoch = opened.parts.epoch
 	const savedContent = opened.parts.content.bytes
+	// Both readings parse a page under the root's start tag: a page copied byte for byte parses the same under the same.
+	const sameRoot = sameBytes(parts.content.rootOpen, opened.parts.content.rootOpen)
 	const key = (src: { readonly part: string; readonly fragment: number }): string => `${src.part}\u0000${String(src.fragment)}`
 	const memo = new Map<string, Map<number, number | undefined>>()
 
@@ -92,12 +105,29 @@ export async function rebaseOdpDeck(
 
 		if (node === undefined || src?.format !== "odp" || span === undefined) continue
 
+		const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+		const old = src.part === "content.xml" && src.epoch === parts.epoch ? before.spanAt(src.fragment) : undefined
+
+		// A page the save copied byte for byte parses to the same nodes: its refs move to the new offset as they are,
+		// without a parse of either page.
+		if (old !== undefined && sameParse(old, span)) {
+			const moved = (each: SourceRef): SourceRef =>
+				each.format === "odp" && each.part === "content.xml" && each.fragment === old.start && each.epoch === parts.epoch
+					? { ...each, fragment: span.start, epoch }
+					: each
+
+			visitSources(node, moved)
+
+			if (notes !== undefined) visitSources(notes, moved)
+
+			continue
+		}
+
 		const from = before.fragmentOf(src)
 
 		if (from === undefined) continue
 
 		const to = after.fragment(span)
-		const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
 
 		// A page the save wrote: its shapes are the slide's in order (gate 2 read it back shape for shape), so each
 		// shape's refs move onto the element at its place, wherever the shape was read from (the page, or markup an
@@ -149,6 +179,20 @@ export async function rebaseOdpDeck(
 	if (saved !== undefined) releaseSnapshotOrders(deck, saved)
 
 	return opened.parts
+
+	// Whether a page of the source and one of the saved file parse alone (pageFragment) to the same document: the same
+	// bytes, under the same root start tag, with the same declarations injected at the same place.
+	function sameParse(old: PageSpan, span: PageSpan): boolean {
+		const length = span.end - span.start
+
+		if (old.end - old.start !== length || old.insertAt - old.start !== span.insertAt - span.start) return false
+		if (!sameRoot) return false
+
+		const injected =
+			old.inject === undefined || span.inject === undefined ? old.inject === span.inject : sameBytes(old.inject, span.inject)
+
+		return injected && equalBytes(parts.content.bytes, old.start, savedContent, span.start, length)
+	}
 
 	// Whether the save wrote the page anew (a page from held markup always), not copied its bytes.
 	function wasWritten(from: Fragment, offset: number, span: { readonly start: number; readonly end: number }): boolean {

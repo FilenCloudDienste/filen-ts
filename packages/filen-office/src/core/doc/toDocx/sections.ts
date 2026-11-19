@@ -1,3 +1,4 @@
+import { le32 } from "../bytes"
 import type { DocFont } from "../fonts"
 import type { DocSectionProps } from "../props"
 import { numberFormat } from "./numbering"
@@ -18,9 +19,7 @@ function hex(bytes: Uint8Array, from: number, count: number): string {
 }
 
 function hexLe32(bytes: Uint8Array, at: number): string {
-	const value = ((bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8) | ((bytes[at + 2] ?? 0) << 16) | ((bytes[at + 3] ?? 0) << 24)) >>> 0
-
-	return value.toString(16).toUpperCase().padStart(8, "0")
+	return le32(bytes, at).toString(16).toUpperCase().padStart(8, "0")
 }
 
 export function fontTablePart(fonts: readonly DocFont[]): string {

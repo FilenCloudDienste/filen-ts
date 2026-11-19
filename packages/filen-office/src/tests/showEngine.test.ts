@@ -6,7 +6,6 @@ import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
 import { slideRef, type ShapeNode, type SlideNode } from "../core/presentation/model"
 import type { SlideLayer, SlideRender } from "../core/presentation/output"
 import { drawingData } from "../core/presentation/render/slide"
-import { encodeUtf8, parseXml } from "../core/xml/index"
 import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
 import { openOdpCapability } from "../dom/presentation/engine/open/odp"
 import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
@@ -15,8 +14,8 @@ import {
 	layerParents,
 	layerScales,
 	paragraphBands,
+	planRuns,
 	planShowLayers,
-	pptxTransition,
 	showCapability,
 	showLayerIndex,
 	STATIC_LAYER
@@ -28,13 +27,13 @@ import { TIMING_XML, TimingBuilder } from "./animFixtures"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
 import { odpBytes, page } from "./odpFixtures"
-import { body, buildPptx, NS, para, sp, xfrm } from "./pptxFixtures"
+import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { RecordingCanvas } from "./presentationCanvasRecorder"
 
 // The worker's side of the show: the layers a slide's timing animates (paragraph ranges split so each target covers
 // whole layers, character targets on the whole shape), how they nest, the slide drawn as z-ordered bitmaps (static
-// runs between animated shapes, paragraph bands, the byte budget), a pptx slide's transition (the Fallback when the
-// Choice is a 3D one), and timegraph(): a source the page compiles to the same graph the worker checked.
+// runs between animated shapes, paragraph bands, the byte budget), and timegraph(): a source the page compiles to the
+// same graph the worker checked.
 
 const EMU = 9525
 const BUDGETS = DEFAULT_PRESENTATION_BUDGETS.timing
@@ -146,6 +145,67 @@ function drawingDataOf(list: DrawingList, width: number, height: number): Return
 
 	return drawingData(list)
 }
+
+describe("planRuns shape lookup", () => {
+	const textShape = (id: number, value: string): ShapeNode => ({
+		id,
+		name: value,
+		hidden: false,
+		kind: "sp",
+		text: { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text: value, rPr: {} }] }] }
+	})
+	const byLetter = (shape: number) => {
+		const b = new TimingBuilder()
+
+		return b.root([
+			b.mainSeq([
+				b.click([
+					[
+						0,
+						[
+							b.effect(
+								0,
+								{
+									presetID: 10,
+									presetClass: "entr",
+									nodeType: "clickEffect",
+									iterate: { type: "lt", interval: { pct: 10000 }, backwards: false }
+								},
+								0,
+								[
+									b.behavior(
+										{
+											type: "animEffect",
+											common: { target: { kind: "shape", shape }, attrNames: [] },
+											transition: "in",
+											filter: "fade"
+										},
+										{ dur: 500 }
+									)
+								]
+							)
+						]
+					]
+				])
+			])
+		])
+	}
+
+	it("addresses the first shape of a repeated id, as the editor does", () => {
+		const runs = planRuns(byLetter(2), [textShape(2, "ab"), textShape(2, "wxyz")])
+
+		expect(runs[0]?.runs).toHaveLength(2)
+	})
+
+	it("finds a shape under deeply nested groups", () => {
+		let shapes: ShapeNode[] = [textShape(2, "abc")]
+
+		for (let depth = 0; depth < 2000; depth++)
+			shapes = [{ id: 1000 + depth, name: "g", hidden: false, kind: "grpSp", children: shapes }]
+
+		expect(planRuns(byLetter(2), shapes)[0]?.runs).toHaveLength(3)
+	})
+})
 
 describe("planShowLayers", () => {
 	it("keeps z-order: the background run, static runs between animated shapes, master art static", () => {
@@ -294,68 +354,6 @@ describe("planShowLayers", () => {
 
 		expect(scales[0]).toBeCloseTo(1, 6)
 		expect(layerScales([layer(5000, 10)], 2)[0]).toBeCloseTo(8192 / 5000, 6)
-	})
-})
-
-describe("pptxTransition", () => {
-	const sld = (inner: string) =>
-		parseXml(
-			encodeUtf8(
-				`<p:sld ${NS} xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"><p:cSld><p:spTree/></p:cSld>${inner}</p:sld>`
-			)
-		)
-
-	it("reads p:transition: kind, options, speed, advance", () => {
-		expect(pptxTransition(sld('<p:transition spd="slow" advClick="0" advTm="3000"><p:push dir="u"/></p:transition>'))).toEqual({
-			kind: "push",
-			namespace: "p",
-			options: { dir: "u" },
-			durationMs: 1000,
-			speed: "slow",
-			advance: { onClick: false, afterMs: 3000 }
-		})
-		expect(pptxTransition(sld('<p:transition><p:fade thruBlk="1"/></p:transition>'))).toMatchObject({
-			kind: "fade",
-			options: { thruBlk: true },
-			durationMs: 500
-		})
-		expect(pptxTransition(sld(""))).toBeUndefined()
-	})
-
-	it("reads an effectless transition and a plain cut as instant, a cut through black at its speed", () => {
-		expect(pptxTransition(sld('<p:transition advTm="5000"/>'))).toMatchObject({
-			kind: "cut",
-			durationMs: 0,
-			advance: { onClick: true, afterMs: 5000 }
-		})
-		expect(pptxTransition(sld('<p:transition spd="med"><p:cut/></p:transition>'))?.durationMs).toBe(0)
-		expect(pptxTransition(sld('<p:transition><p:cut thruBlk="1"/></p:transition>'))?.durationMs).toBe(500)
-	})
-
-	it("takes the Choice an ECMA kind with its p14:dur, and the Fallback for a 3D Choice", () => {
-		const ac = (choice: string, fallback: string) =>
-			`<mc:AlternateContent><mc:Choice Requires="p14">${choice}</mc:Choice><mc:Fallback>${fallback}</mc:Fallback></mc:AlternateContent>`
-
-		expect(
-			pptxTransition(
-				sld(
-					ac(
-						'<p:transition spd="slow" p14:dur="2000"><p:wipe dir="d"/></p:transition>',
-						'<p:transition spd="slow"><p:wipe dir="d"/></p:transition>'
-					)
-				)
-			)
-		).toMatchObject({ kind: "wipe", durationMs: 2000, options: { dir: "d" } })
-		expect(
-			pptxTransition(
-				sld(
-					ac(
-						'<p:transition spd="slow" p14:dur="1250"><p14:vortex dir="r"/></p:transition>',
-						'<p:transition spd="slow"><p:fade/></p:transition>'
-					)
-				)
-			)
-		).toMatchObject({ kind: "fade", namespace: "p", durationMs: 1000 })
 	})
 })
 

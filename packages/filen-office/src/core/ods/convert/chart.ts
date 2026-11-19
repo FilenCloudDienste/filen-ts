@@ -5,6 +5,7 @@ import { rgbaHex } from "../../drawingml/displayList"
 import { D, drawingReader, type DrawingReader } from "../../drawingml/reader"
 import { chartRoot, plotNodes, readChartInfo, type ChartAxisInfo, type ChartLabels } from "../../xlsx/charts/model"
 import { escapeAttribute, escapeText, type XmlDocument } from "../../xml/index"
+import { labelProperties, ODF_LEGENDS } from "../charts/read"
 import { ChartRefused, odfAddress } from "../charts/write"
 import { dataStyles } from "../write/dataStyle"
 
@@ -33,21 +34,6 @@ const CLASSES: Readonly<Record<string, string>> = {
 	doughnut: "chart:ring",
 	scatter: "chart:scatter",
 	radar: "chart:radar"
-}
-
-const LEGENDS: Readonly<Record<string, string>> = { r: "end", l: "start", t: "top", b: "bottom", tr: "top-end" }
-
-// c:dLblPos (§21.2.3.11) as chart:label-position (§20.71).
-const POSITIONS: Readonly<Record<string, string>> = {
-	bestFit: "avoid-overlap",
-	ctr: "center",
-	t: "top",
-	b: "bottom",
-	l: "left",
-	r: "right",
-	inEnd: "inside",
-	outEnd: "outside",
-	inBase: "near-origin"
 }
 
 // What a chart part holds that its object does not (by element, anywhere in the chart).
@@ -139,18 +125,9 @@ function ownLabels(reader: DrawingReader, series: number): Map<number, ChartLabe
 	return out
 }
 
-function labelProperties(labels: ChartLabels | null): [string, string | undefined][] {
-	if (labels === null) return []
-
-	const value = labels.value
-	const percent = labels.percent
-
-	return [
-		["chart:data-label-number", value && percent ? "value-and-percentage" : value ? "value" : percent ? "percentage" : "none"],
-		["chart:data-label-text", String(labels.category)],
-		["chart:data-label-series", String(labels.series)],
-		["chart:label-position", labels.position === null ? undefined : POSITIONS[labels.position]]
-	]
+// Data labels as chart properties; none at all for null labels.
+function labelPairs(labels: ChartLabels | null): [string, string | undefined][] {
+	return labels === null ? [] : labelProperties(labels)
 }
 
 // A solid colour of a container (a:solidFill), as #rrggbb; "none" for a:noFill; a gradient's first stop's colour
@@ -185,6 +162,9 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 
 	const reader = drawingReader(document)
 	const { space, chart, plotArea } = chartRoot(reader)
+
+	if (chart < 0) return null
+
 	const styleNumber = reader.number(reader.child(space, D.C, "style"), "val", 2)
 	const styles = new ObjectStyles()
 	const nodes = plotNodes(reader, plotArea)
@@ -279,7 +259,7 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 			const style = styles.style(
 				[
 					...(lines ? ([["chart:symbol-type", symbol === "none" || !plotSymbols ? "none" : "automatic"]] as const) : []),
-					...labelProperties(one.labels ?? plot.labels)
+					...labelPairs(one.labels ?? plot.labels)
 				],
 				graphic
 			)
@@ -340,7 +320,7 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 
 					flush()
 					children += `<chart:data-point chart:style-name="${styles.style(
-						labels === undefined ? [] : labelProperties(labels ?? NO_LABELS),
+						labels === undefined ? [] : labelPairs(labels ?? NO_LABELS),
 						color === undefined
 							? []
 							: [
@@ -442,7 +422,7 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 	)
 	const titleText = info.title === "" ? (total === 1 ? (first.series[0]?.name ?? "") : "Chart Title") : info.title
 	const title = titleText === null || titleText === "" ? "" : `<chart:title>${paragraphs(titleText)}</chart:title>`
-	const legend = info.legend === null ? "" : `<chart:legend chart:legend-position="${LEGENDS[info.legend] ?? "end"}"/>`
+	const legend = info.legend === null ? "" : `<chart:legend chart:legend-position="${ODF_LEGENDS.get(info.legend) ?? "end"}"/>`
 	const area = styles.style(
 		[],
 		[
@@ -468,8 +448,6 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 				)}"/>`) +
 		"</chart:plot-area>"
 	const body = `<chart:chart svg:width="${width}" svg:height="${height}" chart:class="${CLASSES[first.type] ?? "chart:bar"}" chart:style-name="${area}">${title}${legend}${plot}</chart:chart>`
-
-	if (chart < 0) return null
 
 	return {
 		content: `<?xml version="1.0" encoding="UTF-8"?><office:document-content ${OFFICE} office:version="1.3"><office:automatic-styles>${numberStyles.join("")}${styles.markup.join("")}</office:automatic-styles><office:body><office:chart>${body}</office:chart></office:body></office:document-content>`,

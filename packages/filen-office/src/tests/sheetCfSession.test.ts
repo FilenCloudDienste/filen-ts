@@ -380,4 +380,59 @@ describe("conditional formats on tiles", () => {
 		expect(looks.of(moved, 1, 0).fill).toBeUndefined()
 		session.close()
 	})
+
+	it("applies rules over a hostile number of ranges within a budget of rules times ranges", async () => {
+		// 100,000 ranges (A1 A3 A5 ...) and 2,000 rules: past the budget, rules beyond it are not read.
+		const sqref = Array.from({ length: 100_000 }, (_, i) => `A${String(i * 2 + 1)}`).join(" ")
+		const rules = Array.from(
+			{ length: 2_000 },
+			(_, i) => `<cfRule type="expression" dxfId="0" priority="${String(i + 1)}"><formula>$B1=1</formula></cfRule>`
+		).join("")
+		const { tile, looks, session } = await open(
+			sheet(
+				'<row r="1"><c r="B1"><v>1</v></c></row><row r="3"><c r="B3"><v>0</v></c></row>',
+				`<conditionalFormatting sqref="${sqref}">${rules}</conditionalFormatting>`
+			)
+		)
+		const first = await tile()
+
+		expect(looks.of(first, 0, 0).fill).toBe(0xffc7ce)
+		expect(looks.of(first, 2, 0).fill).toBeUndefined()
+		session.close()
+	})
+
+	it("keeps every rule over a few thousand ranges, and repaints what they read from around the ranges", async () => {
+		// 3,000 ranges (A1 A3 ... A5999): more than a rule's reach is kept per range for.
+		const sqref = Array.from({ length: 3_000 }, (_, i) => `A${String(i * 2 + 1)}`).join(" ")
+		const {
+			session,
+			sheet: id,
+			tile,
+			looks
+		} = await open(
+			sheet(
+				'<row r="1"><c r="A1"><v>0.5</v></c><c r="B1"><v>1</v></c><c r="D1"><v>1</v></c></row><row r="65"><c r="C65"><v>1</v></c></row>' +
+					'<row r="67"><c r="B67"><v>0</v></c></row>',
+				`<conditionalFormatting sqref="${sqref}">` +
+					'<cfRule type="expression" dxfId="0" priority="1"><formula>$B1=1</formula></cfRule>' +
+					'<cfRule type="expression" dxfId="1" priority="2"><formula>$C1=1</formula></cfRule>' +
+					'<cfRule type="expression" dxfId="2" priority="3"><formula>$D1=1</formula></cfRule></conditionalFormatting>'
+			)
+		)
+		const top = await tile(0, 0)
+		const lower = await tile(1, 0)
+
+		expect(looks.of(top, 0, 0)).toMatchObject({ bold: true, fill: 0xffc7ce })
+		expect(tileEntry(top, 0, 0)?.text).toBe("50.0%")
+		expect(looks.of(lower, 64, 0)).toMatchObject({ color: 0x006100, fill: 0xc6efce })
+		expect(looks.of(lower, 66, 0).fill).toBeUndefined()
+
+		const change = changeOf(await session.command({ type: "cells.set", sheet: id, cells: cells([[66, 1, "1"]]) }))
+		const patched = change.patches.find(patch => patch.tileRow === 1)
+
+		looks.add(change.styles)
+		expect(patched).toBeDefined()
+		expect(looks.of(patched as SheetTile, 66, 0).fill).toBe(0xffc7ce)
+		session.close()
+	})
 })

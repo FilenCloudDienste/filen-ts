@@ -387,6 +387,34 @@ describe("VDB", () => {
 		expect(values(["=VDB(100000,20000,10,4,5,1)", "=VDB(100000,20000,10,4,5,1,TRUE)"], 6)).toEqual([7557.142857, 6561])
 	})
 
+	it("prorates fractional start and end periods, with and without the switch", () => {
+		expect(
+			values(
+				[
+					"=VDB(2400,300,10,0.5,3.75,2,TRUE)",
+					"=VDB(2400,300,10,2.5,9.25,2)",
+					"=VDB(2400,300,10,8.25,9.75,1.5)",
+					"=VDB(2400,300,10,6.5,9.5,2,TRUE)",
+					"=VDB(2400,300,3,0.5,2.5,10,TRUE)",
+					"=VDB(2400,300,10,0.5,9.5,4,TRUE)"
+				],
+				6
+			)
+		).toEqual([1115.52, 1065.80809, 226.934564, 255.169766, 1050, 1620])
+	})
+
+	it("ends within a bounded time for any life", () => {
+		const started = performance.now()
+
+		expect(
+			values(
+				["=VDB(1000,0,1E13,0,1E13)", "=VDB(1000,0,1E13,0,1E13,2,TRUE)", "=VDB(1000,0,1E6,0,1E6)", "=VDB(1000,0,1E6,0,1E6,2,TRUE)"],
+				6
+			)
+		).toEqual(["!#NUM!", "!#NUM!", 1000, 864.664987])
+		expect(performance.now() - started).toBeLessThan(budget(1_000))
+	})
+
 	it("gives #NUM! for arguments that are not positive", () => {
 		// "All arguments except no_switch must be positive numbers."
 		expect(

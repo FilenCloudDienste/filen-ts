@@ -17,9 +17,11 @@ import { changeCase } from "../changeCase"
 import type { DocxEditContext } from "../context"
 import { baseFits } from "../formatting"
 import {
+	CLEARED_TYPES,
 	caretMarks,
 	changeMarkSets,
 	changeMarks,
+	normalStyleId,
 	runPieces,
 	selectedParagraphs,
 	withMark,
@@ -38,9 +40,6 @@ import type { DocxEditorSession } from "../session"
 
 const marks = docxSchema.marks
 const nodes = docxSchema.nodes
-// Formatting cleared by Clear All Formatting: everything but the language and highlighting (Word keeps both),
-// and the plain mark it sets.
-const CLEARED_TYPES: readonly MarkType[] = FORMATTING_MARKS.filter(name => name !== "lang" && name !== "highlight").map(name => marks[name])
 // What the painter carries of content: every formatting mark, and the run's source w:rPr (its base).
 const PROPERTY_TYPES: readonly MarkType[] = FORMATTING_MARKS.map(name => marks[name])
 const PAINTED_TYPES: readonly MarkType[] = [...PROPERTY_TYPES, marks.run]
@@ -691,20 +690,13 @@ function spacing(context: StoryCommandContext, command: Cmd<"paragraph.spacing">
 	)
 }
 
-// The id Clear All Formatting gives paragraphs: Normal (null when Normal is the default paragraph style).
-function normalStyle(context: DocxEditContext): string | null {
-	const styles = context.styles
-	const normal = styles.defaultOf("paragraph")
-
-	return normal === undefined || normal.canonicalName === "normal" ? null : (styles.byName("normal", "paragraph")?.id ?? null)
-}
-
 function paragraphReset(context: DocxEditContext, tr: Transaction, paragraphs: readonly ParagraphAt[]): void {
 	const reset: Record<string, unknown> = {}
 
 	for (const name of PARAGRAPH_ATTRS) reset[name] = null
 
-	reset["styleId"] = normalStyle(context)
+	// Clear All Formatting gives paragraphs Normal.
+	reset["styleId"] = normalStyleId(context)
 
 	setAttrs(tr, paragraphs, () => reset)
 }

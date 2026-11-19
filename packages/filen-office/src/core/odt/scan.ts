@@ -1,6 +1,3 @@
-import { Inflate } from "fflate"
-import { crc32, ZipError, type SliceClock, type ZipArchive, type ZipEntry } from "../opc/index"
-import { METHOD_DEFLATE, METHOD_STORED } from "../opc/zipReader"
 import { Namespaces, assertWellFormed, parseXml, type XmlDocument } from "../xml/index"
 
 // content.xml's body cut into its top-level blocks (the children of office:text) without ever holding the
@@ -346,60 +343,4 @@ export class BodyScanner {
 		this.pendingBytes = 0
 		out.push({ document, namespaces: new Namespaces(document), blocks })
 	}
-}
-
-// Bytes inflated per step.
-const STEP = 64 * 1024
-
-// An entry's content in chunks as it inflates, CRC- and size-checked at the end; `clock` gives the host turns.
-export async function* inflateChunks(archive: ZipArchive, entry: ZipEntry, clock?: SliceClock): AsyncGenerator<Uint8Array> {
-	if (entry.method !== METHOD_STORED && entry.method !== METHOD_DEFLATE) {
-		throw new ZipError("unsupported", `Compression method ${entry.method} of ${entry.name} is not supported`)
-	}
-
-	const { dataOffset } = await archive.layout(entry)
-	let crc = 0
-	let written = 0
-	const ready: Uint8Array[] = []
-	const accept = (chunk: Uint8Array): void => {
-		written += chunk.length
-
-		if (written > entry.uncompressedSize) throw new ZipError("corrupt", `${entry.name} inflates past its declared size`)
-
-		crc = crc32(chunk, crc)
-		ready.push(chunk)
-	}
-	const inflater = entry.method === METHOD_DEFLATE ? new Inflate(accept) : undefined
-
-	for (let read = 0; read < entry.compressedSize; read += STEP) {
-		const step = Math.min(STEP, entry.compressedSize - read)
-		const bytes = await archive.source.read(dataOffset + read, step)
-
-		if (inflater === undefined) {
-			accept(bytes)
-		} else {
-			try {
-				inflater.push(bytes, read + step >= entry.compressedSize)
-			} catch (error) {
-				if (error instanceof ZipError) throw error
-
-				throw new ZipError("corrupt", `Damaged deflate data in ${entry.name}`)
-			}
-		}
-
-		while (ready.length > 0) {
-			const chunk = ready.shift()
-
-			if (chunk !== undefined) yield chunk
-		}
-
-		if (clock?.due === true) await clock.pause()
-	}
-
-	if (inflater !== undefined && entry.compressedSize === 0) inflater.push(new Uint8Array(0), true)
-
-	for (const chunk of ready) yield chunk
-
-	if (written !== entry.uncompressedSize) throw new ZipError("corrupt", `${entry.name} is shorter than its declared size`)
-	if (crc !== entry.crc32) throw new ZipError("corrupt", `CRC mismatch in ${entry.name}`)
 }

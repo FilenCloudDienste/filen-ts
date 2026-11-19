@@ -1,6 +1,13 @@
 import type { Node } from "prosemirror-model"
 import { describe, expect, it } from "vitest"
-import { findUnsavableBlocks, type DocxEditorSession } from "@filen/office/core/docx/edit"
+import { TextSelection } from "prosemirror-state"
+import {
+	blockPositions,
+	findUnsavableBlocks,
+	revertFeatureUnits,
+	withRevertedUnits,
+	type DocxEditorSession
+} from "@filen/office/core/docx/edit"
 import { nodeText, sessionOf } from "./docxEditFixtures"
 import { p } from "./docxSynthetic"
 
@@ -134,7 +141,7 @@ describe("edited blocks at save time", () => {
 
 		const doc = session.state.doc
 
-		expect(found?.flatMap(entry => entry.positions.map(pos => nodeText(doc.nodeAt(pos) as Node)))).toEqual([
+		expect(found?.flatMap(entry => blockPositions(entry.units).map(pos => nodeText(doc.nodeAt(pos) as Node)))).toEqual([
 			"Cell edited BAD",
 			"Four edited BAD"
 		])
@@ -143,7 +150,7 @@ describe("edited blocks at save time", () => {
 		for (const entry of found ?? []) {
 			const doc = entry.session.state.doc
 
-			entry.session.revert(entry.positions.map(pos => doc.nodeAt(pos) as Node))
+			entry.session.revert(blockPositions(entry.units).map(pos => doc.nodeAt(pos) as Node))
 		}
 
 		expect(texts(session.state.doc)).toEqual(["Zero edited", "One edited", "locked:Cell", "Three edited", "locked:Four"])
@@ -194,5 +201,40 @@ describe("edited blocks at save time", () => {
 		await findUnsavableBlocks([session], writer.writes)
 		await findUnsavableBlocks([session], known.writes, { refused: true })
 		expect(known.runs()).toBe(writer.runs() - 1)
+	})
+	it("finds a table the editor made as the unit to take back, which the stand-in and the revert both take", async () => {
+		const session = await sessionOf({ body: BODY })
+		let at = -1
+
+		session.state.doc.descendants((node, pos) => {
+			if (at < 0 && node.isTextblock && nodeText(node) === "Four") at = pos + 1
+		})
+		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, at)))
+		expect(session.execute({ type: "table.insert", rows: 1, cols: 1 })).toBe(true)
+
+		// The writer refuses any document with a second table.
+		const writes = (sessions: readonly DocxEditorSession[]): Promise<boolean> => {
+			let tables = 0
+
+			sessions[0]?.state.doc.descendants(node => {
+				if (node.type.name === "table") tables++
+
+				return !node.isTextblock
+			})
+
+			return Promise.resolve(tables < 2)
+		}
+		const found = await findUnsavableBlocks([session], writes)
+
+		expect(found?.map(entry => entry.units)).toEqual([[{ kind: "table", key: -1 }]])
+
+		const entry = found?.[0]
+
+		if (entry === undefined) throw new Error("nothing found")
+
+		expect(await writes([withRevertedUnits(entry.session, entry.units)])).toBe(true)
+		expect(await writes([session])).toBe(false)
+		expect(revertFeatureUnits(session, entry.units)).toBe(1)
+		expect(await writes([session])).toBe(true)
 	})
 })

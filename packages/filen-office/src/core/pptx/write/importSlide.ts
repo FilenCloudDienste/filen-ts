@@ -20,6 +20,8 @@ export interface ImportTarget {
 }
 
 const NEXT_SLIDE = "ppaction://hlinkshowjump?jump=nextslide"
+// p:ph@idx is an xsd:unsignedInt (ECMA-376 Part 1 §19.3.1.36).
+const MAX_IDX = 4_294_967_295
 
 function zip(name: string): string {
 	return name.startsWith("/") ? name.slice(1) : name
@@ -81,14 +83,14 @@ function slideMarkup(bytes: Uint8Array, jumps: ReadonlySet<string>, target: Impo
 		}
 
 		if (r.is(node, G.P, "ph")) {
-			const idx = r.attr(node, "idx")
+			// Read as the reader reads it; an index that is no xsd:unsignedInt (idx="x", idx="-1") is taken out and the
+			// placeholder treated as having none.
+			const idx = r.int(node, "idx")
+			const valid = idx !== undefined && idx >= 0 && idx <= MAX_IDX
 
-			placeholders.push({
-				node,
-				type: (r.attr(node, "type") ?? "obj") as PlaceholderType,
-				idx: idx === undefined ? 0 : Number(idx),
-				written: idx !== undefined
-			})
+			if (!valid && r.attr(node, "idx") !== undefined) editor.removeAttribute(node, "idx")
+
+			placeholders.push({ node, type: (r.attr(node, "type") ?? "obj") as PlaceholderType, idx: valid ? idx : 0, written: valid })
 		}
 	}
 
@@ -106,8 +108,13 @@ function slideMarkup(bytes: Uint8Array, jumps: ReadonlySet<string>, target: Impo
 	})
 
 	// An index for one the layout has nothing for: none of the layout's (a written idx matches by idx alone, whatever
-	// its type) nor the slide's.
-	let spare = Math.max(0, ...target.placeholders.map(each => each.idx), ...placeholders.map(each => each.idx))
+	// its type) nor the slide's. Counted past the highest below MAX_IDX, which PowerPoint writes for a placeholder with no
+	// layout counterpart: one past it is no xsd:unsignedInt.
+	let spare = Math.max(
+		0,
+		...target.placeholders.map(each => each.idx).filter(idx => idx < MAX_IDX),
+		...placeholders.map(each => each.idx).filter(idx => idx < MAX_IDX)
+	)
 
 	for (const ph of pending) {
 		const match =

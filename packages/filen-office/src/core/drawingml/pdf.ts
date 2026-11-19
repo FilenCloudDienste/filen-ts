@@ -7,6 +7,7 @@ import type { PdfImage, PdfPage } from "../pdfwrite/page"
 import type { PdfImageSource } from "../pdfwrite/writer"
 import { linearGradientLine, recolorPixels, recolors } from "./canvas"
 import { closedCommands, commandBounds, compoundMask, type CompoundMask } from "./compoundLine"
+import type { DrawingData } from "./data"
 import {
 	ITEM_FILL_MODIFIER_MASK,
 	ITEM_FLOATS,
@@ -18,7 +19,6 @@ import {
 	pathGradientCircle,
 	type DrawingClip,
 	type DrawingImage,
-	type DrawingList,
 	type DrawingText,
 	type GradientStops,
 	type ImageTile,
@@ -41,22 +41,8 @@ import { layoutBlock } from "./textBlock"
 // Coordinates are the drawing's px; `placement` maps them onto the page's px (see core/pdfwrite/page.ts). The
 // caller opens the marked content (a Figure, or an artifact) around it.
 
-export interface PdfDrawingData {
-	readonly width: number
-	readonly height: number
-	readonly commands: Uint8Array
-	readonly coords: Float32Array
-	readonly itemCount: number
-	readonly itemFloats: Float32Array
-	readonly itemInts: Int32Array
-	readonly paints: DrawingList["paints"]
-	readonly strokes: DrawingList["strokes"]
-	readonly images: DrawingList["images"]
-	readonly texts: DrawingList["texts"]
-	readonly clips?: DrawingList["clips"]
-	readonly itemClips?: Int32Array
-	readonly background?: number
-}
+// Shadows are not drawn, and text takes the export's fonts.
+export type PdfDrawingData = Omit<DrawingData, "shadows" | "textFonts">
 
 export interface PdfDrawingContext {
 	readonly page: PdfPage

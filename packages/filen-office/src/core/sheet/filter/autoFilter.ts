@@ -1,5 +1,6 @@
 import { XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
-import type { SheetRange } from "../protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange } from "../protocol"
+import { columnIndex, rangeName } from "../refs/cellRef"
 import {
 	DYNAMIC_FILTERS,
 	MAX_FILTER_CONDITIONS,
@@ -60,19 +61,12 @@ export function parseA1Range(text: string): SheetRange | null {
 
 	if (match === null) return null
 
-	const col = (letters: string): number => {
-		let value = 0
-
-		for (const char of letters.toUpperCase()) value = value * 26 + (char.charCodeAt(0) - 64)
-
-		return value - 1
-	}
-	const startCol = col(match[1] as string)
+	const startCol = columnIndex(match[1] as string)
 	const startRow = Number(match[2]) - 1
-	const endCol = match[3] === undefined ? startCol : col(match[3])
+	const endCol = match[3] === undefined ? startCol : columnIndex(match[3])
 	const endRow = match[4] === undefined ? startRow : Number(match[4]) - 1
 
-	if (startRow < 0 || endRow < 0 || startCol > 16_383 || endCol > 16_383 || endRow > 1_048_575) return null
+	if (startRow < 0 || endRow < 0 || startCol >= SHEET_MAX_COLS || endCol >= SHEET_MAX_COLS || endRow >= SHEET_MAX_ROWS) return null
 
 	return {
 		startRow: Math.min(startRow, endRow),
@@ -80,22 +74,6 @@ export function parseA1Range(text: string): SheetRange | null {
 		endRow: Math.max(startRow, endRow),
 		endCol: Math.max(startCol, endCol)
 	}
-}
-
-function columnLetters(col: number): string {
-	let out = ""
-
-	for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(65 + ((n - 1) % 26)) + out
-
-	return out
-}
-
-export function a1Range(range: SheetRange): string {
-	const start = `${columnLetters(range.startCol)}${String(range.startRow + 1)}`
-
-	return range.startRow === range.endRow && range.startCol === range.endCol
-		? start
-		: `${start}:${columnLetters(range.endCol)}${String(range.endRow + 1)}`
 }
 
 function bool(value: string | undefined, fallback: boolean): boolean {
@@ -429,9 +407,9 @@ export function sortStateMarkup(prefix: string, sort: SortStateInput): string {
 	let inner = ""
 
 	for (const condition of sort.conditions)
-		inner += `<${qualify(prefix, "sortCondition")}${condition.descending ? attr("descending", 1) : ""}${attr("ref", a1Range(condition.ref))}/>`
+		inner += `<${qualify(prefix, "sortCondition")}${condition.descending ? attr("descending", 1) : ""}${attr("ref", rangeName(condition.ref))}/>`
 
-	return `<${name}${sort.columnSort ? attr("columnSort", 1) : ""}${sort.caseSensitive ? attr("caseSensitive", 1) : ""}${attr("ref", a1Range(sort.ref))}>${inner}</${name}>`
+	return `<${name}${sort.columnSort ? attr("columnSort", 1) : ""}${sort.caseSensitive ? attr("caseSensitive", 1) : ""}${attr("ref", rangeName(sort.ref))}>${inner}</${name}>`
 }
 
 export interface AutoFilterWrite {
@@ -454,8 +432,8 @@ export function writeAutoFilter(source: AutoFilter | null, prefix: string, write
 		const inner = columns + (write.sort ?? "")
 
 		return inner === ""
-			? `<${name}${attr("ref", a1Range(write.ref))}/>`
-			: `<${name}${attr("ref", a1Range(write.ref))}>${inner}</${name}>`
+			? `<${name}${attr("ref", rangeName(write.ref))}/>`
+			: `<${name}${attr("ref", rangeName(write.ref))}>${inner}</${name}>`
 	}
 
 	const document = parseXml(encodeUtf8(source.markup))
@@ -474,7 +452,7 @@ export function writeAutoFilter(source: AutoFilter | null, prefix: string, write
 
 	if (write.sort !== undefined) sort = write.sort ?? ""
 
-	editor.setAttribute(root, "ref", a1Range(write.ref))
+	editor.setAttribute(root, "ref", rangeName(write.ref))
 	editor.setContent(root, columns + sort + rest)
 
 	const out = decodeUtf8(editor.serialize())

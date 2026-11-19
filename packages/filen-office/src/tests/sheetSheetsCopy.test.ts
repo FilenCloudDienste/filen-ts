@@ -210,6 +210,63 @@ describe("sheet session: sheets duplicated", () => {
 	}
 })
 
+// Names a file can hold that Excel would refuse: no " (n)" suffix cures them, so the copy's name is cleaned first.
+describe("sheet session: duplicating sheets whose names Excel would refuse", () => {
+	const valid = (name: string): boolean =>
+		/^[^\\/?*[\]:]{1,31}$/.test(name) &&
+		!name.startsWith("'") &&
+		!name.endsWith("'") &&
+		!/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(name)
+
+	for (const [source, first, second] of [
+		["Report 01/2024", "Report 01_2024 (2)", "Report 01_2024 (3)"],
+		["a:b", "a_b (2)", "a_b (3)"],
+		["'x", "x (2)", "x (3)"],
+		["A".repeat(26) + "\u{1f600}BBB", `${"A".repeat(26)} (2)`, `${"A".repeat(26)} (3)`]
+	] as const)
+		it(`gives a copy of ${JSON.stringify(source)} a valid, unique name`, { timeout: 5_000 }, async () => {
+			const { session, info } = await openFixture({ sheets: [{ name: source, body: "<sheetData/>" }] })
+			const id = info.sheets[0]!.id
+			const once = changeOf(await session.command({ type: "sheet.duplicate", sheet: id })).sheets?.map(sheet => sheet.name)
+			const twice = changeOf(await session.command({ type: "sheet.duplicate", sheet: id })).sheets?.map(sheet => sheet.name)
+
+			expect(once).toEqual([source, first])
+			expect(twice).toEqual([source, second, first])
+			expect([first, second].every(valid)).toBe(true)
+			session.close()
+		})
+})
+
+describe("sheet session: a duplicate undone and redone", () => {
+	it("gives the copy back the very relationships its markup names, two to one target included", async () => {
+		const link = (id: string): string =>
+			`<Relationship Id="${id}" Type="${R}/hyperlink" Target="https://filen.io/" TargetMode="External"/>`
+		const { session, info } = await openFixture({
+			sheets: [
+				{
+					name: "One",
+					body: '<sheetData/><hyperlinks><hyperlink ref="A1" r:id="rId1"/><hyperlink ref="B1" r:id="rId2"/></hyperlinks>',
+					rels: link("rId1") + link("rId2")
+				}
+			]
+		})
+
+		changeOf(await session.command({ type: "sheet.duplicate", sheet: info.sheets[0]!.id }))
+		changeOf(await session.undo())
+		changeOf(await session.redo())
+
+		const files = parts(await savedBytes(session))
+		const part = sheetPartOf(files, "One (2)")
+		const ids = [...(files[part] ?? "").matchAll(/<hyperlink [^>]*r:id="([^"]+)"/g)].map(match => match[1])
+		const relsPart = part.replace(/([^/]+)$/, "_rels/$1.rels")
+		const related = [...(files[relsPart] ?? "").matchAll(/<Relationship [^>]*Id="([^"]+)"/g)].map(match => match[1])
+
+		expect(ids).toHaveLength(2)
+		expect([...ids].sort()).toEqual([...related].sort())
+		session.close()
+	})
+})
+
 const TABLE_SHEET = {
 	sheets: [
 		{

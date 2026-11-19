@@ -98,8 +98,9 @@ for (const [lo, name] of [
 	BY_ODF.set(lo, name)
 }
 
+// Own entries only: the name comes from the file, and "constructor" or "toString" must not resolve.
 export function attributeEntry(name: string): AttributeEntry | undefined {
-	return ATTRIBUTE_MATRIX[name]
+	return Object.hasOwn(ATTRIBUTE_MATRIX, name) ? ATTRIBUTE_MATRIX[name] : undefined
 }
 
 // The ECMA attribute an ODF smil:attributeName names, or undefined.
@@ -108,7 +109,7 @@ export function attributeFromOdf(name: string): string | undefined {
 }
 
 export function attributeToOdf(name: string): string | undefined {
-	return ATTRIBUTE_MATRIX[name]?.odf
+	return attributeEntry(name)?.odf
 }
 
 // --- Formulas (p:tav fmla and the formula syntax of time-animate values, §19.5) ---
@@ -146,15 +147,28 @@ const FUNCTIONS1: Readonly<Record<string, (x: number) => number>> = {
 
 const FUNCTIONS2: Readonly<Record<string, (a: number, b: number) => number>> = { max: Math.max, min: Math.min }
 
+// PowerPoint's formulas are well under 200 characters. The length bounds the tokens and the closure chain a sum
+// evaluates through; the depth bounds the parser's recursion on nested parentheses, unary minus and powers.
+const MAX_FORMULA_CHARS = 4096
+const MAX_FORMULA_DEPTH = 64
+
+// Own entries only: the name comes from the file, and inherited members ("valueOf", "toString") must not resolve.
+function own<T>(table: Readonly<Record<string, T>>, name: string): T | undefined {
+	return Object.hasOwn(table, name) ? table[name] : undefined
+}
+
 // Compiles a formula ("#ppt_x+(cos(-2*pi*(1-$))*-#ppt_x)*(1-$)") into a function of the variables; undefined when it
 // does not parse. Grammar: sum := product (('+'|'-') product)*; product := power (('*'|'/') power)*;
 // power := unary ('^' power)?; unary := '-' unary | primary; primary := number | name | name '(' args ')' | '(' sum ')'.
 export function compileFormula(text: string): Formula | undefined {
+	if (text.length > MAX_FORMULA_CHARS) return undefined
+
 	const tokens = text.match(/\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?|#?[A-Za-z_$][A-Za-z_0-9.]*|\$|[-+*/^(),]/gu)
 
 	if (tokens === null || tokens.join("") !== text.replace(/\s+/gu, "")) return undefined
 
 	let at = 0
+	let depth = 0
 	const peek = (): string | undefined => tokens[at]
 	const sum = (): Formula | undefined => {
 		let left = product()
@@ -189,6 +203,17 @@ export function compileFormula(text: string): Formula | undefined {
 		return left
 	}
 	const power = (): Formula | undefined => {
+		if (depth >= MAX_FORMULA_DEPTH) return undefined
+
+		depth++
+
+		const result = powerUnbounded()
+
+		depth--
+
+		return result
+	}
+	const powerUnbounded = (): Formula | undefined => {
 		const base = unary()
 
 		if (base === undefined || peek() !== "^") return base
@@ -201,9 +226,14 @@ export function compileFormula(text: string): Formula | undefined {
 	}
 	const unary = (): Formula | undefined => {
 		if (peek() === "-") {
+			if (depth >= MAX_FORMULA_DEPTH) return undefined
+
 			at++
+			depth++
 
 			const inner = unary()
+
+			depth--
 
 			return inner === undefined ? undefined : vars => -inner(vars)
 		}
@@ -232,7 +262,7 @@ export function compileFormula(text: string): Formula | undefined {
 		}
 
 		const name = token.startsWith("#") ? token.slice(1) : token
-		const slot = VARIABLES[name]
+		const slot = own(VARIABLES, name)
 
 		if (slot !== undefined) return vars => vars[slot] ?? 0
 		if (name === "pi") return () => Math.PI
@@ -246,7 +276,7 @@ export function compileFormula(text: string): Formula | undefined {
 
 		if (first === undefined) return undefined
 
-		const one = FUNCTIONS1[name]
+		const one = own(FUNCTIONS1, name)
 
 		if (one !== undefined) {
 			if (tokens[at++] !== ")") return undefined
@@ -254,7 +284,7 @@ export function compileFormula(text: string): Formula | undefined {
 			return vars => one(first(vars))
 		}
 
-		const two = FUNCTIONS2[name]
+		const two = own(FUNCTIONS2, name)
 
 		if (two === undefined || tokens[at++] !== ",") return undefined
 

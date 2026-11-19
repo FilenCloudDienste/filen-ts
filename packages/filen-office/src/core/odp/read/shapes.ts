@@ -1,7 +1,6 @@
 import { groupBounds } from "../../presentation/groupBounds"
 import { NO_PROPERTIES, parseLength, parsePercent, type OdfListStyle, type OdfProperties, type StyleScope } from "../../odf/index"
 import { Evaluator, GeometryError, enhancedPath, pointsPath, svgPath, type SubPath } from "../../odt/geometry"
-import { classifyHref } from "../../presentation/actions"
 import type { PictureAdjust } from "../../presentation/edit/ops"
 import { tooDeep, tooLarge } from "../../presentation/refusal"
 import {
@@ -31,9 +30,10 @@ import { NodeKind } from "../../xml/index"
 import { presetOfOdfType } from "../../odf/presetShapes"
 import { decompose, transformMatrix, type Matrix } from "../../odf/transform"
 import { readScene } from "../../metafile/dr3d"
+import { own } from "../../tables"
 import { overlay, type Fragment, type OdpContext } from "./context"
 import { EMU_PER_PT, bodyPrOf, effectsOf, fillOf, lineOf, packagePart, srgb } from "./fills"
-import { asianSizeOf, embeddedListStyle, levelStyle, listStyleOf, pageOfFragment, readTextBody, type TextScope } from "./text"
+import { asianSizeOf, embeddedListStyle, levelStyle, hrefAction, listStyleOf, readTextBody, type TextScope } from "./text"
 
 // The shapes of a drawing page, master page or notes page (ODF 1.3 Part 3 §10.3 frames, §10.4 shapes, §10.5
 // custom shapes, §10.9 groups) as the model's shape nodes, back to front. Positions and sizes become EMU boxes:
@@ -97,14 +97,14 @@ interface Box {
 
 export { transformCalls, transformMatrix } from "../../odf/transform"
 
-// An EMU box from a box in points and an optional transform: DrawingML's offset and extent of the unrotated box and
-// its clockwise rotation about the centre.
 // LibreOffice mirrors a custom shape (draw:mirror-*) after its draw:transform turns it, DrawingML before: under one
 // mirror the box's turn reads the other way (LibreOffice's pptx import writes a flipped group's members so).
 function turnedBack(xfrm: Xfrm, oneMirror: boolean): Xfrm {
 	return oneMirror && xfrm.rot !== 0 ? { ...xfrm, rot: (21_600_000 - xfrm.rot) % 21_600_000 } : xfrm
 }
 
+// An EMU box from a box in points and an optional transform: DrawingML's offset and extent of the unrotated box and
+// its clockwise rotation about the centre.
 export function xfrmOf(box: Box, matrix: Matrix | undefined, flipH = false, flipV = false): Xfrm {
 	if (matrix === undefined) {
 		return {
@@ -292,7 +292,7 @@ interface ShapeStyle {
 const CLASS_STYLES: Readonly<Record<string, string>> = { title: "title", subtitle: "subtitle", outline: "outline1", notes: "notes" }
 
 function masterStyleOf(context: OdpContext, master: string | undefined, presentationClass: string | undefined): string | undefined {
-	const suffix = presentationClass === undefined ? undefined : CLASS_STYLES[presentationClass]
+	const suffix = presentationClass === undefined ? undefined : own(CLASS_STYLES, presentationClass)
 
 	if (suffix === undefined) return undefined
 
@@ -318,7 +318,7 @@ function objectMaster(
 	presentationClass: string | undefined,
 	page: string | undefined
 ): string | undefined {
-	const suffix = presentationClass === undefined ? undefined : CLASS_STYLES[presentationClass]
+	const suffix = presentationClass === undefined ? undefined : own(CLASS_STYLES, presentationClass)
 
 	if (suffix === undefined || presentation === undefined) return page
 
@@ -338,7 +338,8 @@ function styleOf(context: OdpContext, fragment: Fragment, attributes: ReadonlyMa
 	const presentation = attributes.get("presentation:style-name")
 	const scope = fragment.scope
 	const presentationClass = attributes.get("presentation:class")
-	const classObject = presentationClass !== undefined && CLASS_STYLES[presentationClass] !== undefined ? presentationClass : undefined
+	const classObject =
+		presentationClass !== undefined && own(CLASS_STYLES, presentationClass) !== undefined ? presentationClass : undefined
 
 	return {
 		graphic: overlay(
@@ -417,8 +418,6 @@ function graphicProps(
 	}
 }
 
-// The levels of a shape's text: outline objects from their master's outline styles, every other shape from its
-// own style at every level.
 // The levels of a shape's text: outline objects from their master's outline styles ("-outline1"…"-outline9"),
 // their own automatic style's attributes over each, every other shape from its own style at every level.
 function textLevels(
@@ -506,16 +505,8 @@ function eventAction(context: OdpContext, fragment: Fragment, node: number): Act
 					return { kind: "refused", what: "execute", raw: href ?? "execute" }
 				case "verb":
 					return { kind: "refused", what: "ole", raw: attributes.get("presentation:verb") ?? "verb" }
-				case "show": {
-					if (href === undefined) return undefined
-					if (href.startsWith("#")) {
-						const slide = pageOfFragment(context, href.slice(1))
-
-						return slide === undefined ? undefined : { kind: "slide", slide }
-					}
-
-					return classifyHref(href)
-				}
+				case "show":
+					return href === undefined ? undefined : hrefAction(context, href)
 				default:
 					return undefined
 			}
@@ -855,16 +846,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 	if (name === "draw:a") {
 		// A hyperlinked shape: its first shape child, clicked to the link.
 		const href = fragment.attributes(node).get("xlink:href")
-		const action =
-			href === undefined
-				? undefined
-				: href.startsWith("#")
-					? (() => {
-							const slide = pageOfFragment(context, href.slice(1))
-
-							return slide === undefined ? undefined : ({ kind: "slide", slide } as const)
-						})()
-					: classifyHref(href)
+		const action = href === undefined ? undefined : hrefAction(context, href)
 
 		for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
 			const shape = readShape(context, scope, child, depth + 1, action)
@@ -885,7 +867,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 	if (id > context.budgets.shapesPerSlide + 1) tooLarge("shapes on a slide", context.budgets.shapesPerSlide)
 	const hidden = attributes.get("draw:display") === "none" || attributes.get("draw:display") === "printer"
 	const presentationClass = attributes.get("presentation:class")
-	const phType = presentationClass === undefined ? undefined : CLASS_TYPES[presentationClass]
+	const phType = presentationClass === undefined ? undefined : own(CLASS_TYPES, presentationClass)
 	const empty = attributes.get("presentation:placeholder") === "true"
 	const objectMasterName = objectMaster(
 		context,

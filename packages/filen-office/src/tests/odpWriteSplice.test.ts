@@ -1,9 +1,26 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { ShapeNode } from "../core/presentation/model"
-import { plainText } from "./odpFixtures"
-import { changes, entriesOf, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, text, touched } from "./odpWriteFixtures"
+import { odpBytes, plainText } from "./odpFixtures"
+import { changes, entriesOf, ODP_DECK, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, text, touched } from "./odpWriteFixtures"
+import { DEFAULTS, savedOdpShow } from "./showSettingsFixtures"
 
 const EMU_PER_CM = 360_000
+
+// Every stream the content prologue is read from.
+const prologues = vi.hoisted(() => ({ read: [] as Uint8Array[] }))
+
+vi.mock(import("../core/odf/index"), async importOriginal => {
+	const actual = await importOriginal()
+
+	return {
+		...actual,
+		readContentPrologue: bytes => {
+			prologues.read.push(bytes)
+
+			return actual.readContentPrologue(bytes)
+		}
+	}
+})
 
 describe("ODP splice writer", () => {
 	it("answers unchanged for a deck opened and saved with nothing edited", async () => {
@@ -156,6 +173,20 @@ describe("ODP splice writer", () => {
 		})
 	})
 
+	it("parses the source content.xml's prologue once per save", async () => {
+		const opened = await openOdpDeck(odpDeck())
+
+		touched(slideAt(opened, 0))
+		shapeNamed(slideAt(opened, 0), "Title").name = "Renamed"
+		opened.deck.show = { ...DEFAULTS, loop: true }
+		prologues.read.length = 0
+
+		const saved = await saveDeck(opened, changes("show"))
+
+		expect(saved.outcome.kind).toBe("written")
+		expect(prologues.read.filter(bytes => bytes === opened.parts.content.bytes)).toHaveLength(1)
+	})
+
 	it("keeps the pages it did not touch byte for byte", async () => {
 		const opened = await openOdpDeck(odpDeck())
 		const slide = touched(slideAt(opened, 2))
@@ -185,6 +216,39 @@ describe("ODP splice writer", () => {
 		const saved = await saveDeck(opened)
 
 		expect(saved.outcome).toMatchObject({ kind: "refused", reason: "unsupported" })
+	})
+
+	it("writes new settings before office:presentation ends when the last 4 KiB start inside a character", async () => {
+		const bare = ODP_DECK.body.replace(/<presentation:settings.*<\/presentation:settings>/u, "")
+		let cases = 0
+
+		for (const [character, width] of [
+			["é", 2],
+			["中", 3],
+			["😀", 4]
+		] as const) {
+			for (let pad = 0; pad < width; pad++) {
+				const fixture = { ...ODP_DECK, body: bare.replace("The end", `The end ${character.repeat(2000)}${"x".repeat(pad)}`) }
+				const bytes = odpBytes(fixture)
+				const content = (await entriesOf(bytes)).get("content.xml") ?? new Uint8Array(0)
+				const window = content[content.length - 4096] ?? 0
+
+				// Only a window that starts on a continuation byte.
+				if ((window & 0xc0) !== 0x80) continue
+
+				cases++
+
+				const saved = await savedOdpShow(bytes, { ...DEFAULTS, loop: true })
+
+				expect(saved.show.loop).toBe(true)
+				expect(text((await entriesOf(saved.bytes)).get("content.xml"))).toMatch(
+					/<presentation:settings presentation:endless="true"><\/presentation:settings><\/office:presentation><\/office:body><\/office:document-content>$/u
+				)
+			}
+		}
+
+		// Every continuation byte of each width: one for é, two for 中, three for 😀.
+		expect(cases).toBe(6)
 	})
 
 	it("refuses a view-only deck", async () => {

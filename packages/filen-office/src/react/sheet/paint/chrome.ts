@@ -1,5 +1,6 @@
 import { columnName } from "../../../core/sheet/refs/cellRef"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange } from "../../../core/sheet/protocol"
+import { shownIndices } from "../axis"
 import type { GridSelection } from "../selection"
 import type { SheetGridTheme } from "../theme"
 import { rangeRects, segments, type GridRect } from "../layers"
@@ -99,11 +100,8 @@ function headers(canvas: GridCanvas, scene: ChromeScene, axis: "rows" | "cols"):
 
 		canvas.clip()
 
-		for (let index = part.first; index <= part.last; index++) {
+		for (const index of shownIndices(own.axis, part.first, part.last)) {
 			const size = own.axis.size(index)
-
-			if (size === 0) continue
-
 			const start = screenOf(own, index)
 			const cover = selection === null ? "none" : coverOf(selection.ranges, axis, index)
 

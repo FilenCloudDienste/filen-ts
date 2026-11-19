@@ -281,6 +281,24 @@ describe("MicroType Express compact tables", () => {
 		expect(cpuMs() - start).toBeLessThan(budget(150))
 	})
 
+	it("refuses a directory that repeats a tag or has more than 256 tables (each would decode its range again)", () => {
+		const vdmx = concat(be(1, 1, 1), bytes(1, 1, 1, 1), be(12), be(1, 2048, 2048), bytes(0b00000001))
+		const repeated = ctf({ ...baseTables(), glyf: be(0, 0, 0), VDMX: vdmx, VDMy: vdmx })
+		const at = 12 + Array.from({ length: 8 }, (_, k) => k).findIndex(k => repeated[12 + k * 16 + 3] === 0x79) * 16
+
+		repeated[at + 3] = 0x58
+
+		expect(() => ctfToTtf(repeated, new Uint8Array(0), new Uint8Array(0))).toThrow(expect.objectContaining({ code: "corrupt" }))
+
+		const filler: Record<string, Uint8Array> = {}
+
+		for (let k = 0; k < 257 - 6; k++) filler[`z${String(k).padStart(3, "0")}`] = new Uint8Array(0)
+
+		expect(() => ctfToTtf(ctf({ ...baseTables(), glyf: be(0, 0, 0), ...filler }), new Uint8Array(0), new Uint8Array(0))).toThrow(
+			expect.objectContaining({ code: "corrupt" })
+		)
+	})
+
 	it("refuses a compact glyph that runs past its table with a typed error", () => {
 		expect(() => ctfToTtf(ctf({ ...baseTables(), glyf: be(1, 0) }), new Uint8Array(0), new Uint8Array(0))).toThrow(FontError)
 	})
@@ -305,6 +323,45 @@ describe("Embedded OpenType", () => {
 		expect(() => readEotHeader(eot(font, 0).subarray(0, 40))).toThrow(FontError)
 		expect(() => decodeEot(eot(font, 0), { maxFontBytes: 1024 })).toThrow(expect.objectContaining({ code: "tooLarge" }))
 		expect(() => decodeMtx(new Uint8Array(4))).toThrow(FontError)
+	})
+
+	it("refuses an uncompressed font whose directory would checksum the font again per record, before summing", () => {
+		const size = 1 << 20
+		// A sfnt of `tags` records, each covering the whole font but cmap: one (3, 1) format 4 subtable whose
+		// language is set, so the decoder clears it and checksums again.
+		const font = (tags: readonly string[]): Uint8Array => {
+			const out = new Uint8Array(Math.max(size, 12 + tags.length * 16 + 32))
+			const view = new DataView(out.buffer)
+			const cmapAt = out.length - 32
+
+			view.setUint32(0, 0x00010000)
+			view.setUint16(4, tags.length)
+			out.set(concat(be(0, 1, 3, 1, 0, 12), be(4, 12, 7, 0, 0, 0)), cmapAt)
+			tags.forEach((tag, k) => {
+				for (let c = 0; c < 4; c++) out[12 + k * 16 + c] = tag.charCodeAt(c)
+
+				view.setUint32(12 + k * 16 + 8, tag === "cmap" ? cmapAt : 0)
+				view.setUint32(12 + k * 16 + 12, tag === "cmap" ? 24 : out.length)
+			})
+
+			return out
+		}
+		const tags = (count: number): string[] => ["cmap", ...Array.from({ length: count - 1 }, (_, k) => `z${String(k).padStart(3, "0")}`)]
+		const start = cpuMs()
+
+		for (const count of [0xffff, 257]) {
+			expect(() => decodeEot(eot(font(tags(count)), 0))).toThrow(expect.objectContaining({ code: "corrupt" }))
+		}
+
+		expect(() => decodeEot(eot(font(["cmap", "cmap"]), 0))).toThrow(expect.objectContaining({ code: "corrupt" }))
+		// Distinct tags that each alias the whole font, past the bytes the checksums may cover.
+		expect(() => decodeEot(eot(font(tags(16)), 0))).toThrow(expect.objectContaining({ code: "corrupt" }))
+		expect(cpuMs() - start).toBeLessThan(budget(300))
+
+		// Two tags aliasing one range, as an imperfect subset may, still decode, their language cleared.
+		const aliased = decodeEot(eot(font(tags(3)), 0))
+
+		expect(new DataView(aliased.buffer, aliased.byteOffset).getUint16(aliased.length - 32 + 12 + 4)).toBe(0)
 	})
 
 	it("ends on hostile compressed bytes with a typed refusal", () => {

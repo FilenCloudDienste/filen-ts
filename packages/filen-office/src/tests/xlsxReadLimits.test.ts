@@ -5,6 +5,7 @@ import { encodeUtf8 } from "@filen/office/core/xml"
 import { sliceClock } from "../core/slicing"
 import { MAX_SHEET_STRINGS } from "../core/xlsx/read/limits"
 import { DEFAULT_XLSX_LIMITS, openXlsx, type XlsxLimits, type XlsxSheet, type XlsxWorkbook } from "../core/xlsx/read/index"
+import { readSharedStrings } from "../core/xlsx/read/sharedStrings"
 import { readWorksheet } from "../core/xlsx/read/worksheet"
 import { buildWorkbook, SML, type TestWorkbook } from "./xlsxReadFixtures"
 
@@ -127,5 +128,54 @@ describe("xlsx reader: counts are capped before they cost memory", () => {
 		expect(DEFAULT_XLSX_LIMITS.maxCells).toBe(5_000_000)
 		expect(DEFAULT_XLSX_LIMITS.maxCells).toBeLessThan(MAX_SHEET_STRINGS)
 		expect(MAX_SHEET_STRINGS).toBeLessThan(2 ** 24)
+	})
+})
+
+describe("xlsx reader: rich shared strings", () => {
+	it("keeps every rich entry in one byte pool and parses the same runs from it", async () => {
+		const count = 10_000
+		const entries: string[] = []
+		const texts: string[] = []
+		let richCount = 0
+		let siBytes = 0
+
+		for (let i = 0; i < count; i++) {
+			const text = `s${i}`
+
+			texts.push(text)
+
+			if (i % 3 === 0) {
+				const si = `<si><r><rPr><b/></rPr><t>${text}</t></r><r><t>!</t></r></si>`
+
+				texts[i] = `${text}!`
+				entries.push(si)
+				richCount++
+				siBytes += si.length
+			} else {
+				entries.push(`<si><t>${text}</t></si>`)
+			}
+		}
+
+		const part = encodeUtf8(`<sst xmlns="${SML}" count="${count}">${entries.join("")}</sst>`)
+		const strings = await readSharedStrings(part, "xl/sharedStrings.xml", DEFAULT_XLSX_LIMITS, undefined)
+		const lastRich = count - 1 - ((count - 1) % 3)
+
+		for (const index of [0, 4998, lastRich]) {
+			expect(strings.isRich(index)).toBe(true)
+			expect(strings.runs(index)).toEqual([
+				{ text: `s${index}`, font: expect.objectContaining({ bold: true }) },
+				{ text: "!", font: null }
+			])
+		}
+
+		for (const index of [1, 4999, count - 2]) {
+			expect(strings.isRich(index)).toBe(false)
+			expect(strings.runs(index)).toBeNull()
+			expect(strings.text(index)).toBe(`s${index}`)
+		}
+
+		expect(strings.isRich(count)).toBe(false)
+		// The offsets, the pooled text, the rich bytes and two Uint32 per rich entry: no per-entry overhead.
+		expect(strings.estimateBytes()).toBe(count * 4 + texts.join("").length * 2 + siBytes + richCount * 8)
 	})
 })

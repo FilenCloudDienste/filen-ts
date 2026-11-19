@@ -5,8 +5,15 @@ import type { DocxPageData, DocxSessionApi } from "../../../dom/docx/protocol"
 import type { DocxMediaCache } from "../media"
 import { paintObjects } from "../paint/objects"
 import { paintMarks, sameLabels, type DocxMarkLabels } from "../paint/marks"
-import { paintPage, patchPage, type PaintedPage } from "../paint/page"
+import { paintPage, patchPage, type PaintedObject, type PaintedPage } from "../paint/page"
 import type { DocxTables } from "../store"
+
+// Releases every fill of a page's placed objects (each release is idempotent; a batch's is shared by its objects).
+function releaseFills(page: MountedPage): void {
+	for (const release of page.fills.values()) release()
+
+	page.fills.clear()
+}
 
 // The formatting marks layer of each painted page's root (a page painted anew gets a new root, and a new layer).
 const MARKS_LAYERS = new WeakMap<HTMLElement, HTMLElement>()
@@ -42,7 +49,8 @@ interface MountedPage {
 	// Rows by the hash of what they show (rows with the same hash are chained).
 	rowsByHash: Map<number, MarkRow>
 	painted: PaintedPage | undefined
-	release: () => void
+	// The release of each placed object's fill (paintObjects), by object: a patch releases what it took away.
+	readonly fills: Map<PaintedObject, (object?: PaintedObject) => void>
 	signal: { aborted: boolean }
 }
 
@@ -175,7 +183,7 @@ export class EditSurface {
 			rows: [],
 			rowsByHash: new Map(),
 			painted: undefined,
-			release: () => undefined,
+			fills: new Map(),
 			signal: { aborted: false }
 		})
 		this.paint(index)
@@ -188,7 +196,7 @@ export class EditSurface {
 		if (page === undefined) return
 
 		page.signal.aborted = true
-		page.release()
+		releaseFills(page)
 		page.host.replaceChildren()
 		page.layer.replaceChildren()
 		this.mounted.delete(index)
@@ -259,35 +267,41 @@ export class EditSurface {
 		if (mounted === undefined || page === undefined || sources === undefined || mounted.painted?.page === page) return false
 
 		const context = { document: mounted.host.ownerDocument, tables: sources.tables }
-		let objectsChanged = true
+		let added: readonly PaintedObject[]
 
 		if (mounted.painted === undefined || mounted.painted.page.index !== page.index) {
 			const painted = paintPage(page, context)
 
 			mounted.host.replaceChildren(painted.root)
 			mounted.painted = painted
+			mounted.signal.aborted = true
+			releaseFills(mounted)
+			mounted.signal = { aborted: false }
+			added = painted.objects
 		} else {
 			const patched = patchPage(mounted.painted, page, context)
 
 			mounted.painted = patched.painted
-			objectsChanged = patched.objectsChanged
+			added = patched.added
+
+			// Boxes kept go on showing (and holding) what fills them; only those taken away are released.
+			for (const object of patched.removed) {
+				mounted.fills.get(object)?.(object)
+				mounted.fills.delete(object)
+			}
 		}
 
 		this.paintFormattingMarks(mounted.painted)
 
-		if (objectsChanged) {
-			mounted.signal.aborted = true
-			mounted.release()
-
-			const signal = { aborted: false }
-
-			mounted.signal = signal
-			mounted.release = paintObjects(mounted.painted.objects, {
+		if (added.length > 0) {
+			const release = paintObjects(added, {
 				document: mounted.host.ownerDocument,
 				session: sources.session,
 				media: sources.media,
-				signal
+				signal: mounted.signal
 			})
+
+			for (const object of added) mounted.fills.set(object, release)
 		}
 
 		return true
@@ -531,7 +545,7 @@ export class EditSurface {
 			if (row === undefined) {
 				const element = drawing.ownerDocument.createElementNS(SVG, "path")
 
-				element.setAttribute("class", "fo-docx-mark")
+				element.setAttribute("class", "fo-docx-edit-mark")
 				row = { element, content: new Float64Array(0), hash: 0, top: Number.NaN, drawn: 0, next: undefined }
 				rows.push(row)
 			} else {
@@ -685,7 +699,7 @@ export class EditSurface {
 
 		if (drawing === undefined) {
 			drawing = mounted.layer.ownerDocument.createElementNS(SVG, "svg")
-			drawing.setAttribute("class", "fo-docx-marks")
+			drawing.setAttribute("class", "fo-docx-edit-marks")
 			drawing.setAttribute("aria-hidden", "true")
 
 			if (blend) {

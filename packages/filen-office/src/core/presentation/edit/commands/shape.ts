@@ -107,13 +107,19 @@ export function moveOp(slide: SlideRef, shapes: readonly PlacedShape[], dx: numb
 
 export type NudgeDirection = "left" | "right" | "up" | "down"
 
-// An arrow key's move: NUDGE_PX slide px, NUDGE_LARGE_PX with Shift.
-export function nudgeOp(slide: SlideRef, shapes: readonly PlacedShape[], direction: NudgeDirection, large: boolean): DeckOp | undefined {
+// The boxes an arrow key's move gives the shapes: NUDGE_PX slide px, NUDGE_LARGE_PX with Shift; one the file locks
+// against moving keeps its place.
+export function nudgedShapes(shapes: readonly PlacedShape[], direction: NudgeDirection, large: boolean): PlacedShape[] {
 	const step = (large ? NUDGE_LARGE_PX : NUDGE_PX) * EMU_PER_PX
 	const dx = direction === "left" ? -step : direction === "right" ? step : 0
 	const dy = direction === "up" ? -step : direction === "down" ? step : 0
 
-	return moveOp(slide, shapes, dx, dy)
+	return shapes.map(shape => (canMove(shape) ? { ...shape, xfrm: movedXfrm(shape.xfrm, dx, dy) } : shape))
+}
+
+// An arrow key's move (nudgedShapes): undefined when nothing moves.
+export function nudgeOp(slide: SlideRef, shapes: readonly PlacedShape[], direction: NudgeDirection, large: boolean): DeckOp | undefined {
+	return xfrmsOp(slide, shapes, nudgedShapes(shapes, direction, large))
 }
 
 function radians(rot: number): number {

@@ -276,4 +276,32 @@ describe("regex functions: user patterns cannot hang the calculation", () => {
 		expect(heldResult('ROWS(REGEXEXTRACT(REPT("a",30000),"(?:a*a*a*a*c)|a",1))', "stored")).toEqual({ value: "stored" })
 		expect(Date.now() - start).toBeLessThan(budget(5000))
 	})
+
+	it("keep the file's result of a search copying captures at every position, and calculate ordinary captures over long text", () => {
+		expect(heldResult(`REGEXREPLACE(REPT("a",32767),"${"()".repeat(706)}","$1")`, "stored")).toEqual({ value: "stored" })
+		expect(heldResult(`REGEXREPLACE(REPT("a",32767),"${"|".repeat(4_999)}","x")`, "stored")).toEqual({ value: "stored" })
+		expect(
+			calculate([
+				[
+					'=LEN(REGEXREPLACE(REPT("(378) 555-4195 ",2000),"(\\d{3})-(\\d{4})","$2-$1"))',
+					'=RIGHT(REGEXREPLACE(REPT("john@example.com ",1800),"([a-z]+)@([a-z]+)\\.com","$2 $1"),13)',
+					'=ROWS(REGEXEXTRACT(REPT("ab12 ",6000),"([a-z]+)(\\d+)",1))'
+				]
+			])
+		).toEqual({ A1: 30_000, B1: "example john ", C1: 6_000 })
+	})
+
+	it("replace the occurrence-th match of a text holding many as replacing every match chose it", () => {
+		expect(
+			calculate([
+				[
+					'=LEFT(REGEXREPLACE(REPT("ab",16000),"b","x",1),6)',
+					'=LEN(REGEXREPLACE(REPT("ab",16000),"b","x",2))',
+					'=RIGHT(REGEXREPLACE(REPT("ab",16000),"b","x",-1),4)',
+					'=REGEXREPLACE("a1b2c3","\\d","#",3)',
+					'=REGEXREPLACE("a1b2c3","\\d","#",4)'
+				]
+			])
+		).toEqual({ A1: "axabab", B1: 32_000, C1: "abax", D1: "a1b2c#", E1: "a1b2c3" })
+	})
 })

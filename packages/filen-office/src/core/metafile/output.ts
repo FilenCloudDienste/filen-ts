@@ -7,6 +7,7 @@ import {
 	ItemInt,
 	ItemKind,
 	PathCommand,
+	multiply,
 	type DrawingImage,
 	type DrawingText,
 	type ImageFormat,
@@ -19,6 +20,7 @@ import { writeClip, type ClipEnv, type ClipNode } from "./clip"
 import {
 	MAX_COORDS,
 	MAX_IMAGE_BYTES,
+	MAX_INFLATED_BYTES,
 	MAX_ITEMS,
 	MAX_PATH_POINTS,
 	MAX_RECORDS,
@@ -40,23 +42,8 @@ export function transformY(m: Matrix, x: number, y: number): number {
 	return (m[1] ?? 0) * x + (m[3] ?? 1) * y + (m[5] ?? 0)
 }
 
-// m1 * m2 (m2 applied first).
-export function mul(m1: Matrix, m2: Matrix): number[] {
-	const a1 = m1[0] ?? 1
-	const b1 = m1[1] ?? 0
-	const c1 = m1[2] ?? 0
-	const d1 = m1[3] ?? 1
-	const e1 = m1[4] ?? 0
-	const f1 = m1[5] ?? 0
-	const a2 = m2[0] ?? 1
-	const b2 = m2[1] ?? 0
-	const c2 = m2[2] ?? 0
-	const d2 = m2[3] ?? 1
-	const e2 = m2[4] ?? 0
-	const f2 = m2[5] ?? 0
-
-	return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1]
-}
+// m1 * m2 (m2 applied first), by the name the players use.
+export { multiply as mul }
 
 // The inverse, or undefined for a singular matrix.
 export function invert(m: Matrix): number[] | undefined {
@@ -229,6 +216,7 @@ export class Output {
 	private imageBytes = 0
 	private pixels = MAX_TOTAL_DECODE_PIXELS
 	private work = MAX_WORK
+	private inflated = MAX_INFLATED_BYTES
 	// What clip regions combine with: the work budget and the extent standing for the whole plane.
 	readonly env: ClipEnv
 	private readonly solids = new Map<number, number>()
@@ -255,6 +243,13 @@ export class Output {
 
 	record(): void {
 		if (++this.records > MAX_RECORDS) throw new MetafileLimit("records")
+	}
+
+	// Spends inflated bitmap bytes before they are allocated; beyond the budget playback ends.
+	inflate(bytes: number): void {
+		this.inflated -= bytes
+
+		if (!(this.inflated >= 0)) throw new MetafileLimit("inflated bytes")
 	}
 
 	// Decoding budget (PixelBudget).
@@ -464,7 +459,7 @@ export class Output {
 							positions: text.positions === null ? null : Float32Array.from(text.positions, value => value * scale)
 						}
 					: { ...text, run, width: text.width * scale, height: text.height * scale, lineHeight: text.lineHeight * scale }
-			matrix = mul(matrix, [1 / scale, 0, 0, 1 / scale, 0, 0])
+			matrix = multiply(matrix, [1 / scale, 0, 0, 1 / scale, 0, 0])
 			x *= scale
 			y *= scale
 			width *= scale
@@ -477,9 +472,9 @@ export class Output {
 		if (fill !== undefined && inverse !== undefined && (text.kind === "glyphs" || text.kind === "block")) {
 			const local: Paint | undefined =
 				fill.kind === "gradient"
-					? { ...fill, matrix: mul(inverse, fill.matrix) }
+					? { ...fill, matrix: multiply(inverse, fill.matrix) }
 					: fill.kind === "image" && fill.tile?.matrix !== undefined
-						? { ...fill, tile: { ...fill.tile, matrix: mul(inverse, fill.tile.matrix) } }
+						? { ...fill, tile: { ...fill.tile, matrix: multiply(inverse, fill.tile.matrix) } }
 						: fill.kind === "pattern"
 							? fill
 							: undefined

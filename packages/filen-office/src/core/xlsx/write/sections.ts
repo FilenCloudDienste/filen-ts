@@ -40,13 +40,21 @@ export function booleanField(name: string, value: boolean, fallback: boolean): A
 	}
 }
 
+// A source attribute's number as `canonical` writes it; one that is no finite number (malformed, overflowing) reads
+// as absent, so the model's value is written over it rather than refusing the save.
+function sourceNumber(source: string, canonical: (n: number) => string | null): string | null {
+	const n = Number(source)
+
+	return Number.isFinite(n) ? canonical(n) : null
+}
+
 export function numberField(name: string, value: number, fallback: number = Number.NaN): AttributeField {
-	const canonical = (n: number): string | null => (Number.isNaN(n) || n === fallback ? null : formatNumber(n))
+	const canonical = (n: number): string | null => (Number.isNaN(n) || n === fallback ? null : formatNumber(n, name))
 
 	return {
 		name,
 		value: canonical(value),
-		read: source => (source === undefined || source.trim() === "" ? null : canonical(Number(source)))
+		read: source => (source === undefined || source.trim() === "" ? null : sourceNumber(source, canonical))
 	}
 }
 
@@ -113,7 +121,7 @@ export function colorAttributes(color: XlsxColor): string {
 	if (color.indexed !== undefined) out += attr("indexed", color.indexed)
 	if (color.argb !== undefined) out += attr("rgb", (color.argb >>> 0).toString(16).toUpperCase().padStart(8, "0"))
 	if (color.theme !== undefined) out += attr("theme", color.theme)
-	if (color.tint !== undefined && color.tint !== 0) out += attr("tint", formatNumber(color.tint))
+	if (color.tint !== undefined && color.tint !== 0) out += attr("tint", formatNumber(color.tint, "tint"))
 
 	return out
 }
@@ -248,7 +256,7 @@ function formatFields(format: XlsxSheetFormat): AttributeField[] {
 		numberField("defaultColWidth", format.defaultColWidth),
 		{
 			...numberField("defaultRowHeight", format.defaultRowHeight),
-			read: source => (source === undefined ? null : formatNumber(Number(source)))
+			read: source => (source === undefined ? null : sourceNumber(source, formatNumber))
 		},
 		booleanField("customHeight", format.customHeight, false),
 		booleanField("zeroHeight", format.zeroHeight, false),
@@ -448,7 +456,7 @@ const PROTECTION_DEFAULTS: readonly (readonly [SheetProtectedAction, boolean])[]
 	["selectUnlockedCells", false]
 ]
 
-function hashFields(
+export function hashFields(
 	hash: XlsxProtectionHash,
 	names: { algorithm: string; hash: string; salt: string; spin: string; legacy: string }
 ): AttributeField[] {

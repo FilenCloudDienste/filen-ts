@@ -1,5 +1,6 @@
 import type * as Mupdf from "mupdf"
 import { coveredWords, quadBounds, rectsOverlap, type RedactionRegion, type RedactRect } from "../../../core/pdfedit/redactVerify"
+import { lazyPages } from "../fields"
 import type { MupdfModule } from "../protocol"
 import { changedSections, markedSections, removeAlternates, removeShadings, stripSectionText } from "./content"
 import { pageText } from "./find"
@@ -29,20 +30,11 @@ function overlapsAny(rect: RedactRect, regions: readonly RedactionRegion[]): boo
 	return regions.some(region => rectsOverlap(rect, region.rect))
 }
 
-function pageIndexOf(document: Mupdf.PDFDocument, page: Mupdf.PDFObject): number {
-	const number = page.asIndirect()
-
-	for (let index = 0; index < document.countPages(); index++) {
-		if (document.findPage(index).asIndirect() === number) return index
-	}
-
-	return -1
-}
-
 // Removes a form field's value (V, DV up its parent chain) and the appearances of its other widgets, which still
 // show it. Returns the pages of those widgets.
 export function clearField(document: Mupdf.PDFDocument, widget: Mupdf.PDFObject): number[] {
 	const pages = new Set<number>()
+	const pageIndex = lazyPages(document)
 	let field = widget
 
 	for (let depth = 0; depth < 32 && field.isDictionary(); depth++) {
@@ -60,8 +52,9 @@ export function clearField(document: Mupdf.PDFDocument, widget: Mupdf.PDFObject)
 				kid.delete("AP")
 
 				const page = kid.get("P")
+				const at = page.isIndirect() ? pageIndex().get(page.asIndirect()) : undefined
 
-				if (page.isDictionary()) pages.add(pageIndexOf(document, page))
+				if (at !== undefined) pages.add(at)
 			}
 		}
 
@@ -71,8 +64,6 @@ export function clearField(document: Mupdf.PDFDocument, widget: Mupdf.PDFObject)
 	const form = document.getTrailer().get("Root", "AcroForm")
 
 	if (form.isDictionary()) form.put("NeedAppearances", true)
-
-	pages.delete(-1)
 
 	return [...pages]
 }
@@ -104,11 +95,12 @@ function detachWidget(document: Mupdf.PDFDocument, widget: Mupdf.PDFObject): voi
 	remove(document.getTrailer().get("Root", "AcroForm", "Fields"), number)
 }
 
-export function removeAnnotationTree(document: Mupdf.PDFDocument, page: Mupdf.PDFPage, root: Mupdf.PDFAnnotation): void {
-	const annotations = page.getAnnotations()
+// Removes an annotation with its popup and replies (and theirs). Returns the object numbers removed.
+export function removeAnnotationTree(document: Mupdf.PDFDocument, page: Mupdf.PDFPage, root: Mupdf.PDFAnnotation): ReadonlySet<number> {
+	// A copy: deleting an annotation splices MuPDF's cached list.
+	const annotations = [...page.getAnnotations()]
 	const doomed = new Set<number>([root.getObject().asIndirect()])
 
-	// Its popup and replies (and theirs) go with it.
 	for (let grew = true; grew;) {
 		grew = false
 
@@ -135,6 +127,8 @@ export function removeAnnotationTree(document: Mupdf.PDFDocument, page: Mupdf.PD
 		stripObjectStructText(document, object)
 		page.deleteAnnotation(annotation)
 	}
+
+	return doomed
 }
 
 // Removes what lies over the marks before the content is redacted. Returns other pages that changed.
@@ -162,14 +156,19 @@ function removeOverlying(
 	}
 
 	if (options.removeAnnotations) {
-		for (const annotation of page.getAnnotations()) {
+		// Annotations already removed with an earlier one's replies.
+		const removed = new Set<number>()
+
+		for (const annotation of [...page.getAnnotations()]) {
+			// A removed annotation no longer answers getType.
+			if (removed.has(annotation.getObject().asIndirect())) continue
+
 			const type = annotation.getType()
 
-			if (type === "Redact" || type === "Popup" || !overlapsAny(annotation.getBounds(), regions)) continue
-			// Already removed with an earlier one's replies.
-			if (!page.getAnnotations().some(current => current.getObject().asIndirect() === annotation.getObject().asIndirect())) continue
+			if (type === "Redact" || type === "Popup") continue
+			if (!overlapsAny(annotation.getBounds(), regions)) continue
 
-			removeAnnotationTree(document, page, annotation)
+			for (const number of removeAnnotationTree(document, page, annotation)) removed.add(number)
 		}
 	}
 

@@ -12,6 +12,7 @@ import {
 	ZipError
 } from "../../opc/index"
 import { metaDate, metaOnSave } from "../../odf/meta"
+import { odfPrefixOf } from "../../odf/namespaces"
 import {
 	OdfNs,
 	OdfPackage,
@@ -25,9 +26,7 @@ import {
 import { readContentPrologueSliced } from "../../odf/prologue"
 import { OdfStyleSheet } from "../../odf/styles"
 import { sliceClock } from "../../slicing"
-import { inflateChunks } from "../scan"
 import { RtfAborted, jobOf, turn, type RtfJob, type RtfTurns } from "../../rtf/turns"
-import { joinChunks } from "../../rtf/write/out"
 import type { RtfLockedBlock } from "../../rtf/write/proof"
 import {
 	Namespaces,
@@ -43,8 +42,9 @@ import {
 } from "../../xml/index"
 import { nativeDeflate, nativeDeflateChunks } from "../../docx/write/zip"
 import { StyleMapper } from "../styles"
+import { MAX_COLUMNS } from "../tables"
 import { configBoolean, translateOdt } from "../translate"
-import { dateCode, FIELDS_AS_TEXT, PASS_THROUGH_INLINE, referenceCode } from "../translator"
+import { dateCode, FIELDS_AS_TEXT, referenceCode } from "../translator"
 import type { OdtOrigin, OdtTranslation } from "../types"
 import { esc, escText, twips as twipsOf } from "../wml"
 import {
@@ -60,10 +60,28 @@ import {
 	type ListTarget,
 	type ParagraphSource
 } from "./emit"
-import { paragraphAttributes, paragraphSources, paragraphTextSources, runAttributes, runSources, type ParagraphAttributes } from "./inverse"
-import { Meaning, PARAGRAPH_SKIPPED, StyleChains, canonicalElement, descendant, readProps, type PropertyValue, type Props } from "./meaning"
+import {
+	paragraphAttributes,
+	paragraphSources,
+	paragraphTextSources,
+	runAttributes,
+	runSources,
+	twipsPoints,
+	type ParagraphAttributes
+} from "./inverse"
+import {
+	Meaning,
+	PARAGRAPH_SKIPPED,
+	StyleChains,
+	canonicalElement,
+	childNamed,
+	descendant,
+	readProps,
+	type PropertyValue,
+	type Props
+} from "./meaning"
 import { runMeaning, translateRun, type SpanFrame } from "./span"
-import { odfText, sourceTextOf, wmlText, type SourceText } from "./sourceText"
+import { KEPT_FIELDS, odfText, sourceTextOf, wmlText, type SourceText } from "./sourceText"
 import { runProperties } from "../props"
 import type { OdtSource } from "./source"
 import { TableSpacing, withoutTableSpacing, type SpacingShift } from "./tableSpacing"
@@ -223,17 +241,7 @@ const REWRITABLE = new Set([
 	"table:table-cell",
 	"table:covered-table-cell"
 ])
-// Fields the translator keeps as w:fldSimple results (copied whole when their code and result stay).
-const FIELD_ATOMS: ReadonlySet<string> = new Set([
-	"text:reference-ref",
-	"text:bookmark-ref",
-	"text:sequence-ref",
-	"text:note-ref",
-	"text:bibliography-mark",
-	...FIELDS_AS_TEXT,
-	...[...PASS_THROUGH_INLINE].filter(name => name !== "text:meta" && name !== "text:ruby-base")
-])
-const ATOMS = new Set(["text:note", "office:annotation", ...FIELD_ATOMS])
+const ATOMS = new Set(["text:note", "office:annotation", ...KEPT_FIELDS])
 const NO_NODES: ReadonlySet<number> = new Set()
 // Attributes a rewrite keeps or restates, by element; any other keeps the block as it is. Paragraphs keep their start
 // tags (or restate these); links keep theirs while their target stays; table elements are kept or copied whole.
@@ -281,12 +289,13 @@ interface Replacement {
 	segment?: number
 }
 
-// One stream (content.xml, styles.xml) as written: its bytes, what replaces spans of them, its new automatic styles.
 // The translation's narrowest grid column (twips).
 const MIN_GRID_COLUMN = 23
+// The line between columns (style:column-sep) a w:sep writes.
+const COLUMN_SEPARATOR = '<style:column-sep style:width="0.0071in" style:color="#000000" style:height="100%"/>'
 
+// One stream (content.xml, styles.xml) as written: its bytes, what replaces spans of them, its new automatic styles.
 class Stream {
-	readonly name: string
 	readonly bytes: Uint8Array
 	readonly declarations: string
 	readonly registry: StyleRegistry
@@ -297,14 +306,12 @@ class Stream {
 	readonly newFaces: string[] = []
 	readonly faceNames = new Map<string, string>()
 	declaredFaces: Map<string, string> | undefined
-	readonly rootOpen: string
 	private readonly unbound: string[] = []
 	// Where the root's start tag ends ("> "): declarations go before it.
 	private readonly rootTagEnd: number
 	private readonly rootStart: number
 
-	constructor(name: string, bytes: Uint8Array, document: XmlDocument, taken: Set<string>) {
-		this.name = name
+	constructor(plan: OdtPlan, bytes: Uint8Array, document: XmlDocument, taken: Set<string>) {
 		this.bytes = bytes
 
 		const namespaces = new Namespaces(document)
@@ -326,9 +333,8 @@ class Stream {
 		this.registry = new StyleRegistry(taken, declarations)
 		this.lists = new ListIds(() => this.registry.name("list", true))
 
-		// Names in the stream's body, looked for only as a body element is named.
-		this.registry.inBody = candidate => indexOf(bytes, encodeUtf8(`"${candidate}"`), 0) >= 0
-		this.rootOpen = decodeUtf8(bytes.subarray(document.start(root), document.openEnd(root)))
+		// Names in the stream's body, indexed per prefix as a body element is first named with it.
+		this.registry.inBody = (prefix, number) => plan.quotedNumbers(bytes, prefix).has(String(number))
 
 		const officePrefix = namespaces.prefixFor(root, OdfNs.office)
 		const office = officePrefix === undefined || officePrefix === "" ? "office:" : `${officePrefix}:`
@@ -448,11 +454,6 @@ class Stream {
 		return encodeUtf8(`${decodeUtf8(tag.subarray(0, at))}${added}${decodeUtf8(tag.subarray(at))}`)
 	}
 
-	// Font faces and automatic styles this write adds, as markup.
-	get addedFaces(): string {
-		return this.newFaces.join("")
-	}
-
 	// The stream as written, as views of its bytes between the new markup (never joined: the zip writer streams
 	// them); undefined when nothing changed.
 	output(all: Replacement[] = this.all()): BytePieces | undefined {
@@ -516,14 +517,6 @@ function blocksOf(document: XmlDocument, container: number): { blocks: number[];
 	}
 
 	return { blocks, section }
-}
-
-function childNamed(document: XmlDocument, node: number, local: string): number {
-	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-		if (document.localName(child) === local) return child
-	}
-
-	return -1
 }
 
 function relationshipsOf(bytes: Uint8Array | undefined): Map<string, { target: string; external: boolean; type: string }> {
@@ -599,33 +592,48 @@ interface TrackedChanges {
 function trackedChangesOf(plan: OdtPlan): TrackedChanges {
 	const bytes = plan.contentBytes
 	const start = plan.textStart()
-	const text = decodeUtf8(bytes.subarray(start, Math.min(bytes.length, start + 4 * 1024 * 1024)))
-	const offset = (characters: number): number => start + encodeUtf8(text.slice(0, characters)).length
-	const container =
-		/^\s*(?:<([A-Za-z0-9_.-]+:)?forms\b[^>]*?(?:\/>|>[\s\S]*?<\/\1?forms>)\s*)?(<([A-Za-z0-9_.-]+:)?tracked-changes\b([^>]*?)(\/?)>)/u.exec(
-			text
-		)
+	// The start tags are matched in a decoded head; the ends (text:tracked-changes holds every deletion's content,
+	// office:forms every form) are found in the bytes, however far.
+	const head = (from: number): { readonly text: string; readonly offset: (characters: number) => number } => {
+		const text = decodeUtf8(bytes.subarray(from, Math.min(bytes.length, from + 4 * 1024 * 1024)))
 
-	if (container === null) {
-		const forms = /^\s*<([A-Za-z0-9_.-]+:)?forms\b[^>]*?(?:\/>|>[\s\S]*?<\/\1?forms>)/u.exec(text)
+		return { text, offset: characters => from + encodeUtf8(text.slice(0, characters)).length }
+	}
+	let read = head(start)
+	let after = start
+	const forms = /^\s*<([A-Za-z0-9_.-]+:)?forms\b[^>]*?(\/?)>/u.exec(read.text)
 
-		return { container: undefined, insertAt: forms === null ? start : offset(forms[0].length) }
+	if (forms !== null) {
+		after = read.offset(forms[0].length)
+
+		if (forms[2] !== "/") {
+			const end = encodeUtf8(`</${forms[1] ?? ""}forms>`)
+			const at = indexOf(bytes, end, after)
+
+			if (at < 0) throw new OdtWriteRefusal("package", "content.xml's forms have no end")
+
+			after = at + end.length
+		}
+
+		read = head(after)
 	}
 
-	const prefix = container[3] ?? ""
-	const tagStart = offset(container.index + container[0].length - (container[2] ?? "").length)
-	const tagEnd = offset(container.index + container[0].length)
+	const container = /^\s*(<([A-Za-z0-9_.-]+:)?tracked-changes\b([^>]*?)(\/?)>)/u.exec(read.text)
+
+	if (container === null) return { container: undefined, insertAt: after }
+
+	const prefix = container[2] ?? ""
+	const tagStart = read.offset(container.index + container[0].length - (container[1] ?? "").length)
+	const tagEnd = read.offset(container.index + container[0].length)
 	let close = -1
 
-	if (container[5] !== "/") {
-		const at = text.indexOf(`</${prefix}tracked-changes>`, container.index)
+	if (container[4] !== "/") {
+		close = indexOf(bytes, encodeUtf8(`</${prefix}tracked-changes>`), tagEnd)
 
-		if (at < 0) throw new OdtWriteRefusal("package", "content.xml's tracked changes have no end")
-
-		close = offset(at)
+		if (close < 0) throw new OdtWriteRefusal("package", "content.xml's tracked changes have no end")
 	}
 
-	return { container: { tagStart, tagEnd, prefix, attributes: container[4] ?? "", close }, insertAt: tagStart }
+	return { container: { tagStart, tagEnd, prefix, attributes: container[3] ?? "", close }, insertAt: tagStart }
 }
 
 interface Unit {
@@ -677,10 +685,43 @@ class OdtPlan {
 	readonly rootClose: string
 	private readonly bodyStart: number
 	private styleState: PlanStyles | undefined
+	// Per stream and prefix, the numbers N of every double-quoted "<prefix>N" in the stream: the write rounds share it.
+	private readonly quoted = new Map<Uint8Array, Map<string, Set<string>>>()
 
 	// Where content.xml's prologue (font faces, automatic styles) ends: office:body.
 	get prologueEnd(): number {
 		return this.bodyStart < 0 ? this.contentBytes.length : this.bodyStart
+	}
+
+	// The digits of every "<prefix><digits>" in `bytes` (attribute values and quoted text alike), read in one scan.
+	quotedNumbers(bytes: Uint8Array, prefix: string): ReadonlySet<string> {
+		let byPrefix = this.quoted.get(bytes)
+
+		if (byPrefix === undefined) {
+			byPrefix = new Map()
+			this.quoted.set(bytes, byPrefix)
+		}
+
+		let numbers = byPrefix.get(prefix)
+
+		if (numbers !== undefined) return numbers
+
+		numbers = new Set()
+
+		const needle = encodeUtf8(`"${prefix}`)
+
+		for (let at = indexOf(bytes, needle, 0); at >= 0; at = indexOf(bytes, needle, at + needle.length)) {
+			const from = at + needle.length
+			let end = from
+
+			while ((bytes[end] ?? 0) >= 0x30 && (bytes[end] ?? 0) <= 0x39) end++
+
+			if (end > from && bytes[end] === 0x22) numbers.add(decodeUtf8(bytes.subarray(from, end)))
+		}
+
+		byPrefix.set(prefix, numbers)
+
+		return numbers
 	}
 
 	private constructor(
@@ -765,11 +806,16 @@ class OdtPlan {
 			if (entry === undefined) return undefined
 			if (job === undefined) return source.archive.read(entry)
 
-			const chunks: Uint8Array[] = []
+			// Copied as they arrive: a chunk of stream() is the caller's only until the next one (its size is checked).
+			const out = new Uint8Array(entry.uncompressedSize)
+			let at = 0
 
-			for await (const chunk of inflateChunks(source.archive, entry, sliceClock(job.aborting))) chunks.push(chunk)
+			for await (const chunk of source.archive.stream(entry, sliceClock(job.aborting))) {
+				out.set(chunk, at)
+				at += chunk.length
+			}
 
-			return chunks.length === 1 ? (chunks[0] as Uint8Array) : joinChunks(chunks)
+			return out
 		}
 		const content = await read("content.xml")
 
@@ -1262,13 +1308,13 @@ function canonicalAttribute(namespaces: Namespaces, node: number, name: string):
 	if (prefix === "xml") return name
 
 	const uri = namespaces.uri(node, prefix)
-	const known = Object.entries(OdfNs).find(([, value]) => value === uri)
+	const known = uri === undefined ? undefined : odfPrefixOf(uri)
 
-	return known === undefined ? `{${uri ?? ""}}${name.slice(colon + 1)}` : `${known[0]}:${name.slice(colon + 1)}`
+	return known === undefined ? `{${uri ?? ""}}${name.slice(colon + 1)}` : `${known}:${name.slice(colon + 1)}`
 }
 
 // Longest common subsequence of two key arrays, past their common head and tail; a middle too large to compare
-// cell by cell is left unmatched (rewritten whole).
+// cell by cell is matched greedily, each block to the next equal key at most 64 blocks ahead.
 function matchBlocks(a: readonly string[], b: readonly string[]): Int32Array {
 	const out = new Int32Array(a.length).fill(-1)
 	let head = 0
@@ -1394,6 +1440,21 @@ class EditedDocument {
 	expected: { blocks: string[]; sections: string[] } | undefined
 	// The edit switched tracking changes on (or off); undefined when it left it.
 	tracking: boolean | undefined
+	private eIndexes: Map<number, number> | undefined
+	private tIndexes: Map<number, number> | undefined
+
+	// A block's place among the edited (translated) body's blocks, -1 for none: indexed when first asked.
+	eIndex(block: number): number {
+		this.eIndexes ??= new Map(this.eBlocks.map((node, k) => [node, k]))
+
+		return this.eIndexes.get(block) ?? -1
+	}
+
+	tIndex(block: number): number {
+		this.tIndexes ??= new Map(this.tBlocks.map((node, k) => [node, k]))
+
+		return this.tIndexes.get(block) ?? -1
+	}
 
 	constructor(plan: OdtPlan) {
 		this.plan = plan
@@ -1501,7 +1562,8 @@ class EditedDocument {
 		}
 	}
 
-	// Styles: new ones are written to styles.xml; a changed one is refused.
+	// Styles: new ones are written to styles.xml; a changed paragraph or character style is written in place, any
+	// other change is refused.
 	private checkStyles(): void {
 		const before = this.plan.translatedXml("word/styles.xml")
 		const after = this.plan.editedXml("word/styles.xml")
@@ -1539,7 +1601,8 @@ class EditedDocument {
 		}
 	}
 
-	// Numbering: new w:num and w:abstractNum are written as lists; a changed one is refused.
+	// Numbering: new w:num and w:abstractNum are written as lists; a changed w:abstractNum is written in place, any
+	// other change is refused.
 	private checkNumbering(): void {
 		const before = this.plan.translatedXml("word/numbering.xml")
 		const after = this.plan.editedXml("word/numbering.xml")
@@ -1648,8 +1711,6 @@ function numberingKey(document: XmlDocument, node: number): string {
 			: `${local}:${canonicalElement(document, node)}`
 }
 
-const W_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-
 // One write of the edited document.
 class OdtWrite {
 	private readonly plan: OdtPlan
@@ -1666,6 +1727,17 @@ class OdtWrite {
 	private readonly failedBlocks = new Map<number, string>()
 	private written = 0
 	private readonly newLists = new Map<string, ListTarget>()
+	// What the blocks before the last seeded list position set (seedLists).
+	private seeded:
+		| {
+				to: number
+				readonly lists: Map<string, string>
+				last: string | undefined
+				readonly used: string[]
+				readonly numbers: Set<string>
+				applied: number
+		  }
+		| undefined
 	private readonly newCommonStyles = new Map<string, string>()
 	// content.xml's replacements as written.
 	private replaced: Replacement[] = []
@@ -1678,8 +1750,8 @@ class OdtWrite {
 		const plan = this.plan
 
 		this.taken = takenNames(plan)
-		this.content = new Stream("content.xml", plan.contentBytes, plan.prologueDocument, this.taken)
-		this.styles = new Stream("styles.xml", plan.stylesBytes, plan.stylesDocument, this.taken)
+		this.content = new Stream(plan, plan.contentBytes, plan.prologueDocument, this.taken)
+		this.styles = new Stream(plan, plan.stylesBytes, plan.stylesDocument, this.taken)
 
 		for (const [stream, scope] of [
 			[this.content, "content"],
@@ -1739,7 +1811,8 @@ class OdtWrite {
 			continuesLists: odfVersion(plan.rootOpen) >= 1.2,
 			version: odfVersion(plan.rootOpen),
 			precedingList: (document, paragraph) => (document === doc.eBody ? this.precedingList(paragraph) : undefined),
-			masterOf: (_document, paragraph) => doc.masters.get(paragraph),
+			// Node numbers are per document: only the body's blocks start page styles.
+			masterOf: (document, paragraph) => (document === doc.eBody ? doc.masters.get(paragraph) : undefined),
 			picture: (document, drawing) => this.picture(document, drawing, doc.eRels, this.content),
 			change: (kind, author, date, deleted) => {
 				const id = this.content.registry.name("ctFilen", true)
@@ -2224,11 +2297,13 @@ class OdtWrite {
 		}
 
 		const value = (local: string, key: string): number => Number(eDoc.attribute(childNamed(eDoc, edited, local), `w:${key}`) ?? "0")
-		const point = (twips: number): string => `${Math.round((twips / 20) * 10_000) / 10_000}pt`
 		const cols = childNamed(eDoc, edited, "cols")
-		const count = Number(eDoc.attribute(cols, "w:num") ?? "1") || 1
-
-		if (eDoc.attribute(cols, "w:equalWidth") === "0") throw new OdtWriteRefusal("sections", "columns of unequal widths")
+		const columns = columnsMarkup(
+			Number(eDoc.attribute(cols, "w:num") ?? "1") || 1,
+			value("cols", "space"),
+			eDoc.attribute(cols, "w:sep") === "1",
+			eDoc.attribute(cols, "w:equalWidth")
+		)
 
 		for (let child = eDoc.firstChildElement(edited); child >= 0; child = eDoc.nextSiblingElement(child)) {
 			const local = eDoc.localName(child)
@@ -2237,11 +2312,7 @@ class OdtWrite {
 				throw new OdtWriteRefusal("sections", `the section property ${local}`)
 		}
 
-		const columns =
-			count > 1
-				? `<style:columns fo:column-count="${count}" fo:column-gap="${point(value("cols", "space"))}">${eDoc.attribute(cols, "w:sep") === "1" ? '<style:column-sep style:width="0.0071in" style:color="#000000" style:height="100%"/>' : ""}</style:columns>`
-				: ""
-		const properties = `<style:page-layout-properties fo:page-width="${point(value("pgSz", "w"))}" fo:page-height="${point(value("pgSz", "h"))}" style:print-orientation="${eDoc.attribute(childNamed(eDoc, edited, "pgSz"), "w:orient") === "landscape" ? "landscape" : "portrait"}" fo:margin-top="${point(value("pgMar", "top"))}" fo:margin-bottom="${point(value("pgMar", "bottom"))}" fo:margin-left="${point(value("pgMar", "left"))}" fo:margin-right="${point(value("pgMar", "right"))}"${columns === "" ? "/>" : `>${columns}</style:page-layout-properties>`}`
+		const properties = `<style:page-layout-properties fo:page-width="${twipsPoints(value("pgSz", "w"))}" fo:page-height="${twipsPoints(value("pgSz", "h"))}" style:print-orientation="${eDoc.attribute(childNamed(eDoc, edited, "pgSz"), "w:orient") === "landscape" ? "landscape" : "portrait"}" fo:margin-top="${twipsPoints(value("pgMar", "top"))}" fo:margin-bottom="${twipsPoints(value("pgMar", "bottom"))}" fo:margin-left="${twipsPoints(value("pgMar", "left"))}" fo:margin-right="${twipsPoints(value("pgMar", "right"))}"${columns === "" ? "/>" : `>${columns}</style:page-layout-properties>`}`
 		const registry = this.styles.registry
 		const layout = registry.element(
 			`page-layout\u0000${properties}`,
@@ -2922,7 +2993,6 @@ class OdtWrite {
 		return paired
 	}
 
-	// A copy of a master page under a new name, added to office:master-styles.
 	// Tables in the headers and footers of styles.xml's span [start, end) (a master page) whose width follows the page,
 	// restyled to the widths their translation shows (the page under them was set up anew): start tag replacements.
 	private regionTableFixes(start: number, end: number): Replacement[] {
@@ -3016,6 +3086,7 @@ class OdtWrite {
 		throw new OdtWriteRefusal("sections", `page setup of a page layout styles.xml does not have (${name})`)
 	}
 
+	// A copy of a master page under a new name, added to office:master-styles.
 	private copyMaster(name: string, layout?: string, next?: string): string {
 		const styles = this.plan.stylesDocument
 		const namespaces = new Namespaces(styles)
@@ -3120,7 +3191,6 @@ class OdtWrite {
 		}
 
 		const twips = (values: Map<string, string> | undefined, key: string): number => Number(values?.get(key) ?? "0")
-		const point = (value: number): string => `${Math.round((value / 20) * 10_000) / 10_000}pt`
 		const attributes = new Map<string, string>()
 
 		for (const attribute of styles.attributes(properties)) attributes.set(attribute.name, attribute.value)
@@ -3141,11 +3211,11 @@ class OdtWrite {
 		const margins = now.get("pgMar")
 		const oldMargins = was.get("pgMar")
 
-		set("fo:page-width", point(twips(size, "w")))
-		set("fo:page-height", point(twips(size, "h")))
+		set("fo:page-width", twipsPoints(twips(size, "w")))
+		set("fo:page-height", twipsPoints(twips(size, "h")))
 		set("style:print-orientation", size?.get("orient") === "landscape" ? "landscape" : "portrait")
-		set("fo:margin-left", point(twips(margins, "left")))
-		set("fo:margin-right", point(twips(margins, "right")))
+		set("fo:margin-left", twipsPoints(twips(margins, "left")))
+		set("fo:margin-right", twipsPoints(twips(margins, "right")))
 		// A header's or footer's extent sits inside the ODF margin (Part 3 §17.5): the margin is where the header starts
 		// (w:header), and the header style's minimum height, its spacing included, reaches to where the text starts (w:top).
 		const regions = new Map<string, string>()
@@ -3155,7 +3225,7 @@ class OdtWrite {
 			const extent = shown ? twips(margins, edge) - distance : 0
 			const oldExtent = shown ? twips(oldMargins, edge) - twips(oldMargins, kind) : 0
 
-			set(`fo:margin-${edge}`, point(distance))
+			set(`fo:margin-${edge}`, twipsPoints(distance))
 
 			if (extent === oldExtent) return
 			if (extent < 0) throw new OdtWriteRefusal("sections", `a ${kind} starting past the text`)
@@ -3179,8 +3249,8 @@ class OdtWrite {
 
 			values.delete("svg:height")
 			// The minimum height includes the spacing (LibreOffice, measured; the translation reads it so).
-			values.set("fo:min-height", point(extent))
-			values.set(spacing, point(gap))
+			values.set("fo:min-height", twipsPoints(extent))
+			values.set(spacing, twipsPoints(gap))
 
 			let inner = ""
 
@@ -3197,14 +3267,12 @@ class OdtWrite {
 		region("footer", "bottom", "fo:margin-top")
 
 		const cols = now.get("cols")
-		const count = Number(cols?.get("num") ?? "1") || 1
-
-		if (cols?.get("equalWidth") === "0") throw new OdtWriteRefusal("sections", "columns of unequal widths")
-
-		const columns =
-			count > 1
-				? `<style:columns fo:column-count="${count}" fo:column-gap="${point(twips(cols, "space"))}">${cols?.get("sep") === "1" ? '<style:column-sep style:width="0.0071in" style:color="#000000" style:height="100%"/>' : ""}</style:columns>`
-				: ""
+		const columns = columnsMarkup(
+			Number(cols?.get("num") ?? "1") || 1,
+			twips(cols, "space"),
+			cols?.get("sep") === "1",
+			cols?.get("equalWidth")
+		)
 		let inner = ""
 
 		for (let child = styles.firstChildElement(properties); child >= 0; child = styles.nextSiblingElement(child)) {
@@ -3253,7 +3321,7 @@ class OdtWrite {
 				"paragraph",
 				"P",
 				"",
-				`<style:paragraph-properties fo:margin-top="0pt" fo:margin-bottom="0pt" fo:line-height="${Math.round((spacer.gap / 20) * 10_000) / 10_000}pt"/><style:text-properties fo:font-size="1pt"/>`
+				`<style:paragraph-properties fo:margin-top="0pt" fo:margin-bottom="0pt" fo:line-height="${twipsPoints(spacer.gap)}"/><style:text-properties fo:font-size="1pt"/>`
 			)
 			const markup = `<text:p${this.styles.declarations} text:style-name="${esc(style)}"/>`
 
@@ -3413,36 +3481,25 @@ class OdtWrite {
 		rels: Map<string, { target: string; external: boolean }>,
 		stream: Stream
 	): string {
-		const find = (node: number, local: string): number => {
-			for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-				if (document.localName(child) === local) return child
-
-				const found = find(child, local)
-
-				if (found >= 0) return found
-			}
-
-			return -1
-		}
-		const inline = find(drawing, "inline")
+		const inline = descendant(document, drawing, "inline")
 
 		if (inline < 0) {
-			const shape = find(drawing, "txbx") >= 0 || find(drawing, "wsp") >= 0
+			const shape = descendant(document, drawing, "txbx") >= 0 || descendant(document, drawing, "wsp") >= 0
 
 			throw new OdtWriteRefusal("drawing", shape ? "a changed text box or shape" : "a new or moved floating picture")
 		}
 
-		const data = find(inline, "graphicData")
+		const data = descendant(document, inline, "graphicData")
 
 		if (data < 0 || document.attribute(data, "uri") !== "http://schemas.openxmlformats.org/drawingml/2006/picture") {
 			throw new OdtWriteRefusal("drawing", "a new or changed shape")
 		}
 
-		const crop = find(data, "srcRect")
-		const xfrm = find(data, "xfrm")
-		const blip = find(data, "blip")
-		const extent = find(inline, "extent")
-		const docPr = find(inline, "docPr")
+		const crop = descendant(document, data, "srcRect")
+		const xfrm = descendant(document, data, "xfrm")
+		const blip = descendant(document, data, "blip")
+		const extent = descendant(document, inline, "extent")
+		const docPr = descendant(document, inline, "docPr")
 
 		if (crop >= 0 && [...document.attributes(crop)].some(attribute => attribute.value !== "0"))
 			throw new OdtWriteRefusal("drawing", "a cropped picture")
@@ -4290,7 +4347,7 @@ class OdtWrite {
 				if (name.startsWith("draw:") || name.startsWith("dr3d:")) {
 					sources.drawings.push(decodeUtf8(styles.raw(child)))
 					sourceNodes.push(child)
-				} else if (FIELD_ATOMS.has(name)) sources.fields.push({ name, bytes: decodeUtf8(styles.raw(child)) })
+				} else if (KEPT_FIELDS.has(name)) sources.fields.push({ name, bytes: decodeUtf8(styles.raw(child)) })
 				else if (name === "text:page-number" || name === "text:page-count") continue
 				else {
 					if (name === "text:p" || name === "text:h") sources.paragraphs.push(child)
@@ -4396,7 +4453,7 @@ class OdtWrite {
 						sources.drawings.push(bytes())
 						sourceNodes.push(child)
 					} else if (name === "text:note") sources.notes.push(bytes())
-					else if (FIELD_ATOMS.has(name)) sources.fields.push({ name, bytes: bytes() })
+					else if (KEPT_FIELDS.has(name)) sources.fields.push({ name, bytes: bytes() })
 					else if (name === "office:annotation") {
 						const officeName = [...tree.document.attributes(child)].find(
 							attribute => canonicalAttribute(tree.namespaces, child, attribute.name) === "office:name"
@@ -4911,10 +4968,18 @@ class OdtWrite {
 	}
 
 	// Lists before a rewrite: the w:num each list style last numbered, so a list the rewrite starts can continue it.
+	// What the blocks before `region.from` set is gathered once as the asked prefix grows (from the start again when an
+	// earlier block is asked for), then set on the emitter as a walk of them all would.
 	private seedLists(region: Region): void {
 		const doc = this.doc
+		let seeded = this.seeded
 
-		for (let k = 0; k < region.from; k++) {
+		if (seeded === undefined || region.from < seeded.to) {
+			seeded = { to: 0, lists: new Map(), last: undefined, used: [], numbers: new Set(), applied: 0 }
+			this.seeded = seeded
+		}
+
+		for (let k = seeded.to; k < region.from; k++) {
 			const block = doc.eBlocks[k]
 
 			if (block === undefined || doc.eBody.localName(block) !== "p") continue
@@ -4929,10 +4994,23 @@ class OdtWrite {
 
 			if (target === undefined || target.outline) continue
 
-			this.emitter.lastList.set(target.style, numId)
-			this.emitter.last = numId
-			this.emitter.used.add(numId)
+			seeded.lists.set(target.style, numId)
+			seeded.last = numId
+
+			if (!seeded.numbers.has(numId)) {
+				seeded.numbers.add(numId)
+				seeded.used.push(numId)
+			}
 		}
+
+		seeded.to = Math.max(seeded.to, region.from)
+
+		for (const [style, numId] of seeded.lists) this.emitter.lastList.set(style, numId)
+
+		if (seeded.last !== undefined) this.emitter.last = seeded.last
+
+		// The emitter's w:nums only grow: those set before need no setting again.
+		for (; seeded.applied < seeded.used.length; seeded.applied++) this.emitter.used.add(seeded.used[seeded.applied] ?? "")
 	}
 
 	// Each changed block rewritten inside its element, where the blocks pair one to one and keep their kind and list
@@ -4956,9 +5034,6 @@ class OdtWrite {
 		// the rest of the source's are removed); an inserted block is no in-place rewrite.
 		// Paired by what they hold (a block removed and another added keep the count, not the places).
 		const paired = this.pairBlocks(tBlocks, eBlocks)
-
-		if (paired === undefined) return undefined
-
 		const pairs = paired.pairs
 		// Blocks the edit inserted, written beside the source block before them (or before the first): never inside a
 		// list item, where they would join its item.
@@ -4977,7 +5052,7 @@ class OdtWrite {
 			if (parentName === "text:list-item" || parentName === "text:list-header") return false
 
 			const at = (after < 0 ? anchor.tree.document.start(anchor.node) : anchor.tree.document.end(anchor.node)) + anchor.tree.shift
-			const index = this.doc.eBlocks.indexOf(blocks[0] ?? -1)
+			const index = this.doc.eIndex(blocks[0] ?? -1)
 
 			if (index >= 0) this.seedLists({ units: [], from: index, to: index, at: 0 })
 
@@ -5077,7 +5152,8 @@ class OdtWrite {
 		return out
 	}
 
-	// For each source block, the edited block it became (-1: removed); undefined where a block was inserted.
+	// For each source block, the edited block it became (-1: removed), and the edited blocks inserted after each source
+	// block (by its index; -1: before the first).
 	private pairBlocks(tBlocks: readonly number[], eBlocks: readonly number[]): { pairs: number[]; inserted: Map<number, number[]> } {
 		const doc = this.doc
 		const key = (document: XmlDocument, block: number): string => `${fnv(document.raw(block))}:${document.raw(block).length}`
@@ -5159,14 +5235,15 @@ class OdtWrite {
 				if (tDoc !== this.doc.tBody || numberingOf(tDoc, t) !== "" || inList(tree, node) || numberingOf(eDoc, e) === "")
 					return undefined
 
-				const index = this.doc.eBlocks.indexOf(e)
+				const index = this.doc.eIndex(e)
 
 				if (index < 0) return undefined
 
 				this.seedLists({ units: [], from: index, to: index, at: 0 })
 				this.written++
 				this.writingAt = start
-				this.keepMaster(tree, node, e)
+
+				if (eDoc === this.doc.eBody) this.keepMaster(tree, node, e)
 
 				const text = this.followed(tree.document, tree.namespaces, node, tDoc, t)
 
@@ -5279,15 +5356,12 @@ class OdtWrite {
 			throw new OdtWriteRefusal("sections", "the columns of a section the writer cannot find")
 
 		const cols = childNamed(eDoc, edited, "cols")
-		const count = Number(eDoc.attribute(cols, "w:num") ?? "1") || 1
-
-		if (eDoc.attribute(cols, "w:equalWidth") === "0") throw new OdtWriteRefusal("sections", "columns of unequal widths")
-
-		const gap = Number(eDoc.attribute(cols, "w:space") ?? "0") / 20
-		const columns =
-			count > 1
-				? `<style:columns fo:column-count="${count}" fo:column-gap="${Math.round(gap * 10_000) / 10_000}pt">${eDoc.attribute(cols, "w:sep") === "1" ? '<style:column-sep style:width="0.0071in" style:color="#000000" style:height="100%"/>' : ""}</style:columns>`
-				: ""
+		const columns = columnsMarkup(
+			Number(eDoc.attribute(cols, "w:num") ?? "1") || 1,
+			Number(eDoc.attribute(cols, "w:space") ?? "0"),
+			eDoc.attribute(cols, "w:sep") === "1",
+			eDoc.attribute(cols, "w:equalWidth")
+		)
 		const sourceName = attributeNamed(tree, node, "text:style-name")
 		const prologue = this.plan.prologueDocument
 		const namespaces = new Namespaces(prologue)
@@ -5347,17 +5421,7 @@ class OdtWrite {
 				`<style:style${this.content.declarations} style:name="${esc(made)}" style:family="section"${attributes}>${properties}${rest}</style:style>`
 		)
 		const document = tree.document
-		const open = decodeUtf8(document.raw(node).subarray(0, document.openEnd(node) - document.start(node)))
-		const attribute = [...document.attributes(node)].find(
-			item => canonicalAttribute(tree.namespaces, node, item.name) === "text:style-name"
-		)
-		const tag =
-			attribute === undefined
-				? open.replace(/^(<[^\s/>]+)/u, `$1 text:style-name="${esc(name)}"`)
-				: open.replace(
-						new RegExp(`(\\s${attribute.name.replace(/[.]/gu, "\\.")}\\s*=\\s*)(["'])[^"']*\\2`, "u"),
-						`$1"${esc(name)}"`
-					)
+		const { tag } = startTagWith(tree, node, "text:style-name", name)
 		const patches = this.unitPatches.get(unit.index) ?? []
 
 		patches.push({ start: document.start(node) + tree.shift, end: document.openEnd(node) + tree.shift, text: tag })
@@ -5469,7 +5533,7 @@ class OdtWrite {
 				const name = elementName(source.document, source.namespaces, child)
 
 				if (name.startsWith("draw:") || name.startsWith("dr3d:")) frames.push(child)
-				else if (FIELD_ATOMS.has(name)) sourceFields.push({ name, bytes: decodeUtf8(source.document.raw(child)) })
+				else if (KEPT_FIELDS.has(name)) sourceFields.push({ name, bytes: decodeUtf8(source.document.raw(child)) })
 				else if (name !== "text:page-number" && name !== "text:page-count") sourceWalk(child)
 			}
 		}
@@ -5573,7 +5637,10 @@ class OdtWrite {
 			if (raw === "") return undefined
 
 			made = this.content.registry.element(`graphic\u0000${key}`, "fr", fresh => {
-				const renamed = raw.replace(/(\sstyle:name=")[^"]*(")/u, `$1${esc(fresh)}$2`)
+				const renamed = raw.replace(
+					/(\sstyle:name=")[^"]*(")/u,
+					(_match, lead: string, close: string) => `${lead}${esc(fresh)}${close}`
+				)
 				const restated = renamed.replace(/(\sstyle:wrap=")[^"]*(")/u, `$1${wrap}$2`)
 
 				if (restated !== renamed) return restated
@@ -5609,7 +5676,12 @@ class OdtWrite {
 
 		if (fixed === undefined) return bytes
 
-		return open.replace(/(\s[A-Za-z0-9_.-]+:style-name=")[^"]*(")/u, `$1${esc(fixed)}$2`) + bytes.slice(open.length)
+		return (
+			open.replace(
+				/(\s[A-Za-z0-9_.-]+:style-name=")[^"]*(")/u,
+				(_match, lead: string, close: string) => `${lead}${esc(fixed)}${close}`
+			) + bytes.slice(open.length)
+		)
 	}
 
 	// A unit's frames (paired with the translation's drawings, as its atoms are) whose wrap needs a style of its own.
@@ -5659,14 +5731,10 @@ class OdtWrite {
 
 					if (fixed === undefined) return
 
-					const document = tree.document
-					const start = document.start(frame) + tree.shift
-					const open = decodeUtf8(document.raw(frame).subarray(0, document.openEnd(frame) - document.start(frame)))
-
 					out.push({
-						start,
-						end: document.openEnd(frame) + tree.shift,
-						text: open.replace(/(\s[A-Za-z0-9_.-]+:style-name=")[^"]*(")/u, `$1${esc(fixed)}$2`)
+						start: tree.document.start(frame) + tree.shift,
+						end: tree.document.openEnd(frame) + tree.shift,
+						text: startTagWith(tree, frame, "draw:style-name", fixed).tag
 					})
 				})
 			}
@@ -5681,7 +5749,7 @@ class OdtWrite {
 	private framesWithin(tree: UnitTree, node: number, block: number): Replacement[] {
 		if (!this.pageChanged) return []
 
-		const index = this.doc.tBlocks.indexOf(block)
+		const index = this.doc.tIndex(block)
 		const unit = this.plan.units.find(item => item.origin.first <= index && index < item.origin.first + item.origin.count)
 
 		if (unit === undefined) return []
@@ -5802,17 +5870,7 @@ class OdtWrite {
 
 		const fixed = story.stream.registry.style("table", "Table", attributes, `<style:table-properties${props}/>`)
 		const document = tree.document
-		const open = decodeUtf8(document.raw(node).subarray(0, document.openEnd(node) - document.start(node)))
-		const attribute = [...document.attributes(node)].find(
-			item => canonicalAttribute(tree.namespaces, node, item.name) === "table:style-name"
-		)
-		const tag =
-			attribute === undefined
-				? open.replace(/^(<[^\s/>]+)/u, `$1 table:style-name="${esc(fixed)}"`)
-				: open.replace(
-						new RegExp(`(\\s${attribute.name.replace(/[.]/gu, "\\.")}\\s*=\\s*)(["'])[^"']*\\2`, "u"),
-						`$1"${esc(fixed)}"`
-					)
+		const { tag } = startTagWith(tree, node, "table:style-name", fixed)
 
 		return { start: document.start(node) + tree.shift, end: document.openEnd(node) + tree.shift, text: tag }
 	}
@@ -6099,17 +6157,7 @@ class OdtWrite {
 		if (master !== "") attributes = sortedAttributesOf(`${attributes} style:master-page-name="${esc(master)}"`)
 
 		const fixed = this.content.registry.style("paragraph", "P", attributes, properties)
-		const open = decodeUtf8(document.raw(node).subarray(0, document.openEnd(node) - document.start(node)))
-		const attribute = [...document.attributes(node)].find(
-			item => canonicalAttribute(tree.namespaces, node, item.name) === "text:style-name"
-		)
-		const tag =
-			attribute === undefined
-				? open.replace(/^(<[^\s/>]+)/u, `$1 text:style-name="${esc(fixed)}"`)
-				: open.replace(
-						new RegExp(`(\\s${attribute.name.replace(/[.]/gu, "\\.")}\\s*=\\s*)(["'])[^"']*\\2`, "u"),
-						`$1"${esc(fixed)}"`
-					)
+		const { open, tag } = startTagWith(tree, node, "text:style-name", fixed)
 		const start = document.start(node) + tree.shift
 
 		return { start, end: start + encodeUtf8(open).length, text: tag }
@@ -6224,7 +6272,8 @@ class OdtWrite {
 		this.atomsOf([unit])
 
 		const doc = this.doc
-		const from = this.keptFrom(unit) ?? -1
+		// Gate 1 runs on the untouched translation: blocks are the translation's.
+		const from = unit.origin.first
 		const replacements: Replacement[] = []
 
 		// A block at a time, the thread given back between (a unit can be a whole section).
@@ -6259,11 +6308,6 @@ class OdtWrite {
 			replacements
 		)
 	}
-
-	private keptFrom(unit: Unit): number | undefined {
-		// Gate 1 runs on the untouched translation: blocks are the translation's.
-		return unit.origin.first
-	}
 }
 
 function attributeNamed(tree: UnitTree, node: number, canonical: string): string | undefined {
@@ -6274,9 +6318,38 @@ function attributeNamed(tree: UnitTree, node: number, canonical: string): string
 	return undefined
 }
 
+// A source element's start tag (`open`) and the same with its `canonical` attribute set to `value` (`tag`), added after
+// the element's name where it has none. The value is written literally (a function replacer: no "$" patterns).
+function startTagWith(tree: UnitTree, node: number, canonical: string, value: string): { readonly open: string; readonly tag: string } {
+	const document = tree.document
+	const open = decodeUtf8(document.raw(node).subarray(0, document.openEnd(node) - document.start(node)))
+	const attribute = [...document.attributes(node)].find(item => canonicalAttribute(tree.namespaces, node, item.name) === canonical)
+	const written = `"${esc(value)}"`
+	const tag =
+		attribute === undefined
+			? open.replace(/^(<[^\s/>]+)/u, (head: string) => `${head} ${canonical}=${written}`)
+			: open.replace(
+					new RegExp(`(\\s${attribute.name.replace(/[.]/gu, "\\.")}\\s*=\\s*)(["'])[^"']*\\2`, "u"),
+					(_match: string, lead: string) => `${lead}${written}`
+				)
+
+	return { open, tag }
+}
+
+// Columns (style:columns, Part 3 §17.12) of `count` with a gap of `gapTwips`, "" for one; columns of unequal widths
+// (w:equalWidth "0") are refused.
+function columnsMarkup(count: number, gapTwips: number, separator: boolean, equalWidth: string | undefined): string {
+	if (equalWidth === "0") throw new OdtWriteRefusal("sections", "columns of unequal widths")
+
+	return count > 1
+		? `<style:columns fo:column-count="${count}" fo:column-gap="${twipsPoints(gapTwips)}">${separator ? COLUMN_SEPARATOR : ""}</style:columns>`
+		: ""
+}
+
 function sourceCells(tree: UnitTree, row: number): { node: number; style: string | undefined; covered: boolean }[] {
 	const out: { node: number; style: string | undefined; covered: boolean }[] = []
 	const document = tree.document
+	let positions = 0
 
 	for (let cell = document.firstChildElement(row); cell >= 0; cell = document.nextSiblingElement(cell)) {
 		const name = elementName(document, tree.namespaces, cell)
@@ -6284,12 +6357,18 @@ function sourceCells(tree: UnitTree, row: number): { node: number; style: string
 		if (name !== "table:table-cell" && name !== "table:covered-table-cell") continue
 
 		const repeat = Math.max(1, Number(attributeNamed(tree, cell, "table:number-columns-repeated") ?? "1") || 1)
+		// The translator writes at most MAX_COLUMNS positions per row: a crafted repeat count expands no further.
+		const kept = Math.min(repeat, MAX_COLUMNS - positions)
 
-		for (let k = 0; k < repeat; k++) {
-			if (name === "table:covered-table-cell") continue
+		positions += kept
 
-			out.push({ node: repeat > 1 ? -1 : cell, style: attributeNamed(tree, cell, "table:style-name"), covered: repeat > 1 })
+		if (name === "table:table-cell") {
+			const style = attributeNamed(tree, cell, "table:style-name")
+
+			for (let k = 0; k < kept; k++) out.push({ node: repeat > 1 ? -1 : cell, style, covered: repeat > 1 })
 		}
+
+		if (positions >= MAX_COLUMNS) break
 	}
 
 	return out
@@ -6957,7 +7036,6 @@ async function writePackage(
 	return { bytes: sink.bytes(), manifest: written }
 }
 
-// The meaning of a translation's body blocks and sections, and of the edit's.
 // A meaning as a digest: two independent 32-bit hashes of its UTF-16 code units and its length.
 function digestOf(text: string): string {
 	let a = 0x811c9dc5
@@ -6973,6 +7051,7 @@ function digestOf(text: string): string {
 	return `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${text.length.toString(36)}`
 }
 
+// The meaning of a translation's body blocks and sections, and of the edit's.
 async function meaningOf(
 	parts: (name: string) => XmlDocument | undefined,
 	rels: Map<string, { target: string; external: boolean; type: string }>,
@@ -7021,8 +7100,6 @@ async function meaningOf(
 	return meaning.bodyIn(body, bodyOf(body), job === undefined ? undefined : async () => (job.due() ? turn(job) : undefined))
 }
 
-// Compares the written file's reading with the edit, segment by segment. Units whose kept bytes read differently
-// come back to be rewritten; a rewritten segment that reads differently refuses (or, in Gate 1, locks).
 // What the edit means (verify's expectation); the same from one write to the next.
 async function expectedOf(
 	plan: OdtPlan,
@@ -7040,6 +7117,8 @@ async function expectedOf(
 	return doc.expected
 }
 
+// Compares the written file's reading with the edit, segment by segment. Units whose kept bytes read differently
+// come back to be rewritten; a rewritten segment that reads differently refuses (or, in Gate 1, locks).
 async function verify(
 	expected: { readonly blocks: readonly string[]; readonly sections: readonly string[] },
 	result: WriteResult,
@@ -7051,6 +7130,7 @@ async function verify(
 	readonly wrong: Set<number>
 	readonly wrongBlocks: Set<number>
 	readonly message: string | undefined
+	readonly detail: string | undefined
 }> {
 	// Every part listed in the manifest and every listing a part (Part 2 §3.2, §4.3), as far as the source had them so.
 	const written = await ZipArchive.open(bytesSource(packaged))
@@ -7098,15 +7178,33 @@ async function verify(
 	const wrongBlocks = new Set<number>()
 	const wholeUnits = new Set<number>()
 	let message: string | undefined
+	let detail: string | undefined
 
-	const origins = reread.origins.filter(origin => origin.part === BODY_PART && origin.stream === "content.xml")
-	// The reread blocks of each segment, by where their source elements start.
+	const origins = reread.origins
+		.filter(origin => origin.part === BODY_PART && origin.stream === "content.xml" && origin.count > 0)
+		.sort((a, b) => a.start - b.start)
+	// The reread blocks of each segment, by where their source elements start: the origins starting within it, found
+	// by a binary search (segments come in no order).
 	const rangeOf = (segment: Segment): { from: number; to: number } => {
+		let low = 0
+		let high = origins.length
+
+		while (low < high) {
+			const middle = (low + high) >>> 1
+
+			if ((origins[middle]?.start ?? 0) < segment.start) low = middle + 1
+			else high = middle
+		}
+
 		let from = Number.MAX_SAFE_INTEGER
 		let to = -1
 
-		for (const origin of origins) {
-			if (origin.start >= segment.start && origin.end <= segment.end && origin.count > 0) {
+		for (let k = low; k < origins.length; k++) {
+			const origin = origins[k]
+
+			if (origin === undefined || origin.start > segment.end) break
+
+			if (origin.end <= segment.end) {
 				from = Math.min(from, origin.first)
 				to = Math.max(to, origin.first + origin.count)
 			}
@@ -7114,8 +7212,11 @@ async function verify(
 
 		return to < 0 ? { from: 0, to: 0 } : { from, to }
 	}
+	let paired = 0
 
 	for (const segment of result.segments) {
+		if (++paired % 4096 === 0 && job?.due() === true) await turn(job)
+
 		const range = rangeOf(segment)
 		const want = expected.blocks.slice(segment.from, segment.to)
 		const got = actual.blocks.slice(range.from, range.to)
@@ -7140,9 +7241,15 @@ async function verify(
 			}
 
 		if (message === undefined) {
-			const k = want.findIndex((block, index) => block !== got[index])
+			const k = Math.max(
+				0,
+				want.findIndex((block, index) => block !== got[index])
+			)
 
-			message = `block ${segment.from + Math.max(0, k)} reads ${(got[Math.max(0, k)] ?? "nothing").slice(0, 300)} for ${(want[Math.max(0, k)] ?? "nothing").slice(0, 300)}`
+			const difference = readBackDifference(segment.from + k, got[k], want[k])
+
+			message = difference.message
+			detail = difference.detail
 		}
 	}
 
@@ -7150,8 +7257,12 @@ async function verify(
 	if (again.size === 0 && wrong.size === 0) {
 		if (expected.blocks.length !== actual.blocks.length || expected.blocks.some((block, k) => block !== actual.blocks[k])) {
 			const k = expected.blocks.findIndex((block, index) => block !== actual.blocks[index])
+			const at = k < 0 ? expected.blocks.length : k
 
-			message = `block ${k} reads ${(actual.blocks[k] ?? "nothing").slice(0, 300)} for ${(expected.blocks[k] ?? "nothing").slice(0, 300)}`
+			const difference = readBackDifference(at, actual.blocks[at], expected.blocks[at])
+
+			message = difference.message
+			detail = difference.detail
 			wrong.add(-1)
 		} else if (expected.sections.join("\u0001") !== actual.sections.join("\u0001")) {
 			message = "the sections read differently"
@@ -7162,7 +7273,20 @@ async function verify(
 	// A unit whose blocks did not pair locks whole: its blocks then stand for the unit.
 	for (const unit of wholeUnits) wrongBlocks.add(-1 - unit)
 
-	return { again, wrong, wrongBlocks, message }
+	return { again, wrong, wrongBlocks, message, detail }
+}
+
+// Where a block reads back differently, never what it reads as: the message is logged, and a block's reading is a
+// short digest of its meaning (digestOf), which a guess at a short block's text could confirm. Both digests go on
+// the detail (OdtWriteRefusal.detail).
+function readBackDifference(
+	block: number,
+	actual: string | undefined,
+	expected: string | undefined
+): { readonly message: string; readonly detail: string } {
+	const what = actual === undefined ? ": nothing read back" : expected === undefined ? ": nothing expected" : ""
+
+	return { message: `block ${String(block)} reads back differently${what}`, detail: `${actual ?? "nothing"} != ${expected ?? "nothing"}` }
 }
 
 // One changed run of top-level blocks: the edit's blocks [from, to) it must read as, the bytes [start, end) of the
@@ -7251,7 +7375,7 @@ async function proveSpans(
 	let offset = 0
 
 	try {
-		for await (const chunk of inflateChunks(odf.archive, entry, clock)) {
+		for await (const chunk of odf.archive.stream(entry, clock)) {
 			let at = 0
 
 			for (const { window, bytes } of windows) {
@@ -7408,7 +7532,8 @@ async function write(
 			const unchanged = await verify(expected, result, source.bytes, source.archive, job)
 
 			if (unchanged.again.size === 0 && unchanged.wrong.size === 0) return { bytes: source.bytes, written: 0, rounds: round, notices }
-			if (unchanged.wrong.size > 0) throw new OdtWriteRefusal("proof", unchanged.message ?? "the edit does not read back")
+			if (unchanged.wrong.size > 0)
+				throw new OdtWriteRefusal("proof", unchanged.message ?? "the edit does not read back", unchanged.detail)
 
 			for (const unit of unchanged.again) forced.add(unit)
 
@@ -7433,7 +7558,8 @@ async function write(
 
 		const checked = await verify(expected, result, packaged, source.archive, job)
 
-		if (checked.wrong.size > 0) throw new OdtWriteRefusal("proof", checked.message ?? "the written file reads differently")
+		if (checked.wrong.size > 0)
+			throw new OdtWriteRefusal("proof", checked.message ?? "the written file reads differently", checked.detail)
 		if (checked.again.size === 0) return { bytes: packaged, written: result.written, rounds: round, proof: "whole", notices }
 
 		for (const unit of checked.again) forced.add(unit)
@@ -7564,7 +7690,8 @@ export async function proveOdt(source: OdtSource, turns?: RtfTurns): Promise<Odt
 	plan.release(true)
 	const reasons = new Map<number, string>(result.failed)
 
-	if (result.contentChanged) {
+	// Read before the release where the content changed, and only then.
+	if (expected !== undefined) {
 		const { content, styles } = result
 		// Gate 1 proves the blocks only: meta.xml is copied.
 		const { bytes: packaged } = await writePackage(source, content, styles, undefined, result.pictures, job)
@@ -7572,7 +7699,7 @@ export async function proveOdt(source: OdtSource, turns?: RtfTurns): Promise<Odt
 		await turn(job)
 
 		try {
-			const checked = await verify(expected ?? (await expectedOf(plan, doc, result, job)), result, packaged, source.archive, job)
+			const checked = await verify(expected, result, packaged, source.archive, job)
 
 			// Kept units that read differently (a neighbour's rewrite reached them) and units whose blocks did not pair
 			// lock whole; a rewritten block that reads differently locks alone.
@@ -7621,7 +7748,3 @@ export async function proveOdt(source: OdtSource, turns?: RtfTurns): Promise<Odt
 
 	return { locked, written: result.written, reasons: why }
 }
-
-export { RtfAborted as OdtAborted }
-export type { RtfTurns as OdtTurns }
-export { W_NAMESPACE }

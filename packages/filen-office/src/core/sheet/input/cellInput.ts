@@ -11,9 +11,10 @@ export type ParsedInput =
 	| { type: "formula"; formula: string }
 	| { type: "value"; value: string | number | boolean | Date; impliedFormat?: string }
 
-const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i
+// The whole and fraction digits cannot share a run of digits, so a long one that fails is read once (linear).
+const NUMBER = /^[-+]?(\d+(?:\.\d*)?|\.\d+)(e[-+]?\d+)?$/i
 const GROUPED = /^[-+]?\d{1,3}(,\d{3})+(\.\d+)?$/
-const PERCENT = /^[-+]?(\d+\.?\d*|\.\d+)%$/
+const PERCENT = /^[-+]?(\d+(?:\.\d*)?|\.\d+)%$/
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[ T](.+)$/
 // 13:30, 25:00 (hours past a day), 9:05:30.

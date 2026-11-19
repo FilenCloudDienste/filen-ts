@@ -51,10 +51,6 @@ export function nextSlideId(used: Iterable<number>): number | undefined {
 	return freeId(used, MIN_SLIDE_ID, MAX_SLIDE_ID)
 }
 
-export function nextMasterLayoutId(used: Iterable<number>): number | undefined {
-	return freeId(used, MIN_MASTER_LAYOUT_ID, MAX_MASTER_LAYOUT_ID)
-}
-
 function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): void {
 	for (const shape of shapes) {
 		visit(shape)

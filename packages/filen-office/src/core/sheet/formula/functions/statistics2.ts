@@ -1,5 +1,6 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import {
+	ARRAY_ARGUMENTS,
 	divError,
 	naError,
 	numError,
@@ -10,6 +11,7 @@ import {
 	type PluginScalar,
 	type PluginState
 } from "./plugin"
+import { at, linearFit, rangeNumbers } from "./statistics"
 
 // Statistical and math functions as support.microsoft.com defines them (each on its own page).
 
@@ -89,21 +91,34 @@ function logGamma(x: number): number {
 	return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(sum)
 }
 
+// Trials past which the most likely term's log-gamma differences lose their digits (and the sum runs to millions of
+// terms): such a count is refused rather than answered wrongly or slowly.
+const MAX_BINOMIAL_TRIALS = 1e10
+
 // The probability of `from` to `to` successes in `trials` trials of probability p, the terms summed from the most
 // likely one in the span outwards until they no longer count (the terms fall away from the distribution's mode).
+// NaN for a count it cannot answer.
 export function binomialRange(trials: number, p: number, from: number, to: number): number {
 	if (p === 0) return from === 0 ? 1 : 0
 	if (p === 1) return to === trials ? 1 : 0
+	if (!(trials <= MAX_BINOMIAL_TRIALS)) return NaN
 
 	const start = Math.min(to, Math.max(from, Math.floor((trials + 1) * p)))
 	const odds = p / (1 - p)
 	const first = Math.exp(
 		logGamma(trials + 1) - logGamma(start + 1) - logGamma(trials - start + 1) + start * Math.log(p) + (trials - start) * Math.log1p(-p)
 	)
+
+	if (!Number.isFinite(first)) return NaN
+	// The span's largest term underflowed: so did every other.
+	if (first === 0) return 0
+
+	// Every term that counts lies within some 9 standard deviations of the mode; the cap only bounds the loops.
+	const terms = 40 * Math.sqrt(trials * p * (1 - p)) + 64
 	let sum = first
 	let term = first
 
-	for (let k = start; k < to; k++) {
+	for (let k = start, last = Math.min(to, start + terms); k < last; k++) {
 		term *= ((trials - k) / (k + 1)) * odds
 
 		if (term <= sum * 1e-17) break
@@ -113,7 +128,7 @@ export function binomialRange(trials: number, p: number, from: number, to: numbe
 
 	term = first
 
-	for (let k = start; k > from; k--) {
+	for (let k = start, last = Math.max(from, start - terms); k > last; k--) {
 		term *= k / ((trials - k + 1) * odds)
 
 		if (term <= sum * 1e-17) break
@@ -122,20 +137,6 @@ export function binomialRange(trials: number, p: number, from: number, to: numbe
 	}
 
 	return sum
-}
-
-// The numbers of a range or array: text, logical values and empty cells left out; the first error raised.
-function numbersOf(value: SimpleRangeValue, out: number[]): CellError | null {
-	for (const row of value.data)
-		for (const cell of row) {
-			if (cell instanceof CellError) return cell
-
-			const number = rawNumber(cell)
-
-			if (number !== undefined) out.push(number)
-		}
-
-	return null
 }
 
 // The sum of the numbers of a range or array, or its first error.
@@ -152,13 +153,6 @@ function sumOf(value: SimpleRangeValue): number | CellError {
 	return sum
 }
 
-// The value at `index` of a range or array read row by row.
-function at(value: SimpleRangeValue, index: number): PluginScalar {
-	const width = value.width()
-
-	return value.data[Math.floor(index / width)]?.[index % width] ?? EmptyValue
-}
-
 // A number cut (not rounded) to `digits` decimals: PERCENTRANK's significance. The product is read at 15
 // significant digits first, so 0.7 × 1000 is 700, not 699.99….
 function truncated(value: number, digits: number): number {
@@ -167,7 +161,6 @@ function truncated(value: number, digits: number): number {
 	return Math.floor(Number((value * scale).toPrecision(15))) / scale
 }
 
-const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
 const RANKS = {
 	parameters: [
 		{ argumentType: FunctionArgumentType.RANGE },
@@ -239,9 +232,11 @@ export class Statistics2Functions extends SheetFunctionPlugin {
 				const from = Math.trunc(first)
 				const to = second === undefined ? from : Math.trunc(second)
 
-				if (n < 0 || p < 0 || p > 1 || from < 0 || from > n || to < from || to > n) return numError()
+				if (n < 0 || n > Number.MAX_SAFE_INTEGER || p < 0 || p > 1 || from < 0 || from > n || to < from || to > n) return numError()
 
-				return binomialRange(n, p, from, to)
+				const probability = binomialRange(n, p, from, to)
+
+				return Number.isNaN(probability) ? numError() : probability
 			}
 		)
 	}
@@ -283,51 +278,11 @@ export class Statistics2Functions extends SheetFunctionPlugin {
 	// not a number are left out; arrays of different sizes, or no pairs, are #N/A; no spread in x is #DIV/0!.
 	intercept(ast: PluginCall, state: PluginState): unknown {
 		return this.runFunction(ast.args, state, this.metadata("INTERCEPT"), (ys: SimpleRangeValue, xs: SimpleRangeValue) => {
-			const size = ys.width() * ys.height()
+			const fit = linearFit(ys, xs)
 
-			if (size !== xs.width() * xs.height()) return naError()
+			if (fit instanceof CellError) return fit
 
-			let count = 0
-			let ySum = 0
-			let xSum = 0
-
-			for (let index = 0; index < size; index++) {
-				const y = at(ys, index)
-				const x = at(xs, index)
-
-				if (y instanceof CellError) return y
-				if (x instanceof CellError) return x
-
-				const yNumber = rawNumber(y)
-				const xNumber = rawNumber(x)
-
-				if (yNumber === undefined || xNumber === undefined) continue
-
-				count++
-				ySum += yNumber
-				xSum += xNumber
-			}
-
-			if (count === 0) return naError()
-
-			const yMean = ySum / count
-			const xMean = xSum / count
-			let covariance = 0
-			let variance = 0
-
-			for (let index = 0; index < size; index++) {
-				const yNumber = rawNumber(at(ys, index))
-				const xNumber = rawNumber(at(xs, index))
-
-				if (yNumber === undefined || xNumber === undefined) continue
-
-				covariance += (xNumber - xMean) * (yNumber - yMean)
-				variance += (xNumber - xMean) ** 2
-			}
-
-			if (variance === 0) return divError()
-
-			return yMean - (covariance / variance) * xMean
+			return fit.yMean - fit.slope * fit.xMean
 		})
 	}
 
@@ -426,7 +381,7 @@ export class Statistics2Functions extends SheetFunctionPlugin {
 	trimmean(ast: PluginCall, state: PluginState): unknown {
 		return this.runFunction(ast.args, state, this.metadata("TRIMMEAN"), (array: SimpleRangeValue, percent: number) => {
 			const numbers: number[] = []
-			const error = numbersOf(array, numbers)
+			const error = rangeNumbers(array.data, numbers)
 
 			if (error !== null) return error
 			if (percent < 0 || percent > 1 || numbers.length === 0) return numError()

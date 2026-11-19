@@ -16,7 +16,7 @@ import {
 } from "../opc/index"
 import { chartexDrawable } from "../drawingml/chart/chartex"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../presentation/budget"
-import { classifyAction } from "../presentation/actions"
+import { classifyHyperlink } from "../presentation/actions"
 import { addGate, gateReasons } from "../presentation/gate"
 import { SlideRefs } from "../presentation/ids"
 import {
@@ -42,7 +42,7 @@ import { readTheme, type PresentationTheme } from "../presentation/theme"
 import { decodeUtf8, XmlError, type XmlDocument } from "../xml/index"
 import { type ReadContext } from "./read/drawing"
 import { readPresentation } from "./read/presentation"
-import { readLegacyAuthors, readModernAuthors, readShowSettings, readViewGrid, DEFAULT_SHOW } from "./read/props"
+import { fitShowRange, readLegacyAuthors, readModernAuthors, readShowSettings, readViewGrid, DEFAULT_SHOW } from "./read/props"
 import { readCustomShows, readSections } from "./read/sections"
 import { legacyOlePreviews } from "./read/legacyOle"
 import { readSlidePart, SlidePartError } from "./read/slide"
@@ -692,31 +692,11 @@ export class PptxParts {
 	}
 
 	action(reader: PartReader, relationships: Relationships, node: number): Action | undefined {
-		const id = reader.rel(node, "id")
-		const target = id === undefined || id === "" ? undefined : relationships.byId(id)
-		const action = reader.attr(node, "action")
+		return classifyHyperlink(reader, relationships, node, part => {
+			const listed = this.byPart.get(partKey(part))
 
-		return classifyAction(
-			{
-				...(action === undefined ? {} : { action }),
-				...(target === undefined
-					? {}
-					: {
-							target: {
-								external: target.external,
-								target: target.target,
-								...(target.partName === undefined ? {} : { partName: `/${target.partName}` })
-							}
-						})
-			},
-			{
-				slideOf: part => {
-					const listed = this.byPart.get(partKey(part))
-
-					return listed?.kind === "slide" ? listed.ref : undefined
-				}
-			}
-		)
+			return listed?.kind === "slide" ? listed.ref : undefined
+		})
 	}
 
 	private list(kind: SlideKind, part: string, id?: number): SlideRef {
@@ -808,10 +788,31 @@ export class PptxParts {
 		this.deck.nodes.set(ref, read.node)
 
 		if (read.notesPart !== undefined && this.opc.has(read.notesPart)) {
+			// A slide whose notes cannot be read is refused whole: it leaves deck.nodes and gives back its share, so it is
+			// never served with a notes ref that has no node. A notes relationship naming a part listed as another kind
+			// (the slide itself, say) is refused before it is parsed under that part's ref.
+			const listed = this.byPart.get(partKey(read.notesPart))
+
+			if (listed !== undefined && listed.kind !== "notes") {
+				this.deck.nodes.delete(ref)
+				this.tally.release(ref)
+
+				throw new SlidePartError(`${read.notesPart} is a ${listed.kind}, related as notes of ${part}`)
+			}
+
 			const notes = this.list("notes", read.notesPart)
 
 			read.node.notes = notes
-			this.deck.nodes.set(notes, await this.parse(notes, "notes", read.notesPart, slicing))
+
+			try {
+				this.deck.nodes.set(notes, await this.parse(notes, "notes", read.notesPart, slicing))
+			} catch (error) {
+				this.deck.nodes.delete(ref)
+				delete read.node.notes
+				this.tally.release(ref)
+
+				throw error
+			}
 		}
 
 		return read.node
@@ -1114,10 +1115,12 @@ export class PptxParts {
 			const props = await this.xml(part)
 			const propsReader = partReader(props)
 
-			deck.show = readShowSettings(
+			const show = readShowSettings(
 				this.context(part, propsReader, await this.opc.relationships(part.slice(1))),
 				props.documentElement()
 			)
+
+			deck.show = { ...show, range: fitShowRange(show.range, deck.slides.length, deck.customShows) }
 			if (propsReader.malformed) addGate(deck.gate, "malformed")
 		}
 

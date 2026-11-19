@@ -144,9 +144,11 @@ describe("presentation text controller with steps in flight", () => {
 		await undone
 		await controller.flush()
 
-		const sent = s.ops.map(textOf).filter(text => text !== undefined)
+		const lastSent = s.ops.map(textOf).findLast(text => text !== undefined)
 
-		expect(controller.state.doc.textContent.includes("Z") || sent.some(text => text.includes("Z") && !text.startsWith("A"))).toBe(true)
+		// The undone "A" stays undone, the "Z" typed meanwhile is kept, and the worker holds the body the view shows.
+		expect(controller.state.doc.textContent).toBe("TitleZ")
+		expect(lastSent).toBe("TitleZ")
 	})
 
 	it("an undo slower than the idle commit: view and worker end on the same body", async () => {

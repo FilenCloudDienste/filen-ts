@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { NodeKind, type Namespaces, type XmlDocument } from "../xml/index"
 import {
 	canonicalAttributes,
@@ -22,6 +23,12 @@ import { esc, escText, PartWriter, REL, twips } from "./wml"
 
 // Nested blocks and spans (each frame, table cell, note or list level adds about two).
 const MAX_NESTING = 128
+// What one translation does at most: nodes translated again as copies of repeated table rows and cells (every node a
+// copy holds, a nested table's copies again within their own), and characters of text (spaces of text:s included).
+// Content outside copies is bounded by content.xml itself; past either, a tiny file would expand into unbounded work:
+// the document is refused as malformed. A row repeated 1,000 times across 63 cells of a few nodes each stays inside.
+const MAX_COPIED_NODES = 1_000_000
+const MAX_CHARACTERS = 64 * 1024 * 1024
 // The first pPr child w:spacing comes before (ECMA-376 Part 1 §17.3.1.26): w:ind ... w:cnfStyle.
 const AFTER_SPACING =
 	/<w:(?:ind|contextualSpacing|mirrorIndents|suppressOverlap|jc|textDirection|textAlignment|textboxTightWrap|outlineLvl|divId|cnfStyle)[\s/>]/u
@@ -183,6 +190,9 @@ class Runs {
 
 	addText(text: string, rPr: string, origin = ""): void {
 		if (text === "") return
+
+		this.translator.spendCharacters(text.length)
+
 		if (rPr !== this.rPr || origin !== this.origin) this.flush()
 
 		this.rPr = rPr
@@ -264,6 +274,9 @@ export class Translator implements PropsSink {
 	private nextId = 1
 	// Blocks and spans open (see enter).
 	private depth = 0
+	// What the translation has done so far, against MAX_COPIED_NODES and MAX_CHARACTERS.
+	private copiedNodes = 0
+	private characters = 0
 	private readonly bookmarkIds = new Map<string, number>()
 	private readonly changes = new Map<string, ChangeRecord>()
 	// Comment ranges open where the walk is (office:annotation name to comment id), of the story being translated.
@@ -416,6 +429,40 @@ export class Translator implements PropsSink {
 		this.openAnnotations = outer
 	}
 
+	// A header or footer, translated where a page style first takes it, which can be in the middle of a body block: what
+	// that block has open (frames waiting for its paragraph, its offsets in content.xml, a tracked change, a page break
+	// or a table's space below) stays the body's.
+	regionBlocks(container: number, flow: Flow): void {
+		const saved = {
+			blockBase: this.blockBase,
+			insertion: this.insertion,
+			deleting: this.deleting,
+			breakAfter: this.breakAfter,
+			spaceBelow: this.spaceBelow
+		}
+		const anchors = this.pendingAnchors.splice(0)
+
+		this.blockBase = undefined
+		this.insertion = undefined
+		this.deleting = false
+		this.breakAfter = false
+		this.spaceBelow = undefined
+		this.storyBlocks(container, flow)
+
+		// Frames of the region anchored to the page with no paragraph after them.
+		if (this.pendingAnchors.length > 0) {
+			flow.add(paragraph("", "", this.pendingAnchors.join("")))
+			this.pendingAnchors.length = 0
+		}
+
+		appendAll(this.pendingAnchors, anchors)
+		this.blockBase = saved.blockBase
+		this.insertion = saved.insertion
+		this.deleting = saved.deleting
+		this.breakAfter = saved.breakAfter
+		this.spaceBelow = saved.spaceBelow
+	}
+
 	// Comment ranges no office:annotation-end closed: ended after the content of the story's last paragraph.
 	closeOpenAnnotations(flow: Flow): void {
 		if (this.openAnnotations.size === 0) return
@@ -443,6 +490,29 @@ export class Translator implements PropsSink {
 
 	leave(): void {
 		this.depth--
+	}
+
+	// A copy of a repeated table row or cell about to be translated anew: charged every node it holds (elements, text,
+	// comments alike; nodes are numbered in document order, so its subtree is the run up to the node after it).
+	spendCopy(node: number): void {
+		const document = this.document
+		let after = document.count
+
+		for (let n = node; n >= 0; n = document.parent(n)) {
+			const next = document.nextSibling(n)
+
+			if (next >= 0) {
+				after = next
+				break
+			}
+		}
+
+		if ((this.copiedNodes += after - node) > MAX_COPIED_NODES)
+			throw new OdtScanError("Repeated table rows expand past what can be translated")
+	}
+
+	spendCharacters(count: number): void {
+		if ((this.characters += count) > MAX_CHARACTERS) throw new OdtScanError("Text expands past what can be translated")
 	}
 
 	private blockAt(node: number, flow: Flow, list?: ListContext): void {
@@ -604,7 +674,9 @@ export class Translator implements PropsSink {
 
 	// Whether a span style says what its WordprocessingML does not (props.ts: untranslatedText).
 	private untranslatedSpan(name: string): boolean {
-		let found = this.untranslatedSpans.get(name)
+		// Automatic styles of content.xml and styles.xml are apart and reuse names.
+		const key = `${this.scope}\u0000${name}`
+		let found = this.untranslatedSpans.get(key)
 
 		if (found === undefined) {
 			let lossy = false
@@ -613,7 +685,7 @@ export class Translator implements PropsSink {
 				lossy: reason => (lossy ||= reason === "untranslatedText")
 			})
 			found = lossy
-			this.untranslatedSpans.set(name, found)
+			this.untranslatedSpans.set(key, found)
 		}
 
 		return found

@@ -1,6 +1,6 @@
 import type { OdpParts } from "../../odp/read/document"
 import { writeFreshOdp, type FreshReport } from "../../odp/write/fresh"
-import type { ByteSink, OpcPackage } from "../../opc/index"
+import { OpcError, ZipError, type ByteSink, type OpcPackage } from "../../opc/index"
 import type { PptLoss } from "../../ppt/report"
 import { writePptConversion } from "../../ppt/toPptx"
 import type { PptxParts } from "../../pptx/package"
@@ -8,6 +8,7 @@ import { freshPptxWith } from "../../pptx/write/fresh"
 import type { PptxSource } from "../../pptx/write/types"
 import { PresentationError, refused, type Deck, type Format, type Refused, type SlideNode } from "../../presentation/model"
 import type { Slicing } from "../../slicing"
+import { XmlError } from "../../xml/index"
 import { deckComments, legacyComments, odpAnnotations, type SlideCommentsOf } from "./comments"
 import { odpToPptxAdapter } from "./fromOdp"
 import { odpObjects } from "./odpElements"
@@ -261,6 +262,8 @@ export async function convertPresentation(
 		return await convert(deck, input, target, sink, options)
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
+		// A part read for the conversion only (a chart, a drawing cache, a .rels part) that is damaged.
+		if (error instanceof XmlError || error instanceof OpcError || error instanceof ZipError) return refused("malformed", error.message)
 
 		throw error
 	}
@@ -332,7 +335,7 @@ async function convert(
 	}
 
 	const source: PptxSource | undefined = input.format === "pptx" ? input.source : undefined
-	const objects = input.format === "odp" ? await odpObjects(deck, input.parts, report, options.svgPng) : undefined
+	const objects = input.format === "odp" ? await odpObjects(deck, input.parts, report, options.slicing, options.svgPng) : undefined
 	const fromOdp = input.format === "odp" ? await odpExtras(deck, input.parts, report, options.slicing) : undefined
 	const size = slideSize(deck, report)
 	const extras = {

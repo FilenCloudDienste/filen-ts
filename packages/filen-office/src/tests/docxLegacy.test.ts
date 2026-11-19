@@ -1,12 +1,21 @@
 import { describe, expect, it, vi } from "vitest"
 import { bytesSource, OpcPackage } from "@filen/office/core/opc"
-import { openDocxPackage } from "@filen/office/core/docx"
+import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
 import { decodeUtf8 } from "@filen/office/core/xml"
+import {
+	DocxEditorSession,
+	docxSchema,
+	openDocxEditContext,
+	parseDocxEditorCommand,
+	setDocumentProtection
+} from "@filen/office/core/docx/edit"
+import { TextSelection } from "prosemirror-state"
 import { legacyPasswordVerifier, readProtectionHash } from "../core/docx/protection/hash"
 import { verifyProtectionPassword } from "../dom/protection"
 import type { DocxEvent } from "@filen/office/dom/docx"
 import type { DocxConvertedDocument, DocxLegacyOpen } from "../dom/docx/legacy"
 import { buildDoc, prl } from "./docFixtures"
+import { buildDocx, p } from "./docxSynthetic"
 import { encryptedDoc } from "./docDecryptFixtures"
 import { workerHarness } from "./docxEncryptedFixtures"
 
@@ -161,6 +170,88 @@ describe("Word binary documents in the docx worker", () => {
 			})
 		} finally {
 			harness.dispose()
+		}
+	})
+})
+
+// Legacy form fields (w:ffData) in an editor session.
+const TEXT_FIELD = (input: string): string =>
+	'<w:p><w:r><w:fldChar w:fldCharType="begin"><w:ffData><w:name w:val="Text1"/><w:enabled/><w:calcOnExit w:val="0"/>' +
+	`<w:textInput>${input}</w:textInput></w:ffData></w:fldChar></w:r><w:r><w:instrText xml:space="preserve"> FORMTEXT </w:instrText></w:r>` +
+	'<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>12</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+
+async function fieldSession(input: string) {
+	const opened = await openDocxPackage(bytesSource(buildDocx({ body: p("x") + TEXT_FIELD(input) })))
+
+	if (!opened.ok) throw new Error(opened.reason)
+
+	const context = await openDocxEditContext(opened.package, await buildDocxModel(opened.package), {})
+	const session = new DocxEditorSession(context)
+	let pos = -1
+
+	session.state.doc.descendants((node, at) => {
+		if (node.type === docxSchema.nodes.field) pos = at
+	})
+	session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, pos)))
+
+	return { context, session }
+}
+
+function fieldResult(session: DocxEditorSession): string {
+	let shown = ""
+
+	session.state.doc.descendants(node => {
+		if (node.type === docxSchema.nodes.field) shown = String(node.attrs["result"])
+	})
+
+	return shown
+}
+
+function typeInto(session: DocxEditorSession, text: string): boolean {
+	const command = parseDocxEditorCommand({ type: "control.text", text })
+
+	if (command === undefined) throw new Error("invalid command")
+
+	return session.execute(command)
+}
+
+describe("legacy form fields", () => {
+	it("follows document protection in the field's context, keeping its identity while nothing changes", async () => {
+		const { context, session } = await fieldSession("")
+		const before = session.snapshot().context.control
+
+		expect(before?.kind).toBe("field")
+		expect(session.snapshot().context.control).toBe(before)
+
+		setDocumentProtection(context, [session], { edit: "forms", formatting: false })
+
+		const protectedControl = session.snapshot().context.control
+
+		expect(protectedControl?.protection).not.toBe(before?.protection)
+		expect(session.snapshot().context.control).toBe(protectedControl)
+
+		setDocumentProtection(context, [session], undefined)
+
+		expect(session.snapshot().context.control?.protection).toBe(before?.protection)
+	})
+
+	it("formats a number with more than 100 decimal places", async () => {
+		const { session } = await fieldSession(`<w:type w:val="number"/><w:format w:val="0.${"0".repeat(150)}"/>`)
+
+		expect(typeInto(session, "1.5")).toBe(true)
+		expect(fieldResult(session)).toBe(`1.5${"0".repeat(149)}`)
+
+		for (const [decimals, expected] of [
+			[0, "2"],
+			[2, "1.50"],
+			[100, `1.5${"0".repeat(99)}`]
+		] as const) {
+			const field = await fieldSession(
+				`<w:type w:val="number"/><w:format w:val="0${decimals === 0 ? "" : `.${"0".repeat(decimals)}`}"/>`
+			)
+
+			expect(typeInto(field.session, "1.5")).toBe(true)
+			expect(fieldResult(field.session)).toBe(expected)
 		}
 	})
 })

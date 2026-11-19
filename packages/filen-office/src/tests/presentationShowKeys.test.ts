@@ -263,12 +263,21 @@ describe("show keys", () => {
 })
 
 describe("show swipe", () => {
-	const pointer = (pointerId: number, clientX: number, clientY: number, timeStamp: number, pointerType = "touch") => ({
+	// isPrimary left out means primary, as the swipe reads it.
+	const pointer = (
+		pointerId: number,
+		clientX: number,
+		clientY: number,
+		timeStamp: number,
+		pointerType = "touch",
+		isPrimary?: boolean
+	) => ({
 		pointerId,
 		pointerType,
 		clientX,
 		clientY,
-		timeStamp
+		timeStamp,
+		...(isPrimary === undefined ? {} : { isPrimary })
 	})
 
 	it("goes on with a leftward swipe and back with a rightward one, and swallows the click it ends in", () => {
@@ -303,6 +312,50 @@ describe("show swipe", () => {
 		swipe.onPointerDown(pointer(5, 300, 100, 0))
 		swipe.onPointerUp(pointer(5, 100, 100, 100))
 		expect(calls).toEqual([])
+	})
+
+	it("leaves a second finger of a pinch alone", () => {
+		const calls: string[] = []
+		const swipe = createShowSwipe({ next: () => calls.push("next"), prev: () => calls.push("prev") })
+
+		swipe.onPointerDown(pointer(2, 300, 200, 0, "touch", false))
+		swipe.onPointerUp(pointer(2, 200, 200, 100, "touch", false))
+		expect(swipe.onClickCapture({ preventDefault: vi.fn(), stopPropagation: vi.fn() })).toBe(false)
+		expect(calls).toEqual([])
+	})
+
+	it("drops a touch the browser cancels", () => {
+		const calls: string[] = []
+		const swipe = createShowSwipe({ next: () => calls.push("next"), prev: () => calls.push("prev") })
+
+		swipe.onPointerDown(pointer(1, 300, 200, 0))
+		swipe.onPointerCancel(pointer(1, 280, 200, 50))
+		swipe.onPointerUp(pointer(1, 200, 200, 100))
+		expect(swipe.onClickCapture({ preventDefault: vi.fn(), stopPropagation: vi.fn() })).toBe(false)
+		expect(calls).toEqual([])
+	})
+
+	it("ignores an up from another pointer, which also ends the first one's swipe", () => {
+		const calls: string[] = []
+		const swipe = createShowSwipe({ next: () => calls.push("next"), prev: () => calls.push("prev") })
+
+		swipe.onPointerDown(pointer(1, 300, 200, 0))
+		swipe.onPointerUp(pointer(2, 200, 200, 100))
+		swipe.onPointerUp(pointer(1, 200, 200, 120))
+		expect(calls).toEqual([])
+	})
+
+	it("clears the pending click swallow on the next pointerdown", () => {
+		const calls: string[] = []
+		const swipe = createShowSwipe({ next: () => calls.push("next"), prev: () => calls.push("prev") })
+		const click = { preventDefault: vi.fn(), stopPropagation: vi.fn() }
+
+		swipe.onPointerDown(pointer(1, 300, 200, 0))
+		expect(swipe.onPointerUp(pointer(1, 200, 200, 100))).toBe(true)
+		swipe.onPointerDown(pointer(2, 300, 200, 500, "mouse"))
+		expect(swipe.onClickCapture(click)).toBe(false)
+		expect(click.preventDefault).not.toHaveBeenCalled()
+		expect(calls).toEqual(["next"])
 	})
 })
 

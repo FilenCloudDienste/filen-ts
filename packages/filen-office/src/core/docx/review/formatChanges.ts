@@ -1,7 +1,7 @@
 import type { Node } from "prosemirror-model"
 import type { DocxEditContext } from "../edit/context"
 import { runPropsOf } from "../edit/formatting"
-import { docxSchema, type IndentAttrs, type SpacingAttrs } from "../edit/schema"
+import { docxSchema } from "../edit/schema"
 import type { StoryPart } from "../model/index"
 import type {
 	BorderProps,
@@ -16,7 +16,7 @@ import type {
 import { mergeRun } from "../styles/index"
 import type { Mutable } from "../styles/merge"
 import type { StyleDef } from "../styles/styles"
-import { paragraphAttrs, paragraphChange } from "./track"
+import { paragraphAttrs, paragraphChange, type ParagraphAttrs } from "./track"
 
 // What a tracked formatting change changed, as Word describes it in a balloon ("Formatted: Font: Bold, Italic";
 // Revision.FormatDescription): the properties whose value differs before and after (direct formatting over
@@ -462,15 +462,7 @@ export function paragraphFormatChanges(context: DocxEditContext, before: Paragra
 
 // A paragraph's editing attributes (complete: the source's values unless a command changed them) as the
 // properties the descriptions compare.
-export function paragraphFormatOf(attrs: {
-	readonly styleId: string | null
-	readonly numId: number | null
-	readonly ilvl: number | null
-	readonly align: string | null
-	readonly indent: IndentAttrs | null
-	readonly spacing: SpacingAttrs | null
-	readonly borders: ParagraphBordersProps | null
-}): ParagraphFormat {
+export function paragraphFormatOf(attrs: ParagraphAttrs): ParagraphFormat {
 	return {
 		...(attrs.styleId === null ? {} : { styleId: attrs.styleId }),
 		...(attrs.align === null ? {} : { alignment: attrs.align }),

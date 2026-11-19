@@ -14,7 +14,7 @@ import { fieldGuid } from "../core/convert/presentation/fromOdp"
 import { openOdp } from "../core/odp/read/document"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { openPptx, openPptxPackage } from "../core/pptx/package"
-import type { Deck, ShapeNode } from "../core/presentation/model"
+import { PresentationError, type Deck, type ShapeNode } from "../core/presentation/model"
 import { decryptionOf } from "../dom/encryption/legacyDecryption"
 import { CORPUS_DIR } from "./corpusDir"
 import { entriesOf, odpDeck, text } from "./odpWriteFixtures"
@@ -453,6 +453,75 @@ describe("write-reserved decks", () => {
 	})
 })
 
+describe("presentation conversions of a damaged part", () => {
+	const CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+	const chartDeck = (chart: string, parts: Parameters<typeof buildPptx>[0]["parts"] = {}): Uint8Array =>
+		buildPptx({
+			slides: [
+				{
+					shapes:
+						'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Chart 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>' +
+						'<p:xfrm><a:off x="100000" y="100000"/><a:ext cx="4000000" cy="3000000"/></p:xfrm>' +
+						`<a:graphic><a:graphicData uri="${CHART}"><c:chart xmlns:c="${CHART}" r:id="rId9"/></a:graphicData></a:graphic></p:graphicFrame>`,
+					rels: [["rId9", "chart", "../charts/chart1.xml"]]
+				}
+			],
+			parts: {
+				"ppt/charts/chart1.xml": { data: chart, type: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml" },
+				...parts
+			}
+		})
+	const WELL_FORMED = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${CHART}"><c:chart><c:plotArea/></c:chart></c:chartSpace>`
+	const outcome = async (bytes: Uint8Array, options: Parameters<typeof convertPresentation>[4] = {}): Promise<string> => {
+		const opened = await pptx(bytes)
+		const converted = await convertPresentation(opened.deck, opened.input, "odp", memorySink(), options)
+
+		return "kind" in converted ? converted.reason : "converted"
+	}
+
+	it("refuses an .odp copy of a deck whose chart part is not well-formed as malformed", async () => {
+		expect(await outcome(chartDeck(WELL_FORMED))).toBe("converted")
+		expect(await outcome(chartDeck(`<c:chartSpace xmlns:c="${CHART}"><c:chart>`))).toBe("malformed")
+	})
+
+	it("refuses an .odp copy of a deck whose diagram drawing cache is not well-formed as malformed", async () => {
+		const DIAGRAM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+		const deck = buildPptx({
+			slides: [
+				{
+					shapes:
+						'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Diagram 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>' +
+						'<p:xfrm><a:off x="100000" y="900000"/><a:ext cx="6000000" cy="3000000"/></p:xfrm>' +
+						`<a:graphic><a:graphicData uri="${DIAGRAM}"><dgm:relIds xmlns:dgm="${DIAGRAM}" r:dm="rId11" r:lo="rId12" r:qs="rId13" r:cs="rId14"/></a:graphicData></a:graphic></p:graphicFrame>`,
+					rels: [
+						["rId11", "diagramData", "../diagrams/data1.xml"],
+						["rId15", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing", "../diagrams/drawing1.xml"]
+					]
+				}
+			],
+			parts: {
+				"ppt/diagrams/data1.xml": {
+					data: `<dgm:dataModel xmlns:dgm="${DIAGRAM}"><dgm:ptLst/><dgm:extLst><a:ext xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" relId="rId15"/></a:ext></dgm:extLst></dgm:dataModel>`,
+					type: "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml"
+				},
+				"ppt/diagrams/drawing1.xml": { data: "<dsp:drawing", type: "application/vnd.ms-office.drawingml.diagramDrawing+xml" }
+			}
+		})
+
+		expect(await outcome(deck)).toBe("malformed")
+	})
+
+	it("still reports a cancelled conversion as aborted", async () => {
+		const slicing = {
+			pause: () => Promise.reject(new PresentationError("aborted", "cancelled")),
+			sliceMs: 0,
+			now: () => 0
+		}
+
+		expect(await outcome(chartDeck(WELL_FORMED), { slicing })).toBe("aborted")
+	})
+})
+
 function corpus(directories: readonly string[]): string[] {
 	return directories.flatMap(directory => {
 		const path = join(CORPUS_DIR, directory)
@@ -475,8 +544,9 @@ describe.skipIf(ODP_FILES.length === 0 || PPT_FILES.length === 0)("over the corp
 			const after = await slideTexts(await pptx(bytes))
 
 			if (after.length !== before.length) failures.push(`${path}: ${String(after.length)} slides`)
-			// Every text of a slide is there (a field PresentationML has no type for shows its text as it read).
 			else if (before.some((texts, index) => texts.length !== after[index]?.length)) failures.push(`${path}: shapes with text differ`)
+			// Every text of a slide as it read (a field PresentationML has no type for keeps the text it shows).
+			else if (before.some((texts, index) => texts.join("\n") !== after[index]?.join("\n"))) failures.push(`${path}: text differs`)
 		}
 
 		expect(failures).toEqual([])

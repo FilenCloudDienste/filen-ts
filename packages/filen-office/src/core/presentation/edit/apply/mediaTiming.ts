@@ -14,7 +14,7 @@ import { refused, type Deck, type MediaRef, type Refused, type ShapeNode, type S
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, findShape, sameDigest } from "../changes"
 import type { DeckOp, MediaTimingOp, OpOf } from "../ops"
-import { type SourceReading } from "./shape"
+import { comparedShape } from "./table"
 import { isRefused } from "../../refusal"
 
 // The media timing ops on the model, in place: a medium's trim, fade and bookmarks (MS-PPTX p14:media, written by
@@ -67,9 +67,13 @@ function sourceInverse(found: Found, context: ApplyContext): Inverse | Refused |
 
 	if (isRefused(raw)) return raw
 
-	const read = (context as SourceReading).readShape(found.node, raw)
+	const read = comparedShape(context, found.node, raw)
 
-	if (isRefused(read) || !sameDigest({ ...read, id: found.shape.id, sourceId: undefined }, { ...found.shape, sourceId: undefined }))
+	if (
+		read === undefined ||
+		isRefused(read) ||
+		!sameDigest({ ...read, id: found.shape.id, sourceId: undefined }, { ...found.shape, sourceId: undefined })
+	)
 		return undefined
 
 	const copy = raw.slice()

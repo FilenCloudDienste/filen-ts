@@ -1,4 +1,5 @@
-import { TextSelection, type Transaction } from "prosemirror-state"
+import type { Node } from "prosemirror-model"
+import { AllSelection, TextSelection, type Transaction } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import {
 	BLOCK_NODE_MARKS,
@@ -248,6 +249,45 @@ const FEATURE_TYPES = DOCX_EDITOR_COMMANDS.map(info => info.type).filter(
 		storyHandler(type) === undefined &&
 		documentHandler(type) === undefined
 )
+
+// The position of the first character of `text` in `doc`.
+function textAt(doc: Node, text: string): number {
+	let found = -1
+
+	doc.descendants((node, pos) => {
+		if (found >= 0) return false
+
+		const index = node.isText ? (node.text ?? "").indexOf(text) : -1
+
+		if (index >= 0) found = pos + index
+
+		return true
+	})
+
+	if (found < 0) throw new Error(`no ${text}`)
+
+	return found
+}
+
+const CELL_TABLE = '<w:tbl><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc>' + p("cell") + "</w:tc></w:tr></w:tbl>"
+
+// Every story command whose enabled() is false in the session's state is refused, leaving the document as it was.
+function expectGated(session: DocxEditorSession): void {
+	const doc = session.state.doc
+	let gated = 0
+
+	for (const info of DOCX_EDITOR_COMMANDS) {
+		const handler = info.scope === "story" ? storyHandler(info.type) : undefined
+
+		if (handler === undefined || handler.enabled({ session, state: session.state, context: session.context })) continue
+
+		gated++
+		expect(session.execute(command(info.type)), info.type).toBe(false)
+		expect(session.state.doc, info.type).toBe(doc)
+	}
+
+	expect(gated).toBeGreaterThan(0)
+}
 
 function command(type: DocxEditorCommandType): DocxEditorCommand {
 	const parsed = parseDocxEditorCommand({ type, ...EXAMPLES[type] })
@@ -636,8 +676,77 @@ describe("docx editor command registry", () => {
 		)
 
 		expect(found).toHaveLength(1)
-		expect(found?.[0]?.positions).toEqual([session.state.doc.child(0).nodeSize])
 		expect(found?.[0]?.units).toEqual([{ kind: "block", key: session.state.doc.child(0).nodeSize }])
+	})
+
+	it("refuses a story command its enabled() refuses: a page break in a cell or a header, a line over everything", async () => {
+		const session = await sessionOf({ body: CELL_TABLE + p("after") })
+
+		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, textAt(session.state.doc, "cell") + 2)))
+
+		const doc = session.state.doc
+
+		expect(session.snapshot().enabled["insert.pageBreak"]).toBe(false)
+		expect(session.execute({ type: "insert.pageBreak" })).toBe(false)
+		expect(session.state.doc).toBe(doc)
+		expectGated(session)
+
+		const opened = await openSpec({
+			body: p("body") + '<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>',
+			headers: { rIdH: p("Head") }
+		})
+		const story = opened.context.model.stories.find(entry => entry.kind === "header")
+
+		if (story === undefined) throw new Error("no header")
+
+		const header = new DocxEditorSession(opened.context, { story })
+
+		header.dispatch(header.state.tr.setSelection(TextSelection.create(header.state.doc, textAt(header.state.doc, "Head") + 2)))
+
+		const headerDoc = header.state.doc
+
+		expect(header.execute({ type: "insert.pageBreak" })).toBe(false)
+		expect(header.state.doc).toBe(headerDoc)
+		expectGated(header)
+
+		// Everything selected: the line has no paragraph to go after (it threw a RangeError).
+		const all = await sessionOf({ body: p("one") + p("two") })
+
+		all.dispatch(all.state.tr.setSelection(new AllSelection(all.state.doc)))
+
+		const allDoc = all.state.doc
+
+		expect(() => all.execute({ type: "insert.horizontalLine" })).not.toThrow()
+		expect(all.state.doc).toBe(allDoc)
+		expectGated(all)
+	})
+
+	it("inserts a table over a selection it deletes first", async () => {
+		const all = await sessionOf({ body: p("one") + p("two") })
+
+		all.dispatch(all.state.tr.setSelection(new AllSelection(all.state.doc)))
+		expect(all.snapshot().enabled["table.insert"]).toBe(true)
+		expect(all.execute({ type: "table.insert", rows: 2, cols: 2 })).toBe(true)
+		expect(all.state.doc.textContent).not.toContain("one")
+
+		let tables = 0
+
+		all.state.doc.descendants(node => {
+			if (node.type === docxSchema.nodes.table) tables++
+
+			return true
+		})
+		expect(tables).toBe(1)
+
+		const word = await sessionOf({ body: p("one two") })
+
+		word.dispatch(
+			word.state.tr.setSelection(
+				TextSelection.create(word.state.doc, textAt(word.state.doc, "two"), textAt(word.state.doc, "two") + 3)
+			)
+		)
+		expect(word.execute({ type: "table.insert", rows: 2, cols: 2 })).toBe(true)
+		expect(word.state.doc.textContent).toBe("one ")
 	})
 
 	it("routes undo and redo through the editor and keeps the view switch a document command", async () => {

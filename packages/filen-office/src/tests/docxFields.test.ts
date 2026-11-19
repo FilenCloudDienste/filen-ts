@@ -1534,7 +1534,7 @@ describe("gate 2", () => {
 
 		expect(await refusal(opened)).toBeUndefined()
 
-		// The same save with the flag taken out of the written markup, as SuperDoc's writer does.
+		// The same save with the flag taken out of the written markup.
 		const [check] = fieldChecks
 		const changes = await serializeDocx({ pkg: opened.pkg, context: opened.context, sessions: opened.editor.sessions })
 		const story = changes.stories[0]

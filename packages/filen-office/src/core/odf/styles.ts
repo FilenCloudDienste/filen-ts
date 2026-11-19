@@ -1,4 +1,5 @@
 import { runSliced, sliceClock, type Slicing } from "../slicing"
+import { own } from "../tables"
 import { Namespaces, type XmlDocument } from "../xml/index"
 import type { ContentPrologue } from "./prologue"
 import { canonicalAttributes, elementName, readElement, type OdfElement } from "./tree"
@@ -458,7 +459,7 @@ export class OdfStyleSheet {
 			if (++read % STYLES_PER_STEP === 0) yield
 
 			const name = elementName(document, namespaces, node)
-			const dataKind = DATA_STYLE_KINDS[name]
+			const dataKind = own(DATA_STYLE_KINDS, name)
 
 			if (dataKind !== undefined) {
 				const style = this.readDataStyle(readElement(document, namespaces, node), dataKind, automatic, origin)
@@ -586,7 +587,7 @@ export class OdfStyleSheet {
 		const levels = new Map<number, OdfListLevel>()
 
 		for (const child of element.children) {
-			const kind = LIST_LEVEL_KINDS[child.name]
+			const kind = own(LIST_LEVEL_KINDS, child.name)
 			const level = Number(child.attributes.get("text:level") ?? "NaN")
 
 			if (kind === undefined || !Number.isInteger(level) || level < 1 || level > 10 || levels.has(level)) continue

@@ -11,6 +11,7 @@ import {
 	type TextEditTarget
 } from "../../dom/pdfedit/textEdit"
 import { matchPdfFont } from "../../core/pdfedit/fontMatch"
+import { isTagged } from "../../dom/pdfedit/formState"
 import { nodeFontAssets } from "../sheetPdfFixtures"
 import { budget } from "../timing"
 import {
@@ -175,7 +176,7 @@ describe("replacing text", () => {
 
 			const result = inOperation(document, () => applyTextEdit(mupdf, document, 0, edit, overlay))
 
-			expect(result).toEqual({ status: "applied", pages: [0], tagged: false })
+			expect(result).toEqual({ status: "applied", pages: [0] })
 
 			const after = pageChars(document, 0)
 			const kept = before.filter(char => !edit.chars.some(gone => gone.c === char.c && gone.x === char.x && gone.y === char.y))
@@ -375,15 +376,150 @@ describe("replacing text", () => {
 		TIMEOUT
 	)
 
-	it("reports a tagged document", async () => {
+	it("leaves the tags notice to the session's one rule: marked and a structure tree", async () => {
 		const document = makeDocument({ pages: [{ content: LATIN_CONTENT }], tagged: true })
 		const edit = word(target(document, [100, LINE_Y - 4]), "world")
 
-		expect(applyTextEdit(mupdf, document, 0, edit, await overlayFor(edit, "page"))).toEqual({
-			status: "applied",
-			pages: [0],
-			tagged: true
+		expect(applyTextEdit(mupdf, document, 0, edit, await overlayFor(edit, "page"))).toEqual({ status: "applied", pages: [0] })
+		// /MarkInfo /Marked alone, then a structure tree alone, are not tagged; both are.
+		expect(isTagged(document)).toBe(false)
+
+		const root = document.getTrailer().get("Root")
+
+		root.put("StructTreeRoot", document.addObject({ Type: "StructTreeRoot" }))
+		expect(isTagged(document)).toBe(true)
+		root.delete("MarkInfo")
+		expect(isTagged(document)).toBe(false)
+		document.destroy()
+	})
+})
+
+describe("text off the horizontal", () => {
+	// A point on a glyph, from where MuPDF shows it.
+	function hitChar(document: mupdf.PDFDocument, c: string, from: number, unit: "block" | "line" = "line"): TextEditTarget {
+		const char = pageChars(document, 0).filter(candidate => candidate.c === c)[from]
+
+		if (char === undefined) throw new Error(`No ${c} on the page`)
+
+		return target(document, [(char.quad[0] + char.quad[6]) / 2, (char.quad[1] + char.quad[7]) / 2], unit)
+	}
+
+	// Replaces "brave" with "BOLD" and checks the neighbours stayed and the new word starts at the frame's origin.
+	async function replacesBrave(document: mupdf.PDFDocument, base: TextEditTarget): Promise<void> {
+		const before = pageChars(document, 0)
+		const edit = word(base, "brave")
+		const overlay = await overlayFor(edit, "BOLD")
+
+		document.enableJournal()
+		expect(inOperation(document, () => applyTextEdit(mupdf, document, 0, edit, overlay))).toEqual({ status: "applied", pages: [0] })
+
+		const after = pageChars(reopen(save(document)), 0)
+		const kept = before.filter(char => !edit.chars.some(gone => gone.c === char.c && gone.x === char.x && gone.y === char.y))
+
+		for (const char of kept) expect(near(after, char.c, char.x, char.y)).toBe(true)
+		for (const gone of edit.chars) expect(near(after, gone.c, gone.x, gone.y)).toBe(false)
+
+		const bold = after.find(char => char.c === "B")
+
+		expect(bold?.x).toBeCloseTo(edit.frame.origin[0], 0)
+		expect(bold?.y).toBeCloseTo(edit.frame.origin[1], 0)
+	}
+
+	it(
+		"hits and replaces a line on a page turned a quarter",
+		async () => {
+			const document = makeDocument({ pages: [{ content: LATIN_CONTENT, rotate: 90 }] })
+			const edit = hitChar(document, "b", 0)
+
+			expect(edit.text).toBe(LINE)
+			// The page is shown turned clockwise: the line runs down the screen.
+			expect(edit.frame.direction[0]).toBeCloseTo(0, 5)
+			expect(edit.frame.direction[1]).toBeCloseTo(1, 5)
+			expect(edit.angle).toBeCloseTo(90, 3)
+			expect([edit.pageWidth, edit.pageHeight]).toEqual([842, 595])
+			expect(edit.frame.origin[0]).toBeCloseTo(722, 1)
+			expect(edit.frame.origin[1]).toBeCloseTo(72, 1)
+			await replacesBrave(document, edit)
+			document.destroy()
+		},
+		TIMEOUT
+	)
+
+	it(
+		"hits and replaces a line on a page whose crop box is away from the origin",
+		async () => {
+			const document = makeDocument({ pages: [{ content: LATIN_CONTENT, cropBox: [50, 100, 545, 800] }] })
+			const edit = hitChar(document, "b", 0)
+
+			expect(edit.text).toBe(LINE)
+			expect(edit.frame.direction).toEqual([1, 0])
+			expect(edit.angle).toBe(0)
+			expect([edit.pageWidth, edit.pageHeight]).toEqual([495, 700])
+			// 72 - 50 across, 800 - 722 down.
+			expect(edit.frame.origin[0]).toBeCloseTo(22, 1)
+			expect(edit.frame.origin[1]).toBeCloseTo(78, 1)
+			await replacesBrave(document, edit)
+			document.destroy()
+		},
+		TIMEOUT
+	)
+
+	it("reads the angle of text set with a turned matrix, and the line spacing of a turned block", () => {
+		const single = makeDocument({ pages: [{ content: "BT /F1 12 Tf 0.866 0.5 -0.5 0.866 100 500 Tm (Angled line) Tj ET" }] })
+		const angled = hitChar(single, "g", 0)
+
+		// 30 degrees counter-clockwise in the file is -30 on the screen (y down).
+		expect(angled.angle).toBeCloseTo(-30, 1)
+		expect(angled.frame.direction[0]).toBeCloseTo(0.866, 3)
+		expect(angled.frame.direction[1]).toBeCloseTo(-0.5, 3)
+		single.destroy()
+
+		// MuPDF keeps the two turned lines one block on a turned page: shown at 60 degrees.
+		const content = "BT /F1 12 Tf 14 TL 0.866 0.5 -0.5 0.866 100 500 Tm (Angled first line) Tj T* (angled second line) Tj ET"
+		const block = makeDocument({ pages: [{ content, rotate: 90 }] })
+		const edit = hitChar(block, "A", 0, "block")
+
+		expect(edit.text).toBe("Angled first line\nangled second line")
+		expect(edit.angle).toBeCloseTo(60, 1)
+		expect(edit.frame.lineHeight).toBeCloseTo(14, 1)
+		expect(edit.frame.width).toBeGreaterThan(80)
+		block.destroy()
+	})
+
+	it("puts a space where glyphs placed apart leave a word gap, and narrows by those offsets", () => {
+		const document = makeDocument({ pages: [{ content: "BT /F1 12 Tf 72 722 Td [(Glued)-700(words)-700(here)] TJ ET" }] })
+		const edit = hitChar(document, "w", 0)
+
+		expect(edit.text).toBe("Glued words here")
+		expect(pageString(document, 0)).not.toContain(" ")
+
+		const narrowed = word(edit, "words")
+
+		expect(narrowed.chars.map(char => char.c).join("")).toBe("words")
+		expect(narrowed.offsets).toEqual([0, 1, 2, 3, 4])
+		expect(narrowed.frame.origin[0]).toBeCloseTo(narrowed.chars[0]?.x ?? 0, 3)
+		document.destroy()
+	})
+
+	it("reads a right-to-left line drawn left to right in reading order", () => {
+		const hebrew = "שלום עולם"
+		// Drawn as most producers do: the glyphs in visual order, left to right.
+		const document = makeDocument({
+			pages: [{ content: `BT /F5 14 Tf 72 722 Td ${arimoCodes([...hebrew].reverse().join(""))} Tj ET` }]
 		})
+		const chars = pageChars(document, 0)
+
+		expect(chars.length).toBe(hebrew.length)
+		expect(chars.every(char => (char.bidi & 1) === 1)).toBe(true)
+
+		const edit = hitChar(document, "ו", 0)
+
+		expect(edit.text).toBe(hebrew)
+		expect(
+			word(edit, "עולם")
+				.chars.map(char => char.c)
+				.join("")
+		).toBe("עולם")
 		document.destroy()
 	})
 })
@@ -405,7 +541,7 @@ describe("adding text", () => {
 			assets: nodeFontAssets
 		})
 
-		expect(applyAddText(mupdf, document, 0, overlay.bytes)).toEqual({ pages: [0], tagged: false })
+		expect(applyAddText(mupdf, document, 0, overlay.bytes)).toEqual({ pages: [0] })
 
 		const saved = reopen(save(document))
 		const added = pageChars(saved, 0).filter(char => Math.abs(char.y - frame.origin[1]) < 1)

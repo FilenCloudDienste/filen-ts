@@ -1025,36 +1025,8 @@ export class PagedGeometry {
 		return out
 	}
 
-	// rects() of many ranges at once (marks), in one pass over the page's lines: `ranges` sorted by `from`,
-	// none longer than `longest`. Each box goes to `out`, the index of its range to `owners`.
-	rangesRects(
-		ranges: readonly { readonly from: number; readonly to: number }[],
-		longest: number,
-		pageIndex: number,
-		out: PageRect[] = [],
-		owners: number[] = []
-	): PageRect[] {
-		const boxes = new MarkBoxes()
-
-		this.rangesBoxes(ranges, longest, pageIndex, boxes)
-
-		for (let b = 0; b < boxes.count; b++) {
-			const at = b * 4
-
-			out.push({
-				page: pageIndex,
-				x: boxes.values[at + 2] ?? 0,
-				y: boxes.values[at] ?? 0,
-				width: boxes.values[at + 3] ?? 0,
-				height: boxes.values[at + 1] ?? 0
-			})
-			owners.push(boxes.owners[b] ?? -1)
-		}
-
-		return out
-	}
-
-	// rangesRects() as numbers (see MarkBoxes), added to `out`: for drawing many marks on each keystroke
+	// rects() of many ranges at once (marks), in one pass over the page's lines, as numbers (see MarkBoxes) added
+	// to `out`: `ranges` sorted by `from`, none longer than `longest`. For drawing many marks on each keystroke
 	// without an object per box.
 	rangesBoxes(
 		ranges: readonly { readonly from: number; readonly to: number }[],

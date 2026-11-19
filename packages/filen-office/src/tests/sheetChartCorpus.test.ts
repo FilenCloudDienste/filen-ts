@@ -8,24 +8,30 @@ import { newValidityErrors, XsdOracle, xsdOracleMissing } from "./oracles/xsd"
 import { settle } from "./sheetNotesFixtures"
 import { openCharts } from "./sheetChartFixtures"
 
-// Every chart of the corpus's OOXML spreadsheets (in worksheets' drawings and on chartsheets): drawn (never failing), read for the editor, and edited (its legend,
-// then a cell it reads), each save adding no schema error to the chart part. Opt-in (FILEN_OFFICE_SHEET_CORPUS=1);
+// Every chart of the corpus's OOXML spreadsheets (in worksheets' drawings and on chartsheets): drawn (never failing), read for the editor, and edited (its legend),
+// each save adding no schema error to the chart part. A workbook that does not open is counted with why; one whose
+// opening throws fails. Opt-in (FILEN_OFFICE_SHEET_CORPUS=1, which needs the schema oracle);
 // FILEN_OFFICE_CHART_REPORT names a file the tally and each file's time are written to.
 
 const RUN = process.env["FILEN_OFFICE_SHEET_CORPUS"] === "1"
 const KINDS = ["xlsx", "xlsm", "xltx", "xltm"] as const
-const FILES = KINDS.flatMap(kind =>
-	existsSync(join(CORPUS_DIR, kind)) ? readdirSync(join(CORPUS_DIR, kind)).map(name => join(CORPUS_DIR, kind, name)) : []
-).filter(path => {
-	try {
-		return (
-			Object.keys(unzipSync(new Uint8Array(readFileSync(path)), { filter: file => /charts\/chart\d*\.xml$/.test(file.name) }))
-				.length > 0
-		)
-	} catch {
-		return false
-	}
-})
+// What openCharts throws for a workbook that did not open.
+const UNOPENED = new Set(["failed", "aborted"])
+// From a run over the corpus (85 workbooks, 1362 charts, 1330 edited), a little under it so a workbook or two may leave it.
+const FLOOR = { files: 80, charts: 1250, edited: 1200 }
+
+// The workbooks holding a chart part (one that is no zip holds none), listed only when the suite runs.
+function workbooks(): string[] {
+	return KINDS.flatMap(kind =>
+		existsSync(join(CORPUS_DIR, kind)) ? readdirSync(join(CORPUS_DIR, kind)).map(name => join(CORPUS_DIR, kind, name)) : []
+	).filter(path => {
+		try {
+			return Object.keys(unzipSync(readFileSync(path), { filter: file => /charts\/chart\d*\.xml$/.test(file.name) })).length > 0
+		} catch {
+			return false
+		}
+	})
+}
 
 interface Frame {
 	readonly sheet: number
@@ -71,23 +77,41 @@ afterAll(() => {
 
 describe.skipIf(!RUN)("charts over the corpus", () => {
 	it("draws, reads and edits every chart, adding no schema error", { timeout: 600_000 }, async () => {
-		const tally = { files: 0, charts: 0, drawn: 0, unsupported: 0, editable: 0, edited: 0, refused: new Map<string, number>() }
+		expect(oracle, xsdOracleMissing()).not.toBeNull()
+
+		const tally = {
+			files: 0,
+			charts: 0,
+			drawn: 0,
+			unsupported: 0,
+			editable: 0,
+			edited: 0,
+			refused: new Map<string, number>(),
+			unopened: new Map<string, string>()
+		}
 		const times: [string, number][] = []
+		const failures: string[] = []
 
 		const report = process.env["FILEN_OFFICE_CHART_REPORT"]
 		const write = (): void => {
 			if (report !== undefined && report !== "")
-				writeFileSync(report, JSON.stringify({ ...tally, refused: [...tally.refused], times }, null, "\t"))
+				writeFileSync(
+					report,
+					JSON.stringify({ ...tally, refused: [...tally.refused], unopened: [...tally.unopened], times }, null, "\t")
+				)
 		}
 
-		for (const path of FILES) {
+		for (const path of workbooks()) {
 			const started = performance.now()
 			const source = new Uint8Array(readFileSync(path))
 			let opened: Awaited<ReturnType<typeof openCharts>>
 
 			try {
 				opened = await openCharts(source)
-			} catch {
+			} catch (error) {
+				if (error instanceof Error && UNOPENED.has(error.message)) tally.unopened.set(path, error.message)
+				else failures.push(`${path}: opening threw ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+
 				continue
 			}
 
@@ -160,6 +184,9 @@ describe.skipIf(!RUN)("charts over the corpus", () => {
 			write()
 		}
 
-		expect(tally.charts).toBeGreaterThan(0)
+		expect(failures).toEqual([])
+		expect(tally.files, "workbooks opened").toBeGreaterThanOrEqual(FLOOR.files)
+		expect(tally.charts, "charts").toBeGreaterThanOrEqual(FLOOR.charts)
+		expect(tally.edited, "charts edited").toBeGreaterThanOrEqual(FLOOR.edited)
 	})
 })

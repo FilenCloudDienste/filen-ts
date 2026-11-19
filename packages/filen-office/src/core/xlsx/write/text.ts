@@ -7,9 +7,10 @@ import { XlsxWriteError } from "./failure"
 export const MAX_ROWS = 1_048_576
 export const MAX_COLS = 16_384
 
-// xsd:double as the shortest text that reads back as the same number.
-export function formatNumber(value: number): string {
-	if (!Number.isFinite(value)) throw new XlsxWriteError("write", `A cell holds ${String(value)}`)
+// xsd:double as the shortest text that reads back as the same number; NaN and the infinities refuse, `subject`
+// (a constant: nothing is built on the way to a number written) naming what holds one.
+export function formatNumber(value: number, subject: string = "A number"): string {
+	if (!Number.isFinite(value)) throw new XlsxWriteError("write", `${subject} is ${String(value)}`)
 
 	return Object.is(value, -0) ? "0" : String(value)
 }

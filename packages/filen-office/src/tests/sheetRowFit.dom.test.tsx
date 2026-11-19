@@ -2,8 +2,10 @@
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_ROWS, type SheetSessionApi } from "../core/sheet/protocol"
+import { SHEET_MAX_ROWS, TILE_COLS, TILE_ROWS, tileKey, type SheetSessionApi } from "../core/sheet/protocol"
+import { SheetSessionClosedError } from "../dom/sheet/client"
 import { inThreadSheetHost } from "../dom/sheet/host"
+import { autofitSizes } from "../react/sheet/autofit"
 import { SheetGrid, SheetGridModel } from "../react/sheet/index"
 import { TextMeasurer } from "../react/sheet/paint/text"
 import { measureRows } from "../react/sheet/rowFit"
@@ -54,6 +56,21 @@ const WRAP_STYLES = STYLES.replace('<cellXfs count="2">', '<cellXfs count="3">')
 	"</cellXfs>",
 	'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>'
 )
+// Style 2 wraps; style 3 wraps with an indent of 1. A1 holds a 20 pt run inside 11 pt text (a shared rich string),
+// A2 indented text, A5001 (a tile not held) three lines of its own.
+const RICH_BODY =
+	'<sheetFormatPr defaultRowHeight="15"/><sheetData>' +
+	'<row r="1"><c r="A1" t="s" s="2"><v>0</v></c></row>' +
+	'<row r="2"><c r="A2" t="inlineStr" s="3"><is><t>wrapped words of text</t></is></c></row>' +
+	'<row r="5001"><c r="A5001" t="inlineStr" s="2"><is><t xml:space="preserve">one&#10;two&#10;three</t></is></c></row></sheetData>'
+const RICH_STRINGS =
+	'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1"><si>' +
+	'<r><t xml:space="preserve">wrapped </t></r><r><rPr><sz val="20"/></rPr><t>BIG</t></r>' +
+	'<r><t xml:space="preserve"> words of text</t></r></si></sst>'
+const INDENT_STYLES = WRAP_STYLES.replace('<cellXfs count="3">', '<cellXfs count="4">').replace(
+	"</cellXfs>",
+	'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" indent="1"/></xf></cellXfs>'
+)
 
 // Each mounted model's session, which edits and saves go through.
 const sessions = new WeakMap<SheetGridModel, SheetSessionApi>()
@@ -66,9 +83,9 @@ function sessionOf(model: SheetGridModel): SheetSessionApi {
 	return session
 }
 
-async function mount(): Promise<SheetGridModel> {
+async function mount(body = BODY, styles = WRAP_STYLES, sharedStrings?: string): Promise<SheetGridModel> {
 	const opened = await inThreadSheetHost().open(
-		buildFixture({ sheets: [{ name: "One", body: BODY }], styles: WRAP_STYLES }),
+		buildFixture({ sheets: [{ name: "One", body }], styles, ...(sharedStrings !== undefined && { sharedStrings }) }),
 		{ kind: "xlsx", slicing: IMMEDIATE },
 		() => undefined
 	)
@@ -169,5 +186,35 @@ describe("rows fitted to wrapped text", () => {
 		expect(fits[0]?.[0].type === "axis.fit" ? fits[0][0].rows.length : -1).toBeLessThanOrEqual(64)
 		expect(height(model, 0)).toBe(56)
 		expect(performance.now() - started).toBeLessThan(budget(1000))
+	})
+
+	it("fits a rich or indented wrapped cell to the same height after an edit and on an explicit autofit", async () => {
+		const model = await mount(RICH_BODY, INDENT_STYLES, RICH_STRINGS)
+		const sheet = model.getSnapshot().sheet
+		const measurer = new TextMeasurer(new RecordingCanvas())
+		const measured = measureRows(model, sheet, new Set([0, 1]), measurer, "sans-serif", new Set())
+		const fitted = await autofitSizes(model, sheet, "rows", [0, 1, 5000], measurer, "sans-serif")
+
+		expect(model.tiles.has(tileKey(sheet, Math.floor(5000 / TILE_ROWS), Math.floor(0 / TILE_COLS)))).toBe(false)
+		expect(measured === null ? null : Array.from(measured.rows)).toEqual([0, 1])
+		expect(Array.from(fitted.sizes.subarray(0, 2))).toEqual(Array.from(measured?.heights ?? []))
+		// The tile of A5001 is not held: its own three lines, 18 px each, and 2 px.
+		expect(fitted.sizes[2]).toBe(56)
+	})
+
+	it("leaves no rejection unhandled when the session closes before the fit answers", async () => {
+		const model = await mount()
+		const sheet = model.getSnapshot().sheet
+		const session = sessionOf(model)
+		const original = session.command.bind(session)
+		const command = vi
+			.spyOn(session, "command")
+			.mockImplementation(sent => (sent.type === "axis.fit" ? Promise.reject(new SheetSessionClosedError()) : original(sent)))
+
+		// A rejection nobody handles fails the run (vitest reports unhandled errors).
+		await model.command({ type: "format.apply", sheet, ranges: cell(0), patch: { wrap: true } })
+		await settle()
+
+		expect(command.mock.calls.some(([sent]) => sent.type === "axis.fit")).toBe(true)
 	})
 })

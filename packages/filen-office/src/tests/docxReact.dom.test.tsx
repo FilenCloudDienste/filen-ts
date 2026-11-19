@@ -471,6 +471,58 @@ describe("useDocxDocument and DocxPages", () => {
 		expect(viewer?.state.find.active).toBe(0)
 	})
 
+	it("searches streaming pages once a frame, once more when all are in, and a new query at once", async () => {
+		const manual = manualHost()
+		const source: DocxSource = { host: manual.host, bytes: bytesSource(new Uint8Array(1)) }
+		const frames: FrameRequestCallback[] = []
+		const runFrame = (): void => {
+			for (const callback of frames.splice(0)) callback(0)
+		}
+		let viewer: DocxViewer | undefined
+
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback))
+		vi.stubGlobal("cancelAnimationFrame", (frame: number) => {
+			frames[frame - 1] = () => undefined
+		})
+
+		function Viewer() {
+			const document = useDocxDocument(source)
+
+			viewer = useDocxViewer(document)
+
+			return null
+		}
+
+		try {
+			act(() => root.render(<Viewer />))
+			manual.emit(pagesEvent([page(0, ["text"])], false))
+			await flush()
+
+			act(() => viewer?.dispatch({ type: "find.query", query: "text" }))
+			await flush()
+			expect(manual.session.find).toHaveBeenCalledTimes(1)
+
+			for (let index = 1; index <= 5; index++) act(() => manual.emit(pagesEvent([page(index, ["text"])], false, false)))
+			await flush()
+			expect(manual.session.find).toHaveBeenCalledTimes(1)
+
+			act(runFrame)
+			await flush()
+			expect(manual.session.find).toHaveBeenCalledTimes(2)
+
+			act(() => viewer?.dispatch({ type: "find.query", query: "tex" }))
+			await flush()
+			expect(manual.session.find).toHaveBeenCalledTimes(3)
+			expect(manual.session.find).toHaveBeenLastCalledWith("tex", { caseSensitive: false, wholeWord: false })
+
+			act(() => manual.emit(pagesEvent([page(6, ["text"])], true, false)))
+			await flush()
+			expect(manual.session.find).toHaveBeenCalledTimes(4)
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	it("searches whole words when asked and keeps the option for later queries", async () => {
 		const manual = manualHost()
 		const source: DocxSource = { host: manual.host, bytes: bytesSource(new Uint8Array(1)) }

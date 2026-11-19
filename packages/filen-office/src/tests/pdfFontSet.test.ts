@@ -9,6 +9,8 @@ import type { PdfObjectSink, PdfStreamData } from "../core/pdfwrite/writer"
 import { decodeFace, readFace, type PdfByteStream, type PdfFontAssets } from "../core/pdfwrite/fonts/assets"
 import { PDF_FACES } from "../core/pdfwrite/fonts/faces.generated"
 import { PdfFontSet, SHAPE_CAPS, SHAPE_HYPHEN, type PdfFontFaceRequest, type PdfGlyphRun } from "../core/pdfwrite/fonts/fontSet"
+import { readSfnt } from "../core/fonts/sfnt"
+import { buildSfnt } from "../scripts/woff2Tables"
 
 const ASSETS = new URL("../../assets/fonts/", import.meta.url)
 
@@ -126,10 +128,49 @@ async function write(fonts: PdfFontSet): Promise<Map<object, WrittenFont>> {
 	return out
 }
 
+// The font with a cmap of a to z only (a format 12 subtable, one group per letter).
+function lowerCaseOnly(bytes: Uint8Array): Uint8Array {
+	const font = readSfnt(bytes)
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+	const tables = new Map<string, Uint8Array>()
+
+	for (let t = 0; t < view.getUint16(4); t++) {
+		const record = 12 + t * 16
+		const tag = String.fromCharCode(...bytes.subarray(record, record + 4))
+		const offset = view.getUint32(record + 8)
+
+		tables.set(tag, bytes.slice(offset, offset + view.getUint32(record + 12)))
+	}
+
+	const letters = 26
+	const cmap = new Uint8Array(12 + 16 + letters * 12)
+	const out = new DataView(cmap.buffer)
+
+	out.setUint16(2, 1)
+	out.setUint16(4, 3)
+	out.setUint16(6, 10)
+	out.setUint32(8, 12)
+	out.setUint16(12, 12)
+	out.setUint32(16, cmap.length - 12)
+	out.setUint32(24, letters)
+
+	for (let k = 0; k < letters; k++) {
+		const at = 28 + k * 12
+
+		out.setUint32(at, 0x61 + k)
+		out.setUint32(at + 4, 0x61 + k)
+		out.setUint32(at + 8, font.glyphId(0x61 + k))
+	}
+
+	tables.set("cmap", cmap)
+
+	return buildSfnt(0x00010000, tables)
+}
+
 const CALIBRI: PdfFontFaceRequest = { family: "Calibri", bold: false, italic: false, slot: "hAnsi" }
 
 async function shape(fonts: PdfFontSet, text: string, request: PdfFontFaceRequest = CALIBRI, level = 0, flags = 0) {
-	const pending = fonts.prepare(text, 0, text.length, request)
+	const pending = fonts.prepare(text, 0, text.length, request, flags)
 
 	if (pending !== undefined) await pending
 
@@ -167,7 +208,7 @@ const SAMPLES: readonly (readonly [string, string, boolean, string?])[] = [
 describe("PDF font set", () => {
 	for (const [name, text, rtl, language] of SAMPLES) {
 		it(`gives back the source text through ToUnicode for ${name}`, async () => {
-			const fonts = new PdfFontSet({ assets, deterministic: true })
+			const fonts = new PdfFontSet({ assets })
 			const shaped = await shape(fonts, text, { ...CALIBRI, language }, rtl ? 1 : 0)
 			const written = await write(fonts)
 
@@ -182,7 +223,7 @@ describe("PDF font set", () => {
 	}
 
 	it("embeds every font as a Type0 subset with a six-letter tag, widths and a ToUnicode CMap", async () => {
-		const fonts = new PdfFontSet({ assets, deterministic: true })
+		const fonts = new PdfFontSet({ assets })
 
 		for (const [, text, rtl, language] of SAMPLES) await shape(fonts, text, { ...CALIBRI, language }, rtl ? 1 : 0)
 
@@ -355,6 +396,55 @@ describe("PDF font set", () => {
 
 			fonts.close()
 		}
+	})
+
+	it("loads the fallbacks capitals and a break's hyphen need where the embedded face has lower case only", async () => {
+		const lower = lowerCaseOnly(assetBytes("caladea/Caladea-Regular.ttf.gz"))
+		const source: PdfFaceSource = {
+			kind: "embedded",
+			key: "lower",
+			read: () => Promise.resolve(lower),
+			fsType: 0,
+			weight: 400,
+			italic: false,
+			substitute: "arimo"
+		}
+
+		expect(readSfnt(lower).hasGlyph(0x61)).toBe(true)
+		expect(readSfnt(lower).hasGlyph(0x41)).toBe(false)
+
+		for (const flags of [SHAPE_CAPS, SHAPE_HYPHEN]) {
+			const fonts = new PdfFontSet({ assets, resolve: () => source })
+			const shaped = await shape(fonts, "word", { ...CALIBRI, family: "Lower" }, 0, flags)
+			const glyphs = shaped.runs.flatMap(run => [...run.glyphs])
+
+			expect(glyphs.length, `flags ${flags}`).toBeGreaterThan(0)
+			expect(glyphs.includes(0), `flags ${flags}`).toBe(false)
+			expect([...fonts.missing()], `flags ${flags}`).toEqual([])
+
+			fonts.close()
+		}
+	})
+
+	it("decides faux italic by the substitute an embedded italic face that cannot load draws with", async () => {
+		const fonts = new PdfFontSet({
+			assets,
+			resolve: () => ({
+				kind: "embedded",
+				key: "broken-italic",
+				read: () => Promise.resolve(new Uint8Array(16)),
+				fsType: 0,
+				weight: 400,
+				italic: true,
+				substitute: "selawik"
+			})
+		})
+		const shaped = await shape(fonts, "Italic", { ...CALIBRI, family: "Broken", italic: true })
+
+		expect(shaped.runs.length).toBeGreaterThan(0)
+		expect(shaped.runs.every(run => run.font.postScriptName.startsWith("Selawik") && run.fauxItalic)).toBe(true)
+
+		fonts.close()
 	})
 
 	it("embeds a permitted CFF face whole as FontFile3 /OpenType with glyph ids as codes", async () => {

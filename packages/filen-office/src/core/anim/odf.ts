@@ -851,7 +851,7 @@ class OdfTimingReader {
 		const decel = fraction(a.get("smil:decelerate"))
 		const preset = presetFromOdf(a.get("presentation:preset-id"), a.get("presentation:preset-sub-type"))
 		const odfClass = a.get("presentation:preset-class")
-		const presetClass = odfClass === undefined ? undefined : ODF_CLASSES[odfClass]
+		const presetClass = odfClass !== undefined && Object.hasOwn(ODF_CLASSES, odfClass) ? ODF_CLASSES[odfClass] : undefined
 		const group = fraction(a.get("presentation:group-id"))
 
 		set("dur", dur)
@@ -865,7 +865,9 @@ class OdfTimingReader {
 		set("accel", accel === undefined ? undefined : Math.round(accel * 100000))
 		set("decel", decel === undefined ? undefined : Math.round(decel * 100000))
 		set("autoRev", a.has("smil:autoReverse") ? a.get("smil:autoReverse") === "true" : undefined)
-		set("nodeType", NODE_TYPES[a.get("presentation:node-type") ?? ""])
+		const nodeType = a.get("presentation:node-type")
+
+		set("nodeType", nodeType !== undefined && Object.hasOwn(NODE_TYPES, nodeType) ? NODE_TYPES[nodeType] : undefined)
 		set("presetClass", presetClass === "custom" ? undefined : (presetClass ?? preset.presetClass))
 		set("presetID", preset.id)
 		set("presetSubtype", preset.subtype)
@@ -1177,6 +1179,9 @@ function largestId(node: TimeNode): number {
 	let max = node.ctn.id
 
 	for (const child of node.ctn.children) max = Math.max(max, largestId(child))
+
+	// After-effects were moved out of children into subTnLst before media is numbered.
+	for (const child of node.ctn.subTnLst ?? []) max = Math.max(max, largestId(child))
 
 	return max
 }

@@ -1,7 +1,7 @@
 import { PdfEngineRefusal } from "../context"
 import { applyAddText, applyTextEdit } from "../textEdit/apply"
 import type { TextEditChar } from "../textEdit/target"
-import { isIndex, isRecord, type PdfCommandTable } from "./types"
+import { isFiniteNumber, isIndex, isRecord, parseQuad, requirePage, type PdfCommandTable } from "./types"
 
 // Editing a page's text: a block's (or a selection's) glyphs replaced by new text, and new text added where there was
 // none. The new text arrives laid out already (prepareTextEdit, an engine request made before the command: fonts load
@@ -20,29 +20,19 @@ export interface PdfTextEditCommands {
 	"textEdit.add": { readonly page: number; readonly overlay: Uint8Array }
 }
 
-function isNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value)
-}
-
 function parseChar(value: unknown): TextEditChar | null {
 	if (!isRecord(value)) return null
 
 	const { c, x, y, quad } = value
 
-	if (typeof c !== "string" || c.length === 0 || c.length > 8 || !isNumber(x) || !isNumber(y)) return null
-	if (!Array.isArray(quad) || quad.length !== 8 || !quad.every(isNumber)) return null
+	if (typeof c !== "string" || c.length === 0 || c.length > 8 || !isFiniteNumber(x) || !isFiniteNumber(y)) return null
+	const parsed = parseQuad(quad)
 
-	const [a = 0, b = 0, d = 0, e = 0, f = 0, g = 0, h = 0, k = 0] = quad as number[]
-
-	return { c, x, y, quad: [a, b, d, e, f, g, h, k] }
+	return parsed === null ? null : { c, x, y, quad: parsed }
 }
 
 function parseOverlay(value: unknown): Uint8Array | null {
 	return value instanceof Uint8Array && value.byteLength > 0 && value.byteLength <= MAX_OVERLAY_BYTES ? value : null
-}
-
-function pageInRange(page: number, count: number): void {
-	if (page >= count) throw new PdfEngineRefusal("badRequest", "no such page")
 }
 
 export const TEXT_EDIT_COMMANDS: PdfCommandTable<PdfTextEditCommands> = {
@@ -74,7 +64,7 @@ export const TEXT_EDIT_COMMANDS: PdfCommandTable<PdfTextEditCommands> = {
 			return { page: args["page"], chars, overlay }
 		},
 		run: (context, args) => {
-			pageInRange(args.page, context.document.countPages())
+			requirePage(context, args.page)
 
 			const result = applyTextEdit(context.mupdf, context.document, args.page, args, args.overlay)
 
@@ -93,7 +83,7 @@ export const TEXT_EDIT_COMMANDS: PdfCommandTable<PdfTextEditCommands> = {
 			return overlay === null ? null : { page: args["page"], overlay }
 		},
 		run: (context, args) => {
-			pageInRange(args.page, context.document.countPages())
+			requirePage(context, args.page)
 
 			return applyAddText(context.mupdf, context.document, args.page, args.overlay).pages
 		}

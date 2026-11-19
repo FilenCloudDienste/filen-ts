@@ -5,6 +5,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import {
 	addFillMark,
 	addFillText,
+	clipFieldText,
 	hasFormScripts,
 	missingRequiredFields,
 	PdfFieldError,
@@ -97,6 +98,30 @@ async function pdfjsFields(bytes: Uint8Array): Promise<Map<string, PdfjsField[]>
 
 	return result
 }
+
+describe("clipping a text field's value", () => {
+	it("leaves the length alone when the field has no maximum", () => {
+		const text = "x".repeat(500)
+
+		expect(clipFieldText({ maxLength: 0, multiline: false }, text)).toBe(text)
+	})
+
+	it("counts code points, keeping a surrogate pair at the limit whole", () => {
+		expect(clipFieldText({ maxLength: 3, multiline: false }, "ab😀cd")).toBe("ab😀")
+		expect(clipFieldText({ maxLength: 2, multiline: false }, "😀😀😀")).toBe("😀😀")
+	})
+
+	it("keeps a single-line field's first line", () => {
+		expect(clipFieldText({ maxLength: 0, multiline: false }, "one\r\ntwo")).toBe("one")
+		expect(clipFieldText({ maxLength: 0, multiline: false }, "one\rtwo")).toBe("one")
+		expect(clipFieldText({ maxLength: 0, multiline: false }, "one\ntwo")).toBe("one")
+	})
+
+	it("turns CRLF and CR into LF in a multiline field before clipping", () => {
+		expect(clipFieldText({ maxLength: 0, multiline: true }, "a\r\nb\rc\nd")).toBe("a\nb\nc\nd")
+		expect(clipFieldText({ maxLength: 3, multiline: true }, "a\r\nb\r\nc")).toBe("a\nb")
+	})
+})
 
 describe("form fields", () => {
 	it("reads every widget type with its flags, label and options", () => {

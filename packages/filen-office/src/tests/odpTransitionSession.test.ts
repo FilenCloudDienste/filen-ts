@@ -98,6 +98,7 @@ describe("an authored ODP transition across saves in a session", () => {
 
 		const saved = await h.save()
 
-		expect(await page(saved.bytes ?? source)).toBe(await page(source))
+		expect(saved.result.kind).toBe("written")
+		expect(await page(saved.bytes)).toBe(await page(source))
 	})
 })

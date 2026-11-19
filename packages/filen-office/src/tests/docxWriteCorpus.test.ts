@@ -3,10 +3,11 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource, OpcPackage } from "@filen/office/core/opc"
 import { parseXml } from "@filen/office/core/xml"
-import { DocxEditorSession } from "@filen/office/core/docx/edit"
+import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
+import { DocxEditorSession, openDocxEditContext } from "@filen/office/core/docx/edit"
 import { DocxSaveError, saveDocx } from "@filen/office/core/docx/write"
 import { CORPUS_DIR as CORPUS } from "./corpusDir"
-import { openBytes } from "./docxEditFixtures"
+import type { Opened } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
 import { scriptOps } from "./fuzz/ops/index"
 import { sameBytes } from "../core/docx/write/bytes"
@@ -27,6 +28,18 @@ function corpusFiles(): string[] {
 	}
 
 	return files
+}
+
+// A refused package (the corpus holds encrypted and malformed files on purpose) opens as undefined; any other
+// failure to open throws for the sweep to report.
+async function openCorpusFile(bytes: Uint8Array): Promise<Opened | undefined> {
+	const opened = await openDocxPackage(bytesSource(bytes))
+
+	if (!opened.ok) return undefined
+
+	const model = await buildDocxModel(opened.package)
+
+	return { pkg: opened.package, model, context: await openDocxEditContext(opened.package, model) }
 }
 
 // Body children of a document part by content hash.
@@ -66,15 +79,16 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 		for (const file of corpusFiles()) {
 			const name = file.slice(CORPUS.length + 1)
 			const bytes = new Uint8Array(readFileSync(file))
-			let opened
+			let opened: Opened | undefined
 
 			try {
-				opened = await openBytes(bytes)
-			} catch {
+				opened = await openCorpusFile(bytes)
+			} catch (error) {
+				failures.push(`${name}: open: ${error instanceof Error ? error.message : String(error)}`)
 				continue
 			}
 
-			if (opened.model.body === undefined || opened.context.gate.length > 0) continue
+			if (opened === undefined || opened.model.body === undefined || opened.context.gate.length > 0) continue
 
 			files++
 
@@ -91,6 +105,8 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 
 		console.log(`unedited: ${identical}/${files} byte-identical`)
 		expect(failures).toEqual([])
+		// Fewer means lost coverage: about 330 corpus documents open ungated with a body.
+		expect(files).toBeGreaterThanOrEqual(315)
 	})
 
 	it("saves the scripted edits of every document through gate 2", { timeout: 1_800_000 }, async () => {
@@ -104,15 +120,16 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 		for (const file of corpusFiles()) {
 			const name = file.slice(CORPUS.length + 1)
 			const bytes = new Uint8Array(readFileSync(file))
-			let opened
+			let opened: Opened | undefined
 
 			try {
-				opened = await openBytes(bytes)
-			} catch {
+				opened = await openCorpusFile(bytes)
+			} catch (error) {
+				failures.push(`${name}: open: ${error instanceof Error ? error.message : String(error)}`)
 				continue
 			}
 
-			if (opened.model.body === undefined || opened.context.gate.length > 0) continue
+			if (opened === undefined || opened.model.body === undefined || opened.context.gate.length > 0) continue
 
 			files++
 
@@ -174,5 +191,7 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 			`edit suite: ${saved}/${files} saved; edits ${JSON.stringify(edits)}; failures ${JSON.stringify(reasons)}; slowest ${slowest.name} ${slowest.ms.toFixed(0)} ms`
 		)
 		expect(failures).toEqual([])
+		// Fewer means lost coverage: about 330 corpus documents open ungated with a body.
+		expect(files).toBeGreaterThanOrEqual(315)
 	})
 })

@@ -1,10 +1,11 @@
-import { strFromU8, unzipSync } from "fflate"
+import { strFromU8, strToU8, unzipSync } from "fflate"
 import { TextSelection } from "prosemirror-state"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { readRtf } from "../core/rtf/index"
 import { encodeText } from "../core/rtf/write/encode"
-import { proveRtf, writeRtf } from "../core/rtf/write/writer"
+import { openRtfSource, proveRtf, writeRtf, type RtfSource } from "../core/rtf/write/writer"
 import { editRtf, latin1, paragraphs, saveRtf, scriptedEdits } from "./rtfWriteFixtures"
+import { budget, cpuMs } from "./timing"
 
 async function bodyXml(bytes: Uint8Array): Promise<string> {
 	const read = await readRtf(bytes)
@@ -366,5 +367,189 @@ describe("RTF writer", () => {
 		const proof = await proveRtf(editing.source)
 
 		expect(proof.locked.map(block => block.reason)).toEqual(["preserved"])
+	})
+})
+
+function opened(bytes: Uint8Array): Promise<RtfSource> {
+	return openRtfSource(bytes).then(source => {
+		if (source === undefined) throw new Error("not RTF")
+
+		return source
+	})
+}
+
+// The translation's part `name` with `from` replaced by `to` (once), as the docx writer would write the edit.
+async function replaced(source: RtfSource, name: string, from: string, to: string): Promise<Uint8Array> {
+	const xml = strFromU8(await source.translation.read(name))
+
+	if (!xml.includes(from)) throw new Error(`${from} is not in ${name}`)
+
+	return strToU8(xml.replace(from, to))
+}
+
+// The least CPU time of `runs` runs of `work`, and its last result.
+async function leastCpu<T>(runs: number, work: () => Promise<T>): Promise<{ ms: number; result: T }> {
+	let ms = Infinity
+	let result: T | undefined
+
+	for (let run = 0; run < runs; run++) {
+		const started = cpuMs()
+
+		result = await work()
+		ms = Math.min(ms, cpuMs() - started)
+	}
+
+	return { ms, result: result as T }
+}
+
+const NOTED_HEADER = "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\froman Times New Roman;}}"
+
+function noted(count: number): Uint8Array {
+	let body = ""
+
+	for (let k = 0; k < count; k++)
+		body += `\\pard\\plain\\f0\\fs24 Text ${k} here{\\super\\chftn}{\\footnote\\pard\\plain{\\super\\chftn} Note ${k}.}\\par\n`
+
+	return latin1(`${NOTED_HEADER}${body}}`)
+}
+
+describe("RTF writer, large documents", () => {
+	it("proves and saves a document of thousands of footnotes in time linear in their count", { timeout: budget(120_000) }, async () => {
+		const source = await opened(noted(5000))
+		const proof = await leastCpu(1, () => proveRtf(source))
+
+		expect(proof.result.locked).toEqual([])
+		expect(proof.result.written).toBe(10_000)
+		// Quadratic in the notes, the proof took over 3 s here.
+		expect(proof.ms).toBeLessThan(budget(1500))
+
+		const change = {
+			parts: new Map([["word/document.xml", await replaced(source, "word/document.xml", ">Text 0 here<", ">Typed text 0 here<")]])
+		}
+		const save = await leastCpu(1, () => writeRtf(source, change))
+		const out = strFromU8(save.result.bytes, true)
+
+		expect(save.result.written).toBe(1)
+		expect(out).toContain("Typed text 0 here")
+		expect(out).toContain(
+			"\\pard\\plain\\f0\\fs24 Text 4999 here{\\super\\chftn}{\\footnote\\pard\\plain{\\super\\chftn} Note 4999.}\\par\n"
+		)
+		expect(save.ms).toBeLessThan(budget(1500))
+		expect(save.result.bytes).toEqual((await writeRtf(source, change, { span: false })).bytes)
+	})
+
+	it("writes a footnote the edit holds twice under one id from the first of them", async () => {
+		const source = await opened(noted(2))
+		const notes = strFromU8(await source.translation.read("word/footnotes.xml"))
+		const second = notes.slice(notes.indexOf('<w:footnote w:id="2">'), notes.indexOf("</w:footnotes>"))
+		const edited = notes
+			.replace(" Note 0.", " Edited note 0.")
+			.replace("</w:footnotes>", `${second.replace('w:id="2"', 'w:id="1"').replace(" Note 1.", " Shadow note.")}</w:footnotes>`)
+		const out = strFromU8((await writeRtf(source, { parts: new Map([["word/footnotes.xml", strToU8(edited)]]) })).bytes, true)
+
+		expect(out).toContain("Edited note 0.")
+		expect(out).not.toContain("Shadow note.")
+		expect(out).toContain(" Note 1.}")
+	})
+
+	it("proves a table of thousands of rows without a table of its rows' common pairs", { timeout: budget(60_000) }, async () => {
+		let body = ""
+
+		for (let k = 0; k < 2000; k++)
+			body += `\\trowd\\trgaph108\\trleft-108\\cellx3000\\cellx6000\\pard\\plain\\intbl A${k}\\cell B${k}\\cell\\row\n`
+
+		const source = await opened(latin1(`${NOTED_HEADER}${body}\\pard\\plain After\\par\n}`))
+		let largest = 0
+
+		// Every Uint32Array the proof makes, measured: the rows x rows table would be 16 MB.
+		vi.stubGlobal(
+			"Uint32Array",
+			class extends Uint32Array {
+				constructor(...args: ConstructorParameters<typeof Uint32Array>) {
+					super(...args)
+					largest = Math.max(largest, this.length)
+				}
+			}
+		)
+
+		const proof = await proveRtf(source)
+
+		vi.unstubAllGlobals()
+		expect(proof.locked).toEqual([])
+		expect(proof.written).toBe(4001)
+		expect(largest).toBeLessThan(1_000_000)
+	})
+
+	it("adds a list after 200,000 lists of the source, numbering it after the largest", { timeout: budget(120_000) }, async () => {
+		let lists = ""
+
+		for (let k = 1; k <= 200_000; k++)
+			lists += `{\\list\\listtemplateid${k}{\\listlevel\\levelnfc0\\levelstartat1{\\leveltext\\'02\\'00.;}\\fi-360\\li720}\\listid${k}}`
+
+		const source = await opened(
+			latin1(
+				`${NOTED_HEADER}{\\*\\listtable${lists}}{\\*\\listoverridetable{\\listoverride\\listid1\\listoverridecount0\\ls1}}` +
+					"\\pard\\plain\\ls1\\ilvl0 Item one\\par\n\\pard\\plain Plain\\par\n}"
+			)
+		)
+
+		lists = ""
+
+		const written = await writeRtf(source, {
+			parts: new Map([
+				[
+					"word/numbering.xml",
+					await replaced(
+						source,
+						"word/numbering.xml",
+						"</w:numbering>",
+						'<w:num w:numId="2"><w:abstractNumId w:val="0"/></w:num></w:numbering>'
+					)
+				],
+				[
+					"word/document.xml",
+					await replaced(
+						source,
+						"word/document.xml",
+						"<w:p><w:r><w:t>Plain",
+						'<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Plain'
+					)
+				]
+			])
+		})
+
+		expect(strFromU8(written.bytes, true)).toContain("{\\listoverride\\listid200001\\listoverridecount0\\ls2}")
+	})
+
+	it("adds a style after 200,000 styles of the source, numbering it after the largest", { timeout: budget(120_000) }, async () => {
+		const added = async (count: number): Promise<string> => {
+			let styles = ""
+
+			for (let k = 1; k <= count; k++) styles += `{\\s${k} Style ${k};}`
+
+			const source = await opened(latin1(`${NOTED_HEADER}{\\stylesheet{\\s0 Normal;}${styles}}\\pard\\plain Plain\\par\n}`))
+			const written = await writeRtf(source, {
+				parts: new Map([
+					[
+						"word/styles.xml",
+						await replaced(
+							source,
+							"word/styles.xml",
+							"</w:styles>",
+							'<w:style w:type="paragraph" w:customStyle="1" w:styleId="Added"><w:name w:val="Added style"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style></w:styles>'
+						)
+					],
+					[
+						"word/document.xml",
+						await replaced(source, "word/document.xml", "<w:p><w:r>", '<w:p><w:pPr><w:pStyle w:val="Added"/></w:pPr><w:r>')
+					]
+				])
+			})
+
+			return strFromU8(written.bytes, true)
+		}
+
+		expect(await added(3)).toContain("{\\s3 Style 3;}{\\s4\\sbasedon0\\qc Added style;}}")
+		expect(await added(200_000)).toContain("{\\s200000 Style 200000;}{\\s200001\\sbasedon0\\qc Added style;}}")
 	})
 })

@@ -644,8 +644,9 @@ export class ZipArchive {
 	// The entry's content in chunks, never held whole: what one inflate step gives (kept near STREAM_CHUNK by sizing
 	// the steps to the ratio seen so far), or views of a stored entry. A chunk is the caller's only until the next one
 	// is asked for. Size and CRC are checked as read() checks them, the CRC once the last chunk was handed over, so a
-	// caller keeps nothing it read until the stream ends without an error.
-	async *stream(entry: ZipEntry): AsyncGenerator<Uint8Array, void, undefined> {
+	// caller keeps nothing it read until the stream ends without an error. `clock` gives the host its turn between
+	// steps.
+	async *stream(entry: ZipEntry, clock?: SliceClock): AsyncGenerator<Uint8Array, void, undefined> {
 		if (entry.method !== METHOD_STORED && entry.method !== METHOD_DEFLATE) {
 			throw new ZipError("unsupported", `Compression method ${entry.method} of ${entry.name} is not supported`)
 		}
@@ -663,6 +664,8 @@ export class ZipArchive {
 				read += length
 
 				yield chunk
+
+				if (clock?.due === true) await clock.pause()
 			}
 
 			if (crc !== entry.crc32) throw new ZipError("corrupt", `CRC mismatch in ${entry.name}`)
@@ -686,7 +689,7 @@ export class ZipArchive {
 			return Math.max(MIN_INFLATE_STEP, Math.min(MAX_HOOK_STEP, Math.floor(STREAM_CHUNK / ratio), Math.ceil((size - written) / 1024)))
 		}
 		const input = steps(this.compressed(entry, dataOffset), stepSize)
-		// Set while the caller holds a chunk: what it throws is its own, not damage.
+		// Set while the caller holds a chunk or the host has its turn: what they throw is their own, not damage.
 		let yielding = false
 
 		try {
@@ -695,6 +698,9 @@ export class ZipArchive {
 					take(chunk)
 					yielding = true
 					yield chunk
+
+					if (clock?.due === true) await clock.pause()
+
 					yielding = false
 				}
 			} else {
@@ -710,6 +716,8 @@ export class ZipArchive {
 					yielding = true
 
 					for (const chunk of pending) yield chunk
+
+					if (clock?.due === true) await clock.pause()
 
 					yielding = false
 					pending.length = 0

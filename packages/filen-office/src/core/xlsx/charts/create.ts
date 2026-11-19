@@ -1,5 +1,6 @@
 import { referenceText } from "../../sheet/refs/formulaRefs"
 import type { SheetRange } from "../../sheet/protocol"
+import { escapeText } from "../../xml/entities"
 import { encodeUtf8 } from "../../xml/index"
 import type { ChartSheetCells } from "./cache"
 import type { ChartEditType } from "./edit"
@@ -37,6 +38,10 @@ export function chartLayout(sheet: ChartSheetCells, range: SheetRange, type: Cha
 	for (let col = range.startCol + 1; col <= range.endCol && topLabels; col++) if (!isLabel(sheet, range.startRow, col)) topLabels = false
 	for (let row = range.startRow + 1; row <= range.endRow && leftLabels; row++)
 		if (!isLabel(sheet, row, range.startCol)) leftLabels = false
+
+	// A single column (or row) has no category line to vote on its first cell: only text there names the series.
+	if (cols === 1 && rows > 1) topLabels = corner.kind === "text"
+	if (rows === 1 && cols > 1) leftLabels = corner.kind === "text"
 
 	// Text in the corner over a column of text is the categories' header; a blank corner heads both.
 	if (corner.kind === "empty" && rows > 1 && cols > 1) {
@@ -140,10 +145,6 @@ export function chartSource(sheetName: string, range: SheetRange, layout: ChartL
 	return { categories, series: (type === "pie" || type === "doughnut" ? series.slice(0, 1) : series).slice(0, MAX_SERIES) }
 }
 
-function escape(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-}
-
 // The chart part (c:chartSpace) for `source`, without caches (the caller fills them from the cells).
 export function newChartPart(
 	source: ChartSource,
@@ -175,12 +176,12 @@ export function newChartPart(
 	const categoryKind = options.numericCategories || scatter ? "numRef" : "strRef"
 	const series = source.series
 		.map((line, index) => {
-			const name = line.name === null ? "" : `<c:tx><c:strRef><c:f>${escape(line.name)}</c:f></c:strRef></c:tx>`
+			const name = line.name === null ? "" : `<c:tx><c:strRef><c:f>${escapeText(line.name)}</c:f></c:strRef></c:tx>`
 			const categories =
 				source.categories === null
 					? ""
-					: `<c:${categoryElement}><c:${categoryKind}><c:f>${escape(source.categories)}</c:f></c:${categoryKind}></c:${categoryElement}>`
-			const values = `<c:${valueElement}><c:numRef><c:f>${escape(line.values)}</c:f></c:numRef></c:${valueElement}>`
+					: `<c:${categoryElement}><c:${categoryKind}><c:f>${escapeText(source.categories)}</c:f></c:${categoryKind}></c:${categoryElement}>`
+			const values = `<c:${valueElement}><c:numRef><c:f>${escapeText(line.values)}</c:f></c:numRef></c:${valueElement}>`
 			const head = `${v("idx", index)}${v("order", index)}${name}`
 			const own = type === "line" ? '<c:marker><c:symbol val="none"/></c:marker>' : bar ? v("invertIfNegative", 0) : ""
 

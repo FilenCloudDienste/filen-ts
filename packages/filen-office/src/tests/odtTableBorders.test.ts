@@ -46,6 +46,7 @@ describe("the borders of an ODT table's cells", () => {
 		]
 	])("take room in the row: %s", async (_, model, cell, expected) => {
 		const actual = await pitches(model, cell)
+		expect(actual, actual.join(",")).toHaveLength(expected.length)
 
 		actual.forEach((value, index) =>
 			expect(Math.abs(value - (expected[index] ?? 0)), `${index}: ${actual.join(",")}`).toBeLessThanOrEqual(2)

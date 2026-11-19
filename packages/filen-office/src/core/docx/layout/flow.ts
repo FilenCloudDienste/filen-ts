@@ -47,7 +47,7 @@ import { REF_SPAN, refItem, refPart, type LayoutEdits } from "./edits"
 import { borderWidth, modelAuthors, type DecorationTable, type RunStyles } from "./styles"
 import { TableLayout, type TableSnapshot } from "./table"
 import { verticalTurn } from "./turns"
-import { EPSILON, twips } from "./units"
+import { EPSILON, points, twips } from "./units"
 
 export const FlowStatus = {
 	DONE: 0,
@@ -120,9 +120,14 @@ export interface FootnoteSink {
 	add(story: number, lineBottom: number, limit: number, force: boolean): boolean
 }
 
+// What an Area's page is until its owner assigns the page it lays out on. Every owner (the paginator, layoutBox,
+// table cells, a flow's float area) assigns or copies the real page before anything is placed, so nothing ever
+// writes into this one; sharing it saves each new Area a PageOutput's arrays.
+const NO_PAGE = new PageOutput()
+
 // Where a flow places content: a column of a page, a table cell, a header, a note or a text box.
 export class Area {
-	page: PageOutput = new PageOutput()
+	page: PageOutput = NO_PAGE
 	region: Region = Region.BODY
 	left = 0
 	width = 0
@@ -219,6 +224,8 @@ export class Engine {
 	parityReads = 0
 	// Text box contents being laid out lie behind the body text (their box does).
 	boxBehindText = false
+	// Text boxes being laid out inside one another (see MAX_BOX_DEPTH).
+	boxDepth = 0
 	// Endnote stories in reference order.
 	readonly endnotes: number[] = []
 	private readonly endnoteSet = new Set<number>()
@@ -263,7 +270,7 @@ export class Engine {
 						...(chars === undefined ? {} : { left: chars[0], right: chars[1], minWord: chars[2] })
 					})
 		this.autoSpacing = init.compat.htmlSpacing
-			? { before: (init.tuning.htmlAutoSpacing[0] * 4) / 3, after: (init.tuning.htmlAutoSpacing[1] * 4) / 3 }
+			? { before: points(init.tuning.htmlAutoSpacing[0]), after: points(init.tuning.htmlAutoSpacing[1]) }
 			: FIXED_AUTO_SPACING
 		this.content = new ContentBuilder({
 			model: init.model,
@@ -507,6 +514,8 @@ interface Chain {
 	readonly mark: OutputMark
 	exclusions: number
 	footnotes: number
+	// NoteNumbering.pageRefCount before its first paragraph was built (-1: none to forget).
+	notes: number
 	token: number
 	// The chain began with the rows that end this table (kept with the next, see TableLayout.keptRows): it moves
 	// back into the table, which takes back its own output.
@@ -526,10 +535,14 @@ const STALE_CHAIN: Chain = {
 	mark: new OutputMark(),
 	exclusions: 0,
 	footnotes: 0,
+	notes: -1,
 	token: -1,
 	table: undefined
 }
 
+// Text boxes nested deeper are left empty: a box anchored to a line or character is laid out again once its anchor
+// is known, so each level doubles the work of the levels inside it.
+const MAX_BOX_DEPTH = 8
 // Chains that roll back into a table leave the output to it.
 const TABLE_MARK = new OutputMark()
 const NO_MOVES: readonly number[] = []
@@ -687,6 +700,10 @@ export class BlockFlow {
 	private readonly geometry = new Geometry()
 	private breakBeforeDone = false
 	private floatsPlaced = false
+	// NoteNumbering.pageRefCount before the paragraph under way was built (see withdraw()).
+	private noteRefs = 0
+	// A page break before the paragraph took its per-page numbers back: built again in the next area.
+	private renote = false
 	private source = -1
 	private token = -1
 	private areaPlaced = 0
@@ -858,6 +875,7 @@ export class BlockFlow {
 		this.styleId = undefined
 		this.hasPrevious = false
 		this.inParagraph = false
+		this.renote = false
 		this.table = undefined
 		this.chain = undefined
 		this.moves.length = 0
@@ -963,6 +981,7 @@ export class BlockFlow {
 					? began
 					: { ...began, numPages: area.values.numPages, sectionPages: area.values.sectionPages }
 
+		this.noteRefs = engine.notes.pageRefCount
 		engine.content.build(this.story, parts, items, formats, area.width, values, this.built, this.darkFill)
 		this.builtValues = values
 		this.builtWidth = area.width
@@ -998,6 +1017,7 @@ export class BlockFlow {
 		let offset = cursor.offset >= 0 ? cursor.offset : (prepared.start[cursor.item] ?? prepared.text.length)
 		const { items, parts, formats } = this.group()
 
+		this.noteRefs = engine.notes.pageRefCount
 		engine.content.build(this.story, parts, items, formats, area.width, area.values, built, this.darkFill)
 		this.builtValues = area.values
 		this.builtWidth = area.width
@@ -1025,6 +1045,27 @@ export class BlockFlow {
 
 		cursor.item = offset >= prepared.text.length ? prepared.count : item
 		cursor.offset = cursor.item < prepared.count && (prepared.start[item] ?? 0) !== offset ? offset : -1
+	}
+
+	// Builds the paragraph again from its start in `area` (no line placed yet), numbering its per-page note
+	// references after the notes already there. Its fields keep the values it was first built with: the snapshot
+	// of this page carries those, and restore() builds with them, so a restart here gives what this run gives.
+	private rebuild(area: Area): void {
+		const engine = this.engine
+		const { items, parts, formats } = this.group()
+
+		this.renote = false
+		this.noteRefs = engine.notes.pageRefCount
+		engine.content.build(this.story, parts, items, formats, area.width, this.builtValues ?? area.values, this.built, this.darkFill)
+		parts.length = 0
+		formats.length = 0
+		this.builtValues ??= area.values
+		this.builtWidth = area.width
+		this.pageFields = undefined
+
+		const props = this.built.format?.props
+
+		if (props !== undefined) engine.layouter.prepare(engine.content.builder, this.prepareOptions(props), this.prepared)
 	}
 
 	// Renumbering without building again: when every PAGE field shows one format in characters of one kind
@@ -1447,6 +1488,7 @@ export class BlockFlow {
 			mark: area.page.mark(),
 			exclusions: area.exclusions?.count ?? 0,
 			footnotes: footnotes === null ? 0 : footnotes.mark(),
+			notes: this.noteRefs,
 			token: area.token,
 			table: undefined
 		}
@@ -1474,6 +1516,7 @@ export class BlockFlow {
 			mark: TABLE_MARK,
 			exclusions: 0,
 			footnotes: 0,
+			notes: -1,
 			token: area.token,
 			table
 		}
@@ -1529,6 +1572,8 @@ export class BlockFlow {
 			if (area.exclusions !== null) area.exclusions.count = Math.min(area.exclusions.count, chain.exclusions)
 
 			area.footnotes?.rollback(chain.footnotes)
+
+			if (chain.notes >= 0) this.engine.notes.forgetPageRefs(chain.notes)
 		} else if (!table.moveKeptRows(area)) return false
 
 		this.moves.push(0, this.index)
@@ -1586,6 +1631,7 @@ export class BlockFlow {
 
 			const { items, parts, formats } = this.group()
 
+			this.noteRefs = engine.notes.pageRefCount
 			engine.content.build(this.story, parts, items, formats, area.width, area.values, built, this.darkFill)
 			// The scratch is module-wide: emptied, so a long-lived worker keeps no closed document's parts.
 			parts.length = 0
@@ -1613,12 +1659,15 @@ export class BlockFlow {
 				if (engine.styles.hasMissing) return FlowStatus.SUSPEND
 			}
 			this.inParagraph = true
+			this.renote = false
 			this.groupEnd = this.index + items.length
 			this.cursor.reset()
 			this.breakBeforeDone = false
 			this.floatsPlaced = false
 			this.source = -1
 		}
+
+		if (this.renote) this.rebuild(area)
 
 		const props = built.format?.props
 
@@ -1638,7 +1687,16 @@ export class BlockFlow {
 		if (first && props.pageBreakBefore && area.breaks && !this.breakBeforeDone) {
 			this.breakBeforeDone = true
 
-			if (this.areaPlaced > 0 || !area.empty) return FlowStatus.PAGE_BREAK
+			if (this.areaPlaced > 0 || !area.empty) {
+				// Built on this page, its per-page note numbers counted this page's notes: taken back (before the
+				// next page's snapshot, as withdraw() does) and given again where it lands.
+				if (engine.notes.pageRefCount > this.noteRefs) {
+					engine.notes.forgetPageRefs(this.noteRefs)
+					this.renote = true
+				}
+
+				return FlowStatus.PAGE_BREAK
+			}
 		}
 
 		const g = paragraphGeometry(this.geometry, props, area.left, area.width, engine.compat, engine.gridPitch)
@@ -1805,6 +1863,7 @@ export class BlockFlow {
 	private withdraw(area: Area): void {
 		this.inParagraph = false
 		this.box.open = false
+		this.engine.notes.forgetPageRefs(this.noteRefs)
 
 		if (this.floatsPlaced) {
 			area.page.rollback(this.floatMark)
@@ -2135,7 +2194,7 @@ export class BlockFlow {
 		const stories = objects.textboxes[id]
 		const insets = objects.insets[id] ?? [0, 0, 0, 0]
 
-		if (stories === undefined) return
+		if (stories === undefined || engine.boxDepth >= MAX_BOX_DEPTH) return
 
 		const across = (objects.widths[id] ?? 0) - (insets[0] ?? 0) - (insets[2] ?? 0)
 		const vertical = objects.verticals[id]
@@ -2150,6 +2209,7 @@ export class BlockFlow {
 		let top = boxTop
 
 		engine.boxBehindText = behind
+		engine.boxDepth++
 
 		try {
 			for (const index of stories) {
@@ -2174,6 +2234,7 @@ export class BlockFlow {
 			}
 		} finally {
 			engine.boxBehindText = outer
+			engine.boxDepth--
 		}
 
 		if (mark !== undefined && turn !== 0) {
@@ -2194,6 +2255,8 @@ export class BlockFlow {
 		const engine = this.engine
 		const objects = engine.objects
 		const built = this.built
+
+		if (engine.boxDepth >= MAX_BOX_DEPTH) return
 
 		for (const list of [built.floats, built.boxedObjects]) {
 			for (const id of list) {
@@ -2487,7 +2550,21 @@ export class BlockFlow {
 		for (let line = 0; line < scratch.lineCount; line++) width = Math.max(width, scratch.lineFloats[line * LINE_FLOATS + 4] ?? 0)
 
 		const height = cursor.y
-		const space = (frame?.hSpace ?? 0) / 15
+
+		// A cap without room for its full height moves on with the paragraph it introduces (an empty area takes it
+		// regardless, or the flow would loop). The paragraph after it being pushed on by its own keep or widow rules
+		// once the cap is placed is not covered.
+		if (
+			area.breaks &&
+			!(this.areaPlaced === 0 && area.empty) &&
+			top + height > area.bottom - (area.footnotes?.reserved ?? 0) + EPSILON
+		) {
+			this.withdraw(area)
+
+			return FlowStatus.OVERFLOW
+		}
+
+		const space = twips(frame?.hSpace ?? 0)
 		const x = this.built.dropCap === "margin" ? area.left - width - space : area.left
 
 		g.left = x
@@ -2646,10 +2723,6 @@ export class BlockFlow {
 	}
 }
 
-function points(value: number): number {
-	return (value * 4) / 3
-}
-
 // Whether a paragraph's borders join the open box's (LayoutCompat.joinsBoxes): the same lines on every side, a border
 // that draws nothing counting as none unless it carries a shadow (which keeps neighbours apart), the same spacing at
 // the start and end, and no w:frame on the open box's bottom (style:join-border false).
@@ -2674,11 +2747,11 @@ function joinable(a: ResolvedParagraphBorders | undefined, b: ResolvedParagraphB
 }
 
 function paragraphLeft(props: ResolvedParagraphProps): number {
-	return (props.bidi ? props.indent.end : props.indent.start) / 15
+	return twips(props.bidi ? props.indent.end : props.indent.start)
 }
 
 function paragraphRight(props: ResolvedParagraphProps): number {
-	return (props.bidi ? props.indent.start : props.indent.end) / 15
+	return twips(props.bidi ? props.indent.start : props.indent.end)
 }
 
 // The top at or below `y` where a box clears the anchored, wrapping drawings already on the page.

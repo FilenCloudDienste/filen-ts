@@ -252,3 +252,22 @@ export function buildPptx(options: FixtureOptions): Uint8Array {
 		)
 	)
 }
+
+// Rewrites the declared uncompressed size of `name` in both its local header and its central-directory record (a
+// zip that lies about how large an entry inflates).
+export function declare(zip: Uint8Array, name: string, size: number): Uint8Array {
+	const out = zip.slice()
+	const view = new DataView(out.buffer)
+	const wanted = strToU8(name)
+	const matches = (at: number, nameAt: number, length: number): boolean =>
+		length === wanted.length && wanted.every((byte, index) => out[nameAt + index] === byte) && at >= 0
+
+	for (let at = 0; at + 46 <= out.length; at++) {
+		const signature = view.getUint32(at, true)
+
+		if (signature === 0x04034b50 && matches(at, at + 30, view.getUint16(at + 26, true))) view.setUint32(at + 22, size, true)
+		if (signature === 0x02014b50 && matches(at, at + 46, view.getUint16(at + 28, true))) view.setUint32(at + 24, size, true)
+	}
+
+	return out
+}

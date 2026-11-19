@@ -17,11 +17,15 @@ export const MAX_TEXT_CHARS = 1_000_000
 export const MAX_OBJECTS = 65_536
 // SaveDC / EMF+ Save and container depth.
 export const MAX_SAVE_DEPTH = 1024
-// Pixels of one bitmap decoded to RGBA (64 MiB), and bytes of bitmaps embedded in one metafile.
+// Pixels of one bitmap decoded to RGBA (64 MiB).
 export const MAX_DECODE_PIXELS = 16 * 1024 * 1024
 // Pixels decoded over the whole conversion (bitmaps, masks, pattern brushes, nested pictures excluded).
 export const MAX_TOTAL_DECODE_PIXELS = 64 * 1024 * 1024
+// Bytes of bitmaps embedded in one metafile.
 export const MAX_IMAGE_BYTES = 128 * 1024 * 1024
+// Bytes of compressed bitmaps inflated over the whole conversion: what the decoding budget's pixels take at
+// four bytes each, drawn or not.
+export const MAX_INFLATED_BYTES = MAX_TOTAL_DECODE_PIXELS * 4
 // Rectangles read from one region, region nodes of one EMF+ region, and their nesting.
 export const MAX_REGION_RECTS = 20_000
 export const MAX_REGION_NODES = 4096

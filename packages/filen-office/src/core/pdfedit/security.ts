@@ -244,10 +244,21 @@ export function upgradeRefusal(state: PdfSecurityState): PdfSecurityRefusal | nu
 
 	if (state.held.openPassword && !user) return "openPasswordUnknown"
 	if (restricted && !owner) return "ownerRequired"
-	// Carried over as held: one the option parser would read back differently cannot be written.
-	if (!isWriteOptionText(state.held.password)) return "passwordRefused"
 
-	return null
+	const prepared = upgradePassword(state.held.password)
+
+	return prepared.ok ? null : prepared.reason
+}
+
+// The held password as the AES-256 handler stores it: SASLprep'd like every new password, so a conforming reader that
+// prepares what the user types accepts it. An empty one (no password held) stays empty; one that prepares to nothing
+// cannot be carried over.
+function upgradePassword(held: string): Prepared {
+	if (held === "") return { ok: true, value: "" }
+
+	const prepared = preparedPassword(held)
+
+	return !prepared.ok && prepared.reason === "emptyPassword" ? { ok: false, reason: "passwordRefused" } : prepared
 }
 
 function upgradePlan(state: PdfSecurityState): PdfSecurityPlan {
@@ -255,14 +266,18 @@ function upgradePlan(state: PdfSecurityState): PdfSecurityPlan {
 
 	if (refusal !== null) return { ok: false, reason: refusal }
 
-	const owner = (state.held.bits & PDF_AUTH_OWNER) !== 0 || !isRestricted(state.permissions) ? state.held.password : ""
+	const password = upgradePassword(state.held.password)
+
+	if (!password.ok) return password
+
+	const owner = (state.held.bits & PDF_AUTH_OWNER) !== 0 || !isRestricted(state.permissions) ? password.value : ""
 
 	return {
 		ok: true,
 		changes: true,
 		options: {
 			encrypt: "aes-256",
-			"user-password": state.held.openPassword ? state.held.password : "",
+			"user-password": state.held.openPassword ? password.value : "",
 			"owner-password": owner,
 			permissions: state.permissions | 0
 		}

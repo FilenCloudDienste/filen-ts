@@ -1,5 +1,5 @@
 import { tooLarge } from "../presentation/refusal"
-import { DEFAULT_PPT_BUDGETS, malformed, recordAt, RT, u16, u32, type PptBudgets } from "./records"
+import { DEFAULT_PPT_BUDGETS, malformed, recordAt, RT, u32, type PptBudgets } from "./records"
 
 // The persist object directory of a PowerPoint Document stream ([MS-PPT] §2.1.2, §2.3.2–§2.3.6, §3.2–§3.3): the
 // Current User stream names the newest UserEditAtom; each edit's PersistDirectoryAtom maps persist ids to stream
@@ -138,9 +138,4 @@ export function readPersistDirectory(stream: Uint8Array, user: CurrentUser, budg
 // Whether the newest edit names an encryption session ([MS-PPT] §2.3.7: it MUST in an encrypted file).
 export function isEncryptedEdit(directory: PersistDirectory): boolean {
 	return directory.current.encryptSessionPersistIdRef !== 0 && directory.offsets.has(directory.current.encryptSessionPersistIdRef)
-}
-
-// The two-byte record type at `offset` (the record headers of an encrypted stream are encrypted too).
-export function typeAt(stream: Uint8Array, offset: number): number {
-	return u16(stream, offset + 2)
 }

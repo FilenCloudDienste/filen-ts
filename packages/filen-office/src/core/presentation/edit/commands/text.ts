@@ -51,8 +51,10 @@ export function effectiveRunProps(rPr: RunProps, paragraph: Node, defaults: Text
 	return { ...(defaults.paragraph(levelOf(paragraph)).defRPr ?? {}), ...rPr }
 }
 
-// The word around an empty selection (letters, digits, underscore and apostrophes inside it), or undefined at a
-// word's edge or outside one: PowerPoint formats the word the caret is in.
+// The word around an empty selection, or undefined at a word's edge or outside one: PowerPoint formats the word the
+// caret is in. A word is a run of letters, digits, underscores and apostrophes (each with the marks after it), split
+// further where the engine's word segmenter separates two words (Chinese, Japanese, Thai: scripts written without
+// spaces).
 function wordAround($pos: ResolvedPos): { readonly from: number; readonly to: number } | undefined {
 	const parent = $pos.parent
 
@@ -60,16 +62,27 @@ function wordAround($pos: ResolvedPos): { readonly from: number; readonly to: nu
 
 	const text = parent.textBetween(0, parent.content.size, undefined, "￼")
 	const offset = $pos.parentOffset
-	const word = /[\p{L}\p{N}_'’]/u
-	let start = offset
-	let end = offset
-
-	while (start > 0 && word.test(text[start - 1] ?? "")) start--
-	while (end < text.length && word.test(text[end] ?? "")) end++
+	const start = wordRunStart(text, offset)
+	const end = wordRunEnd(text, offset)
 
 	if (start === offset || end === offset) return undefined
 
-	return { from: $pos.start() + start, to: $pos.start() + end }
+	let from = start
+	let to = end
+
+	for (const split of wordSplits(text, start, end)) {
+		if (split === offset) return undefined
+
+		if (split < offset) {
+			from = split
+		} else {
+			to = split
+
+			break
+		}
+	}
+
+	return { from: $pos.start() + from, to: $pos.start() + to }
 }
 
 // The local rPr at a caret: the stored marks, else the run before it, else the paragraph mark's.
@@ -669,10 +682,101 @@ export function plainTextSlice(text: string, base: RunProps, endRPr: RunProps | 
 	return new Slice(Fragment.from(paragraphs), 1, 1)
 }
 
-const WORD_CHAR = /[\p{L}\p{N}_'’]/u
+// One word character's base, a whole code point (sticky: tested at lastIndex), and a mark. A mark (Thai vowels and
+// tones, combining accents) belongs to a word only after a word base: one after a symbol (an emoji's variation
+// selector, a keycap) is not a word character, so a word never starts or ends inside a grapheme cluster.
+const WORD_BASE = /[\p{L}\p{N}_'’]/uy
+const MARK = /\p{M}/uy
 
 function isLowSurrogate(code: number): boolean {
 	return code >= 0xdc00 && code <= 0xdfff
+}
+
+function isHighSurrogate(code: number): boolean {
+	return code >= 0xd800 && code <= 0xdbff
+}
+
+// The start of the code point ending at `at` (> 0).
+function codePointBefore(text: string, at: number): number {
+	return at >= 2 && isLowSurrogate(text.charCodeAt(at - 1)) && isHighSurrogate(text.charCodeAt(at - 2)) ? at - 2 : at - 1
+}
+
+function isMark(text: string, at: number): boolean {
+	MARK.lastIndex = at
+
+	return MARK.test(text)
+}
+
+// The end of the word character (a word base with the marks after it) starting at `at`, or `at` where none does.
+function wordCharEnd(text: string, at: number): number {
+	WORD_BASE.lastIndex = at
+
+	if (!WORD_BASE.test(text)) return at
+
+	let end = WORD_BASE.lastIndex
+
+	while (isMark(text, end)) end = MARK.lastIndex
+
+	return end
+}
+
+// The start of the word character ending at `at`, or `at` where none does.
+function wordCharStart(text: string, at: number): number {
+	if (at === 0) return at
+
+	let base = codePointBefore(text, at)
+
+	while (base > 0 && isMark(text, base)) base = codePointBefore(text, base)
+
+	return wordCharEnd(text, base) === at ? base : at
+}
+
+// The bounds of the run of word characters around `at`.
+function wordRunStart(text: string, at: number): number {
+	for (let previous = wordCharStart(text, at); previous !== at; previous = wordCharStart(text, at)) at = previous
+
+	return at
+}
+
+function wordRunEnd(text: string, at: number): number {
+	for (let next = wordCharEnd(text, at); next !== at; next = wordCharEnd(text, at)) at = next
+
+	return at
+}
+
+// null: the engine has no Intl.Segmenter (a run of word characters is then one word).
+let words: Intl.Segmenter | null | undefined
+
+function wordSegmenter(): Intl.Segmenter | null {
+	if (words === undefined) {
+		const Segmenter = (Intl as { Segmenter?: typeof Intl.Segmenter }).Segmenter
+
+		words = Segmenter === undefined ? null : new Segmenter(undefined, { granularity: "word" })
+	}
+
+	return words
+}
+
+// The offsets inside the word run [from, to) where the segmenter puts two words side by side (UAX #29 with the
+// engine's dictionaries for scripts without spaces). Only word-like neighbours split the run, so an apostrophe or an
+// underscore the segmenter leaves apart still belongs to the word as before.
+function wordSplits(text: string, from: number, to: number): number[] {
+	const segmenter = wordSegmenter()
+	const splits: number[] = []
+
+	if (segmenter === null) return splits
+
+	let previousWordLike = false
+
+	for (const segment of segmenter.segment(text.slice(from, to))) {
+		const wordLike = segment.isWordLike === true
+
+		if (segment.index > 0 && previousWordLike && wordLike) splits.push(from + segment.index)
+
+		previousWordLike = wordLike
+	}
+
+	return splits
 }
 
 // null: the engine has no Intl.Segmenter (steps then go by code point).
@@ -727,14 +831,18 @@ function stepFrom(doc: Node, pos: number, direction: 1 | -1, unit: "char" | "wor
 	let at = offset
 
 	if (direction === 1) {
-		while (at < text.length && !WORD_CHAR.test(text[at] ?? "")) at++
-		while (at < text.length && WORD_CHAR.test(text[at] ?? "")) at++
-	} else {
-		while (at > 0 && !WORD_CHAR.test(text[at - 1] ?? "")) at--
-		while (at > 0 && WORD_CHAR.test(text[at - 1] ?? "")) at--
+		while (at < text.length && wordCharEnd(text, at) === at) at++
+
+		const end = wordRunEnd(text, at)
+
+		return start + (wordSplits(text, wordRunStart(text, at), end).find(split => split > at) ?? end)
 	}
 
-	return start + at
+	while (at > 0 && wordCharStart(text, at) === at) at--
+
+	const from = wordRunStart(text, at)
+
+	return start + (wordSplits(text, from, wordRunEnd(text, at)).findLast(split => split < at) ?? from)
 }
 
 // Left and Right (Alt or Ctrl: by word), Shift extending: moves made on the document's logical positions, so a key

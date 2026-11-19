@@ -1,5 +1,6 @@
-import { CellError, EmptyValue, ErrorType, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
+import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import {
+	ERROR_TEXT,
 	genericErrorText,
 	MAX_TEXT,
 	numberText,
@@ -12,16 +13,6 @@ import {
 } from "./plugin"
 
 // Text functions as support.microsoft.com defines them: ARRAYTOTEXT, VALUETOTEXT, BAHTTEXT and ENCODEURL.
-
-const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
-	[ErrorType.DIV_BY_ZERO]: "#DIV/0!",
-	[ErrorType.NAME]: "#NAME?",
-	[ErrorType.VALUE]: "#VALUE!",
-	[ErrorType.NUM]: "#NUM!",
-	[ErrorType.NA]: "#N/A",
-	[ErrorType.REF]: "#REF!",
-	[ErrorType.SPILL]: "#SPILL!"
-}
 
 function errorText(error: CellError): string {
 	return genericErrorText(error) ?? ERROR_TEXT[error.type] ?? "#VALUE!"

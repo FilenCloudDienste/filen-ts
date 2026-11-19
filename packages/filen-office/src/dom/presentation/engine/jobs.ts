@@ -213,8 +213,8 @@ async function facesOf(session: EngineSession): Promise<DocxFontFace[]> {
 	return (await sessionFaces(session)).map(face => (face.kind === "bytes" ? { ...face, bytes: face.bytes.slice() } : face))
 }
 
-// A password the PDF security handler cannot take (SASLprep prohibits it) refuses as unsupported, naming the password,
-// so the page tells the user that, not that the export failed.
+// A password the PDF security handler cannot take (SASLprep prohibits it) refuses as passwordUnsupported, so the page
+// tells the user that, not that the export failed.
 async function pdfSecurity(session: EngineSession): Promise<PdfSecurityKey | undefined> {
 	const password = pptPassword(session.deck) ?? pptxPassword(session.deck)
 
@@ -222,7 +222,7 @@ async function pdfSecurity(session: EngineSession): Promise<PdfSecurityKey | und
 		return password === undefined ? undefined : await standardSecurityKey(password)
 	} catch (error) {
 		if (error instanceof PdfWriteError && error.reason === "password")
-			throw new PresentationError("unsupported", `password: ${error.message}`)
+			throw new PresentationError("passwordUnsupported", `password: ${error.message}`)
 
 		throw error
 	}

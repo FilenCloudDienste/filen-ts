@@ -83,6 +83,19 @@ describe("ODT lossy flags", () => {
 		expect(translation.lossy.get("textTransform")).toBe(1)
 	})
 
+	it("flags every paragraph of an automatic style it approximates, and every span of one, not only the first", async () => {
+		const translation = await translated({
+			automatic:
+				'<style:style style:name="P3" style:family="paragraph"><style:text-properties fo:text-transform="lowercase"/></style:style><style:style style:name="T2" style:family="text"><style:text-properties style:text-rotation-angle="90"/></style:style>',
+			body: '<text:p text:style-name="P3">ONE</text:p><text:p text:style-name="P3">TWO</text:p><text:p>plain</text:p><text:p text:style-name="P3">THREE</text:p><text:p>a <text:span text:style-name="T2">b</text:span></text:p><text:p>c <text:span text:style-name="T2">d</text:span></text:p>'
+		})
+
+		expect(translation.origins.map(origin => origin.lossy.includes("textTransform"))).toEqual([true, true, false, true, false, false])
+		expect(translation.origins.map(origin => origin.lossy.includes("textEffect"))).toEqual([false, false, false, false, true, true])
+		expect(translation.lossy.get("textTransform")).toBe(3)
+		expect(translation.lossy.get("textEffect")).toBe(2)
+	})
+
 	it("flags a table of contents kept as its entries, and a bookmark between blocks", async () => {
 		const translation = await translated({
 			body: '<text:table-of-content text:name="toc"><text:table-of-content-source/><text:index-body><text:p>entry</text:p></text:index-body></text:table-of-content><text:bookmark text:name="b"/><text:p>after</text:p>'

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { DocxEditorSession } from "@filen/office/core/docx/edit"
-import { prepareDocxSave, saveDocx, writerProof, zipDocxSave } from "@filen/office/core/docx/write"
+import { Out, prepareDocxSave, saveDocx, writerProof, zipDocxSave } from "@filen/office/core/docx/write"
 import { CORPUS_DIR } from "./corpusDir"
 import { openBytes } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
@@ -201,5 +201,77 @@ describe("docx writer performance: people", () => {
 		// The first save reads the source's authors (what the probe sees), the later ones reuse them.
 		expect(first).toBeGreaterThan(1000)
 		expect(later).toEqual([0, 0, 0])
+	})
+})
+
+describe("docx writer performance: written output", () => {
+	// An output of many chunks (copies of 64 bytes or more are chunks of their own) with new markup between them
+	// and some left unflushed.
+	function written(): Out {
+		const source = new Uint8Array(200).map((_, i) => 0x41 + (i % 26))
+		const out = new Out()
+
+		for (let i = 0; i < 2_000; i++) {
+			out.bytes(source, i % 7, 64 + (i % 90))
+			out.text(`<w:t>${String(i)}</w:t>`)
+		}
+
+		out.text("tail")
+
+		return out
+	}
+
+	it("reads any range of what was written as the joined bytes have it", () => {
+		const out = written()
+		const all = out.finish()
+		const size = out.size
+		const ranges = [
+			[size - 3, size],
+			[size - 500, size],
+			[size - 70_000, size],
+			[0, size],
+			[1, 65],
+			[100, 30_000],
+			[size - 600, size - 2],
+			[50, 50],
+			[size, size]
+		] as const
+
+		for (const [from, to] of ranges) expect(out.slice(from, to)).toEqual(all.slice(from, to))
+
+		// A copy, never a view of what is still being written.
+		const tail = out.slice(size - 4, size)
+
+		out.text("more")
+		expect(new TextDecoder().decode(tail)).toBe("tail")
+	})
+
+	// writeTop reads each paragraph's bytes as the tail of the output: a read touches the chunks it covers only,
+	// so rewriting every paragraph of a long story costs linear, not quadratic, time.
+	it("reads the tail of the output without walking every chunk", () => {
+		const out = written()
+		const chunks: unknown = Reflect.get(out, "chunks")
+
+		if (!Array.isArray(chunks)) throw new Error("No chunks")
+
+		let reads = 0
+
+		Reflect.set(
+			out,
+			"chunks",
+			new Proxy(chunks, {
+				get(target, key, receiver) {
+					if (typeof key === "string" && /^\d+$/.test(key)) reads++
+
+					return Reflect.get(target, key, receiver) as unknown
+				}
+			})
+		)
+
+		const tail = out.slice(out.size - 300, out.size)
+
+		expect(tail.length).toBe(300)
+		expect(chunks.length).toBeGreaterThan(2_000)
+		expect(reads).toBeLessThan(10)
 	})
 })

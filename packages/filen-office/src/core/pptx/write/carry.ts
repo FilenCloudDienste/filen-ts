@@ -101,7 +101,7 @@ function sameTarget(relationship: Relationship, type: string, target: string, ex
 }
 
 // The data part's drawing reference (dsp:dataModelExt@relId, MS-ODRAWXML §2.3.4: an id of the slide's relationships)
-// renamed by `rename`; undefined when it names none of them.
+// renamed by `rename`; the bytes as they are when it names none of them.
 function renameDrawingReference(bytes: Uint8Array, rename: ReadonlyMap<string, string>): Uint8Array {
 	if (rename.size === 0) return bytes
 

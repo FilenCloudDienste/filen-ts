@@ -128,16 +128,27 @@
 		}
 	}
 
+	/* pdf.js's own pair of plain declarations falls back by parse failure; a var() declaration always parses, so an
+	   engine without AccentColor (or color-mix) would drop to a transparent selection over the transparent glyphs.
+	   The fallback colour is the default and the AccentColor mix only applies where it is supported. */
 	::-moz-selection {
-		background: rgba(0 0 255 / 0.25);
-		background: var(--fo-pdf-selection, color-mix(in srgb, AccentColor, transparent 50%));
+		background: var(--fo-pdf-selection, rgb(0 0 255 / 0.25));
 		color: transparent;
 	}
 
 	::selection {
-		background: rgba(0 0 255 / 0.25);
-		background: var(--fo-pdf-selection, color-mix(in srgb, AccentColor, transparent 50%));
+		background: var(--fo-pdf-selection, rgb(0 0 255 / 0.25));
 		color: transparent;
+	}
+
+	@supports (color: color-mix(in srgb, AccentColor, transparent 50%)) {
+		::-moz-selection {
+			background: var(--fo-pdf-selection, color-mix(in srgb, AccentColor, transparent 50%));
+		}
+
+		::selection {
+			background: var(--fo-pdf-selection, color-mix(in srgb, AccentColor, transparent 50%));
+		}
 	}
 
 	&.selectionRendering {

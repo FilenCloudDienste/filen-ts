@@ -1,4 +1,4 @@
-import { LookupApplier } from "./apply"
+import { LookupApplier, MAX_CONTEXT, SUBTABLES_PER_OP } from "./apply"
 import { GlyphBuffer, GlyphFlag, ShapingLimitError } from "./buffer"
 import { GlyphClass, classOf, coverageIndex, type LayoutTable, type Lookup } from "./otl"
 
@@ -68,14 +68,19 @@ export class SubstitutionApplier extends LookupApplier {
 
 	private out: GlyphBuffer | null = null
 
-	// The sequence a multiple substitution lookup puts at `i`, or -1; charged as one lookup application.
+	// The sequence a multiple substitution lookup puts at `i`, or -1; charged as one lookup application (as applyAt).
 	private sequenceOf(lookup: Lookup, i: number): number {
 		const view = this.view
 		const glyph = this.buffer.glyph[i] ?? 0
 
+		const subtables = lookup.subtables
+
 		this.buffer.spend(1)
 
-		for (const offset of lookup.subtables) {
+		for (let k = 0; k < subtables.length; k++) {
+			if (k > 0 && k % SUBTABLES_PER_OP === 0) this.buffer.spend(1)
+
+			const offset = subtables[k] ?? 0
 			const covered = coverageIndex(view, offset + view.getUint16(offset + 2), glyph)
 
 			if (covered >= 0 && view.getUint16(offset) === 1 && covered < view.getUint16(offset + 4)) {
@@ -202,10 +207,13 @@ export class SubstitutionApplier extends LookupApplier {
 		const positions: number[] = []
 
 		for (let l = 0; l < count; l++) {
+			if (l > 0 && l % SUBTABLES_PER_OP === 0) buffer.spend(1)
+
 			const ligature = set + view.getUint16(set + 2 + l * 2)
 			const components = view.getUint16(ligature + 2)
 
-			if (components === 0) continue
+			// Longer than any context is never matched (as HarfBuzz's match_input).
+			if (components === 0 || components > MAX_CONTEXT) continue
 			if (!this.matchInput(i, components, (glyph, n) => glyph === view.getUint16(ligature + 4 + (n - 1) * 2), positions, false))
 				continue
 
@@ -233,11 +241,16 @@ export class SubstitutionApplier extends LookupApplier {
 			for (let p = 0; p < count; p++) {
 				const from = (positions[p] ?? 0) + 1
 				const to = p + 1 < count ? (positions[p + 1] ?? 0) : buffer.length
+				let k = from
 
-				for (let k = from; k < to && buffer.glyphClass[k] === GlyphClass.MARK; k++) {
+				for (; k < to && buffer.glyphClass[k] === GlyphClass.MARK; k++) {
 					buffer.ligId[k] = ligId
 					buffer.ligComp[k] = Math.min(15, p + 1)
 				}
+
+				// The marks after the last component are not paid for by matching or removing, and a ligature of one
+				// component applied again and again at one glyph (by nested lookups) would walk them every time.
+				this.visit(k - from)
 			}
 		}
 
@@ -267,6 +280,8 @@ export class SubstitutionApplier extends LookupApplier {
 		const covers = (at: number) => (candidate: number, n: number) =>
 			coverageIndex(view, offset + view.getUint16(at + n * 2), candidate) >= 0
 
+		// As chainRule, a context longer than any real one is not matched, so one position cannot walk the run.
+		if (backtrackCount + lookaheadCount > MAX_CONTEXT * 3) return -1
 		if (covered >= view.getUint16(substituteCountAt)) return -1
 		if (!this.matchBacktrack(i, backtrackCount, covers(backtrackAt))) return -1
 		if (!this.matchLookahead(i, lookaheadCount, covers(lookaheadAt))) return -1
@@ -277,23 +292,40 @@ export class SubstitutionApplier extends LookupApplier {
 	}
 }
 
+// Lookups, subtables, ligatures and rules one wouldSubstitute call tries at most, all together.
+const WOULD_SUBSTITUTE_TRIES = MAX_CONTEXT * SUBTABLES_PER_OP
+// Tries the running wouldSubstitute call has left (it is synchronous, so one counter serves every call).
+let triesLeft = 0
+
 // Whether any of `lookups` would substitute the glyph sequence on its own, without context (as HarfBuzz's
 // would_substitute): single, multiple and alternate substitutions of one glyph, ligatures of exactly these
-// glyphs, and contextual rules whose input is exactly these glyphs.
+// glyphs, and contextual rules whose input is exactly these glyphs. It has no operations budget to charge, so
+// past WOULD_SUBSTITUTE_TRIES lookups, subtables, ligatures and rules tried in one call the answer is no.
 export function wouldSubstitute(table: LayoutTable, lookups: readonly number[], glyphs: readonly number[]): boolean {
 	const view = table.view
 
+	triesLeft = WOULD_SUBSTITUTE_TRIES
+
 	for (const index of lookups) {
+		// A lookup counts as a try too, so a feature of thousands of lookups without subtables stops as well.
+		if (!tried()) return false
+
 		const lookup = table.lookup(index)
 
 		if (lookup === undefined) continue
 
 		for (const offset of lookup.subtables) {
+			if (!tried()) return false
 			if (wouldApply(view, lookup.type, offset, glyphs)) return true
 		}
 	}
 
 	return false
+}
+
+// Counts one try of the running wouldSubstitute call; false: none left.
+function tried(): boolean {
+	return triesLeft-- > 0
 }
 
 function wouldApply(view: DataView, type: number, offset: number, glyphs: readonly number[]): boolean {
@@ -314,6 +346,8 @@ function wouldApply(view: DataView, type: number, offset: number, glyphs: readon
 			const count = view.getUint16(set)
 
 			for (let l = 0; l < count; l++) {
+				if (!tried()) return false
+
 				const ligature = set + view.getUint16(set + 2 + l * 2)
 
 				if (view.getUint16(ligature + 2) !== glyphs.length) continue
@@ -380,6 +414,8 @@ function wouldApplyRules(view: DataView, offset: number, glyphs: readonly number
 		const set = offset + setOffset
 
 		for (let r = 0, count = view.getUint16(set); r < count; r++) {
+			if (!tried()) return false
+
 			let rule = set + view.getUint16(set + 2 + r * 2)
 
 			if (chained) {
@@ -417,6 +453,8 @@ function wouldApplyRules(view: DataView, offset: number, glyphs: readonly number
 	const set = offset + setOffset
 
 	for (let r = 0, count = view.getUint16(set); r < count; r++) {
+		if (!tried()) return false
+
 		let rule = set + view.getUint16(set + 2 + r * 2)
 
 		if (chained) {

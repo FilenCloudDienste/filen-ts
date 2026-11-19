@@ -14,14 +14,18 @@ import { OFFSET_FUNCTION, RANGE_FUNCTION } from "../../functions/engineNames"
 import { MAX_COLUMNS, MAX_ROWS } from "../../model/model"
 import { singleReference } from "../../refs/formulaRefs"
 import {
+	MAX_RANGE_CELLS,
 	refError,
 	SheetFunctionPlugin,
+	unmodeledError,
+	unwrap,
 	valueError,
 	type PluginAst,
 	type PluginCall,
 	type PluginRange,
 	type PluginState,
-	type PluginValue
+	type PluginValue,
+	type RawEvaluation
 } from "./plugin"
 
 // INDIRECT(ref_text, [a1]) (support.microsoft.com "INDIRECT function"): the reference a text names, in A1 or R1C1
@@ -53,6 +57,9 @@ export interface IndirectHost {
 	// The workbook came from an .ods file: text LibreOffice reads as a reference in its Calc A1 syntax (Sheet.A1) is
 	// read so too, where it is no A1 reference nor a defined name.
 	calcA1(): boolean
+	// Whether the workbook defines a name the engine was not given (one past what it reads): what reads it through
+	// INDIRECT keeps its result rather than taking the name for missing.
+	withheld(name: string): boolean
 }
 
 let host: IndirectHost | null = null
@@ -283,11 +290,6 @@ function calcA1Block(text: string): Block | null {
 	return part === undefined || part === "#REF!" ? null : a1Block(part)
 }
 
-// The engine's evaluation before a one-cell result is read out of its range (private to the engine).
-interface RawEvaluation {
-	evaluateAstWithoutPostprocessing(ast: PluginAst, state: PluginState): PluginValue
-}
-
 // OFFSET's rows, cols, height and width, read after its reference; never lifted over an array.
 const SHIFTS: FunctionArgument[] = [
 	{ argumentType: FunctionArgumentType.NUMBER },
@@ -302,6 +304,16 @@ const NAME = /^(?:(?:'(?:[^']|'')+'|[^!'"]+)!)?[A-Za-z_\\À-￿][\w.\\À-￿]*$/
 
 // The most times a defined name may lead to another name.
 const MAX_NAMES = 16
+
+// Whether a block of cells covers more than one range of a formula may (its every address, inclusive).
+function tooMany(block: {
+	readonly startRow: number
+	readonly startCol: number
+	readonly endRow: number
+	readonly endCol: number
+}): boolean {
+	return (block.endRow - block.startRow + 1) * (block.endCol - block.startCol + 1) > MAX_RANGE_CELLS
+}
 
 export class IndirectFunctions extends SheetFunctionPlugin {
 	static override implementedFunctions: ImplementedFunctions = {
@@ -322,12 +334,7 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 	// evaluated; an error it gives as it is, null for no reference. A whole column (row) ends at the grid's last row
 	// (column).
 	private areaOf(ast: PluginAst, state: PluginState): IndirectRead | CellError | null {
-		let node = ast as PluginAst & {
-			expression?: PluginAst
-			reference?: { toSimpleCellAddress(base: SimpleCellAddress): SimpleCellAddress }
-		}
-
-		while (node.type === ("PARENTHESES" as PluginAst["type"]) && node.expression !== undefined) node = node.expression
+		const node = unwrap(ast) as PluginAst & { reference?: { toSimpleCellAddress(base: SimpleCellAddress): SimpleCellAddress } }
 
 		if (node.type === ("CELL_REFERENCE" as PluginAst["type"]) && node.reference !== undefined) {
 			const at = node.reference.toSimpleCellAddress(state.formulaAddress)
@@ -372,10 +379,15 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 		)
 			return new CellError(ErrorType.CYCLE)
 
-		host?.read(formula, area)
-
 		const columns = area.startRow === 0 && area.endRow === MAX_ROWS - 1
 		const rows = area.startCol === 0 && area.endCol === MAX_COLUMNS - 1
+
+		// A block of cells is read address by address, the sheet's empty ones too: one past what a literal range may
+		// cover keeps the file's result (formulaEngine.ts unreadable). Whole columns and rows end with the sheet.
+		if (columns === rows && tooMany(area)) return unmodeledError()
+
+		host?.read(formula, area)
+
 		const range =
 			columns && !rows
 				? made.cols(area.sheet, area.startCol, area.endCol)
@@ -476,9 +488,14 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 
 				if (scope === undefined) return refError()
 
-				const named = reading.name(bang < 0 ? pending : pending.slice(bang + 1), scope)
+				const bare = bang < 0 ? pending : pending.slice(bang + 1)
+				const named = reading.name(bare, scope)
 
-				if (named === undefined) break
+				if (named === undefined) {
+					if (reading.withheld(bare)) return unmodeledError()
+
+					break
+				}
 
 				// A name's own text is A1 style, whatever INDIRECT was asked for.
 				a1 = true
@@ -513,6 +530,8 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 				formula.col <= read.endCol
 			)
 				return new CellError(ErrorType.CYCLE)
+
+			if (block.kind === "cell" && tooMany(block)) return unmodeledError()
 
 			reading.read(formula, read)
 

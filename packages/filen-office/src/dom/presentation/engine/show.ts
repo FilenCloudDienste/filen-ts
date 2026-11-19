@@ -35,12 +35,12 @@ import {
 	type DrawingData,
 	type Rgba
 } from "../../../core/drawingml/index"
+import { findShape } from "../../../core/presentation/edit/changes"
 import { PresentationError, type ColorModel, type ShapeNode, type SlideNode, type SlideRef } from "../../../core/presentation/model"
 import type { RenderEffects, SlideLayer, SlideRender, TextPage } from "../../../core/presentation/output"
 import { drawingData } from "../../../core/presentation/render/slide"
-import { G, PartReader } from "../../../core/pptx/read/xml"
 import { fileFallback } from "../../../core/pptx/read/transition"
-import { defaultDurationMs, playableTransition, transitionOption } from "../../../core/anim/presets/transitions/catalog"
+import { playableTransition, transitionOption } from "../../../core/anim/presets/transitions/catalog"
 import { deckWebglTransitions, morphShapes, pptxGeometry } from "../../../core/anim/morphShapes"
 import { pptxParts } from "./open/pptx"
 import { effectiveClrMap, resolveColor, themeOf, toRgba } from "../../../core/presentation/theme"
@@ -57,7 +57,6 @@ import {
 	LineFloat,
 	LineInt
 } from "../../../core/text/displayList"
-import type { XmlDocument } from "../../../core/xml/index"
 import type { CallContext, EngineSession, ShowCapability } from "../engine"
 import type { BitmapLike, LayerPlan, ShowLayer } from "../protocol"
 import { packAtlas } from "../../../core/anim/morph"
@@ -219,18 +218,6 @@ export interface ShapeRuns {
 	readonly runs: readonly PlannedRun[]
 }
 
-function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	const stack = [...shapes]
-
-	for (let shape = stack.pop(); shape !== undefined; shape = stack.pop()) {
-		if (shape.id === id) return shape
-
-		for (const child of shape.children ?? []) stack.push(child)
-	}
-
-	return undefined
-}
-
 // The runs of a slide's by-letter and by-word builds: per shape, every paragraph a build targets split into letters
 // (any by-letter build there) or words, grouped evenly once the slide passes MAX_RUN_LAYERS.
 export function planRuns(timing: TimingTree | undefined, shapes: readonly ShapeNode[]): ShapeRuns[] {
@@ -239,7 +226,7 @@ export function planRuns(timing: TimingTree | undefined, shapes: readonly ShapeN
 	forEachIterated(timing, (target, unit) => {
 		if (target.kind !== "shape" && target.kind !== "text") return
 
-		const body = findShape(shapes, target.shape)?.text
+		const body = findShape(shapes, target.shape)?.shape.text
 
 		if (body === undefined || body.paragraphs.length === 0) return
 
@@ -267,7 +254,7 @@ export function planRuns(timing: TimingTree | undefined, shapes: readonly ShapeN
 	let total = 0
 
 	for (const [shape, entry] of [...wanted].sort((a, b) => a[0] - b[0])) {
-		const body = findShape(shapes, shape)?.text
+		const body = findShape(shapes, shape)?.shape.text
 
 		if (body === undefined) continue
 
@@ -483,7 +470,7 @@ export function runBoxes(layers: LayerIndex, render: SlideRender, shapes: readon
 		if (range?.unit !== "char" || range.start < 0) return
 
 		if (!starts.has(shape)) {
-			const body = findShape(shapes, shape)?.text
+			const body = findShape(shapes, shape)?.shape.text
 
 			starts.set(shape, body === undefined ? undefined : paragraphStarts(body))
 		}
@@ -635,7 +622,7 @@ export function layerParents(layers: LayerIndex, shapes: readonly ShapeNode[]): 
 	return out
 }
 
-// --- Transitions of pptx slides (the model reads them with the slide; this reads a part's element directly) ---
+// --- Transitions of pptx slides (the model reads them with the slide; these say which kinds the stage draws) ---
 
 // The 21 ECMA-376 Part 1 §19.7 transitions the stage draws; any other (p14, p15) plays the file's mc:Fallback.
 const ECMA_TRANSITIONS: ReadonlySet<string> = new Set([
@@ -665,77 +652,6 @@ const ECMA_TRANSITIONS: ReadonlySet<string> = new Set([
 // fade through white, whose Fallback is a plain fade).
 export function stageDraws(kind: string, namespace: Transition["namespace"]): boolean {
 	return namespace === "p" ? ECMA_TRANSITIONS.has(kind) : namespace === "p14" && kind === "flash"
-}
-
-const OPTIONS = ["dir", "orient", "spokes", "thruBlk", "pattern", "invX", "invY"] as const
-
-function readTransitionElement(r: PartReader, transition: number): Transition | undefined {
-	let kind: string | undefined
-	let namespace: Transition["namespace"] = "p"
-	const options: Record<string, string | number | boolean> = {}
-
-	for (let child = r.first(transition); child >= 0; child = r.next(child)) {
-		const group = r.group(child)
-		const local = r.local(child)
-
-		if ((group !== G.P && group !== G.P14 && group !== G.P15) || local === "sndAc" || local === "extLst") continue
-
-		kind = group === G.P15 && local === "prstTrans" ? (r.attr(child, "prst") ?? "prstTrans") : local
-		namespace = group === G.P14 ? "p14" : group === G.P15 ? "p15" : "p"
-
-		for (const name of OPTIONS) {
-			const value = r.attr(child, name)
-
-			if (value === undefined) continue
-
-			options[name] = value === "true" || value === "1" ? true : value === "false" || value === "0" ? false : value
-		}
-
-		break
-	}
-
-	const speed = r.attr(transition, "spd")
-	const duration = Number(r.attrNs(transition, G.P14, "dur") ?? Number.NaN)
-	const after = Number(r.attr(transition, "advTm") ?? Number.NaN)
-	const click = r.attr(transition, "advClick")
-
-	const read = { kind: kind ?? "cut", namespace, options }
-
-	return {
-		...read,
-		durationMs: Number.isFinite(duration) && duration >= 0 ? duration : defaultDurationMs(read, speed),
-		...(speed === "slow" || speed === "med" || speed === "fast" ? { speed } : {}),
-		advance: { onClick: click !== "false" && click !== "0", ...(Number.isFinite(after) && after >= 0 ? { afterMs: after } : {}) }
-	}
-}
-
-// A pptx slide's p:transition (ECMA-376 Part 1 §19.3.1.50), directly under p:sld or in an mc:AlternateContent: the
-// Choice's when the stage draws its kind, else the Fallback's (as an application without the Choice plays it);
-// undefined without one.
-export function pptxTransition(document: XmlDocument): Transition | undefined {
-	const r = new PartReader(document)
-	const root = document.documentElement()
-
-	for (let child = r.first(root); child >= 0; child = r.next(child)) {
-		if (r.is(child, G.P, "transition")) return readTransitionElement(r, child)
-		if (!r.is(child, G.MC, "AlternateContent")) continue
-
-		let choice: Transition | undefined
-		let fallback: Transition | undefined
-
-		for (let branch = r.first(child); branch >= 0; branch = r.next(branch)) {
-			const transition = r.child(branch, G.P, "transition")
-
-			if (transition < 0) continue
-			if (r.is(branch, G.MC, "Choice")) choice ??= readTransitionElement(r, transition)
-			else if (r.is(branch, G.MC, "Fallback")) fallback = readTransitionElement(r, transition)
-		}
-
-		if (choice !== undefined && (ECMA_TRANSITIONS.has(choice.kind) || fallback === undefined)) return choice
-		if (fallback !== undefined) return fallback
-	}
-
-	return undefined
 }
 
 // --- Renders, kept for the timegraph and layers calls of a slide the page is about to show ---
@@ -911,8 +827,8 @@ export function paragraphTops(layer: SlideLayer): Map<number, number> {
 	if (page === undefined) return tops
 
 	for (let line = 0; line < page.lineCount; line++) {
-		const source = page.lineInts[line * 7 + 5] ?? 0
-		const top = page.lineFloats[line * 5] ?? 0
+		const source = page.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? 0
+		const top = page.lineFloats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
 		const held = tops.get(source)
 
 		if (held === undefined || top < held) tops.set(source, top)
@@ -965,10 +881,10 @@ function textBounds(layer: SlideLayer, bands: readonly (readonly [number, number
 	let lineHeight = 0
 
 	for (let line = 0; line < page.lineCount; line++) {
-		const top = page.lineFloats[line * 5] ?? 0
-		const height = page.lineFloats[line * 5 + 1] ?? 0
-		const x = page.lineFloats[line * 5 + 3] ?? 0
-		const width = page.lineFloats[line * 5 + 4] ?? 0
+		const top = page.lineFloats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
+		const height = page.lineFloats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
+		const x = page.lineFloats[line * LINE_FLOATS + LineFloat.X] ?? 0
+		const width = page.lineFloats[line * LINE_FLOATS + LineFloat.WIDTH] ?? 0
 
 		x0 = Math.min(x0, x)
 		x1 = Math.max(x1, x + width)
@@ -1154,7 +1070,7 @@ export function planShowLayers(
 		const paragraphs = ranges.filter(range => range.target === "para")
 		const runs = ranges.filter(range => range.target === "char" && range.range[0] >= 0)
 		const drawingRun = ranges.find(range => range.target === "char" && range.range[0] < 0)
-		const body = runs.length === 0 ? undefined : findShape(node.shapes, owner)?.text
+		const body = runs.length === 0 ? undefined : findShape(node.shapes, owner)?.shape.text
 		const starts = body === undefined ? undefined : paragraphStarts(body)
 		// Paragraphs laid out as runs: their text paints only in the runs.
 		const split = new Set<number>()

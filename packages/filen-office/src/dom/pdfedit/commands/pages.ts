@@ -10,15 +10,15 @@ import {
 	rotatePages,
 	type PageOpResult
 } from "../pages/index"
+import { insertedImageBytes } from "../pages/organise"
 import { pageSource, sourceBytes } from "../pages/sources"
-import { isIndex, isRecord, type PdfCommandContext, type PdfCommandTable } from "./types"
+import { isIndex, isPageList, isRecord, type PdfCommandContext, type PdfCommandTable } from "./types"
 
 // Page organisation: move, rotate, delete, duplicate and insert (a blank page, a picture, pages of a second document
 // the engine holds open). Each is one journal operation over the pages block (pages/organise.ts). A command reports
 // every page whose place or look changed, so the page column and the thumbnails draw exactly those again.
 
-// The most pages one command names, and the largest picture it takes (bytes, before decoding).
-const MAX_PAGES = 100_000
+// The largest picture a command takes (bytes, before decoding).
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024
 const MAX_BLANK = 100
 
@@ -34,10 +34,6 @@ export interface PdfPageCommands {
 	"pages.insertImage": { readonly at: number; readonly bytes: Uint8Array }
 	// Pages (0-based) of a second document opened with attachSource.
 	"pages.insertFrom": { readonly at: number; readonly source: number; readonly pages: readonly number[] }
-}
-
-function isPageList(value: unknown): value is readonly number[] {
-	return Array.isArray(value) && value.length > 0 && value.length <= MAX_PAGES && value.every(isIndex)
 }
 
 function pageList(args: unknown, key: string): readonly number[] | null {
@@ -139,7 +135,8 @@ export const PAGE_COMMANDS: PdfCommandTable<PdfPageCommands> = {
 
 			return isIndex(at) && bytes instanceof Uint8Array && bytes.length > 0 && bytes.length <= MAX_IMAGE_BYTES ? { at, bytes } : null
 		},
-		bytes: ({ bytes }) => bytes.length,
+		// Decoded pixels included, so a flat picture of huge dimensions is refused as over budget before it is decoded.
+		bytes: ({ bytes }, mupdf) => insertedImageBytes(mupdf, bytes),
 		run: (context, { at, bytes }) => run(() => insertImagePage(context.mupdf, context.document, bytes, at))
 	},
 	"pages.insertFrom": {

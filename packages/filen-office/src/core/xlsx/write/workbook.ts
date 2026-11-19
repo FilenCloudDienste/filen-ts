@@ -5,7 +5,7 @@ import { assembleSections } from "./assemble"
 import { XlsxWriteError } from "./failure"
 import { attr, qualify, rootTag, toBytes } from "./markup"
 import { WORKBOOK } from "./order.generated"
-import { booleanField, childElement, join, numberField, syncAttributes, textField, type AttributeField } from "./sections"
+import { booleanField, childElement, hashFields, join, numberField, syncAttributes, textField, type AttributeField } from "./sections"
 import { STRICT, TRANSITIONAL } from "./namespaces"
 
 // workbook.xml: the sections edits marked, each written from the model as a splice of its source element.
@@ -31,19 +31,6 @@ const SHARING_HASH = {
 	salt: "saltValue",
 	spin: "spinCount",
 	legacy: "reservationPassword"
-}
-
-function hashFields(
-	hash: { algorithmName?: string; hashValue?: string; saltValue?: string; spinCount?: number; legacy?: string },
-	names: typeof SHARING_HASH
-): AttributeField[] {
-	return [
-		textField(names.legacy, hash.legacy),
-		textField(names.algorithm, hash.algorithmName),
-		textField(names.hash, hash.hashValue),
-		textField(names.salt, hash.saltValue),
-		numberField(names.spin, hash.spinCount ?? Number.NaN)
-	]
 }
 
 export function relationshipIdName(context: WorkbookContext): string {
@@ -252,7 +239,7 @@ function writeBookViews(workbook: XlsxWorkbookModel, section: Uint8Array | null,
 	}
 
 	const firstSheet = Number(document.attribute(view, "firstSheet") ?? 0) || 0
-	const fields = [numberField("activeTab", workbook.activeTab, 0), numberField("firstSheet", Math.min(firstSheet, last), 0)]
+	const fields = [numberField("activeTab", workbook.activeTab, 0), numberField("firstSheet", Math.max(0, Math.min(firstSheet, last)), 0)]
 	const raw = document.raw(view)
 	const written = syncAttributes(raw, document.name(view), fields)
 
@@ -312,6 +299,22 @@ export interface WrittenWorkbook {
 	readonly names: readonly string[]
 	readonly sourceNames: readonly string[]
 	readonly written: ReadonlyMap<string, Uint8Array>
+	// The source's sheets section: what the gate holds sheet names and ids against.
+	readonly sourceSheets: Uint8Array | null
+}
+
+// Whether the source's first workbook view shows a tab that is no sheet (the reader clamps the model's): the
+// view is then written from the model.
+function viewOutOfRange(section: Uint8Array, sheets: number): boolean {
+	const document = parseXml(section)
+	const view = childElement(document, document.documentElement(), "workbookView")
+
+	if (view < 0) return false
+
+	const active = Number(document.attribute(view, "activeTab") ?? 0)
+	const first = Number(document.attribute(view, "firstSheet") ?? 0)
+
+	return !(active >= 0 && active < sheets && first >= 0 && first < sheets)
 }
 
 export function writeWorkbook(workbook: XlsxWorkbookModel, changes: XlsxChangeLog, source: Uint8Array): WrittenWorkbook {
@@ -328,11 +331,19 @@ export function writeWorkbook(workbook: XlsxWorkbookModel, changes: XlsxChangeLo
 	if (marked.has("sheets") && !marked.has("definedNames") && workbook.definedNames.some(name => name.sheet !== null))
 		marked.set("definedNames", null)
 
+	const current = (name: string): Uint8Array | null => {
+		const section = byName.get(name)
+
+		return section === undefined ? null : (section.bytes ?? source.subarray(section.start, section.end))
+	}
+	const views = marked.has("bookViews") ? null : current("bookViews")
+
+	if (views !== null && viewOutOfRange(views, workbook.sheets.length)) marked.set("bookViews", null)
+
 	const replacements = new Map<string, Uint8Array>()
 
 	for (const [name, writer] of marked) {
-		const section = byName.get(name)
-		const current = section === undefined ? null : (section.bytes ?? source.subarray(section.start, section.end))
+		const section = current(name)
 
 		if (writer !== null) {
 			replacements.set(name, toBytes(writer(workbook)))
@@ -344,9 +355,9 @@ export function writeWorkbook(workbook: XlsxWorkbookModel, changes: XlsxChangeLo
 
 		if (own === undefined) throw new XlsxWriteError("write", `No writer for the ${name} section of the workbook`)
 
-		const written = own(workbook, current, context, changes)
+		const written = own(workbook, section, context, changes)
 
-		if (written !== current) replacements.set(name, written)
+		if (written !== section) replacements.set(name, written)
 	}
 
 	const assembled = assembleSections({ bytes: source, sections, order: WORKBOOK, replacements })
@@ -360,6 +371,7 @@ export function writeWorkbook(workbook: XlsxWorkbookModel, changes: XlsxChangeLo
 		context,
 		names: assembled.names,
 		sourceNames: sections.map(section => section.name),
-		written
+		written,
+		sourceSheets: current("sheets")
 	}
 }

@@ -3,6 +3,7 @@ import { parseLength, parsePercent, type OdfProperties } from "../odf/index"
 import { customGeometry, enhancedPath, Evaluator, GeometryError, pointsPath, svgPath, type SubPath } from "./geometry"
 import type { Translator } from "./translator"
 import { presetOfOdfType } from "../odf/presetShapes"
+import { color } from "./props"
 import { decompose, transformMatrix } from "../odf/transform"
 import { emu, esc } from "./wml"
 
@@ -38,12 +39,61 @@ interface Placement {
 	readonly reach?: number
 }
 
-function colorOf(value: string | undefined): string | undefined {
-	return value !== undefined && /^#[0-9a-fA-F]{6}$/.test(value) ? value.slice(1).toUpperCase() : undefined
+// The pictures a translation carries: each one's media part extension and content type.
+export const IMAGE_KINDS = {
+	png: { extension: "png", contentType: "image/png" },
+	jpeg: { extension: "jpeg", contentType: "image/jpeg" },
+	gif: { extension: "gif", contentType: "image/gif" },
+	bmp: { extension: "bmp", contentType: "image/bmp" },
+	webp: { extension: "webp", contentType: "image/webp" },
+	svg: { extension: "svg", contentType: "image/svg+xml" },
+	wmf: { extension: "wmf", contentType: "image/x-wmf" },
+	emf: { extension: "emf", contentType: "image/x-emf" },
+	tiff: { extension: "tiff", contentType: "image/tiff" }
+} as const satisfies Readonly<Record<string, { readonly extension: string; readonly contentType: string }>>
+
+export type ImageKind = keyof typeof IMAGE_KINDS | "svm" | "unknown"
+
+// How many of a stream's first bytes imageKind reads: room for an SVG's prolog (XML declaration, comments, DOCTYPE)
+// before its root.
+export const SNIFF_LENGTH = 4096
+
+// Where an SVG's prolog ends in `text`: a byte order mark, then white space, an XML declaration or processing
+// instruction, comments and a DOCTYPE (with one internal subset), in any order. Linear: each step is one indexOf from
+// the current position. An unterminated construct ends the prolog where it starts.
+function prologEnd(text: string): number {
+	let at = text.startsWith("\xef\xbb\xbf") ? 3 : 0
+
+	for (;;) {
+		while (at < text.length && /\s/u.test(text.charAt(at))) at++
+
+		let end = -1
+
+		if (text.startsWith("<?", at)) {
+			const close = text.indexOf("?>", at + 2)
+
+			end = close === -1 ? -1 : close + 2
+		} else if (text.startsWith("<!--", at)) {
+			const close = text.indexOf("-->", at + 4)
+
+			end = close === -1 ? -1 : close + 3
+		} else if (text.slice(at, at + 9).toUpperCase() === "<!DOCTYPE") {
+			const gt = text.indexOf(">", at + 9)
+			const bracket = text.indexOf("[", at + 9)
+			const subsetEnd = bracket !== -1 && (gt === -1 || bracket < gt) ? text.indexOf("]", bracket + 1) : -2
+			const close = subsetEnd === -2 ? gt : subsetEnd === -1 ? -1 : text.indexOf(">", subsetEnd + 1)
+
+			end = close === -1 ? -1 : close + 1
+		}
+
+		if (end === -1) return at
+
+		at = end
+	}
 }
 
-// The first bytes of a stream say what it is: what the viewer draws, or why not.
-export function imageKind(head: Uint8Array): "png" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "wmf" | "emf" | "tiff" | "svm" | "unknown" {
+// The first bytes of a stream (SNIFF_LENGTH) say what it is: what the viewer draws, or why not.
+export function imageKind(head: Uint8Array): ImageKind {
 	const b = (k: number): number => head[k] ?? -1
 
 	if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) return "png"
@@ -58,29 +108,19 @@ export function imageKind(head: Uint8Array): "png" | "jpeg" | "gif" | "bmp" | "w
 		return "emf"
 	if (b(0) === 0x56 && b(1) === 0x43 && b(2) === 0x4c && b(3) === 0x4d && b(4) === 0x54 && b(5) === 0x46) return "svm"
 
-	const text = String.fromCharCode(...head.subarray(0, Math.min(head.length, 256)))
+	// Text: the root after the prolog, within as many bytes as were tested before any prolog was skipped.
+	const text = String.fromCharCode(...head.subarray(0, Math.min(head.length, SNIFF_LENGTH)))
+	const prolog = prologEnd(text)
 
-	if (/<svg[\s>]/i.test(text)) return "svg"
+	if (/<svg[\s>]/iu.test(text.slice(prolog, prolog + 256))) return "svg"
 
 	return "unknown"
-}
-
-const EXTENSIONS: Readonly<Record<string, string>> = {
-	png: "png",
-	jpeg: "jpeg",
-	gif: "gif",
-	bmp: "bmp",
-	webp: "webp",
-	svg: "svg",
-	wmf: "wmf",
-	emf: "emf",
-	tiff: "tiff"
 }
 
 export class Frames {
 	private readonly translator: Translator
 	// Package streams' kinds, sniffed before translating (see translate.ts).
-	readonly kinds = new Map<string, ReturnType<typeof imageKind>>()
+	readonly kinds = new Map<string, ImageKind>()
 	readonly media: MediaReference[] = []
 	private readonly mediaParts = new Map<string, string>()
 	// While an as-char group is translated: its members' placements and graphics, for one group drawing.
@@ -463,7 +503,7 @@ export class Frames {
 		if (part === undefined) {
 			const kind = this.kinds.get(source) ?? "png"
 
-			part = `media/image${this.mediaParts.size + 1}.${EXTENSIONS[kind] ?? "png"}`
+			part = `media/image${this.mediaParts.size + 1}.${kind === "svm" || kind === "unknown" ? "png" : IMAGE_KINDS[kind].extension}`
 			this.mediaParts.set(source, part)
 			this.media.push({ source, part: `word/${part}` })
 		}
@@ -568,8 +608,8 @@ export class Frames {
 	// A frame's fill: its background colour (fo:background-color, or draw:fill with draw:fill-color).
 	private fill(properties: ReadonlyMap<string, string>, frame: boolean): string {
 		const fillKind = properties.get("draw:fill")
-		const background = colorOf(properties.get("fo:background-color"))
-		const fillColor = colorOf(properties.get("draw:fill-color"))
+		const background = color(properties.get("fo:background-color"))
+		const fillColor = color(properties.get("draw:fill-color"))
 		const opacity = properties.get("draw:opacity")
 		const alpha = opacity === undefined ? "" : `<a:alpha val="${Math.round(Number(opacity.replace("%", "")) * 1000)}"/>`
 
@@ -593,10 +633,10 @@ export class Frames {
 		if (stroke === "none" || stroke === undefined) return stroke === "none" ? "<a:ln><a:noFill/></a:ln>" : ""
 
 		const width = parseLength(properties.get("svg:stroke-width")) ?? 0
-		const color = colorOf(properties.get("svg:stroke-color")) ?? "3465A4"
+		const hex = color(properties.get("svg:stroke-color")) ?? "3465A4"
 		const dash = stroke === "dash" ? '<a:prstDash val="dash"/>' : ""
 
-		return `<a:ln w="${Math.max(3175, emu(width))}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dash}</a:ln>`
+		return `<a:ln w="${Math.max(3175, emu(width))}"><a:solidFill><a:srgbClr val="${hex}"/></a:solidFill>${dash}</a:ln>`
 	}
 
 	// A text frame's border (fo:border); drawn as the shape outline when all sides agree.
@@ -607,9 +647,9 @@ export class Frames {
 
 		const parts = value.trim().split(/\s+/)
 		const width = parts.map(part => parseLength(part)).find(item => item !== undefined) ?? 0.75
-		const color = colorOf(parts.find(part => part.startsWith("#"))) ?? "000000"
+		const hex = color(parts.find(part => part.startsWith("#"))) ?? "000000"
 
-		return `<a:ln w="${emu(width)}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:ln>`
+		return `<a:ln w="${emu(width)}"><a:solidFill><a:srgbClr val="${hex}"/></a:solidFill></a:ln>`
 	}
 
 	private shape(node: number, name: string, context: "paragraph" | "page"): string {

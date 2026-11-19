@@ -4,7 +4,6 @@ import {
 	DocxEditorSession,
 	NO_SOURCE,
 	conservativeProof,
-	docxSchema,
 	formattingMarks,
 	markerKey,
 	proveBlocks,
@@ -293,15 +292,18 @@ describe("docx editing documents", () => {
 			comments: '<w:comment w:id="3" w:author="Ann"><w:p><w:r><w:annotationRef/></w:r><w:r><w:t>remark</w:t></w:r></w:p></w:comment>'
 		})
 
-		for (const story of model.stories.filter(story => story.kind !== "body")) {
+		const stories = model.stories.filter(story => story.kind !== "body")
+		const expected: Partial<Record<string, string>> = { header: "header text", footnote: "note", comment: "remark" }
+
+		expect(stories.map(story => story.kind).sort()).toEqual(["comment", "footnote", "header"])
+
+		for (const story of stories) {
 			const session = new DocxEditorSession(context, { story })
 			const doc = session.state.doc
 
 			doc.check()
 			expect(doc.attrs["story"]).toBe(story.index)
-			expect(doc.textContent).toMatch(/header text|note|remark/)
+			expect(doc.textContent).toBe(expected[story.kind])
 		}
-
-		expect(docxSchema.nodes.run_object).toBeDefined()
 	})
 })

@@ -519,6 +519,26 @@ function keepingSink(sink: ByteSink | undefined): ByteSink & { chunks(): readonl
 	}
 }
 
+// The kept zip as the session's source once it is rebased onto it. A stored part of the writer's batch size or more is
+// a kept chunk of its own, so a read of that part whole is a view covering a kept chunk's whole buffer, which an answer
+// would transfer (its view owns its buffer) and so detach under the session: such a read is copied. Any other read is
+// handed on as it is (one within a chunk shares a larger buffer, one across chunks is already an array of its own).
+function keptSource(chunks: readonly Uint8Array[]): ByteSource {
+	const source = chunksSource(chunks)
+	const buffers = new Set<ArrayBufferLike>(chunks.map(chunk => chunk.buffer))
+
+	return {
+		size: source.size,
+		async read(offset, length) {
+			const bytes = await source.read(offset, length)
+
+			return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && buffers.has(bytes.buffer)
+				? bytes.slice()
+				: bytes
+		}
+	}
+}
+
 // The pieces as one array: only for a consumer that needs one (sealing).
 function joined(chunks: readonly Uint8Array[]): Uint8Array {
 	if (chunks.length === 1 && chunks[0] !== undefined) return chunks[0]
@@ -1025,7 +1045,7 @@ async function commitPending(
 
 	if (pending.saved.zip !== undefined) {
 		closeUnused(session, options)
-		raw = chunksSource(pending.saved.zip)
+		raw = keptSource(pending.saved.zip)
 	} else {
 		if (session.rangeSource === undefined) {
 			options.port.close()
@@ -1046,7 +1066,7 @@ async function commitLate(context: CallContext, pending: PendingSave, dependenci
 	if (zip === undefined) return
 
 	savesOf(context.session).committedLate = pending.saved.revision
-	await rebaseOnto(context, pending, chunksSource(zip), dependencies)
+	await rebaseOnto(context, pending, keptSource(zip), dependencies)
 	pending.settle()
 }
 

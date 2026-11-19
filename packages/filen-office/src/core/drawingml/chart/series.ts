@@ -47,19 +47,11 @@ function lineKind(plot: Plot): boolean {
 	return plot.kind === "line" || plot.kind === "scatter" || (plot.kind === "radar" && !plot.filled)
 }
 
-function readMarker(
-	builder: ChartBuilder,
-	plot: Plot,
-	marker: number,
-	color: Rgba,
-	autoIndex: number,
-	fallback: MarkerStyle | undefined
-): MarkerStyle | undefined {
+function readMarker(builder: ChartBuilder, plot: Plot, marker: number, color: Rgba, autoIndex: number): MarkerStyle | undefined {
 	const reader = builder.reader
 	const symbolText = reader.attr(reader.child(marker, D.C, "symbol"), "val")
 
 	if (symbolText === "none" || symbolText === "picture") return undefined
-	if (marker < 0 && fallback !== undefined) return fallback
 	if (!plot.markers && (marker < 0 || symbolText === undefined)) return undefined
 
 	const symbol =
@@ -106,9 +98,7 @@ export function seriesStyles(builder: ChartBuilder, plot: Plot, total: number): 
 			stroke = builder.plainStroke(representative(builder, builder.fill(spPr, color), color), SERIES_LINE, true)
 		}
 
-		const marker = lines
-			? readMarker(builder, plot, reader.child(series.node, D.C, "marker"), color, series.index, undefined)
-			: undefined
+		const marker = lines ? readMarker(builder, plot, reader.child(series.node, D.C, "marker"), color, series.index) : undefined
 		const points = new Map<number, PointStyle>()
 		const pointCount = series.values.count
 

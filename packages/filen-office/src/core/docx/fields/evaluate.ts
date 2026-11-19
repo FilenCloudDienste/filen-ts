@@ -412,8 +412,12 @@ export function rangeText(doc: Node, from: number, to: number, source?: RangeSou
 		else if (node.type === nodes.field) out += results?.get(pos) ?? (node.attrs["result"] as string)
 		else if (node.type === nodes.tab) out += "\t"
 		else if (node.type === nodes.break) out += node.attrs["type"] === "textWrapping" ? "\n" : ""
-		else if (node.type === nodes.symbol) out += String.fromCodePoint(node.attrs["char"] as number)
-		else if (node.type === nodes.hyphen && node.attrs["soft"] !== true) out += "‑"
+		else if (node.type === nodes.symbol) {
+			// From the file: missing (-1), 0 or past U+10FFFF stands for no character.
+			const char = node.attrs["char"] as number
+
+			if (char > 0 && char <= 0x10ffff) out += String.fromCodePoint(char)
+		} else if (node.type === nodes.hyphen && node.attrs["soft"] !== true) out += "‑"
 
 		return false
 	})

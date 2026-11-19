@@ -96,62 +96,79 @@ export interface GradientStops {
 	readonly colors: Uint32Array
 }
 
+// Narrows a document string to one of a closed vocabulary (O(1) membership).
+function vocabulary<T extends string>(values: readonly T[]): (value: string | undefined) => value is T {
+	const set: ReadonlySet<string> = new Set(values)
+
+	return (value: string | undefined): value is T => value !== undefined && set.has(value)
+}
+
 // ST_PresetPatternVal (§20.1.10.51).
-export type PatternPreset =
-	| "pct5"
-	| "pct10"
-	| "pct20"
-	| "pct25"
-	| "pct30"
-	| "pct40"
-	| "pct50"
-	| "pct60"
-	| "pct70"
-	| "pct75"
-	| "pct80"
-	| "pct90"
-	| "horz"
-	| "vert"
-	| "ltHorz"
-	| "ltVert"
-	| "dkHorz"
-	| "dkVert"
-	| "narHorz"
-	| "narVert"
-	| "dashHorz"
-	| "dashVert"
-	| "cross"
-	| "dnDiag"
-	| "upDiag"
-	| "ltDnDiag"
-	| "ltUpDiag"
-	| "dkDnDiag"
-	| "dkUpDiag"
-	| "wdDnDiag"
-	| "wdUpDiag"
-	| "dashDnDiag"
-	| "dashUpDiag"
-	| "diagCross"
-	| "smCheck"
-	| "lgCheck"
-	| "smGrid"
-	| "lgGrid"
-	| "dotGrid"
-	| "smConfetti"
-	| "lgConfetti"
-	| "horzBrick"
-	| "diagBrick"
-	| "solidDmnd"
-	| "openDmnd"
-	| "dotDmnd"
-	| "plaid"
-	| "sphere"
-	| "weave"
-	| "divot"
-	| "shingle"
-	| "wave"
-	| "trellis"
-	| "zigZag"
+export const PATTERN_PRESETS = [
+	"pct5",
+	"pct10",
+	"pct20",
+	"pct25",
+	"pct30",
+	"pct40",
+	"pct50",
+	"pct60",
+	"pct70",
+	"pct75",
+	"pct80",
+	"pct90",
+	"horz",
+	"vert",
+	"ltHorz",
+	"ltVert",
+	"dkHorz",
+	"dkVert",
+	"narHorz",
+	"narVert",
+	"dashHorz",
+	"dashVert",
+	"cross",
+	"dnDiag",
+	"upDiag",
+	"ltDnDiag",
+	"ltUpDiag",
+	"dkDnDiag",
+	"dkUpDiag",
+	"wdDnDiag",
+	"wdUpDiag",
+	"dashDnDiag",
+	"dashUpDiag",
+	"diagCross",
+	"smCheck",
+	"lgCheck",
+	"smGrid",
+	"lgGrid",
+	"dotGrid",
+	"smConfetti",
+	"lgConfetti",
+	"horzBrick",
+	"diagBrick",
+	"solidDmnd",
+	"openDmnd",
+	"dotDmnd",
+	"plaid",
+	"sphere",
+	"weave",
+	"divot",
+	"shingle",
+	"wave",
+	"trellis",
+	"zigZag"
+] as const
+
+export type PatternPreset = (typeof PATTERN_PRESETS)[number]
+
+const isPatternPreset = vocabulary(PATTERN_PRESETS)
+
+// A pattern preset read from a document; pct50 for an unknown name.
+export function patternPreset(value: string): PatternPreset {
+	return isPatternPreset(value) ? value : "pct50"
+}
 
 export interface Inset {
 	readonly left: number
@@ -251,13 +268,20 @@ export interface ShadeRamp {
 	readonly focus: number
 }
 
+// ST_RectAlignment of a tiled picture fill.
+export const TILE_ALIGNS = ["tl", "t", "tr", "l", "ctr", "r", "bl", "b", "br"] as const
+
+export type TileAlign = (typeof TILE_ALIGNS)[number]
+
+export const isTileAlign = vocabulary(TILE_ALIGNS)
+
 export interface ImageTile {
 	readonly tx: number
 	readonly ty: number
 	readonly sx: number
 	readonly sy: number
 	readonly flip: "none" | "x" | "y" | "xy"
-	readonly align: "tl" | "t" | "tr" | "l" | "ctr" | "r" | "bl" | "b" | "br"
+	readonly align: TileAlign
 	// An explicit tile: `width` x `height` units placed by `matrix` (tile space to the item's local space),
 	// mirrored per `flip`; tx, ty, sx, sy and align are then unused. `clamp` draws it once, without repeats.
 	readonly width?: number
@@ -266,8 +290,29 @@ export interface ImageTile {
 	readonly clamp?: boolean
 }
 
-export type DashPreset =
-	"solid" | "dot" | "dash" | "lgDash" | "dashDot" | "lgDashDot" | "lgDashDotDot" | "sysDash" | "sysDot" | "sysDashDot" | "sysDashDotDot"
+// ST_PresetLineDashVal (§20.1.10.48).
+export const DASH_PRESETS = [
+	"solid",
+	"dot",
+	"dash",
+	"lgDash",
+	"dashDot",
+	"lgDashDot",
+	"lgDashDotDot",
+	"sysDash",
+	"sysDot",
+	"sysDashDot",
+	"sysDashDotDot"
+] as const
+
+export type DashPreset = (typeof DASH_PRESETS)[number]
+
+const isDashPreset = vocabulary(DASH_PRESETS)
+
+// A dash preset read from a document; solid for an unknown or absent name.
+export function dashPreset(value: string | undefined): DashPreset {
+	return isDashPreset(value) ? value : "solid"
+}
 
 export interface Stroke {
 	readonly width: number
@@ -317,9 +362,19 @@ export interface DrawingImage {
 	readonly bytesKey?: string
 }
 
-export type TextAnchor = "t" | "ctr" | "b" | "just" | "dist"
+// ST_TextAnchoringType.
+export const TEXT_ANCHORS = ["t", "ctr", "b", "just", "dist"] as const
 
-export type TextVertical = "horz" | "vert" | "vert270" | "wordArtVert" | "eaVert" | "mongolianVert" | "wordArtVertRtl"
+export type TextAnchor = (typeof TEXT_ANCHORS)[number]
+
+export const isTextAnchor = vocabulary(TEXT_ANCHORS)
+
+// ST_TextVerticalType (§20.1.10.83).
+export const TEXT_VERTICALS = ["horz", "vert", "vert270", "wordArtVert", "eaVert", "mongolianVert", "wordArtVertRtl"] as const
+
+export type TextVertical = (typeof TEXT_VERTICALS)[number]
+
+export const isTextVertical = vocabulary(TEXT_VERTICALS)
 
 // a:bodyPr, as input for text layout.
 export interface TextBodyProps {
@@ -339,7 +394,12 @@ export interface TextBodyProps {
 	readonly lineSpacingReduction: number
 }
 
-export type TextAlign = "l" | "ctr" | "r" | "just" | "dist" | "justLow" | "thaiDist"
+// ST_TextAlignType.
+export const TEXT_ALIGNS = ["l", "ctr", "r", "just", "dist", "justLow", "thaiDist"] as const
+
+export type TextAlign = (typeof TEXT_ALIGNS)[number]
+
+export const isTextAlign = vocabulary(TEXT_ALIGNS)
 
 // ST_TextUnderlineType (§20.1.10.82).
 export const UNDERLINES = [
@@ -364,6 +424,8 @@ export const UNDERLINES = [
 ] as const
 
 export type TextUnderline = (typeof UNDERLINES)[number]
+
+export const isTextUnderline = vocabulary(UNDERLINES)
 
 export interface TextRun {
 	readonly text: string
@@ -484,7 +546,7 @@ export interface DrawingClipShape {
 	readonly evenOdd: boolean
 }
 
-// Optional parts of a clip given to DrawingList.clipWith().
+// Optional parts of a clip given to DrawingList.clip().
 export interface ClipExtras {
 	readonly shapes?: readonly DrawingClipShape[]
 	readonly add?: readonly number[]
@@ -1154,7 +1216,7 @@ function measureCubic(
 }
 
 // m1 * m2 (apply m2 first).
-export function multiply(m1: ArrayLike<number>, m2: ArrayLike<number>): number[] {
+export function multiply(m1: ArrayLike<number>, m2: ArrayLike<number>): [number, number, number, number, number, number] {
 	const a1 = m1[0] ?? 1
 	const b1 = m1[1] ?? 0
 	const c1 = m1[2] ?? 0

@@ -1,4 +1,13 @@
-import { crc32, partKey, type ByteChunks, type ByteSource, type PartChange, type Slicing, type ZipEntry } from "../../core/opc/index"
+import {
+	crc32,
+	partKey,
+	ZipError,
+	type ByteChunks,
+	type ByteSource,
+	type PartChange,
+	type Slicing,
+	type ZipEntry
+} from "../../core/opc/index"
 import { deflateBound, InflateIndex } from "../../core/opc/inflateIndex"
 import { MEDIA_LIMITS, sniffMedia, type MediaContainer } from "../../core/opc/mediaPolicy"
 import { pictureSize } from "../../core/odp/read/document"
@@ -10,6 +19,7 @@ import type { Deck, MediaRef, ShapeNode, SlideRef } from "../../core/presentatio
 import type { CallSignal, EngineSession } from "./engine"
 import { pptxParts } from "./engine/open/pptx"
 import { viewParts } from "./engine/view"
+import { pruneCommitted } from "./prune"
 import type { MediaInsertSource, MediaRefusal, PortStreamMeta } from "./protocol"
 
 // The media of a session's deck, served by range to the page (which registers the port with its service worker, so a
@@ -46,6 +56,9 @@ interface InsertedEntry {
 
 interface MediaState {
 	readonly builds: Map<string, IndexBuild>
+	// Parts whose last build stopped short of their end (a read failed, the build was aborted): built again on the next
+	// media() for them, never on a render (which would start it again on every one).
+	readonly unbuilt: Set<string>
 	readonly inserted: Map<number, InsertedEntry>
 	// Containers of parts already sniffed (a part is sniffed once).
 	readonly containers: Map<string, MediaContainer | null>
@@ -61,6 +74,7 @@ function stateOf(session: EngineSession): MediaState {
 	if (state === undefined) {
 		const created: MediaState = {
 			builds: new Map(),
+			unbuilt: new Set(),
 			inserted: new Map(),
 			containers: new Map(),
 			closed: { aborted: false, listeners: [] },
@@ -77,6 +91,7 @@ function stateOf(session: EngineSession): MediaState {
 
 			created.inserted.clear()
 			created.builds.clear()
+			created.unbuilt.clear()
 		})
 	}
 
@@ -336,7 +351,7 @@ export function prepareSlideMedia(session: EngineSession, ref: SlideRef): void {
 
 		state ??= stateOf(session)
 
-		if (!state.builds.has(key)) startIndex(session, state, key, part, archiveOf(session, entry.name))
+		if (!state.builds.has(key) && !state.unbuilt.has(key)) startIndex(session, state, key, part, archiveOf(session, entry.name))
 	})
 }
 
@@ -378,6 +393,7 @@ function startIndex(
 	const build: IndexBuild = { index: undefined, failed: false, progress: 0, used: ++clock }
 
 	state.builds.set(key, build)
+	state.unbuilt.delete(key)
 
 	const notice = (progress: number): void => {
 		session.emit({ type: "notice", notice: { kind: "media", part, reason: "preparing", progress } })
@@ -419,11 +435,23 @@ function startIndex(
 			for (const over of indexesOver(state.builds, INDEX_BUDGET, key)) state.builds.delete(over)
 
 			notice(1)
-		} catch {
-			// A damaged entry (or a session that closed) is no medium: the notice says it cannot be played.
-			build.failed = true
+		} catch (error) {
+			// The session closed: its builds went with it.
+			if (sessionClosed(session).aborted) return
 
-			if (!sessionClosed(session).aborted) session.emit({ type: "notice", notice: { kind: "media", part, reason: "unplayable" } })
+			// A damaged entry (its deflate data, size or CRC-32) is no medium: the notice says it cannot be played.
+			if (!signal.aborted && error instanceof ZipError) {
+				build.failed = true
+				session.emit({ type: "notice", notice: { kind: "media", part, reason: "unplayable" } })
+
+				return
+			}
+
+			// Stopped short (a read failed or was refused as stale, the build was aborted): the medium is not judged, and
+			// the next media() for it builds it again.
+			if (state.builds.get(key) === build) state.builds.delete(key)
+
+			state.unbuilt.add(key)
 		}
 	})
 }
@@ -584,8 +612,14 @@ export function insertedWrites(
 // image's bytes are freed (later saves relate its part), a medium's device file or drive port is let go of and its
 // bytes are read from the saved package where anything still needs them (play, a conversion).
 export function commitInsertedWrites(session: EngineSession, writes: InsertedWrites | undefined): void {
-	if (writes === undefined) return
+	if (writes !== undefined) commitWrites(session, writes)
 
+	// Images and chart versions nothing names any more (the history's steps that did let go of meanwhile) are let go
+	// of once the save is the base.
+	pruneCommitted(session)
+}
+
+function commitWrites(session: EngineSession, writes: InsertedWrites): void {
 	commitChartWrites(session.deck, writes.charts)
 	commitInsertedImages(session.deck, writes.images, pictureSize)
 

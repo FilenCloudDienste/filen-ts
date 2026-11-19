@@ -19,6 +19,7 @@ import { slideRef, type Section, type SlideRef } from "../core/presentation/mode
 import { sessionEdits } from "../dom/presentation/engine/edit"
 import { emitPptx } from "../core/pptx/write/emit"
 import { editDeck, editHarness, shapeById } from "./presentationEditFixtures"
+import { body, buildPptx, para, sp } from "./pptxFixtures"
 import { saveEdits } from "./pptxWriteFixtures"
 import { budget, cpuMs } from "./timing"
 
@@ -306,6 +307,32 @@ describe("slide commands on a deck", () => {
 		await harness.undo()
 		await harness.undo()
 		expect(deck.nodes.get(slide.ref)?.parent).toBe(original)
+		expect(sessionEdits(harness.session).history.dirty).toBe(false)
+		harness.close()
+	})
+
+	it("puts back a placeholder the undo's layout renumbers to idx 0 that the change itself left alone", async () => {
+		const harness = await editHarness(
+			buildPptx({
+				layouts: [
+					{ name: "Body at 0", type: "obj", shapes: sp(2, "Body", 'type="body"') },
+					{ name: "Body at 12", type: "obj", shapes: sp(2, "Body", 'type="body" idx="12"') }
+				],
+				slides: [{ shapes: sp(2, "Body 1", 'type="body" idx="12"', "", body(para("Text"))) }, { shapes: "", layout: 2 }]
+			})
+		)
+		const deck = harness.session.deck
+		const slide = await harness.slide(0)
+		const original = slide.parent
+		const other = deck.layouts.find(ref => ref !== original)
+
+		if (other === undefined || original === undefined) throw new Error("two layouts")
+
+		for (const op of setLayoutOps(deck.slides, [slide.ref], other)) expect(await harness.command(op)).toMatchObject({ ok: true })
+		expect(deck.nodes.get(slide.ref)?.shapes[0]?.ph?.idx).toBe(12)
+		expect(await harness.undo()).toMatchObject({ ok: true })
+		expect(deck.nodes.get(slide.ref)?.parent).toBe(original)
+		expect(deck.nodes.get(slide.ref)?.shapes[0]?.ph).toMatchObject({ type: "body", idx: 12 })
 		expect(sessionEdits(harness.session).history.dirty).toBe(false)
 		harness.close()
 	})

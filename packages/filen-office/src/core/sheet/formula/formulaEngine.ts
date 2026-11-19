@@ -27,16 +27,18 @@ import {
 	shiftFormula,
 	spannedReferences
 } from "../refs/formulaRefs"
-import { MAX_COLUMNS, MAX_ROWS } from "../model/model"
+import { cellKey, cellKeyCol, cellKeyRow, MAX_COLUMNS, MAX_ROWS } from "../model/model"
 import type { SizeAxis } from "../sizes/sizes"
 import { registerSheetFunctions } from "./functions"
 import { installIndirect, withIndirect, type IndirectHost, type IndirectRead } from "./functions/indirect"
 import { spillError, withSpill, type SpillHost, type SpillSize } from "./functions/spill"
 import {
+	ERROR_TEXT as EXCEL_ERROR_TEXT,
 	GENERIC_ERRORS,
 	genericErrorText,
 	guardFunctionPlugins,
 	installLiftTracking,
+	MAX_RANGE_CELLS,
 	trackLifts,
 	UNMODELED,
 	withRowState,
@@ -149,19 +151,13 @@ export interface CircularCell {
 // Excel's own bound on Maximum Iterations.
 const MAX_ITERATIONS = 32_767
 
-// Excel's own error texts, which the files store and the grid shows.
-const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
-	[ErrorType.DIV_BY_ZERO]: "#DIV/0!",
-	[ErrorType.NAME]: "#NAME?",
-	[ErrorType.VALUE]: "#VALUE!",
-	[ErrorType.NUM]: "#NUM!",
-	[ErrorType.NA]: "#N/A",
-	[ErrorType.REF]: "#REF!",
-	[ErrorType.CYCLE]: CYCLE,
-	[ErrorType.SPILL]: "#SPILL!"
-}
+// Excel's own error texts, which the files store and the grid shows, and the engine's circle's.
+const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = { ...EXCEL_ERROR_TEXT, [ErrorType.CYCLE]: CYCLE }
 
 const INSERT_RUN = 10_000
+
+// The deletions kept for their undo (cutNames): the oldest dropped past it.
+const MAX_CUT_RECORDS = 256
 
 // A formula calling SUBTOTAL or AGGREGATE, which read whether rows are hidden.
 const CALLS_TOTAL = /(?:SUBTOTAL|AGGREGATE)\s*\(/i
@@ -175,6 +171,13 @@ const MAX_COPIED_CELLS = 1_048_576
 export class EngineLimitError extends Error {
 	constructor() {
 		super("spreadsheet: the formula engine would copy too many cells")
+	}
+}
+
+// An undo the engine holds no record of what it takes back for: the caller drops the engine and builds it again.
+export class EngineStaleError extends Error {
+	constructor() {
+		super("spreadsheet: the formula engine holds no record of the edit an undo takes back")
 	}
 }
 
@@ -288,6 +291,11 @@ interface Pending {
 }
 
 // What the held-result functions answer from: the engine running now (calls into HyperFormula are synchronous).
+// A defined name a deletion cut: as it was before the deletion, and the text the deletion left (shiftNames).
+type CutName = { readonly before: EngineName; readonly after: string }
+
+type CutNames = { readonly sheet: number; readonly edit: AxisEdit; readonly names: Map<string, CutName> }
+
 type HeldAnswer = (id: number, address: SimpleCellAddress) => number | string | boolean | CellError
 
 let running: HeldAnswer | null = null
@@ -373,11 +381,6 @@ function engineConfig(date1904: DateBase, locale: SheetLocale | undefined): Part
 	}
 }
 
-// The most cells one range of a formula may cover, within the sheet it names as far as that sheet reaches: the
-// engine reads a range's every cell (a whole-column VLOOKUP over a sheet with a cell in its last row is twelve
-// million).
-const MAX_RANGE_CELLS = 2_097_152
-
 // Collects the sheets one formula reads whole columns or rows of together (wholeRanges.ts), its defined names
 // included when there are any.
 interface WholeLink {
@@ -446,6 +449,17 @@ function unreadable(
 		if (!area.range && area.kind === "cell") continue
 		if (area.kind !== "cell" && heavy?.has(first.name.toUpperCase()) === true) return "range"
 
+		const cols = Math.abs(area.endCol - area.startCol) + 1
+		const rows = Math.abs(area.endRow - area.startRow) + 1
+
+		// A block of cells is read address by address, past the sheet's own cells too: its whole size counts. A whole
+		// column (row) is read only as far as the sheet reaches.
+		if (area.kind === "cell") {
+			if (rows * cols > MAX_RANGE_CELLS) return "range"
+
+			continue
+		}
+
 		const top = area.kind === "cols" ? 0 : Math.min(area.startRow, area.endRow)
 		const bottom = area.kind === "cols" ? first.height - 1 : Math.min(Math.max(area.startRow, area.endRow), first.height - 1)
 		const left = area.kind === "rows" ? 0 : Math.min(area.startCol, area.endCol)
@@ -454,11 +468,8 @@ function unreadable(
 		if (Math.max(0, bottom - top + 1) * Math.max(0, right - left + 1) > MAX_RANGE_CELLS) return "range"
 
 		// What it would read were the sheet to reach its last row or column.
-		const cols = Math.abs(area.endCol - area.startCol) + 1
-		const rows = Math.abs(area.endRow - area.startRow) + 1
-
-		if (area.kind === "cols" || (area.kind === "cell" && rows * cols > MAX_RANGE_CELLS)) reach?.(first.name, cols, 0)
-		if (area.kind === "rows" || (area.kind === "cell" && rows * cols > MAX_RANGE_CELLS)) reach?.(first.name, 0, rows)
+		if (area.kind === "cols") reach?.(first.name, cols, 0)
+		else reach?.(first.name, 0, rows)
 	}
 
 	return null
@@ -622,19 +633,28 @@ export class FormulaEngine {
 	private readonly blocking: ((sheet: number, range: SpillRange) => boolean) | undefined
 	private readonly shownFormula: ((sheet: number, row: number, col: number) => string | null) | undefined
 	private readonly calcA1: boolean
-	// The cells whose formula calls SUBTOTAL or AGGREGATE, by engine sheet id (row * MAX_COLUMNS + col): calculated
+	// Defined names the workbook holds but the engine was not given (upper case): INDIRECT of one keeps the file's result.
+	private readonly withheld: ReadonlySet<string>
+	// The cells whose formula calls SUBTOTAL or AGGREGATE, by engine sheet id (cellKey(row, col)): calculated
 	// again when rows are hidden or shown (rowsChanged).
 	private readonly totals = new Map<number, Set<number>>()
 	// The cells given a formula with a 3-D reference spelled sheet by sheet (spanned), by engine sheet id
-	// (row * MAX_COLUMNS + col): the formula as written, given again when rows or columns of a sheet it spans move,
+	// (cellKey(row, col)): the formula as written, given again when rows or columns of a sheet it spans move,
 	// where the engine would move that sheet's part of the span alone.
 	private readonly spans = new Map<number, Map<number, string>>()
 	// Each engine sheet id's grid index while the first build calculates (sheetIds is filled after it).
 	private building: number[] | null = null
 	// Where its whole-column and whole-row references end (wholeRanges.ts).
 	private readonly whole = new WholeRanges()
-	// The defined names by scope (grid sheet index, -1 for the workbook's) and upper-case name.
+	// The defined names by scope (grid sheet index, -1 for the workbook's) and upper-case name: copies of the caller's,
+	// their text moved with the rows, columns and sheet names it reads (shiftNames), as the engine moves its own.
 	private readonly definedNames = new Map<string, EngineName>()
+	// Each deletion, oldest first, one that cut no name too (so the undo of a later deletion of the same rows takes its
+	// own record, never an earlier one's): its grid sheet index, the edit, and by name key each name it cut (#REF!) as it
+	// was before it and the text it left. Put back by the insert its caller marks as undoing it (the rows come back, the
+	// #REF! does not), where the name still reads what the deletion left; edits between keep them (undo runs last first,
+	// so what came after the deletion is undone by then).
+	private readonly cutNames: CutNames[] = []
 	// The workbook's sheet names in grid order, for the names' own references.
 	private sheetNames: readonly string[] = []
 	// The dynamic-array formulas by changeKey of their cell (writeSpills).
@@ -728,7 +748,8 @@ export class FormulaEngine {
 
 			return sheet < 0 ? null : shown(sheet, at.row, at.col)
 		},
-		calcA1: () => this.calcA1
+		calcA1: () => this.calcA1,
+		withheld: name => this.withheld.has(name.toUpperCase())
 	}
 	private readonly link: WholeLink = {
 		names: () => this.definedNames.size > 0,
@@ -776,6 +797,7 @@ export class FormulaEngine {
 	// null for a cell without one, which FORMULATEXT gives; it is #N/A everywhere without it (the engine's text is
 	// its own rewrite of the user's). `calcA1`: the workbook came from an .ods file, whose INDIRECT also reads
 	// LibreOffice's Calc A1 text (Sheet.A1). `iteration`: the workbook's iterative calculation, none without it.
+	// `withheld`: the workbook's defined names left out of `names` (upper case), which INDIRECT does not take for missing.
 	constructor(
 		sheets: readonly EngineSheet[],
 		names: readonly EngineName[],
@@ -786,7 +808,8 @@ export class FormulaEngine {
 		blocking?: (sheet: number, range: SpillRange) => boolean,
 		shownFormula?: (sheet: number, row: number, col: number) => string | null,
 		calcA1 = false,
-		iteration: EngineIteration | null = null
+		iteration: EngineIteration | null = null,
+		withheld: ReadonlySet<string> = new Set()
 	) {
 		this.iteration =
 			iteration === null
@@ -798,6 +821,7 @@ export class FormulaEngine {
 					}
 		this.circles = this.circleHost()
 		this.calcA1 = calcA1
+		this.withheld = withheld
 		this.held = held
 		this.rows = rows
 		this.blocking = blocking
@@ -826,7 +850,7 @@ export class FormulaEngine {
 				const row = sheet.rows[cell.row]
 
 				if (row !== undefined && cell.content instanceof HeldResult) row[cell.col] = this.holding(cell.content)
-				if (cell.fallback !== undefined) fallbacks.set(cell.row * MAX_COLUMNS + cell.col, cell.fallback)
+				if (cell.fallback !== undefined) fallbacks.set(cellKey(cell.row, cell.col), cell.fallback)
 			}
 
 			sheet.rows.forEach((row, rowIndex) => {
@@ -844,7 +868,7 @@ export class FormulaEngine {
 						return
 					}
 
-					row[col] = this.holding(new HeldResult(fallbacks.get(rowIndex * MAX_COLUMNS + col) ?? unreadableShows(reason)))
+					row[col] = this.holding(new HeldResult(fallbacks.get(cellKey(rowIndex, col)) ?? unreadableShows(reason)))
 					missing.push({ sheet: index, row: rowIndex, col })
 				})
 			})
@@ -1365,7 +1389,9 @@ export class FormulaEngine {
 
 								this.engine.setCellContents(write.address, write.content)
 							}
-						})
+							// Moved: where whole columns and rows end is found again before each part calculates, as the part may
+							// reach past their cells or leave them.
+						}, true)
 					),
 					written
 				)
@@ -1443,7 +1469,7 @@ export class FormulaEngine {
 
 	// Keeps the registry of SUBTOTAL and AGGREGATE cells in step with what a cell is given.
 	private noteTotal(id: number, row: number, col: number, content: unknown): void {
-		const key = row * MAX_COLUMNS + col
+		const key = cellKey(row, col)
 
 		if (typeof content === "string" && CALLS_TOTAL.test(content)) {
 			let cells = this.totals.get(id)
@@ -1466,15 +1492,15 @@ export class FormulaEngine {
 		const moved = new Set<number>()
 
 		for (const key of cells) {
-			const row = Math.floor(key / MAX_COLUMNS)
-			const col = key % MAX_COLUMNS
+			const row = cellKeyRow(key)
+			const col = cellKeyCol(key)
 			const index = axis === "rows" ? row : col
 
 			if (count < 0 && index >= at && index < at - count) continue
 
 			const next = index >= at ? index + count : index
 
-			moved.add(axis === "rows" ? next * MAX_COLUMNS + col : row * MAX_COLUMNS + next)
+			moved.add(axis === "rows" ? cellKey(next, col) : cellKey(row, next))
 		}
 
 		this.totals.set(id, moved)
@@ -1484,7 +1510,7 @@ export class FormulaEngine {
 	// for anything else.
 	private noteSpan(id: number, row: number, col: number, formula: string | null): void {
 		if (formula === null) {
-			this.spans.get(id)?.delete(row * MAX_COLUMNS + col)
+			this.spans.get(id)?.delete(cellKey(row, col))
 
 			return
 		}
@@ -1496,7 +1522,7 @@ export class FormulaEngine {
 			this.spans.set(id, cells)
 		}
 
-		cells.set(row * MAX_COLUMNS + col, formula)
+		cells.set(cellKey(row, col), formula)
 	}
 
 	// After rows or columns of sheet `id` moved in the engine: each formula with a 3-D reference moved as the file's is
@@ -1516,8 +1542,8 @@ export class FormulaEngine {
 			const next = new Map<number, string>()
 
 			for (const [key, formula] of cells) {
-				let row = Math.floor(key / MAX_COLUMNS)
-				let col = key % MAX_COLUMNS
+				let row = cellKeyRow(key)
+				let col = cellKeyCol(key)
 
 				if (owner === id) {
 					const index = edit.axis === "rows" ? row : col
@@ -1532,7 +1558,7 @@ export class FormulaEngine {
 
 				const text = `=${shiftFormula(formula.slice(1), own, target, edit).formula}`
 
-				next.set(row * MAX_COLUMNS + col, text)
+				next.set(cellKey(row, col), text)
 
 				const spansEdited = formulaInputs(text.slice(1)).refs.some(ref => {
 					if (ref.lastSheet === null || ref.sheet === null) return false
@@ -1558,14 +1584,93 @@ export class FormulaEngine {
 		}
 	}
 
+	// The defined names' text after rows or columns of sheet `id` move (shiftFormula), as the engine moves its own: what
+	// INDIRECT reads of a name. A deletion is recorded with the names it cuts (#REF!) as they were, for the insert undoing
+	// it (`undoes`, told by the caller: an insert of the same rows may be a new edit, after which the name stays #REF! as
+	// in the workbook), which returns them to be given to the engine again once the rows are back (restoreNames). A
+	// deletion undoing an insert (`undoes`) is not recorded: it is no deletion an undo takes back. `cut` is the record an
+	// undoing insert took (takeCut).
+	private shiftNames(sheet: number, edit: AxisEdit, undoes = false, cut?: CutNames): EngineName[] {
+		const target = this.sheetNames[sheet] ?? ""
+		const restored: EngineName[] = []
+		const cutNow = new Map<string, CutName>()
+
+		for (const [key, named] of this.definedNames) {
+			const entry = cut?.names.get(key)
+
+			if (entry !== undefined && entry.after === named.expression) {
+				this.definedNames.set(key, entry.before)
+				restored.push(entry.before)
+
+				continue
+			}
+
+			// A workbook name's references name their sheet: none is its own.
+			const own = named.scope === undefined ? "" : (this.sheetNames[named.scope] ?? "")
+			const shifted = shiftFormula(named.expression, own, target, edit)
+
+			if (shifted.formula === named.expression) continue
+			if (shifted.cut) cutNow.set(key, { before: named, after: shifted.formula })
+
+			this.definedNames.set(key, { ...named, expression: shifted.formula })
+		}
+
+		if (edit.type === "delete" && !undoes) {
+			this.cutNames.push({ sheet, edit, names: cutNow })
+
+			if (this.cutNames.length > MAX_CUT_RECORDS) this.cutNames.shift()
+		}
+
+		return restored
+	}
+
+	// The latest deletion of these rows or columns, the one the insert undoes (whatever it cut, none included), taken with
+	// any recorded after it (their undo, last first, has run or never will).
+	private takeCut(sheet: number, edit: AxisEdit): CutNames | undefined {
+		for (let index = this.cutNames.length - 1; index >= 0; index--) {
+			const cut = this.cutNames[index]
+
+			if (
+				cut !== undefined &&
+				cut.sheet === sheet &&
+				cut.edit.axis === edit.axis &&
+				cut.edit.at === edit.at &&
+				cut.edit.count === edit.count
+			) {
+				this.cutNames.length = index
+
+				return cut
+			}
+		}
+
+		return undefined
+	}
+
+	// The names an undone deletion had cut given to the engine again (its own stay #REF! with the rows back), and every
+	// INDIRECT calculated again, which read nothing of a cut name. Run with evaluation suspended, after the move.
+	private restoreNames(names: readonly EngineName[]): void {
+		if (names.length === 0) return
+
+		for (const named of names) {
+			const scope = named.scope === undefined ? undefined : this.sheetIds[named.scope]
+			const expression = `=${named.expression}`
+
+			if (this.engine.isItPossibleToChangeNamedExpression(named.name, expression, scope))
+				this.engine.changeNamedExpression(named.name, expression, scope)
+		}
+
+		this.sheetsChanged = true
+	}
+
 	// Rows were hidden or shown (by hand or by a filter): every SUBTOTAL and AGGREGATE is calculated again, and what
-	// changed reported as `set` reports it.
+	// changed reported as `set` reports it. Marked dirty, not given its formula again: the engine's text of it is not
+	// one it reads back (a sheet named 2024 is left unquoted, rebuildWith).
 	rowsChanged(): RecalculatedCell[] {
 		const cells: SimpleCellAddress[] = []
 
 		for (const [sheet, keys] of this.totals) {
 			for (const key of keys) {
-				const address = { sheet, row: Math.floor(key / MAX_COLUMNS), col: key % MAX_COLUMNS }
+				const address = { sheet, row: cellKeyRow(key), col: cellKeyCol(key) }
 				const formula = this.engine.getCellFormula(address)
 
 				if (formula !== undefined && CALLS_TOTAL.test(formula)) cells.push(address)
@@ -1575,15 +1680,31 @@ export class FormulaEngine {
 
 		if (cells.length === 0) return []
 
-		return [
-			...this.recording(
-				() =>
-					this.batched(() => {
-						for (const address of cells) this.engine.setCellContents(address, this.engine.getCellFormula(address) ?? null)
-					}),
-				null
-			).values()
-		]
+		const changes = this.recording(
+			() =>
+				this.batched(() => {
+					const graph = this.engine.dependencyGraph
+
+					for (const address of cells) {
+						const vertex = graph.addressMapping.getCell(address)
+
+						if (vertex !== undefined) graph.graph.markNodeAsDirty(vertex)
+					}
+				}),
+			null
+		)
+
+		// Every total is reported, an unchanged one too: what the workbook stored for it may be from before the engine's
+		// last calculation of it.
+		for (const address of cells) {
+			const key = changeKey(address)
+			const sheet = this.sheetIndex(address.sheet)
+
+			if (sheet >= 0 && !changes.has(key))
+				changes.set(key, { sheet, row: address.row, col: address.col, ...this.result(sheet, address.row, address.col) })
+		}
+
+		return [...changes.values()]
 	}
 
 	// What a sheet's dynamic arrays may spill over changed (cells merged or unmerged, a table): each is calculated
@@ -2138,12 +2259,7 @@ export class FormulaEngine {
 	private write(id: number, sheet: number, cells: readonly EngineCell[]): void {
 		// The sheets as far as the engine has seen them, read once, when a formula needs them.
 		let known: SheetExtent[] | null = null
-		const extents = (): SheetExtent[] =>
-			(known ??= this.sheetIds.map(sheetId => {
-				const { width, height } = this.engine.getSheetDimensions(sheetId)
-
-				return { name: this.engine.getSheetName(sheetId) ?? "", height, width }
-			}))
+		const extents = (): SheetExtent[] => (known ??= this.sheetExtents())
 
 		for (const cell of cells) {
 			const address = { sheet: id, row: cell.row, col: cell.col }
@@ -2255,6 +2371,8 @@ export class FormulaEngine {
 		const span: [number, number] = [edit.at, edit.count]
 
 		if (edit.type === "insert") {
+			if (this.outgrownBy(id, edit)) return "tooLarge"
+
 			return (edit.axis === "rows" ? this.engine.isItPossibleToAddRows(id, span) : this.engine.isItPossibleToAddColumns(id, span))
 				? null
 				: "spill"
@@ -2265,6 +2383,33 @@ export class FormulaEngine {
 		return (edit.axis === "rows" ? this.engine.isItPossibleToRemoveRows(id, span) : this.engine.isItPossibleToRemoveColumns(id, span))
 			? null
 			: "spill"
+	}
+
+	// Whether an insert inside a block of cells the engine reads (A1:Z2, rows inserted at row 2) makes it past
+	// MAX_RANGE_CELLS: the engine widens the block and reads its every address, the empty ones too. A whole column or
+	// row is read only as far as the sheet reaches.
+	private outgrownBy(id: number, edit: AxisEdit): boolean {
+		const rows = edit.axis === "rows"
+
+		for (const vertex of this.engine.dependencyGraph.rangeMapping.rangesInSheet(id)) {
+			const { start, end } = vertex.range
+			const height = end.row - start.row + 1
+			const width = end.col - start.col + 1
+
+			if (!Number.isFinite(height) || !Number.isFinite(width)) continue
+
+			const first = rows ? start.row : start.col
+			const last = rows ? end.row : end.col
+
+			if (
+				edit.at > first &&
+				edit.at <= last &&
+				(rows ? (height + edit.count) * width : height * (width + edit.count)) > MAX_RANGE_CELLS
+			)
+				return true
+		}
+
+		return false
 	}
 
 	canMove(sheet: number, edit: AxisEdit): boolean {
@@ -2283,22 +2428,41 @@ export class FormulaEngine {
 		if (cells > MAX_COPIED_CELLS) throw new EngineLimitError()
 	}
 
-	insert(sheet: number, axis: SizeAxis, at: number, count: number): RecalculatedCell[] {
-		return drain(this.inserting(sheet, axis, at, count))
+	// `restores`: the insert undoes the remove just made of the same rows or columns (the edit's undo, never a new
+	// insert), so the defined names that remove cut are put back as they were.
+	insert(sheet: number, axis: SizeAxis, at: number, count: number, restores = false): RecalculatedCell[] {
+		return drain(this.inserting(sheet, axis, at, count, restores))
 	}
 
 	// insert, a part at a time between yields to `clock` (what a dynamic array spills through the rows written again).
-	async insertSliced(sheet: number, axis: SizeAxis, at: number, count: number, clock?: SliceClock): Promise<RecalculatedCell[]> {
-		return await runSliced(this.inserting(sheet, axis, at, count), clock)
+	async insertSliced(
+		sheet: number,
+		axis: SizeAxis,
+		at: number,
+		count: number,
+		clock?: SliceClock,
+		restores = false
+	): Promise<RecalculatedCell[]> {
+		return await runSliced(this.inserting(sheet, axis, at, count, restores), clock)
 	}
 
-	private *inserting(sheet: number, axis: SizeAxis, at: number, count: number): Generator<void, RecalculatedCell[]> {
+	private *inserting(sheet: number, axis: SizeAxis, at: number, count: number, restores: boolean): Generator<void, RecalculatedCell[]> {
 		const id = this.sheetIds[sheet]
 
 		if (id === undefined) return []
 
+		const edit: AxisEdit = { type: "insert", axis, at, count }
+		const cut = restores ? this.takeCut(sheet, edit) : undefined
+
+		// The deletion this undoes was made on another engine (dropped and built again since, from a workbook whose names
+		// it had cut: those are #REF! here or missing) or its record fell past MAX_CUT_RECORDS: what it cut cannot be put
+		// back here. Refused before anything moves, so the caller drops the engine and builds it again from the reverted
+		// workbook.
+		if (restores && cut === undefined) throw new EngineStaleError()
+
 		this.moveTotals(id, axis, at, count)
 		this.moveSpills(id, axis, at, count)
+		const restored = this.shiftNames(sheet, edit, restores, cut)
 
 		// In runs: the engine spreads the new rows into one call, which a large insert overflows.
 		const changes = yield* this.movingSteps(() => {
@@ -2310,27 +2474,38 @@ export class FormulaEngine {
 			}
 
 			this.respan(id, { type: "insert", axis, at, count })
+			this.restoreNames(restored)
 		})
 
 		return [...changes.values()]
 	}
 
-	remove(sheet: number, axis: SizeAxis, at: number, count: number): RecalculatedCell[] {
-		return drain(this.removing(sheet, axis, at, count))
+	// `reverts`: the remove undoes the insert just made of the same rows or columns (the edit's undo, never a new
+	// deletion), which no later insert puts back.
+	remove(sheet: number, axis: SizeAxis, at: number, count: number, reverts = false): RecalculatedCell[] {
+		return drain(this.removing(sheet, axis, at, count, reverts))
 	}
 
 	// remove, a part at a time between yields to `clock`.
-	async removeSliced(sheet: number, axis: SizeAxis, at: number, count: number, clock?: SliceClock): Promise<RecalculatedCell[]> {
-		return await runSliced(this.removing(sheet, axis, at, count), clock)
+	async removeSliced(
+		sheet: number,
+		axis: SizeAxis,
+		at: number,
+		count: number,
+		clock?: SliceClock,
+		reverts = false
+	): Promise<RecalculatedCell[]> {
+		return await runSliced(this.removing(sheet, axis, at, count, reverts), clock)
 	}
 
-	private *removing(sheet: number, axis: SizeAxis, at: number, count: number): Generator<void, RecalculatedCell[]> {
+	private *removing(sheet: number, axis: SizeAxis, at: number, count: number, reverts: boolean): Generator<void, RecalculatedCell[]> {
 		const id = this.sheetIds[sheet]
 
 		if (id === undefined) return []
 
 		this.ensureCopies(this.removedCopies(id, axis, count))
 		this.moveTotals(id, axis, at, -count)
+		this.shiftNames(sheet, { type: "delete", axis, at, count }, reverts)
 
 		const orphans = this.moveSpills(id, axis, at, -count)
 		const changes = yield* this.movingSteps(() => {
@@ -2412,6 +2587,23 @@ export class FormulaEngine {
 		const { width, height } = this.engine.getSheetDimensions(id)
 
 		this.ensureCopies(width * height)
+
+		const last = this.sheetIds.length - 1
+
+		// A name of the sheet's own goes with it, and the deletions made on it with their undo.
+		for (const [key, named] of this.definedNames) if (named.scope === last) this.definedNames.delete(key)
+
+		for (let index = this.cutNames.length - 1; index >= 0; index--) {
+			const cut = this.cutNames[index]
+
+			if (cut === undefined) continue
+
+			for (const [key, entry] of cut.names) if (entry.before.scope === last) cut.names.delete(key)
+
+			// Another sheet's deletion stays though it no longer holds a name: its undo still takes its own record.
+			if (cut.sheet === last) this.cutNames.splice(index, 1)
+		}
+
 		this.sheetIds.pop()
 		this.sheetNames = this.sheetNames.slice(0, -1)
 		this.totals.delete(id)
@@ -2449,6 +2641,23 @@ export class FormulaEngine {
 
 			for (const cells of this.spans.values())
 				for (const [key, formula] of cells) cells.set(key, `=${renameSheetInFormula(formula.slice(1), was, name)}`)
+
+			for (const [key, named] of this.definedNames) {
+				const expression = renameSheetInFormula(named.expression, was, name)
+
+				if (expression !== named.expression) this.definedNames.set(key, { ...named, expression })
+			}
+
+			// What a deletion cut and left read the new name too, so its undo still finds and restores them.
+			for (const cut of this.cutNames)
+				for (const [key, entry] of cut.names) {
+					const before = renameSheetInFormula(entry.before.expression, was, name)
+
+					cut.names.set(key, {
+						before: before === entry.before.expression ? entry.before : { ...entry.before, expression: before },
+						after: renameSheetInFormula(entry.after, was, name)
+					})
+				}
 
 			this.whole.rename(before, name)
 			this.sheetNames = this.sheetNames.map((known, index) => (index === sheet ? name : known))
@@ -2545,7 +2754,7 @@ export class FormulaEngine {
 
 			return { name, height: rows.length, width: rows.reduce((width, row) => Math.max(width, row.length), 0) }
 		})
-		const fallbacks = new Map(cells.map(cell => [cell.row * MAX_COLUMNS + cell.col, cell.fallback]))
+		const fallbacks = new Map(cells.map(cell => [cellKey(cell.row, cell.col), cell.fallback]))
 		const before = new Map<string, { address: SimpleCellAddress; value: unknown }>()
 		const holds: SimpleCellAddress[] = []
 
@@ -2559,7 +2768,7 @@ export class FormulaEngine {
 					if (typeof value !== "string" || !value.startsWith("=")) return
 
 					const address = { sheet: id, row: rowIndex, col }
-					const own = index === sheet && fallbacks.has(rowIndex * MAX_COLUMNS + col)
+					const own = index === sheet && fallbacks.has(cellKey(rowIndex, col))
 					const was: unknown = own ? undefined : this.cellValue(old, address)
 					const reason = unreadable(value, extents, index, this.reach, heavy, this.link)
 
@@ -2567,7 +2776,7 @@ export class FormulaEngine {
 
 					if (reason === null) return
 
-					const stored = own ? fallbacks.get(rowIndex * MAX_COLUMNS + col) : rawValue(was)
+					const stored = own ? fallbacks.get(cellKey(rowIndex, col)) : rawValue(was)
 
 					row[col] = this.holding(new HeldResult(stored ?? unreadableShows(reason)))
 					holds.push(address)
@@ -2712,6 +2921,13 @@ export class FormulaEngine {
 
 		if (id === undefined || this.deferred !== null) return false
 
+		// What set() would hold is not calculated here either: the engine reads a block's every address.
+		if (
+			(formula.includes(":") || formula.includes("!")) &&
+			unreadable(spanned(formula, this.sheetNames), this.sheetExtents(), sheet) !== null
+		)
+			return false
+
 		try {
 			const { value, lifted } = this.run(() => trackLifts(() => this.engine.calculateFormula(formula, id)))
 
@@ -2719,6 +2935,15 @@ export class FormulaEngine {
 		} catch {
 			return false
 		}
+	}
+
+	// The engine's sheets as far as it has seen them, by grid sheet index.
+	private sheetExtents(): SheetExtent[] {
+		return this.sheetIds.map(sheetId => {
+			const { width, height } = this.engine.getSheetDimensions(sheetId)
+
+			return { name: this.engine.getSheetName(sheetId) ?? "", height, width }
+		})
 	}
 
 	// Whether a value is an error, and the cell it comes from where that is another one (the engine names the cell

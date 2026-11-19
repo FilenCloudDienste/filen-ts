@@ -1,19 +1,77 @@
-import { describe, expect, it } from "vitest"
-import type { SheetRenderStyle, SheetStyleAppend, SheetTile } from "../core/sheet/protocol"
+import { describe, expect, it, vi } from "vitest"
+import { ODS_CHECK_BOUNDS } from "../core/ods/write/check"
+import type { SheetCommand, SheetRenderStyle, SheetStyleAppend, SheetTile } from "../core/sheet/protocol"
+import { ChangeLog } from "../core/xlsx/model/changes"
+import type { XlsxPartWrite } from "../core/xlsx/model/types"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { encryptedEntry, odsBytes, table, type OdsParts } from "./odsFixtures"
 import { IMMEDIATE, tileEntry } from "./sheetSessionFixtures"
 import { settle } from "./sheetNotesFixtures"
 
+// What the edit check (write/check.ts) runs, counted: rules said as validations, formulas said in OpenFormula, style
+// writers made and the formats they planned.
+const counted = vi.hoisted(() => ({
+	validations: 0,
+	formulas: [] as string[],
+	writers: [] as { readonly written: number }[],
+	planned: 0
+}))
+
+vi.mock("../core/ods/write/validations", async importOriginal => {
+	const original = await importOriginal<typeof import("../core/ods/write/validations")>()
+
+	return {
+		...original,
+		sheetValidations: (...args: Parameters<typeof original.sheetValidations>) => {
+			counted.validations++
+
+			return original.sheetValidations(...args)
+		}
+	}
+})
+
+vi.mock("../core/ods/formula/toOf", async importOriginal => {
+	const original = await importOriginal<typeof import("../core/ods/formula/toOf")>()
+
+	return {
+		...original,
+		openFormula: (...args: Parameters<typeof original.openFormula>) => {
+			counted.formulas.push(args[0])
+
+			return original.openFormula(...args)
+		}
+	}
+})
+
+vi.mock("../core/ods/write/styles", async importOriginal => {
+	const original = await importOriginal<typeof import("../core/ods/write/styles")>()
+
+	class CountedWriter extends original.OdsStyleWriter {
+		constructor(...args: ConstructorParameters<typeof original.OdsStyleWriter>) {
+			super(...args)
+			counted.writers.push(this)
+		}
+
+		override cell(xf: number): string | undefined {
+			counted.planned++
+
+			return super.cell(xf)
+		}
+	}
+
+	return { ...original, OdsStyleWriter: CountedWriter }
+})
+
 // An OpenDocument spreadsheet in a session of the sheet host: opened view-only, and each sheet feature reading its
 // ODF source (annotations, links, validations, filters, conditional formats, print ranges, protection) as it reads a
 // worksheet's.
 
-async function open(parts: OdsParts) {
+// `author`: the name notes are written under (an edit of a note needs one).
+async function open(parts: OdsParts, author?: string) {
 	const host = inThreadSheetHost()
 	const result = await host.open(
 		odsBytes(parts),
-		{ kind: "ods", slicing: IMMEDIATE, settings: { clock: () => Date.UTC(2023, 2, 15, 12) } },
+		{ kind: "ods", slicing: IMMEDIATE, settings: { clock: () => Date.UTC(2023, 2, 15, 12), ...(author !== undefined && { author }) } },
 		() => undefined
 	)
 
@@ -248,5 +306,178 @@ describe("an ODS save under way", () => {
 		expect(saved.ok ? "ok" : saved.reason).toBe("closed")
 		// The slice under way when it closed ends it: no further slice of the save runs.
 		expect(pausesAfterClose).toBeLessThanOrEqual(1)
+	})
+})
+
+describe("the check of an ODS edit", () => {
+	const RULE = {
+		type: "whole",
+		operator: "between",
+		value1: "1",
+		value2: "10",
+		allowBlank: true,
+		inCellDropdown: true,
+		showInputMessage: false,
+		promptTitle: "",
+		prompt: "",
+		showErrorMessage: false,
+		errorStyle: "stop",
+		errorTitle: "",
+		error: ""
+	} as const
+
+	const set = (sheet: number, row: number, col: number, input: string): SheetCommand => ({
+		type: "cells.set",
+		sheet,
+		cells: { rows: Uint32Array.of(row), cols: Uint16Array.of(col), inputs: [input] }
+	})
+
+	async function writable(parts: OdsParts) {
+		const opened = await open(parts, "Test")
+
+		expect(await opened.session.intent()).toEqual({ state: "writable" })
+
+		const run = async (command: SheetCommand): Promise<boolean> => (await opened.session.command(command)).ok
+
+		return { ...opened, run }
+	}
+
+	it("does not write a note's drawing again for a later edit that left the notes alone", async () => {
+		const original = ChangeLog.prototype.writePart
+		let drawn = 0
+		const spy = vi.spyOn(ChangeLog.prototype, "writePart").mockImplementation(function (
+			this: ChangeLog,
+			name: string,
+			write: XlsxPartWrite
+		) {
+			original.call(
+				this,
+				name,
+				name.endsWith(".vml")
+					? {
+							contentType: write.contentType,
+							write: (...args: Parameters<XlsxPartWrite["write"]>) => {
+								drawn++
+
+								return write.write(...args)
+							}
+						}
+					: write
+			)
+		})
+
+		try {
+			const { session, sheet, run } = await writable({ body: table("One", NUMBERS([1, 2, 3])) })
+
+			expect(await run({ type: "note.set", sheet, row: 0, col: 0, text: "a note" })).toBe(true)
+			expect(drawn).toBeGreaterThan(0)
+
+			const before = drawn
+
+			expect(await run(set(sheet, 1, 0, "5"))).toBe(true)
+			expect(await run(set(sheet, 2, 0, "6"))).toBe(true)
+			expect(drawn).toBe(before)
+
+			// A note shown all the time is still refused: the edit that shows it marks the drawing.
+			expect(await run({ type: "note.show", sheet, row: 0, col: 0, shown: true })).toBe(false)
+			session.close()
+		} finally {
+			spy.mockRestore()
+		}
+	})
+
+	it("says a sheet's validations again only for an edit that changed them or renamed a sheet", async () => {
+		const { session, sheet, run } = await writable({ body: table("One", NUMBERS([1, 2, 3])) })
+
+		expect(await run({ type: "validation.set", sheet, ranges: [{ startRow: 0, startCol: 1, endRow: 2, endCol: 1 }], rule: RULE })).toBe(
+			true
+		)
+
+		const afterRule = counted.validations
+
+		expect(await run(set(sheet, 1, 0, "5"))).toBe(true)
+		expect(counted.validations).toBe(afterRule)
+
+		// A rename changes the sheet name the rules are said under: they are said again.
+		expect(await run({ type: "sheet.rename", sheet, name: "Renamed" })).toBe(true)
+		expect(counted.validations).toBeGreaterThan(afterRule)
+
+		// A rule ODF cannot say is refused as before.
+		expect(
+			await run({
+				type: "validation.set",
+				sheet,
+				ranges: [{ startRow: 0, startCol: 2, endRow: 0, endCol: 2 }],
+				rule: { ...RULE, type: "list", value1: "=Sheet9:Sheet10!A1:A3", value2: "" }
+			})
+		).toBe(false)
+
+		// Undone and done again, the session saves what the checks accepted.
+		await session.undo()
+		await session.redo()
+		expect((await session.save()).ok).toBe(true)
+		session.close()
+	})
+
+	it("keeps a bounded number of formula texts and gives the same verdicts once it starts over", async () => {
+		const { session, sheet } = await writable({ body: table("One", NUMBERS([1])) })
+		const count = ODS_CHECK_BOUNDS.formulas + 8
+		const inputs = Array.from({ length: count }, (_, i) => `=A1+${String(i)}`)
+		const filled = await session.command({
+			type: "cells.set",
+			sheet,
+			cells: { rows: Uint32Array.from({ length: count }, (_, i) => i + 1), cols: new Uint16Array(count).fill(1), inputs }
+		})
+
+		expect(filled.ok).toBe(true)
+
+		// The first text was forgotten when the cache started over: said again, with the same verdict.
+		const said = counted.formulas.length
+		const again = await session.command(set(sheet, 0, 2, "=A1+0"))
+
+		expect(again.ok).toBe(true)
+		expect(counted.formulas.length).toBe(said + 1)
+
+		// The last ones are still known.
+		const known = await session.command(set(sheet, 0, 3, `=A1+${String(count - 1)}`))
+
+		expect(known.ok).toBe(true)
+		expect(counted.formulas.length).toBe(said + 1)
+		session.close()
+	})
+
+	it("starts its style writer over past its bound and keeps each format's verdict", async () => {
+		const { session, sheet } = await writable({ body: table("One", NUMBERS([1])) })
+		const firstWriter = counted.writers.length
+
+		for (let i = 0; i <= ODS_CHECK_BOUNDS.styles + 4; i++) {
+			const result = await session.command({
+				type: "format.apply",
+				sheet,
+				ranges: [{ startRow: i, startCol: 0, endRow: i, endCol: 0 }],
+				patch: { fill: 0x100000 + i }
+			})
+
+			expect(result.ok).toBe(true)
+		}
+
+		const writers = counted.writers.slice(firstWriter)
+
+		expect(writers.length).toBeGreaterThan(1)
+
+		for (const writer of writers) expect(writer.written).toBeLessThanOrEqual(ODS_CHECK_BOUNDS.styles + 4)
+
+		// A format checked before, given to another cell: its verdict is reused, nothing is planned.
+		const planned = counted.planned
+		const reused = await session.command({
+			type: "format.apply",
+			sheet,
+			ranges: [{ startRow: 0, startCol: 3, endRow: 0, endCol: 3 }],
+			patch: { fill: 0x100000 }
+		})
+
+		expect(reused.ok).toBe(true)
+		expect(counted.planned).toBe(planned)
+		session.close()
 	})
 })

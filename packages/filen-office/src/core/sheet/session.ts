@@ -47,7 +47,9 @@ import {
 	type SheetTilePatch,
 	type SheetWorkbookInfo,
 	type SheetWorkbookProtection,
-	type SheetWritability
+	type SheetWritability,
+	SheetSessionClosedError,
+	saveFailure
 } from "./protocol"
 import {
 	defineSheetFeature,
@@ -764,7 +766,7 @@ export class SheetSession<D extends SheetSessionDocument> implements SheetSessio
 		this.lastCall = Date.now()
 
 		const run = this.chain.then(() => {
-			if (this.closed) throw new Error("The session is closed")
+			if (this.closed) throw new SheetSessionClosedError("The session is closed")
 
 			return work()
 		})
@@ -1344,9 +1346,11 @@ export class SheetSession<D extends SheetSessionDocument> implements SheetSessio
 				encrypted: this.document.encrypted !== undefined,
 				changedParts: saved.changedParts
 			}
-		}).catch(
-			(error: unknown) => ({ ok: false, reason: "closed", message: error instanceof Error ? error.message : String(error) }) as const
-		)
+		}).catch((error: unknown): SheetSaveResult => ({
+			ok: false,
+			reason: saveFailure(error, options?.signal),
+			message: error instanceof Error ? error.message : String(error)
+		}))
 	}
 
 	export(

@@ -1,4 +1,5 @@
 import { PresentationError } from "../presentation/model"
+import { appendAll } from "../arrays"
 import type { AutonumberScheme } from "../presentation/text/autonum"
 import { tooLarge } from "../presentation/refusal"
 import { i16, i32, malformed, RT, u16, u32, utf16Text, type PptBudgets, type PptRecord } from "./records"
@@ -649,12 +650,6 @@ export function readMasterStyle9(data: Uint8Array, record: PptRecord): (ParaProp
 }
 
 const PP9_NAME = "___PPT9"
-const RT_PROG_BINARY_TAG = 0x138a
-const RT_BINARY_TAG_DATA_BLOB = 0x138b
-export const RT_STYLE_TEXT_PROP9 = 0x0fac
-export const RT_TEXT_MASTER_STYLE9 = 0x0fad
-export const RT_OUTLINE_TEXT_PROPS9 = 0x0fae
-export const RT_OUTLINE_TEXT_PROPS_HEADER = 0x0faf
 
 // A ProgTags container (DocProgTagsContainer, SlideProgTagsContainer, ShapeProgTagsContainer): the records of its "___PPT9" binary tag's data blob.
 export function pp9Records<R extends PptRecord>(data: Uint8Array, records: readonly R[], children: (record: R) => readonly R[]): R[] {
@@ -664,14 +659,14 @@ export function pp9Records<R extends PptRecord>(data: Uint8Array, records: reado
 		if (tags.type !== RT.progTags) continue
 
 		for (const tag of children(tags)) {
-			if (tag.type !== RT_PROG_BINARY_TAG) continue
+			if (tag.type !== RT.progBinaryTag) continue
 
 			const parts = children(tag)
 			const name = parts.find(part => part.type === RT.cString)
 
 			if (name === undefined || utf16Text(data, name.start, name.end) !== PP9_NAME) continue
 
-			for (const blob of parts) if (blob.type === RT_BINARY_TAG_DATA_BLOB) out.push(...children(blob))
+			for (const blob of parts) if (blob.type === RT.binaryTagData) appendAll(out, children(blob))
 		}
 	}
 
@@ -971,6 +966,8 @@ export function paragraphsOf(block: TextBlock): TextParagraph[] {
 		if (stop < 0) stop = text.length
 
 		const pfRun = pfRuns.at(start)
+		// Read before the run walk below moves the cursor past the paragraph's first run.
+		const firstCf = block.ext9 === undefined ? undefined : cfRuns.at(start)?.cf
 		const level = masterLevels.at(start)?.level ?? pfRun?.level ?? 0
 		const runs: TextRun[] = []
 		let from = start
@@ -1003,7 +1000,7 @@ export function paragraphsOf(block: TextBlock): TextParagraph[] {
 		flush(stop)
 
 		// The extension of the paragraph's first run's pp9rt (entry 0 when the run names none), as LibreOffice reads it.
-		const ext9 = block.ext9?.[cfRuns.at(start)?.cf.pp9 ?? 0]
+		const ext9 = block.ext9?.[firstCf?.pp9 ?? 0]
 		const pf = ext9 === undefined ? (pfRun?.pf ?? {}) : { ...pfRun?.pf, ...ext9 }
 
 		out.push({ level: Math.min(level, 4), pf, runs, end: cfRuns.at(stop)?.cf ?? {} })

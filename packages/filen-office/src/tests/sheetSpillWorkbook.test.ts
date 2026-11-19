@@ -11,6 +11,7 @@ import { SheetStore } from "../core/xlsx/model/store"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { compareRecords, modelRecord, readSaved } from "./fuzz/sheet/compare"
 import { buildXlsx } from "./oracles/sheet/synthetic"
+import { strictOf } from "./sheetDrawingsFixtures"
 import { openFixture } from "./sheetSessionFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
 
@@ -234,6 +235,58 @@ describe("dynamic arrays in a workbook", () => {
 		// A formula that gives one value is an ordinary one.
 		await set(session, sheet, "D1", "=SUM(A1:A3)")
 		expect((await saved(session)).sheet).toContain('<c r="D1"><f>SUM(A1:A3)</f><v>1</v></c>')
+		session.close()
+	})
+
+	it("in a Strict workbook, are read through its own metadata part, which a typed one reuses", async () => {
+		const { session, sheet } = await open(strictOf(workbook(SPILLING, METADATA)))
+
+		await set(session, sheet, "A2", "5")
+		expect(await texts(session, sheet, ["B1", "B2", "B3"])).toEqual(["10", "50", "30"])
+		await set(session, sheet, "C1", "=SEQUENCE(3)")
+		expect(await texts(session, sheet, ["C1", "C2", "C3"])).toEqual(["1", "2", "3"])
+
+		const { sheet: xml, files } = await saved(session)
+		const types = [...strFromU8(files["xl/_rels/workbook.xml.rels"] as Uint8Array).matchAll(/Type="([^"]*\/sheetMetadata)"/g)].map(
+			match => match[1]
+		)
+
+		expect(xml).toContain('<c r="C1" cm="1"><f t="array" ref="C1:C3">_xlfn.SEQUENCE(3)</f><v>1</v></c>')
+		expect(Object.keys(files).filter(name => name.startsWith("xl/metadata"))).toEqual(["xl/metadata.xml"])
+		expect(types).toEqual(["http://purl.oclc.org/ooxml/officeDocument/relationships/sheetMetadata"])
+		session.close()
+	})
+
+	it("make the metadata part next to a workbook part outside xl/, in the Strict namespace for a Strict workbook", async () => {
+		const files = unzipSync(strictOf(workbook('<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>')))
+		const moved: Record<string, Uint8Array> = {}
+
+		for (const [name, data] of Object.entries(files)) {
+			const text =
+				name.endsWith(".xml") || name.endsWith(".rels")
+					? strFromU8(data).replaceAll("/xl/", "/book/").replaceAll('"xl/', '"book/')
+					: null
+
+			moved[name.replace(/^xl\//, "book/")] = text === null ? data : strToU8(text)
+		}
+
+		const { session, sheet } = await open(zipSync(moved))
+
+		await set(session, sheet, "C1", "=SEQUENCE(3)")
+
+		const result = await session.save()
+
+		if (!result.ok) throw new Error(`${result.reason}: ${result.message}`)
+
+		const out = unzipSync(result.bytes)
+
+		expect(strFromU8(out["book/_rels/workbook.xml.rels"] as Uint8Array)).toMatch(
+			/Type="http:\/\/purl\.oclc\.org\/ooxml\/officeDocument\/relationships\/sheetMetadata" Target="metadata\.xml"/
+		)
+		expect(strFromU8(out["book/metadata.xml"] as Uint8Array)).toContain(
+			'<metadata xmlns="http://purl.oclc.org/ooxml/spreadsheetml/main"'
+		)
+		expect(Object.keys(out).some(name => name.startsWith("xl/"))).toBe(false)
 		session.close()
 	})
 

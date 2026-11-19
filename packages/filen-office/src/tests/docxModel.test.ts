@@ -19,6 +19,7 @@ import {
 	type DocxModel,
 	type StoryPart
 } from "@filen/office/core/docx"
+import { commentParagraphTexts } from "../core/docx/model/comments"
 import { modelProblems } from "./docxIntegrity"
 import { NAMESPACES, modelOf, p } from "./docxSynthetic"
 import { budget, cpuMs } from "./timing"
@@ -114,7 +115,23 @@ describe("paragraphs, runs and text", () => {
 		expect(itemsOf(part, Item.AnnotationMark)).toHaveLength(1)
 		expect(itemsOf(part, Item.ContentPart)).toHaveLength(1)
 		expect(part.document.name(part.node(first(part, Item.Opaque)))).toBe("w:fldData")
-		expect(part.paragraphText(first(part, Item.Paragraph))).toBe("a\t\n\f\f\n\n­‑\t")
+		expect(part.paragraphText(first(part, Item.Paragraph))).toBe("a\t\n\f\f\n\n\uf0e0\u00ad\u2011\t")
+	})
+
+	it("reads a comment's symbol as the character its font draws and a paragraph's as its code", async () => {
+		const run =
+			'<w:r><w:t xml:space="preserve">Done </w:t></w:r><w:r><w:sym w:font="Wingdings" w:char="F0FC"/><w:sym w:char="F0FC"/><w:noBreakHyphen/></w:r>'
+		const model = await sound({
+			body: `<w:p><w:commentRangeStart w:id="1"/>${run}<w:r><w:softHyphen/></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r></w:p>`,
+			comments: `<w:comment w:id="1" w:author="A"><w:p>${run}</w:p></w:comment>`
+		})
+		const comment = model.stories[model.comments[0]?.story ?? -1]
+
+		if (comment === undefined) throw new Error("no comment")
+
+		expect(body(model).paragraphText(first(body(model), Item.Paragraph))).toBe("Done \uf0fc\uf0fc\u2011\u00ad")
+		// Without a symbol font the code is kept.
+		expect(commentParagraphTexts(model.partOf(comment), comment.item)).toEqual(["Done \u2713\uf0fc\u2011"])
 	})
 
 	it("ignores proofErr and unwraps smartTag and customXml while keeping them", async () => {
@@ -845,6 +862,29 @@ describe("hostile and malformed input", () => {
 		})
 
 		expect(aliased.string(body(aliased).paragraphs.style[0] ?? -1)).toBe("X")
+	})
+
+	it("keeps bad references as written, searching for a reference's end within the value only", async () => {
+		const model = await modelOf({
+			body:
+				'<w:p><w:r><w:t xml:space="preserve">a&b c&#xZZ; &amp;&lt; d&very-long-name; e&</w:t></w:r></w:p>' +
+				`<w:p>${"<w:r><w:t>R&D</w:t></w:r>".repeat(4000)}</w:p>` +
+				// Megabytes after them with no ';'.
+				p("plain text ".repeat(400_000))
+		})
+		const part = body(model)
+		const texts = itemsOf(part, Item.Text)
+
+		expect(part.text(texts[0] ?? -1)).toBe("a&b c&#xZZ; &< d&very-long-name; e&")
+
+		const start = cpuMs()
+		let length = 0
+
+		for (let k = 1; k <= 4000; k++) length += part.text(texts[k] ?? -1).length
+
+		// With no ';' after them each bad '&' searched the rest of the part for one: seconds.
+		expect(cpuMs() - start).toBeLessThan(budget(250))
+		expect(length).toBe(4000 * 3)
 	})
 
 	it("keeps elements with unreadable start tags as opaque and never throws", async () => {

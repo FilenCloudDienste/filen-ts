@@ -7,8 +7,9 @@ import type { FreshPptx, PptxSaveInput, PptxSaveOptions, PptxSaveOutcome, PptxSo
 // Saving an encrypted deck ([MS-OFFCRYPTO] §2.3.4.10–§2.3.4.15): the package cannot stream (the compound file needs
 // the EncryptedPackage size up front), so it is zipped into memory, proved there (gate 2 of save.ts runs on the
 // in-memory path), then sealed as Agile under the session's key by the realm that holds it, and the sealed compound
-// file goes to the sink. A Standard source is sealed as Agile. Peak memory: the zip plus the sealed file, about 2.1×
-// the package.
+// file goes to the sink. A Standard source is sealed as Agile. Peak memory, measured by pptxSealPerf: about 3.0× the
+// package while the compound file is built (the zip, the EncryptedPackage stream and the compound file holding it),
+// then about 2.0× (the zip and the sealed file) for the read-back check and the write.
 
 // What seals a zip: the session's PackageSealer (dom/encryption), which seals and reads the result back before it
 // returns it. Structural, so the core never imports the realm that holds the key.

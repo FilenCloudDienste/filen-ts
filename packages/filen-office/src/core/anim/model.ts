@@ -1,6 +1,6 @@
 import type { Rgba } from "../drawingml/index"
 import type { MorphShape } from "./morph"
-import type { ColorModel, ShapeRef, SlideNode, SlideRef, SourceRef } from "../presentation/model"
+import type { ColorModel, ShapeRef, SlideRef, SourceRef } from "../presentation/model"
 
 // Timing and transitions, format-neutral (ECMA-376 §19.5 and §19.3.1.50; ODF SMIL animations map onto the same
 // tree). The player follows the tree, never the presetID: presets label the pane and feed authoring only.
@@ -236,9 +236,9 @@ export interface Transition {
 	src?: SourceRef
 }
 
-// The compiled, event-driven engine (core/anim/timegraph.ts implements it). State depends on the event history
-// (interactive sequences, onNext ends, nextAc="seek", restart, bookmarks), so sampling is pure for a given event
-// log and time.
+// The compiled, event-driven engine (compile, compileSource and instantiate in core/anim/timegraph.ts). State
+// depends on the event history (interactive sequences, onNext ends, nextAc="seek", restart, bookmarks), so sampling
+// is pure for a given event log and time.
 
 export interface CompiledTimegraph {
 	readonly slide: SlideRef
@@ -366,9 +366,4 @@ export interface TimingBudgets {
 	// repeatCount × dur is capped at this much schedule.
 	readonly scheduleMs: number
 	readonly eventsPerShow: number
-}
-
-export interface TimegraphEngine {
-	compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBudgets): CompiledTimegraph
-	instantiate(graph: CompiledTimegraph): TimegraphInstance
 }

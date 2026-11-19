@@ -415,17 +415,19 @@ export function conditionalTile(context: SheetReadContext<XlsxDocument>, tile: S
 	const looks = new TileLook(document, model, tile)
 	const rightToLeft = model.view.rightToLeft
 
-	for (let index = 0; index < covered.length; index++) {
-		if (covered[index] === 0) continue
+	formats.pass(() => {
+		for (let index = 0; index < covered.length; index++) {
+			if (covered[index] === 0) continue
 
-		const row = range.startRow + Math.floor(index / TILE_COLS)
-		const col = range.startCol + (index % TILE_COLS)
-		const slot = store.locate(row, col)
-		const value = slot < 0 ? null : slotValue(document, model, row, col, slot)
-		const look = formats.look(rules, covers, index, value, row, col, looks.rgb, rightToLeft)
+			const row = range.startRow + Math.floor(index / TILE_COLS)
+			const col = range.startCol + (index % TILE_COLS)
+			const slot = store.locate(row, col)
+			const value = slot < 0 ? null : slotValue(document, model, row, col, slot)
+			const look = formats.look(rules, covers, index, value, row, col, looks.rgb, rightToLeft)
 
-		if (look !== null) looks.apply(row, col, value, look)
-	}
+			if (look !== null) looks.apply(row, col, value, look)
+		}
+	})
 
 	looks.layers.finish(tile)
 }

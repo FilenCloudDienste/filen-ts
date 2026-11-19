@@ -116,6 +116,7 @@ function savedFile(context: Parameters<PdfRequestHandler<"verifySignatures">>[0]
 	readonly open: OpenDocument
 	readonly bytes: FileBytes
 	readonly document: Mupdf.PDFDocument
+	readonly password: string | undefined
 } {
 	const open = context.open()
 	const editing = open.role === "edit"
@@ -123,9 +124,11 @@ function savedFile(context: Parameters<PdfRequestHandler<"verifySignatures">>[0]
 
 	// Never needsPassword() on the document being edited or verified: on an authenticated document MuPDF drops the
 	// access it granted. The editor's own read-only copy is unlocked with the document's password.
-	if (!editing) return { open, bytes, document: open.document }
+	if (!editing) return { open, bytes, document: open.document, password: open.password }
 
-	return { open, bytes, document: openUnlocked(context.mupdf, bytes.handle(bytes.length), open.edit?.password) }
+	const password = open.edit?.password
+
+	return { open, bytes, document: openUnlocked(context.mupdf, bytes.handle(bytes.length), password), password }
 }
 
 // The signatures of the file as it now is, as this engine reads them (pdf.js's shape): what a verifier cross-checks
@@ -143,7 +146,7 @@ export const signatureHintsRequest: PdfRequestHandler<"signatureHints"> = contex
 export function verifySignaturesRequest(subtle: PdfSubtle): PdfRequestHandler<"verifySignatures"> {
 	return async (context, { fields }) => {
 		const { mupdf } = context
-		const { open, bytes, document } = savedFile(context)
+		const { open, bytes, document, password } = savedFile(context)
 
 		try {
 			const report = await verifyPdfSignatures(
@@ -152,7 +155,9 @@ export function verifySignaturesRequest(subtle: PdfSubtle): PdfRequestHandler<"v
 				{
 					subtle,
 					createDigest: createPdfDigest,
-					openRevision: length => openOn(mupdf, bytes.handle(length)),
+					// Unlocked like the current document: an encrypted revision read undecrypted would differ from it
+					// everywhere. One that stays locked makes its signature unverifiable.
+					openRevision: length => openUnlocked(mupdf, bytes.handle(length), password),
 					expectedFields: fields
 				}
 			)

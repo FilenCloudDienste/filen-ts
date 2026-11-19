@@ -332,6 +332,31 @@ describe("pptx transition markup", () => {
 		expect(markup({ ...sound, sound: { kind: "stop" } })).toBe("<p:transition><p:fade/><p:sndAc><p:endSnd/></p:sndAc></p:transition>")
 	})
 
+	it("reads p:transition: kind, options, speed, advance, and an ECMA Choice's p14:dur", () => {
+		expect(comparable(read(slideXml('<p:transition spd="slow" advClick="0" advTm="3000"><p:push dir="u"/></p:transition>')))).toEqual({
+			kind: "push",
+			namespace: "p",
+			options: [["dir", "u"]],
+			durationMs: 1000,
+			advance: { onClick: false, afterMs: 3000 }
+		})
+		expect(read(slideXml('<p:transition spd="slow" advClick="0"><p:push/></p:transition>'))?.speed).toBe("slow")
+		expect(read(slideXml('<p:transition><p:fade thruBlk="1"/></p:transition>'))).toMatchObject({
+			kind: "fade",
+			options: { thruBlk: true },
+			durationMs: 500
+		})
+		expect(
+			read(
+				slideXml(
+					'<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" Requires="p14">' +
+						'<p:transition spd="slow" p14:dur="2000"><p:wipe dir="d"/></p:transition></mc:Choice>' +
+						'<mc:Fallback><p:transition spd="slow"><p:wipe dir="d"/></p:transition></mc:Fallback></mc:AlternateContent>'
+				)
+			)
+		).toMatchObject({ kind: "wipe", namespace: "p", durationMs: 2000, options: { dir: "d" } })
+	})
+
 	it("reads a file's transition: the Choice it understands, its Fallback, its sound", () => {
 		const ripple = read(
 			slideXml(
@@ -621,7 +646,7 @@ describe("transition apply", () => {
 		for (const back of result.inverse.ops) applyTransition.apply(deck, back as never, context)
 
 		expect(first.transition?.kind).toBe("wipe")
-		expect(transitionRaw(first.transition as Transition)).toBe(source)
+		expect(transitionRaw(first.transition as Transition)).toStrictEqual(source)
 		expect(deck.nodes.get(slideRef(2))?.transition).toBeUndefined()
 		expect(applyTransition.touches({ family: "transition", kind: "set", slides: deck.slides, transition: fade })).toHaveLength(3)
 	})

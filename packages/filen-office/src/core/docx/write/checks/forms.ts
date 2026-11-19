@@ -1,6 +1,7 @@
 import { joinBytes } from "../../../opc/index"
 import { NodeKind, Namespaces, parseXml, type XmlDocument } from "../../../xml/index"
 import { BindingStores } from "../../forms/binding"
+import { CHECKED_GLYPH, UNCHECKED_GLYPH } from "../../forms/controls"
 import type { StoryPart } from "../../model/index"
 import { Ns } from "../../model/namespaces"
 import { partReader, type PartReader } from "../../model/reader"
@@ -53,8 +54,8 @@ function checkControl(name: string, reader: PartReader, sdt: number): void {
 		const checkedNode = reader.child(checkbox, Ns.W14, "checked")
 		const value = checkedNode < 0 ? undefined : reader.attr(checkedNode, Ns.W14, "val")
 		const checked = checkedNode >= 0 && value !== "0" && value !== "false" && value !== "off"
-		const on = glyph(reader, checkbox, "checkedState", 0x2612)
-		const off = glyph(reader, checkbox, "uncheckedState", 0x2610)
+		const on = glyph(reader, checkbox, "checkedState", CHECKED_GLYPH)
+		const off = glyph(reader, checkbox, "uncheckedState", UNCHECKED_GLYPH)
 		const text = contentText(reader, content)
 		const wanted = checked ? on : off
 		const other = checked ? off : on

@@ -13,8 +13,8 @@ import type { CheckedPart, CheckInput, DocxCheck } from "./index"
 // field codes stay in their paragraph (no more of either fault than the source part had: a code over a
 // paragraph mark hides the text after it), a new bookmark start has its end and a name of at most 40 characters
 // that no other bookmark written has (a document's names are unique: ECMA-376 Part 1 §17.13.6.2), and a
-// bookmark end the save added has its start written. A field character Word was asked to update (w:dirty,
-// which SuperDoc's writer drops) keeps the flag wherever the field it begins is still there: as many are
+// bookmark end the save added has its start written. A field character Word was asked to update (w:dirty)
+// keeps the flag wherever the field it begins is still there: as many are
 // written as the editor's documents still hold. A REF or PAGEREF naming a bookmark the document no longer has
 // is let through: a user may delete a bookmark a field refers to, and Word keeps such a field (an update shows
 // "Error! Bookmark not defined."); a bookmark the editor holds and the writer lost fails the paragraph

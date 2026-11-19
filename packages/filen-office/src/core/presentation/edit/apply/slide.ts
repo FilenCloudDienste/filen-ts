@@ -16,10 +16,12 @@ import {
 import type { ApplyContext, ApplyFamily, ApplyResult, Dirt, Touch } from "../apply"
 import { cloneModel, findShape, sameDigest } from "../changes"
 import { holdDiagramCopies } from "./smartart"
+import { heldChart, isHeldChart } from "./chart"
+import { namesLostImage, reinstateInsertedImage } from "./picture"
 import { planDelete, sectionsAfterInsert, sectionsAfterMove, type JumpRewrite, type PartOf, type ReferenceFacts } from "../integrity"
 import type { DeckOp, ImportedSlide, NotesOp, OpOf, RawPart, SlideOp } from "../ops"
 import { applyNotes } from "./notes"
-import { type SourceReading } from "./shape"
+import { replacingDelete, type SourceReading } from "./shape"
 import { isRefused } from "../../refusal"
 
 // The slide ops on the model, in place, with the integrity graph's model half (edit/integrity.ts): a delete takes
@@ -449,16 +451,30 @@ export function rebindEpoch(value: unknown, epoch: number): void {
 	}
 }
 
-function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: SlideSourceReading): ApplyResult<typeof op> {
-	const entries = op.slides
-	const restored: SlideRef[] = []
+// A chart frame among `shapes` (or their children) naming a version the registry let go of.
+function lostChart(deck: Deck, shapes: readonly ShapeNode[]): boolean {
+	return shapes.some(
+		shape =>
+			(shape.frame?.kind === "chart" && isHeldChart(shape.frame.part) && heldChart(deck, shape.frame.part) === undefined) ||
+			(shape.children !== undefined && lostChart(deck, shape.children))
+	)
+}
 
-	for (const entry of [...entries].sort((a, b) => a.at - b.at)) {
-		if (deck.slides.includes(entry.ref)) return refused("malformed", `slide ${String(entry.ref)} is in the deck`)
+// Atomic: every entry's nodes are read first, and the deck changes only once none was refused (an undo refused half
+// way would leave slides back that no history step accounts for, and every retry refused as "in the deck").
+function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: SlideSourceReading): ApplyResult<typeof op> {
+	const sorted = [...op.slides].sort((a, b) => a.at - b.at)
+	const read: { readonly entry: RestoreEntry; readonly nodes: readonly SlideNode[]; readonly live: boolean }[] = []
+
+	const seen = new Set<SlideRef>()
+
+	for (const entry of sorted) {
+		if (deck.slides.includes(entry.ref) || seen.has(entry.ref)) return refused("malformed", `slide ${String(entry.ref)} is in the deck`)
+
+		seen.add(entry.ref)
 
 		const typed = entry.nodes?.map(node => clone(node))
 		const main = typed?.[0]
-		let nodes: readonly SlideNode[]
 
 		if (
 			main !== undefined &&
@@ -466,24 +482,44 @@ function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: S
 		) {
 			// A slide an op made, or parts still in the package as they were: the held nodes' refs are live (bound to the
 			// package as it is now, a save's rebase since the delete gave it a new epoch).
-			nodes = typed ?? []
+			const nodes = typed ?? []
+			const live = context.epoch !== undefined && entry.parts.length > 0
 
-			if (context.epoch !== undefined && entry.parts.length > 0) {
-				for (const node of nodes) rebindEpoch(node, context.epoch)
+			if (live) for (const node of nodes) rebindEpoch(node, context.epoch)
 
-				context.restoredLive?.(entry.ref, entry.parts)
-			}
+			read.push({ entry, nodes, live })
 		} else {
-			const read = context.readSlides(entry.ref, entry.parts)
+			const parts = context.readSlides(entry.ref, entry.parts)
 
-			if (isRefused(read)) return read
+			if (isRefused(parts)) return parts
 
-			nodes = typed === undefined ? read : typed.map((node, index) => overlayNode(node, read[index]))
+			read.push({
+				entry,
+				nodes: typed === undefined ? parts : typed.map((node, index) => overlayNode(node, parts[index])),
+				live: false
+			})
 		}
 
-		const slide = nodes[0]
+		if (read[read.length - 1]?.nodes[0] === undefined) return refused("malformed", "a restore without its slide")
+	}
 
-		if (slide === undefined) return refused("malformed", "a restore without its slide")
+	// A cut's slides pasted back after the history let go of what they name: no save could write a slide naming an image
+	// or a chart version the registries let go of. The images the cut took along come back under their own ids.
+	for (const { entry, nodes } of read) {
+		const carried = entry.images === undefined ? undefined : new Set(entry.images.map(image => image.id))
+
+		if (namesLostImage(deck, nodes, carried)) return refused("notFound", "an image no longer held")
+		if (nodes.some(node => lostChart(deck, node.shapes))) return refused("stale", "a chart version no longer held")
+	}
+
+	for (const { entry } of read) for (const { id, image } of entry.images ?? []) reinstateInsertedImage(deck, id, image)
+
+	const restored: SlideRef[] = []
+
+	for (const { entry, nodes, live } of read) {
+		const slide = nodes[0] as SlideNode
+
+		if (live) context.restoredLive?.(entry.ref, entry.parts)
 
 		slide.ref = entry.ref
 
@@ -716,21 +752,16 @@ function setLayout(deck: Deck, op: OpOf<"slide"> & { kind: "setLayout" }, contex
 
 		if (isRefused(raw)) return raw
 
-		back.push(
-			{ family: "shape", kind: "delete", slide: op.slide, shapes: [shape.id] },
-			{
-				family: "shape",
-				kind: "insert",
-				slide: op.slide,
-				shape: clone(shape),
-				index,
-				...(raw === undefined ? {} : { raw: raw.slice() })
-			}
-		)
+		back.push(replacingDelete(op.slide, [shape.id]), {
+			family: "shape",
+			kind: "insert",
+			slide: op.slide,
+			shape: clone(shape),
+			index,
+			...(raw === undefined ? {} : { raw: raw.slice() })
+		})
 		renumbered.push({ shape, idx })
 	}
-
-	for (const { shape, idx } of renumbered) if (shape.ph !== undefined) shape.ph = { ...shape.ph, idx, idxWritten: true }
 
 	// The inverse's setLayout renumbers too: a placeholder it would renumber that this op left alone is put back
 	// as it is now, after it.
@@ -739,25 +770,25 @@ function setLayout(deck: Deck, op: OpOf<"slide"> & { kind: "setLayout" }, contex
 
 	if (previous?.kind === "layout") {
 		for (const [index, shape] of node.shapes.entries()) {
-			if (shape.ph === undefined || shape.lock !== undefined || moved.has(shape) || !renumbers(previous, shape)) continue
+			if (shape.ph === undefined || shape.lock !== undefined || moved.has(shape) || renumbers(previous, shape) === undefined) continue
 
 			const raw = shape.src === undefined ? undefined : context.sourceBytes(shape.src)
 
 			if (isRefused(raw)) return raw
 
-			back.push(
-				{ family: "shape", kind: "delete", slide: op.slide, shapes: [shape.id] },
-				{
-					family: "shape",
-					kind: "insert",
-					slide: op.slide,
-					shape: clone(shape),
-					index,
-					...(raw === undefined ? {} : { raw: raw.slice() })
-				}
-			)
+			back.push(replacingDelete(op.slide, [shape.id]), {
+				family: "shape",
+				kind: "insert",
+				slide: op.slide,
+				shape: clone(shape),
+				index,
+				...(raw === undefined ? {} : { raw: raw.slice() })
+			})
 		}
 	}
+
+	// Renumbered only once nothing can refuse: a refusal above leaves the slide as it was.
+	for (const { shape, idx } of renumbered) if (shape.ph !== undefined) shape.ph = { ...shape.ph, idx, idxWritten: true }
 
 	node.parent = op.layout
 	node.revision++

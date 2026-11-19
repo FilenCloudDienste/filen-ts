@@ -10,12 +10,15 @@ import { preparePassword } from "../../../core/pdfwrite/crypto"
 import { PdfWriteError } from "../../../core/pdfwrite/errors"
 import { PdfWriter, type PdfAbortSignal, type PdfDocumentProperties, type PdfOutput } from "../../../core/pdfwrite/writer"
 import { parseHeaderFooter, type HeaderFooterStyle, type HeaderFooterValues } from "../../../core/sheet/print/headerFooter"
+import { cellKey, cellKeyCol, cellKeyRow } from "../../../core/sheet/model/model"
 import { MAX_PRINT_PAGES, type PrintPage } from "../../../core/sheet/print/paginate"
 import type { SheetHeaderImage, SheetPrintNote } from "../../../core/sheet/print/xlsx"
 import {
 	CellFlag,
 	TILE_COLS,
 	TILE_ROWS,
+	tilePositionCol,
+	tilePositionRow,
 	type SheetAbortSignal,
 	type SheetFileKind,
 	type SheetId,
@@ -43,6 +46,7 @@ import {
 	NOTE_LINE_PX,
 	blackAndWhite,
 	chartPlacement,
+	labelText,
 	layOutPrint,
 	MAX_PAGE_CELLS,
 	pageCount,
@@ -153,13 +157,10 @@ function familyOf(name: string | null | undefined, fallback: string): string {
 	return name !== null && name !== undefined && name !== "" ? name : fallback
 }
 
-// A cell's key in a page's maps.
-function cellKey(row: number, col: number): number {
-	return row * 16_384 + col
-}
-
 // Cells one slice of a large page draws (printSlices.ts).
 const PDF_SLICE_CELLS = 32_768
+// Table rows written between two turns for the host.
+const TABLE_ROWS_PER_TURN = 256
 
 // A large page's table, written a slice at a time: its node once a slice has text, and the columns every row has
 // (those of any cell the page's tiles hold, so that rows stay regular before every slice is drawn).
@@ -195,7 +196,6 @@ class SheetPdfExport {
 		this.environment = environment
 		this.fonts = new PdfFontSet({
 			assets: environment.assets,
-			deterministic: environment.deterministic === true,
 			...(environment.signal !== undefined && { signal: environment.signal })
 		})
 		this.shapes = new PdfShapeCache(this.fonts)
@@ -211,6 +211,14 @@ class SheetPdfExport {
 
 	private aborted(): void {
 		if (this.signal?.aborted === true) throw Object.assign(new Error("The PDF export was aborted"), { name: "AbortError" })
+	}
+
+	// A turn for the host between pieces of one page, once the writer's slice clock is up (never without slicing): an
+	// abort sent as a message is heard, and the session serves the grid meanwhile. Never inside marked content.
+	private async turn(): Promise<void> {
+		this.aborted()
+		await this.writer?.yieldIfDue()
+		this.aborted()
 	}
 
 	// A text measure for what the print lays out itself (the notes it lists): the export's own faces, loaded first.
@@ -252,11 +260,17 @@ class SheetPdfExport {
 		let job: PrintJob | null = null
 
 		try {
-			// The faces the notes list measures with, loaded before it is laid out.
-			await this.load("Cell: Note:", defaultFace("Calibri"))
-			await this.load("Cell: Note:", defaultFace("Calibri", true))
+			// The notes list is measured and drawn in the base style's family, its faces loaded for the list's texts
+			// before they are measured.
+			job = await layOutPrint(base, request.sheets, this.measure, MAX_PRINT_PAGES, {
+				family: familyOf(this.styles[0]?.font, "Calibri"),
+				prepare: async (family, texts) => {
+					const text = texts.join("\n")
 
-			job = await layOutPrint(base, request.sheets, this.measure, MAX_PRINT_PAGES)
+					await this.load(text, defaultFace(family))
+					await this.load(text, defaultFace(family, true))
+				}
+			})
 			this.job = job
 
 			if (job.more) return { ok: false, reason: "tooManyPages", pages: pageCount(job) }
@@ -375,7 +389,7 @@ class SheetPdfExport {
 			at.width / POINTS_PER_PX,
 			at.height / POINTS_PER_PX
 		]
-		const node = writer.open("Figure", { alt: `Chart: ${sheet.name}`, bbox: box })
+		const node = writer.open("Figure", { alt: labelText(sheet.labels.chartSheet, "name", sheet.name), bbox: box })
 
 		page.beginContent(node)
 		await paintDrawingPdf(this.drawingContext(page, sheet.setup.blackAndWhite), data, [
@@ -468,11 +482,8 @@ class SheetPdfExport {
 	// A large page's cells, slice by slice (printSlices.ts), in one table.
 	private async slices(sheet: PrintJobSheet, printPage: PrintPage, base: Matrix, page: PdfPage, index: number): Promise<void> {
 		const fetch = (coordinates: Uint32Array): Promise<SheetTile[]> => this.tiles(sheet.sheet, coordinates)
-		const between = (): Promise<void> => {
-			this.aborted()
-
-			return Promise.resolve()
-		}
+		// Edits the session runs during a turn reach the slices after it, as they reach the pages after a page.
+		const between = (): Promise<void> => this.turn()
 		const survey: PageSurvey | null = await surveyPage(printPage, fetch, MAX_PAGE_CELLS, between)
 
 		if (survey === null) throw new PrintPageTooLarge(index + 1)
@@ -525,7 +536,7 @@ class SheetPdfExport {
 				this.aborted()
 			}
 
-			this.aborted()
+			await this.turn()
 
 			const canvas = new PdfCanvas({ page, shapes: this.shapes, base, gray, tagged: true })
 
@@ -575,7 +586,7 @@ class SheetPdfExport {
 		for (const tile of tiles) {
 			for (let entry = 0; entry < tile.count; entry++) {
 				const position = tile.positions[entry] ?? 0
-				const row = tile.tileRow * TILE_ROWS + (position >>> 5)
+				const row = tile.tileRow * TILE_ROWS + tilePositionRow(position)
 
 				// The page's own rows (a tile reaches past them), every column of them (a text running on from a cell
 				// beside the page is drawn on it), and the first rows of merged cells reaching into the page.
@@ -631,7 +642,9 @@ class SheetPdfExport {
 
 				const position = tile.positions[entry] ?? 0
 
-				linked.add(cellKey(tile.tileRow * TILE_ROWS + (position >>> 5), tile.tileCol * TILE_COLS + (position & 31)))
+				linked.add(
+					cellKey(tile.tileRow * TILE_ROWS + tilePositionRow(position), tile.tileCol * TILE_COLS + tilePositionCol(position))
+				)
 			}
 		}
 
@@ -647,10 +660,10 @@ class SheetPdfExport {
 		const byRow = new Map<number, number[]>()
 
 		for (const key of cells) {
-			const row = Math.floor(key / 16_384)
+			const row = cellKeyRow(key)
 			const list = byRow.get(row) ?? []
 
-			list.push(key % 16_384)
+			list.push(cellKeyCol(key))
 			byRow.set(row, list)
 		}
 
@@ -661,8 +674,12 @@ class SheetPdfExport {
 		if (sliced !== null) sliced.node ??= writer.open("Table")
 
 		const table = sliced?.node ?? writer.open("Table")
+		let rows = 0
 
 		for (const row of [...byRow.keys()].sort(titlesFirst(printPage.titleRows))) {
+			// Between rows no marked content is open.
+			if (++rows % TABLE_ROWS_PER_TURN === 0) await this.turn()
+
 			const tr = writer.open("TR")
 			const own = new Set(byRow.get(row))
 			let empty = 0
@@ -707,6 +724,10 @@ class SheetPdfExport {
 			gap()
 			writer.close(tr)
 		}
+
+		// A cell given text by an edit run during a turn, in a column the page's survey did not see, has no place in
+		// the table: its text is drawn all the same, as an artifact.
+		for (const key of canvas.keptCells()) canvas.drawArtifact(key)
 
 		if (sliced === null) writer.close(table)
 	}
@@ -828,7 +849,7 @@ class SheetPdfExport {
 			const at = place(box)
 			const alt = object.alt !== "" ? object.alt : object.name
 			const node = writer.open("Figure", {
-				alt: alt === "" ? (object.chartPart !== undefined ? "Chart" : "Picture") : alt,
+				alt: alt === "" ? (object.chartPart !== undefined ? sheet.labels.chart : sheet.labels.picture) : alt,
 				bbox: [base[0] * at.x + base[4], base[3] * at.y + base[5], base[0] * at.width, base[3] * at.height]
 			})
 
@@ -1025,7 +1046,6 @@ class SheetPdfExport {
 	private async notesList(sheet: PrintJobSheet, notes: NotesPage, page: PdfPage): Promise<void> {
 		const writer = this.writer as PdfWriter
 		const { area } = sheet.pagination
-		const family = familyOf(this.styles[0]?.font, "Calibri")
 
 		for (const [k, line] of notes.lines.entries()) {
 			if (line.text === "") continue
@@ -1036,7 +1056,7 @@ class SheetPdfExport {
 			await this.text(
 				page,
 				line.text,
-				defaultFace(family, line.bold),
+				defaultFace(notes.family, line.bold),
 				area.x / POINTS_PER_PX,
 				(area.y + LIST_FONT_PT + k * LIST_LINE_PT) / POINTS_PER_PX,
 				LIST_FONT_PT * PX_PER_POINT,

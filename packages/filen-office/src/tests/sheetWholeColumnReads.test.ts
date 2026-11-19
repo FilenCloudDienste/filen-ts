@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { FormulaEngine, type EngineSheet } from "../core/sheet/formula/index"
+import { engineCellFormula, engineSpillFormula, storedFormula } from "../core/sheet/refs/formulaRefs"
 import { cells, firstTile, openFixture, tileEntry } from "./sheetSessionFixtures"
 import { budget } from "./timing"
 
@@ -12,6 +13,14 @@ function engine(rows: EngineSheet["rows"], held: string[] = []): FormulaEngine {
 }
 
 const LAST = 1_048_575
+
+function formula(text: string): string {
+	return engineCellFormula(storedFormula(text)) ?? ""
+}
+
+function spillFormula(text: string): string {
+	return engineSpillFormula(storedFormula(text)) ?? ""
+}
 
 describe("whole-column references after a cell in the grid's last row", () => {
 	it("keep an edit feeding whole-column SUMIFS fast", { timeout: 60_000 }, async () => {
@@ -157,6 +166,90 @@ describe("whole-column references ending at their columns' cells", () => {
 			])
 
 			expect(built.result(0, 0, 4)).toEqual({ value: 60 })
+		} finally {
+			built.destroy()
+		}
+	})
+
+	// A dynamic array writes the cells it spills straight into the engine: whole-column and whole-row references
+	// read them though they land past the cells written before.
+	it("read the cells a dynamic array spills below a column's or past a row's other cells", () => {
+		const built = engine([
+			[null, null, formula("SUM(A:A)")],
+			[null, 1],
+			[null, null, null, null, formula("SUM(2:2)")]
+		])
+
+		try {
+			expect(built.result(0, 0, 2)).toEqual({ value: 0 })
+
+			built.set(0, [{ row: 0, col: 0, content: spillFormula("SEQUENCE(10)"), spill: { rows: 1, cols: 1 } }])
+
+			expect(built.result(0, 9, 0)).toEqual({ value: 10 })
+			expect(built.result(0, 0, 2)).toEqual({ value: 55 })
+
+			built.set(0, [{ row: 0, col: 5, content: formula("SUM(A:A)") }])
+
+			expect(built.result(0, 0, 5)).toEqual({ value: 55 })
+
+			built.set(0, [{ row: 1, col: 6, content: spillFormula("SEQUENCE(1,10)"), spill: { rows: 1, cols: 1 } }])
+
+			expect(built.result(0, 1, 15)).toEqual({ value: 10 })
+			expect(built.result(0, 2, 4)).toEqual({ value: 58 })
+
+			// Shrunk: the cells it no longer reaches are read as empty.
+			built.set(0, [{ row: 0, col: 0, content: spillFormula("SEQUENCE(3)") }])
+
+			expect(built.result(0, 0, 2)).toEqual({ value: 6 })
+		} finally {
+			built.destroy()
+		}
+	})
+
+	// A large spill is written in parts, each calculated: every part's cells are read, not only the first part's.
+	it("read every cell of a dynamic array spilled in several parts", () => {
+		const built = engine([[null, null, formula("SUM(A:A)")], [], [null, null, null, null, formula("SUM(2:2)")]])
+
+		try {
+			built.set(0, [{ row: 0, col: 0, content: spillFormula("SEQUENCE(10000)"), spill: { rows: 1, cols: 1 } }])
+
+			expect(built.result(0, 9_999, 0)).toEqual({ value: 10_000 })
+			expect(built.result(0, 0, 2)).toEqual({ value: 50_005_000 })
+
+			built.set(0, [{ row: 0, col: 5, content: formula("SUM(A:A)") }])
+
+			expect(built.result(0, 0, 5)).toEqual({ value: 50_005_000 })
+
+			built.set(0, [{ row: 1, col: 6, content: spillFormula("SEQUENCE(1,10000)"), spill: { rows: 1, cols: 1 } }])
+
+			expect(built.result(0, 1, 10_005)).toEqual({ value: 10_000 })
+			// The row's A2 (2) of the column's spill too.
+			expect(built.result(0, 2, 4)).toEqual({ value: 50_005_002 })
+		} finally {
+			built.destroy()
+		}
+	})
+
+	it("read the cells a dynamic array spills on its first calculation after the build, past the file's cells", () => {
+		const anchor = spillFormula("SEQUENCE(B1)")
+		const built = new FormulaEngine(
+			[
+				{
+					name: "S",
+					rows: [[anchor, 1, formula("SUM(A:A)")]],
+					formulas: [{ row: 0, col: 0, content: anchor, spill: { rows: 1, cols: 1 } }]
+				}
+			],
+			[]
+		)
+
+		try {
+			expect(built.result(0, 0, 2)).toEqual({ value: 1 })
+
+			built.set(0, [{ row: 0, col: 1, content: 10 }])
+
+			expect(built.result(0, 9, 0)).toEqual({ value: 10 })
+			expect(built.result(0, 0, 2)).toEqual({ value: 55 })
 		} finally {
 			built.destroy()
 		}

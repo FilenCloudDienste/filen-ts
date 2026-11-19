@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { ShapeNode, SlideRef } from "../core/presentation/model"
+import { sessionEdits } from "../dom/presentation/engine/edit"
 import { odpParts } from "../dom/presentation/engine/open/odp"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { viewCapability } from "../dom/presentation/engine/view"
@@ -9,6 +10,7 @@ import { liveHeap } from "./liveHeap"
 import { odpBytes, page } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
+import { tableDeck } from "./presentationObjectsFixtures"
 
 // What a session holds across saves: the reading an ODP save's rebase replaced is let go at once (not at the next
 // render), and the faces the session measured with stay prepared, so the page is not sent them again after every save.
@@ -89,4 +91,54 @@ describe("a session across saves", () => {
 			expect(events.filter(event => event.type === "fonts")).toHaveLength(fonts)
 		})
 	}
+})
+
+// Every "raw:" document the session holds (its names are numbered from 1), and how many of them the package adopted.
+function heldRaw(d: Awaited<ReturnType<typeof driveSession>>): { readonly held: number; readonly adopted: number } {
+	const edits = sessionEdits(d.session)
+	const parts = pptxParts(d.session.deck)
+	let held = 0
+	let adopted = 0
+
+	for (let k = 1; k <= 256; k++) {
+		if (edits.rawDocument(`raw:${String(k)}`) !== undefined) held++
+		if (parts?.document(`raw:${String(k)}`) !== undefined) adopted++
+	}
+
+	return { held, adopted }
+}
+
+describe("a source-backed table's ops", () => {
+	beforeAll(installTestRealm)
+	afterAll(() => installPresentationRealm(undefined))
+
+	it("hold no reading of the frame they only compared, and still undo and redo across a save", async () => {
+		const d = await driveSession(tableDeck(), "pptx")
+		const [slide] = d.session.deck.slides
+
+		if (slide === undefined) throw new Error("no slide")
+
+		await viewCapability.render(d.context, [slide])
+
+		const target = { slide, id: 3 }
+		const before = heldRaw(d)
+		const ops = 6
+
+		for (let k = 0; k < ops; k++)
+			expect(await d.command({ family: "table", kind: "insertRows", target, at: 1, count: 1 })).toMatchObject({ ok: true })
+
+		expect(heldRaw(d)).toEqual(before)
+
+		for (let k = 0; k < ops; k++) expect(await d.undo()).toMatchObject({ ok: true })
+		for (let k = 0; k < ops; k++) expect(await d.redo()).toMatchObject({ ok: true })
+
+		expect((await d.save()).result.kind).toBe("written")
+
+		for (let k = 0; k < ops; k++) expect(await d.undo()).toMatchObject({ ok: true })
+		for (let k = 0; k < ops; k++) expect(await d.redo()).toMatchObject({ ok: true })
+
+		const frame = d.session.deck.nodes.get(slide)?.shapes.find(shape => shape.id === 3)?.frame
+
+		expect(frame?.kind === "table" ? frame.table.rows.length : 0).toBe(2 + ops)
+	})
 })

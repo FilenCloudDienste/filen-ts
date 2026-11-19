@@ -1,5 +1,6 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import {
+	ARRAY_ARGUMENTS,
 	calcError,
 	rawNumber,
 	SheetFunctionPlugin,
@@ -13,7 +14,6 @@ import {
 
 // Array shaping functions as support.microsoft.com defines them, and TYPE.
 
-const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
 const SHAPE = {
 	parameters: [
 		{ argumentType: FunctionArgumentType.RANGE },

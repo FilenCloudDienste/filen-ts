@@ -52,6 +52,8 @@ export interface SlideShowProps {
 	// Accessible names of an animation trigger and of a text link.
 	readonly triggerLabel?: (layer: SlideLayer) => string
 	readonly linkLabel?: (link: DocxLinkTarget) => string
+	// Accessible name of a medium's keyboard hotspot (it plays or pauses the medium, or runs its trigger).
+	readonly mediaLabel?: (layer: SlideLayer) => string
 	// The show builds its activator from it (jumps navigate the show); `actions` is used as given otherwise.
 	readonly policy?: PresentationActionPolicy
 	readonly actions?: PresentationActionActivator
@@ -104,7 +106,8 @@ function playerProps(props: SlideShowProps): PlayerProps {
 			action: (action, layer) =>
 				props.actionLabel?.(action, layer) ?? layer.alt ?? (action.kind === "url" ? action.href : String(layer.shape.id)),
 			trigger: layer => props.triggerLabel?.(layer) ?? layer.alt ?? String(layer.shape.id),
-			link: link => props.linkLabel?.(link) ?? link.tooltip ?? (link.kind === "external" ? link.href : link.anchor)
+			link: link => props.linkLabel?.(link) ?? link.tooltip ?? (link.kind === "external" ? link.href : link.anchor),
+			media: layer => props.mediaLabel?.(layer) ?? layer.alt ?? layer.media?.kind ?? String(layer.shape.id)
 		}
 	}
 }

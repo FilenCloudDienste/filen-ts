@@ -7,6 +7,7 @@ import { DEFAULT_PAGE_SETUP, readPageSetup, type SheetPageSetup, type SheetPrint
 import { xlsxPrintFeature } from "../core/sheet/print/xlsx"
 import type { SheetSessionApi } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
+import { transferables } from "../dom/sheet/messages"
 import { ZipArchive } from "../core/opc/zipReader"
 import { MAX_METAFILE_BYTES } from "../core/metafile/index"
 import { withMedia } from "./sheetDrawingsFixtures"
@@ -461,11 +462,14 @@ describe("print settings in a session", () => {
 	it("changes nothing when the choices are what the file has", async () => {
 		const { session, bytes } = await open(PRINTED)
 
-		await session.command({
-			type: "print.setup",
-			sheet: 0,
-			patch: { orientation: "portrait", paperSize: 9, scale: 100, gridLines: false }
-		})
+		// Accepted, not refused: a refusal leaves the same state.
+		changeOf(
+			await session.command({
+				type: "print.setup",
+				sheet: 0,
+				patch: { orientation: "portrait", paperSize: 9, scale: 100, gridLines: false }
+			})
+		)
 
 		expect((await session.query("print.settings", { sheet: 0 }))?.setup.orientation).toBe("portrait")
 		expect(parts(await savedBytes(session))["xl/worksheets/sheet1.xml"]).toBe(parts(bytes)["xl/worksheets/sheet1.xml"])
@@ -562,5 +566,21 @@ describe("header pictures", () => {
 		expect(first).toMatchObject([{ position: "CH", image: { kind: "drawing" } }])
 		expect(await session.query("print.headerImages", { sheet: 0 })).toEqual(first)
 		expect(names.filter(name => name === "xl/media/image1.emf")).toHaveLength(1)
+	})
+
+	it("answers every layout with buffers of its own, as a worker transfers them", async () => {
+		const { session } = await openFixture(headerPicture(rectangle(brush(emf(), 1, 0x0000ff), 0, 0, 500, 250).build()))
+		const posted = async () => {
+			const answer = await session.query("print.headerImages", { sheet: 0 })
+			const transfer = transferables(answer)
+
+			expect(transfer.length).toBeGreaterThan(0)
+
+			return structuredClone(answer, { transfer })
+		}
+		const first = await posted()
+
+		expect(first).toMatchObject([{ position: "CH", image: { kind: "drawing" } }])
+		expect(await posted()).toEqual(first)
 	})
 })

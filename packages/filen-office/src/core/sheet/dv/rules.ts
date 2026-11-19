@@ -1,7 +1,8 @@
 import type { SheetRange } from "../protocol"
 import { parseSqref } from "../../xlsx/refs/sqref"
 import { booleanAttribute, childByLocal, childElements } from "../../xlsx/read/styleRecords"
-import { encodeUtf8, parseXml, XmlError, type XmlDocument } from "../../xml/index"
+import type { XmlDocument } from "../../xml/index"
+import { parseSections } from "../cf/rules"
 
 // A sheet's data validations (ECMA-376 Part 1 §18.3.1.32 dataValidation, §18.3.1.33 dataValidations) and the
 // Excel 2010 ones in the worksheet's extLst ([MS-XLSX] §2.6.65 x14:dataValidations, uri
@@ -55,16 +56,6 @@ const OPERATORS: ReadonlySet<string> = new Set([
 	"greaterThanOrEqual"
 ])
 
-function parse(markup: string): XmlDocument | null {
-	try {
-		return parseXml(encodeUtf8(`<sections>${markup}</sections>`))
-	} catch (error) {
-		if (error instanceof XmlError) return null
-
-		throw error
-	}
-}
-
 function formulaOf(document: XmlDocument, node: number, local: "formula1" | "formula2"): string | null {
 	const child = childByLocal(document, node, local)
 
@@ -110,7 +101,7 @@ export function readValidations(sections: readonly string[], extLst: string | nu
 	const rules: DvRule[] = []
 
 	for (const markup of sections) {
-		const document = parse(markup)
+		const document = parseSections(markup)
 
 		if (document === null) continue
 
@@ -127,7 +118,7 @@ export function readValidations(sections: readonly string[], extLst: string | nu
 		}
 	}
 
-	const ext = extLst === null ? null : parse(extLst)
+	const ext = extLst === null ? null : parseSections(extLst)
 
 	for (const list of ext === null ? [] : childElements(ext, ext.documentElement())) {
 		if (ext === null || ext.localName(list) !== "extLst") continue

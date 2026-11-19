@@ -5,7 +5,7 @@ import { DEFAULT_PAGE_SETUP, type SheetPageSetup } from "../core/sheet/print/set
 import { tileKey, type SheetRange } from "../core/sheet/protocol"
 import { SheetGridModel } from "../react/sheet/model"
 import { renderPrintPage } from "../react/sheet/print/printJob"
-import { layOutPrint, pageCount, printPageAt, PrintPageTooLarge } from "../react/sheet/print/printLayout"
+import { layOutPrint, pageCount, printPageAt, PrintPageTooLarge, type PrintLabels } from "../react/sheet/print/printLayout"
 import { clampRanges } from "../react/sheet/print/printPage"
 import { SvgCanvas } from "../react/sheet/print/svgCanvas"
 import { KEPT, SOLD, barChart, chartFixture } from "./sheetChartFixtures"
@@ -161,7 +161,7 @@ async function printed(count: number, setup: SheetPageSetup = SETUP) {
 }
 
 // Every page of a one-sheet print over `bytes`, printing its used range with `setup`.
-async function pages(bytes: Uint8Array, setup: Partial<SheetPageSetup>): Promise<string[]> {
+async function pages(bytes: Uint8Array, setup: Partial<SheetPageSetup>, labels?: PrintLabels): Promise<string[]> {
 	const model = await openModel(bytes)
 	const settings = await model.session.query("print.settings", { sheet: 0 })
 
@@ -175,7 +175,8 @@ async function pages(bytes: Uint8Array, setup: Partial<SheetPageSetup>): Promise
 				name: "S",
 				setup: { ...settings.setup, ...setup },
 				ranges: settings.used === null ? [] : [settings.used],
-				used: settings.used
+				used: settings.used,
+				...(labels !== undefined && { labels })
 			}
 		],
 		MEASURE
@@ -326,6 +327,64 @@ describe("what a sheet's print settings change on paper", () => {
 		expect(shown[0]).toContain(">second</text>")
 		expect(shown[0]).not.toContain("first note")
 		expect((await pages(bytes, {}))[0]).not.toContain('fill="#ffffe1"')
+	})
+
+	it("writes the characters XML forbids in a cell, a note and a header as spaces, so every page parses", async () => {
+		// Vertical tab, NUL, the DOS end-of-file mark and a lone surrogate, as a file's _xHHHH_ escapes give them.
+		const escaped = "_x000B_x_x0000_y_x001A_z_xD800_"
+		const raw = "\u000Bx\u0000y\u001Az\uD800"
+		const comments = NOTES.parts?.["xl/comments1.xml"]
+		const bytes = buildFixture({
+			...NOTES,
+			sheets: NOTES.sheets.map((sheet, k) =>
+				k === 0
+					? {
+							...sheet,
+							body: `<sheetData><row r="2"><c r="B2" t="inlineStr"><is><t>cell${escaped}end</t></is></c></row></sheetData><legacyDrawing r:id="rId2"/>`
+						}
+					: sheet
+			),
+			parts: {
+				...NOTES.parts,
+				"xl/comments1.xml": { type: comments?.type ?? "", text: (comments?.text ?? "").replace("first note", `note${escaped}end`) }
+			}
+		})
+		const printed = await pages(bytes, {
+			cellComments: "atEnd",
+			headerFooter: { ...DEFAULT_PAGE_SETUP.headerFooter, odd: { header: `&Chead${raw}end`, footer: "" } }
+		})
+		const forbidden = (markup: string): boolean =>
+			[...markup].some(char => {
+				const code = char.codePointAt(0) ?? 0
+
+				return (
+					(code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) ||
+					code === 0xfffe ||
+					code === 0xffff ||
+					(code >= 0xd800 && code <= 0xdfff)
+				)
+			})
+
+		expect(printed).toHaveLength(2)
+		expect(printed.join("")).toContain("cell")
+		expect(printed[0]).toContain(" x y z end")
+		expect(printed[1]).toContain("note x y z end")
+		expect(printed[0]).toContain("head")
+
+		for (const markup of printed) {
+			expect(forbidden(markup)).toBe(false)
+			expect(new DOMParser().parseFromString(markup, "image/svg+xml").querySelector("parsererror")).toBeNull()
+		}
+	})
+
+	it("lists the notes in the words it is given", async () => {
+		const labels = { cell: "Zelle: {cell}", note: "Notiz: {note}", chart: "Diagramm", picture: "Bild", chartSheet: "Diagramm: {name}" }
+		const atEnd = await pages(buildFixture(NOTES), { cellComments: "atEnd" }, labels)
+
+		expect(atEnd[1]).toContain(">Zelle: B2</text>")
+		expect(atEnd[1]).toContain(">Notiz: Ann:")
+		expect(atEnd[1]).not.toContain("Cell: ")
+		expect(atEnd[1]).not.toContain("Note: ")
 	})
 
 	it("places an object across a page break on both pages, clipped at each page's edge, and grows the used range over it", async () => {

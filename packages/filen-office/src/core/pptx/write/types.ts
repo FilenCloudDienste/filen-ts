@@ -109,10 +109,9 @@ export interface PptxEmitFamily {
 
 // The source a save copies from: the archive over the base ByteSource and its package.
 // What the writer needs of the open deck's part map (PptxParts has it): a node's part ("/ppt/slides/slide3.xml"),
-// a slide's p:sldId, the node a part is, and the base source's generation.
+// the node a part is, and the base source's generation.
 export interface PptxPartIndex {
 	partOf(ref: SlideRef): string | undefined
-	slideId(ref: SlideRef): number | undefined
 	refOf(part: string): SlideRef | undefined
 	readonly epoch: number
 }

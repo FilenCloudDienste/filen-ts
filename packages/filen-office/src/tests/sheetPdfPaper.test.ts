@@ -158,4 +158,60 @@ describe("a sheet's PDF on a hostile paper size", () => {
 		expect(done).toEqual([])
 		session.close()
 	}, 120_000)
+
+	it("hears a cancel sent as a message while a large page is drawn, between its slices", async () => {
+		// One page of 600 rows by 80 columns at 10 % on A3: 48,000 cells, drawn in two slices.
+		const { session, info } = await opened(grid(600, 80, 'paperSize="8" scale="10"'))
+		const asked = await request(session, info)
+		const signal = { aborted: false }
+		let after = 0
+
+		const watched = new Proxy(session, {
+			get(target, key, receiver) {
+				if (key !== "query") return Reflect.get(target, key, receiver) as unknown
+
+				return (name: string, ...rest: unknown[]) => {
+					if (name !== "print.tiles")
+						return (target.query as (...args: unknown[]) => Promise<unknown>).call(target, name, ...rest)
+
+					if (signal.aborted) after++
+					// The first read of the page's cells sends the cancel, which arrives as a message would: a task later.
+					else
+						setTimeout(() => {
+							signal.aborted = true
+						}, 0)
+
+					return (target.query as (...args: unknown[]) => Promise<unknown>).call(target, name, ...rest)
+				}
+			}
+		})
+
+		// A slice clock always due, its pause a task: the turns a worker gives.
+		const slicing = { sliceMs: 0, now: () => 0, pause: () => new Promise<void>(resolve => setTimeout(resolve, 0)) }
+
+		await expect(
+			exportSheetPdf(asked, { session: watched, assets: nodeFontAssets, deterministic: true, signal, slicing })
+		).rejects.toThrow("aborted")
+		// Stopped inside the page: no slice's cells were read once the cancel arrived.
+		expect(after).toBe(0)
+		session.close()
+	}, 120_000)
+
+	it("draws a large page in slices to the same bytes with a slice clock as without one", async () => {
+		const { session, info } = await opened(grid(600, 80, 'paperSize="8" scale="10"'))
+		const asked = await request(session, info)
+		const plain = await exportSheetPdf(asked, { session, assets: nodeFontAssets, deterministic: true })
+		const sliced = await exportSheetPdf(asked, {
+			session,
+			assets: nodeFontAssets,
+			deterministic: true,
+			slicing: { sliceMs: 0, now: () => 0, pause: () => new Promise<void>(resolve => setTimeout(resolve, 0)) }
+		})
+
+		if (!plain.ok || !sliced.ok) throw new Error("not exported")
+
+		expect(plain.pages).toBe(1)
+		expect(pdfBytes(sliced.output.parts as never)).toEqual(pdfBytes(plain.output.parts as never))
+		session.close()
+	}, 120_000)
 })

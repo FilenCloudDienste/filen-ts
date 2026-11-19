@@ -88,6 +88,28 @@ describe("BINOM.DIST.RANGE", () => {
 			)
 		).toEqual(["!#NUM!", "!#NUM!", "!#NUM!", "!#NUM!", "!#VALUE!"])
 	})
+
+	it("answers a huge trial count at once instead of summing for ever", () => {
+		const started = performance.now()
+		const answers = values(
+			"BINOM.DIST.RANGE(2E+16,0.5,0,2E+16)",
+			"BINOM.DIST.RANGE(1E+17,0.5,0,1E+17)",
+			"BINOM.DIST.RANGE(1E+15,0.3,0,1E+15)",
+			"BINOM.DIST.RANGE(1E+16,0.3,3E+15)"
+		)
+
+		expect(answers).toEqual(["!#NUM!", "!#NUM!", "!#NUM!", "!#NUM!"])
+		expect(performance.now() - started).toBeLessThan(1_000)
+	})
+
+	it("sums a large trial count within the precision it keeps", () => {
+		const started = performance.now()
+		const [whole, lower] = values("BINOM.DIST.RANGE(1E+9,0.5,0,1E+9)", "BINOM.DIST.RANGE(1E+9,0.5,0,500000000)") as number[]
+
+		expect(whole).toBeCloseTo(1, 5)
+		expect(lower).toBeCloseTo(0.5, 4)
+		expect(performance.now() - started).toBeLessThan(1_000)
+	})
 })
 
 describe("ERF.PRECISE and ERFC.PRECISE", () => {

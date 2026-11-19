@@ -135,6 +135,11 @@ function thumbBytes(bitmap: BitmapLike): number {
 	return bitmap.width * bitmap.height * 4
 }
 
+// An aborted call rejects with the "aborted" reason (a PresentationError, or an error carrying it).
+function isAbort(error: unknown): boolean {
+	return typeof error === "object" && error !== null && (error as { readonly reason?: unknown }).reason === "aborted"
+}
+
 function noticeKey(notice: PresentationNotice): string {
 	return JSON.stringify(notice)
 }
@@ -158,6 +163,9 @@ class Store implements PresentationStore {
 	// the change it waits out (a render asked for before it is still stale).
 	private readonly staleRenders = new Map<SlideRef, number>()
 	private changes = 0
+	// Slides whose render the worker refused, each with the change it failed at: not asked for again until the deck
+	// changes or the window moves (a refusal is answered at once, so asking again would spin).
+	private readonly failedRenders = new Map<SlideRef, number>()
 	// The open window's slides still to arrive by "slides" events.
 	private readonly streamed = new Set<SlideRef>()
 	// The run of render calls for the current window: a new window starts a new run, which ends the old one.
@@ -370,7 +378,12 @@ class Store implements PresentationStore {
 			for (const index of distance === 0 ? [center] : [center + distance, center - distance]) {
 				const ref = slides[index]?.ref
 
-				if (ref !== undefined && (!this.renders.has(ref) || this.staleRenders.has(ref)) && !this.pendingRenders.has(ref))
+				if (
+					ref !== undefined &&
+					(!this.renders.has(ref) || this.staleRenders.has(ref)) &&
+					!this.pendingRenders.has(ref) &&
+					this.failedRenders.get(ref) !== this.changes
+				)
 					out.push(ref)
 			}
 		}
@@ -408,8 +421,12 @@ class Store implements PresentationStore {
 				await fonts
 
 				if (!this.disposed) this.addRenders(renders, { ref, change })
-			} catch {
-				// Aborted, closed or refused: a later window asks again.
+			} catch (error) {
+				// Refused while the run and the connection still stand: not asked for again until a change or a moved
+				// window. Aborted or closed: a later window asks again.
+				if (run === this.run && !this.disposed && this.connection?.session === session && !isAbort(error)) {
+					this.failedRenders.set(ref, this.changes)
+				}
 			} finally {
 				this.pendingRenders.delete(ref)
 
@@ -429,6 +446,9 @@ class Store implements PresentationStore {
 		}
 
 		let dropped = false
+
+		// A moved window asks again for the slides that failed.
+		this.failedRenders.clear()
 
 		for (const ref of this.renders.keys()) {
 			if (!this.inWindow(ref, center)) {
@@ -459,6 +479,8 @@ class Store implements PresentationStore {
 
 		// A changed slide keeps its render until the new one arrives (asked for again below).
 		const change = ++this.changes
+
+		for (const ref of event.slides) this.failedRenders.delete(ref)
 
 		for (const ref of event.slides) if (this.renders.has(ref) || this.pendingRenders.has(ref)) this.staleRenders.set(ref, change)
 

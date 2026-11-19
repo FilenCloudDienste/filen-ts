@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource, ContentTypes, parseContentTypes, type ByteSource, type ZipEntry } from "@filen/office/core/opc"
 import { strToU8 } from "fflate"
-import { checkPackage, confirmMedia, imageDimensions, imageWithinBudget, MEDIA_LIMITS, sniffMedia } from "../core/opc/mediaPolicy"
+import {
+	checkPackage,
+	checkStructure,
+	confirmMedia,
+	imageDimensions,
+	imageWithinBudget,
+	MEDIA_LIMITS,
+	sniffMedia
+} from "../core/opc/mediaPolicy"
 import { openPptx } from "../core/pptx/package"
-import { buildPptx, sp } from "./pptxFixtures"
+import { buildPptx, declare, sp } from "./pptxFixtures"
 
 // The package limits and media classes of presentations: hostile declared sizes are refused from the central
 // directory, before any entry they describe is read; an entry is media only when a media relationship, an audio
@@ -11,25 +19,6 @@ import { buildPptx, sp } from "./pptxFixtures"
 
 const GIB = 1024 * 1024 * 1024
 const MIB = 1024 * 1024
-
-// Rewrites the declared uncompressed size of `name` in both its local header and its central-directory record (a
-// zip that lies about how large an entry inflates).
-function declare(zip: Uint8Array, name: string, size: number): Uint8Array {
-	const out = zip.slice()
-	const view = new DataView(out.buffer)
-	const wanted = strToU8(name)
-	const matches = (at: number, nameAt: number, length: number): boolean =>
-		length === wanted.length && wanted.every((byte, index) => out[nameAt + index] === byte) && at >= 0
-
-	for (let at = 0; at + 46 <= out.length; at++) {
-		const signature = view.getUint32(at, true)
-
-		if (signature === 0x04034b50 && matches(at, at + 30, view.getUint16(at + 26, true))) view.setUint32(at + 22, size, true)
-		if (signature === 0x02014b50 && matches(at, at + 46, view.getUint16(at + 28, true))) view.setUint32(at + 24, size, true)
-	}
-
-	return out
-}
 
 // A source that records the ranges it hands out.
 function recorded(bytes: Uint8Array): ByteSource & { readonly ranges: [number, number][] } {
@@ -189,6 +178,32 @@ const TYPES: ContentTypes = parseContentTypes(
 	)
 )
 
+describe("checkStructure", () => {
+	const LIMIT = 64 * MIB
+
+	it("holds the content types part to the structure budget in any case or percent-encoding", () => {
+		for (const name of [
+			"[Content_Types].xml",
+			"[CONTENT_TYPES].XML",
+			"[content_types].xml",
+			"%5BContent_Types%5D.xml",
+			"/[Content_Types].xml"
+		]) {
+			expect(checkStructure([entry(name, LIMIT + 1)], LIMIT)).toMatchObject({ kind: "tooLarge", part: name, class: "other" })
+		}
+	})
+
+	it("holds a relationships part named with a percent-encoded or upper-case .rels to the structure budget", () => {
+		for (const name of ["_rels/.rel%73", "ppt/_rels/presentation.xml.RELS", "ppt/slides/_rels/slide1.xml.%72els"]) {
+			expect(checkStructure([entry(name, LIMIT + 1)], LIMIT)).toMatchObject({ kind: "tooLarge", part: name, class: "other" })
+		}
+	})
+
+	it("leaves other parts to the package check", () => {
+		expect(checkStructure([entry("ppt/media/a.mp4", LIMIT + 1), entry("Content_Types.xml", LIMIT + 1)], LIMIT)).toBeUndefined()
+	})
+})
+
 describe("checkPackage", () => {
 	it("classes media, images and other parts with their own limits", () => {
 		const media = new Set(["ppt/media/a.mp4"])
@@ -307,6 +322,57 @@ describe("image decode budget", () => {
 		const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0x01, 0xe0, 0x02, 0x80, 3, 0, 0, 0])
 
 		expect(imageDimensions(jpeg)).toEqual({ width: 640, height: 480 })
+	})
+
+	it("reads no JPEG size past FF 00, which a length walk would take to a fake frame header", () => {
+		const sof = (size: number): number[] => [
+			0xff,
+			0xc0,
+			0,
+			0x11,
+			8,
+			size >> 8,
+			size & 0xff,
+			size >> 8,
+			size & 0xff,
+			3,
+			1,
+			0x22,
+			0,
+			2,
+			0x11,
+			1,
+			3,
+			0x11,
+			1
+		]
+		// FF 00 00 20 lands a length walk 36 bytes in, inside the comment after the real SOF0.
+		const jpeg = Uint8Array.from([
+			0xff,
+			0xd8,
+			0xff,
+			0,
+			0,
+			0x20,
+			...sof(23_000),
+			0xff,
+			0xfe,
+			0,
+			28,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			...sof(1),
+			0xff,
+			0xd9
+		])
+
+		expect([jpeg[36], jpeg[37]]).toEqual([0xff, 0xc0])
+		expect(imageDimensions(jpeg)).toBeUndefined()
 	})
 
 	it("refuses an image declaring more than 50 M pixels", () => {

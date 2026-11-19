@@ -3,7 +3,8 @@ import type { DocxModel } from "../model/document"
 import { Ns } from "../model/namespaces"
 import { partReader } from "../model/reader"
 import type { NotePositionProps } from "../props/types"
-import type { NoteNumbers, PageValues, StoryContext } from "./content"
+import { NOTE_SEPARATOR_WIDTH, type NoteNumbers, type PageValues, type StoryContext } from "./content"
+import { ref, refItem, refPart } from "./edits"
 import { numberText } from "./fields"
 import type { Engine, FootnoteSink, PageFrame } from "./flow"
 import { PageGraphic, Layer, PageOutput, Region, SourceFlag } from "./output"
@@ -97,6 +98,8 @@ export class NoteNumbering implements NoteNumbers {
 	pageNotes: () => number = () => 0
 	// References numbered in the paragraph being built.
 	private paragraphRefs = 0
+	// The keys of the per-page numbers given on the page so far, in order (see forgetPageRefs).
+	private readonly pageRefs: number[] = []
 
 	constructor(model: DocxModel) {
 		this.documentFootnotes = readNotePr(model, model.settings.footnotePr, false)
@@ -122,6 +125,25 @@ export class NoteNumbering implements NoteNumbers {
 
 	startPage(): void {
 		if (this.footnotes.restart === "eachPage") this.footnoteNext = this.footnotes.start
+
+		this.pageRefs.length = 0
+	}
+
+	// How many per-page numbers the page has given so far: where forgetPageRefs() goes back to.
+	get pageRefCount(): number {
+		return this.pageRefs.length
+	}
+
+	// Forgets the per-page numbers given since `count` (a paragraph or keep chain taken off the page): built again
+	// on the next page, their references count from that page's notes. The note marks are set again with them.
+	forgetPageRefs(count: number): void {
+		const refs = this.pageRefs
+
+		if (count >= refs.length) return
+
+		for (let k = count; k < refs.length; k++) this.assigned.delete(refs[k] ?? -1)
+
+		refs.length = count
 	}
 
 	// Numbering state to restart layout from.
@@ -146,9 +168,8 @@ export class NoteNumbering implements NoteNumbers {
 
 		for (const [key, text] of this.assigned) {
 			const reference = Math.floor(key / 2)
-			const part = Math.floor(reference / 0x4000000)
 
-			if (keep(part, reference - part * 0x4000000)) out.push([key, text])
+			if (keep(refPart(reference), refItem(reference))) out.push([key, text])
 		}
 
 		return out
@@ -157,20 +178,24 @@ export class NoteNumbering implements NoteNumbers {
 	// Forgets the numbers of references in parts for which `drop` holds (layout numbers them again), then
 	// takes `kept` back.
 	forgetAssigned(drop: (part: number) => boolean, kept: readonly (readonly [number, string])[]): void {
-		for (const key of this.assigned.keys()) if (drop(Math.floor(key / 2 / 0x4000000))) this.assigned.delete(key)
+		for (const key of this.assigned.keys()) if (drop(refPart(Math.floor(key / 2)))) this.assigned.delete(key)
 
 		for (const [key, text] of kept) this.assigned.set(key, text)
 	}
 
 	reference(endnote: boolean, part: number, item: number, story: number): string {
-		const key = (part * 0x4000000 + item) * 2 + (endnote ? 1 : 0)
+		const key = ref(part, item) * 2 + (endnote ? 1 : 0)
 
-		// Per-page numbering is decided where the paragraph is first built: after the notes already on its page.
-		// Kept for the run like other numbers, so a paragraph built again (layout restarted at a page it waited
-		// built for) shows what it showed.
+		// Per-page numbering is decided where the paragraph is built: after the notes already on its page. Kept for
+		// the run like other numbers, so a paragraph built again (layout restarted at a page it waited built for)
+		// shows what it showed; a paragraph taken off its page forgets them (forgetPageRefs). References on the
+		// continuation lines of a split paragraph and blocks built ahead (table cells) stay numbered against the
+		// page they were built on: numbering where the notes are placed would cover them.
 		if (!endnote && this.footnotes.restart === "eachPage") {
 			const index = this.paragraphRefs++
 			let text = this.assigned.get(key)
+
+			this.pageRefs.push(key)
 
 			if (text === undefined) {
 				text = numberText(this.footnotes.start + this.pageNotes() + index, this.footnotes.format)
@@ -448,6 +473,9 @@ export class FootnoteArea implements FootnoteSink {
 	private laid(story: number, from?: PlacedNote): LaidNote {
 		let laid = this.cache.get(story)
 
+		// Numbered again since (per-page numbers of a paragraph moved to the next page, forgetPageRefs).
+		if (laid !== undefined && from === undefined && laid.mark !== (this.engine.notes.marks.get(story) ?? "")) laid = undefined
+
 		if (laid === undefined) {
 			const values = from?.values ?? this.values
 			const frame = from?.frame ?? this.frame
@@ -522,7 +550,7 @@ export class FootnoteArea implements FootnoteSink {
 				Layer.TEXT,
 				this.left,
 				y + points(6),
-				continued ? this.width : Math.min(this.width, 192),
+				continued ? this.width : Math.min(this.width, NOTE_SEPARATOR_WIDTH),
 				1
 			)
 

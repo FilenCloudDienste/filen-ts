@@ -16,7 +16,7 @@ import { planRefEdit, type RefPlan } from "../refs/plan"
 import { relationshipType } from "../write/index"
 import type { XlsxDocument } from "./document"
 import { StyleLimitError, appendXf, reportLogged } from "./format"
-import type { RecalculatedCell } from "../../sheet/formula/index"
+import type { FormulaEngine, RecalculatedCell } from "../../sheet/formula/index"
 import { CellLog, rowState, type CellState } from "./history"
 
 // Rows and columns inserted or deleted, and sheets added and renamed. Every construct that refers to cells moves
@@ -110,6 +110,10 @@ export async function moveAxis(
 
 	if (!document.allReady) return locked("unreadSheet")
 
+	// An engine an earlier edit dropped (a moved defined name, a failed recalculation) is built from the cells as
+	// they stand, so this edit is what it recalculates.
+	await document.engineBeforeRows(changes)
+
 	const model = target.model as XlsxSheetModel
 	const store = model.store as SheetStore
 
@@ -152,14 +156,25 @@ export async function moveAxis(
 		document.shiftShown(sheet, edit)
 		document.structureChanged()
 	}
-	const engineForward = async (clock: SliceClock | undefined): Promise<RecalculatedCell[]> =>
-		engine === null || index < 0
+	// The engine live when the edit is made or redone, its index of the sheet then: one built since the edit (none
+	// there was then, or it was dropped) is moved too, or it would keep the rows the workbook no longer has.
+	const liveEngine = (): { engine: FormulaEngine; index: number } | null => {
+		const live = document.engine
+		const at = document.engineIndex(sheet)
+
+		return live === null || at < 0 ? null : { engine: live, index: at }
+	}
+	const engineForward = async (clock: SliceClock | undefined): Promise<RecalculatedCell[]> => {
+		const live = liveEngine()
+
+		return live === null
 			? []
 			: await document.guardedSliced(() =>
 					type === "insert"
-						? engine.insertSliced(index, axis, at, count, clock)
-						: engine.removeSliced(index, axis, at, count, clock)
+						? live.engine.insertSliced(live.index, axis, at, count, clock)
+						: live.engine.removeSliced(live.index, axis, at, count, clock)
 				)
+	}
 	const report = (sink: SheetChangeSink): void => {
 		for (const [formulaSheet] of plan.formulaCells) {
 			// On the edited sheet, cells past `at` are in the moved region, which `moved` invalidates.
@@ -183,7 +198,7 @@ export async function moveAxis(
 	// Before the engine's own move, one indivisible call: a turn whatever the slice holds, so it runs in a task of its
 	// own and our work around it never shares one with it.
 	const turnBeforeEngine = async (clock: SliceClock | undefined): Promise<void> => {
-		if (clock !== undefined && engine !== null && index >= 0) await clock.pause()
+		if (clock !== undefined && liveEngine() !== null) await clock.pause()
 	}
 	const clock = clockOf()
 
@@ -211,13 +226,17 @@ export async function moveAxis(
 			await document.loadTables()
 			await turn(clock)
 
-			const live = document.engine
+			// The engine now live: one built since a deletion holds no record of it, and is dropped (inserting).
+			const live = liveEngine()
 
-			if (clock !== undefined && live !== null && index >= 0) await clock.pause()
+			if (clock !== undefined && live !== null) await clock.pause()
 
-			if (live !== null && index >= 0) {
+			if (live !== null) {
 				await document.guardedSliced(() =>
-					type === "insert" ? live.removeSliced(index, axis, at, count, clock) : live.insertSliced(index, axis, at, count, clock)
+					// The edit's undo, so told: a deletion's puts back the defined names it cut.
+					type === "insert"
+						? live.engine.removeSliced(live.index, axis, at, count, clock, true)
+						: live.engine.insertSliced(live.index, axis, at, count, clock, true)
 				)
 
 				if (type === "delete") {
@@ -583,6 +602,10 @@ export async function addSheet(
 			if (engine !== null && document.engineSheets.at(-1) === id) {
 				await document.guardedSliced(() => engine.removeLastSheetSliced(clock))
 				document.engineSheets.pop()
+			} else if (engine !== null && document.engineIndex(id) >= 0) {
+				// An engine built since the sheet was added holds it in the workbook's order, not last: it cannot take the
+				// sheet out, and the next edit builds one without it.
+				document.dropEngine()
 			}
 
 			await document.restoreLogSliced(log, "before", clock)
@@ -590,7 +613,7 @@ export async function addSheet(
 			sink.sheets()
 		},
 		redo: async sink => {
-			workbook.changes.addRelationship(workbook.workbookPart, { type: relationship.type, target: relationship.target })
+			workbook.changes.readdRelationship(workbook.workbookPart, relationship)
 			await added(sink)
 		}
 	}

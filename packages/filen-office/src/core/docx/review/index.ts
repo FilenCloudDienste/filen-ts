@@ -5,7 +5,9 @@ import { changedRanges } from "../edit/invariants/core"
 import { docxSchema, survivorsOf, type MarkerList } from "../edit/schema"
 import { fieldUpdateOf } from "../fields/evaluate"
 import { equationChanges } from "../math/edit"
-import type { StoryPart } from "../model/index"
+import { RevisionFlag, type StoryPart } from "../model/index"
+import type { CellOverrides, RowOverrides, TableOverrides } from "../edit/tables/map"
+import type { ParagraphChange } from "./track"
 import type { Slicing } from "../../slicing"
 
 // Where a story's comments and tracked changes are, kept up to date edit by edit: positions are mapped
@@ -89,6 +91,12 @@ export function revisionMarkId(mark: Mark): string {
 
 // A change with neither id nor source (a block the editor recorded) counts on its own.
 const ANONYMOUS = "#-1"
+
+// Whether `id` names no change of its own (one the editor recorded, or a block without id or source): such
+// entries are counted, accepted and rejected one by one, never by id.
+export function anonymousChangeId(id: string): boolean {
+	return id === ANONYMOUS || id.startsWith("new:")
+}
 
 // Entries found in a range, in document order.
 class Found {
@@ -557,7 +565,7 @@ export class ReviewIndex {
 			const map = isComment(kind) ? this.comments : this.revisions
 			const key = isComment(kind)
 				? id
-				: id === ANONYMOUS || id.startsWith("new:")
+				: anonymousChangeId(id)
 					? `${String(kind)}:anonymous${String(++this.serial)}`
 					: `${String(kind)}:${id}`
 
@@ -652,28 +660,6 @@ function markers(list: unknown, pos: number, found: Found): void {
 	}
 }
 
-// Whether a paragraph has a property change: one recorded by the editor, or its source's own w:pPrChange
-// (`sources`: the source paragraphs holding one) unless accepted or rejected since.
-// The ids a paragraph's recorded changes carry (review/track.ts ParagraphChange).
-interface ChangeIds {
-	readonly props?: { readonly id?: number }
-	readonly inserted?: { readonly id?: number }
-	readonly deleted?: { readonly id?: number }
-}
-
-// What a table's props, a row's row_props or a cell's cell_props hold of tracked changes (edit/tables/map.ts).
-interface TableIds {
-	readonly ins?: { readonly id?: number }
-	readonly del?: { readonly id?: number }
-	readonly change?: { readonly id?: number }
-	readonly gridChange?: { readonly id?: number }
-	// The source's own property changes, accepted or rejected: no change any more.
-	readonly source?: string
-}
-
-// RevisionFlag.Merged.
-const MERGED = 16
-
 function changeId(stamp: { readonly id?: number } | undefined): string | undefined {
 	return stamp?.id === undefined ? undefined : String(stamp.id)
 }
@@ -681,6 +667,8 @@ function changeId(stamp: { readonly id?: number } | undefined): string | undefin
 // Keys of a paragraph change that are no property change (the mark's own revisions, a resolved source change).
 const NOT_PROPERTIES: ReadonlySet<string> = new Set(["inserted", "deleted", "source"])
 
+// Whether a paragraph has a property change: one recorded by the editor, or its source's own w:pPrChange
+// (`sources`: the source paragraphs holding one) unless accepted or rejected since.
 function propertyChange(node: Node, sources: ReadonlySet<number> | undefined): boolean {
 	const value: unknown = PROPERTIES_MARK.isInSet(node.marks)?.attrs["value"]
 
@@ -764,18 +752,20 @@ function* scanSteps(
 		if (!within(end)) return
 
 		const own = `#${String(node.attrs["src"])}`
-		const change = PROPERTIES_MARK.isInSet(node.marks)?.attrs["value"] as ChangeIds | undefined
+		const change = PROPERTIES_MARK.isInSet(node.marks)?.attrs["value"] as ParagraphChange | undefined
 		// Rows and cells the table commands tracked carry their stamps in row_props / cell_props, tables in props.
-		const table = (
+		const tableProps = node.type === nodes.table ? ((node.attrs["props"] as TableOverrides | null) ?? undefined) : undefined
+		const cellProps =
 			node.type === nodes.table
-				? node.attrs["props"]
-				: TABLE_MARKS.find(type => type.isInSet(node.marks) !== undefined)?.isInSet(node.marks)?.attrs["value"]
-		) as TableIds | null | undefined
+				? undefined
+				: (TABLE_MARKS.find(type => type.isInSet(node.marks) !== undefined)?.isInSet(node.marks)?.attrs["value"] as
+						RowOverrides | CellOverrides | undefined)
+		const table = tableProps ?? cellProps
 		// A cell's w:cellMerge is a property change (below), no insertion or deletion of the cell.
-		const flags = typeof revision === "number" ? (node.type === nodes.table_cell ? revision & ~MERGED : revision) : 0
+		const flags = typeof revision === "number" ? (node.type === nodes.table_cell ? revision & ~RevisionFlag.Merged : revision) : 0
 
 		if (kind !== undefined && flags !== 0)
-			found.add(end, end + 1, kind, changeId(change?.inserted ?? change?.deleted ?? table?.ins ?? table?.del) ?? own)
+			found.add(end, end + 1, kind, changeId(change?.inserted ?? change?.deleted ?? cellProps?.ins ?? cellProps?.del) ?? own)
 
 		const section = node.type === nodes.paragraph ? sectionChange(SECTION_MARK.isInSet(node.marks)?.attrs["value"]) : undefined
 
@@ -791,7 +781,7 @@ function* scanSteps(
 
 		// Table, row and cell property changes the editor recorded (a table's grid change can be another).
 		const recorded = changeId(table?.change)
-		const grid = changeId(table?.gridChange)
+		const grid = changeId(tableProps?.gridChange)
 
 		if (recorded !== undefined) found.add(end, end + 1, ReviewKind.PROPERTIES, recorded)
 		if (grid !== undefined && grid !== recorded) found.add(end, end + 1, ReviewKind.PROPERTIES, grid)

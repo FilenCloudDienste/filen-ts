@@ -58,6 +58,9 @@ export interface DocxFact {
 // A feature's checks. Each refuses the save by throwing DocxVerifyError.
 export interface DocxCheck {
 	readonly fact?: DocxFact
+	// The check judges only the save's own markup (copies of the source are left alone): on a story part with
+	// namespaces declared below its root, gate 2 runs its `part` on the skeleton as well as on the whole part.
+	readonly newMarkupOnly?: boolean
 	// Checks a changed XML part (relationships and content types are checked apart).
 	part?(input: CheckInput, part: CheckedPart): Promise<void> | void
 	// Checks the save as a whole, after every part.

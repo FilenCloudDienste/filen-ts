@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { detectDelimiter, parseCsv, writeCsv } from "../core/sheet/csv/csvParse"
-import { parseCsvFile } from "../core/sheet/csv/csvView"
+import { parseCsvFile, serializeCsv } from "../core/sheet/csv/csvView"
 import {
 	decodeUtf16,
 	decodeUtf16Fallback,
@@ -257,5 +257,41 @@ describe("parseCsvFile without TextDecoder", () => {
 		vi.stubGlobal("TextDecoder", undefined)
 
 		expect(files.map(file => parseCsvFile(file, false))).toEqual(native)
+	})
+})
+
+describe("CSV files read and written back", () => {
+	const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
+	const utf16 = (text: string, littleEndian: boolean): number[] =>
+		text.split("").flatMap(char => {
+			const code = char.charCodeAt(0)
+
+			return littleEndian ? [code & 0xff, code >> 8] : [code >> 8, code & 0xff]
+		})
+
+	it("knows whether the text ends in a line end", () => {
+		expect(["", "a", "a,b\n", "a,b\r", "a,b\r\n", "a\nb"].map(text => parseCsvFile(utf8(text), false).format.trailingNewline)).toEqual([
+			false,
+			false,
+			true,
+			true,
+			true,
+			false
+		])
+	})
+
+	it("writes UTF-8 with a BOM and both UTF-16 orders back byte for byte", () => {
+		const files = [
+			bytes(0xef, 0xbb, 0xbf, ...utf8("a,\u00e9\u20ac\ud83d\ude00\r\nb,c\r\n")),
+			bytes(0xff, 0xfe, ...utf16("a;\u00e9\u20ac\nb;c\n", true)),
+			bytes(0xfe, 0xff, ...utf16("a\t\u00e9\rb\tc", false)),
+			bytes(0xef, 0xbb, 0xbf)
+		]
+
+		for (const file of files) {
+			const { rows, format } = parseCsvFile(file, false)
+
+			expect([...serializeCsv(rows, format)]).toEqual([...file])
+		}
 	})
 })

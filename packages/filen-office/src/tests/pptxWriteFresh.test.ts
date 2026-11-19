@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { memorySink } from "@filen/office/core/opc"
-import { freshPptx } from "../core/pptx/write/fresh"
+import { freshPptx, transitionalPart } from "../core/pptx/write/fresh"
+import { decodeUtf8, encodeUtf8 } from "../core/xml/index"
 import type { Deck, ShapeNode } from "../core/presentation/model"
 import type { CorpusManifest } from "../scripts/corpusManifest"
 import { CORPUS_DIR } from "./corpusDir"
@@ -83,6 +84,95 @@ describe("pptx fresh writer", () => {
 		const opened = await openDeck(buildPptx({ slides: [{ shapes: sp(2, "Title 1", 'type="title"', "", body(para("Same"))) }] }))
 
 		expect(await fresh(opened.deck, opened.source)).toEqual(await fresh(opened.deck, opened.source))
+	})
+
+	it("hands its slicing to the zip writer and returns the zip's report, the bytes unchanged", async () => {
+		const opened = await openDeck(buildPptx({ slides: [{ shapes: sp(2, "Title 1", 'type="title"', "", body(para("Sliced"))) }] }))
+		let looks = 0
+		const slicing = { sliceMs: 1_000_000, now: () => (looks++, 0), pause: () => Promise.resolve() }
+		const plain = memorySink()
+		const sliced = memorySink()
+		const outcome = await freshPptx(opened.deck, opened.source, sliced, { slicing })
+
+		await freshPptx(opened.deck, opened.source, plain, {})
+
+		if (outcome.kind !== "written") throw new Error(outcome.kind)
+
+		const bytes = sliced.bytes()
+
+		expect(looks).toBeGreaterThan(0)
+		expect(bytes).toEqual(plain.bytes())
+		expect(outcome.report.size).toBe(bytes.length)
+		expect(outcome.report.entries).toBe((await partsOf(bytes)).size)
+		expect(outcome.report.crcs.size).toBe(outcome.report.entries)
+	})
+
+	describe("a Strict part copied as Transitional", () => {
+		const STRICT_A = "http://purl.oclc.org/ooxml/drawingml/main"
+		const STRICT_C = "http://purl.oclc.org/ooxml/drawingml/chart"
+		const STRICT_P = "http://purl.oclc.org/ooxml/presentationml/main"
+		const transitional = (xml: string): string => {
+			const out = transitionalPart(encodeUtf8(xml))
+
+			return decodeUtf8(out, 0, out.length)
+		}
+
+		it("converts DrawingML percentages and universal measures as before", () => {
+			const out = transitional(
+				`<p:sld xmlns:p="${STRICT_P}" xmlns:a="${STRICT_A}"><p:cSld><p:spTree><p:sp><p:spPr><a:xfrm><a:off x="1in" y="2.5cm"/><a:ext cx="914400" cy="72pt"/></a:xfrm>` +
+					'<a:solidFill><a:schemeClr val="accent1"><a:lumMod val="75%"/><a:lumOff val="-12.5%"/></a:schemeClr></a:solidFill>' +
+					'<a:gradFill><a:gsLst><a:gs pos="50%"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100%"><a:scrgbClr r="50%" g="0%" b="25%"/></a:gs></a:gsLst>' +
+					'<a:fillToRect l="50%" t="50%" r="50%" b="50%"/></a:gradFill><a:ln w="1pt"><a:miter lim="800%"/></a:ln></p:spPr>' +
+					'<p:txBody><a:bodyPr lIns="0.1in"><a:normAutofit fontScale="92.5%" lnSpcReduction="10%"/></a:bodyPr><a:p><a:pPr marL="0.5in"><a:buSzPct val="100%"/></a:pPr>' +
+					'<a:r><a:rPr baseline="30%"/><a:t>100%</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>'
+			)
+
+			expect(out).toContain('<a:off x="914400" y="900000"/><a:ext cx="914400" cy="914400"/>')
+			expect(out).toContain('<a:lumMod val="75000"/><a:lumOff val="-12500"/>')
+			expect(out).toContain('<a:gs pos="50000">')
+			expect(out).toContain('<a:fillToRect l="50000" t="50000" r="50000" b="50000"/>')
+			expect(out).toContain('<a:scrgbClr r="50000" g="0" b="25000"/>')
+			expect(out).toContain('<a:ln w="12700"><a:miter lim="800000"/></a:ln>')
+			expect(out).toContain('<a:bodyPr lIns="91440"><a:normAutofit fontScale="92500" lnSpcReduction="10000"/>')
+			expect(out).toContain('<a:pPr marL="457200"><a:buSzPct val="100000"/>')
+			expect(out).toContain('<a:rPr baseline="30000"/><a:t>100%</a:t>')
+			expect(out).toContain('<a:schemeClr val="accent1">')
+		})
+
+		it("leaves names, descriptions and other text attributes that read as a percentage or measure as they are", () => {
+			const out = transitional(
+				`<p:sld xmlns:p="${STRICT_P}" xmlns:a="${STRICT_A}"><p:cSld name="50%"><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="100%" descr="5in" title="12pt"/>` +
+					'<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:pPr><a:buChar char="%"/></a:pPr><a:r><a:rPr><a:latin typeface="2in"/></a:rPr><a:t>x</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>'
+			)
+
+			expect(out).toContain('<p:cSld name="50%">')
+			expect(out).toContain('<p:cNvPr id="2" name="100%" descr="5in" title="12pt"/>')
+			expect(out).toContain('<a:latin typeface="2in"/>')
+		})
+
+		it("gives an element or attribute named after an Object prototype key no conversion", () => {
+			const out = transitional(
+				`<p:sld xmlns:p="${STRICT_P}" xmlns:a="${STRICT_A}"><p:cSld><p:spTree><a:constructor val="50%"/><a:__proto__ val="50%"/>` +
+					'<a:off constructor="1in" toString="50%" x="1in" y="0"/></p:spTree></p:cSld></p:sld>'
+			)
+
+			expect(out).toContain('<a:constructor val="50%"/><a:__proto__ val="50%"/>')
+			expect(out).toContain('<a:off constructor="1in" toString="50%" x="914400" y="0"/>')
+		})
+
+		it("strips the percent sign of chart percentages, never scaling them, and keeps number formats", () => {
+			const out = transitional(
+				`<c:chartSpace xmlns:c="${STRICT_C}" xmlns:a="${STRICT_A}"><c:chart><c:plotArea><c:barChart><c:gapWidth val="150%"/><c:overlap val="-20%"/>` +
+					'<c:ser><c:spPr><a:solidFill><a:srgbClr val="4472C4"><a:alpha val="50%"/></a:srgbClr></a:solidFill></c:spPr>' +
+					'<c:dLbls><c:numFmt formatCode="0%" sourceLinked="0"/></c:dLbls></c:ser></c:barChart>' +
+					'<c:valAx><c:numFmt formatCode="0.0%" sourceLinked="1"/></c:valAx></c:plotArea></c:chart></c:chartSpace>'
+			)
+
+			expect(out).toContain('<c:gapWidth val="150"/><c:overlap val="-20"/>')
+			expect(out).toContain('<a:alpha val="50000"/>')
+			expect(out).toContain('<c:numFmt formatCode="0%" sourceLinked="0"/>')
+			expect(out).toContain('<c:numFmt formatCode="0.0%" sourceLinked="1"/>')
+		})
 	})
 
 	describe.skipIf(PRESENT.length === 0)("over the corpus", () => {

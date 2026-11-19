@@ -1,4 +1,5 @@
 import { estimateSavePeak, fitsBudget, type PdfMemoryProfile } from "../../../core/pdfedit/budget"
+import { PDF_AES256_METHOD } from "../../../core/pdfedit/security"
 import { PdfEngineRefusal } from "../context"
 import type { PdfRequestHandler } from "../requests"
 import { extractDocument, extractSaveOptions } from "./extract"
@@ -24,15 +25,12 @@ export type PdfExtractBegun =
 			readonly status: "written"
 			readonly size: number
 			readonly pageCount: number
-			// What checkSaved expects: "None", or PDF_EXTRACT_ENCRYPTION.
+			// What checkSaved expects: "None", or PDF_AES256_METHOD (extractSaveOptions: AES-256, revision 6).
 			readonly encryption: string
 			// Signed signature fields drawn as page content.
 			readonly flattenedSignatures: number
 	  }
 	| { readonly status: "refused"; readonly reason: "overBudget" | "unsupportedPassword" }
-
-// How MuPDF names the encryption an encrypted new file gets (extractSaveOptions: AES-256, revision 6).
-export const PDF_EXTRACT_ENCRYPTION = "Standard V5 R6 256-bit AES"
 
 export const EXTRACT_REQUESTS: { readonly extractBegin: PdfRequestHandler<"extractBegin"> } = {
 	extractBegin: (context, { pages, protect, inputBytes, memory }) => {
@@ -86,7 +84,7 @@ export const EXTRACT_REQUESTS: { readonly extractBegin: PdfRequestHandler<"extra
 			serving: [],
 			previousSaved: edit.savedApplied,
 			security: null,
-			encryption: options.encrypted ? PDF_EXTRACT_ENCRYPTION : "None",
+			encryption: options.encrypted ? PDF_AES256_METHOD : "None",
 			resets: false
 		}
 		context.mupdf.shrinkStore(50)
@@ -96,7 +94,7 @@ export const EXTRACT_REQUESTS: { readonly extractBegin: PdfRequestHandler<"extra
 				status: "written",
 				size: buffer.getLength(),
 				pageCount: pages.length,
-				encryption: options.encrypted ? PDF_EXTRACT_ENCRYPTION : "None",
+				encryption: options.encrypted ? PDF_AES256_METHOD : "None",
 				flattenedSignatures: extracted.flattenedSignatures
 			}
 		}

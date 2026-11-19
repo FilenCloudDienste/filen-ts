@@ -1,4 +1,5 @@
 import { SHEET_MAX_FORMULA_TEXT } from "../../sheet/protocol"
+import { columnName } from "../../sheet/refs/cellRef"
 import { referenceSpans, referenceText, withoutPrefix, type RefArea, type ReferenceSpan } from "../../sheet/refs/formulaRefs"
 import { OPENFORMULA_NAMES } from "./functions.generated"
 import { translateFormula, type Translated } from "./toXlsx"
@@ -36,16 +37,8 @@ function isWord(c: string): boolean {
 }
 
 // A sheet name as OpenFormula writes it: bare when it holds letters, digits and "_" alone, else quoted.
-function sheetName(name: string): string {
+export function ofSheetName(name: string): string {
 	return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `'${name.replaceAll("'", "''")}'`
-}
-
-function column(index: number): string {
-	let text = ""
-
-	for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-	return text
 }
 
 // One end of an area as OpenFormula writes it after the sheet's "." (§5.8).
@@ -54,7 +47,7 @@ function end(area: RefArea, start: boolean): string {
 	const col = start ? area.startCol : area.endCol
 	const rowAbs = start ? area.startRowAbs : area.endRowAbs
 	const colAbs = start ? area.startColAbs : area.endColAbs
-	const colText = `${colAbs ? "$" : ""}${column(col)}`
+	const colText = `${colAbs ? "$" : ""}${columnName(col)}`
 	const rowText = `${rowAbs ? "$" : ""}${String(row + 1)}`
 
 	if (area.kind === "cols") return colText
@@ -64,7 +57,7 @@ function end(area: RefArea, start: boolean): string {
 }
 
 export function openFormulaReference(span: { readonly sheet: string | null; readonly area: RefArea }): string {
-	const sheet = span.sheet === null ? "" : `$${sheetName(span.sheet)}`
+	const sheet = span.sheet === null ? "" : `$${ofSheetName(span.sheet)}`
 	const area = span.area
 	const range = area.kind !== "cell" || area.range
 

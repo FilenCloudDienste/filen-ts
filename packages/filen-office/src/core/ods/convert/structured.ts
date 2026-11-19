@@ -1,6 +1,7 @@
 import type { SheetRange } from "../../sheet/protocol"
 import { cellRef, parseRangeRef } from "../../xlsx/write/text"
-import { decodeUtf8 } from "../../xml/index"
+import { decodeXstring } from "../../xlsx/model/strings"
+import { XmlError, parseXml, type XmlDocument } from "../../xml/index"
 
 // Structured references (Table1[Col], Table1[[#Headers],[A]:[C]], [@Col]; [MS-XLSX] §2.2.2) as the cell ranges they
 // name now, as LibreOffice reads them: OpenFormula has no tables. Null where a reference names what cannot be said
@@ -15,34 +16,44 @@ export interface SheetTable {
 	readonly columns: readonly string[]
 }
 
-const ENTITIES: Readonly<Record<string, string>> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" }
-
-function attribute(tag: string, name: string): string | undefined {
-	const value = new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1]
-
-	return value?.replace(/&(lt|gt|amp|quot|apos);/g, (_all, entity: string) => ENTITIES[entity] ?? "")
-}
-
-// A table part (ECMA-376 Part 1 §18.5.1.2): its name formulas use (displayName), range and columns.
+// A table part (ECMA-376 Part 1 §18.5.1.2): its name formulas use (displayName), range and columns, names with their
+// _xHHHH_ escapes undone (a header's line break is stored as _x000a_; a formula holds it as itself). Null when the
+// part does not read.
 export function readSheetTable(bytes: Uint8Array, sheet: string): SheetTable | null {
-	const text = decodeUtf8(bytes)
-	const root = /<(?:\w+:)?table\b[^>]*>/.exec(text)?.[0]
+	let document: XmlDocument
 
-	if (root === undefined) return null
+	try {
+		document = parseXml(bytes)
+	} catch (error) {
+		if (error instanceof XmlError) return null
 
-	const ref = parseRangeRef(attribute(root, "ref") ?? "")
-	const name = attribute(root, "displayName") ?? attribute(root, "name")
+		throw error
+	}
 
-	if (ref === null || ref === undefined || name === undefined) return null
+	const root = document.documentElement()
 
-	const columns = [...text.matchAll(/<(?:\w+:)?tableColumn\b[^>]*>/g)].map(match => attribute(match[0], "name") ?? "")
+	if (root < 0 || document.localName(root) !== "table") return null
+
+	const ref = parseRangeRef(document.attribute(root, "ref") ?? "")
+	const name = document.attribute(root, "displayName") ?? document.attribute(root, "name")
+
+	if (ref === undefined || name === undefined) return null
+
+	const columns: string[] = []
+
+	for (let child = document.firstChildElement(root); child >= 0; child = document.nextSiblingElement(child)) {
+		if (document.localName(child) !== "tableColumns") continue
+
+		for (let column = document.firstChildElement(child); column >= 0; column = document.nextSiblingElement(column))
+			if (document.localName(column) === "tableColumn") columns.push(decodeXstring(document.attribute(column, "name") ?? ""))
+	}
 
 	return {
-		name,
+		name: decodeXstring(name),
 		sheet,
 		ref,
-		headerRows: Number(attribute(root, "headerRowCount") ?? "1"),
-		totalsRows: Number(attribute(root, "totalsRowCount") ?? "0"),
+		headerRows: Number(document.attribute(root, "headerRowCount") ?? "1"),
+		totalsRows: Number(document.attribute(root, "totalsRowCount") ?? "0"),
 		columns
 	}
 }

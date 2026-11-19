@@ -37,10 +37,11 @@ import {
 import { cellRef, columnName, parseRangeRef } from "../../xlsx/write/text"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetProtectedAction, type SheetRange } from "../../sheet/protocol"
 import { OdfNs } from "../../odf/namespaces"
-import { openFormula } from "../formula/toOf"
+import { ofSheetName, openFormula } from "../formula/toOf"
 import { openOds } from "../open"
 import { odsSource, setOdsSource, type OdsSource } from "../source"
 import { saveOds } from "../write/save"
+import { linkVisits } from "../write/features"
 import { printRanges } from "../write/content"
 import { filterRange, FilterRefused } from "../write/filters"
 import { NameRefused, namesPlan } from "../write/names"
@@ -138,9 +139,10 @@ function declared(section: string, root: string): string {
 }
 
 // Links on cells holding a formula or no text left out (reported): an OpenDocument cell's link is a text:a of its own
-// text, which a formula's result is not.
+// text, which a formula's result is not. Links overlapping on more cells than linkVisits allows refuse the conversion.
 function withoutFormulaLinks(markup: string, model: XlsxSheetModel, sheet: string, report: SheetLossyReport): string {
 	const store = model.store as SheetStore
+	const visited = linkVisits(store)
 	let lost = 0
 	const kept = markup.replace(/<(?:\w+:)?hyperlink\b[^>]*?(?:\/>|>[\s\S]*?<\/(?:\w+:)?hyperlink>)/g, link => {
 		const range = parseRangeRef(/\sref="([^"]*)"/.exec(link)?.[1] ?? "")
@@ -149,6 +151,7 @@ function withoutFormulaLinks(markup: string, model: XlsxSheetModel, sheet: strin
 
 		if (range !== null && range !== undefined)
 			store.forEachCell(range, (_row, _col, slot) => {
+				visited()
 				formula ||= store.formula(slot) >= 0
 				text ||= store.kind(slot) !== CellKind.EMPTY
 			})
@@ -1011,7 +1014,6 @@ function namesAny(formula: string, names: ReadonlySet<string>): boolean {
 // Validations as table:content-validation can say them: those it cannot, and those naming a name not written, are
 // left out and reported.
 async function prepareValidations(
-	workbook: XlsxWorkbook,
 	prep: SheetPrep,
 	report: SheetLossyReport,
 	dropped: ReadonlySet<string>,
@@ -1029,7 +1031,7 @@ async function prepareValidations(
 		const probe = { ...model, sections } as XlsxSheetModel
 
 		try {
-			await runSliced(sheetValidationsSteps(workbook, probe, entry.name, null, null, new Set()), clock)
+			await runSliced(sheetValidationsSteps(probe, entry.name, null, null, new Set()), clock)
 
 			return true
 		} catch (error) {
@@ -1052,6 +1054,13 @@ async function prepareValidations(
 			)
 		)
 	)
+	// No rule (a self-closed or empty element, or one holding only extLst): nothing to write or prove.
+	if (rules.length === 0) {
+		;(model as { sections: readonly XlsxSection[] }).sections = model.sections.filter((_, k) => k !== index)
+
+		return
+	}
+
 	// The rules kept: each first tried alone (`one`), or none tried until all are, together, at the end.
 	const choose = async (one: boolean): Promise<string[]> => {
 		// A cell one rule already holds keeps that rule (a table cell has one validation).
@@ -1194,10 +1203,7 @@ function hideEmptyRows(model: XlsxSheetModel): void {
 	;(model.store as SheetStore).setRows(rows)
 }
 
-// Ranges by the bands of rows they reach, for asking which one a range overlaps without looking at every one.
-// Ranges held apart (none overlaps another), asked whether a range overlaps or lies in one: whole columns and whole
-// rows as sorted spans (a binary search each), any other range in bands of rows. Linear in what it holds, however
-// many whole columns or rows a sheet's rules name.
+// Spans held apart (none overlaps another), sorted by start: whether a span overlaps or lies in one, by a binary search.
 class Spans {
 	private readonly starts: number[] = []
 	private readonly ends: number[] = []
@@ -1240,6 +1246,9 @@ class Spans {
 	}
 }
 
+// Ranges held apart (none overlaps another), asked whether a range overlaps or lies in one: whole columns and whole
+// rows as sorted spans (a binary search each), any other range in bands of rows. Linear in what it holds, however
+// many whole columns or rows a sheet's rules name.
 class RangeIndex {
 	private readonly columns = new Spans()
 	private readonly rows = new Spans()
@@ -1356,7 +1365,7 @@ interface SheetTablePart {
 }
 
 function rangeAddress(sheet: string, range: SheetRange): string {
-	const quoted = /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
+	const quoted = ofSheetName(sheet)
 
 	return `${quoted}.${cellRef(range.startRow, range.startCol)}:${quoted}.${cellRef(range.endRow, range.endCol)}`
 }
@@ -1683,7 +1692,7 @@ export async function xlsxToOds(source: Uint8Array, options: SheetConvertOptions
 
 	for (const prep of sheets) {
 		await prepareCells(workbook, prep, report, clock, dateCells, color => probe.styles.color(color), richStrings, dropped, tables)
-		await prepareValidations(workbook, prep, report, dropped, clock)
+		await prepareValidations(prep, report, dropped, clock)
 		prepareFilter(prep, report)
 		appendAll(databaseRanges, prepareTables(prep, sheetTables.get(prep.entry.id) ?? [], report))
 
@@ -1831,19 +1840,20 @@ export async function xlsxToOds(source: Uint8Array, options: SheetConvertOptions
 	}
 
 	if (clock?.due === true) await clock.pause()
-	const empty = await openOds(
-		bytesSource(
-			await emptyPackage(
-				probe.styles,
-				workbook,
-				options.language ?? "en-US",
-				conditionStyles.markup + shapeStyles.styles,
-				pageStyles,
-				databaseRanges,
-				files
-			)
-		)
+	const packaged = await emptyPackage(
+		probe.styles,
+		workbook,
+		options.language ?? "en-US",
+		conditionStyles.markup + shapeStyles.styles,
+		pageStyles,
+		databaseRanges,
+		files
 	)
+
+	// The package holds the pictures now (the zip's bytes are a copy): one copy fewer while the save writes them again.
+	files.release()
+
+	const empty = await openOds(bytesSource(packaged))
 
 	if (!empty.ok) return { ok: false, reason: "unsupported", message: `The empty package does not open: ${empty.message}` }
 

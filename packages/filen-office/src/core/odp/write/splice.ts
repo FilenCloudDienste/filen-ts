@@ -1,11 +1,12 @@
 import { appendAll } from "../../arrays"
-import { canonicalName, readContentPrologue } from "../../odf/index"
+import { canonicalName, readContentPrologue, type ContentPrologue } from "../../odf/index"
 import { emitFamilyOf } from "../../pptx/write/emit"
 import type { PartChange } from "../../opc/index"
 import type { DeckChanges } from "../../presentation/edit/apply"
 import { sameDigest } from "../../presentation/edit/changes"
 import { markupBytes } from "../../presentation/edit/proof"
 import { parseInScope } from "../../presentation/edit/canonical"
+import { isRawPart } from "../../presentation/edit/ops"
 import {
 	PresentationError,
 	refused,
@@ -41,7 +42,7 @@ import { odpOwnParagraphSource, odpParagraphKey, odpParagraphTargets, odpTargetI
 import { newSettingsMarkup, pageNames, renameIds, settingsMarkup } from "./integrity"
 import { withManifestEntries } from "./manifestPrune"
 import { settingsAttributes, type SettingsAttribute } from "./emit/presentation"
-import { OdpWriteSource, odpWriteSource } from "./source"
+import { OdpWriteSource, odpWriteSource, type PageBaseline } from "./source"
 import { notesDiffer, slideDiffers } from "./meaning"
 import { spliceOdpNotes } from "./emit/notes"
 import { spliceOdpComments } from "./emit/comment"
@@ -101,6 +102,8 @@ export interface OdpSplice {
 	readonly content: Uint8Array | undefined
 	readonly pages: readonly WrittenPage[]
 	readonly names: ReadonlyMap<SlideRef, string>
+	// Of each parsed page, its nodes at the revisions the splice read them (the next reading's baselines).
+	readonly baselines: ReadonlyMap<SlideRef, PageBaseline>
 	// Entries replaced and added (content.xml, and the manifest when an entry is added).
 	readonly replace: readonly PartChange[]
 	readonly add: readonly PartChange[]
@@ -468,9 +471,7 @@ interface ContentLayout {
 	readonly declarations: string
 }
 
-function contentLayout(bytes: Uint8Array): ContentLayout | Refused {
-	const prologue = readContentPrologue(bytes)
-
+function contentLayout(prologue: ContentPrologue): ContentLayout | Refused {
 	if (!prologue.sliced) return refused("unsupported", "a content stream that is not UTF-8")
 
 	const document = prologue.document
@@ -592,6 +593,8 @@ class Splicer {
 	readonly styles: OdpStyles
 	readonly context: OdpEmitContext
 	readonly names: Map<SlideRef, string>
+	// content.xml's prologue, parsed once for the save.
+	readonly prologue: ContentPrologue
 	// The namespaces content.xml's root binds (new pages and styles declare what it does not).
 	readonly scope: ReadonlyMap<string, string>
 	// Generated markup (the styles it names are the ones kept).
@@ -622,13 +625,13 @@ class Splicer {
 			dispatch: emitOdp,
 			familyOf: emitFamilyOf
 		}
-		const taken = takenInStreams(parts)
+		const prologue = readContentPrologue(parts.content.bytes)
+		const taken = takenInStreams(parts, prologue)
 
 		// A retired style's name stays taken: held markup may name it again.
 		for (const name of source.retired.keys()) taken.add(name)
 
-		const prologue = readContentPrologue(parts.content.bytes)
-
+		this.prologue = prologue
 		this.scope = prologue.namespaces.inScope(prologue.root)
 		this.styles = new OdpStyles(env, "content", taken, styleDeclarations(this.scope))
 		// The styles a save retired first (what an undo returns to had them; a source may hold equal copies, as Google's
@@ -1127,7 +1130,7 @@ class Splicer {
 		walk(target, shape => {
 			const src = shape.src
 
-			if (src?.format !== "odp" || src.part === page.part || !src.part.startsWith("raw:") || seen.has(src.part)) return
+			if (src?.format !== "odp" || src.part === page.part || !isRawPart(src.part) || seen.has(src.part)) return
 
 			seen.add(src.part)
 
@@ -1404,6 +1407,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 	)
 	const splicer = new Splicer(deck, parts, source, names)
 	const pages: WrittenPage[] = []
+	const baselines = new Map<SlideRef, PageBaseline>()
 	let structural = deck.slides.length !== base.length
 	// A page copied where it was keeps its bytes; one that moved has its notes thumbnail name its new place.
 	const copied = (ref: SlideRef, span: PageSpan, index: number): WrittenPage =>
@@ -1442,7 +1446,13 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 			if (node.src.format !== "odp") return refused("unsupported", "a slide read from another format")
 
-			const held = node.src.part.startsWith("raw:") ? source.fragmentOf(node.src) : undefined
+			const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+			const baseline = source.baselines.get(ref)
+
+			// Read before the page is: an edit made while it is written moves the node past what the file will hold.
+			baselines.set(ref, { node, revision: node.revision, notes, notesRevision: notes?.revision ?? 0 })
+
+			const held = isRawPart(node.src.part) ? source.fragmentOf(node.src) : undefined
 
 			if (held !== undefined) {
 				// A page an undo held (deleted, saved, then restored): written from the held markup.
@@ -1477,8 +1487,12 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 			if (span === undefined || baseRef === undefined) return refused("notFound", "the page a slide was read from")
 
 			const duplicate = baseRef !== ref
-			const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
-			const touched = duplicate || node.revision > 0 || (notes?.revision ?? 0) > 0 || names.get(ref) !== parts.pageName(ref)
+			// Edited since the file was saved (or, for a first reading or nodes an undo put back, ever).
+			const edited =
+				baseline !== undefined && baseline.node === node && baseline.notes === notes
+					? node.revision !== baseline.revision || (notes?.revision ?? 0) !== baseline.notesRevision
+					: node.revision > 0 || (notes?.revision ?? 0) > 0
+			const touched = duplicate || edited || names.get(ref) !== parts.pageName(ref)
 
 			if (!touched) {
 				pages.push(copied(ref, span, index))
@@ -1533,7 +1547,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 		splicer.styles.replaced().length === 0 &&
 		stylesReplaced.length === 0
 	)
-		return { revision: input.revision, content: undefined, pages, names, replace: stylesReplaced, add: [] }
+		return { revision: input.revision, content: undefined, pages, names, baselines, replace: stylesReplaced, add: [] }
 
 	const whole = assemble(parts, pages, splicer, structural, settingsChanged, show)
 
@@ -1567,6 +1581,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 		content: assembled,
 		pages,
 		names,
+		baselines,
 		replace: [
 			{ name: "content.xml", bytes: assembled },
 			...stylesReplaced,
@@ -1823,7 +1838,7 @@ function assemble(
 ): Uint8Array | Refused {
 	const content = parts.content
 	const bytes = content.bytes
-	const layout = contentLayout(bytes)
+	const layout = contentLayout(splicer.prologue)
 
 	if (isRefused(layout)) return layout
 
@@ -1832,11 +1847,10 @@ function assemble(
 	const lastEnd = sourcePages[sourcePages.length - 1]?.end
 	const chunks: Uint8Array[] = []
 	const styles = splicer.styles.markup(splicer.written)
-	const presentationPrefix = (() => {
-		const located = readContentPrologue(bytes)
-
-		return located.namespaces.prefixFor(located.root, "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0")
-	})()
+	const presentationPrefix = splicer.prologue.namespaces.prefixFor(
+		splicer.prologue.root,
+		"urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
+	)
 
 	if (show !== undefined && (presentationPrefix === undefined || presentationPrefix === ""))
 		return refused("unsupported", "content.xml binds no presentation prefix")
@@ -1945,12 +1959,13 @@ function assemble(
 }
 
 // The start of office:presentation's end tag (the last "</" before office:body ends): where pages and settings go
-// when there is no page to follow.
+// when there is no page to follow. Counted back from the end: the window may start inside a character, the matched
+// tail (ASCII, from a "<") never does.
 function lastClose(bytes: Uint8Array): number {
 	const text = decodeUtf8(bytes, Math.max(0, bytes.length - 4096), bytes.length)
 	const at = text.search(/<\/[\w.-]*:?presentation>\s*<\/[\w.-]*:?body>\s*<\/[\w.-]*:?document-content>\s*$/u)
 
-	return at < 0 ? -1 : Math.max(0, bytes.length - 4096) + encodeUtf8(text.slice(0, at)).length
+	return at < 0 ? -1 : bytes.length - encodeUtf8(text.slice(at)).length
 }
 
 function findTarget(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {

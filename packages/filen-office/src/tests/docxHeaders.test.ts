@@ -12,6 +12,7 @@ import type { CheckInput } from "../core/docx/write/checks/index"
 import { sectionChecks } from "../core/docx/write/checks/sections"
 import { openBytes } from "./docxEditFixtures"
 import { buildDocx, p, type ExtraPart } from "./docxSynthetic"
+import { pngHeader } from "./fuzz/ops/drawings"
 import { pageDigest, pagedEditor, savedDigest, settleAll } from "./pagedFixtures"
 
 const decoder = new TextDecoder()
@@ -24,33 +25,6 @@ const TWO_SECTIONS = buildDocx({
 	body: p("First section") + `<w:p><w:pPr>${SECTION(HEADER("default", "rIdH"))}</w:pPr></w:p>` + p("Second section") + SECTION(""),
 	headers: { rIdH: p("Shared header") }
 })
-
-// A PNG of a width x height picture (its header: the pixels are not needed to place it).
-function png(width: number, height: number): Uint8Array {
-	const u32 = (value: number): number[] => [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]
-	const chunk = (type: string, data: readonly number[]): number[] => [
-		...u32(data.length),
-		...[...type].map(c => c.charCodeAt(0)),
-		...data,
-		0,
-		0,
-		0,
-		0
-	]
-
-	return new Uint8Array([
-		0x89,
-		0x50,
-		0x4e,
-		0x47,
-		0x0d,
-		0x0a,
-		0x1a,
-		0x0a,
-		...chunk("IHDR", [...u32(width), ...u32(height), 8, 6, 0, 0, 0]),
-		...chunk("IEND", [])
-	])
-}
 
 const PICTURE =
 	'<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="914400" cy="457200"/>' +
@@ -72,7 +46,7 @@ const RICH = buildDocx({
 	body: p("First section") + `<w:p><w:pPr>${SECTION(HEADER("default", "rIdH"))}</w:pPr></w:p>` + p("Second section") + SECTION(""),
 	headers: { rIdH: RICH_HEADER },
 	parts: [
-		{ name: "word/media/a.png", data: png(96, 48) },
+		{ name: "word/media/a.png", data: pngHeader(96, 48) },
 		{
 			name: "word/_rels/header1.xml.rels",
 			data:
@@ -109,7 +83,7 @@ const OWNING_HEADER =
 	'<mc:Fallback><w:pict><v:shape id="Text Box 7" o:spid="_x0000_s1026" type="#_x0000_t202" style="position:absolute;margin-left:0;margin-top:0;width:216pt;height:36pt;z-index:251659264">' +
 	`<v:textbox>${BOX_CONTENT}</v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:r><w:r><w:t>Boxed</w:t></w:r></w:p>`
 const OWNING_PARTS = (): readonly ExtraPart[] => [
-	{ name: "word/media/a.png", data: png(96, 48) },
+	{ name: "word/media/a.png", data: pngHeader(96, 48) },
 	{
 		name: "word/charts/chart1.xml",
 		contentType: CHART_TYPE,
@@ -399,6 +373,47 @@ describe("docx headers and footers", () => {
 			expect(reopened.model.sections.map(section => section.effectiveHeaders.default)).toHaveLength(2)
 			editor.dispose()
 		}
+	})
+
+	it("unlinks a header holding a tracked move with move ranges of its own", async () => {
+		const stamp = 'w:author="Ann" w:date="2026-01-01T00:00:00Z"'
+		const moved =
+			`<w:p><w:moveFromRangeStart w:id="5" w:name="move1" ${stamp}/><w:moveFrom w:id="6" ${stamp}><w:r><w:t>Moved</w:t></w:r></w:moveFrom><w:moveFromRangeEnd w:id="5"/></w:p>` +
+			`<w:p><w:moveToRangeStart w:id="7" w:name="move1" ${stamp}/><w:moveTo w:id="8" ${stamp}><w:r><w:t>Moved</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="7"/></w:p>`
+		const opened = await pagedEditor(
+			buildDocx({
+				body:
+					p("First section") +
+					`<w:p><w:pPr>${SECTION(HEADER("default", "rIdH"))}</w:pPr></w:p>` +
+					p("Second section") +
+					SECTION(""),
+				headers: { rIdH: moved }
+			})
+		)
+		const { editor } = opened
+
+		caret(editor, 20)
+		expect(await run(editor, { type: "header.edit" })).toBe(true)
+		expect(await run(editor, { type: "header.linkToPrevious" })).toBe(true)
+
+		const bytes = await saved(opened)
+		const copy = await read(bytes, "word/header2.xml")
+		const id = (kind: string): string => new RegExp(`<w:${kind} w:id="(\\d+)"`).exec(copy)?.[1] ?? ""
+		const name = (kind: string): string => new RegExp(`<w:${kind} w:id="\\d+" w:name="([^"]+)"`).exec(copy)?.[1] ?? ""
+
+		expect(await read(bytes, "word/header1.xml")).toContain('<w:moveFromRangeStart w:id="5" w:name="move1"')
+		// New ids, each start's end taking it.
+		expect(["5", "7", ""]).not.toContain(id("moveFromRangeStart"))
+		expect(["5", "7", ""]).not.toContain(id("moveToRangeStart"))
+		expect(id("moveFromRangeEnd")).toBe(id("moveFromRangeStart"))
+		expect(id("moveToRangeEnd")).toBe(id("moveToRangeStart"))
+		expect(id("moveFromRangeStart")).not.toBe(id("moveToRangeStart"))
+		// One new name for both halves.
+		expect(name("moveFromRangeStart")).not.toBe("move1")
+		expect(name("moveToRangeStart")).toBe(name("moveFromRangeStart"))
+		// Saved again, the copy's ids are its own.
+		await saved(opened)
+		editor.dispose()
 	})
 
 	it("unlinks a copy owning its chart and embedded object, its controls renumbered, its text boxes as edited", async () => {

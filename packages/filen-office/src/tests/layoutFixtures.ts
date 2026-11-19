@@ -11,6 +11,7 @@ import {
 	parseTheme,
 	styleSettings,
 	type DocxModel,
+	type DocxOpenFailure,
 	type FontSource,
 	type LayoutOptions,
 	type StyleSettings
@@ -168,11 +169,22 @@ export interface LoadedDocx {
 	readonly fonts: FontManager
 }
 
+// A package openDocxPackage refused, with its reason; the message is `${reason}: ${message}`.
+export class DocxRefusedError extends Error {
+	readonly reason: DocxOpenFailure
+
+	constructor(reason: DocxOpenFailure, message: string) {
+		super(`${reason}: ${message}`)
+
+		this.reason = reason
+	}
+}
+
 // `settings` adjusts what the resolver reads from settings.xml (experiments on undocumented defaults).
 export async function loadDocx(bytes: Uint8Array, settings?: (settings: StyleSettings) => StyleSettings): Promise<LoadedDocx> {
 	const opened = await openDocxPackage(bytesSource(bytes))
 
-	if (!opened.ok) throw new Error(`${opened.reason}: ${opened.message}`)
+	if (!opened.ok) throw new DocxRefusedError(opened.reason, opened.message)
 
 	const pkg = opened.package
 	const model = await buildDocxModel(pkg)

@@ -214,6 +214,85 @@ describe("ODF 3D scenes", () => {
 		expect(cpuMs() - start).toBeLessThan(budget(40))
 	})
 
+	it("reads a dr3d:transform left open in linear time, and well-formed lists as before", () => {
+		const start = cpuMs()
+
+		expect(transform3d("scale(".repeat(200_000))).toEqual(transform3d(undefined))
+		expect(transform3d("rotatex(".repeat(600))).toEqual(transform3d(undefined))
+		expect(cpuMs() - start).toBeLessThan(budget(50))
+
+		// The translation is applied inside the rotation about x.
+		const parsed = transform3d("rotatex(1.5) translate(1cm 2cm 3cm)")
+		const cos = Math.cos((1.5 * Math.PI) / 180)
+		const sin = Math.sin((1.5 * Math.PI) / 180)
+
+		expect(parsed[3]).toBeCloseTo(1000, 9)
+		expect(parsed[7]).toBeCloseTo(2000 * cos - 3000 * sin, 9)
+		expect(parsed[11]).toBeCloseTo(2000 * sin + 3000 * cos, 9)
+		expect(parsed[5]).toBeCloseTo(cos, 12)
+	})
+
+	it("caps a small extruded outline as a solid, and draws a long one open in bounded time", () => {
+		const extrude = (d: string, open: boolean): Dr3dScene => {
+			const value = scene(`<dr3d:extrude draw:style-name="slab" svg:d="${d}"/>`, {
+				slab: [open ? { "dr3d:close-front": "false", "dr3d:close-back": "false" } : {}, "standard"]
+			})
+
+			if (value === undefined) throw new Error("no scene")
+
+			return value
+		}
+		// An L: concave, so the caps need more than one ear search.
+		const ell = "M0 0L4000 0 4000 1000 1000 1000 1000 3000 0 3000Z"
+
+		expect(drawn(extrude(ell, false))).not.toEqual(drawn(extrude(ell, true)))
+
+		// A 20,000-point star: every other point reflex, the worst case for ear clipping.
+		const star: string[] = []
+
+		for (let k = 0; k < 20_000; k++) {
+			const radius = k % 2 === 0 ? 5000 : 2500
+			const turn = (k * 2 * Math.PI) / 20_000
+
+			star.push(`${(Math.cos(turn) * radius).toFixed(1)} ${(Math.sin(turn) * radius).toFixed(1)}`)
+		}
+
+		const d = `M${star.join(" ")}Z`
+		const capped = extrude(d, false)
+		const start = cpuMs()
+		const long = drawn(capped)
+
+		expect(cpuMs() - start).toBeLessThan(budget(2000))
+		expect(long).toEqual(drawn(extrude(d, true)))
+	})
+
+	it("triangulates an extruded profile's caps once, however often it is drawn", () => {
+		const value = scene('<dr3d:extrude draw:style-name="slab" svg:d="M0 0L10000 0 10000 10000 0 10000Z"/>', {
+			slab: [{}, "standard"]
+		})
+
+		if (value === undefined) throw new Error("no scene")
+
+		drawn(value, 200, 200)
+
+		// Turn the square into a dart: triangulated afresh its caps differ from the square's.
+		const profile = value.objects[0]?.kind === "extrude" ? value.objects[0].profile : undefined
+
+		if (profile === undefined) throw new Error("no profile")
+
+		profile.points[0] = 6000
+		profile.points[1] = 4000
+
+		const dart = scene('<dr3d:extrude draw:style-name="slab" svg:d="M6000 4000L10000 0 10000 10000 0 10000Z"/>', {
+			slab: [{}, "standard"]
+		})
+
+		if (dart === undefined) throw new Error("no scene")
+
+		// Another size is another mesh: the sides follow the moved point, the caps are the square's.
+		expect(drawn(value, 201, 201)).not.toEqual(drawn(dart, 201, 201))
+	})
+
 	it("reads nothing from a scene without members", () => {
 		expect(scene("")).toBeUndefined()
 	})

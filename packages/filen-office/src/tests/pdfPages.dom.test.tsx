@@ -991,6 +991,179 @@ describe("PdfPages loading and zooming", () => {
 	})
 })
 
+// A document the host swaps itself (the editor's revision after each change), with a page registry it may swap too.
+function Revision({
+	pdfjs,
+	document: pdf,
+	registerPage
+}: {
+	pdfjs: PdfJsDom
+	document: PdfDomDocument
+	registerPage?: (page: number, element: HTMLElement | null) => void
+}) {
+	const viewer = usePdfViewer(pdf)
+
+	latest.viewer = viewer
+
+	return (
+		<PdfPages
+			pdfjs={pdfjs}
+			{...viewer.pages}
+			registerPage={registerPage ?? viewer.pages.registerPage}
+			pageLabel={(page, total) => `Page ${String(page)} of ${String(total)}`}
+			classNames={{ textLayer: "text-layer", link: "link", canvas: painted => (painted ? "painted" : "blank") }}
+			placeholder={<i className="placeholder" />}
+		/>
+	)
+}
+
+// The same document with some of its pages handed out as new objects.
+function revised(pdf: PdfDomDocument, replaced: Record<number, FakePage>): PdfDomDocument {
+	return { ...pdf, getPage: page => (page in replaced ? Promise.resolve(replaced[page] as FakePage) : pdf.getPage(page)) }
+}
+
+describe("PdfPages revisions", () => {
+	it("releases a painted canvas on unmount, and keeps it while the page registry changes", async () => {
+		const { pdfjs, document: pdf } = fakePdfJs([fakePage(["a"])])
+		const root = createRoot(host)
+		const first = vi.fn()
+		const second = vi.fn()
+
+		act(() => {
+			root.render(
+				<Revision
+					pdfjs={pdfjs}
+					document={pdf}
+					registerPage={first}
+				/>
+			)
+		})
+		await settle()
+		await show(1)
+
+		const canvas = pageElement(1).querySelector("canvas")
+
+		expect(pageElement(1).dataset["rendered"]).toBe("true")
+		expect(canvas?.width).toBe(150)
+
+		act(() => {
+			root.render(
+				<Revision
+					pdfjs={pdfjs}
+					document={pdf}
+					registerPage={second}
+				/>
+			)
+		})
+		await settle()
+
+		expect(second).toHaveBeenCalledWith(1, pageElement(1))
+		expect(canvas?.width).toBe(150)
+		expect(canvas?.height).toBe(150)
+
+		act(() => {
+			root.unmount()
+		})
+
+		expect(canvas?.width).toBe(0)
+		expect(canvas?.height).toBe(0)
+	})
+
+	it("keeps the text layer of a page the new document hands out unchanged, and rebuilds a changed page's", async () => {
+		const pages = [fakePage(["one"]), fakePage(["two"])]
+		const { pdfjs, document: pdf } = fakePdfJs(pages)
+		const root = createRoot(host)
+
+		roots.push(root)
+		act(() => {
+			root.render(
+				<Revision
+					pdfjs={pdfjs}
+					document={pdf}
+				/>
+			)
+		})
+		await settle()
+		await show(1)
+		await show(2)
+
+		const kept = Array.from(pageElement(1).querySelectorAll(".text-layer span"))
+
+		expect(kept.map(span => span.textContent)).toEqual(["one"])
+		expect(textLayers).toHaveLength(2)
+
+		act(() => {
+			root.render(
+				<Revision
+					pdfjs={pdfjs}
+					document={revised(pdf, { 2: fakePage(["edited"]) })}
+				/>
+			)
+		})
+		await settle()
+
+		expect(Array.from(pageElement(1).querySelectorAll(".text-layer span"))).toEqual(kept)
+		expect(kept.every(span => span.isConnected)).toBe(true)
+		expect(textLayers).toHaveLength(3)
+		expect(pageElement(2).querySelector(".text-layer")?.textContent).toBe("edited")
+	})
+
+	it("renders an edited page at once, while a zoom still waits for its steps to pause", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		try {
+			const flush = async (ms = 0): Promise<void> => {
+				for (let k = 0; k < 6; k++)
+					await act(async () => {
+						await vi.advanceTimersByTimeAsync(k === 0 ? ms : 0)
+					})
+			}
+			const { pdfjs, document: pdf } = fakePdfJs([fakePage(["a"])])
+			const root = createRoot(host)
+
+			roots.push(root)
+			act(() => {
+				root.render(
+					<Revision
+						pdfjs={pdfjs}
+						document={pdf}
+					/>
+				)
+			})
+			await flush()
+			fire("evict", 1, true)
+			fire("show", 1, true)
+			fire("render", 1, true)
+			await flush()
+			expect(pageElement(1).dataset["rendered"]).toBe("true")
+
+			const edited = fakePage(["a"])
+
+			act(() => {
+				root.render(
+					<Revision
+						pdfjs={pdfjs}
+						document={revised(pdf, { 1: edited })}
+					/>
+				)
+			})
+			await flush()
+
+			expect(edited.render).toHaveBeenCalledTimes(1)
+			expect(pageElement(1).dataset["rendered"]).toBe("true")
+
+			zoomIn(1)
+			await flush()
+			expect(edited.render).toHaveBeenCalledTimes(1)
+
+			await flush(PDF_ZOOM_RENDER_DELAY_MS)
+			expect(edited.render).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
 describe("usePdfDocument", () => {
 	it("asks for the password on the same task until it opens, and destroys the task on unmount", async () => {
 		const { pdfjs, opened } = fakePdfJs([fakePage([])])

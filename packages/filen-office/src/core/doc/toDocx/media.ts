@@ -1,5 +1,18 @@
+import { le16, le32, les16 } from "../bytes"
 import type { DocFile } from "../read"
-import { type ArtContent, type ArtShape, type Blip, PID, blipFile, readBlipStore, readShape, records, RT_SP_CONTAINER } from "./officeArt"
+import {
+	type ArtContent,
+	type ArtShape,
+	type Blip,
+	type BlipEntry,
+	PID,
+	blipFile,
+	blipSize,
+	readBlipStore,
+	readShape,
+	records,
+	RT_SP_CONTAINER
+} from "./officeArt"
 import type { Crop } from "./drawing"
 
 // Pictures of a Word binary document as package media: PICF pictures in the Data stream (§2.9.192, with their
@@ -25,18 +38,56 @@ function decodeHex(text: string): Uint8Array {
 	return out
 }
 
-// Media parts of the package, deduplicated by source (the same BLIP shown twice is one part).
+// What the pictures of one conversion may decode to in all. blipFile bounds each picture, not their sum: a small
+// file's pictures can each inflate to its bound.
+export const MEDIA_BUDGET = 256 * 1024 * 1024
+
+// A picture not decoded yet: the bytes it decodes to at most, and its decoding.
+export interface PendingBlip {
+	readonly size: number
+	readonly decode: () => Blip | undefined
+}
+
+// A BLIP record as a pending picture; undefined for one blipFile reads no picture from.
+function pendingOf(entry: BlipEntry | undefined): PendingBlip | undefined {
+	const record = entry?.blip
+
+	if (entry === undefined || record === undefined) return undefined
+
+	const size = blipSize(entry.data, record)
+
+	return size === undefined ? undefined : { size, decode: () => blipFile(entry.data, record) }
+}
+
+// Media parts of the package, deduplicated by source (the same BLIP shown twice is one part, decoded once).
 export class MediaStore {
 	readonly parts = new Map<string, Uint8Array>()
 	readonly types = new Map<string, string>()
 	private readonly bySource = new Map<string, Media>()
+	private readonly budget: number
+	private spent = 0
 	private next = 1
 
-	add(source: string, blip: Blip): Media {
+	constructor(budget = MEDIA_BUDGET) {
+		this.budget = budget
+	}
+
+	// The part a picture is written to; undefined for one that does not decode, or once the pictures decoded so far
+	// and its bound are past the budget (each charged its bound before decoding, so a failed decode costs too).
+	add(source: string, pending: PendingBlip): Media | undefined {
 		const known = this.bySource.get(source)
 
 		if (known !== undefined) return known
+		if (this.spent + pending.size > this.budget) return undefined
 
+		this.spent += pending.size
+
+		const blip = pending.decode()
+
+		return blip === undefined ? undefined : this.store(source, blip)
+	}
+
+	private store(source: string, blip: Blip): Media {
 		const extension =
 			blip.extension === "jpeg" ? "jpeg" : blip.extension === "pict" ? "pct" : blip.extension === "tiff" ? "tiff" : blip.extension
 		const part = `word/media/image${String(this.next++)}.${extension}`
@@ -49,21 +100,13 @@ export class MediaStore {
 		return media
 	}
 
+	// Outside the budget: what stands for a picture the budget leaves out.
 	placeholder(): Media {
-		return this.add("placeholder", { bytes: decodeHex(PLACEHOLDER_PNG), extension: "png", contentType: "image/png" })
+		return (
+			this.bySource.get("placeholder") ??
+			this.store("placeholder", { bytes: decodeHex(PLACEHOLDER_PNG), extension: "png", contentType: "image/png" })
+		)
 	}
-}
-
-function u16(data: Uint8Array, at: number): number {
-	return (data[at] ?? 0) | ((data[at + 1] ?? 0) << 8)
-}
-
-function i16(data: Uint8Array, at: number): number {
-	return (u16(data, at) << 16) >> 16
-}
-
-function u32(data: Uint8Array, at: number): number {
-	return (u16(data, at) | (u16(data, at + 2) << 16)) >>> 0
 }
 
 // 16.16 fixed point (§2.2.? FixedPoint) as a number.
@@ -86,13 +129,13 @@ export function crop(shape: ArtShape | undefined): Crop | undefined {
 }
 
 export interface InlinePicture {
-	readonly blip: Blip | undefined
+	readonly blip: PendingBlip | undefined
 	// Twips as shown (scaled and cropped).
 	readonly width: number
 	readonly height: number
 	readonly crop: Crop | undefined
 	readonly shape: ArtShape | undefined
-	// The source key for media deduplication.
+	// The source key for media deduplication: the BLIP store entry's ("bstore:<pib>", as shapeBlip's) or the PICF's.
 	readonly source: string
 }
 
@@ -107,19 +150,20 @@ export function inlinePicture(file: DocFile, offset: number, art?: ArtContent): 
 
 	if (data === undefined || offset + PICF_HEADER > data.length) return undefined
 
-	const lcb = u32(data, offset)
-	const cbHeader = u16(data, offset + 4)
+	const lcb = le32(data, offset)
+	const cbHeader = le16(data, offset + 4)
 
 	if (cbHeader !== PICF_HEADER || lcb < PICF_HEADER || offset + lcb > data.length) return undefined
 
-	const mm = u16(data, offset + 6)
-	const goalX = i16(data, offset + 28)
-	const goalY = i16(data, offset + 30)
-	const scaleX = u16(data, offset + 32)
-	const scaleY = u16(data, offset + 34)
+	const mm = le16(data, offset + 6)
+	const goalX = les16(data, offset + 28)
+	const goalY = les16(data, offset + 30)
+	const scaleX = le16(data, offset + 32)
+	const scaleY = le16(data, offset + 34)
 	const end = offset + lcb
 	let at = offset + PICF_HEADER
-	let blip: Blip | undefined
+	let blip: PendingBlip | undefined
+	let source = `data:${String(offset)}`
 	let shape: ArtShape | undefined
 	let cut: Crop | undefined
 
@@ -138,7 +182,9 @@ export function inlinePicture(file: DocFile, offset: number, art?: ArtContent): 
 		// The BLIP follows the shape; without one there, pib names an entry of the document's BLIP store.
 		const entry = store.length > 0 ? (store[pib - 1] ?? store.find(candidate => candidate.blip !== undefined)) : art?.blips[pib - 1]
 
-		if (entry?.blip !== undefined) blip = blipFile(entry.data, entry.blip)
+		if (store.length === 0) source = `bstore:${String(pib)}`
+
+		blip = pendingOf(entry)
 
 		cut = crop(shape)
 	} else {
@@ -146,13 +192,14 @@ export function inlinePicture(file: DocFile, offset: number, art?: ArtContent): 
 		// placeable header.
 		const bytes = data.subarray(at, end)
 
-		if (bytes.length >= 18) blip = { bytes: bytes.slice(), extension: "wmf", contentType: "image/x-wmf" }
+		if (bytes.length >= 18)
+			blip = { size: bytes.length, decode: () => ({ bytes: bytes.slice(), extension: "wmf", contentType: "image/x-wmf" }) }
 
 		// dxaCropLeft, dyaCropTop, dxaCropRight, dyaCropBottom.
-		const left = i16(data, offset + 36)
-		const top = i16(data, offset + 38)
-		const right = i16(data, offset + 40)
-		const bottom = i16(data, offset + 42)
+		const left = les16(data, offset + 36)
+		const top = les16(data, offset + 38)
+		const right = les16(data, offset + 40)
+		const bottom = les16(data, offset + 42)
 
 		if (goalX > 0 && goalY > 0 && (left !== 0 || top !== 0 || right !== 0 || bottom !== 0))
 			cut = { left: left / goalX, top: top / goalY, right: right / goalX, bottom: bottom / goalY }
@@ -167,21 +214,17 @@ export function inlinePicture(file: DocFile, offset: number, art?: ArtContent): 
 		height: (shownY * (scaleY === 0 ? 1000 : scaleY)) / 1000,
 		crop: cut,
 		shape,
-		source: `data:${String(offset)}`
+		source
 	}
 }
 
 // The BLIP a floating picture shape shows (its pib in the drawing group's BLIP store).
-export function shapeBlip(art: ArtContent, shape: ArtShape): { readonly blip: Blip; readonly source: string } | undefined {
+export function shapeBlip(art: ArtContent, shape: ArtShape): { readonly blip: PendingBlip; readonly source: string } | undefined {
 	const pib = shape.properties.get(PID.pib)?.value ?? shape.properties.get(PID.fillBlip)?.value
 
 	if (pib === undefined || pib < 1) return undefined
 
-	const entry = art.blips[pib - 1]
-
-	if (entry?.blip === undefined) return undefined
-
-	const blip = blipFile(entry.data, entry.blip)
+	const blip = pendingOf(art.blips[pib - 1])
 
 	return blip === undefined ? undefined : { blip, source: `bstore:${String(pib)}` }
 }
@@ -210,24 +253,24 @@ export function objectPreview(streams: ReadonlyMap<string, Uint8Array>): Blip | 
 function presentation(bytes: Uint8Array): Blip | undefined {
 	if (bytes.length < 8) return undefined
 
-	const marker = u32(bytes, 0)
+	const marker = le32(bytes, 0)
 	let at = 4
 	let format = 0
 
 	if (marker === 0xffffffff || marker === 0xfffffffe) {
-		format = u32(bytes, 4)
+		format = le32(bytes, 4)
 		at = 8
 	} else if (marker > 0 && marker < 256) {
 		// A clipboard format name: not a standard picture format.
 		return undefined
 	}
 
-	const deviceSize = u32(bytes, at)
+	const deviceSize = le32(bytes, at)
 
 	at += 4 + Math.max(0, deviceSize - 4)
 	at += 4 + 4 + 4 + 4 + 4 + 4
 
-	const size = u32(bytes, at)
+	const size = le32(bytes, at)
 	const data = bytes.subarray(at + 4, Math.min(bytes.length, at + 4 + size))
 
 	// CF_METAFILEPICT 3, CF_DIB 8, CF_ENHMETAFILE 14.

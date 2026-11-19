@@ -5,7 +5,7 @@ import { odpWrittenTransition } from "../../../odp/write/emit/transition"
 import { insertedMediaContent, insertedMediaId, insertedMediaWritten } from "./media"
 import { onHeldPage, pageMarkup, sourceReading } from "./heldPage"
 import type { ApplyFamily, Touch } from "../apply"
-import type { DeckOp, TransitionOp } from "../ops"
+import { heldBytes, type DeckOp, type TransitionOp } from "../ops"
 
 // The transition of one or more slides set (undefined removes it). The inverse sets each slide's transition back,
 // with the source element's bytes when it was the file's own, so an undo writes those bytes again (emit/transition.ts
@@ -100,7 +100,7 @@ export const applyTransition: ApplyFamily<TransitionOp> = {
 			let raw = odp ? pageMarkup(node, reading) : prior === undefined ? undefined : RAWS.get(prior)
 
 			if (!odp && raw === undefined && prior?.src !== undefined) {
-				const source = context.sourceBytes(prior.src)
+				const source = heldBytes(context, prior.src)
 
 				if (!(source instanceof Uint8Array)) return source
 

@@ -5,11 +5,10 @@ import { canZOrder, zOrderOp } from "../../../core/presentation/edit/commands/ar
 import { canGroup, groupOp, ungroupOps } from "../../../core/presentation/edit/commands/group"
 import {
 	ROTATE_SNAP,
-	canMove,
 	deleteOp,
 	duplicateOp,
 	lineEnds,
-	nudgeOp,
+	nudgedShapes,
 	steppedShapes,
 	turnedShapes,
 	xfrmsOp,
@@ -762,6 +761,8 @@ export function ShapeEditLayer({
 		const drag = dragRef.current
 		const pending = pendingRef.current
 		const last = frameRef.current
+		// Read before endPointer() clears the drag: the Mac Control copy applies only during a move.
+		const modifiers = modifiersOf(event)
 
 		endPointer()
 
@@ -773,7 +774,7 @@ export function ShapeEditLayer({
 				return
 			}
 
-			const moved = drag.move(slidePoint(event), modifiersOf(event))
+			const moved = drag.move(slidePoint(event), modifiers)
 
 			if (moved.copy === true) {
 				// The originals stay; the copies become the selection once the render shows them.
@@ -995,22 +996,10 @@ export function ShapeEditLayer({
 
 				event.preventDefault()
 
-				const op = nudgeOp(slide, placed, action.direction, action.large)
+				const boxes = nudgedShapes(placed, action.direction, action.large)
+				const op = xfrmsOp(slide, placed, boxes)
 
-				if (op === undefined) return
-
-				const step = (action.large ? 10 : 1) * EMU_PER_PX
-				const dx = action.direction === "left" ? -step : action.direction === "right" ? step : 0
-				const dy = action.direction === "up" ? -step : action.direction === "down" ? step : 0
-
-				void run(
-					op,
-					placed.map(shape =>
-						canMove(shape)
-							? { ...shape, xfrm: { ...shape.xfrm, x: Math.round(shape.xfrm.x + dx), y: Math.round(shape.xfrm.y + dy) } }
-							: shape
-					)
-				)
+				if (op !== undefined) void run(op, boxes)
 
 				return
 			}

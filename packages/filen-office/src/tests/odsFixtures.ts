@@ -7,6 +7,10 @@ import { buildZip, text } from "./zipBuilder"
 
 // Small ODS packages written by hand, opened into the xlsx model.
 
+// The corpus's encrypted spreadsheets, in name order: AES-256-CBC (ODF 1.2+) and the legacy Blowfish CFB of
+// OpenOffice.org 1.x-3.x. Neither opens without its password.
+export const ODS_ENCRYPTED: readonly string[] = ["lo__password.ods", "lo__passwordOld.ods"]
+
 export const ODS_NS = [
 	'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"',
 	'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"',

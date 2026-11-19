@@ -24,8 +24,6 @@ export interface PageSpan {
 	// inserted there when the page is parsed alone (attributes after the page's own, so its node indexes hold).
 	readonly insertAt: number
 	readonly inject?: Uint8Array
-	// The page's start tag alone, self-closed, inside the root (its attributes: name, style, master, layout).
-	readonly head: XmlDocument
 }
 
 export interface ContentPages {
@@ -324,15 +322,8 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 		}
 
 		const insertAt = tag.end - (tag.selfClosing ? 2 : 1)
-		const head = extra === undefined ? bytes.subarray(at, insertAt) : concat(bytes.subarray(at, insertAt), extra)
 
-		pages.push({
-			start: at,
-			end,
-			insertAt,
-			...(extra === undefined ? {} : { inject: extra }),
-			head: parseXml(concat(rootOpen, head, encodeUtf8("/>"), rootClose))
-		})
+		pages.push({ start: at, end, insertAt, ...(extra === undefined ? {} : { inject: extra }) })
 		skeletonParts.push(bytes.subarray(copied, at))
 		copied = end
 		at = end
@@ -341,6 +332,19 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 	skeletonParts.push(bytes.subarray(copied))
 
 	return { bytes, pages, skeleton: parseXml(concat(...skeletonParts)), rootOpen, rootClose }
+}
+
+const SELF_CLOSE = encodeUtf8("/>")
+
+// A page's start tag alone, self-closed, inside the root (its attributes: name, style, master, layout); parsed when
+// asked for and not kept, so a deck holds no parse per page. Malformed markup in the tag throws XmlError.
+export function pageHead(content: ContentPages, span: PageSpan): XmlDocument {
+	const { bytes, rootOpen, rootClose } = content
+	const tag = bytes.subarray(span.start, span.insertAt)
+
+	return parseXml(
+		span.inject === undefined ? concat(rootOpen, tag, SELF_CLOSE, rootClose) : concat(rootOpen, tag, span.inject, SELF_CLOSE, rootClose)
+	)
 }
 
 // One page as a document of its own (its node indexes are the fragment's: SourceRef.fragment = span.start).

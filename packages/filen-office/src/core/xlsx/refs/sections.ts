@@ -1,7 +1,7 @@
 import { cellName } from "../../sheet/refs/cellRef"
 import { decodeUtf8, encodeUtf8 } from "../../xml/index"
-import { axisLimit, inBand, shiftAxisSpan, shiftIndex, straddles, type AxisShift } from "./axis"
-import { shiftSplit, shiftViewStart } from "./views"
+import { axisLimit, inBand, shiftAxisSpan, shiftIndex, straddles } from "./axis"
+import { shiftSplit, shiftViewStart, viewIndex } from "./views"
 import { refuse } from "./catalogue"
 import { shiftAnchor } from "./anchors"
 import {
@@ -375,12 +375,6 @@ function selectionAndPane(edited: Edited, view: number, job: RefJob, construct: 
 				break
 		}
 	}
-}
-
-function viewIndex(index: number, shift: AxisShift): number {
-	const next = shiftIndex(index, shift)
-
-	return next >= 0 ? next : Math.min(shift.at, axisLimit(shift.axis) - 1)
 }
 
 // The sheet's views, when the catalogue (not the model) writes them: every view, pane and selection moved.

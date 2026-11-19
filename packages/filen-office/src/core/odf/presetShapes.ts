@@ -11,6 +11,7 @@ import {
 import { BUILTIN_COUNT, PathFill } from "../drawingml/geometry/program"
 import { EMU_PER_PX } from "../drawingml/reader"
 import { PATH_ARC, PATH_CLOSE, PATH_CUBIC, PATH_LINE, PATH_MOVE, PATH_QUAD, type CustomPath } from "../presentation/model"
+import { own } from "../tables"
 
 // A custom outline's text rectangle (a:rect), its sides numbers of EMU or guide names.
 export interface CustomTextRect {
@@ -113,13 +114,13 @@ const COMMAND_LETTER: Readonly<Record<number, string>> = {
 
 // Whether odfPresetAttributes writes the preset with these guides.
 export function odfWritesPreset(preset: string, guides: readonly PresetGuide[]): boolean {
-	return (ODF_TYPES[preset] !== undefined && guides.length === 0) || presetProgram(preset) !== undefined
+	return (own(ODF_TYPES, preset) !== undefined && guides.length === 0) || presetProgram(preset) !== undefined
 }
 
 // Whether a preset's draw:enhanced-geometry changes with its box's size: an outline evaluated for the box, or a
 // trapezoid's inset (ODF measures it on the width, DrawingML on the shorter side).
 export function presetDependsOnSize(preset: string, guides: readonly PresetGuide[]): boolean {
-	return preset === "trapezoid" || ODF_TYPES[preset] === undefined || guides.length > 0
+	return preset === "trapezoid" || own(ODF_TYPES, preset) === undefined || guides.length > 0
 }
 
 // ODF's trapezoid modifier for a DrawingML trapezoid on `box`, to thousandths (exact through a read); undefined
@@ -148,7 +149,7 @@ export interface PresetBox {
 // The draw:enhanced-geometry attributes of a preset shape `cx` × `cy` EMU with `guides` (its a:avLst), mirrored by
 // the flips; undefined for a name that is no preset.
 export function odfPresetAttributes(preset: string, guides: readonly PresetGuide[], box: PresetBox): Attribute[] | undefined {
-	const type = ODF_TYPES[preset]
+	const type = own(ODF_TYPES, preset)
 
 	if (type !== undefined && guides.length === 0 && preset !== "trapezoid")
 		return [["svg:viewBox", `0 0 ${VIEW} ${VIEW}`], ["draw:type", type], ...mirrors(box.flipH, box.flipV)]

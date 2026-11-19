@@ -137,7 +137,7 @@ const HIDDEN_TEXT: ReadonlySet<unknown> = new Set([marks.deletion, marks.move_fr
 export const LINE_BREAK = "\u2028"
 
 function inlineText(node: Node): string {
-	if (node.isText) return HIDDEN_TEXT.size > 0 && node.marks.some(mark => HIDDEN_TEXT.has(mark.type)) ? "" : (node.text ?? "")
+	if (node.isText) return node.marks.some(mark => HIDDEN_TEXT.has(mark.type)) ? "" : (node.text ?? "")
 
 	switch (node.type) {
 		case nodes.tab:
@@ -408,30 +408,52 @@ interface Found {
 	reference: number
 }
 
-// Comment anchors of an index by id, the first of each kind.
+// Notes an anchor entry of the index in `found`, the first of each kind.
+function noteAnchor(index: ReviewIndex, entry: number, found: Found): void {
+	const kind = index.kindOf(entry)
+
+	if (kind === ReviewKind.COMMENT_START && found.start < 0) found.start = index.fromOf(entry)
+	else if (kind === ReviewKind.COMMENT_END && found.end < 0) found.end = index.fromOf(entry)
+	else if (kind === ReviewKind.COMMENT_REFERENCE && found.reference < 0) found.reference = index.fromOf(entry)
+}
+
+// Comment anchors of an index by id, the first of each kind, in document order.
 function indexAnchors(index: ReviewIndex): Map<string, Found> {
 	const out = new Map<string, Found>()
 
 	if (index.commentCount === 0) return out
 
-	for (let k = 0; k < index.size; k++) {
-		const entry = index.entry(k)
+	for (const entry of index.commentEntries()) {
+		if (COMMENT_KINDS[index.kindOf(entry)] === undefined) continue
 
-		if (entry === undefined || COMMENT_KINDS[entry.kind] === undefined) continue
-
-		let found = out.get(entry.id)
+		const id = index.idOf(entry)
+		let found = out.get(id)
 
 		if (found === undefined) {
 			found = { start: -1, end: -1, reference: -1 }
-			out.set(entry.id, found)
+			out.set(id, found)
 		}
 
-		if (entry.kind === ReviewKind.COMMENT_START && found.start < 0) found.start = entry.from
-		else if (entry.kind === ReviewKind.COMMENT_END && found.end < 0) found.end = entry.from
-		else if (entry.kind === ReviewKind.COMMENT_REFERENCE && found.reference < 0) found.reference = entry.from
+		noteAnchor(index, entry, found)
 	}
 
 	return out
+}
+
+// The anchors of comment `id` alone (indexAnchors(index).get(id)).
+function anchorsOf(index: ReviewIndex, id: string): Found | undefined {
+	if (index.commentCount === 0) return undefined
+
+	let found: Found | undefined
+
+	for (const entry of index.commentEntries()) {
+		if (COMMENT_KINDS[index.kindOf(entry)] === undefined || index.idOf(entry) !== id) continue
+
+		found ??= { start: -1, end: -1, reference: -1 }
+		noteAnchor(index, entry, found)
+	}
+
+	return found
 }
 
 // Where a marker of a story's document is held: an inline node of its own, a block's (or the story's)
@@ -445,7 +467,61 @@ function listHas(list: unknown, key: string): list is MarkerList {
 	return Array.isArray(list) && (list as MarkerList).some(marker => markerKey(marker) === key)
 }
 
-function holderOf(doc: Node, pos: number, kind: MarkerKind, id: string): Holder {
+// The top-level block holding a position (its index and start), moved forward over positions given in order: each
+// lookup starts from the previous block instead of from the document's first.
+interface TopCursor {
+	index: number
+	offset: number
+}
+
+// The cursor at the block holding `pos` (offset <= pos < offset + nodeSize), undefined at the document's end.
+function topAt(doc: Node, cursor: TopCursor, pos: number): TopCursor | undefined {
+	if (pos < cursor.offset || pos >= doc.content.size) return undefined
+
+	for (let size = doc.child(cursor.index).nodeSize; cursor.offset + size <= pos; size = doc.child(cursor.index).nodeSize) {
+		cursor.offset += size
+		cursor.index++
+	}
+
+	return cursor
+}
+
+// What holderOf() reads of a resolved position.
+interface Depths {
+	readonly depth: number
+	end(depth: number): number
+	node(depth: number): Node
+	before(depth: number): number
+}
+
+const BETWEEN_BLOCKS: Depths = {
+	depth: 0,
+	end: () => 0,
+	node: () => {
+		throw new RangeError("No node between top-level blocks")
+	},
+	before: () => 0
+}
+
+// doc.resolve(pos) read through the block at `top` (pos inside it or at its start).
+function depthsIn(doc: Node, pos: number, top: TopCursor): Depths {
+	const start = top.offset
+
+	if (pos === start) return BETWEEN_BLOCKS
+
+	const base = start + 1
+	const inner = doc.child(top.index).resolve(pos - base)
+
+	return {
+		depth: inner.depth + 1,
+		end: depth => base + inner.end(depth - 1),
+		node: depth => inner.node(depth - 1),
+		before: depth => (depth === 1 ? start : base + inner.before(depth - 1))
+	}
+}
+
+// `top`: the block holding `pos` (topAt()), so it is not looked up from the document's start.
+function holderOf(doc: Node, pos: number, kind: MarkerKind, id: string, top?: TopCursor): Holder {
 	const key = `${kind}:${id}`
 
 	if (pos === doc.content.size) {
@@ -454,7 +530,14 @@ function holderOf(doc: Node, pos: number, kind: MarkerKind, id: string): Holder 
 		if (listHas(end, key)) return { kind: "list", pos: -1, attr: "end", list: end }
 	}
 
-	const node = pos < doc.content.size ? doc.nodeAt(pos) : null
+	const node =
+		pos >= doc.content.size
+			? null
+			: top === undefined
+				? doc.nodeAt(pos)
+				: pos === top.offset
+					? doc.child(top.index)
+					: doc.child(top.index).nodeAt(pos - top.offset - 1)
 
 	if (node !== null) {
 		if (node.isInline) {
@@ -474,7 +557,7 @@ function holderOf(doc: Node, pos: number, kind: MarkerKind, id: string): Holder 
 		}
 	}
 
-	const $pos = doc.resolve(pos)
+	const $pos: Depths = top === undefined ? doc.resolve(pos) : depthsIn(doc, pos, top)
 
 	for (let depth = $pos.depth; depth > 0; depth--) {
 		if ($pos.end(depth) !== pos) break
@@ -626,19 +709,39 @@ interface Live {
 	readonly referable: boolean
 }
 
-// What the commands can do with a comment's anchors in its story's document.
-function anchorAccess(doc: Node, id: string, found: Found): { deletable: boolean; referable: boolean } {
-	let deletable = true
+interface Access {
+	deletable: boolean
+	referable: boolean
+}
 
-	for (const [pos, kind] of [
-		[found.start, "commentRangeStart"],
-		[found.end, "commentRangeEnd"],
-		[found.reference, "commentReference"]
-	] as const) {
-		if (pos >= 0 && holderOf(doc, pos, kind, id).kind === "bytes") deletable = false
+// What the commands can do with the anchors of comments `anchors` of a story's document: their markers are looked
+// up in document order, each from the block of the one before.
+function anchorAccesses(doc: Node, anchors: ReadonlyMap<string, Found>): Map<string, Access> {
+	const out = new Map<string, Access>()
+	const markers: { pos: number; kind: MarkerKind; id: string; access: Access }[] = []
+
+	for (const [id, found] of anchors) {
+		const access: Access = { deletable: true, referable: false }
+
+		out.set(id, access)
+
+		if (found.start >= 0) markers.push({ pos: found.start, kind: "commentRangeStart", id, access })
+		if (found.end >= 0) markers.push({ pos: found.end, kind: "commentRangeEnd", id, access })
+		if (found.reference >= 0) markers.push({ pos: found.reference, kind: "commentReference", id, access })
 	}
 
-	return { deletable, referable: found.reference >= 0 && holderOf(doc, found.reference, "commentReference", id).kind === "inline" }
+	markers.sort((a, b) => a.pos - b.pos)
+
+	const cursor: TopCursor = { index: 0, offset: 0 }
+
+	for (const { pos, kind, id, access } of markers) {
+		const holder = holderOf(doc, pos, kind, id, topAt(doc, cursor, pos))
+
+		if (holder.kind === "bytes") access.deletable = false
+		if (kind === "commentReference" && holder.kind === "inline") access.referable = true
+	}
+
+	return out
 }
 
 const STORES = new WeakMap<CommentHost, DocxComments>()
@@ -743,7 +846,7 @@ export class DocxComments {
 		if (comment === undefined) return undefined
 
 		const session = this.host.storySession(comment.story)
-		const found = session === undefined ? undefined : indexAnchors(session.reviewIndex).get(id)
+		const found = session === undefined ? undefined : anchorsOf(session.reviewIndex, id)
 
 		if (found === undefined) return undefined
 
@@ -1154,7 +1257,7 @@ export class DocxComments {
 		return undefined
 	}
 
-	// The paragraph id of comment `id`'s last paragraph, given one (outside the undo history) when it has none.
+	// The paragraph id of comment `id`'s last paragraph, or undefined when it has none (ensureParaId gives one).
 	private paraIdOf(id: string): string | undefined {
 		const session = this.sessionOfComment(id)
 		const doc = session?.state.doc
@@ -1182,6 +1285,8 @@ export class DocxComments {
 		return undefined
 	}
 
+	// Gives comment `id`'s last paragraph a paragraph id (outside the undo history) when it has none; whether it
+	// has one then.
 	private ensureParaId(id: string): boolean {
 		if (this.paraIdOf(id) !== undefined) return true
 
@@ -1287,8 +1392,15 @@ export class DocxComments {
 
 			if (session.story.story.kind === "comment") continue
 
-			for (const [id, found] of indexAnchors(session.reviewIndex)) {
-				if (found.reference < 0 && found.start < 0) continue
+			const anchored = new Map<string, Found>()
+
+			for (const [id, found] of indexAnchors(session.reviewIndex))
+				if (found.reference >= 0 || found.start >= 0) anchored.set(id, found)
+
+			for (const [id, access] of anchorAccesses(doc, anchored)) {
+				const found = anchored.get(id)
+
+				if (found === undefined) continue
 
 				live.set(id, {
 					id,
@@ -1296,7 +1408,7 @@ export class DocxComments {
 					start: found.start,
 					reference: found.reference,
 					session,
-					...anchorAccess(doc, id, found)
+					...access
 				})
 			}
 		}
@@ -1693,7 +1805,7 @@ export function editText(state: EditorState, texts: readonly string[], styleId: 
 	return tr
 }
 
-// ---- revertible units (decision 5) --------------------------------------------------------------------------
+// ---- revertible units (a save writes what the writer refuses as last saved) ----------------------------------
 
 // Comment ids anchored in `doc` (a scan: made at save time only, a session's index is not created for it).
 function anchorIds(doc: Node): Set<string> {

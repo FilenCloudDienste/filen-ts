@@ -1,4 +1,5 @@
 import { partKey } from "../../../opc/index"
+import { concatBytes } from "../../../opc/pieces"
 import { commentTime, drawingParagraphs, slideComments, type CommentEntry, type SlideComments } from "../../../presentation/comments"
 import { parseInScope } from "../../../presentation/edit/canonical"
 import { refused, type Author, type Deck, type Refused, type SlideNode } from "../../../presentation/model"
@@ -19,7 +20,7 @@ import {
 	readModernComments
 } from "../../read/comments"
 import { G, P_MAIN, partReader } from "../../read/xml"
-import { PART_CONTENT_TYPES, RELATIONSHIPS, type PackageWriter } from "../parts"
+import { PART_CONTENT_TYPES, RELATIONSHIPS, XML_DECLARATION, type PackageWriter } from "../parts"
 import type { PptxEmitFamily } from "../types"
 import type { ReviewSpliceInput } from "./notes"
 import { URIS } from "./shape"
@@ -37,7 +38,6 @@ import { sameBytes } from "../../../docx/write/bytes"
 
 const LEGACY_RELATIONSHIP = `${RELATIONSHIPS}comments`
 const LEGACY_AUTHORS_RELATIONSHIP = `${RELATIONSHIPS}commentAuthors`
-const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 const P = URIS["p"] ?? P_MAIN
 const A = URIS["a"] ?? ""
 const R = URIS["r"] ?? ""
@@ -307,22 +307,6 @@ function spliceList(
 	for (let k = i; k < elements.length; k++) editor.remove(elements[k] as number)
 }
 
-function joinBytes(chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
-}
-
 interface FormSpec {
 	readonly relationship: string
 	readonly contentType: string
@@ -458,7 +442,11 @@ async function writeForm(
 			spec.contentType,
 			modern ? "ppt/comments/modernComment1.xml" : undefined
 		)
-		written = joinBytes([encodeUtf8(`${XML_DECLARATION}<${spec.root} ${spec.rootBindings}>`), ...wanted, encodeUtf8(`</${spec.root}>`)])
+		written = concatBytes([
+			encodeUtf8(`${XML_DECLARATION}<${spec.root} ${spec.rootBindings}>`),
+			...wanted,
+			encodeUtf8(`</${spec.root}>`)
+		])
 		writer.add(name, spec.contentType, written)
 
 		if (related !== undefined) relationships.remove(related.id)

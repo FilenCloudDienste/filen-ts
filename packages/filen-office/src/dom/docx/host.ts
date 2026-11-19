@@ -41,22 +41,15 @@ interface MessageChannelLike {
 	readonly port2: { postMessage(message: unknown): void; close?(): void }
 }
 
-// A macrotask turn, so messages queued for the thread (requests, reads) are handled between layout slices.
-// MessageChannel avoids the 4 ms clamp nested timers get; setTimeout is the fallback.
-export function macrotaskYield(): () => Promise<void> {
-	const Channel: unknown = Reflect.get(globalThis, "MessageChannel")
+// The realm's one channel for macrotask turns, made on first use: a started port is kept alive by the engine, so a
+// channel per caller (one per opened document) would never be collected. Each turn posts its own message and the
+// replies come back in order, so one queue serves every caller.
+let turns: { readonly port: MessageChannelLike["port2"]; readonly waiting: (() => void)[] } | undefined
 
-	if (typeof Channel !== "function") {
-		const timer: unknown = Reflect.get(globalThis, "setTimeout")
+function channelTurns(Channel: new () => MessageChannelLike): NonNullable<typeof turns> {
+	if (turns !== undefined) return turns
 
-		return () =>
-			new Promise(resolve => {
-				if (typeof timer === "function") timer(resolve, 0)
-				else resolve()
-			})
-	}
-
-	const channel = new (Channel as new () => MessageChannelLike)()
+	const channel = new Channel()
 	const waiting: (() => void)[] = []
 
 	channel.port1.onmessage = () => {
@@ -70,10 +63,33 @@ export function macrotaskYield(): () => Promise<void> {
 		if (typeof unref === "function") Reflect.apply(unref, end, [])
 	}
 
+	turns = { port: channel.port2, waiting }
+
+	return turns
+}
+
+// A macrotask turn, so messages queued for the thread (requests, reads) are handled between layout slices.
+// MessageChannel avoids the 4 ms clamp nested timers get; setTimeout is the fallback.
+export function macrotaskYield(): () => Promise<void> {
+	const Channel: unknown = Reflect.get(globalThis, "MessageChannel")
+
+	if (typeof Channel !== "function") {
+		// Looked up per turn: a timer installed later (fake timers in a test) is the one used.
+		return () =>
+			new Promise(resolve => {
+				const timer: unknown = Reflect.get(globalThis, "setTimeout")
+
+				if (typeof timer === "function") timer(resolve, 0)
+				else resolve()
+			})
+	}
+
+	const shared = channelTurns(Channel as new () => MessageChannelLike)
+
 	return () =>
 		new Promise<void>(resolve => {
-			waiting.push(resolve)
-			channel.port2.postMessage(0)
+			shared.waiting.push(resolve)
+			shared.port.postMessage(0)
 		})
 }
 
@@ -904,7 +920,6 @@ function openProtected(
 		worker.post({ t: "close", s: id } satisfies ToWorker, [])
 		end(new Error("closed"))
 	}
-	// One call on the held document; an abort of `signal` asks the worker to stop it.
 	// One call on the held document; an abort of `signal` asks the worker to stop it (a signal without events is
 	// looked at every SIGNAL_POLL_MS).
 	const call = (message: (callId: number) => ToWorker, signal: DocxProtectionOptions["signal"]): Promise<FromWorker> => {

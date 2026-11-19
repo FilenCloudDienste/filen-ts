@@ -1,7 +1,11 @@
-import { XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, transcodeUtf16, type Markup } from "../../xml/index"
+import { ENCODING_DECLARATION } from "../../xml/editor"
+import { XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, transcodeUtf16 } from "../../xml/index"
 import type { SliceClock } from "../../slicing"
-import type { Scanner } from "../read/scan"
+import { XlsxReadError } from "../read/errors"
+import { Scanner } from "../read/scan"
 import { XlsxWriteError } from "./failure"
+
+export { toBytes } from "../../xml/editor"
 
 // Byte-level helpers the splice writer shares: tag scanning over source bytes (no parse of a whole part),
 // attribute splices on small elements, and new markup as pieces.
@@ -25,8 +29,9 @@ export function onlySpace(bytes: Uint8Array, from: number, to: number): boolean 
 	return true
 }
 
-export function toBytes(markup: Markup): Uint8Array {
-	return typeof markup === "string" ? encodeUtf8(markup) : markup
+// The xml:space attribute text that keeps leading or trailing white space, for cells and shared strings alike.
+export function preserved(text: string): string {
+	return text.length > 0 && /^\s|\s$/.test(text) ? ' xml:space="preserve"' : ""
 }
 
 export function attr(name: string, value: string | number): string {
@@ -175,8 +180,11 @@ export function findAttribute(bytes: Uint8Array, tag: ScannedTag, name: string):
 	return -1
 }
 
-// The root element of a part: its start tag and the prefix its name carries.
+// The root element of a part: its start tag and the prefix its name carries. The prolog's comments and processing
+// instructions are skipped to their own terminators (markup inside a comment is no root), a document type
+// declaration to its ">" (one with an internal subset refuses, as the reader refuses it).
 export function rootTag(bytes: Uint8Array): { readonly tag: ScannedTag; readonly prefix: string; readonly name: string } {
+	let scanner: Scanner | null = null
 	let i = 0
 
 	for (;;) {
@@ -184,20 +192,51 @@ export function rootTag(bytes: Uint8Array): { readonly tag: ScannedTag; readonly
 
 		if (i < 0) throw new XlsxWriteError("malformedPart", "A part without a root element")
 
-		const tag = scanTag(bytes, i)
+		const next = bytes[i + 1]
 
-		if (tag !== undefined) {
+		if (next === BANG && spells(bytes, i + 2, i + 9, "DOCTYPE")) {
+			i = doctypeEnd(bytes, i)
+		} else if (next === BANG || next === QUESTION) {
+			scanner ??= new Scanner(bytes, "")
+
+			try {
+				i = scanner.markupEnd(i)
+			} catch (error) {
+				if (error instanceof XlsxReadError) throw new XlsxWriteError("malformedPart", error.message)
+
+				throw error
+			}
+		} else {
+			const tag = scanTag(bytes, i)
+
+			if (tag === undefined) throw new XlsxWriteError("malformedPart", `The root element's start tag at ${i} does not read`)
+
 			const name = decodeUtf8(bytes, i + 1, tag.nameEnd)
 			const colon = name.indexOf(":")
 
 			return { tag, prefix: colon < 0 ? "" : name.slice(0, colon), name }
 		}
-
-		// A declaration, comment or doctype: skip to its end.
-		i = bytes.indexOf(GT, i + 1)
-
-		if (i < 0) throw new XlsxWriteError("malformedPart", "A part without a root element")
 	}
+}
+
+// After the document type declaration whose "<" is at `i`: quoted literals may hold ">".
+function doctypeEnd(bytes: Uint8Array, i: number): number {
+	for (let j = i + 9; j < bytes.length; j++) {
+		const b = bytes[j]
+
+		if (b === GT) return j + 1
+		if (b === 91) throw new XlsxWriteError("malformedPart", "A document type declaration with an internal subset")
+
+		if (b === DQUOTE || b === SQUOTE) {
+			const close = bytes.indexOf(b, j + 1)
+
+			if (close < 0) break
+
+			j = close
+		}
+	}
+
+	throw new XlsxWriteError("malformedPart", "A document type declaration is not closed")
 }
 
 // One element's bytes with attributes set (value) or removed (null), everything else as written. Attributes
@@ -363,7 +402,7 @@ export function utf8Part(bytes: Uint8Array): Uint8Array {
 
 	const end = utf8.indexOf(62)
 	const declaration = decodeUtf8(utf8, 0, end + 1)
-	const match = /(encoding\s*=\s*)(["'])[^"']*\2/.exec(declaration)
+	const match = ENCODING_DECLARATION.exec(declaration)
 
 	if (match === null) return utf8
 

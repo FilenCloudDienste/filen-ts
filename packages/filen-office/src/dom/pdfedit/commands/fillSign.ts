@@ -6,8 +6,19 @@ import {
 	type PdfVisualSignature
 } from "../../../core/pdfedit/visualSignature"
 import { PdfEngineRefusal } from "../context"
+import { insertedImageBytes } from "../pages/organise"
 import { addFillMark, addFillText, placeVisualSignature, type PdfFillFont, type PdfFillMark, type PdfRgb } from "../fillSign"
-import { isIndex, isRecord, isText, type PdfCommandContext, type PdfCommandTable } from "./types"
+import {
+	isFiniteNumber,
+	isIndex,
+	isRecord,
+	isText,
+	parseRect,
+	parseRgb,
+	requirePage,
+	type PdfCommandContext,
+	type PdfCommandTable
+} from "./types"
 
 // Fill & Sign marks on a page through the Fill & Sign block (fillSign/annotations.ts): typed text, a check mark /
 // cross / dot, and a visual signature or initials (a picture of a signature, not a certificate signature). Each is one
@@ -47,21 +58,13 @@ const FONTS: readonly PdfFillFont[] = ["sans", "serif", "mono"]
 const MARKS: readonly PdfFillMark[] = ["check", "cross", "dot"]
 
 function isFiniteIn(value: unknown, min: number, max: number): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max
+	return isFiniteNumber(value) && value >= min && value <= max
 }
 
 function parseBox(value: unknown): PdfPageRect | null {
-	if (!Array.isArray(value) || value.length !== 4 || !value.every(item => isFiniteIn(item, -MAX_COORDINATE, MAX_COORDINATE))) return null
+	const box = parseRect(value, -MAX_COORDINATE, MAX_COORDINATE)
 
-	const [x0, y0, x1, y1] = value as [number, number, number, number]
-
-	return x1 - x0 >= MIN_SIZE && y1 - y0 >= MIN_SIZE ? [x0, y0, x1, y1] : null
-}
-
-function parseColor(value: unknown): PdfRgb | null {
-	return Array.isArray(value) && value.length === 3 && value.every(item => isFiniteIn(item, 0, 1))
-		? [value[0] as number, value[1] as number, value[2] as number]
-		: null
+	return box !== null && box[2] - box[0] >= MIN_SIZE && box[3] - box[1] >= MIN_SIZE ? box : null
 }
 
 function parsePlacement(args: unknown): PdfFillPlacement | null {
@@ -112,7 +115,7 @@ function placeOn(
 	context: PdfCommandContext,
 	placement: PdfFillPlacement
 ): { readonly page: ReturnType<PdfCommandContext["page"]>; readonly box: PdfPageRect } {
-	if (placement.page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
+	requirePage(context, placement.page)
 
 	const page = context.page(placement.page)
 	const [bx0, by0, bx1, by1] = page.getBounds()
@@ -129,7 +132,7 @@ export const FILL_SIGN_COMMANDS: PdfCommandTable<PdfFillSignCommands> = {
 		tool: "annotate",
 		parse: args => {
 			const placement = parsePlacement(args)
-			const color = isRecord(args) ? parseColor(args["color"]) : null
+			const color = isRecord(args) ? parseRgb(args["color"]) : null
 
 			if (placement === null || color === null || !isRecord(args)) return null
 
@@ -161,7 +164,7 @@ export const FILL_SIGN_COMMANDS: PdfCommandTable<PdfFillSignCommands> = {
 		tool: "annotate",
 		parse: args => {
 			const placement = parsePlacement(args)
-			const color = isRecord(args) ? parseColor(args["color"]) : null
+			const color = isRecord(args) ? parseRgb(args["color"]) : null
 			const mark = isRecord(args) ? MARKS.find(candidate => candidate === args["mark"]) : undefined
 
 			return placement === null || color === null || mark === undefined ? null : { ...placement, mark, color }
@@ -186,7 +189,8 @@ export const FILL_SIGN_COMMANDS: PdfCommandTable<PdfFillSignCommands> = {
 
 			return role === null || signature === null ? null : { ...placement, role, signature }
 		},
-		bytes: ({ signature }) => (signature.kind === "image" ? signature.png.byteLength : 0),
+		// Decoded pixels included, so a flat picture of huge dimensions is refused as over budget before it is decoded.
+		bytes: ({ signature }, mupdf) => (signature.kind === "image" ? insertedImageBytes(mupdf, signature.png) : 0),
 		run: (context, args) => {
 			const { page, box } = placeOn(context, args)
 

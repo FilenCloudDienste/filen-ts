@@ -477,3 +477,17 @@ describe("compiling", () => {
 		expect(text(false, "@")).toBe("FALSE")
 	})
 })
+
+describe("the compiled-format cache", () => {
+	it("compiles a short code once, and a code longer than a cell's format each time it is asked for", () => {
+		const long = `${"0".repeat(299)}.`
+		const short = "0.00"
+		const kept = numFmt(short)
+
+		expect(numFmt(short)).toBe(kept)
+		expect(numFmt(long)).not.toBe(numFmt(long))
+		expect(text(5, long)).toBe(formatNumberInto(parseNumFmt(long), 5, new NumFmtOutput()).text)
+		// Asking for long codes does not take the short ones out.
+		expect(numFmt(short)).toBe(kept)
+	})
+})

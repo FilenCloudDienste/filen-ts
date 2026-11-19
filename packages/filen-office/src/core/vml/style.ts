@@ -13,6 +13,10 @@ const PX_PER_UNIT: Readonly<Record<string, number>> = {
 	emu: 1 / 9525
 }
 
+// Real lengths are a few dozen characters; longer text is refused before LENGTH runs (it backtracks on long
+// digit runs).
+const MAX_LENGTH_TEXT = 64
+
 const LENGTH = /^(-?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\s*(pt|in|cm|mm|pc|pi|px|emu)?$/
 
 // A parsed length: `value` in px when `unit` is true, else a bare number (px at the top level, coordinate
@@ -25,7 +29,11 @@ export interface Length {
 export function parseLength(text: string | undefined): Length | undefined {
 	if (text === undefined) return undefined
 
-	const match = LENGTH.exec(text.trim().toLowerCase())
+	const trimmed = text.trim()
+
+	if (trimmed.length > MAX_LENGTH_TEXT) return undefined
+
+	const match = LENGTH.exec(trimmed.toLowerCase())
 
 	if (match === null) return undefined
 

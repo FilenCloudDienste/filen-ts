@@ -12,6 +12,7 @@ import {
 	type PdfMemoryProfile
 } from "../../core/pdfedit"
 import { PDF_UNSIGNED } from "../../core/pdfedit/signaturePolicy"
+import { insertedImageBytes } from "../../dom/pdfedit/pages/organise"
 import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import { makePdf } from "./fixtures"
 import { startEngine, stopEngines, syncPort } from "./harness"
@@ -116,7 +117,7 @@ describe("the memory budget", () => {
 			const picture = noisePng(60, 60)
 			const memory: PdfMemoryProfile = {
 				...PDF_DESKTOP_MEMORY,
-				editMaxBytes: source.length + Math.floor(picture.length * 1.5)
+				editMaxBytes: source.length + Math.floor(insertedImageBytes(mupdf, picture) * 1.5)
 			}
 			const engine = startEngine(source)
 

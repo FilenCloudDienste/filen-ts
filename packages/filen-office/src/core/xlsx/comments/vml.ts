@@ -93,7 +93,12 @@ export function readVml(document: XmlDocument): VmlPart {
 
 				if (name === "Row") row = Number(document.textContent(child).trim())
 				else if (name === "Column") col = Number(document.textContent(child).trim())
-				else if (name === "Visible") shown = true
+				else if (name === "Visible") {
+					// A true/false/blank value: blank or true shows the note, anything else hides it.
+					const value = document.textContent(child).trim().toLowerCase()
+
+					shown = value === "" || value === "true" || value === "t"
+				}
 			}
 
 			if (Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0 && row < SHEET_MAX_ROWS && col < SHEET_MAX_COLS) {
@@ -258,8 +263,22 @@ export function showNoteShape(part: VmlPart, key: number, shown: boolean): Uint8
 	if (shown) {
 		const name = document.name(shape.clientData)
 		const colon = name.indexOf(":")
+		const visible = `<${colon < 0 ? "" : name.slice(0, colon + 1)}Visible/>`
+		let replaced = false
 
-		editor.append(shape.clientData, `<${colon < 0 ? "" : name.slice(0, colon + 1)}Visible/>`)
+		// A false-valued x:Visible becomes the empty element instead of gaining a second one beside it.
+		for (let child = document.firstChildElement(shape.clientData); child >= 0; child = document.nextSiblingElement(child)) {
+			if (document.localName(child) !== "Visible") continue
+
+			if (replaced) {
+				editor.remove(child)
+			} else {
+				editor.replace(child, visible)
+				replaced = true
+			}
+		}
+
+		if (!replaced) editor.append(shape.clientData, visible)
 	} else {
 		for (let child = document.firstChildElement(shape.clientData); child >= 0; child = document.nextSiblingElement(child))
 			if (document.localName(child) === "Visible") editor.remove(child)

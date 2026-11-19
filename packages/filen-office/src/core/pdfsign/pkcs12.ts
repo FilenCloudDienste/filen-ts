@@ -16,6 +16,16 @@ import {
 	getCrypto,
 	type SafeBag
 } from "pkijs"
+import {
+	CURVE_BY_OID,
+	EC_PUBLIC_KEY_OID,
+	ED25519_OID,
+	MIN_RSA_BITS,
+	ownedBytes,
+	RSA_ENCRYPTION_OID,
+	RSA_PSS_OID,
+	rsaModulusBits
+} from "./algorithms"
 import { certificateChain } from "./certificate"
 import { derOf } from "./cms"
 import { keyMatchesCertificate, schemeParams, type PdfSignatureScheme, type PdfSigningIdentity, type PdfSigningSubtle } from "./cmsBuild"
@@ -70,11 +80,7 @@ const OIDS = {
 	shroudedKeyBag: "1.2.840.113549.1.12.10.1.2",
 	certBag: "1.2.840.113549.1.12.10.1.3",
 	safeContentsBag: "1.2.840.113549.1.12.10.1.6",
-	localKeyId: "1.2.840.113549.1.9.21",
-	rsa: "1.2.840.113549.1.1.1",
-	rsaPss: "1.2.840.113549.1.1.10",
-	ec: "1.2.840.10045.2.1",
-	ed25519: "1.3.101.112"
+	localKeyId: "1.2.840.113549.1.9.21"
 } as const
 
 // PKCS#12 PBE (RFC 7292 appendix C): key length, cipher, effective RC2 bits.
@@ -85,13 +91,6 @@ const LEGACY_PBE = new Map<string, { readonly keyBytes: number; readonly cipher:
 	["1.2.840.113549.1.12.1.6", { keyBytes: 5, cipher: "RC2", rc2Bits: 40 }]
 ])
 
-const CURVES = new Map<string, "P-256" | "P-384" | "P-521">([
-	["1.2.840.10045.3.1.7", "P-256"],
-	["1.3.132.0.34", "P-384"],
-	["1.3.132.0.35", "P-521"]
-])
-const CURVE_DIGESTS = { "P-256": "SHA-256", "P-384": "SHA-384", "P-521": "SHA-512" } as const
-const MIN_RSA_BITS = 2048
 // Bags and nesting a container may have: real ones hold a key and a few certificates.
 const MAX_BAGS = 256
 const MAX_DEPTH = 4
@@ -104,10 +103,6 @@ interface KeyEntry {
 interface CertificateEntry {
 	readonly certificate: Certificate
 	readonly localKeyId: Uint8Array | null
-}
-
-function owned(view: Uint8Array): Uint8Array<ArrayBuffer> {
-	return new Uint8Array(view)
 }
 
 function binary(bytes: Uint8Array): string {
@@ -146,7 +141,7 @@ function fail(reason: PdfPkcs12Failure): never {
 
 // The PBES2 password as UTF-8 (RFC 9579), then as BMPString (writers that reuse the PKCS#12 encoding).
 function pbes2Passwords(password: string): Uint8Array<ArrayBuffer>[] {
-	return [owned(new TextEncoder().encode(password)), bmpString(password)]
+	return [ownedBytes(new TextEncoder().encode(password)), bmpString(password)]
 }
 
 // The legacy PBE password as forge's KDF takes it (a string turned into BMPString code unit by code unit): the text
@@ -305,7 +300,7 @@ async function collectBags(
 				localKeyId: localKeyId(bag)
 			})
 		} else if (bag.bagId === OIDS.keyBag && value instanceof PrivateKeyInfo) {
-			keys.push({ pkcs8: owned(derOf(value.toSchema())), localKeyId: localKeyId(bag) })
+			keys.push({ pkcs8: ownedBytes(derOf(value.toSchema())), localKeyId: localKeyId(bag) })
 		} else if (bag.bagId === OIDS.certBag && value instanceof CertBag && value.parsedValue instanceof Certificate) {
 			certificates.push({ certificate: value.parsedValue, localKeyId: localKeyId(bag) })
 		} else if (bag.bagId === OIDS.safeContentsBag && value instanceof SafeContents) {
@@ -318,7 +313,7 @@ async function readContainer(bytes: Uint8Array, password: string, legacy: PdfLeg
 	let pfx: PFX
 
 	try {
-		pfx = PFX.fromBER(owned(bytes))
+		pfx = PFX.fromBER(ownedBytes(bytes))
 	} catch {
 		return fail("malformed")
 	}
@@ -326,7 +321,7 @@ async function readContainer(bytes: Uint8Array, password: string, legacy: PdfLeg
 	try {
 		// The MAC proves the password before anything is decrypted (pkijs takes it as UTF-8 and derives the BMPString).
 		await pfx.parseInternalValues({
-			password: owned(new TextEncoder().encode(password)).buffer,
+			password: ownedBytes(new TextEncoder().encode(password)).buffer,
 			checkIntegrity: pfx.macData !== undefined
 		})
 	} catch (error) {
@@ -344,7 +339,7 @@ async function readContainer(bytes: Uint8Array, password: string, legacy: PdfLeg
 		let contents: SafeContents
 
 		if (content.contentType === OIDS.data && content.content instanceof asn1js.OctetString) {
-			contents = parseSafeContents(owned(encryptedBytes(content.content)))
+			contents = parseSafeContents(ownedBytes(encryptedBytes(content.content)))
 		} else if (content.contentType === OIDS.encryptedData) {
 			const encrypted = encryptedDataOf(content)
 			const data = encrypted.encryptedContentInfo.encryptedContent
@@ -394,45 +389,37 @@ function schemeOf(pkcs8: Uint8Array<ArrayBuffer>): { readonly scheme: PdfSignatu
 
 	const algorithm = info.privateKeyAlgorithm.algorithmId
 
-	if (algorithm === OIDS.rsa || algorithm === OIDS.rsaPss) {
+	if (algorithm === RSA_ENCRYPTION_OID || algorithm === RSA_PSS_OID) {
 		let bits: number
 
 		try {
-			bits = modulusBits(RSAPrivateKey.fromBER(owned(info.privateKey.valueBlock.valueHexView)).modulus.valueBlock.valueHexView)
+			bits = rsaModulusBits(
+				RSAPrivateKey.fromBER(ownedBytes(info.privateKey.valueBlock.valueHexView)).modulus.valueBlock.valueHexView
+			)
 		} catch {
 			return fail("malformed")
 		}
 
 		if (bits < MIN_RSA_BITS) fail("weakKey")
-		if (algorithm === OIDS.rsa) return { scheme: { name: "RSASSA-PKCS1-v1_5", digest: "SHA-256", bits }, importable: pkcs8 }
+		if (algorithm === RSA_ENCRYPTION_OID) return { scheme: { name: "RSASSA-PKCS1-v1_5", digest: "SHA-256", bits }, importable: pkcs8 }
 
-		info.privateKeyAlgorithm = new AlgorithmIdentifier({ algorithmId: OIDS.rsa, algorithmParams: new asn1js.Null() })
+		info.privateKeyAlgorithm = new AlgorithmIdentifier({ algorithmId: RSA_ENCRYPTION_OID, algorithmParams: new asn1js.Null() })
 
-		return { scheme: { name: "RSA-PSS", digest: "SHA-256", bits }, importable: owned(derOf(info.toSchema())) }
+		return { scheme: { name: "RSA-PSS", digest: "SHA-256", bits }, importable: ownedBytes(derOf(info.toSchema())) }
 	}
 
-	if (algorithm === OIDS.ec) {
+	if (algorithm === EC_PUBLIC_KEY_OID) {
 		const params: unknown = info.privateKeyAlgorithm.algorithmParams
-		const curve = params instanceof asn1js.ObjectIdentifier ? CURVES.get(params.valueBlock.toString()) : undefined
+		const curve = params instanceof asn1js.ObjectIdentifier ? CURVE_BY_OID.get(params.valueBlock.toString()) : undefined
 
 		if (curve === undefined) return fail("algorithm")
 
-		return { scheme: { name: "ECDSA", digest: CURVE_DIGESTS[curve], curve }, importable: pkcs8 }
+		return { scheme: { name: "ECDSA", digest: curve.digest, curve: curve.name }, importable: pkcs8 }
 	}
 
-	if (algorithm === OIDS.ed25519) return { scheme: { name: "Ed25519", digest: "SHA-512" }, importable: pkcs8 }
+	if (algorithm === ED25519_OID) return { scheme: { name: "Ed25519", digest: "SHA-512" }, importable: pkcs8 }
 
 	return fail("algorithm")
-}
-
-function modulusBits(modulus: Uint8Array): number {
-	let at = 0
-
-	while (at < modulus.length && modulus[at] === 0) at++
-
-	const top = modulus[at]
-
-	return top === undefined ? 0 : (modulus.length - at - 1) * 8 + (32 - Math.clz32(top))
 }
 
 // The certificates to try for a key: those carrying its localKeyId first.

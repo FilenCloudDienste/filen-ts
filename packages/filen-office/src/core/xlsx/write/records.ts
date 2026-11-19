@@ -65,7 +65,7 @@ function fontChild(font: XlsxFont, element: FontElement): string | null {
 		case "color":
 			return font.color === undefined ? null : colorAttributes(font.color)
 		case "sz":
-			return font.size === undefined ? null : attr("val", formatNumber(font.size))
+			return font.size === undefined ? null : attr("val", formatNumber(font.size, "sz"))
 		case "u":
 			return font.underline === undefined ? null : font.underline === "single" ? "" : attr("val", font.underline)
 		case "vertAlign":
@@ -214,16 +214,16 @@ export function fillMarkup(fill: XlsxFill, prefix: string): string {
 	let head = `<${gradient}`
 
 	if (fill.type === "path") head += attr("type", "path")
-	if (fill.degree !== 0) head += attr("degree", formatNumber(fill.degree))
-	if (fill.left !== 0) head += attr("left", formatNumber(fill.left))
-	if (fill.right !== 0) head += attr("right", formatNumber(fill.right))
-	if (fill.top !== 0) head += attr("top", formatNumber(fill.top))
-	if (fill.bottom !== 0) head += attr("bottom", formatNumber(fill.bottom))
+	if (fill.degree !== 0) head += attr("degree", formatNumber(fill.degree, "degree"))
+	if (fill.left !== 0) head += attr("left", formatNumber(fill.left, "left"))
+	if (fill.right !== 0) head += attr("right", formatNumber(fill.right, "right"))
+	if (fill.top !== 0) head += attr("top", formatNumber(fill.top, "top"))
+	if (fill.bottom !== 0) head += attr("bottom", formatNumber(fill.bottom, "bottom"))
 
 	let stops = ""
 
 	for (const stop of fill.stops) {
-		stops += `<${qualify(prefix, "stop")}${attr("position", formatNumber(stop.position))}>${colorElement("color", stop.color, prefix)}</${qualify(prefix, "stop")}>`
+		stops += `<${qualify(prefix, "stop")}${attr("position", formatNumber(stop.position, "position"))}>${colorElement("color", stop.color, prefix)}</${qualify(prefix, "stop")}>`
 	}
 
 	return `<${tag}>${head}>${stops}</${gradient}></${tag}>`

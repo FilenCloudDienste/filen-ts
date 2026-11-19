@@ -153,10 +153,13 @@ export function placeVisualSignature(
 	if (signature.kind === "image") {
 		const image = new mupdf.Image(signature.png)
 
-		annotation = page.createAnnotation("Stamp")
-		annotation.setRect([...fitted])
-		annotation.setStampImage(image)
-		image.destroy()
+		try {
+			annotation = page.createAnnotation("Stamp")
+			annotation.setRect([...fitted])
+			annotation.setStampImage(image)
+		} finally {
+			image.destroy()
+		}
 	} else {
 		const height = fitted[3] - fitted[1]
 

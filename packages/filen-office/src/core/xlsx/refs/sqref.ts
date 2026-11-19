@@ -57,6 +57,34 @@ export function parseSqref(text: string): SheetRange[] | null {
 	return out
 }
 
+// A worksheet section whose markup carries range lists: conditional formats and validations name theirs in a sqref
+// attribute, the x14 ones in extLst (and sparkline groups) in <xm:sqref> elements.
+export type SqrefSection = "conditionalFormatting" | "dataValidations" | "extLst"
+
+const SQREF_ATTRIBUTE = /\ssqref="([^"]*)"/g
+const SQREF_ELEMENT = /<(?:\w+:)?sqref>([^<]*)<\/(?:\w+:)?sqref>/g
+
+// Every range list (ST_Sqref text, for parseSqref) in a section's markup, in order.
+export function sectionSqrefs(section: SqrefSection, markup: string): string[] {
+	return Array.from(markup.matchAll(section === "extLst" ? SQREF_ELEMENT : SQREF_ATTRIBUTE), match => match[1] ?? "")
+}
+
+// Whether a range is whole cells of the grid, its corners in order.
+export function inGrid(range: SheetRange): boolean {
+	return (
+		Number.isInteger(range.startRow) &&
+		Number.isInteger(range.endRow) &&
+		Number.isInteger(range.startCol) &&
+		Number.isInteger(range.endCol) &&
+		range.startRow >= 0 &&
+		range.startCol >= 0 &&
+		range.endRow < SHEET_MAX_ROWS &&
+		range.endCol < SHEET_MAX_COLS &&
+		range.startRow <= range.endRow &&
+		range.startCol <= range.endCol
+	)
+}
+
 export function formatRef(range: SheetRange): string {
 	const start = cellName(range.startRow, range.startCol)
 

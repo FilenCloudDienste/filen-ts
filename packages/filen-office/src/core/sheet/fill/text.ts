@@ -41,7 +41,9 @@ function writeTexts(
 		value.kind === "copy"
 			? context.doc.text(writes.sourceRows[i] ?? 0, writes.sourceCols[i] ?? 0)
 			: value.kind === "number"
-				? String(value.value)
+				? // A field holds the text itself: round off a series' binary residue (0.1 + 0.1 * 2) as General would show it.
+					// An integer carries none, and rounding it would cut a 16-digit one.
+					String(Number.isInteger(value.value) ? value.value : Number(value.value.toPrecision(15)))
 				: value.text
 	)
 

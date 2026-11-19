@@ -12,6 +12,7 @@ import {
 	type ShapeRef
 } from "../../core/presentation/model"
 import type { DocxFontFace } from "../docx/protocol"
+import { SLICE_MS } from "../../core/slicing"
 import { XmlError } from "../../core/xml/errors"
 import { macrotaskYield } from "../docx/host"
 import {
@@ -117,7 +118,7 @@ export interface CallSignal {
 
 export type Task = (slicing: Slicing, signal: CallSignal) => Promise<void>
 
-// The worker's scheduler: slices of at most 8 ms, the priority lane first (host.ts implements it).
+// The worker's scheduler: slices of at most SLICE_MS, the priority lane first (scheduler.ts implements it).
 export interface PresentationScheduler {
 	// The Slicing of work in `lane`: pause() yields to queued priority work first.
 	slicing(lane: Lane): Slicing
@@ -322,13 +323,11 @@ export interface ServeOptions {
 	readonly openers?: { readonly [F in Format]?: OpenCapability }
 	readonly handlers?: Partial<Handlers>
 	readonly services?: Partial<EngineServices>
-	// The host's scheduler; without one, every call runs at once and pauses take a macrotask after 8 ms.
+	// The host's scheduler; without one, every call runs at once and pauses take a macrotask after SLICE_MS.
 	readonly scheduler?: PresentationScheduler
 }
 
-const SLICE_MS = 8
-
-// Pauses after 8 ms, lanes not told apart (the in-thread default; the worker host brings the real scheduler).
+// Pauses after SLICE_MS, lanes not told apart (the in-thread default; the worker host brings the real scheduler).
 function directScheduler(): PresentationScheduler {
 	const turn = macrotaskYield()
 	const now: () => number = () => Date.now()

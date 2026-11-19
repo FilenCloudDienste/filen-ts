@@ -23,6 +23,26 @@ const FILES = existsSync(DIRECTORY)
 	: []
 const BOX = { x: 1_000_000, y: 1_000_000, cx: 2_000_000, cy: 1_000_000, rot: 0, flipH: false, flipV: false }
 
+// Decks left out of the comparison, by file, with why (a deck that fails to open, applies none of the edits or does not
+// save the state): none today, so a deck that starts to fail is named.
+const EXPECTED_SKIPS: Readonly<Record<string, string>> = {}
+
+// The edits a deck refuses, by file, each explained (the deck still saves the state the other edits make):
+//   - the first slide's first shape with a box is a frame (a chart or an object), which cannot be flipped: BarChartVeryLongLabel,
+//     custom_legend_position, fdo71075, formated_axis_lines, multiple_categories, tdf53970 and tdf53970_linked;
+//   - rotate_flip: the first slide's first shape is locked against moving.
+const FRAME_FLIP = ["shape setXfrm: unsupported"]
+const EXPECTED_REFUSALS: Readonly<Record<string, readonly string[]>> = {
+	"lo__BarChartVeryLongLabel.odp": FRAME_FLIP,
+	"lo__custom_legend_position.odp": FRAME_FLIP,
+	"lo__fdo71075.odp": FRAME_FLIP,
+	"lo__formated_axis_lines.odp": FRAME_FLIP,
+	"lo__multiple_categories.odp": FRAME_FLIP,
+	"lo__rotate_flip.odp": ["shape setXfrm: locked"],
+	"lo__tdf53970.odp": FRAME_FLIP,
+	"lo__tdf53970_linked.odp": FRAME_FLIP
+}
+
 function plain(text: string): TextBody {
 	return { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] }
 }
@@ -37,8 +57,8 @@ function everyShape(shapes: readonly ShapeNode[], out: ShapeNode[] = []): ShapeN
 	return out
 }
 
-// The edits, each as one command; how many applied.
-async function edit(d: Awaited<ReturnType<typeof driveSession>>): Promise<number> {
+// The edits, each as one command: how many applied, and the ones refused (family and kind, with the refusal).
+async function edit(d: Awaited<ReturnType<typeof driveSession>>): Promise<{ applied: number; refused: string[] }> {
 	const slides = d.session.deck.slides as SlideRef[]
 	const first = slides[0] as SlideRef
 	const notes = await review(d.context, first, { comments: false })
@@ -77,10 +97,16 @@ async function edit(d: Awaited<ReturnType<typeof driveSession>>): Promise<number
 	if (slides.length > 2) ops.push({ family: "slide", kind: "delete", slides: [slides[slides.length - 1] as SlideRef] })
 
 	let applied = 0
+	const refused: string[] = []
 
-	for (const op of ops) if ((await d.command(op)).ok) applied++
+	for (const op of ops) {
+		const result = await d.command(op)
 
-	return applied
+		if (result.ok) applied++
+		else refused.push(`${op.family} ${op.kind}: ${result.refusal}`)
+	}
+
+	return { applied, refused }
 }
 
 // The parts whose bytes differ between two saves.
@@ -99,6 +125,8 @@ async function differing(a: Uint8Array, b: Uint8Array): Promise<string[]> {
 describe.skipIf(FILES.length === 0)("the same ODP state saved after an undo of everything and a redo of everything", () => {
 	it("writes the same bytes on every corpus deck that saves the state", { timeout: budget(900_000) }, async () => {
 		const different: string[] = []
+		const skipped: Record<string, string> = {}
+		const refused: Record<string, string[]> = {}
 		let written = 0
 
 		for (const name of FILES) {
@@ -106,23 +134,35 @@ describe.skipIf(FILES.length === 0)("the same ODP state saved after an undo of e
 
 			try {
 				d = await driveSession(new Uint8Array(readFileSync(join(DIRECTORY, name))), "odp")
-			} catch {
+			} catch (error) {
+				skipped[name] = `open: ${String(error)}`
+
 				continue
 			}
 
-			const applied = await edit(d)
+			const edited = await edit(d)
 
-			if (applied === 0) continue
+			if (edited.refused.length > 0) refused[name] = edited.refused
+
+			if (edited.applied === 0) {
+				skipped[name] = "no op applied"
+
+				continue
+			}
 
 			const first = await d.save()
 
-			if (first.bytes === undefined) continue
+			if (first.bytes === undefined) {
+				skipped[name] = `first save ${first.result.kind}`
 
-			for (let k = 0; k < applied; k++) await d.undo()
+				continue
+			}
+
+			for (let k = 0; k < edited.applied; k++) expect((await d.undo()).ok, `${name} undo ${String(k + 1)}`).toBe(true)
 
 			expect((await d.save()).result.kind, name).toBe("written")
 
-			for (let k = 0; k < applied; k++) await d.redo()
+			for (let k = 0; k < edited.applied; k++) expect((await d.redo()).ok, `${name} redo ${String(k + 1)}`).toBe(true)
 
 			const again = await d.save()
 
@@ -132,7 +172,9 @@ describe.skipIf(FILES.length === 0)("the same ODP state saved after an undo of e
 			written++
 		}
 
-		expect(written).toBeGreaterThan(60)
+		expect(skipped).toEqual(EXPECTED_SKIPS)
+		expect(refused).toEqual(EXPECTED_REFUSALS)
+		expect(written).toBe(FILES.length - Object.keys(EXPECTED_SKIPS).length)
 		expect(different).toEqual([])
 	})
 })

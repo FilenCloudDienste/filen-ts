@@ -1,5 +1,5 @@
 import type { LinkedPart } from "../opc/package"
-import { children, u32, utf16Text, type PptRecord, type RecordCounter } from "./records"
+import { children, RT, u32, utf16Text, type PptRecord, type RecordCounter } from "./records"
 import type { PptSound } from "./transitions"
 import { xmlText } from "./text"
 
@@ -7,25 +7,6 @@ import { xmlText } from "./text"
 // PresentationML media (ECMA-376 Part 1 §20.1.3.1–§20.1.3.6 on the picture shape's p:nvPr): an embedded sound becomes
 // an audio part (a:wavAudioFile), a linked movie or sound a link the reader never fetches (a:videoFile, a:audioFile),
 // a CD track its range (a:audioCd). Sounds a transition or an animation plays are the same audio parts.
-
-const RT = {
-	cString: 0x0fba,
-	document: 0x03e8,
-	soundCollection: 0x07e4,
-	sound: 0x07e6,
-	soundData: 0x07e7,
-	externalObjectList: 0x0409,
-	mediaAtom: 0x1004,
-	video: 0x1005,
-	aviMovie: 0x1006,
-	mciMovie: 0x1007,
-	midiAudio: 0x100d,
-	cdAudio: 0x100e,
-	wavEmbedded: 0x100f,
-	wavLink: 0x1010,
-	cdAudioAtom: 0x1012,
-	wavEmbeddedAtom: 0x1013
-} as const
 
 export type PptMediaSource =
 	| { readonly kind: "sound"; readonly soundIdRef: number }
@@ -44,12 +25,13 @@ interface SoundEntry {
 	readonly end: number
 }
 
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
-	wav: "audio/wav",
-	aif: "audio/x-aiff",
-	aiff: "audio/x-aiff",
-	mid: "audio/midi"
-}
+// A map, not an object: the extension is the file's, and an object would also answer its prototype's keys.
+const CONTENT_TYPES: ReadonlyMap<string, string> = new Map([
+	["wav", "audio/wav"],
+	["aif", "audio/x-aiff"],
+	["aiff", "audio/x-aiff"],
+	["mid", "audio/midi"]
+])
 
 // A path a file names (§2.10.7 UncOrLocalPath) as a file URI: drive and UNC paths absolute, others relative. An
 // unpaired surrogate (which encodeURIComponent refuses; a pair is one code point to the u flag) is U+FFFD.
@@ -144,7 +126,7 @@ export class PptMedia {
 		if (held !== undefined) return held
 
 		const extension = entry.extension.replace(/^\./u, "").toLowerCase()
-		const known = extension === "wave" ? "wav" : extension in CONTENT_TYPES ? extension : "wav"
+		const known = extension === "wave" ? "wav" : CONTENT_TYPES.has(extension) ? extension : "wav"
 		const name = `ppt/media/audio${String(this.soundParts.size + 1)}.${known}`
 		const bytes = this.data.subarray(entry.start, entry.end)
 
@@ -199,44 +181,44 @@ export class PptMedia {
 		const data = this.data
 
 		switch (record.type) {
-			case RT.aviMovie:
-			case RT.mciMovie: {
-				const video = this.kids(record).find(child => child.type === RT.video)
+			case RT.externalAviMovie:
+			case RT.externalMciMovie: {
+				const video = this.kids(record).find(child => child.type === RT.externalVideo)
 
 				if (video !== undefined) this.readObject(video, into)
 
 				return
 			}
-			case RT.video:
-			case RT.midiAudio:
-			case RT.wavLink: {
+			case RT.externalVideo:
+			case RT.externalMidiAudio:
+			case RT.externalWavAudioLink: {
 				const kids = this.kids(record)
 				const id = mediaId(data, kids)
 				const path = kids.find(child => child.type === RT.cString)
 
 				if (id !== undefined && path !== undefined && !into.has(id)) {
 					into.set(id, {
-						kind: record.type === RT.video ? "video" : "audio",
+						kind: record.type === RT.externalVideo ? "video" : "audio",
 						source: { kind: "linked", path: cString(data, path) }
 					})
 				}
 
 				return
 			}
-			case RT.wavEmbedded: {
+			case RT.externalWavAudioEmbedded: {
 				const kids = this.kids(record)
 				const id = mediaId(data, kids)
-				const atom = kids.find(child => child.type === RT.wavEmbeddedAtom)
+				const atom = kids.find(child => child.type === RT.externalWavAudioEmbeddedAtom)
 
 				if (id !== undefined && atom !== undefined && atom.end - atom.start >= 4 && !into.has(id))
 					into.set(id, { kind: "audio", source: { kind: "sound", soundIdRef: u32(data, atom.start) } })
 
 				return
 			}
-			case RT.cdAudio: {
+			case RT.externalCdAudio: {
 				const kids = this.kids(record)
 				const id = mediaId(data, kids)
-				const atom = kids.find(child => child.type === RT.cdAudioAtom)
+				const atom = kids.find(child => child.type === RT.externalCdAudioAtom)
 
 				if (id !== undefined && atom !== undefined && atom.end - atom.start >= 8 && !into.has(id))
 					into.set(id, { kind: "audio", source: { kind: "cd", start: u32(data, atom.start), end: u32(data, atom.start + 4) } })
@@ -290,7 +272,7 @@ export class PptMedia {
 			const extension = name.slice(name.lastIndexOf(".") + 1)
 
 			parts.set(name, part)
-			defaults.set(extension, CONTENT_TYPES[extension] ?? "audio/wav")
+			defaults.set(extension, CONTENT_TYPES.get(extension) ?? "audio/wav")
 		}
 	}
 }

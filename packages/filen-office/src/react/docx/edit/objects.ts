@@ -1,6 +1,7 @@
 import { CROP_MAX_PAD, CROP_WHOLE, type DocxCrop } from "../../../core/docx/edit/commands/drawings"
 import type { DocxDrawingContext } from "../../../core/docx/edit/snapshot/drawing"
 import type { DocxEditorCommand } from "../../../core/docx/edit/index"
+import { EMU_PER_PX as EMU_PER_PAGE_PX } from "../../../core/docx/objects/edit"
 import { DRAWING_HANDLES, HANDLE_PLACES, type DrawingHandle, type PageBox } from "../../../core/docx/objects/hits"
 
 // Moving and resizing a drawing with a pointer, headless: the selection frame's handles, the box a drag gives
@@ -13,7 +14,7 @@ import { DRAWING_HANDLES, HANDLE_PLACES, type DrawingHandle, type PageBox } from
 export { DRAWING_HANDLES, type DrawingHandle, type PageBox }
 
 // Layout px are 1/96 inch.
-export const EMU_PER_PAGE_PX = 914400 / 96
+export { EMU_PER_PAGE_PX }
 // The smallest a drag makes a drawing (page px).
 export const MIN_DRAWING_PX = 4
 

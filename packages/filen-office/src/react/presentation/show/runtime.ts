@@ -70,6 +70,7 @@ export interface PlayerProps {
 		readonly action: (action: Action, layer: SlideLayer) => string
 		readonly trigger: (layer: SlideLayer) => string
 		readonly link: (link: DocxLinkTarget) => string
+		readonly media: (layer: SlideLayer) => string
 	}
 }
 
@@ -385,6 +386,11 @@ export class ShowPlayer implements ShowController {
 	private readonly ready = new Map<number, Prepared>()
 	private playing: Playing | undefined
 	private run: TransitionRun | undefined
+	// The slide a navigation is about to show (prepared, not yet on stage): never evicted, by the navigation's
+	// generation.
+	private arriving: { readonly prepared: Prepared; readonly generation: number } | undefined
+	// The slide on stage drawn again at a new size while its transition played: swapped in when the transition ends.
+	private redrawn: { readonly playing: Playing; readonly prepared: Prepared } | undefined
 	private screenState: ShowScreen = "slide"
 	private ended = false
 	private disposed = false
@@ -460,11 +466,20 @@ export class ShowPlayer implements ShowController {
 
 		const generation = this.generation
 
-		void this.prepare(current.prepared.index, true).then(prepared => {
-			if (prepared === undefined || generation !== this.generation || this.playing !== current) return
+		void this.prepare(current.prepared.index, true)
+			.then(prepared => {
+				if (prepared === undefined || generation !== this.generation || this.playing !== current) return
 
-			this.swap(current, prepared)
-		})
+				// The transition into it draws the stage it was prepared with until it ends.
+				if (this.run !== undefined) {
+					this.redrawn = { playing: current, prepared }
+
+					return
+				}
+
+				this.swap(current, prepared)
+			})
+			.catch(() => undefined)
 	}
 
 	private activatorOf(props: PlayerProps): PresentationActionActivator | undefined {
@@ -753,10 +768,7 @@ export class ShowPlayer implements ShowController {
 
 		if (stage === undefined || stage.media.size === 0) return
 
-		const active = this.document.activeElement
-		let target: ShowMediaHandle | undefined
-
-		for (const [shape, box] of stage.mediaBoxes) if (active !== null && box.contains(active)) target = stage.media.get(shape)
+		let target = stage.mediaAt(this.document.activeElement)
 
 		if (target === undefined && stage.media.size === 1) target = stage.media.values().next().value
 		if (target === undefined) for (const handle of stage.media.values()) if (handle.playing?.() === true) target = handle
@@ -854,13 +866,21 @@ export class ShowPlayer implements ShowController {
 
 		if (generation !== this.generation || this.disposed || this.ended) return
 
+		// Held from here until it is on stage: a transition ending meanwhile prefetches around the new position, which
+		// does not hold the slide itself.
+		this.arriving = prepared === undefined ? undefined : { prepared, generation }
+
 		const authored = how.transition && this.playing !== undefined ? prepared?.authored : undefined
 		const renderer = rendererOf(authored)
 
 		if (prepared !== undefined && renderer !== undefined) {
 			await this.prepareTransition(prepared, renderer, this.playing?.prepared)
 
-			if (generation !== this.generation || this.disposed || this.ended) return
+			if (generation !== this.generation || this.disposed || this.ended) {
+				if (this.arriving?.generation === generation) this.arriving = undefined
+
+				return
+			}
 		}
 
 		this.nav.go(position)
@@ -896,6 +916,7 @@ export class ShowPlayer implements ShowController {
 		}
 
 		this.playing = playing
+		this.arriving = undefined
 
 		if (prepared.stage.element.parentElement !== this.host) this.host.insertBefore(prepared.stage.element, this.blackout)
 
@@ -952,6 +973,17 @@ export class ShowPlayer implements ShowController {
 		} else {
 			custom?.finish()
 			this.detach(from?.prepared, prepared)
+
+			// Off stage and no longer the one held for its index (a redraw replaced it, or it was evicted while shown).
+			if (
+				from !== undefined &&
+				from.prepared !== prepared &&
+				this.ready.get(from.prepared.index) !== from.prepared &&
+				!this.inUse(from.prepared)
+			) {
+				this.releasePrepared(from.prepared)
+			}
+
 			this.begin(playing, now, atEnd)
 		}
 
@@ -1225,8 +1257,7 @@ export class ShowPlayer implements ShowController {
 
 			const previous = this.ready.get(index)
 
-			if (previous !== undefined && previous !== prepared && this.playing?.prepared !== previous && this.run?.from !== previous)
-				this.releasePrepared(previous)
+			if (previous !== undefined && previous !== prepared && !this.inUse(previous)) this.releasePrepared(previous)
 
 			// Held until a prefetch drops it, also when it was dropped while it was drawn (a navigation may wait for it).
 			this.ready.set(index, prepared)
@@ -1457,25 +1488,37 @@ export class ShowPlayer implements ShowController {
 		if (bytes <= SHOW_HELD_BYTES) return
 
 		const next = this.nav.peek()
-		const pinned = new Set<Prepared | undefined>([this.playing?.prepared, this.run?.from, this.run?.to])
 
 		for (const [index, prepared] of [...this.ready]) {
 			if (bytes <= SHOW_HELD_BYTES) break
-			if (index === next || pinned.has(prepared)) continue
+			if (index === next || this.inUse(prepared)) continue
 
 			this.evict(index)
 			bytes = this.countBytes()
 		}
 	}
 
+	// Whether a prepared slide is in use: on stage, in the transition playing, or about to be shown.
+	private inUse(prepared: Prepared): boolean {
+		return (
+			this.playing?.prepared === prepared ||
+			this.run?.from === prepared ||
+			this.run?.to === prepared ||
+			this.arriving?.prepared === prepared
+		)
+	}
+
 	private evict(index: number): void {
 		const prepared = this.ready.get(index)
+
+		// The slide a navigation is about to show stays held for its index.
+		if (prepared !== undefined && this.arriving?.prepared === prepared) return
 
 		this.cache.delete(index)
 		this.ready.delete(index)
 		this.countBytes()
 
-		if (prepared !== undefined && this.playing?.prepared !== prepared && this.run?.from !== prepared) this.releasePrepared(prepared)
+		if (prepared !== undefined && !this.inUse(prepared)) this.releasePrepared(prepared)
 	}
 
 	private releasePrepared(prepared: Prepared): void {
@@ -1772,13 +1815,22 @@ export class ShowPlayer implements ShowController {
 			yieldFocus(run.from.stage.element)
 			run.from.stage.element.remove()
 
-			if (!this.ready.has(run.from.index) || this.ready.get(run.from.index) !== run.from) this.releasePrepared(run.from)
+			if (this.ready.get(run.from.index) !== run.from && !this.inUse(run.from)) this.releasePrepared(run.from)
 		}
 
 		const playing = this.playing
 
 		// Only a show without animation enters a slide at its end with a transition (show() played it through).
 		if (playing?.prepared === run.to) this.begin(playing, now, this.props.options.withoutAnimation === true)
+
+		const redrawn = this.redrawn
+
+		this.redrawn = undefined
+
+		// A redraw that finished during the transition. One a later preparation replaced was released by it.
+		if (redrawn !== undefined && redrawn.playing === playing && this.ready.get(redrawn.prepared.index) === redrawn.prepared) {
+			this.swap(redrawn.playing, redrawn.prepared)
+		}
 	}
 
 	private clearTransitionEnd(): void {
@@ -1862,12 +1914,17 @@ export class ShowPlayer implements ShowController {
 
 		this.warmed = []
 
-		for (const prepared of this.ready.values()) this.releasePrepared(prepared)
+		// The slides held, and the ones on stage no longer held for their index (replaced by a redraw).
+		const held = new Set([...this.ready.values(), this.playing?.prepared, this.run?.from, this.run?.to])
+
+		for (const prepared of held) if (prepared !== undefined) this.releasePrepared(prepared)
 
 		this.ready.clear()
 		this.cache.clear()
 		this.playing = undefined
 		this.run = undefined
+		this.arriving = undefined
+		this.redrawn = undefined
 		this.blackout.remove()
 		this.carryHost?.remove()
 		this.carryHost = undefined

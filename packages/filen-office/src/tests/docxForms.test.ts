@@ -13,8 +13,8 @@ import {
 	type DocxEditContext
 } from "@filen/office/core/docx/edit"
 import { prepareDocxSave, saveDocx } from "@filen/office/core/docx/write"
-import { boundControls } from "../core/docx/forms/binding"
-import { controlOf, prefixMappings, simpleBinding, sourceControl, type ControlState } from "../core/docx/forms/controls"
+import { bindingsKnown, boundControls, unmappedKeys } from "../core/docx/forms/binding"
+import { controlKey, controlOf, prefixMappings, simpleBinding, sourceControl, type ControlState } from "../core/docx/forms/controls"
 import { formatControlDate, parseControlDate } from "../core/docx/forms/dates"
 import { datePicture } from "../core/docx/fields/evaluate"
 import { boundIndex } from "../core/docx/forms/positions"
@@ -25,6 +25,8 @@ import { REVIEW_TRANSFORMER } from "../core/docx/edit/handlers/review"
 import { resolveChanges, storyReviewIndex } from "../core/docx/review/accept"
 import { markCommand } from "../core/docx/edit/invariants/index"
 import { NO_SOURCE } from "../core/docx/edit/schema"
+import { FORM_HITS } from "../core/docx/forms/hits"
+import type { PagedEditor } from "../core/docx/paged/editor"
 import { storySessionOf } from "../core/docx/forms/sessions"
 import { pageDigest, pagedEditor, savedDigest, settleAll } from "./pagedFixtures"
 import { formOps } from "./fuzz/ops/forms"
@@ -605,6 +607,57 @@ describe("content controls: data binding", () => {
 		).toBe("New")
 	})
 
+	it("saves a bound control's value although an unrelated custom XML item cannot be read", async () => {
+		const broken = spec(inParagraph(BOUND("/ns0:root[1]/ns0:name[1]", "Old", "5")))
+		const opened = await open({
+			...broken,
+			relationships: [...(broken.relationships ?? []), { id: "rIdY", type: "customXml", target: "../customXml/item2.xml" }],
+			parts: [
+				...(broken.parts ?? []),
+				{ name: "customXml/item2.xml", data: "<root><unclosed></root>" },
+				{
+					name: "customXml/itemProps2.xml",
+					contentType: "application/vnd.openxmlformats-officedocument.customXmlProperties+xml",
+					data: "<ds:datastoreItem"
+				},
+				{
+					name: "customXml/_rels/item2.xml.rels",
+					data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps2.xml"/></Relationships>'
+				}
+			]
+		})
+		const session = opened.session
+
+		await bindingsKnown(opened.context)
+		expect(unmappedKeys(opened.context).size).toBe(0)
+
+		const at = find(session, "Old")
+
+		select(session, at, at + 3)
+		expect(session.dispatch(session.state.tr.insertText("New"))).toBe(true)
+		expect(part(await save(opened), "customXml/item1.xml")).toBe(ITEM.replace("<name>Old</name>", "<name>New</name>"))
+	})
+
+	it("takes a binding whose own custom XML item cannot be read as unmapped, its controls not kept alike", async () => {
+		const unreadableItem = spec(
+			inParagraph(BOUND("/ns0:root[1]/ns0:name[1]", "Old", "7")) + inParagraph(BOUND("/ns0:root/ns0:name", "Old", "8"))
+		)
+		const opened = await open({
+			...unreadableItem,
+			parts: (unreadableItem.parts ?? []).map(entry => (entry.name === "customXml/item1.xml" ? { ...entry, data: "<root" } : entry))
+		})
+		const session = opened.session
+
+		await bindingsKnown(opened.context)
+		expect(unmappedKeys(opened.context).size).toBe(1)
+
+		const first = find(session, "Old")
+
+		select(session, first, first + 3)
+		expect(session.dispatch(session.state.tr.insertText("One"))).toBe(true)
+		expect(session.state.doc.textContent).toBe("Before One afterBefore Old after")
+	})
+
 	it("locks a control bound by a path the editor does not update", async () => {
 		const { session } = await open(spec(inParagraph(BOUND("/ns0:root[1]/ns0:name[last()]", "Old", "6"))))
 		const at = find(session, "Old")
@@ -826,7 +879,7 @@ describe("content controls: data binding", () => {
 		expect(header.state.doc.textContent).toBe("Before Old after")
 	})
 
-	it("passes a bound value to the stories a paged editor has not opened yet", async ({ skip }) => {
+	it("passes a bound value to the stories a paged editor has not opened yet", async () => {
 		const bytes = buildDocx(
 			withHeader(inParagraph(BOUND("/ns0:root[1]/ns0:name[1]", "Old", "7")), inParagraph(BOUND("/ns0:root/ns0:name", "Old", "8")))
 		)
@@ -834,8 +887,8 @@ describe("content controls: data binding", () => {
 		const story = context.model.stories.find(entry => entry.kind === "header")
 
 		if (story === undefined) throw new Error("no header")
-		// The editor hosts its stories' sessions (paged/editor.ts hostStories) once integrated.
-		if (storySessionOf(context, story.index) === undefined) skip()
+
+		expect(storySessionOf(context, story.index)).toBeDefined()
 
 		const session = editor.session
 		const at = find(session, "Old")
@@ -969,6 +1022,54 @@ describe("content controls: repeating sections", () => {
 		const info = controlOf(reopened.session.story.part, reopened.session.state.doc.child(0))
 
 		expect(info?.type).toBe("repeatingSection")
+	})
+
+	it("gives the controls of an added item made in the session identities of their own, one per control", async () => {
+		const opened = await open({ body: p("one two") + p("end") })
+		const session = opened.session
+		const keys = (): string[] => {
+			const out: string[] = []
+
+			session.state.doc.descendants(node => {
+				if (node.type === nodes.sdt) out.push(controlKey(node))
+
+				const mark = node.marks.find(entry => entry.type.name === "content_control")
+
+				if (mark !== undefined && !out.includes(controlKey(mark))) out.push(controlKey(mark))
+			})
+
+			return out
+		}
+
+		select(session, find(session, "one"), find(session, "one") + 7)
+		expect(run({ type: "control.insert", kind: "plainText" }, session)).toBe(true)
+
+		// Bold over part of it: the control spans two text leaves.
+		const at = find(session, "two")
+
+		expect(session.dispatch(session.state.tr.addMark(at, at + 3, docxSchema.marks.bold.create({ value: true })))).toBe(true)
+		select(session, find(session, "one"), find(session, "one") + 7)
+		expect(run({ type: "control.insert", kind: "repeatingSection" }, session)).toBe(true)
+
+		// Section, item and one text control.
+		expect(keys()).toHaveLength(3)
+
+		select(session, find(session, "one") + 1)
+		expect(run({ type: "control.item.add" }, session)).toBe(true)
+		// The second item and its text control (still one control over two leaves) are new.
+		expect(new Set(keys()).size).toBe(5)
+		expect(keys()).toHaveLength(5)
+
+		// A third item copied from the second.
+		select(session, findLast(session, "one") + 1)
+		expect(run({ type: "control.item.add" }, session)).toBe(true)
+		expect(new Set(keys()).size).toBe(7)
+		expect(keys()).toHaveLength(7)
+
+		const ids = [...part(await save(opened), "word/document.xml").matchAll(/<w:id w:val="(-?\d+)"\/>/g)].map(match => match[1])
+
+		expect(ids).toHaveLength(7)
+		expect(new Set(ids).size).toBe(7)
 	})
 })
 
@@ -1223,6 +1324,40 @@ describe("content controls: new controls", () => {
 
 		// Reopened, the copy (no bookmark of its name) shows none either.
 		expect(tags).toEqual(["Check1", null])
+	})
+	it("lets a press toggle a legacy check box pasted into a header that holds no fields of its own", async () => {
+		const opened = await open({
+			body: LEGACY_CHECKBOX + '<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>',
+			headers: { rIdH: p("Head") }
+		})
+		const story = opened.context.model.stories.find(entry => entry.kind === "header")
+
+		if (story === undefined) throw new Error("no header")
+
+		const body = opened.session.state.doc
+		const header = new DocxEditorSession(opened.context, { transformer, story })
+
+		expect(header.story.part.fields.count).toBe(0)
+		expect(header.story.part.sdts.count).toBe(0)
+		select(header, 1)
+		expect(header.dispatch(header.state.tr.replaceSelection(body.slice(0, body.child(0).nodeSize)))).toBe(true)
+
+		const at = legacyFields(header)[0]
+
+		if (at === undefined) throw new Error("no pasted field")
+
+		expect(header.state.doc.nodeAt(at)?.attrs["src"]).toBe(NO_SOURCE)
+
+		// The press lands on the field: only what the provider asks of the editor.
+		const box = { page: 0, x: 10, y: 10, width: 10, height: 10 }
+		const editor = {
+			session: header,
+			activeStory: story.index,
+			hitTest: () => ({ pos: at }),
+			rangeRects: (from: number, to: number) => (from === at && to === at + 1 ? [box] : [])
+		} as unknown as PagedEditor
+
+		expect(FORM_HITS[0]?.hit(editor, 0, 15, 15)).toMatchObject({ kind: "control", part: "checkbox", pos: at })
 	})
 })
 

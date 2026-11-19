@@ -367,4 +367,37 @@ describe("chartex charts", () => {
 		expect(cpuMs() - start).toBeLessThan(budget(1500))
 		expect(result.list.itemCount).toBeLessThan(2000)
 	})
+
+	it("allocates nothing for a declared ptCount without points and caps the categories drawn", () => {
+		const empty =
+			'<cx:data id="0"><cx:strDim type="cat"><cx:lvl ptCount="1048576"/></cx:strDim><cx:numDim type="val"><cx:lvl ptCount="1048576"/></cx:numDim></cx:data>'
+		const blank = convert(empty, seriesXml("waterfall", 0, "Empty"))
+
+		expect(blank.supported).toBe(true)
+		expect(blank.list.itemCount).toBeLessThan(50)
+
+		// One written point under a huge ptCount: the tail of blank categories is bounded, and so is the drawing.
+		const sparse =
+			'<cx:data id="0"><cx:strDim type="cat"><cx:lvl ptCount="1048576"><cx:pt idx="0">A</cx:pt></cx:lvl></cx:strDim><cx:numDim type="val"><cx:lvl ptCount="1048576"><cx:pt idx="0">1</cx:pt></cx:lvl></cx:numDim></cx:data>'
+		const start = cpuMs()
+		const drawn = convert(sparse, seriesXml("waterfall", 0, "Sparse"))
+
+		expect(drawn.supported).toBe(true)
+		expect(drawn.list.itemCount).toBeLessThan(3 * 4096 + 50)
+		expect(cpuMs() - start).toBeLessThan(budget(1500))
+	})
+
+	it("reads only the cx:data a drawn series names", () => {
+		let chartData = data(0, [["A", "B"]], [1, 2])
+
+		for (let id = 1; id <= 500; id++)
+			chartData += `<cx:data id="${id}"><cx:numDim type="val"><cx:lvl ptCount="1048576"><cx:pt idx="262143">1</cx:pt></cx:lvl></cx:numDim></cx:data>`
+
+		const start = cpuMs()
+		const result = convert(chartData, seriesXml("funnel", 0, "Used"))
+
+		expect(result.supported).toBe(true)
+		expect(texts(result.list)).toEqual(expect.arrayContaining(["A", "B"]))
+		expect(cpuMs() - start).toBeLessThan(budget(1000))
+	})
 })

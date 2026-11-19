@@ -308,9 +308,10 @@ describe("deep nesting in every part reader", () => {
 		const xml = new TextDecoder().decode(await reopened.package.opc.read("word/document.xml"))
 
 		expect(xml).toContain("edited top")
-		expect(xml).toContain(
-			nest("<w:sdt><w:sdtContent>", "</w:sdtContent></w:sdt>", "<w:p><w:r><w:t>innermost</w:t></w:r></w:p>", 800).slice(0, 4000)
-		)
-		expect(xml).toContain("innermost")
+		// Every level is written back, and the innermost levels (all past the limit, whatever the writer does
+		// with the modelled ones above) come back byte for byte around the paragraph.
+		expect(xml.split("<w:sdt>").length - 1).toBe(1000)
+		expect(xml.split("</w:sdt>").length - 1).toBe(1000)
+		expect(xml).toContain(nest("<w:sdt><w:sdtContent>", "</w:sdtContent></w:sdt>", "<w:p><w:r><w:t>innermost</w:t></w:r></w:p>", 700))
 	})
 })

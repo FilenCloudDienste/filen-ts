@@ -5,6 +5,7 @@ import {
 	buildDocxModel,
 	layoutDocument,
 	openDocxPackage,
+	parseNumbering,
 	parseStyles,
 	styleSettings,
 	type DocumentLayout,
@@ -74,7 +75,9 @@ export async function pagedEditor(
 	const store = new PropsStore()
 	const stylesName = pkg.part("styles")
 	const styles = stylesName === undefined ? undefined : parseStyles(await pkg.xml(stylesName), store)
-	const resolver = new PropertyResolver({ styles, numbering: undefined, theme: undefined, settings: styleSettings(model.settings) })
+	const numberingName = pkg.part("numbering")
+	const numbering = numberingName === undefined ? undefined : parseNumbering(await pkg.xml(numberingName), store, styles)
+	const resolver = new PropertyResolver({ styles, numbering, theme: undefined, settings: styleSettings(model.settings) })
 	const context = await openDocxEditContext(pkg, model, { store, resolver, ...(styles === undefined ? {} : { styles }) })
 	const edits = new DocumentEdits(model)
 	const layout = layoutDocument(edits.model, resolver, FONTS, MEASURER, { store, sliceMs: Infinity, recordMaps: true, edits })

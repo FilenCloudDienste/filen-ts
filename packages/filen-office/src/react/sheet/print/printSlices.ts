@@ -1,7 +1,7 @@
 import { appendAll } from "../../../core/arrays"
 import type { PrintPage } from "../../../core/sheet/print/paginate"
 import type { SheetPrintSpan } from "../../../core/sheet/print/setup"
-import { TILE_COLS, TILE_ROWS, type SheetTile } from "../../../core/sheet/protocol"
+import { TILE_COLS, TILE_ROWS, tileColOf, tilePositionCol, tilePositionRow, tileRowOf, type SheetTile } from "../../../core/sheet/protocol"
 import type { GridView } from "../view"
 import { pageView, type PrintedSheet } from "./printPage"
 
@@ -25,10 +25,10 @@ function within(span: SheetPrintSpan | null, index: number): boolean {
 	return span !== null && index >= span.first && index <= span.last
 }
 
-function spanRange(spans: readonly (SheetPrintSpan | null)[], shift: number): number[] {
+function spanRange(spans: readonly (SheetPrintSpan | null)[], tileOf: (index: number) => number): number[] {
 	const out = new Set<number>()
 
-	for (const span of spans) if (span !== null) for (let k = span.first >>> shift; k <= span.last >>> shift; k++) out.add(k)
+	for (const span of spans) if (span !== null) for (let k = tileOf(span.first); k <= tileOf(span.last); k++) out.add(k)
 
 	return [...out].sort((a, b) => a - b)
 }
@@ -52,7 +52,7 @@ async function fetchRows(
 	between: () => Promise<void>,
 	each: (tiles: readonly SheetTile[]) => boolean
 ): Promise<boolean> {
-	const tileCols = spanRange([page.titleCols, page.cols], 5)
+	const tileCols = spanRange([page.titleCols, page.cols], tileColOf)
 	const batch: number[] = []
 	const flush = async (): Promise<boolean> => {
 		if (batch.length === 0) return true
@@ -86,12 +86,12 @@ export async function surveyPage(
 	const rowCells = new Uint32Array(page.rows.last - page.rows.first + 1)
 	const columns = new Set<number>()
 	let cells = 0
-	const counted = await fetchRows(page, spanRange([page.titleRows, page.rows], 6), fetch, between, tiles => {
+	const counted = await fetchRows(page, spanRange([page.titleRows, page.rows], tileRowOf), fetch, between, tiles => {
 		for (const tile of tiles) {
 			for (let entry = 0; entry < tile.count; entry++) {
 				const position = tile.positions[entry] ?? 0
-				const row = tile.tileRow * TILE_ROWS + (position >>> 5)
-				const col = tile.tileCol * TILE_COLS + (position & 31)
+				const row = tile.tileRow * TILE_ROWS + tilePositionRow(position)
+				const col = tile.tileCol * TILE_COLS + tilePositionCol(position)
 
 				columns.add(col)
 
@@ -192,7 +192,7 @@ export class SliceTiles {
 	async take(slice: PrintPage): Promise<SheetTile[]> {
 		const { rows } = this.page
 		const around = { first: Math.max(rows.first, slice.rows.first - 1), last: Math.min(rows.last, slice.rows.last + 1) }
-		const wanted = spanRange([slice.titleRows, around], 6)
+		const wanted = spanRange([slice.titleRows, around], tileRowOf)
 		const missing = wanted.filter(tileRow => !this.held.has(tileRow))
 		const fetched = new Map<number, SheetTile[]>(missing.map(tileRow => [tileRow, []]))
 
@@ -213,7 +213,7 @@ export class SliceTiles {
 
 	// Lets go of the tiles above a slice's last row: the next slice needs only that row of what it read.
 	drop(slice: PrintPage): void {
-		const keep = slice.rows.last >>> 6
+		const keep = tileRowOf(slice.rows.last)
 
 		for (const tileRow of [...this.held.keys()]) if (tileRow < keep) this.held.delete(tileRow)
 	}

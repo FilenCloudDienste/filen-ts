@@ -300,6 +300,9 @@ export class OdsStyleWriter {
 	private readonly styles: SheetStyles
 	private readonly cellStyles: OdsCellStyles
 	private readonly taken = new Set<string>()
+	// Per name prefix, the number to try next: names are never released and the source is immutable, so the names
+	// below it stay taken.
+	private readonly nextName = new Map<string, number>()
 	private readonly cellNames = new Map<number, string>()
 	private readonly dataNames = new Map<string, string>()
 	private readonly rowNames = new Map<string, string>()
@@ -378,7 +381,7 @@ export class OdsStyleWriter {
 	}
 
 	private name(prefix: string, family: string | null): string {
-		for (let n = 1; ; n++) {
+		for (let n = this.nextName.get(prefix) ?? 1; ; n++) {
 			const name = `${prefix}${String(n)}`
 
 			if (this.taken.has(name)) continue
@@ -390,6 +393,7 @@ export class OdsStyleWriter {
 				continue
 
 			this.taken.add(name)
+			this.nextName.set(prefix, n + 1)
 
 			return name
 		}
@@ -553,7 +557,7 @@ export class OdsStyleWriter {
 								[
 									["style:row-height", Number.isNaN(heightPt) ? undefined : points(heightPt)],
 									["fo:break-before", pageBreak ? "page" : "auto"],
-									["style:use-optimal-row-height", custom || Number.isNaN(heightPt) ? String(!custom) : "true"]
+									["style:use-optimal-row-height", String(!custom)]
 								]
 							]
 						]

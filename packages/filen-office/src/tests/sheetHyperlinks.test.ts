@@ -207,6 +207,30 @@ describe("hyperlinks", () => {
 		session.close()
 	})
 
+	it("gives two links to one URL their own relationships back through undo and redo", async () => {
+		const { session, sheets } = await openAnnotated(LINKS)
+		const sheet = sheets[1] ?? 0
+
+		for (const col of [0, 1])
+			changeOf(await session.command({ type: "link.set", sheet, ranges: [range(0, col)], target: { url: "https://filen.io/same" } }))
+
+		changeOf(await session.undo())
+		changeOf(await session.undo())
+		changeOf(await session.redo())
+		changeOf(await session.redo())
+
+		const files = entries(await savedBytes(session))
+		const ids = [...(files["xl/worksheets/sheet2.xml"] ?? "").matchAll(/<hyperlink [^>]*r:id="([^"]+)"/g)].map(match => match[1])
+		const related = [
+			...(files["xl/worksheets/_rels/sheet2.xml.rels"] ?? "").matchAll(/<Relationship [^>]*Id="([^"]+)"[^>]*\/hyperlink"/g)
+		].map(match => match[1])
+
+		expect(ids).toHaveLength(2)
+		expect([...ids].sort()).toEqual([...related].sort())
+		expect(await session.query("link.get", { sheet, row: 0, col: 1 })).toMatchObject({ url: "https://filen.io/same" })
+		session.close()
+	})
+
 	it("declares the relationships prefix for every link it adds to a sheet whose root does not", async () => {
 		const bare = buildFixture({
 			sheets: [

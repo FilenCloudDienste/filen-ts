@@ -10,6 +10,7 @@ import {
 	type TableModel,
 	type TableRow
 } from "../../../presentation/model"
+import { isRefused } from "../../../presentation/refusal"
 import { builtinTableStyleXml } from "../../../presentation/render/tableStyles"
 import { escapeAttribute, escapeText } from "../../../xml/index"
 import { readTable, type ReadContext } from "../../read/drawing"
@@ -21,6 +22,7 @@ import {
 	endTag,
 	fillMarkup,
 	lineMarkup,
+	newCNvPr,
 	readerOf,
 	sameModel,
 	shapeElement,
@@ -152,7 +154,20 @@ function cellXml(
 	const txBody = child("txBody")
 
 	if (txBody >= 0 && before !== undefined && sameModel(cell.text, before.text)) out.hole(txBody)
-	else out.append(take(textBodyXml({ ...context, mode: "model" }, shape, cell.text, txBody, "a:txBody")))
+	// In splice mode the pristine cell is the source's text as read with its actions: a link-only change is written.
+	else
+		out.append(
+			take(
+				textBodyXml(
+					{ ...context, mode: "model" },
+					shape,
+					cell.text,
+					txBody,
+					"a:txBody",
+					splicing(context) && txBody >= 0 ? before?.text : undefined
+				)
+			)
+		)
 
 	const tcPr = child("tcPr")
 
@@ -303,15 +318,16 @@ export function tableXml(context: EmitContext, shape: ShapeNode, table: TableMod
 	return out.text(tbl >= 0 ? endTag(context, tbl) : "</a:tbl>").out
 }
 
-// p:cNvPr of a frame the model made.
-function newFrameNv(shape: ShapeNode): string {
-	const alt = shape.alt
+// The non-visual properties of a frame the model made.
+function newFrameNv(context: EmitContext, shape: ShapeNode): readonly EmitPiece[] | Refused {
+	const cNvPr = newCNvPr(context, shape)
 
-	return (
-		`<p:nvGraphicFramePr><p:cNvPr${attr("id", shape.id)}${attr("name", shape.name)}${attr("descr", alt?.descr)}` +
-		`${shape.hidden ? ' hidden="1"' : ""}${attr("title", alt?.title)}/>` +
-		'<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>'
-	)
+	if (isRefused(cNvPr)) return cNvPr
+
+	return new Pieces()
+		.text("<p:nvGraphicFramePr>")
+		.append(cNvPr)
+		.text('<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>').out
 }
 
 function frameElement(context: EmitContext, shape: ShapeNode, table: TableModel): EmitResult {
@@ -336,8 +352,14 @@ function frameElement(context: EmitContext, shape: ShapeNode, table: TableModel)
 	if (source < 0 || graphic < 0 || data < 0) {
 		if (shape.xfrm === undefined) return refused("unsupported", "A new table frame without a box")
 
+		const nv = newFrameNv(context, shape)
+
+		if (isRefused(nv)) return nv
+
 		const pieces = new Pieces()
-			.text(`<p:graphicFrame>${newFrameNv(shape)}${xfrmXml("p:xfrm", shape.xfrm, false)}`)
+			.text("<p:graphicFrame>")
+			.append(nv)
+			.text(xfrmXml("p:xfrm", shape.xfrm, false))
 			.text(`<a:graphic><a:graphicData uri="${escapeAttribute(TABLE_URI)}">`)
 			.append(tableXml(context, shape, table, -1, take))
 			.text("</a:graphicData></a:graphic></p:graphicFrame>")

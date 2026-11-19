@@ -20,6 +20,9 @@ import {
 	type SaveHistory
 } from "../dom/presentation/save"
 import { savePortAnnounced, savePortReader, type SavePortEnd } from "@filen/shared/savePort"
+import { MessageChannel } from "node:worker_threads"
+import { inThreadPresentationWorker, presentationWorkerPool } from "../dom/presentation/host"
+import { pictureDeck, png } from "./presentationObjectsFixtures"
 import { agileStreams, encryptedOfficeFile } from "./encryption/testing"
 import { writeBigDeck, type BigDeckSpec } from "./fixtures/presentation/bigDeck"
 
@@ -1027,5 +1030,102 @@ describe("presentation save of an encrypted deck", () => {
 		expect(await h.commit(SAVE_DEPENDENCIES, saved)).toEqual({ dirty: false })
 		expect(h.session.package.source.size).toBeLessThan(file.length)
 		expect(h.session.deck.protection.encrypted).toBeDefined()
+	})
+})
+
+describe("presentation save across the worker boundary", () => {
+	it("keeps a stored picture a save wrote whole after image() answers transfer it", { timeout: 60_000 }, async () => {
+		// 300 KiB: past the writer's 64 KiB batch, so the stored part is a kept chunk of its own.
+		const bytes = new Uint8Array(300 * 1024)
+
+		bytes.set(png(4, 4))
+
+		for (let at = 33; at < bytes.length; at++) bytes[at] = at % 251
+
+		const pool = presentationWorkerPool(() => inThreadPresentationWorker())
+		const opened = Promise.withResolvers<PresentationEvent>()
+		const client = pool.open({ kind: "bytes", bytes: pictureDeck() }, { format: "pptx", fileName: "deck.pptx" }, event => {
+			if (event.type === "opened" || event.type === "error") opened.resolve(event)
+		})
+		const event = await opened.promise
+
+		if (event.type !== "opened") throw new Error(event.type)
+
+		const slide = event.info.slides[0]?.ref
+
+		if (slide === undefined) throw new Error("no slide")
+
+		const inserted = await client.command({
+			family: "picture",
+			kind: "insert",
+			slide,
+			shape: {
+				id: 0,
+				name: "Picture",
+				hidden: false,
+				kind: "pic",
+				xfrm: { x: 500, y: 600, cx: 2000, cy: 1000, rot: 0, flipH: false, flipV: false }
+			},
+			image: { bytes: bytes.slice(), contentType: "image/png", width: 4, height: 4 }
+		})
+
+		expect(inserted.ok).toBe(true)
+
+		// The page's save: the upload read whole from the save port, then the commit of the file made.
+		const save = async (): Promise<Uint8Array> => {
+			const { port1, port2 } = new MessageChannel()
+			const end = port2 as unknown as SavePortEnd
+			const uploading = savePortAnnounced(end).then(async write => {
+				if (!write) return undefined
+
+				const reader = savePortReader(end)
+				const chunks: Uint8Array[] = []
+
+				for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
+
+				reader.settled(true)
+
+				return join(chunks)
+			})
+			const result = await client.save({ reason: "user", port: port1 as unknown as SavePortEnd })
+			const file = await uploading
+
+			if (result.kind !== "written" || file === undefined) throw new Error(result.kind)
+
+			const commit = new MessageChannel()
+
+			await client.commitSaved({
+				file: { uuid: `v${String(result.revision)}`, name: "deck.pptx" },
+				port: commit.port1 as never,
+				size: file.length,
+				revision: result.revision
+			})
+			port2.close()
+			commit.port2.close()
+
+			return file
+		}
+
+		await save()
+
+		for (let read = 0; read < 2; read++) {
+			const answer = await client.image("/ppt/media/image2.png")
+
+			expect(answer?.bytes).toEqual(bytes)
+		}
+
+		// The next save copies the entry from the session's source as it is: intact.
+		const moved = await client.command({ family: "shape", kind: "setHidden", slide, shapes: [2], hidden: true })
+
+		expect(moved.ok).toBe(true)
+
+		const second = await save()
+		const zip = await ZipArchive.open(bytesSource(second))
+		const entry = zip.get("ppt/media/image2.png")
+
+		if (entry === undefined) throw new Error("no image entry")
+
+		expect(await zip.read(entry)).toEqual(bytes)
+		pool.dispose()
 	})
 })

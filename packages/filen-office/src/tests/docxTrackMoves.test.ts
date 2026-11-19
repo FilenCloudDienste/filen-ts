@@ -224,13 +224,14 @@ describe("docx tracked moves", () => {
 		const session = doc.session
 		const from = find(session, "Moved. ")
 
-		drag(session, from, from + 7, find(session, "Target."))
+		expect(drag(session, from, from + 7, find(session, "Target."))).toBe(true)
 		expect(shown(session.state.doc)).toEqual(["[-Moved. -]Stays.", "[+Moved. +]Target."])
 
 		const slice = cut(session, find(session, "Stays."), find(session, "Stays.") + 6)
 
-		paste(session, find(session, "Target."), slice)
+		expect(paste(session, find(session, "Target."), slice)).toBe(true)
 		expect(moveCount(session.state.doc)).toBe(0)
+		expect(shown(session.state.doc)).toEqual(["[-Moved. Stays.-]", "[+Moved. Stays.+]Target."])
 	})
 
 	it("keeps a copy and paste and a paste after another edit an insertion", async () => {
@@ -252,16 +253,32 @@ describe("docx tracked moves", () => {
 		expect(shown(session.state.doc)).toEqual(["Moved. [-Stays.-]", "[+Moved. xStays.+]Target."])
 	})
 
-	it("drags text an insertion is recorded on as a deletion and an insertion", async () => {
+	it("drags text a deletion is recorded on as a deletion and an insertion", async () => {
 		const doc = await tracked({ body: p("One two.") + p("Target.") })
 		const session = doc.session
 
-		session.dispatch(session.state.tr.delete(find(session, "two"), find(session, "two") + 3))
+		expect(session.dispatch(session.state.tr.delete(find(session, "two"), find(session, "two") + 3))).toBe(true)
 
 		const from = find(session, "One")
 
 		// The dragged range takes the deleted word with it.
-		drag(session, from, find(session, "."), find(session, "Target."))
+		expect(drag(session, from, find(session, "."), find(session, "Target."))).toBe(true)
 		expect(moveCount(session.state.doc)).toBe(0)
+		expect(shown(session.state.doc)).toEqual(["[-One two-].", "[+One two+]Target."])
+	})
+
+	it("drags text an insertion is recorded on as a deletion and an insertion", async () => {
+		const doc = await tracked({ body: p("One two.") + p("Target.") })
+		const session = doc.session
+
+		expect(session.dispatch(session.state.tr.insertText("new ", find(session, "two")))).toBe(true)
+		expect(shown(session.state.doc)).toEqual(["One [+new +]two.", "Target."])
+
+		const from = find(session, "One")
+
+		// The dragged range takes the inserted word with it.
+		expect(drag(session, from, find(session, "."), find(session, "Target."))).toBe(true)
+		expect(moveCount(session.state.doc)).toBe(0)
+		expect(shown(session.state.doc)).toEqual(["[-One two-].", "[+One new two+]Target."])
 	})
 })

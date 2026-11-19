@@ -144,6 +144,8 @@ export class DeckHistory {
 	// Whether the saved anchor is a step of the timeline (false once its branch was discarded or trimmed away).
 	private savedReachable = true
 	private readonly pending = new Map<SavePoint, Anchor>()
+	// The points of saves in flight (beginSave), until their commit or abandon.
+	private readonly saves = new Set<SavePoint>()
 	// The saved anchor's derived fingerprints and how many steps in range touch each key.
 	private readonly savedValue = new Map<TouchKey, Fingerprint>()
 	private readonly inRange = new Map<TouchKey, number>()
@@ -155,6 +157,11 @@ export class DeckHistory {
 	// The push in progress and the last push, while nothing but saves came after it.
 	private recording: PushRecord | undefined
 	private lastPush: PushRecord | undefined
+	// Steps let go of for good by the change in progress, handed to onRelease once it is done.
+	private releasing: HistoryStep[] = []
+	// Told the steps a change let go of for good (trimmed, a redo branch discarded, cleared), once the change is done:
+	// what they held may be let go of too. Not the steps the last push may still bring back (retained()).
+	onRelease: ((steps: readonly HistoryStep[]) => void) | undefined = undefined
 
 	constructor(fingerprint: FingerprintOf, limits: HistoryLimits = DECK_HISTORY_LIMITS) {
 		this.fingerprint = fingerprint
@@ -171,6 +178,12 @@ export class DeckHistory {
 
 	get dirty(): boolean {
 		return this.dirtyKeys.size > 0 && !this.provisionalOnly()
+	}
+
+	// A save is in flight (between its beginSave and its commit or abandon). A bare savePoint() no save commits (a
+	// copy's revision) does not count.
+	get saving(): boolean {
+		return this.saves.size > 0
 	}
 
 	// Steps to undo and to redo.
@@ -230,6 +243,7 @@ export class DeckHistory {
 
 		const continued = options.continues === true ? this.lastPush?.step : undefined
 
+		this.letGo(this.lastPush)
 		this.lastPush = undefined
 		this.recording = record
 		this.discardRedo()
@@ -243,7 +257,7 @@ export class DeckHistory {
 		) {
 			this.recording = undefined
 
-			return this.coalesce(continued, step, continued.op)
+			return this.released(this.coalesce(continued, step, continued.op), record)
 		}
 
 		const top = this.entries[this.cursor - 1]
@@ -260,7 +274,7 @@ export class DeckHistory {
 			// A coalesced step is not retracted: its burst's earlier state is gone.
 			this.recording = undefined
 
-			return this.coalesce(top, step)
+			return this.released(this.coalesce(top, step), record)
 		}
 
 		const entry: HistoryStep = { ...step, id: nextId++, counted: undefined }
@@ -277,6 +291,7 @@ export class DeckHistory {
 		record.step = entry
 		record.revision = this.revision
 		this.lastPush = record
+		this.flushReleased()
 
 		return entry
 	}
@@ -352,6 +367,7 @@ export class DeckHistory {
 		this.entries.pop()
 		this.bytes -= step.bytes
 		this.cursor--
+		this.releasing.push(step)
 
 		const trimmed = record.trimmed.length
 
@@ -384,6 +400,7 @@ export class DeckHistory {
 		this.savedReachable = this.saved === record.saved && !later.includes(this.saved) ? record.savedReachable : false
 		this.revision++
 		this.rebuild()
+		this.flushReleased()
 	}
 
 	// The step to undo (its inverse is applied by the caller, then undone() records it).
@@ -400,8 +417,17 @@ export class DeckHistory {
 		return this.entries
 	}
 
+	// The steps the last push let go of that retract() would bring back: held still, for what they name.
+	retained(): readonly HistoryStep[] {
+		const record = this.lastPush
+
+		return record === undefined ? [] : [...record.redo, ...record.trimmed]
+	}
+
 	undone(): void {
+		this.letGo(this.lastPush)
 		this.lastPush = undefined
+		this.flushReleased()
 
 		const entry = this.entries[this.cursor - 1]
 
@@ -417,7 +443,9 @@ export class DeckHistory {
 	}
 
 	redone(): void {
+		this.letGo(this.lastPush)
 		this.lastPush = undefined
+		this.flushReleased()
 
 		const entry = this.entries[this.cursor]
 
@@ -434,6 +462,7 @@ export class DeckHistory {
 
 	// A redone step's inverse, made again as it applied (its bytes read from the base source as it is now).
 	replaceInverse(step: HistoryStep, inverse: Inverse): void {
+		this.letGo(this.lastPush)
 		this.lastPush = undefined
 
 		const bytes = step.bytes - step.inverse.bytes + inverse.bytes
@@ -442,6 +471,7 @@ export class DeckHistory {
 		step.inverse = inverse
 		step.bytes = bytes
 		this.trim()
+		this.flushReleased()
 	}
 
 	// A save of the current state starts: the point to commit when it lands.
@@ -453,9 +483,20 @@ export class DeckHistory {
 		return point
 	}
 
+	// A save starts: its save point, counted as in flight (saving) until its commit or abandon.
+	beginSave(): SavePoint {
+		const point = this.savePoint()
+
+		this.saves.add(point)
+
+		return point
+	}
+
 	// A save landed: its state is the saved one.
 	commit(point: SavePoint): void {
 		const anchor = this.pending.get(point)
+
+		this.saves.delete(point)
 
 		if (anchor === undefined) return
 
@@ -468,18 +509,47 @@ export class DeckHistory {
 	// A save that failed or was abandoned.
 	abandon(point: SavePoint): void {
 		this.pending.delete(point)
+		this.saves.delete(point)
 	}
 
 	// Everything forgotten (a deck reopened from scratch): the current state is saved.
 	clear(): void {
+		this.letGo(this.lastPush)
 		this.lastPush = undefined
+		this.releasing.push(...this.entries)
 		this.entries.length = 0
 		this.cursor = 0
 		this.bytes = 0
 		this.pending.clear()
+		this.saves.clear()
 		this.saved = { pos: 0, baseline: new Map(), lost: noneLost() }
 		this.savedReachable = true
 		this.rebuild()
+		this.flushReleased()
+	}
+
+	// The steps a push let go of that nothing can bring back now (its retract() is no longer possible).
+	private letGo(record: PushRecord | undefined): void {
+		if (record === undefined) return
+
+		this.releasing.push(...record.redo, ...record.trimmed)
+	}
+
+	// A push that coalesced: what it let go of is gone for good (a coalesced step is not retracted).
+	private released(step: HistoryStep, record: PushRecord): HistoryStep {
+		this.letGo(record)
+		this.flushReleased()
+
+		return step
+	}
+
+	private flushReleased(): void {
+		if (this.releasing.length === 0) return
+
+		const steps = this.releasing
+
+		this.releasing = []
+		this.onRelease?.(steps)
 	}
 
 	// An anchor as it is now, kept once for the push in progress before it changes.
@@ -586,6 +656,7 @@ export class DeckHistory {
 		for (let index = from; index < this.entries.length; index++) this.bytes -= (this.entries[index] as HistoryStep).bytes
 
 		if (this.recording !== undefined) this.recording.redo = this.entries.slice(from)
+		else for (let index = from; index < this.entries.length; index++) this.releasing.push(this.entries[index] as HistoryStep)
 
 		this.entries.length = from
 
@@ -607,7 +678,8 @@ export class DeckHistory {
 
 			this.bytes -= oldest.bytes
 			this.cursor--
-			this.recording?.trimmed.push(oldest)
+			if (this.recording === undefined) this.releasing.push(oldest)
+			else this.recording.trimmed.push(oldest)
 
 			for (const anchor of [this.saved, ...this.pending.values()]) {
 				this.preserve(anchor)

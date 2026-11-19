@@ -48,8 +48,17 @@ export class MetafileCache {
 			conversion => {
 				if (this.entries.get(partName) !== entry) return
 
-				entry.bytes = conversionBytes(conversion)
-				this.bytes += entry.bytes
+				const bytes = conversionBytes(conversion)
+
+				// Kept, it would evict every other entry and then itself.
+				if (bytes > MAX_CACHED_METAFILE_BYTES) {
+					this.entries.delete(partName)
+
+					return
+				}
+
+				entry.bytes = bytes
+				this.bytes += bytes
 				this.trim()
 			},
 			() => {

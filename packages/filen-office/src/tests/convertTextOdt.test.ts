@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { convertText } from "../core/convert/text/index"
+import { LOWERED_NAMESPACES, LoweredIds, Lowering } from "../core/convert/text/lower"
+import { standaloneParts } from "../core/convert/text/odtPackage"
+import { LossyCounts } from "../core/convert/text/report"
 import { bytesSource, ZipArchive } from "../core/opc/index"
 import { translateOdt } from "../core/odt/index"
 import { decodeUtf8, encodeUtf8, parseXml } from "../core/xml/index"
 import { docxConvertServer } from "../dom/docx/convert"
-import { buildDoc } from "./docFixtures"
+import { buildDoc, plc, prl } from "./docFixtures"
 import { buildDocx, p, type SyntheticDocx } from "./docxSynthetic"
 
 const WML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
@@ -271,6 +274,23 @@ describe("convertText docx → odt: tracked changes, notes, protection and links
 		)
 	})
 
+	it("keeps an automatic style only a tracked deletion names, and none no markup names", async () => {
+		const { parts } = await converted(
+			spec(
+				'<w:p><w:r><w:t>Before</w:t></w:r><w:del w:id="5" w:author="A" w:date="2020-01-01T00:00:00Z"><w:r><w:rPr><w:color w:val="00FF00"/></w:rPr><w:delText>gone</w:delText></w:r></w:del><w:r><w:t>After</w:t></w:r></w:p>'
+			)
+		)
+		const content = parts.get("content.xml") ?? ""
+		const automatic = /<office:automatic-styles>([\s\S]*?)<\/office:automatic-styles>/u.exec(content)?.[1] ?? ""
+		const deleted = /<text:deletion>[\s\S]*?<\/text:deletion>/u.exec(content)?.[0] ?? ""
+		const named = /<text:span text:style-name="([^"]+)">gone<\/text:span>/u.exec(deleted)?.[1]
+		const defined = [...automatic.matchAll(/<style:style style:name="([^"]+)"/gu)].map(match => match[1])
+
+		expect(named).toBeDefined()
+		expect(automatic).toMatch(new RegExp(`<style:style style:name="${named ?? ""}" style:family="text">.*fo:color="#00ff00"`, "iu"))
+		expect(defined.every(name => content.slice(content.indexOf("</office:automatic-styles>")).includes(`="${name ?? ""}"`))).toBe(true)
+	})
+
 	it("writes Word's footnote and endnote numbering as notes configurations, counting what has no form", async () => {
 		const notes = (kind: "footnote" | "endnote"): string =>
 			`<w:${kind} w:id="1"><w:p><w:r><w:${kind}Ref/></w:r><w:r><w:t xml:space="preserve"> a note</w:t></w:r></w:p></w:${kind}>`
@@ -520,5 +540,215 @@ describe("convertText docx → odt: tracked changes, notes, protection and links
 		])
 		expect(parts.get("content.xml")).toMatch(/>t4</u)
 		expect(features).toEqual([{ kind: "linkTarget", count: 1 }])
+	})
+})
+
+const BEGIN = '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+const SEPARATE = '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+const END = '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+const instruction = (code: string): string => `<w:r><w:instrText xml:space="preserve"> ${code} </w:instrText></w:r>`
+const inserted = (markup: string, id: number): string =>
+	`<w:ins w:id="${String(id)}" w:author="A" w:date="2024-01-01T00:00:00Z">${markup}</w:ins>`
+
+describe("convertText docx → odt: fields across inline elements", () => {
+	it("keeps the result of a field whose separator and end sit in different changes as text, counted", async () => {
+		for (const code of ["PAGE", 'HYPERLINK "https://filen.io/"']) {
+			const { parts, features } = await converted(
+				spec(
+					`<w:p>${inserted(BEGIN, 1)}${inserted(instruction(code), 2)}${inserted(SEPARATE, 3)}${inserted("<w:r><w:t>1</w:t></w:r>", 4)}${inserted(END, 5)}</w:p>`
+				)
+			)
+			const content = parts.get("content.xml") ?? ""
+
+			expect(() => parseXml(encodeUtf8(content))).not.toThrow()
+			expect(content).toMatch(/>1</u)
+			expect(content).not.toContain("text:page-number")
+			expect(content).not.toContain("<text:a ")
+			expect(features).toEqual([{ kind: "field", count: 1 }])
+		}
+	})
+
+	it("keeps the result of a field that starts inside a hyperlink and ends outside it as text", async () => {
+		const { parts, features } = await converted(
+			spec(
+				`<w:p><w:hyperlink r:id="rIdLink">${BEGIN}${instruction("PAGE")}${SEPARATE}<w:r><w:t>2</w:t></w:r></w:hyperlink>${END}</w:p>`
+			)
+		)
+		const content = parts.get("content.xml") ?? ""
+
+		expect(() => parseXml(encodeUtf8(content))).not.toThrow()
+		expect(content).toContain('<text:a xlink:type="simple" xlink:href="https://filen.io/">2</text:a>')
+		expect(features).toEqual([{ kind: "field", count: 1 }])
+	})
+
+	it("still writes a field wholly inside one change as a field", async () => {
+		const { parts, features } = await converted(
+			spec(`<w:p>${inserted(`${BEGIN}${instruction("PAGE")}${SEPARATE}<w:r><w:t>3</w:t></w:r>${END}`, 1)}</w:p>`)
+		)
+
+		expect(parts.get("content.xml")).toMatch(/<text:page-number text:select-page="current">3<\/text:page-number>/u)
+		expect(features).toEqual([])
+	})
+
+	it("converts a Word 97–2003 document's tracked inserted PAGE field (each field character its own w:ins)", async () => {
+		const insert = prl.toggle(0x0801, 1)
+		const special = [...prl.toggle(0x0855, 1), ...insert]
+		const doc = await buildDoc({
+			pieces: [{ text: "\u0013 PAGE \u00141\u0015\r" }],
+			runs: [
+				{ start: 0, end: 1, grpprl: special },
+				{ start: 1, end: 7, grpprl: insert },
+				{ start: 7, end: 8, grpprl: special },
+				{ start: 8, end: 9, grpprl: insert },
+				{ start: 9, end: 10, grpprl: special }
+			],
+			structures: {
+				plcfFldMom: plc(
+					[0, 7, 9, 11],
+					[
+						[0x13, 33],
+						[0x14, 0],
+						[0x15, 0x80]
+					]
+				)
+			}
+		})
+		const docx = await convertText(doc, "doc", "docx")
+
+		if (!docx.ok) throw new Error(docx.refusal.message)
+
+		expect(decodeUtf8((await odtParts(docx.bytes)).get("word/document.xml") ?? new Uint8Array())).toMatch(
+			/<w:ins [^>]*><w:r>(?:<w:rPr>.*?<\/w:rPr>)?<w:fldChar w:fldCharType="separate"\/>/u
+		)
+
+		const odt = await convertText(docx.bytes, "docx", "odt")
+
+		if (!odt.ok) throw new Error(odt.refusal.message)
+
+		const content = decodeUtf8((await odtParts(odt.bytes)).get("content.xml") ?? new Uint8Array())
+
+		expect(() => parseXml(encodeUtf8(content))).not.toThrow()
+		expect(content).toMatch(/>1</u)
+		expect(odt.lossy.features).toContainEqual({ kind: "field", count: 1 })
+	})
+
+	it("keeps the result of a PAGE field that a page break splits as text, counted", async () => {
+		const { parts, features } = await converted(
+			spec(`<w:p>${BEGIN}${instruction("PAGE")}${SEPARATE}<w:r><w:t>1</w:t><w:br w:type="page"/><w:t>2</w:t></w:r>${END}</w:p>`)
+		)
+		const content = parts.get("content.xml") ?? ""
+
+		expect(() => parseXml(encodeUtf8(content))).not.toThrow()
+		expect(content).toMatch(/>1</u)
+		expect(content).toMatch(/>2</u)
+		expect(content).not.toContain("text:page-number")
+		expect(features).toEqual([{ kind: "field", count: 1 }])
+	})
+
+	it("lowers a story with many unclosed fields in time linear in its size", () => {
+		const pair = '<w:r><w:fldChar w:fldCharType="begin"/><w:fldChar w:fldCharType="separate"/></w:r>'
+		const document = parseXml(
+			encodeUtf8(
+				`<w:document ${LOWERED_NAMESPACES}><w:body><w:p>${pair.repeat(100_000)}${"<w:r><w:t>x</w:t></w:r>".repeat(10_000)}</w:p></w:body></w:document>`
+			)
+		)
+		const lowering = new Lowering(new LossyCounts(), new LoweredIds(), undefined)
+		const { blocks } = lowering.openBody(document, { relationship: () => undefined })
+		const started = performance.now()
+		const { xml } = lowering.lowerBlocks(blocks, true)
+
+		expect(performance.now() - started).toBeLessThan(2000)
+		expect(xml.split("<w:t ").length - 1).toBe(10_000)
+	})
+})
+
+describe("convertText docx → odt: spacing, escaping", () => {
+	it("writes a style's automatic spacing as a paragraph's (14 pt before and after), its line spacing kept, counted", async () => {
+		const spacing =
+			'<w:spacing w:before="100" w:beforeAutospacing="1" w:after="100" w:afterAutospacing="1" w:line="360" w:lineRule="auto"/>'
+		const styles = STYLES.replace(
+			"</w:styles>",
+			`<w:style w:type="paragraph" w:styleId="NormalWeb"><w:name w:val="Normal (Web)"/><w:basedOn w:val="Normal"/><w:pPr>${spacing}</w:pPr></w:style></w:styles>`
+		)
+		const { parts, features } = await converted({
+			body:
+				p("Web", '<w:pStyle w:val="NormalWeb"/>') +
+				p("Direct", spacing) +
+				'<w:p><w:r><w:rPr><w:spacing w:val="20"/></w:rPr><w:t>Spaced</w:t></w:r></w:p>',
+			parts: [{ name: "word/styles.xml", contentType: `${WML}.styles+xml`, data: styles }],
+			relationships: [{ id: "rIdS", type: "styles", target: "styles.xml" }]
+		})
+		const style = /<style:style style:name="NormalWeb"[^>]*>(.*?)<\/style:style>/u.exec(parts.get("styles.xml") ?? "")?.[1] ?? ""
+		const content = parts.get("content.xml") ?? ""
+
+		expect(style).toContain('fo:margin-top="14pt"')
+		expect(style).toContain('fo:margin-bottom="14pt"')
+		expect(style).toContain('fo:line-height="150%"')
+		expect(content).toContain('<style:paragraph-properties fo:line-height="150%" fo:margin-bottom="14pt" fo:margin-top="14pt"/>')
+		expect(content).toContain('fo:letter-spacing="1pt"')
+		expect(features).toEqual([{ kind: "paragraphFormat", count: 4 }])
+	})
+
+	it("keeps line breaks and tabs in a picture's description", async () => {
+		const { parts } = await converted(spec(`<w:p>${PICTURE.replace('descr="A dot"', 'descr="Line one&#10;Line two&#9;end"')}</w:p>`))
+
+		expect(parts.get("content.xml")).toContain("<svg:desc>Line one\nLine two\tend</svg:desc>")
+	})
+
+	it("converts a paragraph split by a page break whose properties hold a value with '/>'", async () => {
+		const { parts } = await converted(
+			spec('<w:p><w:pPr><w:keepNext w:val="a/&gt;b"/></w:pPr><w:r><w:t>x</w:t><w:br w:type="page"/><w:t>y</w:t></w:r></w:p>')
+		)
+		const content = parts.get("content.xml") ?? ""
+
+		expect(() => parseXml(encodeUtf8(content))).not.toThrow()
+		expect(content).toMatch(/>x</u)
+		expect(content).toMatch(/>y</u)
+	})
+
+	it("writes a symbol run's own font when its run fonts hold a value with '/>'", async () => {
+		const { parts } = await converted(
+			spec(
+				'<w:p><w:r><w:rPr><w:rStyle w:val="s/&gt;t"/><w:rFonts w:ascii="A/&gt;B"/></w:rPr><w:sym w:font="Odd/&gt;Font" w:char="0041"/></w:r></w:p>'
+			)
+		)
+		const content = parts.get("content.xml") ?? ""
+
+		expect(() => parseXml(encodeUtf8(content))).not.toThrow()
+		expect(content).toMatch(/>A</u)
+		expect(content).toContain('style:font-name="Odd/>Font"')
+	})
+})
+
+describe("odt → docx: the paragraph-padding setting", () => {
+	const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+	const lossOf = (body: string): readonly string[] => {
+		const parts = new Map([
+			["word/document.xml", encodeUtf8(`<w:document ${W}><w:body>${body}</w:body></w:document>`)],
+			["word/styles.xml", encodeUtf8(`<w:styles ${W}/>`)],
+			[
+				"word/settings.xml",
+				encodeUtf8(
+					`<w:settings ${W}><w:compat><w:compatSetting w:name="paragraph-padding" w:uri="urn:filen" w:val="borders"/></w:compat></w:settings>`
+				)
+			]
+		])
+		const lossy = new LossyCounts()
+
+		standaloneParts(parts, lossy)
+
+		expect(decodeUtf8(parts.get("word/settings.xml") ?? new Uint8Array())).not.toContain("paragraph-padding")
+
+		return lossy.report("odt", "docx").features.map(feature => feature.kind)
+	}
+
+	it("counts a paragraph with a left or right border, and nothing for a document without paragraph borders", () => {
+		expect(
+			lossOf('<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="4" w:space="1" w:color="000000"/></w:pBdr></w:pPr></w:p>')
+		).toContain("paragraphPadding")
+		expect(
+			lossOf('<w:p><w:pPr><w:pBdr><w:top w:val="single" w:sz="4" w:space="1" w:color="000000"/></w:pBdr></w:pPr></w:p>')
+		).not.toContain("paragraphPadding")
+		expect(lossOf('<w:p><w:pPr><w:ind w:left="720"/></w:pPr><w:r><w:t>plain</w:t></w:r></w:p>')).not.toContain("paragraphPadding")
 	})
 })

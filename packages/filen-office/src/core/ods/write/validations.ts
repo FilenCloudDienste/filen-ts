@@ -1,12 +1,14 @@
 import { minOf } from "../../arrays"
 import type { SheetRange } from "../../sheet/protocol"
-import type { XlsxSheetModel, XlsxWorkbookModel } from "../../xlsx/model/types"
+import type { XlsxSheetModel } from "../../xlsx/model/types"
 import { parseRangeRef } from "../../xlsx/write/text"
+import { columnName } from "../../sheet/refs/cellRef"
 import { decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import { validationRuleKey } from "../features"
-import { openFormula } from "../formula/toOf"
+import { ofSheetName, openFormula } from "../formula/toOf"
 import type { OdsTableSource } from "../source"
 import { SourceAxis } from "./axis"
+import { OdsSheet } from "../workbook"
 import { paragraphText } from "./cells"
 
 // Validations as the writer needs them where an edit changed them: each rule's table:content-validation name (the
@@ -165,38 +167,36 @@ function message(tag: string, title: string, text: string, display: boolean, kin
 	return `<table:${tag}${kind === undefined ? "" : ` table:message-type="${kind}"`} table:title="${escapeAttribute(title)}" table:display="${display ? "true" : "false"}">${lines}</table:${tag}>`
 }
 
-function column(index: number): string {
-	let text = ""
-
-	for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-	return text
-}
-
 // A table:content-validation for a rule on `sheet`. Its formulas are SpreadsheetML's, written for the top-left cell of
 // the rectangle around its ranges (not its first range's, which a range list need not list first): that cell is the
 // base cell (§19.584).
 function element(rule: Rule, name: string, sheet: string): string {
-	const quoted = /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
+	const quoted = ofSheetName(sheet)
 	const base =
 		rule.ranges.length === 0
 			? undefined
-			: `${quoted}.${column(minOf(rule.ranges.map(range => range.startCol)))}${minOf(rule.ranges.map(range => range.startRow)) + 1}`
+			: `${quoted}.${columnName(minOf(rule.ranges.map(range => range.startCol)))}${minOf(rule.ranges.map(range => range.startRow)) + 1}`
 	const test = condition(rule)
 	const attributes = rule.attributes
 	const list = (attributes.get("type") ?? "") === "list"
+	// xsd:boolean flags: "1" or "true".
+	const on = (flag: string): boolean => {
+		const value = attributes.get(flag)
 
-	return `<table:content-validation table:name="${escapeAttribute(name)}"${test === undefined ? "" : ` table:condition="${escapeAttribute(test)}"`} table:allow-empty-cell="${attributes.get("allowBlank") === "1" || attributes.get("allowBlank") === "true" ? "true" : "false"}"${list ? ` table:display-list="${attributes.get("showDropDown") === "1" ? "none" : "unsorted"}"` : ""}${base === undefined ? "" : ` table:base-cell-address="${escapeAttribute(base)}"`}>${message(
+		return value === "1" || value === "true"
+	}
+
+	return `<table:content-validation table:name="${escapeAttribute(name)}"${test === undefined ? "" : ` table:condition="${escapeAttribute(test)}"`} table:allow-empty-cell="${on("allowBlank") ? "true" : "false"}"${list ? ` table:display-list="${on("showDropDown") ? "none" : "unsorted"}"` : ""}${base === undefined ? "" : ` table:base-cell-address="${escapeAttribute(base)}"`}>${message(
 		"help-message",
 		attributes.get("promptTitle") ?? "",
 		attributes.get("prompt") ?? "",
-		attributes.get("showInputMessage") === "1",
+		on("showInputMessage"),
 		undefined
 	)}${message(
 		"error-message",
 		attributes.get("errorTitle") ?? "",
 		attributes.get("error") ?? "",
-		attributes.get("showErrorMessage") === "1",
+		on("showErrorMessage"),
 		attributes.get("errorStyle") ?? "stop"
 	)}</table:content-validation>`
 }
@@ -383,14 +383,13 @@ function freeName(taken: Set<string>): string {
 // A sheet's validations where an edit changed them (its dataValidations section written), null where it did not.
 // `taken`: names in use across the workbook (new ones are added to it).
 export function sheetValidations(
-	workbook: XlsxWorkbookModel,
 	model: XlsxSheetModel,
 	sheetName: string,
 	table: OdsTableSource | null,
 	current: string | null,
 	taken: Set<string>
 ): SheetValidations | null {
-	const steps = sheetValidationsSteps(workbook, model, sheetName, table, current, taken)
+	const steps = sheetValidationsSteps(model, sheetName, table, current, taken)
 
 	for (;;) {
 		const step = steps.next()
@@ -404,18 +403,15 @@ const RULES_PER_STEP = 256
 
 // sheetValidations as steps: it yields every RULES_PER_STEP rules, so a sliced run gives the host its turns.
 export function* sheetValidationsSteps(
-	workbook: XlsxWorkbookModel,
 	model: XlsxSheetModel,
 	sheetName: string,
 	table: OdsTableSource | null,
 	current: string | null,
 	taken: Set<string>
 ): Generator<void, SheetValidations | null> {
-	const axes = model as { rowAxis?: SourceAxis; colAxis?: SourceAxis }
-	const rowAxis = axes.rowAxis ?? SourceAxis.identity(0)
-	const colAxis = axes.colAxis ?? SourceAxis.identity(0)
-
-	void workbook
+	// A sheet with no source table holds no source cells: every source row and column is gone.
+	const rowAxis = model instanceof OdsSheet ? model.rowAxis : SourceAxis.identity(0)
+	const colAxis = model instanceof OdsSheet ? model.colAxis : SourceAxis.identity(0)
 
 	if (current === null && table !== null && rowAxis.identity && colAxis.identity) return null
 
@@ -467,12 +463,27 @@ export function* sheetValidationsSteps(
 				const startCol = colAxis.target(range.startCol)
 				const endCol = colAxis.target(range.endCol)
 
-				for (let row = range.startRow; row <= range.endRow; row++) {
+				if (startCol < 0 || endCol < 0) continue
+
+				// One rectangle per run of rows kept together, not one per row: a whole-column rule costs its runs.
+				for (let row = range.startRow; row <= range.endRow;) {
 					const target = rowAxis.target(row)
 
-					if (target < 0 || startCol < 0 || endCol < 0) continue
+					if (target < 0) {
+						const kept = rowAxis.nextKept(row)
 
-					before.push({ range: { startRow: target, endRow: target, startCol, endCol }, name })
+						if (kept < 0) break
+
+						row = kept
+
+						continue
+					}
+
+					const run = Math.min(range.endRow - row + 1, rowAxis.runFrom(row))
+
+					before.push({ range: { startRow: target, endRow: target + run - 1, startCol, endCol }, name })
+
+					row += run
 				}
 			}
 		}

@@ -4,6 +4,7 @@ import {
 	refused,
 	type Action,
 	type Bullet,
+	type Deck,
 	type FontRef,
 	type ListStyle,
 	type Paragraph,
@@ -12,11 +13,12 @@ import {
 	type Run,
 	type RunProps,
 	type ShapeNode,
+	type SlideRef,
 	type Spacing,
 	type TextBody
 } from "../../../presentation/model"
-import { Relationships } from "../../../opc/index"
-import { classifyAction } from "../../../presentation/actions"
+import { partKey, Relationships } from "../../../opc/index"
+import { classifyHyperlink } from "../../../presentation/actions"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS } from "../../../presentation/budget"
 import { NodeKind, escapeText } from "../../../xml/index"
 import { readTextBody } from "../../read/drawing"
@@ -60,15 +62,11 @@ function invalidXml(text: string): boolean {
 	return false
 }
 
-function percent(value: number): number {
-	return Math.round(value)
-}
-
 function spacingXml(tag: string, spacing: Spacing | undefined): string {
 	if (spacing === undefined) return ""
 
 	return "pct" in spacing
-		? `<a:${tag}><a:spcPct${attr("val", percent(spacing.pct))}/></a:${tag}>`
+		? `<a:${tag}><a:spcPct${attr("val", spacing.pct)}/></a:${tag}>`
 		: `<a:${tag}><a:spcPts${attr("val", spacing.pts)}/></a:${tag}>`
 }
 
@@ -120,7 +118,7 @@ export function runPropsXml(context: EmitContext, tag: string, props: RunProps, 
 	const out = new Pieces().text(
 		`<${tag}${attr("lang", props.lang)}${attr("altLang", props.altLang)}${attr("sz", props.sz)}${attr("b", props.b)}${attr("i", props.i)}` +
 			`${attr("u", props.u)}${attr("strike", props.strike)}${attr("kern", props.kern)}${attr("cap", props.cap)}${attr("spc", props.spc)}` +
-			`${attr("baseline", props.baseline === undefined ? undefined : percent(props.baseline))}${attr("noProof", props.noProof)}` +
+			`${attr("baseline", props.baseline)}${attr("noProof", props.noProof)}` +
 			unmodeledAttributes(context, source, RUN_ATTRIBUTES)
 	)
 	const children = new Pieces()
@@ -231,9 +229,7 @@ export function paraPropsXml(context: EmitContext, tag: string, props: ParaProps
 
 	if (props.buSz === "text") children.text("<a:buSzTx/>")
 	else if (props.buSz !== undefined)
-		children.text(
-			"pct" in props.buSz ? `<a:buSzPct${attr("val", percent(props.buSz.pct))}/>` : `<a:buSzPts${attr("val", props.buSz.pts)}/>`
-		)
+		children.text("pct" in props.buSz ? `<a:buSzPct${attr("val", props.buSz.pct)}/>` : `<a:buSzPts${attr("val", props.buSz.pts)}/>`)
 
 	if (props.buFont === "text") children.text("<a:buFontTx/>")
 	else children.text(fontXml("buFont", props.buFont))
@@ -574,6 +570,15 @@ function basisOf(context: EmitContext, shape: ShapeNode, source: number): Basis 
 	}
 }
 
+// A body the caller holds as its source reads (a table cell's pristine text in splice mode), actions compared too.
+function heldBasis(body: TextBody): Basis {
+	const paragraphs = new Map<number, Paragraph>()
+
+	for (const paragraph of body.paragraphs) if (paragraph.src?.format === "pptx") paragraphs.set(paragraph.src.node, paragraph)
+
+	return { body, paragraphs, same: sameModel }
+}
+
 // The internal relationships a source subtree names, from the emit's PartsApi (picture fills and bullets resolve to
 // their parts; external targets stay unknown, so actions are not compared).
 function internalRelationships(context: EmitContext, r: NonNullable<ReturnType<typeof readerOf>>, source: number): Relationships {
@@ -606,44 +611,59 @@ function internalRelationships(context: EmitContext, r: NonNullable<ReturnType<t
 	)
 }
 
-// A hyperlink element classified as the reader classifies it (a slide jump by the deck's own slide parts).
+// The deck's slides by part key, built on a part's first slide jump and kept while the deck is as it was (a source
+// package's relationships outlive one save).
+interface SlidesByPart {
+	readonly deck: Deck
+	readonly revision: number
+	readonly parsed: number
+	readonly slides: ReadonlyMap<string, SlideRef>
+}
+
+const SLIDES_BY_PART = new WeakMap<Relationships, SlidesByPart>()
+
+function slidesByPart(context: EmitContext, relationships: Relationships): ReadonlyMap<string, SlideRef> {
+	const deck = context.deck
+	const held = SLIDES_BY_PART.get(relationships)
+
+	if (held?.deck === deck && held.revision === deck.revision && held.parsed === deck.nodes.size) return held.slides
+
+	const slides = new Map<string, SlideRef>()
+
+	for (const ref of deck.slides) {
+		const part = deck.nodes.get(ref)?.part
+
+		if (part !== undefined) slides.set(partKey(part), ref)
+	}
+
+	SLIDES_BY_PART.set(relationships, { deck, revision: deck.revision, parsed: deck.nodes.size, slides })
+
+	return slides
+}
+
+// A hyperlink element classified as the reader classifies it: a slide jump by part key (case and percent-encoding
+// folded), against the source part names of the deck's slides.
 function classifyNode(
 	context: EmitContext,
 	r: ReturnType<typeof readerOf> & object,
 	relationships: Relationships,
 	node: number
 ): Action | undefined {
-	const id = r.rel(node, "id")
-	const target = id === undefined || id === "" ? undefined : relationships.byId(id)
-	const action = r.attr(node, "action")
-
-	return classifyAction(
-		{
-			...(action === undefined ? {} : { action }),
-			...(target === undefined
-				? {}
-				: {
-						target: {
-							external: target.external,
-							target: target.target,
-							...(target.partName === undefined ? {} : { partName: `/${target.partName}` })
-						}
-					})
-		},
-		{
-			slideOf: part => {
-				for (const ref of context.deck.slides) if (context.deck.nodes.get(ref)?.part === part) return ref
-
-				return undefined
-			}
-		}
-	)
+	return classifyHyperlink(r, relationships, node, part => slidesByPart(context, relationships).get(partKey(part)))
 }
 
-// p:txBody of `shape` (or the element `tag` names: a:txBody in tables).
-export function textBodyXml(context: EmitContext, shape: ShapeNode, body: TextBody, source: number, tag = "p:txBody"): EmitResult {
+// p:txBody of `shape` (or the element `tag` names: a:txBody in tables). `held`: the body as its source reads, when the
+// caller holds it (else the pristine read in splice mode, or the source read again).
+export function textBodyXml(
+	context: EmitContext,
+	shape: ShapeNode,
+	body: TextBody,
+	source: number,
+	tag = "p:txBody",
+	held?: TextBody
+): EmitResult {
 	const r = readerOf(context)
-	const basis = basisOf(context, shape, source)
+	const basis = held === undefined ? basisOf(context, shape, source) : heldBasis(held)
 	const pristine = basis?.body
 	const same = basis?.same ?? sameModel
 	const out = new Pieces().text(source >= 0 ? `<${tag}${unmodeledAttributes(context, source, new Set())}>` : `<${tag}>`)

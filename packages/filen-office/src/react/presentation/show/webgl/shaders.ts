@@ -145,10 +145,6 @@ float along(vec2 centre) {
 	if (uDir.y < 0.0) return 1.0 - centre.y;
 	return centre.y;
 }
-
-float easeOut(float x) {
-	return 1.0 - (1.0 - x) * (1.0 - x);
-}
 `
 
 // Each effect is its own program (a smaller shader compiles sooner).

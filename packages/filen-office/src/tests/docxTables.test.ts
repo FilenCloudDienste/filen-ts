@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Node } from "prosemirror-model"
 import { EditorState, TextSelection } from "prosemirror-state"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { bytesSource, OpcPackage, SliceClock } from "@filen/office/core/opc"
 import { encodeUtf8, parseXml } from "@filen/office/core/xml"
 import { RevisionFlag } from "@filen/office/core/docx"
@@ -18,6 +18,8 @@ import { TABLES_STAGE } from "../core/docx/edit/invariants/tables"
 import { clearCellRevision, removeCells } from "../core/docx/edit/tables/ops"
 import { resolveChanges, storyReviewIndex } from "../core/docx/review/accept"
 import { tableChecks } from "../core/docx/write/checks/tables"
+import { TableLayout } from "../core/docx/layout/table"
+import { MAX_TABLE_COLUMNS } from "../core/docx/props/parse"
 import { CORPUS_DIR } from "./corpusDir"
 import { W as W_NAMESPACE, parseXml as parseIndependent, violations } from "./fuzz/independentReader"
 import { tableOps } from "./fuzz/ops/tables"
@@ -398,6 +400,49 @@ describe("table commands", () => {
 		expect(await partXml(bytes)).toMatch(
 			/<w:p><w:pPr><w:rPr><w:ins w:id="\d+" w:author="Ann Author" w:date="[0-9T:-]+Z"\/><\/w:rPr><\/w:pPr><w:r><w:t xml:space="preserve">Before the <\/w:t><\/w:r><\/w:p><w:tbl>.*<\/w:tbl><w:p><w:r><w:t>table<\/w:t>/
 		)
+	})
+
+	it("sizes an inserted table for the text width of the section the caret is in", async () => {
+		const margins = '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>'
+		const portrait = `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>${margins}</w:sectPr>`
+		const landscape = `<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>${margins}</w:sectPr>`
+		const { context, model } = await openSpec({
+			body:
+				p("Portrait text") +
+				`<w:p><w:pPr>${portrait}</w:pPr><w:r><w:t>Portrait end</w:t></w:r></w:p>` +
+				p("Landscape text") +
+				`<w:tbl><w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid>${tr([tc("Cell text", '<w:tcW w:w="3000" w:type="dxa"/>')])}</w:tbl>` +
+				landscape,
+			headers: { rIdH: p("Header text") }
+		})
+		const columns = (session: DocxEditorSession, at: string): number[] => {
+			select(session, at)
+			expect(session.execute({ type: "table.insert", rows: 1, cols: 3 })).toBe(true)
+
+			const widths: number[] = []
+			let inserted: Node | undefined
+
+			session.state.doc.descendants(node => {
+				if (node.type === nodes.table && node.textContent === "") inserted = node
+
+				return true
+			})
+
+			inserted?.firstChild?.forEach(cell => widths.push(cell.attrs["colwidth"] as number))
+
+			return widths
+		}
+		const sum = (widths: readonly number[]): number => widths.reduce((total, width) => total + width, 0)
+		const header = model.stories.find(story => story?.kind === "header")
+
+		if (header === undefined) throw new Error("no header")
+
+		// Portrait: 12240 − 2 × 1440; landscape: 15840 − 2 × 1440.
+		expect(sum(columns(new DocxEditorSession(context), "Portrait text"))).toBe(9360)
+		expect(sum(columns(new DocxEditorSession(context), "Landscape text"))).toBe(12960)
+		// A header is sized for the last section as before; a cell for the cell less its margins.
+		expect(sum(columns(new DocxEditorSession(context, { story: header }), "Header text"))).toBe(12960)
+		expect(sum(columns(new DocxEditorSession(context), "Cell text"))).toBe(2769)
 	})
 
 	// Fails until review/accept.ts looks past a table the resolution takes out whole (F4-needs-accept.ts.md).
@@ -1301,6 +1346,53 @@ describe("table commands", () => {
 		expect(shape(firstTable(trial.state.doc))).toEqual(["a1:1 b1:1 c1:1", "a2:1 b2:1 c2:1", "a3:1 b3:1 c3:1"])
 		expect(TABLE_UNITS.revert(session, keys)).toBe(2)
 		expect(shape(firstTable(session.state.doc))).toEqual(["a1:1 b1:1 c1:1", "a2:1 b2:1 c2:1", "a3:1 b3:1 c3:1"])
+	})
+})
+
+describe("hostile table grids", () => {
+	// The grid length of every table laid out.
+	async function gridLengths(bytes: Uint8Array): Promise<number[]> {
+		const computed = vi.spyOn(TableLayout.prototype as unknown as { computeGrid(area: unknown): void }, "computeGrid")
+
+		try {
+			await layOut(bytes)
+
+			return computed.mock.contexts.map(table => (Reflect.get(table as object, "grid") as readonly number[]).length)
+		} finally {
+			computed.mockRestore()
+		}
+	}
+
+	it("lays out spans past any real table with a bounded grid", { timeout: 60_000 }, async () => {
+		const spans = [
+			tbl([2000], [tr([tc("a", '<w:gridSpan w:val="2147483647"/>')])]),
+			tbl([2000], [tr([tc("a")], '<w:gridBefore w:val="2000000000"/><w:gridAfter w:val="2000000000"/>')]),
+			// Spans within the bound each, past it together.
+			tbl([2000], [tr(Array.from({ length: 300 }, () => tc("a", '<w:gridSpan w:val="1000"/>')))])
+		]
+
+		for (const table of spans) {
+			const lengths = await gridLengths(docx(table))
+
+			expect(lengths.length).toBeGreaterThan(0)
+
+			for (const length of lengths) expect(length).toBeLessThanOrEqual(MAX_TABLE_COLUMNS)
+		}
+	})
+
+	it("saves a document with a hostile span it did not touch", async () => {
+		const source = docx(
+			tbl(
+				[2000, 2000],
+				[tr([tc("a", '<w:gridSpan w:val="2147483647"/>')], '<w:gridBefore w:val="2000000000"/>'), tr([tc("b"), tc("c")])]
+			)
+		)
+		const opened = await openBytes(source)
+		const session = new DocxEditorSession(opened.context, { proof: writerProof(opened.context) })
+		const result = await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+
+		expect(result.bytes).toBeDefined()
+		expect(await partXml(result.bytes as Uint8Array)).toBe(await partXml(source))
 	})
 })
 

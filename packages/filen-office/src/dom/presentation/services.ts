@@ -1,6 +1,7 @@
 import type { Canvas2DLike, CanvasSurface } from "../../core/drawingml/canvas"
 import { geckoPngDecoder, type PngFrameDecoder } from "../../core/pdfwrite/images"
 import { imageDimensions, imageWithinBudget, MEDIA_LIMITS } from "../../core/opc/mediaPolicy"
+import { SLICE_MS } from "../../core/slicing"
 import { offscreenMeasurer } from "../canvasMeasurer"
 import type { DocxEngineServices } from "../docx/engine"
 import { macrotaskYield } from "../docx/host"
@@ -229,7 +230,7 @@ export function workerRealm(scope: unknown, fonts: FontLocation): PresentationRe
 			fontAssets: fetchFontAssets(fonts, { shared: true }),
 			measurer: offscreenMeasurer(scope),
 			yield: macrotaskYield(),
-			sliceMs: 8
+			sliceMs: SLICE_MS
 		},
 		canvas
 	}

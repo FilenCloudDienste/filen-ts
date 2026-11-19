@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { TimeNode, TimingTree } from "../core/anim/model"
+import type { CommonTimeNode, TimeNode, TimingTree } from "../core/anim/model"
+import { CTN_MODELED, ctnAttributes } from "../core/anim/pptx"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
 import { slideRef, type Deck, type SlideNode } from "../core/presentation/model"
 import { readTiming } from "../core/pptx/read/timing"
@@ -158,6 +159,53 @@ describe("pptx timing", () => {
 		expect(out).toContain(second)
 		expect(out).not.toBe(TIMING_XML)
 		expect(sameModel(reread(out), edited)).toBe(true)
+	})
+
+	it("writes every cTn attribute the model holds", () => {
+		const ctn: CommonTimeNode = {
+			id: 1,
+			presetID: 2,
+			presetClass: "entr",
+			presetSubtype: 4,
+			nodeType: "clickEffect",
+			grpId: 0,
+			fill: "hold",
+			restart: "never",
+			dur: 500,
+			repeatCount: 2000,
+			repeatDur: 1000,
+			spd: 50000,
+			accel: 10000,
+			decel: 10000,
+			autoRev: true,
+			syncBehavior: "locked",
+			masterRel: "sameClick",
+			evtFilter: "cancelBubble",
+			tmFilter: "0,0; 1,1",
+			display: "0",
+			nodePh: "1",
+			afterEffect: "1",
+			bldLvl: "1",
+			stCondLst: [],
+			endCondLst: [],
+			children: []
+		}
+
+		expect(new Set(ctnAttributes(ctn).map(([name]) => name))).toEqual(CTN_MODELED)
+	})
+
+	it("keeps syncBehavior on a rewritten node", () => {
+		const locked = parseXml(
+			encodeUtf8(slideXml(TIMING_XML.replace('id="10" presetID="8"', 'id="10" syncBehavior="locked" presetID="8"')))
+		)
+		const edited = read(locked)
+
+		node(edited, 10).ctn.presetSubtype = 3
+
+		const out = emit(edited, context(locked, read(locked)))
+
+		expect(out).toMatch(/<p:cTn [^>]*id="10"[^>]*syncBehavior="locked"/)
+		expect(node(reread(out), 10).ctn.syncBehavior).toBe("locked")
 	})
 
 	it("writes the model alone when there is no source, reading back the same tree", () => {

@@ -1,5 +1,5 @@
 import type { TimingBudgets } from "../anim/model"
-import { children, i16, i32, u16, u32, utf16Text, type PptRecord, type RecordCounter } from "./records"
+import { children, i16, i32, RT, u16, u32, utf16Text, type PptRecord, type RecordCounter } from "./records"
 import type { PptSound } from "./transitions"
 import { PresentationError } from "../presentation/model"
 import { xmlText, type TextBlock } from "./text"
@@ -55,58 +55,6 @@ export interface PptTiming {
 	// PresentationML attribute can hold).
 	readonly lost: boolean
 }
-
-const RT = {
-	cString: 0x0fba,
-	progTags: 0x1388,
-	progBinaryTag: 0x138a,
-	binaryTagData: 0x138b,
-	buildList: 0x2b02,
-	buildAtom: 0x2b03,
-	chartBuild: 0x2b04,
-	chartBuildAtom: 0x2b05,
-	diagramBuild: 0x2b06,
-	diagramBuildAtom: 0x2b07,
-	paraBuild: 0x2b08,
-	paraBuildAtom: 0x2b09,
-	levelInfo: 0x2b0a,
-	visualShape: 0x2afb,
-	visualPage: 0x2b01,
-	animationInfoAtom: 0x0ff1,
-	sound: 0x07e6,
-	condition: 0xf125,
-	timeNode: 0xf127,
-	conditionAtom: 0xf128,
-	modifier: 0xf129,
-	behavior: 0xf12a,
-	animate: 0xf12b,
-	color: 0xf12c,
-	effect: 0xf12d,
-	motion: 0xf12e,
-	rotation: 0xf12f,
-	scale: 0xf130,
-	set: 0xf131,
-	command: 0xf132,
-	behaviorAtom: 0xf133,
-	animateAtom: 0xf134,
-	colorAtom: 0xf135,
-	effectAtom: 0xf136,
-	motionAtom: 0xf137,
-	rotationAtom: 0xf138,
-	scaleAtom: 0xf139,
-	setAtom: 0xf13a,
-	commandAtom: 0xf13b,
-	visualElement: 0xf13c,
-	propertyList: 0xf13d,
-	stringList: 0xf13e,
-	valueList: 0xf13f,
-	iterate: 0xf140,
-	sequence: 0xf141,
-	variant: 0xf142,
-	animationValue: 0xf143,
-	extTimeNode: 0xf144,
-	subEffect: 0xf145
-} as const
 
 // §2.13.38 TimePropertyID4TimeNode.
 const TPID = {

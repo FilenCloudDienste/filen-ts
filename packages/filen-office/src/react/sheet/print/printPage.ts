@@ -1,6 +1,8 @@
 import {
 	SHEET_MAX_COLS,
 	SHEET_MAX_ROWS,
+	tileColOf,
+	tileRowOf,
 	type SheetAxisLayout,
 	type SheetId,
 	type SheetLayout,
@@ -18,7 +20,7 @@ import {
 import { paginate, type PrintPage, type SheetPagination } from "../../../core/sheet/print/paginate"
 import type { SheetPageSetup, SheetPrintSpan } from "../../../core/sheet/print/setup"
 import type { SheetPrintRows } from "../../../core/sheet/print/xlsx"
-import { createGridAxis, type GridAxis } from "../axis"
+import { createGridAxis, shownIndex, shownIndices, type GridAxis } from "../axis"
 import { decoratePane, decoratorInset, paintScene, type SheetCellDecorator } from "../layers"
 import type { SheetGridModel } from "../model"
 import { CF_BAR_DECORATOR, CF_ICON_DECORATOR } from "../overlays/cf"
@@ -97,7 +99,8 @@ export function printAxis(layout: SheetAxisLayout, count: number): GridAxis {
 		offset: index => fine.offset(index) / FINE,
 		indexAt: position => fine.indexAt(position * FINE),
 		hidden: index => fine.hidden(index),
-		lastShown: fine.lastShown
+		lastShown: fine.lastShown,
+		nextShown: (index, direction) => shownIndex(fine, index, direction)
 	}
 }
 
@@ -149,8 +152,8 @@ export function pageTiles(page: PrintPage): number[] {
 
 	for (const rows of rowSpans) {
 		for (const cols of colSpans) {
-			for (let tileRow = rows.first >>> 6; tileRow <= rows.last >>> 6; tileRow++) {
-				for (let tileCol = cols.first >>> 5; tileCol <= cols.last >>> 5; tileCol++) {
+			for (let tileRow = tileRowOf(rows.first); tileRow <= tileRowOf(rows.last); tileRow++) {
+				for (let tileCol = tileColOf(cols.first); tileCol <= tileColOf(cols.last); tileCol++) {
 					const key = tileRow * 1024 + tileCol
 
 					if (seen.has(key)) continue
@@ -223,15 +226,10 @@ function paintHeadings(canvas: GridCanvas, view: GridView, theme: SheetGridTheme
 		if (axis.last >= axis.first) spans.push([axis.first, axis.last, axis.header + axis.frozenSize])
 
 		for (const [first, last, start] of spans) {
-			let at = start
+			const origin = axis.axis.offset(first)
 
-			for (let index = first; index <= last; index++) {
-				const size = axis.axis.size(index)
-
-				if (size > 0) draw(index, at, size)
-
-				at += size
-			}
+			for (const index of shownIndices(axis.axis, first, last))
+				draw(index, start + axis.axis.offset(index) - origin, axis.axis.size(index))
 		}
 	}
 

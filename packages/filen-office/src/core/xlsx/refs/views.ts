@@ -92,7 +92,7 @@ export function shiftViewStart(first: number, shift: AxisShift): number {
 }
 
 // A view index (active cell, top-left cell) after the edit: a deleted one goes to the first index after the run.
-function viewIndex(index: number, shift: AxisShift): number {
+export function viewIndex(index: number, shift: AxisShift): number {
 	const next = shiftIndex(index, shift)
 
 	if (next >= 0) return next

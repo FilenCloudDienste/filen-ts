@@ -9,7 +9,7 @@ import { RenderReport } from "../core/presentation/render/effects"
 import { renderSlide } from "../core/presentation/render/slide"
 import type { Slicing } from "../core/slicing"
 import { openRenderDeck } from "./fixtures/presentation/renderDeck"
-import { buildPptx, body, para, sp, xfrm } from "./pptxFixtures"
+import { buildPptx, body, declare, para, sp, xfrm } from "./pptxFixtures"
 
 const MIB = 1024 * 1024
 const SLICING: Slicing = { pause: () => Promise.resolve(), sliceMs: 1e9, now: () => 0 }
@@ -36,25 +36,28 @@ function recorded(bytes: Uint8Array): ByteSource & { readonly head: () => number
 	}
 }
 
+// `size` incompressible bytes: an entry after others that keeps their data out of the tail recorded() leaves out.
+function noise(size: number): Uint8Array<ArrayBuffer> {
+	const out = new Uint8Array(size)
+	let state = 0x2545f491
+
+	for (let k = 0; k < size; k++) {
+		state ^= state << 13
+		state ^= state >>> 17
+		state ^= state << 5
+		out[k] = state & 0xff
+	}
+
+	return out
+}
+
 // A fixture zip with one entry's content replaced, and `filler` incompressible bytes in an entry after it.
 function replaceEntry(zip: Uint8Array, name: string, data: Uint8Array<ArrayBuffer>, filler = 0): Uint8Array {
 	const files = unzipSync(zip)
 
 	files[name] = data
 
-	if (filler > 0) {
-		const noise = new Uint8Array(filler)
-		let state = 0x2545f491
-
-		for (let k = 0; k < filler; k++) {
-			state ^= state << 13
-			state ^= state >>> 17
-			state ^= state << 5
-			noise[k] = state & 0xff
-		}
-
-		files["ppt/media/filler.bin"] = noise
-	}
+	if (filler > 0) files["ppt/media/filler.bin"] = noise(filler)
 
 	return zipSync(Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, [bytes, { level: 9 }]])))
 }
@@ -102,22 +105,29 @@ describe("package structure budgets", () => {
 		expect(source.head()).toBeLessThan(1024)
 	})
 
-	it("refuses relationships parts that together exceed the non-media total before reading any", { timeout: 120_000 }, async () => {
+	it("refuses relationships parts that together exceed the non-media total before reading any", async () => {
 		// An audio part makes every relationships part needed for the media classes.
 		const parts: Record<string, { data: string | Uint8Array; type?: string }> = {
 			"ppt/media/media1.mp3": { data: new Uint8Array([0x49, 0x44, 0x33, 0, 0, 0, 0, 0]), type: "audio/mpeg" }
 		}
 		const rels =
 			'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+		const names = Array.from({ length: 10 }, (_, k) => `ppt/junk/_rels/j${String(k)}.xml.rels`)
 
-		// 10 × 60 MiB: each within the 64 MiB part budget, together over the 512 MiB total.
-		for (let k = 0; k < 10; k++) parts[`ppt/junk/_rels/j${k}.xml.rels`] = { data: padded(rels, 60 * MIB) }
+		for (const name of names) parts[name] = { data: rels }
 
-		const zip = buildPptx({ slides: [{ shapes: TITLE }], parts })
+		// After them: their data lies before the tail recorded() leaves out.
+		parts["ppt/media/filler.bin"] = { data: noise(128 * 1024) }
+
+		// 10 × 60 MiB declared: each within the 64 MiB part budget, together over the 512 MiB total.
+		const zip = names.reduce((bytes, name) => declare(bytes, name, 60 * MIB), buildPptx({ slides: [{ shapes: TITLE }], parts }))
 		const source = recorded(zip)
 		const result = await openPptx(source)
 
 		expect(result.kind === "refused" ? result.reason : result.kind).toBe("tooLarge")
+		expect(result.kind === "refused" ? result.detail : "").toMatch(/^ppt\/junk\/_rels\/j\d\.xml\.rels \(total\)/u)
+		// The parts' data lies before the tail: reading any would show.
+		expect(new TextDecoder("latin1").decode(zip).indexOf(names[names.length - 1] ?? "")).toBeLessThan(zip.length - 70_000)
 		expect(source.head()).toBeLessThan(1024)
 	})
 
@@ -131,17 +141,20 @@ describe("package structure budgets", () => {
 
 	it("checks every other entry against its class before the relationships parts are read", async () => {
 		// An audio candidate, and a 70 MiB non-media part: refused before the relationships are read.
-		const zip = buildPptx({
+		const built = buildPptx({
 			slides: [{ shapes: TITLE }],
 			parts: {
 				"ppt/media/media1.mp3": { data: new Uint8Array([0x49, 0x44, 0x33, 0, 0, 0, 0, 0]), type: "audio/mpeg" },
-				"ppt/embeddings/big.bin": { data: new Uint8Array(70 * MIB), type: "application/octet-stream" }
+				"ppt/embeddings/big.bin": { data: new Uint8Array(16), type: "application/octet-stream" },
+				"ppt/media/filler.bin": { data: noise(128 * 1024) }
 			}
 		})
+		const zip = declare(built, "ppt/embeddings/big.bin", 70 * MIB)
 		const source = recorded(zip)
 		const result = await openPptx(source)
 
 		expect(result.kind === "refused" ? result.reason : result.kind).toBe("tooLarge")
+		expect(result.kind === "refused" ? result.detail : "").toMatch(/^ppt\/embeddings\/big\.bin \(other\)/u)
 		expect(source.head()).toBeLessThan(1024)
 	})
 })

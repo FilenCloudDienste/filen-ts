@@ -1,4 +1,5 @@
 import { imageFormat, imageHandling } from "../../drawingml/picture"
+import { imageWithinBudget } from "../../opc/mediaPolicy"
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, naturalExtent, sniffImage, type DocxImageInfo } from "../../docx/objects/images"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRefusal } from "../../sheet/protocol"
 import type { SheetChangeSink, SheetHandled } from "../../sheet/registry"
@@ -161,7 +162,8 @@ export async function insertImage(
 }
 
 // A picture's bytes for a renderer: a part of the package that is an image (by its content type or name), within the
-// size a picture may have; null otherwise.
+// size a picture may have, in bytes and in the pixels its header declares (a raster whose header does not say is
+// refused, as the other formats' renderers refuse it); null otherwise.
 export async function mediaBytes(
 	document: XlsxDocument,
 	partName: string
@@ -184,7 +186,7 @@ export async function mediaBytes(
 
 		const bytes = await store.media(partName)
 
-		if (bytes === null || bytes.length > MAX_IMAGE_BYTES) return null
+		if (bytes === null || bytes.length > MAX_IMAGE_BYTES || !imageWithinBudget(bytes)) return null
 
 		return { bytes, type: CONTENT_TYPES[format] ?? contentType }
 	} catch {

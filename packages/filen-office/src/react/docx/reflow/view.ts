@@ -901,7 +901,7 @@ class ShownStory {
 
 	constructor(host: ReflowView, story: Story, mount: HTMLElement) {
 		const context = host.editor.body.session.context
-		const built = new DocxDocBuilder(context).build(story)
+		const built = new DocxDocBuilder(context, "eager").build(story)
 
 		this.host = host
 		this.source = {

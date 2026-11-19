@@ -2,7 +2,10 @@
 # whether the plaintext is a zip and, optionally, whether it equals an expected plaintext. Run under a Python
 # that has msoffcrypto-tool installed (FILEN_OFFICE_MSOFFCRYPTO), always with -I:
 #   decrypt.py <file> <password> [expectedPlaintextZip]
-# Prints one JSON line: {"ok", "startsPK", "plaintextSize", "integrityVerified", "matchedPlaintext"?} or an error.
+# Prints one JSON line: {"ok", "startsPK", "plaintextSize", "integritySupported", "integrityVerified",
+# "matchedPlaintext"?} or an error. integritySupported is false when this msoffcrypto-tool has no
+# verify_integrity keyword, so a false integrityVerified then says nothing about the file.
+import inspect
 import io
 import json
 import sys
@@ -21,21 +24,24 @@ def main():
             print(json.dumps({"ok": False, "error": "%s: %s" % (type(error).__name__, error)}))
             return
         out = io.BytesIO()
-        # Agile files carry a data-integrity HMAC; ask msoffcrypto to check it.
-        integrity = getattr(office, "type", None) == 1 or office.__class__.__name__.lower().find("agile") >= 0
-        try:
-            office.decrypt(out, verify_integrity=True)
-            integrity_verified = True
-        except Exception:
-            # Older/standard files have no integrity container; decrypt without the check.
-            out = io.BytesIO()
+        # Agile files carry a data-integrity HMAC; ask msoffcrypto to check it when this version can.
+        integrity_supported = "verify_integrity" in inspect.signature(office.decrypt).parameters
+        integrity_verified = False
+        if integrity_supported:
+            try:
+                office.decrypt(out, verify_integrity=True)
+                integrity_verified = True
+            except Exception:
+                out = io.BytesIO()
+        if not integrity_verified:
+            # Standard files have no integrity container, and a failed check still reports the plaintext.
             office.decrypt(out)
-            integrity_verified = False
     data = out.getvalue()
     result = {
         "ok": True,
         "startsPK": data[:2] == b"PK",
         "plaintextSize": len(data),
+        "integritySupported": integrity_supported,
         "integrityVerified": integrity_verified,
     }
     if expected is not None:

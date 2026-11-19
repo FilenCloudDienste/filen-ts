@@ -15,8 +15,7 @@ import { refused, type FrameRef, type Refused, type ShapeNode } from "../../../p
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { OdpStyles, declared } from "../styles"
-import { IDENTITY, OdpShapeWriter, emitOdpShape, familyFragment } from "./shape"
-import { altMarkup, frameBox } from "./table"
+import { IDENTITY, OdpShapeWriter, boxMarkup, emitOdpShape, familyFragment, newElementCommon } from "./shape"
 import { isRefused } from "../../../presentation/refusal"
 
 // A chart's draw:frame holding draw:object (ODF 1.3 Part 3 §10.4.6), the object a chart document of its own
@@ -178,9 +177,16 @@ function emitFrame(context: OdpEmitContext, shape: ShapeNode, request: Parameter
 	if (node === undefined || fragment === undefined) {
 		if (shape.xfrm === undefined) return refused("unsupported", "a new chart without a box")
 
-		const name = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
+		const common = newElementCommon(shape, styles)
 
-		return { kind: "markup", pieces: [`<draw:frame${name}${frameBox(shape.xfrm)}>${objectXml(path)}${altMarkup(shape)}</draw:frame>`] }
+		if (isRefused(common.listeners)) return common.listeners
+
+		return {
+			kind: "markup",
+			pieces: [
+				`<draw:frame${common.attributes}${boxMarkup(shape.xfrm)}>${objectXml(path)}${common.listeners}${common.alt}</draw:frame>`
+			]
+		}
 	}
 
 	const document = fragment.document

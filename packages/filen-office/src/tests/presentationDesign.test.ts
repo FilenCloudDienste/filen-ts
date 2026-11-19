@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest"
 import { openPptx } from "../core/pptx/package"
 import { bytesSource } from "../core/opc/index"
 import type { DeckOp } from "../core/presentation/edit/ops"
-import type { SlideNode } from "../core/presentation/model"
-import { FILEN_THEMES } from "../core/templates/themes/catalog"
+import type { SlideNode, Xfrm } from "../core/presentation/model"
 import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { danglingReferences, partsOf, rebaseSession, saveEdits, text } from "./pptxWriteFixtures"
 import { designDeck, designOdp } from "./presentationDesignFixtures"
 import { driveSession } from "./odpWriteDrive"
-import { entriesOf } from "./odpWriteFixtures"
+import { entriesOf, openOdpDeck, slideAt, type OpenedOdp } from "./odpWriteFixtures"
 import { viewCapability } from "../dom/presentation/engine/view"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { designInfo } from "../core/presentation/edit/apply/design"
+import { sessionEdits } from "../dom/presentation/engine/edit"
 
 // The design family on a pptx session: a gallery theme applied (a new master with its layouts, every slide moved by
 // layout type, slide parts untouched but for their relationships), the file's own theme applied back, variants,
@@ -279,6 +279,42 @@ describe("a gallery theme on a pptx deck", () => {
 		expect(text((await partsOf(saved)).get("ppt/slideMasters/slideMaster2.xml"))).toContain('bg1="dk1" tx1="lt1"')
 		h.close()
 	})
+
+	// The existing slides are changed (their layout), never added: the save keeps each slide part, its name and bytes.
+	const designChanges: readonly (readonly [string, (h: EditHarness) => DeckOp])[] = [
+		["a variant", h => ({ family: "design", kind: "setVariant", master: h.session.deck.masters[0] as never, variant: 3 })],
+		[
+			"a gallery theme on some of the slides",
+			h => ({
+				family: "design",
+				kind: "setTheme",
+				theme: { kind: "gallery", id: "slate", variant: 1 },
+				slides: [h.session.deck.slides[0] as never]
+			})
+		]
+	]
+
+	for (const [name, op] of designChanges) {
+		it(`reports ${name} as a change of the existing slides and saves them in place`, async () => {
+			const bytes = await designDeck(["title", "obj", "blank"])
+			const h = await editHarness(bytes)
+			const revision = await run(h, op(h))
+			const changes = sessionEdits(h.session).changes()
+
+			for (const ref of h.session.deck.slides) {
+				const part = h.session.deck.nodes.get(ref)?.part
+
+				expect(part === undefined ? undefined : changes.parts.get(part)?.change, part).not.toBe("added")
+			}
+
+			const saved = await saveEdits(h, revision)
+			const before = await partsOf(bytes)
+			const after = await partsOf(saved)
+
+			for (const [part, data] of before) if (SLIDE_PART.test(part)) expect(after.get(part), part).toEqual(data)
+			h.close()
+		})
+	}
 })
 
 describe("slide size and backgrounds on a pptx deck", () => {
@@ -339,7 +375,20 @@ describe("slide size and backgrounds on a pptx deck", () => {
 	})
 })
 
-void FILEN_THEMES
+// The deck size, the first master's title placeholder box and the first page's first shape box of an opened ODP deck.
+function boxesOf(opened: OpenedOdp): {
+	readonly size: { readonly cx: number; readonly cy: number }
+	readonly master: Xfrm
+	readonly page: Xfrm
+} {
+	const ref = opened.deck.masters[0]
+	const master = (ref === undefined ? undefined : opened.deck.nodes.get(ref))?.shapes.find(shape => shape.ph?.type === "title")?.xfrm
+	const page = slideAt(opened, 0).shapes.find(shape => shape.xfrm !== undefined)?.xfrm
+
+	if (master === undefined || page === undefined) throw new Error("no boxes")
+
+	return { size: opened.deck.size, master, page }
+}
 
 describe("the file's own theme on an ODP deck", () => {
 	it("reassigns the pages' master page, touching nothing in content.xml but the master references", async () => {
@@ -404,6 +453,7 @@ describe("the file's own theme on an ODP deck", () => {
 
 	it("writes a size change into styles.xml's page layout and moves the master's shapes and the pages' to fit", async () => {
 		const bytes = await designOdp(2)
+		const before = boxesOf(await openOdpDeck(bytes))
 		const d = await driveSession(bytes)
 		const result = await d.command({
 			family: "design",
@@ -423,9 +473,24 @@ describe("the file's own theme on an ODP deck", () => {
 		const styles = text(entries.get("styles.xml"))
 
 		expect(styles).toContain('fo:page-width="25.4cm" fo:page-height="19.05cm"')
-		// The master title: x 6.875 % of 33.867 cm × 0.75; y (5.32 % of 19.05 cm) × 0.75 + 2.38125 cm.
-		expect(styles).toMatch(/presentation:class="title"/u)
 		expect(d.session.deck.size).toEqual({ cx: 9_144_000, cy: 6_858_000 })
+
+		const after = boxesOf(await openOdpDeck(saved.bytes ?? new Uint8Array()))
+		const s = Math.min(9_144_000 / before.size.cx, 6_858_000 / before.size.cy)
+
+		expect(s).toBeCloseTo(0.75, 2)
+		expect(after.size).toEqual({ cx: 9_144_000, cy: 6_858_000 })
+
+		// Scaled about the origin, then centred on the new page.
+		for (const [box, was] of [
+			[after.master, before.master],
+			[after.page, before.page]
+		] as const) {
+			expect(Math.abs(box.cx - was.cx * s)).toBeLessThan(400)
+			expect(Math.abs(box.cy - was.cy * s)).toBeLessThan(400)
+			expect(Math.abs(box.x - (was.x * s + (9_144_000 - before.size.cx * s) / 2))).toBeLessThan(400)
+			expect(Math.abs(box.y - (was.y * s + (6_858_000 - before.size.cy * s) / 2))).toBeLessThan(400)
+		}
 
 		const reopened = await driveSession(saved.bytes ?? new Uint8Array())
 

@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { DocxDocBuilder, conservativeProof, proveBlocks, type LockReason } from "@filen/office/core/docx/edit"
+import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
+import { DocxDocBuilder, conservativeProof, openDocxEditContext, proveBlocks, type LockReason } from "@filen/office/core/docx/edit"
+import { bytesSource } from "@filen/office/core/opc"
 import { CORPUS_DIR as CORPUS } from "./corpusDir"
-import { openBytes, structureProblems } from "./docxEditFixtures"
+import { structureProblems } from "./docxEditFixtures"
 
 // The licensed real-world corpus is kept out of the repository (pnpm run corpus:fetch); this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
@@ -34,24 +36,23 @@ describe.skipIf(!existsSync(CORPUS))("docx editing documents over the real-world
 
 		for (const file of corpusFiles()) {
 			const name = file.slice(CORPUS.length + 1)
-			let document
 
 			try {
-				document = await openBytes(new Uint8Array(readFileSync(file)))
-			} catch {
+				const pkg = await openDocxPackage(bytesSource(new Uint8Array(readFileSync(file))))
+
 				// Encrypted and otherwise refused packages: the model sweep reports them.
-				continue
-			}
+				if (!pkg.ok) continue
 
-			const body = document.model.body
+				const model = await buildDocxModel(pkg.package)
+				const context = await openDocxEditContext(pkg.package, model)
+				const body = model.body
 
-			if (body === undefined) continue
+				if (body === undefined) continue
 
-			opened++
+				opened++
 
-			try {
 				const start = performance.now()
-				const story = new DocxDocBuilder(document.context).build(body)
+				const story = new DocxDocBuilder(context).build(body)
 				const ms = performance.now() - start
 
 				story.doc.check()
@@ -108,5 +109,6 @@ describe.skipIf(!existsSync(CORPUS))("docx editing documents over the real-world
 		)
 
 		expect(failures).toEqual([])
+		expect(opened).toBeGreaterThan(0)
 	})
 })

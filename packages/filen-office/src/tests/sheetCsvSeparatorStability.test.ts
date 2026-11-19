@@ -15,6 +15,7 @@ import { cells, firstTile, savedBytes, tileTexts } from "./sheetSessionFixtures"
 const GERMAN: SheetLocale = { decimal: ",", group: ".", argument: ";", dateOrder: "dmy" }
 const ENGLISH: SheetLocale = { decimal: ".", group: ",", argument: ",", dateOrder: "mdy" }
 const encoder = new TextEncoder()
+const CORPUS_CSV = join(CORPUS_DIR, "csv", "ccsv__csv-141.csv")
 
 async function open(bytes: Uint8Array, settings?: SheetSessionSettings) {
 	const opened = await openTextSession(bytes, { kind: "csv", ...(settings !== undefined && { settings }) }, () => undefined)
@@ -43,12 +44,8 @@ describe("CSV separator stability", () => {
 		expect(writeCsv([["a,b"]], ";", "\n")).toBe("a,b")
 	})
 
-	it("detects the same separator again after any one edit of a real file", async () => {
-		const path = join(CORPUS_DIR, "csv", "ccsv__csv-141.csv")
-
-		if (!existsSync(path)) return
-
-		const bytes = new Uint8Array(readFileSync(path))
+	it.skipIf(!existsSync(CORPUS_CSV))("detects the same separator again after an edit of a real file", async () => {
+		const bytes = new Uint8Array(readFileSync(CORPUS_CSV))
 		const before = parseCsvFile(bytes, false).format.delimiter
 		const session = await open(bytes.slice())
 

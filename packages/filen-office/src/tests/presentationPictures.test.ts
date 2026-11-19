@@ -7,7 +7,8 @@ import { applyPicture, insertedImage, pictureFillOf, type PictureReading } from 
 import type { ShapeNode } from "../core/presentation/model"
 import { image, pictureDeck } from "./presentationObjectsFixtures"
 import { editHarness, shapeById } from "./presentationEditFixtures"
-import { changedParts, openDeck, partsOf, saveEdits, slideNode, text } from "./pptxWriteFixtures"
+import { differingParts, openDeck, partsOf, saveEdits, slideNode, text } from "./pptxWriteFixtures"
+import { driveSession } from "./odpWriteDrive"
 
 // Picture edits end to end: an inserted image lives in the deck's registry until a save stores it as a new image part
 // related from its slide; crop, adjustments and Change Picture write the picture's p:blipFill from its typed fill,
@@ -148,7 +149,7 @@ describe("picture edits", () => {
 		})
 		const saved = await saveEdits(h, (moved as { revision: number }).revision)
 
-		expect(await changedParts(pictureDeck(), saved)).toEqual(["ppt/slides/slide1.xml"])
+		expect(await differingParts(pictureDeck(), saved)).toEqual(["ppt/slides/slide1.xml"])
 	})
 
 	it("crops a source picture through the session, keeping its image and the blip's extension list", async () => {
@@ -166,7 +167,7 @@ describe("picture edits", () => {
 		const saved = await saveEdits(h, (cropped as { revision: number }).revision)
 		const slideXml = text((await partsOf(saved)).get("ppt/slides/slide1.xml"))
 
-		expect(await changedParts(pictureDeck(), saved)).toEqual(["ppt/slides/slide1.xml"])
+		expect(await differingParts(pictureDeck(), saved)).toEqual(["ppt/slides/slide1.xml"])
 		expect(slideXml).toContain('<a:blip r:embed="rId9"><a:extLst>')
 		expect(slideXml).toContain('<a:srcRect l="0" t="25000" r="0" b="25000"/><a:stretch><a:fillRect/></a:stretch>')
 
@@ -221,5 +222,56 @@ describe("picture edits", () => {
 
 		expect(drawn?.grayscale).toBe(true)
 		expect(drawn?.brightness).toBeCloseTo(0.3, 3)
+	})
+})
+
+describe("Change Picture undone and redone", () => {
+	// The images the deck's registry holds (ids are numbered from 1).
+	const held = (deck: Parameters<typeof insertedImage>[0]): number =>
+		Array.from({ length: 64 }, (_, k) => insertedImage(deck, k + 1)).filter(each => each !== undefined).length
+
+	it("holds its image once, however often it is undone and redone", async () => {
+		const d = await driveSession(pictureDeck(), "pptx")
+		const slide = d.session.deck.slides[0] as never
+
+		expect(await d.command({ family: "picture", kind: "replace", target: { slide, id: 4 }, image: image(4, 2) })).toMatchObject({
+			ok: true
+		})
+
+		for (let k = 0; k < 4; k++) {
+			expect(await d.undo()).toMatchObject({ ok: true })
+			expect(await d.redo()).toMatchObject({ ok: true })
+		}
+
+		expect(held(d.session.deck)).toBe(1)
+	})
+
+	it("redone after a save names the part the save wrote, so the next save writes no second copy", async () => {
+		const d = await driveSession(pictureDeck(), "pptx")
+		const slide = d.session.deck.slides[0] as never
+
+		expect(await d.command({ family: "picture", kind: "replace", target: { slide, id: 4 }, image: image(4, 2) })).toMatchObject({
+			ok: true
+		})
+		expect((await d.save()).result.kind).toBe("written")
+		expect(await d.undo()).toMatchObject({ ok: true })
+		expect(await d.redo()).toMatchObject({ ok: true })
+		expect(
+			await d.command({
+				family: "shape",
+				kind: "setXfrm",
+				target: { slide, id: 4 },
+				xfrm: { x: 300, y: 100, cx: 2000, cy: 1000, rot: 0, flipH: false, flipV: false }
+			})
+		).toMatchObject({ ok: true })
+
+		const saved = await d.save()
+
+		expect(saved.result.kind).toBe("written")
+
+		const media = [...(await partsOf(saved.bytes as Uint8Array)).keys()].filter(name => name.startsWith("ppt/media/"))
+
+		// The replaced source image is no longer named; the inserted one is stored once.
+		expect(media).toEqual(["ppt/media/image2.png"])
 	})
 })

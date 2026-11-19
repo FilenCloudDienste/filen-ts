@@ -22,7 +22,9 @@ import {
 	Pieces,
 	attr,
 	findAttribute,
+	isSpace,
 	onlySpace,
+	preserved,
 	qualify,
 	rootTag,
 	scanReference,
@@ -144,15 +146,6 @@ function number(text: string | undefined, fallback: number): number {
 
 const NO_SPANS: readonly number[] = []
 
-// Whether the bytes [start, end) are the ASCII name `name`.
-function isName(bytes: Uint8Array, start: number, end: number, name: string): boolean {
-	if (end - start !== name.length) return false
-
-	for (let i = 0; i < name.length; i++) if (bytes[start + i] !== name.charCodeAt(i)) return false
-
-	return true
-}
-
 // The start tag's attributes named in `names`: their raw value spans into `spans` by index (document offsets, -1
 // when absent); the others' absolute [from, to) spans are returned (kept on a rewrite). Names are matched on their
 // bytes and nothing is decoded: a value is read from its span when it is needed (valueAt, intAt).
@@ -175,7 +168,7 @@ function knownAttributes(
 		let known = -1
 
 		for (let n = 0; n < names.length; n++) {
-			if (isName(bytes, nameStart, nameEnd, names[n] ?? "")) {
+			if (spells(bytes, nameStart, nameEnd, names[n] ?? "")) {
 				known = n
 				break
 			}
@@ -238,7 +231,7 @@ function typeAt(bytes: Uint8Array, spans: Int32Array, index: number): string | u
 
 	const end = spans[index * 2 + 1] ?? 0
 
-	for (const type of CELL_TYPES) if (isName(bytes, start, end, type)) return type
+	for (const type of CELL_TYPES) if (spells(bytes, start, end, type)) return type
 
 	return valueAt(bytes, spans, index)
 }
@@ -558,10 +551,6 @@ function names(prefix: string): Names {
 	}
 }
 
-function preserved(text: string): string {
-	return text.length > 0 && /^\s|\s$/.test(text) ? ' xml:space="preserve"' : ""
-}
-
 function writeFormula(out: ByteBuilder, n: Names, formula: XlsxFormula): void {
 	let head = `<${n.f}`
 	const type = FORMULA_TYPES[formula.kind]
@@ -668,6 +657,8 @@ function writeCell(
 			case CellKind.EMPTY:
 				break
 			case CellKind.NUMBER:
+				if (!Number.isFinite(value)) throw new XlsxWriteError("write", `Cell ${cellRef(row, col)} holds ${String(value)}`)
+
 				out.ascii(`<${n.v}>${formatNumber(value)}</${n.v}>`)
 				break
 			case CellKind.SHARED_STRING:
@@ -767,7 +758,7 @@ function rowPropertyAttributes(height: number, style: number, flags: number): st
 
 	if (style >= 0) out += attr("s", style)
 	if ((flags & RowFlag.CUSTOM_FORMAT) !== 0) out += attr("customFormat", 1)
-	if (!Number.isNaN(height)) out += attr("ht", formatNumber(height))
+	if (!Number.isNaN(height)) out += attr("ht", formatNumber(height, "Row height"))
 	if ((flags & RowFlag.HIDDEN) !== 0) out += attr("hidden", 1)
 	if ((flags & RowFlag.CUSTOM_HEIGHT) !== 0) out += attr("customHeight", 1)
 
@@ -1000,8 +991,8 @@ function equalsSource(context: RowContext, block: XlsxRowBlock, index: number, r
 
 // A decimal integer at [from, to) of `bytes` (spaces around allowed), or -1.
 function uintAt(bytes: Uint8Array, from: number, to: number): number {
-	while (from < to && isSpaceByte(bytes[from])) from++
-	while (to > from && isSpaceByte(bytes[to - 1])) to--
+	while (from < to && isSpace(bytes[from])) from++
+	while (to > from && isSpace(bytes[to - 1])) to--
 
 	if (from === to || to - from > 15) return -1
 
@@ -1047,10 +1038,6 @@ function cellAt(bytes: Uint8Array, from: number, to: number, out: Int32Array): b
 	out[1] = col - 1
 
 	return true
-}
-
-function isSpaceByte(byte: number | undefined): boolean {
-	return byte === 32 || byte === 9 || byte === 10 || byte === 13
 }
 
 // The end (just past the end tag) of an element holding text only, or -1 when it holds elements.

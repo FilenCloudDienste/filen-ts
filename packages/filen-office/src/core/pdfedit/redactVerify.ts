@@ -275,17 +275,21 @@ export function segmentCrossesRect(x0: number, y0: number, x1: number, y1: numbe
 
 // ——— Terms ———
 
-// Case folding one UTF-16 unit at a time, so indices into the folded text are indices into the original.
+// Case folding one code point at a time (a code point whose lower case is longer, U+0130, stays as it is), so indices
+// into the folded text are indices into the original. Whole-string lower casing gives the same result unless the text
+// holds U+0130 or U+03A3 (whose lower case depends on the letters around it).
 export function foldCase(text: string): string {
-	let out = ""
+	if (!text.includes("\u0130") && !text.includes("\u03a3")) return text.toLowerCase()
+
+	const chunks: string[] = []
 
 	for (const char of text) {
 		const lower = char.toLowerCase()
 
-		out += lower.length === char.length ? lower : char
+		chunks.push(lower.length === char.length ? lower : char)
 	}
 
-	return out
+	return chunks.join("")
 }
 
 const WORD = /[\p{L}\p{N}_]/u
@@ -318,6 +322,20 @@ export function matchTerm(text: string, term: RedactionTerm, folded?: string): T
 	}
 
 	return matches
+}
+
+// The first term with a match in the text, or null. The text is folded only when some term ignores case.
+export function matchedTerm(text: string, terms: readonly RedactionTerm[]): RedactionTerm | null {
+	if (text.length === 0) return null
+
+	let folded: string | undefined
+
+	for (const term of terms) {
+		if (!term.matchCase) folded ??= foldCase(text)
+		if (matchTerm(text, term, folded).length > 0) return term
+	}
+
+	return null
 }
 
 // Shortest word a redaction's covered text adds to the manifest's hidden terms: shorter ones are too common to prove
@@ -449,45 +467,55 @@ export function verifiedTerms(
 
 // ——— Decoding the strings a file carries ———
 
-function utf16(bytes: Uint8Array, from: number, littleEndian: boolean): string {
-	let out = ""
+const CHUNK = 8192
 
-	for (let index = from; index + 1 < bytes.length; index += 2) {
+// The first `length` UTF-16 units as a string, converted a chunk at a time (applied, not spread: spreading a typed
+// array runs its iterator).
+function unitsText(units: Uint16Array | Uint8Array, length: number): string {
+	const chunks: string[] = []
+
+	for (let index = 0; index < length; index += CHUNK) {
+		chunks.push(String(Reflect.apply(String.fromCharCode, null, units.subarray(index, Math.min(index + CHUNK, length)))))
+	}
+
+	return chunks.join("")
+}
+
+function utf16(bytes: Uint8Array, from: number, littleEndian: boolean): string {
+	const units = new Uint16Array(Math.max(0, (bytes.length - from) >> 1))
+
+	for (let unit = 0, index = from; unit < units.length; unit++, index += 2) {
 		const high = bytes[index] ?? 0
 		const low = bytes[index + 1] ?? 0
 
-		out += String.fromCharCode(littleEndian ? low * 256 + high : high * 256 + low)
+		units[unit] = littleEndian ? low * 256 + high : high * 256 + low
 	}
 
-	return out
+	return unitsText(units, units.length)
 }
 
 export function latin1Text(bytes: Uint8Array): string {
-	let out = ""
-
-	for (let index = 0; index < bytes.length; index += 8192) {
-		out += String.fromCharCode(...bytes.subarray(index, index + 8192))
-	}
-
-	return out
+	return unitsText(bytes, bytes.length)
 }
 
 // UTF-8, with every invalid byte read as Latin-1 (binary data decodes without throwing).
 export function utf8Text(bytes: Uint8Array): string {
-	let out = ""
+	// Never more units than bytes: a sequence of n bytes decodes to at most 2 units, and n >= 2 for those.
+	const units = new Uint16Array(bytes.length)
+	let length = 0
 	let index = 0
 
 	while (index < bytes.length) {
 		const first = bytes[index] ?? 0
-		let length =
+		let size =
 			first < 0x80 ? 1 : first >= 0xc2 && first < 0xe0 ? 2 : first >= 0xe0 && first < 0xf0 ? 3 : first >= 0xf0 && first < 0xf5 ? 4 : 0
-		let code = length === 1 ? first : length === 2 ? first & 0x1f : length === 3 ? first & 0x0f : first & 0x07
+		let code = size === 1 ? first : size === 2 ? first & 0x1f : size === 3 ? first & 0x0f : first & 0x07
 
-		for (let next = 1; next < length; next++) {
+		for (let next = 1; next < size; next++) {
 			const byte = bytes[index + next]
 
 			if (byte === undefined || (byte & 0xc0) !== 0x80) {
-				length = 0
+				size = 0
 
 				break
 			}
@@ -495,16 +523,22 @@ export function utf8Text(bytes: Uint8Array): string {
 			code = code * 64 + (byte & 0x3f)
 		}
 
-		if (length === 0 || code > 0x10ffff) {
-			out += String.fromCharCode(first)
+		if (size === 0 || code > 0x10ffff) {
+			units[length++] = first
 			index++
 		} else {
-			out += String.fromCodePoint(code)
-			index += length
+			if (code >= 0x10000) {
+				units[length++] = 0xd800 + ((code - 0x10000) >> 10)
+				units[length++] = 0xdc00 + ((code - 0x10000) & 0x3ff)
+			} else {
+				units[length++] = code
+			}
+
+			index += size
 		}
 	}
 
-	return out
+	return unitsText(units, length)
 }
 
 // A PDF text string's bytes: UTF-16 with a byte order mark, UTF-8 with one, else PDFDocEncoding (read as Latin-1).
@@ -531,11 +565,15 @@ export function decodeXmlText(text: string): string {
 }
 
 // Every reading of raw stream bytes a term could hide in: Latin-1, UTF-8 (with XML references resolved) and UTF-16
-// in both byte orders at both alignments.
-export function streamReadings(bytes: Uint8Array): string[] {
-	const readings = [latin1Text(bytes), decodeXmlText(utf8Text(bytes))]
+// in both byte orders at both alignments. Produced one at a time, so only one full-size reading is alive at once.
+export function* streamReadings(bytes: Uint8Array): Generator<string, void, undefined> {
+	yield latin1Text(bytes)
+	yield decodeXmlText(utf8Text(bytes))
 
-	if (bytes.length >= 2) readings.push(utf16(bytes, 0, false), utf16(bytes, 1, false), utf16(bytes, 0, true), utf16(bytes, 1, true))
+	if (bytes.length < 2) return
 
-	return readings
+	yield utf16(bytes, 0, false)
+	yield utf16(bytes, 1, false)
+	yield utf16(bytes, 0, true)
+	yield utf16(bytes, 1, true)
 }

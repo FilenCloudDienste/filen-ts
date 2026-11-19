@@ -1,6 +1,7 @@
 import { dateSerial, serialDate, type DateParts } from "../../numfmt/date"
 import { formatValue } from "../../numfmt/format"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../protocol"
+import { wildcardMatcher, type WildcardMatcher } from "../../find/match"
 import { columnName } from "../../refs/cellRef"
 import type { FormulaHost, FormulaPosition } from "./evaluate"
 import { parseFormula, type FormulaNode } from "./syntax"
@@ -37,11 +38,19 @@ export interface FunctionContext {
 	node(node: FormulaNode): FormulaValue
 	scalar(value: FormulaValue): Scalar
 	array(value: FormulaValue): FormulaArray
+	// Within a pass (FormulaEvaluator.pass), what `build` makes of `owner` (refKey of a reference, an array) for `use`,
+	// once a second cell asks for it; undefined otherwise (the caller works without it).
+	kept<T>(owner: object | string, use: string, build: () => T): T | undefined
 	map1(value: FormulaValue, apply: (value: Scalar) => Scalar): FormulaValue
 	map2(left: FormulaValue, right: FormulaValue, apply: (a: Scalar, b: Scalar) => Scalar): FormulaValue
 }
 
 type Fn = (context: FunctionContext, args: readonly FormulaNode[]) => FormulaValue
+
+// A reference as a key of what a pass keeps of it.
+export function refKey(ref: FormulaRef): string {
+	return `${String(ref.sheet)}:${String(ref.startRow)}:${String(ref.startCol)}:${String(ref.endRow)}:${String(ref.endCol)}`
+}
 
 function arity(args: readonly FormulaNode[], min: number, max: number): void {
 	if (args.length < min || args.length > max) throw new Unsupported("a function given the wrong number of arguments")
@@ -139,23 +148,31 @@ function collect(context: FunctionContext, args: readonly FormulaNode[]): number
 	return error ?? list
 }
 
-function counted(context: FunctionContext, value: FormulaValue, test: (value: Scalar) => boolean): number {
+// `keyed`: the criterion's keys (Criterion.equal, unequal), counted from the reference's kept counts in a pass.
+function counted(context: FunctionContext, value: FormulaValue, test: (value: Scalar) => boolean, keyed?: Criterion): number {
 	if (isRef(value)) {
+		const keys = keyed?.equal ?? keyed?.unequal
+		const counts = keys === undefined ? undefined : context.kept(refKey(value), "counts", () => equalCounts(context, value))
+
+		if (keys !== undefined && counts !== undefined) {
+			let count = 0
+
+			for (const key of keys) count += counts.get(key) ?? 0
+
+			return keyed?.equal === undefined ? refRows(value) * refCols(value) - count : count
+		}
+
 		let count = 0
+		let stored = 0
 
 		context.host.forEach(value, (_row, _col, cell) => {
+			stored++
+
 			if (test(cell)) count++
 		})
 
 		// Blank cells the reference holds beyond the stored ones.
-		if (test(null)) {
-			let stored = 0
-
-			context.host.forEach(value, () => stored++)
-			count += refRows(value) * refCols(value) - stored
-		}
-
-		return count
+		return test(null) ? count + refRows(value) * refCols(value) - stored : count
 	}
 
 	const array = context.array(value)
@@ -175,43 +192,53 @@ function vectorValues(array: FormulaArray): readonly Scalar[] {
 
 interface Criterion {
 	test(value: Scalar): boolean
+	// A plain equality's keys (equalKeys): the values it matches are those with one of them, and never a blank.
+	readonly equal?: readonly string[]
+	// A plain inequality's: it matches every cell, blanks included, but those with one of them.
+	readonly unequal?: readonly string[]
 }
 
-// A pattern's "*" and "?" as a regular expression ("~" escapes them); null when it has none.
-function wildcardSource(pattern: string): string | null {
-	if (!/[*?~]/u.test(pattern)) return null
+// The keys a stored value is counted under for the criteria's plain equalities: its type and value (text without case),
+// and text that reads as a number under that number too (a numeric criterion's text matches it).
+function equalKeys(value: Scalar, add: (key: string) => void): void {
+	if (value instanceof FormulaError) add(`e${String(value.code)}`)
+	else if (typeof value === "number") add(`n${String(value)}`)
+	else if (typeof value === "boolean") add(`b${String(value)}`)
+	else if (typeof value === "string") {
+		const number = textNumber(value)
 
-	let source = ""
+		add(`s${value.toUpperCase()}`)
 
-	for (let i = 0; i < pattern.length; i++) {
-		const char = pattern[i] ?? ""
+		if (number !== null) add(`t${String(number)}`)
+	}
+}
 
-		if (char === "~" && i + 1 < pattern.length) {
-			i++
-			source += (pattern[i] ?? "").replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
-		} else if (char === "*") {
-			source += "[\\s\\S]*"
-		} else if (char === "?") {
-			source += "[\\s\\S]"
-		} else {
-			source += char.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
-		}
+// How many stored cells of a reference have each equality key.
+function equalCounts(context: FunctionContext, ref: FormulaRef): Map<string, number> {
+	const counts = new Map<string, number>()
+	const add = (key: string): void => {
+		counts.set(key, (counts.get(key) ?? 0) + 1)
 	}
 
-	return source
+	context.host.forEach(ref, (_row, _col, value) => {
+		equalKeys(value, add)
+	})
+
+	return counts
 }
 
-function wildcard(pattern: string): RegExp | null {
-	const source = wildcardSource(pattern)
-
-	return source === null ? null : new RegExp(`^${source}$`, "iu")
+// A pattern's "*" and "?" as a matcher without regard to case ("~" makes the next character literal); null when it has
+// none. A linear walk (find/match.ts), never a backtracking regular expression.
+function wildcard(pattern: string): WildcardMatcher | null {
+	return /[*?~]/u.test(pattern) ? wildcardMatcher(pattern, false) : null
 }
 
 export function criterion(raw: Scalar): Criterion {
-	if (raw instanceof FormulaError) return { test: value => value instanceof FormulaError && value.code === raw.code }
-	if (raw === null) return { test: value => value === 0 }
-	if (typeof raw === "number") return { test: value => typeof value === "number" && value === raw }
-	if (typeof raw === "boolean") return { test: value => value === raw }
+	if (raw instanceof FormulaError)
+		return { test: value => value instanceof FormulaError && value.code === raw.code, equal: [`e${String(raw.code)}`] }
+	if (raw === null) return { test: value => value === 0, equal: ["n0"] }
+	if (typeof raw === "number") return { test: value => typeof value === "number" && value === raw, equal: [`n${String(raw)}`] }
+	if (typeof raw === "boolean") return { test: value => value === raw, equal: [`b${String(raw)}`] }
 
 	const match = /^(<=|>=|<>|<|>|=)?([\s\S]*)$/u.exec(raw)
 	const op = match?.[1] ?? ""
@@ -226,24 +253,31 @@ export function criterion(raw: Scalar): Criterion {
 		if (number !== null)
 			return {
 				test: value =>
-					(typeof value === "number" && value === number) || (typeof value === "string" && textNumber(value) === number)
+					(typeof value === "number" && value === number) || (typeof value === "string" && textNumber(value) === number),
+				equal: [`n${String(number)}`, `t${String(number)}`]
 			}
-		if (logical !== null) return { test: value => value === logical }
-		if (error !== null) return { test: value => value instanceof FormulaError && value.code === error.code }
+		if (logical !== null) return { test: value => value === logical, equal: [`b${String(logical)}`] }
+		if (error !== null)
+			return { test: value => value instanceof FormulaError && value.code === error.code, equal: [`e${String(error.code)}`] }
 
 		const pattern = wildcard(operand)
 
-		return { test: value => typeof value === "string" && (pattern === null ? value.toUpperCase() === upper : pattern.test(value)) }
+		if (pattern === null) return { test: value => typeof value === "string" && value.toUpperCase() === upper, equal: [`s${upper}`] }
+
+		return { test: value => typeof value === "string" && pattern.test(value, true) }
 	}
 
 	if (op === "<>") {
 		if (operand === "") return { test: value => value !== null && value !== "" }
-		if (number !== null) return { test: value => !(typeof value === "number" && value === number) }
-		if (logical !== null) return { test: value => value !== logical }
+		if (number !== null) return { test: value => !(typeof value === "number" && value === number), unequal: [`n${String(number)}`] }
+		if (logical !== null) return { test: value => value !== logical, unequal: [`b${String(logical)}`] }
 
 		const pattern = wildcard(operand)
 
-		return { test: value => !(typeof value === "string" && (pattern === null ? value.toUpperCase() === upper : pattern.test(value))) }
+		if (pattern === null)
+			return { test: value => !(typeof value === "string" && value.toUpperCase() === upper), unequal: [`s${upper}`] }
+
+		return { test: value => !(typeof value === "string" && pattern.test(value, true)) }
 	}
 
 	const compare = (order: number): boolean => (op === "<" ? order < 0 : op === ">" ? order > 0 : op === "<=" ? order <= 0 : order >= 0)
@@ -253,54 +287,105 @@ export function criterion(raw: Scalar): Criterion {
 	return { test: value => typeof value === "string" && compare(compareValues(value, operand)) }
 }
 
-// The cells of `range` (a reference) at the positions where every criteria pair holds.
-function criteriaPositions(context: FunctionContext, pairs: readonly FormulaNode[], shape: FormulaRef | null): Set<number> | FormulaError {
-	let positions: Set<number> | null = null
-	let rows = 0
-	let cols = 0
+// One criteria pair over its range, by position in it (row-major): the stored cells that pass, and when a blank passes,
+// the stored cells and the range's size, so the blank rest is never enumerated (a whole column is a million blanks).
+interface CriteriaPair {
+	readonly matches: ReadonlySet<number>
+	// Null when a blank does not pass.
+	readonly blanks: { readonly stored: ReadonlySet<number>; readonly size: number } | null
+}
+
+// The criteria pairs (range, criterion, range, criterion...), or #VALUE! when a range is no reference or differs from
+// `shape`.
+function criteriaPairs(context: FunctionContext, pairs: readonly FormulaNode[], shape: FormulaRef | null): CriteriaPair[] | FormulaError {
+	const list: CriteriaPair[] = []
 
 	for (let k = 0; k + 1 < pairs.length; k += 2) {
 		const range = context.node(pairs[k] as FormulaNode)
 
 		if (!isRef(range)) return FormulaError.VALUE
 
-		rows = refRows(range)
-		cols = refCols(range)
+		const rows = refRows(range)
+		const cols = refCols(range)
 
 		if (shape !== null && (refRows(shape) !== rows || refCols(shape) !== cols)) return FormulaError.VALUE
 
 		const test = criterion(context.scalar(context.node(pairs[k + 1] as FormulaNode)))
-		const found = new Set<number>()
+		const matches = new Set<number>()
+		const stored = test.test(null) ? new Set<number>() : null
 
 		context.host.forEach(range, (row, col, value) => {
-			if (test.test(value)) found.add((row - range.startRow) * cols + (col - range.startCol))
+			const index = (row - range.startRow) * cols + (col - range.startCol)
+
+			stored?.add(index)
+
+			if (test.test(value)) matches.add(index)
 		})
 
-		if (test.test(null)) {
-			const stored = new Set<number>()
+		list.push({ matches, blanks: stored === null ? null : { stored, size: rows * cols } })
+	}
 
-			context.host.forEach(range, (row, col) => stored.add((row - range.startRow) * cols + (col - range.startCol)))
+	return list
+}
 
-			for (let index = 0; index < rows * cols; index++) if (!stored.has(index)) found.add(index)
-		}
+// Whether every pair holds at a position: a stored cell that passes, or a blank one where blanks pass.
+function passes(pairs: readonly CriteriaPair[], index: number): boolean {
+	for (const pair of pairs) {
+		if (pair.matches.has(index)) continue
 
-		if (positions === null) {
-			positions = found
-		} else {
-			for (const index of positions) if (!found.has(index)) positions.delete(index)
+		const blanks = pair.blanks
+
+		if (blanks === null || index >= blanks.size || blanks.stored.has(index)) return false
+	}
+
+	return true
+}
+
+// How many positions every pair holds at: those some pair stores, tested, and when every pair passes blanks, the ones
+// blank in all of them, counted.
+function countPassing(pairs: readonly CriteriaPair[]): number {
+	if (pairs.length === 0) return 0
+
+	// A pair blanks fail: only its passing cells can pass all.
+	const strict = pairs.find(pair => pair.blanks === null)
+
+	if (strict !== undefined) {
+		let count = 0
+
+		for (const index of strict.matches) if (passes(pairs, index)) count++
+
+		return count
+	}
+
+	let size = Number.POSITIVE_INFINITY
+
+	for (const pair of pairs) size = Math.min(size, pair.blanks?.size ?? 0)
+
+	const seen = new Set<number>()
+	let count = 0
+	let storedInside = 0
+
+	for (const pair of pairs) {
+		for (const index of pair.blanks?.stored ?? []) {
+			if (seen.has(index)) continue
+
+			seen.add(index)
+
+			if (index < size) storedInside++
+			if (passes(pairs, index)) count++
 		}
 	}
 
-	return positions ?? new Set()
+	return count + size - storedInside
 }
 
-function sumAt(context: FunctionContext, range: FormulaRef, positions: ReadonlySet<number>): { sum: number; count: number } {
+function sumAt(context: FunctionContext, range: FormulaRef, pairs: readonly CriteriaPair[]): { sum: number; count: number } {
 	const cols = refCols(range)
 	let sum = 0
 	let count = 0
 
 	context.host.forEach(range, (row, col, value) => {
-		if (typeof value === "number" && positions.has((row - range.startRow) * cols + (col - range.startCol))) {
+		if (typeof value === "number" && passes(pairs, (row - range.startRow) * cols + (col - range.startCol))) {
 			sum += value
 			count++
 		}
@@ -311,11 +396,42 @@ function sumAt(context: FunctionContext, range: FormulaRef, positions: ReadonlyS
 
 // --- Lookup ---
 
-function lookupIndex(values: readonly Scalar[], key: Scalar, mode: number): number {
+// The key a value is found by in an exact lookup: equal keys are values compareValues finds equal, of one type (a
+// number to Excel's 15 digits, as compareNumbers compares, text without case).
+function exactKey(value: Exclude<Scalar, FormulaError | null>): string {
+	if (typeof value === "number") return `n${String(Number(value.toPrecision(15)))}`
+	if (typeof value === "string") return `s${value.toUpperCase()}`
+
+	return `b${String(value)}`
+}
+
+// Each exact key's first index among the values (errors and blanks never match).
+function firstIndexes(values: readonly Scalar[]): Map<string, number> {
+	const firsts = new Map<string, number>()
+
+	for (let i = 0; i < values.length; i++) {
+		const value = values[i] ?? null
+
+		if (value instanceof FormulaError || value === null) continue
+
+		const key = exactKey(value)
+
+		if (!firsts.has(key)) firsts.set(key, i)
+	}
+
+	return firsts
+}
+
+function lookupIndex(context: FunctionContext, values: readonly Scalar[], key: Scalar, mode: number): number {
 	if (key instanceof FormulaError) return -1
 
 	if (mode === 0) {
 		const pattern = typeof key === "string" ? wildcard(key) : null
+
+		// In a pass, the many cells looking a key up in the same values find it by the first index of each.
+		const firsts = pattern === null && key !== null ? context.kept(values, "firsts", () => firstIndexes(values)) : undefined
+
+		if (firsts !== undefined && key !== null) return firsts.get(exactKey(key)) ?? -1
 
 		for (let i = 0; i < values.length; i++) {
 			const value = values[i] ?? null
@@ -323,7 +439,7 @@ function lookupIndex(values: readonly Scalar[], key: Scalar, mode: number): numb
 			if (value instanceof FormulaError || value === null) continue
 			if (
 				pattern !== null
-					? typeof value === "string" && pattern.test(value)
+					? typeof value === "string" && pattern.test(value, true)
 					: typeof value === typeof key && compareValues(value, key) === 0
 			)
 				return i
@@ -526,8 +642,7 @@ function logicalFold(
 	return any ? acc : FormulaError.VALUE
 }
 
-function lookupVector(context: FunctionContext, table: FormulaValue, index: number, byRows: boolean): Scalar[] | FormulaError {
-	const array = context.array(table)
+function lookupVector(array: FormulaArray, index: number, byRows: boolean): Scalar[] | FormulaError {
 	// A blank rest is left out (a blank never matches); one that is something else is read whole.
 	const whole = (array.fill ?? null) !== null
 
@@ -558,13 +673,18 @@ function vhlookup(byRows: boolean): Fn {
 		if (approximate instanceof FormulaError) return approximate
 		if (index < 1) return FormulaError.VALUE
 
-		const keys = lookupVector(context, table, 0, byRows)
-		const results = lookupVector(context, table, Math.trunc(index) - 1, byRows)
+		// The table read once, and in a pass each vector of it made once.
+		const array = context.array(table)
+		const vector = (at: number): Scalar[] | FormulaError =>
+			context.kept(array, `${byRows ? "col" : "row"} ${String(at)}`, () => lookupVector(array, at, byRows)) ??
+			lookupVector(array, at, byRows)
+		const keys = vector(0)
+		const results = vector(Math.trunc(index) - 1)
 
 		if (keys instanceof FormulaError) return keys
 		if (results instanceof FormulaError) return results
 
-		const at = lookupIndex(keys, key, approximate ? 1 : 0)
+		const at = lookupIndex(context, keys, key, approximate ? 1 : 0)
 
 		return at < 0 ? FormulaError.NA : (results[at] ?? null)
 	}
@@ -755,8 +875,7 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 			if (find instanceof FormulaError) return find
 			if (start instanceof FormulaError) return start
 
-			const source = wildcardSource(find)
-			const pattern = source === null ? null : new RegExp(source, "iu")
+			const pattern = wildcard(find)
 			const needle = find.toUpperCase()
 
 			return context.map1(arg(context, args, 1), value => {
@@ -766,9 +885,9 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 				if (start < 1 || start > text.length + 1) return FormulaError.VALUE
 
 				const from = Math.trunc(start) - 1
-				const at = pattern === null ? text.toUpperCase().indexOf(needle, from) : (pattern.exec(text.slice(from))?.index ?? -1)
+				const at = pattern === null ? text.toUpperCase().indexOf(needle, from) : pattern.search(text, from)
 
-				return at < 0 ? FormulaError.VALUE : (pattern === null ? at : at + from) + 1
+				return at < 0 ? FormulaError.VALUE : at + 1
 			})
 		}
 	],
@@ -1146,7 +1265,7 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 
 			if (!isRef(range) && !isArray(range)) return FormulaError.VALUE
 
-			return counted(context, range, value => test.test(value))
+			return counted(context, range, value => test.test(value), test)
 		}
 	],
 	[
@@ -1154,9 +1273,9 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 		(context, args) => {
 			if (args.length < 2 || args.length % 2 !== 0) throw new Unsupported("COUNTIFS arguments")
 
-			const positions = criteriaPositions(context, args, null)
+			const pairs = criteriaPairs(context, args, null)
 
-			return positions instanceof FormulaError ? positions : positions.size
+			return pairs instanceof FormulaError ? pairs : countPassing(pairs)
 		}
 	],
 	[
@@ -1168,16 +1287,16 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 
 			if (range === null) return FormulaError.VALUE
 
-			const positions = criteriaPositions(context, args.slice(0, 2), null)
+			const pairs = criteriaPairs(context, args.slice(0, 2), null)
 			const target = args.length < 3 ? range : reference(context, args, 2)
 
-			if (positions instanceof FormulaError) return positions
+			if (pairs instanceof FormulaError) return pairs
 			if (target === null) return FormulaError.VALUE
 
 			// The sum range takes the criteria range's size from its own top-left cell (support.microsoft.com "SUMIF").
 			const sized = { ...target, endRow: target.startRow + refRows(range) - 1, endCol: target.startCol + refCols(range) - 1 }
 
-			return sumAt(context, sized, positions).sum
+			return sumAt(context, sized, pairs).sum
 		}
 	],
 	[
@@ -1189,9 +1308,9 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 
 			if (target === null) return FormulaError.VALUE
 
-			const positions = criteriaPositions(context, args.slice(1), target)
+			const pairs = criteriaPairs(context, args.slice(1), target)
 
-			return positions instanceof FormulaError ? positions : sumAt(context, target, positions).sum
+			return pairs instanceof FormulaError ? pairs : sumAt(context, target, pairs).sum
 		}
 	],
 	[
@@ -1203,16 +1322,16 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 
 			if (range === null) return FormulaError.VALUE
 
-			const positions = criteriaPositions(context, args.slice(0, 2), null)
+			const pairs = criteriaPairs(context, args.slice(0, 2), null)
 			const target = args.length < 3 ? range : reference(context, args, 2)
 
-			if (positions instanceof FormulaError) return positions
+			if (pairs instanceof FormulaError) return pairs
 			if (target === null) return FormulaError.VALUE
 
 			const { sum, count } = sumAt(
 				context,
 				{ ...target, endRow: target.startRow + refRows(range) - 1, endCol: target.startCol + refCols(range) - 1 },
-				positions
+				pairs
 			)
 
 			return count === 0 ? FormulaError.DIV0 : sum / count
@@ -1227,11 +1346,11 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 
 			if (target === null) return FormulaError.VALUE
 
-			const positions = criteriaPositions(context, args.slice(1), target)
+			const pairs = criteriaPairs(context, args.slice(1), target)
 
-			if (positions instanceof FormulaError) return positions
+			if (pairs instanceof FormulaError) return pairs
 
-			const { sum, count } = sumAt(context, target, positions)
+			const { sum, count } = sumAt(context, target, pairs)
 
 			return count === 0 ? FormulaError.DIV0 : sum / count
 		}
@@ -1339,7 +1458,12 @@ export const FUNCTIONS: ReadonlyMap<string, Fn> = new Map<string, Fn>([
 
 			if (array.rows !== 1 && array.cols !== 1) return FormulaError.NA
 
-			const at = lookupIndex(vectorValues(array), key, Math.sign(Math.trunc(mode)))
+			const at = lookupIndex(
+				context,
+				context.kept(array, "vector", () => vectorValues(array)) ?? vectorValues(array),
+				key,
+				Math.sign(Math.trunc(mode))
+			)
 
 			return at < 0 ? FormulaError.NA : at + 1
 		}

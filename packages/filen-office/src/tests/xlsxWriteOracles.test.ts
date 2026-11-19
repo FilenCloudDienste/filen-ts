@@ -252,6 +252,7 @@ describe.skipIf(XSD_MISSING !== undefined)("xlsx saves against the SpreadsheetML
 
 		console.log(`xlsx schema: ${saved} saves, ${checked} parts, ${failures.length} failures`)
 		expect(failures).toEqual([])
+		expect(saved).toBeGreaterThan(0)
 	})
 })
 
@@ -303,5 +304,6 @@ describe.skipIf(SDK_MISSING !== undefined)("xlsx saves against the Open XML SDK"
 
 		console.log(`xlsx Open XML SDK: ${saved} saves, ${failures.length} failures`)
 		expect(failures).toEqual([])
+		expect(saved).toBeGreaterThan(0)
 	})
 })

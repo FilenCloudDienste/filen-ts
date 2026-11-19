@@ -2,11 +2,15 @@ import { setFlagsFromString } from "node:v8"
 import { runInNewContext } from "node:vm"
 import { describe, expect, it, vi } from "vitest"
 import { convertText } from "../core/convert/text/index"
+import { standaloneParts } from "../core/convert/text/odtPackage"
+import { LossyCounts } from "../core/convert/text/report"
 import { ByteKeyMap } from "../core/odt/write/byteKeys"
 import { OdfEmitter, OdtWriteRefusal } from "../core/odt/write/emit"
 import { bytesSource, ZipArchive } from "../core/opc/index"
-import { decodeUtf8, type XmlDocument } from "../core/xml/index"
+import { assertWellFormed, decodeUtf8, encodeUtf8, parseXml, type XmlDocument } from "../core/xml/index"
 import { buildDocx, p, type SyntheticDocx } from "./docxSynthetic"
+import { odtBytes } from "./odtFixtures"
+import { buildZip, text } from "./zipBuilder"
 import { budget } from "./timing"
 
 const cell = (tcPr: string, text = "c"): string => `<w:tc><w:tcPr>${tcPr}</w:tcPr>${p(text)}</w:tc>`
@@ -597,5 +601,105 @@ describe("doc → docx of a renamed package", () => {
 		if (!converted.ok) throw new Error(converted.refusal.message)
 
 		expect(converted.bytes).toBe(source)
+	})
+})
+
+describe("odt → docx: a hyperlink inside a tracked change", () => {
+	const W =
+		'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+	const standalone = (body: string): string => {
+		const parts = new Map([["word/document.xml", encodeUtf8(`<w:document ${W}><w:body><w:p>${body}</w:p></w:body></w:document>`)]])
+
+		standaloneParts(parts, new LossyCounts())
+
+		const written = decodeUtf8(parts.get("word/document.xml") ?? new Uint8Array())
+
+		assertWellFormed(parseXml(encodeUtf8(written)))
+
+		return written
+	}
+
+	it('writes an .odt\'s internal link holding ">" in a tracked insertion as a well-formed .docx', async () => {
+		const source = odtBytes({
+			body:
+				'<text:tracked-changes><text:changed-region text:id="c1"><text:insertion><office:change-info><dc:creator>A</dc:creator><dc:date>2024-01-01T00:00:00</dc:date></office:change-info></text:insertion></text:changed-region></text:tracked-changes>' +
+				'<text:p>x<text:change-start text:change-id="c1"/>a <text:a xlink:type="simple" xlink:href="#Settings &gt; Privacy">link</text:a> b<text:change-end text:change-id="c1"/></text:p>'
+		})
+		const converted = await convertText(source, "odt", "docx")
+
+		if (!converted.ok) throw new Error(converted.refusal.message)
+
+		const archive = await ZipArchive.open(bytesSource(converted.bytes))
+		const entry = archive.get("word/document.xml")
+		const body = entry === undefined ? "" : decodeUtf8(await archive.read(entry))
+
+		assertWellFormed(parseXml(encodeUtf8(body)))
+		expect(body).toMatch(/<w:hyperlink w:anchor="Settings > Privacy"><w:ins w:id="\d+"[^>]*>(?:(?!<\/w:ins>).)*link/su)
+	})
+
+	it('reads an anchor holding ">" in the package\'s own markup, either quote, and leaves a self-closing hyperlink as it is', () => {
+		expect(
+			standalone(
+				'<w:ins w:id="7" w:author="A"><w:r><w:t>a</w:t></w:r><w:hyperlink w:anchor="Settings > Privacy"><w:r><w:t>b</w:t></w:r></w:hyperlink></w:ins>'
+			)
+		).toContain(
+			'<w:ins w:id="1" w:author="A"><w:r><w:t>a</w:t></w:r></w:ins><w:hyperlink w:anchor="Settings > Privacy"><w:ins w:id="2" w:author="A"><w:r><w:t>b</w:t></w:r></w:ins></w:hyperlink>'
+		)
+		expect(
+			standalone(
+				'<w:ins w:id="7" w:author="A"><w:r><w:t>a</w:t></w:r><w:hyperlink w:anchor=\'Settings > "Privacy"\'><w:r><w:t>b</w:t></w:r></w:hyperlink></w:ins>'
+			)
+		).toContain(
+			'<w:ins w:id="1" w:author="A"><w:r><w:t>a</w:t></w:r></w:ins><w:hyperlink w:anchor=\'Settings > "Privacy"\'><w:ins w:id="2" w:author="A"><w:r><w:t>b</w:t></w:r></w:ins></w:hyperlink>'
+		)
+		expect(standalone('<w:ins w:id="7" w:author="A"><w:r><w:t>a</w:t></w:r><w:hyperlink w:anchor="x > y"/></w:ins>')).toContain(
+			'<w:ins w:id="1" w:author="A"><w:r><w:t>a</w:t></w:r></w:ins><w:hyperlink w:anchor="x > y"/>'
+		)
+	})
+})
+
+describe("doc → docx of a renamed package, cancelled", () => {
+	const macroDocument = (): Uint8Array =>
+		buildDocx({
+			body: p("Macro document"),
+			mainContentType: "application/vnd.ms-word.document.macroEnabled.main+xml",
+			parts: [
+				{ name: "word/vbaProject.bin", contentType: "application/vnd.ms-office.vbaProject", data: new Uint8Array([0xd0, 0xcf]) }
+			],
+			relationships: [
+				{ id: "rIdVba", type: "http://schemas.microsoft.com/office/2006/relationships/vbaProject", target: "vbaProject.bin" }
+			]
+		})
+
+	it("reports a cancel while the package is rewritten as aborted", async () => {
+		const signal = { aborted: false }
+		const converted = await convertText(macroDocument(), "doc", "docx", {
+			turns: {
+				signal,
+				slicing: {
+					pause: () => {
+						signal.aborted = true
+
+						return Promise.resolve()
+					},
+					sliceMs: 0,
+					now: () => 0
+				}
+			}
+		})
+
+		expect(converted.ok ? "ok" : converted.refusal.reason).toBe("aborted")
+	})
+
+	it("converts the same package when not cancelled, and reads a ZIP that is no Word package as a binary document", async () => {
+		const converted = await convertText(macroDocument(), "doc", "docx", {
+			turns: { signal: { aborted: false }, slicing: { pause: () => Promise.resolve(), sliceMs: 0, now: () => 0 } }
+		})
+
+		expect(converted.ok).toBe(true)
+
+		const other = await convertText(buildZip([{ name: "a.txt", data: text("a") }]), "doc", "docx")
+
+		expect(other.ok ? "ok" : other.refusal.reason).toBe("notSource")
 	})
 })

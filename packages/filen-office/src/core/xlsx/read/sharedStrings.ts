@@ -8,7 +8,7 @@ import { BANG, GT, LT, QUESTION, SLASH, Scanner, bytesAre, localIs, nameEnd, par
 import { childByLocal, childElements, readFont } from "./styleRecords"
 
 // The shared string table (ECMA-376 Part 1 §18.4.8 sst): each entry's text (its <t>, or its runs' <t>, phonetic
-// runs left out), pooled. A rich entry keeps a copy of its <si> so its runs parse when asked for.
+// runs left out), pooled. A rich entry's <si> is copied into one shared byte pool so its runs parse when asked for.
 
 // Entries read between two looks at the clock.
 const ENTRIES_PER_STEP = 4096
@@ -38,12 +38,41 @@ export async function readSharedStrings(
 	})
 
 	const pools: string[] = []
-	const rich = new Map<number, Uint8Array>()
+	let richPool = new Uint8Array(0)
+	let richIndexes = new Uint32Array(0)
+	let richEnds = new Uint32Array(0)
+	let richLength = 0
+	let richBytes = 0
 	let starts = new Uint32Array(1024)
 	let pieces: string[] = []
 	let poolLength = 0
 	let length = 0
 	let at = rootOpenEnd
+
+	// Entries come in index order, so the indexes stay ascending.
+	const keepRich = (si: Uint8Array): void => {
+		if (richLength === richIndexes.length) {
+			const indexes = new Uint32Array(Math.max(64, richLength * 2))
+			const ends = new Uint32Array(indexes.length)
+
+			indexes.set(richIndexes)
+			ends.set(richEnds)
+			richIndexes = indexes
+			richEnds = ends
+		}
+
+		if (richBytes + si.length > richPool.length) {
+			const pool = new Uint8Array(Math.max(4096, richPool.length * 2, richBytes + si.length))
+
+			pool.set(richPool.subarray(0, richBytes))
+			richPool = pool
+		}
+
+		richPool.set(si, richBytes)
+		richBytes += si.length
+		richIndexes[richLength] = length
+		richEnds[richLength++] = richBytes
+	}
 
 	const push = (text: string): void => {
 		if (length === starts.length) {
@@ -98,7 +127,7 @@ export async function readSharedStrings(
 			} else {
 				const entry = readEntry(scanner, tagEnd)
 
-				if (entry.rich) rich.set(length, bytes.slice(lt, entry.end))
+				if (entry.rich) keepRich(bytes.subarray(lt, entry.end))
 
 				push(entry.text)
 				at = entry.end
@@ -109,6 +138,12 @@ export async function readSharedStrings(
 	}
 
 	if (pieces.length > 0) pools.push(pieces.join(""))
+
+	const rich = {
+		pool: richPool.slice(0, richBytes),
+		indexes: richIndexes.slice(0, richLength),
+		ends: richEnds.slice(0, richLength)
+	}
 
 	return new SharedStrings(count, pools, starts.slice(0, length), length, rich, parseRuns)
 }

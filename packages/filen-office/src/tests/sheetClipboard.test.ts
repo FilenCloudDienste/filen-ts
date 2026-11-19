@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { cellKey, newSheetName, parseTsv, pastedCells, pastedInputs, type CellView, type GridClip } from "../core/sheet/index"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange } from "../core/sheet/protocol"
+import { openKeys, sheetBody } from "./sheetKeysFixtures"
 
 function sheetOf(name: string, cells: [row: number, col: number, view: CellView][]) {
 	const map = new Map(cells.map(([row, col, view]) => [cellKey(row, col), view]))
@@ -148,5 +150,26 @@ describe("newSheetName", () => {
 		expect(newSheetName(["Sheet 1"], nameFor)).toBe("Sheet 2")
 		expect(newSheetName(["Sheet1", "Sheet 3"], nameFor)).toBe("Sheet 4")
 		expect(newSheetName(["sheet 2"], nameFor)).toBe("Sheet 3")
+	})
+})
+
+describe("a workbook's copy of whole columns and rows", () => {
+	it("copies the used cells' text, however far the range reaches", async () => {
+		const { session } = await openKeys({ sheets: [{ name: "S", body: sheetBody([["a", 1], ["b", 2], ["c"]]) }] })
+		const copyText = async (range: SheetRange): Promise<string> => {
+			const copy = await session.query("copy", { sheet: 0, range, cut: false })
+
+			if ("refused" in copy) throw new Error(copy.refused)
+
+			return copy.text
+		}
+
+		expect(await copyText({ startRow: 0, startCol: 1, endRow: SHEET_MAX_ROWS - 1, endCol: 1 })).toBe("1\r\n2\r\n")
+		expect(await copyText({ startRow: 0, startCol: 0, endRow: 0, endCol: SHEET_MAX_COLS - 1 })).toBe("a\t1")
+		expect(await copyText({ startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: SHEET_MAX_COLS - 1 })).toBe(
+			"a\t1\r\nb\t2\r\nc\t"
+		)
+		expect(await copyText({ startRow: 10, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: 0 })).toBe("")
+		session.close()
 	})
 })

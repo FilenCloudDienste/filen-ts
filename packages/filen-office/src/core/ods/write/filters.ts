@@ -1,4 +1,6 @@
 import { parseRangeRef } from "../../xlsx/write/text"
+import { columnName } from "../../sheet/refs/cellRef"
+import { ofSheetName } from "../formula/toOf"
 import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 
 // A sheet's autoFilter as the table:database-range LibreOffice keeps it in (ODF 1.3 Part 3 §9.4.15): its range with
@@ -14,14 +16,6 @@ const OPERATORS: Readonly<Record<string, string>> = {
 	lessThanOrEqual: "<=",
 	greaterThan: ">",
 	greaterThanOrEqual: ">="
-}
-
-function column(index: number): string {
-	let text = ""
-
-	for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-	return text
 }
 
 function elements(document: XmlDocument, node: number, local: string): number[] {
@@ -50,8 +44,8 @@ export function filterRange(markup: string, sheet: string, name: string): string
 
 	if (range === undefined || range === null) throw new FilterRefused("An autoFilter range")
 
-	const quoted = /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
-	const address = `${quoted}.${column(range.startCol)}${range.startRow + 1}:${quoted}.${column(range.endCol)}${range.endRow + 1}`
+	const quoted = ofSheetName(sheet)
+	const address = `${quoted}.${columnName(range.startCol)}${range.startRow + 1}:${quoted}.${columnName(range.endCol)}${range.endRow + 1}`
 	const conditions: string[] = []
 	let combined = "and"
 

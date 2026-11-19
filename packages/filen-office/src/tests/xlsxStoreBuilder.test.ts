@@ -111,6 +111,43 @@ describe("the store builder", () => {
 	})
 })
 
+describe("the store builder, a row out of order first in a new block", () => {
+	// Rows 0..count-1 of `cols` cells each, then `last` once more with a cell of its own (value -1, column `cols`).
+	function storeWith(count: number, cols: number, last: number): SheetStore {
+		const builder = new StoreBuilder()
+
+		for (let row = 0; row < count; row++) {
+			builder.beginRow()
+
+			for (let col = 0; col < cols; col++) builder.cell(col, CellKind.NUMBER, row, 0, -1)
+
+			builder.endRow(row, 0, 0, 0, Number.NaN, -1)
+		}
+
+		builder.beginRow()
+		builder.cell(cols, CellKind.NUMBER, -1, 0, -1)
+		builder.endRow(last, 0, 0, 0, Number.NaN, -1)
+
+		return new SheetStore(builder.finish(), new SheetStrings(), new FormulaTable())
+	}
+
+	for (const [cut, count, cols] of [
+		["1,024 rows", 1024, 1],
+		["32,768 cells", 32, 1024]
+	] as const)
+		for (const last of [count - 1, count - 5])
+			it(`orders the blocks and finds every cell after a cut at ${cut}, the next row ${last === count - 1 ? "repeated" : "lower"}`, () => {
+				const store = storeWith(count, cols, last)
+
+				for (let b = 1; b < store.blocks.length; b++)
+					expect(store.blocks[b]!.firstRow).toBeGreaterThan(store.blocks[b - 1]!.lastRow)
+
+				for (let row = 0; row < count; row++) expect(store.value(store.locate(row, 0))).toBe(row)
+
+				expect(store.value(store.locate(last, cols))).toBe(-1)
+			})
+})
+
 describe("the store", () => {
 	it("keeps a cell put back as it was, its source cell with it, and removes one cleared", () => {
 		const builder = new StoreBuilder()

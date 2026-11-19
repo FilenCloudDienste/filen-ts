@@ -10,6 +10,7 @@ import { RtfAborted, jobOf, turn, type RtfJob, type RtfTurns } from "../../rtf/t
 import { decodeUtf8, encodeUtf8 } from "../../xml/index"
 import { standaloneParts } from "./odtPackage"
 import { LossyCounts, TextConversionError, type TextLossyKind, type TextRefusalReason } from "./report"
+import { relsName, STORY } from "./shared"
 
 // OpenDocument text, RTF and Word 97–2003 documents as .docx: each written from the translation the viewer opens
 // (the ODT translator's, the RTF reader's, the Word binary converter's), which is a complete WordprocessingML
@@ -73,9 +74,6 @@ export function withoutOrigins(bytes: Uint8Array): Uint8Array {
 
 	return out.subarray(0, written + bytes.length - copied)
 }
-
-// Parts the translator writes runs into (the body, headers and footers, notes, comments).
-const STORY = /^word\/(?:document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/u
 
 function rethrow(error: unknown): never {
 	if (error instanceof RtfAborted) throw new TextConversionError("aborted", "aborted")
@@ -254,7 +252,13 @@ export async function docToDocx(source: Uint8Array, options: ToDocxOptions): Pro
 	if (source[0] === 0x50 && source[1] === 0x4b) {
 		const archive = await wordPackage(source)
 
-		if (archive !== undefined) return asDocx(source, archive, options)
+		if (archive !== undefined) {
+			try {
+				return await asDocx(source, archive, options)
+			} catch (error) {
+				return rethrow(error)
+			}
+		}
 	}
 
 	try {
@@ -311,12 +315,6 @@ function target(source: string, value: string): string {
 	}
 
 	return base.join("/")
-}
-
-function relationshipsOf(name: string): string {
-	const at = name.lastIndexOf("/")
-
-	return `${name.slice(0, at + 1)}_rels/${name.slice(at + 1)}.rels`
 }
 
 // A WordprocessingML package renamed .doc, as a .docx: a macro-enabled document's or a template's main part typed as a
@@ -380,10 +378,10 @@ async function asDocx(source: Uint8Array, archive: ZipArchive, options: ToDocxOp
 	for (const name of reached)
 		if (!kept.has(name)) {
 			removed.add(name)
-			removed.add(relationshipsOf(name))
+			removed.add(relsName(name))
 		}
 
-	const documentRels = relationshipsOf(MAIN)
+	const documentRels = relsName(MAIN)
 	const withoutMacros = ((await text(documentRels)) ?? "").replace(ELEMENT("Relationship"), element =>
 		attribute(element, "Type") === VBA_PROJECT ? "" : element
 	)

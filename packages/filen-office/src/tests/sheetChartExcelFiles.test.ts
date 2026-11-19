@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { SheetSessionApi } from "../core/sheet/protocol"
 import { CORPUS_DIR } from "./corpusDir"
-import { settle } from "./sheetNotesFixtures"
+import { changeOf, settle } from "./sheetNotesFixtures"
 import { openCharts, partText } from "./sheetChartFixtures"
 
 // Charts as Excel wrote them, in corpus workbooks: a pivot chart drawn and kept from its own caches, and a layout
@@ -42,7 +42,9 @@ describe("charts Excel wrote", () => {
 
 			expect(drawn.kind).toBe("drawing")
 			expect(drawn.kind === "drawing" ? JSON.stringify(drawn.drawing.texts) : "").not.toContain("Grand Total")
-			await session.command({ type: "axis.hide", sheet: frame.sheet, axis: "rows", spans: [{ start: 3, end: 3 }], hidden: true })
+			changeOf(
+				await session.command({ type: "axis.hide", sheet: frame.sheet, axis: "rows", spans: [{ start: 3, end: 3 }], hidden: true })
+			)
 
 			const saved = await session.save()
 
@@ -62,13 +64,15 @@ describe("charts Excel wrote", () => {
 
 			if (frame === undefined) throw new Error("no chart")
 
-			await session.command({
-				type: "axis.resize",
-				sheet: frame.sheet,
-				axis: "cols",
-				indices: Uint32Array.of(30),
-				sizes: Float32Array.of(90)
-			})
+			changeOf(
+				await session.command({
+					type: "axis.resize",
+					sheet: frame.sheet,
+					axis: "cols",
+					indices: Uint32Array.of(30),
+					sizes: Float32Array.of(90)
+				})
+			)
 
 			const saved = await session.save()
 

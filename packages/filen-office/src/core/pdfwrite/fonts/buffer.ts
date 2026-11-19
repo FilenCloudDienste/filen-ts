@@ -280,6 +280,8 @@ export class GlyphBuffer {
 	mergeClusters(start: number, end: number): void {
 		if (end - start < 2) return
 
+		this.spend(Math.floor((end - start) / MOVES_PER_OP))
+
 		let cluster = this.cluster[start] ?? 0
 
 		for (let k = start + 1; k < end; k++) cluster = Math.min(cluster, this.cluster[k] ?? 0)

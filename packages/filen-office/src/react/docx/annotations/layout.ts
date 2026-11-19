@@ -63,19 +63,48 @@ function byPosition(a: DocxAnnotationAnchor, b: DocxAnnotationAnchor): number {
 	return a.y - b.y || a.x - b.x || a.index - b.index
 }
 
-// The root of a comment's reply chain (a chain that loops or breaks ends where it does).
-function rootOf(annotations: DocxAnnotations, comment: number): number {
-	let at = comment
+// Each comment's thread root, one walk per chain. A chain that breaks (no parent, or one out of range) ends at
+// its last comment; one that loops roots at the loop's first comment in document order, so exactly one member
+// of a loop is a thread and the others, with any chain hanging off it, its replies. The editor's comment list
+// (core/docx/review/comments.ts) resolves a loop differently: every member there is a root.
+function threadRoots(comments: DocxAnnotations["comments"]): Int32Array {
+	const roots = new Int32Array(comments.length).fill(-1)
+	// The walk (its start) that last visited each comment.
+	const visited = new Int32Array(comments.length).fill(-1)
+	const path: number[] = []
 
-	for (let hops = 0; hops < annotations.comments.length; hops++) {
-		const parent = annotations.comments[at]?.parent ?? -1
+	for (let start = 0; start < comments.length; start++) {
+		if ((roots[start] ?? -1) >= 0) continue
 
-		if (parent < 0 || parent === comment) return at
+		path.length = 0
 
-		at = parent
+		let at = start
+		let root = -1
+
+		while (root < 0) {
+			const known = roots[at] ?? -1
+
+			if (known >= 0) {
+				root = known
+			} else if (visited[at] === start) {
+				root = at
+
+				for (let k = path.indexOf(at); k < path.length; k++) root = Math.min(root, path[k] ?? root)
+			} else {
+				visited[at] = start
+				path.push(at)
+
+				const parent = comments[at]?.parent ?? -1
+
+				if (parent < 0 || parent >= comments.length || parent === at) root = at
+				else at = parent
+			}
+		}
+
+		for (const comment of path) roots[comment] = root
 	}
 
-	return at
+	return roots
 }
 
 // Merges [top, top + height) spans (sorted by top) where they overlap or touch.
@@ -116,9 +145,10 @@ export function indexAnnotations(annotations: DocxAnnotations): DocxAnnotationIn
 	const threads: (DocxThread | undefined)[] = annotations.comments.map(() => undefined)
 	const replies = new Map<number, number[]>()
 	const unanchored: number[] = []
+	const roots = threadRoots(annotations.comments)
 
 	annotations.comments.forEach((comment, index) => {
-		const root = rootOf(annotations, index)
+		const root = roots[index] ?? index
 
 		for (let rect = comment.firstRect; rect < comment.firstRect + comment.rectCount; rect++) {
 			build(annotations.rectPages[rect] ?? -1).ranges.push(root, rect)
@@ -145,7 +175,7 @@ export function indexAnnotations(annotations: DocxAnnotations): DocxAnnotationIn
 	})
 
 	annotations.comments.forEach((_, index) => {
-		if (rootOf(annotations, index) === index) threads[index] = { comment: index, replies: replies.get(index) ?? [] }
+		if (roots[index] === index) threads[index] = { comment: index, replies: replies.get(index) ?? [] }
 	})
 
 	annotations.revisions.forEach((revision, index) => {

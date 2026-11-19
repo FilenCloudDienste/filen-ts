@@ -140,8 +140,9 @@ export function decodeEot(bytes: Uint8Array, limits: EotLimits = DEFAULT_EOT_LIM
 	if (data.length > limits.maxFontBytes) throw new FontError("tooLarge", "The embedded font exceeds the size limit")
 
 	const font = data.slice()
+	const tables = readDirectory(font)
 
-	if (clearCmapLanguages(font)) resum(font)
+	if (clearCmapLanguages(font, tables)) resum(font, tables)
 
 	return font
 }
@@ -555,6 +556,11 @@ const TAG_HMTX = 0x686d7478
 const TAG_CMAP = 0x636d6170
 const MAC_PLATFORM = 1
 
+// As sfnt.ts reads a font.
+const MAX_TABLES = 256
+// Bytes resum may checksum, as a multiple of the font's length.
+const RESUM_BUDGET = 4
+
 interface CtfTable {
 	readonly tag: number
 	readonly offset: number
@@ -703,28 +709,37 @@ class Writer {
 	}
 }
 
-function readDirectory(rest: Uint8Array): CtfTable[] {
-	const reader = new Reader(rest)
+// An sfnt table directory (a compact font's mirrors one): at most MAX_TABLES records, each tag once, so no table is
+// decoded or checksummed more than once per record a file could repeat.
+function readDirectory(bytes: Uint8Array): CtfTable[] {
+	const count = ((bytes[4] ?? 0) << 8) | (bytes[5] ?? 0)
 
-	reader.u32()
-
-	const count = reader.u16()
-
-	reader.at = 12
+	if (count > MAX_TABLES) throw new FontError("corrupt", `${count} tables`)
+	if (12 + count * 16 > bytes.length) throw new FontError("truncated", "The table directory is cut off")
 
 	const tables: CtfTable[] = []
+	const seen = new Set<number>()
 
 	for (let i = 0; i < count; i++) {
-		const tag = reader.u32()
+		const at = 12 + i * 16
+		const tag = u32be(bytes, at)
 
-		reader.u32()
+		if (seen.has(tag)) throw new FontError("corrupt", "A table tag repeats in the directory")
 
-		const offset = reader.u32()
-		const length = reader.u32()
+		seen.add(tag)
+		tables.push({ tag, offset: u32be(bytes, at + 8), length: u32be(bytes, at + 12) })
+	}
 
-		if (tag !== TAG_LOCA && offset + length > rest.length) throw new FontError("corrupt", "A compact font table lies outside its block")
+	return tables
+}
 
-		tables.push({ tag, offset, length })
+// A compact font's directory: every table but loca (rebuilt from the glyphs) inside its block.
+function readCompactDirectory(rest: Uint8Array): CtfTable[] {
+	const tables = readDirectory(rest)
+
+	for (const table of tables) {
+		if (table.tag !== TAG_LOCA && table.offset + table.length > rest.length)
+			throw new FontError("corrupt", "A compact font table lies outside its block")
 	}
 
 	return tables
@@ -1382,37 +1397,34 @@ function clearLanguages(data: DataView, offset: number, length: number): boolean
 }
 
 // clearLanguages over a whole font's cmap.
-function clearCmapLanguages(font: Uint8Array): boolean {
-	const data = new DataView(font.buffer, font.byteOffset, font.byteLength)
-	const count = data.getUint16(4)
+function clearCmapLanguages(font: Uint8Array, tables: readonly CtfTable[]): boolean {
+	const cmap = find(tables, TAG_CMAP)
 
-	for (let k = 0; k < count && 12 + k * 16 + 16 <= font.length; k++) {
-		if (data.getUint32(12 + k * 16) === TAG_CMAP)
-			return clearLanguages(data, data.getUint32(12 + k * 16 + 8), data.getUint32(12 + k * 16 + 12))
-	}
+	if (cmap === undefined) return false
 
-	return false
+	return clearLanguages(new DataView(font.buffer, font.byteOffset, font.byteLength), cmap.offset, cmap.length)
 }
 
-// A font's table checksums and head.checkSumAdjustment, written again.
-function resum(font: Uint8Array): void {
+// A font's table checksums and head.checkSumAdjustment, written again. Tables may alias one range, but the bytes
+// summed stay within a small multiple of the font.
+function resum(font: Uint8Array, tables: readonly CtfTable[]): void {
 	const data = new DataView(font.buffer, font.byteOffset, font.byteLength)
-	const count = data.getUint16(4)
+	let budget = font.length * RESUM_BUDGET
 	let head = -1
 
-	for (let k = 0; k < count && 12 + k * 16 + 16 <= font.length; k++) {
-		const at = 12 + k * 16
-		const offset = data.getUint32(at + 8)
-		const length = data.getUint32(at + 12)
+	tables.forEach((table, k) => {
+		if (table.offset + table.length > font.length) return
 
-		if (offset + length > font.length) continue
-		if (data.getUint32(at) === TAG_HEAD && length >= 12) {
-			head = offset
-			data.setUint32(offset + 8, 0)
+		budget -= table.length
+
+		if (budget < 0) throw new FontError("corrupt", "The font's tables overlap too much to checksum")
+		if (table.tag === TAG_HEAD && table.length >= 12) {
+			head = table.offset
+			data.setUint32(table.offset + 8, 0)
 		}
 
-		data.setUint32(at + 4, checksum(font, offset, length))
-	}
+		data.setUint32(12 + k * 16 + 4, checksum(font, table.offset, table.length))
+	})
 
 	if (head >= 0) data.setUint32(head + 8, (0xb1b0afba - checksum(font, 0, font.length)) >>> 0)
 }
@@ -1433,7 +1445,7 @@ function checksum(bytes: Uint8Array, start: number, length: number): number {
 export function ctfToTtf(rest: Uint8Array, push: Uint8Array, code: Uint8Array, max: number = DEFAULT_EOT_LIMITS.maxFontBytes): Uint8Array {
 	if (rest.length < 12) throw new FontError("truncated", "Too short for a compact font")
 
-	const tables = readDirectory(rest)
+	const tables = readCompactDirectory(rest)
 	const facts = factsOf(rest, tables)
 	const glyfTable = find(tables, TAG_GLYF)
 	const glyphs = glyfTable === undefined ? undefined : decodeGlyphs(rest, glyfTable, push, code, facts.numGlyphs, max)

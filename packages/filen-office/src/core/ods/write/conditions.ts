@@ -7,6 +7,7 @@ import { conditionalSections } from "../features"
 import { OdsIssues } from "../issues"
 import type { OdsSource } from "../source"
 import { addressBoxes, splitList, type Shifter } from "../unheld"
+import { sourceTableOf } from "../workbook"
 import { currentSection, sectionText } from "./features"
 
 // A table's calcext:conditional-formats moved with its cells as LibreOffice moves them: each format's target ranges,
@@ -240,8 +241,7 @@ export function conditionsRefusal(document: XlsxDocument, source: OdsSource, shi
 
 		if (model === null || entry.kind !== "worksheet") continue
 
-		const table = source.tables[entry.id]
-		const own = table !== undefined && table.id === entry.id && "rowAxis" in model
+		const own = sourceTableOf(source, entry) !== null
 
 		if (!own) {
 			if (currentConditions(workbook, model).trim() !== "") return refused

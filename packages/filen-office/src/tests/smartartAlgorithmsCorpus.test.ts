@@ -91,6 +91,9 @@ const EXACT = [
 	"hProcess6"
 ]
 
+// The layouts the engine was first sized on.
+const NAMED = new Set(["vProcess5", "default", "hList1"])
+
 describe.skipIf(FILES.length === 0)("SmartArt layout against PowerPoint's cached drawings", () => {
 	it("reproduces the cached boxes of the corpus diagrams", { timeout: 300_000 }, async () => {
 		const scores: DiagramScore[] = []
@@ -99,6 +102,9 @@ describe.skipIf(FILES.length === 0)("SmartArt layout against PowerPoint's cached
 			scores.push(...(await scoreFile(join(CORPUS_DIR, file), file, undefined, await measurers(join(CORPUS_DIR, file)))))
 
 		const shapes = scores.flatMap(score => score.shapes.map(shape => shape.iou))
+		const report = process.env["SMARTART_SPIKE_REPORT"]
+
+		if (report !== undefined && report !== "") writeFileSync(report, JSON.stringify(scores, null, "\t"))
 
 		expect(scores.every(score => score.error === undefined)).toBe(true)
 		expect(scores.length).toBeGreaterThanOrEqual(48)
@@ -108,8 +114,11 @@ describe.skipIf(FILES.length === 0)("SmartArt layout against PowerPoint's cached
 		for (const score of scores.filter(s => EXACT.includes(s.layout)))
 			expect(score.mean, `${score.file} ${score.layout}`).toBeGreaterThanOrEqual(0.99)
 
-		// Connectors routed between their nodes after the user's offsets moved them.
+		expect(median(scores.filter(s => NAMED.has(s.layout)).map(s => s.mean))).toBeGreaterThanOrEqual(0.85)
+
+		// bProcess3's snake re-flowed after the user's offsets moved its nodes, and the connectors routed between them.
 		for (const score of scores.filter(s => s.layout === "bProcess3")) {
+			for (const shape of score.shapes.filter(s => s.name === "node")) expect(shape.iou, score.file).toBeGreaterThanOrEqual(0.95)
 			for (const shape of score.shapes.filter(s => s.name === "sibTrans")) expect(shape.iou, score.file).toBeGreaterThanOrEqual(0.85)
 		}
 	})

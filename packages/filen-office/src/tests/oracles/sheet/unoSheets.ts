@@ -105,6 +105,8 @@ interface RawResult extends Omit<UnoResult, "before" | "after"> {
 }
 
 const STARTUP_TIMEOUT_MS = 120_000
+// How long close() waits for the runner to exit on EOF (closing its document) before killing it.
+const CLOSE_GRACE_MS = 5000
 
 // Office process groups still running, killed if this process exits first.
 const running = new Set<number>()
@@ -160,6 +162,8 @@ export class UnoSheets {
 			env: unoEnv(office.resources)
 		})
 		this.lines = createInterface({ input: this.python.stdout })[Symbol.asyncIterator]()
+		// A write to a runner that already exited fails with EPIPE; readLine() reports the exit from stdout.
+		this.python.stdin.on("error", () => undefined)
 		this.ready = this.readLine(STARTUP_TIMEOUT_MS).then(line => {
 			if (!(JSON.parse(line) as { ready?: boolean }).ready) throw new Error(`UNO runner did not start: ${line}`)
 		})
@@ -212,24 +216,38 @@ export class UnoSheets {
 		}
 	}
 
-	async close(): Promise<void> {
-		const exited = new Promise<void>(resolve => {
-			if (this.python.exitCode !== null) resolve()
-			else this.python.once("exit", () => resolve())
-		})
+	// Ends the runner's input so it closes its document and exits (killed after `graceMs`, as when a job hangs
+	// LibreOffice), then kills soffice's process group and removes the work directory.
+	async close(graceMs = CLOSE_GRACE_MS): Promise<void> {
+		const python = this.python
 
-		this.python.stdin.end()
-		await exited
+		// Startup may still be pending, or have failed, when no job ever ran.
+		void this.ready.catch(() => undefined)
 
 		try {
-			if (this.soffice.pid !== undefined) process.kill(-this.soffice.pid, "SIGKILL")
-		} catch {
-			// Already gone.
+			if (python.exitCode === null && python.signalCode === null) {
+				const exited = new Promise<void>(resolve => python.once("exit", () => resolve()))
+				const timer = setTimeout(() => python.kill("SIGKILL"), graceMs)
+
+				python.stdin.end()
+
+				try {
+					await exited
+				} finally {
+					clearTimeout(timer)
+				}
+			}
+		} finally {
+			try {
+				if (this.soffice.pid !== undefined) process.kill(-this.soffice.pid, "SIGKILL")
+			} catch {
+				// Already gone.
+			}
+
+			if (this.soffice.pid !== undefined) running.delete(this.soffice.pid)
+
+			rmSync(this.work, { recursive: true, force: true })
 		}
-
-		if (this.soffice.pid !== undefined) running.delete(this.soffice.pid)
-
-		rmSync(this.work, { recursive: true, force: true })
 	}
 }
 

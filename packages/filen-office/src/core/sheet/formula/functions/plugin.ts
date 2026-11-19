@@ -14,7 +14,9 @@ import {
 	type FunctionArgument,
 	type SimpleCellAddress
 } from "hyperformula"
+import { wildcardMatcher } from "../../find/match"
 import { MAX_COLUMNS, MAX_ROWS } from "../../model/model"
+import { MAX_ARRAY_CELLS } from "../../refs/formulaRefs"
 
 // The engine's plugin types, read from the plugin class (HyperFormula does not export them by name).
 type RunFunction = FunctionPlugin["runFunction"]
@@ -57,6 +59,20 @@ export function withRowState<T>(state: RowState | null, work: () => T): T {
 export function rowStateOf(sheet: number, row: number): number {
 	return rowState === null ? ROW_SHOWN : rowState(sheet, row)
 }
+
+// The metadata of a function whose arguments are read as arrays, the function called once on them whole.
+export const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
+
+// An argument's syntax inside any parentheses around it.
+export function unwrap(ast: PluginAst): PluginAst {
+	let node = ast
+
+	while (node.type === ("PARENTHESES" as PluginAst["type"]) && "expression" in node) node = node.expression
+
+	return node
+}
+
+export { MAX_RANGE_CELLS } from "../../refs/formulaRefs"
 
 // The longest text a cell holds ("Excel specifications and limits"): longer results are #VALUE!.
 export const MAX_TEXT = 32767
@@ -103,13 +119,16 @@ type ExcelHelper = {
 	}
 	compare(left: Compared, right: Compared): number
 	stringCmp(left: string, right: string): number
-	buildRegex(pattern: string, matchWholeCell?: boolean): RegExp
+	buildRegex(pattern: string, matchWholeCell?: boolean): EnginePattern
 	normalizeString(text: string): string
 }
+// What the engine reads of the pattern buildRegex gives (its criteria matchers' test, SEARCH's exec index): a RegExp, or
+// a wildcard walk in its place.
+interface EnginePattern {
+	test(text: string): boolean
+	exec(text: string): { readonly index: number } | null
+}
 type ExcelInterpreter = { concatOp: (left: PluginScalar, right: PluginScalar) => PluginScalar }
-
-// A character a regular expression reads as syntax.
-const REGEX_SYNTAX = /[\\^$.*+?()[\]{}|/-]/
 
 // Where the engine's own coercion differs from Excel's, for every function and operator of one engine:
 // - text that is empty ("" from a formula) is not a number, so ""*2 and ""+1 are #VALUE! (the engine read it as 0).
@@ -121,7 +140,9 @@ const REGEX_SYNTAX = /[\\^$.*+?()[\]{}|/-]/
 //   that reads as a date ("1/1/2020"=DATE(2020,1,1) is FALSE; the engine compared the date). =, <, SORT, UNIQUE and
 //   the others compare through compare;
 // - a wildcard ? is exactly one character (the engine's matched none too) and every other character of a pattern is
-//   itself ("a|c" was an alternation): COUNTIF and the other criteria, SEARCH, XLOOKUP's match_mode 2;
+//   itself ("a|c" was an alternation): COUNTIF and the other criteria, SEARCH, XLOOKUP's match_mode 2. Matched by a
+//   linear walk (find/match.ts wildcardMatcher), not the engine's regular expression, whose backtracking a pattern of
+//   a few stars over a long text never finishes;
 // - & turns a number into its General text (numberText; the engine's gave all 17 digits) and gives #VALUE! past
 //   MAX_TEXT characters.
 function adjustToExcel(interpreter: Interpreter, helper: Helper): void {
@@ -156,22 +177,18 @@ function adjustToExcel(interpreter: Interpreter, helper: Helper): void {
 	excel.buildRegex = (pattern, matchWholeCell = true) => {
 		if (config.useRegularExpressions || !config.useWildcards) return buildRegex(pattern, matchWholeCell)
 
-		const normalized = excel.normalizeString(pattern)
-		let source = ""
+		// The text the engine tests is normalized as the pattern is (or lower-cased alone, SEARCH's): compared as it stands.
+		const matcher = wildcardMatcher(excel.normalizeString(pattern), true)
+		const whole = config.matchWholeCell && matchWholeCell
 
-		for (let index = 0; index < normalized.length; index++) {
-			let char = normalized.charAt(index)
+		return {
+			test: text => matcher.test(text, whole),
+			exec: text => {
+				const index = whole ? (matcher.test(text, true) ? 0 : -1) : matcher.search(text, 0)
 
-			if (char === "*") source += "[^]*"
-			else if (char === "?") source += "[^]"
-			else {
-				if (char === "~" && index + 1 < normalized.length) char = normalized.charAt(++index)
-
-				source += REGEX_SYNTAX.test(char) ? `\\${char}` : char
+				return index < 0 ? null : { index }
 			}
 		}
-
-		return new RegExp(config.matchWholeCell && matchWholeCell ? `^(?:${source})$` : source)
 	}
 
 	;(interpreter as unknown as ExcelInterpreter).concatOp = (left, right) => {
@@ -255,6 +272,38 @@ function installExcelText(): void {
 	}
 }
 
+let sequenceInstalled = false
+
+// The engine's SEQUENCE refusing more than MAX_ARRAY_CELLS cells (#VALUE!) before it builds any, once. A cell formula's
+// sizes are bounded in its text (refs/formulaRefs.ts boundArraySizes), but a defined name's expression reaches the
+// engine as written, so SEQUENCE(3000,3000) behind a name would build all nine million. Otherwise as the engine's:
+// sizes truncated, below 1 or past the sheet #VALUE!, row by row from start in steps of step.
+function installSequenceCap(): void {
+	if (sequenceInstalled) return
+
+	sequenceInstalled = true
+
+	const sequence = HyperFormula.getFunctionPlugin("SEQUENCE")?.prototype as unknown as
+		{ sequence?: (this: FunctionPlugin, ast: PluginCall, state: PluginState) => unknown } | undefined
+
+	if (sequence === undefined) throw new Error("No SEQUENCE")
+
+	sequence.sequence = function (ast, state) {
+		return this.runFunction(ast.args, state, this.metadata("SEQUENCE"), (rows: number, cols: number, start: number, step: number) => {
+			const height = Math.trunc(rows)
+			const width = Math.trunc(cols)
+
+			// NaN fails the first test; an infinite size the cell count.
+			if (!(height >= 1 && width >= 1) || height * width > MAX_ARRAY_CELLS) return valueError()
+			if (height > this.config.maxRows || width > this.config.maxColumns) return valueError()
+
+			return SimpleRangeValue.onlyNumbers(
+				Array.from({ length: height }, (_, row) => Array.from({ length: width }, (_, col) => start + (row * width + col) * step))
+			)
+		})
+	}
+}
+
 // Every plugin of the app's own: the engine it runs in coerces as Excel does (adjustToExcel).
 export abstract class SheetFunctionPlugin extends FunctionPlugin {
 	constructor(interpreter: Interpreter) {
@@ -296,9 +345,11 @@ type PluginMethod = (this: unknown, ...args: unknown[]) => unknown
 
 // Every function the engine knows (its own and the app's, registered by now) gives a failure as its cell's error.
 // The engine calls them by method name on each plugin class's instance, so each class's methods are wrapped, once.
-// Text past MAX_TEXT characters is #VALUE! too. The engine's text functions are made Excel's first (installExcelText).
+// Text past MAX_TEXT characters is #VALUE! too. The engine's text functions are made Excel's first (installExcelText),
+// and its SEQUENCE bounded (installSequenceCap).
 export function guardFunctionPlugins(): void {
 	installExcelText()
+	installSequenceCap()
 
 	for (const plugin of HyperFormula.getAllFunctionPlugins()) {
 		const prototype = plugin.prototype as unknown as Record<string, unknown>
@@ -457,10 +508,31 @@ export function refError(): CellError {
 	return new CellError(ErrorType.REF)
 }
 
+// Excel's error texts by the engine's error types, which the files store and the grid shows.
+export const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
+	[ErrorType.DIV_BY_ZERO]: "#DIV/0!",
+	[ErrorType.NAME]: "#NAME?",
+	[ErrorType.VALUE]: "#VALUE!",
+	[ErrorType.NUM]: "#NUM!",
+	[ErrorType.NA]: "#N/A",
+	[ErrorType.REF]: "#REF!",
+	[ErrorType.SPILL]: "#SPILL!"
+}
+
 // The plain number of an engine number (dates, percentages and currencies carry their format).
 export function rawNumber(value: PluginScalar): number | undefined {
 	if (typeof value === "number") return value
 	if (typeof value === "object" && !(value instanceof CellError)) return value.val
 
 	return undefined
+}
+
+// A value as the engine's lookups index it: its rich numbers (dates, percentages, currencies) as plain ones.
+export function rawValue(value: unknown): unknown {
+	return typeof value === "object" && value !== null && "val" in value ? (value as { readonly val: unknown }).val : value
+}
+
+// The engine's evaluation before a one-cell result is read out of its range (private to the engine).
+export interface RawEvaluation {
+	evaluateAstWithoutPostprocessing(ast: PluginAst, state: PluginState): PluginValue
 }

@@ -2,7 +2,7 @@ import { EMU_PER_PX } from "../../drawingml/reader"
 import type { Format, ShapeNode, SlideNode, SlideRef, TextBody, Xfrm } from "../model"
 import { oneStep } from "./commands/batch"
 import { inDeckOrder } from "./commands/slide"
-import type { CarriedPart, CarriedRelationship, DeckOp, ImportedSlide, OpOf, PastedShape, RawPart } from "./ops"
+import type { CarriedImage, CarriedPart, CarriedRelationship, DeckOp, ImportedSlide, OpOf, PastedShape, RawPart } from "./ops"
 
 // Cut, Copy and Paste of shapes and slides, as PowerPoint does them. A clip is what the worker hands the page for a
 // copy (dom/presentation engine/clip.ts); the page keeps it (one app-wide clipboard, so a paste reaches another open
@@ -54,8 +54,14 @@ export interface SlideClip {
 	readonly format: Format
 	// In deck order.
 	readonly slides: readonly SlideRef[]
-	// A cut's slides as their delete held them: what a paste puts back while they are not in the deck.
-	readonly held?: readonly { readonly ref: SlideRef; readonly parts: readonly RawPart[]; readonly nodes?: readonly SlideNode[] }[]
+	// A cut's slides as their delete held them: what a paste puts back while they are not in the deck, with the
+	// inserted images no save wrote that they name (the registry lets go of them once the history does).
+	readonly held?: readonly {
+		readonly ref: SlideRef
+		readonly parts: readonly RawPart[]
+		readonly nodes?: readonly SlideNode[]
+		readonly images?: readonly CarriedImage[]
+	}[]
 	// Each slide's paragraphs as text, for other apps.
 	readonly text: readonly (readonly string[])[]
 	// A cut's slides as a paste into another deck takes them (pptx), made when they were cut.
@@ -210,7 +216,15 @@ export function pasteSlidesOps(clip: SlideClip, order: readonly SlideRef[], afte
 		ops.push({
 			family: "slide",
 			kind: "restore",
-			slides: [{ ref, at: at + k, parts: entry.parts, ...(entry.nodes === undefined ? {} : { nodes: entry.nodes }) }]
+			slides: [
+				{
+					ref,
+					at: at + k,
+					parts: entry.parts,
+					...(entry.nodes === undefined ? {} : { nodes: entry.nodes }),
+					...(entry.images === undefined || entry.images.length === 0 ? {} : { images: entry.images })
+				}
+			]
 		})
 	}
 

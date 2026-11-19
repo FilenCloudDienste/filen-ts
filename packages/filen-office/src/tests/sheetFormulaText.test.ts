@@ -86,6 +86,33 @@ describe("FORMULATEXT", () => {
 		session.close()
 	})
 
+	it("reads a reference function inside parentheses, and calculates again when the formula there changes", async () => {
+		const { session, sheet } = await open(
+			"<sheetData>" +
+				'<row r="1"><c r="A1"><v>1</v></c>' +
+				formula("C1", "1+1", "<v>2</v>") +
+				formula("D1", '_xlfn.FORMULATEXT((INDIRECT("C1")))') +
+				formula("E1", "_xlfn.FORMULATEXT((OFFSET(B2,1,0)))") +
+				formula("F1", "_xlfn.FORMULATEXT((OFFSET(B2,A1,0)))") +
+				"</row>" +
+				'<row r="3">' +
+				formula("B3", "A1*3", "<v>3</v>") +
+				"</row></sheetData>"
+		)
+
+		expect(await texts(session, sheet, ["D1", "E1", "F1"])).toEqual(["=1+1", "=A1*3", "=A1*3"])
+
+		ok(
+			await session.command({
+				type: "cells.set",
+				sheet,
+				cells: { rows: Uint32Array.of(0, 2), cols: Uint16Array.of(2, 1), inputs: ["=1+2", "=A1*5"] }
+			})
+		)
+		expect(await texts(session, sheet, ["D1", "E1", "F1"])).toEqual(["=1+2", "=A1*5", "=A1*5"])
+		session.close()
+	})
+
 	it("calculates again when the formula it reads changes, its value the same", async () => {
 		const { session, sheet } = await open(
 			"<sheetData>" +

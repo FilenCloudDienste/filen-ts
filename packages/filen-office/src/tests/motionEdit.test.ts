@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseMotionPath, pointAt } from "../core/anim/motion"
+import { CURVE_STEPS, parseMotionPath, pointAt } from "../core/anim/motion"
 import {
 	curvePath,
 	deletePoint,
@@ -93,8 +93,8 @@ describe("motion path attribute", () => {
 		// The bound is the one the motionPath op checks: what reads also applies, and the next segment refuses.
 		expect("reason" in readEditablePath(lines(cap))).toBe(false)
 		expect(readEditablePath(lines(cap + 1))).toMatchObject({ reason: "tooLarge" })
-		expect("reason" in readEditablePath(curves(Math.floor(cap / 16)))).toBe(false)
-		expect(readEditablePath(curves(Math.floor(cap / 16) + 1))).toMatchObject({ reason: "tooLarge" })
+		expect("reason" in readEditablePath(curves(Math.floor(cap / CURVE_STEPS)))).toBe(false)
+		expect(readEditablePath(curves(Math.floor(cap / CURVE_STEPS) + 1))).toMatchObject({ reason: "tooLarge" })
 		expect(readEditablePath(`${lines(cap).slice(0, -2)} Z E`)).toMatchObject({ reason: "tooLarge" })
 
 		const player = (path: string): boolean => {
@@ -107,12 +107,29 @@ describe("motion path attribute", () => {
 			}
 		}
 
-		expect([lines(cap), lines(cap + 1), curves(Math.floor(cap / 16)), curves(Math.floor(cap / 16) + 1)].map(player)).toEqual([
-			true,
-			false,
-			true,
-			false
-		])
+		expect(
+			[lines(cap), lines(cap + 1), curves(Math.floor(cap / CURVE_STEPS)), curves(Math.floor(cap / CURVE_STEPS) + 1)].map(player)
+		).toEqual([true, false, true, false])
+	})
+
+	it("parses with the player a path the editor writes at the segment budget", () => {
+		const cap = DEFAULT_PRESENTATION_BUDGETS.timing.motionSegments
+		const curves = ["M 0 0", ...Array.from({ length: Math.floor(cap / CURVE_STEPS) }, () => "c 0 0.1 0.1 0.1 0.1 0"), "E"].join(" ")
+		const written = writeEditablePath(ok(readEditablePath(curves)))
+
+		expect(() => parseMotionPath(written.path, 1, cap)).not.toThrow()
+	})
+
+	it("refuses a huge path, or a run of skipped commands, without tokenising all of it", () => {
+		const cap = DEFAULT_PRESENTATION_BUDGETS.timing.motionSegments
+
+		for (const unit of ["L 0 0 ", "Q 0 0 "]) {
+			const path = `M 0 0 ${unit.repeat(Math.ceil(5_000_000 / unit.length))}`
+			const start = cpuMs()
+
+			expect(() => parseMotionPath(path, 1, cap)).toThrow(expect.objectContaining({ reason: "tooLarge" }))
+			expect(cpuMs() - start).toBeLessThan(budget(30))
+		}
 	})
 
 	it("writes absolute commands at five decimals with E, and ptsTypes with one letter per written point", () => {

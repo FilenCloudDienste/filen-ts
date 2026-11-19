@@ -64,12 +64,36 @@ function elements(document: XmlDocument, node: number): number[] {
 	return out
 }
 
-// settings.xml with the views given; null when nothing in it changes.
+// The view a package gets when it has none: ooo:view-settings > Views > one entry (LibreOffice's ViewId), the config
+// namespace under `prefix`.
+function viewEntryMarkup(prefix: string): string {
+	return `<${prefix}config-item-map-entry>${itemMarkup(prefix, { name: "ViewId", type: "string", value: "view1" })}</${prefix}config-item-map-entry>`
+}
+
+function viewsMarkup(prefix: string): string {
+	return `<${prefix}config-item-map-indexed ${prefix}name="Views">${viewEntryMarkup(prefix)}</${prefix}config-item-map-indexed>`
+}
+
+function viewSetMarkup(prefix: string): string {
+	return `<${prefix}config-item-set ${prefix}name="ooo:view-settings">${viewsMarkup(prefix)}</${prefix}config-item-set>`
+}
+
+// settings.xml for a package without one, of the package's own ODF version (content.xml's, else its manifest's), as
+// each of its parts must be (Part 2 §4.3). xmlns:ooo declares the prefix of the "ooo:view-settings" name LibreOffice
+// looks the views up by.
+export function emptySettings(version: string | undefined): string {
+	return `<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="${OdfNs.office}" xmlns:config="${OdfNs.config}" xmlns:ooo="${OdfNs.ooo}"${version === undefined ? "" : ` office:version="${escapeAttribute(version)}"`}><office:settings>${viewSetMarkup("config:")}</office:settings></office:document-settings>`
+}
+
+// settings.xml with the views given; null when nothing in it changes. A settings.xml without a view (no
+// office:settings, no ooo:view-settings, no Views or no entry in it) gets the levels it lacks, as emptySettings has
+// them, and is kept only when the views given then change something.
 export function writeSettings(
 	bytes: Uint8Array,
 	activeSheet: string,
 	activeChanged: boolean,
-	sheets: readonly SheetViewState[]
+	sheets: readonly SheetViewState[],
+	grown = false
 ): Uint8Array | null {
 	const document = parseXml(bytes)
 	const namespaces = new Namespaces(document, { lenient: true })
@@ -82,11 +106,18 @@ export function writeSettings(
 		return undefined
 	}
 	const root = document.documentElement()
-	const prefix = ((): string => {
-		for (const { name, value } of document.attributes(root))
-			if (name.startsWith("xmlns:") && value === OdfNs.config) return `${name.slice(6)}:`
+	const declared = new Map<string, string>()
 
-		return "config:"
+	for (const { name, value } of document.attributes(root)) if (name.startsWith("xmlns:")) declared.set(name.slice(6), value)
+
+	const prefix = ((): string => {
+		for (const [name, uri] of declared) if (uri === OdfNs.config) return `${name}:`
+
+		let name = "config"
+
+		for (let n = 2; declared.has(name); n++) name = `config${String(n)}`
+
+		return `${name}:`
 	})()
 	const settings = elements(document, root).find(
 		node => namespaces.elementUri(node) === OdfNs.office && document.localName(node) === "settings"
@@ -95,10 +126,30 @@ export function writeSettings(
 		settings === undefined
 			? undefined
 			: elements(document, settings).find(node => config(node, "config-item-set") && nameOf(node) === "ooo:view-settings")
-	const views = viewSet === undefined ? undefined : elements(document, viewSet).find(node => nameOf(node) === "Views")
+	const views =
+		viewSet === undefined
+			? undefined
+			: elements(document, viewSet).find(node => config(node, "config-item-map-indexed") && nameOf(node) === "Views")
 	const view = views === undefined ? undefined : elements(document, views).find(node => config(node, "config-item-map-entry"))
 
-	if (view === undefined) return null
+	if (view === undefined) {
+		// A root that is not office:document-settings, or levels that still do not read back once added: not ours to write.
+		if (grown || namespaces.elementUri(root) !== OdfNs.office || document.localName(root) !== "document-settings") return null
+
+		if (views !== undefined) editor.append(views, viewEntryMarkup(prefix))
+		else if (viewSet !== undefined) editor.append(viewSet, viewsMarkup(prefix))
+		else if (settings !== undefined) editor.append(settings, viewSetMarkup(prefix))
+		else {
+			const office = document.prefix(root) === "" ? "" : `${document.prefix(root)}:`
+
+			editor.append(root, `<${office}settings>${viewSetMarkup(prefix)}</${office}settings>`)
+		}
+
+		if (declared.get(prefix.slice(0, -1)) !== OdfNs.config) editor.setAttribute(root, `xmlns:${prefix.slice(0, -1)}`, OdfNs.config)
+		if (!declared.has("ooo")) editor.setAttribute(root, "xmlns:ooo", OdfNs.ooo)
+
+		return writeSettings(editor.serialize(), activeSheet, activeChanged, sheets, true)
+	}
 
 	const setItems = (entry: number, items: readonly Item[]): void => {
 		const present = new Map<string, number>()

@@ -297,6 +297,43 @@ describe("content type and relationship edits", () => {
 		expect(created.ids).toEqual(["rId1"])
 		expect(parseRelationships(created.bytes, "").byId("rId1")?.partName).toBe("x.xml")
 	})
+
+	it("numbers new relationships past ids too large to count on, and always finds one", () => {
+		const existing = text(
+			'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId3" Type="t" Target="a.xml"/>' +
+				'<Relationship Id="rId9007199254740992" Type="t" Target="b.xml"/><Relationship Id="rId99999999999999999999999" Type="t" Target="c.xml"/>' +
+				'<Relationship Id="rId4" Type="t" Target="d.xml"/></Relationships>'
+		)
+		const added = addRelationships(existing, [
+			{ type: "t", target: "e.xml" },
+			{ type: "t", target: "f.xml" },
+			{ type: "t", target: "g.xml" }
+		])
+		const parsed = parseRelationships(added.bytes, "")
+
+		expect(added.ids).toEqual(["rId5", "rId6", "rId7"])
+		expect(parsed.all.map(relationship => relationship.id)).toEqual([
+			"rId3",
+			"rId9007199254740992",
+			"rId99999999999999999999999",
+			"rId4",
+			"rId5",
+			"rId6",
+			"rId7"
+		])
+
+		// Counted on from the largest id that can be: each new one still a plain integer, past it.
+		const edge = text(
+			'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId4503599627370496" Type="t" Target="a.xml"/></Relationships>'
+		)
+
+		expect(
+			addRelationships(edge, [
+				{ type: "t", target: "b.xml" },
+				{ type: "t", target: "c.xml" }
+			]).ids
+		).toEqual(["rId4503599627370497", "rId4503599627370498"])
+	})
 })
 
 describe("OpcPackage", () => {

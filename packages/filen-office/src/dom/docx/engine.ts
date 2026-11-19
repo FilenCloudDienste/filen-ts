@@ -1,7 +1,6 @@
 import {
 	DocxDrawings,
 	Item,
-	Layer,
 	OBJECT_INTS,
 	ObjectKind,
 	PropertyResolver,
@@ -14,6 +13,7 @@ import {
 	drawingAltText,
 	objectTurnsOf,
 	layoutDocument,
+	ref,
 	openDocxPackage,
 	gateReasons,
 	withGate,
@@ -35,6 +35,7 @@ import {
 } from "../../core/docx/index"
 import type { StoryPart } from "../../core/docx/model/index"
 import { viewable } from "../../core/docx/objects/images"
+import { pageObjects } from "../../core/docx/layout/turns"
 import type { DrawingList } from "../../core/drawingml/index"
 import {
 	FontManager,
@@ -47,18 +48,7 @@ import {
 	type FontRequest
 } from "../../core/fonts/index"
 import { OpcError, SliceClock, ZipError, type ByteSource, type ContentTypes, type OpcPackage, type Slicing } from "../../core/opc/index"
-import {
-	FRAGMENT_FLOATS,
-	FRAGMENT_INTS,
-	FRAGMENT_KIND_MASK,
-	FragmentKind,
-	LINE_FLOATS,
-	LINE_INTS,
-	LineInt,
-	SMALL_CAPS_SCALE,
-	type HyphenationLibrary,
-	type TextMeasurer
-} from "../../core/text/index"
+import { LINE_FLOATS, LINE_INTS, LineInt, SMALL_CAPS_SCALE, type HyphenationLibrary, type TextMeasurer } from "../../core/text/index"
 import { XmlError, type XmlDocument } from "../../core/xml/index"
 import type { OdtDocxOpenResult, OdtTranslateOptions } from "../../core/odt/index"
 import { collectAnnotations } from "./annotate"
@@ -484,7 +474,7 @@ export class DocxEngine implements DocxSessionApi {
 		const sizer: ObjectSizer = {
 			size(object) {
 				// Only the equation's run size is recorded (the renderer sizes MathML with it).
-				if (object.kind === ObjectKind.MATH) mathSizes.set(object.part.index * 0x4000000 + object.item, object.fontSize)
+				if (object.kind === ObjectKind.MATH) mathSizes.set(ref(object.part.index, object.item), object.fontSize)
 
 				return undefined
 			}
@@ -687,8 +677,7 @@ export class DocxEngine implements DocxSessionApi {
 		return ranges
 	}
 
-	// The page's placed objects plus its inline ones, which the text layout carries as object fragments
-	// on their lines (box: the fragment's x and width, the object's ascent above the baseline).
+	// The page's objects (pageObjects()) with each one's kind and the turn it is drawn through.
 	private inlineObjects(page: PageDisplayList): {
 		count: number
 		floats: Float32Array
@@ -697,50 +686,19 @@ export class DocxEngine implements DocxSessionApi {
 		turns: Int32Array | undefined
 	} {
 		const table = this.layout?.objects
-		const text = page.text
-		const floats = Array.from(page.objectFloats)
-		const ints = Array.from(page.objectInts)
-		// The line of each inline object, for the turn it is drawn through.
-		const lines: number[] = []
+		const { count, floats, ints, lines } = pageObjects(page, table)
+		const kinds = new Uint8Array(count)
 
-		for (let line = 0; line < text.lineCount; line++) {
-			const baseline = text.lineFloats[line * LINE_FLOATS + 2] ?? 0
-			const first = text.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
-			const count = text.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
+		for (let o = 0; o < count; o++) this.objectIds.add(ints[o * OBJECT_INTS] ?? -1)
 
-			for (let k = first; k < first + count; k++) {
-				if (((text.fragmentInts[k * FRAGMENT_INTS + 3] ?? 0) & FRAGMENT_KIND_MASK) !== FragmentKind.OBJECT) continue
-
-				const id = text.fragmentInts[k * FRAGMENT_INTS + 4] ?? -1
-				const height = table?.heights[id] ?? 0
-
-				if (id < 0 || !(height > 0)) continue
-
-				floats.push(
-					text.fragmentFloats[k * FRAGMENT_FLOATS] ?? 0,
-					baseline - (table?.ascents[id] ?? height),
-					text.fragmentFloats[k * FRAGMENT_FLOATS + 1] ?? table?.widths[id] ?? 0,
-					height
-				)
-				ints.push(id, Layer.TEXT, text.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)
-
-				if (page.turnCount > 0) lines.push(line)
-			}
-		}
-
-		const total = ints.length / OBJECT_INTS
-		const kinds = new Uint8Array(total)
-
-		for (let o = 0; o < total; o++) this.objectIds.add(ints[o * OBJECT_INTS] ?? -1)
-
-		for (let o = 0; o < total; o++) kinds[o] = table?.kinds[ints[o * OBJECT_INTS] ?? -1] ?? 0
+		for (let o = 0; o < count; o++) kinds[o] = table?.kinds[ints[o * OBJECT_INTS] ?? -1] ?? 0
 
 		return {
-			count: total,
-			floats: Float32Array.from(floats),
-			ints: Int32Array.from(ints),
+			count,
+			floats,
+			ints,
 			kinds,
-			turns: objectTurnsOf(page.turnCount, page.turnInts, text.lineCount, page.objectCount, lines)
+			turns: objectTurnsOf(page.turnCount, page.turnInts, page.text.lineCount, page.objectCount, lines)
 		}
 	}
 
@@ -886,7 +844,7 @@ export class DocxEngine implements DocxSessionApi {
 
 			return tree === undefined
 				? { kind: "placeholder", id, reason: "math" }
-				: { kind: "math", id, tree, fontSize: this.mathSizes.get(part * 0x4000000 + item) ?? 14.667 }
+				: { kind: "math", id, tree, fontSize: this.mathSizes.get(ref(part, item)) ?? 14.667 }
 		}
 
 		if (kind === ObjectKind.DRAWING || kind === ObjectKind.VML) {

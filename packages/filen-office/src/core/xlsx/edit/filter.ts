@@ -1,4 +1,4 @@
-import { spliceAll } from "../../arrays"
+import { appendAll, spliceAll } from "../../arrays"
 import {
 	DATE_1904_OFFSET,
 	FilterTest,
@@ -15,15 +15,15 @@ import {
 import {
 	columnMarkup,
 	criteriaMarkup,
-	parseA1Range,
 	readAutoFilter,
 	writeAutoFilter,
 	type AutoFilter,
 	type AutoFilterColumn
 } from "../../sheet/filter/autoFilter"
+import { columnName } from "../../sheet/refs/cellRef"
 import { FilterButton, type SheetFilterItem, type SheetFilterLayout, type SheetFilterValues } from "../../sheet/filter/types"
 import { serialDate, type DateParts } from "../../sheet/numfmt/index"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRange, type SheetRefusal, type SheetRgb } from "../../sheet/protocol"
+import type { SheetId, SheetRange, SheetRefusal, SheetRgb } from "../../sheet/protocol"
 import {
 	defineSheetFeature,
 	type SheetChangeSink,
@@ -39,8 +39,10 @@ import { CellKind, RowFlag, type XlsxDefinedName, type XlsxSheetModel } from "..
 import { RefRefused } from "../refs/catalogue"
 import { readTable, type TableInfo } from "../refs/tables"
 import { liveRelationships, refState } from "../refs/state"
+import { intersects } from "../refs/moveRefs"
+import { inGrid, parseSqref, sectionSqrefs } from "../refs/sqref"
 import { nameWithFormula } from "../refs/plan"
-import { dateSerial } from "../../sheet/numfmt/date"
+import { isoSerial } from "../../sheet/numfmt/date"
 import type { XlsxDocument } from "./document"
 import { MAX_HIDDEN_ROWS } from "./hide"
 import { CellLog, NO_ROW, cellKeyOf, rowState, type RowState } from "./history"
@@ -220,10 +222,6 @@ function sheetFilter(document: XlsxDocument, model: XlsxSheetModel): AutoFilter 
 	return filter
 }
 
-function prefixOf(model: XlsxSheetModel): string {
-	return (model as { readonly prefix?: string }).prefix ?? ""
-}
-
 // --- Filters of a sheet ---
 
 // One filter range: the sheet's (table null) or a table's. `range` is the filter's own (a table's without its totals).
@@ -275,17 +273,6 @@ function targetAt(targets: readonly FilterTarget[], row: number, col: number): F
 }
 
 // --- Cells ---
-
-function isoSerial(text: string, date1904: boolean): number {
-	const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?)?/.exec(text)
-
-	if (match === null) return Number.NaN
-
-	const day = dateSerial(Number(match[1]), Number(match[2]), Number(match[3]), date1904)
-	const seconds = Number(match[4] ?? 0) * 3600 + Number(match[5] ?? 0) * 60 + Number(match[6] ?? 0)
-
-	return day + seconds / 86_400
-}
 
 const BLANK_CELL: FilterCell = { type: SortType.BLANK, number: 0, text: "", date: false }
 
@@ -412,25 +399,21 @@ function unworkable(column: AutoFilterColumn): SheetRefusal | null {
 }
 
 // The ranges the sheet's conditional formatting applies to (its own and the x14 ones in extLst): what a cell shows
-// there may not be its own colour.
+// there may not be its own colour. null when one of them does not read (or the markup cannot be read): it may cover
+// anything.
 function formattedRanges(document: XlsxDocument, model: XlsxSheetModel): SheetRange[] | null {
 	const state = refState(document.workbook)
 	const out: SheetRange[] = []
 
 	try {
-		for (const markup of state.sectionMarkup(model, "conditionalFormatting"))
-			for (const ref of (/\ssqref="([^"]*)"/.exec(markup)?.[1] ?? "").split(/\s+/)) {
-				const range = parseA1Range(ref)
+		for (const section of ["conditionalFormatting", "extLst"] as const)
+			for (const markup of state.sectionMarkup(model, section))
+				for (const sqref of sectionSqrefs(section, markup)) {
+					const ranges = parseSqref(sqref)
 
-				if (range !== null) out.push(range)
-			}
+					if (ranges === null) return null
 
-		for (const markup of state.sectionMarkup(model, "extLst"))
-			for (const match of markup.matchAll(/<(?:\w+:)?sqref>([^<]*)<\/(?:\w+:)?sqref>/g))
-				for (const ref of (match[1] ?? "").split(/\s+/)) {
-					const range = parseA1Range(ref)
-
-					if (range !== null) out.push(range)
+					appendAll(out, ranges)
 				}
 	} catch (error) {
 		if (error instanceof RefRefused) return null
@@ -740,15 +723,7 @@ function quotedSheet(name: string): string {
 }
 
 function absoluteRange(range: SheetRange): string {
-	const letters = (col: number): string => {
-		let out = ""
-
-		for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(65 + ((n - 1) % 26)) + out
-
-		return out
-	}
-
-	return `$${letters(range.startCol)}$${String(range.startRow + 1)}:$${letters(range.endCol)}$${String(range.endRow + 1)}`
+	return `$${columnName(range.startCol)}$${String(range.startRow + 1)}:$${columnName(range.endCol)}$${String(range.endRow + 1)}`
 }
 
 // The workbook's names with the sheet's _xlnm._FilterDatabase on `range` (added when missing), or null when that is
@@ -1050,7 +1025,7 @@ export function sortStateParts(
 
 		for (const column of target.filter.columns) if (column.markup !== null) columns.set(column.colId, column.markup)
 
-		const after = writeAutoFilter(target.filter, prefixOf(model), { ref: target.filter.ref, columns, sort: markup })
+		const after = writeAutoFilter(target.filter, model.prefix, { ref: target.filter.ref, columns, sort: markup })
 
 		if (before.length === 1 && before[0] === after) return null
 
@@ -1188,25 +1163,6 @@ async function context(document: XlsxDocument, sheet: SheetId): Promise<{ model:
 	}
 }
 
-function intersects(a: SheetRange, b: SheetRange): boolean {
-	return a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol
-}
-
-function inGrid(range: SheetRange): boolean {
-	return (
-		Number.isInteger(range.startRow) &&
-		Number.isInteger(range.endRow) &&
-		Number.isInteger(range.startCol) &&
-		Number.isInteger(range.endCol) &&
-		range.startRow >= 0 &&
-		range.startCol >= 0 &&
-		range.endRow < SHEET_MAX_ROWS &&
-		range.endCol < SHEET_MAX_COLS &&
-		range.startRow <= range.endRow &&
-		range.startCol <= range.endCol
-	)
-}
-
 async function toggleFilter(
 	document: XlsxDocument,
 	sheet: SheetId,
@@ -1252,7 +1208,7 @@ async function toggleFilter(
 	// A new filter cannot cross a table or a merge that reaches out of the range's header row.
 	if (tables.some(candidate => intersects(candidate.info.ref, range))) return { refused: { reason: "structureLocked", detail: "tables" } }
 
-	const markup = writeAutoFilter(null, prefixOf(model), { ref: range, columns: new Map() })
+	const markup = writeAutoFilter(null, model.prefix, { ref: range, columns: new Map() })
 	const parts = filterEdit(document, model, { table: null, filter: null, range }, markup, new Map())
 
 	return "reason" in parts ? { refused: parts } : editStep(document, model, parts, changes)
@@ -1428,7 +1384,8 @@ async function filterValues(
 	store.forEachCell({ startRow: range.startRow + 1, endRow: range.endRow, startCol: col, endCol: col }, (r, _, slot) => {
 		if (shown[r - range.startRow - 1] === 0) return
 
-		const cell = readCell(document, model, r, col, slot, true)
+		// Once the list is full, only the counts still change: they need no display text.
+		const cell = readCell(document, model, r, col, slot, !more)
 
 		present++
 
@@ -1443,6 +1400,8 @@ async function filterValues(
 
 			if (cell.date) dates++
 		} else texts++
+
+		if (more) return
 
 		const key = cell.text.toLowerCase()
 

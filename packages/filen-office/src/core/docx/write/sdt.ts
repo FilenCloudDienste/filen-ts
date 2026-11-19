@@ -1,6 +1,9 @@
 import type { Mark, Node } from "prosemirror-model"
 import { NodeKind, decodeUtf8, escapeAttribute } from "../../xml/index"
 import {
+	CHECKED_GLYPH,
+	GLYPH_FONT,
+	UNCHECKED_GLYPH,
 	controlState,
 	formFieldData,
 	type ControlListItem,
@@ -306,6 +309,11 @@ function prefixFor(part: StoryPart, uri: string, fallback: string): { prefix: st
 		: { prefix: bound, declare: "" }
 }
 
+// A w14:checkedState / uncheckedState w14:val: the code point as four or more upper-case hex digits.
+function glyphHex(codePoint: number): string {
+	return codePoint.toString(16).toUpperCase().padStart(4, "0")
+}
+
 function attr(name: string, value: string): string {
 	return ` ${name}="${escapeAttribute(value)}"`
 }
@@ -329,8 +337,8 @@ export function newSdtPr(names: Names, part: StoryPart, made: MadeControl, state
 
 			out +=
 				`<${el("checkbox")}${declare}><${el("checked")}${attr(el("val"), state.checked === true ? "1" : "0")}/>` +
-				`<${el("checkedState")}${attr(el("val"), "2612")}${attr(el("font"), "MS Gothic")}/>` +
-				`<${el("uncheckedState")}${attr(el("val"), "2610")}${attr(el("font"), "MS Gothic")}/></${el("checkbox")}>`
+				`<${el("checkedState")}${attr(el("val"), glyphHex(CHECKED_GLYPH))}${attr(el("font"), GLYPH_FONT)}/>` +
+				`<${el("uncheckedState")}${attr(el("val"), glyphHex(UNCHECKED_GLYPH))}${attr(el("font"), GLYPH_FONT)}/></${el("checkbox")}>`
 			break
 		}
 		case "dropDownList":

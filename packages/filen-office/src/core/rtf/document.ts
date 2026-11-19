@@ -873,7 +873,7 @@ export class DocumentParts implements StoryContext {
 		rPr =
 			rPr === ""
 				? `<w:rPr>${fonts}${size}</w:rPr>`
-				: rPr.replace("<w:rPr>", `<w:rPr>${defaultChar.style >= 0 ? "" : fonts}`).replace("</w:rPr>", `${size}</w:rPr>`)
+				: rPr.replace("<w:rPr>", () => `<w:rPr>${defaultChar.style >= 0 ? "" : fonts}`).replace("</w:rPr>", `${size}</w:rPr>`)
 
 		const pPr = this.defaultPara === undefined ? "" : this.defaultPara.xml(this, numId)
 		let out = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NAMESPACES}><w:docDefaults><w:rPrDefault>${rPr}</w:rPrDefault><w:pPrDefault>${pPr === "" ? "" : `<w:pPr>${pPr}</w:pPr>`}</w:pPrDefault></w:docDefaults>`

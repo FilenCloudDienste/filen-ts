@@ -132,6 +132,27 @@ describe("inserted media in pptx", () => {
 		expect(shape?.xfrm).toMatchObject({ x: BOX.x, y: BOX.y, cx: BOX.cx, cy: BOX.cy })
 	})
 
+	it("stores a medium two slides play once, a duplicate made before the save relating the same part", async () => {
+		const holder = { bytes: mp4(300_000) }
+		const reads = { count: 0, bytes: 0 }
+		const { h } = await insertVideo(holder, reads)
+		const duplicated = await h.command({ family: "slide", kind: "duplicate", slide: h.session.deck.slides[0] as never })
+
+		if (!duplicated.ok) throw new Error(duplicated.refusal)
+
+		const atInsert = reads.bytes
+		const saved = await saveEdits(h, duplicated.revision)
+		const parts = await partsOf(saved)
+
+		expect([...parts.keys()].filter(name => name.startsWith("ppt/media/") && name.endsWith(".mp4"))).toEqual(["ppt/media/media1.mp4"])
+		expect(reads.bytes - atInsert).toBe(holder.bytes.length)
+
+		for (const rels of ["ppt/slides/_rels/slide1.xml.rels", "ppt/slides/_rels/slide2.xml.rels"]) {
+			expect(text(parts.get(rels))).toMatch(/relationships\/video" Target="\.\.\/media\/media1\.mp4"/u)
+			expect(text(parts.get(rels))).toMatch(/2007\/relationships\/media" Target="\.\.\/media\/media1\.mp4"/u)
+		}
+	})
+
 	it("fails the save when the file changed after the insert", async () => {
 		const holder = { bytes: mp4(600_000) }
 		const { h, revision } = await insertVideo(holder, { count: 0, bytes: 0 })
@@ -183,6 +204,89 @@ describe("inserted media in pptx", () => {
 		const shape = slideShapes(render).find(candidate => candidate.id === id)
 
 		expect(shape === undefined ? [] : [...selectionKinds([shape])]).toEqual(["video"])
+	})
+})
+
+const P14_NS = "http://schemas.microsoft.com/office/powerpoint/2010/main"
+const VIDEO_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/video"
+const MEDIA_REL = "http://schemas.microsoft.com/office/2007/relationships/media"
+
+// A deck whose slide holds a source video (shape 4) trimmed by its p14:media.
+function sourceVideoDeck(): Uint8Array {
+	const pic =
+		'<p:pic><p:nvPicPr><p:cNvPr id="4" name="Video 4"><a:hlinkClick r:id="" action="ppaction://media"/></p:cNvPr><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr><a:videoFile r:link="rId10"/>' +
+		`<p:extLst><p:ext uri="{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}"><p14:media xmlns:p14="${P14_NS}" r:embed="rId11"><p14:trim st="1500" end="250"/></p14:media></p:ext></p:extLst></p:nvPr></p:nvPicPr>` +
+		'<p:blipFill><a:blip r:embed="rId12"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+		'<p:spPr><a:xfrm><a:off x="1000000" y="1000000"/><a:ext cx="4000000" cy="3000000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+
+	return buildPptx({
+		slides: [
+			{
+				shapes: sp(2, "Title 1", 'type="title"', "", body(para("Media"))) + pic,
+				rels: [
+					["rId10", VIDEO_REL, "../media/media1.mp4"],
+					["rId11", MEDIA_REL, "../media/media1.mp4"],
+					["rId12", "image", "../media/image1.png"]
+				]
+			}
+		],
+		parts: {
+			"ppt/media/media1.mp4": { data: mp4(4096), type: "video/mp4" },
+			"ppt/media/image1.png": { data: image().bytes, type: "image/png" }
+		}
+	})
+}
+
+const NEW_BOX: ShapeNode = {
+	id: 0,
+	name: "Box",
+	hidden: false,
+	kind: "sp",
+	xfrm: { x: 0, y: 0, cx: 100, cy: 100, rot: 0, flipH: false, flipV: false },
+	props: { geometry: { kind: "preset", preset: "rect", guides: [] } }
+}
+
+describe("source media timing in pptx", () => {
+	it("keeps a trim when the same save also inserts a shape on the slide", async () => {
+		const h = await editHarness(sourceVideoDeck())
+		const slide = h.session.deck.slides[0] as never
+
+		expect((await h.command({ family: "mediaTiming", kind: "setTrim", target: { slide, id: 4 }, startMs: 2000, endMs: 500 })).ok).toBe(
+			true
+		)
+
+		const added = await h.command({ family: "shape", kind: "insert", slide, shape: NEW_BOX })
+
+		if (!added.ok) throw new Error(added.refusal)
+
+		const reopened = await openDeck(await saveEdits(h, added.revision))
+
+		expect(slideNode(reopened, 0).shapes.find(shape => shape.name === "Video 4")?.media?.timing).toEqual({
+			trim: { startMs: 2000, endMs: 500 }
+		})
+	})
+
+	it("keeps a trim made on a duplicated slide", async () => {
+		const h = await editHarness(sourceVideoDeck())
+
+		expect((await h.command({ family: "slide", kind: "duplicate", slide: h.session.deck.slides[0] as never })).ok).toBe(true)
+
+		const copy = (await h.slide(1)).shapes.find(shape => shape.name === "Video 4")
+		const trimmed = await h.command({
+			family: "mediaTiming",
+			kind: "setTrim",
+			target: { slide: h.session.deck.slides[1] as never, id: copy?.id ?? -1 },
+			startMs: 3000,
+			endMs: 0
+		})
+
+		if (!trimmed.ok) throw new Error(trimmed.refusal)
+
+		const reopened = await openDeck(await saveEdits(h, trimmed.revision))
+		const timingAt = (index: number) => slideNode(reopened, index).shapes.find(shape => shape.name === "Video 4")?.media?.timing
+
+		expect(timingAt(0)).toEqual({ trim: { startMs: 1500, endMs: 250 } })
+		expect(timingAt(1)).toEqual({ trim: { startMs: 3000, endMs: 0 } })
 	})
 })
 

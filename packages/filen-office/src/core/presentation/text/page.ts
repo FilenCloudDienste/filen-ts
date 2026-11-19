@@ -1,5 +1,7 @@
 import { CLIP_FLOATS, CLIP_INTS, LINK_INTS, Region, SOURCE_INTS, type DocxPageData } from "../../docx/layout/index"
 import type { DocxPdfPage, DocxPdfRole } from "../../docx/pdf/types"
+import type { DrawingImage } from "../../drawingml/displayList"
+import { MISSING_IMAGE, imageFormat, imageHandling } from "../../drawingml/picture"
 import type { TextLayout } from "../../text/index"
 import type { TextPage } from "../output"
 import type { BodySession } from "./body"
@@ -12,6 +14,13 @@ import type { BodySession } from "./body"
 // An object of a text page that is a picture bullet (objectInts: index into TextPage.images, layer, paragraph); above
 // the docx object kinds.
 export const PICTURE_BULLET_OBJECT = 64
+
+// The picture a picture bullet shows, as a drawing image of its part (looked up by its part name).
+export function bulletImage(part: string): DrawingImage {
+	const format = imageFormat(part, undefined)
+
+	return { ...MISSING_IMAGE, partName: part, format, handling: imageHandling(format) }
+}
 
 // The objects a body's page carries (picture bullets), OBJECT_FLOATS and OBJECT_INTS per object.
 export interface PageObjects {

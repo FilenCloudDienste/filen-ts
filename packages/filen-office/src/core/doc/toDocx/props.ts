@@ -1,4 +1,4 @@
-import { languageTag } from "../../docx/forms/dates"
+import { lcidHex, lcidTag } from "../../docx/forms/dates"
 import type { DocFont } from "../fonts"
 import type { DocBorder, DocChar, DocColor, DocPara, DocShading, DocTab } from "../props"
 import { attr, clamp, hexColor, onOff, val } from "./xml"
@@ -189,10 +189,10 @@ export function fontName(context: PropsContext, index: number): string | undefin
 }
 
 export function lang(lid: number): string | undefined {
-	// 0x0400 is "no proofing language"; 0 and unknown identifiers are left out.
+	// 0x0400 is "no proofing language"; 0 is left out. An identifier without a tag keeps its four hex digits.
 	if (lid === 0 || lid === 0x0400) return undefined
 
-	return languageTag(lid.toString(16).padStart(4, "0"))
+	return lcidTag(lid) ?? lcidHex(lid)
 }
 
 function same(a: DocColor | undefined, b: DocColor | undefined): boolean {

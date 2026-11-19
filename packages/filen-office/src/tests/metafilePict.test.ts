@@ -46,6 +46,82 @@ function picture(width: number, height: number, body: (p: Pict) => void): Uint8A
 	return p.done()
 }
 
+// A QuickTime-compressed image (opcode 0x8200): identity matrix, a 2x2 source rectangle, no matte or mask, an empty
+// image description and then `data`.
+function quickTime(p: Pict, data: readonly number[]): void {
+	const body = new Pict().word(0)
+
+	for (const value of [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000]) body.long(value)
+
+	body.long(0)
+		.word(0, 0, 0, 0)
+		.word(0)
+		.word(0, 0, 2, 2)
+		.long(0)
+		.long(0)
+		.long(4)
+		.byte(...data)
+		.align()
+
+	const bytes = body.done()
+
+	p.word(0x8200)
+		.long(bytes.length)
+		.byte(...bytes)
+}
+
+// A PNG signature and IHDR chunk declaring `width` x `height`.
+function pngHeader(width: number, height: number): number[] {
+	const be = (value: number): number[] => [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]
+
+	return [
+		0x89,
+		0x50,
+		0x4e,
+		0x47,
+		0x0d,
+		0x0a,
+		0x1a,
+		0x0a,
+		...be(13),
+		0x49,
+		0x48,
+		0x44,
+		0x52,
+		...be(width),
+		...be(height),
+		8,
+		6,
+		0,
+		0,
+		0,
+		...be(0)
+	]
+}
+
+// A BkPixPat (0x0012) of type 1 whose `width` x `height` pixmap has empty packed rows but the first, which is 255
+// PackBits no-ops (flag 128): read as opcodes instead of stepped over, its count would end the picture (0x00FF).
+function emptyPixPattern(p: Pict, width: number, height: number, rowBytes: number, pixelSize: number): void {
+	p.word(0x0012, 1).word(0, 0, 0, 0)
+	p.word(0x8000 | rowBytes, 0, 0, height, width)
+	p.word(0, 0)
+		.long(0)
+		.long(0x480000)
+		.long(0x480000)
+		.word(0, pixelSize, pixelSize === 32 ? 3 : 1, 8)
+		.long(0)
+		.long(0)
+		.long(0)
+
+	if (pixelSize <= 8) p.long(0).word(0, 0).word(0, 0, 0, 0)
+
+	p.word(255).byte(...new Array<number>(255).fill(128))
+
+	for (let row = 1; row < height; row++) p.word(0)
+
+	p.align()
+}
+
 describe("QuickDraw pictures", () => {
 	it("draws rectangles and ovals in the RGB foreground colour, frames inside their rectangle", () => {
 		const bytes = picture(72, 72, p => {
@@ -72,7 +148,7 @@ describe("QuickDraw pictures", () => {
 	it("draws text at the pen location in Mac Roman", () => {
 		const bytes = picture(200, 50, p => {
 			p.word(0x000d, 18)
-			p.word(0x0028, 30, 10).byte(3, 0x43, 0x61, 0x8e)
+			p.word(0x0028, 30, 10).byte(4, 0x43, 0x61, 0xca, 0x8e)
 		})
 		const result = convertPict(new Bytes(bytes))
 
@@ -81,7 +157,7 @@ describe("QuickDraw pictures", () => {
 		const text = result.list.texts[0]
 
 		expect(result.list.kind(0)).toBe(ItemKind.TEXT)
-		expect(text?.kind === "glyphs" ? text.run.text : undefined).toBe("Caé")
+		expect(text?.kind === "glyphs" ? text.run.text : undefined).toBe("Ca\u00a0é")
 	})
 
 	it("unpacks a PackBits pixmap through its colour table and a 32-bit direct pixmap's component planes", () => {
@@ -128,6 +204,48 @@ describe("QuickDraw pictures", () => {
 		expect(result.truncated).toBe(true)
 		expect(result.list.images.length).toBe(0)
 		expect((process.resourceUsage().maxRSS - before) / 1024).toBeLessThan(64)
+	})
+
+	it("embeds QuickTime PNG and JPEG images only within the per-image pixel bound", () => {
+		const jpeg = [0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 8, 0, 2, 0, 2, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]
+		const small = convertPict(
+			new Bytes(
+				picture(72, 72, p => {
+					quickTime(p, pngHeader(2, 2))
+					quickTime(p, jpeg)
+				})
+			)
+		)
+
+		if (!small.ok) throw new Error(small.reason)
+
+		expect(small.list.images.map(image => image.format)).toEqual(["png", "jpeg"])
+		expect(small.unsupported).toBe(0)
+
+		const bomb = convertPict(new Bytes(picture(72, 72, p => quickTime(p, pngHeader(60000, 60000)))))
+
+		if (!bomb.ok) throw new Error(bomb.reason)
+
+		expect(bomb.list.images.length).toBe(0)
+		expect(bomb.unsupported).toBeGreaterThan(0)
+	})
+
+	it("steps over a pixel pattern's rows without unpacking them", () => {
+		const bytes = picture(72, 72, p => {
+			// Three 16-megapixel 8-bit patterns, then a 32-bit one whose rows unpack past the decoding bound.
+			for (let k = 0; k < 3; k++) emptyPixPattern(p, 4096, 4096, 4096, 8)
+
+			emptyPixPattern(p, 512, 32767, 2051, 32)
+			p.word(0x001a, 0xffff, 0, 0)
+			p.word(0x0031, 0, 0, 36, 36)
+		})
+		const result = convertPict(new Bytes(bytes))
+
+		if (!result.ok) throw new Error(result.reason)
+
+		expect(result.truncated).toBe(false)
+		expect(result.list.itemCount).toBe(1)
+		expect(result.list.paints[result.list.itemInt(0, ItemInt.FILL)]).toMatchObject({ kind: "solid", color: 0xff0000ff })
 	})
 
 	it("refuses a direct pixmap with more than four components or an unknown pixel size, typed", () => {

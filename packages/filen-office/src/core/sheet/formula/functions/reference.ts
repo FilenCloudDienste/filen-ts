@@ -17,13 +17,15 @@ import {
 	naError,
 	refError,
 	SheetFunctionPlugin,
+	unwrap,
 	valueError,
 	type PluginAst,
 	type PluginCall,
 	type PluginRange,
 	type PluginScalar,
 	type PluginState,
-	type PluginValue
+	type PluginValue,
+	type RawEvaluation
 } from "./plugin"
 
 // A reference's rows and columns as Excel counts them: a whole column has the grid's every row, wherever the engine
@@ -34,11 +36,6 @@ function heightOf(value: SimpleRangeValue, range: PluginRange | undefined): numb
 
 function widthOf(value: SimpleRangeValue, range: PluginRange | undefined): number {
 	return range !== undefined && range.end.col === Number.POSITIVE_INFINITY ? MAX_COLUMNS - range.start.col : value.width()
-}
-
-// The engine's evaluation before a one-cell result is read out of its range (private to the engine).
-interface RawEvaluation {
-	evaluateAstWithoutPostprocessing(ast: PluginAst, state: PluginState): PluginValue
 }
 
 // INDEX's row_num, column_num and area_num, read after its array (INDEX_REFERENCE_FUNCTION reads that itself).
@@ -100,9 +97,8 @@ export class ReferenceFunctions extends SheetFunctionPlugin {
 			return shownFormulaAt(address) ?? naError()
 		}
 
-		let arg = ast.args.length === 1 ? ast.args[0] : undefined
-
-		while (arg?.type === ("PARENTHESIS" as PluginAst["type"])) arg = (arg as PluginAst & { expression: PluginAst }).expression
+		const given = ast.args.length === 1 ? ast.args[0] : undefined
+		const arg = given === undefined ? undefined : unwrap(given)
 
 		if (arg?.type === ("FUNCTION_CALL" as PluginAst["type"])) {
 			// Unwrapped: evaluateAst gives a one-cell reference's value, no longer the reference.

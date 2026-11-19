@@ -7,6 +7,9 @@ import type { DocxSessionApi } from "@filen/office/dom/docx"
 import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { EditSink } from "@filen/office/react/docx/editor"
 import { ReflowView } from "../react/docx/reflow/view"
+import { LineFlag } from "../core/text/index"
+import { paintPage, patchPage } from "../react/docx/paint/page"
+import { FIXTURE_TABLES, fixturePage, text, type FixtureLine } from "./docxPageFixture"
 import { buildDocx, p } from "./docxSynthetic"
 import { pagedEditor } from "./pagedDomFixtures"
 
@@ -206,3 +209,46 @@ for (const surface of SURFACES) {
 		})
 	})
 }
+
+describe("what copying puts after a painted line", () => {
+	// Per line: a run of spaces to the next line, a newline, a single space, nothing after a hyphen, a space where
+	// the next line follows at once.
+	const page = (top: number) => {
+		const line = (at: number, source: number, start: number, end: number, flags: number): FixtureLine => ({
+			top: top + at * 30,
+			source,
+			start,
+			end,
+			flags,
+			fragments: [text(start, end)]
+		})
+
+		return fixturePage({
+			sources: ["one   two", "ab cd", "hy-phen", "abcd"],
+			lines: [
+				line(0, 0, 0, 3, LineFlag.FIRST),
+				line(1, 0, 6, 9, LineFlag.LAST),
+				line(2, 1, 0, 2, LineFlag.FIRST),
+				line(3, 1, 3, 5, LineFlag.LAST),
+				line(4, 2, 0, 3, LineFlag.FIRST | LineFlag.HYPHENATED),
+				line(5, 2, 3, 7, LineFlag.LAST),
+				line(6, 3, 0, 2, LineFlag.FIRST),
+				line(7, 3, 2, 4, LineFlag.LAST)
+			]
+		})
+	}
+	const separators = (lines: readonly { readonly text: HTMLElement }[]): (string | undefined)[] =>
+		lines.map(line => line.text.querySelector(".fo-docx-eol")?.textContent)
+
+	it("is the same on a patched page as on a fresh one, for every kind of separator", () => {
+		const fresh = paintPage(page(100), { document, tables: FIXTURE_TABLES })
+
+		expect(separators(fresh.lines)).toEqual(["   ", "\n", " ", "\n", undefined, "\n", " ", "\n"])
+
+		// Painted elsewhere, then moved: every line kept.
+		const moved = patchPage(paintPage(page(140), { document, tables: FIXTURE_TABLES }), page(100), { document, tables: FIXTURE_TABLES })
+
+		expect(separators(moved.painted.lines)).toEqual(separators(fresh.lines))
+		expect(moved.painted.root.innerHTML).toBe(fresh.root.innerHTML)
+	})
+})

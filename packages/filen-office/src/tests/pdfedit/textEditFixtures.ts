@@ -31,7 +31,8 @@ export const SECOND = "Second line stays"
 export const LATIN_CONTENT = `BT /F1 12 Tf 72 722 Td (${LINE}) Tj ET BT /F1 12 Tf 72 692 Td (${SECOND}) Tj ET`
 
 // Pages have the fonts F1 (Helvetica), F2 (Times-Bold, as "ABCDEF+Garamond-Italic" when `garamond`), F3 (Type 3,
-// one square glyph for "A"), F4 (Arimo as an Identity-V Type0 font).
+// one square glyph for "A"), F4 (Arimo as an Identity-V Type0 font), F5 (Arimo as an Identity-H Type0 font, for
+// Hebrew).
 export function makeDocument(spec: DocumentSpec): mupdf.PDFDocument {
 	const document = new mupdf.PDFDocument()
 	const helvetica = document.addSimpleFont(new mupdf.Font("Helvetica"))
@@ -56,7 +57,16 @@ export function makeDocument(spec: DocumentSpec): mupdf.PDFDocument {
 
 	arimo.put("Encoding", document.newName("Identity-V"))
 
-	const resources = document.addObject({ Font: { F1: helvetica, F2: times, F3: type3, F4: arimo } })
+	// MuPDF hands out one font object per font file: the horizontal one is a second Type0 dictionary over its CIDFont.
+	const arimoHorizontal = document.addObject({
+		Type: "Font",
+		Subtype: "Type0",
+		BaseFont: arimo.get("BaseFont"),
+		Encoding: "Identity-H",
+		DescendantFonts: arimo.get("DescendantFonts"),
+		ToUnicode: arimo.get("ToUnicode")
+	})
+	const resources = document.addObject({ Font: { F1: helvetica, F2: times, F3: type3, F4: arimo, F5: arimoHorizontal } })
 
 	for (const page of spec.pages) {
 		const object = document.addPage([...(page.mediaBox ?? [0, 0, 595, 842])], page.rotate ?? 0, resources, page.content)
@@ -78,7 +88,7 @@ export function arimoBytes(): Uint8Array {
 	return (arimo ??= new Uint8Array(gunzipSync(readFileSync(new URL("arimo/Arimo-Regular.ttf.gz", FONTS)))))
 }
 
-// Hex glyph ids of `text` in Arimo, for F4 (Identity: code = glyph id).
+// Hex glyph ids of `text` in Arimo, for F4 and F5 (Identity: code = glyph id).
 export function arimoCodes(text: string): string {
 	const font = new mupdf.Font("Arimo", arimoBytes())
 

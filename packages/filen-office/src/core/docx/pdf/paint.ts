@@ -17,14 +17,18 @@ import {
 	FRAGMENT_KIND_MASK,
 	FRAGMENT_LEVEL_SHIFT,
 	FragmentFlag,
+	FragmentFloat,
+	FragmentInt,
 	FragmentKind,
 	LINE_FLOATS,
 	LINE_INTS,
+	LineFloat,
+	LineInt,
 	SMALL_CAPS_SCALE,
 	TabLeader
 } from "../../text/index"
 import { symbolTable, symbolToUnicode } from "../../fonts/index"
-import { GRAPHIC_FLOATS, GRAPHIC_INTS, Layer, OBJECT_FLOATS, OBJECT_INTS, PageGraphic } from "../layout/output"
+import { GRAPHIC_FLOATS, GRAPHIC_INTS, GraphicInt, Layer, OBJECT_FLOATS, OBJECT_INTS, ObjectInt, PageGraphic } from "../layout/output"
 import { Emphasis, OUTLINE_WIDTH, PAPER, RunEffect, effectFillsPaper, effectShadows, effectStrokes } from "../layout/effects"
 import type { DecorationValue } from "../layout/styles"
 import { borderLines } from "../layout/borderLines"
@@ -258,14 +262,14 @@ function decorationColor(value: DecorationValue | undefined): number | undefined
 
 // The text colour under x on a line (decorations without a colour of their own take it).
 function colorAt(page: DocxPdfPage, styles: readonly DocxPdfStyle[], line: number, x: number): number {
-	const first = page.lineInts[line * LINE_INTS] ?? 0
-	const count = page.lineInts[line * LINE_INTS + 1] ?? 0
+	const first = page.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
+	const count = page.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
 	let style = -1
 
 	for (let k = first; k < first + count; k++) {
-		if ((page.fragmentFloats[k * FRAGMENT_FLOATS] ?? 0) > x + 0.5) break
+		if ((page.fragmentFloats[k * FRAGMENT_FLOATS + FragmentFloat.X] ?? 0) > x + 0.5) break
 
-		style = page.fragmentInts[k * FRAGMENT_INTS + 2] ?? -1
+		style = page.fragmentInts[k * FRAGMENT_INTS + FragmentInt.STYLE] ?? -1
 	}
 
 	return styles[style]?.color ?? BLACK
@@ -404,8 +408,8 @@ function paintGraphic(page: PdfPage, data: DocxPdfPage, decorations: readonly De
 	const y = data.graphicFloats[f + 1] ?? 0
 	const width = data.graphicFloats[f + 2] ?? 0
 	const height = data.graphicFloats[f + 3] ?? 0
-	const kind = data.graphicInts[i] ?? 0
-	const value = decorations[(data.graphicInts[i + 1] ?? 0) - 1]
+	const kind = data.graphicInts[i + GraphicInt.KIND] ?? 0
+	const value = decorations[(data.graphicInts[i + GraphicInt.KEY] ?? 0) - 1]
 
 	if (!(width > 0 && height > 0)) return
 
@@ -689,7 +693,7 @@ export class DocxPagePainter {
 		if (owners !== undefined) {
 			const here = new Set<number>()
 
-			for (let object = 0; object < data.objectCount; object++) here.add(data.objectInts[object * OBJECT_INTS] ?? -1)
+			for (let object = 0; object < data.objectCount; object++) here.add(data.objectInts[object * OBJECT_INTS + ObjectInt.ID] ?? -1)
 
 			for (let source = 0; source < data.sourceCount; source++) {
 				const owner = owners[source] ?? -1
@@ -729,7 +733,7 @@ export class DocxPagePainter {
 		page.beginArtifact({ type: "Layout" })
 
 		for (let g = 0; g < data.graphicCount; g++) {
-			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.BEHIND) this.graphic(g)
+			if ((data.graphicInts[g * GRAPHIC_INTS + GraphicInt.LAYER] ?? Layer.TEXT) === Layer.BEHIND) this.graphic(g)
 		}
 
 		page.endArtifact()
@@ -739,7 +743,7 @@ export class DocxPagePainter {
 		page.beginArtifact({ type: "Layout" })
 
 		for (let g = 0; g < data.graphicCount; g++) {
-			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.TEXT) this.graphic(g)
+			if ((data.graphicInts[g * GRAPHIC_INTS + GraphicInt.LAYER] ?? Layer.TEXT) === Layer.TEXT) this.graphic(g)
 		}
 
 		for (let line = 0; line < data.lineCount; line++) if (!this.inBox(line)) this.lineDecorations(line, true)
@@ -760,7 +764,7 @@ export class DocxPagePainter {
 		page.beginArtifact({ type: "Layout" })
 
 		for (let g = 0; g < data.graphicCount; g++) {
-			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.FRONT) this.graphic(g)
+			if ((data.graphicInts[g * GRAPHIC_INTS + GraphicInt.LAYER] ?? Layer.TEXT) === Layer.FRONT) this.graphic(g)
 		}
 
 		page.endArtifact()
@@ -799,16 +803,16 @@ export class DocxPagePainter {
 	}
 
 	private inBox(line: number): boolean {
-		return this.boxText.has(this.data.lineInts[line * LINE_INTS + 5] ?? -1)
+		return this.boxText.has(this.data.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)
 	}
 
 	private objectLayer(object: number): number {
-		return this.data.objectInts[object * OBJECT_INTS + 1] ?? Layer.TEXT
+		return this.data.objectInts[object * OBJECT_INTS + ObjectInt.LAYER] ?? Layer.TEXT
 	}
 
 	// Whether a text-layer object is drawn with its paragraph (in its structure element).
 	private anchored(object: number): boolean {
-		const source = this.data.objectInts[object * OBJECT_INTS + 2] ?? -1
+		const source = this.data.objectInts[object * OBJECT_INTS + ObjectInt.SOURCE] ?? -1
 
 		return source >= 0 && source < this.data.sourceCount && this.roleOf(source).kind !== "artifact"
 	}
@@ -819,8 +823,9 @@ export class DocxPagePainter {
 
 	private lineDecorations(line: number, fills: boolean): void {
 		const { data, page } = this
-		const first = data.lineInts[line * LINE_INTS + 6] ?? 0
-		const last = line + 1 < data.lineCount ? (data.lineInts[(line + 1) * LINE_INTS + 6] ?? 0) : data.decorationCount
+		const first = data.lineInts[line * LINE_INTS + LineInt.FIRST_DECORATION] ?? 0
+		const last =
+			line + 1 < data.lineCount ? (data.lineInts[(line + 1) * LINE_INTS + LineInt.FIRST_DECORATION] ?? 0) : data.decorationCount
 		const clip = this.clips.lines[line] ?? -1
 
 		if (last <= first) return
@@ -838,17 +843,17 @@ export class DocxPagePainter {
 
 	private leaders(line: number): void {
 		const { data } = this
-		const first = data.lineInts[line * LINE_INTS] ?? 0
-		const count = data.lineInts[line * LINE_INTS + 1] ?? 0
-		const baseline = data.lineFloats[line * LINE_FLOATS + 2] ?? 0
+		const first = data.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
+		const count = data.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
+		const baseline = data.lineFloats[line * LINE_FLOATS + LineFloat.BASELINE] ?? 0
 
 		for (let k = first; k < first + count; k++) {
 			const fi = k * FRAGMENT_INTS
 
-			if (((data.fragmentInts[fi + 3] ?? 0) & FRAGMENT_KIND_MASK) !== FragmentKind.TAB) continue
+			if (((data.fragmentInts[fi + FragmentInt.INFO] ?? 0) & FRAGMENT_KIND_MASK) !== FragmentKind.TAB) continue
 
-			const leader = data.fragmentInts[fi + 4] ?? 0
-			const style = this.context.doc.styles[data.fragmentInts[fi + 2] ?? -1]
+			const leader = data.fragmentInts[fi + FragmentInt.AUX] ?? 0
+			const style = this.context.doc.styles[data.fragmentInts[fi + FragmentInt.STYLE] ?? -1]
 
 			if (leader === TabLeader.NONE) continue
 
@@ -856,9 +861,9 @@ export class DocxPagePainter {
 				this.page,
 				leader,
 				style?.color ?? BLACK,
-				data.fragmentFloats[k * FRAGMENT_FLOATS] ?? 0,
+				data.fragmentFloats[k * FRAGMENT_FLOATS + FragmentFloat.X] ?? 0,
 				baseline - (style?.shift ?? 0),
-				data.fragmentFloats[k * FRAGMENT_FLOATS + 1] ?? 0
+				data.fragmentFloats[k * FRAGMENT_FLOATS + FragmentFloat.WIDTH] ?? 0
 			)
 		}
 	}
@@ -872,7 +877,7 @@ export class DocxPagePainter {
 		const order: number[] = []
 
 		for (let line = 0; line < data.lineCount; line++) {
-			const source = data.lineInts[line * LINE_INTS + 5] ?? -1
+			const source = data.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1
 
 			if (this.boxText.has(source)) continue
 
@@ -892,7 +897,7 @@ export class DocxPagePainter {
 		for (let object = 0; object < data.objectCount; object++) {
 			if (this.objectLayer(object) !== Layer.TEXT || !this.anchored(object)) continue
 
-			const source = data.objectInts[object * OBJECT_INTS + 2] ?? -1
+			const source = data.objectInts[object * OBJECT_INTS + ObjectInt.SOURCE] ?? -1
 			const list = objectsBySource.get(source)
 
 			if (list === undefined) objectsBySource.set(source, [object])
@@ -980,7 +985,8 @@ export class DocxPagePainter {
 
 		for (const source of sources) linesBySource.set(source, [])
 
-		for (let line = 0; line < data.lineCount; line++) linesBySource.get(data.lineInts[line * LINE_INTS + 5] ?? -1)?.push(line)
+		for (let line = 0; line < data.lineCount; line++)
+			linesBySource.get(data.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)?.push(line)
 
 		for (const source of cellOrder(sources, source => this.roleOf(source)))
 			await this.paintSource(source, linesBySource.get(source) ?? [], [], true)
@@ -1150,24 +1156,24 @@ export class DocxPagePainter {
 		const { data, page } = this
 		const lf = line * LINE_FLOATS
 		const li = line * LINE_INTS
-		const top = data.lineFloats[lf] ?? 0
-		const height = data.lineFloats[lf + 1] ?? 0
-		const baseline = data.lineFloats[lf + 2] ?? 0
-		const first = data.lineInts[li] ?? 0
-		const count = data.lineInts[li + 1] ?? 0
-		const source = data.lineInts[li + 5] ?? -1
+		const top = data.lineFloats[lf + LineFloat.TOP] ?? 0
+		const height = data.lineFloats[lf + LineFloat.HEIGHT] ?? 0
+		const baseline = data.lineFloats[lf + LineFloat.BASELINE] ?? 0
+		const first = data.lineInts[li + LineInt.FIRST_FRAGMENT] ?? 0
+		const count = data.lineInts[li + LineInt.FRAGMENT_COUNT] ?? 0
+		const source = data.lineInts[li + LineInt.SOURCE] ?? -1
 		const text = data.sourceTexts[source] ?? ""
 		const clip = this.clips.lines[line] ?? -1
 		const turn = this.lineTurn(line)
 
 		for (let k = first; k < first + count; k++) {
 			const fi = k * FRAGMENT_INTS
-			const info = data.fragmentInts[fi + 3] ?? 0
+			const info = data.fragmentInts[fi + FragmentInt.INFO] ?? 0
 
 			if ((info & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT) continue
 
-			const start = data.fragmentInts[fi] ?? 0
-			const end = data.fragmentInts[fi + 1] ?? 0
+			const start = data.fragmentInts[fi + FragmentInt.TEXT_START] ?? 0
+			const end = data.fragmentInts[fi + FragmentInt.TEXT_END] ?? 0
 
 			if (end <= start && (info & FragmentFlag.HYPHEN) === 0) continue
 
@@ -1220,11 +1226,11 @@ export class DocxPagePainter {
 
 		for (let p = 0; p < pieces.length; p++) {
 			const [from, to, small] = pieces[p] ?? [start, end, false]
-			const pending = fonts.prepare(text, from, to, request)
+			const pieceFlags = (small ? SHAPE_SMALL_CAPS : 0) | (p === pieces.length - 1 ? flags : flags & ~SHAPE_HYPHEN)
+			const pending = fonts.prepare(text, from, to, request, pieceFlags)
 
 			if (pending !== undefined) await pending
 
-			const pieceFlags = (small ? SHAPE_SMALL_CAPS : 0) | (p === pieces.length - 1 ? flags : flags & ~SHAPE_HYPHEN)
 			const shaped = fonts.shape(text, from, to, request, { level, flags: pieceFlags })
 			const size = small ? style.size * SMALL_CAPS_SCALE : style.size
 
@@ -1254,10 +1260,10 @@ export class DocxPagePainter {
 		const { data, page, context } = this
 		const ff = fragment * FRAGMENT_FLOATS
 		const fi = fragment * FRAGMENT_INTS
-		const start = data.fragmentInts[fi] ?? 0
-		const end = data.fragmentInts[fi + 1] ?? 0
-		const styleId = data.fragmentInts[fi + 2] ?? -1
-		const info = data.fragmentInts[fi + 3] ?? 0
+		const start = data.fragmentInts[fi + FragmentInt.TEXT_START] ?? 0
+		const end = data.fragmentInts[fi + FragmentInt.TEXT_END] ?? 0
+		const styleId = data.fragmentInts[fi + FragmentInt.STYLE] ?? -1
+		const info = data.fragmentInts[fi + FragmentInt.INFO] ?? 0
 		const style = context.doc.styles[styleId]
 
 		if (style === undefined) return
@@ -1268,18 +1274,18 @@ export class DocxPagePainter {
 		if (placed.length === 0) return
 
 		const scaleX = style.scaleX > 0 && Number.isFinite(style.scaleX) ? Math.min(style.scaleX, 10) : 1
-		const wordSpacing = data.fragmentFloats[ff + 2] ?? 0
-		const letterSpacing = style.letterSpacing + (data.fragmentFloats[ff + 3] ?? 0)
+		const wordSpacing = data.fragmentFloats[ff + FragmentFloat.WORD_SPACING] ?? 0
+		const letterSpacing = style.letterSpacing + (data.fragmentFloats[ff + FragmentFloat.LETTER_SPACING] ?? 0)
 		// Natural advance of each glyph with the spacing CSS adds, then the fit to the layout's width (in the
 		// fragment's unscaled space): spread between glyphs, or a horizontal scale.
 		const advances = placed.map(
 			glyph => glyph.width + letterSpacing + (wordSpacing !== 0 && fragmentText.charCodeAt(glyph.cluster) === 0x20 ? wordSpacing : 0)
 		)
 		const natural = advances.reduce((sum, value) => sum + value, 0)
-		const target = (data.fragmentFloats[ff + 1] ?? natural * scaleX) / scaleX
+		const target = (data.fragmentFloats[ff + FragmentFloat.WIDTH] ?? natural * scaleX) / scaleX
 		const fit = style.fit === "scale" && natural > 0 ? target / natural : 1
 		const spread = style.fit === "scale" || placed.length < 2 ? 0 : (target - natural) / (placed.length - 1)
-		const x0 = data.fragmentFloats[ff] ?? 0
+		const x0 = data.fragmentFloats[ff + FragmentFloat.X] ?? 0
 		const y = baseline - style.shift
 		const upright = (info & FragmentFlag.UPRIGHT) !== 0
 		// Link ranges over this fragment's text.
@@ -1528,7 +1534,7 @@ export class DocxPagePainter {
 	private async paintObject(object: number, parent: number | undefined): Promise<void> {
 		const { data, page, context } = this
 		const f = object * OBJECT_FLOATS
-		const id = data.objectInts[object * OBJECT_INTS] ?? -1
+		const id = data.objectInts[object * OBJECT_INTS + ObjectInt.ID] ?? -1
 		const x = data.objectFloats[f] ?? 0
 		const y = data.objectFloats[f + 1] ?? 0
 		const width = data.objectFloats[f + 2] ?? 0
@@ -1556,6 +1562,12 @@ export class DocxPagePainter {
 				alt: alt.trim(),
 				bbox: [x, y, x + width, y + height]
 			})
+			page.beginContent(node)
+		} else if (this.tagged && entry.kind === "checkbox") {
+			// A checkbox's state has no text of its own (its paragraph's text skips the object): read as a ballot box.
+			if (parent === undefined) this.closeAll()
+
+			node = context.writer.open("Span", { actualText: entry.checked ? "\u2612" : "\u2610" })
 			page.beginContent(node)
 		} else {
 			page.beginArtifact({ type: "Layout" })
@@ -1709,8 +1721,6 @@ export class DocxPagePainter {
 	}
 }
 
-// A symbol font's codes as the Unicode characters they show, where one UTF-16 unit stays one (offsets keep
-// meaning the source's); a code whose character is outside the BMP is left (and reported missing).
 interface DrawingLook {
 	readonly color: number
 	readonly filled: boolean
@@ -1838,6 +1848,8 @@ function blendColors(top: number, bottom: number, share: number): number {
 	return out >>> 0
 }
 
+// A symbol font's codes as the Unicode characters they show, where one UTF-16 unit stays one (offsets keep
+// meaning the source's); a code whose character is outside the BMP is left (and reported missing).
 function symbolMapped(text: string, family: string | undefined): string {
 	const table = family === undefined ? undefined : symbolTable(family)
 

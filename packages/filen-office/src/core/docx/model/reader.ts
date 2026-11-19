@@ -26,10 +26,7 @@ function isSpace(b: number | undefined): boolean {
 	return b === 32 || b === 9 || b === 10 || b === 13
 }
 
-// Element classification and attribute reads for one part. When every namespace is declared on the root
-// (Word always does this) an element's code depends only on its interned name, so it is computed once per
-// distinct name; otherwise per node. Attributes are matched against every prefix bound to the group in
-// scope, scanned in place, and decoded only when asked for.
+// The prefixes bound to one namespace group, as a list and as a set.
 interface PrefixSet {
 	readonly list: readonly string[]
 	readonly set: ReadonlySet<string>
@@ -435,14 +432,21 @@ export function afterSubtree(document: XmlDocument, node: number, root: number):
 	return document.count
 }
 
-// Character data with every valid reference resolved and invalid ones kept as written.
+// Character data with every valid reference resolved and invalid ones kept as written. Both searches stay inside
+// the value (a reference is at most 12 bytes up to its ';'): unbounded, each bad '&' scanned on through the part.
 function decodeLenient(bytes: Uint8Array, start: number, end: number, attribute: boolean): string {
+	const value = bytes.subarray(start, end)
 	let out = ""
 	let from = start
 
-	for (let amp = bytes.indexOf(38, start); amp >= 0 && amp < end; amp = bytes.indexOf(38, from)) {
-		const semicolon = bytes.indexOf(59, amp)
-		const referenceEnd = semicolon >= 0 && semicolon < end && semicolon - amp <= 12 ? semicolon + 1 : amp + 1
+	for (let at = value.indexOf(38); at >= 0; at = value.indexOf(38, from - start)) {
+		const amp = start + at
+		const limit = Math.min(end, amp + 13)
+		let semicolon = amp + 1
+
+		while (semicolon < limit && bytes[semicolon] !== 59) semicolon++
+
+		const referenceEnd = semicolon < limit ? semicolon + 1 : amp + 1
 
 		out += decodeCharacterData(bytes, from, amp, attribute)
 
@@ -494,8 +498,14 @@ const TWIPS_PER_UNIT: Readonly<Record<string, number>> = {
 	pi: 240
 }
 
+// Longer than any measure a file writes: such text is not read (nor run through the pattern).
+export const MAX_MEASURE_TEXT = 64
+
 export function parseUniversalMeasure(text: string, perPoint: number): number | undefined {
-	const match = /^\s*(-?[0-9]*\.?[0-9]+)\s*(mm|cm|in|pt|pc|pi)\s*$/.exec(text)
+	if (text.length > MAX_MEASURE_TEXT) return undefined
+
+	// One way to split the digits (a run of them split between two groups backtracks quadratically).
+	const match = /^\s*(-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))\s*(mm|cm|in|pt|pc|pi)\s*$/.exec(text)
 
 	if (match === null) return undefined
 

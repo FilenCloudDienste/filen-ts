@@ -1,5 +1,5 @@
 import { appendAll } from "../../arrays"
-import type { SheetId, SheetRange } from "../protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRange } from "../protocol"
 import { cellName } from "../refs/cellRef"
 import type { XlsxBorderEdge, XlsxColor, XlsxDxf, XlsxFont } from "../../xlsx/model/types"
 import { FormulaEvaluator, formulaSheets, ruleTruth, type FormulaHost } from "./formula/evaluate"
@@ -179,10 +179,10 @@ function moved(ref: AreaRef, anchorRow: number, anchorCol: number, range: SheetR
 
 		return low < 0 || high >= max ? [0, max - 1] : [low, high]
 	}
-	const [r1] = span(ref.startRow, ref.startRow, ref.startRowAbs, range.startRow - anchorRow, range.endRow - anchorRow, 1_048_576)
-	const [, r2] = span(ref.endRow, ref.endRow, ref.endRowAbs, range.startRow - anchorRow, range.endRow - anchorRow, 1_048_576)
-	const [c1] = span(ref.startCol, ref.startCol, ref.startColAbs, range.startCol - anchorCol, range.endCol - anchorCol, 16_384)
-	const [, c2] = span(ref.endCol, ref.endCol, ref.endColAbs, range.startCol - anchorCol, range.endCol - anchorCol, 16_384)
+	const [r1] = span(ref.startRow, ref.startRow, ref.startRowAbs, range.startRow - anchorRow, range.endRow - anchorRow, SHEET_MAX_ROWS)
+	const [, r2] = span(ref.endRow, ref.endRow, ref.endRowAbs, range.startRow - anchorRow, range.endRow - anchorRow, SHEET_MAX_ROWS)
+	const [c1] = span(ref.startCol, ref.startCol, ref.startColAbs, range.startCol - anchorCol, range.endCol - anchorCol, SHEET_MAX_COLS)
+	const [, c2] = span(ref.endCol, ref.endCol, ref.endColAbs, range.startCol - anchorCol, range.endCol - anchorCol, SHEET_MAX_COLS)
 
 	return { startRow: Math.min(r1, r2), startCol: Math.min(c1, c2), endRow: Math.max(r1, r2), endCol: Math.max(c1, c2) }
 }
@@ -199,6 +199,8 @@ class PreparedRule {
 	// The rule's formulas as written (or implied), and read once; an Unsupported one leaves the rule unapplied.
 	readonly texts: readonly string[]
 	readonly formulas: readonly (ParsedFormula | Unsupported)[]
+	// Each formula cfvo's index into `formulas`.
+	private readonly cfvoFormulas = new Map<Cfvo, number>()
 	// Where the formulas read, by upper-case sheet name ("": the rule's own), or null when that is not known ahead.
 	readonly reads: ReadonlyMap<string, RangeIndex> | null
 	// The rule's ranges as a key: rules over the same cells share their statistics.
@@ -231,7 +233,10 @@ class PreparedRule {
 			...(rule.dataBar === null ? [] : [rule.dataBar.min, rule.dataBar.max]),
 			...(rule.iconSet?.cfvos ?? [])
 		])
-			if (cfvo.type === "formula" && cfvo.value !== null) texts.push(cfvo.value)
+			if (cfvo.type === "formula" && cfvo.value !== null) {
+				this.cfvoFormulas.set(cfvo, texts.length)
+				texts.push(cfvo.value)
+			}
 
 		this.texts = texts
 		this.formulas = texts.map(text => {
@@ -246,9 +251,12 @@ class PreparedRule {
 
 		const reads: { sheet: string | null; range: SheetRange }[] = []
 		let known = true
+		// Over many ranges, what the rectangle around them reaches (more than the ranges do, which only repaints more):
+		// one area per reference, not one per range and reference.
+		const over = block.ranges.length <= ADDED_PARTS ? block.ranges : [this.bounds]
 
 		for (const formula of this.formulas)
-			if (!(formula instanceof Unsupported)) known = reach(formula.root, this.anchorRow, this.anchorCol, block.ranges, reads) && known
+			if (!(formula instanceof Unsupported)) known = reach(formula.root, this.anchorRow, this.anchorCol, over, reads) && known
 
 		if (!known) {
 			this.reads = null
@@ -267,6 +275,11 @@ class PreparedRule {
 		}
 
 		this.reads = new Map([...bySheet].map(([sheet, ranges]) => [sheet, new RangeIndex(ranges)]))
+	}
+
+	// The index of a formula cfvo among the rule's parsed formulas, -1 for one of another type.
+	cfvoFormula(cfvo: Cfvo): number {
+		return this.cfvoFormulas.get(cfvo) ?? -1
 	}
 }
 
@@ -356,6 +369,12 @@ export class SheetConditionalFormats {
 		}
 
 		return { all, names }
+	}
+
+	// Runs a tile's evaluations as one pass (FormulaEvaluator.pass): a range its rules read for many cells is read once.
+	// Nothing is kept past it, so no edit, recalculation or sheet parsed later can leave a kept read stale.
+	pass<T>(work: () => T): T {
+		return this.evaluator.pass(work)
 	}
 
 	// The rules on a range (a tile), in the order they apply.
@@ -580,18 +599,6 @@ export class SheetConditionalFormats {
 		}
 	}
 
-	// The index of a cfvo formula among the rule's parsed formulas.
-	private cfvoFormula(rule: PreparedRule, cfvo: Cfvo): number {
-		const texts = rule.rule.formulas.length + (FORMULA_TYPES.has(rule.rule.type) && rule.rule.formulas.length === 0 ? 1 : 0)
-		const cfvos = [
-			...(rule.rule.colorScale?.cfvos ?? []),
-			...(rule.rule.dataBar === null ? [] : [rule.rule.dataBar.min, rule.rule.dataBar.max]),
-			...(rule.rule.iconSet?.cfvos ?? [])
-		].filter(item => item.type === "formula" && item.value !== null)
-
-		return texts + cfvos.indexOf(cfvo)
-	}
-
 	// Whether a rule holds for a cell (its value given), and what it adds to the cell's look.
 	private apply(
 		rule: PreparedRule,
@@ -679,7 +686,7 @@ export class SheetConditionalFormats {
 					return false
 
 				const stats = this.stats(rule)
-				const points = scale.cfvos.map(cfvo => this.cfvoValue(rule, cfvo, stats, this.cfvoFormula(rule, cfvo)))
+				const points = scale.cfvos.map(cfvo => this.cfvoValue(rule, cfvo, stats, rule.cfvoFormula(cfvo)))
 
 				if (points.some(point => Number.isNaN(point))) return false
 
@@ -710,8 +717,8 @@ export class SheetConditionalFormats {
 				if (bar === null || typeof value !== "number") return false
 
 				const stats = this.stats(rule)
-				const low = this.cfvoValue(rule, bar.min, stats, this.cfvoFormula(rule, bar.min))
-				const high = this.cfvoValue(rule, bar.max, stats, this.cfvoFormula(rule, bar.max))
+				const low = this.cfvoValue(rule, bar.min, stats, rule.cfvoFormula(bar.min))
+				const high = this.cfvoValue(rule, bar.max, stats, rule.cfvoFormula(bar.max))
 
 				if (Number.isNaN(low) || Number.isNaN(high)) return false
 
@@ -734,7 +741,7 @@ export class SheetConditionalFormats {
 
 				for (let i = 1; i < count; i++) {
 					const cfvo = set.cfvos[i] as Cfvo
-					const threshold = this.cfvoValue(rule, cfvo, stats, this.cfvoFormula(rule, cfvo))
+					const threshold = this.cfvoValue(rule, cfvo, stats, rule.cfvoFormula(cfvo))
 
 					if (Number.isNaN(threshold)) continue
 					const order = compareNumbers(value, threshold)

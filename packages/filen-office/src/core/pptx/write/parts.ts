@@ -13,6 +13,7 @@ import {
 	type Relationship,
 	type ZipChanges
 } from "../../opc/index"
+import { storedByType } from "../../opc/mediaPolicy"
 import { formerName, issuedNames, noteFormerName, noteIssuedNames } from "../../presentation/issuedNames"
 import { PresentationError } from "../../presentation/model"
 import { noteRestoredMedia } from "../../presentation/restoredMedia"
@@ -30,7 +31,7 @@ const MS_RELATIONSHIPS_2007 = "http://schemas.microsoft.com/office/2007/relation
 const MS_RELATIONSHIPS_2011 = "http://schemas.microsoft.com/office/2011/relationships/"
 const PML = "application/vnd.openxmlformats-officedocument.presentationml."
 const DML = "application/vnd.openxmlformats-officedocument.drawingml."
-const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+export const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 const RELS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 export const RELATIONSHIP_TYPES: { readonly [K in PptxPartKind]: string } = {
@@ -313,8 +314,6 @@ export interface SaveNotice {
 	readonly part: string
 }
 
-// The editable package: one per save. Base parts are read through `opc`; every document a writer edits is loaded
-// first (loadDocument), so the PartsApi calls the emit families make stay synchronous.
 // A relationship of the emitted part under a given id (one its parts' markup names already): true when the part has it
 // (made now, or there already with that target and type), false when the id holds another.
 export interface RelatingWithId {
@@ -536,6 +535,8 @@ export function releasedDeckParts(deck: object): readonly string[] {
 	return deckReleased.get(deck) ?? []
 }
 
+// The editable package: one per save. Base parts are read through `opc`; every document a writer edits is loaded
+// first (loadDocument), so the PartsApi calls the emit families make stay synchronous.
 export class PackageWriter {
 	readonly opc: OpcPackage
 	readonly contentTypes: ContentTypes
@@ -761,9 +762,6 @@ export class PackageWriter {
 		else this.replaced.set(key, bytes)
 	}
 
-	// Of `candidates` (part keys), those a part this save writes names (the save's own output, whatever the session
-	// predicted): by a relationship id its markup names, or, from a slide, the drawing relationship its diagram data
-	// names (dsp:dataModelExt@relId); with what those relate in turn.
 	// A copy's relationships to charts this save copied for it that its written markup names by no id: the copy's
 	// frame was written into a chart part of its own (a chart the session holds), so the copied chart goes, with what
 	// only it related, unless something else relates it. (Notes and comments are related by type, never named.)
@@ -786,6 +784,9 @@ export class PackageWriter {
 		}
 	}
 
+	// Of `candidates` (part keys), those a part this save writes names (the save's own output, whatever the session
+	// predicted): by a relationship id its markup names, or, from a slide, the drawing relationship its diagram data
+	// names (dsp:dataModelExt@relId); with what those relate in turn.
 	async namedByWritten(candidates: ReadonlySet<string>): Promise<Set<string>> {
 		const named = new Set<string>()
 
@@ -880,7 +881,7 @@ export class PackageWriter {
 			name,
 			contentType,
 			bytes,
-			compress: options.compress ?? !/^(image|video|audio)\//u.test(contentType),
+			compress: options.compress ?? !storedByType(contentType, bytes?.length ?? 0),
 			...(options.crc32 === undefined ? {} : { crc32: options.crc32 })
 		})
 	}
@@ -1228,9 +1229,6 @@ export class PackageWriter {
 		return live
 	}
 
-	// What removing `parts` takes with it: they and every part only they referenced, transitively, judged against every
-	// surviving referrer (new parts included, so a copy keeps what it shares with a removed original). A part that was
-	// already unreferenced is not touched. Returns the part keys that go.
 	// Parts a removal never takes with it (keepParts), by key.
 	private readonly kept = new Set<string>()
 	// Parts a step the history holds names (holdParts): never let go of when nothing relates them, by key.
@@ -1258,6 +1256,9 @@ export class PackageWriter {
 		for (const part of parts) this.kept.add(partKey(part))
 	}
 
+	// What removing `parts` takes with it: they and every part only they referenced, transitively, judged against every
+	// surviving referrer (new parts included, so a copy keeps what it shares with a removed original). A part that was
+	// already unreferenced is not touched. Returns the part keys that go.
 	async planRemoval(parts: readonly string[]): Promise<Set<string>> {
 		return this.plan(parts, this.liveRelationships(await this.everyRelationship()))
 	}

@@ -15,9 +15,9 @@ import { drawingReader } from "../../drawingml/reader"
 // A sheet's drawing (ECMA-376 Part 1 §20.5) as frames anchored to their cells (ODF 1.3 Part 3 §10.4.3 draw:frame
 // in a table:table-cell, at its offset in the cell, LibreOffice's form): pictures as draw:image of the package's
 // Pictures/ (§10.4.4), charts as chart objects (§10.4.6, chart.ts). A frame keeps its size; it moves with its cell but
-// is not stretched by it (an end cell is no address the save's proof can follow on a new table). Shapes, groups,
-// connectors, ink, controls and hidden objects are reported; so is what a picture holds besides its image (cropping,
-// rotation, effects, an outline, a link).
+// is not stretched by it (an end cell is no address the save's proof can follow on a new table). Shapes, text boxes,
+// groups and connectors are written (shapes.ts). Ink, controls and hidden objects are reported; so is what a picture
+// holds besides its image (cropping, rotation, effects, an outline, a link).
 
 const EMU_PER_CM = 360_000
 const EMU_PER_PX = 9525
@@ -33,6 +33,11 @@ export class PackageFiles {
 	}[] = []
 	private readonly pictures = new Map<string, string>()
 	private objects = 0
+
+	// The path a part's picture already has, so a part placed again is not read again.
+	pictureAt(part: string): string | undefined {
+		return this.pictures.get(part)
+	}
 
 	picture(part: string, bytes: Uint8Array, mediaType: string): string {
 		let path = this.pictures.get(part)
@@ -54,6 +59,11 @@ export class PackageFiles {
 		this.files.push({ path: `${name}/content.xml`, bytes: content, mediaType: "text/xml", directory: `${name}/` })
 
 		return name
+	}
+
+	// Lets go of the files once a package holds them (its bytes are a copy).
+	release(): void {
+		this.files.length = 0
 	}
 }
 
@@ -332,7 +342,7 @@ export async function sheetFrames(
 
 			if (PICTURE_EXTRAS.test(markup)) lostPictures++
 
-			const path = files.picture(part, await workbook.parts.read(part), entry.contentType)
+			const path = files.pictureAt(part) ?? files.picture(part, await workbook.parts.read(part), entry.contentType)
 
 			add(
 				object,

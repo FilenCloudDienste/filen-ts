@@ -15,6 +15,7 @@ import type { ShowController, ShowEvent } from "../react/presentation/show/contr
 import { layerTree } from "../react/presentation/show/layers"
 import { DEFAULT_SHOW_BINDINGS, type ShowKeyBindings } from "../react/presentation/presenter/keys"
 import { SlideShow } from "../react/presentation/show/player"
+import { ShowPlayer } from "../react/presentation/show/runtime"
 import { POINTER_IDLE_MS } from "../react/presentation/show/pointer"
 import { buildStageSlide, type ShowMediaMount } from "../react/presentation/show/stage"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
@@ -96,6 +97,8 @@ interface SlideSpec {
 	readonly transition?: Transition
 	readonly actions?: Readonly<Record<number, Action>>
 	readonly broken?: true
+	// Shapes that are click-to-play videos.
+	readonly media?: readonly number[]
 }
 
 const slides = [0, 1, 2, 3].map(n => ({ ref: slideRef(300 + n), hidden: n === 2 }))
@@ -109,8 +112,15 @@ function renderOf(ref: SlideRef, spec: SlideSpec | undefined): SlideRender {
 		background: drawing(1280, 720),
 		layers: [2, 3, 4].map(id => {
 			const click = spec?.actions?.[id]
+			const drawn = layer(ref, id, id * 150, click === undefined ? undefined : { click })
 
-			return layer(ref, id, id * 150, click === undefined ? undefined : { click })
+			return spec?.media?.includes(id) === true
+				? {
+						...drawn,
+						alt: `Clip ${String(id)}`,
+						media: { kind: "video" as const, part: `/ppt/media/media${String(id)}.mp4`, contentType: "video/mp4" }
+					}
+				: drawn
 		}),
 		notesText: "",
 		animated: spec?.timing !== undefined
@@ -305,6 +315,11 @@ function flyIn(): TimingTree {
 	return b.root([b.mainSeq([b.click([[0, [b.flyIn(3, "clickEffect", 500)]]])])])
 }
 
+// The layer canvases of the slides on stage.
+function shown(): HTMLCanvasElement[] {
+	return [...host.querySelectorAll<HTMLCanvasElement>(".fo-show-slide-box canvas.fo-show-bitmap")]
+}
+
 describe("SlideShow", () => {
 	it("shows a slide's first state, steps its animation on a click, then moves on with the next slide's transition", async () => {
 		const fade: Transition = { kind: "fade", namespace: "p", options: {}, durationMs: 500, advance: { onClick: true } }
@@ -370,6 +385,47 @@ describe("SlideShow", () => {
 		show.key("ArrowRight")
 		await settle(100)
 		expect(live?.textContent).toBe(`Slide 2 of ${String(slides.length)}`)
+	})
+
+	it("gives each medium of a slide a labelled keyboard hotspot that plays it without advancing, and its chords", async () => {
+		const pressed: number[] = []
+		const commands: [number, string][] = []
+		const media: ShowMediaMount = {
+			mount: (_box, layer) => ({
+				command: command => commands.push([layer.shape.id, command.command]),
+				click: () => pressed.push(layer.shape.id),
+				release: () => undefined
+			})
+		}
+		const show = await mount(new Map([[slides[0]!.ref, { media: [2, 3] }]]), { media })
+		const keys = [...host.querySelectorAll<HTMLButtonElement>("button[data-fo-media]")]
+
+		expect(keys.map(key => key.getAttribute("aria-label"))).toEqual(["Clip 2", "Clip 3"])
+		// In the tab order, and out of the pointer's way (the box under it keeps the native controls).
+		expect(keys.map(key => [key.tabIndex, key.disabled, key.style.pointerEvents])).toEqual([
+			[0, false, "none"],
+			[0, false, "none"]
+		])
+
+		const second = keys[1]!
+
+		act(() => {
+			second.focus()
+			second.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }))
+			// The button's own activation by Enter.
+			second.click()
+		})
+		await settle(100)
+
+		expect(pressed).toEqual([3])
+		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+
+		// Alt+P on the focused hotspot: that medium, of the two.
+		act(() => {
+			second.dispatchEvent(new KeyboardEvent("keydown", { key: "p", code: "KeyP", altKey: true, bubbles: true }))
+		})
+		expect(commands).toContainEqual([3, "toggle"])
+		expect(commands.some(([shape]) => shape === 2)).toBe(false)
 	})
 
 	it("plays a slide's transition sound as it enters, looping until the next sound or a stop, and stops it at the end", async () => {
@@ -881,6 +937,92 @@ describe("SlideView in the editor", () => {
 		expect(asked).toBeGreaterThan(30)
 		// One per frame, and two per probe at most every 777 ms.
 		expect(samples).toBeLessThanOrEqual(asked + 6)
+	})
+
+	it("keeps the slide a navigation goes to while a transition plays, ahead or back", async () => {
+		const fade: Transition = { kind: "fade", namespace: "p", options: {}, durationMs: 1000, advance: { onClick: true } }
+		// Each slide's background layer: 640 x 360 px.
+		const slideBytes = 640 * 360 * 4
+		const heldBytes = (): number => Number(host.querySelector<HTMLElement>(".fo-show-host")?.dataset["foShowBytes"] ?? 0)
+
+		for (const target of [3, 0]) {
+			const show = await mount(new Map([[slides[1]!.ref, { transition: fade }]]))
+
+			show.controller.next()
+			await settle(100)
+			expect(host.querySelectorAll(".fo-show-slide-box")).toHaveLength(2)
+
+			// Mid-transition: the target's preparation lands while slide 2 still fades in.
+			show.controller.goto(target)
+			await settle(0)
+			await settle(1500)
+
+			expect(show.onSlide).toHaveBeenLastCalledWith(target)
+			expect(host.querySelectorAll(".fo-show-slide-box")).toHaveLength(1)
+			expect(shown().length).toBeGreaterThan(0)
+
+			for (const canvas of shown()) expect([canvas.width, canvas.height]).toEqual([640, 360])
+
+			// The slide on stage and the one kept beside it.
+			expect(heldBytes()).toBe(2 * slideBytes)
+			act(() => root.unmount())
+			root = createRoot(host)
+		}
+	})
+
+	it("swaps in a slide redrawn at a larger size during its transition once the transition ends, and begins it", async () => {
+		const fade: Transition = { kind: "fade", namespace: "p", options: {}, durationMs: 1000, advance: { onClick: true, afterMs: 500 } }
+		const resize = vi.spyOn(ShowPlayer.prototype, "resize")
+		const show = await mount(new Map([[slides[1]!.ref, { transition: fade }]]), { settings: TIMED })
+		const player = resize.mock.contexts[0] as ShowPlayer
+
+		await settle(0)
+		player.resize(600, 1)
+		show.controller.next()
+		await settle(100)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+
+		const before = shown()
+
+		// The stage grows past the redraw ratio mid-transition; the redraw lands before the transition ends.
+		player.resize(1200, 1)
+		await settle(0)
+		expect(shown()).toEqual(before)
+		await settle(1100)
+
+		// The redrawn slide is on stage, its timeline began: the timed advance moves on.
+		expect(shown().some(canvas => !before.includes(canvas))).toBe(true)
+
+		for (const canvas of before) expect(canvas.width).toBe(0)
+
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(3)
+		resize.mockRestore()
+	})
+
+	it("releases the slide replaced by a redraw when it leaves without a transition", async () => {
+		const resize = vi.spyOn(ShowPlayer.prototype, "resize")
+		const show = await mount(new Map())
+		const player = resize.mock.contexts[0] as ShowPlayer
+
+		player.resize(600, 1)
+		await settle(0)
+
+		const first = shown()
+
+		// A redraw is under way when the presenter moves on (no transition), and lands while the next slide (dropped by
+		// the resize) is drawn again.
+		player.resize(2000, 1)
+		show.controller.next()
+		await settle(0)
+		await settle(100)
+
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+		expect(first.length).toBeGreaterThan(0)
+
+		for (const canvas of first) expect(canvas.width).toBe(0)
+
+		resize.mockRestore()
 	})
 
 	it("holds at most 256 MiB of layer bitmaps over the slides it keeps", async () => {

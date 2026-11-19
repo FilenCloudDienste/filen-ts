@@ -18,7 +18,7 @@ import {
 } from "../model/types"
 import { XlsxReadError } from "./errors"
 import type { XlsxLimits, XlsxReadBudget, XlsxReadLease } from "./limits"
-import { AMP, BANG, GT, LT, QUESTION, SLASH, Scanner, bytesAre, localIs, localStart, nameEnd } from "./scan"
+import { AMP, BANG, GT, LT, QUESTION, SLASH, Scanner, bytesAre, localIs, localStart, nameEnd, sameBytes } from "./scan"
 import { SheetDataReader, parseRange, rangeAt } from "./sheetData"
 import { booleanAttribute, childByLocal, childElements, intAttribute, numberAttribute, readColor } from "./styleRecords"
 
@@ -358,12 +358,6 @@ function isUtf16(bytes: Uint8Array): boolean {
 	return (b0 === 0xff && b1 === 0xfe) || (b0 === 0xfe && b1 === 0xff) || (b0 === 0x3c && b1 === 0) || (b0 === 0 && b1 === 0x3c)
 }
 
-function sameBytes(bytes: Uint8Array, a: number, b: number, length: number): boolean {
-	for (let k = 0; k < length; k++) if (bytes[a + k] !== bytes[b + k]) return false
-
-	return true
-}
-
 function decodeAscii(bytes: Uint8Array, start: number, end: number): string {
 	let out = ""
 
@@ -537,7 +531,7 @@ function readCol(document: XmlDocument, node: number): XlsxColRange | null {
 	const min = intAttribute(document, node, "min", 0)
 	const max = intAttribute(document, node, "max", min)
 
-	if (min < 1 || max < min) return null
+	if (min < 1 || max < min || min > SHEET_MAX_COLS) return null
 
 	let flags = 0
 
@@ -553,7 +547,7 @@ function readCol(document: XmlDocument, node: number): XlsxColRange | null {
 
 	return {
 		first: min - 1,
-		last: Math.min(max, 16_384) - 1,
+		last: Math.min(max, SHEET_MAX_COLS) - 1,
 		width: numberAttribute(document, node, "width") ?? Number.NaN,
 		style: intAttribute(document, node, "style", -1),
 		flags

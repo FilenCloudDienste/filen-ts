@@ -336,8 +336,7 @@ export class StyleChains {
 		return found
 	}
 
-	// Table properties (tblPr) of a table style's chain, or the default table style's; whether it formats parts of a
-	// table conditionally (tblStylePr).
+	// Table properties (tblPr) of a table style's chain, or the default table style's.
 	table(styleId: string | undefined): Props {
 		const id = styleId !== undefined && this.entries.get(styleId)?.type === "table" ? styleId : this.defaultTable
 		const props: Props = new Map()
@@ -347,6 +346,7 @@ export class StyleChains {
 		return props
 	}
 
+	// Whether a table style's chain formats parts of a table conditionally (tblStylePr).
 	conditional(styleId: string | undefined): boolean {
 		const document = this.document
 		const id = styleId !== undefined && this.entries.get(styleId)?.type === "table" ? styleId : this.defaultTable
@@ -978,6 +978,15 @@ export class Meaning {
 			this.abstracts.set(document.attribute(child, "w:numId") ?? "", text)
 		}
 	}
+}
+
+// The first child element of `node` named `local`, or -1.
+export function childNamed(document: XmlDocument, node: number, local: string): number {
+	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
+		if (document.localName(child) === local) return child
+	}
+
+	return -1
 }
 
 export function descendant(document: XmlDocument, node: number, local: string): number {

@@ -60,7 +60,11 @@ describe("Georgia drawn with Gelasio", () => {
 	it("sets 10 pt docx lines Georgia's 11.36 pt apart, not Gelasio's 16.6 pt", async () => {
 		const layout = await layOut(georgiaDocx())
 
-		for (const pitch of pitches(pageLines(layout, 0))) expect(pitch).toBeCloseTo(GEORGIA_LINE_10PT, 2)
+		const gaps = pitches(pageLines(layout, 0))
+
+		expect(gaps).toHaveLength(3)
+
+		for (const pitch of gaps) expect(pitch).toBeCloseTo(GEORGIA_LINE_10PT, 2)
 	})
 
 	it("places PDF baselines Georgia's 11.36 pt apart and still draws Gelasio's glyphs", async () => {
@@ -92,6 +96,10 @@ describe("Georgia drawn with Gelasio", () => {
 			})
 		)
 
-		for (const pitch of pitches(pageLines(layout, 0))) expect(pitch).toBeCloseTo(GEORGIA_LINE_10PT, 2)
+		const gaps = pitches(pageLines(layout, 0))
+
+		expect(gaps).toHaveLength(3)
+
+		for (const pitch of gaps) expect(pitch).toBeCloseTo(GEORGIA_LINE_10PT, 2)
 	})
 })

@@ -1,25 +1,15 @@
-import {
-	CellError,
-	EmptyValue,
-	ErrorType,
-	FunctionArgumentType,
-	SimpleRangeValue,
-	type FunctionPlugin,
-	type ImplementedFunctions
-} from "hyperformula"
+import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type FunctionPlugin, type ImplementedFunctions } from "hyperformula"
 import { CRITERION_FUNCTION } from "../../functions/engineNames"
-import { divError, rawNumber, SheetFunctionPlugin, valueError, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
-
-// Excel's error texts, as a criterion names an error.
-const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
-	[ErrorType.DIV_BY_ZERO]: "#DIV/0!",
-	[ErrorType.NAME]: "#NAME?",
-	[ErrorType.VALUE]: "#VALUE!",
-	[ErrorType.NUM]: "#NUM!",
-	[ErrorType.NA]: "#N/A",
-	[ErrorType.REF]: "#REF!",
-	[ErrorType.SPILL]: "#SPILL!"
-}
+import {
+	divError,
+	ERROR_TEXT,
+	rawNumber,
+	SheetFunctionPlugin,
+	valueError,
+	type PluginCall,
+	type PluginScalar,
+	type PluginState
+} from "./plugin"
 
 type Helper = FunctionPlugin["arithmeticHelper"]
 type Interpreter = ConstructorParameters<typeof FunctionPlugin>[0]

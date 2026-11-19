@@ -260,6 +260,23 @@ describe("docx editor commands", () => {
 		expect(session.snapshot().enabled["list.outdent"]).toBe(false)
 	})
 
+	it("switches off a start indent in character units the paragraph style gives when indenting", async () => {
+		const session = await sessionOf({
+			body: p("text", '<w:pStyle w:val="Indented"/>'),
+			parts: [
+				STYLES_PART(
+					'<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+						'<w:style w:type="paragraph" w:styleId="Indented"><w:name w:val="Indented"/><w:pPr><w:ind w:leftChars="200"/></w:pPr></w:style>'
+				)
+			],
+			relationships: [{ id: "rIdS", type: "styles", target: "styles.xml" }]
+		})
+
+		select(session, 2)
+		session.execute({ type: "list.indent" })
+		expect(session.state.doc.child(0).attrs["indent"]).toEqual({ start: 720, startChars: 0 })
+	})
+
 	it("undoes and redoes commands, and tracks the saved state", async () => {
 		const session = await sessionOf({ body: p("words"), ...PARTS })
 		const opened = session.state.doc

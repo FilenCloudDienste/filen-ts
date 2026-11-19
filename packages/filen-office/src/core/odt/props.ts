@@ -12,7 +12,8 @@ export interface PropsSink {
 
 const COLOR = /^#[0-9a-fA-F]{6}$/
 
-function color(value: string | undefined): string | undefined {
+// A #RRGGBB colour as WordprocessingML's RRGGBB; undefined for anything else.
+export function color(value: string | undefined): string | undefined {
 	return value !== undefined && COLOR.test(value) ? value.slice(1).toUpperCase() : undefined
 }
 

@@ -2,6 +2,7 @@ import { SHEET_MAX_EDIT_CELLS, type SheetId, type SheetRange } from "../../sheet
 import { defineSheetFeature, type SheetChangeSink, type SheetHandled, type SheetReadContext, type SheetTarget } from "../../sheet/registry"
 import type { SheetStore } from "../model/store"
 import { CellKind, FormulaKind } from "../model/types"
+import { contains, intersects } from "../refs/moveRefs"
 import { recalculateLogged, splitsArray, unshare } from "./cells"
 import type { XlsxDocument } from "./document"
 import { StyleLimitError, XfPatcher, cellStep, reportLogged } from "./format"
@@ -31,16 +32,6 @@ declare module "../../sheet/protocol" {
 	}
 }
 
-function intersects(a: SheetRange, b: SheetRange): boolean {
-	return a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol
-}
-
-function contains(outer: SheetRange, inner: SheetRange): boolean {
-	return (
-		outer.startRow <= inner.startRow && outer.endRow >= inner.endRow && outer.startCol <= inner.startCol && outer.endCol >= inner.endCol
-	)
-}
-
 function quads(merges: Uint32Array): SheetRange[] {
 	const out: SheetRange[] = []
 
@@ -56,6 +47,50 @@ function packed(ranges: readonly SheetRange[]): Uint32Array {
 	ranges.forEach((range, k) => out.set([range.startRow, range.startCol, range.endRow, range.endCol], k * 4))
 
 	return out
+}
+
+// Ranges by first row, each with the furthest last row up to it: the ones that may share rows with a range are a
+// run of it, found by two binary searches.
+interface RowIndex {
+	readonly ranges: readonly SheetRange[]
+	readonly reach: Uint32Array
+}
+
+function rowIndex(ranges: readonly SheetRange[]): RowIndex {
+	const sorted = [...ranges].sort((a, b) => a.startRow - b.startRow)
+	const reach = new Uint32Array(sorted.length)
+	let furthest = 0
+
+	sorted.forEach((range, k) => {
+		furthest = Math.max(furthest, range.endRow)
+		reach[k] = furthest
+	})
+
+	return { ranges: sorted, reach }
+}
+
+// Whether a range of the index sharing rows with `range` passes `test`.
+function someNear(index: RowIndex, range: SheetRange, test: (other: SheetRange) => boolean): boolean {
+	let low = 0
+	let high = index.ranges.length
+
+	// The first whose rows up to it reach the range's first row.
+	while (low < high) {
+		const middle = (low + high) >>> 1
+
+		if ((index.reach[middle] ?? 0) < range.startRow) low = middle + 1
+		else high = middle
+	}
+
+	for (let k = low; k < index.ranges.length; k++) {
+		const other = index.ranges[k] as SheetRange
+
+		if (other.startRow > range.endRow) break
+
+		if (test(other)) return true
+	}
+
+	return false
 }
 
 function area(range: SheetRange): number {
@@ -97,12 +132,22 @@ export async function mergeRefusal(
 
 	if (cells > SHEET_MAX_EDIT_CELLS) return { reason: "tooLarge" }
 
-	for (let k = 0; k < merges.length; k++)
-		for (let j = k + 1; j < merges.length; j++)
-			if (intersects(merges[k] as SheetRange, merges[j] as SheetRange)) return { reason: "merged" }
+	// By first row, each against the ones after it that start before it ends (one per row of a Merge Across).
+	const sorted = rowIndex(merges).ranges
 
-	for (const existing of quads(model.merges))
-		for (const merge of merges) if (intersects(existing, merge) && !contains(merge, existing)) return { reason: "merged" }
+	for (let k = 0; k < sorted.length; k++) {
+		const merge = sorted[k] as SheetRange
+
+		for (let j = k + 1; j < sorted.length && (sorted[j] as SheetRange).startRow <= merge.endRow; j++)
+			if (intersects(merge, sorted[j] as SheetRange)) return { reason: "merged" }
+	}
+
+	if (model.merges.length > 0) {
+		const existing = rowIndex(quads(model.merges))
+
+		for (const merge of merges)
+			if (someNear(existing, merge, other => intersects(other, merge) && !contains(merge, other))) return { reason: "merged" }
+	}
 
 	for (const table of await document.sheetTables(sheet))
 		for (const merge of merges) if (intersects(table.range, merge)) return { reason: "merged", detail: "table" }
@@ -130,6 +175,9 @@ export async function mergeRefusal(
 
 	return null
 }
+
+// Cells written to the store at once: about a block's worth, each block rebuilt about once.
+const CELLS_PER_BATCH = 1024
 
 function holds(state: CellState): boolean {
 	return state.formula >= 0 || state.kind !== CellKind.EMPTY
@@ -174,6 +222,13 @@ export async function mergeCells(
 
 	const log = new CellLog()
 	const centred = mode === "merge" ? null : new XfPatcher(document, { align: "center" })
+	// Written to the store in batches, so a block is rebuilt once per batch rather than once per cell it gains. Merges
+	// do not overlap: no cell is named twice, and none read before its write is pending.
+	const pending: { row: number; col: number; state: CellState }[] = []
+	const flush = (): void => {
+		document.writeCells(sheet, pending)
+		pending.length = 0
+	}
 
 	try {
 		for (const merge of merges) {
@@ -201,16 +256,25 @@ export async function mergeCells(
 					)
 						continue
 
-					if (!upperLeft && before.formula >= 0 && store.formulas.kind(before.formula) === FormulaKind.SHARED_MASTER)
+					// It rewrites its children, which may be pending here: those go to the store first.
+					if (!upperLeft && before.formula >= 0 && store.formulas.kind(before.formula) === FormulaKind.SHARED_MASTER) {
+						flush()
 						unshare(document, sheet, row, col, log)
+					}
 
 					log.touch(sheet, row, col, () => document.state(sheet, row, col), !upperLeft)
-					document.write(sheet, row, col, next)
+					pending.push({ row, col, state: next })
+
+					if (pending.length >= CELLS_PER_BATCH) flush()
 				}
 			}
 		}
+
+		flush()
 	} catch (error) {
 		if (error instanceof StyleLimitError) {
+			// What is still pending was never written: the log restores the cells that were.
+			pending.length = 0
 			log.restore(document.restoreCell, "before")
 
 			return { refused: { reason: "styleLimit" } }
@@ -220,7 +284,8 @@ export async function mergeCells(
 	}
 
 	const before = model.merges
-	const kept = quads(before).filter(existing => !merges.some(merge => contains(merge, existing)))
+	const made = rowIndex(merges)
+	const kept = quads(before).filter(existing => !someNear(made, existing, merge => contains(merge, existing)))
 	const after = packed([...kept, ...merges])
 	const setMerges = (value: Uint32Array, sink: SheetChangeSink): void => {
 		model.merges = value

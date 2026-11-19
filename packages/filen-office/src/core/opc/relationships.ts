@@ -81,10 +81,40 @@ export interface NewRelationship {
 	readonly external?: boolean
 }
 
+// Ids numbered past this are only taken, not counted on: counting on from them would leave the safe integers,
+// where adding one no longer makes a new number.
+const COUNTED_ID_LIMIT = 2 ** 52
+
+// New relationship ids for a part: each the next free "rId<n>" above every numeric id taken. One numbered past
+// what counting can reach (COUNTED_ID_LIMIT) is only taken.
+export class RelationshipIds {
+	private readonly taken = new Set<string>()
+	private highest = 0
+
+	take(id: string): void {
+		this.taken.add(id)
+
+		const numbered = /^rId(\d+)$/.exec(id)
+		const value = numbered === null ? Number.NaN : Number(numbered[1])
+
+		if (value <= COUNTED_ID_LIMIT) this.highest = Math.max(this.highest, value)
+	}
+
+	next(): string {
+		let id = `rId${String(++this.highest)}`
+
+		while (this.taken.has(id)) id = `rId${String(++this.highest)}`
+
+		this.taken.add(id)
+
+		return id
+	}
+}
+
 const EMPTY_RELATIONSHIPS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<Relationships xmlns="${RELATIONSHIPS_NAMESPACE}"></Relationships>`
 
 // A .rels part (`bytes`, or a new one when null) with relationships appended. Each gets the next free
-// "rId<n>" above every existing numeric id (`removals` included), which `ids` returns in order. Existing bytes
+// "rId<n>" above every existing numeric id (`removals` included, RelationshipIds), which `ids` returns in order. Existing bytes
 // are kept, but for the relationships whose ids `removals` holds.
 export function addRelationships(
 	bytes: Uint8Array | null,
@@ -93,19 +123,15 @@ export function addRelationships(
 ): { bytes: Uint8Array; ids: string[] } {
 	const { document, namespaces, root } = relationshipsRoot(bytes ?? encodeUtf8(EMPTY_RELATIONSHIPS), "")
 	const editor = new XmlEditor(document)
-	const taken = new Set<string>()
-	let highest = 0
+	const allocated = new RelationshipIds()
 
 	for (let node = document.firstChildElement(root); node >= 0; node = document.nextSiblingElement(node)) {
 		const id = document.attribute(node, "Id")
 
 		if (id === undefined) continue
 
-		taken.add(id)
+		allocated.take(id)
 
-		const numbered = /^rId(\d+)$/.exec(id)
-
-		if (numbered !== null) highest = Math.max(highest, Number(numbered[1]))
 		if (removals.has(id)) editor.remove(node)
 	}
 
@@ -114,11 +140,8 @@ export function addRelationships(
 	const ids: string[] = []
 
 	for (const addition of additions) {
-		let id = `rId${++highest}`
+		const id = allocated.next()
 
-		while (taken.has(id)) id = `rId${++highest}`
-
-		taken.add(id)
 		ids.push(id)
 		editor.append(
 			root,

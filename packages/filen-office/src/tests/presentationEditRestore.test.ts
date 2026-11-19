@@ -1,18 +1,16 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { MessageChannel } from "node:worker_threads"
 import { describe, expect, it } from "vitest"
-import { bytesSource, parseRelationships, relationshipsPartName, ZipArchive, type ByteSource } from "../core/opc/index"
+import { bytesSource, parseRelationships, relationshipsPartName, ZipArchive } from "../core/opc/index"
 import { opBytesOf } from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { SlideRef } from "../core/presentation/model"
-import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
+import type { CallContext } from "../dom/presentation/engine"
 import { editCapability, sessionEdits } from "../dom/presentation/engine/edit"
-import { openPptxCapability, pptxParts } from "../dom/presentation/engine/open/pptx"
-import { SAVE_DEPENDENCIES } from "../dom/presentation/engine/save"
-import { commitSavedSession, rebasableSource, saveHistoryOf, saveSession } from "../dom/presentation/save"
-import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
+import { pptxParts } from "../dom/presentation/engine/open/pptx"
+import { saveHistoryOf } from "../dom/presentation/save"
 import { CORPUS_DIR } from "./corpusDir"
+import { driveSession } from "./odpWriteDrive"
 import { BROKEN_EMITTER, editDeck, editDeckOptions, editHarness, shapeById, SOURCE_EMITTER } from "./presentationEditFixtures"
 import { body, buildPptx, DEFAULT_LAYOUTS, para, sp, xfrm, type FixtureOptions } from "./pptxFixtures"
 
@@ -32,108 +30,6 @@ const PNG = new Uint8Array([
 ])
 const PIC =
 	'<p:pic><p:nvPicPr><p:cNvPr id="40" name="Picture 39"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId60"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="10" y="10"/><a:ext cx="1000" cy="1000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
-
-// A file store with versioning off: an upload replaces the file, and the old version is gone.
-class Drive {
-	readonly files = new Map<string, Uint8Array>()
-	current = "v1"
-	private next = 1
-
-	constructor(bytes: Uint8Array) {
-		this.files.set("v1", bytes)
-	}
-
-	source(uuid: string): ByteSource {
-		const of = (): Uint8Array => {
-			const bytes = this.files.get(uuid)
-
-			if (bytes === undefined) throw new Error(`gone ${uuid}`)
-
-			return bytes
-		}
-
-		return { size: of().length, read: (offset, length) => Promise.resolve(of().slice(offset, offset + length)) }
-	}
-
-	async upload(port: InstanceType<typeof MessageChannel>["port1"]): Promise<string> {
-		const reader = savePortReader(port as unknown as SavePortEnd)
-		const chunks: Uint8Array[] = []
-
-		for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
-
-		const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-		let at = 0
-
-		for (const chunk of chunks) {
-			out.set(chunk, at)
-			at += chunk.length
-		}
-
-		const uuid = `v${String(++this.next)}`
-
-		this.files.set(uuid, out)
-		this.files.delete(this.current)
-		this.current = uuid
-		reader.settled(true)
-
-		return uuid
-	}
-}
-
-async function driveSession(bytes: Uint8Array) {
-	const drive = new Drive(bytes)
-	const outcome = await openPptxCapability.open({
-		source: rebasableSource(drive.source("v1")),
-		sourceKind: "range",
-		options: { format: "pptx", fileName: "deck.pptx" }
-	})
-
-	if (outcome.kind !== "opened") throw new Error(outcome.kind)
-
-	const session: EngineSession = {
-		s: 1,
-		deck: outcome.deck,
-		package: outcome.package,
-		options: { format: "pptx", fileName: "deck.pptx" },
-		services: SERVICES,
-		rangeSource: spec => drive.source((spec.port as unknown as { uuid: string }).uuid),
-		schedule: () => undefined,
-		emit: () => undefined,
-		onClose: () => undefined
-	}
-	const context: CallContext = {
-		session,
-		signal: { aborted: false, onAbort: () => undefined },
-		lane: "background",
-		slicing: { pause: () => Promise.resolve(), sliceMs: 8, now: () => Date.now() }
-	}
-	const save = async () => {
-		const { port1, port2 } = new MessageChannel()
-		const uploading = drive.upload(port2)
-		const result = await saveSession(context, { reason: "user", port: port1 as unknown as SavePortEnd }, SAVE_DEPENDENCIES)
-		const uuid = result.kind === "written" ? await uploading : undefined
-
-		port1.close()
-		port2.close()
-
-		if (result.kind === "written" && uuid !== undefined) {
-			await commitSavedSession(
-				context,
-				{
-					file: { uuid, name: "deck.pptx" },
-					port: { uuid, postMessage: () => undefined, close: () => undefined } as never,
-					size: drive.files.get(uuid)?.length ?? 0,
-					revision: result.revision
-				},
-				SAVE_DEPENDENCIES
-			)
-		}
-
-		return { result, bytes: uuid === undefined ? undefined : drive.files.get(uuid) }
-	}
-
-	return { drive, session, context, save, command: (op: DeckOp) => editCapability.command(context, op) }
-}
 
 async function entries(bytes: Uint8Array): Promise<Map<string, string>> {
 	const archive = await ZipArchive.open(bytesSource(bytes))
@@ -198,19 +94,19 @@ function richDeck(): FixtureOptions {
 
 describe("slide restore after a save", () => {
 	it("undoes a slide delete after the save that removed the slide", async () => {
-		const h = await driveSession(editDeck())
+		const h = await driveSession(editDeck(), "pptx")
 		const deck = h.session.deck
 		const target = deck.slides[1] as SlideRef
 
 		await pptxParts(deck)?.slide(target)
 		expect(await h.command({ family: "slide", kind: "delete", slides: [target] })).toMatchObject({ ok: true })
 		expect((await h.save()).result).toMatchObject({ kind: "written" })
-		expect(await editCapability.undo(h.context)).toMatchObject({ ok: true, dirty: true })
+		expect(await h.undo()).toMatchObject({ ok: true, dirty: true })
 		expect(deck.slides[1]).toBe(target)
 	})
 
 	it("holds the slide, every part it owns and the shared parts its delete removes", async () => {
-		const h = await driveSession(buildPptx(richDeck()))
+		const h = await driveSession(buildPptx(richDeck()), "pptx")
 		const deck = h.session.deck
 		const target = deck.slides[1] as SlideRef
 
@@ -229,7 +125,7 @@ describe("slide restore after a save", () => {
 	})
 
 	it("gives the restored slide and its notes part names nothing else has", async () => {
-		const h = await driveSession(buildPptx(richDeck()))
+		const h = await driveSession(buildPptx(richDeck()), "pptx")
 		const deck = h.session.deck
 		const target = deck.slides[1] as SlideRef
 
@@ -241,8 +137,8 @@ describe("slide restore after a save", () => {
 
 		const added = deck.nodes.get(deck.slides[0] as SlideRef)?.part
 
-		await editCapability.undo(h.context)
-		expect(await editCapability.undo(h.context)).toMatchObject({ ok: true })
+		await h.undo()
+		expect(await h.undo()).toMatchObject({ ok: true })
 
 		const slide = deck.nodes.get(target)
 		const notes = slide?.notes === undefined ? undefined : deck.nodes.get(slide.notes)
@@ -261,7 +157,7 @@ describe("slide restore after a save", () => {
 	})
 
 	it("a slide deleted, saved and restored by undo saves with its notes, comments and picture", async () => {
-		const h = await driveSession(buildPptx(richDeck()))
+		const h = await driveSession(buildPptx(richDeck()), "pptx")
 		const deck = h.session.deck
 		const target = deck.slides[1] as SlideRef
 
@@ -275,7 +171,7 @@ describe("slide restore after a save", () => {
 		const deleted = await entries(first.bytes as Uint8Array)
 
 		expect([deleted.has("ppt/comments/comment1.xml"), deleted.has("ppt/media/image9.png")]).toEqual([false, false])
-		expect(await editCapability.undo(h.context)).toMatchObject({ ok: true, dirty: true })
+		expect(await h.undo()).toMatchObject({ ok: true, dirty: true })
 
 		const second = await h.save()
 
@@ -313,18 +209,49 @@ describe("slide restore after a save", () => {
 		big.set(PNG)
 
 		const options = richDeck()
-		const h = await driveSession(buildPptx({ ...options, parts: { ...options.parts, "ppt/media/image9.png": { data: big } } }))
+		const h = await driveSession(buildPptx({ ...options, parts: { ...options.parts, "ppt/media/image9.png": { data: big } } }), "pptx")
 		const deck = h.session.deck
 		const target = deck.slides[1] as SlideRef
 
 		await pptxParts(deck)?.slide(target)
 		await h.command({ family: "slide", kind: "delete", slides: [target] })
 		// Before the save the picture is still in the package: the undo works.
-		expect(await editCapability.undo(h.context)).toMatchObject({ ok: true, dirty: false })
-		await editCapability.redo(h.context)
+		expect(await h.undo()).toMatchObject({ ok: true, dirty: false })
+		await h.redo()
 		await h.save()
-		expect(await editCapability.undo(h.context)).toEqual({ ok: false, refusal: "stale" })
+		expect(await h.undo()).toEqual({ ok: false, refusal: "stale" })
 		expect(deck.slides).not.toContain(target)
+	}, 60_000)
+
+	it("restores a multi-slide delete whole or not at all when one slide's read is refused", async () => {
+		const big = new Uint8Array(17 * 1024 * 1024)
+
+		big.set(PNG)
+
+		const options = richDeck()
+		const h = await driveSession(buildPptx({ ...options, parts: { ...options.parts, "ppt/media/image9.png": { data: big } } }), "pptx")
+		const deck = h.session.deck
+		const targets = deck.slides.slice(0, 3)
+
+		for (const ref of targets) await pptxParts(deck)?.slide(ref)
+
+		expect(await h.command({ family: "slide", kind: "delete", slides: targets })).toMatchObject({ ok: true })
+		await h.save()
+
+		const slides = [...deck.slides]
+		const nodes = [...deck.nodes.keys()]
+		const revisions = [...deck.nodes.values()].map(node => node.revision)
+		const customShows = deck.customShows
+
+		// The second slide's picture is gone and was too large to hold: its read is refused, after the first's succeeded.
+		expect(await h.undo()).toEqual({ ok: false, refusal: "stale" })
+		expect(deck.slides).toEqual(slides)
+		expect([...deck.nodes.keys()]).toEqual(nodes)
+		expect([...deck.nodes.values()].map(node => node.revision)).toEqual(revisions)
+		expect(deck.customShows).toBe(customShows)
+		// A retry is refused for the same reason, never as a slide already back in the deck.
+		expect(await h.undo()).toEqual({ ok: false, refusal: "stale" })
+		expect(deck.slides).toEqual(slides)
 	}, 60_000)
 })
 
@@ -548,7 +475,7 @@ describe("reference graph", () => {
 			shapes: sp(2, "Title 1", 'type="title"', "", body(para(`Slide ${String(index)}`))),
 			notes: para(`n${String(index)}`)
 		}))
-		const h = await driveSession(buildPptx({ slides }))
+		const h = await driveSession(buildPptx({ slides }), "pptx")
 		const deck = h.session.deck
 		let pauses = 0
 		const context: CallContext = {
@@ -619,7 +546,7 @@ describe("group moves", () => {
 			sp(11, "Inner", undefined, `${xfrm(1000, 1000, 1000, 1000)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>`) +
 			sp(12, "Inner 2", undefined, `${xfrm(2000, 1000, 1000, 1000)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>`) +
 			"</p:grpSp>"
-		const h = await driveSession(buildPptx({ slides: [{ shapes: group }, { shapes: "" }] }))
+		const h = await driveSession(buildPptx({ slides: [{ shapes: group }, { shapes: "" }] }), "pptx")
 		const deck = h.session.deck
 		const slide = await pptxParts(deck)?.slide(deck.slides[0] as SlideRef)
 
@@ -646,7 +573,7 @@ describe("inherited damage on restore", () => {
 
 	it.skipIf(!existsSync(file))("restores a slide whose source relationship already dangles exactly as the source had it", async () => {
 		const source = new Uint8Array(readFileSync(file))
-		const h = await driveSession(source)
+		const h = await driveSession(source, "pptx")
 		const deck = h.session.deck
 		const target = deck.slides[0] as SlideRef
 		const relationshipsIn = (files: ReadonlyMap<string, string>, part: string): string[] =>
@@ -659,7 +586,7 @@ describe("inherited damage on restore", () => {
 		await pptxParts(deck)?.slide(target)
 		expect(await h.command({ family: "slide", kind: "delete", slides: [target] })).toMatchObject({ ok: true })
 		expect((await h.save()).result).toMatchObject({ kind: "written" })
-		expect(await editCapability.undo(h.context)).toMatchObject({ ok: true })
+		expect(await h.undo()).toMatchObject({ ok: true })
 
 		const saved = await h.save()
 
@@ -708,7 +635,7 @@ async function slideSignatures(bytes: Uint8Array): Promise<string[]> {
 describe("restore chains across saves", () => {
 	for (const again of ["command", "redo"] as const) {
 		it(`a slide deleted again (${again}) after its restore was saved comes back whole from the next undo`, async () => {
-			const h = await driveSession(buildPptx(richDeck()))
+			const h = await driveSession(buildPptx(richDeck()), "pptx")
 			const deck = h.session.deck
 			const target = deck.slides[1] as SlideRef
 			const original = await slideSignatures(buildPptx(richDeck()))
@@ -716,14 +643,14 @@ describe("restore chains across saves", () => {
 			await pptxParts(deck)?.slide(target)
 			await h.command({ family: "slide", kind: "delete", slides: [target] })
 			await h.save()
-			await editCapability.undo(h.context)
+			await h.undo()
 			await h.save()
 
-			if (again === "redo") expect(await editCapability.redo(h.context)).toMatchObject({ ok: true })
+			if (again === "redo") expect(await h.redo()).toMatchObject({ ok: true })
 			else expect(await h.command({ family: "slide", kind: "delete", slides: [target] })).toMatchObject({ ok: true })
 
 			expect((await h.save()).result).toMatchObject({ kind: "written" })
-			expect(await editCapability.undo(h.context)).toMatchObject({ ok: true })
+			expect(await h.undo()).toMatchObject({ ok: true })
 
 			const saved = await h.save()
 
@@ -746,7 +673,7 @@ describe("restore chains across saves", () => {
 
 				return state / 4_294_967_296
 			}
-			const h = await driveSession(source)
+			const h = await driveSession(source, "pptx")
 			const deck = h.session.deck
 			const signature = new Map(deck.slides.map((ref, index) => [ref, original[index] ?? ""]))
 			let saved = 0
@@ -764,9 +691,9 @@ describe("restore chains across saves", () => {
 					await pptxParts(deck)?.slide(ref)
 					await h.command({ family: "slide", kind: "delete", slides: [ref] })
 				} else if (roll < 0.5) {
-					await editCapability.undo(h.context)
+					await h.undo()
 				} else if (roll < 0.65) {
-					await editCapability.redo(h.context)
+					await h.redo()
 				} else {
 					const result = await h.save()
 

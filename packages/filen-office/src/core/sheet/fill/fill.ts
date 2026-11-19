@@ -282,7 +282,8 @@ export function autoFillWrites(
 	const reach = vertical ? target.endRow - target.startRow + 1 - depth : target.endCol - target.startCol + 1 - depth
 	const count = lines * reach
 
-	if (count > SHEET_MAX_EDIT_CELLS) return "tooLarge"
+	// The source is read cell by cell and each line analysed whole: bound it as the targets are.
+	if (count > SHEET_MAX_EDIT_CELLS || lines * depth > SHEET_MAX_EDIT_CELLS) return "tooLarge"
 	if (count === 0) return null
 
 	const rows = new Uint32Array(count)

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { memorySink } from "@filen/office/core/opc"
+import { BytePieces, bytesSource, crc32, memorySink, writeZip, ZipArchive, type ByteChunks } from "@filen/office/core/opc"
+import { DEFLATE_HELD } from "../core/opc/mediaPolicy"
+import { PackageWriter } from "../core/pptx/write/parts"
 import { slideRef, type Deck, type ShapeNode, type SlideNode, type SlideRef } from "../core/presentation/model"
 import { spliceSnapshot, type PptxSpliceSource } from "../core/pptx/write/splice"
 import { savePptx, writeSnapshot } from "../core/pptx/write/save"
@@ -169,10 +171,12 @@ describe("pptx splice writer", () => {
 		)
 
 		const back = await openDeck(bytes)
-		const sections = back.deck.sections.map(section => section.slides.map(ref => back.parts.partOf(ref)))
 
-		// Slide 3 moved first: it belongs to "Rest" by the deck's sections, written as they are.
-		expect(sections.flat().sort()).toEqual(["/ppt/slides/slide1.xml", "/ppt/slides/slide2.xml", "/ppt/slides/slide3.xml"])
+		// Slide 3 moved first: it still belongs to "Rest", and "Intro" keeps slides 1 and 2.
+		expect(back.deck.sections.map(section => [section.name, section.slides.map(ref => back.parts.partOf(ref))])).toEqual([
+			["Intro", ["/ppt/slides/slide1.xml", "/ppt/slides/slide2.xml"]],
+			["Rest", ["/ppt/slides/slide3.xml"]]
+		])
 	})
 
 	it("deletes a slide that is a jump target and a section and custom show member: its notes go, the jump becomes next slide", async () => {
@@ -450,3 +454,51 @@ function duplicate(node: SlideNode, ref: SlideRef, part: string): SlideNode {
 }
 
 export type { Deck }
+
+describe("pptx splice writer media", () => {
+	it("deflates added bitmaps, metafiles and SVG, and stores compressed media and parts over the cap", async () => {
+		const deck = await opened()
+		const opc = deck.source.package
+		const writer = new PackageWriter(opc, await opc.contentTypes())
+		const owner = "ppt/slides/slide1.xml"
+
+		await writer.loadRelationships(owner)
+
+		const api = writer.api(owner)
+		const svg = new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg">${"<rect/>".repeat(500)}</svg>`)
+		const bmp = new Uint8Array(4096).fill(0x42)
+		const png = new Uint8Array(4096).fill(0x13)
+		const large: ByteChunks = {
+			length: DEFLATE_HELD + 1,
+			async *chunks() {
+				await Promise.resolve()
+
+				for (let at = 0; at < DEFLATE_HELD + 1; at += 1 << 20) yield new Uint8Array(Math.min(1 << 20, DEFLATE_HELD + 1 - at))
+			}
+		}
+		const largeCrc = crc32(new Uint8Array(DEFLATE_HELD + 1))
+		const added = [
+			{ part: api.addPart("image", svg, "image/svg+xml").part, bytes: svg, method: 8 },
+			// A piece-wise part with its CRC, as an inserted picture arrives.
+			{ part: api.addPart("image", BytePieces.of([bmp]), "image/bmp", { crc32: crc32(bmp) }).part, bytes: bmp, method: 8 },
+			{ part: api.addPart("image", png, "image/png").part, bytes: png, method: 0 },
+			{ part: api.addPart("media", large, "image/bmp", { crc32: largeCrc }).part, bytes: undefined, method: 0 }
+		]
+		const { changes } = await writer.changes()
+
+		const sink = memorySink()
+
+		await writeZip(await opc.plan(changes), deck.source.archive, sink)
+
+		const archive = await ZipArchive.open(bytesSource(sink.bytes()))
+
+		for (const { part, bytes, method } of added) {
+			const entry = archive.get(part.slice(1))
+
+			expect(entry?.method, part).toBe(method)
+
+			if (bytes === undefined) expect(entry?.crc32).toBe(largeCrc)
+			else expect(await archive.read(entry!)).toEqual(bytes)
+		}
+	})
+})

@@ -31,7 +31,7 @@ describe.skipIf(!ENABLED)("RTF writer saves against the Open XML SDK", () => {
 
 		try {
 			for (const name of readdirSync(OUT as string)
-				.filter(file => file.endsWith(".rtf"))
+				.filter(file => file.toLowerCase().endsWith(".rtf"))
 				.sort()) {
 				const saved = join(scratch, "saved.docx")
 				const original = join(scratch, "original.docx")
@@ -52,6 +52,7 @@ describe.skipIf(!ENABLED)("RTF writer saves against the Open XML SDK", () => {
 
 		writeFileSync(join(OUT as string, "sdk.json"), JSON.stringify(report, null, "\t"))
 
+		expect(report.length).toBeGreaterThan(0)
 		expect(report.filter(entry => entry.added.length > 0)).toEqual([])
 	})
 })

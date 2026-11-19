@@ -10,6 +10,9 @@ export const FRAGMENT_INTS = 5
 export const DECORATION_FLOATS = 4
 export const DECORATION_INTS = 3
 
+// decorationFloats: x, y, width, height.
+export const DecorationFloat = { X: 0, Y: 1, WIDTH: 2, HEIGHT: 3 } as const
+
 // lineFloats: top, height, baseline, x, width (the content after alignment).
 export const LineFloat = { TOP: 0, HEIGHT: 1, BASELINE: 2, X: 3, WIDTH: 4 } as const
 
@@ -54,9 +57,11 @@ export const FragmentKind = { TEXT: 0, TAB: 1, OBJECT: 2 } as const
 export const FRAGMENT_KIND_MASK = 0x0f
 
 export const FragmentFlag = {
-	// Draw the text upper-cased.
+	// Draw the text upper-cased: String.prototype.toUpperCase() of the fragment's text, which layout measured, with
+	// no language's tailoring (no Turkish dotted capital I); a painter that upper-cases otherwise (CSS text-transform)
+	// must give it a neutral language.
 	CAPS: 0x10,
-	// Upper-cased at SMALL_CAPS_SCALE of the size.
+	// Lower-case letters upper-cased as CAPS does, at SMALL_CAPS_SCALE of the size.
 	SMALL_CAPS: 0x20,
 	// Append a hyphen (the line breaks at a soft hyphen or hyphenation point).
 	HYPHEN: 0x40,

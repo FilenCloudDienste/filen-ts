@@ -204,6 +204,10 @@ interface Frame {
 	old: { author: number; date: number } | undefined
 	// The group as the writer's openGroups sees it: the document's, or one a destination word (or \\*) opens.
 	opener: boolean
+	// Where the group's first byte past its leading white space and \\* is (-1 until firstInGroup needs it).
+	lead: number
+	// A drawing object's text box began in the group (\\do): a later \\do in it is ignored.
+	drawing: boolean
 }
 
 interface FieldState {
@@ -675,8 +679,15 @@ const UNPLAIN_WORDS: ReadonlySet<string> = new Set([
 	"flddirty"
 ])
 const TEXT_WORDS: ReadonlySet<string> = new Set(["u", "tab", "line", "page", "column", "lbr"])
+// Routes probed by name, shared by every reader: emptied when full, as file-supplied names fill it.
 const PROBED_ROUTES = new Map<string, Route>()
+const PROBED_ROUTES_MAX = 4096
 const PROBE_BYTES = new Uint8Array(0)
+// A reader's own route and bearing tables stop growing past this many names (a name not held is found again,
+// the same way, each time it is met).
+const WORD_TABLE_MAX = 16384
+// No word the reader handles is longer: a longer name is an unknown word (Route.Special), never probed or held.
+const WORD_MAX = 32
 // Destinations whose content the tables (fonts, colours, styles, lists, authors) are read from.
 const TABLE_DESTINATIONS: ReadonlySet<string> = new Set([
 	"fonttbl",
@@ -688,6 +699,11 @@ const TABLE_DESTINATIONS: ReadonlySet<string> = new Set([
 	"defchp",
 	"defpap"
 ])
+
+// How many probed routes readers share (bounded by PROBED_ROUTES_MAX).
+export function probedRouteCount(): number {
+	return PROBED_ROUTES.size
+}
 
 // "{\rtf" after optional whitespace (and a UTF-8 byte order mark some writers add).
 export function isRtf(bytes: Uint8Array): boolean {
@@ -802,7 +818,9 @@ class Reader {
 			start: 0,
 			box: undefined,
 			old: undefined,
-			opener: false
+			opener: false,
+			lead: -1,
+			drawing: false
 		}
 
 		if (span === undefined || tables === undefined) return
@@ -829,7 +847,9 @@ class Reader {
 			start: state.start,
 			box: undefined,
 			old: undefined,
-			opener: state.opener
+			opener: state.opener,
+			lead: -1,
+			drawing: false
 		}))
 
 		this.frame = frames.pop() ?? this.frame
@@ -1086,6 +1106,7 @@ class Reader {
 
 		// A list label's group: its text goes aside in the paragraph being read until the paragraph ends.
 		if (name === "listtext" || name === "pntext") plain = Plain.Props
+		else if (name.length > WORD_MAX) return Plain.Props
 		else if (!UNPLAIN_WORDS.has(name) && !DESTINATIONS.has(name) && !SKIPPED.has(name) && !PRESERVED_KIND.has(name)) {
 			const route = this.routes.get(name) ?? Reader.routeOf(name)
 
@@ -1095,13 +1116,15 @@ class Reader {
 			else if (route === Route.Special) plain = TEXT_WORDS.has(name) || CHARACTERS.has(name) ? Plain.Text : Plain.Props
 		}
 
-		this.plainWords.set(name, plain)
+		if (this.plainWords.size < WORD_TABLE_MAX) this.plainWords.set(name, plain)
 
 		return plain
 	}
 
 	// The route of a word not met yet: found as reading finds it (by its name alone), by a reader of its own.
 	private static routeOf(name: string): Route {
+		if (name.length > WORD_MAX) return Route.Special
+
 		let route = PROBED_ROUTES.get(name)
 
 		if (route === undefined) {
@@ -1109,6 +1132,9 @@ class Reader {
 
 			probe.word(name, 0, false)
 			route = probe.routes.get(name) ?? Route.Special
+
+			if (PROBED_ROUTES.size >= PROBED_ROUTES_MAX) PROBED_ROUTES.clear()
+
 			PROBED_ROUTES.set(name, route)
 		}
 
@@ -1473,7 +1499,9 @@ class Reader {
 			start: this.tokens.start,
 			box: parent.box,
 			old: parent.old,
-			opener: this.stack.length === 1
+			opener: this.stack.length === 1,
+			lead: -1,
+			drawing: false
 		}
 
 		if (parent.dest.kind === "styles") {
@@ -1939,6 +1967,11 @@ class Reader {
 		}
 
 		// Which handler takes a word depends on its name alone: found once per name, then called directly.
+		if (name.length > WORD_MAX) {
+			this.specialWord(name, param, hasParam)
+			return
+		}
+
 		const route = this.routes.get(name)
 
 		switch (route) {
@@ -1973,7 +2006,7 @@ class Reader {
 		else if (this.sectionWord(name, param, hasParam)) found = Route.Section
 		else this.specialWord(name, param, hasParam)
 
-		this.routes.set(name, found)
+		if (this.routes.size < WORD_TABLE_MAX) this.routes.set(name, found)
 	}
 
 	// Destination words: they set what the rest of the group is. Returns whether `name` was one.
@@ -2729,6 +2762,9 @@ class Reader {
 			return true
 		}
 
+		// A repeated \\do: the group was read ahead once, and its text box's end action places what follows.
+		if (frame.drawing) return true
+
 		const ahead = new RtfTokenizer(this.bytes, this.tokens.position)
 		const box = newFrame()
 		let depth = 1
@@ -2793,6 +2829,7 @@ class Reader {
 		const content = new Story(this.doc)
 		const depthInTable = frame.para.depth()
 
+		frame.drawing = true
 		frame.box = box
 		frame.dest = { kind: "story", story: content, mode: "text" }
 		frame.onEnd = () => {
@@ -2944,25 +2981,30 @@ class Reader {
 		this.characterWord(name, param, hasParam)
 	}
 
-	// Whether the word just read is the first in its group (after \\* and spaces).
+	// Whether the word just read is the first in its group (after \\* and spaces). The group's leading bytes are
+	// scanned once, not again for every later word.
 	private firstInGroup(frame: Frame): boolean {
-		const bytes = this.bytes
-		const end = this.tokens.start
+		if (frame.lead < 0) {
+			const bytes = this.bytes
+			let at = frame.start + 1
 
-		for (let at = frame.start + 1; at < end; at++) {
-			const byte = bytes[at]
+			for (; at < bytes.length; at++) {
+				const byte = bytes[at]
 
-			if (byte === 0x20 || byte === 0x0d || byte === 0x0a || byte === 0x09) continue
-			if (byte === 0x5c && bytes[at + 1] === 0x2a) {
-				at++
+				if (byte === 0x20 || byte === 0x0d || byte === 0x0a || byte === 0x09) continue
+				if (byte === 0x5c && bytes[at + 1] === 0x2a) {
+					at++
 
-				continue
+					continue
+				}
+
+				break
 			}
 
-			return false
+			frame.lead = at
 		}
 
-		return true
+		return this.tokens.start <= frame.lead
 	}
 
 	// ---- pictures and shapes
@@ -4551,7 +4593,7 @@ class Reader {
 		if (revision !== "") {
 			const tag = revision.replace(/>$/u, "/>").replace(/^<w:(ins|del)/u, open => `${open} w:id="${this.doc.nextId()}"`)
 
-			rPr = rPr === "" ? `<w:rPr>${tag}</w:rPr>` : rPr.replace("<w:rPr>", `<w:rPr>${tag}`)
+			rPr = rPr === "" ? `<w:rPr>${tag}</w:rPr>` : rPr.replace("<w:rPr>", () => `<w:rPr>${tag}`)
 		}
 
 		const old = para.old

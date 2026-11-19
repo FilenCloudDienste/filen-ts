@@ -12,14 +12,13 @@ import type { DeckOp, InsertedImage, PictureAdjust } from "../../../presentation
 import { isIssuedName } from "../../../presentation/issuedNames"
 import { refused, type Deck, type FillProps, type Refused, type ShapeNode } from "../../../presentation/model"
 import { findShape } from "../../../presentation/edit/changes"
-import type { Slicing } from "../../../opc/index"
+import { crc32, type Slicing } from "../../../opc/index"
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import { pictureSize, type OdpPackageView } from "../../read/document"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { OdpStyles, declared, hexColor, percent, pt, setProperty, styleChanges, type StyleChanges } from "../styles"
-import { IDENTITY, OdpShapeWriter, canonicalBox, familyFragment, pictureMirror } from "./shape"
-import { altMarkup, frameBox } from "./table"
+import { IDENTITY, OdpShapeWriter, boxMarkup, canonicalBox, familyFragment, newElementCommon, pictureMirror } from "./shape"
 import { isRefused } from "../../../presentation/refusal"
 import { sameBytes } from "../../../docx/write/bytes"
 
@@ -45,18 +44,6 @@ interface SavedImages {
 }
 
 const entries = new WeakMap<OdpStylesApi, SavedImages>()
-
-function crc32(bytes: Uint8Array): number {
-	let crc = 0xffffffff
-
-	for (const byte of bytes) {
-		crc ^= byte
-
-		for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
-	}
-
-	return (crc ^ 0xffffffff) >>> 0
-}
 
 // The package path of an inserted image: named by its content and registry id, past every name the package has or a
 // package of the session had (an earlier session's insert of the same image has its name), added once per save.
@@ -245,20 +232,22 @@ function newPicture(context: OdpEmitContext, styles: OdpStyles, shape: ShapeNode
 	if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
 
 	const style = styles.derived("graphic", undefined, changes)
-	const name = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
+	const common = newElementCommon(shape, styles)
 
-	return `<draw:frame${name} draw:style-name="${escapeAttribute(style)}"${frameBox(held)}>${imageElement(image.path)}${altMarkup(shape)}</draw:frame>`
+	if (isRefused(common.listeners)) return common.listeners
+
+	return `<draw:frame${common.attributes} draw:style-name="${escapeAttribute(style)}"${boxMarkup(held)}>${imageElement(image.path)}${common.listeners}${common.alt}</draw:frame>`
 }
 
-// The source frame's draw:image and graphic style.
-function sourceImage(fragment: Fragment, node: number): { readonly image: number; readonly style: string | undefined } {
+// The source frame's draw:image.
+function sourceImage(fragment: Fragment, node: number): { readonly image: number } {
 	const document = fragment.document
 	let image = -1
 
 	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child))
 		if (image < 0 && fragment.name(child) === "draw:image") image = child
 
-	return { image, style: fragment.attributes(node).get("draw:style-name") }
+	return { image }
 }
 
 export const emitOdpPicture: OdpEmitFamily = {
@@ -292,11 +281,11 @@ export const emitOdpPicture: OdpEmitFamily = {
 
 		if (isRefused(changes)) return changes
 
-		const pieces = writer.element(shape, IDENTITY, { xfrm: true, alt: true, name: true, hidden: true, actions: true }, true)
+		// The crop and adjustments go into the style the shape writer derives for the frame (with its mirror).
+		const pieces = writer.element(shape, IDENTITY, { xfrm: true, alt: true, name: true, hidden: true, actions: true }, true, changes)
 
 		if (isRefused(pieces)) return pieces
 
-		const style = changes.attributes.size === 0 ? undefined : styles.derived("graphic", source.style, changes)
 		const out: EmitPiece[] = []
 
 		// Spans of the source frame are written as their text: the shape writer nests this markup in the frame it
@@ -312,12 +301,6 @@ export const emitOdpPicture: OdpEmitFamily = {
 				out.push(decodeUtf8(fragment.document.raw(piece.hole)))
 			} else if (piece instanceof Uint8Array) {
 				out.push(decodeUtf8(piece))
-			} else if (style !== undefined && typeof piece === "string" && piece.startsWith("<draw:frame")) {
-				out.push(
-					piece
-						.replace(/ draw:style-name="[^"]*"/u, "")
-						.replace(/^<draw:frame/u, `<draw:frame draw:style-name="${escapeAttribute(style)}"`)
-				)
 			} else {
 				out.push(piece)
 			}

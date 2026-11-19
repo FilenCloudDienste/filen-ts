@@ -14,6 +14,7 @@ import type {
 } from "../props/types"
 import { shadingColor } from "../theme/color"
 import { marginTwips } from "../styles/cellMargins"
+import { MAX_TABLE_COLUMNS } from "../props/parse"
 import type { PropsStore } from "../props/store"
 import type { CellFormat, ParagraphFormat, PropertyResolver, RowPosition, TableFormat } from "../styles/resolve"
 import { ref, refItem, refPart } from "./edits"
@@ -730,7 +731,7 @@ export class TableLayout {
 				const own = this.cellProps(from, cell)
 				const span = own.gridSpan ?? 1
 
-				if (usable) {
+				if (usable && column < MAX_TABLE_COLUMNS) {
 					const width = widthPx(own.width, wanted > 0 ? wanted : area.width)
 
 					if (width <= 0) usable = false
@@ -744,7 +745,8 @@ export class TableLayout {
 			columns = Math.max(columns, column + (rowProps.gridAfter ?? 0))
 		}
 
-		while (grid.length < columns) grid.push(0)
+		// Spans are bounded each, not together: past the bound a row's cells go without columns of their own.
+		while (grid.length < Math.min(columns, MAX_TABLE_COLUMNS)) grid.push(0)
 
 		if (usable) this.preferGrid(preferred, spanned, wanted)
 

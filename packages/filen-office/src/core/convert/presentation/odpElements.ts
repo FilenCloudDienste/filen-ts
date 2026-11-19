@@ -4,6 +4,7 @@ import { IMAGE_RELATIONSHIP, Pieces, attr, xfrmXml, type EmitContext } from "../
 import type { FreshForeignParts } from "../../pptx/write/fresh"
 import type { EmitRequest, EmitResult } from "../../pptx/write/types"
 import type { Deck, ShapeNode } from "../../presentation/model"
+import type { Slicing } from "../../slicing"
 import { heldChart, isHeldChart, XLSX_CONTENT_TYPE } from "../../presentation/edit/apply/chart"
 import { CHART_WORKBOOK_ID, odpChartPart, type OdpChartPart } from "./odpChart"
 import type { ConversionReport } from "./report"
@@ -53,13 +54,19 @@ function objectOf(part: string): string {
 }
 
 // A chart frame's object content.xml: the version the session holds (an inserted or edited chart), else the package's.
-async function objectContent(deck: Deck, parts: OdpParts, part: string, object: string): Promise<Uint8Array | undefined> {
+async function objectContent(
+	deck: Deck,
+	parts: OdpParts,
+	part: string,
+	object: string,
+	slicing: Slicing | undefined
+): Promise<Uint8Array | undefined> {
 	if (isHeldChart(part)) return heldChart(deck, part)?.object
 
 	const content = `${object}/content.xml`
 	const entry = parts.opc.entry(content)
 
-	return entry === undefined || entry.uncompressedSize > MAX_OBJECT_BYTES ? undefined : parts.opc.read(content)
+	return entry === undefined || entry.uncompressedSize > MAX_OBJECT_BYTES ? undefined : parts.opc.read(content, slicing)
 }
 
 export interface OdpObjects {
@@ -78,6 +85,7 @@ export async function odpObjects(
 	deck: Deck,
 	parts: OdpParts,
 	report: ConversionReport,
+	slicing: Slicing | undefined,
 	svgPng?: (svg: Uint8Array) => Promise<Uint8Array | undefined>
 ): Promise<OdpObjects> {
 	const charts = new Map<string, OdpChartPart>()
@@ -93,8 +101,8 @@ export async function odpObjects(
 
 		if (charts.has(object)) continue
 
-		const bytes = await objectContent(deck, parts, frame.frame.part, object)
-		const part = bytes === undefined ? undefined : await odpChartPart(bytes)
+		const bytes = await objectContent(deck, parts, frame.frame.part, object, slicing)
+		const part = bytes === undefined ? undefined : await odpChartPart(bytes, slicing)
 
 		if (part === undefined) continue
 

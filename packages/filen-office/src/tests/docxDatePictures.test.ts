@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { docxSchema, parseDocxEditorCommand } from "@filen/office/core/docx/edit"
 import { datePictures, intlDatePicture, numericDatePicture } from "../core/docx/fields/datePictures"
 import { datePicture } from "../core/docx/fields/evaluate"
-import { dayPeriodName, formatControlDate } from "../core/docx/forms/dates"
+import { dateLocale, dayPeriodName, formatControlDate, languageIdentifier, languageTag, lcidTag } from "../core/docx/forms/dates"
+import { lcidCode } from "../core/rtf/props"
 import { STYLES_PART } from "./docxEditFixtures"
 import { buildDocx, type SyntheticDocx } from "./docxSynthetic"
 import { pagedEditor, settleAll } from "./pagedFixtures"
@@ -179,6 +180,41 @@ describe("calendars", () => {
 		expect(numericDatePicture("0411")).toBe("yyyy/MM/dd")
 		expect(datePicture(new Date(Date.UTC(2026, 2, 4, 12)), "d MMMM yyyy", "0407")).toBe("4 März 2026")
 		expect(formatControlDate("2026-03-04", "MMMM", "040c")).toBe("mars")
+	})
+
+	it("reads regional identifiers of [MS-LCID] and falls back to an unknown one's primary language", () => {
+		const day = new Date(Date.UTC(2026, 2, 3, 12))
+
+		expect(dateLocale("2C0A")).toBe("es-AR")
+		expect(dateLocale("241A")).toBe("sr-Latn-RS")
+		expect(dateLocale("0452")).toBe("cy-GB")
+		expect(datePicture(day, "d MMMM yyyy", "2C0A")).toBe("3 marzo 2026")
+		// 0x7C0A has no row of its own: Spanish (0x0A) all the same.
+		expect(languageTag("7C0A")).toBe("es")
+		expect(dateLocale("7C0A")).toBe("es")
+		expect(formatControlDate("2026-03-03", "MMMM", "7C0A")).toBe("marzo")
+		// Neither the identifier nor its primary language is known.
+		expect(languageTag("00FF")).toBeUndefined()
+		expect(dateLocale("00FF")).toBe("en-US")
+	})
+
+	it("maps each language tag's first identifier back to that identifier", () => {
+		const seen = new Set<string>()
+
+		for (let lcid = 1; lcid <= 0xffff; lcid++) {
+			const tag = lcidTag(lcid)
+
+			if (tag === undefined || seen.has(tag.toLowerCase())) continue
+
+			seen.add(tag.toLowerCase())
+			expect([tag, languageIdentifier(tag)]).toEqual([tag, lcid])
+			expect(lcidCode(lcid)).toBe(tag)
+		}
+
+		expect(seen.size).toBeGreaterThan(400)
+		// es-ES is the traditional sort's (0x040A) first: the modern sort keeps its hex.
+		expect(lcidCode(0x0c0a)).toBe("0C0A")
+		expect(lcidCode(0x7c0a)).toBe("7C0A")
 	})
 
 	it("shows a date control in a non-Gregorian calendar with Latin digits, the Hebrew month by its number", () => {

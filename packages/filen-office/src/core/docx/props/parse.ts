@@ -1,3 +1,4 @@
+import { MAX_MEASURE_TEXT } from "../model/reader"
 import type { PropsReader } from "./reader"
 import type {
 	BorderProps,
@@ -45,6 +46,10 @@ import type {
 	WidthProps,
 	WidthType
 } from "./types"
+
+// Grid columns a table is read with at most (w:gridSpan, w:gridBefore and w:gridAfter, and a table's grid): past
+// any real table (Word's limit is 63) and bounding what a hostile file's spans make layout and conversion allocate.
+export const MAX_TABLE_COLUMNS = 1024
 
 // Parsers for the property containers. Unknown children (w14:*, future elements) are skipped: the XML
 // keeps them, and these objects only describe what rendering needs.
@@ -160,7 +165,8 @@ function percentOrFiftieths(r: PropsReader, node: number, local: string): number
 	if (plain !== undefined) return Math.round(plain)
 
 	const text = r.string(node, local)
-	const match = text === undefined ? null : /^\s*(-?[0-9]*\.?[0-9]+)\s*%\s*$/.exec(text)
+	const match =
+		text === undefined || text.length > MAX_MEASURE_TEXT ? null : /^\s*(-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))\s*%\s*$/.exec(text)
 
 	return match === null ? undefined : Math.round(Number.parseFloat(match[1] ?? "0") * 50)
 }
@@ -963,7 +969,7 @@ export function parseTableRowProps(r: PropsReader, node: number): TableRowProps 
 			case "gridAfter": {
 				const value = r.integer(c, "val")
 
-				if (value !== undefined && value >= 0) out[local] = value
+				if (value !== undefined && value >= 0) out[local] = Math.min(value, MAX_TABLE_COLUMNS)
 
 				break
 			}
@@ -1036,7 +1042,7 @@ export function parseTableCellProps(r: PropsReader, node: number): TableCellProp
 			case "gridSpan": {
 				const value = r.integer(c, "val")
 
-				if (value !== undefined && value > 0) out.gridSpan = value
+				if (value !== undefined && value > 0) out.gridSpan = Math.min(value, MAX_TABLE_COLUMNS)
 
 				break
 			}

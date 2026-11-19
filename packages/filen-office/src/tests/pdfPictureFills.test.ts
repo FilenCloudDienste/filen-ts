@@ -120,7 +120,7 @@ async function painted(image: DrawingImage, tile?: ImageTile, decoder: boolean =
 
 	const writer = await PdfWriter.create({ deterministic: true, deflate: null, ...(decoder ? { decoder: nodePngDecoder } : {}) })
 	const bytes = decoder ? PNG : rgbPng()
-	const fonts = new PdfFontSet({ assets: nodeFontAssets, deterministic: true })
+	const fonts = new PdfFontSet({ assets: nodeFontAssets })
 	const page = writer.beginPage(200, 200)
 	const images = new Map<string, Promise<PdfImage>>()
 

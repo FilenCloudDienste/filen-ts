@@ -8,14 +8,17 @@ import { CodeEditor } from "../react/code/index"
 import { codeLanguageExtensions, codeLanguageForExtension, isCodeLanguageId, CODE_LANGUAGES } from "../core/code/index"
 import {
 	CODE_EDITOR_SCOPE,
+	CODE_PHRASES,
 	codeEditorSetup,
 	codeFillParent,
 	codeKeymap,
 	codeLanguageSupport,
 	codeLineNumbers,
+	codePhrases,
 	codeReadOnly,
 	codeTheme,
-	mountCodeCompare
+	mountCodeCompare,
+	type CodePhrase
 } from "../dom/code/index"
 import type { CodeLanguageId } from "../core/code/languages"
 
@@ -273,6 +276,25 @@ describe("code editor extensions", () => {
 			destroy()
 
 			expect(container.querySelector(".cm-editor")).toBeNull()
+		}
+	})
+
+	it("labels the collapsed unchanged lines of a comparison through the phrase map", () => {
+		const map = Object.fromEntries(CODE_PHRASES.map(phrase => [phrase, `x-${phrase}`])) as Record<CodePhrase, string>
+		const same = Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n")
+
+		for (const sideBySide of [true, false]) {
+			const destroy = mountCodeCompare({
+				parent: container,
+				theirs: `${same}\nold`,
+				mine: `${same}\nnew`,
+				sideBySide,
+				extensions: [codeTheme, codePhrases(map)]
+			})
+
+			expect(container.querySelector(".cm-collapsedLines")?.textContent).toBe("x-17 unchanged lines")
+
+			destroy()
 		}
 	})
 })

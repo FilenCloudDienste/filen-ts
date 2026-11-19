@@ -7,7 +7,7 @@ import type { BitmapLike, PresentationEvent, PresentationSessionApi, SlideRender
 import { presentationActions } from "../react/presentation/links"
 import { NotesPanel } from "../react/presentation/notes/NotesPanel"
 import { SlideRail } from "../react/presentation/rail/SlideRail"
-import { railKeyTarget, railRange, revealOffset } from "../react/shared/railWindow"
+import { railKeyTarget } from "../react/shared/railWindow"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import {
 	createPresentationStore,
@@ -310,17 +310,7 @@ describe("presentation store", () => {
 })
 
 describe("rail window", () => {
-	it("mounts the items in view plus overscan only", () => {
-		expect(railRange(2000, 100, 0, 500, 3)).toEqual({ first: 0, last: 7 })
-		expect(railRange(2000, 100, 100_000, 500, 3)).toEqual({ first: 997, last: 1007 })
-		expect(railRange(2000, 100, 199_600, 500, 3)).toEqual({ first: 1993, last: 1999 })
-		expect(railRange(0, 100, 0, 500, 3)).toEqual({ first: 0, last: -1 })
-	})
-
-	it("reveals an item outside the view and moves by keys", () => {
-		expect(revealOffset(10, 100, 0, 500)).toBe(600)
-		expect(revealOffset(2, 100, 500, 500)).toBe(200)
-		expect(revealOffset(6, 100, 500, 500)).toBeUndefined()
+	it("moves by keys", () => {
 		expect(railKeyTarget("ArrowDown", 0, 5, 3, true)).toBe(1)
 		expect(railKeyTarget("ArrowRight", 0, 5, 3, true)).toBeUndefined()
 		expect(railKeyTarget("ArrowRight", 4, 5, 3, false)).toBe(4)

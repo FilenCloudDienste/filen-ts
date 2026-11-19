@@ -911,8 +911,8 @@ export function convertGraphic(
 	return { list, textboxes: walker.textboxes, unsupported: walker.unsupported, childEffects: walker.childEffects }
 }
 
-// Converts a shape tree whose coordinates are already in the frame's EMU (dsp:spTree of a SmartArt drawing,
-// later p:spTree).
+// Converts a shape tree whose coordinates are already in the frame's EMU (dsp:spTree of a SmartArt drawing, a slide's
+// p:spTree).
 export function convertShapeTree(
 	context: ShapeContext,
 	document: XmlDocument,

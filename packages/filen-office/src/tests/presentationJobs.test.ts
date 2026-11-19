@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { CORPUS_DIR } from "./corpusDir"
 import { bytesSource, type ByteSink } from "../core/opc/index"
 import type { ShapeRef } from "../core/presentation/model"
@@ -13,7 +13,12 @@ import { presentationTextServices } from "../dom/presentation/engine/view"
 import { presentationJobsRealm } from "../dom/presentation/raster"
 import type { SvgRasterizer } from "../dom/presentation/svgPort"
 import { serveJobsPort, type JobsPortEnd } from "../dom/presentation/engine/jobs"
-import { presentationJobsClient, servePresentationJobsWorker, type PresentationJobsWorkerLike } from "../dom/presentation/jobsWorker"
+import {
+	JOB_ABORT_GRACE_MS,
+	presentationJobsClient,
+	servePresentationJobsWorker,
+	type PresentationJobsWorkerLike
+} from "../dom/presentation/jobsWorker"
 import type { JobKind, JobOutcome, JobRequests } from "../dom/presentation/jobs/registry"
 import { installPresentationRealm, type RealmCanvas } from "../dom/presentation/services"
 import { pdfAssets, openPdf, pageText } from "./docxPdfFixtures"
@@ -74,7 +79,9 @@ function inThreadJobsWorker(canvas?: RealmCanvas): PresentationJobsWorkerLike {
 		postMessage: message => {
 			deliver(toWorker, message)
 		},
-		addEventListener: (_type, listener) => toPage.add(listener),
+		addEventListener: (type, listener) => {
+			if (type === "message") toPage.add(listener)
+		},
 		terminate: () => {
 			stopped = true
 			stop()
@@ -191,7 +198,7 @@ describe("presentation jobs over the jobs port", () => {
 		const context = await openDeck(deck())
 		const { outcome, bytes } = await job(context, "pdf", { layout: "slides", includeHidden: false, protect: true })
 
-		expect(outcome).toMatchObject({ kind: "refused", reason: "unsupported" })
+		expect(outcome).toMatchObject({ kind: "refused", reason: "passwordUnsupported" })
 		expect(bytes.length).toBe(0)
 	})
 
@@ -275,7 +282,9 @@ describe("slide images through the jobs worker", () => {
 			postMessage: message => {
 				deliver(toWorker, message)
 			},
-			addEventListener: (_type, listener) => toPage.add(listener),
+			addEventListener: (type, listener) => {
+				if (type === "message") toPage.add(listener)
+			},
 			terminate: stop
 		}
 	}
@@ -442,7 +451,7 @@ describe("what a PDF job tells the page", () => {
 		const context = await openDeck(await encryptedOfficeFile(agileStreams(deck(), password)), password)
 		const { outcome } = await job(context, "pdf", { layout: "slides", includeHidden: true, protect: true })
 
-		expect(outcome).toMatchObject({ kind: "refused", reason: "unsupported" })
+		expect(outcome).toMatchObject({ kind: "refused", reason: "passwordUnsupported" })
 		expect(outcome.kind === "refused" ? outcome.detail : "").toMatch(/^password/u)
 	})
 
@@ -522,6 +531,72 @@ describe("SVG pictures in a jobs worker", () => {
 			expect(await raster).toBe(bitmap)
 		} finally {
 			stop()
+		}
+	})
+})
+
+describe("a jobs worker that posts no outcome", () => {
+	// A worker that takes every message and answers none; its listeners by event type.
+	function silentWorker(): {
+		readonly worker: PresentationJobsWorkerLike
+		readonly fire: (type: "error" | "messageerror") => void
+		readonly posted: unknown[]
+	} {
+		const listeners = new Map<string, ((event: { readonly data: unknown }) => void)[]>()
+		const posted: unknown[] = []
+
+		return {
+			worker: {
+				postMessage: message => {
+					posted.push(message)
+				},
+				addEventListener: (type, listener) => {
+					listeners.set(type, [...(listeners.get(type) ?? []), listener])
+				},
+				terminate: () => undefined
+			},
+			fire: type => {
+				for (const listener of listeners.get(type) ?? []) listener({ data: undefined })
+			},
+			posted
+		}
+	}
+
+	const session = { jobsPort: () => Promise.resolve() }
+
+	it.each(["error", "messageerror"] as const)("ends the job as failed on the worker's %s event", async type => {
+		const fake = silentWorker()
+		const handle = presentationJobsClient(() => fake.worker)("pdf", { layout: "slides", includeHidden: false, protect: false }, session)
+
+		fake.fire(type)
+
+		expect(await handle.done).toEqual({ kind: "refused", reason: "failed", detail: "job" })
+		await expect(handle.output.read()).rejects.toMatchObject({ reason: "failed" })
+		handle.close()
+	})
+
+	it("ends an aborted job as aborted once the grace passed", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		try {
+			const fake = silentWorker()
+			const handle = presentationJobsClient(() => fake.worker)(
+				"pdf",
+				{ layout: "slides", includeHidden: false, protect: false },
+				session
+			)
+			let outcome: JobOutcome | undefined
+
+			void handle.done.then(value => (outcome = value))
+			handle.abort()
+			expect(fake.posted).toContainEqual({ t: "abort", id: 1 })
+			await vi.advanceTimersByTimeAsync(JOB_ABORT_GRACE_MS - 1)
+			expect(outcome).toBeUndefined()
+			await vi.advanceTimersByTimeAsync(1)
+			expect(outcome).toEqual({ kind: "refused", reason: "aborted", detail: "job" })
+			handle.close()
+		} finally {
+			vi.useRealTimers()
 		}
 	})
 })

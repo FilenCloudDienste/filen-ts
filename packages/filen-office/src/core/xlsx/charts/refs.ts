@@ -18,6 +18,15 @@ export type ChartNameLookup = (name: string, sheet: string | null) => string | u
 
 const NAME_DEPTH = 4
 
+// Areas and defined names one expansion may take at most (a chart's references share one budget): names of names of
+// unions multiply, so an expansion past it reads nothing rather than building the product.
+export const MAX_CHART_AREAS = 1024
+
+// What an expansion may still take: below 0 once spent.
+export interface ChartAreaBudget {
+	left: number
+}
+
 // The top-level pieces of a union: "(A,B)" or "A,B" split at commas outside quotes, brackets and parentheses.
 function pieces(text: string): string[] | null {
 	let body = text.trim()
@@ -30,6 +39,8 @@ function pieces(text: string): string[] | null {
 
 	for (let index = 0; index < body.length; index++) {
 		const code = body.charCodeAt(index)
+
+		if (out.length > MAX_CHART_AREAS) return null
 
 		if (code === 39 || code === 34) {
 			const quote = code
@@ -71,8 +82,14 @@ function rangeOf(area: RefArea): SheetRange {
 
 const NAME = /^(?:(?:'((?:[^']|'')+)'|([^\s!'[\]()]+))!)?([A-Za-z_\\][\w.\\?]*)$/
 
-// The areas `formula` reads, in order; null when it is not a plain reference, union or name of them.
-export function chartAreas(formula: string, names: ChartNameLookup | null, depth = 0): ChartArea[] | null {
+// The areas `formula` reads, in order; null when it is not a plain reference, union or name of them, or when it
+// takes more than `budget` allows (budget.left is then below 0).
+export function chartAreas(
+	formula: string,
+	names: ChartNameLookup | null,
+	depth = 0,
+	budget: ChartAreaBudget = { left: MAX_CHART_AREAS }
+): ChartArea[] | null {
 	const parts = pieces(formula)
 
 	if (parts === null) return null
@@ -84,7 +101,7 @@ export function chartAreas(formula: string, names: ChartNameLookup | null, depth
 		const span = spans[0]
 
 		if (spans.length === 1 && span !== undefined && span.start === 0 && span.end === piece.length) {
-			if (span.sheet === null) return null
+			if (span.sheet === null || --budget.left < 0) return null
 
 			out.push({ sheet: span.sheet, range: rangeOf(span.area) })
 
@@ -94,14 +111,14 @@ export function chartAreas(formula: string, names: ChartNameLookup | null, depth
 		// A defined name: Sheet1!Name, [0]!Name (the workbook's own) or a bare name.
 		const named = NAME.exec(piece.replace(/^\[0\]!/, ""))
 
-		if (named === null || names === null || depth >= NAME_DEPTH) return null
+		if (named === null || names === null || depth >= NAME_DEPTH || --budget.left < 0) return null
 
 		const sheet = named[1]?.replace(/''/g, "'") ?? named[2] ?? null
 		const target = names(named[3] ?? "", sheet)
 
 		if (target === undefined) return null
 
-		const resolved = chartAreas(target, names, depth + 1)
+		const resolved = chartAreas(target, names, depth + 1, budget)
 
 		if (resolved === null) return null
 

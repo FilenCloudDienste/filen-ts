@@ -4,17 +4,18 @@ import { strToU8, unzipSync, zipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { bytesSource, ZipArchive } from "../core/opc/index"
 import { chartWorkbookOp, chartEditOp, insertChartOp, sampleChartCells } from "../core/presentation/edit/commands/chart"
-import { heldChart, workbookCells, XLSX_CONTENT_TYPE } from "../core/presentation/edit/apply/chart"
+import { heldChart, workbookCells, type WorkbookCells } from "../core/presentation/edit/apply/chart"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, SlideRef, Xfrm } from "../core/presentation/model"
 import { textWorkbookXlsx } from "../core/xlsx/convert/text"
-import { readChartInfo } from "../core/xlsx/charts/model"
 import { parseXml } from "../core/xml/index"
 import { chartData } from "../dom/presentation/engine/chart"
 import { viewCapability } from "../dom/presentation/engine/view"
 import { CORPUS_DIR } from "./corpusDir"
 import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
+import { sessionEdits } from "../dom/presentation/engine/edit"
+import { clipSlides } from "../dom/presentation/engine/clip"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 
 // Charts in a presentation through the engine (prepare, apply, save, upload, commit, rebase): Insert ▸ Chart with its
@@ -313,7 +314,6 @@ describe("Edit Data", () => {
 				chartShape(d, slide).frame?.kind === "chart" ? (chartShape(d, slide).frame as { part: string }).part : ""
 			)
 		).toBeDefined()
-		expect(XLSX_CONTENT_TYPE).toContain("spreadsheetml")
 	})
 })
 
@@ -380,7 +380,6 @@ describe("ODP charts", () => {
 
 		expect(object).toContain('chart:class="chart:line"')
 		expect(object).toContain('office:value="9"')
-		expect(readChartInfo).toBeDefined()
 	})
 })
 
@@ -451,11 +450,49 @@ describe("versions across saves", () => {
 
 // A deck whose chart's data is an embedded .xls (an OLE object, as a pptx converted from a .ppt holds it): the
 // inserted chart's .xlsx swapped for a workbook of the corpus.
-async function xlsDeck(): Promise<Uint8Array | undefined> {
-	const xls = join(CORPUS_DIR, "xls", "csvkit__test.xls")
+const XLS = join(CORPUS_DIR, "xls", "csvkit__test.xls")
+const LEGEND_ODP = join(CORPUS_DIR, "odp", "lo__custom_legend_position.odp")
+const PLOT_PPTX = join(CORPUS_DIR, "pptx", "pypptx__cht-plot-props.pptx")
 
-	if (!existsSync(xls)) return undefined
+// A chart's own Edit Data workbook with every number of its data area (below the header row, right of the label
+// column) × 100 and rounded (a product like 4.4 × 100 = 440.00000000000006 would type as text), as the .xlsx Edit
+// Data sends back.
+async function scaledWorkbook(
+	bytes: Uint8Array | undefined
+): Promise<{ readonly sheet: ReturnType<WorkbookCells["sheet"]>; readonly workbook: { readonly bytes: Uint8Array } }> {
+	const cells = await workbookCells(bytes ?? new Uint8Array())
 
+	if ("kind" in cells) throw new Error(cells.reason)
+
+	const sheet = cells.sheet(cells.sheets[0] ?? "")
+	const rows: string[][] = []
+
+	for (let row = 0; row <= (sheet?.lastRow ?? -1); row++) {
+		const line: string[] = []
+
+		for (let col = 0; col <= (sheet?.lastCol ?? -1); col++) {
+			const cell = sheet?.cell(row, col)
+
+			line.push(
+				cell === undefined || cell.kind === "empty"
+					? ""
+					: row > 0 && col > 0 && cell.kind === "number"
+						? String(Math.round(cell.number * 100))
+						: cell.text
+			)
+		}
+
+		rows.push(line)
+	}
+
+	const workbook = await textWorkbookXlsx(rows, "Sheet1")
+
+	if (!workbook.ok) throw new Error("no workbook")
+
+	return { sheet, workbook }
+}
+
+async function xlsDeck(): Promise<Uint8Array> {
 	const d = await driveSession(deckOf("pptx"), "pptx")
 	const slide = d.session.deck.slides[0] as SlideRef
 
@@ -466,7 +503,7 @@ async function xlsDeck(): Promise<Uint8Array | undefined> {
 	const embedded = Object.keys(files).find(name => name.startsWith("ppt/embeddings/")) as string
 
 	delete files[embedded]
-	files["ppt/embeddings/Microsoft_Excel_97-2003_Worksheet1.xls"] = readFileSync(xls)
+	files["ppt/embeddings/Microsoft_Excel_97-2003_Worksheet1.xls"] = readFileSync(XLS)
 	files["ppt/charts/_rels/chart1.xml.rels"] = strToU8(
 		'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
 			'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="../embeddings/Microsoft_Excel_97-2003_Worksheet1.xls"/></Relationships>'
@@ -480,118 +517,191 @@ async function xlsDeck(): Promise<Uint8Array | undefined> {
 	return zipSync(files)
 }
 
-describe("an embedded .xls", () => {
-	it("Edit Data hands the .xls over and its first commit writes the chart into a new part with an .xlsx", async () => {
-		const deck = await xlsDeck()
+describe("chart versions nothing names any more", () => {
+	type Drive = Awaited<ReturnType<typeof driveSession>>
 
-		if (deck === undefined) return
+	// The versions the session holds ("chart:N", numbered from 1).
+	const held = (d: Drive): string[] =>
+		Array.from({ length: 64 }, (_, k) => `chart:${String(k + 1)}`).filter(name => heldChart(d.session.deck, name) !== undefined)
+	const partOf = (d: Drive, slide: SlideRef): string | undefined => {
+		const frame = chartShape(d, slide).frame
 
-		const d = await driveSession(deck, "pptx")
+		return frame?.kind === "chart" ? frame.part : undefined
+	}
+	const edits = async (d: Drive, slide: SlideRef, count: number): Promise<void> => {
+		const target = { slide, id: chartShape(d, slide).id }
+
+		for (let k = 0; k < count; k++)
+			expect(await d.command(chartEditOp(target, { kind: "title", text: `Title ${String(k)}` }))).toMatchObject({ ok: true })
+	}
+
+	for (const format of ["pptx", "odp"] as const) {
+		it(`${format}: once the history lets go of their steps, only the version the frame names is held`, async () => {
+			const d = await driveSession(deckOf(format), format)
+			const slide = d.session.deck.slides[0] as SlideRef
+
+			await insertChart(d, slide)
+			await edits(d, slide, 4)
+			expect(held(d).length).toBeGreaterThan(1)
+
+			sessionEdits(d.session).history.clear()
+
+			expect(held(d)).toEqual([partOf(d, slide)])
+		})
+
+		it(`${format}: a version only a step names survives a prune, so the undo of the chart's delete is exact`, async () => {
+			const d = await driveSession(deckOf(format), format)
+			const slide = d.session.deck.slides[0] as SlideRef
+
+			await insertChart(d, slide)
+			await edits(d, slide, 2)
+
+			const edited = partOf(d, slide)
+			const id = chartShape(d, slide).id
+
+			const other = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(each => each.frame === undefined) as ShapeNode
+			const move: DeckOp = {
+				family: "shape",
+				kind: "setXfrm",
+				target: { slide, id: other.id },
+				xfrm: { ...(other.xfrm as Xfrm), x: 9000 }
+			}
+
+			expect(await d.command({ family: "shape", kind: "delete", slide, shapes: [id] })).toMatchObject({ ok: true })
+			expect(await d.command(move)).toMatchObject({ ok: true })
+			await saved(d)
+			expect((await d.undo()).ok).toBe(true)
+			expect((await d.undo()).ok).toBe(true)
+			expect(partOf(d, slide)).toBe(edited)
+			expect((await d.undo()).ok).toBe(true)
+			expect((await d.undo()).ok).toBe(true)
+			await saved(d)
+		})
+
+		it(`${format}: a redo after a prune points the frame at the version its op made`, async () => {
+			const d = await driveSession(deckOf(format), format)
+			const slide = d.session.deck.slides[0] as SlideRef
+
+			await insertChart(d, slide)
+			await edits(d, slide, 3)
+
+			const last = partOf(d, slide)
+
+			expect((await d.undo()).ok).toBe(true)
+			await saved(d)
+			expect((await d.redo()).ok).toBe(true)
+			expect(partOf(d, slide)).toBe(last)
+			await saved(d)
+		})
+	}
+
+	it("pptx: after a slide copy (it starts no save), the versions of a discarded redo are let go of", async () => {
+		const d = await driveSession(deckOf("pptx"), "pptx")
 		const slide = d.session.deck.slides[0] as SlideRef
 
-		await viewCapability.render(d.context, [slide])
+		await insertChart(d, slide)
+		expect((await clipSlides(d.context, [slide])).ok).toBe(true)
+		expect(sessionEdits(d.session).history.saving).toBe(false)
 
-		const target = { slide, id: chartShape(d, slide).id }
-		const data = await chartData(d.context, target, { workbook: true })
+		const made: (string | undefined)[] = []
 
-		expect(data.workbook?.kind).toBe("xls")
+		for (let k = 0; k < 3; k++) {
+			await edits(d, slide, 1)
+			made.push(partOf(d, slide))
+		}
 
-		const workbook = await textWorkbookXlsx(
-			[
-				["", "S"],
-				["x", "5"],
-				["y", "6"]
-			],
-			"Sheet1"
-		)
+		expect((await d.undo()).ok).toBe(true)
+		expect((await d.undo()).ok).toBe(true)
+		// The new edits discard the redo of the two undone ones (once the first can no longer be taken back).
+		await edits(d, slide, 2)
 
-		if (!workbook.ok) throw new Error("no workbook")
-
-		expect(await d.command(chartWorkbookOp(target, workbook.bytes))).toMatchObject({ ok: true })
-
-		const archive = await saved(d)
-		const slideXml = await textOf(archive, "ppt/slides/slide1.xml")
-		const slideRels = await textOf(archive, "ppt/slides/_rels/slide1.xml.rels")
-		const rId = /<c:chart [^>]*r:id="([^"]+)"/u.exec(slideXml)?.[1] ?? ""
-		const target2 = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./charts/(chart\\d+\\.xml)"`, "u").exec(slideRels)?.[1] ?? ""
-
-		expect(target2).toBe("chart2.xml")
-
-		const rels = await textOf(archive, "ppt/charts/_rels/chart2.xml.rels")
-
-		expect(rels).toContain('Id="rId1"')
-		expect(rels).toContain("relationships/package")
-		expect(rels).toMatch(/\.xlsx"/u)
-		expect(cachedValues(await textOf(archive, "ppt/charts/chart2.xml"))[0]).toEqual([5, 6])
+		expect(heldChart(d.session.deck, made[1] ?? "")).toBeUndefined()
+		expect(heldChart(d.session.deck, made[2] ?? "")).toBeUndefined()
+		expect(heldChart(d.session.deck, partOf(d, slide) ?? "")).toBeDefined()
 	})
 })
 
-describe.skipIf(!existsSync(CORPUS_DIR))("charts of the corpus", () => {
-	it("odp: changes a LibreOffice chart's legend and writes Edit Data's cells into its own table, in its own object", async () => {
-		const file = join(CORPUS_DIR, "odp", "lo__custom_legend_position.odp")
+describe("an embedded .xls", () => {
+	it.skipIf(!existsSync(XLS))(
+		"Edit Data hands the .xls over and its first commit writes the chart into a new part with an .xlsx",
+		async () => {
+			const d = await driveSession(await xlsDeck(), "pptx")
+			const slide = d.session.deck.slides[0] as SlideRef
 
-		if (!existsSync(file)) return
+			await viewCapability.render(d.context, [slide])
 
-		const d = await driveSession(readFileSync(file), "odp")
-		const slide = d.session.deck.slides[0] as SlideRef
+			const target = { slide, id: chartShape(d, slide).id }
+			const data = await chartData(d.context, target, { workbook: true })
 
-		await viewCapability.render(d.context, [slide])
+			expect(data.workbook?.kind).toBe("xls")
 
-		const shape = chartShape(d, slide)
-		const target = { slide, id: shape.id }
-		const data = await chartData(d.context, target, { workbook: true })
+			const workbook = await textWorkbookXlsx(
+				[
+					["", "S"],
+					["x", "5"],
+					["y", "6"]
+				],
+				"Sheet1"
+			)
 
-		expect(data.data).toBe(true)
-		expect(data.workbook?.kind).toBe("xlsx")
+			if (!workbook.ok) throw new Error("no workbook")
 
-		const cells = await workbookCells(data.workbook?.bytes ?? new Uint8Array())
+			expect(await d.command(chartWorkbookOp(target, workbook.bytes))).toMatchObject({ ok: true })
 
-		if ("kind" in cells) throw new Error(cells.reason)
+			const archive = await saved(d)
+			const slideXml = await textOf(archive, "ppt/slides/slide1.xml")
+			const slideRels = await textOf(archive, "ppt/slides/_rels/slide1.xml.rels")
+			const rId = /<c:chart [^>]*r:id="([^"]+)"/u.exec(slideXml)?.[1] ?? ""
+			const target2 = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./charts/(chart\\d+\\.xml)"`, "u").exec(slideRels)?.[1] ?? ""
 
-		const sheet = cells.sheet(cells.sheets[0] ?? "")
-		const rows: string[][] = []
+			expect(target2).toBe("chart2.xml")
 
-		for (let row = 0; row <= (sheet?.lastRow ?? -1); row++) {
-			const line: string[] = []
+			const rels = await textOf(archive, "ppt/charts/_rels/chart2.xml.rels")
 
-			for (let col = 0; col <= (sheet?.lastCol ?? -1); col++) {
-				const cell = sheet?.cell(row, col)
-
-				line.push(
-					cell === undefined || cell.kind === "empty"
-						? ""
-						: row > 0 && col > 0 && cell.kind === "number"
-							? String(cell.number * 100)
-							: cell.text
-				)
-			}
-
-			rows.push(line)
+			expect(rels).toContain('Id="rId1"')
+			expect(rels).toContain("relationships/package")
+			expect(rels).toMatch(/\.xlsx"/u)
+			expect(cachedValues(await textOf(archive, "ppt/charts/chart2.xml"))[0]).toEqual([5, 6])
 		}
+	)
+})
 
-		const workbook = await textWorkbookXlsx(rows, "Sheet1")
+describe.skipIf(!existsSync(CORPUS_DIR))("charts of the corpus", () => {
+	it.skipIf(!existsSync(LEGEND_ODP))(
+		"odp: changes a LibreOffice chart's legend and writes Edit Data's cells into its own table, in its own object",
+		async () => {
+			const file = LEGEND_ODP
+			const d = await driveSession(readFileSync(file), "odp")
+			const slide = d.session.deck.slides[0] as SlideRef
 
-		if (!workbook.ok) throw new Error("no workbook")
+			await viewCapability.render(d.context, [slide])
 
-		expect(await d.command(chartEditOp(target, { kind: "legend", position: "b" }))).toMatchObject({ ok: true })
-		expect(await d.command(chartWorkbookOp(target, workbook.bytes))).toMatchObject({ ok: true })
+			const shape = chartShape(d, slide)
+			const target = { slide, id: shape.id }
+			const data = await chartData(d.context, target, { workbook: true })
 
-		const archive = await saved(d)
-		const objects = names(archive, /^Object \d+\/content\.xml$/u)
+			expect(data.data).toBe(true)
+			expect(data.workbook?.kind).toBe("xlsx")
 
-		expect(objects).toEqual(Object.keys(unzipSync(readFileSync(file))).filter(name => /^Object \d+\/content\.xml$/u.test(name)))
+			const { sheet, workbook } = await scaledWorkbook(data.workbook?.bytes)
 
-		const object = await textOf(archive, objects[0] as string)
+			expect(await d.command(chartEditOp(target, { kind: "legend", position: "b" }))).toMatchObject({ ok: true })
+			expect(await d.command(chartWorkbookOp(target, workbook.bytes))).toMatchObject({ ok: true })
 
-		expect(object).toContain('chart:legend-position="bottom"')
-		expect(object).toContain(`office:value="${String((sheet?.cell(1, 1).number ?? 0) * 100)}"`)
-	})
+			const archive = await saved(d)
+			const objects = names(archive, /^Object \d+\/content\.xml$/u)
 
-	it("edits a deck's own chart in place and writes its caches from Edit Data's workbook", async () => {
-		const file = join(CORPUS_DIR, "pptx", "pypptx__cht-plot-props.pptx")
+			expect(objects).toEqual(Object.keys(unzipSync(readFileSync(file))).filter(name => /^Object \d+\/content\.xml$/u.test(name)))
 
-		if (!existsSync(file)) return
+			const object = await textOf(archive, objects[0] as string)
 
+			expect(object).toContain('chart:legend-position="bottom"')
+			expect(object).toContain(`office:value="${String(Math.round((sheet?.cell(1, 1).number ?? 0) * 100))}"`)
+		}
+	)
+
+	it.skipIf(!existsSync(PLOT_PPTX))("edits a deck's own chart in place and writes its caches from Edit Data's workbook", async () => {
+		const file = PLOT_PPTX
 		const d = await driveSession(readFileSync(file), "pptx")
 		const slide = d.session.deck.slides[0] as SlideRef
 
@@ -604,10 +714,16 @@ describe.skipIf(!existsSync(CORPUS_DIR))("charts of the corpus", () => {
 
 		expect(data.info).not.toBeNull()
 		expect(data.workbook?.kind).toBe("xlsx")
+
+		const before = unzipSync(readFileSync(file))
+		const cached = cachedValues(new TextDecoder().decode(before[part]))
+		const { workbook } = await scaledWorkbook(data.workbook?.bytes)
+
+		expect(cached.flat().some(value => value !== 0)).toBe(true)
 		expect(await d.command(chartEditOp(target, { kind: "title", text: "Corpus title" }))).toMatchObject({ ok: true })
+		expect(await d.command(chartWorkbookOp(target, workbook.bytes))).toMatchObject({ ok: true })
 
 		const archive = await saved(d)
-		const before = unzipSync(readFileSync(file))
 
 		expect(names(archive, /^ppt\/charts\/chart\d+\.xml$/u)).toEqual(
 			Object.keys(before)
@@ -615,6 +731,8 @@ describe.skipIf(!existsSync(CORPUS_DIR))("charts of the corpus", () => {
 				.sort()
 		)
 		expect(await textOf(archive, part)).toContain("Corpus title")
+		// The workbook sent holds the deck's own numbers × 100 (rounded), so the rewritten caches are the cached values × 100.
+		expect(cachedValues(await textOf(archive, part))).toEqual(cached.map(series => series.map(value => Math.round(value * 100))))
 	})
 })
 

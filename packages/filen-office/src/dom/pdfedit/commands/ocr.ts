@@ -1,9 +1,8 @@
 import type { PdfMatrix } from "../../../core/pdfedit/matrix"
-import { PdfEngineRefusal } from "../context"
 import { applyOcrPage, type OcrGraft } from "../ocr/page"
 import { graftOverlay } from "../overlay"
 import type { MupdfModule } from "../protocol"
-import { isIndex, isRecord, type PdfCommandTable } from "./types"
+import { isIndex, isRecord, requirePage, type PdfCommandTable } from "./types"
 
 // Text recognition's change to a page: the recogniser's invisible text laid over it (one journal operation per page).
 // It adds page content (a Form XObject drawn by the page), so it is a content edit for the signature policy and the
@@ -49,7 +48,7 @@ export const OCR_COMMANDS: PdfCommandTable<PdfOcrCommands> = {
 			return { page: args["page"], pdf, matrix }
 		},
 		run: (context, args) => {
-			if (args.page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
+			requirePage(context, args.page)
 
 			return applyOcrPage(context.mupdf, ocrGraft(context.mupdf), context.document, args)
 		}

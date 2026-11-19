@@ -13,7 +13,7 @@ import {
 	type Certificate
 } from "pkijs"
 import { OID, derOf, type PdfAlgorithm } from "./cms"
-import { RSA_PSS_OID } from "./keyInfo"
+import { CURVES, DIGEST_ALGORITHMS, ED25519_OID, MGF1_OID, ownedBytes, RSA_PSS_OID, type PdfCurveName } from "./algorithms"
 import type { PdfDigestName } from "./types"
 
 // The CMS SignedData of a PDF signature we make (PAdES B-B, /SubFilter /ETSI.CAdES.detached): detached, one signer,
@@ -39,7 +39,7 @@ export interface PdfSigningSubtle {
 export type PdfSignatureScheme =
 	| { readonly name: "RSASSA-PKCS1-v1_5"; readonly digest: PdfDigestName; readonly bits: number }
 	| { readonly name: "RSA-PSS"; readonly digest: PdfDigestName; readonly bits: number }
-	| { readonly name: "ECDSA"; readonly digest: PdfDigestName; readonly curve: "P-256" | "P-384" | "P-521" }
+	| { readonly name: "ECDSA"; readonly digest: PdfDigestName; readonly curve: PdfCurveName }
 	| { readonly name: "Ed25519"; readonly digest: "SHA-512" }
 
 // What signing needs: a non-extractable private key and the certificates. `chain` starts with the signer's own.
@@ -49,32 +49,9 @@ export interface PdfSigningIdentity {
 	readonly chain: readonly Certificate[]
 }
 
-const DIGEST_OIDS: Readonly<Record<PdfDigestName, string>> = {
-	"SHA-256": "2.16.840.1.101.3.4.2.1",
-	"SHA-384": "2.16.840.1.101.3.4.2.2",
-	"SHA-512": "2.16.840.1.101.3.4.2.3"
-}
-const DIGEST_BYTES: Readonly<Record<PdfDigestName, number>> = { "SHA-256": 32, "SHA-384": 48, "SHA-512": 64 }
-const RSA_SIGNATURE_OIDS: Readonly<Record<PdfDigestName, string>> = {
-	"SHA-256": "1.2.840.113549.1.1.11",
-	"SHA-384": "1.2.840.113549.1.1.12",
-	"SHA-512": "1.2.840.113549.1.1.13"
-}
-const ECDSA_SIGNATURE_OIDS: Readonly<Record<PdfDigestName, string>> = {
-	"SHA-256": "1.2.840.10045.4.3.2",
-	"SHA-384": "1.2.840.10045.4.3.3",
-	"SHA-512": "1.2.840.10045.4.3.4"
-}
-const CURVE_BYTES = { "P-256": 32, "P-384": 48, "P-521": 66 } as const
-const MGF1_OID = "1.2.840.113549.1.1.8"
-const ED25519_OID = "1.3.101.112"
 const SIGNING_CERTIFICATE_V2 = "1.2.840.113549.1.9.16.2.47"
 // The signed attributes and identifiers around the certificates and the signature value, with room to spare.
 const CMS_OVERHEAD_BYTES = 1024
-
-function owned(view: Uint8Array): Uint8Array<ArrayBuffer> {
-	return new Uint8Array(view)
-}
 
 // The WebCrypto parameters of importing (`import`) and signing with (`sign`) a scheme's key.
 export function schemeParams(scheme: PdfSignatureScheme): { readonly import: PdfAlgorithm; readonly sign: PdfAlgorithm } {
@@ -84,7 +61,7 @@ export function schemeParams(scheme: PdfSignatureScheme): { readonly import: Pdf
 		case "RSA-PSS":
 			return {
 				import: { name: scheme.name, hash: scheme.digest },
-				sign: { name: scheme.name, saltLength: DIGEST_BYTES[scheme.digest] }
+				sign: { name: scheme.name, saltLength: DIGEST_ALGORITHMS[scheme.digest].bytes }
 			}
 		case "ECDSA":
 			return { import: { name: "ECDSA", namedCurve: scheme.curve }, sign: { name: "ECDSA", hash: scheme.digest } }
@@ -101,7 +78,7 @@ function signatureBytes(scheme: PdfSignatureScheme): number {
 			return Math.ceil(scheme.bits / 8)
 		case "ECDSA":
 			// SEQUENCE of two INTEGERs, each possibly one byte longer for its sign.
-			return CURVE_BYTES[scheme.curve] * 2 + 9
+			return CURVES[scheme.curve].size * 2 + 9
 		case "Ed25519":
 			return 64
 	}
@@ -131,7 +108,7 @@ export async function keyMatchesCertificate(
 	let publicKey: unknown
 
 	try {
-		publicKey = await subtle.importKey("spki", owned(spki(certificate)), params.import, false, ["verify"])
+		publicKey = await subtle.importKey("spki", ownedBytes(spki(certificate)), params.import, false, ["verify"])
 	} catch {
 		return false
 	}
@@ -146,25 +123,25 @@ export async function keyMatchesCertificate(
 }
 
 function digestAlgorithm(digest: PdfDigestName): AlgorithmIdentifier {
-	return new AlgorithmIdentifier({ algorithmId: DIGEST_OIDS[digest] })
+	return new AlgorithmIdentifier({ algorithmId: DIGEST_ALGORITHMS[digest].oid })
 }
 
 function signatureAlgorithm(scheme: PdfSignatureScheme): AlgorithmIdentifier {
 	switch (scheme.name) {
 		case "RSASSA-PKCS1-v1_5":
-			return new AlgorithmIdentifier({ algorithmId: RSA_SIGNATURE_OIDS[scheme.digest], algorithmParams: new asn1js.Null() })
+			return new AlgorithmIdentifier({ algorithmId: DIGEST_ALGORITHMS[scheme.digest].rsaOid, algorithmParams: new asn1js.Null() })
 		case "RSA-PSS": {
-			const hash = new AlgorithmIdentifier({ algorithmId: DIGEST_OIDS[scheme.digest], algorithmParams: new asn1js.Null() })
+			const hash = new AlgorithmIdentifier({ algorithmId: DIGEST_ALGORITHMS[scheme.digest].oid, algorithmParams: new asn1js.Null() })
 			const params = new RSASSAPSSParams({
 				hashAlgorithm: hash,
 				maskGenAlgorithm: new AlgorithmIdentifier({ algorithmId: MGF1_OID, algorithmParams: hash.toSchema() }),
-				saltLength: DIGEST_BYTES[scheme.digest]
+				saltLength: DIGEST_ALGORITHMS[scheme.digest].bytes
 			})
 
 			return new AlgorithmIdentifier({ algorithmId: RSA_PSS_OID, algorithmParams: params.toSchema() })
 		}
 		case "ECDSA":
-			return new AlgorithmIdentifier({ algorithmId: ECDSA_SIGNATURE_OIDS[scheme.digest] })
+			return new AlgorithmIdentifier({ algorithmId: DIGEST_ALGORITHMS[scheme.digest].ecdsaOid })
 		case "Ed25519":
 			return new AlgorithmIdentifier({ algorithmId: ED25519_OID })
 	}
@@ -181,12 +158,12 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
 // ESS signing-certificate-v2 (RFC 5035): the SHA-256 of the signer's certificate (the default algorithm, so left out)
 // with its issuer and serial number, binding the signature to that certificate.
 async function signingCertificateV2(certificate: Certificate, subtle: PdfSigningSubtle): Promise<Attribute> {
-	const hash = new Uint8Array(await subtle.digest("SHA-256", owned(derOf(certificate.toSchema()))))
+	const hash = new Uint8Array(await subtle.digest("SHA-256", ownedBytes(derOf(certificate.toSchema()))))
 	const directoryName = new asn1js.Constructed({ idBlock: { tagClass: 3, tagNumber: 4 }, value: [certificate.issuer.toSchema()] })
 	const issuerSerial = new asn1js.Sequence({
 		value: [
 			new asn1js.Sequence({ value: [directoryName] }),
-			new asn1js.Integer({ valueHex: owned(certificate.serialNumber.valueBlock.valueHexView) })
+			new asn1js.Integer({ valueHex: ownedBytes(certificate.serialNumber.valueBlock.valueHexView) })
 		]
 	})
 	const certId = new asn1js.Sequence({ value: [new asn1js.OctetString({ valueHex: hash }), issuerSerial] })
@@ -203,11 +180,11 @@ export async function buildPdfCms(identity: PdfSigningIdentity, digest: Uint8Arr
 	const [signer] = identity.chain
 
 	if (signer === undefined) throw new Error("no signer certificate")
-	if (digest.length !== DIGEST_BYTES[identity.scheme.digest]) throw new Error("digest length")
+	if (digest.length !== DIGEST_ALGORITHMS[identity.scheme.digest].bytes) throw new Error("digest length")
 
 	const attributes = [
 		new Attribute({ type: OID.contentType, values: [new asn1js.ObjectIdentifier({ value: OID.data })] }),
-		new Attribute({ type: OID.messageDigest, values: [new asn1js.OctetString({ valueHex: owned(digest) })] }),
+		new Attribute({ type: OID.messageDigest, values: [new asn1js.OctetString({ valueHex: ownedBytes(digest) })] }),
 		await signingCertificateV2(signer, subtle)
 	]
 	// DER orders a SET OF by its members' encodings.
@@ -217,7 +194,7 @@ export async function buildPdfCms(identity: PdfSigningIdentity, digest: Uint8Arr
 
 	const signedAttrs = new SignedAndUnsignedAttributes({ type: 0, attributes: encoded.map(item => item.attribute) })
 	// What is signed: the attributes as a SET (the [0] IMPLICIT tag of their place in SignerInfo replaced).
-	const toSign = owned(derOf(signedAttrs.toSchema()))
+	const toSign = ownedBytes(derOf(signedAttrs.toSchema()))
 
 	toSign[0] = 0x31
 

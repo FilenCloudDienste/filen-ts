@@ -1,6 +1,7 @@
 import {
 	OdfNs,
 	readContentPrologue,
+	type ContentPrologue,
 	type OdfElement,
 	type OdfProperties,
 	type OdfStyle,
@@ -662,21 +663,21 @@ const APOSTROPHE = 0x27
 const takenCache = new WeakMap<Uint8Array, { readonly styles: object | undefined; readonly names: ReadonlySet<string> }>()
 
 // Every name a new automatic style of a save must not take: the styles both streams define and every style name
-// their markup refers to. A set of the caller's own (it adds to it).
-export function takenInStreams(parts: OdpParts): Set<string> {
+// their markup refers to. A set of the caller's own (it adds to it). `prologue`: content.xml's, when the caller has
+// parsed it already.
+export function takenInStreams(parts: OdpParts, prologue?: ContentPrologue): Set<string> {
 	const held = takenCache.get(parts.content.bytes)
 
 	if (held !== undefined && held.styles === parts.sheet.stylesDocument) return new Set(held.names)
 
-	const taken = scanTaken(parts)
+	const taken = scanTaken(parts, prologue ?? readContentPrologue(parts.content.bytes))
 
 	takenCache.set(parts.content.bytes, { styles: parts.sheet.stylesDocument, names: taken })
 
 	return new Set(taken)
 }
 
-function scanTaken(parts: OdpParts): Set<string> {
-	const prologue = readContentPrologue(parts.content.bytes)
+function scanTaken(parts: OdpParts, prologue: ContentPrologue): Set<string> {
 	const stylesDocument = parts.sheet.stylesDocument
 	const taken = takenNames([
 		{ document: prologue.document, namespaces: prologue.namespaces, root: prologue.root },

@@ -118,10 +118,10 @@ export function crossingPosition(cross: AxisState, axis: Axis): number {
 	return cross.from
 }
 
-export function tickLabels(state: AxisState): string[] {
+export function tickLabels(state: AxisState, date1904: boolean): string[] {
 	if (state.scale === undefined) return state.categories
 
-	return scaleTicks(state.scale).map(value => formatNumber(value, state.format))
+	return scaleTicks(state.scale).map(value => formatNumber(value, state.format, date1904))
 }
 
 const NARROW = new Set("ilIjtfr.,:;!|'`\"()[]{}/\\- 1")
@@ -224,7 +224,7 @@ export function axisExtent(builder: ChartBuilder, state: AxisState): number {
 	let extent = 0
 
 	if (axis.labelPosition !== "none") {
-		const labels = tickLabels(state)
+		const labels = tickLabels(state, builder.date1904)
 		let widest = 0
 		let lines = 1
 
@@ -351,7 +351,7 @@ export function drawAxisLabels(builder: ChartBuilder, state: AxisState, inner: R
 	let extent = 0
 
 	if (axis.labelPosition !== "none") {
-		const labels = tickLabels(state)
+		const labels = tickLabels(state, builder.date1904)
 		const positions =
 			state.scale === undefined
 				? labels.map((_, k) => categoryPosition(state, k))

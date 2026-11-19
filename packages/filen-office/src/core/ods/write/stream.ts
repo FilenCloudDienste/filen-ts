@@ -294,7 +294,6 @@ function markupEnd(bytes: Uint8Array, i: number, end: number): number {
 	return tagEnd(bytes, i, end)
 }
 
-// The attributes of a start tag (its bytes, "<" to ">"), qualified name to decoded value, in order.
 // One attribute of a start tag by its qualified name, without reading the others.
 export function tagAttribute(tag: Uint8Array, name: string): string | undefined {
 	let i = 1
@@ -331,6 +330,7 @@ export function tagAttribute(tag: Uint8Array, name: string): string | undefined 
 	return undefined
 }
 
+// The attributes of a start tag (its bytes, "<" to ">"), qualified name to decoded value, in order.
 export function tagAttributes(tag: Uint8Array): Map<string, string> {
 	const out = new Map<string, string>()
 	let i = 1
@@ -362,14 +362,4 @@ export function tagAttributes(tag: Uint8Array): Map<string, string> {
 	}
 
 	return out
-}
-
-// The qualified name of a tag (start or end), from its bytes.
-export function tagName(tag: Uint8Array): string {
-	let i = tag[1] === SLASH ? 2 : 1
-	const start = i
-
-	while (i < tag.length && !isSpace(tag[i]) && tag[i] !== SLASH && tag[i] !== GT) i++
-
-	return fromCharCodes(tag.subarray(start, i))
 }

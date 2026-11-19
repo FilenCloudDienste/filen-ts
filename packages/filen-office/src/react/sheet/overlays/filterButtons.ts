@@ -128,6 +128,7 @@ function paintButton(canvas: GridCanvas, box: GridRect, bits: number, scene: Gri
 export const FILTER_BUTTONS_LAYER: SheetGridLayer = {
 	id: "filterButtons",
 	stage: "cells",
+	pure: true,
 	paint: (canvas, scene) => {
 		const ranges = filtersOf(scene.layout)
 

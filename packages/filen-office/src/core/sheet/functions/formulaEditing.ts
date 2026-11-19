@@ -1,5 +1,6 @@
 import { referenceSpans, referenceText, type RefArea, type ReferenceSpan } from "../refs/formulaRefs"
 import { ARGUMENT_LABELS, sheetFunctions, type SheetFunction } from "./catalogue"
+import { skipQuoted } from "../refs/scan"
 
 // What the formula being typed offers at the caret, from its text alone (no engine): the function names a word
 // could become (autocomplete), the call the caret is in and which argument (signature help), whether a click on a
@@ -43,25 +44,6 @@ function isNameChar(code: number): boolean {
 	return isNameStart(code) || (code >= 48 && code <= 57) || code === 46
 }
 
-function quotedEnd(text: string, start: number, quote: number): number {
-	let index = start + 1
-
-	while (index < text.length) {
-		if (text.charCodeAt(index) === quote) {
-			if (text.charCodeAt(index + 1) === quote) {
-				index += 2
-				continue
-			}
-
-			return index + 1
-		}
-
-		index++
-	}
-
-	return text.length
-}
-
 // Characters after which a reference may start: an operator, a separator, an open parenthesis or the "=".
 const POINT_AFTER = new Set(["=", "(", "+", "-", "*", "/", "^", "&", "<", ">", ":", "{", "%"])
 
@@ -80,7 +62,7 @@ export function formulaContext(text: string, caret: number, separator = ","): Fo
 		const code = text.charCodeAt(index)
 
 		if (code === QUOTE || code === APOSTROPHE) {
-			const close = quotedEnd(text, index, code)
+			const close = skipQuoted(text, index, code)
 
 			// The caret inside a string or a quoted sheet name: nothing to offer.
 			if (close > end || (close === text.length && text.charCodeAt(close - 1) !== code)) {

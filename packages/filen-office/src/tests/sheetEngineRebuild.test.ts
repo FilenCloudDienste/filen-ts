@@ -32,3 +32,40 @@ describe("the engine built again after a cell at the grid's far edge", () => {
 		}
 	})
 })
+
+describe("SUBTOTAL calculated again when rows are hidden", () => {
+	it.each(["2024", "1st"])("reads a sheet named %s, whose name needs quotes, without an error", name => {
+		let hiding = false
+		const hidden = (sheet: number, row: number): number => (hiding && sheet === 1 && row === 1 ? 1 : 0)
+		const engine = new FormulaEngine(
+			[
+				{ name: "S", rows: [[`=SUBTOTAL(109,'${name}'!A1:A3)`]], formulas: [] },
+				{ name, rows: [[1], [2], [3]], formulas: [] }
+			],
+			[],
+			false,
+			() => undefined,
+			hidden
+		)
+
+		try {
+			expect(engine.result(0, 0, 0)).toEqual({ value: 6 })
+
+			hiding = true
+			engine.rowsChanged()
+
+			expect(engine.result(0, 0, 0)).toEqual({ value: 4 })
+
+			engine.set(1, [{ row: 0, col: 0, content: 10 }])
+
+			expect(engine.result(0, 0, 0)).toEqual({ value: 13 })
+
+			hiding = false
+			engine.rowsChanged()
+
+			expect(engine.result(0, 0, 0)).toEqual({ value: 15 })
+		} finally {
+			engine.destroy()
+		}
+	})
+})

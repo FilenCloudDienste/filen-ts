@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest"
 import { Relationships } from "../core/opc/index"
 import { DEFAULT_FORMAT, DEFAULT_VIEW, FormulaTable, SheetStore, SheetStrings } from "../core/xlsx/read/index"
 import { CellKind, ColFlag, FormulaKind, RowFlag, XfApply, type XlsxFormula } from "../core/xlsx/model/types"
+import { planRefEdit } from "../core/xlsx/refs/index"
+import { rootTag } from "../core/xlsx/write/markup"
 import { saveXlsx } from "../core/xlsx/write/save"
+import { decodeUtf8, encodeUtf8 } from "../core/xml/index"
 import { seedImpliedStyles } from "../core/xlsx/write/styles"
 import { buildFixture, changedEntries, difference, equalBytes, openWorkbook, parts, R, saved, SML } from "./xlsxWriteFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
@@ -613,6 +616,171 @@ describe("xlsx splice writer", () => {
 
 		expect(reopened.sheets.map(sheet => sheet.name)).toEqual(["One", "Two", "Three"])
 		expect((await reopened.load(reopened.sheets[2]!.id)).store.cellCount).toBe(1)
+	})
+})
+
+describe("a part's root element", () => {
+	const PROLOG = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- made with <x:worksheet> and <b>y</b> -->\n'
+
+	it("is found past markup inside a prolog comment, and a save that touches the part succeeds", async () => {
+		const { tag, prefix, name } = rootTag(encodeUtf8(`${PROLOG}<worksheet xmlns="${SML}"><sheetData/></worksheet>`))
+
+		expect({ prefix, name, start: tag.start }).toEqual({ prefix: "", name: "worksheet", start: PROLOG.length })
+
+		const source = buildFixture({
+			sheets: [
+				{
+					name: "One",
+					xml: `${PROLOG}<worksheet xmlns="${SML}"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>`
+				}
+			]
+		})
+		const workbook = await openWorkbook(source)
+		const sheet = await workbook.load(0)
+
+		sheet.store.setCell(0, 0, CellKind.NUMBER, 2, 0, -1)
+		workbook.changes.sheetRows(0)
+
+		expect(parts(await saved(workbook))["xl/worksheets/sheet1.xml"]).toContain('<c r="A1"><v>2</v></c>')
+	})
+
+	it("is skipped to past a document type declaration, and refuses unterminated prolog markup", () => {
+		expect(rootTag(encodeUtf8(`<!DOCTYPE worksheet SYSTEM "a>b.dtd"><x:worksheet xmlns:x="${SML}"/>`)).prefix).toBe("x")
+
+		for (const text of [
+			'<?xml version="1.0"?><!-- <worksheet/>',
+			'<?xml version="1.0"<worksheet/>',
+			'<!DOCTYPE worksheet [<!ENTITY a "b">]><worksheet/>'
+		])
+			expect(() => rootTag(encodeUtf8(text))).toThrow(expect.objectContaining({ reason: "malformedPart" }))
+	})
+})
+
+describe("the save gate and defects the source already had", () => {
+	const LONG = "A sheet name of forty characters, really"
+
+	function withWorkbookXml(bytes: Uint8Array, edit: (xml: string) => string): Uint8Array {
+		const files = unzipSync(bytes)
+		const xml = encodeUtf8(edit(decodeUtf8(files["xl/workbook.xml"] ?? new Uint8Array(0))))
+
+		return zipSync({ ...files, "xl/workbook.xml": xml }, { mtime: ZIP_ENTRY_TIME })
+	}
+
+	it("keeps a source sheet name the gate would refuse, and refuses a rename to one", async () => {
+		expect(LONG.length).toBe(40)
+
+		const source = buildFixture({
+			sheets: [{ name: LONG, body: '<sheetData><row r="1"><c r="A1"><f>1+1</f><v>2</v></c></row></sheetData>' }, { name: "Two" }]
+		})
+		const workbook = await openWorkbook(source)
+		const sheet = await workbook.load(0)
+
+		sheet.store.setCell(0, 1, CellKind.NUMBER, 3, 0, -1)
+		workbook.changes.sheetRows(0)
+		workbook.changes.needsFullCalc()
+
+		expect(parts(await saved(workbook))["xl/workbook.xml"]).toContain(`name="${LONG}"`)
+
+		const renamed = await openWorkbook(source)
+		const two = renamed.sheets[1]!
+
+		two.name = `${LONG}!`
+		renamed.changes.workbookSection("sheets")
+
+		expect(await saveXlsx({ opc: renamed.opc, workbook: renamed })).toMatchObject({ ok: false, reason: "reference" })
+	})
+
+	it("keeps duplicate sheetIds of the source, and refuses a new duplicate", async () => {
+		const source = withWorkbookXml(
+			buildFixture({
+				sheets: [{ name: "One" }, { name: "Two" }, { name: "Three" }],
+				workbookTail: '<definedNames><definedName name="n">One!$A$1</definedName></definedNames>'
+			}),
+			xml => xml.replace('sheetId="2"', 'sheetId="1"')
+		)
+		const workbook = await openWorkbook(source)
+
+		workbook.changes.workbookSection("definedNames", () => '<definedNames><definedName name="n">One!$A$1</definedName></definedNames>')
+
+		expect(parts(await saved(workbook))["xl/workbook.xml"]).toContain('<sheet name="Two" sheetId="1"')
+
+		const other = await openWorkbook(source)
+
+		other.sheets[2]!.name = "one"
+		other.changes.workbookSection("sheets")
+
+		expect(await saveXlsx({ opc: other.opc, workbook: other })).toMatchObject({ ok: false, reason: "reference" })
+	})
+
+	it("writes an active tab past the last sheet back within the sheets", async () => {
+		const source = withWorkbookXml(buildFixture({ sheets: [{ name: "One" }, { name: "Two" }] }), xml =>
+			xml.replace('<workbookView xWindow="0"', '<workbookView activeTab="5" firstSheet="7" xWindow="0"')
+		)
+		const workbook = await openWorkbook(source)
+
+		workbook.changes.needsFullCalc()
+
+		const written = parts(await saved(workbook))["xl/workbook.xml"] ?? ""
+
+		expect(written).toMatch(new RegExp(`<workbookView activeTab="${workbook.activeTab}" firstSheet="1" `))
+		expect(workbook.activeTab).toBeLessThan(2)
+	})
+
+	it("keeps overlapping column ranges of the source when the columns are written", async () => {
+		const source = buildFixture({
+			sheets: [
+				{
+					name: "One",
+					body: '<cols><col min="1" max="3" width="5" customWidth="1"/><col min="2" max="4" width="6" customWidth="1"/></cols><sheetData/>'
+				}
+			]
+		})
+		const workbook = await openWorkbook(source)
+		const sheet = await workbook.load(0)
+
+		// A width changed: the section is written anew, its source overlap with it.
+		sheet.cols = sheet.cols.map(col => (col.first === 1 ? { ...col, width: 9 } : col))
+		workbook.changes.sheetSection(0, "cols")
+
+		expect(parts(await saved(workbook))["xl/worksheets/sheet1.xml"]).toContain('<col min="2" max="4" width="9"')
+
+		sheet.cols = [...sheet.cols, { ...sheet.cols[0]!, first: 3, last: 3 }]
+		workbook.changes.sheetSection(0, "cols")
+
+		expect(await saveXlsx({ opc: workbook.opc, workbook })).toMatchObject({ ok: false, reason: "reference" })
+	})
+
+	it("keeps a dangling relationship id of the source through a structure edit, and refuses a new one", async () => {
+		const source = buildFixture({
+			sheets: [
+				{
+					name: "One",
+					body: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><hyperlinks><hyperlink ref="A3" r:id="rId9"/></hyperlinks>'
+				}
+			]
+		})
+		const workbook = await openWorkbook(source)
+
+		await workbook.load(0)
+
+		const result = await planRefEdit(workbook, { kind: "axis", sheet: 0, shift: { type: "insert", axis: "rows", at: 0, count: 1 } })
+
+		if (!result.ok) throw new Error(`refused: ${JSON.stringify(result.refusal)}`)
+
+		result.plan.apply()
+
+		expect(parts(await saved(workbook))["xl/worksheets/sheet1.xml"]).toContain('<hyperlink ref="A4" r:id="rId9"/>')
+
+		const other = await openWorkbook(source)
+
+		await other.load(0)
+		other.changes.sheetSection(
+			0,
+			"hyperlinks",
+			() => '<hyperlinks><hyperlink ref="A3" r:id="rId9"/><hyperlink ref="A5" r:id="rId8"/></hyperlinks>'
+		)
+
+		expect(await saveXlsx({ opc: other.opc, workbook: other })).toMatchObject({ ok: false, reason: "relationship" })
 	})
 })
 

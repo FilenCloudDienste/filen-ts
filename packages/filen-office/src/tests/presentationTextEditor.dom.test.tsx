@@ -24,9 +24,16 @@ import { FakeMeasurer, testFont } from "./textFixtures"
 const SHAPE: ShapeRef = { slide: slideRef(7), id: 3 }
 const ENV = { fonts: { resolve: () => testFont() }, cache: new MeasureCache(new FakeMeasurer()) }
 
+// The theme's colour for every scheme slot: what a run without its own colour is painted in (here the text colour).
+const THEME_TEXT = "336699"
+
 function laid(body: TextBody) {
 	const result = layoutBody(
-		resolveBody(body, { listStyles: [], bodyPr: [], fonts: { color: () => rgba("000000"), typeface: typeface => typeface } }),
+		resolveBody(body, {
+			listStyles: [],
+			bodyPr: [],
+			fonts: { color: color => rgba(color.kind === "srgb" ? color.rgb : THEME_TEXT), typeface: typeface => typeface }
+		}),
 		{ width: 300, height: 100 },
 		ENV
 	)
@@ -239,6 +246,86 @@ describe("presentation text editor view", () => {
 		sink.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }))
 
 		expect(editing.active?.state.doc.textContent).toBe("Ho")
+
+		await act(async () => {
+			root.unmount()
+		})
+	})
+
+	it("draws the caret in the colour of the text at it, not black", async () => {
+		const white = { kind: "solid", color: { kind: "srgb", rgb: "FFFFFF" } } as const
+		const red = { kind: "solid", color: { kind: "srgb", rgb: "FF0000" } } as const
+		const theme = { kind: "solid", color: { kind: "scheme", slot: "tx1" } } as const
+		const body: TextBody = {
+			bodyPr: {},
+			paragraphs: [
+				{
+					pPr: {},
+					runs: [
+						{ kind: "r", text: "White", rPr: { fill: white } },
+						{ kind: "r", text: "Red", rPr: { fill: red } },
+						{ kind: "r", text: "Theme", rPr: { fill: theme } }
+					]
+				},
+				{ pPr: {}, runs: [{ kind: "r", text: "Plain", rPr: {} }] },
+				{ pPr: {}, runs: [] }
+			]
+		}
+		const seed: TextSeed = {
+			shape: SHAPE,
+			revision: 1,
+			body,
+			resolved: [
+				{ pPr: {}, runs: [{}, {}, {}] },
+				{ pPr: {}, runs: [{}] },
+				{ pPr: {}, runs: [] }
+			],
+			...laid(body),
+			matrix: [1, 0, 0, 1, 0, 0]
+		}
+		const session = { ...fakeSession([], []), textSeed: () => Promise.resolve(seed) } as PresentationSessionApi
+		const frame = frameWithLayers()
+		const editing = createTextEditing()
+		const root = createRoot(frame)
+
+		await act(async () => {
+			root.render(
+				<PresentationTextEditor
+					session={session}
+					shape={SHAPE}
+					scale={1}
+					editing={editing}
+					labels={{ editor: "Slide text" }}
+					apple={false}
+					measurer={new FakeMeasurer()}
+					onExit={() => undefined}
+					onRefused={() => undefined}
+				/>
+			)
+		})
+		await flushAll()
+
+		const caretAt = (pos: number): string => {
+			editing.active?.setSelection(pos)
+
+			return (frame.querySelector(".fo-text-caret") as HTMLElement).style.background.replace(/\s/gu, "").toLowerCase()
+		}
+		const colors = (hex: string): string[] => [
+			`#${hex.toLowerCase()}`,
+			`rgb(${[0, 2, 4].map(at => String(parseInt(hex.slice(at, at + 2), 16))).join(",")})`
+		]
+
+		// Inside the white run, and at the start of the body (the run after the caret).
+		expect(colors("FFFFFF")).toContain(caretAt(3))
+		expect(colors("FFFFFF")).toContain(caretAt(1))
+		// It follows the caret into a run of another colour.
+		expect(colors("FF0000")).toContain(caretAt(8))
+		// A theme colour: the colour the worker painted the run in.
+		expect(colors(THEME_TEXT)).toContain(caretAt(13))
+		// No colour of its own: the body's default text colour as painted.
+		expect(colors(THEME_TEXT)).toContain(caretAt(21))
+		// An empty paragraph: the body's default text colour too.
+		expect(colors(THEME_TEXT)).toContain(caretAt(24))
 
 		await act(async () => {
 			root.unmount()

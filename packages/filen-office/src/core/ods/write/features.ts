@@ -1,10 +1,13 @@
 import { partKey, resolvePartName } from "../../opc/partNames"
 import type { Relationship } from "../../opc/relationships"
 import { parseCellRef, parseRangeRef } from "../../xlsx/write/text"
-import type { XlsxSection, XlsxSheetModel, XlsxWorkbookModel } from "../../xlsx/model/types"
+import { CellKind, type XlsxSection, type XlsxSheetModel, type XlsxWorkbookModel } from "../../xlsx/model/types"
+import type { SheetStore } from "../../xlsx/model/store"
+import type { SheetRange } from "../../sheet/protocol"
 import { decodeUtf8, encodeUtf8, escapeText, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
 import type { OdsSource, OdsTableSource } from "../source"
 import { SourceAxis } from "./axis"
+import { OdsSheet } from "../workbook"
 import { paragraphText } from "./cells"
 import { sheetValidationsSteps, validationRects, type Rect, type SheetValidations } from "./validations"
 import { runSliced, type SliceClock } from "../../slicing"
@@ -90,14 +93,69 @@ function readNotes(bytes: Uint8Array | undefined): Map<string, NoteState> {
 	return out
 }
 
-// A hyperlinks section's links by cell, as text:a's xlink:href (a place in the workbook as "#Sheet.A1").
-function readLinks(markup: string, relationships: ReadonlyMap<string, string>): Map<string, string> {
+// The cells of a range a link can be on, as the save has them: each one holding text (an OpenDocument link is a
+// text:a of its cell's text), never the whole rectangle, which a whole-column or whole-sheet link makes millions.
+// Overlapping links visit a cell once each, so the visits of a sheet's links are bounded by its cells and this much
+// over them: far above any real sheet's overlaps, it stops thousands of whole-sheet links over the same cells.
+const MAX_LINK_OVERLAP = 1_048_576
+
+export class LinksRefused extends Error {}
+
+// Counts one visit of a link's cell, refusing past a store's cells and the overlap allowed over them.
+export function linkVisits(store: SheetStore): () => void {
+	let left = store.cellCount + MAX_LINK_OVERLAP
+
+	return () => {
+		if (--left < 0) throw new LinksRefused("The links of a sheet overlap on more cells than the limit")
+	}
+}
+
+type LinkCells = (range: SheetRange, visit: (row: number, col: number) => void) => void
+
+// The store's cells with text in a range.
+function textCells(store: SheetStore): LinkCells {
+	return (range, visit) =>
+		store.forEachCell(range, (row, col, slot) => {
+			if (store.kind(slot) !== CellKind.EMPTY) visit(row, col)
+		})
+}
+
+// The cells with text now of a range of source cells (deleted rows and columns left out, inserted ones not in it), at
+// where they are now. The axes keep order, so the range now runs from its first kept cell to its last.
+function movedTextCells(store: SheetStore, rows: SourceAxis, cols: SourceAxis): LinkCells {
+	const cells = textCells(store)
+
+	return (range, visit) => {
+		const startRow = rows.target(rows.nextKept(range.startRow))
+		const endRow = rows.target(rows.previousKept(range.endRow))
+		const startCol = cols.target(cols.nextKept(range.startCol))
+		const endCol = cols.target(cols.previousKept(range.endCol))
+
+		if (startRow < 0 || endRow < startRow || startCol < 0 || endCol < startCol) return
+
+		cells({ startRow, startCol, endRow, endCol }, (row, col) => {
+			if (rows.source(row) >= 0 && cols.source(col) >= 0) visit(row, col)
+		})
+	}
+}
+
+// A hyperlinks section's links by cell, as text:a's xlink:href (a place in the workbook as "#Sheet.A1"), on the
+// cells `cells` gives; a link on none of them keeps its first cell (where it is now, `first`), so that a link the
+// save cannot write still differs from what it reads back.
+function readLinks(
+	markup: string,
+	relationships: ReadonlyMap<string, string>,
+	store: SheetStore,
+	cells: LinkCells,
+	first: (row: number, col: number) => readonly [number, number] | null
+): Map<string, string> {
 	const out = new Map<string, string>()
 
 	if (markup.trim() === "") return out
 
 	const document = parseXml(encodeUtf8(markup))
 	const root = document.documentElement()
+	const visited = linkVisits(store)
 
 	for (const link of children(document, root, "hyperlink")) {
 		const range = parseRangeRef(document.attribute(link, "ref") ?? "")
@@ -113,12 +171,23 @@ function readLinks(markup: string, relationships: ReadonlyMap<string, string>): 
 
 		if (href === undefined) continue
 
-		for (let row = range.startRow; row <= range.endRow; row++)
-			for (let col = range.startCol; col <= range.endCol; col++) out.set(key(row, col), href)
+		let any = false
+
+		cells(range, (row, col) => {
+			visited()
+			any = true
+			out.set(key(row, col), href)
+		})
+
+		const at = any ? null : first(range.startRow, range.startCol)
+
+		if (at !== null) out.set(key(at[0], at[1]), href)
 	}
 
 	return out
 }
+
+const IN_PLACE = (row: number, col: number): readonly [number, number] => [row, col]
 
 // A place in the workbook ("Sheet 2!A1", a name) as LibreOffice writes it after "#" ("Sheet 2.A1").
 function placeHref(location: string): string {
@@ -239,7 +308,15 @@ export function currentLinks(workbook: XlsxWorkbookModel, model: XlsxSheetModel)
 	for (const relationship of relationshipsOf(workbook, model))
 		if (relationship.type === HYPERLINK_TYPE) external.set(relationship.id, relationship.target)
 
-	return readLinks(currentSection(workbook, model, "hyperlinks") ?? sectionText(model.sections, "hyperlinks"), external)
+	const store = model.store as SheetStore
+
+	return readLinks(
+		currentSection(workbook, model, "hyperlinks") ?? sectionText(model.sections, "hyperlinks"),
+		external,
+		store,
+		textCells(store),
+		IN_PLACE
+	)
 }
 
 // The notes and links of a sheet, where an edit changed them.
@@ -252,9 +329,9 @@ export async function sheetFeatures(
 	taken: Set<string>,
 	clock?: SliceClock
 ): Promise<SheetFeatures> {
-	const axes = model as { rowAxis?: SourceAxis; colAxis?: SourceAxis }
-	const rowAxis = axes.rowAxis ?? SourceAxis.identity(0)
-	const colAxis = axes.colAxis ?? SourceAxis.identity(0)
+	// A sheet with no source table holds no source cells: every source row and column is gone.
+	const rowAxis = model instanceof OdsSheet ? model.rowAxis : SourceAxis.identity(0)
+	const colAxis = model instanceof OdsSheet ? model.colAxis : SourceAxis.identity(0)
 	const rows = new Set<number>()
 	const relationships = relationshipsOf(workbook, model)
 	let notes: Map<string, NoteState> | null = null
@@ -295,11 +372,24 @@ export async function sheetFeatures(
 		for (const relationship of table?.relationships ?? [])
 			if (relationship.type === HYPERLINK_TYPE) sourceExternal.set(relationship.id, relationship.target)
 
-		const now = readLinks(linkMarkup ?? sectionText(model.sections, "hyperlinks"), external)
+		const store = model.store as SheetStore
+		const now = readLinks(linkMarkup ?? sectionText(model.sections, "hyperlinks"), external, store, textCells(store), IN_PLACE)
+		// The source's, on its cells where they are now.
 		const before =
 			table === null
 				? new Map<string, string>()
-				: moved(readLinks(sectionText(table.sections, "hyperlinks"), sourceExternal), rowAxis, colAxis)
+				: readLinks(
+						sectionText(table.sections, "hyperlinks"),
+						sourceExternal,
+						store,
+						movedTextCells(store, rowAxis, colAxis),
+						(row, col) => {
+							const targetRow = rowAxis.target(row)
+							const targetCol = colAxis.target(col)
+
+							return targetRow < 0 || targetCol < 0 ? null : [targetRow, targetCol]
+						}
+					)
 		const linkRows = new Set<number>()
 
 		differing(now, before, (a, b) => a === b, linkRows)
@@ -346,7 +436,7 @@ export async function sheetFeatures(
 	}
 
 	const validations = await runSliced(
-		sheetValidationsSteps(workbook, model, sheetName, table, currentSection(workbook, model, "dataValidations"), taken),
+		sheetValidationsSteps(model, sheetName, table, currentSection(workbook, model, "dataValidations"), taken),
 		clock
 	)
 

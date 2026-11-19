@@ -6,9 +6,9 @@ import {
 	type Canvas2DLike,
 	type CanvasPaintContext
 } from "../../core/drawingml/canvas"
-import { EMU_PER_PX, MISSING_IMAGE, imageFormat, imageHandling, type DrawingImage } from "../../core/drawingml/index"
+import { EMU_PER_PX, multiply, type DrawingImage } from "../../core/drawingml/index"
 import type { RenderEffects, SlideRender, TextPage } from "../../core/presentation/output"
-import { PICTURE_BULLET_OBJECT } from "../../core/presentation/text/page"
+import { PICTURE_BULLET_OBJECT, bulletImage } from "../../core/presentation/text/page"
 import { realmSurface, type RasterImage, type RealmCanvas } from "./services"
 
 // Slides drawn on a canvas: the raster path of thumbnails, PNG/JPEG export, show layers and handout previews. A
@@ -24,13 +24,6 @@ export const MAX_THUMB_WIDTH = 2048
 export const THUMB_CACHE_BYTES = 64 * 1024 * 1024
 
 type Matrix = readonly number[]
-
-function times(m1: Matrix, m2: Matrix): number[] {
-	const [a1 = 1, b1 = 0, c1 = 0, d1 = 1, e1 = 0, f1 = 0] = m1
-	const [a2 = 1, b2 = 0, c2 = 0, d2 = 1, e2 = 0, f2 = 0] = m2
-
-	return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1]
-}
 
 function color(rgba: number): string {
 	return `#${(rgba >>> 0).toString(16).padStart(8, "0")}`
@@ -111,10 +104,10 @@ export function paintSlideCanvas(
 	for (const layer of render.layers) {
 		// The effects are the drawing's, or its text's when the shape draws no fill or line (effectsOnText).
 		const paint = (extra: Matrix, text: boolean = true): void => {
-			paintDrawingCanvas(ctx, layer.drawing, times(base, times(extra, layer.matrix)), images)
+			paintDrawingCanvas(ctx, layer.drawing, multiply(base, multiply(extra, layer.matrix)), images)
 
 			if (text && layer.text !== undefined) {
-				const matrix = times(base, times(extra, layer.textMatrix ?? layer.matrix))
+				const matrix = multiply(base, multiply(extra, layer.textMatrix ?? layer.matrix))
 
 				paintTextPageCanvas(ctx, layer.text, matrix)
 				paintPictureBullets(ctx, layer.text, matrix, images)
@@ -140,13 +133,6 @@ export function paintSlideCanvas(
 	}
 
 	return undrawn
-}
-
-// The picture a picture bullet shows, as a drawing image of its part (looked up by its part name).
-function bulletImage(part: string): DrawingImage {
-	const format = imageFormat(part, undefined)
-
-	return { ...MISSING_IMAGE, partName: part, format, handling: imageHandling(format) }
 }
 
 // A text page's picture bullets drawn over their places (the page's objects of PICTURE_BULLET_OBJECT).

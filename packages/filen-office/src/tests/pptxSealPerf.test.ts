@@ -1,20 +1,42 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { unzipSync, zipSync } from "fflate"
-import { describe, expect, it } from "vitest"
-import { bytesSource, memorySink, ZipArchive } from "@filen/office/core/opc"
+import { describe, expect, it, vi } from "vitest"
+import { bytesSource, memorySink, ZipArchive, type ByteSink, type Slicing } from "@filen/office/core/opc"
 import { agileStreams, encryptedOfficeFile } from "@filen/office/testing/encryption"
 import { openPptx } from "../core/pptx/package"
 import { savePptxSealed } from "../core/pptx/write/seal"
 import { openEncryptedPackage } from "../dom/encryption/index"
 import { packageSealer } from "../dom/encryption/seal"
 import { CORPUS_DIR } from "./corpusDir"
+import { liveHeapNow } from "./liveHeap"
 import { budget, cpuMs } from "./timing"
 import { Changes } from "./pptxWriteFixtures"
 
 // The encrypted save of a 30 MB deck (govuk Shaping with a stored 13 MB medium, Agile): one shape moved, the zip in
-// memory with gate 2, sealed under the session's key and read back by the sealer. The least CPU of three runs, and
-// the memory the save holds at its peak (the zip and the sealed file) against the package size.
+// memory with gate 2, sealed under the session's key and read back by the sealer. The least CPU of three runs, then
+// one run measured for memory: the save's slicing pause, the end of the compound-file build and every chunk handed to
+// the sink sample this process's live heap (liveHeap.ts); its rise above the opened deck is held against the package
+// size. The peak is the build: the zip, the EncryptedPackage stream and the compound file holding it, about 3.0×.
+
+// The compound file is built in one go with no pause inside it, so the build is sampled as it returns, while its
+// EncryptedPackage stream is still held. Only the measured run sets the sampler.
+const hook = vi.hoisted(() => ({ sample: undefined as (() => void) | undefined }))
+
+vi.mock(import("../core/cfb/writer"), async importOriginal => {
+	const writer = await importOriginal()
+
+	return {
+		...writer,
+		cfbBytes: async (...args: Parameters<typeof writer.cfbBytes>) => {
+			const bytes = await writer.cfbBytes(...args)
+
+			hook.sample?.()
+
+			return bytes
+		}
+	}
+})
 
 const SHAPING = join(CORPUS_DIR, "pptx", "govuk__Shaping_the_Qualifications_Landscape.pptx")
 const PASSWORD = "perf"
@@ -36,9 +58,12 @@ function thirtyMegabytes(): Uint8Array {
 	return zipSync({ ...entries, "ppt/media/filler.bin": [filler, { level: 0 }] })
 }
 
+// A slice of work between samples: each sample is two full collections.
+const SAMPLE_MS = 20
+
 describe.skipIf(!existsSync(SHAPING))("pptxSealPerf", () => {
 	it(
-		"saves a 30 MB encrypted deck with one shape edited in at most 1.5 s CPU, holding at most 2.1× the package",
+		"saves a 30 MB encrypted deck with one shape edited in at most 1.5 s CPU, holding at most 3.1× the package",
 		{ timeout: budget(300_000) },
 		async ({ task }) => {
 			const plain = thirtyMegabytes()
@@ -54,10 +79,12 @@ describe.skipIf(!existsSync(SHAPING))("pptxSealPerf", () => {
 			const decrypted = unlocked.document
 			const { sealer, release } = packageSealer(decrypted.key)
 			let best = Number.POSITIVE_INFINITY
-			let held = 0
+			let peak = 0
 
 			try {
-				for (let run = 0; run < 3; run++) {
+				// Three timed runs, then one measured for memory.
+				for (let run = 0; run < 4; run++) {
+					const measured = run === 3
 					const deck = await openPptx(bytesSource(decrypted.bytes))
 
 					if (deck.kind !== "opened") throw new Error(deck.reason)
@@ -80,37 +107,72 @@ describe.skipIf(!existsSync(SHAPING))("pptxSealPerf", () => {
 						package: deck.parts.opc,
 						index: deck.parts
 					}
-					const sink = memorySink()
-					const start = cpuMs()
-					const outcome = await savePptxSealed(
-						{
-							deck: deck.deck,
-							source,
-							changes: new Changes().shape(node.part, shape.id, { kind: "xfrm" }).build(),
-							revision: 1
+					const input = {
+						deck: deck.deck,
+						source,
+						changes: new Changes().shape(node.part, shape.id, { kind: "xfrm" }).build(),
+						revision: 1
+					}
+
+					if (!measured) {
+						const start = cpuMs()
+						const outcome = await savePptxSealed(input, sealer, memorySink())
+
+						best = Math.min(best, cpuMs() - start)
+
+						if (outcome.kind !== "written") throw new Error(JSON.stringify(outcome))
+
+						continue
+					}
+
+					let top = 0
+					let written = 0
+					const sample = (): void => {
+						top = Math.max(top, liveHeapNow())
+					}
+					const slicing: Slicing = {
+						pause: () => {
+							sample()
+
+							return Promise.resolve()
 						},
-						sealer,
-						sink
-					)
+						sliceMs: SAMPLE_MS,
+						now: () => performance.now()
+					}
+					// Drops what it gets, as the save port's writer does.
+					const sink: ByteSink = {
+						write: chunk => {
+							written += chunk.length
+							sample()
 
-					best = Math.min(best, cpuMs() - start)
+							return Promise.resolve()
+						},
+						close: () => Promise.resolve()
+					}
+					const before = liveHeapNow()
 
-					if (outcome.kind !== "written") throw new Error(JSON.stringify(outcome))
+					hook.sample = sample
 
-					// What the save holds at its peak: the zip (its report's size) and the sealed file.
-					held = Math.max(held, outcome.report.size + sink.bytes().length)
+					const outcome = await savePptxSealed(input, sealer, sink, { slicing }).finally(() => {
+						hook.sample = undefined
+					})
+
+					if (outcome.kind !== "written" || written === 0) throw new Error(JSON.stringify(outcome))
+
+					peak = top - before
 				}
 			} finally {
 				release()
 			}
 
-			const ratio = held / decrypted.bytes.length
+			const ratio = peak / decrypted.bytes.length
 
 			Object.assign(task.meta, {
-				perf: { pptxSealCpuMs: { value: best, budget: 1500 }, pptxSealPeakRatio: { value: ratio, budget: 2.1 } }
+				perf: { pptxSealCpuMs: { value: best, budget: 1500 }, pptxSealPeakRatio: { value: ratio, budget: 3.1 } }
 			})
 			expect(best).toBeLessThanOrEqual(budget(1500))
-			expect(ratio).toBeLessThanOrEqual(2.1)
+			expect(peak).toBeGreaterThan(0)
+			expect(ratio).toBeLessThanOrEqual(3.1)
 		}
 	)
 })

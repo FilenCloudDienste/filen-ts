@@ -430,12 +430,20 @@ describe.skipIf(!existsSync(WORKSHOP) || !existsSync(LIFECYCLE))("ODP layouts an
 
 			const content = text((await entriesOf(saved.bytes!)).get("content.xml"))
 			const group = /<draw:g\b[\s\S]*?<\/draw:g>/u.exec(content)?.[0] ?? ""
+			let checked = 0
+
+			expect(group, path).not.toBe("")
 
 			for (const tag of group.match(/<draw:(?:frame|custom-shape)\b[^>]*>/gu) ?? []) {
 				const drawId = /\sdraw:id="([^"]*)"/u.exec(tag)?.[1]
 
-				if (drawId !== undefined) expect(tag, path).toContain(`xml:id="${drawId}"`)
+				if (drawId === undefined) continue
+
+				expect(tag, path).toContain(`xml:id="${drawId}"`)
+				checked++
 			}
+
+			expect(checked, path).toBeGreaterThan(0)
 		}
 	})
 })

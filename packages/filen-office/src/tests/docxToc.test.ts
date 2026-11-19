@@ -806,6 +806,45 @@ describe("tables of contents", () => {
 		])
 	})
 
+	it("builds entries and references over symbols without a character, leaving the symbol out", async () => {
+		const symbol = (char: string): string => `<w:r><w:sym w:font="Wingdings"${char}/></w:r>`
+		const symbolHeading = (name: string, char: string): string =>
+			`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${name}</w:t></w:r>${symbol(char)}<w:r><w:t>end</w:t></w:r></w:p>`
+		const reference =
+			'<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> REF Target \\h </w:instrText></w:r>' +
+			'<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>stale</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+		const opened = await open(
+			spec(
+				p("Contents") +
+					symbolHeading("None", "") +
+					symbolHeading("Past", ' w:char="00110000"') +
+					symbolHeading("Zero", ' w:char="0"') +
+					`<w:p><w:bookmarkStart w:id="1" w:name="Target"/><w:r><w:t>Ref</w:t></w:r>${symbol("")}${symbol(' w:char="00110000"')}${symbol(' w:char="0"')}<w:r><w:t>end</w:t></w:r><w:bookmarkEnd w:id="1"/></w:p>` +
+					reference
+			)
+		)
+		const editor = opened.editor
+		const session = editor.session
+
+		caretAt(editor, find(session.state.doc, "Contents"))
+		expect(await editor.execute({ type: "toc.insert", levels: 3, hyperlinks: true })).toBe(true)
+		await settleAll(editor)
+
+		const [region] = tocRegions(session)
+
+		expect(entries(session.state.doc, region?.from ?? 0, region?.to ?? 0)).toEqual(["Noneend\t[1]", "Pastend\t[1]", "Zeroend\t[1]"])
+		expect(session.state.doc.textContent).not.toContain("\u0000")
+		expect(await editor.execute({ type: "field.updateAll" })).toBe(true)
+
+		const results: string[] = []
+
+		session.state.doc.descendants(node => {
+			if (node.type === nodes.field && node.attrs["type"] === "REF") results.push(node.attrs["result"] as string)
+		})
+		expect(results).toEqual(["Refend"])
+		expect(await read(await save(opened), "word/document.xml")).not.toContain("\u0000")
+	})
+
 	it("rebuilds a table of figures (\\c) in Word's table of figures style", async () => {
 		const caption = (n: string, text: string): string =>
 			'<w:p><w:r><w:t xml:space="preserve">Figure </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> SEQ Figure \\* ARABIC </w:instrText></w:r>' +

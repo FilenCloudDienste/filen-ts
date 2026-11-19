@@ -20,6 +20,7 @@ import {
 	type XlsxSheet,
 	type XlsxWorkbook
 } from "../core/xlsx/read/index"
+import { saveXlsx } from "../core/xlsx/write/save"
 import { buildWorkbook, R, SML, workbookFiles, type TestWorkbook } from "./xlsxReadFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
 
@@ -339,6 +340,25 @@ describe("xlsx reader: sheet sections", () => {
 		expect(Array.from(sheet.merges)).toEqual([0, 0, 1, 1, 2, 2, 3, 2])
 		expect(sheet.protection?.hash).toEqual({ algorithmName: "SHA-512", hashValue: "h", saltValue: "s", spinCount: 100000 })
 		expect([...(sheet.protection?.allows ?? [])].sort()).toEqual(["formatCells", "objects", "scenarios", "selectUnlockedCells", "sort"])
+	})
+
+	it("drops a col range past the grid, clamps one straddling it, and saves a width edit on such a sheet", async () => {
+		const body =
+			'<cols><col min="1" max="1" width="10" customWidth="1"/><col min="16380" max="16400" width="8" customWidth="1"/>' +
+			'<col min="16385" max="16390" width="9"/></cols><sheetData/>'
+		const { workbook, sheet } = await sheetOf({ sheets: [{ body }] })
+
+		expect(sheet.cols).toEqual([
+			{ first: 0, last: 0, width: 10, style: -1, flags: ColFlag.CUSTOM_WIDTH },
+			{ first: 16_379, last: 16_383, width: 8, style: -1, flags: ColFlag.CUSTOM_WIDTH }
+		])
+
+		sheet.cols = [{ first: 0, last: 0, width: 20, style: -1, flags: ColFlag.CUSTOM_WIDTH }, ...sheet.cols.slice(1)]
+		workbook.changes.sheetSection(0, "cols")
+
+		const result = await saveXlsx({ opc: workbook.opc, workbook })
+
+		expect(result.ok).toBe(true)
 	})
 
 	it("reads chartsheets and empty roots", async () => {

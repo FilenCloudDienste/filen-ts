@@ -3,10 +3,11 @@ import { insertedImage, insertedImageWritten, pictureFillOf } from "../../../pre
 import type { InsertedImage, MediaPlayback } from "../../../presentation/edit/ops"
 import { isIssuedName } from "../../../presentation/issuedNames"
 import { refused, type Deck, type Refused, type ShapeNode, type SlideNode } from "../../../presentation/model"
-import { escapeAttribute, escapeText } from "../../../xml/index"
+import { escapeAttribute } from "../../../xml/index"
 import type { EmitResult } from "../../../pptx/write/types"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
-import { boxAttributes, placed } from "./shape"
+import { boxMarkup, newElementCommon } from "./shape"
+import { isRefused } from "../../../presentation/refusal"
 
 // The media family's ODF markup: a draw:frame holding a draw:plugin (ODF 1.3 Part 3 §10.4.7, xlink:href to the
 // package entry, the parameters LibreOffice reads: Loop, Mute, VolumeDB, Zoom, MediaMimeType) and its poster as a
@@ -169,24 +170,21 @@ function newMedia(context: OdpEmitContext, slide: SlideNode, shape: ShapeNode, i
 	if (typeof image !== "string") return image
 
 	const contentType = insertedMediaContent(context.deck, id)?.contentType ?? media.contentType
-	const box = boxAttributes(placed(shape.xfrm, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }))
-		.filter(change => change.value !== null)
-		.map(change => ` ${change.name}="${escapeAttribute(change.value as string)}"`)
-		.join("")
-	const alt =
-		(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
-		(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
+	const common = newElementCommon(shape, styles)
+
+	if (isRefused(common.listeners)) return common.listeners
+
 	const link = ' xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"'
 
 	return {
 		kind: "markup",
 		pieces: [
-			`<draw:frame${shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`}${shape.hidden ? ' draw:display="none"' : ""}${box}>` +
+			`<draw:frame${common.attributes}${boxMarkup(shape.xfrm)}>` +
 				`<draw:plugin xlink:href="${escapeAttribute(href)}"${link} draw:mime-type="${PLUGIN_MIME}">` +
 				playbackParams(mediaPlayback(slide.timing, shape.id)) +
 				param("Zoom", "fit") +
 				param("MediaMimeType", contentType) +
-				`</draw:plugin><draw:image xlink:href="${escapeAttribute(image)}"${link}/>${alt}</draw:frame>`
+				`</draw:plugin><draw:image xlink:href="${escapeAttribute(image)}"${link}/>${common.listeners}${common.alt}</draw:frame>`
 		]
 	}
 }

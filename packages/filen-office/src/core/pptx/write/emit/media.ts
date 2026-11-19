@@ -1,10 +1,12 @@
 import { insertedMediaContent, insertedMediaId, insertedMediaWritten } from "../../../presentation/edit/apply/media"
 import { pictureFillOf } from "../../../presentation/edit/apply/picture"
 import { refused, type Refused, type ShapeNode } from "../../../presentation/model"
-import { RELATIONSHIP_TYPES } from "../parts"
+import { isRefused } from "../../../presentation/refusal"
+import { P14_MEDIA_EXT } from "../../../anim/media"
+import { RELATIONSHIPS, RELATIONSHIP_TYPES } from "../parts"
 import type { EmitPiece, EmitResult, PptxEmitFamily } from "../types"
 import { blipFillXml, pictureElement } from "./picture"
-import { Pieces, attr, lineMarkup, readerOf, sourceNode, xfrmXml, type EmitContext } from "./shape"
+import { Pieces, lineMarkup, newCNvPr, readerOf, sourceNode, xfrmXml, type EmitContext } from "./shape"
 
 // The media family's PresentationML: a p:pic playing a medium (ECMA-376 Part 1 §19.3.1.37 with §20.1.3.6 a:videoFile
 // or §20.1.3.1 a:audioFile in p:nvPr, and PowerPoint 2010's p14:media naming the embedded copy it plays). A medium
@@ -14,8 +16,6 @@ import { Pieces, attr, lineMarkup, readerOf, sourceNode, xfrmXml, type EmitConte
 // (the a:videoFile/a:audioFile link and the p14:media embed), and its poster as the picture fill. Once a save wrote it,
 // the part it was written to is related instead (nothing is read or added again).
 
-const RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
-const P14_MEDIA_EXT = "{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}"
 const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
 
 // The medium's part and its embed relationship: the part a save wrote it to, else its bytes added as a new part.
@@ -28,7 +28,7 @@ function mediaPart(context: EmitContext, id: number): { readonly part: string; r
 
 	if (content === undefined) return refused("stale", `The inserted medium ${String(id)} is not held`)
 
-	return context.parts.addPart("media", content.bytes, content.contentType, { crc32: content.crc32 })
+	return context.parts.addPart("media", content.bytes, content.contentType, { crc32: content.crc32, shared: content.bytes })
 }
 
 function newMedia(context: EmitContext, shape: ShapeNode, id: number): EmitResult {
@@ -54,14 +54,15 @@ function newMedia(context: EmitContext, shape: ShapeNode, id: number): EmitResul
 
 	const { part, rId: embed } = added
 	const link = context.parts.relate(part, `${RELATIONSHIPS}${media.kind}`)
-	const alt = shape.alt
+	const cNvPr = newCNvPr(context, shape)
+
+	if (isRefused(cNvPr)) return cNvPr
 
 	return new Pieces()
+		.text("<p:pic><p:nvPicPr>")
+		.append(cNvPr)
 		.text(
-			`<p:pic><p:nvPicPr><p:cNvPr${attr("id", shape.id)}${attr("name", shape.name)}${attr("descr", alt?.descr)}` +
-				`${shape.hidden ? ' hidden="1"' : ""}${attr("title", alt?.title)}>` +
-				`${shape.actions?.click?.kind === "media" ? '<a:hlinkClick r:id="" action="ppaction://media"/>' : ""}</p:cNvPr>` +
-				'<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>' +
+			'<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>' +
 				`<p:nvPr><a:${media.kind}File r:link="${link}"/><p:extLst><p:ext uri="${P14_MEDIA_EXT}">` +
 				`<p14:media xmlns:p14="${P14}" r:embed="${embed}"/></p:ext></p:extLst></p:nvPr></p:nvPicPr>`
 		)

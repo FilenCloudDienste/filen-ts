@@ -61,6 +61,9 @@ export interface OpenDocument {
 	readonly source?: Mupdf.Buffer | null
 	// The edit role's memory profile, as the open asked (the editor's bookkeeping takes it once the document unlocks).
 	readonly memory?: PdfMemoryProfile
+	// The form of the password that authenticated the document (as typed or SASLprep'd), which every other open of its
+	// bytes authenticates with; absent or undefined: none did. The edit role's follows its saves (edit.password).
+	readonly password?: string | undefined
 }
 
 // A document the read role opened (formats.ts). Its renderer and generation change with each layout.

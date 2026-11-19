@@ -1,13 +1,14 @@
 import { MessageChannel } from "node:worker_threads"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
 import { CROP_COMMANDS } from "../../dom/pdfedit/commands/crop"
 import { changedPages } from "../../dom/pdfedit/commands/pages"
+import { insertImagePage } from "../../dom/pdfedit/pages/organise"
 import type { PdfCommandContext } from "../../dom/pdfedit/commands/types"
-import { PDF_EXTRACT_ENCRYPTION } from "../../dom/pdfedit/pages/extractRequest"
+import { PDF_AES256_METHOD } from "../../core/pdfedit/security"
 import type { PdfSaveExpectation } from "../../dom/pdfedit/protocol"
 import { markArea, markText, pageRedactionMarks } from "../../dom/pdfedit/redact"
 import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort } from "../../dom/pdfedit/syncRange"
@@ -190,6 +191,28 @@ function pngBytes(width: number, height: number): Uint8Array {
 	return png
 }
 
+// A 2000 x 2000 flat grey JP2 (OpenJPEG): 244 bytes for 12 MB of samples.
+function flatJp2(): Uint8Array {
+	return Uint8Array.from(
+		atob(
+			"AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAH0AAAB9AAAwcHAAAAAAAPY29scgEAAAAAABAAAACnanAyY/9P/1EALwAAAAAH0AAAB9AAAAAAAAAAAAAAB9AAAAfQAAAAAAAAAAAAAwcBAQcBAQcBAf9SAAwAAAABAQUEBAAB/1wAE0BASEhQSEhQSEhQSEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS40/5AACgAAAAAAIAAB/5OAgICAgICAgICAgICAgICAgID/2Q=="
+		),
+		char => char.charCodeAt(0)
+	)
+}
+
+function jpegBytes(width: number, height: number): Uint8Array {
+	const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], false)
+
+	pixmap.clear(128)
+
+	const jpeg = pixmap.asJPEG(90).slice()
+
+	pixmap.destroy()
+
+	return jpeg
+}
+
 // An unsigned 3-page document: "Page N" at the top of each page, a rect lower down.
 function plainPdf(): Uint8Array {
 	const doc = new mupdf.PDFDocument()
@@ -306,6 +329,80 @@ describe("page commands", () => {
 		},
 		TIMEOUT
 	)
+
+	it(
+		"refuses a flat picture whose decoded pixels exceed the budget, keeps the engine usable, and inserts a JPEG or JPEG 2000 that size",
+		async () => {
+			const engine = startEngine(plainPdf())
+			const memory = { ...PDF_DESKTOP_MEMORY, editMaxBytes: 8 * 1024 * 1024 }
+
+			await engine.open(undefined, memory)
+
+			// A few kilobytes of PNG, 16 MB of pixels (RGB and an alpha channel's worth).
+			const png = pngBytes(2000, 2000)
+
+			expect(png.length).toBeLessThan(1024 * 1024)
+			await expect(
+				engine.client.call("dispatch", { command: "pages.insertImage", args: { at: 0, bytes: png } })
+			).rejects.toMatchObject({ failure: "overBudget" })
+
+			// Not poisoned: the next commands run, and a JPEG of the same size is written as it is.
+			const blank = await engine.client.call("dispatch", { command: "pages.insertBlank", args: { at: 0, count: 1 } })
+
+			expect(blank.state.pageCount).toBe(4)
+
+			const image = await engine.client.call("dispatch", {
+				command: "pages.insertImage",
+				args: { at: 0, bytes: jpegBytes(2000, 2000) }
+			})
+
+			expect(image.state.pageCount).toBe(5)
+
+			// A JPEG 2000 file is written as it is too.
+			const jpx = await engine.client.call("dispatch", { command: "pages.insertImage", args: { at: 0, bytes: flatJp2() } })
+
+			expect(jpx.state.pageCount).toBe(6)
+		},
+		TIMEOUT
+	)
+
+	it("keeps a decoded picture's samples unfiltered in the document, so they count as added until a save", () => {
+		const doc = mupdf.Document.openDocument(plainPdf(), "application/pdf").asPDF()
+
+		if (doc === null) throw new Error("not a PDF")
+
+		try {
+			insertImagePage(mupdf, doc, pngBytes(300, 200), 0)
+
+			const stream = doc.findPage(0).get("Resources").get("XObject").get("Im1")
+
+			expect(stream.get("Filter").isNull()).toBe(true)
+			expect(stream.readRawStream().length).toBe(300 * 200 * 3)
+		} finally {
+			doc.destroy()
+		}
+	})
+
+	it("destroys the picture when adding it to the document throws", () => {
+		const doc = mupdf.Document.openDocument(plainPdf(), "application/pdf").asPDF()
+
+		if (doc === null) throw new Error("not a PDF")
+
+		const destroy = vi.spyOn(mupdf.Image.prototype, "destroy")
+
+		vi.spyOn(doc, "addImage").mockImplementation(() => {
+			throw new Error("out of memory")
+		})
+
+		try {
+			expect(() => insertImagePage(mupdf, doc, pngBytes(40, 20), 0)).toThrow("out of memory")
+			expect(destroy).toHaveBeenCalledTimes(1)
+			expect(doc.countPages()).toBe(3)
+		} finally {
+			vi.restoreAllMocks()
+			doc.destroy()
+		}
+	})
 
 	it(
 		"inserts pages of a second document, asking for its password, and keeps it for steps run again",
@@ -532,7 +629,7 @@ describe("page commands", () => {
 
 			if (begun.status !== "written") throw new Error("refused")
 
-			expect(begun).toMatchObject({ pageCount: 2, encryption: PDF_EXTRACT_ENCRYPTION })
+			expect(begun).toMatchObject({ pageCount: 2, encryption: PDF_AES256_METHOD })
 			expect(
 				await verify(engine.client, begun.size, { pageCount: 2, versions: 1, encryption: begun.encryption }, "pässword")
 			).toEqual({ ok: true })
@@ -554,7 +651,7 @@ describe("page commands", () => {
 
 			if (kept.status !== "written") throw new Error("refused")
 
-			expect(kept.encryption).toBe(PDF_EXTRACT_ENCRYPTION)
+			expect(kept.encryption).toBe(PDF_AES256_METHOD)
 			await engine.client.call("saveEnd", { outcome: "failed", next: "continue" })
 
 			// Opened with the owner password, it is.

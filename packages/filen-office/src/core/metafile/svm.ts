@@ -338,7 +338,6 @@ class Player {
 		return points
 	}
 
-	// A polygon with its optional point flags (Bézier control points).
 	// A complex polygon (tools::Polygon's own stream): a VersionCompat block holding the points, then whether point flags
 	// (Bézier control points) follow, and the flags. Read within the block, which also ends it.
 	private flaggedPolygon(cursor: Cursor): { points: number[]; flags: Uint8Array | undefined } {
@@ -723,7 +722,7 @@ class Player {
 		this.gdi.text(x, y, text, dx, 1, 0, null)
 	}
 
-	// A DIB stream with its file header ("BM"); the bitmap and the offset after it.
+	// A DIB stream with its file header ("BM"): the bitmap, the cursor moved past it.
 	private dib(cursor: Cursor): Dib | undefined {
 		const start = cursor.at
 
@@ -750,7 +749,7 @@ class Player {
 
 			cursor.at = end
 
-			return svmDib(cursor.bytes, start + 14, offBits - 14, start + offBits, coded)
+			return svmDib(this.out, cursor.bytes, start + 14, offBits - 14, start + offBits, coded)
 		}
 
 		if (size < 14 + headerSize || offBits < 14 + headerSize || start + size > cursor.end) {
@@ -759,12 +758,19 @@ class Player {
 
 			cursor.at = end
 
-			return svmDib(cursor.bytes, start + 14, Math.max(0, offBits - 14), start + offBits, Math.max(0, end - start - offBits))
+			return svmDib(
+				this.out,
+				cursor.bytes,
+				start + 14,
+				Math.max(0, offBits - 14),
+				start + offBits,
+				Math.max(0, end - start - offBits)
+			)
 		}
 
 		cursor.at = start + size
 
-		return svmDib(cursor.bytes, start + 14, offBits - 14, start + offBits, size - offBits)
+		return svmDib(this.out, cursor.bytes, start + 14, offBits - 14, start + offBits, size - offBits)
 	}
 
 	// A BitmapEx: the bitmap, then (behind two magic numbers) a mask bitmap or a transparent colour.
@@ -1584,7 +1590,7 @@ const INFLATE_STEP = 8 * 1024
 // there would not tell bitmaps apart.
 const inflatedFrom = new WeakMap<Dib, number>()
 
-function svmDib(bytes: Bytes, bmiOffset: number, bmiSize: number, bitsOffset: number, bitsSize: number): Dib | undefined {
+function svmDib(out: Output, bytes: Bytes, bmiOffset: number, bmiSize: number, bitsOffset: number, bitsSize: number): Dib | undefined {
 	if (bmiSize < 40 || bytes.u32(bmiOffset) < 40 || bytes.u32(bmiOffset + 16) !== ZCODEC_COMPRESSION) {
 		return parseDib(bytes, bmiOffset, bmiSize, bitsOffset, bitsSize, 0)
 	}
@@ -1599,6 +1605,9 @@ function svmDib(bytes: Bytes, bmiOffset: number, bmiSize: number, bitsOffset: nu
 	const size = Math.min(uncodedSize, stride * height)
 
 	if (size <= 0 || size > MAX_DECODE_PIXELS * 4 || codedSize > bitsSize - 12) return undefined
+
+	// Charged before the buffer exists, whether the bitmap is drawn or not.
+	out.inflate(size)
 
 	// The header with the real compression, then the bits inflated behind it.
 	const header = bytes.sub(bmiOffset, bmiSize)

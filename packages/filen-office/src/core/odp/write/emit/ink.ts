@@ -7,14 +7,13 @@ import {
 	refused,
 	type CustomPath,
 	type Refused,
-	type ShapeNode,
-	type Xfrm
+	type ShapeNode
 } from "../../../presentation/model"
-import { escapeAttribute, escapeText } from "../../../xml/index"
+import { escapeAttribute } from "../../../xml/index"
 import { odpTargetId, odpTargetIds } from "../../../anim/odf"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
-import { attributeMarkup, cm, effectChanges, fillChanges, lineChanges, styleChanges, type StyleChanges } from "../styles"
-import { IDENTITY, compose, emitOdpShape, groupAffine, placed, type Affine } from "./shape"
+import { attributeMarkup, effectChanges, fillChanges, lineChanges, styleChanges, type StyleChanges } from "../styles"
+import { IDENTITY, boxMarkup, compose, emitOdpShape, groupAffine, newElementCommon, placed, type Affine } from "./shape"
 import { isRefused } from "../../../presentation/refusal"
 
 // The ink family's ODF markup (ODF 1.3 Part 3 §10.3.7 draw:path): a freeform a session made, kept ink's strokes
@@ -55,24 +54,6 @@ function mappingOf(shapes: readonly ShapeNode[], shape: ShapeNode): Affine | Ref
 	}
 
 	return m
-}
-
-// svg:x/y/width/height, or for a turned box draw:transform "rotate (a) translate (x y)" about its corner (§19.229;
-// the reader's angle turns counter-clockwise, DrawingML's rot clockwise).
-function boxMarkup(box: Xfrm): string {
-	const size = ` svg:width="${cm(box.cx)}" svg:height="${cm(box.cy)}"`
-
-	if (box.rot === 0) return ` svg:x="${cm(box.x)}" svg:y="${cm(box.y)}"${size}`
-
-	const a = -((box.rot / 60_000) * Math.PI) / 180
-	const cos = Math.cos(a)
-	const sin = Math.sin(a)
-	const halfW = box.cx / 2
-	const halfH = box.cy / 2
-	const tx = box.x + halfW - (cos * halfW + sin * halfH)
-	const ty = box.y + halfH - (-sin * halfW + cos * halfH)
-
-	return `${size} draw:transform="rotate (${a.toFixed(12)}) translate (${cm(tx)} ${cm(ty)})"`
 }
 
 const POINTS: Readonly<Record<number, readonly [string, number]>> = {
@@ -158,8 +139,6 @@ function pathElement(
 	if (shape.xfrm === undefined) return refused("unsupported", "a new freeform without a box")
 	if (shape.text?.paragraphs.some(paragraph => paragraph.runs.length > 0) === true)
 		return refused("unsupported", "text in a new freeform")
-	if (shape.actions !== undefined && (shape.actions.click !== undefined || shape.actions.hover !== undefined))
-		return refused("unsupported", "an action on a new freeform")
 
 	// svg:d is read back as one path (every move continues it), filled and stroked.
 	const path = geometry.paths[0]
@@ -186,22 +165,16 @@ function pathElement(
 
 	if (isRefused(style)) return style
 
-	let common = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
-
 	// A shape the slide's timing animates is named by its target id (core/anim/odf.ts odpTargetId).
-	if (timing.has(shape.id)) {
-		const id = escapeAttribute(odpTargetId(shape))
+	const common = newElementCommon(shape, context.styles, timing.has(shape.id) ? odpTargetId(shape) : undefined)
 
-		common += ` xml:id="${id}" draw:id="${id}"`
-	}
-	if (shape.hidden) common += ' draw:display="none"'
+	if (isRefused(common.listeners)) return common.listeners
 
-	const alt =
-		(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
-		(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
 	return {
 		kind: "markup",
-		pieces: [`<draw:path${common}${style}${boxMarkup(box)} svg:viewBox="0 0 ${String(w)} ${String(h)}" svg:d="${d}">${alt}</draw:path>`]
+		pieces: [
+			`<draw:path${common.attributes}${style}${boxMarkup(box)} svg:viewBox="0 0 ${String(w)} ${String(h)}" svg:d="${d}">${common.alt}${common.listeners}</draw:path>`
+		]
 	}
 }
 

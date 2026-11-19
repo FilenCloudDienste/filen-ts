@@ -1,12 +1,5 @@
 import { CLR_MAP_KEYS } from "../../../presentation/theme"
-import {
-	type ClrMap,
-	type HeaderFooterFlags,
-	type ListStyle,
-	type Refused,
-	type SlideKind,
-	type SlideNode
-} from "../../../presentation/model"
+import { type ClrMap, type HeaderFooterFlags, type Refused, type SlideKind, type SlideNode } from "../../../presentation/model"
 import { NodeKind, type XmlDocument } from "../../../xml/index"
 import { G } from "../../read/xml"
 import type { EmitPiece, EmitResult, PptxEmitFamily } from "../types"
@@ -67,10 +60,6 @@ function hfXml(hf: HeaderFooterFlags): string {
 	return `<p:hf${hf.sldNum ? "" : ' sldNum="0"'}${hf.hdr ? "" : ' hdr="0"'}${hf.ftr ? "" : ' ftr="0"'}${hf.dt ? "" : ' dt="0"'}/>`
 }
 
-function renamedList(context: EmitContext, tag: string, list: ListStyle, source: number): readonly EmitPiece[] | Refused {
-	return listStyleXml(context, list, source, tag)
-}
-
 // p:txStyles of a master (title, body, other) or p:notesStyle of a notes master, from the model.
 function textStylesXml(context: EmitContext, node: SlideNode, source: number): readonly EmitPiece[] | Refused {
 	const styles = node.txStyles
@@ -80,7 +69,7 @@ function textStylesXml(context: EmitContext, node: SlideNode, source: number): r
 	const r = readerOf(context)
 	const child = (local: string): number => (r === undefined || source < 0 ? -1 : r.child(source, G.P, local))
 
-	if (node.kind === "notesMaster") return renamedList(context, "p:notesStyle", styles.body, source)
+	if (node.kind === "notesMaster") return listStyleXml(context, styles.body, source, "p:notesStyle")
 
 	const out = new Pieces().text("<p:txStyles>")
 
@@ -89,7 +78,7 @@ function textStylesXml(context: EmitContext, node: SlideNode, source: number): r
 		["bodyStyle", styles.body],
 		["otherStyle", styles.other]
 	] as const) {
-		const written = renamedList(context, `p:${tag}`, list, child(tag))
+		const written = listStyleXml(context, list, child(tag), `p:${tag}`)
 
 		if (!Array.isArray(written)) return written as Refused
 
@@ -206,7 +195,7 @@ function cSldXml(context: EmitContext, node: SlideNode, source: number, pristine
 
 const ROOT_ATTRIBUTES: Readonly<Record<SlideKind, ReadonlySet<string>>> = {
 	slide: new Set(["show", "showMasterSp"]),
-	layout: new Set(["showMasterSp"]),
+	layout: new Set(["showMasterSp", "type"]),
 	master: new Set(),
 	notes: new Set(),
 	notesMaster: new Set(),
@@ -254,9 +243,7 @@ export function slideRoot(context: EmitContext, node: SlideNode, options: SlideR
 		if (same) {
 			out.append([startTag(context, source)])
 		} else {
-			const modeled = node.kind === "layout" ? new Set(["showMasterSp", "type"]) : ROOT_ATTRIBUTES[node.kind]
-
-			out.text(`<${tag}${unmodeledAttributes(context, source, modeled)}${rootAttributes(node)}>`)
+			out.text(`<${tag}${unmodeledAttributes(context, source, ROOT_ATTRIBUTES[node.kind])}${rootAttributes(node)}>`)
 		}
 	} else {
 		out.text(`<${tag} ${declarations()}${rootAttributes(node)}>`)

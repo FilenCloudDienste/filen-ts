@@ -84,6 +84,7 @@ export interface DocxPageOverlay {
 }
 
 export interface DocxEditorProps {
+	// Fixed for the component's life: another editor needs another `key`.
 	readonly editor: PagedEditor
 	// The renderer's side of the same document (pages, tables, objects, media).
 	readonly document: DocxDocument
@@ -605,6 +606,7 @@ export function DocxEditor(props: DocxEditorProps) {
 	useLayoutEffect(() => {
 		readOnlyRef.current = props.readOnly === true
 		sinkRef.current?.setReadOnly(props.readOnly === true)
+		sinkRef.current?.setLabels(props.label, props.describedBy)
 		caretClientRectRef.current = caretClientRect
 		pageMoveRef.current = pageMove
 		onFindRef.current = props.onFind

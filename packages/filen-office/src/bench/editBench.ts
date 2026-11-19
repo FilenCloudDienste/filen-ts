@@ -244,10 +244,13 @@ if (import.meta.filename === process.argv[1]) {
 		if (json !== undefined) writeFileSync(json, JSON.stringify(result))
 	} else {
 		const results: CaseResult[] = []
+		let skipped = 0
 
 		for (const name of Object.keys(CASES)) {
 			if (!existsSync(FILES[CASES[name]?.file ?? "300p"])) {
 				console.log(`${name}: fixture missing, skipped`)
+
+				skipped++
 
 				continue
 			}
@@ -266,8 +269,14 @@ if (import.meta.filename === process.argv[1]) {
 		const head = headJson === undefined ? [] : (JSON.parse(readFileSync(headJson, "utf8")) as CaseResult[])
 		const failures = gateFailures(results, head)
 
-		console.log(
-			failures.length === 0 ? "Performance gate: within the limits" : `Performance gate failures:\n  ${failures.join("\n  ")}`
-		)
+		const skippedNote = skipped === 0 ? "" : ` (${String(skipped)} of ${String(Object.keys(CASES).length)} cases skipped)`
+
+		if (failures.length === 0) {
+			console.log(`Performance gate: within the limits${skippedNote}`)
+		} else {
+			console.log(`Performance gate failures${skippedNote}:\n  ${failures.join("\n  ")}`)
+
+			process.exitCode = 1
+		}
 	}
 }

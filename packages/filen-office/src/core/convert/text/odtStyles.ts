@@ -4,7 +4,7 @@ import { readProps, type PropertyValue, type Props } from "../../odt/write/meani
 import { levelStyle } from "../../odt/write/writer"
 import { symbolTable, symbolText } from "../../fonts/symbols"
 import type { ListTarget } from "../../odt/write/emit"
-import type { XmlDocument } from "../../xml/index"
+import { escapeAttribute, type XmlDocument } from "../../xml/index"
 import type { LossyCounts } from "./report"
 
 // WordprocessingML styles, numbering and section page setup as ODF 1.3 styles: paragraph and character
@@ -12,10 +12,6 @@ import type { LossyCounts } from "./report"
 // defaults as the paragraph default style with what Word assumes where the document says nothing
 // (10 pt Times New Roman, no spacing); each abstract numbering (and each w:num overriding levels) as a common list
 // style; each section as a page layout and a master page.
-
-export function esc(text: string): string {
-	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;")
-}
 
 function round(value: number): string {
 	return String(Math.round(value * 10_000) / 10_000)
@@ -51,7 +47,7 @@ export class FontFaces {
 		for (const [family, name] of this.faces) {
 			const quoted = /[\s,]/u.test(family) ? `'${family.replace(/'/gu, "")}'` : family
 
-			out += `<style:font-face style:name="${esc(name)}" svg:font-family="${esc(quoted)}"/>`
+			out += `<style:font-face style:name="${escapeAttribute(name)}" svg:font-family="${escapeAttribute(quoted)}"/>`
 		}
 
 		return `${out}</office:font-face-decls>`
@@ -162,7 +158,7 @@ export function propertiesMarkup(
 	const attributeList = (map: ReadonlyMap<string, string>): string =>
 		[...map]
 			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-			.map(([name, item]) => ` ${name}="${esc(item)}"`)
+			.map(([name, item]) => ` ${name}="${escapeAttribute(item)}"`)
 			.join("")
 	let out = ""
 
@@ -293,10 +289,10 @@ export function convertStyles(
 			.get("outlineLvl")
 			?.attributes.get("val")
 		const level = outline === undefined ? Number.NaN : Number(outline) + 1
-		let attributes = ` style:name="${esc(name)}"${display === name ? "" : ` style:display-name="${esc(name === "Standard" ? "Normal" : display)}"`} style:family="${family}"`
+		let attributes = ` style:name="${escapeAttribute(name)}"${display === name ? "" : ` style:display-name="${escapeAttribute(name === "Standard" ? "Normal" : display)}"`} style:family="${family}"`
 
-		if (parent !== undefined && parent !== name) attributes += ` style:parent-style-name="${esc(parent)}"`
-		if (next !== undefined) attributes += ` style:next-style-name="${esc(next)}"`
+		if (parent !== undefined && parent !== name) attributes += ` style:parent-style-name="${escapeAttribute(parent)}"`
+		if (next !== undefined) attributes += ` style:next-style-name="${escapeAttribute(next)}"`
 		if (Number.isInteger(level) && level >= 1 && level <= 9) attributes += ` style:default-outline-level="${String(level)}"`
 
 		const properties = propertiesMarkup(entry.type === "paragraph" ? pPr : new Map(), rPr, fonts, fontSizeOf(rPr, defaultSize), lossy)
@@ -326,7 +322,7 @@ function symbolBullet(markup: string): string {
 	return markup
 		.replace(
 			/ text:bullet-char="([^"]*)"/u,
-			(_attribute, char: string) => ` text:bullet-char="${esc(symbolText(table, unescape(char)))}"`
+			(_attribute, char: string) => ` text:bullet-char="${escapeAttribute(symbolText(table, unescape(char)))}"`
 		)
 		.replace(font[0], "")
 }
@@ -467,7 +463,7 @@ export function convertLists(document: XmlDocument | undefined, fonts: FontFaces
 
 			const levels = levelsOf(abstract, overrides)
 
-			out += `<text:list-style style:name="${esc(style)}">${levels}</text:list-style>`
+			out += `<text:list-style style:name="${escapeAttribute(style)}">${levels}</text:list-style>`
 		}
 
 		styleOf.set(`num:${numId}`, style)

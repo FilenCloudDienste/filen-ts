@@ -66,7 +66,6 @@ export async function layoutTextOverlay(request: TextOverlayRequest): Promise<Te
 	const { frame, style, text } = request
 	const fonts = new PdfFontSet({
 		assets: request.assets,
-		deterministic: true,
 		...(request.signal === undefined ? {} : { signal: request.signal })
 	})
 

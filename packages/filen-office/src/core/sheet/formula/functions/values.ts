@@ -1,4 +1,5 @@
 import { CellError, EmptyValue, SimpleRangeValue } from "hyperformula"
+import { wildcardMatcher } from "../../find/match"
 import { rawNumber, type PluginScalar, type PluginValue } from "./plugin"
 
 // Values as Excel's lookup and array functions read them.
@@ -114,46 +115,10 @@ export function binarySearch(
 	return best < 0 ? -1 : positionAt(best)
 }
 
-// A wildcard pattern (* any run, ? one character, ~ escaping the next) as a test, without regard to case. Matched
-// by the greedy star walk, at most pattern × text steps (never a backtracking regular expression).
+// A wildcard pattern (* any run, ? one character, ~ escaping the next) as a test of a whole text, without regard to
+// case. A linear walk (find/match.ts), never a backtracking regular expression.
 export function wildcard(pattern: string): (text: string) => boolean {
-	// -1: any run, -2: any one character, else a character code (lower case).
-	const tokens: number[] = []
-	const lower = pattern.toLowerCase()
+	const matcher = wildcardMatcher(pattern, false)
 
-	for (let index = 0; index < lower.length; index++) {
-		const code = lower.charCodeAt(index)
-
-		if (code === 126 && index + 1 < lower.length) tokens.push(lower.charCodeAt(++index))
-		else if (code === 42) tokens.push(-1)
-		else if (code === 63) tokens.push(-2)
-		else tokens.push(code)
-	}
-
-	return text => {
-		const subject = text.toLowerCase()
-		let t = 0
-		let p = 0
-		let star = -1
-		let resume = 0
-
-		while (t < subject.length) {
-			const token = tokens[p]
-
-			if (token !== undefined && (token === -2 || token === subject.charCodeAt(t))) {
-				t++
-				p++
-			} else if (token === -1) {
-				star = p++
-				resume = t
-			} else if (star >= 0) {
-				p = star + 1
-				t = ++resume
-			} else return false
-		}
-
-		while (tokens[p] === -1) p++
-
-		return p === tokens.length
-	}
+	return text => matcher.test(text, true)
 }

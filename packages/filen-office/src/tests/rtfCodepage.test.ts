@@ -90,4 +90,17 @@ describe("RTF code pages", () => {
 		expect(encodeText("Ł", 10029).rtf).toBe("\\u321\\'fc")
 		expect(encodeText("╗", 437).rtf).toBe("\\u9559\\'bb")
 	})
+
+	it("decodes ISO-2022-JP (code page 50220), whose bytes are all 7-bit", () => {
+		const kanji = hex([0x1b, 0x24, 0x42, 0x30, 0x6c, 0x1b, 0x28, 0x42])
+
+		expect(decodeCodepage(kanji, 0, kanji.length, 50220)).toBe("\u4e00")
+		expect(decodeCodepage(bytes("plain text"), 0, 10, 50220)).toBe("plain text")
+
+		// A call left in the two-byte set does not carry it into the next.
+		const open = hex([0x1b, 0x24, 0x42, 0x30, 0x6c])
+
+		expect(decodeCodepage(open, 0, open.length, 50220)).toBe("\u4e00")
+		expect(decodeCodepage(bytes("0l"), 0, 2, 50220)).toBe("0l")
+	})
 })

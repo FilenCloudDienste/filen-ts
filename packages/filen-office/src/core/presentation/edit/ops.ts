@@ -1,6 +1,7 @@
 import type { ChartEditType, SheetChartEdit } from "../../xlsx/charts/edit"
 import type { ChartGrouping } from "../../xlsx/charts/model"
 import type { Behavior, TimeNode, TimingTree, Transition } from "../../anim/model"
+import type { ApplyContext } from "./apply"
 import type { JumpRewrite } from "./integrity"
 import type {
 	Action,
@@ -13,10 +14,12 @@ import type {
 	ShapePropsEdit,
 	ShapeRef,
 	ShapeStyleRefs,
+	Refused,
 	Section,
 	SlideNode,
 	SlideRef,
 	ShowSettings,
+	SourceRef,
 	TableCellProps,
 	TextBody,
 	Xfrm
@@ -73,6 +76,14 @@ export const DECK_OP_FAMILIES: readonly DeckOpFamily[] = [
 	"presentation"
 ]
 
+// The prefix of a name the edit session holds markup under (an inverse's source read back after a save's rebase, a
+// restored slide's parts: "raw:N"), never a package part: the writer and the pruner read it from the session.
+export const RAW_PART_PREFIX = "raw:"
+
+export function isRawPart(name: string): boolean {
+	return name.startsWith(RAW_PART_PREFIX)
+}
+
 // A source part of a removed slide (the slide, its notes, its comments, its charts…), to restore on undo.
 export interface RawPart {
 	readonly name: string
@@ -110,6 +121,9 @@ export type SlideOp =
 				// The nodes' typed state when deleted (the slide, then its notes): the edits on them, and the whole of a slide
 				// an op made (it has no parts).
 				readonly nodes?: readonly SlideNode[]
+				// A cut's slides pasted back: the inserted images (by registry id) they name that no save wrote, as the cut
+				// took them; the registry may have let go of them since.
+				readonly images?: readonly CarriedImage[]
 				// On the first entry: the custom shows as they were, and the jumps the delete rewrote (edit/integrity.ts).
 				readonly customShows?: readonly CustomShow[]
 				readonly jumps?: readonly JumpRewrite[]
@@ -358,15 +372,37 @@ export type TableOp =
 			readonly family: "table"
 			readonly kind: "setStyle"
 			readonly target: ShapeRef
-			readonly styleId: string | undefined
+			// Absent: the style kept; null: removed; a string: set.
+			readonly styleId?: string | null
 			readonly flags?: { readonly [flag in "firstRow" | "lastRow" | "firstCol" | "lastCol" | "bandRow" | "bandCol"]?: boolean }
 	  }
 	// EMU.
 	| { readonly family: "table"; readonly kind: "setColumnWidth"; readonly target: ShapeRef; readonly col: number; readonly width: number }
 	| { readonly family: "table"; readonly kind: "setRowHeight"; readonly target: ShapeRef; readonly row: number; readonly height: number }
+	// Consecutive lines from `col` / `row` at once (a distribute): one op, one inverse for them all.
+	| {
+			readonly family: "table"
+			readonly kind: "setColumnWidths"
+			readonly target: ShapeRef
+			readonly col: number
+			readonly widths: readonly number[]
+	  }
+	| {
+			readonly family: "table"
+			readonly kind: "setRowHeights"
+			readonly target: ShapeRef
+			readonly row: number
+			readonly heights: readonly number[]
+	  }
 
 // An image prepared in the worker (decoded, size-checked, re-encoded when needed), held by the op until a save
 // gives it a part.
+// An inserted image a cut took along with its registry id (the id the slides' fills and held markup name).
+export interface CarriedImage {
+	readonly id: number
+	readonly image: InsertedImage
+}
+
 export interface InsertedImage {
 	readonly bytes: Uint8Array
 	readonly contentType: string
@@ -781,3 +817,12 @@ export type FamilyOp =
 export type DeckOp = FamilyOp | BatchOp
 
 export type OpOf<F extends DeckOpFamily> = Extract<DeckOp, { readonly family: F }>
+
+// The source subtree `src` names as bytes an inverse may hold: sourceBytes answers a view on the whole part's buffer,
+// which a held view would keep reachable past a save's rebase. Here, not in apply.ts: apply.ts imports every family, so
+// a family importing it would be a cycle.
+export function heldBytes(context: ApplyContext, src: SourceRef): Uint8Array | Refused {
+	const bytes = context.sourceBytes(src)
+
+	return bytes instanceof Uint8Array ? bytes.slice() : bytes
+}

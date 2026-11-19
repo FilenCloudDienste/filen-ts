@@ -1,7 +1,7 @@
 import type * as Mupdf from "mupdf"
 import type { RedactionManifest, RedactionQuery } from "../../core/pdfedit/redactVerify"
 import type { PdfAllowed, PdfSecurityChoice } from "../../core/pdfedit/security"
-import { isIndex, isRecord, isText } from "./commands/types"
+import { checkPage, isFiniteTuple, isIndex, isRecord, isText } from "./commands/types"
 import { isRedactionPresets, isRedactionTerms } from "./commands/redact"
 import { PdfEngineRefusal, type OpenDocument, type PdfEngineContext } from "./context"
 import type { PdfEditSession } from "./editSession"
@@ -30,8 +30,7 @@ function editing(context: PdfEngineContext): OpenDocument & { readonly edit: Pdf
 }
 
 function pageIndex(document: Mupdf.PDFDocument, page: unknown): number {
-	if (typeof page !== "number" || !Number.isInteger(page) || page < 0 || page >= document.countPages())
-		throw new PdfEngineRefusal("badRequest", "no such page")
+	checkPage(document, page, "no such page")
 
 	return page
 }
@@ -203,9 +202,7 @@ function isRegion(value: unknown): boolean {
 	return (
 		isIndex(value["page"]) &&
 		(value["kind"] === "text" || value["kind"] === "area" || value["kind"] === "page") &&
-		Array.isArray(rect) &&
-		rect.length === 4 &&
-		rect.every(item => typeof item === "number" && Number.isFinite(item))
+		isFiniteTuple(rect, 4)
 	)
 }
 

@@ -1,8 +1,8 @@
 import type { Slicing } from "../slicing"
 import { pastedCells, type GridClip } from "./clipboard/tsv"
-import { canEncodeWindows1252, csvCellView, parseCsvFile, serializeCsv, type CsvFormat } from "./csv/csvView"
+import { canEncodeWindows1252, csvCellView, encodeUtf8, parseCsvFile, serializeCsv, type CsvFormat } from "./csv/csvView"
 import { writeCsv } from "./csv/csvParse"
-import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, cellKey } from "./model/model"
+import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, cellKey, cellKeyCol, cellKeyRow } from "./model/model"
 import {
 	CellFlag,
 	SHEET_MAX_COLS,
@@ -304,13 +304,7 @@ export class TextSheetDocument implements SheetSessionDocument {
 	csv(): Uint8Array | SheetRefusal {
 		if (!this.complete) return { reason: "tooLarge", detail: "incomplete" }
 
-		const body = new TextEncoder().encode(writeCsv(this.rows, ",", "\r\n", true))
-		const bytes = new Uint8Array(body.length + 3)
-
-		bytes.set([0xef, 0xbb, 0xbf], 0)
-		bytes.set(body, 3)
-
-		return bytes
+		return encodeUtf8(writeCsv(this.rows, ",", "\r\n", true), true)
 	}
 
 	viewOnly(): void {}
@@ -429,7 +423,7 @@ function setTexts(
 		const rowsBefore = document.rows.length
 		const widthBefore = document.width
 
-		for (const [key, text] of values) document.write(Math.floor(key / SHEET_MAX_COLS), key % SHEET_MAX_COLS, text)
+		for (const [key, text] of values) document.write(cellKeyRow(key), cellKeyCol(key), text)
 
 		if (undoing) document.shrink(widths, rowCount)
 
@@ -551,32 +545,53 @@ function filled(document: TextSheetDocument, ranges: readonly SheetRange[]): { r
 	return { rows, cols }
 }
 
+// The cells of `range` the file holds, as tab-separated text: a whole column, row or sheet selected copies the used
+// cells, not the grid's million rows of blanks.
 function copyTexts(document: TextSheetDocument, range: SheetRange, cut: boolean): SheetQueryResult<"copy"> {
-	const rowCount = range.endRow - range.startRow + 1
-	const colCount = range.endCol - range.startCol + 1
+	if (range.endRow < range.startRow || range.endCol < range.startCol) return { refused: "tooLarge" }
 
-	if (rowCount <= 0 || colCount <= 0 || rowCount * colCount > SHEET_MAX_COPY_CELLS) return { refused: "tooLarge" }
+	const held = {
+		startRow: range.startRow,
+		startCol: range.startCol,
+		endRow: Math.min(range.endRow, document.rows.length - 1),
+		endCol: Math.min(range.endCol, document.width - 1)
+	}
+	const rowCount = held.endRow - held.startRow + 1
+	const colCount = held.endCol - held.startCol + 1
+	const used = rowCount > 0 && colCount > 0
+
+	if (used && rowCount * colCount > SHEET_MAX_COPY_CELLS) return { refused: "tooLarge" }
 
 	const lines: string[] = []
 
-	for (let row = range.startRow; row <= range.endRow; row++) {
-		const fields: string[] = []
+	if (used)
+		for (let row = held.startRow; row <= held.endRow; row++) {
+			const fields: string[] = []
 
-		for (let col = range.startCol; col <= range.endCol; col++) fields.push(field(document.text(row, col)))
+			for (let col = held.startCol; col <= held.endCol; col++) fields.push(field(document.text(row, col)))
 
-		lines.push(fields.join("\t"))
-	}
+			lines.push(fields.join("\t"))
+		}
 
 	const text = lines.join("\r\n")
 	const id = document.copyId()
 
-	document.clip = { id, grid: { tsv: text, sheet: "", range, cut, inputs: new Map() } }
+	// Past the data the clip holds nothing: no text to paste back as its own, and a cut with no cell to empty.
+	document.clip = used ? { id, grid: { tsv: text, sheet: "", range: held, cut, inputs: new Map() } } : null
 
 	return { clip: id, text }
 }
 
 function lineEnds(text: string): string {
 	return text.replace(/\r\n?/g, "\n")
+}
+
+// The session's latest copy when `clip` names it and `text` is still its clipboard text (line ends as a host may
+// have rewritten them); null for any other paste.
+export function ownTextClip(document: TextSheetDocument, clip: number | undefined, text: string): TextSheetDocument["clip"] {
+	const held = document.clip
+
+	return held !== null && clip === held.id && lineEnds(text) === lineEnds(held.grid.tsv) ? held : null
 }
 
 function pasteTexts(
@@ -587,34 +602,41 @@ function pasteTexts(
 	changes: SheetChangeSink,
 	area?: SheetRange
 ): SheetHandled {
-	const held = document.clip
-	const own = held !== null && clip === held.id && lineEnds(text) === lineEnds(held.grid.tsv) ? held : null
+	const own = ownTextClip(document, clip, text)
 	const block = pastedCells(text, own?.grid ?? null, at, "", SHEET_MAX_EDIT_CELLS, area)
 
 	if (block === null) return { refused: { reason: "tooLarge" } }
 	if (block.cells.length === 0) return null
 
-	const rows = block.cells.map(cell => cell.row)
-	const cols = block.cells.map(cell => cell.col)
-	const texts = block.cells.map(cell => cell.input)
+	let rows = block.cells.map(cell => cell.row)
+	let cols = block.cells.map(cell => cell.col)
+	let texts = block.cells.map(cell => cell.input)
 
-	// A cut empties its cells first; the paste lands over them.
+	// A cut empties its cells first, so they come before the pasted ones (a later write of a cell wins): the paste
+	// lands over them. Refused whole, before anything is written, past what one edit may name.
 	if (own?.grid.cut === true) {
 		const source = filled(document, [own.grid.range])
 
-		if (source !== null) {
-			const pasted = new Set(block.cells.map(cell => cellKey(cell.row, cell.col)))
+		if (source === null) return { refused: { reason: "tooLarge" } }
 
-			source.rows.forEach((row, index) => {
-				const col = source.cols[index] ?? 0
+		const pasted = new Set(block.cells.map(cell => cellKey(cell.row, cell.col)))
+		const clearedRows: number[] = []
+		const clearedCols: number[] = []
 
-				if (pasted.has(cellKey(row, col))) return
+		source.rows.forEach((row, index) => {
+			const col = source.cols[index] ?? 0
 
-				rows.unshift(row)
-				cols.unshift(col)
-				texts.unshift("")
-			})
-		}
+			if (pasted.has(cellKey(row, col))) return
+
+			clearedRows.push(row)
+			clearedCols.push(col)
+		})
+
+		if (clearedRows.length + rows.length > SHEET_MAX_EDIT_CELLS) return { refused: { reason: "tooLarge" } }
+
+		rows = clearedRows.concat(rows)
+		cols = clearedCols.concat(cols)
+		texts = new Array<string>(clearedRows.length).fill("").concat(texts)
 	}
 
 	const handled = setTexts(document, rows, cols, texts, changes)

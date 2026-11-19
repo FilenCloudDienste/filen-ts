@@ -701,32 +701,24 @@ function decliningTotal(cost: number, salvage: number, life: number, remainingLi
 	const last = Math.ceil(end)
 	let total = 0
 	let left = cost - salvage
-	let straight = 0
-	let switched = false
 
 	for (let period = 1; period <= last; period++) {
-		let write: number
+		const declining = decliningPeriod(cost, salvage, life, period, factor)
+		const straight = left / (remainingLife - (period - 1))
 
-		if (switched) write = straight
-		else {
-			const declining = decliningPeriod(cost, salvage, life, period, factor)
+		// Straight line from here on: every remaining period writes the same, the last one prorated.
+		if (straight > declining) return total + straight * (end + 1 - period)
 
-			straight = left / (remainingLife - (period - 1))
-
-			if (straight > declining) {
-				write = straight
-				switched = true
-			} else {
-				write = declining
-				left -= declining
-			}
-		}
-
-		total += period === last ? write * (end + 1 - last) : write
+		left -= declining
+		total += period === last ? declining * (end + 1 - last) : declining
 	}
 
 	return total
 }
+
+// The most whole periods VDB schedules: its loops run once per period, so a far larger life would hang the
+// calculation.
+export const VDB_MAX_PERIODS = 1_000_000
 
 // VDB: the declining-balance depreciation from start to end (fractions of periods prorated), switching to straight
 // line unless noSwitch.
@@ -747,6 +739,9 @@ export function variableDeclining(
 
 		for (let period = startWhole + 1; period <= endWhole; period++) {
 			let write = decliningPeriod(cost, salvage, life, period, factor)
+
+			// Book value at salvage: no later period writes anything.
+			if (write === 0) break
 
 			if (period === startWhole + 1) write *= Math.min(end, startWhole + 1) - start
 			else if (period === endWhole) write *= end + 1 - endWhole

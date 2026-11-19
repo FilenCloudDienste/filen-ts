@@ -1,3 +1,4 @@
+import { maxOf } from "../../arrays"
 import { OpcPackage, bytesSource, type ZipEntry } from "../../opc/index"
 import { NodeKind, parseXml, parseXmlSliced, type XmlDocument } from "../../xml/index"
 import { CHECKPOINT_SPACING, type Checkpoint, type RtfCheckpoints } from "../checkpoint"
@@ -20,8 +21,9 @@ import {
 	type RowWriter,
 	type SourceTableWords
 } from "./emit"
-import { RtfOut, RtfWriteRefusal, joinChunks } from "./out"
+import { RtfOut, RtfWriteRefusal, joinChunks, latin1Bytes } from "./out"
 import { writeNewPicture } from "./picture"
+import { descendant } from "./wml"
 
 // The lossless RTF writer. The document was edited as the WordprocessingML package the reader translated it to;
 // the docx writer wrote the edited parts (unchanged blocks byte for byte). Blocks whose WordprocessingML is
@@ -62,6 +64,8 @@ export interface RtfWritten {
 	// Blocks written from their WordprocessingML, and how many reads the proof took.
 	readonly written: number
 	readonly rounds: number
+	// Written and proved where the edit changed the body ("span"), or as the whole document.
+	readonly path: "span" | "whole"
 }
 
 const BODY_PART = "word/document.xml"
@@ -75,6 +79,7 @@ const BOOKMARK_END_K = BOOKMARK_END.indexOf(0x6b)
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 const R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 const STORY_PART = /^word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/u
+const MEDIA_PART = /^word\/media\/[^/]+$/u
 const RELS_PART = /^word\/_rels\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml\.rels$/u
 // Parts an edit may change that the RTF does not hold (the translation's own metadata).
 const COMMENTS_PART = "word/comments.xml"
@@ -99,6 +104,10 @@ function key(part: string, id: string): string {
 	return id === "" ? part : `${part}#${id}`
 }
 
+// A notes or comments part's root children by w:id (the first with each), found once per document: every note and
+// comment is looked up by id on each preparation and proof.
+const CHILDREN_BY_ID = new WeakMap<XmlDocument, Map<string, number>>()
+
 // The container element of `container` in its part's document: the body, the header or footer root, the w:footnote,
 // w:endnote or w:comment with its id.
 function containerElement(document: XmlDocument, container: { readonly part: string; readonly id: string }): number {
@@ -113,10 +122,21 @@ function containerElement(document: XmlDocument, container: { readonly part: str
 
 	if (container.id === "") return root
 
-	for (let child = document.firstChildElement(root); child >= 0; child = document.nextSiblingElement(child))
-		if (document.attribute(child, "w:id") === container.id) return child
+	let ids = CHILDREN_BY_ID.get(document)
 
-	return -1
+	if (ids === undefined) {
+		ids = new Map()
+
+		for (let child = document.firstChildElement(root); child >= 0; child = document.nextSiblingElement(child)) {
+			const id = document.attribute(child, "w:id")
+
+			if (id !== undefined && !ids.has(id)) ids.set(id, child)
+		}
+
+		CHILDREN_BY_ID.set(document, ids)
+	}
+
+	return ids.get(container.id) ?? -1
 }
 
 function blocksOf(document: XmlDocument, container: number): { blocks: number[]; section: number } {
@@ -317,8 +337,8 @@ function startingPoint(checkpoints: RtfCheckpoints, head: number): Checkpoint | 
 
 // A span's paragraphs as a document of their own (undefined for anything else).
 function spanDocument(blocks: readonly Block[]): XmlDocument | undefined {
-	const head = encodeAscii(`<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>`)
-	const foot = encodeAscii("</w:body></w:document>")
+	const head = latin1Bytes(`<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>`)
+	const foot = latin1Bytes("</w:body></w:document>")
 	let size = head.length + foot.length
 
 	for (const block of blocks) {
@@ -347,21 +367,13 @@ function spanDocument(blocks: readonly Block[]): XmlDocument | undefined {
 	return parseXml(out)
 }
 
-function encodeAscii(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k)
-
-	return out
-}
-
 // {\\*\\name text}: a destination holding text (\\uc1 where the text needs \\uN).
 function destination(out: RtfOut, name: string, text: string, codepage: number): void {
 	const encoded = encodeText(text, codepage)
 
 	out.rtf("{\\*").word(name)
 	if (encoded.unicode) out.word("uc", 1)
-	out.bytes(encodeAscii(encoded.rtf)).rtf("}")
+	out.bytes(latin1Bytes(encoded.rtf)).rtf("}")
 }
 
 // commentsExtended as the edit wrote it: refused where an entry threads a reply or resolves its comment.
@@ -382,7 +394,7 @@ function commentStates(document: XmlDocument): void {
 
 // The text of the {\\*\\atnref ...} in a source annotation group: what its range's \\atrfstart and \\atrfend hold.
 function annotationTag(bytes: Uint8Array, group: SourceRange): string {
-	const word = encodeAscii("\\atnref")
+	const word = latin1Bytes("\\atnref")
 
 	for (let at = bytes.indexOf(0x5c, group.start); at >= 0 && at < group.end; at = bytes.indexOf(0x5c, at + 1)) {
 		let k = 0
@@ -940,7 +952,7 @@ class Plan implements EmitContext {
 
 		sort()
 
-		const first = new RtfOut()
+		let first: RtfOut | undefined = new RtfOut()
 		const firstRun = { next: 0, at: 0 }
 
 		while (!this.copyOn(firstRun, size, first, due)) yield
@@ -964,6 +976,8 @@ class Plan implements EmitContext {
 			return joinChunks(first.finish())
 		}
 
+		// The first writing's chunks go before the second's are made.
+		first = undefined
 		sort()
 
 		const out = new RtfOut()
@@ -1003,7 +1017,7 @@ class Plan implements EmitContext {
 		}
 
 		if (this.listsAdded.length > 0) {
-			let ids = Math.max(0, ...this.facts.listIds) + 1
+			let ids = Math.max(0, maxOf(this.facts.listIds)) + 1
 			const lists = new RtfOut()
 			const overrides = new RtfOut()
 
@@ -1142,6 +1156,10 @@ class RtfWriter {
 	// Each story part's relationships as edited: id → target.
 	private readonly relationships = new Map<string, Map<string, { target: string; external: boolean }>>()
 	private readonly drawingKeys = new Map<string, Map<string, string>>()
+	// The source's pictures by relationship id: the first container's with each (picture).
+	private sourcePictures: Map<string, { readonly part: string; readonly range: SourceRange }> | undefined
+	// The pictures the edit inserted as written (newPicture), by document and drawing: every pass writes them alike.
+	private readonly newPictures = new Map<XmlDocument, Map<number, Uint8Array>>()
 	private get originalStyles(): XmlDocument | undefined {
 		return this.originals.get("word/styles.xml")
 	}
@@ -1362,7 +1380,7 @@ class RtfWriter {
 		this.lastPlan = plan
 
 		for (const [id, state] of this.states) {
-			yield* this.plan(id, state, plan, due)
+			yield* this.planOnce(id, state, plan, due)
 
 			if (due?.() === true) yield
 		}
@@ -1376,17 +1394,12 @@ class RtfWriter {
 
 	// ---- per container
 
-	private *plan(id: string, state: ContainerState, plan: Plan, due: (() => boolean) | undefined): Generator<void, void> {
-		yield* this.planOnce(id, state, plan, due)
-	}
-
 	// Steps at `due`.
 	private *planOnce(id: string, state: ContainerState, plan: Plan, due: (() => boolean) | undefined): Generator<void, void> {
 		const { original, edited, originalBlocks, editedBlocks, container } = state
 		const forced = this.forced.get(id)
 		const bytes = this.source.bytes
 		const blocks = container.blocks
-		const story = container.kind
 		const last = editedBlocks.length - 1
 		// The role a paragraph at edited index j needs, against the source's.
 		const fits = (source: SourceBlock, j: number): boolean => {
@@ -1397,7 +1410,6 @@ class RtfWriter {
 			const section = hasSection(edited, editedBlocks[j] ?? -1)
 
 			if (section) return term === "sect"
-			if (j === last) return term === "par" || term === ""
 
 			// Ended by nothing (the story's last) or a word another place has: kept, its end written anew.
 			return term === "par" || term === ""
@@ -1442,7 +1454,7 @@ class RtfWriter {
 					const mark = plan.splices.length
 
 					try {
-						this.replace(id, state, plan, source, node, j, story)
+						this.replace(id, state, plan, source, i, node, j)
 					} catch (error) {
 						// Gate 1: the block is locked and kept as it was.
 						if (!this.prove || !(error instanceof RtfWriteRefusal)) throw error
@@ -1462,7 +1474,7 @@ class RtfWriter {
 				} else if (node !== undefined) {
 					const index = j
 
-					this.insert(id, state, plan, at, node, index, story)
+					this.insert(id, state, plan, at, node, index)
 					ops.push({ kind: "write", source: undefined })
 					j++
 				}
@@ -1502,21 +1514,14 @@ class RtfWriter {
 			plan.splice(container.end, container.end, out => this.writeSection(plan, edited, state.lastSection, out))
 	}
 
-	private place(story: string, edited: XmlDocument, editedBlocks: readonly number[], j: number): "par" | "last" {
-		void story
-		void edited
-
-		return j === editedBlocks.length - 1 ? "last" : "par"
-	}
-
-	// A source block replaced by edited block `node` (index j of the container).
-	private replace(id: string, state: ContainerState, plan: Plan, source: SourceBlock, node: number, j: number, story: string): void {
+	// Source block `index` of the container replaced by edited block `node` (index j).
+	private replace(id: string, state: ContainerState, plan: Plan, source: SourceBlock, index: number, node: number, j: number): void {
 		const edited = state.edited
 		const local = edited.localName(node)
 
 		if (source.kind === "p" && source.from < 0) {
 			// The translation's own closing paragraph: there is nothing in the source to replace.
-			if (!this.prove) this.insert(id, state, plan, endOfStory(state), node, j, story)
+			if (!this.prove) this.insert(id, state, plan, endOfStory(state), node, j)
 
 			return
 		}
@@ -1527,7 +1532,7 @@ class RtfWriter {
 
 			try {
 				skeleton = this.checkContent(source)
-				term = this.termFor(state, source, node, j, plan)
+				term = this.termFor(state, source, index, node, j, plan)
 			} catch (error) {
 				if (!this.prove || !(error instanceof RtfWriteRefusal)) throw error
 
@@ -1544,21 +1549,18 @@ class RtfWriter {
 		}
 
 		if (source.kind === "tbl" && local === "tbl") {
-			this.table(id, state, plan, source, node, j)
+			this.table(id, state, plan, source, index, node, j)
 
 			return
 		}
 
 		// A paragraph became a table or the other way: the old one goes, the new one is written in its place.
 		this.remove(plan, source)
-		this.insert(id, state, plan, endOf(source, source.from), node, j, story)
+		this.insert(id, state, plan, endOf(source, source.from), node, j)
 	}
 
-	private insert(id: string, state: ContainerState, plan: Plan, at: number, node: number, j: number, story: string): void {
+	private insert(id: string, state: ContainerState, plan: Plan, at: number, node: number, j: number): void {
 		const edited = state.edited
-		const role = this.place(story, edited, state.editedBlocks, j)
-
-		void role
 
 		if (edited.localName(node) === "p") {
 			const term = hasSection(edited, node) ? this.newSectionTerm(state, plan, node, j) : "par"
@@ -1690,13 +1692,13 @@ class RtfWriter {
 		return this.skeleton(source.start, source.end)
 	}
 
-	private termFor(state: ContainerState, source: SourceParagraph, node: number, j: number, plan: Plan): ParagraphTerm {
+	private termFor(state: ContainerState, source: SourceParagraph, index: number, node: number, j: number, plan: Plan): ParagraphTerm {
 		const term = termOf(this.source.bytes, source)
 
 		if (!hasSection(state.edited, node)) return "par"
 
 		if (term === "sect") {
-			const original = state.originalBlocks[state.container.blocks.indexOf(source)] ?? -1
+			const original = state.originalBlocks[index] ?? -1
 
 			// The same break: its \sect as it was (the section's words are before it in the source).
 			if (sectionOf(state.original, original) === sectionOf(state.edited, node))
@@ -1806,8 +1808,8 @@ class RtfWriter {
 
 	// A changed table: rows compared, kept rows copied, rows with the same definitions edited cell by cell, other
 	// rows written whole.
-	private table(id: string, state: ContainerState, plan: Plan, source: SourceTable, node: number, j: number): void {
-		const originalTable = state.originalBlocks[state.container.blocks.indexOf(source)] ?? -1
+	private table(id: string, state: ContainerState, plan: Plan, source: SourceTable, index: number, node: number, j: number): void {
+		const originalTable = state.originalBlocks[index] ?? -1
 
 		this.tableRows(id, j, plan, source, state.original, originalTable, state.edited, node, 1)
 	}
@@ -1849,13 +1851,15 @@ class RtfWriter {
 
 		const forcedTable = this.forced.get(id)?.has(j) === true
 		const base = this.baseOf(source, original, originalTable, depth)
-		const pairs = commonPairs(originalRows.length, editedRows.length, (a, b) => {
-			const row = source.rows[a]
-
-			return (
-				row !== undefined && !forcedTable && !this.prove && sameBytes(original, originalRows[a] ?? -1, edited, editedRows[b] ?? -1)
-			)
-		})
+		// Gate 1 and a table written in full keep no row: no pair to look for.
+		const pairs =
+			this.prove || forcedTable
+				? []
+				: commonPairs(
+						originalRows.length,
+						editedRows.length,
+						(a, b) => source.rows[a] !== undefined && sameBytes(original, originalRows[a] ?? -1, edited, editedRows[b] ?? -1)
+					)
 		let a = 0
 		let b = 0
 		let at = source.rows[0]?.from ?? source.from
@@ -1968,17 +1972,18 @@ class RtfWriter {
 
 				return depth >= 2 ? term === "nestcell" : term === "cell" || term === "row"
 			}
-			const pairs = commonPairs(originalBlocks.length, editedBlocks.length, (x, y) => {
-				const source = sources[x]
+			const pairs =
+				this.prove || forcedTable
+					? []
+					: commonPairs(originalBlocks.length, editedBlocks.length, (x, y) => {
+							const source = sources[x]
 
-				return (
-					source !== undefined &&
-					!forcedTable &&
-					!this.prove &&
-					sameBytes(original, originalBlocks[x] ?? -1, edited, editedBlocks[y] ?? -1) &&
-					fits(source, y)
-				)
-			})
+							return (
+								source !== undefined &&
+								sameBytes(original, originalBlocks[x] ?? -1, edited, editedBlocks[y] ?? -1) &&
+								fits(source, y)
+							)
+						})
 			let x = 0
 			let y = 0
 			// Inside the row (after its definitions): where the cell's first paragraph's content starts.
@@ -2277,25 +2282,46 @@ class RtfWriter {
 	}
 
 	private picture(document: XmlDocument, drawing: number): Uint8Array {
-		const blip = findDescendant(document, drawing, "blip")
+		const blip = descendant(document, drawing, "blip")
 		const rId = blip < 0 ? undefined : document.attribute(blip, "r:embed")
 
 		if (rId === undefined) throw new RtfWriteRefusal("drawing", "a drawing without a picture")
 
-		for (const container of this.source.read.containers) {
-			const range = container.pictures.get(rId)
+		if (this.sourcePictures === undefined) {
+			this.sourcePictures = new Map()
 
-			if (range === undefined) continue
-
-			const original = this.originals.get(container.part)
-
-			if (original !== undefined && this.drawingKey(container.part, original, rId) !== drawingKey(document, drawing))
-				throw new RtfWriteRefusal("drawing", "an edited picture")
-
-			return this.source.bytes.subarray(range.start, range.end)
+			for (const container of this.source.read.containers)
+				for (const [id, range] of container.pictures)
+					if (!this.sourcePictures.has(id)) this.sourcePictures.set(id, { part: container.part, range })
 		}
 
-		return this.newPicture(document, drawing, rId)
+		const known = this.sourcePictures.get(rId)
+
+		if (known !== undefined) {
+			const original = this.originals.get(known.part)
+
+			if (original !== undefined && this.drawingKey(known.part, original, rId) !== drawingKey(document, drawing))
+				throw new RtfWriteRefusal("drawing", "an edited picture")
+
+			return this.source.bytes.subarray(known.range.start, known.range.end)
+		}
+
+		let written = this.newPictures.get(document)
+
+		if (written === undefined) {
+			written = new Map()
+			this.newPictures.set(document, written)
+		}
+
+		let bytes = written.get(drawing)
+
+		if (bytes === undefined) {
+			bytes = this.newPicture(document, drawing, rId)
+			written.set(drawing, bytes)
+		}
+
+		// A view of the bytes written once: never changed.
+		return bytes
 	}
 
 	// A picture the edit inserted: inline, its bytes a part the edit added.
@@ -2306,14 +2332,14 @@ class RtfWriter {
 
 		const extent = childNamed(document, inline, "extent")
 		const docPr = childNamed(document, inline, "docPr")
-		const graphicData = findDescendant(document, inline, "graphicData")
+		const graphicData = descendant(document, inline, "graphicData")
 
 		if (graphicData < 0 || document.attribute(graphicData, "uri") !== "http://schemas.openxmlformats.org/drawingml/2006/picture")
 			throw new RtfWriteRefusal("drawing", "a new drawing that is not a picture")
-		if (findDescendant(document, drawing, "srcRect") >= 0) throw new RtfWriteRefusal("drawing", "a new picture cropped")
-		if (findDescendant(document, drawing, "extLst") >= 0) throw new RtfWriteRefusal("drawing", "a new picture with extensions (an SVG)")
+		if (descendant(document, drawing, "srcRect") >= 0) throw new RtfWriteRefusal("drawing", "a new picture cropped")
+		if (descendant(document, drawing, "extLst") >= 0) throw new RtfWriteRefusal("drawing", "a new picture with extensions (an SVG)")
 
-		const xfrm = findDescendant(document, graphicData, "xfrm")
+		const xfrm = descendant(document, graphicData, "xfrm")
 
 		if (xfrm >= 0 && ["rot", "flipH", "flipV"].some(name => (document.attribute(xfrm, name) ?? "0") !== "0"))
 			throw new RtfWriteRefusal("drawing", "a new picture rotated or flipped")
@@ -2352,7 +2378,7 @@ class RtfWriter {
 			const walk = (node: number): void => {
 				for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
 					if (document.localName(child) === "drawing") {
-						const blip = findDescendant(document, child, "blip")
+						const blip = descendant(document, child, "blip")
 						const id = blip < 0 ? undefined : document.attribute(blip, "r:embed")
 
 						if (id !== undefined && !keys?.has(id)) keys?.set(id, drawingKey(document, child))
@@ -2385,11 +2411,8 @@ class RtfWriter {
 
 	// Styles the edit added (ids the translation's style sheet has not); a style it changed, or new defaults, refuse.
 	private addedStyles(styles: XmlDocument): Map<string, number> {
-		const original = this.source.translation
 		const originalStyles = this.originalStyles
 		const out = new Map<string, number>()
-
-		void original
 
 		if (originalStyles === undefined) throw new RtfWriteRefusal("style", "the translation has no style sheet")
 
@@ -2405,7 +2428,11 @@ class RtfWriter {
 			)
 		}
 
-		let next = Math.max(0, ...[...this.source.read.facts.styles.values()].map(style => style.number)) + 1
+		let next = 0
+
+		for (const style of this.source.read.facts.styles.values()) if (style.number > next) next = style.number
+
+		next++
 		const editedRoot = styles.documentElement()
 
 		for (let child = styles.firstChildElement(editedRoot); child >= 0; child = styles.nextSiblingElement(child)) {
@@ -2496,7 +2523,7 @@ class RtfWriter {
 		const encoded = encodeText(name, this.source.read.facts.codepage)
 
 		if (encoded.unicode) out.word("uc", 1)
-		out.bytes(asciiOf(`${encoded.rtf};`)).rtf("}")
+		out.bytes(latin1Bytes(`${encoded.rtf};`)).rtf("}")
 	}
 
 	// Lists the edit added (w:num ids the source's numbering does not have), each written as a list table entry.
@@ -2822,6 +2849,17 @@ class RtfWriter {
 		const actualMarks: string[] = []
 		const expectedNotes = await this.noteOrder(name => Promise.resolve(this.parts.get(name) ?? this.originals.get(name)), expectedMarks)
 		const actualNotes = await this.noteOrder(readPart, actualMarks)
+		// Each kind's ids by where they first come in the expected order.
+		const expectedIndex = new Map<NoteKind | "comment", Map<string, number>>()
+
+		for (const [kind, ids] of expectedNotes) {
+			const index = new Map<string, number>()
+
+			ids.forEach((noteId, k) => {
+				if (!index.has(noteId)) index.set(noteId, k)
+			})
+			expectedIndex.set(kind, index)
+		}
 
 		if (expectedMarks.join() !== actualMarks.join()) {
 			if (!this.prove) throw new RtfWriteRefusal("proof", "comment ranges and references read back otherwise")
@@ -2845,7 +2883,7 @@ class RtfWriter {
 			if (container.kind === "header" || container.kind === "footer") continue
 
 			if (container.kind === "footnote" || container.kind === "endnote" || container.kind === "comment") {
-				const order = expectedNotes.get(container.kind)?.indexOf(container.id) ?? -1
+				const order = expectedIndex.get(container.kind)?.get(container.id) ?? -1
 
 				if (order < 0) continue
 
@@ -2931,10 +2969,7 @@ class RtfWriter {
 					this.force(id, k)
 					again = true
 				} else {
-					throw new RtfWriteRefusal(
-						"proof",
-						`${id} block ${k} reads back differently: ${difference(actual[k] ?? "", expected[k] ?? "")}`
-					)
+					throw readBackRefusal(`${id} block ${String(k)}`, actual[k] ?? "", expected[k] ?? "")
 				}
 			}
 		}
@@ -2943,11 +2978,11 @@ class RtfWriter {
 		if (this.newComments.size > 0) {
 			const edited = this.parts.get(COMMENTS_PART)
 			const actualDocument = await readPart(COMMENTS_PART)
-			const expectedOrder = expectedNotes.get("comment") ?? []
+			const expectedOrder = expectedIndex.get("comment")
 			const actualOrder = actualNotes.get("comment") ?? []
 
 			for (const id of this.newComments) {
-				const order = expectedOrder.indexOf(id)
+				const order = expectedOrder?.get(id) ?? -1
 
 				if (order < 0) throw new RtfWriteRefusal("comment", "a new comment without its reference")
 
@@ -2968,10 +3003,7 @@ class RtfWriter {
 				const actual = blockDigestsExcept(actualDocument, actualElement, actualTargets(COMMENTS_PART), () => false)
 
 				if (expected.join("\u0002") !== actual.join("\u0002"))
-					throw new RtfWriteRefusal(
-						"proof",
-						`comment ${id} reads back differently: ${difference(actual.join("\n"), expected.join("\n"))}`
-					)
+					throw readBackRefusal(`comment ${id}`, actual.join("\n"), expected.join("\n"))
 			}
 		}
 
@@ -2983,8 +3015,7 @@ class RtfWriter {
 			const got =
 				actualStyles === undefined || actualId === undefined ? undefined : styleDefinition(actualStyles, actualId, actualStyles)
 
-			if (want === undefined || got === undefined || want !== got)
-				throw new RtfWriteRefusal("proof", `style ${id} reads back differently:\n${got}\n!=\n${want}`)
+			if (want === undefined || got === undefined || want !== got) throw readBackRefusal(`style ${id}`, got, want)
 		}
 
 		// Lists the edit added read back with the levels it gave them.
@@ -2998,8 +3029,7 @@ class RtfWriter {
 				const want = expected === undefined ? undefined : levelsOf(expected, String(numId))
 				const got = actual === undefined ? undefined : levelsOf(actual, String(numId))
 
-				if (want === undefined || got === undefined || want !== got)
-					throw new RtfWriteRefusal("proof", `list ${numId} reads back differently:\n${got}\n!=\n${want}`)
+				if (want === undefined || got === undefined || want !== got) throw readBackRefusal(`list ${String(numId)}`, got, want)
 			}
 		}
 
@@ -3198,14 +3228,6 @@ const NUMBER_FORMAT_CODES = new Map<string, number>([
 	["none", 255]
 ])
 
-function asciiOf(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
-
-	return out
-}
-
 function styleElement(styles: XmlDocument, id: string): number {
 	const root = styles.documentElement()
 
@@ -3335,14 +3357,27 @@ function styleDefinition(styles: XmlDocument, id: string, names: XmlDocument): s
 }
 
 // Where two digests part: a little of each from there.
-function difference(actual: string, expected: string): string {
+// A read-back refusal names where `what` differs, never what it holds: the message is logged, and digests, style
+// definitions and list levels carry document text. The window around the first difference is on the detail.
+function readBackRefusal(what: string, actual: string | undefined, expected: string | undefined): RtfWriteRefusal {
+	if (actual === undefined || expected === undefined)
+		return new RtfWriteRefusal(
+			"proof",
+			`${what} reads back differently: ${actual === undefined ? "nothing read back" : "nothing expected"}`,
+			`${String(actual)}\n!=\n${String(expected)}`
+		)
+
 	let at = 0
 
 	while (at < actual.length && actual[at] === expected[at]) at++
 
 	const from = Math.max(0, at - 80)
 
-	return `…${actual.slice(from, at + 160)}\n!=\n…${expected.slice(from, at + 160)}`
+	return new RtfWriteRefusal(
+		"proof",
+		`${what} reads back differently at offset ${String(at)}, ${String(actual.length)} characters written, ${String(expected.length)} expected`,
+		`…${actual.slice(from, at + 160)}\n!=\n…${expected.slice(from, at + 160)}`
+	)
 }
 
 // The levels of list `numId` (its w:num's abstract definition), canonical.
@@ -3403,18 +3438,6 @@ function drawingKey(document: XmlDocument, drawing: number): string {
 	}
 
 	return walk(drawing)
-}
-
-function findDescendant(document: XmlDocument, node: number, local: string): number {
-	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-		if (document.localName(child) === local) return child
-
-		const found = findDescendant(document, child, local)
-
-		if (found >= 0) return found
-	}
-
-	return -1
 }
 
 function childNamed(document: XmlDocument, node: number, local: string): number {
@@ -3634,7 +3657,7 @@ async function partsOf(
 		else if (RELS_PART.test(name) || IGNORED_PARTS.has(name) || name === "word/numbering.xml" || name === "word/styles.xml")
 			parts.set(name, parseXml(bytes))
 		// A picture the edit added: written where its drawing is (newPicture).
-		else if (/^word\/media\/[^/]+$/u.test(name)) continue
+		else if (MEDIA_PART.test(name)) continue
 		else throw new RtfWriteRefusal("part", `the edit changed ${name}`)
 	}
 
@@ -4027,7 +4050,7 @@ function windowsOf(
 					text += `<w:tbl w:held="${k}"/>`
 					break
 				case Child.Section:
-					out.push(encodeAscii(text), edited.subarray((starts[k] ?? 0) + shift, (ends[k] ?? 0) + shift))
+					out.push(latin1Bytes(text), edited.subarray((starts[k] ?? 0) + shift, (ends[k] ?? 0) + shift))
 					text = ""
 					break
 				default:
@@ -4035,7 +4058,7 @@ function windowsOf(
 			}
 		}
 
-		out.push(encodeAscii(text))
+		out.push(latin1Bytes(text))
 
 		return out
 	}
@@ -4080,12 +4103,14 @@ async function trackingChange(source: RtfSource, edited: XmlDocument): Promise<b
 
 // Writes the edited document as RTF; refuses (RtfWriteRefusal) what it cannot write as edited. `span: false` writes
 // and proves the whole document even where the edit changed only a span of the body. `turns`: written in slices.
+// `onFallback`: an error the span's writing threw (neither a refusal nor the end of the job), the whole document
+// written in its place.
 export async function writeRtf(
 	source: RtfSource,
 	edits: RtfEdits,
-	options: { readonly span?: boolean; readonly turns?: RtfTurns } = {}
+	options: { readonly span?: boolean; readonly turns?: RtfTurns; readonly onFallback?: (error: unknown) => void } = {}
 ): Promise<RtfWritten> {
-	if (edits.parts.size === 0 && (edits.removed?.length ?? 0) === 0) return { bytes: source.bytes, written: 0, rounds: 0 }
+	if (edits.parts.size === 0 && (edits.removed?.length ?? 0) === 0) return { bytes: source.bytes, written: 0, rounds: 0, path: "whole" }
 
 	const job = jobOf(options.turns)
 
@@ -4097,6 +4122,7 @@ export async function writeRtf(
 		} catch (error) {
 			if (error instanceof RtfAborted) throw error
 			// Refused or not: the whole document's writing decides.
+			if (!(error instanceof RtfWriteRefusal)) options.onFallback?.(error)
 		}
 	}
 
@@ -4113,7 +4139,7 @@ export async function writeRtf(
 
 		const { bytes, written } = await writer.runIn(job)
 
-		if ((await writer.verify(bytes, job)) === "done") return { bytes, written, rounds: round }
+		if ((await writer.verify(bytes, job)) === "done") return { bytes, written, rounds: round, path: "whole" }
 	}
 
 	throw new RtfWriteRefusal("proof", "the written file does not settle")
@@ -4128,7 +4154,7 @@ async function writeChanged(source: RtfSource, edits: RtfEdits, job: Job | undef
 
 	const { bytes, written } = await writer.runIn(job)
 
-	return (await writer.spanProof(bytes)) ? { bytes, written, rounds: 1 } : undefined
+	return (await writer.spanProof(bytes)) ? { bytes, written, rounds: 1, path: "span" } : undefined
 }
 
 // A writer of the body's changed span (prepared), where the edit is one.
@@ -4136,6 +4162,9 @@ async function spanWriter(source: RtfSource, edits: RtfEdits): Promise<RtfWriter
 	const body = edits.parts.get(BODY_PART)
 
 	if (body === undefined || source.read.checkpoints === undefined || (edits.removed?.length ?? 0) > 0) return undefined
+
+	// A picture the edit added names a relationship, which the span's proof never takes (spanReadsAsEdited).
+	for (const name of edits.parts.keys()) if (MEDIA_PART.test(name)) return undefined
 
 	const windows = await bodyWindows(source, body)
 

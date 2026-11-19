@@ -14,6 +14,7 @@ import type { EngineSession } from "../dom/presentation/engine"
 import { AVERAGE_MEASURER, relayoutDiagram, sampleData, smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { CORPUS_DIR } from "./corpusDir"
 import { openRenderDeck } from "./fixtures/presentation/renderDeck"
+import { FIXTURE_LINE_HEIGHT, fixtureTextPage } from "./fixtures/presentation/textPage"
 import { MM, data, layout } from "./smartartFixtures"
 
 // The SmartArt engine of the presentation worker: relayouts from a diagram's parts, the session cache, the
@@ -232,7 +233,21 @@ describe.skipIf(!existsSync(PYRAMID))("SmartArt without its drawing cache, throu
 		const session = { deck, onClose: () => undefined } as unknown as EngineSession
 		// The cache part is withheld: the engine has to lay the diagram out.
 		const hidden: RenderServices = { ...services, xml: part => (part === drawing ? undefined : services.xml(part)) }
-		const uncached: RenderServices = { ...hidden, smartart: smartArtRenderer(session, { services: hidden }) }
+		// The slide's text adapter: records each body it lays out, one fixture line per paragraph.
+		const laidOut: string[] = []
+		const uncached: RenderServices = {
+			...hidden,
+			smartart: smartArtRenderer(session, { services: hidden }),
+			layoutText: request => {
+				const paragraphs = request.body.paragraphs.map(paragraph =>
+					paragraph.runs.map(run => (run.kind === "br" ? "\n" : run.text)).join("")
+				)
+
+				laidOut.push(paragraphs.join("\n"))
+
+				return { page: fixtureTextPage(paragraphs, { width: request.width }), height: paragraphs.length * FIXTURE_LINE_HEIGHT }
+			}
+		}
 		const render = await renderSlide(deck, ref, uncached, SLICING)
 		const layers = render.layers.filter(l => l.role === "smartart")
 		let paths = 0
@@ -244,6 +259,7 @@ describe.skipIf(!existsSync(PYRAMID))("SmartArt without its drawing cache, throu
 		expect(drawing).toBeDefined()
 		// One trapezoid per level, each with its text laid out by the slide's text adapter.
 		expect(paths).toBe(3)
-		expect(layers.filter(layer => layer.text !== undefined).length + layers.length).toBeGreaterThanOrEqual(3)
+		expect(laidOut.map(text => text.split(" ")[0])).toEqual(["1", "2", "3"])
+		expect(layers.filter(layer => layer.text !== undefined)).toHaveLength(3)
 	})
 })

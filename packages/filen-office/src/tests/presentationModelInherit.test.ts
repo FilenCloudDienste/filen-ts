@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { openPptx, type PptxParts } from "../core/pptx/package"
 import { resolveBackground, themeFillStyle } from "../core/presentation/background"
-import { creationId, newGuid, nextMasterLayoutId, nextShapeId, nextSlideId, SlideRefs, uniqueShapeIds } from "../core/presentation/ids"
+import { creationId, newGuid, nextShapeId, nextSlideId, SlideRefs, uniqueShapeIds } from "../core/presentation/ids"
 import { inheritedShapes, resolveBodyPr, resolveParagraph, resolveRun, resolveShape, styleFont } from "../core/presentation/inherit"
 import type { Deck, ShapeNode, SlideNode } from "../core/presentation/model"
 import { applyMods, effectiveClrMap, presetColor, resolveColor, themeTypeface } from "../core/presentation/theme"
@@ -359,12 +359,10 @@ describe("themes and colours", () => {
 })
 
 describe("identifiers", () => {
-	it("allocates slide ids from 256 and master/layout ids from 2^31, never colliding", () => {
+	it("allocates slide ids from 256, never colliding", () => {
 		expect(nextSlideId([])).toBe(256)
 		expect(nextSlideId([256, 300])).toBe(301)
 		expect(nextSlideId([2_147_483_647, 256])).toBe(257)
-		expect(nextMasterLayoutId([2_147_483_648, 2_147_483_650])).toBe(2_147_483_651)
-		expect(nextMasterLayoutId([4_294_967_295])).toBe(2_147_483_648)
 	})
 
 	it("hands out slide refs once", () => {

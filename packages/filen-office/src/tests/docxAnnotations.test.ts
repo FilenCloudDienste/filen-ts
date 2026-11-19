@@ -213,6 +213,33 @@ describe("docx annotations", () => {
 		expect(annotations?.comments[0]?.paragraphs[0]?.map(run => run.text).join("")).toBe("Done \u2713")
 	})
 
+	it("places a comment after a MACROBUTTON at the text it covers", async () => {
+		const field =
+			'<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> MACROBUTTON NoMacro ab </w:instrText></w:r>' +
+			'<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+		const bytes = buildDocx({
+			// Drawn "qababab": the button's "ab", then the commented "ab". Read without the button's text, the paragraph
+			// ("qabab") is found at the start of the drawn text and the comment two characters early.
+			body:
+				`<w:p><w:r><w:t>q</w:t></w:r>${field}<w:commentRangeStart w:id="1"/><w:r><w:t>ab</w:t></w:r>` +
+				'<w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:r><w:t>ab</w:t></w:r></w:p>',
+			comments: '<w:comment w:id="1" w:author="A"><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:comment>'
+		})
+		const { annotations, pages } = await open(bytes)
+		const page = pages[0]
+		const comment = annotations?.comments[0]
+
+		if (page === undefined || annotations === null || annotations === undefined || comment === undefined)
+			throw new Error("not laid out")
+
+		const { x, char } = lineMetrics(page, 0)
+		const at = comment.firstRect * RECT_FLOATS
+
+		expect(comment.rectCount).toBe(1)
+		expect(annotations.rectFloats[at]).toBeCloseTo(x + 3 * char, 3)
+		expect(annotations.rectFloats[at + 2]).toBeCloseTo(2 * char, 3)
+	})
+
 	it("returns nothing to place for a document without annotations", async () => {
 		const { annotations, counts } = await open(buildDocx({ body: "<w:p><w:r><w:t>Plain</w:t></w:r></w:p>" }))
 
@@ -225,6 +252,55 @@ describe("docx annotations", () => {
 		const { annotations } = await open(REVIEWED, { retain: true })
 
 		expect(annotations?.comments).toHaveLength(2)
+	})
+})
+
+// Unanchored comments replying to the given parents (-1 for none), as a file's reply metadata may name them.
+function threaded(parents: readonly number[]): DocxAnnotations {
+	return {
+		authors: [],
+		comments: parents.map((parent, index) => ({
+			id: String(index),
+			author: -1,
+			initials: "",
+			date: "",
+			paragraphs: [],
+			parent,
+			done: false,
+			firstRect: 0,
+			rectCount: 0
+		})),
+		revisions: [],
+		rectPages: new Int32Array(0),
+		rectFloats: new Float32Array(0)
+	}
+}
+
+describe("comment threads", () => {
+	it("roots two comments naming each other at the first", () => {
+		const index = indexAnnotations(threaded([1, 0]))
+
+		expect(index.threads).toEqual([{ comment: 0, replies: [1] }, undefined])
+		expect(index.unanchored).toEqual([0])
+	})
+
+	it("roots a longer loop at its first comment with the others as replies", () => {
+		const index = indexAnnotations(threaded([-1, 3, 1, 2]))
+
+		expect(index.threads).toEqual([{ comment: 0, replies: [] }, { comment: 1, replies: [2, 3] }, undefined, undefined])
+		expect(index.unanchored).toEqual([0, 1])
+	})
+
+	it("roots a chain hanging off a loop at the loop's root", () => {
+		const index = indexAnnotations(threaded([4, 0, 3, 2, 3]))
+
+		expect(index.threads).toEqual([undefined, undefined, { comment: 2, replies: [0, 1, 3, 4] }, undefined, undefined])
+	})
+
+	it("keeps a comment replying to itself or to no comment a root", () => {
+		const index = indexAnnotations(threaded([0, 9, 1]))
+
+		expect(index.threads).toEqual([{ comment: 0, replies: [] }, { comment: 1, replies: [2] }, undefined])
 	})
 })
 

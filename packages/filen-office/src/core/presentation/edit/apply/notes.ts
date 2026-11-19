@@ -1,4 +1,3 @@
-import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import { reviewFacts } from "../../comments"
 import { refused, type Deck, type Refused, type ShapeNode, type SlideNode, type SlideRef, type TextBody } from "../../model"
 import { defaultNotesMaster, markMadeNotesPart, newNotesSlide, notesBody, notesBoxes } from "../../notes"
@@ -7,6 +6,7 @@ import type { NotesOp } from "../ops"
 import { cloneModel } from "../changes"
 import { sourceReading } from "./heldPage"
 import { applyText } from "./text"
+import { checkTextBody } from "../xmlText"
 
 // setNotes: a slide's speaker notes. On a slide with a notes slide it is the text family's setText on the notes
 // placeholder (its inverse holds the body's source bytes the way a shape's does). On a slide without one it makes the
@@ -25,27 +25,14 @@ const REMOVES = new WeakSet<NotesOp>()
 const ADDED_BODY = new WeakMap<NotesOp, { readonly notes: SlideRef; readonly id: number }>()
 const DROPS_BODY = new WeakMap<NotesOp, { readonly notes: SlideRef; readonly id: number }>()
 
-const BUDGETS = DEFAULT_PRESENTATION_BUDGETS
-
+// A new notes body: the text family's rule, and no content kept as source (a new notes slide has no source).
 function checkBody(body: TextBody): Refused | undefined {
-	let runs = 0
+	const checked = checkTextBody(body)
+
+	if (checked !== undefined) return checked
 
 	for (const paragraph of body.paragraphs) {
-		runs += paragraph.runs.length
-
-		if (runs > BUDGETS.runsPerBody) return refused("tooLarge", `${String(runs)} runs in one body`)
-
-		for (const run of paragraph.runs) {
-			if (run.kind === "opaque") return refused("unsupported", "content kept as source in new notes")
-			if (run.kind === "br") continue
-
-			for (let index = 0; index < run.text.length; index++) {
-				const code = run.text.charCodeAt(index)
-
-				if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0xfffe || code === 0xffff)
-					return refused("malformed", "text holds a character XML cannot")
-			}
-		}
+		for (const run of paragraph.runs) if (run.kind === "opaque") return refused("unsupported", "content kept as source in new notes")
 	}
 
 	return undefined

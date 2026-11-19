@@ -79,6 +79,10 @@ describe.skipIf(sealed === undefined || !anyOracle)("encryption oracles", () => 
 	const entries = sealed?.outputs.entries ?? []
 	const agile = sealed?.agile ?? new Set<string>()
 
+	it("has at least one sealed entry to check", () => {
+		expect(entries.length).toBeGreaterThan(0)
+	})
+
 	it.skipIf(msoffcrypto === undefined)("msoffcrypto-tool decrypts every sealed file", () => {
 		for (const entry of entries) {
 			const result = runMsoffcrypto(msoffcrypto as string, entry)
@@ -86,6 +90,10 @@ describe.skipIf(sealed === undefined || !anyOracle)("encryption oracles", () => 
 			expect(result.error, `${entry.name}: ${result.error}`).toBeUndefined()
 			expect(result.ok).toBe(true)
 			expect(result.startsPK).toBe(true)
+			if (entry.plaintext !== undefined) expect(result.matchedPlaintext, `${entry.name} plaintext`).toBe(true)
+			if (agile.has(entry.name) && result.integritySupported !== false) {
+				expect(result.integrityVerified, `${entry.name} integrity`).toBe(true)
+			}
 		}
 	})
 
@@ -96,6 +104,7 @@ describe.skipIf(sealed === undefined || !anyOracle)("encryption oracles", () => 
 			expect(result.error, `${entry.name}: ${result.error}`).toBeUndefined()
 			expect(result.ok).toBe(true)
 			expect(result.startsPK).toBe(true)
+			if (entry.plaintext !== undefined) expect(result.matchedPlaintext, `${entry.name} plaintext`).toBe(true)
 			if (agile.has(entry.name)) expect(result.hmacVerified, `${entry.name} HMAC`).toBe(true)
 		}
 	})

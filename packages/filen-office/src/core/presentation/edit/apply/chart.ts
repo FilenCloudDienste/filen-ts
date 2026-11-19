@@ -327,6 +327,63 @@ export function commitChartWrites(deck: Deck, writes: ChartWrites | undefined): 
 			if (written !== undefined) registry.workbookHolds.set(workbook, written)
 		}
 	}
+
+	forgetWrittenSources(deck, registry, writes)
+}
+
+// The source reads of homes a save wrote no longer match the package: let go of once their lineage holds its pristine
+// version (what baseVersion reads instead of them from then on).
+function forgetWrittenSources(deck: Deck, registry: Registry, writes: ChartWrites): void {
+	const homes = new Set<string>()
+
+	for (const { role, name } of writes.entries)
+		if (role !== "workbook") homes.add(role === "object" ? name.slice(0, name.lastIndexOf("/")) : name)
+
+	for (const part of [...registry.sources.keys()]) {
+		const home = deck.format === "odp" ? objectPathOf(part) : part
+		const lineage = homes.has(home) ? registry.lineages.get(home) : undefined
+
+		if (lineage !== undefined && [...registry.held.values()].some(version => version.pristine && version.lineage === lineage))
+			registry.sources.delete(part)
+	}
+}
+
+// Whether the deck holds chart versions (what a prune could let go of).
+export function holdsChartVersions(deck: Deck): boolean {
+	return (registries.get(deck)?.held.size ?? 0) > 0
+}
+
+// Lets go of every version nothing can name again: kept are those `reachable` names (the deck's frames, the history's
+// ops and inverses), those the ops in `ops` made (a redo points at them again), what each home holds and the pristine
+// version of every lineage. Never between a save's emit and its commit: the commit finds its writes by version name.
+export function pruneChartVersions(deck: Deck, reachable: ReadonlySet<string>, ops: Iterable<DeckOp>): void {
+	const registry = registries.get(deck)
+
+	if (registry === undefined || registry.held.size === 0) return
+
+	const keep = new Set(reachable)
+	const made = (op: DeckOp): void => {
+		if (op.family === "batch") {
+			for (const each of op.ops) made(each)
+
+			return
+		}
+
+		const name = registry.made.get(op)
+
+		if (name !== undefined) keep.add(name)
+	}
+
+	for (const op of ops) made(op)
+	for (const name of registry.holds.values()) keep.add(name)
+
+	const lineages = new Set(registry.lineages.values())
+
+	for (const [name, version] of [...registry.held]) {
+		if (keep.has(name) || (version.pristine && lineages.has(version.lineage))) continue
+
+		registry.held.delete(name)
+	}
 }
 
 // The frame `owner` wrote its lineage's version into parts of its own: from now on it is a chart of its own, its
@@ -623,6 +680,8 @@ function sheetCellsOf(workbook: XlsxWorkbook, model: XlsxSheetModel): ChartSheet
 		lastRow,
 		lastCol,
 		hidden: () => false,
+		hiddenRow: () => false,
+		hiddenCol: () => false,
 		cell(row, col) {
 			const slot = store.locate(row, col)
 
@@ -698,6 +757,8 @@ export function rowsCells(rows: readonly (readonly Cell[])[], name: string): Wor
 		lastRow: rows.length - 1,
 		lastCol: width - 1,
 		hidden: () => false,
+		hiddenRow: () => false,
+		hiddenCol: () => false,
 		cell(row, col) {
 			const value = rows[row]?.[col] ?? null
 

@@ -31,6 +31,7 @@ import {
 	type TabStop,
 	type TextStyle
 } from "../../text/index"
+import { DECORATION_FLOATS, DecorationFloat } from "../../text/displayList"
 import { PresentationError, type Action, type ParaProps, type RunProps } from "../model"
 import type { RenderEffects, TextPage } from "../output"
 import { AutonumberCounters, autonumberText } from "./autonum"
@@ -1018,10 +1019,24 @@ function pictureBullets(out: TextLayout, session: Session): PageObjects | undefi
 	const images: string[] = []
 	const parts = new Map<string, number>()
 
-	for (const bullet of bullets) {
-		for (let line = 0; line < out.lineCount; line++) {
-			if (out.lineInts[line * LINE_INTS + LineInt.SOURCE] !== bullet.paragraph) continue
+	// Each paragraph's first line, found in one pass: the lines need not ascend by paragraph (sideways text is split
+	// upright and mirrored), and a body may hold a picture bullet on every one of its paragraphs.
+	let span = 0
 
+	for (let line = 0; line < out.lineCount; line++) span = Math.max(span, (out.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1) + 1)
+
+	const firstLine = new Int32Array(span).fill(-1)
+
+	for (let line = 0; line < out.lineCount; line++) {
+		const source = out.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1
+
+		if (source >= 0 && firstLine[source] === -1) firstLine[source] = line
+	}
+
+	for (const bullet of bullets) {
+		const line = bullet.paragraph >= 0 && bullet.paragraph < span ? (firstLine[bullet.paragraph] ?? -1) : -1
+
+		if (line >= 0) {
 			const first = out.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
 			const count = out.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
 			let fragment = -1
@@ -1044,8 +1059,6 @@ function pictureBullets(out: TextLayout, session: Session): PageObjects | undefi
 				// Layer 1: the page's text layer.
 				ints.push(image, 1, bullet.paragraph)
 			}
-
-			break
 		}
 	}
 
@@ -1121,16 +1134,16 @@ function breakingSpace(code: number): boolean {
 // The largest font size of the text on one line (the paragraph's marker excluded), px; `fallback` for a line
 // without text (ECMA-376 §21.1.2.2.11: percentage spacing is taken from the largest text on the line).
 function largestSize(session: Session, out: TextLayout, line: number, prefix: number, fallback: number): number {
-	const first = out.lineInts[line * LINE_INTS] ?? 0
-	const count = out.lineInts[line * LINE_INTS + 1] ?? 0
+	const first = out.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
+	const count = out.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
 	let size = 0
 
 	for (let k = first; k < first + count; k++) {
 		const at = k * FRAGMENT_INTS
 
-		if ((out.fragmentInts[at + 1] ?? 0) <= prefix) continue
+		if ((out.fragmentInts[at + FragmentInt.TEXT_END] ?? 0) <= prefix) continue
 
-		size = Math.max(size, session.sizes[out.fragmentInts[at + 2] ?? -1] ?? 0)
+		size = Math.max(size, session.sizes[out.fragmentInts[at + FragmentInt.STYLE] ?? -1] ?? 0)
 	}
 
 	return size > 0 ? size : fallback
@@ -1142,11 +1155,11 @@ function largestSize(session: Session, out: TextLayout, line: number, prefix: nu
 // start edge onto the box's right edge, its start indent kept as when wrapped.
 function alignUnwrapped(out: TextLayout, resolved: ResolvedBody, frameWidth: number): void {
 	for (let line = 0; line < out.lineCount; line++) {
-		const source = out.lineInts[line * 7 + 5] ?? 0
+		const source = out.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? 0
 		const pPr = resolved.paragraphs[source]?.pPr
 		const algn = pPr?.algn ?? "l"
-		const width = out.lineFloats[line * 5 + 4] ?? 0
-		const x = out.lineFloats[line * 5 + 3] ?? 0
+		const width = out.lineFloats[line * LINE_FLOATS + LineFloat.WIDTH] ?? 0
+		const x = out.lineFloats[line * LINE_FLOATS + LineFloat.X] ?? 0
 		const dx =
 			algn === "ctr"
 				? (frameWidth - width) / 2 - x
@@ -1163,17 +1176,28 @@ function alignUnwrapped(out: TextLayout, resolved: ResolvedBody, frameWidth: num
 }
 
 function shiftLine(out: TextLayout, line: number, dx: number): void {
-	out.lineFloats[line * 5 + 3] = (out.lineFloats[line * 5 + 3] ?? 0) + dx
+	const lineX = line * LINE_FLOATS + LineFloat.X
 
-	const first = out.lineInts[line * 7] ?? 0
-	const count = out.lineInts[line * 7 + 1] ?? 0
+	out.lineFloats[lineX] = (out.lineFloats[lineX] ?? 0) + dx
 
-	for (let k = first; k < first + count; k++) out.fragmentFloats[k * 4] = (out.fragmentFloats[k * 4] ?? 0) + dx
+	const first = out.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
+	const count = out.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
 
-	const firstDecoration = out.lineInts[line * 7 + 6] ?? 0
-	const endDecoration = line + 1 < out.lineCount ? (out.lineInts[(line + 1) * 7 + 6] ?? 0) : out.decorationCount
+	for (let k = first; k < first + count; k++) {
+		const at = k * FRAGMENT_FLOATS + FragmentFloat.X
 
-	for (let d = firstDecoration; d < endDecoration; d++) out.decorationFloats[d * 4] = (out.decorationFloats[d * 4] ?? 0) + dx
+		out.fragmentFloats[at] = (out.fragmentFloats[at] ?? 0) + dx
+	}
+
+	const firstDecoration = out.lineInts[line * LINE_INTS + LineInt.FIRST_DECORATION] ?? 0
+	const endDecoration =
+		line + 1 < out.lineCount ? (out.lineInts[(line + 1) * LINE_INTS + LineInt.FIRST_DECORATION] ?? 0) : out.decorationCount
+
+	for (let d = firstDecoration; d < endDecoration; d++) {
+		const at = d * DECORATION_FLOATS + DecorationFloat.X
+
+		out.decorationFloats[at] = (out.decorationFloats[at] ?? 0) + dx
+	}
 }
 
 // a:bodyPr@anchor (t, ctr, b; just and dist as t, as PowerPoint draws horizontal text) and anchorCtr (the text
@@ -1189,10 +1213,10 @@ function anchor(out: TextLayout, kind: string, center: boolean, frameWidth: numb
 	let right = -Infinity
 
 	for (let line = 0; line < out.lineCount; line++) {
-		const x = out.lineFloats[line * 5 + 3] ?? 0
+		const x = out.lineFloats[line * LINE_FLOATS + LineFloat.X] ?? 0
 
 		left = Math.min(left, x)
-		right = Math.max(right, x + (out.lineFloats[line * 5 + 4] ?? 0))
+		right = Math.max(right, x + (out.lineFloats[line * LINE_FLOATS + LineFloat.WIDTH] ?? 0))
 	}
 
 	const dx = (frameWidth - (right - left)) / 2 - left

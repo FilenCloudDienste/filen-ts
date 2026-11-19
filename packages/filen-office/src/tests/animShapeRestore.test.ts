@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { effectPreset } from "../core/anim/presets/effects/index"
+import { cloneModel } from "../core/presentation/edit/changes"
 import { addEffectsOp, slideEffects } from "../core/presentation/edit/commands/timing"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { SlideNode } from "../core/presentation/model"
@@ -75,6 +76,8 @@ for (const format of ["pptx", "odp"] as const)
 				)
 
 				const want = await partOf((await h.save()).bytes)
+				// A copy: the session's slide node is live and the delete and the undo change it in place.
+				const held = cloneModel(await slide())
 
 				await command({ family: "shape", kind: "delete", slide: first.ref, shapes: [body] })
 
@@ -88,7 +91,17 @@ for (const format of ["pptx", "odp"] as const)
 				expect(await h.undo()).toMatchObject({ ok: true })
 
 				const after = await h.save()
+				const restored = await slide()
 
-				expect(after.bytes === undefined ? want : await partOf(after.bytes)).toBe(want)
+				if (saveBetween) {
+					// A save between changes the source provenance the model carries; the written part is the check.
+					expect(after.result.kind).toBe("written")
+					expect(await partOf(after.bytes)).toBe(want)
+				} else {
+					// The undo returns the history to the saved marker and there is nothing to write.
+					expect(after.result.kind).toBe("unchanged")
+					expect(restored.shapes).toEqual(held.shapes)
+					expect(restored.timing).toEqual(held.timing)
+				}
 			})
 		})

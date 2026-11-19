@@ -26,7 +26,7 @@ import {
 	type NumFmtLocale,
 	type NumFmtOptions
 } from "../../sheet/numfmt/index"
-import { dateSerial, ISO_1900, type DateBase } from "../../sheet/numfmt/date"
+import { ISO_1900, isoSerial, type DateBase } from "../../sheet/numfmt/date"
 import {
 	AxisFlag,
 	CellFlag,
@@ -74,6 +74,7 @@ import {
 	holdsArrayConstant,
 	holdsBracket,
 	legacyIntersections,
+	MAX_RANGE_CELLS,
 	sameSheet,
 	shownFormula
 } from "../../sheet/refs/formulaRefs"
@@ -195,22 +196,6 @@ const LEGACY_SHOWN = 4096
 
 // The functions a file stores for operators (@, A1#, a LAMBDA called in place), known to every workbook.
 const KNOWN_OPERATORS = /^_xlfn\.(?:SINGLE|ANCHORARRAY|LAMBDA|LET)$/i
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/
-
-// A t="d" cell's ISO 8601 text as a serial, NaN when it does not read.
-function isoSerial(text: string, date1904: DateBase): number {
-	const match = ISO_DATE.exec(text)
-
-	if (match === null) return Number.NaN
-
-	const [, year = "", month = "", day = "", hours = "0", minutes = "0", seconds = "0"] = match
-
-	return (
-		dateSerial(Number(year), Number(month), Number(day), date1904) +
-		(Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)) / 86_400
-	)
-}
 
 const dateScratch: DateParts = { year: 0, month: 0, day: 0, weekday: 0 }
 
@@ -1156,9 +1141,10 @@ export class XlsxDocument {
 	}
 
 	// Text an OpenDocument cell holds that typed again would be no text (a number, a date, a formula): its entry
-	// starts with an apostrophe, as LibreOffice shows it (an ODF cell has no quote-prefix flag to carry it).
+	// starts with an apostrophe, as LibreOffice shows it (an ODF cell has no quote-prefix flag to carry it). The
+	// caller tests the format first, so an xlsx cell never reads its text for it.
 	private quotedText(format: NumFmt, text: string): boolean {
-		return this.workbook.format === "ods" && text !== "" && readEntry(text, format.isText, this.dateBase).type !== "text"
+		return text !== "" && readEntry(text, format.isText, this.dateBase).type !== "text"
 	}
 
 	private showText(format: NumFmt, text: string, formula: boolean, quoted: boolean, rich = false): void {
@@ -1237,15 +1223,18 @@ export class XlsxDocument {
 				break
 			case CellKind.SHARED_STRING:
 			case CellKind.INLINE_STRING:
-			case CellKind.FORMULA_STRING:
+			case CellKind.FORMULA_STRING: {
+				const text = this.stringOf(model, kind, value)
+
 				this.showText(
 					format,
-					this.stringOf(model, kind, value),
+					text,
 					hasFormula,
-					!hasFormula && (this.styles.quotePrefix(xf) || this.quotedText(format, this.stringOf(model, kind, value))),
+					!hasFormula && (this.styles.quotePrefix(xf) || (this.workbook.format === "ods" && this.quotedText(format, text))),
 					kind === CellKind.SHARED_STRING && this.workbook.sharedStrings.isRich(value)
 				)
 				break
+			}
 			case CellKind.BOOLEAN:
 				shown.text = value !== 0 ? "TRUE" : "FALSE"
 				shown.flags |= CellFlag.BOOLEAN
@@ -2090,21 +2079,12 @@ export class XlsxDocument {
 		}
 	}
 
-	// The alone-held results the edit made stale: those reading a cell it wrote or the engine recalculated.
-	private staleAlone(
-		sheet: SheetId,
-		cells: readonly { row: number; col: number }[],
-		results: readonly RecalculatedCell[]
-	): RecalculatedCell[] {
+	// The alone-held results the edit made stale: those reading what it wrote (`written`, the areas of its sheet the
+	// engine was given, worked out only when something is held alone) or what the engine recalculated.
+	private staleAlone(written: () => ReadArea[], results: readonly RecalculatedCell[]): RecalculatedCell[] {
 		if (this.alone.size === 0 || this.engine === null) return []
 
-		const changed: ReadArea[] = cells.map(cell => ({
-			sheet,
-			startRow: cell.row,
-			endRow: cell.row,
-			startCol: cell.col,
-			endCol: cell.col
-		}))
+		const changed = written()
 
 		// What the engine reports that the cell already holds is no change (a volatile call gives a new error each time).
 		for (const result of results) {
@@ -2135,6 +2115,8 @@ export class XlsxDocument {
 		}
 
 		const stale: RecalculatedCell[] = []
+		// Whether an area reads a change, once per distinct area: a table's calculated column reads one range.
+		const verdicts = new Map<string, boolean>()
 
 		for (const [held, keys] of this.alone) {
 			const model = this.model(held)
@@ -2150,8 +2132,8 @@ export class XlsxDocument {
 			}
 
 			for (const key of keys) {
-				const row = Math.floor(key / 16_384)
-				const col = key % 16_384
+				const row = Math.floor(key / SHEET_MAX_COLS)
+				const col = key % SHEET_MAX_COLS
 				let areas = inputs.get(key)
 
 				if (areas === undefined) {
@@ -2167,11 +2149,17 @@ export class XlsxDocument {
 					areas.some(area => {
 						const box = boxes.get(area.sheet)
 
-						return (
-							box !== undefined &&
-							overlaps(area, box) &&
-							changed.some(cell => cell.sheet === area.sheet && overlaps(area, cell))
-						)
+						if (box === undefined || !overlaps(area, box)) return false
+
+						const id = `${area.sheet}:${area.startRow}:${area.endRow}:${area.startCol}:${area.endCol}`
+						let hit = verdicts.get(id)
+
+						if (hit === undefined) {
+							hit = changed.some(cell => cell.sheet === area.sheet && overlaps(area, cell))
+							verdicts.set(id, hit)
+						}
+
+						return hit
 					})
 
 				if (reads) stale.push({ sheet: index, row, col, ...this.engine.result(index, row, col), stale: true })
@@ -2314,7 +2302,7 @@ export class XlsxDocument {
 		const candidates = named.map(({ named: entry, scope }) => {
 			const name = {
 				name: aliases.get(entry.name.toUpperCase()) ?? entry.name,
-				expression: engineFormula(entry.formula, spelled, lambdas)
+				expression: engineFormula(deadReferences(entry.formula), spelled, lambdas)
 			}
 
 			return { named: entry, name: scope === undefined ? name : { ...name, scope } }
@@ -2326,7 +2314,7 @@ export class XlsxDocument {
 		const unknown = new Set<string>()
 
 		candidates.forEach((candidate, index) => {
-			if (refused.has(index) || hugeArea(candidate.named.formula)) unknown.add(candidate.named.name.toUpperCase())
+			if (refused.has(index) || hugeArea(candidate.name.expression)) unknown.add(candidate.named.name.toUpperCase())
 		})
 
 		// A name reading one the engine lacks is lacking too: until none is added.
@@ -2429,7 +2417,8 @@ export class XlsxDocument {
 			this.workbook.format === "ods",
 			this.workbook.calc.iterate
 				? { count: this.workbook.calc.iterateCount, delta: this.workbook.calc.iterateDelta, recalculateOnLoad: fullCalc }
-				: null
+				: null,
+			this.unknownNames
 		)
 
 		this.engine = engine
@@ -2623,8 +2612,9 @@ export class XlsxDocument {
 		return this.filteredRow?.(sheet, row) === true ? 2 : 1
 	}
 
-	// Before an edit that hides or shows rows: the engine built from the cells as they stand (all sheets ready, a
-	// workbook with formulas), so the edit is what it recalculates.
+	// Before an edit that hides or shows rows, moves cells, rows or columns, or clears cells: the engine built from the
+	// cells as they stand (all sheets ready, a workbook with formulas) when none is live, an earlier edit having dropped
+	// it, so the edit is what it recalculates.
 	async engineBeforeRows(changes: SheetChangeSink): Promise<void> {
 		if (this.engine !== null || !this.allReady || !this.hasFormulas) return
 
@@ -2654,6 +2644,51 @@ export class XlsxDocument {
 			const sheet = this.engineSheets[cell.sheet]
 
 			if (sheet === undefined) continue
+
+			const list = bySheet.get(sheet)
+
+			if (list === undefined) bySheet.set(sheet, [{ row: cell.row, col: cell.col }])
+			else list.push({ row: cell.row, col: cell.col })
+		}
+
+		return bySheet
+	}
+
+	// What reads `cells` (by sheet), directly or through others, whose stored result is not what the engine now gives,
+	// and the array formulas among them (a first cell's result may hold while what it spills changed). For an engine
+	// built again after an edit: setting a cell on it reports that cell only, never what reads it, as the engine already
+	// holds the new values. A result the engine cannot give (a circle, an unsupported value) is left as at build.
+	staleReaders(cells: ReadonlyMap<SheetId, readonly { row: number; col: number }[]>): Map<SheetId, { row: number; col: number }[]> {
+		const bySheet = new Map<SheetId, { row: number; col: number }[]>()
+		const engine = this.engine
+
+		if (engine === null) return bySheet
+
+		const seeds: { sheet: number; row: number; col: number }[] = []
+
+		for (const [sheet, list] of cells) {
+			const index = this.engineIndex(sheet)
+
+			if (index >= 0) for (const cell of list) seeds.push({ sheet: index, row: cell.row, col: cell.col })
+		}
+
+		for (const cell of engine.dependents(seeds)) {
+			const sheet = this.engineSheets[cell.sheet]
+			const model = sheet === undefined ? null : this.model(sheet)
+
+			if (sheet === undefined || model === null) continue
+
+			const store = model.store as SheetStore
+			const slot = store.locate(cell.row, cell.col)
+			const formula = slot < 0 ? -1 : store.formula(slot)
+
+			if (formula < 0) continue
+
+			if (store.formulas.kind(formula) !== FormulaKind.ARRAY) {
+				const result = { ...cell, ...engine.result(cell.sheet, cell.row, cell.col) }
+
+				if (result.value === CYCLE || FormulaEngine.unsupported(result.value) || this.holdsResult(sheet, result)) continue
+			}
 
 			const list = bySheet.get(sheet)
 
@@ -2717,19 +2752,19 @@ export class XlsxDocument {
 			)
 		)
 
-		this.applyRecalculated(sheet, cells, results, log, changes)
+		this.apply([...results, ...this.staleAlone(() => cellAreas(sheet, cells), results)], log, changes)
 	}
 
-	// Stores what the engine recalculated for `cells` of `sheet` (given to it apart from recalculate: in parts, its
-	// evaluation held between them), as recalculate does.
+	// Stores what the engine recalculated for the cells of `areas` of `sheet` (given to it apart from recalculate: in
+	// parts, its evaluation held between them), as recalculate does.
 	applyRecalculated(
 		sheet: SheetId,
-		cells: readonly { row: number; col: number }[],
+		areas: readonly SheetRange[],
 		results: readonly RecalculatedCell[],
 		log: CellLog | null,
 		changes: SheetChangeSink
 	): void {
-		this.apply([...results, ...this.staleAlone(sheet, cells, results)], log, changes)
+		this.apply([...results, ...this.staleAlone(() => areas.map(area => ({ sheet, ...area })), results)], log, changes)
 	}
 
 	// apply in parts of WRITE_SLICE results, yielding between them once the clock's slice is up.
@@ -2762,7 +2797,7 @@ export class XlsxDocument {
 		changes: SheetChangeSink,
 		clock: SliceClock | undefined
 	): Promise<void> {
-		const all = [...results, ...this.staleAlone(sheet, cells, results)]
+		const all = [...results, ...this.staleAlone(() => cellAreas(sheet, cells), results)]
 
 		if (clock === undefined || all.length <= WRITE_SLICE) {
 			this.apply(all, log, changes)
@@ -3254,6 +3289,11 @@ interface ReadArea {
 	readonly endCol: number
 }
 
+// Each of `cells` of `sheet` as an area of its own.
+function cellAreas(sheet: SheetId, cells: readonly { row: number; col: number }[]): ReadArea[] {
+	return cells.map(cell => ({ sheet, startRow: cell.row, endRow: cell.row, startCol: cell.col, endCol: cell.col }))
+}
+
 function overlaps(a: ReadArea, b: ReadArea): boolean {
 	return a.startRow <= b.endRow && b.startRow <= a.endRow && a.startCol <= b.endCol && b.startCol <= a.endCol
 }
@@ -3266,8 +3306,8 @@ interface CellBand {
 
 // A cell's key after rows or columns move, or -1 when they deleted it.
 function shiftedKey(key: number, edit: AxisEdit & { readonly band?: CellBand }): number {
-	const row = Math.floor(key / 16_384)
-	const col = key % 16_384
+	const row = Math.floor(key / SHEET_MAX_COLS)
+	const col = key % SHEET_MAX_COLS
 	const index = edit.axis === "rows" ? row : col
 	const cross = edit.axis === "rows" ? col : row
 
@@ -3279,27 +3319,34 @@ function shiftedKey(key: number, edit: AxisEdit & { readonly band?: CellBand }):
 	return edit.axis === "rows" ? cellKeyOf(next, col) : cellKeyOf(row, next)
 }
 
-// Cells past which a name that is one area alone is not given to the engine, which reads a name's area whole when it
-// builds (a print area of entire rows would take gigabytes): what reads such a name keeps its result.
-const MAX_NAME_AREA = 4_000_000
-const AREA = /^(?:(?:'(?:[^']|'')+'|[^'!:]+)!)?\$?([A-Z]{1,3})\$?(\d{1,7}):\$?([A-Z]{1,3})\$?(\d{1,7})$/
+// A reference into a deleted sheet as Excel writes it (#REF!$A$1, #REF!A1:B2, #REF!$A:$A), outside string literals
+// and quoted sheet names: the engine cannot read it, and Excel gives the error itself for it.
+const DEAD_REFERENCE =
+	/"(?:[^"]|"")*"|'(?:[^']|'')*'|#REF!(?:\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|\$?\d+:\$?\d+)(?![\w.(!$:])/gi
+const DEAD_ERROR = /#REF!/i
 
+// A defined name's formula with each reference into a deleted sheet spelled as the bare #REF! the engine reads: what
+// reads the name is calculated (#REF!, or what IFERROR makes of it), not held at a result the edit made stale.
+function deadReferences(formula: string): string {
+	return DEAD_ERROR.test(formula) ? formula.replace(DEAD_REFERENCE, match => (match.startsWith("#") ? "#REF!" : match)) : formula
+}
+
+// A name reading a block of cells past MAX_RANGE_CELLS is not given to the engine, which reads a name's block address
+// by address when it builds (a print area of entire rows would take gigabytes), the sheet's empty cells too: what reads
+// such a name keeps its result, as a formula reading the block itself does. `formula` is the name's text as the engine
+// takes it (engineFormula), which spells each range as one block (S!A1 : S!B2 as S!A1:B2).
 function hugeArea(formula: string): boolean {
-	const match = AREA.exec(formula.trim())
+	if (!formula.includes(":")) return false
 
-	if (match === null) return false
-
-	const column = (letters: string): number => {
-		let index = 0
-
-		for (const letter of letters) index = index * 26 + (letter.charCodeAt(0) - 64)
-
-		return index
+	for (const { area } of formulaInputs(formula).refs) {
+		if (
+			area.kind === "cell" &&
+			(Math.abs(area.endRow - area.startRow) + 1) * (Math.abs(area.endCol - area.startCol) + 1) > MAX_RANGE_CELLS
+		)
+			return true
 	}
-	const columns = Math.abs(column(match[3] ?? "A") - column(match[1] ?? "A")) + 1
-	const rows = Math.abs(Number(match[4]) - Number(match[2])) + 1
 
-	return columns * rows > MAX_NAME_AREA
+	return false
 }
 
 function axisLayout(defaultSize: number, indices: number[], sizes: number[], styles: number[], flags: number[]): SheetAxisLayout {

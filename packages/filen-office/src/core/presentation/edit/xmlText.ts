@@ -1,4 +1,6 @@
 import { classifyHref } from "../actions"
+import { DEFAULT_PRESENTATION_BUDGETS } from "../budget"
+import { refused, type Refused, type TextBody } from "../model"
 
 // Text and links the editor puts into the model, made what the deck can carry: the writer replaces anything XML 1.0
 // cannot hold with U+FFFD (core/xml/entities.ts), which the proof then reads back as a different value and refuses
@@ -20,6 +22,78 @@ function carriable(text: string, index: number): number {
 	if (code <= 0xdfff) return 0
 
 	return code === 0xfffe || code === 0xffff ? 0 : 1
+}
+
+// Whether XML 1.0 can carry all of `text` as it is: what xmlSafeText returns unchanged.
+export function xmlCarries(text: string): boolean {
+	for (let index = 0; index < text.length;) {
+		const span = carriable(text, index)
+
+		if (span === 0) return false
+
+		index += span
+	}
+
+	return true
+}
+
+// A run's URL link: one only as the save proof classifies it (http, https, mailto) and with text XML can hold.
+function carriableHref(href: string): boolean {
+	return xmlCarries(href) && classifyHref(href).kind === "url"
+}
+
+// The texts and links of `body`'s runs, which an edit re-sending the whole body may carry over as they are.
+function heldValues(body: TextBody): Set<string> {
+	const held = new Set<string>()
+
+	for (const paragraph of body.paragraphs) {
+		for (const run of paragraph.runs) {
+			if (run.kind !== "br") held.add(run.text)
+
+			const action = run.kind === "opaque" ? undefined : run.rPr.hlinkClick
+
+			if (action?.kind === "url") held.add(action.href)
+		}
+	}
+
+	return held
+}
+
+// A body over the hostile-input budgets, holding text XML cannot carry or a link the deck cannot carry, is refused
+// before it enters the model: the one rule for shape, cell and notes bodies. A run text or link the body it replaces
+// (`current`) already holds verbatim passes: an edit re-sends the whole body, and what a file already held must not
+// make every later edit of that body a refusal. Content kept as source carries its text but no link to check.
+export function checkTextBody(body: TextBody, current?: TextBody): Refused | undefined {
+	let runs = 0
+	let held: Set<string> | undefined
+
+	const carried = (value: string, fine: boolean): boolean => {
+		if (fine) return true
+		if (current === undefined) return false
+
+		held ??= heldValues(current)
+
+		return held.has(value)
+	}
+
+	for (const paragraph of body.paragraphs) {
+		runs += paragraph.runs.length
+
+		if (runs > DEFAULT_PRESENTATION_BUDGETS.runsPerBody) return refused("tooLarge", `${String(runs)} runs in one body`)
+
+		for (const run of paragraph.runs) {
+			if (run.kind !== "br" && !carried(run.text, xmlCarries(run.text)))
+				return refused("malformed", "text holds a character XML cannot")
+			if (run.kind === "opaque") continue
+
+			const action = run.rPr.hlinkClick
+
+			if (action?.kind === "url" && !carried(action.href, carriableHref(action.href)))
+				return refused("malformed", "a link the deck cannot carry")
+		}
+	}
+
+	return undefined
 }
 
 // `text` with what XML 1.0 cannot carry taken out: U+000B (the soft line break PowerPoint and Word put on the

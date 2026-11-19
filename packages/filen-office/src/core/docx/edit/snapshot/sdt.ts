@@ -137,6 +137,7 @@ export function controlOf(input: SnapshotInput): DocxControlContext | null {
 
 	if (
 		last?.key === key &&
+		last.context.protection === protection &&
 		last.context.value === (field.type === "FORMTEXT" ? result : last.context.value) &&
 		sameField(last.info, field)
 	)

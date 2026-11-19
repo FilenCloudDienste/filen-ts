@@ -54,6 +54,11 @@ function points(twips: string | undefined): string | undefined {
 	return twips === undefined || !Number.isFinite(value) ? undefined : `${round(value / 20)}pt`
 }
 
+// Twips as points ("12.5pt").
+export function twipsPoints(twips: number): string {
+	return `${round(twips / 20)}pt`
+}
+
 function round(value: number): string {
 	return String(Math.round(value * 10_000) / 10_000)
 }

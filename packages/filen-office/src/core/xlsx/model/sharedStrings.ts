@@ -8,6 +8,16 @@ const POOL_SHIFT = 12
 // Parses a rich entry's runs from its <si> bytes (read/sharedStrings.ts), so this module needs no parser.
 export type RunsParser = (si: Uint8Array) => readonly XlsxRichRun[] | null
 
+// The rich source entries' <si> bytes, back to back in one pool: entry indexes ascending, each with the end of its
+// bytes in the pool (an entry starts where the previous one ends). One buffer, not a typed array per entry.
+export type RichSource = {
+	readonly pool: Uint8Array
+	readonly indexes: Uint32Array
+	readonly ends: Uint32Array
+}
+
+const NO_RICH: RichSource = { pool: new Uint8Array(0), indexes: new Uint32Array(0), ends: new Uint32Array(0) }
+
 export class SharedStrings implements XlsxSharedStrings {
 	readonly sourceCount: number
 	readonly sourceLength: number
@@ -16,7 +26,7 @@ export class SharedStrings implements XlsxSharedStrings {
 	// Start of each entry in its pool.
 	private readonly starts: Uint32Array
 	// <si> bytes of the rich source entries, parsed on demand.
-	private readonly richSource: ReadonlyMap<number, Uint8Array>
+	private readonly richSource: RichSource
 	private readonly parseRuns: RunsParser
 	private readonly richParsed = new Map<number, readonly XlsxRichRun[] | null>()
 	private readonly appended: string[] = []
@@ -30,7 +40,7 @@ export class SharedStrings implements XlsxSharedStrings {
 		pools: readonly string[],
 		starts: Uint32Array,
 		length: number,
-		richSource: ReadonlyMap<number, Uint8Array>,
+		richSource: RichSource,
 		parseRuns: RunsParser
 	) {
 		this.sourceCount = sourceCount
@@ -42,7 +52,7 @@ export class SharedStrings implements XlsxSharedStrings {
 	}
 
 	static empty(parseRuns: RunsParser): SharedStrings {
-		return new SharedStrings(-1, [], new Uint32Array(0), 0, new Map(), parseRuns)
+		return new SharedStrings(-1, [], new Uint32Array(0), 0, NO_RICH, parseRuns)
 	}
 
 	get length(): number {
@@ -68,20 +78,22 @@ export class SharedStrings implements XlsxSharedStrings {
 	}
 
 	isRich(index: number): boolean {
-		return index < this.sourceLength ? this.richSource.has(index) : this.appendedRuns.has(index)
+		return index < this.sourceLength ? this.richSlot(index) >= 0 : this.appendedRuns.has(index)
 	}
 
 	runs(index: number): readonly XlsxRichRun[] | null {
 		if (index >= this.sourceLength) return this.appendedRuns.get(index) ?? null
 
-		const bytes = this.richSource.get(index)
-
-		if (bytes === undefined) return null
-
 		let runs = this.richParsed.get(index)
 
 		if (runs === undefined) {
-			runs = this.parseRuns(bytes)
+			const slot = this.richSlot(index)
+
+			if (slot < 0) return null
+
+			const { pool, ends } = this.richSource
+
+			runs = this.parseRuns(pool.subarray(slot === 0 ? 0 : (ends[slot - 1] ?? 0), ends[slot] ?? 0))
 			this.richParsed.set(index, runs)
 		}
 
@@ -125,6 +137,24 @@ export class SharedStrings implements XlsxSharedStrings {
 		this.referenceDelta += delta
 	}
 
+	// Position of a source entry in the rich source, or -1 when it is plain.
+	private richSlot(index: number): number {
+		const indexes = this.richSource.indexes
+		let low = 0
+		let high = indexes.length - 1
+
+		while (low <= high) {
+			const middle = (low + high) >>> 1
+			const value = indexes[middle] ?? 0
+
+			if (value === index) return middle
+			if (value < index) low = middle + 1
+			else high = middle - 1
+		}
+
+		return -1
+	}
+
 	private buildTable(): Int32Array {
 		let size = 16
 
@@ -132,9 +162,15 @@ export class SharedStrings implements XlsxSharedStrings {
 
 		const table = new Int32Array(size)
 		const mask = size - 1
+		const richIndexes = this.richSource.indexes
+		let nextRich = 0
 
 		for (let index = 0; index < this.sourceLength; index++) {
-			if (this.richSource.has(index)) continue
+			if (nextRich < richIndexes.length && richIndexes[nextRich] === index) {
+				nextRich++
+
+				continue
+			}
 
 			const pool = this.pools[index >>> POOL_SHIFT] ?? ""
 			const next = index + 1
@@ -164,11 +200,11 @@ export class SharedStrings implements XlsxSharedStrings {
 	}
 
 	estimateBytes(): number {
-		let bytes = this.starts.byteLength + (this.table?.byteLength ?? 0)
+		const rich = this.richSource
+		let bytes =
+			this.starts.byteLength + (this.table?.byteLength ?? 0) + rich.pool.byteLength + rich.indexes.byteLength + rich.ends.byteLength
 
 		for (const pool of this.pools) bytes += pool.length * 2
-
-		for (const si of this.richSource.values()) bytes += si.byteLength + 64
 
 		for (const text of this.appended) bytes += text.length * 2 + 32
 

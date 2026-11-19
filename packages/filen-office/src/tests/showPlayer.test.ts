@@ -16,6 +16,7 @@ import {
 } from "../react/presentation/show/timeline"
 import { transitionDurationMs, transitionStyles } from "../react/presentation/show/transitions"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
+import { budget, cpuMs } from "./timing"
 
 // The player's pure parts: the clip regions of the 21 ECMA transitions and of the animEffect filters drawn as CSS
 // clip paths, measured against the ECMA progress functions at t = 0, 0.5 and 1 (ink mismatch on a sample grid); the
@@ -213,6 +214,32 @@ describe("animEffect filters as CSS", () => {
 		expect(both.opacity).toBe(0.5)
 		expect(mismatch(clipPathCss(both.clip ?? { kind: "none" }, box), u => u < 0.5)).toBe(0)
 		expect(filterFrame("image", 0.5, false)).toEqual({ opacity: 1, dx: 0, dy: 0 })
+	})
+
+	it("parses a filter list in linear time, as written or with whitespace around each piece", () => {
+		const whole = { opacity: 1, dx: 0, dy: 0 }
+
+		for (const [written, canonical] of [
+			[" fade ", "fade"],
+			["wipe( left )", "wipe(left)"],
+			[" blinds ( horizontal ) ", "blinds(horizontal)"],
+			["fade ; wipe(right) ;", "fade;wipe(right)"],
+			["wipe(()", "wipe(right)"],
+			["wipe(constructor)", "wipe(right)"],
+			["strips(toString)", "strips(downRight)"]
+		] as const) {
+			expect(filterFrame(written, 0.4, false), written).toEqual(filterFrame(canonical, 0.4, false))
+		}
+
+		for (const malformed of ["wipe(left", "wipe(left)x", "wi pe", "wipe)", "1fade", "", ";"]) {
+			expect(filterFrame(malformed, 0.4, false), malformed).toEqual(whole)
+		}
+
+		const start = cpuMs()
+
+		expect(filterFrame(`wipe(${" ".repeat(5000)}`, 0.5, false)).toEqual(whole)
+		expect(filterFrame(`fade;${"wipe( ".repeat(20_000)}`, 0.5, false)).toEqual(filterFrame("fade", 0.5, false))
+		expect(cpuMs() - start).toBeLessThan(budget(10))
 	})
 
 	it("reaches past the box on its edges, so effects outside the shape box show with the edge they touch", () => {

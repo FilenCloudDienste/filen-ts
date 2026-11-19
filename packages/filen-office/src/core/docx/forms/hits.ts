@@ -1,4 +1,4 @@
-import { mayHoldControls } from "../edit/invariants/forms"
+import { mayHoldControls, mayHoldFields } from "../edit/invariants/forms"
 import { docxSchema } from "../edit/schema"
 import type { PagedEditor } from "../paged/editor"
 import type { ObjectHit, ObjectHitProvider } from "../paged/objects"
@@ -31,7 +31,7 @@ const CONTROLS: ObjectHitProvider = {
 		const session = editor.session
 		const part = session.story.part
 
-		if (!mayHoldControls(session) && part.fields.count === 0) return undefined
+		if (!mayHoldControls(session) && !mayHoldFields(session)) return undefined
 
 		const hit = editor.hitTest(page, x, y)
 

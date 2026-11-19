@@ -14,13 +14,13 @@ import type { TextEditChar, TextEditTarget } from "./target"
 //    target glyph stayed, the result is "unsafe" and the caller abandons the operation (nothing is re-created);
 // 4. the new text, laid out beforehand into a one-page overlay PDF (core/pdfedit/textLayout.ts), is grafted over the
 //    page (overlay.ts).
-// Structure (tagged PDF) is not updated: `tagged` says the document has tags, for the notice.
+// Structure (tagged PDF) is not updated: the session snapshot's `tagged` says the document has tags, for the notice.
 //
 // The page's PDFPage wrappers held elsewhere keep a stale annotation list after this (MuPDF deletes the applied
 // Redact annotation underneath them): reload the page.
 
 export type TextEditResult =
-	| { readonly status: "applied"; readonly pages: readonly number[]; readonly tagged: boolean }
+	| { readonly status: "applied"; readonly pages: readonly number[] }
 	// Abandon the journal operation and say the change was not applied (the "unsafe" notice).
 	| { readonly status: "unsafe" }
 
@@ -63,7 +63,7 @@ export function applyTextEdit(
 
 		if (overlay !== null) graftOverlay(mupdf, document, pageIndex, overlay)
 
-		return { status: "applied", pages: [pageIndex], tagged: isTagged(document) }
+		return { status: "applied", pages: [pageIndex] }
 	} finally {
 		page.destroy()
 	}
@@ -75,21 +75,10 @@ export function applyAddText(
 	document: Mupdf.PDFDocument,
 	pageIndex: number,
 	overlay: Uint8Array
-): { readonly pages: readonly number[]; readonly tagged: boolean } {
+): { readonly pages: readonly number[] } {
 	graftOverlay(mupdf, document, pageIndex, overlay)
 
-	return { pages: [pageIndex], tagged: isTagged(document) }
-}
-
-// A document with a structure tree or marked as tagged.
-export function isTagged(document: Mupdf.PDFDocument): boolean {
-	const root = document.getTrailer().get("Root")
-
-	if (!root.isDictionary()) return false
-
-	const markInfo = root.get("MarkInfo")
-
-	return !root.get("StructTreeRoot").isNull() || (markInfo.isDictionary() && markInfo.get("Marked").valueOf() === true)
+	return { pages: [pageIndex] }
 }
 
 // Indices into `chars` of the target's glyphs; null when one is not on the page (any more).

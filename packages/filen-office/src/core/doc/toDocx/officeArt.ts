@@ -1,4 +1,5 @@
 import { unzlibSync } from "fflate"
+import { le16, le32, les32 } from "../bytes"
 
 // [MS-ODRAW] records as Word binary files hold them: the drawing group and per-story drawings of
 // OfficeArtContent ([MS-DOC] §2.9.172, Table stream at fcDggInfo), inline picture shapes (PICF in the Data
@@ -36,9 +37,9 @@ export function records(data: Uint8Array, start: number, end: number): ArtRecord
 	const limit = Math.min(end, data.length)
 
 	for (let at = start; at + 8 <= limit;) {
-		const head = (data[at] ?? 0) | ((data[at + 1] ?? 0) << 8)
-		const type = (data[at + 2] ?? 0) | ((data[at + 3] ?? 0) << 8)
-		const length = ((data[at + 4] ?? 0) | ((data[at + 5] ?? 0) << 8) | ((data[at + 6] ?? 0) << 16) | ((data[at + 7] ?? 0) << 24)) >>> 0
+		const head = le16(data, at)
+		const type = le16(data, at + 2)
+		const length = le32(data, at + 4)
 		const dataStart = at + 8
 		const dataEnd = Math.min(limit, dataStart + length)
 
@@ -47,18 +48,6 @@ export function records(data: Uint8Array, start: number, end: number): ArtRecord
 	}
 
 	return out
-}
-
-function u16(data: Uint8Array, at: number): number {
-	return (data[at] ?? 0) | ((data[at + 1] ?? 0) << 8)
-}
-
-function u32(data: Uint8Array, at: number): number {
-	return (u16(data, at) | (u16(data, at + 2) << 16)) >>> 0
-}
-
-function i32(data: Uint8Array, at: number): number {
-	return u32(data, at) | 0
 }
 
 export interface ArtProperty {
@@ -76,8 +65,8 @@ export function readProperties(data: Uint8Array, record: ArtRecord, into: Map<nu
 
 	for (let k = 0; k < count; k++) {
 		const at = record.start + 6 * k
-		const opid = u16(data, at)
-		const value = u32(data, at + 2)
+		const opid = le16(data, at)
+		const value = le32(data, at + 2)
 		const pid = opid & 0x3fff
 		let complex: Uint8Array | undefined
 
@@ -120,10 +109,10 @@ function ltrb(data: Uint8Array, record: ArtRecord): ArtRect | undefined {
 	if (record.end - record.start < 16) return undefined
 
 	return {
-		left: i32(data, record.start),
-		top: i32(data, record.start + 4),
-		right: i32(data, record.start + 8),
-		bottom: i32(data, record.start + 12)
+		left: les32(data, record.start),
+		top: les32(data, record.start + 4),
+		right: les32(data, record.start + 8),
+		bottom: les32(data, record.start + 12)
 	}
 }
 
@@ -141,8 +130,8 @@ export function readShape(data: Uint8Array, container: ArtRecord): ArtShape | un
 		} else if (record.type === RT_CHILD_ANCHOR) {
 			childAnchor = ltrb(data, record)
 		} else if (record.type === RT_FSP && record.end - record.start >= 8) {
-			spid = u32(data, record.start)
-			flags = u32(data, record.start + 4)
+			spid = le32(data, record.start)
+			flags = le32(data, record.start + 4)
 			shapeType = record.instance
 		} else if (record.type === RT_OPT || record.type === RT_SECONDARY_OPT || record.type === RT_TERTIARY_OPT) {
 			readProperties(data, record, properties)
@@ -233,8 +222,8 @@ export function readBlipStore(data: Uint8Array, start: number, end: number, dela
 
 	for (const record of records(data, start, end)) {
 		if (record.type === RT_FBSE && record.end - record.start >= 36) {
-			const size = u32(data, record.start + 20)
-			const foDelay = u32(data, record.start + 28)
+			const size = le32(data, record.start + 20)
+			const foDelay = le32(data, record.start + 28)
 			const cbName = data[record.start + 33] ?? 0
 			const embeddedAt = record.start + 36 + cbName
 			let blip: ArtRecord | undefined
@@ -343,11 +332,11 @@ function metafileOf(data: Uint8Array, record: ArtRecord, uids: number): Metafile
 
 	if (header + 34 > record.end) return undefined
 
-	const cbSave = u32(data, header + 28)
+	const cbSave = le32(data, header + 28)
 
 	return {
 		header,
-		cbSize: u32(data, header),
+		cbSize: le32(data, header),
 		bodyStart: header + 34,
 		bodyEnd: Math.min(record.end, header + 34 + cbSave),
 		compressed: (data[header + 32] ?? 0) === 0
@@ -436,13 +425,13 @@ export function blipFile(data: Uint8Array, record: ArtRecord): Blip | undefined 
 // A WMF BLIP is stored without its placeable header ([MS-WMF] §2.3.2.3); rcBounds (logical units) and ptSize
 // (EMUs) give it back, so the picture keeps its size wherever it is read.
 function withPlaceableHeader(wmf: Uint8Array, data: Uint8Array, header: number): Uint8Array {
-	if (u32(wmf, 0) === 0x9ac6cdd7) return wmf
+	if (le32(wmf, 0) === 0x9ac6cdd7) return wmf
 
-	const left = i32(data, header + 4)
-	const top = i32(data, header + 8)
-	const right = i32(data, header + 12)
-	const bottom = i32(data, header + 16)
-	const widthEmu = i32(data, header + 20)
+	const left = les32(data, header + 4)
+	const top = les32(data, header + 8)
+	const right = les32(data, header + 12)
+	const bottom = les32(data, header + 16)
+	const widthEmu = les32(data, header + 20)
 	const width = right - left
 
 	if (
@@ -478,10 +467,10 @@ function withPlaceableHeader(wmf: Uint8Array, data: Uint8Array, header: number):
 
 // A packed DIB with a BITMAPFILEHEADER in front.
 function dibToBmp(dib: Uint8Array): Uint8Array {
-	const headerSize = u32(dib, 0)
-	const bitCount = u16(dib, 14)
-	const compression = u32(dib, 16)
-	let colors = headerSize >= 36 ? u32(dib, 32) : 0
+	const headerSize = le32(dib, 0)
+	const bitCount = le16(dib, 14)
+	const compression = le32(dib, 16)
+	let colors = headerSize >= 36 ? le32(dib, 32) : 0
 
 	if (colors === 0 && bitCount <= 8) colors = 1 << bitCount
 
@@ -558,7 +547,7 @@ export function complexText(property: ArtProperty | undefined): string | undefin
 	let out = ""
 
 	for (let at = 0; at + 1 < bytes.length; at += 2) {
-		const unit = u16(bytes, at)
+		const unit = le16(bytes, at)
 
 		if (unit === 0) break
 

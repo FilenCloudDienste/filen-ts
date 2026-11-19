@@ -1,4 +1,5 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
+import { MAX_ARRAY_CELLS } from "../../refs/formulaRefs"
 import { sortOrder, type SortValue } from "../../sort/order"
 import { Lambda, LambdaFunctions } from "./lambda"
 import { sortValue } from "./shape"
@@ -6,6 +7,7 @@ import {
 	calcError,
 	rawNumber,
 	unmodeledError,
+	unwrap,
 	valueError,
 	type PluginAst,
 	type PluginCall,
@@ -23,9 +25,6 @@ import {
 // Arguments evaluated here, as arrays (filter_array is often a comparison of a range: B2:B9="x").
 const LAZY = { vectorizationForbidden: true, enableArrayArithmeticForArguments: true } as const
 const ANY = { argumentType: FunctionArgumentType.ANY } as const
-
-// The most cells a result may hold, as the array functions are bounded (refs/formulaRefs.ts).
-const MAX_CELLS = 200_000
 
 // Named functions that take the set a value is relative to as a second value.
 const PAIRED: ReadonlySet<string> = new Set(["PERCENTOF"])
@@ -88,14 +87,6 @@ function groupKey(value: PluginScalar): string {
 	if (value instanceof CellError) return `x${value.type}${value.message ?? ""}`
 
 	return `n${String(rawNumber(value) ?? 0)}`
-}
-
-function unwrap(ast: PluginAst): PluginAst {
-	let node = ast
-
-	while (node.type === ("PARENTHESES" as PluginAst["type"]) && "expression" in node) node = node.expression
-
-	return node
 }
 
 function omitted(ast: PluginAst | undefined): boolean {
@@ -510,7 +501,7 @@ export class GroupFunctions extends LambdaFunctions {
 		const outRows = headerRows + rowEntries.length * down.length
 		const outCols = labels + colEntries.length * across.length
 
-		if (outRows * outCols > MAX_CELLS) return unmodeledError()
+		if (outRows * outCols > MAX_ARRAY_CELLS) return unmodeledError()
 
 		const header = (fields: readonly (readonly PluginScalar[])[], column: number, generated: string): PluginScalar =>
 			generate ? `${generated} ${String(column + 1)}` : (fields[0]?.[column] ?? EmptyValue)

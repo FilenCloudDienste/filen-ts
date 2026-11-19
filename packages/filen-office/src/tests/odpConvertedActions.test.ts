@@ -3,6 +3,8 @@ import { bytesSource, memorySink, ZipArchive } from "@filen/office/core/opc"
 import { convertPresentation } from "../core/convert/presentation/index"
 import { openPptx } from "../core/pptx/package"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
+import { openOdpDeck, shapeNamed, slideAt } from "./odpWriteFixtures"
+import { png } from "./presentationObjectsFixtures"
 
 // A shape converted to ODP keeps its outline, fill and text whatever its click action: "last slide viewed" is ODF's
 // last-visited-page, and an action ODF has no form for (a custom show) is left off alone and reported.
@@ -44,7 +46,7 @@ async function toOdp(bytes: Uint8Array) {
 
 	if (entry === undefined) throw new Error("no content.xml")
 
-	return { losses: converted.losses, content: new TextDecoder().decode(await out.read(entry)) }
+	return { losses: converted.losses, content: new TextDecoder().decode(await out.read(entry)), bytes: sink.bytes() }
 }
 
 describe("a pptx shape with a click action, converted to ODP", () => {
@@ -149,5 +151,58 @@ describe("a pptx action ODF can't hold, converted to ODP", () => {
 		expect(out.content).toContain(" back")
 		expect(out.losses).toContainEqual(expect.objectContaining({ kind: "action", count: 1 }))
 		expect(out.losses.filter(loss => loss.kind === "shape")).toEqual([])
+	})
+})
+
+// A picture and a group converted to ODP keep what every shape shares: hidden, title and description (escaped, a
+// description holding "]]>" too) and a link click action.
+describe("a pptx picture and group converted to ODP", () => {
+	it("keep their visibility, alt text and click action", async () => {
+		const picture =
+			'<p:pic><p:nvPicPr><p:cNvPr id="4" name="Cat" hidden="1" title="Cat title" descr="Ends ]]&gt; &amp; &lt;here&gt;"><a:hlinkClick r:id="rId10"/></p:cNvPr>' +
+			'<p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId9"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+			`<p:spPr>${xfrm(100_000, 100_000, 2_000_000, 1_000_000)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`
+		const group =
+			'<p:grpSp><p:nvGrpSpPr><p:cNvPr id="5" name="Group" hidden="1" title="Group title" descr="Group description"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+			'<p:grpSpPr><a:xfrm><a:off x="0" y="3000000"/><a:ext cx="2000000" cy="1000000"/><a:chOff x="0" y="3000000"/><a:chExt cx="2000000" cy="1000000"/></a:xfrm></p:grpSpPr>' +
+			sp(
+				6,
+				"Member",
+				undefined,
+				`${xfrm(0, 3_000_000, 2_000_000, 1_000_000)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>`,
+				body(para("Member text"))
+			) +
+			"</p:grpSp>"
+		const out = await toOdp(
+			buildPptx({
+				slides: [
+					{
+						shapes: picture + group,
+						rels: [
+							["rId9", "image", "../media/image1.png"],
+							["rId10", "hyperlink", "https://example.com/cat", "External"]
+						]
+					}
+				],
+				parts: { "ppt/media/image1.png": { data: png(), type: "image/png" } }
+			})
+		)
+
+		expect(out.content).toMatch(/<draw:frame draw:name="Cat"[^>]* draw:display="none"/u)
+		expect(out.content).toContain("<svg:title>Cat title</svg:title>")
+		expect(out.content).toContain("<svg:desc>Ends ]]&gt; &amp; &lt;here&gt;</svg:desc>")
+		expect(out.content).toMatch(/<presentation:event-listener [^>]*xlink:href="https:\/\/example\.com\/cat"/u)
+		expect(out.content).toMatch(
+			/<draw:g draw:name="Group"[^>]* draw:display="none"><svg:title>Group title<\/svg:title><svg:desc>Group description<\/svg:desc>/u
+		)
+		expect(out.losses.filter(loss => loss.kind === "action" || loss.kind === "shape")).toEqual([])
+
+		const node = slideAt(await openOdpDeck(out.bytes), 0)
+		const cat = shapeNamed(node, "Cat")
+		const back = shapeNamed(node, "Group")
+
+		expect(cat).toMatchObject({ hidden: true, alt: { title: "Cat title", descr: "Ends ]]> & <here>" } })
+		expect(cat.actions?.click).toMatchObject({ kind: "url", href: "https://example.com/cat" })
+		expect(back).toMatchObject({ hidden: true, alt: { title: "Group title", descr: "Group description" } })
 	})
 })

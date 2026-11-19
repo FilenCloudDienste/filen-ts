@@ -555,6 +555,9 @@ function PdfPageView({
 	const textRef = useRef<HTMLDivElement | null>(null)
 	const layerRef = useRef<PdfTextLayer | null>(null)
 	const proxyRef = useRef<PdfPageProxy<ReadableStream> | null>(null)
+	// The document the page was last read from, for the text layer's struct tree lookups: not a dependency of that
+	// effect, so an editor change that keeps this page's object keeps its text layer.
+	const ownerRef = useRef<PdfDomDocument | null>(null)
 	const linksFor = useRef<PdfPageProxy<ReadableStream> | null>(null)
 	const revealed = useRef(0)
 	// The page as last read, and the document it was read from: a new document's page replaces it once read, and
@@ -563,7 +566,6 @@ function PdfPageView({
 	// The page as last read. An engine may hand out the same page object for a new document (the editor's, after a change
 	// elsewhere): what it painted stays current then.
 	const proxy = loaded?.page ?? null
-	const owner = loaded?.document ?? null
 	// The page's structure tree is in its canvas: the canvas is then read, not hidden.
 	const [structured, setStructured] = useState(false)
 	// Read from the document shown (a page of the previous one only sizes and shows its bitmap until replaced).
@@ -587,6 +589,8 @@ function PdfPageView({
 	// The canvas holds a bitmap at this turn: a zoom keeps it on screen, stretched to the new size, until the sharper
 	// one replaces it. A turn does not (stretched across, it would be distorted).
 	const painted = paintedAt !== null && paintedAt.rotation === rotation
+	// Only the scale went stale: zoom steps may keep coming, so the render waits for them to pause.
+	const zoomed = painted && paintedAt.scale !== scale
 	// The scale and turn a new text layer is laid out at; later changes reach it through update().
 	const layoutRef = useRef({ scale, rotation })
 
@@ -601,6 +605,7 @@ function PdfPageView({
 			resolved => {
 				if (live) {
 					proxyRef.current = resolved
+					ownerRef.current = document
 					setLoaded({ document, page: resolved })
 				}
 			},
@@ -662,6 +667,21 @@ function PdfPageView({
 		}
 	}, [watcher, pageNumber, registerPage])
 
+	// The bitmap is released when the page unmounts (the viewer closes), not left to the collector: WebKit counts a
+	// detached canvas against its canvas budget until it is reclaimed. Its own effect: the watcher's re-runs while
+	// the page stays, which would blank a canvas still recorded as painted. Captured here, as refs are detached by
+	// the time a cleanup runs.
+	useEffect(() => {
+		const canvas = canvasRef.current
+
+		return () => {
+			if (canvas === null) return
+
+			canvas.width = 0
+			canvas.height = 0
+		}
+	}, [])
+
 	useEffect(() => {
 		const canvas = canvasRef.current
 
@@ -709,8 +729,10 @@ function PdfPageView({
 			)
 		}
 
-		// A stale bitmap stays up while zoom steps keep coming; the render starts once they pause.
-		const timer = painted ? setTimeout(start, PDF_ZOOM_RENDER_DELAY_MS) : null
+		// A stale bitmap stays up while zoom steps keep coming; the render starts once they pause. A new page object (an
+		// edit) renders at once: no steps follow it, and a burst of edits (a held arrow key) is paced by the engine's
+		// answers, a render the next one cancels being cheaper than holding every edit back.
+		const timer = zoomed ? setTimeout(start, PDF_ZOOM_RENDER_DELAY_MS) : null
 
 		if (timer === null) start()
 
@@ -726,7 +748,7 @@ function PdfPageView({
 				offscreen.height = 0
 			}
 		}
-	}, [proxy, fresh, nearView, inView, rendered, painted, scale, rotation, maxCanvasBytes, watcher])
+	}, [proxy, fresh, nearView, inView, rendered, painted, zoomed, scale, rotation, maxCanvasBytes, watcher])
 
 	// Before the text layer's effect, which reads it.
 	useEffect(() => {
@@ -740,6 +762,7 @@ function PdfPageView({
 	useEffect(() => {
 		const container = textRef.current
 		const canvas = canvasRef.current
+		const owner = ownerRef.current
 
 		if (proxy === null || owner === null || !nearView || !inView || container === null || canvas === null) return
 
@@ -830,7 +853,7 @@ function PdfPageView({
 					if (!liveTextLayers.has(pdfjs.TextLayer)) pdfjs.TextLayer.cleanup()
 				})
 		}
-	}, [pdfjs, proxy, owner, pageNumber, nearView, inView, sanitizeMathML])
+	}, [pdfjs, proxy, pageNumber, nearView, inView, sanitizeMathML])
 
 	// A zoom or a turn re-lays out the spans in place, once the steps pause as the canvas does (it measures every
 	// span again); meanwhile --total-scale-factor resizes them. The selection and the find highlights stay.

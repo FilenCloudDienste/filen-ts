@@ -119,5 +119,7 @@ describe.skipIf(!existsSync(CORPUS))("drawings over the real-world corpus", () =
 		)
 
 		expect(failures).toEqual([])
+		// Fewer means lost coverage: about 150 corpus documents hold drawings, VML shapes or equations.
+		expect(files.size).toBeGreaterThanOrEqual(140)
 	})
 })

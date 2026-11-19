@@ -22,6 +22,40 @@ export interface PrintSheetRequest {
 	readonly used: SheetRange | null
 	// A chartsheet's chart (print.settings): the sheet prints it on a page of its own instead of cells.
 	readonly chart?: PrintChart
+	// The words the print adds, in the app's language (English without them).
+	readonly labels?: PrintLabels
+}
+
+// The words a print adds to the sheet. Templates: "{cell}" is a cell's reference, "{note}" a note's text, "{name}" a
+// sheet's name.
+export interface PrintLabels {
+	// The notes listed at the end: a note's cell, and its text.
+	readonly cell: string
+	readonly note: string
+	// A tagged PDF's alternative text for a chart or a picture that names none, and for a chartsheet's chart.
+	readonly chart: string
+	readonly picture: string
+	readonly chartSheet: string
+}
+
+export const PRINT_LABELS: PrintLabels = {
+	cell: "Cell: {cell}",
+	note: "Note: {note}",
+	chart: "Chart",
+	picture: "Picture",
+	chartSheet: "Chart: {name}"
+}
+
+// A label's template with its `field` filled in.
+export function labelText(template: string, field: "cell" | "note" | "name", value: string): string {
+	return template.replace(`{${field}}`, () => value)
+}
+
+export interface PrintLayoutOptions {
+	// The family the notes listed at the end are measured and drawn in (default: the workbook's own, its base style's).
+	readonly family?: string
+	// Told the family and the texts of the notes list before they are measured (a measurer that loads faces first).
+	readonly prepare?: (family: string, texts: readonly string[]) => Promise<void>
 }
 
 // A chartsheet's chart part and its size (EMU).
@@ -31,9 +65,11 @@ export interface PrintChart {
 	readonly height: number
 }
 
-// A page listing notes: each note's cell and its text, in lines as they fit the page.
+// A page listing notes: each note's cell and its text, in lines as they fit the page, in the family they were
+// measured in (listFamilies).
 export interface NotesPage {
 	readonly lines: readonly { readonly text: string; readonly bold: boolean }[]
+	readonly family: string
 }
 
 export interface PrintJobSheet extends PrintedSheet {
@@ -43,6 +79,7 @@ export interface PrintJobSheet extends PrintedSheet {
 	readonly objects: readonly SheetDrawingObject[]
 	readonly headerImages: readonly SheetHeaderImage[]
 	readonly chart: PrintChart | null
+	readonly labels: PrintLabels
 }
 
 export interface PrintJob {
@@ -83,6 +120,26 @@ export const NOTE_LINE_PX = 15
 export const LIST_FONT_PT = 10
 export const LIST_LINE_PT = 14
 
+// The notes list's families as CSS names them: the sheet's own, then the faces that stand in for Calibri.
+export function listFamilies(family: string): string {
+	return `"${family.replace(/["\\]/g, "")}", Calibri, Carlito, Arial, sans-serif`
+}
+
+// The notes list's font in px (a PDF canvas reads px only; 10 pt is 4/3 as many px).
+export function listFont(family: string): string {
+	return `${String((LIST_FONT_PT * 4) / 3)}px ${listFamilies(family)}`
+}
+
+// A note as the list prints it: its cell's line, and its text (the author's name before it unless it starts with it).
+function noteLines(note: SheetPrintNote, labels: PrintLabels): { readonly cell: string; readonly text: string } {
+	const body = note.author === "" || note.text.startsWith(note.author) ? note.text : `${note.author}: ${note.text}`
+
+	return {
+		cell: labelText(labels.cell, "cell", `${columnName(note.col)}${String(note.row + 1)}`),
+		text: labelText(labels.note, "note", body)
+	}
+}
+
 // `text` broken into lines `width` wide at spaces (a long word between characters); line breaks kept.
 export function wrap(text: string, width: number, measure: (text: string) => number): string[] {
 	const out: string[] = []
@@ -118,29 +175,36 @@ export function wrap(text: string, width: number, measure: (text: string) => num
 	return out
 }
 
-// The notes listed after a sheet, as Excel prints them: a "Cell:" line and a "Note:" line each, a blank line between.
-function notesPages(notes: readonly SheetPrintNote[], printed: PrintedSheet, measure: (font: string, text: string) => number): NotesPage[] {
+// The notes listed after a sheet, as Excel prints them: a "Cell:" line and a "Note:" line each, a blank line between;
+// measured in the font they are drawn in (listFont).
+function notesPages(
+	notes: readonly SheetPrintNote[],
+	printed: PrintedSheet,
+	measure: (font: string, text: string) => number,
+	family: string,
+	labels: PrintLabels
+): NotesPage[] {
 	if (notes.length === 0) return []
 
 	const { area } = printed.pagination
-	const font = `${String(LIST_FONT_PT)}pt Calibri, Carlito, Arial, sans-serif`
+	const font = listFont(family)
 	const perPage = Math.max(1, Math.floor(area.height / LIST_LINE_PT))
 	const lines: { text: string; bold: boolean }[] = []
 
 	for (const note of notes) {
 		if (lines.length > 0) lines.push({ text: "", bold: false })
 
-		lines.push({ text: `Cell: ${columnName(note.col)}${String(note.row + 1)}`, bold: true })
+		const { cell, text } = noteLines(note, labels)
 
-		const body = note.author === "" || note.text.startsWith(note.author) ? note.text : `${note.author}: ${note.text}`
+		lines.push({ text: cell, bold: true })
 
 		// Measured in px: the list's points are 4/3 as many px.
-		for (const text of wrap(`Note: ${body}`, (area.width * 4) / 3, piece => measure(font, piece))) lines.push({ text, bold: false })
+		for (const line of wrap(text, (area.width * 4) / 3, piece => measure(font, piece))) lines.push({ text: line, bold: false })
 	}
 
 	const pages: NotesPage[] = []
 
-	for (let k = 0; k < lines.length; k += perPage) pages.push({ lines: lines.slice(k, k + perPage) })
+	for (let k = 0; k < lines.length; k += perPage) pages.push({ lines: lines.slice(k, k + perPage), family })
 
 	return pages
 }
@@ -162,9 +226,11 @@ export async function layOutPrint(
 	model: SheetGridModel,
 	sheets: readonly PrintSheetRequest[],
 	measure: (font: string, text: string) => number = (_font, text) => text.length * 7,
-	maxPages?: number
+	maxPages?: number,
+	options: PrintLayoutOptions = {}
 ): Promise<PrintJob> {
 	const out: PrintJobSheet[] = []
+	const family = options.family ?? familyOf(model.style(0).font)
 	let left = maxPages ?? Number.POSITIVE_INFINITY
 	let more = false
 	const xlsx = model.kind !== "csv" && model.kind !== "tsv" && model.kind !== "tab"
@@ -196,7 +262,8 @@ export async function layOutPrint(
 				shownNotes: [],
 				objects: [],
 				headerImages: [],
-				chart: request.chart
+				chart: request.chart,
+				labels: request.labels ?? PRINT_LABELS
 			})
 
 			continue
@@ -229,13 +296,22 @@ export async function layOutPrint(
 		if (objects.length > 0 || headerImages.length > 0)
 			media ??= new DocxMediaCache({ media: partName => model.session.query("drawing.media", { partName }) })
 
+		const labels = request.labels ?? PRINT_LABELS
+
+		if (notesAtEnd.length > 0 && options.prepare !== undefined)
+			await options.prepare(
+				family,
+				notesAtEnd.flatMap(note => Object.values(noteLines(note, labels)))
+			)
+
 		out.push({
 			...printed,
-			notesAtEnd: notesPages(notesAtEnd, printed, measure),
+			notesAtEnd: notesPages(notesAtEnd, printed, measure, family, labels),
 			shownNotes,
 			objects,
 			headerImages,
-			chart: null
+			chart: null,
+			labels
 		})
 	}
 
@@ -253,6 +329,11 @@ export async function layOutPrint(
 			drawn.clear()
 		}
 	}
+}
+
+// A family the workbook names, else Calibri (Excel's default).
+function familyOf(name: string | undefined): string {
+	return name === undefined || name === "" ? "Calibri" : name
 }
 
 function sheetPages(sheet: PrintJobSheet): number {

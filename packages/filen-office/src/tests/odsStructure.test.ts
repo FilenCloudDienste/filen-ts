@@ -375,6 +375,57 @@ describe("ODS views, protection and print areas", () => {
 		session.close()
 	})
 
+	for (const [label, settings] of [
+		["an empty office:settings", ""],
+		[
+			"only ooo:configuration-settings",
+			'<config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="ShowGrid" config:type="boolean">true</config:config-item></config:config-item-set>'
+		]
+	] as const) {
+		it(`adds the view to a settings.xml with ${label} once a view is kept`, async () => {
+			const { session, sheets } = await open({ body: table("S", "", GRID), settings })
+
+			await run(session, { type: "view.freeze", sheet: sheets[0] ?? 0, rows: 1, cols: 0 })
+
+			const written = await saved(session)
+			const text = strFromU8(unzipSync(written)["settings.xml"] ?? new Uint8Array(0))
+
+			expect(text).toContain('xmlns:ooo="http://openoffice.org/2004/office"')
+			expect(text).toContain('<config:config-item-set config:name="ooo:view-settings">')
+
+			if (settings !== "") expect(text).toContain(settings)
+
+			expect((await readBack(written)).document.model(0)?.view.frozen?.rows).toBe(1)
+			session.close()
+		})
+
+		it(`keeps a freeze with a sheet renamed in the same save, in a settings.xml with ${label}`, async () => {
+			const { session, sheets } = await open({ body: table("S", "", GRID), settings })
+			const sheet = sheets[0] ?? 0
+
+			await run(session, { type: "view.freeze", sheet, rows: 1, cols: 1 })
+			await run(session, { type: "sheet.rename", sheet, name: "Renamed" })
+
+			const back = await readBack(await saved(session))
+
+			expect(back.names).toEqual(["Renamed"])
+			expect(back.document.model(0)?.view.frozen).toEqual({ rows: 1, cols: 1, topLeftRow: 1, topLeftCol: 1 })
+			session.close()
+		})
+
+		it(`leaves a settings.xml with ${label} as it was when no view changes`, async () => {
+			const bytes = odsBytes({ body: table("S", "", GRID), settings })
+			const { session, sheets } = await open({ body: table("S", "", GRID), settings })
+
+			await run(session, set(sheets[0] ?? 0, 0, 0, "changed"))
+
+			const written = await saved(session)
+
+			expect(unzipSync(written)["settings.xml"]).toEqual(unzipSync(bytes)["settings.xml"])
+			session.close()
+		})
+	}
+
 	it("protects a sheet and the workbook without a password, and refuses Excel's salted hash", async () => {
 		const { session, sheets } = await open({ body: table("S", "", GRID) })
 		const sheet = sheets[0] ?? 0

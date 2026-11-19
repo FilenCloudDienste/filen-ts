@@ -2,6 +2,7 @@ import { symbolTable, symbolText } from "../fonts/symbols"
 import { resolveParagraph, resolveRun, type ResolvedShape, resolveShape } from "./inherit"
 import type { Deck, ListStyle, Paragraph, ParaProps, ShapeNode, ShapeRef, SlideNode, SlideRef, TextBody, ThemeRef, Xfrm } from "./model"
 import type { NotesParagraph, NotesRun } from "./output"
+import { DEFAULT_CLR_MAP } from "./theme"
 import { AutonumberCounters, autonumberText } from "./text/autonum"
 
 // A slide's speaker notes: the body placeholder of its notes slide (ECMA-376 Part 1 §19.3.1.26), which inherits from
@@ -12,9 +13,9 @@ import { AutonumberCounters, autonumberText } from "./text/autonum"
 // 12 pt minor-font text indented 0.5 in per level.
 
 // PowerPoint's default notes page (EMU) and its placeholders' boxes on it.
-const PAGE = { cx: 6_858_000, cy: 9_144_000 }
+export const DEFAULT_NOTES_PAGE = { cx: 6_858_000, cy: 9_144_000 } as const
 const QUARTER = { cx: 2_971_800, cy: 458_788 }
-const MASTER_BOXES = {
+export const DEFAULT_NOTES_BOXES = {
 	hdr: { x: 0, y: 0, ...QUARTER },
 	dt: { x: 3_884_613, y: 0, ...QUARTER },
 	sldImg: { x: 1_143_000, y: 685_800, cx: 4_572_000, cy: 3_429_000 },
@@ -47,6 +48,11 @@ export function markMadeNotesPart(deck: Deck, part: string): void {
 	}
 
 	held.add(part.replace(/^\//u, "").toLowerCase())
+}
+
+// Whether the session made any notes part for `deck` (a save that finds none has no made part to take out).
+export function hasMadeNotesParts(deck: Deck): boolean {
+	return (MADE_PARTS.get(deck)?.size ?? 0) > 0
 }
 
 export function madeNotesPart(deck: Deck, part: string): boolean {
@@ -199,8 +205,8 @@ export function notesValue(deck: Deck, node: SlideNode): unknown {
 }
 
 function scaled(box: { readonly x: number; readonly y: number; readonly cx: number; readonly cy: number }, size: Deck["notesSize"]): Xfrm {
-	const sx = size.cx > 0 ? size.cx / PAGE.cx : 1
-	const sy = size.cy > 0 ? size.cy / PAGE.cy : 1
+	const sx = size.cx > 0 ? size.cx / DEFAULT_NOTES_PAGE.cx : 1
+	const sy = size.cy > 0 ? size.cy / DEFAULT_NOTES_PAGE.cy : 1
 
 	return {
 		x: Math.round(box.x * sx),
@@ -242,20 +248,7 @@ export function defaultNotesMaster(deck: Deck, ref: SlideRef, part: string, them
 		part,
 		showMasterShapes: true,
 		hidden: false,
-		clrMap: {
-			bg1: "lt1",
-			tx1: "dk1",
-			bg2: "lt2",
-			tx2: "dk2",
-			accent1: "accent1",
-			accent2: "accent2",
-			accent3: "accent3",
-			accent4: "accent4",
-			accent5: "accent5",
-			accent6: "accent6",
-			hlink: "hlink",
-			folHlink: "folHlink"
-		},
+		clrMap: { ...DEFAULT_CLR_MAP },
 		...(theme === undefined ? {} : { theme }),
 		txStyles: { title: EMPTY_LIST, body: notesStyle(), other: EMPTY_LIST },
 		shapes: MASTER_PLACEHOLDERS.map((placeholder, index) => ({
@@ -264,7 +257,7 @@ export function defaultNotesMaster(deck: Deck, ref: SlideRef, part: string, them
 			hidden: false,
 			kind: "sp",
 			ph: { type: placeholder.type, idx: placeholder.idx, ...(placeholder.idx === 0 ? {} : { idxWritten: true }) },
-			xfrm: scaled(MASTER_BOXES[placeholder.type], deck.notesSize)
+			xfrm: scaled(DEFAULT_NOTES_BOXES[placeholder.type], deck.notesSize)
 		})),
 		comments: [],
 		revision: 0
@@ -317,7 +310,7 @@ export function notesBoxes(deck: Deck, master: SlideNode | undefined): { readonl
 	const own = (type: "sldImg" | "body"): Xfrm | undefined => master?.shapes.find(shape => shape.ph?.type === type)?.xfrm
 
 	return {
-		image: own("sldImg") ?? scaled(MASTER_BOXES.sldImg, deck.notesSize),
-		body: own("body") ?? scaled(MASTER_BOXES.body, deck.notesSize)
+		image: own("sldImg") ?? scaled(DEFAULT_NOTES_BOXES.sldImg, deck.notesSize),
+		body: own("body") ?? scaled(DEFAULT_NOTES_BOXES.body, deck.notesSize)
 	}
 }

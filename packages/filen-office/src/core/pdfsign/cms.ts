@@ -1,6 +1,19 @@
 import * as asn1js from "asn1js"
 import { Certificate, ContentInfo, IssuerAndSerialNumber, RSAPublicKey, RSASSAPSSParams, SignedData, TSTInfo, type SignerInfo } from "pkijs"
-import { RSA_ENCRYPTION_OID as RSA_KEY, RSA_PSS_OID as RSA_PSS, webCryptoSpki } from "./keyInfo"
+import {
+	CURVE_BY_OID,
+	DIGEST_ALGORITHMS,
+	EC_PUBLIC_KEY_OID,
+	ED25519_OID,
+	MGF1_OID,
+	MIN_RSA_BITS,
+	ownedBytes,
+	RSA_ENCRYPTION_OID,
+	RSA_PSS_OID,
+	rsaModulusBits,
+	TIMESTAMP_TOKEN_OID
+} from "./algorithms"
+import { webCryptoSpki } from "./keyInfo"
 import { digestBytes, equalBytes, type PdfDigestFactory } from "./source"
 import type { PdfDigestName, PdfSignatureInvalidReason } from "./types"
 
@@ -41,45 +54,32 @@ export const OID = {
 	contentType: "1.2.840.113549.1.9.3",
 	messageDigest: "1.2.840.113549.1.9.4",
 	signingTime: "1.2.840.113549.1.9.5",
-	timeStampToken: "1.2.840.113549.1.9.16.2.14",
+	timeStampToken: TIMESTAMP_TOKEN_OID,
 	subjectKeyIdentifier: "2.5.29.14"
 } as const
 
+const DIGEST_LIST = Object.values(DIGEST_ALGORITHMS)
+
+// The digests signing uses, and the weak ones verification still recognises (SHA-1, MD5) to call them weak.
 const DIGESTS = new Map<string, PdfDigestName | "weak">([
-	["2.16.840.1.101.3.4.2.1", "SHA-256"],
-	["2.16.840.1.101.3.4.2.2", "SHA-384"],
-	["2.16.840.1.101.3.4.2.3", "SHA-512"],
+	...DIGEST_LIST.map(digest => [digest.oid, digest.name] as const),
 	["1.3.14.3.2.26", "weak"],
 	["1.2.840.113549.2.5", "weak"]
 ])
 
+// Null: the key's own identifier, the digest stated apart.
 const RSA_SIGNATURES = new Map<string, PdfDigestName | "weak" | null>([
-	["1.2.840.113549.1.1.1", null],
-	["1.2.840.113549.1.1.11", "SHA-256"],
-	["1.2.840.113549.1.1.12", "SHA-384"],
-	["1.2.840.113549.1.1.13", "SHA-512"],
+	[RSA_ENCRYPTION_OID, null],
+	...DIGEST_LIST.map(digest => [digest.rsaOid, digest.name] as const),
 	["1.2.840.113549.1.1.5", "weak"],
 	["1.2.840.113549.1.1.4", "weak"]
 ])
 
 const ECDSA_SIGNATURES = new Map<string, PdfDigestName | "weak" | null>([
-	["1.2.840.10045.2.1", null],
-	["1.2.840.10045.4.3.2", "SHA-256"],
-	["1.2.840.10045.4.3.3", "SHA-384"],
-	["1.2.840.10045.4.3.4", "SHA-512"],
+	[EC_PUBLIC_KEY_OID, null],
+	...DIGEST_LIST.map(digest => [digest.ecdsaOid, digest.name] as const),
 	["1.2.840.10045.4.1", "weak"]
 ])
-
-const CURVES = new Map<string, { readonly name: string; readonly size: number }>([
-	["1.2.840.10045.3.1.7", { name: "P-256", size: 32 }],
-	["1.3.132.0.34", { name: "P-384", size: 48 }],
-	["1.3.132.0.35", { name: "P-521", size: 66 }]
-])
-
-const EC_KEY = "1.2.840.10045.2.1"
-const ED25519 = "1.3.101.112"
-const MGF1 = "1.2.840.113549.1.1.8"
-const MIN_RSA_BITS = 2048
 
 export interface ParsedCms {
 	readonly signedData: SignedData
@@ -100,10 +100,6 @@ export type CmsFailure =
 export type CmsParseResult = { readonly ok: true; readonly cms: ParsedCms } | CmsFailure
 
 const invalid = (reason: PdfSignatureInvalidReason): CmsFailure => ({ ok: false, state: "invalid", reason })
-
-function bytesOf(view: Uint8Array): Uint8Array<ArrayBuffer> {
-	return new Uint8Array(view)
-}
 
 function octets(value: asn1js.OctetString): Uint8Array {
 	if (!value.valueBlock.isConstructed) return value.valueBlock.valueHexView
@@ -127,7 +123,7 @@ export function parseCms(der: Uint8Array): CmsParseResult {
 	let signedData: SignedData
 
 	try {
-		const info = ContentInfo.fromBER(bytesOf(der))
+		const info = ContentInfo.fromBER(ownedBytes(der))
 
 		if (info.contentType !== OID.signedData) return invalid("malformedSignature")
 
@@ -260,7 +256,7 @@ export async function verifyCms(cms: ParsedCms, expected: Uint8Array, deps: PdfC
 
 	signedAttrs[0] = 0x31
 
-	let signature: Uint8Array<ArrayBuffer> = bytesOf(signer.signature.valueBlock.valueHexView)
+	let signature: Uint8Array<ArrayBuffer> = ownedBytes(signer.signature.valueBlock.valueHexView)
 
 	if (resolved.ecSize !== null) {
 		const raw = ecdsaRaw(signature, resolved.ecSize)
@@ -273,7 +269,7 @@ export async function verifyCms(cms: ParsedCms, expected: Uint8Array, deps: PdfC
 	let key: unknown
 
 	try {
-		key = await deps.subtle.importKey("spki", bytesOf(webCryptoSpki(certificate)), resolved.importParams, false, ["verify"])
+		key = await deps.subtle.importKey("spki", ownedBytes(webCryptoSpki(certificate)), resolved.importParams, false, ["verify"])
 	} catch {
 		return { ok: false, state: "unverifiable" }
 	}
@@ -295,13 +291,13 @@ function resolveAlgorithm(signer: SignerInfo, certificate: Certificate, digest: 
 	const keyId = keyInfo.algorithm.algorithmId
 
 	// A key restricted to RSA-PSS signs only with RSA-PSS.
-	if (keyId === RSA_KEY || (keyId === RSA_PSS && signatureId === RSA_PSS)) {
+	if (keyId === RSA_ENCRYPTION_OID || (keyId === RSA_PSS_OID && signatureId === RSA_PSS_OID)) {
 		const bits = rsaBits(keyInfo.subjectPublicKey.valueBlock.valueHexView)
 
 		if (bits === null) return invalid("malformedSignature")
 		if (bits < MIN_RSA_BITS) return invalid("weakKey")
 
-		if (signatureId === RSA_PSS) return resolvePss(signer, bits)
+		if (signatureId === RSA_PSS_OID) return resolvePss(signer, bits)
 
 		const hash = RSA_SIGNATURES.get(signatureId)
 
@@ -316,9 +312,9 @@ function resolveAlgorithm(signer: SignerInfo, certificate: Certificate, digest: 
 		}
 	}
 
-	if (keyId === EC_KEY) {
+	if (keyId === EC_PUBLIC_KEY_OID) {
 		const curveParam: unknown = keyInfo.algorithm.algorithmParams
-		const curve = curveParam instanceof asn1js.ObjectIdentifier ? CURVES.get(curveParam.valueBlock.toString()) : undefined
+		const curve = curveParam instanceof asn1js.ObjectIdentifier ? CURVE_BY_OID.get(curveParam.valueBlock.toString()) : undefined
 		const hash = ECDSA_SIGNATURES.get(signatureId)
 
 		if (hash === "weak") return invalid("weakDigest")
@@ -333,7 +329,7 @@ function resolveAlgorithm(signer: SignerInfo, certificate: Certificate, digest: 
 		}
 	}
 
-	if (keyId === ED25519 && (signatureId === ED25519 || signatureId === RSA_KEY)) {
+	if (keyId === ED25519_OID && (signatureId === ED25519_OID || signatureId === RSA_ENCRYPTION_OID)) {
 		return { importParams: { name: "Ed25519" }, verifyParams: { name: "Ed25519" }, label: "Ed25519", ecSize: null }
 	}
 
@@ -354,7 +350,7 @@ function resolvePss(signer: SignerInfo, bits: number): ResolvedAlgorithm | CmsFa
 	if (hash === "weak") return invalid("weakDigest")
 	if (hash === undefined || params.trailerField !== 1) return { ok: false, state: "unverifiable" }
 
-	if (params.maskGenAlgorithm.algorithmId !== MGF1) return { ok: false, state: "unverifiable" }
+	if (params.maskGenAlgorithm.algorithmId !== MGF1_OID) return { ok: false, state: "unverifiable" }
 
 	let mgfHash: string
 
@@ -390,23 +386,17 @@ function rsaBits(der: Uint8Array): number | null {
 	let modulus: Uint8Array
 
 	try {
-		modulus = RSAPublicKey.fromBER(bytesOf(der)).modulus.valueBlock.valueHexView
+		modulus = RSAPublicKey.fromBER(ownedBytes(der)).modulus.valueBlock.valueHexView
 	} catch {
 		return null
 	}
 
-	let at = 0
-
-	while (at < modulus.length && modulus[at] === 0) at++
-
-	const top = modulus[at]
-
-	return top === undefined ? 0 : (modulus.length - at - 1) * 8 + (32 - Math.clz32(top))
+	return rsaModulusBits(modulus)
 }
 
 // ECDSA-Sig-Value (DER SEQUENCE of r and s) as WebCrypto's fixed-size r || s.
 function ecdsaRaw(der: Uint8Array, size: number): Uint8Array<ArrayBuffer> | null {
-	const parsed = asn1js.fromBER(bytesOf(der))
+	const parsed = asn1js.fromBER(ownedBytes(der))
 
 	if (parsed.offset !== der.length || !(parsed.result instanceof asn1js.Sequence)) return null
 
@@ -448,7 +438,7 @@ export function parseTimestampToken(der: Uint8Array): TimestampToken | CmsFailur
 	let info: TSTInfo
 
 	try {
-		info = TSTInfo.fromBER(bytesOf(parsed.cms.content))
+		info = TSTInfo.fromBER(ownedBytes(parsed.cms.content))
 	} catch {
 		return invalid("malformedSignature")
 	}

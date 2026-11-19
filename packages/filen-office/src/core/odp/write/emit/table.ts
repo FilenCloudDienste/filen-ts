@@ -7,13 +7,12 @@ import {
 	type SlideNode,
 	type TableCell,
 	type TableCellProps,
-	type TableModel,
-	type Xfrm
+	type TableModel
 } from "../../../presentation/model"
-import { decodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
+import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
 import { OdpStyles, alphaOf, cm, declared, hexColor, setProperty, styleChanges, type StyleChanges } from "../styles"
-import { IDENTITY, OdpShapeWriter, familyFragment, markupOf } from "./shape"
+import { IDENTITY, OdpShapeWriter, boxMarkup, familyFragment, markupOf, newElementCommon } from "./shape"
 import { emitOdpText } from "./text"
 import { isRefused } from "../../../presentation/refusal"
 
@@ -127,7 +126,6 @@ function cellChanges(props: TableCellProps | undefined): StyleChanges | Refused 
 }
 
 interface Source {
-	readonly writer: OdpShapeWriter
 	// The source cell's own style name by its node (a style the source names stays the parent of the written one).
 	styleOf(cell: TableCell): string | undefined
 	attributes(): ReadonlyMap<string, string>
@@ -229,31 +227,6 @@ export function odpTableXml(
 	return `${out}</table:table>`
 }
 
-// A new frame's box: svg:x/y/width/height, a turned one placed by draw:transform about its corner (as the shape
-// family writes a box; the reader's angle turns counter-clockwise, DrawingML's rot clockwise).
-export function frameBox(xfrm: Xfrm): string {
-	const size = ` svg:width="${cm(xfrm.cx)}" svg:height="${cm(xfrm.cy)}"`
-
-	if (xfrm.rot === 0) return ` svg:x="${cm(xfrm.x)}" svg:y="${cm(xfrm.y)}"${size}`
-
-	const a = -((xfrm.rot / 60_000) * Math.PI) / 180
-	const cos = Math.cos(a)
-	const sin = Math.sin(a)
-	const halfW = xfrm.cx / 2
-	const halfH = xfrm.cy / 2
-	const tx = xfrm.x + halfW - (cos * halfW + sin * halfH)
-	const ty = xfrm.y + halfH - (-sin * halfW + cos * halfH)
-
-	return `${size} draw:transform="rotate (${a.toFixed(12)}) translate (${cm(tx)} ${cm(ty)})"`
-}
-
-export function altMarkup(shape: ShapeNode): string {
-	return (
-		(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
-		(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
-	)
-}
-
 export const emitOdpTable: OdpEmitFamily = {
 	emit(request, context): EmitResult {
 		const shape = request.shape
@@ -275,9 +248,14 @@ export const emitOdpTable: OdpEmitFamily = {
 
 			if (isRefused(markup)) return markup
 
-			const name = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
+			const common = newElementCommon(shape, styles)
 
-			return { kind: "markup", pieces: [`<draw:frame${name}${frameBox(shape.xfrm)}>${markup}${altMarkup(shape)}</draw:frame>`] }
+			if (isRefused(common.listeners)) return common.listeners
+
+			return {
+				kind: "markup",
+				pieces: [`<draw:frame${common.attributes}${boxMarkup(shape.xfrm)}>${markup}${common.listeners}${common.alt}</draw:frame>`]
+			}
 		}
 
 		const document = fragment.document
@@ -287,7 +265,6 @@ export const emitOdpTable: OdpEmitFamily = {
 			if (fragment.name(child) === "table:table") tableNode = child
 
 		const source: Source = {
-			writer,
 			styleOf: cell => {
 				const src = cell.src
 

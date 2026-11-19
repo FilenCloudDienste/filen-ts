@@ -475,6 +475,13 @@ export function PageRail({
 
 		if (held === undefined || held.pointerId !== event.pointerId || onMove === undefined) return
 
+		// A press whose release never reached the rail (outside it, or onto a menu) is over: a hover is not a drag.
+		if ((event.buttons & 1) === 0) {
+			endPress()
+
+			return
+		}
+
 		if (!held.dragging) {
 			if (Math.hypot(event.clientX - held.x, event.clientY - held.y) < DRAG_START) return
 
@@ -715,6 +722,10 @@ export function PageRail({
 			onPointerMove={onPointerMove}
 			onPointerUp={onPointerUp}
 			onPointerCancel={endPress}
+			onContextMenu={() => {
+				// A context-menu press (Ctrl+click on macOS) releases on the menu; it never arms a drag.
+				if (press.current?.dragging === false) press.current = undefined
+			}}
 		>
 			<div
 				className={`${prefix}-content`}

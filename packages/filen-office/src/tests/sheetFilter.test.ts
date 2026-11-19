@@ -1,8 +1,17 @@
-import { describe, expect, it } from "vitest"
-import { readAutoFilter, writeAutoFilter, columnMarkup, criteriaMarkup } from "../core/sheet/filter/autoFilter"
+import { describe, expect, it, vi } from "vitest"
+import { readAutoFilter, writeAutoFilter, columnMarkup, criteriaMarkup, parseA1Range } from "../core/sheet/filter/autoFilter"
 import { FilterTest, datePeriod, filterContext, type FilterCell, type SheetFilterCriteria } from "../core/sheet/filter/criteria"
 import { AxisFlag, type SheetCommandResult, type SheetLayout, type SheetOpened } from "../core/sheet/protocol"
 import { SortType } from "../core/sheet/sort/order"
+import { slotValue } from "../core/sheet/cf/host"
+import { dateSerial, isoSerial } from "../core/sheet/numfmt/date"
+import { RenderStyleTable } from "../core/sheet/session"
+import { XlsxDocument } from "../core/xlsx/edit/document"
+import { readCell } from "../core/xlsx/edit/filter"
+import type { SheetStore } from "../core/xlsx/model/store"
+import { bytesSource } from "../core/opc/index"
+import { openXlsx } from "../core/xlsx/read/index"
+import { buildXlsx } from "./oracles/sheet/synthetic"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { IMMEDIATE, savedBytes } from "./sheetSessionFixtures"
 import { buildFixture, parts, type Fixture } from "./xlsxWriteFixtures"
@@ -121,7 +130,56 @@ describe("filter criteria", () => {
 	})
 })
 
+describe('a t="d" cell\'s ISO 8601 text', () => {
+	it("reads as a serial: a date, its time, seconds with their fraction, in either date system", () => {
+		expect(isoSerial("2024-01-02", false)).toBe(dateSerial(2024, 1, 2, false))
+		expect(isoSerial("2024-01-02T06:00", false)).toBe(dateSerial(2024, 1, 2, false) + 0.25)
+		expect(isoSerial("2024-01-02T12:00:00.5", false)).toBe(dateSerial(2024, 1, 2, false) + 43_200.5 / 86_400)
+		expect(isoSerial("1904-01-02", true)).toBe(1)
+		expect(isoSerial("1900-01-01", false)).toBe(1)
+		expect(isoSerial("noon", false)).toBeNaN()
+	})
+
+	it("has one serial for filters, conditional formats and the cell view", async () => {
+		const opened = await openXlsx(
+			bytesSource(
+				buildXlsx({
+					sheets: [
+						{ name: "One", body: '<sheetData><row r="1"><c r="A1" t="d"><v>2024-01-02T12:00:00.5</v></c></row></sheetData>' }
+					]
+				})
+			)
+		)
+
+		if (!opened.ok) throw new Error(opened.reason)
+
+		const document = new XlsxDocument(opened.workbook, new RenderStyleTable(), { kind: "xlsx" })
+
+		try {
+			const model = await document.ready(document.worksheets()[0]?.id ?? 0)
+			const slot = (model.store as SheetStore).locate(0, 0)
+			const serial = dateSerial(2024, 1, 2, false) + 43_200.5 / 86_400
+
+			expect(readCell(document, model, 0, 0, slot, false).number).toBe(serial)
+			expect(slotValue(document, model, 0, 0, slot)).toBe(serial)
+			expect(document.engineCell(model, 0, 0).content).toBe(serial)
+		} finally {
+			document.close()
+		}
+	})
+})
+
 describe("autofilter markup", () => {
+	it("reads a range reference: reversed corners put in order, nothing past the grid", () => {
+		expect(parseA1Range("c5:$A$2")).toEqual({ startRow: 1, startCol: 0, endRow: 4, endCol: 2 })
+		expect(parseA1Range("B3")).toEqual({ startRow: 2, startCol: 1, endRow: 2, endCol: 1 })
+		expect(parseA1Range("XFD1048576")).toEqual({ startRow: 1_048_575, startCol: 16_383, endRow: 1_048_575, endCol: 16_383 })
+		expect(parseA1Range("XFE1")).toBeNull()
+		expect(parseA1Range("A1:A1048577")).toBeNull()
+		expect(parseA1Range("A0")).toBeNull()
+		expect(parseA1Range("A:A")).toBeNull()
+	})
+
 	it("reads every kind of criteria, and keeps what it does not know", () => {
 		const filter = readAutoFilter(
 			'<autoFilter ref="A1:F9" xr:uid="{1}"><filterColumn colId="0"><filters blank="1"><filter val="a"/><dateGroupItem year="2024" month="2" dateTimeGrouping="month"/></filters></filterColumn>' +
@@ -406,6 +464,48 @@ describe("filter commands", () => {
 		}
 	})
 
+	it("stops formatting values once the list is full, still counting every cell's kind", async () => {
+		// Three texts, then numbers, a blank and more numbers: the list holds the first values, the kind is the counts'.
+		const rows = ['<row r="1"><c r="A1" t="inlineStr"><is><t>Id</t></is></c></row>']
+
+		for (let r = 2; r <= 2_001; r++)
+			rows.push(
+				r <= 4
+					? `<row r="${r}"><c r="A${r}" t="inlineStr"><is><t>t${r}</t></is></c></row>`
+					: r === 10
+						? `<row r="${r}"><c r="B${r}"><v>1</v></c></row>`
+						: `<row r="${r}"><c r="A${r}"><v>${r}</v></c></row>`
+			)
+
+		const opened = await open({ sheets: [{ name: "Data", body: `<sheetData>${rows.join("")}</sheetData>` }] })
+		const sheet = opened.info.sheets[0]!.id
+
+		ok(
+			await opened.session.command({
+				type: "filter.toggle",
+				sheet,
+				range: { startRow: 0, startCol: 0, endRow: 2_000, endCol: 1 },
+				active: { row: 0, col: 0 }
+			})
+		)
+
+		const views = vi.spyOn(XlsxDocument.prototype, "cellView")
+
+		try {
+			const values = await opened.session.query("filter.values", { sheet, row: 0, col: 0, limit: 4 })
+
+			expect(values?.items.map(item => item.text)).toEqual(["5", "t2", "t3", "t4"])
+			expect(values?.more).toBe(true)
+			expect(values?.blank).toEqual({ checked: true })
+			expect(values?.kind).toBe("number")
+			// The header and the cells up to the first one past the limit.
+			expect(views.mock.calls.length).toBeLessThan(10)
+		} finally {
+			views.mockRestore()
+			opened.session.close()
+		}
+	})
+
 	it("lists a column's values once each in sort order, by the rows other columns let through", async () => {
 		const opened = await open(FRUIT)
 		const sheet = opened.info.sheets[0]!.id
@@ -582,5 +682,38 @@ describe("filter commands", () => {
 			/<filterColumn colId="0"><colorFilter dxfId="\d+"\/><\/filterColumn>/
 		)
 		opened.session.close()
+	})
+
+	it("refuses a colour filter over cells a conditional format may colour, a whole column or a list that does not read", async () => {
+		const refusal = async (sqref: string): Promise<string | null> => {
+			const opened = await open({
+				sheets: [
+					{
+						name: "Data",
+						body:
+							'<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c><c r="B2"><v>2</v></c></row></sheetData>' +
+							'<autoFilter ref="A1:B2"/>' +
+							`<conditionalFormatting sqref="${sqref}"><cfRule type="cellIs" priority="1" operator="greaterThan" dxfId="0"><formula>1</formula></cfRule></conditionalFormatting>`
+					}
+				]
+			})
+			const result = await opened.session.command({
+				type: "filter.column",
+				sheet: opened.info.sheets[0]!.id,
+				row: 0,
+				col: 1,
+				criteria: { kind: "color", cell: true, color: 0xffff00 }
+			})
+
+			opened.session.close()
+
+			return result.ok ? null : `${result.refusal.reason}:${result.refusal.detail ?? ""}`
+		}
+
+		expect(await refusal("B:B")).toBe("filterCriteria:colorFilter")
+		expect(await refusal("B2")).toBe("filterCriteria:colorFilter")
+		expect(await refusal("D1 B:")).toBe("filterCriteria:colorFilter")
+		// Over another column, it does not colour column B.
+		expect(await refusal("A:A")).toBeNull()
 	})
 })

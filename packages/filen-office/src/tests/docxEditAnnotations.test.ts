@@ -702,6 +702,94 @@ describe("comment boxes kept per page", () => {
 	})
 })
 
+describe("change boxes kept per page", () => {
+	it("boxes each change again only when its page or places change, as a fresh read boxes them", async () => {
+		let body = ""
+
+		// Tracked insertions by two authors on the first page.
+		for (let k = 1; k <= 12; k++)
+			body +=
+				`<w:p><w:r><w:t xml:space="preserve">Plain ${String(k)} </w:t></w:r>` +
+				`<w:ins w:id="${String(k)}" w:author="${k % 2 === 0 ? "Ann" : "Bob"}" w:date="2026-01-01T00:00:00Z"><w:r><w:t>added ${String(k)}</w:t></w:r></w:ins></w:p>`
+
+		const { editor } = await open(buildDocx({ body }))
+
+		await settleAll(editor)
+
+		const mounted = allPages(editor)
+		const annotations = new EditAnnotations(editor)
+		const boxed = vi.spyOn(editor.body.geometry, "rangesBoxes")
+		const rects = (data: EditAnnotationData): unknown[] =>
+			data.revisions.map(revision => [
+				revision.id,
+				[...data.rectPages.subarray(revision.firstRect, revision.firstRect + revision.rectCount)],
+				[...data.rectFloats.subarray(revision.firstRect * RECT_FLOATS, (revision.firstRect + revision.rectCount) * RECT_FLOATS)]
+			])
+
+		expect(annotations.read(mounted).revisions.length).toBeGreaterThanOrEqual(12)
+		boxed.mockClear()
+		// Nothing changed: no change is boxed again.
+		annotations.read(mounted)
+		expect(boxed).not.toHaveBeenCalled()
+
+		select(editor, 2)
+		editor.session.dispatch(editor.session.state.tr.insertText("typed "))
+		await settleAll(editor)
+		expect(rects(annotations.read(mounted))).toEqual(rects(new EditAnnotations(editor).read(mounted)))
+		annotations.dispose()
+	})
+})
+
+describe("change boxes kept per page", () => {
+	it("keeps a page's change boxes right when typing on an earlier page moves its places", async () => {
+		let body = '<w:p><w:r><w:t xml:space="preserve">Start</w:t></w:r></w:p>'
+
+		for (let k = 1; k <= 60; k++)
+			body += `<w:p><w:r><w:t xml:space="preserve">Plain ${String(k)} ${"lorem ipsum dolor sit amet ".repeat(10)}</w:t></w:r></w:p>`
+
+		// Two adjacent insertions of four characters by two authors on the last page.
+		body +=
+			'<w:p><w:r><w:t xml:space="preserve">Last </w:t></w:r>' +
+			'<w:ins w:id="1" w:author="Ann" w:date="2026-01-01T00:00:00Z"><w:r><w:t>abcd</w:t></w:r></w:ins>' +
+			'<w:ins w:id="2" w:author="Bob" w:date="2026-01-01T00:00:00Z"><w:r><w:t>efgh</w:t></w:r></w:ins>' +
+			'<w:r><w:t xml:space="preserve"> tail</w:t></w:r></w:p>'
+
+		const { editor } = await open(buildDocx({ body }), undefined)
+
+		await settleAll(editor)
+		expect(editor.pageCount).toBeGreaterThan(2)
+
+		const last = editor.pageCount - 1
+		const mounted = [last]
+		const annotations = new EditAnnotations(editor)
+		const boxed = vi.spyOn(editor.body.geometry, "rangesBoxes")
+		const rects = (data: EditAnnotationData): unknown[] =>
+			data.revisions.map(revision => [
+				revision.id,
+				[...data.rectPages.subarray(revision.firstRect, revision.firstRect + revision.rectCount)],
+				[...data.rectFloats.subarray(revision.firstRect * RECT_FLOATS, (revision.firstRect + revision.rectCount) * RECT_FLOATS)]
+			])
+
+		expect(annotations.read(mounted).revisions.length).toBe(2)
+
+		const list = editor.page(last)
+
+		// Text as long as the first insertion, typed into the first paragraph: the last page is not laid out
+		// again, and the first change now sits where the second one was.
+		editor.session.dispatch(editor.session.state.tr.insertText("wxyz", 2))
+		await settleAll(editor)
+		expect(editor.page(last)).toBe(list)
+		boxed.mockClear()
+
+		const kept = annotations.read(mounted)
+
+		// The page shows what it showed: its boxes are kept.
+		expect(boxed).not.toHaveBeenCalled()
+		expect(rects(kept)).toEqual(rects(new EditAnnotations(editor).read(mounted)))
+		annotations.dispose()
+	})
+})
+
 describe("live annotations performance", () => {
 	it("adds less than a millisecond per keystroke on 300 pages with 200 comments", { timeout: 300_000 }, async () => {
 		const { editor } = await open(new Uint8Array(readFileSync(LARGE)))
@@ -710,14 +798,6 @@ describe("live annotations performance", () => {
 		expect(editor.pageCount).toBeGreaterThanOrEqual(150)
 
 		// 200 comments spread over the document, each on a word.
-		const textblocks: number[] = []
-
-		editor.session.state.doc.descendants((node, pos) => {
-			if (node.isTextblock && node.textContent.length > 12) textblocks.push(pos + 1)
-
-			return !node.isTextblock
-		})
-
 		for (let k = 0; k < 200; k++) {
 			const doc = editor.session.state.doc
 			const blocks: number[] = []

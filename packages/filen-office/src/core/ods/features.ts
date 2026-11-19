@@ -16,7 +16,7 @@ import {
 } from "./formula/toXlsx"
 import type { OdsIssues } from "./issues"
 import type { UnheldCollector } from "./unheld"
-import { capturedText, parseCaptured } from "./read/captured"
+import { capturedText, chargeText, parseCaptured, spaceCount, textBudget, type TextBudget } from "./read/captured"
 import type { OdsContent, OdsTable } from "./read/content"
 import { OdsReadError } from "./read/errors"
 import type { OdsCellLink, OdsCellNote } from "./read/sheet"
@@ -204,7 +204,10 @@ function commentsPart(
 					author = captured.document.textContent(child)
 				}
 			}
-		} catch {
+		} catch (error) {
+			// Text past the limit refuses the workbook, as notes past the budget do; markup that does not read drops the note.
+			if (error instanceof OdsReadError && error.code === "tooLarge") throw error
+
 			issues.add("drawing", sheet, "annotation")
 
 			continue
@@ -377,15 +380,19 @@ function between(type: string, negated: boolean, args: string, shift?: Reference
 	return { type, operator: negated ? "notBetween" : "between", formula1, formula2 }
 }
 
-// `ordered`: the message's text in document order, where it was captured so.
-function messageOf(element: OdfElement | undefined, ordered?: string): { title: string; text: string; display: boolean; kind: string } {
+// `ordered`: the message's text in document order, where it was captured so; else read here, from `budget`.
+function messageOf(
+	element: OdfElement | undefined,
+	budget: TextBudget,
+	ordered?: string
+): { title: string; text: string; display: boolean; kind: string } {
 	if (element === undefined) return { title: "", text: "", display: false, kind: "stop" }
 
 	const text =
 		ordered ??
 		element.children
 			.filter(child => child.name === "text:p")
-			.map(child => paragraphText(child))
+			.map(child => paragraphText(child, budget))
 			.join("\n")
 
 	return {
@@ -396,14 +403,24 @@ function messageOf(element: OdfElement | undefined, ordered?: string): { title: 
 	}
 }
 
-function paragraphText(paragraph: OdfElement): string {
+function paragraphText(paragraph: OdfElement, budget: TextBudget): string {
 	let text = paragraph.text
 
+	chargeText(budget, text.length + 1)
+
 	for (const child of paragraph.children) {
-		if (child.name === "text:s") text += " ".repeat(Math.max(1, Number(child.attributes.get("text:c") ?? "1") || 1))
-		else if (child.name === "text:tab") text += "\t"
-		else if (child.name === "text:line-break") text += "\n"
-		else text += paragraphText(child)
+		if (child.name === "text:s") {
+			const count = spaceCount(child.attributes.get("text:c"))
+
+			chargeText(budget, count)
+			text += " ".repeat(count)
+		} else if (child.name === "text:tab") {
+			chargeText(budget, 1)
+			text += "\t"
+		} else if (child.name === "text:line-break") {
+			chargeText(budget, 1)
+			text += "\n"
+		} else text += paragraphText(child, budget)
 	}
 
 	return text
@@ -433,6 +450,8 @@ function* validationsSection(
 	}
 
 	const out: string[] = []
+	// Messages read here (those not captured in document order) together.
+	const budget = textBudget()
 
 	let step = 0
 
@@ -470,10 +489,12 @@ function* validationsSection(
 		const ordered = messages.get(name)
 		const help = messageOf(
 			validation.children.find(child => child.name === "table:help-message"),
+			budget,
 			ordered?.help
 		)
 		const error = messageOf(
 			validation.children.find(child => child.name === "table:error-message"),
+			budget,
 			ordered?.error
 		)
 
@@ -550,36 +571,67 @@ const FILTER_OPERATORS: Readonly<Record<string, string>> = {
 	">=": "greaterThanOrEqual"
 }
 
-// table:filter (§9.5.2) as filterColumn elements; null where a criterion has no SpreadsheetML form.
+// The criteria of a table:filter (§9.5.2) by field, in the shapes SpreadsheetML can say (its filterColumns are joined
+// by and): one condition; one table:filter-and of conditions, two on the same field an and pair; one table:filter-or
+// whose conditions all name one field. A group of one stands for what it holds. Null for any other nesting.
+function filterCriteria(filter: OdfElement): Map<number, { readonly conditions: OdfElement[]; readonly and: boolean }> | null {
+	const unwrap = (element: OdfElement): OdfElement => {
+		let node = element
+
+		while ((node.name === "table:filter-and" || node.name === "table:filter-or") && node.children.length === 1)
+			node = node.children[0] ?? node
+
+		return node
+	}
+	const fieldOf = (condition: OdfElement): number => Number(condition.attributes.get("table:field-number") ?? "0")
+	const out = new Map<number, { readonly conditions: OdfElement[]; readonly and: boolean }>()
+
+	if (filter.children.length === 0) return out
+	if (filter.children.length > 1) return null
+
+	const root = unwrap(filter.children[0] ?? filter)
+
+	if (root.name === "table:filter-condition") return out.set(fieldOf(root), { conditions: [root], and: false })
+	if (root.name !== "table:filter-and" && root.name !== "table:filter-or") return null
+
+	const and = root.name === "table:filter-and"
+
+	for (const child of root.children) {
+		const condition = unwrap(child)
+
+		if (condition.name !== "table:filter-condition") return null
+
+		const field = fieldOf(condition)
+		const entry = out.get(field)
+
+		if (entry === undefined) out.set(field, { conditions: [condition], and })
+		else entry.conditions.push(condition)
+	}
+
+	return and || out.size === 1 ? out : null
+}
+
+// table:filter (§9.5.2) as filterColumn elements; a column with a criterion of no SpreadsheetML form is reported and
+// left out, and a filter whose nesting has none (or across columns, groups within groups) is reported without any.
 function filterColumns(filter: OdfElement | undefined, table: string, issues: OdsIssues): string {
 	if (filter === undefined) return ""
 
-	const conditions: OdfElement[] = []
-	const collect = (element: OdfElement): void => {
-		for (const child of element.children) {
-			if (child.name === "table:filter-condition") conditions.push(child)
-			else collect(child)
-		}
-	}
+	const byField = filterCriteria(filter)
 
-	collect(filter)
+	if (byField === null) {
+		issues.add("filter", table, "nested criteria")
 
-	const byField = new Map<number, OdfElement[]>()
-
-	for (const condition of conditions) {
-		const field = Number(condition.attributes.get("table:field-number") ?? "0")
-		const list = byField.get(field) ?? []
-
-		list.push(condition)
-		byField.set(field, list)
+		return ""
 	}
 
 	const out: string[] = []
 
-	for (const [field, list] of byField) {
+	for (const [field, { conditions: list, and }] of byField) {
+		const pair = and && list.length > 1
 		const equal = list.every(condition => (condition.attributes.get("table:operator") ?? "=") === "=")
 
-		if (equal) {
+		// Values any of which shows a row: one condition, or conditions joined by or.
+		if (equal && !pair) {
 			const values = list.flatMap(condition => {
 				const set = condition.children
 					.filter(child => child.name === "table:filter-set-item")
@@ -603,15 +655,17 @@ function filterColumns(filter: OdfElement | undefined, table: string, issues: Od
 				: `<customFilter operator="${operator}" val="${escapeAttribute(condition.attributes.get("table:value") ?? "")}"/>`
 		})
 
-		if (custom.some(entry => entry === null) || custom.length > 2) {
+		if (
+			custom.some(entry => entry === null) ||
+			custom.length > 2 ||
+			list.some(condition => condition.children.some(child => child.name === "table:filter-set-item"))
+		) {
 			issues.add("filter", table, list.map(condition => condition.attributes.get("table:operator") ?? "").join(","))
 
 			continue
 		}
 
-		out.push(
-			`<filterColumn colId="${field}"><customFilters${filter.children[0]?.name === "table:filter-and" ? ' and="1"' : ""}>${custom.join("")}</customFilters></filterColumn>`
-		)
+		out.push(`<filterColumn colId="${field}"><customFilters${pair ? ' and="1"' : ""}>${custom.join("")}</customFilters></filterColumn>`)
 	}
 
 	return out.join("")

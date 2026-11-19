@@ -274,16 +274,20 @@ export function encodeWindows1252(text: string): Uint8Array | null {
 
 // A string is UTF-16 code units already: each is split into its two bytes in the given order, surrogate
 // pairs included.
-export function encodeUtf16(text: string, littleEndian: boolean): Uint8Array {
-	const bytes = new Uint8Array(text.length * 2)
+// `prefix` (a byte order mark) is written first, into the same buffer, so the body is never copied to make room for it.
+export function encodeUtf16(text: string, littleEndian: boolean, prefix: readonly number[] = []): Uint8Array {
+	const offset = prefix.length
+	const bytes = new Uint8Array(offset + text.length * 2)
+
+	bytes.set(prefix)
 
 	for (let i = 0; i < text.length; i++) {
 		const code = text.charCodeAt(i)
 		const high = (code >> 8) & 0xff
 		const low = code & 0xff
 
-		bytes[i * 2] = littleEndian ? low : high
-		bytes[i * 2 + 1] = littleEndian ? high : low
+		bytes[offset + i * 2] = littleEndian ? low : high
+		bytes[offset + i * 2 + 1] = littleEndian ? high : low
 	}
 
 	return bytes

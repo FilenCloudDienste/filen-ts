@@ -6,8 +6,14 @@ import {
 	diagramRelationshipTargets,
 	insertedDiagramParts
 } from "../../core/presentation/edit/apply/smartart"
-import { insertedImageWritten, insertedImageWrittenFor } from "../../core/presentation/edit/apply/picture"
-import type { DeckOp, InsertedImage, RawPart } from "../../core/presentation/edit/ops"
+import {
+	holdsInsertedImages,
+	insertedImageWritten,
+	insertedImageWrittenFor,
+	pruneInsertedImages
+} from "../../core/presentation/edit/apply/picture"
+import { holdsChartVersions, isHeldChart, pruneChartVersions } from "../../core/presentation/edit/apply/chart"
+import { isRawPart, type DeckOp, type InsertedImage, type RawPart } from "../../core/presentation/edit/ops"
 import type { PartChange } from "../../core/opc/index"
 import { hasHeldOdpMedia, keepHeldOdpMedia } from "../../core/odp/write/save"
 import { isRestoredMedia } from "../../core/presentation/restoredMedia"
@@ -15,8 +21,9 @@ import { hasReleasedMedia, keepReleasedMedia } from "../../core/pptx/write/parts
 import type { Deck, SlideRef } from "../../core/presentation/model"
 import { decodeUtf8, NodeKind, transcodeUtf16, type XmlDocument } from "../../core/xml/index"
 import type { EngineSession } from "./engine"
-import type { DeckHistory } from "../../core/presentation/edit/history"
+import type { DeckHistory, HistoryStep } from "../../core/presentation/edit/history"
 import { sessionEdits } from "./engine/edit"
+import { saveHistoryOf } from "./save"
 import { odpParts } from "./engine/open/odp"
 import { pptxParts } from "./engine/open/pptx"
 
@@ -38,7 +45,6 @@ import { pptxParts } from "./engine/open/pptx"
 const AUTHORED_PPTX = /^ppt\/(?:diagrams|media)\/[^/]+$/u
 const AUTHORED_ODP = /^(?:Pictures|Media)\/[^/]+$/u
 const INSERTED = "inserted:"
-const HELD = "raw:"
 const CHUNK = 8192
 
 // The platform's UTF-8 decoder (one native pass); hosts without one (Hermes) take the bytes as one-byte characters,
@@ -134,6 +140,24 @@ interface Reach {
 	readonly held: Set<string>
 	// Every name but a held part's own.
 	readonly byName: Set<string>
+	// Inserted image registry ids and held chart versions ("chart:N") named anywhere (the registries' prune).
+	readonly images: Set<number>
+	readonly charts: Set<string>
+	// The held ("raw:") names whose markup was searched.
+	readonly expanded: Set<string>
+}
+
+function emptyReach(): Reach {
+	return {
+		names: new Set(),
+		markup: new Markup(),
+		history: new Set(),
+		byName: new Set(),
+		held: new Set(),
+		images: new Set(),
+		charts: new Set(),
+		expanded: new Set()
+	}
 }
 
 function nameIn(reach: Reach, name: string): void {
@@ -144,7 +168,7 @@ function nameIn(reach: Reach, name: string): void {
 // A part name has a path ("/ppt/media/image1.png", "Pictures/1.png") or is one the session holds; text runs and the
 // like are none.
 function isPartName(value: string): boolean {
-	return value.length > 1 && value.length < 1024 && (value.includes("/") || value.startsWith(HELD))
+	return value.length > 1 && value.length < 1024 && (value.includes("/") || isRawPart(value))
 }
 
 function isSourceRef(value: unknown): value is { readonly format: string; readonly part: string } {
@@ -153,7 +177,7 @@ function isSourceRef(value: unknown): value is { readonly format: string; readon
 	return typeof candidate === "object" && candidate !== null && typeof candidate.format === "string" && typeof candidate.part === "string"
 }
 
-function isRawPart(value: object): value is RawPart {
+function isRawPartValue(value: object): value is RawPart {
 	const candidate = value as Partial<RawPart>
 
 	return candidate.bytes instanceof Uint8Array && typeof candidate.contentType === "string" && typeof candidate.name === "string"
@@ -181,9 +205,12 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 			const media = insertedMediaWritten(deck, id)
 			const image = insertedImageWritten(deck, id)?.part
 
+			reach.images.add(id)
+
 			if (media !== undefined) nameIn(reach, key(media))
 			if (image !== undefined) nameIn(reach, key(image))
-		} else if (isPartName(value)) nameIn(reach, key(value))
+		} else if (isHeldChart(value)) reach.charts.add(value.split("#")[0] ?? value)
+		else if (isPartName(value)) nameIn(reach, key(value))
 
 		return
 	}
@@ -198,7 +225,7 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 
 	seen.add(value)
 
-	if (isRawPart(value)) {
+	if (isRawPartValue(value)) {
 		reach.names.add(key(value.name))
 
 		if (isMarkup(value.contentType)) reach.markup.add(value.bytes)
@@ -219,9 +246,12 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 	// A diagram an insert op made, written by a save: a redo names those parts again.
 	for (const part of insertedDiagramParts(deck, value)) nameIn(reach, key(part))
 
-	// An inserted image (an op's, an undo's): the part a save wrote it to; its pixels are no names.
+	// An inserted image (an op's, an undo's): the part a save wrote it to; its pixels are no names. It names no registry
+	// id (a redo registers it again), but the steps that hold it name an image: 0, which no id is.
 	if (isInsertedImage(value)) {
 		const written = insertedImageWrittenFor(deck, value)?.part
+
+		reach.images.add(0)
 
 		if (written !== undefined) nameIn(reach, key(written))
 
@@ -254,6 +284,8 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 		if (name === "inserted" && typeof item === "number") {
 			const written = insertedImageWritten(deck, item)?.part
 
+			reach.images.add(item)
+
 			if (written !== undefined) nameIn(reach, key(written))
 
 			continue
@@ -263,7 +295,7 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 		// A source ref names the markup a shape or slide was read from, not a part it uses: only one the session holds
 		// (re-read markup) is searched.
 		if (name === "src" && isSourceRef(item)) {
-			if (item.part.startsWith(HELD)) nameIn(reach, key(item.part))
+			if (isRawPart(item.part)) nameIn(reach, key(item.part))
 
 			continue
 		}
@@ -272,10 +304,16 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 	}
 }
 
-// The deck's parsed nodes, the held markup its frames name, and every step the history holds.
-function reachOf(session: EngineSession, heldMarkup: (name: string) => Uint8Array | undefined, history: DeckHistory | undefined): Reach {
+// The deck's parsed nodes, the held markup its frames name, and every step the history holds (and `retained`: steps
+// the history may bring back).
+function reachOf(
+	session: EngineSession,
+	heldMarkup: (name: string) => Uint8Array | undefined,
+	history: DeckHistory | undefined,
+	retained: readonly HistoryStep[] = []
+): Reach {
 	const deck = session.deck
-	const reach: Reach = { names: new Set(), markup: new Markup(), history: new Set(), byName: new Set(), held: new Set() }
+	const reach = emptyReach()
 	const seen = new WeakSet<object>()
 
 	for (const node of deck.nodes.values()) visit(node, deck, reach, seen, 0)
@@ -283,23 +321,27 @@ function reachOf(session: EngineSession, heldMarkup: (name: string) => Uint8Arra
 	// Held markup (an edited diagram's data, a restored slide) named by the model; the package's own parts name what
 	// they use by relationships (followed below), so only the session's are searched.
 	for (const name of [...reach.names]) {
-		const bytes = name.startsWith(HELD) ? heldMarkup(name) : undefined
+		const bytes = isRawPart(name) ? heldMarkup(name) : undefined
 
-		if (bytes !== undefined) reach.markup.add(bytes)
+		if (bytes === undefined) continue
+
+		reach.markup.add(bytes)
+		reach.expanded.add(name)
 	}
 
 	// The history on its own (a step may hold objects the deck holds too: a deleted slide's copy of a frame): what it
 	// names, whether or not the deck does.
-	const steps: Reach = { names: new Set(), markup: reach.markup, history: new Set(), byName: new Set(), held: new Set() }
+	const steps: Reach = { ...emptyReach(), markup: reach.markup, images: reach.images, charts: reach.charts }
 	const stepsSeen = new WeakSet<object>()
 
-	const held = history?.steps() ?? []
+	const held = [...(history?.steps() ?? []), ...retained]
 	// A redoable step's inverse is made again when it is redone: the parts it holds are not written back from it.
 	const redoInverses: Reach = { ...steps, held: new Set() }
 	const undoable = history?.depth.undo ?? 0
 
 	held.forEach((step, at) => {
 		visit(step.op, deck, steps, stepsSeen, 0)
+		visit(step.lead, deck, steps, stepsSeen, 0)
 		visit(step.inverse.ops, deck, at < undoable ? steps : redoInverses, stepsSeen, 0)
 	})
 
@@ -315,6 +357,122 @@ function reachOf(session: EngineSession, heldMarkup: (name: string) => Uint8Arra
 		for (const match of text.matchAll(/inserted:(\d+)/gu)) visit(`${INSERTED}${match[1] ?? ""}`, deck, reach, seen, 0)
 
 	return reach
+}
+
+// The held markup a "raw:" name answers (pptx: the documents the session adopted; ODP holds none by name).
+function heldMarkupOf(session: EngineSession): (name: string) => Uint8Array | undefined {
+	const parts = pptxParts(session.deck)
+
+	return name => parts?.document(`/${name}`)?.bytes ?? parts?.document(name)?.bytes
+}
+
+// The inserted images and chart versions nothing can name again let go of: neither the deck, nor a step the history
+// holds (or may bring back), names them, by the same conservative search by name as the parts (held bytes included).
+// Not while a save is in flight: its commit finds what it wrote among them. After a save committed, and once the
+// history let go of steps that named any.
+function pruneHeld(session: EngineSession, history: DeckHistory | undefined): void {
+	const deck = session.deck
+
+	if (history?.saving === true || (!holdsInsertedImages(deck) && !holdsChartVersions(deck))) return
+
+	const retained = history?.retained() ?? []
+	const heldMarkup = heldMarkupOf(session)
+	const reach = reachOf(session, heldMarkup, history, retained)
+	const from = reach.markup.texts.length
+
+	// Held markup only a step names (a deleted diagram's data, held as "raw:N" by the frame a delete's inverse holds):
+	// searched for the registries only, the parts' prune plan judges the history's names on their own.
+	for (const name of reach.history) {
+		const bytes = isRawPart(name) && !reach.expanded.has(name) ? heldMarkup(name) : undefined
+
+		if (bytes !== undefined) reach.markup.add(bytes)
+	}
+
+	for (const text of reach.markup.texts.slice(from))
+		for (const match of text.matchAll(/inserted:(\d+)/gu)) reach.images.add(Number(match[1] ?? ""))
+
+	// Version names in held bytes (a chart frame's copy).
+	for (const text of reach.markup.texts) for (const match of text.matchAll(/chart:(\d+)/gu)) reach.charts.add(`chart:${match[1] ?? ""}`)
+
+	pruneInsertedImages(deck, reach.images)
+	pruneChartVersions(
+		deck,
+		reach.charts,
+		[...(history?.steps() ?? []), ...retained].flatMap(step => [
+			step.op,
+			...(step.lead === undefined ? [] : [step.lead]),
+			...step.inverse.ops
+		])
+	)
+}
+
+// The inserted images (registry ids) `values` name, by the prune's own search: fills, pending ids in held bytes, and in
+// the held markup they name ("raw:N", a diagram's data). What a cut's slides take along: once the history lets go of
+// their delete, nothing the prune searches names them, and a paste of the cut names them again.
+export function insertedImagesNamed(session: EngineSession, values: readonly unknown[]): number[] {
+	const deck = session.deck
+	const reach = emptyReach()
+	const seen = new WeakSet<object>()
+	const heldMarkup = heldMarkupOf(session)
+
+	for (const value of values) visit(value, deck, reach, seen, 0)
+
+	for (const name of reach.names) {
+		const bytes = isRawPart(name) ? heldMarkup(name) : undefined
+
+		if (bytes !== undefined) reach.markup.add(bytes)
+	}
+
+	for (const text of reach.markup.texts) for (const match of text.matchAll(/inserted:(\d+)/gu)) reach.images.add(Number(match[1] ?? ""))
+
+	return [...reach.images].filter(id => id > 0)
+}
+
+// After a committed save (its writes made aliases and homes): what nothing names any more is let go of.
+export function pruneCommitted(session: EngineSession): void {
+	pruneHeld(session, saveHistoryOf(session.deck)?.steps)
+}
+
+// Steps the history let go of for good: when any named an inserted image or a chart version, what nothing names any
+// more is let go of (a step that named none cannot have held the last name of one).
+export function pruneReleased(session: EngineSession, history: DeckHistory, released: readonly HistoryStep[]): void {
+	const deck = session.deck
+
+	if (history.saving || (!holdsInsertedImages(deck) && !holdsChartVersions(deck))) return
+
+	const reach = emptyReach()
+	const seen = new WeakSet<object>()
+
+	for (const step of released) {
+		visit(step.op, deck, reach, seen, 0)
+		visit(step.lead, deck, reach, seen, 0)
+		visit(step.inverse.ops, deck, reach, seen, 0)
+	}
+
+	const names = (): boolean =>
+		reach.images.size > 0 || reach.charts.size > 0 || reach.markup.texts.some(text => text.includes(INSERTED) || /chart:\d/u.test(text))
+
+	if (names()) {
+		pruneHeld(session, history)
+
+		return
+	}
+
+	// Held markup the steps name ("raw:N": a deleted diagram's data, its pictures pending ids): a step whose last name
+	// of an image was there let go of it too.
+	const heldMarkup = heldMarkupOf(session)
+	let added = false
+
+	for (const name of reach.names) {
+		const bytes = isRawPart(name) ? heldMarkup(name) : undefined
+
+		if (bytes === undefined) continue
+
+		reach.markup.add(bytes)
+		added = true
+	}
+
+	if (added && names()) pruneHeld(session, history)
 }
 
 function candidates(deck: Deck, has: (name: string) => boolean): string[] {
@@ -666,7 +824,7 @@ async function judgePptx(
 	const owned: string[] = []
 
 	for (const name of reach.names) {
-		if (!name.startsWith(HELD)) continue
+		if (!isRawPart(name)) continue
 
 		const owner = diagramRelationshipOwner(session.deck, name)
 
@@ -678,9 +836,9 @@ async function judgePptx(
 
 	// Held data the deck's frames name, or a step the history holds writes back, names its pictures through the package
 	// part it was read from (or the targets read for it): a removal never takes those while it is named.
-	for (const name of new Set([...reach.held, ...[...reach.names].filter(each => each.startsWith(HELD))])) {
+	for (const name of new Set([...reach.held, ...[...reach.names].filter(isRawPart)])) {
 		// A package part the step writes back keeps its own relationships; held bytes keep their owner's.
-		const owner = name.startsWith(HELD) ? diagramRelationshipOwner(session.deck, name) : name
+		const owner = isRawPart(name) ? diagramRelationshipOwner(session.deck, name) : name
 
 		if (owner !== undefined) {
 			for (const { target } of index.get(key(owner)) ?? []) pictures.add(target)

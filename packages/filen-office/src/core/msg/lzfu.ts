@@ -14,8 +14,6 @@ const PRELOAD =
 const RUN_IN = 17
 const RUN_OUT = 8 * 17
 
-export const LZFU_PRELOAD_LENGTH = PRELOAD.length
-
 // The RTF in a PidTagRtfCompressed value. Output stops at `maxSize` bytes (past it: MsgError "tooLarge") and at the
 // header's raw size, and the buffer is sized by what the input can expand to, so a header naming a huge size
 // allocates nothing it cannot fill. One pass over the input.

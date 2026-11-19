@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource, ZipArchive } from "@filen/office/core/opc"
+import { DECK_HISTORY_LIMITS } from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, SlideRef, TextBody, Xfrm } from "../core/presentation/model"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
@@ -22,7 +23,7 @@ type Drive = Awaited<ReturnType<typeof driveSession>>
 
 const PIE = join(CORPUS_DIR, "pptx", "lo__tdf149551_SmartArt_Pie.pptx")
 const BOX: Xfrm = { x: 1_000_000, y: 1_000_000, cx: 3_000_000, cy: 2_000_000, rot: 0, flipH: false, flipV: false }
-const STEP_LIMIT = 500
+const STEP_LIMIT = DECK_HISTORY_LIMITS.maxSteps
 
 function synthetic(): Uint8Array {
 	return buildPptx({

@@ -132,6 +132,9 @@ export interface CfBlock {
 // position (ranges.ts), so a large sqref costs what it covers.
 export const MAX_CF_RANGES = 100_000
 export const MAX_CF_RULES = 100_000
+// And on rules times the ranges each applies to, which is what preparing and applying them costs: far past what
+// formatted cells copied about make (thousands of ranges, a handful of rules), short of 100_000 rules over as many.
+export const MAX_CF_RULE_RANGES = 5_000_000
 
 const DATA_BAR_EXT = "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}"
 const CF_EXT = "{78C0D931-6437-407D-A8EE-F0AAD7539E65}"
@@ -316,8 +319,9 @@ function ruleOf(document: XmlDocument, node: number, context: RuleContext, x14: 
 	}
 }
 
-// Section markup (one or more elements) under a root of its own.
-function parse(markup: string): XmlDocument | null {
+// Section markup (one or more elements) under a root of its own, null when it does not parse (validations read theirs
+// so too).
+export function parseSections(markup: string): XmlDocument | null {
 	try {
 		return parseXml(encodeUtf8(`<sections>${markup}</sections>`))
 	} catch (error) {
@@ -339,7 +343,7 @@ function rangesOf(text: string): SheetRange[] {
 export function readConditionalFormats(sections: readonly string[], extLst: string | null, dxfs: readonly XlsxDxf[]): CfBlock[] {
 	const extended = new Map<string, { document: XmlDocument; node: number }>()
 	const x14Blocks: { document: XmlDocument; node: number }[] = []
-	const extDocument = extLst === null ? null : parse(extLst)
+	const extDocument = extLst === null ? null : parseSections(extLst)
 
 	for (const extList of extDocument === null ? [] : childElements(extDocument, extDocument.documentElement())) {
 		if (extDocument === null || extDocument.localName(extList) !== "extLst") continue
@@ -367,37 +371,41 @@ export function readConditionalFormats(sections: readonly string[], extLst: stri
 	const context: RuleContext = { dxfs, extended, used: new Set() }
 	const blocks: CfBlock[] = []
 	let count = 0
+	// Rules read so far times their ranges.
+	let work = 0
 
 	for (const { document, root } of sections.flatMap(markup => {
-		const document = parse(markup)
+		const document = parseSections(markup)
 
 		return document === null ? [] : [...childElements(document, document.documentElement())].map(root => ({ document, root }))
 	})) {
 		if (document.localName(root) !== "conditionalFormatting") continue
 
 		const rules: CfRule[] = []
+		const ranges = rangesOf(document.attribute(root, "sqref") ?? "")
 
 		for (const child of childElements(document, root)) {
-			if (document.localName(child) !== "cfRule" || count >= MAX_CF_RULES) continue
+			if (document.localName(child) !== "cfRule" || count >= MAX_CF_RULES || work + ranges.length > MAX_CF_RULE_RANGES) continue
 
 			const rule = ruleOf(document, child, context, false)
 
 			if (rule !== null) {
 				rules.push(rule)
 				count++
+				work += ranges.length
 			}
 		}
-
-		const ranges = rangesOf(document.attribute(root, "sqref") ?? "")
 
 		if (rules.length > 0 && ranges.length > 0) blocks.push({ ranges, rules })
 	}
 
 	for (const { document, node } of x14Blocks) {
 		const rules: CfRule[] = []
+		const sqref = childByLocal(document, node, "sqref")
+		const ranges = rangesOf(textOf(document, sqref))
 
 		for (const child of childElements(document, node)) {
-			if (document.localName(child) !== "cfRule" || count >= MAX_CF_RULES) continue
+			if (document.localName(child) !== "cfRule" || count >= MAX_CF_RULES || work + ranges.length > MAX_CF_RULE_RANGES) continue
 
 			const id = document.attribute(child, "id")?.trim().toUpperCase()
 
@@ -409,11 +417,9 @@ export function readConditionalFormats(sections: readonly string[], extLst: stri
 			if (rule !== null) {
 				rules.push(rule)
 				count++
+				work += ranges.length
 			}
 		}
-
-		const sqref = childByLocal(document, node, "sqref")
-		const ranges = rangesOf(textOf(document, sqref))
 
 		if (rules.length > 0 && ranges.length > 0) blocks.push({ ranges, rules })
 	}

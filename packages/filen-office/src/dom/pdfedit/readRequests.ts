@@ -3,6 +3,7 @@ import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit/budget"
 import type { ByteSource } from "../../core/opc/io"
 import { ZipArchive } from "../../core/opc/zipReader"
 import { PDF_OUTLINE_LIMIT, PDF_OUTLINE_MAX_DEPTH } from "../pdf/outline"
+import { checkPage, isPageOf } from "./commands/types"
 import { isFatalEngineError, PdfEngineRefusal, type PdfEngineContext, type ReadDocument } from "./context"
 import { isMupdfFormat, MUPDF_FORMATS, type MupdfFormat } from "./formats"
 import { drawTile, pageInfos } from "./pageOps"
@@ -29,8 +30,48 @@ import { pageBoundsOf, pageTextLinks, pointOf, structuredTextLines } from "./tex
 
 // An e-book whose encryption.xml names any other algorithm than these (font obfuscation) is locked by DRM.
 const FONT_OBFUSCATION = new Set(["http://www.idpf.org/2008/embedding", "http://ns.adobe.com/pdf/enc#RC"])
-const ENCRYPTION_XML_MAX_BYTES = 4 * 1024 * 1024
-const ENCRYPTION_METHOD = /<(?:[\w-]+:)?EncryptionMethod\b[^>]*?\bAlgorithm\s*=\s*["']([^"']*)["']/g
+// A font-obfuscation-only file names a handful of fonts; one larger than this counts as locked.
+export const ENCRYPTION_XML_MAX_BYTES = 128 * 1024
+const ENCRYPTION_METHOD_TAG = /^<(?:[\w-]+:)?EncryptionMethod\b/
+const ALGORITHM = /\bAlgorithm\s*=\s*["']/
+const QUOTE = /["']/g
+
+// The Algorithm values of encryption.xml's EncryptionMethod tags, in one pass over the text: each tag is the span from
+// the last "<" before a ">" to it, and the scan resumes after that ">" (a regex over the whole text backtracks to its
+// end from every unclosed tag).
+export function encryptionAlgorithms(xml: string): string[] {
+	const out: string[] = []
+
+	for (let from = 0; ;) {
+		const open = xml.indexOf("<", from)
+
+		if (open === -1) break
+
+		const close = xml.indexOf(">", open)
+
+		if (close === -1) break
+
+		from = close + 1
+
+		const tag = xml.slice(xml.lastIndexOf("<", close), close)
+
+		if (!ENCRYPTION_METHOD_TAG.test(tag)) continue
+
+		const algorithm = ALGORITHM.exec(tag)
+
+		if (algorithm === null) continue
+
+		const start = algorithm.index + algorithm[0].length
+
+		QUOTE.lastIndex = start
+
+		const end = QUOTE.exec(tag)
+
+		if (end !== null) out.push(tag.slice(start, end.index))
+	}
+
+	return out
+}
 
 // The user style sheet a reflowed book is set with (the publisher's applies under it): text takes the layout's size
 // (A−/A+), whatever fixed px or pt size a publisher wrote, and dark publisher backgrounds or light text never reach
@@ -66,10 +107,6 @@ function readAt(context: PdfEngineContext, generation: number | undefined): Read
 	if (generation !== read.generation) throw new PdfEngineRefusal("cancelled", "the document was laid out again")
 
 	return read
-}
-
-function checkPage(document: Mupdf.Document, page: number): void {
-	if (!Number.isInteger(page) || page < 0 || page >= document.countPages()) throw new PdfEngineRefusal("badRequest")
 }
 
 function checkHeap(context: PdfEngineContext, read: { readonly memory: { readonly heapBudget: number } }): void {
@@ -135,11 +172,7 @@ async function lockedByDrm(format: MupdfFormat, size: number, read: (offset: num
 
 		const xml = new TextDecoder().decode(await archive.read(entry))
 
-		for (const match of xml.matchAll(ENCRYPTION_METHOD)) {
-			if (!FONT_OBFUSCATION.has((match[1] ?? "").trim())) return true
-		}
-
-		return false
+		return encryptionAlgorithms(xml).some(algorithm => !FONT_OBFUSCATION.has(algorithm.trim()))
 	}
 
 	if (format === "mobi") {
@@ -293,7 +326,7 @@ function resolveIndex(
 		return null
 	}
 
-	return Number.isInteger(page) && page >= 0 && page < document.countPages() ? { page, point } : null
+	return isPageOf(document, page) ? { page, point } : null
 }
 
 function outlineOf(document: Mupdf.Document): PdfReadOutlineNode[] {

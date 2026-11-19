@@ -12,7 +12,10 @@ import { createGridAxis } from "../react/sheet/axis"
 import { gridView } from "../react/sheet/view"
 import { KEPT, SOLD, barChart, chartFixture } from "./sheetChartFixtures"
 import { CHART_FRAME, DRAWINGS, DRAWINGS_BYTES, PNG, bitmapEmf, withMedia, wsDr } from "./sheetDrawingsFixtures"
+import { SheetSessionClosedError } from "../dom/sheet/client"
 import { inThreadSheetHost } from "../dom/sheet/host"
+import type { DrawingAnchor } from "../core/xlsx/drawings/anchor"
+import type { SheetDrawingObject } from "../core/xlsx/drawings/feature"
 import { IMMEDIATE, buildFixture, cells } from "./sheetSessionFixtures"
 
 // Objects over the grid: pictures drawn with their bitmaps (a metafile's own too), a picture's media kept lent until
@@ -33,8 +36,13 @@ const flush = async (): Promise<void> => {
 	for (let k = 0; k < 10; k++) await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
 }
 
+interface ShownOptions {
+	readonly onMove?: (object: SheetDrawingObject, anchor: DrawingAnchor) => Promise<boolean>
+}
+
 async function shown(
-	bytes: Uint8Array
+	bytes: Uint8Array,
+	options: ShownOptions = {}
 ): Promise<{ model: SheetGridModel; container: HTMLElement; scroll: { top: number; width: number; height: number } }> {
 	const scroll = { top: 0, width: 800, height: 600 }
 	let model: SheetGridModel | null = null
@@ -49,8 +57,20 @@ async function shown(
 	// The drawing is read beside the sheet: its layout comes in an event.
 	for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))
 
+	// The grid's frames: schedule draws one, which calls the frame listeners; a change the model reports draws one too.
+	const frames = new Set<() => void>()
+	let frame = 0
 	const handle = {
 		renderer: {
+			schedule: () => {
+				if (frame !== 0) return
+
+				frame = requestAnimationFrame(() => {
+					frame = 0
+
+					for (const listener of frames) listener()
+				})
+			},
 			currentView: () => {
 				const axes = model.axes(0)
 				const layout = model.layout(0)
@@ -68,7 +88,16 @@ async function shown(
 			},
 			scrollBy: () => undefined
 		},
-		onFrame: (listener: () => void) => model.onPaint(listener),
+		onFrame: (listener: () => void) => {
+			const unpaint = model.onPaint(listener)
+
+			frames.add(listener)
+
+			return () => {
+				frames.delete(listener)
+				unpaint()
+			}
+		},
 		focus: () => undefined
 	} as unknown as SheetGridHandle
 	const source: SheetObjectSource = {
@@ -97,7 +126,8 @@ async function shown(
 				selected={null}
 				canEdit
 				onSelect={() => undefined}
-				onMove={() => Promise.resolve(true)}
+				onMove={options.onMove ?? (() => Promise.resolve(true))}
+				mac={false}
 				onDelete={() => undefined}
 				label={object => object.name}
 			/>
@@ -108,6 +138,14 @@ async function shown(
 	await flush()
 
 	return { model, container, scroll }
+}
+
+function pointer(element: HTMLElement, type: string, x: number, y: number): void {
+	act(() => {
+		element.dispatchEvent(
+			new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: "mouse", button: 0, clientX: x, clientY: y })
+		)
+	})
 }
 
 function svgOf(container: HTMLElement, name: string): SVGSVGElement | null {
@@ -808,5 +846,67 @@ describe("plain pictures on a canvas", () => {
 
 		expect(container.querySelector('[aria-label="Picture 1"] canvas')).toBeNull()
 		expect(container.querySelector('[aria-label="Picture 1"] svg image')).not.toBeNull()
+	})
+})
+
+describe("dragging and keys on an object", () => {
+	it("re-places a dragged object on the next frame without drawing the cells again", async () => {
+		vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
+
+		const { model, container } = await shown(DRAWINGS_BYTES)
+		const element = container.querySelector<HTMLElement>('[aria-label="Picture 1"]')
+
+		if (element === null) throw new Error("no picture")
+
+		const before = element.style.transform
+		const cells = model.cellsVersion()
+
+		pointer(element, "pointerdown", 10, 10)
+		pointer(element, "pointermove", 60, 70)
+		pointer(element, "pointermove", 80, 90)
+		await flush()
+
+		expect(element.style.transform).not.toBe(before)
+		expect(model.cellsVersion()).toBe(cells)
+	})
+
+	it("puts a dropped object back where it is when the move rejects, leaving no rejection unhandled", async () => {
+		vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
+
+		const { container } = await shown(DRAWINGS_BYTES, { onMove: () => Promise.reject(new SheetSessionClosedError()) })
+		const element = container.querySelector<HTMLElement>('[aria-label="Picture 1"]')
+
+		if (element === null) throw new Error("no picture")
+
+		const before = element.style.transform
+
+		// A rejection nobody handles fails the run (vitest reports unhandled errors).
+		pointer(element, "pointerdown", 10, 10)
+		pointer(element, "pointermove", 60, 70)
+		await flush()
+		expect(element.style.transform).not.toBe(before)
+		pointer(element, "pointerup", 60, 70)
+		await flush()
+
+		expect(element.style.transform).toBe(before)
+	})
+
+	it("leaves no rejection unhandled when a nudge, an undo or a redo rejects", async () => {
+		const { model, container } = await shown(DRAWINGS_BYTES, { onMove: () => Promise.reject(new SheetSessionClosedError()) })
+		const element = container.querySelector<HTMLElement>('[aria-label="Picture 1"]')
+		const undo = vi.spyOn(model, "undo").mockRejectedValue(new SheetSessionClosedError())
+		const redo = vi.spyOn(model, "redo").mockRejectedValue(new SheetSessionClosedError())
+
+		if (element === null) throw new Error("no picture")
+
+		// A rejection nobody handles fails the run (vitest reports unhandled errors).
+		act(() => {
+			element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }))
+			element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "z", code: "KeyZ", ctrlKey: true }))
+			element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "y", code: "KeyY", ctrlKey: true }))
+		})
+		await flush()
+
+		expect([undo.mock.calls.length, redo.mock.calls.length]).toEqual([1, 1])
 	})
 })

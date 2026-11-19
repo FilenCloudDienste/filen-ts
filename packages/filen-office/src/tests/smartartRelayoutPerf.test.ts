@@ -63,28 +63,35 @@ async function corpusDef(source: { readonly file: string; readonly part: string 
 	return new TextDecoder().decode(await pkg.read(source.part))
 }
 
-const snakeDef = (): Promise<string | undefined> => corpusDef(SNAKE)
+function missing(source: { readonly file: string }): string {
+	return `corpus file ${source.file} is missing from ${CORPUS_DIR}: run pnpm run corpus:fetch or set FILEN_OFFICE_CORPUS`
+}
 
 const CASES: readonly {
 	readonly name: string
 	readonly layout: () => Promise<string | undefined>
+	readonly corpus?: { readonly file: string }
 	readonly nodes: readonly PointSpec[]
 	readonly shapes: number
 }[] = [
 	{ name: "cycle", layout: () => Promise.resolve(CYCLE), nodes: flat(30), shapes: 59 },
 	{ name: "hierarchy", layout: () => Promise.resolve(HIERARCHY), nodes: tree(30), shapes: 30 },
-	{ name: "bProcess3", layout: snakeDef, nodes: flat(30), shapes: 59 },
-	{ name: "list1", layout: () => corpusDef(LIST), nodes: flat(30), shapes: 60 }
+	{ name: "bProcess3", layout: () => corpusDef(SNAKE), corpus: SNAKE, nodes: flat(30), shapes: 59 },
+	{ name: "list1", layout: () => corpusDef(LIST), corpus: LIST, nodes: flat(30), shapes: 60 }
 ]
 
 describe("SmartArt relayout performance", () => {
 	it.for(CASES)(
 		"relays $name with 30 nodes out within 60 ms of CPU",
 		{ timeout: 60_000 },
-		async ({ name, layout: definition, nodes, shapes }, { task }) => {
+		async ({ name, layout: definition, corpus, nodes, shapes }, { task, skip }) => {
 			const layoutXml = await definition()
 
-			if (layoutXml === undefined) return
+			if (layoutXml === undefined) {
+				skip(corpus === undefined ? `${name} has no layout` : missing(corpus))
+
+				return
+			}
 
 			const dataXml = data(nodes)
 			const texts = [...model(dataXml).points.values()].map(pointText).filter(text => text !== "")
@@ -113,10 +120,14 @@ describe("SmartArt relayout performance", () => {
 })
 
 describe("SmartArt relayout of a long list", () => {
-	it("draws a 300-node vertical box list rather than refusing it", { timeout: 120_000 }, async () => {
+	it("draws a 300-node vertical box list rather than refusing it", { timeout: 120_000 }, async ({ skip }) => {
 		const layoutXml = await corpusDef(LIST)
 
-		if (layoutXml === undefined) return
+		if (layoutXml === undefined) {
+			skip(missing(LIST))
+
+			return
+		}
 
 		const dataXml = data(flat(300))
 		const texts = [...model(dataXml).points.values()].map(pointText).filter(text => text !== "")

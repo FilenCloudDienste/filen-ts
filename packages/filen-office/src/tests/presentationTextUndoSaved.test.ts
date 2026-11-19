@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { zipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import type { ShapeNode, SlideNode, SlideRef, TextBody } from "../core/presentation/model"
 import { notesTarget } from "../core/presentation/notes"
@@ -7,7 +8,7 @@ import { review } from "../dom/presentation/engine/review"
 import { CORPUS_DIR } from "./corpusDir"
 import { driveSession } from "./odpWriteDrive"
 import { buildPptx } from "./pptxFixtures"
-import { partsOf } from "./pptxWriteFixtures"
+import { differingParts } from "./pptxWriteFixtures"
 
 // A body set, saved and undone on a deck PowerPoint wrote (self-closed `<a:lstStyle />`, dirty="0" run properties):
 // the next save gives every part back byte for byte, slide text and speaker notes alike.
@@ -18,21 +19,9 @@ function line(text: string): TextBody {
 	return { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] }
 }
 
+// The parts a save gives back other than they were, or "(not written)" when it wrote nothing.
 async function changedParts(before: Uint8Array, after: Uint8Array | undefined): Promise<string[]> {
-	if (after === undefined) return ["(not written)"]
-
-	const a = await partsOf(before)
-	const b = await partsOf(after)
-	const out: string[] = []
-
-	for (const name of new Set([...a.keys(), ...b.keys()])) {
-		const x = a.get(name)
-		const y = b.get(name)
-
-		if (x === undefined || y === undefined || x.length !== y.length || x.some((byte, index) => byte !== y[index])) out.push(name)
-	}
-
-	return out
+	return after === undefined ? ["(not written)"] : differingParts(before, after)
 }
 
 // A slide shape serialised as PowerPoint writes it: spaces before "/>", run properties PowerPoint marks dirty="0".
@@ -105,5 +94,16 @@ describe.skipIf(!existsSync(DECK))("undo after a save on a PowerPoint-written de
 		await s.undo()
 
 		expect(await changedParts(original, (await s.save()).bytes)).toEqual([])
+	})
+})
+
+describe("differingParts", () => {
+	it("lists a part only the first package has and a binary part one invalid UTF-8 byte apart", async () => {
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00])
+		const before = zipSync({ "a.xml": new Uint8Array([1]), "media/image1.png": png, "gone.xml": new Uint8Array([2]) })
+		const after = zipSync({ "a.xml": new Uint8Array([1]), "media/image1.png": png.map((byte, index) => (index === 0 ? 0x8a : byte)) })
+
+		expect(await differingParts(before, after)).toEqual(["media/image1.png", "gone.xml"])
+		expect(await differingParts(before, before)).toEqual([])
 	})
 })

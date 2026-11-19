@@ -1,3 +1,4 @@
+import { escapeText } from "../xml/entities"
 import { odfPackage } from "./odf"
 import { templateLocale } from "./locale"
 import { FILEN_THEME, themeName, type FilenTheme } from "./themes/model"
@@ -56,10 +57,6 @@ const PAGE_LAYOUTS: readonly (readonly [string, readonly (readonly [string, read
 	["AL5T20", []]
 ]
 
-function escape(text: string): string {
-	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;")
-}
-
 function frameBox([x, y, w, h]: readonly number[], size: SlideSize): string {
 	return `svg:x="${cm((x ?? 0) * size.cx)}" svg:y="${cm((y ?? 0) * size.cy)}" svg:width="${cm((w ?? 0) * size.cx)}" svg:height="${cm((h ?? 0) * size.cy)}"`
 }
@@ -90,7 +87,7 @@ export function blankOdpParts(options: BlankOdpOptions): ReturnType<typeof odfPa
 		`<office:automatic-styles>${set.automatic}</office:automatic-styles>` +
 		`<office:master-styles>${LAYERS}${set.master}</office:master-styles></office:document-styles>`
 	const title =
-		options.title === undefined || options.title === "" ? "" : `<text:p text:style-name="P1">${escape(options.title)}</text:p>`
+		options.title === undefined || options.title === "" ? "" : `<text:p text:style-name="P1">${escapeText(options.title)}</text:p>`
 	const content =
 		`<office:document-content ${ODP_ROOT_NS} office:version="1.3"><office:automatic-styles>` +
 		// The title slide's title: centred and larger, bottom-aligned, over the master's title style.

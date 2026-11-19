@@ -103,5 +103,7 @@ describe.skipIf(!existsSync(CORPUS))("charts over the real-world corpus", () => 
 		)
 
 		expect(failures).toEqual([])
+		// Fewer means lost coverage: the corpus holds about 1370 chart parts.
+		expect(found).toBeGreaterThanOrEqual(1300)
 	})
 })

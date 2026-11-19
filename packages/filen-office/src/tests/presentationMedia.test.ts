@@ -272,6 +272,76 @@ describe("presentation media serving", () => {
 		expect(reads.media).toBeGreaterThanOrEqual(50_000)
 	})
 
+	// A deflated video's deck whose media reads go through `read` (the base source's bytes, or not).
+	async function mediaReadsThrough(
+		read: (base: (offset: number, length: number) => Promise<Uint8Array>, offset: number, length: number) => Promise<Uint8Array>
+	): Promise<{ readonly harness: MediaHarness; readonly video: Uint8Array }> {
+		const video = mp4(3_000_000)
+
+		video.fill(7, 100_000, 2_900_000)
+
+		const harness = await mediaHarness(videoDeck(video))
+		const base = harness.session.package.source
+
+		harness.session.package = {
+			...harness.session.package,
+			source: Object.assign(Object.create(null) as object, {
+				size: base.size,
+				read: (offset: number, length: number) => base.read(offset, length),
+				readMedia: (offset: number, length: number) => read((at, size) => base.read(at, size), offset, length)
+			})
+		}
+
+		return { harness, video }
+	}
+
+	function unplayable(events: readonly PresentationEvent[]): number {
+		return events.filter(event => event.type === "notice" && event.notice.kind === "media" && event.notice.reason === "unplayable")
+			.length
+	}
+
+	it("builds a deflated video again after a read failed once, without calling it unplayable", async () => {
+		let failures = 1
+		const { harness, video } = await mediaReadsThrough((base, offset, length) =>
+			failures-- > 0 ? Promise.reject(new Error("the connection dropped")) : base(offset, length)
+		)
+
+		expect(await harness.media("/ppt/media/media1.mp4")).toEqual({ kind: "refused", reason: "preparing" })
+		await harness.runTasks()
+		expect(unplayable(harness.events)).toBe(0)
+
+		// The next request starts a new build, which serves.
+		expect(await harness.media("/ppt/media/media1.mp4")).toEqual({ kind: "refused", reason: "preparing" })
+		expect(harness.tasks).toHaveLength(1)
+		await harness.runTasks()
+		expect(await harness.media("/ppt/media/media1.mp4")).toMatchObject({ size: video.length, seekable: true })
+		expect(equal(await (harness.served[0] as Served).read(2_950_000, 3_000_000, SIGNAL), video.subarray(2_950_000))).toBe(true)
+		expect(unplayable(harness.events)).toBe(0)
+	})
+
+	it("calls a damaged deflated video unplayable once, and starts no build per render while its reads fail", async () => {
+		const damaged = await mediaReadsThrough(async (base, offset, length) => (await base(offset, length)).map(byte => byte ^ 0xff))
+
+		await damaged.harness.media("/ppt/media/media1.mp4")
+		await damaged.harness.runTasks()
+		expect(await damaged.harness.media("/ppt/media/media1.mp4")).toEqual({ kind: "refused", reason: "notMedia" })
+		expect(damaged.harness.tasks).toHaveLength(0)
+		expect(unplayable(damaged.harness.events)).toBe(1)
+
+		const failing = await mediaReadsThrough(() => Promise.reject(new Error("offline")))
+		const context = { ...failing.harness.h.context, session: failing.harness.session, lane: "background" as const }
+		const slide = failing.harness.session.deck.slides[0] as never
+
+		await viewCapability.render(context, [slide])
+		expect(failing.harness.tasks).toHaveLength(1)
+		await failing.harness.runTasks()
+
+		for (let render = 0; render < 3; render++) await viewCapability.render(context, [slide])
+
+		expect(failing.harness.tasks).toHaveLength(0)
+		expect(unplayable(failing.harness.events)).toBe(0)
+	})
+
 	it("drops the indexes used longest ago once their windows pass the session's budget", () => {
 		const build = (used: number, windowBytes: number) => ({ used, index: { windowBytes } })
 		const builds = new Map<string, { readonly used: number; readonly index: { readonly windowBytes: number } | undefined }>([

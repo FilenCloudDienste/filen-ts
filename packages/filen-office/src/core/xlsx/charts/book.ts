@@ -7,7 +7,7 @@ import type { XlsxDefinedName, XlsxWorkbookModel } from "../model/types"
 import { refState } from "../refs/state"
 import { chartReferences, isPivotChart } from "./cache"
 import { chartNames, hiddenSignature } from "./cells"
-import { chartAreas, type ChartArea, type ChartNameLookup } from "./refs"
+import { MAX_CHART_AREAS, chartAreas, type ChartArea, type ChartNameLookup } from "./refs"
 import { CHART_TYPE } from "./parts"
 import { drawingReader } from "../../drawingml/reader"
 import { parseXml } from "../../xml/index"
@@ -15,9 +15,6 @@ import { parseXml } from "../../xml/index"
 // A workbook's charts as the charts feature tracks them: each chart part's current bytes, the cells its references
 // read, and which charts read cells an edit changed since the last save (their caches are refreshed then) or since
 // they were last drawn (their stamp moves on). Source bytes are read once, when the first sheet opens.
-
-// Charts whose references read more areas than this are refreshed on any edit of their sheets.
-const MAX_AREAS = 1024
 
 // What a chart's references read: its areas (null: more than are tracked), and the defined names they were resolved
 // through, with the formula each stood for (by "sheet!NAME", upper case), checked again once the names change.
@@ -160,6 +157,9 @@ export class ChartBook {
 
 	private readAreas(document: XlsxDocument, bytes: Uint8Array): ChartReads {
 		const out: ChartArea[] = []
+		// One budget for all the chart's references: a chart past it (MAX_CHART_AREAS) is refreshed on any edit of its
+		// sheets.
+		const budget = { left: MAX_CHART_AREAS }
 		const used = new Map<string, string | undefined>()
 		const lookup = chartNames(document)
 		const names: ChartNameLookup = (name, sheet) => {
@@ -175,12 +175,12 @@ export class ChartBook {
 
 			// A pivot chart's caches are its pivot table's: no cell edit changes what it shows.
 			if (!isPivotChart(reader))
-				for (const reference of chartReferences(reader)) appendAll(out, chartAreas(reference.formula, names) ?? [])
+				for (const reference of chartReferences(reader)) appendAll(out, chartAreas(reference.formula, names, 0, budget) ?? [])
 		} catch {
 			out.length = 0
 		}
 
-		return { areas: out.length > MAX_AREAS ? null : out, names: used, epoch: this.namesEpoch }
+		return { areas: budget.left < 0 ? null : out, names: used, epoch: this.namesEpoch }
 	}
 
 	// What a chart's references read, and whether that moved because a defined name they read changed.

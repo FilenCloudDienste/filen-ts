@@ -177,21 +177,29 @@ describe.skipIf(!existsSync(DIR))("docx review index over the corpus", () => {
 		const pick = rng(99)
 		const files = REVIEWED.filter(name => all.includes(name))
 
-		for (let added = 0; added < 8;) {
-			const name = all[Math.floor(pick() * all.length)] ?? ""
+		// Eight more, drawn without replacement (a seeded partial shuffle), so a small corpus ends the draw.
+		const pool = all.filter(name => !files.includes(name))
+		const extra = Math.min(8, pool.length)
 
-			if (!files.includes(name)) {
-				files.push(name)
-				added++
-			}
+		for (let k = 0; k < extra; k++) {
+			const at = k + Math.floor(pick() * (pool.length - k))
+			const name = pool[at] ?? ""
+
+			pool[at] = pool[k] ?? ""
+			pool[k] = name
+			files.push(name)
 		}
 
 		const problems: string[] = []
+		// REVIEWED documents the gate let through: a gate that starts refusing them all must not pass unchecked.
+		let checked = 0
 
 		for (const file of files) {
 			const opened = await openBytes(new Uint8Array(readFileSync(join(DIR, file))))
 
 			if (opened.context.gate.length > 0) continue
+
+			if (REVIEWED.includes(file)) checked++
 
 			// Made before the first edit, and made after some edits (it starts from that document).
 			for (const [seed, touch] of [
@@ -221,5 +229,7 @@ describe.skipIf(!existsSync(DIR))("docx review index over the corpus", () => {
 		}
 
 		expect(problems).toEqual([])
+
+		if (files.length > extra) expect(checked).toBeGreaterThan(0)
 	})
 })

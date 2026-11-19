@@ -2,23 +2,22 @@
 // were, kept as chunks (copied bytes are views of the source, never copies until the file is joined). A
 // control word that could run on into what follows (a letter, digit, space or minus) gets its delimiting space.
 
+import { isDigit, isLetter } from "../tokenizer"
+
 export class RtfWriteRefusal extends Error {
 	// What the writer cannot represent: a WordprocessingML element or attribute, or the edit's kind.
 	readonly reason: string
+	// What a read-back refusal compared, for tests and local debugging. It holds document text, so it is never part
+	// of `message` (which is logged) and not enumerable (not copied by a spread, a structured log or a worker reply).
+	declare readonly detail?: string
 
-	constructor(reason: string, message: string = reason) {
+	constructor(reason: string, message: string = reason, detail?: string) {
 		super(message)
 		this.name = "RtfWriteRefusal"
 		this.reason = reason
+
+		if (detail !== undefined) Object.defineProperty(this, "detail", { value: detail, enumerable: false })
 	}
-}
-
-function isLetter(code: number): boolean {
-	return (code >= 0x61 && code <= 0x7a) || (code >= 0x41 && code <= 0x5a)
-}
-
-function isDigit(code: number): boolean {
-	return code >= 0x30 && code <= 0x39
 }
 
 // Whether `at(length - 1)` ends an open control word (\name or \nameN with no delimiter after it).
@@ -112,14 +111,21 @@ export class RtfOut {
 
 		if (this.pending === "") return
 
-		const out = new Uint8Array(this.pending.length)
-
-		for (let k = 0; k < this.pending.length; k++) out[k] = this.pending.charCodeAt(k) & 0xff
+		const out = latin1Bytes(this.pending)
 
 		this.chunks.push(out)
 		this.length += out.length
 		this.pending = ""
 	}
+}
+
+// Text of characters below U+0100 (RTF already encoded: encode.ts) as its bytes, one a character.
+export function latin1Bytes(text: string): Uint8Array {
+	const out = new Uint8Array(text.length)
+
+	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
+
+	return out
 }
 
 export function joinChunks(chunks: readonly Uint8Array[]): Uint8Array {

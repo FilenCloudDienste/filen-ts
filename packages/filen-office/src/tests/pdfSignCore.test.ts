@@ -1,5 +1,6 @@
+import { unzlibSync, zlibSync } from "fflate"
 import * as mupdf from "mupdf"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
 	changeAllowed,
 	certificationLevel,
@@ -12,6 +13,12 @@ import {
 } from "../core/pdfsign"
 import { pdfSignatureFields } from "../dom/pdf/signatureFields"
 import { signedFixture as fixture, verifyBytes } from "./pdfSignFixtures"
+
+vi.mock("fflate", async importOriginal => {
+	const actual = await importOriginal<typeof import("fflate")>()
+
+	return { ...actual, unzlibSync: vi.fn(actual.unzlibSync) }
+})
 
 const source = (bytes: Uint8Array) => ({
 	length: bytes.length,
@@ -46,6 +53,24 @@ describe("trimDer", () => {
 		expect(trimDer(Uint8Array.of(0x30, 0x02, 1, 2, 0, 9))).toBeNull()
 		expect(trimDer(Uint8Array.of(0x30, 0x05, 1, 2))).toBeNull()
 		expect(trimDer(Uint8Array.of(0x04, 0x01, 1))).toBeNull()
+	})
+
+	it("walks an indefinite-length object to the end-of-contents octets that close it", () => {
+		// SEQUENCE { [0] { OCTET STRING, SEQUENCE {} }, high-tag-number [31] }, indefinite where BouncyCastle writes it.
+		const ber = [0x30, 0x80, 0xa0, 0x80, 0x04, 0x01, 0, 0x30, 0x00, 0, 0, 0x9f, 0x1f, 0x01, 7, 0, 0]
+
+		expect(trimDer(Uint8Array.of(...ber, 0, 0, 0, 0))).toEqual(Uint8Array.of(...ber))
+		expect(trimDer(Uint8Array.of(...ber))).toEqual(Uint8Array.of(...ber))
+	})
+
+	it("rejects an indefinite-length object followed by anything but padding, unclosed, or overrunning", () => {
+		expect(trimDer(Uint8Array.of(0x30, 0x80, 0x04, 0x01, 7, 0, 0, 0, 9))).toBeNull()
+		expect(trimDer(Uint8Array.of(0x30, 0x80, 0x04, 0x01, 7, 0))).toBeNull()
+		expect(trimDer(Uint8Array.of(0x30, 0x80, 0x04, 0x05, 7, 0, 0))).toBeNull()
+		expect(trimDer(Uint8Array.of(0x30, 0x80, 0x04, 0x80, 0, 0, 0, 0))).toBeNull()
+		expect(
+			trimDer(Uint8Array.of(...Array.from({ length: 40 }, () => [0x30, 0x80]).flat(), ...new Array<number>(80).fill(0)))
+		).toBeNull()
 	})
 })
 
@@ -116,7 +141,101 @@ describe("readXrefChain", () => {
 	it("returns null for a file without startxref", async () => {
 		expect(await readXrefChain(source(new TextEncoder().encode("%PDF-1.7\nnothing here\n")))).toBeNull()
 	})
+
+	it("inflates an xref stream no further than its declared rows need", async () => {
+		const rows = Uint8Array.of(0, 0, 0, 0xff, 1, 0, 0x10, 0, 2, 0, 3, 1)
+		const inflated = new Uint8Array(16 * 1024 * 1024)
+
+		inflated.set(rows)
+
+		const inflate = vi.mocked(unzlibSync)
+
+		inflate.mockClear()
+
+		const chain = await readXrefChain(source(xrefStreamFile([{ dict: "/W [1 2 1] /Size 3", data: inflated }])))
+
+		expect(inflate.mock.calls[0]?.[1]?.out?.length).toBe(rows.length)
+		expect(chain?.sections[0]?.entries).toEqual(
+			new Map([
+				[0, { type: 0 }],
+				[1, { type: 1, offset: 16, gen: 0 }],
+				[2, { type: 2, stream: 3, index: 1 }]
+			])
+		)
+	})
+
+	it("refuses rows the file does not pay for, within a section and over the chain", async () => {
+		const inflate = vi.mocked(unzlibSync)
+
+		inflate.mockClear()
+
+		expect(
+			await readXrefChain(source(xrefStreamFile([{ dict: "/W [1 0 0] /Size 8388607", data: new Uint8Array(8_388_607) }])))
+		).toBeNull()
+		expect(inflate).not.toHaveBeenCalled()
+
+		const half = { dict: "/W [1 0 0] /Size 40000", data: new Uint8Array(40_000) }
+
+		expect((await readXrefChain(source(xrefStreamFile([half]))))?.sections[0]?.entries.size).toBe(40_000)
+		expect(await readXrefChain(source(xrefStreamFile([half, half])))).toBeNull()
+	})
+
+	it("reads a large file whose every revision rewrites the full table", async () => {
+		const objects = 50_000
+		const data = new Uint8Array((objects + 1) * 6)
+
+		for (let num = 1; num <= objects; num++) {
+			const offset = num * 20
+
+			data.set([1, offset >>> 24, (offset >>> 16) & 0xff, (offset >>> 8) & 0xff, offset & 0xff, 0], num * 6)
+		}
+
+		const revisions = 8
+		const chain = await readXrefChain(
+			source(
+				xrefStreamFile(
+					Array.from({ length: revisions }, () => ({ dict: `/W [1 4 1] /Size ${objects + 1}`, data })),
+					objects * 20
+				)
+			)
+		)
+
+		expect(chain?.sections).toHaveLength(revisions)
+		expect(chain?.sections.every(section => section.entries.size === objects + 1)).toBe(true)
+	})
 })
+
+// A file of `padding` filler bytes then one xref stream per section, newest last, each pointing at the one before.
+function xrefStreamFile(sections: readonly { readonly dict: string; readonly data: Uint8Array }[], padding = 0): Uint8Array {
+	const encoder = new TextEncoder()
+	const parts: Uint8Array[] = [encoder.encode("%PDF-1.7\n"), new Uint8Array(padding).fill(0x20)]
+	let length = parts.reduce((sum, part) => sum + part.length, 0)
+	let prev: number | null = null
+
+	for (const [i, section] of sections.entries()) {
+		const stream = zlibSync(section.data)
+		const head = encoder.encode(
+			`${i + 1} 0 obj\n<< /Type /XRef ${section.dict}${prev === null ? "" : ` /Prev ${prev}`} /Filter /FlateDecode /Length ${stream.length} >>\nstream\n`
+		)
+		const tail = encoder.encode("\nendstream\nendobj\n")
+
+		prev = length
+		parts.push(head, stream, tail)
+		length += head.length + stream.length + tail.length
+	}
+
+	parts.push(encoder.encode(`startxref\n${prev ?? 0}\n%%EOF\n`))
+
+	const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+	let at = 0
+
+	for (const part of parts) {
+		bytes.set(part, at)
+		at += part.length
+	}
+
+	return bytes
+}
 
 describe("MuPDF revisions of a signed file", () => {
 	it("judges a form value MuPDF saved incrementally as an allowed change", async () => {

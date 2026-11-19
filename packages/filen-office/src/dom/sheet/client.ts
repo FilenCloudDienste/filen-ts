@@ -1,11 +1,13 @@
-import type {
-	SheetAbortSignal,
-	SheetEvent,
-	SheetHost,
-	SheetLockedFile,
-	SheetOpenResult,
-	SheetSessionApi,
-	SheetWorkbookInfo
+import {
+	SheetSessionClosedError,
+	saveFailure,
+	type SheetAbortSignal,
+	type SheetEvent,
+	type SheetHost,
+	type SheetLockedFile,
+	type SheetOpenResult,
+	type SheetSessionApi,
+	type SheetWorkbookInfo
 } from "../../core/sheet/protocol"
 import {
 	SHEET_PASSWORD_JOB,
@@ -40,7 +42,12 @@ export interface SheetJobRunner {
 	job(
 		name: string,
 		args: unknown,
-		options?: { readonly signal?: SheetAbortSignal; readonly onProgress?: (value: unknown) => void }
+		// transfer: buffers of `args` the worker takes over (detached here), else the args are cloned.
+		options?: {
+			readonly signal?: SheetAbortSignal
+			readonly onProgress?: (value: unknown) => void
+			readonly transfer?: ArrayBuffer[]
+		}
 	): Promise<unknown>
 }
 
@@ -61,11 +68,8 @@ interface Open {
 
 const FAILED = "The sheet worker stopped"
 
-// A call or job answered by the page's side because its session was closed (or its host disposed) first: the user
-// left, nothing failed.
-export class SheetSessionClosedError extends Error {
-	override readonly name = "SheetSessionClosedError"
-}
+// A call or job answered by the page's side because its session was closed (or its host disposed) first.
+export { SheetSessionClosedError }
 
 export function sheetWorkerHost(worker: SheetWorkerLike): SheetHost {
 	const opens = new Map<number, Open>()
@@ -179,7 +183,7 @@ export function sheetWorkerHost(worker: SheetWorkerLike): SheetHost {
 			save: options =>
 				call<Awaited<ReturnType<SheetSessionApi["save"]>>>("save", [], options?.signal).catch((error: unknown) => ({
 					ok: false as const,
-					reason: "closed" as const,
+					reason: saveFailure(error, options?.signal),
 					message: error instanceof Error ? error.message : String(error)
 				})),
 			export: (format, options) => call("export", [format, options]),
@@ -194,7 +198,7 @@ export function sheetWorkerHost(worker: SheetWorkerLike): SheetHost {
 
 				return new Promise<unknown>((resolve, reject) => {
 					open.calls.set(id, { resolve, reject, ...(options.onProgress !== undefined && { progress: options.onProgress }) })
-					send({ t: "job", s, id, name, args })
+					send({ t: "job", s, id, name, args }, options.transfer)
 
 					if (signal !== undefined) {
 						if (signal.aborted) send({ t: "abort", s, id })
@@ -320,9 +324,12 @@ export async function checkSheetPassword(
 
 	if (jobs === null) return "failed"
 
+	// One copy, handed over: the caller's file stays usable for the next attempt.
+	const copy = bytes.slice()
+
 	return (await jobs.job(
 		SHEET_PASSWORD_JOB,
-		{ bytes: bytes.slice(), password },
-		signal === undefined ? {} : { signal }
+		{ bytes: copy, password },
+		{ ...(signal === undefined ? {} : { signal }), transfer: [copy.buffer] }
 	)) as SheetPasswordVerdict
 }

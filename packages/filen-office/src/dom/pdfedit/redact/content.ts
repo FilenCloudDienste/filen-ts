@@ -10,6 +10,7 @@ import {
 	type PdfOperation
 } from "../../../core/pdfedit/contentStream"
 import { intersectRects, rectsOverlap, transformRect, type RedactRect } from "../../../core/pdfedit/redactVerify"
+import { TEXT_ALTERNATIVES } from "./structure"
 
 // Content-stream passes MuPDF's redaction does not do: shadings painted under an area mark, the text alternatives of
 // marked content whose drawing a redaction changed, and (sanitize) content in hidden layers. Streams are rewritten by
@@ -335,6 +336,9 @@ export function markedSections(page: Mupdf.PDFObject): { readonly operations: Pd
 			return
 		}
 
+		// Outside every section nothing reads it: a form's stream is not parsed for nothing.
+		if (open.length === 0) return
+
 		const part = drawSignature(resources, operation, 0, new Set())
 
 		if (part.length > 0) for (const section of open) section.signature += part
@@ -359,8 +363,6 @@ export function changedSections(before: readonly MarkedSection[], after: readonl
 	})
 }
 
-const ALTERNATIVES = ["ActualText", "Alt", "E"]
-
 // Removes the text alternatives of the given sections from their marked-content properties (inline in the stream,
 // or in the page's Properties resources). Returns whether the page changed.
 export function stripSectionText(
@@ -380,14 +382,14 @@ export function stripSectionText(
 
 		const [tag, properties] = operation.operands
 
-		if (properties?.kind === "dict" && ALTERNATIVES.some(key => properties.entries.has(key)) && tag !== undefined) {
-			const entries = new Map([...properties.entries].filter(([key]) => !ALTERNATIVES.includes(key)))
+		if (properties?.kind === "dict" && TEXT_ALTERNATIVES.some(key => properties.entries.has(key)) && tag !== undefined) {
+			const entries = new Map([...properties.entries].filter(([key]) => !TEXT_ALTERNATIVES.includes(key)))
 
 			edits.push({ start: operation.start, end: operation.end, replacement: writeOperation("BDC", [tag, { kind: "dict", entries }]) })
 		} else if (resources.isDictionary()) {
 			const dict = propertyDict(resources, properties)
 
-			for (const key of ALTERNATIVES) {
+			for (const key of TEXT_ALTERNATIVES) {
 				if (dict !== null && !dict.get(key).isNull()) {
 					dict.delete(key)
 					changed = true
@@ -493,6 +495,22 @@ function removeHiddenStream(
 	removeHiddenIn(document, stream, streamBytes(stream), resources, visible, done, depth)
 }
 
+// An annotation's appearance streams: each of /N, /D and /R, or each state of one.
+export function appearanceStreams(annotation: Mupdf.PDFObject): Mupdf.PDFObject[] {
+	const streams: Mupdf.PDFObject[] = []
+
+	annotation.get("AP").forEach(appearance => {
+		if (appearance.isStream()) streams.push(appearance)
+		else if (appearance.isDictionary()) {
+			appearance.forEach(state => {
+				if (state.isStream()) streams.push(state)
+			})
+		}
+	})
+
+	return streams
+}
+
 // Removes the page's hidden-layer content, its hidden annotations, and hidden content in its annotations'
 // appearances. Returns whether the page changed.
 export function removeHiddenContent(document: Mupdf.PDFDocument, page: Mupdf.PDFPage, visible: OcVisibility, done: Set<number>): boolean {
@@ -509,7 +527,8 @@ export function removeHiddenContent(document: Mupdf.PDFDocument, page: Mupdf.PDF
 		}
 	}
 
-	for (const annotation of page.getAnnotations()) {
+	// A copy: deleting an annotation splices MuPDF's cached list.
+	for (const annotation of [...page.getAnnotations()]) {
 		const annotObject = annotation.getObject()
 		const oc = annotObject.get("OC")
 
@@ -520,15 +539,8 @@ export function removeHiddenContent(document: Mupdf.PDFDocument, page: Mupdf.PDF
 			continue
 		}
 
-		annotObject.get("AP").forEach(appearance => {
-			const streams = appearance.isStream() ? [appearance] : []
-
-			if (appearance.isDictionary()) appearance.forEach(state => streams.push(state))
-
-			for (const stream of streams) {
-				if (stream.isStream()) removeHiddenStream(document, stream, document.newDictionary(), visible, done, 0)
-			}
-		})
+		for (const stream of appearanceStreams(annotObject))
+			removeHiddenStream(document, stream, document.newDictionary(), visible, done, 0)
 	}
 
 	return changed

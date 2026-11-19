@@ -2,7 +2,7 @@ import { appendAll } from "../../arrays"
 import { OdfNs } from "../../odf/namespaces"
 import { declaresCalcext } from "./cells"
 import { runSliced, type SliceClock } from "../../slicing"
-import { SHEET_MAX_ROWS } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import {
 	RowFlag,
@@ -14,7 +14,6 @@ import {
 } from "../../xlsx/model/types"
 import { decodeUtf8, encodeUtf8, escapeAttribute } from "../../xml/index"
 import type { OdsSource, OdsTableSource } from "../source"
-import { SourceAxis } from "./axis"
 import { SheetView } from "./sheet"
 import { TagKind, TagStream, tagAttributes, type StreamHandler } from "./stream"
 import { OdsStyleWriter } from "./styles"
@@ -24,7 +23,10 @@ import type { ScopeNames } from "./names"
 import { nameKey } from "../features"
 import { ADDRESS_ATTRIBUTES, patchAttributes, type Shifter } from "../unheld"
 import { movedAttribute, movedTarget } from "./conditions"
+import { OdsSheet, sourceTableOf } from "../workbook"
 import { sameBytes } from "../../docx/write/bytes"
+import { splitOutsideQuotes, withoutSheet } from "../formula/toXlsx"
+import { ofSheetName } from "../formula/toOf"
 
 // content.xml as a save writes it, streamed from the source's: everything an edit left alone passes through as its
 // bytes; the automatic styles new formats need go at the end of office:automatic-styles; each table:table goes
@@ -284,9 +286,7 @@ export class ContentWriter implements StreamHandler {
 	}
 
 	private sourceOf(entry: XlsxSheetEntry): OdsTableSource | undefined {
-		const source = this.plan.source.tables[entry.id]
-
-		return source !== undefined && source.id === entry.id && entry.model !== null && "rowAxis" in entry.model ? source : undefined
+		return sourceTableOf(this.plan.source, entry) ?? undefined
 	}
 
 	private writerFor(entry: XlsxSheetEntry): TableWriter {
@@ -325,10 +325,10 @@ export class ContentWriter implements StreamHandler {
 
 			const source = this.sourceOf(entry) ?? null
 			const view = new SheetView(this.plan.document, model)
-			const axes = model as { rowAxis?: SourceAxis; colAxis?: SourceAxis }
-			const rowAxis = source === null ? null : (axes.rowAxis ?? SourceAxis.identity(SHEET_MAX_ROWS))
-			const movedFrom = (model as { movedFrom?: number }).movedFrom ?? SHEET_MAX_ROWS
-			const allRows = source === null || axes.colAxis?.identity === false
+			const sheet = model instanceof OdsSheet ? model : null
+			const rowAxis = source === null || sheet === null ? null : sheet.rowAxis
+			const movedFrom = sheet?.movedFrom ?? SHEET_MAX_ROWS
+			const allRows = source === null || sheet?.colAxis.identity === false
 			const sourceRows = source?.rows ?? 0
 			const fresh = (row: number): boolean => {
 				if (rowAxis === null) return true
@@ -361,7 +361,7 @@ export class ContentWriter implements StreamHandler {
 			}
 
 			model.styleRuns?.forEach(
-				{ startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: 0x3fff },
+				{ startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: SHEET_MAX_COLS - 1 },
 				(startRow, _c, endRow, _e, xf) => {
 					if (allRows || fresh(startRow) || fresh(endRow) || endRow >= movedFrom) styles.cell(xf)
 				}
@@ -438,13 +438,13 @@ export class ContentWriter implements StreamHandler {
 	private endRanges(end: number): void {
 		const element = decodeUtf8(this.stream.bytes(this.rangesStart, end))
 		const filters = this.plan.filters
-		const open = /^<[^>]*>/.exec(element)?.[0] ?? "<table:database-ranges>"
+		const open = openingTag(element) || "<table:database-ranges>"
 		const inner = open.endsWith("/>") ? "" : element.slice(open.length, element.lastIndexOf("<"))
 		const seen = new Set<string>()
 		const out: string[] = []
 
 		for (const child of topElements(inner)) {
-			const tag = /^<[^>]*>/.exec(child)?.[0] ?? ""
+			const tag = openingTag(child)
 			const attributes = tagAttributes(encodeTag(tag))
 			const sheet = rangeSheet(attributes.get("table:target-range-address") ?? "")
 
@@ -477,6 +477,7 @@ export class ContentWriter implements StreamHandler {
 		}
 
 		appendAll(out, filters?.added ?? [])
+		this.replacedWhole()
 		this.ownStructure(out.length === 0 ? "" : `<table:database-ranges>${out.join("")}</table:database-ranges>`)
 		this.filtersDone = true
 		this.rangesStart = -1
@@ -503,7 +504,7 @@ export class ContentWriter implements StreamHandler {
 	// references, one whose cells were all deleted left out; every other byte as written.
 	private movedConditions(element: string, own: string): string {
 		const shifter = this.shifter
-		const open = /^<[^>]*>/.exec(element)?.[0] ?? ""
+		const open = openingTag(element)
 
 		if (shifter === null || open.endsWith("/>")) return element
 
@@ -514,7 +515,7 @@ export class ContentWriter implements StreamHandler {
 		for (const child of topElements(element.slice(open.length, closeAt))) {
 			let text: string | undefined
 
-			patchAttributes(/^<[^>]*>/.exec(child)?.[0] ?? "", calcext, (local, value) => {
+			patchAttributes(openingTag(child), calcext, (local, value) => {
 				if (local === "target-range-address") text = value
 
 				return undefined
@@ -557,12 +558,12 @@ export class ContentWriter implements StreamHandler {
 	private endNames(scope: number | null, end: number): void {
 		const element = decodeUtf8(this.stream.bytes(this.namesStart, end))
 		const plan = this.plan.names?.get(scope)
-		const open = /^<[^>]*>/.exec(element)?.[0] ?? "<table:named-expressions>"
+		const open = openingTag(element) || "<table:named-expressions>"
 		const inner = open.endsWith("/>") ? "" : element.slice(open.length, element.lastIndexOf("<"))
 		const out: string[] = []
 
 		for (const child of topElements(inner)) {
-			const tag = /^<[^>]*>/.exec(child)?.[0] ?? ""
+			const tag = openingTag(child)
 			const name = tagAttributes(encodeTag(tag)).get("table:name")?.toUpperCase()
 			const replacement = name === undefined ? undefined : plan?.replaced.get(name)
 
@@ -580,6 +581,7 @@ export class ContentWriter implements StreamHandler {
 		}
 
 		appendAll(out, plan?.added ?? [])
+		this.replacedWhole()
 		this.ownStructure(out.length === 0 ? "" : `<table:named-expressions>${out.join("")}</table:named-expressions>`)
 		this.namesDone.add(scope)
 		this.namesStart = -1
@@ -673,6 +675,13 @@ export class ContentWriter implements StreamHandler {
 		if (piece.length > 0) this.spanBlocked = true
 
 		this.own(piece)
+	}
+
+	// A source element taken whole and written again, also as nothing (left out): a change the span proof does not
+	// see, proved by reading the whole file back.
+	private replacedWhole(): void {
+		this.changed = true
+		this.spanBlocked = true
 	}
 
 	// Set once the content holds a change past rows and styles (ownStructure, a table written anew).
@@ -806,6 +815,11 @@ export class ContentWriter implements StreamHandler {
 		}
 
 		this.stream.end()
+
+		// Every table and the root seen under the names the writer matches: else its edits would pass by unwritten.
+		if (!this.rootSeen || this.sourceTable !== this.plan.source.tables.length)
+			throw new ContentRefused("The content's elements are not under the prefixes the writer reads")
+
 		this.flush(this.stream.offset)
 
 		yield* this.take()
@@ -1426,25 +1440,26 @@ export class ContentWriter implements StreamHandler {
 	}
 }
 
-// "Sheet1!$A$1:$D$20,..." as table:print-ranges ("$Sheet1.$A$1:$Sheet1.$D$20 ..."): each area on its sheet.
+// "Sheet1!$A$1:$D$20,..." as table:print-ranges ("$Sheet1.$A$1:$Sheet1.$D$20 ..."): each area on its sheet. Areas
+// split and their sheet found outside quotes: a sheet name may hold "," or "!".
 export function printRanges(formula: string, sheet: string): string | undefined {
 	const parts: string[] = []
+	const cell = /^\$?[A-Z]{1,3}\$?\d+$/
 
-	for (const area of formula.split(",")) {
+	for (const area of splitOutsideQuotes(formula, ",")) {
 		const text = area.trim()
-		const bang = text.lastIndexOf("!")
+		const range = withoutSheet(text)
 		const name =
-			bang < 0
+			range.length === text.length
 				? sheet
 				: text
-						.slice(0, bang)
+						.slice(0, text.length - range.length - 1)
 						.replace(/^'(.*)'$/, "$1")
 						.replaceAll("''", "'")
-		const range = bang < 0 ? text : text.slice(bang + 1)
 		const [from = "", to] = range.split(":")
-		const quoted = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `'${name.replaceAll("'", "''")}'`
+		const quoted = ofSheetName(name)
 
-		if (!/^\$?[A-Z]{1,3}\$?\d+$/.test(from) || (to !== undefined && !/^\$?[A-Z]{1,3}\$?\d+$/.test(to))) return undefined
+		if (!cell.test(from) || (to !== undefined && !cell.test(to))) return undefined
 
 		parts.push(to === undefined ? `$${quoted}.${from}` : `$${quoted}.${from}:$${quoted}.${to}`)
 	}
@@ -1504,34 +1519,63 @@ function protectionChild(protection: XlsxSheetProtection | null, prefixes: Reado
 	return `<${loext}:table-protection${attributes}/>`
 }
 
+// Past the ">" of the tag whose "<" is at `at`, quoted values passed over (either quote, ">" allowed inside); -1 when
+// it is not complete.
+function tagEndIn(markup: string, at: number): number {
+	for (let i = at + 1; i < markup.length; i++) {
+		const code = markup.charCodeAt(i)
+
+		if (code === 62) return i + 1
+
+		if (code === 34 || code === 39) {
+			const close = markup.indexOf(code === 34 ? '"' : "'", i + 1)
+
+			if (close < 0) return -1
+
+			i = close
+		}
+	}
+
+	return -1
+}
+
+// The start tag markup opens with, "" for none.
+export function openingTag(markup: string): string {
+	if (!markup.startsWith("<")) return ""
+
+	const end = tagEndIn(markup, 0)
+
+	return end < 0 ? "" : markup.slice(0, end)
+}
+
 // The top-level elements of markup, as written.
-function topElements(markup: string): string[] {
+export function topElements(markup: string): string[] {
 	const out: string[] = []
 	let depth = 0
 	let start = -1
 
 	for (let at = markup.indexOf("<"); at >= 0; at = markup.indexOf("<", at + 1)) {
-		const close = markup.indexOf(">", at)
-
-		if (close < 0) break
-
 		const next = markup[at + 1]
 
 		if (next === "!" || next === "?") continue
+
+		const end = tagEndIn(markup, at)
+
+		if (end < 0) break
 
 		if (next === "/") {
 			depth--
 
 			if (depth === 0 && start >= 0) {
-				out.push(markup.slice(start, close + 1))
+				out.push(markup.slice(start, end))
 				start = -1
 			}
 		} else {
 			if (depth === 0) start = at
 
-			if (markup[close - 1] === "/") {
+			if (markup[end - 2] === "/") {
 				if (depth === 0) {
-					out.push(markup.slice(start, close + 1))
+					out.push(markup.slice(start, end))
 					start = -1
 				}
 			} else {
@@ -1539,7 +1583,7 @@ function topElements(markup: string): string[] {
 			}
 		}
 
-		at = close
+		at = end - 1
 	}
 
 	return out
@@ -1565,10 +1609,46 @@ function rangeSheet(address: string): string | undefined {
 	return dot <= 0 ? undefined : text.slice(0, dot)
 }
 
-function replaceAttribute(tag: string, name: string, value: string | undefined): string {
-	const pattern = new RegExp(`\\s${name}="[^"]*"`)
+function isSpace(code: number): boolean {
+	return code === 32 || code === 9 || code === 10 || code === 13
+}
+
+// A start tag with attribute `name` set to `value` (undefined: removed), every other byte as it was. The tag's
+// attributes are scanned (either quote, space around "=") so a value holding the name or a ">" is never taken for it.
+export function replaceAttribute(tag: string, name: string, value: string | undefined): string {
 	const close = tag.endsWith("/>") ? "/>" : ">"
-	const without = tag.replace(pattern, "")
+	let without = tag
+	let i = 1
+
+	while (i < tag.length && !isSpace(tag.charCodeAt(i)) && tag[i] !== "/" && tag[i] !== ">") i++
+
+	while (i < tag.length) {
+		const spaceStart = i
+
+		while (i < tag.length && isSpace(tag.charCodeAt(i))) i++
+
+		if (i >= tag.length || tag[i] === "/" || tag[i] === ">") break
+
+		const nameStart = i
+
+		while (i < tag.length && tag[i] !== "=" && !isSpace(tag.charCodeAt(i))) i++
+
+		const same = i - nameStart === name.length && tag.startsWith(name, nameStart)
+
+		while (i < tag.length && tag[i] !== '"' && tag[i] !== "'") i++
+
+		const valueEnd = i < tag.length ? tag.indexOf(tag.charAt(i), i + 1) : -1
+
+		if (valueEnd < 0) break
+
+		i = valueEnd + 1
+
+		if (same) {
+			without = `${tag.slice(0, spaceStart)}${tag.slice(i)}`
+
+			break
+		}
+	}
 
 	if (value === undefined) return without
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { insertPictureOp, insertTableOp } from "../core/presentation/edit/commands/insert"
 import type { DeckOp } from "../core/presentation/edit/ops"
+import { boxMarkup } from "../core/odp/write/emit/shape"
 import type { ShapeNode, SlideNode, SlideRef, TextBody } from "../core/presentation/model"
 import { review } from "../dom/presentation/engine/review"
 import { odpBytes, page } from "./odpFixtures"
@@ -263,5 +265,41 @@ describe("an ODP page whose start tag the save writes again", () => {
 		expect((await d.save()).result.kind).toBe("written")
 		expect((await d.undo()).ok).toBe(true)
 		expect(await contentOf((await d.save()).bytes)).toBe(original)
+	})
+})
+
+// A table and a picture inserted turned are written as the shape writer writes a turned box (boxAttributes): after
+// the rebase, a later save of their page copies them as the first save wrote them.
+describe("ODP frames inserted turned", () => {
+	it("are copied unchanged by the next save of their page", async () => {
+		const d = await driveSession(odpBytes(PRETTY_DECK), "odp")
+		const first = d.session.deck.slides[0] as SlideRef
+
+		await review(d.context, first, { comments: false })
+
+		const turned = { x: 1_234_567, y: 765_431, cx: 2_345_679, cy: 1_234_573, rot: 1_234_567, flipH: false, flipV: false }
+		const table = insertTableOp(d.session.deck, first, 2, 2, 0) as Extract<DeckOp, { kind: "insert" }>
+
+		expect((await d.command({ ...table, shape: { ...table.shape, xfrm: turned } } as DeckOp)).ok).toBe(true)
+		expect((await d.command(insertPictureOp(d.session.deck, first, image(12, 7), 0, "p.png", { ...turned, y: 3_456_789 }))).ok).toBe(
+			true
+		)
+
+		const frames = (content: string): string[] =>
+			[...content.matchAll(/<draw:frame[^>]*draw:transform="[^"]*"[^>]*>/gu)].map(match => match[0])
+		const saved = frames(await contentOf((await d.save()).bytes))
+
+		expect(saved).toHaveLength(2)
+		// Written as the shape writer writes a turned box (the reader's rounding taken into account).
+		expect(saved[0]).toContain(boxMarkup(turned))
+		expect(saved[1]).toContain(boxMarkup({ ...turned, y: 3_456_789 }))
+
+		const node = d.session.deck.nodes.get(first) as SlideNode
+		const other = node.shapes.find(shape => shape.kind === "sp") as ShapeNode
+
+		expect((await d.command({ family: "shape", kind: "setName", target: { slide: first, id: other.id }, name: "Renamed" })).ok).toBe(
+			true
+		)
+		expect(frames(await contentOf((await d.save()).bytes))).toEqual(saved)
 	})
 })

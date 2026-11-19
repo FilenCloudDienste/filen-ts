@@ -36,9 +36,10 @@ const BINDINGS: ObjectKeyBindings = {
 	bringForward: "mod+]",
 	sendBackward: "mod+["
 }
-// The app keymap's own Mac test, which the canvas reads.
-const APPLE = isMacPlatform()
-const MOD = APPLE ? { metaKey: true } : { ctrlKey: true }
+// Mod as the app keymap's own Mac test reads it, per test (a test may spy the user agent).
+const mod = (): KeyboardEventInit => (isMacPlatform() ? { metaKey: true } : { ctrlKey: true })
+const MAC_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)"
+const LINUX_AGENT = "Mozilla/5.0 (X11; Linux x86_64)"
 
 interface Shape {
 	readonly xfrm: Xfrm
@@ -236,11 +237,21 @@ describe("the canvas layer's pointer", () => {
 	})
 
 	it("Control+click on a Mac is the secondary click, not an additive press", () => {
-		vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)")
+		vi.spyOn(navigator, "userAgent", "get").mockReturnValue(MAC_AGENT)
 		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 100, 100) }])
 		click(150, 150)
 		click(450, 150, { ctrlKey: true, pointerType: "mouse" })
 		expect(selection.getSnapshot().ids).toEqual([2])
+	})
+
+	it("a move drag snaps the shape's edge to a nearby shape's", async () => {
+		mount([{ xfrm: box(100, 100, 100, 100) }, { xfrm: box(300, 300, 100, 100) }])
+		click(150, 150)
+		pointer("pointerdown", 150, 150)
+		pointer("pointermove", 247, 150)
+		pointer("pointerup", 247, 150)
+		await settle()
+		expect(ops).toMatchObject([{ kind: "setXfrm", xfrm: { x: 200 * EMU, y: 100 * EMU } }])
 	})
 
 	it("a press past the slide that misses every handle clears the selection, as empty canvas does", () => {
@@ -277,7 +288,7 @@ describe("the file's locks and lines on the canvas", () => {
 		pointer("pointerup", 600, 300)
 		expect(selection.getSnapshot().ids).toEqual([3])
 		act(() => {
-			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "a", code: "KeyA", ...MOD }))
+			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "a", code: "KeyA", ...mod() }))
 		})
 		expect(selection.getSnapshot().ids).toEqual([3])
 	})
@@ -317,7 +328,7 @@ describe("the canvas layer's keys", () => {
 			selection.set([2, 3])
 		})
 		act(() => {
-			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "U", code: "KeyU", shiftKey: true, ...MOD }))
+			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "U", code: "KeyU", shiftKey: true, ...mod() }))
 		})
 		await settle()
 		expect(ops).toEqual([
@@ -338,7 +349,7 @@ describe("the canvas layer's keys", () => {
 			selection.set([3, 2])
 		})
 
-		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "d", code: "KeyD", ...MOD })
+		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "d", code: "KeyD", ...mod() })
 
 		act(() => {
 			layer().dispatchEvent(event)
@@ -348,48 +359,6 @@ describe("the canvas layer's keys", () => {
 		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 10 * EMU, dy: 10 * EMU }])
 		// Compared at every level (the slide's is 0).
 		expect(selection.getSnapshot().pending?.before).toEqual(new Set(["0:2", "0:3"]))
-	})
-
-	it("Ctrl+drag copies the selection to the drop and selects the copies; the originals stay", async () => {
-		const COPY = APPLE ? { altKey: true } : { ctrlKey: true }
-
-		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 200, 100) }])
-		act(() => {
-			selection.set([3, 2])
-		})
-		pointer("pointerdown", 150, 150, COPY)
-		pointer("pointermove", 200, 170, COPY)
-		pointer("pointerup", 250, 190, COPY)
-		await settle()
-		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 100 * EMU, dy: 40 * EMU }])
-		expect(selection.getSnapshot().pending?.before).toEqual(new Set(["0:2", "0:3"]))
-		// The press on a selected shape with Ctrl became a drag: it does not leave the selection.
-		expect(selection.getSnapshot().ids).toEqual([3, 2])
-	})
-
-	it("Ctrl pressed during a move drag shows the originals where they are and copies at the drop", async () => {
-		mount([{ xfrm: box(100, 100, 200, 100) }])
-		click(150, 150)
-		pointer("pointerdown", 150, 150)
-		pointer("pointermove", 200, 150)
-		await vi.waitFor(() => {
-			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).not.toBe("")
-		})
-		act(() => {
-			layer().dispatchEvent(
-				new KeyboardEvent("keydown", {
-					bubbles: true,
-					key: APPLE ? "Alt" : "Control",
-					...(APPLE ? { altKey: true } : { ctrlKey: true })
-				})
-			)
-		})
-		await vi.waitFor(() => {
-			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).toBe("")
-		})
-		pointer("pointerup", 200, 150, APPLE ? { altKey: true } : { ctrlKey: true })
-		await settle()
-		expect(ops).toMatchObject([{ kind: "duplicate", shapes: [2], dx: 50 * EMU, dy: 0 }])
 	})
 
 	it("Escape during a marquee hides it and keeps the release from selecting", async () => {
@@ -458,5 +427,85 @@ describe("the canvas layer's keys", () => {
 		expect(ops).toEqual([
 			{ family: "shape", kind: "setXfrm", target: { slide: ref, id: 2 }, xfrm: { ...box(100, 100, 200, 100), rot: 900_000 } }
 		])
+	})
+})
+
+// The drag modifiers differ by platform: on a Mac, Option copies and Cmd turns snapping off; elsewhere Ctrl copies and
+// Alt turns snapping off.
+describe.each([
+	{ platform: "other", agent: LINUX_AGENT, copyKey: "Control", copy: { ctrlKey: true }, free: { altKey: true } },
+	{ platform: "Apple", agent: MAC_AGENT, copyKey: "Alt", copy: { altKey: true }, free: { metaKey: true } }
+])("the canvas layer's drag modifiers ($platform)", ({ agent, copyKey, copy, free }) => {
+	beforeEach(() => {
+		vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent)
+	})
+
+	it("the copy modifier held from the press copies the selection to the drop and selects the copies; the originals stay", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 200, 100) }])
+		act(() => {
+			selection.set([3, 2])
+		})
+		pointer("pointerdown", 150, 150, copy)
+		pointer("pointermove", 200, 170, copy)
+		pointer("pointerup", 250, 190, copy)
+		await settle()
+		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 100 * EMU, dy: 40 * EMU }])
+		expect(selection.getSnapshot().pending?.before).toEqual(new Set(["0:2", "0:3"]))
+		// The press on a selected shape with the modifier became a drag: it does not leave the selection.
+		expect(selection.getSnapshot().ids).toEqual([3, 2])
+	})
+
+	it("the copy modifier pressed during a move drag shows the originals where they are and copies at the drop", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }])
+		click(150, 150)
+		pointer("pointerdown", 150, 150)
+		pointer("pointermove", 200, 150)
+		await vi.waitFor(() => {
+			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).not.toBe("")
+		})
+		act(() => {
+			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: copyKey, ...copy }))
+		})
+		await vi.waitFor(() => {
+			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).toBe("")
+		})
+		pointer("pointerup", 200, 150, copy)
+		await settle()
+		expect(ops).toMatchObject([{ kind: "duplicate", shapes: [2], dx: 50 * EMU, dy: 0 }])
+	})
+
+	it("the snap override held through a move drag drops the shape where the pointer left it", async () => {
+		mount([{ xfrm: box(100, 100, 100, 100) }, { xfrm: box(300, 300, 100, 100) }])
+		click(150, 150)
+		pointer("pointerdown", 150, 150, free)
+		pointer("pointermove", 247, 150, free)
+		pointer("pointerup", 247, 150, free)
+		await settle()
+		expect(ops).toMatchObject([{ kind: "setXfrm", xfrm: { x: 197 * EMU, y: 100 * EMU } }])
+	})
+})
+
+describe("the canvas layer's Mac Control copy", () => {
+	beforeEach(() => {
+		vi.spyOn(navigator, "userAgent", "get").mockReturnValue(MAC_AGENT)
+	})
+
+	it("Control pressed during a move drag copies at the drop", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }])
+		click(150, 150)
+		pointer("pointerdown", 150, 150)
+		pointer("pointermove", 200, 150)
+		await vi.waitFor(() => {
+			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).not.toBe("")
+		})
+		act(() => {
+			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Control", ctrlKey: true }))
+		})
+		await vi.waitFor(() => {
+			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).toBe("")
+		})
+		pointer("pointerup", 200, 150, { ctrlKey: true })
+		await settle()
+		expect(ops).toMatchObject([{ kind: "duplicate", shapes: [2], dx: 50 * EMU, dy: 0 }])
 	})
 })

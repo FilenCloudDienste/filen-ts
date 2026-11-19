@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { docxSchema, REVISION_MARKS } from "../core/docx/edit/schema"
 import { sessionOf } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
 import { rng } from "./fuzz/config"
@@ -42,8 +43,33 @@ describe("docx fuzz ops", () => {
 			execute: () => "false"
 		}
 
-		for (let k = 0; k < 8; k++) await move.run(context)
+		const texts = (): string[] => {
+			const out: string[] = []
 
+			session.state.doc.forEach(block => out.push(block.textContent))
+
+			return out
+		}
+		const before = texts()
+		const results: string[] = []
+
+		// Until a move applies: a draw may pick a target inside the moved range (a no-op).
+		for (let k = 0; k < 32 && !results.some(result => result.endsWith("-> true")); k++) results.push(await move.run(context))
+
+		const after = texts()
+		const revisionMarks = new Set(REVISION_MARKS.map(name => docxSchema.marks[name]))
+		const tracked: string[] = []
+
+		session.state.doc.descendants(node => {
+			if (((node.attrs["revision"] as number | undefined) ?? 0) !== 0) tracked.push(`${node.type.name} revision`)
+
+			for (const mark of node.marks) if (revisionMarks.has(mark.type)) tracked.push(mark.type.name)
+		})
+
+		expect(results.some(result => result.endsWith("-> true"))).toBe(true)
+		expect(after).not.toEqual(before)
+		expect(after.toSorted()).toEqual(before.toSorted())
+		expect(tracked).toEqual([])
 		expect(review.tracking).toBe(true)
 	})
 

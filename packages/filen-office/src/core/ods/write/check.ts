@@ -16,6 +16,7 @@ import { currentSection } from "./features"
 import { filterRange, FilterRefused } from "./filters"
 import { NameRefused, namesPlan, scopeSheetName } from "./names"
 import { OdfNs } from "../../odf/namespaces"
+import { partMark, sheetMark, workbookMark } from "../../xlsx/model/changes"
 import type { XlsxDefinedName, XlsxProtectionHash } from "../../xlsx/model/types"
 
 // Whether the OpenDocument writer can hold what an edit just did, asked once the edit ran (and undone at once when
@@ -46,11 +47,23 @@ const OWN_NAMES: ReadonlySet<string> = new Set([PRINT_AREA, "_XLNM._FILTERDATABA
 // Parts written through what they hold (a sheet's notes), and sheets' own parts added or taken away with them.
 const PARTS = /^xl\/(?:comments\d*\.xml|drawings\/vmlDrawing\d*\.vml|worksheets\/(?:_rels\/)?sheet\d+\.xml(?:\.rels)?)$/
 
-// What each document's checks found already, by what they checked.
-const known = new WeakMap<
-	XlsxDocument,
-	{ formulas: Map<string, boolean>; styles: Map<number, string | null>; writer: OdsStyleWriter; calcext: boolean }
->()
+// What each document's checks found already, by what they checked: whether each formula text OpenFormula can say,
+// and each format's verdict. The style writer only plans (its markup is never written) and is replaced once it holds
+// STYLE_WRITER_BOUND styles; a format's verdict depends on the format alone, so the verdicts stay.
+interface Known {
+	readonly formulas: Map<string, boolean>
+	readonly styles: Map<number, string | null>
+	writer: OdsStyleWriter
+	readonly calcext: boolean
+}
+
+const known = new WeakMap<XlsxDocument, Known>()
+// Formula texts remembered before the cache starts over (a fill down a column gives each row its own text).
+const FORMULA_CACHE_BOUND = 4096
+const STYLE_WRITER_BOUND = 256
+
+// The cache bounds, for tests.
+export const ODS_CHECK_BOUNDS = { formulas: FORMULA_CACHE_BOUND, styles: STYLE_WRITER_BOUND } as const
 
 function unsupported(detail: string): SheetRefusal {
 	return { reason: "unsupported", detail }
@@ -89,11 +102,13 @@ export function odsEditRefusal(
 		}
 	}
 
-	const kept = unheldRefusal(document, touched, command)
+	// Built once for both checks, which only read it.
+	const shifter = shifterOf(document.workbook, source.tables)
+	const kept = unheldRefusal(document, source, shifter, touched, command)
 
 	if (kept !== null) return kept
 
-	const conditions = conditionsVerdict(document, source, journal)
+	const conditions = conditionsVerdict(document, source, shifter, journal)
 
 	if (conditions !== null) return conditions
 
@@ -101,9 +116,14 @@ export function odsEditRefusal(
 
 	if (chart !== null) return { reason: "chartUnsupported", detail: chart }
 
+	// The checks below run for what this edit marked (each mark since open where no journal was begun). Validations,
+	// filters and print areas also read sheet names: a sheet renamed, moved, added or deleted runs them all again.
+	const sheetsMarked = journal === null || journal.has(workbookMark("sheets"))
+	const sectionMarked = (id: SheetId, section: string): boolean => sheetsMarked || journal?.has(sheetMark(id, section)) === true
+
 	// Validations: each rule as a table:content-validation can say it.
 	for (const [id, sheet] of changes.sheets) {
-		if (!sheet.sections.has("dataValidations")) continue
+		if (!sheet.sections.has("dataValidations") || !sectionMarked(id, "dataValidations")) continue
 
 		const entry = document.workbook.sheets.find(candidate => candidate.id === id)
 		const model = entry?.model
@@ -111,14 +131,7 @@ export function odsEditRefusal(
 		if (entry === undefined || model === null || model === undefined) continue
 
 		try {
-			sheetValidations(
-				document.workbook,
-				model,
-				entry.name,
-				null,
-				currentSection(document.workbook, model, "dataValidations"),
-				new Set()
-			)
+			sheetValidations(model, entry.name, null, currentSection(document.workbook, model, "dataValidations"), new Set())
 		} catch (error) {
 			if (error instanceof ValidationRefused) return { reason: "unsupported", detail: "validation" }
 
@@ -128,7 +141,7 @@ export function odsEditRefusal(
 
 	// Filters: criteria a table:filter can say.
 	for (const [id, sheet] of changes.sheets) {
-		if (!sheet.sections.has("autoFilter")) continue
+		if (!sheet.sections.has("autoFilter") || !sectionMarked(id, "autoFilter")) continue
 
 		const entry = document.workbook.sheets.find(candidate => candidate.id === id)
 		const model = entry?.model
@@ -172,7 +185,7 @@ export function odsEditRefusal(
 	}
 
 	// Defined names: print areas the writer puts on their tables; any other name as it was.
-	if (changes.workbookSections.has("definedNames")) {
+	if (changes.workbookSections.has("definedNames") && (sheetsMarked || journal?.has(workbookMark("definedNames")) === true)) {
 		const others = (names: readonly XlsxDefinedName[]): string =>
 			JSON.stringify(
 				names
@@ -205,7 +218,7 @@ export function odsEditRefusal(
 
 	// A note shown all the time: an office:annotation's office:display, which the reader does not take back.
 	for (const [name, write] of changes.parts) {
-		if (write === null || !name.endsWith(".vml")) continue
+		if (write === null || !name.endsWith(".vml") || journal?.has(partMark(name)) === false) continue
 
 		const bytes = write.write(document.workbook)
 
@@ -237,7 +250,7 @@ export function odsEditRefusal(
 			store.forEachCell(range, (_row, _col, slot) => {
 				if (refusal !== null) return
 
-				refusal = cellRefusal(document, store, slot, state)
+				refusal = cellRefusal(document, source, store, slot, state)
 			})
 
 			if (refusal !== null) return refusal
@@ -279,13 +292,11 @@ const verdicts = new WeakMap<XlsxDocument, { readonly state: readonly unknown[];
 // moves them where that is certain, the edit refused where it is not.
 function unheldRefusal(
 	document: XlsxDocument,
+	source: OdsSource,
+	shifter: Shifter,
 	touched: ReadonlyMap<SheetId, readonly SheetRange[]>,
 	command: SheetCommand | undefined
 ): SheetRefusal | null {
-	const source = odsSource(document.workbook)
-
-	if (source === undefined) return null
-
 	const unheld = source.unheld
 
 	if (unheld.items.length === 0 && unheld.pinned.size === 0 && unheld.opaque === null) return null
@@ -303,8 +314,6 @@ function unheldRefusal(
 		// The copy is written from the model: what it does not carry would not be in it.
 		if (table !== undefined && (unheld.rows.has(table.name) || unheld.pinned.has(table.name))) return keptReferences
 	}
-
-	const shifter = shifterOf(document.workbook, source.tables)
 
 	// A paste of the session's own copy: from where it was copied (the paste handler takes it so, ownClip). A values
 	// paste writes results and moves nothing.
@@ -421,12 +430,16 @@ function unheldRefusal(
 const conditionVerdicts = new WeakMap<XlsxDocument, readonly unknown[]>()
 
 // The conditional formatting check (conditions.ts), where this edit marked it or moved or renamed a sheet.
-function conditionsVerdict(document: XlsxDocument, source: OdsSource, journal: ReadonlySet<string> | null): SheetRefusal | null {
+function conditionsVerdict(
+	document: XlsxDocument,
+	source: OdsSource,
+	shifter: Shifter,
+	journal: ReadonlySet<string> | null
+): SheetRefusal | null {
 	const marked =
 		journal === null
 			? [...document.workbook.changes.sheets.values()].some(sheet => sheet.sections.has("conditionalFormatting"))
 			: [...journal].some(mark => mark.startsWith("s\u0000") && mark.endsWith("\u0000conditionalFormatting"))
-	const shifter = shifterOf(document.workbook, source.tables)
 	const state = [...shifter.moves.values()].flatMap(move => (move === null ? [null] : [move.name, move.rows, move.cols]))
 	const last = conditionVerdicts.get(document)
 
@@ -467,12 +480,7 @@ function structureRefusal(unheld: OdsUnheld, shifter: Shifter): SheetRefusal | n
 	return null
 }
 
-function cellRefusal(
-	document: XlsxDocument,
-	store: SheetStore,
-	slot: number,
-	state: { formulas: Map<string, boolean>; styles: Map<number, string | null>; writer: OdsStyleWriter; calcext: boolean }
-): SheetRefusal | null {
+function cellRefusal(document: XlsxDocument, source: OdsSource, store: SheetStore, slot: number, state: Known): SheetRefusal | null {
 	let cell
 
 	try {
@@ -492,6 +500,9 @@ function cellRefusal(
 
 		if (writable === undefined) {
 			writable = "text" in openFormula(cell.formula)
+
+			if (state.formulas.size >= FORMULA_CACHE_BOUND) state.formulas.clear()
+
 			state.formulas.set(cell.formula, writable)
 		}
 
@@ -502,6 +513,8 @@ function cellRefusal(
 
 	if (style === undefined) {
 		style = null
+
+		if (state.writer.written >= STYLE_WRITER_BOUND) state.writer = new OdsStyleWriter(source.styles, document.styles)
 
 		try {
 			state.writer.cell(cell.xf)

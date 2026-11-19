@@ -103,9 +103,9 @@ export interface DocxPdfColumn {
 // linkInts per range: source, text start, text end, link index into DocxPdfDocument.links.
 export const PDF_LINK_INTS = 4
 
-// clipInts: first line, end line, first object, end object (placed objects; inline ones are never clipped).
-export const PDF_CLIP_FLOATS = 4
-export const PDF_CLIP_INTS = 4
+// The layout's own clip arrays (core/docx/layout/output.ts): clipInts first line, end line, first object, end
+// object (placed objects; inline ones are never clipped).
+export { CLIP_FLOATS as PDF_CLIP_FLOATS, CLIP_INTS as PDF_CLIP_INTS } from "../layout/output"
 
 // One page: the display list's arrays (core/docx/layout/output.ts, core/text/displayList.ts), with the page's
 // inline objects appended to its placed ones (objectFloats x, y, width, height; objectInts id, layer, source).

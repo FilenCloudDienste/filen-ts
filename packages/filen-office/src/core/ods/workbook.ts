@@ -1,6 +1,7 @@
 import { Relationships } from "../opc/relationships"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetProtectedAction, type SheetRange } from "../sheet/protocol"
 import type { AxisShift } from "../xlsx/refs/axis"
+import { columnName } from "../sheet/refs/cellRef"
 import { SourceAxis } from "./write/axis"
 import { DEFAULT_FORMAT, DEFAULT_VIEW, XlsxSheet } from "../xlsx/read/worksheet"
 import { SheetStore } from "../xlsx/model/store"
@@ -19,6 +20,7 @@ import {
 	type XlsxWorkbookProtection
 } from "../xlsx/model/types"
 import type { OdsIssues } from "./issues"
+import type { OdsSource, OdsTableSource } from "./source"
 import { rangeAddresses, sheetRef, withoutSheet } from "./formula/toXlsx"
 import type { OdsContent, OdsTable, OdsTableProtection } from "./read/content"
 import { NULL_DATE_1899, NULL_DATE_1904 } from "./read/values"
@@ -107,6 +109,14 @@ export class OdsSheet extends XlsxSheet {
 	}
 }
 
+// The source table a sheet is still the one read from: the table of its id, its model an OdsSheet (a copied or new
+// sheet's is a plain XlsxSheet). Null for a sheet with no source table.
+export function sourceTableOf(source: OdsSource, entry: XlsxSheetEntry): OdsTableSource | null {
+	const table = source.tables[entry.id]
+
+	return table !== undefined && table.id === entry.id && entry.model instanceof OdsSheet ? table : null
+}
+
 // Runs without the rows the store holds (each such row holds its own properties).
 function runsApart(runs: readonly XlsxRowRun[], store: SheetStore): readonly XlsxRowRun[] {
 	const out: XlsxRowRun[] = []
@@ -119,10 +129,22 @@ function runsApart(runs: readonly XlsxRowRun[], store: SheetStore): readonly Xls
 
 			if (block === undefined || block.firstRow > run.last) break
 
-			for (let i = 0; i < block.rowCount; i++) {
+			// The block's rows ascend: start at the first one at or after `first`, stop past the run.
+			const relative = first - block.firstRow
+			let low = 0
+			let high = block.rowCount
+
+			while (low < high) {
+				const mid = (low + high) >>> 1
+
+				if ((block.rows[mid] ?? 0) < relative) low = mid + 1
+				else high = mid
+			}
+
+			for (let i = low; i < block.rowCount; i++) {
 				const row = block.firstRow + (block.rows[i] ?? 0)
 
-				if (row < first || row > run.last) continue
+				if (row > run.last) break
 				if (row > first) out.push({ ...run, first, last: row - 1 })
 
 				first = row + 1
@@ -203,15 +225,7 @@ function view(table: OdsTableView | undefined, settings: OdsSettings, active: bo
 
 // "$A$1:$D$20" for a range: every part anchored (print areas and titles are absolute).
 function absolute(range: SheetRange): string {
-	const column = (index: number): string => {
-		let text = ""
-
-		for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-		return text
-	}
-
-	return `$${column(range.startCol)}$${range.startRow + 1}:$${column(range.endCol)}$${range.endRow + 1}`
+	return `$${columnName(range.startCol)}$${range.startRow + 1}:$${columnName(range.endCol)}$${range.endRow + 1}`
 }
 
 // The workbook's sheets and parts from what was read, in steps (featurePartsSteps' turns), for a sliced open.
@@ -335,7 +349,6 @@ export function* buildSheetsSteps(
 
 	if (activeTab >= entries.length) activeTab = 0
 
-	// A hidden active sheet is no active sheet: the first visible one shows (as XlsxDocument.activeSheet does).
 	// A name is defined once in its scope: the first definition stands (a database range and a named range may share
 	// a name; LibreOffice keeps them apart, a workbook cannot).
 	const seen = new Set(definedNames.map(name => `${name.sheet ?? ""}\u0000${name.name.toUpperCase()}`))

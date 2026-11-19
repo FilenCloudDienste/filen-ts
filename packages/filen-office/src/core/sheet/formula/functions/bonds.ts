@@ -20,6 +20,7 @@ import {
 	serialToDate,
 	solveYield,
 	variableDeclining,
+	VDB_MAX_PERIODS,
 	yearDifference,
 	yearFraction,
 	type Basis,
@@ -509,6 +510,9 @@ export class BondFunctions extends SheetFunctionPlugin {
 			(cost: number, salvage: number, life: number, start: number, end: number, factor: number, noSwitch: boolean) => {
 				if (cost < 0 || salvage < 0 || life <= 0 || start < 0 || end < start || end > life || factor <= 0 || salvage > cost)
 					return numError()
+
+				// A schedule of more periods than any real asset has would hang the calculation.
+				if (Math.ceil(end) > VDB_MAX_PERIODS) return numError()
 
 				return finite(variableDeclining(cost, salvage, life, start, end, factor, noSwitch))
 			}

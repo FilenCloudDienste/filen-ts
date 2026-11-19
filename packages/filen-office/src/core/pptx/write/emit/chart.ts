@@ -11,12 +11,13 @@ import {
 	type HeldChart
 } from "../../../presentation/edit/apply/chart"
 import { refused, type FrameRef, type Refused, type ShapeNode, type SlideRef } from "../../../presentation/model"
+import { isRefused } from "../../../presentation/refusal"
 import { CHART_TYPE } from "../../../xlsx/charts/parts"
 import type { XmlDocument } from "../../../xml/index"
 import { G } from "../../read/xml"
 import { RELATIONSHIP_TYPES } from "../parts"
 import type { EmitPiece, EmitResult, PartsApi, PptxEmitFamily } from "../types"
-import { attr, readerOf, shapeElement, sourceNode, xfrmXml, type EmitContext } from "./shape"
+import { Pieces, bareCNvPr, newCNvPr, readerOf, shapeElement, sourceNode, xfrmXml, type EmitContext } from "./shape"
 
 // A chart's p:graphicFrame (ECMA-376 Part 1 §19.3.1.21; a:graphicData c:chart §21.2.2.27) and its parts. A frame that
 // names the package's chart is the shape family's (its a:graphic kept as written). A frame naming a version the
@@ -70,19 +71,20 @@ function graphicXml(prefix: string, rId: string): string {
 	)
 }
 
-export function newFrame(shape: ShapeNode, rId: string): EmitResult {
+// A new frame written whole; `cNvPr` its non-visual properties (newCNvPr in a save, which writes its actions too).
+export function newFrame(shape: ShapeNode, rId: string, cNvPr: readonly EmitPiece[] = [bareCNvPr(shape)]): EmitResult {
 	const xfrm = shape.xfrm
 
 	if (xfrm === undefined) return refused("malformed", "a new chart without its box")
 
-	return {
-		kind: "markup",
-		pieces: [
-			`<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr${attr("id", shape.id)}${attr("name", shape.name)}${attr("descr", shape.alt?.descr)}` +
-				`${shape.hidden ? ' hidden="1"' : ""}${attr("title", shape.alt?.title)}/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr>` +
+	return new Pieces()
+		.text("<p:graphicFrame><p:nvGraphicFramePr>")
+		.append(cNvPr)
+		.text(
+			'<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr>' +
 				`<p:nvPr/></p:nvGraphicFramePr>${xfrmXml("p:xfrm", xfrm, false)}${graphicXml("a:", rId)}</p:graphicFrame>`
-		]
-	}
+		)
+		.markup()
 }
 
 // Writes a version into a new chart part (with its workbook and the relationships it keeps): the part's rId from the
@@ -229,7 +231,9 @@ function emitFrame(context: EmitContext, shape: ShapeNode, slide: SlideRef): Emi
 	if (source === undefined) {
 		if (sourceNode(context, shape.src) >= 0) return refused("malformed", "a chart frame without its a:graphic")
 
-		return newFrame(shape, rId)
+		const cNvPr = newCNvPr(context, shape)
+
+		return isRefused(cNvPr) ? cNvPr : newFrame(shape, rId, cNvPr)
 	}
 
 	const element = shapeElement(context, shape)

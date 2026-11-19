@@ -8,7 +8,7 @@ import {
 	type ChartPartSource
 } from "../../../core/presentation/edit/apply/chart"
 import { diagramDrawingRelId, diagramRelationshipOwner } from "../../../core/presentation/edit/apply/smartart"
-import type { CarriedPart, ImportedSlide, PastedShape } from "../../../core/presentation/edit/ops"
+import { isRawPart, type CarriedPart, type ImportedSlide, type PastedShape } from "../../../core/presentation/edit/ops"
 import { notesBody } from "../../../core/presentation/notes"
 import { exportSlides } from "../../../core/pptx/write/splice"
 import { pptxSaveSource } from "./save"
@@ -19,7 +19,7 @@ import { G, partReader } from "../../../core/pptx/read/xml"
 import { DIAGRAM_CONTENT_TYPES, pendingImageIds, withDrawingReference } from "../../../core/smartart/edit"
 import { CHART_TYPE } from "../../../core/xlsx/charts/parts"
 import { insertedMediaId } from "../../../core/presentation/edit/apply/media"
-import type { PictureReading } from "../../../core/presentation/edit/apply/picture"
+import { holdsInsertedImages, insertedImage, type PictureReading } from "../../../core/presentation/edit/apply/picture"
 import type { SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
 import { cloneModel, findShape } from "../../../core/presentation/edit/changes"
@@ -55,6 +55,7 @@ import type { CallContext, ClipCapability } from "../engine"
 import type { ClipPart, ClipPartsResult, ClipRequest, ClipResult, ClipSlidesResult } from "../protocol"
 import { chartPartSource, sessionEdits, withClipReading } from "./edit"
 import { pptxParts } from "./open/pptx"
+import { insertedImagesNamed } from "../prune"
 
 // Cut and Copy in the worker (core/presentation/edit/clip.ts holds the rest): the clip a copy of shapes or slides makes,
 // and the parts a paste into another deck asks for.
@@ -67,7 +68,6 @@ import { pptxParts } from "./open/pptx"
 // chart's version, an edited diagram's data): a paste gives the slide copies of its own. An ODP shape is its source
 // element and its typed state (a clip of one deck), never one holding an object of its own.
 
-const RAW_PREFIX = "raw:"
 // The relationship kinds a pasted element may name: pictures, media, links.
 const CARRIED_KINDS: ReadonlySet<string> = new Set(["image", "video", "audio", "media", "hdphoto", "hyperlink", "slide"])
 // The kinds whose targets a pasted element owns: copied with it.
@@ -447,7 +447,7 @@ async function diagramParts(
 
 		if (target === undefined || field === "") continue
 
-		if (field.startsWith(RAW_PREFIX)) {
+		if (isRawPart(field)) {
 			const document = edits.rawDocument(field)
 
 			if (document === undefined) return refused("stale", `the diagram part ${field} is not held`)
@@ -570,7 +570,7 @@ function sourceDocument(context: CallContext, shape: ShapeNode): XmlDocument | u
 	if (parts === undefined) return refused("notImplemented", "copy")
 
 	const src = shape.src?.format === "pptx" ? shape.src : undefined
-	const held = src !== undefined && src.part.startsWith(RAW_PREFIX)
+	const held = src !== undefined && isRawPart(src.part)
 	const document = src === undefined ? undefined : held ? sessionEdits(context.session).rawDocument(src.part) : parts.document(src.part)
 
 	if (src !== undefined && (document === undefined || (!held && src.epoch !== parts.epoch)))
@@ -618,7 +618,7 @@ async function newFrameMarkup(
 
 			if (field === "") return undefined
 
-			const name = field.startsWith(RAW_PREFIX) ? unsavedName(context, owned, role.like) : zip(field)
+			const name = isRawPart(field) ? unsavedName(context, owned, role.like) : zip(field)
 
 			return { id: recorder.relate(name, role.type), name }
 		})
@@ -937,8 +937,18 @@ function slideClip(context: CallContext, refs: readonly SlideRef[], cut: boolean
 			if (isRefused(parts)) return parts
 
 			const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+			const nodes = [cloneModel(node), ...(notes === undefined ? [] : [cloneModel(notes)])]
+			// The inserted images no save wrote that the slide names: the registry lets go of them once the history lets go
+			// of the cut's delete, and a paste brings them back (a deck that holds none takes none along).
+			const images = holdsInsertedImages(deck)
+				? insertedImagesNamed(context.session, [nodes, parts]).flatMap(id => {
+						const image = insertedImage(deck, id)
 
-			held.push({ ref, parts, nodes: [cloneModel(node), ...(notes === undefined ? [] : [cloneModel(notes)])] })
+						return image === undefined ? [] : [{ id, image }]
+					})
+				: []
+
+			held.push({ ref, parts, nodes, ...(images.length === 0 ? {} : { images }) })
 		}
 
 		return {

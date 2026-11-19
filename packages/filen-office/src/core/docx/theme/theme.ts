@@ -1,3 +1,4 @@
+import { presetColor, systemColor } from "../../drawingml/presetColors"
 import type { XmlDocument } from "../../xml/index"
 import { Ns } from "../model/namespaces"
 import { partReader, type PartReader } from "../model/reader"
@@ -165,45 +166,6 @@ export function scriptForLanguage(tag: string | undefined): string | undefined {
 
 const EMPTY_FONTS: ThemeFontSet = { latin: "", eastAsia: "", complex: "", scripts: new Map() }
 
-// System colours by a:sysClr/@val when lastClr is missing.
-const SYSTEM_COLORS: Readonly<Record<string, string>> = {
-	windowText: "000000",
-	window: "FFFFFF",
-	btnText: "000000",
-	btnFace: "F0F0F0",
-	highlight: "0078D7",
-	highlightText: "FFFFFF",
-	menuText: "000000",
-	captionText: "000000",
-	grayText: "6D6D6D",
-	infoText: "000000",
-	infoBk: "FFFFE1"
-}
-
-// A few ST_PresetColorVal names; the rest are rare in documents.
-const PRESET_COLORS: Readonly<Record<string, string>> = {
-	black: "000000",
-	white: "FFFFFF",
-	red: "FF0000",
-	green: "008000",
-	lime: "00FF00",
-	blue: "0000FF",
-	yellow: "FFFF00",
-	cyan: "00FFFF",
-	aqua: "00FFFF",
-	magenta: "FF00FF",
-	fuchsia: "FF00FF",
-	gray: "808080",
-	grey: "808080",
-	silver: "C0C0C0",
-	maroon: "800000",
-	navy: "000080",
-	olive: "808000",
-	purple: "800080",
-	teal: "008080",
-	orange: "FFA500"
-}
-
 // alphaOff and alphaMod are read by drawingml readColor; a hex colour carries no alpha.
 const VALUED_TRANSFORM_KINDS: ReadonlySet<string> = new Set<ValuedColorTransformKind>([
 	"tint",
@@ -267,7 +229,7 @@ export function readDrawingColor(document: XmlDocument, node: number, scheme?: (
 		case "sysClr": {
 			const last = attribute("lastClr")
 
-			base = last !== undefined && /^[0-9a-fA-F]{6}$/.test(last) ? last.toUpperCase() : SYSTEM_COLORS[attribute("val") ?? ""]
+			base = last !== undefined && /^[0-9a-fA-F]{6}$/.test(last) ? last.toUpperCase() : systemColor(attribute("val") ?? "")
 
 			break
 		}
@@ -295,7 +257,7 @@ export function readDrawingColor(document: XmlDocument, node: number, scheme?: (
 			break
 		}
 		case "prstClr":
-			base = PRESET_COLORS[attribute("val") ?? ""]
+			base = presetColor(attribute("val") ?? "")
 			break
 	}
 

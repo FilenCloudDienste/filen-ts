@@ -192,6 +192,7 @@ function sourceEquation(part: StoryPart, document: XmlDocument, root: number): b
 
 export const mathChecks: readonly DocxCheck[] = [
 	{
+		newMarkupOnly: true,
 		part(input, checked) {
 			if (checked.part === undefined || (!checked.skeleton && input.original.has(checked.name))) return
 

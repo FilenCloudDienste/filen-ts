@@ -1,17 +1,18 @@
 import type * as Mupdf from "mupdf"
-import { foldCase, matchTerm, streamReadings, type RedactionTerm } from "../../../core/pdfedit/redactVerify"
+import { matchedTerm, matchTerm, streamReadings, type RedactionTerm } from "../../../core/pdfedit/redactVerify"
 import { clearField, removeAnnotationTree } from "./apply"
+import { appearanceStreams } from "./content"
+import { appearanceStates, isUserNameValue, STATE_KEYS, userNames } from "./structure"
 
 // Find and redact beyond the page text (one journal operation, after the marks are applied): the searched terms are
 // removed from everything else that stores text. An annotation or comment that mentions a term is removed with its
-// replies; a form field whose value mentions one loses the value; a link to a URI with one goes; every other string,
-// name or key (bookmarks, destinations, page labels, tags, document information, attachment names) has the term
-// cut out. XMP streams and attachment contents are left to Sanitize. Page content is only ever changed by marks.
+// replies; a form field whose value or button state mentions one loses the value; a link to a URI with one goes;
+// every other string, and every name a person chose (structure.ts userNames: destinations, tags, custom document
+// information), has the term cut out. The format's own names and keys are never changed. XMP streams and attachment
+// contents are left to Sanitize. Page content is only ever changed by marks.
 
 function hasTerm(text: string, terms: readonly RedactionTerm[]): boolean {
-	const folded = foldCase(text)
-
-	return terms.some(term => matchTerm(text, term, folded).length > 0)
+	return matchedTerm(text, terms) !== null
 }
 
 // The text without any match of the terms.
@@ -31,65 +32,128 @@ export function cutTerms(text: string, terms: readonly RedactionTerm[]): string 
 	return out
 }
 
-function stringsOf(object: Mupdf.PDFObject, depth = 0): string[] {
+// The strings of a direct object tree, and the names in it a person chose.
+function textsOf(object: Mupdf.PDFObject, depth = 0): string[] {
 	if (depth > 16) return []
 	if (object.isString()) return [object.asString()]
-	if (object.isName()) return [object.asName()]
 
 	const out: string[] = []
 
 	if (object.isDictionary() || object.isArray()) {
 		object.forEach((value, key) => {
-			if (typeof key === "string") out.push(key)
-			if (!value.isIndirect() || value.isString()) out.push(...stringsOf(value, depth + 1))
+			if (value.isName()) {
+				if (isUserNameValue(object, key, value.asName())) out.push(value.asName())
+			} else if (!value.isIndirect() || value.isString()) out.push(...textsOf(value, depth + 1))
 		})
 	}
 
 	return out
 }
 
-// An annotation's appearance streams, decoded.
-function appearanceTexts(object: Mupdf.PDFObject): string[] {
-	const texts: string[] = []
+// Whether an annotation's appearance streams hold a term, decoding one reading at a time and stopping at the first match.
+function appearanceMentions(object: Mupdf.PDFObject, terms: readonly RedactionTerm[]): boolean {
+	for (const stream of appearanceStreams(object)) {
+		for (const reading of streamReadings(stream.readStream().asUint8Array())) if (hasTerm(reading, terms)) return true
+	}
 
-	object.get("AP").forEach(appearance => {
-		const streams: Mupdf.PDFObject[] = appearance.isStream() ? [appearance] : []
-
-		if (!appearance.isStream() && appearance.isDictionary()) appearance.forEach(state => streams.push(state))
-
-		for (const stream of streams) if (stream.isStream()) texts.push(...streamReadings(stream.readStream().asUint8Array()))
-	})
-
-	return texts
+	return false
 }
 
 function mentions(object: Mupdf.PDFObject, terms: readonly RedactionTerm[], keys: readonly string[]): boolean {
-	return [...keys.flatMap(key => stringsOf(object.get(key))), ...appearanceTexts(object)].some(text => hasTerm(text, terms))
+	return keys.some(key => textsOf(object.get(key)).some(text => hasTerm(text, terms))) || appearanceMentions(object, terms)
 }
 
-// Replaces every string, name and key containing a term in a direct object tree; indirect children are visited as
-// objects of their own.
+// Whether a widget's field holds a term in a value (up its parent chain) or a button state chosen by a person.
+function fieldMentions(widget: Mupdf.PDFObject, terms: readonly RedactionTerm[]): boolean {
+	let field = widget
+
+	for (let depth = 0; depth < 32 && field.isDictionary(); depth++) {
+		for (const key of ["V", "DV"]) {
+			const value = field.get(key)
+
+			if (value.isName()) {
+				if (isUserNameValue(field, key, value.asName()) && hasTerm(value.asName(), terms)) return true
+			} else if (textsOf(value).some(text => hasTerm(text, terms))) return true
+		}
+
+		field = field.get("Parent")
+	}
+
+	const state = widget.get("AS")
+
+	if (state.isName() && isUserNameValue(widget, "AS", state.asName()) && hasTerm(state.asName(), terms)) return true
+
+	for (const states of appearanceStates(widget)) {
+		let found = false
+
+		states.forEach((_, key) => {
+			if (!found && typeof key === "string" && !STATE_KEYS.has(key) && hasTerm(key, terms)) found = true
+		})
+
+		if (found) return true
+	}
+
+	return appearanceMentions(widget, terms)
+}
+
+// Cuts the terms out of every string of a direct object tree, and out of the names in it a person chose (a name cut to
+// nothing goes with its entry); indirect children are visited as objects of their own.
 function cutIn(document: Mupdf.PDFDocument, object: Mupdf.PDFObject, terms: readonly RedactionTerm[], depth: number): void {
 	if (depth > 64 || !(object.isDictionary() || object.isArray())) return
 
-	const replacements: [string | number, Mupdf.PDFObject][] = []
-	const renamed: [string, string, Mupdf.PDFObject][] = []
+	const replacements: [string | number, Mupdf.PDFObject | null][] = []
 
 	object.forEach((value, key) => {
-		if (typeof key === "string" && hasTerm(key, terms)) renamed.push([key, cutTerms(key, terms), value])
 		if (value.isIndirect()) return
-		if (value.isString() && hasTerm(value.asString(), terms))
-			replacements.push([key, document.newString(cutTerms(value.asString(), terms))])
-		else if (value.isName() && hasTerm(value.asName(), terms))
-			replacements.push([key, document.newName(cutTerms(value.asName(), terms))])
-		else cutIn(document, value, terms, depth + 1)
+		if (value.isString()) {
+			if (hasTerm(value.asString(), terms)) replacements.push([key, document.newString(cutTerms(value.asString(), terms))])
+		} else if (value.isName()) {
+			if (isUserNameValue(object, key, value.asName()) && hasTerm(value.asName(), terms)) {
+				const cut = cutTerms(value.asName(), terms)
+
+				replacements.push([key, cut.length > 0 ? document.newName(cut) : null])
+			}
+		} else cutIn(document, value, terms, depth + 1)
 	})
 
-	for (const [key, value] of replacements) object.put(key, value)
+	// Removals from the end, so array indices stay valid.
+	for (let index = replacements.length - 1; index >= 0; index--) {
+		const replacement = replacements[index]
 
-	for (const [from, to, value] of renamed) {
-		object.delete(from)
-		if (to.length > 0) object.put(to, value)
+		if (replacement === undefined) continue
+
+		const [key, value] = replacement
+
+		if (value === null) object.delete(key)
+		else object.put(key, value)
+	}
+}
+
+// Renames the keys of a dictionary that hold a term (but for `fixed` ones), keeping each value. A key cut to nothing
+// goes with its value; one cut to a key the dictionary already has gets a free name next to it.
+function cutKeys(dict: Mupdf.PDFObject, fixed: ReadonlySet<string>, terms: readonly RedactionTerm[]): void {
+	const renamed: [string, string][] = []
+	const kept = new Set<string>()
+
+	dict.forEach((_, key) => {
+		if (typeof key !== "string") return
+		if (!fixed.has(key) && hasTerm(key, terms)) renamed.push([key, cutTerms(key, terms)])
+		else kept.add(key)
+	})
+
+	for (const [from, to] of renamed) {
+		const value = dict.get(from)
+
+		dict.delete(from)
+
+		if (to.length === 0) continue
+
+		let name = to
+
+		for (let suffix = 2; kept.has(name); suffix++) name = `${to} ${String(suffix)}`
+
+		kept.add(name)
+		dict.put(name, value)
 	}
 }
 
@@ -118,26 +182,32 @@ export function scrubTermsForRedaction(document: Mupdf.PDFDocument, terms: reado
 		for (const widget of page.getWidgets()) {
 			const field = widget.getObject()
 
-			if (!mentions(field, terms, ["V", "DV", "Parent"])) continue
+			if (!fieldMentions(field, terms)) continue
 
 			for (const other of clearField(document, field)) pages.add(other)
 
 			field.delete("AP")
+
+			if (field.get("AS").isName()) field.put("AS", document.newName("Off"))
+
 			pages.add(index)
 		}
 
-		for (const annotation of page.getAnnotations()) {
+		// Annotations already removed with an earlier one's replies.
+		const removed = new Set<number>()
+
+		// A copy: deleting an annotation splices MuPDF's cached list.
+		for (const annotation of [...page.getAnnotations()]) {
+			// A removed annotation no longer answers getType.
+			if (removed.has(annotation.getObject().asIndirect())) continue
+
 			const type = annotation.getType()
 
-			if (
-				type === "Redact" ||
-				type === "Popup" ||
-				!mentions(annotation.getObject(), terms, ["Contents", "RC", "T", "Subj", "NM", "A"])
-			)
-				continue
-			if (!page.getAnnotations().some(current => current.getObject().asIndirect() === annotation.getObject().asIndirect())) continue
+			if (type === "Redact" || type === "Popup") continue
+			if (!mentions(annotation.getObject(), terms, ["Contents", "RC", "T", "Subj", "NM", "A"])) continue
 
-			removeAnnotationTree(document, page, annotation)
+			for (const number of removeAnnotationTree(document, page, annotation)) removed.add(number)
+
 			pages.add(index)
 		}
 
@@ -157,10 +227,33 @@ export function scrubTermsForRedaction(document: Mupdf.PDFDocument, terms: reado
 		const reference = document.newIndirect(number)
 		const object = reference.resolve()
 
+		// A cross-reference stream's dictionary is the trailer (the file identifier, a direct encryption dictionary).
+		if (object.isDictionary() && object.get("Type").asName() === "XRef") continue
 		if (object.isString() && hasTerm(object.asString(), terms))
 			reference.writeObject(document.newString(cutTerms(object.asString(), terms)))
 		else cutIn(document, object, terms, 0)
 	}
+
+	// After the strings: a renamed key keeps its value as already cut.
+	const chosen = userNames(document)
+
+	for (let index = chosen.values.length - 1; index >= 0; index--) {
+		const slot = chosen.values[index]
+
+		if (slot === undefined) continue
+
+		const value = slot.holder.get(slot.key)
+
+		if (!value.isName() || !hasTerm(value.asName(), terms)) continue
+
+		const cut = cutTerms(value.asName(), terms)
+
+		if (cut.length > 0) slot.holder.put(slot.key, document.newName(cut))
+		else if (slot.empty !== undefined) slot.holder.put(slot.key, document.newName(slot.empty))
+		else slot.holder.delete(slot.key)
+	}
+
+	for (const { dict, fixed } of chosen.keys) cutKeys(dict, fixed, terms)
 
 	return [...pages].sort((left, right) => left - right)
 }

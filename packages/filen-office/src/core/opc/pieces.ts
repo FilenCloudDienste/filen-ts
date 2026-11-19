@@ -219,6 +219,23 @@ export function isByteChunks(bytes: PartBytes): bytes is ByteChunks {
 	return !(bytes instanceof Uint8Array)
 }
 
+// Arrays joined into one (a copy, even of one).
+export function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+	let length = 0
+
+	for (const chunk of chunks) length += chunk.length
+
+	const out = new Uint8Array(length)
+	let at = 0
+
+	for (const chunk of chunks) {
+		out.set(chunk, at)
+		at += chunk.length
+	}
+
+	return out
+}
+
 // The content joined (pieces are copied once).
 export async function joinBytes(bytes: PartBytes): Promise<Uint8Array> {
 	if (bytes instanceof Uint8Array) return bytes

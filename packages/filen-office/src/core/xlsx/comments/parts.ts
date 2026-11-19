@@ -143,13 +143,8 @@ export class AnnotationWrites {
 
 			if (removed === undefined) continue
 
-			if (removed.added === undefined) {
-				changes.restoreRelationship(removed.source, removed.id)
-			} else {
-				const { id: _id, partName: _partName, ...relationship } = removed.added
-
-				changes.addRelationship(removed.source, relationship)
-			}
+			if (removed.added === undefined) changes.restoreRelationship(removed.source, removed.id)
+			else changes.readdRelationship(removed.source, removed.added)
 		}
 
 		for (let k = this.added.length - 1; k >= 0; k--) {
@@ -171,11 +166,7 @@ export class AnnotationWrites {
 
 		for (const part of this.parts) state.setPart(part.name, part.contentType, part.after)
 
-		for (const added of this.added) {
-			const { id: _id, partName: _partName, ...relationship } = added.relationship
-
-			changes.addRelationship(added.source, relationship)
-		}
+		for (const added of this.added) changes.readdRelationship(added.source, added.relationship)
 
 		for (const removed of this.removed) changes.removeRelationship(removed.source, removed.id)
 		for (const section of this.sections) state.setSection(section.model, section.name, section.after)

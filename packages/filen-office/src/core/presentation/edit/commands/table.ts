@@ -151,21 +151,18 @@ export function tableCommandOps(target: ShapeRef, table: TableShape, selection: 
 			const rows = range.rows > 1 ? range : wholeTable(table)
 			const heights = evenly(table.heights, rows.row, rows.rows)
 
-			return heights.flatMap((height, k) =>
-				table.heights[rows.row + k] === height
-					? []
-					: [{ family: "table", kind: "setRowHeight", target, row: rows.row + k, height } as const]
-			)
+			// One op for every line (the table copied once for its undo), none when they are even already.
+			return heights.every((height, k) => table.heights[rows.row + k] === height)
+				? []
+				: [{ family: "table", kind: "setRowHeights", target, row: rows.row, heights }]
 		}
 		case "distributeColumns": {
 			const cols = range.cols > 1 ? range : wholeTable(table)
 			const widths = evenly(table.grid, cols.col, cols.cols)
 
-			return widths.flatMap((width, k) =>
-				table.grid[cols.col + k] === width
-					? []
-					: [{ family: "table", kind: "setColumnWidth", target, col: cols.col + k, width } as const]
-			)
+			return widths.every((width, k) => table.grid[cols.col + k] === width)
+				? []
+				: [{ family: "table", kind: "setColumnWidths", target, col: cols.col, widths }]
 		}
 	}
 }
@@ -175,23 +172,20 @@ export function cellPropsOp(target: ShapeRef, table: TableShape, selection: Cell
 	return { family: "table", kind: "setCellProps", target, range: selectionRange(table, selection), props }
 }
 
-// A style of the gallery (or none, `styleId` null) and the flags as they are, or one flag set.
+// A style of the gallery (or none, `styleId` null), or one flag set with the style kept.
 export function tableStyleOp(
 	target: ShapeRef,
 	change: {
 		readonly styleId?: string | null
-		readonly current?: string
 		readonly flag?: keyof TableModel["flags"]
 		readonly on?: boolean
 	}
 ): DeckOp {
-	const styleId = change.styleId === null ? undefined : (change.styleId ?? change.current)
-
 	return {
 		family: "table",
 		kind: "setStyle",
 		target,
-		styleId,
+		...(change.styleId === undefined ? {} : { styleId: change.styleId }),
 		...(change.flag === undefined ? {} : { flags: { [change.flag]: change.on ?? true } })
 	}
 }

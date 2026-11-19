@@ -3,6 +3,7 @@ import { ecmaFallback, isEcmaTransition, SPEED_MS, speedOf, writtenOptions } fro
 import { insertedMediaContent, insertedMediaId, insertedMediaWritten } from "../../../presentation/edit/apply/media"
 import { transitionRaw } from "../../../presentation/edit/apply/transition"
 import { refused, type Refused } from "../../../presentation/model"
+import { isRefused } from "../../../presentation/refusal"
 import { escapeAttribute, type XmlDocument, type XmlEditor } from "../../../xml/index"
 import { transitionElement } from "../../read/transition"
 import { G, partReader, type PartReader } from "../../read/xml"
@@ -39,10 +40,6 @@ function kindXml(kind: string, namespace: Transition["namespace"], options: read
 		default:
 			return `<${namespace}:${kind}${attributes}/>`
 	}
-}
-
-function isPieces(value: readonly EmitPiece[] | Refused): value is readonly EmitPiece[] {
-	return Array.isArray(value)
 }
 
 // The source p:transition the slide's transition was read from (the branch read of an AlternateContent).
@@ -145,7 +142,7 @@ export function pptxTransitionPieces(transition: Transition | undefined, context
 	const extLst = kept === undefined ? -1 : kept.r.child(kept.node, G.P, "extLst")
 	const sound = soundPieces(context, transition, kept)
 
-	if (!isPieces(sound)) return sound
+	if (isRefused(sound)) return sound
 
 	const tail: EmitPiece[] = [...sound, ...(extLst >= 0 ? [{ hole: extLst }] : [])]
 	const duration = transition.durationMs === undefined ? undefined : Math.round(transition.durationMs)
@@ -232,6 +229,6 @@ export const emitPptxTransition: PptxEmitFamily = {
 
 		const pieces = pptxTransitionPieces(slide.transition, context)
 
-		return isPieces(pieces) ? { kind: "markup", pieces } : pieces
+		return isRefused(pieces) ? pieces : { kind: "markup", pieces }
 	}
 }

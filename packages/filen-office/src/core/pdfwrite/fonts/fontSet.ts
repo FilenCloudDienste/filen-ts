@@ -84,7 +84,6 @@ export interface PdfFontSetOptions {
 	// Where each request's face comes from; the default maps family names to the bundled substitutes. Pass
 	// `request => manager.pdfFace(request)` to embed what the document's FontManager drew with.
 	readonly resolve?: PdfFaceResolver
-	readonly deterministic?: boolean
 	readonly signal?: { readonly aborted: boolean }
 	readonly maxEmbeddedFaceBytes?: number
 }
@@ -103,8 +102,9 @@ const CJK = new Set(["Hani", "Hira", "Kana", "Hang", "Bopo"])
 
 interface Face {
 	readonly key: string
-	readonly weight: number
-	readonly italic: boolean
+	// The style of the program drawn: a failed embedded face takes its substitute's.
+	weight: number
+	italic: boolean
 	load: Promise<void> | null
 	state: "pending" | "ready" | "failed"
 	shaping: ShapingFace | null
@@ -137,19 +137,20 @@ export class PdfFontSet {
 		this.maxEmbedded = options.maxEmbeddedFaceBytes ?? DEFAULT_MAX_EMBEDDED
 	}
 
-	// Loads what shaping text[start, end) needs. Undefined when everything is loaded already.
-	prepare(text: string, start: number, end: number, request: PdfFontFaceRequest): Promise<void> | undefined {
+	// Loads what shaping text[start, end) with `flags` (the SHAPE_* flags shape() is given) needs. Undefined when
+	// everything is loaded already.
+	prepare(text: string, start: number, end: number, request: PdfFontFaceRequest, flags: number = 0): Promise<void> | undefined {
 		this.live()
 
 		const resolved = this.resolve(request)
 
 		if (resolved.primary.state !== "ready")
-			return this.loadPrimary(resolved.primary).then(() => this.prepare(text, start, end, request))
+			return this.loadPrimary(resolved.primary).then(() => this.prepare(text, start, end, request, flags))
 
-		const needed = this.fallbacksNeeded(text, start, end, request, resolved)
+		const needed = this.fallbacksNeeded(text, start, end, request, resolved, flags)
 		const loads = needed.filter(face => face.state === "pending").map(face => this.loadFace(face))
 
-		return loads.length === 0 ? undefined : Promise.all(loads).then(() => this.prepare(text, start, end, request))
+		return loads.length === 0 ? undefined : Promise.all(loads).then(() => this.prepare(text, start, end, request, flags))
 	}
 
 	shape(text: string, start: number, end: number, request: PdfFontFaceRequest, options: PdfShapeOptions): PdfShapedText {
@@ -232,7 +233,7 @@ export class PdfFontSet {
 
 			while (next < count && (isMark(input.cps[next] ?? 0) || input.cps[next] === 0x200d)) next++
 
-			const face = this.faceFor(input.cps.slice(i, next), scripts[i] ?? 0, request, resolved)
+			const face = this.faceFor(input.cps.subarray(i, next), scripts[i] ?? 0, request, resolved)
 
 			faceOf.fill(face, i, next)
 			i = next
@@ -274,7 +275,8 @@ export class PdfFontSet {
 		return this.missingByScript
 	}
 
-	// Runs drawn without their font's layout tables because shaping them went past the limits.
+	// Runs drawn without their font's layout tables because shaping them went past the limits, or the tables failed
+	// to read or apply.
 	unshaped(): number {
 		return this.unshapedRuns
 	}
@@ -288,6 +290,7 @@ export class PdfFontSet {
 
 		this.faces.clear()
 		this.resolved.clear()
+		this.candidateLists.clear()
 		this.used.length = 0
 		this.usedSet.clear()
 	}
@@ -386,6 +389,8 @@ export class PdfFontSet {
 				await this.loadFace(substitute)
 				face.shaping = substitute.shaping
 				face.pdf = substitute.pdf
+				face.weight = substitute.weight
+				face.italic = substitute.italic
 				face.state = substitute.state
 			}
 		})()
@@ -413,12 +418,38 @@ export class PdfFontSet {
 		return resolved.primary
 	}
 
-	private candidates(cps: Uint32Array, script: number, request: PdfFontFaceRequest, resolved: Resolved): Face[] {
+	// Per resolved request, the candidate lists by script, language and the first code point's symbol class. Faces
+	// keep their identity as they load, so the lists never go stale.
+	private readonly candidateLists = new Map<Resolved, Map<string, readonly Face[]>>()
+
+	private candidates(cps: Uint32Array, script: number, request: PdfFontFaceRequest, resolved: Resolved): readonly Face[] {
 		const code = scriptCode(script)
+		const cp = cps[0] ?? 0
+		const symbols = symbolFamilies(cp)
+		const symbolClass = symbols === MATH_FIRST ? 1 : symbols === SYMBOLS_FIRST ? 2 : code === "Zyyy" && isCjkSymbol(cp) ? 3 : 0
+		const key = `${code}\u0000${String(symbolClass)}\u0000${request.language ?? ""}`
+		let lists = this.candidateLists.get(resolved)
+
+		if (lists === undefined) {
+			lists = new Map()
+			this.candidateLists.set(resolved, lists)
+		}
+
+		let list = lists.get(key)
+
+		if (list === undefined) {
+			list = this.candidatesOf(code, cp, request, resolved)
+			lists.set(key, list)
+		}
+
+		return list
+	}
+
+	private candidatesOf(code: string, cp: number, request: PdfFontFaceRequest, resolved: Resolved): Face[] {
 		const out: Face[] = []
 		const bold = resolved.weight >= 600
 
-		for (const family of fallbackFamilies(code, request.language, cps[0] ?? 0)) {
+		for (const family of fallbackFamilies(code, request.language, cp)) {
 			const file = pickFace(family.faces, bold ? 700 : 400, false)
 
 			out.push(this.face(`asset:${file.file}`, file.weight, file.italic, () => readFace(this.assets, file, this.signal)))
@@ -436,8 +467,15 @@ export class PdfFontSet {
 		return out
 	}
 
-	private fallbacksNeeded(text: string, start: number, end: number, request: PdfFontFaceRequest, resolved: Resolved): Face[] {
-		const cps = this.codePoints(text, start, end, 0).cps
+	private fallbacksNeeded(
+		text: string,
+		start: number,
+		end: number,
+		request: PdfFontFaceRequest,
+		resolved: Resolved,
+		flags: number
+	): Face[] {
+		const cps = this.codePoints(text, start, end, flags).cps
 		const scripts = resolveScripts(cps)
 		const needed = new Set<Face>()
 
@@ -538,7 +576,7 @@ export class PdfFontSet {
 		const buffer = shaped.buffer
 		const n = buffer.length
 
-		if (shaped.limited) this.unshapedRuns++
+		if (shaped.limited || shaped.broken) this.unshapedRuns++
 		if (n === 0) return null
 
 		if (!this.usedSet.has(pdf)) {
@@ -743,6 +781,8 @@ function covers(face: Face, cps: Uint32Array | readonly number[]): boolean {
 
 	for (const cp of cps) {
 		if (shaping.hasGlyph(cp) || isDefaultIgnorable(cp)) continue
+		// Nothing below U+00C0 decomposes.
+		if (cp < 0xc0) return false
 
 		// The composed or decomposed form counts too.
 		const decomposed = String.fromCodePoint(cp).normalize("NFD")

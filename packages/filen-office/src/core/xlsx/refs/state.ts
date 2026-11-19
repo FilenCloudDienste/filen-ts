@@ -1,12 +1,13 @@
 import { partKey } from "../../opc/partNames"
 import type { PartBytes } from "../../opc/pieces"
 import type { Relationship } from "../../opc/relationships"
-import type { SheetId, SheetRange } from "../../sheet/protocol"
+import type { SheetId } from "../../sheet/protocol"
 import { decodeUtf8, encodeUtf8, type Markup } from "../../xml/index"
 import type { XlsxPartWrite, XlsxSectionWriter, XlsxSheetModel, XlsxWorkbookModel, XlsxWorkbookSectionWriter } from "../model/types"
 import { editedRange, usedRange } from "../write/cells"
 import { readDimension, writeDimension } from "../write/sections"
 import { refuse } from "./catalogue"
+import { contains } from "./moveRefs"
 
 // What the catalogue wrote, per workbook: the current markup of each worksheet section it rewrote (every
 // occurrence of the name, in order) and the current bytes of each part. Its writers serialise from here, so an
@@ -201,13 +202,7 @@ function coveringDimension(sheet: XlsxSheetModel, markup: string): Markup {
 					endCol: Math.max(recorded.endCol, used.endCol)
 				}
 
-	return writeDimension(range, bytes, (sheet as { readonly prefix?: string }).prefix ?? "")
-}
-
-function contains(outer: SheetRange, inner: SheetRange): boolean {
-	return (
-		outer.startRow <= inner.startRow && outer.startCol <= inner.startCol && outer.endRow >= inner.endRow && outer.endCol >= inner.endCol
-	)
+	return writeDimension(range, bytes, sheet.prefix)
 }
 
 // A part's relationships as they now are: those read, less the ones edits removed, with the ones they added.

@@ -78,12 +78,17 @@ describe("an ODP edit undone across a save", () => {
 			it.runIf(existsSync(join(CORPUS_DIR, "odp", deck)))(
 				`${deck} ${name}: the save after the undo writes the source's content`,
 				{ timeout: 120_000 },
-				async () => {
+				async ({ skip }) => {
 					const source = new Uint8Array(readFileSync(join(CORPUS_DIR, "odp", deck)))
 					const d = await driveSession(source, "odp")
 					const op = await edit(d)
 
-					if (op === undefined) return
+					// The deck has no shape this edit can target.
+					if (op === undefined) {
+						skip(`${deck} has nothing to ${name}`)
+
+						return
+					}
 
 					expect((await d.command(op)).ok).toBe(true)
 					expect((await d.save()).result).toEqual(expect.objectContaining({ kind: "written" }))

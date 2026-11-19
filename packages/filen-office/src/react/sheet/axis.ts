@@ -18,6 +18,9 @@ export interface GridAxis {
 	hidden(index: number): boolean
 	// The last index with a size (-1: none), so a run of hidden indices at the end is never walked.
 	readonly lastShown: number
+	// The next shown index from `index` (inclusive) in `direction`, or -1, stepping over a hidden run at once. A
+	// hand-built axis may leave it out: shownIndex then steps index by index.
+	readonly nextShown?: ((index: number, direction: 1 | -1) => number) | undefined
 }
 
 // Pixels at 100 % (a resize being dragged); NaN takes an index back to the default.
@@ -163,7 +166,22 @@ export function createGridAxis(layout: SheetAxisLayout, count: number, scale: nu
 
 	for (let k = entryOf(lastShown); lastShown >= 0 && k >= 0 && sizes[k] === 0; k = entryOf(lastShown)) lastShown = (starts[k] ?? 0) - 1
 
-	return { count, total, defaultSize, size, offset, indexAt, hidden: index => size(index) === 0, lastShown }
+	// One binary search per entry of size 0 stepped over (a default-size gap between entries is shown).
+	function nextShown(from: number, direction: 1 | -1): number {
+		let index = direction === 1 ? Math.max(0, from) : Math.min(from, count - 1)
+
+		while (index >= 0 && index < count && (direction === -1 || index <= lastShown)) {
+			const k = entryOf(index)
+
+			if (k < 0 || (sizes[k] ?? 0) > 0) return index
+
+			index = direction === 1 ? (starts[k] ?? 0) + (counts[k] ?? 1) : (starts[k] ?? 0) - 1
+		}
+
+		return -1
+	}
+
+	return { count, total, defaultSize, size, offset, indexAt, hidden: index => size(index) === 0, lastShown, nextShown }
 }
 
 function scaled(layout: SheetAxisLayout, k: number, scale: number): number {
@@ -177,12 +195,60 @@ export function axisEntry(layout: SheetAxisLayout, index: number): { readonly st
 	return k < 0 ? null : { style: layout.styles[k] ?? 0, flags: layout.flags[k] ?? 0 }
 }
 
-// The next shown index from `from` (inclusive) in `direction`, or -1.
+// The next shown index from `from` (inclusive, past the end: the last index) in `direction`, or -1.
 export function shownIndex(axis: GridAxis, from: number, direction: 1 | -1): number {
+	const start = Math.min(from, axis.count - 1)
+
+	if (axis.nextShown !== undefined) return axis.nextShown(start, direction)
+
 	const end = direction === 1 ? axis.lastShown : 0
 
-	for (let index = Math.min(from, axis.count - 1); direction === 1 ? index <= end : index >= end; index += direction)
-		if (!axis.hidden(index)) return index
+	for (let index = start; direction === 1 ? index <= end : index >= end; index += direction) if (!axis.hidden(index)) return index
 
 	return -1
+}
+
+// The shown indices from `first` to `last`, in order.
+export function shownIndices(axis: GridAxis, first: number, last: number): number[] {
+	const out: number[] = []
+
+	for (
+		let index = shownIndex(axis, first, 1);
+		index >= 0 && index <= last;
+		index = index + 1 < axis.count ? shownIndex(axis, index + 1, 1) : -1
+	)
+		out.push(index)
+
+	return out
+}
+
+// The tiles (`size` indices each) from the one holding `first` to the one holding `last` that hold a shown index of
+// that span, in order: a hidden run is stepped over at once, so a filtered sheet costs its shown indices.
+export function shownTiles(axis: GridAxis, first: number, last: number, size: number): number[] {
+	const out: number[] = []
+
+	for (let index = shownIndex(axis, first, 1); index >= 0 && index <= last;) {
+		const tile = Math.floor(index / size)
+		const next = (tile + 1) * size
+
+		out.push(tile)
+		index = next < axis.count ? shownIndex(axis, next, 1) : -1
+	}
+
+	return out
+}
+
+// The shown index `steps` shown indices from `from` in `direction`, or the farthest there is.
+export function shownStep(axis: GridAxis, from: number, steps: number, direction: 1 | -1): number {
+	let at = from
+
+	for (let step = 0; step < steps; step++) {
+		const next = at + direction < 0 || at + direction >= axis.count ? -1 : shownIndex(axis, at + direction, direction)
+
+		if (next < 0) break
+
+		at = next
+	}
+
+	return at
 }

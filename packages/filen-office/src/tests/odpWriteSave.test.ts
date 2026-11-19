@@ -52,7 +52,21 @@ describe("ODP save gate 2", () => {
 	})
 
 	it("hands the written package to the sink in chunks and closes it once", async () => {
-		const opened = await openOdpDeck(odpDeck())
+		// A part of 3 MiB that deflate cannot shrink: the copy of it the zip writer reads in one piece must reach the sink in
+		// pieces of at most 1 MiB.
+		const noise = new Uint8Array(3 * 1024 * 1024)
+		let seed = 0x9e3779b9
+
+		for (let at = 0; at < noise.length; at++) {
+			seed ^= seed << 13
+			seed ^= seed >>> 17
+			seed ^= seed << 5
+			noise[at] = seed & 0xff
+		}
+
+		const opened = await openOdpDeck(
+			odpBytes({ ...ODP_DECK, extra: [{ name: "noise.bin", data: noise, mediaType: "application/octet-stream" }] })
+		)
 		const slide = touched(slideAt(opened, 0))
 
 		shapeNamed(slide, "Box").hidden = true
@@ -77,6 +91,8 @@ describe("ODP save gate 2", () => {
 
 		expect(outcome).toMatchObject({ kind: "written", revision: 7 })
 		expect(closes).toBe(1)
+		expect(chunks.reduce((sum, length) => sum + length, 0)).toBeGreaterThan(noise.length)
+		expect(chunks.length).toBeGreaterThan(1)
 		expect(Math.max(...chunks)).toBeLessThanOrEqual(1024 * 1024)
 	})
 

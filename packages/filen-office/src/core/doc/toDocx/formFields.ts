@@ -1,3 +1,4 @@
+import { le16, le32 } from "../bytes"
 import type { DocModel } from "../model"
 import type { DocFile } from "../read"
 import { attr, val } from "./xml"
@@ -8,22 +9,18 @@ import { attr, val } from "./xml"
 const FFDATA_AT = 0x44
 const TEXT_TYPES = ["regular", "number", "date", "currentDate", "currentTime", "calculated"]
 
-function u16(data: Uint8Array, at: number): number {
-	return (data[at] ?? 0) | ((data[at + 1] ?? 0) << 8)
-}
-
 // Xstz (§2.9.355): cch, the characters, a terminating zero.
 function xstz(data: Uint8Array, at: number, end: number): readonly [string, number] {
 	if (at + 2 > end) return ["", end]
 
-	const cch = u16(data, at)
+	const cch = le16(data, at)
 	const stop = at + 2 + 2 * cch
 
 	if (stop > end) return ["", end]
 
 	let out = ""
 
-	for (let k = at + 2; k < stop; k += 2) out += String.fromCharCode(u16(data, k))
+	for (let k = at + 2; k < stop; k += 2) out += String.fromCharCode(le16(data, k))
 
 	return [out, stop + 2]
 }
@@ -35,15 +32,12 @@ function cut(value: string, length: number): string {
 }
 
 export function formFieldXml(data: Uint8Array, offset: number): string {
-	const end = Math.min(
-		data.length,
-		offset + ((data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8) | ((data[offset + 2] ?? 0) << 16) | ((data[offset + 3] ?? 0) << 24))
-	)
+	const end = Math.min(data.length, offset + le32(data, offset))
 	let at = offset + FFDATA_AT
 
 	if (at + 10 > end) return ""
 
-	const bits = u16(data, at + 4)
+	const bits = le16(data, at + 4)
 	const type = bits & 3
 	const result = (bits >> 2) & 0x1f
 	const ownHelp = (bits & 0x80) !== 0
@@ -51,8 +45,8 @@ export function formFieldXml(data: Uint8Array, offset: number): string {
 	const sizeExact = (bits & 0x400) !== 0
 	const textType = (bits >> 11) & 7
 	const recalc = (bits & 0x4000) !== 0
-	const maxLength = u16(data, at + 6)
-	const size = u16(data, at + 8)
+	const maxLength = le16(data, at + 6)
+	const size = le16(data, at + 8)
 
 	at += 10
 
@@ -65,7 +59,7 @@ export function formFieldXml(data: Uint8Array, offset: number): string {
 
 	if (type === 0) [textDefault, at] = xstz(data, at, end)
 	else {
-		wDef = u16(data, at)
+		wDef = le16(data, at)
 		at += 2
 	}
 
@@ -95,19 +89,19 @@ export function formFieldXml(data: Uint8Array, offset: number): string {
 		const entries: string[] = []
 		let cursor = afterExit
 
-		if (cursor + 6 <= end && u16(data, cursor) === 0xffff) {
-			const count = Math.min(25, u16(data, cursor + 2))
+		if (cursor + 6 <= end && le16(data, cursor) === 0xffff) {
+			const count = Math.min(25, le16(data, cursor + 2))
 
 			cursor += 6
 
 			for (let k = 0; k < count && cursor + 2 <= end; k++) {
-				const cch = u16(data, cursor)
+				const cch = le16(data, cursor)
 
 				if (cursor + 2 + 2 * cch > end) break
 
 				let item = ""
 
-				for (let j = 0; j < cch; j++) item += String.fromCharCode(u16(data, cursor + 2 + 2 * j))
+				for (let j = 0; j < cch; j++) item += String.fromCharCode(le16(data, cursor + 2 + 2 * j))
 
 				entries.push(item)
 				cursor += 2 + 2 * cch

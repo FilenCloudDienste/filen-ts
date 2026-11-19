@@ -286,7 +286,7 @@ export function odfPageTransition(transition: Transition): { readonly odf: OdfPa
 		return odf === undefined ? undefined : { odf: withColor(odf), exact: true }
 	}
 
-	const libreOffice = LIBREOFFICE[transition.kind]
+	const libreOffice = Object.hasOwn(LIBREOFFICE, transition.kind) ? LIBREOFFICE[transition.kind] : undefined
 
 	if (libreOffice !== undefined) return { odf: libreOffice(transition), exact: true }
 

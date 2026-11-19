@@ -8,7 +8,7 @@ import type { PaintedObject } from "./page"
 
 // Fills a painted page's object boxes: drawings as SVG (their images read from the package first), equations
 // as MathML, separators as rules; anything that cannot be drawn becomes a placeholder box. Returns the
-// cleanup that releases the page's images.
+// cleanup that releases the images of the objects given, or of one of them (a patched page took it away).
 
 let drawingCounter = 0
 
@@ -23,20 +23,34 @@ function mediaKey(image: DrawingImage): { partName: string; type: string } | und
 	return partName === undefined || type.length === 0 ? undefined : { partName, type }
 }
 
+// One measuring context per document, made when first asked for (null: the document has none); a document gone takes
+// its context with it.
+const measureContexts = new WeakMap<Document, CanvasRenderingContext2D | null>()
+
+function measureContext(document: Document): CanvasRenderingContext2D | null {
+	let context = measureContexts.get(document)
+
+	if (context === undefined) {
+		try {
+			context = document.createElement("canvas").getContext("2d")
+		} catch {
+			context = null
+		}
+
+		measureContexts.set(document, context)
+	}
+
+	return context
+}
+
 // Advance widths through a canvas of the document (text a drawing wraps); NaN without one (the painter
-// then estimates).
-function textMeasurer(document: Document): (text: string, font: string) => number {
+// then estimates). Every painter of a document (pages, sheet charts and objects) shares one context: the font is set
+// on each call.
+export function textMeasurer(document: Document): (text: string, font: string) => number {
 	let context: CanvasRenderingContext2D | null | undefined
 
 	return (text, font) => {
-		if (context === undefined) {
-			try {
-				context = document.createElement("canvas").getContext("2d")
-			} catch {
-				context = null
-			}
-		}
-
+		if (context === undefined) context = measureContext(document)
 		if (context === null) return Number.NaN
 
 		context.font = font
@@ -56,6 +70,10 @@ export interface ObjectPaintOptions {
 // Pixels of one shaded raster, and of all a page's shaded rasters over its life.
 const MAX_SHADE_PIXELS = 2048 * 2048
 const MAX_SHADE_TOTAL = 32 * 1024 * 1024
+// Quiet time after the last zoom or resize before the rasters are made again: a pinch or wheel zoom crosses its 2×
+// steps without rasterising the ones it only passes (each raster is synchronous, up to MAX_SHADE_PIXELS). Meanwhile
+// the previous raster stays, scaled.
+const SHADE_SETTLE_MS = 40
 
 interface ShadeEntry {
 	readonly object: PaintedObject
@@ -68,7 +86,7 @@ interface ShadeEntry {
 }
 
 // A page's shaded paints, rasterised at the device resolution they are drawn at (zoom × device pixel ratio,
-// rounded up to a power of two) and again when the zoom crosses a 2× step; each raster is made once per
+// rounded up to a power of two) and again when the zoom settles across a 2× step; each raster is made once per
 // paint and step, and every URL is revoked with the page.
 class Shader {
 	private readonly media: DocxMediaCache
@@ -79,7 +97,8 @@ class Shader {
 	private pixelsLeft = MAX_SHADE_TOTAL
 	private observer: MutationObserver | null = null
 	private resize: (() => void) | null = null
-	private scheduled = false
+	private view: Window | null = null
+	private settling: ReturnType<typeof setTimeout> | null = null
 	private disposed = false
 
 	constructor(media: DocxMediaCache) {
@@ -110,6 +129,18 @@ class Shader {
 		const ratio = view !== null && view.devicePixelRatio > 0 ? view.devicePixelRatio : 1
 
 		return entry.drawingWidth > 0 ? (width / entry.drawingWidth) * ratio * entry.localScale : ratio
+	}
+
+	// Releases the rasters of an object taken away (the others' stay).
+	forget(object: PaintedObject): void {
+		for (let k = this.entries.length - 1; k >= 0; k--) {
+			const entry = this.entries[k]
+
+			if (entry?.object !== object) continue
+
+			this.entries.splice(k, 1)
+			this.drop(entry.key)
+		}
 	}
 
 	private update(entry: ShadeEntry): void {
@@ -164,28 +195,26 @@ class Shader {
 	}
 
 	// Zoom scales the page with a CSS transform, and the device pixel ratio changes with the window: either
-	// re-checks the entries once per frame.
+	// re-checks the entries once they settle (SHADE_SETTLE_MS without another change).
 	private watch(element: HTMLElement): void {
 		if (this.resize !== null) return
 
 		const view = element.ownerDocument.defaultView
 		const schedule = (): void => {
-			if (this.scheduled || this.disposed) return
+			if (this.disposed) return
+			if (this.settling !== null) clearTimeout(this.settling)
 
-			this.scheduled = true
+			this.settling = setTimeout(() => {
+				this.settling = null
 
-			const run = (): void => {
-				this.scheduled = false
-
+				// Entries forgotten meanwhile are no longer listed: they get no raster.
 				if (!this.disposed) for (const entry of this.entries) this.update(entry)
-			}
-
-			if (view !== null && typeof view.requestAnimationFrame === "function") view.requestAnimationFrame(run)
-			else void Promise.resolve().then(run)
+			}, SHADE_SETTLE_MS)
 		}
 		const scaled = element.closest(".fo-docx-page-scale")
 
 		this.resize = schedule
+		this.view = view
 		view?.addEventListener("resize", schedule)
 
 		if (scaled !== null && typeof MutationObserver === "function") {
@@ -199,10 +228,17 @@ class Shader {
 
 		this.disposed = true
 		this.observer?.disconnect()
+		this.observer = null
 
-		const view = this.entries[0]?.object.element.ownerDocument.defaultView
+		if (this.settling !== null) clearTimeout(this.settling)
 
-		if (this.resize !== null) view?.removeEventListener("resize", this.resize)
+		this.settling = null
+
+		// The window the listener was added on: the entries may all be forgotten by now.
+		if (this.resize !== null) this.view?.removeEventListener("resize", this.resize)
+
+		this.resize = null
+		this.view = null
 
 		for (const held of this.urls.values()) this.media.revokeBytesUrl(held.url)
 
@@ -212,9 +248,11 @@ class Shader {
 }
 
 interface Holder {
-	// Records an acquired image; false (and released at once) when the page already went away.
+	// Whether the object is still shown (neither the page nor the object went away).
+	live(): boolean
+	// Records an acquired image; false (and released at once) when the object already went away.
 	hold(key: { partName: string; type: string }): boolean
-	// Records an object URL made for bytes the drawing carries, revoked with the page's images.
+	// Records an object URL made for bytes the drawing carries, revoked with the object's images.
 	holdUrl(url: string): boolean
 	readonly shader: Shader
 }
@@ -246,7 +284,7 @@ async function paintDrawingObject(
 	if (Array.isArray(data.drawing.texts) && data.drawing.texts.some(text => text?.kind === "block"))
 		await options.media.fontsReady().catch(() => undefined)
 
-	if (options.signal.aborted) return
+	if (options.signal.aborted || !holder.live()) return
 
 	const inline = inlineImageUrls(data.drawing, (bytes, type) => {
 		const created = options.media.createBytesUrl(bytes, type)
@@ -275,46 +313,89 @@ async function paintDrawingObject(
 	object.element.appendChild(svg)
 }
 
-export function paintObjects(objects: readonly PaintedObject[], options: ObjectPaintOptions): () => void {
-	const held: { partName: string; type: string }[] = []
-	const heldUrls: string[] = []
+// What one object holds: images acquired and object URLs made for it.
+interface Held {
+	readonly keys: { partName: string; type: string }[]
+	readonly urls: string[]
+}
+
+export function paintObjects(objects: readonly PaintedObject[], options: ObjectPaintOptions): (object?: PaintedObject) => void {
+	const held = new Map<PaintedObject, Held>()
+	const gone = new Set<PaintedObject>()
 	const shader = new Shader(options.media)
 	let released = false
-	const release = (): void => {
+	const releaseHeld = (entry: Held): void => {
+		for (const key of entry.keys) options.media.release(key.partName, key.type)
+		for (const url of entry.urls) options.media.revokeBytesUrl(url)
+
+		entry.keys.length = 0
+		entry.urls.length = 0
+	}
+	const release = (object?: PaintedObject): void => {
 		if (released) return
+
+		if (object !== undefined) {
+			if (gone.has(object)) return
+
+			gone.add(object)
+			shader.forget(object)
+
+			const entry = held.get(object)
+
+			if (entry !== undefined) releaseHeld(entry)
+
+			held.delete(object)
+
+			// Every object of this call went one by one: nobody calls the batch release any more, so the shader's
+			// window listener and observer go now.
+			if (gone.size < objects.length) return
+		}
 
 		released = true
 		shader.dispose()
 
-		for (const key of held) options.media.release(key.partName, key.type)
-		for (const url of heldUrls) options.media.revokeBytesUrl(url)
+		for (const entry of held.values()) releaseHeld(entry)
 
-		held.length = 0
-		heldUrls.length = 0
+		held.clear()
 	}
-	const holder: Holder = {
-		shader,
-		hold(key) {
-			if (released) {
-				options.media.release(key.partName, key.type)
+	const holderOf = (object: PaintedObject): Holder => {
+		const live = (): boolean => !released && !gone.has(object)
+		const entry = (): Held => {
+			let found = held.get(object)
 
-				return false
+			if (found === undefined) {
+				found = { keys: [], urls: [] }
+				held.set(object, found)
 			}
 
-			held.push(key)
+			return found
+		}
 
-			return true
-		},
-		holdUrl(url) {
-			if (released) {
-				options.media.revokeBytesUrl(url)
+		return {
+			shader,
+			live,
+			hold(key) {
+				if (!live()) {
+					options.media.release(key.partName, key.type)
 
-				return false
+					return false
+				}
+
+				entry().keys.push(key)
+
+				return true
+			},
+			holdUrl(url) {
+				if (!live()) {
+					options.media.revokeBytesUrl(url)
+
+					return false
+				}
+
+				entry().urls.push(url)
+
+				return true
 			}
-
-			heldUrls.push(url)
-
-			return true
 		}
 	}
 
@@ -335,7 +416,8 @@ export function paintObjects(objects: readonly PaintedObject[], options: ObjectP
 
 				for (const result of results) {
 					for (const object of byId.get(result.id) ?? []) {
-						if (options.signal.aborted) return
+						if (options.signal.aborted || released) return
+						if (gone.has(object)) continue
 
 						switch (result.kind) {
 							case "separator":
@@ -369,7 +451,7 @@ export function paintObjects(objects: readonly PaintedObject[], options: ObjectP
 								}
 
 								work.push(
-									paintDrawingObject(object, result, options, holder).catch(() => {
+									paintDrawingObject(object, result, options, holderOf(object)).catch(() => {
 										placeholder(object.element)
 									})
 								)

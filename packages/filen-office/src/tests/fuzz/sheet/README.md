@@ -14,9 +14,11 @@ What runs by default and what is opt-in, for the xlsx session (`core/sheet`, `co
 
 The invariant at every checkpoint (`harness.ts`): the save passes its gate; read back without the engine
 (`compare.ts`, over the oracles' `xlsxCells.ts`) it equals the session's model: cells, cached results, formulas,
-style ids, rows, columns, merges, sheets, defined names, cell formats, fonts and number formats; and a fresh session
-on it shows the same text and input in the held tiles. After undoing everything, the save holds what the source
-held, and every part but the append-only ones (styles, shared strings, the calculation chain with its relationship
+style ids, rows, columns, merges, the cells of each data validation (2007 and Excel 2010 ones), the autoFilter's
+range, each hyperlink's cells, sheets, defined names, cell formats, fonts and number formats; and a fresh session
+on it shows the same text and input in the held tiles. Sheet protection and the frozen pane are read back by the
+save gate; notes and threaded comments (other parts and VML) are not compared here. The source is read back once
+per sequence. After undoing everything, the save holds what the source held, and every part but the append-only ones (styles, shared strings, the calculation chain with its relationship
 and content type) keeps its bytes. Every command answers with a change or a typed refusal (`ops.ts`
 `KNOWN_REFUSALS`); refusals are tallied, never findings. An exception, a rejection or a call that does not answer
 within 60 s is a finding.

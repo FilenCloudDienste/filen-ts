@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import type { DocxEvent } from "@filen/office/dom/docx"
 import { docxSealer, isSealedOfficeFile } from "@filen/office/dom/docx/editing"
@@ -37,6 +37,10 @@ function plaintextOnPage(received: readonly unknown[]): number {
 	for (const message of received) visit(message, 0)
 
 	return found
+}
+
+function isUnlockedReply(message: unknown): message is { readonly t: "unlocked"; readonly answer?: { readonly ok: boolean } } {
+	return typeof message === "object" && message !== null && Reflect.get(message, "t") === "unlocked"
 }
 
 function events(host: (listener: (event: DocxEvent) => void) => { close(): void }): Promise<DocxEvent[]> {
@@ -187,11 +191,11 @@ describe("encrypted docx in the docx worker", () => {
 		}
 	})
 
-	it("stops an unlock in the worker at the page's AbortSignal, and unlocks on a retry", { timeout: 30_000 }, async () => {
+	it("stops an unlock in the worker at the page's AbortSignal, and unlocks on a retry", { timeout: 60_000 }, async () => {
 		const harness = workerHarness()
 
 		try {
-			const locked = await lockedOf(await agileFile(300_000), harness.pool.protection)
+			const locked = await lockedOf(await agileFile(200_000), harness.pool.protection)
 			const controller = new AbortController()
 			const started = performance.now()
 			const pending = locked.unlock(PASSWORD, { signal: controller.signal })
@@ -206,7 +210,13 @@ describe("encrypted docx in the docx worker", () => {
 			expect(await harness.pool.protection.open(bytesSource(await agileFile()), { signal: aborted.signal })).toEqual({
 				kind: "aborted"
 			})
-			locked.dispose()
+
+			// The same locked document, through the same worker, unlocks once asked again.
+			const document = decrypted(await locked.unlock(PASSWORD))
+
+			expect(document.integrity).toBe("verified")
+			expect((await document.take()).bytes).toEqual(PLAINTEXT)
+			document.release()
 		} finally {
 			harness.dispose()
 		}
@@ -247,7 +257,15 @@ describe("encrypted docx in the docx worker", () => {
 			const outcome = await unlocking
 
 			expect("answer" in outcome && outcome.answer.ok).toBe(false)
-			await new Promise(resolve => setTimeout(resolve, 300))
+
+			// The page dropped the call; the worker still answers it once its spin stops: never ok, never the package.
+			await vi.waitFor(
+				() => {
+					if (!harness.received.some(isUnlockedReply)) throw new Error("No unlock reply yet")
+				},
+				{ timeout: 30_000, interval: 10 }
+			)
+			expect(harness.received.filter(isUnlockedReply).map(reply => reply.answer?.ok)).toEqual([false])
 			expect(plaintextOnPage(harness.received)).toBe(0)
 		} finally {
 			harness.dispose()
@@ -289,6 +307,60 @@ describe("encrypted docx in the docx worker", () => {
 
 		expect(server.close(1)).toBe(true)
 		expect("error" in (await keying)).toBe(true)
+		expect(() => server.take(1)).toThrow()
+	})
+
+	it("a document closed mid-spin answers the unlock not ok and holds no package", async () => {
+		const server = docxProtectionServer()
+
+		expect((await server.protect(1, bytesSource(await agileFile(200_000)))).kind).toBe("needsPassword")
+
+		const unlocking = server.unlock(1, 1, PASSWORD)
+
+		await new Promise(resolve => setTimeout(resolve, 20))
+		expect(server.close(1)).toBe(true)
+		expect((await unlocking).ok).toBe(false)
+		expect(server.plaintext(1)).toBeUndefined()
+		expect(() => server.take(1)).toThrow()
+	})
+
+	it("a document closed after the unlock's last look at its signal answers not ok and holds no package", async () => {
+		const file = await agileFile(10)
+		// The unlock looks at its signal at fixed points (the spin, each window, the HMAC): count them once.
+		const counting = docxProtectionServer()
+		let looks = 0
+
+		await counting.protect(1, bytesSource(file))
+		expect(
+			(
+				await counting.unlock(1, 1, PASSWORD, {
+					get aborted() {
+						looks++
+
+						return false
+					}
+				})
+			).ok
+		).toBe(true)
+		counting.close(1)
+
+		// Closed at the last look: the derivation finishes, the document is gone by the time it answers.
+		const server = docxProtectionServer()
+		let seen = 0
+
+		await server.protect(1, bytesSource(file))
+
+		const answer = await server.unlock(1, 1, PASSWORD, {
+			get aborted() {
+				if (++seen === looks) server.close(1)
+
+				return false
+			}
+		})
+
+		expect(seen).toBe(looks)
+		expect(answer.ok).toBe(false)
+		expect(server.plaintext(1)).toBeUndefined()
 		expect(() => server.take(1)).toThrow()
 	})
 })

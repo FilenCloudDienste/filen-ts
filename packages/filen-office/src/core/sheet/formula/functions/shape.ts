@@ -1,7 +1,9 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { MAX_COLUMNS, MAX_ROWS } from "../../model/model"
+import { MAX_ARRAY_CELLS } from "../../refs/formulaRefs"
 import { BLANK_SORT_VALUE, SortType, sortOrder, textSortKey, type SortValue } from "../../sort/order"
 import {
+	ARRAY_ARGUMENTS,
 	calcError,
 	naError,
 	numError,
@@ -13,14 +15,9 @@ import {
 	type PluginScalar,
 	type PluginState
 } from "./plugin"
+import { vectorOf } from "./values"
 
 // Array building and reshaping functions as support.microsoft.com defines them.
-
-const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
-
-// The most cells an array built here may hold (as formulaRefs.ts bounds the arrays a formula builds): the engine
-// keeps every value, a few hundred bytes each. Past it the formula keeps its result in the file.
-const MAX_BUILT_CELLS = 200_000
 
 const SCAN = {
 	parameters: [
@@ -48,10 +45,10 @@ export function given(ast: PluginCall, index: number): boolean {
 }
 
 // The error a size past the grid (#NUM!, "array is too large") or past what is held here gives; null when it fits.
-function sizeError(rows: number, cols: number): CellError | null {
+export function sizeError(rows: number, cols: number): CellError | null {
 	if (rows > MAX_ROWS || cols > MAX_COLUMNS) return numError()
 
-	return rows * cols > MAX_BUILT_CELLS ? unmodeledError() : null
+	return rows * cols > MAX_ARRAY_CELLS ? unmodeledError() : null
 }
 
 // A value as SORTBY orders it (Excel's sort order, sort/order.ts).
@@ -62,16 +59,6 @@ export function sortValue(value: PluginScalar): SortValue {
 	if (typeof value === "boolean") return { type: SortType.BOOLEAN, number: value ? 1 : 0, key: "" }
 
 	return { type: SortType.NUMBER, number: rawNumber(value) ?? 0, key: "" }
-}
-
-// The values of a one-row or one-column array in order, or null for a block.
-function vector(value: SimpleRangeValue): PluginScalar[] | null {
-	const rows = value.data
-
-	if (rows.length === 1) return rows[0] ?? []
-	if (value.width() !== 1) return null
-
-	return rows.map(row => row[0] ?? EmptyValue)
 }
 
 // The span left after trimming blank lines from either end of `count` lines, `mode` 1 leading, 2 trailing, 3 both.
@@ -148,8 +135,8 @@ export class ShapeFunctions extends SheetFunctionPlugin {
 
 	// SORT(array, [sort_index], [sort_order], [by_col]): array's rows (its columns when by_col) in the order of the
 	// column (row) at sort_index, ascending unless sort_order is -1, in SORTBY's order. sort_index and sort_order may be
-	// arrays, one key per index (a single order applies to every key). An index outside array or a sort order other
-	// than 1 or -1 is #VALUE!. Stable.
+	// arrays, one key per index (a single order applies to every key; a repeated index adds nothing). An index outside
+	// array or a sort order other than 1 or -1 is #VALUE!. Stable.
 	sort(ast: PluginCall, state: PluginState): unknown {
 		const [, indexed, ordered] = [0, 1, 2].map(index => given(ast, index))
 
@@ -175,6 +162,7 @@ export class ShapeFunctions extends SheetFunctionPlugin {
 
 				const lines = byCol ? height : width
 				const at: number[] = []
+				const keyed = new Set<number>()
 				const keys: { readonly descending: boolean }[] = []
 
 				for (let key = 0; key < indexes.length; key++) {
@@ -187,10 +175,15 @@ export class ShapeFunctions extends SheetFunctionPlugin {
 					const line = Math.trunc(index)
 
 					if (line < 1 || line > lines || (order !== 1 && order !== -1)) return valueError()
+					// A line already keyed: its first key's direction wins, so a later one can never break a tie.
+					if (keyed.has(line)) continue
 
+					keyed.add(line)
 					at.push(line - 1)
 					keys.push({ descending: order === -1 })
 				}
+
+				if (keys.length * (byCol ? width : height) > MAX_ARRAY_CELLS) return unmodeledError()
 
 				const rows = array.data
 				const order = sortOrder(byCol ? width : height, keys, (key, item) => {
@@ -301,7 +294,7 @@ export class ShapeFunctions extends SheetFunctionPlugin {
 			state,
 			this.metadata(name),
 			(array: SimpleRangeValue, count: number, padding: PluginScalar | undefined) => {
-				const values = vector(array)
+				const values = vectorOf(array.data)
 
 				if (values === null) return valueError()
 

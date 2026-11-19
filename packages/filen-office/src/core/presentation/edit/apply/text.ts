@@ -1,12 +1,9 @@
-import { classifyHref } from "../../actions"
-import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import { resolveShape } from "../../inherit"
 import {
 	refused,
 	type Deck,
 	type Paragraph,
 	type Refused,
-	type RunProps,
 	type ShapeNode,
 	type ShapeRef,
 	type SlideNode,
@@ -23,6 +20,7 @@ import { remapParagraphs } from "./timing"
 import { odpParagraphTargets } from "../../../anim/odf"
 import { parseXml, type XmlDocument } from "../../../xml/index"
 import { isRefused } from "../../refusal"
+import { checkTextBody } from "../xmlText"
 import { sameBytes } from "../../../docx/write/bytes"
 
 // The text ops on the model, in place. setText puts a whole new body on one shape; its inverse is a setText of the
@@ -38,7 +36,6 @@ type SetText = OpOf<"text"> & { kind: "setText" }
 type SetAutofit = OpOf<"text"> & { kind: "setAutofitResult" }
 type Replace = OpOf<"text"> & { kind: "replace" }
 
-const BUDGETS = DEFAULT_PRESENTATION_BUDGETS
 const AUTOFIT_UNIT = 100_000
 
 function reading(context: ApplyContext): SourceReading | undefined {
@@ -66,42 +63,6 @@ function editable(deck: Deck, target: ShapeRef): { readonly node: SlideNode; rea
 
 function live(src: SourceRef, context: ApplyContext): boolean {
 	return !isRefused(context.sourceBytes(src))
-}
-
-// Characters XML 1.0 cannot hold (§2.2): such text would never be written, so it never enters the model.
-function invalidXml(text: string): boolean {
-	for (let index = 0; index < text.length; index++) {
-		const code = text.charCodeAt(index)
-
-		if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0xfffe || code === 0xffff) return true
-	}
-
-	return false
-}
-
-// A run's link: a URL one only as the save proof classifies it (http, https, mailto) and with text XML can hold.
-function carriableLinks(rPr: RunProps): boolean {
-	const action = rPr.hlinkClick
-
-	return action?.kind !== "url" || (!invalidXml(action.href) && classifyHref(action.href).kind === "url")
-}
-
-// A body over the hostile-input budgets, or holding text XML cannot, is refused before it enters the model.
-function checkBody(body: TextBody): Refused | undefined {
-	let runs = 0
-
-	for (const paragraph of body.paragraphs) {
-		runs += paragraph.runs.length
-
-		if (runs > BUDGETS.runsPerBody) return refused("tooLarge", `${String(runs)} runs in one body`)
-
-		for (const run of paragraph.runs) {
-			if (run.kind !== "br" && invalidXml(run.text)) return refused("malformed", "text holds a character XML cannot")
-			if (run.kind !== "opaque" && !carriableLinks(run.rPr)) return refused("malformed", "a link the deck cannot carry")
-		}
-	}
-
-	return undefined
 }
 
 function paragraphDigest(paragraph: Paragraph): string {
@@ -430,7 +391,7 @@ function setText(deck: Deck, op: SetText, context: ApplyContext): ApplyResult<Se
 
 	if (isRefused(found)) return found
 
-	const checked = checkBody(op.body)
+	const checked = checkTextBody(op.body, found.shape.text)
 
 	if (checked !== undefined) return checked
 
@@ -551,7 +512,7 @@ function replace(deck: Deck, op: Replace, context: ApplyContext): ApplyResult<Re
 
 		if (replaced.count === 0) continue
 
-		const checked = checkBody(replaced.body)
+		const checked = checkTextBody(replaced.body, text)
 
 		if (checked !== undefined) return checked
 

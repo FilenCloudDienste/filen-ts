@@ -8,7 +8,7 @@ import { cellKeyOf } from "../core/xlsx/edit/history"
 import type { SheetStore } from "../core/xlsx/model/store"
 import { CellKind } from "../core/xlsx/model/types"
 import { CORPUS_DIR } from "./corpusDir"
-import { odsDocument } from "./odsFixtures"
+import { ODS_ENCRYPTED, odsDocument } from "./odsFixtures"
 
 // The licensed corpus's spreadsheets: every one opens (an encrypted one is refused, as LibreOffice asks for its
 // password), and its formulas, built into the engine as a session builds them, give the results LibreOffice cached.
@@ -19,8 +19,6 @@ const FILES = existsSync(DIR)
 			.filter(name => name.endsWith(".ods"))
 			.sort()
 	: []
-// The encrypted files, in name order.
-const ENCRYPTED = ["lo__password.ods", "lo__passwordOld.ods"]
 // A LibreOffice sheet whose table style writes right to left.
 const RTL = "lo__tdf137081_RTL_page_anchored.ods"
 // Large files are left to the performance bench: the engine over their tens of thousands of formulas takes long here.
@@ -43,7 +41,7 @@ describe.skipIf(FILES.length === 0)("ODS corpus", () => {
 		}
 
 		// AES-256-CBC (ODF 1.2+) and the legacy Blowfish CFB of OpenOffice.org 1.x-3.x packages alike.
-		expect(failures).toEqual(ENCRYPTED.filter(name => FILES.includes(name)).map(name => `${name}: encrypted`))
+		expect(failures).toEqual(ODS_ENCRYPTED.filter(name => FILES.includes(name)).map(name => `${name}: encrypted`))
 	})
 
 	it.skipIf(!FILES.includes(RTL))("opens a right-to-left sheet (style:writing-mode rl-tb) mirrored", async () => {

@@ -342,7 +342,6 @@ export {
 	SlideRefs,
 	creationId,
 	newGuid,
-	nextMasterLayoutId,
 	nextShapeId,
 	nextSlideId,
 	uniqueShapeIds,

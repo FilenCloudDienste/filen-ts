@@ -168,7 +168,7 @@ const TAB_ALIGNMENTS: Readonly<Record<string, TabAlignment>> = {
 	num: TabAlignment.START
 }
 
-const TAB_LEADERS: Readonly<Record<string, TabLeader>> = {
+export const TAB_LEADERS: Readonly<Record<string, TabLeader>> = {
 	dot: TabLeader.DOT,
 	hyphen: TabLeader.HYPHEN,
 	underscore: TabLeader.UNDERSCORE,

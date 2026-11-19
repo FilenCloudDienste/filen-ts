@@ -1,4 +1,4 @@
-import { canonicalFormula, openFormula } from "../formula/toOf"
+import { canonicalFormula, ofSheetName, openFormula } from "../formula/toOf"
 import type { XlsxDefinedName } from "../../xlsx/model/types"
 import { escapeAttribute } from "../../xml/index"
 
@@ -22,20 +22,16 @@ function key(name: XlsxDefinedName): string {
 	return `${name.sheet ?? ""}\u0000${name.name.toUpperCase()}`
 }
 
-function quoted(sheet: string): string {
-	return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
-}
-
 const AREA = /^(?:'((?:[^']|'')+)'|([A-Za-z_][A-Za-z0-9_.]*))!(\$?[A-Z]{1,3}\$?\d+)(?::(\$?[A-Z]{1,3}\$?\d+))?$/
 
 // The element a name is written as; `base`: the sheet its relative references are relative to (its first cell).
 export function nameElement(name: XlsxDefinedName, base: string): string {
 	const area = AREA.exec(name.formula.trim())
 	const hidden = name.hidden ? ' table:hidden="true"' : ""
-	const baseCell = `$${quoted(base)}.$A$1`
+	const baseCell = `$${ofSheetName(base)}.$A$1`
 
 	if (area !== null) {
-		const sheet = quoted(area[1] === undefined ? (area[2] ?? "") : area[1].replaceAll("''", "'"))
+		const sheet = ofSheetName(area[1] === undefined ? (area[2] ?? "") : area[1].replaceAll("''", "'"))
 		const first = area[3] ?? ""
 		const second = area[4]
 		const address = second === undefined ? `$${sheet}.${first}` : `$${sheet}.${first}:.${second}`

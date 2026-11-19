@@ -98,6 +98,112 @@ describe("sheet session: sheets moved", () => {
 	})
 })
 
+// A filled-down formula is one shared master and children whose stored text is empty, each reading a name over a
+// 3-D span; the stored results are stale (99). A delete or move that rewrites the name recalculates them all.
+const SPANNED = {
+	sheets: [
+		{
+			name: "One",
+			body:
+				'<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*SUM(Span)</f><v>99</v></c></row>' +
+				'<row r="2"><c r="A2"><v>2</v></c><c r="B2"><f t="shared" si="0"/><v>99</v></c></row>' +
+				'<row r="3"><c r="A3"><v>3</v></c><c r="B3"><f t="shared" si="0"/><v>99</v></c></row></sheetData>'
+		},
+		{ name: "Two", body: '<sheetData><row r="1"><c r="A1"><v>2</v></c></row></sheetData>' },
+		{ name: "Three", body: '<sheetData><row r="1"><c r="A1"><v>3</v></c></row></sheetData>' }
+	],
+	workbookTail: '<definedNames><definedName name="Span">Two:Three!$A$1</definedName></definedNames>'
+}
+
+async function spannedResults(session: Awaited<ReturnType<typeof openFixture>>["session"], sheet: number) {
+	const tile = await firstTile(session, sheet)
+	const saved = parts(await savedBytes(session))["xl/worksheets/sheet1.xml"] ?? ""
+
+	return {
+		shown: [0, 1, 2].map(row => tileEntry(tile, row, 1)?.text),
+		saved: ["B1", "B2", "B3"].map(ref => new RegExp(`<c r="${ref}"[^>]*>.*?<v>(.*?)</v></c>`).exec(saved)?.[1])
+	}
+}
+
+// A name pointing at a sheet, read by a filled-down formula (a shared master and children) and an ordinary one, all
+// with stale stored results (99).
+const NAMED_CELL = {
+	sheets: [
+		{
+			name: "One",
+			body:
+				'<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*Rate</f><v>99</v></c>' +
+				'<c r="C1"><f>IFERROR(Rate,0)+1</f><v>99</v></c><c r="D1"><f>Rate+1</f><v>99</v></c></row>' +
+				'<row r="2"><c r="A2"><v>2</v></c><c r="B2"><f t="shared" si="0"/><v>99</v></c></row>' +
+				'<row r="3"><c r="A3"><v>3</v></c><c r="B3"><f t="shared" si="0"/><v>99</v></c></row></sheetData>'
+		},
+		{ name: "Two", body: '<sheetData><row r="1"><c r="A1"><v>2</v></c></row></sheetData>' }
+	],
+	workbookTail: '<definedNames><definedName name="Rate">Two!$A$1</definedName></definedNames>'
+}
+
+async function namedResults(session: Awaited<ReturnType<typeof openFixture>>["session"], sheet: number) {
+	const tile = await firstTile(session, sheet)
+	const saved = parts(await savedBytes(session))["xl/worksheets/sheet1.xml"] ?? ""
+	const cells = [
+		[0, 1, "B1"],
+		[1, 1, "B2"],
+		[2, 1, "B3"],
+		[0, 2, "C1"],
+		[0, 3, "D1"]
+	] as const
+
+	return {
+		shown: cells.map(([row, col]) => tileEntry(tile, row, col)?.text),
+		saved: cells.map(([, , ref]) => new RegExp(`<c r="${ref}"[^>]*>.*?<v>(.*?)</v></c>`).exec(saved)?.[1])
+	}
+}
+
+describe("sheet session: shared formulas reading a name a sheet edit changed", () => {
+	it("recalculates every child once a delete narrows the name", async () => {
+		const { session, info } = await openFixture(SPANNED)
+		const [one, , three] = info.sheets.map(sheet => sheet.id)
+
+		changeOf(await session.command({ type: "sheet.delete", sheet: three! }))
+		expect(parts(await savedBytes(session))["xl/workbook.xml"]).toContain("<definedName name=\"Span\">'Two'!$A$1</definedName>")
+		expect(await spannedResults(session, one!)).toEqual({ shown: ["2", "4", "6"], saved: ["2", "4", "6"] })
+		session.close()
+	})
+
+	it("calculates what reads a name into a deleted sheet as #REF!, master and children alike, and undoes", async () => {
+		const { session, info } = await openFixture(NAMED_CELL)
+		const [one, two] = info.sheets.map(sheet => sheet.id)
+
+		changeOf(await session.command({ type: "sheet.delete", sheet: two! }))
+		expect(parts(await savedBytes(session))["xl/workbook.xml"]).toContain('<definedName name="Rate">#REF!$A$1</definedName>')
+		expect(await namedResults(session, one!)).toEqual({
+			shown: ["#REF!", "#REF!", "#REF!", "1", "#REF!"],
+			saved: ["#REF!", "#REF!", "#REF!", "1", "#REF!"]
+		})
+
+		changeOf(await session.undo())
+		expect(await namedResults(session, one!)).toEqual({
+			shown: ["99", "99", "99", "99", "99"],
+			saved: ["99", "99", "99", "99", "99"]
+		})
+		session.close()
+	})
+
+	it("recalculates every child once a move swaps the name's span", async () => {
+		const { session, info } = await openFixture(SPANNED)
+		const [one, two] = info.sheets.map(sheet => sheet.id)
+
+		changeOf(await session.command({ type: "sheet.move", sheet: two!, to: 2 }))
+
+		// The engine takes no 3-D span in a name: every cell as the master, none keeping the stale 99.
+		expect(await spannedResults(session, one!)).toEqual({
+			shown: ["#REF!", "#REF!", "#REF!"],
+			saved: ["#REF!", "#REF!", "#REF!"]
+		})
+		session.close()
+	})
+})
+
 describe("sheet session: sheets hidden and shown", () => {
 	it("hides the active sheet, moving the active tab to the next visible one, and shows it again", async () => {
 		const { session, info, bytes } = await openFixture({

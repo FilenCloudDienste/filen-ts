@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
 	MathFrame,
@@ -90,6 +92,21 @@ describe("runs", () => {
 	it("reads m:nor runs as text and m:lit runs without operators", () => {
 		expect(show(math(run(" if x ", "<m:nor/>")))).toBe('math(mtext" if x ")')
 		expect(show(math(run("a+b", "<m:lit/>")))).toBe('math(mi"a" mi"+" mi"b")')
+	})
+
+	it("turns only edge spaces of m:nor text into no-break spaces, in linear time", () => {
+		const nbsp = "\u00a0"
+
+		expect(show(math(run("  x  ", "<m:nor/>")))).toBe(`math(mtext"${nbsp}${nbsp}x${nbsp}${nbsp}")`)
+		expect(show(math(run("   ", "<m:nor/>")))).toBe(`math(mtext"${nbsp.repeat(3)}")`)
+		expect(show(math(run("a  b", "<m:nor/>")))).toBe('math(mtext"a  b")')
+
+		const inner = " ".repeat(300_000)
+		const started = performance.now()
+		const tree = math(run(`a${inner}b`, "<m:nor/>"))
+
+		expect(performance.now() - started).toBeLessThan(1000)
+		expect(show(tree)).toBe(`math(mtext"a${inner}b")`)
 	})
 
 	it("carries w:color and ignores m:ctrlPr", () => {
@@ -365,5 +382,17 @@ describe("assertMathTree", () => {
 		for (let k = 0; k < 1100; k++) node = { tag: "mrow", children: [node] }
 
 		expect(() => assertMathTree(node)).toThrow(MathTreeError)
+	})
+})
+
+describe("math sources", () => {
+	it("write no-break, invisible and combining characters as escapes", () => {
+		const directory = join(import.meta.dirname, "..", "core", "math")
+
+		for (const file of ["latex.ts", "omml.ts", "ommlTrack.ts", "toLatex.ts"]) {
+			expect(readFileSync(join(directory, file), "utf8"), file).not.toMatch(
+				/[\u00a0\u2000-\u200f\u2028-\u202f\u205f-\u206f\ufeff\p{Mn}]/u
+			)
+		}
 	})
 })

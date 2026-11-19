@@ -2,37 +2,10 @@ import { describe, expect, it } from "vitest"
 import { saveDocx } from "@filen/office/core/docx/write"
 import { macroButtonText } from "../core/docx/model/macroButton"
 import { buildDocx } from "./docxSynthetic"
+import { BODY, SHOWN, char, instr, para, run } from "./docxMacroButtonFixtures"
 import { layOut, pageLines } from "./layoutFixtures"
 import { pagedEditor } from "./pagedFixtures"
 import { budget, cpuMs } from "./timing"
-
-const instr = (text: string): string => `<w:r><w:instrText xml:space="preserve">${text}</w:instrText></w:r>`
-const char = (type: string): string => `<w:r><w:fldChar w:fldCharType="${type}"/></w:r>`
-const run = (text: string): string => `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`
-const para = (inner: string): string => `<w:p>${inner}</w:p>`
-
-// A MACROBUTTON with a result, without one, with an empty one, w:fldSimple with and without one, one inside
-// another field's result, and one whose display text is quoted.
-const BODY = [
-	para(char("begin") + instr(' MACROBUTTON  synchronize "Sync contents" ') + char("separate") + run("*") + char("end")),
-	para(char("begin") + instr(" MACROBUTTON  synchronize Without result ") + char("end")),
-	para(char("begin") + instr(" MACROBUTTON NoMacro [Click here] ") + char("separate") + char("end")),
-	para('<w:fldSimple w:instr=" MACROBUTTON NoMacro Simple text "/>'),
-	para(`<w:fldSimple w:instr=" MACROBUTTON NoMacro Simple text ">${run("stored")}</w:fldSimple>`),
-	para(
-		char("begin") +
-			instr(" QUOTE x ") +
-			char("separate") +
-			run("outer ") +
-			char("begin") +
-			instr(" MACROBUTTON NoMacro Nested ") +
-			char("end") +
-			char("end")
-	),
-	para(run("Body"))
-].join("")
-
-const SHOWN = ["*", "Without result", "[Click here]", "Simple text", "stored", "outer ", "Body"]
 
 describe("MACROBUTTON fields as laid out", () => {
 	it("show their display text where they have no result, and their result where they have one", async () => {

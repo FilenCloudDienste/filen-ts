@@ -147,7 +147,7 @@ describe("stretched block text", () => {
 	it("concatenates the x scale in PDF", async () => {
 		const content = async (stretch: boolean): Promise<string> => {
 			const writer = await PdfWriter.create({ deterministic: true, deflate: null })
-			const fonts = new PdfFontSet({ assets: nodeFontAssets, deterministic: true })
+			const fonts = new PdfFontSet({ assets: nodeFontAssets })
 			const page = writer.beginPage(200, 200)
 
 			await paintDrawingPdf(

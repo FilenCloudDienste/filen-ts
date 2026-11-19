@@ -132,6 +132,20 @@ describe("ODT writer: page styles and sections", () => {
 		expect(content).toMatch(new RegExp(`<style:style style:name="${style}"[^>]*style:master-page-name="Standard"`, "u"))
 	})
 
+	it("writes a style name holding a replacement pattern ($1) literally into the start tag it restyles", async () => {
+		// The opening paragraph moves to a copy of its page; the source already has a style for that copy, named "P$1".
+		const { content } = await save(
+			{
+				...TITLED,
+				automatic: `${TITLED.automatic ?? ""}<style:style style:name="P$1" style:family="paragraph" style:parent-style-name="Standard" style:master-page-name="First_20_Page_2"/>`
+			},
+			BREAK,
+			PAGE
+		)
+
+		expect(/<text:p text:style-name="([^"]+)">Opening/u.exec(content)?.[1]).toBe("P$1")
+	})
+
 	it("never gives a paragraph the start tag of one whose style breaks the page", async () => {
 		const { content } = await save(
 			{

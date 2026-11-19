@@ -8,6 +8,7 @@ import {
 	type OdfStyleSheet
 } from "../odf/index"
 import { blockXml, MarkupFlow, paragraph, type Block, type Flow } from "./flow"
+import { NUMBER_FORMATS } from "./lists"
 import { border, layoutRtl } from "./props"
 import type { Translator } from "./translator"
 import type { OdtOrigin } from "./types"
@@ -21,14 +22,6 @@ import { PART_NAMESPACES, PartWriter, twips, XML_DECLARATION } from "./wml"
 
 // LibreOffice's page when a document has no page layout: A4, 2 cm margins.
 const A4 = { width: 595.28, height: 841.89, margin: 56.69 }
-
-const NUMBER_FORMATS: Readonly<Record<string, string>> = {
-	"1": "decimal",
-	a: "lowerLetter",
-	A: "upperLetter",
-	i: "lowerRoman",
-	I: "upperRoman"
-}
 
 interface SectionState {
 	readonly master: string
@@ -427,7 +420,7 @@ export class Pages {
 
 			translator.blockLossy.clear()
 			translator.widths.push(this.textWidthOfMaster(master))
-			translator.storyBlocks(region.node, flow)
+			translator.regionBlocks(region.node, flow)
 			translator.widths.pop()
 
 			const lossy = translator.takeLossy()

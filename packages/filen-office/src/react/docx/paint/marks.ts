@@ -116,13 +116,22 @@ export interface PageMarksContext {
 	readonly labels: DocxMarkLabels
 }
 
-// The marks of one painted page, in `layer` (emptied first when given): line groups reused from earlier paints of
-// the same lines, the anchors drawn anew.
+// Each marks layer's anchors: their container, kept while the anchors' boxes stay the same.
+interface KeptAnchors {
+	readonly element: HTMLElement
+	readonly boxes: readonly number[]
+}
+
+const keptAnchors = new WeakMap<HTMLElement, KeptAnchors>()
+
+// The marks of one painted page, in `layer` (anything else in it taken away): line groups reused from earlier
+// paints of the same lines, then the anchors. Only groups not already in their place are moved, as patchPage does
+// for the text: a node moved in the DOM is styled and laid out again as if new.
 export function paintMarks(painted: PaintedPage, context: PageMarksContext, layer?: HTMLElement): HTMLElement {
 	const { document } = context
 	const root = layer ?? document.createElement("div")
 	const page = painted.page
-	const children: Node[] = []
+	const wanted: HTMLElement[] = []
 
 	root.className = "fo-docx-layer fo-docx-marks"
 	root.setAttribute("aria-hidden", "true")
@@ -151,12 +160,43 @@ export function paintMarks(painted: PaintedPage, context: PageMarksContext, laye
 			element.style.transformOrigin = shown.turn === "" ? "" : "0 0"
 		}
 
-		children.push(element)
+		wanted.push(element)
 	}
 
-	for (const anchor of anchors(page, document)) children.push(anchor)
+	const boxes = anchorBoxes(page)
+	let held = keptAnchors.get(root)
 
-	root.replaceChildren(...children)
+	if (held === undefined || !sameBoxes(held.boxes, boxes)) {
+		const element = held?.element ?? document.createElement("div")
+
+		element.className = "fo-docx-mark-anchors"
+		element.replaceChildren(...anchorElements(boxes, document))
+		held = { element, boxes }
+		keptAnchors.set(root, held)
+	}
+
+	wanted.push(held.element)
+
+	const keep = new Set<Node>(wanted)
+	let child = root.firstChild
+
+	while (child !== null) {
+		const next = child.nextSibling
+
+		if (!keep.has(child)) child.remove()
+
+		child = next
+	}
+
+	let previous: HTMLElement | null = null
+
+	for (const element of wanted) {
+		const after: ChildNode | null = previous === null ? root.firstChild : previous.nextSibling
+
+		if (element !== after) root.insertBefore(element, after)
+
+		previous = element
+	}
 
 	return root
 }
@@ -389,8 +429,9 @@ function markSpaces(document: Document, node: Text): void {
 	else node.remove()
 }
 
-// Anchors of the page's floating objects, left of the first line their paragraph has on the page.
-function anchors(page: DocxPageData, document: Document): HTMLElement[] {
+// The boxes of the anchors of the page's floating objects, left of the first line their paragraph has on the page:
+// x, y per anchor (px, rounded as drawn).
+function anchorBoxes(page: DocxPageData): number[] {
 	if (page.objectCount === 0) return []
 
 	const inline = new Set<number>()
@@ -401,7 +442,7 @@ function anchors(page: DocxPageData, document: Document): HTMLElement[] {
 		if (((page.fragmentInts[fi + 3] ?? 0) & FRAGMENT_KIND_MASK) === FragmentKind.OBJECT) inline.add(page.fragmentInts[fi + 4] ?? -1)
 	}
 
-	const out: HTMLElement[] = []
+	const out: number[] = []
 	const done = new Set<number>()
 
 	for (let o = 0; o < page.objectCount; o++) {
@@ -421,12 +462,31 @@ function anchors(page: DocxPageData, document: Document): HTMLElement[] {
 
 		const start = page.sourceMarks?.[source * SOURCE_MARK_FLOATS + SourceMark.START] ?? Number.NaN
 		const x = (Number.isNaN(start) ? (page.lineFloats[line * LINE_FLOATS + 3] ?? 0) : start) - ANCHOR_SIZE - ANCHOR_GAP
+
+		out.push(px(x), px(page.lineFloats[line * LINE_FLOATS] ?? 0))
+	}
+
+	return out
+}
+
+function sameBoxes(a: readonly number[], b: readonly number[]): boolean {
+	if (a.length !== b.length) return false
+
+	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+
+	return true
+}
+
+function anchorElements(boxes: readonly number[], document: Document): HTMLElement[] {
+	const out: HTMLElement[] = []
+
+	for (let i = 0; i + 1 < boxes.length; i += 2) {
 		const element = document.createElement("span")
 		const svg = document.createElementNS(SVG, "svg")
 		const path = document.createElementNS(SVG, "path")
 
 		element.className = "fo-docx-mark fo-docx-mark-anchor"
-		element.style.cssText = `left:${px(x)}px;top:${px(page.lineFloats[line * LINE_FLOATS] ?? 0)}px;width:${ANCHOR_SIZE}px;height:${ANCHOR_SIZE}px;`
+		element.style.cssText = `left:${boxes[i] ?? 0}px;top:${boxes[i + 1] ?? 0}px;width:${ANCHOR_SIZE}px;height:${ANCHOR_SIZE}px;`
 		svg.setAttribute("viewBox", "0 0 16 16")
 		path.setAttribute("d", ANCHOR_PATH)
 		svg.appendChild(path)

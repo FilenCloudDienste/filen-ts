@@ -31,12 +31,19 @@ function sheetCells(document: XlsxDocument, sheet: SheetId): ChartSheetCells | n
 	}
 
 	let hidden: HiddenAxes | undefined
+	const axes = (): HiddenAxes => (hidden ??= hiddenAxes(model))
 
 	return {
 		hidden(row, col) {
-			hidden ??= hiddenAxes(model)
+			const { rows, cols } = axes()
 
-			return hidden.rows.has(row) || hidden.cols.has(col)
+			return rows.has(row) || cols.has(col)
+		},
+		hiddenRow(row) {
+			return axes().rows.has(row)
+		},
+		hiddenCol(col) {
+			return axes().cols.has(col)
 		},
 		get lastRow() {
 			return used().lastRow

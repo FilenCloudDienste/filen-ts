@@ -5,6 +5,7 @@ import {
 	checkboxGlyph,
 	controlAround,
 	inlineControlAround,
+	controlKey,
 	controlOf,
 	controlState,
 	EMPTY_FORM_TEXT,
@@ -613,15 +614,41 @@ const COPYABLE_LEAVES = new Set(["text", "tab", "break", "hyphen", "symbol", "pr
 function itemCopy(part: StoryPart, item: Node): Node | undefined {
 	let copyable = true
 	const copies = new Map<string, Mark>()
+	// One new identity per control of the item the editor made or copied (controlKey), so that a control split
+	// over several leaves stays one control in the copy.
+	const identities = new Map<string, string>()
+	const renewed = (holder: Node | Mark, state: ControlState | null): ControlState | null => {
+		if (state === null || (state.made === undefined && state.copy === undefined && state.properties === undefined)) return state
+
+		const key = controlKey(holder)
+		let id = identities.get(key)
+
+		if (id === undefined) {
+			id = newControlId()
+			identities.set(key, id)
+		}
+
+		return state.made !== undefined ? { ...state, made: { ...state.made, id } } : { ...state, id }
+	}
 	const copyMark = (mark: Mark): Mark => {
 		if (mark.type !== marks.content_control) return mark
 
 		const own = mark.attrs["src"] as number
 
 		if (own === NO_SOURCE) {
-			copyable &&= controlState(mark)?.made !== undefined
+			const state = controlState(mark)
 
-			return mark
+			copyable &&= state?.made !== undefined
+
+			const key = controlKey(mark)
+			let copy = copies.get(key)
+
+			if (copy === undefined) {
+				copy = marks.content_control.create({ ...mark.attrs, state: renewed(mark, state) })
+				copies.set(key, copy)
+			}
+
+			return copy
 		}
 
 		if (controlOf(part, mark)?.binding !== null) copyable = false
@@ -672,7 +699,7 @@ function itemCopy(part: StoryPart, item: Node): Node | undefined {
 			if (controlOf(part, node)?.binding !== null) copyable = false
 
 			attrs["end"] = []
-			attrs["state"] = own === NO_SOURCE ? state : { ...(state ?? {}), copy: own, id: newControlId() }
+			attrs["state"] = own === NO_SOURCE ? renewed(node, state) : { ...(state ?? {}), copy: own, id: newControlId() }
 		} else {
 			attrs["sectPr"] = NO_SOURCE
 			attrs["revision"] = 0

@@ -12,35 +12,40 @@ afterEach(stopEngines)
 async function bytesPerPixel(side: number): Promise<number> {
 	const engine = startEngine(makeEpub({ imageSide: side }), { blockBytes: 1024 * 1024 })
 
-	await engine.openRead({ format: "epub", layout: { width: side, height: side, em: 11 }, maxImagePixels: Number.MAX_SAFE_INTEGER })
+	// Stopped before the next size starts: only one grown heap is alive at a time.
+	try {
+		await engine.openRead({ format: "epub", layout: { width: side, height: side, em: 11 }, maxImagePixels: Number.MAX_SAFE_INTEGER })
 
-	const pages = await engine.client.call("pages", { from: 0, count: 1000, generation: 0 })
-	const page = pages.length - 1
-	const size = pages[page]
+		const pages = await engine.client.call("pages", { from: 0, count: 1000, generation: 0 })
+		const page = pages.length - 1
+		const size = pages[page]
 
-	if (size === undefined) throw new Error("no image page")
+		if (size === undefined) throw new Error("no image page")
 
-	// Builds the page's list: the image is read (not decoded).
-	await engine.client.call("text", { page, generation: 0 })
+		// Builds the page's list: the image is read (not decoded).
+		await engine.client.call("text", { page, generation: 0 })
 
-	const before = await engine.client.call("heap", {})
+		const before = await engine.client.call("heap", {})
 
-	for (let y = 0; y < size.height; y += 1024) {
-		for (let x = 0; x < size.width; x += 1024) {
-			await engine.client.call("render", {
-				page,
-				scale: 1,
-				rotation: 0,
-				tile: [x, y, Math.min(x + 1024, size.width), Math.min(y + 1024, size.height)],
-				priority: "visible",
-				generation: 0
-			})
+		for (let y = 0; y < size.height; y += 1024) {
+			for (let x = 0; x < size.width; x += 1024) {
+				await engine.client.call("render", {
+					page,
+					scale: 1,
+					rotation: 0,
+					tile: [x, y, Math.min(x + 1024, size.width), Math.min(y + 1024, size.height)],
+					priority: "visible",
+					generation: 0
+				})
+			}
 		}
+
+		const after = await engine.client.call("heap", {})
+
+		return (after.heapBytes - before.heapBytes) / (side * side)
+	} finally {
+		engine.client.terminate()
 	}
-
-	const after = await engine.client.call("heap", {})
-
-	return (after.heapBytes - before.heapBytes) / (side * side)
 }
 
 describe("MuPDF's bytes per pixel", () => {

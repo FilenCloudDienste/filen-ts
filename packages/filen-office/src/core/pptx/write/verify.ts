@@ -9,7 +9,7 @@ import {
 	type ZipChanges
 } from "../../opc/index"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS } from "../../presentation/budget"
-import { classifyAction } from "../../presentation/actions"
+import { classifyHyperlink } from "../../presentation/actions"
 import {
 	PATH_ARC,
 	PATH_CLOSE,
@@ -23,13 +23,16 @@ import {
 	type FillProps,
 	type Geometry,
 	type GeometryGuide,
+	type Paragraph,
 	type Refused,
 	type ShapeNode,
 	type SlideNode,
-	type SlideRef
+	type SlideRef,
+	type TableModel
 } from "../../presentation/model"
 import { Namespaces, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
 import { fillChild, readBlipFill, readEffects, readFill, readLine, type ReadContext } from "../read/drawing"
+import { SECTIONS_EXT } from "../read/sections"
 import { readSlidePart } from "../read/slide"
 import { G, partReader, type PartReader } from "../read/xml"
 import { sameModel } from "./emit/shape"
@@ -84,6 +87,24 @@ function normalFill(fill: unknown): unknown {
 	return rest
 }
 
+// A cell read without a:txBody holds no paragraph; once the cell is written its body holds one empty a:p (CT_TextBody
+// holds at least one), so a body without paragraphs compares as that one. Unchanged when no cell needs it.
+const EMPTY_PARAGRAPHS: Paragraph[] = [{ pPr: {}, runs: [] }]
+
+function normalTable(table: TableModel): TableModel {
+	if (!table.rows.some(row => row.cells.some(cell => cell.text.paragraphs.length === 0))) return table
+
+	return {
+		...table,
+		rows: table.rows.map(row => ({
+			...row,
+			cells: row.cells.map(cell =>
+				cell.text.paragraphs.length === 0 ? { ...cell, text: { ...cell.text, paragraphs: EMPTY_PARAGRAPHS } } : cell
+			)
+		}))
+	}
+}
+
 function normalShape(shape: ShapeNode, partOf: PartOf): Record<string, unknown> {
 	const props = shape.props
 	const text =
@@ -108,6 +129,7 @@ function normalShape(shape: ShapeNode, partOf: PartOf): Record<string, unknown> 
 			fill: normalFill(props?.fill),
 			ln: props?.ln,
 			effects: props?.effects?.effects,
+			table: shape.frame?.kind === "table" ? normalTable(shape.frame.table) : undefined,
 			children: shape.children?.map(child => normalShape(child, partOf))
 		},
 		partOf
@@ -373,27 +395,8 @@ async function readWritten(
 		media: { contentType: () => undefined, size: () => undefined },
 		refOf,
 		themeOf: () => undefined,
-		action: (reader, rels, target) => {
-			const id = reader.rel(target, "id")
-			const relationship = id === undefined || id === "" ? undefined : rels.byId(id)
-			const action = reader.attr(target, "action")
-
-			return classifyAction(
-				{
-					...(action === undefined ? {} : { action }),
-					...(relationship === undefined
-						? {}
-						: {
-								target: {
-									external: relationship.external,
-									target: relationship.target,
-									...(relationship.partName === undefined ? {} : { partName: `/${relationship.partName}` })
-								}
-							})
-				},
-				{ slideOf: target => (relationshipTo(rels, target) === "slide" ? refOf(target) : undefined) }
-			)
-		}
+		action: (reader, rels, target) =>
+			classifyHyperlink(reader, rels, target, name => (relationshipTo(rels, name) === "slide" ? refOf(name) : undefined))
 	})
 	// Slide → layout, layout → master, notes → notes master.
 	const parentType = { slide: "/slideLayout", layout: "/slideMaster", notes: "/notesMaster" }[read.node.kind as "slide"]
@@ -584,9 +587,7 @@ export async function verifyFinal(final: FinalPackage, expectation: GateExpectat
 
 	if (new Set(ids.keys()).size !== parts.length) return refused("proofFailed", "Two slides share a slide id")
 
-	const ext = r
-		.children(r.child(root, G.P, "extLst"), G.P, "ext")
-		.find(node => r.attr(node, "uri") === "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}")
+	const ext = r.children(r.child(root, G.P, "extLst"), G.P, "ext").find(node => r.attr(node, "uri") === SECTIONS_EXT)
 	const sections = (ext === undefined ? [] : r.children(r.child(ext, G.P14, "sectionLst"), G.P14, "section")).map(section => ({
 		name: r.attr(section, "name") ?? "",
 		id: r.attr(section, "id") ?? "",

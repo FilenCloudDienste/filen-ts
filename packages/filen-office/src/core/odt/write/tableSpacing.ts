@@ -1,6 +1,6 @@
 import type { XmlDocument } from "../../xml/index"
 import type { OdtTableSpacing } from "../types"
-import type { PropertyValue, Props, StyleChains } from "./meaning"
+import { childNamed, type PropertyValue, type Props, type StyleChains } from "./meaning"
 
 // A table's space above and below (fo:margin-top/bottom) as a save writes it. The translation adds it to the
 // paragraph beside the table in the body (Translator.spaceTable); a paragraph written from the edit has that space
@@ -11,14 +11,6 @@ import type { PropertyValue, Props, StyleChains } from "./meaning"
 export interface SpacingShift {
 	readonly before: number
 	readonly after: number
-}
-
-function childNamed(document: XmlDocument, node: number, local: string): number {
-	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-		if (document.localName(child) === local) return child
-	}
-
-	return -1
 }
 
 function isParagraph(document: XmlDocument, node: number | undefined): node is number {

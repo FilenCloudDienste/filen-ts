@@ -216,6 +216,38 @@ export function paragraphText(text: string): string {
 	return out
 }
 
+// Past the text:tab or text:s element (as paragraphText writes them) starting at `at`, -1 for none there.
+function whiteSpaceElementEnd(body: string, at: number): number {
+	if (!body.startsWith("<text:", at)) return -1
+
+	const name = body.startsWith("tab", at + 6) ? at + 9 : body.startsWith("s", at + 6) ? at + 7 : -1
+
+	if (name < 0 || /\w/.test(body.charAt(name))) return -1
+
+	const close = body.indexOf(">", name)
+
+	return close < 0 || body[close - 1] !== "/" ? -1 : close + 1
+}
+
+// Body markup split as [leading white space elements, the rest, trailing ones]: two linear walks, one from each end.
+export function whiteSpaceEdges(body: string): readonly [string, string, string] {
+	let start = 0
+
+	for (let next = whiteSpaceElementEnd(body, 0); next >= 0; next = whiteSpaceElementEnd(body, start)) start = next
+
+	let end = body.length
+
+	while (end > start) {
+		const open = body.lastIndexOf("<", end - 1)
+
+		if (open < start || whiteSpaceElementEnd(body, open) !== end) break
+
+		end = open
+	}
+
+	return [body.slice(0, start), body.slice(start, end), body.slice(end)]
+}
+
 // Lines of text as text:p elements, each line's runs as text:span with their text styles, each line's text inside
 // the cell's link when it has one.
 export function paragraphs(
@@ -228,10 +260,9 @@ export function paragraphs(
 	const linked = (body: string): string => {
 		if (link === undefined || body === "") return body
 
-		const edges = /^((?:<text:(?:tab|s)\b[^>]*\/>)*)([\s\S]*?)((?:<text:(?:tab|s)\b[^>]*\/>)*)$/.exec(body)
-		const inner = edges?.[2] ?? body
+		const [lead, inner, trail] = whiteSpaceEdges(body)
 
-		return `${edges?.[1] ?? ""}${inner === "" ? "" : `<text:a xlink:href="${escapeAttribute(link)}" xlink:type="simple">${inner}</text:a>`}${edges?.[3] ?? ""}`
+		return `${lead}${inner === "" ? "" : `<text:a xlink:href="${escapeAttribute(link)}" xlink:type="simple">${inner}</text:a>`}${trail}`
 	}
 	const paragraph = (line: string): string => `<text:p>${linked(line)}</text:p>`
 

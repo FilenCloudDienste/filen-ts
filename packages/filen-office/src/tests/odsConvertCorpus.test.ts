@@ -5,6 +5,9 @@ import { basename, join } from "node:path"
 import { unzipSync } from "fflate"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { convertSheet, type SheetLossyFeature, type SheetSourceFormat } from "../core/ods/convert/index"
+import { openOds } from "../core/ods/open"
+import { bytesSource } from "../core/opc/index"
+import { openXlsx } from "../core/xlsx/package/open"
 import { CORPUS_DIR } from "./corpusDir"
 import { OpenXmlSdk, openXmlSdkMissing } from "./oracles/openXmlSdk"
 import { exportShown, sheetOffices, sheetProfile, type ShownWorkbook } from "./oracles/sheet/libreOffice"
@@ -37,6 +40,19 @@ interface Converted {
 	readonly output: string
 	readonly from: SheetSourceFormat
 	readonly lossy: readonly SheetLossyFeature[]
+	// Source sheets the target has no home for (a dialog or macro sheet into .ods), noted "other".
+	readonly dropped: number
+}
+
+// The sheets a workbook's reader finds, and how many of them are worksheets or chart sheets (which every target holds).
+async function sheetCounts(bytes: Uint8Array, format: SheetSourceFormat): Promise<{ all: number; held: number } | null> {
+	const opened = format === "xlsx" ? await openXlsx(bytesSource(bytes)) : await openOds(bytesSource(bytes))
+
+	if (!opened.ok) return null
+
+	const sheets = opened.workbook.sheets
+
+	return { all: sheets.length, held: sheets.filter(entry => entry.kind === "worksheet" || entry.kind === "chartsheet").length }
 }
 
 function trimmed(rows: readonly (readonly string[])[]): string[][] {
@@ -63,6 +79,7 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 	let work = ""
 	const converted: Converted[] = []
 	const refused: string[] = []
+	const sheetLosses: string[] = []
 
 	beforeAll(async () => {
 		work = mkdtempSync(join(SCRATCH, "filen-office-convert-"))
@@ -77,7 +94,9 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 			for (const name of readdirSync(directory).sort()) {
 				const from = FAMILIES[family] as SheetSourceFormat
 				const source = join(directory, name)
-				const result = await convertSheet(new Uint8Array(readFileSync(source)), from, from === "xlsx" ? "ods" : "xlsx")
+				const bytes = new Uint8Array(readFileSync(source))
+				const to = from === "xlsx" ? "ods" : "xlsx"
+				const result = await convertSheet(bytes, from, to)
 
 				if (!result.ok) {
 					refused.push(`${name}: ${result.reason}: ${result.message}`)
@@ -85,10 +104,16 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 					continue
 				}
 
-				const output = join(work, family, `${name}.${from === "xlsx" ? "ods" : "xlsx"}`)
+				const output = join(work, family, `${name}.${to}`)
+				const before = await sheetCounts(bytes, from)
+				const after = await sheetCounts(result.bytes, to)
+
+				if (before === null || after === null)
+					sheetLosses.push(`${name}: ${before === null ? "the source" : "the output"} does not open`)
+				else if (after.all !== before.held) sheetLosses.push(`${name}: ${before.held} sheets held, ${after.all} written`)
 
 				writeFileSync(output, result.bytes)
-				converted.push({ source, output, from, lossy: result.lossy })
+				converted.push({ source, output, from, lossy: result.lossy, dropped: before === null ? 0 : before.all - before.held })
 			}
 		}
 
@@ -113,6 +138,11 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 		expect(refused.filter(line => !SOURCE_REFUSALS.has(line.split(": ")[1] ?? ""))).toEqual([])
 	})
 
+	it("writes every worksheet and chart sheet of each source", () => {
+		expect(converted.length).toBeGreaterThan(300)
+		expect(sheetLosses.slice(0, 40)).toEqual([])
+	})
+
 	it.skipIf(ODF_VALIDATOR === "")("writes .ods files odfvalidator finds no error in", { timeout: 3_600_000 }, () => {
 		const files = converted.filter(item => item.from === "xlsx").map(item => item.output)
 		const errors: string[] = []
@@ -122,6 +152,13 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 				encoding: "utf8",
 				maxBuffer: 1 << 28
 			})
+
+			// A spawn failure, a kill or a cut-off output reads as no error line: the batch went unchecked. A non-zero exit
+			// is how odfvalidator reports an invalid file, which the lines name.
+			if (run.error !== undefined || run.signal !== null || run.status === null)
+				errors.push(
+					`files ${start}-${start + 49}: odfvalidator did not finish: ${run.error?.message ?? run.signal ?? "no exit status"}`
+				)
 
 			for (const line of `${run.stdout}\n${run.stderr}`.split("\n")) if (/:\s+(?:Error|Fatal):/.test(line)) errors.push(line)
 		}
@@ -208,6 +245,7 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 				false
 			)
 			const problems: string[] = []
+			let compared = 0
 
 			converted.forEach((item, index) => {
 				const before = shownBySheet(sources[index])
@@ -221,11 +259,27 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 
 				if (before === null) return
 
+				compared++
+
+				// By count: LibreOffice writes no CSV for a sheet whose name cannot be a file name (on either side), and a
+				// conversion renames a sheet the target's name rules refuse ("sheetName"), so names alone do not pair them.
+				if (after.size + item.dropped < before.size && !item.lossy.some(feature => feature.kind === "sheetName"))
+					problems.push(`${basename(item.source)}: ${before.size} sheets shown, ${after.size} after`)
+
+				// One sheet's CSV is named after the file, which differs between source and output.
+				if (before.size === 1 && after.size === 1) {
+					if ([...before.values()][0] !== [...after.values()][0]) problems.push(`${basename(item.source)}: shown differently`)
+
+					return
+				}
+
 				for (const [sheet, text] of before)
 					if (after.has(sheet) && after.get(sheet) !== text) problems.push(`${basename(item.source)} ${sheet}: shown differently`)
 			})
 
 			expect(problems.slice(0, 40)).toEqual([])
+			// Most sources open in LibreOffice: a profile or install that opens none compares nothing.
+			expect(compared).toBeGreaterThan(converted.length * 0.9)
 		}
 	)
 })

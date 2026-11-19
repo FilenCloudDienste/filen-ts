@@ -73,10 +73,26 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 	const status = document.status
 	const { open, query, caseSensitive, wholeWord } = find
 	const searching = open && query.length > 0
+	const streaming = status === "streaming"
+	const hasPages = laidOut > 0
+	// The pages laid out when the open search last ran, while pages stream in.
+	const [searchedPages, setSearchedPages] = useState(laidOut)
 
-	// The engine searches every page laid out so far, and again as more arrive. A newer query wins.
+	// Pages arrive in many events a frame while a document streams in: one search a frame covers them all.
 	useEffect(() => {
-		if (!searching || session === undefined || laidOut === 0) return
+		if (!searching || !streaming || laidOut === searchedPages) return
+
+		const frame = requestAnimationFrame(() => setSearchedPages(laidOut))
+
+		return () => cancelAnimationFrame(frame)
+	}, [searching, streaming, laidOut, searchedPages])
+
+	const searchedLaidOut = streaming ? searchedPages : laidOut
+
+	// The engine searches every page laid out so far, and again as more arrive (at most once a frame while they
+	// stream in, and once more when all are in). A new query searches at once; a newer query wins.
+	useEffect(() => {
+		if (!searching || session === undefined || !hasPages) return
 
 		let current = true
 
@@ -115,7 +131,7 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 		return () => {
 			current = false
 		}
-	}, [searching, session, query, caseSensitive, wholeWord, laidOut, status])
+	}, [searching, session, query, caseSensitive, wholeWord, hasPages, searchedLaidOut, status])
 
 	// A newly selected match scrolls into view once the state that holds it has rendered.
 	useEffect(() => {

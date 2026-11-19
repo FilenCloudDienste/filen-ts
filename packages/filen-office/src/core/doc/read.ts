@@ -1181,10 +1181,19 @@ function readPlaceholders(context: Context, runs: readonly DocRun[], stories: re
 			continue
 		}
 
+		let outside = 0
+
 		for (let k = 0; k < plc.count; k++) {
 			const at = plc.dataAt + 26 * k
 			const flags = table.u16(at + 20)
 			const cp = story.start + (plc.cps[k] ?? 0)
+
+			// An anchor past its story (in a text box's text, say) is no anchor of this story: left out.
+			if (cp >= story.end) {
+				outside++
+
+				continue
+			}
 
 			shapes.set(cp, {
 				kind: "shape",
@@ -1202,6 +1211,9 @@ function readPlaceholders(context: Context, runs: readonly DocRun[], stories: re
 				behindText: (flags & 0x4000) !== 0
 			})
 		}
+
+		if (outside > 0)
+			context.issues.push({ code: "unreadableStructure", message: `${name} anchors ${String(outside)} CPs outside its story` })
 	}
 
 	for (const run of runs) {

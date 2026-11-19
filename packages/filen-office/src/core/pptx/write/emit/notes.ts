@@ -1,12 +1,13 @@
 import { partKey } from "../../../opc/index"
+import { concatBytes } from "../../../opc/pieces"
 import type { DeckChanges } from "../../../presentation/edit/apply"
 import { formerName, noteFormerName } from "../../../presentation/issuedNames"
 import { refused, type Deck, type Refused, type SlideNode, type SlideRef } from "../../../presentation/model"
-import { madeNotesPart } from "../../../presentation/notes"
+import { hasMadeNotesParts, madeNotesPart } from "../../../presentation/notes"
 import { encodeUtf8, escapeAttribute } from "../../../xml/index"
 import { G, P_MAIN, partReader } from "../../read/xml"
 import { emitFamilyOf, emitPptx } from "../emit"
-import { PART_CONTENT_TYPES, RELATIONSHIPS, modelName, zipName, type PackageWriter } from "../parts"
+import { PART_CONTENT_TYPES, RELATIONSHIPS, XML_DECLARATION, modelName, zipName, type PackageWriter } from "../parts"
 import type { EmitPiece, EmitRequest, EmitResult, PptxEmitFamily } from "../types"
 import { URIS, type EmitContext } from "./shape"
 import { slideRoot } from "./slide"
@@ -22,7 +23,6 @@ const NOTES_SLIDE = `${RELATIONSHIPS}notesSlide`
 const NOTES_MASTER = `${RELATIONSHIPS}notesMaster`
 const SLIDE = `${RELATIONSHIPS}slide`
 const THEME = `${RELATIONSHIPS}theme`
-const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 
 export interface ReviewSpliceInput {
 	readonly writer: PackageWriter
@@ -44,22 +44,6 @@ function dispatch(request: EmitRequest, context: EmitContext): EmitResult {
 	return emitPptx(emitFamilyOf(request), request, context)
 }
 
-function concat(chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
-}
-
 function piecesBytes(pieces: readonly EmitPiece[]): Uint8Array | Refused {
 	const chunks: Uint8Array[] = [encodeUtf8(XML_DECLARATION)]
 
@@ -69,7 +53,7 @@ function piecesBytes(pieces: readonly EmitPiece[]): Uint8Array | Refused {
 		else return refused("failed", "a model-written notes part names source markup")
 	}
 
-	return concat(chunks)
+	return concatBytes(chunks)
 }
 
 // A node written from the model alone into a new part `name`.
@@ -120,6 +104,9 @@ export async function spliceNotes(input: ReviewSpliceInput): Promise<Refused | u
 		}
 	}
 
+	// Only a notes part the session made is ever taken out: with none, no slide's relationships need reading.
+	const madeAny = hasMadeNotesParts(deck)
+
 	for (const ref of deck.slides) {
 		const node = deck.nodes.get(ref)
 		const slidePart = input.slidePart(ref)
@@ -130,7 +117,7 @@ export async function spliceNotes(input: ReviewSpliceInput): Promise<Refused | u
 
 		if (notes === undefined) {
 			// The notes slide an undo took back after a save: out of the package with its relationship.
-			if (!writer.exists(slidePart) || writer.isAdded(slidePart)) continue
+			if (!madeAny || !writer.exists(slidePart) || writer.isAdded(slidePart)) continue
 
 			const related = await relationOfType(writer, slidePart, NOTES_SLIDE)
 

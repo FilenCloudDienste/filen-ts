@@ -119,7 +119,10 @@ describe("link targets", () => {
 
 	// A link's existing target stays whatever its scheme: one the file holds unencoded (a raw space) is the same
 	// target as its encoded form.
-	it.each(["file:///C:/My Docs/a.docx", "https://e.example/a b"])("edits the text of a link to %s, its target kept", async target => {
+	it.each([
+		["file:///C:/My Docs/a.docx", "file:///C:/My%20Docs/a.docx"],
+		["https://e.example/a b", "https://e.example/a%20b"]
+	])("edits the text of a link to %s, its target kept", async (target, written) => {
 		const opened = await openBytes(
 			buildDocx({
 				body: p("Before") + '<w:p><w:hyperlink r:id="rIdL"><w:r><w:t>Link</w:t></w:r></w:hyperlink></w:p>',
@@ -130,10 +133,23 @@ describe("link targets", () => {
 
 		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 10, 12)))
 
-		const current = session.snapshot().context.link?.target ?? ""
+		expect(session.snapshot().context.link?.target).toBe(target)
+		expect(session.execute({ type: "link.set", target, text: "Edited" })).toBe(true)
+		expect(session.state.doc.textContent).toBe("BeforeEdited")
 
-		expect(session.execute({ type: "link.set", target: current, text: "Edited" })).toBe(true)
-		await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+		const result = await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+		const pkg = await OpcPackage.open(bytesSource(result.bytes as Uint8Array))
+		const rels = new TextDecoder().decode(await pkg.read("word/_rels/document.xml.rels"))
+		const document = new TextDecoder().decode(await pkg.read("word/document.xml"))
+		const hyperlinks = [
+			...rels.matchAll(/<Relationship Id="([^"]+)" Type="[^"]+\/hyperlink" Target="([^"]*)" TargetMode="External"\/>/g)
+		]
+
+		// One relationship, the target written as the URI reference it is (a raw space encoded), the link's text the new one.
+		expect(rels.match(/\/hyperlink"/g)).toHaveLength(1)
+		expect(hyperlinks).toHaveLength(1)
+		expect(hyperlinks[0]?.[2]).toBe(written)
+		expect(document).toContain(`<w:hyperlink r:id="${hyperlinks[0]?.[1] ?? ""}"><w:r><w:t>Edited</w:t></w:r></w:hyperlink>`)
 	})
 
 	it("links new targets to web, email and phone addresses only, with why", () => {

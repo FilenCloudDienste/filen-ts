@@ -11,6 +11,7 @@ import {
 	replaceMatches,
 	selectMatch
 } from "@filen/office/core/docx/edit"
+import { nfcWithMap } from "@filen/office/core/text"
 import { nodeText, openSpec, sessionOf } from "./docxEditFixtures"
 import { p } from "./docxSynthetic"
 
@@ -86,6 +87,15 @@ describe("findInStory", () => {
 
 		expect(matches.map(match => doc.textBetween(match.from, match.to))).toEqual(["CAFE\u0301", "cafe\u0301"])
 		expect(matches.every(match => matchHolds(doc, match, "café"))).toBe(true)
+	})
+
+	it("matches Korean stored as conjoining jamo", async () => {
+		const session = await sessionOf({ body: p("\u1100\u1161\u11a8 \u1100\u1161 \uac00") })
+		const doc = session.state.doc
+		const matches = findInStory(doc, "\uac00")
+
+		expect(matches.map(match => doc.textBetween(match.from, match.to))).toEqual(["\u1100\u1161", "\uac00"])
+		expect(findInStory(doc, "\uac01").map(match => doc.textBetween(match.from, match.to))).toEqual(["\u1100\u1161\u11a8"])
 	})
 
 	it("finds whole words only when asked: a letter, digit, mark or underscore on either side rules a match out", async () => {
@@ -403,5 +413,31 @@ describe("markSaved", () => {
 		expect(session.snapshot().dirty).toBe(true)
 		session.markSaved()
 		expect(session.snapshot().dirty).toBe(false)
+	})
+})
+
+describe("nfcWithMap", () => {
+	it("composes a decomposed Hangul syllable over all of its jamo", () => {
+		const mapped = nfcWithMap("\u1100\u1161\u11a8")
+
+		expect(mapped.text).toBe("\uac01")
+		expect(Array.from(mapped.starts ?? [])).toEqual([0])
+		expect(Array.from(mapped.ends ?? [])).toEqual([3])
+	})
+
+	it("keeps two leading consonants apart and composes an LV syllable with a final", () => {
+		const mapped = nfcWithMap("\u1100\u1100\u1161 \uac00\u11a8")
+
+		expect(mapped.text).toBe("\u1100\uac00 \uac01")
+		expect(Array.from(mapped.starts ?? [])).toEqual([0, 1, 3, 4])
+		expect(Array.from(mapped.ends ?? [])).toEqual([1, 3, 4, 6])
+	})
+
+	it("maps a base and its combining marks as one cluster", () => {
+		const mapped = nfcWithMap("cafe\u0301s")
+
+		expect(mapped.text).toBe("caf\u00e9s")
+		expect(Array.from(mapped.starts ?? [])).toEqual([0, 1, 2, 3, 5])
+		expect(Array.from(mapped.ends ?? [])).toEqual([1, 2, 3, 5, 6])
 	})
 })

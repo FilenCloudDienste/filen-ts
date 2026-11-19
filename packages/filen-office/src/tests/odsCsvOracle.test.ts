@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { bytesSource } from "../core/opc/index"
 import { openOds } from "../core/ods/open"
 import { CORPUS_DIR } from "./corpusDir"
-import { odsDocument, shownRows } from "./odsFixtures"
+import { ODS_ENCRYPTED, odsDocument, shownRows } from "./odsFixtures"
 import { exportShown, sheetOffices, sheetProfile } from "./oracles/sheet/libreOffice"
 
 // Each corpus spreadsheet's sheets as shown (CSV, number formats applied, cached results) equal LibreOffice 7.5's
@@ -21,8 +21,6 @@ const FILES = existsSync(DIR)
 	: []
 const OFFICE = sheetOffices().find(office => office.version.startsWith("7.5."))
 const SCRATCH = process.env["FILEN_OFFICE_SHEET_LO_SCRATCH"] || tmpdir()
-// Neither opens it without its password.
-const ENCRYPTED = "lo__password.ods"
 
 // Where LibreOffice's text differs from ours, and why.
 const ACCEPTED: Readonly<Record<string, string>> = {
@@ -87,7 +85,8 @@ describe.skipIf(FILES.length === 0 || OFFICE === undefined)("ODS as shown agains
 				const result = await openOds(bytesSource(new Uint8Array(readFileSync(join(DIR, name)))))
 
 				if (!result.ok || exported?.ok !== true) {
-					if (name !== ENCRYPTED || result.ok || exported?.ok === true) unexpected.push(`${name}: one side did not open it`)
+					if (!ODS_ENCRYPTED.includes(name) || result.ok || exported?.ok === true)
+						unexpected.push(`${name}: one side did not open it`)
 
 					continue
 				}
@@ -115,7 +114,8 @@ describe.skipIf(FILES.length === 0 || OFFICE === undefined)("ODS as shown agains
 			}
 
 			expect(unexpected).toEqual([])
-			expect(equal).toBe(FILES.length - 1 - Object.keys(ACCEPTED).length)
+			// Neither side opens an encrypted file; an accepted one differs.
+			expect(equal).toBe(FILES.filter(name => !ODS_ENCRYPTED.includes(name) && ACCEPTED[name] === undefined).length)
 		} finally {
 			rmSync(work, { recursive: true, force: true })
 		}

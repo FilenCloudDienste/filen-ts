@@ -21,6 +21,7 @@ describe.skipIf(files.length === 0)("proof gate 1 over the corpus", () => {
 	it("locks at most 2% of shapes, each lock counted by reason", async ({ task }) => {
 		let shapes = 0
 		let decks = 0
+		let unreadableSlides = 0
 		const locked: Partial<Record<LockReason, number>> = {}
 		const failures: Record<string, number> = {}
 		const worst: { file: string; locked: number; shapes: number }[] = []
@@ -46,6 +47,9 @@ describe.skipIf(files.length === 0)("proof gate 1 over the corpus", () => {
 				try {
 					slide = await opened.parts.slide(ref)
 				} catch {
+					// Malformed decks legitimately refuse some slides; counted so a reader regression shows in the meta.
+					unreadableSlides++
+
 					continue
 				}
 
@@ -86,11 +90,13 @@ describe.skipIf(files.length === 0)("proof gate 1 over the corpus", () => {
 				presentationProofLockRate: { value: rate, budget: 0.02 },
 				presentationProofLockRateWithPendingFamilies: { value: shapes === 0 ? 0 : total / shapes },
 				presentationProofShapes: { value: shapes },
-				presentationProofDecks: { value: decks }
+				presentationProofDecks: { value: decks },
+				presentationProofUnreadableSlides: { value: unreadableSlides }
 			},
 			locks: { byReason: locked, failures, worst: worst.slice(0, 15) }
 		})
 		expect(decks).toBeGreaterThan(0)
+		expect(shapes).toBeGreaterThan(0)
 		expect(rate).toBeLessThanOrEqual(0.02)
 	}, 900_000)
 })

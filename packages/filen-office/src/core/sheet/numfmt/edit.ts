@@ -1,5 +1,5 @@
 import { numFmt } from "./format"
-import { SectionKind, Tok, type NumFmt, type NumFmtSection } from "./parse"
+import { MAX_NUMFMT_LENGTH, SectionKind, Tok, type NumFmt, type NumFmtSection } from "./parse"
 
 // What the toolbar and the Format Cells dialog do with number format codes: name a code's category, offer Excel's
 // Home tab formats, and add or take away a decimal place (Increase and Decrease Decimal). Codes are en-US syntax,
@@ -291,7 +291,7 @@ export function unwritableText(text: string): boolean {
 // format.apply refuses what this refuses, so the dialog and the session agree.
 export type NumFmtProblem = "empty" | "tooLong" | "sections" | "unclosed" | "characters"
 
-export const MAX_NUMFMT_LENGTH = 255
+export { MAX_NUMFMT_LENGTH }
 
 export function numFmtProblem(code: string): NumFmtProblem | null {
 	if (code.trim() === "") return "empty"

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import type { SheetCommand, SheetOpened } from "../core/sheet/protocol"
-import { textSortFeature } from "../core/sheet/sort/text"
 import { inThreadTextHost } from "../dom/sheet/text"
 import { IMMEDIATE } from "./sheetSessionFixtures"
 
@@ -12,14 +11,7 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 async function open(text: string): Promise<SheetOpened> {
-	// The feature is the text session's own once registered; added here only while it is not.
-	let host = inThreadTextHost([textSortFeature])
-	let result = await host.open(encoder.encode(text), { kind: "csv", slicing: IMMEDIATE }, () => undefined)
-
-	if (result.kind === "failed") {
-		host = inThreadTextHost()
-		result = await host.open(encoder.encode(text), { kind: "csv", slicing: IMMEDIATE }, () => undefined)
-	}
+	const result = await inThreadTextHost().open(encoder.encode(text), { kind: "csv", slicing: IMMEDIATE }, () => undefined)
 
 	if (result.kind !== "opened") throw new Error(`expected an open, got ${result.kind}`)
 

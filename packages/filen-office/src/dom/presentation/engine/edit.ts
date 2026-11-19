@@ -17,7 +17,16 @@ import { readSlidePart } from "../../../core/pptx/read/slide"
 import { G, P_MAIN, partReader } from "../../../core/pptx/read/xml"
 import { sourcePictureFill } from "../../../core/pptx/write/emit/picture"
 import { DeckTally } from "../../../core/presentation/budget"
-import { applyAll, applyOp, opTouches, type DeckChanges, type Dirt, type Inverse, type Touch } from "../../../core/presentation/edit/apply"
+import {
+	applyAll,
+	applyOp,
+	heldBytesOf,
+	opTouches,
+	type DeckChanges,
+	type Dirt,
+	type Inverse,
+	type Touch
+} from "../../../core/presentation/edit/apply"
 import type { PictureReading } from "../../../core/presentation/edit/apply/picture"
 import {
 	deckDefinitionType,
@@ -26,7 +35,14 @@ import {
 	type SmartArtSourceReading
 } from "../../../core/presentation/edit/apply/smartart"
 import { overlayNode, rebindEpoch, type SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
-import { designInfo, designLayouts, predictedSizeTouches, type DesignReading } from "../../../core/presentation/edit/apply/design"
+import {
+	designInfo,
+	designLayouts,
+	predictedDesignTouches,
+	predictedSizeTouches,
+	type DesignReading
+} from "../../../core/presentation/edit/apply/design"
+import type { ComparingReading } from "../../../core/presentation/edit/apply/table"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
 import { deckChanges, deckFingerprints, findShape, fingerprintTouches, orderKey } from "../../../core/presentation/edit/changes"
 import {
@@ -47,7 +63,7 @@ import {
 	type PartReference,
 	type ReferenceFacts
 } from "../../../core/presentation/edit/integrity"
-import type { DeckOp, RawPart } from "../../../core/presentation/edit/ops"
+import { isRawPart, RAW_PART_PREFIX, type DeckOp, type RawPart } from "../../../core/presentation/edit/ops"
 import { isMovable, proveSlide, type EmitFunction, type ProofTally } from "../../../core/presentation/edit/proof"
 import { holdingGroups } from "../../../core/presentation/groupSpace"
 import { nextShapeId } from "../../../core/presentation/ids"
@@ -69,6 +85,7 @@ import type { CallContext, EditCapability, EngineSession } from "../engine"
 import type { CommandResult } from "../protocol"
 import type { RefusedEdits } from "../refusedEdits"
 import { bindSaveHistory, deckTurn, saveHistoryOf, type SaveHistory } from "../save"
+import { pruneReleased } from "../prune"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
 import { autofitOp, textSeedOf } from "./text"
@@ -83,7 +100,6 @@ import { isRefused } from "../../../core/presentation/refusal"
 // Source markup an inverse holds is read back as the deck's reader reads it, into documents the session keeps
 // under "raw:" names: a shape's or slide's `src` names one after a save's rebase made its old ref stale.
 
-const RAW_PREFIX = "raw:"
 // The shared parts a slide delete holds for its undo: at most this share of the history's byte budget.
 const SHARED_SHARE = 4
 // Refs the session allocates sit above every ref the reader hands out.
@@ -133,6 +149,9 @@ interface EditState {
 	nextRaw: number
 	// Slides an undo restored onto the package's parts, with the parts their delete held and the epoch they bound to.
 	readonly restored: Map<SlideRef, { readonly parts: readonly RawPart[]; epoch: number }>
+	// While a refused save's revert holds undone ops outside the history to apply again: the steps the history let go
+	// of meanwhile, pruned for once it is done (the held ops may name the last copy of an image or chart version).
+	deferred: HistoryStep[] | undefined
 }
 
 interface HeldReferences {
@@ -169,10 +188,16 @@ function stateOf(session: EngineSession): EditState {
 		nextRef: SESSION_REFS,
 		nextRaw: 1,
 		origins: new Map(),
-		restored: new Map()
+		restored: new Map(),
+		deferred: undefined
 	}
 
 	states.set(session, state)
+	// Steps the history let go of for good may have held the last name of an inserted image or a chart version.
+	state.history.onRelease = steps => {
+		if (state.deferred !== undefined) state.deferred.push(...steps)
+		else pruneReleased(session, state.history, steps)
+	}
 	// A save takes back notes started and not typed in (the provisional step on top) before its snapshot, as retract()
 	// would: the file never holds empty notes, and the page's open editor closes on them (the history as before them).
 	// The page's editor may still be on them: they stay answered (dormant) and its first input makes them again.
@@ -209,7 +234,7 @@ function stateOf(session: EngineSession): EditState {
 			return state.history.dirtyBytes
 		},
 		changes: () => deckChanges(session.deck, state.history, fingerprint),
-		savePoint: () => state.history.savePoint(),
+		savePoint: () => state.history.beginSave(),
 		commit: point => {
 			state.history.commit(point)
 		},
@@ -232,6 +257,8 @@ function stateOf(session: EngineSession): EditState {
 		state.cache.bytes.clear()
 		state.cache.relationships.clear()
 		state.references.clear()
+		// Closing: the deck and its registries go with the session, nothing to judge.
+		state.history.onRelease = undefined
 		state.history.clear()
 	})
 
@@ -595,7 +622,7 @@ function readPart(parts: PptxParts, ref: SlideRef, name: string, document: XmlDo
 
 // Held under a "raw:" name the package answers too, so the renderer and the emitters resolve its refs.
 function holdRaw(state: EditState, parts: PptxParts, document: XmlDocument, held: Omit<RawDocument, "document"> = {}): string {
-	const name = `${RAW_PREFIX}${String(state.nextRaw++)}`
+	const name = `${RAW_PART_PREFIX}${String(state.nextRaw++)}`
 
 	state.raw.set(name, { document, ...held })
 	parts.adopt(name, document)
@@ -626,9 +653,7 @@ function basePart(parts: PptxParts, slide: SlideNode): string | undefined {
 
 	const src = slide.src
 
-	return src?.format === "pptx" && !src.part.startsWith(RAW_PREFIX) && src.epoch === parts.epoch && parts.opc.has(src.part)
-		? src.part
-		: undefined
+	return src?.format === "pptx" && !isRawPart(src.part) && src.epoch === parts.epoch && parts.opc.has(src.part) ? src.part : undefined
 }
 
 // Relationship kinds a restored part may name outside what it held: the writer re-targets or drops slide jumps.
@@ -720,7 +745,7 @@ function reconcileRestored(session: EngineSession, state: EditState): void {
 function contextFor(
 	session: EngineSession,
 	state: EditState
-): SlideSourceReading & Partial<PictureReading & SmartArtSourceReading & DesignReading> {
+): SlideSourceReading & Partial<PictureReading & SmartArtSourceReading & DesignReading & ComparingReading> {
 	if (session.deck.format === "odp") {
 		const odp = odpParts(session.deck)
 
@@ -757,7 +782,38 @@ function contextFor(
 		return node
 	}
 
-	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading & DesignReading = {
+	// Shape markup read as a shape of `slide`, under a "raw:" name the package answers; `keep` false: the name is let go
+	// once read (a comparison that drops the shape holds nothing for the session).
+	const readShapeMarkup = (slide: SlideNode, raw: Uint8Array, keep: boolean): ShapeNode | Refused => {
+		const held = parts.document(slide.part) ?? rawDocumentOf(state, slide.part)
+		const scope = held === undefined ? (cache.scopes.get(partKey(slide.part)) ?? "") : rootScope(held)
+		const relationships = withHeldRelationships(deck, slide.part, cache.relationships.get(partKey(slide.part)) ?? new Relationships([]))
+		let document: XmlDocument
+
+		try {
+			document = parseXml(
+				join(
+					`<w:sld xmlns:w="${P_MAIN}"${scope}><w:cSld><w:spTree><w:nvGrpSpPr><w:cNvPr id="0" name=""/><w:cNvGrpSpPr/><w:nvPr/></w:nvGrpSpPr><w:grpSpPr/>`,
+					raw,
+					"</w:spTree></w:cSld></w:sld>"
+				)
+			)
+		} catch {
+			return refused("malformed", "held shape markup")
+		}
+
+		const name = holdRaw(state, parts, document)
+		const shape = readPart(parts, slide.ref, name, document, relationships).shapes[0]
+
+		if (!keep) {
+			state.raw.delete(name)
+			parts.forget(name)
+		}
+
+		return shape === undefined ? refused("malformed", "held shape markup") : shape
+	}
+
+	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading & DesignReading & ComparingReading = {
 		sourceBytes: src => sourceBytes(session, state.raw, src),
 		keptSource: shape => (shape.src === undefined ? undefined : alternateSource(session, state.raw, shape.src)),
 		epoch: parts.epoch,
@@ -767,32 +823,9 @@ function contextFor(
 		newShapeId: slide => nextShapeId(deck.nodes.get(slide)?.shapes ?? []),
 		newSlideRef: () => slideRef(state.nextRef++),
 		movable: shape => isMovable(shape, part => parts.document(part) ?? state.raw.get(part)?.document),
-		readShape(slide, raw) {
-			const held = parts.document(slide.part) ?? rawDocumentOf(state, slide.part)
-			const scope = held === undefined ? (cache.scopes.get(partKey(slide.part)) ?? "") : rootScope(held)
-			const relationships = withHeldRelationships(
-				deck,
-				slide.part,
-				cache.relationships.get(partKey(slide.part)) ?? new Relationships([])
-			)
-			let document: XmlDocument
-
-			try {
-				document = parseXml(
-					join(
-						`<w:sld xmlns:w="${P_MAIN}"${scope}><w:cSld><w:spTree><w:nvGrpSpPr><w:cNvPr id="0" name=""/><w:cNvGrpSpPr/><w:nvPr/></w:nvGrpSpPr><w:grpSpPr/>`,
-						raw,
-						"</w:spTree></w:cSld></w:sld>"
-					)
-				)
-			} catch {
-				return refused("malformed", "held shape markup")
-			}
-
-			const shape = readPart(parts, slide.ref, holdRaw(state, parts, document), document, relationships).shapes[0]
-
-			return shape === undefined ? refused("malformed", "held shape markup") : shape
-		},
+		readShape: (slide, raw) => readShapeMarkup(slide, raw, true),
+		// Read under a "raw:" name as readShape reads, then let go: the comparison drops the shape.
+		compareShape: (slide, raw) => readShapeMarkup(slide, raw, false),
 		carry: (slide, raws, carried) => {
 			const result = carryRelationships(
 				{
@@ -967,14 +1000,14 @@ function contextFor(
 		},
 		// A diagram part prepare read (one the package no longer has is no part to name), or one an op held.
 		diagramDocument: part =>
-			part.startsWith(RAW_PREFIX)
+			isRawPart(part)
 				? state.raw.get(part)?.document
 				: parts.opc.has(part) || heldRestorePart(state, deck, part) !== undefined || carriedPart(deck, part) !== undefined
 					? parts.document(part)
 					: undefined,
 		holdDiagram: (document, name) => {
 			// An undo holds a part again under the name it had, so the frame reads as it did.
-			if (name === undefined || !name.startsWith(RAW_PREFIX) || state.raw.has(name)) return holdRaw(state, parts, document)
+			if (name === undefined || !isRawPart(name) || state.raw.has(name)) return holdRaw(state, parts, document)
 
 			state.raw.set(name, { document })
 			parts.adopt(name, document)
@@ -1260,7 +1293,7 @@ async function prepare(
 	const definitionType = deckDefinitionType(op)
 
 	for (const part of [...diagramPartsOf(deck, op), ...(definitionType === undefined ? [] : diagramPartsOfType(parts, definitionType))]) {
-		if (part.startsWith(RAW_PREFIX) || parts.document(part) !== undefined) continue
+		if (isRawPart(part) || parts.document(part) !== undefined) continue
 
 		if (!parts.opc.has(part)) {
 			// A restored slide's frame names the diagram parts its restore held (no save since wrote them back).
@@ -1422,7 +1455,7 @@ function predictedTouches(deck: Deck, op: DeckOp): Touch[] {
 		}
 	}
 
-	out.push(...predictedSizeTouches(deck, op))
+	out.push(...predictedSizeTouches(deck, op), ...predictedDesignTouches(deck, op))
 
 	if (op.family === "slide" && (op.kind === "reset" || op.kind === "setLayout")) {
 		for (const shape of deck.nodes.get(op.slide)?.shapes ?? []) {
@@ -1664,11 +1697,12 @@ function refusal(error: unknown): CommandResult {
 	throw error
 }
 
-// The history's accounting of a step: its op, its inverse's typed values and bytes, and the fingerprints it keeps.
+// The history's accounting of a step: its op, its inverse's typed values and bytes, what the families hold off its
+// inverse's ops (an ODP design step's copied pages, a comment restore's comments), and the fingerprints it keeps.
 function inverseWithBytes(inverse: Inverse): Inverse {
 	let bytes = 0
 
-	for (const op of inverse.ops) bytes += opBytesOf(op)
+	for (const op of inverse.ops) bytes += opBytesOf(op) + heldBytesOf(op)
 
 	return { ops: inverse.ops, bytes }
 }
@@ -2040,57 +2074,71 @@ async function revert(
 	}
 	const unrelated: DeckOp[] = []
 	let count = 0
+	const deferred: HistoryStep[] = []
 
-	while (touched()) {
-		const entry = history.peekUndo()
+	state.deferred = deferred
 
-		if (entry === undefined) break
+	try {
+		await revertSteps()
+	} finally {
+		state.deferred = undefined
 
-		try {
-			for (const op of entry.inverse.ops) await prepare(session, state, op, undefined, options)
-		} catch {
-			break
-		}
-
-		const result = applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
-
-		if (isRefused(result)) break
-
-		history.undone()
-		changed(session, state, entry.touches)
-
-		if (related(entry)) {
-			count++
-
-			if (left !== undefined) left--
-		} else unrelated.unshift(entry.op)
-	}
-
-	for (const op of unrelated) {
-		const result = await applyStep(session, state, op, undefined, options)
-
-		if (!result.ok) {
-			count++
-
-			continue
-		}
-
-		// A step that keeps a refused part changed after all goes again (a step named by `edits` never is one).
-		if (named === undefined && touched()) {
-			const entry = history.peekUndo()
-
-			const back = entry === undefined ? undefined : applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
-
-			if (entry !== undefined && back !== undefined && !isRefused(back)) {
-				history.undone()
-				changed(session, state, entry.touches)
-			}
-
-			count++
-		}
+		if (deferred.length > 0) pruneReleased(session, history, deferred)
 	}
 
 	return count
+
+	// Undoes, then applies the unrelated steps again (`count` the steps reverted).
+	async function revertSteps(): Promise<void> {
+		while (touched()) {
+			const entry = history.peekUndo()
+
+			if (entry === undefined) break
+
+			try {
+				for (const op of entry.inverse.ops) await prepare(session, state, op, undefined, options)
+			} catch {
+				break
+			}
+
+			const result = applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
+
+			if (isRefused(result)) break
+
+			history.undone()
+			changed(session, state, entry.touches)
+
+			if (related(entry)) {
+				count++
+
+				if (left !== undefined) left--
+			} else unrelated.unshift(entry.op)
+		}
+
+		for (const op of unrelated) {
+			const result = await applyStep(session, state, op, undefined, options)
+
+			if (!result.ok) {
+				count++
+
+				continue
+			}
+
+			// A step that keeps a refused part changed after all goes again (a step named by `edits` never is one).
+			if (named === undefined && touched()) {
+				const entry = history.peekUndo()
+
+				const back = entry === undefined ? undefined : applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
+
+				if (entry !== undefined && back !== undefined && !isRefused(back)) {
+					history.undone()
+					changed(session, state, entry.touches)
+				}
+
+				count++
+			}
+		}
+	}
 }
 
 // The edit capability, proving slides with `options.emit` (tests pass their own emitters).
@@ -2133,7 +2181,7 @@ export function chartPartSource(session: EngineSession, parts: PptxParts): Chart
 		for (const node of session.deck.nodes.values()) {
 			const src = node.src
 
-			if (src?.format !== "pptx" || !src.part.startsWith("raw:")) continue
+			if (src?.format !== "pptx" || !isRawPart(src.part)) continue
 
 			const held = stateOf(session)
 				.raw.get(src.part)

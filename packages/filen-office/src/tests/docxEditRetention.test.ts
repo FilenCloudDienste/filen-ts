@@ -9,6 +9,7 @@ import { key, memory, openEditor, placeCaret, selectAll, spreadPosition } from "
 import { find, findAll, wordPart } from "./docxFixtures"
 import { openSpec } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
+import { pagedEditor, settleAll } from "./pagedFixtures"
 
 // What a long editing session keeps: property containers that differ only in tracked-change stamps are drawn
 // from one object, and formatting undone back to the document as built shares the built nodes again.
@@ -384,5 +385,54 @@ describe("formatting undone", () => {
 		expect(doc.child(0).textContent).toContain("x")
 		expect(copies(doc, built)).toBe(1)
 		session.dispose()
+	})
+})
+
+const NOTE_SEPARATORS =
+	'<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>' +
+	'<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>'
+const NOTED = buildDocx({
+	body: '<w:p><w:r><w:t>Body text</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p>' + p("After"),
+	footnotes: NOTE_SEPARATORS + '<w:footnote w:id="1"><w:p><w:r><w:t>Note text</w:t></w:r></w:p></w:footnote>'
+})
+
+describe("origins of documents built to be read", () => {
+	it("records those of Find's documents at once, and keeps them once one is a session's and after a paste", async () => {
+		const { editor } = await pagedEditor(NOTED)
+
+		await settleAll(editor)
+
+		const note = editor.edits.model.stories.find(story => story?.kind === "footnote" && story.id === "1")
+
+		if (note === undefined) throw new Error("no note")
+
+		const searched = (): Node => {
+			const doc = editor.searchStories().find(entry => entry.story === note.index)?.doc
+
+			if (doc === undefined) throw new Error("note not searched")
+
+			return doc
+		}
+
+		// Nothing pasted yet: each build is tagged as made, none waits for a paste.
+		for (let round = 0; round < 3; round++) {
+			expect(originOf(searched().child(0))).toBe(note.part)
+			editor.releaseSearch()
+		}
+
+		const doc = searched()
+		const block = doc.child(0)
+
+		expect(editor.enterStory(note.index, -1)).toBe(true)
+		expect(editor.session.state.doc).toBe(doc)
+		expect(originOf(block)).toBe(note.part)
+
+		// The note's paragraph pasted into the body: content of another part.
+		const body = editor.body.session
+
+		expect(body.dispatch(body.state.tr.insert(body.state.doc.content.size, block).setMeta("uiEvent", "paste"))).toBe(true)
+		expect(originOf(block)).toBe(note.part)
+		expect(body.state.doc.lastChild?.textContent).toBe("Note text")
+		editor.dispose()
 	})
 })

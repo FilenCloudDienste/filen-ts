@@ -49,9 +49,6 @@ const WORKBOOK_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheet
 const VML_TYPE = "application/vnd.openxmlformats-officedocument.vmlDrawing"
 const WORKBOOK_PART = "xl/workbook.xml"
 const STYLES_PART = "xl/styles.xml"
-const EMPTY_SHEET_PART = "xl/worksheets/sheet1.xml"
-const EMPTY_SHEET_RELATIONSHIP = "rIdSheet1"
-const WORKSHEET_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
 const STYLES_RELATIONSHIP = `${TRANSITIONAL.relationships}/styles`
 const LAST_ROW = SHEET_MAX_ROWS - 1
 const LAST_COL = SHEET_MAX_COLS - 1
@@ -117,7 +114,7 @@ function reportIssues(
 
 	for (const item of formulas)
 		report.formula(
-			item.sheet,
+			named(item.sheet) ?? item.sheet,
 			areaName(item.row, item.rows, item.col, item.cols),
 			item.text,
 			Math.max(1, item.rows) * Math.max(1, item.cols)
@@ -331,11 +328,13 @@ function placeStyleRuns(
 
 		for (let row = at; row <= LAST_ROW; row++) rowStyles.set(row, 0)
 
+		const taken = new Set(runs)
+
 		spliceAll(
 			list,
 			0,
 			list.length,
-			list.filter(run => !runs.includes(run))
+			list.filter(run => !taken.has(run))
 		)
 	}
 
@@ -462,8 +461,6 @@ function withColumnStyles(
 	return out
 }
 
-// Rows held in runs (hidden or resized rows without cells) as rows of the store: a run to the grid's end becomes the
-// sheet's default row, the rows above it that have none of their own then written with the old default.
 // Properties of empty rows held in runs (OpenDocument's repeated rows): the commonest, by rows, becomes the sheet's
 // default row (sheetFormatPr defaultRowHeight, customHeight, zeroHeight; ECMA-376 Part 1 §18.3.1.81), every other
 // row is a row of its own, as are the rows that kept the old default when it changed. Those rows are charged to
@@ -650,14 +647,12 @@ function workbookXml(workbook: XlsxWorkbook): string {
 		(workbook.date1904 ? '<workbookPr date1904="1"/>' : "<workbookPr/>") +
 		(protection?.structure === true ? '<workbookProtection lockStructure="1"/>' : "") +
 		`<bookViews><workbookView${attr("activeTab", workbook.activeTab)}/></bookViews><sheets>` +
-		(workbook.sheets.length === 0
-			? `<sheet name="Sheet1" sheetId="1"${attr("r:id", EMPTY_SHEET_RELATIONSHIP)}/>`
-			: workbook.sheets
-					.map(
-						entry =>
-							`<sheet${attr("name", entry.name)}${attr("sheetId", entry.sheetId)}${entry.state === "visible" ? "" : attr("state", entry.state)}${attr("r:id", entry.relationshipId)}/>`
-					)
-					.join("")) +
+		workbook.sheets
+			.map(
+				entry =>
+					`<sheet${attr("name", entry.name)}${attr("sheetId", entry.sheetId)}${entry.state === "visible" ? "" : attr("state", entry.state)}${attr("r:id", entry.relationshipId)}/>`
+			)
+			.join("") +
 		"</sheets>" +
 		(names.length === 0 ? "" : `<definedNames>${names.join("")}</definedNames>`) +
 		`<calcPr${calc.iterate ? `${attr("iterate", 1)}${attr("iterateCount", calc.iterateCount)}${attr("iterateDelta", calc.iterateDelta)}` : ""}/>` +
@@ -924,20 +919,10 @@ export async function odsToXlsx(source: Uint8Array, options: SheetConvertOptions
 					type: WORKSHEET_RELATIONSHIP,
 					target: entry.part.replace(/^xl\//, "")
 				})),
-				{ id: `rId${ods.sheets.length + 1}`, type: STYLES_RELATIONSHIP, target: "styles.xml" },
-				...(ods.sheets.length === 0
-					? [{ id: EMPTY_SHEET_RELATIONSHIP, type: WORKSHEET_RELATIONSHIP, target: "worksheets/sheet1.xml" }]
-					: [])
+				{ id: `rId${ods.sheets.length + 1}`, type: STYLES_RELATIONSHIP, target: "styles.xml" }
 			])
 		)
 	)
-
-	// A workbook of no tables (ODF allows it) as one of an empty sheet: SpreadsheetML has a sheet at least (§18.2.27).
-	if (ods.sheets.length === 0) {
-		parts.set(EMPTY_SHEET_PART, encodeUtf8(`${DECLARATION}<worksheet xmlns="${TRANSITIONAL.main}"><sheetData/></worksheet>`))
-		overrides.push(`<Override PartName="/${EMPTY_SHEET_PART}" ContentType="${WORKSHEET_TYPE}"/>`)
-		parts.set("[Content_Types].xml", encodeUtf8(contentTypesOf(synthetic, overrides)))
-	}
 
 	// workbook.xml and styles.xml are complete as written: parts of the package, not edits (the gate's checks of an
 	// edit's styles are of formats appended to a file's own).

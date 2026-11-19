@@ -301,10 +301,12 @@ const KAPPA = 0.5522847498307936
 // Cubic segments of an ellipse arc from parametric angle t0 over delta (radians; positive runs clockwise
 // on screen), starting at the current point.
 export function ellipseArc(list: DrawingList, cx: number, cy: number, rx: number, ry: number, t0: number, delta: number): [number, number] {
-	if (delta === 0) return [cx + rx * Math.cos(t0), cy + ry * Math.sin(t0)]
+	if (delta === 0 || !Number.isFinite(delta)) return [cx + rx * Math.cos(t0), cy + ry * Math.sin(t0)]
 
-	const segments = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 2) - 1e-9))
-	const step = delta / segments
+	// A quarter turn per segment, at most four: past a full turn the arc retraces the same ellipse.
+	const sweep = Math.max(-2 * Math.PI, Math.min(2 * Math.PI, delta))
+	const segments = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2) - 1e-9))
+	const step = sweep / segments
 	const k = (4 / 3) * Math.tan(step / 4)
 	let a = t0
 	let x = cx + rx * Math.cos(t0)
@@ -490,7 +492,9 @@ export function emitVmlPath(
 				// Centre, radii, start angle and sweep in 1/65536 degree, counter-clockwise on screen.
 				for (let k = 0; k + 5 < n.length; k += 6) {
 					const start = -(n[k + 4] ?? 0) / FD_PER_RADIAN
-					const sweep = -(n[k + 5] ?? 0) / FD_PER_RADIAN
+					// Past a full turn the arc retraces the same ellipse: clamp to one turn, keeping the direction.
+					const raw = -(n[k + 5] ?? 0) / FD_PER_RADIAN
+					const sweep = Number.isNaN(raw) ? 0 : Math.max(-2 * Math.PI, Math.min(2 * Math.PI, raw))
 
 					arc(n[k] ?? 0, n[k + 1] ?? 0, n[k + 2] ?? 0, n[k + 3] ?? 0, start, sweep, command === "ae")
 				}

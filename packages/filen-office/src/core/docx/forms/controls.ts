@@ -1139,6 +1139,8 @@ function firstCharacters(text: string, count: number): string {
 	return text.slice(0, end)
 }
 
+const MAX_FIXED_DIGITS = 100
+
 // A number picture (w:format of a number field, a Word numeric picture: 0 and # digits, a "," grouping digits,
 // "." the decimals, "%" a percentage, ";" a negative section, anything else literal) applied to `value`.
 function formatNumber(value: number, picture: string): string {
@@ -1154,7 +1156,9 @@ function formatNumber(value: number, picture: string): string {
 	const dot = body.indexOf(".")
 	const decimals = dot < 0 ? 0 : body.slice(dot + 1).replace(/[^0#]/g, "").length
 	const scaled = Math.abs(value) * (section.includes("%") ? 100 : 1)
-	const [whole = "0", fraction] = scaled.toFixed(decimals).split(".")
+	// toFixed takes at most 100 digits; the places past that are zeros.
+	const [whole = "0", fixed] = scaled.toFixed(Math.min(decimals, MAX_FIXED_DIGITS)).split(".")
+	const fraction = fixed === undefined ? undefined : fixed.padEnd(decimals, "0")
 	const grouped = body.slice(0, dot < 0 ? body.length : dot).includes(",") ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : whole
 	const sign = value < 0 && !negative ? "-" : ""
 

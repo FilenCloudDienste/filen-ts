@@ -367,7 +367,7 @@ export class Scanner {
 	}
 }
 
-function sameBytes(bytes: Uint8Array, a: number, b: number, length: number): boolean {
+export function sameBytes(bytes: Uint8Array, a: number, b: number, length: number): boolean {
 	for (let k = 0; k < length; k++) if (bytes[a + k] !== bytes[b + k]) return false
 
 	return true

@@ -4,6 +4,7 @@ import { Item, RevisionView } from "../model/kinds"
 import { Ns } from "../model/namespaces"
 import type { StoryPart } from "../model/part"
 import { ommlToMathTree, type MathElement, type OmmlRevisionView } from "../../math/index"
+import { ref } from "./edits"
 import { mathBox } from "./math"
 import { emu, points } from "./units"
 
@@ -92,21 +93,23 @@ export class ObjectTable {
 	// Equations measured while a font was still loading: measured again once fonts are in.
 	readonly provisional = new Set<number>()
 	private readonly byItem = new Map<number, number>()
+	// Ids by part, in order, until the part is released.
+	private readonly byPart = new Map<number, number[]>()
 
 	// Equations holding tracked changes, by item and revision view: each view shows them otherwise.
 	private readonly byView = new Map<number, number>()
 
 	idOf(part: number, item: number): number {
-		return this.byItem.get(part * 0x4000000 + item) ?? -1
+		return this.byItem.get(ref(part, item)) ?? -1
 	}
 
 	// The equation at `item` as revision view `view` shows it (its index is the view), or -1.
 	viewIdOf(part: number, item: number, view: RevisionView): number {
-		return this.byView.get((part * 0x4000000 + item) * 4 + view) ?? -1
+		return this.byView.get(ref(part, item) * 4 + view) ?? -1
 	}
 
 	setViewId(part: number, item: number, view: RevisionView, id: number): void {
-		this.byView.set((part * 0x4000000 + item) * 4 + view, id)
+		this.byView.set(ref(part, item) * 4 + view, id)
 	}
 
 	add(
@@ -136,9 +139,43 @@ export class ObjectTable {
 		this.insets.push(insets)
 		this.verticals.push(vertical)
 
-		if (item >= 0) this.byItem.set(part * 0x4000000 + item, id)
+		if (item >= 0) this.byItem.set(ref(part, item), id)
+
+		const ids = this.byPart.get(part)
+
+		if (ids === undefined) this.byPart.set(part, [id])
+		else ids.push(id)
 
 		return id
+	}
+
+	// Lets go of what the objects of each part `gone` tells (an overlay part dropped, which no page shows): their
+	// ids stay with their kind and sizes (events and the pages number objects by id, never reusing one), the
+	// lookups by item and their anchoring, text box stories and insets go.
+	release(gone: (part: number) => boolean): void {
+		for (const [part, ids] of this.byPart) {
+			if (!gone(part)) continue
+
+			for (const id of ids) {
+				const key = ref(part, this.items[id] ?? -1)
+
+				if (this.byItem.get(key) === id) this.byItem.delete(key)
+
+				for (let view = 0; view < 4; view++) if (this.byView.get(key * 4 + view) === id) this.byView.delete(key * 4 + view)
+
+				this.floats[id] = undefined
+				this.textboxes[id] = undefined
+				this.insets[id] = undefined
+				this.provisional.delete(id)
+			}
+
+			this.byPart.delete(part)
+		}
+	}
+
+	// The parts holding objects not released.
+	heldParts(): IterableIterator<number> {
+		return this.byPart.keys()
 	}
 }
 

@@ -9,6 +9,7 @@ import {
 	caretRunProps,
 	changeLevel,
 	deleteAtEnd,
+	effectiveRunProps,
 	horizontalMove,
 	insertLineBreak,
 	moveParagraphs,
@@ -300,7 +301,7 @@ export function PresentationTextEditor({
 		const frames = document.defaultView
 
 		caret.className = "fo-text-caret"
-		caret.style.cssText = "position:absolute;width:1px;background:#000;pointer-events:none"
+		caret.style.cssText = "position:absolute;width:1px;pointer-events:none"
 		pageHost.replaceChildren(painted.root)
 
 		const run = (command: TextCommand, typing = false): boolean => !latest.current.readOnly && controller.run(command, typing)
@@ -588,6 +589,30 @@ export function PresentationTextEditor({
 			})
 		}
 
+		// The caret is drawn in the colour of the text it types (PowerPoint's): a plain colour the run at the caret writes
+		// (a colour picked before typing shows at once), else the painted colour of the text beside it, which the worker
+		// resolved through the body's defaults and the theme; black when nothing names one.
+		const caretColor = (head: number): string => {
+			const state = controller.state
+			const fill = effectiveRunProps(caretRunProps(state), state.selection.$from.parent, controller.defaults).fill
+
+			if (
+				fill !== undefined &&
+				fill !== "none" &&
+				fill.kind === "solid" &&
+				fill.color.kind === "srgb" &&
+				(fill.color.mods?.length ?? 0) === 0
+			) {
+				return `#${fill.color.rgb}`
+			}
+
+			// A line without text (an empty paragraph) takes the body's first style: an empty body's paragraph mark.
+			const styles = controller.page.styles
+			const color = (styles[controller.map.styleAt(head)] ?? styles[0])?.color ?? ""
+
+			return color === "" ? "#000" : `#${color}`
+		}
+
 		const draw = (): void => {
 			// The echo of typing the worker has not laid out yet is drawn again from scratch on every draw.
 			echo.restore()
@@ -646,6 +671,7 @@ export function PresentationTextEditor({
 				caret.style.top = `${String(place.top)}px`
 				caret.style.height = `${String(place.height)}px`
 				caret.style.width = `${String(Math.max(1, 1 / Math.max(0.01, s)))}px`
+				caret.style.background = caretColor(head)
 				children.push(caret)
 			}
 

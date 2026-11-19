@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import {
@@ -25,7 +25,8 @@ import {
 	scrubTermsForRedaction,
 	verifyRedactedPdf
 } from "../../dom/pdfedit/redact"
-import { makePdf } from "./fixtures"
+import { markedSections } from "../../dom/pdfedit/redact/content"
+import { makeFormPdf, makePdf } from "./fixtures"
 import { page as toPage, SECRET, SPEC, type PdfBox } from "./redactFixtureSpec"
 
 const SECRET_TERM: RedactionTerm = { text: SECRET, matchCase: false, wholeWord: false }
@@ -52,8 +53,8 @@ interface Redaction {
 }
 
 // The whole flow as the editor runs it: marks, find, apply, scrub, sanitize, full rewrite.
-function redact(name: string, options: Redaction): { readonly bytes: Uint8Array; readonly manifest: RedactionManifest } {
-	const document = open(fixture(name))
+function redact(name: string | Uint8Array, options: Redaction): { readonly bytes: Uint8Array; readonly manifest: RedactionManifest } {
+	const document = open(typeof name === "string" ? fixture(name) : name)
 	const terms = options.terms ?? []
 	const first = document.loadPage(0)
 
@@ -217,6 +218,30 @@ describe("applying redactions", () => {
 		if (manifest.terms.length > 0) expect(await pdfjsText(bytes)).not.toMatch(new RegExp(manifest.terms[0]?.text ?? "", "i"))
 	})
 
+	it("reads no form for the drawing of marked content where there is none, and still reads it inside a section", () => {
+		const document = new mupdf.PDFDocument()
+		const form = document.addStream("0 0 10 10 re f", { Type: "XObject", Subtype: "Form", BBox: [0, 0, 10, 10] })
+		const resources = document.addObject({ XObject: { Fm0: form }, Properties: {} })
+		const untagged = Array.from({ length: 40 }, () => "q /Fm0 Do Q").join(" ")
+
+		document.insertPage(-1, document.addPage([0, 0, 200, 200], 0, resources, untagged))
+		document.insertPage(-1, document.addPage([0, 0, 200, 200], 0, resources, "/P <</MCID 0>> BDC /Fm0 Do EMC /Fm0 Do"))
+
+		const reads = vi.spyOn(mupdf.PDFObject.prototype, "readStream")
+
+		try {
+			// The page's content only.
+			expect(markedSections(document.findPage(0)).sections).toEqual([])
+			expect(reads).toHaveBeenCalledTimes(1)
+			reads.mockClear()
+			expect(markedSections(document.findPage(1)).sections).toEqual([{ open: 0, mcid: 0, signature: "F(P)" }])
+			expect(reads).toHaveBeenCalledTimes(2)
+		} finally {
+			reads.mockRestore()
+			document.destroy()
+		}
+	})
+
 	it("keeps the second page's shared form intact while redacting the first", () => {
 		const { bytes } = redact("form", { areas: [SPEC.form.area] })
 		const document = open(bytes)
@@ -294,6 +319,59 @@ describe("applying redactions", () => {
 		expect(layer.loadPage(0).getObject().get("Contents").readStream().asString()).toContain("Shown layer")
 	})
 
+	it("keeps resources named like the keys sanitize drops, and still drops those keys where they are the format's", () => {
+		// Resources named /AA (a font, in an indirect map) and /AF (an image, in a direct one), on a page with a real
+		// /AA action and a catalog with a /Metadata stream.
+		const make = (): Uint8Array => {
+			const document = new mupdf.PDFDocument()
+			const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 8, 8], false)
+
+			pixmap.clear(0)
+
+			const image = document.addImage(new mupdf.Image(pixmap))
+			const fonts = document.addObject({ AA: document.addSimpleFont(new mupdf.Font("Helvetica")) })
+			const resources = document.addObject({ Font: fonts, XObject: { AF: image } })
+			const page = document.addPage(
+				[0, 0, 300, 300],
+				0,
+				resources,
+				"BT /AA 12 Tf 20 250 Td (Kept words) Tj ET q 50 0 0 50 100 100 cm /AF Do Q"
+			)
+
+			page.put("AA", document.addObject({ O: { S: "JavaScript", JS: "app.alert(1)" } }))
+			document.insertPage(-1, page)
+			document
+				.getTrailer()
+				.get("Root")
+				.put("Metadata", document.addStream("<x:xmpmeta/>", { Type: "Metadata", Subtype: "XML" }))
+			pixmap.destroy()
+
+			return save(document)
+		}
+		const { bytes, manifest } = redact(make(), {})
+		const document = open(bytes)
+		const page = document.loadPage(0)
+		const resources = page.getObject().get("Resources")
+
+		expect(verify(bytes, manifest)).toEqual({ ok: true })
+		expect(resources.get("Font", "AA").isNull()).toBe(false)
+		expect(resources.get("XObject", "AF").isNull()).toBe(false)
+		expect(page.toStructuredText("").asText()).toContain("Kept words")
+		expect(page.toStructuredText("preserve-images").asJSON()).toContain('"type":"image"')
+		expect(page.getObject().get("AA").isNull()).toBe(true)
+		expect(document.getTrailer().get("Root", "Metadata").isNull()).toBe(true)
+		page.destroy()
+		document.destroy()
+
+		// Left in place, the real ones fail the check.
+		const unsanitized = redact(make(), { sanitize: false })
+
+		expect(verify(unsanitized.bytes, { ...unsanitized.manifest, sanitized: true })).toEqual({
+			ok: false,
+			failure: { code: "metadata", what: "xmp" }
+		})
+	})
+
 	it("applies text and area marks of one page with their own drawing rules", () => {
 		const document = open(fixture("text"))
 		const page = document.loadPage(0)
@@ -339,6 +417,17 @@ describe("encrypted files", () => {
 
 		expect(check.needsPassword()).toBe(true)
 		expect(check.authenticatePassword("pw")).toBeGreaterThan(0)
+		// The page tree, page boxes and the text outside the marks survive the scrub ("Pa" is in /Parent, /Pages, /Page).
+		expect(check.countPages()).toBe(3)
+
+		for (let index = 0; index < 3; index++) {
+			const page = check.loadPage(index)
+
+			expect(page.getBounds()).toEqual([0, 0, 595, 842])
+			expect(page.toStructuredText("").asText()).toContain(`ge ${String(index + 1)}`)
+			page.destroy()
+		}
+
 		expect(
 			verifyRedactedPdf(mupdf, check, { regions: applied.regions, terms: [term], sanitized: true, annotationsRemoved: true })
 		).toEqual({
@@ -348,7 +437,218 @@ describe("encrypted files", () => {
 	})
 })
 
+describe("scrubbing terms outside the pages", () => {
+	const term = (text: string): RedactionTerm => ({ text, matchCase: false, wholeWord: false })
+	const shape = (bytes: Uint8Array) => {
+		const document = open(bytes)
+		const pages = Array.from({ length: document.countPages() }, (_, index) => {
+			const page = document.loadPage(index)
+			const out = { bounds: page.getBounds(), widgets: page.getWidgets().length, links: page.getLinks().length }
+
+			page.destroy()
+
+			return out
+		})
+
+		document.destroy()
+
+		return pages
+	}
+
+	it.each(["Page", "Parent", "Type", "Font", "Contents", "age", "Kids", "Annot"])(
+		"keeps the document whole when the term is %s, a name the format uses",
+		text => {
+			for (const source of [fixture("annotations"), fixture("tagged"), makeFormPdf()]) {
+				const before = shape(source)
+				const { bytes, manifest } = redact(source, { terms: [term(text)], sanitize: false, removeAnnotations: false })
+				const after = shape(bytes)
+
+				expect(after.map(page => page.bounds)).toEqual(before.map(page => page.bounds))
+				expect(after.length).toBeGreaterThan(0)
+				expect(verify(bytes, manifest)).toEqual({ ok: true })
+			}
+		}
+	)
+
+	it("keeps the form's fields and the text outside the marks", () => {
+		const { bytes, manifest } = redact(makeFormPdf(), { terms: [term("Parent"), term("Type")], sanitize: false })
+		const document = open(bytes)
+		const page = document.loadPage(0)
+
+		expect(verify(bytes, manifest)).toEqual({ ok: true })
+		expect(page.getWidgets().map(widget => widget.getName())).toEqual(["name", "agree", "fixed", "colour", "choice"])
+		expect(page.toStructuredText("").asText()).toContain("Form page 1")
+		expect(document.getTrailer().get("Root", "AcroForm", "Fields").length).toBe(5)
+	})
+
+	it("cuts a term from a custom document information entry, its key and its value", () => {
+		const document = open(makePdf({ pages: 1 }))
+
+		document.setMetaData("info:Title", "Report")
+
+		const custom = document.getTrailer().get("Info")
+
+		custom.put("SecretOwner", document.newString("Secret agency"))
+		custom.put("Plain", document.newName("SecretName"))
+		scrubTermsForRedaction(document, [SECRET_TERM])
+
+		const bytes = save(document)
+		const saved = open(bytes)
+		const info = saved.getTrailer().get("Info")
+
+		expect(info.get("Owner").asString()).toBe(" agency")
+		expect(info.get("SecretOwner").isNull()).toBe(true)
+		expect(info.get("Plain").asName()).toBe("Name")
+		expect(info.get("Title").asString()).toBe("Report")
+		expect(verify(bytes, { regions: [], terms: [SECRET_TERM], sanitized: false, annotationsRemoved: true })).toEqual({ ok: true })
+	})
+
+	it("keeps both entries when two keys cut to the same name", () => {
+		const document = open(makePdf({ pages: 1 }))
+
+		document.setMetaData("info:Title", "Report")
+
+		const custom = document.getTrailer().get("Info")
+
+		custom.put("SecretX", document.newString("one"))
+		custom.put("XSecret", document.newString("two"))
+		custom.put("Y", document.newString("three"))
+		custom.put("SecretY", document.newString("four"))
+		scrubTermsForRedaction(document, [SECRET_TERM])
+
+		const saved = open(save(document))
+		const info = saved.getTrailer().get("Info")
+		const entries: Record<string, string> = {}
+
+		info.forEach((value, key) => {
+			entries[String(key)] = value.asString()
+		})
+
+		expect(Object.values(entries).sort()).toEqual(["Report", "four", "one", "three", "two"])
+		expect(entries["Y"]).toBe("three")
+		expect(Object.keys(entries).some(key => key.includes(SECRET))).toBe(false)
+	})
+
+	it("cuts custom tags and role map keys, and leaves the standard ones", () => {
+		const document = open(fixture("tagged"))
+		const tree = document.getTrailer().get("Root", "StructTreeRoot")
+		const first = tree.get("ParentTree", "Nums").get(1).get(0)
+
+		const terms = [term("Secret"), term("Docu")]
+
+		first.put("S", document.newName("SecretPara"))
+		tree.put("RoleMap", { SecretPara: document.newName("P") })
+		markFindings(document, findRedactions(document, { terms, presets: [] }))
+
+		const applied = applyAllRedactions(mupdf, document, { removeAnnotations: true })
+
+		scrubTermsForRedaction(document, terms)
+
+		const bytes = save(document)
+		const file = open(bytes)
+		const saved = file.getTrailer().get("Root", "StructTreeRoot")
+
+		expect(saved.get("ParentTree", "Nums").get(1).get(0).get("S").asName()).toBe("Para")
+		expect(saved.get("RoleMap", "Para").asName()).toBe("P")
+		expect(saved.get("K", "S").asName()).toBe("Document")
+		expect(verify(bytes, { regions: applied.regions, terms, sanitized: false, annotationsRemoved: true })).toEqual({ ok: true })
+	})
+
+	it("clears a button whose appearance state holds the term", () => {
+		const document = open(makeFormPdf())
+
+		scrubTermsForRedaction(document, [term("Yes")])
+
+		const bytes = save(document)
+		const saved = open(bytes)
+		const agree = saved.findPage(0).get("Annots").get(1)
+
+		expect(agree.get("AP").isNull()).toBe(true)
+		expect(agree.get("AS").asName()).toBe("Off")
+		expect(verify(bytes, { regions: [], terms: [term("Yes")], sanitized: false, annotationsRemoved: true })).toEqual({ ok: true })
+		// The verifier reads the states: the unscrubbed form fails.
+		expect(verify(makeFormPdf(), { regions: [], terms: [term("Yes")], sanitized: false, annotationsRemoved: true })).toEqual({
+			ok: false,
+			failure: { code: "term", term: "Yes", place: "field" }
+		})
+	})
+
+	it.each(["Off", "of"])("leaves every button's off state alone when the term is %s", text => {
+		const terms = [term(text)]
+		const buttons = (document: mupdf.PDFDocument): string[][] =>
+			document
+				.loadPage(0)
+				.getWidgets()
+				.concat(document.loadPage(1).getWidgets())
+				.map(widget => widget.getObject())
+				.filter(widget => widget.get("FT").asName() === "Btn" || widget.get("Parent", "FT").asName() === "Btn")
+				.map(widget => {
+					const states: string[] = []
+
+					widget.get("AP", "N").forEach((_, key) => states.push(String(key)))
+
+					return [
+						widget.get("AS").asName(),
+						(widget.get("V").isNull() ? widget.get("Parent", "V") : widget.get("V")).asName(),
+						...states
+					]
+				})
+		const before = buttons(open(makeFormPdf()))
+		const document = open(makeFormPdf())
+
+		scrubTermsForRedaction(document, terms)
+
+		const bytes = save(document)
+
+		expect(before).toHaveLength(3)
+		expect(buttons(open(bytes))).toEqual(before)
+		expect(verify(bytes, { regions: [], terms, sanitized: false, annotationsRemoved: true })).toEqual({ ok: true })
+		expect(verify(makeFormPdf(), { regions: [], terms, sanitized: false, annotationsRemoved: true })).toEqual({ ok: true })
+	})
+
+	it("removes every annotation over the marks with its replies in one pass", () => {
+		const document = open(makePdf({ pages: 1 }))
+		const page = document.loadPage(0)
+		const note = (y: number, reply?: mupdf.PDFAnnotation): mupdf.PDFAnnotation => {
+			const annotation = page.createAnnotation("Text")
+
+			annotation.setRect([100, y, 120, y + 20])
+
+			if (reply !== undefined) annotation.getObject().put("IRT", reply.getObject())
+
+			return annotation
+		}
+
+		for (const y of [100, 200, 300]) note(y + 10, note(y))
+
+		markArea(page, [50, 50, 400, 400])
+		page.destroy()
+		applyAllRedactions(mupdf, document, { removeAnnotations: true })
+
+		const saved = open(save(document))
+
+		expect(
+			saved
+				.loadPage(0)
+				.getAnnotations()
+				.map(annotation => annotation.getType())
+		).toEqual([])
+	})
+})
+
 describe("the verifier catches incomplete redactions", () => {
+	it("fails a file without pages, or without a page a mark was on", () => {
+		const empty = new mupdf.PDFDocument()
+
+		expect(verify(save(empty), { regions: [], terms: [], sanitized: false, annotationsRemoved: true })).toEqual({
+			ok: false,
+			failure: { code: "unreadable", page: 1 }
+		})
+		expect(
+			verify(makePdf({ pages: 1 }), { regions: [area(2, [0, 0, 10, 10])], terms: [], sanitized: false, annotationsRemoved: true })
+		).toEqual({ ok: false, failure: { code: "unreadable", page: 3 } })
+	})
+
 	// A "redaction" that only paints black boxes over the areas.
 	function boxesOnly(name: string, areas: readonly PdfBox[]): Uint8Array {
 		const document = open(fixture(name))
@@ -525,9 +825,8 @@ describe("the verifier catches incomplete redactions", () => {
 		).toEqual({ ok: false, failure: { code: "term", term: "Hidden", place: "tags" } })
 	})
 
-	it("catches a term only in an earlier revision's leftovers and in page content strings", () => {
-		const document = open(fixture("tagged"))
-		const bytes = save(document)
+	it("catches a term in the text alternative of a tagged page's marked content", () => {
+		const bytes = save(open(fixture("tagged")))
 
 		expect(
 			verify(bytes, {
@@ -536,9 +835,28 @@ describe("the verifier catches incomplete redactions", () => {
 				sanitized: false,
 				annotationsRemoved: true
 			})
-		).toMatchObject({
-			ok: false,
-			failure: { code: "term" }
-		})
+		).toEqual({ ok: false, failure: { code: "term", term: "Secret Actual", place: "page", page: 1 } })
+	})
+
+	it("catches a term only in a string of the page's content that no text extraction returns", () => {
+		const document = new mupdf.PDFDocument()
+		const font = document.addSimpleFont(new mupdf.Font("Helvetica"))
+		// "Secret Lang", hex: no reading of the raw stream spells it, and no extraction returns a /Lang.
+		const hex = [..."Secret Lang"].map(char => char.charCodeAt(0).toString(16)).join("")
+		const content = `/Span << /MCID 0 /Lang <${hex}> >> BDC BT /F1 18 Tf 72 600 Td (Kept words) Tj ET EMC`
+
+		document.insertPage(-1, document.addPage([0, 0, 612, 792], 0, document.addObject({ Font: { F1: font } }), content))
+
+		const bytes = save(document)
+
+		document.destroy()
+		expect(
+			verify(bytes, {
+				regions: [],
+				terms: [{ text: "Secret Lang", matchCase: true, wholeWord: false }],
+				sanitized: false,
+				annotationsRemoved: true
+			})
+		).toEqual({ ok: false, failure: { code: "term", term: "Secret Lang", place: "page", page: 1 } })
 	})
 })

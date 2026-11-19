@@ -91,6 +91,8 @@ const LABELS: ReadonlyMap<number, string> = new Map([
 	[54936, "gb18030"],
 	[65001, "utf-8"]
 ])
+// The stateful 7-bit page in LABELS.
+const ISO_2022_JP = 50220
 
 // Windows-1252's 0x80..0x9F, for hosts without TextDecoder (Hermes): the rest of its range is Latin-1.
 const CP1252_HIGH = [
@@ -313,9 +315,10 @@ export function decodeCodepage(bytes: Uint8Array, start: number, end: number, co
 		return out
 	}
 
-	let ascii = true
+	// ISO-2022-JP is 7-bit: its escape sequences switch character sets, so all-ASCII bytes still need its decoder.
+	let ascii = codepage !== ISO_2022_JP
 
-	for (let i = start; i < end; i++) {
+	for (let i = start; ascii && i < end; i++) {
 		if ((bytes[i] ?? 0) >= 0x80) {
 			ascii = false
 

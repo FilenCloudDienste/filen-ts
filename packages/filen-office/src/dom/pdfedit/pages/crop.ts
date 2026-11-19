@@ -14,25 +14,37 @@ export interface CropResult {
 
 // The visible box of a page in view space.
 export function pageBounds(doc: PDFDocument, page: number): CropRect {
-	const [x0, y0, x1, y1] = doc.loadPage(page).getBounds()
+	const loaded = doc.loadPage(page)
 
-	return [x0, y0, x1, y1]
+	try {
+		const [x0, y0, x1, y1] = loaded.getBounds()
+
+		return [x0, y0, x1, y1]
+	} finally {
+		loaded.destroy()
+	}
 }
 
 // Crops pages by `margins` (points off each side of each page's visible box, as the page shows). Pages the margins
-// would leave smaller than MIN_CROP_SIDE are left as they are.
+// would leave smaller than MIN_CROP_SIDE are left as they are. Each page loaded is closed again: MuPDF keeps a page
+// open while a wrapper of it lives, and an open page does not follow a later flatten.
 export function cropPages(doc: PDFDocument, pages: Iterable<number>, margins: CropMargins): CropResult {
 	const touched: number[] = []
 
 	for (const index of selectionPages(doc.countPages(), pages)) {
 		const page = doc.loadPage(index)
-		const [x0, y0, x1, y1] = page.getBounds()
-		const rect = cropRectFromMargins([x0, y0, x1, y1], margins)
 
-		if (rect === null) continue
+		try {
+			const [x0, y0, x1, y1] = page.getBounds()
+			const rect = cropRectFromMargins([x0, y0, x1, y1], margins)
 
-		page.setPageBox("CropBox", [rect[0], rect[1], rect[2], rect[3]])
-		touched.push(index)
+			if (rect === null) continue
+
+			page.setPageBox("CropBox", [rect[0], rect[1], rect[2], rect[3]])
+			touched.push(index)
+		} finally {
+			page.destroy()
+		}
 	}
 
 	return { touched }
@@ -45,14 +57,19 @@ export function cropPagesToContent(mupdf: MupdfModule, doc: PDFDocument, pages: 
 
 	for (const index of selectionPages(doc.countPages(), pages)) {
 		const page = doc.loadPage(index)
-		const [x0, y0, x1, y1] = page.getBounds()
-		const bounds: CropRect = [x0, y0, x1, y1]
-		const rect = paddedContent(bounds, contentBounds(mupdf, page), padding)
 
-		if (rect === null || rect.every((value, at) => Math.abs(value - (bounds[at] ?? 0)) < 0.01)) continue
+		try {
+			const [x0, y0, x1, y1] = page.getBounds()
+			const bounds: CropRect = [x0, y0, x1, y1]
+			const rect = paddedContent(bounds, contentBounds(mupdf, page), padding)
 
-		page.setPageBox("CropBox", [rect[0], rect[1], rect[2], rect[3]])
-		touched.push(index)
+			if (rect === null || rect.every((value, at) => Math.abs(value - (bounds[at] ?? 0)) < 0.01)) continue
+
+			page.setPageBox("CropBox", [rect[0], rect[1], rect[2], rect[3]])
+			touched.push(index)
+		} finally {
+			page.destroy()
+		}
 	}
 
 	return { touched }
@@ -234,11 +251,16 @@ export function outsideCropRects(doc: PDFDocument, pages: Iterable<number>, marg
 
 	for (const index of selectionPages(doc.countPages(), pages)) {
 		const page = doc.loadPage(index)
-		const [x0, y0, x1, y1] = page.getBounds()
-		const [mx0, my0, mx1, my1] = page.getBounds("MediaBox")
-		const rect = cropRectFromMargins([x0, y0, x1, y1], margins)
 
-		if (rect !== null) out.set(index, outsideRects([mx0, my0, mx1, my1], rect))
+		try {
+			const [x0, y0, x1, y1] = page.getBounds()
+			const [mx0, my0, mx1, my1] = page.getBounds("MediaBox")
+			const rect = cropRectFromMargins([x0, y0, x1, y1], margins)
+
+			if (rect !== null) out.set(index, outsideRects([mx0, my0, mx1, my1], rect))
+		} finally {
+			page.destroy()
+		}
 	}
 
 	return out

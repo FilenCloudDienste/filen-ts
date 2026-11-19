@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { FormulaShift } from "../core/xlsx/refs/formulas"
-import { REF_CONSTRUCTS, shiftEdges, shiftVmlAnchor, specifierColumns } from "../core/xlsx/refs/index"
+import { planMove } from "../core/xlsx/refs/move"
+import { pivotSource, slicerSource } from "../core/xlsx/refs/parts"
+import { encodeUtf8 } from "../core/xml/index"
+import { REF_CONSTRUCTS, planRefEdit, shiftEdges, shiftVmlAnchor, specifierColumns } from "../core/xlsx/refs/index"
 import { rewriteStructured } from "../core/xlsx/refs/structured"
 import { MC, R, TYPES, X14, XM, cols, covered, edited, refused, relationship, rels, rows, sheetBody } from "./xlsxRefsFixtures"
-import type { Fixture } from "./xlsxWriteFixtures"
+import { buildFixture, openWorkbook, parts, saved, type Fixture } from "./xlsxWriteFixtures"
 
 // The reference catalogue: every construct that refers to cells, moved by row and column inserts and deletes and
 // by sheet deletes, renames and moves as Excel moves it, each saved through the gate and reverted to the source's
@@ -572,6 +575,30 @@ const COLUMNS = [
 ]
 
 describe("tables", () => {
+	it("are not written by an edit elsewhere that does not reach them", async () => {
+		const fixture: Fixture = {
+			sheets: [
+				{ name: "Other", body: DATA },
+				{ name: "Data", body: TABLE_DATA, rels: relationship("rId1", "table", "../tables/table1.xml") }
+			],
+			parts: { "xl/tables/table1.xml": { text: tableXml("A1:C3", COLUMNS), type: TYPES.table } }
+		}
+
+		for (const edit of [rows("insert", 0, 1), { kind: "renameSheet" as const, sheet: 0, name: "Renamed" }]) {
+			const workbook = await openWorkbook(buildFixture(fixture))
+
+			for (const entry of workbook.sheets) await workbook.load(entry.id)
+
+			const result = await planRefEdit(workbook, edit)
+
+			if (!result.ok) throw new Error(`refused: ${JSON.stringify(result.refusal)}`)
+
+			result.plan.apply()
+
+			expect([...workbook.changes.parts.keys()]).not.toContain("xl/tables/table1.xml")
+		}
+	})
+
 	it("grow with rows inserted inside and move with rows inserted above", async () => {
 		const grown = await edited(tables(tableXml("A1:C3", COLUMNS)), rows("insert", 2, 1), ["tables"])
 
@@ -728,6 +755,108 @@ describe("pivots, slicers, timelines", () => {
 		expect(files["xl/pivotCache/pivotCacheDefinition1.xml"]).toContain('<worksheetSource ref="A1:B5" sheet="Source"/>')
 	})
 
+	it("read a pivot cache's and a slicer's source from the part's head", () => {
+		const head = (body: string, prefix = "") =>
+			encodeUtf8(
+				`${DECLARATION}<!-- <cacheSource><worksheetSource sheet="Wrong"/></cacheSource> --><${prefix}pivotCacheDefinition xmlns${prefix === "" ? "" : `:${prefix.slice(0, -1)}`}="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${body}</${prefix}pivotCacheDefinition>`
+			)
+
+		expect(
+			pivotSource(
+				head('<cacheSource type="worksheet"><worksheetSource ref="A1:B5" sheet="Data"/></cacheSource><cacheFields count="0"/>'),
+				"p"
+			)
+		).toEqual({
+			sheet: "Data",
+			ref: { startRow: 0, startCol: 0, endRow: 4, endCol: 1 },
+			name: null
+		})
+		expect(
+			pivotSource(head("<x:cacheSource type='worksheet'><x:worksheetSource name='T1' r:id='rId1'/></x:cacheSource>", "x:"), "p")
+		).toEqual({ sheet: null, ref: null, name: "T1" })
+		expect(
+			pivotSource(head("<cacheSource type='worksheet'><worksheetSource sheet='O&apos;Brien' ref='C3'/></cacheSource>"), "p")
+		).toEqual({
+			sheet: "O'Brien",
+			ref: { startRow: 2, startCol: 2, endRow: 2, endCol: 2 },
+			name: null
+		})
+		// Consolidation and external sources, and a worksheetSource outside cacheSource, are not cell sources.
+		expect(pivotSource(head('<cacheSource type="external" connectionId="1"/><worksheetSource sheet="Data"/>'), "p")).toBeNull()
+		expect(
+			pivotSource(head('<cacheSource type="consolidation"><consolidation><rangeSets count="0"/></consolidation></cacheSource>'), "p")
+		).toBeNull()
+		expect(
+			pivotSource(head('<cacheFields count="0"/><cacheSource type="worksheet"><worksheetSource sheet="Late"/></cacheSource>'), "p")
+				?.sheet
+		).toBe("Late")
+		expect(() => pivotSource(head("<cacheSource><worksheetSource sheet=Data/></cacheSource>"), "p")).toThrow()
+
+		// What parseXml reads before the root reads here too: a UTF-8 byte order mark, UTF-16 with or without one,
+		// and an external document type declaration; an internal subset refuses.
+		const plain = head('<cacheSource type="worksheet"><worksheetSource ref="A1:B5" sheet="Dätä"/></cacheSource>')
+		const expected = pivotSource(plain, "p")
+		const utf16 = (bytes: Uint8Array, bom: boolean, littleEndian: boolean) => {
+			const text = new TextDecoder().decode(bytes)
+			const out = new Uint8Array((bom ? 2 : 0) + text.length * 2)
+
+			if (bom) out.set(littleEndian ? [0xff, 0xfe] : [0xfe, 0xff])
+
+			for (let k = 0; k < text.length; k++) {
+				const unit = text.charCodeAt(k)
+				const at = (bom ? 2 : 0) + k * 2
+
+				out[at + (littleEndian ? 0 : 1)] = unit & 0xff
+				out[at + (littleEndian ? 1 : 0)] = unit >> 8
+			}
+
+			return out
+		}
+		const withBom = (bytes: Uint8Array) => new Uint8Array([0xef, 0xbb, 0xbf, ...bytes])
+		const doctype = (bytes: Uint8Array, declaration: string) =>
+			encodeUtf8(new TextDecoder().decode(bytes).replace(DECLARATION, `${DECLARATION}${declaration}`))
+
+		expect(expected?.sheet).toBe("Dätä")
+		expect(pivotSource(withBom(plain), "p")).toEqual(expected)
+		expect(pivotSource(utf16(plain, true, true), "p")).toEqual(expected)
+		expect(pivotSource(utf16(plain, true, false), "p")).toEqual(expected)
+		expect(pivotSource(utf16(plain, false, true), "p")).toEqual(expected)
+		expect(pivotSource(doctype(plain, '<!DOCTYPE pivotCacheDefinition SYSTEM "a>b.dtd">\n'), "p")).toEqual(expected)
+		expect(() => pivotSource(doctype(plain, "<!DOCTYPE pivotCacheDefinition [<!ENTITY e 'x'>]>"), "p")).toThrow(/malformed/)
+		expect(() => pivotSource(doctype(plain, "<!DOCTYPE a SYSTEM 'a'><!DOCTYPE b SYSTEM 'b'>"), "p")).toThrow(/malformed/)
+
+		const slicer = (body: string) =>
+			encodeUtf8(
+				`${DECLARATION}<x14:slicerCacheDefinition xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="S">${body}</x14:slicerCacheDefinition>`
+			)
+
+		expect(
+			slicerSource(
+				slicer(
+					'<x14:pivotTables><x14:pivotTable tabId="2" name="P1"/><x14:pivotTable name="P2"/><x14:pivotTable tabId=\'5\' name="P3"/></x14:pivotTables>'
+				),
+				"s"
+			)
+		).toEqual({
+			table: null,
+			pivotSheets: [2, 5]
+		})
+		expect(
+			slicerSource(
+				slicer('<x14:extLst><x14:ext uri="{x}"><x15:tableSlicerCache tableId="3" column="2"/></x14:ext></x14:extLst>'),
+				"s"
+			)
+		).toEqual({
+			table: { id: 3, column: 2 },
+			pivotSheets: []
+		})
+
+		const pivots = slicer('<x14:pivotTables><x14:pivotTable tabId="2" name="P1"/></x14:pivotTables>')
+
+		expect(slicerSource(withBom(pivots), "s")).toEqual({ table: null, pivotSheets: [2] })
+		expect(slicerSource(utf16(pivots, true, true), "s")).toEqual({ table: null, pivotSheets: [2] })
+	})
+
 	it("refuse removing what a slicer or timeline reads", async () => {
 		const slicer = (body: string) =>
 			`${DECLARATION}<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="S" sourceName="B">${body}</slicerCacheDefinition>`
@@ -879,6 +1008,89 @@ describe("sheet operations", () => {
 		const moved = await edited(fixture, { kind: "moveSheet", sheet: 0, to: 2 }, ["formulas"])
 
 		expect(moved.files["xl/worksheets/sheet2.xml"]).toContain("<f>Jan!A1+SUM('Mar:Jan'!A1)</f>")
+	})
+})
+
+describe("cut and paste over x14 extensions", () => {
+	const DV_URI = "{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}"
+	const CF_URI = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}"
+
+	function validations(cells: readonly string[]): string {
+		return (
+			`<ext uri="${DV_URI}" xmlns:x14="${X14}"><x14:dataValidations count="${cells.length}" xmlns:xm="${XM}">` +
+			cells
+				.map(
+					cell =>
+						`<x14:dataValidation type="list"><x14:formula1><xm:f>Data!$C$1:$C$3</xm:f></x14:formula1><xm:sqref>${cell}</xm:sqref></x14:dataValidation>`
+				)
+				.join("") +
+			"</x14:dataValidations></ext>"
+		)
+	}
+
+	function formats(cells: readonly string[]): string {
+		return (
+			`<ext uri="${CF_URI}" xmlns:x14="${X14}"><x14:conditionalFormattings>` +
+			cells
+				.map(
+					(cell, k) =>
+						`<x14:conditionalFormatting xmlns:xm="${XM}"><x14:cfRule type="expression" priority="${k + 1}" id="{${k + 1}}"><xm:f>Data!$B$1&gt;0</xm:f></x14:cfRule><xm:sqref>${cell}</xm:sqref></x14:conditionalFormatting>`
+				)
+				.join("") +
+			"</x14:conditionalFormattings></ext>"
+		)
+	}
+
+	// Cuts A10:A11 and pastes it over B2:B3; the saved sheet.
+	async function pasted(exts: string): Promise<string> {
+		const workbook = await openWorkbook(buildFixture(sheetBody(`${DATA}<extLst>${exts}</extLst>`)))
+
+		await workbook.load(0)
+
+		const result = await planMove(workbook, {
+			sheet: "Data",
+			range: { startRow: 9, startCol: 0, endRow: 10, endCol: 0 },
+			to: "Data",
+			destination: { startRow: 1, startCol: 1, endRow: 2, endCol: 1 }
+		})
+
+		if (!result.ok) throw new Error(`refused: ${JSON.stringify(result.refusal)}`)
+
+		result.plan.apply()
+
+		return parts(await saved(workbook))["xl/worksheets/sheet1.xml"] ?? ""
+	}
+
+	it("counts the validations left once", async () => {
+		const sheet = await pasted(validations(["B2", "B3", "B5"]))
+
+		expect(sheet).toContain('<x14:dataValidations count="1"')
+		expect(sheet).toContain("<xm:sqref>B5</xm:sqref>")
+		expect(sheet).not.toContain("<xm:sqref>B2</xm:sqref>")
+	})
+
+	it("drops a container written over whole with its ext, and the extension list with its last ext", async () => {
+		const kept = await pasted(validations(["B2", "B3"]) + formats(["D1"]))
+
+		expect(kept).not.toContain("dataValidation")
+		expect(kept).not.toContain(DV_URI)
+		expect(kept).toContain("<xm:sqref>D1</xm:sqref>")
+
+		expect(await pasted(validations(["B2", "B3"]))).not.toContain("extLst")
+	})
+
+	it("drops x14 conditional formats written over whole the same way", async () => {
+		const kept = await pasted(formats(["B2", "B3"]) + validations(["D1"]))
+
+		expect(kept).not.toContain("conditionalFormatting")
+		expect(kept).not.toContain(CF_URI)
+		expect(kept).toContain('<x14:dataValidations count="1"')
+
+		const some = await pasted(formats(["B2", "D1"]))
+
+		expect(some).toContain("<x14:conditionalFormattings><x14:conditionalFormatting")
+		expect(some).toContain("<xm:sqref>D1</xm:sqref>")
+		expect(await pasted(formats(["B2", "B3"]))).not.toContain("extLst")
 	})
 })
 

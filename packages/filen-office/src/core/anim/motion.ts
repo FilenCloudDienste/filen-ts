@@ -15,13 +15,29 @@ export interface MotionPath {
 	readonly total: number
 }
 
-// Cubic Béziers are flattened into this many chords each.
-const CURVE_STEPS = 16
+// Cubic Béziers are flattened into this many chords each; the motion path editor budgets its writes by it.
+export const CURVE_STEPS = 16
+
+// One token of a path attribute: a command letter or a number. The source only, so each user builds its own instance
+// (a global regex carries lastIndex).
+export const MOTION_PATH_TOKEN = String.raw`[A-Za-z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`
 
 // Reads `path` (refusing tooLarge past `maxSegments` flattened segments); `aspect` is the slide's width over its
-// height, so lengths are measured as a viewer sees them.
+// height, so lengths are measured as a viewer sees them. Tokens are scanned lazily and counted, so neither a huge path
+// nor a run of skipped commands is materialised before the budget refuses it.
 export function parseMotionPath(path: string, aspect: number, maxSegments: number): MotionPath {
-	const tokens = path.match(/[A-Za-z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/gu) ?? []
+	const scan = new RegExp(MOTION_PATH_TOKEN, "gu")
+	// A vertex takes at most 3 tokens ("L x y"), so this is never reached before the segment budget on a valid path.
+	const maxTokens = maxSegments * 8 + 8
+	let consumed = 0
+	const next = (): string | undefined => {
+		const match = scan.exec(path)
+
+		if (match === null) return undefined
+		if (++consumed > maxTokens) tooLarge("motion path segments", maxSegments)
+
+		return match[0]
+	}
 	const xs: number[] = []
 	const ys: number[] = []
 	let x = 0
@@ -29,7 +45,7 @@ export function parseMotionPath(path: string, aspect: number, maxSegments: numbe
 	let startX = 0
 	let startY = 0
 	let command = "M"
-	let at = 0
+	let token = next()
 	const push = (px: number, py: number): void => {
 		if (xs.length > maxSegments) tooLarge("motion path segments", maxSegments)
 
@@ -37,21 +53,19 @@ export function parseMotionPath(path: string, aspect: number, maxSegments: numbe
 		ys.push(py)
 	}
 	const number = (): number | undefined => {
-		const token = tokens[at]
-
 		if (token === undefined || /[A-Za-z]/u.test(token)) return undefined
 
-		at++
+		const value = Number(token)
 
-		return Number(token)
+		token = next()
+
+		return value
 	}
 
-	while (at < tokens.length) {
-		const token = tokens[at] ?? ""
-
+	while (token !== undefined) {
 		if (/[A-Za-z]/u.test(token)) {
 			command = token
-			at++
+			token = next()
 
 			if (command === "Z" || command === "z") {
 				push(startX, startY)
@@ -138,7 +152,7 @@ export function parseMotionPath(path: string, aspect: number, maxSegments: numbe
 			}
 			default:
 				// An unknown command's numbers are skipped.
-				at++
+				token = next()
 		}
 	}
 

@@ -1,4 +1,6 @@
 import { colorXml, effectsXml, fillXml, geometryXml, lineXml } from "../../../presentation/render/markup"
+import { isRawPart } from "../../../presentation/edit/ops"
+import { RELATIONSHIPS } from "../parts"
 import {
 	refused,
 	type Action,
@@ -74,7 +76,6 @@ export interface EmitExtras {
 
 export type EmitContext = PptxEmitContext & EmitExtras
 
-const RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
 export const IMAGE_RELATIONSHIP = `${RELATIONSHIPS}image`
 
 // --- Pieces ---
@@ -634,6 +635,22 @@ function cNvPrXml(
 	return out.text(">").append(children.out).text(`</${prefix}:cNvPr>`)
 }
 
+// p:cNvPr of an element the session made (no source element): written from the model as cNvPrXml writes it.
+export function newCNvPr(context: EmitContext, shape: ShapeNode): readonly EmitPiece[] | Refused {
+	const pieces = cNvPrXml(context, shape, "p", -1, undefined)
+
+	return pieces instanceof Pieces ? pieces.out : pieces
+}
+
+// p:cNvPr of a new element written without an emit context (a clipboard copy): no actions, which need relationships.
+export function bareCNvPr(shape: ShapeNode): string {
+	return (
+		`<p:cNvPr${attr("id", shape.id)}${attr("name", shape.name)}${attr("descr", shape.alt?.descr)}` +
+		`${shape.hidden ? ' hidden="1"' : ""}${attr("title", shape.alt?.title)}` +
+		(shape.alt?.decorative === true ? `>${decorativeXml()}</p:cNvPr>` : "/>")
+	)
+}
+
 function decorativeExt(): string {
 	return `<a:ext uri="${DECORATIVE_EXT}"><adec:decorative xmlns:adec="${URIS["adec"] ?? ""}" val="1"/></a:ext>`
 }
@@ -942,7 +959,7 @@ export function childShapes(context: EmitContext, shapes: readonly ShapeNode[]):
 	const wrappers = new Set<number>()
 
 	for (const child of shapes) {
-		if (child.src?.format === "pptx" && child.src.part.startsWith("raw:")) {
+		if (child.src?.format === "pptx" && isRawPart(child.src.part)) {
 			const raw = rawShape(context, child)
 
 			if (raw.kind !== "markup") return raw
@@ -1027,6 +1044,9 @@ export function sameShape(a: ShapeNode, b: ShapeNode): boolean {
 			a.frame.colors !== b.frame.colors)
 	)
 		return false
+	// A table frame's cells and a medium's timing are what those families write; the rest of each is a cache.
+	if (a.frame?.kind === "table" && (b.frame?.kind !== "table" || !sameModel(a.frame.table, b.frame.table))) return false
+	if (!sameModel(a.media?.timing, b.media?.timing)) return false
 	if (
 		!sameModel(
 			{ ...a, frame: undefined, media: undefined, lock: undefined, children: undefined },

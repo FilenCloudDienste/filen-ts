@@ -204,7 +204,13 @@ export const TABLE_UNITS: RevertibleUnits = {
 export const TABLE_HANDLERS: FeatureHandlers = {
 	story: {
 		"table.insert": {
-			enabled: context => canInsertTable(context.state),
+			// A selection not starting in a paragraph (all, a node, cells) is deleted first and the caret it leaves
+			// tested then (run).
+			enabled: context => {
+				const selection = context.state.selection
+
+				return canInsertTable(context.state) || (!selection.empty && selection.$from.parent.type !== nodes.paragraph)
+			},
 			run: (context, command) => {
 				const part = context.session.story.part
 

@@ -1,6 +1,6 @@
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId } from "../../protocol"
 import { sheetFunction } from "../../functions/catalogue"
-import { FUNCTIONS, type FunctionContext } from "./functions"
+import { FUNCTIONS, refKey, type FunctionContext } from "./functions"
 import { parseFormula, type AreaRef, type FormulaNode, type ParsedFormula } from "./syntax"
 import {
 	FormulaError,
@@ -52,6 +52,10 @@ export interface FormulaPosition {
 }
 
 const MAX_ARRAY_CELLS = 1_000_000
+// The most cells of arrays one pass keeps (FormulaEvaluator.pass).
+const MAX_KEPT_CELLS = 1_000_000
+// What kept holds for a use asked for once.
+const ASKED = Symbol("asked")
 const MAX_NAME_DEPTH = 8
 
 function wrap(value: number, size: number): number {
@@ -64,9 +68,69 @@ export class FormulaEvaluator implements FunctionContext {
 	readonly host: FormulaHost
 	position: FormulaPosition = { sheet: 0, anchorRow: 0, anchorCol: 0, row: 0, col: 0 }
 	private names = 0
+	// Within a pass: what was made of each reference (refKey) and of each array, by what it was made for (kept); null
+	// outside one. Arrays weakly: one read for a single cell (a relative range, one past MAX_KEPT_CELLS) is let go with
+	// its cell, not held to the pass's end.
+	private made: Map<string, Map<string, unknown>> | null = null
+	private madeOf: WeakMap<object, Map<string, unknown>> | null = null
+	// The cells of the arrays a pass keeps, bounded by MAX_KEPT_CELLS.
+	private keptCells = 0
 
 	constructor(host: FormulaHost) {
 		this.host = host
+	}
+
+	// Runs `work` with what the formulas read kept for it: a range the rule reads for every cell of a tile is read once.
+	// One synchronous pass over cells whose host holds still (a tile's build), so nothing kept can go stale; not for a
+	// host that substitutes a cell (data validation's entry), which a kept read would not see.
+	pass<T>(work: () => T): T {
+		if (this.made !== null) return work()
+
+		this.made = new Map()
+		this.madeOf = new WeakMap()
+		this.keptCells = 0
+
+		try {
+			return work()
+		} finally {
+			this.made = null
+			this.madeOf = null
+		}
+	}
+
+	// What `build` makes of `owner` (refKey of a reference, an array) for `use`, kept for the rest of a pass once a second
+	// cell asks for it (a range only one cell reads, a relative one, is never kept); undefined until then, and outside
+	// a pass.
+	kept<T>(owner: object | string, use: string, build: () => T): T | undefined {
+		const made = this.made
+		const madeOf = this.madeOf
+
+		if (made === null || madeOf === null) return undefined
+
+		let uses = typeof owner === "string" ? made.get(owner) : madeOf.get(owner)
+
+		if (uses === undefined) {
+			uses = new Map()
+
+			if (typeof owner === "string") made.set(owner, uses)
+			else madeOf.set(owner, uses)
+		}
+
+		const known = uses.get(use)
+
+		if (known === undefined) {
+			uses.set(use, ASKED)
+
+			return undefined
+		}
+
+		if (known !== ASKED) return known as T
+
+		const value = build()
+
+		uses.set(use, value)
+
+		return value
 	}
 
 	// The formula's value for one cell. Throws Unsupported when it cannot be calculated here.
@@ -120,6 +184,23 @@ export class FormulaEvaluator implements FunctionContext {
 		if (isArray(value)) return value
 		if (!isRef(value)) return { kind: "array", rows: 1, cols: 1, values: [value] }
 
+		const key = refKey(value)
+		// Asked for again in the pass (null): read and kept, within bounds.
+		const known = this.kept<FormulaArray | null>(key, "array", () => null)
+
+		if (known !== undefined && known !== null) return known
+
+		const array = this.read(value)
+
+		if (known === null && this.keptCells + array.values.length <= MAX_KEPT_CELLS) {
+			this.keptCells += array.values.length
+			this.made?.get(key)?.set("array", array)
+		}
+
+		return array
+	}
+
+	private read(value: FormulaRef): FormulaArray {
 		const extent = this.host.extent(value.sheet)
 		const fullRows = refRows(value)
 		const fullCols = refCols(value)

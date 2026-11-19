@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate"
 import { AxisFlag, TILE_COLS, TILE_ROWS, type SheetRange, type SheetRenderStyle, type SheetTile } from "../core/sheet/protocol"
 import { parseSqref } from "../core/xlsx/refs/sqref"
@@ -51,13 +51,17 @@ function workbooks(): string[] {
 const hex = (rgb: number | undefined): string | undefined =>
 	rgb === undefined ? undefined : `#${rgb.toString(16).padStart(6, "0").toUpperCase()}`
 
-const scratch = mkdtempSync(join(tmpdir(), "filen-cf-oracle-"))
+describe.skipIf(INSTALLS.length === 0 || !existsSync(CORPUS_DIR))("conditional formats against LibreOffice", () => {
+	let scratch: string
 
-afterAll(() => {
-	rmSync(scratch, { recursive: true, force: true })
-})
+	beforeAll(() => {
+		scratch = mkdtempSync(join(tmpdir(), "filen-cf-oracle-"))
+	})
 
-describe.skipIf(INSTALLS.length === 0)("conditional formats against LibreOffice", () => {
+	afterAll(() => {
+		rmSync(scratch, { recursive: true, force: true })
+	})
+
 	it(
 		"fills every rule's cells as LibreOffice's HTML export does",
 		async () => {

@@ -12,6 +12,7 @@ import { MAX_METAFILE_BYTES, convertMetafile } from "../../metafile/index"
 import { visibleNotes } from "../../xlsx/comments/feature"
 import { annotationStore } from "../../xlsx/comments/store"
 import { compact, type SheetDrawingData } from "../../xlsx/drawings/render"
+import { cloneModel } from "../../presentation/edit/changes"
 import { decodeUtf8, encodeUtf8, parseXml } from "../../xml/index"
 import { sectionMarkup } from "../cf/sections"
 import { defineSheetFeature, type SheetChangeSink, type SheetHandled } from "../registry"
@@ -491,7 +492,7 @@ async function headerImages(document: XlsxDocument, sheet: SheetId): Promise<She
 		kept.delete(key)
 		kept.set(key, held)
 
-		return held
+		return ownedImages(await held)
 	}
 
 	const read = readHeaderImages(document.workbook, model, markup)
@@ -504,7 +505,13 @@ async function headerImages(document: XlsxDocument, sheet: SheetId): Promise<She
 		kept.delete(oldest)
 	}
 
-	return read
+	return ownedImages(await read)
+}
+
+// Answers of their own: a worker transfers every answer's buffers (protocol.ts), which would leave the kept drawings
+// detached for the next print. Bitmap pictures are part names, with nothing to copy.
+function ownedImages(images: SheetHeaderImage[]): SheetHeaderImage[] {
+	return images.map(entry => (entry.image.kind === "drawing" ? { ...entry, image: cloneModel(entry.image) } : entry))
 }
 
 async function readHeaderImages(workbook: XlsxWorkbookModel, model: XlsxSheetModel, markup: string): Promise<SheetHeaderImage[]> {

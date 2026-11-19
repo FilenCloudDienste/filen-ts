@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { ATTRIBUTE_MATRIX, attributeFromOdf, compileFormula, ease, hslToRgba, lerpHsl, rgbToHsl } from "../core/anim/attributes"
+import {
+	ATTRIBUTE_MATRIX,
+	attributeEntry,
+	attributeFromOdf,
+	attributeToOdf,
+	compileFormula,
+	ease,
+	hslToRgba,
+	lerpHsl,
+	rgbToHsl
+} from "../core/anim/attributes"
 import { compile, instantiate } from "../core/anim/timegraph"
 import { BUDGETS, TimingBuilder, animatedSlide, shape } from "./animFixtures"
 
@@ -32,6 +42,35 @@ describe("the attribute matrix", () => {
 		expect(compileFormula("max(1,-2)+min(3,abs(-4))")?.(vars)).toBe(4)
 		expect(compileFormula("#ppt_x+")).toBeUndefined()
 		expect(compileFormula("unknown(1)")).toBeUndefined()
+	})
+
+	it("resolves only its own names, never inherited members of Object.prototype", () => {
+		for (const text of ["constructor", "ppt_x+toString", "valueOf(1)", "toString(1)", "hasOwnProperty(1)", "max(__proto__,1)"]) {
+			expect(compileFormula(text)).toBeUndefined()
+		}
+
+		expect(attributeEntry("constructor")).toBeUndefined()
+		expect(attributeEntry("__proto__")).toBeUndefined()
+		expect(attributeToOdf("toString")).toBeUndefined()
+		expect(attributeEntry("ppt_x")).toMatchObject({ route: "transform", channel: "x" })
+		expect(attributeToOdf("style.rotation")).toBe("rotate")
+		expect(compileFormula("sqrt(4)+max(1,2)")?.(new Float64Array(5))).toBe(4)
+	})
+
+	it("refuses formulas too long or too deeply nested to compile without throwing", () => {
+		const terms = Array.from({ length: 20_000 }, () => "1").join("+")
+
+		expect(compileFormula(terms)).toBeUndefined()
+		expect(compileFormula(`${"(".repeat(5000)}1${")".repeat(5000)}`)).toBeUndefined()
+		expect(compileFormula(`${"-".repeat(5000)}1`)).toBeUndefined()
+		// Under the length bound, the depth bound refuses.
+		expect(compileFormula(`${"(".repeat(1500)}1${")".repeat(1500)}`)).toBeUndefined()
+		expect(compileFormula(`${"-".repeat(1500)}1`)).toBeUndefined()
+		expect(compileFormula(`${"2^".repeat(1500)}1`)).toBeUndefined()
+		expect(compileFormula(`${"abs(".repeat(500)}1${")".repeat(500)}`)).toBeUndefined()
+		// Nesting within the bound still compiles.
+		expect(compileFormula(`${"(".repeat(20)}1${")".repeat(20)}`)?.(new Float64Array(5))).toBe(1)
+		expect(compileFormula("--1")?.(new Float64Array(5))).toBe(1)
 	})
 
 	it("eases with SMIL acceleration and deceleration", () => {

@@ -4,10 +4,8 @@ import { bytesSource, memorySink, planZip, writeZip, type ByteChunks, type PartC
 import type { InflateHook } from "../../opc/zipReader"
 import { SliceClock, sliceClock, type Slicing } from "../../slicing"
 import type { XlsxDocument } from "../../xlsx/edit/document"
-import type { XlsxSheetModel } from "../../xlsx/model/types"
-import { encodeUtf8, escapeAttribute } from "../../xml/index"
+import { encodeUtf8 } from "../../xml/index"
 import { withManifestEntries, withoutManifestEntries } from "../../odp/write/manifestPrune"
-import { OdfNs } from "../../odf/namespaces"
 import { NULL_DATE_1899, NULL_DATE_1904 } from "../read/values"
 import { odsSource, type OdsSource } from "../source"
 import { verifyOds } from "../verify"
@@ -16,16 +14,17 @@ import { ContentRefused, ContentWriter } from "./content"
 import { StreamError } from "./stream"
 import { OdsStyleWriter, StyleRefused, StyleUnplanned } from "./styles"
 import { ChartRefused, writeOdsCharts } from "../charts/write"
-import { currentSection, sectionText, sheetFeatures, type SheetFeatures } from "./features"
+import { currentSection, LinksRefused, sectionText, sheetFeatures, type SheetFeatures } from "./features"
 import { ValidationRefused } from "./validations"
 import { FilterRefused, filterRange } from "./filters"
 import type { NewTable } from "./table"
 import { NameRefused, namesPlan, scopeSheetName } from "./names"
-import type { SourceAxis } from "./axis"
 import { proveSpan } from "./span"
+import { hasMarkedRows } from "./sheet"
 import { shifterOf } from "../unheld"
+import { OdsSheet, sourceTableOf } from "../workbook"
 import { SHEET_MAX_ROWS } from "../../sheet/protocol"
-import { sameView, writeSettings, type SheetViewState } from "./settings"
+import { emptySettings, sameView, writeSettings, type SheetViewState } from "./settings"
 
 // The OpenDocument save: content.xml streamed through the splice writer (ContentWriter), every other entry copied
 // as its compressed bytes, then the whole file read back by the reader and compared with the session's model
@@ -59,11 +58,9 @@ function filterPlan(document: XlsxDocument, source: OdsSource): { replaced: Map<
 
 		if (model === null || entry.kind !== "worksheet") return
 
-		const table = source.tables[entry.id]
-		const own = table !== undefined && table.id === entry.id && "rowAxis" in model ? table : null
-		const axes = model as { rowAxis?: SourceAxis; colAxis?: SourceAxis }
+		const own = sourceTableOf(source, entry)
 		const current = currentSection(workbook, model, "autoFilter")
-		const moved = axes.rowAxis?.identity === false || axes.colAxis?.identity === false
+		const moved = model instanceof OdsSheet && (!model.rowAxis.identity || !model.colAxis.identity)
 
 		if (current === null && own !== null && own.name === entry.name && !moved) return
 
@@ -91,8 +88,7 @@ async function settingsChange(document: XlsxDocument, source: OdsSource): Promis
 
 		if (model === null || sheet.kind !== "worksheet") continue
 
-		const table = source.tables[sheet.id]
-		const own = table !== undefined && table.id === sheet.id && "rowAxis" in model ? table : undefined
+		const own = sourceTableOf(source, sheet) ?? undefined
 
 		if (own !== undefined && own.name !== sheet.name) renamed = true
 
@@ -122,11 +118,6 @@ async function settingsChange(document: XlsxDocument, source: OdsSource): Promis
 
 	return written === null ? null : { bytes: written, fresh: entry === undefined }
 }
-
-// Of the package's own ODF version (content.xml's, else its manifest's), as each of its parts must be (Part 2 §4.3).
-// xmlns:ooo declares the prefix of the "ooo:view-settings" name LibreOffice looks the views up by.
-const emptySettings = (version: string | undefined): string =>
-	`<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="${OdfNs.office}" xmlns:config="${OdfNs.config}" xmlns:ooo="${OdfNs.ooo}"${version === undefined ? "" : ` office:version="${escapeAttribute(version)}"`}><office:settings><config:config-item-set config:name="ooo:view-settings"><config:config-item-map-indexed config:name="Views"><config:config-item-map-entry><config:config-item config:name="ViewId" config:type="string">view1</config:config-item></config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set></office:settings></office:document-settings>`
 
 // META-INF/manifest.xml as the save writes it (ODF 1.3 Part 2 §4.3): settings.xml listed when one is added, the
 // dropped preview's entry gone. Null when it stays as it is; undefined when it cannot list settings.xml.
@@ -251,6 +242,7 @@ function refusalOf(error: unknown): OdsSaveResult {
 	if (error instanceof NameRefused) return { ok: false, reason: "unsupported", message: error.message }
 	if (error instanceof ValidationRefused) return { ok: false, reason: "unsupported", message: error.message }
 	if (error instanceof FilterRefused) return { ok: false, reason: "unsupported", message: error.message }
+	if (error instanceof LinksRefused) return { ok: false, reason: "unsupported", message: error.message }
 	if (error instanceof StreamError) return { ok: false, reason: "write", message: error.message }
 
 	return { ok: false, reason: "write", message: error instanceof Error ? error.message : String(error) }
@@ -272,25 +264,26 @@ function spanGate(document: XlsxDocument, source: OdsSource, writer: ContentWrit
 
 	return sheets.every((entry, index) => {
 		const table = source.tables[index]
-		const model = entry.model as (XlsxSheetModel & { rowAxis?: SourceAxis; colAxis?: SourceAxis; movedFrom?: number }) | null
+		const model = entry.model
 		const tableWriter = writer.tableWriters.get(entry.id)
-		const features = tableWriter?.features
+
+		// A sheet whose table the writer did not take, or whose rows it never saw or wrote although an edit marked
+		// some: what the span would read back is not what was edited.
+		if (table === undefined || tableWriter === undefined || model === null) return false
+		if (table.rows > 0 && tableWriter.sourceRowsSeen === 0) return false
+		if (tableWriter.spanRows?.length === 0 && hasMarkedRows(model)) return false
+
+		const features = tableWriter.features
 
 		return (
-			table !== undefined &&
 			table.id === entry.id &&
 			table.name === entry.name &&
-			model !== null &&
-			model.rowAxis?.identity !== false &&
-			(model.movedFrom === undefined || model.movedFrom >= SHEET_MAX_ROWS) &&
-			(features === undefined ||
-				(features.notes === null &&
-					features.links === null &&
-					// A sheet with no validation, before or now (columns moving still give it a plan, empty).
-					(features.validations === null ||
-						(features.validations.rows.size === 0 &&
-							features.validations.fresh.length === 0 &&
-							table.validationNames.size === 0))))
+			(!(model instanceof OdsSheet) || (model.rowAxis.identity && model.movedFrom >= SHEET_MAX_ROWS)) &&
+			features.notes === null &&
+			features.links === null &&
+			// A sheet with no validation, before or now (columns moving still give it a plan, empty).
+			(features.validations === null ||
+				(features.validations.rows.size === 0 && features.validations.fresh.length === 0 && table.validationNames.size === 0))
 		)
 	})
 }
@@ -316,8 +309,7 @@ export async function saveOds(document: XlsxDocument, options: OdsSaveOptions = 
 
 			if (model === null || entry.kind !== "worksheet") continue
 
-			const table = source.tables[entry.id]
-			const own = table !== undefined && table.id === entry.id && "rowAxis" in model ? table : null
+			const own = sourceTableOf(source, entry)
 
 			if (clock?.due === true) await clock.pause()
 

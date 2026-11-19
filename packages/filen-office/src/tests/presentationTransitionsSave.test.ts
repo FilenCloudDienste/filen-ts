@@ -9,7 +9,7 @@ import type { SlideNode } from "../core/presentation/model"
 import { odpApplier, openOdpDeck, odpDeck, saveDeck, slideAt, entriesOf, text as odpText } from "./odpWriteFixtures"
 import { odpBytes } from "./odpFixtures"
 import { body, buildPptx, para, sp } from "./pptxFixtures"
-import { changedParts, openDeck, partsOf, rebaseSession, saveEdits, slideNode, text } from "./pptxWriteFixtures"
+import { differingParts, openDeck, partsOf, rebaseSession, saveEdits, slideNode, text } from "./pptxWriteFixtures"
 import { editHarness, P14 } from "./presentationEditFixtures"
 
 // Transitions authored through the transition ops and saved: written where the slide had none, in place of the
@@ -76,7 +76,7 @@ describe("pptx transitions saved", () => {
 			durationMs: 3000,
 			options: { dir: "r" }
 		})
-		expect(await changedParts(deck(), saved)).toEqual(["ppt/slides/slide3.xml"])
+		expect(await differingParts(deck(), saved)).toEqual(["ppt/slides/slide3.xml"])
 
 		const xml = text((await partsOf(saved)).get("ppt/slides/slide3.xml"))
 

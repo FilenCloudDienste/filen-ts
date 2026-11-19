@@ -1,4 +1,4 @@
-import { rgba, type Paint, type PatternPreset, type Rgba, type Stroke } from "../../drawingml/index"
+import { dashPreset, patternPreset, rgba, type Paint, type Rgba, type Stroke } from "../../drawingml/displayList"
 import type { RenderEffect, RenderEffects } from "../output"
 import type { ColorModel, EffectList, FillProps, LineProps } from "../model"
 
@@ -11,63 +11,6 @@ const BLACK = rgba("000000")
 // Resolves a theme-relative colour (the host binds the slide's theme and colour map, core/presentation/theme.ts);
 // undefined when it names no colour.
 export type ColorResolver = (color: ColorModel) => Rgba | undefined
-
-const PATTERNS: ReadonlySet<string> = new Set([
-	"pct5",
-	"pct10",
-	"pct20",
-	"pct25",
-	"pct30",
-	"pct40",
-	"pct50",
-	"pct60",
-	"pct70",
-	"pct75",
-	"pct80",
-	"pct90",
-	"horz",
-	"vert",
-	"ltHorz",
-	"ltVert",
-	"dkHorz",
-	"dkVert",
-	"narHorz",
-	"narVert",
-	"dashHorz",
-	"dashVert",
-	"cross",
-	"dnDiag",
-	"upDiag",
-	"ltDnDiag",
-	"ltUpDiag",
-	"dkDnDiag",
-	"dkUpDiag",
-	"wdDnDiag",
-	"wdUpDiag",
-	"dashDnDiag",
-	"dashUpDiag",
-	"diagCross",
-	"smCheck",
-	"lgCheck",
-	"smGrid",
-	"lgGrid",
-	"dotGrid",
-	"smConfetti",
-	"lgConfetti",
-	"horzBrick",
-	"diagBrick",
-	"solidDmnd",
-	"openDmnd",
-	"dotDmnd",
-	"plaid",
-	"sphere",
-	"weave",
-	"divot",
-	"shingle",
-	"wave",
-	"trellis",
-	"zigZag"
-])
 
 // A text fill as drawn: a solid colour stays a colour (DocxTextStyle.color plus alpha), anything else a Paint.
 // A picture fill on text draws in its mean colour, which is unknown without decoding: the run's solid fallback
@@ -120,7 +63,7 @@ export function resolveTextFill(fill: FillProps | "none", color: ColorResolver, 
 				kind: "paint",
 				paint: {
 					kind: "pattern",
-					pattern: (PATTERNS.has(fill.preset) ? fill.preset : "pct50") as PatternPreset,
+					pattern: patternPreset(fill.preset),
 					foreground: color(fill.fg) ?? BLACK,
 					background: color(fill.bg) ?? rgba("FFFFFF")
 				}
@@ -130,20 +73,6 @@ export function resolveTextFill(fill: FillProps | "none", color: ColorResolver, 
 			return { kind: "color", color: fallback }
 	}
 }
-
-const DASHES: ReadonlySet<string> = new Set([
-	"solid",
-	"dot",
-	"dash",
-	"lgDash",
-	"dashDot",
-	"lgDashDot",
-	"lgDashDotDot",
-	"sysDash",
-	"sysDot",
-	"sysDashDot",
-	"sysDashDotDot"
-])
 
 // a:ln on text as a Stroke whose paint is added through `paint` (it returns the index); undefined when the line
 // draws nothing (noFill, or no fill and no colour to fall back on).
@@ -164,7 +93,7 @@ export function resolveTextLine(line: LineProps, color: ColorResolver, paint: (p
 	return {
 		width,
 		paint: paint(resolved.kind === "color" ? { kind: "solid", color: resolved.color } : resolved.paint),
-		dash: (DASHES.has(dash) ? dash : "solid") as Stroke["dash"],
+		dash: dashPreset(dash),
 		customDash: line.custDash === undefined ? null : Float32Array.from(line.custDash, value => value / 100000),
 		cap: line.cap === "rnd" ? "round" : line.cap === "sq" ? "square" : "flat",
 		join: line.join ?? "round",

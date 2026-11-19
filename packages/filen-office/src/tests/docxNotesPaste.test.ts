@@ -10,6 +10,7 @@ import { sourceCopies } from "../core/docx/edit/session"
 import { storyReviewIndex } from "../core/docx/review/accept"
 import { docxNotes } from "../core/docx/stories/notes"
 import { buildDocx, p, type SyntheticDocx } from "./docxSynthetic"
+import { pngHeader } from "./fuzz/ops/drawings"
 import { pageDigest, pagedEditor, savedDigest, settleAll } from "./pagedFixtures"
 
 // A pasted note reference: Word's paste makes a new note with a copy of the note's content; a cut pasted moves
@@ -29,33 +30,6 @@ const OBJECT =
 	'<v:imagedata r:id="rIdPic" o:title=""/></v:shape><o:OLEObject Type="Embed" ProgID="Package" ShapeID="_x0000_i1025" DrawAspect="Content" ObjectID="_1" r:id="rIdOle"/></w:object></w:r>'
 const NOTE = `<w:footnote w:id="1"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> Note text</w:t></w:r>${PICTURE}${OBJECT}</w:p></w:footnote>`
 
-// A PNG of a width x height picture (its header: the pixels are not needed to place it).
-function png(width: number, height: number): Uint8Array {
-	const u32 = (value: number): number[] => [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]
-	const chunk = (type: string, data: readonly number[]): number[] => [
-		...u32(data.length),
-		...[...type].map(c => c.charCodeAt(0)),
-		...data,
-		0,
-		0,
-		0,
-		0
-	]
-
-	return new Uint8Array([
-		0x89,
-		0x50,
-		0x4e,
-		0x47,
-		0x0d,
-		0x0a,
-		0x1a,
-		0x0a,
-		...chunk("IHDR", [...u32(width), ...u32(height), 8, 6, 0, 0, 0]),
-		...chunk("IEND", [])
-	])
-}
-
 const SPEC: SyntheticDocx = {
 	body:
 		'<w:p><w:r><w:t>One</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p>' +
@@ -64,7 +38,7 @@ const SPEC: SyntheticDocx = {
 	footnotes: SEPARATORS + NOTE,
 	headers: { rIdH: p("Head") },
 	parts: [
-		{ name: "word/media/a.png", data: png(48, 24) },
+		{ name: "word/media/a.png", data: pngHeader(48, 24) },
 		{
 			name: "word/embeddings/oleObject1.bin",
 			contentType: "application/vnd.openxmlformats-officedocument.oleObject",
@@ -219,7 +193,7 @@ describe("pasted and converted notes keep what they hold", () => {
 				editor.session.dispatch(editor.session.state.tr.setSelection(TextSelection.atEnd(editor.session.state.doc)))
 			}
 
-			expect(await editor.execute({ type: "image.insert", media: editor.addMedia(png(96, 48)) as number })).toBe(true)
+			expect(await editor.execute({ type: "image.insert", media: editor.addMedia(pngHeader(96, 48)) as number })).toBe(true)
 			editor.exitStory()
 			expect(pasteFirst(editor, context)).toBe(true)
 

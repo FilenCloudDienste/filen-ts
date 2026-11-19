@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { unzipSync } from "fflate"
-import { chartLayout } from "../core/xlsx/charts/create"
+import { chartLayout, chartSource, newChartPart } from "../core/xlsx/charts/create"
 import type { ChartCell, ChartSheetCells } from "../core/xlsx/charts/cache"
 import { readChartInfo } from "../core/xlsx/charts/model"
-import { decodeUtf8, encodeUtf8, parseXml } from "../core/xml/index"
+import { assertWellFormed, decodeUtf8, encodeUtf8, parseXml } from "../core/xml/index"
 import { XsdOracle, xsdOracleMissing } from "./oracles/xsd"
 import { changeOf } from "./sheetNotesFixtures"
 import { CHART_PART, KEPT, SOLD, barChart, chartFixture, openCharts, partText } from "./sheetChartFixtures"
@@ -30,7 +30,14 @@ function sheetOf(rows: readonly (readonly (string | number | null)[])[]): ChartS
 				? { kind: "number", number: value, text: String(value), format: "General" }
 				: { kind: "text", number: Number.NaN, text: value, format: "General" }
 
-	return { lastRow: rows.length - 1, lastCol: 9, cell: (row, col) => cell(rows[row]?.[col]), hidden: () => false }
+	return {
+		lastRow: rows.length - 1,
+		lastCol: 9,
+		cell: (row, col) => cell(rows[row]?.[col]),
+		hidden: () => false,
+		hiddenRow: () => false,
+		hiddenCol: () => false
+	}
 }
 
 const range = (endRow: number, endCol: number) => ({ startRow: 0, startCol: 0, endRow, endCol })
@@ -73,6 +80,53 @@ describe("chart insertion", () => {
 				"line"
 			)
 		).toEqual({ byColumns: true, nameLine: false, categoryLine: false })
+	})
+
+	it("plots every value of a single numeric column or row, and names the series only by text in the first cell", () => {
+		const column = sheetOf([[5], [1], [2], [3], [4], [6], [7], [8], [9], [10]])
+		const columnLayout = chartLayout(column, range(9, 0), "column")
+
+		expect(columnLayout).toEqual({ byColumns: true, nameLine: false, categoryLine: false })
+		expect(chartSource("Data", range(9, 0), columnLayout, "column").series).toEqual([{ name: null, values: "Data!$A$1:$A$10" }])
+
+		const row = sheetOf([[5, 1, 2, 3, 4, 6, 7, 8, 9, 10]])
+		const rowLayout = chartLayout(row, range(0, 9), "column")
+
+		expect(rowLayout).toEqual({ byColumns: false, nameLine: false, categoryLine: false })
+		expect(chartSource("Data", range(0, 9), rowLayout, "column").series).toEqual([{ name: null, values: "Data!$A$1:$J$1" }])
+
+		// A text header over one numeric column stays the series name.
+		const named = chartLayout(sheetOf([["Sales"], [1], [2], [3]]), range(3, 0), "column")
+
+		expect(named.nameLine).toBe(true)
+		expect(chartSource("Data", range(3, 0), named, "column").series).toEqual([{ name: "Data!$A$1", values: "Data!$A$2:$A$4" }])
+		expect(chartLayout(sheetOf([["Sales", 1, 2, 3]]), range(0, 3), "column").nameLine).toBe(true)
+
+		// An empty first cell over numbers is no name.
+		const blank = chartLayout(sheetOf([[null], [1], [2], [3]]), range(3, 0), "column")
+
+		expect(blank.nameLine).toBe(false)
+		expect(chartSource("Data", range(3, 0), blank, "column").series).toEqual([{ name: null, values: "Data!$A$1:$A$4" }])
+		expect(chartLayout(sheetOf([[null, 1, 2, 3]]), range(0, 3), "column").nameLine).toBe(false)
+		// A scatter of one numeric column is one series of every value.
+		expect(chartSource("Data", range(9, 0), chartLayout(column, range(9, 0), "scatter"), "scatter")).toEqual({
+			categories: null,
+			series: [{ name: null, values: "Data!$A$1:$A$10" }]
+		})
+	})
+
+	it("writes formulas with characters XML cannot carry as well-formed markup", () => {
+		const part = newChartPart(
+			{ categories: "'A\u0001'!$A$2:$A$4", series: [{ name: "'A\u0001'!$B$1", values: "'A\u0001'!$B$2:$B$4" }] },
+			"column",
+			undefined,
+			{ strict: false, date1904: false, numericCategories: false }
+		)
+
+		expect(() => {
+			assertWellFormed(parseXml(part))
+		}).not.toThrow()
+		expect(decodeUtf8(part)).toContain("<c:f>'A\ufffd'!$B$1</c:f>")
 	})
 
 	it("inserts a chart of the selection: part, frame, relationships and content type, valid and saved", async () => {

@@ -962,7 +962,8 @@ export class SheetStore implements XlsxSheetStore {
 		return true
 	}
 
-	// setRow for many rows: each block they fall in is rebuilt once.
+	// setRow for many rows: a block whose rows all exist and stay is written in place, any other block they fall in is
+	// rebuilt once.
 	setRows(rows: readonly RowProperties[]): void {
 		if (rows.length === 0) return
 
@@ -981,6 +982,9 @@ export class SheetStore implements XlsxSheetStore {
 		// Last block first: rebuilding a block moves only the blocks after it.
 		for (const index of [...groups.keys()].sort((a, b) => b - a)) {
 			const group = groups.get(index) ?? []
+			const block = this.blocks[index]
+
+			if (block !== undefined && this.setRowsInPlace(index, block, group)) continue
 
 			this.edit(group[0]?.row ?? 0, records => {
 				const byRow = new Map(records.map(record => [record.row, record]))
@@ -1004,6 +1008,47 @@ export class SheetStore implements XlsxSheetStore {
 				if (added) records.sort((a, z) => a.row - z.row)
 			})
 		}
+	}
+
+	// Writes a group's row properties where they are when every row is in the block and none is left vacant: the
+	// cells stay as they are, the block is copied only when an undo snapshot holds it. False, writing nothing,
+	// otherwise.
+	private setRowsInPlace(b: number, block: RowBlock, group: readonly RowProperties[]): boolean {
+		const indexes = new Int32Array(group.length)
+
+		for (let i = 0; i < group.length; i++) {
+			const { row, height, style, flags } = group[i] as RowProperties
+			const index = block.rowIndex(row)
+
+			if (index < 0) return false
+
+			const vacant =
+				block.rowStarts[index] === block.rowStarts[index + 1] &&
+				((block.rowFlags[index] ?? 0) & RowFlag.NEW) !== 0 &&
+				(flags & PROPERTY_FLAGS) === 0 &&
+				Number.isNaN(height) &&
+				style < 0
+
+			if (vacant) return false
+
+			indexes[i] = index
+		}
+
+		const target = this.held.has(block) ? copyBlock(block) : block
+
+		for (let i = 0; i < group.length; i++) {
+			const { height, style, flags } = group[i] as RowProperties
+			const index = indexes[i] ?? 0
+
+			target.rowHeights[index] = height
+			target.rowStyles[index] = style
+			target.rowFlags[index] =
+				((target.rowFlags[index] ?? 0) & (RowFlag.NEW | RowFlag.DIRTY)) | (flags & PROPERTY_FLAGS) | RowFlag.DIRTY
+		}
+
+		this.blocks[b] = target
+
+		return true
 	}
 
 	// Rebuilds the block holding `row` (the one before it when none does) through `change`, which edits its row
@@ -1583,11 +1628,11 @@ export class StoreBuilder {
 			flags |= RowFlag.DIRTY
 		}
 
-		if (this.rowCount === 0) {
-			this.blockFirstRow = row
-		} else if (row <= this.previousRow || row < this.blockFirstRow) {
-			this.unordered = true
-		}
+		// Against the row before whatever the block: a block just cut starts with a row that may repeat or precede it.
+		if (row <= this.previousRow) this.unordered = true
+
+		if (this.rowCount === 0) this.blockFirstRow = row
+		else if (row < this.blockFirstRow) this.unordered = true
 
 		if (this.rowCount === this.rows.length) {
 			const size = Math.min(BLOCK_ROWS, this.rows.length * 2)

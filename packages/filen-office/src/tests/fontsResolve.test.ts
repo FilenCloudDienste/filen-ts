@@ -272,6 +272,42 @@ describe("fallbacks", () => {
 		expect(await resolved(new FontManager(rejecting, new FakeAssets()), request("Georgia"))).toMatchObject({ source: "generic" })
 	})
 
+	it("reads a bundled face again after a failed read, a bounded number of times, and never re-adds a rejected one", async () => {
+		const file = "carlito/Carlito-Regular.woff2"
+		const reads = (assets: FakeAssets): number => assets.reads.filter(read => read === file).length
+		const flaky = new FakeAssets()
+
+		flaky.failing.add(file)
+
+		const manager = new FontManager(new FakeHost(), flaky)
+
+		expect(await resolved(manager, request("Calibri"))).toMatchObject({ source: "generic" })
+		flaky.failing.clear()
+		expect(await resolved(manager, request("Calibri"))).toMatchObject({ family: alias("carlito"), source: "bundled" })
+		expect(reads(flaky)).toBe(2)
+
+		const offline = new FakeAssets()
+
+		offline.failing.add(file)
+
+		const down = new FontManager(new FakeHost(), offline)
+
+		for (let k = 0; k < 6; k++) expect(await resolved(down, request("Calibri"))).toMatchObject({ source: "generic" })
+
+		expect(reads(offline)).toBe(3)
+
+		const rejecting = new FakeHost()
+		const assets = new FakeAssets()
+
+		rejecting.rejectBytes = true
+
+		const rejected = new FontManager(rejecting, assets)
+
+		for (let k = 0; k < 3; k++) expect(await resolved(rejected, request("Calibri"))).toMatchObject({ source: "generic" })
+
+		expect(reads(assets)).toBe(1)
+	})
+
 	it("bounds installed-font probes and never probes unprintable names", async () => {
 		const host = new FakeHost(["A", "B"])
 		const manager = new FontManager(host, new FakeAssets(), { maxEmbeddedFaceBytes: 1, maxEmbeddedBytes: 1, maxLocalProbes: 1 })

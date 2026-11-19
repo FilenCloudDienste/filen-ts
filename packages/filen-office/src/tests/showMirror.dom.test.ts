@@ -1,11 +1,18 @@
 // @vitest-environment happy-dom
+import { act, createElement } from "react"
+import { createRoot } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { EMU_PER_PX } from "../core/drawingml/index"
 import type { ShowController, ShowMirror } from "../react/presentation/show/controller"
 import { ShowMirrorLink, StageMirror } from "../react/presentation/show/mirror"
+import { ShowMirrorView } from "../react/presentation/show/mirrorView"
 
 // The presenter's copy of the stage: structure and attributes from the stage's mutations, layer bitmaps copied once at
 // the copy's resolution, transition pieces and tints on every frame, video at each presented frame, click targets left
-// out, gone nodes freed; and the link that keeps one copy on the controller driving the show.
+// out, gone nodes freed; the link that keeps one copy on the controller driving the show; and the presenter view's box
+// that letterboxes the copy and sizes it in device pixels.
+
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 
 interface Drawn {
 	readonly canvas: HTMLCanvasElement
@@ -259,5 +266,91 @@ describe("ShowMirrorLink", () => {
 		link.disconnect(b.controller)
 		await Promise.resolve()
 		expect(b.released).toEqual([1])
+	})
+})
+
+describe("ShowMirrorView", () => {
+	const View = document.defaultView as Window & typeof globalThis
+	const NativeResizeObserver = View.ResizeObserver
+
+	afterEach(() => {
+		Reflect.set(View, "ResizeObserver", NativeResizeObserver)
+	})
+
+	it("hands the link its host, letterboxes the slide in its box at device resolution, and lets go on unmount", () => {
+		const observers: (() => void)[] = []
+		const area = { width: 1000, height: 450 }
+
+		vi.spyOn(View, "devicePixelRatio", "get").mockReturnValue(2)
+		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+			return this.dataset["foShowMirror"] === undefined ? 0 : area.width
+		})
+		vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+			return this.dataset["foShowMirror"] === undefined ? 0 : area.height
+		})
+		Reflect.set(
+			View,
+			"ResizeObserver",
+			class {
+				constructor(callback: () => void) {
+					observers.push(callback)
+				}
+				observe(): void {}
+				disconnect(): void {}
+			}
+		)
+
+		const views: (HTMLElement | undefined)[] = []
+		const ratios: number[] = []
+		const link = {
+			view: (target: HTMLElement | undefined) => views.push(target),
+			resize: (ratio: number) => ratios.push(ratio)
+		} as unknown as ShowMirrorLink
+		const container = document.createElement("div")
+		const root = createRoot(container)
+
+		document.body.append(container)
+		act(() => {
+			root.render(
+				createElement(ShowMirrorView, {
+					link,
+					size: { cx: 400 * EMU_PER_PX, cy: 300 * EMU_PER_PX },
+					label: "Current slide",
+					screen: "slide"
+				})
+			)
+		})
+
+		const host = container.querySelector<HTMLElement>(".fo-show-host")
+		const viewport = container.querySelector<HTMLElement>(".fo-show-viewport")
+
+		expect(views).toEqual([host])
+		// 400 by 300 in 1000 by 450: height-limited at 1.5, 600 wide, centred across; 2 device px per CSS px.
+		expect(ratios.at(-1)).toBe(3)
+		expect([viewport?.style.left, viewport?.style.top, viewport?.style.width, viewport?.style.height]).toEqual([
+			"200px",
+			"0px",
+			"600px",
+			"450px"
+		])
+
+		area.height = 900
+		act(() => {
+			for (const observer of observers) observer()
+		})
+
+		// Width-limited at 2.5: 1000 by 750, centred down.
+		expect(ratios.at(-1)).toBe(5)
+		expect([viewport?.style.left, viewport?.style.top, viewport?.style.width, viewport?.style.height]).toEqual([
+			"0px",
+			"75px",
+			"1000px",
+			"750px"
+		])
+
+		act(() => {
+			root.unmount()
+		})
+		expect(views).toEqual([host, undefined])
 	})
 })

@@ -239,8 +239,8 @@ export function morphShapes(
 
 	const boxes = new Map<number, NonNullable<(typeof render.layers)[number]["box"]>>()
 	const drawings = new Map<number, DrawingData[]>()
-	// Per object, its layers (a plain shape has exactly one).
-	const own = new Map<number, SlideLayer[]>()
+	// Per object, its first layer and how many it has (a plain shape has exactly one).
+	const own = new Map<number, { first: SlideLayer; count: number }>()
 
 	for (const layer of render.layers) {
 		if (layer.shape.slide !== render.ref || layer.box === undefined) continue
@@ -252,7 +252,10 @@ export function morphShapes(
 		if (layer.shape.id === layer.box.id || list.length === 0) list.push(layer.drawing)
 
 		drawings.set(layer.box.id, list)
-		own.set(layer.box.id, [...(own.get(layer.box.id) ?? []), layer])
+		const entry = own.get(layer.box.id)
+
+		if (entry === undefined) own.set(layer.box.id, { first: layer, count: 1 })
+		else entry.count++
 	}
 
 	const out: MorphShape[] = []
@@ -268,11 +271,8 @@ export function morphShapes(
 		chars += text?.length ?? 0
 
 		const xfrm = box.xfrm
-		const layers = own.get(shape.id) ?? []
-		const vector =
-			layers.length === 1 && layers[0] !== undefined
-				? morphVector(shape, layers[0], shape.props?.geometry ?? geometry?.(shape))
-				: undefined
+		const layers = own.get(shape.id)
+		const vector = layers?.count === 1 ? morphVector(shape, layers.first, shape.props?.geometry ?? geometry?.(shape)) : undefined
 
 		out.push({
 			id: shape.id,

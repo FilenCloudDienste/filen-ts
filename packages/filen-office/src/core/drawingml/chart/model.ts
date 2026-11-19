@@ -258,8 +258,8 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 		if (reader.group(child) !== D.C) continue
 
 		const local = document.localName(child)
-		const kind = PLOT_KINDS[local]
-		const axisKind = AXIS_KINDS[local]
+		const kind = Object.hasOwn(PLOT_KINDS, local) ? PLOT_KINDS[local] : undefined
+		const axisKind = Object.hasOwn(AXIS_KINDS, local) ? AXIS_KINDS[local] : undefined
 
 		if (kind !== undefined) {
 			found.push(local)

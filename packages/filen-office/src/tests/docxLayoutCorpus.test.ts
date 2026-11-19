@@ -12,7 +12,7 @@ import {
 	type ResolvedFont
 } from "@filen/office/core/fonts"
 import { CORPUS_DIR } from "./corpusDir"
-import { adjustedFonts, layOut, layoutDigest, readBytes } from "./layoutFixtures"
+import { DocxRefusedError, adjustedFonts, layOut, layoutDigest, readBytes } from "./layoutFixtures"
 
 // Page breaks Word recorded (w:lastRenderedPageBreak) against ours, on Word-authored files whose recorded
 // breaks agree with docProps/app.xml <Pages> (the corpus README's page-count ground truth). Widths come from
@@ -323,6 +323,47 @@ function lineHeightOf(family: string, factor: number): (manager: FontManager) =>
 		})
 }
 
+// Encrypted packages are the only refusal the corpus holds (docxModelCorpus.test.ts pins it); any other throw,
+// a refusal for another reason included, is a failure.
+function isEncryptedRefusal(error: unknown): boolean {
+	return error instanceof DocxRefusedError && error.reason === "encrypted"
+}
+
+// Lays out one file for the sweep: refused for an encrypted package, else the failure when it does not lay out.
+async function sweepFile(
+	bytes: Uint8Array,
+	lay: (bytes: Uint8Array, options: LayoutOptions) => Promise<DocumentLayout> = layOut
+): Promise<{ readonly refused: boolean; readonly failure?: string }> {
+	try {
+		const layout = await lay(bytes, { maxPages: 5000 })
+
+		expect(layout.final).toBe(true)
+		expect(layout.pages.length).toBeGreaterThan(0)
+
+		return { refused: false }
+	} catch (error) {
+		if (isEncryptedRefusal(error)) return { refused: true }
+
+		return { refused: false, failure: String(error) }
+	}
+}
+
+describe("corpus layout sweep", () => {
+	it("reports a layout crash and skips only encrypted packages", async () => {
+		const bytes = new Uint8Array(0)
+
+		expect(await sweepFile(bytes, () => Promise.reject(new RangeError("Invalid typed array length")))).toEqual({
+			refused: false,
+			failure: "RangeError: Invalid typed array length"
+		})
+		expect(await sweepFile(bytes, () => Promise.reject(new DocxRefusedError("encrypted", "password")))).toEqual({ refused: true })
+		expect(await sweepFile(bytes, () => Promise.reject(new DocxRefusedError("invalidPackage", "no document part")))).toEqual({
+			refused: false,
+			failure: "Error: invalidPackage: no document part"
+		})
+	})
+})
+
 describe.skipIf(!present)("layout against Word's recorded page breaks", () => {
 	it("agrees on the page count of Word-authored files", async () => {
 		const byName = new Map<string, FileResult>()
@@ -382,8 +423,9 @@ describe.skipIf(!present)("layout against Word's recorded page breaks", () => {
 
 			try {
 				layout = await layOut(readBytes(join(DIRECTORY, name)), { maxPages: 5000 })
-			} catch {
-				// Packages that do not open are covered by the test below.
+			} catch (error) {
+				if (!isEncryptedRefusal(error)) differences.push(`${name}: ${String(error)}`)
+
 				continue
 			}
 
@@ -412,30 +454,25 @@ describe.skipIf(!present)("layout against Word's recorded page breaks", () => {
 
 	it("lays out every corpus document", async () => {
 		const failures: string[] = []
+		const refused: string[] = []
 		const slow: string[] = []
 
 		for (const name of readdirSync(DIRECTORY).sort()) {
 			if (!name.endsWith(".docx")) continue
 
 			const started = performance.now()
+			const result = await sweepFile(readBytes(join(DIRECTORY, name)))
 
-			try {
-				const layout = await layOut(readBytes(join(DIRECTORY, name)), { maxPages: 5000 })
+			if (result.refused) refused.push(name)
 
-				expect(layout.final).toBe(true)
-				expect(layout.pages.length).toBeGreaterThan(0)
-			} catch (error) {
-				// Encrypted and unreadable packages are the model's to report.
-				if (!(error instanceof Error && /encrypted|notZip|unsupported|invalid/i.test(error.message)))
-					failures.push(`${name}: ${String(error)}`)
-			}
+			if (result.failure !== undefined) failures.push(`${name}: ${result.failure}`)
 
 			const ms = performance.now() - started
 
 			if (ms > 1000) slow.push(`${name} ${ms.toFixed(0)} ms`)
 		}
 
-		console.log(slow.join("\n"))
+		console.log(`refused (encrypted): ${refused.length} ${refused.join(", ")}\n${slow.join("\n")}`)
 		expect(failures).toEqual([])
 	}, 600000)
 

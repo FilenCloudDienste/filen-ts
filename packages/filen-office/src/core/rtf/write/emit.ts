@@ -2,7 +2,8 @@ import type { XmlDocument } from "../../xml/index"
 import { languageIdentifier } from "../../docx/forms/dates"
 import { BORDER_STYLES, UNDERLINES, textureWord } from "../props"
 import { encodeText } from "./encode"
-import { RtfOut, RtfWriteRefusal, joinChunks } from "./out"
+import { RtfOut, RtfWriteRefusal, joinChunks, latin1Bytes } from "./out"
+import { OFF, TEXT, preserves } from "./wml"
 
 // WordprocessingML paragraphs and table rows as RTF (Microsoft RTF Specification 1.9.1), the inverse of what the
 // reader translates: every property spelled out after \pard\plain, every run in a group of its own starting with
@@ -36,8 +37,6 @@ export interface EmitContext {
 function refuse(reason: string, detail?: string): never {
 	throw new RtfWriteRefusal(reason, detail === undefined ? reason : `${reason}: ${detail}`)
 }
-
-const OFF = new Set(["0", "false", "off"])
 
 function on(document: XmlDocument, node: number): boolean {
 	const value = document.attribute(node, "w:val")
@@ -785,18 +784,6 @@ type Item =
 	| { readonly kind: "commentMark"; readonly rPr: number; readonly revision: Revision | undefined }
 	| { readonly kind: "picture"; readonly rPr: number; readonly revision: Revision | undefined; readonly bytes: Uint8Array }
 
-const TEXT = new Set(["t", "delText", "instrText", "delInstrText"])
-
-function preserves(document: XmlDocument, node: number): boolean {
-	for (let at = node; at > 0; at = document.parent(at)) {
-		const space = document.attribute(at, "xml:space")
-
-		if (space !== undefined) return space === "preserve"
-	}
-
-	return false
-}
-
 class Content {
 	readonly items: Item[] = []
 	private readonly bookmarks = new Map<string, string>()
@@ -1084,7 +1071,7 @@ function writeItems(document: XmlDocument, items: readonly Item[], context: Emit
 				out.rtf("{").word("plain")
 				if (encoded.unicode) out.word("uc", 1)
 				runWords(document, item.rPr, item.revision, context, out)
-				out.bytes(asText(encoded.rtf)).rtf("}")
+				out.bytes(latin1Bytes(encoded.rtf)).rtf("}")
 				break
 			}
 			case "atom":
@@ -1134,7 +1121,7 @@ function writeItems(document: XmlDocument, items: readonly Item[], context: Emit
 
 				out.rtf("{\\*").word(item.start ? "bkmkstart" : "bkmkend")
 				if (encoded.unicode) out.word("uc", 1)
-				out.bytes(asText(encoded.rtf)).rtf("}")
+				out.bytes(latin1Bytes(encoded.rtf)).rtf("}")
 				break
 			}
 			case "note":
@@ -1158,7 +1145,7 @@ function writeItems(document: XmlDocument, items: readonly Item[], context: Emit
 
 				out.rtf("{\\*").word(item.start ? "atrfstart" : "atrfend")
 				if (encoded.unicode) out.word("uc", 1)
-				out.bytes(asText(encoded.rtf)).rtf("}")
+				out.bytes(latin1Bytes(encoded.rtf)).rtf("}")
 				break
 			}
 			case "comment":
@@ -1187,14 +1174,6 @@ function quoted(value: string): string {
 	if (value.includes('"')) refuse("hyperlink", "a quote in its target")
 
 	return `"${value.replace(/\\/gu, "\\\\")}"`
-}
-
-function asText(rtf: string): Uint8Array {
-	const out = new Uint8Array(rtf.length)
-
-	for (let k = 0; k < rtf.length; k++) out[k] = rtf.charCodeAt(k) & 0xff
-
-	return out
 }
 
 export interface ParagraphPlace {

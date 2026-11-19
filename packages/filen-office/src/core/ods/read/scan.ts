@@ -294,10 +294,48 @@ function isSpace(b: number | undefined): boolean {
 
 // Elements one capture may hold, and its bytes: past either the file is refused, not read in part.
 const MAX_CAPTURE = 64 * 1024 * 1024
+// Bytes of one unfinished tag, comment or other markup carried from push to push: each push scans it again from its
+// start, so it is bounded as the text a capture holds is.
+const MAX_CARRIED_TAG = 4 * 1024 * 1024
 const MAX_DEPTH = 4096
 const MAX_ATTRIBUTES = 256
 
 const INDEXES = new WeakMap<ReadonlyMap<string, string>, readonly [NameIndex, NameIndex]>()
+
+// The namespaces a save names by their conventional prefix, as it matches elements and writes its own markup.
+const CONVENTIONAL: ReadonlyMap<string, string> = new Map([
+	["office", OdfNs.office],
+	["style", OdfNs.style],
+	["table", OdfNs.table],
+	["text", OdfNs.text],
+	["fo", OdfNs.fo],
+	["number", OdfNs.number],
+	["xlink", OdfNs.xlink],
+	["dc", OdfNs.dc],
+	["svg", OdfNs.svg],
+	["draw", OdfNs.draw],
+	["calcext", OdfNs.calcext],
+	["loext", OdfNs.loext],
+	["of", OdfNs.of]
+])
+const CONVENTIONAL_PREFIX: ReadonlyMap<string, string> = new Map([...CONVENTIONAL].map(([prefix, uri]) => [uri, prefix]))
+
+// Whether a declaration binds one of those namespaces under another prefix (or as the default one), or one of their
+// prefixes to another namespace: reading follows it, a save's markup would not.
+export function misbound(prefix: string, uri: string): boolean {
+	const conventional = CONVENTIONAL_PREFIX.get(uri)
+	const expected = CONVENTIONAL.get(prefix)
+
+	return (conventional !== undefined && conventional !== prefix) || (expected !== undefined && expected !== uri)
+}
+
+// Root declarations below which an element declared a misbound prefix, as a scan of their content found.
+const REBOUND = new WeakSet<ReadonlyMap<string, string>>()
+
+// Whether content scanned under these root declarations misbinds a prefix in a scope of its own.
+export function reboundBelowRoot(prefixes: ReadonlyMap<string, string>): boolean {
+	return REBOUND.has(prefixes)
+}
 
 export class OdsScanner {
 	// Set by the handler: character data is passed to text() while it is.
@@ -311,6 +349,8 @@ export class OdsScanner {
 	private elements: NameIndex
 	private attributeNames: NameIndex
 	private prefixes: Map<string, string>
+	// The root's declarations, as given.
+	private readonly root: ReadonlyMap<string, string>
 	// Open elements: the name hash of each, and where a scope of namespace declarations ends.
 	private readonly hashes = new Int32Array(MAX_DEPTH)
 	private depth = 0
@@ -350,6 +390,7 @@ export class OdsScanner {
 	// the stream to pass over first (up to office:body).
 	constructor(handler: ScanHandler, prefixes: ReadonlyMap<string, string>, skip = 0) {
 		this.handler = handler
+		this.root = prefixes
 		this.prefixes = new Map(prefixes)
 		this.skip = skip
 
@@ -428,6 +469,8 @@ export class OdsScanner {
 
 		if (left > 0) {
 			if (final) throw this.malformed("The stream ends inside a tag")
+			if (left > (bytes[used] === LT ? MAX_CARRIED_TAG : MAX_CAPTURE))
+				throw new OdsReadError("tooLarge", "A tag or text run of content.xml is too large")
 
 			// The unread tail moves to the start of the carry (it may already be there).
 			if (bytes.buffer === this.carry.buffer && bytes.byteOffset === this.carry.byteOffset) {
@@ -946,8 +989,13 @@ export class OdsScanner {
 
 			i++
 
-			if (name === "xmlns") next.set("", value)
-			else if (name.startsWith("xmlns:")) next.set(name.slice(6), value)
+			const prefix = name === "xmlns" ? "" : name.startsWith("xmlns:") ? name.slice(6) : undefined
+
+			if (prefix === undefined) continue
+
+			next.set(prefix, value)
+
+			if (misbound(prefix, value)) REBOUND.add(this.root)
 		}
 
 		this.scopes.push({ depth: this.depth, prefixes: this.prefixes })

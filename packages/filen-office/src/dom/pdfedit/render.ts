@@ -138,10 +138,15 @@ export class TileRenderer {
 		}
 
 		const loaded = this.document.loadPage(page)
-		const list = loaded.toDisplayList(true)
-		const bounds = loaded.getBounds()
+		let bounds: Mupdf.Rect
+		let list: Mupdf.DisplayList
 
-		loaded.destroy()
+		try {
+			bounds = loaded.getBounds()
+			list = loaded.toDisplayList(true)
+		} finally {
+			loaded.destroy()
+		}
 
 		let text: Mupdf.StructuredText | null = null
 		let largest: ImageExtent | null = null
@@ -306,33 +311,40 @@ export class TileRenderer {
 		const x1 = Math.min(size[0], Math.ceil(tile[2]))
 		const y1 = Math.min(size[1], Math.ceil(tile[3]))
 
-		if (x1 <= x0 || y1 <= y0) throw new RangeError("tile outside the page")
+		// A request's mistake, not a broken heap: a refusal leaves the engine usable.
+		if (x1 <= x0 || y1 <= y0) throw new PdfEngineRefusal("badRequest", "tile outside the page")
 
 		// RGBA cleared to opaque white: what is drawn composites onto it, so the samples are the bitmap's pixels as
-		// they are and leave the heap in one copy.
+		// they are and leave the heap in one copy. Freed even when the draw throws (a failed read under it).
 		const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [x0, y0, x1, y1], true)
-		const width = x1 - x0
-		const height = y1 - y0
-		const rgba = new Uint8ClampedArray(width * height * 4)
 
-		pixmap.clear(255)
+		try {
+			const width = x1 - x0
+			const height = y1 - y0
+			const rgba = new Uint8ClampedArray(width * height * 4)
 
-		const device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
+			pixmap.clear(255)
 
-		source.run(device, ctm)
-		device.close()
-		device.destroy()
+			const device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
 
-		// A view of the wasm heap: read before anything else can grow (and detach) it.
-		const samples = pixmap.getPixels()
-		const stride = pixmap.getStride()
+			try {
+				source.run(device, ctm)
+				device.close()
+			} finally {
+				device.destroy()
+			}
 
-		if (stride === width * 4) rgba.set(samples.subarray(0, rgba.length))
-		else for (let y = 0; y < height; y++) rgba.set(samples.subarray(y * stride, y * stride + width * 4), y * width * 4)
+			// A view of the wasm heap: read before anything else can grow (and detach) it.
+			const samples = pixmap.getPixels()
+			const stride = pixmap.getStride()
 
-		pixmap.destroy()
+			if (stride === width * 4) rgba.set(samples.subarray(0, rgba.length))
+			else for (let y = 0; y < height; y++) rgba.set(samples.subarray(y * stride, y * stride + width * 4), y * width * 4)
 
-		return { rgba, width, height, tile: [x0, y0, x1, y1] }
+			return { rgba, width, height, tile: [x0, y0, x1, y1] }
+		} finally {
+			pixmap.destroy()
+		}
 	}
 
 	evict(pages: readonly number[]): void {

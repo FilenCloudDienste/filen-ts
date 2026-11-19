@@ -647,49 +647,63 @@ export function schemaDirectory(): string {
 // One xmllint call may take this long (the largest corpus part takes seconds); longer fails the run.
 const XMLLINT_TIMEOUT_MS = 300_000
 
+// xmllint's exit status: 0 valid, 3 or 4 validation errors (libxml2 versions differ); anything else (1 an input that
+// does not parse, 5 a schema that does not compile, 9 out of memory) checked nothing.
+const VALIDATED = new Set([0, 3, 4])
+// Report lines that say the input or the schemas were not read: an input that does not parse or is not
+// namespace-well-formed, a schema that does not compile.
+const UNREAD = /parser error|namespace error|failed to compile/
+
 // Validity errors by message (line numbers and xmllint's list of expected elements left out), counted. The
 // XML goes to xmllint as a file and its report comes back in one, with no pipe to the child: piping the input
 // through spawnSync's stdin hung for good now and then on macOS (xmllint had read all that was written and
-// waited on a stdin node never finished writing or closed, both at 0% CPU).
+// waited on a stdin node never finished writing or closed, both at 0% CPU). Throws when xmllint validated nothing.
 export function validityErrors(schema: string, bytes: Uint8Array): Map<string, number> {
 	const input = join(dirname(schema), "input.xml")
 	const report = join(dirname(schema), "report.txt")
 
-	writeFileSync(input, bytes)
-
-	const output = openSync(report, "w")
-	let result: SpawnSyncReturns<Buffer>
-
 	try {
-		result = spawnSync("xmllint", ["--noout", "--schema", schema, input], {
-			stdio: ["ignore", "ignore", output],
-			timeout: XMLLINT_TIMEOUT_MS,
-			killSignal: "SIGKILL"
-		})
+		writeFileSync(input, bytes)
+
+		const output = openSync(report, "w")
+		let result: SpawnSyncReturns<Buffer>
+
+		try {
+			result = spawnSync("xmllint", ["--noout", "--schema", schema, input], {
+				stdio: ["ignore", "ignore", output],
+				timeout: XMLLINT_TIMEOUT_MS,
+				killSignal: "SIGKILL"
+			})
+		} finally {
+			closeSync(output)
+		}
+
+		if (result.error !== undefined || result.signal !== null)
+			throw new Error(`xmllint failed on ${bytes.length} bytes: ${result.error?.message ?? `killed by ${result.signal}`}`)
+
+		const lines = readFileSync(report, "utf8").split("\n")
+
+		if (result.status === null || !VALIDATED.has(result.status) || lines.some(line => UNREAD.test(line)))
+			throw new Error(`xmllint exited ${result.status} on ${bytes.length} bytes: ${lines.slice(0, 5).join("\n").slice(0, 1500)}`)
+
+		const errors = new Map<string, number>()
+
+		for (const line of lines) {
+			if (!line.includes("validity error") || EXTENSIONS.test(line)) continue
+
+			const message = line
+				.slice(line.startsWith(input) ? input.length : 0)
+				.replace(/^:\d+: /, "")
+				.replace(/ Expected is .*$/, "")
+
+			errors.set(message, (errors.get(message) ?? 0) + 1)
+		}
+
+		return errors
 	} finally {
-		closeSync(output)
+		rmSync(input, { force: true })
+		rmSync(report, { force: true })
 	}
-
-	if (result.error !== undefined || result.signal !== null)
-		throw new Error(`xmllint failed on ${bytes.length} bytes: ${result.error?.message ?? `killed by ${result.signal}`}`)
-
-	const errors = new Map<string, number>()
-
-	for (const line of readFileSync(report, "utf8").split("\n")) {
-		if (!line.includes("validity error") || EXTENSIONS.test(line)) continue
-
-		const message = line
-			.slice(line.startsWith(input) ? input.length : 0)
-			.replace(/^:\d+: /, "")
-			.replace(/ Expected is .*$/, "")
-
-		errors.set(message, (errors.get(message) ?? 0) + 1)
-	}
-
-	rmSync(input, { force: true })
-	rmSync(report, { force: true })
-
-	return errors
 }
 
 // validityErrors against wml.xsd; throws where xmllint or the schemas are missing.

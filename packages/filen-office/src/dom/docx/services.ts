@@ -62,31 +62,40 @@ export function fetchFontAssets(location: FontLocation, options: { readonly shar
 	}
 }
 
+// A language whose patterns failed to load is laid out without hyphenation until the next document retries it.
+function reportHyphenationFailure(error: unknown, file: string): void {
+	console.warn(`Hyphenation patterns ${file} failed to load`, error)
+}
+
 // Libraries by where their patterns are served, for the realm's lifetime: each language is fetched and compiled
 // once, whatever the number of documents.
 const libraries = new Map<FontLocation, HyphenationLibrary>()
 
 // The bundled hyphenation patterns (paths under assets/hyphenation), fetched on first use from where the app serves
-// them (same origin, like the fonts), as stored: the library inflates them.
+// them (same origin, like the fonts), as stored: the library inflates them. Languages that failed to load are retried
+// by the next engine's services (workerServices, windowServices), not per word.
 export function hyphenationLibrary(location: FontLocation): HyphenationLibrary {
 	let library = libraries.get(location)
 
 	if (library === undefined) {
-		library = new HyphenationLibrary({
-			async read(file) {
-				const url = fontUrl(location, file)
-				const fetcher: unknown = Reflect.get(globalThis, "fetch")
+		library = new HyphenationLibrary(
+			{
+				async read(file) {
+					const url = fontUrl(location, file)
+					const fetcher: unknown = Reflect.get(globalThis, "fetch")
 
-				if (url === undefined) throw new Error(`Hyphenation patterns ${file} are not served`)
-				if (typeof fetcher !== "function") throw new Error("fetch is not available")
+					if (url === undefined) throw new Error(`Hyphenation patterns ${file} are not served`)
+					if (typeof fetcher !== "function") throw new Error("fetch is not available")
 
-				const response = await (fetcher as Fetch)(url)
+					const response = await (fetcher as Fetch)(url)
 
-				if (!response.ok) throw new Error(`Hyphenation patterns ${file}: HTTP ${response.status}`)
+					if (!response.ok) throw new Error(`Hyphenation patterns ${file}: HTTP ${response.status}`)
 
-				return new Uint8Array(await response.arrayBuffer())
-			}
-		})
+					return new Uint8Array(await response.arrayBuffer())
+				}
+			},
+			reportHyphenationFailure
+		)
 		libraries.set(location, library)
 	}
 
@@ -109,11 +118,15 @@ function isFontFaceScope(scope: unknown): scope is FontFaceScope {
 export function workerServices(scope: unknown, fonts: FontLocation, hyphenation?: FontLocation): DocxEngineServices {
 	if (!isFontFaceScope(scope)) throw new Error("The CSS Font Loading API is not available in this worker")
 
+	const library = hyphenation === undefined ? undefined : hyphenationLibrary(hyphenation)
+
+	library?.retryFailed()
+
 	return {
 		fontHost: fontFaceHost(scope),
 		replayFonts: true,
 		fontAssets: fetchFontAssets(fonts, { shared: true }),
-		...(hyphenation === undefined ? {} : { hyphenation: hyphenationLibrary(hyphenation) }),
+		...(library === undefined ? {} : { hyphenation: library }),
 		measurer: offscreenMeasurer(scope),
 		yield: macrotaskYield(),
 		sliceMs: 12,
@@ -150,6 +163,8 @@ export function windowServices(scope: unknown, assets: FontAssets, hyphenation?:
 	const fontScope: unknown = { FontFace, fonts }
 
 	if (!isFontFaceScope(fontScope)) throw new Error("The CSS Font Loading API is not available")
+
+	hyphenation?.retryFailed()
 
 	return {
 		fontHost: fontFaceHost(fontScope),

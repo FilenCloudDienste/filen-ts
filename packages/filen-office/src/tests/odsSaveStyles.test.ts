@@ -229,3 +229,54 @@ describe("a number format an ODS data style cannot hold", () => {
 		expect(content(first)).toContain('number:min-decimal-places="1"')
 	})
 })
+
+describe("the names of the automatic styles an ODS save adds", () => {
+	it("count up past those the source holds, without probing every earlier name, for thousands of styles", async () => {
+		const count = 6000
+		const held: OdsParts = {
+			automatic: `${LIBRE.automatic ?? ""}<style:style style:name="ceF2" style:family="table-cell"><style:table-cell-properties fo:background-color="#010203"/></style:style><style:style style:name="ceF5" style:family="table-cell"><style:table-cell-properties fo:background-color="#040506"/></style:style>`,
+			body: LIBRE.body
+		}
+		const { session, sheet } = await open(odsBytes(held))
+
+		for (let i = 0; i < count; i++) {
+			const result = await session.command({
+				type: "format.apply",
+				sheet,
+				ranges: [{ startRow: 10 + i, startCol: 0, endRow: 10 + i, endCol: 0 }],
+				patch: { fill: 0x100000 + i }
+			})
+
+			expect(result.ok).toBe(true)
+		}
+
+		// Each name tried is first looked up among those taken: the k-th new style must not try the k-1 before it again.
+		const has = Set.prototype.has
+		let tried = 0
+
+		Set.prototype.has = function (this: Set<unknown>, value: unknown): boolean {
+			tried++
+
+			return has.call(this, value)
+		}
+
+		const saved = await session.save().finally(() => {
+			Set.prototype.has = has
+		})
+
+		session.close()
+
+		if (!saved.ok) throw new Error(`${saved.reason}: ${saved.message}`)
+
+		const names = [...content(saved.bytes).matchAll(/<style:style style:name="(ceF\d+)"/g)].map(match => match[1] ?? "")
+		const added = names.filter(name => name !== "ceF2" && name !== "ceF5")
+		const expected: string[] = []
+
+		for (let n = 1; expected.length < added.length; n++) if (n !== 2 && n !== 5) expected.push(`ceF${String(n)}`)
+
+		expect(added.length).toBeGreaterThanOrEqual(count)
+		expect(added).toEqual(expected)
+		expect(undefinedNames(saved.bytes)).toEqual([])
+		expect(tried).toBeLessThan(count * 100)
+	})
+})

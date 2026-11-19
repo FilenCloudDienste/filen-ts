@@ -1,5 +1,6 @@
 import { ISO_1900 } from "../../numfmt/date"
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
+import { foldText } from "../../find/match"
 import { formatValue, NUMFMT_EN_US, type NumFmtOptions } from "../../numfmt"
 import {
 	dateBaseOf,
@@ -14,6 +15,7 @@ import {
 	type PluginState,
 	type PluginValue
 } from "./plugin"
+import { sizeError } from "./shape"
 import { flatten, rowsOf } from "./values"
 
 // Text functions as Excel calculates them.
@@ -39,10 +41,10 @@ interface Occurrence {
 }
 
 // Where delimiters occur in text, without overlapping, from the start or (fromEnd) from the end; at each place the
-// longest delimiter that matches.
+// longest delimiter that matches. Caseless folds unit by unit (foldText), so the offsets are offsets in the text.
 function occurrences(text: string, delimiters: readonly string[], caseless: boolean, fromEnd: boolean): Occurrence[] {
-	const subject = caseless ? text.toLowerCase() : text
-	const needles = delimiters.map(delimiter => (caseless ? delimiter.toLowerCase() : delimiter)).sort((a, z) => z.length - a.length)
+	const subject = caseless ? foldText(text) : text
+	const needles = delimiters.map(delimiter => (caseless ? foldText(delimiter) : delimiter)).sort((a, z) => z.length - a.length)
 	const found: Occurrence[] = []
 
 	if (needles.some(needle => needle === "")) return found
@@ -353,7 +355,15 @@ export class TextFunctions extends SheetFunctionPlugin {
 					return ignoreEmpty ? pieces.filter(piece => piece !== "") : pieces
 				}
 				const lines = split(text, rowDelimiters).map(line => split(line, columnDelimiters))
-				const width = Math.max(1, ...lines.map(line => line.length))
+				let width = 1
+
+				for (const line of lines) if (line.length > width) width = line.length
+
+				// Bounded before padding: a 32,767-character text splits into up to 16,384 by 16,384 pieces.
+				const tooLarge = sizeError(lines.length, width)
+
+				if (tooLarge !== null) return tooLarge
+
 				const filler: PluginScalar = pad ?? naError()
 				const data: PluginScalar[][] = (lines.length === 0 ? [[""]] : lines).map(line => {
 					const row: PluginScalar[] = [...line]
@@ -395,7 +405,7 @@ export class TextFunctions extends SheetFunctionPlugin {
 
 			const plain = (point < 0 ? body : body.slice(0, point)).split(group).join("") + (point < 0 ? "" : `.${body.slice(point + 1)}`)
 
-			if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(plain)) return valueError()
+			if (!/^[-+]?(\d+(?:\.\d*)?|\.\d+)(e[-+]?\d+)?$/i.test(plain)) return valueError()
 
 			return Number(plain) / 100 ** percent
 		})

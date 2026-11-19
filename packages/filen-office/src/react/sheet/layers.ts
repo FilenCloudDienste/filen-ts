@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { TILE_COLS, TILE_ROWS, tileKey, type SheetId, type SheetLayout, type SheetRange } from "../../core/sheet/protocol"
+import { shownTiles } from "./axis"
 import type { SheetGridModel } from "./model"
 import type { GridCanvas } from "./paint/canvas"
 import type { GridPoint } from "./selection"
@@ -59,6 +60,10 @@ export interface GridPaintScene {
 export interface SheetGridLayer {
 	readonly id: string
 	readonly stage: "cells" | "chrome"
+	// A "cells" layer that reads only the scene's layout, view, theme, scale and pixel ratio (cellBox and panes come
+	// from them): a frame that changes none of those (a selection move, an entry's keystroke) keeps the cells canvas.
+	// Without it a cells layer may read anything, and the cells canvas is drawn again on every frame.
+	readonly pure?: boolean | undefined
 	paint(canvas: GridCanvas, scene: GridPaintScene): void
 }
 
@@ -274,8 +279,12 @@ export function decoratePane(
 	canvas.rect(cols.start, rows.start, cols.end - cols.start, rows.end - rows.start)
 	canvas.clip()
 
-	for (let tileRow = Math.floor(rows.first / TILE_ROWS); tileRow <= Math.floor(rows.last / TILE_ROWS); tileRow++) {
-		for (let tileCol = Math.floor(cols.first / TILE_COLS); tileCol <= Math.floor(cols.last / TILE_COLS); tileCol++) {
+	// Only tiles holding a shown row and column: a filtered sheet's hidden runs are stepped over.
+	const tileRows = shownTiles(scene.view.rows.axis, rows.first, rows.last, TILE_ROWS)
+	const tileCols = shownTiles(scene.view.cols.axis, cols.first, cols.last, TILE_COLS)
+
+	for (const tileRow of tileRows) {
+		for (const tileCol of tileCols) {
 			const tile = model.tiles.peek(tileKey(sheet, tileRow, tileCol))
 
 			if (tile === undefined) continue
@@ -314,10 +323,16 @@ export function decoratePane(
 
 	canvas.restore()
 
-	// Merges whose first cell is above or left of the pane still show in it: their first cell's tile is outside the
-	// walk above.
+	// Merges whose first cell the walk above did not reach still show in the pane: the first cell is above or left of
+	// it, or sits in a tile with no shown row or column (a partly shown merge anchored in a hidden run).
 	for (const merge of merges) {
-		if (merge.startRow >= rows.first && merge.startCol >= cols.first) continue
+		if (
+			merge.startRow >= rows.first &&
+			merge.startCol >= cols.first &&
+			tileRows.includes(Math.floor(merge.startRow / TILE_ROWS)) &&
+			tileCols.includes(Math.floor(merge.startCol / TILE_COLS))
+		)
+			continue
 
 		const found = model.entry(sheet, merge.startRow, merge.startCol)
 

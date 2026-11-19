@@ -204,7 +204,8 @@ describe("custom motion paths in a pptx", () => {
 	it("an Edit Points drag is one setPath: it plays the edited path, undoes in one step and saves unchanged after undo", async () => {
 		const h = await authoringHarness()
 		const slide = await addPath(h, toolPaths()["curve"] as EditablePath)
-		const saved = await saveEdits(h, 2)
+		await saveEdits(h, 2)
+
 		const motion = onlyMotion(slide)
 		const edited = movePoint(insertPoint(ok(readEditablePath(motion.path, motion.ptsTypes)), 1, 0.5), 2, 0.2, 0.3)
 		const written = writeEditablePath(edited)
@@ -213,17 +214,18 @@ describe("custom motion paths in a pptx", () => {
 		expect(onlyMotion(after)).toMatchObject(written)
 		expectFollows(after, edited)
 
-		await h.undo()
+		expect(await h.undo()).toMatchObject({ ok: true, dirty: false })
 		expect(onlyMotion(await h.slide(0))).toMatchObject({ path: motion.path, ptsTypes: motion.ptsTypes })
+		// Undone to the save point, the save writes nothing (saveEdits throws on any outcome but written).
+		await expect(saveEdits(h, 3)).rejects.toThrow('save: {"kind":"unchanged"}')
 
-		await h.redo()
+		expect(await h.redo()).toMatchObject({ ok: true })
 
 		const resaved = await saveEdits(h, 4)
 		const reopened = slideNode(await openDeck(resaved), 0)
 
 		expect(onlyMotion(reopened)).toMatchObject(written)
 		expectFollows(reopened, edited)
-		expect(saved.length).toBeGreaterThan(0)
 		h.close()
 	})
 

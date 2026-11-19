@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import { chartEditOp, insertChartOp, sampleChartCells } from "../core/presentation/edit/commands/chart"
 import { slideSizeOp } from "../core/presentation/edit/commands/design"
 import type { DeckOp } from "../core/presentation/edit/ops"
@@ -13,7 +12,7 @@ import type { SmartArtInfo } from "../core/smartart/edit"
 import { CORPUS_DIR } from "./corpusDir"
 import { modelVsFile, reopened } from "./modelVsFile"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { danglingReferences } from "./pptxWriteFixtures"
+import { danglingReferences, differingParts } from "./pptxWriteFixtures"
 import { image } from "./presentationObjectsFixtures"
 
 // Undo across saves that left a slide's parts out (its slide deleted and saved): every save after it is written, and
@@ -25,22 +24,6 @@ const BOX: Xfrm = { x: 1_000_000, y: 1_000_000, cx: 3_000_000, cy: 2_000_000, ro
 const STRIP = join(CORPUS_DIR, "pptx", "lo__smartart-picture-strip.pptx")
 const PIE = join(CORPUS_DIR, "pptx", "lo__tdf149551_SmartArt_Pie.pptx")
 const SOURCE_CHART = join(CORPUS_DIR, "pptx", "docx4j__loadAndSave.pptx")
-
-// Every entry whose bytes differ between two packages, or that only one has.
-async function differing(a: Uint8Array, b: Uint8Array): Promise<string[]> {
-	const read = async (bytes: Uint8Array): Promise<Map<string, string>> => {
-		const zip = await ZipArchive.open(bytesSource(bytes))
-		const out = new Map<string, string>()
-
-		for (const entry of zip.entries) out.set(entry.name, Buffer.from(await zip.read(entry)).toString("base64"))
-
-		return out
-	}
-	const left = await read(a)
-	const right = await read(b)
-
-	return [...new Set([...left.keys(), ...right.keys()])].filter(name => left.get(name) !== right.get(name))
-}
 
 const notes = (text: string): TextBody => ({ bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] })
 
@@ -393,34 +376,31 @@ describe("undo across a save is byte for byte", () => {
 			slideSizeOp({ cx: d.session.deck.size.cx === 12_192_000 ? 9_144_000 : 12_192_000, cy: 6_858_000 }, "ensureFit") as DeckOp
 	} satisfies Record<string, (d: Drive) => DeckOp>
 
-	const corpus = (name: string) => (): Uint8Array | undefined => {
-		const path = join(CORPUS_DIR, "pptx", `${name}.pptx`)
-
-		return existsSync(path) ? new Uint8Array(readFileSync(path)) : undefined
-	}
-	const cases: readonly (readonly [string, () => Uint8Array | undefined, keyof typeof ops])[] = [
-		["synthetic", spaced, "a shape inserted into an empty tree"],
+	const corpus = (name: string): string => join(CORPUS_DIR, "pptx", `${name}.pptx`)
+	// The deck's file, or none for the synthetic deck (always run); a corpus case is skipped without the corpus.
+	const cases: readonly (readonly [string, string | undefined, keyof typeof ops])[] = [
+		["synthetic", undefined, "a shape inserted into an empty tree"],
 		["lo__animation-sound-embedded", corpus("lo__animation-sound-embedded"), "a shape inserted into an empty tree"],
 		["oxpt__TestPresentation", corpus("oxpt__TestPresentation"), "the slide size"],
 		["lo__tdf149551_SmartArt_Pie", corpus("lo__tdf149551_SmartArt_Pie"), "the slide size"]
 	]
 
-	for (const [deck, bytes, name] of cases)
-		it(`pptx ${deck}: ${name}, saved and undone: the next save writes the source's bytes`, async () => {
-			const source = bytes()
+	for (const [deck, path, name] of cases)
+		it.skipIf(path !== undefined && !existsSync(path))(
+			`pptx ${deck}: ${name}, saved and undone: the next save writes the source's bytes`,
+			async () => {
+				const source = path === undefined ? spaced() : new Uint8Array(readFileSync(path))
+				const d = await reopened(source, "pptx")
 
-			if (source === undefined) return
+				await review(d.context, d.session.deck.slides[0] as SlideRef)
+				await command(d, ops[name](d))
+				await saved(d)
+				expect((await d.undo()).ok).toBe(true)
 
-			const d = await reopened(source, "pptx")
+				const undone = await d.save()
 
-			await review(d.context, d.session.deck.slides[0] as SlideRef)
-			await command(d, ops[name](d))
-			await saved(d)
-			expect((await d.undo()).ok).toBe(true)
-
-			const undone = await d.save()
-
-			expect(undone.result.kind).toBe("written")
-			expect(await differing(source, undone.bytes as Uint8Array)).toEqual([])
-		})
+				expect(undone.result.kind).toBe("written")
+				expect(await differingParts(source, undone.bytes as Uint8Array)).toEqual([])
+			}
+		)
 })

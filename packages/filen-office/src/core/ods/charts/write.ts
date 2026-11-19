@@ -3,8 +3,9 @@ import type { PartChange } from "../../opc/index"
 import { OdfNs } from "../../odf/namespaces"
 import { canonicalAttributes, elementName } from "../../odf/tree"
 import { singleReference } from "../../sheet/refs/formulaRefs"
+import { cellName } from "../../sheet/refs/cellRef"
 import { chartBook } from "../../xlsx/charts/book"
-import { readChartInfo, type ChartInfo, type ChartLabels, type ChartPlotInfo, type ChartType } from "../../xlsx/charts/model"
+import { readChartInfo, type ChartInfo, type ChartPlotInfo, type ChartType } from "../../xlsx/charts/model"
 import type { DrawingAnchor } from "../../xlsx/drawings/anchor"
 import { readDrawingPart } from "../../xlsx/drawings/read"
 import { drawingStore } from "../../xlsx/drawings/store"
@@ -13,7 +14,8 @@ import { Namespaces, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, escapeT
 import { parseCaptured } from "../read/captured"
 import { odsSource, type OdsSource } from "../source"
 import { addressBoxes } from "../unheld"
-import { EMU_PER_PT, LEGENDS, chartOf, translateChart, type OdsChartSource } from "./read"
+import { ofSheetName } from "../formula/toOf"
+import { EMU_PER_PT, ODF_LEGENDS, chartOf, labelProperties, translateChart, type OdsChartSource } from "./read"
 
 // What a save writes of the charts an edit changed. A chart the editor changed is its object's content.xml patched
 // where the chart part now differs from what was read (title, legend, plot type and grouping, axes, series and their
@@ -224,7 +226,7 @@ export function odfAddress(ref: string, ownSheet: string): string {
 			if (parsed === null || parsed.area === null || parsed.external || parsed.lastSheet !== null) refuse(`the reference ${area}`)
 
 			const sheet = parsed.sheet ?? ownSheet
-			const quoted = /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
+			const quoted = ofSheetName(sheet)
 
 			return parsed.areaText
 				.replaceAll("$", "")
@@ -245,32 +247,6 @@ const CLASS_OF: Readonly<Record<ChartType, string | null>> = {
 	scatter: "chart:scatter",
 	radar: "chart:radar",
 	other: null
-}
-
-// c:dLblPos (§21.2.3.11) as chart:label-position (§20.71).
-const POSITIONS: ReadonlyMap<string, string> = new Map([
-	["bestFit", "avoid-overlap"],
-	["ctr", "center"],
-	["t", "top"],
-	["b", "bottom"],
-	["l", "left"],
-	["r", "right"],
-	["inEnd", "inside"],
-	["outEnd", "outside"],
-	["inBase", "near-origin"]
-])
-
-function labelChanges(labels: ChartLabels | null): Map<string, string | undefined> {
-	const value = labels?.value === true
-	const percent = labels?.percent === true
-	const position = labels?.position
-
-	return new Map([
-		["chart:data-label-number", value && percent ? "value-and-percentage" : value ? "value" : percent ? "percentage" : "none"],
-		["chart:data-label-text", labels?.category === true ? "true" : "false"],
-		["chart:data-label-series", labels?.series === true ? "true" : "false"],
-		["chart:label-position", position === null || position === undefined ? undefined : POSITIONS.get(position)]
-	])
 }
 
 function sheetOf(ref: string | null): string | null {
@@ -300,7 +276,7 @@ function patch(object: ObjectMarkup, was: ChartInfo, now: ChartInfo, ownSheet: s
 
 	if (was.legend !== now.legend) {
 		const legend = first(object, chart, "chart:legend")
-		const position = [...LEGENDS].find(([, value]) => value === now.legend)?.[0]
+		const position = now.legend === null ? undefined : ODF_LEGENDS.get(now.legend)
 
 		if (now.legend === null) {
 			if (legend >= 0) editor.remove(legend)
@@ -409,7 +385,7 @@ function patch(object: ObjectMarkup, was: ChartInfo, now: ChartInfo, ownSheet: s
 		if (bare(before?.values) !== bare(series.values)) set(object, node, "chart:values-cell-range-address", values)
 		if (bare(before?.nameRef) !== bare(series.nameRef)) set(object, node, "chart:label-cell-address", label)
 		if (!sameJson(before?.labels ?? wasPlot.labels, series.labels ?? nowPlot.labels))
-			restyle(object, node, labelChanges(series.labels ?? nowPlot.labels))
+			restyle(object, node, new Map(labelProperties(series.labels ?? nowPlot.labels)))
 	}
 
 	elements.forEach((node, k) => {
@@ -590,14 +566,6 @@ function movedPlotArea(current: string, pairs: readonly [Box, Box][], ownSheet: 
 	return out.join(" ")
 }
 
-function cellName(row: number, col: number): string {
-	let letters = ""
-
-	for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters
-
-	return `${letters}${row + 1}`
-}
-
 // The object's content.xml with the chart edited as `now` says, proved by reading it back.
 export function patchObject(bytes: Uint8Array, was: ChartInfo, now: ChartInfo, ownSheet: string): Uint8Array {
 	const object = objectMarkup(bytes)
@@ -617,19 +585,72 @@ export function patchObject(bytes: Uint8Array, was: ChartInfo, now: ChartInfo, o
 	return written
 }
 
+// A verdict as last proved, reused while the bytes it was proved from are the same array (a part's bytes are replaced,
+// never changed in place): every edit asks again, and each would otherwise parse, patch and prove every chart edited
+// earlier in the session. A refusal is kept as the error to throw again.
+interface Proof<T> {
+	readonly now: Uint8Array
+	readonly ownSheet: string
+	readonly result: T | ChartRefused
+}
+
+const chartProofs = new WeakMap<OdsChartSource, Proof<Uint8Array | null>>()
+const frameProofs = new WeakMap<OdsSource, Map<string, Proof<string | null>>>()
+
+function frameProofsOf(source: OdsSource): Map<string, Proof<string | null>> {
+	let proofs = frameProofs.get(source)
+
+	if (proofs === undefined) {
+		proofs = new Map()
+		frameProofs.set(source, proofs)
+	}
+
+	return proofs
+}
+
+function proved<T>(known: Proof<T> | undefined, now: Uint8Array, ownSheet: string, prove: () => T, keep: (proof: Proof<T>) => void): T {
+	if (known !== undefined && known.now === now && known.ownSheet === ownSheet) {
+		if (known.result instanceof ChartRefused) throw known.result
+
+		return known.result
+	}
+
+	try {
+		const result = prove()
+
+		keep({ now, ownSheet, result })
+
+		return result
+	} catch (error) {
+		if (error instanceof ChartRefused) keep({ now, ownSheet, result: error })
+
+		throw error
+	}
+}
+
 // The object's content.xml for a chart as it now is, null when it needs no writing.
 function chartObject(source: OdsSource, chart: OdsChartSource, now: Uint8Array | null): Uint8Array | null {
 	const read = source.parts.get(chart.part)
 
 	if (now === null || read === undefined || now === read) return null
 
-	const was = infoOf(read)
-	const edited = infoOf(now)
+	const ownSheet = source.tables[chart.table]?.name ?? ""
 
-	if (sameJson(shown(was), shown(edited))) return null
-	if (chart.refusal !== null) refuse(chart.refusal)
+	return proved(
+		chartProofs.get(chart),
+		now,
+		ownSheet,
+		() => {
+			const was = infoOf(read)
+			const edited = infoOf(now)
 
-	return patchObject(chart.content, was, edited, source.tables[chart.table]?.name ?? "")
+			if (sameJson(shown(was), shown(edited))) return null
+			if (chart.refusal !== null) refuse(chart.refusal)
+
+			return patchObject(chart.content, was, edited, ownSheet)
+		},
+		proof => chartProofs.set(chart, proof)
+	)
 }
 
 // Why the charts and their frames as they now are cannot be written to the OpenDocument file, null when they can (or
@@ -743,6 +764,7 @@ function written(document: XlsxDocument, source: OdsSource): OdsChartWrite {
 	}
 
 	const store = drawingStore(document.workbook)
+	const proofs = frameProofsOf(source)
 
 	for (const [name, charts] of drawings) {
 		const read = source.parts.get(name)
@@ -750,7 +772,17 @@ function written(document: XlsxDocument, source: OdsSource): OdsChartWrite {
 
 		if (read === undefined || now === undefined || now === read) continue
 
-		const markup = framesWritten(source, charts, read, now)
+		// A drawing removed holds no bytes to key a proof on: proved each time.
+		const markup =
+			now === null
+				? framesWritten(source, charts, read, null)
+				: proved(
+						proofs.get(name),
+						now,
+						"",
+						() => framesWritten(source, charts, read, now),
+						proof => proofs.set(name, proof)
+					)
 		const table = charts[0]?.table
 
 		if (markup !== null && table !== undefined) shapes.set(table, markup)

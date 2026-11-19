@@ -47,7 +47,8 @@ export type SourceRef =
 // Why a deck opens view-only (non-empty → view-only).
 export type GateReason = "signed" | "strict" | "writeProtected" | "malformed"
 
-// Why something is refused (typed, never silent). notImplemented: a capability not built yet.
+// Why something is refused (typed, never silent). notImplemented: a capability not built yet. passwordUnsupported: a
+// protected PDF was asked for, but the deck has no password, or one the PDF security handler cannot take.
 export type PresentationRefusal =
 	| "notImplemented"
 	| "tooLarge"
@@ -57,6 +58,7 @@ export type PresentationRefusal =
 	| "encrypted"
 	| "needsPassword"
 	| "wrongPassword"
+	| "passwordUnsupported"
 	| "rightsManaged"
 	| "unsupportedEncryption"
 	| "damagedEncryption"

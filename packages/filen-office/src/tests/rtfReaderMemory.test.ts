@@ -2,6 +2,7 @@ import { strFromU8, unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { bytesSource, ZipArchive } from "../core/opc/index"
 import { readRtf } from "../core/rtf/index"
+import { probedRouteCount } from "../core/rtf/reader"
 import { XmlStore } from "../core/rtf/story"
 import { docxRtfServer } from "../dom/docx/rtfWorker"
 import { latin1 } from "./rtfWriteFixtures"
@@ -94,5 +95,23 @@ describe("RTF reader memory", () => {
 
 		expect(taken).toEqual(held)
 		expect(taken.buffer).not.toBe(held?.buffer)
+	})
+
+	it("holds a bounded number of routes for many distinct unknown words, over-long ones among them", async () => {
+		const letters = (k: number): string => {
+			let name = ""
+
+			for (let n = k; n > 0 || name === ""; n = Math.floor(n / 26)) name += String.fromCharCode(0x61 + (n % 26))
+
+			return name
+		}
+		const words = Array.from({ length: 6_000 }, (_, k) => `\\zq${letters(k)} ${k % 10}`).join("")
+		const long = Array.from({ length: 100 }, (_, k) => `\\${"x".repeat(40)}${letters(k)} y`).join("")
+		const docx = await read(`${H}\\pard ${words}${long}\\par}`)
+		const xml = strFromU8(unzipSync(docx)["word/document.xml"] ?? new Uint8Array())
+		const text = [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/gu)].map(match => match[1]).join("")
+
+		expect(probedRouteCount()).toBeLessThanOrEqual(4096)
+		expect(text).toBe(`${Array.from({ length: 6_000 }, (_, k) => `${k % 10}`).join("")}${"y".repeat(100)}`)
 	})
 })

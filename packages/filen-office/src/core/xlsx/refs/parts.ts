@@ -1,5 +1,5 @@
 import type { SheetRange } from "../../sheet/protocol"
-import { decodeUtf8, type XmlDocument } from "../../xml/index"
+import { decodeUtf8, transcodeUtf16, type XmlDocument } from "../../xml/index"
 import { sameSheet } from "../../sheet/refs/formulaRefs"
 import { axisLimit, meetsMoved, reaches, shiftCell, type AxisShift } from "./axis"
 import { shiftAnchor, shiftVmlAnchor } from "./anchors"
@@ -14,6 +14,8 @@ import {
 	shiftFormulaText,
 	type RefJob
 } from "./markup"
+import { BANG, bytesAre, GT, isSpace, localIs, LT, nameEnd, QUESTION, Scanner, SLASH } from "../read/scan"
+import { XlsxReadError } from "../read/errors"
 import { parseRef } from "./sqref"
 
 // The other parts that refer to cells (ECMA-376 Part 1 §20.5 drawings, §21.2 charts, §18.7 comments, §18.10
@@ -274,20 +276,151 @@ export interface PivotSource {
 	readonly name: string | null
 }
 
+// The cache's source, read from the start of the part: a pivot cache definition can run to megabytes of items,
+// and cacheSource comes before them.
 export function pivotSource(bytes: Uint8Array, part: string): PivotSource | null {
-	const { document } = editMarkup(bytes, `pivot cache ${part}`)
-	const source = childByLocal(document, document.documentElement(), "cacheSource")
-	const worksheet = source < 0 ? -1 : childByLocal(document, source, "worksheetSource")
+	let source = false
+	let found: PivotSource | null = null
 
-	if (worksheet < 0) return null
+	scanTags(bytes, `pivot cache ${part}`, (scanner, tag, end, depth) => {
+		const bytes = scanner.bytes
+		const name = nameEnd(bytes, tag + 1)
 
-	const ref = document.attribute(worksheet, "ref")
+		if (depth === 1) {
+			if (source) return true
 
-	return {
-		sheet: document.attribute(worksheet, "sheet") ?? null,
-		ref: ref === undefined ? null : parseRef(ref),
-		name: document.attribute(worksheet, "name") ?? null
+			source = localIs(bytes, tag + 1, name, "cacheSource")
+
+			return source && scanner.selfClosing
+		}
+
+		if (!source || depth !== 2 || !localIs(bytes, tag + 1, name, "worksheetSource")) return false
+
+		let sheet: string | null = null
+		let ref: string | null = null
+		let named: string | null = null
+
+		scanner.attributes(tag, end, (start, stop, valueStart, valueEnd) => {
+			if (bytesAre(bytes, start, stop, "sheet")) sheet = scanner.attributeValue(valueStart, valueEnd)
+			else if (bytesAre(bytes, start, stop, "ref")) ref = scanner.attributeValue(valueStart, valueEnd)
+			else if (bytesAre(bytes, start, stop, "name")) named = scanner.attributeValue(valueStart, valueEnd)
+		})
+
+		found = { sheet, ref: ref === null ? null : parseRef(ref), name: named }
+
+		return true
+	})
+
+	return found
+}
+
+// Visits a part's start tags in document order (the root at depth 0) without building a tree, until `visit`
+// returns true; `visit` reads `scanner.bytes`, which are UTF-8 (a UTF-16 part is transcoded first). It accepts
+// what parseXml accepts before the root: a UTF-8 byte order mark and an external document type declaration.
+// Markup that does not read refuses (`what` names it).
+function scanTags(input: Uint8Array, what: string, visit: (scanner: Scanner, tag: number, end: number, depth: number) => boolean): void {
+	try {
+		const bytes = utf8Part(input, what)
+		const scanner = new Scanner(bytes, what)
+		let depth = 0
+		let at = prologEnd(scanner)
+
+		for (;;) {
+			const lt = bytes.indexOf(LT, at)
+
+			if (lt < 0) scanner.fail("An element is not closed", at)
+
+			const next = bytes[lt + 1]
+
+			if (next === BANG || next === QUESTION) {
+				at = scanner.markupEnd(lt)
+			} else if (next === SLASH) {
+				const close = bytes.indexOf(GT, lt)
+
+				if (close < 0) scanner.fail("An end tag is not closed", lt)
+
+				at = close + 1
+				depth--
+
+				if (depth === 0) return
+			} else {
+				const end = scanner.tagEnd(lt)
+
+				if (visit(scanner, lt, end, depth)) return
+				if (scanner.selfClosing && depth === 0) return
+				if (!scanner.selfClosing) depth++
+
+				at = end
+			}
+		}
+	} catch (error) {
+		if (error instanceof XlsxReadError) refuse("structureLocked", `${what}: malformed`)
+
+		throw error
 	}
+}
+
+// The part as UTF-8, detected as parseXml detects it (xml/parse.ts): a UTF-16 part, with or without its byte
+// order mark, is transcoded; anything else is read as UTF-8.
+function utf8Part(input: Uint8Array, what: string): Uint8Array {
+	const b0 = input[0]
+	const b1 = input[1]
+	const littleEndian = (b0 === 0xff && b1 === 0xfe) || (b0 === LT && b1 === 0)
+
+	if (!littleEndian && !((b0 === 0xfe && b1 === 0xff) || (b0 === 0 && b1 === LT))) return input
+
+	if (input.length % 2 !== 0) throw new XlsxReadError("malformed", "Truncated UTF-16 part", what)
+
+	return transcodeUtf16(input, b0 === 0xff || b0 === 0xfe ? 2 : 0, littleEndian)
+}
+
+// The root element's "<": past a UTF-8 byte order mark, the XML declaration, comments, processing instructions,
+// white space and one external document type declaration (an internal subset refuses, as in parseXml).
+function prologEnd(scanner: Scanner): number {
+	const bytes = scanner.bytes
+	let at = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0
+	let doctype = false
+
+	for (;;) {
+		while (isSpace(bytes[at])) at++
+
+		if (bytes[at] !== LT) return scanner.rootStart(at)
+
+		if (bytesAre(bytes, at + 1, at + 9, "!DOCTYPE")) {
+			if (doctype) scanner.fail("A second document type declaration", at)
+
+			doctype = true
+			at = doctypeEnd(scanner, at)
+		} else if (bytes[at + 1] === QUESTION || bytes[at + 1] === BANG) {
+			at = scanner.markupEnd(at)
+		} else {
+			return at
+		}
+	}
+}
+
+function doctypeEnd(scanner: Scanner, start: number): number {
+	const bytes = scanner.bytes
+	let at = start + 9
+
+	while (at < bytes.length && bytes[at] !== GT) {
+		const b = bytes[at]
+
+		if (b === 0x5b) scanner.fail("Internal DTD subsets are not allowed", at)
+		if (b === LT) scanner.fail("A document type declaration is not closed", at)
+
+		if (b === 0x22 || b === 0x27) {
+			const close = bytes.indexOf(b, at + 1)
+
+			at = close < 0 ? bytes.length : close + 1
+		} else {
+			at++
+		}
+	}
+
+	if (at >= bytes.length) scanner.fail("A document type declaration is not closed", start)
+
+	return at + 1
 }
 
 // A pivot cache sourced from cells is locked: an edit that would move or cut its source refuses; a rename of its
@@ -324,18 +457,31 @@ export interface SlicerSource {
 
 // Slicer and timeline caches: what they read from.
 export function slicerSource(bytes: Uint8Array, part: string): SlicerSource {
-	const { document } = editMarkup(bytes, `slicer cache ${part}`)
 	let table: SlicerSource["table"] = null
 	const pivotSheets: number[] = []
 
-	for (const node of descendants(document, document.documentElement())) {
-		const local = document.localName(node)
+	scanTags(bytes, `slicer cache ${part}`, (scanner, tag, end, depth) => {
+		const bytes = scanner.bytes
+		const name = nameEnd(bytes, tag + 1)
+		const slicer = depth > 0 && localIs(bytes, tag + 1, name, "tableSlicerCache")
 
-		if (local === "tableSlicerCache")
-			table = { id: Number(document.attribute(node, "tableId") ?? "-1"), column: Number(document.attribute(node, "column") ?? "-1") }
-		if (local === "pivotTable" && document.attribute(node, "tabId") !== undefined)
-			pivotSheets.push(Number(document.attribute(node, "tabId")))
-	}
+		if (!slicer && (depth === 0 || !localIs(bytes, tag + 1, name, "pivotTable"))) return false
+
+		let tableId = "-1"
+		let column = "-1"
+		let tabId: string | null = null
+
+		scanner.attributes(tag, end, (start, stop, valueStart, valueEnd) => {
+			if (slicer && bytesAre(bytes, start, stop, "tableId")) tableId = scanner.attributeValue(valueStart, valueEnd)
+			else if (slicer && bytesAre(bytes, start, stop, "column")) column = scanner.attributeValue(valueStart, valueEnd)
+			else if (!slicer && bytesAre(bytes, start, stop, "tabId")) tabId = scanner.attributeValue(valueStart, valueEnd)
+		})
+
+		if (slicer) table = { id: Number(tableId), column: Number(column) }
+		else if (tabId !== null) pivotSheets.push(Number(tabId))
+
+		return false
+	})
 
 	return { table, pivotSheets }
 }

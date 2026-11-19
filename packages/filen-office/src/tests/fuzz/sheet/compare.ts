@@ -1,14 +1,24 @@
 import { bytesSource, OpcPackage } from "../../../core/opc/index"
-import { MC_NAMESPACE, Namespaces, type XmlDocument } from "../../../core/xml/index"
-import { CellKind, ColFlag, FormulaKind, RowFlag, type XlsxColRange, type XlsxSheetStore } from "../../../core/xlsx/model/types"
+import { toBytes } from "../../../core/xml/editor"
+import { decodeUtf8, encodeUtf8, MC_NAMESPACE, Namespaces, parseXml, type XmlDocument } from "../../../core/xml/index"
+import {
+	CellKind,
+	ColFlag,
+	FormulaKind,
+	RowFlag,
+	type XlsxColRange,
+	type XlsxSheetModel,
+	type XlsxSheetStore
+} from "../../../core/xlsx/model/types"
 import type { XlsxWorkbook } from "../../../core/xlsx/read/index"
 import { formatA1, parseA1, readXlsxCells, type CellScalar, type XlsxCell } from "../../oracles/sheet/xlsxCells"
 
 // The fuzz's invariant: what a session holds equals what its save holds, read back without the engine. Cell
 // values, cached results and formulas come from the oracles' plain reader (xlsxCells.ts); everything else a
 // session edits is read here from the part text (ECMA-376 Part 1 §18.3.1: rows, cols, mergeCells, the cell
-// style index; §18.2: sheets and definedNames; §18.8: cellXfs, fonts and numFmts), and compared with the model
-// section by section. A difference is reported in words, the first few per section.
+// style index, the cells of each data validation, the autoFilter's range and each hyperlink's; §18.2: sheets and
+// definedNames; §18.8: cellXfs, fonts and numFmts), and compared with the model section by section. A difference is
+// reported in words, the first few per section.
 
 const SHEET_MAX_COLS = 16_384
 
@@ -40,6 +50,11 @@ export interface SheetRecord {
 	readonly rows?: Map<number, RowRecord>
 	readonly cols?: Map<number, ColRecord>
 	readonly merges?: Set<string>
+	// The cells of each data validation, in order (the Excel 2010 ones of extLst after "x14 "); the autoFilter's
+	// range ("" for none); each hyperlink's cells, in order.
+	readonly validations?: string[]
+	readonly autoFilter?: string
+	readonly links?: string[]
 }
 
 export interface XfRecord {
@@ -102,6 +117,65 @@ function areaKey(ref: string): string {
 	return a === undefined || b === undefined ? `?${ref}` : `${a.row},${a.column}:${b.row},${b.column}`
 }
 
+// ST_Sqref (§18.18.76): areas separated by spaces, each normalized.
+function sqrefKey(text: string): string {
+	return text
+		.split(/\s+/)
+		.filter(ref => ref !== "")
+		.map(areaKey)
+		.join(" ")
+}
+
+// The extension of extLst that holds Excel 2010 data validations ([MS-XLSX] 2.3.6).
+const DV_EXT = "{CCE6A557-97BC-4B89-ADB6-D9C93CAAB3DF}"
+
+interface FeatureRecord {
+	readonly validations: string[]
+	readonly autoFilter: string
+	readonly links: string[]
+}
+
+// The data validations, autoFilter and hyperlinks among the children of `root` (a worksheet, or the sections the
+// model holds wrapped in one element).
+function featureRecord(document: XmlDocument, root: number): FeatureRecord {
+	const validations: string[] = []
+	const links: string[] = []
+	let autoFilter = ""
+
+	for (const section of children(document, root)) {
+		switch (document.localName(section)) {
+			case "dataValidations":
+				for (const rule of children(document, section, "dataValidation"))
+					validations.push(sqrefKey(document.attribute(rule, "sqref") ?? ""))
+
+				break
+			case "autoFilter":
+				autoFilter = areaKey(document.attribute(section, "ref") ?? "")
+
+				break
+			case "hyperlinks":
+				for (const link of children(document, section, "hyperlink")) links.push(areaKey(document.attribute(link, "ref") ?? ""))
+
+				break
+			case "extLst":
+				for (const ext of children(document, section, "ext")) {
+					if ((document.attribute(ext, "uri") ?? "").toUpperCase() !== DV_EXT) continue
+
+					for (const list of children(document, ext, "dataValidations"))
+						for (const rule of children(document, list, "dataValidation")) {
+							const sqref = child(document, rule, "sqref")
+
+							validations.push(`x14 ${sqrefKey(sqref < 0 ? "" : document.textContent(sqref))}`)
+						}
+				}
+
+				break
+		}
+	}
+
+	return { validations, autoFilter, links }
+}
+
 const RELATIONSHIP_NAMESPACES = [
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 	"http://purl.oclc.org/ooxml/officeDocument/relationships"
@@ -132,10 +206,13 @@ function fontRecord(document: XmlDocument, font: number): FontRecord {
 }
 
 // The saved package read without the engine.
-// `source`: the workbook the save came from. A count it already got wrong, which the save kept as written (the
-// writer never rewrites a container it adds nothing to), is the source's, not a problem of the save.
-export async function readSaved(bytes: Uint8Array, source?: Uint8Array): Promise<WorkbookRecord> {
-	const inherited = source === undefined ? new Set<string>() : new Set((await readSaved(source)).problems)
+// `source`: the workbook the save came from, or its record read once (a sequence reads its source once). A count it
+// already got wrong, which the save kept as written (the writer never rewrites a container it adds nothing to), is
+// the source's, not a problem of the save.
+export async function readSaved(bytes: Uint8Array, source?: Uint8Array | WorkbookRecord): Promise<WorkbookRecord> {
+	const inherited = new Set(
+		source === undefined ? [] : source instanceof Uint8Array ? (await readSaved(source)).problems : source.problems
+	)
 	const cells = await readXlsxCells(bytes)
 	const pkg = await OpcPackage.open(bytesSource(bytes))
 	const root = await pkg.relationships("")
@@ -256,7 +333,7 @@ export async function readSaved(bytes: Uint8Array, source?: Uint8Array): Promise
 			})
 		}
 
-		sheets.push({ name, state, cells: record, rows, cols, merges })
+		sheets.push({ name, state, cells: record, rows, cols, merges, ...featureRecord(document, document.documentElement()) })
 	}
 
 	const names = new Set<string>()
@@ -353,6 +430,21 @@ function scalar(workbook: XlsxWorkbook, store: XlsxSheetStore, kind: number, val
 	}
 }
 
+// The sections featureRecord reads.
+const FEATURE_SECTIONS = ["autoFilter", "dataValidations", "hyperlinks", "extLst"]
+
+// A worksheet section as the save writes it: through the writer an edit gave it, else as the source holds it.
+function sectionMarkup(workbook: XlsxWorkbook, model: XlsxSheetModel, name: string): string {
+	const writer = workbook.changes.sheets.get(model.id)?.sections.get(name)
+
+	if (writer !== undefined && writer !== null) return decodeUtf8(toBytes(writer(model, workbook)))
+
+	return model.sections
+		.filter(section => section.name === name)
+		.map(section => (section.bytes === null ? "" : decodeUtf8(section.bytes)))
+		.join("")
+}
+
 const FORMULA_KINDS: Readonly<Record<number, string>> = {
 	[FormulaKind.NORMAL]: "normal",
 	[FormulaKind.SHARED_MASTER]: "shared",
@@ -438,7 +530,18 @@ export function modelRecord(workbook: XlsxWorkbook): WorkbookRecord {
 		for (let i = 0; i + 3 < model.merges.length; i += 4)
 			merges.add(`${model.merges[i] ?? 0},${model.merges[i + 1] ?? 0}:${model.merges[i + 2] ?? 0},${model.merges[i + 3] ?? 0}`)
 
-		sheets.push({ name: entry.name, state: entry.state, cells, rows, cols, merges })
+		const features = FEATURE_SECTIONS.map(name => sectionMarkup(workbook, model, name)).join("")
+		const wrapped = features === "" ? null : parseXml(encodeUtf8(`<sections>${features}</sections>`))
+
+		sheets.push({
+			name: entry.name,
+			state: entry.state,
+			cells,
+			rows,
+			cols,
+			merges,
+			...(wrapped === null ? { validations: [], autoFilter: "", links: [] } : featureRecord(wrapped, wrapped.documentElement()))
+		})
 	}
 
 	const names = new Set<string>()
@@ -492,6 +595,18 @@ function fields<T extends object>(a: T, b: T): string[] {
 	}
 
 	return out
+}
+
+// What `expected` holds and `actual` does not, and the reverse, as a multiset.
+function listDifferences(expected: readonly string[], actual: readonly string[]): string[] {
+	const counts = new Map<string, number>()
+
+	for (const item of expected) counts.set(item, (counts.get(item) ?? 0) + 1)
+	for (const item of actual) counts.set(item, (counts.get(item) ?? 0) - 1)
+
+	return [...counts].flatMap(([item, count]) =>
+		count === 0 ? [] : [`${count > 0 ? "missing" : "extra"} ${item}${Math.abs(count) > 1 ? ` ×${Math.abs(count)}` : ""}`]
+	)
 }
 
 function cellName(key: string): string {
@@ -583,6 +698,12 @@ export function compareRecords(expected: WorkbookRecord, actual: WorkbookRecord,
 			...[...(sheet.merges ?? [])].filter(merge => !saved.merges?.has(merge)).map(merge => `missing ${merge}`),
 			...[...(saved.merges ?? [])].filter(merge => !sheet.merges?.has(merge)).map(merge => `extra ${merge}`)
 		])
+		push(`${sheet.name} dataValidations`, listDifferences(sheet.validations ?? [], saved.validations ?? []))
+		push(
+			`${sheet.name} autoFilter`,
+			(sheet.autoFilter ?? "") === (saved.autoFilter ?? "") ? [] : [`${sheet.autoFilter || "∅"}≠${saved.autoFilter || "∅"}`]
+		)
+		push(`${sheet.name} hyperlinks`, listDifferences(sheet.links ?? [], saved.links ?? []))
 	}
 
 	// A save writes the model's records up to the last one a cell refers to (records an undone edit appended stay

@@ -1,25 +1,21 @@
 import { readColorIn, type DrawingTheme } from "./color"
 import {
-	UNDERLINES,
+	isTextAlign,
+	isTextAnchor,
+	isTextUnderline,
+	isTextVertical,
 	rgba,
 	type Inset,
 	type Rgba,
 	type TextAlign,
-	type TextAnchor,
 	type TextBodyProps,
 	type TextParagraph,
 	type TextRun,
-	type TextUnderline,
-	type TextVertical
+	type TextUnderline
 } from "./displayList"
 import { D, EMU_PER_PX, type DrawingReader } from "./reader"
 
 // DrawingML text (a:txBody, §21.1.2) as input descriptions for text layout. Nothing is measured here.
-
-const UNDERLINE_SET: ReadonlySet<string> = new Set(UNDERLINES)
-const ANCHORS: ReadonlySet<string> = new Set(["t", "ctr", "b", "just", "dist"])
-const VERTICALS: ReadonlySet<string> = new Set(["horz", "vert", "vert270", "wordArtVert", "eaVert", "mongolianVert", "wordArtVertRtl"])
-const ALIGNS: ReadonlySet<string> = new Set(["l", "ctr", "r", "just", "dist", "justLow", "thaiDist"])
 
 // The run properties text falls back to (a style's font reference, a chart's text properties).
 export interface TextDefaults {
@@ -56,9 +52,9 @@ export function readBodyProps(reader: DrawingReader, bodyPr: number, defaults: P
 			right: reader.attr(bodyPr, "rIns") === undefined ? insets.right : reader.emu(bodyPr, "rIns", 0) / EMU_PER_PX,
 			bottom: reader.attr(bodyPr, "bIns") === undefined ? insets.bottom : reader.emu(bodyPr, "bIns", 0) / EMU_PER_PX
 		},
-		anchor: (anchor !== undefined && ANCHORS.has(anchor) ? anchor : (defaults.anchor ?? "t")) as TextAnchor,
+		anchor: isTextAnchor(anchor) ? anchor : (defaults.anchor ?? "t"),
 		anchorCenter: reader.bool(bodyPr, "anchorCtr", defaults.anchorCenter ?? false),
-		vertical: (vertical !== undefined && VERTICALS.has(vertical) ? vertical : (defaults.vertical ?? "horz")) as TextVertical,
+		vertical: isTextVertical(vertical) ? vertical : (defaults.vertical ?? "horz"),
 		wrap: reader.attr(bodyPr, "wrap") === undefined ? (defaults.wrap ?? true) : reader.attr(bodyPr, "wrap") !== "none",
 		rotation: reader.angle(bodyPr, "rot", defaults.rotation ?? 0),
 		upright: reader.bool(bodyPr, "upright", defaults.upright ?? false),
@@ -106,7 +102,7 @@ function applyRunProps(reader: DrawingReader, theme: DrawingTheme, node: number,
 
 	const underline = reader.attr(node, "u")
 
-	if (underline !== undefined) into.underline = UNDERLINE_SET.has(underline) ? (underline as TextUnderline) : "none"
+	if (underline !== undefined) into.underline = isTextUnderline(underline) ? underline : "none"
 
 	const strike = reader.attr(node, "strike")
 
@@ -221,7 +217,7 @@ export function readTextBody(
 		}
 
 		paragraphs.push({
-			align: (align !== undefined && ALIGNS.has(align) ? align : "l") as TextAlign,
+			align: isTextAlign(align) ? align : "l",
 			level,
 			marginLeft: reader.emu(pPr, "marL", reader.emu(levelNode, "marL", 0)) / EMU_PER_PX,
 			indent: reader.emu(pPr, "indent", reader.emu(levelNode, "indent", 0)) / EMU_PER_PX,

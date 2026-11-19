@@ -19,10 +19,11 @@ import {
 } from "../../odt/write/emit"
 import { StyleChains } from "../../odt/write/meaning"
 import { RtfAborted, jobOf, turn, type RtfJob, type RtfTurns } from "../../rtf/turns"
-import { decodeUtf8, encodeUtf8, parseXml, type XmlDocument } from "../../xml/index"
+import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
 import { LOWERED_NAMESPACES, LoweredIds, Lowering, MAX_TABLE_COLUMNS, type PartLinks, type Theme } from "./lower"
-import { convertLists, convertStyles, esc, FontFaces, pt, StyleNames, type ConvertedLists } from "./odtStyles"
+import { convertLists, convertStyles, FontFaces, pt, StyleNames, type ConvertedLists } from "./odtStyles"
 import { LossyCounts, TextConversionError, type TextRefusalReason } from "./report"
+import { isOn, NUMBER_FORMATS } from "./shared"
 import { docToDocx } from "./toDocx"
 
 // A WordprocessingML document (.docx, .docm, .dotx, .dotm) as an OpenDocument text (ODF 1.3): each story lowered to
@@ -164,10 +165,6 @@ function cm(emu: number): string {
 	return `${String(Math.round((emu / EMU_PER_CM) * 10_000) / 10_000)}cm`
 }
 
-function escText(text: string): string {
-	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;")
-}
-
 const DOCX_REFUSALS: Readonly<Record<string, TextRefusalReason>> = {
 	encrypted: "encrypted",
 	legacyBinary: "notSource",
@@ -178,14 +175,6 @@ const DOCX_REFUSALS: Readonly<Record<string, TextRefusalReason>> = {
 	tooLarge: "tooLarge"
 }
 
-// Word's footnote and endnote number formats with an ODF form (Part 3 §19.474, letters as Word repeats them).
-const NOTE_FORMATS: Readonly<Record<string, string>> = {
-	decimal: "1",
-	lowerRoman: "i",
-	upperRoman: "I",
-	lowerLetter: "a",
-	upperLetter: "A"
-}
 const NOTE_RESTARTS: Readonly<Record<string, string>> = { continuous: "document", eachPage: "page", eachSect: "chapter" }
 const FOOTNOTE_POSITIONS: Readonly<Record<string, string>> = {
 	pageBottom: "page",
@@ -193,17 +182,6 @@ const FOOTNOTE_POSITIONS: Readonly<Record<string, string>> = {
 	sectEnd: "section",
 	docEnd: "document"
 }
-const OFF = new Set(["0", "false", "off"])
-
-// An ST_OnOff element's w:val (or another attribute): off without the element, `unset` without the attribute.
-function isOn(document: XmlDocument, node: number, attribute = "w:val", unset = true): boolean {
-	if (node < 0) return false
-
-	const value = document.attribute(node, attribute)
-
-	return value === undefined ? unset : !OFF.has(value)
-}
-
 function child(document: XmlDocument, node: number, local: string): number {
 	for (let at = document.firstChildElement(node); at >= 0; at = document.nextSiblingElement(at))
 		if (document.localName(at) === local) return at
@@ -231,9 +209,14 @@ function descendant(document: XmlDocument, node: number, local: string): number 
 	return -1
 }
 
-// Attribute values markup names (the automatic styles it uses among them).
-function collectReferences(text: string, into: Set<string>): void {
-	for (const match of text.matchAll(/="([^"]*)"/gu)) into.add(match[1] ?? "")
+// The registry's automatic styles markup names: only names are kept, not every attribute value (a substring would
+// keep the whole markup string alive).
+function collectReferences(text: string, registry: StyleRegistry, into: Set<string>): void {
+	for (const match of text.matchAll(/="([^"]*)"/gu)) {
+		const value = match[1] ?? ""
+
+		if (registry.has(value)) into.add(value)
+	}
 }
 
 // Table styles with conditional formatting (w:tblStylePr).
@@ -345,6 +328,8 @@ class Converter {
 	private readonly headerParts = new Map<string, string>()
 	// Notes and comments by element and id, per lowered part.
 	private readonly noteIndex = new WeakMap<XmlDocument, Map<string, number>>()
+	// Lists written so far, by xml:id (continuable).
+	private readonly listNames = new Set<string>()
 	private spent = 0
 
 	constructor(pkg: DocxPackage, lossy: LossyCounts, job: RtfJob | undefined) {
@@ -507,7 +492,9 @@ class Converter {
 
 			written.push(
 				encodeUtf8(
-					inSection ? "</text:section>" : `<text:section text:name="${esc(this.names.name("Section"))}" text:protected="true">`
+					inSection
+						? "</text:section>"
+						: `<text:section text:name="${escapeAttribute(this.names.name("Section"))}" text:protected="true">`
 				)
 			)
 			inSection = wanted
@@ -524,9 +511,9 @@ class Converter {
 				const name = masters.starts.get(from)
 
 				for await (const piece of this.streamTable(content, lowering, table, name, from + 1 >= body.blocks.length, run, masterOf)) {
-					collectReferences(piece, referenced)
+					collectReferences(piece, content.registry, referenced)
 					written.push(encodeUtf8(piece))
-					this.flushChanges(referenced)
+					this.flushChanges(content.registry, referenced)
 				}
 
 				from++
@@ -559,11 +546,11 @@ class Converter {
 
 			const text = this.continuable(this.resolved(content, this.blocks(content, document, nodes)))
 
-			collectReferences(text, referenced)
+			collectReferences(text, content.registry, referenced)
 
 			// Charged as each block was written.
 			written.push(encodeUtf8(text))
-			this.flushChanges(referenced)
+			this.flushChanges(content.registry, referenced)
 			from = to
 		}
 
@@ -601,11 +588,11 @@ class Converter {
 				inner += `<${element}${shown ? "" : ' style:display="false"'}>${markup === "" ? "<text:p/>" : markup}</${element}>`
 			}
 
-			masterStyles += `<style:master-page style:name="${esc(master.name)}" style:page-layout-name="${esc(master.layout)}"${inner === "" ? "/>" : `>${inner}</style:master-page>`}`
+			masterStyles += `<style:master-page style:name="${escapeAttribute(master.name)}" style:page-layout-name="${escapeAttribute(master.layout)}"${inner === "" ? "/>" : `>${inner}</style:master-page>`}`
 		}
 
 		await turn(this.job)
-		this.flushChanges(referenced)
+		this.flushChanges(content.registry, referenced)
 
 		// Whether changes are tracked (w:trackRevisions, or forced by the editing restriction): Part 3 §5.5.1.
 		const trackedChanges =
@@ -620,7 +607,7 @@ class Converter {
 					]
 		const contentHead =
 			`${XML_DECLARATION}<office:document-content ${ROOT_NAMESPACES} office:version="1.3">${this.fonts.markup()}` +
-			`<office:automatic-styles>${content.registry.used([[...referenced].map(name => `="${name}"`).join("")])}</office:automatic-styles>` +
+			`<office:automatic-styles>${content.registry.used([], referenced)}</office:automatic-styles>` +
 			"<office:body><office:text>"
 		const contentXml = [
 			encodeUtf8(contentHead),
@@ -732,7 +719,7 @@ class Converter {
 			const start = Number(settled(value("numStart", "1")))
 			const restart = settled(value("numRestart", "continuous"))
 			const position = settled(value("pos", kind === "footnote" ? "pageBottom" : "docEnd"))
-			const written = NOTE_FORMATS[format]
+			const written = NUMBER_FORMATS[format]
 
 			if (written === undefined) this.lossy.add("noteSettings")
 
@@ -844,7 +831,7 @@ class Converter {
 			hyperlink: id => this.ids.hyperlinks.get(id),
 			change: (kind, author, date, deleted) => {
 				const id = registry.name("ct", true)
-				const open = `<text:changed-region xml:id="${esc(id)}" text:id="${esc(id)}"><text:${kind}><office:change-info><dc:creator>${escText(author)}</dc:creator><dc:date>${escText((date ?? "1970-01-01T00:00:00").replace(/Z$/u, ""))}</dc:date></office:change-info>`
+				const open = `<text:changed-region xml:id="${escapeAttribute(id)}" text:id="${escapeAttribute(id)}"><text:${kind}><office:change-info><dc:creator>${escapeText(author)}</dc:creator><dc:date>${escapeText((date ?? "1970-01-01T00:00:00").replace(/Z$/u, ""))}</dc:date></office:change-info>`
 				const close = `</text:${kind}></text:changed-region>`
 				// Its lists named by the stream that wrote it, and charged as written: held as bytes once its blocks are.
 				const region = { open, deleted: holder.stream === undefined ? deleted : this.resolved(holder.stream, deleted), close }
@@ -910,8 +897,6 @@ class Converter {
 		return stream.listIds.resolve(text)
 	}
 
-	private readonly listNames = new Set<string>()
-
 	// A list continuing one that was not written (its paragraphs fell back to plain text) numbers anew: its
 	// text:continue-list (Part 3 §19.785) left out, counted.
 	private continuable(text: string): string {
@@ -927,7 +912,8 @@ class Converter {
 	}
 
 	// The change regions of blocks now written, as bytes: a list they continue is known by now (continuable).
-	private flushChanges(referenced: Set<string>): void {
+	// `registry`: the content stream's, whose styles `referenced` collects.
+	private flushChanges(registry: StyleRegistry, referenced: Set<string>): void {
 		if (this.pendingChanges.length === 0) return
 
 		let text = ""
@@ -935,7 +921,7 @@ class Converter {
 		for (const { open, deleted, close } of this.pendingChanges) {
 			const written = deleted.includes("<text:list") ? this.continuable(deleted) : deleted
 
-			collectReferences(written, referenced)
+			collectReferences(written, registry, referenced)
 			text += `${open}${written}${close}`
 		}
 
@@ -1173,11 +1159,11 @@ class Converter {
 		const after: string[] = []
 		const inner = this.plainInline(stream, document, node, after)
 
-		return `<text:p${style === undefined ? "" : ` text:style-name="${esc(style)}"`}>${inner}</text:p>${after.join("")}`
+		return `<text:p${style === undefined ? "" : ` text:style-name="${escapeAttribute(style)}"`}>${inner}</text:p>${after.join("")}`
 	}
 
 	private plainTableStart(stream: Stream, columns: number): string {
-		return `<table:table table:name="${esc(stream.registry.name("Table", true))}"><table:table-column table:number-columns-repeated="${String(columns)}"/>`
+		return `<table:table table:name="${escapeAttribute(stream.registry.name("Table", true))}"><table:table-column table:number-columns-repeated="${String(columns)}"/>`
 	}
 
 	// A row with its cells' text and paragraph styles only, as wide as the table's `columns`.
@@ -1255,7 +1241,7 @@ class Converter {
 							// Charged with the block once written; refused here as soon as it outgrows one.
 							if (++written % 65_536 === 0) this.spend(0, out.length)
 							leading = false
-							out += escText(character)
+							out += escapeText(character)
 						}
 
 						break
@@ -1283,7 +1269,7 @@ class Converter {
 							const shown = notes.citation(kind, id)
 
 							if (notes.depth > 0 || stream.context.scope === "styles")
-								out += escText(
+								out += escapeText(
 									flattenedNote(
 										(noteKind, noteId) => stream.context.note(noteKind, noteId),
 										kind,
@@ -1310,7 +1296,7 @@ class Converter {
 									notes.open.delete(`${kind}:${id}`)
 								}
 
-								out += `<text:note text:note-class="${kind}" text:id="${esc(noteId(kind, id))}"><text:note-citation/><text:note-body>${blocks === "" ? "<text:p/>" : blocks}</text:note-body></text:note>`
+								out += `<text:note text:note-class="${kind}" text:id="${escapeAttribute(noteId(kind, id))}"><text:note-citation/><text:note-body>${blocks === "" ? "<text:p/>" : blocks}</text:note-body></text:note>`
 							}
 
 							leading = false
@@ -1447,22 +1433,22 @@ class Converter {
 				this.media.set(part, path)
 			}
 
-			content = `<draw:image xlink:href="${esc(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>`
+			content = `<draw:image xlink:href="${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>`
 		}
 
 		const attributes = [...graphic]
 			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-			.map(([name, value]) => ` ${name}="${esc(value)}"`)
+			.map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`)
 			.join("")
 		const style = stream.registry.style("graphic", "fr", "", `<style:graphic-properties${attributes}/>`)
 		const name = stream.registry.name(box >= 0 ? "Frame" : "Image", true)
-		const titled = `${title === "" ? "" : `<svg:title>${escText(title)}</svg:title>`}${description === "" ? "" : `<svg:desc>${escText(description)}</svg:desc>`}`
+		const titled = `${title === "" ? "" : `<svg:title>${escapeText(title)}</svg:title>`}${description === "" ? "" : `<svg:desc>${escapeText(description)}</svg:desc>`}`
 
-		return `<draw:frame draw:style-name="${esc(style)}" draw:name="${esc(name)}"${anchor}${position} svg:width="${cm(width)}" svg:height="${cm(height)}">${content}${titled}</draw:frame>`
+		return `<draw:frame draw:style-name="${escapeAttribute(style)}" draw:name="${escapeAttribute(name)}"${anchor}${position} svg:width="${cm(width)}" svg:height="${cm(height)}">${content}${titled}</draw:frame>`
 	}
 
 	// wp:positionH / wp:positionV as ODF's horizontal and vertical position and relation
-	// (,).
+	// (style:horizontal-pos, style:horizontal-rel, style:vertical-pos, style:vertical-rel).
 	private axis(document: XmlDocument, node: number, axis: "H" | "V"): { pos: string; rel: string; offset?: number } {
 		const from = document.attribute(node, "relativeFrom") ?? (axis === "H" ? "column" : "paragraph")
 		const relations: Readonly<Record<string, string>> =
@@ -1574,9 +1560,7 @@ class Converter {
 				}
 			}
 
-			const titleValue = value("titlePg", "val")
-			const titlePage =
-				root >= 0 && child(sectPr, root, "titlePg") >= 0 && titleValue !== "0" && titleValue !== "false" && titleValue !== "off"
+			const titlePage = root >= 0 && isOn(sectPr, child(sectPr, root, "titlePg"))
 			const stories: [string, string, boolean][] = []
 
 			for (const kind of ["header", "footer"] as const) {
@@ -1607,14 +1591,7 @@ class Converter {
 			const headerDistance = number("pgMar", "header", 720)
 			const footerDistance = number("pgMar", "footer", 720)
 			const columns = number("cols", "num", 1)
-			const formats: Readonly<Record<string, string>> = {
-				decimal: "1",
-				lowerRoman: "i",
-				upperRoman: "I",
-				lowerLetter: "a",
-				upperLetter: "A"
-			}
-			const format = formats[value("pgNumType", "fmt") ?? "decimal"]
+			const format = NUMBER_FORMATS[value("pgNumType", "fmt") ?? "decimal"]
 			// With a header, the page's top margin is the header's distance from the edge and the header area reaches down
 			// to where the body starts (dynamic spacing: a taller header pushes the body down, as in Word).
 			let properties = `fo:page-width="${pt(number("pgSz", "w", 12_240))}" fo:page-height="${pt(number("pgSz", "h", 15_840))}" style:print-orientation="${value("pgSz", "orient") === "landscape" ? "landscape" : "portrait"}"`
@@ -1648,7 +1625,7 @@ class Converter {
 			if (layoutName === undefined) {
 				layoutName = this.names.name(`pm${String(layouts.size + 1)}`)
 				layouts.set(layout, layoutName)
-				layoutMarkup += `<style:page-layout style:name="${esc(layoutName)}">${layout}</style:page-layout>`
+				layoutMarkup += `<style:page-layout style:name="${escapeAttribute(layoutName)}">${layout}</style:page-layout>`
 			}
 
 			const key = `${layoutName}\u0000${stories.map(([element, part, shown]) => `${element}=${part}=${String(shown)}`).join("\u0000")}`
@@ -1712,7 +1689,7 @@ class Converter {
 
 		const inner = fields
 			.filter((field): field is [string, string] => field[1] !== undefined)
-			.map(([name, text]) => `<${name}>${escText(text)}</${name}>`)
+			.map(([name, text]) => `<${name}>${escapeText(text)}</${name}>`)
 			.join("")
 
 		return inner === ""
@@ -1753,7 +1730,10 @@ class Converter {
 				.map(name => `<manifest:file-entry manifest:full-path="${name}" manifest:media-type="text/xml"/>`)
 				.join("") +
 			pictures
-				.map(picture => `<manifest:file-entry manifest:full-path="${esc(picture.name)}" manifest:media-type="${picture.type}"/>`)
+				.map(
+					picture =>
+						`<manifest:file-entry manifest:full-path="${escapeAttribute(picture.name)}" manifest:media-type="${picture.type}"/>`
+				)
 				.join("") +
 			"</manifest:manifest>"
 		const sink = memorySink()

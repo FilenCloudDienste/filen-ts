@@ -1,4 +1,5 @@
 import { appendAll } from "../arrays"
+import { columnName } from "../sheet/refs/cellRef"
 import { decodeCharacterData, encodeUtf8, escapeAttribute } from "../xml/index"
 import type { SourceAxis } from "./write/axis"
 import { storeValue } from "./write/cells"
@@ -514,14 +515,6 @@ function columnIndex(letters: string): number {
 	return index - 1
 }
 
-function columnLetters(index: number): string {
-	let text = ""
-
-	for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-	return text
-}
-
 function sheetText(sheet: SheetPart, move: SheetMove | undefined): string {
 	if (move === undefined || move.name === sheet.name) return sheet.raw
 
@@ -533,7 +526,7 @@ function sheetText(sheet: SheetPart, move: SheetMove | undefined): string {
 
 function partText(part: Part, move: SheetMove | undefined, col: number, row: number): string {
 	const sheet = part.sheet === null ? "" : sheetText(part.sheet, move)
-	const colText = part.col < 0 ? "" : `${part.colAbsolute ? "$" : ""}${columnLetters(col)}`
+	const colText = part.col < 0 ? "" : `${part.colAbsolute ? "$" : ""}${columnName(col)}`
 	const rowText = part.row < 0 ? "" : `${part.rowAbsolute ? "$" : ""}${row + 1}`
 
 	return `${sheet}.${colText}${rowText}`
@@ -571,8 +564,8 @@ export const ADDRESS_ATTRIBUTES: ReadonlyMap<string, "address" | "formula"> = ne
 
 const ATTRIBUTE = /(\s)([A-Za-z_][\w.-]*):([A-Za-z-]+)(\s*=\s*)("[^"]*"|'[^']*')/g
 
-// Each attribute of `markup` that `pick` takes (by its local name and value) given the value `move` returns for it.
-// `tablePrefix`: whether a prefix is the table namespace's. Throws `refuse` where move cannot tell.
+// `markup` with each table-namespace attribute given the value `move` returns for it (by its local name and value;
+// undefined keeps it). `tablePrefix`: whether a prefix is the table namespace's. Null where move returns null.
 export function patchAttributes(
 	markup: string,
 	tablePrefix: (prefix: string) => boolean,
@@ -740,7 +733,7 @@ export function unheldDifference(
 			}
 		}
 
-		const where = `${item.sheet} ${columnLetters(item.col)}${item.row + 1}`
+		const where = `${item.sheet} ${columnName(item.col)}${item.row + 1}`
 
 		if (sourceName === undefined || move === undefined) return `${where}: ${item.kind} on a new sheet`
 
@@ -778,7 +771,7 @@ export function unheldDifference(
 
 			if (row < 0 || col < 0 || cellNow(move.name, row, col) !== item.cached) continue
 			if (!found.has(`${move.name}\u0000${row}\u0000${col}`))
-				return `${move.name} ${columnLetters(col)}${row + 1}: its formula ${item.text} is not read back`
+				return `${move.name} ${columnName(col)}${row + 1}: its formula ${item.text} is not read back`
 		}
 	}
 

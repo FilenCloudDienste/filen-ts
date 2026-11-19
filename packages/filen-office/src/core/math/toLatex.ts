@@ -44,7 +44,7 @@ function reverse(map: ReadonlyMap<string, string>, keep: (value: string) => bool
 const SYMBOL_NAMES = reverse(LATEX_SYMBOLS, value => value.charCodeAt(0) >= 0x80)
 const NARY_NAMES = reverse(LATEX_NARY)
 // Accent characters, with those MathML draws as one of the subset's (SPACING_ACCENTS in omml.ts).
-const ACCENT_NAMES = new Map([...reverse(LATEX_ACCENTS), ["̄", "bar"]])
+const ACCENT_NAMES = new Map([...reverse(LATEX_ACCENTS), ["\u0304", "bar"]])
 const FUNCTION_NAMES = new Map([...LATEX_FUNCTIONS].map(([command, fn]) => [fn.name, { command, limits: fn.limits }]))
 const MATRIX_NAMES = new Map([...LATEX_MATRICES].map(([name, [open, close]]) => [`${open}\u0000${close}`, name]))
 const FENCE_NAMES = reverse(LATEX_FENCES)
@@ -365,7 +365,7 @@ class Writer {
 				return this.func(node)
 			case "acc": {
 				const properties = this.child(node, "accPr")
-				const character = this.has(properties, "chr") ? (this.value(properties, "chr") ?? "") : "̂"
+				const character = this.has(properties, "chr") ? (this.value(properties, "chr") ?? "") : "\u0302"
 				const name = ACCENT_NAMES.get(character)
 
 				this.otherProperties(properties, ["chr"])

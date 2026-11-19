@@ -62,6 +62,29 @@ describe("Download as CSV", () => {
 })
 
 describe("Download as CSV of a sparse sheet", () => {
+	// Before the 328 MB export below: maxRSS is the process high-water mark, so after that export this growth reads 0.
+	it("refuses, before allocating it, a CSV past the size a browser download holds", async () => {
+		const { session, info } = await openFixture({
+			sheets: [
+				{
+					name: "One",
+					body: `<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="XFD1"><v>2</v></c></row><row r="${String(SHEET_MAX_ROWS)}"><c r="A${String(SHEET_MAX_ROWS)}"><v>3</v></c></row></sheetData>`
+				}
+			]
+		})
+		const peak = process.resourceUsage().maxRSS * 1024
+		const cpu = cpuMs()
+		const csv = await session.export("csv", { sheet: info.activeSheet })
+		const used = cpuMs() - cpu
+
+		session.close()
+
+		// 17 GB of commas, refused from its known size alone.
+		expect(csv).toEqual({ ok: false, refusal: { reason: "tooLarge", detail: "csv" } })
+		expect(process.resourceUsage().maxRSS * 1024 - peak).toBeLessThan(64 * 1024 * 1024)
+		expect(used).toBeLessThan(budget(500))
+	})
+
 	it("writes the whole data area row by row, a far column and a far row included", async () => {
 		const rows = 20_000
 		const { session, info, bytes } = await openFixture({
@@ -99,28 +122,6 @@ describe("Download as CSV of a sparse sheet", () => {
 		expect(decoder.decode(csv.bytes.subarray(0, 3 + line + 2))).toBe(`\ufeff1${",".repeat(width - 1)}2\r\n`)
 		expect(decoder.decode(csv.bytes.subarray(3 + line + 2, 3 + 2 * line + 2))).toBe(`${",".repeat(width - 1)}\r\n`)
 		expect(decoder.decode(csv.bytes.subarray(csv.bytes.length - line - 1))).toBe(`3${",".repeat(width - 1)}\r\n`)
-	})
-
-	it("refuses, before allocating it, a CSV past the size a browser download holds", async () => {
-		const { session, info } = await openFixture({
-			sheets: [
-				{
-					name: "One",
-					body: `<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="XFD1"><v>2</v></c></row><row r="${String(SHEET_MAX_ROWS)}"><c r="A${String(SHEET_MAX_ROWS)}"><v>3</v></c></row></sheetData>`
-				}
-			]
-		})
-		const peak = process.resourceUsage().maxRSS * 1024
-		const cpu = cpuMs()
-		const csv = await session.export("csv", { sheet: info.activeSheet })
-		const used = cpuMs() - cpu
-
-		session.close()
-
-		// 17 GB of commas, refused from its known size alone.
-		expect(csv).toEqual({ ok: false, refusal: { reason: "tooLarge", detail: "csv" } })
-		expect(process.resourceUsage().maxRSS * 1024 - peak).toBeLessThan(64 * 1024 * 1024)
-		expect(used).toBeLessThan(budget(500))
 	})
 
 	it("of a sheet whose part is missing is refused, never left unanswered", async () => {

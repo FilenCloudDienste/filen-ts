@@ -36,11 +36,11 @@ const PARAM_MAX = 0x7fffffff
 // The specification limits names to 32 letters; longer ones are read in full and never match a known word.
 const NAME_MAX = 32
 
-function isLetter(byte: number): boolean {
+export function isLetter(byte: number): boolean {
 	return (byte >= 0x61 && byte <= 0x7a) || (byte >= 0x41 && byte <= 0x5a)
 }
 
-function isDigit(byte: number): boolean {
+export function isDigit(byte: number): boolean {
 	return byte >= 0x30 && byte <= 0x39
 }
 

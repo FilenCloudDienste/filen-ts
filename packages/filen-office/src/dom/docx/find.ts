@@ -1,4 +1,5 @@
 import { findPattern } from "../../core/docx/findPattern"
+import { LINE_INTS, LineInt } from "../../core/text/displayList"
 import { nfcWithMap } from "../../core/text/nfc"
 import { DOCX_FIND_LIMIT, FIND_INTS, type DocxFindOptions } from "./protocol"
 
@@ -10,18 +11,21 @@ export interface FindablePage {
 	readonly sourceCount: number
 	readonly sourceTexts: readonly string[]
 	readonly lineCount: number
-	// lineInts as the text layout writes them (LINE_INTS per line; text start 2, end 3, source 5).
+	// lineInts as the text layout writes them (LINE_INTS per line, fields at LineInt).
 	readonly lineInts: Int32Array
 }
-
-const LINE_INTS = 7
 
 // The page's line that holds offset `at` of `source`, or -1.
 export function lineOf(page: FindablePage, source: number, at: number): number {
 	for (let line = 0; line < page.lineCount; line++) {
 		const i = line * LINE_INTS
 
-		if (page.lineInts[i + 5] === source && at >= (page.lineInts[i + 2] ?? 0) && at < (page.lineInts[i + 3] ?? 0)) return line
+		if (
+			page.lineInts[i + LineInt.SOURCE] === source &&
+			at >= (page.lineInts[i + LineInt.TEXT_START] ?? 0) &&
+			at < (page.lineInts[i + LineInt.TEXT_END] ?? 0)
+		)
+			return line
 	}
 
 	return -1

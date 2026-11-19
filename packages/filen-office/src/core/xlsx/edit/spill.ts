@@ -1,14 +1,17 @@
+import { relativeTarget } from "../../opc/partNames"
 import { decodeUtf8, encodeUtf8 } from "../../xml/index"
 import { mayReturnArray } from "../../sheet/refs/formulaRefs"
 import type { XlsxWorkbookModel } from "../model/types"
 import { refState } from "../refs/state"
+import { namespacesOf, relationshipType } from "../write/namespaces"
 
 // Dynamic arrays in a workbook (support.microsoft.com "Dynamic array formulas and spilled array behavior"; [MS-XLSX]
 // 2.6.97 dynamicArrayProperties): a dynamic-array formula is an array formula (t="array") whose cell metadata (cm)
 // points at a cell metadata record of type XLDAPR with fDynamic set, in the workbook's metadata part
 // (ECMA-376 Part 1 §18.9). Its ref is what it spills over; the values there are stored in their cells.
 
-export const SHEET_METADATA_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"
+// The relationship type's last segment: the full type is in the workbook's own namespace (Transitional or Strict).
+const SHEET_METADATA = "sheetMetadata"
 export const SHEET_METADATA_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"
 
 const XLDAPR = "XLDAPR"
@@ -25,7 +28,14 @@ export interface DynamicArrays {
 	readonly create: string | null
 }
 
-const NONE: DynamicArrays = { dynamic: new Set(), cm: null, create: "xl/metadata.xml" }
+// The directory of the workbook part ("xl/" as Excel writes it), where its metadata part goes.
+function workbookDirectory(workbook: XlsxWorkbookModel): string {
+	return workbook.workbookPart.slice(0, workbook.workbookPart.lastIndexOf("/") + 1)
+}
+
+function none(workbook: XlsxWorkbookModel): DynamicArrays {
+	return { dynamic: new Set(), cm: null, create: `${workbookDirectory(workbook)}metadata.xml` }
+}
 
 // OpenDocument has no dynamic-array metadata: a dynamic array is written as a matrix formula over its spill (ODF 1.3
 // Part 3 §19.680-§19.681), read back as one whose formula may give an array (typedSpills). The session marks those
@@ -80,20 +90,20 @@ export async function readDynamicArrays(workbook: XlsxWorkbookModel): Promise<Dy
 	const relationships = await workbook.parts.relationships(workbook.workbookPart)
 	const added = workbook.changes.relationships.get(workbook.workbookPart)
 	const relationship = [...relationships.all.filter(entry => added?.removed.has(entry.id) !== true), ...(added?.added ?? [])].find(
-		entry => entry.type === SHEET_METADATA_TYPE && !entry.external && entry.partName !== undefined
+		entry => entry.type.endsWith(`/${SHEET_METADATA}`) && !entry.external && entry.partName !== undefined
 	)
 
-	if (relationship?.partName === undefined) return NONE
+	if (relationship?.partName === undefined) return none(workbook)
 
 	const bytes = await refState(workbook).partBytes(relationship.partName)
 
-	return bytes === null ? NONE : dynamicCellMetadata(decodeUtf8(bytes))
+	return bytes === null ? none(workbook) : dynamicCellMetadata(decodeUtf8(bytes))
 }
 
-// The metadata part Excel writes for dynamic arrays alone: one XLDAPR record, cm 1.
-const METADATA =
+// The metadata part Excel writes for dynamic arrays alone: one XLDAPR record, cm 1, in the workbook's namespace.
+const metadata = (strict: boolean): string =>
 	'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
-	'<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+	`<metadata xmlns="${namespacesOf(strict).main}" ` +
 	`xmlns:xda="${DYNAMIC_ARRAY_NAMESPACE}">` +
 	`<metadataTypes count="1"><metadataType name="${XLDAPR}" minSupportedVersion="120000" copy="1" pasteAll="1" ` +
 	'pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" clearComments="1" assign="1" coerce="1" ' +
@@ -121,14 +131,14 @@ export function dynamicArrayCm(
 	let name = arrays.create
 	const taken = (part: string): boolean => workbook.parts.get(part) !== undefined || workbook.changes.parts.get(part) !== undefined
 
-	for (let index = 2; taken(name); index++) name = `xl/metadata${String(index)}.xml`
+	for (let index = 2; taken(name); index++) name = `${workbookDirectory(workbook)}metadata${String(index)}.xml`
 
 	let relationship = ""
 	const add = (): void => {
-		refState(workbook).setPart(name, SHEET_METADATA_CONTENT_TYPE, encodeUtf8(METADATA))
+		refState(workbook).setPart(name, SHEET_METADATA_CONTENT_TYPE, encodeUtf8(metadata(workbook.strict)))
 		relationship = workbook.changes.addRelationship(workbook.workbookPart, {
-			type: SHEET_METADATA_TYPE,
-			target: name.slice("xl/".length)
+			type: relationshipType(workbook.strict, SHEET_METADATA),
+			target: relativeTarget(workbook.workbookPart, name)
 		}).id
 	}
 	const remove = (): void => {

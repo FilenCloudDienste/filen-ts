@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
 import { PdfEngineError } from "../../dom/pdfedit/client"
-import { isFatalEngineError } from "../../dom/pdfedit/server"
+import { isFatalEngineError, servePdfEngine, type PdfEngineScope } from "../../dom/pdfedit/server"
+import type { FromPdfEngine, PdfBitmapLike, PdfRenderPriority } from "../../dom/pdfedit/protocol"
 import { abortSyncRange } from "../../dom/pdfedit/syncRange"
 import { estimateSavePeak, fitsBudget, PDF_DESKTOP_MEMORY, PDF_MOBILE_MEMORY } from "../../core/pdfedit/budget"
 import { makePdf, wasmTrap } from "./fixtures"
@@ -274,6 +275,126 @@ describe("signature verification in the engine", () => {
 		},
 		TIMEOUT
 	)
+})
+
+// A server over stub handlers and a fake scope (no document): the render of page BLOCKER runs until the test releases
+// it, so every later message is queued behind it.
+const BLOCKER = 99
+
+function queueServer() {
+	const listeners = new Set<(event: { readonly data: unknown }) => void>()
+	const posted: FromPdfEngine[] = []
+	const ran: string[] = []
+	let release: () => void = () => undefined
+	const blocked = new Promise<void>(resolve => {
+		release = resolve
+	})
+	const scope: PdfEngineScope = {
+		postMessage: message => {
+			posted.push(message)
+		},
+		addEventListener: (_type, listener) => {
+			listeners.add(listener)
+		},
+		removeEventListener: (_type, listener) => {
+			listeners.delete(listener)
+		}
+	}
+	const bitmap: PdfBitmapLike = { width: 1, height: 1, close: () => undefined }
+	const stop = servePdfEngine(mupdf, scope, {
+		readDeadlineMs: 60_000,
+		now: () => performance.now(),
+		toBitmap: () => Promise.resolve(bitmap),
+		yieldTask: () => Promise.resolve(),
+		requests: {
+			render: async (_context, args) => {
+				ran.push(`render:${args.priority}:${String(args.page)}`)
+
+				if (args.page === BLOCKER) await blocked
+
+				return { value: { bitmap, tile: args.tile } }
+			},
+			pages: (_context, args) => {
+				ran.push(`pages:${String(args.from)}`)
+
+				return { value: [] }
+			}
+		}
+	})
+	const send = (data: unknown): void => {
+		for (const listener of listeners) listener({ data })
+	}
+	const render = (id: number, page: number, priority: PdfRenderPriority): void => {
+		send({ t: "call", id, op: "render", args: { page, scale: 1, rotation: 0, tile: [0, 0, 1, 1], priority } })
+	}
+	const about = (id: number): FromPdfEngine[] => posted.filter(message => "id" in message && message.id === id)
+
+	return { posted, ran, release, send, render, about, stop }
+}
+
+describe("the engine's request queue", () => {
+	it("runs other requests first, then renders by priority, each in arrival order", async () => {
+		const server = queueServer()
+
+		server.render(1, BLOCKER, "visible")
+		server.render(2, 1, "prefetch")
+		server.render(3, 2, "thumbnail")
+		server.render(4, 3, "overlay")
+		server.render(5, 4, "visible")
+		server.render(6, 5, "prefetch")
+		server.render(7, 6, "visible")
+		server.send({ t: "call", id: 8, op: "pages", args: { from: 7, count: 1 } })
+		server.render(9, 8, "overlay")
+		server.render(10, 9, "thumbnail")
+		expect(server.ran).toEqual([`render:visible:${String(BLOCKER)}`])
+
+		server.release()
+		await vi.waitFor(() => {
+			expect(server.posted.filter(message => message.t === "ok")).toHaveLength(10)
+		})
+		expect(server.ran).toEqual([
+			`render:visible:${String(BLOCKER)}`,
+			"pages:7",
+			"render:visible:4",
+			"render:visible:6",
+			"render:overlay:3",
+			"render:overlay:8",
+			"render:thumbnail:2",
+			"render:thumbnail:9",
+			"render:prefetch:1",
+			"render:prefetch:5"
+		])
+		server.stop()
+	})
+
+	it("answers a cancelled queued render once and never starts it; the running one finishes", async () => {
+		const server = queueServer()
+
+		server.render(1, BLOCKER, "visible")
+		server.render(2, 1, "visible")
+		server.render(3, 2, "visible")
+		server.send({ t: "cancel", ids: [2, 1] })
+		expect(server.about(2)).toEqual([{ t: "error", id: 2, failure: "cancelled", message: "cancelled" }])
+		expect(server.about(1)).toEqual([{ t: "started", id: 1 }])
+
+		server.release()
+		await vi.waitFor(() => {
+			expect(server.about(3).map(message => message.t)).toEqual(["started", "ok"])
+		})
+		expect(server.about(1).map(message => message.t)).toEqual(["started", "ok"])
+		expect(server.about(2)).toHaveLength(1)
+		expect(server.ran).toEqual([`render:visible:${String(BLOCKER)}`, "render:visible:2"])
+		server.stop()
+	})
+
+	it("refuses an unknown request", () => {
+		const server = queueServer()
+
+		server.send({ t: "call", id: 1, op: "nonsense", args: {} })
+		expect(server.posted).toEqual([{ t: "error", id: 1, failure: "badRequest", message: "unknown request nonsense" }])
+		expect(server.ran).toEqual([])
+		server.stop()
+	})
 })
 
 describe("engine errors and budgets", () => {

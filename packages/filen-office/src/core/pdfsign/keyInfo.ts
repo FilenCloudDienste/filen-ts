@@ -1,12 +1,10 @@
 import * as asn1js from "asn1js"
 import { AlgorithmIdentifier, PublicKeyInfo, type Certificate } from "pkijs"
+import { RSA_ENCRYPTION_OID, RSA_PSS_OID } from "./algorithms"
 
 // A certificate's public key as WebCrypto imports it ("spki"). WebCrypto takes RSA keys only under the rsaEncryption
 // identifier, so a key restricted to RSA-PSS (id-RSASSA-PSS) is presented as plain RSA: the key material is the same,
 // and the signature algorithm is still checked against the restriction by the caller.
-
-export const RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1"
-export const RSA_PSS_OID = "1.2.840.113549.1.1.10"
 
 export function webCryptoSpki(certificate: Certificate): Uint8Array {
 	const info = certificate.subjectPublicKeyInfo

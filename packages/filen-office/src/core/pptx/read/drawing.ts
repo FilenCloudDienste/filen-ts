@@ -194,7 +194,7 @@ export function fillChild(r: PartReader, container: number): number {
 	return -1
 }
 
-// A fill element as written (§20.1.8). `pictures` resolves a:blip r:embed.
+// A fill element as written (§20.1.8), a:blip r:embed resolved through the context's relationships.
 export function readFill(context: ReadContext, node: number): FillProps | "none" | undefined {
 	const r = context.reader
 

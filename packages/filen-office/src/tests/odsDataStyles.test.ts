@@ -306,6 +306,15 @@ describe("ODF data styles as number formats", () => {
 		expect(formatWith(1234.5, converted, { localeFor: numFmtLocaleFor }).text).toBe("1,234.50")
 	})
 
+	it("gives one formatter locale per locale id, and none for an id with sort bits", () => {
+		const german = numFmtLocaleFor(0x407)
+
+		expect(german).toMatchObject({ decimal: ",", group: "." })
+		expect(numFmtLocaleFor(0x407)).toBe(german)
+		expect(numFmtLocaleFor(0x10407)).toBeUndefined()
+		expect(numFmtLocaleFor(0x10407)).toBeUndefined()
+	})
+
 	it("names what a code cannot say and shows the rest", () => {
 		const quarter = code(
 			'<number:date-style style:name="Q"><number:quarter/><number:text> </number:text><number:year number:style="long"/></number:date-style>',

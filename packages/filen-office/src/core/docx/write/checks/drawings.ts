@@ -40,12 +40,33 @@ function inRange(value: string | undefined, max: number): boolean {
 	return value !== undefined && INTEGER.test(value) && Number(value) <= max
 }
 
+// The r:embed ids of every picture (a:blip, svgBlip) in `document`.
+function blipEmbeds(document: XmlDocument): Set<string> {
+	const reader = partReader(document)
+	const ids = new Set<string>()
+
+	for (let node = 0; node < document.count; node++) {
+		if (document.kinds[node] !== NodeKind.Element) continue
+
+		const local = document.localName(node)
+
+		if (!((reader.group(node) === Ns.A && local === "blip") || local === "svgBlip")) continue
+
+		const id = reader.attr(node, Ns.R, "embed")
+
+		if (id !== undefined) ids.add(id)
+	}
+
+	return ids
+}
+
 // Drawing ids (as written) whose drawing has values out of range, per save, for done() to match with the ids
 // the save added.
 const outOfRange = new WeakMap<CheckInput, Set<string>>()
 
 export const drawingChecks: readonly DocxCheck[] = [
 	{
+		newMarkupOnly: true,
 		async part(input, checked) {
 			// Copies of source nodes are what they were; only the save's own markup is looked at.
 			if (checked.part === undefined || (!checked.skeleton && input.original.has(checked.name))) return
@@ -100,8 +121,19 @@ export const drawingChecks: readonly DocxCheck[] = [
 				}
 			}
 
+			// The source's own pictures whose relationship it lacks, read only when one is still missing as written.
+			let danglingInSource: Set<string> | undefined
+
 			for (const id of added) {
 				const relationship = written.byId(id)
+
+				if (relationship === undefined && checked.part !== undefined && source !== undefined) {
+					danglingInSource ??= blipEmbeds(checked.part.document)
+
+					// A copy of a picture the source already left without its part (as gate 2 allows a dangling id).
+					if (danglingInSource.has(id)) continue
+				}
+
 				const type = relationship?.partName === undefined ? undefined : input.types.typeOf(relationship.partName)
 
 				if (relationship === undefined || relationship.external || type?.toLowerCase().startsWith("image/") !== true)

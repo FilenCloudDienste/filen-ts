@@ -10,7 +10,15 @@ import { isDefaultIgnorable } from "./unicode"
 // Nested lookups beyond this depth are not run. Every lookup application is charged to the run's operations
 // budget (GlyphBuffer.limit), which ends the run's shaping when spent.
 const MAX_NESTING = 16
-const MAX_CONTEXT = 64
+export const MAX_CONTEXT = 64
+// Trying a lookup at a position costs one operation, and one more per this many subtables tried past the first; the
+// same holds for the ligatures or rules of one set and the nested lookup records of one rule.
+export const SUBTABLES_PER_OP = 32
+// Running a lookup over the run costs one operation, and one more per this many glyphs it scans.
+const POSITIONS_PER_OP = 32
+// Matching costs one operation per this many glyphs it steps to or over, so one try's work is bounded however many
+// glyphs it skips or a context lists.
+const VISITS_PER_OP = 64
 
 export const ZWNJ = 0x200c
 export const ZWJ = 0x200d
@@ -32,6 +40,8 @@ export abstract class LookupApplier {
 	protected lookup!: Lookup
 	protected settings!: LookupSettings
 	protected nesting = 0
+	// Glyphs stepped to or over since the last operation charged for them.
+	private visits = 0
 
 	constructor(buffer: GlyphBuffer, table: LayoutTable, gdef: GlyphDefinitions) {
 		this.buffer = buffer
@@ -41,6 +51,10 @@ export abstract class LookupApplier {
 	}
 
 	applyLookup(index: number, settings: LookupSettings): void {
+		// Charged before anything is read, so a plan of thousands of lookups that never apply stops at the budget.
+		this.buffer.spend(1 + Math.floor(this.buffer.length / POSITIONS_PER_OP))
+		this.visits = 0
+
 		const lookup = this.table.lookup(index)
 
 		if (lookup === undefined || lookup.type === 0) return
@@ -92,10 +106,14 @@ export abstract class LookupApplier {
 	protected abstract applySubtable(type: number, offset: number, i: number): number
 
 	protected applyAt(lookup: Lookup, i: number): number {
+		const subtables = lookup.subtables
+
 		this.buffer.spend(1)
 
-		for (const subtable of lookup.subtables) {
-			const next = this.applySubtable(lookup.type, subtable, i)
+		for (let k = 0; k < subtables.length; k++) {
+			if (k > 0 && k % SUBTABLES_PER_OP === 0) this.buffer.spend(1)
+
+			const next = this.applySubtable(lookup.type, subtables[k] ?? 0, i)
 
 			if (next >= 0) return next
 		}
@@ -144,14 +162,36 @@ export abstract class LookupApplier {
 
 	// The next glyph after (dir 1) or before (dir -1) `from` that matching considers, or -1.
 	step(from: number, dir: 1 | -1, limitToSyllable: boolean = this.settings.perSyllable): number {
-		const syllable = this.buffer.syllable[from] ?? 0
+		const buffer = this.buffer
+		const syllable = buffer.syllable[from] ?? 0
+		let found = -1
+		let k = from + dir
 
-		for (let k = from + dir; k >= 0 && k < this.buffer.length; k += dir) {
-			if (limitToSyllable && (this.buffer.syllable[k] ?? 0) !== syllable) return -1
-			if (!this.skippable(k)) return k
+		for (; k >= 0 && k < buffer.length; k += dir) {
+			if (limitToSyllable && (buffer.syllable[k] ?? 0) !== syllable) break
+			if (!this.skippable(k)) {
+				found = k
+				break
+			}
 		}
 
-		return -1
+		this.visit((k - from) * dir)
+
+		return found
+	}
+
+	// Charges `count` glyphs stepped to or over, an operation per VISITS_PER_OP.
+	protected visit(count: number): void {
+		const visits = this.visits + count
+
+		if (visits < VISITS_PER_OP) {
+			this.visits = visits
+
+			return
+		}
+
+		this.visits = visits % VISITS_PER_OP
+		this.buffer.spend(Math.floor(visits / VISITS_PER_OP))
 	}
 
 	// Matches `count` further input glyphs after `i` (the first is covered by the caller) with `test`, filling
@@ -224,6 +264,8 @@ export abstract class LookupApplier {
 
 		try {
 			for (let r = 0; r < recordCount; r++) {
+				if (r > 0 && r % SUBTABLES_PER_OP === 0) this.buffer.spend(1)
+
 				const sequenceIndex = view.getUint16(records + r * 4)
 				const lookupIndex = view.getUint16(records + r * 4 + 2)
 				const at = positions[sequenceIndex]
@@ -287,6 +329,8 @@ export abstract class LookupApplier {
 			const ruleCount = view.getUint16(set)
 
 			for (let r = 0; r < ruleCount; r++) {
+				if (r > 0 && r % SUBTABLES_PER_OP === 0) this.buffer.spend(1)
+
 				const rule = set + view.getUint16(set + 2 + r * 2)
 				const next = chained
 					? this.chainRule(rule, i, positions, glyphTest, glyphTest, glyphTest)
@@ -316,6 +360,8 @@ export abstract class LookupApplier {
 			const test = classTest(view, classDef)
 
 			for (let r = 0; r < ruleCount; r++) {
+				if (r > 0 && r % SUBTABLES_PER_OP === 0) this.buffer.spend(1)
+
 				const next = this.contextRule(set + view.getUint16(set + 2 + r * 2), i, positions, test)
 
 				if (next >= 0) return next
@@ -343,6 +389,8 @@ export abstract class LookupApplier {
 		const lookahead = classTest(view, lookaheadDef)
 
 		for (let r = 0; r < ruleCount; r++) {
+			if (r > 0 && r % SUBTABLES_PER_OP === 0) this.buffer.spend(1)
+
 			const next = this.chainRule(set + view.getUint16(set + 2 + r * 2), i, positions, backtrack, input, lookahead)
 
 			if (next >= 0) return next

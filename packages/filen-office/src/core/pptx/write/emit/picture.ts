@@ -1,6 +1,7 @@
 import { insertedImage, insertedImageWritten, pictureFillOf, type PictureFill } from "../../../presentation/edit/apply/picture"
 import { adjustXml } from "../../../presentation/render/markup"
 import { refused, type EdgeFractions, type Refused, type ShapeNode } from "../../../presentation/model"
+import { isRefused } from "../../../presentation/refusal"
 import type { Relationships } from "../../../opc/index"
 import type { DeckTally } from "../../../presentation/budget"
 import type { XmlDocument } from "../../../xml/index"
@@ -12,6 +13,7 @@ import {
 	Pieces,
 	attr,
 	lineMarkup,
+	newCNvPr,
 	readerOf,
 	shapeElement,
 	sourceNode,
@@ -101,17 +103,18 @@ function newPicture(context: EmitContext, shape: ShapeNode, fill: PictureFill): 
 
 	if (!Array.isArray(blipFill)) return blipFill as Refused
 
-	const alt = shape.alt
 	const ln = shape.props?.ln === undefined ? "" : lineMarkup(context, shape.props.ln)
 
 	if (typeof ln !== "string") return ln
 
+	const cNvPr = newCNvPr(context, shape)
+
+	if (isRefused(cNvPr)) return cNvPr
+
 	return new Pieces()
-		.text(
-			`<p:pic><p:nvPicPr><p:cNvPr${attr("id", shape.id)}${attr("name", shape.name)}${attr("descr", alt?.descr)}` +
-				`${shape.hidden ? ' hidden="1"' : ""}${attr("title", alt?.title)}/>` +
-				'<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
-		)
+		.text("<p:pic><p:nvPicPr>")
+		.append(cNvPr)
+		.text('<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>')
 		.append(blipFill as readonly EmitPiece[])
 		.text(`<p:spPr>${xfrmXml("a:xfrm", shape.xfrm, false)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${ln}</p:spPr></p:pic>`)
 		.markup()

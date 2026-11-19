@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
 	DrawingList,
 	IDENTITY,
 	ItemFlag,
+	ItemInt,
 	ItemKind,
 	rgba,
 	type DrawingImage,
@@ -12,8 +13,10 @@ import {
 	type TextParagraph,
 	type TextRun
 } from "../core/drawingml/displayList"
-import type { DrawingData } from "../dom/docx/protocol"
+import type { DocxSessionApi, DrawingData } from "../dom/docx/protocol"
+import { DocxMediaCache } from "../react/docx/media"
 import { drawingImages, imageMime, paintDrawing, type DrawingPaintContext } from "../react/docx/paint/drawing"
+import { paintObjects, textMeasurer } from "../react/docx/paint/objects"
 
 const PREFIX = "d7"
 
@@ -626,6 +629,43 @@ describe("drawingImages", () => {
 
 		expect(images.map(item => item.svgPartName ?? item.partName)).toEqual(["/word/media/image1.png", "/word/media/image3.svg"])
 	})
+
+	it("lists an image only a text's fill uses (picture-filled word art)", () => {
+		const target = list()
+		const texture = target.image(image({ partName: "/word/media/texture.png" }))
+		const paint = target.paint({ kind: "image", image: texture, stretch: undefined, tile: undefined })
+		const text = target.text({
+			kind: "block",
+			run: run("Word art"),
+			width: 100,
+			height: 50,
+			align: "start",
+			lineAlign: "start",
+			wrap: false,
+			clip: false,
+			lineLimit: false,
+			trimming: "none",
+			lineHeight: 12,
+			ascent: 0.8,
+			rtl: false,
+			fill: paint
+		})
+
+		target.addItem(ItemKind.TEXT, IDENTITY, 0, 0, 100, 50, target.commandCount, target.coordCount, -1, -1, text, -1, 0, 0)
+
+		const shown = data(target)
+
+		expect(drawingImages(shown).map(item => item.partName)).toEqual(["/word/media/texture.png"])
+
+		// A text reference to nothing, or to a broken entry, lists nothing and does not throw.
+		const broken = Int32Array.from(shown.itemInts)
+
+		broken[ItemInt.REF] = 99
+
+		expect(drawingImages({ ...shown, itemInts: broken })).toEqual([])
+		expect(drawingImages({ ...shown, texts: [null, 7, "x"] as unknown as DrawingData["texts"] })).toEqual([])
+		expect(drawingImages({ ...shown, texts: undefined as unknown as DrawingData["texts"] })).toEqual([])
+	})
 })
 
 describe("imageMime", () => {
@@ -637,5 +677,114 @@ describe("imageMime", () => {
 		expect(imageMime(image({ format: "tiff" }))).toBe("")
 		expect(imageMime(image({ format: "emf" }))).toBe("")
 		expect(imageMime(image({ format: "unknown" }))).toBe("")
+	})
+})
+
+describe("shaded paints while zooming", () => {
+	const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+	async function painted(): Promise<{
+		readonly created: string[]
+		readonly href: () => string | null | undefined
+		readonly zoom: (width: number) => void
+		readonly release: () => void
+	}> {
+		const target = list(10, 10)
+		const fill = target.paint({
+			kind: "shaded",
+			points: Float32Array.of(0, 0, 10, 0, 0, 10),
+			colors: Uint32Array.of(0xff0000ff, 0x00ff00ff, 0x0000ffff),
+			ramp: null
+		})
+
+		addPath(target, () => rect(target, 0, 0, 10, 10), fill)
+
+		const drawing = data(target)
+		const created: string[] = []
+		const session: DocxSessionApi = {
+			objects: ids => Promise.resolve(ids.map(id => ({ kind: "drawing" as const, id, drawing }))),
+			media: () => Promise.resolve(null),
+			locate: () => Promise.resolve(null),
+			find: () => Promise.resolve(new Int32Array(0)),
+			close: () => undefined
+		}
+		const media = new DocxMediaCache(session, undefined, {
+			create: () => {
+				created.push(`blob:s${String(created.length)}`)
+
+				return created[created.length - 1] ?? ""
+			},
+			revoke: () => undefined
+		})
+		const scaled = document.createElement("div")
+		const element = document.createElement("div")
+		let width = 12
+
+		scaled.className = "fo-docx-page-scale"
+		scaled.appendChild(element)
+		document.body.appendChild(scaled)
+		element.getBoundingClientRect = () => ({ width }) as DOMRect
+
+		const release = paintObjects([{ element, id: 1, kind: 0, width: 10, height: 10 }], {
+			document,
+			session,
+			media,
+			signal: { aborted: false }
+		})
+
+		await wait(0)
+
+		return {
+			created,
+			href: () => element.querySelector("image")?.getAttribute("href"),
+			zoom: next => {
+				width = next
+				scaled.setAttribute("style", `transform: scale(${String(next / 10)})`)
+			},
+			release: () => {
+				release()
+				scaled.remove()
+			}
+		}
+	}
+
+	it("rasterises once, for the step the zoom settles on, not for the steps it passes", async () => {
+		const shown = await painted()
+
+		expect(shown.created).toHaveLength(1)
+
+		// 3x (the 4x step), then 5x (the 8x step) before the first settles.
+		shown.zoom(30)
+		await wait(20)
+		shown.zoom(50)
+		await wait(100)
+
+		expect(shown.created).toHaveLength(2)
+		expect(shown.href()).toBe(shown.created[1])
+		shown.release()
+	})
+
+	it("gives a released drawing no raster from a zoom it did not settle", async () => {
+		const shown = await painted()
+		const before = shown.href()
+
+		shown.zoom(30)
+		shown.release()
+		await wait(100)
+
+		expect(shown.created).toHaveLength(1)
+		expect(shown.href()).toBe(before)
+	})
+})
+
+describe("textMeasurer", () => {
+	it("makes one canvas per document, however many painters measure with it", () => {
+		const other = document.implementation.createHTMLDocument("")
+		const create = vi.spyOn(other, "createElement")
+
+		textMeasurer(other)("a", "12px sans-serif")
+		textMeasurer(other)("b", "12px sans-serif")
+
+		expect(create.mock.calls.filter(([tag]) => tag === "canvas")).toHaveLength(1)
 	})
 })

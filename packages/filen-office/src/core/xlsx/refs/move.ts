@@ -10,7 +10,7 @@ import { FormulaShift } from "./formulas"
 import { childElements, descendants, editMarkup, type Edited, type RefJob } from "./markup"
 import { contains, intersects, type CellMove } from "./moveRefs"
 import { pivotSource, rewriteChart, rewriteConnections, rewriteControlProperties, rewriteDrawing, rewriteVml } from "./parts"
-import { partKind } from "./plan"
+import { lastSegment, partKind, type Step } from "./plan"
 import { MODEL_SECTIONS, PLAIN_SECTIONS, rewriteSection } from "./sections"
 import { formatRef, formatSqref, overlapRange, parseRef, parseSqref, subtractRange, topLeft } from "./sqref"
 import { liveRelationships, refState } from "./state"
@@ -30,17 +30,8 @@ export interface MovePlan {
 
 export type MovePlanResult = { readonly ok: true; readonly plan: MovePlan } | { readonly ok: false; readonly refusal: SheetRefusal }
 
-interface Step {
-	readonly apply: () => void
-	readonly revert: () => void
-}
-
 // Sections of the cut's and the paste's sheets whose ranges travel with the cells.
 const TRAVELLING_SECTIONS: ReadonlySet<string> = new Set(["conditionalFormatting", "dataValidations", "hyperlinks", "extLst"])
-
-function lastSegment(type: string): string {
-	return type.slice(type.lastIndexOf("/") + 1)
-}
 
 // One sheet's view of the move.
 class SheetMove {
@@ -227,7 +218,9 @@ function travelSection(name: string, markup: string, sheet: SheetMove, job: RefJ
 		if (left === 0) return ""
 	} else {
 		// extLst: x14 conditional formats and validations travel; sparklines over the cells refuse; any other formula
-		// moves in place.
+		// moves in place. A container whose blocks all go takes its ext with it, and the section goes with its last ext.
+		const remaining = new Map<number, number>()
+
 		for (const node of descendants(document, root)) {
 			if (done.has(node)) continue
 
@@ -239,15 +232,10 @@ function travelSection(name: string, markup: string, sheet: SheetMove, job: RefJ
 					editor.remove(node)
 
 					const parent = document.parent(node)
+					const count =
+						remaining.get(parent) ?? childElements(document, parent).filter(other => document.localName(other) === local).length
 
-					if (local === "dataValidation")
-						setCount(
-							edited,
-							parent,
-							childElements(document, parent).filter(
-								other => other !== node && document.localName(other) === "dataValidation"
-							).length
-						)
+					remaining.set(parent, count - 1)
 				}
 			} else if (local === "sparkline" && hasRange) {
 				const range = parseRef(
@@ -262,6 +250,21 @@ function travelSection(name: string, markup: string, sheet: SheetMove, job: RefJ
 				if (next !== text) editor.setText(node, next)
 			}
 		}
+
+		const extsGone = new Set<number>()
+
+		for (const [container, count] of remaining) {
+			const ext = document.parent(container)
+
+			if (count === 0 && ext >= 0 && document.localName(ext) === "ext") {
+				editor.remove(ext)
+				extsGone.add(ext)
+			} else if (document.localName(container) === "dataValidations") {
+				setCount(edited, container, count)
+			}
+		}
+
+		if (extsGone.size > 0 && extsGone.size === childElements(document, root).length) return ""
 	}
 
 	return editor.changed ? decodeUtf8(editor.serialize()) : markup
@@ -374,8 +377,8 @@ async function plan(workbook: XlsxWorkbookModel, move: CellMove, slicing: Slicin
 			const before = state.sectionMarkup(model, name)
 			const after = before.map(markup =>
 				sheet.touched.length > 0 && TRAVELLING_SECTIONS.has(name)
-					? named(name, () => travelSection(name, markup, sheet, job))
-					: named(name, () => rewriteSection(name, markup, job))
+					? travelSection(name, markup, sheet, job)
+					: rewriteSection(name, markup, job)
 			)
 
 			if (after.every((markup, k) => markup === before[k])) continue
@@ -441,9 +444,10 @@ async function plan(workbook: XlsxWorkbookModel, move: CellMove, slicing: Slicin
 				}
 				break
 			case "pivotCache": {
-				// A source the cut takes whole would have to follow it; one it takes in part keeps its range.
+				// A source the cut takes whole would have to follow it; one it takes in part keeps its range. The source
+				// is read from the head of the part, never the whole cache.
 				const bytes = await state.partBytes(part.name)
-				const found = bytes === null || !formulas.namesTarget(decodeUtf8(bytes)) ? null : pivotSource(bytes, part.name)
+				const found = bytes === null ? null : pivotSource(bytes, part.name)
 
 				if (
 					found !== null &&
@@ -471,8 +475,7 @@ async function plan(workbook: XlsxWorkbookModel, move: CellMove, slicing: Slicin
 
 		if (before === null) continue
 
-		const transform = rewrite
-		const after = named(kind, () => transform(before))
+		const after = rewrite(before)
 
 		if (after === before) continue
 
@@ -536,17 +539,6 @@ async function placedParts(workbook: XlsxWorkbookModel, entry: XlsxSheetEntry, m
 			if (range !== null && sheet.touched.some(touched => intersects(range, touched)))
 				refuse(type === "pivotTable" ? "pivot" : "structureLocked", type)
 		}
-	}
-}
-
-// A refusal from inside a rewrite names the construct it came from.
-function named<T>(construct: string, run: () => T): T {
-	try {
-		return run()
-	} catch (error) {
-		if (error instanceof RefRefused && error.refusal.detail === "moved cells") refuse(error.refusal.reason, construct)
-
-		throw error
 	}
 }
 

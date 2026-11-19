@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs"
+import { strFromU8, unzipSync } from "fflate"
 import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { RevisionView, layoutDocument } from "@filen/office/core/docx"
 import { LINE_FLOATS, LINE_INTS, LineFloat, LineInt } from "@filen/office/core/text"
 import { Region, SOURCE_INTS, SourceInt, type PageDisplayList } from "../core/docx/layout/index"
 import type { PagedEditor, PagedEditorEvent } from "@filen/office/core/docx/paged"
-import { saveDocx } from "@filen/office/core/docx/write"
-import { buildDocx, modelOf } from "./docxSynthetic"
+import { DocxSaveError, PART_CONTRIBUTORS, prepareDocxSave, saveDocx, type PartContributor } from "@filen/office/core/docx/write"
+import { commentParts } from "../core/docx/write/parts/comments"
+import { buildDocx, modelOf, p } from "./docxSynthetic"
 import { HmtxMeasurer, layOut, loadDocx } from "./layoutFixtures"
 import { pageDigest, pagedEditor, savedDigest, settleAll } from "./pagedFixtures"
 
@@ -666,5 +668,94 @@ describe("docx stories by region", () => {
 		await settled
 		expect(editor.settled).toBe(true)
 		editor.dispose()
+	})
+})
+
+// A comments part related but holding no comment, written self-closing (as generators other than Word leave it).
+describe("docx stories in a self-closing part", () => {
+	const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+	const W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
+	// Declaring w14 (the new comments' paragraph ids): the root is opened as it is.
+	const ROOT = `<w:comments xmlns:w="${W}"  xmlns:w14="${W14}" xmlns:x="urn:x" x:keep="a&amp;b" />`
+	const docx = (root: string): Uint8Array =>
+		buildDocx({
+			body: p("one two three"),
+			relationships: [{ id: "rIdC", type: "comments", target: "comments.xml" }],
+			parts: [
+				{
+					name: "word/comments.xml",
+					contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml",
+					data: root
+				}
+			]
+		})
+	const comments = (saved: Uint8Array): string => strFromU8(unzipSync(saved)["word/comments.xml"] ?? new Uint8Array())
+	const open = async (root: string = ROOT): Promise<Awaited<ReturnType<typeof pagedEditor>>> => {
+		const opened = await pagedEditor(docx(root))
+
+		opened.context.identity.author = "Ann Lee"
+		opened.editor.dispatch(opened.editor.state.tr.setSelection(TextSelection.create(opened.editor.state.doc, 1, 4)))
+
+		return opened
+	}
+
+	it("opens the root for new comments, its start tag kept byte for byte", async () => {
+		const opened = await open()
+
+		expect(await opened.editor.execute({ type: "comment.add", text: "first" })).toBe(true)
+		opened.editor.dispatch(opened.editor.state.tr.setSelection(TextSelection.create(opened.editor.state.doc, 5, 8)))
+		expect(await opened.editor.execute({ type: "comment.add", text: "second" })).toBe(true)
+
+		const result = await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: opened.editor.sessions })
+		const saved = result.bytes as Uint8Array
+		const xml = comments(saved)
+
+		expect(xml.startsWith(`${ROOT.slice(0, -2)}><w:comment `)).toBe(true)
+		expect(xml.endsWith("</w:comment></w:comments>")).toBe(true)
+		expect(xml.match(/<w:comment /g)).toHaveLength(2)
+
+		const reopened = await pagedEditor(saved)
+
+		expect(reopened.editor.edits.model.stories.filter(story => story?.kind === "comment")).toHaveLength(2)
+		opened.editor.dispose()
+		reopened.editor.dispose()
+	})
+
+	it("opens it with the declarations a comment's paragraph ids need", async () => {
+		const opened = await open(`<w:comments xmlns:w="${W}" xmlns:x="urn:x" x:keep="a&amp;b"/>`)
+
+		expect(await opened.editor.execute({ type: "comment.add", text: "first" })).toBe(true)
+
+		const saved = (await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: opened.editor.sessions })).bytes as Uint8Array
+		const xml = comments(saved)
+
+		expect(xml).toMatch(/^<w:comments xmlns:w="[^"]+" xmlns:x="urn:x" x:keep="a&amp;b" xmlns:w14="[^"]+" [^>]*><w:comment /)
+		expect(xml).toContain("w14:paraId=")
+		expect(xml.endsWith("</w:comment></w:comments>")).toBe(true)
+		opened.editor.dispose()
+	})
+
+	it("refuses a new story anywhere else in it", async () => {
+		const opened = await open()
+
+		expect(await opened.editor.execute({ type: "comment.add", text: "first" })).toBe(true)
+
+		const misplaced: PartContributor = {
+			...commentParts,
+			container(story, doc) {
+				const container = commentParts.container?.(story, doc)
+				const document = story.part.document
+
+				return container === undefined ? undefined : { ...container, at: document.start(document.documentElement()) }
+			}
+		}
+		const parts = PART_CONTRIBUTORS.map(contributor => (contributor === commentParts ? misplaced : contributor))
+		const error = await prepareDocxSave({ pkg: opened.pkg, context: opened.context, sessions: opened.editor.sessions, parts }).catch(
+			(caught: unknown) => caught
+		)
+
+		expect(error).toBeInstanceOf(DocxSaveError)
+		expect((error as DocxSaveError).message).toContain("goes inside another element")
+		opened.editor.dispose()
 	})
 })

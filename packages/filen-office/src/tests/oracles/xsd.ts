@@ -296,18 +296,26 @@ const BATCH = 200
 // Larger documents stream through xmllint: a tree of a 130 MB part takes 1.6 GB.
 const STREAM_BYTES = 16 << 20
 
-function run(tool: string, args: readonly string[], report: string): void {
+// The tool's exit status.
+function run(tool: string, args: readonly string[], report: string): number {
 	const output = openSync(report, "w")
 
 	try {
 		const result = spawnSync(tool, args, { stdio: ["ignore", "ignore", output], timeout: TOOL_TIMEOUT_MS, killSignal: "SIGKILL" })
 
-		if (result.error !== undefined || result.signal !== null)
+		if (result.error !== undefined || result.signal !== null || result.status === null)
 			throw new Error(`${tool} failed: ${result.error?.message ?? `killed by ${result.signal}`}`)
+
+		return result.status
 	} finally {
 		closeSync(output)
 	}
 }
+
+// xmllint's exit status over a batch (the last file's): 0 valid, 1 an input that does not parse (reported per file
+// as NOT_WELL_FORMED), 3 or 4 validation errors (libxml2 versions differ). Anything else (5 a schema that does not
+// compile, 9 out of memory) checked nothing.
+const VALIDATED = new Set([0, 1, 3, 4])
 
 export const NOT_WELL_FORMED = "not well-formed XML"
 
@@ -367,9 +375,13 @@ export class XsdOracle {
 	}
 
 	private lint(args: readonly string[], outputs: Map<string, number>, results: Map<string, number>[], report: string): void {
-		run("xmllint", ["--nonet", "--schema", this.schema, ...args], report)
+		const status = run("xmllint", ["--nonet", "--schema", this.schema, ...args], report)
+		const lines = readFileSync(report, "utf8").split("\n")
 
-		for (const line of readFileSync(report, "utf8").split("\n")) {
+		if (!VALIDATED.has(status) || lines.some(line => line.includes("failed to compile")))
+			throw new Error(`xmllint exited ${status}: ${lines.slice(0, 5).join("\n").slice(0, 1500)}`)
+
+		for (const line of lines) {
 			// --stream reports "<file> : failed to parse", tree mode "<file>:<line>: parser error : ...".
 			const failed = / : failed to parse$|:\d+: (?:parser|namespace) error : /.exec(line)
 

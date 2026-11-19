@@ -127,6 +127,35 @@ describe("colour arithmetic", () => {
 		expect(colors).toEqual(["2F5597", "FF0000", "FFFFFF", "000080", "FF0000", "FF0000", "404040"])
 	})
 
+	it("resolves every preset name and system colour default, never a prototype member", () => {
+		const document = xml(
+			`<r xmlns:a="${A}"><a:prstClr val="darkBlue"/><a:prstClr val="crimson"/><a:prstClr val="ltGray"/><a:prstClr val="dkGoldenrod"/>` +
+				'<a:sysClr val="btnShadow"/><a:sysClr val="windowText"/><a:sysClr val="window" lastClr="fafafa"/>' +
+				'<a:sysClr val="constructor"/><a:sysClr val="toString"/><a:sysClr val="__proto__"/><a:prstClr val="constructor"/>' +
+				'<a:prstClr val="__proto__"/></r>'
+		)
+		const colors: (string | undefined)[] = []
+
+		for (let child = document.firstChildElement(document.documentElement()); child >= 0; child = document.nextSiblingElement(child)) {
+			colors.push(readDrawingColor(document, child))
+		}
+
+		expect(colors).toEqual([
+			"00008B",
+			"DC143C",
+			"D3D3D3",
+			"B8860B",
+			"A0A0A0",
+			"000000",
+			"FAFAFA",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		])
+	})
+
 	it("applies hue, sat, lum, component and gamma transforms as the text colour path does", () => {
 		const elements =
 			'<a:srgbClr val="FF0000"><a:hue val="7200000"/></a:srgbClr><a:srgbClr val="FF0000"><a:sat val="0"/></a:srgbClr>' +

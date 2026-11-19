@@ -153,6 +153,39 @@ export async function tableHeaders(document: XlsxDocument, model: XlsxSheetModel
 	return headers
 }
 
+// Whether writing these cells changes a table header's text (tableHeaders): `text` gives the i-th cell's new text (null
+// for a value that is no text), asked only of a header cell. A sheet without tables is not read.
+export async function changesTableHeader(
+	document: XlsxDocument,
+	sheet: SheetId,
+	model: XlsxSheetModel,
+	rows: ArrayLike<number>,
+	cols: ArrayLike<number>,
+	text: (i: number) => string | null
+): Promise<boolean> {
+	if (
+		!liveRelationships(document.workbook, model.part, model.relationships.all).some(relationship =>
+			relationship.type.endsWith("/table")
+		)
+	)
+		return false
+
+	const headers = await tableHeaders(document, model)
+
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i] ?? 0
+		const col = cols[i] ?? 0
+
+		if (
+			headers.some(range => row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol) &&
+			document.cellView(sheet, row, col).text !== text(i)
+		)
+			return true
+	}
+
+	return false
+}
+
 // A shared formula's children (§18.3.1.40) are written as the master's text moved to them: before its master is
 // overwritten or moved, each becomes a formula of its own with that text (logged, so undo gives the group back).
 export function unshare(document: XlsxDocument, sheet: SheetId, masterRow: number, masterCol: number, log: CellLog): void {
@@ -362,22 +395,8 @@ export async function setCells(
 
 	if (splitsArray(model, cells.rows, cells.cols)) return { refused: { reason: "arrayFormula" } }
 
-	if (
-		liveRelationships(document.workbook, model.part, model.relationships.all).some(relationship => relationship.type.endsWith("/table"))
-	) {
-		const headers = await tableHeaders(document, model)
-
-		for (let i = 0; i < count; i++) {
-			const row = cells.rows[i] ?? 0
-			const col = cells.cols[i] ?? 0
-
-			if (
-				headers.some(range => row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol) &&
-				document.cellView(sheet, row, col).text !== (cells.inputs[i] ?? "")
-			)
-				return { refused: { reason: "tableHeader" } }
-		}
-	}
+	if (await changesTableHeader(document, sheet, model, cells.rows, cells.cols, i => cells.inputs[i] ?? ""))
+		return { refused: { reason: "tableHeader" } }
 
 	// Built from the cells as they stand before this edit, so the edit is what it recalculates.
 	if (document.engine === null && document.allReady && (document.hasFormulas || entries.some(entry => entry.type === "formula"))) {
@@ -614,6 +633,8 @@ export async function clearCells(
 	const cols = Uint32Array.from(targets, target => target.col)
 
 	if (splitsArray(model, rows, cols)) return { refused: { reason: "arrayFormula" } }
+	// A header cell left empty would no longer name its table column; one already empty stays allowed.
+	if (await changesTableHeader(document, sheet, model, rows, cols, () => "")) return { refused: { reason: "tableHeader" } }
 
 	const log = new CellLog()
 	const changedRows: number[] = []
@@ -647,6 +668,9 @@ export async function clearCells(
 
 		if ((i & SLICE_MASK) === SLICE_MASK) await due(clock)
 	}
+
+	// An engine an earlier edit dropped is built from the cells as they stand, so the clear is what it recalculates.
+	if (cleared.length > 0) await document.engineBeforeRows(changes)
 
 	const contents =
 		cleared.length === 0 ? null : await writeLogged(document, sheet, changedRows, changedCols, cleared, log, changes, slicing)

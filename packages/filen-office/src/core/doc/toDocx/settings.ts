@@ -1,3 +1,4 @@
+import { le16, le32 } from "../bytes"
 import type { DocModel } from "../model"
 import { STORY_NAMESPACES, attr, clamp, val } from "./xml"
 
@@ -173,14 +174,6 @@ export function compatElements(dop: Uint8Array): string[] {
 	return COMPAT_ORDER.filter(name => on.has(name))
 }
 
-function u16(data: Uint8Array, at: number): number {
-	return (data[at] ?? 0) | ((data[at + 1] ?? 0) << 8)
-}
-
-function u32(data: Uint8Array, at: number): number {
-	return (u16(data, at) | (u16(data, at + 2) << 16)) >>> 0
-}
-
 function bit(value: number, index: number): boolean {
 	return ((value >>> index) & 1) !== 0
 }
@@ -209,7 +202,7 @@ const CURRENT_PROTECTION: readonly (DopProtectionEdit | undefined)[] = ["tracked
 export function dopProtection(dop: Uint8Array): { readonly edit: DopProtectionEdit; readonly key: number } | undefined {
 	if (dop.length < DOP_KEY + 4) return undefined
 
-	const flags = u32(dop, DOP_FLAGS)
+	const flags = le32(dop, DOP_FLAGS)
 	const dop2003 = dop.length >= DOP2003 + DOP2003_LENGTH
 	const enforced = dop2003 ? (dop[DOP2003 + 4] ?? 0) : 0
 	let edit: DopProtectionEdit | undefined
@@ -219,7 +212,7 @@ export function dopProtection(dop: Uint8Array): { readonly edit: DopProtectionEd
 	else if (bit(flags, 20)) edit = dop2003 && bit(dop[DOP2003] ?? 0, 0) ? "readOnly" : "comments"
 	else if (bit(flags, 30)) edit = "trackedChanges"
 
-	return edit === undefined ? undefined : { edit, key: u32(dop, DOP_KEY) }
+	return edit === undefined ? undefined : { edit, key: le32(dop, DOP_KEY) }
 }
 
 function protectionKeyAttributes(hash: ProtectionKeyHash): string {
@@ -248,13 +241,13 @@ export interface NoteSettings {
 
 export function settingsPart(model: DocModel, notes: NoteSettings, protectionHash?: ProtectionKeyHash): string {
 	const dop = model.dop
-	const flags = u32(dop, 4)
+	const flags = le32(dop, 4)
 	const out: string[] = [`<w:settings ${STORY_NAMESPACES}>`]
 
 	if (model.fib.fReadOnlyRecommended) out.push('<w:writeProtection w:recommended="1"/>')
 
 	if (dop.length >= 84) {
-		const view = u16(dop, 82)
+		const view = le16(dop, 82)
 		const percent = (view >> 3) & 0x1ff
 		const zoom = (view >> 12) & 3
 
@@ -264,11 +257,11 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 			)
 	}
 
-	const formFlags = dop.length >= 56 ? u16(dop, 54) : 0
+	const formFlags = dop.length >= 56 ? le16(dop, 54) : 0
 
 	if (bit(formFlags, 10)) out.push("<w:printFormsData/>")
 	if (bit(flags, 21)) out.push("<w:mirrorMargins/>")
-	if (dop.length >= 84 && bit(u16(dop, 82), 15)) out.push("<w:gutterAtTop/>")
+	if (dop.length >= 84 && bit(le16(dop, 82), 15)) out.push("<w:gutterAtTop/>")
 	if (bit(flags, 8)) out.push("<w:hideSpellingErrors/>")
 	if (bit(flags, 9)) out.push("<w:hideGrammaticalErrors/>")
 	if (bit(flags, 15)) out.push("<w:trackRevisions/>")
@@ -285,7 +278,7 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 	}
 
 	if (dop.length >= 12) {
-		const tab = u16(dop, 10)
+		const tab = le16(dop, 10)
 
 		out.push(val("defaultTabStop", tab === 0 ? 720 : clamp(tab, 1, 31680)))
 	}
@@ -293,8 +286,8 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 	if (bit(flags, 12)) out.push("<w:autoHyphenation/>")
 
 	if (dop.length >= 18) {
-		const limit = u16(dop, 16)
-		const zone = u16(dop, 14)
+		const limit = le16(dop, 16)
+		const zone = le16(dop, 14)
 
 		if (limit > 0 && limit < 0x8000) out.push(val("consecutiveHyphenLimit", limit))
 		if (zone > 0 && zone < 0x8000) out.push(val("hyphenationZone", zone))
@@ -314,7 +307,7 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 
 		if (documentWide) {
 			const fpc = ((dop[0] ?? 0) >> 5) & 3
-			const word = u16(dop, 2)
+			const word = le16(dop, 2)
 
 			props += val("pos", fpc === 0 ? "sectEnd" : fpc === 2 ? "beneathText" : "pageBottom")
 			if (word >> 2 > 0) props += val("numStart", word >> 2)
@@ -328,7 +321,7 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 		let props = dop.length >= 56 ? val("pos", (formFlags & 3) === 3 ? "docEnd" : "sectEnd") : ""
 
 		if (documentWide) {
-			const word = u16(dop, 52)
+			const word = le16(dop, 52)
 
 			if (word >> 2 > 0) props += val("numStart", word >> 2)
 			props += val("numRestart", ["continuous", "eachSect", "eachPage"][word & 3] ?? "continuous")

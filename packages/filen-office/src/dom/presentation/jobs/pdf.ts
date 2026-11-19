@@ -87,7 +87,8 @@ export const pdfJob: JobDefinition<"pdf"> = {
 
 		const securityKey = request.protect ? await session.pdfSecurity?.() : undefined
 
-		if (request.protect && securityKey === undefined) return refused("unsupported", "the deck has no password to protect the PDF with")
+		if (request.protect && securityKey === undefined)
+			return refused("passwordUnsupported", "the deck has no password to protect the PDF with")
 
 		const faces = (await session.faces?.()) ?? []
 

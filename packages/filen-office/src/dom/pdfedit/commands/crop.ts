@@ -5,7 +5,7 @@ import { cropPages, cropPagesToContent, outsideCropRects } from "../pages/index"
 import { applyPageRedactions, markArea, markText, pageRedactionMarks, removeRedactionMark } from "../redact/index"
 import { recordRedaction, type RedactedRegions } from "./redact"
 import type { MupdfModule } from "../protocol"
-import { isIndex, isRecord, type PdfCommandTable } from "./types"
+import { isPageList, isRecord, type PdfCommandTable } from "./types"
 
 // Cropping: a crop box set from margins (points off each side of each page as it shows), each page fitted to what it
 // draws ("Remove white margins"), and a crop that also deletes what lies outside it. Cropping alone hides content
@@ -13,7 +13,6 @@ import { isIndex, isRecord, type PdfCommandTable } from "./types"
 // redaction block (drawings touching the outside go whole, text and image pixels there go), then crops. Pending
 // redaction marks the user made on those pages are set aside meanwhile and put back, so only the outside is applied.
 
-const MAX_PAGES = 100_000
 // Points: a margin or padding no page reaches (MuPDF's page limit is 14 400 pt a side).
 const MAX_POINTS = 100_000
 
@@ -32,7 +31,7 @@ function parsePages(args: unknown): readonly number[] | null {
 
 	const pages = args["pages"]
 
-	return Array.isArray(pages) && pages.length > 0 && pages.length <= MAX_PAGES && pages.every(isIndex) ? pages : null
+	return isPageList(pages) ? pages : null
 }
 
 function parseMargins(args: unknown): { readonly pages: readonly number[]; readonly margins: CropMargins } | null {

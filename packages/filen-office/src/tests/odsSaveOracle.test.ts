@@ -124,6 +124,13 @@ function validatorErrors(files: readonly string[]): Map<string, Set<string>> {
 		const batch = files.slice(start, start + 100)
 		const run = spawnSync("java", ["-jar", VALIDATOR, ...batch], { encoding: "utf8", maxBuffer: 1 << 28 })
 
+		// A spawn failure, a kill or a cut-off output reads as no error line, which would pass a save as adding none. A
+		// non-zero exit is how odfvalidator reports an invalid file (sources among them), which the lines name.
+		if (run.error !== undefined || run.signal !== null || run.status === null)
+			throw new Error(
+				`odfvalidator did not finish files ${start}-${start + batch.length - 1}: ${run.error?.message ?? run.signal ?? "no exit status"}`
+			)
+
 		for (const line of `${run.stdout}\n${run.stderr}`.split("\n")) {
 			const match = /^(.+?\.ods)(\/[^[:]*)?(?:\[\d+,\d+\])?:\s+(?:Error|Fatal):\s+(.*)$/.exec(line)
 			const file = match === null ? undefined : batch.find(item => basename(item) === basename(match[1] ?? ""))

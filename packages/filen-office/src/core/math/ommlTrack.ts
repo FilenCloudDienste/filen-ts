@@ -773,7 +773,7 @@ const DEFAULTS: Readonly<Record<string, string>> = {
 	"m:d/m:begChr": "(",
 	"m:d/m:endChr": ")",
 	"m:d/m:sepChr": "|",
-	"m:acc/m:chr": "̂",
+	"m:acc/m:chr": "\u0302",
 	"m:groupChr/m:chr": "⏟",
 	"m:groupChr/m:pos": "bot",
 	"m:bar/m:pos": "bot",

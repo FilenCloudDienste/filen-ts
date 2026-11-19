@@ -3,6 +3,7 @@ import { parseLength, parsePercent, type OdfElement, type OdfListLevel, type Odf
 import { classifyHref } from "../../presentation/actions"
 import { tooDeep, tooLarge } from "../../presentation/refusal"
 import type { Action, Bullet, FontRef, ListStyle, Paragraph, ParaProps, Run, RunProps, SlideRef, TextBody } from "../../presentation/model"
+import { own } from "../../tables"
 import { NodeKind } from "../../xml/index"
 import { EMU_PER_PT, packagePart, srgb } from "./fills"
 import type { Fragment, OdpContext } from "./context"
@@ -147,7 +148,7 @@ export function paraPropsOf(properties: OdfProperties | undefined): { -readonly 
 	if (properties === undefined) return out
 
 	const attributes = properties.attributes
-	const align = ALIGNS[attributes.get("fo:text-align") ?? ""]
+	const align = own(ALIGNS, attributes.get("fo:text-align") ?? "")
 	const left = parseLength(attributes.get("fo:margin-left"))
 	const right = parseLength(attributes.get("fo:margin-right"))
 	const indent = parseLength(attributes.get("fo:text-indent"))
@@ -311,6 +312,8 @@ export const NEAR_NUMBERINGS: ReadonlyMap<string, string> = new Map([
 
 // Formats LibreOffice also reads a scheme from: Hebrew numerals (its .ppt import's hebrew2Minus).
 const FORMAT_ALIASES: Readonly<Record<string, string>> = { "א, י, ק, ...": "א, ב, ג, ..." }
+// The Latin formats' scheme stems.
+const LATIN_SCHEMES: Readonly<Record<string, string>> = { "1": "arabic", a: "alphaLc", A: "alphaUc", i: "romanLc", I: "romanUc" }
 
 const BY_FORM = new Map<string, string>()
 const BY_FORMAT = new Map<string, string>()
@@ -331,14 +334,14 @@ function autonumberScheme(attributes: ReadonlyMap<string, string>): string | und
 
 	if (given === "") return undefined
 
-	const format = FORMAT_ALIASES[given] ?? given
+	const format = own(FORMAT_ALIASES, given) ?? given
 	const prefix = attributes.get("style:num-prefix") ?? ""
 	const suffix = attributes.get("style:num-suffix") ?? ""
 	const exact = BY_FORM.get(`${format}\u0000${prefix}\u0000${suffix}`)
 
 	if (exact !== undefined) return exact
 
-	const latin = { "1": "arabic", a: "alphaLc", A: "alphaUc", i: "romanLc", I: "romanUc" }[format]
+	const latin = own(LATIN_SCHEMES, format)
 
 	if (latin === undefined) return BY_FORMAT.get(format) ?? "arabicPlain"
 	if (suffix.startsWith(")")) return `${latin}${prefix.startsWith("(") ? "ParenBoth" : "ParenR"}`
@@ -510,20 +513,22 @@ function merged(base: RunProps, own: RunProps): RunProps {
 function linkAction(context: OdpContext, href: string | undefined): Action | undefined {
 	if (href === undefined || href.trim() === "") return undefined
 
-	const trimmed = href.trim()
+	return hrefAction(context, href.trim())
+}
 
-	if (trimmed.startsWith("#")) {
-		const slide = pageOfFragment(context, trimmed.slice(1))
+// A link's action: a jump to the page a fragment names ("#page3"; none when no page has the name), else the link
+// classified as the deck's links are.
+export function hrefAction(context: OdpContext, href: string): Action | undefined {
+	if (!href.startsWith("#")) return classifyHref(href)
 
-		return slide === undefined ? undefined : { kind: "slide", slide }
-	}
+	const slide = pageOfFragment(context, href.slice(1))
 
-	return classifyHref(trimmed)
+	return slide === undefined ? undefined : { kind: "slide", slide }
 }
 
 // The page an href fragment ("#name", an IRI reference) names: its escapes decoded, else the name as written (a
 // producer that writes "%" raw, or a raw name its decoding does not match).
-export function pageOfFragment(context: OdpContext, fragment: string): SlideRef | undefined {
+function pageOfFragment(context: OdpContext, fragment: string): SlideRef | undefined {
 	let decoded = fragment
 
 	try {
@@ -748,7 +753,6 @@ export function readTextBody(
 	const fragment = scope.fragment
 	const document = fragment.document
 	const paragraphs: Paragraph[] = []
-	const cursorBase = { characters: 0 }
 	let found = false
 
 	const paragraph = (node: number, list: ListFrame | undefined, bulleted: boolean, start: number | undefined): void => {
@@ -828,7 +832,6 @@ export function readTextBody(
 			cursor.characters--
 		}
 
-		cursorBase.characters += cursor.characters
 		context.countRuns(cursor.runs.length, cursor.characters)
 
 		if (cursor.runs.length > context.budgets.runsPerBody) tooLarge("runs in a text body", context.budgets.runsPerBody)

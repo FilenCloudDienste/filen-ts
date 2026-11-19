@@ -68,14 +68,16 @@ export function startEdit(
 	document.enableJournal()
 
 	const { encryption, permissions } = opened.document
+	const held = heldAtStart(document, opened, password)
 
+	// The session reopens its bytes with the candidate that unlocked them, never the password as typed.
 	return new PdfEditSession(document, {
 		access: opened.access,
 		encryption,
 		restrictions: restrictionsOf(permissions, opened.access, encryption),
-		held: heldAtStart(document, opened, password),
+		held,
 		revisions,
-		...(password === undefined ? {} : { password }),
+		...(held.password === "" ? {} : { password: held.password }),
 		memory,
 		fileBytes
 	})
@@ -666,7 +668,8 @@ export const EDIT_REQUESTS: Handlers = {
 			renderer: new TileRenderer(context.mupdf, adopted, context.host.maxDisplayLists),
 			heap: output.buffer,
 			base: restart ? output.buffer : open.base,
-			source: output.buffer
+			source: output.buffer,
+			password: edit.password
 		})
 		context.mupdf.emptyStore()
 

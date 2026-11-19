@@ -130,6 +130,7 @@ export function ctnAttributes(ctn: CommonTimeNode): readonly (readonly [string, 
 	push("autoRev", ctn.autoRev === undefined ? undefined : ctn.autoRev ? "1" : "0")
 	push("restart", ctn.restart)
 	push("fill", ctn.fill)
+	push("syncBehavior", ctn.syncBehavior)
 	push("tmFilter", ctn.tmFilter)
 	push("evtFilter", ctn.evtFilter)
 	push("display", ctn.display)

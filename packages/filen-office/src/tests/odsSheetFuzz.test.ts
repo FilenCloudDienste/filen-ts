@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { odsProof } from "../core/ods/write/save"
 import { STRICT_ERRORS } from "../core/ods/write/cells"
 import { join } from "node:path"
@@ -274,34 +274,35 @@ const MODES: readonly Mode[] = ["sync", "race"]
 const SEEDS = Number(process.env["FILEN_OFFICE_ODS_FUZZ"] ?? "6")
 const CORPUS = ["frictionless__table-with-two-sheets.ods", "lo__chart-import-basic.ods", "govuk__Budget_example__guidance.ods"]
 
+const ODS_CORPUS = join(CORPUS_DIR, "ods")
+const CORPUS_PRESENT = existsSync(ODS_CORPUS)
+
+async function fuzz(source: Uint8Array, mode: Mode): Promise<void> {
+	const findings: string[] = []
+	let applied = 0
+
+	for (let seed = 1; seed <= SEEDS; seed++) {
+		const result = await sequence(source, seed, mode)
+
+		applied += result.applied
+		findings.push(...result.findings.map(finding => `seed ${seed}: ${finding}`))
+	}
+
+	expect(findings.slice(0, 10)).toEqual([])
+	expect(applied).toBeGreaterThan(SEEDS * 3)
+}
+
 describe("ODS sheet fuzz", () => {
-	const targets: [string, () => Uint8Array][] = [
-		["fixture", () => FIXTURE],
-		...CORPUS.map((name): [string, () => Uint8Array] => [name, () => new Uint8Array(readFileSync(join(CORPUS_DIR, "ods", name)))])
-	]
+	for (const mode of MODES) it(`fixture, ${mode}`, { timeout: 600_000 }, () => fuzz(FIXTURE, mode))
 
-	for (const [name, bytes] of targets)
+	// Skipped without the corpus; a named file missing from a fetched corpus fails rather than passing on nothing.
+	for (const name of CORPUS)
 		for (const mode of MODES)
-			it(`${name}, ${mode}`, { timeout: 600_000 }, async () => {
-				let source: Uint8Array
+			it.skipIf(!CORPUS_PRESENT)(`${name}, ${mode}`, { timeout: 600_000 }, async () => {
+				const path = join(ODS_CORPUS, name)
 
-				try {
-					source = bytes()
-				} catch {
-					return
-				}
+				expect(existsSync(path), name).toBe(true)
 
-				const findings: string[] = []
-				let applied = 0
-
-				for (let seed = 1; seed <= SEEDS; seed++) {
-					const result = await sequence(source, seed, mode)
-
-					applied += result.applied
-					findings.push(...result.findings.map(finding => `seed ${seed}: ${finding}`))
-				}
-
-				expect(findings.slice(0, 10)).toEqual([])
-				expect(applied).toBeGreaterThan(SEEDS * 3)
+				await fuzz(new Uint8Array(readFileSync(path)), mode)
 			})
 })

@@ -1,9 +1,10 @@
 import { TextSelection } from "prosemirror-state"
 import { strFromU8, unzipSync } from "fflate"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import { saveDocx } from "@filen/office/core/docx/write"
+import { orphanedNotes } from "../core/docx/write/parts/notes"
 import { buildDocx, p, type ExtraPart } from "./docxSynthetic"
 import { pagedEditor, settleAll } from "./pagedFixtures"
 
@@ -312,5 +313,58 @@ describe("docx save drops a removed header", () => {
 
 		expect(text(entries, "[Content_Types].xml")).not.toContain(CHART_TYPE)
 		opened.editor.dispose()
+	})
+})
+
+describe("docx save drops a note whose every reference went", () => {
+	const COUNT = 200
+	const reference = (id: number): string => `<w:r><w:footnoteReference w:id="${String(id)}"/></w:r>`
+	const note = (id: number): string =>
+		`<w:footnote w:id="${String(id)}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t>note ${String(id)}</w:t></w:r></w:p></w:footnote>`
+	const ids = Array.from({ length: COUNT }, (_, k) => k + 1)
+	// Each paragraph a reference among tabs (atoms the save copies as their source bytes).
+	const bytes = buildDocx({
+		body:
+			ids
+				.map(
+					id => `<w:p><w:r><w:t>Text</w:t><w:tab/><w:tab/><w:tab/></w:r>${reference(id)}<w:r><w:tab/><w:t>more</w:t></w:r></w:p>`
+				)
+				.join("") + SECTION(""),
+		footnotes:
+			'<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>' +
+			'<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>' +
+			ids.map(note).join("")
+	})
+
+	it("finds the note whose reference was deleted, searching held source only for it", async () => {
+		const opened = await pagedEditor(bytes)
+		const { editor, context } = opened
+		const session = editor.session
+		let at = -1
+
+		session.state.doc.descendants((node, pos) => {
+			if (at < 0 && node.type.name === "note_ref" && node.attrs["id"] === "7") at = pos
+		})
+		session.dispatch(session.state.tr.delete(at, at + 1))
+
+		const parts = vi.spyOn(context.model.parts, "entries")
+		const orphans = orphanedNotes(
+			context,
+			editor.sessions,
+			editor.sessions.map(candidate => candidate.state.doc)
+		)
+
+		expect(
+			[...orphans.values()].flat().map(item => context.model.parts[context.model.footnotes.get("7")?.part ?? -1]?.id(item))
+		).toEqual(["7"])
+		// Every other note is referenced by a story's own nodes: no search of the held source ranges for it.
+		expect(parts).toHaveBeenCalledTimes(1)
+		parts.mockRestore()
+
+		const saved = await save(opened)
+
+		expect(text(saved, "word/footnotes.xml")).not.toContain("note 7<")
+		expect(text(saved, "word/footnotes.xml")).toContain("note 8<")
+		editor.dispose()
 	})
 })

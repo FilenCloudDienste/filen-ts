@@ -130,6 +130,8 @@ export interface OdsSource {
 	readonly protection: XlsxWorkbookProtection | null
 	readonly activeTab: number
 	readonly issues: readonly OdsIssue[]
+	// A table inside a cell or marked as a sub-table, which the model does not hold.
+	readonly subTables: boolean
 	// What names cells by address that the model does not carry.
 	readonly unheld: OdsUnheld
 }

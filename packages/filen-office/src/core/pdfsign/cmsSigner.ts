@@ -1,5 +1,6 @@
 import * as asn1js from "asn1js"
 import { SignerInfo } from "pkijs"
+import { TIMESTAMP_TOKEN_OID } from "./algorithms"
 import { certificateInfo } from "./certificate"
 import { derOf, parseCms, parseTimestampToken, signingTime } from "./cms"
 
@@ -17,7 +18,7 @@ export interface CmsSignerSummary {
 }
 
 // RFC 3161 tokens: CMS's own attribute, and Authenticode's.
-const TIMESTAMP_TOKENS: ReadonlySet<string> = new Set(["1.2.840.113549.1.9.16.2.14", "1.3.6.1.4.1.311.3.3.1"])
+const TIMESTAMP_TOKENS: ReadonlySet<string> = new Set([TIMESTAMP_TOKEN_OID, "1.3.6.1.4.1.311.3.3.1"])
 const COUNTER_SIGNATURE = "1.2.840.113549.1.9.6"
 
 function unsignedTime(signer: SignerInfo): number | null {

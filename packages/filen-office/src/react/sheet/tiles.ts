@@ -366,20 +366,20 @@ export class TileCache {
 		return entry
 	}
 
-	// A patch for a tile held: a merge needs the tile (else the patch is dropped and false answered, so the tile is
-	// fetched again); a patch older than the tile held changes nothing.
+	// A patch for a tile held; a patch older than the tile held changes nothing. A patch, a replace too, for a tile not
+	// held is dropped and false answered: the tile was released (the session stops patching it once it handles the
+	// release), so caching it would keep a tile nothing updates; it is fetched again when seen.
 	patch(patch: SheetTilePatch): boolean {
 		const key = tileKey(patch.sheet, patch.tileRow, patch.tileCol)
 		const held = this.tiles.get(key)
 
-		if (held !== undefined && held.version > patch.version) return true
+		if (held === undefined) return false
+		if (held.version > patch.version) return true
 		if (patch.mode === "replace") {
 			this.tiles.set(key, keyed(patch))
 
 			return true
 		}
-
-		if (held === undefined) return false
 
 		this.tiles.set(key, keyed(mergeTile(held, patch)))
 

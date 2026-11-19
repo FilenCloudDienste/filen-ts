@@ -2,11 +2,13 @@ import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { OpcPackage, bytesSource } from "@filen/office/core/opc"
 import type { DocxPackage } from "@filen/office/core/docx"
-import { docxSchema, type DocxEditContext, type DocxEditorCommand } from "@filen/office/core/docx/edit"
+import { docxSchema, freshSlice, type DocxEditContext, type DocxEditorCommand } from "@filen/office/core/docx/edit"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import { DocxSaveError, saveDocx } from "@filen/office/core/docx/write"
 import { markInternal } from "../core/docx/edit/invariants/index"
-import { noteReferences } from "../core/docx/stories/notes"
+import { sourceCopies } from "../core/docx/edit/session"
+import { cloneNote } from "../core/docx/stories/clone"
+import { docxNotes, noteReferences } from "../core/docx/stories/notes"
 import { openBytes } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
 import { pageDigest, pagedEditor, savedDigest, settleAll } from "./pagedFixtures"
@@ -408,6 +410,38 @@ describe("docx footnotes and endnotes", () => {
 		editor.dispose()
 	})
 
+	it("deletes or converts a custom-mark note whose mark is gone without touching the text after it", async () => {
+		// The reference alone in its run, body text in a run of its own after it.
+		const docx = buildDocx({
+			body:
+				'<w:p><w:r><w:t>One</w:t></w:r><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:customMarkFollows="1" w:id="1"/></w:r>' +
+				'<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">body text</w:t></w:r></w:p>',
+			footnotes: SEPARATORS("footnote") + NOTE("footnote", "1", "first")
+		})
+		const deleted = await pagedEditor(docx)
+
+		caret(deleted.editor, 4)
+		expect(await run(deleted.editor, { type: "note.delete" })).toBe(true)
+		expect(deleted.editor.session.state.doc.textContent).toBe("Onebody text")
+		deleted.editor.dispose()
+
+		const converted = await pagedEditor(docx)
+		const following = (editor: PagedEditor): string =>
+			JSON.stringify(
+				editor.session.state.doc
+					.child(0)
+					.child(editor.session.state.doc.child(0).childCount - 1)
+					.marks.map(mark => mark.toJSON())
+			)
+		const before = following(converted.editor)
+
+		caret(converted.editor, 4)
+		expect(await run(converted.editor, { type: "note.convert" })).toBe(true)
+		expect(converted.editor.session.state.doc.textContent).toBe("Onebody text")
+		expect(following(converted.editor)).toBe(before)
+		converted.editor.dispose()
+	})
+
 	it("refuses a save with two references to one new note", async () => {
 		const opened = await pagedEditor(buildDocx({ body: p("Alpha beta") }))
 		const { editor, pkg, context } = opened
@@ -509,6 +543,193 @@ describe("docx footnotes and endnotes", () => {
 
 		expect(laid).toBeLessThan(4)
 		await saved(opened)
+		editor.dispose()
+	})
+})
+
+// A PNG of a width x height picture (its header: the pixels are not needed to place it).
+function png(width: number, height: number): Uint8Array {
+	const u32 = (value: number): number[] => [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]
+	const chunk = (type: string, data: readonly number[]): number[] => [
+		...u32(data.length),
+		...[...type].map(c => c.charCodeAt(0)),
+		...data,
+		0,
+		0,
+		0,
+		0
+	]
+
+	return new Uint8Array([
+		0x89,
+		0x50,
+		0x4e,
+		0x47,
+		0x0d,
+		0x0a,
+		0x1a,
+		0x0a,
+		...chunk("IHDR", [...u32(width), ...u32(height), 8, 6, 0, 0, 0]),
+		...chunk("IEND", [])
+	])
+}
+
+const T = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+const NOTES_RELATIONSHIPS = (entries: string): { name: string; data: string } => ({
+	name: "word/_rels/footnotes.xml.rels",
+	data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${entries}</Relationships>`
+})
+const LINK = (id: string, text: string): string => `<w:hyperlink r:id="${id}"><w:r><w:t>${text}</w:t></w:r></w:hyperlink>`
+const PICTURE =
+	'<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="457200" cy="228600"/><wp:docPr id="7" name="Picture 7"/>' +
+	'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="a.png"/><pic:cNvPicPr/></pic:nvPicPr>' +
+	'<pic:blipFill><a:blip r:embed="rIdPic"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="457200" cy="228600"/></a:xfrm>' +
+	'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+// A legacy VML picture naming its image by o:relid only.
+const LEGACY =
+	'<w:r><w:pict><v:shape id="_x0000_i1030" type="#_x0000_t75" style="width:72pt;height:36pt"><v:imagedata o:relid="rIdOld" o:title=""/></v:shape></w:pict></w:r>'
+const NOTE_WITH = (id: string, text: string, content: string): string =>
+	`<w:footnote w:id="${id}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> ${text}</w:t></w:r>${content}</w:p></w:footnote>`
+
+// The relationship target attribute `attribute` = id of each element names in `xml`, by `rels` (a .rels part).
+function targets(xml: string, rels: string, attribute: string): string[] {
+	return [...xml.matchAll(new RegExp(`${attribute}="([^"]+)"`, "g"))].map(
+		match => new RegExp(`Id="${match[1] ?? ""}" Type="[^"]+" Target="([^"]+)"`).exec(rels)?.[1] ?? "dangling"
+	)
+}
+
+describe("docx notes copied and converted", () => {
+	it("copies a note holding a tracked move with move ranges of its own", async () => {
+		const stamp = 'w:author="Ann" w:date="2026-01-01T00:00:00Z"'
+		const opened = await pagedEditor(
+			buildDocx({
+				body: `<w:p><w:r><w:t>One</w:t></w:r>${REFERENCE("footnote", "1")}</w:p>${p("Two")}`,
+				footnotes:
+					SEPARATORS("footnote") +
+					'<w:footnote w:id="1"><w:p><w:r><w:footnoteRef/></w:r>' +
+					`<w:moveFromRangeStart w:id="5" w:name="move1" ${stamp}/><w:moveFrom w:id="6" ${stamp}><w:r><w:t>Moved</w:t></w:r></w:moveFrom><w:moveFromRangeEnd w:id="5"/></w:p>` +
+					`<w:p><w:moveToRangeStart w:id="7" w:name="move1" ${stamp}/><w:moveTo w:id="8" ${stamp}><w:r><w:t>Moved</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="7"/></w:p></w:footnote>`
+			})
+		)
+		const { editor, context } = opened
+		const story = context.model.footnotes.get("1")
+		const part = story === undefined ? undefined : context.model.parts[story.part]
+
+		if (story === undefined || part === undefined) throw new Error("no note")
+
+		// The copy a paste makes (and a conversion, into the endnotes part) of the note as its source has it.
+		const endnotes = editor.notePart("endnote")
+
+		if (endnotes === undefined) throw new Error("no endnotes part")
+
+		for (const into of [undefined, { part: endnotes, kind: "endnote" as const }]) {
+			const template = cloneNote(context, part, story.item, "9", undefined, [], into)
+
+			if (template === undefined) throw new Error("not copied")
+
+			const copy = decoder.decode(template.bytes)
+			const ids = (kind: string): string[] =>
+				[...copy.matchAll(new RegExp(`<w:${kind} w:id="(\\d+)"`, "g"))].map(match => match[1] ?? "")
+			const names = (kind: string): string[] =>
+				[...copy.matchAll(new RegExp(`<w:${kind} w:id="\\d+" w:name="([^"]+)"`, "g"))].map(match => match[1] ?? "")
+
+			for (const half of ["moveFromRange", "moveToRange"]) {
+				const starts = ids(`${half}Start`)
+
+				expect(starts).toHaveLength(1)
+				expect(["5", "6", "7", "8"]).not.toContain(starts[0])
+				expect(ids(`${half}End`)).toEqual(starts)
+			}
+
+			expect(ids("moveFromRangeStart")).not.toEqual(ids("moveToRangeStart"))
+			expect(names("moveFromRangeStart")[0]).not.toBe("move1")
+			expect(names("moveToRangeStart")).toEqual(names("moveFromRangeStart"))
+		}
+
+		// A paste of the reference saves, again and again.
+		const body = editor.body.session
+		const doc = body.state.doc
+		const at = doc.content.size - 1
+		const slice = freshSlice(
+			doc.slice(1, doc.child(0).nodeSize - 1),
+			sourceCopies(context),
+			body.story.part.index,
+			body.story.part.index,
+			true
+		)
+		const tr = body.state.tr.replaceRange(at, at, slice).setMeta("uiEvent", "paste")
+
+		expect(docxNotes(editor).pasted(tr) && body.dispatch(tr)).toBe(true)
+		await saved(opened)
+		// Saved again: still every id once.
+		await saved(opened)
+		editor.dispose()
+	})
+
+	it("converts notes naming relationships, each copy holding placeholders only for what it names", async () => {
+		const unused = Array.from(
+			{ length: 6 },
+			(_, k) =>
+				`<Relationship Id="rIdX${String(k)}" Type="${T}/hyperlink" Target="https://unused.example/${String(k)}" TargetMode="External"/>`
+		)
+		const opened = await pagedEditor(
+			buildDocx({
+				body:
+					`<w:p><w:r><w:t>One</w:t></w:r>${REFERENCE("footnote", "1")}</w:p>` +
+					`<w:p><w:r><w:t>Two</w:t></w:r>${REFERENCE("footnote", "2")}</w:p>` +
+					`<w:p><w:r><w:t>Three</w:t></w:r>${REFERENCE("footnote", "3")}</w:p>`,
+				footnotes:
+					SEPARATORS("footnote") +
+					NOTE_WITH("1", "first", LINK("rIdL1", "one")) +
+					NOTE_WITH("2", "second", LINK("rIdL2", "two")) +
+					NOTE_WITH("3", "third", `${LINK("rIdL3", "three")}${PICTURE}${LEGACY}`),
+				parts: [
+					{ name: "word/media/a.png", data: png(48, 24) },
+					{ name: "word/media/old.png", data: png(24, 12) },
+					NOTES_RELATIONSHIPS(
+						[1, 2, 3]
+							.map(
+								k =>
+									`<Relationship Id="rIdL${String(k)}" Type="${T}/hyperlink" Target="https://example.com/${String(k)}" TargetMode="External"/>`
+							)
+							.join("") +
+							`<Relationship Id="rIdPic" Type="${T}/image" Target="media/a.png"/><Relationship Id="rIdOld" Type="${T}/image" Target="media/old.png"/>` +
+							unused.join("")
+					)
+				]
+			})
+		)
+		const { editor } = opened
+
+		caret(editor, 2)
+		expect(await run(editor, { type: "note.convertAll", to: "endnote" })).toBe(true)
+
+		const model = editor.edits.model
+		const copies = new Set(
+			model.stories
+				.filter(story => story.kind === "endnote" && story.id !== undefined && story.noteType === "normal")
+				.map(story => model.parts[story.part])
+		)
+		const placeholders = [...copies].map(part =>
+			(part?.relationships.all ?? []).filter(relationship => relationship.id.startsWith("filenCopiedPart"))
+		)
+
+		expect(placeholders.map(list => list.length).sort()).toEqual([1, 1, 3])
+		expect(
+			placeholders
+				.flat()
+				.map(relationship => relationship.target)
+				.sort()
+		).toEqual(["https://example.com/1", "https://example.com/2", "https://example.com/3", "media/a.png", "media/old.png"])
+
+		const bytes = await saved(opened)
+		const endnotes = await read(bytes, "word/endnotes.xml")
+		const rels = await read(bytes, "word/_rels/endnotes.xml.rels")
+
+		expect(targets(endnotes, rels, "r:id").sort()).toEqual(["https://example.com/1", "https://example.com/2", "https://example.com/3"])
+		expect(targets(endnotes, rels, "r:embed")).toEqual(["media/a.png"])
+		// The legacy picture's o:relid names the same image as before, in the endnotes part.
+		expect(targets(endnotes, rels, "o:relid")).toEqual(["media/old.png"])
 		editor.dispose()
 	})
 })

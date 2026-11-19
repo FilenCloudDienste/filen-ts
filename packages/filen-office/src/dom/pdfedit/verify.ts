@@ -445,20 +445,24 @@ function dictChanges(objectNum: number, before: PDFObject, after: PDFObject, con
 }
 
 function classifyObject(objectNum: number, context: ChangeContext): PdfChange[] {
-	const before = deref(context.revision.newIndirect(objectNum))
-	const after = deref(context.document.newIndirect(objectNum))
+	// Whether an object is a stream is known from its reference only: the resolved dictionary is never a stream.
+	const beforeRef = context.revision.newIndirect(objectNum)
+	const afterRef = context.document.newIndirect(objectNum)
+	const before = deref(beforeRef)
+	const after = deref(afterRef)
 
 	// A new object matters once something references it, which is a change to that object, or when the signed
 	// revision already referred to it.
 	if (before.isNull()) return context.shadowed ? [{ kind: "content" }] : []
 	if (after.isNull()) return [annotationChange(objectNum, context) ?? { kind: "content" }]
 
-	if (after.isStream() || before.isStream()) {
-		if (!after.isStream() || !before.isStream()) return [{ kind: "content" }]
+	const afterStream = afterRef.isStream()
+	const beforeStream = beforeRef.isStream()
 
-		const sameData = equal(after.readRawStream().asUint8Array(), before.readRawStream().asUint8Array())
+	if (afterStream || beforeStream) {
+		if (!afterStream || !beforeStream) return [{ kind: "content" }]
 
-		if (sameData && changedKeys(before, after).size === 0) return []
+		if (sameRawStream(beforeRef, afterRef) && changedKeys(before, after).size === 0) return []
 
 		return [annotationChange(objectNum, context) ?? { kind: "content" }]
 	}
@@ -481,6 +485,26 @@ function classifyObjectSafely(objectNum: number, context: ChangeContext): PdfCha
 		return classifyObject(objectNum, context)
 	} catch {
 		return [{ kind: "content" }]
+	}
+}
+
+// Both raw streams are read before either view is taken, since a heap growth detaches earlier views, and both buffers
+// are freed at once: the loop over changed objects never yields to the finalizers.
+function sameRawStream(before: PDFObject, after: PDFObject): boolean {
+	const a = after.readRawStream()
+
+	try {
+		const b = before.readRawStream()
+
+		try {
+			if (a.getLength() !== b.getLength()) return false
+
+			return equal(a.asUint8Array(), b.asUint8Array())
+		} finally {
+			b.destroy()
+		}
+	} finally {
+		a.destroy()
 	}
 }
 

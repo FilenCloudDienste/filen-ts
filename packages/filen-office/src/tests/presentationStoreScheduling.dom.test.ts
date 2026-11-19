@@ -192,6 +192,50 @@ describe("presentation store scheduling", () => {
 		store.dispose()
 	})
 
+	it("asks for a slide whose render the worker refused once, until the deck changes or the window moves", async () => {
+		const { host, store } = open(undefined, 1)
+		const refused = (): Error => Object.assign(new Error("tooLarge"), { reason: "tooLarge" })
+		const asked = (): number[] => host.renders.map(entry => Number(entry.refs[0]) - 10)
+		const answer = async (ok: boolean): Promise<void> => {
+			const last = host.renders[host.renders.length - 1]
+
+			if (ok) last?.call.resolve(last.refs.map(render))
+			else last?.call.reject(refused())
+
+			await settle()
+		}
+
+		host.emit({ type: "opened", info: info(10) })
+		await settle()
+		await answer(false)
+
+		// The refused slide is not asked for again; the rest of the window still is.
+		expect(asked()).toEqual([0, 1])
+		await answer(true)
+		expect(asked()).toEqual([0, 1])
+
+		// The same centre again (the show re-asks for its window): still nothing.
+		store.setWindow(0)
+		await settle()
+		expect(asked()).toEqual([0, 1])
+
+		// A change naming the slide allows one more attempt.
+		host.emit({ type: "changed", revision: 2, dirty: true, slides: [slideRef(10)] })
+		await settle()
+		expect(asked()).toEqual([0, 1, 0])
+		await answer(false)
+		expect(asked()).toEqual([0, 1, 0])
+
+		// A moved window asks again too.
+		store.setWindow(1)
+		await settle()
+		await answer(true)
+		expect(asked()).toEqual([0, 1, 0, 2, 0])
+		await answer(false)
+		expect(asked()).toEqual([0, 1, 0, 2, 0])
+		store.dispose()
+	})
+
 	it("keeps one thumbnail batch in flight, replacing it when the rail shows other slides", async () => {
 		const { host, store } = open()
 

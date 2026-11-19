@@ -4,6 +4,7 @@ import { EditorState, TextSelection, type Transaction } from "prosemirror-state"
 import {
 	changeLevel,
 	clearFormatting,
+	horizontalMove,
 	insertLineBreak,
 	pastedSlice,
 	selectionRunProps,
@@ -90,6 +91,92 @@ describe("presentation text commands", () => {
 
 		expect(edge.storedMarks?.[0]?.attrs["rPr"]).toEqual({ lang: "en-GB", i: true })
 		expect(body(edge).paragraphs[0]?.runs).toHaveLength(1)
+	})
+
+	it("a caret in a script without spaces formats one word, and a word move stops at the next word", () => {
+		// Chinese: 我们|喜欢|学习; Thai: สวัสดี|ครับ (the engine's word dictionaries split them).
+		for (const [text, caret, word, rest] of [
+			["我们喜欢学习", 3, "喜欢", "学习"],
+			["สวัสดีครับ", 3, "สวัสดี", "ครับ"]
+		] as const) {
+			const source: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] }
+			const bold = run(setRunProps({ b: true }), state(source, 1 + caret))
+
+			expect(body(bold, source).paragraphs[0]?.runs.find(r => r.kind === "r" && r.rPr.b === true)).toEqual({
+				kind: "r",
+				text: word,
+				rPr: { b: true }
+			})
+
+			const moved = run(horizontalMove(1, "word", false), state(source, 1 + caret))
+
+			expect(moved.selection.head - 1, text).toBe(text.length - rest.length)
+
+			const back = run(horizontalMove(-1, "word", false), moved)
+
+			expect(back.selection.head - 1, text).toBe(text.indexOf(word))
+		}
+	})
+
+	it("Latin words keep their apostrophes and underscores, and a word of astral letters is one word", () => {
+		const text = "dogs' don’t foo_bar 𝐀𝐁𝐂 x"
+		const source: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] }
+		const words = [...text.matchAll(/\S+/gu)]
+
+		// A caret two code units in: inside each word, between whole code points.
+		for (const match of words.filter(word => word[0].length > 2)) {
+			const at = match.index + 2
+			const bold = run(setRunProps({ b: true }), state(source, 1 + at))
+
+			expect(body(bold, source).paragraphs[0]?.runs.find(r => r.kind === "r" && r.rPr.b === true)).toEqual({
+				kind: "r",
+				text: match[0],
+				rPr: { b: true }
+			})
+		}
+
+		let caret = state(source, 1)
+		const stops: number[] = []
+
+		for (let i = 0; i < words.length; i++) {
+			caret = run(horizontalMove(1, "word", false), caret)
+			stops.push(caret.selection.head - 1)
+		}
+
+		expect(stops).toEqual(words.map(match => match.index + match[0].length))
+	})
+
+	it("a mark after a symbol is not a word character, so a word move never lands inside an emoji", () => {
+		// U+FE0F (a variation selector) and U+20E3 (an enclosing keycap) are marks after a symbol, not a letter.
+		for (const [text, before, after] of [
+			["hi \u2764\uFE0F there", "hi ", "there"],
+			["go #\uFE0F\u20E3 now", "go ", "now"]
+		] as const) {
+			const source: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] }
+			const afterStart = text.length - after.length
+			const back = run(horizontalMove(-1, "word", false), state(source, 1 + afterStart))
+
+			expect(back.selection.head - 1, text).toBe(0)
+
+			const forward = run(horizontalMove(1, "word", false), state(source, 1 + before.length - 1))
+
+			expect(forward.selection.head - 1, text).toBe(text.length)
+
+			// Every word stop, both ways, is a grapheme boundary.
+			const boundaries = new Set([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(g => g.index))
+
+			boundaries.add(text.length)
+
+			for (let at = 0; at <= text.length; at++) {
+				if (!boundaries.has(at)) continue
+
+				for (const direction of [1, -1] as const) {
+					const stop = run(horizontalMove(direction, "word", false), state(source, 1 + at)).selection.head - 1
+
+					expect(boundaries.has(stop), `${text} ${at} ${direction}`).toBe(true)
+				}
+			}
+		}
 	})
 
 	it("an empty paragraph's mark takes the format, so the line shows it", () => {

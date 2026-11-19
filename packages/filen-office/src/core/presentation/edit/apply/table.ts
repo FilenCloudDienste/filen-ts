@@ -16,9 +16,10 @@ import {
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, findShape, sameDigest } from "../changes"
 import { replaceInBody, type Matcher } from "../find"
-import type { CellRange, DeckOp, OpOf, TableOp } from "../ops"
-import { xmlSafeText } from "../xmlText"
-import { type SourceReading } from "./shape"
+import { heldBytes, type CellRange, type DeckOp, type OpOf, type TableOp } from "../ops"
+import { checkTextBody } from "../xmlText"
+import { namesLostImage } from "./picture"
+import { replacingDelete, type SourceReading } from "./shape"
 import { isRefused } from "../../refusal"
 
 // The table ops on the model (a:tbl, ECMA-376 Part 1 §21.1.3; ODF table:table in a draw:frame), in place. A table is
@@ -524,23 +525,6 @@ function split(table: TableModel, op: Op<"split">): TableModel | Refused {
 	return next
 }
 
-// A cell body over the budgets or holding text XML cannot carry is refused before it enters the model.
-export function checkCellBody(body: TextBody): Refused | undefined {
-	let runs = 0
-
-	for (const paragraph of body.paragraphs) {
-		runs += paragraph.runs.length
-
-		if (runs > BUDGETS.runsPerBody) return refused("tooLarge", `${String(runs)} runs in one body`)
-
-		for (const run of paragraph.runs) {
-			if (run.kind !== "br" && xmlSafeText(run.text) !== run.text) return refused("malformed", "text holds a character XML cannot")
-		}
-	}
-
-	return undefined
-}
-
 // A body's source refs, live: a paragraph whose ref is of another epoch is written from the model; content kept as
 // source of another epoch cannot be written and refuses.
 function liveBody(body: TextBody, context: ApplyContext): TextBody | Refused {
@@ -578,7 +562,7 @@ function setCellText(table: TableModel, op: Op<"setCellText">, context: ApplyCon
 
 	if (isRefused(cell)) return cell
 
-	const checked = checkCellBody(op.body)
+	const checked = checkTextBody(op.body, cell.text)
 
 	if (checked !== undefined) return checked
 
@@ -648,8 +632,8 @@ function setCellProps(table: TableModel, op: Op<"setCellProps">): TableModel | R
 function setStyle(table: TableModel, op: Op<"setStyle">): TableModel {
 	const next = working(table)
 
-	if (op.styleId === undefined) delete next.styleId
-	else next.styleId = op.styleId
+	if (op.styleId === null) delete next.styleId
+	else if (op.styleId !== undefined) next.styleId = op.styleId
 
 	for (const [flag, value] of Object.entries(op.flags ?? {})) {
 		if (value !== undefined) next.flags[flag as keyof NonNullable<Op<"setStyle">["flags"]>] = value
@@ -663,22 +647,32 @@ function validLength(value: number): boolean {
 	return Number.isFinite(value) && value >= 0 && value <= 51_206_400
 }
 
-function resize(table: TableModel, op: Op<"setColumnWidth" | "setRowHeight">): TableModel | Refused {
-	const value = op.kind === "setColumnWidth" ? op.width : op.height
-	const index = op.kind === "setColumnWidth" ? op.col : op.row
-	const limit = op.kind === "setColumnWidth" ? table.grid.length : table.rows.length
+function resize(table: TableModel, op: Op<"setColumnWidth" | "setRowHeight" | "setColumnWidths" | "setRowHeights">): TableModel | Refused {
+	const columns = op.kind === "setColumnWidth" || op.kind === "setColumnWidths"
+	const values =
+		op.kind === "setColumnWidth"
+			? [op.width]
+			: op.kind === "setRowHeight"
+				? [op.height]
+				: op.kind === "setColumnWidths"
+					? op.widths
+					: op.heights
+	const from = columns ? op.col : op.row
+	const limit = columns ? table.grid.length : table.rows.length
 
-	if (!validLength(value) || !Number.isInteger(index) || index < 0 || index >= limit)
-		return refused("malformed", `${op.kind} ${String(index)}`)
+	if (values.length === 0 || !values.every(validLength) || !Number.isInteger(from) || from < 0 || from + values.length > limit)
+		return refused("malformed", `${op.kind} ${String(from)}`)
 
 	const next = working(table)
 
-	if (op.kind === "setColumnWidth") {
-		next.grid[index] = Math.round(value)
-	} else {
-		const row = next.rows[index]
+	for (const [k, value] of values.entries()) {
+		if (columns) {
+			next.grid[from + k] = Math.round(value)
+		} else {
+			const row = next.rows[from + k]
 
-		if (row !== undefined) next.rows[index] = { ...row, h: Math.round(value) }
+			if (row !== undefined) next.rows[from + k] = { ...row, h: Math.round(value) }
+		}
 	}
 
 	return next
@@ -703,6 +697,8 @@ function nextTable(table: TableModel, op: TableOp, context: ApplyContext): Table
 			return setStyle(table, op)
 		case "setColumnWidth":
 		case "setRowHeight":
+		case "setColumnWidths":
+		case "setRowHeights":
 			return resize(table, op)
 	}
 }
@@ -710,17 +706,25 @@ function nextTable(table: TableModel, op: TableOp, context: ApplyContext): Table
 // --- Inverses ---
 
 function rawOf(shape: ShapeNode, context: ApplyContext): Uint8Array | Refused | undefined {
-	if (shape.src === undefined) return undefined
+	return shape.src === undefined ? undefined : heldBytes(context, shape.src)
+}
 
-	const bytes = context.sourceBytes(shape.src)
+// A reading that also reads a shape only to compare it, keeping nothing for it (the ODP session holds what readShape
+// reads for the rest of the session, which a comparison that drops the shape does not need).
+export interface ComparingReading {
+	compareShape(slide: SlideNode, raw: Uint8Array): ShapeNode | Refused
+}
 
-	return isRefused(bytes) ? bytes : bytes.slice()
+// `raw` read as a shape of `slide` for a comparison: undefined when the context reads no source.
+export function comparedShape(context: ApplyContext, slide: SlideNode, raw: Uint8Array): ShapeNode | Refused | undefined {
+	if ("compareShape" in context) return (context as ApplyContext & ComparingReading).compareShape(slide, raw)
+
+	return "readShape" in context ? (context as SourceReading).readShape(slide, raw) : undefined
 }
 
 // Whether the frame is exactly what its source bytes read as (no edit since: restoring them puts it back whole).
 function asSource(at: Found, raw: Uint8Array, context: ApplyContext): boolean {
-	const reader = "readShape" in context ? (context as SourceReading) : undefined
-	const read = reader?.readShape(at.node, raw)
+	const read = comparedShape(context, at.node, raw)
 
 	if (read === undefined || isRefused(read)) return false
 
@@ -739,7 +743,7 @@ function frameInverse(at: Found, context: ApplyContext): Inverse | Refused {
 		return { ops: [{ family: "shape", kind: "restore", target, raw }], bytes: raw.length }
 
 	const ops: DeckOp[] = [
-		{ family: "shape", kind: "delete", slide: at.node.ref, shapes: [at.shape.id] },
+		replacingDelete(at.node.ref, [at.shape.id]),
 		{
 			family: "shape",
 			kind: "insert",
@@ -765,6 +769,8 @@ function applyOne(deck: Deck, op: TableOp, context: ApplyContext): ApplyResult<T
 	const at = found(deck, op.target)
 
 	if (isRefused(at)) return at
+	// Cell fills the page held (a picture fill naming an image the registry let go of) no save could write.
+	if (op.kind === "setCellProps" && namesLostImage(deck, op.props)) return refused("notFound", "an image no longer held")
 
 	const table = nextTable(at.table, op, context)
 
@@ -842,9 +848,9 @@ export function replaceInFrame(
 	if (replaced === undefined) return undefined
 	if (replaced.count === 0) return { inverse: { ops: [], bytes: 0 }, put: () => undefined, count: 0 }
 
-	for (const row of replaced.table.rows) {
-		for (const cell of row.cells) {
-			const checked = checkCellBody(cell.text)
+	for (const [r, row] of replaced.table.rows.entries()) {
+		for (const [c, cell] of row.cells.entries()) {
+			const checked = checkTextBody(cell.text, at.table.rows[r]?.cells[c]?.text)
 
 			if (checked !== undefined) return checked
 		}

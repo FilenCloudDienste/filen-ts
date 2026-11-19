@@ -1,4 +1,4 @@
-import type { Mark, MarkType, Node } from "prosemirror-model"
+import type { Mark, Node } from "prosemirror-model"
 import { EditorState, TextSelection, type Transaction } from "prosemirror-state"
 import { closeHistory, history, isHistoryTransaction, redo, redoDepth, undo, undoDepth } from "prosemirror-history"
 import { ReplaceStep } from "prosemirror-transform"
@@ -21,6 +21,7 @@ import {
 import { BASE_COMMANDS, writesUnholdableText } from "./commands/base"
 import type { DocxEditContext } from "./context"
 import {
+	CLEARED_TYPES,
 	FormatResolver,
 	RUN_TOGGLES,
 	TOGGLE_ON,
@@ -28,8 +29,13 @@ import {
 	builtInStyleId,
 	builtInStyleType,
 	caretMarks,
+	normalStyleId,
+	runPieces,
+	selectedParagraphs,
+	takesFormatting,
 	wordAround,
 	type ListKind,
+	type ParagraphAt,
 	type ListStart,
 	type NewList,
 	type RunToggle
@@ -52,7 +58,7 @@ import { knowOrigins } from "./origin"
 import { commandAllowed, internalViolation, type DocxProtectionChange } from "./protection"
 import { readOnlyReasons, type DocxReadOnlyReason } from "./readOnly"
 import { registeredTransformer, storyHandler, type DocxTransactionTransformer, type StoryCommandContext } from "./registry"
-import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type IndentAttrs, type LockReason } from "./schema"
+import { NO_SOURCE, docxSchema, type IndentAttrs, type LockReason } from "./schema"
 import {
 	providedSnapshot,
 	type DocxContextSnapshot,
@@ -137,10 +143,6 @@ const AUTO_FORMAT_ON: DocxAutoFormat = { lists: true, quotes: true }
 const nodes = docxSchema.nodes
 const marks = docxSchema.marks
 const BASE_TYPES: ReadonlySet<string> = new Set(BASE_COMMANDS.map(info => info.type))
-const FORMATTING_TYPES: readonly MarkType[] = FORMATTING_MARKS.map(name => marks[name])
-// What clearing direct formatting removes (Word's Ctrl+Space), and the plain mark it sets: everything but the
-// language and highlighting.
-const CLEARED_TYPES: readonly MarkType[] = FORMATTING_TYPES.filter(type => type !== marks.lang && type !== marks.highlight)
 // The command style of each built-in style name.
 const STYLE_OF_NAME: ReadonlyMap<string, DocxParagraphStyle> = new Map(
 	Object.entries(PARAGRAPH_STYLE_NAMES).map(([style, name]) => [name, style as DocxParagraphStyle])
@@ -279,13 +281,6 @@ function smartQuote(state: EditorState, typed: string): Transaction | null {
 	const pos = $caret.pos
 
 	return state.tr.replaceWith(pos - 1, pos, docxSchema.text(curly, quote.marks))
-}
-
-interface RunPiece {
-	readonly from: number
-	readonly to: number
-	readonly node: Node
-	readonly paragraph: Node
 }
 
 // What a selection holds, additive over ranges so an extended selection updates by its difference.
@@ -470,11 +465,6 @@ function bump<K>(map: Map<K, number>, key: K, by: number): void {
 
 function only<K>(map: ReadonlyMap<K, number>): K | undefined {
 	return map.size === 1 ? map.keys().next().value : undefined
-}
-
-interface ParagraphAt {
-	readonly node: Node
-	readonly pos: number
 }
 
 // The headless editing session of one story: a ProseMirror state with the document invariants, undo
@@ -764,9 +754,9 @@ export class DocxEditorSession {
 		return out
 	}
 
-	// The step taking the blocks at `positions` of `state` back to their last-saved form: a block saved as the
-	// file has it is locked (kept as its bytes, decision 5); one saved with edits goes back to that edited
-	// form, which the writer accepted then.
+	// The step taking the blocks at `positions` of `state` back to their last-saved form (what a save does with
+	// edited units the writer refuses): a block saved as the file has it is locked (kept as its bytes); one saved
+	// with edits goes back to that edited form, which the writer accepted then.
 	private revertStep(state: EditorState, positions: readonly number[]): Transaction | null {
 		const forms = this.savedForms()
 		const tr = state.tr
@@ -1133,59 +1123,18 @@ export class DocxEditorSession {
 			default: {
 				const handler = commandInfo(command.type)?.scope === "story" ? storyHandler(command.type) : undefined
 
-				return handler === undefined ? null : handler.run(this.commandContext(), command as never)
+				if (handler === undefined) return null
+
+				// The gate the toolbar shows holds for shortcuts, Repeat and bridge messages too.
+				const context = this.commandContext()
+
+				return handler.enabled(context) ? handler.run(context, command as never) : null
 			}
 		}
 	}
 
 	private commandContext(): StoryCommandContext {
 		return { session: this, state: this.current, context: this.context }
-	}
-
-	private paragraphs(state: EditorState = this.current): ParagraphAt[] {
-		const out: ParagraphAt[] = []
-		const seen = new Set<number>()
-
-		for (const range of state.selection.ranges) {
-			state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
-				if (node.type === nodes.paragraph) {
-					if (!seen.has(pos)) {
-						seen.add(pos)
-						out.push({ node, pos })
-					}
-
-					return false
-				}
-
-				return !node.isInline && node.type !== nodes.locked_block
-			})
-		}
-
-		return out
-	}
-
-	// Run-level content in the selection as [from, to) pieces with their paragraph (what formatting changes:
-	// not markers or locked blocks).
-	private runPieces(state: EditorState, ranges?: readonly { readonly from: number; readonly to: number }[]): RunPiece[] {
-		const out: RunPiece[] = []
-
-		for (const { from, to } of ranges ?? state.selection.ranges.map(range => ({ from: range.$from.pos, to: range.$to.pos }))) {
-			state.doc.nodesBetween(from, to, (node, pos, parent) => {
-				if (!node.isInline) return node.type !== nodes.locked_block
-
-				// A field takes formatting as its runs do (§17.16.4.3).
-				if (parent !== null && parent.type === nodes.paragraph && (inlineLevel(node) === "run" || node.type === nodes.field)) {
-					const start = Math.max(from, pos)
-					const end = Math.min(to, pos + node.nodeSize)
-
-					if (end > start) out.push({ from: start, to: end, node, paragraph: parent })
-				}
-
-				return false
-			})
-		}
-
-		return out
 	}
 
 	private toggleMark(toggle: RunToggle, on: boolean): Mark {
@@ -1228,7 +1177,7 @@ export class DocxEditorSession {
 			return desired === value.style ? tr : tr.addStoredMark(this.toggleMark(toggle, desired))
 		}
 
-		const pieces = this.runPieces(state, word === undefined ? undefined : [word])
+		const pieces = runPieces(state, word === undefined ? undefined : [word])
 
 		if (pieces.length === 0) return null
 
@@ -1286,7 +1235,7 @@ export class DocxEditorSession {
 			return state.tr.setStoredMarks(plain.addToSet(current.filter(mark => !CLEARED_TYPES.includes(mark.type))))
 		}
 
-		const pieces = this.runPieces(state, word === undefined ? undefined : [word])
+		const pieces = runPieces(state, word === undefined ? undefined : [word])
 
 		if (pieces.length === 0) return null
 
@@ -1311,15 +1260,7 @@ export class DocxEditorSession {
 
 	// The id of a built-in paragraph style, adding it to the styles the writer must define when missing.
 	private styleIdFor(style: DocxParagraphStyle): string | null {
-		const styles = this.context.styles
-
-		if (style === "normal") {
-			const normal = styles.defaultOf("paragraph")
-
-			return normal === undefined || normal.canonicalName === "normal" ? null : (styles.byName("normal", "paragraph")?.id ?? null)
-		}
-
-		return this.builtInId(PARAGRAPH_STYLE_NAMES[style])
+		return style === "normal" ? normalStyleId(this.context) : this.builtInId(PARAGRAPH_STYLE_NAMES[style])
 	}
 
 	// The id of built-in style `name`, added to the styles the writer defines when the document lacks it.
@@ -1366,7 +1307,7 @@ export class DocxEditorSession {
 	}
 
 	private setStyle(style: DocxParagraphStyle): Transaction | null {
-		const paragraphs = this.paragraphs()
+		const paragraphs = selectedParagraphs(this.current)
 
 		if (paragraphs.length === 0) return null
 
@@ -1379,7 +1320,7 @@ export class DocxEditorSession {
 	}
 
 	private align(alignment: DocxAlignment): Transaction | null {
-		const paragraphs = this.paragraphs()
+		const paragraphs = selectedParagraphs(this.current)
 
 		if (paragraphs.length === 0) return null
 
@@ -1387,9 +1328,12 @@ export class DocxEditorSession {
 		const changes = new AttrChanges()
 
 		for (const at of paragraphs) {
-			const fromStyle = alignmentOf(this.formats.styleParagraph(at.node.attrs["styleId"] as string | null).props.alignment)
+			// No direct property where the style already aligns the paragraph so; in a table its style's paragraph
+			// properties count, which the resolver does not see, so a cell's paragraph always gets one.
+			const fromStyle = at.cell
+				? undefined
+				: alignmentOf(this.formats.styleParagraph(at.node.attrs["styleId"] as string | null).props.alignment)
 
-			// No direct property where the style already aligns the paragraph so.
 			changes.set(at.node, at.pos, { align: fromStyle === alignment ? null : value })
 		}
 
@@ -1398,7 +1342,7 @@ export class DocxEditorSession {
 
 	private toggleList(kind: ListKind): Transaction | null {
 		const state = this.current
-		const paragraphs = this.paragraphs(state)
+		const paragraphs = selectedParagraphs(state)
 
 		if (paragraphs.length === 0) return null
 
@@ -1430,7 +1374,7 @@ export class DocxEditorSession {
 
 	// The list of the paragraph right before the selection (or right after it) when it is of `kind`: a
 	// new item continues it.
-	private adjacentList(state: EditorState, paragraphs: readonly ParagraphAt[], kind: ListKind): number | undefined {
+	private adjacentList(state: EditorState, paragraphs: readonly Pick<ParagraphAt, "node" | "pos">[], kind: ListKind): number | undefined {
 		const first = paragraphs[0]
 		const last = paragraphs[paragraphs.length - 1]
 
@@ -1462,7 +1406,7 @@ export class DocxEditorSession {
 	}
 
 	private indent(direction: 1 | -1): Transaction | null {
-		const paragraphs = this.paragraphs()
+		const paragraphs = selectedParagraphs(this.current)
 
 		if (paragraphs.length === 0) return null
 
@@ -1490,8 +1434,12 @@ export class DocxEditorSession {
 			if (next === current) continue
 
 			const { startChars: _startChars, ...rest } = indent
+			// Character-unit forms win over twips: one the styles or the list level give is switched off (0).
+			const styled = this.formats.paragraphWith(at.node, { indent: null }).props.indent
 
-			changes.set(at.node, at.pos, { indent: { ...rest, start: next } })
+			changes.set(at.node, at.pos, {
+				indent: { ...rest, start: next, ...(styled.startChars === undefined ? {} : { startChars: 0 }) }
+			})
 		}
 
 		return changes.empty ? null : attrsTransaction(this.current, changes)
@@ -1570,7 +1518,7 @@ export class DocxEditorSession {
 		if (node.type === nodes.paragraph) {
 			this.addParagraph(tally, node, sign)
 			node.forEach(child => {
-				if (inlineLevel(child) === "run") this.addInline(tally, node, child, child.nodeSize, sign)
+				if (takesFormatting(child)) this.addInline(tally, node, child, child.nodeSize, sign)
 			})
 
 			return
@@ -1615,7 +1563,7 @@ export class DocxEditorSession {
 				return node.type !== nodes.locked_block
 			}
 
-			if (parent !== null && parent.type === nodes.paragraph && (inlineLevel(node) === "run" || node.type === nodes.field)) {
+			if (parent !== null && parent.type === nodes.paragraph && takesFormatting(node)) {
 				const size = Math.min(to, pos + node.nodeSize) - Math.max(from, pos)
 
 				if (size > 0) this.addInline(tally, parent, node, size, sign)

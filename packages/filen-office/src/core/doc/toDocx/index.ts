@@ -5,7 +5,7 @@ import { encodeUtf8 } from "../../xml/index"
 import type { DocCipherScheme } from "../decrypt"
 import type { DocHeaderSet, DocPlaceholder, DocStory, DocTextBox } from "../model"
 import { type DocFile, type DocReadOptions, readDocFile } from "../read"
-import { type Conversion, type NoteRef, PartRelationships, StoryWriter } from "./convert"
+import { type Conversion, type NoteRef, PartRelationships, type RangeMarkup, StoryWriter } from "./convert"
 import { readFormFields } from "./formFields"
 import { MediaStore, objectPreview } from "./media"
 import { numberingPart } from "./numbering"
@@ -110,9 +110,12 @@ export async function convertDocFile(
 
 		const streams = await file.objectStreams(placeholder.objectId)
 		const preview = streams === undefined ? undefined : objectPreview(streams)
+		const shown =
+			preview === undefined
+				? undefined
+				: media.add(`object:${String(placeholder.objectId)}`, { size: preview.bytes.length, decode: () => preview })
 
-		if (preview !== undefined)
-			objectPreviews.set(placeholder.objectId, media.add(`object:${String(placeholder.objectId)}`, preview).part)
+		if (shown !== undefined) objectPreviews.set(placeholder.objectId, shown.part)
 	}
 
 	const noteRefs = new Map<number, NoteRef>()
@@ -134,14 +137,14 @@ export async function convertDocFile(
 		})
 	}
 
-	// Range markup: ends before starts at the same CP.
-	const ends = new Map<number, string[]>()
-	const starts = new Map<number, string[]>()
-	const push = (map: Map<number, string[]>, cp: number, markup: string): void => {
+	// Range markup: ends before starts at the same CP; each entry owned by the CP where its range opens.
+	const ends = new Map<number, RangeMarkup[]>()
+	const starts = new Map<number, RangeMarkup[]>()
+	const push = (map: Map<number, RangeMarkup[]>, cp: number, owner: number, markup: string): void => {
 		const list = map.get(cp)
 
-		if (list === undefined) map.set(cp, [markup])
-		else list.push(markup)
+		if (list === undefined) map.set(cp, [{ owner, markup }])
+		else list.push({ owner, markup })
 	}
 	const storyOf = (cp: number): DocStory | undefined => model.stories.find(story => cp >= story.start && cp < story.end)
 	const commentRefs = new Map<number, number>()
@@ -153,12 +156,10 @@ export async function convertDocFile(
 		const end = comment.rangeEnd ?? comment.reference
 		const story = storyOf(comment.reference)
 
-		push(
-			starts,
-			story !== undefined && start >= story.start && start <= comment.reference ? start : comment.reference,
-			`<w:commentRangeStart${attr("w:id", id)}/>`
-		)
-		push(ends, end <= comment.reference && end >= start ? end : comment.reference, `<w:commentRangeEnd${attr("w:id", id)}/>`)
+		const opens = story !== undefined && start >= story.start && start <= comment.reference ? start : comment.reference
+
+		push(starts, opens, opens, `<w:commentRangeStart${attr("w:id", id)}/>`)
+		push(ends, end <= comment.reference && end >= start ? end : comment.reference, opens, `<w:commentRangeEnd${attr("w:id", id)}/>`)
 	})
 
 	const names = new Set<string>()
@@ -177,11 +178,11 @@ export async function convertDocFile(
 
 		const id = bookmarkId++
 
-		push(starts, bookmark.start, `<w:bookmarkStart${attr("w:id", id)}${attr("w:name", name)}/>`)
-		push(ends, Math.min(bookmark.end, story.end), `<w:bookmarkEnd${attr("w:id", id)}/>`)
+		push(starts, bookmark.start, bookmark.start, `<w:bookmarkStart${attr("w:id", id)}${attr("w:name", name)}/>`)
+		push(ends, Math.min(bookmark.end, story.end), bookmark.start, `<w:bookmarkEnd${attr("w:id", id)}/>`)
 	}
 
-	const events = new Map<number, string[]>()
+	const events = new Map<number, RangeMarkup[]>()
 
 	for (const cp of new Set([...ends.keys(), ...starts.keys()])) events.set(cp, [...(ends.get(cp) ?? []), ...(starts.get(cp) ?? [])])
 
@@ -267,7 +268,9 @@ export async function convertDocFile(
 		formFields: readFormFields(model, file),
 		ids: { docPr: 1, revision: 1, order: art.stacking.size + 1 },
 		objectPreviews,
-		shownBoxes: new Set()
+		shownBoxes: new Set(),
+		openBoxes: new Set(),
+		writtenBoxes: new Set()
 	}
 	const storyRange = (kind: DocStory["kind"]): DocStory | undefined =>
 		model.stories.find(story => story.kind === kind && story.end > story.start)

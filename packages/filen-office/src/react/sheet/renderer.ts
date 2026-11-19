@@ -1,12 +1,4 @@
-import {
-	SHEET_MAX_COLS,
-	SHEET_MAX_ROWS,
-	TILE_COLS,
-	TILE_ROWS,
-	type SheetId,
-	type SheetLayout,
-	type SheetRange
-} from "../../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetLayout, type SheetRange } from "../../core/sheet/protocol"
 import {
 	decoratePane,
 	decoratorInset,
@@ -18,6 +10,7 @@ import {
 	type GridExtensionParts,
 	type GridRect
 } from "./layers"
+import type { GridAxis } from "./axis"
 import { EXTRA_COLS, EXTRA_ROWS, type GridAxes, type SheetGridModel } from "./model"
 import { BorderPainter } from "./paint/borders"
 import type { GridCanvas } from "./paint/canvas"
@@ -29,7 +22,19 @@ import { domExtent, toDom, toVirtual } from "./scroll"
 import type { GridPoint } from "./selection"
 import { readTheme } from "./readTheme"
 import { DEFAULT_THEME, type SheetGridTheme } from "./theme"
-import { bodyTotal, gridView, hitAxis, revealOffset, screenOf, edgeAt, type GridView } from "./view"
+import {
+	bodyTotal,
+	gridView,
+	hitAxis,
+	revealOffset,
+	screenOf,
+	edgeAt,
+	spanTiles,
+	tileSpans,
+	MARGIN_COLS,
+	MARGIN_ROWS,
+	type GridView
+} from "./view"
 
 // Draws a grid on two canvases (cells; headers and selection over them) at most once a frame, sized to the
 // scroller's viewport. The scroller holds only an empty extent element, so the browser scrolls nothing it has to
@@ -70,9 +75,6 @@ interface Scroll {
 	domLeft: number
 }
 
-// Tile rows and columns fetched past the edges of what is on screen.
-const MARGIN_ROWS = 16
-const MARGIN_COLS = 8
 // Rows (columns) left before the extent's end that make it grow.
 const GROW_SLACK = 8
 // The smallest font iOS focuses a field in without zooming the page (WebKit: text fields under 16 px zoom).
@@ -174,9 +176,15 @@ export class GridRenderer {
 	// What the cells canvas shows was drawn from: a frame whose inputs all match draws the chrome only (a selection
 	// move, an entry's keystroke). Null: the canvas holds nothing drawn (attached, resized, blanked).
 	private drawn: DrawnCells | null = null
-	// Frame costs (ms), for the perf harness.
-	readonly costs: number[] = []
-	measure = false
+	// The last frame's tile request and the spans it was made for.
+	private requested: {
+		readonly sheet: SheetId
+		readonly layout: SheetLayout
+		readonly rows: GridAxis
+		readonly cols: GridAxis
+		readonly spans: readonly number[]
+		readonly coordinates: readonly number[]
+	} | null = null
 
 	private readonly model: SheetGridModel
 
@@ -518,7 +526,6 @@ export class GridRenderer {
 
 		if (elements === null) return
 
-		const started = this.measure ? performance.now() : 0
 		const snapshot = this.model.getSnapshot()
 
 		if (snapshot.sheet !== this.sheet) this.restoreScroll()
@@ -547,7 +554,7 @@ export class GridRenderer {
 		// goes on from its own): its offsets are set again once it settles.
 		if (this.sizeExtent(view) && !this.panning) this.writeScroll()
 
-		this.requestTiles(snapshot.sheet, view)
+		this.requestTiles(snapshot.sheet, layout, view)
 
 		const parts = this.parts
 		const extended = parts.decorators.length > 0 || parts.cellLayers.length > 0 || parts.chromeLayers.length > 0
@@ -566,11 +573,12 @@ export class GridRenderer {
 
 		const version = this.model.cellsVersion()
 		const drawn = this.drawn
-		// A cells-stage layer is a whole pass that may read anything, so it draws on every frame; decorators mark tile
-		// entries, which move the model's cells version when they change.
+		// A cells-stage layer is a whole pass that may read anything, so it draws on every frame unless it declares it
+		// reads only what is compared here (pure); decorators mark tile entries, which move the model's cells version
+		// when they change.
 		const current =
 			drawn !== null &&
-			parts.cellLayers.length === 0 &&
+			parts.cellLayers.every(layer => layer.pure === true) &&
 			drawn.version === version &&
 			drawn.sheet === snapshot.sheet &&
 			drawn.layout === layout &&
@@ -653,8 +661,6 @@ export class GridRenderer {
 		this.growIfAtEnd(snapshot.sheet, view)
 
 		for (const listener of this.frameListeners) listener()
-
-		if (this.measure) this.costs.push(performance.now() - started)
 	}
 
 	// The copy's moving border steps on a timer while it shows on the sheet shown, redrawing the chrome layer alone
@@ -726,32 +732,31 @@ export class GridRenderer {
 		this.borders?.reset()
 	}
 
-	// The tiles under the view (frozen panes included) plus a margin, as tile row and column pairs.
-	private requestTiles(sheet: SheetId, view: GridView): void {
-		const rowSpans: [number, number][] = []
-		const colSpans: [number, number][] = []
+	// The tiles under the view plus a margin (frameTiles), asked for again unchanged while the spans stay.
+	private requestTiles(sheet: SheetId, layout: SheetLayout, view: GridView): void {
+		const rowSpans = tileSpans(view.rows, MARGIN_ROWS)
+		const colSpans = tileSpans(view.cols, MARGIN_COLS)
+		const spans = [...rowSpans.flat(), -1, ...colSpans.flat()]
+		const last = this.requested
 
-		if (view.rows.frozen > 0) rowSpans.push([view.rows.frozenFirst, view.rows.frozenEnd - 1])
-		if (view.rows.last >= view.rows.first)
-			rowSpans.push([Math.max(view.rows.frozenEnd, view.rows.first - MARGIN_ROWS), view.rows.last + MARGIN_ROWS])
-		if (view.cols.frozen > 0) colSpans.push([view.cols.frozenFirst, view.cols.frozenEnd - 1])
-		if (view.cols.last >= view.cols.first)
-			colSpans.push([Math.max(view.cols.frozenEnd, view.cols.first - MARGIN_COLS), view.cols.last + MARGIN_COLS])
+		// A frame over the same spans (a selection move, an entry's keystroke) asks for the same tiles.
+		if (
+			last !== null &&
+			last.sheet === sheet &&
+			last.layout === layout &&
+			last.rows === view.rows.axis &&
+			last.cols === view.cols.axis &&
+			last.spans.length === spans.length &&
+			last.spans.every((value, i) => value === spans[i])
+		) {
+			this.model.need(sheet, last.coordinates)
 
-		const tileRows = new Set<number>()
-		const tileCols = new Set<number>()
+			return
+		}
 
-		for (const [first, last] of rowSpans)
-			for (let tile = Math.floor(first / TILE_ROWS); tile <= Math.floor(Math.min(view.rows.axis.count - 1, last) / TILE_ROWS); tile++)
-				tileRows.add(tile)
-		for (const [first, last] of colSpans)
-			for (let tile = Math.floor(first / TILE_COLS); tile <= Math.floor(Math.min(view.cols.axis.count - 1, last) / TILE_COLS); tile++)
-				tileCols.add(tile)
+		const coordinates = spanTiles(view, rowSpans, colSpans, this.model.merges(layout))
 
-		const coordinates: number[] = []
-
-		for (const tileRow of tileRows) for (const tileCol of tileCols) coordinates.push(tileRow, tileCol)
-
+		this.requested = { sheet, layout, rows: view.rows.axis, cols: view.cols.axis, spans, coordinates }
 		this.model.need(sheet, coordinates)
 	}
 

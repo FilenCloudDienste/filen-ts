@@ -7,11 +7,11 @@ import type { PdfRequestHandler } from "./requests"
 
 export const FORM_REQUESTS: { readonly requiredFields: PdfRequestHandler<"requiredFields"> } = {
 	requiredFields: context => {
-		const open = context.open()
+		const { document, edit } = context.open()
 
-		if (open.edit === null) throw new PdfEngineRefusal("badRequest", "the document is not open for editing")
+		if (edit === null) throw new PdfEngineRefusal("badRequest", "the document is not open for editing")
 
-		const missing = missingRequiredFields(open.document)
+		const missing = missingRequiredFields(document, pageObject => edit.pageOf(document, pageObject))
 		const first = missing[0]
 
 		return { value: { count: missing.length, first: first === undefined ? null : { page: first.page, widget: first.widget } } }

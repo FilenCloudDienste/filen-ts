@@ -70,6 +70,9 @@ export interface OracleResult {
 	readonly startsPK?: boolean
 	// Whether a data-integrity HMAC was present and verified (Agile only).
 	readonly hmacVerified?: boolean
+	// msoffcrypto-tool only: whether this tool version can check the data-integrity HMAC at all, and whether it did.
+	readonly integritySupported?: boolean
+	readonly integrityVerified?: boolean
 	// Whether the plaintext equalled the entry's expected plaintext, when one was given.
 	readonly matchedPlaintext?: boolean
 	// Why the oracle rejected the file (wrong password, integrity, unsupported, or a tool error).

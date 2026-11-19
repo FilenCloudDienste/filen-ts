@@ -1,4 +1,4 @@
-import { Fragment } from "prosemirror-model"
+import { Fragment, type Node } from "prosemirror-model"
 import { TextSelection } from "prosemirror-state"
 import { unzipSync, zipSync } from "fflate"
 import { describe, expect, it, vi } from "vitest"
@@ -16,9 +16,14 @@ import {
 } from "@filen/office/core/opc"
 import { encodeUtf8, parseXml } from "@filen/office/core/xml"
 import { parseRunProps, PropsReader } from "@filen/office/core/docx"
+import { PartReader } from "../core/docx/model/index"
+import { changeDrawing, drawingState } from "../core/docx/objects/edit"
 import { DocxEditorSession, docxSchema, formattingMarks, proveBlocks } from "@filen/office/core/docx/edit"
 import {
+	DocxSaveError,
+	DocxVerifyError,
 	Names,
+	type DocxChanges,
 	Out,
 	PARAGRAPH_PROPERTIES,
 	RUN_PROPERTIES,
@@ -35,7 +40,7 @@ import {
 } from "@filen/office/core/docx/write"
 import { elementOrder } from "../scripts/wmlOrder"
 import { NUMBERING_PART, RICH, STYLES_PART, openBytes, type Opened } from "./docxEditFixtures"
-import { buildDocx, p, type SyntheticDocx } from "./docxSynthetic"
+import { NAMESPACES, buildDocx, p, type SyntheticDocx } from "./docxSynthetic"
 import { ZIP_ENTRY_TIME } from "./zipTime"
 
 const decoder = new TextDecoder()
@@ -319,6 +324,33 @@ describe("docx writer", () => {
 		expect(xml).toContain(`<w:hyperlink r:id="${link?.id}"><w:r><w:t>click</w:t></w:r></w:hyperlink>`)
 	})
 
+	it("numbers new hyperlinks past relationship ids too large to count on", async () => {
+		const document = await opened({
+			body: p("click here") + p("and there"),
+			...PARTS,
+			relationships: [
+				...PARTS.relationships,
+				{ id: "rId9007199254740992", type: "hyperlink", target: "https://one.example/", external: true },
+				{ id: "rId99999999999999999999999", type: "hyperlink", target: "https://two.example/", external: true },
+				{ id: "rId1", type: "hyperlink", target: "https://three.example/", external: true }
+			]
+		})
+		const edit = session(document)
+		const second = edit.state.doc.child(0).nodeSize + 1
+
+		edit.dispatch(edit.state.tr.addMark(1, 6, docxSchema.marks.link.create({ target: "https://filen.io/" })))
+		edit.dispatch(edit.state.tr.addMark(second, second + 3, docxSchema.marks.link.create({ target: "https://filen.io/other" })))
+
+		const result = await save(document, edit)
+		const xml = await read(result.bytes, "word/document.xml")
+		const relationships = await (await OpcPackage.open(bytesSource(result.bytes))).relationships("word/document.xml")
+		const ids = [...xml.matchAll(/<w:hyperlink r:id="([^"]+)">/g)].map(match => match[1])
+
+		// Planned as written: each link names the relationship to its target, a plain number past the others.
+		expect(ids).toEqual(["rId2", "rId3"])
+		expect(ids.map(id => relationships.byId(id ?? "")?.target)).toEqual(["https://filen.io/", "https://filen.io/other"])
+	})
+
 	it("writes a split paragraph's second half without the paragraph id and moves the section break with it", async () => {
 		const document = await opened({
 			body:
@@ -450,7 +482,9 @@ describe("docx save verifier", () => {
 
 			return undefined
 		} catch (error) {
-			return (error as { reason?: unknown }).reason
+			if (error instanceof DocxVerifyError || error instanceof DocxSaveError) return error.reason
+
+			throw error
 		}
 	}
 	const documentXml = (xml: string): PartChange[] => [{ name: "word/document.xml", bytes: encodeUtf8(xml) }]
@@ -510,9 +544,64 @@ describe("docx save verifier", () => {
 		}
 
 		await expect(verifyDocxParts({ original: document.pkg, context: document.context, changes })).resolves.toBeUndefined()
-		await expect(verifyDocxParts({ original: document.pkg, context: document.context, changes: tampered })).rejects.toMatchObject({
-			reason: "content"
-		})
+
+		const refusal: unknown = await verifyDocxParts({ original: document.pkg, context: document.context, changes: tampered }).catch(
+			(error: unknown) => error
+		)
+
+		if (!(refusal instanceof DocxVerifyError)) throw new Error("Not refused")
+
+		// The message (which is logged) says where, never what: the paragraph's text is on the detail only.
+		expect(refusal.reason).toBe("content")
+		expect(refusal.message).toContain("word/document.xml (#0)")
+		expect(refusal.message).toContain("at entry 1 (t)")
+		expect(refusal.message).not.toMatch(/mo[rd]e text/)
+		expect(refusal.detail).toContain("mode text")
+		expect(refusal.detail).toContain("more text")
+		expect(Object.keys(refusal)).not.toContain("detail")
+	})
+})
+
+describe("docx writer: tracked move ranges in gate 2", () => {
+	it("refuses a new move range start without an author, and saves a tracked move as written", async () => {
+		const document = await opened({ body: p("Moved. Stays.") + p("Target."), ...PARTS })
+
+		document.context.identity.author = "Ann"
+		document.context.identity.now = () => Date.UTC(2026, 9, 12, 13, 25, 41)
+		document.context.review.tracking = true
+
+		const edit = new DocxEditorSession(document.context)
+		const state = edit.state
+		const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 8)).deleteSelection()
+		const at = tr.mapping.map(state.doc.child(0).nodeSize + 1)
+
+		expect(edit.dispatch(tr.replaceRange(at, at, state.doc.slice(1, 8)).setMeta("uiEvent", "drop"))).toBe(true)
+
+		const changes = await serializeDocx({ pkg: document.pkg, context: document.context, sessions: [edit] })
+		const story = changes.stories[0]
+
+		if (story === undefined) throw new Error("No story change")
+
+		// The start's author taken out, the markup the same length (the written paragraph offsets still hold).
+		const tamper = async (bytes: PartBytes): Promise<Uint8Array> => {
+			const xml = decoder.decode(await joinBytes(bytes))
+
+			expect(xml).toMatch(/<w:moveFromRangeStart [^>]*w:author="Ann"/)
+
+			return encodeUtf8(xml.replace(/(<w:moveFromRangeStart [^>]*)w:author="Ann"/, '$1w:author=""   '))
+		}
+		const tampered = {
+			...changes,
+			replace: await Promise.all(
+				changes.replace.map(async part => (part.name === "word/document.xml" ? { ...part, bytes: await tamper(part.bytes) } : part))
+			),
+			stories: [{ ...story, output: { ...story.output, bytes: await tamper(story.output.bytes) } }]
+		}
+
+		await expect(verifyDocxParts({ original: document.pkg, context: document.context, changes })).resolves.toBeUndefined()
+		await expect(verifyDocxParts({ original: document.pkg, context: document.context, changes: tampered })).rejects.toThrow(
+			"a new w:moveFromRangeStart has no author"
+		)
 	})
 })
 
@@ -1077,6 +1166,267 @@ describe("docx writer: structure and values", () => {
 	})
 })
 
+// A story part with a namespace declared below its root (as every Word picture has) is checked whole, and the
+// checks of the save's own markup and of copied containers still run on its rewritten stories.
+describe("docx save verifier: parts with namespaces below the root", () => {
+	// Declared on an element inside the body, as a:graphic declares its own prefix in a Word picture.
+	const NESTED = '<w:p><w:r><w:t xmlns:x="urn:example:x">kept</w:t></w:r></w:p>'
+	const RUN = "Q".repeat(400)
+
+	// The save of `RUN` typed into the last paragraph, with `markup` written in its place (as long, padded with
+	// the run's own text) and the body's relationships part replaced by `rels` when given.
+	async function tampered(markup: string, rels?: (xml: string) => string): Promise<DocxVerifyError | undefined> {
+		const document = await opened({ body: NESTED + p("text"), ...PARTS })
+		const edit = session(document)
+		const last = edit.state.doc.child(1)
+
+		edit.dispatch(edit.state.tr.insertText(RUN, edit.state.doc.content.size - last.nodeSize + 1))
+
+		const changes = await serializeDocx({ pkg: document.pkg, context: document.context, sessions: [edit] })
+		const story = changes.stories[0]
+
+		if (story === undefined) throw new Error("No story change")
+
+		const replacement = `</w:t></w:r>${markup}<w:r><w:t>`
+
+		if (replacement.length > RUN.length) throw new Error("Markup too long")
+
+		const tamper = async (bytes: PartBytes): Promise<Uint8Array> => {
+			const xml = decoder.decode(await joinBytes(bytes))
+
+			if (!xml.includes(RUN)) throw new Error("Run not written")
+
+			return encodeUtf8(xml.replace(RUN, replacement + "Q".repeat(RUN.length - replacement.length)))
+		}
+		const replace = await Promise.all(
+			changes.replace.map(async part => (part.name === "word/document.xml" ? { ...part, bytes: await tamper(part.bytes) } : part))
+		)
+
+		if (rels !== undefined) {
+			const name = "word/_rels/document.xml.rels"
+
+			replace.push({ name, bytes: encodeUtf8(rels(await read(document.bytes, name))) })
+		}
+
+		try {
+			await verifyDocxParts({
+				original: document.pkg,
+				context: document.context,
+				changes: {
+					...changes,
+					replace,
+					stories: [{ ...story, output: { ...story.output, bytes: await tamper(story.output.bytes) } }]
+				}
+			})
+
+			return undefined
+		} catch (error) {
+			if (error instanceof DocxVerifyError) return error
+
+			throw error
+		}
+	}
+
+	it("refuses a new picture whose relationship points at a part that is not a picture", async () => {
+		const picture =
+			'<w:r><w:drawing><wp:inline><wp:extent cx="9525" cy="9525"/><wp:docPr id="77" name="P"/><a:graphic><a:graphicData>' +
+			'<pic:pic><pic:blipFill><a:blip r:embed="rIdX"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+
+		expect(
+			await tampered(picture, xml =>
+				xml.replace("</Relationships>", '<Relationship Id="rIdX" Type="http://example/t" Target="styles.xml"/></Relationships>')
+			)
+		).toMatchObject({ reason: "relationship", message: expect.stringContaining("does not point at a picture part") as unknown })
+	})
+
+	// The source's picture has no relationship for its r:embed; resizing it writes that id again, not a new one.
+	it("saves a resized picture whose relationship the source already lacks", async () => {
+		const picture =
+			'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/><wp:docPr id="90" name="P"/>' +
+			'<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+			'<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+			'<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="90" name="P"/>' +
+			'<pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdGone"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+			'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
+			"</pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+		const document = await opened({ body: picture + p("text"), ...PARTS })
+		const edit = session(document)
+		let found: { node: Node; pos: number } | undefined
+
+		edit.state.doc.descendants((node, pos) => {
+			if (node.type === docxSchema.nodes.drawing) found ??= { node, pos }
+		})
+
+		if (found === undefined) throw new Error("No drawing")
+
+		const state = drawingState(edit.context, found.node)
+		const tr = changeDrawing(edit.state, edit.context, found.pos, found.node, { cx: state.cx / 2, cy: state.cy / 2 })
+
+		expect(tr !== null && edit.dispatch(tr)).toBe(true)
+
+		const xml = await read((await save(document, edit)).bytes, "word/document.xml")
+
+		expect(xml).toContain('<wp:extent cx="457200" cy="457200"/>')
+		expect(xml).toContain('r:embed="rIdGone"')
+	})
+
+	// Refused by the equation check, before the paragraph's read-back would refuse it as different content.
+	it("refuses a faulty new equation", async () => {
+		expect(await tampered("<m:oMath><m:nonsense/></m:oMath>")).toMatchObject({
+			reason: "content",
+			message: expect.stringContaining("an equation") as unknown
+		})
+	})
+
+	const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+	const TABLE_REST =
+		'<w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+
+	// The table opening `body` pasted again at the end of it: its containers are written as copies of the
+	// source's properties.
+	async function pastedTable(table: string): Promise<{ document: Opened; edit: DocxEditorSession; changes: DocxChanges }> {
+		const document = await opened({ body: table + NESTED + p("after"), ...PARTS })
+		const edit = session(document)
+
+		edit.dispatch(edit.state.tr.insert(edit.state.doc.content.size, edit.state.doc.child(0)))
+
+		const changes = await serializeDocx({ pkg: document.pkg, context: document.context, sessions: [edit] })
+
+		expect(changes.stories[0]?.output.containers.some(container => container.properties.length > 0)).toBe(true)
+
+		return { document, edit, changes }
+	}
+
+	it("saves a copied container whose properties keep their namespace", async () => {
+		const { document, edit } = await pastedTable(
+			'<w:tbl><w:tblPr><w:tblStyle w:val="Standard"/><w:tblW w:w="0" w:type="auto"/></w:tblPr>' + TABLE_REST
+		)
+		const xml = body(await read((await save(document, edit)).bytes, "word/document.xml"))
+
+		expect(xml.match(/<w:tblStyle w:val="Standard"\/>/g)?.length).toBe(2)
+	})
+
+	// The prefix is bound on w:body, below the root, and means the same at the source and where the copy went.
+	it("saves a copied container whose properties use a prefix bound below the root", async () => {
+		const table = '<w:tbl><w:tblPr x:foo="1"><w:tblStyle w:val="Standard"/><x:ext x:a="b"/></w:tblPr>' + TABLE_REST
+		const document = await opened({
+			document:
+				'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+				`<w:document ${NAMESPACES}><w:body xmlns:x="urn:example:x">${table}${p("after")}</w:body></w:document>`,
+			...PARTS
+		})
+		const edit = session(document)
+
+		edit.dispatch(edit.state.tr.insert(edit.state.doc.content.size, edit.state.doc.child(0)))
+
+		const changes = await serializeDocx({ pkg: document.pkg, context: document.context, sessions: [edit] })
+
+		expect(changes.stories[0]?.output.containers.some(container => container.properties.length > 0)).toBe(true)
+
+		const xml = await read((await save(document, edit)).bytes, "word/document.xml")
+
+		expect(xml.match(/<w:tblPr x:foo="1">/g)?.length).toBe(2)
+		expect(xml.match(/<x:ext x:a="b"\/>/g)?.length).toBe(2)
+	})
+
+	// The source's v is WordprocessingML, declared on its table; the root binds v to VML, which is what the pasted
+	// table's properties read as where they were written.
+	it("refuses a copied container whose properties use a prefix that means something else where it went", async () => {
+		const { document, changes } = await pastedTable(
+			`<w:tbl xmlns:v="${W}"><v:tblPr><v:tblStyle v:val="Standard"/><v:tblW v:w="0" v:type="auto"/></v:tblPr>` + TABLE_REST
+		)
+
+		await expect(verifyDocxParts({ original: document.pkg, context: document.context, changes })).rejects.toMatchObject({
+			reason: "content",
+			message: expect.stringContaining("lost its properties") as unknown
+		})
+	})
+})
+
+// Gate 2 counts the range ends a rewritten story lost by walking only the source between its copies.
+describe("docx save verifier: comment range ends", () => {
+	const COUNT = 200
+	const commented = (i: number): string =>
+		`<w:p><w:commentRangeStart w:id="${String(i)}"/><w:r><w:t>para ${String(i)}</w:t></w:r><w:commentRangeEnd w:id="${String(i)}"/>` +
+		`<w:r><w:commentReference w:id="${String(i)}"/></w:r></w:p>`
+
+	async function commentedDocument(): Promise<Opened & { bytes: Uint8Array }> {
+		return await opened({
+			body: Array.from({ length: COUNT }, (_, i) => commented(i)).join(""),
+			comments: Array.from(
+				{ length: COUNT },
+				(_, i) => `<w:comment w:id="${String(i)}" w:author="Ann"><w:p><w:r><w:t>remark</w:t></w:r></w:p></w:comment>`
+			).join(""),
+			...PARTS
+		})
+	}
+
+	// Saves the edit, counting the range ends of the source body gate 2 reads an id of.
+	async function savedCounting(document: Opened, edit: DocxEditorSession): Promise<{ xml: string; reads: number }> {
+		const source = document.context.model.parts.find(part => part.name === "word/document.xml")?.document
+
+		if (source === undefined) throw new Error("No body part")
+
+		const attr = PartReader.prototype.attr
+		let reads = 0
+
+		vi.spyOn(PartReader.prototype, "attr").mockImplementation(function (this: PartReader, node, group, localName) {
+			if (this.document === source && localName === "id" && source.localName(node) === "commentRangeEnd") reads++
+
+			return attr.call(this, node, group, localName)
+		})
+
+		try {
+			const xml = body(await read((await save(document, edit)).bytes, "word/document.xml"))
+
+			return { xml, reads }
+		} finally {
+			vi.restoreAllMocks()
+		}
+	}
+
+	it("walks only the rewritten source when one word of a commented document changes", async () => {
+		const document = await commentedDocument()
+		const edit = session(document)
+
+		edit.dispatch(edit.state.tr.insertText("X", 2))
+
+		const { xml, reads } = await savedCounting(document, edit)
+
+		expect(xml.match(/<w:commentRangeEnd /g)?.length).toBe(COUNT)
+		// The paragraphs copied as they are are not read: the whole body twice would be 2 * COUNT.
+		expect(reads).toBeLessThan(10)
+	})
+
+	it("accepts a save that deletes a commented paragraph", async () => {
+		const document = await commentedDocument()
+		const edit = session(document)
+		const doc = edit.state.doc
+		const second = doc.child(1)
+		const at = doc.child(0).nodeSize
+
+		edit.dispatch(edit.state.tr.delete(at, at + second.nodeSize))
+
+		const { xml } = await savedCounting(document, edit)
+
+		expect(xml).not.toContain("para 1<")
+		expect(xml.match(/<w:commentRangeEnd /g)?.length).toBe(COUNT - 1)
+	})
+
+	it("accepts a save that duplicates a paragraph holding a range end", async () => {
+		const document = await commentedDocument()
+		const edit = session(document)
+		const doc = edit.state.doc
+		const first = doc.child(0)
+
+		edit.dispatch(edit.state.tr.insert(doc.content.size, doc.slice(0, first.nodeSize).content))
+
+		const { xml } = await savedCounting(document, edit)
+
+		expect(xml.match(/para 0</g)?.length).toBe(2)
+	})
+})
+
 // Gate 2 against writer bugs: the copies the writer claims are checked, not trusted.
 describe("docx save verifier against the writer", () => {
 	const THREE = p("first") + p("second") + p("third")
@@ -1097,7 +1447,9 @@ describe("docx save verifier against the writer", () => {
 
 			return undefined
 		} catch (error) {
-			return (error as { reason?: unknown }).reason
+			if (error instanceof DocxVerifyError || error instanceof DocxSaveError) return error.reason
+
+			throw error
 		}
 	}
 

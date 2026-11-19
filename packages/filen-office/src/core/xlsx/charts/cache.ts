@@ -31,8 +31,10 @@ export interface ChartSheetCells {
 	readonly lastRow: number
 	readonly lastCol: number
 	cell(row: number, col: number): ChartCell
-	// Whether the cell's row or column is hidden.
+	// Whether the cell's row or column is hidden (hiddenRow or hiddenCol).
 	hidden(row: number, col: number): boolean
+	hiddenRow(row: number): boolean
+	hiddenCol(col: number): boolean
 }
 
 export interface ChartCells {
@@ -218,7 +220,8 @@ function cacheMarkup(prefix: string, element: string, cache: Cache, extension: s
 }
 
 // The levels of multi-level categories (§21.2.2.116): the range's columns when its rows are the points (the column
-// nearest the data first), else its rows (the lowest first); a level has a point for each cell that holds text.
+// nearest the data first), else its rows (the lowest first); a level has a point for each cell that holds text. With
+// `visibleOnly`, hidden rows (or columns) drop their point and a hidden column (or row) its level, as Excel shows them.
 function levelsOf(areas: readonly ChartArea[], cells: ChartCells, count: number | undefined, visibleOnly: boolean): Levels | null {
 	const area = areas[0]
 
@@ -239,7 +242,7 @@ function levelsOf(areas: readonly ChartArea[], cells: ChartCells, count: number 
 	const shown: number[] = []
 
 	for (let idx = 0; idx < (byRows ? rows : cols); idx++) {
-		const hidden = byRows ? sheet.hidden(range.startRow + idx, range.startCol) : sheet.hidden(range.startRow, range.startCol + idx)
+		const hidden = byRows ? sheet.hiddenRow(range.startRow + idx) : sheet.hiddenCol(range.startCol + idx)
 
 		if (!visibleOnly || !hidden) shown.push(idx)
 	}
@@ -249,6 +252,8 @@ function levelsOf(areas: readonly ChartArea[], cells: ChartCells, count: number 
 	const levels: Point[][] = []
 
 	for (let level = levelCount - 1; level >= 0; level--) {
+		if (visibleOnly && (byRows ? sheet.hiddenCol(range.startCol + level) : sheet.hiddenRow(range.startRow + level))) continue
+
 		const points: Point[] = []
 
 		shown.forEach((at, idx) => {
@@ -286,8 +291,9 @@ function sameLevels(a: Levels | null, b: Levels): boolean {
 	return a.levels.every((level, index) => samePoints(level, b.levels[index] ?? [], false))
 }
 
-// The series' value count: what multi-level categories are laid out against (the val or yVal beside them).
-function seriesCount(reader: DrawingReader, reference: number, cells: ChartCells, visibleOnly: boolean): number | undefined {
+// The series' value count: what multi-level categories are laid out against (the val or yVal beside them). Every
+// cell counts, hidden or not: the orientation is the ranges', and a hidden row must not turn it.
+function seriesCount(reader: DrawingReader, reference: number, cells: ChartCells): number | undefined {
 	const category = reader.document.parent(reference)
 	const series = category < 0 ? -1 : reader.document.parent(category)
 
@@ -300,7 +306,7 @@ function seriesCount(reader: DrawingReader, reference: number, cells: ChartCells
 	if (formula < 0) return undefined
 
 	const areas = chartAreas(reader.text(formula).trim(), cells.names)
-	const values$ = areas === null ? null : cellsOf(areas, cells, visibleOnly)
+	const values$ = areas === null ? null : cellsOf(areas, cells, false)
 
 	return values$ === null ? undefined : values$.length
 }
@@ -364,7 +370,7 @@ export function refreshChartCaches(
 
 		if (reference.kind === "multiLvlStrRef") {
 			const cache = reader.child(reference.node, D.C, "multiLvlStrCache")
-			const levels = levelsOf(areas, cells, seriesCount(reader, reference.node, cells, visibleOnly), visibleOnly)
+			const levels = levelsOf(areas, cells, seriesCount(reader, reference.node, cells), visibleOnly)
 
 			if (levels === null || sameLevels(readLevels(reader, cache), levels)) continue
 

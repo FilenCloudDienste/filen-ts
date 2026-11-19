@@ -1,12 +1,14 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { strFromU8 } from "fflate"
+import type { Transaction } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import type { DocxEditorSession } from "@filen/office/core/docx/edit"
+import { DocxSaveError } from "@filen/office/core/docx/write"
 import { bytesSource } from "@filen/office/core/opc"
 import { OdfPackage } from "../core/odf/index"
 import { translateOdt } from "../core/odt/index"
-import { OdtWriteRefusal, writeOdt } from "../core/odt/write/writer"
+import { OdtWriteRefusal, writeOdt, type OdtEdits } from "../core/odt/write/writer"
 import { CORPUS_DIR } from "./corpusDir"
 import { rng, type Rand } from "./fuzz/config"
 import { baseOps } from "./fuzz/ops/base"
@@ -56,27 +58,45 @@ function corpusSample(): { name: string; bytes: Uint8Array }[] {
 		.filter((_, index) => index % 3 === 0)
 }
 
-function context(session: DocxEditorSession, rand: Rand): OpContext {
+function errorText(error: unknown): string {
+	return (error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error)).slice(0, 800)
+}
+
+// A transaction that cannot be built for this document is expected and only logged; a dispatch or command that
+// throws is an editor crash, recorded through `crashed`.
+function context(session: DocxEditorSession, rand: Rand, crashed: (what: string, error: unknown) => void): OpContext {
 	return {
 		rand,
 		session,
 		editor: undefined,
 		numIds: [],
 		styleIds: [],
-		transact(_label, build) {
-			try {
-				const tr = build(session.state.tr)
+		transact(label, build) {
+			let tr: Transaction | void
 
-				return tr === undefined ? "noop" : String(session.dispatch(tr))
+			try {
+				tr = build(session.state.tr)
 			} catch (error) {
-				return `threw ${String(error)}`
+				return `build threw ${String(error).slice(0, 60)}`
+			}
+
+			if (tr === undefined) return "noop"
+
+			try {
+				return String(session.dispatch(tr))
+			} catch (error) {
+				crashed(`dispatch ${label}`, error)
+
+				return "dispatch threw"
 			}
 		},
-		execute(_label, command) {
+		execute(label, command) {
 			try {
 				return String(session.execute(command))
 			} catch (error) {
-				return `threw ${String(error)}`
+				crashed(`execute ${label}`, error)
+
+				return "execute threw"
 			}
 		}
 	}
@@ -105,6 +125,7 @@ describe("ODT writer fuzz", () => {
 		const outcomes = { saved: 0, refused: 0, steps: 0 }
 		const reasons = new Map<string, number>()
 		const unopened = new Map<string, string>()
+		const findings: string[] = []
 
 		for (const file of files) {
 			const pkg = await OdfPackage.open(bytesSource(file.bytes), { kinds: ["text"] })
@@ -121,23 +142,44 @@ describe("ODT writer fuzz", () => {
 
 				editing.opened.context.identity.author = "Fuzz"
 
+				const log: string[] = []
+				const crashed = (what: string, error: unknown): void => {
+					findings.push(`${file.name} run ${run}: ${what} threw ${errorText(error)}\n${log.join("\n")}`)
+				}
+
 				for (let step = 0; step < STEPS; step++) {
 					const op = OPS[Math.floor(rand() * OPS.length)]
 
 					if (op === undefined) continue
 
 					try {
-						await op.run(context(editing.session, rand))
-					} catch {
-						// An op that cannot apply to this document.
+						log.push(
+							`${op.name}: ${await op.run(context(editing.session, rand, (what, error) => crashed(`op ${op.name} ${what}`, error)))}`
+						)
+					} catch (error) {
+						crashed(`op ${op.name}`, error)
 					}
 
 					outcomes.steps++
 				}
 
-				const edits = await odtEditsOf(editing).catch(() => undefined)
+				let edits: OdtEdits
 
-				if (edits === undefined) continue
+				try {
+					edits = await odtEditsOf(editing)
+				} catch (error) {
+					if (!(error instanceof DocxSaveError)) {
+						crashed("save preparation", error)
+
+						continue
+					}
+
+					// The docx writer's gates refused the edited document: a refusal with its reason.
+					outcomes.refused++
+					reasons.set(`docx ${error.reason}`, (reasons.get(`docx ${error.reason}`) ?? 0) + 1)
+
+					continue
+				}
 
 				try {
 					const written = await writeOdt(editing.source, edits)
@@ -170,6 +212,7 @@ describe("ODT writer fuzz", () => {
 		})
 
 		expect([...unopened.values()].filter(reason => reason !== "encrypted" && reason !== "invalidPackage")).toEqual([])
+		expect(findings.slice(0, 10)).toEqual([])
 		expect(outcomes.saved).toBeGreaterThan(0)
 	})
 })

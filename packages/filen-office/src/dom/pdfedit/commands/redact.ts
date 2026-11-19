@@ -16,7 +16,17 @@ import { applyPageRedactions } from "../redact/apply"
 import { markArea, markPage, markText, removeRedactionMark } from "../redact/marks"
 import { sanitizeForRedaction } from "../redact/sanitize"
 import { scrubTermsForRedaction } from "../redact/scrub"
-import { isIndex, isRecord, isText, type PdfCommand, type PdfCommandContext, type PdfCommandTable } from "./types"
+import {
+	isFiniteTuple,
+	isIndex,
+	isRecord,
+	isText,
+	parseNoArgs,
+	requirePage,
+	type PdfCommand,
+	type PdfCommandContext,
+	type PdfCommandTable
+} from "./types"
 
 // True redaction as commands. Marks are Redact annotations (nothing is removed until they are applied); applying is
 // one page per command (its undo step), then the searched terms are cut from everything outside page content
@@ -55,16 +65,12 @@ export interface PdfRedactCommands {
 	"redact.sanitize": Record<string, never>
 }
 
-function isFiniteNumbers(value: unknown, length: number): value is readonly number[] {
-	return Array.isArray(value) && value.length === length && value.every(item => typeof item === "number" && Number.isFinite(item))
-}
-
 function isQuad(value: unknown): value is RedactQuad {
-	return isFiniteNumbers(value, 8)
+	return isFiniteTuple(value, 8)
 }
 
 function isRect(value: unknown): value is RedactRect {
-	return isFiniteNumbers(value, 4)
+	return isFiniteTuple(value, 4)
 }
 
 function isQuads(value: unknown): value is readonly RedactQuad[] {
@@ -87,14 +93,6 @@ export function isRedactionTerms(value: unknown): value is readonly RedactionTer
 
 export function isRedactionPresets(value: unknown): value is readonly RedactionPreset[] {
 	return Array.isArray(value) && value.every(item => REDACTION_PRESETS.some(preset => preset === item))
-}
-
-function noArgs(args: unknown): Record<string, never> | null {
-	return isRecord(args) && Object.keys(args).length === 0 ? {} : null
-}
-
-function checkPage(context: PdfCommandContext, page: number): void {
-	if (page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
 }
 
 function pageNumber(document: PdfCommandContext["document"], page: number): number {
@@ -169,7 +167,7 @@ const APPLY: PdfCommand<PdfRedactCommands["redact.apply"]> = {
 			? { page: args["page"], removeAnnotations: args["removeAnnotations"], terms: args["terms"], sanitize: args["sanitize"] }
 			: null,
 	run: (context, args) => {
-		checkPage(context, args.page)
+		requirePage(context, args.page)
 
 		const result = applyPageRedactions(context.mupdf, context.document, args.page, { removeAnnotations: args.removeAnnotations })
 
@@ -185,7 +183,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 		parse: args =>
 			isRecord(args) && isIndex(args["page"]) && isQuads(args["quads"]) ? { page: args["page"], quads: args["quads"] } : null,
 		run: (context, args) => {
-			checkPage(context, args.page)
+			requirePage(context, args.page)
 			markText(context.page(args.page), args.quads)
 
 			return [args.page]
@@ -196,7 +194,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 		parse: args =>
 			isRecord(args) && isIndex(args["page"]) && isRect(args["rect"]) ? { page: args["page"], rect: args["rect"] } : null,
 		run: (context, args) => {
-			checkPage(context, args.page)
+			requirePage(context, args.page)
 
 			const [x0, y0, x1, y1] = args.rect
 
@@ -211,7 +209,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 		tool: "content",
 		parse: args => (isRecord(args) && isIndex(args["page"]) ? { page: args["page"] } : null),
 		run: (context, args) => {
-			checkPage(context, args.page)
+			requirePage(context, args.page)
 			markPage(context.page(args.page))
 
 			return [args.page]
@@ -240,7 +238,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 			const pages = new Set<number>()
 
 			for (const finding of args.findings) {
-				checkPage(context, finding.page)
+				requirePage(context, finding.page)
 				markText(context.page(finding.page), finding.quads)
 				pages.add(finding.page)
 			}
@@ -253,7 +251,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 		target: "id",
 		parse: args => (isRecord(args) && isIndex(args["page"]) && isIndex(args["id"]) ? { page: args["page"], id: args["id"] } : null),
 		run: (context, args) => {
-			checkPage(context, args.page)
+			requirePage(context, args.page)
 
 			if (!removeRedactionMark(context.page(args.page), args.id)) throw new PdfEngineRefusal("badRequest", "no such mark")
 
@@ -270,7 +268,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 	"redact.sanitize": {
 		tool: "content",
 		removesContent: true,
-		parse: noArgs,
+		parse: parseNoArgs,
 		run: context => sanitizeForRedaction(context.document)
 	}
 }

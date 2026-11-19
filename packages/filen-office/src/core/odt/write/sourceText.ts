@@ -19,9 +19,8 @@ export interface SourceText {
 // A unit standing for an object (a picture, a note, a comment, a field's result).
 const OBJECT = "￼"
 
-const FIELD_ATOMS: ReadonlySet<string> = new Set([
-	"text:page-number",
-	"text:page-count",
+// Fields the translator keeps as w:fldSimple results (copied whole when their code and result stay).
+export const KEPT_FIELDS: ReadonlySet<string> = new Set([
 	"text:reference-ref",
 	"text:bookmark-ref",
 	"text:sequence-ref",
@@ -30,6 +29,7 @@ const FIELD_ATOMS: ReadonlySet<string> = new Set([
 	...FIELDS_AS_TEXT,
 	...[...PASS_THROUGH_INLINE].filter(name => name !== "text:meta" && name !== "text:ruby-base")
 ])
+const FIELD_ATOMS: ReadonlySet<string> = new Set(["text:page-number", "text:page-count", ...KEPT_FIELDS])
 const NOTHING: ReadonlySet<string> = new Set([
 	"text:soft-page-break",
 	"text:bookmark",

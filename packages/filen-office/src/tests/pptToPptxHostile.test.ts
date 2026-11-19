@@ -1,8 +1,11 @@
 import { Zlib } from "fflate"
 import { describe, expect, it } from "vitest"
 import { bytesSource, memorySink, type ByteSink } from "../core/opc/index"
+import type { LinkedPart } from "../core/opc/package"
 import { slideTiming, type PptAnimContext, type PptAnimShape } from "../core/ppt/anim"
-import { recordAt, RecordCounter } from "../core/ppt/records"
+import { PptMedia } from "../core/ppt/media"
+import { shapeGeometry } from "../core/ppt/officeArt"
+import { children, recordAt, RecordCounter } from "../core/ppt/records"
 import { pptToPptx, type PptConversion } from "../core/ppt/toPptx"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
 import { liveHeap, liveHeapNow } from "./liveHeap"
@@ -525,5 +528,220 @@ describe("ppt embedded object storage bombs", () => {
 
 		expect(bytes.length).toBe(5000)
 		expect(bytes[4999]).toBe(0)
+	})
+})
+
+describe("ppt PowerPoint 2000 text extensions", () => {
+	it("reads a ___PPT9 blob of 200,000 records without passing them as call arguments", { timeout: 60_000 }, async () => {
+		// 200,000 empty records (type 0, no data) in a shape's ShapeProgTagsContainer.
+		const blob = record(0x138b, new Uint8Array(200_000 * 8))
+		const tags = container(0x1388, [container(0x138a, [record(0x0fba, utf16("___PPT9").subarray(0, 14)), blob])])
+		const converted = await pptToPptx(
+			bytesSource((await buildPpt({ png: FIXTURE_PNG, slides: [{ shapes: [{ ...TEXT, clientData: [tags] }] }] })).bytes)
+		)
+
+		if (converted.kind === "refused") expect(converted.reason).toBe("tooLarge")
+		else expect(await part(converted, "ppt/slides/slide1.xml")).toContain("<a:t>Hi</a:t>")
+	})
+	it(
+		"reads the paragraphs of a body with StyleTextProp9 extensions and one-character runs in linear time",
+		{ timeout: 60_000 },
+		async () => {
+			// 30,000 three-character paragraphs over 90,001 one-character runs; the shape's StyleTextProp9Atom holds one
+			// empty entry, so every paragraph looks up its first run's pp9rt.
+			const text = Array.from({ length: 30_000 }, () => "ab").join("\r")
+			const style = new Uint8Array(10 + (text.length + 1) * 8)
+			const view = new DataView(style.buffer)
+
+			view.setUint32(0, text.length + 1, true)
+
+			for (let k = 0; k <= text.length; k++) view.setUint32(10 + k * 8, 1, true)
+
+			const tags = container(0x1388, [
+				container(0x138a, [record(0x0fba, utf16("___PPT9").subarray(0, 14)), record(0x138b, record(0x0fac, new Uint8Array(12)))])
+			])
+			const built = await buildPpt({
+				png: FIXTURE_PNG,
+				slides: [{ shapes: [{ text, rawStyle: style, anchor: [100, 100, 2000, 600], clientData: [tags] }] }]
+			})
+			const start = cpuMs()
+			const converted = await pptToPptx(bytesSource(built.bytes))
+			const spent = cpuMs() - start
+
+			if (converted.kind !== "converted") throw new Error(converted.reason)
+
+			expect(spent).toBeLessThan(budget(600))
+		}
+	)
+})
+
+describe("ppt freeform geometry bombs", () => {
+	// An IMsoArray (MS-ODRAW §2.2.51) of `size`-byte elements.
+	function msoArray(size: number, elements: Uint8Array): Uint8Array {
+		return concat(u16(elements.length / size), u16(elements.length / size), u16(size), elements)
+	}
+
+	const segmentsOf = (infos: readonly number[]): Uint8Array => msoArray(2, concat(...infos.map(u16)))
+	const geometryOf = (vertices: readonly number[], segments: Uint8Array) =>
+		shapeGeometry(
+			[
+				new Map([
+					[0x0145, { value: 0, complex: msoArray(8, concat(...vertices.map(u32))) }],
+					[0x0146, { value: 0, complex: segments }]
+				])
+			],
+			0
+		)
+
+	it("emits no more points than a path's vertices when every segment repeats 8191 times", () => {
+		// 65,535 lnTo segments of 8191 repeats over one vertex, then the same as cubics and closes.
+		const lines = new Uint8Array(6 + 65_535 * 2).fill(0xff)
+		const view = new DataView(lines.buffer)
+
+		view.setUint16(0, 65_535, true)
+		view.setUint16(2, 65_535, true)
+		view.setUint16(4, 2, true)
+
+		for (let k = 0; k < 65_535; k++) view.setUint16(6 + 2 * k, (k % 3 === 0 ? 0x0000 : k % 3 === 1 ? 0x2000 : 0x6000) | 0x1fff, true)
+
+		const start = cpuMs()
+		const geometry = geometryOf([0, 0], lines)
+		const spent = cpuMs() - start
+
+		expect(geometry?.xml.length).toBeLessThan(2000)
+		expect(spent).toBeLessThan(budget(100))
+	})
+
+	it("keeps a valid path's closes, ends and no-fill escape, and the clamped last point of a count one past its vertices", () => {
+		// moveTo, lnTo ×3 over three more vertices plus one past them, close, end; then a no-fill path: moveTo, lnTo, end.
+		const geometry = geometryOf(
+			[0, 0, 100, 0, 100, 100, 0, 100],
+			segmentsOf([0x4000, 0x0004, 0x6001, 0x8000, 0xaa00, 0x4000, 0x0001, 0x8000])
+		)
+
+		expect(geometry?.xml).toContain(
+			'<a:path w="21600" h="21600"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:lnTo><a:pt x="100" y="0"/></a:lnTo><a:lnTo><a:pt x="100" y="100"/></a:lnTo><a:lnTo><a:pt x="0" y="100"/></a:lnTo><a:lnTo><a:pt x="0" y="100"/></a:lnTo><a:close/></a:path>'
+		)
+		expect(geometry?.xml).toContain('<a:path w="21600" h="21600" fill="none"><a:moveTo>')
+	})
+})
+
+describe("ppt embedded sound extensions", () => {
+	it.each([".constructor", ".__proto__", ".Constructor"])("writes a sound named %s as a .wav part of audio/wav", extension => {
+		const document = container(0x03e8, [
+			container(0x07e4, [
+				container(0x07e6, [
+					record(0x0fba, utf16("Chime").subarray(0, 10), 0),
+					record(0x0fba, utf16(extension).subarray(0, extension.length * 2), 1),
+					record(0x0fba, utf16("3").subarray(0, 2), 2),
+					record(0x07e7, Uint8Array.of(82, 73, 70, 70))
+				])
+			])
+		])
+		const counter = new RecordCounter()
+		const media = new PptMedia(document, children(document, 8, document.length, counter), counter)
+		const parts = new Map<string, Uint8Array | LinkedPart>()
+		const defaults = new Map<string, string>()
+
+		expect(media.soundPart(3)?.part).toBe("ppt/media/audio1.wav")
+
+		media.finish(parts, defaults)
+
+		expect([...parts.keys()]).toEqual(["ppt/media/audio1.wav"])
+		expect([...defaults]).toEqual([["wav", "audio/wav"]])
+	})
+})
+
+// A slide (persist object, §2.5.1) whose drawing holds the given shape and group containers.
+function tableSlide(members: readonly Uint8Array[], shapes: number): Uint8Array {
+	const patriarch = container(0xf004, [record(0xf009, new Uint8Array(16), 0, 1), record(0xf00a, concat(u32(0x800), u32(0x5)), 0, 2)])
+
+	return container(0x03ee, [
+		record(0x03ef, concat(u32(1), new Uint8Array(8), u32(0x80000000), u32(0), u16(0x7), u16(0)), 0, 2),
+		container(0x040c, [
+			container(0xf002, [record(0xf008, concat(u32(shapes + 1), u32(0x800 + shapes))), container(0xf003, [patriarch, ...members])])
+		]),
+		record(0x07f0, concat(...[0xffffff, 0, 0x808080, 0, 0x99cc00, 0xcc3333, 0xffcccc, 0xb2b2b2].map(u32)), 1)
+	])
+}
+
+const ltrb = (left: number, top: number, right: number, bottom: number): Uint8Array => concat(u32(left), u32(top), u32(right), u32(bottom))
+
+// A group flagged a table (tableProperties bit 1, MS-ODRAW §2.3.4.41) of `cells` rectangles: on a diagonal (an n × n
+// grid of mostly empty slots), or in one row.
+function tableGroup(spid: number, cells: number, layout: "diagonal" | "row"): Uint8Array {
+	const members = Array.from({ length: cells }, (_, index) =>
+		container(0xf004, [
+			record(0xf00a, concat(u32(spid + 1 + index), u32(0x2 | 0xa00)), 1, 2),
+			record(
+				0xf00f,
+				layout === "diagonal"
+					? ltrb(index * 10, index * 10, index * 10 + 10, index * 10 + 10)
+					: ltrb(index * 10, 0, index * 10 + 10, 10)
+			)
+		])
+	)
+
+	return container(0xf003, [
+		container(0xf004, [
+			record(0xf009, ltrb(0, 0, cells * 10, layout === "diagonal" ? cells * 10 : 10), 0, 1),
+			record(0xf00a, concat(u32(spid), u32(0x1 | 0x2 | 0x200)), 0, 2),
+			record(0xf00b, concat(u16(0x039f), u32(1)), 1, 3),
+			record(0xf010, concat(u16(100), u16(100), u16(2000), u16(1000)))
+		]),
+		...members
+	])
+}
+
+async function convertTables(slides: readonly (readonly Uint8Array[])[], budgets: Partial<typeof DEFAULT_PRESENTATION_BUDGETS>) {
+	const objects = new Map(slides.map((groups, index) => [3 + index, tableSlide(groups, 1000)] as const))
+	const built = await buildPpt({ slides: slides.map(() => ({ shapes: [] })), objects })
+
+	return pptToPptx(bytesSource(built.bytes), { deckBudgets: { ...DEFAULT_PRESENTATION_BUDGETS, ...budgets } })
+}
+
+describe("ppt tables", () => {
+	it("converts a table group to a:tbl", async () => {
+		const converted = await convertTables([[tableGroup(0x801, 3, "row")]], {})
+
+		if (converted.kind !== "converted") throw new Error(converted.kind)
+
+		const slide = await part(converted, "ppt/slides/slide1.xml")
+
+		expect(slide).toContain('<a:tblGrid><a:gridCol w="')
+		expect(slide.match(/<a:gridCol /gu)).toHaveLength(3)
+		expect(slide.match(/<a:tr /gu)).toHaveLength(1)
+		expect(slide.match(/<a:tc[ >]/gu)).toHaveLength(3)
+	})
+
+	it("keeps a table over its own cell bound a group", async () => {
+		const converted = await convertTables([[tableGroup(0x801, 11, "diagonal")]], { cellsPerTable: 100 })
+
+		if (converted.kind !== "converted") throw new Error(converted.kind)
+
+		const slide = await part(converted, "ppt/slides/slide1.xml")
+
+		expect(slide).not.toContain("<a:tbl>")
+		expect(slide).toContain("<p:grpSp>")
+	})
+
+	it("refuses diagonal tables past the cells of a slide before writing their markup", async () => {
+		const groups = [tableGroup(0x801, 10, "diagonal"), tableGroup(0x821, 10, "diagonal")]
+
+		expect(await convertTables([groups], { cellsPerTable: 100, cellsPerSlide: 150 })).toMatchObject({
+			kind: "refused",
+			reason: "tooLarge"
+		})
+		expect((await convertTables([groups], { cellsPerTable: 100, cellsPerSlide: 200 })).kind).toBe("converted")
+	})
+
+	it("refuses tables past the cells of the deck", async () => {
+		const slides = [[tableGroup(0x801, 10, "diagonal")], [tableGroup(0x801, 10, "diagonal")]]
+
+		expect(await convertTables(slides, { cellsPerTable: 100, cellsPerSlide: 100, cellsPerDeck: 150 })).toMatchObject({
+			kind: "refused",
+			reason: "tooLarge"
+		})
+		expect((await convertTables(slides, { cellsPerTable: 100, cellsPerSlide: 100, cellsPerDeck: 200 })).kind).toBe("converted")
 	})
 })

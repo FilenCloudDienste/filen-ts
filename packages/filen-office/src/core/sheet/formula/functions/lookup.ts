@@ -1,12 +1,19 @@
 import { EmptyValue, FunctionArgumentType, HyperFormula, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { lastLineValue, uniformTail, type Plugin } from "./blankTails"
-import { naError, SheetFunctionPlugin, unmodeledError, valueError, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
+import {
+	ARRAY_ARGUMENTS,
+	naError,
+	SheetFunctionPlugin,
+	unmodeledError,
+	valueError,
+	type PluginCall,
+	type PluginScalar,
+	type PluginState
+} from "./plugin"
 import { binarySearch, compareLookup, lookupValue, sameClass, vectorOf, wildcard, type Lookup } from "./values"
 
 // LOOKUP and XMATCH as support.microsoft.com defines them. Their arrays are evaluated as arrays
 // (LOOKUP(2,1/(A1:A9="x"),B1:B9) in an ordinary formula), as Excel does.
-
-const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
 
 // A row or column read value by value: a range's cells straight from the engine's graph, so a search reads only up to
 // its match and copies nothing (the range's `data` builds a row array per cell at each call).

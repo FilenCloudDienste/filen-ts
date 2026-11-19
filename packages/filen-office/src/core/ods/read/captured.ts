@@ -1,8 +1,39 @@
 import { canonicalAttributes, elementName, readElement, type OdfElement } from "../../odf/tree"
+import { SHEET_MAX_CELL_TEXT } from "../../sheet/protocol"
 import { escapeAttribute, Namespaces, NodeKind, parseXml, XmlError, type XmlDocument } from "../../xml/index"
 import { OdsReadError } from "./errors"
 
 const encoder = new TextEncoder()
+
+// The most spaces one text:s stands for (text:c, §19.763): the longest run of spaces in a cell the writer writes, so
+// what it wrote reads back. A few bytes of markup stand for this many characters: what the reader builds from them is
+// bounded by MAX_CAPTURED_TEXT (captured markup) and the content reader's own limit (cells).
+export const MAX_SPACE_RUN = SHEET_MAX_CELL_TEXT
+// The most characters the text of captured markup comes to: a note, or all of a sheet's validation messages.
+export const MAX_CAPTURED_TEXT = 16 * 1024 * 1024
+
+// The spaces a text:s stands for: its text:c, at least one (also for a count that does not read) and at most `max`.
+export function spaceCount(count: string | undefined, max: number = MAX_SPACE_RUN): number {
+	const value = Number(count ?? "1")
+
+	return Number.isFinite(value) && value >= 1 ? Math.min(max, Math.floor(value)) : 1
+}
+
+// What text read from captured markup may still come to, in characters.
+export interface TextBudget {
+	chars: number
+}
+
+export function textBudget(): TextBudget {
+	return { chars: MAX_CAPTURED_TEXT }
+}
+
+// Takes `length` characters from the budget; the markup is refused once it is spent.
+export function chargeText(budget: TextBudget, length: number): void {
+	budget.chars -= length
+
+	if (budget.chars < 0) throw new OdsReadError("tooLarge", "The spreadsheet holds more text in a note or message than the limit")
+}
 
 // A small element captured from content.xml (validations, names, an annotation...), parsed under the namespace
 // declarations in force where it was captured.
@@ -47,8 +78,13 @@ export function capturedElement(markup: Uint8Array, prefixes: ReadonlyMap<string
 }
 
 // The text of an element in document order: paragraphs (text:p, text:h) on lines of their own, text:s, text:tab and
-// text:line-break as the characters they stand for, other inline elements (spans, links, fields) by their text.
-export function capturedText({ document, namespaces, node }: Captured, skip: ReadonlySet<string> = new Set()): string {
+// text:line-break as the characters they stand for, other inline elements (spans, links, fields) by their text. Refused
+// as tooLarge once it would pass what `budget` holds.
+export function capturedText(
+	{ document, namespaces, node }: Captured,
+	skip: ReadonlySet<string> = new Set(),
+	budget: TextBudget = textBudget()
+): string {
 	const lines: string[] = []
 	let line: string[] | null = null
 
@@ -57,7 +93,12 @@ export function capturedText({ document, namespaces, node }: Captured, skip: Rea
 			const kind = document.kind(child)
 
 			if (kind === NodeKind.Text || kind === NodeKind.CData) {
-				line?.push(document.text(child))
+				if (line === null) continue
+
+				const text = document.text(child)
+
+				chargeText(budget, text.length)
+				line.push(text)
 
 				continue
 			}
@@ -73,13 +114,22 @@ export function capturedText({ document, namespaces, node }: Captured, skip: Rea
 
 				line = []
 				walk(child)
+				// The line end that joins it to the next.
+				chargeText(budget, 1)
 				lines.push(line.join(""))
 				line = outer
 			} else if (name === "text:s") {
-				line?.push(" ".repeat(Math.max(1, Number(canonicalAttributes(document, namespaces, child).get("text:c") ?? "1") || 1)))
+				if (line === null) continue
+
+				const count = spaceCount(canonicalAttributes(document, namespaces, child).get("text:c"))
+
+				chargeText(budget, count)
+				line.push(" ".repeat(count))
 			} else if (name === "text:tab") {
+				chargeText(budget, 1)
 				line?.push("\t")
 			} else if (name === "text:line-break") {
+				chargeText(budget, 1)
 				line?.push("\n")
 			} else {
 				walk(child)
@@ -92,13 +142,12 @@ export function capturedText({ document, namespaces, node }: Captured, skip: Rea
 	return lines.join("\n")
 }
 
-// Each content validation's help and error messages (by table:name) as their text in document order (capturedText):
-// the element tree keeps an element's character data apart from its children, which loses where a text:s was.
 // Validations captured between yields.
 const VALIDATIONS_PER_STEP = 256
 
-// table:content-validations parsed once, in steps: the element, and each validation's messages, their text in
-// document order.
+// table:content-validations parsed once, in steps: the element, and each validation's help and error messages (by
+// table:name) as their text in document order (capturedText): the element tree keeps an element's character data
+// apart from its children, which loses where a text:s was.
 export function* capturedValidationsSteps(
 	markup: Uint8Array,
 	prefixes: ReadonlyMap<string, string>
@@ -107,6 +156,8 @@ export function* capturedValidationsSteps(
 	const { document, namespaces, node } = captured
 	const children: OdfElement[] = []
 	const messages = new Map<string, { help: string; error: string }>()
+	// All the messages together, as they are kept and copied into the rules.
+	const budget = textBudget()
 	let text = ""
 	let step = 0
 
@@ -132,8 +183,8 @@ export function* capturedValidationsSteps(
 		for (let message = document.firstChildElement(child); message >= 0; message = document.nextSiblingElement(message)) {
 			const which = elementName(document, namespaces, message)
 
-			if (which === "table:help-message") own.help = capturedText({ document, namespaces, node: message })
-			else if (which === "table:error-message") own.error = capturedText({ document, namespaces, node: message })
+			if (which === "table:help-message") own.help = capturedText({ document, namespaces, node: message }, undefined, budget)
+			else if (which === "table:error-message") own.error = capturedText({ document, namespaces, node: message }, undefined, budget)
 		}
 
 		messages.set(name, own)

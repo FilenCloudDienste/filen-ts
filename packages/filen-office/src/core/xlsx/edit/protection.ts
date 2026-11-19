@@ -1,4 +1,4 @@
-import type { SheetId, SheetProtectedAction } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetProtectedAction } from "../../sheet/protocol"
 import { defineSheetFeature, type SheetChangeSink, type SheetHandled } from "../../sheet/registry"
 import { decodeUtf8 } from "../../xml/index"
 import type { XlsxProtectionHash, XlsxSheetProtection, XlsxWorkbookProtection } from "../model/types"
@@ -134,7 +134,7 @@ async function protectSheet(
 		document.workbook.changes.sheetSection(sheet, "sheetProtection")
 		sink.layout(sheet)
 		// Locked cells show as locked, or no longer.
-		sink.look(sheet, { startRow: 0, startCol: 0, endRow: 1_048_575, endCol: 16_383 })
+		sink.look(sheet, { startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: SHEET_MAX_COLS - 1 })
 	}
 
 	set(protection, changes)

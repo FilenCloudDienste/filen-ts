@@ -57,6 +57,12 @@ export interface DocLists {
 }
 
 const MAX_LISTS = 8192
+// MS-DOC LVLF.iStartAt and LFOLVL.iStartAt: 0..0x7FFF; Word stops counting there too.
+const MAX_NUMBER = 0x7fff
+
+function clampNumber(value: number): number {
+	return Math.min(MAX_NUMBER, Math.max(0, value))
+}
 
 function readLevel(table: Bytes, at: number): readonly [DocLevel, number] {
 	table.check(at, 28, "LVLF")
@@ -93,7 +99,7 @@ function readLevel(table: Bytes, at: number): readonly [DocLevel, number] {
 
 	return [
 		{
-			start: table.i32(at),
+			start: clampNumber(table.i32(at)),
 			nfc: table.u8(at + 4),
 			jc: flags & 3,
 			legal: (flags & 0x04) !== 0,
@@ -164,7 +170,7 @@ export function readLists(table: Bytes, lst: readonly [number, number], lfo: rea
 				let cursor = dataAt + 4
 
 				for (let n = 0; n < levelCount && cursor + 8 <= end; n++) {
-					const startAt = table.i32(cursor)
+					const startAt = clampNumber(table.i32(cursor))
 					const flags = table.u32(cursor + 4)
 					let formatting: DocLevel | undefined
 
@@ -206,7 +212,13 @@ const ROMAN: readonly (readonly [number, string])[] = [
 	[1, "i"]
 ]
 
+// Beyond these, labels stop being readable and hostile values would build huge strings: decimal instead.
+const MAX_ROMAN = 3999
+const MAX_REPEATS = 30
+
 function roman(value: number): string {
+	if (value > MAX_ROMAN) return String(value)
+
 	let out = ""
 	let rest = value
 
@@ -224,9 +236,9 @@ function roman(value: number): string {
 function letters(value: number): string {
 	if (value <= 0) return ""
 
-	const letter = String.fromCharCode(0x61 + ((value - 1) % 26))
+	const repeats = Math.floor((value - 1) / 26) + 1
 
-	return letter.repeat(Math.floor((value - 1) / 26) + 1)
+	return repeats > MAX_REPEATS ? String(value) : String.fromCharCode(0x61 + ((value - 1) % 26)).repeat(repeats)
 }
 
 function ordinalSuffix(value: number): string {
@@ -333,7 +345,7 @@ export class ListNumberer {
 		const current = counters[index]
 
 		if (firstUse && override?.startAt !== undefined) counters[index] = override.startAt
-		else counters[index] = current === undefined ? level.start : current + 1
+		else counters[index] = current === undefined ? level.start : Math.min(MAX_NUMBER, current + 1)
 
 		const value = counters[index] ?? level.start
 

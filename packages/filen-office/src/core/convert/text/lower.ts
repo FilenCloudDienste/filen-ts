@@ -1,10 +1,12 @@
 import { appendAll } from "../../arrays"
+import { MAX_TABLE_COLUMNS } from "../../docx/props/parse"
 import { symbolTable, symbolToUnicode } from "../../fonts/symbols"
 import { ByteKeyMap } from "../../odt/write/byteKeys"
 import { paragraphAttributes, runAttributes } from "../../odt/write/inverse"
 import { readProps, StyleChains, type Props } from "../../odt/write/meaning"
-import { encodeUtf8, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
+import { encodeUtf8, escapeAttribute, escapeText, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
 import { TextConversionError, type LossyCounts, type TextLossyKind } from "./report"
+import { OFF } from "./shared"
 
 // A WordprocessingML story (the body, a header or footer, the notes, the comments) lowered to what the ODF emitter
 // (core/odt/write/emit.ts) writes: content controls, smart tags and custom XML unwrapped to their content; complex
@@ -91,13 +93,27 @@ const HIGHLIGHTS: Readonly<Record<string, string>> = {
 const KEPT_PREFIXES = new Set(["w", "r", "wp", "a", "xml"])
 // Lowered markup that shows something.
 const VISIBLE = /<w:(?:t|delText|tab|br|cr|drawing|sym|footnoteReference|endnoteReference|softHyphen|noBreakHyphen)\b/u
+
+// A lowered empty element, `<w:name a="v"/>`. Its values may hold a raw ">" (escapeAttribute leaves it), so the
+// pattern steps over each quoted value instead of stopping at the first ">".
+function emptyElement(name: string): string {
+	return `<w:${name}(?: [^\\s="]+="[^"]*")*\\/>`
+}
+
+const PAGE_BREAK_BEFORE = new RegExp(emptyElement("pageBreakBefore"), "u")
+// What precedes pageBreakBefore in CT_PPr order.
+const BREAK_BEFORE_HEAD = new RegExp(
+	`^(?:${emptyElement("pStyle")})?(?:${emptyElement("keepNext")})?(?:${emptyElement("keepLines")})?`,
+	"u"
+)
+const OUTLINE_LEVEL = new RegExp(emptyElement("outlineLvl"), "u")
+const RUN_FONTS = new RegExp(emptyElement("rFonts"), "u")
+const RUN_STYLE = new RegExp(`^${emptyElement("rStyle")}`, "u")
 // Attributes without a prefix (DrawingML's cx, relativeFrom...) are kept too.
 const KEPT_ATTRIBUTE_PREFIXES = new Set([...KEPT_PREFIXES, ""])
 // Properties that say nothing visible, left out without a count.
 const SILENT = new Set(["cnfStyle", "divId", "rsid", "noProof", "webHidden", "specVanish", "proofErr", "adjustRightInd"])
 const EAST_ASIAN = new Set(["autoSpaceDE", "autoSpaceDN", "kinsoku", "wordWrap", "overflowPunct", "topLinePunct"])
-// ST_OnOff false.
-const OFF = new Set(["0", "false", "off"])
 // Paragraph properties the emitter reads itself.
 const PARAGRAPH_OWN = new Set(["pStyle", "numPr", "outlineLvl", "rPr"])
 const MARK_REVISIONS = new Set(["ins", "del", "moveFrom", "moveTo", "rPrChange"])
@@ -123,9 +139,9 @@ const DROPPED_INLINE = new Set([
 // Bounds on what a hostile file's tables make the conversion write, checked before anything is laid out per column:
 // WordprocessingML sets no column limit (ECMA-376 Part 1 CT_TblGridBase: gridCol maxOccurs unbounded), so these are past any
 // real table (the corpus' widest has 22 grid columns, its most cells 119 266 in all) and bound the output: a row past
-// MAX_TABLE_COLUMNS refuses, and so do the cells of every table together past MAX_TABLE_CELLS (counted for a table's
-// rows at its grid's width before any is lowered).
-export const MAX_TABLE_COLUMNS = 1024
+// MAX_TABLE_COLUMNS (the docx reader's own column bound) refuses, and so do the cells of every table together past
+// MAX_TABLE_CELLS (counted for a table's rows at its grid's width before any is lowered).
+export { MAX_TABLE_COLUMNS }
 // A sanity bound known before any row is lowered: a long top-level table is lowered and written a few rows at a time,
 // so the conversion's written budget bounds the rest (about a million plain cells).
 const MAX_TABLE_CELLS = 2_000_000
@@ -145,16 +161,6 @@ const CELL_PROPERTIES = new Set([
 ])
 const CELL_SIDES = new Set(["top", "left", "bottom", "right", "start", "end"])
 
-const NEEDS_ESCAPE = /[&<>"]/u
-
-function escText(text: string): string {
-	return NEEDS_ESCAPE.test(text) ? text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;") : text
-}
-
-function escAttribute(text: string): string {
-	return NEEDS_ESCAPE.test(text) ? escText(text).replace(/"/gu, "&quot;") : text
-}
-
 function prefixOf(name: string): string {
 	const colon = name.indexOf(":")
 
@@ -165,9 +171,11 @@ interface FieldFrame {
 	// "code" until the separator, then "result".
 	phase: "code" | "result"
 	code: string
-	// Where its result starts in the paragraph's output (-1: another paragraph).
+	// Where its result starts in the paragraph's output (-1: another paragraph), and the inline element (a change, a
+	// hyperlink...) its separator sits in: the result is wrapped only when the end sits in that same element.
 	resultAt: number
 	paragraph: number
+	scope: number
 }
 
 interface ParagraphOut {
@@ -179,6 +187,8 @@ interface ParagraphOut {
 	// Blocks written after the paragraph (text that drawings hold).
 	after: string[]
 	id: number
+	// The inline element being written into (each change, hyperlink or field written as an element has its own).
+	scope: number
 }
 
 // What the converted styles and lists hold, which lowered properties may name.
@@ -217,7 +227,10 @@ export class Lowering {
 	private links: PartLinks = { relationship: () => undefined }
 	private document!: XmlDocument
 	private fields: FieldFrame[] = []
+	// Fields on the stack still in their code (output is held back while any is).
+	private codeFields = 0
 	private paragraphs = 0
+	private scopes = 0
 	private readonly startedComments = new Set<string>()
 	// Whether tracked changes can stay tracked in the story (ODF records them in the body only).
 	private tracked = true
@@ -319,6 +332,7 @@ export class Lowering {
 		this.document = document
 		this.links = links
 		this.fields = []
+		this.codeFields = 0
 		this.startedComments.clear()
 		this.tracked = tracked
 		this.pendingBreak = undefined
@@ -491,7 +505,7 @@ export class Lowering {
 						this.block(child, out, sectionEnd)
 			} else if (document.textContent(node).trim() !== "") {
 				this.lossy.add("unknownElement")
-				out.push(`<w:p><w:r><w:t xml:space="preserve">${escText(document.textContent(node))}</w:t></w:r></w:p>`)
+				out.push(`<w:p><w:r><w:t xml:space="preserve">${escapeText(document.textContent(node))}</w:t></w:r></w:p>`)
 			}
 
 			return
@@ -556,7 +570,7 @@ export class Lowering {
 			default:
 				if (document.textContent(node).trim() !== "") {
 					this.lossy.add("unknownElement")
-					out.push(`<w:p><w:r><w:t xml:space="preserve">${escText(document.textContent(node))}</w:t></w:r></w:p>`)
+					out.push(`<w:p><w:r><w:t xml:space="preserve">${escapeText(document.textContent(node))}</w:t></w:r></w:p>`)
 				}
 		}
 	}
@@ -573,7 +587,7 @@ export class Lowering {
 
 			blocks.push(
 				this.tracked
-					? `<w:p><w:del${this.attributes(node)}><w:r><w:delText xml:space="preserve">${escText(text)}</w:delText></w:r></w:del></w:p>`
+					? `<w:p><w:del${this.attributes(node)}><w:r><w:delText xml:space="preserve">${escapeText(text)}</w:delText></w:r></w:del></w:p>`
 					: ""
 			)
 		}
@@ -584,7 +598,7 @@ export class Lowering {
 	private paragraph(node: number, out: string[], sectionEnd: (sectPr: string) => void): void {
 		const pPr = this.child(node, "pPr")
 		const sectPr = pPr < 0 ? -1 : this.child(pPr, "sectPr")
-		const state: ParagraphOut = { out: "", depth: 0, splits: [], after: [], id: ++this.paragraphs }
+		const state: ParagraphOut = { out: "", depth: 0, splits: [], after: [], id: ++this.paragraphs, scope: ++this.scopes }
 
 		this.inline(node, state)
 
@@ -639,7 +653,7 @@ export class Lowering {
 	}
 
 	private breakBefore(properties: string, kind: "page" | "column"): string {
-		const without = properties.replace(/<w:pageBreakBefore[^>]*\/>/u, "")
+		const without = properties.replace(PAGE_BREAK_BEFORE, "")
 
 		// A column break has no form in the emitter's properties (fo:break-before="column" is not one of them).
 		if (kind === "column") {
@@ -649,7 +663,7 @@ export class Lowering {
 		}
 
 		// pageBreakBefore sits after pStyle, keepNext and keepLines (CT_PPr order).
-		const match = /^(<w:pStyle[^>]*\/>)?(<w:keepNext[^>]*\/>)?(<w:keepLines[^>]*\/>)?/u.exec(without)
+		const match = BREAK_BEFORE_HEAD.exec(without)
 		const head = match?.[0] ?? ""
 
 		return `${head}<w:pageBreakBefore/>${without.slice(head.length)}`
@@ -716,8 +730,8 @@ export class Lowering {
 			if (SILENT.has(local)) continue
 
 			if (EAST_ASIAN.has(local)) {
-				// East Asian line breaking and spacing (,,,,
-				//): on by default, which ODF shows as it is; off has no form the writer gives.
+				// East Asian line breaking and spacing (w:autoSpaceDE, w:autoSpaceDN, w:kinsoku, w:wordWrap, w:overflowPunct,
+				// w:topLinePunct): on by default, which ODF shows as it is; off has no form the writer gives.
 				if (OFF.has(document.attribute(child, "w:val") ?? "true")) this.lossy.add("eastAsianTypography")
 
 				continue
@@ -750,13 +764,13 @@ export class Lowering {
 		// list does not show the list's label in LibreOffice); its outline level is not kept.
 		if (/<w:outlineLvl\b/u.test(out) && /<w:numPr>(?![\s\S]*?<w:numId w:val="0"\/>)/u.test(out)) {
 			this.lossy.add("paragraphFormat")
-			out = out.replace(/<w:outlineLvl\b[^>]*\/>/u, "")
+			out = out.replace(OUTLINE_LEVEL, "")
 		}
 
 		return out
 	}
 
-	// Spacing and indents in twips . Their East Asian forms in lines and characters (used
+	// Spacing and indents in twips (w:spacing, w:ind). Their East Asian forms in lines and characters (used
 	// with a document grid) give way to the twips Word writes beside them; automatic spacing (an HTML paragraph's)
 	// is 14 pt before and after, as LibreOffice 7.5 imports it. Undefined: written as it is.
 	private measured(node: number): string | undefined {
@@ -800,7 +814,7 @@ export class Lowering {
 			}
 		}
 
-		return `<w:${local}${[...kept].map(([name, value]) => ` ${name}="${escAttribute(value)}"`).join("")}/>`
+		return `<w:${local}${[...kept].map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`).join("")}/>`
 	}
 
 	// The numbering a paragraph's style gives, as its own (the emitter writes a paragraph's lists from its own
@@ -818,7 +832,7 @@ export class Lowering {
 			// Numbering the document does not define numbers nothing.
 			out +=
 				numId !== undefined && numId !== "0" && this.styles.lists.has(numId)
-					? `<w:numPr><w:ilvl w:val="${escAttribute(ilvl ?? "0")}"/><w:numId w:val="${escAttribute(numId)}"/></w:numPr>`
+					? `<w:numPr><w:ilvl w:val="${escapeAttribute(ilvl ?? "0")}"/><w:numId w:val="${escapeAttribute(numId)}"/></w:numPr>`
 					: '<w:numPr><w:numId w:val="0"/></w:numPr>'
 		}
 
@@ -916,7 +930,7 @@ export class Lowering {
 
 		return attributes.length === 0
 			? ""
-			: `<w:rFonts${attributes.map(([name, value]) => ` ${name}="${escAttribute(value)}"`).join("")}/>`
+			: `<w:rFonts${attributes.map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`).join("")}/>`
 	}
 
 	// --- Inline content ---
@@ -1015,7 +1029,7 @@ export class Lowering {
 
 	// Whether output is held back: inside a field's code.
 	private suppressed(): boolean {
-		return this.fields.some(field => field.phase === "code")
+		return this.codeFields > 0
 	}
 
 	private hyperlink(node: number, state: ParagraphOut): void {
@@ -1039,9 +1053,7 @@ export class Lowering {
 		}
 
 		state.out += `<w:hyperlink r:id="${linked}">`
-		state.depth++
-		this.inline(node, state)
-		state.depth--
+		this.within(node, state)
 		state.out += "</w:hyperlink>"
 	}
 
@@ -1058,10 +1070,19 @@ export class Lowering {
 		}
 
 		state.out += `<w:${kind}${this.attributes(node, ["w:author", "w:date", "w:id"])}>`
+		this.within(node, state)
+		state.out += `</w:${kind}>`
+	}
+
+	// An element's content lowered inside the element the caller opened: a scope of its own, one level deeper.
+	private within(node: number, state: ParagraphOut): void {
+		const scope = state.scope
+
+		state.scope = ++this.scopes
 		state.depth++
 		this.inline(node, state)
 		state.depth--
-		state.out += `</w:${kind}>`
+		state.scope = scope
 	}
 
 	// A simple field: PAGE and NUMPAGES as such, HYPERLINK as a hyperlink, any other as its result.
@@ -1071,7 +1092,7 @@ export class Lowering {
 
 		if (code === "PAGE" || code === "NUMPAGES") {
 			state.out += `<w:fldSimple w:instr=" ${code} ">`
-			this.inline(node, state)
+			this.within(node, state)
 			state.out += "</w:fldSimple>"
 
 			return
@@ -1082,7 +1103,7 @@ export class Lowering {
 
 		if (id !== undefined) {
 			state.out += `<w:hyperlink r:id="${id}">`
-			this.inline(node, state)
+			this.within(node, state)
 			state.out += "</w:hyperlink>"
 
 			return
@@ -1132,7 +1153,7 @@ export class Lowering {
 					break
 				case "t":
 				case "delText":
-					content += `<w:${local} xml:space="preserve">${escText(document.textContent(child))}</w:${local}>`
+					content += `<w:${local} xml:space="preserve">${escapeText(document.textContent(child))}</w:${local}>`
 					break
 				case "tab":
 				case "ptab":
@@ -1170,7 +1191,7 @@ export class Lowering {
 					// A comment with no range: a point comment where its mark is.
 					if (!this.startedComments.has(id)) {
 						flush()
-						state.out += `<w:commentRangeStart w:id="${escAttribute(id)}"/>`
+						state.out += `<w:commentRangeStart w:id="${escapeAttribute(id)}"/>`
 						this.startedComments.add(id)
 					}
 
@@ -1192,9 +1213,9 @@ export class Lowering {
 					const symbolProps =
 						font === undefined || mapped !== 0
 							? rPr
-							: `${rPr.replace(/<w:rFonts[^>]*\/>/u, "")}<w:rFonts w:ascii="${escAttribute(font)}" w:hAnsi="${escAttribute(font)}"/>`
+							: `${rPr.replace(RUN_FONTS, "")}<w:rFonts w:ascii="${escapeAttribute(font)}" w:hAnsi="${escapeAttribute(font)}"/>`
 
-					state.out += `<w:r>${symbolProps === "" ? "" : `<w:rPr>${sortedRun(symbolProps)}</w:rPr>`}<w:t xml:space="preserve">${escText(String.fromCodePoint(mapped === 0 ? char : mapped))}</w:t></w:r>`
+					state.out += `<w:r>${symbolProps === "" ? "" : `<w:rPr>${sortedRun(symbolProps)}</w:rPr>`}<w:t xml:space="preserve">${escapeText(String.fromCodePoint(mapped === 0 ? char : mapped))}</w:t></w:r>`
 					break
 				}
 				case "drawing":
@@ -1214,7 +1235,14 @@ export class Lowering {
 
 					const piece = (local: string): string => {
 						const container = this.child(child, local)
-						const inner: ParagraphOut = { out: "", depth: state.depth + 1, splits: [], after: state.after, id: state.id }
+						const inner: ParagraphOut = {
+							out: "",
+							depth: state.depth + 1,
+							splits: [],
+							after: state.after,
+							id: state.id,
+							scope: ++this.scopes
+						}
 
 						if (container >= 0) this.inline(container, inner)
 
@@ -1238,7 +1266,7 @@ export class Lowering {
 				default:
 					if (document.textContent(child).trim() !== "") {
 						this.lossy.add("unknownElement")
-						content += `<w:t xml:space="preserve">${escText(document.textContent(child))}</w:t>`
+						content += `<w:t xml:space="preserve">${escapeText(document.textContent(child))}</w:t>`
 					}
 			}
 		}
@@ -1250,7 +1278,8 @@ export class Lowering {
 		const type = this.document.attribute(node, "w:fldCharType")
 
 		if (type === "begin") {
-			this.fields.push({ phase: "code", code: "", resultAt: -1, paragraph: state.id })
+			this.fields.push({ phase: "code", code: "", resultAt: -1, paragraph: state.id, scope: -1 })
+			this.codeFields++
 
 			return
 		}
@@ -1260,9 +1289,12 @@ export class Lowering {
 		if (field === undefined) return
 
 		if (type === "separate") {
+			if (field.phase === "code") this.codeFields--
+
 			field.phase = "result"
 			field.resultAt = this.suppressed() ? -1 : state.out.length
 			field.paragraph = state.id
+			field.scope = state.scope
 
 			return
 		}
@@ -1271,10 +1303,20 @@ export class Lowering {
 
 		this.fields.pop()
 
+		if (field.phase === "code") this.codeFields--
+
 		if (this.suppressed()) return
 
 		const code = fieldCode(field.code)
-		const local = field.paragraph === state.id && field.resultAt >= 0 && field.resultAt <= state.out.length
+		// The result is wrapped only within the element its separator sat in: a slice across a change's or hyperlink's
+		// tags (the separator in one w:ins, the end in another) would not be well formed; kept as plain runs, counted.
+		// Nor across a break that splits the paragraph: the splice would shift the split's offset into a tag.
+		const local =
+			field.paragraph === state.id &&
+			field.scope === state.scope &&
+			field.resultAt >= 0 &&
+			field.resultAt <= state.out.length &&
+			!state.splits.some(split => split.at > field.resultAt)
 
 		if (local && (code === "PAGE" || code === "NUMPAGES")) {
 			state.out = `${state.out.slice(0, field.resultAt)}<w:fldSimple w:instr=" ${code} ">${state.out.slice(field.resultAt)}</w:fldSimple>`
@@ -1284,7 +1326,7 @@ export class Lowering {
 
 		const target = code === "HYPERLINK" ? hyperlinkTarget(field.code) : undefined
 
-		if (local && target !== undefined && !state.splits.some(split => split.at > field.resultAt)) {
+		if (local && target !== undefined) {
 			const id = this.linkId(target)
 
 			// A target no URI can name: the result stays as text, counted.
@@ -1326,7 +1368,7 @@ export class Lowering {
 	private text(text: string, state: ParagraphOut): void {
 		if (text === "" || this.suppressed()) return
 
-		state.out += `<w:r><w:t xml:space="preserve">${escText(text)}</w:t></w:r>`
+		state.out += `<w:r><w:t xml:space="preserve">${escapeText(text)}</w:t></w:r>`
 	}
 
 	// --- Drawings ---
@@ -1457,7 +1499,7 @@ export class Lowering {
 
 		for (const box of boxes) state.after.push(this.boxBlocks(box))
 
-		// WordArt (v:textpath,: a watermark's "DRAFT"...): its text in a text box where the shape is.
+		// WordArt (v:textpath: a watermark's "DRAFT"...): its text in a text box where the shape is.
 		for (const path of this.descendants(node, "textpath")) {
 			const text = document.attribute(path, "string") ?? ""
 
@@ -1493,10 +1535,10 @@ export class Lowering {
 		const relative = (name: string, fallback: string): string => {
 			const value = property(name)
 
-			return value === "page" ? "page" : value === "text" || value === undefined ? fallback : value === "margin" ? "margin" : fallback
+			return value === "page" || value === "margin" ? value : fallback
 		}
 		const axis = (tag: "positionH" | "positionV", align: string | undefined, offset: number, from: string): string =>
-			`<wp:${tag} relativeFrom="${from}">${align === undefined || align === "absolute" ? `<wp:posOffset>${String(offset)}</wp:posOffset>` : `<wp:align>${escText(align)}</wp:align>`}</wp:${tag}>`
+			`<wp:${tag} relativeFrom="${from}">${align === undefined || align === "absolute" ? `<wp:posOffset>${String(offset)}</wp:posOffset>` : `<wp:align>${escapeText(align)}</wp:align>`}</wp:${tag}>`
 		const behind = /z-index:\s*-/u.test(style)
 
 		return (
@@ -1513,7 +1555,7 @@ export class Lowering {
 				emu("margin-top"),
 				relative("mso-position-vertical-relative", "paragraph")
 			) +
-			`<wp:wrapNone/><a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/><w:txbxContent><w:p><w:r><w:t xml:space="preserve">${escText(text)}</w:t></w:r></w:p></w:txbxContent></wp:anchor></w:drawing>`
+			`<wp:wrapNone/><a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/><w:txbxContent><w:p><w:r><w:t xml:space="preserve">${escapeText(text)}</w:t></w:r></w:p></w:txbxContent></wp:anchor></w:drawing>`
 		)
 	}
 
@@ -1522,16 +1564,19 @@ export class Lowering {
 
 		const document = this.document
 		const saved = this.fields
+		const savedCode = this.codeFields
 		const pending = this.pendingBreak
 		const blocks: string[] = []
 
 		this.fields = []
+		this.codeFields = 0
 		this.pendingBreak = undefined
 
 		for (let child = document.firstChildElement(content); child >= 0; child = document.nextSiblingElement(child))
 			this.block(child, blocks, () => undefined)
 
 		this.fields = saved
+		this.codeFields = savedCode
 		this.pendingBreak = pending
 
 		return blocks.join("")
@@ -1876,7 +1921,7 @@ export class Lowering {
 					this.lossy.add("tableLayout")
 
 					if (fill !== undefined && fill !== "auto")
-						properties += `<w:shd w:val="clear" w:color="auto" w:fill="${escAttribute(fill)}"/>`
+						properties += `<w:shd w:val="clear" w:color="auto" w:fill="${escapeAttribute(fill)}"/>`
 
 					continue
 				}
@@ -1969,7 +2014,7 @@ export class Lowering {
 				continue
 			}
 
-			out += ` ${name}="${escAttribute(value)}"`
+			out += ` ${name}="${escapeAttribute(value)}"`
 		}
 
 		return out
@@ -1992,7 +2037,8 @@ export class Lowering {
 	}
 
 	// Spacing and indents with their East Asian forms (lines, characters) given way to the twips beside them
-	// (or, without, left out and counted), and automatic spacing "off" left out: the forms the emitter reads.
+	// (or, without, left out and counted), and automatic spacing as `measured` writes a paragraph's (14 pt, counted;
+	// "off" left out): the forms the emitter reads.
 	private measuredAttributes(node: number): string | undefined {
 		const document = this.document
 		const local = document.localName(node)
@@ -2014,13 +2060,28 @@ export class Lowering {
 				return ""
 			}
 		)
-		changed = changed.replace(/ w:(beforeAutospacing|afterAutospacing)="([^"]*)"/gu, (match, name: string, value: string) => {
-			if (!OFF.has(value)) return match
+		for (const [name, side] of [
+			["beforeAutospacing", "before"],
+			["afterAutospacing", "after"]
+		] as const) {
+			const value = document.attribute(node, `w:${name}`)
+
+			if (value === undefined) continue
 
 			found = true
+			changed = changed.replace(new RegExp(` w:${name}="[^"]*"`, "u"), "")
 
-			return name === "" ? match : ""
-		})
+			if (OFF.has(value)) continue
+
+			// The twips beside it give way (` w:before="…"`, its value up to the closing quote).
+			const at = changed.indexOf(` w:${side}="`)
+
+			changed =
+				at < 0
+					? `${changed} w:${side}="280"`
+					: `${changed.slice(0, at)} w:${side}="280"${changed.slice(changed.indexOf('"', at + side.length + 5) + 1)}`
+			this.lossy.add("paragraphFormat")
+		}
 
 		return found ? changed : undefined
 	}
@@ -2039,7 +2100,7 @@ export class Lowering {
 			const kind = document.kind(child)
 
 			if (kind === NodeKind.Element) inner += this.clean(child)
-			else if (kind === NodeKind.Text || kind === NodeKind.CData) inner += escText(document.text(child))
+			else if (kind === NodeKind.Text || kind === NodeKind.CData) inner += escapeText(document.text(child))
 		}
 
 		out += inner === "" ? "/>" : `>${inner}</${name}>`
@@ -2199,12 +2260,12 @@ export function linkUri(target: string): string | undefined {
 
 // Run property children in schema order once rFonts was moved (sym).
 function sortedRun(markup: string): string {
-	const fonts = /<w:rFonts[^>]*\/>/u.exec(markup)?.[0]
+	const fonts = RUN_FONTS.exec(markup)?.[0]
 
 	if (fonts === undefined) return markup
 
 	const rest = markup.replace(fonts, "")
-	const style = /^<w:rStyle[^>]*\/>/u.exec(rest)?.[0] ?? ""
+	const style = RUN_STYLE.exec(rest)?.[0] ?? ""
 
 	return `${style}${fonts}${rest.slice(style.length)}`
 }

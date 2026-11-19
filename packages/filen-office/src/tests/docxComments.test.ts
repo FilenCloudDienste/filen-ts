@@ -620,6 +620,88 @@ describe("comments: the selection and stepping", () => {
 		expect(entry).not.toHaveBeenCalled()
 	})
 
+	it("reads anchors and what the commands can do from the comment entries alone, among tracked changes", async () => {
+		const ins = (id: number, text: string): string =>
+			`<w:ins w:id="${String(id)}" w:author="Bo" w:date="2020-01-01T00:00:00Z"><w:r><w:t>${text}</w:t></w:r></w:ins>`
+		const opened = await open({
+			body:
+				Array.from({ length: 6 }, (_, k) => `<w:p>${ins(100 + k, `inserted ${String(k)}`)}</w:p>`).join("") +
+				'<w:commentRangeStart w:id="3"/>' +
+				'<w:p><w:r><w:t xml:space="preserve">Alpha </w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:t>beta</w:t></w:r></w:p>' +
+				`<w:p>${ins(200, "gamma")}<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r>` +
+				'<w:r><w:t xml:space="preserve"> delta</w:t></w:r><w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r></w:p>' +
+				'<w:p><w:fldSimple w:instr="PAGE"><w:commentRangeStart w:id="5"/><w:r><w:t>1</w:t></w:r></w:fldSimple><w:r><w:t>x</w:t></w:r>' +
+				'<w:commentRangeEnd w:id="5"/><w:r><w:commentReference w:id="5"/></w:r>' +
+				'<w:commentRangeStart w:id="6"/><w:r><w:t>y</w:t></w:r><w:commentRangeEnd w:id="6"/>' +
+				'<w:fldSimple w:instr="PAGE"><w:r><w:commentReference w:id="6"/></w:r></w:fldSimple></w:p>' +
+				Array.from({ length: 6 }, (_, k) => `<w:p>${ins(300 + k, `more ${String(k)}`)}</w:p>`).join(""),
+			comments: [0, 3, 5, 6]
+				.map(
+					id =>
+						`<w:comment w:id="${String(id)}" w:author="Bo"><w:p w14:paraId="0000000${String(id)}"><w:r><w:t>c${String(id)}</w:t></w:r></w:p></w:comment>`
+				)
+				.join("")
+		})
+		const { editor } = opened
+		const index = editor.session.reviewIndex
+		const doc = editor.session.state.doc
+		// The anchors as a walk over every entry finds them, the first of each kind.
+		const walked = new Map<string, { start: number; end: number; reference: number }>()
+
+		for (let k = 0; k < index.size; k++) {
+			const entry = index.entry(k)
+
+			if (entry === undefined || entry.kind > 2) continue
+
+			const found = walked.get(entry.id) ?? { start: -1, end: -1, reference: -1 }
+			const slots: readonly ("start" | "end" | "reference")[] = ["start", "end", "reference"]
+			const slot = slots[entry.kind] ?? "start"
+
+			if (found[slot] < 0) found[slot] = entry.from
+
+			walked.set(entry.id, found)
+		}
+
+		expect(index.revisionCount).toBeGreaterThanOrEqual(13)
+		expect([...walked.keys()].sort()).toEqual(["0", "3", "5", "6"])
+
+		const entry = vi.spyOn(index, "entry")
+		const store = docxComments(editor)
+
+		for (const [id, found] of walked) {
+			const from = found.start >= 0 ? found.start : found.reference
+
+			expect(store.anchor(id)).toEqual({
+				story: editor.session.story.story.index,
+				from,
+				to: found.end >= 0 ? Math.max(from, found.end) : from,
+				reference: found.reference
+			})
+		}
+
+		// The block-level start sits before its paragraph, the comment spans two paragraphs.
+		expect(doc.resolve(walked.get("3")?.start ?? 0).depth).toBe(0)
+		expect(doc.resolve(walked.get("0")?.start ?? 0).index(0)).not.toBe(doc.resolve(walked.get("0")?.end ?? 0).index(0))
+		expect(store.threads().map(thread => thread.id)).toEqual(["3", "0", "5", "6"])
+
+		const flags = (id: string) => {
+			const comment = store.comment(id)
+
+			return [comment?.canDelete, comment?.canReply]
+		}
+
+		expect(flags("0")).toEqual([true, true])
+		expect(flags("3")).toEqual([true, true])
+		// Anchors held by a field are its bytes.
+		expect(flags("5")).toEqual([false, true])
+		expect(flags("6")).toEqual([false, false])
+		expect(store.select("0")).toBe(true)
+		expect(textOf(editor, editor.session.state.selection)).toBe("betagamma")
+		expect(store.step(true)).toBe(true)
+		expect(editor.snapshot().context.comment?.thread).toBe("5")
+		expect(entry).not.toHaveBeenCalled()
+	})
+
 	it("hears changes of the threads, a microtask later", async () => {
 		const opened = await open(W2013)
 		const store = docxComments(opened.editor)
@@ -1738,19 +1820,23 @@ const COMMENT_FILES = [
 	"docx/oxpt__CA009-altChunk.docx"
 ]
 
+// Files of COMMENT_FILES that open for editing and reach every assertion (measured on the corpus).
+const COMMENT_FILES_REACHED = 14
+let commentFilesReached = 0
+
 describe.skipIf(!existsSync(join(CORPUS_DIR, "docx")))("comments over the corpus", () => {
-	it.each(COMMENT_FILES)(
+	it.for(COMMENT_FILES)(
 		"adds, replies, resolves and deletes in %s through Gate 2, and reads it back",
 		{ timeout: 120_000 },
-		async file => {
+		async (file, context) => {
 			const path = join(CORPUS_DIR, file)
 
-			if (!existsSync(path)) return
+			if (!existsSync(path)) return context.skip(`${file} is not in the corpus`)
 
 			const opened = await open(new Uint8Array(readFileSync(path)))
 			const { editor } = opened
 
-			if (editor.body.session.readOnly) return
+			if (editor.body.session.readOnly) return context.skip(`${file} opens read-only`)
 
 			const store = docxComments(editor)
 			const before = store.threads()
@@ -1794,20 +1880,31 @@ describe.skipIf(!existsSync(join(CORPUS_DIR, "docx")))("comments over the corpus
 			// Every other comment reads back as it was.
 			for (const comment of before.filter(thread => thread !== deleting).flatMap(thread => [thread.comment, ...thread.replies]))
 				expect(reopened.find(candidate => candidate.id === comment.id)?.text, comment.id).toBe(comment.text)
+
+			commentFilesReached++
 		}
 	)
+
+	it("reaches the assertions in every file that should", () => {
+		expect(commentFilesReached).toBeGreaterThanOrEqual(COMMENT_FILES_REACHED)
+	})
 })
 
+const REPARENT_FILES = [
+	"docm/oxsdk__Comment061.docm",
+	"dotm/oxsdk__Comment063.dotm",
+	"dotx/oxsdk__Comment064.dotx",
+	"docx/oxsdk__Invalid_Word15Comments.docx"
+]
+// Files of REPARENT_FILES with a reply that has replies, open for editing (measured on the corpus).
+const REPARENT_FILES_REACHED = 4
+let reparentFilesReached = 0
+
 describe.skipIf(!existsSync(join(CORPUS_DIR, "docx")))("comments over the corpus: replies to deleted replies", () => {
-	it.each([
-		"docm/oxsdk__Comment061.docm",
-		"dotm/oxsdk__Comment063.dotm",
-		"dotx/oxsdk__Comment064.dotx",
-		"docx/oxsdk__Invalid_Word15Comments.docx"
-	])("re-parents the replies of a deleted reply in %s", { timeout: 120_000 }, async file => {
+	it.for(REPARENT_FILES)("re-parents the replies of a deleted reply in %s", { timeout: 120_000 }, async (file, context) => {
 		const path = join(CORPUS_DIR, file)
 
-		if (!existsSync(path)) return
+		if (!existsSync(path)) return context.skip(`${file} is not in the corpus`)
 
 		const opened = await open(new Uint8Array(readFileSync(path)))
 		const comments = opened.context.model.comments
@@ -1815,7 +1912,8 @@ describe.skipIf(!existsSync(join(CORPUS_DIR, "docx")))("comments over the corpus
 			comment => comment.parentId !== undefined && comments.some(other => other.parentId === comment.id && other.anchor >= 0)
 		)
 
-		if (middle === undefined || opened.editor.body.session.readOnly) return
+		if (middle === undefined) return context.skip(`${file} has no reply with replies`)
+		if (opened.editor.body.session.readOnly) return context.skip(`${file} opens read-only`)
 
 		const root = middle.parentId ?? ""
 		const children = comments.filter(comment => comment.parentId === middle.id).map(comment => comment.id)
@@ -1832,5 +1930,11 @@ describe.skipIf(!existsSync(join(CORPUS_DIR, "docx")))("comments over the corpus
 
 		expect(reopened.some(comment => comment.id === middle.id)).toBe(false)
 		for (const id of children) expect(reopened.find(comment => comment.id === id)?.parent, id).toBe(root)
+
+		reparentFilesReached++
+	})
+
+	it("reaches the assertions in every file that should", () => {
+		expect(reparentFilesReached).toBeGreaterThanOrEqual(REPARENT_FILES_REACHED)
 	})
 })

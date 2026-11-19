@@ -9,7 +9,11 @@ import { buildDoc, lists, plc, prl } from "./docFixtures"
 import { budget } from "./timing"
 
 // Mutated documents (bytes of the WordDocument and Table streams overwritten, the compound file rebuilt) must read
-// or be refused with a DocError, never throw anything else, and never take long.
+// or be refused with a DocError, never throw anything else, and never take long. FILEN_OFFICE_DOC_FUZZ (mutants
+// per test) and FILEN_OFFICE_DOC_FUZZ_SEED replace the fixed counts and seeds; the nightly fuzz sets the seed.
+
+const ITERATIONS = process.env["FILEN_OFFICE_DOC_FUZZ"] || undefined
+const SEED = process.env["FILEN_OFFICE_DOC_FUZZ_SEED"] || undefined
 
 function random(seed: number): () => number {
 	let state = seed >>> 0
@@ -93,7 +97,7 @@ async function fuzz(sources: readonly Streams[], iterations: number, seed: numbe
 
 		slowest = Math.max(slowest, result.ms)
 
-		if (result.untyped !== undefined) untyped.push(`${source.name} #${k}: ${result.untyped}`)
+		if (result.untyped !== undefined) untyped.push(`${source.name} #${k} (seed ${seed}): ${result.untyped}`)
 	}
 
 	return { untyped, slowest }
@@ -135,10 +139,11 @@ describe("mutated Word binary documents", () => {
 			},
 			lengths: { plfLst: lstLength }
 		})
-		const { untyped, slowest } = await fuzz([await streams("synthetic", bytes)], 1500, 7)
+		const seed = Number(SEED ?? "7")
+		const { untyped, slowest } = await fuzz([await streams("synthetic", bytes)], Number(ITERATIONS ?? "1500"), seed)
 
 		expect(untyped).toEqual([])
-		expect(slowest).toBeLessThan(budget(1000))
+		expect(slowest, `seed ${seed}`).toBeLessThan(budget(1000))
 	})
 
 	const files = existsSync(join(CORPUS_DIR, "doc"))
@@ -160,9 +165,10 @@ describe("mutated Word binary documents", () => {
 			}
 		}
 
-		const { untyped, slowest } = await fuzz(sources, 800, 11)
+		const seed = Number(SEED ?? "11")
+		const { untyped, slowest } = await fuzz(sources, Number(ITERATIONS ?? "800"), seed)
 
 		expect(untyped).toEqual([])
-		expect(slowest).toBeLessThan(budget(2000))
+		expect(slowest, `seed ${seed}`).toBeLessThan(budget(2000))
 	})
 })

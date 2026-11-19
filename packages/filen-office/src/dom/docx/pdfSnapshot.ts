@@ -1,9 +1,11 @@
 import {
 	Item,
+	OBJECT_INTS,
 	Region,
 	SOURCE_INTS,
 	SourceInt,
 	objectTurnsOf,
+	ref,
 	type DocumentLayout,
 	type DocxModel,
 	type PageDisplayList,
@@ -12,21 +14,23 @@ import {
 	type RevisionView,
 	type StoryPart
 } from "../../core/docx/index"
-import type {
-	DocxPdfCell,
-	DocxPdfColumn,
-	DocxPdfDocument,
-	DocxPdfFace,
-	DocxPdfLinkTarget,
-	DocxPdfObject,
-	DocxPdfOutlineEntry,
-	DocxPdfPage,
-	DocxPdfRole,
-	DocxPdfStyle
+import {
+	PDF_LINK_INTS,
+	type DocxPdfCell,
+	type DocxPdfColumn,
+	type DocxPdfDocument,
+	type DocxPdfFace,
+	type DocxPdfLinkTarget,
+	type DocxPdfObject,
+	type DocxPdfOutlineEntry,
+	type DocxPdfPage,
+	type DocxPdfRole,
+	type DocxPdfStyle
 } from "../../core/docx/pdf/types"
 import { Emphasis, RunEffect } from "../../core/docx/layout/effects"
+import { pageObjects } from "../../core/docx/layout/turns"
 import { symbolTable, type FontManager, type FontRequest, type FontSlot } from "../../core/fonts/index"
-import { FRAGMENT_FLOATS, FRAGMENT_INTS, FRAGMENT_KIND_MASK, FragmentKind, LINE_FLOATS, LINE_INTS, LineInt } from "../../core/text/index"
+import { LINE_FLOATS, LINE_INTS, LineInt } from "../../core/text/index"
 import { sliceClock, type Slicing } from "../../core/slicing"
 import { pdfLanguage } from "../../core/docx/pdf/lang"
 import { coreProperties } from "../../core/opc/coreTitle"
@@ -73,6 +77,8 @@ const SLOTS: readonly FontSlot[] = ["ascii", "hAnsi", "eastAsia", "cs"]
 const BLACK = 0x000000ff
 const HEX = /^[0-9A-Fa-f]{6}$/
 const IMAGE_FORMATS = new Set(["png", "jpeg", "gif", "bmp", "webp", "tiff"])
+// Objects asked for at once by a sliced snapshot.
+const OBJECT_CHUNK = 8
 
 function checkAbort(signal: { readonly aborted: boolean } | undefined): void {
 	if (signal?.aborted === true) throw Object.assign(new Error("The PDF export was aborted"), { name: "AbortError" })
@@ -389,7 +395,7 @@ function cellsOf(part: StoryPart, partIndex: number, item: number, store: PropsS
 		const index = shape.rows.get(row) ?? 0
 
 		out.push({
-			table: partIndex * 0x4000000 + table,
+			table: ref(partIndex, table),
 			row: index,
 			cell: shape.cells.get(at) ?? 0,
 			header: shape.headers[index] === true,
@@ -446,50 +452,14 @@ function copied<T extends Float32Array | Int32Array>(array: T, copy: boolean): T
 	return (copy ? array.slice() : array) as T
 }
 
-// The page's placed objects plus its inline ones, which the text layout carries as object fragments (as the
-// renderer's pages have them).
+// The page's objects (pageObjects(), as the renderer's pages have them) with the turn each is drawn through.
 function objectsOf(
 	layout: DocumentLayout,
 	page: PageDisplayList
 ): { count: number; floats: Float32Array; ints: Int32Array; turns: Int32Array | undefined } {
-	const table = layout.objects
-	const text = page.text
-	const floats = Array.from(page.objectFloats.subarray(0, page.objectCount * 4))
-	const ints = Array.from(page.objectInts.subarray(0, page.objectCount * 3))
-	// The line of each inline object, for the turn it is drawn through.
-	const lines: number[] = []
+	const { count, floats, ints, lines } = pageObjects(page, layout.objects)
 
-	for (let line = 0; line < text.lineCount; line++) {
-		const baseline = text.lineFloats[line * LINE_FLOATS + 2] ?? 0
-		const first = text.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
-		const count = text.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
-
-		for (let k = first; k < first + count; k++) {
-			if (((text.fragmentInts[k * FRAGMENT_INTS + 3] ?? 0) & FRAGMENT_KIND_MASK) !== FragmentKind.OBJECT) continue
-
-			const id = text.fragmentInts[k * FRAGMENT_INTS + 4] ?? -1
-			const height = table.heights[id] ?? 0
-
-			if (id < 0 || !(height > 0)) continue
-
-			floats.push(
-				text.fragmentFloats[k * FRAGMENT_FLOATS] ?? 0,
-				baseline - (table.ascents[id] ?? height),
-				text.fragmentFloats[k * FRAGMENT_FLOATS + 1] ?? table.widths[id] ?? 0,
-				height
-			)
-			ints.push(id, 1, text.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)
-
-			if (page.turnCount > 0) lines.push(line)
-		}
-	}
-
-	return {
-		count: ints.length / 3,
-		floats: Float32Array.from(floats),
-		ints: Int32Array.from(ints),
-		turns: objectTurnsOf(page.turnCount, page.turnInts, text.lineCount, page.objectCount, lines)
-	}
+	return { count, floats, ints, turns: objectTurnsOf(page.turnCount, page.turnInts, page.text.lineCount, page.objectCount, lines) }
 }
 
 // The renderer's object data as the painter takes it (core/drawingml/pdf.ts reads its lists as arrays).
@@ -609,7 +579,7 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 
 		const objects = objectsOf(layout, page)
 
-		for (let o = 0; o < objects.count; o++) objectIds.add(objects.ints[o * 3] ?? -1)
+		for (let o = 0; o < objects.count; o++) objectIds.add(objects.ints[o * OBJECT_INTS] ?? -1)
 
 		pages.push({
 			index: page.index,
@@ -634,7 +604,7 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 			sourceInts: copied(page.sourceInts, copy),
 			sourceTexts: page.sourceTexts,
 			...(page.sourceOwners.some(owner => owner >= 0) ? { sourceOwners: copied(page.sourceOwners, copy) } : {}),
-			linkCount: linkInts.length / 4,
+			linkCount: linkInts.length / PDF_LINK_INTS,
 			linkInts: Int32Array.from(linkInts),
 			clipCount: page.clipCount,
 			clipFloats: copied(page.clipFloats, copy),
@@ -657,8 +627,18 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 	objectIds.delete(-1)
 
 	const objects = new Map<number, DocxPdfObject>()
+	const ids = [...objectIds]
+	// Sliced, the objects are asked for a few at a time: building them may never give the host a turn on its own.
+	const step = clock === undefined ? ids.length : OBJECT_CHUNK
 
-	for (const object of await live.objects([...objectIds])) objects.set(object.id, pdfObject(object))
+	for (let at = 0; at < ids.length; at += step) {
+		// The last page gave the host its turn already.
+		if (at > 0 && clock?.due === true) await clock.pause()
+
+		for (const object of await live.objects(ids.slice(at, at + step))) objects.set(object.id, pdfObject(object))
+
+		checkAbort(signal)
+	}
 
 	checkAbort(signal)
 
@@ -667,6 +647,8 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 	for (const object of objects.values()) {
 		for (const part of drawingImages(object)) {
 			if (media.has(part)) continue
+
+			if (clock?.due === true) await clock.pause()
 
 			const found = await live.media(part)
 

@@ -353,7 +353,8 @@ function nearestFree(plan: MorphPlan, fromIn: Uint8Array, toIn: Uint8Array, take
 	// Each from object's index in its group's remaining list.
 	const position = new Int32Array(plan.from.length).fill(-1)
 
-	for (const grid of grids) grid.remaining.forEach((f, k) => (position[f] = k))
+	// A group with no free from object leaves a hole in `grids`, which forEach skips.
+	grids.forEach(grid => grid.remaining.forEach((f, k) => (position[f] = k)))
 
 	const remove = (list: number[], f: number): void => {
 		const at = list.indexOf(f)

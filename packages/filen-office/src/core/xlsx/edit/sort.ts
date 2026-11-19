@@ -7,9 +7,11 @@ import { sortStateMarkup } from "../../sheet/filter/autoFilter"
 import { BLANK_SORT_VALUE, sortOrder, type SortValue } from "../../sheet/sort/order"
 import type { CellWrite, SheetStore } from "../model/store"
 import { CARRIED, CellKind, ColFlag, FormulaKind, RowFlag, SLOT_BLOCK, type XlsxSheetModel } from "../model/types"
-import type { RecalculatedCell } from "../../sheet/formula/index"
+import type { EngineCell, RecalculatedCell } from "../../sheet/formula/index"
 import { RefRefused } from "../refs/catalogue"
 import { liveRelationships, refState } from "../refs/state"
+import { contains, intersects } from "../refs/moveRefs"
+import { parseRef, parseSqref, sectionSqrefs } from "../refs/sqref"
 import { unshare } from "./cells"
 import { reportLogged } from "./format"
 import type { XlsxDocument } from "./document"
@@ -43,46 +45,8 @@ interface SortCells {
 	// from lineStarts[i] to lineStarts[i + 1].
 	readonly lineStarts: Int32Array
 	readonly positions: Int32Array
-	readonly slots: Int32Array
-}
-
-function intersects(a: SheetRange, b: SheetRange): boolean {
-	return a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol
-}
-
-function contains(outer: SheetRange, inner: SheetRange): boolean {
-	return (
-		outer.startRow <= inner.startRow && outer.endRow >= inner.endRow && outer.startCol <= inner.startCol && outer.endCol >= inner.endCol
-	)
-}
-
-function parseRanges(text: string): SheetRange[] {
-	const out: SheetRange[] = []
-
-	for (const part of text.trim().split(/\s+/)) {
-		const match = /^\$?([A-Z]{1,3})\$?(\d+)(?::\$?([A-Z]{1,3})\$?(\d+))?$/i.exec(part)
-
-		if (match === null) continue
-
-		const col = (letters: string): number => {
-			let value = 0
-
-			for (const char of letters.toUpperCase()) value = value * 26 + (char.charCodeAt(0) - 64)
-
-			return value - 1
-		}
-		const startCol = col(match[1] as string)
-		const startRow = Number(match[2]) - 1
-
-		out.push({
-			startRow,
-			startCol,
-			endRow: match[4] === undefined ? startRow : Number(match[4]) - 1,
-			endCol: match[3] === undefined ? startCol : col(match[3])
-		})
-	}
-
-	return out
+	// Store slots reach past 2^31 from block 128 on (SLOT_BLOCK): doubles hold them exactly.
+	readonly slots: Float64Array
 }
 
 // Ranges anchored to cells that must cover the sorted lines evenly (a moved cell keeps what covers it only then).
@@ -193,20 +157,16 @@ async function sortRefusal(
 	const state = refState(document.workbook)
 
 	try {
-		for (const [section, detail] of [
-			["conditionalFormatting", "conditionalFormatting"],
-			["dataValidations", "dataValidations"]
-		] as const)
+		// Conditional formats and validations, and in extLst the x14 ones and sparkline locations: a range list that
+		// does not read may cover anything.
+		for (const section of ["conditionalFormatting", "dataValidations", "extLst"] as const)
 			for (const markup of state.sectionMarkup(model, section))
-				for (const match of markup.matchAll(/\ssqref="([^"]*)"/g))
-					if (!parseRanges(match[1] ?? "").every(range => evenlyCovered(range, area, rows)))
-						return { reason: "structureLocked", detail }
+				for (const sqref of sectionSqrefs(section, markup)) {
+					const ranges = parseSqref(sqref)
 
-		// The x14 conditional formats, validations and sparkline locations.
-		for (const markup of state.sectionMarkup(model, "extLst"))
-			for (const match of markup.matchAll(/<(?:\w+:)?sqref>([^<]*)</g))
-				if (!parseRanges(match[1] ?? "").every(range => evenlyCovered(range, area, rows)))
-					return { reason: "structureLocked", detail: "extLst" }
+					if (ranges === null || !ranges.every(range => evenlyCovered(range, area, rows)))
+						return { reason: "structureLocked", detail: section }
+				}
 
 		for (const relationship of liveRelationships(document.workbook, model.part, model.relationships.all)) {
 			if (relationship.external || relationship.partName === undefined) continue
@@ -217,8 +177,11 @@ async function sortRefusal(
 
 			if (bytes === null) continue
 
-			for (const match of decodeUtf8(bytes).matchAll(/<(?:\w+:)?location\b[^>]*\sref="([^"]*)"/g))
-				if (parseRanges(match[1] ?? "").some(range => intersects(range, area))) return { reason: "pivot" }
+			for (const match of decodeUtf8(bytes).matchAll(/<(?:\w+:)?location\b[^>]*\sref="([^"]*)"/g)) {
+				const location = parseRef(match[1] ?? "")
+
+				if (location === null || intersects(location, area)) return { reason: "pivot" }
+			}
 		}
 	} catch (error) {
 		if (error instanceof RefRefused) return error.refusal
@@ -255,7 +218,7 @@ function gatherCells(store: SheetStore, area: SheetRange, rows: boolean, lineCou
 
 	const total = counts[lineCount] ?? 0
 	const positions = new Int32Array(total)
-	const slots = new Int32Array(total)
+	const slots = new Float64Array(total)
 	const fill = counts.slice(0, lineCount)
 
 	store.forEachCell(area, (row, col, slot) => {
@@ -518,41 +481,72 @@ export async function sortRange(
 	const after = new StoreSnapshot(store, true)
 	const shownAfter = new Map(document.shownResults.get(sheet) ?? [])
 	const clock = slicing === undefined ? undefined : sliceClock(slicing)
-	// The moved lines' cells.
-	const movedCells = (): { row: number; col: number }[] => {
-		const from = rows ? area.startCol : area.startRow
-		const to = rows ? area.endCol : area.endRow
-		const out: { row: number; col: number }[] = []
+	// The moved lines over the area, consecutive ones as one range (moves go by target, ascending).
+	const movedAreas = (): SheetRange[] => {
+		const out: SheetRange[] = []
+		let start = -1
+		let end = -1
+		const push = (): void => {
+			if (start < 0) return
+
+			out.push(
+				rows
+					? { startRow: start, endRow: end, startCol: area.startCol, endCol: area.endCol }
+					: { startRow: area.startRow, endRow: area.endRow, startCol: start, endCol: end }
+			)
+		}
 
 		for (let k = 0; k < moves.length; k += 2) {
 			const line = firstLine + (moves[k] ?? 0)
 
-			for (let position = from; position <= to; position++)
-				out.push(rows ? { row: line, col: position } : { row: position, col: line })
+			if (line === end + 1 && start >= 0) {
+				end = line
+
+				continue
+			}
+
+			push()
+			start = line
+			end = line
 		}
+
+		push()
 
 		return out
 	}
-	// Gives the engine `cells` as they now stand in parts, yielding between them, and recalculates once: a total over
-	// the moved rows is worked out once, not once per part. What it recalculated (when `report`), or none when it
-	// failed (dropped, built again when next needed).
-	const engineInParts = async (cells: readonly { row: number; col: number }[], report: boolean): Promise<RecalculatedCell[]> => {
+	// Gives the engine the moved lines' cells as they now stand in parts of ENGINE_PART, each built as it goes,
+	// yielding between them, and recalculates once: a total over the moved rows is worked out once, not once per
+	// part. What it recalculated (when `report`), or none when it failed (dropped, built again when next needed).
+	const engineInParts = async (report: boolean): Promise<RecalculatedCell[]> => {
 		const engine = document.engine
 		const index = document.engineIndex(sheet)
 
 		if (engine === null || index < 0) return []
 
+		const from = rows ? area.startCol : area.startRow
+		const to = rows ? area.endCol : area.endRow
+
 		try {
 			engine.holdEvaluation()
 
-			for (let at = 0; at < cells.length; at += ENGINE_PART) {
-				engine.set(
-					index,
-					cells.slice(at, at + ENGINE_PART).map(cell => document.engineCell(model, cell.row, cell.col))
-				)
+			let part: EngineCell[] = []
 
-				if (clock?.due === true) await clock.pause()
+			for (let k = 0; k < moves.length; k += 2) {
+				const line = firstLine + (moves[k] ?? 0)
+
+				for (let position = from; position <= to; position++) {
+					part.push(rows ? document.engineCell(model, line, position) : document.engineCell(model, position, line))
+
+					if (part.length < ENGINE_PART) continue
+
+					engine.set(index, part)
+					part = []
+
+					if (clock?.due === true) await clock.pause()
+				}
 			}
+
+			if (part.length > 0) engine.set(index, part)
 
 			return await engine.releaseEvaluation(report, clock)
 		} catch {
@@ -565,11 +559,8 @@ export async function sortRange(
 	// undo and redo put the results back as they were rather than working them out again.
 	const results = new CellLog()
 
-	if (moves.length > 0 && document.engine !== null) {
-		const cells = movedCells()
-
-		document.applyRecalculated(sheet, cells, await engineInParts(cells, true), results, changes)
-	}
+	if (moves.length > 0 && document.engine !== null)
+		document.applyRecalculated(sheet, movedAreas(), await engineInParts(true), results, changes)
 
 	results.seal((s, r, c) => document.state(s, r, c))
 
@@ -579,7 +570,7 @@ export async function sortRange(
 	}
 	// The engine takes the moved cells as they now stand; its results are the log's (not read back).
 	const syncEngine = async (): Promise<void> => {
-		if (moves.length > 0 && document.engine !== null) await engineInParts(movedCells(), false)
+		if (moves.length > 0 && document.engine !== null) await engineInParts(false)
 	}
 	const report = (sink: SheetChangeSink): void => {
 		if (moves.length > 0) sink.content(sheet, area)

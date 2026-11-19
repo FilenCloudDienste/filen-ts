@@ -1,6 +1,7 @@
 import { OdfStyleResolver, OdfStyleSheet } from "../../odf/index"
 import { nextShapeId } from "../../presentation/ids"
 import type { DesignReading } from "../../presentation/edit/apply/design"
+import type { ComparingReading } from "../../presentation/edit/apply/table"
 import type { SlideSourceReading } from "../../presentation/edit/apply/slide"
 import type { ReferenceFacts } from "../../presentation/edit/integrity"
 import { refused, type Deck, type Refused, type ShapeNode, type SlideNode, type SlideRef } from "../../presentation/model"
@@ -141,11 +142,16 @@ function readDesignMaster(source: OdpWriteSource, bytes: Uint8Array, ref: SlideR
 	}
 }
 
-export function odpSourceReading(deck: Deck, source: OdpWriteSource, refs: OdpSessionRefs): SlideSourceReading & DesignReading {
+export function odpSourceReading(
+	deck: Deck,
+	source: OdpWriteSource,
+	refs: OdpSessionRefs
+): SlideSourceReading & DesignReading & ComparingReading {
 	const parts = source.parts
 	const content = parts.content
 	// A held fragment: markup an inverse held, parsed under the content root (so it reads with content.xml's scope).
-	const hold = (markup: Uint8Array, wrap: boolean): Fragment | Refused => {
+	// `keep`: held for the session (what is read goes into the deck), else read once and let go.
+	const hold = (markup: Uint8Array, wrap: boolean, keep = true): Fragment | Refused => {
 		let document
 
 		try {
@@ -164,7 +170,7 @@ export function odpSourceReading(deck: Deck, source: OdpWriteSource, refs: OdpSe
 			throw error
 		}
 
-		return source.hold(document)
+		return keep ? source.hold(document) : source.transient(document)
 	}
 	const shapesOf = (fragment: Fragment, container: number): ShapeNode[] => {
 		let next = 1
@@ -188,23 +194,24 @@ export function odpSourceReading(deck: Deck, source: OdpWriteSource, refs: OdpSe
 		return shapes
 	}
 
+	const shapeOf = (raw: Uint8Array, keep: boolean): ShapeNode | Refused => {
+		const fragment = hold(raw, true, keep)
+
+		if (!(fragment instanceof Fragment)) return fragment
+
+		const page = fragment.document.firstChildElement(fragment.document.documentElement())
+		const shape = shapesOf(fragment, page)[0]
+
+		return shape === undefined ? refused("malformed", "held shape markup") : shape
+	}
+
 	return {
 		sourceBytes: src => source.sourceBytes(src),
 		newShapeId: slide => nextShapeId(deck.nodes.get(slide)?.shapes ?? []),
 		newSlideRef: () => refs.next(),
 		movable: shape => isBoxWritable(shape, src => source.fragmentOf(src)),
-		readShape(_slide, raw) {
-			const fragment = hold(raw, true)
-
-			if (fragment instanceof Fragment) {
-				const page = fragment.document.firstChildElement(fragment.document.documentElement())
-				const shape = shapesOf(fragment, page)[0]
-
-				return shape === undefined ? refused("malformed", "held shape markup") : shape
-			}
-
-			return fragment
-		},
+		readShape: (_slide, raw) => shapeOf(raw, true),
+		compareShape: (_slide, raw) => shapeOf(raw, false),
 		rawParts(slide) {
 			const src = slide.src
 

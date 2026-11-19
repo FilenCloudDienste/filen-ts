@@ -52,7 +52,6 @@ const WORDPROCESSINGML = "http://schemas.openxmlformats.org/wordprocessingml/200
 const MARKUP_COMPATIBILITY_URI = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 // Roots of parts whose stories are elements of their own.
 const NOTE_ROOTS = new Set(["footnotes", "endnotes", "comments"])
-// The root and story elements of a new story's part.
 // The root of a part a copied story is laid out from.
 const COPIED_ROOTS: Readonly<Record<Exclude<NewStoryKind, "comment">, string>> = {
 	header: "hdr",
@@ -60,6 +59,7 @@ const COPIED_ROOTS: Readonly<Record<Exclude<NewStoryKind, "comment">, string>> =
 	footnote: "footnotes",
 	endnote: "endnotes"
 }
+// The root and story elements of a new story's part.
 const NEW_STORY_ELEMENTS: Readonly<Record<NewStoryKind, readonly [string, string | undefined]>> = {
 	footnote: ["w:footnotes", "w:footnote"],
 	endnote: ["w:endnotes", "w:endnote"],
@@ -163,9 +163,6 @@ export interface TopEntry {
 	tables?: Map<number, TableRows> | undefined
 }
 
-// The part of an edit the layout must redo: the changed top-level blocks as laid out now, the entries the
-// edit replaced and, when blocks came or went, their neighbours (layout restarts at the first page showing
-// any of those).
 // Transactions a story applied, folded as applyAll reads them: what is kept of them is their first document and
 // their last, never those between.
 export interface PendingChange {
@@ -213,6 +210,9 @@ export function foldTransactions(into: PendingChange | undefined, transactions: 
 	return { before: into?.before ?? first.before, after: previous?.doc ?? first.doc, chained, stepped, span }
 }
 
+// The part of an edit the layout must redo: the changed top-level blocks as laid out now, the entries the
+// edit replaced and, when blocks came or went, their neighbours (layout restarts at the first page showing
+// any of those).
 export interface StoryChange {
 	readonly dirty: DirtyBlock[]
 	readonly replaced: readonly TopEntry[]
@@ -222,8 +222,6 @@ export interface StoryChange {
 	readonly whole: boolean
 }
 
-// One document's edits for layout: the derived model the layout reads (overlay parts added), the
-// substitutions and block lists of every edited story.
 // The prefixes the element and attribute names in `bytes` (XML the writer made) need declared, added to `out`
 // ("" for an element without one); false when the names alone do not tell which namespaces it needs: an
 // attribute that names prefixes in its value (Markup Compatibility's Requires, Ignorable...), a namespace
@@ -342,6 +340,8 @@ function isCompatibility(bytes: Uint8Array, start: number, end: number): boolean
 	return false
 }
 
+// One document's edits for layout: the derived model the layout reads (overlay parts added), the
+// substitutions and block lists of every edited story.
 export class DocumentEdits implements LayoutEdits {
 	readonly model: DocxModel
 	readonly extension: ModelExtension
@@ -531,6 +531,15 @@ export class DocumentEdits implements LayoutEdits {
 	// Whether `story` is one the editor added.
 	addedStory(story: number): boolean {
 		return this.added.has(story)
+	}
+
+	// Whether `story` is a text box only an overlay part holds: one not laid out as a source story (see addPart).
+	overlayTextbox(story: number): boolean {
+		const entry = story < this.storyCount ? undefined : this.extension.stories[story]
+
+		if (entry?.kind !== "textbox" || !this.overlays.has(entry.part)) return false
+
+		return this.extension.parts[entry.part]?.aux[entry.item] === story
 	}
 
 	// Adds a story the editor made (a new note, comment, header or footer), with no source of its own (item
@@ -1346,12 +1355,6 @@ export class StoryEdits {
 			after,
 			pending.chained && pending.before === this.doc ? pending.span : { from: 0, to: after.content.size, whole: true }
 		)
-	}
-
-	apply(tr: Transaction): StoryChange | undefined {
-		if (tr.steps.length === 0) return undefined
-
-		return this.change(tr.doc, this.doc === tr.before ? changedSpan(tr) : { from: 0, to: tr.doc.content.size, whole: true })
 	}
 
 	// The layout's view taken from this.doc to `after`, which differs from it in `span` (of `after`).
@@ -3467,7 +3470,6 @@ export class StoryEdits {
 	}
 }
 
-// Index of the last record whose item is at or before `item` (0 when none is).
 // An overlay part's records, those dropped taken out once they are half of them (linear over any number of
 // drops); the rest are skipped by readers.
 function compacted(overlay: OverlayPart): OverlayRecord[] {
@@ -3479,6 +3481,7 @@ function compacted(overlay: OverlayPart): OverlayRecord[] {
 	return overlay.records
 }
 
+// Index of the last record whose item is at or before `item` (0 when none is).
 function recordIndex(records: readonly OverlayRecord[], item: number): number {
 	let low = 0
 	let high = records.length - 1

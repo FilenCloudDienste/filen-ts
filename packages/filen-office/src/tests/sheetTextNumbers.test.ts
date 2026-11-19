@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { FormulaEngine } from "../core/sheet/formula/index"
-import { territoryCurrency, textNumber } from "../core/sheet/input/locale"
+import { parseCellInput } from "../core/sheet/input/cellInput"
+import { localizedNumber, territoryCurrency, textNumber } from "../core/sheet/input/locale"
 import type { SheetLocale } from "../core/sheet/protocol"
 import { engineCellFormula } from "../core/sheet/refs/formulaRefs"
 import { firstTile, openFixture, tileEntry } from "./sheetSessionFixtures"
+import { budget, cpuMs } from "./timing"
 
 // Text read as a number where a formula takes one, as Excel reads text "that looks like an accepted number format"
 // (support.microsoft.com "Calculation operators and precedence in Excel": ="1"+"2" is 3, =1+"$4.00" is 5), in the
@@ -164,5 +166,57 @@ describe("territory currencies (Unicode CLDR)", () => {
 		expect(territoryCurrency("AQ")).toBeUndefined()
 		expect(territoryCurrency("ZZ")).toBeUndefined()
 		expect(territoryCurrency("")).toBeUndefined()
+	})
+})
+
+describe("numbers as typed, read in linear time", () => {
+	// What a typed entry is read as: its number, or null when it is not one.
+	const typed = (text: string, locale?: SheetLocale): number | null => {
+		const parsed = parseCellInput(text, locale)
+
+		return parsed.type === "value" && typeof parsed.value === "number" ? parsed.value : null
+	}
+
+	it("accepts the same numbers as before, with and without a locale", () => {
+		const cases: Readonly<Record<string, number | null>> = {
+			"1": 1,
+			"1.": 1,
+			"1.5": 1.5,
+			".5": 0.5,
+			"15": 15,
+			"-1e5": -100000,
+			"+2.5E-1": 0.25,
+			"1.5%": 0.015,
+			"5.%": 0.05,
+			"1.2.3": null,
+			".": null,
+			e5: null,
+			"1e": null,
+			"%": null
+		}
+
+		for (const [text, value] of Object.entries(cases)) {
+			expect(typed(text), text).toBe(value)
+			expect(typed(text, EN_US), text).toBe(value)
+			expect(localizedNumber(text, EN_US)?.value ?? null, text).toBe(value)
+		}
+
+		expect(localizedNumber("1,5", DE_DE)?.value).toBe(1.5)
+		expect(localizedNumber("1,", DE_DE)?.value).toBe(1)
+		expect(localizedNumber(",5", DE_DE)?.value).toBe(0.5)
+		expect(localizedNumber("1,5%", DE_DE)?.value).toBe(0.015)
+		expect(localizedNumber("1,2,3", DE_DE)).toBeNull()
+		expect(localizedNumber(",", DE_DE)).toBeNull()
+	})
+
+	it("rejects a long run of digits that ends in a letter at once", () => {
+		const text = `${"1".repeat(32_000)}x`
+		const start = cpuMs()
+
+		expect(typed(text)).toBeNull()
+		expect(typed(text, EN_US)).toBeNull()
+		expect(localizedNumber(text, DE_DE)).toBeNull()
+		expectResults(undefined, { ['NUMBERVALUE(REPT("1",32000)&"x")']: "!#VALUE!" })
+		expect(cpuMs() - start).toBeLessThan(budget(300))
 	})
 })

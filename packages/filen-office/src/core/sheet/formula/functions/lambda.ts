@@ -1,11 +1,13 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { CALL_FUNCTION } from "../../functions/engineNames"
+import { MAX_ARRAY_CELLS } from "../../refs/formulaRefs"
 import {
 	calcError,
 	EvaluationSuspended,
 	naError,
 	numError,
 	SheetFunctionPlugin,
+	unwrap,
 	valueError,
 	type PluginAst,
 	type PluginCall,
@@ -328,9 +330,6 @@ function callKey(lambda: Lambda, values: readonly Bound[]): string | null {
 	return key
 }
 
-// The most values MAKEARRAY may build, as the array functions are bounded (refs/formulaRefs.ts).
-const MAX_CELLS = 200_000
-
 function lookup(name: string): Bound | undefined {
 	for (let at = scope; at !== null; at = at.parent) if (at.name === name) return at.value
 
@@ -347,14 +346,6 @@ function within<T>(inner: Scope | null, work: () => T): T {
 	} finally {
 		scope = previous
 	}
-}
-
-function unwrap(ast: PluginAst): PluginAst {
-	let node = ast
-
-	while (node.type === ("PARENTHESES" as PluginAst["type"]) && "expression" in node) node = node.expression
-
-	return node
 }
 
 // The bound name an argument is (upper case), or null.
@@ -827,7 +818,7 @@ export class LambdaFunctions extends SheetFunctionPlugin {
 		const height = Math.max(...sizes.map(size => size[0]))
 		const width = Math.max(...sizes.map(size => size[1]))
 
-		if (height * width > MAX_CELLS) return valueError()
+		if (height * width > MAX_ARRAY_CELLS) return valueError()
 
 		const rows: PluginScalar[][] = []
 
@@ -977,7 +968,7 @@ export class LambdaFunctions extends SheetFunctionPlugin {
 
 		const [height = 1, width = 1] = counts
 
-		if (height * width > MAX_CELLS) return valueError()
+		if (height * width > MAX_ARRAY_CELLS) return valueError()
 
 		const rows: PluginScalar[][] = []
 

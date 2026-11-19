@@ -2,9 +2,10 @@ import { minOf } from "../../arrays"
 import type { SheetStyles } from "../../sheet/style/resolve"
 import type { XlsxColor, XlsxDxf, XlsxStyleTable } from "../../xlsx/model/types"
 import { parseRangeRef } from "../../xlsx/write/text"
+import { columnName } from "../../sheet/refs/cellRef"
 import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import { DATES } from "../features"
-import { openFormula } from "../formula/toOf"
+import { ofSheetName, openFormula } from "../formula/toOf"
 
 // Conditional formats (ECMA-376 Part 1 §18.3.1.18) as LibreOffice's calcext:conditional-formats, which an ODF 1.3
 // document of extended conformance carries and LibreOffice reads (the inverse of the reader's features.ts cfRule):
@@ -36,18 +37,6 @@ function children(document: XmlDocument, node: number, local: string): number[] 
 		if (document.localName(child) === local) out.push(child)
 
 	return out
-}
-
-function quotedSheet(sheet: string): string {
-	return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
-}
-
-function column(index: number): string {
-	let text = ""
-
-	for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) text = String.fromCharCode(65 + ((n - 1) % 26)) + text
-
-	return text
 }
 
 // A formula as calcext:value's expression: OpenFormula without its "of:=".
@@ -300,15 +289,15 @@ export function sheetConditions(sections: readonly string[], sheet: string, styl
 			continue
 		}
 
-		const name = quotedSheet(sheet)
+		const name = ofSheetName(sheet)
 		const target = ranges
 			.map(
 				range =>
-					`${name}.${column(range.startCol)}${range.startRow + 1}${range.startRow === range.endRow && range.startCol === range.endCol ? "" : `:${name}.${column(range.endCol)}${range.endRow + 1}`}`
+					`${name}.${columnName(range.startCol)}${range.startRow + 1}${range.startRow === range.endRow && range.startCol === range.endCol ? "" : `:${name}.${columnName(range.endCol)}${range.endRow + 1}`}`
 			)
 			.join(" ")
 		// SpreadsheetML's formulas are for the top-left cell of the rectangle around the ranges: the base cell.
-		const base = `${name}.${column(minOf(ranges.map(range => range.startCol)))}${minOf(ranges.map(range => range.startRow)) + 1}`
+		const base = `${name}.${columnName(minOf(ranges.map(range => range.startCol)))}${minOf(ranges.map(range => range.startRow)) + 1}`
 		const rules = children(document, root, "cfRule").sort(
 			(a, b) => Number(document.attribute(a, "priority") ?? "0") - Number(document.attribute(b, "priority") ?? "0")
 		)

@@ -1,6 +1,6 @@
 import { parseLength, parsePercent, parseRelativeLength, type OdfProperties } from "../odf/index"
 import { MarkupFlow, type Flow } from "./flow"
-import { border, modeRtl } from "./props"
+import { border, color, modeRtl } from "./props"
 import type { Translator } from "./translator"
 import { twips } from "./wml"
 
@@ -11,7 +11,7 @@ import { twips } from "./wml"
 
 // WordprocessingML's column limit (ECMA-376 Part 1 §17.4.48 note: 63 grid columns), and how many copies of
 // one repeated row are written.
-const MAX_COLUMNS = 63
+export const MAX_COLUMNS = 63
 const MAX_ROW_REPEAT = 1000
 // LibreOffice's narrowest column (sw MINLAY, 23 twips): no column is laid out narrower, so a table narrower than
 // that per column grows (measured over UNO: a zero-width table of n columns is n × 23 twips, columns equal).
@@ -20,10 +20,6 @@ const MIN_COLUMN = 23 / 20
 interface ColumnInfo {
 	readonly absolute: number | undefined
 	readonly relative: number | undefined
-}
-
-function colorOf(value: string | undefined): string | undefined {
-	return value !== undefined && /^#[0-9a-fA-F]{6}$/.test(value) ? value.slice(1).toUpperCase() : undefined
 }
 
 function insertPageBreak(markup: string): string {
@@ -94,7 +90,12 @@ export function translateTable(translator: Translator, node: number, flow: Flow)
 
 				if (repeat > MAX_ROW_REPEAT) translator.lossy("tableLimit")
 
-				for (let k = 0; k < Math.min(repeat, MAX_ROW_REPEAT); k++) rows.push({ node: child, header })
+				// Each copy is translated anew (its ids its own), a nested table's copies within it.
+				for (let k = 0; k < Math.min(repeat, MAX_ROW_REPEAT); k++) {
+					if (k > 0) translator.spendCopy(child)
+
+					rows.push({ node: child, header })
+				}
 			} else if (name === "table:table-header-rows") {
 				collect(child, true)
 			} else if (name === "table:table-rows" || name === "table:table-row-group") {
@@ -157,7 +158,7 @@ export function translateTable(translator: Translator, node: number, flow: Flow)
 	width = widths.reduce((sum, item) => sum + item, 0)
 	const jc = align === "center" ? "center" : align === "right" ? "right" : "left"
 	const indent = align === "left" || align === "margins" ? marginLeft : 0
-	const background = colorOf(properties.get("fo:background-color"))
+	const background = color(properties.get("fo:background-color"))
 	// Separate borders (table:border-model, separating where nothing says: LibreOffice, measured) as cell spacing of zero:
 	// each cell keeps its own borders, which then both take room between rows.
 	const separating = (properties.get("table:border-model") ?? "separating") === "separating"
@@ -188,7 +189,7 @@ export function translateTable(translator: Translator, node: number, flow: Flow)
 		else if (minimum !== undefined) trPr += `<w:trHeight w:val="${twips(minimum)}" w:hRule="atLeast"/>`
 		if (row.header) trPr += "<w:tblHeader/>"
 
-		const rowBackground = colorOf(rowProperties.get("fo:background-color"))
+		const rowBackground = color(rowProperties.get("fo:background-color"))
 		let rowXml = `<w:tr>${trPr === "" ? "" : `<w:trPr>${trPr}</w:trPr>`}`
 		let column = 0
 		let skip = 0
@@ -239,6 +240,8 @@ export function translateTable(translator: Translator, node: number, flow: Flow)
 				const cellProperties = translator.resolver
 					.resolve("table-cell", cellAttributes.get("table:style-name"), translator.scope)
 					.properties("table-cell")
+				if (copy > 0) translator.spendCopy(cell)
+
 				const cellXml = cellMarkup(translator, cell, cellProperties, spanWidth(column, span), span, rowSpan, rowBackground)
 
 				if (rowSpan > 1) {
@@ -285,7 +288,7 @@ function cellMarkup(
 		.filter(markup => !markup.includes('w:val="nil"'))
 		.join("")
 	const verticalAlign = attributes.get("style:vertical-align")
-	const background = colorOf(attributes.get("fo:background-color")) ?? rowBackground
+	const background = color(attributes.get("fo:background-color")) ?? rowBackground
 	const writingMode = attributes.get("style:writing-mode")
 	const flow = new MarkupFlow()
 	const inner = Math.max(1, width - padding("left") - padding("right"))

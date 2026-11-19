@@ -238,6 +238,84 @@ describe("grid axes", () => {
 		expect(shownIndex(axis, 5, 1)).toBe(6)
 		expect(shownIndex(axis, 5, -1)).toBe(4)
 	})
+
+	it("steps over hidden runs, default gaps and single 0 px overrides as walking every index does", () => {
+		const runs: SheetAxisLayout = {
+			...axisLayout(20, [
+				[3, 0, AxisFlag.HIDDEN],
+				[10, 30],
+				[12, 0, AxisFlag.HIDDEN],
+				[50_000, 0, AxisFlag.HIDDEN]
+			]),
+			counts: Uint32Array.of(5, 2, 40_000, 5_000)
+		}
+		const count = 100_000
+		// Row 60,000 dragged to 0 px, row 0 too (the axis's first index).
+		const axis = createGridAxis(
+			runs,
+			count,
+			1,
+			new Map([
+				[60_000, 0],
+				[0, 0]
+			])
+		)
+		const brute = (from: number, direction: 1 | -1): number => {
+			for (let index = Math.min(from, count - 1); index >= 0 && index < count; index += direction)
+				if (axis.size(index) > 0) return index
+
+			return -1
+		}
+
+		expect(axis.nextShown?.(12, 1)).toBe(40_012)
+		expect(axis.nextShown?.(40_011, -1)).toBe(11)
+		expect(axis.nextShown?.(3, 1)).toBe(8)
+		expect(axis.nextShown?.(7, -1)).toBe(2)
+		expect(axis.nextShown?.(60_000, 1)).toBe(60_001)
+		expect(axis.nextShown?.(60_000, -1)).toBe(59_999)
+		expect(axis.nextShown?.(54_999, -1)).toBe(49_999)
+		expect(axis.nextShown?.(50_000, 1)).toBe(55_000)
+		expect(axis.nextShown?.(0, 1)).toBe(1)
+		expect(axis.nextShown?.(0, -1)).toBe(-1)
+		expect(axis.nextShown?.(count - 1, 1)).toBe(count - 1)
+		expect(axis.nextShown?.(count, 1)).toBe(-1)
+
+		for (const from of [
+			0,
+			1,
+			2,
+			3,
+			7,
+			8,
+			9,
+			10,
+			11,
+			12,
+			30_000,
+			40_011,
+			40_012,
+			49_999,
+			50_000,
+			55_000,
+			59_999,
+			60_000,
+			60_001,
+			count - 1
+		])
+			for (const direction of [1, -1] as const) expect(shownIndex(axis, from, direction)).toBe(brute(from, direction))
+	})
+
+	it("stops at the axis's ends when nothing is shown past a hidden run", () => {
+		const axis = createGridAxis({ ...axisLayout(20, [[0, 0, AxisFlag.HIDDEN]]), counts: Uint32Array.of(5) }, 10, 1, new Map([[9, 0]]))
+
+		expect(axis.nextShown?.(0, -1)).toBe(-1)
+		expect(axis.nextShown?.(4, -1)).toBe(-1)
+		expect(axis.nextShown?.(0, 1)).toBe(5)
+		expect(axis.nextShown?.(9, 1)).toBe(-1)
+		expect(axis.nextShown?.(9, -1)).toBe(8)
+		expect(shownIndex(axis, 9, 1)).toBe(-1)
+		expect(shownIndex(axis, 2, -1)).toBe(-1)
+	})
 })
 
 describe("scaled scrolling", () => {

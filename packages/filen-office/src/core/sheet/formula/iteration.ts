@@ -1,4 +1,5 @@
 import { CellError, ErrorType, HyperFormula, type SimpleCellAddress } from "hyperformula"
+import { rawValue } from "./functions/plugin"
 
 // Circles in the engine's dependency graph as Excel calculates them, in place of the engine's #CYCLE!. Iterating
 // (calcPr iterate, ECMA-376 Part 1 §18.2.2), a circle's formulas are calculated again and again, each from the
@@ -97,15 +98,10 @@ function isRange(vertex: Vertex): vertex is RangeVertex {
 	return typeof (vertex as Partial<RangeVertex>).clearCache === "function"
 }
 
-// A value as the engine's lookups index it (its rich numbers as plain ones).
-function raw(value: unknown): unknown {
-	return typeof value === "object" && value !== null && "val" in value ? (value as { val: unknown }).val : value
-}
-
 // Whether a circle's formula settled: a number changed by less than delta (or not at all), anything else unchanged.
 function settled(previous: unknown, next: unknown, delta: number): boolean {
-	const a = raw(previous)
-	const b = raw(next)
+	const a = rawValue(previous)
+	const b = rawValue(next)
 
 	if (typeof a === "number" && typeof b === "number") return a === b || Math.abs(b - a) < delta
 	if (a instanceof CellError && b instanceof CellError) return a.type === b.type && a.message === b.message
@@ -195,8 +191,8 @@ function flush(): void {
 		const address = vertex.getAddress(service)
 
 		if (changes !== null) changes.addChange(value, address)
-		if (before[i] === undefined) evaluator.columnSearch.add(raw(value), address)
-		else evaluator.columnSearch.change(raw(before[i]), raw(value), address)
+		if (before[i] === undefined) evaluator.columnSearch.add(rawValue(value), address)
+		else evaluator.columnSearch.change(rawValue(before[i]), rawValue(value), address)
 	}
 
 	circle.found(formulas)
@@ -295,7 +291,7 @@ export function installCircles(licenseKey: string): void {
 						outside(vertex)
 
 						if (isFormula(vertex))
-							this.columnSearch.add(raw(this.recomputeFormulaVertexValue(vertex)), vertex.getAddress(service))
+							this.columnSearch.add(rawValue(this.recomputeFormulaVertexValue(vertex)), vertex.getAddress(service))
 						else if (isRange(vertex)) vertex.clearCache()
 
 						return true

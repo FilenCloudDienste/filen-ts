@@ -56,15 +56,30 @@ const SYNTHETIC = [
 		"{\\*\\do\\dptxbx{\\dptxbxtext\\pard box\\par}\\dpx1\\dpy1}\\pard\\phpg\\posx10 framed\\par{\\upr{a}{\\*\\ud{b}}}{\\info{\\title t}{\\creatim\\yr2020}}\\bin4 {}}x}"
 ]
 
-function seeds(): Uint8Array[] {
-	const out = SYNTHETIC.map(latin1)
+// The source set depends on whether the corpus is on disk, and the source index steers the shared random
+// stream, so a failure names the set size and the source to be reproducible elsewhere.
+type Source = {
+	name: string
+	bytes: Uint8Array
+}
+
+function seeds(): Source[] {
+	const out: Source[] = SYNTHETIC.map((text, index) => ({
+		name: `synthetic ${index}`,
+		bytes: latin1(text)
+	}))
 	const directory = join(CORPUS_DIR, "rtf")
 
 	if (existsSync(directory)) {
 		for (const name of readdirSync(directory).sort()) {
 			const path = join(directory, name)
 
-			if (name.endsWith(".rtf") && statSync(path).size <= 200_000) out.push(new Uint8Array(readFileSync(path)))
+			if (name.endsWith(".rtf") && statSync(path).size <= 200_000) {
+				out.push({
+					name,
+					bytes: new Uint8Array(readFileSync(path))
+				})
+			}
 		}
 	}
 
@@ -187,7 +202,9 @@ describe("RTF reader fuzzing", () => {
 
 		for (let k = 0; k < MUTANTS; k++) {
 			const seedIndex = random.below(sources.length)
-			const bytes = mutate(sources[seedIndex] as Uint8Array, random)
+			const source = sources[seedIndex] as Source
+			const bytes = mutate(source.bytes, random)
+			const label = `mutant ${k} of source ${seedIndex} "${source.name}" of ${sources.length} (seed ${SEED})`
 			const started = performance.now()
 			let failure: string | undefined
 
@@ -212,9 +229,9 @@ describe("RTF reader fuzzing", () => {
 
 			const elapsed = performance.now() - started
 
-			expect(failure, `mutant ${k} of source ${seedIndex} (seed ${SEED})`).toBeUndefined()
+			expect(failure, label).toBeUndefined()
 
-			if (elapsed > budget(BOUND_MS)) slow.push(`mutant ${k} of source ${seedIndex} (seed ${SEED}): ${Math.round(elapsed)} ms`)
+			if (elapsed > budget(BOUND_MS)) slow.push(`${label}: ${Math.round(elapsed)} ms`)
 		}
 
 		expect(slow).toEqual([])

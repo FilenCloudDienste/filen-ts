@@ -100,12 +100,30 @@ export function tileKeyCol(key: number): number {
 
 // The key of the tile holding a cell.
 export function cellTileKey(sheet: SheetId, row: number, col: number): number {
-	return tileKey(sheet, row >>> TILE_ROW_BITS, col >>> TILE_COL_BITS)
+	return tileKey(sheet, tileRowOf(row), tileColOf(col))
+}
+
+// The tile row holding `row`, and the tile column holding `col`.
+export function tileRowOf(row: number): number {
+	return row >>> TILE_ROW_BITS
+}
+
+export function tileColOf(col: number): number {
+	return col >>> TILE_COL_BITS
 }
 
 // A cell's position inside its tile.
 export function tilePosition(row: number, col: number): number {
 	return ((row & (TILE_ROWS - 1)) << TILE_COL_BITS) | (col & (TILE_COLS - 1))
+}
+
+// The row and the column inside its tile of a tilePosition.
+export function tilePositionRow(position: number): number {
+	return position >>> TILE_COL_BITS
+}
+
+export function tilePositionCol(position: number): number {
+	return position & (TILE_COLS - 1)
 }
 
 // --- Tiles ---
@@ -765,6 +783,12 @@ export type SheetCommandResult =
 
 // --- Save ---
 
+// A call answered with "the session is closed" because it was closed (or its host disposed) first: the user left,
+// nothing failed.
+export class SheetSessionClosedError extends Error {
+	override readonly name = "SheetSessionClosedError"
+}
+
 export type SheetSaveFailure =
 	// The independent re-read of the saved package did not equal the session (nothing is handed out).
 	| "gate"
@@ -772,6 +796,16 @@ export type SheetSaveFailure =
 	| "seal"
 	| "closed"
 	| "aborted"
+	// Anything else that threw (a feature's save hook, the writer): the message says what.
+	| "failed"
+
+// Why a save that threw failed: the session's own closed refusal, the caller's abort, else "failed" (never told apart
+// by message text).
+export function saveFailure(error: unknown, signal: SheetAbortSignal | undefined): SheetSaveFailure {
+	if (error instanceof SheetSessionClosedError) return "closed"
+
+	return signal?.aborted === true ? "aborted" : "failed"
+}
 
 export type SheetSaveResult =
 	| {

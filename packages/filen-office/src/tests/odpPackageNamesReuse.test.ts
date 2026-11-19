@@ -181,8 +181,24 @@ describe("an image inserted again in a later session of the file", () => {
 		expect(names[0]).toHaveLength(1)
 		expect(names[1]).toHaveLength(2)
 		expect(names[1]).toContain(names[0]?.[0])
+		// Named by the image's CRC-32 (ISO-HDLC), the value a bit-by-bit reference gives.
+		expect(names[0]?.[0]).toMatch(
+			new RegExp(`^Pictures/inserted-${bitwiseCrc32(image(64, 32).bytes).toString(16).padStart(8, "0")}-`, "u")
+		)
 	})
 })
+
+function bitwiseCrc32(bytes: Uint8Array): number {
+	let crc = 0xffffffff
+
+	for (const byte of bytes) {
+		crc ^= byte
+
+		for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+	}
+
+	return (crc ^ 0xffffffff) >>> 0
+}
 
 describe("a chart inserted into an ODP deck", () => {
 	it("takes no object name a package of the session had", async () => {

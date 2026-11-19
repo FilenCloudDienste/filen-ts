@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { strFromU8, unzipSync } from "fflate"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { convertPresentation } from "../core/convert/presentation/index"
 import { openOdp } from "../core/odp/read/document"
 import { bytesSource, memorySink } from "../core/opc/index"
@@ -13,8 +13,8 @@ import { convertCapability } from "../dom/presentation/engine/convert"
 import { viewCapability } from "../dom/presentation/engine/view"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { CORPUS_DIR } from "./corpusDir"
-import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
+import { odpBytes, page } from "./odpFixtures"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 
 // Charts across conversions: an ODF chart object becomes a PresentationML chart part PowerPoint draws and opens in
@@ -22,6 +22,26 @@ import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 // or edited, saved or not), not only the file's.
 
 type Session = Awaited<ReturnType<typeof driveSession>>
+
+// How many chart objects are being translated (odpChartPart) right now.
+const translating = vi.hoisted(() => ({ count: 0 }))
+
+vi.mock("../core/convert/presentation/odpChart", async importOriginal => {
+	const original = await importOriginal<typeof import("../core/convert/presentation/odpChart")>()
+
+	return {
+		...original,
+		odpChartPart: async (...args: Parameters<typeof original.odpChartPart>) => {
+			translating.count++
+
+			try {
+				return await original.odpChartPart(...args)
+			} finally {
+				translating.count--
+			}
+		}
+	}
+})
 
 const CELLS = sampleChartCells({ categories: ["A", "B", "C", "D"], series: ["N", "S", "W"] })
 
@@ -251,5 +271,63 @@ describe("number formats across a conversion", () => {
 		const kept = /<number:date-style/u.test(object) && /<number:percentage-style/u.test(object)
 
 		expect(kept || written.losses.some(loss => loss.kind === "chartDetail")).toBe(true)
+	})
+})
+
+describe("ODF charts in a sliced conversion", () => {
+	const chartObject = (n: number): string =>
+		'<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:chart="urn:oasis:names:tc:opendocument:xmlns:chart:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3"><office:body><office:chart><chart:chart chart:class="chart:bar"><chart:plot-area><chart:series chart:values-cell-range-address="local-table.$B$2:.$B$3" chart:label-cell-address="local-table.$B$1"/></chart:plot-area>' +
+		'<table:table table:name="local-table"><table:table-header-columns><table:table-column/></table:table-header-columns><table:table-columns><table:table-column/></table:table-columns><table:table-header-rows><table:table-row><table:table-cell/><table:table-cell><text:p>S</text:p></table:table-cell></table:table-row></table:table-header-rows>' +
+		`<table:table-rows><table:table-row><table:table-cell><text:p>a</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="${String(n)}"><text:p>${String(n)}</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell><text:p>b</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="2"><text:p>2</text:p></table:table-cell></table:table-row></table:table-rows></table:table></chart:chart></office:chart></office:body></office:document-content>`
+	const OBJECTS = [1, 2, 3]
+	const deck = odpBytes({
+		extra: OBJECTS.map(n => ({
+			name: `Object ${String(n)}/content.xml`,
+			data: new TextEncoder().encode(chartObject(n)),
+			mediaType: "text/xml"
+		})),
+		manifestEntries: OBJECTS.map(
+			n =>
+				`<manifest:file-entry manifest:full-path="Object ${String(n)}/" manifest:media-type="application/vnd.oasis.opendocument.chart"/>`
+		).join(""),
+		body: page(
+			OBJECTS.map(
+				n => `<draw:frame svg:width="8cm" svg:height="6cm"><draw:object xlink:href="./Object ${String(n)}"/></draw:frame>`
+			).join("")
+		)
+	})
+	const written = async (slicing?: Parameters<typeof convertPresentation>[4]): Promise<Record<string, Uint8Array>> => {
+		const opened = await openOdp(bytesSource(deck))
+
+		if (opened.kind !== "opened") throw new Error(opened.reason)
+
+		const sink = memorySink()
+		const result = await convertPresentation(opened.deck, { format: "odp", parts: opened.parts }, "pptx", sink, slicing)
+
+		if ("kind" in result) throw new Error(result.reason)
+
+		return unzipSync(sink.bytes())
+	}
+
+	it("gives the thread its turns while it translates the charts, and writes what an unsliced conversion writes", async () => {
+		let paused = 0
+		const sliced = await written({
+			slicing: {
+				pause: () => {
+					if (translating.count > 0) paused++
+
+					return Promise.resolve()
+				},
+				sliceMs: 0,
+				now: () => 0
+			}
+		})
+		const plain = await written()
+
+		expect(paused).toBeGreaterThan(0)
+		expect(chartNames(sliced, "pptx")).toHaveLength(OBJECTS.length)
+		expect(Object.keys(sliced).sort()).toEqual(Object.keys(plain).sort())
+
+		for (const name of Object.keys(plain)) expect(sliced[name], name).toEqual(plain[name])
 	})
 })

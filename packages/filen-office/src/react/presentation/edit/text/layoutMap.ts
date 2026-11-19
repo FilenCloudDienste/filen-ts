@@ -4,11 +4,14 @@ import {
 	FRAGMENT_INTS,
 	FRAGMENT_KIND_MASK,
 	FRAGMENT_LEVEL_SHIFT,
+	FragmentFloat,
+	FragmentInt,
 	FragmentKind,
 	HitTester,
 	LINE_FLOATS,
 	LINE_INTS,
 	LineFlag,
+	LineFloat,
 	LineInt,
 	MeasureCache,
 	StyleTable,
@@ -313,9 +316,46 @@ export class LayoutMap {
 
 		return {
 			x: this.tester.xAtOffset(this.layout, line, text, offset),
-			top: this.lineFloat(line, 0),
-			height: this.lineFloat(line, 1)
+			top: this.lineFloat(line, LineFloat.TOP),
+			height: this.lineFloat(line, LineFloat.HEIGHT)
 		}
+	}
+
+	// The style (an index into the page's styles) of the text a caret at `pos` takes on: the text fragment before it on
+	// its line, else the first one after it; -1 on a line without text (an empty paragraph's).
+	styleAt(pos: number): number {
+		const { paragraph, offset } = this.toLayout(pos)
+		const line = this.lineOf(paragraph, offset)
+
+		if (line < 0) return -1
+
+		const prefix = this.paragraphs[paragraph]?.prefix ?? 0
+		const first = this.lineInt(line, LineInt.FIRST_FRAGMENT)
+		const count = this.lineInt(line, LineInt.FRAGMENT_COUNT)
+		let before = -1
+		let beforeStart = -1
+		let after = -1
+		let afterStart = Infinity
+
+		for (let f = first; f < first + count; f++) {
+			const start = this.layout.fragmentInts[f * FRAGMENT_INTS + FragmentInt.TEXT_START] ?? 0
+			const info = this.layout.fragmentInts[f * FRAGMENT_INTS + FragmentInt.INFO] ?? 0
+
+			// The marker (bullet or number) is drawn in its own style.
+			if ((info & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT || start < prefix) continue
+
+			const style = this.layout.fragmentInts[f * FRAGMENT_INTS + FragmentInt.STYLE] ?? -1
+
+			if (start < offset && start > beforeStart) {
+				before = style
+				beforeStart = start
+			} else if (start >= offset && start < afterStart) {
+				after = style
+				afterStart = start
+			}
+		}
+
+		return before >= 0 ? before : after
 	}
 
 	// Where text typed at `pos` shows before the worker lays it out again (the editor's echo): the paragraph and laid-out
@@ -333,8 +373,8 @@ export class LayoutMap {
 		let fragment = -1
 
 		for (let f = first; f < first + count; f++) {
-			const start = this.layout.fragmentInts[f * FRAGMENT_INTS] ?? 0
-			const info = this.layout.fragmentInts[f * FRAGMENT_INTS + 3] ?? 0
+			const start = this.layout.fragmentInts[f * FRAGMENT_INTS + FragmentInt.TEXT_START] ?? 0
+			const info = this.layout.fragmentInts[f * FRAGMENT_INTS + FragmentInt.INFO] ?? 0
 
 			if ((info & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT || (info >> FRAGMENT_LEVEL_SHIFT) % 2 === 1 || start > offset) continue
 
@@ -345,8 +385,10 @@ export class LayoutMap {
 
 		if (fragment < 0 || at === undefined) return undefined
 
-		const style = this.layout.fragmentInts[fragment * FRAGMENT_INTS + 2] ?? 0
-		const letter = (this.styles.letterSpacing[style] ?? 0) + (this.layout.fragmentFloats[fragment * FRAGMENT_FLOATS + 3] ?? 0)
+		const style = this.layout.fragmentInts[fragment * FRAGMENT_INTS + FragmentInt.STYLE] ?? 0
+		const letter =
+			(this.styles.letterSpacing[style] ?? 0) +
+			(this.layout.fragmentFloats[fragment * FRAGMENT_FLOATS + FragmentFloat.LETTER_SPACING] ?? 0)
 		const text = (this.styles.caps[style] ?? 0) === 0 ? inserted : inserted.toUpperCase()
 		const width =
 			this.styles.cache.measure(this.styles.fontKey[style] ?? 0, text, 0, text.length) * (this.styles.scaleX[style] ?? 1) +
@@ -383,9 +425,14 @@ export class LayoutMap {
 				let x2 = this.tester.xAtOffset(this.layout, line, text, b)
 
 				// A selected paragraph end shows as a sliver past the line.
-				if (p < end.paragraph && line === last - 1) x2 = Math.max(x1, x2) + this.lineFloat(line, 1) * 0.25
+				if (p < end.paragraph && line === last - 1) x2 = Math.max(x1, x2) + this.lineFloat(line, LineFloat.HEIGHT) * 0.25
 
-				out.push({ x: Math.min(x1, x2), top: this.lineFloat(line, 0), width: Math.abs(x2 - x1), height: this.lineFloat(line, 1) })
+				out.push({
+					x: Math.min(x1, x2),
+					top: this.lineFloat(line, LineFloat.TOP),
+					width: Math.abs(x2 - x1),
+					height: this.lineFloat(line, LineFloat.HEIGHT)
+				})
 			}
 		}
 
@@ -398,10 +445,10 @@ export class LayoutMap {
 		let distance = Infinity
 
 		for (let line = 0; line < this.layout.lineCount; line++) {
-			const top = this.lineFloat(line, 0)
-			const height = this.lineFloat(line, 1)
-			const left = this.lineFloat(line, 3)
-			const width = Math.max(this.lineFloat(line, 4), 1)
+			const top = this.lineFloat(line, LineFloat.TOP)
+			const height = this.lineFloat(line, LineFloat.HEIGHT)
+			const left = this.lineFloat(line, LineFloat.X)
+			const width = Math.max(this.lineFloat(line, LineFloat.WIDTH), 1)
 			const dy = y < top ? top - y : y > top + height ? y - top - height : 0
 			const dx = x < left ? left - x : x > left + width ? x - left - width : 0
 			const d = dy * 4 + dx
@@ -464,17 +511,5 @@ export class LayoutMap {
 		else if ((flags & LineFlag.LAST) === 0 && /\s/u.test((this.texts[paragraph] ?? "")[end - 1] ?? "")) end--
 
 		return this.toDoc(paragraph, end)
-	}
-
-	// Whether a line's fragments hold text (an empty paragraph's line has none): for tests and the caret's height.
-	hasText(line: number): boolean {
-		const first = this.lineInt(line, LineInt.FIRST_FRAGMENT)
-		const count = this.lineInt(line, LineInt.FRAGMENT_COUNT)
-
-		for (let f = first; f < first + count; f++) {
-			if (((this.layout.fragmentInts[f * FRAGMENT_INTS + 3] ?? 0) & FRAGMENT_KIND_MASK) === FragmentKind.TEXT) return true
-		}
-
-		return count > 0 && (this.layout.fragmentFloats[first * FRAGMENT_FLOATS + 1] ?? 0) > 0
 	}
 }

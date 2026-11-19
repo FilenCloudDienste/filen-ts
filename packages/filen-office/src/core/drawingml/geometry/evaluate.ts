@@ -20,20 +20,25 @@ import { PRESET_GEOMETRY } from "./presets.generated"
 const TO_RADIANS = Math.PI / (180 * 60000)
 const CIRCLE = 21600000
 
-const compiled = new Map<string, GeometryProgram | null>()
+const compiled = new Map<string, GeometryProgram>()
 
-// The compiled program of a preset (ST_ShapeType), or undefined for unknown names. Compiled once.
+// The compiled program of a preset (ST_ShapeType), or undefined for unknown names. Compiled once; unknown
+// names (document strings) are never cached.
 export function presetProgram(name: string): GeometryProgram | undefined {
+	if (!Object.hasOwn(PRESET_GEOMETRY, name)) return undefined
+
 	let program = compiled.get(name)
 
 	if (program === undefined) {
-		const encoded = Object.hasOwn(PRESET_GEOMETRY, name) ? PRESET_GEOMETRY[name] : undefined
+		const encoded = PRESET_GEOMETRY[name]
 
-		program = encoded === undefined ? null : parseProgram(encoded)
+		if (encoded === undefined) return undefined
+
+		program = parseProgram(encoded)
 		compiled.set(name, program)
 	}
 
-	return program ?? undefined
+	return program
 }
 
 export function presetNames(): string[] {

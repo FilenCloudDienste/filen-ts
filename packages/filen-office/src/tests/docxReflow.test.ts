@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { RevisionView } from "../core/docx/model/kinds"
 import { StoryCounters, markerCopy } from "../core/docx/reflow/counters"
-import { NUMBERING_PART } from "./docxEditFixtures"
+import { runCss } from "../core/docx/reflow/css"
+import { NUMBERING_PART, sessionOf } from "./docxEditFixtures"
 import { buildDocx } from "./docxSynthetic"
 import { pagedEditor, settleAll } from "./pagedFixtures"
 
@@ -322,5 +323,30 @@ describe("reflow stylesheet", () => {
 			expect(hiding).toContain(`.fo-docx-reflow[data-fo-revisions="final"] ${element}[data-fo-revision~="del"]`)
 			expect(hiding).toContain(`.fo-docx-reflow[data-fo-revisions="original"] ${element}[data-fo-revision~="ins"]`)
 		}
+	})
+})
+
+describe("reflow run CSS", () => {
+	it("names a face the document learned after the run's CSS was first made", async () => {
+		const session = await sessionOf({
+			body: '<w:p><w:r><w:rPr><w:rFonts w:ascii="Foo" w:hAnsi="Foo"/><w:b/></w:rPr><w:t>text</w:t></w:r></w:p>'
+		})
+		const paragraph = session.state.doc.child(0)
+		const run = session.formats.resolvedRun(session.formats.paragraph(paragraph), paragraph.child(0).marks)
+		const known = new Map<string, string>()
+		// One function per view whose answers change, as LayoutFaces' after refresh().
+		const faces = (name: string): string | undefined => known.get(name)
+		const before = runCss(run, faces)
+
+		expect(before).toMatch(/^font-family: "Foo", /)
+		expect(runCss(run, faces)).toBe(before)
+
+		known.set("Foo", '"fo-face-1"')
+
+		const after = runCss(run, faces)
+
+		expect(after).toMatch(/^font-family: "fo-face-1", /)
+		expect(after).toContain("font-weight: 700")
+		expect(runCss(run)).toBe(before)
 	})
 })

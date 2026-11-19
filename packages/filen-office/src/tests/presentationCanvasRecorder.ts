@@ -50,6 +50,9 @@ export interface Recorded {
 	readonly alpha: number
 	readonly font: string
 	readonly lineWidth: number
+	readonly lineCap: string
+	readonly lineJoin: string
+	readonly miterLimit: number
 	readonly dash: readonly number[]
 	readonly shadow: readonly [string, number, number, number]
 	readonly composite: string
@@ -140,6 +143,9 @@ export class RecordingCanvas implements Canvas2DLike<RecordedImage>, RecordedIma
 			alpha: s.alpha,
 			font: s.font,
 			lineWidth: s.lineWidth,
+			lineCap: s.lineCap,
+			lineJoin: s.lineJoin,
+			miterLimit: s.miterLimit,
 			dash: [...s.dash],
 			shadow: [...s.shadow],
 			composite: s.composite,

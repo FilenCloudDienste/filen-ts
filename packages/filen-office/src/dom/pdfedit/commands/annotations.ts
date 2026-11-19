@@ -36,7 +36,21 @@ import {
 	type PdfCreated
 } from "../annotations/index"
 import { PdfEngineRefusal } from "../context"
-import { isIndex, isRecord, isText, type PdfCommandContext, type PdfCommandOutcome, type PdfCommandTable } from "./types"
+import { insertedImageBytes } from "../pages/organise"
+import {
+	isFiniteNumber,
+	isFiniteTuple,
+	isIndex,
+	isRecord,
+	isText,
+	parseQuad,
+	parseRect,
+	parseRgb,
+	requirePage,
+	type PdfCommandContext,
+	type PdfCommandOutcome,
+	type PdfCommandTable
+} from "./types"
 
 // Annotations and comments (dom/pdfedit/annotations) as editor commands: each is one journal operation, its arguments
 // checked here (they arrive structured-cloned), its author and text carried in them so a rebuild replays it alike.
@@ -123,40 +137,8 @@ export interface PdfAnnotationCommands {
 
 // --- Argument checks ---
 
-function isNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value)
-}
-
-function numbers(value: unknown, length: number): number[] | null {
-	return Array.isArray(value) && value.length === length && value.every(isNumber) ? (value as number[]) : null
-}
-
 function point(value: unknown): PdfPoint | null {
-	const pair = numbers(value, 2)
-
-	return pair === null ? null : [pair[0] ?? 0, pair[1] ?? 0]
-}
-
-function rect(value: unknown): PdfRect | null {
-	const four = numbers(value, 4)
-
-	return four === null ? null : [four[0] ?? 0, four[1] ?? 0, four[2] ?? 0, four[3] ?? 0]
-}
-
-function quad(value: unknown): PdfQuad | null {
-	const eight = numbers(value, 8)
-
-	return eight === null
-		? null
-		: [eight[0] ?? 0, eight[1] ?? 0, eight[2] ?? 0, eight[3] ?? 0, eight[4] ?? 0, eight[5] ?? 0, eight[6] ?? 0, eight[7] ?? 0]
-}
-
-function rgb(value: unknown): PdfRgb | null {
-	const three = numbers(value, 3)
-
-	return three === null || !three.every(component => component >= 0 && component <= 1)
-		? null
-		: [three[0] ?? 0, three[1] ?? 0, three[2] ?? 0]
+	return isFiniteTuple(value, 2) ? [value[0] ?? 0, value[1] ?? 0] : null
 }
 
 function points(value: unknown): PdfPoint[] | null {
@@ -194,7 +176,7 @@ function stroke(args: Readonly<Record<string, unknown>>): Stroke | null {
 	const out: { color?: PdfRgb; width?: number; opacity?: number } = {}
 
 	if (args["color"] !== undefined) {
-		const color = rgb(args["color"])
+		const color = parseRgb(args["color"])
 
 		if (color === null) return null
 
@@ -205,7 +187,7 @@ function stroke(args: Readonly<Record<string, unknown>>): Stroke | null {
 		const value = args[key]
 
 		if (value === undefined) continue
-		if (!isNumber(value) || value < 0) return null
+		if (!isFiniteNumber(value) || value < 0) return null
 
 		out[key] = value
 	}
@@ -225,11 +207,11 @@ function optional<T>(value: unknown, parse: (value: unknown) => T | null): { rea
 function parseStyle(value: unknown): PdfAnnotationStyle | null {
 	if (!isRecord(value)) return null
 
-	const color = optional(value["color"], rgb)
-	const fill = value["fill"] === null ? { ok: true, value: null } : optional(value["fill"], rgb)
+	const color = optional(value["color"], parseRgb)
+	const fill = value["fill"] === null ? { ok: true, value: null } : optional(value["fill"], parseRgb)
 	const font = optional(value["font"], entry => oneOf(entry, FONTS))
 	const align = optional(value["align"], entry => oneOf(entry, ALIGNS))
-	const numeric = (entry: unknown): number | null => (isNumber(entry) && entry >= 0 ? entry : null)
+	const numeric = (entry: unknown): number | null => (isFiniteNumber(entry) && entry >= 0 ? entry : null)
 	const opacity = optional(value["opacity"], numeric)
 	const width = optional(value["width"], numeric)
 	const size = optional(value["size"], numeric)
@@ -275,18 +257,14 @@ function made(created: PdfCreated): PdfCommandOutcome {
 	return { pages: created.pages, created: created.ref }
 }
 
-function checkPage(context: PdfCommandContext, page: number): void {
-	if (page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
-}
-
 // The quads of the text between two points of a page, from its structured text (what a drag over text marks).
 export function textQuadsBetween(context: PdfCommandContext, page: number, from: PdfPoint, to: PdfPoint): PdfQuad[] {
-	checkPage(context, page)
+	requirePage(context, page)
 
 	const text = context.page(page).toStructuredText("preserve-whitespace")
 
 	try {
-		return text.highlight([from[0], from[1]], [to[0], to[1]], MAX_QUADS).map(entry => quad(entry) ?? [0, 0, 0, 0, 0, 0, 0, 0])
+		return text.highlight([from[0], from[1]], [to[0], to[1]], MAX_QUADS).map(entry => parseQuad(entry) ?? [0, 0, 0, 0, 0, 0, 0, 0])
 	} finally {
 		text.destroy()
 	}
@@ -300,13 +278,18 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 
 			if (base === null || !isRecord(args)) return null
 
-			const box = rect(args["rect"])
+			const box = parseRect(args["rect"])
 			const font = oneOf(args["font"], FONTS)
 			const align = oneOf(args["align"], ALIGNS)
-			const color = rgb(args["color"])
+			const color = parseRgb(args["color"])
 			const size = args["size"]
 
-			return box === null || font === null || align === null || color === null || !isNumber(size) || !isText(args["text"], MAX_TEXT)
+			return box === null ||
+				font === null ||
+				align === null ||
+				color === null ||
+				!isFiniteNumber(size) ||
+				!isText(args["text"], MAX_TEXT)
 				? null
 				: { ...base, rect: box, text: args["text"], font, size, color, align }
 		},
@@ -347,14 +330,14 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 			if (base === null || !isRecord(args)) return null
 
 			const kind = oneOf(args["kind"], MARKUPS)
-			const color = optional(args["color"], rgb)
-			const opacity = optional(args["opacity"], entry => (isNumber(entry) ? entry : null))
+			const color = optional(args["color"], parseRgb)
+			const opacity = optional(args["opacity"], entry => (isFiniteNumber(entry) ? entry : null))
 			const from = optional(args["from"], point)
 			const to = optional(args["to"], point)
 			const quads = optional(args["quads"], entry => {
 				if (!Array.isArray(entry) || entry.length > MAX_QUADS) return null
 
-				const parsed = entry.map(quad)
+				const parsed = entry.map(parseQuad)
 
 				return parsed.some(value => value === null) ? null : parsed.filter(value => value !== null)
 			})
@@ -404,9 +387,9 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 			if (base === null || !isRecord(args)) return null
 
 			const kind = oneOf(args["kind"], ["Square", "Circle"] as const)
-			const box = rect(args["rect"])
+			const box = parseRect(args["rect"])
 			const style = stroke(args)
-			const fill = optional(args["fill"], rgb)
+			const fill = optional(args["fill"], parseRgb)
 
 			return kind === null || box === null || style === null || !fill.ok
 				? null
@@ -442,13 +425,14 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.image": {
 		tool: "annotate",
-		bytes: args => args.image.byteLength,
+		// setStampImage adds the picture as insertImage does, so it counts the same.
+		bytes: (args, mupdf) => insertedImageBytes(mupdf, args.image),
 		parse: args => {
 			const base = authored(args)
 
 			if (base === null || !isRecord(args)) return null
 
-			const box = rect(args["rect"])
+			const box = parseRect(args["rect"])
 			const image = args["image"]
 
 			return box === null || !(image instanceof Uint8Array) || image.byteLength === 0 || image.byteLength > PDF_STAMP_MAX_BYTES
@@ -456,7 +440,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 				: { ...base, rect: box, image }
 		},
 		run: (context, args) => {
-			checkPage(context, args.page)
+			requirePage(context, args.page)
 
 			return guarded(context, () => made(addImageStamp(context.mupdf, context.document, { ...args, now: context.now() })))
 		}
@@ -468,7 +452,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 
 			if (base === null || !isRecord(args)) return null
 
-			const box = rect(args["rect"])
+			const box = parseRect(args["rect"])
 			const name = oneOf(args["name"], PDF_PRESET_STAMPS)
 
 			return box === null || name === null ? null : { ...base, rect: box, name }
@@ -483,7 +467,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 			if (base === null || !isRecord(args)) return null
 
 			const at = point(args["at"])
-			const color = optional(args["color"], rgb)
+			const color = optional(args["color"], parseRgb)
 
 			return at === null || !color.ok || !isText(args["text"], MAX_TEXT)
 				? null
@@ -497,7 +481,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 		parse: args => {
 			const ref = target(args)
 
-			return ref === null || !isRecord(args) || !isNumber(args["dx"]) || !isNumber(args["dy"])
+			return ref === null || !isRecord(args) || !isFiniteNumber(args["dx"]) || !isFiniteNumber(args["dy"])
 				? null
 				: { ...ref, dx: args["dx"], dy: args["dy"] }
 		},
@@ -508,7 +492,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 		target: "id",
 		parse: args => {
 			const ref = target(args)
-			const box = isRecord(args) ? rect(args["rect"]) : null
+			const box = isRecord(args) ? parseRect(args["rect"]) : null
 
 			return ref === null || box === null ? null : { ...ref, rect: box }
 		},

@@ -110,22 +110,28 @@ export function hitHandle(rect: PdfRect, point: readonly [number, number], toler
 	return null
 }
 
-// `from` with the dragged handle at (dx, dy); Shift keeps the aspect on corner handles. Never smaller than the
-// minimum size.
-export function resizeRect(from: PdfRect, handle: SelectHandle, dx: number, dy: number, keepAspect: boolean): PdfRect {
+// `from` with the dragged handle at (dx, dy), kept inside `box`; Shift keeps the aspect on corner handles. Never
+// smaller than the minimum size.
+export function resizeRect(from: PdfRect, handle: SelectHandle, dx: number, dy: number, keepAspect: boolean, box: PdfRect): PdfRect {
 	let [x0, y0, x1, y1] = from
 
-	if (handle.includes("w")) x0 = Math.min(x0 + dx, x1 - TOOL_MIN_SIZE)
-	if (handle.includes("e")) x1 = Math.max(x1 + dx, x0 + TOOL_MIN_SIZE)
-	if (handle.includes("n")) y0 = Math.min(y0 + dy, y1 - TOOL_MIN_SIZE)
-	if (handle.includes("s")) y1 = Math.max(y1 + dy, y0 + TOOL_MIN_SIZE)
+	if (handle.includes("w")) x0 = Math.min(Math.max(x0 + dx, box[0]), x1 - TOOL_MIN_SIZE)
+	if (handle.includes("e")) x1 = Math.max(Math.min(x1 + dx, box[2]), x0 + TOOL_MIN_SIZE)
+	if (handle.includes("n")) y0 = Math.min(Math.max(y0 + dy, box[1]), y1 - TOOL_MIN_SIZE)
+	if (handle.includes("s")) y1 = Math.max(Math.min(y1 + dy, box[3]), y0 + TOOL_MIN_SIZE)
 
 	if (keepAspect && handle.length === 2) {
 		const aspect = (from[2] - from[0]) / Math.max(TOOL_MIN_SIZE, from[3] - from[1])
-		const height = (x1 - x0) / aspect
+		const north = handle.includes("n")
+		// The height the width asks for, capped to the room left on the dragged side (the width shrinks to match).
+		const height = Math.min((x1 - x0) / aspect, north ? y1 - box[1] : box[3] - y0)
+		const width = height * aspect
 
-		if (handle.includes("n")) y0 = y1 - height
+		if (north) y0 = y1 - height
 		else y1 = y0 + height
+
+		if (handle.includes("w")) x0 = x1 - width
+		else x1 = x0 + width
 	}
 
 	return [x0, y0, x1, y1]
@@ -180,7 +186,7 @@ export function selectPointer(state: SelectState, event: ToolPointer, context: S
 			const rect =
 				drag.kind === "move"
 					? clampRect(translateRect(drag.from, dx, dy), event.box)
-					: resizeRect(drag.from, drag.handle ?? "se", dx, dy, event.shift === true)
+					: resizeRect(drag.from, drag.handle ?? "se", dx, dy, event.shift === true, event.box)
 
 			return { state: { selected, drag: { ...drag, rect, moved } } }
 		}
@@ -206,7 +212,8 @@ export function selectPointer(state: SelectState, event: ToolPointer, context: S
 	}
 }
 
-export function selectKey(state: SelectState, key: ToolKey): ToolStep<SelectState, SelectCommit> {
+// `box` is the selected annotation's page box: a nudge or resize stays inside it.
+export function selectKey(state: SelectState, key: ToolKey, box: PdfRect): ToolStep<SelectState, SelectCommit> {
 	const selected = state.selected
 
 	if (selected === null || state.drag !== null) return { state }
@@ -220,16 +227,25 @@ export function selectKey(state: SelectState, key: ToolKey): ToolStep<SelectStat
 	if (key.alt === true) {
 		if (!canResize(selected)) return { state }
 
-		const rect = resizeRect(selected.rect, "se", dx, dy, false)
+		const rect = resizeRect(selected.rect, "se", dx, dy, false, box)
+
+		if (same(rect, selected.rect)) return { state }
 
 		return { state: { selected: { ...selected, rect }, drag: null }, commit: { kind: "resize", ref: refOf(selected), rect } }
 	}
 
 	if (!canMove(selected)) return { state }
 
+	// The delta that keeps it inside the page (the rect itself is moved by it, never shrunk to fit).
+	const inside = clampRect(translateRect(selected.rect, dx, dy), box)
+	const moveX = inside[0] - selected.rect[0]
+	const moveY = inside[1] - selected.rect[1]
+
+	if (moveX === 0 && moveY === 0) return { state }
+
 	return {
-		state: { selected: { ...selected, rect: translateRect(selected.rect, dx, dy) }, drag: null },
-		commit: { kind: "move", ref: refOf(selected), dx, dy }
+		state: { selected: { ...selected, rect: translateRect(selected.rect, moveX, moveY) }, drag: null },
+		commit: { kind: "move", ref: refOf(selected), dx: moveX, dy: moveY }
 	}
 }
 

@@ -21,6 +21,7 @@ import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
 import { withManifestEntries, withoutManifestEntries } from "./manifestPrune"
 import { odpSplice, sameCopied, type OdpSaveInput, type OdpSplice } from "./splice"
+import type { PageBaseline } from "./source"
 import { isRefused } from "../../presentation/refusal"
 
 // Saving an ODP deck into its own source (§1.5.4): the splice (splice.ts) at revision R, proof gate 2, then the zip.
@@ -156,7 +157,7 @@ export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Re
 		snapshotOrders.set(input.deck, orders)
 	}
 
-	orders.set(splice.revision, order)
+	orders.set(splice.revision, { order, baselines: splice.baselines })
 
 	return {
 		revision: splice.revision,
@@ -173,13 +174,22 @@ export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Re
 
 // The slide order each snapshot of a deck wrote, by the save's revision: the pages of the file that save makes, in
 // order, whatever the deck does while it is uploaded or waits for its commit (a commit may come after a later save's
-// snapshot). Kept until a commit at that revision or a later one lands.
-const snapshotOrders = new WeakMap<Deck, Map<number, readonly SlideRef[]>>()
+// snapshot), with the nodes it saved them from. Kept until a commit at that revision or a later one lands.
+const snapshotOrders = new WeakMap<
+	Deck,
+	Map<number, { readonly order: readonly SlideRef[]; readonly baselines: ReadonlyMap<SlideRef, PageBaseline> }>
+>()
 
 // The slides the deck's snapshot at `revision` wrote, page by page (what the rebase onto that save's file binds its
 // pages to).
 export function snapshotSlideOrder(deck: Deck, revision: number): readonly SlideRef[] | undefined {
-	return snapshotOrders.get(deck)?.get(revision)
+	return snapshotOrders.get(deck)?.get(revision)?.order
+}
+
+// The nodes, at their revisions, the deck's snapshot at `revision` saved its parsed pages from (the baselines of the
+// reading of that save's file).
+export function snapshotBaselines(deck: Deck, revision: number): ReadonlyMap<SlideRef, PageBaseline> | undefined {
+	return snapshotOrders.get(deck)?.get(revision)?.baselines
 }
 
 // The revision of the deck's latest snapshot still kept (a caller that does not say which save's file it rebases

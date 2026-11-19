@@ -1,6 +1,7 @@
 import { EMU_PER_PX } from "../drawingml/index"
 import type { PdfDocumentProperties } from "../pdfwrite/index"
 import type { SlideRef } from "./model"
+import { DEFAULT_NOTES_BOXES, DEFAULT_NOTES_PAGE } from "./notes"
 import type { SlideRender } from "./output"
 
 // The pages an export prints a deck on, besides one page per slide: notes pages and handouts, and what an export reads
@@ -43,8 +44,13 @@ const GRIDS: { readonly [K in HandoutsPerPage]: readonly [number, number] } = {
 	9: [3, 3]
 }
 
-// The default notes master's slide image box, as fractions of its 6858000 x 9144000 EMU page.
-export const NOTES_SLIDE_BOX = { x: 1143000 / 6858000, y: 685800 / 9144000, width: 4572000 / 6858000, height: 3429000 / 9144000 } as const
+// The default notes master's slide image box, as fractions of its page.
+export const NOTES_SLIDE_BOX = {
+	x: DEFAULT_NOTES_BOXES.sldImg.x / DEFAULT_NOTES_PAGE.cx,
+	y: DEFAULT_NOTES_BOXES.sldImg.y / DEFAULT_NOTES_PAGE.cy,
+	width: DEFAULT_NOTES_BOXES.sldImg.cx / DEFAULT_NOTES_PAGE.cx,
+	height: DEFAULT_NOTES_BOXES.sldImg.cy / DEFAULT_NOTES_PAGE.cy
+} as const
 
 export interface Box {
 	readonly x: number

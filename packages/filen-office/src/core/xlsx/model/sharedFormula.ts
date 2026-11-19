@@ -1,4 +1,6 @@
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
+import { columnName } from "../../sheet/refs/cellRef"
+import { skipQuoted } from "../../sheet/refs/scan"
 
 // Moves the relative references of an A1 formula by (rows, cols), as a shared formula's text applies to each of
 // its cells (ECMA-376 Part 1 §18.3.1.40): absolute parts ($) stay, strings, sheet names, structured references,
@@ -78,14 +80,6 @@ function readPart(text: string, i: number, allow: "cell" | "col" | "row"): Part 
 	return part
 }
 
-function columnName(col: number): string {
-	let name = ""
-
-	for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + ((n - 1) % 26)) + name
-
-	return name
-}
-
 // The part moved, or null when it leaves the grid.
 function movePart(part: Part, rows: number, cols: number): string | null {
 	let out = ""
@@ -107,27 +101,6 @@ function movePart(part: Part, rows: number, cols: number): string | null {
 	}
 
 	return out
-}
-
-// After the quoted text (string or quoted sheet name) whose opening quote is at `i`.
-function quotedEnd(text: string, i: number, quote: number): number {
-	let at = i + 1
-
-	while (at < text.length) {
-		if (text.charCodeAt(at) === quote) {
-			if (text.charCodeAt(at + 1) === quote) {
-				at += 2
-
-				continue
-			}
-
-			return at + 1
-		}
-
-		at++
-	}
-
-	return text.length
 }
 
 // After the bracketed text (structured reference, external index) whose "[" is at `i`; brackets nest, "'"
@@ -165,7 +138,7 @@ export function moveRelativeReferences(text: string, rows: number, cols: number)
 		const code = text.charCodeAt(i)
 
 		if (code === 34 || code === 39) {
-			i = quotedEnd(text, i, code)
+			i = skipQuoted(text, i, code)
 
 			continue
 		}

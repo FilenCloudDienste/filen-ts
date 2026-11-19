@@ -215,28 +215,28 @@ const ESCAPED: ReadonlyMap<string, string> = new Map([
 	["$", "$"],
 	["|", "‖"],
 	[" ", " "],
-	[",", " "],
-	[":", " "],
-	[">", " "],
-	[";", " "]
+	[",", "\u2009"],
+	[":", "\u205f"],
+	[">", "\u205f"],
+	[";", "\u2004"]
 ])
 
 const SPACE_COMMANDS: ReadonlyMap<string, string> = new Map([
-	["quad", " "],
-	["qquad", "  "],
-	["enspace", " "],
-	["thinspace", " "]
+	["quad", "\u2003"],
+	["qquad", "\u2003\u2003"],
+	["enspace", "\u2002"],
+	["thinspace", "\u2009"]
 ])
 
 // How the spaces the subset makes are written back.
 export const LATEX_SPACES: ReadonlyMap<string, string> = new Map([
 	[" ", "\\ "],
-	[" ", "~"],
-	[" ", "\\,"],
-	[" ", "\\:"],
-	[" ", "\\;"],
-	[" ", "\\quad "],
-	[" ", "\\enspace "]
+	["\u00a0", "~"],
+	["\u2009", "\\,"],
+	["\u205f", "\\:"],
+	["\u2004", "\\;"],
+	["\u2003", "\\quad "],
+	["\u2002", "\\enspace "]
 ])
 
 export const LATEX_NARY: ReadonlyMap<string, string> = new Map([
@@ -304,20 +304,20 @@ export const LATEX_FUNCTIONS: ReadonlyMap<string, LatexFunction> = new Map([
 
 // Accents as the combining characters OMML's m:acc carries.
 export const LATEX_ACCENTS: ReadonlyMap<string, string> = new Map([
-	["hat", "̂"],
-	["widehat", "̂"],
-	["check", "̌"],
-	["tilde", "̃"],
-	["widetilde", "̃"],
-	["acute", "́"],
-	["grave", "̀"],
-	["dot", "̇"],
-	["ddot", "̈"],
-	["dddot", "⃛"],
-	["breve", "̆"],
-	["bar", "̅"],
-	["vec", "⃗"],
-	["mathring", "̊"]
+	["hat", "\u0302"],
+	["widehat", "\u0302"],
+	["check", "\u030c"],
+	["tilde", "\u0303"],
+	["widetilde", "\u0303"],
+	["acute", "\u0301"],
+	["grave", "\u0300"],
+	["dot", "\u0307"],
+	["ddot", "\u0308"],
+	["dddot", "\u20db"],
+	["breve", "\u0306"],
+	["bar", "\u0305"],
+	["vec", "\u20d7"],
+	["mathring", "\u030a"]
 ])
 
 export type LatexLook = { readonly style?: OmmlStyle; readonly script?: OmmlScript }
@@ -668,7 +668,7 @@ class Reader {
 			case "~":
 				this.pos++
 
-				return { nodes: [run(" ", look)] }
+				return { nodes: [run("\u00a0", look)] }
 		}
 
 		if (unreadable(code)) fail("unexpected", start, character)

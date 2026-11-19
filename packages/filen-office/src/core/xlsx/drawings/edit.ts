@@ -444,7 +444,7 @@ export async function appendDrawingObject(
 			type: relationshipType(strict, "drawing"),
 			target: relativeTarget(found.part, name)
 		})
-		const prefix = (found.model as { readonly prefix?: string }).prefix ?? ""
+		const prefix = found.model.prefix
 		const p = prefix === "" ? "" : `${prefix}:`
 
 		writes.setSection(found.model, "drawing", [

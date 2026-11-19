@@ -39,9 +39,10 @@ export async function odtSource(bytes: Uint8Array): Promise<OdtSource> {
 	return opened.source
 }
 
-// Opens as the editor does: laid out, Gate 1 the docx writer's proof and the ODT writer's.
-export async function editOdt(bytes: Uint8Array, options: { readonly prove?: boolean } = {}): Promise<OdtEditing> {
-	const source = await odtSource(bytes)
+// Opens as the editor does: laid out, Gate 1 the docx writer's proof and the ODT writer's. Takes the file, or a
+// source already opened (a refusal to open is then the caller's, and anything thrown here is a failure).
+export async function editOdt(input: Uint8Array | OdtSource, options: { readonly prove?: boolean } = {}): Promise<OdtEditing> {
+	const source = input instanceof Uint8Array ? await odtSource(input) : input
 	const docx = source.docx
 	const loaded = await loadDocx(docx)
 	const opened = await openDocxPackage(bytesSource(docx))

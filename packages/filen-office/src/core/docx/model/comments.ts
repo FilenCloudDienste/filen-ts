@@ -1,4 +1,3 @@
-import { symbolTable, symbolToUnicode } from "../../fonts/symbols"
 import type { XmlDocument } from "../../xml/index"
 import { Item, RevisionView } from "./kinds"
 import { Ns } from "./namespaces"
@@ -31,6 +30,25 @@ export interface Person {
 export interface CommentExtension {
 	readonly parentParaId: string | undefined
 	readonly done: boolean
+}
+
+// What the read-only viewer's annotations (dom/docx/annotate.ts) and the editor's live ones
+// (paged/annotations.ts) show of a comment or tracked change, one definition for both: a change's text preview,
+// a comment's text read, the boxes kept per comment or change, and a sane date.
+export const MAX_PREVIEW = 160
+export const MAX_COMMENT_CHARS = 20_000
+export const MAX_RECTS = 512
+
+// `text` on one line, shortened to MAX_PREVIEW characters.
+export function preview(text: string): string {
+	const flat = text.replace(/\s+/g, " ").trim()
+
+	return flat.length > MAX_PREVIEW ? `${flat.slice(0, MAX_PREVIEW - 1)}…` : flat
+}
+
+// A recorded date when it parses as one, else "".
+export function dateOf(value: string | undefined): string {
+	return value !== undefined && value.length <= 40 && !Number.isNaN(Date.parse(value)) ? value : ""
 }
 
 function children(
@@ -232,12 +250,10 @@ export function commentParagraphTexts(part: StoryPart, root: number): string[] {
 					text += "\u2028"
 					break
 				case Item.NoBreakHyphen:
-					text += "‑"
+					text += "\u2011"
 					break
 				case Item.Symbol: {
-					const symbol = part.symbol(item)
-					const table = symbol.font === undefined ? undefined : symbolTable(symbol.font)
-					const char = table === undefined ? symbol.char : symbolToUnicode(table, symbol.char) || symbol.char
+					const char = part.symbolChar(item)
 
 					if (char > 0 && char <= 0x10ffff) text += String.fromCodePoint(char)
 

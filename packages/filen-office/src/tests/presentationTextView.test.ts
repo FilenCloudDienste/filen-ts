@@ -159,6 +159,8 @@ interface FakeSession {
 	readonly api: PresentationSessionApi
 	readonly ops: DeckOp[]
 	readonly layouts: TextBody[]
+	// The most layouts asked for and not yet answered at once.
+	maxInFlight: number
 	undoSeed: TextSeed | undefined
 }
 
@@ -166,15 +168,23 @@ function fakeSession(): FakeSession {
 	const ops: DeckOp[] = []
 	const layouts: TextBody[] = []
 	let revision = 1
+	let inFlight = 0
 	const fake: FakeSession = {
 		ops,
 		layouts,
+		maxInFlight: 0,
 		undoSeed: undefined,
 		api: {
 			layoutText: (_shape: ShapeRef, body: TextBody) => {
 				layouts.push(body)
+				inFlight++
+				fake.maxInFlight = Math.max(fake.maxInFlight, inFlight)
 
-				return Promise.resolve({ ...laid(body), revision })
+				return Promise.resolve({ ...laid(body), revision }).then(answer => {
+					inFlight--
+
+					return answer
+				})
 			},
 			command: (op: DeckOp): Promise<CommandResult> => {
 				ops.push(op)
@@ -221,7 +231,7 @@ describe("presentation text editor controller", () => {
 
 		expect(fake.ops).toEqual([])
 		// At most one layout in flight: the second change went after the first answered.
-		expect(fake.layouts.length).toBeGreaterThanOrEqual(1)
+		expect(fake.maxInFlight).toBe(1)
 
 		await vi.advanceTimersByTimeAsync(20)
 

@@ -4,9 +4,6 @@
 // Case is ignored unless "Match case" is on. Matching is linear in the cell's text for each pattern position (an NFA
 // walk, never backtracking), so no text or pattern makes it slow.
 
-// "Find what" holds 255 characters in Excel.
-export const FIND_MAX_TEXT = 255
-
 // Pattern token kinds.
 const CHAR = 0
 const ANY = 1
@@ -59,7 +56,8 @@ interface Pattern {
 	readonly next: Int32Array
 }
 
-function parse(text: string, matchCase: boolean): Pattern {
+// `escapeAny`: "~" makes any character after it literal (the functions' criteria), not "*", "?" and "~" alone (Find).
+function parse(text: string, matchCase: boolean, escapeAny = false): Pattern {
 	const kinds: number[] = []
 	let chars = ""
 	let wild = false
@@ -67,7 +65,7 @@ function parse(text: string, matchCase: boolean): Pattern {
 	for (let i = 0; i < text.length; i++) {
 		const char = text.charAt(i)
 
-		if (char === "~" && i + 1 < text.length && "*?~".includes(text.charAt(i + 1))) {
+		if (char === "~" && i + 1 < text.length && (escapeAny || "*?~".includes(text.charAt(i + 1)))) {
 			kinds.push(CHAR)
 			chars += text.charAt(++i)
 		} else if (char === "*") {
@@ -251,7 +249,7 @@ function leftmost(pattern: Pattern, text: string, from: number): readonly [numbe
 export function findMatcher(text: string, options: FindOptions): FindMatcher | null {
 	if (text === "") return null
 
-	const pattern = parse(text.slice(0, FIND_MAX_TEXT), options.matchCase)
+	const pattern = parse(text, options.matchCase)
 	const fold = (value: string): string => (options.matchCase ? value : foldText(value))
 
 	if (options.wholeCell) {
@@ -311,6 +309,42 @@ export function findMatcher(text: string, options: FindOptions): FindMatcher | n
 			}
 
 			return any ? out + value.slice(at) : null
+		}
+	}
+}
+
+// A wildcard pattern of the worksheet functions (COUNTIF and the other criteria, MATCH, SEARCH: support.microsoft.com
+// "Using wildcard characters in searches") or of a filter's condition, matched by the same walks as Find's: linear,
+// never backtracking, whatever the text and the pattern.
+export interface WildcardMatcher {
+	// Whether the text is a match (`whole`) or holds one.
+	test(text: string, whole: boolean): boolean
+	// Where the leftmost match at or after `from` starts, or -1.
+	search(text: string, from: number): number
+}
+
+// `matchCase` false: case is ignored (pattern and text folded as foldText folds them); true: both are compared as they
+// stand (normalized by the caller). `escapeAny`: "~" makes any character after it literal, as the functions read it; a
+// filter's makes "*", "?" and "~" alone literal.
+export function wildcardMatcher(text: string, matchCase: boolean, escapeAny = true): WildcardMatcher {
+	const pattern = parse(text, matchCase, escapeAny)
+	const fold = (value: string): string => (matchCase ? value : foldText(value))
+	const { literal } = pattern
+
+	return {
+		test: (value, whole) => {
+			const folded = fold(value)
+
+			if (literal !== null) return whole ? folded === literal : folded.includes(literal)
+
+			return holds(pattern, folded, whole)
+		},
+		search: (value, from) => {
+			const folded = fold(value)
+
+			if (literal !== null) return folded.indexOf(literal, from)
+
+			return from > folded.length ? -1 : (leftmost(pattern, folded, from)?.[0] ?? -1)
 		}
 	}
 }

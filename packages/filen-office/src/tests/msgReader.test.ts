@@ -11,6 +11,7 @@ import {
 	uncompressedRtf,
 	type MsgSpec
 } from "@filen/office/testing/msg"
+import { budget } from "./timing"
 
 function ascii(text: string): Uint8Array {
 	return Uint8Array.from(text, char => char.charCodeAt(0))
@@ -171,7 +172,7 @@ describe("readMsg", () => {
 		expect(message.attachments).toHaveLength(count)
 		// A few KiB each, not the mapping's 30 MiB.
 		expect(total).toBeLessThan(count * 8192)
-		expect(performance.now() - started).toBeLessThan(10_000)
+		expect(performance.now() - started).toBeLessThan(budget(10_000))
 	})
 
 	it("takes each address from its own property pair, and names the sending account when it is not the author", async () => {

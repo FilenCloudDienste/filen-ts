@@ -231,11 +231,13 @@ export {
 } from "./schema"
 export {
 	REVERTIBLE_UNITS,
+	blockPositions,
 	findUnsavableBlocks,
 	type RevertibleUnit,
 	type RevertibleUnits,
 	type UnsavableBlocks,
 	type UnsavableSearchOptions,
+	revertFeatureUnits,
 	withRevertedUnits
 } from "./unsavable"
 export { ReviewIndex, ReviewKind, revisionMarkId, type ReviewEntry } from "../review/index"

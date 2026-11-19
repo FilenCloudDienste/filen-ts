@@ -1,22 +1,21 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import {
-	divError,
+	ARRAY_ARGUMENTS,
 	naError,
 	numError,
 	rawNumber,
 	SheetFunctionPlugin,
+	unwrap,
 	valueError,
 	type PluginAst,
 	type PluginCall,
 	type PluginScalar,
 	type PluginState
 } from "./plugin"
-import { kurtosis, mean, mode, modes } from "./statistics"
-import { flatten } from "./values"
+import { kurtosis, linearFit, mode, modes, rangeNumbers } from "./statistics"
 
 // Statistical functions the engine lacks, as support.microsoft.com defines them.
 
-const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
 const NUMBERS = { parameters: [{ argumentType: FunctionArgumentType.ANY }], repeatLastArgs: 1, ...ARRAY_ARGUMENTS }
 const RANKS = {
 	parameters: [
@@ -34,104 +33,96 @@ const FORECASTS = {
 	...ARRAY_ARGUMENTS
 }
 
-function unwrap(ast: PluginAst): PluginAst {
-	let node = ast
-
-	while (node.type === ("PARENTHESES" as PluginAst["type"]) && "expression" in node) node = node.expression
-
-	return node
-}
-
-// The numbers of a range or array: text, logical values and empty cells left out; the first error raised.
-function rangeNumbers(rows: readonly (readonly PluginScalar[])[], out: number[]): CellError | null {
-	for (const row of rows)
-		for (const value of row) {
-			if (value instanceof CellError) return value
-
-			const number = rawNumber(value)
-
-			if (number !== undefined) out.push(number)
-		}
-
-	return null
-}
-
-// Paired numbers of two arrays of one size, by position: a pair is left out where either is not a number. #N/A when
-// the sizes differ.
-function pairs(ys: SimpleRangeValue, xs: SimpleRangeValue): { ys: number[]; xs: number[] } | CellError {
-	const yValues = flatten(ys.data)
-	const xValues = flatten(xs.data)
-
-	if (yValues.length !== xValues.length) return naError()
-
-	const out = { ys: [] as number[], xs: [] as number[] }
-
-	for (let index = 0; index < yValues.length; index++) {
-		const y = yValues[index]
-		const x = xValues[index]
-
-		if (y instanceof CellError) return y
-		if (x instanceof CellError) return x
-
-		const yNumber = y === undefined ? undefined : rawNumber(y)
-		const xNumber = x === undefined ? undefined : rawNumber(x)
-
-		if (yNumber === undefined || xNumber === undefined) continue
-
-		out.ys.push(yNumber)
-		out.xs.push(xNumber)
-	}
-
-	return out
-}
-
 // Least squares over columns of predictors (each row one observation), with or without an intercept: the
-// coefficients [b, m1, m2, ...] (b 0 without one), or #NUM! when the predictors are not independent.
+// coefficients [b, m1, m2, ...] (b 0 without one), or #NUM! when the predictors are not independent. With an intercept
+// the predictors and ys are centred on their means first, so an offset (dates) cannot cancel the spread away. The
+// normal equations are scaled to unit diagonal before solving, so whether predictors are independent does not depend
+// on the units of any of them.
 function leastSquares(ys: readonly number[], xs: readonly (readonly number[])[], intercept: boolean): number[] | CellError {
 	const k = xs[0]?.length ?? 0
-	const size = k + (intercept ? 1 : 0)
+	const n = ys.length
+	const xMeans = new Array<number>(k).fill(0)
+	let yMean = 0
+
+	if (intercept && n > 0) {
+		ys.forEach((y, row) => {
+			const observed = xs[row]
+
+			yMean += y
+
+			for (let j = 0; j < k; j++) xMeans[j] = (xMeans[j] ?? 0) + (observed?.[j] ?? 0)
+		})
+
+		yMean /= n
+
+		for (let j = 0; j < k; j++) xMeans[j] = (xMeans[j] ?? 0) / n
+	}
+
 	// The normal equations, augmented: [XᵀX | Xᵀy].
-	const matrix = Array.from({ length: size }, () => new Array<number>(size + 1).fill(0))
+	const matrix = Array.from({ length: k }, () => new Array<number>(k + 1).fill(0))
+	const line = new Array<number>(k).fill(0)
 
 	ys.forEach((y, row) => {
-		const line = intercept ? [1, ...(xs[row] ?? [])] : [...(xs[row] ?? [])]
+		const observed = xs[row]
+		const target = y - yMean
 
-		for (let i = 0; i < size; i++) {
-			const target = matrix[i] as number[]
+		for (let j = 0; j < k; j++) line[j] = (observed?.[j] ?? 0) - (xMeans[j] ?? 0)
 
-			for (let j = 0; j < size; j++) target[j] = (target[j] ?? 0) + (line[i] ?? 0) * (line[j] ?? 0)
+		for (let i = 0; i < k; i++) {
+			const equation = matrix[i] as number[]
+			const value = line[i] ?? 0
 
-			target[size] = (target[size] ?? 0) + (line[i] ?? 0) * y
+			for (let j = 0; j < k; j++) equation[j] = (equation[j] ?? 0) + value * (line[j] ?? 0)
+
+			equation[k] = (equation[k] ?? 0) + value * target
 		}
 	})
 
-	// Gaussian elimination with partial pivoting.
-	for (let column = 0; column < size; column++) {
-		let pivot = column
+	// Each equation and unknown divided by the square root of its column's sum of squares (a constant column, or an
+	// empty one, is no predictor), so every diagonal entry is 1 whatever the units of each column.
+	const roots = matrix.map((equation, index) => Math.sqrt(equation[index] ?? 0))
 
-		for (let row = column + 1; row < size; row++)
-			if (Math.abs(matrix[row]?.[column] ?? 0) > Math.abs(matrix[pivot]?.[column] ?? 0)) pivot = row
+	if (!roots.every(root => root > 0 && Number.isFinite(root))) return numError()
 
-		const top = matrix[pivot] as number[]
+	matrix.forEach((equation, i) => {
+		const root = roots[i] ?? 1
 
-		if (Math.abs(top[column] ?? 0) < 1e-12) return numError()
+		for (let j = 0; j < k; j++) equation[j] = (equation[j] ?? 0) / (root * (roots[j] ?? 1))
 
-		matrix[pivot] = matrix[column] as number[]
-		matrix[column] = top
+		equation[k] = (equation[k] ?? 0) / root
+	})
 
-		for (let row = 0; row < size; row++) {
+	// Gauss-Jordan elimination down the diagonal (the matrix is symmetric and positive semi-definite, which needs no row
+	// exchanges). A pivot is then 1 - R² of its column on the columns before it, free of units and of the order of the
+	// rows: next to nothing when the column is a combination of them.
+	for (let column = 0; column < k; column++) {
+		const top = matrix[column] as number[]
+		const pivot = top[column] ?? 0
+
+		if (!(pivot > 1e-12)) return numError()
+
+		for (let row = 0; row < k; row++) {
 			if (row === column) continue
 
-			const line = matrix[row] as number[]
-			const factor = (line[column] ?? 0) / (top[column] ?? 1)
+			const equation = matrix[row] as number[]
+			const factor = (equation[column] ?? 0) / pivot
 
-			for (let j = column; j <= size; j++) line[j] = (line[j] ?? 0) - factor * (top[j] ?? 0)
+			if (factor === 0) continue
+
+			for (let j = column; j <= k; j++) equation[j] = (equation[j] ?? 0) - factor * (top[j] ?? 0)
 		}
 	}
 
-	const solved = matrix.map((line, index) => (line[size] ?? 0) / (line[index] ?? 1))
+	// Back to each column's own units.
+	const slopes = matrix.map((equation, index) => (equation[k] ?? 0) / (equation[index] ?? 1) / (roots[index] ?? 1))
 
-	return intercept ? solved : [0, ...solved]
+	if (!intercept) return [0, ...slopes]
+
+	let constant = yMean
+
+	for (let j = 0; j < k; j++) constant -= (slopes[j] ?? 0) * (xMeans[j] ?? 0)
+
+	return [constant, ...slopes]
 }
 
 export class StatisticalFunctions extends SheetFunctionPlugin {
@@ -265,26 +256,11 @@ export class StatisticalFunctions extends SheetFunctionPlugin {
 		const name = ast.procedureName.toUpperCase().endsWith("LINEAR") ? "FORECAST.LINEAR" : "FORECAST"
 
 		return this.runFunction(ast.args, state, this.metadata(name), (x: number, ys: SimpleRangeValue, xs: SimpleRangeValue) => {
-			const paired = pairs(ys, xs)
+			const fit = linearFit(ys, xs)
 
-			if (paired instanceof CellError) return paired
-			if (paired.ys.length === 0) return naError()
+			if (fit instanceof CellError) return fit
 
-			const xMean = mean(paired.xs)
-			const yMean = mean(paired.ys)
-			let covariance = 0
-			let variance = 0
-
-			paired.xs.forEach((value, index) => {
-				covariance += (value - xMean) * ((paired.ys[index] ?? 0) - yMean)
-				variance += (value - xMean) ** 2
-			})
-
-			if (variance === 0) return divError()
-
-			const slope = covariance / variance
-
-			return yMean + slope * (x - xMean)
+			return fit.yMean + fit.slope * (x - fit.xMean)
 		})
 	}
 

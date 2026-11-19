@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import { chartEditOp, insertChartOp, sampleChartCells } from "../core/presentation/edit/commands/chart"
+import { DECK_HISTORY_LIMITS } from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import { refused, type ShapeNode, type SlideNode, type SlideRef, type TextBody } from "../core/presentation/model"
 import type { SmartArtInfo } from "../core/smartart/edit"
@@ -259,7 +260,7 @@ describe("random sessions of edits, undo, redo and saves", () => {
 
 					const first = d.session.deck.slides[0] as SlideRef
 
-					for (let at = 0; at <= 500; at++)
+					for (let at = 0; at <= DECK_HISTORY_LIMITS.maxSteps; at++)
 						await d.command({ family: "slide", kind: "hide", slides: [first], hidden: at % 2 === 0 })
 
 					problems.push(...(await checked(d, format, "redone, the history let go")))

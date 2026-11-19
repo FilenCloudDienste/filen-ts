@@ -62,6 +62,8 @@ export interface StageTargets {
 		readonly action: (action: Action, layer: SlideLayer) => string
 		readonly trigger: (layer: SlideLayer) => string
 		readonly link: (link: DocxLinkTarget) => string
+		// A medium's (its keyboard hotspot); absent: its description, else its kind.
+		readonly media?: (layer: SlideLayer) => string
 	}
 }
 
@@ -75,6 +77,8 @@ export interface StageSlide {
 	readonly media: ReadonlyMap<number, ShowMediaHandle>
 	// The box each medium's element is in, by shape id.
 	readonly mediaBoxes: ReadonlyMap<number, HTMLElement>
+	// The medium a focused element presses (a medium's keyboard hotspot, or an element in its box).
+	mediaAt(element: Element | null): ShowMediaHandle | undefined
 	// Takes a medium off the slide (its box with it): the slide no longer moves, releases or removes it.
 	take(shape: number): { readonly handle: ShowMediaHandle; readonly box: HTMLElement } | undefined
 	// Places the click targets of a render (again: the previous ones are removed).
@@ -324,6 +328,8 @@ export function buildStageSlide(
 	let placed: HTMLElement[] = []
 	let media = new Map<number, ShowMediaHandle>()
 	let mediaBoxes = new Map<number, HTMLElement>()
+	// Each medium's keyboard hotspot, by shape id.
+	let mediaKeys = new Map<number, HTMLElement>()
 
 	const removeTargets = (): void => {
 		for (const target of placed) {
@@ -336,6 +342,7 @@ export function buildStageSlide(
 		placed = []
 		media = new Map()
 		mediaBoxes = new Map()
+		mediaKeys = new Map()
 	}
 
 	return {
@@ -348,15 +355,31 @@ export function buildStageSlide(
 		get mediaBoxes() {
 			return mediaBoxes
 		},
+		mediaAt(focused) {
+			if (focused === null) return undefined
+
+			for (const [shape, box] of mediaBoxes) if (mediaKeys.get(shape) === focused || box.contains(focused)) return media.get(shape)
+
+			return undefined
+		},
 		take(shape) {
 			const handle = media.get(shape)
 			const box = mediaBoxes.get(shape)
 
 			if (handle === undefined || box === undefined) return undefined
 
+			// Its hotspot stays with the slide: it presses nothing once the medium plays on elsewhere.
+			const key = mediaKeys.get(shape)
+
+			if (key !== undefined) {
+				yieldFocus(key)
+				key.remove()
+			}
+
 			media.delete(shape)
 			mediaBoxes.delete(shape)
-			placed = placed.filter(target => target !== box)
+			mediaKeys.delete(shape)
+			placed = placed.filter(target => target !== box && target !== key)
 
 			return { handle, box }
 		},
@@ -444,17 +467,31 @@ export function buildStageSlide(
 					host.appendChild(box)
 
 					const handle = targets.media.mount(box, layer, targets.session, targets.mediaEvents(id))
-
 					// A click on a medium never advances the slide: it is the medium's trigger, else plays or pauses it.
-					box.addEventListener("click", event => {
+					const press = (event: MouseEvent): void => {
 						event.stopPropagation()
 
 						if (triggers.has(id) || triggers.has(shape)) targets.trigger(triggers.has(id) ? id : shape)
 						else handle.click()
-					})
-					placed.push(box)
+					}
+					// The keyboard's way to the medium: a hotspot over its box that pointers pass through (the box keeps
+					// the pointer, with the native controls it shows on hover). The box itself holds the element and
+					// its controls, so it is no button.
+					const key = hotspot(document)
+
+					key.dataset["foMedia"] = String(id)
+					key.style.width = `${String(layer.drawing.width)}px`
+					key.style.height = `${String(layer.drawing.height)}px`
+					key.style.transform = matrixCss(layer.matrix)
+					key.style.pointerEvents = "none"
+					key.setAttribute("aria-label", targets.labels.media?.(layer) ?? layer.alt ?? layer.media.kind)
+					key.addEventListener("click", press)
+					box.addEventListener("click", press)
+					host.appendChild(key)
+					placed.push(box, key)
 					media.set(id, handle)
 					mediaBoxes.set(id, box)
+					mediaKeys.set(id, key)
 				}
 			}
 		},

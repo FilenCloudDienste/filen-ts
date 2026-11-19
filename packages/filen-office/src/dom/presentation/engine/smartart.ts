@@ -4,7 +4,8 @@ import { DrawingList, IDENTITY } from "../../../core/drawingml/displayList"
 import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "../../../core/drawingml/reader"
 import { convertSmartArt } from "../../../core/drawingml/smartart"
 import type { DeckChanges } from "../../../core/presentation/edit/apply"
-import type { SmartArtDefRef } from "../../../core/presentation/edit/ops"
+import { findShape } from "../../../core/presentation/edit/changes"
+import { isRawPart, type SmartArtDefRef } from "../../../core/presentation/edit/ops"
 import {
 	PresentationError,
 	type Deck,
@@ -146,23 +147,9 @@ export function relayoutDiagram(
 	}
 }
 
-function findShape(shapes: readonly ShapeNode[], id: number, depth: number): ShapeNode | undefined {
-	if (depth > MAX_GROUP_DEPTH) return undefined
-
-	for (const shape of shapes) {
-		if (shape.id === id) return shape
-
-		const inner = shape.children === undefined ? undefined : findShape(shape.children, id, depth + 1)
-
-		if (inner !== undefined) return inner
-	}
-
-	return undefined
-}
-
 function frameOf(deck: Deck, target: ShapeRef): { shape: ShapeNode; frame: Extract<FrameRef, { kind: "smartart" }> } {
 	const slide = deck.nodes.get(target.slide)
-	const shape = slide === undefined ? undefined : findShape(slide.shapes, target.id, 0)
+	const shape = slide === undefined ? undefined : findShape(slide.shapes, target.id)?.shape
 	const frame = shape?.frame
 
 	if (shape === undefined || frame?.kind !== "smartart") throw new PresentationError("notFound", "smartart frame")
@@ -297,7 +284,7 @@ export function smartArtRenderer(session: EngineSession, host: SmartArtHost): Sm
 
 	return {
 		async relayout(target, frame, slicing) {
-			const xfrm = findShape(session.deck.nodes.get(target.slide)?.shapes ?? [], target.id, 0)?.xfrm
+			const xfrm = findShape(session.deck.nodes.get(target.slide)?.shapes ?? [], target.id)?.shape.xfrm
 
 			if (xfrm === undefined || !(xfrm.cx > 0 && xfrm.cy > 0)) return undefined
 
@@ -428,7 +415,7 @@ async function diagramPart(session: EngineSession, part: string): Promise<XmlDoc
 
 	const held = parts.document(part)
 
-	if (held !== undefined || part.startsWith("raw:")) return held
+	if (held !== undefined || isRawPart(part)) return held
 	if (!parts.opc.has(part)) return restoredPart(session, part)
 	if ((parts.opc.entry(part)?.uncompressedSize ?? 0) > parts.budgets.xmlPartBytes) throw new PresentationError("tooLarge", part)
 
@@ -451,7 +438,7 @@ function restoredPart(session: EngineSession, part: string): XmlDocument | undef
 	for (const node of session.deck.nodes.values()) {
 		const src = node.src
 
-		if (src?.format !== "pptx" || !src.part.startsWith("raw:")) continue
+		if (src?.format !== "pptx" || !isRawPart(src.part)) continue
 
 		const held = sessionEdits(session)
 			.rawParts(src.part)
@@ -484,10 +471,10 @@ export async function layoutEditedDiagrams(session: EngineSession, changes: Deck
 		if (node === undefined) continue
 
 		for (const id of change.shapes.keys()) {
-			const shape = findShape(node.shapes, id, 0)
+			const shape = findShape(node.shapes, id)?.shape
 			const frame = shape?.frame
 
-			if (frame?.kind !== "smartart" || !frame.data.startsWith("raw:") || shape?.xfrm === undefined) continue
+			if (frame?.kind !== "smartart" || !isRawPart(frame.data) || shape?.xfrm === undefined) continue
 			// Data as it was (an undo's after a save, a copy's) is written as it is, with the drawing it names (no layout).
 			if (diagramDataAsItWas(session.deck, frame.data)) continue
 			if (!(shape.xfrm.cx > 0 && shape.xfrm.cy > 0)) continue

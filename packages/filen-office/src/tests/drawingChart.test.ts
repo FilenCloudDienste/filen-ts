@@ -4,7 +4,7 @@ import { drawingTheme } from "../core/drawingml/color"
 import { DrawingList, ItemFloat, ItemInt, ItemKind, rgba, type DrawingText } from "../core/drawingml/displayList"
 import type { PaintContext } from "../core/drawingml/fill"
 import { parseXml } from "../core/xml/index"
-import { budget } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 const SCHEME: Readonly<Record<string, string>> = {
 	tx1: "000000",
@@ -88,17 +88,67 @@ function filledWith(list: DrawingList, color: number): number[] {
 
 describe("chart number formats", () => {
 	it("formats the codes charts use", () => {
-		expect(formatNumber(4.4000000000000004, "General")).toBe("4.4")
-		expect(formatNumber(1234567.891, "#,##0")).toBe("1,234,568")
-		expect(formatNumber(0.256, "0%")).toBe("26%")
-		expect(formatNumber(0.256, "0.0%")).toBe("25.6%")
-		expect(formatNumber(3, "0.00")).toBe("3.00")
-		expect(formatNumber(-3.5, "0.0")).toBe("-3.5")
-		expect(formatNumber(1500, '"$"#,##0.00')).toBe("$1,500.00")
-		expect(formatNumber(12345, "0.00E+00")).toBe("1.23E+04")
-		expect(formatNumber(45000, "mmm-yy")).toBe("Mar-23")
-		expect(formatNumber(45000, "d/m/yyyy")).toBe("15/3/2023")
-		expect(formatNumber(Number.NaN, "General")).toBe("")
+		expect(formatNumber(4.4000000000000004, "General", false)).toBe("4.4")
+		expect(formatNumber(1234567.891, "#,##0", false)).toBe("1,234,568")
+		expect(formatNumber(0.256, "0%", false)).toBe("26%")
+		expect(formatNumber(0.256, "0.0%", false)).toBe("25.6%")
+		expect(formatNumber(3, "0.00", false)).toBe("3.00")
+		expect(formatNumber(-3.5, "0.0", false)).toBe("-3.5")
+		expect(formatNumber(1500, '"$"#,##0.00', false)).toBe("$1,500.00")
+		expect(formatNumber(12345, "0.00E+00", false)).toBe("1.23E+04")
+		expect(formatNumber(45000, "mmm-yy", false)).toBe("Mar-23")
+		expect(formatNumber(45000, "d/m/yyyy", false)).toBe("15/3/2023")
+		expect(formatNumber(Number.NaN, "General", false)).toBe("")
+	})
+
+	it("scales by a thousand per comma after the last digit placeholder", () => {
+		expect(formatNumber(1500000, "#,##0,", false)).toBe("1,500")
+		expect(formatNumber(1500000, '0.0,,"M"', false)).toBe("1.5M")
+		expect(formatNumber(1500000, "#,##0,,", false)).toBe("2")
+		expect(formatNumber(1500000, '$#,##0,"K"', false)).toBe("$1,500K")
+		expect(formatNumber(-1500000, "0,", false)).toBe("-1500")
+		// A quoted or escaped comma is literal text, not scaling.
+		expect(formatNumber(1500000, '0","', false)).toBe("1500000,")
+		expect(formatNumber(1500000, "0\\,", false)).toBe("1500000,")
+	})
+
+	it("reads an oversized code as General and caps decimals", () => {
+		const code = "[".repeat(20000)
+		const start = performance.now()
+
+		for (let k = 0; k < 3000; k++) expect(formatNumber(k, code, false)).toBe(String(k))
+
+		expect(performance.now() - start).toBeLessThan(budget(1000))
+		expect(() => formatNumber(1.5, `0.${"0".repeat(101)}`, false)).not.toThrow()
+		expect(formatNumber(1.5, `0.${"0".repeat(101)}`, false)).toBe(`1.5${"0".repeat(99)}`)
+	})
+
+	it("formats each point in time independent of the code", () => {
+		// The longest code Excel allows, built to make a backtracking bracket scan quadratic, against a plain one.
+		const hostile = ["[".repeat(255), "[$".repeat(127), `0${"[".repeat(254)}`, `0${",".repeat(253)}0`]
+		const points = 200000
+
+		for (const code of hostile) expect(code.length).toBeLessThanOrEqual(255)
+
+		const start = cpuMs()
+
+		for (const code of hostile) {
+			for (let k = 0; k < points; k++) formatNumber(k, code, false)
+		}
+
+		expect(cpuMs() - start).toBeLessThan(budget(1500))
+		expect(formatNumber(7, "[".repeat(255), false)).toBe("[".repeat(255))
+		expect(formatNumber(7, `0${"[".repeat(254)}`, false)).toBe(`7${"[".repeat(254)}`)
+	})
+
+	it("reads bracket tags", () => {
+		expect(formatNumber(1500, "[$€-407]#,##0.00", false)).toBe("€1,500.00")
+		expect(formatNumber(1500, "[$USD] 0", false)).toBe("USD 1500")
+		expect(formatNumber(-3, "[Blue]0;[Red]-0", false)).toBe("-3")
+		expect(formatNumber(3, "[>100]0.0;0", false)).toBe("3.0")
+		expect(formatNumber(0, '0;-0;"none"', false)).toBe("none")
+		expect(formatNumber(45000, "[$-409]mmm-yy", false)).toBe("Mar-23")
+		expect(formatNumber(2, "[Red]", false)).toBe("2")
 	})
 })
 
@@ -502,23 +552,32 @@ describe("stock charts and crowded category axes", () => {
 	it("draws a high-low-close chart's high-low lines and its series' own markers, with no default line", () => {
 		const result = convert(stock())
 		const list = result.list
-		const highLow = items(list, ItemKind.PATH).filter(item => {
-			const stroke = list.strokes[list.itemInt(item, ItemInt.STROKE)]
-			const paint = stroke === undefined ? undefined : list.paints[stroke.paint]
+		const strokedWith = (color: number) =>
+			items(list, ItemKind.PATH).filter(item => {
+				const stroke = list.strokes[list.itemInt(item, ItemInt.STROKE)]
+				const paint = stroke === undefined ? undefined : list.paints[stroke.paint]
 
-			return paint?.kind === "solid" && paint.color === RED
-		})
+				return paint?.kind === "solid" && paint.color === color
+			})
+		const highLow = strokedWith(RED)
 
 		expect(result).toMatchObject({ supported: true, unsupported: [] })
 		// One path: a segment per category.
 		expect(highLow).toHaveLength(1)
 		expect(list.itemInt(highLow[0] ?? -1, ItemInt.COMMAND_COUNT)).toBe(6)
-		// The close series has neither a written line nor a marker, so it draws nothing.
-		const lines = items(list, ItemKind.PATH).filter(
-			item => list.itemInt(item, ItemInt.SOURCE) >= 0 && list.itemInt(item, ItemInt.STROKE) >= 0
-		)
+		// High and low draw only their own dash markers: one path of three dashes each, in their series colours.
+		for (const accent of [SCHEME["accent1"], SCHEME["accent2"]]) {
+			const markers = strokedWith(rgba(accent ?? ""))
 
-		expect(lines.length).toBeGreaterThan(0)
+			expect(markers).toHaveLength(1)
+			expect(list.itemInt(markers[0] ?? -1, ItemInt.COMMAND_COUNT)).toBe(15)
+		}
+
+		// The close series has neither a written line nor a marker, so nothing is drawn in its default colour.
+		const close = rgba(SCHEME["accent3"] ?? "")
+
+		expect(strokedWith(close)).toHaveLength(0)
+		expect(filledWith(list, close)).toHaveLength(0)
 	})
 
 	it("counts up-down bars as not drawn", () => {
@@ -632,5 +691,49 @@ describe("stock charts and crowded category axes", () => {
 		})
 
 		expect(rotations).toEqual([0, 0, 0])
+	})
+})
+
+describe("charts of 1904 workbooks", () => {
+	it("formats date-valued tick and data labels in the 1904 date system", () => {
+		const plotArea = `<c:scatterChart><c:scatterStyle val="marker"/><c:ser><c:idx val="0"/><c:order val="0"/><c:dLbls><c:numFmt formatCode="yyyy-mm-dd" sourceLinked="0"/><c:showVal val="1"/></c:dLbls><c:xVal>${numbers([0, 10])}</c:xVal><c:yVal>${numbers([100, 200])}</c:yVal></c:ser><c:axId val="5"/><c:axId val="6"/></c:scatterChart><c:valAx><c:axId val="5"/><c:scaling/><c:delete val="0"/><c:numFmt formatCode="yyyy-mm-dd" sourceLinked="0"/><c:axPos val="b"/><c:crossAx val="6"/></c:valAx><c:valAx><c:axId val="6"/><c:scaling/><c:delete val="0"/><c:axPos val="l"/><c:crossAx val="5"/></c:valAx>`
+		const part = new TextDecoder().decode(chartPart(plotArea)).replace("<c:roundedCorners", '<c:date1904 val="1"/><c:roundedCorners')
+		const { list } = convertChart(context(), parseXml(new TextEncoder().encode(part)), 480 * EMU, 320 * EMU)
+		const shown = texts(list)
+
+		// Serial 0 is 1904-01-01 on the x axis; the data labels of 100 and 200 are days after it.
+		expect(shown).toEqual(expect.arrayContaining(["1904-01-01", "1904-04-10", "1904-07-19"]))
+		expect(shown.some(text => text.startsWith("1899") || text.startsWith("1900"))).toBe(false)
+	})
+})
+
+describe("hostile chart caches and grids", () => {
+	it("floors a fractional point index", () => {
+		const categories = '<c:strRef><c:strCache><c:ptCount val="5"/><c:pt idx="1.5"><c:v>Half</c:v></c:pt></c:strCache></c:strRef>'
+		const plotArea = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:ser><c:idx val="0"/><c:order val="0"/><c:cat>${categories}</c:cat><c:val>${numbers([1, 2, 3])}</c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart>${AXES}`
+		const result = convert(plotArea)
+
+		expect(result.supported).toBe(true)
+		expect(texts(result.list)).toContain("Half")
+	})
+
+	it("draws a large surface with many bands in bounded time", () => {
+		const columns = 257
+		let sers = ""
+
+		for (let j = 0; j < 257; j++) {
+			const values = Array.from({ length: columns }, (_, i) => i + j / 1000)
+
+			sers += `<c:ser><c:idx val="${j}"/><c:order val="${j}"/><c:val>${numbers(values)}</c:val></c:ser>`
+		}
+
+		const axes =
+			'<c:catAx><c:axId val="1"/><c:scaling/><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:min val="0"/><c:max val="999"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorUnit val="1"/><c:crossAx val="1"/></c:valAx><c:serAx><c:axId val="3"/><c:scaling/><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="2"/></c:serAx>'
+		const plotArea = `<c:surfaceChart>${sers}<c:axId val="1"/><c:axId val="2"/><c:axId val="3"/></c:surfaceChart>${axes}`
+		const start = cpuMs()
+		const result = convert(plotArea)
+
+		expect(result.supported).toBe(true)
+		expect(cpuMs() - start).toBeLessThan(budget(1500))
 	})
 })

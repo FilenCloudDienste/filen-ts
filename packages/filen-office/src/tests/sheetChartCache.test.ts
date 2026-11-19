@@ -3,13 +3,14 @@ import { refreshChartCaches, type ChartCell, type ChartCells } from "../core/xls
 import { numericCells } from "../core/xlsx/charts/formulas"
 import { chartAreas } from "../core/xlsx/charts/refs"
 import { encodeUtf8 } from "../core/xml/index"
+import { changeOf } from "./sheetNotesFixtures"
 import { cells } from "./sheetSessionFixtures"
 import { CHART_PART, KEPT, SOLD, barChart, chartFixture, openCharts, partText } from "./sheetChartFixtures"
 
 // A chart's cached values (c:numCache, c:strCache) read again from its cells: at once where it is drawn, and at save
 // for every chart whose cells an edit changed. A chart whose cells nobody changed keeps its bytes.
 
-function grid(values: Record<string, string | number>, hiddenRows: readonly number[] = []): ChartCells {
+function grid(values: Record<string, string | number>, hiddenRows: readonly number[] = [], hiddenCols: readonly number[] = []): ChartCells {
 	const cell = (value: string | number | undefined): ChartCell =>
 		value === undefined
 			? { kind: "empty", number: Number.NaN, text: "", format: "General" }
@@ -25,7 +26,9 @@ function grid(values: Record<string, string | number>, hiddenRows: readonly numb
 						lastRow: 9,
 						lastCol: 9,
 						cell: (row, col) => cell(values[`${String.fromCharCode(65 + col)}${String(row + 1)}`]),
-						hidden: row => hiddenRows.includes(row)
+						hidden: (row, col) => hiddenRows.includes(row) || hiddenCols.includes(col),
+						hiddenRow: row => hiddenRows.includes(row),
+						hiddenCol: col => hiddenCols.includes(col)
 					}
 				: null
 	}
@@ -55,6 +58,37 @@ describe("chart references", () => {
 		expect(chartAreas("SUM(Data!A1)", null)).toBeNull()
 		expect(chartAreas("$A$1", null)).toBeNull()
 	})
+
+	it("gives up on names of unions nested past the budget instead of building their product", () => {
+		const union = (piece: string): string => `(${Array.from({ length: 200 }, () => piece).join(",")})`
+		const nested: Record<string, string> = { A: union("B"), B: union("C"), C: union("D"), D: union("Data!$A$1") }
+		let lookups = 0
+		const names = (name: string): string | undefined => {
+			lookups++
+
+			return nested[name]
+		}
+		const started = performance.now()
+
+		expect(chartAreas("A", names)).toBeNull()
+		expect(lookups).toBeLessThanOrEqual(1024)
+		expect(performance.now() - started).toBeLessThan(1000)
+
+		const budget = { left: 1024 }
+
+		expect(chartAreas("A", names, 0, budget)).toBeNull()
+		expect(budget.left).toBeLessThan(0)
+	})
+
+	it("still reads a two-level union of names", () => {
+		const nested: Record<string, string> = { Both: "(Left,Right)", Left: "(Data!$A$1,Data!$A$2:$A$3)", Right: "Data!$B$1" }
+
+		expect(chartAreas("Both", name => nested[name])?.map(area => [area.sheet, area.range.startRow, area.range.startCol])).toEqual([
+			["Data", 0, 0],
+			["Data", 1, 0],
+			["Data", 0, 1]
+		])
+	})
 })
 
 describe("number categories", () => {
@@ -70,7 +104,9 @@ describe("number categories", () => {
 
 					return { kind: "number", number: 1, text: "1", format: "General" }
 				},
-				hidden: () => false
+				hidden: () => false,
+				hiddenRow: () => false,
+				hiddenCol: () => false
 			})
 		})
 
@@ -123,6 +159,47 @@ describe("chart caches", () => {
 		expect(refreshChartCaches(all, grid(CELLS, [2]), { shown: true }).changed).toBe(false)
 	})
 
+	it("drops a hidden level of multi-level categories from what a chart of visible cells shows, keeping its points", () => {
+		// Two-level categories down A2:B4 (outer A, inner B) over the values in C2:C4.
+		const rowWise = { A2: "East", A4: "West", B2: "Apple", B3: "Pear", B4: "Plum", C2: 3, C3: 5, C4: 7 }
+		const multiLevel = (cat: string, val: string): Uint8Array =>
+			encodeUtf8(
+				barChart([{ name: "Data!$C$1", cat, val }]).replace(
+					`<c:cat><c:strRef><c:f>${cat}</c:f></c:strRef></c:cat>`,
+					`<c:cat><c:multiLvlStrRef><c:f>${cat}</c:f></c:multiLvlStrRef></c:cat>`
+				)
+			)
+		const shown = (bytes: Uint8Array, cells: ChartCells): string =>
+			new TextDecoder().decode(refreshChartCaches(bytes, cells, { shown: true }).bytes)
+		const byRows = multiLevel("Data!$A$2:$B$4", "Data!$C$2:$C$4")
+		const inner =
+			'<c:lvl><c:pt idx="0"><c:v>Apple</c:v></c:pt><c:pt idx="1"><c:v>Pear</c:v></c:pt><c:pt idx="2"><c:v>Plum</c:v></c:pt></c:lvl>'
+
+		// The outer level's column hidden: every point, with the inner level only.
+		expect(shown(byRows, grid(rowWise, [], [0]))).toContain(`<c:multiLvlStrCache><c:ptCount val="3"/>${inner}</c:multiLvlStrCache>`)
+		// A hidden point row: that point only.
+		expect(shown(byRows, grid(rowWise, [2]))).toContain(
+			'<c:multiLvlStrCache><c:ptCount val="2"/><c:lvl><c:pt idx="0"><c:v>Apple</c:v></c:pt><c:pt idx="1"><c:v>Plum</c:v></c:pt></c:lvl>' +
+				'<c:lvl><c:pt idx="0"><c:v>East</c:v></c:pt><c:pt idx="1"><c:v>West</c:v></c:pt></c:lvl></c:multiLvlStrCache>'
+		)
+
+		// Both levels hidden: the points without levels, as many as the values.
+		const bare = shown(byRows, grid(rowWise, [], [0, 1]))
+
+		expect(bare).toContain('<c:multiLvlStrCache><c:ptCount val="3"/></c:multiLvlStrCache>')
+		expect(bare).toContain('<c:f>Data!$C$2:$C$4</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="3"/>')
+
+		// Across: the levels are rows 1 (outer) and 2 (inner) over the values in row 3.
+		const colWise = { A1: "East", C1: "West", A2: "Apple", B2: "Pear", C2: "Plum", A3: 3, B3: 5, C3: 7 }
+		const byCols = multiLevel("Data!$A$1:$C$2", "Data!$A$3:$C$3")
+
+		expect(shown(byCols, grid(colWise, [0]))).toContain(`<c:multiLvlStrCache><c:ptCount val="3"/>${inner}</c:multiLvlStrCache>`)
+		expect(shown(byCols, grid(colWise, [], [1]))).toContain(
+			'<c:multiLvlStrCache><c:ptCount val="2"/><c:lvl><c:pt idx="0"><c:v>Apple</c:v></c:pt><c:pt idx="1"><c:v>Plum</c:v></c:pt></c:lvl>'
+		)
+		expect(shown(byCols, grid(colWise, [0, 1]))).toContain('<c:multiLvlStrCache><c:ptCount val="3"/></c:multiLvlStrCache>')
+	})
+
 	it("turns number categories that now hold text into text ones", () => {
 		const chart = barChart([SOLD])
 			.replace("<c:cat><c:strRef><c:f>Data!$A$2:$A$4</c:f>", "<c:cat><c:numRef><c:f>Data!$A$2:$A$4</c:f>")
@@ -139,7 +216,7 @@ describe("chart caches", () => {
 		const { session, sheets } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const data = sheets[0] ?? 0
 
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[2, 1, "50"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[2, 1, "50"]]) }))
 
 		const saved = await save(session)
 		const chart = partText(saved.bytes, CHART_PART)
@@ -159,8 +236,8 @@ describe("chart caches", () => {
 		const { session, sheets } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 
 		// A cell the chart does not read, and a cell on another sheet.
-		await session.command({ type: "cells.set", sheet: sheets[0] ?? 0, cells: cells([[8, 6, "12"]]) })
-		await session.command({ type: "cells.set", sheet: sheets[1] ?? 0, cells: cells([[0, 0, "1"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: sheets[0] ?? 0, cells: cells([[8, 6, "12"]]) }))
+		changeOf(await session.command({ type: "cells.set", sheet: sheets[1] ?? 0, cells: cells([[0, 0, "1"]]) }))
 
 		const saved = await save(session)
 
@@ -172,9 +249,9 @@ describe("chart caches", () => {
 		const { session, sheets, bytes } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const data = sheets[0] ?? 0
 
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "40"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "40"]]) }))
 		await session.undo()
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[9, 9, "1"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[9, 9, "1"]]) }))
 
 		const saved = await save(session)
 
@@ -190,12 +267,14 @@ describe("chart caches", () => {
 		const first = await session.query("chart.render", request)
 
 		// A format: the cached categories' text and the values' format code follow it.
-		await session.command({
-			type: "format.apply",
-			sheet: data,
-			ranges: [{ startRow: 1, startCol: 1, endRow: 3, endCol: 1 }],
-			patch: { numFmt: "0.00" }
-		})
+		changeOf(
+			await session.command({
+				type: "format.apply",
+				sheet: data,
+				ranges: [{ startRow: 1, startCol: 1, endRow: 3, endCol: 1 }],
+				patch: { numFmt: "0.00" }
+			})
+		)
 
 		const formatted = await session.query("chart.render", { ...request, since: first.stamp })
 
@@ -205,7 +284,7 @@ describe("chart caches", () => {
 		)
 
 		// Row 3 hidden: the chart (visible cells only) draws two categories.
-		await session.command({ type: "axis.hide", sheet: data, axis: "rows", spans: [{ start: 2, end: 2 }], hidden: true })
+		changeOf(await session.command({ type: "axis.hide", sheet: data, axis: "rows", spans: [{ start: 2, end: 2 }], hidden: true }))
 
 		const hidden = await session.query("chart.render", { ...request, since: formatted.stamp })
 
@@ -222,14 +301,14 @@ describe("chart caches", () => {
 		expect(first.kind).toBe("drawing")
 		expect((await session.query("chart.render", { ...request, since: first.stamp })).kind).toBe("same")
 
-		await session.command({ type: "cells.set", sheet: sheets[0] ?? 0, cells: cells([[1, 1, "30"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: sheets[0] ?? 0, cells: cells([[1, 1, "30"]]) }))
 
 		const after = await session.query("chart.render", { ...request, since: first.stamp })
 
 		expect(after.kind).toBe("drawing")
 		expect(after.stamp).not.toBe(first.stamp)
 		// An edit elsewhere leaves it as drawn.
-		await session.command({ type: "cells.set", sheet: sheets[1] ?? 0, cells: cells([[3, 3, "1"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: sheets[1] ?? 0, cells: cells([[3, 3, "1"]]) }))
 		expect((await session.query("chart.render", { ...request, since: after.stamp })).kind).toBe("same")
 		session.close()
 	})
@@ -251,8 +330,8 @@ describe("chart caches as Excel writes them", () => {
 
 		// The value axis reaches 80 (over the cache's 70), not 8 (over the cells' 7).
 		expect(texts).toContain('"text":"80"')
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) })
-		await session.command({ type: "axis.hide", sheet: data, axis: "rows", spans: [{ start: 2, end: 2 }], hidden: true })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) }))
+		changeOf(await session.command({ type: "axis.hide", sheet: data, axis: "rows", spans: [{ start: 2, end: 2 }], hidden: true }))
 		expect((await session.query("chart.render", { ...request, since: first.stamp })).kind).toBe("same")
 
 		const saved = await save(session)
@@ -271,13 +350,13 @@ describe("chart caches as Excel writes them", () => {
 		})
 		const data = sheets[0] ?? 0
 
-		await session.command({ type: "axis.insert", sheet: data, axis: "rows", at: 0, count: 1 })
+		changeOf(await session.command({ type: "axis.insert", sheet: data, axis: "rows", at: 0, count: 1 }))
 		await save(session)
 
 		const first = await session.query("chart.render", request)
 
 		// Sales is now Data!$B$3:$B$5: B5 holds what B4 held.
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[4, 1, "99"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[4, 1, "99"]]) }))
 		expect((await session.query("chart.render", { ...request, since: first.stamp })).kind).toBe("drawing")
 		expect(partText((await save(session)).bytes, CHART_PART)).toMatch(/\[0\]!Sales<\/c:f><c:numCache>.*<c:v>99<\/c:v>/)
 		session.close()
@@ -336,7 +415,15 @@ describe("chart caches as Excel writes them", () => {
 		const data = sheets[0] ?? 0
 		const first = await session.query("chart.render", request)
 
-		await session.command({ type: "axis.resize", sheet: data, axis: "cols", indices: Uint32Array.of(1), sizes: Float32Array.of(90) })
+		changeOf(
+			await session.command({
+				type: "axis.resize",
+				sheet: data,
+				axis: "cols",
+				indices: Uint32Array.of(1),
+				sizes: Float32Array.of(90)
+			})
+		)
 		expect((await session.query("chart.render", { ...request, since: first.stamp })).kind).toBe("same")
 
 		const saved = await save(session)
@@ -351,7 +438,7 @@ describe("chart caches as Excel writes them", () => {
 		const data = sheets[0] ?? 0
 		const first = await session.query("chart.render", request)
 
-		await session.command({ type: "axis.hide", sheet: data, axis: "rows", spans: [{ start: 2, end: 2 }], hidden: true })
+		changeOf(await session.command({ type: "axis.hide", sheet: data, axis: "rows", spans: [{ start: 2, end: 2 }], hidden: true }))
 		expect((await session.query("chart.render", { ...request, since: first.stamp })).kind).toBe("drawing")
 
 		const saved = await save(session)
@@ -367,7 +454,7 @@ describe("chart caches across saves", () => {
 		const { session, sheets, bytes } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const data = sheets[0] ?? 0
 
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) }))
 		expect(partText((await save(session)).bytes, CHART_PART)).toContain("<c:v>99</c:v>")
 		await session.undo()
 		expect(partText((await save(session)).bytes, CHART_PART)).toBe(partText(bytes, CHART_PART))
@@ -380,12 +467,14 @@ describe("chart caches across saves", () => {
 		const { session, sheets, bytes } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const data = sheets[0] ?? 0
 
-		await session.command({
-			type: "cells.clear",
-			sheet: data,
-			ranges: [{ startRow: 0, startCol: 0, endRow: 3, endCol: 2 }],
-			what: "all"
-		})
+		changeOf(
+			await session.command({
+				type: "cells.clear",
+				sheet: data,
+				ranges: [{ startRow: 0, startCol: 0, endRow: 3, endCol: 2 }],
+				what: "all"
+			})
+		)
 		expect(partText((await save(session)).bytes, CHART_PART)).not.toContain("<c:v>Apple</c:v>")
 		await session.undo()
 		expect(partText((await save(session)).bytes, CHART_PART)).toBe(partText(bytes, CHART_PART))
@@ -396,7 +485,7 @@ describe("chart caches across saves", () => {
 		const { session, sheets, bytes } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const data = sheets[0] ?? 0
 
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) }))
 		expect((await session.save({ signal: { aborted: true } })).ok).toBe(false)
 		await session.undo()
 		expect(partText((await save(session)).bytes, CHART_PART)).toBe(partText(bytes, CHART_PART))
@@ -407,9 +496,9 @@ describe("chart caches across saves", () => {
 		const { session, sheets, bytes } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const data = sheets[0] ?? 0
 
-		await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) })
+		changeOf(await session.command({ type: "cells.set", sheet: data, cells: cells([[1, 1, "99"]]) }))
 		await save(session)
-		await session.command({ type: "chart.edit", sheet: data, part: CHART_PART, edit: { kind: "legend", position: "t" } })
+		changeOf(await session.command({ type: "chart.edit", sheet: data, part: CHART_PART, edit: { kind: "legend", position: "t" } }))
 		await session.undo()
 
 		const kept = partText((await save(session)).bytes, CHART_PART)

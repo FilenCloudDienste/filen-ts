@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { DrawingList, PathCommand } from "../core/drawingml/displayList"
 import { compileCustomGeometry } from "../core/drawingml/geometry/custom"
 import { emitPaths, evaluateGuides, evaluateOp, presetNames, presetProgram, textRect } from "../core/drawingml/geometry/evaluate"
@@ -35,6 +35,20 @@ describe("preset geometry table", () => {
 		expect(Object.hasOwn(PRESET_GEOMETRY, "rect")).toBe(true)
 		expect(presetProgram("constructor")).toBeUndefined()
 		expect(presetProgram("noSuchShape")).toBeUndefined()
+	})
+
+	it("compiles a known preset once and never caches an unknown name", () => {
+		expect(presetProgram("roundRect")).toBe(presetProgram("roundRect"))
+
+		const set = vi.spyOn(Map.prototype, "set")
+
+		try {
+			for (let k = 0; k < 4; k++) expect(presetProgram(`noSuchShape${k}`)).toBeUndefined()
+
+			expect(set.mock.calls.some(([key]) => typeof key === "string" && key.startsWith("noSuchShape"))).toBe(false)
+		} finally {
+			set.mockRestore()
+		}
 	})
 
 	it("evaluates every preset to finite paths at any aspect ratio", () => {
@@ -204,6 +218,26 @@ describe("custom geometry", () => {
 
 		emitPaths(list, program, evaluateGuides(program, EMU, EMU), EMU, EMU)
 		expect(list.coords[0]).toBeCloseTo(5 / EMU, 9)
+	})
+
+	it("reads a huge digit run as a guide name without quadratic backtracking", () => {
+		const huge = `${"1".repeat(200000)}x`
+		const document = parseXml(
+			new TextEncoder().encode(`<a:custGeom ${A}><a:pathLst><a:path w="10" h="10">
+				<a:moveTo><a:pt x="${huge}" y="5"/></a:moveTo><a:lnTo><a:pt x="-.5" y="1e3"/></a:lnTo><a:lnTo><a:pt x="5." y="5"/></a:lnTo>
+			</a:path></a:pathLst></a:custGeom>`)
+		)
+		const started = performance.now()
+		const program = compileCustomGeometry(drawingReader(document), document.documentElement())
+
+		expect(performance.now() - started).toBeLessThan(500)
+
+		const list = new DrawingList()
+		const w = 100 * EMU
+
+		emitPaths(list, program, evaluateGuides(program, w, w), w, w)
+		// The huge token and "5." are unknown guide names (0); "5", "-.5" and "1e3" are numbers.
+		expect(Array.from(list.coords.slice(0, 6))).toEqual([0, 50, -5, 10000, 0, 50])
 	})
 })
 

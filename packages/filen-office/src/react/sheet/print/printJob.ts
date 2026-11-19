@@ -21,6 +21,7 @@ import type { SheetGridTheme } from "../theme"
 import {
 	LIST_FONT_PT,
 	LIST_LINE_PT,
+	listFamilies,
 	NOTE_FONT,
 	NOTE_FONT_PX,
 	NOTE_LINE_PX,
@@ -40,7 +41,7 @@ import {
 import { framePage, paintPrintedCells, pageTiles, pageView, placedPage, PRINT_THEME, printPageSvg, type BandPictures } from "./printPage"
 import { planSlices, slicePage, SliceTiles, sliceView, smallPage, surveyPage, type TileFetch } from "./printSlices"
 import { noteBox, wholeAxes } from "./printRanges"
-import { escapeSvgText, SvgCanvas } from "./svgCanvas"
+import { escapeSvgText, SvgCanvas, xmlChars } from "./svgCanvas"
 
 // A print as a list of pages over the grid model's session: each sheet cut into pages (and the pages listing its
 // notes, when it prints them at the end), then each page drawn as SVG once the tiles it shows are held, with the
@@ -170,7 +171,8 @@ async function drawingMarkup(job: PrintJob, drawing: SheetDrawingData, width: nu
 	svg.setAttribute("height", String(height))
 	svg.setAttribute("preserveAspectRatio", "none")
 
-	return new XMLSerializer().serializeToString(svg)
+	// A serializer writes the characters XML forbids as they are (a text from the file): the page would not parse.
+	return xmlChars(new XMLSerializer().serializeToString(svg))
 }
 
 // An object drawn once per print: a chart through the charts feature (chart.render, laid out at the object's size), a
@@ -356,13 +358,15 @@ async function chartPageMarkup(job: PrintJob, sheet: PrintJobSheet, chart: Print
 	return markup === null ? "" : `<g transform="translate(${String(at.x)} ${String(at.y)})">${markup}</g>`
 }
 
+// In the family the lines were measured in (layOutPrint's listFont).
 function notesPageMarkup(sheet: PrintJobSheet, notes: NotesPage): string {
 	const { area } = sheet.pagination
+	const family = escapeSvgText(listFamilies(notes.family))
 
 	return notes.lines
 		.map(
 			(line, k) =>
-				`<text x="${String(area.x)}" y="${String(area.y + LIST_FONT_PT + k * LIST_LINE_PT)}" font-size="${String(LIST_FONT_PT)}"${line.bold ? ' font-weight="bold"' : ""}>${escapeSvgText(line.text)}</text>`
+				`<text x="${String(area.x)}" y="${String(area.y + LIST_FONT_PT + k * LIST_LINE_PT)}" font-family="${family}" font-size="${String(LIST_FONT_PT)}"${line.bold ? ' font-weight="bold"' : ""}>${escapeSvgText(line.text)}</text>`
 		)
 		.join("")
 }

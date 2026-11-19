@@ -1,4 +1,5 @@
 import { bytesSource, memorySink, OpcPackage, partKey, PRESENTATION_ZIP_LIMITS, ZipArchive } from "@filen/office/core/opc"
+import { sameBytes } from "../core/docx/write/bytes"
 import { openPptx, type PptxParts } from "../core/pptx/package"
 import type { DeckChanges, Dirt, PartChanges, Touch } from "../core/presentation/edit/apply"
 import { slideRef, type Deck, type ShapeNode, type SlideNode, type SlideRef } from "../core/presentation/model"
@@ -401,7 +402,25 @@ export async function saveEdits(h: EditHarness, revision: number): Promise<Uint8
 	return sink.bytes().slice()
 }
 
-// Part names whose bytes differ between two packages (added ones included).
+// Part names whose bytes differ between two packages, compared byte for byte: those of `after` that `before` lacks or
+// holds other bytes for, in `after`'s order, then those only `before` has (a part the save dropped).
+export async function differingParts(before: Uint8Array, after: Uint8Array): Promise<string[]> {
+	const a = await partsOf(before)
+	const b = await partsOf(after)
+	const out: string[] = []
+
+	for (const [name, data] of b) {
+		const prior = a.get(name)
+
+		if (prior === undefined || !sameBytes(prior, data)) out.push(name)
+	}
+
+	for (const name of a.keys()) if (!b.has(name)) out.push(name)
+
+	return out
+}
+
+// Part names added or changed (as decoded text) between two packages, for rebaseSession, which rebinds only those.
 export async function changedParts(before: Uint8Array, after: Uint8Array): Promise<string[]> {
 	const a = await partsOf(before)
 	const b = await partsOf(after)

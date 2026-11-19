@@ -1,8 +1,16 @@
 import { HyperFormula } from "hyperformula"
 import { describe, expect, it, vi } from "vitest"
+import { bytesSource } from "../core/opc/index"
 import type { SheetCommandResult, SheetOpened, SheetTile } from "../core/sheet/protocol"
+import type { SheetChangeSink } from "../core/sheet/registry"
+import { RenderStyleTable } from "../core/sheet/session"
 import { SortType, compareSortValues, sortOrder, textSortKey, type SortValue } from "../core/sheet/sort/order"
+import { XlsxDocument } from "../core/xlsx/edit/document"
+import { sortRange } from "../core/xlsx/edit/sort"
+import { CellKind } from "../core/xlsx/model/types"
+import { SheetStore, StoreBuilder, openXlsx } from "../core/xlsx/read/index"
 import { inThreadSheetHost } from "../dom/sheet/host"
+import { buildXlsx } from "./oracles/sheet/synthetic"
 import { IMMEDIATE, savedBytes, tileTexts } from "./sheetSessionFixtures"
 import { buildFixture, parts, type Fixture } from "./xlsxWriteFixtures"
 
@@ -59,6 +67,62 @@ describe("Excel's sort order", () => {
 
 	it("sorts accented letters with their base letter, after it", () => {
 		expect(textsSorted(["eb", "éa", "ea", "f"])).toEqual(["ea", "éa", "eb", "f"])
+	})
+
+	it("keeps other scripts' letters in code point order after Z, Hangul and the compatibility blocks included", () => {
+		const hangul = ["\uac00", "\uce74", "\ucfe0", "\ud0c0", "\ud30c", "\ud558"]
+
+		expect(textsSorted([...hangul].reverse())).toEqual(hangul)
+		// A CJK ideograph, a compatibility ideograph and an astral one after Z, in that order.
+		expect(textsSorted(["\u{20000}", "\uf900", "\u4e00", "Z"])).toEqual(["Z", "\u4e00", "\uf900", "\u{20000}"])
+		// Fullwidth Latin letters keep their order, either case.
+		expect(textsSorted(["\uff5a", "\uff22", "\uff41"])).toEqual(["\uff41", "\uff22", "\uff5a"])
+	})
+
+	it("weighs the other scripts' letters from U+0180 to U+D7FF and up to U+FFFF in code point order, below the surrogates", () => {
+		const weight = (code: number): number => textSortKey(String.fromCharCode(code), false).charCodeAt(0)
+		let previous = 0
+		let decreases = 0
+
+		for (const [from, to] of [
+			[0x180, 0xd7ff],
+			[0xf900, 0xffff]
+		] as const)
+			for (let code = from; code <= to; code++) {
+				const char = String.fromCharCode(code)
+
+				// Upper case letters weigh as their lower case; symbols have weights of their own.
+				if (char.toLowerCase() !== char.toUpperCase() && char.toLowerCase() !== char) continue
+				if ((code >= 0x2000 && code <= 0x2bff) || (code >= 0x3000 && code <= 0x303f)) continue
+				if ((code >= 0xfe30 && code <= 0xfe4f) || (code >= 0xff00 && code <= 0xff0f)) continue
+
+				const at = weight(code)
+
+				if (at < previous) decreases++
+
+				expect(at).toBeLessThan(0xd800)
+				previous = at
+			}
+
+		expect(decreases).toBe(0)
+		expect(textSortKey("\u{1f600}\u{20000}", false).charCodeAt(0)).toBeLessThan(0xd800)
+	})
+
+	it("ranks an accent alike in either case, and every accent apart", () => {
+		expect(textsSorted(["\u00e9cole", "\u00c9cole"])).toEqual(["\u00e9cole", "\u00c9cole"])
+		expect(textsSorted(["\u00c9cole", "\u00e9cole"])).toEqual(["\u00c9cole", "\u00e9cole"])
+		expect(sorted([text("\u00c9cole"), text("\u00e9cole")], true)).toEqual([0, 1])
+		expect(sorted([text("\u00e9cole"), text("\u00c9cole")], true)).toEqual([0, 1])
+		// Lowercase first when case counts.
+		expect(textsSorted(["\u00c9cole", "\u00e9cole"], true)).toEqual(["\u00e9cole", "\u00c9cole"])
+		expect(textSortKey("\u00e9", false)).not.toBe(textSortKey("\u00ea", false))
+		expect(textSortKey("\u00e9", false)).not.toBe(textSortKey("\u00ca", false))
+		expect(textSortKey("\u0139", false)).toBe(textSortKey("\u013a", false))
+		expect(textSortKey("\u0179", false)).toBe(textSortKey("\u017a", false))
+		expect(textSortKey("\u0178", false)).toBe(textSortKey("\u00ff", false))
+		// İ and Ÿ sort with their base letters.
+		expect(textsSorted(["j", "\u0130", "h"])).toEqual(["h", "\u0130", "j"])
+		expect(textsSorted(["z", "\u0178", "x"])).toEqual(["x", "\u0178", "z"])
 	})
 
 	it("is stable over equal keys", () => {
@@ -455,6 +519,53 @@ describe("sort.apply", () => {
 		result.session.close()
 	})
 
+	it("gives the engine the moved cells, blank ones included, and marks results held alone over them stale", async () => {
+		// A2:B4 sorted by A; D reads the sorted area (D1 a cell that turns blank), E1 is held alone over it.
+		const opened = await open({
+			sheets: [
+				{
+					name: "Data",
+					body:
+						'<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Key</t></is></c><c r="D1"><f>B2</f><v>30</v></c>' +
+						'<c r="E1"><f>_xlfn.FORECAST.ETS.SEASONALITY(A2:A4,B2:B4)</f><v>5</v></c></row>' +
+						'<row r="2"><c r="A2"><v>3</v></c><c r="B2"><v>30</v></c><c r="D2"><f>SUM(B2:B4)</f><v>50</v></c></row>' +
+						'<row r="3"><c r="A3"><v>1</v></c><c r="D3"><f>A2*10</f><v>30</v></c></row>' +
+						'<row r="4"><c r="A4"><v>2</v></c><c r="B4"><v>20</v></c></row></sheetData>'
+				}
+			]
+		})
+		const sheet = opened.info.sheets[0]!.id
+		const fullCalc = async (): Promise<boolean> =>
+			/<calcPr[^>]*\sfullCalcOnLoad="(?:1|true)"/.test(parts(await savedBytes(opened.session))["xl/workbook.xml"] ?? "")
+
+		expect(await fullCalc()).toBe(false)
+		ok(
+			await opened.session.command({
+				type: "sort.apply",
+				sheet,
+				range: { startRow: 0, startCol: 0, endRow: 3, endCol: 1 },
+				orientation: "rows",
+				header: true,
+				caseSensitive: false,
+				keys: [{ index: 0, descending: false }]
+			})
+		)
+
+		const sortedCells = await texts(opened)
+
+		expect(column(sortedCells, 1, 1, 3)).toEqual(["", "20", "30"])
+		expect(column(sortedCells, 3, 0, 2)).toEqual(["0", "50", "10"])
+		expect(await fullCalc()).toBe(true)
+
+		ok(await opened.session.undo())
+		expect(column(await texts(opened), 3, 0, 2)).toEqual(["30", "50", "30"])
+
+		ok(await opened.session.redo())
+		expect(column(await texts(opened), 3, 0, 2)).toEqual(["0", "50", "10"])
+		expect(await fullCalc()).toBe(true)
+		opened.session.close()
+	})
+
 	it("refuses merged cells, array formulas, a hyperlink over moved rows and locked cells on a protected sheet", async () => {
 		const base = TABLE.sheets[0]!.body!
 		const command = (sheet: number) =>
@@ -467,14 +578,15 @@ describe("sort.apply", () => {
 				caseSensitive: false,
 				keys: [{ index: 1, descending: false }]
 			}) as const
-		const refusal = async (body: string): Promise<string | undefined> => {
+		const refused = async (body: string) => {
 			const opened = await open({ sheets: [{ name: "Data", body }], sharedStrings: TABLE.sharedStrings! })
 			const result = await opened.session.command(command(opened.info.sheets[0]!.id))
 
 			opened.session.close()
 
-			return result.ok ? undefined : result.refusal.reason
+			return result.ok ? undefined : result.refusal
 		}
+		const refusal = async (body: string): Promise<string | undefined> => (await refused(body))?.reason
 
 		expect(await refusal(`${base}<mergeCells count="1"><mergeCell ref="A2:A3"/></mergeCells>`)).toBe("merged")
 		expect(await refusal(base.replace("<f>B3*2</f>", '<f t="array" ref="C3:C4">B3:B4*2</f>'))).toBe("arrayFormula")
@@ -494,5 +606,91 @@ describe("sort.apply", () => {
 				`${base}<conditionalFormatting sqref="B3"><cfRule type="cellIs" priority="1" operator="greaterThan" dxfId="0"><formula>1</formula></cfRule></conditionalFormatting>`
 			)
 		).toBe("structureLocked")
+		// Whole rows (rows 3-6, past the sorted rows 2-5 on one side) cover them unevenly, as does a list that does not read.
+		const cf = (sqref: string): string =>
+			`<conditionalFormatting sqref="${sqref}"><cfRule type="cellIs" priority="1" operator="greaterThan" dxfId="0"><formula>1</formula></cfRule></conditionalFormatting>`
+		const dv = (sqref: string): string =>
+			`<dataValidations count="1"><dataValidation type="whole" operator="greaterThan" sqref="${sqref}"><formula1>0</formula1></dataValidation></dataValidations>`
+
+		expect(await refusal(`${base}${cf("3:6")}`)).toBe("structureLocked")
+		expect(await refused(`${base}${dv("3:6")}`)).toMatchObject({ reason: "structureLocked", detail: "dataValidations" })
+		expect(await refusal(`${base}${cf("E1 B:")}`)).toBe("structureLocked")
+		expect(await refusal(`${base}${dv("E1 B:")}`)).toBe("structureLocked")
+		// A whole column, or whole rows over all of them, cover them evenly.
+		expect(await refusal(`${base}${cf("B:B")}`)).toBeUndefined()
+		expect(await refusal(`${base}${dv("1:9")}`)).toBeUndefined()
 	})
+})
+
+const NO_CHANGES: SheetChangeSink = {
+	content: () => undefined,
+	look: () => undefined,
+	moved: () => undefined,
+	layout: () => undefined,
+	sheets: () => undefined,
+	select: () => undefined
+}
+
+describe("sort.apply over a large store", () => {
+	it("moves every cell of a sheet past 256 blocks to its place", async () => {
+		const opened = await openXlsx(bytesSource(buildXlsx({ sheets: [{ name: "Data", body: "<sheetData/>" }] })))
+
+		if (!opened.ok) throw new Error(opened.reason)
+
+		const document = new XlsxDocument(opened.workbook, new RenderStyleTable(), { kind: "xlsx" })
+
+		try {
+			const sheet = document.worksheets()[0]?.id ?? 0
+			const model = await document.ready(sheet)
+			// 300,000 one-cell rows (293 blocks of 1,024): slots of blocks 128 and up reach past 2^31.
+			const count = 300_000
+			const builder = new StoreBuilder()
+
+			for (let row = 0; row < count; row++) {
+				builder.beginRow()
+				builder.cell(0, CellKind.NUMBER, row, 0, -1)
+				builder.endRow(row, 0, 1, 0, Number.NaN, -1)
+			}
+
+			const before = model.store as SheetStore
+			const store = new SheetStore(builder.finish(), before.strings, before.formulas)
+
+			expect(store.blocks.length).toBeGreaterThan(256)
+			Object.assign(model, { store })
+
+			const result = await sortRange(
+				document,
+				{
+					type: "sort.apply",
+					sheet,
+					range: { startRow: 0, startCol: 0, endRow: count - 1, endCol: 0 },
+					orientation: "rows",
+					header: false,
+					caseSensitive: false,
+					keys: [{ index: 0, descending: true }]
+				},
+				NO_CHANGES
+			)
+
+			expect(result !== null && "refused" in result).toBe(false)
+
+			const sorted = model.store as SheetStore
+			const valueAt = (row: number): number | null => {
+				const slot = sorted.locate(row, 0)
+
+				return slot < 0 ? null : sorted.value(slot)
+			}
+
+			// Rows from blocks 0-127, 128-255 (slots that wrapped negative) and 256 up (slots that aliased block b - 256).
+			for (const row of [0, 1_000, 140_000, 200_000, 262_144, 270_000, 299_999]) expect(valueAt(row)).toBe(count - 1 - row)
+
+			let wrong = 0
+
+			for (let row = 0; row < count; row++) if (valueAt(row) !== count - 1 - row) wrong++
+
+			expect(wrong).toBe(0)
+		} finally {
+			document.close()
+		}
+	}, 60_000)
 })

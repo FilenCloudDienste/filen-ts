@@ -122,6 +122,25 @@ describe("convertText", () => {
 
 		expect(written.get("word/settings.xml")).not.toContain("flow-with-text")
 		expect(converted.lossy.features.map(feature => feature.kind)).not.toContain("floatsOnAnchorPage")
+
+		// A paragraph-anchored frame: the translation asks for it to stay on its anchor's page and writes a wp:anchor.
+		const floating = await convertText(
+			odtBytes({
+				automatic:
+					'<style:style style:name="fr" style:family="graphic"><style:graphic-properties style:wrap="parallel" style:vertical-pos="from-top" style:vertical-rel="paragraph" style:horizontal-pos="left" style:horizontal-rel="paragraph"/></style:style>',
+				body: '<text:p>Anchor<draw:frame draw:style-name="fr" text:anchor-type="paragraph" svg:y="0.5cm" svg:width="5cm" svg:height="2cm"><draw:text-box><text:p/></draw:text-box></draw:frame></text:p>'
+			}),
+			"odt",
+			"docx"
+		)
+
+		if (!floating.ok) throw new Error(floating.refusal.message)
+
+		const floated = await entries(floating.bytes)
+
+		expect(floated.get("word/document.xml")).toContain("<wp:anchor")
+		expect(floated.get("word/settings.xml")).not.toContain("flow-with-text")
+		expect(floating.lossy.features).toContainEqual({ kind: "floatsOnAnchorPage", count: 1 })
 	})
 
 	it("writes a standalone package: revision ids, long bookmarks and their fields, header relationships", async () => {

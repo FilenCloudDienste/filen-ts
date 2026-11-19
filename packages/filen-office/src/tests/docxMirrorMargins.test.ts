@@ -74,7 +74,7 @@ describe("mirror margins", () => {
 
 		expect(lefts[0]).toBeCloseTo(1800 * PX_PER_TWIP, 1)
 		expect(lefts[1]).toBeCloseTo(1440 * PX_PER_TWIP, 1)
-		expect(settingsXml(await saved(editor, opened))).toMatch(/<w:defaultTabStop w:val="720"\/><w:mirrorMargins\/>|<w:mirrorMargins\/>/)
+		expect(settingsXml(await saved(editor, opened))).toContain('<w:mirrorMargins/><w:defaultTabStop w:val="720"/>')
 
 		// Only the switch: nothing else of the sections changes.
 		expect(await editor.execute({ type: "page.setup", mirrorMargins: false })).toBe(true)
@@ -87,7 +87,7 @@ describe("mirror margins", () => {
 		expect(await editor.execute({ type: "history.undo" })).toBe(true)
 		expect(currentPageSetup(editor).mirrorMargins).toBe(true)
 		expect(await editor.execute({ type: "page.setup", mirrorMargins: true })).toBe(false)
-		expect(settingsXml(await saved(editor, opened))).toContain("<w:mirrorMargins/>")
+		expect(settingsXml(await saved(editor, opened))).toContain('<w:mirrorMargins/><w:defaultTabStop w:val="720"/>')
 		editor.dispose()
 	})
 

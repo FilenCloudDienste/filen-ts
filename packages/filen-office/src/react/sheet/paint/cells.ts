@@ -11,12 +11,12 @@ import {
 	type SheetTile
 } from "../../../core/sheet/protocol"
 import { fitGeneral } from "../../../core/sheet/numfmt/general"
-import { axisEntry, shownIndex } from "../axis"
+import { axisEntry, shownIndex, shownIndices } from "../axis"
 import { segments, type GridSegment } from "../layers"
 import type { SheetGridModel } from "../model"
 import type { SheetGridTheme } from "../theme"
 import { entryInput, entryRepeat, entryRuns, entryText } from "../tiles"
-import { screenOf, type GridView } from "../view"
+import { CARRY_COLUMNS, screenOf, type GridView } from "../view"
 import { BorderPainter, strongerLine } from "./borders"
 import { rgb, type GridCanvas } from "./canvas"
 import type { PatternCache } from "./patterns"
@@ -38,8 +38,6 @@ import { layoutText, textFont, type TextLine, type TextMeasurer, type TextRun } 
 export const TEXT_PADDING = 3
 const LINE_HEIGHT = 1.2
 const DESCENT = 0.22
-// How far left of the drawn columns a cell's text is looked for, as it may run on into view.
-const CARRY_COLUMNS = 64
 // Text drawn on a fill the file chose: dark unless the cell says otherwise (the file drew it for paper).
 const PAPER_TEXT = "#000000"
 // Black, the file's automatic and dark-1 text and line colour.
@@ -81,28 +79,29 @@ class Lookup {
 
 	private readonly scene: CellScene
 	readonly merges: readonly SheetRange[]
-	// The merges by row, for the rows drawn and one each side (the rest search them all).
+	// The merges by row, for the rows drawn and the shown one each side (the rest search them all).
 	private readonly byRow: Map<number, SheetRange[]> | null
 
-	constructor(scene: CellScene, merges: readonly SheetRange[], rows: GridSegment) {
+	// `rows`: the shown rows asked about, in order.
+	constructor(scene: CellScene, merges: readonly SheetRange[], rows: readonly number[]) {
 		this.scene = scene
 		this.merges = merges
-		this.byRow = merges.length === 0 ? null : new Map()
 
-		for (const merge of merges) {
-			for (let row = Math.max(merge.startRow, rows.first - 1); row <= Math.min(merge.endRow, rows.last + 1); row++) {
-				let bucket = this.byRow?.get(row)
+		if (merges.length === 0) {
+			this.byRow = null
 
-				if (bucket === undefined) {
-					bucket = []
-					this.byRow?.set(row, bucket)
-				}
-
-				bucket.push(merge)
-			}
+			return
 		}
 
-		for (let row = rows.first - 1; this.byRow !== null && row <= rows.last + 1; row++) if (!this.byRow.has(row)) this.byRow.set(row, [])
+		const byRow = new Map<number, SheetRange[]>()
+
+		for (const row of rows) byRow.set(row, [])
+
+		for (const merge of merges)
+			for (let i = firstAtLeast(rows, merge.startRow); i < rows.length && (rows[i] ?? 0) <= merge.endRow; i++)
+				byRow.get(rows[i] ?? 0)?.push(merge)
+
+		this.byRow = byRow
 	}
 
 	private rowStyle(row: number): number {
@@ -163,6 +162,21 @@ class Lookup {
 	occupied(row: number, col: number): boolean {
 		return this.text(row, col) !== "" || this.merge(row, col) !== null
 	}
+}
+
+// The first position in ascending `list` holding `value` or more (list.length: none).
+function firstAtLeast(list: readonly number[], value: number): number {
+	let low = 0
+	let high = list.length
+
+	while (low < high) {
+		const middle = (low + high) >>> 1
+
+		if ((list[middle] ?? 0) < value) low = middle + 1
+		else high = middle
+	}
+
+	return low
 }
 
 // Whether a formula cell shows its formula instead of its result (Ctrl+`, Excel's Show Formulas).
@@ -263,12 +277,16 @@ function paintPane(
 	const { model, view, layout, theme } = scene
 	const rowAxis = view.rows.axis
 	const colAxis = view.cols.axis
-	const lookup = new Lookup(scene, intersecting(layout, rows, cols), rows)
-	const rowList: number[] = []
-	const colList: number[] = []
+	const rowList = shownIndices(rowAxis, rows.first, rows.last)
+	const colList = shownIndices(colAxis, cols.first, cols.last)
+	// The shown row before and after the drawn ones, whose borders meet theirs.
+	const beforeRow = rowList.length === 0 ? -1 : shownIndex(rowAxis, (rowList[0] ?? 0) - 1, -1)
+	const afterRow = rowList.length === 0 ? -1 : shownIndex(rowAxis, (rowList[rowList.length - 1] ?? 0) + 1, 1)
+	const asked = beforeRow < 0 ? [...rowList] : [beforeRow, ...rowList]
 
-	for (let row = rows.first; row <= rows.last; row++) if (rowAxis.size(row) > 0) rowList.push(row)
-	for (let col = cols.first; col <= cols.last; col++) if (colAxis.size(col) > 0) colList.push(col)
+	if (afterRow >= 0) asked.push(afterRow)
+
+	const lookup = new Lookup(scene, intersecting(layout, rows, cols), asked)
 
 	const rowY = rowList.map(row => screenOf(view.rows, row))
 	const colX = colList.map(col => screenOf(view.cols, col))
@@ -355,7 +373,7 @@ function paintPane(
 		restore(painters)
 	}
 
-	paintBorders(painters, scene, lookup, rowList, colList, rowY, colX, blocks)
+	paintBorders(painters, scene, lookup, { rowList, colList, beforeRow, afterRow }, rowY, colX, blocks)
 
 	// Text: merged blocks, then single cells (with text running on into empty neighbours).
 	for (const { merge, box } of blocks) paintText(painters, scene, lookup, merge.startRow, merge.startCol, box, box.x, box.x + box.width)
@@ -405,12 +423,17 @@ function paintBorders(
 	painters: CellPainters,
 	scene: CellScene,
 	lookup: Lookup,
-	rowList: readonly number[],
-	colList: readonly number[],
+	shown: {
+		readonly rowList: readonly number[]
+		readonly colList: readonly number[]
+		readonly beforeRow: number
+		readonly afterRow: number
+	},
 	rowY: readonly number[],
 	colX: readonly number[],
 	blocks: readonly { readonly merge: SheetRange; readonly box: Box }[]
 ): void {
+	const { rowList, colList, beforeRow: beforeRows, afterRow: afterRows } = shown
 	const { borders } = painters
 	const { model, view, scale } = scene
 	const rowAxis = view.rows.axis
@@ -427,13 +450,10 @@ function paintBorders(
 	const sameMerge = (a: SheetRange | null, row: number, col: number): boolean =>
 		a !== null && row >= a.startRow && row <= a.endRow && col >= a.startCol && col <= a.endCol
 	// The shown index before the first and after the last drawn one (the rest are the drawn ones' neighbours).
-	const firstRow = rowList[0] ?? 0
 	const firstCol = colList[0] ?? 0
 	const lastRow = rowList[rowList.length - 1] ?? 0
 	const lastCol = colList[colList.length - 1] ?? 0
-	const beforeRows = shownIndex(rowAxis, firstRow - 1, -1)
 	const beforeCols = shownIndex(colAxis, firstCol - 1, -1)
-	const afterRows = shownIndex(rowAxis, lastRow + 1, 1)
 	const afterCols = shownIndex(colAxis, lastCol + 1, 1)
 
 	rowList.forEach((row, i) => {
@@ -725,6 +745,8 @@ interface RunOn {
 
 // A single cell's text with its run-on: left-aligned text continues over empty cells to its right, right-aligned
 // to its left, centred both ways, as far as the next cell with content (Excel's overflow). Null when nothing shows.
+// A hidden run longer than CARRY_COLUMNS stops it: the frame only fetches that much of a hidden run (frameTiles), so
+// the answer never depends on what the tile cache happens to hold, and print draws the same.
 function runOn(scene: CellScene, lookup: Lookup, row: number, col: number, cols: GridSegment, knownX?: number): RunOn | null {
 	const colAxis = scene.view.cols.axis
 	const x = knownX ?? screenOf(scene.view.cols, col)
@@ -739,18 +761,26 @@ function runOn(scene: CellScene, lookup: Lookup, row: number, col: number, cols:
 
 	if (runs && (content.flags & CellFlag.NUMBER) === 0) {
 		if (content.align === "left" || content.align === "center") {
-			for (let next = col + 1; next <= colAxis.lastShown && right < cols.end; next++) {
-				if (lookup.occupied(row, next)) break
+			for (let next = col + 1, hidden = 0; next <= colAxis.lastShown && right < cols.end; next++) {
+				const size = colAxis.size(next)
 
-				right += colAxis.size(next)
+				hidden = size === 0 ? hidden + 1 : 0
+
+				if (hidden > CARRY_COLUMNS || lookup.occupied(row, next)) break
+
+				right += size
 			}
 		}
 
 		if (content.align === "right" || content.align === "center") {
-			for (let before = col - 1; before >= 0 && left > cols.start; before--) {
-				if (lookup.occupied(row, before)) break
+			for (let before = col - 1, hidden = 0; before >= 0 && left > cols.start; before--) {
+				const size = colAxis.size(before)
 
-				left -= colAxis.size(before)
+				hidden = size === 0 ? hidden + 1 : 0
+
+				if (hidden > CARRY_COLUMNS || lookup.occupied(row, before)) break
+
+				left -= size
 			}
 		}
 	}

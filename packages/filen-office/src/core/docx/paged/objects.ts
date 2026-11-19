@@ -6,11 +6,11 @@ import { TABLE_HITS } from "../edit/tables/hits"
 import { NOTE_REF_HITS } from "../stories/noteHits"
 import type { PagedEditor } from "./editor"
 
-// What sits on the pages besides text, for pointer input: a feature registers how it finds its objects at a
-// page point (pictures and shapes, content controls, comment anchors, fields), and a view hands a press to
-// the feature's handler before placing the caret (DocxEditor `interactions`).
+// What sits on the pages besides text, for pointer input: each feature's provider finds its objects at a page
+// point (pictures and shapes, content controls, comment anchors, fields), and a view hands a press to the
+// feature's handler before placing the caret (DocxEditor `interactions`).
 
-export type ObjectHitKind = "drawing" | "control" | "commentMarker" | "field" | "link" | "noteRef" | "equation" | "tableBorder"
+export type ObjectHitKind = "drawing" | "control" | "commentMarker" | "field" | "noteRef" | "equation" | "tableBorder"
 
 export interface ObjectHit {
 	readonly kind: ObjectHitKind

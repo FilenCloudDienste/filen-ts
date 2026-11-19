@@ -10,6 +10,7 @@ import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { danglingReferences } from "./pptxWriteFixtures"
+import { modelVsFile } from "./modelVsFile"
 import { image } from "./presentationObjectsFixtures"
 
 // Home ▸ New slide, then each Insert kind on that slide (SmartArt in pptx, table, chart, picture, video), then Save:
@@ -96,6 +97,32 @@ async function newSlide(d: Drive): Promise<SlideRef> {
 	return d.session.deck.slides.find(ref => !before.has(ref)) as SlideRef
 }
 
+// Whether `shape` is what inserting `kind` puts on a slide, as a fresh open reads it (a layout's placeholders are none).
+function isKind(shape: ShapeNode, kind: Kind): boolean {
+	switch (kind) {
+		case "smartart":
+		case "table":
+		case "chart":
+			return shape.frame?.kind === kind
+		case "picture":
+			return shape.kind === "pic" && shape.media === undefined && shape.frame === undefined
+		case "media":
+			return shape.media !== undefined || shape.frame?.kind === "media"
+	}
+}
+
+async function reopenedKinds(bytes: Uint8Array, format: "pptx" | "odp", at: number): Promise<Kind[]> {
+	const again = await driveSession(bytes, format)
+	const reread = again.session.deck.slides[at] as SlideRef
+
+	await review(again.context, reread)
+
+	const shapes = (again.session.deck.nodes.get(reread) as SlideNode).shapes
+	const kinds: Kind[] = ["smartart", "table", "chart", "picture", "media"]
+
+	return kinds.filter(kind => shapes.some(shape => isKind(shape, kind)))
+}
+
 async function saved(d: Drive, format: "pptx" | "odp"): Promise<Uint8Array> {
 	const result = await d.save()
 
@@ -130,21 +157,20 @@ describe("a new slide with something inserted, then saved", () => {
 				expect((await d.command(await insertOn(d, slide, kind))).ok, kind).toBe(true)
 
 				const bytes = await saved(d, format)
-				const again = await driveSession(bytes, format)
 
-				expect(again.session.deck.slides).toHaveLength(2)
-
-				const reread = again.session.deck.slides[1] as SlideRef
-
-				await review(again.context, reread)
-				expect((again.session.deck.nodes.get(reread) as SlideNode).shapes.length).toBeGreaterThan(0)
+				expect(await modelVsFile(d, bytes, format)).toBe("")
+				expect(await reopenedKinds(bytes, format, 1)).toEqual([kind])
 
 				// Every kind together on another new slide, saved after the first.
 				const more = await newSlide(d)
 
 				for (const each of kinds) expect((await d.command(await insertOn(d, more, each))).ok, each).toBe(true)
 
-				await saved(d, format)
+				const all = await saved(d, format)
+				const at = d.session.deck.slides.indexOf(more)
+
+				expect(await modelVsFile(d, all, format)).toBe("")
+				expect(await reopenedKinds(all, format, at)).toEqual(kinds)
 			})
 	}
 })

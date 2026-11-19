@@ -4,6 +4,7 @@ import { chartObject } from "../../ods/convert/chart"
 import { dataStyles } from "../../ods/write/dataStyle"
 import { formatValue } from "../../sheet/numfmt/index"
 import { encodeUtf8, escapeAttribute, escapeText, parseXml, XmlEditor, type XmlDocument } from "../../xml/index"
+import { MAX_CELLS, MAX_POINTS, MAX_SERIES } from "../localTable"
 
 // A DrawingML chart part (ECMA-376 Part 1 §21.2) as the object an ODF presentation embeds (ODF 1.3 Part 3 §11): the
 // chart as core/ods/convert/chart.ts writes one, reading a table of its own (§11.1 table:table in chart:chart) that
@@ -96,10 +97,6 @@ export function withAutomaticStyles(content: string, markup: string): string {
 		? content
 		: `${content.slice(0, body)}<office:automatic-styles>${markup}</office:automatic-styles>${content.slice(body)}`
 }
-
-const MAX_POINTS = 10_000
-const MAX_SERIES = 255
-const MAX_CELLS = 1_000_000
 
 // A chart's own table:table of `rows` (§9.1), its first row the header and its first column the categories;
 // `declarations`: namespace declarations its start tag carries (a table written into a document in place); `styles`:

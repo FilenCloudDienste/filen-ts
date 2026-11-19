@@ -91,6 +91,21 @@ function text(page: Page | undefined, pieces: readonly EmitPiece[]): string {
 describe("ODF timing", () => {
 	const source = pageOf(ROOT)
 
+	it("reads names that are members of Object.prototype as unknown, and the tree stays structured-cloneable", () => {
+		const odd =
+			'<anim:par smil:dur="indefinite" smil:restart="never" presentation:node-type="timing-root"><anim:seq smil:dur="indefinite" presentation:node-type="main-sequence">' +
+			'<anim:par smil:begin="indefinite" smil:fill="hold"><anim:par smil:begin="0s" smil:fill="hold">' +
+			'<anim:par smil:begin="0s" smil:fill="hold" presentation:node-type="constructor" presentation:preset-class="toString" presentation:preset-id="other-effect">' +
+			'<anim:set smil:begin="0s" smil:dur="0.001s" smil:fill="hold" smil:targetElement="id1" smil:attributeName="visibility" smil:to="visible"/>' +
+			"</anim:par></anim:par></anim:par></anim:seq></anim:par>"
+		const tree = read(pageOf(odd))
+		const effect = find(tree, node => node.ctn.presetName === "other-effect")
+
+		expect(effect.ctn.nodeType).toBeUndefined()
+		expect(effect.ctn.presetClass).toBeUndefined()
+		expect(() => structuredClone(tree)).not.toThrow()
+	})
+
 	it("reads LibreOffice's tree into the model: node types, presets, conditions, behaviours and the trigger", () => {
 		const tree = read(source)
 		const main = find(tree, node => node.ctn.nodeType === "mainSeq")

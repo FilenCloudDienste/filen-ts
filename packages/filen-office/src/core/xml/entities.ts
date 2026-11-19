@@ -185,12 +185,17 @@ function escape(text: string, attribute: boolean): string {
 	return runStart === 0 ? text : out + text.slice(runStart)
 }
 
+// A character `escape` changes, tested natively first (most text and values hold none): anything but what is written
+// as it is. In u-mode a paired surrogate is one code point past U+FFFF; an unpaired one matches.
+const TEXT_ESCAPES = /[^\t\n -%'-;=?-\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/u
+const ATTRIBUTE_ESCAPES = /[^ !#-%(-;=-\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/u
+
 // Text for new markup.
 export function escapeText(text: string): string {
-	return escape(text, false)
+	return TEXT_ESCAPES.test(text) ? escape(text, false) : text
 }
 
 // An attribute value for new markup, safe inside either quote character.
 export function escapeAttribute(value: string): string {
-	return escape(value, true)
+	return ATTRIBUTE_ESCAPES.test(value) ? escape(value, true) : value
 }

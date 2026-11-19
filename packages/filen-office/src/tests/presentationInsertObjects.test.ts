@@ -19,8 +19,15 @@ import {
 	tableShapeOfLayer,
 	type TableShape
 } from "../core/presentation/edit/commands/table"
-import type { ShapeNode, TableModel } from "../core/presentation/model"
+import { insertChartOp, sampleChartCells } from "../core/presentation/edit/commands/chart"
+import type { DeckOp, FileLike } from "../core/presentation/edit/ops"
+import type { ShapeNode, SlideNode, SlideRef, TableModel } from "../core/presentation/model"
+import { mediaCapability } from "../dom/presentation/engine/media"
+import { pptxParts } from "../dom/presentation/engine/open/pptx"
+import { smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { odpBytes } from "./odpFixtures"
+import { driveSession } from "./odpWriteDrive"
+import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { changes, entriesOf, odpApplier, openOdpDeck, saveDeck, slideAt, text as odpText } from "./odpWriteFixtures"
 import { image, tableDeck } from "./presentationObjectsFixtures"
 import { editHarness, shapeById } from "./presentationEditFixtures"
@@ -179,4 +186,97 @@ describe("inserting objects", () => {
 		expect(cellAt(layer, shape.areas, 25, 7)).toEqual({ row: 1, col: 2, rows: 1, cols: 1 })
 		expect(cellAt(layer, shape.areas, 35, 7)).toBeUndefined()
 	})
+})
+
+// A new element's p:cNvPr is the shape family's: a link and the decorative flag set before any save gave the element a
+// source are written and read back, so the save passes its proof.
+describe("new elements' non-visual properties", () => {
+	const BOX = { x: 1_000_000, y: 1_000_000, cx: 3_000_000, cy: 2_000_000, rot: 0, flipH: false, flipV: false }
+	const VIDEO = new Uint8Array(4096)
+
+	VIDEO.set([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 2, 0, 0x69, 0x73, 0x6f, 0x6d, 0x6d, 0x70, 0x34, 0x31], 0)
+
+	const video: FileLike = {
+		size: VIDEO.length,
+		name: "clip.mp4",
+		type: "video/mp4",
+		slice: (start = 0, end = VIDEO.length) => ({ arrayBuffer: () => Promise.resolve(VIDEO.slice(start, end).buffer) })
+	}
+
+	type Drive = Awaited<ReturnType<typeof driveSession>>
+
+	const insertOps: Readonly<Record<string, (d: Drive, slide: SlideRef) => Promise<DeckOp>>> = {
+		picture: d => Promise.resolve(insertPictureOp(d.session.deck, d.session.deck.slides[0] as never, image(40, 30), 0, "photo.png")),
+		table: d => Promise.resolve(insertTableOp(d.session.deck, d.session.deck.slides[0] as never, 2, 2, 0) as DeckOp),
+		chart: (d, slide) =>
+			Promise.resolve(insertChartOp(d.session.deck, slide, 0, "column", sampleChartCells({ categories: ["A"], series: ["S"] }))),
+		smartart: (_d, slide) =>
+			Promise.resolve({
+				family: "smartart",
+				kind: "insert",
+				slide,
+				shape: { id: 0, name: "Diagram", hidden: false, kind: "frame", xfrm: BOX } as ShapeNode,
+				layout: { uniqueId: "urn:filen:smartart:layout:list-basic", source: "gallery" },
+				texts: ["Alpha", "Beta"]
+			}),
+		media: async (d, slide) => {
+			const registered = await mediaCapability.registerMedia({ ...d.context, lane: "background" }, { kind: "file", file: video })
+
+			if ("reason" in registered) throw new Error(registered.reason)
+
+			return {
+				family: "media",
+				kind: "insert",
+				slide,
+				shape: { id: 0, name: "clip.mp4", hidden: false, kind: "pic", xfrm: BOX },
+				media: { ...registered, poster: image(16, 9), durationMs: 1000 }
+			}
+		}
+	}
+
+	for (const [family, insertOp] of Object.entries(insertOps)) {
+		it(`writes a new ${family}'s link and decorative flag`, async () => {
+			const d = await driveSession(
+				buildPptx({
+					slides: [{ shapes: sp(2, "TextBox 1", undefined, xfrm(100_000, 100_000, 3_000_000, 500_000), body(para("P"))) }]
+				}),
+				"pptx"
+			)
+			const slide = d.session.deck.slides[0] as SlideRef
+
+			smartArtRenderer(d.session, {
+				services: {
+					xml: part => pptxParts(d.session.deck)?.document(part),
+					relationship: () => undefined,
+					contentType: () => undefined
+				}
+			})
+			expect((await d.command(await insertOp(d, slide))).ok).toBe(true)
+
+			const id = lastShape((d.session.deck.nodes.get(slide) as SlideNode).shapes).id
+			const target = { slide, id }
+
+			expect((await d.command({ family: "shape", kind: "setAlt", target, alt: { decorative: true } })).ok).toBe(true)
+			expect(
+				(
+					await d.command({
+						family: "shape",
+						kind: "setAction",
+						target,
+						trigger: "hover",
+						action: { kind: "url", href: "https://example.com/" }
+					})
+				).ok
+			).toBe(true)
+
+			const { result, bytes } = await d.save()
+
+			expect(result.kind).toBe("written")
+
+			const shape = lastShape(slideNode(await openDeck(bytes ?? new Uint8Array()), 0).shapes)
+
+			expect(shape.alt?.decorative).toBe(true)
+			expect(shape.actions?.hover).toEqual({ kind: "url", href: "https://example.com/" })
+		})
+	}
 })

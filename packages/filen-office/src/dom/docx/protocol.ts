@@ -18,7 +18,7 @@ export type { DrawingData } from "../../core/drawingml/data"
 // arrival.
 
 // The engine reports an encrypted package by why it cannot open it, never as "encrypted" (that stays for a
-// host's own checks). Unlocking (encrypted.ts) comes before the engine is given the decrypted package.
+// host's own checks). Unlocking (protection.ts) comes before the engine is given the decrypted package.
 //   needsPassword          password encryption, opened once given the password
 //   rightsManaged          IRM / a sensitivity label
 //   unsupportedEncryption  an encryption scheme Filen does not implement

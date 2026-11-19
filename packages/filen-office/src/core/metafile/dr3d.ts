@@ -175,14 +175,18 @@ function multiply(a: Matrix3d, b: Matrix3d): Matrix3d {
 	]
 }
 
+// A dr3d:transform longer than any real list of transforms is read as none.
+const MAX_TRANSFORM_LENGTH = 4096
+
 // dr3d:transform (§19.xx): matrix, rotatex/y/z, scale and translate, applied left to right as SVG transforms are.
 // matrix(a … l) lists the columns of the 3x3 part, then the translation.
 export function transform3d(value: string | undefined): Matrix3d {
-	if (value === undefined) return IDENTITY_3D
+	if (value === undefined || value.length > MAX_TRANSFORM_LENGTH) return IDENTITY_3D
 
 	let out: Matrix3d = IDENTITY_3D
 
-	for (const match of value.matchAll(/(matrix|rotatex|rotatey|rotatez|scale|translate)\s*\(([^)]*)\)/gu)) {
+	// Arguments hold no parentheses: a call left open fails at the next "(" instead of scanning to the end.
+	for (const match of value.matchAll(/(matrix|rotatex|rotatey|rotatez|scale|translate)\s*\(([^()]*)\)/gu)) {
 		const name = match[1]
 		const args = (match[2] ?? "").trim().split(/[\s,]+/u)
 		let step: Matrix3d | undefined
@@ -695,8 +699,6 @@ function profileNormals(profile: Dr3dProfile, polyline: number, outward: number)
 	return { before, after }
 }
 
-// The sign that turns a polyline's left-hand normal outward: away from the axis (rotate) or from its inside
-// (closed outlines, by their winding).
 // Whether a polyline starts and ends on the rotation axis (a profile LibreOffice leaves open there).
 function onAxis(profile: Dr3dProfile, polyline: number): boolean {
 	const points = profile.points
@@ -725,6 +727,8 @@ function solidOf(object: Dr3dObject): boolean {
 	}
 }
 
+// The sign that turns a polyline's left-hand normal outward: away from the axis (rotate) or from its inside
+// (closed outlines, by their winding).
 function outwardSign(profile: Dr3dProfile, polyline: number, axis: boolean): number {
 	const points = profile.points
 	const start = profile.starts[polyline] ?? 0
@@ -807,8 +811,13 @@ function rotate(mesh: Mesh, place: Placement, object: Extract<Dr3dObject, { kind
 	}
 }
 
-// Ear clipping of one simple polygon (x, y pairs) into triangles of point indices.
-function triangulate(points: Float64Array, start: number, count: number): number[] {
+// Steps (candidate ears and point-in-triangle tests) the caps of one extruded profile may take: ear clipping is
+// quadratic to cubic in the outline's points, so an outline past this bound is drawn open instead.
+const CAP_STEPS = 1 << 24
+
+// Ear clipping of one simple polygon (x, y pairs) into triangles of point indices; undefined once it has spent the
+// steps `budget` has left.
+function triangulate(points: Float64Array, start: number, count: number, budget: { steps: number }): number[] | undefined {
 	const out: number[] = []
 	const index: number[] = []
 	let area = 0
@@ -832,6 +841,8 @@ function triangulate(points: Float64Array, start: number, count: number): number
 		let clipped = false
 
 		for (let k = 0; k < index.length; k++) {
+			if (--budget.steps < 0) return undefined
+
 			const a = index[(k + index.length - 1) % index.length] ?? 0
 			const b = index[k] ?? 0
 			const c = index[(k + 1) % index.length] ?? 0
@@ -840,6 +851,10 @@ function triangulate(points: Float64Array, start: number, count: number): number
 			if (turn <= 0) continue
 
 			let inside = false
+
+			budget.steps -= index.length
+
+			if (budget.steps < 0) return undefined
 
 			for (const p of index) {
 				if (p === a || p === b || p === c) continue
@@ -870,6 +885,45 @@ function triangulate(points: Float64Array, start: number, count: number): number
 	return out
 }
 
+// The cap triangles of each closed polyline of an extruded profile, made once per profile; null when they are over
+// CAP_STEPS (the object is drawn open: no caps, its far faces shown).
+const caps = new WeakMap<Dr3dProfile, readonly (readonly number[] | undefined)[] | null>()
+
+function capsOf(profile: Dr3dProfile): readonly (readonly number[] | undefined)[] | null {
+	const held = caps.get(profile)
+
+	if (held !== undefined) return held
+
+	const budget = { steps: CAP_STEPS }
+	const made: (readonly number[] | undefined)[] = []
+	const total = profile.points.length / 2
+
+	for (let polyline = 0; polyline < profile.starts.length; polyline++) {
+		const start = profile.starts[polyline] ?? 0
+		const count = (polyline + 1 < profile.starts.length ? (profile.starts[polyline + 1] ?? 0) : total) - start
+
+		if (profile.closed[polyline] !== 1 || count < 3) {
+			made.push(undefined)
+
+			continue
+		}
+
+		const triangles = triangulate(profile.points, start, count, budget)
+
+		if (triangles === undefined) {
+			caps.set(profile, null)
+
+			return null
+		}
+
+		made.push(triangles)
+	}
+
+	caps.set(profile, made)
+
+	return made
+}
+
 function extrude(mesh: Mesh, place: Placement, object: Extract<Dr3dObject, { kind: "extrude" }>): void {
 	const profile = object.profile
 	const points = profile.points
@@ -890,6 +944,9 @@ function extrude(mesh: Mesh, place: Placement, object: Extract<Dr3dObject, { kin
 	const backPoint = (k: number): Vec3 =>
 		place.point(cx + ((points[k * 2] ?? 0) - cx) * object.backScale, cy + ((points[k * 2 + 1] ?? 0) - cy) * object.backScale, back)
 	const frontPoint = (k: number): Vec3 => place.point(points[k * 2] ?? 0, points[k * 2 + 1] ?? 0, front)
+	const capped = object.closeFront || object.closeBack ? capsOf(profile) : undefined
+
+	if (capped === null) mesh.solid = false
 
 	for (let polyline = 0; polyline < profile.starts.length; polyline++) {
 		const start = profile.starts[polyline] ?? 0
@@ -924,16 +981,17 @@ function extrude(mesh: Mesh, place: Placement, object: Extract<Dr3dObject, { kin
 			)
 		}
 
-		if (!closed || count < 3) continue
+		const triangles = capped?.[polyline]
 
-		const caps = triangulate(points, start, count)
+		if (triangles === undefined) continue
+
 		const capNormal = (k: number, z: number): Vec3 =>
 			place.normalAt(points[k * 2] ?? 0, points[k * 2 + 1] ?? 0, z, 0, 0, z === front ? 1 : -1)
 
-		for (let k = 0; k + 2 < caps.length; k += 3) {
-			const a = caps[k] ?? 0
-			const b = caps[k + 1] ?? 0
-			const c = caps[k + 2] ?? 0
+		for (let k = 0; k + 2 < triangles.length; k += 3) {
+			const a = triangles[k] ?? 0
+			const b = triangles[k + 1] ?? 0
+			const c = triangles[k + 2] ?? 0
 
 			if (object.closeFront) {
 				const [pa, pb, pc] = [frontPoint(a), frontPoint(b), frontPoint(c)]
@@ -1205,8 +1263,6 @@ function packed(r: number, g: number, b: number, alpha: number): Rgba {
 	return ((Math.round(r * 255) << 24) | (Math.round(g * 255) << 16) | (Math.round(b * 255) << 8) | Math.round(alpha * 255)) >>> 0
 }
 
-// Draws `scene` into `list` through `matrix` (the frame's px to the list's), fitted to `width` x `height` px. False
-// when it draws nothing (no visible triangle) or is over its triangle budget.
 // The scene's mesh fitted to `width` x `height` px: per triangle its corners (counter-clockwise on screen) and their
 // colours; undefined when no triangle shows or the scene is over its triangle budget.
 function meshOf(scene: Dr3dScene, width: number, height: number): SceneMesh | undefined {

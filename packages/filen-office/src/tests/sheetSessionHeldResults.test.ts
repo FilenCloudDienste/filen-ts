@@ -5,6 +5,7 @@ import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { CORPUS_DIR } from "./corpusDir"
 import { parts } from "./xlsxWriteFixtures"
 import { cells, firstTile, openFixture, savedBytes, tileEntry, tileTexts } from "./sheetSessionFixtures"
+import { TYPES, relationship } from "./xlsxRefsFixtures"
 
 function changeOf(result: SheetCommandResult): SheetChange {
 	if (!result.ok) throw new Error(`refused: ${result.refusal.reason} ${result.refusal.detail ?? ""}`)
@@ -331,6 +332,46 @@ describe("sheet session: results held from the file", () => {
 		expect(cellXml(sheet, "C1")).toContain("<v>5</v>")
 		expect(fullCalc(workbook)).toBe(true)
 		session.close()
+	})
+
+	it("holds a table's calculated column until a cell of the table changes, whatever the edit's extent", async () => {
+		const rows = Array.from(
+			{ length: 50 },
+			(_, index) =>
+				`<row r="${index + 2}"><c r="A${index + 2}"><v>${index}</v></c><c r="B${index + 2}"><f>SUM(Rates[Amount])</f><v>1225</v></c></row>`
+		).join("")
+		const fixture = {
+			sheets: [
+				{
+					name: "One",
+					body:
+						`<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Amount</t></is></c><c r="B1" t="inlineStr"><is><t>Total</t></is></c></row>${rows}</sheetData>` +
+						'<tableParts count="1"><tablePart r:id="rId1"/></tableParts>',
+					rels: relationship("rId1", "table", "../tables/table1.xml")
+				}
+			],
+			parts: {
+				"xl/tables/table1.xml": {
+					type: TYPES.table,
+					text: '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Rates" displayName="Rates" ref="A1:B51"><tableColumns count="2"><tableColumn id="1" name="Amount"/><tableColumn id="2" name="Total"/></tableColumns></table>'
+				}
+			}
+		}
+		const outside = await openFixture(fixture)
+		const one = outside.info.sheets[0]?.id ?? 0
+		// Cells around the table: their box spans it, none of them is in it.
+		const around = Array.from({ length: 60 }, (_, index) => [index, 4, String(index)] as const)
+
+		changeOf(await outside.session.command({ type: "cells.set", sheet: one, cells: cells([...around, [60, 0, "1"]]) }))
+		expect(tileEntry(await firstTile(outside.session, one), 1, 1)?.text).toBe("1225")
+		expect(fullCalc((await saved(outside.session)).workbook)).toBe(false)
+		outside.session.close()
+
+		const inside = await openFixture(fixture)
+
+		changeOf(await inside.session.command({ type: "cells.set", sheet: one, cells: cells([...around, [10, 0, "100"]]) }))
+		expect(fullCalc((await saved(inside.session)).workbook)).toBe(true)
+		inside.session.close()
 	})
 
 	it("keeps holding a stale legacy array block's result through undo, redo and later edits", async () => {

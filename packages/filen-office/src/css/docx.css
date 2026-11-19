@@ -10,6 +10,9 @@
 }
 
 .fo-docx-pages:focus-visible {
+	/* Transparent until forced colours, which draw it in a system colour where the box-shadow is dropped. */
+	outline: 2px solid transparent;
+	outline-offset: -2px;
 	box-shadow: inset 0 0 0 2px var(--fo-focus-ring, #2563eb);
 }
 
@@ -344,9 +347,11 @@
 	box-sizing: border-box;
 }
 
-/* Marks (spelling, repeated words, find results): a drawing over each page, a path per line and kind. */
-.fo-docx-marks {
+/* Marks (spelling, repeated words, find results): a drawing over each page, a path per line and kind, above
+   everything on the page (objects in front of the text and the caret included). */
+.fo-docx-edit-marks {
 	position: absolute;
+	z-index: 2147483647;
 	left: 0;
 	top: 0;
 	overflow: visible;
@@ -354,11 +359,11 @@
 }
 
 /* Find highlights multiply with the text under them (drawn apart from the other marks). */
-.fo-docx-marks[data-fo-blend] {
+.fo-docx-edit-marks[data-fo-blend] {
 	mix-blend-mode: multiply;
 }
 
-.fo-docx-mark {
+.fo-docx-edit-mark {
 	fill: none;
 	stroke: var(--fo-mark, #dc2626);
 	stroke-width: var(--fo-mark-width, 2px);
@@ -366,26 +371,26 @@
 }
 
 /* A misspelt word: a wavy underline. */
-.fo-docx-mark[data-fo-mark="spelling"] {
+.fo-docx-edit-mark[data-fo-mark="spelling"] {
 	stroke: var(--fo-spelling, #dc2626);
 	stroke-width: var(--fo-spelling-width, 1px);
 	stroke-dasharray: none;
 }
 
 /* A word repeated (the same word twice in a row): a double underline. */
-.fo-docx-mark[data-fo-mark="repeated"] {
+.fo-docx-edit-mark[data-fo-mark="repeated"] {
 	stroke: var(--fo-repeated, #d97706);
 	stroke-width: 1px;
 	stroke-dasharray: none;
 }
 
 /* Find results while editing (the viewer's .fo-docx-find, as marks). */
-.fo-docx-mark[data-fo-mark="find"] {
+.fo-docx-edit-mark[data-fo-mark="find"] {
 	fill: var(--fo-find-bg, rgb(250 204 21 / 0.45));
 	stroke: none;
 }
 
-.fo-docx-mark[data-fo-mark="find-active"] {
+.fo-docx-edit-mark[data-fo-mark="find-active"] {
 	fill: var(--fo-find-active-bg, rgb(249 115 22 / 0.6));
 	stroke: none;
 }
@@ -424,6 +429,25 @@
 @media (prefers-reduced-motion: reduce) {
 	.fo-docx-caret[data-fo-blink] {
 		animation: none;
+	}
+}
+
+/* Forced colours replace author backgrounds, which would lose the caret and selection on the page: both are drawn
+   in system colours instead, the unfocused selection still dimmed. */
+@media (forced-colors: active) {
+	.fo-docx-caret {
+		forced-color-adjust: none;
+		background: CanvasText;
+	}
+
+	.fo-docx-selection {
+		forced-color-adjust: none;
+		background: Highlight;
+		opacity: 0.4;
+	}
+
+	.fo-docx-editor:not([data-fo-focused]) .fo-docx-selection {
+		background: GrayText;
 	}
 }
 

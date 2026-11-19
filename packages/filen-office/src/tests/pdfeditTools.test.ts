@@ -304,30 +304,56 @@ describe("select", () => {
 			ref: { page: 2, id: 1 },
 			rect: [100, 100, 260, 170]
 		})
-		expect(resizeRect([0, 0, 10, 10], "nw", 50, 50, false)).toEqual([6, 6, 10, 10])
-		expect(resizeRect([0, 0, 20, 10], "se", 20, 0, true)).toEqual([0, 0, 40, 20])
+		expect(resizeRect([0, 0, 10, 10], "nw", 50, 50, false, BOX)).toEqual([6, 6, 10, 10])
+		expect(resizeRect([0, 0, 20, 10], "se", 20, 0, true, BOX)).toEqual([0, 0, 40, 20])
+	})
+
+	it("keeps a resize inside the page box, at least the minimum size", () => {
+		let state = selected()
+
+		state = selectPointer(state, pointer("down", [200, 150]), context).state
+		state = selectPointer(state, pointer("move", [900, 1000]), context).state
+		expect(selectPointer(state, pointer("up", [900, 1000]), context).commit).toEqual({
+			kind: "resize",
+			ref: { page: 2, id: 1 },
+			rect: [100, 100, 600, 800]
+		})
+
+		const rect: PdfRect = [100, 100, 200, 150]
+
+		expect(resizeRect(rect, "nw", -500, -500, false, BOX)).toEqual([0, 0, 200, 150])
+		expect(resizeRect(rect, "n", 0, -500, false, BOX)).toEqual([100, 0, 200, 150])
+		expect(resizeRect(rect, "e", 900, 0, false, BOX)).toEqual([100, 100, 600, 150])
+		expect(resizeRect(rect, "s", 0, 900, false, BOX)).toEqual([100, 100, 200, 800])
+		expect(resizeRect(rect, "w", -500, 0, false, BOX)).toEqual([0, 100, 200, 150])
+		// Past the opposite edge: the minimum size wins.
+		expect(resizeRect(rect, "se", -500, -500, false, BOX)).toEqual([100, 100, 104, 104])
+		// Shift: the aspect (2:1) is kept and the height capped to the room left; the width shrinks to match.
+		expect(resizeRect([100, 600, 200, 650], "se", 900, 0, true, BOX)).toEqual([100, 600, 500, 800])
+		expect(resizeRect([100, 20, 200, 70], "nw", -900, 0, true, BOX)).toEqual([60, 0, 200, 70])
+		expect(resizeRect([100, 600, 200, 650], "sw", -50, 0, true, BOX)).toEqual([50, 600, 200, 675])
 	})
 
 	it("nudges, resizes, deletes and deselects from the keyboard; never moves markups or locked ones", () => {
 		const state = selected()
 
-		expect(selectKey(state, { key: "ArrowRight", shift: true }).commit).toEqual({
+		expect(selectKey(state, { key: "ArrowRight", shift: true }, BOX).commit).toEqual({
 			kind: "move",
 			ref: { page: 2, id: 1 },
 			dx: 10,
 			dy: 0
 		})
-		expect(selectKey(state, { key: "ArrowDown", alt: true }).commit).toEqual({
+		expect(selectKey(state, { key: "ArrowDown", alt: true }, BOX).commit).toEqual({
 			kind: "resize",
 			ref: { page: 2, id: 1 },
 			rect: [100, 100, 200, 151]
 		})
-		expect(selectKey(state, { key: "Delete" }).commit).toEqual({ kind: "delete", ref: { page: 2, id: 1 } })
-		expect(selectKey(state, { key: "Escape" }).commit).toEqual({ kind: "select", ref: null })
+		expect(selectKey(state, { key: "Delete" }, BOX).commit).toEqual({ kind: "delete", ref: { page: 2, id: 1 } })
+		expect(selectKey(state, { key: "Escape" }, BOX).commit).toEqual({ kind: "select", ref: null })
 
 		const onMarkup = selectPointer(SELECT_IDLE, pointer("down", [250, 130]), context).state
 
-		expect(selectKey(onMarkup, { key: "ArrowLeft" }).commit).toBeUndefined()
+		expect(selectKey(onMarkup, { key: "ArrowLeft" }, BOX).commit).toBeUndefined()
 
 		const locked = selectPointer(SELECT_IDLE, pointer("down", [110, 110]), {
 			annotations: [info(3, [100, 100, 200, 150], { locked: true })],
@@ -335,7 +361,36 @@ describe("select", () => {
 		}).state
 
 		expect(locked.drag).toBeNull()
-		expect(selectKey(locked, { key: "Backspace" }).commit).toBeUndefined()
+		expect(selectKey(locked, { key: "Backspace" }, BOX).commit).toBeUndefined()
+	})
+
+	it("keeps a keyboard nudge and resize inside the page box", () => {
+		const nearEdge: SelectState = { selected: info(4, [520, 100, 595, 150]), drag: null }
+
+		const nudged = selectKey(nearEdge, { key: "ArrowRight", shift: true }, BOX)
+
+		expect(nudged.commit).toEqual({ kind: "move", ref: { page: 2, id: 4 }, dx: 5, dy: 0 })
+		expect(nudged.state.selected?.rect).toEqual([525, 100, 600, 150])
+		expect(selectKey(nudged.state, { key: "ArrowRight", shift: true }, BOX)).toEqual({ state: nudged.state })
+		expect(selectKey(nudged.state, { key: "ArrowLeft" }, BOX).commit).toEqual({
+			kind: "move",
+			ref: { page: 2, id: 4 },
+			dx: -1,
+			dy: 0
+		})
+
+		const resized = selectKey(nearEdge, { key: "ArrowRight", alt: true, shift: true }, BOX)
+
+		expect(resized.commit).toEqual({ kind: "resize", ref: { page: 2, id: 4 }, rect: [520, 100, 600, 150] })
+		expect(selectKey(resized.state, { key: "ArrowRight", alt: true }, BOX)).toEqual({ state: resized.state })
+
+		const small: SelectState = { selected: info(5, [595, 0, 600, 5]), drag: null }
+
+		expect(selectKey(small, { key: "ArrowUp", alt: true, shift: true }, BOX).commit).toEqual({
+			kind: "resize",
+			ref: { page: 2, id: 5 },
+			rect: [595, 0, 600, 4]
+		})
 	})
 
 	it("refreshes the selection after a change and drops it when gone", () => {

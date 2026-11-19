@@ -953,7 +953,6 @@ class PartBuilder {
 	}
 
 	// A style reference's id; a malformed one counts as absent.
-	// A style reference's id; a malformed one counts as absent.
 	private styleId(node: number): number {
 		return this.reader.malformedNodes.has(node) ? -1 : this.shared.strings.intern(this.reader.attr(node, Ns.W, "val"))
 	}

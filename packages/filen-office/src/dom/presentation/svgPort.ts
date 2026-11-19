@@ -1,3 +1,4 @@
+import { clearTimer, setTimer } from "@filen/shared/savePort"
 import { prepareSvgThumb } from "@filen/shared/svgThumb"
 import type { BitmapLike } from "./protocol"
 
@@ -26,19 +27,6 @@ export const MAX_SVG_BYTES = 16 * 1024 * 1024
 export const MAX_SVG_SIDE = 4096
 // How long a worker waits for the page's raster.
 const SVG_TIMEOUT_MS = 10_000
-
-// Timers through globalThis: the module type-checks without DOM or Node typings.
-export function setTimer(run: () => void, ms: number): unknown {
-	const set: unknown = Reflect.get(globalThis, "setTimeout")
-
-	return typeof set === "function" ? Reflect.apply(set, globalThis, [run, ms]) : undefined
-}
-
-export function clearTimer(handle: unknown): void {
-	const clear: unknown = Reflect.get(globalThis, "clearTimeout")
-
-	if (typeof clear === "function") Reflect.apply(clear, globalThis, [handle])
-}
 
 export function isBitmap(value: unknown): value is BitmapLike {
 	return (

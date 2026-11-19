@@ -1,5 +1,6 @@
 import { OpcPackage, partKey, PRESENTATION_ZIP_LIMITS, type ByteSource } from "../../../core/opc/index"
 import { PresentationError, type Deck, type ShapeNode } from "../../../core/presentation/model"
+import { isRawPart } from "../../../core/presentation/edit/ops"
 import { rebaseOdpDeck } from "../../../core/odp/write/rebase"
 import {
 	diagramDrawingRelId,
@@ -245,7 +246,7 @@ async function insertedDiagrams(
 type DiagramFrameRef = Extract<NonNullable<ShapeNode["frame"]>, { kind: "smartart" }>
 
 function heldNames(frame: DiagramFrameRef): string[] {
-	return [frame.data, frame.layout, frame.style, frame.colors, frame.drawing ?? ""].filter(name => name.startsWith("raw:"))
+	return [frame.data, frame.layout, frame.style, frame.colors, frame.drawing ?? ""].filter(isRawPart)
 }
 
 // The "raw:" names anywhere in `values` (the history's ops and inverses: frames and sources they hold).
@@ -254,7 +255,7 @@ function heldNamesIn(values: readonly unknown[]): Set<string> {
 	const seen = new WeakSet<object>()
 	const visit = (value: unknown, depth: number): void => {
 		if (typeof value === "string") {
-			if (value.startsWith("raw:")) out.add(value)
+			if (isRawPart(value)) out.add(value)
 
 			return
 		}

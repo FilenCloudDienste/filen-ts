@@ -31,7 +31,7 @@ async function axialLine(scaled: boolean): Promise<number[]> {
 	list.addItem(ItemKind.PATH, [1, 0, 0, 1, 0, 0], 0, 0, 100, 50, firstCommand, firstCoord, paint, -1, -1, -1, 0, 0)
 
 	const writer = await PdfWriter.create({ deterministic: true, deflate: null })
-	const fonts = new PdfFontSet({ assets: nodeFontAssets, deterministic: true })
+	const fonts = new PdfFontSet({ assets: nodeFontAssets })
 	const page = writer.beginPage(200, 200)
 
 	await paintDrawingPdf(

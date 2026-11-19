@@ -13,6 +13,7 @@ import { equalBytes } from "./xlsxWriteFixtures"
 
 const COMMITTED = join(import.meta.dirname, "..", "..", "corpus")
 const FAMILIES = ["csv", "tsv"] as const
+const BROKEN_QUOTES = join(CORPUS_DIR, "csv", "lo__fdo48621_broken_quotes.csv")
 const FILES = FAMILIES.flatMap(family =>
 	existsSync(join(CORPUS_DIR, family)) ? readdirSync(join(CORPUS_DIR, family)).map(name => ({ family, name })) : []
 )
@@ -144,12 +145,8 @@ describe.skipIf(FILES.length === 0)("CSV and TSV corpus", () => {
 	// deliberately not followed. These pin the current one: a quoted run ends at its closing quote and the characters
 	// after it join the field, quotes and all. Microsoft publishes no specification of how Excel reads malformed quotes,
 	// so this documents current behaviour, not confirmed Office parity.
-	it("pins the reading of lo__fdo48621_broken_quotes.csv's malformed quotes", () => {
-		const path = join(CORPUS_DIR, "csv", "lo__fdo48621_broken_quotes.csv")
-
-		if (!existsSync(path)) return
-
-		const { rows, format } = parseCsvFile(new Uint8Array(readFileSync(path)), false)
+	it.skipIf(!existsSync(BROKEN_QUOTES))("pins the reading of lo__fdo48621_broken_quotes.csv's malformed quotes", () => {
+		const { rows, format } = parseCsvFile(new Uint8Array(readFileSync(BROKEN_QUOTES)), false)
 
 		expect(format.delimiter).toBe(",")
 		expect(rows[1]).toEqual(['abc d "ef"', "shall be:", 'abc" d "ef'])

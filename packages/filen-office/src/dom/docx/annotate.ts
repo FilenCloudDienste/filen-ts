@@ -1,19 +1,16 @@
 import {
-	BreakType,
-	FieldCharType,
 	Item,
 	Revision,
 	RevisionView,
 	SOURCE_INTS,
 	SourceInt,
-	TRANSPARENT,
 	revisionAuthors,
 	type DocxModel,
 	type PageDisplayList,
 	type StoryPart
 } from "../../core/docx/index"
+import { MAX_COMMENT_CHARS, MAX_RECTS, dateOf, preview } from "../../core/docx/model/comments"
 import { Ns } from "../../core/docx/model/namespaces"
-import { symbolTable, symbolToUnicode } from "../../core/fonts/index"
 import { FRAGMENT_FLOATS, FRAGMENT_INTS, HitTester, LINE_FLOATS, LINE_INTS, LineInt, type StyleTable } from "../../core/text/index"
 import {
 	EMPTY_ANNOTATIONS,
@@ -33,9 +30,6 @@ import {
 // line are interpolated over the fragment holding them: boxes for balloons' anchors and change bars, not
 // for drawing text.
 
-const MAX_PREVIEW = 160
-const MAX_COMMENT_CHARS = 20_000
-const MAX_RECTS = 512
 const MAX_SPAN_PARAGRAPHS = 4096
 const MAX_PROPERTIES = 12
 const SEARCH_CONTEXT = 16
@@ -62,12 +56,6 @@ interface Position {
 
 const OFF_VALUES = new Set(["0", "false", "off", "none"])
 
-function preview(text: string): string {
-	const flat = text.replace(/\s+/g, " ").trim()
-
-	return flat.length > MAX_PREVIEW ? `${flat.slice(0, MAX_PREVIEW - 1)}…` : flat
-}
-
 function paragraphOf(part: StoryPart, item: number): number {
 	for (let at = item; at >= 0; at = part.parent(at)) {
 		const kind = part.kinds[at] ?? 0
@@ -85,94 +73,9 @@ function isStoryRoot(kind: number): boolean {
 
 // paragraphText (StoryPart) with the offset reached at every item kept.
 function walkParagraph(part: StoryPart, paragraph: number, view: RevisionView): Walked {
-	const end = part.end(paragraph)
-	const offsets = new Int32Array(end - paragraph + 1)
-	let out = ""
-	let filled = 1
-	let fieldDepth = 0
-	let codeDepth = 0
-	let paragraphs = 0
-	let joinNext = false
-	const codeStack: number[] = []
+	const offsets = new Int32Array(part.end(paragraph) - paragraph + 1)
 
-	for (let i = paragraph + 1; i < end;) {
-		for (; filled <= i - paragraph; filled++) offsets[filled] = out.length
-
-		const kind = part.kinds[i] ?? 0
-
-		if (view !== RevisionView.Markup && part.hidden(i, view)) {
-			i = part.end(i)
-
-			continue
-		}
-
-		switch (kind) {
-			case Item.FieldChar: {
-				const type = part.fieldCharType(i)
-
-				if (type === FieldCharType.Begin) {
-					codeStack.push(codeDepth)
-					fieldDepth++
-					codeDepth = fieldDepth
-				} else if (type === FieldCharType.Separate) {
-					codeDepth = codeStack[codeStack.length - 1] ?? 0
-				} else if (type === FieldCharType.End && fieldDepth > 0) {
-					fieldDepth--
-					codeDepth = codeStack.pop() ?? 0
-				}
-
-				break
-			}
-			case Item.Text:
-			case Item.DeletedText:
-				if (codeDepth === 0) out += part.text(i)
-
-				break
-			case Item.Tab:
-			case Item.PositionalTab:
-				if (codeDepth === 0) out += "\t"
-
-				break
-			case Item.Break:
-				if (codeDepth === 0) out += part.breakType(i) === BreakType.TextWrapping ? "\n" : "\f"
-
-				break
-			case Item.CarriageReturn:
-				if (codeDepth === 0) out += "\n"
-
-				break
-			case Item.NoBreakHyphen:
-				if (codeDepth === 0) out += "‑"
-
-				break
-			case Item.SoftHyphen:
-				if (codeDepth === 0) out += "­"
-
-				break
-			case Item.Symbol: {
-				const char = part.symbol(i).char
-
-				if (codeDepth === 0 && char > 0 && char <= 0x10ffff) out += String.fromCodePoint(char)
-
-				break
-			}
-			case Item.Paragraph:
-				if (paragraphs++ > 0 && !joinNext) out += "\n"
-
-				joinNext = part.paragraphMarkHidden(i, view)
-
-				break
-		}
-
-		i =
-			TRANSPARENT[kind] === 1 || kind === Item.Paragraph || kind === Item.Table || kind === Item.Row || kind === Item.Cell
-				? i + 1
-				: part.end(i)
-	}
-
-	for (; filled < offsets.length; filled++) offsets[filled] = out.length
-
-	return { text: out, offsets }
+	return { text: part.paragraphText(paragraph, view, offsets), offsets }
 }
 
 // A comment run's text as Word shows it: symbol-font characters (w:sym) as the Unicode characters they
@@ -202,9 +105,7 @@ function runText(part: StoryPart, run: number): string {
 
 				break
 			case Item.Symbol: {
-				const symbol = part.symbol(item)
-				const table = symbol.font === undefined ? undefined : symbolTable(symbol.font)
-				const char = table === undefined ? symbol.char : symbolToUnicode(table, symbol.char) || symbol.char
+				const char = part.symbolChar(item)
 
 				if (char > 0 && char <= 0x10ffff) out += String.fromCodePoint(char)
 
@@ -795,10 +696,6 @@ function xAt(page: PageDisplayList, line: number, offset: number): number {
 	}
 
 	return x
-}
-
-function dateOf(value: string | undefined): string {
-	return value !== undefined && value.length <= 40 && !Number.isNaN(Date.parse(value)) ? value : ""
 }
 
 // `styles`: the layout's text styles, to place positions inside lines exactly (by measuring).

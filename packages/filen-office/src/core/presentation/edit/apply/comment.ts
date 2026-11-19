@@ -306,5 +306,11 @@ export const applyComment: ApplyFamily<CommentOp> = {
 			touches.push({ kind: "presentation", what: "authors" })
 
 		return touches
+	},
+	// A restore's comments, held off the op.
+	held(op) {
+		const restore = RESTORES.get(op)
+
+		return restore === undefined ? 0 : inverseBytes(restore.entries)
 	}
 }

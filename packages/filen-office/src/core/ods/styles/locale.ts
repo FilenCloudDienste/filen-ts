@@ -93,12 +93,25 @@ export function odsLocale(language: string | undefined, country: string | undefi
 
 // The number formatter's language data for a locale id the converted codes carry: separators of the locale, names
 // as en-US (LibreOffice's localized month and day names are not carried).
+// Asked for every formatted value: one answer per locale id, built once (the first listing of an id wins).
+const NUMFMT_LOCALES = new Map<number, NumFmtLocale | undefined>()
+
 export function numFmtLocaleFor(lcid: number): NumFmtLocale | undefined {
+	if (NUMFMT_LOCALES.has(lcid)) return NUMFMT_LOCALES.get(lcid)
+
+	let locale: NumFmtLocale | undefined
+
 	for (const facts of LOCALES.values()) {
-		if (facts.lcid === lcid) return { ...NUMFMT_EN_US, decimal: facts.decimal, group: facts.group }
+		if (facts.lcid === lcid) {
+			locale = { ...NUMFMT_EN_US, decimal: facts.decimal, group: facts.group }
+
+			break
+		}
 	}
 
-	return undefined
+	NUMFMT_LOCALES.set(lcid, locale)
+
+	return locale
 }
 
 // A [$-xxxx] tag for a locale id.

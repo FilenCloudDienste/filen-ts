@@ -1,6 +1,6 @@
 import type { PDFDocument, PDFObject, PDFPage, PDFWidget } from "mupdf"
 import type { PdfPageRect } from "../../../core/pdfedit/visualSignature"
-import { deref } from "../fields"
+import { deref, lazyPages } from "../fields"
 
 // AcroForm fields of an open MuPDF document: what a field overlay shows (kind, value, flags, options, the /TU
 // label) and the value setters a form edit applies. Each setter changes one field and regenerates the appearance
@@ -231,24 +231,20 @@ function findWidget(page: PDFPage, objectNumber: number): PDFWidget | null {
 	return page.getWidgets().find(widget => widget.getObject().asIndirect() === objectNumber) ?? null
 }
 
-// Page index by page object number, built only when a field has widgets beyond the page being edited.
-function pageIndex(document: PDFDocument, pageObject: PDFObject): number | null {
-	if (!pageObject.isIndirect()) return null
+// The 0-based index of the page with a given object number. An edit session passes its own (PdfCommandContext.pageOf);
+// without one, a map is built on the first lookup of a call.
+export type PdfPageResolver = (pageObject: number) => number | undefined
 
-	const target = pageObject.asIndirect()
-	const count = document.countPages()
+function resolverOf(document: PDFDocument, pageOf: PdfPageResolver | undefined): PdfPageResolver {
+	if (pageOf !== undefined) return pageOf
 
-	for (let index = 0; index < count; index++) {
-		const candidate = document.findPage(index)
+	const pages = lazyPages(document)
 
-		if (candidate.isIndirect() && candidate.asIndirect() === target) return index
-	}
-
-	return null
+	return pageObject => pages().get(pageObject)
 }
 
 // Regenerates the appearance of every widget of `widget`'s field; the pages touched, `pageIndex0` first.
-function refreshField(document: PDFDocument, page: PDFPage, pageIndex0: number, widget: PDFWidget): number[] {
+function refreshField(document: PDFDocument, page: PDFPage, pageIndex0: number, widget: PDFWidget, pageOf: PdfPageResolver): number[] {
 	const pages = new Set<number>([pageIndex0])
 	const own = widget.getObject().asIndirect()
 
@@ -257,17 +253,23 @@ function refreshField(document: PDFDocument, page: PDFPage, pageIndex0: number, 
 	for (const number of siblingWidgets(widget.getObject())) {
 		if (number === own) continue
 
-		const sibling = document.newIndirect(number).resolve()
-		const index = pageIndex(document, sibling.get("P"))
+		const pageObject = document.newIndirect(number).resolve().get("P")
+		const index = pageObject.isIndirect() ? pageOf(pageObject.asIndirect()) : undefined
 
-		if (index === null) continue
+		if (index === undefined) continue
 
+		// A page loaded here is closed again: MuPDF keeps a page open while a wrapper of it lives.
 		const target = index === pageIndex0 ? page : document.loadPage(index)
-		const other = findWidget(target, number)
 
-		if (other !== null) {
-			other.update()
-			pages.add(index)
+		try {
+			const other = findWidget(target, number)
+
+			if (other !== null) {
+				other.update()
+				pages.add(index)
+			}
+		} finally {
+			if (target !== page) target.destroy()
 		}
 	}
 
@@ -328,7 +330,8 @@ export function setFieldValue(
 	page: PDFPage,
 	pageIndex0: number,
 	widgetObject: number,
-	value: PdfFieldValue
+	value: PdfFieldValue,
+	pageOf?: PdfPageResolver
 ): number[] {
 	const widget = findWidget(page, widgetObject)
 
@@ -370,23 +373,14 @@ export function setFieldValue(
 		}
 	}
 
-	return refreshField(document, page, pageIndex0, widget)
+	return refreshField(document, page, pageIndex0, widget, resolverOf(document, pageOf))
 }
 
 // Every widget of the document's fields by page (from the AcroForm field tree; pages without fields are never
 // loaded).
-function widgetPages(document: PDFDocument): Map<number, Set<number>> {
+function widgetPages(document: PDFDocument, pageOf: PdfPageResolver): Map<number, Set<number>> {
 	const fields = deref(document.getTrailer().get("Root", "AcroForm", "Fields"))
 	const byPage = new Map<number, Set<number>>()
-	const pageNumbers = new Map<number, number>()
-	const count = document.countPages()
-
-	for (let index = 0; index < count; index++) {
-		const page = document.findPage(index)
-
-		if (page.isIndirect()) pageNumbers.set(page.asIndirect(), index)
-	}
-
 	const seen = new Set<number>()
 	const visit = (node: PDFObject, depth: number): void => {
 		if (depth > MAX_PARENT_DEPTH || seen.size > MAX_KIDS) return
@@ -406,7 +400,7 @@ function widgetPages(document: PDFDocument): Map<number, Set<number>> {
 		}
 
 		const pageObject = dict.get("P")
-		const page = pageObject.isIndirect() ? pageNumbers.get(pageObject.asIndirect()) : undefined
+		const page = pageObject.isIndirect() ? pageOf(pageObject.asIndirect()) : undefined
 
 		if (page !== undefined && node.isIndirect()) {
 			const set = byPage.get(page) ?? new Set<number>()
@@ -423,15 +417,21 @@ function widgetPages(document: PDFDocument): Map<number, Set<number>> {
 
 // Clear form: every field back to its default value (/DV, else empty), appearances regenerated. Returns the pages
 // touched.
-export function resetForm(document: PDFDocument): number[] {
+export function resetForm(document: PDFDocument, pageOf?: PdfPageResolver): number[] {
 	// No field list: every field (an empty list resets nothing).
 	document.resetForm(document.newNull(), true)
 
-	const byPage = widgetPages(document)
+	const byPage = widgetPages(document, resolverOf(document, pageOf))
 
 	for (const [index, widgets] of byPage) {
-		for (const widget of document.loadPage(index).getWidgets()) {
-			if (widgets.has(widget.getObject().asIndirect())) widget.update()
+		const page = document.loadPage(index)
+
+		try {
+			for (const widget of page.getWidgets()) {
+				if (widgets.has(widget.getObject().asIndirect())) widget.update()
+			}
+		} finally {
+			page.destroy()
 		}
 	}
 
@@ -440,15 +440,21 @@ export function resetForm(document: PDFDocument): number[] {
 
 // Required fields without a value, for the warning on save (never a refusal). Fields that cannot be filled here
 // (read-only, password) are left out.
-export function missingRequiredFields(document: PDFDocument): PdfFormField[] {
+export function missingRequiredFields(document: PDFDocument, pageOf?: PdfPageResolver): PdfFormField[] {
 	const missing: PdfFormField[] = []
 
-	for (const [index] of [...widgetPages(document)].sort((a, b) => a[0] - b[0])) {
-		for (const field of readPageFields(document.loadPage(index), index)) {
-			const empty = field.kind === "checkbox" || field.kind === "radio" ? field.value === "Off" : field.value === ""
+	for (const [index] of [...widgetPages(document, resolverOf(document, pageOf))].sort((a, b) => a[0] - b[0])) {
+		const page = document.loadPage(index)
 
-			if (field.required && empty && !field.readOnly && !field.password && missing.every(other => other.name !== field.name))
-				missing.push(field)
+		try {
+			for (const field of readPageFields(page, index)) {
+				const empty = field.kind === "checkbox" || field.kind === "radio" ? field.value === "Off" : field.value === ""
+
+				if (field.required && empty && !field.readOnly && !field.password && missing.every(other => other.name !== field.name))
+					missing.push(field)
+			}
+		} finally {
+			page.destroy()
 		}
 	}
 

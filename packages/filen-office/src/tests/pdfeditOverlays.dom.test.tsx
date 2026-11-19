@@ -183,14 +183,36 @@ describe("tool overlays", () => {
 		expect(editor.style.fontSize).toBe("24px")
 		expect(editor.style.textAlign).toBe("center")
 
-		act(() => {
-			editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }))
-		})
-		expect(onDone).toHaveBeenCalledTimes(1)
+		// The textarea is controlled: React tracks its value, so it is set through the prototype setter.
+		const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+
+		if (setValue === undefined) throw new Error("no value setter")
 
 		act(() => {
-			editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+			setValue.call(editor, "Hello")
+			editor.dispatchEvent(new Event("input", { bubbles: true }))
 		})
-		expect(onDone).toHaveBeenCalledTimes(1)
+		expect(onInput).toHaveBeenLastCalledWith("Hello")
+
+		const finishes = (init: KeyboardEventInit): number => {
+			const before = onDone.mock.calls.length
+
+			act(() => {
+				editor.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true }))
+			})
+
+			return onDone.mock.calls.length - before
+		}
+
+		expect(finishes({ key: "Enter", ctrlKey: true })).toBe(1)
+		expect(finishes({ key: "Enter", metaKey: true })).toBe(1)
+		expect(finishes({ key: "Enter" })).toBe(0)
+
+		const beforeBlur = onDone.mock.calls.length
+
+		act(() => {
+			editor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
+		})
+		expect(onDone.mock.calls.length - beforeBlur).toBe(1)
 	})
 })

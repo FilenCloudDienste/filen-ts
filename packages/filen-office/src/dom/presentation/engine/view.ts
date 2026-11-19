@@ -23,7 +23,7 @@ import type { SlideRender } from "../../../core/presentation/output"
 import type { RenderServices, TextLayoutRequest, TextLayoutResult } from "../../../core/presentation/render/services"
 import type { PlaceholderPrompts } from "../../../core/presentation/render/prompts"
 import { renderSlide, type RenderOptions } from "../../../core/presentation/render/slide"
-import { fontRequests, layoutBody, type TextEnvironment } from "../../../core/presentation/text/body"
+import { fontRequests, layoutBody, type LayoutOptions, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, shapeBodyContext, type BodyContext, type TextFonts } from "../../../core/presentation/text/resolve"
 import { effectiveClrMap, resolveColor, themeOf, themeTypeface, toRgba, type PresentationTheme } from "../../../core/presentation/theme"
 import type { DataPoint } from "../../../core/smartart/data"
@@ -93,10 +93,16 @@ interface ViewText {
 	pending: Promise<boolean> | undefined
 	// Registrations of `fonts` already sent to the page.
 	replayed: number
-	// The request of one shape's body, captured during a render (shapeText).
-	capture: { readonly shape: ShapeRef; request: TextLayoutRequest | undefined } | undefined
+	// The requests of shapes' bodies, captured during renders (one per shapeText call in flight: any render fills
+	// every capture its shape matches).
+	readonly captures: Set<TextCapture>
 	// shapeText answers by shape, at the slide revision they were read at.
 	readonly shapes: Map<string, { readonly revision: number; readonly request: TextLayoutRequest }>
+}
+
+interface TextCapture {
+	readonly shape: ShapeRef
+	request: TextLayoutRequest | undefined
 }
 
 interface ViewState {
@@ -135,7 +141,7 @@ function stateOf(session: EngineSession): ViewState {
 	if (kept !== undefined) {
 		// Its answers were read from the previous reading.
 		kept.shapes.clear()
-		kept.capture = undefined
+		kept.captures.clear()
 
 		if (kept.realm !== realm) kept.fonts.dispose()
 	}
@@ -164,7 +170,7 @@ function stateOf(session: EngineSession): ViewState {
 							missing: new Map<string, FontRequest>(),
 							pending: undefined,
 							replayed: 0,
-							capture: undefined,
+							captures: new Set(),
 							shapes: new Map()
 						}
 					})()
@@ -442,20 +448,22 @@ function smartArtMeasurer(
 }
 
 function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequest): TextLayoutResult | undefined {
-	const capture = text.capture
 	const own = request.cell === undefined
-	const wanted = capture?.shape.cell
 
 	// A layer names the node that owns its shape (a layout's or master's shape drawn on a slide names that layout or
 	// master), so the slide shape's own body is the one captured; a table cell's body is captured for that cell only.
-	if (
-		capture !== undefined &&
-		request.prompt !== true &&
-		capture.shape.slide === request.owner.ref &&
-		capture.shape.id === request.shape.id &&
-		(wanted === undefined ? own : request.cell?.row === wanted.row && request.cell.column === wanted.col)
-	)
-		capture.request = request
+	if (request.prompt !== true) {
+		for (const capture of text.captures) {
+			const wanted = capture.shape.cell
+
+			if (
+				capture.shape.slide === request.owner.ref &&
+				capture.shape.id === request.shape.id &&
+				(wanted === undefined ? own : request.cell?.row === wanted.row && request.cell.column === wanted.col)
+			)
+				capture.request = request
+		}
+	}
 
 	// A shape body with nothing visible in it paints nothing: the render hands it over only so the editor can enter it.
 	if (own && !visibleText(request.body)) return undefined
@@ -484,15 +492,12 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 		}
 	}
 
-	const index = slideIndexOf(request.deck, request.slide)
-	const result = layoutBody(resolved, { width: request.width, height: request.height }, text.environment, {
-		fields: { slideNumber: request.deck.firstSlideNumber + Math.max(0, index), now: new Date() },
-		hyperlinks: true,
-		// ODF shrink-to-fit names no scale: LibreOffice finds it as it lays the text out.
-		...(request.deck.format === "odp" ? { shrinkOnLayout: true } : {}),
-		// Table cells keep the face's own line height (LibreOffice 7.5, measured).
-		...(request.cell === undefined ? {} : { lineMetrics: "face" as const })
-	})
+	const result = layoutBody(
+		resolved,
+		{ width: request.width, height: request.height },
+		text.environment,
+		layoutOptionsOf(request.deck, request.slide, request.cell !== undefined)
+	)
 	const answer = { page: result.page, height: result.height }
 
 	// Laid out with every face it names (a missing one renders the slide again once loaded).
@@ -577,6 +582,19 @@ function slideIndexOf(deck: EngineSession["deck"], node: TextLayoutRequest["slid
 	if (index >= 0 || node.kind !== "notes") return index
 
 	return deck.slides.findIndex(ref => deck.nodes.get(ref)?.notes === node.ref)
+}
+
+// The options a body of `slide` (a slide or notes page) is laid out with, by the render and by the editor alike: the
+// editor's line breaks are the render's. Made per call (the slide number follows a reorder, the date the clock).
+function layoutOptionsOf(deck: Deck, slide: SlideNode, cell: boolean): LayoutOptions {
+	return {
+		fields: { slideNumber: deck.firstSlideNumber + Math.max(0, slideIndexOf(deck, slide)), now: new Date() },
+		hyperlinks: true,
+		// ODF shrink-to-fit names no scale: LibreOffice finds it as it lays the text out.
+		...(deck.format === "odp" ? { shrinkOnLayout: true } : {}),
+		// Table cells keep the face's own line height (LibreOffice 7.5, measured).
+		...(cell ? { lineMetrics: "face" as const } : {})
+	}
 }
 
 // Loads the faces text asked for and sends the page the ones newly registered; whether any was missing.
@@ -713,16 +731,16 @@ export const presentationTextServices: TextServices = {
 
 		if (held === undefined || held.revision !== node.revision) {
 			const signal = { aborted: false, onAbort: () => undefined }
-			const capture: NonNullable<ViewText["capture"]> = { shape, request: undefined }
+			const capture: TextCapture = { shape, request: undefined }
 
-			text.capture = capture
+			text.captures.add(capture)
 
 			try {
 				const render = node.kind === "notes" ? renderNodeFor : renderSlideFor
 
 				await render({ session, signal, lane: "priority", slicing }, shape.slide)
 			} finally {
-				text.capture = undefined
+				text.captures.delete(capture)
 			}
 
 			if (capture.request === undefined) return refused("notFound", "the shape has no text body")
@@ -740,22 +758,7 @@ export const presentationTextServices: TextServices = {
 			prepare: async requests => {
 				await prepareFaces(session, text, requests)
 			},
-			options: {
-				fields: {
-					slideNumber:
-						session.deck.firstSlideNumber +
-						Math.max(
-							0,
-							node.kind === "notes"
-								? session.deck.slides.findIndex(ref => session.deck.nodes.get(ref)?.notes === shape.slide)
-								: session.deck.slides.indexOf(shape.slide)
-						),
-					now: new Date()
-				},
-				hyperlinks: true,
-				...(session.deck.format === "odp" ? { shrinkOnLayout: true } : {}),
-				...(request.cell === undefined ? {} : { lineMetrics: "face" as const })
-			},
+			options: layoutOptionsOf(session.deck, node, request.cell !== undefined),
 			// PowerPoint refits a body's autofit as it is edited; an ODF one shrinks on every layout (shrinkOnLayout).
 			refit: session.deck.format !== "odp" && request.cell === undefined && node.kind !== "notes",
 			revision: held.revision

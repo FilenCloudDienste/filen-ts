@@ -224,6 +224,8 @@ const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">",
 const BREAKS = new Set(["p", "div", "br", "li"])
 // Rich text longer than this is cut before it is read: a comment is never megabytes of markup.
 const MAX_RICH_CHARS = 1 << 20
+// The farthest an entity's ";" may be from its "&" ("&#x10FFFF;" and every named entity fit).
+const MAX_ENTITY_CHARS = 12
 
 function codePoint(digits: string, radix: number): string {
 	const code = Number.parseInt(digits, radix)
@@ -236,6 +238,17 @@ function decodeEntity(name: string): string {
 	if (name.startsWith("#")) return codePoint(name.slice(1), 10)
 
 	return ENTITIES[name] ?? ""
+}
+
+// The index of the ";" ending the entity that starts at `start` (an "&"), or -1 when none is near enough.
+function entityEnd(source: string, start: number): number {
+	const limit = Math.min(source.length, start + MAX_ENTITY_CHARS + 1)
+
+	for (let at = start + 1; at < limit; at++) {
+		if (source.charCodeAt(at) === 0x3b) return at
+	}
+
+	return -1
 }
 
 // Rich text (/RC, XHTML) as plain text: tags dropped, block ends and <br> as line breaks, entities decoded. The result
@@ -263,9 +276,10 @@ export function richTextToPlain(rich: string): string {
 
 			index = end + 1
 		} else if (char === "&") {
-			const end = source.indexOf(";", index + 1)
+			// An entity ends within MAX_ENTITY_CHARS: the search stops there, so a run of "&" without ";" stays linear.
+			const end = entityEnd(source, index)
 
-			if (end < 0 || end - index > 12) {
+			if (end < 0) {
 				out += "&"
 				index += 1
 			} else {

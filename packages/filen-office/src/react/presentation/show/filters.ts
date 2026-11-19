@@ -141,7 +141,7 @@ function one(name: string, arg: string, q: number): FilterFrame {
 		case "fade":
 			return { ...WHOLE, opacity: q }
 		case "wipe":
-			return { ...WHOLE, ...clip(reveal("wipe", { dir: SIDES[arg] ?? "r" }, q)) }
+			return { ...WHOLE, ...clip(reveal("wipe", { dir: (Object.hasOwn(SIDES, arg) ? SIDES[arg] : undefined) ?? "r" }, q)) }
 		case "blinds":
 			return { ...WHOLE, ...clip(reveal("blinds", { dir: arg === "vertical" ? "vert" : "horz" }, q)) }
 		case "checkerboard":
@@ -149,7 +149,7 @@ function one(name: string, arg: string, q: number): FilterFrame {
 		case "randombar":
 			return { ...WHOLE, ...clip(reveal("randomBar", { dir: arg === "vertical" ? "vert" : "horz" }, q)) }
 		case "strips":
-			return { ...WHOLE, ...clip(reveal("strips", { dir: CORNERS[arg] ?? "rd" }, q)) }
+			return { ...WHOLE, ...clip(reveal("strips", { dir: (Object.hasOwn(CORNERS, arg) ? CORNERS[arg] : undefined) ?? "rd" }, q)) }
 		case "barn":
 			return {
 				...WHOLE,
@@ -198,6 +198,28 @@ function clip(shape: ClipShape | undefined): Pick<FilterFrame, "clip"> {
 	return shape === undefined ? {} : { clip: shape }
 }
 
+// Longer parts and lists are not ECMA filters; bounding them keeps the per-frame parse cheap for any file.
+const MAX_FILTER_PART = 64
+const MAX_FILTER_PARTS = 8
+
+// "name" or "name(argument)" with optional whitespace around each piece; the argument holds no ")". Linear: a
+// backtracking regex here is cubic in a run of spaces.
+function parseFilter(part: string): { name: string; argument: string } | undefined {
+	if (part.length > MAX_FILTER_PART) return undefined
+
+	const open = part.indexOf("(")
+	const name = part.slice(0, open < 0 ? undefined : open).trim()
+
+	if (!/^[A-Za-z]+$/u.test(name)) return undefined
+	if (open < 0) return { name, argument: "" }
+
+	const close = part.indexOf(")", open + 1)
+
+	if (close < 0 || part.slice(close + 1).trim() !== "") return undefined
+
+	return { name, argument: part.slice(open + 1, close).trim() }
+}
+
 // The frame of filter list `filter` (";"-separated, each "name" or "name(argument)") at progress p. Several filters
 // multiply their opacities; the last one with a region gives the region.
 export function filterFrame(filter: string, progress: number, reverse: boolean): FilterFrame {
@@ -205,12 +227,17 @@ export function filterFrame(filter: string, progress: number, reverse: boolean):
 	const q = reverse ? 1 - p : p
 	let out = WHOLE
 
-	for (const part of filter.split(";")) {
-		const match = /^\s*([A-Za-z]+)\s*(?:\(\s*([^)]*?)\s*\))?\s*$/u.exec(part)
+	for (let start = 0, count = 0; start <= filter.length && count < MAX_FILTER_PARTS; count++) {
+		const end = filter.indexOf(";", start)
+		const part = filter.slice(start, end < 0 ? filter.length : end)
 
-		if (match === null) continue
+		start = end < 0 ? filter.length + 1 : end + 1
 
-		const frame = one(match[1] ?? "", match[2] ?? "", q)
+		const parsed = parseFilter(part)
+
+		if (parsed === undefined) continue
+
+		const frame = one(parsed.name, parsed.argument, q)
 
 		out = {
 			opacity: out.opacity * frame.opacity,

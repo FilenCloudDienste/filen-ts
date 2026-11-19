@@ -43,8 +43,10 @@ export type Touch =
 	| { readonly kind: "presentation"; readonly what: "slideList" | "sections" | "customShows" | "size" | "defaults" | "show" | "authors" }
 	| { readonly kind: "part"; readonly part: string; readonly change: "added" | "removed" | "changed" }
 
-// What an op held back to undo it: the ops that restore the state before it, in order, and the bytes they hold
-// (source subtrees serialized at apply time, never node ids into a parsed part) for history accounting.
+// What an op held back to undo it: the ops that restore the state before it, in order, and the family's estimate of the
+// bytes they hold (source subtrees serialized at apply time, never node ids into a parsed part). The history accounts
+// a step by its ops' own values (opBytesOf) and what the families hold off them (heldBytesOf), never by this estimate,
+// which counts bytes the ops carry too.
 export interface Inverse {
 	readonly ops: readonly DeckOp[]
 	readonly bytes: number
@@ -56,7 +58,8 @@ export type ApplyResult<O extends DeckOp = DeckOp> = { readonly kind: "applied";
 
 export interface ApplyContext {
 	// The source subtree `src` names, serialized now (an inverse holds bytes so it survives a rebase); refused as stale
-	// when `src` is of another epoch than the base source's.
+	// when `src` is of another epoch than the base source's. Often a view on the part's whole buffer: what is only
+	// compared or parsed now reads it as is, what an inverse holds is copied first (heldBytes, ops.ts).
 	sourceBytes(src: SourceRef): Uint8Array | Refused
 	// A cNvPr id not used on `slide`.
 	newShapeId(slide: SlideRef): number
@@ -69,6 +72,9 @@ export interface ApplyFamily<O extends DeckOp> {
 	apply(deck: Deck, op: O, context: ApplyContext): ApplyResult<O>
 	// What the op touches, without applying it (for changes and for the page's invalidation).
 	touches(op: O): readonly Touch[]
+	// The bytes the family holds for the op off the op object (state keyed by its identity that applying it reads, such
+	// as an inverse's held markup), for the history's accounting; none when absent.
+	held?(op: O): number
 }
 
 // What differs between the current history node and the saved state, recomputed from the net effect of the ops
@@ -165,6 +171,15 @@ function applyBatch(deck: Deck, op: BatchOp, context: ApplyContext): ApplyResult
 	}
 
 	return { kind: "applied", inverse: { ops, bytes }, op: { family: "batch", kind: "batch", ops: result.applied } }
+}
+
+// What the families hold for `op` off it (ApplyFamily.held), a batch's ops summed.
+export function heldBytesOf(op: DeckOp): number {
+	if (op.family === "batch") return op.ops.reduce((total, each) => total + heldBytesOf(each), 0)
+
+	const family: ApplyFamily<FamilyOp> = APPLY_FAMILIES[op.family]
+
+	return family.held?.(op) ?? 0
 }
 
 export function opTouches(op: DeckOp): readonly Touch[] {

@@ -6,7 +6,14 @@ import {
 	sheetFunctions,
 	type FunctionVolatility
 } from "../core/sheet/functions/catalogue"
-import { shownFormula, storedFormula } from "../core/sheet/refs/formulaRefs"
+import {
+	LAMBDA_HELPERS,
+	RESIZED_FUNCTIONS,
+	SIZED_FUNCTIONS,
+	mayReturnArray,
+	shownFormula,
+	storedFormula
+} from "../core/sheet/refs/formulaRefs"
 
 // The future functions of [MS-XLSX] 2.2.3 (learn.microsoft.com, revised 2024-02-20), as the list writes them: a
 // name without a prefix is one ISO/IEC 29500 already defines.
@@ -231,5 +238,71 @@ describe("sheet function catalogue", () => {
 		expect(storedFormula("single(A1:A3)")).toBe("_xlfn.SINGLE(A1:A3)")
 		expect(shownFormula("_xlfn.SINGLE(A1:A3)")).toBe("@A1:A3")
 		expect(storedFormula("@A1:A3")).toBe("_xlfn.SINGLE(A1:A3)")
+	})
+
+	it("shows a stored SINGLE or ANCHORARRAY it cannot spell as @ or # as a call, once, and stores it back", () => {
+		const unconverted: Record<string, string> = {
+			"_xlfn.SINGLE(A1+B1)": "SINGLE(A1+B1)",
+			'"_xlfn.SINGLE("&A1': '"_xlfn.SINGLE("&A1',
+			"_xlfn.ANCHORARRAY(A1:B2)": "_xlfn.ANCHORARRAY(A1:B2)",
+			"_xlfn.SINGLE(A1,B1)": "SINGLE(A1,B1)"
+		}
+		const converted: Record<string, string> = {
+			"SUM(_xlfn.ANCHORARRAY(MyName))": "SUM(MyName#)",
+			"_xlfn.SINGLE(Table1[Amount])": "@Table1[Amount]",
+			"_xlfn.SINGLE(Table1[[#This Row],[Amount]])": "@Table1[[#This Row],[Amount]]",
+			"_xlfn.SINGLE(Sheet1!MyName)": "@Sheet1!MyName",
+			"_xlfn.ANCHORARRAY(Sheet1!MyName)": "Sheet1!MyName#",
+			"_xlfn.SINGLE(_xlfn.ANCHORARRAY(A1))": "@A1#"
+		}
+
+		for (const [stored, shown] of Object.entries({ ...unconverted, ...converted })) {
+			expect(shownFormula(stored)).toBe(shown)
+			expect(shownFormula(shownFormula(stored))).toBe(shown)
+			expect(storedFormula(shown)).toBe(stored)
+		}
+	})
+
+	it("stores @ and # around names, structured references and sheets, leaving a structured reference's own @ and #", () => {
+		const stored: Record<string, string> = {
+			"@Table1[Amount]": "_xlfn.SINGLE(Table1[Amount])",
+			"@Sheet1!MyName": "_xlfn.SINGLE(Sheet1!MyName)",
+			"@A1#": "_xlfn.SINGLE(_xlfn.ANCHORARRAY(A1))",
+			"MyName#": "_xlfn.ANCHORARRAY(MyName)",
+			"SUM('My Sheet'!MyName#)": "SUM(_xlfn.ANCHORARRAY('My Sheet'!MyName))",
+			"SUM(Sheet2!B3#)": "SUM(_xlfn.ANCHORARRAY(Sheet2!B3))",
+			"[@Amount]*2": "[@Amount]*2",
+			"Table1[@Amount]": "Table1[@Amount]",
+			"Table1[[#This Row],[Amount]]": "Table1[[#This Row],[Amount]]",
+			"A1+#REF!": "A1+#REF!",
+			"MyName+#N/A": "MyName+#N/A",
+			'"MyName#"&A1': '"MyName#"&A1',
+			"[1]Sheet1!A1#": "[1]Sheet1!A1#"
+		}
+
+		for (const [typed, file] of Object.entries(stored)) {
+			expect(storedFormula(typed)).toBe(file)
+			expect(shownFormula(storedFormula(typed))).toBe(typed)
+		}
+	})
+
+	it("names only catalogue functions the engine calculates in its tables of calls", () => {
+		for (const name of [...LAMBDA_HELPERS, ...SIZED_FUNCTIONS, ...RESIZED_FUNCTIONS, "LOOKUP"]) {
+			expect(["hyperformula", "plugin"]).toContain(sheetFunction(name)?.support)
+		}
+
+		for (const name of LAMBDA_HELPERS) {
+			expect(storedFormula(`${name}(A1:A3,SUM)`)).toBe(`${sheetFunction(name)?.prefix ?? ""}${name}(A1:A3,_xleta.SUM)`)
+		}
+	})
+
+	it("finds an array-returning call by its whole name outside strings, stored with or without its prefixes", () => {
+		expect(mayReturnArray('IF(A1="unique(x)",1,2)')).toBe(false)
+		expect(mayReturnArray("MyFilter(A1)")).toBe(false)
+		expect(mayReturnArray("MODEXMULT(A1)")).toBe(false)
+		expect(mayReturnArray("_xlfn.UNIQUE(A1:A9)")).toBe(true)
+		expect(mayReturnArray("_xlfn._xlws.FILTER(A1:A9,B1:B9)")).toBe(true)
+		expect(mayReturnArray("_xlfn.MODE.MULT(A1:A9)")).toBe(true)
+		expect(mayReturnArray('IF(A1="x",UNIQUE(B1:B9),1)')).toBe(true)
 	})
 })

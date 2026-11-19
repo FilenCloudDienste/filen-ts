@@ -3,13 +3,20 @@ import { act, StrictMode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { closeHistory } from "prosemirror-history"
 import { TextSelection } from "prosemirror-state"
+import { EditorView } from "prosemirror-view"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SOURCE_INTS, type DocumentLayout, type PageDisplayList } from "@filen/office/core/docx"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
+import type { AdvanceResult } from "../core/docx/layout/index"
+import { LayoutFailedError } from "../core/docx/paged/editor"
 import type { DocxPageData, DocxSessionApi, DocxTextStyle } from "@filen/office/dom/docx"
 import { DocxMediaCache, paintPage, patchPage, type DocxDocument, type DocxTables } from "@filen/office/react/docx"
 import { DocxEditor, EditSink, type DocxEditorHandle, type DocxEditorMark } from "@filen/office/react/docx/editor"
 import { plainSlice, plainText } from "../react/docx/edit/sink"
+import { DrawingList, ItemKind, type DrawingImage } from "../core/drawingml/displayList"
+import { PageGraphic } from "../core/docx/layout/output"
+import { EditSurface } from "../react/docx/edit/surface"
+import { FIXTURE_TABLES, fixturePage, paragraph, type FixtureGraphic, type FixtureObject } from "./docxPageFixture"
 import { buildDocx } from "./docxSynthetic"
 import { pagedEditor, settle } from "./pagedDomFixtures"
 import { classicScrollbars } from "./scrollbars.dom"
@@ -167,6 +174,323 @@ describe("line patching", () => {
 	})
 })
 
+describe("graphics patching", () => {
+	const shading: FixtureGraphic = { x: 96, y: 96, width: 200, height: 40, kind: PageGraphic.SHADING, key: 1, layer: 1 }
+	const page = (graphics: readonly FixtureGraphic[], extra: Partial<Parameters<typeof fixturePage>[0]> = {}) =>
+		fixturePage({ sources: ["text"], lines: [paragraph(100, 0, 4)], graphics, ...extra })
+	const context = { document, tables: FIXTURE_TABLES }
+
+	it("keeps the graphics when their numbers are the same, whatever arrays hold them", () => {
+		const painted = paintPage(page([shading]), context)
+		const box = painted.parts.graphics[1].firstChild
+
+		expect(box).not.toBeNull()
+
+		const same = patchPage(painted, page([shading]), context).painted
+
+		expect(same.parts.graphics[1].firstChild).toBe(box)
+
+		// Capacity past the graphics used: not drawn from, not compared.
+		const slack = patchPage(same, page([shading], { graphicSlack: 3 }), context).painted
+
+		expect(slack.parts.graphics[1].firstChild).toBe(box)
+
+		const moved = patchPage(slack, page([{ ...shading, y: 97 }]), context).painted
+
+		expect(moved.parts.graphics[1].firstChild).not.toBe(box)
+		expect(moved.parts.graphics[1].childNodes).toHaveLength(1)
+	})
+
+	it("paints the graphics again when turn arrays come or go", () => {
+		const painted = paintPage(page([shading]), context)
+		const box = painted.parts.graphics[1].firstChild
+		const turned = patchPage(
+			painted,
+			page([shading], { turns: { floats: new Float32Array(0), ints: new Int32Array(0) } }),
+			context
+		).painted
+
+		expect(turned.parts.graphics[1].firstChild).not.toBe(box)
+	})
+})
+
+describe("object patching", () => {
+	const image = (partName: string): DrawingImage => ({
+		partName,
+		format: "png",
+		handling: "native",
+		svgPartName: undefined,
+		crop: { left: 0, top: 0, right: 0, bottom: 0 },
+		alpha: 1,
+		grayscale: false,
+		biLevel: -1,
+		duotone: null,
+		brightness: 0,
+		contrast: 0,
+		colorChange: null
+	})
+	// A 20 x 20 drawing filled with picture `partName`, or with a gradient mesh.
+	const drawing = (partName: string, shaded = false) => {
+		const list = new DrawingList()
+
+		list.width = 20
+		list.height = 20
+
+		const firstCommand = list.commandCount
+		const firstCoord = list.coordCount
+
+		list.moveTo(0, 0)
+		list.lineTo(20, 0)
+		list.lineTo(20, 20)
+		list.close()
+
+		const paint = shaded
+			? list.paint({
+					kind: "shaded",
+					points: Float32Array.of(0, 0, 20, 0, 0, 20),
+					colors: Uint32Array.of(0xff0000ff, 0x00ff00ff, 0x0000ffff),
+					ramp: null
+				})
+			: list.paint({ kind: "image", image: list.image(image(partName)), stretch: undefined, tile: undefined })
+
+		list.addItem(ItemKind.PATH, [1, 0, 0, 1, 0, 0], 0, 0, 20, 20, firstCommand, firstCoord, paint, -1, -1, -1, 0, 0)
+
+		const compact = list.compact()
+
+		return {
+			width: 20,
+			height: 20,
+			commands: compact.commands,
+			coords: compact.coords,
+			itemCount: compact.itemCount,
+			itemFloats: compact.itemFloats,
+			itemInts: compact.itemInts,
+			paints: compact.paints,
+			strokes: compact.strokes,
+			images: compact.images,
+			texts: compact.texts,
+			shadows: compact.shadows
+		}
+	}
+	const parts = ["/word/media/a.png", "/word/media/b.png"]
+	const page = (objects: readonly FixtureObject[]): DocxPageData =>
+		fixturePage({ sources: ["text"], lines: [paragraph(100, 0, 4)], objects })
+	const first: FixtureObject = { id: 0, x: 96, y: 200, width: 20, height: 20 }
+	const second: FixtureObject = { id: 1, x: 200, y: 200, width: 20, height: 20 }
+
+	it("keeps the boxes of objects that moved, fills only new ones and releases only those taken away", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const session: DocxSessionApi = {
+			...SESSION,
+			objects: ids => Promise.resolve(ids.map(id => ({ kind: "drawing" as const, id, drawing: drawing(parts[id] ?? "") })))
+		}
+		const requested = vi.spyOn(session, "objects")
+		const media = new DocxMediaCache(session, undefined, { create: () => "blob:picture", revoke: () => undefined })
+		const released = vi.spyOn(media, "release")
+		const sources = { session, media, tables: FIXTURE_TABLES }
+		const surface = new EditSurface(editor)
+		const host = document.createElement("div")
+		const layer = document.createElement("div")
+
+		surface.update([page([first, second])], sources)
+		surface.mount(0, host, layer)
+		await settleObjects()
+
+		const boxes = [...host.querySelectorAll<HTMLElement>(".fo-docx-object")]
+		const pictures = boxes.map(box => box.firstChild)
+
+		expect(boxes).toHaveLength(2)
+		expect(pictures.every(picture => picture !== null)).toBe(true)
+		expect(requested).toHaveBeenCalledTimes(1)
+
+		// The first object moved: both boxes stay, filled as they were, the moved one in its new place.
+		surface.update([page([{ ...first, x: 120 }, second])], sources)
+		await settleObjects()
+
+		const moved = [...host.querySelectorAll<HTMLElement>(".fo-docx-object")]
+
+		expect(moved).toEqual(boxes)
+		expect(moved.map(box => box.firstChild)).toEqual(pictures)
+		expect(moved[0]?.style.left).toBe("120px")
+		expect(requested).toHaveBeenCalledTimes(1)
+		expect(released).not.toHaveBeenCalled()
+
+		// The second resized: only it is made and filled again.
+		surface.update(
+			[
+				page([
+					{ ...first, x: 120 },
+					{ ...second, width: 30 }
+				])
+			],
+			sources
+		)
+		await settleObjects()
+
+		const resized = [...host.querySelectorAll<HTMLElement>(".fo-docx-object")]
+
+		expect(resized[0]).toBe(boxes[0])
+		expect(resized[1]).not.toBe(boxes[1])
+		expect(resized[1]?.firstChild).not.toBeNull()
+		expect(requested).toHaveBeenCalledTimes(2)
+		expect(requested).toHaveBeenLastCalledWith([1])
+		expect(released.mock.calls).toEqual([[parts[1], "image/png"]])
+
+		// The first taken away: its picture is released, the second's is not.
+		released.mockClear()
+		surface.update([page([{ ...second, width: 30 }])], sources)
+		await settleObjects()
+
+		expect([...host.querySelectorAll(".fo-docx-object")]).toEqual([resized[1]])
+		expect(released.mock.calls).toEqual([[parts[0], "image/png"]])
+		expect(requested).toHaveBeenCalledTimes(2)
+
+		// Unmounted: the rest goes.
+		released.mockClear()
+		surface.unmount(0)
+		expect(released.mock.calls).toEqual([[parts[1], "image/png"]])
+		editor.dispose()
+	})
+
+	it("stops watching the zoom for a shaded drawing once every object of its paint went one by one", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const session: DocxSessionApi = {
+			...SESSION,
+			objects: ids => Promise.resolve(ids.map(id => ({ kind: "drawing" as const, id, drawing: drawing("", true) })))
+		}
+		const media = new DocxMediaCache(session, undefined, { create: () => "blob:shade", revoke: () => undefined })
+		const sources = { session, media, tables: FIXTURE_TABLES }
+		const surface = new EditSurface(editor)
+		const scale = document.createElement("div")
+		const host = document.createElement("div")
+		const layer = document.createElement("div")
+		const added = vi.spyOn(window, "addEventListener")
+		const removed = vi.spyOn(window, "removeEventListener")
+		const observe = vi.spyOn(MutationObserver.prototype, "observe")
+		const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect")
+		const resizes = (spy: typeof added | typeof removed): number => spy.mock.calls.filter(call => call[0] === "resize").length
+
+		scale.className = "fo-docx-page-scale"
+		scale.appendChild(host)
+		document.body.appendChild(scale)
+
+		try {
+			surface.update([page([first])], sources)
+			surface.mount(0, host, layer)
+			await settleObjects()
+
+			expect(host.querySelector(".fo-docx-object image")).not.toBeNull()
+			expect(resizes(added)).toBe(1)
+			expect(observe).toHaveBeenCalledTimes(1)
+
+			// Resized: the box is made and shaded again, and the first paint's watchers go with it.
+			surface.update([page([{ ...first, width: 30 }])], sources)
+			await settleObjects()
+
+			expect(resizes(added)).toBe(2)
+			expect(resizes(removed)).toBe(1)
+			expect(observe).toHaveBeenCalledTimes(2)
+			expect(disconnect).toHaveBeenCalledTimes(1)
+
+			surface.unmount(0)
+
+			expect(resizes(removed)).toBe(2)
+			expect(disconnect).toHaveBeenCalledTimes(2)
+		} finally {
+			added.mockRestore()
+			removed.mockRestore()
+			observe.mockRestore()
+			disconnect.mockRestore()
+			scale.remove()
+			editor.dispose()
+		}
+	})
+})
+
+describe("a background layout that fails", () => {
+	it("settles what waits for the layout, reports the failure and clears it once a later run completes", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const driver: unknown = Reflect.get(editor.layout, "driver")
+
+		if (typeof driver !== "object" || driver === null || !("advance" in driver)) throw new Error("no layout driver")
+
+		// The edit's own slice leaves work for the background, whose next slice throws.
+		const advance = vi
+			.spyOn(driver as { advance: (deadline: number, through: number) => AdvanceResult }, "advance")
+			.mockImplementationOnce(() => "more")
+			.mockImplementationOnce(() => {
+				throw new Error("broken slice")
+			})
+		const errors: unknown[] = []
+
+		// A rejection nobody handles fails the run (vitest reports unhandled errors).
+		editor.onLayoutError(error => errors.push(error))
+
+		try {
+			editor.dispatch(editor.state.tr.insertText("typed ", 1))
+
+			const waiting = editor.whenSettled()
+
+			await expect(waiting).rejects.toBeInstanceOf(LayoutFailedError)
+			await new Promise(resolve => setTimeout(resolve, 10))
+
+			expect(errors).toHaveLength(1)
+			expect(editor.layoutError).toBe(errors[0])
+			expect(editor.settled).toBe(false)
+			// Later waiters do not hang either.
+			await expect(editor.whenSettled()).rejects.toBeInstanceOf(LayoutFailedError)
+			// A command waiting for final pages is not run.
+			await expect(editor.execute({ type: "field.updateAll" })).resolves.toBe(false)
+		} finally {
+			advance.mockRestore()
+		}
+
+		// The next edit lays out to the end: the failure is behind.
+		editor.dispatch(editor.state.tr.insertText("more ", 1))
+		await settle(editor)
+		await editor.whenSettled()
+		expect(editor.layoutError).toBeUndefined()
+		expect(errors).toHaveLength(1)
+		editor.dispose()
+	})
+})
+
+describe("an edit whose own layout slice fails", () => {
+	it("throws to the dispatcher, rejects what waits for the layout and clears once a later edit lays out", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const driver: unknown = Reflect.get(editor.layout, "driver")
+
+		if (typeof driver !== "object" || driver === null || !("advance" in driver)) throw new Error("no layout driver")
+
+		const advance = vi
+			.spyOn(driver as { advance: (deadline: number, through: number) => AdvanceResult }, "advance")
+			.mockImplementationOnce(() => {
+				throw new Error("broken slice")
+			})
+		const errors: unknown[] = []
+
+		editor.onLayoutError(error => errors.push(error))
+
+		try {
+			expect(() => editor.dispatch(editor.state.tr.insertText("typed ", 1))).toThrow("broken slice")
+			expect(errors).toHaveLength(1)
+			expect(editor.layoutError).toBe(errors[0])
+			await expect(editor.whenSettled()).rejects.toBeInstanceOf(LayoutFailedError)
+		} finally {
+			advance.mockRestore()
+		}
+
+		editor.dispatch(editor.state.tr.insertText("more ", 1))
+		await settle(editor)
+		await editor.whenSettled()
+		expect(editor.layoutError).toBeUndefined()
+		expect(errors).toHaveLength(1)
+		editor.dispose()
+	})
+})
+
+const settleObjects = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+
 describe("DocxEditor", () => {
 	let container: HTMLDivElement
 	let root: Root
@@ -248,6 +572,51 @@ describe("DocxEditor", () => {
 		}
 
 		expect(container.querySelectorAll(".fo-docx-caret").length).toBe(0)
+	})
+
+	it("brings the text box's name and description up to date while it stays mounted", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const show = (label: string, describedBy?: string): void =>
+			act(() =>
+				root.render(
+					<DocxEditor
+						editor={editor}
+						document={documentOf(editor)}
+						zoom={1}
+						label={label}
+						{...(describedBy === undefined ? {} : { describedBy })}
+					/>
+				)
+			)
+
+		show("Report.docx")
+		await act(frame)
+
+		const textbox = container.querySelector<HTMLElement>("[role=textbox]")
+
+		expect(textbox?.getAttribute("aria-label")).toBe("Report.docx")
+		expect(textbox?.hasAttribute("aria-describedby")).toBe(false)
+
+		show("Renamed.docx")
+		expect(textbox?.getAttribute("aria-label")).toBe("Renamed.docx")
+
+		show("Renamed.docx", "keys")
+		expect(textbox?.getAttribute("aria-describedby")).toBe("keys")
+
+		show("Renamed.docx", "other-keys")
+		expect(textbox?.getAttribute("aria-describedby")).toBe("other-keys")
+
+		show("Renamed.docx")
+		expect(textbox?.hasAttribute("aria-describedby")).toBe(false)
+		// The same text box all along, not one built anew.
+		expect(container.querySelector("[role=textbox]")).toBe(textbox)
+
+		// Rendered again with the same values: the view's attributes are left alone.
+		const setProps = vi.spyOn(EditorView.prototype, "setProps")
+
+		show("Renamed.docx")
+		expect(setProps).not.toHaveBeenCalled()
+		setProps.mockRestore()
 	})
 
 	it("shows itself focused (the caret) when remounted holding focus", async () => {
@@ -761,10 +1130,10 @@ describe("DocxEditor input", () => {
 		editor.state.doc.forEach((_node, offset) => marks.push({ from: offset + 1, to: offset + 10, kind: "spelling" }))
 
 		const rangeRects = vi.spyOn(editor, "rangeRects")
-		const rangesRects = vi.spyOn(editor.geometry, "rangesRects")
+		const rangesBoxes = vi.spyOn(editor.geometry, "rangesBoxes")
 		const { handle } = await mount(editor, { marks })
 		const mounted = Array.from(container.querySelectorAll<HTMLElement>("[data-fo-page]")).map(page => Number(page.dataset["foPage"]))
-		const drawn = (): Element[] => Array.from(container.querySelectorAll('.fo-docx-mark[data-fo-mark="spelling"]'))
+		const drawn = (): Element[] => Array.from(container.querySelectorAll('.fo-docx-edit-mark[data-fo-mark="spelling"]'))
 		// A box per mark on a line: a wave starting at each box.
 		const boxes = (): number => drawn().reduce((sum, path) => sum + (path.getAttribute("d")?.match(/M/g)?.length ?? 0), 0)
 		let expected = 0
@@ -776,10 +1145,12 @@ describe("DocxEditor input", () => {
 		expect(boxes()).toBe(expected)
 		// One call per page drawn, never one per mark.
 		expect(rangeRects.mock.calls.length).toBe(mounted.length * marks.length)
-		expect(rangesRects.mock.calls.length).toBeLessThanOrEqual(mounted.length * 2)
+		// The pages box their marks (each mounted page drawn at most twice as the layout settles), never mark by mark.
+		expect(rangesBoxes.mock.calls.length).toBeGreaterThan(0)
+		expect(rangesBoxes.mock.calls.length).toBeLessThanOrEqual(mounted.length * 2)
 
 		const before = drawn()
-		const calls = rangesRects.mock.calls.length
+		const calls = rangesBoxes.mock.calls.length
 
 		// The caret moving redraws no mark.
 		await act(async () => {
@@ -787,7 +1158,7 @@ describe("DocxEditor input", () => {
 			handle.current?.focus()
 			await frame()
 		})
-		expect(rangesRects.mock.calls.length).toBe(calls)
+		expect(rangesBoxes.mock.calls.length).toBe(calls)
 		expect(drawn()).toEqual(before)
 
 		const caret = container.querySelector(".fo-docx-caret")
@@ -815,13 +1186,15 @@ describe("DocxEditor input", () => {
 		await mount(editor, { marks })
 
 		const rows = (): Map<Element, string> =>
-			new Map(Array.from(container.querySelectorAll(".fo-docx-mark"), path => [path, path.getAttribute("d") ?? ""]))
+			new Map(Array.from(container.querySelectorAll(".fo-docx-edit-mark"), path => [path, path.getAttribute("d") ?? ""]))
 		const before = rows()
 
 		// One path per line: every mark here sits on its paragraph's first line.
 		expect(before.size).toBeGreaterThan(5)
 		expect([...before.values()].every(d => d.match(/M/g)?.length === 1)).toBe(true)
-		expect(container.querySelectorAll("svg.fo-docx-marks").length).toBe(container.querySelectorAll("[data-fo-page]").length)
+		expect(container.querySelectorAll("svg.fo-docx-edit-marks").length).toBe(container.querySelectorAll("[data-fo-page]").length)
+		// Apart from the formatting-marks layer's names, so neither picks up the other's rules.
+		expect(container.querySelectorAll(".fo-docx-marks svg, svg.fo-docx-marks, svg .fo-docx-mark").length).toBe(0)
 
 		const tr = editor.state.tr.insertText("x", paragraphPos(editor, 3) + 3)
 		const original = marks
@@ -849,7 +1222,7 @@ describe("DocxEditor input", () => {
 		const first = { from: start, to: start + 5, kind: "spelling" }
 		const second = { from: start + 20, to: start + 25, kind: "repeated" }
 		const marks: DocxEditorMark[] = [first, second]
-		const count = (kind: string): number => container.querySelectorAll(`.fo-docx-mark[data-fo-mark="${kind}"]`).length
+		const count = (kind: string): number => container.querySelectorAll(`.fo-docx-edit-mark[data-fo-mark="${kind}"]`).length
 
 		await mount(editor, { marks })
 		expect([count("spelling"), count("repeated")]).toEqual([1, 1])
@@ -878,8 +1251,8 @@ describe("DocxEditor input", () => {
 			]
 		})
 
-		const blended = container.querySelector("svg.fo-docx-marks[data-fo-blend]")
-		const plain = container.querySelector("svg.fo-docx-marks:not([data-fo-blend])")
+		const blended = container.querySelector("svg.fo-docx-edit-marks[data-fo-blend]")
+		const plain = container.querySelector("svg.fo-docx-edit-marks:not([data-fo-blend])")
 
 		expect(blended?.querySelectorAll('[data-fo-mark="find"], [data-fo-mark="find-active"]').length).toBe(2)
 		expect(plain?.querySelectorAll('[data-fo-mark="repeated"]').length).toBe(1)

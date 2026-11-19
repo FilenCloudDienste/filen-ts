@@ -37,6 +37,14 @@ const MAX_CAPTURE_WORK = 2_000_000
 // a match's higher-priority threads read past it, which this bounds.
 export const STEP_BUDGET = 2_000_000
 
+// The work a budget of thread steps comes with: one per instruction a thread is followed through (jumps, splits, saves
+// and assertions take no step), and per capture copied one per eight of its slots. An ordinary search follows each
+// thread through a few instructions per step (some four with captures: (.*a){20}), so WORK_PER_STEP plus a capture's
+// copy per step leaves it twice that; a pattern matching nothing at every position (a thousand empty groups, thousands
+// of empty alternatives) takes few steps and far more work. At most WORK_BUDGET.
+const WORK_PER_STEP = 8
+const WORK_BUDGET = 32_000_000
+
 // The characters a node's matches start with (`codes`; a caseless letter by its fold, in `folded`), and whether it may
 // match nothing (`empty`); null when not known.
 interface Firsts {
@@ -118,6 +126,11 @@ export class RegexBudgetError extends RegexUnsupportedError {}
 
 const NEWLINE = 0x0a
 
+// A count of instructions, Infinity past the limit: a nested repeat's product then never overflows to NaN.
+function capped(count: number): number {
+	return count > MAX_INSTRUCTIONS ? Infinity : count
+}
+
 // The instructions a node compiles to (Infinity past the limit).
 function cost(node: Node, captures: boolean): number {
 	switch (node.type) {
@@ -129,17 +142,37 @@ function cost(node: Node, captures: boolean): number {
 		case "assert":
 			return 1
 		case "group":
-			return cost(node.body, captures) + (captures ? 2 : 0)
-		case "concat":
-			return node.items.reduce((total, item) => total + cost(item, captures), 0)
-		case "alternate":
-			return node.alternatives.reduce((total, item) => total + cost(item, captures) + 2, -2)
+			return capped(cost(node.body, captures) + (captures ? 2 : 0))
+		case "concat": {
+			let total = 0
+
+			for (const item of node.items) {
+				total = capped(total + cost(item, captures))
+
+				if (total === Infinity) return total
+			}
+
+			return total
+		}
+		case "alternate": {
+			let total = -2
+
+			for (const item of node.alternatives) {
+				total = capped(total + cost(item, captures) + 2)
+
+				if (total === Infinity) return total
+			}
+
+			return total
+		}
 		case "repeat": {
 			const body = cost(node.body, captures)
 
-			if (node.max < 0) return node.min === 0 ? body + 2 : node.min * body + 1
+			// Even repeated no times: the pattern is refused, not compiled to one that never matches.
+			if (body === Infinity) return body
+			if (node.max < 0) return capped(node.min === 0 ? body + 2 : node.min * body + 1)
 
-			return node.min * body + (node.max - node.min) * (body + 1)
+			return capped(node.min * body + (node.max > node.min ? (node.max - node.min) * (body + 1) : 0))
 		}
 	}
 }
@@ -251,17 +284,24 @@ export class Program {
 	private readonly stackSlots: Int32Array[] = []
 	private lists: [ThreadList, ThreadList] | null = null
 	private budget = STEP_BUDGET
+	private work = 0
+	// The work one capture copied takes (WORK_PER_STEP).
+	private readonly copyWork: number
 
 	constructor(parsed: Parsed, captures: boolean) {
 		const size = cost(parsed.root, captures) + 2
 
-		if (size > MAX_INSTRUCTIONS) throw new RegexUnsupportedError("pattern too large")
+		// Negated: a count that is not a number fails too.
+		if (!(size <= MAX_INSTRUCTIONS)) throw new RegexUnsupportedError("pattern too large")
 
 		checkLoops(parsed.root, captures)
 
 		this.slotCount = captures ? 2 * (parsed.groups + 1) : 2
 
-		if (size * this.slotCount > MAX_CAPTURE_WORK && captures) throw new RegexUnsupportedError("pattern too large")
+		if (captures && !(size * this.slotCount <= MAX_CAPTURE_WORK)) throw new RegexUnsupportedError("pattern too large")
+
+		this.copyWork = this.slotCount >> 3
+		this.resetBudget()
 
 		this.ops = new Uint8Array(size)
 		this.args = new Int32Array(size)
@@ -458,9 +498,10 @@ export class Program {
 		return limit
 	}
 
-	// Starts a new step budget of `steps`.
+	// Starts a new step budget of `steps`, and the work that comes with it (WORK_PER_STEP).
 	resetBudget(steps = STEP_BUDGET): void {
 		this.budget = steps
+		this.work = Math.min(WORK_BUDGET, steps * (WORK_PER_STEP + this.copyWork))
 	}
 
 	// The match's capture slots (UTF-16 offsets, -1 for a group that took no part), or null for none.
@@ -620,6 +661,14 @@ export class Program {
 			const at = pcs.pop() ?? 0
 			const held = stackSlots.pop() as Int32Array
 
+			if (--this.work < 0) {
+				// Left empty for the next search, whose budget is reset.
+				pcs.length = 0
+				stackSlots.length = 0
+
+				throw new RegexBudgetError("search too long")
+			}
+
 			if (this.visited[at] === stamp) continue
 
 			this.visited[at] = stamp
@@ -635,6 +684,8 @@ export class Program {
 					break
 				case SAVE: {
 					const copy = held.slice()
+
+					this.work -= this.copyWork
 
 					copy[this.args[at] ?? 0] = pos
 					pcs.push(at + 1)

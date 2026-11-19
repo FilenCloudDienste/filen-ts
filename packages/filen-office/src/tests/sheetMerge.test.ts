@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
-import { parts } from "./xlsxWriteFixtures"
+import { STYLES, parts } from "./xlsxWriteFixtures"
 import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
 
@@ -114,6 +114,109 @@ describe("sheet session: cells merged", () => {
 
 		expect(refused.ok ? null : refused.refusal.reason).toBe("protectedSheet")
 		locked.session.close()
+	})
+})
+
+describe("sheet session: cells merged at scale", () => {
+	it("refuses overlapping ranges and a tall merge cut through, and takes in one held whole", async () => {
+		const { session, info } = await openFixture({
+			sheets: [
+				{
+					name: "One",
+					body: '<sheetData/><mergeCells count="2"><mergeCell ref="B1:B20"/><mergeCell ref="D5:E5"/></mergeCells>'
+				}
+			]
+		})
+		const sheet = info.sheets[0]!.id
+		const reason = async (ranges: ReturnType<typeof range>[], mode: "merge" | "across" = "merge") => {
+			const result = await session.command({ type: "merge.cells", sheet, ranges, mode, discard: true })
+
+			return result.ok ? null : result.refusal
+		}
+
+		expect(await reason([range(30, 0, 31, 1), range(31, 1, 32, 2)])).toEqual({ reason: "merged" })
+		expect(await reason([range(30, 0, 32, 1), range(32, 0, 32, 2)], "across")).toEqual({ reason: "merged" })
+		// B1:B20 starts rows above the merge and reaches into it.
+		expect(await reason([range(10, 0, 10, 2)])).toEqual({ reason: "merged" })
+		expect(await reason([range(10, 0, 10, 2)], "across")).toEqual({ reason: "merged" })
+
+		const change = changeOf(await session.command({ type: "merge.cells", sheet, ranges: [range(3, 3, 5, 5)], mode: "merge" }))
+
+		expect([...(change.layouts[0]?.layout.merges ?? [])]).toEqual([0, 1, 19, 1, 3, 3, 5, 5])
+		session.close()
+	})
+
+	it("merges a hundred thousand rows across, every cell centred, and undo takes it all back", async () => {
+		const { session, info, bytes } = await openFixture({ sheets: [{ name: "One", body: "<sheetData/>" }] })
+		const sheet = info.sheets[0]!.id
+		const change = changeOf(await session.command({ type: "merge.cells", sheet, ranges: [range(0, 0, 99_999, 1)], mode: "across" }))
+
+		expect(change.layouts[0]?.layout.merges?.length).toBe(400_000)
+
+		const sheetXml = parts(await savedBytes(session))["xl/worksheets/sheet1.xml"] ?? ""
+
+		expect(sheetXml).toContain('<row r="100000"><c r="A100000" s="2"/><c r="B100000" s="2"/></row>')
+		expect(sheetXml).toContain('<mergeCell ref="A100000:B100000"/>')
+
+		changeOf(await session.undo())
+		expect(parts(await savedBytes(session))["xl/worksheets/sheet1.xml"]).toBe(parts(bytes)["xl/worksheets/sheet1.xml"])
+		session.close()
+	})
+
+	it("unshares a shared formula's master it drops, its children keeping their formulas", async () => {
+		const { session, info, bytes } = await openFixture({
+			sheets: [
+				{
+					name: "One",
+					body:
+						'<sheetData><row r="1"><c r="A1" s="1"><v>1</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*2</f><v>2</v></c></row>' +
+						'<row r="2"><c r="A2"><v>2</v></c><c r="B2"><f t="shared" si="0"/><v>4</v></c></row>' +
+						'<row r="3"><c r="A3"><v>3</v></c><c r="B3"><f t="shared" si="0"/><v>6</v></c></row></sheetData>'
+				}
+			]
+		})
+		const sheet = info.sheets[0]!.id
+
+		changeOf(await session.command({ type: "merge.cells", sheet, ranges: [range(0, 0, 0, 2)], mode: "center", discard: true }))
+
+		const sheetXml = parts(await savedBytes(session))["xl/worksheets/sheet1.xml"] ?? ""
+
+		expect(sheetXml).toContain('<c r="A1" s="2"><v>1</v></c><c r="B1" s="2"/><c r="C1" s="2"/>')
+		expect(sheetXml).toContain('<c r="B2"><f>A2*2</f><v>4</v></c>')
+		expect(sheetXml).toContain('<c r="B3"><f>A3*2</f><v>6</v></c>')
+
+		changeOf(await session.undo())
+		expect(parts(await savedBytes(session))["xl/worksheets/sheet1.xml"]).toBe(parts(bytes)["xl/worksheets/sheet1.xml"])
+		session.close()
+	})
+
+	it("refuses at the style limit with the cells it already merged put back", async () => {
+		// One cell format short of the limit: the first merge's centred format fits, the second's does not.
+		const padding = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'.repeat(65_487)
+		const styles = STYLES.replace(
+			/<cellXfs count="2">(.*)<\/cellXfs>/,
+			(_whole, xfs: string) => `<cellXfs count="65489">${xfs}${padding}</cellXfs>`
+		)
+		const { session, info, bytes } = await openFixture({
+			sheets: [
+				{
+					name: "One",
+					body: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="3"><c r="A3" s="1"><v>2</v></c></row></sheetData>'
+				}
+			],
+			styles
+		})
+		const sheet = info.sheets[0]!.id
+		const result = await session.command({
+			type: "merge.cells",
+			sheet,
+			ranges: [range(0, 0, 0, 2), range(2, 0, 2, 2)],
+			mode: "center"
+		})
+
+		expect(result.ok ? null : result.refusal.reason).toBe("styleLimit")
+		expect(parts(await savedBytes(session))["xl/worksheets/sheet1.xml"]).toBe(parts(bytes)["xl/worksheets/sheet1.xml"])
+		session.close()
 	})
 })
 

@@ -245,27 +245,31 @@ describe("PDF export of a document", () => {
 		})
 		const engine = new DocxEngine(bytesSource(docx), services(), () => undefined, { retain: true, view: "markup" })
 
-		await engine.run()
+		try {
+			await engine.run()
 
-		const shown = engine.pdfSource()
-		const live = await engine.pdfFinalSource(false)
+			const shown = engine.pdfSource()
+			const live = await engine.pdfFinalSource(false)
 
-		expect(shown?.layout.pages[0]?.sourceTexts.join("")).toContain("removed")
-		expect(live?.layout).not.toBe(shown?.layout)
+			expect(shown?.layout.pages[0]?.sourceTexts.join("")).toContain("removed")
+			expect(live).toBeDefined()
 
-		if (live === undefined) return
+			if (live === undefined) return
 
-		const result = await exportDocxPdfInWorker(channel(), {
-			input: { kind: "snapshot", document: await docxPdfSnapshot(live, { title: "Report", copy: true }) },
-			options: { title: "Report" }
-		})
+			expect(live.layout).not.toBe(shown?.layout)
 
-		engine.close()
+			const result = await exportDocxPdfInWorker(channel(), {
+				input: { kind: "snapshot", document: await docxPdfSnapshot(live, { title: "Report", copy: true }) },
+				options: { title: "Report" }
+			})
 
-		const text = await pageText(await openPdf(await bytesOf(result.blob)), 1)
+			const text = await pageText(await openPdf(await bytesOf(result.blob)), 1)
 
-		expect(text).toContain("added")
-		expect(text).not.toContain("removed")
+			expect(text).toContain("added")
+			expect(text).not.toContain("removed")
+		} finally {
+			engine.close()
+		}
 	})
 
 	it("refuses a document that cannot be opened with its reason", async () => {

@@ -1,6 +1,7 @@
 import { strFromU8, unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { emitPptx } from "../core/pptx/write/emit"
+import { importedSlideParts } from "../core/pptx/write/importSlide"
 import { clipPartNames, pasteShapesOp, pasteSlidesOps, PASTE_STEP, type ShapeClip, type SlideClip } from "../core/presentation/edit/clip"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, SlideRef, Xfrm } from "../core/presentation/model"
@@ -420,5 +421,60 @@ describe("presentation clipboard", () => {
 
 		expect(order()).toHaveLength(4)
 		expect(await danglingReferences(await saveEdits(h, 5))).toEqual([])
+	})
+})
+
+// A pasted slide given the destination layout's placeholder indices: every idx written is an xsd:unsignedInt and none
+// is taken twice, whatever indices the slide came with (PowerPoint's 4294967295 for a placeholder with no layout
+// counterpart, a damaged non-numeric one).
+describe("a pasted slide's placeholder indices", () => {
+	const SLIDE_NS =
+		'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+	const ph = (attributes: string, id: number): string =>
+		`<p:sp><p:nvSpPr><p:cNvPr id="${String(id)}" name="Shape ${String(id)}"/><p:cNvSpPr/><p:nvPr><p:ph ${attributes}/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>`
+
+	function pasted(placeholders: string): number[] {
+		const markup = `<p:sld ${SLIDE_NS}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>${placeholders}</p:spTree></p:cSld></p:sld>`
+		const parts = importedSlideParts(
+			[
+				{
+					name: "/ppt/slides/slide9.xml",
+					contentType: "application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
+					bytes: new TextEncoder().encode(markup)
+				}
+			],
+			{
+				layout: "/ppt/slideLayouts/slideLayout2.xml",
+				placeholders: [
+					{ type: "title", idx: 0 },
+					{ type: "body", idx: 1 }
+				]
+			}
+		)
+
+		if (!Array.isArray(parts)) throw new Error(JSON.stringify(parts))
+
+		const out = new TextDecoder().decode(parts[0]?.bytes)
+		const written = [...out.matchAll(/<p:ph\b[^>]*\bidx="([^"]*)"/gu)].map(match => match[1] ?? "")
+
+		for (const idx of written) expect(idx).toMatch(/^\d+$/u)
+
+		const indices = written.map(Number)
+
+		for (const idx of indices) expect(idx).toBeLessThanOrEqual(4_294_967_295)
+
+		expect(new Set(indices).size).toBe(indices.length)
+
+		return indices
+	}
+
+	it("counts a spare index past the slide's indices below 4294967295", () => {
+		expect(
+			pasted(ph('type="title"', 2) + ph('type="body" idx="1"', 3) + ph('idx="4294967295"', 4) + ph('type="dt" idx="1"', 5))
+		).toEqual([1, 4_294_967_295, 2])
+	})
+
+	it("takes out a non-numeric index and gives the placeholder a spare one where it would collide", () => {
+		expect(pasted(ph('type="title"', 2) + ph('type="body" idx="1"', 3) + ph('type="ftr" idx="x"', 4))).toEqual([1, 2])
 	})
 })

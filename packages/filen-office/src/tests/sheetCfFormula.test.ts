@@ -1,7 +1,12 @@
+import { setFlagsFromString } from "node:v8"
+import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
 import { FormulaEvaluator, ruleTruth, type FormulaHost } from "../core/sheet/cf/formula/evaluate"
 import { parseFormula } from "../core/sheet/cf/formula/syntax"
 import { FormulaError, Unsupported, numberText, type FormulaRef, type Scalar } from "../core/sheet/cf/formula/values"
+import { meetsValidation } from "../core/sheet/dv/validate"
+import type { DvRule } from "../core/sheet/dv/rules"
+import { budget } from "./timing"
 
 // Rule formulas (conditional formats, validations) read and calculated as Excel does: array semantics, relative
 // references moved from the anchor, the functions those rules use, and what is not calculated refused.
@@ -165,6 +170,16 @@ describe("rule formulas", () => {
 		expect(parseFormula("TODAY()").volatile).toBe(true)
 	})
 
+	it("counts a rule that reads a defined name as moving with the cell", () => {
+		const host = grid({}, { ROWISEVEN: "MOD(ROW(),2)=0" })
+
+		// Names are evaluated at each cell: a rule of a relative name alone must not be calculated once.
+		expect(parseFormula("RowIsEven").relative).toBe(true)
+		expect(parseFormula("AND(RowIsEven,$A$1=0)").relative).toBe(true)
+		expect([0, 1, 2, 3].map(row => evaluate(host, "RowIsEven", [row, 0]))).toEqual([false, true, false, true])
+		expect(parseFormula("$A$1+$B$2>0").relative).toBe(false)
+	})
+
 	it("takes only TRUE and non-zero numbers as a rule holding", () => {
 		expect(ruleTruth(true)).toBe(true)
 		expect(ruleTruth(2)).toBe(true)
@@ -211,5 +226,304 @@ describe("rule formulas", () => {
 		expect(evaluate(host, "B1=B2")).toBe(false)
 		expect(evaluate(host, "B2>B1")).toBe(true)
 		expect(evaluate(host, 'COUNTIF(A1:A3,"="&(A1+A2))')).toBe(1)
+	})
+})
+
+// The criteria functions over whole columns: a blank-matching criterion counts the column's every blank arithmetically,
+// never one by one (a million positions a column, sixteen million over sixteen columns).
+describe("criteria over whole columns", () => {
+	const host = grid({
+		A1: "a",
+		A2: "b",
+		A3: "a",
+		A5: "a",
+		A6: "b",
+		C1: "done",
+		C2: "open",
+		C4: "done",
+		C5: "open",
+		D1: 1,
+		D2: 2,
+		D3: 3,
+		D4: 4,
+		D5: 5,
+		D6: 6,
+		D7: 7
+	})
+	const ROWS = 1_048_576
+
+	it("count, sum and average as over the used range, the blanks past it counted", () => {
+		expect(evaluate(host, 'COUNTIFS($A:$A,"a",$C:$C,"<>done")')).toBe(2)
+		expect(evaluate(host, 'COUNTIFS($A$1:$A$10,"a",$C$1:$C$10,"<>done")')).toBe(2)
+		expect(evaluate(host, 'COUNTIFS($C:$C,"<>done")')).toBe(ROWS - 2)
+		expect(evaluate(host, 'COUNTIFS($C$1:$C$10,"<>done")')).toBe(8)
+		expect(evaluate(host, 'COUNTIFS($A:$A,"<>b",$C:$C,"")')).toBe(ROWS - 5)
+		expect(evaluate(host, 'COUNTIFS($A$1:$A$10,"<>b",$C$1:$C$10,"")')).toBe(5)
+		// Mixed: a pair blanks fail limits the count to its own matches, tested against the blank-accepting one.
+		expect(evaluate(host, 'COUNTIFS($A:$A,"<>b",$C:$C,"open")')).toBe(1)
+		expect(evaluate(host, 'COUNTIFS($C:$C,"open",$A:$A,"<>b")')).toBe(1)
+		expect(evaluate(host, 'SUMIFS($D:$D,$C:$C,"<>done")')).toBe(23)
+		expect(evaluate(host, 'SUMIFS($D$1:$D$10,$C$1:$C$10,"<>done")')).toBe(23)
+		expect(evaluate(host, 'SUMIFS($D:$D,$A:$A,"<>b",$C:$C,"")')).toBe(10)
+		expect(evaluate(host, 'SUMIF($C:$C,"<>done",$D:$D)')).toBe(23)
+		expect(evaluate(host, 'AVERAGEIFS($D:$D,$C:$C,"<>done",$A:$A,"a")')).toBe(4)
+		expect(evaluate(host, 'AVERAGEIF($C:$C,"",$D:$D)')).toBeCloseTo(16 / 3, 12)
+		expect(evaluate(host, 'COUNTIFS($A:$A,"x",$C:$C,"<>done")')).toBe(0)
+	})
+
+	it("take sixteen whole columns without running out of room, and quickly", () => {
+		expect(evaluate(host, 'COUNTIFS($A:$P,"<>x")')).toBe(16 * ROWS)
+		expect(evaluate(host, 'COUNTIFS($A:$P,"<>a",$A:$P,"<>b")')).toBe(16 * ROWS - 5)
+		expect(evaluate(host, 'SUMIFS($A:$P,$A:$P,"<>x")')).toBe(28)
+
+		const start = performance.now()
+
+		for (let row = 0; row < 200; row++) evaluate(host, 'COUNTIFS($C:$C,"<>done",$A:$A,$A1)', [row, 4], [0, 4])
+
+		expect(performance.now() - start).toBeLessThan(budget(1_000))
+	})
+})
+
+// Wildcards in rule formulas (support.microsoft.com "Using wildcard characters in searches"): ? any one character,
+// * any run, ~ making the next character literal, case ignored. Matched without backtracking.
+describe("wildcards in rule formulas", () => {
+	it("match ?, *, ~ and case, and give SEARCH's position", () => {
+		const host = grid({ A1: "abc", A2: "ABC", A3: "a*c", A4: "a?c", A5: "axc", A6: "ac", B1: "x~y" })
+
+		expect(evaluate(host, 'COUNTIF(A1:A6,"a?c")')).toBe(5)
+		expect(evaluate(host, 'COUNTIF(A1:A6,"a~*c")')).toBe(1)
+		expect(evaluate(host, 'COUNTIF(A1:A6,"a~?c")')).toBe(1)
+		expect(evaluate(host, 'COUNTIF(A1:A6,"~a?c")')).toBe(5)
+		expect(evaluate(host, 'COUNTIF(A1:A6,"A*")')).toBe(6)
+		expect(evaluate(host, 'COUNTIF(A1:A6,"<>a*c")')).toBe(0)
+		expect(evaluate(host, 'COUNTIF(B1,"x~~y")')).toBe(1)
+		expect(evaluate(host, 'MATCH("A~?C",A1:A6,0)')).toBe(4)
+		expect(evaluate(host, 'MATCH("*X*",A1:A6,0)')).toBe(5)
+		expect(evaluate(host, 'VLOOKUP("a?c",A3:A6,1,FALSE)')).toBe("a*c")
+		expect(evaluate(host, 'SEARCH("b?d","abcbxd")')).toBe(4)
+		expect(evaluate(host, 'SEARCH("C*X","abcbxd")')).toBe(3)
+		expect(evaluate(host, 'SEARCH("~*","a*b")')).toBe(2)
+		expect(evaluate(host, 'SEARCH("b*","abcb",3)')).toBe(4)
+		expect(evaluate(host, 'SEARCH("?","abc",3)')).toBe(3)
+		expect(evaluate(host, 'SEARCH("x?","abc")')).toBe(FormulaError.VALUE)
+	})
+
+	it.each([3_000, 30_000])("tell at once that ten stars do not match %i characters", length => {
+		const host = grid({ A1: "a".repeat(length) })
+		const pattern = `${"*a".repeat(9)}*b`
+		const start = performance.now()
+
+		// A containsText rule's formula (conditional.ts impliedFormula), COUNTIF and MATCH.
+		expect(evaluate(host, `NOT(ISERROR(SEARCH("${pattern}",A1)))`)).toBe(false)
+		expect(evaluate(host, `COUNTIF(A1,"${pattern}")`)).toBe(0)
+		expect(evaluate(host, `MATCH("${pattern}",A1:A1,0)`)).toBe(FormulaError.NA)
+		expect(evaluate(host, `COUNTIF(A1,"${pattern.slice(0, -1)}")`)).toBe(1)
+		expect(performance.now() - start).toBeLessThan(budget(1_000))
+	})
+})
+
+// A tile's cells evaluated as one pass: a range its rules read for every cell is read once, with the same results.
+describe("rule formulas evaluated as one pass", () => {
+	const formulas = [
+		"COUNTIF($A$1:$A$50,$A1)>1",
+		"ISNUMBER(MATCH($A1,$B$1:$B$50,0))",
+		"VLOOKUP($A1,$B$1:$C$50,2,FALSE)",
+		"SUMPRODUCT(($A$1:$A$50=$A1)*1)",
+		'COUNTIF($A$1:$A$50,"<>"&$A1)'
+	]
+
+	function cells(): Record<string, Scalar> {
+		const values: Record<string, Scalar> = {}
+
+		for (let r = 1; r <= 50; r++) {
+			values[`A${String(r)}`] = r % 7 === 0 ? String(r % 5) : r % 5
+			values[`B${String(r)}`] = r % 3 === 0 ? `${String(r)}` : r
+			values[`C${String(r)}`] = `c${String(r)}`
+		}
+
+		return values
+	}
+
+	// Each formula over the rows, in a pass or not; and how often each range was walked.
+	function run(host: FormulaHost, pass: boolean): { results: Scalar[]; walks: Map<string, number> } {
+		const walks = new Map<string, number>()
+		const spied: FormulaHost = {
+			...host,
+			forEach: (ref, visit) => {
+				const key = `${String(ref.startRow)}:${String(ref.startCol)}:${String(ref.endRow)}:${String(ref.endCol)}`
+
+				walks.set(key, (walks.get(key) ?? 0) + 1)
+				host.forEach(ref, visit)
+			}
+		}
+		const evaluator = new FormulaEvaluator(spied)
+		const results: Scalar[] = []
+		const all = (): void => {
+			for (const formula of formulas) {
+				const parsed = parseFormula(formula)
+
+				for (let row = 0; row < 50; row++)
+					results.push(evaluator.scalar(evaluator.evaluate(parsed, { sheet: 0, anchorRow: 0, anchorCol: 4, row, col: 4 })))
+			}
+		}
+
+		if (pass) evaluator.pass(all)
+		else all()
+
+		return { results, walks }
+	}
+
+	it("gives the results each cell gives alone, reading each range a bounded number of times", () => {
+		const host = grid(cells())
+		const alone = run(host, false)
+		const passed = run(host, true)
+
+		expect(passed.results).toEqual(alone.results)
+		// Alone, the ranges are read once per cell or more; in a pass twice for each use made of them (asked, then
+		// kept): column A's counts and its array.
+		expect(Math.max(...alone.walks.values())).toBeGreaterThanOrEqual(50)
+		expect(passed.walks.get("0:0:49:0")).toBe(4)
+		expect(passed.walks.get("0:1:49:1")).toBe(2)
+		expect(passed.walks.get("0:1:49:2")).toBe(2)
+	})
+
+	it("reads what changed in the next pass, on its own sheet and another", () => {
+		const values = cells()
+		const host = grid(values, {}, { One: 0, Two: 1 })
+		const evaluator = new FormulaEvaluator(host)
+		const first = (formula: string): Scalar[] =>
+			evaluator.pass(() =>
+				[0, 1, 2].map(row =>
+					evaluator.scalar(evaluator.evaluate(parseFormula(formula), { sheet: 0, anchorRow: 0, anchorCol: 4, row, col: 4 }))
+				)
+			)
+
+		expect(first("COUNTIF($A$1:$A$50,1)")).toEqual([9, 9, 9])
+		expect(first("COUNTIF(Two!$A$1:$A$5,1)")).toEqual([0, 0, 0])
+
+		const edited = grid({ ...values, A2: 1, "Two!A1": 1 }, {}, { One: 0, Two: 1 })
+		const next = new FormulaEvaluator(edited)
+		const again = (formula: string): Scalar[] =>
+			next.pass(() =>
+				[0, 1, 2].map(row =>
+					next.scalar(next.evaluate(parseFormula(formula), { sheet: 0, anchorRow: 0, anchorCol: 4, row, col: 4 }))
+				)
+			)
+
+		expect(again("COUNTIF($A$1:$A$50,1)")).toEqual([10, 10, 10])
+		expect(again("COUNTIF(Two!$A$1:$A$5,1)")).toEqual([1, 1, 1])
+	})
+
+	it("keeps nothing past a pass: the host's next answer is read", () => {
+		const values: Record<string, Scalar> = { A1: 1, A2: 1, A3: 2 }
+		let host = grid(values)
+		const evaluator = new FormulaEvaluator({
+			value: (sheet, row, col) => host.value(sheet, row, col),
+			forEach: (ref, visit) => {
+				host.forEach(ref, visit)
+			},
+			extent: sheet => host.extent(sheet),
+			sheetByName: name => host.sheetByName(name),
+			definedName: (name, sheet) => host.definedName(name, sheet),
+			today: () => host.today(),
+			now: () => host.now(),
+			date1904: false
+		})
+		const counts = (): Scalar[] =>
+			evaluator.pass(() =>
+				[0, 1, 2].map(row =>
+					evaluator.scalar(
+						evaluator.evaluate(parseFormula("COUNTIF($A$1:$A$3,1)"), { sheet: 0, anchorRow: 0, anchorCol: 1, row, col: 1 })
+					)
+				)
+			)
+
+		expect(counts()).toEqual([2, 2, 2])
+
+		host = grid({ ...values, A3: 1 })
+
+		expect(counts()).toEqual([3, 3, 3])
+	})
+
+	// A range read for one cell (a relative one, or one past what a pass keeps) is let go with the cell, not held to the
+	// pass's end with what was made of it.
+	it("holds no array read for a single cell until the pass ends", async () => {
+		setFlagsFromString("--expose-gc")
+
+		const gc = runInNewContext("gc") as () => void
+		const values: Record<string, Scalar> = {}
+
+		for (let r = 1; r <= 50; r++) {
+			values[`A${String(r)}`] = r
+			values[`B${String(r)}`] = r
+		}
+
+		const formulas = [
+			"MATCH($A1,B1:B50,0)",
+			"VLOOKUP($A1,B1:C50,1,FALSE)",
+			// Kept from its second cell on, the next can no longer be: its arrays are each cell's own.
+			"MATCH($A1,$D$1:$D$600000,0)",
+			"MATCH($A1,$E$1:$E$600000,0)"
+		]
+		const evaluator = new FormulaEvaluator(grid(values, {}, { One: 0 }, { rows: 700_000, cols: 30 }))
+		const read = evaluator.array.bind(evaluator)
+		// What the collector let go of while the pass ran, by formula.
+		const collected = formulas.map(() => 0)
+		const registry = new FinalizationRegistry<number>(at => {
+			collected[at] = (collected[at] ?? 0) + 1
+		})
+		let current = 0
+
+		evaluator.array = value => {
+			const array = read(value)
+
+			registry.register(array, current)
+
+			return array
+		}
+
+		evaluator.pass(() => {
+			for (const [at, formula] of formulas.entries()) {
+				const parsed = parseFormula(formula)
+
+				current = at
+
+				for (let row = 0; row < 5; row++)
+					evaluator.scalar(evaluator.evaluate(parsed, { sheet: 0, anchorRow: 0, anchorCol: 25, row, col: 25 }))
+			}
+
+			gc()
+		})
+
+		// The registry reports in tasks of its own.
+		for (let turn = 0; turn < 5; turn++) await new Promise(resolve => setTimeout(resolve, 0))
+
+		// Every cell's own array; of the kept range, the first cell's (asked, not yet kept).
+		expect(collected).toEqual([5, 5, 1, 5])
+	})
+
+	it("leaves data validation to see the entry under check", () => {
+		const rule: DvRule = {
+			ranges: [{ startRow: 0, startCol: 0, endRow: 49, endCol: 0 }],
+			type: "custom",
+			operator: "between",
+			formula1: "COUNTIF($A$1:$A$50,A1)=1",
+			formula2: null,
+			allowBlank: true,
+			hideDropDown: false,
+			showInputMessage: false,
+			showErrorMessage: true,
+			errorStyle: "stop",
+			errorTitle: null,
+			error: null,
+			promptTitle: null,
+			prompt: null,
+			extended: false
+		}
+		const host = grid({ A1: "x", A2: "y" })
+
+		expect(meetsValidation(rule, { sheet: 0, row: 2, col: 0 }, "x", host)).toBe(false)
+		expect(meetsValidation(rule, { sheet: 0, row: 2, col: 0 }, "z", host)).toBe(true)
+		expect(meetsValidation(rule, { sheet: 0, row: 0, col: 0 }, "y", host)).toBe(false)
 	})
 })

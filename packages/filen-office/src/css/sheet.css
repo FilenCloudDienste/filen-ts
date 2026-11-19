@@ -45,6 +45,9 @@
 }
 
 .fo-sheet-scroller:focus-visible {
+	/* Transparent until forced colours, which draw it in a system colour where the box-shadow is dropped. */
+	outline: 2px solid transparent;
+	outline-offset: -2px;
 	box-shadow: inset 0 0 0 2px var(--fo-focus-ring, #2563eb);
 }
 

@@ -2,10 +2,13 @@ import {
 	CellFlag,
 	SHEET_MAX_COLS,
 	SHEET_MAX_ROWS,
+	cellTileKey,
+	tileColOf,
 	tileKey,
 	tileKeyCol,
 	tileKeyRow,
 	tileKeySheet,
+	tileRowOf,
 	type SheetAxis,
 	type SheetCell,
 	type SheetChange,
@@ -161,7 +164,8 @@ function shiftStep(command: SheetCommandOf<"axis.insert"> | SheetCommandOf<"axis
 	return { sheet: command.sheet, shifts: spans.map(span => ({ type, axis: command.axis, at: span.at, count: span.count })) }
 }
 
-const TEXT_KINDS: ReadonlySet<SheetFileKind> = new Set(["csv", "tsv", "tab"])
+// The kinds a file of plain text is saved as: no formats, sizes or anything else but the cells' text.
+export const TEXT_KINDS: ReadonlySet<SheetFileKind> = new Set(["csv", "tsv", "tab"])
 
 // A refused command and what it was, for the app's message (or, for a refusal that asks the user, its question).
 export type SheetGridRefusalHandler = (refusal: SheetRefusal, command: SheetCommand | "undo" | "redo") => void
@@ -589,7 +593,7 @@ export class SheetGridModel {
 
 	// A held cell's tile entry (no fetch).
 	entry(sheet: SheetId, row: number, col: number): GridEntry | null {
-		const tile = this.tiles.peek(tileKey(sheet, row >>> 6, col >>> 5))
+		const tile = this.tiles.peek(cellTileKey(sheet, row, col))
 
 		if (tile === undefined) return null
 
@@ -600,7 +604,7 @@ export class SheetGridModel {
 
 	// A held cell's tile, entry or not.
 	tileHeld(sheet: SheetId, row: number, col: number): boolean {
-		return this.tiles.has(tileKey(sheet, row >>> 6, col >>> 5))
+		return this.tiles.has(cellTileKey(sheet, row, col))
 	}
 
 	// What an entry being committed shows until the session's answer lands.
@@ -635,12 +639,12 @@ export class SheetGridModel {
 		// The active cell's tile is kept and fetched whatever is in view: the formula bar and the editor read it.
 		if (sheet === this.snapshot.sheet) {
 			const { row, col } = this.snapshot.selection.active
-			const key = tileKey(sheet, row >>> 6, col >>> 5)
+			const key = cellTileKey(sheet, row, col)
 
 			if (!needed.has(key)) {
 				needed.add(key)
 
-				if (this.tiles.touch(key) === undefined && !this.inFlight.has(key)) missing.push(row >>> 6, col >>> 5)
+				if (this.tiles.touch(key) === undefined && !this.inFlight.has(key)) missing.push(tileRowOf(row), tileColOf(col))
 			}
 		}
 
@@ -718,14 +722,13 @@ export class SheetGridModel {
 
 	// --- Sheets ---
 
-	// `keepEntry`: an open entry stays open on its own sheet while another is shown (pointing at that sheet's cells).
+	// `keepEntry`: an open entry stays open on its own sheet while another is shown (pointing at that sheet's cells);
+	// without it an open entry is dropped, not committed (the caller commits it first when it should be kept).
 	setSheet(sheet: SheetId, keepEntry = false): void {
 		if (sheet === this.snapshot.sheet || !this.snapshot.sheets.some(entry => entry.id === sheet)) return
 
 		this.moves++
 		this.tabRun = null
-
-		if (!keepEntry) this.commitOrDrop()
 
 		const layout = this.layouts.get(sheet) ?? null
 
@@ -759,11 +762,6 @@ export class SheetGridModel {
 	// An entry ended while another sheet is shown: its own sheet is shown again.
 	private returnTo(editing: GridEditing): void {
 		if (editing.sheet !== this.snapshot.sheet) this.setSheet(editing.sheet)
-	}
-
-	// Switching sheets mid-entry drops the entry (the caller commits it first when it should be kept).
-	private commitOrDrop(): void {
-		if (this.snapshot.editing !== null) this.snapshot = { ...this.snapshot, editing: null }
 	}
 
 	private loadLayout(sheet: SheetId): void {
@@ -872,10 +870,10 @@ export class SheetGridModel {
 	private activeCell(sheet: SheetId, point: GridPoint): GridActiveCell {
 		if (!this.tileHeld(sheet, point.row, point.col)) {
 			// Asked for now, whether or not a frame draws it (the cell answers once it arrives).
-			const key = tileKey(sheet, point.row >>> 6, point.col >>> 5)
+			const key = cellTileKey(sheet, point.row, point.col)
 
 			if (!this.disposed && this.snapshot.failed === null && !this.inFlight.has(key) && this.layouts.has(sheet))
-				this.fetch(sheet, [point.row >>> 6, point.col >>> 5])
+				this.fetch(sheet, [tileRowOf(point.row), tileColOf(point.col)])
 
 			return NO_ACTIVE
 		}

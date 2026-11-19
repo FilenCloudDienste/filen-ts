@@ -6,13 +6,19 @@ import { odsSource, type OdsSource } from "../source"
 import { ContentRefused, missingDeclarations } from "./content"
 import { saveOds } from "./save"
 import { odsEditBegins, odsEditRefusal } from "./check"
+import { misbound, reboundBelowRoot } from "../read/scan"
 
 // Why an OpenDocument workbook can never be saved here, known at open: content past what is materialised (a repeat
-// beyond the caps), tables inside cells, or a prefix the writer's markup needs bound to another namespace.
-function viewOnly(source: OdsSource | undefined): SheetViewOnlyReason | null {
+// beyond the caps), tables inside cells, or a namespace the writer names by its conventional prefix bound otherwise
+// (under another prefix, as the default namespace, or that prefix to another namespace; at the root or below it):
+// the writer would pass its elements by unseen.
+export function viewOnly(source: OdsSource | undefined): SheetViewOnlyReason | null {
 	if (source === undefined) return "legacyFormat"
 	if (source.tables.some(table => table.truncated)) return "tooLarge"
-	if (source.issues.some(issue => issue.kind === "subTable")) return "lossy"
+	if (source.subTables) return "lossy"
+	if (reboundBelowRoot(source.prefixes)) return "lossy"
+
+	for (const [prefix, uri] of source.prefixes) if (misbound(prefix, uri)) return "lossy"
 
 	try {
 		missingDeclarations(source.prefixes)

@@ -279,10 +279,6 @@ async function rc4Key(lKey: number, table: Uint8Array, password: string, blockSi
 	)
 }
 
-// §2.3.5.1 RC4 CryptoAPI EncryptionHeader: Version (2|3|4).2, Flags, EncryptionHeaderSize, EncryptionHeader (§2.3.2:
-// AlgID RC4, AlgIDHash SHA-1, KeySize 40–128 bits), EncryptionVerifier (§2.3.3: 16-byte salt and verifier, 20-byte
-// verifier hash). §2.3.5.2: H0 = SHA-1(salt + password), key(block) = SHA-1(H0 + block) cut to KeySize; a 40-bit key is
-// padded with zeros to 128 bits.
 // What makes an RC4 CryptoAPI EncryptionHeader and EncryptionVerifier unreadable ([MS-OFFCRYPTO] §2.3.5.1, §2.3.3) within
 // the first `lKey` bytes of the Table stream, else undefined. The structure is checked without the password, so a
 // damaged file is refused before one is asked for; only the verifier's hash needs the key.
@@ -311,6 +307,10 @@ export function cryptoApiHeaderProblem(table: Uint8Array, lKey: number): string 
 	return undefined
 }
 
+// §2.3.5.1 RC4 CryptoAPI EncryptionHeader: Version (2|3|4).2, Flags, EncryptionHeaderSize, EncryptionHeader (§2.3.2:
+// AlgID RC4, AlgIDHash SHA-1, KeySize 40–128 bits), EncryptionVerifier (§2.3.3: 16-byte salt and verifier, 20-byte
+// verifier hash). §2.3.5.2: H0 = SHA-1(salt + password), key(block) = SHA-1(H0 + block) cut to KeySize; a 40-bit key is
+// padded with zeros to 128 bits.
 async function cryptoApiKey(lKey: number, table: Uint8Array, decryption: DocDecryption, blockSize: number): Promise<DocBlockKey> {
 	const end = lKey
 	const problem = cryptoApiHeaderProblem(table, lKey)

@@ -179,6 +179,10 @@ export async function convert(
 
 		return !present(output) || statSync(output).mtimeMs < statSync(input).mtimeMs
 	})
+
+	// An older output left in place would pass for a conversion that failed this time.
+	for (const input of stale) rmSync(outputPath(outdir, input, format), { force: true })
+
 	const batch =
 		stale.length === 0
 			? { code: 0, timedOut: false, stderr: "", ms: 0 }

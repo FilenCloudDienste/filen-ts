@@ -39,7 +39,7 @@ import { notesBody } from "../../presentation/notes"
 import { builtinTableStyle, builtinTableStyleFamily } from "../../presentation/render/tableStyles"
 import { D } from "../../drawingml/reader"
 import { resolveColor, themeTypeface, type ColorContext, type PresentationTheme } from "../../presentation/theme"
-import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText } from "../../xml/index"
+import { decodeUtf8, encodeUtf8, escapeAttribute } from "../../xml/index"
 import { odpParagraphId, odpParagraphKey, odpParagraphTargets, odpTargetId, odpTargetIds, odpTimingMarkup } from "../../anim/odf"
 import { bookmarkTriggers, mediaTimingLosses } from "../../anim/media"
 import { withoutShapes } from "../../anim/prune"
@@ -49,11 +49,12 @@ import { NEAR_NUMBERINGS, NUMBERING_ALIASES, ODF_NUMBERINGS } from "../read/text
 import {
 	IDENTITY,
 	OdpShapeWriter,
-	boxAttributes,
+	boxMarkup,
 	canonicalBox,
 	markupOf,
 	compose,
 	groupAffine,
+	newElementCommon,
 	odpWritesAction,
 	pictureMirror,
 	placed,
@@ -151,6 +152,17 @@ export interface FreshOdp {
 
 function count(table: Record<string, number>, what: string): void {
 	table[what] = (table[what] ?? 0) + 1
+}
+
+// A shape's actions as ODF holds them: a click action ODF has no listener for (a custom show, a medium of its own, one
+// refused as unsafe: a macro, a program) and a hover action (ODF has none) are left off, each counted; the shape stays.
+function writableActions(shape: ShapeNode, report: FreshReport): Pick<ShapeNode, "actions"> {
+	const click = shape.actions?.click
+
+	if (click !== undefined && !odpWritesAction(click)) count(report.omitted, `action ${click.kind}`)
+	if (shape.actions?.hover !== undefined) count(report.omitted, "action hover")
+
+	return click === undefined || !odpWritesAction(click) ? {} : { actions: { click } }
 }
 
 // A colour as ODF holds it (sRGB, its alpha a modifier): theme slots, presets, system colours and modifiers applied.
@@ -397,13 +409,6 @@ class Flattener {
 
 		if (resolved.xfrm === undefined && xfrm !== undefined) count(this.report.approximated, "shape without a box")
 
-		// A click action ODF has no listener for (a custom show, a medium of its own, one refused as unsafe: a macro, a
-		// program) and a hover action (ODF has none) are left off, each counted; the shape stays.
-		const click = shape.actions?.click
-
-		if (click !== undefined && !odpWritesAction(click)) count(this.report.omitted, `action ${click.kind}`)
-		if (shape.actions?.hover !== undefined) count(this.report.omitted, "action hover")
-
 		const out: ShapeNode = {
 			id: shape.id,
 			name: shape.name,
@@ -418,7 +423,7 @@ class Flattener {
 				bodyPr: { ...body, vertical }
 			},
 			...(text === undefined ? {} : { text }),
-			...(click === undefined || !odpWritesAction(click) ? {} : { actions: { click } })
+			...writableActions(shape, this.report)
 		}
 
 		if (shape.kind === "pic") {
@@ -867,7 +872,6 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 	const extra: PartChange[] = []
 	// Chart objects written, by directory.
 	const objects: string[] = []
-	const written: string[] = []
 	const masterPages = new Map<string, string>()
 	const masterMarkup: string[] = []
 
@@ -966,10 +970,31 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		return prefix
 	}
 
+	// What a new element shares (newElementCommon), named by its target id when the page's timing animates it, as the
+	// shape writer names shapes. A click action that cannot be written (a jump to a page not written) is left off and
+	// counted.
+	const commonOf = (
+		shape: ShapeNode,
+		styles: OdpStyles,
+		owner: SlideNode
+	): { readonly attributes: string; readonly alt: string; readonly listeners: string } => {
+		const common = newElementCommon(
+			shape,
+			styles,
+			targetsOf(owner).has(shape.id) ? odpTargetId(shape, undefined, idPrefix(owner)) : undefined
+		)
+
+		if (!isRefused(common.listeners)) return { ...common, listeners: common.listeners }
+
+		count(report.omitted, `action (${common.listeners.detail ?? common.listeners.reason})`)
+
+		return { ...common, listeners: "" }
+	}
+
 	// A chart frame as draw:frame holding draw:object (ODF 1.3 Part 3 §10.4.6), its object a chart document of its own
 	// ("Object N/", Part 2 §4.3 manifest type application/vnd.oasis.opendocument.chart); undefined when the source
 	// has no object for it (the frame then left out and named).
-	const chartMarkup = (shape: ShapeNode, node: SlideNode, owner: SlideNode, m: Affine): string | undefined => {
+	const chartMarkup = (shape: ShapeNode, node: SlideNode, owner: SlideNode, styles: OdpStyles, m: Affine): string | undefined => {
 		const xfrm = resolveShape(deck, node.ref, shape, services.documents).xfrm
 		const object = xfrm === undefined ? undefined : services.chart?.({ ...shape, xfrm }, node)
 
@@ -981,15 +1006,10 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		objects.push(path)
 		extra.push({ name: `${path}/content.xml`, bytes: object.content })
 
-		const box = placed(xfrm, m)
-		const turn = box.rot === 0 ? `svg:x="${cm(box.x)}" svg:y="${cm(box.y)}"` : transformAttributes(box)
-		const target = targetsOf(owner).has(shape.id) ? escapeAttribute(odpTargetId(shape, undefined, idPrefix(owner))) : undefined
-		const ids = target === undefined ? "" : ` xml:id="${target}" draw:id="${target}"`
-		const alt =
-			(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
-			(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
+		const { actions: _actions, ...rest } = shape
+		const common = commonOf({ ...rest, ...writableActions(shape, report) }, styles, owner)
 
-		return `<draw:frame draw:name="${escapeAttribute(shape.name)}"${ids} ${turn} svg:width="${cm(box.cx)}" svg:height="${cm(box.cy)}"><draw:object xlink:href="./${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${alt}</draw:frame>`
+		return `<draw:frame${common.attributes}${boxMarkup(placed(xfrm, m))}><draw:object xlink:href="./${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${common.listeners}${common.alt}</draw:frame>`
 	}
 
 	// Shapes as markup, flattened; pictures written here (their family is not built for new elements).
@@ -1013,7 +1033,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			}
 
 			if (shape.kind === "frame" && shape.frame?.kind === "chart" && services.chart !== undefined) {
-				const chart = chartMarkup(shape, node, owner, m)
+				const chart = chartMarkup(shape, node, owner, styles, m)
 
 				if (chart !== undefined) {
 					out += chart
@@ -1049,13 +1069,9 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 				if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
 
 				const style = styles.derived("graphic", undefined, changes)
-				const turn = box.rot === 0 ? `svg:x="${cm(box.x)}" svg:y="${cm(box.y)}"` : transformAttributes(box)
+				const common = commonOf(flat, styles, owner)
 
-				// A picture the page's timing animates is named by its target id, as the shape writer names shapes.
-				const target = targetsOf(owner).has(flat.id) ? escapeAttribute(odpTargetId(flat, undefined, idPrefix(owner))) : undefined
-				const ids = target === undefined ? "" : ` xml:id="${target}" draw:id="${target}"`
-
-				out += `<draw:frame draw:name="${escapeAttribute(flat.name)}"${ids} draw:style-name="${escapeAttribute(style)}" ${turn} svg:width="${cm(box.cx)}" svg:height="${cm(box.cy)}"><draw:image xlink:href="${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${flat.alt?.descr === undefined ? "" : `<svg:desc>${flat.alt.descr.replace(/&/gu, "&amp;").replace(/</gu, "&lt;")}</svg:desc>`}</draw:frame>`
+				out += `<draw:frame${common.attributes} draw:style-name="${escapeAttribute(style)}"${boxMarkup(box)}><draw:image xlink:href="${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${common.listeners}${common.alt}</draw:frame>`
 
 				continue
 			}
@@ -1082,9 +1098,9 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 
 				if (isRefused(inner)) return inner
 
-				const target = targetsOf(owner).has(flat.id) ? escapeAttribute(odpTargetId(flat, undefined, idPrefix(owner))) : undefined
+				const common = commonOf(flat, styles, owner)
 
-				out += `<draw:g${flat.name === "" ? "" : ` draw:name="${escapeAttribute(flat.name)}"`}${target === undefined ? "" : ` xml:id="${target}" draw:id="${target}"`}>${inner}</draw:g>`
+				out += `<draw:g${common.attributes}>${common.alt}${common.listeners}${inner}</draw:g>`
 
 				continue
 			}
@@ -1111,8 +1127,6 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 
 			out += markup
 		}
-
-		written.push(out)
 
 		return out
 	}
@@ -1219,9 +1233,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			const imageBox = image === undefined ? undefined : resolveShape(deck, notesNode.ref, image, services.documents).xfrm
 			const imageAttributes =
 				(image === undefined || image.name === "" ? "" : ` draw:name="${escapeAttribute(image.name)}"`) +
-				(imageBox === undefined ? [] : boxAttributes(imageBox))
-					.map(change => (change.value === null ? "" : ` ${change.name}="${escapeAttribute(change.value)}"`))
-					.join("")
+				(imageBox === undefined ? "" : boxMarkup(imageBox))
 			const thumbnail =
 				image === undefined
 					? ""
@@ -1354,26 +1366,10 @@ function drawingPageFill(changes: StyleChanges, fill: FillProps | "none" | undef
 	for (const [attribute, value] of own.attributes.get("graphic") ?? []) setProperty(changes, "drawing-page", attribute, value)
 }
 
-function transformAttributes(box: {
-	readonly x: number
-	readonly y: number
-	readonly cx: number
-	readonly cy: number
-	readonly rot: number
-}): string {
-	const a = -((box.rot / 60_000) * Math.PI) / 180
-	const cos = Math.cos(a)
-	const sin = Math.sin(a)
-	const halfW = box.cx / 2
-	const halfH = box.cy / 2
-	const tx = box.x + halfW - (cos * halfW + sin * halfH)
-	const ty = box.y + halfH - (-sin * halfW + cos * halfH)
-
-	return `draw:transform="rotate (${a.toFixed(12)}) translate (${cm(tx)} ${cm(ty)})"`
-}
-
-// The fresh package written to a sink (mimetype first and stored, Part 2 §3.3), then read back: a package that does
-// not open, or opens with another slide count, is refused before the sink is closed.
+// The fresh package written to a sink (mimetype first and stored, Part 2 §3.3) once its XML parts are read back: a
+// package whose XML parts do not open, or open with another slide count, is refused before anything reaches the sink.
+// The read-back needs no picture (it opens the package and counts its pages), so the pictures are never held a
+// second time as a zip in memory: the package streams to the sink from the parts.
 export async function writeFreshOdp(
 	deck: Deck,
 	services: FreshOdpServices,
@@ -1385,17 +1381,14 @@ export async function writeFreshOdp(
 
 	const memory = memorySink()
 
-	await writeZip(newOdfPlan({ mediaType: fresh.mediaType, parts: fresh.parts }), null, memory)
+	await writeZip(newOdfPlan({ mediaType: fresh.mediaType, parts: fresh.parts.filter(part => part.name.endsWith(".xml")) }), null, memory)
 
-	const chunks = memory.chunks()
-	const back = await openOdp(chunksSource(chunks))
+	const back = await openOdp(chunksSource(memory.chunks()))
 
 	if (back.kind === "refused") return refused("proofFailed", `the written package does not open: ${back.detail ?? back.reason}`)
 	if (back.deck.slides.length !== deck.slides.length) return refused("proofFailed", "the written package has another slide count")
 
-	for (const chunk of chunks) await sink.write(chunk)
-
-	await sink.close()
+	await writeZip(newOdfPlan({ mediaType: fresh.mediaType, parts: fresh.parts }), null, sink)
 
 	return { report: fresh.report }
 }

@@ -41,6 +41,62 @@ describe("setting many rows' properties", () => {
 	})
 })
 
+describe("setting existing rows' properties", () => {
+	const props = (rows: readonly number[], flags = RowFlag.HIDDEN): { row: number; height: number; style: number; flags: number }[] =>
+		rows.map(row => ({ row, height: 20, style: 1, flags }))
+
+	it("writes them in place: the cells keep their arrays, the rows get what setRow gives them", () => {
+		const one = storeOf(3000, 0)
+		const many = storeOf(3000, 0)
+		const block = many.blocks[1]!
+		const arrays = [block.cols, block.kinds, block.values, block.styles]
+		const rows = Array.from({ length: 900 }, (_, k) => 1024 + k)
+		const version = many.version
+
+		for (const { row, height, style, flags } of props(rows)) one.setRow(row, height, style, flags)
+
+		many.setRows(props(rows))
+
+		expect(many.blocks[1]).toBe(block)
+		expect([block.cols, block.kinds, block.values, block.styles]).toEqual(arrays)
+		arrays.forEach((array, k) => expect([block.cols, block.kinds, block.values, block.styles][k]).toBe(array))
+		expect(many.version).toBeGreaterThan(version)
+
+		for (const row of [1023, 1024, 1500, 1923, 1924]) expect(rowState(many, row)).toEqual(rowState(one, row))
+	})
+
+	it("copies a block an undo snapshot holds rather than changing it", () => {
+		const store = storeOf(10, 0)
+		const block = store.blocks[0]!
+		const before = block.rowFlags.slice()
+
+		store.held.add(block)
+		store.setRows(props([2, 3]))
+
+		expect(store.blocks[0]).not.toBe(block)
+		expect(block.rowFlags).toEqual(before)
+		expect((store.blocks[0]!.rowFlags[2] ?? 0) & RowFlag.HIDDEN).toBe(RowFlag.HIDDEN)
+		expect(store.blocks[0]!.values).toEqual(block.values)
+	})
+
+	it("drops a row left vacant and adds a missing one, as setRow does", () => {
+		const one = storeOf(10, 0)
+		const many = storeOf(10, 0)
+
+		for (const store of [one, many]) store.setRow(20, 15, -1, RowFlag.CUSTOM_HEIGHT)
+
+		const bare = { row: 20, height: Number.NaN, style: -1, flags: 0 }
+		const added = { row: 30, height: 18, style: -1, flags: RowFlag.CUSTOM_HEIGHT }
+
+		one.setRow(bare.row, bare.height, bare.style, bare.flags)
+		one.setRow(added.row, added.height, added.style, added.flags)
+		many.setRows([bare, added])
+
+		for (const row of [5, 20, 30]) expect(rowState(many, row)).toEqual(rowState(one, row))
+		expect(many.blocks.reduce((sum, block) => sum + block.rowCount, 0)).toBe(one.blocks.reduce((sum, block) => sum + block.rowCount, 0))
+	})
+})
+
 describe("setting many cells", () => {
 	it("writes what one setCell per cell writes: in place, added, removed, in new rows and blocks", () => {
 		const one = storeOf(3000, 100)

@@ -304,7 +304,9 @@ export function transitionFrame(kind: string, options: TransitionOptions, progre
 			return frame({}, { kind: "polygon", points: Float64Array.from(out) })
 		}
 		case "wheel": {
-			const spokes = Math.max(1, Math.trunc(Number(options["spokes"] ?? 4)) || 4)
+			// Clamped at draw time (the file's value is written back as read): PowerPoint knows 1, 2, 3, 4 and 8.
+			const raw = Math.trunc(Number(options["spokes"] ?? 4))
+			const spokes = Number.isFinite(raw) && raw >= 1 ? Math.min(raw, 8) : 4
 			const out: number[] = []
 			const span = (2 * Math.PI) / spokes
 
@@ -417,7 +419,7 @@ export function transitionToOdf(kind: string, options: TransitionOptions): OdfTr
 
 	const dir = (fallback: string): string => option(options, "dir", fallback)
 	// The edge (or corner) the incoming slide comes from: the opposite of the way it moves.
-	const from = (d: string): string => FROM[d] ?? "fromRight"
+	const from = (d: string): string => (Object.hasOwn(FROM, d) ? FROM[d] : undefined) ?? "fromRight"
 
 	switch (kind) {
 		case "fade":

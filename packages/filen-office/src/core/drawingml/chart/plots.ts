@@ -732,7 +732,15 @@ export function drawBars(frame: PlotFrame): void {
 			place(k, offset, lows[k] ?? 0, highs[k] ?? 0)
 
 			const share = totals === null ? Number.NaN : raw / ((totals[k] ?? 0) || 1)
-			const text = labelText(config, seriesName(series, order), frame.categories[k] ?? "", raw, valueFormat(series), share)
+			const text = labelText(
+				config,
+				seriesName(series, order),
+				frame.categories[k] ?? "",
+				raw,
+				valueFormat(series),
+				share,
+				frame.builder.date1904
+			)
 
 			if (text === "") continue
 
@@ -821,7 +829,6 @@ function pointLabels(
 	order: number,
 	xs: Float64Array,
 	ys: Float64Array,
-	shares: Float64Array | null,
 	fallback: "r" | "ctr" | "t"
 ): void {
 	const labels = seriesLabels(frame.builder, frame.plot.dataLabels, series.node)
@@ -842,7 +849,8 @@ function pointLabels(
 			frame.categories[k] ?? "",
 			raw,
 			valueFormat(series),
-			shares?.[k] ?? Number.NaN
+			Number.NaN,
+			frame.builder.date1904
 		)
 		const where = config.position
 		const side = where === "t" || where === "b" || where === "l" || where === "r" || where === "ctr" ? where : fallback
@@ -950,7 +958,7 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 
 			builder.end(style.fill, style.stroke, inner, ItemFlag.EVEN_ODD, series.node)
 			categoryOverlays(frame, series, style, count, tips ?? ys, totals, xs)
-			pointLabels(frame, series, order, xs, ys, null, "ctr")
+			pointLabels(frame, series, order, xs, ys, "ctr")
 
 			return
 		}
@@ -960,7 +968,7 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 		builder.end(-1, style.stroke, inner, 0, series.node)
 		drawMarkers(builder, style, xs, ys, inner, series.node)
 		categoryOverlays(frame, series, style, count, tips ?? ys, totals, xs)
-		pointLabels(frame, series, order, xs, ys, null, "r")
+		pointLabels(frame, series, order, xs, ys, "r")
 	})
 
 	// Drop lines: from each category's points to the category axis.
@@ -1052,7 +1060,7 @@ export function drawScatter(frame: PlotFrame): void {
 
 		if (xData !== null) xyOverlays(frame, series, style, xData, xs, ys)
 
-		pointLabels(frame, series, order, xs, ys, null, "r")
+		pointLabels(frame, series, order, xs, ys, "r")
 	})
 }
 
@@ -1139,7 +1147,7 @@ export function drawBubbles(frame: PlotFrame): void {
 
 		if (xData !== null) xyOverlays(frame, series, style, xData, xs, ys)
 
-		pointLabels(frame, series, order, xs, ys, null, "r")
+		pointLabels(frame, series, order, xs, ys, "r")
 	})
 }
 
@@ -1218,49 +1226,68 @@ export function drawSurface(frame: PlotFrame, rows: AxisState | undefined, bands
 	if (rowCount < 2 || columnCount === 0) return
 
 	const wide = columnCount === 1 ? 2 : columnCount
-	const columnAt = (i: number): number => (columnCount === 1 ? (i === 0 ? inner.x : inner.x + inner.w) : categoryPosition(columns, i))
-	const rowAt = (j: number): number =>
-		rows !== undefined && plot.series.length > 1 ? categoryPosition(rows, j) : inner.y + inner.h - (j * inner.h) / (rowCount - 1)
 	const valueAt = (i: number, j: number): number => series[j]?.values.numbers?.[columnCount === 1 ? 0 : i] ?? Number.NaN
 	const cells = Math.min(MAX_SURFACE_CELLS, (wide - 1) * (rowCount - 1))
+	// Everything but the band test is the same for every band: grid positions and each triangle's value range
+	// (NaN for a triangle with a missing point, which Office leaves empty) are computed once.
+	const columnX = new Float64Array(wide)
+	const rowY = new Float64Array(rowCount)
+	const triangleMin = new Float64Array(cells * 2)
+	const triangleMax = new Float64Array(cells * 2)
+
+	for (let i = 0; i < wide; i++) columnX[i] = columnCount === 1 ? (i === 0 ? inner.x : inner.x + inner.w) : categoryPosition(columns, i)
+	for (let j = 0; j < rowCount; j++) {
+		rowY[j] =
+			rows !== undefined && plot.series.length > 1 ? categoryPosition(rows, j) : inner.y + inner.h - (j * inner.h) / (rowCount - 1)
+	}
+
+	for (let cell = 0; cell < cells; cell++) {
+		const i = cell % (wide - 1)
+		const j = Math.floor(cell / (wide - 1))
+		const v00 = valueAt(i, j)
+		const v10 = valueAt(i + 1, j)
+		const v01 = valueAt(i, j + 1)
+		const v11 = valueAt(i + 1, j + 1)
+		const first = Number.isFinite(v00) && Number.isFinite(v10) && Number.isFinite(v11)
+		const second = Number.isFinite(v00) && Number.isFinite(v11) && Number.isFinite(v01)
+
+		triangleMin[cell * 2] = first ? Math.min(v00, v10, v11) : Number.NaN
+		triangleMax[cell * 2] = first ? Math.max(v00, v10, v11) : Number.NaN
+		triangleMin[cell * 2 + 1] = second ? Math.min(v00, v11, v01) : Number.NaN
+		triangleMax[cell * 2 + 1] = second ? Math.max(v00, v11, v01) : Number.NaN
+	}
 
 	for (let band = 0; band < bands.length; band++) {
 		const { low, high, fill, stroke } = bands[band] as SurfaceBand
+		// Values beyond the axis fall in the end bands.
+		const bottom = band === 0 ? -Infinity : low
+		const top = band === bands.length - 1 ? Infinity : high
 
 		builder.begin()
 
 		for (let cell = 0; cell < cells; cell++) {
-			const i = cell % (wide - 1)
-			const j = Math.floor(cell / (wide - 1))
-			const x0 = columnAt(i)
-			const x1 = columnAt(i + 1)
-			const y0 = rowAt(j)
-			const y1 = rowAt(j + 1)
-			const v00 = valueAt(i, j)
-			const v10 = valueAt(i + 1, j)
-			const v01 = valueAt(i, j + 1)
-			const v11 = valueAt(i + 1, j + 1)
-			const triangles = [
-				[x0, y0, v00, x1, y0, v10, x1, y1, v11],
-				[x0, y0, v00, x1, y1, v11, x0, y1, v01]
-			]
+			for (let half = 0; half < 2; half++) {
+				const min = triangleMin[cell * 2 + half] ?? Number.NaN
+				const max = triangleMax[cell * 2 + half] ?? Number.NaN
 
-			for (const t of triangles) {
+				if (Number.isNaN(min)) continue
+				if (fill >= 0 ? max < bottom || min > top : !(band > 0 && min < low && max > low)) continue
+
+				const i = cell % (wide - 1)
+				const j = Math.floor(cell / (wide - 1))
+				const x0 = columnX[i] ?? 0
+				const x1 = columnX[i + 1] ?? 0
+				const y0 = rowY[j] ?? 0
+				const y1 = rowY[j + 1] ?? 0
+				const v00 = valueAt(i, j)
+				const v11 = valueAt(i + 1, j + 1)
+				const t =
+					half === 0
+						? [x0, y0, v00, x1, y0, valueAt(i + 1, j), x1, y1, v11]
+						: [x0, y0, v00, x1, y1, v11, x0, y1, valueAt(i, j + 1)]
 				const vs = [t[2] ?? 0, t[5] ?? 0, t[8] ?? 0]
 
-				// A cell with a missing point is left empty, as Office leaves it.
-				if (!vs.every(Number.isFinite)) continue
-
-				const min = Math.min(...vs)
-				const max = Math.max(...vs)
-
 				if (fill >= 0) {
-					// Values beyond the axis fall in the end bands.
-					const bottom = band === 0 ? -Infinity : low
-					const top = band === bands.length - 1 ? Infinity : high
-
-					if (max < bottom || min > top) continue
-
 					const part = clipToBand([t[0] ?? 0, t[3] ?? 0, t[6] ?? 0], [t[1] ?? 0, t[4] ?? 0, t[7] ?? 0], vs, bottom, top)
 
 					if (part.xs.length < 3) continue
@@ -1270,7 +1297,7 @@ export function drawSurface(frame: PlotFrame, rows: AxisState | undefined, bands
 					for (let k = 1; k < part.xs.length; k++) builder.list.lineTo(part.xs[k] ?? 0, part.ys[k] ?? 0)
 
 					builder.list.close()
-				} else if (band > 0 && min < low && max > low) {
+				} else {
 					// The band's lower edge through the triangle: where two of its edges cross the value.
 					const points: number[] = []
 
@@ -1405,7 +1432,8 @@ export function drawPie(frame: PlotFrame): void {
 				frame.categories[k] ?? "",
 				values?.[k] ?? 0,
 				valueFormat(series),
-				v / total
+				v / total,
+				builder.date1904
 			)
 
 			if (text === "") continue
@@ -1517,14 +1545,14 @@ export function drawRadar(frame: PlotFrame): void {
 		polyline(builder, xs, ys, false, false, true)
 		builder.end(plot.filled ? style.fill : -1, style.stroke, box, ItemFlag.EVEN_ODD, series.node)
 		drawMarkers(builder, style, xs, ys, box, series.node)
-		pointLabels(frame, series, order, xs, ys, null, "t")
+		pointLabels(frame, series, order, xs, ys, "t")
 	})
 
 	if (!value.axis.deleted && value.axis.labelPosition !== "none") {
 		const valueText = value.text
 
 		for (const tick of ticks) {
-			const label = formatNumber(tick, value.format)
+			const label = formatNumber(tick, value.format, builder.date1904)
 			const width = estimateWidth(label, valueText.size) + 4
 			const height = estimateHeight(valueText.size)
 			const y = cy - reach(tick)

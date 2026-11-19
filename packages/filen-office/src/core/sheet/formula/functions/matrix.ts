@@ -1,4 +1,5 @@
 import { CellError, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
+import { MAX_ARRAY_CELLS } from "../../refs/formulaRefs"
 import {
 	naError,
 	numError,
@@ -465,12 +466,14 @@ export class MatrixFunctions extends SheetFunctionPlugin {
 		})
 	}
 
-	// MUNIT(dimension): the identity matrix of that size; a dimension of 0 or below is #VALUE!.
+	// MUNIT(dimension): the identity matrix of that size; a dimension of 0 or below, or one past the cells held here,
+	// is #VALUE! (as Excel answers an oversized one). Checked here, not only in the cell formula's text, as a defined
+	// name's expression or a computed dimension reaches it unbounded.
 	munit(ast: PluginCall, state: PluginState): unknown {
 		return this.runFunction(ast.args, state, this.metadata("MUNIT"), (dimension: number) => {
 			const size = Math.trunc(dimension)
 
-			if (size <= 0) return valueError()
+			if (size <= 0 || size * size > MAX_ARRAY_CELLS) return valueError()
 
 			return SimpleRangeValue.onlyNumbers(
 				Array.from({ length: size }, (_, row) => {

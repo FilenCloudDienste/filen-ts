@@ -124,7 +124,9 @@ export async function writeSheetNotes(
 
 	if (fresh.length === 0) return true
 
-	const shapes = fresh.filter(note => store.vmlOf(target.sheet)?.notes.has(cellKeyOf(note.row, note.col)) !== true)
+	// Read once: nothing between here and its use below changes the sheet's parts.
+	const vml = store.vmlOf(target.sheet)
+	const shapes = fresh.filter(note => vml?.notes.has(cellKeyOf(note.row, note.col)) !== true)
 
 	if (shapes.length === 0) return true
 
@@ -137,7 +139,7 @@ export async function writeSheetNotes(
 			type: vmlRelationship(workbook),
 			target: relativeTarget(target.part, name)
 		})
-		const prefix = (target.model as { readonly prefix?: string }).prefix ?? ""
+		const prefix = target.model.prefix
 		const p = prefix === "" ? "" : `${prefix}:`
 
 		writes.setPart(name, VML_TYPE, newVml(block, shapes))
@@ -147,8 +149,6 @@ export async function writeSheetNotes(
 
 		return true
 	}
-
-	const vml = store.vmlOf(target.sheet)
 
 	if (vml === null) return false
 
@@ -241,6 +241,7 @@ export async function deleteNotes(
 	const store = annotationStore(document.workbook)
 	const part = store.commentsOf(sheet)
 	const threads = store.threadedOf(sheet)
+	const vml = store.vmlOf(sheet)
 	const keys = new Set<number>()
 	const cells: { row: number; col: number }[] = []
 	let shown = false
@@ -256,7 +257,7 @@ export async function deleteNotes(
 
 		keys.add(key)
 		cells.push({ row: note.row, col: note.col })
-		shown ||= store.vmlOf(sheet)?.notes.get(key)?.shown === true
+		shown ||= vml?.notes.get(key)?.shown === true
 	}
 
 	if (part === null || keys.size === 0) return null
@@ -265,8 +266,6 @@ export async function deleteNotes(
 	const writes = new AnnotationWrites(document.workbook)
 
 	if (parts.comments !== null) writes.setPart(parts.comments, COMMENTS_TYPE, removeNotes(part, keys))
-
-	const vml = store.vmlOf(sheet)
 
 	if (vml !== null && parts.vml !== null && [...keys].some(key => vml.notes.has(key)))
 		writes.setPart(parts.vml, VML_TYPE, removeNoteShapes(vml, keys))

@@ -42,6 +42,14 @@ interface SourceDocument {
 	readonly bytes: Uint8Array
 }
 
+// An error the span's writing of an RTF save threw, the whole file written in its place: logged where the worker has a
+// console (the package's lib names none: read through Reflect).
+function logFallback(error: unknown): void {
+	const console = Reflect.get(globalThis, "console") as { warn?: (...data: unknown[]) => void } | undefined
+
+	console?.warn?.("RTF span save fell back to the whole document", error)
+}
+
 // The translation package with the docx writer's parts in it: replaced where the package has them, added otherwise.
 async function editedPackage(docx: Uint8Array, edits: DocxRtfEdits): Promise<Uint8Array> {
 	const pkg = await OpcPackage.open(bytesSource(docx))
@@ -90,8 +98,17 @@ async function openSource(format: DocxSourceFormat, bytes: Uint8Array, turns: Rt
 					bytes: source.bytes,
 					prove: async proofTurns => (await proveRtf(source, proofTurns)).locked.map(({ part, offset }) => ({ part, offset })),
 					write: async (edits, writeTurns) => ({
-						bytes: (await writeRtf(source, { parts: new Map(edits.parts), removed: edits.removed }, { turns: writeTurns }))
-							.bytes
+						bytes: (
+							await writeRtf(
+								source,
+								{ parts: new Map(edits.parts), removed: edits.removed },
+								{
+									turns: writeTurns,
+									// The span's writing failed where it should have refused: the save is the whole document's.
+									onFallback: logFallback
+								}
+							)
+						).bytes
 					}),
 					convertEdited: async (edits, convertTurns) => {
 						try {

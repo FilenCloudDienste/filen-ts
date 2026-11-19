@@ -229,6 +229,8 @@ export class EditSink {
 	private composeFormatting: readonly Mark[] | undefined = undefined
 	private dispatching = false
 	private readOnlyOption: boolean
+	private label: string
+	private describedBy: string | undefined
 	private readOnlyShown: boolean
 	// The input view's font size and width as last set (px, client space).
 	private lineHeight = 0
@@ -251,6 +253,8 @@ export class EditSink {
 		parent.appendChild(this.element)
 
 		this.readOnlyOption = options.readOnly === true
+		this.label = options.label
+		this.describedBy = options.describedBy
 		this.readOnlyShown = this.readOnly
 		this.real = editor.state
 		this.view = new EditorView(this.element, {
@@ -335,8 +339,8 @@ export class EditSink {
 			attributes: () => ({
 				role: "textbox",
 				"aria-multiline": "true",
-				"aria-label": options.label,
-				...(options.describedBy === undefined ? {} : { "aria-describedby": options.describedBy }),
+				"aria-label": this.label,
+				...(this.describedBy === undefined ? {} : { "aria-describedby": this.describedBy }),
 				spellcheck: "false",
 				translate: "no",
 				// Not editable but still focused (selection, copy).
@@ -373,6 +377,16 @@ export class EditSink {
 	// Read-only: the host's option or the story's session (a gate, a text box).
 	get readOnly(): boolean {
 		return this.readOnlyOption || this.editor.session.readOnly
+	}
+
+	// The accessible name and description, as the host's change (a rename, the language, writability): the view's
+	// attributes are brought up to date only when one of them changed.
+	setLabels(label: string, describedBy: string | undefined): void {
+		if (label === this.label && describedBy === this.describedBy) return
+
+		this.label = label
+		this.describedBy = describedBy
+		this.view.setProps({})
 	}
 
 	setReadOnly(readOnly: boolean): void {

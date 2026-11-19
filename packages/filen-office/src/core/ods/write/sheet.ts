@@ -1,4 +1,4 @@
-import type { SheetId } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, type SheetId } from "../../sheet/protocol"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import { cellKeyOf } from "../../xlsx/edit/history"
 import type { SheetStore } from "../../xlsx/model/store"
@@ -32,6 +32,14 @@ function edited(flags: number): boolean {
 	return (flags & RowFlag.NEW) !== 0 || (flags & (RowFlag.DIRTY | RowFlag.SHIFTED)) === RowFlag.DIRTY
 }
 
+// Whether an edit marked a row of the model's store (SheetView.marked not empty), without collecting them.
+export function hasMarkedRows(model: XlsxSheetModel): boolean {
+	for (const block of (model.store as SheetStore).blocks)
+		for (let i = 0; i < block.rowCount; i++) if (edited(block.rowFlags[i] ?? 0)) return true
+
+	return false
+}
+
 export class SheetView {
 	readonly document: XlsxDocument
 	readonly model: XlsxSheetModel
@@ -42,7 +50,6 @@ export class SheetView {
 	private readonly merges: Merge[]
 	// Merges by their first row.
 	private readonly mergesByRow = new Map<number, Merge[]>()
-	// Rows inside a merge (anchor rows included), for covered cells.
 	// Merges by their first row, and the last row any of the first k reaches (a stabbing query's bound).
 	private readonly byStart: Merge[]
 	private readonly reach: Int32Array
@@ -231,10 +238,13 @@ export class SheetView {
 			into.add(range.last + 1)
 		}
 
-		this.model.styleRuns?.forEach({ startRow: row, startCol: 0, endRow: row, endCol: 0x3fff }, (_r0, startCol, _r1, endCol) => {
-			into.add(startCol)
-			into.add(endCol + 1)
-		})
+		this.model.styleRuns?.forEach(
+			{ startRow: row, startCol: 0, endRow: row, endCol: SHEET_MAX_COLS - 1 },
+			(_r0, startCol, _r1, endCol) => {
+				into.add(startCol)
+				into.add(endCol + 1)
+			}
+		)
 	}
 
 	// The merge anchored at a cell.

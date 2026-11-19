@@ -134,6 +134,14 @@ const HIDDEN_MARKS: Readonly<Partial<Record<RevisionView, readonly MarkType[]>>>
 const DOCUMENT_COMMANDS = DOCX_EDITOR_COMMANDS.filter(info => info.scope === "document")
 const REGIONS = new WeakMap<PageDisplayList, PageRegions>()
 
+// whenSettled() when layout failed before catching up: what waits for final pages gets none.
+export class LayoutFailedError extends Error {
+	constructor(cause: unknown) {
+		super("Layout failed", { cause })
+		this.name = "LayoutFailedError"
+	}
+}
+
 export class PagedEditor {
 	readonly edits: DocumentEdits
 	readonly layout: DocumentLayout
@@ -146,6 +154,9 @@ export class PagedEditor {
 	private readonly budget: number
 	private readonly listeners = new Set<(event: PagedEditorEvent) => void>()
 	private readonly refusedListeners = new Set<(reason: DocxRefusalReason) => void>()
+	private readonly layoutErrorListeners = new Set<(error: unknown) => void>()
+	// What the last background layout run (or the font load it waited for) threw, until layout completes again.
+	private failure: unknown = undefined
 	// Pages as shown: the layout's, and while it lays out again in the background, earlier ones it has not
 	// reached yet.
 	private readonly shown: PageDisplayList[] = []
@@ -191,7 +202,7 @@ export class PagedEditor {
 	private pagesVersion = 0
 	private searchOrder: { readonly pages: number; readonly headers: boolean; readonly stories: readonly number[] } | undefined = undefined
 	private searchList: readonly StorySearch[] | undefined = undefined
-	private readonly settledWaiters: (() => void)[] = []
+	private readonly settledWaiters: { readonly resolve: () => void; readonly reject: (error: unknown) => void }[] = []
 	private snapshotOf: { session: DocxEditorSnapshot; history: number; state: number; snapshot: DocxEditorSnapshot } | undefined =
 		undefined
 	// Changes with the editor's own state document commands may depend on (painter, view, suspension, stories).
@@ -231,6 +242,7 @@ export class PagedEditor {
 		this.unsubscribe.push(hostStories(init.session.context, story => this.storySession(story)))
 		this.finalSeen = init.layout.final
 		this.unsubscribe.push(init.layout.subscribe(event => this.onLayout(event)))
+		this.unsubscribe.push(init.layout.onError(error => this.layoutFailed(error)))
 	}
 
 	private edited(session: DocxEditorSession): EditedStory {
@@ -384,7 +396,7 @@ export class PagedEditor {
 
 		if (target === undefined) return undefined
 
-		const doc = (this.searchBuilder ??= new DocxDocBuilder(this.body.session.context)).build(target)
+		const doc = (this.searchBuilder ??= new DocxDocBuilder(this.body.session.context, "eager")).build(target)
 
 		this.searchBuilt.set(story, doc)
 
@@ -630,6 +642,21 @@ export class PagedEditor {
 		}
 	}
 
+	// Hears a layout run in the background that threw: pages stop updating where it stopped, until an edit lays
+	// them out again (layoutError tells meanwhile).
+	onLayoutError(listener: (error: unknown) => void): () => void {
+		this.layoutErrorListeners.add(listener)
+
+		return () => {
+			this.layoutErrorListeners.delete(listener)
+		}
+	}
+
+	// What the last background layout run threw; undefined once layout completed again.
+	get layoutError(): unknown {
+		return this.failure
+	}
+
 	subscribe(listener: (event: PagedEditorEvent) => void): () => void {
 		this.listeners.add(listener)
 
@@ -646,10 +673,11 @@ export class PagedEditor {
 		this.unsubscribe.length = 0
 		this.listeners.clear()
 		this.refusedListeners.clear()
+		this.layoutErrorListeners.clear()
 		this.behind.length = 0
 		this.releaseSearch()
 
-		for (const resolve of this.settledWaiters.splice(0)) resolve()
+		for (const waiter of this.settledWaiters.splice(0)) waiter.resolve()
 
 		this.body.session.context.media.clear()
 
@@ -737,7 +765,16 @@ export class PagedEditor {
 
 		if (handler === undefined || !handler.enabled(context)) return false
 
-		return handler.run(context, command as never)
+		const result = handler.run(context, command as never)
+
+		// A command waiting for final pages (whenSettled) is not run when layout failed instead.
+		return typeof result === "boolean"
+			? result
+			: result.catch((error: unknown) => {
+					if (error instanceof LayoutFailedError) return false
+
+					throw error
+				})
 	}
 
 	// Word's Repeat (F4): the last story command that changed formatting or content, run again where the
@@ -1092,7 +1129,7 @@ export class PagedEditor {
 		const page = this.pendingPage
 
 		this.pendingPage = undefined
-		void layout.resume()
+		this.background(layout.resume())
 
 		for (const story of this.pendingStories) layout.restory(story)
 
@@ -1110,12 +1147,40 @@ export class PagedEditor {
 	}
 
 	// Resolves once layout has caught up with every edit (what async commands wait for before reading pages).
+	// Rejects with a LayoutFailedError when layout fails first (or failed and has not completed since).
 	whenSettled(): Promise<void> {
 		if (this.settled || this.disposed) return Promise.resolve()
+		if (this.failure !== undefined) return Promise.reject(new LayoutFailedError(this.failure))
 
-		return new Promise(resolve => {
-			this.settledWaiters.push(resolve)
+		return new Promise((resolve, reject) => {
+			this.settledWaiters.push({ resolve, reject })
 		})
+	}
+
+	// A layout run in the background (or the font load it waits for): one place hears what it throws
+	// (layoutFailed), as nothing awaits it.
+	private background(run: Promise<void>): void {
+		void run.catch((error: unknown) => {
+			// A run that threw was heard already (DocumentLayout.onError); a font load that failed was not.
+			if (error !== this.failure) this.layoutFailed(error)
+		})
+	}
+
+	private continueAfterFonts(): void {
+		const layout = this.layout
+
+		this.background(layout.prepareFonts().then(() => (this.disposed ? undefined : layout.continue())))
+	}
+
+	private layoutFailed(error: unknown): void {
+		if (this.disposed) return
+
+		this.failure = error
+
+		const failed = new LayoutFailedError(error)
+
+		for (const waiter of this.settledWaiters.splice(0)) waiter.reject(failed)
+		for (const listener of this.layoutErrorListeners) listener(error)
 	}
 
 	// Lays out from `restart` through the pages in view within the edit's budget, the rest in slices.
@@ -1123,13 +1188,8 @@ export class PagedEditor {
 		const layout = this.layout
 		const result = layout.advance(this.now() + this.budget, Math.max(restart, this.visible.last))
 
-		if (result === "fonts") {
-			void layout.prepareFonts().then(() => {
-				if (!this.disposed) void layout.continue()
-			})
-		} else if (result === "more") {
-			void layout.continue()
-		}
+		if (result === "fonts") this.continueAfterFonts()
+		else if (result === "more") this.background(layout.continue())
 
 		this.flush()
 	}
@@ -1305,7 +1365,7 @@ export class PagedEditor {
 			const first = layout.restory(index)
 
 			if (first >= 0) this.refreshStale(this.visible.first, this.visible.last)
-			if (!layout.final) void layout.continue()
+			if (!layout.final) this.background(layout.continue())
 
 			return
 		}
@@ -1319,7 +1379,8 @@ export class PagedEditor {
 
 			const restart = layout.beginEdit(Math.max(0, layout.pages.length - 1), undefined)
 
-			if (layout.advance(this.now() + this.budget, Math.max(restart, this.visible.last)) !== "done") void layout.continue()
+			if (layout.advance(this.now() + this.budget, Math.max(restart, this.visible.last)) !== "done")
+				this.background(layout.continue())
 
 			this.flush()
 
@@ -1334,7 +1395,7 @@ export class PagedEditor {
 				: layout.beginEdit(page < 0 ? 0 : page, undefined)
 		const result = layout.advance(this.now() + this.budget, Math.max(restart, this.visible.last))
 
-		if (result !== "done") void layout.continue()
+		if (result !== "done") this.background(layout.continue())
 
 		this.flush()
 	}
@@ -1353,13 +1414,8 @@ export class PagedEditor {
 		const through = Math.max(restart, this.visible.last)
 		const result = layout.advance(this.now() + this.budget, through)
 
-		if (result === "fonts") {
-			void layout.prepareFonts().then(() => {
-				if (!this.disposed) void layout.continue()
-			})
-		} else if (result === "more") {
-			void layout.continue()
-		}
+		if (result === "fonts") this.continueAfterFonts()
+		else if (result === "more") this.background(layout.continue())
 
 		this.flush()
 	}
@@ -1423,7 +1479,9 @@ export class PagedEditor {
 	}
 
 	private wakeSettled(): void {
-		if (this.settledWaiters.length > 0 && this.settled) for (const resolve of this.settledWaiters.splice(0)) resolve()
+		// Layout completed (without a failure since): what failed before is behind it.
+		if (this.layout.final && this.layout.error === undefined) this.failure = undefined
+		if (this.settledWaiters.length > 0 && this.settled) for (const waiter of this.settledWaiters.splice(0)) waiter.resolve()
 	}
 
 	// Pages in [first, last] showing outdated page numbers or counts are brought up to date.
@@ -1451,7 +1509,7 @@ export class PagedEditor {
 				// The body shows page numbers too: laid out again from there; or a header or footer changed height:
 				// to the end (what its height does to the body is no state layout compares).
 				layout.beginEdit(index, result === "numbers" ? [] : undefined)
-				void layout.continue()
+				this.background(layout.continue())
 
 				return
 			}
@@ -1790,7 +1848,6 @@ export function paragraphPos(edits: Pick<StoryEdits, "document" | "starts" | "en
 	return found
 }
 
-// A paragraph's fields in order: field atoms and the begin characters of fields spanning paragraphs.
 // Whether the paragraph at `pos` of `doc` lies inside a field spanning paragraphs that shows its code (`shown`,
 // asked of its begin character) and does not end in it: the field characters from where its container starts
 // to its end leave one open. Such fields are paragraphs of one container (tables of contents), so the walk
@@ -1819,6 +1876,7 @@ function insideCode(doc: Node, pos: number, shown: (begin: Node) => boolean): bo
 	return false
 }
 
+// A paragraph's fields in order: field atoms and the begin characters of fields spanning paragraphs.
 function fieldsOf(paragraph: Node): Node[] {
 	const out: Node[] = []
 

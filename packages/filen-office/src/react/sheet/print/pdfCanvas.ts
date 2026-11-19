@@ -144,21 +144,21 @@ export interface CanvasFont {
 	readonly request: PdfFontFaceRequest
 }
 
-const FONT = /^\s*(?:(italic|oblique)\s+)?(?:(bold|bolder|[5-9]00)\s+)?(?:(italic|oblique)\s+)?([\d.]+)px\s+(.+)$/i
+const FONT = /^\s*(?:(italic|oblique)\s+)?(?:(bold|bolder|[5-9]00)\s+)?(?:(italic|oblique)\s+)?([\d.]+)(px|pt)\s+(.+)$/i
 
 // A canvas font shorthand ("italic bold 14.67px "Calibri", Carlito, sans-serif") as a face request: the first family
-// named, quoted or not.
+// named, quoted or not. A size in points is 4/3 as many px, as a browser canvas reads it.
 export function canvasFont(font: string): CanvasFont {
 	const match = FONT.exec(font)
 
 	if (match === null) return { px: 10, request: { family: "Arial", bold: false, italic: false, slot: "hAnsi" } }
 
-	const families = match[5] ?? ""
+	const families = match[6] ?? ""
 	const quoted = /^\s*"([^"]+)"/.exec(families)
 	const first = quoted?.[1] ?? families.split(",")[0]?.trim() ?? "Arial"
 
 	return {
-		px: Math.max(0.1, Number(match[4])),
+		px: Math.max(0.1, Number(match[4]) * (match[5]?.toLowerCase() === "pt" ? 4 / 3 : 1)),
 		request: {
 			family:
 				first === "" || first === "sans-serif"
@@ -750,7 +750,25 @@ export class PdfCanvas implements GridCanvas {
 		if (page === null || list === undefined) return
 
 		page.beginContent(node)
+		this.drawKept(page, list)
+		page.endContent()
+		this.kept.delete(key)
+	}
 
+	// Draws a cell's kept text as an artifact (text with no place in the page's structure; call after flush).
+	drawArtifact(key: number): void {
+		const page = this.options.page
+		const list = this.kept.get(key)
+
+		if (page === null || list === undefined) return
+
+		page.beginArtifact({ type: "Layout" })
+		this.drawKept(page, list)
+		page.endArtifact()
+		this.kept.delete(key)
+	}
+
+	private drawKept(page: PdfPage, list: readonly KeptText[]): void {
 		for (const text of list) {
 			if (text.clip !== null) page.saveState().rect(text.clip.x, text.clip.y, text.clip.width, text.clip.height).clip()
 
@@ -758,9 +776,6 @@ export class PdfCanvas implements GridCanvas {
 
 			if (text.clip !== null) page.restoreState()
 		}
-
-		page.endContent()
-		this.kept.delete(key)
 	}
 
 	createPattern(): object | null {

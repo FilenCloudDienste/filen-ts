@@ -23,7 +23,16 @@ const AUTO_SPACING_PX = (14 * 4) / 3
 const FALLBACK = "var(--fo-reflow-font, sans-serif)"
 
 const paragraphs = new WeakMap<ParagraphFormat, string>()
-const runs = new WeakMap<ResolvedRunProps, Map<CssFaces | undefined, string>>()
+// Per run: its font families, the declarations after them (which no faces change) and its last CSS with the faces
+// answers it was made with, so a faces function that answers otherwise later (its document learned a face) is heard.
+interface RunEntry {
+	readonly families: readonly string[]
+	readonly rest: string
+	readonly answers: (string | undefined)[]
+	css: string | undefined
+}
+
+const runs = new WeakMap<ResolvedRunProps, RunEntry>()
 
 function px(value: number): string {
 	return `${String(Math.round(value * 100) / 100)}px`
@@ -152,10 +161,9 @@ const UNDERLINES: Readonly<Record<string, string>> = {
 }
 
 // The name comes from the document: a quote or backslash would end or escape the string, and a line break or
-// other control character would end it as a bad string, after which the rest reads as declarations.
-function family(name: string, faces: CssFaces | undefined): string {
-	const known = faces?.(name)
-
+// other control character would end it as a bad string, after which the rest reads as declarations. `known`: the
+// faces the document registered for it (CssFaces).
+function family(name: string, known: string | undefined): string {
 	if (known !== undefined) return known
 
 	let quoted = ""
@@ -169,21 +177,50 @@ function family(name: string, faces: CssFaces | undefined): string {
 	return `"${quoted}"`
 }
 
+// Whether a run's CSS cases its text (caps, small caps). The pages measure that as String.prototype.toUpperCase(),
+// which no language tailors, and CSS cases by the content language: an element drawing such a run gets lang="".
+export function casesText(run: ResolvedRunProps): boolean {
+	return run.caps || run.smallCaps
+}
+
 // A run's declarations within its paragraph; `faces` names the faces the document registered for its fonts.
 export function runCss(run: ResolvedRunProps, faces?: CssFaces): string {
-	let byFaces = runs.get(run)
-	const cached = byFaces?.get(faces)
+	let entry = runs.get(run)
 
-	if (cached !== undefined) return cached
+	if (entry === undefined) {
+		entry = runEntry(run)
+		runs.set(run, entry)
+	}
 
+	const { families, answers } = entry
+	let same = entry.css !== undefined
+
+	for (let k = 0; k < families.length; k++) {
+		const known = faces?.(families[k] ?? "")
+
+		if (known !== answers[k]) {
+			answers[k] = known
+			same = false
+		}
+	}
+
+	if (same && entry.css !== undefined) return entry.css
+
+	const font = families.length > 0 ? `font-family: ${families.map((name, k) => family(name, answers[k])).join(", ")}, ${FALLBACK}` : ""
+	const css = font.length === 0 ? entry.rest : entry.rest.length === 0 ? font : `${font}; ${entry.rest}`
+
+	entry.css = css
+
+	return css
+}
+
+function runEntry(run: ResolvedRunProps): RunEntry {
 	const out: string[] = []
 	const complex = run.rtl || run.cs
 	const fonts = run.fonts
 	// Characters the main font lacks (East Asian, complex script) fall back to the run's fonts for them.
 	const names = complex ? [fonts.cs, fonts.ascii, fonts.eastAsia] : [fonts.ascii, fonts.eastAsia, fonts.cs]
 	const families = names.filter((name, k) => name.length > 0 && names.indexOf(name) === k)
-
-	if (families.length > 0) out.push(`font-family: ${families.map(name => family(name, faces)).join(", ")}, ${FALLBACK}`)
 
 	// Half-points.
 	const size = (complex ? run.sizeCs : run.size) / 2
@@ -218,8 +255,7 @@ export function runCss(run: ResolvedRunProps, faces?: CssFaces): string {
 	if (lines.length > 0) out.push(`text-decoration-line: ${lines.join(" ")}`)
 	if (lineStyle !== undefined) out.push(`text-decoration-style: ${lineStyle}`)
 
-	if (run.caps) out.push("text-transform: uppercase")
-	else if (run.smallCaps) out.push("font-variant-caps: small-caps")
+	if (casesText(run)) out.push(run.caps ? "text-transform: uppercase" : "font-variant-caps: small-caps")
 
 	const text = color(run.color)
 
@@ -245,14 +281,5 @@ export function runCss(run: ResolvedRunProps, faces?: CssFaces): string {
 		out.push("display: var(--fo-reflow-hidden, none)", "text-decoration: var(--fo-reflow-hidden-line, none)")
 	}
 
-	const css = out.join("; ")
-
-	if (byFaces === undefined) {
-		byFaces = new Map()
-		runs.set(run, byFaces)
-	}
-
-	byFaces.set(faces, css)
-
-	return css
+	return { families, rest: out.join("; "), answers: families.map(() => undefined), css: undefined }
 }

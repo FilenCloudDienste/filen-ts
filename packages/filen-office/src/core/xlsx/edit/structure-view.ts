@@ -21,7 +21,7 @@ export function setSheetView(workbook: XlsxWorkbookModel, model: XlsxSheetModel,
 	}
 
 	const markup = state.sectionMarkup(model, "sheetViews")
-	const prefix = (model as { readonly prefix?: string }).prefix ?? ""
+	const prefix = model.prefix
 	const current = markup.length === 0 ? null : encodeUtf8(markup.join(""))
 	const written = writeSheetViews(view, current, prefix)
 

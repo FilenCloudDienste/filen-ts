@@ -1,3 +1,4 @@
+import { wildcardMatcher, type WildcardMatcher } from "../find/match"
 import type { SheetRgb } from "../protocol"
 import { SortType, textSortKey } from "../sort/order"
 
@@ -138,76 +139,6 @@ export interface FilterColumnContext {
 
 const NO_CONTEXT: FilterColumnContext = { threshold: Number.NaN, average: Number.NaN, from: Number.NaN, to: Number.NaN }
 
-// --- Wildcards ---
-
-interface Pattern {
-	// Lower case; `wild` marks the positions of * and ? that are wildcards (not escaped by ~).
-	readonly chars: string
-	readonly wild: Uint8Array
-	readonly plain: boolean
-}
-
-const STAR = 1
-const QUESTION = 2
-
-function compile(text: string): Pattern {
-	let chars = ""
-	const wild: number[] = []
-	let plain = true
-
-	for (let i = 0; i < text.length; i++) {
-		const char = text[i] as string
-
-		if (char === "~" && i + 1 < text.length && "*?~".includes(text[i + 1] as string)) {
-			chars += text[++i] as string
-			wild.push(0)
-		} else if (char === "*" || char === "?") {
-			chars += char
-			wild.push(char === "*" ? STAR : QUESTION)
-			plain = false
-		} else {
-			chars += char.toLowerCase()
-			wild.push(0)
-		}
-	}
-
-	return { chars, wild: Uint8Array.from(wild), plain }
-}
-
-// Whether `text` (any case) matches the whole pattern. Greedy with one backtrack point per star: linear in practice,
-// at worst text × pattern (both bounded).
-function wildcardMatch(pattern: Pattern, text: string): boolean {
-	const subject = text.toLowerCase()
-
-	if (pattern.plain) return subject === pattern.chars
-
-	let p = 0
-	let s = 0
-	let star = -1
-	let resume = 0
-
-	while (s < subject.length) {
-		const kind = pattern.wild[p] ?? 0
-
-		if (p < pattern.chars.length && kind === STAR) {
-			star = p++
-			resume = s
-		} else if (p < pattern.chars.length && (kind === QUESTION || pattern.chars[p] === subject[s])) {
-			p++
-			s++
-		} else if (star >= 0) {
-			p = star + 1
-			s = ++resume
-		} else {
-			return false
-		}
-	}
-
-	while (p < pattern.chars.length && pattern.wild[p] === STAR) p++
-
-	return p === pattern.chars.length
-}
-
 // --- Numbers ---
 
 // A condition's value as a number when it is one in en-US form (Excel stores numbers and date serials so).
@@ -224,7 +155,7 @@ export function filterNumber(text: string): number {
 interface CompiledCondition {
 	readonly operator: SheetFilterOperator
 	readonly number: number
-	readonly pattern: Pattern
+	readonly pattern: WildcardMatcher
 	readonly key: string
 	// Excel writes "Non blanks" as notEqual " ", and "Blanks" as equal "".
 	readonly blankTest: "blank" | "nonBlank" | null
@@ -241,7 +172,7 @@ function compileCondition(condition: SheetFilterCondition): CompiledCondition {
 	return {
 		operator: condition.operator,
 		number: condition.value.includes("*") || condition.value.includes("?") ? Number.NaN : filterNumber(condition.value),
-		pattern: compile(condition.value),
+		pattern: wildcardMatcher(condition.value, false, false),
 		key: textSortKey(condition.value, false),
 		blankTest
 	}
@@ -275,7 +206,7 @@ function meets(condition: CompiledCondition, cell: FilterCell): boolean {
 	}
 
 	if (equality) {
-		const match = wildcardMatch(condition.pattern, cell.text)
+		const match = condition.pattern.test(cell.text, true)
 
 		return condition.operator === "equal" ? match : !match
 	}

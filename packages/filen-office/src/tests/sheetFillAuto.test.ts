@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { SeriesRequest } from "../core/sheet/fill/series"
-import type { SheetCommandResult, SheetRange, SheetSessionApi } from "../core/sheet/protocol"
+import { autoFillWrites } from "../core/sheet/fill/fill"
+import type { FillSourceCell, FillValue, SeriesRequest } from "../core/sheet/fill/series"
+import { SHEET_MAX_EDIT_CELLS, type SheetCommandResult, type SheetRange, type SheetSessionApi } from "../core/sheet/protocol"
 import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
 import { STYLES } from "./xlsxWriteFixtures"
@@ -172,6 +173,64 @@ describe("fill.auto", () => {
 				[3, 1]
 			])
 		).toEqual(["3", "4", "Wed", "Thu"])
+
+		for (const [body, expected] of [
+			["0.1\n0.2\n", ["0.3", "0.4"]],
+			["1.1\n2.2\n", ["3.3", "4.4"]],
+			["1000000000000001\n1000000000000002\n", ["1000000000000003", "1000000000000004"]]
+		] as const) {
+			const decimals = await openKeys(body)
+
+			expect(
+				(
+					await auto(
+						decimals.session,
+						{ startRow: 0, startCol: 0, endRow: 1, endCol: 0 },
+						{ startRow: 0, startCol: 0, endRow: 3, endCol: 0 }
+					)
+				).ok
+			).toBe(true)
+			expect(
+				await texts(decimals.session, [
+					[2, 0],
+					[3, 0]
+				])
+			).toEqual(expected)
+		}
+	})
+
+	it("refuses a source block past the cells one edit takes without reading it", () => {
+		let reads = 0
+		const read = (): FillSourceCell => {
+			reads++
+
+			return { kind: "number", value: 1, temporal: "none" }
+		}
+		const copy = (): ((k: number) => FillValue) => () => ({ kind: "copy" })
+		// Ten columns deep enough to pass the bound, dragged one row down: ten targets.
+		const rows = Math.floor(SHEET_MAX_EDIT_CELLS / 10)
+
+		expect(
+			autoFillWrites(
+				{ startRow: 0, startCol: 0, endRow: rows, endCol: 9 },
+				{ startRow: 0, startCol: 0, endRow: rows + 1, endCol: 9 },
+				"auto",
+				read,
+				copy
+			)
+		).toBe("tooLarge")
+		expect(reads).toBe(0)
+
+		const filled = autoFillWrites(
+			{ startRow: 0, startCol: 0, endRow: rows - 1, endCol: 9 },
+			{ startRow: 0, startCol: 0, endRow: rows, endCol: 9 },
+			"auto",
+			read,
+			copy
+		)
+
+		expect(filled !== "tooLarge" && filled?.values.length).toBe(10)
+		expect(reads).toBe(SHEET_MAX_EDIT_CELLS)
 	})
 })
 

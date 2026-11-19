@@ -1,3 +1,6 @@
+// The slice length of every presentation and text worker scheduler (ms).
+export const SLICE_MS = 8
+
 // Long work on a thread that must stay responsive, cut into slices: `pause` gives the host a turn (a
 // macrotask, so input and requests are handled meanwhile) once `sliceMs` passed since the last one.
 export interface Slicing {

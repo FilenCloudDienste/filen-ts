@@ -1,4 +1,4 @@
-import { readEntry, setCells, sharedString, splitsArray, tableHeaders, writeLogged } from "../../xlsx/edit/cells"
+import { changesTableHeader, readEntry, setCells, sharedString, splitsArray, writeLogged } from "../../xlsx/edit/cells"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import { ABSENT, CellLog, type CellState } from "../../xlsx/edit/history"
 import type { SheetStore } from "../../xlsx/model/store"
@@ -9,7 +9,7 @@ import type { NumFmt } from "../numfmt/parse"
 import { defineSheetFeature, type SheetChangeSink, type SheetHandled } from "../registry"
 import type { Slicing } from "../../slicing"
 import { formulaTranslator } from "../refs/formulaRefs"
-import { SHEET_MAX_CELL_TEXT, type SheetId, type SheetRange } from "../protocol"
+import { SHEET_MAX_CELL_TEXT, SHEET_MAX_COLS, type SheetId, type SheetRange } from "../protocol"
 import { filteredOutRows } from "../../xlsx/edit/filter"
 import { visibleRanges } from "../visibleRows"
 import { autoFillWrites, entryCells, seriesWrites, visibleFillPlan, type FillDirection, type FillPlan, type FillWrites } from "./fill"
@@ -76,7 +76,9 @@ function copied(
 	plan: FillPlan,
 	i: number,
 	sheet: SheetId,
-	value: FillValue | undefined
+	value: FillValue | undefined,
+	// Each source formula's translator, made once for all its targets.
+	translators: Map<number, (rows: number, cols: number) => string>
 ): CellState {
 	const row = plan.rows[i] ?? 0
 	const col = plan.cols[i] ?? 0
@@ -110,7 +112,15 @@ function copied(
 		return { present: true, kind: source.kind, value: source.value, style: source.style, formula: -1, shown: undefined }
 
 	const formulas = model.store.formulas
-	const text = formulaTranslator(document.formulaText(model, source.formula, sourceRow, sourceCol))(row - sourceRow, col - sourceCol)
+	const key = sourceRow * SHEET_MAX_COLS + sourceCol
+	let translate = translators.get(key)
+
+	if (translate === undefined) {
+		translate = formulaTranslator(document.formulaText(model, source.formula, sourceRow, sourceCol))
+		translators.set(key, translate)
+	}
+
+	const text = translate(row - sourceRow, col - sourceCol)
 	const formula = formulas.add({ kind: FormulaKind.NORMAL, text, sharedIndex: -1, ref: null, flags: 0, cellMetadata: -1 })
 
 	return { present: true, kind: CellKind.EMPTY, value: 0, style: source.style, formula, shown: undefined }
@@ -169,25 +179,27 @@ async function writeFill(
 
 	if (splitsArray(model, plan.rows, plan.cols)) return { refused: { reason: "arrayFormula" } }
 
-	if (model.relationships.all.some(relationship => relationship.type.endsWith("/table"))) {
-		const headers = await tableHeaders(document, model)
+	// A header target's new text: its source's as shown (read once per source), or a value of its own.
+	const sourceTexts = new Map<number, string>()
+	const headerText = (i: number): string | null => {
+		const value = values?.[i]
 
-		for (let i = 0; i < count; i++) {
-			const row = plan.rows[i] ?? 0
-			const col = plan.cols[i] ?? 0
+		if (value !== undefined && value.kind !== "copy") return value.kind === "text" ? value.text : null
 
-			const value = values?.[i]
-			const text =
-				value === undefined || value.kind === "copy"
-					? document.cellView(sheet, plan.sourceRows[i] ?? 0, plan.sourceCols[i] ?? 0).text
-					: value.kind === "text"
-						? value.text
-						: null
+		const sourceRow = plan.sourceRows[i] ?? 0
+		const sourceCol = plan.sourceCols[i] ?? 0
+		const key = sourceRow * SHEET_MAX_COLS + sourceCol
+		let text = sourceTexts.get(key)
 
-			if (headers.some(range => intersects(range, row, col, row, col)) && document.cellView(sheet, row, col).text !== text)
-				return { refused: { reason: "tableHeader" } }
+		if (text === undefined) {
+			text = document.cellView(sheet, sourceRow, sourceCol).text
+			sourceTexts.set(key, text)
 		}
+
+		return text
 	}
+
+	if (await changesTableHeader(document, sheet, model, plan.rows, plan.cols, headerText)) return { refused: { reason: "tableHeader" } }
 
 	const store = model.store as SheetStore
 	let formulas = false
@@ -210,8 +222,9 @@ async function writeFill(
 
 	// Every source is read before any target is written: a target never feeds another.
 	const states: CellState[] = []
+	const translators = new Map<number, (rows: number, cols: number) => string>()
 
-	for (let i = 0; i < count; i++) states.push(copied(document, model, plan, i, sheet, values?.[i]))
+	for (let i = 0; i < count; i++) states.push(copied(document, model, plan, i, sheet, values?.[i], translators))
 
 	return writeLogged(document, sheet, plan.rows, plan.cols, states, new CellLog(), changes, slicing)
 }

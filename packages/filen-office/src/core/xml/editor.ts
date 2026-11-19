@@ -23,7 +23,11 @@ interface ElementEdit {
 const EMPTY = new Uint8Array(0)
 const GT = encodeUtf8(">")
 
-function toBytes(markup: Markup): Uint8Array {
+// The encoding pseudo-attribute of an XML declaration: the text before its value, the quote, the value. Not
+// global, so one shared instance keeps no state between uses.
+export const ENCODING_DECLARATION = /(encoding\s*=\s*)(["'])[^"']*\2/
+
+export function toBytes(markup: Markup): Uint8Array {
 	return typeof markup === "string" ? encodeUtf8(markup) : markup
 }
 
@@ -300,7 +304,7 @@ export class XmlEditor {
 		const start = document.start(declaration)
 		const end = document.end(declaration)
 		const text = decodeUtf8(document.bytes, start, end)
-		const rewritten = text.replace(/(encoding\s*=\s*)(["'])[^"']*\2/, "$1$2UTF-8$2")
+		const rewritten = text.replace(ENCODING_DECLARATION, "$1$2UTF-8$2")
 
 		if (rewritten !== text && !splices.some(splice => splice.from < end && splice.to > start)) {
 			splices.push({ from: start, to: end, data: [encodeUtf8(rewritten)], order: 0 })

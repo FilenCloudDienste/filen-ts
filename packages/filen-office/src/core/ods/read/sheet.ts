@@ -184,6 +184,8 @@ export interface OdsBuiltSheet {
 	// The rows the table's row elements give (their repeats), and the columns its column elements declare.
 	readonly rowCount: number
 	readonly columnCount: number
+	// Content past what is materialised (a repeat beyond the caps): its rows are never rewritten.
+	readonly truncated: boolean
 }
 
 // Text as the store keeps it (ST_Xstring escapes), at no cost for text that needs none: control characters XML
@@ -247,9 +249,13 @@ export class OdsSheetBuilder {
 	// The row under way: its cells in column order, materialised (content, or a short style-only run); entries are
 	// reused from row to row.
 	private readonly pool: OdsCellInput[] = []
+	// Each pool entry's rich text as a shared string, -1 until placed: every copy of a repeated row shares the one.
+	private readonly poolRich: number[] = []
 	private cellsInRow = 0
 	private rowCol = 0
 	cellCount = 0
+	// Content left out past a cap (columns past the last leave out none: they hold no content).
+	private truncated = false
 	// Typed values' formats: derived cell formats by base xf and number format, currency formats by code.
 	private readonly typedXfs = new Map<number, number>()
 	private readonly currencyFormats = new Map<string, number>()
@@ -369,7 +375,10 @@ export class OdsSheetBuilder {
 		this.rowCol = col + input.repeat
 
 		if (repeat <= 0) {
-			if (hasContent) this.issues.add("repeat", this.name, "cells past the last column")
+			if (hasContent) {
+				this.truncated = true
+				this.issues.add("repeat", this.name, "cells past the last column")
+			}
 
 			return
 		}
@@ -386,7 +395,10 @@ export class OdsSheetBuilder {
 		if (hasContent) {
 			const copies = Math.min(repeat, MAX_CELL_COPIES)
 
-			if (copies < repeat) this.issues.add("repeat", this.name, "cell copies", repeat - copies)
+			if (copies < repeat) {
+				this.truncated = true
+				this.issues.add("repeat", this.name, "cell copies", repeat - copies)
+			}
 
 			this.take(input, col, copies)
 
@@ -434,6 +446,7 @@ export class OdsSheetBuilder {
 
 		cell.col = col
 		cell.repeat = repeat
+		this.poolRich[this.cellsInRow] = -1
 		this.cellsInRow++
 
 		return cell
@@ -476,7 +489,10 @@ export class OdsSheetBuilder {
 		this.row = first + input.repeat
 
 		if (repeat <= 0) {
-			if (this.cellsInRow > 0) this.issues.add("repeat", this.name, "rows past the last")
+			if (this.cellsInRow > 0) {
+				this.truncated = true
+				this.issues.add("repeat", this.name, "rows past the last")
+			}
 
 			return
 		}
@@ -529,6 +545,7 @@ export class OdsSheetBuilder {
 		const rows = Math.max(1, Math.min(repeat, Math.floor(MAX_ROW_CELLS / Math.max(1, width))))
 
 		if (rows < repeat) {
+			this.truncated = true
 			this.issues.add("repeat", this.name, "row copies", repeat - rows)
 			// The rest keeps the row's properties.
 			this.propertyRun(first + rows, repeat - rows, height, flags, Number.isNaN(style.heightPt))
@@ -539,7 +556,7 @@ export class OdsSheetBuilder {
 
 			this.builder.beginRow()
 
-			for (let k = 0; k < this.cellsInRow; k++) this.place(this.pool[k] as OdsCellInput, row)
+			for (let k = 0; k < this.cellsInRow; k++) this.place(this.pool[k] as OdsCellInput, row, k)
 
 			this.builder.endRow(row, NO_SPAN, NO_SPAN, r === 0 ? firstFlags : flags, height, -1)
 		}
@@ -634,7 +651,7 @@ export class OdsSheetBuilder {
 		return format
 	}
 
-	private place(cell: OdsCellInput, row: number): void {
+	private place(cell: OdsCellInput, row: number, slot: number): void {
 		let xf = cell.style === undefined ? this.columnXf(cell.col) : this.styles.xf(cell.style)
 		let value = cell.number
 		let kind: CellKind = cell.kind
@@ -643,7 +660,12 @@ export class OdsSheetBuilder {
 
 		if (cell.kind === CellKind.INLINE_STRING && cell.rich) {
 			kind = CellKind.SHARED_STRING
-			value = this.richString(cell)
+			value = this.poolRich[slot] ?? -1
+
+			if (value < 0) {
+				value = this.richString(cell)
+				this.poolRich[slot] = value
+			}
 		} else if (cell.kind === CellKind.INLINE_STRING || cell.kind === CellKind.ERROR) {
 			value = this.strings.intern(cell.kind === CellKind.INLINE_STRING ? xstring(cell.text) : cell.text)
 		}
@@ -688,6 +710,7 @@ export class OdsSheetBuilder {
 						Math.min(SHEET_MAX_COLS - 1, col + cell.colSpan - 1)
 					)
 				} else {
+					this.truncated = true
 					this.issues.add("repeat", this.name, "merges")
 				}
 			}
@@ -828,7 +851,8 @@ export class OdsSheetBuilder {
 			rowProps: this.rowProps,
 			recalculate: this.recalculate,
 			rowCount: this.row,
-			columnCount: this.nextColumn
+			columnCount: this.nextColumn,
+			truncated: this.truncated
 		}
 	}
 }

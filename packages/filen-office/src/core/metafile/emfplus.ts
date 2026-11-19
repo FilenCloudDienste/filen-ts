@@ -1,4 +1,5 @@
 import {
+	IDENTITY,
 	PathCommand,
 	type DashPreset,
 	type Paint,
@@ -7,6 +8,7 @@ import {
 	type Stroke,
 	type TextRun
 } from "../drawingml/displayList"
+import { imageDimensions } from "../opc/mediaPolicy"
 import { Bytes } from "./bytes"
 import {
 	ClipCombine,
@@ -41,8 +43,6 @@ import type { MetafileConversion } from "./types"
 // are counted in `unsupported`, which makes a dual picture fall back to its EMF records.
 
 type NestedConverter = (bytes: Uint8Array) => MetafileConversion
-
-const IDENTITY = [1, 0, 0, 1, 0, 0]
 
 // HatchStyle (2.1.1.13) in order; DrawingML's preset patterns are GDI+'s hatches.
 const HATCHES: readonly PatternPreset[] = [
@@ -263,7 +263,7 @@ export class EmfPlus {
 	// Path-gradient paints per brush and the transform they were made under.
 	private readonly gradients = new WeakMap<object, { key: string; paint: Paint }>()
 	// Clip geometry built from path objects, per path and the transform it was built under.
-	private readonly pathGeometries = new Map<PathObject, { key: string; geometry: ClipGeometry }>()
+	private readonly pathGeometries = new WeakMap<PathObject, { key: string; geometry: ClipGeometry | null }>()
 	private readonly scratch = new PathBuilder()
 	private textChars = 0
 	private cached: number[] | null = null
@@ -679,19 +679,26 @@ export class EmfPlus {
 		this.clip = combineClips(this.clip, region, modes[mode] ?? ClipCombine.COPY, this.out.env)
 	}
 
-	// A path object's region under the current transform; the geometry is built once per path and transform.
+	// A path object's region under the current transform; the geometry is built once per path and transform,
+	// an empty one included. Every use is charged, so replaying a cached path still spends work.
 	private pathRegion(path: PathObject): ClipNode {
+		this.out.charge(1)
+
 		const m = this.matrix()
 		const key = m.join(",")
 		const cached = this.pathGeometries.get(path)
 
-		if (cached !== undefined && cached.key === key) return geometryClip(cached.geometry, true)
+		if (cached !== undefined && cached.key === key) return cached.geometry === null ? emptyClip() : geometryClip(cached.geometry, true)
 
 		const builder = this.builder(m)
 
 		this.addPath(builder, path)
 
-		if (builder.empty) return emptyClip()
+		if (builder.empty) {
+			this.pathGeometries.set(path, { key, geometry: null })
+
+			return emptyClip()
+		}
 
 		this.out.charge(builder.coords.length)
 
@@ -702,9 +709,11 @@ export class EmfPlus {
 		return geometryClip(geometry, true)
 	}
 
-	// A region tree as a clip (null is the whole plane).
+	// A region tree as a clip (null is the whole plane); each node visited is charged.
 	private region(node: RegionNode, depth: number): ClipNode | null {
 		if (depth > MAX_REGION_DEPTH) throw new MetafileLimit("region depth")
+
+		this.out.charge(1)
 
 		switch (node.kind) {
 			case "rect":
@@ -877,8 +886,6 @@ export class EmfPlus {
 		}
 	}
 
-	// An elliptical path gradient as a radial gradient focused on its centre point; any other boundary (or
-	// a colour per boundary point) shaded into a tile.
 	// A path gradient's paint, made once per brush and transform (a shaded tile is costly).
 	private pathGradient(brush: Extract<BrushObject, { kind: "pathGradient" }>): Paint {
 		const m = mul(this.matrix(), brush.transform)
@@ -894,6 +901,8 @@ export class EmfPlus {
 		return paint
 	}
 
+	// An elliptical path gradient as a radial gradient focused on its centre point; any other boundary (or
+	// a colour per boundary point) shaded into a tile.
 	private makePathGradient(brush: Extract<BrushObject, { kind: "pathGradient" }>, m: readonly number[]): Paint {
 		const surround = brush.surround[0] ?? brush.center
 		const uniform = brush.surround.every(color => color === surround)
@@ -2095,12 +2104,15 @@ function parseImage(b: Bytes, at: number, end: number): ImageObject | undefined 
 	const data = at + 28
 
 	if (compressed) {
+		// The header's size fields are undefined for a compressed bitmap (writers leave them zero): the encoded
+		// stream's declared size stands, the header's only when the stream gives none.
 		const bytes = b.sub(data, end - data).slice()
+		const size = imageDimensions(bytes)
 
 		return {
 			kind: "image",
-			width,
-			height,
+			width: size?.width ?? width,
+			height: size?.height ?? height,
 			encoded: undefined,
 			encode: budget => passThrough(bytes, budget),
 			metafile: undefined,

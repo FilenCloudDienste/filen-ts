@@ -2,16 +2,7 @@ import { readProperties, records as artRecords, type ArtProperty, type ArtRecord
 import { tooDeep, tooLarge } from "../presentation/refusal"
 import type { PptFile } from "./document"
 import { i16, i32, RT, u16, u32, type PptRecord } from "./records"
-import {
-	interactionOf,
-	pp9Records,
-	readStyleTextProp9,
-	readTextBlocks,
-	RT_STYLE_TEXT_PROP9,
-	type Interaction,
-	type ParaProps,
-	type TextBlock
-} from "./text"
+import { interactionOf, pp9Records, readStyleTextProp9, readTextBlocks, type Interaction, type ParaProps, type TextBlock } from "./text"
 
 // The OfficeArt drawing of a slide ([MS-PPT] §2.5.13 DrawingContainer → [MS-ODRAW] §2.2.13 OfficeArtDgContainer) as a
 // tree of shapes, read with the Word reader's OfficeArt record and property parsing (core/doc/toDocx/officeArt.ts):
@@ -154,7 +145,7 @@ class ShapeReader {
 	): void {
 		const children = this.records(record.start, record.end)
 		const ext9 = pp9Records(this.data, children, kid => this.records(kid.start, kid.end)).find(
-			child => child.type === RT_STYLE_TEXT_PROP9
+			child => child.type === RT.styleTextProp9Atom
 		)
 
 		if (ext9 !== undefined) into.ext9 = readStyleTextProp9(this.data, asPpt(ext9))
@@ -743,55 +734,57 @@ function customGeometry(
 	const segments = msoArray(lookup(chain, P.pSegmentInfo)?.complex)
 	const paths: string[] = []
 	let approximations = 0
-	let current = ""
+	let current: string[] = []
 	let next = 0
 	let fill = true
 	let stroke = true
 	const close = (): void => {
-		if (current !== "")
+		if (current.length > 0)
 			paths.push(
-				`<a:path w="${String(width)}" h="${String(height)}"${fill ? "" : ' fill="none"'}${stroke ? "" : ' stroke="false"'}>${current}</a:path>`
+				`<a:path w="${String(width)}" h="${String(height)}"${fill ? "" : ' fill="none"'}${stroke ? "" : ' stroke="false"'}>${current.join("")}</a:path>`
 			)
 
-		current = ""
+		current = []
 	}
 
 	if (segments === undefined || segments.size !== 2) {
 		const closed = (value(chain, P.shapePath) ?? 1) % 2 === 1
 
-		current = `<a:moveTo>${point(0)}</a:moveTo>`
+		current.push(`<a:moveTo>${point(0)}</a:moveTo>`)
 
-		for (let k = 1; k < points.length; k++) current += `<a:lnTo>${point(k)}</a:lnTo>`
+		for (let k = 1; k < points.length; k++) current.push(`<a:lnTo>${point(k)}</a:lnTo>`)
 
-		if (closed) current += "<a:close/>"
+		if (closed) current.push("<a:close/>")
 
 		close()
 	} else {
-		let commands = 0
+		// A segment repeats up to 8191 times and each repeat takes the next vertices; past the last one it would only
+		// repeat the clamped last point. Repeats start while a cubic's worth of vertices past the end is left (counts a
+		// little past the vertices draw as they always have), so the points a path emits stay within its vertices.
+		const limit = points.length + 3
 
 		for (let k = 0; k < segments.count; k++) {
 			const info = u16(segments.data, 2 * k)
 			const type = info >>> 13
 			const count = info & 0x1fff
 
-			if (++commands > 100_000) break
-
 			switch (type) {
 				case 0:
-					for (let n = 0; n < Math.max(1, count); n++) current += `<a:lnTo>${point(next++)}</a:lnTo>`
+					for (let n = 0; n < Math.max(1, count) && next < limit; n++) current.push(`<a:lnTo>${point(next++)}</a:lnTo>`)
 					break
 				case 1:
-					for (let n = 0; n < Math.max(1, count); n++) {
-						current += `<a:cubicBezTo>${point(next)}${point(next + 1)}${point(next + 2)}</a:cubicBezTo>`
+					for (let n = 0; n < Math.max(1, count) && next < limit; n++) {
+						current.push(`<a:cubicBezTo>${point(next)}${point(next + 1)}${point(next + 2)}</a:cubicBezTo>`)
 						next += 3
 					}
 
 					break
 				case 2:
-					current += `<a:moveTo>${point(next++)}</a:moveTo>`
+					if (next < limit) current.push(`<a:moveTo>${point(next++)}</a:moveTo>`)
 					break
 				case 3:
-					current += "<a:close/>"
+					// A close right after a close draws nothing more; skipping it keeps closes within the points too.
+					if (current.at(-1) !== "<a:close/>") current.push("<a:close/>")
 					break
 				case 4:
 					close()
@@ -808,7 +801,7 @@ function customGeometry(
 					else if (used > 0) {
 						approximations++
 
-						for (let n = 0; n < used; n++) current += `<a:lnTo>${point(next++)}</a:lnTo>`
+						for (let n = 0; n < used && next < limit; n++) current.push(`<a:lnTo>${point(next++)}</a:lnTo>`)
 					}
 				}
 			}

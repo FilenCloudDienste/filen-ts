@@ -406,32 +406,73 @@ export function deckFingerprints(deck: Deck, sourceBytes: SourceBytes): Fingerpr
 }
 
 // The shapes of `now` that moved relative to the others since `saved`: those outside a longest common subsequence.
+// Sibling ids are unique, so that is a longest increasing run of `now` projected onto positions in `saved`
+// (patience sorting, O(n log n) time and O(n) memory), after the common prefix and suffix are set aside.
 export function movedShapes(saved: readonly number[], now: readonly number[]): number[] {
-	const kept = new Set(saved)
-	const a = saved.filter(id => now.includes(id))
-	const b = now.filter(id => kept.has(id))
-	const lengths: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0))
+	const present = new Set(now)
+	const position = new Map<number, number>()
 
-	for (let i = a.length - 1; i >= 0; i--) {
-		for (let j = b.length - 1; j >= 0; j--) {
-			const row = lengths[i] as number[]
+	for (const id of saved) {
+		if (present.has(id) && !position.has(id)) position.set(id, position.size)
+	}
 
-			row[j] = a[i] === b[j] ? (lengths[i + 1]?.[j + 1] ?? 0) + 1 : Math.max(lengths[i + 1]?.[j] ?? 0, row[j + 1] ?? 0)
+	const ids: number[] = []
+	const at: number[] = []
+
+	for (const id of now) {
+		const index = position.get(id)
+
+		if (index === undefined) continue
+
+		ids.push(id)
+		at.push(index)
+	}
+
+	let low = 0
+	let high = at.length
+
+	while (low < high && at[low] === low) low++
+
+	while (high > low && at[high - 1] === position.size - (at.length - high) - 1) high--
+
+	// Middle positions outside (low - 1, first suffix position) cannot join the prefix and suffix.
+	const floor = low
+	const ceiling = position.size - (at.length - high)
+	// tails[k]: the index in `at` ending the smallest-ending increasing run of length k + 1; previous links each run.
+	const tails: number[] = []
+	const previous = new Int32Array(at.length).fill(-1)
+
+	for (let i = low; i < high; i++) {
+		const value = at[i] as number
+
+		if (value < floor || value >= ceiling) continue
+
+		let left = 0
+		let right = tails.length
+
+		while (left < right) {
+			const middle = (left + right) >>> 1
+
+			if ((at[tails[middle] as number] as number) < value) left = middle + 1
+			else right = middle
 		}
+
+		if (left > 0) previous[i] = tails[left - 1] as number
+
+		tails[left] = i
 	}
 
 	const common = new Set<number>()
 
-	for (let i = 0, j = 0; i < a.length && j < b.length;) {
-		if (a[i] === b[j]) {
-			common.add(a[i] as number)
-			i++
-			j++
-		} else if ((lengths[i + 1]?.[j] ?? 0) >= (lengths[i]?.[j + 1] ?? 0)) i++
-		else j++
+	for (let i = 0; i < low; i++) common.add(ids[i] as number)
+
+	for (let i = high; i < ids.length; i++) common.add(ids[i] as number)
+
+	for (let i = tails.length === 0 ? -1 : (tails[tails.length - 1] as number); i !== -1; i = previous[i] as number) {
+		common.add(ids[i] as number)
 	}
 
-	return b.filter(id => !common.has(id))
+	return ids.filter(id => !common.has(id))
 }
 
 // The fingerprints of what `touches` names, now (a step's before or after state).

@@ -1439,6 +1439,12 @@ export interface SaveInput {
 	readonly bytes: Uint8Array
 }
 
+// A save's name without its extension: <corpus stem>.<source extension>__s<seed>__<n>. The save is this name with the
+// source's extension last (LibreOffice picks its import filter from it), its sidecar this name with .json.
+export function saveName(stem: string, extension: string, seed: number, n: number): string {
+	return `${stem}.${extension.slice(1)}__s${seed}__${n}`
+}
+
 // Writes one save and its sidecar (each to a temporary name first, so a reader never sees half a file);
 // false when the run is not sampled or the source is too big.
 export async function writeSave(
@@ -1457,7 +1463,8 @@ export async function writeSave(
 	const extension = extname(input.source) || ".docx"
 	const stem = basename(input.source, extension)
 	const directory = join(config.dir, input.family)
-	const name = `${stem}__s${input.seed}__${input.n}`
+	// The source's extension in the name too: corpus files of one stem (a .docm and a .dotm) keep a sidecar each.
+	const name = saveName(stem, extension, input.seed, input.n)
 	const sidecar: SaveSidecar = {
 		source: input.source,
 		family: input.family,
@@ -1560,7 +1567,7 @@ export function writeManifest(dir: string): number {
 		JSON.stringify(
 			{
 				contract:
-					"<family>/<corpus stem>__s<seed>__<n>.<ext> + sidecar .json (source, family, harness, mode, seed, view, ops, oursBefore/After text, counts); n: paged 3*mode+view, damage sequence 0, script 0",
+					"<family>/<corpus stem>.<ext>__s<seed>__<n>.<ext> + sidecar <corpus stem>.<ext>__s<seed>__<n>.json (source, family, harness, mode, seed, view, ops, oursBefore/After text, counts); n: paged 3*mode+view, damage sequence 0, script 0",
 				count: entries.length,
 				entries
 			},

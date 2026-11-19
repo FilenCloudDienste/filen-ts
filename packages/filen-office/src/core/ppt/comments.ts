@@ -1,4 +1,4 @@
-import { children, i32, u16, utf16Text, type PptRecord, type RecordCounter } from "./records"
+import { children, i32, RT, u16, utf16Text, type PptRecord, type RecordCounter } from "./records"
 import { xmlText } from "./text"
 
 // Comments ([MS-PPT] §2.5.25–§2.5.29 Comment10Container, in a slide's "___PPT10" tag) as PresentationML comments
@@ -16,9 +16,6 @@ export interface PptComment {
 	readonly y: number
 }
 
-const RT_CSTRING = 0x0fba
-const RT_COMMENT10 = 0x2ee0
-const RT_COMMENT10_ATOM = 0x2ee1
 // §2.5.26–§2.5.28 bounds on the author, text and initials (bytes).
 const MAX_NAME = 104
 const MAX_TEXT = 64000
@@ -55,7 +52,7 @@ export function slideComments(data: Uint8Array, tag: readonly PptRecord[], count
 	const out: PptComment[] = []
 
 	for (const record of tag) {
-		if (record.type !== RT_COMMENT10) continue
+		if (record.type !== RT.comment10) continue
 
 		let author = ""
 		let initials = ""
@@ -63,8 +60,8 @@ export function slideComments(data: Uint8Array, tag: readonly PptRecord[], count
 		let atom: PptRecord | undefined
 
 		for (const child of children(data, record.start, record.end, counter)) {
-			if (child.type === RT_COMMENT10_ATOM) atom = child
-			else if (child.type === RT_CSTRING) {
+			if (child.type === RT.comment10Atom) atom = child
+			else if (child.type === RT.cString) {
 				const limit = child.instance === 1 ? MAX_TEXT : MAX_NAME
 				const value = utf16Text(data, child.start, Math.min(child.end, child.start + limit), true)
 

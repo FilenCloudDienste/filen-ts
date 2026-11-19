@@ -9,7 +9,17 @@ import {
 	recolorPixels
 } from "../core/drawingml/canvas"
 import type { DrawingData } from "../core/drawingml/data"
-import { DrawingList, IDENTITY, ItemFlag, ItemKind, rgba, type DrawingImage, type Paint, type Stroke } from "../core/drawingml/index"
+import {
+	DrawingList,
+	IDENTITY,
+	ItemFlag,
+	ItemKind,
+	rgba,
+	type DrawingImage,
+	type Paint,
+	type Stroke,
+	type TextRun
+} from "../core/drawingml/index"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
 import { RecordedGradient, RecordedPattern, RecordingCanvas, recordingSurfaces, type RecordedImage } from "./presentationCanvasRecorder"
 
@@ -266,6 +276,32 @@ describe("canvas painter: paths", () => {
 		expect(stroke?.stroke).toBe("#ff0000ff")
 		expect(stroke?.lineWidth).toBe(2)
 		expect(stroke?.dash).toEqual([8, 6])
+		expect(stroke).toMatchObject({ lineCap: "round", lineJoin: "bevel", miterLimit: 8 })
+	})
+
+	it("maps square and flat caps, miter joins and clamps the miter limit", () => {
+		const cases: [Partial<Stroke>, { lineCap: string; lineJoin: string; miterLimit: number }][] = [
+			[
+				{ cap: "square", join: "miter", miterLimit: 0.5 },
+				{ lineCap: "square", lineJoin: "miter", miterLimit: 1 }
+			],
+			[
+				{ cap: "flat", join: "round", miterLimit: 250 },
+				{ lineCap: "butt", lineJoin: "round", miterLimit: 100 }
+			],
+			[
+				{ cap: "round", join: "miter", miterLimit: Number.NaN },
+				{ lineCap: "round", lineJoin: "miter", miterLimit: 8 }
+			]
+		]
+
+		for (const [line, expected] of cases) {
+			const ctx = new RecordingCanvas()
+
+			paintDrawingCanvas(ctx, shape(undefined, { stroke: { ...LINE, ...line } }), [1, 0, 0, 1, 0, 0], NO_IMAGES)
+
+			expect(ctx.ops("stroke")[0]).toMatchObject(expected)
+		}
 	})
 
 	it("casts a shadow offset and blurred in drawing space", () => {
@@ -529,6 +565,51 @@ describe("canvas painter: text pages", () => {
 		expect(outline[0]?.dash).toEqual([])
 	})
 
+	it("places shadows and reflections of a width-scaled fragment under its scale", () => {
+		const ctx = new RecordingCanvas()
+		const page = fixtureTextPage(["Decorated"], { decorated: [0] })
+		const [plain, decorated] = page.styles
+
+		if (plain === undefined || decorated === undefined) throw new Error("fixture")
+
+		const base = [2, 0, 0, 2, 10, 5] as const
+
+		paintTextPageCanvas(
+			ctx,
+			{
+				...page,
+				styles: [plain, { ...decorated, scaleX: 0.8 }],
+				textEffects: [
+					[
+						{ kind: "outerShadow", color: rgba("000000", 0.5), blur: 2, dx: 3, dy: 2 },
+						{ kind: "reflection", startAlpha: 0.5, endPos: 1, distance: 0 }
+					]
+				]
+			},
+			base
+		)
+
+		const fills = ctx.ops("fillText")
+		const shadow = fills[0]
+		// The fragment at x 0 scaled about it: the base times [0.8, 0, 0, 1, 0, 0].
+		const placed = [1.6, 0, 0, 2, 10, 5] as const
+
+		expect(shadow?.transform).toEqual(placed)
+
+		const x = (shadow?.args[1] as number) ?? 0
+		const away = -x
+
+		expect(shadow?.shadow[2]).toBeCloseTo(placed[0] * away + base[0] * 3 + base[2] * 2, 9)
+		expect(shadow?.shadow[3]).toBeCloseTo(placed[1] * away + base[1] * 3 + base[3] * 2, 9)
+		// Where the shadow lands: the glyphs' device origin moved by the shadow's offset in drawing space.
+		expect(placed[0] * x + placed[4] + (shadow?.shadow[2] ?? 0)).toBeCloseTo(base[4] + base[0] * 3, 9)
+
+		const mirrored = fills.filter(call => (call.transform[3] ?? 0) < 0)
+
+		expect(mirrored.length).toBeGreaterThan(0)
+		expect(mirrored.every(call => call.transform[0] === 1.6 && call.transform[3] === -2)).toBe(true)
+	})
+
 	it("spaces characters itself where the context has no letterSpacing", () => {
 		const ctx = new RecordingCanvas(0, 0, "canvas", false)
 		const page = fixtureTextPage(["ab"])
@@ -562,5 +643,55 @@ describe("canvas painter: text pages", () => {
 		paintTextPageCanvas(ctx, { ...page, styles: [{ ...style, font: "20px url(x)" }] }, [1, 0, 0, 1, 0, 0])
 
 		expect(ctx.ops("fillText")[0]?.font).toBe("400 16px serif")
+	})
+})
+
+describe("canvas painter: drawing text", () => {
+	it("sizes underline and strike bars to the measured width where the context spaces letters", () => {
+		const run: TextRun = {
+			text: "ABCD",
+			size: 12,
+			bold: false,
+			italic: false,
+			underline: "sng",
+			strike: "sngStrike",
+			color: rgba("000000"),
+			font: "Arial",
+			baseline: 0,
+			caps: "none",
+			spacing: 3,
+			lineBreak: false
+		}
+		const list = new DrawingList()
+
+		list.width = 100
+		list.height = 50
+		list.addItem(
+			ItemKind.TEXT,
+			IDENTITY,
+			0,
+			0,
+			100,
+			50,
+			0,
+			0,
+			-1,
+			-1,
+			list.text({ kind: "glyphs", run, positions: null, anchor: "start" }),
+			-1,
+			0,
+			0
+		)
+
+		const ctx = new RecordingCanvas()
+
+		paintDrawingCanvas(ctx, dataOf(list), IDENTITY, NO_IMAGES)
+
+		const measured = ctx.measureText("ABCD").width
+		const bars = ctx.ops("fillRect")
+
+		expect(ctx.ops("fillText")[0]?.args[0]).toBe("ABCD")
+		expect(bars).toHaveLength(2)
+		expect(bars.every(call => call.args[2] === measured)).toBe(true)
 	})
 })

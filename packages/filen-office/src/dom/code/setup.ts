@@ -61,6 +61,52 @@ export function codeEditorSetup(options?: CodeEditorSetupOptions): Extension {
 	]
 }
 
+// Every English string the installed CodeMirror extensions read through state.phrase (view, language, search, merge,
+// autocomplete, commands, lint): the keys an app's codePhrases map translates. "$" is a number CodeMirror fills in.
+// tests/codeEditor.dom.test.tsx checks the list against the installed sources, so an upgrade that adds or drops one fails.
+export const CODE_PHRASES = [
+	"Control character",
+	"close",
+	"folded code",
+	"unfold",
+	"Fold line",
+	"Unfold line",
+	"Folded lines",
+	"Unfolded lines",
+	"to",
+	"Find",
+	"Replace",
+	"next",
+	"previous",
+	"all",
+	"match case",
+	"regexp",
+	"by word",
+	"replace",
+	"replace all",
+	"current match",
+	"on line",
+	"replaced match on line $",
+	"replaced $ matches",
+	"Go to line",
+	"go",
+	"$ unchanged lines",
+	"Accept",
+	"Reject",
+	"Revert this chunk",
+	"Completions",
+	"Selection deleted",
+	"Diagnostics",
+	"No diagnostics"
+] as const
+
+export type CodePhrase = (typeof CODE_PHRASES)[number]
+
+// CodeMirror's own labels and announcements in the app's language. A new map (a language change) redraws the editor.
+export function codePhrases(map: Readonly<Record<CodePhrase, string>>): Extension {
+	return EditorState.phrases.of(map)
+}
+
 // The editor fills its parent, which must be height-bounded; the scroller scrolls inside it.
 export const codeFillParent: Extension = EditorView.theme({
 	"&": { height: "100%" },

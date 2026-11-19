@@ -1,12 +1,16 @@
 import { readdirSync } from "node:fs"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PdfSignatureInfo } from "../core/pdfsign"
 import { createPdfDigest } from "../dom/pdfedit/digest"
 import { pdfSignatureFields } from "../dom/pdf/signatureFields"
 import { verifyPdfSignatures } from "../dom/pdfedit/verify"
-import { nodeSubtle, signedFixture as fixture, verifyBytes } from "./pdfSignFixtures"
+import { PdfEngineRefusal } from "../dom/pdfedit/context"
+import { startEngine, stopEngines } from "./pdfedit/harness"
+import { loadIdentity, signBytes } from "./pdfSignCreateFixtures"
+import { nodeSubtle, signedFixture as fixture, verifyBytes, withIndefiniteContents } from "./pdfSignFixtures"
+import { budget } from "./timing"
 
 async function only(name: string): Promise<PdfSignatureInfo> {
 	const report = await verifyBytes(fixture(name))
@@ -52,6 +56,16 @@ describe("verifyPdfSignatures", () => {
 		expect(signature.chain[1]?.selfSigned).toBe(true)
 		expect(signature).toMatchObject({ name: "Fixture Signer", reason: "Approval", expiredAtClaimedTime: false })
 		expect((await only("approval-selfsigned.pdf")).signer?.selfSigned).toBe(true)
+	})
+
+	it("verifies a signature whose CMS uses indefinite lengths", async () => {
+		const bytes = withIndefiniteContents(fixture("approval-rsa.pdf"))
+
+		expect(new TextDecoder("latin1").decode(bytes)).toContain("/Contents <308006092a864886f70d010702a0803080")
+
+		const report = await verifyBytes(bytes)
+
+		expect(report.signatures[0]).toMatchObject({ state: "unchanged", algorithm: "RSA 2048", digest: "SHA-256" })
 	})
 
 	it("flags a certificate expired at the claimed time without failing the signature", async () => {
@@ -188,6 +202,48 @@ describe("verifyPdfSignatures", () => {
 		expect((await withHistory(1))?.changes).toEqual({ allowed: false, kinds: ["form", "annotation"] })
 	})
 
+	it("compares a rewritten stream's raw bytes, only when the lengths agree, and frees both copies", async () => {
+		const rewritten = async (data: string): Promise<{ readonly report: PdfSignatureInfo | undefined; readonly compared: number }> => {
+			const document = new mupdf.PDFDocument(fixture("approval-rsa.pdf"))
+
+			document.newIndirect(4).writeRawStream(data)
+
+			const bytes = document.saveToBuffer("incremental").asUint8Array().slice()
+
+			document.destroy()
+
+			const read = vi.spyOn(mupdf.PDFObject.prototype, "readRawStream")
+			const destroy = vi.spyOn(mupdf.Buffer.prototype, "destroy")
+			const view = vi.spyOn(mupdf.Buffer.prototype, "asUint8Array")
+
+			try {
+				const report = (await verifyBytes(bytes)).signatures[0]
+				const buffers = read.mock.results.map(result => result.value as unknown)
+
+				expect(buffers).toHaveLength(2)
+				expect(buffers.every(buffer => destroy.mock.contexts.includes(buffer))).toBe(true)
+
+				return { report, compared: view.mock.contexts.filter(buffer => buffers.includes(buffer)).length }
+			} finally {
+				read.mockRestore()
+				destroy.mockRestore()
+				view.mockRestore()
+			}
+		}
+
+		const same = await rewritten("BT /F1 24 Tf 72 760 Td (Signed fixture) Tj ET")
+		const tampered = await rewritten("BT /F1 24 Tf 72 760 Td (Signed fixturX) Tj ET")
+		const longer = await rewritten("BT /F1 24 Tf 72 760 Td (Signed fixture, changed) Tj ET")
+
+		expect(same.report?.changes).toEqual({ allowed: true, kinds: [] })
+		expect(same.compared).toBe(2)
+		// Same length, other bytes: the page's content changed.
+		expect(tampered.report?.changes).toEqual({ allowed: false, kinds: ["content"] })
+		expect(tampered.compared).toBe(2)
+		expect(longer.report?.changes).toEqual({ allowed: false, kinds: ["content"] })
+		expect(longer.compared).toBe(0)
+	})
+
 	it("reads the certification from the revision the certifying signature signed, not a later catalog", async () => {
 		expect(await only("certified-p1-new-root.pdf")).toMatchObject({ certification: 1 })
 	})
@@ -267,4 +323,82 @@ describe("verifyPdfSignatures", () => {
 			expect(report.signatures.every(signature => signature.unverifiableReason !== "parserMismatch")).toBe(true)
 		}
 	)
+})
+
+describe("verifying a file with a password to open", () => {
+	afterEach(stopEngines)
+
+	const PASSWORD = "open"
+
+	// Encrypted with a user password, signed, then a form field filled: a change the signature allows, whose strings a
+	// revision read undecrypted would show as changed everywhere.
+	async function signedThenFilled(): Promise<Uint8Array> {
+		const source = new mupdf.PDFDocument(fixture("unsigned.pdf"))
+		const encrypted = source.saveToBuffer(`encrypt=aes-256,user-password=${PASSWORD},owner-password=owner`).asUint8Array().slice()
+
+		source.destroy()
+
+		const signed = await signBytes(encrypted, await loadIdentity("rsa2048"), {}, { password: PASSWORD })
+		const document = new mupdf.PDFDocument(signed.slice())
+
+		document.authenticatePassword(PASSWORD)
+
+		const field = document
+			.loadPage(0)
+			.getWidgets()
+			.find(item => item.getName() === "Name")
+
+		field?.setTextValue("Ada")
+		field?.update()
+
+		const filled = document.saveToBuffer("incremental").asUint8Array().slice()
+
+		document.destroy()
+
+		return filled
+	}
+
+	it(
+		"opens the signed revision with the document's password in the engine",
+		async () => {
+			const bytes = await signedThenFilled()
+			const engine = startEngine(bytes)
+
+			expect(await engine.open(PASSWORD)).toMatchObject({ status: "open" })
+
+			const fields = await engine.client.call("signatureHints", {})
+			const report = await engine.client.call("verifySignatures", { fields })
+
+			expect(report.signatures.map(signature => [signature.state, signature.changes])).toEqual([
+				["changed", { allowed: true, kinds: ["form"] }]
+			])
+		},
+		budget(60_000)
+	)
+
+	it("reports a signature whose revision stays locked as unverifiable", async () => {
+		const bytes = await signedThenFilled()
+		const document = new mupdf.PDFDocument(bytes.slice())
+
+		document.authenticatePassword(PASSWORD)
+
+		const report = await verifyPdfSignatures(
+			document,
+			{ length: bytes.length, read: (offset, length) => Promise.resolve(bytes.slice(offset, offset + length)) },
+			{
+				subtle: nodeSubtle,
+				createDigest: createPdfDigest,
+				openRevision: () => {
+					throw new PdfEngineRefusal("needsPassword")
+				},
+				now: Date.UTC(2026, 10, 14)
+			}
+		)
+
+		document.destroy()
+
+		expect(report.signatures.map(signature => [signature.state, signature.unverifiableReason])).toEqual([
+			["unverifiable", "readFailed"]
+		])
+	})
 })

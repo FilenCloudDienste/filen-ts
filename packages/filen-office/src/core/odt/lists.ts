@@ -8,12 +8,18 @@ import { esc, REL, twips } from "./wml"
 // shares its counters unless a w:startOverride restarts a level (ECMA-376 Part 1 §17.9.27), so a style's later
 // lists override each level with its start value.
 
-const FORMATS: Readonly<Record<string, string>> = {
+// style:num-format (Part 3 §19.500) as w:numFmt: the formats page numbers and notes take (an unknown one is none of
+// theirs), which list levels take with more.
+export const NUMBER_FORMATS: Readonly<Record<string, string>> = {
 	"1": "decimal",
 	a: "lowerLetter",
 	A: "upperLetter",
 	i: "lowerRoman",
-	I: "upperRoman",
+	I: "upperRoman"
+}
+
+const FORMATS: Readonly<Record<string, string>> = {
+	...NUMBER_FORMATS,
 	"": "none",
 	"1st": "ordinal",
 	"١, ٢, ٣, ...": "arabicAlpha",

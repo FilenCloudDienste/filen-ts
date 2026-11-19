@@ -71,7 +71,7 @@ export const Item = {
 	PermissionStart: 83,
 	PermissionEnd: 84,
 	CustomXmlRangeMarker: 85,
-	// Math, kept as opaque subtrees for a later converter
+	// Math: one item per equation (m:oMathPara, m:oMath), its OMML read by core/math and edited by docx/math/edit.ts
 	MathParagraph: 90,
 	Math: 91,
 	// Anything not modelled: kept by span, never rendered as content

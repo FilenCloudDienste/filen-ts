@@ -29,11 +29,16 @@ import { levelGeometry } from "../lists"
 
 export class OdtWriteRefusal extends Error {
 	readonly reason: string
+	// What a read-back refusal compared, for tests and local debugging. It holds document text, so it is never part
+	// of `message` (which is logged) and not enumerable (not copied by a spread, a structured log or a worker reply).
+	declare readonly detail?: string
 
-	constructor(reason: string, message: string) {
+	constructor(reason: string, message: string, detail?: string) {
 		super(message)
 		this.name = "OdtWriteRefusal"
 		this.reason = reason
+
+		if (detail !== undefined) Object.defineProperty(this, "detail", { value: detail, enumerable: false })
 	}
 }
 
@@ -41,6 +46,8 @@ const W_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/mai
 // Entries a cache of the emitter keeps before it starts again.
 const CACHE_LIMIT = 4096
 const NO_BYTES = new Uint8Array(0)
+// A field instruction's keyword, as a refusal may name it (letters only: anything else may be document text).
+const FIELD_KEYWORD = /^[A-Z]{1,24}$/u
 
 // New automatic styles of one stream, deduplicated by what they say, named past every name either stream uses. A
 // style the stream already has with the same markup is that style (so saves do not pile up copies of it).
@@ -52,11 +59,13 @@ export class StyleRegistry {
 	// The stream's own automatic styles of a family by their written form (writtenForm), read when first asked.
 	existing: ((family: string) => ReadonlyMap<string, string>) | undefined
 	readonly markup: string[] = []
-	// Whether a name is taken in the stream's body (an id or a name a frame, table or change region has there), asked
-	// for names given to body elements only (`name(prefix, true)`).
-	inBody: ((name: string) => boolean) | undefined
+	// Whether `prefix` followed by `number` is taken in the stream's body (an id or a name a frame, table or change
+	// region has there), asked for names given to body elements only (`name(prefix, true)`).
+	inBody: ((prefix: string, number: number) => boolean) | undefined
 	// The name each markup entry defines, and whether it is a paragraph or text style (others are always kept).
 	readonly names: string[] = []
+	// `names` as markup writes them (escaped).
+	private readonly written = new Set<string>()
 	private readonly collectable: boolean[] = []
 	private readonly counters = new Map<string, number>()
 	private readonly declarations: string
@@ -72,7 +81,7 @@ export class StyleRegistry {
 		let next = this.counters.get(prefix) ?? 1
 		let name = `${prefix}${next}`
 
-		while (this.taken.has(name) || (body && this.inBody?.(name) === true)) name = `${prefix}${++next}`
+		while (this.taken.has(name) || (body && this.inBody?.(prefix, next) === true)) name = `${prefix}${++next}`
 
 		this.counters.set(prefix, next + 1)
 		this.taken.add(name)
@@ -90,6 +99,7 @@ export class StyleRegistry {
 		const name = this.name(prefix)
 
 		this.names.push(name)
+		this.written.add(esc(name))
 		this.collectable.push(family === "text" || family === "paragraph")
 		this.markup.push(
 			`<style:style${this.declarations} style:name="${esc(name)}" style:family="${family}"${attributes}${properties === "" ? "/>" : `>${properties}</style:style>`}`
@@ -99,10 +109,15 @@ export class StyleRegistry {
 		return name
 	}
 
-	// The markup of the styles something written names (`written`, or another such style): a style made for a rewrite
-	// that was then written another way names nothing.
-	used(written: readonly string[]): string {
-		const referenced = new Set<string>()
+	// Whether an attribute value (as markup writes it) names one of the registry's styles.
+	has(value: string): boolean {
+		return this.written.has(value)
+	}
+
+	// The markup of the styles something written names (`written`, or `names`: attribute values as markup writes them,
+	// or another such style): a style made for a rewrite that was then written another way names nothing.
+	used(written: readonly string[], names: Iterable<string> = []): string {
+		const referenced = new Set<string>(names)
 		const collect = (text: string): void => {
 			for (const match of text.matchAll(/="([^"]*)"/gu)) referenced.add(match[1] ?? "")
 		}
@@ -142,6 +157,7 @@ export class StyleRegistry {
 		const name = this.name(prefix)
 
 		this.names.push(name)
+		this.written.add(esc(name))
 		this.collectable.push(false)
 		this.markup.push(make(name))
 		this.byKey.set(key, name)
@@ -1434,7 +1450,12 @@ export class OdfEmitter {
 						const bytes =
 							atom?.bytes ?? (live === undefined ? undefined : withContent(live.bytes, escText(document.textContent(at))))
 
-						if (bytes === undefined) this.refuse("field", `the field ${instruction ?? ""}`)
+						// Named by its keyword only, and only when it reads as one: a malformed instruction may begin with text.
+						if (bytes === undefined)
+							this.refuse(
+								"field",
+								instruction !== undefined && FIELD_KEYWORD.test(instruction) ? `the field ${instruction}` : "a field"
+							)
 
 						// In the style of its result's first run, as the span around it gave.
 						this.openSpan(document, child(document, at, "r"), styling, state, state.offset++)

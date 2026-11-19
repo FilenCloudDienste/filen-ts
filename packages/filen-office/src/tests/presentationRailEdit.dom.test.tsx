@@ -167,7 +167,15 @@ describe("slide rail editing", () => {
 		const pointer = (type: string, target: HTMLElement, y: number): void => {
 			act(() =>
 				target.dispatchEvent(
-					new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: 50, clientY: y })
+					new PointerEvent(type, {
+						bubbles: true,
+						button: 0,
+						buttons: 1,
+						pointerId: 1,
+						pointerType: "mouse",
+						clientX: 50,
+						clientY: y
+					})
 				)
 			)
 		}
@@ -198,7 +206,15 @@ describe("slide rail editing", () => {
 		const pointer = (type: string, target: HTMLElement, y: number): void => {
 			act(() =>
 				target.dispatchEvent(
-					new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: 50, clientY: y })
+					new PointerEvent(type, {
+						bubbles: true,
+						button: 0,
+						buttons: 1,
+						pointerId: 1,
+						pointerType: "mouse",
+						clientX: 50,
+						clientY: y
+					})
 				)
 			)
 		}

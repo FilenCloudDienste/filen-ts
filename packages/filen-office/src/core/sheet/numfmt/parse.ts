@@ -907,6 +907,9 @@ function compileSection(section: SectionDraft): NumFmtSection {
 	}
 }
 
+// The longest code a cell's format may have (format.apply and the dialog refuse longer ones).
+export const MAX_NUMFMT_LENGTH = 255
+
 // Compiles a code. Never throws: anything it does not know shows as written.
 export function parseNumFmt(code: string): NumFmt {
 	const drafts = scan(code)

@@ -14,7 +14,7 @@ import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import type { CorpusManifest } from "../scripts/corpusManifest"
 import { CORPUS_DIR } from "./corpusDir"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { Changes, changedParts, openDeck, rebaseSession, saveEdits, slideNode, type OpenedDeck } from "./pptxWriteFixtures"
+import { Changes, differingParts, openDeck, rebaseSession, saveEdits, slideNode, type OpenedDeck } from "./pptxWriteFixtures"
 import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { budget } from "./timing"
 
@@ -182,7 +182,7 @@ describe("presentation text through the pptx writer", () => {
 		const saved = await saveEdits(h, revision)
 
 		// The links' relationships go with the slide.
-		expect(await changedParts(bytes, saved)).toEqual(["ppt/slides/slide1.xml", "ppt/slides/_rels/slide1.xml.rels"])
+		expect(await differingParts(bytes, saved)).toEqual(["ppt/slides/slide1.xml", "ppt/slides/_rels/slide1.xml.rels"])
 
 		const back = await openDeck(saved)
 		const read = shapeOn(slideNode(back, 0), 3).text as TextBody
@@ -392,7 +392,7 @@ describe.skipIf(PRESENT.length === 0)("the text edit set over the corpus", () =>
 					}
 
 					const saved = await saveEdits(h, revision)
-					const changed = (await changedParts(bytes, saved)).filter(name => !name.startsWith("docProps/"))
+					const changed = (await differingParts(bytes, saved)).filter(name => !name.startsWith("docProps/"))
 
 					if (changed.some(name => !touched.has(name)))
 						failures.push(`${path}: changed ${changed.join(", ")} for ${[...touched].join(", ")}`)

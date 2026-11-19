@@ -66,6 +66,7 @@ describe("office corpus workflow", () => {
 			readVariable("./rtfFuzz.test.ts", /process\.env\["(\w+_SEED)"\]/u),
 			readVariable("./cfbFuzz.test.ts", /process\.env\["(\w+_SEED)"\]/u),
 			readVariable("./xlsxReadFuzz.test.ts", /process\.env\["(\w+_SEED)"\]/u),
+			readVariable("./docFuzz.test.ts", /process\.env\["(\w+_SEED)"\]/u),
 			readVariable("./odtWriterFuzz.test.ts", /process\.env\["(\w+_FROM)"\]/u),
 			readVariable("./presentationSessionFuzz.test.ts", /process\.env\["(\w+_FROM)"\]/u),
 			readVariable("./fuzz/sheet/run.ts", /env\["(\w+_SHEET_FUZZ_SEED)"\]/u)
@@ -82,6 +83,24 @@ describe("office corpus workflow", () => {
 
 		expect(new Set(offsets).size).toBe(offsets.length)
 		expect(values(readVariable("./fuzz/sheet/run.ts", /env\["(FILEN_OFFICE_SHEET_FUZZ)"\]/u))).toEqual(["1"])
+	})
+
+	it("runs the Word binary fuzzers on the run's seed, the converter's by its test name", () => {
+		const seed = readVariable("./docFuzz.test.ts", /process\.env\["(\w+_SEED)"\]/u)
+		const name = /describe\.skipIf\(!fetched\)\("(mutated Word binary documents)[^"]*"/u.exec(text("./docToDocxCorpus.test.ts"))?.[1]
+
+		expect(readVariable("./docToDocxCorpus.test.ts", /process\.env\["(\w+_SEED)"\]/u)).toBe(seed)
+		expect(WORKFLOW).toContain("src/tests/docFuzz.test.ts")
+		expect(WORKFLOW).toContain(`src/tests/docToDocxCorpus.test.ts -t "${name ?? "?"}"`)
+	})
+
+	it("runs the xlsx save budget alone with its switch on", () => {
+		const perf = readVariable("./xlsxWritePerf.test.ts", /process\.env\["(\w+_PERF)"\] === "1"/u)
+
+		expect(values(perf)).toEqual(["1"])
+		expect(WORKFLOW).toMatch(
+			new RegExp(`${perf}: '1'\\n\\s+run: pnpm exec vitest run --reporter=verbose src/tests/xlsxWritePerf\\.test\\.ts\\n`, "u")
+		)
 	})
 
 	it("runs the recalculation against Excel's cached results at the gate its README states", () => {

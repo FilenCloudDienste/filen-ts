@@ -1,5 +1,6 @@
 import type { Relationships } from "../../opc/index"
 import { NodeKind, decodeCharacterData, type XmlDocument } from "../../xml/index"
+import { symbolTable, symbolToUnicode } from "../../fonts/symbols"
 import type { XmlNodeRef } from "../props/types"
 import { BreakType, FieldCharType, Item, RevisionView, TRANSPARENT, revisionHidden, type SdtLevel } from "./kinds"
 import { macroButtonText } from "./macroButton"
@@ -408,12 +409,19 @@ export class StoryPart implements PartItems, PartTables {
 		if (this.fields.simple[field] === 1) return macroButtonText(instruction)
 
 		const begin = this.fields.begin[field] ?? -1
+		// The field's own end, else its separator: an unterminated field shows its instruction's display text
+		// (scanning to the end of the part would read later paragraphs, once per field).
+		const fieldEnd = this.fields.end[field] ?? -1
+		const last = fieldEnd >= 0 ? fieldEnd : (this.fields.separate[field] ?? -1)
+
+		if (last < 0) return macroButtonText(instruction)
+
 		// Per nested field, whether its result is being read; and how many are not (text shows only when none is).
 		const nested: boolean[] = []
 		let inCode = 0
 		let out = ""
 
-		for (let item = begin + 1; item >= 0 && item < this.count; item++) {
+		for (let item = begin + 1; item >= 0 && item < last; item++) {
 			if (view !== RevisionView.Markup && this.hidden(item, view)) {
 				item = this.end(item) - 1
 
@@ -496,12 +504,24 @@ export class StoryPart implements PartItems, PartTables {
 		return match?.[1]?.toUpperCase() ?? ""
 	}
 
+	// The code point a w:sym shows: the Unicode character its symbol font draws there, else its own code.
+	symbolChar(item: number): number {
+		const symbol = this.symbol(item)
+		const table = symbol.font === undefined ? undefined : symbolTable(symbol.font)
+
+		return table === undefined ? symbol.char : symbolToUnicode(table, symbol.char) || symbol.char
+	}
+
 	// Plain text of a paragraph (or any container) for search and tests: tabs as "\t", breaks as "\n",
-	// non-breaking hyphens as U+2011, soft hyphens as U+00AD, symbols as their code point; field codes and
-	// nested text boxes left out, field results kept.
-	paragraphText(item: number, view: RevisionView = RevisionView.Final): string {
+	// non-breaking hyphens as U+2011, soft hyphens as U+00AD, symbols as their code point (as the editing
+	// document holds them); field codes and nested text boxes left out, field results kept, a MACROBUTTON without a
+	// result as its display text. `offsets`, when given (length end(item) - item + 1), receives the text's
+	// length before each item (index item - `item`; a field's display text counts before the item after the
+	// field) and its whole length last.
+	paragraphText(item: number, view: RevisionView = RevisionView.Final, offsets?: Int32Array): string {
 		let out = ""
 		const end = this.end(item)
+		let filled = 1
 		let fieldDepth = 0
 		let codeDepth = 0
 		let paragraphs = 0
@@ -523,6 +543,8 @@ export class StoryPart implements PartItems, PartTables {
 
 				simpleEnd = -1
 			}
+
+			if (offsets !== undefined) for (; filled <= i - item; filled++) offsets[filled] = out.length
 
 			if (view !== RevisionView.Markup && this.hidden(i, view)) {
 				i = this.end(i)
@@ -577,11 +599,11 @@ export class StoryPart implements PartItems, PartTables {
 
 					break
 				case Item.NoBreakHyphen:
-					if (codeDepth === 0) out += "‑"
+					if (codeDepth === 0) out += "\u2011"
 
 					break
 				case Item.SoftHyphen:
-					if (codeDepth === 0) out += "­"
+					if (codeDepth === 0) out += "\u00ad"
 
 					break
 				case Item.Symbol: {
@@ -618,6 +640,7 @@ export class StoryPart implements PartItems, PartTables {
 		}
 
 		if (simpleEnd >= 0 && out.length === simpleStart) out += simpleDisplay
+		if (offsets !== undefined) for (; filled < offsets.length; filled++) offsets[filled] = out.length
 
 		return out
 	}

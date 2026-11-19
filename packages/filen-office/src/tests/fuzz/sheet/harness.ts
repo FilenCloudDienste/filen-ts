@@ -205,6 +205,10 @@ export async function runSequence(
 
 		for (const entry of live.document.worksheets()) await hold(entry.id)
 
+		// The source as read back, once per sequence (the session holds a copy of `bytes`, which nothing changes).
+		let sourceRecord: Promise<WorkbookRecord> | undefined
+		const source = (): Promise<WorkbookRecord> => (sourceRecord ??= readSaved(bytes))
+
 		const checkpoint = async (): Promise<boolean> => {
 			result.checks++
 			options.trace?.("checkpoint")
@@ -220,7 +224,7 @@ export async function runSequence(
 			options.keep?.(saved.bytes)
 			options.trace?.("compare")
 
-			const differences = compareRecords(modelRecord(live.document.workbook), await readSaved(saved.bytes, bytes))
+			const differences = compareRecords(modelRecord(live.document.workbook), await readSaved(saved.bytes, await source()))
 
 			if (differences.length > 0) {
 				result.diverge = [...differences.slice(0, 12), `after ${result.ops.join(" ")}`]
@@ -307,7 +311,7 @@ export async function runSequence(
 			const saved = await within(live.save(), options.callTimeoutMs, "save")
 
 			if (saved.ok) {
-				const problems = await undoneProblems(bytes, saved.bytes)
+				const problems = await undoneProblems(bytes, await source(), saved.bytes)
 
 				if (problems.length > 0) result.undoAll = [...problems, `after ${result.ops.join(" ")}`]
 			}
@@ -327,12 +331,13 @@ export async function runSequence(
 // calculation chain goes with its relationship and content type once a formula changed.
 const APPEND_ONLY = /^xl\/(styles|sharedStrings|calcChain)\.xml$|^\[Content_Types\]\.xml$|^xl\/_rels\/workbook\.xml\.rels$/
 
-// After every edit is undone: what the save holds equals the source (cells, rows, columns, merges, sheets, names),
+// After every edit is undone: what the save holds equals the source (cells, rows, columns, merges, data validations,
+// the autoFilter, hyperlinks, sheets, names),
 // and every part but the append-only ones keeps its bytes, or differs in its text only where shown.
 // Worksheet parts are compared by what they hold: a rewritten row loses source cells that hold nothing (no value, no
 // style, no formula: `<c r="F5"/>`), and a dimension that did not cover the cells is widened.
-async function undoneProblems(source: Uint8Array, saved: Uint8Array): Promise<string[]> {
-	const problems = compareRecords(normalized(await readSaved(source)), normalized(await readSaved(saved, source)))
+async function undoneProblems(source: Uint8Array, record: WorkbookRecord, saved: Uint8Array): Promise<string[]> {
+	const problems = compareRecords(normalized(record), normalized(await readSaved(saved, record)))
 	const after = unzipSync(saved)
 	const original = unzipSync(source)
 
@@ -353,7 +358,9 @@ async function undoneProblems(source: Uint8Array, saved: Uint8Array): Promise<st
 
 const WORKSHEET = /^xl\/worksheets\/[^/]+\.xml$/
 
-// Without the style tables (append-only) and without cells that hold nothing.
+// Without the style tables (append-only) and without cells that hold nothing. The worksheet sections read from the
+// part's text (data validations, the autoFilter, hyperlinks) are kept as read: an undone edit writes them back as the
+// source has them, raw markup the model keeps included.
 function normalized(record: WorkbookRecord): WorkbookRecord {
 	return {
 		...record,

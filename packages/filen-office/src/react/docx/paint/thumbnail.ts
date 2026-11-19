@@ -1,4 +1,4 @@
-import type { PageDisplayList } from "../../../core/docx/layout/index"
+import { GRAPHIC_FLOATS, GRAPHIC_INTS, OBJECT_FLOATS, PageGraphic, type PageDisplayList } from "../../../core/docx/layout/index"
 import {
 	FRAGMENT_FLOATS,
 	FRAGMENT_INTS,
@@ -16,10 +16,6 @@ import {
 // of text a bar along its line, objects and shading as boxes. No text, fonts or media are drawn, so a page costs
 // one pass over its lines, in the colour the caller gives (the canvas's own, so it follows the theme).
 
-const GRAPHIC_FLOATS = 4
-const GRAPHIC_INTS = 3
-const GRAPHIC_SHADING = 1
-const OBJECT_FLOATS = 4
 // Of a line's height, where a text bar starts and how much of it it covers (an x-height's band).
 const BAR_TOP = 0.35
 const BAR_HEIGHT = 0.4
@@ -62,7 +58,7 @@ export function paintThumbnail(canvas: ThumbnailCanvas, page: PageDisplayList, w
 	context.globalAlpha = BOX_ALPHA
 
 	for (let graphic = 0; graphic < page.graphicCount; graphic++) {
-		if (page.graphicInts[graphic * GRAPHIC_INTS] !== GRAPHIC_SHADING) continue
+		if (page.graphicInts[graphic * GRAPHIC_INTS] !== PageGraphic.SHADING) continue
 
 		const f = graphic * GRAPHIC_FLOATS
 

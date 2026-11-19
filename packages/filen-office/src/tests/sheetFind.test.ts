@@ -73,6 +73,25 @@ describe("find matching", () => {
 		expect(findMatcher("x", plain)?.replace("İxİ", "y")).toBe("İyİ")
 	})
 
+	it("searches for the whole of a text longer than 255 characters", () => {
+		const head = "a".repeat(255)
+		const text = `${head}${"b".repeat(45)}`
+		const matcher = findMatcher(text, plain)
+
+		expect(matcher?.test(`x${text}y`)).toBe(true)
+		expect(matcher?.test(`${head}${"c".repeat(45)}`)).toBe(false)
+		expect(matcher?.replace(`x${text}y`, "Z")).toBe("xZy")
+		expect(matcher?.replace(`${head}c`, "Z")).toBeNull()
+	})
+
+	it("keeps a ~ escape that straddles the 255th character", () => {
+		const matcher = findMatcher(`${"a".repeat(254)}~*b`, plain)
+
+		expect(matcher?.test(`${"a".repeat(254)}*b`)).toBe(true)
+		expect(matcher?.test(`${"a".repeat(254)}xb`)).toBe(false)
+		expect(matcher?.test(`${"a".repeat(254)}~`)).toBe(false)
+	})
+
 	it("agrees with a reference reading of the wildcards on random patterns and texts", () => {
 		const letters = "ab*?~"
 		let seed = 7
@@ -389,6 +408,17 @@ describe("find.replace", () => {
 		expect(state.canUndo).toBe(false)
 	})
 
+	it("replaces the whole of a search text longer than 255 characters", async () => {
+		const head = "a".repeat(255)
+		const text = `${head}${"b".repeat(45)}`
+		const { session } = await openKeys({ sheets: [{ name: "One", body: sheetBody([[`${text}!`], [`${head}${"c".repeat(45)}`]]) }] })
+
+		await session.command({ type: "find.replace", scope: "workbook", text, replacement: "Z", matchCase: false, wholeCell: false })
+
+		expect(tileEntry(await firstTile(session, 0), 0, 0)?.text).toBe("Z!")
+		expect(tileEntry(await firstTile(session, 0), 1, 0)?.text).toBe(`${head}${"c".repeat(45)}`)
+	})
+
 	it("replaces in the given cell only (Replace on the current match)", async () => {
 		const { session } = await openKeys(BOOK)
 
@@ -463,7 +493,8 @@ describe("find.replace", () => {
 			wholeCell: false
 		})
 
-		expect(result.ok && result.change.state.canUndo).toBe(false)
+		expect(result.ok).toBe(true)
+		expect(result.ok ? result.change.state.canUndo : null).toBe(false)
 	})
 
 	it("replaces in a text file and undoes", async () => {

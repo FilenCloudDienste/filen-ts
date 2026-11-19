@@ -562,10 +562,16 @@ describe("SmartArt org chart connectors (orgChart1 as the corpus deck embeds it)
 		return new TextDecoder().decode(await pkg.read("ppt/diagrams/layout1.xml"))
 	}
 
-	it("hangs a manager's staff in a column set in from it, each line dropping from the manager's bottom into the staff box's side", async () => {
+	it("hangs a manager's staff in a column set in from it, each line dropping from the manager's bottom into the staff box's side", async ({
+		skip
+	}) => {
 		const layoutXml = await orgChart()
 
-		if (layoutXml === undefined) return
+		if (layoutXml === undefined) {
+			skip(`corpus file ${deck} is missing: run pnpm run corpus:fetch or set FILEN_OFFICE_CORPUS`)
+
+			return
+		}
 
 		const result = run(
 			data([

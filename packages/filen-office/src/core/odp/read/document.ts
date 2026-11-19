@@ -1,10 +1,19 @@
 import { chartOf, translateChart } from "../../ods/charts/read"
-import { NO_PROPERTIES, OdfPackage, OdfStyleSheet, parseLength, type OdfElement, type OdfProperties } from "../../odf/index"
+import {
+	NO_PROPERTIES,
+	OdfPackage,
+	OdfStyleSheet,
+	parseLength,
+	type OdfElement,
+	type OdfMasterPage,
+	type OdfProperties
+} from "../../odf/index"
 import { readContentPrologueSliced, readContentPrologue } from "../../odf/prologue"
 import { PRESENTATION_ZIP_LIMITS } from "../../opc/mediaPolicy"
 import { Relationships, ZipError, partKey, type ByteSource, type Slicing, type ZipEntry } from "../../opc/index"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../../presentation/budget"
 import { SlideRefs } from "../../presentation/ids"
+import { own } from "../../tables"
 import {
 	PresentationError,
 	refused,
@@ -21,9 +30,10 @@ import {
 } from "../../presentation/model"
 import { tooLarge } from "../../presentation/refusal"
 import { Namespaces, XmlError, decodeUtf8, encodeUtf8, parseXml, parseXmlSliced, type XmlDocument } from "../../xml/index"
+import { MAX_CELLS, MAX_POINTS, MAX_SERIES } from "../localTable"
 import { Fragment, OdpContext, type TableTemplate } from "./context"
 import { EMU_PER_PT, fillOf, packagePart } from "./fills"
-import { pageFragment, scanPages, ScanError, type ContentPages, type PageSpan } from "./scan"
+import { pageFragment, pageHead, scanPages, ScanError, type ContentPages, type PageSpan } from "./scan"
 import { CLASS_TYPES, readShapeElements, readShapes, type ShapeScope } from "./shapes"
 import { levelStyle, listStyleOf } from "./text"
 import { readOdpTiming } from "../../anim/odf"
@@ -307,6 +317,8 @@ export class OdpParts {
 	private readonly decls = new Map<string, Map<string, { readonly text: string; readonly fixed: boolean }>>()
 	private readonly slicing: Slicing | undefined
 	private readonly refs = new SlideRefs()
+	// The pages by name, as links ("#page3") name them: the context's table, filled by build() and openOdp.
+	private readonly pageNames: Map<string, SlideRef>
 	// Refs a reading must never hand out: those of the deck it took over (adopt).
 	private taken: ReadonlySet<SlideRef> | undefined
 
@@ -323,7 +335,7 @@ export class OdpParts {
 		sheet: OdfStyleSheet,
 		budgets: PresentationBudgets,
 		options: OdpOpenOptions,
-		pages: ReadonlyMap<string, SlideRef>,
+		pages: Map<string, SlideRef>,
 		templates: ReadonlyMap<string, TableTemplate>
 	) {
 		this.odf = odf
@@ -333,6 +345,7 @@ export class OdpParts {
 		this.tally = new DeckTally(budgets)
 		this.epoch = options.epoch ?? 0
 		this.slicing = options.slicing
+		this.pageNames = pages
 
 		for (const entry of odf.archive.entries) if (!entry.name.endsWith("/")) this.entries.set(partKey(entry.name), entry)
 
@@ -372,7 +385,7 @@ export class OdpParts {
 
 				const extension = /\.([a-z0-9]+)$/u.exec(key)?.[1]
 
-				return imageType(manifest.get(key)) ?? (extension === undefined ? undefined : IMAGE_EXTENSIONS[extension])
+				return imageType(manifest.get(key)) ?? (extension === undefined ? undefined : own(IMAGE_EXTENSIONS, extension))
 			}
 		}
 
@@ -483,10 +496,10 @@ export class OdpParts {
 		const images = new Set<string>()
 		const charts = new Set<string>()
 		const clips: ShapeScope["clips"] = []
-		let node: SlideNode
+		let read: { readonly node: SlideNode; readonly unread: number }
 
 		try {
-			node = this.tally.count(ref, () => this.readPage(ref, fragment, head, images, charts, clips))
+			read = this.tally.count(ref, () => this.readPage(ref, fragment, head, images, charts, clips))
 		} catch (error) {
 			// Markup the parse let through and a value read later refuses (a character reference to NUL).
 			if (error instanceof XmlError) throw new PresentationError("malformed", `Page ${head.name}: ${error.message}`)
@@ -494,10 +507,24 @@ export class OdpParts {
 			throw error
 		}
 
-		// What the renderer reads beside the page: the charts, and the types of pictures the manifest leaves open.
-		for (const path of charts) await this.translateChart(path, node, slicing)
-		for (const part of images) await this.sniffImage(part)
-		for (const clip of clips) await this.cropPicture(clip)
+		const node = read.node
+
+		// What the renderer reads beside the page: the charts, and the types of pictures the manifest leaves open. The
+		// page is published (deck.nodes) only once they are in: until then every caller waits on this parse, and one
+		// that fails leaves nothing half read behind (the next slide() reads the page again).
+		try {
+			for (const path of charts) await this.translateChart(path, node, slicing)
+			for (const part of images) await this.sniffImage(part)
+			for (const clip of clips) await this.cropPicture(clip)
+		} catch (error) {
+			this.tally.release(ref)
+			if (node.notes !== undefined) this.deck.nodes.delete(node.notes)
+
+			throw error
+		}
+
+		this.unread += read.unread
+		this.deck.nodes.set(ref, node)
 
 		return node
 	}
@@ -559,7 +586,7 @@ export class OdpParts {
 		images: Set<string>,
 		charts: Set<string>,
 		clips: ShapeScope["clips"]
-	): SlideNode {
+	): { readonly node: SlideNode; readonly unread: number } {
 		const document = fragment.document
 		const page = document.firstChildElement(document.documentElement())
 		const master = this.masters.get(head.master) ?? this.masters.values().next().value
@@ -582,7 +609,6 @@ export class OdpParts {
 		const shapes = page < 0 ? [] : readShapes(this.context, scope, page)
 
 		this.pushMasterFooters(shapes, master, headerFooter, scope)
-		this.unread += scope.unread
 
 		let notes: SlideRef | undefined
 		const comments: CommentRef[] = []
@@ -623,9 +649,7 @@ export class OdpParts {
 			revision: 0
 		}
 
-		this.deck.nodes.set(ref, node)
-
-		return node
+		return { node, unread: scope.unread }
 	}
 
 	// The pages in content order, by the refs the deck names them with.
@@ -638,14 +662,14 @@ export class OdpParts {
 		return this.spans.get(ref)
 	}
 
-	// This reading takes over `target` (OdpOpenOptions.adopt): the refs it built are mapped onto the deck's (pages and
-	// masters by position, notes masters by master, layouts by master and name; a layout the deck lacks is added to it
-	// under a ref the deck does not use), and every table keyed by ref is keyed by the deck's.
 	// The highest ref this reading's allocator has handed out (what a rebase reading must stay above).
 	refsIssued(): number {
 		return this.refs.issued
 	}
 
+	// This reading takes over `target` (OdpOpenOptions.adopt): the refs it built are mapped onto the deck's (pages and
+	// masters by position, notes masters by master, layouts by master and name; a layout the deck lacks is added to it
+	// under a ref the deck does not use), and every table keyed by ref is keyed by the deck's.
 	adopt(target: Deck, refsAbove = 0, order: readonly SlideRef[] = target.slides): void {
 		const built = this.deck
 
@@ -835,7 +859,7 @@ export class OdpParts {
 			charts: new Set(),
 			clips: [],
 			unread: 0,
-			...(info === undefined ? {} : { masterName: info.name })
+			masterName: info.name
 		}
 
 		this.pushMasterFooters(shapes, info, settings, scope)
@@ -860,8 +884,10 @@ export class OdpParts {
 				const found = chartOf(parseXml(bytes))
 				// The chart reads its own table (§11.1 local-table) as literals: the spreadsheet converter's cell
 				// references have no sheet to point at here. What it cannot carry (a trend line, a secondary axis) is
-				// left out of the drawing and counted; the object keeps it.
-				const result = found === null ? undefined : translateChart(withLocalTable(found.chart), found.styles)
+				// left out of the drawing and counted; the object keeps it. A table past its bounds is not drawn, nor one
+				// whose names and categories take more text than the object holds.
+				const local = found === null ? undefined : withLocalTable(found.chart, entry.uncompressedSize)
+				const result = found === null || local === undefined ? undefined : translateChart(local, found.styles)
 
 				if (result !== undefined) {
 					translated = parseXml(encodeUtf8(result.markup))
@@ -1012,6 +1038,10 @@ export class OdpParts {
 
 		this.readDecls()
 
+		// The masters' refs and tables first, their shapes once the pages are listed: a master's shape that links to a
+		// page by name ("#page3") finds it.
+		const masterPages: { readonly page: OdfMasterPage; readonly info: MasterInfo; readonly notesElement: number }[] = []
+
 		for (const name of sheet.masterOrder) {
 			const page = sheet.masterPages.get(name)
 
@@ -1019,39 +1049,7 @@ export class OdpParts {
 			if (masters.length >= this.budgets.masters) tooLarge("master pages", this.budgets.masters)
 
 			const ref = refs.next()
-			let next = 1
-			const images = new Set<string>()
-			const scope: ShapeScope | undefined =
-				stylesFragment === undefined
-					? undefined
-					: {
-							fragment: stylesFragment,
-							text: {},
-							masterBoxes: new Map(),
-							nextId: () => ++next,
-							images,
-							charts: new Set(),
-							clips: [],
-							unread: 0,
-							masterName: name
-						}
-			const shapes = scope === undefined ? [] : this.tally.count(ref, () => readShapes(this.context, scope, page.node))
-			const boxes = new Map<string, Xfrm>()
-			const footers = new Map<string, number>()
 			let notesElement = -1
-
-			for (const shape of shapes) {
-				const src = shape.src
-
-				if (src?.format !== "odp" || stylesFragment === undefined) continue
-
-				const presentationClass = stylesFragment.attributes(src.node).get("presentation:class")
-
-				if (presentationClass === undefined) continue
-				if (shape.xfrm !== undefined && !boxes.has(presentationClass)) boxes.set(presentationClass, shape.xfrm)
-				if (["header", "footer", "date-time", "page-number"].includes(presentationClass) && !footers.has(presentationClass))
-					footers.set(presentationClass, src.node)
-			}
 
 			if (stylesFragment !== undefined) {
 				const document = stylesFragment.document
@@ -1060,70 +1058,25 @@ export class OdpParts {
 					if (stylesFragment.name(child) === "presentation:notes") notesElement = child
 			}
 
-			const style = this.pageStyle(page.drawStyle, "styles")
-			const background = fillOf(style, sheet.drawResources, this.context.pictureSizes)
-			let notesMaster: SlideRef | undefined
-			const notesBoxes = new Map<string, Xfrm>()
-
-			if (notesElement >= 0 && stylesFragment !== undefined && scope !== undefined) {
-				notesMaster = refs.next()
-
-				let notesNext = 1
-				const notesShapes = readShapes(this.context, { ...scope, nextId: () => ++notesNext }, notesElement)
-
-				for (const shape of notesShapes) {
-					const src = shape.src
-					const presentationClass =
-						src?.format === "odp" ? stylesFragment.attributes(src.node).get("presentation:class") : undefined
-
-					if (presentationClass !== undefined && shape.xfrm !== undefined && !notesBoxes.has(presentationClass))
-						notesBoxes.set(presentationClass, shape.xfrm)
-				}
-
-				nodes.set(notesMaster, {
-					ref: notesMaster,
-					kind: "notesMaster",
-					part: "/styles.xml",
-					src: stylesFragment.src(notesElement),
-					name,
-					showMasterShapes: true,
-					hidden: false,
-					shapes: notesShapes,
-					comments: [],
-					revision: 0
-				})
-			}
-
+			const notesMaster = notesElement >= 0 && stylesFragment !== undefined ? refs.next() : undefined
 			const notesSize =
 				notesElement < 0 || stylesFragment === undefined
 					? undefined
 					: this.pageSize(stylesFragment.attributes(notesElement).get("style:page-layout-name"))
-
-			nodes.set(ref, {
-				ref,
-				kind: "master",
-				part: "/styles.xml",
-				...(stylesFragment === undefined ? {} : { src: stylesFragment.src(page.node) }),
-				name: page.displayName ?? name,
-				...(background === undefined || background === "none" ? {} : { background: { kind: "fill" as const, fill: background } }),
-				showMasterShapes: true,
-				hidden: false,
-				shapes,
-				comments: [],
-				revision: 0
-			})
-			masters.push(ref)
-			this.unread += scope?.unread ?? 0
-			this.masters.set(name, {
+			const info: MasterInfo = {
 				ref,
 				name,
-				boxes,
-				footers,
+				boxes: new Map(),
+				footers: new Map(),
 				notesMaster,
-				notesBoxes,
+				notesBoxes: new Map(),
 				size: this.pageSize(page.pageLayout),
 				notesSize
-			})
+			}
+
+			masters.push(ref)
+			this.masters.set(name, info)
+			masterPages.push({ page, info, notesElement })
 		}
 
 		// A deck whose styles name no master page (a damaged or minimal package) gets one empty master.
@@ -1165,7 +1118,8 @@ export class OdpParts {
 
 		for (const [index, span] of this.content.pages.entries()) {
 			const ref = refs.next()
-			const document = span.head
+			// The start tag parsed for its attributes and let go (a malformed one refuses the deck here, at open).
+			const document = pageHead(this.content, span)
 			const element = document.firstChildElement(document.documentElement())
 			const namespaces = new Namespaces(document, { lenient: true })
 			const fragment = new Fragment(document, namespaces, "content.xml", span.start, "content", this.epoch)
@@ -1203,6 +1157,17 @@ export class OdpParts {
 
 			if (this.pageStyle(head.style, "content").attributes.get("presentation:visibility") === "hidden") hiddenSlides.add(ref)
 		}
+
+		// The pages' names (draw:name, else "page<n>"; the first page of a name wins), which links resolve against.
+		this.pageNames.clear()
+
+		for (const ref of slides) {
+			const name = this.heads.get(ref)?.name
+
+			if (name !== undefined && !this.pageNames.has(name)) this.pageNames.set(name, ref)
+		}
+
+		for (const { page, info, notesElement } of masterPages) this.readMaster(nodes, page, info, notesElement)
 
 		// Every master offers every presentation page layout of styles.xml, in its order, as PowerPoint's masters offer
 		// their whole layout set (LibreOffice offers all its AutoLayouts on any master), then the ones pages name that
@@ -1296,6 +1261,85 @@ export class OdpParts {
 		return deck
 	}
 
+	// A master page's shapes and its notes master's, their presentation boxes and footers into `info`'s tables.
+	private readMaster(nodes: Map<SlideRef, SlideNode>, page: OdfMasterPage, info: MasterInfo, notesElement: number): void {
+		const { ref, name, boxes, footers, notesMaster, notesBoxes } = info
+		const stylesFragment = this.stylesFragment
+		let next = 1
+		const scope: ShapeScope | undefined =
+			stylesFragment === undefined
+				? undefined
+				: {
+						fragment: stylesFragment,
+						text: {},
+						masterBoxes: new Map(),
+						nextId: () => ++next,
+						images: new Set(),
+						charts: new Set(),
+						clips: [],
+						unread: 0,
+						masterName: name
+					}
+		const shapes = scope === undefined ? [] : this.tally.count(ref, () => readShapes(this.context, scope, page.node))
+
+		for (const shape of shapes) {
+			const src = shape.src
+
+			if (src?.format !== "odp" || stylesFragment === undefined) continue
+
+			const presentationClass = stylesFragment.attributes(src.node).get("presentation:class")
+
+			if (presentationClass === undefined) continue
+			if (shape.xfrm !== undefined && !boxes.has(presentationClass)) boxes.set(presentationClass, shape.xfrm)
+			if (["header", "footer", "date-time", "page-number"].includes(presentationClass) && !footers.has(presentationClass))
+				footers.set(presentationClass, src.node)
+		}
+
+		const style = this.pageStyle(page.drawStyle, "styles")
+		const background = fillOf(style, this.sheet.drawResources, this.context.pictureSizes)
+
+		if (notesMaster !== undefined && stylesFragment !== undefined && scope !== undefined) {
+			let notesNext = 1
+			const notesShapes = readShapes(this.context, { ...scope, nextId: () => ++notesNext }, notesElement)
+
+			for (const shape of notesShapes) {
+				const src = shape.src
+				const presentationClass = src?.format === "odp" ? stylesFragment.attributes(src.node).get("presentation:class") : undefined
+
+				if (presentationClass !== undefined && shape.xfrm !== undefined && !notesBoxes.has(presentationClass))
+					notesBoxes.set(presentationClass, shape.xfrm)
+			}
+
+			nodes.set(notesMaster, {
+				ref: notesMaster,
+				kind: "notesMaster",
+				part: "/styles.xml",
+				src: stylesFragment.src(notesElement),
+				name,
+				showMasterShapes: true,
+				hidden: false,
+				shapes: notesShapes,
+				comments: [],
+				revision: 0
+			})
+		}
+
+		nodes.set(ref, {
+			ref,
+			kind: "master",
+			part: "/styles.xml",
+			...(stylesFragment === undefined ? {} : { src: stylesFragment.src(page.node) }),
+			name: page.displayName ?? name,
+			...(background === undefined || background === "none" ? {} : { background: { kind: "fill" as const, fill: background } }),
+			showMasterShapes: true,
+			hidden: false,
+			shapes,
+			comments: [],
+			revision: 0
+		})
+		this.unread += scope?.unread ?? 0
+	}
+
 	// A style:page-layout's fo:page-width and fo:page-height (§17.2) in EMU, when both are written.
 	private pageSize(name: string | undefined): { cx: number; cy: number } | undefined {
 		const layout = name === undefined ? undefined : this.sheet.pageLayouts.get(name)
@@ -1312,7 +1356,6 @@ export class OdpParts {
 		return master?.size ?? { cx: Math.round((28 / 2.54) * 72 * EMU_PER_PT), cy: Math.round((21 / 2.54) * 72 * EMU_PER_PT) }
 	}
 
-	// style:presentation-page-layout (§16.43): its placeholders' classes and boxes (lengths, or percents of the page).
 	// style:presentation-page-layout display names by style:name (§16.41: style:display-name, else style:name; none for
 	// LibreOffice's internal "AL<n>T<AutoLayout>" names, which it never shows).
 	private pageLayoutNames(): Map<string, { readonly display: string | undefined }> {
@@ -1344,6 +1387,7 @@ export class OdpParts {
 		return out
 	}
 
+	// style:presentation-page-layout (§16.43): its placeholders' classes and boxes (lengths, or percents of the page).
 	private presentationPageLayouts(): Map<string, { readonly kind: string; readonly box: readonly (string | undefined)[] }[]> {
 		const out = new Map<string, { readonly kind: string; readonly box: readonly (string | undefined)[] }[]>()
 		const fragment = this.stylesFragment
@@ -1394,7 +1438,7 @@ export class OdpParts {
 		const counts = new Map<string, number>()
 
 		for (const placeholder of placeholders ?? []) {
-			const type = CLASS_TYPES[placeholder.kind]
+			const type = own(CLASS_TYPES, placeholder.kind)
 
 			if (type === undefined) continue
 
@@ -1584,34 +1628,48 @@ function transitionFilter(fragment: Fragment, root: number): ReadonlyMap<string,
 	return search(root, 0)
 }
 
-// A chart's own table (§11.1 local-table) as a grid: header rows first, cells by column (repeats expanded).
-function localGrid(table: OdfElement): { readonly text: string; readonly value: number | null }[][] {
-	const grid: { text: string; value: number | null }[][] = []
-	const rowsOf = (container: OdfElement | undefined): void => {
-		for (const row of container?.children ?? []) {
-			if (row.name !== "table:table-row" || grid.length >= 10_000) continue
+type LocalCell = { readonly text: string; readonly value: number | null }
 
-			const cells: { text: string; value: number | null }[] = []
+// A chart's own table (§11.1 local-table) as a grid: header rows first, cells by column (repeats expanded, each
+// repeat the one cell object: nothing writes to a grid's cells). Undefined past MAX_CELLS cells.
+function localGrid(table: OdfElement): (readonly LocalCell[])[] | undefined {
+	const grid: LocalCell[][] = []
+	let count = 0
+	const rowsOf = (container: OdfElement | undefined): boolean => {
+		for (const row of container?.children ?? []) {
+			if (row.name !== "table:table-row" || grid.length >= MAX_POINTS) continue
+
+			const cells: LocalCell[] = []
 
 			for (const cell of row.children) {
+				if (cells.length >= 1000) break
 				if (cell.name !== "table:table-cell" && cell.name !== "table:covered-table-cell") continue
 
 				const repeat = Math.min(1000, Math.max(1, Number(cell.attributes.get("table:number-columns-repeated") ?? "1") || 1))
 				const raw = cell.attributes.get("office:value")
 				const value = raw === undefined || !Number.isFinite(Number(raw)) ? null : Number(raw)
-				const text = cell.children.map(child => (child.name === "text:p" ? elementTextOf(child) : "")).join("\n")
+				const shared: LocalCell = {
+					text: cell.children.map(child => (child.name === "text:p" ? elementTextOf(child) : "")).join("\n"),
+					value
+				}
 
-				for (let k = 0; k < repeat && cells.length < 1000; k++) cells.push({ text, value })
+				for (let k = 0; k < repeat && cells.length < 1000; k++) cells.push(shared)
 			}
+
+			count += cells.length
+
+			if (count > MAX_CELLS) return false
 
 			grid.push(cells)
 		}
+
+		return true
 	}
 
-	rowsOf(table.children.find(child => child.name === "table:table-header-rows"))
-	rowsOf(table.children.find(child => child.name === "table:table-rows"))
+	if (!rowsOf(table.children.find(child => child.name === "table:table-header-rows"))) return undefined
+	if (!rowsOf(table.children.find(child => child.name === "table:table-rows"))) return undefined
 
-	for (const child of table.children) if (child.name === "table:table-row") rowsOf({ ...table, children: [child] })
+	for (const child of table.children) if (child.name === "table:table-row" && !rowsOf({ ...table, children: [child] })) return undefined
 
 	return grid
 }
@@ -1620,21 +1678,38 @@ function elementTextOf(element: OdfElement): string {
 	return element.text + element.children.map(elementTextOf).join("")
 }
 
-// "local-table.$B$2:.$D$2" as cell positions in reading order; undefined for any other reference.
-function localCells(address: string | undefined): [number, number][] | undefined {
+type LocalRange = { readonly r1: number; readonly c1: number; readonly r2: number; readonly c2: number }
+
+// "local-table.$B$2:.$D$2" as its corners (top left, bottom right); undefined for any other reference.
+function localRange(address: string | undefined): LocalRange | undefined {
 	const match = /^\s*local-table\.\$?([A-Z]{1,3})\$?(\d+)(?::\s*(?:local-table)?\.\$?([A-Z]{1,3})\$?(\d+))?\s*$/u.exec(address ?? "")
 
 	if (match === null) return undefined
 
 	const column = (letters: string): number => [...letters].reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0) - 1
+	// A grid holds at most MAX_POINTS rows: a row past them (a number of any length) is one past the grid's last.
+	const row = (digits: string): number => Math.min(MAX_POINTS, Number(digits) - 1)
 	const c1 = column(match[1] ?? "A")
-	const r1 = Number(match[2]) - 1
+	const r1 = row(match[2] ?? "1")
 	const c2 = match[3] === undefined ? c1 : column(match[3])
-	const r2 = match[4] === undefined ? r1 : Number(match[4]) - 1
+	const r2 = match[4] === undefined ? r1 : row(match[4])
+
+	return { r1: Math.min(r1, r2), c1: Math.min(c1, c2), r2: Math.max(r1, r2), c2: Math.max(c1, c2) }
+}
+
+// How many cells a range gives (localCells' length) without listing them.
+function rangeSize(range: LocalRange | undefined): number {
+	return range === undefined ? 0 : Math.min(MAX_POINTS, (range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1))
+}
+
+// A range's cell positions in reading order, at most MAX_POINTS; undefined for no range.
+function localCells(range: LocalRange | undefined): [number, number][] | undefined {
+	if (range === undefined) return undefined
+
 	const out: [number, number][] = []
 
-	for (let r = Math.min(r1, r2); r <= Math.max(r1, r2) && out.length < 10_000; r++)
-		for (let c = Math.min(c1, c2); c <= Math.max(c1, c2) && out.length < 10_000; c++) out.push([r, c])
+	for (let r = range.r1; r <= range.r2 && out.length < MAX_POINTS; r++)
+		for (let c = range.c1; c <= range.c2 && out.length < MAX_POINTS; c++) out.push([r, c])
 
 	return out
 }
@@ -1660,38 +1735,75 @@ function tableCell(text: string, value: number | null): OdfElement {
 
 // The chart with its series, names and categories taken out of its own table whatever their layout (series in rows
 // or columns, §19.15 chart:values-cell-range-address), laid out again as the chart converter reads a table without
-// references: the categories in the first column, one column per series, the names in a header row.
-function withLocalTable(chart: OdfElement): OdfElement {
+// references: the categories in the first column, one column per series, the names in a header row. Undefined for
+// a table past the writer's bounds (MAX_SERIES series, MAX_CELLS cells) or names and categories of more than
+// `maxText` characters (a repeated cell's text read once per repeat), which the object's picture stands for.
+function withLocalTable(chart: OdfElement, maxText: number): OdfElement | undefined {
 	const table = chart.children.find(child => child.name === "table:table")
 	const plot = chart.children.find(child => child.name === "chart:plot-area")
 
 	if (table === undefined || plot === undefined) return chart
 
-	const grid = localGrid(table)
-	const at = ([row, column]: [number, number]): { readonly text: string; readonly value: number | null } | undefined =>
-		grid[row]?.[column]
 	const series = plot.children.filter(child => child.name === "chart:series")
-	const columns = series.map(item => ({
-		values: (localCells(item.attributes.get("chart:values-cell-range-address")) ?? []).map(cell => at(cell)?.value ?? null),
-		name:
-			localCells(item.attributes.get("chart:label-cell-address"))
-				?.map(cell => at(cell)?.text ?? "")
-				.join(" ") ?? ""
-	}))
-	const categoryAddress = plot.children
-		.find(child => child.name === "chart:axis" && child.attributes.get("chart:dimension") === "x")
-		?.children.find(child => child.name === "chart:categories")
-		?.attributes.get("table:cell-range-address")
+
+	if (series.length > MAX_SERIES) return undefined
+
+	const valueRanges = series.map(item => localRange(item.attributes.get("chart:values-cell-range-address")))
+	const labelRanges = series.map(item => localRange(item.attributes.get("chart:label-cell-address")))
+	const categoryRange = localRange(
+		plot.children
+			.find(child => child.name === "chart:axis" && child.attributes.get("chart:dimension") === "x")
+			?.children.find(child => child.name === "chart:categories")
+			?.attributes.get("table:cell-range-address")
+	)
+	const firstRange = valueRanges[0]
+	// The rows the table is laid out with, sized from the references before any cell is read.
+	let length = rangeSize(categoryRange ?? firstRange)
+
+	for (const range of valueRanges) length = Math.max(length, rangeSize(range))
+
+	if (series.length === 0 || length === 0 || valueRanges.every(range => range === undefined)) return chart
+	// The writer's rule (core/odp/write/chartObject.ts): a header row and a category column around the values.
+	if ((length + 1) * (series.length + 1) > MAX_CELLS) return undefined
+
+	const grid = localGrid(table)
+
+	if (grid === undefined) return undefined
+
+	const at = ([row, column]: [number, number]): LocalCell | undefined => grid[row]?.[column]
+	// The texts names and categories take, counted before any is joined or laid out (a name's cells with the space
+	// that joins them), the count stopping past `maxText`.
+	let text = 0
+	const texts = (cells: readonly [number, number][], joined: number): string[] => {
+		const out: string[] = []
+
+		for (const cell of cells) {
+			if (text > maxText) break
+
+			const value = at(cell)?.text ?? ""
+
+			text += value.length + joined
+			out.push(value)
+		}
+
+		return out
+	}
+	const names = labelRanges.map(range => (range === undefined ? [] : texts(localCells(range) ?? [], 1)))
 	// Without categories, a series' cells are labelled by the first column (series in columns) or the first row
 	// (series in rows) of the table.
-	const firstCells = localCells(series[0]?.attributes.get("chart:values-cell-range-address")) ?? []
+	const firstCells = localCells(firstRange) ?? []
 	const vertical = firstCells.length < 2 || firstCells[0]?.[1] === firstCells[1]?.[1]
-	const categories =
-		localCells(categoryAddress)?.map(cell => at(cell)?.text ?? "") ??
-		firstCells.map(([row, column]) => (vertical ? (at([row, 0])?.text ?? "") : (at([0, column])?.text ?? "")))
-	const length = Math.max(categories.length, ...columns.map(column => column.values.length))
+	const categories = texts(
+		localCells(categoryRange) ?? firstCells.map(([row, column]): [number, number] => (vertical ? [row, 0] : [0, column])),
+		0
+	)
 
-	if (columns.length === 0 || length === 0 || columns.every(column => column.values.length === 0)) return chart
+	if (text > maxText) return undefined
+
+	const columns = valueRanges.map((range, index) => ({
+		values: (localCells(range) ?? []).map(cell => at(cell)?.value ?? null),
+		name: names[index]?.join(" ") ?? ""
+	}))
 
 	const strip = (element: OdfElement): OdfElement => {
 		const attributes = new Map(
@@ -1849,7 +1961,11 @@ export async function openOdp(source: ByteSource, options: OdpOpenOptions = {}):
 		await parts.readFillImageSizes()
 		parts.build(odf.facts.template, odf.facts.signed, odf.facts.macros)
 
-		if (options.adopt !== undefined) parts.adopt(options.adopt, options.refsAbove, options.adoptOrder)
+		// A rebase names the pages by the deck's refs: build()'s names are the reading's own.
+		if (options.adopt !== undefined) {
+			parts.adopt(options.adopt, options.refsAbove, options.adoptOrder)
+			pages.clear()
+		}
 
 		for (const [index, ref] of (options.adoptOrder ?? parts.deck.slides).entries()) {
 			const name = parts.pageName(ref) ?? `page${String(index + 1)}`

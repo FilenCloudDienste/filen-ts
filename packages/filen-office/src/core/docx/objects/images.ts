@@ -137,6 +137,12 @@ function exifOrientation(b: Uint8Array, at: number, length: number): number {
 	return 1
 }
 
+// Whether a JPEG marker byte after the no-length ones (fill, SOI, RSTn, TEM) starts a segment with a length: FF 00 is a
+// stuffed zero and 02-BF are reserved (ITU-T T.81 B.1.1), which a decoder does not skip by a length.
+function segmentMarker(marker: number): boolean {
+	return marker !== 0x00 && (marker < 0x02 || marker > 0xbf)
+}
+
 // JPEG: the frame's size, turned as its EXIF orientation shows it (5-8 a quarter turn: readers draw it so, the
 // browsers' image-orientation from-image included, and Word sizes it so).
 function jpeg(b: Uint8Array): DocxImageInfo | undefined {
@@ -166,6 +172,8 @@ function jpeg(b: Uint8Array): DocxImageInfo | undefined {
 
 			continue
 		}
+
+		if (!segmentMarker(marker)) return undefined
 
 		const length = u16be(b, at + 2)
 
@@ -306,13 +314,16 @@ function wmf(b: Uint8Array): DocxImageInfo | undefined {
 	}
 }
 
-const SVG_LENGTH = /^\s*([0-9]*\.?[0-9]+(?:e[-+]?[0-9]+)?)\s*(px|pt|pc|in|cm|mm|)\s*$/i
+// One reading per number (no backtracking that grows with its digits).
+const SVG_LENGTH = /^\s*((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:e[-+]?[0-9]+)?)\s*(px|pt|pc|in|cm|mm|)\s*$/i
+// Longer values are no length a picture means, and are not handed to the pattern.
+const MAX_SVG_LENGTH = 40
 const PX_PER_UNIT: Readonly<Record<string, number>> = { "": 1, px: 1, pt: 96 / 72, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4 }
 
 function svgLength(tag: string, name: string): number | undefined {
 	const value = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`).exec(tag)
 	const text = value?.[2] ?? value?.[3]
-	const length = text === undefined ? null : SVG_LENGTH.exec(text)
+	const length = text === undefined || text.length > MAX_SVG_LENGTH ? null : SVG_LENGTH.exec(text)
 
 	if (length === null) return undefined
 
@@ -395,7 +406,7 @@ function hasExif(b: Uint8Array): boolean {
 		const length = u16be(b, at + 2)
 
 		if (marker === 0xe1 && starts(b, at + 4, "Exif\0\0")) return true
-		if (marker === 0xda || length < 2) return false
+		if (marker === 0xda || length < 2 || !segmentMarker(marker)) return false
 
 		at += 2 + length
 	}

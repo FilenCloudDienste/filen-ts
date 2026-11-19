@@ -1,6 +1,7 @@
 // Page ranges as people type them ("1-3, 7, 10-"): one grammar for printing, extracting and splitting. Pages are
 // 1-based; a range without an end runs to the last page, one without a start from the first ("-4"). Commas or
-// semicolons separate parts, whitespace is ignored, an en dash counts as a hyphen.
+// semicolons separate parts, whitespace is ignored; full-width forms, other scripts' digits, dashes, the minus sign and
+// ideographic or Arabic commas count as their ASCII forms.
 
 // Inclusive, 1-based, first <= last.
 export interface PageRange {
@@ -25,6 +26,76 @@ const PART = /^(\d*)-(\d*)$|^(\d+)$/
 // A part longer than this is not a page number anyone typed; refused before it reaches Number().
 const MAX_DIGITS = 9
 
+// The zero of each decimal digit block a shipped locale's keyboard types that NFKC leaves alone (Arabic-Indic,
+// Extended Arabic-Indic, Devanagari, Bengali, Thai); each block runs 0 to 9.
+const DIGIT_ZEROS = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50]
+// Hyphens, dashes, the minus sign and the katakana long vowel mark an IME types for "-".
+const DASH = /^[\u2010-\u2015\u2212\u30fc]$/
+// The ideographic and Arabic commas and the Arabic semicolon.
+const COMMA = /^[\u3001\u060c\u061b]$/
+const SPACE = /\s/
+
+function nfkc(char: string): string {
+	try {
+		return char.normalize("NFKC")
+	} catch {
+		// No Unicode normalization on this engine: full-width forms stay unread, as before.
+		return char
+	}
+}
+
+// One character as the grammar reads it: full-width forms, other digits, dashes and commas as their ASCII forms.
+function foldChar(char: string): string {
+	const code = char.codePointAt(0) ?? 0
+
+	if (code < 0x80) return char
+
+	for (const zero of DIGIT_ZEROS) {
+		if (code >= zero && code <= zero + 9) return String(code - zero)
+	}
+
+	const folded = nfkc(char)
+
+	if (DASH.test(folded)) return "-"
+	if (COMMA.test(folded)) return ","
+
+	return folded
+}
+
+interface Part {
+	// As typed (whitespace dropped), for errors shown to the user.
+	readonly typed: string
+	// As the grammar reads it.
+	readonly folded: string
+}
+
+// The non-empty parts of `text`, split at commas and semicolons, whitespace dropped.
+function splitParts(text: string): Part[] {
+	const parts: Part[] = []
+	let typed = ""
+	let folded = ""
+
+	for (const char of text) {
+		if (SPACE.test(char)) continue
+
+		const read = foldChar(char)
+
+		if (read === "," || read === ";") {
+			if (typed.length > 0) parts.push({ typed, folded })
+
+			typed = ""
+			folded = ""
+		} else {
+			typed += char
+			folded += read
+		}
+	}
+
+	if (typed.length > 0) parts.push({ typed, folded })
+
+	return parts
+}
+
 function page(digits: string): number | null {
 	return digits.length === 0 || digits.length > MAX_DIGITS ? null : Number(digits)
 }
@@ -40,20 +111,16 @@ export function parsePageRanges(text: string, pageCount: number): PageRangeResul
 // Parses `text` like parsePageRanges, keeping every part as typed, in order (overlaps included): splitting by ranges
 // makes one file per part.
 export function parsePageRangeParts(text: string, pageCount: number): PageRangeResult {
-	const parts = text
-		.replace(/–/g, "-")
-		.split(/[,;]/)
-		.map(part => part.replace(/\s+/g, ""))
-		.filter(part => part.length > 0)
+	const parts = splitParts(text)
 
 	if (parts.length === 0) return { ok: false, error: { kind: "empty" } }
 
 	const ranges: PageRange[] = []
 
-	for (const part of parts) {
-		const match = PART.exec(part)
+	for (const { typed: part, folded } of parts) {
+		const match = PART.exec(folded)
 
-		if (match === null || part === "-") return { ok: false, error: { kind: "syntax", part } }
+		if (match === null || folded === "-") return { ok: false, error: { kind: "syntax", part } }
 
 		const single = match[3]
 		const first = single === undefined ? (match[1] === "" ? 1 : page(match[1] ?? "")) : page(single)

@@ -7,7 +7,7 @@ import type { DeckOp, PresentationOp } from "../ops"
 
 const SHOW_TOUCHES: readonly Touch[] = [{ kind: "presentation", what: "show" }]
 // p:kiosk@restart is an xsd:unsignedInt (ECMA-376 Part 1 §19.2.1.18).
-const MAX_RESTART_MS = 4_294_967_295
+export const MAX_RESTART_MS = 4_294_967_295
 const KINDS: ReadonlySet<string> = new Set(["present", "browse", "kiosk"])
 
 function isCount(value: unknown): value is number {

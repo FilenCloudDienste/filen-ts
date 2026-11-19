@@ -421,6 +421,9 @@ export interface XlsxSheetModel {
 	readonly sourceOrphanedShared?: ReadonlySet<number>
 	readonly sections: readonly XlsxSection[]
 	readonly relationships: Relationships
+	// The prefix the root binds SpreadsheetML to ("x" for <x:worksheet>), "" for the default namespace: sections an
+	// edit writes take it.
+	readonly prefix: string
 	cols: readonly XlsxColRange[]
 	// Quads: startRow, startCol, endRow, endCol.
 	merges: Uint32Array
@@ -795,6 +798,8 @@ export interface XlsxChangeLog {
 	restorePart(name: string): void
 	// Returns the relationship as added (its id allocated against the source part's relationships).
 	addRelationship(source: string, relationship: NewRelationship): Relationship
+	// A relationship addRelationship returned, added back under its own id (an undo or redo).
+	readdRelationship(source: string, relationship: Relationship): void
 	removeRelationship(source: string, id: string): void
 	formulasChanged(): void
 	needsFullCalc(): void

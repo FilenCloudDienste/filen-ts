@@ -1,4 +1,5 @@
 import { refused } from "../../../core/presentation/model"
+import { onFontFaceAdded } from "../../../dom/fontFaceHost"
 import type { PresenterOpen, PresenterPortal } from "../show/controller"
 
 // The presenter view's window: a same-origin popup opened from the user's click (`window.open("", …)` returns an
@@ -189,9 +190,16 @@ export function createPresenterPortal(options: PresenterPortalOptions): Presente
 			if (target !== undefined) addFaces(event.fontfaces ?? [], target)
 		}
 
+		// Faces the deck adds later: loaded ones through the font host (the set fires no event for them), the rest when
+		// their load ends.
+		let stopAdded: (() => void) | undefined
+
 		if (fonts !== undefined && target !== undefined) {
 			addFaces(fonts, target)
 			fonts.addEventListener("loadingdone", onFonts)
+			stopAdded = onFontFaceAdded(fonts, face => {
+				addFaces([face as FontFace], target)
+			})
 		}
 
 		// The user closing the popup, and the page going away (the popup has nothing to show without it).
@@ -211,6 +219,7 @@ export function createPresenterPortal(options: PresenterPortalOptions): Presente
 		cleanup = () => {
 			observer.disconnect()
 			fonts?.removeEventListener("loadingdone", onFonts)
+			stopAdded?.()
 			opener.removeEventListener("pagehide", onOpenerGone)
 
 			try {

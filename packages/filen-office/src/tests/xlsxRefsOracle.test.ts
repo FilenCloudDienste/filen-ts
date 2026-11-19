@@ -263,7 +263,8 @@ const ACCEPTED: readonly { readonly pattern: RegExp; readonly reason: string }[]
 
 interface Case {
 	readonly name: string
-	readonly source: () => Uint8Array | null
+	// The workbook, or the path of the corpus file that is not fetched.
+	readonly source: () => Uint8Array | { readonly missing: string }
 	readonly edits: readonly { readonly ours: (workbook: XlsxWorkbook) => RefEdit; readonly theirs: UnoOperation }[]
 }
 
@@ -320,11 +321,11 @@ const TABLE: Fixture = {
 	}
 }
 
-function corpus(relative: string): () => Uint8Array | null {
+function corpus(relative: string): () => Uint8Array | { readonly missing: string } {
 	return () => {
 		const path = join(CORPUS_DIR, relative)
 
-		return existsSync(path) ? new Uint8Array(readFileSync(path)) : null
+		return existsSync(path) ? new Uint8Array(readFileSync(path)) : { missing: path }
 	}
 }
 
@@ -410,10 +411,14 @@ describe.skipIf(UNO === undefined)("structure edits against LibreOffice", () => 
 	})
 
 	for (const testCase of CASES) {
-		it(`equals LibreOffice's re-save: ${testCase.name}`, { timeout: 900_000 }, async () => {
+		it(`equals LibreOffice's re-save: ${testCase.name}`, { timeout: 900_000 }, async ({ skip }) => {
 			const source = testCase.source()
 
-			if (source === null) return
+			if (!(source instanceof Uint8Array)) {
+				skip(`corpus file ${source.missing} is missing: run pnpm run corpus:fetch or set FILEN_OFFICE_CORPUS`)
+
+				return
+			}
 
 			const input = join(SCRATCH, `${testCase.name.replaceAll(" ", "-")}.xlsx`)
 			const unexplained: string[] = []

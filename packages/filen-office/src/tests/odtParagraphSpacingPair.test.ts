@@ -27,6 +27,7 @@ describe("an ODT paragraph style's space above and below", () => {
 	])("are set together: %s", async (_, properties, expected) => {
 		const all = await baselines(properties)
 		const pitches = all.slice(1).map((value, index) => Math.round(value - (all[index] ?? 0)))
+		expect(pitches, pitches.join(",")).toHaveLength(expected.length)
 
 		pitches.forEach((value, index) => expect(Math.abs(value - (expected[index] ?? 0)), pitches.join(",")).toBeLessThanOrEqual(2))
 	})

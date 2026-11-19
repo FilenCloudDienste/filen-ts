@@ -1,3 +1,18 @@
+import {
+	FRAGMENT_FLOATS,
+	FRAGMENT_INTS,
+	FRAGMENT_KIND_MASK,
+	FragmentFloat,
+	FragmentInt,
+	FragmentKind,
+	LINE_FLOATS,
+	LINE_INTS,
+	LineFloat,
+	LineInt
+} from "../../text/index"
+import type { ObjectTable } from "./objects"
+import { Layer, OBJECT_FLOATS, OBJECT_INTS, type PageDisplayList } from "./output"
+
 // Text turned sideways in a box of the page: a table cell's w:textDirection (ECMA-376 §17.4.72, ST_TextDirection
 // §17.18.93) and a text box's wps:bodyPr@vert (§20.1.10.83). The lines, graphics and objects of a turn are laid out
 // upright in the box's own frame: their x runs along the text from the box's left edge (the box's height is the
@@ -152,6 +167,50 @@ export function objectTurnsOf(
 	for (let k = 0; k < inlineLines.length; k++) out[placed + k] = lines[inlineLines[k] ?? -1] ?? -1
 
 	return out
+}
+
+export interface PageObjects {
+	readonly count: number
+	readonly floats: Float32Array
+	readonly ints: Int32Array
+	// The line of each inline object (filled only when the page has turns), for objectTurnsOf().
+	readonly lines: readonly number[]
+}
+
+// The page's placed objects plus its inline ones, which the text layout carries as object fragments on their lines
+// (box: the fragment's x and width, the object's ascent above the baseline), as OBJECT_FLOATS / OBJECT_INTS records.
+export function pageObjects(page: PageDisplayList, table: ObjectTable | undefined): PageObjects {
+	const text = page.text
+	const floats = Array.from(page.objectFloats.subarray(0, page.objectCount * OBJECT_FLOATS))
+	const ints = Array.from(page.objectInts.subarray(0, page.objectCount * OBJECT_INTS))
+	const lines: number[] = []
+
+	for (let line = 0; line < text.lineCount; line++) {
+		const baseline = text.lineFloats[line * LINE_FLOATS + LineFloat.BASELINE] ?? 0
+		const first = text.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
+		const count = text.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
+
+		for (let k = first; k < first + count; k++) {
+			if (((text.fragmentInts[k * FRAGMENT_INTS + FragmentInt.INFO] ?? 0) & FRAGMENT_KIND_MASK) !== FragmentKind.OBJECT) continue
+
+			const id = text.fragmentInts[k * FRAGMENT_INTS + FragmentInt.AUX] ?? -1
+			const height = table?.heights[id] ?? 0
+
+			if (id < 0 || !(height > 0)) continue
+
+			floats.push(
+				text.fragmentFloats[k * FRAGMENT_FLOATS + FragmentFloat.X] ?? 0,
+				baseline - (table?.ascents[id] ?? height),
+				text.fragmentFloats[k * FRAGMENT_FLOATS + FragmentFloat.WIDTH] ?? table?.widths[id] ?? 0,
+				height
+			)
+			ints.push(id, Layer.TEXT, text.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)
+
+			if (page.turnCount > 0) lines.push(line)
+		}
+	}
+
+	return { count: ints.length / OBJECT_INTS, floats: Float32Array.from(floats), ints: Int32Array.from(ints), lines }
 }
 
 // The CSS transform placing an element whose box starts at (x, y) of the page through matrix `m`, about the

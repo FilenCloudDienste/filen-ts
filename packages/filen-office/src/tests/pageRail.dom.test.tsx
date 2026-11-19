@@ -186,7 +186,15 @@ describe("page rail", () => {
 		const pointer = (type: string, target: HTMLElement, x: number, y: number): void => {
 			act(() =>
 				target.dispatchEvent(
-					new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: x, clientY: y })
+					new PointerEvent(type, {
+						bubbles: true,
+						button: 0,
+						buttons: 1,
+						pointerId: 1,
+						pointerType: "mouse",
+						clientX: x,
+						clientY: y
+					})
 				)
 			)
 		}
@@ -198,6 +206,49 @@ describe("page rail", () => {
 		expect(host.querySelector(".fo-page-rail-drop")?.getAttribute("data-fo-axis")).toBe("across")
 		pointer("pointerup", listbox(), 250, 140)
 		expect(handlers.onMove).toHaveBeenCalledWith(5)
+	})
+
+	it("drops a press whose release never reached the rail, so a later hover is not a drag", () => {
+		const handlers = renderRail({ layout: "grid", cellChrome: 12 })
+		const first = host.querySelector<HTMLElement>("[data-fo-index='0']")
+
+		if (first === null) throw new Error("no page")
+
+		listbox().setPointerCapture = () => undefined
+		vi.spyOn(listbox(), "getBoundingClientRect").mockReturnValue({ top: 0, left: 0, width: 400, height: 600 } as DOMRect)
+
+		const pointer = (type: string, target: HTMLElement, x: number, y: number, init: PointerEventInit = {}): void => {
+			act(() =>
+				target.dispatchEvent(
+					new PointerEvent(type, {
+						bubbles: true,
+						button: 0,
+						pointerId: 1,
+						pointerType: "mouse",
+						clientX: x,
+						clientY: y,
+						...init
+					})
+				)
+			)
+		}
+
+		// Released outside the rail: the next hover has no button down.
+		pointer("pointerdown", first, 20, 20, { buttons: 1 })
+		pointer("pointermove", listbox(), 250, 140, { buttons: 0 })
+		expect(host.querySelector(".fo-page-rail-drop")).toBeNull()
+		pointer("pointerup", listbox(), 250, 140, { buttons: 0 })
+		expect(handlers.onMove).not.toHaveBeenCalled()
+		expect(handlers.onSelect).not.toHaveBeenCalled()
+
+		// A Ctrl+click that opens the context menu: moving with the button still held is not a drag.
+		pointer("pointerdown", first, 20, 20, { buttons: 1, ctrlKey: true })
+		act(() => first.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 0, ctrlKey: true })))
+		pointer("pointermove", listbox(), 250, 140, { buttons: 1 })
+		expect(host.querySelector(".fo-page-rail-drop")).toBeNull()
+		pointer("pointerup", listbox(), 250, 140, { buttons: 0 })
+		expect(handlers.onMove).not.toHaveBeenCalled()
+		expect(handlers.onSelect).not.toHaveBeenCalled()
 	})
 
 	it("selects with a marquee from the background", () => {
