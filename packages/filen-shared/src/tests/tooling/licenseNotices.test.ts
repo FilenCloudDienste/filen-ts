@@ -98,7 +98,7 @@ describe("describedNotice", () => {
 describe("describeCargoCrate", () => {
 	it("reads license and repository from Cargo.toml", () => {
 		const dir = packageDir({
-			"Cargo.toml": "[package]\nname = \"crate\"\nlicense = \"MIT OR Apache-2.0\"\nrepository = \"https://github.com/o/crate\"\n",
+			"Cargo.toml": '[package]\nname = "crate"\nlicense = "MIT OR Apache-2.0"\nrepository = "https://github.com/o/crate"\n',
 			"LICENSE-MIT": "Copyright (c) 2020 Someone\n\nPermission is hereby granted.",
 			"LICENSE-APACHE": APACHE
 		})
@@ -257,18 +257,18 @@ describe("lockedCrates", () => {
 			"version = 4",
 			"",
 			"[[package]]",
-			"name = \"filen-sdk-rs\"",
-			"version = \"0.5.32\"",
+			'name = "filen-sdk-rs"',
+			'version = "0.5.32"',
 			"",
 			"[[package]]",
-			"name = \"libc\"",
-			"version = \"0.2.191\"",
-			"source = \"registry+https://github.com/rust-lang/crates.io-index\"",
+			'name = "libc"',
+			'version = "0.2.191"',
+			'source = "registry+https://github.com/rust-lang/crates.io-index"',
 			"",
 			"[[package]]",
-			"name = \"forked\"",
-			"version = \"1.0.0\"",
-			"source = \"git+https://github.com/example/forked?rev=abc#abcdef1234\"",
+			'name = "forked"',
+			'version = "1.0.0"',
+			'source = "git+https://github.com/example/forked?rev=abc#abcdef1234"',
 			""
 		].join("\n")
 

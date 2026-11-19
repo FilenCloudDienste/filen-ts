@@ -19,23 +19,14 @@ describe("resolveChatParticipantsDisplayName", () => {
 	})
 
 	it("multi — joins every other participant's display name with a comma", () => {
-		expect(
-			resolveChatParticipantsDisplayName(
-				[
-					{ email: "a@x.com", nickName: "Ann" },
-					{ email: "b@x.com" }
-				],
-				"Just you"
-			)
-		).toBe("Ann, b@x.com")
+		expect(resolveChatParticipantsDisplayName([{ email: "a@x.com", nickName: "Ann" }, { email: "b@x.com" }], "Just you")).toBe(
+			"Ann, b@x.com"
+		)
 	})
 
 	it("multi — sorts the joined names regardless of input order", () => {
 		expect(
-			resolveChatParticipantsDisplayName(
-				[{ email: "zeta@x.com" }, { email: "unused@x.com", nickName: "Alpha" }],
-				"Just you"
-			)
+			resolveChatParticipantsDisplayName([{ email: "zeta@x.com" }, { email: "unused@x.com", nickName: "Alpha" }], "Just you")
 		).toBe("Alpha, zeta@x.com")
 	})
 })

@@ -401,7 +401,7 @@ const NAMED_ENTITIES: ReadonlyMap<string, string> = new Map([
 	["lt", "&lt;"],
 	["gt", ">"],
 	["nbsp", "&nbsp;"],
-	["quot", "\""],
+	["quot", '"'],
 	["apos", "'"],
 	["lrm", "&lrm;"],
 	["rlm", "&rlm;"]

@@ -75,7 +75,7 @@ describe("segmentMessage", () => {
 describe("segmentMessage — where a link ends", () => {
 	// Both apps open a link segment's raw string, so a closing character left in it corrupts the URL.
 	it.each([
-		["\"https://example.com/path\"", "\"", "https://example.com/path", "\""],
+		['"https://example.com/path"', '"', "https://example.com/path", '"'],
 		["'https://example.com'", "'", "https://example.com", "'"],
 		["`https://example.com`", "`", "https://example.com", "`"],
 		["<https://example.com/path>", "<", "https://example.com/path", ">"],
@@ -120,8 +120,18 @@ describe("segmentMessage — where a link ends", () => {
 	})
 
 	it.each([
-		["\ub9c1\ud06c\ub294 'https://example.com/docs'\ub97c \ud655\uc778\ud558\uc138\uc694", "\ub9c1\ud06c\ub294 '", "https://example.com/docs", "'\ub97c \ud655\uc778\ud558\uc138\uc694"],
-		["'https://example.com/docs'\u3092\u898b\u3066\u304f\u3060\u3055\u3044", "'", "https://example.com/docs", "'\u3092\u898b\u3066\u304f\u3060\u3055\u3044"],
+		[
+			"\ub9c1\ud06c\ub294 'https://example.com/docs'\ub97c \ud655\uc778\ud558\uc138\uc694",
+			"\ub9c1\ud06c\ub294 '",
+			"https://example.com/docs",
+			"'\ub97c \ud655\uc778\ud558\uc138\uc694"
+		],
+		[
+			"'https://example.com/docs'\u3092\u898b\u3066\u304f\u3060\u3055\u3044",
+			"'",
+			"https://example.com/docs",
+			"'\u3092\u898b\u3066\u304f\u3060\u3055\u3044"
+		],
 		["'https://example.com/docs'\u91cc\u6709\u8bf4\u660e", "'", "https://example.com/docs", "'\u91cc\u6709\u8bf4\u660e"],
 		["'https://example.com/docs'\u0e04\u0e23\u0e31\u0e1a", "'", "https://example.com/docs", "'\u0e04\u0e23\u0e31\u0e1a"],
 		[
@@ -162,24 +172,24 @@ describe("segmentMessage — where a link ends", () => {
 	})
 
 	it("segments what follows a link's end in the same pass, a code fence across whitespace included", () => {
-		expect(segmentMessage("[\"https://a.example.com\",\"https://b.example.com\"]:gigachad:")).toEqual([
-			{ kind: "text", value: "[\"" },
+		expect(segmentMessage('["https://a.example.com","https://b.example.com"]:gigachad:')).toEqual([
+			{ kind: "text", value: '["' },
 			{ kind: "link", raw: "https://a.example.com" },
-			{ kind: "text", value: "\",\"" },
+			{ kind: "text", value: '","' },
 			{ kind: "link", raw: "https://b.example.com" },
-			{ kind: "text", value: "\"]" },
+			{ kind: "text", value: '"]' },
 			{ kind: "emoji", shortcode: "gigachad", raw: ":gigachad:" }
 		])
-		expect(segmentMessage("\"https://example.com\"```a b```")).toEqual([
-			{ kind: "text", value: "\"" },
+		expect(segmentMessage('"https://example.com"```a b```')).toEqual([
+			{ kind: "text", value: '"' },
 			{ kind: "link", raw: "https://example.com" },
-			{ kind: "text", value: "\"" },
+			{ kind: "text", value: '"' },
 			{ kind: "code", code: "a b" }
 		])
 	})
 
 	it("ends every link of a message-length run with no spaces", () => {
-		const segments = segmentMessage("http://a\"".repeat(7274))
+		const segments = segmentMessage('http://a"'.repeat(7274))
 
 		expect(segments).toHaveLength(14548)
 		expect(segments.filter(segment => segment.kind === "link" && segment.raw === "http://a")).toHaveLength(7274)

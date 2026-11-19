@@ -26,9 +26,9 @@ function shown(reply: string, foreign: readonly string[] = []): string {
 
 describe("replyWithoutHandles", () => {
 	it("drops a handle bracketed after its item's name, with or without a label", () => {
-		expect(shown("Your note \"Groceries\" (n1) lists milk.")).toBe("Your note \"Groceries\" lists milk.")
+		expect(shown('Your note "Groceries" (n1) lists milk.')).toBe('Your note "Groceries" lists milk.')
 		expect(shown("Found **CV.pdf** (handle: f3).")).toBe("Found **CV.pdf**.")
-		expect(shown("Die Datei „CV.pdf\" (Handle: f3) ist geteilt.")).toBe("Die Datei „CV.pdf\" ist geteilt.")
+		expect(shown('Die Datei „CV.pdf" (Handle: f3) ist geteilt.')).toBe('Die Datei „CV.pdf" ist geteilt.')
 		expect(shown("您的《读书笔记》（n8）中记录了")).toBe("您的《读书笔记》中记录了")
 		expect(shown("- **Lisbon 2024** (directory, handle d5)")).toBe("- **Lisbon 2024** (directory)")
 	})
@@ -37,7 +37,7 @@ describe("replyWithoutHandles", () => {
 		expect(shown("- f14: Oma_Geburtstag.jpg (2025-10-06)\n- n1 - Groceries")).toBe("- Oma_Geburtstag.jpg (2025-10-06)\n- Groceries")
 		expect(shown("- **f44** `旅行计划.docx` (2025-07-01)")).toBe("- `旅行计划.docx` (2025-07-01)")
 		expect(shown("- p1 Workout tracks=3")).toBe("- Workout tracks=3")
-		expect(shown("- **d49** \"Screenshots 2023\" (directory)")).toBe("- \"Screenshots 2023\" (directory)")
+		expect(shown('- **d49** "Screenshots 2023" (directory)')).toBe('- "Screenshots 2023" (directory)')
 		expect(shown("- `d49` (directory): Screenshots 2023")).toBe("- Screenshots 2023 (directory)")
 	})
 
@@ -193,8 +193,8 @@ describe("replyWithHandles", () => {
 		expect(replyWithHandles("Carlos Ruiz asked about the budget. Carlos Ruiz is waiting.", items)).toBe(
 			"Carlos Ruiz (c3) asked about the budget. Carlos Ruiz is waiting."
 		)
-		expect(replyWithHandles("Your note \"Groceries\" lists milk; CV.pdf (f3) is in Documents.", items)).toBe(
-			"Your note \"Groceries\" (n1) lists milk; CV.pdf (f3) is in Documents."
+		expect(replyWithHandles('Your note "Groceries" lists milk; CV.pdf (f3) is in Documents.', items)).toBe(
+			'Your note "Groceries" (n1) lists milk; CV.pdf (f3) is in Documents.'
 		)
 	})
 

@@ -48,7 +48,15 @@ export function isDotFilenName(name: string): boolean {
 
 // The `.filen` directly under the drive root; never one nested elsewhere, nor anything inside it. `parentUuid` is
 // the directory's own parent (null for anything that isn't an own directory); an unknown root matches nothing.
-export function isRootDotFilen({ name, parentUuid, rootUuid }: { name: string; parentUuid: string | null; rootUuid: string | null }): boolean {
+export function isRootDotFilen({
+	name,
+	parentUuid,
+	rootUuid
+}: {
+	name: string
+	parentUuid: string | null
+	rootUuid: string | null
+}): boolean {
 	return rootUuid !== null && rootUuid.length > 0 && parentUuid === rootUuid && isDotFilenName(name)
 }
 

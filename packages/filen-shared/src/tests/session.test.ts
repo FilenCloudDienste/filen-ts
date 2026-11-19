@@ -58,7 +58,7 @@ describe("envelope serializer (hardened $bigint marker with $str escaping)", () 
 		expect(parseEnvelope(stringifyEnvelope(v))).toEqual(v)
 	})
 	it("rejects malformed bigint markers in foreign data (not written by us)", () => {
-		expect(() => parseEnvelope("{\"x\":\"$bigint:abcn\"}")).toThrow()
+		expect(() => parseEnvelope('{"x":"$bigint:abcn"}')).toThrow()
 	})
 	it("revives a root marker string", () => {
 		expect(parseEnvelope(stringifyEnvelope(42n))).toBe(42n)
@@ -71,11 +71,11 @@ describe("envelope serializer (hardened $bigint marker with $str escaping)", () 
 		expect(parseEnvelope(stringifyEnvelope(v))).toEqual(v)
 	})
 	it("revives markers written with the JSON escape for $", () => {
-		expect(parseEnvelope("{\"a\":\"\\u0024bigint:5n\",\"b\":[\"\\u0024str:$bigint:1n\"]}")).toEqual({ a: 5n, b: ["$bigint:1n"] })
-		expect(parseEnvelope("{\"a\":\"\\u0024bigint:5n\"}")).toEqual({ a: 5n })
+		expect(parseEnvelope('{"a":"\\u0024bigint:5n","b":["\\u0024str:$bigint:1n"]}')).toEqual({ a: 5n, b: ["$bigint:1n"] })
+		expect(parseEnvelope('{"a":"\\u0024bigint:5n"}')).toEqual({ a: 5n })
 	})
 	it("keeps an own __proto__ key an own property without touching the prototype", () => {
-		const parsed = parseEnvelope("{\"__proto__\":\"$bigint:7n\",\"x\":{\"__proto__\":{\"y\":\"$bigint:8n\"}}}") as Record<string, unknown>
+		const parsed = parseEnvelope('{"__proto__":"$bigint:7n","x":{"__proto__":{"y":"$bigint:8n"}}}') as Record<string, unknown>
 		expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype)
 		expect(Object.getOwnPropertyDescriptor(parsed, "__proto__")?.value).toBe(7n)
 		const x = parsed["x"] as Record<string, unknown>
@@ -87,9 +87,9 @@ describe("envelope serializer (hardened $bigint marker with $str escaping)", () 
 		expect(Object.keys(parsed)).toEqual(["z", "a", "m", "b"])
 	})
 	it("rejects both malformed bigint shapes with the same error", () => {
-		expect(() => parseEnvelope("{\"x\":\"$bigint:12\"}")).toThrow("invalid $bigint envelope")
-		expect(() => parseEnvelope("[\"$bigint:1.5n\"]")).toThrow("invalid $bigint envelope")
-		expect(() => parseEnvelope("\"$bigint:abcn\"")).toThrow("invalid $bigint envelope")
+		expect(() => parseEnvelope('{"x":"$bigint:12"}')).toThrow("invalid $bigint envelope")
+		expect(() => parseEnvelope('["$bigint:1.5n"]')).toThrow("invalid $bigint envelope")
+		expect(() => parseEnvelope('"$bigint:abcn"')).toThrow("invalid $bigint envelope")
 	})
 	it("matches a JSON.parse reviver on a mixed payload", () => {
 		const reviver = (raw: string): unknown =>

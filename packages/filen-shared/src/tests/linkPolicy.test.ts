@@ -15,7 +15,16 @@ describe("classifyLink", () => {
 		expect(classifyLink("whatsapp://send?text=hi")).toMatchObject({ kind: "external", scheme: "whatsapp:" })
 		expect(classifyLink("geo:37.78,-122.41")).toMatchObject({ kind: "external", scheme: "geo:" })
 		expect(classifyLink("maps:?q=Berlin")).toMatchObject({ kind: "external", scheme: "maps:" })
-		expect(LINK_SCHEMES.map(([, scheme]) => scheme)).toEqual(["http:", "https:", "mailto:", "tel:", "sms:", "whatsapp:", "geo:", "maps:"])
+		expect(LINK_SCHEMES.map(([, scheme]) => scheme)).toEqual([
+			"http:",
+			"https:",
+			"mailto:",
+			"tel:",
+			"sms:",
+			"whatsapp:",
+			"geo:",
+			"maps:"
+		])
 	})
 
 	it("matches the scheme case-insensitively and trims surrounding whitespace", () => {
@@ -63,7 +72,15 @@ describe("classifyLink", () => {
 	})
 
 	it("blocks relative, protocol-relative and slash-less http(s) references", () => {
-		for (const href of ["docs/setup.md", "/abs", "//example.com/x", "https:/reset/x", "https:d/uuid#key", "http:example.com", "http:\\\\example.com"]) {
+		for (const href of [
+			"docs/setup.md",
+			"/abs",
+			"//example.com/x",
+			"https:/reset/x",
+			"https:d/uuid#key",
+			"http:example.com",
+			"http:\\\\example.com"
+		]) {
 			expect(classifyLink(href)).toEqual({ kind: "blocked" })
 		}
 	})

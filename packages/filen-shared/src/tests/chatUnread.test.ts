@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
-import { isMessageUnreadCore, chatHasUnreadCore, countUnreadCore, type UnreadMessage, type UnreadChat, type IsSenderBlocked } from "@filen/shared"
+import {
+	isMessageUnreadCore,
+	chatHasUnreadCore,
+	countUnreadCore,
+	type UnreadMessage,
+	type UnreadChat,
+	type IsSenderBlocked
+} from "@filen/shared"
 
 // Consolidates the raw-predicate coverage that used to live three times over: mobile's
 // chatSelectors.test.ts ("isMessageUnread" + "chatHasUnread"), mobile's
@@ -93,9 +100,9 @@ describe("isMessageUnreadCore", () => {
 	})
 
 	it("false when the sender is blocked by email fallback (userId doesn't match)", () => {
-		expect(isMessageUnreadCore(message({ senderId: OTHER, senderEmail: "spam@x.com" }), chat(), SELF, blockedBy([], ["spam@x.com"]))).toBe(
-			false
-		)
+		expect(
+			isMessageUnreadCore(message({ senderId: OTHER, senderEmail: "spam@x.com" }), chat(), SELF, blockedBy([], ["spam@x.com"]))
+		).toBe(false)
 	})
 })
 
@@ -117,9 +124,9 @@ describe("chatHasUnreadCore", () => {
 	})
 
 	it("false when the last message is from self", () => {
-		expect(chatHasUnreadCore({ muted: false, lastFocus: 100n }, message({ senderId: SELF, sentTimestamp: 200n }), SELF, NEVER_BLOCKED)).toBe(
-			false
-		)
+		expect(
+			chatHasUnreadCore({ muted: false, lastFocus: 100n }, message({ senderId: SELF, sentTimestamp: 200n }), SELF, NEVER_BLOCKED)
+		).toBe(false)
 	})
 
 	it("false when the last message is older than lastFocus", () => {
@@ -170,9 +177,9 @@ describe("chatHasUnreadCore", () => {
 		const own = message({ senderId: SELF, sentTimestamp: 180n })
 		const alreadyRead = message({ senderId: OTHER, sentTimestamp: 50n })
 
-		expect(chatHasUnreadCore({ muted: false, lastFocus: 100n }, lastMessage, SELF, blocked, () => [fromBlocked, own, alreadyRead])).toBe(
-			false
-		)
+		expect(
+			chatHasUnreadCore({ muted: false, lastFocus: 100n }, lastMessage, SELF, blocked, () => [fromBlocked, own, alreadyRead])
+		).toBe(false)
 	})
 
 	it("a muted chat never reaches the blocked-sender scan", () => {
@@ -241,7 +248,14 @@ describe("countUnreadCore", () => {
 	it("asks about blocking only for messages that pass the cheap checks", () => {
 		const isMessageSenderBlocked = vi.fn(() => false)
 
-		countUnreadCore(messages, chat(), SELF, m => m.sentTimestamp, m => m.senderId, isMessageSenderBlocked)
+		countUnreadCore(
+			messages,
+			chat(),
+			SELF,
+			m => m.sentTimestamp,
+			m => m.senderId,
+			isMessageSenderBlocked
+		)
 
 		expect(isMessageSenderBlocked).toHaveBeenCalledTimes(5)
 	})
@@ -249,7 +263,16 @@ describe("countUnreadCore", () => {
 	it("never reads a message when the chat gate rejects", () => {
 		const getSentTimestamp = vi.fn((m: UnreadMessage) => m.sentTimestamp)
 
-		expect(countUnreadCore(messages, chat({ muted: true }), SELF, getSentTimestamp, m => m.senderId, () => false)).toBe(0)
+		expect(
+			countUnreadCore(
+				messages,
+				chat({ muted: true }),
+				SELF,
+				getSentTimestamp,
+				m => m.senderId,
+				() => false
+			)
+		).toBe(0)
 		expect(getSentTimestamp).not.toHaveBeenCalled()
 	})
 })

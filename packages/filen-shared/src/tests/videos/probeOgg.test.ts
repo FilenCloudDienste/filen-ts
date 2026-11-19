@@ -211,7 +211,7 @@ describe("oggHeadVideo", () => {
 
 describe("oggVideoVerdict", () => {
 	const facts: OggVideoFacts = { codec: "theora", codecString: "theora", width: 320, height: 240 }
-	const query = "video/ogg; codecs=\"theora\""
+	const query = 'video/ogg; codecs="theora"'
 
 	it("says video only where this browser has a rung for the stream", () => {
 		expect(oggVideoVerdict(facts, caps({ browser: "firefox", canPlayType: { [query]: "maybe" } }))).toBe("video")
@@ -220,7 +220,7 @@ describe("oggVideoVerdict", () => {
 
 	it("is the ladder's own answer: Firefox plays Ogg Theora direct, Chrome gets the container message", () => {
 		const probe = { ...oggVideoProbe(facts), audio: [{ codec: "vorbis", codecString: "vorbis", channels: 2 }] }
-		const both = "video/ogg; codecs=\"theora,vorbis\""
+		const both = 'video/ogg; codecs="theora,vorbis"'
 		const selection = { audioIndex: 0, subtitle: "none" } as const
 
 		expect(decidePlayback(probe, selection, caps({ browser: "firefox", canPlayType: { [both]: "probably" } })).path).toBe("direct")

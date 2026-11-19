@@ -46,17 +46,21 @@ describe("keysToTranslate", () => {
 	const source = englishSource(EN)
 
 	it("expands plural groups to the language's categories in full mode", () => {
-		expect(Object.keys(keysToTranslate({ source, full: true, delta: { upsert: {}, removed: [] }, existing: {}, lang: "ru" })).sort()).toEqual(
-			["cancel", "files_few", "files_many", "files_one", "files_other", "link"].sort()
-		)
+		expect(
+			Object.keys(keysToTranslate({ source, full: true, delta: { upsert: {}, removed: [] }, existing: {}, lang: "ru" })).sort()
+		).toEqual(["cancel", "files_few", "files_many", "files_one", "files_other", "link"].sort())
 	})
 
 	it("fills only what a target lacks, and a changed plural's whole group", () => {
 		const existing = { cancel: "Abbrechen", files_one: "{{count}} Datei", files_other: "{{count}} Dateien" }
 
-		expect(keysToTranslate({ source, full: false, delta: { upsert: {}, removed: [] }, existing, lang: "de" })).toEqual({ link: EN.link })
+		expect(keysToTranslate({ source, full: false, delta: { upsert: {}, removed: [] }, existing, lang: "de" })).toEqual({
+			link: EN.link
+		})
 		expect(
-			Object.keys(keysToTranslate({ source, full: false, delta: { upsert: { files_other: "x" }, removed: [] }, existing, lang: "de" })).sort()
+			Object.keys(
+				keysToTranslate({ source, full: false, delta: { upsert: { files_other: "x" }, removed: [] }, existing, lang: "de" })
+			).sort()
 		).toEqual(["files_one", "files_other", "link"])
 	})
 
@@ -73,7 +77,12 @@ describe("keysToTranslate", () => {
 describe("keysToTranslate resuming a FULL run", () => {
 	const source = englishSource(EN)
 	const delta = { upsert: {}, removed: [] }
-	const translated = { cancel: "Abbrechen", files_one: "{{count}} Datei", files_other: "{{count}} Dateien", link: "Öffne <link>{{name}}</link>" }
+	const translated = {
+		cancel: "Abbrechen",
+		files_one: "{{count}} Datei",
+		files_other: "{{count}} Dateien",
+		link: "Öffne <link>{{name}}</link>"
+	}
 
 	function recordOf(english: Record<string, string>): Record<string, string> {
 		const record: Record<string, string> = {}
@@ -97,7 +106,10 @@ describe("keysToTranslate resuming a FULL run", () => {
 
 		Reflect.deleteProperty(withoutLink, "link")
 
-		expect(keysToTranslate({ source, full: true, delta, existing: withoutLink, lang: "de", sources })).toEqual({ cancel: "Cancel", link: EN.link })
+		expect(keysToTranslate({ source, full: true, delta, existing: withoutLink, lang: "de", sources })).toEqual({
+			cancel: "Cancel",
+			link: EN.link
+		})
 	})
 
 	it("retranslates a plural group whole when one form is stale", () => {
@@ -122,7 +134,10 @@ describe("keysToTranslate resuming a FULL run", () => {
 
 describe("staleKeys", () => {
 	it("lists keys no English key or plural group produces", () => {
-		expect(staleKeys(englishSource(EN), { cancel: "a", files_few: "b", files_one: "c", gone: "d", gone_one: "e" })).toEqual(["gone", "gone_one"])
+		expect(staleKeys(englishSource(EN), { cancel: "a", files_few: "b", files_one: "c", gone: "d", gone_one: "e" })).toEqual([
+			"gone",
+			"gone_one"
+		])
 	})
 })
 
@@ -150,7 +165,10 @@ describe("LANGUAGE_NAMES", () => {
 })
 
 describe("translateBatch", () => {
-	const ok: BatchResponse = { stop_reason: "end_turn", content: [{ type: "thinking" }, { type: "text", text: JSON.stringify({ cancel: "Abbrechen" }) }] }
+	const ok: BatchResponse = {
+		stop_reason: "end_turn",
+		content: [{ type: "thinking" }, { type: "text", text: JSON.stringify({ cancel: "Abbrechen" }) }]
+	}
 
 	it("sends the cached system blocks and reads the reply", async () => {
 		const createMessage = vi.fn(() => Promise.resolve(ok))
@@ -159,7 +177,9 @@ describe("translateBatch", () => {
 			translateBatch({ createMessage, model: "m", system: ["ctx"], lang: "de", languageName: "German", batch: { cancel: "Cancel" } })
 		).resolves.toEqual({ cancel: "Abbrechen" })
 
-		expect(createMessage).toHaveBeenCalledWith(buildBatchRequest({ model: "m", system: ["ctx"], languageName: "German", batch: { cancel: "Cancel" } }))
+		expect(createMessage).toHaveBeenCalledWith(
+			buildBatchRequest({ model: "m", system: ["ctx"], languageName: "German", batch: { cancel: "Cancel" } })
+		)
 		expect(buildBatchRequest({ model: "m", system: ["a"], languageName: "German", batch: {} }).system).toEqual([
 			{ type: "text", text: "a", cache_control: { type: "ephemeral" } }
 		])
@@ -169,15 +189,18 @@ describe("translateBatch", () => {
 		const args = { model: "m", system: [], lang: "de", languageName: "German", batch: {} }
 
 		await expect(
-			translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "end_turn", content: [{ type: "text", text: "{" }] }) })
+			translateBatch({
+				...args,
+				createMessage: () => Promise.resolve({ stop_reason: "end_turn", content: [{ type: "text", text: "{" }] })
+			})
 		).rejects.toBeInstanceOf(TranslationValidationError)
 
-		await expect(translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "max_tokens", content: [] }) })).rejects.toThrow(
-			"stopped early"
-		)
-		await expect(translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "end_turn", content: [] }) })).rejects.toThrow(
-			"No text content"
-		)
+		await expect(
+			translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "max_tokens", content: [] }) })
+		).rejects.toThrow("stopped early")
+		await expect(
+			translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "end_turn", content: [] }) })
+		).rejects.toThrow("No text content")
 	})
 
 	it("has a free dry-run stub", () => {
@@ -192,7 +215,14 @@ describe("catalog checks", () => {
 	})
 
 	it("pass a faithful translation", () => {
-		const target = { cancel: "Отмена", files_one: "{{count}} файл", files_few: "{{count}} файла", files_many: "{{count}} файлов", files_other: "{{count}} файла", link: "<link>{{name}}</link>" }
+		const target = {
+			cancel: "Отмена",
+			files_one: "{{count}} файл",
+			files_few: "{{count}} файла",
+			files_many: "{{count}} файлов",
+			files_other: "{{count}} файла",
+			link: "<link>{{name}}</link>"
+		}
 
 		expect(catalogIssues(EN, target, "ru")).toEqual([])
 		expect(missingKeys(EN, target)).toEqual([])

@@ -37,11 +37,11 @@ function legacyOpenTag(dataList: string | null): string {
 		}
 
 		case "checked": {
-			return "<ul data-checked=\"true\">"
+			return '<ul data-checked="true">'
 		}
 
 		case "unchecked": {
-			return "<ul data-checked=\"false\">"
+			return '<ul data-checked="false">'
 		}
 
 		default: {

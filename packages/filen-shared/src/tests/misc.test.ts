@@ -92,7 +92,7 @@ describe("sanitizeFileName", () => {
 	})
 
 	it("replaces illegal characters with default replacement '_'", () => {
-		const result = sanitizeFileName("a/b:c<d>e\"f\\g|h?i*j")
+		const result = sanitizeFileName('a/b:c<d>e"f\\g|h?i*j')
 		// All illegal chars replaced with _
 		expect(result).not.toMatch(/[/:?<>"\\|*]/)
 		expect(result).toBe("a_b_c_d_e_f_g_h_i_j")

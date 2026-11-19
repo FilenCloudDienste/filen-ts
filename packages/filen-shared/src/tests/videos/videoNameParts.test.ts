@@ -303,7 +303,12 @@ describe("versions", () => {
 					.sort(underCzech)
 					.map(entry => entry.name)
 
-			expect(order(names)).toEqual(["Film (2010) - aa", "Film (2010) - b", "Film (2010) - Chinese dub", "Film (2010) - Director's Cut"])
+			expect(order(names)).toEqual([
+				"Film (2010) - aa",
+				"Film (2010) - b",
+				"Film (2010) - Chinese dub",
+				"Film (2010) - Director's Cut"
+			])
 			expect(order(["film b", "Film B"])).toEqual(order(["Film B", "film b"]))
 		} finally {
 			vi.unstubAllGlobals()

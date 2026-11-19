@@ -155,13 +155,12 @@ describe("filterHiddenItems with rootDotFilen", () => {
 			["b", ""]
 		])
 
-		expect(filterHiddenItems({ items: [inside, docs], hide: false, searchParentPaths: paths, rootDotFilen: rootFilter(true) })).toEqual([
-			docs
-		])
-		expect(filterHiddenItems({ items: [inside, docs], hide: false, searchParentPaths: paths, rootDotFilen: rootFilter(false) })).toEqual([
-			inside,
-			docs
-		])
+		expect(filterHiddenItems({ items: [inside, docs], hide: false, searchParentPaths: paths, rootDotFilen: rootFilter(true) })).toEqual(
+			[docs]
+		)
+		expect(
+			filterHiddenItems({ items: [inside, docs], hide: false, searchParentPaths: paths, rootDotFilen: rootFilter(false) })
+		).toEqual([inside, docs])
 	})
 
 	it("returns the input itself when a filter applies but removes nothing", () => {

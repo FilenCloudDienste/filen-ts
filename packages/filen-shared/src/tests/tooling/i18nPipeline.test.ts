@@ -43,7 +43,7 @@ describe("parseCliArgs", () => {
 	})
 
 	it("rejects an unknown language", () => {
-		expect(() => parseCliArgs(["xx"], langs)).toThrow("Unknown target language \"xx\". Valid: de, fr, ja")
+		expect(() => parseCliArgs(["xx"], langs)).toThrow('Unknown target language "xx". Valid: de, fr, ja')
 	})
 })
 
@@ -104,7 +104,9 @@ describe("sortRecord", () => {
 
 describe("translateSubset", () => {
 	const echo = (): ((batch: Record<string, string>) => Promise<Record<string, string>>) =>
-		vi.fn(async (batch: Record<string, string>) => Object.fromEntries(Object.entries(batch).map(([key, value]) => [key, `de:${value}`])))
+		vi.fn(async (batch: Record<string, string>) =>
+			Object.fromEntries(Object.entries(batch).map(([key, value]) => [key, `de:${value}`]))
+		)
 	const noSleep = (): (() => Promise<void>) => vi.fn(() => Promise.resolve())
 
 	function quiet(): void {
@@ -148,7 +150,7 @@ describe("translateSubset", () => {
 		const sleep = noSleep()
 
 		await expect(translateSubset({ label: "de/common", subset: { a: "1", b: "2" }, translateBatch, onBatch, sleep })).rejects.toThrow(
-			"de/common: batch 1/1: model did not return a translation for key \"b\""
+			'de/common: batch 1/1: model did not return a translation for key "b"'
 		)
 		expect(translateBatch).toHaveBeenCalledTimes(MAX_VALIDATION_ATTEMPTS)
 		expect(onBatch).not.toHaveBeenCalled()
@@ -190,9 +192,9 @@ describe("translateSubset", () => {
 
 		const bad = vi.fn().mockRejectedValue(Object.assign(new Error("400 invalid_request_error"), { status: 400 }))
 
-		await expect(translateSubset({ label: "de", subset: { a: "1" }, translateBatch: bad, onBatch: vi.fn(), sleep: noSleep() })).rejects.toThrow(
-			"400 invalid_request_error"
-		)
+		await expect(
+			translateSubset({ label: "de", subset: { a: "1" }, translateBatch: bad, onBatch: vi.fn(), sleep: noSleep() })
+		).rejects.toThrow("400 invalid_request_error")
 		expect(bad).toHaveBeenCalledTimes(1)
 	})
 
@@ -203,7 +205,9 @@ describe("translateSubset", () => {
 		const { result, onBatch } = collect()
 		let checks = 0
 
-		await expect(translateSubset({ label: "de", subset, translateBatch: echo(), onBatch, shouldStop: () => ++checks > 2 })).resolves.toBe(false)
+		await expect(
+			translateSubset({ label: "de", subset, translateBatch: echo(), onBatch, shouldStop: () => ++checks > 2 })
+		).resolves.toBe(false)
 		expect(Object.keys(result)).toHaveLength(50)
 	})
 
@@ -247,7 +251,7 @@ describe("batchIssues", () => {
 	it("reports missing keys and placeholder or markup drift", () => {
 		expect(batchIssues({ a: "Open <link>{{name}}</link>", b: "x" }, { a: "Öffnen {{name}}" })).toEqual([
 			"a: markup differs from English",
-			"model did not return a translation for key \"b\""
+			'model did not return a translation for key "b"'
 		])
 		expect(batchIssues({ a: "{{count}} files" }, { a: "{{n}} Dateien" })).toEqual(["a: placeholders n differ from English count"])
 	})
@@ -281,7 +285,7 @@ describe("writeJsonFile", () => {
 
 		try {
 			writeJsonFile(path, { b: "2", a: "1" })
-			expect(readFileSync(path, "utf8")).toBe("{\n\t\"b\": \"2\",\n\t\"a\": \"1\"\n}\n")
+			expect(readFileSync(path, "utf8")).toBe('{\n\t"b": "2",\n\t"a": "1"\n}\n')
 			expect(readdirSync(join(dir, ".sources"))).toEqual(["de.json"])
 		} finally {
 			rmSync(dir, { recursive: true, force: true })
@@ -291,12 +295,12 @@ describe("writeJsonFile", () => {
 
 describe("parseTranslatedBatch", () => {
 	it("returns a map of strings", () => {
-		expect(parseTranslatedBatch("{\"a\":\"x\",\"b\":\"y\"}")).toEqual({ a: "x", b: "y" })
+		expect(parseTranslatedBatch('{"a":"x","b":"y"}')).toEqual({ a: "x", b: "y" })
 	})
 
 	it("throws on a non-string value, an array or malformed JSON", () => {
-		expect(() => parseTranslatedBatch("{\"a\":1}")).toThrow(/a must be a string/)
-		expect(() => parseTranslatedBatch("[\"x\"]")).toThrow(/array/)
+		expect(() => parseTranslatedBatch('{"a":1}')).toThrow(/a must be a string/)
+		expect(() => parseTranslatedBatch('["x"]')).toThrow(/array/)
 		expect(() => parseTranslatedBatch("null")).toThrow()
 		expect(() => parseTranslatedBatch("{")).toThrow()
 	})

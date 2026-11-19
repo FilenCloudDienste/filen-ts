@@ -258,7 +258,7 @@ export function resolveDateFilter(input: AssistantDateFilterInput, calendar: Ass
 	}
 
 	if (from === null && to === null) {
-		return period === "custom" ? { ok: false, error: "Period \"custom\" needs \"from\" or \"to\"" } : { ok: true, range: null }
+		return period === "custom" ? { ok: false, error: 'Period "custom" needs "from" or "to"' } : { ok: true, range: null }
 	}
 
 	if (from !== null && to !== null && from > to) {

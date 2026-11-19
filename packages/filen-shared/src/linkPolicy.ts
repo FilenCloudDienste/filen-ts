@@ -25,7 +25,8 @@ export const LINK_SCHEMES: readonly (readonly [prefix: string, scheme: LinkSchem
 // external: an allowlisted scheme; `url` is the trimmed value with its original casing (paths, queries and
 // tokens are case-sensitive), `scheme` lowercased.
 // blocked: everything else, rendered as inert text.
-export type LinkVerdict = { kind: "internal"; fragment: string } | { kind: "external"; url: string; scheme: LinkScheme } | { kind: "blocked" }
+export type LinkVerdict =
+	{ kind: "internal"; fragment: string } | { kind: "external"; url: string; scheme: LinkScheme } | { kind: "blocked" }
 
 const BLOCKED: LinkVerdict = { kind: "blocked" }
 

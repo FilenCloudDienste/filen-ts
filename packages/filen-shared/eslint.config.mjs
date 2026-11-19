@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint"
 // @filen/shared must compile on Hermes and in the browser, so nothing platform-bound may enter it.
 const parentEscapePattern = {
 	regex: "^\\.\\.",
-	message: "Parent-escaping relative imports leave the package; import siblings with \"./\"."
+	message: 'Parent-escaping relative imports leave the package; import siblings with "./".'
 }
 
 const platformFreeImportPatterns = [

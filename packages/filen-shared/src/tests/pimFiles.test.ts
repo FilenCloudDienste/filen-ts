@@ -27,7 +27,7 @@ describe("readCalendar", () => {
 				"DTEND;TZID=Europe/Berlin:20240304T110000",
 				"RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=10",
 				"EXDATE;TZID=Europe/Berlin:20240318T100000,20240401T100000",
-				"ORGANIZER;CN=\"Ada L\":mailto:ada@example.com",
+				'ORGANIZER;CN="Ada L":mailto:ada@example.com',
 				"ATTENDEE;CN=Bob:mailto:bob@example.com",
 				"ATTENDEE:mailto:eve@example.com",
 				"URL:https://example.com/meet",

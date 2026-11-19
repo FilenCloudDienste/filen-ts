@@ -51,7 +51,7 @@ function doctypeEnd(text: string, from: number): { end: number; subset?: string 
 			}
 
 			index = close + 1
-		} else if (char === "\"" || char === "'") {
+		} else if (char === '"' || char === "'") {
 			const close = text.indexOf(char, index + 1)
 
 			if (close === -1) {

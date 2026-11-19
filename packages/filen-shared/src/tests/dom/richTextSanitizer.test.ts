@@ -80,8 +80,8 @@ describe("createRichTextSanitizer", () => {
 	it("forces a link with an href to open in a new tab without opener or referrer", () => {
 		const sanitize = createRichTextSanitizer(fakePurifier().purifier)
 
-		expect(sanitize("<a href=\"https://example.com\" target=\"_self\" rel=\"opener\">l</a>")).toBe(
-			"<a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">l</a>"
+		expect(sanitize('<a href="https://example.com" target="_self" rel="opener">l</a>')).toBe(
+			'<a href="https://example.com" target="_blank" rel="noopener noreferrer">l</a>'
 		)
 		expect(sanitize("<a>no href</a>")).toBe("<a>no href</a>")
 	})
@@ -89,21 +89,21 @@ describe("createRichTextSanitizer", () => {
 	it("strips positioning and viewport-sized declarations, keeping the rest", () => {
 		const sanitize = createRichTextSanitizer(fakePurifier().purifier)
 
-		expect(sanitize("<p style=\"position:fixed;top:0;inset:0;z-index:9;width:100vw;color:red\">x</p>")).toBe(
-			"<p style=\"color: red\">x</p>"
+		expect(sanitize('<p style="position:fixed;top:0;inset:0;z-index:9;width:100vw;color:red">x</p>')).toBe(
+			'<p style="color: red">x</p>'
 		)
-		expect(sanitize("<p style=\"position:fixed;height:100vh\">x</p>")).toBe("<p>x</p>")
+		expect(sanitize('<p style="position:fixed;height:100vh">x</p>')).toBe("<p>x</p>")
 	})
 
 	it("keeps only Quill's content formatting classes", () => {
 		const sanitize = createRichTextSanitizer(fakePurifier().purifier)
 
-		expect(sanitize("<p class=\"fixed inset-0 z-50 ql-align-center ql-tooltip ql-indent-2\">x</p>")).toBe(
-			"<p class=\"ql-align-center ql-indent-2\">x</p>"
+		expect(sanitize('<p class="fixed inset-0 z-50 ql-align-center ql-tooltip ql-indent-2">x</p>')).toBe(
+			'<p class="ql-align-center ql-indent-2">x</p>'
 		)
-		expect(sanitize("<span class=\"ql-container ql-editor\">x</span>")).toBe("<span>x</span>")
-		expect(sanitize("<div class=\"ql-code-block-container\"><div class=\"ql-code-block\">c</div></div>")).toBe(
-			"<div class=\"ql-code-block-container\"><div class=\"ql-code-block\">c</div></div>"
+		expect(sanitize('<span class="ql-container ql-editor">x</span>')).toBe("<span>x</span>")
+		expect(sanitize('<div class="ql-code-block-container"><div class="ql-code-block">c</div></div>')).toBe(
+			'<div class="ql-code-block-container"><div class="ql-code-block">c</div></div>'
 		)
 	})
 })

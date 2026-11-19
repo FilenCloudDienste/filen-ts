@@ -41,7 +41,7 @@ describe("parseNfo", () => {
 			premiered: "2021-02-26",
 			runtimeMinutes: 101,
 			mpaa: "PG",
-			tagline: "It's \"on\"",
+			tagline: 'It\'s "on"',
 			plot: "Cat <and> mouse & friends",
 			genres: ["Family", "Comedy"],
 			tags: ["cartoon"],
@@ -143,7 +143,7 @@ describe("parseNfo", () => {
 
 	it("does not expand entities from a DOCTYPE", () => {
 		const nfo = parseNfo(
-			"<?xml version=\"1.0\"?><!DOCTYPE movie [<!ENTITY a \"aaaa\"><!ENTITY b \"&a;&a;&a;&a;\">]><movie><title>&b;</title></movie>"
+			'<?xml version="1.0"?><!DOCTYPE movie [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;&a;">]><movie><title>&b;</title></movie>'
 		)
 
 		expect(nfo?.title).toBe("&b;")
@@ -192,7 +192,7 @@ describe("parseNfo", () => {
 		expect(parseNfo(text)?.title).toBe("x")
 		expect(walked).toBeLessThan(2 * text.length)
 		vi.restoreAllMocks()
-		expect(parseNfo("<!DOCTYPE movie [<!ENTITY a \"<title>no</title>\">]><movie><title>yes</title></movie>")?.title).toBe("yes")
+		expect(parseNfo('<!DOCTYPE movie [<!ENTITY a "<title>no</title>">]><movie><title>yes</title></movie>')?.title).toBe("yes")
 	})
 
 	it("never throws on random markup soup", () => {

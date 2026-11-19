@@ -224,7 +224,7 @@ class Tokenizer {
 				return this.badUrl(start)
 			}
 
-			if (char === "\"" || char === "'" || char === "(" || isNonPrintable(char)) {
+			if (char === '"' || char === "'" || char === "(" || isNonPrintable(char)) {
 				return this.badUrl(start)
 			}
 
@@ -272,7 +272,7 @@ class Tokenizer {
 
 		const next = this.css[look]
 
-		if (next === "\"" || next === "'") {
+		if (next === '"' || next === "'") {
 			return { type: "function", value: name, start, end: this.at }
 		}
 
@@ -302,7 +302,7 @@ class Tokenizer {
 			return { type: "ws", start, end: this.at }
 		}
 
-		if (char === "\"" || char === "'") {
+		if (char === '"' || char === "'") {
 			this.at++
 
 			return this.string(char, start)

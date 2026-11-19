@@ -6,11 +6,7 @@ import { blankChecklistItem, type Checklist, type ChecklistItem } from "./checkl
 // without rendering anything.
 
 // Set a row's checked state and/or content, returning a new list (never mutating the input).
-export function patchChecklistItem(
-	rows: Checklist,
-	itemId: string,
-	patch: Partial<Pick<ChecklistItem, "checked" | "content">>
-): Checklist {
+export function patchChecklistItem(rows: Checklist, itemId: string, patch: Partial<Pick<ChecklistItem, "checked" | "content">>): Checklist {
 	return rows.map(i =>
 		i.id === itemId
 			? {

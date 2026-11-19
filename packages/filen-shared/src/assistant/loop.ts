@@ -1225,7 +1225,11 @@ export async function runAssistantTurn({
 					...(tools.length > 0
 						? {
 								tools,
-								...(offered.length === 0 ? { toolChoice: "none" as const } : forced ? { toolChoice: "required" as const } : {})
+								...(offered.length === 0
+									? { toolChoice: "none" as const }
+									: forced
+										? { toolChoice: "required" as const }
+										: {})
 							}
 						: {}),
 					slot: "main",

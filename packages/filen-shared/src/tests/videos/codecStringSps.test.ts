@@ -232,7 +232,16 @@ describe("reorder frames", () => {
 		// Level 1b (11 with constraint_set3 in Main): 396 macroblocks over QCIF's 99.
 		expect(parseAvcSps(plainAvcSps(77, 0x10, 11, 11, 9))?.reorderFrames).toBe(4)
 		// High with constraint_set3: High Intra.
-		expect(avcReorderFrames({ profile: 100, compatibility: 0x10, level: 31, widthMbs: 80, frameHeightMbs: 45, vui: { maxNumReorderFrames: null, maxDecFrameBuffering: null } })).toBe(0)
+		expect(
+			avcReorderFrames({
+				profile: 100,
+				compatibility: 0x10,
+				level: 31,
+				widthMbs: 80,
+				frameHeightMbs: 45,
+				vui: { maxNumReorderFrames: null, maxDecFrameBuffering: null }
+			})
+		).toBe(0)
 		expect(parseAvcSps(plainAvcSps(77, 0, 7))?.reorderFrames).toBeNull()
 	})
 

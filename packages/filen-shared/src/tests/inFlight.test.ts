@@ -12,11 +12,7 @@ describe("InFlight", () => {
 					})
 			)
 
-			const [a, b, c] = await Promise.all([
-				inFlight.coalesce("key", fn),
-				inFlight.coalesce("key", fn),
-				inFlight.coalesce("key", fn)
-			])
+			const [a, b, c] = await Promise.all([inFlight.coalesce("key", fn), inFlight.coalesce("key", fn), inFlight.coalesce("key", fn)])
 
 			expect(fn).toHaveBeenCalledTimes(1)
 			expect(a).toBe(1)

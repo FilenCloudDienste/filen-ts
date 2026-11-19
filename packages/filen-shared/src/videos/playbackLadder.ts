@@ -125,9 +125,9 @@ const WASM_AUDIO_DECODERS: ReadonlySet<string> = new Set([
 const TARGET_BITRATE = 128_000
 
 const TARGET_MIMES: Readonly<Record<AudioTarget, { mime: string; codecString: string }>> = {
-	aac: { mime: "audio/mp4; codecs=\"mp4a.40.2\"", codecString: "mp4a.40.2" },
-	"aac-wasm": { mime: "audio/mp4; codecs=\"mp4a.40.2\"", codecString: "mp4a.40.2" },
-	opus: { mime: "audio/mp4; codecs=\"opus\"", codecString: "opus" }
+	aac: { mime: 'audio/mp4; codecs="mp4a.40.2"', codecString: "mp4a.40.2" },
+	"aac-wasm": { mime: 'audio/mp4; codecs="mp4a.40.2"', codecString: "mp4a.40.2" },
+	opus: { mime: 'audio/mp4; codecs="opus"', codecString: "opus" }
 }
 
 export function normalizeLadderContainer(container: string): string {

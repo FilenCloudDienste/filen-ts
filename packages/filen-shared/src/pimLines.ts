@@ -59,8 +59,8 @@ function parseParams(text: string, params: Map<string, string[]>): void {
 		for (;;) {
 			let value: string
 
-			if (text[at] === "\"") {
-				const close = text.indexOf("\"", at + 1)
+			if (text[at] === '"') {
+				const close = text.indexOf('"', at + 1)
 				const end = close === -1 ? text.length : close
 
 				value = text.slice(at + 1, end)
@@ -95,7 +95,7 @@ function valueStart(line: string): number {
 	for (let index = 0; index < line.length; index++) {
 		const char = line[index]
 
-		if (char === "\"") quoted = !quoted
+		if (char === '"') quoted = !quoted
 		else if (char === ":" && !quoted) return index
 	}
 
@@ -187,7 +187,7 @@ export function eachContentLine(text: string, caps: ContentLineCaps, visit: (lin
 			for (let index = 0; index < piece.length; index++) {
 				const char = piece[index]
 
-				if (char === "\"") {
+				if (char === '"') {
 					scan.quoted = !scan.quoted
 				} else if (char === ":" && !scan.quoted) {
 					return pieces.slice(0, scan.piece).join("") + piece.slice(0, index + 1)

@@ -95,7 +95,8 @@ export const getContext = defineTool({
 export const searchItems = defineTool({
 	name: "search_items",
 	title: "Search drive",
-	description: "Search files and directories in the user's drive by name, optionally only those dated in a period. Returns handles, names and paths.",
+	description:
+		"Search files and directories in the user's drive by name, optionally only those dated in a period. Returns handles, names and paths.",
 	group: "insights",
 	effect: "read",
 	untrustedOutput: "names",
@@ -106,7 +107,7 @@ export const searchItems = defineTool({
 	input: {
 		query: {
 			type: type.string,
-			description: "Words from the item name, e.g. \"invoice 2024\""
+			description: 'Words from the item name, e.g. "invoice 2024"'
 		},
 		kind: optional({
 			...oneOf(DRIVE_KINDS),
@@ -134,7 +135,7 @@ export const listDirectory = defineTool({
 	name: "list_directory",
 	title: "List directory",
 	description:
-		"List one directory's contents, given its handle or its path (\"/\" is the drive root). Can sort by size (directories by total size) or date and filter by kind or date.",
+		'List one directory\'s contents, given its handle or its path ("/" is the drive root). Can sort by size (directories by total size) or date and filter by kind or date.',
 	group: "insights",
 	effect: "read",
 	untrustedOutput: "names",
@@ -147,7 +148,7 @@ export const listDirectory = defineTool({
 		handle: optional(handle("a directory")),
 		path: optional({
 			type: type.string,
-			description: "Absolute path, e.g. \"/Documents/Invoices\""
+			description: 'Absolute path, e.g. "/Documents/Invoices"'
 		}),
 		sort: optional({
 			...oneOf(["name", "largest", "smallest", "newest", "oldest"]),
@@ -216,7 +217,7 @@ export const NO_TRANSFERS_NOTE = "No uploads or downloads in this tab since it w
 
 const listDirectoryPlain = defineTool({
 	...listDirectory,
-	description: "List the contents of a directory, given its handle or its path (\"/\" is the drive root). Can sort by size or date.",
+	description: 'List the contents of a directory, given its handle or its path ("/" is the drive root). Can sort by size or date.',
 	group: "files",
 	input: {
 		handle: listDirectory.input.handle,
@@ -773,8 +774,7 @@ export const addTracksToPlaylist = defineTool({
 export const getTransfers = defineTool({
 	name: "get_transfers",
 	title: "Transfers",
-	description:
-		"Show the uploads, downloads and copies that are running or finished recently: progress, time left, and which failed.",
+	description: "Show the uploads, downloads and copies that are running or finished recently: progress, time left, and which failed.",
 	group: "navigation",
 	effect: "read",
 	// Transfers carry file names, which may be someone else's.

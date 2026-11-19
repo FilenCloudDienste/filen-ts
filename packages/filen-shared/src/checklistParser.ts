@@ -195,7 +195,7 @@ function firstReadingEnd(html: string, p: number): number {
 		const quote = html.charCodeAt(value)
 
 		if (quote === 34 || quote === 39) {
-			const close = html.indexOf(quote === 34 ? "\"" : "'", value + 1)
+			const close = html.indexOf(quote === 34 ? '"' : "'", value + 1)
 
 			if (close !== FAIL) {
 				p = close + 1
@@ -258,7 +258,7 @@ function tagEnds(html: string, lo: number): Int32Array {
 			const quote = start === FAIL ? FAIL : html.charCodeAt(start)
 
 			if (quote === 34 || quote === 39) {
-				const close = html.indexOf(quote === 34 ? "\"" : "'", start + 1)
+				const close = html.indexOf(quote === 34 ? '"' : "'", start + 1)
 
 				assigned = close === FAIL ? FAIL : (ends[close + 1 - lo] ?? FAIL)
 			} else {

@@ -63,7 +63,7 @@ const XML_ENTITIES: ReadonlyMap<string, string> = new Map([
 	["amp", "&"],
 	["lt", "<"],
 	["gt", ">"],
-	["quot", "\""],
+	["quot", '"'],
 	["apos", "'"]
 ])
 

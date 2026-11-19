@@ -191,7 +191,11 @@ describe("resolveQuotaVerdict", () => {
 	})
 
 	it("lets nothing-to-store through without a read, even on a full or stale cache", async () => {
-		const full = harness(counters(100n, 100n), () => Promise.reject(new Error("unexpected read")), () => false)
+		const full = harness(
+			counters(100n, 100n),
+			() => Promise.reject(new Error("unexpected read")),
+			() => false
+		)
 		const none = harness(undefined, () => Promise.reject(new Error("unexpected read")))
 
 		expect(await resolveQuotaVerdict(full.deps, 0n)).toEqual({ status: "fits" })
@@ -251,7 +255,9 @@ describe("resolveQuotaVerdict", () => {
 
 describe("storageSummary", () => {
 	it("words the meter's figures", () => {
-		expect(storageSummary({ storageUsed: 3n * 1024n ** 3n, maxStorage: 10n * 1024n ** 3n, versionedStorage: 512n * 1024n ** 2n })).toEqual({
+		expect(
+			storageSummary({ storageUsed: 3n * 1024n ** 3n, maxStorage: 10n * 1024n ** 3n, versionedStorage: 512n * 1024n ** 2n })
+		).toEqual({
 			used: "3 GiB",
 			total: "10 GiB",
 			free: "7 GiB",

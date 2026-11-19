@@ -84,9 +84,7 @@ describe("aggregateNoteSelectionFlags", () => {
 	})
 
 	it("includesUndecryptable true when any note is undecryptable", () => {
-		expect(aggregateNoteSelectionFlags([note(), note({ undecryptable: true })], ME, isUndecryptable).includesUndecryptable).toBe(
-			true
-		)
+		expect(aggregateNoteSelectionFlags([note(), note({ undecryptable: true })], ME, isUndecryptable).includesUndecryptable).toBe(true)
 	})
 
 	it("includesUndecryptable false when no note is undecryptable", () => {
@@ -99,9 +97,7 @@ describe("aggregateNoteSelectionFlags", () => {
 	})
 
 	it("everyTrashed true only when every note is trashed", () => {
-		expect(aggregateNoteSelectionFlags([note({ trash: true }), note({ trash: true })], ME, isUndecryptable).everyTrashed).toBe(
-			true
-		)
+		expect(aggregateNoteSelectionFlags([note({ trash: true }), note({ trash: true })], ME, isUndecryptable).everyTrashed).toBe(true)
 		expect(aggregateNoteSelectionFlags([note({ trash: true }), note()], ME, isUndecryptable).everyTrashed).toBe(false)
 	})
 
@@ -118,9 +114,7 @@ describe("aggregateNoteSelectionFlags", () => {
 	})
 
 	it("everyArchivedOrTrashed false when any note is active", () => {
-		expect(aggregateNoteSelectionFlags([note({ archive: true }), note()], ME, isUndecryptable).everyArchivedOrTrashed).toBe(
-			false
-		)
+		expect(aggregateNoteSelectionFlags([note({ archive: true }), note()], ME, isUndecryptable).everyArchivedOrTrashed).toBe(false)
 		expect(aggregateNoteSelectionFlags([note({ trash: true }), note()], ME, isUndecryptable).everyArchivedOrTrashed).toBe(false)
 	})
 
@@ -168,9 +162,7 @@ describe("aggregateNoteSelectionFlags", () => {
 	it("participantOfEveryAndNotOwner: true only if user is participant + not owner of ALL", () => {
 		const participated = note({ ownerId: SOMEONE_ELSE, participants: [participant(ME, true)] })
 
-		expect(
-			aggregateNoteSelectionFlags([participated, participated], ME, isUndecryptable).participantOfEveryAndNotOwner
-		).toBe(true)
+		expect(aggregateNoteSelectionFlags([participated, participated], ME, isUndecryptable).participantOfEveryAndNotOwner).toBe(true)
 	})
 
 	it("participantOfEveryAndNotOwner: true for a read-only participant on notes of different owners", () => {
@@ -199,16 +191,11 @@ describe("aggregateNoteSelectionFlags", () => {
 		const participated = note({ ownerId: SOMEONE_ELSE, participants: [participant(ME, true)] })
 		const absentFrom = note({ ownerId: SOMEONE_ELSE, participants: [participant(SOMEONE_ELSE + 1n, true)] })
 
-		expect(
-			aggregateNoteSelectionFlags([participated, absentFrom], ME, isUndecryptable).participantOfEveryAndNotOwner
-		).toBe(false)
+		expect(aggregateNoteSelectionFlags([participated, absentFrom], ME, isUndecryptable).participantOfEveryAndNotOwner).toBe(false)
 	})
 
 	it("combination: mixed favorited / pinned / owned", () => {
-		const notes = [
-			note({ favorite: true }),
-			note({ pinned: true, ownerId: SOMEONE_ELSE, participants: [participant(ME, false)] })
-		]
+		const notes = [note({ favorite: true }), note({ pinned: true, ownerId: SOMEONE_ELSE, participants: [participant(ME, false)] })]
 
 		const flags = aggregateNoteSelectionFlags(notes, ME, isUndecryptable)
 

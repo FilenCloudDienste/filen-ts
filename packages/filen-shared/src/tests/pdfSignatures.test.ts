@@ -76,7 +76,8 @@ describe("saved PDF signatures", () => {
 	it("keeps at most the newest entries per role", () => {
 		let doc = addPdfSignature(emptyPdfSignatures(), strokes("initials", 0, "initials"))
 
-		for (let index = 1; index <= PDF_SIGNATURES_MAX_PER_ROLE + 2; index++) doc = addPdfSignature(doc, strokes(`s${String(index)}`, index))
+		for (let index = 1; index <= PDF_SIGNATURES_MAX_PER_ROLE + 2; index++)
+			doc = addPdfSignature(doc, strokes(`s${String(index)}`, index))
 
 		const signatures = doc.items.filter(item => item.role === "signature")
 
@@ -87,23 +88,29 @@ describe("saved PDF signatures", () => {
 	})
 
 	it("keeps a typed name's style, and reads names saved before styles existed without one", () => {
-		const typed: SavedPdfSignature = { ...image("t", 3), data: { kind: "image", width: 120, height: 40, png: "iVBORw0KGgo=", style: "ms-madi" } }
+		const typed: SavedPdfSignature = {
+			...image("t", 3),
+			data: { kind: "image", width: 120, height: 40, png: "iVBORw0KGgo=", style: "ms-madi" }
+		}
 		const doc = addPdfSignature(addPdfSignature(emptyPdfSignatures(), typed), image("old", 1))
 		const text = serializePdfSignatures(doc)
 		const again = parsePdfSignatures(text)
 
-		expect(text).toContain("\"style\":\"ms-madi\"")
+		expect(text).toContain('"style":"ms-madi"')
 		expect(again.items.find(item => item.id === "t")?.data).toEqual(typed.data)
 		expect(again.items.find(item => item.id === "old")?.data).toEqual(image("old", 1).data)
 		expect(again.items.find(item => item.id === "old")?.data).not.toHaveProperty("style")
 		// A style this app does not know is kept; one that is not an id drops the entry, as any malformed field does.
-		expect(parsePdfSignatures(text.replace("\"ms-madi\"", "\"future-style\"")).items[0]?.data).toHaveProperty("style", "future-style")
-		expect(parsePdfSignatures(text.replace("\"ms-madi\"", "\"not an id\"")).items.map(item => item.id)).toEqual(["old"])
+		expect(parsePdfSignatures(text.replace('"ms-madi"', '"future-style"')).items[0]?.data).toHaveProperty("style", "future-style")
+		expect(parsePdfSignatures(text.replace('"ms-madi"', '"not an id"')).items.map(item => item.id)).toEqual(["old"])
 	})
 
 	it("refuses what a read would drop", () => {
 		expect(isStorablePdfSignature({ kind: "strokes", width: 10, height: 10, strokes: [] })).toBe(false)
 		expect(isStorablePdfSignature({ kind: "image", width: 10, height: 10, png: "A".repeat(400_000) })).toBe(false)
-		expect(addPdfSignature(emptyPdfSignatures(), { ...strokes("a", 1), data: { kind: "strokes", width: 0, height: 1, strokes: [[0, 0]] } }).items).toEqual([])
+		expect(
+			addPdfSignature(emptyPdfSignatures(), { ...strokes("a", 1), data: { kind: "strokes", width: 0, height: 1, strokes: [[0, 0]] } })
+				.items
+		).toEqual([])
 	})
 })

@@ -17,7 +17,7 @@ describe("dirnameOf", () => {
 })
 
 describe("pathSegmentDepth", () => {
-	it("matches split(\"/\").length for representative inputs", () => {
+	it('matches split("/").length for representative inputs', () => {
 		const inputs = ["", "a", "a/b/c", "/a/b"]
 
 		for (const input of inputs) {

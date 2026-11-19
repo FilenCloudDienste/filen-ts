@@ -78,7 +78,7 @@ describe("ladderQueries", () => {
 			mp4("avc1.640028", "mp4a.6b")
 		])
 		expect(q.decodingInfoFile).toEqual(q.canPlayType)
-		expect(q.isTypeSupported).toContain("video/mp4; codecs=\"avc1.640028\"")
+		expect(q.isTypeSupported).toContain('video/mp4; codecs="avc1.640028"')
 		expect(q.isTypeSupported).toContain(audioMp4("mp3"))
 		expect(q.isTypeSupported).toContain(audioMp4("opus"))
 		expect(q.isTypeSupported).toContain(audioMp4("mp4a.40.2"))
@@ -99,7 +99,7 @@ describe("ladderQueries", () => {
 
 	it("probes MOV as MP4, WebM as WebM, and is empty without a video codec string", () => {
 		expect(ladderQueries(probe("mov", H264, AAC), sel()).canPlayType[0]).toBe(mp4("avc1.640028", "mp4a.40.2"))
-		expect(ladderQueries(probe("webm", H264, OPUS), sel()).canPlayType[0]).toBe("video/webm; codecs=\"avc1.640028,opus\"")
+		expect(ladderQueries(probe("webm", H264, OPUS), sel()).canPlayType[0]).toBe('video/webm; codecs="avc1.640028,opus"')
 		expect(ladderQueries(probe("mp4", null), sel())).toEqual({
 			canPlayType: [],
 			isTypeSupported: [],
@@ -129,7 +129,7 @@ describe("rung A: direct", () => {
 	})
 
 	it("plays a video without audio", () => {
-		expect(decidePlayback(probe("mp4", H264), sel(-1), caps({ playable: ["video/mp4; codecs=\"avc1.640028\""] })).path).toBe("direct")
+		expect(decidePlayback(probe("mp4", H264), sel(-1), caps({ playable: ['video/mp4; codecs="avc1.640028"'] })).path).toBe("direct")
 	})
 
 	it("probes MOV as video/mp4 and accepts M4V", () => {
@@ -138,7 +138,7 @@ describe("rung A: direct", () => {
 	})
 
 	it("plays WebM", () => {
-		const webm = caps({ playable: ["video/webm; codecs=\"vp09.00.40.08,opus\""] })
+		const webm = caps({ playable: ['video/webm; codecs="vp09.00.40.08,opus"'] })
 
 		expect(
 			decidePlayback(probe("webm", { codec: "vp9", codecString: "vp09.00.40.08", width: 1280, height: 720 }, OPUS), sel(), webm).path

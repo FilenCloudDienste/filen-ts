@@ -24,7 +24,7 @@ describe("css tokens", () => {
 
 	it("skips comments outside strings and url tokens only", () => {
 		expect(types("a/* x */b")).toEqual(["ident:a", "ident:b"])
-		expect(types("\"/*\"")).toEqual(["string:/*"])
+		expect(types('"/*"')).toEqual(["string:/*"])
 		expect(types("url(/*)")).toEqual(["url:/*"])
 	})
 
@@ -54,7 +54,7 @@ describe("css tokens", () => {
 	})
 
 	it("ends a string at a newline as a bad string", () => {
-		expect(types("\"a\nb")[0]).toBe("badString")
+		expect(types('"a\nb')[0]).toBe("badString")
 	})
 
 	it("reads a url with a space or quote inside as a bad url", () => {
@@ -71,7 +71,7 @@ describe("css loads", () => {
 		"@import 'a.css';",
 		"@font-face{font-family:x}",
 		"a{background:url(a b)}",
-		"a{content:\"x\n}",
+		'a{content:"x\n}',
 		"a{background:url(cid:other)}",
 		"p{x:1.url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}",
 		"p{x:.5.url(/*)}q{background-image:url(https://e.vil/c)}r{y:*/}"
@@ -79,7 +79,7 @@ describe("css loads", () => {
 		expect(loads(css)).toBe(true)
 	})
 
-	it.each(["a{color:red}", "a{background:url(data:image/png;base64,AAAA)}", "a{background:url(cid:part)}", "a{content:\"url(x)\"}"])(
+	it.each(["a{color:red}", "a{background:url(data:image/png;base64,AAAA)}", "a{background:url(cid:part)}", 'a{content:"url(x)"}'])(
 		"judges %j as inert",
 		css => {
 			expect(loads(css)).toBe(false)
@@ -118,7 +118,7 @@ describe("css loads against a reference tokenizer", () => {
 		"\\75 ",
 		"\\2f",
 		"\\\n",
-		"\"",
+		'"',
 		"'",
 		":",
 		";",

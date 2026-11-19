@@ -40,9 +40,7 @@ describe("noteBulkActionAvailability — count guard", () => {
 
 describe("noteBulkActionAvailability — undecryptable gate", () => {
 	it("suppresses pin/favorite/type/tags/duplicate/export when the selection includes an undecryptable note", () => {
-		const availability = noteBulkActionAvailability(
-			flags({ includesUndecryptable: true, everyOwned: true, hasWriteAccessToAll: true })
-		)
+		const availability = noteBulkActionAvailability(flags({ includesUndecryptable: true, everyOwned: true, hasWriteAccessToAll: true }))
 
 		expect(availability.pin).toBe(false)
 		expect(availability.favorite).toBe(false)
@@ -105,9 +103,9 @@ describe("noteBulkActionAvailability — owner-gated lifecycle (archive/restore/
 	it("trash requires everyOwned and none already trashed — survives includesUndecryptable (pure-uuid disposition)", () => {
 		expect(noteBulkActionAvailability(flags({ everyOwned: true, includesTrashed: false })).trash).toBe(true)
 		expect(noteBulkActionAvailability(flags({ everyOwned: true, includesTrashed: true })).trash).toBe(false)
-		expect(
-			noteBulkActionAvailability(flags({ everyOwned: true, includesTrashed: false, includesUndecryptable: true })).trash
-		).toBe(true)
+		expect(noteBulkActionAvailability(flags({ everyOwned: true, includesTrashed: false, includesUndecryptable: true })).trash).toBe(
+			true
+		)
 	})
 
 	it("delete requires everyOwned and everyTrashed", () => {
@@ -120,8 +118,6 @@ describe("noteBulkActionAvailability — leave (non-owner participant gate)", ()
 	it("is available only when participantOfEveryAndNotOwner is true, independent of everyOwned", () => {
 		expect(noteBulkActionAvailability(flags({ participantOfEveryAndNotOwner: true })).leave).toBe(true)
 		expect(noteBulkActionAvailability(flags({ participantOfEveryAndNotOwner: false })).leave).toBe(false)
-		expect(
-			noteBulkActionAvailability(flags({ everyOwned: false, participantOfEveryAndNotOwner: true })).leave
-		).toBe(true)
+		expect(noteBulkActionAvailability(flags({ everyOwned: false, participantOfEveryAndNotOwner: true })).leave).toBe(true)
 	})
 })

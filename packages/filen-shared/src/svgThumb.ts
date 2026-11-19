@@ -28,7 +28,7 @@ function startTagEnd(text: string, from: number): number {
 			if (char === quote) {
 				quote = null
 			}
-		} else if (char === "\"" || char === "'") {
+		} else if (char === '"' || char === "'") {
 			quote = char
 		} else if (char === ">") {
 			return index

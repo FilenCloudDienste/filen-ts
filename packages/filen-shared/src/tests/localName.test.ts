@@ -22,15 +22,15 @@ describe("localName", () => {
 
 	it("replaces controls on every platform and the Windows set only on win32", () => {
 		expect(localName("a\tb\x7fc", "linux")).toBe("a_b_c")
-		expect(localName("a:b*c?d\"e<f>g|h", "win32")).toBe("a_b_c_d_e_f_g_h")
-		expect(localName("a:b*c?d\"e<f>g|h", "darwin")).toBe("a:b*c?d\"e<f>g|h")
+		expect(localName('a:b*c?d"e<f>g|h', "win32")).toBe("a_b_c_d_e_f_g_h")
+		expect(localName('a:b*c?d"e<f>g|h', "darwin")).toBe('a:b*c?d"e<f>g|h')
 	})
 
 	it("normalizes to NFC", () => {
 		expect(localName("Ä.txt", "linux")).toBe("Ä.txt")
 	})
 
-	it("maps CON, com1.txt and \"name.\" on win32 and not on darwin", () => {
+	it('maps CON, com1.txt and "name." on win32 and not on darwin', () => {
 		expect(localName("CON", "win32")).toBe("CON_")
 		expect(localName("com1.txt", "win32")).toBe("com1_.txt")
 		expect(localName("nul.tar.gz", "win32")).toBe("nul_.tar.gz")
@@ -40,7 +40,7 @@ describe("localName", () => {
 		expect(localName("name.", "darwin")).toBe("name.")
 	})
 
-	it("maps CONIN$, COM¹ and \"CON .txt\" on win32", () => {
+	it('maps CONIN$, COM¹ and "CON .txt" on win32', () => {
 		expect(localName("conin$", "win32")).toBe("conin$_")
 		expect(localName("CONOUT$.log", "win32")).toBe("CONOUT$_.log")
 		expect(localName("COM¹", "win32")).toBe("COM¹_")
@@ -50,7 +50,7 @@ describe("localName", () => {
 		expect(localName("console", "win32")).toBe("console")
 	})
 
-	it("never returns \"\", \".\" or \"..\"", () => {
+	it('never returns "", "." or ".."', () => {
 		for (const platform of ["darwin", "win32", "linux"] as const) {
 			for (const name of ["", ".", "..", "...", " "]) {
 				const result = localName(name, platform)

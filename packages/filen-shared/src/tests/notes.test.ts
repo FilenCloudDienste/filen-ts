@@ -46,46 +46,46 @@ describe("createNotePreviewFromContentText", () => {
 
 	describe("checklist", () => {
 		it("should extract first non-empty list item", () => {
-			const html = "<ul data-checked=\"false\"><li>First item</li><li>Second item</li></ul>"
+			const html = '<ul data-checked="false"><li>First item</li><li>Second item</li></ul>'
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("First item")
 		})
 
 		it("should skip empty items", () => {
-			const html = "<ul data-checked=\"false\"><li></li><li>Actual item</li></ul>"
+			const html = '<ul data-checked="false"><li></li><li>Actual item</li></ul>'
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("Actual item")
 		})
 
 		it("should return empty string for empty checklist", () => {
-			const html = "<ul data-checked=\"false\"><li></li></ul>"
+			const html = '<ul data-checked="false"><li></li></ul>'
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("")
 		})
 
 		it("decodes the row text instead of showing its entities", () => {
-			const html = "<ul data-checked=\"false\"><li>Tom &amp; Jerry</li></ul>"
+			const html = '<ul data-checked="false"><li>Tom &amp; Jerry</li></ul>'
 
 			expect(createNotePreviewFromContentText("checklist", html)).toBe("Tom & Jerry")
 		})
 
 		it("keeps an escaped tag-like row as text (decoded after tags are gone, not stripped)", () => {
-			const html = "<ul data-checked=\"true\"><li>Fix &lt;Header&gt;</li></ul>"
+			const html = '<ul data-checked="true"><li>Fix &lt;Header&gt;</li></ul>'
 
 			expect(createNotePreviewFromContentText("checklist", html)).toBe("Fix <Header>")
 		})
 
 		it("skips an empty first row (<br>) and previews the first row with text", () => {
-			const html = "<ul data-checked=\"false\"><li><br></li><li>Milk</li></ul>"
+			const html = '<ul data-checked="false"><li><br></li><li>Milk</li></ul>'
 
 			expect(createNotePreviewFromContentText("checklist", html)).toBe("Milk")
 		})
 
 		it("reads a row older mobile builds stored unescaped as it was typed", () => {
-			const html = "<ul data-checked=\"false\"><li>cut&copy</li></ul>"
+			const html = '<ul data-checked="false"><li>cut&copy</li></ul>'
 
 			expect(createNotePreviewFromContentText("checklist", html)).toBe("cut&copy")
 		})
@@ -106,7 +106,7 @@ describe("createNotePreviewFromContentText", () => {
 
 		// Rows older mobile builds stored unescaped can hold one; the parser's tag pattern took seconds to
 		// minutes on such a row, on every received edit of the note.
-		it("previews past a row with a \"<\" that starts no tag, quickly, and shows that row as typed", () => {
+		it('previews past a row with a "<" that starts no tag, quickly, and shows that row as typed', () => {
 			const row = "Fix the bug where count<limit fails on second try"
 			const start = performance.now()
 
@@ -146,8 +146,7 @@ describe("createNotePreviewFromContentText", () => {
 describe("createNotePreviewFromContentText matches the whole-segment preview", () => {
 	function wholeSegmentPreview(type: "rich" | "other", content: string): string {
 		if (type === "rich") {
-			const segment =
-				content.indexOf("<p><br></p>") === -1 ? (content.split("\n")[0] ?? "") : (content.split("<p><br></p>")[0] ?? "")
+			const segment = content.indexOf("<p><br></p>") === -1 ? (content.split("\n")[0] ?? "") : (content.split("<p><br></p>")[0] ?? "")
 
 			return decodeHtmlEntities(striptags(segment)).slice(0, 128)
 		}
@@ -173,9 +172,9 @@ describe("createNotePreviewFromContentText matches the whole-segment preview", (
 		expectSame(prose.repeat(3))
 	})
 
-	it("a tag, a quoted \">\", a comment and an entity straddling the chunk cut", () => {
+	it('a tag, a quoted ">", a comment and an entity straddling the chunk cut', () => {
 		for (let before = 1; before < 12; before++) {
-			expectSame(atCut("<span class=\"a\">", before))
+			expectSame(atCut('<span class="a">', before))
 			expectSame(atCut("<a title=\"1 > 0\" href='x>y'>", before))
 			expectSame(atCut("<!-- a > b -- c -->", before))
 			expectSame(atCut("&amp;&lt;&#65;&#x42;", before))
@@ -191,7 +190,7 @@ describe("createNotePreviewFromContentText matches the whole-segment preview", (
 		}
 	})
 
-	it("an \"&\" followed only by alphanumerics right at the chunk end", () => {
+	it('an "&" followed only by alphanumerics right at the chunk end', () => {
 		expectSame("<p>" + "a".repeat(4096 - 3 - 3) + "&am" + "p;" + "b".repeat(5000) + "</p>")
 		expectSame("<p>" + "a".repeat(4096 - 3 - 4) + "&#12" + "3;" + "b".repeat(5000) + "</p>")
 		expectSame("<p>" + "a".repeat(4096 - 3 - 4) + "&#x4" + "1;" + "b".repeat(5000) + "</p>")
@@ -199,15 +198,15 @@ describe("createNotePreviewFromContentText matches the whole-segment preview", (
 	})
 
 	it("a large data: image tag before the text", () => {
-		expectSame("<p><img src=\"data:image/png;base64," + "QUJD".repeat(5000) + "\">Caption &amp; more</p>" + prose)
+		expectSame('<p><img src="data:image/png;base64,' + "QUJD".repeat(5000) + '">Caption &amp; more</p>' + prose)
 	})
 
 	it("fewer than 128 visible characters in a long note", () => {
-		expectSame("<p><img src=\"data:image/png;base64," + "QUJD".repeat(5000) + "\">Short &amp; sweet</p>")
+		expectSame('<p><img src="data:image/png;base64,' + "QUJD".repeat(5000) + '">Short &amp; sweet</p>')
 		expectSame("<p>" + "<b></b>".repeat(3000) + "tiny</p>")
 	})
 
-	it("a single early \"&\" followed by long plain prose", () => {
+	it('a single early "&" followed by long plain prose', () => {
 		expectSame("<p>Q&amp;A " + "plain words only ".repeat(1000) + "</p>")
 		expectSame("<p>Q&A " + "plain words only ".repeat(1000) + "</p>")
 	})
@@ -230,7 +229,7 @@ describe("createNotePreviewFromContentText matches the whole-segment preview", (
 	})
 
 	it("other notes with a long first line", () => {
-		expectSame("{\"json\":\"" + "v".repeat(10000) + "\"}\nsecond")
+		expectSame('{"json":"' + "v".repeat(10000) + '"}\nsecond')
 		expectSame("<<a>>" + "w".repeat(10000))
 		expectSame("< not a tag " + "w".repeat(10000))
 	})
@@ -253,7 +252,29 @@ describe("createNotePreviewFromContentText matches the whole-segment preview", (
 
 			return seed % max
 		}
-		const pieces = ["<p>", "</p>", "<b>", "</b>", "<a href=\"x>y\">", "<!-- c -->", "&amp;", "&lt;", "&#65;", "&", "&am", "p;", "\"", "'", "<", ">", "😀", " ", "text", "#", ";"]
+		const pieces = [
+			"<p>",
+			"</p>",
+			"<b>",
+			"</b>",
+			'<a href="x>y">',
+			"<!-- c -->",
+			"&amp;",
+			"&lt;",
+			"&#65;",
+			"&",
+			"&am",
+			"p;",
+			'"',
+			"'",
+			"<",
+			">",
+			"😀",
+			" ",
+			"text",
+			"#",
+			";"
+		]
 
 		for (let round = 0; round < 60; round++) {
 			let content = ""

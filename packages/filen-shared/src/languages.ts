@@ -100,8 +100,14 @@ function resolveTag<L extends string>(tag: string, supported: readonly L[]): L |
 	}
 
 	const language = LANGUAGE_ALIASES[rawLanguage] ?? rawLanguage
-	const script = parts.slice(1).find(part => part.length === 4)?.toLowerCase()
-	const region = parts.slice(1).find(part => part.length === 2 || /^\d{3}$/.test(part))?.toUpperCase()
+	const script = parts
+		.slice(1)
+		.find(part => part.length === 4)
+		?.toLowerCase()
+	const region = parts
+		.slice(1)
+		.find(part => part.length === 2 || /^\d{3}$/.test(part))
+		?.toUpperCase()
 	const exact = findSupported(tag.trim().replaceAll("_", "-"), supported)
 
 	if (exact !== undefined) {

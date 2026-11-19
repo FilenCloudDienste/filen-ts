@@ -97,7 +97,9 @@ const strokesEntry = type({
 const imageEntry = type({
 	...common,
 	kind: "'image'",
-	png: type("string").narrow(value => value.length > 0 && value.length <= Math.ceil(PDF_SIGNATURE_MAX_PNG_BYTES / 3) * 4 && BASE64.test(value)),
+	png: type("string").narrow(
+		value => value.length > 0 && value.length <= Math.ceil(PDF_SIGNATURE_MAX_PNG_BYTES / 3) * 4 && BASE64.test(value)
+	),
 	"style?": type("string").narrow(value => ID.test(value))
 })
 

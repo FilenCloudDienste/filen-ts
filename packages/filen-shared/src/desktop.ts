@@ -309,12 +309,7 @@ export interface DesktopSyncImportNote {
 // Why deletions were held back for approval.
 // restoreUnfinished: a restore of held deletions has not landed yet, so what it would put back stays held.
 export type DesktopSyncHeldReason =
-	| "scanIncomplete"
-	| "firstSyncWithDeletions"
-	| "remoteUnconverged"
-	| "remoteEmptied"
-	| "exceededThreshold"
-	| "restoreUnfinished"
+	"scanIncomplete" | "firstSyncWithDeletions" | "remoteUnconverged" | "remoteEmptied" | "exceededThreshold" | "restoreUnfinished"
 
 // Why a pass applies nothing: two items on one side resolve to the same path (only a mode switch adopting the
 // destination across such a pair refuses).
@@ -711,8 +706,7 @@ export type DesktopMountsRoleState = "off" | "starting" | "running" | "stopping"
 // What mounts the drive: macFUSE when installed, else rclone's NFS mount (macOS); WinFsp; Linux fuse3. `installable`:
 // the app ships an installer for the missing one.
 export type DesktopFuseStatus =
-	| { state: "ready"; provider: "macFuse" | "nfsMount" | "winFsp" | "fuse3" }
-	| { state: "missing"; installable: boolean }
+	{ state: "ready"; provider: "macFuse" | "nfsMount" | "winFsp" | "fuse3" } | { state: "missing"; installable: boolean }
 
 export type DesktopMountsErrorCode =
 	| "hostUnavailable"
@@ -822,15 +816,7 @@ export interface DesktopMountsStats {
 
 // Why a chosen directory cannot be the drive's mount point.
 export type DesktopMountPointProblem =
-	| "notDirectory"
-	| "notEmpty"
-	| "symlink"
-	| "outsideHome"
-	| "homeDirectory"
-	| "appData"
-	| "temporary"
-	| "insidePair"
-	| "containsPair"
+	"notDirectory" | "notEmpty" | "symlink" | "outsideHome" | "homeDirectory" | "appData" | "temporary" | "insidePair" | "containsPair"
 
 // `id` stands for the chosen directory in a later setDrive; the page never sends a path back.
 export type DesktopMountPointChoice =
@@ -842,8 +828,7 @@ export type DesktopMountPointChoice =
 export type DesktopCredentialProtocol = Exclude<DesktopServeProtocol, "nfs">
 
 export type DesktopServeCredentials =
-	| { kind: "basic"; user: string; password: string }
-	| { kind: "s3"; accessKeyId: string; secretAccessKey: string }
+	{ kind: "basic"; user: string; password: string } | { kind: "s3"; accessKeyId: string; secretAccessKey: string }
 
 // An address a server can listen on: loopback, one LAN interface's IPv4 address, or every interface ("0.0.0.0").
 export interface DesktopListenAddress {
@@ -927,14 +912,7 @@ export interface DesktopFileProviderState {
 }
 
 export type DesktopFileProviderErrorCode =
-	| "unsupported"
-	| "appLocked"
-	| "noSession"
-	| "translocated"
-	| "extensionMissing"
-	| "notFound"
-	| "timeout"
-	| "unknown"
+	"unsupported" | "appLocked" | "noSession" | "translocated" | "extensionMissing" | "notFound" | "timeout" | "unknown"
 
 // `message`: the system's error domain and code, for the log only.
 export interface DesktopFileProviderError {
