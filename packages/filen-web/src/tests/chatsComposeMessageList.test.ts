@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "@filen/sdk-rs"
 import { composeMessageList, buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
+import { mockChatMessage } from "@/tests/fixtures/sdk"
 
 // Pure core of the chat send outbox — no store/IO. Uuid-shaped fields are the SDK's branded UuidStr;
 // literal strings with 3+ dashes satisfy that template type directly, so no casts are needed.
@@ -9,18 +10,15 @@ import type { ChatMessageWithInflightId } from "@/features/chats/store/useChatsI
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
 
 function confirmed(uuid: string, sentTimestamp: bigint, message = "hi"): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: uuid as ChatMessage["uuid"],
 		chat: "chat-a-a-a",
 		senderId: 7,
 		senderEmail: "me@filen.io",
 		senderNickName: "Me",
 		message,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp
-	}
+	})
 }
 
 function optimistic(inflightId: string, sentTimestamp: bigint, content = "queued"): ChatMessageWithInflightId {

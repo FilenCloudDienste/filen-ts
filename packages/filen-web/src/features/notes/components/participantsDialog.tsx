@@ -38,7 +38,7 @@ export interface ParticipantsDialogProps {
 // it stays the note menu's own dialog-routed "Leave" entry (noteMenu.logic.ts), so a participant's own
 // row in this list never carries a remove control even when viewed by the owner.
 export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsDialogProps) {
-	const { t } = useTranslation(["notes", "common"])
+	const { t } = useTranslation(["notes", "common", "contacts"])
 	const isOnline = useIsOnline()
 	const accountQuery = useAccountQuery()
 	const note = useLiveNote(initialNote)
@@ -51,6 +51,8 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 	// under the other (re-enabling that row mid-write and letting the dialog close).
 	const [pendingUserId, setPendingUserId] = useState<bigint | null>(null)
 	const [removing, setRemoving] = useState<NoteParticipant | null>(null)
+	// Block confirms first, as everywhere else it is offered (it also drops the contact); unblock does not.
+	const [blocking, setBlocking] = useState<NoteParticipant | null>(null)
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [addPending, setAddPending] = useState(false)
 	const [filter, setFilter] = useState("")
@@ -104,6 +106,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 		setPendingUserId(participant.userId)
 		const outcome = await toggled
 		setPendingUserId(null)
+		setBlocking(null)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -208,7 +211,11 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 										email: participant.email
 									})}
 									onClick={() => {
-										void handleToggleBlock(participant, blocked)
+										if (blocked) {
+											void handleToggleBlock(participant, true)
+										} else {
+											setBlocking(participant)
+										}
 									}}
 								>
 									{blocked ? <UserCheckIcon aria-hidden="true" /> : <UserXIcon aria-hidden="true" />}
@@ -319,6 +326,25 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 				onConfirm={() => {
 					if (removing) {
 						void handleRemoveConfirmed(removing)
+					}
+				}}
+			/>
+			<ConfirmDialog
+				open={blocking !== null}
+				pending={pendingUserId !== null}
+				title={t("contacts:contactsBlockConfirmTitle")}
+				body={t("contacts:contactsBlockConfirmBodySingle")}
+				confirmLabel={t("contacts:contactsActionBlock")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={open => {
+					if (!open) {
+						setBlocking(null)
+					}
+				}}
+				onConfirm={() => {
+					if (blocking) {
+						void handleToggleBlock(blocking, false)
 					}
 				}}
 			/>

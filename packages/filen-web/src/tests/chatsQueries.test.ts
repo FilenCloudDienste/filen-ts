@@ -50,6 +50,7 @@ import {
 	useChatMessages
 } from "@/features/chats/queries/chatMessages"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatMessage, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -57,45 +58,15 @@ beforeEach(() => {
 })
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 1n,
-		email: "a@example.com",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
+	return mockChatParticipant({ userId: 1n, email: "a@example.com", ...overrides })
 }
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ participants: [mockParticipant()], ...overrides })
 }
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		message: "hello",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n,
-		...overrides
-	}
+	return mockChatMessage({ senderEmail: "a@example.com", message: "hello", sentTimestamp: 1_000n, ...overrides })
 }
 
 describe("fetchChats", () => {

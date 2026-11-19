@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest"
-import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	assembleDragPayload,
@@ -10,38 +9,7 @@ import {
 	isValidMoveTarget
 } from "@/features/drive/lib/dnd.logic"
 import { testUuid } from "@/tests/support/uuid"
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
-
-function mockFile(overrides: Partial<File> = {}): File {
-	return {
-		uuid: testUuid("file"),
-		stableUUID: undefined,
-		parent: testUuid("parent"),
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: true,
-		meta: {
-			type: "decoded",
-			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
-		},
-		...overrides
-	}
-}
+import { mockDir, mockFile } from "@/tests/fixtures/sdk"
 
 function dirItem(uuid: string, parent: string): DriveItem {
 	return narrowItem(mockDir({ uuid: testUuid(uuid), parent: testUuid(parent) }))

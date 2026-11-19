@@ -22,35 +22,16 @@ vi.mock("@/features/chats/hooks/useChatTyping", () => ({ useChatTypingLabel: () 
 
 import { ChatRow, type ChatRowProps } from "@/features/chats/components/chatRow"
 import { touchLongPress, touchTap } from "@/tests/support/touch"
-import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatMessage, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 function mockParticipant(userId: bigint, email: string): ChatParticipant {
-	return { userId, email, nickName: undefined, permissionsAdd: false, added: 0n, appearOffline: false, lastActive: 0n }
+	return mockChatParticipant({ userId, email })
 }
 
-const chat: Chat = {
-	uuid: testUuid("chat"),
-	ownerId: 1n,
-	key: "chat-key",
-	participants: [mockParticipant(1n, "me@example.com"), mockParticipant(2n, "zoe@example.com")],
-	muted: false,
-	created: 0n,
-	lastFocus: 0n
-}
+const chat = mockChat({ participants: [mockParticipant(1n, "me@example.com"), mockParticipant(2n, "zoe@example.com")] })
 
 function lastMessage(senderId: number, senderEmail: string): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId,
-		senderEmail,
-		senderNickName: undefined,
-		message: "hi",
-		chat: chat.uuid,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n
-	}
+	return mockChatMessage({ senderId, senderEmail, chat: chat.uuid, sentTimestamp: 1_000n })
 }
 
 function renderRow(

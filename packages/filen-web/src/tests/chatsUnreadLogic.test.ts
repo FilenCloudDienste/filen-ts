@@ -17,34 +17,14 @@ import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import { sumUnread } from "@/features/chats/hooks/useChatsUnreadCount"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatMessage } from "@/tests/fixtures/sdk"
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 100n,
-		...overrides
-	}
+	return fixtureChat({ lastFocus: 100n, ...overrides })
 }
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 2,
-		senderEmail: "peer@x.io",
-		senderNickName: "Peer",
-		message: "hi",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 200n,
-		...overrides
-	}
+	return mockChatMessage({ senderId: 2, senderEmail: "peer@x.io", senderNickName: "Peer", sentTimestamp: 200n, ...overrides })
 }
 
 // What the SDK hands over for a chat this account never focused: sdk-rs.d.ts types lastFocus as bigint,

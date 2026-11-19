@@ -27,6 +27,7 @@ import {
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChatMessage } from "@/tests/fixtures/sdk"
 
 // Local-calendar timestamp so the day-boundary tests are deterministic regardless of the runner's TZ
 // (buildThreadRows uses local getFullYear/Month/Date, matching how the time-header label renders).
@@ -50,19 +51,12 @@ let counter = 0
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	counter += 1
 
-	return {
+	return mockChatMessage({
 		uuid: testUuid(`msg${String(counter)}`),
-		senderId: 1,
 		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		message: "hi",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp: ts(2021, 1, 1, 12, 0),
 		...overrides
-	}
+	})
 }
 
 function runFlags(rows: ThreadRow[]): { key: string; runStart: boolean }[] {

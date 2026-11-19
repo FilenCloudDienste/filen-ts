@@ -13,42 +13,10 @@ import {
 	ownDirectoryUuids
 } from "@/features/drive/components/moveTargetDialog.logic"
 import { testUuid } from "@/tests/support/uuid"
-import { receiverRole } from "@/tests/fixtures/sdk"
+import { mockDir, mockFile, receiverRole } from "@/tests/fixtures/sdk"
 
 // Local fixtures mirror itemMenu.test.ts's own per-file convention (each test file owns its minimal
 // Dir/File shape rather than sharing one across files).
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
-
-function mockFile(overrides: Partial<File> = {}): File {
-	return {
-		uuid: testUuid("file"),
-		stableUUID: undefined,
-		parent: testUuid("parent"),
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: true,
-		meta: {
-			type: "decoded",
-			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
-		},
-		...overrides
-	}
-}
-
 function dirItem(uuid: string, overrides: Partial<Dir> = {}): DriveItem {
 	return narrowItem(mockDir({ uuid: testUuid(uuid), ...overrides }))
 }

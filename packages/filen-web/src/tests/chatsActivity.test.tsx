@@ -11,6 +11,7 @@ import type { ExternalToast } from "sonner"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import "@/lib/i18n"
 
@@ -61,24 +62,14 @@ const { useChatDialogHost } = await import("@/features/chats/hooks/useChatDialog
 const { useChatsSelectionStore } = await import("@/features/chats/store/useChatsSelectionStore")
 
 function participant(userId: bigint, email: string, nickName?: string): ChatParticipant {
-	return { userId, email, nickName, permissionsAdd: false, added: 0n, appearOffline: false, lastActive: 0n }
+	return mockChatParticipant({ userId, email, nickName })
 }
 
 const SELF = participant(1n, "me@x.io")
 const BOB = participant(2n, "bob@x.io", "Bob")
 
 function chat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		name: "Team",
-		participants: [SELF, BOB],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return mockChat({ name: "Team", participants: [SELF, BOB], ...overrides })
 }
 
 // A message from someone else after the chat was last focused: what makes "Mark as read" appear.

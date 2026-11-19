@@ -97,3 +97,31 @@ describe("ParticipantsDialog — one operation at a time", () => {
 		expect(blockOther.disabled).toBe(false)
 	})
 })
+
+describe("ParticipantsDialog — block confirms first", () => {
+	it("opens a confirm and blocks nothing until it is confirmed; cancel blocks nothing", async () => {
+		toggleParticipantBlocked.mockReturnValue(Promise.resolve({ status: "success" }))
+		render(createElement(ParticipantsDialog, { note, onClose: () => undefined }))
+
+		fireEvent.click(screen.getByRole("button", { name: "Block a@x.io" }))
+
+		expect(screen.getByText("Block contact?")).toBeTruthy()
+		expect(toggleParticipantBlocked).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+		expect(screen.queryByText("Block contact?")).toBeNull()
+		expect(toggleParticipantBlocked).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: "Block a@x.io" }))
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Block" }))
+			await Promise.resolve()
+		})
+
+		expect(toggleParticipantBlocked).toHaveBeenCalledTimes(1)
+		expect(toggleParticipantBlocked).toHaveBeenCalledWith(note.participants[1], [], false)
+		expect(screen.queryByText("Block contact?")).toBeNull()
+	})
+})

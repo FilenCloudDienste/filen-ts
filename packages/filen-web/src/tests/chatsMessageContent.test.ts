@@ -9,22 +9,14 @@ import "@/lib/i18n"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 import { segmentMessage } from "@filen/shared"
+import { mockChat as fixtureChat, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 afterEach(() => {
 	cleanup()
 })
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: "aaaaaaaa-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ uuid: "aaaaaaaa-0000-0000-0000-000000000000", ...overrides })
 }
 
 // External links read their domain trust through a query.
@@ -104,17 +96,7 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 describe("MessageContent — mentions", () => {
 	it("renders a current participant's mention as their display name", () => {
 		const chat = mockChat({
-			participants: [
-				{
-					userId: 2n,
-					email: "alice@example.com",
-					nickName: "Alice",
-					permissionsAdd: false,
-					added: 0n,
-					appearOffline: false,
-					lastActive: 0n
-				}
-			]
+			participants: [mockChatParticipant({ userId: 2n, email: "alice@example.com", nickName: "Alice" })]
 		})
 
 		const { container } = render(content(chat, "hey @alice@example.com nice"))

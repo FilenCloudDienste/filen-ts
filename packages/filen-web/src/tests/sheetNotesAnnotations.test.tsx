@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useEffect } from "react"
 import "@/lib/i18n"
 import { CellFlag, type SheetSessionApi } from "@filen/office/core/sheet"
+import type { SheetThread } from "@/features/spreadsheet/comments/annotations.logic"
 import type { SheetCellPointer, SheetGridHandle, SheetGridModel, SheetGridState, SheetShortcut } from "@filen/office/react/sheet"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
 import type { SheetBodyExtension } from "@/features/spreadsheet/components/sheetExtension"
@@ -342,6 +343,37 @@ describe("sheet annotations around the author name and links to other sheets", (
 		} finally {
 			author.stored = "Jan"
 		}
+	})
+
+	it("names a comment thread without an author by the unknown author", { timeout: 30_000 }, async () => {
+		const model = await openGrid(await workbook([{ name: "One", rows: [["a", "b"]] }]), "xlsx")
+		const sheet = model.getSnapshot().sheet
+
+		configureAuthor(model, "Jan")
+		expect((await model.command({ type: "thread.add", sheet, row: 0, col: 0, text: "first" })).ok).toBe(true)
+
+		// The session writes every comment under an author; a file can still hold a thread whose author is empty.
+		const session = model.session as unknown as SheetSessionApi
+		const query = session.query.bind(session)
+
+		vi.spyOn(session, "query").mockImplementation((async (name: string, point: unknown) => {
+			const value = await (query as (name: string, point: unknown) => Promise<unknown>)(name, point)
+
+			return name === "thread.get" && value !== null
+				? { ...(value as SheetThread), comments: (value as SheetThread).comments.map(comment => ({ ...comment, author: "" })) }
+				: value
+		}) as SheetSessionApi["query"])
+
+		const probe = mount(model)
+
+		await ready(model, 0, 0, CellFlag.THREADED_COMMENT)
+		act(() => {
+			expect(probe.shortcut?.("note")).toBe(true)
+		})
+
+		const card = await screen.findByRole("dialog", { name: /^Comment thread by / }, { timeout: 10_000 })
+
+		expect(card.getAttribute("aria-label")).toBe("Comment thread by Unknown author")
 	})
 
 	it("posts a reply once when it is submitted again while the author name is still asked for", { timeout: 30_000 }, async () => {

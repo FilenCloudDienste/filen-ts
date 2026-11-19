@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage } from "@filen/sdk-rs"
+import type { Chat } from "@filen/sdk-rs"
 
 // Dropping files on the composer starts an upload, so it answers to the same gate as the attach menu:
 // offline, on a free account, or while an attachment is still uploading, the drop is refused with a
@@ -41,18 +41,12 @@ import { beginMessageEdit } from "@/features/chats/lib/composerEdit"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { MAX_CHAT_MESSAGE_LENGTH } from "@/features/chats/lib/composer.logic"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { mockChatMessage, mockChatParticipant, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 
 // The composer reads its keys from the registry.
 registerAllActions()
 
-const CHAT: Chat = {
-	uuid: "chat-0000-0000-0000-000000000000",
-	ownerId: 1n,
-	participants: [],
-	muted: false,
-	created: 0n,
-	lastFocus: 0n
-}
+const CHAT = mockUndecryptableChat({ uuid: "chat-0000-0000-0000-000000000000" })
 
 function renderComposer(): HTMLElement {
 	const { container } = render(
@@ -163,18 +157,12 @@ describe("Composer — dropping files", () => {
 	})
 })
 
-const EDITED: ChatMessage = {
+const EDITED = mockChatMessage({
 	uuid: "edit-0000-0000-0000-000000000000",
 	chat: CHAT.uuid,
-	senderId: 1,
 	senderEmail: "me@filen.io",
-	senderNickName: undefined,
-	message: "old text",
-	embedDisabled: false,
-	edited: false,
-	editedTimestamp: 0n,
-	sentTimestamp: 0n
-}
+	message: "old text"
+})
 
 describe("Composer — attach menu on a free account", () => {
 	it("opens with the reason and an Upgrade to the plans instead of the attach entries", async () => {
@@ -235,24 +223,8 @@ const PARTICIPANT_CHAT: Chat = {
 	...CHAT,
 	uuid: "chat-1111-1111-1111-111111111111",
 	participants: [
-		{
-			userId: 2n,
-			email: "alice@filen.io",
-			nickName: undefined,
-			permissionsAdd: false,
-			added: 0n,
-			appearOffline: false,
-			lastActive: 0n
-		},
-		{
-			userId: 3n,
-			email: "alfred@filen.io",
-			nickName: undefined,
-			permissionsAdd: false,
-			added: 0n,
-			appearOffline: false,
-			lastActive: 0n
-		}
+		mockChatParticipant({ userId: 2n, email: "alice@filen.io" }),
+		mockChatParticipant({ userId: 3n, email: "alfred@filen.io" })
 	]
 }
 

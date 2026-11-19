@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon, UserXIcon } from "lucide-react"
-import type { Chat, ChatMessage } from "@filen/sdk-rs"
+import type { ChatMessage } from "@filen/sdk-rs"
 import { deriveBlockedUsers } from "@filen/shared"
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
@@ -24,53 +24,14 @@ import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/que
 import { deleteMessage, editMessage, disableMessageEmbed } from "@/features/chats/lib/messageActions"
 import { parkOwnMessageEcho } from "@/features/chats/lib/parkedOwnMessages"
 import { applyMessageOfflineGate, messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
-import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatMessage, mockUndecryptableChatMessage } from "@/tests/fixtures/sdk"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		message: "hello",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 0n,
-		...overrides
-	}
+	return mockChatMessage({ senderEmail: "a@example.com", message: "hello", ...overrides })
 }
 
-// exactOptionalPropertyTypes distinguishes "key absent" (valid for an optional field) from "key
-// present with value undefined" (rejected) — an undecryptable message genuinely never has the `message`
-// key, mirrors chatsSort.test.ts's own mockUndecryptableChat.
 function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message"> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 0n,
-		...overrides
-	}
-}
-
-function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return mockUndecryptableChatMessage({ senderEmail: "a@example.com", ...overrides })
 }
 
 describe("messageMenuActions", () => {

@@ -7,6 +7,7 @@ import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { buildChatList, type ChatSection } from "@/features/chats/components/chatsSidebar.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 // A section header controls its listbox only while that listbox exists, and a section with no rows to show renders
 // none: an empty listbox is announced as a list of nothing.
@@ -22,28 +23,14 @@ afterEach(() => {
 })
 
 function participant(userId: bigint): ChatParticipant {
-	return {
-		userId,
-		email: `${String(userId)}@example.com`,
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n
-	}
+	return mockChatParticipant({ userId, email: `${String(userId)}@example.com` })
 }
 
 function chat(label: string, userIds: bigint[]): Chat {
 	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: userIds.map(participant),
-		muted: false,
-		created: 0n,
+		...mockChat({ uuid: testUuid(label), participants: userIds.map(participant), name: label }),
 		lastFocus: undefined,
-		lastMessage: undefined,
-		name: label
+		lastMessage: undefined
 	} as unknown as Chat
 }
 

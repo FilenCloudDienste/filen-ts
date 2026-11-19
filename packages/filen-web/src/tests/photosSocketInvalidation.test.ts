@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, SocketEvent } from "@filen/sdk-rs"
+import type { File, SocketEvent } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -11,6 +11,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { photosListingQueryKey } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
 import { testUuid } from "@/tests/support/uuid"
+import { mockDir } from "@/tests/fixtures/sdk"
 
 const ROOT_UUID = "root-uuid"
 // The fixture file's whole-life id, and the uuid a content edit rotates the lineage onto (what `newUUID`
@@ -46,18 +47,6 @@ function mockPhoto(overrides: Partial<File> = {}): File {
 		},
 		...overrides
 	})
-}
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
 }
 
 function driveEvt(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): Extract<SocketEvent, { type: "drive" }> {

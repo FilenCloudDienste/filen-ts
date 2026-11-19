@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { deriveBlockedUsers, type BlockedUsers } from "@filen/shared"
 import {
@@ -15,39 +15,7 @@ import {
 import { DRIVE_SORT_BY, DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
 import { dotFilenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
-import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
-
-function mockFile(overrides: Partial<File> = {}): File {
-	return {
-		uuid: testUuid("file"),
-		stableUUID: undefined,
-		parent: testUuid("parent"),
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: true,
-		meta: {
-			type: "decoded",
-			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
-		},
-		...overrides
-	}
-}
+import { mockDir, mockFile, sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 function mockSharedRootDir(uuid: UuidStr, role: SharingRole): SharedRootDir {
 	return {

@@ -3,6 +3,7 @@ import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { mockDir } from "@/tests/fixtures/sdk"
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
@@ -20,18 +21,6 @@ function mockFile(overrides: Partial<File> = {}): File {
 			type: "decoded",
 			data: { name: "clip.mp4", mime: "video/mp4", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
 		},
-		...overrides
-	}
-}
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
 		...overrides
 	}
 }

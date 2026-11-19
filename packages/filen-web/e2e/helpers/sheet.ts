@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test"
 import { expect } from "../fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./listing"
+import { escapeRegExp } from "./rows"
 import { preview } from "@/locales/en/preview"
 
 // The xlsx MIME type the sheet specs upload their workbooks with.
@@ -43,7 +44,7 @@ function topLeft(ref: string): string {
 export async function expectSelection(dialog: Locator, range: string): Promise<void> {
 	const said = preview.previewSheetRangeSelected.replace("{{range}}", range)
 
-	await expect(dialog.locator(".fo-sheet-live")).toHaveText(new RegExp(`, ${said.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
+	await expect(dialog.locator(".fo-sheet-live")).toHaveText(new RegExp(`, ${escapeRegExp(said)}$`))
 }
 
 // Makes `ref` ("B4", "A2:A4") the selection through the name box, without asserting where focus goes after.

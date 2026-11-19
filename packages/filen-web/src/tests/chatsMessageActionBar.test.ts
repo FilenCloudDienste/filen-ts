@@ -2,22 +2,10 @@ import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "@filen/sdk-rs"
 import { applyMessageOfflineGate, messageMenuActions, type MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
 import { inlinePrimaryActions, INLINE_PRIMARY } from "@/features/chats/components/thread/messageActionBar.logic"
-import { testUuid } from "@/tests/support/uuid"
+import { mockChatMessage } from "@/tests/fixtures/sdk"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		message: "hello",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 0n,
-		...overrides
-	}
+	return mockChatMessage({ senderEmail: "a@example.com", message: "hello", ...overrides })
 }
 
 function ids(descriptors: { id: MessageActionId }[]): MessageActionId[] {

@@ -1,65 +1,26 @@
 import { describe, expect, it } from "vitest"
-import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 
 import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { deriveBlockedUsers } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
-
-function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 2n,
-		email: "p@x.io",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
-}
+import {
+	mockChat as fixtureChat,
+	mockChatMessage,
+	mockChatParticipant as mockParticipant,
+	mockUndecryptableChat
+} from "@/tests/fixtures/sdk"
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ participants: [mockParticipant()], ...overrides })
 }
 
-// exactOptionalPropertyTypes distinguishes "key absent" from "key present with value undefined" —
-// builds an undecryptable-style Chat by never including `key` at all, mirrors chatsSort.test.ts's own
-// mockUndecryptableChat.
 function undecryptableChat(overrides: Omit<Partial<Chat>, "key"> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return mockUndecryptableChat({ participants: [mockParticipant()], ...overrides })
 }
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 2,
-		senderEmail: "other@x.io",
-		senderNickName: "Other",
-		message: "hi",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 200n,
-		...overrides
-	}
+	return mockChatMessage({ senderId: 2, senderEmail: "other@x.io", senderNickName: "Other", sentTimestamp: 200n, ...overrides })
 }
 
 const OWNER = 1n

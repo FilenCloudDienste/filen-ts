@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, renderHook } from "@testing-library/react"
-import type { Chat, ChatMessage } from "@filen/sdk-rs"
+import type { ChatMessage } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 const { blockContactByEmail, toastSuccess, toastError } = vi.hoisted(() => ({
@@ -17,21 +17,19 @@ vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }
 
 import { MessageBlockRequestContext, useMessageActions, useMessageBlockConfirm } from "@/features/chats/components/thread/useMessageActions"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChatMessage, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 
-const chat: Chat = { uuid: testUuid("c1"), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 0n }
+const chat = mockUndecryptableChat({ uuid: testUuid("c1") })
 
-const message: ChatMessage = {
+const message = mockChatMessage({
 	uuid: testUuid("m1"),
 	chat: testUuid("c1"),
 	senderId: 5,
 	senderEmail: "peer@x.io",
 	senderNickName: "Peer",
 	message: "hello",
-	embedDisabled: false,
-	edited: false,
-	editedTimestamp: 0n,
 	sentTimestamp: 100n
-}
+})
 
 beforeEach(() => {
 	vi.clearAllMocks()

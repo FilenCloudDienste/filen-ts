@@ -201,6 +201,60 @@ describe("DocxEditView with write protection", () => {
 		expect(screen.queryByText("This document needs a password to be edited. You can view it without one.")).toBeNull()
 	}, 60_000)
 
+	it("starts the pages' overlay cache again when the right password opens the document again", async () => {
+		// The view caches each mounted page's overlay in a Map keyed by page index, holding the editor it was made
+		// for: watch which Map each editor's entries go into.
+		const sets = vi.spyOn(Map.prototype, "set")
+		const cachesOf = (editor: PagedEditor): Set<unknown> =>
+			new Set(
+				sets.mock.calls.flatMap(([key, value]: unknown[], call) =>
+					typeof key === "number" &&
+					typeof value === "object" &&
+					value !== null &&
+					"element" in value &&
+					"editor" in value &&
+					value.editor === editor
+						? [sets.mock.contexts[call]]
+						: []
+				)
+			)
+
+		try {
+			const first = await openEditor(await protectedDocx(WORD_PASSWORD))
+
+			await waitFor(() => {
+				expect(cachesOf(first).size).toBe(1)
+			})
+
+			fireEvent.click(await screen.findByRole("button", { name: "Edit…" }))
+			await screen.findByRole("dialog")
+			submit("a")
+			// Word's 100,000 SHA-512 spins, a second or more on a loaded runner.
+			await waitFor(
+				() => {
+					expect(hooks.hosts).toHaveLength(2)
+				},
+				{ timeout: 25_000 }
+			)
+
+			const second = await lastEditor()
+
+			await waitFor(() => {
+				expect(cachesOf(second).size).toBe(1)
+			})
+
+			const [firstCache] = cachesOf(first)
+			const [secondCache] = cachesOf(second)
+
+			// A cache of its own, holding nothing of the first editor's pages.
+			expect(secondCache).not.toBe(firstCache)
+			expect(secondCache).toBeInstanceOf(Map)
+			expect([...(secondCache as Map<number, { editor: unknown }>).values()].some(entry => entry.editor === first)).toBe(false)
+		} finally {
+			sets.mockRestore()
+		}
+	}, 60_000)
+
 	it("lifts a read-only recommendation with Edit anyway, without opening the document again", async () => {
 		const editor = await openEditor(await protectedDocx(RECOMMENDED))
 

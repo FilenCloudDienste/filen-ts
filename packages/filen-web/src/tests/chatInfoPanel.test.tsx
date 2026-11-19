@@ -9,6 +9,7 @@ import { useState } from "react"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
 import { mockBlockedContact, mockContact } from "@/tests/support/contactFixtures"
 import "@/lib/i18n"
 
@@ -48,7 +49,7 @@ const { openChatInfo, useChatInfoStore } = await import("@/features/chats/store/
 const { SidePanelSlotContext } = await import("@/features/shell/lib/sidePanelSlot")
 
 function participant(userId: bigint, email: string, nickName?: string): ChatParticipant {
-	return { userId, email, nickName, permissionsAdd: false, added: 0n, appearOffline: false, lastActive: 0n }
+	return mockChatParticipant({ userId, email, nickName })
 }
 
 const SELF = participant(1n, "me@x.io", "Me")
@@ -56,17 +57,7 @@ const BOB = participant(2n, "bob@x.io", "Bob")
 const CAROL = participant(3n, "carol@x.io", "Carol")
 
 function chat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		name: "Design team",
-		participants: [BOB, SELF, CAROL],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return mockChat({ name: "Design team", participants: [BOB, SELF, CAROL], ...overrides })
 }
 
 // The thread's header toggle and its host, with the shell's side-panel slot beside them.

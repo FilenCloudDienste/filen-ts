@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import type { ChatParticipant } from "@filen/sdk-rs"
 
 const { addChatParticipantOp, removeChatParticipantOp } = vi.hoisted(() => ({
 	addChatParticipantOp: vi.fn(),
@@ -27,7 +27,7 @@ import {
 } from "@/features/chats/components/chatInfoPanel.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainContact } from "@/tests/support/contactFixtures"
-import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -35,29 +35,7 @@ beforeEach(() => {
 })
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 2n,
-		email: "p@x.io",
-		nickName: "p",
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
-}
-
-function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return mockChatParticipant({ nickName: "p", ...overrides })
 }
 
 describe("addChatParticipants — sequential ordering", () => {

@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage, Dir, File, LinkedFile, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatParticipant, Dir, File, LinkedFile, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { linkedFileIntoDriveItem, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -149,6 +149,28 @@ export function mockChat(overrides: Partial<Chat> = {}): Chat {
 	}
 }
 
+// An undecryptable chat: the group key is absent, never `key: undefined` (exactOptionalPropertyTypes).
+export function mockUndecryptableChat(overrides: Omit<Partial<Chat>, "key"> = {}): Chat {
+	const chat = mockChat(overrides)
+
+	delete chat.key
+
+	return chat
+}
+
+export function mockChatParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
+	return {
+		userId: 2n,
+		email: "p@x.io",
+		nickName: undefined,
+		permissionsAdd: false,
+		added: 0n,
+		appearOffline: false,
+		lastActive: 0n,
+		...overrides
+	}
+}
+
 export function mockChatMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	return {
 		uuid: testUuid("msg"),
@@ -163,4 +185,13 @@ export function mockChatMessage(overrides: Partial<ChatMessage> = {}): ChatMessa
 		sentTimestamp: 0n,
 		...overrides
 	}
+}
+
+// An undecryptable message: the `message` key is absent, never `message: undefined`.
+export function mockUndecryptableChatMessage(overrides: Omit<Partial<ChatMessage>, "message"> = {}): ChatMessage {
+	const message = mockChatMessage(overrides)
+
+	delete message.message
+
+	return message
 }

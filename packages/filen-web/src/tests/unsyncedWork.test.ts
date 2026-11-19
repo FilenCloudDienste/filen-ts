@@ -1,25 +1,13 @@
 import { describe, expect, it } from "vitest"
-import type { ChatMessage } from "@filen/sdk-rs"
 import type { InflightContent } from "@/features/notes/store/useNotesInflight"
 import type { ChatMessageWithInflightId, InflightChatMessageErrors, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import { hasUnsyncedNotes, hasUnsyncedChatSends, logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.logic"
 import { testUuid } from "@/tests/support/uuid"
 import { mockNote } from "@/tests/fixtures/notes"
-import { mockChat } from "@/tests/fixtures/sdk"
+import { mockChat, mockChatMessage } from "@/tests/fixtures/sdk"
 
 function mockQueuedMessage(): ChatMessageWithInflightId {
-	const message: ChatMessage = {
-		uuid: testUuid("inflight"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		message: "unsent",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n
-	}
+	const message = mockChatMessage({ uuid: testUuid("inflight"), senderEmail: "a@example.com", message: "unsent", sentTimestamp: 1_000n })
 
 	return { ...message, inflightId: testUuid("inflight") }
 }

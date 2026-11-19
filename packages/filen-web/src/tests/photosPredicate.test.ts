@@ -1,20 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File } from "@filen/sdk-rs"
+import type { File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoCandidate, isPhotoItem } from "@/features/photos/lib/predicate"
 import { testUuid } from "@/tests/support/uuid"
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
+import { mockDir } from "@/tests/fixtures/sdk"
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {

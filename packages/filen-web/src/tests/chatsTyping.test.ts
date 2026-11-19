@@ -11,19 +11,12 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendTypingSignal: sendTypingSigna
 import { signalStopped, signalTyping, typingUserName, visibleTypingUsers } from "@/features/chats/lib/typing"
 import type { ChatTypingUser } from "@/features/chats/store/useChatTyping"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat } from "@/tests/fixtures/sdk"
 
 // typing.ts keeps its per-chat send state in a module-global Map with no reset, and vitest evaluates the
 // module once per file — so every case builds its own chat uuid to get a virgin TypingSendState.
 function mockChat(label: string): Chat {
-	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
+	return fixtureChat({ uuid: testUuid(label) })
 }
 
 // emitSignal rides a Semaphore whose acquire() resolves as a promise MICROtask — fake timers do not drive

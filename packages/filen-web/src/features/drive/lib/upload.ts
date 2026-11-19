@@ -51,7 +51,7 @@ export interface RunUploadDeps {
 	// Splices the landed file into its parent listing (queueListingCreate: batched with the other
 	// creates, its own socket echo included).
 	patchCreated: (parentUuid: string | null, item: DriveItem) => void
-	// Optional (mirrors `cancel` above), and like `cancel` unused by runUpload itself: the batch callers
+	// Optional (mirrors `cancel` above), and unused by runUpload itself: the batch callers
 	// (startUploads, runDirectoryUpload) invoke it once after their whole fan-out rather than once per
 	// file, see invalidateUploadedDirectorySizes. Tests that don't care about sizes simply omit it.
 	invalidateDirectorySizes?: typeof invalidateUploadedDirectorySizes

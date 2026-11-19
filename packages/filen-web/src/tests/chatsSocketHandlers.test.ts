@@ -50,45 +50,27 @@ import {
 } from "@/features/chats/lib/socketHandlers"
 import { sync } from "@/features/chats/lib/sync"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChatMessage, mockChatParticipant, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 
 function makeChat(uuid: string, overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid(uuid),
-		ownerId: 1n,
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return { ...mockUndecryptableChat({ uuid: testUuid(uuid) }), ...overrides }
 }
 
 function makeMessage(uuid: string, chatUuid: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: testUuid(uuid),
 		chat: testUuid(chatUuid),
 		senderId: 2,
 		senderEmail: "peer@x.io",
 		senderNickName: "Peer",
 		message: `msg-${uuid}`,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp: 100n,
 		...overrides
-	}
+	})
 }
 
 function participant(userId: bigint): ChatParticipant {
-	return {
-		userId,
-		email: `u${userId.toString()}@x.io`,
-		nickName: `u${userId.toString()}`,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n
-	}
+	return mockChatParticipant({ userId, email: `u${userId.toString()}@x.io`, nickName: `u${userId.toString()}` })
 }
 
 function seedChats(chats: Chat[]): void {

@@ -20,37 +20,26 @@ import {
 } from "@/features/chats/lib/composer.logic"
 import { emojiForShortcode, customEmojiImageForShortcode, searchEmoji } from "@/features/chats/lib/emoji"
 import { sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
+import { mockChatMessage, mockChatParticipant, mockUndecryptableChatMessage } from "@/tests/fixtures/sdk"
 
 // Pure composer core — no React/store/IO. Uuid-shaped fields are the SDK's branded UuidStr; literal
 // strings with 3+ dashes satisfy that template type directly.
 
 function participant(userId: bigint, email: string, nickName?: string): ChatParticipant {
-	return {
-		userId,
-		email,
-		nickName,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n
-	}
+	return mockChatParticipant({ userId, email, nickName })
 }
 
 function message(uuid: string, senderId: number, body: string | undefined, sentTimestamp: bigint): ChatMessage {
-	// exactOptionalPropertyTypes: an undecryptable message OMITS the `message` key, never sets it undefined.
-	const base = {
+	const fields = {
 		uuid: uuid as ChatMessage["uuid"],
 		chat: "chat-a-a-a" as ChatMessage["chat"],
 		senderId,
 		senderEmail: "peer@filen.io",
 		senderNickName: "Peer",
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp
-	} satisfies Omit<ChatMessage, "message" | "senderAvatar" | "replyTo">
+	}
 
-	return body === undefined ? base : { ...base, message: body }
+	return body === undefined ? mockUndecryptableChatMessage(fields) : mockChatMessage({ ...fields, message: body })
 }
 
 describe("enterIntent", () => {

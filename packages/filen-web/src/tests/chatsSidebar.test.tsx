@@ -35,32 +35,17 @@ import "@/lib/i18n"
 import { ChatsVirtualList, type ChatsVirtualListProps } from "@/features/chats/components/chatsSidebar"
 import { buildChatList } from "@/features/chats/components/chatsSidebar.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 const VIEWPORT_HEIGHT = 300
 const ROW_HEIGHT = 48
 
 function participant(userId: bigint): ChatParticipant {
-	return {
-		userId,
-		email: `u${String(userId)}@filen.io`,
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n
-	}
+	return mockChatParticipant({ userId, email: `u${String(userId)}@filen.io` })
 }
 
 function chat(i: number): Chat {
-	return {
-		uuid: testUuid(`chat${String(i)}`),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [participant(1n), participant(BigInt(100 + i))],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
+	return mockChat({ uuid: testUuid(`chat${String(i)}`), participants: [participant(1n), participant(BigInt(100 + i))] })
 }
 
 const chats = Array.from({ length: 60 }, (_, i) => chat(i))

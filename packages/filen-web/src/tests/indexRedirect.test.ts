@@ -8,47 +8,20 @@ import { MOUNTS_OVERVIEW, mountsIndexRedirectTarget } from "@/features/mounts/li
 import { mockNote } from "@/tests/fixtures/notes"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatMessage, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 const SELF = 1n
 
 function mockParticipant(userId: bigint): ChatParticipant {
-	return {
-		userId,
-		email: `${String(userId)}@example.com`,
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n
-	}
+	return mockChatParticipant({ userId, email: `${String(userId)}@example.com` })
 }
 
 function mockMessage(chat: string): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 2,
-		senderEmail: "2@example.com",
-		senderNickName: undefined,
-		message: "hi",
-		chat: testUuid(chat),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n
-	}
+	return mockChatMessage({ chat: testUuid(chat), senderId: 2, senderEmail: "2@example.com", sentTimestamp: 1_000n })
 }
 
 function mockChat(label: string, overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid(label),
-		ownerId: SELF,
-		key: "chat-key",
-		participants: [mockParticipant(SELF), mockParticipant(2n)],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ uuid: testUuid(label), ownerId: SELF, participants: [mockParticipant(SELF), mockParticipant(2n)], ...overrides })
 }
 
 describe("chatsIndexRedirectTarget", () => {

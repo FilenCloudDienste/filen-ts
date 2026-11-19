@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import type { Chat } from "@filen/sdk-rs"
 
 // Mock boundary matching chatsActions.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
@@ -33,36 +33,15 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
 import { markChatsRead, setChatsMuted, deleteChatsPermanently, leaveChats } from "@/features/chats/lib/bulk"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatParticipant as mockParticipant } from "@/tests/fixtures/sdk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
 
-function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 2n,
-		email: "p@x.io",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
-}
-
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ participants: [mockParticipant()], ...overrides })
 }
 
 function setCurrentUser(id: bigint): void {

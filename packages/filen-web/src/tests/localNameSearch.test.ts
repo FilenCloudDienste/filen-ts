@@ -9,6 +9,7 @@ import { filterMentionParticipants } from "@/features/chats/lib/composer.logic"
 import { buildNotesByTag, filterTagsForView } from "@/features/notes/components/notesSidebar.logic"
 import { testUuid } from "@/tests/support/uuid"
 import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
+import { mockChatParticipant } from "@/tests/fixtures/sdk"
 import { nameSearchKey } from "@filen/shared"
 
 // A name uploaded from macOS arrives decomposed; the query is typed composed (and the reverse).
@@ -77,15 +78,7 @@ describe("local name search across Unicode compositions", () => {
 	})
 
 	it("filterMentionParticipants matches a decomposed nickname with a decomposed or composed query", () => {
-		const participant: ChatParticipant = {
-			userId: 1n,
-			email: "a@example.com",
-			nickName: NFD_NAME,
-			permissionsAdd: false,
-			added: 0n,
-			appearOffline: false,
-			lastActive: 0n
-		}
+		const participant = mockChatParticipant({ userId: 1n, email: "a@example.com", nickName: NFD_NAME })
 		const other: ChatParticipant = { ...participant, userId: 2n, email: "b@example.com", nickName: "Reports" }
 
 		expect(filterMentionParticipants([participant, other], "übers".normalize("NFD"), undefined)).toEqual([participant])

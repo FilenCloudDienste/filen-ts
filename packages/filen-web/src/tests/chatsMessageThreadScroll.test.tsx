@@ -72,6 +72,7 @@ import { registerAllActions } from "@/lib/keymap/actions"
 import { MessageThread } from "@/features/chats/components/thread/messageThread"
 import { RUN_CONTINUATION_ROW_ESTIMATE } from "@/features/chats/components/thread/thread.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChatMessage, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 
 // The thread binds Home, End and the message keys through the registry.
 registerAllActions()
@@ -128,22 +129,19 @@ afterAll(() => {
 })
 
 function chat(label: string): Chat {
-	return { uuid: testUuid(label), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 10_000n }
+	return mockUndecryptableChat({ uuid: testUuid(label), lastFocus: 10_000n })
 }
 
 function message(chatLabel: string, label: string, sentTimestamp: bigint, senderId = 9): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: testUuid(label),
 		chat: testUuid(chatLabel),
 		senderId,
 		senderEmail: "peer@filen.io",
 		senderNickName: "Peer",
 		message: label,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp
-	}
+	})
 }
 
 beforeEach(() => {

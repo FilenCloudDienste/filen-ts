@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import type { ChatMessage } from "@filen/sdk-rs"
 import { useChatComposerStore, useChatComposerEntry } from "@/features/chats/store/useChatComposer"
+import { mockChatMessage } from "@/tests/fixtures/sdk"
 
 // The composer store is the cross-component channel between the (portaled) message menu and the composer:
 // the menu requests reply/edit, the composer renders it. Reducer-level assertions (no React); the
@@ -9,18 +10,15 @@ import { useChatComposerStore, useChatComposerEntry } from "@/features/chats/sto
 const CHAT = "chat-a-a-a"
 
 function message(uuid: string, body = "original"): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: uuid as ChatMessage["uuid"],
 		chat: CHAT,
 		senderId: 7,
 		senderEmail: "me@filen.io",
 		senderNickName: "Me",
 		message: body,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp: 100n
-	}
+	})
 }
 
 beforeEach(() => {

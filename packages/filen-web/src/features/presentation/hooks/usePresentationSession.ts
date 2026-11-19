@@ -174,6 +174,7 @@ const REFUSAL_KEYS: Partial<Record<PresentationRefusal, PreviewKey>> = {
 	locked: "previewPptxEditorRefusedLocked",
 	notImplemented: "previewPptxEditorRefusedUnsupported",
 	unsupported: "previewPptxEditorRefusedUnsupported",
+	invalidValue: "previewSheetChartValueInvalid",
 	tooLarge: "previewPptxEditorRefusedTooLarge",
 	tooDeep: "previewPptxEditorRefusedTooLarge",
 	stale: "previewPptxEditorRefusedStale",

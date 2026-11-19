@@ -6,42 +6,26 @@ import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { chatMessageNotification, NOTIFICATION_BODY_MAX_LENGTH } from "@/features/desktop/lib/notifications"
-import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatMessage, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 const ME = 1n
 const LABELS = { undecryptableChat: "Encrypted conversation", soloFallback: "Just you", undecryptableMessage: "Unreadable" }
 
 function participant(userId: bigint, email: string, nickName: string): ChatParticipant {
-	return { userId, email, nickName } as ChatParticipant
+	return mockChatParticipant({ userId, email, nickName })
 }
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
+	return fixtureChat({
 		ownerId: ME,
-		key: "chat-key",
 		participants: [participant(ME, "me@x.io", "Me"), participant(2n, "peer@x.io", "Peer")],
-		muted: false,
-		created: 0n,
 		lastFocus: 100n,
 		...overrides
-	}
+	})
 }
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 2,
-		senderEmail: "peer@x.io",
-		senderNickName: "Peer",
-		message: "hi",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 200n,
-		...overrides
-	}
+	return mockChatMessage({ senderId: 2, senderEmail: "peer@x.io", senderNickName: "Peer", sentTimestamp: 200n, ...overrides })
 }
 
 describe("chatMessageNotification", () => {

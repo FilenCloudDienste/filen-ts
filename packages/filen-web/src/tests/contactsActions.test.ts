@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { BlockedContact, Chat, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
+import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
@@ -68,24 +68,12 @@ import {
 import { runBulkOutcomes } from "@/lib/actions/bulk"
 import { mockBlockedContact, mockContact, mockIncoming, mockOutgoing } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat } from "@/tests/fixtures/sdk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
-}
 
 function sdkDto(kind: string): ErrorDTO {
 	return { species: "sdk", kind, message: `${kind} message`, label: `${kind} label` }

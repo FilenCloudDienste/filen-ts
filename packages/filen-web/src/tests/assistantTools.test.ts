@@ -12,6 +12,7 @@ import {
 	type AssistantToolFailure
 } from "@filen/shared/assistant"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatMessage, mockChatParticipant } from "@/tests/fixtures/sdk"
 
 const sdk = vi.hoisted(() => ({
 	searchQuery: vi.fn(),
@@ -205,43 +206,10 @@ function note(uuid: string, title: string, overrides: Partial<Note> = {}): Note 
 const plan = note(testUuid("plan"), "Trip plan", { pinned: true })
 const recipe = note(testUuid("recipe"), "Recipe", { noteType: "rich" })
 
-const anna = {
-	userId: 2n,
-	email: "anna@example.com",
-	nickName: "Anna",
-	permissionsAdd: false,
-	added: 0n,
-	appearOffline: false,
-	lastActive: 0n
-}
-const mallory = {
-	userId: 3n,
-	email: "mallory@example.com",
-	nickName: "Mallory",
-	permissionsAdd: false,
-	added: 0n,
-	appearOffline: false,
-	lastActive: 0n
-}
-const self = {
-	userId: ME,
-	email: "me@example.com",
-	nickName: undefined,
-	permissionsAdd: true,
-	added: 0n,
-	appearOffline: false,
-	lastActive: 0n
-}
-const chat = {
-	uuid: testUuid("chat"),
-	ownerId: ME,
-	key: "key",
-	name: "Team",
-	participants: [self, anna, mallory],
-	muted: false,
-	created: 0n,
-	lastFocus: 0n
-} as unknown as Chat
+const anna = mockChatParticipant({ userId: 2n, email: "anna@example.com", nickName: "Anna" })
+const mallory = mockChatParticipant({ userId: 3n, email: "mallory@example.com", nickName: "Mallory" })
+const self = mockChatParticipant({ userId: ME, email: "me@example.com", permissionsAdd: true })
+const chat = mockChat({ ownerId: ME, key: "key", name: "Team", participants: [self, anna, mallory] })
 
 function message(
 	uuid: string,
@@ -249,18 +217,15 @@ function message(
 	text: string,
 	sent: bigint
 ): ChatMessage {
-	return {
-		uuid,
+	return mockChatMessage({
+		uuid: uuid as ChatMessage["uuid"],
 		chat: chat.uuid,
 		senderId: Number(from.userId),
 		senderEmail: from.email,
 		senderNickName: from.nickName,
 		message: text,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp: sent
-	} as ChatMessage
+	})
 }
 
 const playlist: Playlist = {

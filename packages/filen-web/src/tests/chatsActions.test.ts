@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, ChatParticipant, UserInfo } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, UserInfo } from "@filen/sdk-rs"
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
@@ -58,36 +58,15 @@ import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib
 import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { mockPlainContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatMessage, mockChatParticipant as mockParticipant } from "@/tests/fixtures/sdk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
 
-function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 2n,
-		email: "p@x.io",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
-}
-
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ participants: [mockParticipant()], ...overrides })
 }
 
 function setCurrentUser(id: bigint): void {
@@ -324,18 +303,7 @@ describe("markChatRead", () => {
 // action's resolve: the SDK returns the snapshot the caller passed in, so only the action's own field may land.
 describe("action results keep a socket patch made during the request", () => {
 	function mockMessage(label: string, sentTimestamp: bigint): ChatMessage {
-		return {
-			uuid: testUuid(label),
-			chat: testUuid("chat"),
-			senderId: 2,
-			senderEmail: "p@x.io",
-			senderNickName: undefined,
-			message: label,
-			embedDisabled: false,
-			edited: false,
-			editedTimestamp: 0n,
-			sentTimestamp
-		}
+		return mockChatMessage({ uuid: testUuid(label), senderId: 2, senderEmail: "p@x.io", message: label, sentTimestamp })
 	}
 
 	const older = mockMessage("older", 100n)

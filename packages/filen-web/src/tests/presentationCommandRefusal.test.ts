@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { PresentationCallError } from "@filen/office/dom/presentation"
-import { commandFailure, refusalToTell } from "@/features/presentation/hooks/usePresentationSession"
+import { commandFailure, refusalKey, refusalToTell } from "@/features/presentation/hooks/usePresentationSession"
 
 // A command the session could not answer: its reason as the worker gave it, and only a refusal the user's change met
 // is told (a command that met a closing session, the file closed meanwhile, tells nothing).
@@ -15,5 +15,10 @@ describe("a command's failure", () => {
 		expect(refusalToTell("closed")).toBe(false)
 		expect(refusalToTell("failed")).toBe(true)
 		expect(refusalToTell("locked")).toBe(true)
+	})
+
+	it("tells a value the user typed in a chart's axis as the value, not as an unsupported change", () => {
+		expect(refusalKey("invalidValue")).toBe("previewSheetChartValueInvalid")
+		expect(refusalKey("unsupported")).toBe("previewPptxEditorRefusedUnsupported")
 	})
 })

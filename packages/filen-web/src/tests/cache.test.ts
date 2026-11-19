@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 // Whole-statement `import type` (not the usual inline `type` keyword — see queries/drive.ts): the
 // inline form doesn't reliably elide under vitest for this package, and a non-elided import drags
 // in the wasm-bindgen worker glue (references `self`, undefined under Node).
-import type { Dir, UuidStr, SharedRootDir, SharingRole } from "@filen/sdk-rs"
+import type { UuidStr, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import {
 	cacheDirs,
 	cacheSharedDirContext,
@@ -15,19 +15,7 @@ import {
 	isOutsideRoot
 } from "@/features/drive/lib/cache"
 import { testUuid } from "@/tests/support/uuid"
-import { sharerRole } from "@/tests/fixtures/sdk"
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
+import { mockDir, sharerRole } from "@/tests/fixtures/sdk"
 
 // Every test starts from an empty cache — this doubles as coverage for clearDirectoryCache itself
 // rather than reaching for vi.resetModules() (the module has no import-time side effects to reset

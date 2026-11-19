@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { deriveBlockedUsers } from "@filen/shared"
 import type { MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 
@@ -23,34 +22,15 @@ import "@/lib/i18n"
 import { messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { formatClockTime } from "@/features/chats/lib/time"
-import { testUuid } from "@/tests/support/uuid"
+import { mockChat, mockChatMessage } from "@/tests/fixtures/sdk"
 import { registerAllActions } from "@/lib/keymap/actions"
 
 // The action bar's tooltips show each action's keys.
 registerAllActions()
 
-const chat: Chat = {
-	uuid: testUuid("chat"),
-	ownerId: 1n,
-	key: "chat-key",
-	participants: [],
-	muted: false,
-	created: 0n,
-	lastFocus: 0n
-}
+const chat = mockChat()
 
-const message: ChatMessage = {
-	uuid: testUuid("msg"),
-	senderId: 1,
-	senderEmail: "a@example.com",
-	senderNickName: undefined,
-	message: "hello",
-	chat: chat.uuid,
-	embedDisabled: false,
-	edited: false,
-	editedTimestamp: 0n,
-	sentTimestamp: 0n
-}
+const message = mockChatMessage({ senderEmail: "a@example.com", message: "hello", chat: chat.uuid })
 
 const descriptors = messageMenuActions(message, 1n, "confirmed")
 

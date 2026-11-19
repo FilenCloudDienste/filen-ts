@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk-rs"
+import type { File, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import {
@@ -13,7 +13,7 @@ import {
 	THUMB_SVG_SIZE_GATE
 } from "@/features/drive/lib/thumbnails.logic"
 import { testUuid } from "@/tests/support/uuid"
-import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
+import { mockDir, sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 // Past every byte ceiling a thumbnail has (64 MiB).
 const BIG = 67_108_865n
@@ -36,18 +36,6 @@ function mockFile(overrides: Partial<File> = {}): File {
 			type: "decoded",
 			data: { name: "photo.jpg", mime: "image/jpeg", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
 		},
-		...overrides
-	}
-}
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
 		...overrides
 	}
 }

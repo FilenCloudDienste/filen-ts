@@ -1,39 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File } from "@filen/sdk-rs"
 import { buildSearchResults, resolveSearchTransition, searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch.logic"
 import { testUuid } from "@/tests/support/uuid"
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
-		...overrides
-	}
-}
-
-function mockFile(overrides: Partial<File> = {}): File {
-	return {
-		uuid: testUuid("file"),
-		stableUUID: undefined,
-		parent: testUuid("parent"),
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: true,
-		meta: {
-			type: "decoded",
-			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
-		},
-		...overrides
-	}
-}
+import { mockDir, mockFile } from "@/tests/fixtures/sdk"
 
 describe("resolveSearchTransition", () => {
 	it("stays idle for a blank query before the engine has ever been engaged", () => {

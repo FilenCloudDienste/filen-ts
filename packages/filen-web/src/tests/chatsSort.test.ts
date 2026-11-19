@@ -15,81 +15,32 @@ import {
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
+import {
+	mockChat as fixtureChat,
+	mockChatMessage,
+	mockChatParticipant,
+	mockUndecryptableChat as fixtureUndecryptableChat,
+	mockUndecryptableChatMessage
+} from "@/tests/fixtures/sdk"
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 1n,
-		email: "a@example.com",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
+	return mockChatParticipant({ userId: 1n, email: "a@example.com", ...overrides })
 }
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ participants: [mockParticipant()], ...overrides })
 }
 
-// exactOptionalPropertyTypes distinguishes "key absent" (valid for an optional field) from "key
-// present with value undefined" (rejected) — this builds an undecryptable-style Chat (the group
-// key genuinely absent, matching what the wasm surface returns for an undecryptable chat) by
-// simply never including the key, rather than assigning it undefined. Same pattern as notes'
-// notesSort.test.ts mockNoteWithoutTitle.
 function mockUndecryptableChat(overrides: Omit<Partial<Chat>, "key"> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureUndecryptableChat({ participants: [mockParticipant()], ...overrides })
 }
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		message: "hello",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n,
-		...overrides
-	}
+	return mockChatMessage({ senderEmail: "a@example.com", message: "hello", sentTimestamp: 1_000n, ...overrides })
 }
 
-// Same exactOptionalPropertyTypes rationale as mockUndecryptableChat above, applied to
-// ChatMessage.message (undefined ⇒ the message content did not decrypt).
 function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message"> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 1,
-		senderEmail: "a@example.com",
-		senderNickName: undefined,
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n,
-		...overrides
-	}
+	return mockUndecryptableChatMessage({ senderEmail: "a@example.com", sentTimestamp: 1_000n, ...overrides })
 }
 
 describe("compareBySentTimestamp", () => {

@@ -1,48 +1,19 @@
 import { describe, expect, it } from "vitest"
 import { MailOpenIcon, Volume2Icon, VolumeOffIcon, UsersIcon, PencilIcon, Trash2Icon, LogOutIcon } from "lucide-react"
-import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import type { Chat } from "@filen/sdk-rs"
 import { applyOfflineGate, chatMenuActions, type ChatActionDescriptor } from "@/features/chats/components/chatMenu.logic"
-import { testUuid } from "@/tests/support/uuid"
-
-function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 2n,
-		email: "p@x.io",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
-}
+import {
+	mockChat as fixtureChat,
+	mockChatParticipant as mockParticipant,
+	mockUndecryptableChat as fixtureUndecryptableChat
+} from "@/tests/fixtures/sdk"
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ participants: [mockParticipant()], ...overrides })
 }
 
-// exactOptionalPropertyTypes distinguishes "key absent" from "key present with value undefined" —
-// builds an undecryptable-style Chat by never including `key` at all (mirrors chatsSort.test.ts's own
-// mockUndecryptableChat).
 function mockUndecryptableChat(overrides: Omit<Partial<Chat>, "key"> = {}): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureUndecryptableChat({ participants: [mockParticipant()], ...overrides })
 }
 
 function ids(chat: Chat, userId: bigint | undefined, hasUnread = false): string[] {

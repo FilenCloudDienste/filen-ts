@@ -11,6 +11,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
 import { editMessage } from "@/features/chats/lib/messageActions"
+import { mockChatMessage } from "@/tests/fixtures/sdk"
 
 // Starting an edit loads the message body over the composer's draft; ending it (save, cancel, emptied
 // input) must bring back whatever was typed before, including a pending reply quote.
@@ -18,18 +19,15 @@ import { editMessage } from "@/features/chats/lib/messageActions"
 const CHAT = "chat-a-a-a"
 
 function message(uuid: string, body: string): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: uuid as ChatMessage["uuid"],
 		chat: CHAT,
 		senderId: 7,
 		senderEmail: "me@filen.io",
 		senderNickName: "Me",
 		message: body,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp: 100n
-	}
+	})
 }
 
 function entry() {

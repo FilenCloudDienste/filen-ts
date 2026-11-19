@@ -93,7 +93,7 @@ interface RailEntryProps {
 
 const NO_SUBS: UserAccountSubs[] = []
 
-function AccountMenu() {
+export function AccountMenu() {
 	const { t } = useTranslation(["common", "auth", "settings"])
 	const navigate = useNavigate()
 	const { toggleTheme } = useTheme()

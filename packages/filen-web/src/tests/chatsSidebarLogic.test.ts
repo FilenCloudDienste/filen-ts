@@ -11,60 +11,27 @@ import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
+import {
+	mockChat as fixtureChat,
+	mockChatMessage,
+	mockChatParticipant,
+	mockUndecryptableChat as fixtureUndecryptableChat
+} from "@/tests/fixtures/sdk"
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
-	return {
-		userId: 1n,
-		email: "a@example.com",
-		nickName: undefined,
-		permissionsAdd: false,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		...overrides
-	}
+	return mockChatParticipant({ userId: 1n, email: "a@example.com", ...overrides })
 }
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
-		uuid: testUuid("msg"),
-		senderId: 2,
-		senderEmail: "b@example.com",
-		senderNickName: undefined,
-		message: "hi",
-		chat: testUuid("chat"),
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 1_000n,
-		...overrides
-	}
+	return mockChatMessage({ senderId: 2, senderEmail: "b@example.com", sentTimestamp: 1_000n, ...overrides })
 }
 
 function mockChat(label: string, overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureChat({ uuid: testUuid(label), participants: [mockParticipant()], ...overrides })
 }
 
-// Undecryptable = group key genuinely absent (never `key: undefined`, per exactOptionalPropertyTypes).
 function mockUndecryptableChat(label: string, overrides: Omit<Partial<Chat>, "key"> = {}): Chat {
-	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		participants: [mockParticipant()],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	}
+	return fixtureUndecryptableChat({ uuid: testUuid(label), participants: [mockParticipant()], ...overrides })
 }
 
 const SELF = 1n

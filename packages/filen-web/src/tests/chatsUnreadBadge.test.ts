@@ -42,35 +42,25 @@ import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMes
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { CONTACTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChatMessage, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 
 const USER_ID = 7n
 
 // Read up to 100: only messages from the peer sent after that count.
 function mockChat(label: string, lastMessage?: ChatMessage): Chat {
-	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 100n,
-		...(lastMessage !== undefined ? { lastMessage } : {})
-	}
+	return mockUndecryptableChat({ uuid: testUuid(label), lastFocus: 100n, ...(lastMessage !== undefined ? { lastMessage } : {}) })
 }
 
 function peerMessage(label: string, chatLabel: string, sentTimestamp: bigint): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: testUuid(label),
 		chat: testUuid(chatLabel),
 		senderId: 2,
 		senderEmail: "p@x.io",
 		senderNickName: "P",
 		message: label,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp
-	}
+	})
 }
 
 // Server pages held open per chat until the test answers them, so the resync's list write renders first,

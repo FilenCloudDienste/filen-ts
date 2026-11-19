@@ -16,38 +16,26 @@ import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { testUuid } from "@/tests/support/uuid"
+import { mockChat as fixtureChat, mockChatMessage } from "@/tests/fixtures/sdk"
 
 // By default a chat with a last message newer than its lastFocus: one whose unread the list cannot rule out.
 // `lastMessage: null` builds one with no last message.
 function mockChat(label: string, overrides: Omit<Partial<Chat>, "lastMessage"> & { lastMessage?: ChatMessage | null } = {}): Chat {
 	const { lastMessage = mockMessage(`last-${label}`, label), ...rest } = overrides
 
-	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		key: "k",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n,
-		...(lastMessage !== null ? { lastMessage } : {}),
-		...rest
-	}
+	return fixtureChat({ uuid: testUuid(label), key: "k", ...(lastMessage !== null ? { lastMessage } : {}), ...rest })
 }
 
 function mockMessage(label: string, chatLabel: string): ChatMessage {
-	return {
+	return mockChatMessage({
 		uuid: testUuid(label),
 		chat: testUuid(chatLabel),
 		senderId: 2,
 		senderEmail: "p@x.io",
 		senderNickName: "P",
 		message: "m",
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp: 10n
-	}
+	})
 }
 
 beforeEach(() => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, DirMeta, File, FileMeta } from "@filen/sdk-rs"
+import type { DirMeta, File, FileMeta } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	reconcilePreviewDialog,
@@ -10,6 +10,7 @@ import {
 } from "@/features/preview/lib/previewReconcile"
 import { setPreviewDirty } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { testUuid } from "@/tests/support/uuid"
+import { mockDir } from "@/tests/fixtures/sdk"
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
@@ -27,18 +28,6 @@ function mockFile(overrides: Partial<File> = {}): File {
 			type: "decoded",
 			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
 		},
-		...overrides
-	}
-}
-
-function mockDir(overrides: Partial<Dir> = {}): Dir {
-	return {
-		uuid: testUuid("dir"),
-		parent: testUuid("parent"),
-		color: "default",
-		timestamp: 1_700_000_000_000n,
-		favorited: false,
-		meta: { type: "decoded", data: { name: "Documents" } },
 		...overrides
 	}
 }

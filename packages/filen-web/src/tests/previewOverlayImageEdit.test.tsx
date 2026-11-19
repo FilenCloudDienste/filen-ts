@@ -13,6 +13,7 @@ import type { SaveTarget } from "@/features/preview/imageEdit/types"
 // unsaved edits asks first.
 
 const harness = vi.hoisted(() => ({
+	actions: new Map<string, (event: KeyboardEvent) => void>(),
 	saves: [] as { content: unknown; asNewFile?: string; mime?: string; times?: { created?: bigint; modified?: bigint } }[],
 	exports: [] as unknown[],
 	released: 0,
@@ -20,7 +21,11 @@ const harness = vi.hoisted(() => ({
 	toastSuccess: vi.fn(),
 	toastError: vi.fn(),
 	loadFails: false,
-	splices: [] as unknown[]
+	splices: [] as unknown[],
+	// A markup text draft still being typed in the editor, the only edit: the real editor reports it dirty and its
+	// save source commits it before exporting.
+	draft: null as string | null,
+	exportedDrafts: [] as string[]
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -30,7 +35,15 @@ vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => vi.fn(),
 	useRouterState: () => "/drive"
 }))
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {} }))
+vi.mock("@/lib/keymap/useAction", () => ({
+	useAction: (id: string, handler: (event: KeyboardEvent) => void) => {
+		harness.actions.set(id, handler)
+
+		return () => undefined
+	},
+	IN_EDITORS: {},
+	IN_EDITORS_AND_FIELDS: {}
+}))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@/features/drive/lib/actions", async () => ({
 	...(await vi.importActual<typeof import("@/features/drive/lib/actions")>("@/features/drive/lib/actions")),
@@ -111,13 +124,21 @@ vi.mock("@/features/preview/imageEdit/components/imageEditor", () => ({
 			saveRef.current = (target: SaveTarget) => {
 				harness.exports.push(target)
 
+				if (harness.draft !== null) {
+					harness.exportedDrafts.push(harness.draft)
+				}
+
 				return Promise.resolve({ blob: new Blob([new Uint8Array([1])], { type: target.mime }), geometryOnly: null })
 			}
 			commandsRef.current = { undo: vi.fn(), redo: vi.fn(), revert: vi.fn() }
 			onDirtyChange(true)
 		}, [saveRef, commandsRef, onDirtyChange, onLoadFailed])
 
-		return createElement("div", { "data-testid": "image-editor" })
+		return createElement(
+			"div",
+			{ "data-testid": "image-editor" },
+			harness.draft === null ? null : createElement("input", { "data-testid": "markup-draft", defaultValue: harness.draft })
+		)
 	}
 }))
 
@@ -180,6 +201,8 @@ beforeEach(() => {
 	harness.toastSuccess.mockClear()
 	harness.toastError.mockClear()
 	harness.loadFails = false
+	harness.draft = null
+	harness.exportedDrafts = []
 	harness.targets = { primary: { kind: "inPlace", mime: "image/jpeg" }, copy: { kind: "copy", mime: "image/jpeg", extension: "jpg" } }
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
@@ -209,6 +232,35 @@ describe("PreviewOverlay — image editing", () => {
 		expect(harness.splices).toEqual([["11111111-1111-1111-1111-111111111111", expect.anything(), "replace"]])
 		expect(harness.released).toBe(1)
 		expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(false)
+	})
+
+	it("saves on Mod+S typed into a markup text draft that is the only edit", async () => {
+		harness.draft = "Invoice paid"
+
+		await openEditor("photo.jpg", "image/jpeg")
+
+		const field = screen.getByTestId("markup-draft")
+		const handler = harness.actions.get("preview.save")
+
+		if (handler === undefined) throw new Error("no save action")
+
+		const event = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true })
+
+		field.addEventListener("keydown", handler, { once: true })
+		field.focus()
+
+		act(() => {
+			field.dispatchEvent(event)
+		})
+
+		expect(event.defaultPrevented).toBe(true)
+		await waitFor(() => {
+			expect(screen.queryByTestId("image-editor")).toBeNull()
+		})
+		expect(harness.exports).toEqual([{ kind: "inPlace", mime: "image/jpeg" }])
+		expect(harness.exportedDrafts).toEqual(["Invoice paid"])
+		expect(harness.saves).toHaveLength(1)
+		expect(harness.saves[0]?.asNewFile).toBeUndefined()
 	})
 
 	it("writes a copy-only format's edit as a copy beside it, the slot left on the original", async () => {
