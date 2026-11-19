@@ -2,7 +2,14 @@ import { formatBytes } from "@filen/shared"
 import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect } from "./fixtures"
 import { archivePasswordPrompt, expectRows, expectRowSize, openArchive, openRowMenu } from "./helpers/archive"
-import { GATE_STOP_FILES, HOSTILE_MISLEADING_NAME, NOTE_TEXT, TREE_FILES, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
+import {
+	GATE_STOP_BLOB,
+	GATE_STOP_FILES,
+	HOSTILE_MISLEADING_NAME,
+	NOTE_TEXT,
+	TREE_FILES,
+	ZIPCRYPTO_PASSWORD
+} from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { holdChunks } from "./helpers/jobs"
@@ -78,10 +85,10 @@ test.describe("archive browser", () => {
 		await expectRows(list, ["docs", "empty-dir", "photos", "readme.txt"])
 
 		// The sort columns say which one is active.
-		await expect(browser.sortButton("Name")).toHaveAttribute("aria-pressed", "true")
+		await expect(browser.sortButton("Name")).toHaveAccessibleName("Name sorted ascending")
 		await browser.sort("Size")
-		await expect(browser.sortButton("Size")).toHaveAttribute("aria-pressed", "true")
-		await expect(browser.sortButton("Name")).toHaveAttribute("aria-pressed", "false")
+		await expect(browser.sortButton("Size")).toHaveAccessibleName(/^Size sorted (ascending|descending)$/)
+		await expect(browser.sortButton("Name")).toHaveAccessibleName("Name")
 
 		await browser.into("empty-dir")
 		await expect(browser.status("This directory is empty.")).toBeVisible()
@@ -413,10 +420,10 @@ test.describe("archive browser", () => {
 			await expect(browser.status("Reading the archive…").first()).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 			await expect.poll(() => hold?.held() ?? 0, { timeout: LISTING_TIMEOUT_MS }).toBeGreaterThan(0)
 			await browser.overlay.getByRole("button", { name: "Stop", exact: true }).click()
-			// The small files ahead of the blob were whole within the first chunk: those stay.
-			await expect(browser.status(`Listing stopped after ${String(GATE_STOP_FILES.length)} entries.`)).toBeVisible()
+			// The small files ahead of the blob were whole within the first chunk, and the blob's header was read: all stay.
+			await expect(browser.status(`Listing stopped after ${String(GATE_STOP_FILES.length + 1)} entries.`)).toBeVisible()
 			await browser.into("e2e-arc-gate-stop")
-			await expectRows(browser.list, [...GATE_STOP_FILES])
+			await expectRows(browser.list, [...GATE_STOP_FILES, GATE_STOP_BLOB])
 
 			hold?.release()
 			await browser.overlay.getByRole("button", { name: "List again", exact: true }).click()

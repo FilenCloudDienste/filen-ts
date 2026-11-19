@@ -559,7 +559,9 @@ export function archiveBrowser(page: Page): ArchiveBrowserPO {
 	const list = overlay.getByRole("listbox", { name: /^Contents of / })
 	const crumbs = overlay.getByRole("navigation", { name: "Location in the archive", exact: true })
 	const row = (name: string): Locator => entryOf(list, name)
-	const sortButton = (column: "Name" | "Size" | "Modified"): Locator => overlay.getByRole("button", { name: column, exact: true })
+	// The active column's name carries its direction ("Name sorted ascending").
+	const sortButton = (column: "Name" | "Size" | "Modified"): Locator =>
+		overlay.getByRole("button", { name: new RegExp(`^${column}( sorted (ascending|descending))?$`) })
 	const extractAllButton = overlay.getByRole("button", { name: "Extract all", exact: true })
 
 	return {
