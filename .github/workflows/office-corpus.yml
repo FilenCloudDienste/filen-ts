@@ -491,7 +491,8 @@ jobs:
 
   # Nightly and on demand, for the spreadsheet engine over the cached corpus: the full recalculation against the
   # results Excel stored (sheetOracleCached.test.ts, its 0.995 gate), the long sheet fuzz run, one new sequence
-  # per workbook and run, in one mode a night (src/tests/fuzz/sheet), and the xlsx save budget at 1M cells.
+  # per workbook and run, in one mode a night (src/tests/fuzz/sheet), the xlsx save budget at 1M cells, the
+  # sheet corpus suites (charts, sessions, grid, legacy intersections, drawings) and the session and grid budgets.
   sheet-office-corpus:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: test-office-corpus
@@ -499,7 +500,7 @@ jobs:
       group: filen-office-sheet-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
       FILEN_OFFICE_FUZZ_SEED: ${{ inputs.fuzz-seed || github.run_number }}
@@ -572,6 +573,43 @@ jobs:
         env:
           FILEN_OFFICE_XLSX_PERF: '1'
         run: pnpm exec vitest run --reporter=verbose src/tests/xlsxWritePerf.test.ts
+      # xmllint and the pinned ECMA-376 schemas, for the schema check of the chart saves (sheetChartCorpus.test.ts).
+      - name: Install xmllint
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: sudo apt-get ${APT_NET} update && sudo apt-get ${APT_NET} install -y --no-install-recommends libxml2-utils
+      - name: Cache the WordprocessingML schemas
+        if: ${{ !cancelled() }}
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: packages/filen-office/node_modules/.cache/filen-office-wml
+          key: office-wml-${{ hashFiles('packages/filen-office/src/scripts/wmlOrder.ts') }}
+      - name: Fetch the WordprocessingML schemas
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        run: pnpm run generate:wml-order --fetch
+      # The files FILEN_OFFICE_SHEET_CORPUS turns on, named: never set on the sharded Test step, whose timeout
+      # does not hold them.
+      - name: Sheet corpus suites
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_SHEET_CORPUS: '1'
+        run: >-
+          pnpm exec vitest run --reporter=verbose src/tests/sheetChartCorpus.test.ts src/tests/sheetSessionCorpus.test.ts
+          src/tests/sheetGridCorpus.test.ts src/tests/sheetLegacyIntersectionsCorpus.test.ts
+      - name: Drawings over the corpus
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_DRAWINGS_CORPUS: '1'
+        run: pnpm exec vitest run --reporter=verbose src/tests/sheetDrawingsCorpus.test.ts
+      - name: Sheet session and grid budgets at 1M cells
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_SHEET_PERF: '1'
+        run: pnpm exec vitest run --reporter=verbose src/tests/sheetSessionPerf.test.ts src/tests/sheetGridPerf.dom.test.tsx
 
   # Nightly and on demand: every ODF save and conversion against the ODF Toolkit's odfvalidator (ODF 1.3) and,
   # where a suite also writes OOXML, the Open XML SDK validator. Each oracle adds no error its source lacks.

@@ -185,6 +185,8 @@ jobs:
       group: filen-office-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
+    # A shard takes a few minutes; a hang fails here instead of at the 360-minute default.
+    timeout-minutes: 30
     # Vitest's --shard splits the test files by a hash of their path, so the shards together run every file
     # once. Each runner keeps Vitest's default pool (CPUs - 1 workers), so a timing test shares its machine
     # as it did unsharded.
@@ -530,8 +532,9 @@ jobs:
             exit 1
           fi
   # filen-web's unit suite, outside the e2e group like web-checks. Vitest's --shard splits the test files by a
-  # hash of their path, so the shards together run every file once. The tests read only the spellchecker's
-  # committed manifest, so no shard builds the wasm engine or the dictionaries.
+  # hash of their path, so the shards together run every file once. No shard needs Rust or the network: the tests
+  # read only the committed asset manifests, and the bundle-shape tests (src/tests/fixtures/bundleBuild.ts) build
+  # with the asset plugins reduced to their virtual modules, so no cargo build, dictionary or OCR model download runs.
   web-unit:
     needs: changes
     if: needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch'
