@@ -166,7 +166,7 @@ describe("uploadAttachment", () => {
 	it("returns an error outcome when the chat-uploads directory itself can't be created/found", async () => {
 		createDirectory.mockRejectedValueOnce(new Error("parent directory not found"))
 
-		const outcome = await uploadAttachment(mockBrowserFile(), noop)
+		const outcome = await uploadAttachment(mockBrowserFile())
 
 		expect(outcome.status).toBe("error")
 		expect(uploadFile).not.toHaveBeenCalled()
@@ -179,7 +179,7 @@ describe("uploadAttachment", () => {
 		const link = mockFilePublicLink()
 		createFileLink.mockResolvedValueOnce(link)
 
-		const outcome = await uploadAttachment(mockBrowserFile(), noop)
+		const outcome = await uploadAttachment(mockBrowserFile())
 
 		// `.filen` is found missing; the chat-uploads under a `.filen` just created needs no find.
 		expect(findDirectoryUuid).toHaveBeenCalledExactlyOnceWith(null, ".filen")
@@ -202,7 +202,7 @@ describe("uploadAttachment", () => {
 		uploadFile.mockResolvedValueOnce(mockSdkFile())
 		createFileLink.mockResolvedValueOnce(mockFilePublicLink())
 
-		expect((await uploadAttachment(mockBrowserFile(), noop)).status).toBe("success")
+		expect((await uploadAttachment(mockBrowserFile())).status).toBe("success")
 
 		expect(findDirectoryUuid.mock.calls).toEqual([
 			[null, ".filen"],
@@ -217,7 +217,7 @@ describe("uploadAttachment", () => {
 		uploadFile.mockResolvedValueOnce(mockSdkFile())
 		createFileLink.mockResolvedValueOnce(mockFilePublicLink())
 
-		const outcome = await uploadAttachment(mockBrowserFile(), noop)
+		const outcome = await uploadAttachment(mockBrowserFile())
 
 		expect(getFileLinkStatus).not.toHaveBeenCalled()
 		expect(createFileLink).toHaveBeenCalledOnce()
@@ -232,7 +232,7 @@ describe("uploadAttachment", () => {
 		vi.spyOn(Date, "now").mockReturnValue(9_000_000_000_123)
 
 		try {
-			await uploadAttachment(mockBrowserFile("image.png", 2_048), noop)
+			await uploadAttachment(mockBrowserFile("image.png", 2_048))
 		} finally {
 			vi.mocked(Date.now).mockRestore()
 		}
@@ -250,7 +250,7 @@ describe("uploadAttachment", () => {
 		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockResolvedValueOnce(mockSdkFile())
 		createFileLink.mockResolvedValueOnce(mockFilePublicLink()).mockResolvedValueOnce(mockFilePublicLink())
 
-		await Promise.all([uploadAttachment(mockBrowserFile("image.png"), noop), uploadAttachment(mockBrowserFile("image.png"), noop)])
+		await Promise.all([uploadAttachment(mockBrowserFile("image.png")), uploadAttachment(mockBrowserFile("image.png"))])
 
 		const names = uploadFile.mock.calls.map(call => call[2].name)
 
@@ -266,9 +266,9 @@ describe("uploadAttachment", () => {
 			.mockResolvedValueOnce(mockFilePublicLink())
 
 		const outcomes = await Promise.all([
-			uploadAttachment(mockBrowserFile("a.jpg"), noop),
-			uploadAttachment(mockBrowserFile("b.jpg"), noop),
-			uploadAttachment(mockBrowserFile("c.jpg"), noop)
+			uploadAttachment(mockBrowserFile("a.jpg")),
+			uploadAttachment(mockBrowserFile("b.jpg")),
+			uploadAttachment(mockBrowserFile("c.jpg"))
 		])
 
 		expect(createDirectory).toHaveBeenCalledTimes(2)
@@ -289,8 +289,8 @@ describe("uploadAttachment", () => {
 		uploadFile.mockResolvedValueOnce(mockSdkFile())
 		createFileLink.mockResolvedValueOnce(mockFilePublicLink())
 
-		expect((await uploadAttachment(mockBrowserFile(), noop)).status).toBe("error")
-		expect((await uploadAttachment(mockBrowserFile(), noop)).status).toBe("success")
+		expect((await uploadAttachment(mockBrowserFile())).status).toBe("error")
+		expect((await uploadAttachment(mockBrowserFile())).status).toBe("success")
 		expect(createDirectory).toHaveBeenCalledTimes(3)
 	})
 
@@ -308,13 +308,13 @@ describe("uploadAttachment", () => {
 		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockResolvedValueOnce(mockSdkFile())
 		createFileLink.mockResolvedValueOnce(mockFilePublicLink()).mockResolvedValueOnce(mockFilePublicLink())
 
-		const stale = uploadAttachment(mockBrowserFile(), noop)
+		const stale = uploadAttachment(mockBrowserFile())
 
 		resetDotFilen()
 		resolveDotFilen(mockDir("old-dot-filen"))
 		await stale
 
-		await uploadAttachment(mockBrowserFile(), noop)
+		await uploadAttachment(mockBrowserFile())
 
 		expect(uploadFile.mock.calls.map(call => call[0])).toEqual([testUuid("old-uploads"), testUuid("new-uploads")])
 	})
@@ -324,7 +324,7 @@ describe("uploadAttachment", () => {
 		uploadFile.mockResolvedValueOnce(mockSdkFile())
 		createFileLink.mockRejectedValueOnce({ species: "sdk", label: "Please upgrade to premium.", message: "premium required" })
 
-		const outcome = await uploadAttachment(mockBrowserFile(), noop)
+		const outcome = await uploadAttachment(mockBrowserFile())
 
 		expect(outcome).toEqual({
 			status: "error",
@@ -336,7 +336,7 @@ describe("uploadAttachment", () => {
 		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
 		uploadFile.mockRejectedValueOnce(new Error("network down"))
 
-		const outcome = await uploadAttachment(mockBrowserFile(), noop)
+		const outcome = await uploadAttachment(mockBrowserFile())
 
 		expect(outcome.status).toBe("error")
 		expect(getFileLinkStatus).not.toHaveBeenCalled()

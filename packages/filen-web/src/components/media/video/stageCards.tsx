@@ -4,6 +4,7 @@ import { XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { STAGE_POPUP_TONE_CLASS, useRestoreStageFocus } from "@/components/media/video/stageContext"
+import { useRovingRadioGroup } from "@/components/media/video/useRovingRadioGroup"
 
 // The stage's cards: a corner card (Skip, Up Next), a centred card that waits for the user (still watching,
 // autoplay blocked, post-play), a notice pill, and a small panel (subtitle style, delay). All in the
@@ -120,7 +121,7 @@ export function StagePanel({ title, onClose, children }: { title: string; onClos
 	)
 }
 
-// One row of mutually exclusive choices in a panel.
+// One row of mutually exclusive choices in a panel. Choices are cheap to apply, so arrows select as they move.
 export function ChoiceRow<T extends string | number>({
 	label,
 	options,
@@ -132,6 +133,19 @@ export function ChoiceRow<T extends string | number>({
 	value: T
 	onChange: (value: T) => void
 }) {
+	const roving = useRovingRadioGroup({
+		count: options.length,
+		checked: options.findIndex(option => option.value === value),
+		horizontal: true,
+		onMove: index => {
+			const option = options[index]
+
+			if (option !== undefined) {
+				onChange(option.value)
+			}
+		}
+	})
+
 	return (
 		<div
 			role="radiogroup"
@@ -140,9 +154,10 @@ export function ChoiceRow<T extends string | number>({
 		>
 			<span className="text-xs text-muted-foreground">{label}</span>
 			<div className="flex flex-wrap gap-1">
-				{options.map(option => (
+				{options.map((option, index) => (
 					<Button
 						key={String(option.value)}
+						{...roving(index)}
 						role="radio"
 						aria-checked={option.value === value}
 						variant={option.value === value ? "secondary" : "outline"}

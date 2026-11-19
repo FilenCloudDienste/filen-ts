@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { tierLabelKey, referralLink, referralEarnedStorage, formatBillingCost, subscriptionStatus } from "@/features/settings/lib/billing"
+import {
+	tierLabelKey,
+	referralLink,
+	referralEarnedStorage,
+	formatBillingCost,
+	subscriptionStatus,
+	gatewayLabelKey
+} from "@/features/settings/lib/billing"
 
 describe("tierLabelKey (account-plans-stack rule: derived from isProAccount(subs) only)", () => {
 	it("Free for a non-premium account", () => {
@@ -49,5 +56,22 @@ describe("subscriptionStatus", () => {
 
 	it("pending when neither activated nor cancelled", () => {
 		expect(subscriptionStatus({ activated: false, cancelled: false })).toBe("pending")
+	})
+})
+
+describe("gatewayLabelKey", () => {
+	it("names a recurring gateway by the purchase menu's payment method", () => {
+		expect(gatewayLabelKey("stripe")).toBe("settingsBillingMethodCard")
+		expect(gatewayLabelKey("paypal")).toBe("settingsBillingMethodPaypal")
+	})
+
+	it("names a one-off gateway by the same payment method", () => {
+		expect(gatewayLabelKey("stripe_sale")).toBe("settingsBillingMethodCard")
+		expect(gatewayLabelKey("paypal_sale")).toBe("settingsBillingMethodPaypal")
+	})
+
+	it("is null for an unknown gateway id, including one that names an Object prototype key", () => {
+		expect(gatewayLabelKey("someNewGateway")).toBeNull()
+		expect(gatewayLabelKey("constructor")).toBeNull()
 	})
 })

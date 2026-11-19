@@ -101,8 +101,10 @@ describe("setFavoritedPhotos", () => {
 
 		await setFavoritedPhotos([ROOT_UUID], [a, b], true)
 
-		const listing = getPhotosListing() ?? []
-		expect(listing.every(item => item.data.favorited)).toBe(true)
+		expect(getPhotosListing()?.map(item => [item.data.uuid, item.data.favorited])).toEqual([
+			[a.data.uuid, true],
+			[b.data.uuid, true]
+		])
 	})
 
 	it("leaves a failed item's flag untouched", async () => {

@@ -279,6 +279,8 @@ export class WatchStateEngine {
 	private currentUuid: string | null = null
 	// Bumped whenever the socket can no longer vouch.
 	private epoch = 0
+	// The epoch a head lookup last completed in; -1 before the first. Another epoch = the next open looks it up again.
+	private headCheckedEpoch = -1
 	// Since when (performance.now()) the socket has vouched without a gap: a listing that started since misses no save
 	// the socket didn't report.
 	private vouchedSince = Number.POSITIVE_INFINITY
@@ -644,22 +646,24 @@ export class WatchStateEngine {
 
 		this.openedOnce = true
 
-		if (!this.writable() || (!first && this.remoteSave === null)) {
+		if (!this.writable() || (!first && this.remoteSave === null && !this.headUnchecked())) {
 			return
 		}
 
 		await this.track(
 			navigator.locks.request(FLUSH_LOCK, async () => {
-				if (!this.writable()) {
+				// Opens after the first aren't joined: one queued behind another finds its work done.
+				if (!this.writable() || (!first && this.remoteSave === null && !this.headUnchecked())) {
 					return
 				}
 
 				this.abandonPeerFlush()
 				await this.reload()
 
-				// A page that hasn't confirmed the head yet can't know about a save made elsewhere while it was
-				// closed (the socket only tells a live page): one lookup says whether the head moved.
-				if (first && this.currentUuid === null && this.remoteSave === null) {
+				// A page that hasn't confirmed the head in this epoch can't know about a save made elsewhere while it
+				// was closed or the socket was down (the socket only tells a live page): one lookup says whether the
+				// head moved.
+				if (this.headUnchecked()) {
 					await this.checkHead()
 				}
 
@@ -682,9 +686,15 @@ export class WatchStateEngine {
 		}
 	}
 
+	// No head is vouched for, no lookup completed since the socket last stopped vouching, and no save waits to be read
+	// that the socket named in this epoch (one named before the gap may have been overtaken by a save made during it).
+	private headUnchecked(): boolean {
+		return this.currentUuid === null && this.headCheckedEpoch !== this.epoch && this.remoteSave?.epoch !== this.epoch
+	}
+
 	// Looks the head up once: unchanged, it is confirmed for this page; moved (another device saved since), the new
-	// file becomes the save from elsewhere that readLatestSave reads. With no head cached yet (a new browser), the
-	// state file is found by listing `.filen/videos` when that directory exists.
+	// file becomes the save from elsewhere that readLatestSave reads, in place of one seen before the lookup. With no
+	// head cached yet (a new browser), the state file is found by listing `.filen/videos` when that directory exists.
 	private async checkHead(): Promise<void> {
 		const epoch = this.epoch
 		const seq = this.saveSeq
@@ -695,10 +705,27 @@ export class WatchStateEngine {
 			file = await this.liveHead(head.s)
 
 			if (file !== null && file.uuid === head.u) {
+				// Saves seen before the lookup started are covered by what it found.
+				const dropped = this.dropRemoteSavesThrough(seq)
+
 				if (this.epoch === epoch && this.remoteSave === null) {
 					this.currentUuid = file.uuid
 					this.confirmedHead = { file, epoch }
 				}
+
+				this.headCheckedEpoch = epoch
+
+				if (dropped) {
+					this.rebuild()
+				}
+
+				return
+			}
+
+			if (file === null) {
+				// The cached lineage is gone, which says nothing of a state file started elsewhere in a new one: a save the
+				// socket named stays for readLatestSave, and the next flush's listing finds any other.
+				this.headCheckedEpoch = epoch
 
 				return
 			}
@@ -710,6 +737,13 @@ export class WatchStateEngine {
 					: await (this.sdk.listVideosDir?.(videosDir, this.vouchedSince) ?? this.sdk.listDirectory(videosDir))
 
 			file = listed?.find(isStateFileName) ?? null
+		}
+
+		this.headCheckedEpoch = epoch
+
+		// Listed without a state file: nothing seen before the lookup is still the head.
+		if (file === null && this.dropRemoteSavesThrough(seq)) {
+			this.rebuild()
 		}
 
 		// Gone or unlisted: the next flush's own lookup sorts it out.
@@ -1482,6 +1516,8 @@ export class WatchStateEngine {
 
 	private noteForeign(file: SdkFile): void {
 		this.loseHead()
+		// The socket named the head in this epoch: reading it is all an open needs, no lookup.
+		this.headCheckedEpoch = this.epoch
 		this.remoteSave = {
 			file,
 			epoch: this.epoch,
@@ -1491,10 +1527,14 @@ export class WatchStateEngine {
 	}
 
 	// A head lookup that started after the save was seen covers it.
-	private dropRemoteSavesThrough(seq: number): void {
+	private dropRemoteSavesThrough(seq: number): boolean {
 		if (this.remoteSave !== null && this.remoteSave.seq <= seq) {
 			this.remoteSave = null
+
+			return true
 		}
+
+		return false
 	}
 
 	// ── Flush ──
@@ -1818,6 +1858,7 @@ export class WatchStateEngine {
 
 			if (file === null) {
 				this.dropRemoteSavesThrough(seq)
+				this.headCheckedEpoch = epoch
 
 				return {
 					ref: null,
@@ -1838,6 +1879,7 @@ export class WatchStateEngine {
 
 		if (file.uuid === head?.u && !this.headGone) {
 			this.dropRemoteSavesThrough(seq)
+			this.headCheckedEpoch = epoch
 
 			return {
 				ref,

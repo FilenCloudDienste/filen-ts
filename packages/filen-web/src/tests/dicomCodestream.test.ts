@@ -212,6 +212,35 @@ describe("codestream headers", () => {
 		expect(jpeg2000Header(Uint8Array.from([...main, ...tilePart(null), 0xff, 0xd9]))?.levels).toBe(5)
 	})
 
+	it("reads each tile part's header only within that part, in steps linear in the parts", () => {
+		// 16-byte tile parts (Psot 16), each header a 4-byte segment claiming 14 bytes: unbounded, a walk from one part
+		// lands on the next part's segment, never on an SOT, and runs through every later part.
+		const parts = 20_000
+		const main = siz(64, 48, 1, 8, 5)
+		const stream = new Uint8Array(main.length + parts * 16 + 2)
+
+		stream.set(main)
+
+		for (let i = 0, at = main.length; i < parts; i++, at += 16) {
+			stream.set([0, 10, 0, 0, 0, 0, 0, 16, 0, 1, 0xff, 0x64, 0, 14, 0xff, i === parts - 1 ? 0xd9 : 0x90], at)
+		}
+
+		// Every index read counted, the walk stopped once it is past a linear bound.
+		const limit = 64 * parts
+		let reads = 0
+		const counted = new Proxy(stream, {
+			get: (target, key) => {
+				if (typeof key === "string" && /^\d+$/.test(key) && ++reads > limit) throw new Error("not linear in the tile parts")
+
+				const value: unknown = Reflect.get(target, key, target)
+
+				return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value
+			}
+		})
+
+		expect(jpeg2000Header(counted)?.levels).toBe(5)
+	})
+
 	it("sizes a reduced resolution from the image's origin on the reference grid, as the decoders do", () => {
 		const header = jpeg2000Header(siz(101, 7, 1, 8, 3, { x0: 1, y0: 3 }))
 

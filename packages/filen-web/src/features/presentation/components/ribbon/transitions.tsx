@@ -34,6 +34,7 @@ import { animationPane, useAnimationPane } from "@/features/presentation/compone
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import type { PreviewKey } from "@/lib/i18n"
+import { noop } from "@/lib/utils"
 
 // The presentation ribbon's Transitions tab: the transition into the selected slides (every ECMA, PowerPoint 2010 and
 // 2013 transition and Morph, core/anim's catalog), its effect options, duration, sound and advance, and Apply To All.
@@ -52,15 +53,20 @@ export interface SlideTransitionState {
 	readonly failed: boolean
 }
 
-function createTransitionState() {
-	let state: SlideTransitionState = {
-		slide: undefined,
-		revision: -1,
-		transition: undefined,
-		played: undefined,
-		loaded: false,
-		failed: false
-	}
+type TransitionSession = Pick<PresentationSessionApi, "timegraph">
+
+const IDLE: SlideTransitionState = {
+	slide: undefined,
+	revision: -1,
+	transition: undefined,
+	played: undefined,
+	loaded: false,
+	failed: false
+}
+
+// One session's answers: slide refs and revisions restart in every deck, so a store never answers for another session.
+function createTransitionState(session: TransitionSession) {
+	let state = IDLE
 	let token = 0
 	const listeners = new Set<() => void>()
 	const set = (next: Partial<SlideTransitionState>): void => {
@@ -79,7 +85,7 @@ function createTransitionState() {
 		},
 		getSnapshot: (): SlideTransitionState => state,
 		// The slide's transition at `revision` of its render, asked once per revision.
-		request: (session: Pick<PresentationSessionApi, "timegraph">, slide: SlideRef, revision: number): void => {
+		request: (slide: SlideRef, revision: number): void => {
 			if (state.slide === slide && state.revision === revision) return
 
 			const mine = ++token
@@ -105,27 +111,38 @@ function createTransitionState() {
 	}
 }
 
-const slideTransition = createTransitionState()
+type TransitionStore = ReturnType<typeof createTransitionState>
 
-const IDLE: SlideTransitionState = {
-	slide: undefined,
-	revision: -1,
-	transition: undefined,
-	played: undefined,
-	loaded: false,
-	failed: false
+// Held weakly: a closed deck's session and its answers go with it.
+const stores = new WeakMap<TransitionSession, TransitionStore>()
+
+function storeOf(session: TransitionSession): TransitionStore {
+	let store = stores.get(session)
+
+	if (store === undefined) {
+		store = createTransitionState(session)
+		stores.set(session, store)
+	}
+
+	return store
 }
 
-function useSlideTransition(editor: PresentationRibbonEditor | undefined): SlideTransitionState {
-	const state = useSyncExternalStore(slideTransition.subscribe, slideTransition.getSnapshot, slideTransition.getSnapshot)
+const noSubscribe = (): (() => void) => noop
+const idleSnapshot = (): SlideTransitionState => IDLE
+
+// The slide's transition in this editor's session; IDLE from the first render of another session until it answers.
+export function useSlideTransition(editor: Pick<PresentationRibbonEditor, "render" | "session"> | undefined): SlideTransitionState {
+	const session = editor?.session
+	const store = session === undefined ? undefined : storeOf(session)
+	const getSnapshot = store?.getSnapshot ?? idleSnapshot
+	const state = useSyncExternalStore(store?.subscribe ?? noSubscribe, getSnapshot, getSnapshot)
 	const render = editor?.render
 	const slide = render?.ref
 	const revision = render?.revision ?? -1
-	const session = editor?.session
 
 	useEffect(() => {
-		if (session !== undefined && slide !== undefined) slideTransition.request(session, slide, revision)
-	}, [session, slide, revision])
+		if (store !== undefined && slide !== undefined) store.request(slide, revision)
+	}, [store, slide, revision])
 
 	return state.slide === slide && slide !== undefined ? state : IDLE
 }
@@ -164,7 +181,7 @@ const OPTION_KEYS: Readonly<Record<string, PreviewKey>> = {
 	invY: "previewPptxTransitionOptionInvY"
 }
 
-function valueLabel(t: TFunction<"preview">, spec: TransitionOptionSpec, value: string): string {
+export function valueLabel(t: TFunction<"preview">, spec: TransitionOptionSpec, value: string): string {
 	if (spec.name === "spokes") return t("previewPptxTransitionSpokes", { count: Number(value) })
 	if (spec.name === "option") return t(`previewPptxTransitionMorph${capitalized(value)}` as PreviewKey)
 	if (spec.name === "pattern") return t(`previewPptxTransitionPattern${capitalized(value)}` as PreviewKey)

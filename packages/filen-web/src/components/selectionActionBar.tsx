@@ -1,4 +1,4 @@
-import { createElement, useState, type ReactNode } from "react"
+import { createElement, useId, useState, type ReactNode } from "react"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useTranslation } from "react-i18next"
 import { XIcon, type LucideIcon } from "lucide-react"
@@ -6,7 +6,7 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { DisabledReason, EXPLAINED_DISABLED_CLASS, TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 // Surfaces whose rows carry their own actions mount the floating bar only from two selected up.
@@ -46,7 +46,7 @@ export function SelectionActionBar(props: {
 }
 
 // Icon-only keeps the pill compact: the label is the stable accessible name, and a disabled button
-// explains itself through both the tooltip and a native title.
+// explains itself through the tooltip and its accessible description.
 export function BulkActionButton(props: {
 	icon: LucideIcon
 	label: string
@@ -56,6 +56,10 @@ export function BulkActionButton(props: {
 	kbdAction?: string | undefined
 	onClick: () => void
 }) {
+	const reasonId = useId()
+	const reason = props.disabled === true ? props.disabledReason : undefined
+	const explained = reason !== undefined
+
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -64,16 +68,22 @@ export function BulkActionButton(props: {
 						variant={props.destructive === true ? "destructive" : "outline"}
 						size="icon-sm"
 						disabled={props.disabled}
+						focusableWhenDisabled={explained}
 						aria-label={props.label}
-						title={props.disabledReason}
+						aria-describedby={explained ? reasonId : undefined}
+						className={explained ? EXPLAINED_DISABLED_CLASS : undefined}
 						onClick={props.onClick}
 					>
 						{createElement(props.icon, { "aria-hidden": true })}
+						<DisabledReason
+							id={reasonId}
+							reason={reason}
+						/>
 					</Button>
 				}
 			/>
 			<TooltipContent>
-				{props.disabledReason ?? props.label}
+				{reason ?? props.label}
 				{props.kbdAction === undefined ? null : <Kbd action={props.kbdAction} />}
 			</TooltipContent>
 		</Tooltip>
@@ -105,6 +115,9 @@ export function BulkActionMenuButton(props: {
 	children: ReactNode
 }) {
 	const [open, setOpen] = useState(false)
+	const reasonId = useId()
+	const reason = props.disabled === true ? props.disabledReason : undefined
+	const explained = reason !== undefined
 
 	return (
 		<DropdownMenu
@@ -123,22 +136,29 @@ export function BulkActionMenuButton(props: {
 				<TooltipTrigger
 					render={
 						<DropdownMenuTrigger
+							disabled={props.disabled}
 							render={
 								<Button
 									variant="outline"
 									size="icon-sm"
 									disabled={props.disabled}
+									focusableWhenDisabled={explained}
 									aria-label={props.label}
-									title={props.disabledReason}
+									aria-describedby={explained ? reasonId : undefined}
+									className={explained ? EXPLAINED_DISABLED_CLASS : undefined}
 								>
 									{createElement(props.icon, { "aria-hidden": true })}
+									<DisabledReason
+										id={reasonId}
+										reason={reason}
+									/>
 								</Button>
 							}
 						/>
 					}
 				/>
 				<TooltipContent>
-					{props.disabledReason ?? props.label}
+					{reason ?? props.label}
 					{props.kbdAction === undefined ? null : <Kbd action={props.kbdAction} />}
 				</TooltipContent>
 			</Tooltip>

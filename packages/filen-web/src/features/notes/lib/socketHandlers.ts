@@ -434,7 +434,7 @@ export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promi
 		copy = await runOp(sdkApi.setNoteContent(copy, mine, notePreviewFor(copy.noteType, mine)))
 	} catch (e) {
 		if (copy !== null) {
-			await discardPartialCopy(copy)
+			await discardPartialNote(copy)
 		}
 
 		return { status: "error", dto: asErrorDTO(e) }
@@ -447,15 +447,16 @@ export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promi
 	return { status: "success", item: copy }
 }
 
-// Best effort: a copy that cannot be deleted is listed, rather than left for the next list read to surface.
-async function discardPartialCopy(copy: Note): Promise<void> {
+// Removes a note a multi-step create (a conflicted copy, an import) left half made. Best effort: a note that cannot be
+// deleted is listed, rather than left for the next list read to surface.
+export async function discardPartialNote(note: Note): Promise<void> {
 	const discarded = await run(async () => {
-		await sdkApi.deleteNote(await sdkApi.trashNote(copy))
+		await sdkApi.deleteNote(await sdkApi.trashNote(note))
 	})
 
 	if (!discarded.success) {
-		log.warn("notes", "conflicted copy: could not delete the partial copy", copy.uuid, discarded.error)
-		notesQueryUpsert(copy)
+		log.warn("notes", "could not delete a partially created note", note.uuid, discarded.error)
+		notesQueryUpsert(note)
 	}
 }
 

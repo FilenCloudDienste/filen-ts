@@ -251,6 +251,32 @@ export function streamHeldOutput(client: Pick<PdfEngine["client"], "call">): Hel
 	return { port: channel.port2, announced, uploaded }
 }
 
+// The file an engine holds, uploaded by `write` once the engine announced the stream. `made`: `write` answered a
+// success and the engine's stream then completed (its answer is awaited only then: a write that never read the port
+// would leave it pending). Otherwise the engine's write, which holds every other request until the upload settles, is
+// told on this end of the port (a write that failed may never have read it; one that handed it on leaves nothing to
+// tell here), so the engine always comes free. Never throws: a `write` that threw comes back in `written`.
+export async function uploadHeldOutput<T extends { readonly outcome: ActionOutcome<DriveItem> } | null>(
+	client: Pick<PdfEngine["client"], "call">,
+	write: (port: MessagePort) => Promise<T>
+): Promise<{
+	readonly written: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }
+	readonly made: boolean
+}> {
+	const upload = streamHeldOutput(client)
+	const written = await upload.announced
+		.then(() => write(upload.port))
+		.then(
+			value => ({ ok: true as const, value }),
+			(error: unknown) => ({ ok: false as const, error })
+		)
+	const made = written.ok && written.value?.outcome.status === "success" && (await upload.uploaded)
+
+	if (!made) savePortReader(upload.port, { inFlight: 1 }).abort("upload")
+
+	return { written, made }
+}
+
 // Save: a new version of `item`, for the preview overlay's port save (PresentationSaveEdits, with the exact size and the
 // edited file's times). `adopt`: the session goes on on the written file where it fits (a signing follows, which
 // appends to the saved file).
@@ -316,19 +342,7 @@ export function savePdfCopy(
 ): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
 	return holding(deps, async release => {
 		const begun = await writeAndCheck(deps, deps.fileBytes)
-		const upload = stream(deps)
-		const written = await upload.announced
-			.then(() => write({ port: upload.port, size: begun.size }))
-			.then(
-				value => ({ ok: true as const, value }),
-				(error: unknown) => ({ ok: false as const, error })
-			)
-		// The upload's own answer only once it made the file. Otherwise the engine's write, which holds its requests until
-		// the upload settles, is told on this end of the port (a write that failed may never have read it; one that handed
-		// it on leaves nothing to tell here).
-		const made = written.ok && written.value?.outcome.status === "success" && (await upload.uploaded)
-
-		if (!made) savePortReader(upload.port, { inFlight: 1 }).abort("upload")
+		const { written, made } = await uploadHeldOutput(deps.engine.client, port => write({ port, size: begun.size }))
 
 		await endQuietly(deps, made ? "copied" : "failed")
 		release()

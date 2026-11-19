@@ -1,4 +1,5 @@
 import { formatBytes, formatSecondsToMediaClock } from "@filen/shared"
+import { NO_TRANSFERS_NOTE } from "@filen/shared/assistant"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import {
 	computeTransfersAggregate,
@@ -93,7 +94,7 @@ export const getTransfersTool: ToolAdapter = (_input, scope) => {
 						more: Math.max(0, active.length - ACTIVE_LIMIT) + Math.max(0, finished.length - FINISHED_LIMIT)
 					}
 				: {}),
-			...(transfers.length === 0 ? { note: "No uploads or downloads in this tab since it was opened." } : {})
+			...(transfers.length === 0 ? { note: NO_TRANSFERS_NOTE } : {})
 		}
 	})
 }

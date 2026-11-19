@@ -108,6 +108,18 @@ async function flushAsync(): Promise<void> {
 	await new Promise(resolve => setTimeout(resolve, 15))
 }
 
+// Every instance shares the module-level store and sdk mocks, and a leader edit arms a real debounce:
+// one left running would fire a pass into a later test. afterEach cancels them all.
+const syncs: Sync[] = []
+
+function newSync(): Sync {
+	const s = new Sync()
+
+	syncs.push(s)
+
+	return s
+}
+
 beforeEach(() => {
 	kvStore.clear()
 	kvGetJson.mockClear()
@@ -123,6 +135,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	for (const s of syncs.splice(0)) {
+		s.cancel()
+	}
+
 	vi.useRealTimers()
 })
 
@@ -180,7 +196,7 @@ describe("reconcileFollower — leader-authoritative + optimistic overlay", () =
 
 describe("follower enqueue — optimistic local apply + forward, no disk", () => {
 	it("applies to the local store AND forwards the newest entry; never persists", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -207,7 +223,7 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 	})
 
 	it("marks forwarded edits as an answer to the remote-edit dialog until the note drains, re-sends included", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -232,7 +248,7 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 	})
 
 	it("forwards a flush request on executeNow instead of running a pass", () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -244,7 +260,7 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 	})
 
 	it("requests the leader's current state on start (catch up to another tab's pending note)", () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -259,7 +275,7 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 // an edit another tab has queued.
 describe("follower hydration gate", () => {
 	it("stays closed until the leader's first state broadcast lands", () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -276,7 +292,7 @@ describe("follower hydration gate", () => {
 	})
 
 	it("opens immediately when no channel is attached — nothing can ever answer", () => {
-		const s = new Sync()
+		const s = newSync()
 
 		s.startAsFollower()
 
@@ -286,7 +302,7 @@ describe("follower hydration gate", () => {
 
 describe("follower reconcile-on-broadcast — spinner clears when the leader drains", () => {
 	it("drops the note from the store once the leader confirms then drains it", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -309,7 +325,7 @@ describe("follower reconcile-on-broadcast — spinner clears when the leader dra
 
 describe("follower re-send on takeover announcement", () => {
 	it("re-forwards every still-unacked edit when a new leader says hello", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -333,7 +349,7 @@ describe("follower re-send on takeover announcement", () => {
 
 describe("leader ingest — apply forwarded edit, persist, broadcast", () => {
 	async function startedLeader(): Promise<{ s: Sync; transport: ReturnType<typeof mockTransport> }> {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -353,9 +369,10 @@ describe("leader ingest — apply forwarded edit, persist, broadcast", () => {
 		s.ingestRemoteEnqueue({ note, content: "from-follower", timestamp: 500 })
 		await flushAsync()
 
-		// Persisted to disk (the durability point) and broadcast to followers.
-		expect(kvSetJson).toHaveBeenCalledWith("inflightNoteContent", expect.any(Object))
+		// Persisted to disk (the durability point), then broadcast to followers.
+		expect(kvStore.get("inflightNoteContent")).toStrictEqual({ a: [{ timestamp: 500, content: "from-follower", note }] })
 		expect(transport.broadcastState).toHaveBeenCalled()
+		expect(kvSetJson.mock.invocationCallOrder[0]).toBeLessThan(transport.broadcastState.mock.invocationCallOrder[0] ?? 0)
 	})
 
 	// A follower's "Load theirs" over a push of the local edits that landed after their save.
@@ -394,7 +411,7 @@ describe("leader ingest — apply forwarded edit, persist, broadcast", () => {
 
 describe("a follower hears the leader's pushes", () => {
 	it("knows a push of an entry it queued for its own, by the entry's origin, and no other", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -427,9 +444,9 @@ describe("a follower hears the leader's pushes", () => {
 	// Same-millisecond entries carry the same timestamp: only the origin tells whose was pushed.
 	it("two tabs queuing the note in the same millisecond: each knows exactly whether the push was its own", async () => {
 		const now = vi.spyOn(Date, "now").mockReturnValue(1000)
-		const leader = new Sync()
+		const leader = newSync()
 		const leaderTransport = mockTransport()
-		const follower = new Sync()
+		const follower = newSync()
 		const followerTransport = mockTransport()
 
 		leader.attachTransport(leaderTransport)
@@ -479,9 +496,9 @@ describe("a follower hears the leader's pushes", () => {
 	})
 
 	it("the overwrite a follower's push made is told in that tab, not the leader's", async () => {
-		const leader = new Sync()
+		const leader = newSync()
 		const leaderTransport = mockTransport()
-		const follower = new Sync()
+		const follower = newSync()
 		const followerTransport = mockTransport()
 
 		leader.attachTransport(leaderTransport)
@@ -513,7 +530,7 @@ describe("a follower hears the leader's pushes", () => {
 	})
 
 	it("a follower's drop reaches the leader, and a follower writes no durable outbox", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -530,7 +547,7 @@ describe("a follower hears the leader's pushes", () => {
 
 	// The answer and the push it answers over outlive the leader that knew them.
 	it("a promoted follower puts their content back over this browser's last push without an overwrite warning", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -554,7 +571,7 @@ describe("a follower hears the leader's pushes", () => {
 
 describe("promoteToLeader — a follower wins the lock and pushes carried-over work", () => {
 	it("pushes an optimistic edit the follower held locally even when disk was empty", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -580,7 +597,7 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 	})
 
 	it("records what it pushes and tells the other tabs, before the push goes out", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -608,7 +625,7 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 	})
 
 	it("merges disk state persisted by the dead leader with the follower's local store, then pushes", async () => {
-		const s = new Sync()
+		const s = newSync()
 		const transport = mockTransport()
 
 		s.attachTransport(transport)
@@ -637,7 +654,7 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 describe("terminal shutdown — no cross-tab resurrection after logout", () => {
 	it("cancel() closes the cross-tab channel exactly once", async () => {
 		const transport = mockTransport()
-		const s = new Sync()
+		const s = newSync()
 
 		s.attachTransport(transport)
 		s.start()
@@ -651,7 +668,7 @@ describe("terminal shutdown — no cross-tab resurrection after logout", () => {
 	it("ingestRemoteEnqueue after cancel() neither queues nor persists a peer's forwarded edit", async () => {
 		const transport = mockTransport()
 		const note = makeNote("a")
-		const s = new Sync()
+		const s = newSync()
 
 		s.attachTransport(transport)
 		s.start()
@@ -671,7 +688,7 @@ describe("terminal shutdown — no cross-tab resurrection after logout", () => {
 
 	it("broadcastState() after cancel() posts nothing — the role is no longer leader", async () => {
 		const transport = mockTransport()
-		const s = new Sync()
+		const s = newSync()
 
 		s.attachTransport(transport)
 		s.start()
@@ -720,7 +737,7 @@ describe("editing sessions", () => {
 	it("cancel() clears every session so a wiped account leaves no note gated", () => {
 		beginEditingSession("a")
 
-		new Sync().cancel()
+		newSync().cancel()
 
 		expect(useNotesInflightStore.getState().editingSessions).toStrictEqual({})
 	})

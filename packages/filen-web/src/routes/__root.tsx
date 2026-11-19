@@ -9,7 +9,7 @@ import { onAuthBroadcast } from "@/lib/sdk/session"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { registerSW } from "@/lib/sw/register"
-import { showUpdateReadyToast } from "@/lib/appUpdate"
+import { showUpdateDeferredToast, showUpdateReadyToast } from "@/lib/appUpdate"
 import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
 import { useBootSplashShown } from "@/lib/bootSplash"
@@ -106,7 +106,7 @@ function BootGate() {
 			return
 		}
 
-		registerSW(showUpdateReadyToast)
+		registerSW(showUpdateReadyToast, showUpdateDeferredToast)
 	}, [phase])
 
 	if (onNoCoi || onNoOpfs) {

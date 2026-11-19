@@ -1,14 +1,41 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 
 // de, zh and zh-TW ship near-complete catalogs; fr has a partial one.
 vi.mock("@/locales/.catalogs.json", () => ({ default: { languages: { de: 1e9, zh: 1e9, "zh-TW": 1e9, fr: 1 } } }))
 // The real map only holds catalog files that exist on disk.
 vi.mock("@/lib/i18n/catalogUrl", () => ({ catalogUrl: (lang: string) => `/assets/${lang}.json` }))
+vi.mock("sonner", () => ({ toast: { error: toastError } }))
+// The select itself is the shared row's concern; a button per option drives onChange here.
+vi.mock("@/features/settings/components/settingRows", () => ({
+	SettingsSelectRow: (props: { options: readonly { value: string; label: string }[]; onChange: (value: string) => void }) =>
+		createElement(
+			"div",
+			null,
+			props.options.map(option =>
+				createElement(
+					"button",
+					{
+						key: option.value,
+						type: "button",
+						onClick: () => {
+							props.onChange(option.value)
+						}
+					},
+					option.value
+				)
+			)
+		)
+}))
 
 const { i18n } = await import("@/lib/i18n")
 const language = await import("@/lib/i18n/language")
+const { LanguageRow } = await import("@/features/settings/components/appearance/languageRow")
 
 const CATALOGS: Record<string, unknown> = {
 	de: { common: { cancel: "Abbrechen" } },
@@ -36,6 +63,8 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+	cleanup()
+	toastError.mockClear()
 	vi.useRealTimers()
 })
 
@@ -94,10 +123,15 @@ describe("applyLanguage", () => {
 		expect(document.documentElement.lang).toBe("en")
 	})
 
-	it("stays in English when the catalog cannot be loaded", async () => {
+	it("resolves true when the language is in place", async () => {
+		await expect(language.applyLanguage("de")).resolves.toBe(true)
+		await expect(language.applyLanguage("en")).resolves.toBe(true)
+	})
+
+	it("stays in English when the catalog cannot be loaded, and resolves false", async () => {
 		fetchMock.mockImplementationOnce(() => Promise.reject(new TypeError("offline")))
 
-		await language.applyLanguage("de")
+		await expect(language.applyLanguage("de")).resolves.toBe(false)
 
 		expect(i18n.language).toBe("en")
 		expect(i18n.hasResourceBundle("de", "common")).toBe(false)
@@ -107,7 +141,8 @@ describe("applyLanguage", () => {
 		const first = language.applyLanguage("de")
 		const second = language.applyLanguage("zh")
 
-		await Promise.all([first, second])
+		// The superseded call is not a failure.
+		await expect(Promise.all([first, second])).resolves.toEqual([true, true])
 
 		expect(i18n.language).toBe("zh")
 		expect(i18n.hasResourceBundle("de", "common")).toBe(false)
@@ -141,6 +176,50 @@ describe("setLanguagePreference", () => {
 		expect(listener).toHaveBeenCalledTimes(2)
 
 		unsubscribe()
+	})
+})
+
+describe("LanguageRow", () => {
+	it("stores the pick and shows an error when its catalog cannot be fetched", async () => {
+		fetchMock.mockImplementationOnce(() => Promise.resolve(new Response(null, { status: 404 })))
+		render(createElement(LanguageRow))
+
+		fireEvent.click(screen.getByRole("button", { name: "de" }))
+
+		await vi.waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith("The language couldn't be loaded. Check your connection and reload the page.")
+		})
+		expect(localStorage.getItem(language.LANGUAGE_STORAGE_KEY)).toBe("de")
+		expect(i18n.language).toBe("en")
+	})
+
+	it("does not report a pick superseded by a later one", async () => {
+		let release: (response: Response) => void = () => undefined
+
+		fetchMock.mockImplementationOnce(
+			() =>
+				new Promise<Response>(resolve => {
+					release = resolve
+				})
+		)
+		render(createElement(LanguageRow))
+
+		fireEvent.click(screen.getByRole("button", { name: "de" }))
+		fireEvent.click(screen.getByRole("button", { name: "zh" }))
+
+		await vi.waitFor(() => {
+			expect(i18n.language).toBe("zh")
+		})
+
+		// The first pick's catalog fails after the second pick has applied.
+		release(new Response(null, { status: 404 }))
+		await vi.waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledTimes(2)
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(toastError).not.toHaveBeenCalled()
+		expect(i18n.language).toBe("zh")
 	})
 })
 

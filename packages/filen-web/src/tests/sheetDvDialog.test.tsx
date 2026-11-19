@@ -2,15 +2,22 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { SheetRefusalReason, SheetSessionApi, SheetValidationAlert, SheetValidationRule } from "@filen/office/core/sheet"
-import type { SheetGridHandle } from "@filen/office/react/sheet"
+import type {
+	SheetCommand,
+	SheetCommandResult,
+	SheetRefusal,
+	SheetSessionApi,
+	SheetValidationAlert,
+	SheetValidationRule
+} from "@filen/office/core/sheet"
+import type { SheetGridHandle, SheetGridModel, SheetGridState } from "@filen/office/react/sheet"
 import "@/lib/i18n"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
 import { ValidationDialog } from "@/features/spreadsheet/data/dvDialog"
 import { NEW_RULE, validationComplete, validationFields, validationRefusalKey } from "@/features/spreadsheet/data/dvDialog.logic"
 import { ALERT_BUTTONS, useValidationAlert, type ValidationVerdict } from "@/features/spreadsheet/data/dvAlert"
-import { checkEntry } from "@/features/spreadsheet/data/cfExtension"
+import { checkEntry, useSheetConditional } from "@/features/spreadsheet/data/cfExtension"
 
 // The Data validation dialog (Excel's fields per kind, the rule sent, a refusal shown), the alert an invalid entry
 // shows with Excel's buttons per style, and an entry checked before it is written.
@@ -37,14 +44,15 @@ describe("the Data validation dialog's fields", () => {
 
 	it("sends the rule as edited, and shows why the session refused it", async () => {
 		const onApply = vi
-			.fn<(rule: SheetValidationRule) => Promise<SheetRefusalReason | null>>()
-			.mockResolvedValueOnce("formula")
+			.fn<(rule: SheetValidationRule) => Promise<SheetRefusal | null>>()
+			.mockResolvedValueOnce({ reason: "formula" })
 			.mockResolvedValueOnce(null)
 		const onClose = vi.fn()
 
 		render(
 			<ValidationDialog
 				rule={{ ...NEW_RULE, type: "list" }}
+				kind="xlsx"
 				onClose={onClose}
 				onApply={onApply}
 				onClear={() => undefined}
@@ -72,11 +80,12 @@ describe("the Data validation dialog's fields", () => {
 	})
 
 	it("writes the input and error messages in boxes of several lines, as Excel's dialog has them", async () => {
-		const onApply = vi.fn<(rule: SheetValidationRule) => Promise<SheetRefusalReason | null>>().mockResolvedValue(null)
+		const onApply = vi.fn<(rule: SheetValidationRule) => Promise<SheetRefusal | null>>().mockResolvedValue(null)
 
 		render(
 			<ValidationDialog
 				rule={{ ...NEW_RULE, showInputMessage: true }}
+				kind="xlsx"
 				onClose={() => undefined}
 				onApply={onApply}
 				onClear={() => undefined}
@@ -104,6 +113,7 @@ describe("the Data validation dialog's fields", () => {
 		render(
 			<ValidationDialog
 				rule={NEW_RULE}
+				kind="xlsx"
 				onClose={() => undefined}
 				onApply={() => Promise.resolve(null)}
 				onClear={onClear}
@@ -111,6 +121,92 @@ describe("the Data validation dialog's fields", () => {
 		)
 		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetValidationClearAll }))
 		expect(onClear).toHaveBeenCalled()
+	})
+
+	it("says a refusal that is not about the rule in the app's words, not as an invalid value", async () => {
+		const onApply = vi
+			.fn<(rule: SheetValidationRule) => Promise<SheetRefusal | null>>()
+			.mockResolvedValue({ reason: "readOnly", detail: "signed" })
+
+		render(
+			<ValidationDialog
+				rule={{ ...NEW_RULE, type: "list", value1: "Yes,No" }}
+				kind="xlsx"
+				onClose={() => undefined}
+				onApply={onApply}
+				onClear={() => undefined}
+			/>
+		)
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: preview.previewSheetValidationOk }))
+			await Promise.resolve()
+		})
+
+		expect(screen.getByText(preview.previewSheetReadOnlySigned)).toBeTruthy()
+		expect(screen.queryByText(preview.previewSheetValidationInvalidValue)).toBeNull()
+	})
+})
+
+function ConditionalHarness({ model, session }: { model: SheetGridModel; session: SheetSessionApi }) {
+	const grid = {
+		sheet: 1,
+		selection: { active: { row: 0, col: 0 }, ranges: [{ top: 0, left: 0, bottom: 0, right: 0 }] },
+		editing: null
+	} as unknown as SheetGridState
+	const extension = useSheetConditional({
+		grid,
+		model,
+		gridRef: { current: null },
+		session,
+		canEdit: true,
+		text: false,
+		run: () => undefined
+	})
+
+	return (
+		<>
+			<button
+				type="button"
+				onClick={() => {
+					extension.ribbon?.dataValidation?.()
+				}}
+			>
+				open
+			</button>
+			{extension.dialogs}
+		</>
+	)
+}
+
+describe("the Data validation dialog in the sheet", () => {
+	it("clears with the model reporting a refusal, so a refused Clear all toasts", async () => {
+		const onRefusal = vi.fn()
+		const refusal: SheetRefusal = { reason: "protectedSheet" }
+		const command = vi.fn((_command: SheetCommand, report = true): Promise<SheetCommandResult> => {
+			if (report) onRefusal(refusal)
+
+			return Promise.resolve({ ok: false, refusal } as SheetCommandResult)
+		})
+		const model = { kind: "xlsx", intent: () => Promise.resolve(), command } as unknown as SheetGridModel
+		const session = { query: () => Promise.resolve(NEW_RULE) } as unknown as SheetSessionApi
+
+		render(
+			<ConditionalHarness
+				model={model}
+				session={session}
+			/>
+		)
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "open" }))
+			await Promise.resolve()
+		})
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: preview.previewSheetValidationClearAll }))
+			await Promise.resolve()
+		})
+
+		expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: "validation.set", rule: null }))
+		expect(onRefusal).toHaveBeenCalledWith(refusal)
 	})
 })
 

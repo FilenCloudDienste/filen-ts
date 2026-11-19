@@ -34,6 +34,19 @@ describe("errorLabel", () => {
 		)
 	})
 
+	it("labels an exhausted retry and a stale state from the catalog, not the SDK's English message", () => {
+		const retry: ErrorDTO = {
+			species: "sdk",
+			kind: "RetryFailed",
+			message: "Failed to acquire lock on resource drive after 10 attempts",
+			label: "Failed to acquire lock on resource drive after 10 attempts"
+		}
+		const stale: ErrorDTO = { species: "sdk", kind: "StaleState", message: "stale state", label: "stale state" }
+
+		expect(errorLabel(retry)).toBe("Another device may be changing this right now, or the connection is unstable. Please try again.")
+		expect(errorLabel(stale)).toBe("This changed elsewhere in the meantime. Please try again.")
+	})
+
 	it("falls back to labelFirst for a real SdkErrorKind that has no catalog entry", () => {
 		const dto: ErrorDTO = {
 			species: "sdk",

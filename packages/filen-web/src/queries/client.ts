@@ -24,9 +24,9 @@ import { QUERY_DEFAULTS } from "@/queries/clientDefaults"
 // each query owns one sqlite kv row (`<PERSIST_PREFIX>-<queryHash>`), written via the `persister` default
 // below only when that query settles successfully; `restorePersistedQueries(queryClient)` runs
 // once on boot. Mobile's O(1) `persistQueryByKey` narrowing facade (version-pinned to library
-// internals) is deliberately NOT ported — parked until profiling shows the need. When the first
-// query that must NOT persist appears, use the persister's first-class `filters` option
-// (persist.ts) — not mobile's serialize-undefined hack.
+// internals) is deliberately NOT ported — parked until profiling shows the need. A query that must
+// NOT persist sets `persister: noDiskPersister` (persist.ts) on its own definition — the one
+// opt-out; no central filter, no feature keys here, not mobile's serialize-undefined hack.
 //
 // Zero-`useMutation` convention: this app never calls `useMutation`. Writes are plain typed async
 // functions that call the SDK directly from the triggering event handler and, on success,

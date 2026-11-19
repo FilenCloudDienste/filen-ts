@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
-import { createEntrySearch, searchEntries, SEARCH_CAP } from "@/features/archive/lib/search"
+import { createEntrySearch, SEARCH_CAP, type SearchOptions, type SearchResult } from "@/features/archive/lib/search"
 import { dirOfRef, isDirRef } from "@/features/archive/lib/sortedChildren"
 import { createEntryStore } from "@/features/archive/lib/entryStore"
 import { packEntries, storeOf } from "@/tests/support/archiveEntries"
@@ -9,7 +9,12 @@ function labels(store: EntryStore, refs: Int32Array): string[] {
 	return Array.from(refs, ref => (isDirRef(ref) ? `${store.dirPath(dirOfRef(ref))}/` : store.name(ref)))
 }
 
-describe("searchEntries", () => {
+// One search over the entries the store holds when it begins: a single advance.
+function searchEntries(store: EntryStore, scopeDir: number, query: string, options: SearchOptions = {}): Promise<SearchResult> {
+	return createEntrySearch(store, scopeDir, query, options).advance(options.signal)
+}
+
+describe("one search", () => {
 	const store = storeOf([
 		"docs/Report 10.pdf",
 		"docs/report 2.pdf",

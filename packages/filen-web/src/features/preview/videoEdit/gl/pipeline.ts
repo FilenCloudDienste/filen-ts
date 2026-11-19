@@ -2,15 +2,7 @@ import { gradeUniforms, IDENTITY_GRADE, TRANSFER_BT709, type GradeUniforms } fro
 import type { Matrix3, Size } from "@/features/preview/imageEdit/lib/recipe"
 import type { HdrHandling, TextOverlay, TransferCharacteristic, VideoEditRecipe, VideoRotation } from "@/features/preview/videoEdit/types"
 import { hasColourWork } from "@/features/preview/videoEdit/lib/plan"
-import {
-	minification,
-	needsGpuPass,
-	outputToTexture,
-	overlayBox,
-	overlayVisible,
-	videoGrade,
-	type PipelineNeedOptions
-} from "@/features/preview/videoEdit/gl/pipeline.logic"
+import { minification, outputToTexture, overlayBox, overlayVisible, videoGrade } from "@/features/preview/videoEdit/gl/pipeline.logic"
 import { VIDEO_FRAGMENTS, VIDEO_VERTEX, type VideoProgramName } from "@/features/preview/videoEdit/gl/shaders"
 import { rasterizeText } from "@/features/preview/videoEdit/gl/textRaster"
 import { textRasterKey } from "@/features/preview/videoEdit/gl/textRaster.logic"
@@ -60,8 +52,6 @@ export interface FramePipeline {
 	// Deletes the text textures of overlays not in `overlays` (a preview's stage after an edit). Rendering never prunes
 	// on its own, so a pass with another recipe in between (a filter thumbnail) costs the stage no re-rasterising.
 	pruneText(overlays: readonly TextOverlay[]): void
-	// Whether the recipe needs this pass at all (pipeline.logic needsGpuPass).
-	needsGpu(recipe: VideoEditRecipe, options?: PipelineNeedOptions): boolean
 	dispose(): void
 }
 
@@ -737,7 +727,6 @@ export function createFramePipeline(canvas: OffscreenCanvas, options: FramePipel
 				pruneText(state, overlays)
 			}
 		},
-		needsGpu: (recipe, needOptions) => needsGpuPass(recipe, needOptions),
 		dispose: () => {
 			if (disposed) {
 				return

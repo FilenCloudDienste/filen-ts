@@ -233,11 +233,7 @@ function PlotFields({
 	const id = `chart-plot-${String(plot.index)}`
 
 	if (!editableType(plot.type) || (combo && !COMBO_TYPES.has(plot.type)))
-		return (
-			<p className="text-sm text-muted-foreground">
-				{t("previewSheetChartType")}: {t(typeKey(plot.type))}
-			</p>
-		)
+		return <p className="text-sm text-muted-foreground">{t("previewSheetChartTypeReadOnly", { type: t(typeKey(plot.type)) })}</p>
 
 	return (
 		<div className="flex flex-col gap-4">

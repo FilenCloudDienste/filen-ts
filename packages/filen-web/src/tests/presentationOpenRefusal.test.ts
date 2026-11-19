@@ -13,8 +13,11 @@ describe("the viewer's words for a deck that refuses to open", () => {
 		expect(previewPptxViewer[key as keyof typeof previewPptxViewer]).toMatch(/password/iu)
 	})
 
+	it("names a rights-managed deck", () => {
+		expect(openRefusalKey("rightsManaged")).toBe("previewPptxRightsManaged")
+	})
+
 	it("keeps the generic failure for a reason without words of its own", () => {
 		expect(openRefusalKey("stale")).toBe("previewPptxLoadFailed")
-		expect(openRefusalKey("rightsManaged")).toBe("previewPptxRightsManaged")
 	})
 })

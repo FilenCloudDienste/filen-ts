@@ -17,6 +17,7 @@ interface E2eHooks {
 	kvSet: (key: string, value: string) => Promise<void>
 	kvGet: (key: string) => Promise<string | null>
 	kvHas: (key: string) => Promise<boolean>
+	kvFindValue: (needle: string) => Promise<string[]>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
 	clearPreviews: () => void

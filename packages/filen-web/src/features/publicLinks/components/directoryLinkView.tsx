@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { sdkApi } from "@/lib/sdk/client"
+import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runOp } from "@/lib/actions/outcome"
 import { queryClient } from "@/queries/client"
 import { usePublicDirInfo, publicDirListingQueryKey } from "@/features/publicLinks/queries/publicLink"
@@ -12,14 +13,15 @@ import { useReportPassword } from "@/features/publicLinks/lib/reportSubject"
 
 // The /d/ route body. Resolves the directory info (root + link handle + hasPassword) up front; a
 // protected link is validated by LISTING the root with the typed password set — success accepts it,
-// a throw is a wrong password. The accepted password lives ONLY in this component's state and is
-// threaded into every browse call via linkForBrowsing, so navigating into subfolders never re-prompts;
-// a reload drops it and re-prompts by construction. An abuse report reads it from memory too.
+// a rejection is classified by dirAccessState (wrong password vs retryable network failure). The
+// accepted password lives ONLY in this component's state and is threaded into every browse call via
+// linkForBrowsing, so navigating into subfolders never re-prompts; a reload drops it and re-prompts
+// by construction. An abuse report reads it from memory too.
 export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: string }) {
 	const info = usePublicDirInfo(uuid, linkKey)
 	const [accepted, setAccepted] = useState<string | undefined>(undefined)
 	const [verifying, setVerifying] = useState(false)
-	const [failed, setFailed] = useState(false)
+	const [verifyError, setVerifyError] = useState<ErrorDTO | undefined>(undefined)
 
 	// An abuse report carries the accepted password, so staff can open the link.
 	useReportPassword(accepted)
@@ -30,7 +32,7 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 		hasPassword: info.data?.hasPassword ?? false,
 		accepted: accepted !== undefined,
 		verifying,
-		failed
+		verifyError
 	})
 
 	function verify(candidate: string): void {
@@ -41,7 +43,7 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 		}
 
 		setVerifying(true)
-		setFailed(false)
+		setVerifyError(undefined)
 
 		const root = rootCrumb(data)
 		const link = linkForBrowsing(data, candidate)
@@ -52,8 +54,8 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 				queryClient.setQueryData(publicDirListingQueryKey(root.uuid, link), listing)
 				setAccepted(candidate)
 			})
-			.catch(() => {
-				setFailed(true)
+			.catch((e: unknown) => {
+				setVerifyError(asErrorDTO(e))
 			})
 			.finally(() => {
 				setVerifying(false)
@@ -65,7 +67,15 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 			<LinkAccessGate
 				access={access}
 				onRetry={() => {
-					void info.refetch()
+					// An info failure refetches the info. A failed verify returns to the prompt rather than
+					// re-running with the last candidate, so the typed password is not kept in state.
+					if (info.status === "error") {
+						void info.refetch()
+
+						return
+					}
+
+					setVerifyError(undefined)
 				}}
 				onSubmitPassword={verify}
 			/>

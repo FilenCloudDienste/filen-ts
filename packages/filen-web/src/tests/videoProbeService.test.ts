@@ -226,6 +226,30 @@ describe("probe records", () => {
 		expect(recordSatisfies(at(null, 3), "card", () => "film.avi")).toBe(true)
 	})
 
+	it("probes again at revision 5 a full read of a picture without a frame rate, and only for a full request", () => {
+		const at = (record: VideoProbe | null, rev: number) => ({
+			probe: record,
+			tiers: { card: true, full: true, cover: true },
+			at: 1,
+			rev
+		})
+		const picture = probe().video
+
+		if (picture === null) {
+			throw new Error("no picture")
+		}
+
+		const withFps = probe({ video: { ...picture, fps: 25 } })
+
+		expect(recordSatisfies(at(probe(), 4), "full")).toBe(false)
+		expect(recordSatisfies(at(probe(), 4), "card")).toBe(true)
+		expect(recordSatisfies(at(probe(), 4), "cover")).toBe(true)
+		expect(recordSatisfies(at(probe(), 5), "full")).toBe(true)
+		expect(recordSatisfies(at(withFps, 4), "full")).toBe(true)
+		expect(recordSatisfies(at(probe({ video: null }), 4), "full")).toBe(true)
+		expect(probeRecordSchema(at(withFps, 5))).toEqual(at(withFps, 5))
+	})
+
 	it("folds a new read into an older record without keeping what it read differently", () => {
 		const oldMkv = {
 			probe: withoutLandscapeCover(probe({ container: "mkv", cover: COVER })),

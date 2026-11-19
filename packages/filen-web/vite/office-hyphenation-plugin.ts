@@ -50,14 +50,14 @@ function hashedPath(entry: PatternFile): string {
 	return `assets/office-hyphenation/${entry.file.replace(/\.txt\.gz$/, "")}-${entry.sha256.slice(0, 8)}.txt.gz`
 }
 
-export function officeHyphenation(): Plugin {
+// `emit: false` is the workers' instance: the same virtual module and URLs, without the dev middleware or the build's
+// verify-and-emit (the page build emits every file once).
+export function officeHyphenation(options: { readonly emit?: boolean } = {}): Plugin {
 	const files = readManifest()
-	// Exactly the manifest's files, so the dev middleware needs no path containment of its own.
-	const served = new Set(files.map(entry => entry.file))
 	let build = false
 
-	return {
-		name: "filen:office-hyphenation",
+	const plugin: Plugin = {
+		name: options.emit === false ? "filen:office-hyphenation-modules" : "filen:office-hyphenation",
 		configResolved(config) {
 			build = config.command === "build"
 		},
@@ -74,7 +74,16 @@ export function officeHyphenation(): Plugin {
 			)
 
 			return `export const OFFICE_HYPHENATION_URLS = Object.freeze(${JSON.stringify(urls)})\n`
-		},
+		}
+	}
+
+	if (options.emit === false) return plugin
+
+	// Exactly the manifest's files, so the dev middleware needs no path containment of its own.
+	const served = new Set(files.map(entry => entry.file))
+
+	return {
+		...plugin,
 		configureServer(server) {
 			server.middlewares.use((req, res, next) => {
 				const path = (req.url ?? "").split("?")[0] ?? ""

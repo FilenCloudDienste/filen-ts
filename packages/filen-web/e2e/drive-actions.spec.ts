@@ -16,12 +16,15 @@ import {
 import { MOD_KEY } from "./helpers/modkey"
 import { menuItemName } from "./helpers/menu"
 
-// Serial, not parallel: the account is shared LIVE state, and the last test creates/selects/trashes/
-// restores real items by name — running it alongside this file's own other tests (which each select
-// "the first option" in the SAME listing) risks one test's transient item becoming another's "first
-// option". Config-level fullyParallel still races this file against OTHER spec files' own reads of
-// the same account; that residual cross-file window is accepted, not solved, here.
-test.describe.configure({ mode: "serial" })
+// One test at a time, not in parallel: the account is shared LIVE state, and the last test creates/
+// selects/trashes/restores real items by name — running it alongside this file's own other tests (which
+// each select "the first option" in the SAME listing) risks one test's transient item becoming another's
+// "first option". The write lane's `workers: 1` (playwright.config.ts) plus the cross-process drive
+// account lock (fixtures.ts) guarantee that. Default mode, not serial: a serial group skips every later
+// test after one failure. Kept explicit so the file does not turn parallel-eligible under fullyParallel
+// if the lane's worker count ever rises. The read lane still races this file against OTHER spec files'
+// own reads of the same account; that residual cross-file window is accepted, not solved, here.
+test.describe.configure({ mode: "default" })
 
 test.describe("drive bulk actions", () => {
 	test("selecting an item floats the bulk-action bar; clear-selection dismisses it", async ({ page }) => {

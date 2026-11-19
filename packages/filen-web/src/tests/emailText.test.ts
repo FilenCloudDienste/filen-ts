@@ -35,7 +35,7 @@ describe("htmlText", () => {
 	})
 
 	it("stops reading once it has enough, and leaves an unclosed skipped element's rest out", () => {
-		expect(htmlText(`<p>${"word ".repeat(100_000)}</p>`, 50).length).toBeLessThan(600_000)
+		expect(htmlText("<p>word</p>".repeat(100_000), 50).length).toBeLessThan(100)
 		expect(htmlText("<p>a</p><script>never closed", 100)).toBe("a")
 	})
 })

@@ -111,7 +111,15 @@ function segmentClass(active: boolean): string {
 }
 
 // A dry run's lists, a page at a time, behind a segmented switch over the lists that hold anything.
-function PlanLists({ planId, summary }: { planId: string; summary: DesktopSyncPlanSummary }) {
+function PlanLists({
+	planId,
+	summary,
+	onPlanExpired
+}: {
+	planId: string
+	summary: DesktopSyncPlanSummary
+	onPlanExpired: (() => void) | undefined
+}) {
 	const { t } = useTranslation("sync")
 	const lists = planListsWithEntries(summary)
 	const [chosen, setChosen] = useState<DesktopSyncPlanList | null>(null)
@@ -153,7 +161,10 @@ function PlanLists({ planId, summary }: { planId: string; summary: DesktopSyncPl
 						row={row}
 					/>
 				))}
-				<PagedFooter paged={paged} />
+				<PagedFooter
+					paged={paged}
+					onPlanExpired={onPlanExpired}
+				/>
 			</div>
 		</div>
 	)
@@ -200,11 +211,14 @@ export interface ReviewSummaryProps {
 	planId: string | null
 	// Lists shown as soon as there is a plan to page: the caller read it on request, so no second click.
 	listsOpen?: boolean
+	// The dry run expired (the shell releases one minutes after its last read): the owner of the plan plans again, on
+	// the list's retry. Without it the retry reads the same plan again.
+	onPlanExpired?: () => void
 }
 
 // What a pair's first run would do: why it was held (findings), the dry run's totals and its lists. Used by the
 // review card and by the add-pair dialog's last step.
-export function ReviewSummary({ summary, findings, planId, listsOpen = false }: ReviewSummaryProps) {
+export function ReviewSummary({ summary, findings, planId, listsOpen = false, onPlanExpired }: ReviewSummaryProps) {
 	const { t } = useTranslation("sync")
 	const [showLists, setShowLists] = useState(false)
 
@@ -236,6 +250,7 @@ export function ReviewSummary({ summary, findings, planId, listsOpen = false }: 
 							<PlanLists
 								planId={planId}
 								summary={summary}
+								onPlanExpired={onPlanExpired}
 							/>
 						) : (
 							<Button

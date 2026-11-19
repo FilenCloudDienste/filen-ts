@@ -5,7 +5,7 @@ import { codeTheme, mountCodeCompare } from "@filen/office/dom/code"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { readTextFileDetected } from "@/features/preview/lib/encodingGuess"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
-import { languageExtensionFor } from "@/features/preview/lib/codeMirrorShared"
+import { languageExtensionFor, useCodePhrases } from "@/features/preview/lib/codeMirrorShared"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { LoadingState } from "@/components/loadingState"
 import { isNarrowViewport } from "@/features/shell/lib/breakpoints"
@@ -38,6 +38,7 @@ export function RemoteCompare({
 	// The edits as a save writes them may begin with the file's byte order mark, which theirs (decoded) does not.
 	const mine = mineText.startsWith("\uFEFF") ? mineText.slice(1) : mineText
 	const language = languageExtensionFor(tag)
+	const phrases = useCodePhrases()
 	const hostRef = useRef<HTMLDivElement>(null)
 	// Side by side needs the width; a narrow window gets one column with both versions interleaved.
 	const [sideBySide] = useState(() => !isNarrowViewport())
@@ -49,10 +50,10 @@ export function RemoteCompare({
 			return undefined
 		}
 
-		const extensions: Extension = language === null ? codeTheme : [codeTheme, language]
+		const extensions: Extension = language === null ? [codeTheme, phrases] : [codeTheme, phrases, language]
 
 		return mountCodeCompare({ parent: host, theirs: theirsText, mine, sideBySide, extensions })
-	}, [theirsText, mine, language, sideBySide])
+	}, [theirsText, mine, language, phrases, sideBySide])
 
 	if (theirs.status === "failed") {
 		return <p className="flex items-center justify-center text-sm text-destructive">{t("previewRemoteCompareFailed")}</p>

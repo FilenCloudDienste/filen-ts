@@ -43,6 +43,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 import "@/lib/i18n"
 import { settings as EN } from "@/locales/en/settings"
+import { common as COMMON } from "@/locales/en/common"
 import { PlansView } from "@/features/settings/components/billing/plansView"
 import { WithdrawalDialog } from "@/features/settings/components/billing/withdrawalDialog"
 import { InvoicesBlock } from "@/features/settings/components/billing/invoicesBlock"
@@ -237,6 +238,10 @@ describe("PlansView", () => {
 		renderPlans()
 
 		expect(screen.getByText(EN.settingsBillingPlansLoadError)).toBeDefined()
+
+		fireEvent.click(screen.getByRole("button", { name: COMMON.tryAgain }))
+
+		expect(pricingQuery.current.refetch).toHaveBeenCalledOnce()
 	})
 
 	it("creates a checkout for the chosen method and offers the payment link", async () => {
@@ -433,6 +438,21 @@ describe("InvoicesBlock", () => {
 		{ id: "inv-1", gateway: "stripe", planCost: 1.99, planName: "Pro I", subId: "s", timestamp: 1_700_000_000_000n },
 		{ id: "inv-2", gateway: "paypal", planCost: 1.99, planName: "Pro I", subId: "s", timestamp: 1_700_100_000_000n }
 	] as UserAccountSubsInvoices[]
+
+	it("names the payment method as the purchase menu does, and shows an unknown gateway as it is", () => {
+		const shown = [
+			...invoices,
+			{ id: "inv-3", gateway: "stripe_sale", planCost: 99, planName: "Lifetime", subId: "l", timestamp: 1_700_200_000_000n },
+			{ id: "inv-4", gateway: "someNewGateway", planCost: 9, planName: "Pro I", subId: "n", timestamp: 1_700_300_000_000n }
+		] as UserAccountSubsInvoices[]
+
+		render(createElement(InvoicesBlock, { accountQuery: query(info({ subsInvoices: shown })) }))
+
+		expect(screen.getAllByText(EN.settingsBillingMethodCard)).toHaveLength(2)
+		expect(screen.getAllByText(EN.settingsBillingMethodPaypal)).toHaveLength(1)
+		expect(screen.getByText("someNewGateway")).toBeDefined()
+		expect(screen.queryByText("stripe_sale")).toBeNull()
+	})
 
 	it("downloads one invoice at a time", async () => {
 		let finish: (value: { status: "success" }) => void = () => undefined

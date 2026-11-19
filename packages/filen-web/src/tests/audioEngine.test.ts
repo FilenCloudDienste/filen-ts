@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile } from "@filen/sdk-rs"
 
 // The engine imports the store, which imports the kv adapter → leader (real election needs
@@ -140,6 +140,9 @@ interface Harness {
 	events: () => AudioElementEvents
 }
 
+// Every engine a test built: disposed after it, so none stays subscribed to the shared stores.
+const engines: AudioEngine[] = []
+
 function makeHarness(extra: Partial<AudioEngineDeps> = {}): Harness {
 	const fake = makeFakeElement()
 	const revoke = vi.fn<(url: string) => void>()
@@ -161,8 +164,12 @@ function makeHarness(extra: Partial<AudioEngineDeps> = {}): Harness {
 		...extra
 	}
 
+	const engine = new AudioEngine(deps)
+
+	engines.push(engine)
+
 	return {
-		engine: new AudioEngine(deps),
+		engine,
 		fake,
 		revoke,
 		resolveSource,
@@ -199,6 +206,12 @@ beforeEach(() => {
 	released.length = 0
 	fakeStore.clear()
 	resetStore()
+})
+
+afterEach(() => {
+	for (const engine of engines.splice(0)) {
+		engine.dispose()
+	}
 })
 
 describe("enqueueAndPlay", () => {
@@ -296,11 +309,26 @@ describe("format demotion", () => {
 		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
 		await flush()
 
+		// Three minutes in when the browser gives up on the format.
+		h.setNow(2_000)
+		h.fake.setSample({ currentTimeMs: 180_000, durationMs: 240_000, paused: false, ended: false })
+		h.events().onTimeUpdate()
+
+		const atReplay: { seek: number[]; positionMs: number }[] = []
+
+		h.fake.setPlayImpl(() => {
+			atReplay.push({ seek: [...h.fake.calls.seek], positionMs: useAudioStore.getState().positionMs })
+
+			return Promise.resolve()
+		})
 		h.events().onError(() => Promise.resolve(mediaFailureDTO("format")))
 		await flush()
 
 		expect(demoted).toEqual(["a"])
 		expect(h.fake.calls.load).toEqual(["src:a", "decoded:a"])
+		// The fresh source is at the old position before play(): never heard or shown from 0:00 first.
+		expect(atReplay).toEqual([{ seek: [180], positionMs: 180_000 }])
+		expect(useAudioStore.getState().positionMs).toBe(180_000)
 		expect(released).toEqual(["src:a"])
 		expect(onFormatFailure).not.toHaveBeenCalled()
 		expect(useAudioStore.getState().currentIndex).toBe(0)
@@ -481,6 +509,34 @@ describe("bounded auto-skip", () => {
 		expect(useAudioStore.getState().status).toBe("playing")
 	})
 
+	it("clears the error and the skip guard when a stopped track resumes in place", async () => {
+		const h = makeHarness()
+
+		h.fake.setPlayImpl(() => Promise.reject(new DOMException("not allowed", "NotAllowedError")))
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().lastError).not.toBeNull()
+
+		h.fake.setPlayImpl(() => Promise.resolve())
+		h.engine.resume()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(useAudioStore.getState().status).toBe("playing")
+		expect(useAudioStore.getState().lastError).toBeNull()
+
+		// A full skip pass again: on a one-track loop the failed track gets its retry instead of stopping at once.
+		useAudioStore.setState({ loopMode: "all" })
+		h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
 	it("resets the skip guard and clears the error on a later success", async () => {
 		const h = makeHarness()
 
@@ -538,6 +594,79 @@ describe("handleTrackEnd", () => {
 		expect(h.fake.calls.seek).toContain(0)
 		expect(h.fake.calls.play).toBe(2)
 		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("ignores the previous track's end, position and duration while the picked track loads", async () => {
+		const h = makeHarness()
+		let release: ((source: TrackSource) => void) | undefined
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c"), track("d")], 0)
+		await flush()
+
+		h.resolveSource.mockImplementationOnce(
+			() =>
+				new Promise<TrackSource>(resolve => {
+					release = resolve
+				})
+		)
+
+		void h.engine.playIndex(2)
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(2)
+
+		// Track a, still on the element, reaches its end while c resolves.
+		h.setNow(5_000)
+		h.fake.setSample({ currentTimeMs: 59_900, durationMs: 60_000, paused: false, ended: false })
+		h.events().onTimeUpdate()
+		h.events().onDurationChange()
+		h.events().onEnded()
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(2)
+		expect(useAudioStore.getState().positionMs).toBe(0)
+		expect(useAudioStore.getState().durationMs).toBe(0)
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+
+		release?.(urlSource("src:c", released))
+		await flush()
+
+		expect(h.fake.calls.load).toEqual(["src:a", "src:c"])
+		expect(useAudioStore.getState().currentIndex).toBe(2)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("does not reconcile the previous track's sample on a return to the tab while the picked track loads", async () => {
+		const page = Object.assign(new EventTarget(), { visibilityState: "visible" })
+
+		vi.stubGlobal("document", page)
+
+		try {
+			const h = makeHarness()
+
+			h.engine.bindLifecycle()
+
+			await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+			await flush()
+
+			h.resolveSource.mockImplementationOnce(() => new Promise<TrackSource>(() => undefined))
+
+			void h.engine.playIndex(2)
+			await flush()
+
+			// Track a, still on the element, ended while the tab was hidden.
+			h.fake.setSample({ currentTimeMs: 60_000, durationMs: 60_000, paused: true, ended: true })
+			page.dispatchEvent(new Event("visibilitychange"))
+			await flush()
+
+			expect(useAudioStore.getState().currentIndex).toBe(2)
+			expect(useAudioStore.getState().positionMs).toBe(0)
+			expect(useAudioStore.getState().durationMs).toBe(0)
+			expect(useAudioStore.getState().status).toBe("loading")
+			expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.unstubAllGlobals()
+		}
 	})
 
 	it("cold-loads the loop-one track when the element does not hold it", async () => {
@@ -755,6 +884,35 @@ describe("transport", () => {
 
 		expect(h.fake.calls.load).toEqual(["src:a", "src:b"])
 		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("removing the current track while paused loads the next one without starting it", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+		h.setNow(2_000)
+		h.fake.setSample({ currentTimeMs: 30_000, durationMs: 60_000, paused: false, ended: false })
+		h.events().onTimeUpdate()
+		h.engine.pause()
+
+		await h.engine.removeAt(0)
+		await flush()
+
+		const state = useAudioStore.getState()
+
+		expect(h.fake.calls.play).toBe(1)
+		expect(h.fake.calls.load).toEqual(["src:a", "src:b"])
+		expect(state.status).toBe("paused")
+		expect(state.queue[state.currentIndex]?.uuid).toBe("b")
+		expect(state.positionMs).toBe(0)
+
+		h.engine.resume()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(h.fake.calls.play).toBe(2)
 		expect(useAudioStore.getState().status).toBe("playing")
 	})
 

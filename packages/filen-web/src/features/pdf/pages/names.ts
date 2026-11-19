@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next"
+import { nameCollisionKey } from "@filen/shared"
 import { formatPageRanges, type PageRange } from "@filen/office/core/pdfedit/pageRanges"
 import { editedCopyName } from "@/features/drive/lib/copyName"
 
@@ -29,7 +30,7 @@ export function unsignedSuffix(t: TFunction<"preview">): CopySuffix {
 	return numbered(t, t("previewPdfPagesUnsignedSuffix"))
 }
 
-// One name per suffix, in order, each free in `taken` (lowercased names in the directory) and different from the
+// One name per suffix, in order, each free in `taken` (names in the directory, as nameCollisionKey keys them) and different from the
 // names before it in the batch.
 export function batchCopyNames(original: string, suffixes: readonly CopySuffix[], taken: ReadonlySet<string>): string[] {
 	const used = new Set(taken)
@@ -37,7 +38,7 @@ export function batchCopyNames(original: string, suffixes: readonly CopySuffix[]
 	return suffixes.map(suffix => {
 		const name = editedCopyName(original, "pdf", suffix, used)
 
-		used.add(name.toLowerCase())
+		used.add(nameCollisionKey(name))
 
 		return name
 	})

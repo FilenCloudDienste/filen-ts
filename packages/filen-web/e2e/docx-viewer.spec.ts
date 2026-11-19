@@ -25,9 +25,9 @@ import { createLink, openLinkDialog, setLinkDownloads } from "./helpers/publicLi
 // place: the engine drew the pages (never docx-preview's .docx-wrapper), nothing violated the CSP, find and zoom
 // work. The zip's documents also cover comments, an embedded font, links (only http(s) and mailto open, in a new tab
 // with no opener), 300 pages, and the one docx worker every document shares and that ends a minute after the last
-// one closed. A document in the drive opens in the editor (docx-smoke.spec.ts), so the overlay leg checks only the
-// files the editor hands to the viewer: the docx-preview fallback for a package the engine refuses, and the
-// messages for an encrypted and a legacy file.
+// one closed (the viewer's Download as ▸ PDF is docx-a11y.spec.ts's, in the read lane). A document in the drive opens in the editor
+// (docx-smoke.spec.ts), so the overlay leg checks only the files the editor hands to the viewer: the docx-preview
+// fallback for a package the engine refuses, and the messages for an encrypted and a legacy file.
 
 test.describe.configure({ mode: "default" })
 

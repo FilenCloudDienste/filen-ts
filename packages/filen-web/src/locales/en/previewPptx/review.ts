@@ -29,8 +29,6 @@ export const previewPptxReview = {
 	previewPptxCommentReply: "Reply",
 	/** Comments pane — saves an edited comment */
 	previewPptxCommentSave: "Save",
-	/** Comments pane — closes a comment field without posting */
-	previewPptxCommentCancel: "Cancel",
 	/** Comments pane — the ⋯ menu of one comment */
 	previewPptxCommentActions: "Comment actions",
 	/** Comments pane ⋯ menu — changes the text of one's own comment */

@@ -40,8 +40,10 @@ beforeAll(async () => {
 	await api.open()
 })
 
+// A fresh connection (the mock's MemoryDb is a new, empty :memory: database) per test: the vacuum leaves the one it ran
+// on in incremental mode, which a later test would otherwise inherit.
 beforeEach(async () => {
-	await api.kvDeletePrefix("")
+	await api.wipe()
 })
 
 describe("db.worker kvPrefixBytes", () => {

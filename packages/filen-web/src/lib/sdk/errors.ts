@@ -116,19 +116,30 @@ export class ErrorWithDTO extends Error {
 	}
 }
 
-// resolveNormalDirParent's own thrown message (sdk.worker.ts) when a create/move/save target's parent
-// directory no longer exists — shared here rather than duplicated since it's the one signal
-// main-thread logic needs out of a worker throw's otherwise-opaque plain Error (see
-// previewSave.logic.ts's own isUnresolvableParentError, today's only consumer). Not a general
-// error-kind taxonomy entry: a plain Error has no `kind`, only this literal `message` prefix to match.
 // The kind of a download refused on a page the service worker does not control (saveDownload.ts's
 // assertSwControlled), labelled in the "errors" catalog so every download path tells the user alike.
 export const DOWNLOAD_NEEDS_RELOAD = "DownloadNeedsReload"
 
+// The kind of a streamed download the service worker no longer knows (it restarted between the registration and
+// the page's watch message), reported by its download reporter; labelled in the "errors" catalog.
+export const DOWNLOAD_GONE = "DownloadGone"
+
+// The kind of a streamed download that stopped reporting progress (saveDownload.ts's stall timer); labelled in the
+// "errors" catalog.
+export const DOWNLOAD_STALLED = "DownloadStalled"
+
+// The kind of a download the service worker could not take on (none is active, it did not answer, or it refused
+// the request: saveDownload.ts's sendToSw and activeServiceWorker); labelled in the "errors" catalog.
+export const DOWNLOAD_WORKER_UNAVAILABLE = "DownloadWorkerUnavailable"
+
+// resolveNormalDirParent's own thrown message (sdk.worker.ts) when a create/move/save target's parent
+// directory no longer exists: the one signal main-thread logic needs out of a worker throw's otherwise-opaque
+// plain Error (previewSave.logic.ts's isUnresolvableParentError). Not an error-kind entry: a plain Error has no
+// `kind`, only this literal `message` prefix to match.
 export const PARENT_NOT_FOUND_PREFIX = "parent directory not found: "
 
 // listDirectory's own thrown message (sdk.worker.ts, `kind: "uuid"` branch) when the uuid a caller
-// asked to browse into no longer resolves — the signal photos' root-gone detection keys off of (a
+// asked to browse into no longer resolves: the signal photos' root-gone detection keys off of (a
 // saved root directory that was trashed/deleted elsewhere), same message-prefix convention as
-// PARENT_NOT_FOUND_PREFIX right above.
+// PARENT_NOT_FOUND_PREFIX.
 export const DIRECTORY_NOT_FOUND_PREFIX = "directory not found: "

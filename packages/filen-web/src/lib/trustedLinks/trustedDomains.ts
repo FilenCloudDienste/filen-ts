@@ -14,10 +14,13 @@ export async function getTrustedDomains(): Promise<ReadonlySet<string>> {
 	return new Set(stored ?? [])
 }
 
-// Idempotent — trusting an already-trusted domain twice is a no-op write (the Set collapses the dup
-// before it's ever persisted).
+// Idempotent: trusting an already-trusted domain writes nothing.
 export async function trustDomain(domain: string): Promise<void> {
 	const current = await getTrustedDomains()
+
+	if (current.has(domain)) {
+		return
+	}
 
 	await kvSetJson(TRUSTED_DOMAINS_KV_KEY, [...current, domain])
 }

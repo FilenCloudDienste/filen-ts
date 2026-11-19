@@ -61,6 +61,8 @@ interface TiffSpec {
 	exif?: Entry[]
 	ifd1?: Entry[]
 	thumbnail?: Uint8Array
+	// Writes IFD0's entries in the given order instead of sorted by tag, as some non-conforming writers do.
+	unsortedIfd0?: boolean
 }
 
 // Header, IFD0 (+ its data), Exif IFD, IFD1, thumbnail: a camera's usual layout, every offset from the header.
@@ -87,11 +89,11 @@ function buildTiff(le: boolean, spec: TiffSpec): Uint8Array {
 	put16(2, 42)
 
 	// Writes an IFD at the current end; returns [ifd offset, next-pointer offset, entry offsets by tag].
-	const writeIfd = (entries: Entry[]): [number, number, Map<number, number>] => {
+	const writeIfd = (entries: Entry[], sort = true): [number, number, Map<number, number>] => {
 		pad()
 
 		const ifd = bytes.length
-		const sorted = [...entries].sort((a, b) => a.tag - b.tag)
+		const sorted = sort ? [...entries].sort((a, b) => a.tag - b.tag) : entries
 		const offsets = new Map<number, number>()
 
 		bytes.length += 2 + sorted.length * 12 + 4
@@ -135,7 +137,7 @@ function buildTiff(le: boolean, spec: TiffSpec): Uint8Array {
 		ifd0Entries.push({ tag: 0x8769, type: 4, value: 0 })
 	}
 
-	const [ifd0, ifd0Next, ifd0Offsets] = writeIfd(ifd0Entries)
+	const [ifd0, ifd0Next, ifd0Offsets] = writeIfd(ifd0Entries, spec.unsortedIfd0 !== true)
 
 	put32(4, ifd0)
 
@@ -401,6 +403,20 @@ describe("buildJpeg", () => {
 	})
 })
 
+describe("readExifOrientation", () => {
+	it("finds an Orientation placed after a higher tag", () => {
+		const tiff = buildTiff(false, {
+			ifd0: [
+				{ tag: 0x8298, type: 2, value: ascii("Filen\0") },
+				{ tag: 0x0112, type: 3, value: 6 }
+			],
+			unsortedIfd0: true
+		})
+
+		expect(readExifOrientation(tiff)).toBe(6)
+	})
+})
+
 describe("normalizeExif", () => {
 	it("keeps the dead bytes when IFD1 is not at the tail", () => {
 		const tiff = cameraExif(true, 6)
@@ -472,6 +488,27 @@ describe("rewriteOrientationHead", () => {
 			expect(segmentsOf(result.head)[0]?.payload.length).toBe(6 + exif.length)
 		})
 	}
+
+	it("updates an Orientation placed after a higher tag in place, leaving exactly one", () => {
+		const tiff = buildTiff(true, {
+			ifd0: [
+				{ tag: 0x8298, type: 2, value: ascii("Filen\0") },
+				{ tag: 0x0112, type: 3, value: 6 }
+			],
+			unsortedIfd0: true
+		})
+		const file = jpeg(exifSegment(tiff), sof0(30, 20))
+		const { result, info } = rewritten(file, 1)
+		const exif = info?.exif ?? new Uint8Array()
+		const read = readTiff(exif)
+		const ifd0 = read.entries(read.ifd0)
+
+		expect(result.delta).toBe(0)
+		// Two entries, the original one rewritten: no second Orientation was added beside it.
+		expect(new DataView(exif.buffer, exif.byteOffset).getUint16(read.ifd0, true)).toBe(2)
+		expect(ifd0.tags).toEqual([0x8298, 0x0112])
+		expect(ifd0.out.get(0x0112)?.value).toBe(1)
+	})
 
 	it("leaves a file without Orientation alone when 1 is asked", () => {
 		const file = jpeg(exifSegment(cameraExif(true, null)), sof0(30, 20))

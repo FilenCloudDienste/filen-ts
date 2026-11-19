@@ -43,6 +43,36 @@ export function textSize(width: MarkupWidth, longerSide: number): number {
 	return TEXT_FRACTIONS[width] * longerSide
 }
 
+// The face markup text is drawn in, the app's own (index.css): the render worker draws with it, and the page measures
+// with it.
+export const MARKUP_FONT_FAMILY = "Inter Variable"
+export const MARKUP_TEXT_WEIGHT = 600
+export const MARKUP_TEXT_LINE_HEIGHT = 1.2
+
+export function markupFontSpec(px: number): string {
+	return `${String(MARKUP_TEXT_WEIGHT)} ${String(px)}px "${MARKUP_FONT_FAMILY}", sans-serif`
+}
+
+// The width in px of a line of markup text at `px` font size.
+export type MarkupTextMeasure = (text: string, px: number) => number
+
+// One context for every measure, made on first use. Null where the page has no 2D canvas.
+let measureContext: CanvasRenderingContext2D | null | undefined
+
+// A line of markup text measured as the worker draws it, at the time of asking (the face may load meanwhile). Without
+// a 2D canvas, 0.6 em a UTF-16 unit.
+export function measureMarkupText(text: string, px: number): number {
+	measureContext ??= document.createElement("canvas").getContext("2d")
+
+	if (measureContext === null) {
+		return text.length * px * 0.6
+	}
+
+	measureContext.font = markupFontSpec(px)
+
+	return measureContext.measureText(text).width
+}
+
 // Mapping between the frame (screen px from the picture's top left) and the upright source's pixels.
 export interface MarkupMapping {
 	toSource: (x: number, y: number) => readonly [number, number]

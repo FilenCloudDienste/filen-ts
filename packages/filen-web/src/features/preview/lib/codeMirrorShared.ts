@@ -3,14 +3,17 @@ import { redo, toggleComment, undo } from "@codemirror/commands"
 import { foldAll, foldCode, unfoldAll, unfoldCode } from "@codemirror/language"
 import { findNext, findPrevious, gotoLine } from "@codemirror/search"
 import type { Extension } from "@codemirror/state"
+import { useTranslation } from "react-i18next"
 import {
 	CODE_EDITOR_SCOPE,
 	CODE_SEARCH_SCOPE,
 	codeKeymap,
 	codeLanguageSupport,
+	codePhrases,
 	openReplacePanel,
 	openSearchPanel,
-	type CodeBinding
+	type CodeBinding,
+	type CodePhrase
 } from "@filen/office/dom/code"
 import { isCodeLanguageId } from "@filen/office/core/code"
 import { insertLink, MARKDOWN_MARKERS, toggleInlineMarker, toggleItalic } from "@filen/office/core/markdown"
@@ -44,6 +47,49 @@ export function languageExtensionFor(tag: string): Extension | null {
 	return isCodeLanguageId(tag) ? codeLanguageSupport(tag) : null
 }
 
+// CodeMirror's own labels and announcements (fold gutter, search panel, the comparison's collapsed lines) in the UI
+// language. "$" is the number CodeMirror fills in. A language change gives a new value, which redraws the editor.
+export function useCodePhrases(): Extension {
+	const { t } = useTranslation("preview")
+	const map: Record<CodePhrase, string> = {
+		"Control character": t("previewCodeControlCharacter"),
+		close: t("previewCodeClose"),
+		"folded code": t("previewCodeFoldedCode"),
+		unfold: t("previewCodeUnfold"),
+		"Fold line": t("previewCodeFoldLine"),
+		"Unfold line": t("previewCodeUnfoldLine"),
+		"Folded lines": t("previewCodeFoldedLines"),
+		"Unfolded lines": t("previewCodeUnfoldedLines"),
+		to: t("previewCodeLineRangeTo"),
+		Find: t("previewCodeFind"),
+		Replace: t("previewCodeReplaceField"),
+		next: t("previewCodeNext"),
+		previous: t("previewCodePrevious"),
+		all: t("previewCodeAll"),
+		"match case": t("previewCodeMatchCase"),
+		regexp: t("previewCodeRegexp"),
+		"by word": t("previewCodeByWord"),
+		replace: t("previewCodeReplace"),
+		"replace all": t("previewCodeReplaceAll"),
+		"current match": t("previewCodeCurrentMatch"),
+		"on line": t("previewCodeOnLine"),
+		"replaced match on line $": t("previewCodeReplacedOnLine", { line: "$" }),
+		"replaced $ matches": t("previewCodeReplacedMatches", { matches: "$" }),
+		"Go to line": t("previewCodeGoToLine"),
+		go: t("previewCodeGo"),
+		"$ unchanged lines": t("previewCodeUnchangedLines", { lines: "$" }),
+		Accept: t("previewCodeAccept"),
+		Reject: t("previewCodeReject"),
+		"Revert this chunk": t("previewCodeRevertChunk"),
+		Completions: t("previewCodeCompletions"),
+		"Selection deleted": t("previewCodeSelectionDeleted"),
+		Diagnostics: t("previewCodeDiagnostics"),
+		"No diagnostics": t("previewCodeNoDiagnostics")
+	}
+
+	return codePhrases(map)
+}
+
 // A host's own find (the text viewers' command bar): find, replace, the next and previous match and go to line, in
 // place of CodeMirror's panels. Stable for the editor's life (a new value rebuilds the keymap).
 export interface EditorKeymapCommands {
@@ -56,7 +102,7 @@ export interface EditorKeymapCommands {
 
 // The editor shortcuts (features/preview/lib/keymap.ts), bound inside CodeMirror so they act on the
 // focused editor only, and follow whatever the user rebound them to. The markdown ones only in a markdown
-// editor.
+// editor. Carries the editor's phrases (useCodePhrases) too, as every editor takes this.
 export function useEditorKeymap(markdown: boolean, commands?: EditorKeymapCommands): Extension {
 	const find = useComboFor("editor.find")
 	const replace = useComboFor("editor.replace")
@@ -75,6 +121,7 @@ export function useEditorKeymap(markdown: boolean, commands?: EditorKeymapComman
 	const unfold = useComboFor("editor.unfold")
 	const foldAllCombo = useComboFor("editor.foldAll")
 	const unfoldAllCombo = useComboFor("editor.unfoldAll")
+	const phrases = useCodePhrases()
 	const bindings: CodeBinding[] = []
 	const bind = (combo: string, run: Command, scope: string): void => {
 		const matches = editorKeyMatcher(combo, IS_MAC)
@@ -108,5 +155,5 @@ export function useEditorKeymap(markdown: boolean, commands?: EditorKeymapComman
 		bind(link, insertLink, CODE_EDITOR_SCOPE)
 	}
 
-	return codeKeymap(bindings)
+	return [codeKeymap(bindings), phrases]
 }

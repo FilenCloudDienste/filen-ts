@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import QRCode from "react-qr-code"
@@ -13,6 +13,7 @@ import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
 import { Button } from "@/components/ui/button"
+import { DisabledReason, EXPLAINED_DISABLED_CLASS } from "@/components/ui/tooltipIconButton"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -132,6 +133,14 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 	const [disableCodeOpen, setDisableCodeOpen] = useState(false)
 	const [disablePending, setDisablePending] = useState(false)
 
+	// Offline, every action here stays focusable and hoverable and says why it is disabled, through one shared
+	// accessible description; any other disabled state (no setup key yet) stays natively disabled.
+	const offlineReasonId = useId()
+	const offlineReason = isOnline ? undefined : t("common:offlineActionDisabled")
+	const offlineExplained = isOnline
+		? {}
+		: { focusableWhenDisabled: true, "aria-describedby": offlineReasonId, className: EXPLAINED_DISABLED_CLASS }
+
 	async function handleCopySecret(): Promise<void> {
 		if (twoFactorKey === undefined) {
 			return
@@ -180,12 +189,16 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 			<span className="text-sm text-muted-foreground">
 				{twoFactorEnabled ? t("settings:settingsTwoFactorOn") : t("settings:settingsTwoFactorOff")}
 			</span>
+			<DisabledReason
+				id={offlineReasonId}
+				reason={offlineReason}
+			/>
 			{twoFactorEnabled ? (
 				<Button
 					type="button"
 					variant="destructive"
 					disabled={!isOnline}
-					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+					{...offlineExplained}
 					onClick={() => {
 						setDisableConfirmOpen(true)
 					}}
@@ -197,7 +210,7 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 					type="button"
 					variant="outline"
 					disabled={!setupAvailable || !isOnline}
-					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+					{...offlineExplained}
 					onClick={() => {
 						setSetupOpen(true)
 					}}
@@ -237,7 +250,7 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 							<Button
 								type="button"
 								disabled={!isOnline}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+								{...offlineExplained}
 								onClick={() => {
 									setSetupOpen(false)
 									setEnableCodeOpen(true)

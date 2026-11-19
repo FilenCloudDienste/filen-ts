@@ -184,18 +184,21 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 				</div>
 				<PickerListShell
 					listingQuery={listingQuery}
-					isEmpty={filteredDirectories.length === 0}
 					noResults={filter.trim().length > 0}
-				>
-					{filteredDirectories.map(directory => (
-						<PickerDirectoryRow
-							key={directory.data.uuid}
-							directory={directory}
-							disabled={isMoveRowDisabled(directory, pathStack, items)}
-							onDescend={descend}
-						/>
-					))}
-				</PickerListShell>
+					count={filteredDirectories.length}
+					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
+					renderRow={index => {
+						const directory = filteredDirectories[index]
+
+						return directory === undefined ? null : (
+							<PickerDirectoryRow
+								directory={directory}
+								disabled={isMoveRowDisabled(directory, pathStack, items)}
+								onDescend={descend}
+							/>
+						)
+					}}
+				/>
 				<DialogFooter>
 					<Button
 						disabled={

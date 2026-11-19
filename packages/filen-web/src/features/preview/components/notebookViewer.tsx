@@ -18,12 +18,12 @@ import { readNotebookFile } from "@/features/preview/lib/textFamilyClient"
 import type { NotebookCell, NotebookOutput, NotebookReading } from "@/features/preview/lib/notebookReading"
 import { deviceProfile } from "@/lib/deviceProfile"
 import { workerDecodePixels } from "@/lib/pixelBudget"
-import { useNearViewport } from "@/lib/useNearViewport"
+import { NearViewportRootContext, useNearViewport } from "@/lib/useNearViewport"
 import { log } from "@/lib/log"
 import { cn } from "@filen/shared"
 
 // A Jupyter notebook: an "In [n]:" gutter, code highlighted as the editor would, outputs under it (HTML in the
-// script-less frame, mounted only near the viewport; images inline), markdown cells rendered as a markdown file is.
+// script-less frame, mounted only near the notebook's scroll position; images inline), markdown cells rendered as a markdown file is.
 
 // The browser decodes an <img> to RGBA8, and holds no other copy.
 const NOTEBOOK_IMAGE_BPP = 4
@@ -101,28 +101,70 @@ function CodeSource({ source, language }: { source: string; language: CodeLangua
 	)
 }
 
-// An HTML output: sanitized and framed only near the viewport; away from it, a placeholder of its last height.
+type SanitizedHtml = ReturnType<typeof sanitizeEmailHtml>
+
+// An HTML output: sanitized once (when it first comes near its scroller) and framed only near it; away from it, a
+// placeholder of its last measured height, so leaving and returning moves neither the reading position nor the sanitizer.
 function HtmlOutput({ html }: { html: string }) {
 	const { t } = useTranslation("preview")
 	const [element, setElement] = useState<HTMLDivElement | null>(null)
+	const [content, setContent] = useState<HTMLDivElement | null>(null)
 	const near = useNearViewport(element, HTML_MOUNT_MARGIN)
-	const sanitized = near ? sanitizeEmailHtml(html, () => null) : null
+	const [cached, setCached] = useState<{ html: string; sanitized: SanitizedHtml } | null>(null)
+	const [height, setHeight] = useState<number | null>(null)
+	const sanitized = cached !== null && cached.html === html ? cached.sanitized : null
+
+	if (near && sanitized === null) {
+		setCached({ html, sanitized: sanitizeEmailHtml(html, () => null) })
+	}
+
+	// The content's own height (the wrapper's floor below never feeds back into it), skipped while a mounted frame has
+	// not sized itself yet: a remounted frame starts at the default iframe height until its document loads and measures.
+	useEffect(() => {
+		if (content === null || typeof ResizeObserver === "undefined") {
+			return undefined
+		}
+
+		const observer = new ResizeObserver(entries => {
+			const entry = entries.at(-1)
+			const frame = content.querySelector("iframe")
+
+			if (entry !== undefined && entry.contentRect.height > 0 && frame?.style.height !== "") {
+				setHeight(entry.contentRect.height)
+			}
+		})
+
+		observer.observe(content)
+
+		return () => {
+			observer.disconnect()
+		}
+	}, [content])
 
 	return (
-		<div ref={setElement}>
-			{sanitized === null ? (
-				<div className="h-24" />
-			) : sanitized.tooLarge ? (
-				<p className="text-sm text-muted-foreground">{t("previewNotebookOutputTooLarge")}</p>
-			) : (
-				<SafeHtmlDocument
-					html={sanitized.html}
-					links={sanitized.links}
-					title={t("previewNotebookHtmlOutput")}
-					layout="autoHeight"
-					paper
-				/>
-			)}
+		<div
+			ref={setElement}
+			style={height === null ? undefined : { minHeight: height }}
+		>
+			<div ref={setContent}>
+				{!near || sanitized === null ? (
+					height === null ? (
+						<div className="h-24" />
+					) : (
+						<div style={{ height }} />
+					)
+				) : sanitized.tooLarge ? (
+					<p className="text-sm text-muted-foreground">{t("previewNotebookOutputTooLarge")}</p>
+				) : (
+					<SafeHtmlDocument
+						html={sanitized.html}
+						links={sanitized.links}
+						title={t("previewNotebookHtmlOutput")}
+						layout="autoHeight"
+						paper
+					/>
+				)}
+			</div>
 		</div>
 	)
 }
@@ -256,6 +298,8 @@ function NotebookView({ text, fileBytes, alt }: { text: string; fileBytes: numbe
 	// and outputs included.
 	const [budget] = useState<FenceBudget>(newFenceBudget)
 	const scope = useMermaidScope()
+	// The scroller the outputs and fences measure their nearness against.
+	const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
 
 	if (state.status === "pending") {
 		return <PreviewLoading />
@@ -276,29 +320,32 @@ function NotebookView({ text, fileBytes, alt }: { text: string; fileBytes: numbe
 	return (
 		<MermaidScopeContext value={scope}>
 			<FenceBudgetContext value={budget}>
-				<div
-					role="document"
-					aria-label={alt}
-					className="size-full overflow-auto px-4 py-4 select-text"
-				>
-					<div className="mx-auto flex max-w-5xl flex-col">
-						{reading.cellsSkipped > 0 ? (
-							<p className="flex items-center gap-1.5 pb-2 text-xs text-muted-foreground">
-								<InfoIcon className="size-3.5 shrink-0" />
-								{t("previewNotebookCellsSkipped", { count: reading.cellsSkipped })}
-							</p>
-						) : null}
-						{reading.cells.map((cell, index) => (
-							<Cell
-								key={index}
-								cell={cell}
-								language={language}
-								urls={state.urls}
-								alt={alt}
-							/>
-						))}
+				<NearViewportRootContext value={scroller}>
+					<div
+						ref={setScroller}
+						role="document"
+						aria-label={alt}
+						className="size-full overflow-auto px-4 py-4 select-text"
+					>
+						<div className="mx-auto flex max-w-5xl flex-col">
+							{reading.cellsSkipped > 0 ? (
+								<p className="flex items-center gap-1.5 pb-2 text-xs text-muted-foreground">
+									<InfoIcon className="size-3.5 shrink-0" />
+									{t("previewNotebookCellsSkipped", { count: reading.cellsSkipped })}
+								</p>
+							) : null}
+							{reading.cells.map((cell, index) => (
+								<Cell
+									key={index}
+									cell={cell}
+									language={language}
+									urls={state.urls}
+									alt={alt}
+								/>
+							))}
+						</div>
 					</div>
-				</div>
+				</NearViewportRootContext>
 			</FenceBudgetContext>
 		</MermaidScopeContext>
 	)
@@ -314,7 +361,7 @@ function renderNotebook(source: RenderedSource, alt: string) {
 	)
 }
 
-// A Jupyter notebook (G1): its cells rendered, its JSON source a toggle away (editable as text).
+// A Jupyter notebook: its cells rendered, its JSON source a toggle away (editable as text).
 export function NotebookViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: TextViewerProps) {
 	const { t } = useTranslation("preview")
 

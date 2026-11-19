@@ -449,11 +449,57 @@ describe("startVideoSave", () => {
 		await vi.waitFor(() => {
 			expect(h.clock.tick).not.toBeNull()
 		})
-		h.clock.now += 31_000
-		h.clock.tick?.()
+		for (let index = 0; index < 7; index++) {
+			h.clock.now += 5_000
+			h.clock.tick?.()
+		}
 
 		expect(await handle.done).toEqual({ status: "error", code: "workerLost" })
 		expect(h.uploads[0]?.file ?? null).toBeNull()
+	})
+
+	it("does not hold the time the page was suspended against the worker, yet still finds a dead one after", async () => {
+		const h = harness({ exporterOptions: { hang: true } })
+		const handle = save(h)
+
+		await vi.waitFor(() => {
+			expect(h.clock.tick).not.toBeNull()
+		})
+
+		// The lid was closed for ten minutes: the overdue tick runs before the worker's next beat lands.
+		h.clock.now += 600_000
+		h.clock.tick?.()
+
+		expect(h.exporter.cancels).toBe(0)
+
+		// The worker stays silent once the page runs again: lost after the usual window.
+		for (let index = 0; index < 5; index++) {
+			h.clock.now += 5_000
+			h.clock.tick?.()
+		}
+
+		expect(h.exporter.cancels).toBe(0)
+
+		h.clock.now += 5_000
+		h.clock.tick?.()
+
+		expect(await handle.done).toEqual({ status: "error", code: "workerLost" })
+	})
+
+	it("keeps finding a dead worker on a page whose ticks are throttled to one a minute", async () => {
+		const h = harness({ exporterOptions: { hang: true } })
+		const handle = save(h)
+
+		await vi.waitFor(() => {
+			expect(h.clock.tick).not.toBeNull()
+		})
+
+		for (let index = 0; index < 10 && h.exporter.cancels === 0; index++) {
+			h.clock.now += 60_000
+			h.clock.tick?.()
+		}
+
+		expect(await handle.done).toEqual({ status: "error", code: "workerLost" })
 	})
 
 	it("calls an export with no output for minutes a stall, unless its row is paused", async () => {

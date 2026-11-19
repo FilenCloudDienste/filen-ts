@@ -55,12 +55,6 @@ describe("the pdfEditor section", () => {
 		}
 	})
 
-	it("lists every tool action id it declares in actionIds", () => {
-		for (const tool of PDF_TOOLS) {
-			expect(new Set(tool.actionIds), tool.id).toEqual(new Set(tool.actions.map(action => action.id)))
-		}
-	})
-
 	it("defaults to the editors' undo, redo and page rotate keys", () => {
 		expect(defaultComboOn(def("pdf.undo"), BROWSER)).toBe("mod+z")
 		expect(defaultComboOn(def("pdf.redo"), MAC_BROWSER)).toBe("mod+shift+z")

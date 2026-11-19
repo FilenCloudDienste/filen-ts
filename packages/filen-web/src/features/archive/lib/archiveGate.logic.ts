@@ -21,8 +21,8 @@ export function isIndexedFormat(type: ArchiveFormat["type"] | null): boolean {
 
 // The indexed formats whose index lies in one place, so listing reads only it. A RAR's member table is its headers,
 // one before each member: listing walks them all, which in an archive of small members (a comic's pages) reads every
-// chunk. So a RAR is gated and shows a byte bar as a tar does (owner decision: keep the 8 MiB RAR gate, deviating
-// from W6 §3.11).
+// chunk. So a RAR is gated and shows a byte bar as a tar does: above UNGATED_MAX_BYTES its listing reads too much
+// of the archive to start unasked, although its format is indexed.
 export function listsFromIndex(type: ArchiveFormat["type"] | null): boolean {
 	return isIndexedFormat(type) && type !== "rar"
 }

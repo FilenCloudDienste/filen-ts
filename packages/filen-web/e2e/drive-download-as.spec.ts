@@ -26,6 +26,7 @@ import { drive } from "@/locales/en/drive"
 import { preview } from "@/locales/en/preview"
 import { transfers } from "@/locales/en/transfers"
 import { menuItemName } from "./helpers/menu"
+import { E2E_AUTOSAVE_KEY, E2E_PDF_DETERMINISTIC_KEY } from "@/e2e-hooks/storageKeys"
 
 // Download as ▸ PDF from the drive's item menu, end to end against the backend: the saved file read, laid out in the
 // workers without opening its viewer, and downloaded as "<name>.pdf"; byte for byte the File menu's export of the
@@ -35,10 +36,6 @@ import { menuItemName } from "./helpers/menu"
 
 test.describe.configure({ mode: "default" })
 
-// features/office/lib/pdfTestMode.ts's key: an E2E build makes every PDF deterministic once it is set.
-const PDF_DETERMINISTIC_KEY = "filen-e2e-pdf-deterministic"
-// features/office/lib/officeAutosave.ts's key: the editors this spec opens never save.
-const AUTOSAVE_KEY = "filen-e2e-docx-autosave"
 const EXPORT_TIMEOUT_MS = 120_000
 // The password's key derivation (100,000 SHA-512 rounds).
 const UNLOCK_TIMEOUT_MS = 60_000
@@ -49,7 +46,7 @@ test.beforeEach(async ({ page }) => {
 			sessionStorage.setItem(deterministic, "on")
 			sessionStorage.setItem(autosave, "off")
 		},
-		[PDF_DETERMINISTIC_KEY, AUTOSAVE_KEY] as const
+		[E2E_PDF_DETERMINISTIC_KEY, E2E_AUTOSAVE_KEY] as const
 	)
 })
 

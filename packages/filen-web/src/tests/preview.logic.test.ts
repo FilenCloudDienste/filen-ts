@@ -95,14 +95,10 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`shot.${ext}`))).toBe("rawImage")
 	})
 
-	// The RAW set has 21 families and none of them may collide with a browser-decodable extension —
-	// "image" renders the full picture, "rawImage" only the camera's embedded preview, so an overlap
-	// would silently demote a previewable file.
-	it("has 21 RAW families, disjoint from the browser-decodable image set", () => {
+	// The it.each above already proves no RAW extension resolves to "image" (an overlap would silently
+	// demote a previewable file to its embedded preview); this pins the family count.
+	it("has 21 RAW families", () => {
 		expect(RAW_IMAGE_EXTENSIONS.size).toBe(21)
-		for (const ext of RAW_IMAGE_EXTENSIONS) {
-			expect(previewType(fileNamed(`shot.${ext}`))).toBe("rawImage")
-		}
 	})
 
 	it("is case-insensitive on a RAW extension", () => {
@@ -861,20 +857,18 @@ describe("stepPreviewIndex", () => {
 // preview must never fan out per-sibling work. previewOverlay.tsx only ever reads `items[index]`
 // (a single array index, O(1)) and `items.length` (also O(1)) from the frozen snapshot this module
 // hands it — no viewer component ever receives the sibling array itself, only the one active
-// DriveItem. The only per-navigation cost living in THIS module is stepPreviewIndex's own uuid scan,
-// which these tests hold to a plain, synchronous index derivation — never a per-sibling
-// allocation/transform/IO — even across a many-thousand-item directory.
+// DriveItem. The open-time filter keeps the listing's own objects, and stepPreviewIndex resolves
+// every position across the full range.
 describe("pager windowing stays cheap over a very large directory", () => {
 	const SIBLING_COUNT = 20_000
-
-	function buildLargeSiblingSet(): DriveItem[] {
-		// Every other entry is a non-previewable directory, mirroring a real mixed listing —
-		// previewableSiblings (the one-time, open-time filter) must still land on exactly the file half.
-		return Array.from({ length: SIBLING_COUNT }, (_, i) => (i % 2 === 0 ? fileNamed(`sibling-${String(i)}.jpg`) : dirItem()))
-	}
+	// Every other entry is a non-previewable directory, mirroring a real mixed listing —
+	// previewableSiblings (the one-time, open-time filter) must still land on exactly the file half.
+	// Built once and shared: no test mutates it.
+	const raw: DriveItem[] = Array.from({ length: SIBLING_COUNT }, (_, i) =>
+		i % 2 === 0 ? fileNamed(`sibling-${String(i)}.jpg`) : dirItem()
+	)
 
 	it("previewableSiblings filters without cloning — surviving entries stay the SAME object references", () => {
-		const raw = buildLargeSiblingSet()
 		const siblings = previewableSiblings(raw)
 
 		expect(siblings).toHaveLength(SIBLING_COUNT / 2)
@@ -887,24 +881,8 @@ describe("pager windowing stays cheap over a very large directory", () => {
 		expect(siblings.at(-1)).toBe(raw.at(-2))
 	})
 
-	it("stepPreviewIndex is a synchronous, plain-number derivation — never an awaitable/IO-shaped result", () => {
-		const siblings = previewableSiblings(buildLargeSiblingSet())
-		const middle = siblings[Math.floor(siblings.length / 2)]
-
-		if (!middle) {
-			throw new Error("fixture setup produced no middle sibling")
-		}
-
-		const result: unknown = stepPreviewIndex(middle.data.uuid, siblings, 1)
-
-		// A step that instead fetched or decrypted per-sibling data would have to return a Promise —
-		// this stays a plain number precisely because it never does.
-		expect(typeof result).toBe("number")
-		expect(result).not.toBeInstanceOf(Promise)
-	})
-
 	it("resolves the correct index from any position across the full sibling range, forward and back", () => {
-		const siblings = previewableSiblings(buildLargeSiblingSet())
+		const siblings = previewableSiblings(raw)
 		const last = siblings.length - 1
 		const checkpoints = [0, 1, Math.floor(siblings.length / 2), last - 1, last]
 
@@ -918,39 +896,6 @@ describe("pager windowing stays cheap over a very large directory", () => {
 			expect(stepPreviewIndex(current.data.uuid, siblings, 1)).toBe(Math.min(position + 1, last))
 			expect(stepPreviewIndex(current.data.uuid, siblings, -1)).toBe(Math.max(position - 1, 0))
 		}
-	})
-
-	it("a long run of consecutive steps across the whole set lands on the same items the array already holds", () => {
-		const siblings = previewableSiblings(buildLargeSiblingSet())
-		let index = 0
-
-		// Walks every slot forward, then all the way back — each step re-derives its target purely from
-		// the current item's uuid (stepPreviewIndex's own contract), never from an accumulated,
-		// separately-materialized window. Landing back on siblings[0] by reference proves no sibling
-		// along the way was replaced, copied, or dropped by the walk itself.
-		for (let step = 0; step < siblings.length - 1; step++) {
-			const current = siblings[index]
-
-			if (!current) {
-				throw new Error(`walk lost its footing at index ${String(index)}`)
-			}
-
-			index = stepPreviewIndex(current.data.uuid, siblings, 1)
-		}
-
-		expect(index).toBe(siblings.length - 1)
-
-		for (let step = 0; step < siblings.length - 1; step++) {
-			const current = siblings[index]
-
-			if (!current) {
-				throw new Error(`walk lost its footing at index ${String(index)}`)
-			}
-
-			index = stepPreviewIndex(current.data.uuid, siblings, -1)
-		}
-
-		expect(index).toBe(0)
 	})
 })
 

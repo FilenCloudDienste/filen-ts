@@ -13,7 +13,6 @@ export const SHAPES_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolShapes",
 	icon: SquareIcon,
 	toolClass: "annotate",
-	actionIds: [],
 	actions: [],
 	enabledWhen: policy => toolEnabled("annotate", policy),
 	commands: ["annotations.shape", "annotations.line"],

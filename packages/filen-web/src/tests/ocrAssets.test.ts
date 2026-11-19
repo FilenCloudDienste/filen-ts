@@ -95,7 +95,7 @@ describe("OCR assets", () => {
 
 			expect(source).toMatch(/^export const OCR_ENGINE_FACTORY = \(\(\) => \{\nvar TesseractCore=/)
 			expect(source.match(/var TesseractCore=/g)).toHaveLength(1)
-			expect(source).toContain(readFileSync(join(CORE_DIR, `tesseract-core-${variant}.js`), "utf8").slice(0, 2000))
+			expect(source).toContain(readFileSync(join(CORE_DIR, `tesseract-core-${variant}.js`), "utf8"))
 		}
 
 		expect(await loaded("virtual:ocr-engine/unknown", false)).toBe("null")

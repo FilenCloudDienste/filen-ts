@@ -31,6 +31,8 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {}, OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+// The inline preview itself is not under test: a stub stands in for it.
+vi.mock("@/features/publicLinks/components/publicPreview", () => ({ PublicPreview: () => null }))
 
 import { queryClient } from "@/queries/client"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
@@ -136,5 +138,71 @@ describe("FileLinkView — the password gate", () => {
 		// Back through checking to wrong, which clears the field for the next try.
 		expect(screen.getByText("Wrong password. Please try again.")).toBeDefined()
 		expect(screen.getByLabelText("Password")).toHaveProperty("value", "")
+	})
+})
+
+describe("FileLinkView — a download from the preview's bar", () => {
+	const previewable = mockLinkedFile({ name: { Decrypted: "notes.txt" }, mime: { Decrypted: "text/plain" } })
+
+	async function renderPreview(): Promise<void> {
+		getLinkedFileAnon.mockResolvedValue(previewable)
+
+		await renderLink()
+
+		expect(screen.getByRole("button", { name: "Hide preview" })).toBeDefined()
+	}
+
+	it("says the file is too large to download here", async () => {
+		startAnonFileDownload.mockResolvedValue({ status: "too-large" })
+
+		await renderPreview()
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }))
+		await settle()
+
+		expect(screen.getByRole("alert").textContent).toMatch(/^This file is too large to download here/)
+	})
+
+	it("announces a failed download", async () => {
+		startAnonFileDownload.mockResolvedValue({
+			status: "error",
+			dto: { species: "sdk", kind: "SomethingUnlisted", message: "The connection dropped.", label: "" }
+		})
+
+		await renderPreview()
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }))
+		await settle()
+
+		expect(screen.getByRole("alert").textContent).toBe("The download failed. The connection dropped.")
+	})
+
+	it("spins while running, with no bar until a share is reported, then a named bar", async () => {
+		let report: (loaded: number, total: number | null) => void = () => undefined
+
+		startAnonFileDownload.mockImplementation(((options: { onProgress: (loaded: number, total: number | null) => void }) => {
+			report = options.onProgress
+
+			return new Promise(() => undefined)
+		}) as () => Promise<AnonDownloadOutcome>)
+
+		await renderPreview()
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }))
+		await settle()
+
+		const button = screen.getByRole("button", { name: "Downloading…" })
+
+		expect(button.hasAttribute("disabled")).toBe(true)
+		expect(button.querySelector("[data-slot='spinner']")).not.toBeNull()
+		expect(screen.queryByRole("progressbar")).toBeNull()
+
+		act(() => {
+			report(40, 100)
+		})
+
+		const bar = screen.getByRole("progressbar", { name: "Downloading…" })
+
+		expect(bar.getAttribute("aria-valuenow")).toBe("40")
 	})
 })

@@ -20,6 +20,7 @@ import {
 	patchWalHeader,
 	quoteIdent,
 	rowidPaging,
+	schemaKind,
 	tileSql,
 	type CellRead,
 	type SchemaKind,
@@ -347,20 +348,25 @@ export class SqliteBrowser {
 			rowMode: "array",
 			returnValue: "resultRows"
 		})
-		const sqlOf = (name: string): string => {
-			const value = this.db.selectValue("SELECT sql FROM sqlite_schema WHERE name = ?", [name])
+		// One scan of sqlite_schema, not one per table (it has no index on name); tables and views only, so a trigger
+		// sharing a table's name never supplies its SQL.
+		const sqlOf = new Map<string, string>()
 
-			return typeof value === "string" ? value : ""
+		for (const [name, sql] of this.db.exec({
+			sql: "SELECT name, sql FROM sqlite_schema WHERE type IN ('table', 'view')",
+			rowMode: "array",
+			returnValue: "resultRows"
+		})) {
+			if (typeof name === "string" && typeof sql === "string") sqlOf.set(name, sql)
 		}
+
 		const tables: TableState[] = []
 
 		for (const [name, type, withoutRowid] of rows) {
 			if (typeof name !== "string" || isInternalTable(name)) continue
 
-			// sqlite_schema's own SQL decides a virtual table too: a module the library lacks reads as a table here.
-			const sql = sqlOf(name)
-			const kind: SchemaKind =
-				type === "view" ? "view" : type === "virtual" || /^\s*create\s+virtual\s+table\b/i.test(sql) ? "virtual" : "table"
+			const sql = sqlOf.get(name) ?? ""
+			const kind = schemaKind(sqlText(type), sql)
 			const columns = kind === "table" ? this.columnsOf(name) : []
 			const paging: TablePaging =
 				kind !== "table"

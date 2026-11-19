@@ -33,7 +33,6 @@ type ActiveNoteDialog =
 	| { kind: "createStandaloneTag" }
 
 export interface NoteDialogHost {
-	isDialogOpen: boolean
 	openNoteDialog: (kind: NoteActionDialogKind, note: Note) => void
 	openTagDialog: (kind: NoteTagDialogKind, tag: NoteTag) => void
 	openBulkDialog: (kind: NoteBulkDialogActionKind, notes: Note[]) => void
@@ -49,16 +48,8 @@ export function useNoteDialogHost(): NoteDialogHost {
 	const { t } = useTranslation(["notes", "common"])
 	const navigate = useNavigate()
 	const router = useRouter()
-	const {
-		activeDialog,
-		setActiveDialog,
-		dialogPending,
-		isDialogOpen,
-		closeActiveDialog,
-		runDialogPending,
-		runDialogOutcome,
-		runBulkDialogActivity
-	} = useDialogHost<ActiveNoteDialog>()
+	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogPending, runDialogOutcome, runBulkDialogActivity } =
+		useDialogHost<ActiveNoteDialog>()
 
 	function openNoteDialog(kind: NoteActionDialogKind, note: Note): void {
 		setActiveDialog({ kind, note })
@@ -414,5 +405,5 @@ export function useNoteDialogHost(): NoteDialogHost {
 		}
 	}
 
-	return { isDialogOpen, openNoteDialog, openTagDialog, openBulkDialog, openCreateTagDialog, renderActiveDialog }
+	return { openNoteDialog, openTagDialog, openBulkDialog, openCreateTagDialog, renderActiveDialog }
 }

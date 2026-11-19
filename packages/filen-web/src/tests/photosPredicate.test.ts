@@ -102,6 +102,9 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(narrowItem(mockDir({ meta: { type: "decoded", data: { name: "beach.jpg" } } })))).toBe(false)
 	})
 
+	// Documents the invariant photos/lib/itemActions.ts and bulkActions.ts rely on instead of gating:
+	// a photos listing item can NEVER be undecryptable, so neither builder needs its own undecryptable
+	// branch (unlike driveItemActions/driveBulkActions, which both do).
 	it("drops an undecryptable file even when its (unreadable) name would otherwise look like media", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
 
@@ -116,18 +119,6 @@ describe("isPhotoItem", () => {
 
 	it("drops an unrecognized extension (falls through previewType's mime lookup to 'other')", () => {
 		expect(isPhotoItem(fileNamed("archive.zip"))).toBe(false)
-	})
-
-	// Documents the invariant photos/lib/itemActions.ts and bulkActions.ts rely on instead of gating:
-	// a photos listing item can NEVER be undecryptable, so neither builder needs its own undecryptable
-	// branch (unlike driveItemActions/driveBulkActions, which both do).
-	it("invariant: no undecryptable item ever passes, across every arm the predicate inspects", () => {
-		const undecryptableFile = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
-		const undecryptableDir = narrowItem(mockDir({ meta: { type: "encrypted", data: "ciphertext" } }))
-
-		for (const item of [undecryptableFile, undecryptableDir]) {
-			expect(isPhotoItem(item)).toBe(false)
-		}
 	})
 })
 
@@ -155,10 +146,8 @@ describe("isPhotoCandidate", () => {
 
 		expect(isPhotoCandidate(withMime("voice.mp4", "audio/mp4"))).toBe(false)
 		expect(isPhotoCandidate(withMime("talk.webm", "audio/webm"))).toBe(false)
-		// This app's table has no .mka: an audio-signalled .mkv reads as the video it is named (as in Drive).
-		expect(isPhotoCandidate(withMime("concert.mkv", "audio/x-matroska"))).toBe(
-			isPhotoItem(withMime("concert.mkv", "audio/x-matroska"), null)
-		)
+		// audio/x-matroska resolves the .mka row, so an audio-signalled .mkv is audio, as album.mka is.
+		expect(isPhotoCandidate(withMime("concert.mkv", "audio/x-matroska"))).toBe(false)
 		expect(isPhotoCandidate(withMime("clip.mp4", "video/mp4"))).toBe(true)
 	})
 

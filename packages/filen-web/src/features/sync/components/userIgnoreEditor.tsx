@@ -12,6 +12,7 @@ import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { syncErrorLabel } from "@/features/sync/lib/syncActions"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
+import { SyncReadError } from "@/features/sync/components/syncEntryRows"
 
 // One box metric for the textarea and the backdrop behind it, so the highlighted line sits exactly under its text.
 const EDITOR_TEXT_CLASS = "px-3 py-2 font-mono text-sm leading-5 whitespace-pre"
@@ -170,18 +171,16 @@ export function UserIgnoreEditor() {
 			description={t("userIgnoreDescription")}
 		>
 			{read.data === undefined ? (
-				<SettingsBlock className="flex justify-center">
-					{read.error === null ? (
+				read.error === null ? (
+					<SettingsBlock className="flex justify-center">
 						<Spinner className="size-5 text-muted-foreground" />
-					) : (
-						<p
-							role="alert"
-							className="text-sm text-destructive"
-						>
-							{syncErrorLabel(read.error)}
-						</p>
-					)}
-				</SettingsBlock>
+					</SettingsBlock>
+				) : (
+					<SyncReadError
+						error={read.error}
+						onRetry={read.reload}
+					/>
+				)
 			) : (
 				<RulesEditor
 					key={read.data.text}

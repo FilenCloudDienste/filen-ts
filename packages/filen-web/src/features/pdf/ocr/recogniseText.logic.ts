@@ -37,6 +37,8 @@ export type OcrDialogRun =
 	| { readonly phase: "recognising"; readonly pages: readonly OcrPageState[] }
 	| { readonly phase: "finished"; readonly pages: readonly OcrPageState[]; readonly cancelled: boolean }
 	| { readonly phase: "modelsFailed" }
+	// The run broke off (a worker died or did not load, a page could not be rendered); pages already laid over stay.
+	| { readonly phase: "failed"; readonly pages: readonly OcrPageState[] }
 
 export function waitingPages(pages: readonly number[]): OcrPageState[] {
 	return pages.map(page => ({ page, status: "waiting", words: 0 }))

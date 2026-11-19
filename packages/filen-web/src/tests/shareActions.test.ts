@@ -173,14 +173,39 @@ describe("shareItems", () => {
 		const dir = dirItem({ uuid: testUuid("d") })
 		const contacts = [mockContact("a"), mockContact("b"), mockContact("c")]
 		const seen: string[] = []
+		const pending: (() => void)[] = []
+		// Each call stays open until the test resolves it, so a concurrent rewrite (Promise.all over the
+		// contacts) would dispatch the next call while the previous one is still pending.
 		shareDirectory.mockImplementation((_dir: Dir, contact: Contact) => {
 			seen.push(contact.email)
-			return Promise.resolve()
+			const { promise, resolve } = Promise.withResolvers<undefined>()
+			pending.push(() => {
+				resolve(undefined)
+			})
+			return promise
 		})
 
-		await shareItems([dir], contacts, noop)
+		try {
+			const sharing = shareItems([dir], contacts, noop)
 
-		expect(seen).toEqual(["a@example.com", "b@example.com", "c@example.com"])
+			for (let call = 1; call <= contacts.length; call++) {
+				await vi.waitFor(() => {
+					expect(shareDirectory).toHaveBeenCalledTimes(call)
+				})
+				// Yield a macrotask so any eagerly dispatched next call would have landed by now.
+				await new Promise(resolve => setTimeout(resolve, 0))
+				expect(shareDirectory).toHaveBeenCalledTimes(call)
+				pending[call - 1]?.()
+			}
+
+			const outcome = await sharing
+
+			expect(outcome.succeeded).toEqual([dir])
+			expect(seen).toEqual(["a@example.com", "b@example.com", "c@example.com"])
+		} finally {
+			// vi.clearAllMocks keeps implementations; drop the deferred one so it cannot leak into later tests.
+			shareDirectory.mockReset()
+		}
 	})
 
 	it("partial failure: an item whose sibling fails still reports the succeeded one, both correctly split", async () => {

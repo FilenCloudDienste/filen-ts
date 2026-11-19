@@ -32,10 +32,6 @@ export interface NoteEditorPaneProps {
 	loading?: boolean | undefined
 }
 
-// The main content card for the notes module: a titled header for the selected note (icon + title +
-// sync spinner + the ⋮ menu, sharing noteMenu.logic.ts's descriptor list with the sidebar row's menu)
-// plus the per-type content body (NoteContentBody) — live CodeMirror editors for text/code/md, wired to
-// the fault-tolerant outbox; read-only readers for trashed/rich/checklist.
 // Focus moves from the editor to the note's own row in the sidebar; with the row filtered out of the
 // list, focus just leaves the editor.
 function leaveNoteEditor(uuid: string): void {
@@ -56,6 +52,10 @@ const COMPOSITION_ESCAPE_WINDOW_MS = 100
 
 const SAVE_NOW_OPTIONS = { ...IN_EDITORS_AND_FIELDS, ...OUTSIDE_OVERLAYS }
 
+// The main content card for the notes module: a titled header for the selected note (icon + title +
+// sync spinner + the ⋮ menu, sharing noteMenu.logic.ts's descriptor list with the sidebar row's menu)
+// plus the per-type content body (NoteContentBody): a live editor for every note type, wired to the
+// fault-tolerant outbox, or the read-only reader for a trashed or non-writable note.
 export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	// ["notes", "common"] so the header can reach the shared cannot-decrypt label; notes stays the
 	// default namespace, so every bare t("notes…") key below is unaffected.

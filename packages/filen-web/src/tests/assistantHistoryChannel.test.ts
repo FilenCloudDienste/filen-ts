@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Counts index reads; the rows themselves do not matter here.
 const { indexReads } = vi.hoisted(() => ({ indexReads: { count: 0 } }))
@@ -23,7 +23,7 @@ vi.mock("@/lib/sdk/session", () => ({
 	onAuthBroadcast: () => () => undefined
 }))
 
-import { resetConversationHistory, setHistoryOpen, useAssistantHistoryStore } from "@/features/assistant/store/conversationHistory"
+type ConversationHistory = typeof import("@/features/assistant/store/conversationHistory")
 
 const CHANNEL = "filen-web-assistant-history"
 
@@ -45,24 +45,33 @@ async function broadcastFromOtherTab(): Promise<void> {
 	probe.close()
 }
 
+// A fresh module per test: the reset after each closes that copy and its channel for good.
+let history: ConversationHistory
+
+beforeEach(async () => {
+	vi.resetModules()
+	history = await import("@/features/assistant/store/conversationHistory")
+	indexReads.count = 0
+})
+
 afterEach(() => {
-	resetConversationHistory()
+	history.resetConversationHistory()
 })
 
 describe("history list across tabs", () => {
 	it("reloads the index on another tab's change only while the list is open", async () => {
-		setHistoryOpen(true)
+		history.setHistoryOpen(true)
 		await vi.waitFor(() => {
-			expect(useAssistantHistoryStore.getState().conversations).toEqual([])
+			expect(history.useAssistantHistoryStore.getState().conversations).toEqual([])
 		})
-		setHistoryOpen(false)
+		history.setHistoryOpen(false)
 		indexReads.count = 0
 
 		await broadcastFromOtherTab()
 
 		expect(indexReads.count).toBe(0)
 
-		setHistoryOpen(true)
+		history.setHistoryOpen(true)
 		await vi.waitFor(() => {
 			expect(indexReads.count).toBe(1)
 		})

@@ -59,6 +59,21 @@ function awaitPreviewBufferReleased(): Promise<void> {
 	})
 }
 
+// The sign-out in flight. A second caller joins it rather than raising the prompts again and running a second
+// teardown and wipe beside the first. Cleared when it ends without signing out; a sign-out that went through ends in
+// a reload.
+interface SignOutRun {
+	readonly forced: boolean
+	// Settles every prompt this run is parked at with "proceed": a caller nobody can answer for (the locked desktop
+	// app) joined it.
+	readonly discarded: Promise<true>
+	discardRequested: boolean
+	discard: () => void
+	promise: Promise<boolean>
+}
+
+let current: SignOutRun | null = null
+
 // Kick both outboxes now rather than waiting on the notes debounce / the chats retry cadence — the
 // sign-out confirm calls this as it opens, so anything still queued gets the dialog's dwell to reach the
 // server before the teardown below destroys it. Must never run after cancel(): a post-abort pass is the
@@ -87,18 +102,74 @@ export interface PerformLogoutOptions {
 // layer, and injected into runLogout's phased wipe. Resolves `false` — with nothing torn down — only
 // when a NON-forced sign-out was declined at the network drive's pending-uploads prompt or the unsaved-preview prompt
 // below.
-export async function performLogout(options?: PerformLogoutOptions): Promise<boolean> {
+//
+// Single-flight: a call while one runs joins it, except that a `discardUnsaved` call first settles whatever prompt the
+// running one is parked at, and a forced call behind a user-initiated one runs again if the user cancelled that one —
+// the user's Cancel never vetoes a revoked session's sign-out.
+export function performLogout(options?: PerformLogoutOptions): Promise<boolean> {
+	if (current !== null) {
+		if (options?.discardUnsaved === true) {
+			current.discard()
+
+			return current.promise
+		}
+
+		if (options?.forced === true && !current.forced) {
+			return current.promise.then(
+				signedOut => signedOut || performLogout(options),
+				() => performLogout(options)
+			)
+		}
+
+		return current.promise
+	}
+
+	const discarded = Promise.withResolvers<true>()
+	const run: SignOutRun = {
+		forced: options?.forced === true || options?.discardUnsaved === true,
+		discarded: discarded.promise,
+		discardRequested: options?.discardUnsaved === true,
+		discard: () => {
+			run.discardRequested = true
+			discarded.resolve(true)
+			// An open unsaved-changes prompt is answered with "discard", which also closes it.
+			usePreviewUnsavedGuardStore.getState().logoutRequest?.resolve(true)
+			usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
+		},
+		promise: Promise.resolve(false)
+	}
+
+	current = run
+	run.promise = signOut(run).then(
+		signedOut => {
+			if (!signedOut) {
+				current = null
+			}
+
+			return signedOut
+		},
+		(error: unknown) => {
+			current = null
+
+			throw error
+		}
+	)
+
+	return run.promise
+}
+
+async function signOut(run: SignOutRun): Promise<boolean> {
 	// Desktop: with uploads still in the network drive's cache, the shell asks to wait or to sign out anyway (they then
 	// finish at this user's next sign-in). Only a user-initiated sign-out asks; a revoked session cannot upload anyway.
-	if (options?.forced !== true && options?.discardUnsaved !== true && !(await confirmMountsSignOut())) {
+	if (!run.forced && !(await Promise.race([confirmMountsSignOut(), run.discarded]))) {
 		return false
 	}
 
 	// A dirty preview buffer lives only in memory: the wipe + reload below destroys it with no recovery,
 	// so the user answers BEFORE anything is torn down. Cancel leaves a user-initiated sign-out's session
 	// completely intact — nothing has run at this point.
-	if (options?.discardUnsaved !== true && !(await confirmDiscardUnsavedPreview())) {
-		if (options?.forced !== true) {
+	if (!run.discardRequested && !(await Promise.race([confirmDiscardUnsavedPreview(), run.discarded]))) {
+		if (!run.forced) {
 			return false
 		}
 
@@ -106,7 +177,7 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 		// it stays until the wipe's own reload takes the page.
 		toast.warning(i18n.t("auth:logoutForcedPending"), { duration: Infinity })
 
-		await awaitPreviewBufferReleased()
+		await Promise.race([awaitPreviewBufferReleased(), run.discarded])
 	}
 
 	// Watch progress journaled locally gets its last upload (the one the confirm started, joined here; at most 30 s)

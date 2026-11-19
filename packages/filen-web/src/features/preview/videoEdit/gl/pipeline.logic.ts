@@ -1,13 +1,12 @@
 import { effectiveAdjustments } from "@/features/preview/imageEdit/lib/filters"
 import { IDENTITY_ADJUSTMENTS, affineMatrix3, multiplyMatrix3, type Matrix3, type Size } from "@/features/preview/imageEdit/lib/recipe"
 import type { GradeAdjustments } from "@/lib/gl/colorGrade"
-import { hasColourWork } from "@/features/preview/videoEdit/lib/plan"
-import type { HdrHandling, TextOverlay, VideoEditRecipe, VideoRotation } from "@/features/preview/videoEdit/types"
+import type { TextOverlay, VideoEditRecipe, VideoRotation } from "@/features/preview/videoEdit/types"
 
 // The frame pass's geometry and decisions, DOM- and GL-free: which source texel each output pixel samples, which
-// adjustments the grade applies, whether a recipe needs the pass at all, and where a text box lands. The output size,
-// the timeline mapping and what counts as colour work are the export plan's (lib/plan.ts), so the preview and the
-// export draw the same frame.
+// adjustments the grade applies, and where a text box lands. The output size, the timeline mapping and whether a
+// recipe needs the pass at all are the export plan's (lib/plan.ts needsPixelPass), so the preview and the export draw
+// the same frame.
 
 function quarterTurns(rotation: VideoRotation): number {
 	return rotation / 90
@@ -98,26 +97,6 @@ export function outputToTexture(
 // sharpening (the video pass has none) and the vignette only a filter brings.
 export function videoGrade(recipe: Pick<VideoEditRecipe, "adjust" | "filter">): GradeAdjustments {
 	return effectiveAdjustments({ adjustments: { ...IDENTITY_ADJUSTMENTS, ...recipe.adjust }, filter: recipe.filter })
-}
-
-export interface PipelineNeedOptions {
-	// The output is scaled from the source (plan.ts outputGeometry `scaled`).
-	scaled?: boolean
-	hdr?: HdrHandling | null
-}
-
-// Whether a recipe needs the GPU pass: colour work, text, a flip, a resize or a tone map. Neither a crop (a VideoFrame
-// visibleRect view) nor a rotation (written as metadata) does on its own; when the pass runs for another reason, it
-// applies them too.
-export function needsGpuPass(recipe: VideoEditRecipe, options: PipelineNeedOptions = {}): boolean {
-	return (
-		hasColourWork(recipe) ||
-		recipe.text.length > 0 ||
-		recipe.flipH ||
-		recipe.flipV ||
-		options.hdr === "toSdr" ||
-		options.scaled === true
-	)
 }
 
 // Whether a text box shows at an output time: from its start, up to (not including) its end.

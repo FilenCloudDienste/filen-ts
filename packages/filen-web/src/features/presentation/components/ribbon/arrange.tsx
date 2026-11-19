@@ -603,6 +603,25 @@ function choiceOf(action: Action | undefined): ActionChoice {
 	}
 }
 
+interface ActionFields {
+	readonly choice: ActionChoice
+	readonly slide: string
+	readonly url: string
+	readonly show: string
+	readonly returnAfter: boolean
+}
+
+// Every field seeded from one trigger's action, so switching the trigger shows (and applies) that trigger's own target.
+function fieldsOf(action: Action | undefined, info: PresentationRibbonEditor["info"]): ActionFields {
+	return {
+		choice: choiceOf(action),
+		slide: action?.kind === "slide" ? String(action.slide) : String(info.slides[0]?.ref ?? ""),
+		url: action?.kind === "url" ? action.href : "",
+		show: action?.kind === "customShow" ? String(action.id) : String(info.customShows[0]?.id ?? ""),
+		returnAfter: action?.kind === "customShow" ? action.returnAfter : false
+	}
+}
+
 // The action the dialog's fields make; undefined: none; null: not valid yet.
 export function actionOfChoice(
 	choice: ActionChoice,
@@ -651,18 +670,13 @@ export function ActionDialog({
 	const { t } = useTranslation("preview")
 	const [trigger, setTrigger] = useState<"click" | "hover">("click")
 	const current = shape.actions?.[trigger]
-	const [choice, setChoice] = useState<ActionChoice>(choiceOf(current))
-	const [slideValue, setSlideValue] = useState(
-		current?.kind === "slide" ? String(current.slide) : String(editor.info.slides[0]?.ref ?? "")
-	)
-	const [url, setUrl] = useState(current?.kind === "url" ? current.href : "")
-	const [show, setShow] = useState(current?.kind === "customShow" ? String(current.id) : String(editor.info.customShows[0]?.id ?? ""))
-	const [returnAfter, setReturnAfter] = useState(current?.kind === "customShow" ? current.returnAfter : false)
+	const [fields, setFields] = useState(() => fieldsOf(current, editor.info))
+	const { choice, url, show, returnAfter } = fields
 	const urlId = useId()
 	const returnId = useId()
 	const slides = editor.info.slides.map(entry => entry.ref)
 	const refused = current?.kind === "refused" ? current : undefined
-	const action = actionOfChoice(choice, { slide: slideValue, url, show, returnAfter }, slides)
+	const action = actionOfChoice(choice, fields, slides)
 	const urlInvalid = choice === "url" && url.trim() !== "" && action === null
 	const choices: { value: ActionChoice; label: string }[] = [
 		...(refused === undefined ? [] : [{ value: "keep" as const, label: t("previewPptxActionKeep") }]),
@@ -708,11 +722,8 @@ export function ActionDialog({
 					{ value: "hover", label: t("previewPptxActionOnHover") }
 				]}
 				onChange={next => {
-					const now = shape.actions?.[next]
-
 					setTrigger(next)
-					setChoice(choiceOf(now))
-					setUrl(now?.kind === "url" ? now.href : "")
+					setFields(fieldsOf(shape.actions?.[next], editor.info))
 				}}
 			/>
 			{refused === undefined ? null : (
@@ -724,17 +735,21 @@ export function ActionDialog({
 				label={t("previewPptxActionKind")}
 				value={choice}
 				items={choices}
-				onChange={setChoice}
+				onChange={next => {
+					setFields(prev => ({ ...prev, choice: next }))
+				}}
 			/>
 			{choice === "slide" ? (
 				<DocxChoiceField
 					label={t("previewPptxActionSlideLabel")}
-					value={slideValue}
+					value={fields.slide}
 					items={slides.map((ref, index) => ({
 						value: String(ref),
 						label: t("previewPptxActionSlideNumber", { number: index + 1 })
 					}))}
-					onChange={setSlideValue}
+					onChange={next => {
+						setFields(prev => ({ ...prev, slide: next }))
+					}}
 				/>
 			) : null}
 			{choice === "url" ? (
@@ -748,7 +763,9 @@ export function ActionDialog({
 						maxLength={2048}
 						aria-invalid={urlInvalid || undefined}
 						onChange={event => {
-							setUrl(event.target.value)
+							const next = event.target.value
+
+							setFields(prev => ({ ...prev, url: next }))
 						}}
 					/>
 					{urlInvalid ? <FieldError>{t("previewPptxActionUrlInvalid")}</FieldError> : null}
@@ -760,14 +777,16 @@ export function ActionDialog({
 						label={t("previewPptxActionCustomShowLabel")}
 						value={show}
 						items={editor.info.customShows.map(entry => ({ value: String(entry.id), label: entry.name }))}
-						onChange={setShow}
+						onChange={next => {
+							setFields(prev => ({ ...prev, show: next }))
+						}}
 					/>
 					<Field orientation="horizontal">
 						<Switch
 							id={returnId}
 							checked={returnAfter}
 							onCheckedChange={checked => {
-								setReturnAfter(checked)
+								setFields(prev => ({ ...prev, returnAfter: checked }))
 							}}
 						/>
 						<Label htmlFor={returnId}>{t("previewPptxActionReturn")}</Label>

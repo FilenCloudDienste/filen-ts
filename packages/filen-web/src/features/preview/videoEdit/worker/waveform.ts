@@ -157,12 +157,26 @@ export class WaveformTap {
 		const bytes = this.options.cache.peek(start, clampedEnd)
 
 		if (bytes === null) {
-			this.lastMiss = start
+			const miss = this.firstAbsent(start, clampedEnd)
 
-			throw new NotResidentError(start)
+			this.lastMiss = miss
+
+			throw new NotResidentError(miss)
 		}
 
 		return bytes
+	}
+
+	// Where the first absent block of [start, end) begins: a read straddling a boundary waits for that block, not for
+	// the resident one it starts in.
+	private firstAbsent(start: number, end: number): number {
+		let position = start
+
+		while (position < end && this.options.cache.isResident(position)) {
+			position = (Math.floor(position / BLOCK_BYTES) + 1) * BLOCK_BYTES
+		}
+
+		return position < end ? position : start
 	}
 
 	private async open(): Promise<void> {

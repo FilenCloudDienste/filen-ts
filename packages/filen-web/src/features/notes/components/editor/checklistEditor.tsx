@@ -170,17 +170,21 @@ export function ChecklistEditor({
 	const renderedRows: Checklist = visibleRows.length > 0 ? visibleRows : [{ id: ghostId, checked: false, content: "" }]
 
 	return (
-		<div className="flex size-full flex-col gap-0.5 overflow-auto p-4">
+		<div
+			role="list"
+			className="flex size-full flex-col gap-0.5 overflow-auto p-4"
+		>
 			{renderedRows.map(item => (
 				<div
 					key={item.id}
+					role="listitem"
 					className="flex items-start gap-2.5 rounded-md px-2 py-1.5"
 				>
 					<button
 						type="button"
 						role="checkbox"
 						aria-checked={item.checked}
-						aria-label={t("noteChecklistToggle")}
+						aria-label={item.content.trim().length > 0 ? item.content : t("noteChecklistToggle")}
 						onClick={() => {
 							handleToggle(item.id, !item.checked)
 						}}

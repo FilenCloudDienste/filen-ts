@@ -12,7 +12,9 @@ import { queryClient } from "@/queries/client"
 // projection has no directory context for a move destination to restart from. Copy and Compress stay:
 // both only read the photos, and what they make lands in the Cloud Drive tree. Extract never applies: a
 // photos listing holds only images and videos.
-export const PHOTOS_HIDDEN_ACTION_IDS: ReadonlySet<ItemActionId> = new Set(["move", "extract"])
+const PHOTOS_HIDDEN_IDS = ["move", "extract"] as const satisfies readonly (ItemActionId & BulkActionDescriptor["id"])[]
+
+export const PHOTOS_HIDDEN_ACTION_IDS: ReadonlySet<ItemActionId> = new Set(PHOTOS_HIDDEN_IDS)
 
 // The grid's keys (photos/lib/keymap.ts), as a photo's menus show them: drive's entries under the photos grid's own
 // actions.
@@ -28,8 +30,8 @@ export const PHOTOS_ITEM_SHORTCUTS: ItemMenuShortcuts = {
 	copyToClipboard: "photos.copy"
 }
 
-// The selection bar's counterpart (bulkActionBar.tsx), for the same reasons.
-export const PHOTOS_HIDDEN_BULK_ACTION_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(["move", "extract"])
+// The selection bar's counterpart (bulkActionBar.tsx), the same ids for the same reasons.
+export const PHOTOS_HIDDEN_BULK_ACTION_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(PHOTOS_HIDDEN_IDS)
 
 // What the selection bar offers for a photos selection, and so what the grid's keys may run on it. A photos selection
 // is always owned, decryptable, non-shared-root files, so the drive variant yields exactly the photos set once the

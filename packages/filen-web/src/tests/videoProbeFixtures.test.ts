@@ -10,6 +10,7 @@ import { CARD_BUDGET, MEDIA_DIR, TIERS, blocksOf, fileReadRange, measureProbe } 
 interface ManifestStream {
 	type: string
 	codec?: string
+	tag?: string
 	width?: number
 	height?: number
 	pixFmt?: string
@@ -47,11 +48,27 @@ function expectedLanguage(stream: ManifestStream): string | undefined {
 	return stream.language === "und" ? undefined : stream.language
 }
 
+// The probe's container and full-tier index per ffprobe format; ISOBMFF and Matroska go by extension below.
+const CONTAINERS: Readonly<Record<string, { container: string; index: string }>> = {
+	avi: { container: "avi", index: "idx" },
+	mpegts: { container: "ts", index: "none" }
+}
+// Containers with no default flag: the probe marks the first audio track default, ffprobe none.
+const FLAGLESS = new Set(["avi", "mpegts"])
+
+// AAC in TS is stream type 0x0f; as private data (0x06, which ffmpeg's BDAV muxer writes) no descriptor
+// names it, so the probe skips the track while ffprobe identifies it from its payload.
+function probedStream(stream: ManifestStream, format: string): boolean {
+	return !(format === "mpegts" && stream.codec === "aac" && stream.tag === "[6][0][0][0]")
+}
+
 function checkRecord(entry: ManifestEntry, tier: ProbeTier, record: VideoProbe): void {
 	const isMatroska = entry.format.startsWith("matroska")
+	const known = CONTAINERS[entry.format]
+	const flagless = FLAGLESS.has(entry.format)
 
 	expect(record.container).toBe(
-		isMatroska ? (entry.name.endsWith(".webm") ? "webm" : "mkv") : entry.name.endsWith(".mov") ? "mov" : "mp4"
+		known?.container ?? (isMatroska ? (entry.name.endsWith(".webm") ? "webm" : "mkv") : entry.name.endsWith(".mov") ? "mov" : "mp4")
 	)
 	expect(record.partial).toBe(false)
 
@@ -70,11 +87,17 @@ function checkRecord(entry: ManifestEntry, tier: ProbeTier, record: VideoProbe):
 	expect(record.video?.codec).toBe(video?.codec)
 	expect(record.video?.w).toBe(video?.width)
 	expect(record.video?.h).toBe(video?.height)
-	// WebM VP9 without CodecPrivate states no bit depth; its codec string assumes profile 0's 8 bits.
-	expect(record.video?.bitDepth).toBe(isMatroska && video?.codec === "vp9" ? null : video?.pixFmt?.includes("10") === true ? 10 : 8)
-	expect(record.video?.codecString).not.toBeNull()
+	// WebM VP9 without CodecPrivate states no bit depth; its codec string assumes profile 0's 8 bits. AVI's
+	// BITMAPINFOHEADER states none either, and names a codec string only for H.264 (from its SPS) and VP8.
+	expect(record.video?.bitDepth).toBe(
+		(isMatroska && video?.codec === "vp9") || entry.format === "avi" ? null : video?.pixFmt?.includes("10") === true ? 10 : 8
+	)
 
-	const audio = entry.streams.filter(stream => stream.type === "audio")
+	if (entry.format !== "avi" || video?.codec === "h264") {
+		expect(record.video?.codecString).not.toBeNull()
+	}
+
+	const audio = entry.streams.filter(stream => stream.type === "audio" && probedStream(stream, entry.format))
 
 	expect(
 		record.audio.map(track => ({
@@ -83,7 +106,7 @@ function checkRecord(entry: ManifestEntry, tier: ProbeTier, record: VideoProbe):
 			rate: track.rate,
 			lang: legacyLanguage(track.lang),
 			name: track.name ?? undefined,
-			def: track.def,
+			def: flagless ? undefined : track.def,
 			forced: track.forced
 		}))
 	).toEqual(
@@ -93,7 +116,7 @@ function checkRecord(entry: ManifestEntry, tier: ProbeTier, record: VideoProbe):
 			rate: stream.sampleRate,
 			lang: expectedLanguage(stream),
 			name: tier === "full" || isMatroska ? stream.title : undefined,
-			def: stream.default,
+			def: flagless ? undefined : stream.default,
 			forced: stream.forced
 		}))
 	)
@@ -120,7 +143,7 @@ function checkRecord(entry: ManifestEntry, tier: ProbeTier, record: VideoProbe):
 			}
 		}
 
-		expect(record.index).toBe(isMatroska ? (entry.name.includes("nocues") ? "none" : "cues") : "moov")
+		expect(record.index).toBe(known?.index ?? (isMatroska ? (entry.name.includes("nocues") ? "none" : "cues") : "moov"))
 	}
 }
 
@@ -146,12 +169,6 @@ describe.skipIf(manifest.length === 0)("video probe against the generated fixtur
 							measured.record?.audio.map(track => track.codecString ?? "?").join(",") ?? "-"
 						].join(" | ")
 					)
-
-					if (entry.format === "avi") {
-						expect(measured.record).toBeNull()
-						expect(measured.blockReads).toBe(1)
-						continue
-					}
 
 					expect(measured.record).not.toBeNull()
 

@@ -38,10 +38,10 @@ function dayNames(language: string, weekday: "long" | "short"): string[] {
 	return Array.from({ length: 7 }, (_, i) => partOf(format, Date.UTC(2000, 0, 2 + i), "weekday") ?? "")
 }
 
-// Text a code shows as it is: quoted, or each character escaped where it holds a quote. CLDR's narrow no-break space
-// (before AM and PM) as the plain space the system patterns have.
-function literal(raw: string): string {
-	const text = raw.replaceAll(" ", " ")
+// Text a format code shows as it is: quoted, or each character escaped where it holds a quote. No-break spaces (CLDR's
+// narrow one before AM and PM, the one before a year's abbreviation) as the plain space the system patterns have.
+export function quotedText(raw: string): string {
+	const text = raw.replace(/[\u00a0\u202f]/gu, " ")
 
 	if (text === "") return ""
 
@@ -92,7 +92,7 @@ function codeOf(format: Intl.DateTimeFormat, names: Names): string {
 				code += "AM/PM"
 				break
 			default:
-				code += literal(part.value)
+				code += quotedText(part.value)
 		}
 
 	return code

@@ -84,7 +84,8 @@ export function matchesExtension(name: string, mime: SourceMime): boolean {
 }
 
 // Whether the sniffed file can be edited at all: a still image whose bytes are the format its name claims (a
-// renamed file would be saved back under a name that lies about it).
+// renamed file would be saved back under a name that lies about it). The size is not part of it: a TIFF whose first
+// IFD lies past the head sniffs as 0 × 0, and the engine that draws its page knows the real one.
 export function isEditableSource(info: SourceInfo, name: string): boolean {
-	return !info.animated && info.width > 0 && info.height > 0 && matchesExtension(name, info.mime)
+	return !info.animated && matchesExtension(name, info.mime)
 }

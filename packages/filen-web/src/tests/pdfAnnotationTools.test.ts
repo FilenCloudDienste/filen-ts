@@ -458,6 +458,16 @@ describe("the annotation store", () => {
 			selectionKey({ kind: "down", key: name, shift: extra.shift ?? false, alt: extra.alt ?? false, page: 0 }, context)
 
 		expect(press("ArrowRight")).toBe(false)
+		// Before its page's box is known an arrow is taken and does nothing; Delete does not need the box.
+		store.select(INFO)
+		expect(press("ArrowRight", { shift: true })).toBe(true)
+		expect(press("ArrowDown", { alt: true })).toBe(true)
+		expect(changes).toEqual([])
+		expect(press("Delete")).toBe(true)
+		expect(changes).toEqual([["annotations.delete", { page: 0, id: 7 }]])
+
+		changes.length = 0
+		store.setPageBox(0, [0, 0, 600, 800])
 		store.select(INFO)
 		expect(press("ArrowRight", { shift: true })).toBe(true)
 		expect(press("ArrowDown", { alt: true })).toBe(true)
@@ -468,6 +478,16 @@ describe("the annotation store", () => {
 			["annotations.delete", { page: 0, id: 7 }]
 		])
 		expect(store.getState().selected).toBeNull()
+
+		// Near the page's right edge a nudge stops at it; flush with it, the arrow is taken and changes nothing.
+		changes.length = 0
+		store.select({ ...INFO, rect: [555, 10, 595, 50] })
+		expect(press("ArrowRight", { shift: true })).toBe(true)
+		expect(changes).toEqual([["annotations.move", { page: 0, id: 7, dx: 5, dy: 0 }]])
+		store.select({ ...INFO, rect: [560, 10, 600, 50] })
+		expect(press("ArrowRight", { shift: true })).toBe(true)
+		expect(changes).toHaveLength(1)
+		expect(store.getState().selected?.rect).toEqual([560, 10, 600, 50])
 
 		store.select({ ...INFO, locked: true })
 		changes.length = 0

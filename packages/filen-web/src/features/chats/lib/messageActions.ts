@@ -1,6 +1,6 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { chatsQueryUpsert } from "@/features/chats/queries/chats"
+import { chatsQueryMerge } from "@/features/chats/queries/chats"
 import { chatMessagesQueryRemove, chatMessagesQueryUpsert } from "@/features/chats/queries/chatMessages"
 import { cancelOwnMessageEcho } from "@/features/chats/lib/parkedOwnMessages"
 import { attemptOp, type VoidActionOutcome } from "@/lib/actions/outcome"
@@ -8,8 +8,7 @@ import { attemptOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 export type { VoidActionOutcome }
 
 // Message-level actions that need no OUTBOX. Copy-to-clipboard is a pure client affordance with
-// nothing to patch, so it lives inline in messageMenu.tsx (mirrors noteMenu.tsx's own copyId handling)
-// rather than here. Edit/disableEmbed are ONLINE-only / best-effort — NOT routed through the send
+// nothing to patch, so it lives in components/thread/useMessageActions.ts rather than here. Edit/disableEmbed are ONLINE-only / best-effort — NOT routed through the send
 // outbox — mirroring mobile/old-web: only the initial SEND is fault-tolerant, an edit/embed-toggle
 // targets an already-committed server uuid and a failure just surfaces its own error toast.
 
@@ -26,7 +25,23 @@ export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<V
 
 	const updatedChat = outcome.item
 
-	chatsQueryUpsert(updatedChat)
+	// The row's preview changes only when the deleted message was its lastMessage; otherwise a newer one
+	// (perhaps arrived while the request was in flight) stays.
+	chatsQueryMerge(updatedChat, current => {
+		if (current.lastMessage?.uuid !== message.uuid) {
+			return null
+		}
+
+		const next = { ...current }
+
+		if (updatedChat.lastMessage !== undefined) {
+			next.lastMessage = updatedChat.lastMessage
+		} else {
+			Reflect.deleteProperty(next, "lastMessage")
+		}
+
+		return next
+	})
 	chatMessagesQueryRemove(chat.uuid, message.uuid)
 	// Deleting a message this client sent seconds ago: its own socket echo may still be parked (see
 	// parkedOwnMessages), holding a patch that would re-append what was just deleted. Not covered by the
@@ -40,7 +55,12 @@ export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<V
 // returns the re-encrypted ChatMessage (same uuid, edited=true); the returned message patches the
 // thread cache so the edited marker appears without waiting for the socket echo. Online-best-
 // effort: a failure returns an error DTO and the caller (composer) restores the input for a retry.
+// Unchanged text is a no-op success: the SDK would still send it and mark the message edited.
 export async function editMessage(chat: Chat, message: ChatMessage, newMessage: string): Promise<VoidActionOutcome> {
+	if (newMessage === message.message) {
+		return { status: "success" }
+	}
+
 	const outcome = await attemptOp(sdkApi.editMessage(chat, message, newMessage))
 
 	if (outcome.status === "error") {

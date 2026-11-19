@@ -1,20 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatParticipant, UserInfo } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatParticipant, UserInfo } from "@filen/sdk-rs"
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
-const { createChatOp, renameChatOp, muteChatOp, leaveChatOp, deleteChatOp, markChatReadOp, updateLastChatFocusTimesNowOp } = vi.hoisted(
-	() => ({
-		createChatOp: vi.fn(),
-		renameChatOp: vi.fn(),
-		muteChatOp: vi.fn(),
-		leaveChatOp: vi.fn(),
-		deleteChatOp: vi.fn(),
-		markChatReadOp: vi.fn(),
-		updateLastChatFocusTimesNowOp: vi.fn()
-	})
-)
+const {
+	createChatOp,
+	renameChatOp,
+	muteChatOp,
+	leaveChatOp,
+	deleteChatOp,
+	markChatReadOp,
+	updateLastChatFocusTimesNowOp,
+	addChatParticipantOp,
+	removeChatParticipantOp,
+	deleteMessageOp
+} = vi.hoisted(() => ({
+	createChatOp: vi.fn(),
+	renameChatOp: vi.fn(),
+	muteChatOp: vi.fn(),
+	leaveChatOp: vi.fn(),
+	deleteChatOp: vi.fn(),
+	markChatReadOp: vi.fn(),
+	updateLastChatFocusTimesNowOp: vi.fn(),
+	addChatParticipantOp: vi.fn(),
+	removeChatParticipantOp: vi.fn(),
+	deleteMessageOp: vi.fn()
+}))
 
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
@@ -24,7 +36,10 @@ vi.mock("@/lib/sdk/client", () => ({
 		leaveChat: leaveChatOp,
 		deleteChat: deleteChatOp,
 		markChatRead: markChatReadOp,
-		updateLastChatFocusTimesNow: updateLastChatFocusTimesNowOp
+		updateLastChatFocusTimesNow: updateLastChatFocusTimesNowOp,
+		addChatParticipant: addChatParticipantOp,
+		removeChatParticipant: removeChatParticipantOp,
+		deleteMessage: deleteMessageOp
 	}
 }))
 
@@ -36,9 +51,11 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
+import { CHATS_QUERY_KEY, chatsQueryGet, chatsQueryUpdate } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import { createChat as createChatAction, renameChat, setChatMuted, leaveChat, deleteChat, markChatRead } from "@/features/chats/lib/actions"
+import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib/participants"
+import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { mockPlainContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -256,9 +273,10 @@ describe("deleteChat (owner-gated)", () => {
 })
 
 describe("markChatRead", () => {
-	it("fires updateLastChatFocusTimesNow and markChatRead together, upserting the refreshed chat", async () => {
+	it("fires updateLastChatFocusTimesNow and markChatRead together, merging the refreshed lastFocus into the cached row", async () => {
 		const chat = mockChat({ lastFocus: 0n })
 		const refreshed = { ...chat, lastFocus: 1_000n }
+		testQueryClient.setQueryData<Chat[]>(CHATS_QUERY_KEY, [chat])
 		updateLastChatFocusTimesNowOp.mockResolvedValueOnce([refreshed])
 		markChatReadOp.mockResolvedValueOnce(undefined)
 
@@ -267,6 +285,17 @@ describe("markChatRead", () => {
 		expect(updateLastChatFocusTimesNowOp).toHaveBeenCalledExactlyOnceWith([chat])
 		expect(markChatReadOp).toHaveBeenCalledExactlyOnceWith(chat)
 		expect(outcome).toEqual({ status: "success" })
+		expect(chatsQueryGet()).toEqual([refreshed])
+	})
+
+	it("appends the refreshed chat when the list has no row for it", async () => {
+		const chat = mockChat({ lastFocus: 0n })
+		const refreshed = { ...chat, lastFocus: 1_000n }
+		updateLastChatFocusTimesNowOp.mockResolvedValueOnce([refreshed])
+		markChatReadOp.mockResolvedValueOnce(undefined)
+
+		await markChatRead(chat)
+
 		expect(chatsQueryGet()).toEqual([refreshed])
 	})
 
@@ -288,5 +317,179 @@ describe("markChatRead", () => {
 		const outcome = await markChatRead(mockChat())
 
 		expect(outcome.status).toBe("error")
+	})
+})
+
+// A socket event (a new message) patching the row while an action's request is in flight must survive the
+// action's resolve: the SDK returns the snapshot the caller passed in, so only the action's own field may land.
+describe("action results keep a socket patch made during the request", () => {
+	function mockMessage(label: string, sentTimestamp: bigint): ChatMessage {
+		return {
+			uuid: testUuid(label),
+			chat: testUuid("chat"),
+			senderId: 2,
+			senderEmail: "p@x.io",
+			senderNickName: undefined,
+			message: label,
+			embedDisabled: false,
+			edited: false,
+			editedTimestamp: 0n,
+			sentTimestamp
+		}
+	}
+
+	const older = mockMessage("older", 100n)
+	const newer = mockMessage("newer", 200n)
+
+	function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+		let resolve: (value: T) => void = () => undefined
+		const promise = new Promise<T>(r => {
+			resolve = r
+		})
+
+		return { promise, resolve }
+	}
+
+	// Seeds the row, starts the action, then lands a socket patch (new lastMessage, advanced lastFocus).
+	async function withSocketPatch<T>(chat: Chat, start: () => Promise<T>): Promise<() => Promise<T>> {
+		testQueryClient.setQueryData<Chat[]>(CHATS_QUERY_KEY, [chat])
+
+		const pending = start()
+
+		await Promise.resolve()
+		chatsQueryUpdate(prev => prev.map(c => (c.uuid === chat.uuid ? { ...c, lastMessage: newer, lastFocus: 500n } : c)))
+
+		return () => pending
+	}
+
+	function cachedRow(): Chat | undefined {
+		return chatsQueryGet()?.[0]
+	}
+
+	it("rename applies the name only", async () => {
+		setCurrentUser(1n)
+		const chat = mockChat({ ownerId: 1n, name: "Original", lastMessage: older })
+		const request = deferred<Chat>()
+		renameChatOp.mockReturnValueOnce(request.promise)
+
+		const settle = await withSocketPatch(chat, () => renameChat(chat, "Renamed"))
+
+		request.resolve({ ...chat, name: "Renamed" })
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, name: "Renamed", lastMessage: newer, lastFocus: 500n })
+	})
+
+	it("mute applies muted only", async () => {
+		const chat = mockChat({ muted: false, lastMessage: older })
+		const request = deferred<Chat>()
+		muteChatOp.mockReturnValueOnce(request.promise)
+
+		const settle = await withSocketPatch(chat, () => setChatMuted(chat, true))
+
+		request.resolve({ ...chat, muted: true })
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, muted: true, lastMessage: newer, lastFocus: 500n })
+	})
+
+	it("mark read applies lastFocus only", async () => {
+		const chat = mockChat({ lastFocus: 0n, lastMessage: older })
+		const request = deferred<Chat[]>()
+		updateLastChatFocusTimesNowOp.mockReturnValueOnce(request.promise)
+		markChatReadOp.mockResolvedValueOnce(undefined)
+
+		const settle = await withSocketPatch(chat, () => markChatRead(chat))
+
+		request.resolve([{ ...chat, lastFocus: 1_000n }])
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, lastMessage: newer, lastFocus: 1_000n })
+	})
+
+	it("mark read never moves lastFocus behind a socket patch that advanced it further", async () => {
+		const chat = mockChat({ lastFocus: 0n, lastMessage: older })
+		const request = deferred<Chat[]>()
+		updateLastChatFocusTimesNowOp.mockReturnValueOnce(request.promise)
+		markChatReadOp.mockResolvedValueOnce(undefined)
+
+		const settle = await withSocketPatch(chat, () => markChatRead(chat))
+
+		request.resolve([{ ...chat, lastFocus: 300n }])
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, lastMessage: newer, lastFocus: 500n })
+	})
+
+	it("adding participants applies the participant list only", async () => {
+		const chat = mockChat({ lastMessage: older })
+		const contact = mockPlainContact({ userId: 3n })
+		const added = mockParticipant({ userId: contact.userId, email: contact.email })
+		const request = deferred<Chat>()
+		addChatParticipantOp.mockReturnValueOnce(request.promise)
+
+		const settle = await withSocketPatch(chat, () => addChatParticipants(chat, [contact]))
+
+		request.resolve({ ...chat, participants: [...chat.participants, added] })
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, participants: [...chat.participants, added], lastMessage: newer, lastFocus: 500n })
+	})
+
+	it("removing a participant applies the participant list only", async () => {
+		const participant = mockParticipant()
+		const chat = mockChat({ participants: [participant], lastMessage: older })
+		const request = deferred<Chat>()
+		removeChatParticipantOp.mockReturnValueOnce(request.promise)
+
+		const settle = await withSocketPatch(chat, () => removeChatParticipant(chat, participant))
+
+		request.resolve({ ...chat, participants: [] })
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, participants: [], lastMessage: newer, lastFocus: 500n })
+	})
+
+	it("deleting a message that is no longer the row's lastMessage leaves the row alone", async () => {
+		const chat = mockChat({ lastMessage: older })
+		const request = deferred<Chat>()
+		deleteMessageOp.mockReturnValueOnce(request.promise)
+
+		const settle = await withSocketPatch(chat, () => deleteMessage(chat, older))
+
+		// The SDK's snapshot predates the arrival.
+		request.resolve({ ...chat, lastMessage: mockMessage("before-older", 50n) })
+		await settle()
+
+		expect(cachedRow()).toEqual({ ...chat, lastMessage: newer, lastFocus: 500n })
+	})
+
+	it("deleting the row's lastMessage takes the returned preview and keeps other patched fields", async () => {
+		const chat = mockChat({ lastMessage: older })
+		const previous = mockMessage("previous", 50n)
+		const request = deferred<Chat>()
+		deleteMessageOp.mockReturnValueOnce(request.promise)
+		testQueryClient.setQueryData<Chat[]>(CHATS_QUERY_KEY, [chat])
+
+		const pending = deleteMessage(chat, older)
+
+		await Promise.resolve()
+		chatsQueryUpdate(prev => prev.map(c => ({ ...c, lastFocus: 500n })))
+		request.resolve({ ...chat, lastMessage: previous })
+		await pending
+
+		expect(cachedRow()).toEqual({ ...chat, lastMessage: previous, lastFocus: 500n })
+	})
+
+	it("deleting the only message clears the row's preview", async () => {
+		const chat = mockChat({ lastMessage: older })
+		const withoutPreview = mockChat()
+		deleteMessageOp.mockResolvedValueOnce(withoutPreview)
+		testQueryClient.setQueryData<Chat[]>(CHATS_QUERY_KEY, [chat])
+
+		await deleteMessage(chat, older)
+
+		expect(cachedRow()).toEqual(withoutPreview)
+		expect(cachedRow()).not.toHaveProperty("lastMessage")
 	})
 })

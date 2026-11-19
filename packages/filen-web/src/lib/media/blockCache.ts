@@ -68,6 +68,8 @@ export class BlockCache {
 	// The furthest block the current forward pattern has reached; NO_BLOCK when there is none.
 	private lastBlock = NO_BLOCK
 	private sequentialSteps = 0
+	// The furthest block a read-ahead has been scheduled up to; NO_BLOCK when the pattern starts over.
+	private readAheadTo = NO_BLOCK
 	private disposed = false
 
 	public constructor(size: number, readRange: AbortableReadRange, options: BlockCacheOptions = {}) {
@@ -212,6 +214,7 @@ export class BlockCache {
 		this.inFlight.clear()
 		this.lastBlock = NO_BLOCK
 		this.sequentialSteps = 0
+		this.readAheadTo = NO_BLOCK
 	}
 
 	// Aborts and drops everything; the cache refuses reads afterwards.
@@ -403,6 +406,11 @@ export class BlockCache {
 			}
 
 			this.resident.delete(oldest.value)
+
+			// A read-ahead block evicted before the reader got to it: the next read past it schedules it again.
+			if (oldest.value > this.lastBlock && oldest.value <= this.readAheadTo) {
+				this.readAheadTo = oldest.value - 1
+			}
 		}
 	}
 
@@ -415,15 +423,24 @@ export class BlockCache {
 			// A jump, either way.
 			this.sequentialSteps = 0
 			this.lastBlock = last
+			this.readAheadTo = NO_BLOCK
 		}
 
 		if (this.sequentialSteps < SEQUENTIAL_STEPS_FOR_READ_AHEAD || this.readAhead === 0) {
 			return
 		}
 
-		const from = last + 1
 		const to = Math.min(this.blockCount - 1, last + this.readAhead)
+
+		// Already scheduled up to there: a read inside the block the reader is in costs no timer.
+		if (to <= this.readAheadTo) {
+			return
+		}
+
+		const from = last + 1
 		const { signal } = this.controller
+
+		this.readAheadTo = to
 
 		// After the read that triggered it has made its own request, which must not queue behind this one;
 		// dropped if a seek aborted in between.

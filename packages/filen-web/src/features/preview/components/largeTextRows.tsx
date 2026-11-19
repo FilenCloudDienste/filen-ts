@@ -131,7 +131,8 @@ export function LargeTextRows({
 	const [drag, setDrag] = useState<number | null>(null)
 	const at = useSyncExternalStore(position.subscribe, position.get)
 	const generation = useRef(0)
-	const fetching = useRef({ before: false, after: false })
+	// The generation each side's row fetch was asked for, or null: one asked for an older generation never blocks a newer.
+	const fetching = useRef<{ before: number | null; after: number | null }>({ before: null, after: null })
 	// A scrollbar drag asks for one position at a time; the latest asked meanwhile follows.
 	const seeking = useRef<{ busy: boolean; next: number | null }>({ busy: false, next: null })
 	// A touch drag's last point and its speed, then the fling it leaves behind.
@@ -145,7 +146,7 @@ export function LargeTextRows({
 	const locate = (offset: number, before: number, line: number | null, match: boolean): Promise<void> => {
 		const seq = ++generation.current
 
-		fetching.current = { before: false, after: false }
+		fetching.current = { before: null, after: null }
 
 		return pager
 			.run(remote => remote.locate(offset, before, 2 * shown, line))
@@ -211,13 +212,18 @@ export function LargeTextRows({
 		const last = current.rows.at(-1)
 		const seq = current.generation
 
-		if (first !== undefined && !fetching.current.before && wantsBefore(current, bounds)) {
-			fetching.current.before = true
+		// A jump is in flight: its rows replace these, and their landing fills again.
+		if (seq !== generation.current) {
+			return
+		}
+
+		if (first !== undefined && fetching.current.before !== seq && wantsBefore(current, bounds)) {
+			fetching.current.before = seq
 			void pager
 				.run(remote => remote.before(first.start, 2 * shown, first.line))
 				.then(
 					more => {
-						if (generation.current === seq) fetching.current.before = false
+						if (fetching.current.before === seq) fetching.current.before = null
 
 						setView(previous =>
 							previous.generation === seq && previous.rows[0]?.start === first.start && more.length > 0
@@ -226,19 +232,19 @@ export function LargeTextRows({
 						)
 					},
 					(error: unknown) => {
-						fetching.current.before = false
+						fetching.current.before = null
 						fail(error)
 					}
 				)
 		}
 
-		if (last !== undefined && !fetching.current.after && wantsAfter(current, bounds)) {
-			fetching.current.after = true
+		if (last !== undefined && fetching.current.after !== seq && wantsAfter(current, bounds)) {
+			fetching.current.after = seq
 			void pager
 				.run(remote => remote.after(last.end, !last.breaks, 2 * shown, nextLine(last)))
 				.then(
 					more => {
-						if (generation.current === seq) fetching.current.after = false
+						if (fetching.current.after === seq) fetching.current.after = null
 
 						setView(previous =>
 							previous.generation === seq && previous.rows.at(-1)?.end === last.end && more.length > 0
@@ -247,7 +253,7 @@ export function LargeTextRows({
 						)
 					},
 					(error: unknown) => {
-						fetching.current.after = false
+						fetching.current.after = null
 						fail(error)
 					}
 				)

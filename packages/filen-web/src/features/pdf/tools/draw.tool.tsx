@@ -13,7 +13,6 @@ export const DRAW_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolDraw",
 	icon: PenLineIcon,
 	toolClass: "annotate",
-	actionIds: ["annotations.draw"],
 	actions: [pdfToolAction("annotations.draw", "d", "preview:previewPdfKeyToolDraw")],
 	enabledWhen: policy => toolEnabled("annotate", policy),
 	commands: ["annotations.ink", "annotations.inkStroke"],

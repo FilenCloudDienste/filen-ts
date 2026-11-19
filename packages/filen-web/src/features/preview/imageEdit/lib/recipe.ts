@@ -36,7 +36,7 @@ export const IDENTITY_ADJUSTMENTS: Readonly<Adjustments> = Object.freeze({
 	vignette: 0
 })
 
-const FULL_CROP: Readonly<Crop> = Object.freeze({ x: 0, y: 0, width: 1, height: 1 })
+export const FULL_CROP: Readonly<Crop> = Object.freeze({ x: 0, y: 0, width: 1, height: 1 })
 
 // Below a millionth of the frame a crop edge is on the frame edge: a handle dragged back lands within float noise.
 const EPSILON = 1e-6
@@ -216,6 +216,11 @@ export function affineMatrix3(a: number, b: number, c: number, d: number, e: num
 	return [a, b, 0, c, d, 0, e, f, 1]
 }
 
+// The uniform scale of a similarity map (rotation, flips and one zoom): lengths grow by this factor.
+export function matrixScale(m: Matrix3): number {
+	return Math.sqrt(Math.abs(m[0] * m[4] - m[1] * m[3]))
+}
+
 // Output px → upright source px. The shader samples the source through it; its inverse places markup.
 export function geometryMatrix(recipe: ImageEditRecipe, source: Size): Matrix3 {
 	const g = recipe.geometry
@@ -272,11 +277,6 @@ export function invertMatrix3(m: Matrix3): Matrix3 {
 
 export function transformPoint(m: Matrix3, x: number, y: number): [number, number] {
 	return [m[0] * x + m[3] * y + m[6], m[1] * x + m[4] * y + m[7]]
-}
-
-// Upright source px → output px. For many points, invert geometryMatrix once and use transformPoint.
-export function mapMarkupPoint(recipe: ImageEditRecipe, source: Size, x: number, y: number): [number, number] {
-	return transformPoint(invertMatrix3(geometryMatrix(recipe, source)), x, y)
 }
 
 // The upright source px a tile of output px (x, y, width, height) samples from: the bounding box of its inverse

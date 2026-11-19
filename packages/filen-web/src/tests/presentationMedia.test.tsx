@@ -41,6 +41,24 @@ vi.mock("@/features/preview/lib/previewStream", () => ({
 	previewStreamUrl: () => Promise.reject(new Error("no service worker")),
 	previewStreamIdOf: (url: string) => url
 }))
+// The remux path's session, as far as the page's side goes: what the next one opened does.
+const remux = vi.hoisted(() => ({ attach: (): Promise<void> => Promise.resolve(), disposed: 0, opened: 0 }))
+
+vi.mock("@/lib/media/mseController", async importOriginal => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	openRemuxSession: () => {
+		remux.opened++
+
+		return Promise.resolve({
+			attach: () => remux.attach(),
+			play: () => Promise.resolve(),
+			seek: () => undefined,
+			dispose: () => {
+				remux.disposed++
+			}
+		})
+	}
+}))
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),
@@ -248,6 +266,43 @@ describe("media streams", () => {
 
 		expect(await mediaStreams(undefined, undefined).url(refused, VIDEO)).toEqual({ kind: "refused", reason: "preparing" })
 		expect(alive).toEqual({ held: 2, released: 2 })
+	})
+
+	it("lets go of a remux session whose attach fails", async () => {
+		remux.attach = () => Promise.reject(new Error("no playable video track"))
+		remux.disposed = 0
+		remux.opened = 0
+
+		const session = {
+			media: () => Promise.resolve({ size: 1000, contentType: "video/x-msvideo", seekable: true })
+		} as unknown as PresentationSessionApi
+		const remuxed = mediaStreams(undefined, undefined).remux?.(session, VIDEO, document.createElement("video"))
+
+		await expect(remuxed).rejects.toThrow("no playable video track")
+		expect(remux).toMatchObject({ opened: 1, disposed: 1 })
+	})
+
+	it("closes the remux path's port when the deck's worker fails to serve the medium", async () => {
+		const close = vi.fn()
+
+		vi.stubGlobal(
+			"MessageChannel",
+			class {
+				readonly port1 = { close }
+				readonly port2 = {}
+			}
+		)
+
+		try {
+			const session = { media: () => Promise.reject(new Error("worker gone")) } as unknown as PresentationSessionApi
+
+			await expect(mediaStreams(undefined, undefined).remux?.(session, VIDEO, document.createElement("video"))).rejects.toThrow(
+				"worker gone"
+			)
+			expect(close).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.unstubAllGlobals()
+		}
 	})
 
 	it("follows a preparing medium's progress through the deck's store", () => {

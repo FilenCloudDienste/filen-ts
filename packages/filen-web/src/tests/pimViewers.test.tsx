@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
-import "@/lib/i18n"
+import { i18n } from "@/lib/i18n"
 import { readCalendar } from "@filen/shared/calendarFile"
 import { readContacts } from "@filen/shared/contactFile"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -124,6 +124,45 @@ describe("CalendarViewer", () => {
 		expect(screen.getByRole("button", { name: "Copy Link" })).toBeTruthy()
 	})
 
+	it("words a recurrence's weekdays and list in the app language, not the browser's", async () => {
+		i18n.addResourceBundle(
+			"de",
+			"preview",
+			{
+				previewCalendarEveryWeek_other: "Alle {{count}} Wochen",
+				previewCalendarOnDays: "am {{days}}",
+				previewCalendarTimes_other: "{{count}}-mal"
+			},
+			true,
+			true
+		)
+		text.current = [
+			"BEGIN:VCALENDAR",
+			"BEGIN:VEVENT",
+			"SUMMARY:Planning",
+			"DTSTART:20240304",
+			"RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=10",
+			"END:VEVENT",
+			"END:VCALENDAR"
+		].join("\r\n")
+
+		try {
+			await act(() => i18n.changeLanguage("de"))
+
+			render(
+				<CalendarViewer
+					item={itemNamed("team.ics")}
+					alt="team.ics"
+				/>,
+				{ wrapper }
+			)
+
+			expect(await screen.findByText("Alle 2 Wochen am Montag und Mittwoch, 10-mal")).toBeTruthy()
+		} finally {
+			await act(() => i18n.changeLanguage("en"))
+		}
+	})
+
 	it("gives a count past the cap as a lower bound when reading stopped before the file's end", async () => {
 		text.current = "TRUNCATED"
 
@@ -208,6 +247,80 @@ describe("ContactViewer", () => {
 
 		expect(await screen.findByRole("listbox", { name: "2 contacts" })).toBeTruthy()
 		expect(screen.getByText("About Ada")).toBeTruthy()
+	})
+
+	it("moves the selection and the one tab stop with the arrow, Home and End keys", async () => {
+		text.current = ["Ada", "Charles", "Grace"].map(name => `BEGIN:VCARD\r\nFN:${name}\r\nNOTE:About ${name}\r\nEND:VCARD`).join("\r\n")
+
+		render(
+			<ContactViewer
+				item={itemNamed("people.vcf")}
+				alt="people.vcf"
+			/>,
+			{ wrapper }
+		)
+
+		const listbox = await screen.findByRole("listbox", { name: "3 contacts" })
+		const option = (name: string) => screen.getByRole("option", { name })
+		const tabStops = () => screen.getAllByRole("option").filter(element => element.tabIndex === 0)
+
+		expect(tabStops()).toEqual([option("Ada")])
+		expect(option("Charles").getAttribute("aria-posinset")).toBe("2")
+		expect(option("Charles").getAttribute("aria-setsize")).toBe("3")
+
+		fireEvent.keyDown(listbox, { key: "ArrowDown" })
+
+		expect(screen.getByText("About Charles")).toBeTruthy()
+		expect(document.activeElement).toBe(option("Charles"))
+		expect(tabStops()).toEqual([option("Charles")])
+
+		fireEvent.keyDown(listbox, { key: "End" })
+
+		expect(screen.getByText("About Grace")).toBeTruthy()
+		expect(document.activeElement).toBe(option("Grace"))
+
+		fireEvent.keyDown(listbox, { key: "ArrowDown" })
+
+		expect(document.activeElement).toBe(option("Grace"))
+
+		fireEvent.keyDown(listbox, { key: "Home" })
+
+		expect(screen.getByText("About Ada")).toBeTruthy()
+		expect(document.activeElement).toBe(option("Ada"))
+		expect(tabStops()).toEqual([option("Ada")])
+	})
+
+	it("leaves the focus where the user moved it after a key that keeps the selection", async () => {
+		text.current = ["Ada", "Charles"].map(name => `BEGIN:VCARD\r\nFN:${name}\r\nNOTE:About ${name}\r\nEND:VCARD`).join("\r\n")
+
+		render(
+			<ContactViewer
+				item={itemNamed("people.vcf")}
+				alt="people.vcf"
+			/>,
+			{ wrapper }
+		)
+
+		const listbox = await screen.findByRole("listbox", { name: "2 contacts" })
+
+		fireEvent.keyDown(listbox, { key: "ArrowUp" })
+		expect(document.activeElement).toBe(screen.getByRole("option", { name: "Ada" }))
+
+		const outside = document.createElement("button")
+
+		document.body.append(outside)
+
+		try {
+			outside.focus()
+
+			// Any later render of the list: a language switch re-renders it through useTranslation.
+			await act(() => i18n.changeLanguage("de"))
+
+			expect(document.activeElement).toBe(outside)
+		} finally {
+			await act(() => i18n.changeLanguage("en"))
+			outside.remove()
+		}
 	})
 
 	it("keeps a card selected when a new reading has fewer cards", async () => {

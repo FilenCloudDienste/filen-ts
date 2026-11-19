@@ -292,6 +292,7 @@ describe("PlaybackCapabilityProbe", () => {
 		expect(calls).toBeGreaterThan(0)
 		expect(first.browser).toBe("firefox")
 		expect(first.audioEncoders).toEqual(["opus"])
+		expect(Object.keys(first.canPlayType).length).toBeGreaterThan(0)
 		expect(Object.values(first.canPlayType).every(answer => answer === "probably")).toBe(true)
 		expect(Object.keys(first.decodingInfoMediaSource)).toContain('audio/mp4; codecs="ac-3"')
 

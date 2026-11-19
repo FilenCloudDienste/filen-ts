@@ -120,5 +120,3 @@ export function reapplyFilters(model: SheetGridModel): void {
 
 	if (cell !== null) send(model, { type: "filter.reapply", sheet: model.getSnapshot().sheet, ...cell })
 }
-
-export { send as sendSortFilter }

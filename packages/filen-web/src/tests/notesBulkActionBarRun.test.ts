@@ -105,8 +105,36 @@ describe("NotesBulkActionBar — run gating", () => {
 
 		fireEvent.click(duplicateButton())
 
-		expect(duplicateButton().disabled).toBe(true)
+		expect(duplicateButton().getAttribute("aria-disabled")).toBe("true")
+		expect(document.getElementById(duplicateButton().getAttribute("aria-describedby") ?? "")?.textContent).toBe("Saving…")
 		expect(duplicateNotes).not.toHaveBeenCalled()
+	})
+
+	it("keeps a disabled submenu trigger focusable, says why, and never opens its menu", () => {
+		useNotesInflightStore.setState({
+			inflightContent: { [edited.uuid]: [{ content: "typed", timestamp: 0, note: edited }] }
+		})
+		renderBar()
+
+		const triggers = screen.getAllByRole("button").filter(button => button.getAttribute("aria-haspopup") === "menu")
+
+		expect(triggers.length).toBeGreaterThan(0)
+
+		for (const trigger of triggers) {
+			expect(trigger.getAttribute("aria-disabled")).toBe("true")
+			expect(trigger.hasAttribute("disabled")).toBe(false)
+			expect(trigger.getAttribute("title")).toBeNull()
+			expect(document.getElementById(trigger.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Saving…")
+
+			trigger.focus()
+			expect(document.activeElement).toBe(trigger)
+			fireEvent.pointerDown(trigger)
+			fireEvent.mouseDown(trigger)
+			fireEvent.click(trigger)
+			fireEvent.keyDown(trigger, { key: "Enter" })
+			fireEvent.keyDown(trigger, { key: "ArrowDown" })
+			expect(screen.queryByRole("menu")).toBeNull()
+		}
 	})
 })
 

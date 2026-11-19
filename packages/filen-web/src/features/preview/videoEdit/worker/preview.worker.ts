@@ -7,6 +7,7 @@ import { createFramePipeline, type FramePipeline } from "@/features/preview/vide
 import { fitWidth } from "@/features/preview/videoEdit/gl/pipeline.logic"
 import { outputGeometry, sourceFrame, sourceToOutputTime } from "@/features/preview/videoEdit/lib/plan"
 import { FRAME_BATCH_MAX_FRAMES } from "@/features/videos/lib/frameBatch.logic"
+import { keyframeAtOrBefore } from "@/features/preview/videoEdit/lib/timeline.logic"
 import { GopDecoder, SupersededError } from "@/features/preview/videoEdit/worker/gopDecoder"
 import { WaveformTap } from "@/features/preview/videoEdit/worker/waveform"
 import {
@@ -60,6 +61,8 @@ interface Session {
 	frameRequest: number
 	// The same for filter thumbnails, apart: a thumbnail never stops a stage frame, nor a stage frame a thumbnail.
 	thumbnailRequest: number
+	// The same for saved stills, apart from both: a still never stops a stage frame, nor a stage frame a still.
+	stillRequest: number
 	filmstrips: Set<number>
 	// Waveform subscriptions by id, each with what ends it.
 	waveforms: Map<number, () => void>
@@ -340,6 +343,7 @@ const api = {
 				lock: new PriorityLock(),
 				frameRequest: 0,
 				thumbnailRequest: 0,
+				stillRequest: 0,
 				filmstrips: new Set(),
 				waveforms: new Map()
 			}
@@ -400,6 +404,56 @@ const api = {
 		}
 	},
 
+	// The frame at `time` with the recipe applied, fitted to `maxWidth`, for saving as a still: its own lane, so the stage
+	// frame a pause posts right after never supersedes it, nor it a stage frame. A newer still, a session change and a
+	// suspended decoder stop it (it rejects with an AbortError).
+	async stillAt(time: number, recipe: VideoEditRecipe, maxWidth: number): Promise<ImageBitmap> {
+		const s = current()
+		const request = ++s.stillRequest
+		const isCurrent = (): boolean => session === s && s.stillRequest === request && !decodingSuspended
+
+		for (;;) {
+			const release = await s.lock.acquire("interactive")
+
+			try {
+				if (!isCurrent()) {
+					throw new SupersededError()
+				}
+
+				const decoder = await ensureDecoder(s)
+				let frame: VideoFrame
+
+				try {
+					frame = await decoder.frameAt(time, isCurrent)
+				} catch (error) {
+					if (error instanceof SupersededError && isCurrent()) {
+						continue
+					}
+
+					throw error
+				}
+
+				try {
+					const out = fitWidth(outputGeometry(recipe, s.info), maxWidth)
+					const bitmap = ensurePipeline(s).renderBitmap(
+						frame,
+						recipe,
+						out.width,
+						out.height,
+						sourceToOutputTime(recipe.keep, recipe.speed, time) ?? Number.NaN,
+						previewHdr(s)
+					)
+
+					return Comlink.transfer(bitmap, [bitmap])
+				} finally {
+					frame.close()
+				}
+			} finally {
+				release()
+			}
+		}
+	},
+
 	// The frame at `time` drawn once per filter (the recipe with that filter, without its text boxes), `height` px high
 	// at most: one decode (the stage's own when it shows the same time), N passes. A newer call supersedes this one (it
 	// rejects with an AbortError); stage frames go first: a decode in progress steps aside for one and resumes after.
@@ -451,32 +505,13 @@ const api = {
 		}
 	},
 
-	// Keyframe stills at the given source times, `height` px high, in display orientation: at most
-	// FRAME_BATCH_MAX_FRAMES distinct keyframes per call (the rest are left out; ask again). Yields the decoder to frame
-	// requests between stills.
+	// Keyframe stills at the given source times, `height` px high, in display orientation, each answered under its
+	// keyframe's time (keyframeAtOrBefore): at most FRAME_BATCH_MAX_FRAMES distinct keyframes per call, the rest left
+	// out for the timeline to ask again. Yields the decoder to frame requests between stills.
 	async filmstrip(id: number, times: readonly number[], height: number): Promise<FilmstripFrame[]> {
 		const s = current()
 		const keys = s.info.keyframes
-		const keyTimes = times.map(time => {
-			// The last listed keyframe at or before the time, else the first.
-			let low = 0
-			let high = keys.length - 1
-			let found: number | null = keys.length > 0 ? (keys[0] ?? null) : null
-
-			while (low <= high) {
-				const mid = (low + high) >> 1
-				const value = keys[mid] ?? 0
-
-				if (value <= time) {
-					found = value
-					low = mid + 1
-				} else {
-					high = mid - 1
-				}
-			}
-
-			return found
-		})
+		const keyTimes = times.map(time => keyframeAtOrBefore(keys, time))
 		const slots = planFilmstrip(keyTimes, FRAME_BATCH_MAX_FRAMES)
 		const out: FilmstripFrame[] = []
 
@@ -500,9 +535,9 @@ const api = {
 					}
 
 					try {
-						// One still per keyframe, under the first time that asked for it; the other times it stands for are
-						// left out (the caller shows its neighbour).
-						out.push({ time: times[slot.positions[0] ?? 0] ?? slot.keyTime, bitmap: still(frame, s, height) })
+						// One still per keyframe, under the keyframe's own time: the timeline draws every slot it stands for
+						// from it.
+						out.push({ time: slot.keyTime, bitmap: still(frame, s, height) })
 					} finally {
 						frame.close()
 					}

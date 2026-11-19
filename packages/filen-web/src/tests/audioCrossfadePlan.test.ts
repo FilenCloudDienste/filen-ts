@@ -3,7 +3,6 @@ import {
 	committedValid,
 	continuousBoundary,
 	crossfadeEligible,
-	curveValueAt,
 	fadeCurves,
 	manualFadePlan,
 	microOverlapPlan,
@@ -18,6 +17,16 @@ import {
 	type TransitionTrackInfo
 } from "@/features/audio/lib/crossfade.logic"
 import type { TrackEdges } from "@/features/audio/lib/smoothTransitions.types"
+
+// Samples an automation curve `fraction` (0-1) of the way through, linearly interpolated as the browser does.
+function curveValueAt(curve: Float32Array, fraction: number): number {
+	const position = fraction * (curve.length - 1)
+	const index = Math.floor(position)
+	const from = curve[index] ?? 0
+	const to = curve[index + 1] ?? from
+
+	return from + (to - from) * (position - index)
+}
 
 function info(overrides: Partial<TransitionTrackInfo> = {}): TransitionTrackInfo {
 	return { name: "a.mp3", durationMs: 200_000, album: null, artist: null, ...overrides }
@@ -250,14 +259,6 @@ describe("fade curves", () => {
 
 	it("caches one pair per rounded peak pair", () => {
 		expect(fadeCurves(0.71, 0.4)).toBe(fadeCurves(0.72, 0.38))
-	})
-
-	it("reads a held value between points", () => {
-		const curve = new Float32Array([1, 0])
-
-		expect(curveValueAt(curve, 0.25)).toBeCloseTo(0.75)
-		expect(curveValueAt(curve, -1)).toBe(1)
-		expect(curveValueAt(curve, 2)).toBe(0)
 	})
 })
 

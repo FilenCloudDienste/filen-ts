@@ -154,8 +154,32 @@ function isWordChar(char: string | undefined): boolean {
 	return char !== undefined && WORD_CHAR.test(char)
 }
 
+function isHighSurrogate(unit: number): boolean {
+	return unit >= 0xd800 && unit <= 0xdbff
+}
+
+function isLowSurrogate(unit: number): boolean {
+	return unit >= 0xdc00 && unit <= 0xdfff
+}
+
+// The code point starting at `index`, and the one ending there.
+function charAt(text: string, index: number): string | undefined {
+	const code = text.codePointAt(index)
+
+	return code === undefined ? undefined : String.fromCodePoint(code)
+}
+
+function charBefore(text: string, index: number): string | undefined {
+	if (index <= 0) return undefined
+
+	return index >= 2 && isLowSurrogate(text.charCodeAt(index - 1)) && isHighSurrogate(text.charCodeAt(index - 2))
+		? text.slice(index - 2, index)
+		: text[index - 1]
+}
+
 // The words of `before` that `after` changes, as one span: the common start and end are kept, the rest widened to
 // whole words, so an edited word is replaced alone and its neighbours stay as drawn. Null when nothing changed.
+// The span starts and ends on code point boundaries.
 export function changedSpan(before: string, after: string): TextChange | null {
 	if (before === after) return null
 
@@ -171,31 +195,63 @@ export function changedSpan(before: string, after: string): TextChange | null {
 		endAfter--
 	}
 
-	// Back to the start of the word the change begins in, on to the end of the word it ends in.
-	// A word the change touches (inside it, or text joined to its end or start) is replaced whole.
-	while (start > 0 && isWordChar(before[start - 1]) && (isWordChar(before[start]) || isWordChar(after[start]))) start--
+	// The common start or end may share half of a surrogate pair: the whole pair belongs to the change.
+	if (start > 0 && isHighSurrogate(before.charCodeAt(start - 1))) start--
 
-	while (end < before.length && isWordChar(before[end]) && (isWordChar(before[end - 1]) || isWordChar(after[endAfter - 1]))) {
+	if (end < before.length && isLowSurrogate(before.charCodeAt(end))) {
 		end++
 		endAfter++
+	}
+
+	// Back to the start of the word the change begins in, on to the end of the word it ends in.
+	// A word the change touches (inside it, or text joined to its end or start) is replaced whole.
+	while (start > 0) {
+		const previous = charBefore(before, start)
+
+		if (previous === undefined || !isWordChar(previous) || !(isWordChar(charAt(before, start)) || isWordChar(charAt(after, start))))
+			break
+
+		start -= previous.length
+	}
+
+	while (end < before.length) {
+		const next = charAt(before, end)
+
+		if (next === undefined || !isWordChar(next) || !(isWordChar(charBefore(before, end)) || isWordChar(charBefore(after, endAfter))))
+			break
+
+		end += next.length
+		endAfter += next.length
 	}
 
 	// Text only inserted between words: it replaces the next word with itself and that word (the last word at the end).
 	if (start === end) {
 		if (end < before.length) {
-			while (end < before.length && !isWordChar(before[end])) {
-				end++
-				endAfter++
+			let next = charAt(before, end)
+
+			while (next !== undefined && !isWordChar(next)) {
+				end += next.length
+				endAfter += next.length
+				next = charAt(before, end)
 			}
 
-			while (end < before.length && isWordChar(before[end])) {
-				end++
-				endAfter++
+			while (next !== undefined && isWordChar(next)) {
+				end += next.length
+				endAfter += next.length
+				next = charAt(before, end)
 			}
 		} else {
-			while (start > 0 && !isWordChar(before[start - 1])) start--
+			let previous = charBefore(before, start)
 
-			while (start > 0 && isWordChar(before[start - 1])) start--
+			while (previous !== undefined && !isWordChar(previous)) {
+				start -= previous.length
+				previous = charBefore(before, start)
+			}
+
+			while (previous !== undefined && isWordChar(previous)) {
+				start -= previous.length
+				previous = charBefore(before, start)
+			}
 		}
 	}
 

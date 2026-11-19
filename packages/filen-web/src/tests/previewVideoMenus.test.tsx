@@ -6,6 +6,7 @@ import type { VideoProbe } from "@filen/shared/videos"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { ChaptersMenu, TracksMenu } from "@/features/preview/components/videoTrackMenus"
 import type { PreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
+import "@/lib/i18n"
 
 // The "converted" note asks the browser's decoders, which jsdom has none of.
 // Whether the menu last asked them while open.
@@ -72,7 +73,7 @@ function tracksMenu(probe: VideoProbe | null, onAudio: (index: number) => void =
 	})
 }
 
-// Strings render as their keys here (no catalogue is loaded); the track names come from the language table.
+// The English catalogue is loaded, so the composed strings (chapter numbers, times) are asserted as shown.
 describe("the preview player's track menus", () => {
 	it("shows no tracks button for one audio track and no subtitles", () => {
 		const probe = probeWith([audioTrack(1, "eng", 2)])
@@ -87,13 +88,13 @@ describe("the preview player's track menus", () => {
 
 		render(tracksMenu(probe, index => picked.push(index)))
 		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "videos:playerAudio" }))
+			fireEvent.click(screen.getByRole("button", { name: "Audio" }))
 			await Promise.resolve()
 		})
 
 		expect(await screen.findByText("English 5.1")).toBeTruthy()
-		expect(await screen.findByText("previewMediaAudioConverted")).toBeTruthy()
-		fireEvent.click(await screen.findByText("German playerChannelsStereo"))
+		expect(await screen.findByText("Converted")).toBeTruthy()
+		fireEvent.click(await screen.findByText("German Stereo"))
 		expect(picked).toEqual([1])
 	})
 
@@ -110,12 +111,12 @@ describe("the preview player's track menus", () => {
 			})
 		)
 		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "previewMediaChapters" }))
+			fireEvent.click(screen.getByRole("button", { name: "Chapters" }))
 			await Promise.resolve()
 		})
 
 		expect(await screen.findByText("Opening")).toBeTruthy()
-		expect(await screen.findByText("common:mediaChapter")).toBeTruthy()
+		expect(await screen.findByText("Chapter 2")).toBeTruthy()
 		// A radio list, the chapter playing (the first: no element, so time 0) checked.
 		expect((await screen.findAllByRole("menuitemradio")).map(item => item.getAttribute("aria-checked"))).toEqual(["true", "false"])
 		expect(await screen.findByText("10:00")).toBeTruthy()
@@ -161,7 +162,7 @@ describe("a menu that goes away while open", () => {
 		)
 
 		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "previewMediaChapters" }))
+			fireEvent.click(screen.getByRole("button", { name: "Chapters" }))
 			await Promise.resolve()
 		})
 		view.unmount()
@@ -186,7 +187,7 @@ describe("a menu that goes away while open", () => {
 		const view = render(menu(probeWith([audioTrack(1, "eng", 6), audioTrack(2, "deu", 2)])))
 
 		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "videos:playerAudio" }))
+			fireEvent.click(screen.getByRole("button", { name: "Audio" }))
 			await Promise.resolve()
 		})
 		expect(changes.at(-1)).toBe(true)
@@ -216,6 +217,6 @@ describe("the scrubber's chapter names", () => {
 			})
 		)
 
-		expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("mediaTimeOfInChapter")
+		expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("11:40 of 20:00, Chapter 2")
 	})
 })

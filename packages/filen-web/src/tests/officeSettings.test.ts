@@ -71,6 +71,7 @@ const {
 	loadedOfficeSetting,
 	resetOfficeSettings
 } = await import("@/features/office/lib/officeSettings")
+const { useCommentAuthor } = await import("@/features/office/components/commentAuthor")
 const { regionalLanguage, loadedRegionalLanguage } = await import("@/features/office/lib/regionalFormat")
 const { listDotFilenDirectory: listOfficeDirectory } = await import("@/lib/dotFilenDirectory")
 
@@ -140,6 +141,57 @@ describe("office settings", () => {
 
 		expect(await ensureAuthorName(again)).toBe("Joan")
 		expect(again).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks again for a caller after the one that asked went, instead of joining its dropped question", async () => {
+		const controller = new AbortController()
+		const lost = vi.fn(() => new Promise<string | null>(() => undefined))
+		const first = ensureAuthorName(lost, controller.signal)
+
+		await vi.waitFor(() => {
+			expect(lost).toHaveBeenCalledTimes(1)
+		})
+		controller.abort()
+
+		// Straight after the abort, before the dropped question has settled.
+		const again = vi.fn(() => Promise.resolve("Joan"))
+		const second = ensureAuthorName(again)
+
+		expect(await first).toBeNull()
+		expect(await second).toBe("Joan")
+		expect(again).toHaveBeenCalledTimes(1)
+	})
+
+	it("drops the comment author question when its host unmounts, so a fresh host asks again", async () => {
+		const gone = renderHook(() => useCommentAuthor())
+		let lost: Promise<string | null> = Promise.resolve(null)
+
+		act(() => {
+			lost = gone.result.current.ask()
+		})
+		await vi.waitFor(() => {
+			expect((gone.result.current.dialog.props as { open: boolean }).open).toBe(true)
+		})
+		gone.unmount()
+		expect(await lost).toBeNull()
+
+		const fresh = renderHook(() => useCommentAuthor())
+		let asked: Promise<string | null> = Promise.resolve(null)
+
+		act(() => {
+			asked = fresh.result.current.ask()
+		})
+		await vi.waitFor(() => {
+			expect((fresh.result.current.dialog.props as { open: boolean }).open).toBe(true)
+		})
+
+		const { onSubmit: submit } = fresh.result.current.dialog.props as { onSubmit: (name: string) => void }
+
+		act(() => {
+			submit("Joan")
+		})
+		expect(await asked).toBe("Joan")
+		fresh.unmount()
 	})
 
 	it("uses a name another device set, without asking", async () => {

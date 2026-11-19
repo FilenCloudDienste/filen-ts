@@ -5,6 +5,8 @@
 // Names, paths and free text in here are shown verbatim, as plain text. A step carries the tool's name and
 // at most a short sanitized subject; the UI owns its wording (locales/en/assistant.ts).
 
+import type { AssistantRoute } from "@filen/shared/assistant"
+
 export interface AssistantModelInfo {
 	// Stable build id (cache directory, logs). Never shown.
 	id: string
@@ -44,9 +46,8 @@ export type AssistantModelState =
 	| { kind: "ready"; model: AssistantModelInfo }
 	| { kind: "error"; error: AssistantModelError; model: AssistantModelInfo | null; partialBytes?: number }
 
-// The tool group the turn was routed to ("answer": no tools), as @filen/shared/assistant names them.
-export type AssistantStepRoute =
-	"files" | "insights" | "shared" | "organize" | "trash" | "notes" | "chats" | "audio" | "navigation" | "answer"
+// The tool group the turn was routed to ("answer": no tools).
+export type AssistantStepRoute = AssistantRoute
 
 // "queued": a call written and waiting for the calls before it. "waiting": on the user (a confirmation
 // card). "stopped": the turn ended while it ran. "discarded": the model abandoned a call it had started to

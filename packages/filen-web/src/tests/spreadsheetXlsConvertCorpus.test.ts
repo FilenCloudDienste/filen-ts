@@ -12,14 +12,19 @@ import { sheetWorkbookOpener } from "@/features/spreadsheet/workers/sheetWorkboo
 // through the workbook worker's opener, as a user opens it: Excel's default password tried, then converted to .xlsx
 // and opened view-only. Each opens with named sheets and cells, or is refused with a typed reason, within a bound on
 // time; a workbook whose password the manifest publishes asks for it, says a wrong one was wrong, and opens with it.
-// FILEN_OFFICE_CORPUS when set, else the cache `pnpm run corpus:fetch` fills; skipped while it is absent.
+// FILEN_OFFICE_CORPUS when set (it must exist and hold both families), else the cache `pnpm run corpus:fetch` fills;
+// skipped while that cache is absent.
+
+const CONFIGURED = process.env["FILEN_OFFICE_CORPUS"] ?? ""
+// A corpus asked for by FILEN_OFFICE_CORPUS is never skipped: an empty or wrong one fails the run.
+const REQUIRED = CONFIGURED !== ""
 
 const CORPUS = (() => {
-	const configured = process.env["FILEN_OFFICE_CORPUS"]
+	if (!REQUIRED) return join(__dirname, "..", "..", "..", "filen-office", ".corpus")
 
-	return configured !== undefined && configured !== ""
-		? resolve(configured)
-		: join(__dirname, "..", "..", "..", "filen-office", ".corpus")
+	if (!existsSync(CONFIGURED)) throw new Error(`FILEN_OFFICE_CORPUS does not exist: ${CONFIGURED}`)
+
+	return resolve(CONFIGURED)
 })()
 
 function familyFiles(family: "xls" | "xlt"): string[] {
@@ -94,7 +99,7 @@ async function unlocked(path: string, result: SheetOpenResult): Promise<SheetOpe
 	return outcome
 }
 
-describe.skipIf(FILES.length === 0)("the .xls and .xlt corpus through the workbook opener", () => {
+describe.skipIf(FILES.length === 0 && !REQUIRED)("the .xls and .xlt corpus through the workbook opener", () => {
 	it("covers both families", () => {
 		expect(FILES.some(path => path.startsWith("xls/"))).toBe(true)
 		expect(FILES.some(path => path.startsWith("xlt/"))).toBe(true)

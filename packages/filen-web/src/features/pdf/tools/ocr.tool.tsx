@@ -11,7 +11,6 @@ export const OCR_TOOL: PdfTool = {
 	labelKey: "previewPdfOcrMenu",
 	icon: ScanTextIcon,
 	toolClass: "content",
-	actionIds: [],
 	actions: [],
 	enabledWhen: policy => toolEnabled("content", policy),
 	commands: ["ocr.applyPage"],

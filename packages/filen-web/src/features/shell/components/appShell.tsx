@@ -189,8 +189,8 @@ export function AppShell() {
 			{/* Chat send outbox driver — same rationale as the notes SyncHost above: mounted once so a
 			    pending chat send flushes even off the chats route. Renders nothing. */}
 			<ChatsSyncHost />
-			{/* Realtime socket bridge — one subscription for the whole authed session; registers the note
-			    domain's handlers (drive/chats reuse the bridge later). Renders nothing. */}
+			{/* Realtime socket bridge — one subscription for the whole authed session; registers every
+			    domain's socket handlers (see socketHost.tsx). Renders nothing. */}
 			<SocketHost />
 			{/* The assistant's navigation tools act through the router from here, whether or not the panel is
 			    open. Renders nothing. */}

@@ -1,6 +1,6 @@
 import { useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
-import type { SheetCommand, SheetRefusalReason, SheetSessionApi, SheetValidationAlert, SheetValidationRule } from "@filen/office/core/sheet"
+import type { SheetCommand, SheetRefusal, SheetSessionApi, SheetValidationAlert, SheetValidationRule } from "@filen/office/core/sheet"
 import {
 	CF_BAR_DECORATOR,
 	CF_ICON_DECORATOR,
@@ -85,7 +85,8 @@ export function useSheetConditional({
 		)
 	}
 
-	async function apply(next: SheetValidationRule | null): Promise<SheetRefusalReason | null> {
+	// The dialog shows a refused rule itself, so the model's toast stays quiet.
+	async function apply(next: SheetValidationRule): Promise<SheetRefusal | null> {
 		void model.intent()
 
 		const result = await model.command(
@@ -93,7 +94,13 @@ export function useSheetConditional({
 			false
 		)
 
-		return result.ok ? null : result.refusal.reason
+		return result.ok ? null : result.refusal
+	}
+
+	// The dialog closes on Clear all, so a refusal toasts through the model's handler.
+	function clear(): void {
+		void model.intent()
+		void model.command({ type: "validation.set", sheet, ranges: selection.ranges, rule: null, at: selection.active })
 	}
 
 	// Alt+Down on a cell with a list validation opens its values, on another cell the column's entries (Excel's
@@ -141,13 +148,12 @@ export function useSheetConditional({
 				{alerts.dialog}
 				<ValidationDialog
 					rule={rule}
+					kind={model.kind}
 					onClose={() => {
 						setRule(null)
 					}}
 					onApply={apply}
-					onClear={() => {
-						void apply(null)
-					}}
+					onClear={clear}
 				/>
 			</>
 		)

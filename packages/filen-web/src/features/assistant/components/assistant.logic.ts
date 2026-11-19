@@ -62,6 +62,22 @@ export function canRemoveModel(state: AssistantModelState): boolean {
 	}
 }
 
+// What Remove frees, for the states canRemoveModel accepts: the part a download left plus an earlier
+// version's files, else the whole model. A downloaded model may also take earlier versions with it, which
+// the state does not carry.
+export function removableModelBytes(state: AssistantModelState): number {
+	switch (state.kind) {
+		case "not-downloaded":
+			return (state.partialBytes ?? 0) + (state.staleBytes ?? 0)
+		case "error":
+			return state.error === "load-failed" || state.error === "out-of-memory"
+				? (state.model?.sizeBytes ?? 0)
+				: (state.partialBytes ?? 0)
+		default:
+			return state.model?.sizeBytes ?? 0
+	}
+}
+
 // The waiting bubble shows only until the turn's step list or reply appears: the list says what is
 // happening from then on.
 export function transcriptRows(entries: readonly TranscriptEntry[], activeTurnId: string | null): readonly TranscriptRow[] {

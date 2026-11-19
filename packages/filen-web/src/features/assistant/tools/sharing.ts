@@ -1,4 +1,13 @@
-import { listRest, MAX_ARRAY_ITEMS, type ASSISTANT_DRIVE_SECTIONS } from "@filen/shared/assistant"
+import {
+	listRest,
+	matchScore,
+	MAX_ARRAY_ITEMS,
+	ROOT_NOT_SHAREABLE,
+	searchTokens,
+	SHARED_WITH_YOU_NOTE,
+	TRASH_NOTE,
+	type ASSISTANT_DRIVE_SECTIONS
+} from "@filen/shared/assistant"
 import { queryClient } from "@/queries/client"
 import type { QueryKey } from "@tanstack/react-query"
 import {
@@ -27,7 +36,7 @@ import {
 	UNSYNCED_LISTING_REUSE_MS,
 	type ToolAdapter
 } from "@/features/assistant/tools/entities"
-import { AssistantToolError, matchScore, searchTokens, throwIfStopped } from "@/features/assistant/tools/format"
+import { AssistantToolError, throwIfStopped } from "@/features/assistant/tools/format"
 import { isTrashed, itemAncestors, sortListing } from "@/features/assistant/tools/drive"
 
 type DriveSection = (typeof ASSISTANT_DRIVE_SECTIONS)[number]
@@ -113,9 +122,7 @@ export const listSectionTool: ToolAdapter = async (input, scope) => {
 				}
 			}),
 			...listRest(sorted.length),
-			...(section === "trash" && sorted.length > 0
-				? { note: "Only the user can restore or delete these, in the app. Do not offer to." }
-				: {})
+			...(section === "trash" && sorted.length > 0 ? { note: TRASH_NOTE } : {})
 		}
 	}
 }
@@ -216,7 +223,7 @@ export const getSharingTool: ToolAdapter = async (input, scope) => {
 	const entity = await resolveHandle(scope, requiredString(input, "handle"), ["root", "drive"])
 
 	if (entity.kind !== "drive") {
-		throw new AssistantToolError("The drive root cannot be shared or linked; ask about an item in it")
+		throw new AssistantToolError(ROOT_NOT_SHAREABLE)
 	}
 
 	const item = freshDriveItem(entity.item)
@@ -229,7 +236,7 @@ export const getSharingTool: ToolAdapter = async (input, scope) => {
 	const name = driveName(item)
 
 	if (shareDirection(item) === "in") {
-		return { value: { handle, name, sharedWithYou: true, ...sharedByOf(item), note: "Its owner manages its links and shares." } }
+		return { value: { handle, name, sharedWithYou: true, ...sharedByOf(item), note: SHARED_WITH_YOU_NOTE } }
 	}
 
 	const parents = ancestorsOf(item)

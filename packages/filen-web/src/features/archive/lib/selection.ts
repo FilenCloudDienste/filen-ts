@@ -168,10 +168,6 @@ export function selectAll(store: EntryStore, dir: number): Selection {
 	return { rules, inner }
 }
 
-export function clearSelection(): Selection {
-	return EMPTY_SELECTION
-}
-
 // Exact, as each rule adds or takes away its row's whole subtree and none repeats an ancestor's say.
 export function selectionTotals(store: EntryStore, selection: Selection): SelectionTotals {
 	let files = 0

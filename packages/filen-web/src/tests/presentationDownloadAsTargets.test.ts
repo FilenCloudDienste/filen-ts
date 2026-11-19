@@ -10,8 +10,8 @@ import {
 } from "@/features/drive/lib/downloadAs.logic"
 
 // Download as for presentations: every deck the presentation viewer opens exports from its engine at any size (the
-// viewer reads decks in ranges), a PowerPoint deck to .odp, an OpenDocument one to .pptx, a 97–2003 one to either;
-// never to a PDF from the item menus, and in a mixed selection only what every file converts to.
+// viewer reads decks in ranges): every deck to a PDF, a PowerPoint deck to .odp, an OpenDocument one to .pptx, a
+// 97–2003 one to either; in a mixed selection only what every file converts to.
 
 function file(name: string, size = 1_024n): DriveItem {
 	return narrowItem({

@@ -20,7 +20,7 @@ import {
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
-import { docxSessionKey } from "@/features/preview/components/docxViewer.logic"
+import { docxSessionKey, heldDocument } from "@/features/preview/components/docxViewer.logic"
 
 // A password-protected Word document in the viewer: probed in the docx worker only when it is a compound file,
 // the password asked (a wrong one says so, the check can be stopped), the document opened on its decrypted
@@ -450,5 +450,23 @@ describe("docxSessionKey", () => {
 		key.drop()
 		await new Promise(resolve => setTimeout(resolve, 5))
 		expect(release).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("heldDocument", () => {
+	it("releases a turn after the drop, and a hold within the turn cancels it", async () => {
+		const release = vi.fn()
+		const held = heldDocument({ release })
+
+		held.drop()
+		expect(release).not.toHaveBeenCalled()
+		held.hold()
+		await new Promise(resolve => setTimeout(resolve, 5))
+		expect(release).not.toHaveBeenCalled()
+
+		held.drop()
+		held.drop()
+		await new Promise(resolve => setTimeout(resolve, 5))
+		expect(release).toHaveBeenCalledOnce()
 	})
 })

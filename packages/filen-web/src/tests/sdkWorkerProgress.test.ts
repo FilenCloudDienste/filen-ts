@@ -79,7 +79,6 @@ beforeEach(async () => {
 
 afterEach(() => {
 	vi.useRealTimers()
-	vi.clearAllMocks()
 })
 
 // Uploads and downloads post their bytes through the page's one sink, a batch by transfer id at a time.

@@ -21,7 +21,6 @@ export const STAMP_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolStamp",
 	icon: StampIcon,
 	toolClass: "annotate",
-	actionIds: [],
 	actions: [],
 	enabledWhen: policy => toolEnabled("annotate", policy),
 	commands: ["annotations.image", "annotations.stamp"],

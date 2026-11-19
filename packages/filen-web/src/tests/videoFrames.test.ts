@@ -126,7 +126,7 @@ const KEY = {
 	decoder: { codec: "avc1.64001f", codedWidth: 1280, codedHeight: 720, description: Uint8Array.from([1, 100, 0, 31]) }
 }
 
-function generator(results: FrameCaptureResult[]) {
+function generator(results: FrameCaptureResult[], supported: () => boolean = () => true) {
 	const { kv, rows } = memoryKv()
 	const hints = new RecordStore<FrameHint>({
 		prefix: "videos.v1.frame.",
@@ -154,7 +154,8 @@ function generator(results: FrameCaptureResult[]) {
 		sleep: vi.fn((_ms: number, signal: AbortSignal | undefined) =>
 			signal?.aborted === true ? Promise.reject(new DOMException("aborted", "AbortError")) : Promise.resolve()
 		),
-		now: () => 7
+		now: () => 7,
+		supported
 	}
 
 	return { frames: new FrameGenerator(deps), deps, captures, rows, hints }
@@ -200,6 +201,35 @@ describe("FrameGenerator", () => {
 
 		await frames.generate({ target: TARGET, probe: probe(), box: BOX })
 		expect(captures[1]?.known).toEqual(KEY)
+	})
+
+	it("attempts nothing where the browser cannot decode video frames, and keeps no verdict", async () => {
+		let supported = false
+		const { frames, deps, rows, hints } = generator([frame(1)], () => supported)
+		const hintGet = vi.spyOn(hints, "get")
+
+		expect(await frames.generate({ target: TARGET, probe: probe(), box: BOX })).toBeNull()
+		expect(hintGet).not.toHaveBeenCalled()
+		expect(deps.sleep).not.toHaveBeenCalled()
+		expect(deps.reads.acquire).not.toHaveBeenCalled()
+		expect(deps.openPort).not.toHaveBeenCalled()
+		expect(deps.capture).not.toHaveBeenCalled()
+		await Promise.resolve()
+		expect(rows.has("videos.v1.frame.video")).toBe(false)
+
+		// A browser that gains WebCodecs makes the frame, its whole read allowance still there.
+		supported = true
+		expect(await frames.generate({ target: TARGET, probe: probe(), box: BOX })).not.toBeNull()
+		expect(deps.capture).toHaveBeenCalledWith(expect.objectContaining({ maxReads: FRAME_READS_PER_ITEM }))
+	})
+
+	it("tells a settled miss from its hint without capturing", async () => {
+		const { frames, deps } = generator([{ type: "miss", reason: "noIndex", reads: 1 }])
+
+		expect(await frames.settledMiss("video")).toBe(false)
+		await frames.generate({ target: TARGET, probe: probe(), box: BOX })
+		expect(await frames.settledMiss("video")).toBe(true)
+		expect(deps.capture).toHaveBeenCalledOnce()
 	})
 
 	it("never reads for a file it cannot index, or for a requester gone during the dwell", async () => {

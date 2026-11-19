@@ -18,6 +18,7 @@ import {
 	encapsulatedFrame,
 	fragmentIndex,
 	nativeFrame,
+	samplesView,
 	type FrameContext
 } from "@/features/preview/lib/dicom/frameDecode"
 import { DICOM_MIN_CODE_BLOCK, structureBytes } from "@/features/preview/lib/dicom/budget.logic"
@@ -700,5 +701,23 @@ describe("the tags", () => {
 		expect(root.rows.find(row => row.tag === "(0010,0010)")?.value).toBe("Müller")
 		expect(name(0)).toBe("Müller")
 		expect(name(1)).toBe("Zoë")
+	})
+
+	it("swaps big-endian samples on a copy, the source bytes untouched", () => {
+		const source = new Uint8Array([0x00, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0])
+		const before = source.slice()
+		// An odd offset: the big-endian path copies whatever the alignment.
+		const bytes = source.subarray(1)
+		// Swapped by index, no view made per sample.
+		const subarray = vi.spyOn(Uint8Array.prototype, "subarray")
+		const shorts = Array.from(samplesView(bytes, 16, false))
+		const longs = Array.from(samplesView(bytes, 32, false))
+
+		expect(subarray).not.toHaveBeenCalled()
+		subarray.mockRestore()
+		expect(shorts).toEqual([0x1234, 0x5678, 0x9abc, 0xdef0])
+		expect(longs).toEqual([0x12345678, 0x9abcdef0])
+		expect(source).toEqual(before)
+		expect(Array.from(samplesView(bytes.subarray(0, 2), 16, true))).toEqual([0x3412])
 	})
 })

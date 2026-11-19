@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import type { DesktopBridge, DesktopMounts, DesktopSessionRead, DesktopSessionVault, DesktopSync } from "@filen/shared/desktop"
+import type { DesktopBridge, DesktopSessionRead, DesktopSessionVault } from "@filen/shared/desktop"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
 // to the one method the session store calls. `injectClient` is a spy so the resume path is observable.
@@ -38,7 +38,7 @@ const { writeSignedInHint } = vi.hoisted(() => ({ writeSignedInHint: vi.fn<(sign
 vi.mock("@/lib/signedInHint", () => ({ writeSignedInHint }))
 
 // The desktop shell's bridge, swapped in per test; undefined is a plain browser.
-const desktop = vi.hoisted(() => ({ bridge: undefined as DesktopBridge | undefined }))
+const desktop = vi.hoisted(() => ({ bridge: undefined as Pick<DesktopBridge, "session"> | undefined }))
 
 vi.mock("@/lib/desktop", () => ({ desktopBridge: () => desktop.bridge }))
 
@@ -187,70 +187,6 @@ describe("browser kv", () => {
 	})
 })
 
-const unused = () => Promise.reject(new Error("unused"))
-
-const unusedSync: DesktopSync = {
-	overview: unused,
-	onOverview: () => () => undefined,
-	activity: unused,
-	onActivity: () => () => undefined,
-	chooseLocalDirectory: unused,
-	addPair: unused,
-	startPair: unused,
-	removePair: unused,
-	pausePair: unused,
-	resumePair: unused,
-	setMode: unused,
-	renamePair: unused,
-	syncNow: unused,
-	plan: unused,
-	planPage: unused,
-	releasePlan: unused,
-	conflicts: unused,
-	resolveConflict: unused,
-	resolveConflicts: unused,
-	heldDeletions: unused,
-	approveDeletions: unused,
-	restoreDeletions: unused,
-	retryPath: unused,
-	retryAll: unused,
-	unsyncablePaths: unused,
-	skippedSymlinks: unused,
-	ignoredPaths: unused,
-	userIgnore: unused,
-	setUserIgnore: unused,
-	reveal: unused,
-	dismissNotice: unused,
-	holdAction: unused,
-	dismissInfo: unused,
-	dismissImportNote: unused,
-	retryHost: () => undefined,
-	onOpenPair: () => () => undefined
-}
-
-const unusedMounts: DesktopMounts = {
-	overview: unused,
-	onOverview: () => () => undefined,
-	stats: unused,
-	onStats: () => () => undefined,
-	chooseMountPoint: unused,
-	driveLetters: unused,
-	setDrive: unused,
-	listenAddresses: unused,
-	setServe: unused,
-	credentials: unused,
-	copyCredential: unused,
-	setCredentials: unused,
-	regenerateCredentials: unused,
-	setTuning: unused,
-	clearCache: unused,
-	installFuse: unused,
-	revealDrive: unused,
-	confirmSignOut: unused,
-	dismissNotice: unused,
-	retryHost: () => undefined
-}
-
 describe("desktop vault", () => {
 	function installVault(stored: string | null = null) {
 		const state = { stored, unreadable: false }
@@ -285,59 +221,7 @@ describe("desktop vault", () => {
 			onRevoked: () => () => undefined
 		}
 
-		desktop.bridge = {
-			platform: "darwin",
-			session: vault,
-			prefs: { get: () => Promise.reject(new Error("unused")), set: () => Promise.reject(new Error("unused")) },
-			app: {
-				version: "4.0.0",
-				setBadge: () => undefined,
-				setUnloadHolds: () => undefined,
-				setForegroundRenderingHolds: () => undefined,
-				setAudioPlaying: () => undefined,
-				setMediaTransport: () => undefined,
-				setSmoothTransitions: () => undefined,
-				setMenuShortcuts: () => undefined,
-				setShellStrings: () => undefined,
-				onMenuAction: () => () => undefined,
-				onUpdateReady: () => () => undefined,
-				installUpdate: () => undefined,
-				quit: () => undefined,
-				browserCacheSize: () => Promise.reject(new Error("unused")),
-				clearBrowserCache: () => Promise.reject(new Error("unused")),
-				thirdPartyNotices: () => Promise.reject(new Error("unused"))
-			},
-			lock: {
-				status: () => Promise.reject(new Error("unused")),
-				onChanged: () => () => undefined,
-				unlock: () => Promise.reject(new Error("unused")),
-				set: () => Promise.reject(new Error("unused")),
-				clear: () => Promise.reject(new Error("unused")),
-				lock: () => undefined,
-				reset: () => Promise.reject(new Error("unused"))
-			},
-			logs: { export: () => Promise.reject(new Error("unused")) },
-			sync: unusedSync,
-			mounts: unusedMounts,
-			fileProvider: { supported: false, state: unused, enable: unused, disable: unused, reveal: unused, openSettings: unused },
-			transfers: {
-				download: unused,
-				upload: unused,
-				pickUpload: unused,
-				cancel: () => undefined,
-				setPaused: () => undefined,
-				onEvents: () => () => undefined,
-				reveal: unused,
-				open: unused,
-				chooseDownloadDirectory: unused
-			},
-			drag: { prepare: unused, begin: unused, release: () => undefined, onState: () => () => undefined },
-			window: { zoom: () => undefined, toggleFullScreen: () => undefined, close: () => undefined },
-			setTitleBarColors: () => undefined,
-			onWindowState: () => () => undefined,
-			showWindow: () => undefined,
-			networkOnline: () => undefined
-		}
+		desktop.bridge = { session: vault }
 
 		return vault
 	}

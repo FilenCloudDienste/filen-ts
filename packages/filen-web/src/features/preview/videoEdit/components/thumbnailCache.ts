@@ -1,6 +1,7 @@
-// Filmstrip thumbnails by slot, least recently used dropped (and closed) past a byte budget, so zooming and panning back
-// and forth reuse what was decoded instead of asking again, while memory stays bounded by what a tile really holds
-// (RGBA, 4 bytes a pixel) rather than by a count of tiles of any size. The timeline sizes the budget to the visible
+// Filmstrip thumbnails by keyframe time (every slot showing that keyframe draws the one tile, at any zoom), least
+// recently used dropped (and closed) past a byte budget, so zooming and panning back and forth reuse what was decoded
+// instead of asking again, while memory stays bounded by what a tile really holds (RGBA, 4 bytes a pixel) rather than
+// by a count of tiles of any size. The timeline sizes the budget to the visible
 // slots. Once closed, the cache closes whatever still arrives (a fetch that outlived the timeline).
 export class ThumbnailCache {
 	private readonly entries = new Map<string, ImageBitmap>()
@@ -12,8 +13,8 @@ export class ThumbnailCache {
 		this.budget = budgetBytes
 	}
 
-	static key(step: number, time: number): string {
-		return `${String(step)}:${String(time)}`
+	static key(time: number): string {
+		return String(time)
 	}
 
 	static sizeOf(bitmap: ImageBitmap): number {

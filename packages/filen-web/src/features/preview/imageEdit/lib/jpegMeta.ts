@@ -62,15 +62,10 @@ function findEntry(t: Tiff, ifd: number, tag: number): number {
 
 	for (let i = 0; i < count; i++) {
 		const entry = ifd + 2 + i * 12
-		const entryTag = t.view.getUint16(entry, t.le)
 
-		if (entryTag === tag) {
+		// Every entry is checked: TIFF 6.0 §2 sorts by tag, but some writers do not, and the decoder reads them all.
+		if (t.view.getUint16(entry, t.le) === tag) {
 			return entry
-		}
-
-		// Entries are sorted by tag (TIFF 6.0 §2): past it means absent.
-		if (entryTag > tag) {
-			return -1
 		}
 	}
 
@@ -411,7 +406,7 @@ export function buildJpeg(
 	let exif = meta.exif === null ? null : normalizeExif(meta.exif, { width: meta.width, height: meta.height })
 
 	if (exif !== null && exif.length + EXIF_HEADER_LENGTH + 2 > MAX_SEGMENT_LENGTH) {
-		log.warn("imageEdit", `Exif of ${String(exif.length)} bytes does not fit one APP1 segment; dropped`)
+		log.warn("image-edit", `Exif of ${String(exif.length)} bytes does not fit one APP1 segment; dropped`)
 
 		exif = null
 	}
@@ -420,7 +415,7 @@ export function buildJpeg(
 	const iccChunks = icc === null ? 0 : Math.ceil(icc.length / MAX_ICC_CHUNK)
 
 	if (iccChunks > 255) {
-		log.warn("imageEdit", `ICC profile of ${String(icc?.length ?? 0)} bytes exceeds 255 APP2 chunks; dropped`)
+		log.warn("image-edit", `ICC profile of ${String(icc?.length ?? 0)} bytes exceeds 255 APP2 chunks; dropped`)
 
 		icc = null
 	}

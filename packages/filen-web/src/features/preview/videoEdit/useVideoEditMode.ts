@@ -63,7 +63,7 @@ export function useVideoEditMode(createClient: (item: DriveItem) => VideoEditCli
 		setEntering(true)
 
 		const info = await client.loadSource().catch((error: unknown) => {
-			log.error("[videoEdit] reading the source failed", error)
+			log.error("video-edit", "reading the source failed", error)
 
 			return null
 		})

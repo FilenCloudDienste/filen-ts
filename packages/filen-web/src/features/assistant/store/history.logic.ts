@@ -9,6 +9,7 @@ import {
 	type TranscriptEntry,
 	type TranscriptStep
 } from "@/features/assistant/store/transcript"
+import { clipText } from "@/features/assistant/tools/format"
 import type { AssistantExchange } from "@/features/assistant/types"
 
 // Saved conversations, as plain text. A turn is a few KB (the message, replies capped by the model's
@@ -132,7 +133,9 @@ export interface ConversationSnapshot {
 }
 
 function capText(text: string): string {
-	return text.length <= MAX_TEXT_CHARS ? text : `${text.slice(0, MAX_TEXT_CHARS)}…`
+	const capped = clipText(text, MAX_TEXT_CHARS)
+
+	return capped.truncated ? `${capped.text}…` : text
 }
 
 const encoder = new TextEncoder()
@@ -362,7 +365,7 @@ export function conversationTitle(content: ConversationContent): string {
 		return text
 	}
 
-	const cut = text.slice(0, TITLE_CHARS)
+	const cut = clipText(text, TITLE_CHARS).text
 	const space = cut.lastIndexOf(" ")
 
 	return `${(space > TITLE_CHARS / 2 ? cut.slice(0, space) : cut).trimEnd()}…`

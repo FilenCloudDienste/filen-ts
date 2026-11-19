@@ -3,7 +3,7 @@ import {
 	filmstripSlots,
 	formatTimecode,
 	fullView,
-	isZoomed,
+	keyframeAtOrBefore,
 	MIN_VIEW_SPAN,
 	panView,
 	parseTimecode,
@@ -25,7 +25,6 @@ describe("timeline view", () => {
 		expect(view.end - view.start).toBe(50)
 		// 25 s sat a quarter of the way along; it still does.
 		expect((25 - view.start) / (view.end - view.start)).toBeCloseTo(0.25)
-		expect(isZoomed(view, 100)).toBe(true)
 	})
 
 	it("never zooms past the whole source or below the minimum span", () => {
@@ -96,6 +95,17 @@ describe("filmstrip and ruler", () => {
 		// The tiles both views show are the same times.
 		expect(b.times.filter(time => a.times.includes(time)).length).toBeGreaterThan(0)
 		expect(filmstripSlots({ start: 0, end: 10 }, 0, 100, 60).times).toEqual([])
+	})
+
+	it("maps a time to the keyframe at or before it, the first before it, none without a list", () => {
+		const keys = new Float64Array([0.5, 2, 4])
+
+		expect(keyframeAtOrBefore(keys, 0.1)).toBe(0.5)
+		expect(keyframeAtOrBefore(keys, 0.5)).toBe(0.5)
+		expect(keyframeAtOrBefore(keys, 3.99)).toBe(2)
+		expect(keyframeAtOrBefore(keys, 4)).toBe(4)
+		expect(keyframeAtOrBefore(keys, 1e6)).toBe(4)
+		expect(keyframeAtOrBefore(new Float64Array(), 3)).toBeNull()
 	})
 
 	it("labels the ruler at a readable step", () => {

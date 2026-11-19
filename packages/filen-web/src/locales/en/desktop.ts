@@ -14,8 +14,12 @@ export const desktop = {
 	lockUnlock: "Unlock",
 	/** Lock screen — the PIN entered was wrong */
 	lockWrongPin: "Wrong PIN. Try again.",
-	/** Lock screen and PIN dialogs — too many wrong PINs; {{time}} is a m:ss countdown */
+	/** PIN dialogs — too many wrong PINs; {{time}} is a m:ss countdown */
 	lockRetryIn: "Too many wrong PINs. Try again in {{time}}.",
+	/** Lock screen — too many wrong PINs; announced once, with lockRetryClock after it */
+	lockTooManyPins: "Too many wrong PINs.",
+	/** Lock screen — after lockTooManyPins; {{time}} is a m:ss countdown */
+	lockRetryClock: "Try again in {{time}}.",
 	/** Lock screen — the PIN could not be checked (main refused or failed) */
 	lockFailed: "Couldn't check the PIN. Try again.",
 	/** Lock screen — a PIN is set but cannot be read (locked system keychain, damaged file) */

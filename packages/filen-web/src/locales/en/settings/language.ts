@@ -12,6 +12,8 @@ export const settingsLanguage = {
 	settingsLanguageDescription: "The language of the app. Dates and numbers follow your browser's region.",
 	/** Appearance → General — language select option that follows the browser's preferred languages instead of a fixed pick */
 	settingsLanguageSystem: "Browser default",
+	/** Appearance → General — error toast when the picked language's text could not be downloaded; the app stays in English until a reload */
+	settingsLanguageLoadFailed: "The language couldn't be loaded. Check your connection and reload the page.",
 	/** Appearance — title of the group holding note settings */
 	settingsNotesTitle: "Notes",
 	/** Appearance → Notes — label of the select that picks the type new notes get */

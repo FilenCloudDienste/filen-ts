@@ -100,12 +100,13 @@ export interface SchemaObject {
 
 const VIRTUAL = /^\s*create\s+virtual\s+table\b/i
 
-// The kind of a sqlite_schema table or view row by its SQL. A virtual table is listed, never queried: its module's
-// code would run over the file's data (shadow tables stay browsable as plain tables).
+// The kind of a pragma_table_list row by its type and sqlite_schema SQL. A virtual table is listed, never queried: its
+// module's code would run over the file's data (shadow tables stay browsable as plain tables). The SQL decides it too:
+// a module the library lacks reads as a table in pragma_table_list.
 export function schemaKind(type: string, sql: string): SchemaKind {
 	if (type === "view") return "view"
 
-	return VIRTUAL.test(sql) ? "virtual" : "table"
+	return type === "virtual" || VIRTUAL.test(sql) ? "virtual" : "table"
 }
 
 // Internal tables a database keeps for itself, never user data.

@@ -26,7 +26,30 @@ export function showUpdateReadyToast(): void {
 		id: UPDATE_TOAST_ID,
 		description: i18n.t("updateReadyBody"),
 		duration: Infinity,
-		action: { label: i18n.t("reload"), onClick: applyUpdate }
+		// Left up on click: sonner would dismiss it, and a held-back update turns it into the note below.
+		action: {
+			label: i18n.t("reload"),
+			onClick: event => {
+				event.preventDefault()
+				applyUpdate()
+			}
+		}
+	})
+}
+
+// Reload was pressed while a download still streams through the active worker: the same toast stays up and
+// says why nothing happens yet. The page reloads by itself once the last stream ends.
+export function showUpdateDeferredToast(): void {
+	if (desktopPlatform() !== undefined) {
+		return
+	}
+
+	toast(i18n.t("updateReadyTitle"), {
+		id: UPDATE_TOAST_ID,
+		description: i18n.t("updateAfterDownload"),
+		duration: Infinity,
+		// sonner merges into the toast under the same id, so the prompt's Reload button goes only when named.
+		action: undefined
 	})
 }
 

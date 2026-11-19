@@ -175,13 +175,23 @@ function answered(ask: () => Promise<string | null>, signal: AbortSignal | undef
 // The author name a change that records one (a comment, a tracked change) carries: the setting, or asked
 // once through `ask` when the user has not given one (never filled in from the account). Null when the user
 // declined, when `signal` aborted (the editor asking closed) or when asking failed: the change is not made,
-// and the next one asks again. Concurrent callers share one question.
+// and the next one asks again. Concurrent callers share one question; it lasts only as long as the caller that asked
+// it: once that one's signal aborts, the next change asks again instead of joining a question nobody can answer.
 export function ensureAuthorName(ask: () => Promise<string | null>, signal?: AbortSignal): Promise<string | null> {
 	if (signal?.aborted === true) {
 		return Promise.resolve(null)
 	}
 
-	asking ??= (async () => {
+	if (asking !== null) {
+		return asking
+	}
+
+	const drop = (): void => {
+		if (asking === question) {
+			asking = null
+		}
+	}
+	const question: Promise<string | null> = (async () => {
 		await loadOfficeSettings()
 
 		const current = officeAuthorName(officeSettings.value())
@@ -210,10 +220,14 @@ export function ensureAuthorName(ask: () => Promise<string | null>, signal?: Abo
 			return null
 		})
 		.finally(() => {
-			asking = null
+			signal?.removeEventListener("abort", drop)
+			drop()
 		})
 
-	return asking
+	asking = question
+	signal?.addEventListener("abort", drop, { once: true })
+
+	return question
 }
 
 // Called once by the authed shell's socket host.

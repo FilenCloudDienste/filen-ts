@@ -2,7 +2,7 @@ import type { AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { isAbortError } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { getAppliedTransferConfig } from "@/features/settings/lib/transferConfig"
-import { DOWNLOAD_NEEDS_RELOAD, ErrorWithDTO, plainErrorDTO } from "@/lib/sdk/errors"
+import { DOWNLOAD_NEEDS_RELOAD, DOWNLOAD_STALLED, DOWNLOAD_WORKER_UNAVAILABLE, ErrorWithDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
 import {
@@ -132,7 +132,7 @@ export function sendToSw(
 		const channel = new MessageChannel()
 		const timeout = setTimeout(() => {
 			close()
-			reject(new Error("service worker did not respond"))
+			reject(new ErrorWithDTO(plainErrorDTO("service worker did not respond", DOWNLOAD_WORKER_UNAVAILABLE)))
 		}, timeoutMs)
 
 		function close(): void {
@@ -146,7 +146,8 @@ export function sendToSw(
 			if (event.data.ok) {
 				resolve()
 			} else {
-				reject(new Error(event.data.error ?? "service worker request failed"))
+				// The worker's own text stays the message, for the logs; the kind is what the user reads.
+				reject(new ErrorWithDTO(plainErrorDTO(event.data.error ?? "service worker request failed", DOWNLOAD_WORKER_UNAVAILABLE)))
 			}
 		}
 
@@ -159,7 +160,7 @@ export async function activeServiceWorker(): Promise<ServiceWorker> {
 	const target = registration.active
 
 	if (target === null) {
-		throw new Error("no active service worker")
+		throw new ErrorWithDTO(plainErrorDTO("no active service worker", DOWNLOAD_WORKER_UNAVAILABLE))
 	}
 
 	return target
@@ -398,7 +399,7 @@ async function startWatchedSwDownload(
 			clearTimeout(stall)
 			stall = setTimeout(() => {
 				finish()
-				reject(new Error("the download stopped responding"))
+				reject(new ErrorWithDTO(plainErrorDTO("the download stopped responding", DOWNLOAD_STALLED)))
 			}, SW_DOWNLOAD_STALL_MS)
 		}
 

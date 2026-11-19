@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { InfoIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { FormDialog } from "@/components/dialogs/formDialog"
+import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -85,7 +86,7 @@ export function ReportAbuseDialog({ subject, signedIn, onClose }: { subject: Rep
 		comment: ""
 	}))
 	const [token, setToken] = useState<string | null>(null)
-	// Remounts the challenge for a fresh token after a failed send.
+	// Remounts the challenge for a fresh token after a failed send, or to retry one that could not load.
 	const [challengeKey, setChallengeKey] = useState(0)
 	const [challengeFailed, setChallengeFailed] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -130,6 +131,7 @@ export function ReportAbuseDialog({ subject, signedIn, onClose }: { subject: Rep
 
 			setError(outcome.error)
 			setToken(null)
+			setChallengeFailed(false)
 			setChallengeKey(key => key + 1)
 		})
 	}
@@ -239,6 +241,21 @@ export function ReportAbuseDialog({ subject, signedIn, onClose }: { subject: Rep
 					}}
 				/>
 				{errorMessage === null ? null : <FieldError>{errorMessage}</FieldError>}
+				{challengeFailed && token === null ? (
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="self-start"
+						disabled={pending}
+						onClick={() => {
+							setChallengeFailed(false)
+							setChallengeKey(key => key + 1)
+						}}
+					>
+						{t("common:tryAgain")}
+					</Button>
+				) : null}
 			</FieldGroup>
 		</FormDialog>
 	)

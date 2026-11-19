@@ -241,7 +241,10 @@ export function readerClosed(): Error {
 	return error
 }
 
-function settle(report: EntryDownloadReport): boolean {
+// The SDK resolves with its report however the download ended, the writer aborted on an early end: a
+// failed one rejects here, so neither a picked file nor a buffer is taken for the whole entry. An entry
+// without a CRC passes, answering `checked` false: whatever password it took is proven by nothing.
+export function settleEntryReport(report: EntryDownloadReport): boolean {
 	if (report.error !== undefined) {
 		throw new ErrorWithDTO(liftError(report.error))
 	}
@@ -859,7 +862,7 @@ export function createArchiveReaders(deps: ArchiveReaderDeps): ArchiveReaders {
 
 				const buffer = entryBuffer(size)
 				let phase: EntryDownloadPhase | null = null
-				const checked = settle(
+				const checked = settleEntryReport(
 					await reader.downloadEntry({
 						entry: ownId(record, reader, entry),
 						writer: buffer.writer,

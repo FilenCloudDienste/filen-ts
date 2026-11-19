@@ -83,6 +83,7 @@ export function fakeVideoEditClient(
 	const client = {
 		loadSource: vi.fn(() => Promise.resolve(info)),
 		frameAt: vi.fn((_time: number, _recipe: VideoEditRecipe, _maxWidth: number) => Promise.resolve(fakeBitmap())),
+		stillAt: vi.fn((_time: number, _recipe: VideoEditRecipe, _maxWidth: number) => Promise.resolve(fakeBitmap())),
 		filterThumbnails: vi.fn((_time: number, _recipe: VideoEditRecipe, filters: readonly (string | null)[], height: number) =>
 			Promise.resolve(filters.map(filter => ({ filter, bitmap: fakeBitmap(height, height) })))
 		),

@@ -70,6 +70,14 @@ export interface FrameGeneratorDeps {
 	reads: Pick<RangeReadBudget, "acquire" | "release" | "whenPlaybackIdle">
 	sleep: (ms: number, signal: AbortSignal | undefined) => Promise<void>
 	now: () => number
+	// Whether this browser decodes video frames (WebCodecs' VideoDecoder): without it nothing is attempted and no
+	// verdict is kept, so a browser that gains it later starts making frames.
+	supported: () => boolean
+}
+
+// Whether this browser has WebCodecs' VideoDecoder, which the frame worker decodes keyframes with.
+function webCodecsVideo(): boolean {
+	return typeof VideoDecoder !== "undefined"
 }
 
 export class FrameGenerator {
@@ -85,7 +93,13 @@ export class FrameGenerator {
 		this.deps = deps
 	}
 
-	// One frame of the file at `box`, or null: not eligible, a known miss, past the file's failure limit,
+	// Whether the file's hint says no frame can be made (a local read, no capture): a settled miss the artwork loader
+	// passes over without waiting for a generation.
+	public async settledMiss(uuid: string): Promise<boolean> {
+		return isSettledMiss(await this.deps.hints.get(uuid))
+	}
+
+	// One frame of the file at `box`, or null: no frame decoding in this browser, not eligible, a known miss, past the file's failure limit,
 	// the session's budget spent, dropped once every requester gave up, or a failed download. Requests for
 	// the same file and size share one capture.
 	public generate(request: FrameRequest): Promise<GeneratedFrame | null> {
@@ -104,7 +118,7 @@ export class FrameGenerator {
 		// A function, so each check reads the signal and the epoch anew across the awaits.
 		const dropped = (): boolean => signal.aborted || epoch !== this.epoch
 
-		if (!frameEligible(probe) || (this.failures.get(target.uuid) ?? 0) >= FRAME_FAILURE_LIMIT) {
+		if (!this.deps.supported() || !frameEligible(probe) || (this.failures.get(target.uuid) ?? 0) >= FRAME_FAILURE_LIMIT) {
 			return null
 		}
 
@@ -332,7 +346,8 @@ export const frameGenerator = new FrameGenerator({
 	hints: frameHints,
 	reads: rangeReads,
 	sleep,
-	now: () => Date.now()
+	now: () => Date.now(),
+	supported: webCodecsVideo
 })
 
 // Zero-read capture: the frame a paused or stopped player shows, drawn at the slot's size for Continue

@@ -6,10 +6,9 @@ import { desktopBridge } from "@/lib/desktop"
 import { currentSocketEpoch, socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { reportSessionSuspect } from "@/lib/sdk/sessionHealth"
 
-// The main-thread half of the realtime socket bridge — the FIRST socket wiring in filen-web, kept
-// generic so drive/chats reuse it later; the note handlers live in features/notes, never here. One
-// subscription for the whole app (started by the authed shell, torn down on logout). Domain modules
-// register a handler per top-level event.type; unknown/unregistered types are ignored silently.
+// The main-thread half of the realtime socket bridge, generic over event categories; each feature's handlers live in
+// that feature, never here. One subscription for the whole app (started by the authed shell, torn down on logout).
+// Domain modules register a handler per top-level event.type; unknown/unregistered types are ignored silently.
 
 // A handler receives the narrowed event for the exact `type` it registered under.
 export type SocketHandlerFor<T extends SocketEvent["type"]> = (event: Extract<SocketEvent, { type: T }>) => void
@@ -54,7 +53,7 @@ export function registerSocketHandler<T extends SocketEvent["type"]>(type: T, ha
 
 // The single entry point the worker's proxied callback invokes for every event. Fans out to the
 // handlers registered for that category; a throwing handler is logged and never aborts the fan-out or
-// the socket. An unregistered category (e.g. "drive", which has no handler yet) is a silent no-op.
+// the socket. A category with no handler registered is a silent no-op.
 function dispatch(event: SocketEvent): void {
 	// Before the fan-out, so a read a handler starts (a reconnect re-read) already counts as live.
 	if (event.type === "authSuccess") {

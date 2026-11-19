@@ -16,7 +16,15 @@ const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 const password = process.env["FILEN_WEB_E2E_TEST_PASSWORD"] ?? ""
 
 setup("sign in through the real form and harvest the session", async ({ page }) => {
-	setup.skip(email === "" || password === "", "no e2e credentials configured")
+	const configured = email !== "" && password !== ""
+
+	// A skipped setup does not stop its dependents, which then skip too: a green run of skips. In CI missing
+	// credentials are a misconfiguration; contributors without them run the SDK-free subset.
+	if (!configured && process.env["CI"]) {
+		throw new Error("FILEN_WEB_E2E_TEST_EMAIL / FILEN_WEB_E2E_TEST_PASSWORD are not set in CI")
+	}
+
+	setup.skip(!configured, "no e2e credentials configured")
 
 	// The login screen only renders once boot reaches "ready" (the SDK worker's thread pool must be up
 	// before login can derive keys), so its presence gates the form fill below. At the cold-boot budget:

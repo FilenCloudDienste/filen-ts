@@ -31,7 +31,17 @@ const {
 	officeSettingsReset,
 	savedSignaturesReset,
 	confirmMountsSignOut,
-	wipeLegacyWebOnSignOut
+	wipeLegacyWebOnSignOut,
+	writeSignOutPending,
+	showSignOutOverlay,
+	userDictionaryReset,
+	resetPhotosLibrary,
+	resetDotFilen,
+	resetSocketReconnectState,
+	releaseVideoEditWorkers,
+	resetDriveKeyframes,
+	resetFileKindVerdicts,
+	discardListingPatches
 } = vi.hoisted(() => {
 	const calls: string[] = []
 	const record =
@@ -70,7 +80,21 @@ const {
 		officeSettingsReset: vi.fn(),
 		savedSignaturesReset: vi.fn(),
 		confirmMountsSignOut: vi.fn(() => Promise.resolve(true)),
-		wipeLegacyWebOnSignOut: vi.fn(() => Promise.resolve())
+		wipeLegacyWebOnSignOut: vi.fn(() => Promise.resolve()),
+		// Node has no localStorage, so the real writer is a silent no-op: mocked to be seen.
+		writeSignOutPending: vi.fn((pending: boolean) => {
+			calls.push(`writeSignOutPending(${String(pending)})`)
+		}),
+		// The rest record, then call through to the real module (wired in each vi.mock below).
+		showSignOutOverlay: vi.fn(record("showSignOutOverlay", () => undefined)),
+		userDictionaryReset: vi.fn(record("userDictionary.reset", () => undefined)),
+		resetPhotosLibrary: vi.fn(record("resetPhotosLibrary", () => undefined)),
+		resetDotFilen: vi.fn(record("resetDotFilen", () => undefined)),
+		resetSocketReconnectState: vi.fn(record("resetSocketReconnectState", () => undefined)),
+		releaseVideoEditWorkers: vi.fn(record("releaseVideoEditWorkers", () => undefined)),
+		resetDriveKeyframes: vi.fn(record("resetDriveKeyframes", () => undefined)),
+		resetFileKindVerdicts: vi.fn(record("resetFileKindVerdicts", () => undefined)),
+		discardListingPatches: vi.fn(record("discardListingPatches", () => undefined))
 	}
 })
 
@@ -78,19 +102,31 @@ const {
 const TEARDOWN_STEPS = [
 	// Journaled watch progress gets its last upload while writes are still allowed.
 	"watchState.executeNow",
+	// A tab closed mid-wipe leaves the next boot this flag to finish the wipe with.
+	"writeSignOutPending(true)",
+	"showSignOutOverlay",
 	// No assistant tool may read, navigate or play while the rest winds down.
 	"shutdownAssistant",
 	"notesSync.cancel",
 	"chatsSync.cancel",
 	"watchState.cancel",
+	// kv-backed writers: a write landing after kv-clear would put this account's data back on disk.
+	"userDictionary.reset",
+	"resetPhotosLibrary",
 	"cancelActiveTransfers",
+	"resetDotFilen",
+	"resetSocketReconnectState",
 	"clearAllTyping",
 	"detachUnreadBadges",
 	"disposeAudioEngine",
 	"releaseImageEditWorker",
+	"releaseVideoEditWorkers",
 	"resetVideoSession",
+	"resetDriveKeyframes",
+	"resetFileKindVerdicts",
 	"resetConversationHistory",
-	"socketBridge.stop"
+	"socketBridge.stop",
+	"discardListingPatches"
 ]
 
 vi.mock("@/lib/logout", () => ({ runLogout }))
@@ -128,29 +164,145 @@ vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 vi.mock("@/features/office/lib/officeSettings", () => ({ resetOfficeSettings: officeSettingsReset }))
 vi.mock("@/features/pdf/fillSign/savedSignatures", () => ({ resetSavedSignatures: savedSignaturesReset }))
 vi.mock("@/features/mounts/lib/mountsStore", () => ({ confirmMountsSignOut }))
+vi.mock("@/lib/signOutPending", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/signOutPending")>()),
+	writeSignOutPending
+}))
+vi.mock("@/features/shell/lib/signOutOverlay", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/shell/lib/signOutOverlay")>()
 
-import { kvClear } from "@/lib/storage/adapter"
-import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
-import { performLogout } from "@/features/shell/lib/performLogout"
-import { consumeUnloadAllowance } from "@/lib/unloadGuard"
-import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
-import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
-import { registerPreviewDisposer } from "@/lib/workers/previewDisposers"
-import { createListingCache, type CachedListing } from "@/features/archive/lib/listingCache"
-import { createEntryStore } from "@/features/archive/lib/entryStore"
+	return {
+		...original,
+		showSignOutOverlay: () => {
+			showSignOutOverlay()
+			original.showSignOutOverlay()
+		}
+	}
+})
+vi.mock("@/features/spellcheck/lib/userDictionary", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/spellcheck/lib/userDictionary")>()
+	const reset = original.userDictionary.reset.bind(original.userDictionary)
+
+	original.userDictionary.reset = () => {
+		userDictionaryReset()
+		reset()
+	}
+
+	return original
+})
+vi.mock("@/features/photos/lib/library", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/photos/lib/library")>()
+
+	return {
+		...original,
+		resetPhotosLibrary: () => {
+			resetPhotosLibrary()
+			original.resetPhotosLibrary()
+		}
+	}
+})
+vi.mock("@/lib/dotFilen", async importOriginal => {
+	const original = await importOriginal<typeof import("@/lib/dotFilen")>()
+
+	return {
+		...original,
+		resetDotFilen: () => {
+			resetDotFilen()
+			original.resetDotFilen()
+		}
+	}
+})
+vi.mock("@/features/chats/lib/socketHandlers", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/chats/lib/socketHandlers")>()
+
+	return {
+		...original,
+		resetSocketReconnectState: () => {
+			resetSocketReconnectState()
+			original.resetSocketReconnectState()
+		}
+	}
+})
+vi.mock("@/features/preview/videoEdit/client", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/preview/videoEdit/client")>()
+
+	return {
+		...original,
+		releaseVideoEditWorkers: () => {
+			releaseVideoEditWorkers()
+			original.releaseVideoEditWorkers()
+		}
+	}
+})
+vi.mock("@/features/drive/lib/thumbGenerators", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/drive/lib/thumbGenerators")>()
+
+	return {
+		...original,
+		resetDriveKeyframes: () => {
+			resetDriveKeyframes()
+			original.resetDriveKeyframes()
+		}
+	}
+})
+vi.mock("@/features/drive/lib/fileKindVerdicts", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/drive/lib/fileKindVerdicts")>()
+
+	return {
+		...original,
+		resetFileKindVerdicts: () => {
+			resetFileKindVerdicts()
+			original.resetFileKindVerdicts()
+		}
+	}
+})
+vi.mock("@/features/drive/queries/drive", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/drive/queries/drive")>()
+
+	return {
+		...original,
+		discardListingPatches: () => {
+			discardListingPatches()
+			original.discardListingPatches()
+		}
+	}
+})
+
+import type { CachedListing } from "@/features/archive/lib/listingCache"
+
+// performLogout is single-flight at module scope, and a sign-out that went through keeps its latch (a reload follows),
+// so every test gets fresh copies of it and of the real modules it shares state with.
+async function loadModules() {
+	vi.resetModules()
+
+	return {
+		...(await import("@/lib/storage/adapter")),
+		...(await import("@/features/drive/lib/saveDownload")),
+		...(await import("@/features/preview/store/usePreviewUnsavedGuard")),
+		...(await import("@/features/shell/lib/performLogout")),
+		...(await import("@/lib/unloadGuard")),
+		...(await import("@/features/drive/store/useDriveClipboardStore")),
+		...(await import("@/features/drive/store/useDirectoryTreeStore")),
+		...(await import("@/features/preview/lib/previewCache")),
+		...(await import("@/lib/workers/previewDisposers")),
+		...(await import("@/features/archive/lib/listingCache")),
+		...(await import("@/features/archive/lib/entryStore"))
+	}
+}
+
+let modules: Awaited<ReturnType<typeof loadModules>>
 
 // Stands in for the overlay's unsaved-changes prompt: waits for the request the guard armed, then
 // answers it the way a Cancel click does.
 async function declinePrompt(): Promise<void> {
 	await vi.waitFor(() => {
-		expect(usePreviewUnsavedGuardStore.getState().logoutRequest).not.toBeNull()
+		expect(modules.usePreviewUnsavedGuardStore.getState().logoutRequest).not.toBeNull()
 	})
 
-	const request = usePreviewUnsavedGuardStore.getState().logoutRequest
+	const request = modules.usePreviewUnsavedGuardStore.getState().logoutRequest
 
 	request?.resolve(false)
-	usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
+	modules.usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
 }
 
 async function settleMicrotasks(): Promise<void> {
@@ -159,11 +311,16 @@ async function settleMicrotasks(): Promise<void> {
 	}
 }
 
-beforeEach(() => {
+beforeEach(async () => {
 	vi.clearAllMocks()
 	calls.length = 0
-	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
+	modules = await loadModules()
+	modules.usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
+
+function performLogout(...args: Parameters<typeof modules.performLogout>): ReturnType<typeof modules.performLogout> {
+	return modules.performLogout(...args)
+}
 
 describe("performLogout", () => {
 	it("runs the wipe straight away when no preview buffer is dirty", async () => {
@@ -177,7 +334,7 @@ describe("performLogout", () => {
 		await runLogout.mock.calls[0]?.[0].kvClear()
 
 		expect(calls).toEqual(["withHistoryWritesHeld"])
-		expect(kvClear).toHaveBeenCalledTimes(1)
+		expect(modules.kvClear).toHaveBeenCalledTimes(1)
 	})
 
 	it("hands the wipe every OPFS cache: drive thumbnails, Videos artwork and the Videos index", async () => {
@@ -205,7 +362,7 @@ describe("performLogout", () => {
 	})
 
 	it("a user-initiated sign-out is genuinely cancelled at the unsaved-changes prompt", async () => {
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
 
 		const result = performLogout()
 
@@ -218,7 +375,7 @@ describe("performLogout", () => {
 
 	// The session is already revoked server-side, so declining can only buy time to copy the buffer out.
 	it("a FORCED sign-out is only delayed by the prompt, never cancelled", async () => {
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
 
 		const result = performLogout({ forced: true })
 
@@ -229,7 +386,7 @@ describe("performLogout", () => {
 		expect(toastWarning).toHaveBeenCalledTimes(1)
 
 		// The buffer is released (the preview was closed / unmounted) — the deferred wipe completes.
-		usePreviewUnsavedGuardStore.getState().clear()
+		modules.usePreviewUnsavedGuardStore.getState().clear()
 
 		await expect(result).resolves.toBe(true)
 		expect(runLogout).toHaveBeenCalledTimes(1)
@@ -237,36 +394,36 @@ describe("performLogout", () => {
 
 	// Behind the desktop lock nobody can answer the prompt.
 	it("a sign-out that discards unsaved work never asks", async () => {
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
 
 		await expect(performLogout({ forced: true, discardUnsaved: true })).resolves.toBe(true)
-		expect(usePreviewUnsavedGuardStore.getState().logoutRequest).toBeNull()
+		expect(modules.usePreviewUnsavedGuardStore.getState().logoutRequest).toBeNull()
 		expect(toastWarning).not.toHaveBeenCalled()
 		expect(runLogout).toHaveBeenCalledTimes(1)
 	})
 
 	it("drops every decrypted preview buffer held for pager revisits", async () => {
-		await loadPreviewBytes("authed", "file-uuid", 3, () => Promise.resolve(new Uint8Array([1, 2, 3])))
-		expect(getPreviewBytes("authed", "file-uuid")).toBeDefined()
+		await modules.loadPreviewBytes("authed", "file-uuid", 3, () => Promise.resolve(new Uint8Array([1, 2, 3])))
+		expect(modules.getPreviewBytes("authed", "file-uuid")).toBeDefined()
 
 		await expect(performLogout()).resolves.toBe(true)
 
-		expect(getPreviewBytes("authed", "file-uuid")).toBeUndefined()
+		expect(modules.getPreviewBytes("authed", "file-uuid")).toBeUndefined()
 	})
 
 	it("closes whatever a preview still holds through its registered disposers", async () => {
 		const dispose = vi.fn()
 
-		registerPreviewDisposer("served port", dispose)
+		modules.registerPreviewDisposer("served port", dispose)
 		await expect(performLogout()).resolves.toBe(true)
 
 		expect(dispose).toHaveBeenCalledTimes(1)
 	})
 
 	it("drops every archive listing an open preview holds, and every one its browsers dispose after", async () => {
-		const cache = createListingCache()
+		const cache = modules.createListingCache()
 		const listing: CachedListing = {
-			store: createEntryStore(),
+			store: modules.createEntryStore(),
 			summary: {
 				format: { type: "zip" },
 				password: "right",
@@ -304,19 +461,19 @@ describe("performLogout", () => {
 	})
 
 	it("empties the drive clipboard, whose items belong to this account", async () => {
-		useDriveClipboardStore.getState().set({ mode: "cut", items: [] })
+		modules.useDriveClipboardStore.getState().set({ mode: "cut", items: [] })
 
 		await expect(performLogout()).resolves.toBe(true)
 
-		expect(useDriveClipboardStore.getState().entry).toBeNull()
+		expect(modules.useDriveClipboardStore.getState().entry).toBeNull()
 	})
 
 	it("forgets the sidebar tree's expanded directories, which are this account's", async () => {
-		useDirectoryTreeStore.getState().toggle("dir-1", "root")
+		modules.useDirectoryTreeStore.getState().toggle("dir-1", "root")
 
 		await expect(performLogout()).resolves.toBe(true)
 
-		expect(useDirectoryTreeStore.getState().open).toEqual({})
+		expect(modules.useDirectoryTreeStore.getState().open).toEqual({})
 	})
 
 	// Desktop: the shell asks to wait for the network drive's pending uploads; waiting cancels the sign-out.
@@ -360,10 +517,32 @@ describe("performLogout — pre-wipe teardown", () => {
 			detachUnreadBadges,
 			disposeAudioEngine,
 			releaseImageEditWorker,
-			socketStop
+			socketStop,
+			writeSignOutPending,
+			showSignOutOverlay,
+			userDictionaryReset,
+			resetPhotosLibrary,
+			resetDotFilen,
+			resetSocketReconnectState,
+			releaseVideoEditWorkers,
+			resetDriveKeyframes,
+			resetFileKindVerdicts,
+			discardListingPatches
 		]) {
 			expect(step).toHaveBeenCalledTimes(1)
 		}
+	})
+
+	it("hands the wipe the flag's clearing and the service worker's own wipe", async () => {
+		await expect(performLogout()).resolves.toBe(true)
+
+		const deps = runLogout.mock.calls[0]?.[0]
+
+		calls.length = 0
+		deps?.wipesLanded()
+
+		expect(calls).toEqual(["writeSignOutPending(false)"])
+		expect(deps?.wipeServiceWorker).toBe(modules.wipeSwClient)
 	})
 
 	it("lets its own reload past the leave-page prompt that guards running transfers", async () => {
@@ -376,11 +555,11 @@ describe("performLogout — pre-wipe teardown", () => {
 		runLogout.mock.calls[0]?.[0].reload()
 
 		expect(reload).toHaveBeenCalledTimes(1)
-		expect(consumeUnloadAllowance()).toBe(true)
+		expect(modules.consumeUnloadAllowance()).toBe(true)
 	})
 
 	it("a declined user-initiated sign-out leaves the session completely intact", async () => {
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
 
 		const result = performLogout()
 
@@ -391,7 +570,7 @@ describe("performLogout — pre-wipe teardown", () => {
 	})
 
 	it("a declined FORCED sign-out defers the teardown until the buffer is released, then runs all of it", async () => {
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
 
 		const result = performLogout({ forced: true })
 
@@ -402,9 +581,99 @@ describe("performLogout — pre-wipe teardown", () => {
 		// pending notice just promised them a chance to copy.
 		expect(calls).toEqual([])
 
-		usePreviewUnsavedGuardStore.getState().clear()
+		modules.usePreviewUnsavedGuardStore.getState().clear()
 
 		await expect(result).resolves.toBe(true)
 		expect(calls).toEqual([...TEARDOWN_STEPS, "runLogout"])
+	})
+})
+
+// One sign-out at a time: a second caller must neither raise the prompts again nor run a second teardown and wipe.
+describe("performLogout — single flight", () => {
+	it("a second forced sign-out joins the one parked on the buffer: one prompt, one notice, one teardown", async () => {
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
+
+		const first = performLogout({ forced: true })
+
+		await declinePrompt()
+		await settleMicrotasks()
+
+		const second = performLogout({ forced: true })
+
+		await settleMicrotasks()
+
+		expect(modules.usePreviewUnsavedGuardStore.getState().logoutRequest).toBeNull()
+		expect(toastWarning).toHaveBeenCalledTimes(1)
+
+		modules.usePreviewUnsavedGuardStore.getState().clear()
+
+		await expect(first).resolves.toBe(true)
+		await expect(second).resolves.toBe(true)
+		expect(runLogout).toHaveBeenCalledTimes(1)
+		expect(calls).toEqual([...TEARDOWN_STEPS, "runLogout"])
+	})
+
+	// The locked desktop app: nobody can answer, so joining a parked sign-out must not wait on the buffer.
+	it("a sign-out that discards unsaved work completes one parked on the buffer", async () => {
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
+
+		const parked = performLogout({ forced: true })
+
+		await declinePrompt()
+		await settleMicrotasks()
+
+		await expect(performLogout({ forced: true, discardUnsaved: true })).resolves.toBe(true)
+		await expect(parked).resolves.toBe(true)
+		expect(runLogout).toHaveBeenCalledTimes(1)
+	})
+
+	it("a sign-out that discards unsaved work answers an open unsaved-changes prompt", async () => {
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
+
+		const asking = performLogout()
+
+		await vi.waitFor(() => {
+			expect(modules.usePreviewUnsavedGuardStore.getState().logoutRequest).not.toBeNull()
+		})
+
+		await expect(performLogout({ forced: true, discardUnsaved: true })).resolves.toBe(true)
+		await expect(asking).resolves.toBe(true)
+		expect(modules.usePreviewUnsavedGuardStore.getState().logoutRequest).toBeNull()
+		expect(runLogout).toHaveBeenCalledTimes(1)
+	})
+
+	// The user's Cancel on their own sign-out never vetoes a revoked session's.
+	it("a forced sign-out behind a user-initiated one still signs out after the user cancels", async () => {
+		const answer = Promise.withResolvers<boolean>()
+
+		confirmMountsSignOut.mockReturnValueOnce(answer.promise)
+
+		const asking = performLogout()
+		const forced = performLogout({ forced: true })
+
+		await settleMicrotasks()
+
+		expect(runLogout).not.toHaveBeenCalled()
+
+		answer.resolve(false)
+
+		await expect(asking).resolves.toBe(false)
+		await expect(forced).resolves.toBe(true)
+		expect(confirmMountsSignOut).toHaveBeenCalledTimes(1)
+		expect(runLogout).toHaveBeenCalledTimes(1)
+	})
+
+	it("a declined sign-out does not keep the next one from running", async () => {
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: true })
+
+		const declined = performLogout()
+
+		await declinePrompt()
+		await expect(declined).resolves.toBe(false)
+
+		modules.usePreviewUnsavedGuardStore.setState({ dirty: false })
+
+		await expect(performLogout()).resolves.toBe(true)
+		expect(runLogout).toHaveBeenCalledTimes(1)
 	})
 })

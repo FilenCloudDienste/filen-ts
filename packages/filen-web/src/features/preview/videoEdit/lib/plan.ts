@@ -1,13 +1,17 @@
 import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
 import { filterPreset } from "@/features/preview/imageEdit/lib/filters"
+import { hasVisibleText } from "@/features/preview/videoEdit/lib/recipe"
 import { videoSaveTargets } from "@/features/preview/videoEdit/lib/targets"
 import type {
+	EditFeature,
+	ExportBlocker,
 	ExportDrop,
 	ExportPlan,
 	HdrHandling,
 	OutputQuality,
 	SnappedEdge,
 	TimeRange,
+	TranscodeReason,
 	VideoCrop,
 	VideoEditRecipe,
 	VideoRotation,
@@ -22,18 +26,6 @@ import type {
 // while the faster frame rate stays within the stream's codec level). Audio may still be re-encoded on that path (a
 // gain, speed, or a codec players do not take in MP4). "transcode" decodes and encodes every kept frame: anything that
 // changes pixels, or exact cuts.
-
-// Why the copy path cannot be used. Stable ids: the UI words them.
-export type TranscodeReason =
-	"precise" | "crop" | "flip" | "resize" | "quality" | "adjust" | "text" | "speed" | "videoCodec" | "keyframes" | "gop"
-
-// Editor options this browser can never do for this source, whatever the recipe (ExportPlan.unavailable): the editor
-// disables them up front. Ids the editor knows.
-export type UnavailableOption =
-	"crop" | "rotate" | "flip" | "resize" | "quality" | "adjust" | "text" | "speed" | "gain" | "audioTracks" | "precise"
-
-// What in a recipe this browser (or this source) cannot export; any of them refuses the export (exportBlockers).
-export type ExportBlocker = TranscodeReason | "gain" | "audioCodec"
 
 // Presentation-time slack: key frame times and range edges are compared within it.
 const TIME_EPSILON = 0.001
@@ -250,7 +242,7 @@ export function hasColourWork(recipe: VideoEditRecipe): boolean {
 // Whether frames go through the GPU pass for the recipe's own sake (colour, text, a flip, a resize); a crop alone is a
 // view onto the decoded frame and a rotation is metadata.
 export function needsPixelPass(recipe: VideoEditRecipe, geometry: Pick<OutputGeometry, "scaled">): boolean {
-	return hasColourWork(recipe) || recipe.text.length > 0 || recipe.flipH || recipe.flipV || geometry.scaled
+	return hasColourWork(recipe) || hasVisibleText(recipe) || recipe.flipH || recipe.flipV || geometry.scaled
 }
 
 export function isHdrSource(source: VideoSourceInfo): boolean {
@@ -495,6 +487,26 @@ export function transcodeBitrate(params: {
 	return Math.round(Math.min(MAX_VIDEO_BITRATE, Math.max(MIN_VIDEO_BITRATE, Math.min(modelled, ceiling))))
 }
 
+// The video bitrate a transcode of `recipe` encodes at, from the source's own video bitrate (its audio's share taken
+// out). The plan's estimate and the export worker's encoder both read it, so the size shown is the size written.
+export function transcodeVideoBitrate(
+	recipe: Pick<VideoEditRecipe, "output">,
+	source: VideoSourceInfo,
+	geometry: Pick<OutputGeometry, "width" | "height">,
+	codec: string,
+	frameRate: number
+): number {
+	return transcodeBitrate({
+		width: geometry.width,
+		height: geometry.height,
+		frameRate,
+		quality: recipe.output.quality,
+		codec,
+		sourceVideoBitrate: sourceVideoBitrate(source),
+		sourcePixels: source.width * source.height
+	})
+}
+
 export function aacBitrate(channels: number): number {
 	return AAC_BITRATE_PER_CHANNEL * Math.min(Math.max(channels, 1), 2)
 }
@@ -563,9 +575,9 @@ function uniquePush<T>(list: T[], value: T): void {
 }
 
 // The options to disable for this source in this browser.
-export function unavailableOptions(source: VideoSourceInfo, caps: EncodeCapabilities): UnavailableOption[] {
+export function unavailableOptions(source: VideoSourceInfo, caps: EncodeCapabilities): EditFeature[] {
 	const abilities = editAbilities(source, caps)
-	const unavailable: UnavailableOption[] = []
+	const unavailable: EditFeature[] = []
 
 	if (!abilities.transcode) {
 		unavailable.push("crop", "flip", "resize", "quality", "adjust", "text", "precise")
@@ -624,7 +636,7 @@ function analyse(
 	if (geometry.scaled) reasons.push("resize")
 	if (recipe.output.quality !== "high") reasons.push("quality")
 	if (colour) reasons.push("adjust")
-	if (recipe.text.length > 0) reasons.push("text")
+	if (hasVisibleText(recipe)) reasons.push("text")
 	if (recipe.speed !== 1 && !copySpeedFits(source, recipe.speed)) reasons.push("speed")
 	if (!COPYABLE_VIDEO.has(videoCodecId(source.videoCodec) ?? "")) reasons.push("videoCodec")
 
@@ -704,15 +716,7 @@ function analyse(
 	} else {
 		const codec = transcodeVideoCodec(caps, hdr) ?? "avc"
 		const frameRate = transcodeFrameRate(source, recipe.speed)
-		const videoBitrate = transcodeBitrate({
-			width: geometry.width,
-			height: geometry.height,
-			frameRate,
-			quality: recipe.output.quality,
-			codec,
-			sourceVideoBitrate: sourceVideoBitrate(source),
-			sourcePixels: source.width * source.height
-		})
+		const videoBitrate = transcodeVideoBitrate(recipe, source, geometry, codec, frameRate)
 		const audio = audioInfo.reduce(
 			(total, track) =>
 				total + (audioReencoded.includes(track) ? audioBytes(aacBitrate(track.channels)) : (ASSUMED_AUDIO_BITRATE * kept) / 8),

@@ -1,9 +1,10 @@
-import { useRef, useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import * as Comlink from "comlink"
 import { toast } from "sonner"
 import { driveItemName } from "@filen/shared"
+import { EMU_PER_PX } from "@filen/office/core/drawingml"
 import type { InsertedImage, InsertedMedia, ShapeNode, SlideLayer, SlideRef, Xfrm } from "@filen/office/core/presentation"
 import type { MediaInsertSource, MediaRefusal, PresentationNotice } from "@filen/office/dom/presentation"
 import {
@@ -20,7 +21,9 @@ import { DriveFilePickerDialog } from "@/features/drive/components/driveFilePick
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { anyFileTypeFacts, type DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { canvasImage, posterFromSource } from "@/features/presentation/lib/poster"
 import {
 	holdPreviewStreamAlive,
 	previewStreamIdOf,
@@ -42,9 +45,6 @@ import type { PreviewKey } from "@/lib/i18n"
 
 export type MediaKind = "video" | "audio"
 
-const EMU_PER_PX = 9525
-// The poster's longest side, px.
-const POSTER_MAX = 1280
 // Audio shows as an icon of this many EMU (half an inch), as PowerPoint inserts it.
 const AUDIO_ICON_EMU = 457_200
 const AUDIO_ICON_PX = 256
@@ -71,16 +71,6 @@ interface Probe {
 	readonly height: number
 	readonly durationMs?: number
 	readonly poster: InsertedImage
-}
-
-async function canvasImage(canvas: HTMLCanvasElement, type: "image/png" | "image/jpeg"): Promise<InsertedImage> {
-	const blob = await new Promise<Blob | null>(resolve => {
-		canvas.toBlob(resolve, type, 0.85)
-	})
-
-	if (blob === null) throw new Error("the poster could not be encoded")
-
-	return { bytes: new Uint8Array(await blob.arrayBuffer()), contentType: type, width: canvas.width, height: canvas.height }
 }
 
 // A speaker glyph, our own drawing: what an audio clip shows on the slide.
@@ -241,14 +231,9 @@ async function probe(url: string, kind: MediaKind, signal: AbortSignal, hold: (r
 		element.currentTime = Math.min(1, (element.duration || 0) / 10)
 		await waitFor(element, "seeked", deadline)
 
-		const scale = Math.min(1, POSTER_MAX / Math.max(width, height))
-		const canvas = document.createElement("canvas")
+		const poster = await posterFromSource(element, width, height, "image/jpeg")
 
-		canvas.width = Math.max(1, Math.round(width * scale))
-		canvas.height = Math.max(1, Math.round(height * scale))
-		canvas.getContext("2d")?.drawImage(element, 0, 0, canvas.width, canvas.height)
-
-		return { width, height, ...(durationMs === undefined ? {} : { durationMs }), poster: await canvasImage(canvas, "image/jpeg") }
+		return { width, height, ...(durationMs === undefined ? {} : { durationMs }), poster }
 	} catch (error) {
 		if (signal.aborted) throw error
 		if (kind === "audio") return { width: AUDIO_ICON_PX, height: AUDIO_ICON_PX, poster: await audioIcon() }
@@ -391,65 +376,55 @@ export interface MediaInsertControls {
 	// Opens the file chooser (call inside the click: it needs the user's activation).
 	fromDevice(kind: MediaKind): void
 	fromDrive(kind: MediaKind): void
-	// The hidden file chooser and the drive picker, rendered by the caller.
+	// The drive picker while no ribbon dialog host shows it, rendered by the caller.
 	readonly elements: ReactNode
 }
 
-export function useMediaInsert(editor: PresentationRibbonEditor | undefined): MediaInsertControls {
+// Opens the file chooser for a medium of `kind`. The input is the chooser's own, not the control's: a command run from
+// the ribbon's overflow closes it, and the control with it, while the chooser is still open.
+export function chooseMedia(kind: MediaKind, onFile: (file: File) => void): void {
+	const input = document.createElement("input")
+
+	input.type = "file"
+	input.accept = ACCEPT[kind]
+	input.addEventListener(
+		"change",
+		() => {
+			const file = input.files?.[0]
+
+			if (file !== undefined) onFile(file)
+		},
+		{ once: true }
+	)
+	input.click()
+}
+
+// The drive picker goes through the session's ribbon dialogs (it outlives the control that asked for it).
+export function useMediaInsert(editor: PresentationRibbonEditor): MediaInsertControls {
 	const { t } = useTranslation("preview")
-	const inputRef = useRef<HTMLInputElement | null>(null)
-	const [deviceKind, setDeviceKind] = useState<MediaKind>("video")
-	const [driveKind, setDriveKind] = useState<MediaKind | null>(null)
-	const run = (picked: Picked, kind: MediaKind, signal: AbortSignal): Promise<void> =>
-		editor === undefined ? Promise.resolve() : insertMedia(editor, picked, kind, signal, t)
+	const dialog = useRibbonDialog(editor)
 
 	return {
 		fromDevice: kind => {
-			setDeviceKind(kind)
-
-			const input = inputRef.current
-
-			if (input === null) return
-
-			input.accept = ACCEPT[kind]
-			input.click()
+			chooseMedia(kind, file => {
+				void insertMedia(editor, { kind: "file", file }, kind, new AbortController().signal, t)
+			})
 		},
 		fromDrive: kind => {
-			setDriveKind(kind)
-		},
-		elements: (
-			<>
-				<input
-					ref={inputRef}
-					type="file"
-					className="hidden"
-					tabIndex={-1}
-					aria-hidden
-					accept={ACCEPT[deviceKind]}
-					onChange={event => {
-						const file = event.currentTarget.files?.[0]
-
-						event.currentTarget.value = ""
-
-						if (file !== undefined) void run({ kind: "file", file }, deviceKind, new AbortController().signal)
+			dialog.open((live, close) => (
+				<DriveFilePickerDialog
+					title={t(kind === "video" ? "previewPptxVideoDriveTitle" : "previewPptxAudioDriveTitle")}
+					description={t(kind === "video" ? "previewPptxVideoDriveDescription" : "previewPptxAudioDriveDescription")}
+					accept={isMediaFile(kind)}
+					onPick={async (item, signal) => {
+						await insertMedia(live, { kind: "drive", item }, kind, signal, t)
+						close()
 					}}
+					onClose={close}
 				/>
-				{driveKind === null ? null : (
-					<DriveFilePickerDialog
-						title={t(driveKind === "video" ? "previewPptxVideoDriveTitle" : "previewPptxAudioDriveTitle")}
-						description={t(driveKind === "video" ? "previewPptxVideoDriveDescription" : "previewPptxAudioDriveDescription")}
-						accept={isMediaFile(driveKind)}
-						onPick={async (item, signal) => {
-							await run({ kind: "drive", item }, driveKind, signal)
-							setDriveKind(null)
-						}}
-						onClose={() => {
-							setDriveKind(null)
-						}}
-					/>
-				)}
-			</>
-		)
+			))
+		},
+		elements: dialog.view
 	}
 }
 
@@ -553,7 +528,11 @@ export function mediaStreams(
 			if (part === undefined) return undefined
 
 			const { port1, port2 } = new MessageChannel()
-			const meta = await session.media(part, port2)
+			const meta = await session.media(part, port2).catch((error: unknown) => {
+				port1.close()
+
+				throw error
+			})
 
 			if ("reason" in meta) {
 				port1.close()
@@ -563,7 +542,14 @@ export function mediaStreams(
 
 			const remuxed = await openRemuxSession({ port: port1, size: meta.size, onFailure: () => undefined })
 
-			await remuxed.attach(element)
+			// A medium the remuxer cannot play either (no track it can copy or transcode): its session goes with it.
+			try {
+				await remuxed.attach(element)
+			} catch (error) {
+				remuxed.dispose()
+
+				throw error
+			}
 
 			return {
 				play: () => remuxed.play(),

@@ -25,7 +25,10 @@ export interface WorkerHandle<Api> {
 
 interface StartedWorker<Api> {
 	readonly handle: WorkerHandle<Api>
-	// Idempotent: unregisters, rejects `gone` with `reason`, terminates.
+	// A call that rejects with the end reason once the worker is gone instead of hanging. Its waiter is dropped when it
+	// settles, so nothing it returned outlives it.
+	race<R>(call: () => Promise<R>): Promise<R>
+	// Idempotent: unregisters, rejects the calls in flight and `gone` with `reason`, terminates.
 	end(reason: Error): void
 }
 
@@ -34,7 +37,10 @@ function startWorker<Api>(create: () => Worker, label: string, stop: (reason: Er
 	const worker = create()
 	const remote = Comlink.wrap<Api>(worker)
 	const gone = Promise.withResolvers<never>()
-	let ended = false
+	// The reject of every call in flight. Racing each call against `gone` instead would leave a reaction on it per call,
+	// holding that call's result until the worker ends.
+	const waiters = new Set<(reason: Error) => void>()
+	let endReason: Error | null = null
 
 	gone.promise.catch(() => undefined)
 
@@ -53,22 +59,40 @@ function startWorker<Api>(create: () => Worker, label: string, stop: (reason: Er
 
 	return {
 		handle: { worker, remote, gone: gone.promise },
+		race: <R>(call: () => Promise<R>) =>
+			new Promise<R>((resolve, reject) => {
+				if (endReason !== null) {
+					reject(endReason)
+
+					return
+				}
+
+				waiters.add(reject)
+				void Promise.resolve()
+					.then(call)
+					.then(resolve, reject)
+					.finally(() => {
+						waiters.delete(reject)
+					})
+			}),
 		end: reason => {
-			if (ended) {
+			if (endReason !== null) {
 				return
 			}
 
-			ended = true
+			endReason = reason
 			unregister()
+
+			for (const reject of waiters) {
+				reject(reason)
+			}
+
+			waiters.clear()
 			gone.reject(reason)
 			remote[Comlink.releaseProxy]()
 			worker.terminate()
 		}
 	}
-}
-
-function raceGone<R>(handle: WorkerHandle<unknown>, call: () => Promise<R>): Promise<R> {
-	return Promise.race([Promise.resolve().then(call), handle.gone])
 }
 
 // A worker holding per-file state or a canvas. Created by the caller, terminated exactly once.
@@ -95,7 +119,7 @@ export function createOwnedWorker<Api>(create: () => Worker, label: string): Own
 	return {
 		...handle,
 		failed: failed.promise,
-		run: call => raceGone(handle, () => call(handle.remote)),
+		run: call => started.race(() => call(handle.remote)),
 		terminate: () => {
 			started.end(workerEndedError(label, "ended by its owner"))
 		}
@@ -166,7 +190,7 @@ export function statelessWorker<Api>(create: () => Worker, idleMs: number, label
 	)
 
 	return {
-		use: run => pool.use(({ handle }) => raceGone(handle, () => run(handle))),
+		use: run => pool.use(worker => worker.race(() => run(worker.handle))),
 		disposeIfIdle: () => {
 			pool.disposeIfIdle()
 		},

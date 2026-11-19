@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from "react"
 import type { TFunction } from "i18next"
 import { toast } from "sonner"
+import { EMU_PER_PX } from "@filen/office/core/drawingml"
 import { deleteSlidesOp, insertTextBoxOp, type ShapeRef } from "@filen/office/core/presentation"
 import type { ClipRequest, PresentationSessionApi } from "@filen/office/dom/presentation"
 import { selectedShapes, shapeOf, slideShapes, type ShapeSelection } from "@filen/office/react/presentation"
@@ -219,8 +220,7 @@ export function usePresentationClipboard({
 		const render = chosen === undefined ? undefined : current.document.renders.get(chosen.slide)
 		const lone = chosen?.ids.length === 1 ? shapeOf(render, chosen.ids[0] ?? -1) : undefined
 		const picture = request.kind === "slides" || (lone?.role === "picture" && lone.media === undefined)
-		// Slide px (9,525 EMU each).
-		const slideWidth = (current.document.info?.size.cx ?? 0) / 9525
+		const slideWidth = (current.document.info?.size.cx ?? 0) / EMU_PER_PX
 		const text = made.then(clip => new Blob([clipboardPayload(clip).text], { type: "text/plain" }))
 		const html = made.then(clip => new Blob([clipboardPayload(clip).html], { type: "text/html" }))
 		const written =

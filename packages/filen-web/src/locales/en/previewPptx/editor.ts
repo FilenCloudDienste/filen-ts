@@ -5,7 +5,7 @@ export const previewPptxEditor = {
 	previewPptxEditorSectionStart: "Section {{section}}, {{slide}}",
 	/** Presentation editor — the File menu's button, first in the ribbon */
 	previewPptxEditorFileMenu: "File",
-	/** Presentation editor — File menu item: saves the changes to the file now (also Ctrl+S) */
+	/** Presentation editor — File menu item: saves the changes to the file now (also its Save key) */
 	previewPptxEditorSave: "Save",
 	/** Presentation editor — File menu item: downloads the file as it is saved in the drive */
 	previewPptxEditorDownload: "Download",
@@ -15,12 +15,18 @@ export const previewPptxEditor = {
 	previewPptxEditorAutosaveOffLarge: "Off for presentations over 256 MB",
 	/** Presentation editor — under the File menu's autosave checkbox when this presentation is password-protected and large */
 	previewPptxEditorAutosaveOffEncrypted: "Off for password-protected presentations over 64 MB",
-	/** Presentation editor — notice strip: why this presentation never saves by itself */
+	/** Presentation editor — notice strip: why this presentation never saves by itself; {{shortcut}} is the Save key as the user bound it (e.g. "Ctrl+S", "⌘S") */
 	previewPptxEditorAutosaveOffLargeNotice:
-		"This presentation is too large to save automatically. Save your changes with Ctrl+S or File → Save.",
-	/** Presentation editor — notice strip: why this password-protected presentation never saves by itself */
+		"This presentation is too large to save automatically. Save your changes with {{shortcut}} or File → Save.",
+	/** Presentation editor — the same notice when the user has no key bound to Save (Settings → Keyboard) */
+	previewPptxEditorAutosaveOffLargeNoticeNoKey:
+		"This presentation is too large to save automatically. Save your changes with File → Save.",
+	/** Presentation editor — notice strip: why this password-protected presentation never saves by itself; {{shortcut}} is the Save key as the user bound it (e.g. "Ctrl+S", "⌘S") */
 	previewPptxEditorAutosaveOffEncryptedNotice:
-		"This password-protected presentation is too large to save automatically. Save your changes with Ctrl+S or File → Save.",
+		"This password-protected presentation is too large to save automatically. Save your changes with {{shortcut}} or File → Save.",
+	/** Presentation editor — the same notice when the user has no key bound to Save (Settings → Keyboard) */
+	previewPptxEditorAutosaveOffEncryptedNoticeNoKey:
+		"This password-protected presentation is too large to save automatically. Save your changes with File → Save.",
 	/** Presentation editor — status at the end of the tab row while changes are not saved yet */
 	previewPptxEditorUnsaved: "Unsaved changes",
 	/** Presentation editor — status at the end of the tab row while the changes are being saved */
@@ -143,5 +149,7 @@ export const previewPptxEditor = {
 	/** Presentation editor — toast when a save is refused because a change can't be written in the file's format yet */
 	previewPptxSaveRefusedUnsupported: "This presentation has a change that can't be saved in this format yet.",
 	/** Presentation editor — toast when a save is refused because the file changed on the drive while it saved */
-	previewPptxSaveRefusedStale: "The file changed while saving. Try again."
+	previewPptxSaveRefusedStale: "The file changed while saving. Try again.",
+	/** Presentation editor — screen-reader hint on the slide's speaker notes as they are read (not edited): how to start editing them */
+	previewPptxNotesEditHint: "Speaker notes. Press Enter to edit them."
 }

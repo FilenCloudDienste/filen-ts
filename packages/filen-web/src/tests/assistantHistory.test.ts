@@ -70,7 +70,6 @@ import {
 	currentConversationId,
 	loadConversationIndex,
 	registerConversationSnapshot,
-	resetConversationHistory,
 	saveConversationNow,
 	scheduleConversationSave,
 	setHistoryOpen,
@@ -261,6 +260,20 @@ describe("conversation serialization", () => {
 		expect(titleOf("Summarize every note I wrote about the garden renovation last spring please")).toBe(
 			"Summarize every note I wrote about the garden renovation…"
 		)
+	})
+
+	it("never cuts a title or a capped text inside a surrogate pair", () => {
+		const loneHighSurrogate = /[\uD800-\uDBFF]$/
+		const title = conversationTitle(serializeConversation(snapshot(turnEntries("turn-1", `${"あ".repeat(59)}😀${"い".repeat(10)}`)), 1))
+
+		expect(title).toBe(`${"あ".repeat(59)}…`)
+		expect(title.slice(0, -1)).not.toMatch(loneHighSurrogate)
+
+		const content = serializeConversation(snapshot(turnEntries("turn-1", `${"あ".repeat(16_383)}😀${"い".repeat(10)}`)), 1)
+		const text = (content.entries[0] as { text: string }).text
+
+		expect(text).toBe(`${"あ".repeat(16_383)}…`)
+		expect(text.slice(0, -1)).not.toMatch(loneHighSurrogate)
 	})
 })
 
@@ -705,7 +718,6 @@ describe("switching conversations", () => {
 	})
 })
 
-// Last: logout closes the module for the rest of the page's life.
 describe("logout", () => {
 	it("closes on another tab's sign-out, so the save its reload runs writes nothing", async () => {
 		vi.resetModules()
@@ -738,19 +750,23 @@ describe("logout", () => {
 	})
 
 	it("drops the list and writes nothing after the wipe, not even a save that was waiting", async () => {
-		vi.useFakeTimers()
+		vi.resetModules()
 
-		registerConversationSnapshot(() => snapshot(turnEntries("turn-1", "secret plans")))
-		startConversationSlot()
-		useAssistantHistoryStore.setState({ conversations: [meta("a", 1)] })
-		scheduleConversationSave()
-		resetConversationHistory()
+		// A fresh module: the wipe closes it for good, so the one the other tests share stays open.
+		const history = await import("@/features/assistant/store/conversationHistory")
+
+		vi.useFakeTimers()
+		history.registerConversationSnapshot(() => snapshot(turnEntries("turn-1", "secret plans")))
+		history.startConversationSlot()
+		history.useAssistantHistoryStore.setState({ conversations: [meta("a", 1)] })
+		history.scheduleConversationSave()
+		history.resetConversationHistory()
 		vi.runAllTimers()
-		saveConversationNow()
-		await whenHistoryWritten()
+		history.saveConversationNow()
+		await history.whenHistoryWritten()
 		vi.useRealTimers()
 
 		expect(kvWrites).toEqual([])
-		expect(useAssistantHistoryStore.getState()).toMatchObject({ conversations: null, open: false, currentId: null })
+		expect(history.useAssistantHistoryStore.getState()).toMatchObject({ conversations: null, open: false, currentId: null })
 	})
 })

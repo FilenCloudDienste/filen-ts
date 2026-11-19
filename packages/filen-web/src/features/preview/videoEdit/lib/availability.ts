@@ -1,33 +1,11 @@
-import type { ExportDrop, ExportPlan, VideoSaveErrorCode, VideoSaveRefusal } from "@/features/preview/videoEdit/types"
+import type { EditFeature, ExportDrop, ExportPlan, VideoSaveErrorCode, VideoSaveRefusal } from "@/features/preview/videoEdit/types"
 import type { NamespaceKey } from "@/lib/i18n"
 
-// Which editing controls this browser can offer, read from the plan. `ExportPlan.unavailable` names features by these
-// ids (anything else in it is not a control and is ignored here): a feature listed there is disabled with the reason
-// beside it, never hidden, and never silently dropped from a save.
-export const EDIT_FEATURES = [
-	"crop",
-	"rotate",
-	"flip",
-	"resize",
-	"quality",
-	"adjust",
-	"text",
-	"speed",
-	"gain",
-	"audioTracks",
-	"precise"
-] as const
+export type { EditFeature } from "@/features/preview/videoEdit/types"
 
-export type EditFeature = (typeof EDIT_FEATURES)[number]
-
-const FEATURES: ReadonlySet<string> = new Set(EDIT_FEATURES)
-
-function isFeature(value: string): value is EditFeature {
-	return FEATURES.has(value)
-}
-
+// Which editing controls this browser can offer, read from the plan.
 export function unavailableFeatures(plan: ExportPlan | null): ReadonlySet<EditFeature> {
-	return new Set(plan === null ? [] : plan.unavailable.filter(isFeature))
+	return new Set(plan?.unavailable)
 }
 
 // Why a save cannot run for this recipe here (plan.blockers): only its sound (muting it would let the save run), or its

@@ -231,7 +231,7 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 	// Size-gated where the drive-side arm deliberately is not, because the two arms do not decode under
 	// the same budget: makeThumbnailFromStream buffers the source WHOLE and takes its length off the
 	// SDK's decode budget, where the drive arm pays a constant three chunk slots for a source it reads by
-	// range. Past THUMB_WARM_SIZE_GATE what is left cannot afford the 256x512 this asks for, and the
+	// range. Past THUMB_WARM_SIZE_GATE what is left cannot afford the THUMB_MAX_DIM x THUMB_SDK_MAX_HEIGHT (384x768) this asks for, and the
 	// result is not a refusal but a SMALLER thumbnail — which the seat then persists as the uuid's
 	// durable cache entry, displacing the full-size one the drive arm would have produced. A browser
 	// File knows its own size, so nothing is read to decide this.
@@ -615,7 +615,8 @@ function createKeyframeServices(): KeyframeServices {
 			whenPlaybackIdle: () => Promise.resolve()
 		},
 		sleep: () => Promise.resolve(),
-		now: () => Date.now()
+		now: () => Date.now(),
+		supported: () => typeof VideoDecoder !== "undefined"
 	})
 
 	onlineManager.subscribe(online => {
@@ -643,6 +644,12 @@ export function resetDriveKeyframes(): void {
 // no frame to find (no video track, no keyframe index, a codec without a decoder) is a settled verdict;
 // everything else (offline, budgets spent, a failed read) is a failure.
 async function keyframeThumb(item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
+	// No WebCodecs video decoding (no frame could be decoded): no card probe is spent, and the verdict is the
+	// session's only, so a browser update is picked up.
+	if (typeof VideoDecoder === "undefined") {
+		return { type: "unavailable", reason: "unsupported" }
+	}
+
 	// A function, so each check reads the signal anew across the awaits.
 	const stopped = (): boolean => signal.aborted
 	const { probes, frames } = keyframeServicesNow()
@@ -1352,8 +1359,7 @@ export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
 	}
 }
 
-// Module scope, not inside a function: runs exactly once per module evaluation (mirrors
-// the drive.newDirectory def in features/drive/lib/keymap.ts). features/drive/lib/thumbnails.ts (the service)
+// Module scope, not inside a function: runs exactly once per module evaluation. features/drive/lib/thumbnails.ts (the service)
 // deliberately never imports this module itself — it already exposes registerThumbGenerator as a
 // seam specifically so it doesn't need to know these generators exist, and importing back would cycle
 // — so whichever consumer wants thumbnails (sdk/video/pdf/svg) must import this module at least once,

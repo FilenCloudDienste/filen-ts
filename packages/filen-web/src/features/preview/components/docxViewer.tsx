@@ -48,7 +48,8 @@ import {
 	type DocxConversionKey,
 	type DocxGateReason,
 	type DocxOpenContext,
-	type DocxSessionKey
+	type DocxSessionKey,
+	type HeldDocument
 } from "@/features/preview/components/docxViewer.logic"
 import { DocxAnnotationLayer, type DocxBalloonKey } from "@/features/preview/components/docxAnnotations"
 import { DocxPreviewFallback } from "@/features/preview/components/docxPreviewFallback"
@@ -479,28 +480,7 @@ function DocxPasswordBoundary({
 		}
 	}, [bytes, converting, conversions])
 
-	useEffect(() => {
-		if (conversion === null) {
-			return
-		}
-
-		conversions.add(conversion)
-		conversion.hold()
-
-		return () => {
-			conversions.delete(conversion)
-			conversion.drop()
-		}
-	}, [conversion, conversions])
-
-	useEffect(
-		() => () => {
-			for (const held of conversions) {
-				held.drop()
-			}
-		},
-		[conversions]
-	)
+	useHeldDocument(conversion, conversions)
 
 	// A locked file the prompt left without unlocking is dropped where the worker holds it, a turn later (a
 	// remount in the same turn, React's Strict Mode check, keeps it).
@@ -523,27 +503,21 @@ function DocxPasswordBoundary({
 		}
 	}, [locked])
 
-	useEffect(() => {
-		if (key === null) {
-			return
-		}
+	useHeldDocument(key, keys)
 
-		keys.add(key)
-		key.hold()
-
-		return () => {
-			keys.delete(key)
-			key.drop()
-		}
-	}, [key, keys])
-
-	useEffect(
-		() => () => {
-			for (const held of keys) {
-				held.drop()
-			}
-		},
-		[keys]
+	// The prompt for either kind of password; only how a password is tried differs.
+	const passwordGate = (verify: (password: string, signal: AbortSignal) => Promise<PasswordVerdict>): ReactNode => (
+		<DocxPasswordGate
+			title={t("previewDocxPasswordTitle")}
+			body={t("previewDocxPasswordBody", { name })}
+			wrongMessage={t("previewDocxPasswordWrong")}
+			label={t("previewDocxPasswordLabel")}
+			submitLabel={t("previewDocxPasswordSubmit")}
+			progressLabel={t("previewDocxPasswordUnlocking")}
+			message={t("previewDocxNeedsPassword")}
+			enterLabel={t("previewDocxEnterPassword")}
+			verify={verify}
+		/>
 	)
 
 	switch (protection.kind) {
@@ -607,19 +581,7 @@ function DocxPasswordBoundary({
 				return "accepted"
 			}
 
-			return (
-				<DocxPasswordGate
-					title={t("previewDocxPasswordTitle")}
-					body={t("previewDocxPasswordBody", { name })}
-					wrongMessage={t("previewDocxPasswordWrong")}
-					label={t("previewDocxPasswordLabel")}
-					submitLabel={t("previewDocxPasswordSubmit")}
-					progressLabel={t("previewDocxPasswordUnlocking")}
-					message={t("previewDocxNeedsPassword")}
-					enterLabel={t("previewDocxEnterPassword")}
-					verify={verify}
-				/>
-			)
+			return passwordGate(verify)
 		}
 		case "locked": {
 			const lockedDocument = protection.locked
@@ -661,23 +623,38 @@ function DocxPasswordBoundary({
 				return "accepted"
 			}
 
-			return (
-				<DocxPasswordGate
-					title={t("previewDocxPasswordTitle")}
-					body={t("previewDocxPasswordBody", { name })}
-					wrongMessage={t("previewDocxPasswordWrong")}
-					label={t("previewDocxPasswordLabel")}
-					submitLabel={t("previewDocxPasswordSubmit")}
-					progressLabel={t("previewDocxPasswordUnlocking")}
-					message={t("previewDocxNeedsPassword")}
-					enterLabel={t("previewDocxEnterPassword")}
-					verify={verify}
-				/>
-			)
+			return passwordGate(verify)
 		}
 		case "open":
 			return children(protection.content, key, conversion)
 	}
+}
+
+// Holds the document `current` while it is shown and drops it once it is not; every document in `all` (also one
+// whose state never committed) is dropped when the preview unmounts.
+function useHeldDocument<T>(current: HeldDocument<T> | null, all: Set<HeldDocument<T>>): void {
+	useEffect(() => {
+		if (current === null) {
+			return
+		}
+
+		all.add(current)
+		current.hold()
+
+		return () => {
+			all.delete(current)
+			current.drop()
+		}
+	}, [current, all])
+
+	useEffect(
+		() => () => {
+			for (const held of all) {
+				held.drop()
+			}
+		},
+		[all]
+	)
 }
 
 // Locked files whose unlock succeeded: their dispose would release the unlocked document (the same hold).

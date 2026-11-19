@@ -43,5 +43,6 @@ describe("trusted domains: get/trust", () => {
 
 		const stored = await getTrustedDomains()
 		expect(stored.size).toBe(1)
+		expect(kvStore.get("chats.trustedLinkDomains.v1")).toEqual(["example.com"])
 	})
 })

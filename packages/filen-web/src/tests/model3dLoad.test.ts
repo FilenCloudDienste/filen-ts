@@ -12,6 +12,7 @@ import {
 import { installModelGlobals } from "@/features/preview/lib/model3d/workerGlobals"
 import { XmlDomParser } from "@/features/preview/lib/model3d/xmlDom"
 import { ModelRefusedError, REFERENCE_BASE, loadModel, modelInfo, mtlLibraries, releaseSource } from "@/features/preview/lib/model3d/load"
+import { MODEL_MAX_TRIANGLES } from "@/features/preview/lib/model3d/preflight.logic"
 
 // The worker's loading path without a GPU: each format parsed as the 3D worker parses it (its globals, the ImageLoader
 // shim answering texture reads), and its figures counted. Draco and KTX2 need decoder workers and are left to the e2e.
@@ -125,11 +126,17 @@ describe("loadModel", () => {
 		expect(modelInfo(loaded.root)).toMatchObject({ triangles: 4, vertices: 4, meshes: 1 })
 	})
 
-	it("refuses a binary STL above the triangle limit before parsing", async () => {
+	it("reads an empty binary STL, and refuses an STL or PLY whose header declares more than the limit before parsing", async () => {
 		const stl = new Uint8Array(84)
 
 		new DataView(stl.buffer).setUint32(80, 0, true)
 		await expect(loadModel(stl, "stl", null, () => Promise.resolve(null))).resolves.toBeDefined()
+
+		// A header declaring more triangles than the cap, without their bytes: STLLoader would size its arrays from it.
+		const huge = new Uint8Array(84 + 50)
+
+		new DataView(huge.buffer).setUint32(80, MODEL_MAX_TRIANGLES + 1, true)
+		await expect(loadModel(huge, "stl", null, () => Promise.resolve(null))).rejects.toBeInstanceOf(ModelRefusedError)
 		await expect(
 			loadModel(encode("ply\nformat ascii 1.0\nelement vertex 40000000\nend_header\n"), "ply", null, () => Promise.resolve(null))
 		).rejects.toBeInstanceOf(ModelRefusedError)
@@ -390,11 +397,14 @@ describe("bounded loaders", () => {
 		new DataView(header.buffer).setUint32(24, 4, true)
 		new DataView(header.buffer).setUint32(40, 1, true)
 		budget.pixels = 1_000_000
+		skipped.length = 0
 
 		const loader = new KTX2Loader() as unknown as { _createTexture: (buffer: ArrayBuffer) => Promise<Texture> }
 
-		// No transcoder in a test: the transcode fails after the reserve.
-		await expect(loader._createTexture(header.buffer)).rejects.toBeDefined()
+		// No transcoder in a test: the transcode fails after the reserve. A skip (unreadable header, no room) would
+		// leave the budget unchanged without ever reserving.
+		await expect(loader._createTexture(header.buffer)).rejects.not.toMatchObject({ name: "TextureSkipped" })
+		expect(skipped).not.toContain("ktx2")
 		expect(budget.pixels).toBe(1_000_000)
 	})
 
@@ -429,6 +439,15 @@ describe("mtllib", () => {
 		})
 
 		expect(names.sort()).toEqual(["blue", "red"])
+	})
+
+	it("reads the rest of an mtllib line linearly, trimmed, without its line break", () => {
+		const started = performance.now()
+
+		expect(mtlLibraries(`mtllib a${" ".repeat(1_000_000)}b\n`)).toEqual([`a${" ".repeat(1_000_000)}b`])
+		expect(performance.now() - started).toBeLessThan(1000)
+		expect(mtlLibraries("mtllib a.mtl b.mtl \t\r\nmtllib my model.mtl\r\n")).toEqual(["a.mtl", "b.mtl", "my model.mtl"])
+		expect(mtlLibraries("mtllib \t \nmtllib\r\nmtllib   \r\n  mtllib c.mtl")).toEqual(["c.mtl"])
 	})
 
 	it("refuses an OBJ whose faces fan past the triangle cap before parsing", async () => {

@@ -50,6 +50,7 @@ import { PresentationNotesPane } from "@/features/presentation/components/notesP
 import { SmartArtPrompts, SmartArtTextPane } from "@/features/presentation/components/smartartTextPane"
 import { AnimationPane, AnimationPreview } from "@/features/presentation/components/animationPane"
 import { PresentationCommentsPane } from "@/features/presentation/components/commentsPane"
+import { resetSlideReview } from "@/features/presentation/components/commentsPane.logic"
 import { SelectionPane } from "@/features/presentation/components/selectionPane"
 import { createSelectionPane, type SelectionPaneStore } from "@/features/presentation/lib/selectionPane"
 import { PresentationFileMenu } from "@/features/presentation/components/presentationFileMenu"
@@ -97,7 +98,10 @@ import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
-import { useBindings } from "@/lib/keymap/registry"
+import { useBindings, useComboFor } from "@/lib/keymap/registry"
+import { chordText } from "@/lib/keymap/keyText"
+import { useKeyboardLayout } from "@/lib/keymap/layout"
+import { parseCombo } from "@filen/shared/keymap"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import type { PreviewKey } from "@/lib/i18n"
 import { PresentationMotionPaths } from "@/features/presentation/components/ribbon/motionPaths"
@@ -444,6 +448,9 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const textBindings = usePresentationTextBindings()
 	const downloads = usePreviewDownloadable()
 	const overrides = useBindings()
+	// Save's key as the user bound it (none when unbound), for the notice of a deck that never saves by itself.
+	const saveChord = parseCombo(useComboFor("preview.save"))[0]
+	const keyboardLayout = useKeyboardLayout()
 	// The device's choice (Settings, Office) as the deck opens; the View tab changes them after.
 	const [railOpen, setRailOpen] = useState(() => officeViewSettings().slideRail)
 	// The media play controls' layer, above the selection layer.
@@ -496,6 +503,29 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		store.setWindow(index)
 	}, [store, index])
 
+	// A new slide's wait for its first render (navigateText), released once it opens, by the next wait, once the slide
+	// is gone or out of view, and on unmount: the store closes its deck only when its last listener leaves.
+	const slideWait = useRef<{ readonly slide: SlideRef; readonly off: () => void } | undefined>(undefined)
+	const releaseSlideWait = (): void => {
+		slideWait.current?.off()
+		slideWait.current = undefined
+	}
+
+	useEffect(() => {
+		if (slideWait.current !== undefined && slideWait.current.slide !== ref) releaseSlideWait()
+	}, [ref])
+
+	useEffect(
+		() => () => {
+			slideWait.current?.off()
+			slideWait.current = undefined
+		},
+		[]
+	)
+
+	// The Comments pane's state and the review the panes last showed are this deck's: closed with it.
+	useEffect(() => resetSlideReview, [])
+
 	// The body a cell or placeholder key went to (the one it left is closed, its text sent): another cell or
 	// placeholder, a cell of a row added at the table's bottom, or the first placeholder of a new slide on this layout.
 	const navigateText = (to: TextNavigation): void => {
@@ -545,11 +575,15 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				return true
 			}
 
+			releaseSlideWait()
+
 			if (open()) return
 
 			const off = store.subscribe(() => {
-				if (open()) off()
+				if (!store.getSnapshot().slides.some(slide => slide.ref === added) || open()) releaseSlideWait()
 			})
+
+			slideWait.current = { slide: added, off }
 		})
 	}
 
@@ -801,7 +835,22 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const tier = editor.autosave.tier
 	const autosaveNotice =
 		editor.editable && tier.kind === "off"
-			? [t(tier.reason === "encrypted" ? "previewPptxEditorAutosaveOffEncryptedNotice" : "previewPptxEditorAutosaveOffLargeNotice")]
+			? [
+					saveChord === undefined
+						? t(
+								tier.reason === "encrypted"
+									? "previewPptxEditorAutosaveOffEncryptedNoticeNoKey"
+									: "previewPptxEditorAutosaveOffLargeNoticeNoKey"
+							)
+						: t(
+								tier.reason === "encrypted"
+									? "previewPptxEditorAutosaveOffEncryptedNotice"
+									: "previewPptxEditorAutosaveOffLargeNotice",
+								{
+									shortcut: chordText(saveChord, keyboardLayout)
+								}
+							)
+				]
 			: []
 
 	return (

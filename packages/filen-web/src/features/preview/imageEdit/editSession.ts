@@ -1,16 +1,14 @@
-import { driveItemName, nameCollisionKey } from "@filen/shared"
+import { driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { heldImageCap, imageDecodeFor, imageMupdfFormat } from "@/features/drive/lib/preview.logic"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { decodeHeicRgba, decodeRasterRgba, RASTER_BYTES_PER_PIXEL } from "@/features/preview/lib/rasterDecode"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
-import { matchesExtension, saveTargets } from "@/features/preview/imageEdit/lib/targets"
+import { isEditableSource, matchesExtension, saveTargets } from "@/features/preview/imageEdit/lib/targets"
 import { heifExif, heifIcc } from "@/features/preview/imageEdit/lib/heifMeta"
 import { openEditSession } from "@/features/preview/imageEdit/renderClient"
 import type { EditCapabilities, EditSession, ImageEditSource, SaveTarget, SourceInfo, SourceMime } from "@/features/preview/imageEdit/types"
-import { queryClient } from "@/queries/client"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
@@ -57,14 +55,6 @@ function editDecoder(item: DriveItem): EditDecoder | null {
 	const decode = imageDecodeFor(item)
 
 	return decode === "heic" || decode === "qoi" || decode === "jxl" || decode === "mupdf" ? decode : null
-}
-
-// The names taken in a directory, as the server compares them: one read of its listing (the cached one while it is
-// current), for naming a copy.
-export async function takenNames(parent: string | null): Promise<ReadonlySet<string>> {
-	const listing = await queryClient.query(driveListingQueryOptions("drive", parent))
-
-	return new Set(listing.map(row => nameCollisionKey(driveItemName(row))))
 }
 
 // A read under `token` that stops when `signal` aborts.
@@ -271,12 +261,11 @@ async function enter(
 	let held = cached ?? (fromBytes ? await wholeBytes(item, cacheScope, signal) : undefined)
 	let info = sniffImage(held ?? (await headBytes(item, signal)), size)
 
-	if (info === null || !matchesExtension(name, info.mime)) {
-		return { status: "refused", messageKey: "previewImageSaveRefusedUnsupported" }
-	}
+	// The predicate is the gate; which of its parts failed only picks the message.
+	if (info === null || !isEditableSource(info, name)) {
+		const animated = info !== null && info.animated && matchesExtension(name, info.mime)
 
-	if (info.animated) {
-		return { status: "refused", messageKey: "previewImageSaveRefusedAnimated" }
+		return { status: "refused", messageKey: animated ? "previewImageSaveRefusedAnimated" : "previewImageSaveRefusedUnsupported" }
 	}
 
 	// A WebP whose Exif follows its image data: read whole, which the editor then decodes from too.

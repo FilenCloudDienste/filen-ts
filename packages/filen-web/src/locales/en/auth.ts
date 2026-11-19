@@ -221,8 +221,6 @@ export const auth = {
 	signingOut: "Signing out…",
 
 	// ── Security settings page ──────────────────────────────────────────────────
-	/** Security settings — page title */
-	securityTitle: "Security",
 
 	// ── Change password (security settings) ─────────────────────────────────────
 	/** Change-password section — heading and dialog title */

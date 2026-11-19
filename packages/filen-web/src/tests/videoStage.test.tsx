@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { createElement, type ReactElement, type ReactNode } from "react"
+import { createElement, useState, type ReactElement, type ReactNode } from "react"
 import "@/lib/i18n"
 
 const narrow = vi.hoisted(() => ({ value: false }))
@@ -10,7 +10,8 @@ const narrow = vi.hoisted(() => ({ value: false }))
 vi.mock("@/features/shell/hooks/useIsNarrowViewport", () => ({ useIsNarrowViewport: () => narrow.value }))
 
 import { VideoStage, type VideoStageProps } from "@/components/media/video/videoStage"
-import { StageCenterCard, StageNotice } from "@/components/media/video/stageCards"
+import { ChoiceRow, StageCenterCard, StageNotice } from "@/components/media/video/stageCards"
+import { TracksPopover } from "@/components/media/video/tracksPopover"
 import { useStagePopupOpen } from "@/components/media/video/stageContext"
 import type { VideoKeyAction } from "@/lib/media/videoKeys.logic"
 
@@ -70,6 +71,30 @@ function Popup({ open }: { open: boolean }): ReactElement {
 	useStagePopupOpen(open)
 
 	return createElement("span", null, open ? "open" : "closed")
+}
+
+const CHOICES = [
+	{ value: "a", label: "Small" },
+	{ value: "b", label: "Normal" },
+	{ value: "c", label: "Large" }
+] as const
+
+function Choices({ onChange }: { onChange: (value: string) => void }): ReactElement {
+	const [value, setValue] = useState("b")
+
+	return createElement(ChoiceRow<string>, {
+		label: "Size",
+		options: CHOICES,
+		value,
+		onChange: next => {
+			setValue(next)
+			onChange(next)
+		}
+	})
+}
+
+function radio(name: string): HTMLElement {
+	return screen.getByRole("radio", { name })
 }
 
 beforeEach(() => {
@@ -223,6 +248,41 @@ describe("VideoStage", () => {
 		expect(document.activeElement).toBe(stageRoot())
 	})
 
+	it("takes the keyboard back when the focused Next button unmounts at the queue's end", () => {
+		const { rerender } = render(createElement(VideoStage, props({ hasNext: true, onNext: () => undefined })))
+		const next = screen.getByRole("button", { name: "Next episode" })
+
+		next.focus()
+		expect(document.activeElement).toBe(next)
+
+		rerender(createElement(VideoStage, props({ hasNext: false, onNext: () => undefined })))
+		expect(document.activeElement).toBe(stageRoot())
+	})
+
+	it("takes the keyboard back when a focused corner card button unmounts", () => {
+		const { rerender } = render(
+			createElement(VideoStage, props({ cornerCard: createElement("button", { type: "button" }, "Skip intro") }))
+		)
+		const skip = screen.getByRole("button", { name: "Skip intro" })
+
+		skip.focus()
+		expect(document.activeElement).toBe(skip)
+
+		rerender(createElement(VideoStage, props({ cornerCard: null })))
+		expect(document.activeElement).toBe(stageRoot())
+	})
+
+	it("leaves focus inside a stage popup when a control unmounts", () => {
+		const trailing = (): ReactNode =>
+			createElement("div", { "data-stage-popup": "" }, createElement("button", { type: "button" }, "inside"))
+		const { rerender } = render(createElement(VideoStage, props({ hasNext: true, onNext: () => undefined, trailing })))
+		const inside = screen.getByRole("button", { name: "inside" })
+
+		inside.focus()
+		rerender(createElement(VideoStage, props({ hasNext: false, onNext: () => undefined, trailing })))
+		expect(document.activeElement).toBe(inside)
+	})
+
 	it("lets the controls hide while the stage itself holds a keyboard focus", () => {
 		const { matches } = Object.getOwnPropertyDescriptors(Element.prototype)
 
@@ -300,5 +360,71 @@ describe("VideoStage", () => {
 		view.rerender(createElement(VideoStage, props({ announcement: "Up next: Episode 2" })))
 		expect(stageRoot().querySelector("[aria-live=polite]")).toBe(region)
 		expect(region?.textContent).toBe("Up next: Episode 2")
+	})
+
+	it("ChoiceRow: one Tab stop on the checked radio; arrows and Home/End move and select, wrapping", () => {
+		const onChange = vi.fn()
+
+		render(createElement(Choices, { onChange }))
+
+		expect(radio("Small").tabIndex).toBe(-1)
+		expect(radio("Normal").tabIndex).toBe(0)
+		expect(radio("Large").tabIndex).toBe(-1)
+
+		radio("Normal").focus()
+		fireEvent.keyDown(radio("Normal"), { key: "ArrowRight" })
+		expect(document.activeElement).toBe(radio("Large"))
+		expect(radio("Large").getAttribute("aria-checked")).toBe("true")
+		expect(radio("Large").tabIndex).toBe(0)
+
+		fireEvent.keyDown(radio("Large"), { key: "ArrowRight" })
+		expect(document.activeElement).toBe(radio("Small"))
+		expect(onChange).toHaveBeenLastCalledWith("a")
+
+		fireEvent.keyDown(radio("Small"), { key: "ArrowUp" })
+		expect(document.activeElement).toBe(radio("Large"))
+
+		fireEvent.keyDown(radio("Large"), { key: "Home" })
+		expect(document.activeElement).toBe(radio("Small"))
+		fireEvent.keyDown(radio("Small"), { key: "End" })
+		expect(document.activeElement).toBe(radio("Large"))
+		expect(onChange).toHaveBeenLastCalledWith("c")
+	})
+
+	it("TracksPopover: arrows move focus without selecting a track", () => {
+		const onAudio = vi.fn()
+
+		const popover = createElement(TracksPopover, {
+			label: "Tracks",
+			audio: [
+				{ id: "en", label: "English" },
+				{ id: "de", label: "German", disabled: true },
+				{ id: "fr", label: "French" }
+			],
+			audioValue: "en",
+			onAudio,
+			subtitles: [],
+			subtitleValue: null,
+			onSubtitle: () => undefined,
+			onOpenChange: () => undefined,
+			open: true
+		})
+
+		// Inside the stage: the popover portals into its container.
+		render(createElement(VideoStage, props({ trailing: () => popover })))
+
+		act(() => {
+			vi.advanceTimersByTime(20)
+		})
+
+		expect(radio("English").tabIndex).toBe(0)
+		expect(radio("French").tabIndex).toBe(-1)
+
+		radio("English").focus()
+		fireEvent.keyDown(radio("English"), { key: "ArrowDown" })
+		// The disabled option is skipped.
+		expect(document.activeElement).toBe(radio("French"))
+		expect(onAudio).not.toHaveBeenCalled()
+		expect(radio("English").getAttribute("aria-checked")).toBe("true")
 	})
 })

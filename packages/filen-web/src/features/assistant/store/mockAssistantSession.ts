@@ -8,13 +8,13 @@ import type {
 	AssistantStep
 } from "@/features/assistant/types"
 
-// A scripted AssistantSession for tests and for development builds before a real runtime registers. It
-// walks the whole UI surface: a chunked download, a load that starts only on request (the Load action or a
-// sent message, which waits for it), the turn's steps (loading, routing, a search with its prompt-reading
-// progress and result count), a streamed markdown reply, and a confirmation card when the message asks to
-// draft, move, copy, trash or download something. Cards behave as the real session's (loop/session.ts): the
-// turn waits on one until it is confirmed, declined or the turn is stopped, and a confirm of anything else
-// settles as failed. Timer-driven, so tests step it with fake timers.
+// A scripted AssistantSession for tests. It walks the whole UI surface: a chunked download, a load that
+// starts only on request (the Load action or a sent message, which waits for it), the turn's steps
+// (loading, routing, a search with its prompt-reading progress and result count), a streamed markdown
+// reply, and a confirmation card when the message asks to draft, move, copy, trash or download something.
+// Cards behave as the real session's (loop/session.ts): the turn waits on one until it is confirmed,
+// declined or the turn is stopped, and a confirm of anything else settles as failed. Timer-driven, so tests
+// step it with fake timers.
 
 export const MOCK_ASSISTANT_MODEL: AssistantModelInfo = {
 	id: "mock-model",

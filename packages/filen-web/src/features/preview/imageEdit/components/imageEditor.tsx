@@ -25,9 +25,11 @@ import {
 	aspectRect,
 	clampCrop,
 	geometryMatrix,
+	IDENTITY_ADJUSTMENTS,
 	identityRecipe,
 	invertMatrix3,
 	isIdentity,
+	matrixScale,
 	outputSize,
 	transformPoint,
 	turnedSize,
@@ -77,7 +79,6 @@ export interface ImageEditorProps {
 const FILTER_THUMBNAIL_SIZE = 96
 
 // Every slider, for the reset adjustments key.
-const IDENTITY_ADJUSTMENTS: Adjustments = identityRecipe().adjustments
 const ADJUSTMENT_KEYS: readonly (keyof Adjustments)[] = Object.keys(IDENTITY_ADJUSTMENTS).filter(
 	(key): key is keyof Adjustments => key in IDENTITY_ADJUSTMENTS
 )
@@ -122,6 +123,10 @@ export function ImageEditor(props: ImageEditorProps) {
 	const [color, setColor] = useState<MarkupColor>(MARKUP_COLORS[0]?.color ?? "#ef4444")
 	const [width, setWidth] = useState<MarkupWidth>(1)
 	const [editingText, setEditingText] = useState<string | null>(null)
+	// Text being typed into a markup field, not committed yet: an unsaved edit all the same.
+	const [pendingText, setPendingText] = useState(false)
+	// Ends an open markup text edit and returns the markup with its text (MarkupLayer), for a save.
+	const flushMarkupRef = useRef<(() => readonly MarkupItem[] | null) | null>(null)
 	const [thumbnails, setThumbnails] = useState<{ key: string; bitmaps: readonly ImageBitmap[] } | null>(null)
 	// The bitmaps on show, closed when replaced or on unmount.
 	const thumbnailsRef = useRef<readonly ImageBitmap[]>([])
@@ -401,7 +406,7 @@ export function ImageEditor(props: ImageEditorProps) {
 					props.session.render(displayRecipe(latest.recipe, latest.cropping, latest.editingText), { compare: latest.compare })
 				},
 				(error: unknown) => {
-					log.error("[imageEditor] attach/load failed", error)
+					log.error("image-edit", "attaching the canvas or loading the source failed", error)
 
 					if (alive) {
 						setFailed(true)
@@ -467,7 +472,7 @@ export function ImageEditor(props: ImageEditorProps) {
 				setThumbnails({ key: geometryKey, bitmaps })
 			},
 			(error: unknown) => {
-				log.warn("[imageEditor] filter thumbnails failed", error)
+				log.warn("image-edit", "filter thumbnails failed", error)
 			}
 		)
 
@@ -489,20 +494,31 @@ export function ImageEditor(props: ImageEditorProps) {
 	const onDirtyChange = useLatestRef(props.onDirtyChange)
 
 	useEffect(() => {
-		const dirty = !isIdentity(recipe)
+		const dirty = !isIdentity(recipe) || pendingText
 
 		if (dirty !== dirtyRef.current) {
 			dirtyRef.current = dirty
 			onDirtyChange.current(dirty)
 		}
-	}, [recipe, onDirtyChange])
+	}, [recipe, pendingText, onDirtyChange])
 
 	const commands = useLatestRef({ undo, redo, revert })
 
 	const { saveRef, commandsRef, session, info } = props
 
 	useEffect(() => {
-		saveRef.current = target => exportForTarget(session, info, history.current, target)
+		saveRef.current = target => {
+			// Text still in its field goes into the save. Pushed here, not through commit: the save is starting, and the
+			// lock it brings must not refuse what was typed before it.
+			const markup = flushMarkupRef.current?.() ?? null
+
+			if (markup !== null) {
+				history.push({ ...history.current, markup }, undefined)
+				setSnapshot({ recipe: history.current, canUndo: history.canUndo, canRedo: history.canRedo })
+			}
+
+			return exportForTarget(session, info, history.current, target)
+		}
 		commandsRef.current = {
 			undo: () => {
 				commands.current.undo()
@@ -530,7 +546,7 @@ export function ImageEditor(props: ImageEditorProps) {
 		const toSourceMatrix = geometryMatrix(recipe, sourceSize)
 		const toOutputMatrix = invertMatrix3(toSourceMatrix)
 		const screenPerOutput = frame.width / displaySize.width
-		const sourcePerOutput = Math.sqrt(Math.abs(toSourceMatrix[0] * toSourceMatrix[4] - toSourceMatrix[1] * toSourceMatrix[3]))
+		const sourcePerOutput = matrixScale(toSourceMatrix)
 
 		mapping = {
 			toSource: (x, y) => transformPoint(toSourceMatrix, x / screenPerOutput, y / screenPerOutput),
@@ -613,6 +629,8 @@ export function ImageEditor(props: ImageEditorProps) {
 								width={width}
 								onCommit={handleMarkup}
 								onEditingChange={setEditingText}
+								flushRef={flushMarkupRef}
+								onPendingTextChange={setPendingText}
 							/>
 						) : null}
 					</div>

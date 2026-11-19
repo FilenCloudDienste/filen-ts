@@ -591,11 +591,14 @@ function RibbonKeyTips({
 		window.addEventListener("keydown", down, true)
 		window.addEventListener("keyup", up, true)
 		window.addEventListener("pointerdown", reset, true)
+		// A combination the OS takes (Alt+Tab) blurs the window without a keyup; the release on return must not open them.
+		window.addEventListener("blur", reset)
 
 		return () => {
 			window.removeEventListener("keydown", down, true)
 			window.removeEventListener("keyup", up, true)
 			window.removeEventListener("pointerdown", reset, true)
+			window.removeEventListener("blur", reset)
 		}
 	}, [trigger])
 

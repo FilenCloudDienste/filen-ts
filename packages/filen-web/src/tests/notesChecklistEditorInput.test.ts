@@ -18,7 +18,6 @@ function controllerFor(seed: string, onChange: (value: string) => void): NoteEdi
 		seed,
 		remountKey: "key",
 		readOnly: false,
-		isInflight: false,
 		sizeReached: false,
 		onChange
 	}
@@ -157,5 +156,33 @@ describe("ChecklistEditor — hide completed", () => {
 
 		expect(ghost?.value).toBe("")
 		expect(document.activeElement).toBe(ghost)
+	})
+})
+
+describe("ChecklistEditor — accessible names", () => {
+	it("names each checkbox after its row, falling back to the generic name for an empty row", () => {
+		renderEditor(
+			seedOf([
+				{ checked: false, content: "Milk" },
+				{ checked: true, content: "Bread" },
+				{ checked: false, content: "  " }
+			])
+		)
+
+		const names = screen.getAllByRole("checkbox").map(checkbox => checkbox.getAttribute("aria-label"))
+
+		expect(names).toEqual(["Milk", "Bread", "Toggle item"])
+		expect(screen.getAllByRole("listitem")).toHaveLength(3)
+		expect(screen.getAllByRole("textbox").map(input => input.getAttribute("aria-label"))).toEqual([
+			"Checklist item",
+			"Checklist item",
+			"Checklist item"
+		])
+	})
+
+	it("gives the ghost row the generic name", () => {
+		renderEditor("")
+
+		expect(screen.getByRole("checkbox").getAttribute("aria-label")).toBe("Toggle item")
 	})
 })

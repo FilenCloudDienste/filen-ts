@@ -115,6 +115,8 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 					toast.error(t("previewPdfRedactSaveFailed"))
 					break
 				case "cancelled":
+					// Nothing to apply stays quiet; a save that could not start is said (the steps were undone).
+					if (outcome.reason === "save") toast.error(t("previewPdfSaveFailed"))
 					break
 			}
 		})

@@ -52,6 +52,14 @@ describe("identity", () => {
 		expect(isIdentityVideoRecipe({ ...base, output: { resolution: 720, quality: "high" } }, 10)).toBe(false)
 	})
 
+	it("is clean with a text box whose text was cleared, dirty once it says something", () => {
+		const base = identityVideoRecipe(10)
+		const box = { id: "t", text: "  ", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }
+
+		expect(isIdentityVideoRecipe({ ...base, text: [box] }, 10)).toBe(true)
+		expect(isIdentityVideoRecipe({ ...base, text: [box, { ...box, id: "u", text: "hi" }] }, 10)).toBe(false)
+	})
+
 	it("is clean when only the precision or quality changed", () => {
 		const base = identityVideoRecipe(10)
 

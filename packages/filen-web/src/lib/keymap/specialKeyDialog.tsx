@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { spokenKey } from "@/lib/keymap/keyText"
 
 const IS_MAC = isMacPlatform()
 
@@ -67,8 +68,9 @@ export function SpecialKeyDialog({
 				<FieldGroup>
 					<Field>
 						<FieldLabel htmlFor="special-key">{t("keyboardSpecialKey")}</FieldLabel>
+						{/* Keys as words, not glyphs: a glyph reads as its symbol name, and the trigger shows this label. */}
 						<Select
-							items={SPECIAL_KEYS.map(token => ({ value: token, label: keyLabel(token, IS_MAC) }))}
+							items={SPECIAL_KEYS.map(token => ({ value: token, label: spokenKey(token, t) }))}
 							value={key}
 							onValueChange={value => {
 								if (value !== null) {
@@ -89,7 +91,7 @@ export function SpecialKeyDialog({
 											key={token}
 											value={token}
 										>
-											{keyLabel(token, IS_MAC)}
+											{spokenKey(token, t)}
 										</SelectItem>
 									))}
 								</SelectGroup>
@@ -113,6 +115,7 @@ export function SpecialKeyDialog({
 										variant={pressed ? "secondary" : "outline"}
 										size="sm"
 										aria-pressed={pressed}
+										aria-label={spokenKey(modifier, t)}
 										onClick={() => {
 											setHeld(current => {
 												const next = new Set(current)

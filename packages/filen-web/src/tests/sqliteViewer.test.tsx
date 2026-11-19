@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@/lib/i18n"
-import type { SqliteCheck, SqliteSchema } from "@/features/preview/lib/sqliteBrowser"
+import type { SqliteCellValue, SqliteCheck, SqliteSchema } from "@/features/preview/lib/sqliteBrowser"
 import type { SqliteDatabase, SqliteOpenOutcome } from "@/features/preview/lib/sqliteDatabase"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { SQLITE_COUNT_CHUNK, SQLITE_FIRST_COUNT_CHUNK, SQLITE_TILE_ROWS } from "@/features/preview/lib/sqliteBrowse.logic"
@@ -12,8 +12,9 @@ import { SQLITE_COUNT_CHUNK, SQLITE_FIRST_COUNT_CHUNK, SQLITE_TILE_ROWS } from "
 // never browsed), the WAL notice, and the integrity check: by itself up to 256 MiB, on demand above, damage replacing
 // the grid with the card.
 
-const { outcome, checks, worker, grid } = vi.hoisted(() => ({
-	grid: { reportsActive: false, renders: 0 },
+const { outcome, checks, worker, grid, fullText } = vi.hoisted(() => ({
+	grid: { reportsActive: false, renders: 0, report: null as ((row: number, col: number) => void) | null },
+	fullText: { calls: 0 },
 	worker: { status: "ready", owned: {}, generation: 1 },
 	outcome: { next: null as SqliteOpenOutcome | null },
 	checks: { results: [] as Promise<SqliteCheck>[], runs: 0, cancels: 0 }
@@ -39,6 +40,18 @@ vi.mock("@/features/preview/lib/sqliteDatabase", () => ({
 		}
 	}
 }))
+vi.mock("@/features/preview/lib/sqliteBrowse.logic", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/preview/lib/sqliteBrowse.logic")>()
+
+	return {
+		...actual,
+		fullValueText: (value: Parameters<typeof actual.fullValueText>[0]) => {
+			fullText.calls++
+
+			return actual.fullValueText(value)
+		}
+	}
+})
 vi.mock("@/features/preview/components/sqliteTableGrid", async () => {
 	const { useEffect } = await import("react")
 
@@ -46,6 +59,7 @@ vi.mock("@/features/preview/components/sqliteTableGrid", async () => {
 	// render.
 	function SqliteTableGrid({ name, rows, onActive }: { name: string; rows: number; onActive: (row: number, col: number) => void }) {
 		grid.renders++
+		grid.report = onActive
 		useEffect(() => {
 			if (grid.reportsActive) onActive(1, 0)
 		}, [onActive])
@@ -107,6 +121,8 @@ function database(overrides: Partial<SqliteDatabase> = {}): SqliteDatabase {
 beforeEach(() => {
 	grid.reportsActive = false
 	grid.renders = 0
+	grid.report = null
+	fullText.calls = 0
 	checks.results = []
 	checks.runs = 0
 	checks.cancels = 0
@@ -338,5 +354,83 @@ describe("SqliteViewer", () => {
 		await new Promise(resolve => setTimeout(resolve, 50))
 		// Rendered a few times, never in a loop.
 		expect(grid.renders).toBeLessThan(10)
+	})
+
+	it("shows a newly selected cell without the previous cell's value until its own read resolves", async () => {
+		const second = Promise.withResolvers<SqliteCellValue>()
+
+		grid.reportsActive = true
+		outcome.next = {
+			ok: true,
+			database: database({
+				reads: () => ({
+					tiles: () => Promise.resolve([]),
+					cell: (_base, row) => (row === 1 ? Promise.resolve({ type: "text", bytes: 5, value: "alice" }) : second.promise)
+				})
+			})
+		}
+		await renderViewer()
+
+		expect(await screen.findByText("alice")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Full value" }))
+
+		expect((await screen.findAllByText("alice")).length).toBe(2)
+
+		// The grid reports the next cell only now (it would report the first again on each new callback).
+		grid.reportsActive = false
+		act(() => {
+			grid.report?.(2, 1)
+		})
+
+		expect((await screen.findAllByText("users.email, row 2")).length).toBe(2)
+		expect(screen.queryByText("alice")).toBeNull()
+		expect(screen.getByRole("dialog").querySelector("pre")?.textContent).toBe("")
+
+		second.resolve({ type: "text", bytes: 3, value: "bob" })
+
+		expect((await screen.findAllByText("bob")).length).toBe(2)
+	})
+
+	it("builds a cell's full value only once Full value is opened", async () => {
+		grid.reportsActive = true
+		outcome.next = {
+			ok: true,
+			database: database({
+				reads: () => ({
+					tiles: () => Promise.resolve([]),
+					cell: () => Promise.resolve({ type: "blob", bytes: 4096, value: new Uint8Array(4096) })
+				})
+			})
+		}
+		await renderViewer()
+
+		expect(await screen.findByRole("button", { name: "Full value" })).toBeTruthy()
+		expect(fullText.calls).toBe(0)
+
+		fireEvent.click(screen.getByRole("button", { name: "Full value" }))
+
+		expect(await screen.findByRole("dialog")).toBeTruthy()
+		expect(fullText.calls).toBeGreaterThan(0)
+	})
+
+	it("cancels Go to row with Escape, back on its button, and marks a row number that is none invalid", async () => {
+		outcome.next = { ok: true, database: database() }
+		await renderViewer()
+
+		fireEvent.click(await screen.findByRole("button", { name: "Go to row" }))
+
+		const field = screen.getByRole("textbox", { name: "Row number" })
+
+		fireEvent.change(field, { target: { value: "abc" } })
+		fireEvent.click(screen.getByRole("button", { name: "Go" }))
+
+		expect(field.getAttribute("aria-invalid")).toBe("true")
+		expect(screen.getByRole("textbox", { name: "Row number" })).toBe(field)
+
+		// fireEvent returns false when the event was default-prevented.
+		expect(fireEvent.keyDown(field, { key: "Escape" })).toBe(false)
+		expect(screen.queryByRole("textbox", { name: "Row number" })).toBeNull()
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Go to row" }))
 	})
 })

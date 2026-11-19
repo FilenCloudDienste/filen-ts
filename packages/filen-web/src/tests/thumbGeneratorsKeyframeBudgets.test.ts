@@ -154,6 +154,8 @@ function live(): AbortSignal {
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	// Node has no WebCodecs; the frame generators attempt nothing without it.
+	vi.stubGlobal("VideoDecoder", {})
 	readVideoProbeMock.mockResolvedValue(PROBE)
 	captureMock.mockResolvedValue(FRAME)
 })
@@ -187,6 +189,19 @@ describe("drive keyframe thumbnails — budgets of their own", () => {
 		})
 
 		expect(made?.bytes).toEqual(FRAME.bytes)
+	})
+
+	it("spends no probe or capture where the browser cannot decode video frames, and keeps no verdict", async () => {
+		vi.stubGlobal("VideoDecoder", undefined)
+
+		const item = mkvItem()
+
+		// Session-only (no blacklist strike, nothing persisted), so a browser update is picked up.
+		expect(await generateVideoThumb(item, live())).toEqual({ type: "unavailable", reason: "unsupported" })
+		expect(readVideoProbeMock).not.toHaveBeenCalled()
+		expect(captureMock).not.toHaveBeenCalled()
+		expect(openRangePortMock).not.toHaveBeenCalled()
+		expect(await frameGenerator.settledMiss(item.data.uuid)).toBe(false)
 	})
 
 	it("starts drive's session over on logout, while a drive probe record stays shared with Videos", async () => {

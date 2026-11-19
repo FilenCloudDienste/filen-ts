@@ -50,6 +50,8 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 		const row = rows[index]
 
 		if (row === undefined) {
+			failures.push(`${name}: no listing row`)
+
 			continue
 		}
 
@@ -155,6 +157,12 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 
 		if (!moments.some(moment => moment.currentTime >= PLAYED_SECONDS)) {
 			failures.push(`${name}: played to ${String(last?.currentTime)} s, not ${String(PLAYED_SECONDS)}, in ${String(WATCH_MS)} ms`)
+		}
+
+		// The first trak only is read, so an audio buffer or one whose kept bytes hold no fragment has none: one with
+		// samples is what makes the check below live.
+		if (!buffers.some(buffer => buffer.samples.length > 0)) {
+			failures.push(`${name}: no SourceBuffer with samples was recorded`)
 		}
 
 		for (const buffer of buffers) {

@@ -276,8 +276,14 @@ describe("chat info panel — contents", () => {
 
 		const panel = openPanel()
 
+		const rename = within(panel).getByRole("button", { name: "Rename" })
+
+		expect(rename.getAttribute("aria-disabled")).toBe("true")
+		expect((rename as HTMLButtonElement).disabled).toBe(false)
+		expect(rename.getAttribute("title")).toBeNull()
+		expect(document.getElementById(rename.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Unavailable while offline")
+
 		for (const control of [
-			within(panel).getByRole("button", { name: "Rename" }),
 			within(panel).getByRole("button", { name: "Add participants" }),
 			within(panel).getByRole("button", { name: "Delete" })
 		]) {

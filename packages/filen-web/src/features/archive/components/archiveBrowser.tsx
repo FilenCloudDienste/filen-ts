@@ -138,7 +138,7 @@ export interface ArchiveSourceBrowserProps {
 	extractable?: boolean
 }
 
-// One archive entered from another (W6 §6.1 A): its source, the directory of the archive holding it that it was entered
+// One archive entered from another: its source, the directory of the archive holding it that it was entered
 // from, and how it was entered.
 interface NestedLevel {
 	source: ArchiveSource
@@ -246,7 +246,7 @@ interface ArchiveLevelBrowserProps extends ArchiveSourceBrowserProps {
 }
 
 // The archive's directories, browsed and searched, with an extract of the selection or of everything.
-// The selection's base is the directory shown (owner decision), so navigating clears it; extracts land in
+// The selection's base is the directory shown, so navigating clears it; extracts land in
 // the user's own drive whatever the archive's source. An archive held in another is never extracted from: it has no
 // drive file of its own.
 function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit, entered, onEnter, onLeave }: ArchiveLevelBrowserProps) {
@@ -293,12 +293,19 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	const pendingCheck = useRef<(() => void) | null>(null)
 	// The last marquee step: the rows it covered and the selection that made.
 	const marqueeStep = useRef<MarqueeStep | null>(null)
+	// A password was typed for this archive itself: a refusal after it is its own, not the outer one's.
+	const typedPassword = useRef(false)
 
 	// A new run (List again, a password) lists into a fresh store: the view starts over at its root. A
 	// store replacing one that holds nothing (the placeholder before the session opened, a run that read
 	// nothing) loses nothing, and keeps where a cached listing reopens.
 	if (viewStore !== store) {
 		setViewStore(store)
+
+		// The replaced store's selection is never shown again; dropped, it no longer holds that listing's entries.
+		if (picked.store !== store) {
+			setPicked({ store, selection: EMPTY_SELECTION })
+		}
 
 		if (viewStore.entryCount > 0) {
 			setPath("")
@@ -345,7 +352,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 		// asked a password of its own (none was typed for it), which asks the outer one again.
 		if (phase.type === "done" || (phase.type === "stopped" && store.entryCount > 0)) {
 			parent.accepted()
-		} else if (phase.type === "needsPassword" && phase.wrong && listing.session()?.password() === undefined) {
+		} else if (phase.type === "needsPassword" && phase.wrong && !typedPassword.current && listing.session()?.password() === undefined) {
 			onLeave?.()
 			parent.rejected()
 		}
@@ -354,6 +361,11 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	useEffect(() => {
 		enteredCheck()
 	}, [phase.type])
+
+	// The last marquee step's rows read the store they were built from.
+	useEffect(() => {
+		marqueeStep.current = null
+	}, [store])
 
 	const dir = dirOfPath(snapshot, path)
 	const search = useArchiveSearch(snapshot, dir, query)
@@ -768,6 +780,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 			return
 		}
 
+		typedPassword.current = true
 		session.submitPassword(password)
 
 		if (pending === null) {
@@ -855,6 +868,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 				name={source.name}
 				wrong={phase.wrong}
 				onSubmit={password => {
+					typedPassword.current = true
 					listing.session()?.submitPassword(password)
 				}}
 			/>

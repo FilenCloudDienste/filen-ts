@@ -37,7 +37,6 @@ export interface PdfViewerProps {
 	item: DriveItem
 	alt: string
 	variant?: DriveVariant
-	canSaveCopy?: boolean
 	onOpenFile?: (item: DriveItem) => void
 	// Present where the slot's file may be edited and saved (the preview overlay's save path).
 	editing?: PdfEditHost
@@ -216,21 +215,45 @@ interface PdfSourceProps {
 	notice: ReactNode
 }
 
-function BufferedPdf({ item, alt, limit, signatures, edit, notice }: PdfSourceProps) {
+export function BufferedPdf({ item, alt, limit, signatures, edit, notice }: PdfSourceProps) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
-				<PdfDocument
+				<BufferedPdfDocument
+					bytes={ready.bytes}
 					item={item}
 					notice={notice}
 					edit={edit}
-					source={{ kind: "bytes", bytes: limit === undefined ? ready.bytes : ready.bytes.subarray(0, limit) }}
 					alt={alt}
-					size={limit ?? ready.bytes.byteLength}
+					limit={limit}
 					signatures={signatures}
 				/>
 			)}
 		</PreviewGate>
+	)
+}
+
+function bytesSource(bytes: Uint8Array, limit: number | undefined): PdfSource {
+	return { kind: "bytes", bytes: limit === undefined ? bytes : bytes.subarray(0, limit) }
+}
+
+// The source is held for its bytes and limit: a view [0, limit) built again would be a new source to pdf.js, which
+// reopens the document (a rename or a favorite would reset the reader).
+function BufferedPdfDocument({ bytes, limit, ...rest }: Omit<PdfSourceProps, "limit"> & { bytes: Uint8Array; limit: number | undefined }) {
+	const [held, setHeld] = useState(() => ({ bytes, limit, source: bytesSource(bytes, limit) }))
+	let current = held
+
+	if (held.bytes !== bytes || held.limit !== limit) {
+		current = { bytes, limit, source: bytesSource(bytes, limit) }
+		setHeld(current)
+	}
+
+	return (
+		<PdfDocument
+			{...rest}
+			source={current.source}
+			size={limit ?? bytes.byteLength}
+		/>
 	)
 }
 
@@ -373,9 +396,10 @@ const DRAFT_HOST: PdfEditHost = {
 const NO_SIGNED_VERSION = (): void => undefined
 
 // Extracted pages as a new, unsaved PDF over the one they came from (its own full-screen layer, the editor's ribbon and
-// tools on a second engine): Save makes it a file beside `item`, named as Extract said; closing it unsaved asks first.
-// The PDF behind stays as it was (its view, its changes) and keeps the draft's bytes until the draft ends.
-function PdfDraftDocument({
+// tools on a second engine): Save makes it a file beside `item`, named as Extract said; closing it unsaved asks first,
+// and neither closes nor discards while its save runs. The PDF behind stays as it was (its view, its changes) and keeps
+// the draft's bytes until the draft ends.
+export function PdfDraftDocument({
 	draft,
 	item,
 	access,
@@ -399,6 +423,7 @@ function PdfDraftDocument({
 	})
 	const name = batchCopyNames(driveItemName(item), [draft.suffix], new Set())[0] ?? driveItemName(item)
 	const history = edit.history
+	const saving = history?.saving === true
 
 	// Mod+S in the draft's layer saves the draft (the overlay's Save stands down for a layer over it).
 	useAction(
@@ -461,7 +486,7 @@ function PdfDraftDocument({
 				details.cancel()
 
 				// An Escape something inside took already (the find field, a tool) is not a close.
-				if (details.reason === "escape-key" && details.event.defaultPrevented) return
+				if (saving || (details.reason === "escape-key" && details.event.defaultPrevented)) return
 
 				setAsking(true)
 			}}
@@ -483,7 +508,7 @@ function PdfDraftDocument({
 							variant="ghost"
 							size="icon-sm"
 							aria-label={t("common:close")}
-							disabled={history?.saving === true}
+							disabled={saving}
 							onClick={() => {
 								setAsking(true)
 							}}
@@ -494,7 +519,7 @@ function PdfDraftDocument({
 					<div className="min-h-0 flex-1">{body}</div>
 					<ConfirmDialog
 						open={asking}
-						pending={false}
+						pending={saving}
 						title={t("previewPdfDraftDiscardTitle")}
 						body={t("previewPdfDraftDiscardBody")}
 						confirmLabel={t("previewPdfDiscardConfirm")}
@@ -502,6 +527,9 @@ function PdfDraftDocument({
 						destructive
 						onOpenChange={setAsking}
 						onConfirm={() => {
+							// A question asked before the save started does not discard during it.
+							if (saving) return
+
 							setAsking(false)
 							controller.closeDraft(false)
 						}}

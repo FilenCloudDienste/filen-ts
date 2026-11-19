@@ -1,14 +1,17 @@
-import { RangeSetBuilder, StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state"
+import { RangeSetBuilder, StateEffect, StateField, type EditorState, type Extension, type Text } from "@codemirror/state"
 import { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view"
 import { findNext, findPrevious, getSearchQuery, replaceAll, replaceNext, search, SearchQuery, setSearchQuery } from "@codemirror/search"
 import type { DocxFindControls } from "@/features/preview/components/docxViewer.logic"
 
 // Find and replace for the text and code viewers in their command bar (the find field the document viewers share,
 // DocxFindField), over CodeMirror's own search state and commands in place of its bottom panel. The field reads a
-// store: a match count capped at CODE_FIND_LIMIT and the current match, counted again at most once a frame while the
-// field is open, so typing in the editor re-renders the field only, never the bar.
+// store: a match count capped at CODE_FIND_LIMIT and the current match. The matches are collected once per query and,
+// after edits, once the typing pauses; a caret move only looks the selection up in them, at most once a frame. Typing
+// in the editor re-renders the field only, never the bar.
 
 export const CODE_FIND_LIMIT = 1000
+// Edits wait this long (ms) for the next before the matches are collected again.
+export const CODE_FIND_EDIT_DELAY = 200
 
 export interface CodeFindCount {
 	readonly count: number
@@ -20,30 +23,62 @@ export interface CodeFindCount {
 
 const NO_MATCHES: CodeFindCount = { count: 0, capped: false, active: -1 }
 
-// Matches of `query` up to `limit`, and which one the main selection covers.
-export function countCodeMatches(state: EditorState, query: SearchQuery, limit: number): CodeFindCount {
+// The first matches of a query, in document order (they never overlap).
+export interface CodeMatches {
+	readonly starts: readonly number[]
+	readonly ends: readonly number[]
+	// More matches than these.
+	readonly capped: boolean
+}
+
+const EMPTY_MATCHES: CodeMatches = { starts: [], ends: [], capped: false }
+
+// Matches of `query` up to `limit`, in one walk of the document.
+export function collectCodeMatches(state: EditorState, query: SearchQuery, limit: number): CodeMatches {
 	if (!query.valid) {
-		return NO_MATCHES
+		return EMPTY_MATCHES
 	}
 
-	const { from, to } = state.selection.main
+	const starts: number[] = []
+	const ends: number[] = []
 	const cursor = query.getCursor(state)
-	let count = 0
-	let active = -1
 
 	for (let match = cursor.next(); !match.done; match = cursor.next()) {
-		if (count === limit) {
-			return { count, capped: true, active }
+		if (starts.length === limit) {
+			return { starts, ends, capped: true }
 		}
 
-		if (match.value.from === from && match.value.to === to) {
-			active = count
-		}
-
-		count++
+		starts.push(match.value.from)
+		ends.push(match.value.to)
 	}
 
-	return { count, capped: false, active }
+	return { starts, ends, capped: false }
+}
+
+// The index of the first match starting at or after `position` (the count when none does).
+function firstMatchFrom(starts: readonly number[], position: number): number {
+	let low = 0
+	let high = starts.length
+
+	while (low < high) {
+		const middle = (low + high) >>> 1
+
+		if ((starts[middle] ?? 0) < position) {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+
+	return low
+}
+
+// The count of `matches`, and which one the selection from `from` to `to` covers.
+export function countOfCodeMatches(matches: CodeMatches, from: number, to: number): CodeFindCount {
+	const index = firstMatchFrom(matches.starts, from)
+	const active = matches.starts[index] === from && matches.ends[index] === to ? index : -1
+
+	return { count: matches.starts.length, capped: matches.capped, active }
 }
 
 // The field is open: matches are highlighted (CodeMirror's own highlighter shows only with its panel).
@@ -150,6 +185,11 @@ export class CodeFind {
 	private snapshot: CodeFindSnapshot = CLOSED
 	private readonly listeners = new Set<() => void>()
 	private frame = 0
+	private timer: ReturnType<typeof setTimeout> | undefined = undefined
+	// The matches, of `matchesQuery` in `matchesDoc`.
+	private matches: CodeMatches = EMPTY_MATCHES
+	private matchesQuery: SearchQuery | null = null
+	private matchesDoc: Text | null = null
 	private readonly view: () => EditorView | null
 	// Replace is offered (an editable file).
 	private readonly editable: boolean
@@ -199,6 +239,7 @@ export class CodeFind {
 	}
 
 	close(): void {
+		this.forget()
 		this.set({ ...CLOSED, caseSensitive: this.snapshot.caseSensitive, focus: this.snapshot.focus })
 		this.view()?.dispatch({ effects: [setFindOpen.of(false), setSearchQuery.of(new SearchQuery({ search: "" }))] })
 	}
@@ -216,22 +257,39 @@ export class CodeFind {
 		const query = new SearchQuery({ search: text, caseSensitive, literal: true })
 
 		view.dispatch({ effects: setSearchQuery.of(query) })
+		this.collect(view.state)
 
-		if (query.valid) {
-			const start = view.state.selection.main.from
+		const { starts, ends, capped } = this.matches
+		const start = view.state.selection.main.from
+		const index = firstMatchFrom(starts, start)
+		let from = starts[index]
+		let to = ends[index]
+
+		// Past the collected matches: the first one from the selection on is beyond them.
+		if (from === undefined && capped) {
 			const after = query.getCursor(view.state, start).next()
-			const match = after.done ? query.getCursor(view.state).next() : after
 
-			if (!match.done) {
-				view.dispatch({
-					selection: { anchor: match.value.from, head: match.value.to },
-					scrollIntoView: true,
-					userEvent: "select.search"
-				})
+			if (!after.done) {
+				from = after.value.from
+				to = after.value.to
 			}
 		}
 
-		this.recount()
+		// None from the selection on: wrap round to the first.
+		if (from === undefined) {
+			from = starts[0]
+			to = ends[0]
+		}
+
+		if (from !== undefined && to !== undefined) {
+			view.dispatch({
+				selection: { anchor: from, head: to },
+				scrollIntoView: true,
+				userEvent: "select.search"
+			})
+		}
+
+		this.recount(false)
 	}
 
 	// CodeMirror's commands open its panel for an empty query: never run without one.
@@ -240,7 +298,7 @@ export class CodeFind {
 
 		if (view !== null && getSearchQuery(view.state).valid) {
 			command(view)
-			this.recount()
+			this.recount(true)
 		}
 	}
 
@@ -265,22 +323,71 @@ export class CodeFind {
 		this.run(command)
 	}
 
-	// The next frame's count, after edits or moves while the field is open.
-	schedule(): void {
-		if (!this.snapshot.open || this.frame !== 0) {
+	// The count after an edit (once the edits pause) or a move (the next frame) while the field is open.
+	schedule(docChanged: boolean): void {
+		if (!this.snapshot.open) {
+			return
+		}
+
+		if (docChanged) {
+			clearTimeout(this.timer)
+			this.timer = setTimeout(() => {
+				this.timer = undefined
+				this.recount(true)
+			}, CODE_FIND_EDIT_DELAY)
+
+			return
+		}
+
+		if (this.frame !== 0) {
 			return
 		}
 
 		this.frame = requestAnimationFrame(() => {
 			this.frame = 0
-			this.recount()
+			this.recount(false)
 		})
 	}
 
-	private recount(): void {
+	// The matches are collected again for another query at once, and for another document only when `edited` (an
+	// edit's delay ran out, or a command changed it); until then the count stays as it was.
+	private recount(edited: boolean): void {
 		const view = this.view()
-		const counted =
-			view === null || !this.snapshot.open ? NO_MATCHES : countCodeMatches(view.state, getSearchQuery(view.state), CODE_FIND_LIMIT)
+
+		if (view === null || !this.snapshot.open) {
+			this.update(NO_MATCHES)
+
+			return
+		}
+
+		const state = view.state
+		const query = getSearchQuery(state)
+		const sameQuery = this.matchesQuery?.eq(query) ?? false
+
+		if (sameQuery && this.matchesDoc !== state.doc && !edited) {
+			return
+		}
+
+		this.collect(state)
+		this.update(countOfCodeMatches(this.matches, state.selection.main.from, state.selection.main.to))
+	}
+
+	// The matches of the state's query in its document, collected again when either differs.
+	private collect(state: EditorState): void {
+		const query = getSearchQuery(state)
+
+		if (this.matchesDoc === state.doc && this.matchesQuery?.eq(query) === true) {
+			return
+		}
+
+		clearTimeout(this.timer)
+		this.timer = undefined
+		this.matches = collectCodeMatches(state, query, CODE_FIND_LIMIT)
+		this.matchesQuery = query
+		this.matchesDoc = state.doc
+	}
+
+	private update(counted: CodeFindCount): void {
 		const current = this.snapshot
 
 		if (counted.count !== current.count || counted.capped !== current.capped || counted.active !== current.active) {
@@ -288,9 +395,19 @@ export class CodeFind {
 		}
 	}
 
-	dispose(): void {
+	// Drops the matches and any count to come.
+	private forget(): void {
 		cancelAnimationFrame(this.frame)
 		this.frame = 0
+		clearTimeout(this.timer)
+		this.timer = undefined
+		this.matches = EMPTY_MATCHES
+		this.matchesQuery = null
+		this.matchesDoc = null
+	}
+
+	dispose(): void {
+		this.forget()
 	}
 
 	// The field's view of it (DocxFindField).

@@ -35,7 +35,7 @@ function comparePaths(a: readonly string[], b: readonly string[]): number {
 	return a.length - b.length
 }
 
-// The page images, as entry slots in reading order: every file an image viewer opens by its name (W2's format table)
+// The page images, as entry slots in reading order: every file an image viewer opens by its name (IMAGE_FORMATS)
 // that the SDK reads alone, macOS metadata and anything the SDK skips left out (canReadEntry), sorted by the natural
 // order of the path, segment by segment, so p2 comes before p10 and a chapter directory's pages stay together. A page
 // too large to show keeps its place (pageOpens), so the numbering stays the book's.
@@ -61,7 +61,7 @@ export function pageOpens(store: EntryStore, slot: number): boolean {
 // Where every header the sniff reads sits.
 const PAGE_HEAD_BYTES = 64 * 1024
 
-// Whether a page's image is wider than tall (a two-page scan), from its header (W2's sniff, upright), before it is
+// Whether a page's image is wider than tall (a two-page scan), from its header (sniffImage, upright), before it is
 // decoded; null when the header names no size.
 export function landscapeOf(bytes: Uint8Array): boolean | null {
 	const info = sniffImage(bytes.subarray(0, PAGE_HEAD_BYTES), bytes.length)
@@ -70,7 +70,7 @@ export function landscapeOf(bytes: Uint8Array): boolean | null {
 }
 
 // The largest solid block a page lies in, in archive bytes; 0 when no page is in one. Above SOLID_BLOCK_READ_MAX_BYTES
-// the comic is extracted to read (E3).
+// the comic is extracted to read.
 export function largestSolidBlock(store: EntryStore, pages: readonly number[]): number {
 	let largest = 0
 

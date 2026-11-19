@@ -2,13 +2,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // A sign-out cut short leaves its flag set; the next boot redoes every wipe before any session resume,
 // and keeps the flag for another try while a wipe still fails.
-const { calls, kvClear, wipeThumbnailStore, wipeArtStore, wipeVideoIndexStore, wipeSwClient } = vi.hoisted(() => {
+const {
+	calls,
+	kv,
+	kvClear,
+	clearSessionOutsideKv,
+	wipeThumbnailStore,
+	wipeArtStore,
+	wipeVideoIndexStore,
+	wipeSwClient,
+	wipeLegacyWebOnSignOut
+} = vi.hoisted(() => {
 	const calls: string[] = []
+	const kv = new Map<string, unknown>()
 
 	return {
 		calls,
+		kv,
 		kvClear: vi.fn(() => {
 			calls.push("kvClear")
+			kv.clear()
+
+			return Promise.resolve()
+		}),
+		clearSessionOutsideKv: vi.fn(() => {
+			calls.push("clearSession")
 
 			return Promise.resolve()
 		}),
@@ -31,6 +49,11 @@ const { calls, kvClear, wipeThumbnailStore, wipeArtStore, wipeVideoIndexStore, w
 			calls.push("wipeServiceWorker")
 
 			return Promise.resolve()
+		}),
+		wipeLegacyWebOnSignOut: vi.fn(() => {
+			calls.push("wipeLegacy")
+
+			return Promise.resolve()
 		})
 	}
 })
@@ -42,14 +65,19 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/lib/storage/adapter", () => ({
 	storage: () => Promise.resolve({}),
 	kvGetJson: () => Promise.resolve(null),
-	kvSetJson: () => Promise.resolve(),
+	kvSetJson: (key: string, value: unknown) => {
+		kv.set(key, value)
+
+		return Promise.resolve()
+	},
 	kvEntriesJson: () => Promise.resolve([]),
 	kvClear
 }))
 vi.mock("@/lib/storage/capability", () => ({ isOpfsApiAvailable: () => true }))
-vi.mock("@/lib/sdk/session", () => ({
-	clearSessionOutsideKv: () => Promise.resolve(),
-	persistSession: vi.fn(),
+// The real persistSession: a sign-in after a boot that opened signed out finishes the sign-out first.
+vi.mock("@/lib/sdk/session", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/sdk/session")>()),
+	clearSessionOutsideKv,
 	resumeSession: () => {
 		calls.push("resumeSession")
 
@@ -62,10 +90,24 @@ vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore }))
 vi.mock("@/features/videos/lib/artStore", () => ({ wipeArtStore }))
 vi.mock("@/features/videos/lib/indexStore", () => ({ wipeVideoIndexStore }))
 vi.mock("@/features/drive/lib/saveDownload", () => ({ wipeSwClient }))
+vi.mock("@/lib/legacyWebMigration", () => ({ wipeLegacyWebOnSignOut, runLegacyWebMigration: () => Promise.resolve(false) }))
 
+import type { StringifiedClient } from "@filen/sdk-rs"
 import { bootSdk } from "@/lib/sdk/boot"
+import { persistSession } from "@/lib/sdk/session"
 import { readSignOutPending, writeSignOutPending } from "@/lib/signOutPending"
 import { useBootStore } from "@/stores/boot"
+
+// kvClear itself, not keepKeymapsAcrossWipe around it, which reads kvEntriesJson first.
+const WIPES = [
+	{ call: "kvClear", mock: kvClear },
+	{ call: "clearSession", mock: clearSessionOutsideKv },
+	{ call: "wipeThumbnails", mock: wipeThumbnailStore },
+	{ call: "wipeArt", mock: wipeArtStore },
+	{ call: "wipeVideoIndex", mock: wipeVideoIndexStore },
+	{ call: "wipeServiceWorker", mock: wipeSwClient },
+	{ call: "wipeLegacy", mock: wipeLegacyWebOnSignOut }
+]
 
 beforeEach(() => {
 	const store = new Map<string, string>()
@@ -76,6 +118,7 @@ beforeEach(() => {
 		removeItem: (key: string) => store.delete(key)
 	})
 	calls.length = 0
+	kv.clear()
 	vi.clearAllMocks()
 	useBootStore.setState({ phase: "idle" })
 })
@@ -86,38 +129,63 @@ describe("bootSdk after a sign-out cut short", () => {
 
 		await bootSdk()
 
-		expect(calls.slice(0, 5).sort()).toEqual(["kvClear", "wipeArt", "wipeServiceWorker", "wipeThumbnails", "wipeVideoIndex"])
-		expect(calls[5]).toBe("resumeSession")
+		const resumedAt = calls.indexOf("resumeSession")
+
+		expect(resumedAt).toBeGreaterThan(-1)
+
+		for (const wipe of WIPES) {
+			const at = calls.indexOf(wipe.call)
+
+			expect(at, wipe.call).toBeGreaterThan(-1)
+			expect(at, wipe.call).toBeLessThan(resumedAt)
+		}
+
 		expect(readSignOutPending()).toBe(false)
 		expect(useBootStore.getState().phase).toBe("ready")
 	})
 
-	it("keeps the flag for the next boot while a wipe still fails", async () => {
+	// A failed wipe may have left the session it was meant to remove: the boot opens signed out without reading it.
+	it.each(WIPES)("keeps the flag and opens signed out while $call still fails", async ({ mock }) => {
 		writeSignOutPending(true)
-		wipeThumbnailStore.mockRejectedValueOnce(new Error("entry locked"))
+		mock.mockRejectedValueOnce(new Error("storage busy"))
 
 		await bootSdk()
 
+		expect(calls).not.toContain("resumeSession")
 		expect(readSignOutPending()).toBe(true)
 		expect(useBootStore.getState().phase).toBe("ready")
 	})
 
-	it("keeps the flag while the Videos artwork wipe still fails", async () => {
+	// Without the sign-in finishing the sign-out, the next boot would wipe the new session or open signed out again.
+	it.each([
+		{ name: "the wipes succeed by then", failures: 1 },
+		{ name: "a wipe still fails", failures: 2 }
+	])("a sign-in after that survives the next boot when $name", async ({ failures }) => {
 		writeSignOutPending(true)
-		wipeArtStore.mockRejectedValueOnce(new Error("entry locked"))
+
+		for (let i = 0; i < failures; i++) {
+			kvClear.mockRejectedValueOnce(new Error("storage busy"))
+		}
 
 		await bootSdk()
 
-		expect(readSignOutPending()).toBe(true)
-	})
+		expect(calls).not.toContain("resumeSession")
 
-	it("keeps the flag while the Videos index wipe still fails", async () => {
-		writeSignOutPending(true)
-		wipeVideoIndexStore.mockRejectedValueOnce(new Error("entry locked"))
+		const session = { userId: 1n } as unknown as StringifiedClient
+
+		await persistSession(session)
+
+		expect(readSignOutPending()).toBe(false)
+		expect(kv.get("sdk.session.v1")).toBe(session)
+
+		calls.length = 0
+		useBootStore.setState({ phase: "idle" })
 
 		await bootSdk()
 
-		expect(readSignOutPending()).toBe(true)
+		expect(calls).toEqual(["resumeSession"])
+		expect(kv.get("sdk.session.v1")).toBe(session)
+		expect(useBootStore.getState().phase).toBe("ready")
 	})
 
 	it("wipes nothing when no sign-out is pending", async () => {

@@ -104,7 +104,7 @@ const targets = new WeakMap<HTMLElement, DropTargetHandlers>()
 let hooks: PointerDragHooks | null = null
 let session: Session | null = null
 
-// X9 installs the desktop hand-off; null removes it.
+// dragOut.ts installs the desktop hand-off; null removes it.
 export function setPointerDragHooks(next: PointerDragHooks | null): void {
 	hooks = next
 }

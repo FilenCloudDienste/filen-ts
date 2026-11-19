@@ -13,7 +13,6 @@ export const TEXT_BOX_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolTextBox",
 	icon: TypeIcon,
 	toolClass: "annotate",
-	actionIds: ["annotations.textBox"],
 	actions: [pdfToolAction("annotations.textBox", "t", "preview:previewPdfKeyToolTextBox")],
 	enabledWhen: policy => toolEnabled("annotate", policy),
 	commands: ["annotations.textBox", "annotations.text", "annotations.delete"],

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { Schema, type Node } from "prosemirror-model"
 import { slideRef, type DeckOp } from "@filen/office/core/presentation"
@@ -10,6 +10,7 @@ import {
 	FIND_IN_TABLE,
 	FIND_LOCKED,
 	PRESENTATION_FIND_LIMIT,
+	PresentationCallError,
 	type CommandResult,
 	type OpenInfo,
 	type PresentationSessionApi
@@ -411,5 +412,116 @@ describe("presentation find controls", () => {
 		const { result } = renderHook(() => usePresentationFind({ session, info: { ...INFO, editable: false }, editor: editorFor([], []) }))
 
 		expect(result.current.replace).toBeUndefined()
+	})
+})
+
+describe("presentation find failures", () => {
+	const unhandled: unknown[] = []
+	const onUnhandled = (reason: unknown): void => {
+		unhandled.push(reason)
+	}
+
+	process.on("unhandledRejection", onUnhandled)
+
+	afterEach(() => {
+		unhandled.length = 0
+	})
+
+	// Lets rejected promises settle and Node report any left unhandled.
+	async function settle(): Promise<void> {
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+	}
+
+	it("a failing find leaves no unhandled rejection and shows no result for the current query", async () => {
+		const find = vi
+			.fn<PresentationSessionApi["find"]>()
+			.mockResolvedValueOnce(matches([0, 2, 0, 0, 1, 0], [1, 4, 0, 0, 1, 0]))
+			.mockRejectedValueOnce(new PresentationCallError("failed", "find"))
+			.mockRejectedValueOnce(new PresentationCallError("closed", "find"))
+		const session = { find } as unknown as PresentationSessionApi
+		const { result } = renderHook(() => usePresentationFind({ session, info: INFO, editor: editorFor([], []) }))
+
+		act(() => {
+			result.current.search("ab", false)
+		})
+		await waitFor(() => {
+			expect(result.current.count).toBe(2)
+		})
+
+		act(() => {
+			result.current.search("abc", true)
+		})
+		await waitFor(() => {
+			expect(result.current.query).toBe("abc")
+		})
+		expect(result.current).toMatchObject({ query: "abc", caseSensitive: true, count: 0, active: -1, capped: false })
+
+		// A closed session is as quiet.
+		act(() => {
+			result.current.search("abcd", false)
+		})
+		await waitFor(() => {
+			expect(result.current.query).toBe("abcd")
+		})
+		await settle()
+		expect(result.current.count).toBe(0)
+		expect(unhandled).toEqual([])
+	})
+
+	it("a superseded find's failure changes nothing", async () => {
+		let rejectFirst: (error: unknown) => void = () => undefined
+		const find = vi
+			.fn<PresentationSessionApi["find"]>()
+			.mockImplementationOnce(
+				() =>
+					new Promise<Int32Array>((_, reject) => {
+						rejectFirst = reject
+					})
+			)
+			.mockResolvedValueOnce(matches([0, 2, 0, 0, 1, 0]))
+		const session = { find } as unknown as PresentationSessionApi
+		const { result } = renderHook(() => usePresentationFind({ session, info: INFO, editor: editorFor([], []) }))
+
+		act(() => {
+			result.current.search("a", false)
+			result.current.search("ab", false)
+		})
+		await waitFor(() => {
+			expect(result.current.count).toBe(1)
+		})
+
+		rejectFirst(new PresentationCallError("failed", "find"))
+		await settle()
+		expect(result.current).toMatchObject({ query: "ab", count: 1, active: 0 })
+		expect(unhandled).toEqual([])
+	})
+
+	it("a failing flush ends replace quietly, sending nothing", async () => {
+		const find = vi.fn(() => Promise.resolve(matches([0, 2, 0, 1, 3, 0])))
+		const session = { find } as unknown as PresentationSessionApi
+		const sent: DeckOp[] = []
+		const editor = editorFor(sent, [])
+
+		vi.spyOn(editor.text, "flush").mockRejectedValue(new PresentationCallError("closed", "flush"))
+
+		const { result } = renderHook(() => usePresentationFind({ session, info: INFO, editor }))
+
+		act(() => {
+			result.current.search("xy", false)
+		})
+		await waitFor(() => {
+			expect(result.current.count).toBe(1)
+		})
+
+		act(() => {
+			result.current.replace?.one("Z")
+			result.current.replace?.all("Z")
+		})
+		await settle()
+		expect(sent).toEqual([])
+		expect(find).toHaveBeenCalledTimes(1)
+		expect(unhandled).toEqual([])
 	})
 })

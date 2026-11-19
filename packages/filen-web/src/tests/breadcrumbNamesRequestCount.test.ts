@@ -37,8 +37,9 @@ const resolveSharedContext = vi.fn((_hint: SharedPathHint, uuid: string) =>
 )
 let ownedDirs = new InFlight<string, Dir | undefined>()
 
-// The worker's wiring (sdk.worker.ts's resolveOwnedDir, listDirectory's uuid case, resolveDirectoryName)
-// over the real dir cache, so a spy count is the SDK request count the worker would issue.
+// A stand-in for the worker's wiring (resolveOwnedDir, listDirectory's uuid case, resolveDirectoryName) over the
+// real dir cache: this file pins the page side (hook, query keys, dir cache) against it. The shipped worker's own
+// cache-first and coalesced lookups are pinned in sdkWorkerArchive.test.ts ("owned directory resolve").
 function resolveOwnedDir(uuid: string): Promise<Dir | undefined> {
 	const cached = getCachedDir(uuid)
 

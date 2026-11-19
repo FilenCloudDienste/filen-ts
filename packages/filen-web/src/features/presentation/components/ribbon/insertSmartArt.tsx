@@ -127,12 +127,19 @@ export interface SmartArtPaneStore {
 	readonly setNode: (node: string | undefined) => void
 	readonly focusNode: (node: string, caret: number | "end") => void
 	readonly focused: () => void
-	// The focused field (`owner`, its node) registers the op that sends what it holds unsent and how it sends it;
+	// The focused field (`owner`, its node) registers the op that sends what it holds unsent, how it sends it, and what
+	// it does when a command carrying that op answers (`ok` false: refused or failed, the text counts as unsent again);
 	// leaving, it releases it (`flush`: sending what is unsent, for a field that goes away).
-	readonly setDraft: (owner: string, take: () => SmartArtOp | undefined, send: (op: SmartArtOp) => void) => void
+	readonly setDraft: (
+		owner: string,
+		take: () => SmartArtOp | undefined,
+		send: (op: SmartArtOp) => void,
+		settled?: (op: SmartArtOp, ok: boolean) => void
+	) => void
 	readonly releaseDraft: (owner: string, flush: boolean) => void
-	// The unsent text as an op (now counted as sent), for a command that sends it first.
-	readonly takeDraft: () => SmartArtOp | undefined
+	// The unsent text as an op (now counted as sent), for a command that sends it first, and what to call once that
+	// command answers (`ok` false when it did not apply).
+	readonly takeDraft: () => { readonly op: SmartArtOp; readonly settled: (ok: boolean) => void } | undefined
 	readonly reset: () => void
 }
 
@@ -156,7 +163,14 @@ export function createSmartArtPane(): SmartArtPaneStore {
 	let state = INITIAL
 	// The session `state` was read from (another deck's refs may repeat).
 	let source: unknown
-	let draft: { readonly owner: string; readonly take: () => SmartArtOp | undefined; readonly send: (op: SmartArtOp) => void } | undefined
+	let draft:
+		| {
+				readonly owner: string
+				readonly take: () => SmartArtOp | undefined
+				readonly send: (op: SmartArtOp) => void
+				readonly settled: ((op: SmartArtOp, ok: boolean) => void) | undefined
+		  }
+		| undefined
 	const listeners = new Set<() => void>()
 	const commit = (next: SmartArtPaneState): void => {
 		state = next
@@ -219,8 +233,8 @@ export function createSmartArtPane(): SmartArtPaneStore {
 		focused: () => {
 			if (state.focus !== undefined) commit({ ...state, focus: undefined })
 		},
-		setDraft: (owner, take, send) => {
-			draft = { owner, take, send }
+		setDraft: (owner, take, send, settled) => {
+			draft = { owner, take, send, settled }
 		},
 		releaseDraft: (owner, flush) => {
 			if (draft?.owner !== owner) return
@@ -233,7 +247,19 @@ export function createSmartArtPane(): SmartArtPaneStore {
 
 			if (op !== undefined) left.send(op)
 		},
-		takeDraft: () => draft?.take(),
+		takeDraft: () => {
+			const settled = draft?.settled
+			const op = draft?.take()
+
+			if (op === undefined) return undefined
+
+			return {
+				op,
+				settled: ok => {
+					settled?.(op, ok)
+				}
+			}
+		},
 		reset: () => {
 			draft = undefined
 			source = undefined
@@ -329,12 +355,19 @@ export async function runSmartArtOp(
 	focus?: { readonly node: string; readonly caret: number | "end" }
 ): Promise<boolean> {
 	const draft = smartArtPane.takeDraft()
-	const sent: DeckOp = draft === undefined ? op : { family: "batch", kind: "batch", ops: [draft, op] }
-	const result = await editor.command(sent)
+	const sent: DeckOp = draft === undefined ? op : { family: "batch", kind: "batch", ops: [draft.op, op] }
+	let ok = false
 
-	if (result.ok && focus !== undefined) smartArtPane.focusNode(focus.node, focus.caret)
+	try {
+		ok = (await editor.command(sent)).ok
+	} finally {
+		// Refused whole (or failed): the pane's text it carried is unsent again.
+		draft?.settled(ok)
+	}
 
-	return result.ok
+	if (ok && focus !== undefined) smartArtPane.focusNode(focus.node, focus.caret)
+
+	return ok
 }
 
 const EMPTY_SELECTION: PresentationRibbonEditor["selection"] = {

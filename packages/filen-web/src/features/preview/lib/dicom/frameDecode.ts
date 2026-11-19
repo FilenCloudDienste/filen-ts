@@ -71,7 +71,7 @@ export interface FrameContext {
 	readonly compressed: CompressedDecoder | null
 }
 
-function samplesView(bytes: Uint8Array, bitsAllocated: number, littleEndian: boolean): Uint8Array | Uint16Array | Uint32Array {
+export function samplesView(bytes: Uint8Array, bitsAllocated: number, littleEndian: boolean): Uint8Array | Uint16Array | Uint32Array {
 	const width = bitsAllocated / 8
 
 	if (width === 1) return bytes
@@ -79,8 +79,25 @@ function samplesView(bytes: Uint8Array, bitsAllocated: number, littleEndian: boo
 	const count = bytes.length / width
 	const aligned = littleEndian && bytes.byteOffset % width === 0 ? bytes : bytes.slice()
 
+	// Big-endian samples swapped in place on the copy: no view per sample.
 	if (!littleEndian) {
-		for (let at = 0; at + width <= aligned.length; at += width) aligned.subarray(at, at + width).reverse()
+		const end = aligned.length - (aligned.length % width)
+
+		for (let at = 0; at < end; at += width) {
+			const first = aligned[at] ?? 0
+
+			if (width === 2) {
+				aligned[at] = aligned[at + 1] ?? 0
+				aligned[at + 1] = first
+			} else {
+				const second = aligned[at + 1] ?? 0
+
+				aligned[at] = aligned[at + 3] ?? 0
+				aligned[at + 3] = first
+				aligned[at + 1] = aligned[at + 2] ?? 0
+				aligned[at + 2] = second
+			}
+		}
 	}
 
 	return width === 2
@@ -106,13 +123,13 @@ interface Budgeted {
 	readonly structure?: number
 }
 
-// The decoded pixels left for a frame of `encodedBytes`, checked before any of them is read: none left refuses the
-// frame whatever its decoder, and so does a tags' frame that does not fit them when the decoder cannot reduce it.
 // Bytes a fragment's span takes while its frame is read (the object and its two numbers).
 const SPAN_BYTES = 48
 
-// The pixels a frame may decode to; refused (tooLarge) when they do not fit it, by `fits`. A codec heap grown past its
-// initial size is let go first and the frame weighed again, so a heap a large frame left cannot keep refusing the next.
+// The decoded pixels left for a frame of `encodedBytes`, checked before any of them is read: none left refuses the
+// frame (tooLarge) whatever its decoder, and so does a tags' frame that does not fit them when the decoder cannot reduce
+// it, or pixels `fits` rejects. A codec heap grown past its initial size is let go first and the frame weighed again, so
+// a heap a large frame left cannot keep refusing the next.
 function checkBudget(
 	context: FrameContext,
 	encodedBytes: number,

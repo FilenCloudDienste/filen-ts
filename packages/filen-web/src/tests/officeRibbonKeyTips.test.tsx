@@ -224,4 +224,22 @@ describe("OfficeRibbon KeyTips", () => {
 		press("p")
 		expect(onCommand).toHaveBeenCalledWith("Paste")
 	})
+
+	it("drops a desktop Alt press whose window lost focus before the release", async () => {
+		platform.value = "linux"
+
+		render(<Harness onCommand={vi.fn()} />)
+
+		fireEvent.keyDown(window, { key: "Alt", altKey: true })
+		fireEvent.blur(window)
+		fireEvent.keyUp(window, { key: "Alt" })
+		await new Promise(resolve => requestAnimationFrame(resolve))
+		expect(document.querySelector("[data-ribbon-keytips]")).toBeNull()
+
+		fireEvent.keyDown(window, { key: "Alt", altKey: true })
+		fireEvent.keyUp(window, { key: "Alt" })
+		await waitFor(() => {
+			expect(badges()).toContain("H")
+		})
+	})
 })

@@ -236,6 +236,76 @@ describe("LargeTextRows", () => {
 		expect(position.get()).toBeGreaterThan(released)
 	})
 
+	it("asks for rows above and below the view a scrollbar drag lands on, after a locate overtook the one before", async () => {
+		// Ten rows from the located offset: neither file end is held, so the view wants rows either side.
+		const rowsAt = (offset: number): PagerRowView[] =>
+			Array.from({ length: 10 }, (_, index) => row(offset + index * 100, "y".repeat(99)))
+		const located: { offset: number; land: () => void }[] = []
+		const before = vi.fn((_start: number) => Promise.resolve<PagerRowView[]>([]))
+		const after = vi.fn((_end: number) => Promise.resolve<PagerRowView[]>([]))
+		const remote = {
+			locate: (offset: number): Promise<PagerRows> =>
+				offset === 0
+					? Promise.resolve({ rows: ROWS, focus: 0, column: 0 })
+					: new Promise<PagerRows>(resolve => {
+							located.push({
+								offset,
+								land: () => {
+									resolve({ rows: rowsAt(offset), focus: 0, column: 0 })
+								}
+							})
+						}),
+			before,
+			after,
+			lineOf: () => Promise.resolve({ line: 1, frontier: SIZE })
+		}
+
+		Element.prototype.setPointerCapture = () => undefined
+		render(
+			<LargeTextRows
+				reading={{
+					...reading(),
+					pager: { run: (call: (api: typeof remote) => unknown) => call(remote) } as unknown as TextPagerReading["pager"]
+				}}
+				alt="big.log"
+				fontSize={13}
+				pattern={null}
+				jump={null}
+				linesVersion={0}
+				position={positionStore()}
+			/>
+		)
+
+		const scrollbar = screen.getByRole("scrollbar", { name: "Position in file" })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		// Grab the thumb, then drag twice: the second position waits for the first locate.
+		fireEvent.pointerDown(scrollbar, { pointerId: 1, clientY: 10 })
+		fireEvent.pointerMove(scrollbar, { pointerId: 1, clientY: 200 })
+		fireEvent.pointerMove(scrollbar, { pointerId: 1, clientY: 400 })
+		expect(located).toHaveLength(1)
+
+		// The first locate lands, and the queued one starts before the first's view renders and fills.
+		await act(async () => {
+			located[0]?.land()
+			await Promise.resolve()
+		})
+		expect(located).toHaveLength(2)
+
+		await act(async () => {
+			located[1]?.land()
+			await Promise.resolve()
+		})
+
+		const final = located[1]?.offset ?? -1
+
+		expect(before).toHaveBeenCalledWith(final, expect.anything(), null)
+		expect(after).toHaveBeenCalledWith(final + 1000, false, expect.anything(), null)
+	})
+
 	it("numbers the rows it holds once lines are counted, without moving them", async () => {
 		const props = {
 			reading: reading(),

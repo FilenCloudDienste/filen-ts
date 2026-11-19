@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ComponentType } from "react"
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import type { StringifiedClient, UserInfo } from "@filen/sdk-rs"
+import { onlineManager } from "@tanstack/react-query"
 
 // The Account and Security rows that patch the held account instead of reading it back, with only the
 // worker boundary, the session store and the toasts mocked: getUserInfo's call count is the read count.
@@ -26,6 +27,7 @@ import "@/lib/i18n"
 import { i18n } from "@/lib/i18n"
 import { settings as EN_SETTINGS } from "@/locales/en/settings"
 import { auth as EN_AUTH } from "@/locales/en/auth"
+import { common as EN_COMMON } from "@/locales/en/common"
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY, useAccountQuery, useMasterKeysNotExported, type AccountQuerySuccess } from "@/queries/account"
@@ -178,6 +180,41 @@ describe("disabling two-factor authentication", () => {
 		expect(toastSuccess).toHaveBeenCalledExactlyOnceWith(EN_SETTINGS.settingsTwoFactorDisabledSuccess)
 		expect(cached()).toMatchObject({ twoFactorEnabled: false, twoFactorKey: "SETUPKEY" })
 		expect(getUserInfo).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("two-factor authentication offline", () => {
+	it("keeps the set-up action focusable and says why it is disabled, without opening the setup", async () => {
+		renderRow(TwoFactorRow)
+		await drain()
+
+		act(() => {
+			onlineManager.setOnline(false)
+		})
+
+		try {
+			const setUp = screen.getByRole("button", { name: EN_SETTINGS.settingsTwoFactorSetUpAction })
+
+			expect(setUp.getAttribute("aria-disabled")).toBe("true")
+			expect(setUp.hasAttribute("disabled")).toBe(false)
+			expect(setUp.getAttribute("title")).toBeNull()
+			expect(document.getElementById(setUp.getAttribute("aria-describedby") ?? "")?.textContent).toBe(EN_COMMON.offlineActionDisabled)
+
+			setUp.focus()
+			expect(document.activeElement).toBe(setUp)
+			fireEvent.click(setUp)
+			fireEvent.keyDown(setUp, { key: "Enter" })
+			expect(screen.queryByRole("dialog")).toBeNull()
+		} finally {
+			act(() => {
+				onlineManager.setOnline(true)
+			})
+		}
+
+		const online = screen.getByRole("button", { name: EN_SETTINGS.settingsTwoFactorSetUpAction })
+
+		expect(online.getAttribute("aria-disabled")).toBeNull()
+		expect(online.getAttribute("aria-describedby")).toBeNull()
 	})
 })
 

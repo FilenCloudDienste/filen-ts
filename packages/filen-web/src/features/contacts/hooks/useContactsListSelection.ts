@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
 import { clampListboxIndex, isToggleModifier, listboxKeyTarget, resolveCursorIndex, touchTapIntent } from "@/features/drive/lib/listbox"
 import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
 import {
@@ -76,11 +76,15 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 	// because a virtualized target may be unmounted) — every contacts row is already in the DOM.
 	const rowRefs = useRef(new Map<string, HTMLDivElement>())
 
-	useEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate view-switch reset, mirrors useNotesListSelection
+	const [seenKey, setSeenKey] = useState(resetKey)
+
+	// Reset during render, not in an effect, so the first commit of a new section already has an empty
+	// selection and cursors instead of one frame of the previous section's.
+	if (seenKey !== resetKey) {
+		setSeenKey(resetKey)
 		setState(EMPTY_CONTACT_SELECTION_STATE)
 		setCursors(EMPTY_CURSORS)
-	}, [resetKey])
+	}
 
 	// The 0 fallback (rather than drive's tracked last-position one) is deliberate: contacts lists are
 	// short and unvirtualized, so a vanished cursor row snapping to the top of its section is both cheap

@@ -1,4 +1,5 @@
 import {
+	contextName,
 	isAssistantWebTool,
 	isConsequentialTool,
 	sanitizeUntrustedText,
@@ -82,20 +83,9 @@ const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly As
 	add_tracks_to_playlist: { playlist: ["playlist"], handles: ["drive", "track"] }
 }
 
-const CONTEXT_NAME_MAX_CHARS = 80
 // A path the model is told to list a directory by is copied back whole, so it is never shortened: past this it
 // is not offered at all.
 const CONTEXT_PATH_MAX_CHARS = 512
-
-// A name in the context line: other people choose shared items', notes', chats' and tracks' names, and the
-// line sits in the system prompt. Sanitized, on one line, shortened and quoted, so it can neither carry
-// template tokens nor pose as another field of the line. The loop sanitizes the whole line again with the
-// model's own tokens.
-function contextName(name: string): string {
-	const flat = Array.from(sanitizeUntrustedText(name, [], { keepJoiners: true }).replace(/\s+/g, " ").trim())
-
-	return JSON.stringify(flat.length > CONTEXT_NAME_MAX_CHARS ? `${flat.slice(0, CONTEXT_NAME_MAX_CHARS - 1).join("")}…` : flat.join(""))
-}
 
 // A path to list a directory by: whole, on one line, quoted; null when too long to offer.
 function contextPath(path: string): string | null {

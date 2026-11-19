@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest"
-import { geometryMatrix, identityRecipe, sourceRectForTile, transformPoint, type Matrix3 } from "@/features/preview/imageEdit/lib/recipe"
+import {
+	affineMatrix3,
+	geometryMatrix,
+	identityRecipe,
+	matrixScale,
+	multiplyMatrix3,
+	sourceRectForTile,
+	transformPoint,
+	type Matrix3
+} from "@/features/preview/imageEdit/lib/recipe"
 import type { ImageEditRecipe } from "@/features/preview/imageEdit/types"
 import {
-	affine,
-	composeMatrix3,
 	containTransform,
 	coverTransform,
 	expandRect,
 	exportTileEdge,
 	matrixRows,
-	matrixScale,
 	planTiles,
 	previewMargin,
 	previewSize,
@@ -42,9 +48,9 @@ function straightened(angle: number, turns: 0 | 1 | 2 | 3): ImageEditRecipe {
 
 describe("matrix helpers", () => {
 	it("composes outer after inner", () => {
-		const inner = affine(0.8, 0.6, -0.6, 0.8, 10, -4)
+		const inner = affineMatrix3(0.8, 0.6, -0.6, 0.8, 10, -4)
 		const outer = scaleTranslate(2, -1, 3, 50)
-		const composed = composeMatrix3(outer, inner)
+		const composed = multiplyMatrix3(outer, inner)
 		const [ix, iy] = transformPoint(inner, 7, 11)
 
 		expect(transformPoint(composed, 7, 11)[0]).toBeCloseTo(transformPoint(outer, ix, iy)[0], 10)
@@ -52,7 +58,7 @@ describe("matrix helpers", () => {
 	})
 
 	it("reports a similarity's scale and its GLSL rows", () => {
-		const m: Matrix3 = affine(0, 3, -3, 0, 5, 6)
+		const m: Matrix3 = affineMatrix3(0, 3, -3, 0, 5, 6)
 
 		expect(matrixScale(m)).toBeCloseTo(3, 10)
 		expect(matrixRows(m)).toEqual({ x: [0, -3, 5], y: [3, 0, 6] })
@@ -99,7 +105,7 @@ describe("exportTileEdge", () => {
 	})
 
 	it("uses the whole limit for an unrotated 1:1 mapping", () => {
-		expect(exportTileEdge(4096, 0, 2, affine(1, 0, 0, 1, 0, 0))).toBe(4090)
+		expect(exportTileEdge(4096, 0, 2, affineMatrix3(1, 0, 0, 1, 0, 0))).toBe(4090)
 	})
 })
 

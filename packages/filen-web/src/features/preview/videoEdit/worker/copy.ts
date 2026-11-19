@@ -13,8 +13,10 @@ import type { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
 // reordered past the cut make it a frame or two earlier than asked), which copyBounds finds from packet timestamps
 // alone, before any data is read, so the audio is cut at exactly that boundary.
 //
-// Audio is laid down gap-free: per range, the packets whose running total comes closest to the video's running total,
-// so after any number of joins the audio is never more than half a packet off the video (no drift).
+// Audio is laid down back to back: per range, the packets whose running total comes closest to the video's running
+// total, so after any number of joins the audio is never more than half a packet off the video (no drift). A packet
+// more than a packet later than that (audio that starts after the video, or a hole in it) is laid at its own place
+// from the range's start instead, as the video is, so the gap stays a gap rather than pulling the audio early.
 
 // Presentation-time slack between key frame tables and packet timestamps.
 const EPSILON = 0.001
@@ -119,7 +121,6 @@ export interface CopyVideoParams {
 	signal: AbortSignal
 	// The most bytes one GOP may hold (a fragment holds at least a GOP in memory); null for no cap.
 	gopByteCap: number | null
-	onPacket?: (bytes: number) => void
 }
 
 export async function copyVideo(params: CopyVideoParams): Promise<void> {
@@ -161,7 +162,6 @@ export async function copyVideo(params: CopyVideoParams): Promise<void> {
 						packet.clone({ timestamp, duration: packet.duration / speed }),
 						first ? { decoderConfig: params.decoderConfig } : undefined
 					)
-					params.onPacket?.(packet.byteLength)
 					first = false
 				}
 			}
@@ -200,8 +200,8 @@ async function packetNear(sink: EncodedPacketSink, time: number): Promise<Encode
 	return after !== null && Math.abs(after.timestamp - time) < Math.abs(before.timestamp - time) ? after : before
 }
 
-// Lays the audio of `bounds` down gap-free. Returns how far the audio's running total ends from the video's (seconds;
-// within half a packet).
+// Lays the audio of `bounds` down, its gaps kept. Returns how far the audio's running total ends from the video's
+// (seconds; within half a packet when the source's audio runs to the end).
 export async function copyAudio(params: CopyAudioParams): Promise<number> {
 	const { sink, bounds, output, gate, lane, signal } = params
 	// Output seconds written (the audio's running total) and the video's running total.
@@ -228,9 +228,17 @@ export async function copyAudio(params: CopyAudioParams): Promise<number> {
 
 			duration = packetDuration(packet, duration)
 
-			if (duration <= 0 || written + duration / 2 > target + 1e-9) {
+			// Where the packet belongs on the output: past the running total by more than a packet is a gap in the source.
+			// Committed only once the packet is kept, so a gap that runs past the range's end leaves the total short and the
+			// next range restarts in step instead of skipping its own start.
+			const place = rangeStart + (packet.timestamp - bound.start)
+			const at = place - written > duration + EPSILON ? place : written
+
+			if (duration <= 0 || at + duration / 2 > target + 1e-9) {
 				break
 			}
+
+			written = at
 
 			await gate.advance(lane, written)
 			throwIfCancelled(signal)

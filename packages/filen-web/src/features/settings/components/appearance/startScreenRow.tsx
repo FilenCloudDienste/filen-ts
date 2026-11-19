@@ -3,7 +3,7 @@ import { useStartScreenQuery } from "@/features/shell/queries/startScreen"
 import { DEFAULT_START_SCREEN, setStartScreen, START_SCREENS, type StartScreen } from "@/features/shell/lib/startScreen"
 import type { SettingsKey } from "@/lib/i18n"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
-import { saveSetting } from "@/features/settings/components/appearance/saveSetting"
+import { saveSetting } from "@/lib/saveSetting"
 
 const START_SCREEN_LABEL_KEYS: Record<StartScreen, SettingsKey> = {
 	drive: "settingsStartScreenDrive",

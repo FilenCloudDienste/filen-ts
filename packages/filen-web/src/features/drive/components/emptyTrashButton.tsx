@@ -13,8 +13,8 @@ export interface EmptyTrashButtonProps {
 }
 
 // Trash toolbar's own trigger — directoryListing.tsx only mounts this once
-// isEmptyTrashTriggerVisible(variant, sortedItems.length) is true (trash variant, non-empty
-// listing). Opens the already-wired TypedConfirmDialog (useDriveDialogHost's "emptyTrash" arm);
+// isEmptyTrashTriggerVisible(variant, visibleItems.length) is true (trash variant, non-empty
+// trash): the unfiltered count, as Empty trash acts on the whole trash, not the rows a filter leaves. Opens the already-wired TypedConfirmDialog (useDriveDialogHost's "emptyTrash" arm);
 // this component owns no dialog state of its own.
 export function EmptyTrashButton({ onClick, disabled, offlineTitle }: EmptyTrashButtonProps) {
 	const { t } = useTranslation("drive")

@@ -345,14 +345,6 @@ describe("createFramePipeline", () => {
 		expect(loseContext).toHaveBeenCalledTimes(1)
 	})
 
-	it("answers needsGpu like needsGpuPass", () => {
-		const p = pipeline()
-
-		expect(p.needsGpu(recipe())).toBe(false)
-		expect(p.needsGpu(recipe({ rotate: 90 }))).toBe(false)
-		expect(p.needsGpu(recipe({ flipH: true }))).toBe(true)
-	})
-
 	it("refuses to render after dispose", () => {
 		const p = pipeline()
 

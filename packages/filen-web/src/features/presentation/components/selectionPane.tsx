@@ -16,6 +16,7 @@ import {
 	type DeckOp,
 	type OutlineRow,
 	type OutlineShape,
+	type SlideRef,
 	type ZOrder
 } from "@filen/office/core/presentation"
 import { createShapeSelection, useShapeSelection, type ObjectKeyBindings, type ShapeSelectionState } from "@filen/office/react/presentation"
@@ -62,6 +63,29 @@ function outlineName(t: TFunction<"preview">, shape: OutlineShape): string {
 			: t(shape.media === "audio" ? "previewPptxObjectAudio" : "previewPptxObjectVideo")
 
 	return t("previewPptxSelectionUnnamed", { kind, id: shape.id })
+}
+
+// A restack waiting for the outline that shows it: the objects moved, their level and the slide's objects before it.
+interface Moved {
+	readonly slide: SlideRef
+	readonly parent: number
+	readonly ids: readonly number[]
+	readonly shapes: readonly OutlineShape[]
+}
+
+// What the live region says once a restack is drawn: the first moved object whose place changed (else the first), by
+// name, and its place in its level counted from the top, as the list shows it.
+function movedText(t: TFunction<"preview">, moved: Moved, shapes: readonly OutlineShape[]): string | undefined {
+	const before = outlineLevel(moved.shapes, moved.parent) ?? []
+	const after = outlineLevel(shapes, moved.parent) ?? []
+	const indexIn = (list: readonly OutlineShape[], id: number): number => list.findIndex(shape => shape.id === id)
+	const id = moved.ids.find(each => indexIn(after, each) !== indexIn(before, each)) ?? moved.ids[0]
+	const index = id === undefined ? -1 : indexIn(after, id)
+	const shape = after[index]
+
+	return shape === undefined
+		? undefined
+		: t("previewPptxSelectionMovedTo", { name: outlineName(t, shape), position: after.length - index, count: after.length })
 }
 
 const IS_MAC = isMacPlatform()
@@ -143,6 +167,7 @@ export function SelectionPane({
 	const [focusId, setFocusId] = useState<number | undefined>(undefined)
 	const [renaming, setRenaming] = useState<number | undefined>(undefined)
 	const [announce, setAnnounce] = useState("")
+	const [moved, setMoved] = useState<Moved | undefined>(undefined)
 	const render = editor?.render
 	const slide = render?.ref
 	const revision = render?.revision ?? -1
@@ -177,10 +202,24 @@ export function SelectionPane({
 			element.focus({ preventScroll: false })
 	}, [focusId, renaming])
 
-	if (!pane.open || editor === undefined) return null
+	if (!pane.open || editor === undefined) {
+		if (moved !== undefined) setMoved(undefined)
+		if (announce !== "") setAnnounce("")
+
+		return null
+	}
 
 	const outline = pane.outline?.slide === slide ? pane.outline : undefined
 	const shapes = outline?.shapes ?? []
+
+	// A restack is announced once the outline after it arrives: the place said is the one it took, not the one it left.
+	if (moved !== undefined && outline !== undefined && shapes !== moved.shapes) {
+		const text = outline.slide === moved.slide ? movedText(t, moved, shapes) : undefined
+
+		setMoved(undefined)
+
+		if (text !== undefined) setAnnounce(text)
+	}
 	const rows = outlineRows(shapes, pane.collapsed)
 	const byId = new Map<number, OutlineRow>()
 	// Drawn on the slide: neither it nor a group it is in hidden.
@@ -248,7 +287,12 @@ export function SelectionPane({
 	const canMove = (to: ZOrder): boolean =>
 		editable && sameLevel && chosenIds.every(id => byId.get(id)?.shape.lock === undefined) && canZOrder(order, chosen, to)
 	const move = (to: ZOrder): void => {
-		if (slide !== undefined && canMove(to)) command(zOrderOp(slide, chosenIds, to))
+		if (slide === undefined || level === undefined || !canMove(to)) return
+
+		command(zOrderOp(slide, chosenIds, to))
+		// Emptied until the new outline is drawn, so a message equal to the last one still changes the region and is spoken.
+		setAnnounce("")
+		setMoved({ slide, parent: level, ids: chosenIds, shapes })
 	}
 	const setCollapsed = (id: number, collapsed: boolean): void => {
 		if (pane.collapsed.has(id) === collapsed) return
@@ -599,7 +643,8 @@ export function SelectionPane({
 
 						if (op !== undefined) {
 							command(op)
-							setAnnounce(t("previewPptxSelectionMoved"))
+							setAnnounce("")
+							setMoved({ slide, parent: dragged.parent, ids: dragged.ids, shapes })
 						}
 					}}
 				>
@@ -665,7 +710,6 @@ export function SelectionPane({
 									aria-label={t(shape.hidden ? "previewPptxSelectionShow" : "previewPptxSelectionHide", { name })}
 									title={t(shape.hidden ? "previewPptxSelectionShow" : "previewPptxSelectionHide", { name })}
 									disabled={!changeable}
-									aria-pressed={!shape.hidden}
 									className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-40"
 								>
 									{shape.hidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}

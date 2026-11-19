@@ -107,6 +107,7 @@ export function ShortcutRow({
 						}
 
 						const off = !characterKeys && action.keepsCharacterKeys !== true && isCharacterChord(chord)
+						const offId = `${nameId}-off-${String(slot)}`
 						const keys = chordText(chord, layout)
 
 						return (
@@ -119,7 +120,7 @@ export function ShortcutRow({
 									type="button"
 									className="inline-flex h-6 items-center rounded-l-md pr-1 pl-1.5 focus-ring outline-none hover:bg-muted"
 									aria-label={t("settings:keyboardChangeKeys", { keys })}
-									aria-describedby={nameId}
+									aria-describedby={off ? `${nameId} ${offId}` : nameId}
 									onClick={() => {
 										onRecord(slot)
 									}}
@@ -129,6 +130,15 @@ export function ShortcutRow({
 										layout={layout}
 									/>
 								</button>
+								{/* The title tells a mouse why the chip is dimmed; this tells a keyboard or a screen reader. */}
+								{off && (
+									<span
+										id={offId}
+										className="sr-only"
+									>
+										{t("settings:keyboardCharacterKeyOff")}
+									</span>
+								)}
 								<button
 									type="button"
 									className="inline-flex size-6 items-center justify-center rounded-r-md text-muted-foreground focus-ring outline-none hover:bg-muted hover:text-foreground"

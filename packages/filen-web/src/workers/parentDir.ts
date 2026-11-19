@@ -1,10 +1,7 @@
-import type { AnyNormalDir, Dir, UuidStr } from "@filen/sdk-rs"
+import type { AnyNormalDir, Dir } from "@filen/sdk-rs"
 import { isUuid } from "@filen/shared"
 import { cacheFoundDir, getCachedDir, isFoundDir } from "@/features/drive/lib/cache"
-
-function isUuidStr(value: string): value is UuidStr {
-	return isUuid(value)
-}
+import { isUuidStr } from "@/lib/uuidStr"
 
 // A directory findDirUuid found under `parent`.
 export function noteFoundDir(uuid: string, parent: string): void {

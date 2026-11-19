@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
@@ -35,8 +35,43 @@ function track(uuid: string, name: string): QueueTrack {
 	return { uuid, name, mime: "audio/mpeg", contentType: "audio/mpeg", file: {} as unknown as AnyFile }
 }
 
+// jsdom lays nothing out: the queue list (the virtualizer's scroll element) reports the popover's max height
+// and room to scroll, and scrollTo moves it the way a browser would, so the virtualizer sees a real viewport.
+const LIST_HEIGHT = 448
+const LIST_SCROLL_HEIGHT = 1_000_000
+const clientHeight = Object.getOwnPropertyDescriptor(Element.prototype, "clientHeight")
+const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight")
+
+beforeEach(() => {
+	Object.defineProperty(Element.prototype, "clientHeight", {
+		configurable: true,
+		get(this: Element) {
+			return this.tagName === "UL" ? LIST_HEIGHT : 0
+		}
+	})
+	Object.defineProperty(Element.prototype, "scrollHeight", {
+		configurable: true,
+		get(this: Element) {
+			return this.tagName === "UL" ? LIST_SCROLL_HEIGHT : 0
+		}
+	})
+	Element.prototype.scrollTo = function (this: Element, options?: ScrollToOptions | number) {
+		if (typeof options === "object" && options.top !== undefined) {
+			this.scrollTop = options.top
+			this.dispatchEvent(new Event("scroll"))
+		}
+	}
+})
+
 afterEach(() => {
 	cleanup()
+	if (clientHeight) {
+		Object.defineProperty(Element.prototype, "clientHeight", clientHeight)
+	}
+	if (scrollHeight) {
+		Object.defineProperty(Element.prototype, "scrollHeight", scrollHeight)
+	}
+	Reflect.deleteProperty(Element.prototype, "scrollTo")
 	vi.clearAllMocks()
 	useSmoothTransitionsStore.setState({ prefs: DEFAULT_SMOOTH_TRANSITIONS_PREFS, unavailable: null })
 	useAudioStore.setState({ queue: [], currentIndex: 0, status: "idle", lastError: null, lastErrorTrack: null, coverUrlsByUuid: {} })
@@ -137,6 +172,61 @@ describe("NowPlayingPanel — queue-only popover", () => {
 		expect(rowButton(/one\.mp3$/).querySelector("img")).toBeNull()
 		expect(rowButton(/one\.mp3$/).querySelector("svg.text-destructive")).not.toBeNull()
 		expect(rowButton(/two\.mp3$/).textContent).toBe("2two.mp3")
+	})
+})
+
+describe("NowPlayingPanel — long queue", () => {
+	const LENGTH = 5000
+	const CURRENT = 2500
+
+	function longQueue(): QueueTrack[] {
+		return Array.from({ length: LENGTH }, (_, index) => track(`t${String(index)}`, `track-${String(index)}.mp3`))
+	}
+
+	it("mounts only a window of rows, with the current track in it after open", async () => {
+		useAudioStore.setState({ queue: longQueue(), currentIndex: CURRENT })
+
+		const { container } = render(createElement(NowPlayingPanel))
+
+		await act(async () => {
+			await new Promise(resolve => requestAnimationFrame(resolve))
+		})
+
+		const rows = container.querySelectorAll("li")
+
+		expect(rows.length).toBeGreaterThan(0)
+		expect(rows.length).toBeLessThan(100)
+
+		const current = screen.getByRole("button", { name: new RegExp(`track-${String(CURRENT)}\\.mp3$`) })
+
+		expect(current.getAttribute("aria-current")).toBe("true")
+		expect(screen.queryByRole("button", { name: /track-0\.mp3$/ })).toBeNull()
+	})
+
+	it("plays and removes a windowed row by its index in the whole queue", async () => {
+		useAudioStore.setState({ queue: longQueue(), currentIndex: CURRENT })
+
+		render(createElement(NowPlayingPanel))
+
+		await act(async () => {
+			await new Promise(resolve => requestAnimationFrame(resolve))
+		})
+
+		const next = screen.getByRole("button", { name: new RegExp(`track-${String(CURRENT + 1)}\\.mp3$`) })
+
+		fireEvent.click(next)
+
+		expect(audioEngine.playIndex).toHaveBeenCalledWith(CURRENT + 1)
+
+		const remove = next.parentElement?.querySelector<HTMLElement>("[aria-label='Remove from queue']")
+
+		expect(remove).toBeDefined()
+
+		if (remove) {
+			fireEvent.click(remove)
+		}
+
+		expect(audioEngine.removeAt).toHaveBeenCalledWith(CURRENT + 1)
 	})
 })
 

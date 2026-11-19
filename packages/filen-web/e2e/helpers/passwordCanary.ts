@@ -1,8 +1,10 @@
 import type { Page } from "@playwright/test"
+import { waitForE2eHooks } from "./e2eHooks"
 
 // A document password used as a canary: the specs that type one assert it reaches no console message, request
-// (URL or body, as UTF-8 or UTF-16LE: Office derives keys from the UTF-16LE form) and no web storage (local,
-// session, IndexedDB). The page's own and its workers' requests are seen (the SDK's run in a worker).
+// (URL or body, as UTF-8 or UTF-16LE: Office derives keys from the UTF-16LE form) and no storage: local, session,
+// IndexedDB and the OPFS SQLite kv the app persists to. The page's own and its workers' requests are seen (the SDK's
+// run in a worker). The OPFS blob store outside the kv (src/lib/storage/opfsBlobStore.ts) is not scanned.
 
 export interface PasswordCanary {
 	// Where the password was seen so far: "console: …", "request: <url>".
@@ -39,8 +41,11 @@ export function trackPasswordCanary(page: Page, password: string): PasswordCanar
 }
 
 // Every value in localStorage, sessionStorage and the origin's IndexedDB databases that holds the password
-// (strings as they are, binary as UTF-8 and UTF-16LE).
+// (strings as they are, binary as UTF-8 and UTF-16LE), and every kv row whose key or stored value does
+// (src/e2e-hooks/kvScan.ts).
 export async function storedPassword(page: Page, password: string): Promise<string[]> {
+	await waitForE2eHooks(page)
+
 	return await page.evaluate(async secret => {
 		const found: string[] = []
 		const utf16 = new TextDecoder("utf-16le")
@@ -108,6 +113,10 @@ export async function storedPassword(page: Page, password: string): Promise<stri
 			}
 
 			database.close()
+		}
+
+		for (const key of await window.__filenE2E.kvFindValue(secret)) {
+			found.push(`kv: ${key}`)
 		}
 
 		return found

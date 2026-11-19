@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import { LANGUAGE_LABELS, type SupportedLanguage } from "@filen/shared/languages"
 import { AVAILABLE_LANGUAGES, readStoredLanguage, setLanguagePreference, subscribeLanguagePreference } from "@/lib/i18n/language"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
@@ -20,6 +21,13 @@ function LanguageRow() {
 		...AVAILABLE_LANGUAGES.map(lang => ({ value: lang, label: LANGUAGE_LABELS[lang] }))
 	]
 
+	// The pick is stored either way; a catalog that cannot be fetched leaves the UI in English, so say so.
+	async function pick(value: LanguageChoice): Promise<void> {
+		if (!(await setLanguagePreference(value === "system" ? null : value))) {
+			toast.error(t("settingsLanguageLoadFailed"))
+		}
+	}
+
 	return (
 		<SettingsSelectRow
 			label={t("settingsLanguageTitle")}
@@ -28,7 +36,7 @@ function LanguageRow() {
 			options={options}
 			value={choice}
 			disabled={false}
-			onChange={value => void setLanguagePreference(value === "system" ? null : value)}
+			onChange={value => void pick(value)}
 		/>
 	)
 }

@@ -47,6 +47,7 @@ vi.mock("sonner", () => ({ toast: { error: hooks.toastError } }))
 
 import "@/lib/i18n"
 import { preview as EN } from "@/locales/en/preview"
+import { common as COMMON } from "@/locales/en/common"
 import { SignatureDialog } from "@/features/pdf/fillSign/signatureDialog"
 
 beforeEach(() => {
@@ -95,6 +96,14 @@ function draw(points: readonly (readonly [number, number])[]): void {
 }
 
 const place = (): HTMLElement => screen.getByRole("button", { name: EN.previewPdfSignaturePlace })
+
+function fileInput(): HTMLInputElement {
+	const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+
+	if (input === null) throw new Error("no file input")
+
+	return input
+}
 
 describe("SignatureDialog", () => {
 	it("places drawn strokes, undoes and redoes a stroke, and saves a new signature for reuse", async () => {
@@ -268,6 +277,101 @@ describe("SignatureDialog", () => {
 
 		expect(hooks.picked).toHaveBeenLastCalledWith(expect.objectContaining({ name: "signature.heic" }))
 		expect(onPlace).toHaveBeenCalledWith(pickedImage)
+	})
+
+	it("keeps the latest picked image when an earlier pick ends later, resolved or failed", async () => {
+		open()
+		fireEvent.click(screen.getByRole("tab", { name: EN.previewPdfSignatureImage }))
+
+		const input = fileInput()
+		const first = Promise.withResolvers<PdfSignatureImage>()
+		const second = Promise.withResolvers<PdfSignatureImage>()
+		const urls = vi.fn(() => "blob:second")
+
+		URL.createObjectURL = urls
+		hooks.picked.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+		fireEvent.change(input, { target: { files: [new File(["heic"], "large.heic")] } })
+		fireEvent.change(input, { target: { files: [new File(["png"], "small.png")] } })
+		second.resolve(pickedImage)
+		await settle()
+		first.resolve(typedImage)
+		await settle()
+
+		expect(urls).toHaveBeenCalledTimes(1)
+		expect(document.querySelector("img")?.getAttribute("src")).toBe("blob:second")
+
+		const third = Promise.withResolvers<PdfSignatureImage>()
+		const fourth = Promise.withResolvers<PdfSignatureImage>()
+
+		hooks.picked.mockReturnValueOnce(third.promise).mockReturnValueOnce(fourth.promise)
+		fireEvent.change(input, { target: { files: [new File(["x"], "broken.heic")] } })
+		fireEvent.change(input, { target: { files: [new File(["png"], "other.png")] } })
+		fourth.resolve(pickedImage)
+		await settle()
+		third.reject(new Error("not an image"))
+		await settle()
+
+		expect(screen.queryByRole("alert")).toBeNull()
+		expect(document.querySelector("img")).not.toBeNull()
+		expect(place()).toHaveProperty("disabled", false)
+	})
+
+	it("drops a picked image whose decode ends after the dialog closed", async () => {
+		const pending = Promise.withResolvers<PdfSignatureImage>()
+		const urls = vi.fn(() => "blob:late")
+		const { unmount } = render(
+			createElement(SignatureDialog, { open: true, onOpenChange: () => undefined, role: "signature", onPlace: () => undefined })
+		)
+
+		URL.createObjectURL = urls
+		fireEvent.click(screen.getByRole("tab", { name: EN.previewPdfSignatureImage }))
+		hooks.picked.mockReturnValueOnce(pending.promise)
+		fireEvent.change(fileInput(), { target: { files: [new File(["png"], "signature.png")] } })
+		unmount()
+		pending.resolve(pickedImage)
+		await settle()
+
+		expect(urls).not.toHaveBeenCalled()
+	})
+
+	it("says when the handwriting fonts fail to load, and loads them again on Try again", async () => {
+		open("signature", "Jane")
+		hooks.loadFonts.mockRejectedValueOnce(new Error("offline"))
+		fireEvent.click(screen.getByRole("tab", { name: EN.previewPdfSignatureType }))
+		await settle()
+
+		expect(screen.getByRole("alert").textContent).toContain(EN.previewPdfSignatureFontsFailed)
+		expect(place()).toHaveProperty("disabled", true)
+
+		fireEvent.click(screen.getByRole("button", { name: COMMON.tryAgain }))
+		await settle()
+
+		expect(hooks.loadFonts).toHaveBeenCalledTimes(2)
+		expect(screen.queryByRole("alert")).toBeNull()
+		expect(place()).toHaveProperty("disabled", false)
+	})
+
+	it("hides the font error once the text no longer needs the face that failed", async () => {
+		open("signature", "Jane")
+		fireEvent.click(screen.getByRole("tab", { name: EN.previewPdfSignatureType }))
+		await settle()
+
+		expect(place()).toHaveProperty("disabled", false)
+
+		// Cyrillic needs the fallback face; its load fails.
+		hooks.loadFonts.mockRejectedValueOnce(new Error("offline"))
+		const input = screen.getByLabelText(EN.previewPdfSignatureTypeLabel)
+		fireEvent.change(input, { target: { value: "Jane Ж" } })
+		await settle()
+
+		expect(screen.getByRole("alert").textContent).toContain(EN.previewPdfSignatureFontsFailed)
+		expect(place()).toHaveProperty("disabled", true)
+
+		fireEvent.change(input, { target: { value: "Jane" } })
+		await settle()
+
+		expect(screen.queryByRole("alert")).toBeNull()
+		expect(place()).toHaveProperty("disabled", false)
 	})
 
 	it("offers saved signatures first, and New for another", async () => {

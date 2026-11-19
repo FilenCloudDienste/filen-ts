@@ -62,13 +62,15 @@ vi.mock("@/features/drive/lib/upload", () => ({
 	})
 }))
 
-const { toastSuccess, toastError, toastTransferStarted } = vi.hoisted(() => ({
+const { toastSuccess, toastError, toastLoading, toastDismiss, toastTransferStarted } = vi.hoisted(() => ({
 	toastSuccess: vi.fn(),
 	toastError: vi.fn(),
+	toastLoading: vi.fn((_message: string) => "scanning"),
+	toastDismiss: vi.fn(),
 	toastTransferStarted: vi.fn()
 }))
 
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, loading: toastLoading, dismiss: toastDismiss } }))
 vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
 
 const { startDirectoryUpload, ensureUploadQuota, convertPreference, findCachedListingItem } = vi.hoisted(() => ({
@@ -706,6 +708,57 @@ describe("native entry points: drops", () => {
 		await startNativeDrop([plain, photos], [directoryEntry("Docs", ["a.txt"]), photosEntry], PARENT)
 
 		expect(bridge.transfers.upload).toHaveBeenCalledWith([plain], expect.objectContaining({ uuid: PARENT }))
+		expect(startDirectoryUpload).toHaveBeenCalledWith({ kind: "entries", entries: [photosEntry] }, PARENT)
+	})
+
+	it("with conversion on, shows the scanning toast, reads the dropped trees at once and starts one native upload in drop order", async () => {
+		const events: string[] = []
+		const slowEntry = (name: string): FileSystemDirectoryEntry =>
+			({
+				name,
+				isDirectory: true,
+				isFile: false,
+				createReader: () => {
+					events.push(`open:${name}`)
+
+					return {
+						readEntries: (resolve: (entries: FileSystemEntry[]) => void) => {
+							setTimeout(() => {
+								events.push(`read:${name}`)
+								resolve([])
+							}, 0)
+						}
+					}
+				}
+			}) as unknown as FileSystemDirectoryEntry
+		const docs = localFile("Docs", 0)
+		const loose = localFile("a.txt", 1)
+		const photos = localFile("Photos", 0)
+
+		convertPreference.on = true
+		await startNativeDrop(
+			[docs, loose, photos],
+			[slowEntry("Docs"), { name: "a.txt", isDirectory: false, isFile: true } as FileSystemEntry, slowEntry("Photos")],
+			PARENT
+		)
+
+		expect(toastLoading).toHaveBeenCalledWith("Scanning directory…")
+		expect(events.slice(0, 2)).toEqual(["open:Docs", "open:Photos"])
+		expect(bridge.transfers.upload).toHaveBeenCalledTimes(1)
+		expect(bridge.transfers.upload).toHaveBeenCalledWith([docs, loose, photos], expect.objectContaining({ uuid: PARENT }))
+		expect(toastTransferStarted).toHaveBeenCalledWith(expect.objectContaining({ name: "Docs", count: 1 }), "scanning")
+		expect(toastDismiss).not.toHaveBeenCalled()
+		expect(startDirectoryUpload).not.toHaveBeenCalled()
+	})
+
+	it("with conversion on, dismisses the scanning toast when every dropped directory takes the web walk", async () => {
+		const photosEntry = directoryEntry("Photos", ["b.heic"])
+
+		convertPreference.on = true
+		await startNativeDrop([localFile("Photos", 0)], [photosEntry], PARENT)
+
+		expect(toastDismiss).toHaveBeenCalledWith("scanning")
+		expect(bridge.transfers.upload).not.toHaveBeenCalled()
 		expect(startDirectoryUpload).toHaveBeenCalledWith({ kind: "entries", entries: [photosEntry] }, PARENT)
 	})
 })

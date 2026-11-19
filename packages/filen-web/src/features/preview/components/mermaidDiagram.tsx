@@ -9,10 +9,10 @@ import { MERMAID_AUTO_RENDER_LIMIT, MermaidScopeContext } from "@/features/previ
 // Mermaid diagrams as the preview shows them: a markdown file's fences (drawn when they come near, the first 50 of a
 // document on their own and the rest on request) and a .mmd file's one diagram, zoomable.
 
-function SourceBlock({ source, title }: { source: string; title?: string | undefined }) {
+function SourceBlock({ source }: { source: string }) {
 	return (
 		<MarkdownPre>
-			<code title={title}>{source}</code>
+			<code>{source}</code>
 		</MarkdownPre>
 	)
 }
@@ -99,10 +99,10 @@ function DiagramState({ state, source }: { state: Exclude<MermaidDiagramState, {
 			return <p className="mb-3 rounded-lg border border-border p-3 text-sm text-muted-foreground">{t("previewMermaidTooComplex")}</p>
 		case "failed":
 			return (
-				<SourceBlock
-					source={source}
-					title={t("previewMermaidUnreadable")}
-				/>
+				<div className="mb-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-sm text-muted-foreground">
+					<p>{t("previewMermaidUnreadable")}</p>
+					<SourceBlock source={source} />
+				</div>
 			)
 		case "waiting":
 		case "pending":

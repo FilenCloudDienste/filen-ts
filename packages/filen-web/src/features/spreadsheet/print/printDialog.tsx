@@ -115,7 +115,8 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 	const id = useId()
 	const [form, setForm] = useState<PrintForm>(() => formOf(active.setup))
 	const [workbook, setWorkbook] = useState<WorkbookSettings | null>(null)
-	const [printed, setPrinted] = useState<PrintJob | null>(null)
+	// The pages laid out, with the choices they were laid out for.
+	const [laidOut, setLaidOut] = useState<{ readonly job: PrintJob; readonly inputs: readonly unknown[] } | null>(null)
 	const [index, setIndex] = useState(0)
 	// The page on show as drawn, or null where it holds too many cells to draw.
 	const [preview, setPreview] = useState<{
@@ -156,6 +157,12 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 
 	const waiting = form.scope === "workbook" && workbook === null
 	const selection = grid.selection.ranges
+	// The choices a layout is made from (as the layout effect lists them).
+	const inputs = [form, active, workbook, selection, model, measure, t] as const
+	const printed = laidOut?.job ?? null
+	// The pages shown stand until the next layout replaces them, but their job is disposed once the choices change: they
+	// neither print nor save until the pages for the choices now made are laid out.
+	const pending = waiting || laidOut === null || inputs.some((input, k) => laidOut.inputs[k] !== input)
 
 	// The pages, laid out again when the choices change.
 	useEffect(() => {
@@ -167,13 +174,15 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 
 		let live = true
 		let current: PrintJob | null = null
+		// What `inputs` holds as this layout starts.
+		const laidFor = [form, active, workbook, selection, model, measure, t] as const
 
 		// Laid out only as far as a browser prints.
 		void layOutPrint(model, requests, measure, MAX_BROWSER_PAGES).then(
 			job => {
 				if (live) {
 					current = job
-					setPrinted(job)
+					setLaidOut({ job, inputs: laidFor })
 					setIndex(0)
 				} else {
 					job.dispose()
@@ -252,7 +261,7 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 	}
 
 	function print(): void {
-		if (printed === null) {
+		if (printed === null || pending) {
 			return
 		}
 
@@ -287,6 +296,10 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 
 	// The same pages as a PDF, made in the worker; the dialog closes, the toast counts.
 	function savePdf(): void {
+		if (pending) {
+			return
+		}
+
 		const requests = printRequests(form, active, workbook?.sheets ?? [active], selection)
 
 		if (requests === null || onSavePdf === undefined) {
@@ -325,7 +338,7 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 			description={t("previewSheetPrintDescription")}
 			className="sm:max-w-3xl"
 			busy={busy}
-			canPrint={pages > 0 && !percentInvalid}
+			canPrint={pages > 0 && !percentInvalid && !pending}
 			printLabel={
 				progress !== null
 					? t("previewSheetPrintProgress", { done: progress.done, pages: progress.pages })
@@ -340,7 +353,7 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 					<Button
 						type="button"
 						variant="outline"
-						disabled={busy || pages === 0 || percentInvalid}
+						disabled={busy || pages === 0 || percentInvalid || pending}
 						onClick={() => {
 							savePdf()
 						}}

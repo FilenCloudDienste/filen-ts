@@ -38,8 +38,71 @@ const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text an
 // dirty by design, so on a green run the finally's Escape and the prompt's mount are a genuine race.
 // Generous rather than tight because the two sides are not symmetric — losing the race means Discard is
 // never clicked and the teardown falls through to trashScratchDirectory's reload recovery, a four-minute
-// path, while waiting longer costs nothing on a run where the prompt never opens at all.
+// path. A waitFor that never sees the prompt runs to this full timeout, so discardUnsavedEdits only
+// waits while a preview is still open: a teardown with nothing open pays nothing.
 const UNSAVED_PROMPT_TIMEOUT_MS = 15_000
+
+// The preview overlay while open: Base UI writes `data-open` on the popup for exactly as long as it is
+// open (see OPEN_DIALOG_SELECTOR in src/lib/keymap/dialogGuard.ts).
+const OPEN_PREVIEW_SELECTOR = '[role="dialog"][data-open]'
+
+// The navigation-guard legs' teardown, ahead of trashScratchDirectory: that helper opens with Escape + a
+// sidebar "Cloud Drive" click, and BOTH are defeated by a still-dirty buffer (Escape opens the prompt;
+// the link is covered by the overlay or blocked by the router). Never throws — it runs in a finally.
+async function discardUnsavedEdits(page: Page): Promise<void> {
+	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
+
+	// A prompt already standing (the body failed with it open) is answered directly: Escape on it would
+	// only cancel it and leave the buffer dirty. Keyed on `data-open`, not isVisible: a prompt just
+	// cancelled stays mounted and visible through its exit animation, and Base UI drops `data-open` the
+	// moment it starts closing, so a closing prompt falls through to the Escape path below.
+	if (
+		await unsavedPrompt
+			.and(page.locator("[data-open]"))
+			.isVisible()
+			.catch(() => false)
+	) {
+		const discarded = await unsavedPrompt
+			.getByRole("button", { name: "Discard", exact: true })
+			.click()
+			.then(() => true)
+			.catch(() => false)
+
+		if (discarded) {
+			return
+		}
+	}
+
+	// Probed through a raw attribute selector, not getByRole: an open modal over the preview marks it
+	// aria-hidden, and Playwright's role engine skips aria-hidden subtrees (see dismissOverlays in
+	// helpers/listing.ts). No open preview, nothing can be dirty, and the wait below is never paid.
+	const previewOpen =
+		(await page
+			.locator(OPEN_PREVIEW_SELECTOR)
+			.count()
+			.catch(() => 0)) > 0
+
+	if (!previewOpen) {
+		return
+	}
+
+	await page.keyboard.press("Escape").catch(() => undefined)
+
+	// waitFor, not isVisible: isVisible answers from the DOM as it stands, while the prompt mounts a
+	// tick after the press it responds to — losing that race leaves the prompt standing, Discard
+	// unclicked, and the trash on its reload recovery path.
+	const prompted = await unsavedPrompt
+		.waitFor({ state: "visible", timeout: UNSAVED_PROMPT_TIMEOUT_MS })
+		.then(() => true)
+		.catch(() => false)
+
+	if (prompted) {
+		await unsavedPrompt
+			.getByRole("button", { name: "Discard", exact: true })
+			.click()
+			.catch(() => undefined)
+	}
+}
 
 // The exact history both navigation-guard legs below depend on: the scratch directory current, with
 // /favorites one entry AHEAD of it. Back never navigates under a preview (it closes the overlay, see
@@ -217,27 +280,7 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		// here; the finally below already dismisses the prompt its own Escape raises.
 		expect(cspViolations).toEqual([])
 	} finally {
-		// trashScratchDirectory opens with Escape + a sidebar "Cloud Drive" click, and BOTH are defeated by
-		// a still-dirty buffer (Escape opens the prompt; the link is covered by the overlay or blocked by
-		// the router). The happy path above ends clean, but a failure mid-leg would otherwise leak the
-		// scratch directory.
-		await page.keyboard.press("Escape").catch(() => undefined)
-
-		// waitFor, not isVisible: isVisible answers from the DOM as it stands, while the prompt mounts a
-		// tick after the press it responds to — losing that race leaves the prompt standing, Discard
-		// unclicked, and the trash below on its reload recovery path.
-		const prompted = await unsavedPrompt
-			.waitFor({ state: "visible", timeout: UNSAVED_PROMPT_TIMEOUT_MS })
-			.then(() => true)
-			.catch(() => false)
-
-		if (prompted) {
-			await unsavedPrompt
-				.getByRole("button", { name: "Discard", exact: true })
-				.click()
-				.catch(() => undefined)
-		}
-
+		await discardUnsavedEdits(page)
 		await trashScratchDirectory(page, scratchName)
 	}
 })
@@ -376,24 +419,13 @@ test("discarding after a cancelled forward on the same pop still proceeds to the
 		await expect(unsavedPrompt).toBeVisible()
 		await unsavedPrompt.getByRole("button", { name: "Discard", exact: true }).click()
 		await expect(page).toHaveURL(/\/favorites$/)
+		// Not a barrier on its own: the browser URL is already /favorites while the prompt is open. The
+		// overlay closing is the proceed() actually committing the destination route, and the teardown's
+		// open-preview probe relies on it. A raw selector, because getByRole would pass early while the
+		// closing prompt still leaves the preview aria-hidden.
+		await expect(page.locator(OPEN_PREVIEW_SELECTOR)).toHaveCount(0)
 	} finally {
-		await page.keyboard.press("Escape").catch(() => undefined)
-
-		// waitFor, not isVisible: isVisible answers from the DOM as it stands, while the prompt mounts a
-		// tick after the press it responds to — losing that race leaves the prompt standing, Discard
-		// unclicked, and the trash below on its reload recovery path.
-		const prompted = await unsavedPrompt
-			.waitFor({ state: "visible", timeout: UNSAVED_PROMPT_TIMEOUT_MS })
-			.then(() => true)
-			.catch(() => false)
-
-		if (prompted) {
-			await unsavedPrompt
-				.getByRole("button", { name: "Discard", exact: true })
-				.click()
-				.catch(() => undefined)
-		}
-
+		await discardUnsavedEdits(page)
 		await trashScratchDirectory(page, scratchName)
 	}
 })

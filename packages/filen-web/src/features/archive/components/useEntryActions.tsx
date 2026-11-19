@@ -67,7 +67,7 @@ export interface EntryActionsInput {
 	// A link allowing no downloads still previews.
 	downloadable: boolean
 	isOnline: boolean
-	// Browses an archive held in an entry in this one's place (W6 §6.1 A); null where none is entered.
+	// Browses an archive held in an entry in this one's place; null where none is entered.
 	onEnterArchive: ((inner: ArchiveSource, target: EntryTarget, entered: EnteredArchive) => void) | null
 }
 
@@ -127,7 +127,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 		}
 	}
 
-	// The inner archive opens by its entry's access kind (W6 §3.10): in this one's place when it is mapped or seekable,
+	// The inner archive opens by its entry's access kind: in this one's place when it is mapped or seekable,
 	// else as the "Extract to open" card. A seekable one first confirms what reaching it decodes: a gzip tar's member the
 	// block before it (the solid cost, once per session), any one its inflate above NESTED_INFLATE_CONFIRM_BYTES. An
 	// encrypted entry is read with the outer archive's password, asked first when the listing holds none.
@@ -191,7 +191,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 		)
 	}
 
-	// `extract`: it is not read from here (a block too large, E3), so it opens as the card offering to extract.
+	// `extract`: it is not read from here (a block too large), so it opens as the card offering to extract.
 	function open({ store, slot }: EntryTarget, extract?: ExtractReason): void {
 		const request = entryRequest(source, store, slot)
 		// Its content read picks the viewer once it opens.
@@ -262,7 +262,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 			return
 		}
 
-		// A solid block above E3's ceiling: no cost covers reading it from here. Opened, its card offers the extract.
+		// A solid block above SOLID_BLOCK_READ_MAX_BYTES: no cost covers reading it from here. Opened, its card offers the extract.
 		if (extractsToRead(target.store, target.slot)) {
 			if (intent === "open") {
 				open(target, "read")

@@ -138,9 +138,10 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	}
 
 	async function handleSavePassword(current: DriveItemLinkStatus): Promise<void> {
-		const plaintext = passwordDraft.trim()
+		// Sent as typed: the link page checks what a visitor types untrimmed. A blank draft sets nothing.
+		const plaintext = passwordDraft
 
-		if (plaintext.length === 0) {
+		if (plaintext.trim().length === 0) {
 			return
 		}
 
@@ -329,14 +330,17 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										</Select>
 									</Field>
 									<Field>
-										<FieldLabel>{t("driveLinkPasswordLabel")}</FieldLabel>
+										{/* Labels the input only while it shows. No "password" in the id: password managers key on it. */}
+										<FieldLabel htmlFor={passwordEditing ? "link-secret" : undefined}>
+											{t("driveLinkPasswordLabel")}
+										</FieldLabel>
 										{passwordEditing ? (
 											<div className="flex items-center gap-2">
 												<SecretInput
+													id="link-secret"
 													autoFocus
 													value={passwordDraft}
 													disabled={pending || !isOnline}
-													placeholder={t("driveLinkPasswordPlaceholder")}
 													className="flex-1"
 													onChange={e => {
 														setPasswordDraft(e.target.value)

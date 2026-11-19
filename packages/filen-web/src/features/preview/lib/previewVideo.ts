@@ -2,7 +2,6 @@ import type { AnyFile } from "@filen/sdk-rs"
 import {
 	languagesMatch,
 	normalizeLanguage,
-	selectAudioTrack,
 	type CueStore,
 	type LadderDecision,
 	type LadderSubtitle,
@@ -23,6 +22,7 @@ import { confirmedGap, silentAudioCodec, type PreviewVideoRoute } from "@/featur
 import { STREAM_STALL_MS, STREAM_STALL_POLL_MS, expectsProgress } from "@/lib/media/playback/directSession.logic"
 import { audioTracksOf, enableAudioTrack } from "@/lib/media/playback/audioTrackList"
 import { menuListsProbeAudio } from "@/features/preview/lib/audioTrackMenu.logic"
+import { defaultAudioIndex } from "@/features/videos/lib/player/audioChoice.logic"
 import {
 	holdPreviewStreamAlive,
 	previewStreamIdOf,
@@ -121,9 +121,6 @@ export interface PreviewVideoOptions {
 const PLAYED_SECONDS_BEFORE_CHECK = 1.5
 // How long the playhead may stand still after an in-place audio track switch before it is seeked, then given up on.
 const SWITCH_STALL_MS = 4_000
-
-// Audio codecs every browser decodes without re-encoding: what a default track choice prefers.
-const NATIVE_AUDIO: ReadonlySet<string> = new Set(["aac", "mp3", "opus", "vorbis", "flac"])
 
 function userLanguages(): readonly string[] {
 	return typeof navigator === "undefined" ? [] : navigator.languages
@@ -514,7 +511,8 @@ export class PreviewVideo {
 			return
 		}
 
-		if (this.isDisposed()) {
+		// Disposed, or moved to the ladder while the registration was in flight: the element reads the ladder's source.
+		if (this.isDisposed() || this.escalated) {
 			this.releaseUrl(url)
 
 			return
@@ -793,17 +791,7 @@ export class PreviewVideo {
 		const audioIndex =
 			chosen !== null && chosen < probe.audio.length
 				? chosen
-				: selectAudioTrack(
-						probe.audio.map(track => ({ lang: track.lang, default: track.def })),
-						{
-							userLanguages: userLanguages(),
-							playable: (_track, index) => {
-								const codec = probe.audio[index]?.codec ?? null
-
-								return codec !== null && NATIVE_AUDIO.has(codec)
-							}
-						}
-					)
+				: defaultAudioIndex({ probe, rememberedLang: null, userLanguages: userLanguages() })
 
 		this.update({ probe, audioIndex, nativeAudio: null })
 

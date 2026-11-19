@@ -42,7 +42,10 @@ describe("threadCount", () => {
 		expect(withCores(64)).toBe(12)
 	})
 
-	it("assumes four cores where the browser reports none", () => {
+	it("falls back to the minimum pool where the browser reports no core count", () => {
+		vi.stubGlobal("navigator", {})
+
+		expect(threadCount()).toBe(2)
 		expect(withCores(0)).toBe(2)
 	})
 })

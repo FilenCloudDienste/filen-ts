@@ -1,8 +1,7 @@
 import { createContext, useContext } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { fetchDirectoryListing, DRIVE_LISTING_KEY_PREFIX } from "@/features/drive/queries/drive"
+import { fetchDirectoryListing, findCachedDirectoryListing } from "@/features/drive/queries/drive"
 import { currentRootUuid } from "@/features/drive/lib/actions"
-import { cachedQueriesWithPrefix } from "@/queries/patch"
 import { originSize, type ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { sdkApi } from "@/lib/sdk/client"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
@@ -104,27 +103,10 @@ function directoryListing(items: readonly DriveItem[], own: boolean): ReferenceL
 	return { files: listing.files, dirs: listing.dirs.map(([name, item]) => [name, { item, own }] as const) }
 }
 
-// The directory listing holding `uuid` (a row of it, or the directory itself), as the cache holds it: the drive's own,
-// or a shared directory's.
-function cachedListingOf(
-	match: (params: { variant?: unknown; uuid?: unknown }, rows: readonly DriveItem[]) => boolean
-): { rows: readonly DriveItem[]; own: boolean } | null {
-	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
-		const params = query.queryKey[2] as { variant?: unknown; uuid?: unknown } | undefined
-		const rows = query.state.data as DriveItem[] | undefined
-		const directory =
-			params?.variant === "drive" || ((params?.variant === "sharedIn" || params?.variant === "sharedOut") && params.uuid !== null)
-
-		if (rows !== undefined && params !== undefined && directory && match(params, rows)) return { rows, own: params.variant === "drive" }
-	}
-
-	return null
-}
-
 function cachedDirectory(uuid: string): readonly DriveItem[] | undefined {
 	const root = uuid === currentRootUuid() ? null : uuid
 
-	return cachedListingOf(params => params.uuid === root || params.uuid === uuid)?.rows
+	return findCachedDirectoryListing(({ params }) => params.uuid === root || params.uuid === uuid)?.rows
 }
 
 async function driveDirectory(directory: DriveDirectory): Promise<ReferenceListing<DriveDirectory, ByteOrigin>> {
@@ -140,7 +122,7 @@ async function driveDirectory(directory: DriveDirectory): Promise<ReferenceListi
 export function driveReferences(item: DriveItem): ReferenceResolver {
 	return originResolver<DriveDirectory>(
 		async () => {
-			const holding = cachedListingOf((_params, rows) => rows.some(row => row.data.uuid === item.data.uuid))
+			const holding = findCachedDirectoryListing(({ rows }) => rows.some(row => row.data.uuid === item.data.uuid))
 
 			if (holding !== null) return directoryListing(holding.rows, holding.own)
 

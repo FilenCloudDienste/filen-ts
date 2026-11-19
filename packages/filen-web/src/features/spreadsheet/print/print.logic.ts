@@ -1,7 +1,7 @@
 import type { SheetDocumentProperties, SheetFileKind, SheetRange, SheetSummary } from "@filen/office/core/sheet"
 import { COMMON_PAPER_SIZES, paperPoints, type SheetPageSetup, type SheetPrintPatch } from "@filen/office/core/sheet/print"
 import type { PrintChart, PrintSheetRequest, SheetPdfRequest } from "@filen/office/react/sheet/print"
-import type { PreviewKey } from "@/lib/i18n"
+import { i18n, type PreviewKey } from "@/lib/i18n"
 import { fileStem } from "@/features/spreadsheet/save/sheetSave.logic"
 
 // The print dialog's choices and what they print: the sheets and ranges, each sheet's setup with the dialog's choices
@@ -129,6 +129,18 @@ export function patchOf(setup: SheetPageSetup, form: PrintForm): SheetPrintPatch
 	return Object.keys(patch).length === 0 ? null : patch
 }
 
+// The words a print adds (the notes list, a PDF's alternative texts) in the app's language, as the print's templates
+// take them ("{cell}", "{note}", "{name}" filled in by the print).
+export function printLabels(): NonNullable<PrintSheetRequest["labels"]> {
+	return {
+		cell: i18n.t("preview:previewSheetPrintNoteCell", { cell: "{cell}" }),
+		note: i18n.t("preview:previewSheetPrintNoteText", { note: "{note}" }),
+		chart: i18n.t("preview:previewSheetPrintChartAlt"),
+		picture: i18n.t("preview:previewSheetPrintPictureAlt"),
+		chartSheet: i18n.t("preview:previewSheetPrintChartSheetAlt", { name: "{name}" })
+	}
+}
+
 export interface PrintSheetSettings {
 	readonly sheet: SheetSummary
 	readonly setup: SheetPageSetup
@@ -151,13 +163,15 @@ export function printRequests(
 
 	if (own === null) return null
 
+	const labels = printLabels()
 	const request = (settings: PrintSheetSettings, setup: SheetPageSetup): PrintSheetRequest => ({
 		sheet: settings.sheet.id,
 		name: settings.sheet.name,
 		setup,
 		used: settings.used,
 		ranges: setup.printArea !== null && !form.ignorePrintArea ? setup.printArea : settings.used === null ? [] : [settings.used],
-		...(settings.chart !== undefined && { chart: settings.chart })
+		...(settings.chart !== undefined && { chart: settings.chart }),
+		labels
 	})
 
 	if (form.scope === "selection") {
@@ -168,7 +182,8 @@ export function printRequests(
 				setup: { ...own, printArea: null },
 				used: active.used,
 				ranges: selection,
-				...(active.chart !== undefined && { chart: active.chart })
+				...(active.chart !== undefined && { chart: active.chart }),
+				labels
 			}
 		]
 	}

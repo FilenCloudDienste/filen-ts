@@ -14,6 +14,7 @@ import {
 	MODEL_MAX_TRIANGLES,
 	MODEL_MAX_UNPACKED_BYTES,
 	OBJ_MAX_CORNERS,
+	gltfAccessorBytes,
 	gltfMeshoptBytes,
 	ktx2Pixels,
 	objCounts,
@@ -178,6 +179,28 @@ describe("preflight", () => {
 		expect(gltfMeshoptBytes(meshopt(10))).toBe(164)
 		expect(preflightGltf(glb(meshopt(10)), true)).toEqual({ ok: true })
 		expect(preflightGltf(glb(meshopt(100_000_000)), true)).toEqual({ ok: false, reason: "tooLarge" })
+	})
+
+	it("refuses a glTF whose accessors the loader allocates itself are over the GPU budget, not those read from the file", () => {
+		const sparse = { count: 1, indices: { bufferView: 1, componentType: 5125 }, values: { bufferView: 1 } }
+		// 20 million MAT4 floats with no buffer view: a 1.28 GB zero-filled array from a few bytes of JSON.
+		const unbacked = { accessors: [{ count: 20_000_000, type: "MAT4", componentType: 5126 }] }
+		// Six accessors of 160 MB each, all read in place from one aliased buffer view.
+		const aliased = {
+			bufferViews: [{ buffer: 0, byteLength: 160_000_000 }],
+			accessors: Array.from({ length: 6 }, () => ({ bufferView: 0, count: 10_000_000, type: "VEC4", componentType: 5126 }))
+		}
+
+		expect(gltfAccessorBytes(unbacked)).toBe(1_280_000_000)
+		expect(preflightGltf(glb(unbacked), true)).toEqual({ ok: false, reason: "tooLarge" })
+		expect(gltfAccessorBytes(aliased)).toBe(0)
+		expect(preflightGltf(glb(aliased), true)).toEqual({ ok: true })
+		expect(gltfAccessorBytes({ accessors: [{ count: 2, type: "VEC3", componentType: 5123, sparse }] })).toBe(12)
+		expect(gltfAccessorBytes({ accessors: [{ bufferView: 0, count: 2, type: "VEC3", componentType: 5123, sparse }] })).toBe(12)
+		expect(preflightGltf(glb({ accessors: [{ count: 13_000_000, type: "MAT4", componentType: 5126, sparse }] }), true)).toEqual({
+			ok: false,
+			reason: "tooLarge"
+		})
 	})
 
 	it("counts an OBJ's vertices and the corners its faces, lines and points copy, before parsing", () => {

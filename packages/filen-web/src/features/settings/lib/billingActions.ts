@@ -52,11 +52,6 @@ function checkoutKey(planId: number, method: PaymentMethod): string {
 	return `${String(planId)}:${method}`
 }
 
-// The URL already created for this pair, if any.
-export function heldCheckout(planId: number, method: PaymentMethod): Promise<ActionOutcome<string>> | undefined {
-	return checkouts.get(checkoutKey(planId, method))
-}
-
 // The URL becomes a link's href, so only a web page passes.
 export function isCheckoutUrl(value: string): boolean {
 	try {

@@ -379,14 +379,21 @@ describe("defaultDownloadDeps.download — fsa branch", () => {
 			order.push("download")
 			await writer.getWriter().close()
 		})
-		const save: FsaSaveTarget = { kind: "fsa", handle: fsaHandle(), writable: fsaWritable() }
+		// A fresh module graph, so the channel's open-once latch starts closed whatever ran earlier in this file.
+		vi.resetModules()
 
-		await defaultDownloadDeps.download(testFile(), "transfer-id", save, vi.fn())
+		const { defaultDownloadDeps: fresh } = await import("@/features/drive/lib/download")
+
+		await fresh.download(testFile(), "transfer-id", { kind: "fsa", handle: fsaHandle(), writable: fsaWritable() }, vi.fn())
 
 		expect(downloadFileToWriter).toHaveBeenCalledWith(expect.anything(), "transfer-id", expect.anything())
-		// Once for the page, ahead of the first transfer.
-		expect(order[order.length - 1]).toBe("download")
-		expect(order.filter(step => step === "sink").length).toBeLessThanOrEqual(1)
+		expect(order).toEqual(["sink", "download"])
+
+		// Once for the page: a second download reuses the open channel.
+		await fresh.download(testFile(), "transfer-id-2", { kind: "fsa", handle: fsaHandle(), writable: fsaWritable() }, vi.fn())
+
+		expect(order).toEqual(["sink", "download", "download"])
+		expect(setProgressSink).toHaveBeenCalledOnce()
 	})
 
 	it("tears down (aborts) the fsa sink when the worker call rejects — coordinated teardown", async () => {

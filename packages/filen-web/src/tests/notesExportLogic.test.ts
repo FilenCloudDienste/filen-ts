@@ -180,6 +180,28 @@ describe("dedupeExportNames — collision suffixing", () => {
 		])
 	})
 
+	it("never emits a generated name that equals a real one (Foo, Foo (2), Foo)", () => {
+		const out = dedupeExportNames(["a.txt", "a (2).txt", "a.txt"])
+
+		expect(out).toEqual(["a.txt", "a (2).txt", "a (3).txt"])
+		expect(new Set(out.map(name => name.toLowerCase())).size).toBe(3)
+	})
+
+	it("bumps a first occurrence that equals an already generated name (Foo, Foo, Foo (2))", () => {
+		const out = dedupeExportNames(["a.txt", "a.txt", "a (2).txt"])
+
+		expect(out).toEqual(["a.txt", "a (2).txt", "a (2) (2).txt"])
+		expect(new Set(out.map(name => name.toLowerCase())).size).toBe(3)
+	})
+
+	it("treats names differing only in case or Unicode normalization as the same entry", () => {
+		const cased = dedupeExportNames(["Todo.txt", "todo.txt"])
+
+		expect(cased).toEqual(["Todo.txt", "todo (2).txt"])
+		expect(new Set(cased.map(name => name.toLowerCase())).size).toBe(2)
+		expect(dedupeExportNames(["Café.txt", "Café.txt"])).toEqual(["Café.txt", "Café (2).txt"])
+	})
+
 	it("returns a fresh array, same length as the input, empty input stays empty", () => {
 		const input: string[] = []
 		expect(dedupeExportNames(input)).toEqual([])

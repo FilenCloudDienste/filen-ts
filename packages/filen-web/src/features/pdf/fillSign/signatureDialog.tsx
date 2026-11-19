@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react"
@@ -106,7 +106,7 @@ function SignatureDialogBody({
 	defaultName: string | undefined
 	onPlace: (signature: PdfVisualSignature) => void
 }) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "common"])
 	const id = useId()
 	const saved = useSavedSignatures()
 	const online = useIsOnline()
@@ -124,10 +124,14 @@ function SignatureDialogBody({
 	const [fonts, setFonts] = useState<{ styles: boolean; fallback: boolean }>({ styles: false, fallback: false })
 	const needsFallback = SIGNATURE_STYLES.some(item => needsSignatureFallback(typed, item))
 	const fontsReady = fonts.styles && (fonts.fallback || !needsFallback)
+	// A failed load stops the retries until the user asks for one.
+	const [fontsFailed, setFontsFailed] = useState(false)
 	// The chosen picture and an object URL showing it (revoked when replaced or on close).
 	const [picture, setPicture] = useState<{ image: PdfSignatureImage; url: string } | null>(null)
 	const image = picture?.image ?? null
 	const [imageFailed, setImageFailed] = useState(false)
+	// Bumped by every pick and on close: a decode ending after either is dropped.
+	const pickRef = useRef(0)
 	const [saveForReuse, setSaveForReuse] = useState(true)
 	const [placing, setPlacing] = useState(false)
 	// A saved entry is offered first; New (or no saved entries) shows the tabs.
@@ -141,7 +145,7 @@ function SignatureDialogBody({
 	}, [])
 
 	useEffect(() => {
-		if (tab !== "type" || fontsReady) return
+		if (tab !== "type" || fontsReady || fontsFailed) return
 
 		let live = true
 
@@ -151,13 +155,23 @@ function SignatureDialogBody({
 			},
 			(error: unknown) => {
 				log.warn("pdf", "signature fonts not loaded", { error })
+
+				if (live) setFontsFailed(true)
 			}
 		)
 
 		return () => {
 			live = false
 		}
-	}, [tab, fontsReady, needsFallback])
+	}, [tab, fontsReady, fontsFailed, needsFallback])
+
+	useEffect(() => {
+		const picks = pickRef
+
+		return () => {
+			picks.current += 1
+		}
+	}, [])
 
 	useEffect(() => {
 		if (picture === null) return
@@ -225,13 +239,22 @@ function SignatureDialogBody({
 	}
 
 	function chooseImage(file: File): void {
+		pickRef.current += 1
+
+		const pick = pickRef.current
+
 		setImageFailed(false)
 		imageFileSignature(file).then(
 			chosen => {
+				if (pick !== pickRef.current) return
+
 				setPicture({ image: chosen, url: URL.createObjectURL(new Blob([chosen.png.slice()], { type: "image/png" })) })
 			},
 			(error: unknown) => {
 				log.warn("pdf", "signature image not read", { error })
+
+				if (pick !== pickRef.current) return
+
 				setPicture(null)
 				setImageFailed(true)
 			}
@@ -361,6 +384,24 @@ function SignatureDialogBody({
 							value={style}
 							onChange={setPickedStyle}
 						/>
+						{fontsFailed && !fontsReady ? (
+							<div
+								role="alert"
+								className="flex items-center justify-between gap-2 text-xs text-destructive"
+							>
+								<span>{t("previewPdfSignatureFontsFailed")}</span>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										setFontsFailed(false)
+									}}
+								>
+									{t("common:tryAgain")}
+								</Button>
+							</div>
+						) : null}
 					</TabsContent>
 					<TabsContent
 						value="image"

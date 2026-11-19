@@ -58,6 +58,8 @@ export const previewPdfOcr = {
 	previewPdfOcrFailed_other: "{{count}} pages couldn't be recognised.",
 	/** Text recognition dialog — the language data could not be downloaded or did not check out */
 	previewPdfOcrModelsFailed: "The language data couldn't be downloaded. Check your connection and try again.",
+	/** Text recognition dialog — recognition broke off partway; pages already recognised keep their text */
+	previewPdfOcrRunFailed: "Recognition stopped because of an error. Pages already recognised keep their text.",
 	/** Text recognition dialog — after Cancel */
 	previewPdfOcrCancelled: "Stopped. Pages already recognised keep their text.",
 	/** Settings › Office — row title: the languages scanned PDFs are recognised in */
@@ -72,5 +74,7 @@ export const previewPdfOcr = {
 	/** Settings › Office — the language picker dialog's save button */
 	previewPdfOcrSettingsSave: "Save",
 	/** One-line status under the ribbon while the editor looks for the PDF's scanned pages */
-	previewPdfOcrFinding: "Looking for scanned pages…"
+	previewPdfOcrFinding: "Looking for scanned pages…",
+	/** One-line notice under the ribbon when the editor could not look for the PDF's scanned pages */
+	previewPdfOcrFindingFailed: "Couldn't look for scanned pages. Try again."
 } as const

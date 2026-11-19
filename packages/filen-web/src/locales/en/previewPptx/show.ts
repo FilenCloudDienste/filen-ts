@@ -67,6 +67,14 @@ export const previewPptxShow = {
 	previewPptxShowTriggerUnnamed: "Play animation",
 	/** Slide show — accessible name of a link in the slide's text; {{target}} is its web address or tooltip */
 	previewPptxShowLink: "Link: {{target}}",
+	/** Slide show — accessible name of the button that plays or pauses a video on the slide; {{name}} is the video's name or description */
+	previewPptxShowMediaVideo: "Video: {{name}}",
+	/** Slide show — accessible name of the button that plays or pauses a video on the slide, when it has no name */
+	previewPptxShowMediaVideoUnnamed: "Video",
+	/** Slide show — accessible name of the button that plays or pauses an audio clip on the slide; {{name}} is the clip's name or description */
+	previewPptxShowMediaAudio: "Audio: {{name}}",
+	/** Slide show — accessible name of the button that plays or pauses an audio clip on the slide, when it has no name */
+	previewPptxShowMediaAudioUnnamed: "Audio",
 	/** Slide show — note while a slide plays: its animations exceed what can be played, so it shows without them */
 	previewPptxShowTimingTooLarge: "This slide's animations are too complex to play. It is shown without them.",
 	/** Slide show — note while a slide plays: a text size animation is shown by scaling the text, so lines may look different than in PowerPoint */

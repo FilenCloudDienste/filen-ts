@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import {
-	capFinishedTransfers,
 	computeTransfersAggregate,
 	computeTransfersSpeed,
 	hasActiveDriveJobs,
@@ -287,6 +286,28 @@ describe("settle", () => {
 		expect(ids).toContain("finished-0")
 		expect(ids).toContain("cancelled-row")
 	})
+
+	it("drops every finished row past the cap at once when the history is already several over it", () => {
+		const finished = Array.from({ length: 205 }, (_, i) => makeTransfer({ id: `finished-${String(i)}`, status: "done" }))
+
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "active", status: "uploading" }),
+				...finished,
+				makeTransfer({ id: "settling", status: "uploading" })
+			],
+			rowSpeedSamples: { "finished-0": [{ timestamp: 0, totalBytes: 0 }], "finished-6": [{ timestamp: 0, totalBytes: 0 }] }
+		})
+
+		useTransfersStore.getState().settle("settling", "done")
+
+		// 206 finished rows -> the six oldest go in one pass; the active row and every later finished row stay, in order.
+		const state = useTransfersStore.getState()
+		const ids = state.transfers.map(transfer => transfer.id)
+
+		expect(ids).toEqual(["active", ...finished.slice(6).map(transfer => transfer.id), "settling"])
+		expect(Object.keys(state.rowSpeedSamples)).toEqual(["finished-6"])
+	})
 })
 
 describe("remove", () => {
@@ -395,29 +416,6 @@ describe("hasActiveDriveJobs", () => {
 				makeTransfer({ id: "x", direction: "extract", status: "completedWithErrors" })
 			])
 		).toBe(false)
-	})
-})
-
-describe("capFinishedTransfers", () => {
-	it("is a no-op under the cap", () => {
-		const transfers = [makeTransfer({ id: "a", status: "uploading" }), makeTransfer({ id: "b", status: "done" })]
-
-		expect(capFinishedTransfers(transfers)).toEqual(transfers)
-	})
-
-	it("drops only the oldest finished rows past the cap, never an active row", () => {
-		const transfers = [
-			makeTransfer({ id: "active", status: "uploading" }),
-			...Array.from({ length: 201 }, (_, i) => makeTransfer({ id: `f${String(i)}`, status: "done" }))
-		]
-
-		const kept = capFinishedTransfers(transfers).map(transfer => transfer.id)
-
-		expect(kept).toHaveLength(201) // 1 active + 200 finished
-		expect(kept).toContain("active")
-		expect(kept).not.toContain("f0")
-		expect(kept).toContain("f1")
-		expect(kept).toContain("f200")
 	})
 })
 
@@ -1004,6 +1002,7 @@ describe("directory runs — fewer writes", () => {
 		const unsubscribe = useTransfersStore.subscribe(listener)
 
 		store.updateUploadBatchScans(new Map([["run", { files: 2, bytes: 20 }]]))
+		expect(listener).not.toHaveBeenCalled()
 		store.cancelUploadBatches(new Set(["run"]))
 		listener.mockClear()
 		store.updateUploadBatchScans(new Map([["run", { files: 5, bytes: 50 }]]))

@@ -447,3 +447,56 @@ describe("Shift+F11", () => {
 		expect(model.getSnapshot().sheets.map(sheet => sheet.name)).toEqual(["One", "Two", "Sheet4", "Three"])
 	})
 })
+
+describe("the tab row's arrow keys", () => {
+	beforeEach(() => {
+		vi.stubGlobal("crypto", webcrypto)
+	})
+
+	function active(model: SheetGridModel): string | undefined {
+		const snapshot = model.getSnapshot()
+
+		return snapshot.sheets.find(sheet => sheet.id === snapshot.sheet)?.name
+	}
+
+	async function settle(): Promise<void> {
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 50))
+		})
+	}
+
+	it("show the next sheet from a tab", async () => {
+		const model = await opened()
+
+		show(model)
+		fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "ArrowRight" })
+		await waitFor(() => {
+			expect(active(model)).toBe("Two")
+		})
+	})
+
+	it("stay with the menu button beside the active tab", async () => {
+		const model = await opened()
+
+		show(model)
+		fireEvent.keyDown(screen.getByRole("button", { name: label("previewSheetTabMenu") }), { key: "ArrowRight" })
+		await settle()
+		expect(active(model)).toBe("One")
+	})
+
+	it("stay with an open tab menu", async () => {
+		const model = await opened()
+
+		show(model)
+		tabMenu("One")
+
+		const item = (await screen.findByText(label("previewSheetDuplicate"))).closest("[role=menuitem]")
+
+		expect(item).not.toBeNull()
+		fireEvent.keyDown(item ?? document.body, { key: "ArrowRight" })
+		fireEvent.keyDown(item ?? document.body, { key: "F2" })
+		await settle()
+		expect(active(model)).toBe("One")
+		expect(screen.queryByLabelText(label("previewSpreadsheetSheetName"))).toBeNull()
+	})
+})

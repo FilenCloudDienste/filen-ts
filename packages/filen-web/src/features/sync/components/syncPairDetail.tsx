@@ -50,9 +50,16 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 	const [removing, setRemoving] = useState(false)
 	// The dry run to release when the card goes away.
 	const planRef = useRef<string | null>(null)
+	// Set by the cleanup, so a dry run answering after the card is gone is released rather than stored.
+	const unmountedRef = useRef(false)
 
 	useEffect(() => {
+		// Reset on setup: StrictMode's mount-cleanup-mount must not leave it set.
+		unmountedRef.current = false
+
 		return () => {
+			unmountedRef.current = true
+
 			const planId = planRef.current
 
 			if (planId !== null) {
@@ -73,10 +80,24 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 
 		setBusy(null)
 
-		if (done !== null && done.value !== null) {
-			planRef.current = done.value.planId
-			setPlan(done.value)
+		const planned = done?.value ?? null
+
+		if (planned === null) {
+			return
 		}
+
+		if (unmountedRef.current) {
+			syncApi()
+				.releasePlan(planned.planId)
+				.catch((error: unknown) => {
+					log.warn("sync", "plan could not be released", error)
+				})
+
+			return
+		}
+
+		planRef.current = planned.planId
+		setPlan(planned)
 	}
 
 	async function start(): Promise<void> {
@@ -114,6 +135,13 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 				findings={review.findings}
 				planId={plan?.planId ?? null}
 				listsOpen
+				onPlanExpired={() => {
+					// The shell already let the expired plan go. A new one replaces it; none (unconverged, or the plan
+					// failed) leaves the recorded totals with Show details again.
+					planRef.current = null
+					setPlan(null)
+					void loadPlan()
+				}}
 				actions={
 					<>
 						{plan === null && review.summary !== null ? (

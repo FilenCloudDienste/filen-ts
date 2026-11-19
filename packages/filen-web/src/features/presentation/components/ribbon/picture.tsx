@@ -36,9 +36,10 @@ function useSelectedPicture(editor: PresentationRibbonEditor): { readonly target
 	return only === undefined || slide === undefined ? undefined : { target: { slide, id: only.id }, shape: only }
 }
 
-// A percentage field's value, or undefined outside [min, max].
+// A percentage field's value (a decimal comma taken as a point), or undefined outside [min, max].
 function percent(value: string, min: number, max: number): number | undefined {
-	const number = Number(value.trim() === "" ? "0" : value)
+	const trimmed = value.trim()
+	const number = Number(trimmed === "" ? "0" : trimmed.replace(",", "."))
 
 	return Number.isFinite(number) && number >= min && number <= max ? number : undefined
 }

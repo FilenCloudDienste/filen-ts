@@ -44,6 +44,8 @@ import { ShownNotes } from "@/features/spreadsheet/comments/shownNotes"
 // A pointer resting this long on a cell shows its card; leaving the cell (and the card) this long hides it.
 const HOVER_SHOW_MS = 350
 const HOVER_HIDE_MS = 250
+// What an author-name question asked before the sheet mounted, or after it unmounted, gets.
+const AUTHOR_CLOSED = AbortSignal.abort()
 
 interface Card {
 	readonly kind: AnnotationKind
@@ -88,10 +90,14 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 	const [data, setData] = useState<{ key: string; value: CardData } | null>(null)
 	const [linkAsked, setLinkAsked] = useState<{ link: SheetLink | null; shown: string } | null>(null)
 	const [asking, setAsking] = useState<((name: string | null) => void) | null>(null)
+	// Aborted once the sheet unmounts: an author-name question still open is dropped, so the next one asks again.
+	const authorSignal = useRef<AbortSignal>(AUTHOR_CLOSED)
 	const [mac] = useState(isMacPlatform)
 	const timers = useRef<{ show: number; hide: number }>({ show: 0, hide: 0 })
 	// Links read ahead (on hover, for the active cell) so a Ctrl/Cmd+click opens one inside the click's activation.
 	const links = useRef(new Map<string, SheetLink | null>())
+	// A followed link's place on another sheet, waiting for that sheet to be on show: stops its frame listener.
+	const pendingFollow = useRef<{ stop: (() => void) | null }>({ stop: null })
 	const session = handle.session
 	const { sheet, selection, layout } = grid
 	const version = grid.state.version
@@ -109,6 +115,17 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 	if (!linksShown && (grid.active.flags & CellFlag.HYPERLINK) !== 0 && !text) {
 		setLinksShown(true)
 	}
+
+	useEffect(() => {
+		const controller = new AbortController()
+
+		authorSignal.current = controller.signal
+
+		return () => {
+			controller.abort()
+			authorSignal.current = AUTHOR_CLOSED
+		}
+	}, [])
 
 	// The session writes notes and comments under the documents settings' author name.
 	useEffect(() => {
@@ -181,10 +198,12 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 
 	useEffect(() => {
 		const current = timers.current
+		const pending = pendingFollow.current
 
 		return () => {
 			window.clearTimeout(current.show)
 			window.clearTimeout(current.hide)
+			pending.stop?.()
 		}
 	}, [])
 
@@ -238,20 +257,24 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 		)
 	}
 
-	// Runs `run` once there is an author name (asked for the first time).
-	function withAuthor(run: (author: string) => void): void {
-		void ensureAuthorName(
+	// Runs `run` once there is an author name (asked for the first time); resolves false, running nothing, when the
+	// name was not given.
+	function withAuthor(run: (author: string) => void): Promise<boolean> {
+		return ensureAuthorName(
 			() =>
 				new Promise<string | null>(resolve => {
 					setAsking(() => resolve)
-				})
+				}),
+			authorSignal.current
 		).then(author => {
 			if (author === null) {
-				return
+				return false
 			}
 
 			session.configure({ author })
 			run(author)
+
+			return true
 		})
 	}
 
@@ -278,6 +301,10 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 			}
 			case "go": {
 				const { place } = action
+				const pending = pendingFollow.current
+
+				// A newer follow replaces one still waiting.
+				pending.stop?.()
 				const start = { row: place.range.startRow, col: place.range.startCol }
 				const select = (): void => {
 					gridRef.current?.goTo(start)
@@ -300,14 +327,33 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 
 				grid.model.setSheet(place.sheet)
 
-				// Once the sheet is on show (its layout read, a frame drawn), its place is selected.
 				const handleRef = gridRef.current
-				const off = handleRef?.onFrame(() => {
-					if (grid.model.getSnapshot().sheet === place.sheet && grid.model.layout(place.sheet) !== null) {
-						off?.()
+
+				if (handleRef === null) {
+					return
+				}
+
+				// Once the sheet is on show (its layout read, a frame drawn), its place is selected. setSheet shows it at
+				// once, so another sheet on show means the user went elsewhere first (or the sheet is gone): the follow is
+				// dropped, never a late jump when the sheet is opened by hand.
+				let off = (): void => undefined
+				const stop = (): void => {
+					off()
+
+					if (pending.stop === stop) {
+						pending.stop = null
+					}
+				}
+
+				off = handleRef.onFrame(() => {
+					if (grid.model.getSnapshot().sheet !== place.sheet) {
+						stop()
+					} else if (grid.model.layout(place.sheet) !== null) {
+						stop()
 						select()
 					}
 				})
+				pending.stop = stop
 
 				return
 			}
@@ -451,7 +497,7 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 			} else if (activeKind === "note") {
 				open("note")
 			} else if (canEdit) {
-				withAuthor(() => {
+				void withAuthor(() => {
 					open("note")
 				})
 			}
@@ -473,6 +519,8 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 		setCard(null)
 	}
 	let body = null
+	const knownAuthor = (author: string | null | undefined): string =>
+		author === null || author === undefined || author === "" ? t("previewSheetUnknownAuthor") : author
 
 	if (card !== null && (loaded || card.mode === "opened")) {
 		const cell = { row: card.row, col: card.col }
@@ -486,7 +534,7 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 					gridRef={gridRef}
 					cell={cell}
 					rightToLeft={rightToLeft}
-					label={t("previewSheetNoteBy", { author: note?.author ?? settings.authorName ?? "" })}
+					label={t("previewSheetNoteBy", { author: knownAuthor(note?.author ?? settings.authorName) })}
 					opened={card.mode === "opened"}
 					onPointerEnter={() => {
 						window.clearTimeout(timers.current.hide)
@@ -501,12 +549,13 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 						editing={card.mode === "opened" && canEdit && loaded}
 						initial={noteStart(settings.authorName)}
 						onCancel={close}
-						onSave={value => {
-							close()
+						onSave={value =>
+							// The card stays, its text with it, until the author name is given.
 							withAuthor(() => {
+								close()
 								void exec({ type: "note.set", sheet: card.sheet, row: card.row, col: card.col, text: value })
 							})
-						}}
+						}
 					/>
 				</CardFrame>
 			)
@@ -520,7 +569,7 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 						gridRef={gridRef}
 						cell={cell}
 						rightToLeft={rightToLeft}
-						label={t("previewSheetCommentThread", { author: thread?.comments[0]?.author ?? settings.authorName ?? "" })}
+						label={t("previewSheetCommentThread", { author: knownAuthor(thread?.comments[0]?.author ?? settings.authorName) })}
 						opened={card.mode === "opened"}
 						onPointerEnter={() => {
 							window.clearTimeout(timers.current.hide)
@@ -533,11 +582,11 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 							opened={card.mode === "opened" && loaded}
 							canEdit={canEdit}
 							onCancel={close}
-							onPost={value => {
+							onPost={value =>
 								withAuthor(() => {
 									void exec({ type: "thread.add", sheet: card.sheet, row: card.row, col: card.col, text: value })
 								})
-							}}
+							}
 							onEdit={(id, value) => {
 								void exec({ type: "thread.edit", sheet: card.sheet, id, text: value })
 							}}
@@ -611,7 +660,7 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 						? {}
 						: {
 								newComment: () => {
-									withAuthor(() => {
+									void withAuthor(() => {
 										open("thread")
 									})
 								}
@@ -660,7 +709,7 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 					<>
 						<ContextMenuItem
 							onClick={() => {
-								withAuthor(() => {
+								void withAuthor(() => {
 									open("thread")
 								})
 							}}
@@ -669,7 +718,7 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 						</ContextMenuItem>
 						<ContextMenuItem
 							onClick={() => {
-								withAuthor(() => {
+								void withAuthor(() => {
 									open("note")
 								})
 							}}

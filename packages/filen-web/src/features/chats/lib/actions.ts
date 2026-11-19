@@ -5,10 +5,11 @@ import { plainErrorDTO } from "@/lib/sdk/errors"
 import { queryClient } from "@/queries/client"
 import { removeQueriesAndPersisted } from "@/queries/persist"
 import { accountQueryGet } from "@/queries/account"
-import { chatsQueryUpsert, chatsQueryRemove } from "@/features/chats/queries/chats"
+import { chatsQueryUpsert, chatsQueryRemove, chatsQueryMerge } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { isChatOwner } from "@/features/chats/lib/sort"
+import { chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { attemptOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome, VoidActionOutcome }
@@ -60,7 +61,7 @@ export async function renameChat(chat: Chat, name: string): Promise<ActionOutcom
 	const outcome = await attemptOp(sdkApi.renameChat(chat, trimmed))
 
 	if (outcome.status === "success") {
-		chatsQueryUpsert(outcome.item)
+		chatsQueryMerge(outcome.item, current => ({ ...current, name: trimmed }))
 	}
 
 	return outcome
@@ -76,7 +77,7 @@ export async function setChatMuted(chat: Chat, mute: boolean): Promise<ActionOut
 	const outcome = await attemptOp(sdkApi.muteChat(chat, mute))
 
 	if (outcome.status === "success") {
-		chatsQueryUpsert(outcome.item)
+		chatsQueryMerge(outcome.item, current => ({ ...current, muted: outcome.item.muted }))
 	}
 
 	return outcome
@@ -149,8 +150,13 @@ export async function markChatRead(chat: Chat): Promise<VoidActionOutcome> {
 	if (refreshed) {
 		// The refreshed chat carries the advanced lastFocus; the client-derived unread count (both the
 		// per-row badge and the rail total) re-derives to zero for this chat on the next render off that
-		// alone — no separate unread-side cache write is needed.
-		chatsQueryUpsert(refreshed)
+		// alone — no separate unread-side cache write is needed. Only lastFocus is taken: a message that
+		// arrived during the request stays the row's lastMessage. lastFocus never moves backwards: the SDK's
+		// value is the client time before the request, and a message arriving in the focused chat meanwhile
+		// may have advanced the row past it.
+		chatsQueryMerge(refreshed, current =>
+			chatLastFocus(refreshed) > chatLastFocus(current) ? { ...current, lastFocus: refreshed.lastFocus } : null
+		)
 	}
 
 	return { status: "success" }

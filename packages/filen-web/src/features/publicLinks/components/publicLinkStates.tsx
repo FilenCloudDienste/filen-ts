@@ -80,13 +80,26 @@ export function PublicLinkError({ onRetry }: { onRetry: () => void }) {
 }
 
 // The file or directory zip cannot be held in memory. The way out (another browser or the desktop app) is
-// advice for a browser only.
-export function DownloadTooLargeNote({ message }: { message: string }) {
+// advice for a browser only. `compact`: one truncating line, the whole text in its title (a slim bar). Mounted with its
+// text, so an alert, which is announced on mount.
+export function DownloadTooLargeNote({ message, compact = false }: { message: string; compact?: boolean }) {
 	const { t } = useTranslation("publicLinks")
+	const text = desktopPlatform() === undefined ? `${message} ${t("downloadTooLargeAdvice")}` : message
 
-	return (
-		<p className="text-sm text-destructive">
-			{desktopPlatform() === undefined ? `${message} ${t("downloadTooLargeAdvice")}` : message}
+	return compact ? (
+		<span
+			role="alert"
+			className="truncate text-xs text-destructive"
+			title={text}
+		>
+			{text}
+		</span>
+	) : (
+		<p
+			role="alert"
+			className="text-sm text-destructive"
+		>
+			{text}
 		</p>
 	)
 }

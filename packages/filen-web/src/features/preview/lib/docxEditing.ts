@@ -1,5 +1,12 @@
 import type { Node } from "prosemirror-model"
-import { findUnsavableBlocks, type DocxEditorSession } from "@filen/office/core/docx/edit"
+import {
+	blockPositions,
+	findUnsavableBlocks,
+	revertFeatureUnits,
+	withRevertedUnits,
+	type DocxEditorSession,
+	type RevertibleUnit
+} from "@filen/office/core/docx/edit"
 import { DocxSaveError, prepareDocxSave, writerProof } from "@filen/office/core/docx/write"
 import type { ConvertEdited } from "@/features/preview/lib/docxLiveFile"
 import { OFFICE_HYPHENATION_URLS } from "virtual:office-hyphenation"
@@ -273,42 +280,64 @@ export async function writeDocx(host: DocxEditingHost, options: WriteDocxOptions
 			throw error
 		}
 
-		// The blocks as the save found them, taken back in the live session wherever they still are.
-		const blocks = new Map<DocxEditorSession, (Node | null)[]>()
+		// What the save found, by live session: its blocks as nodes of the document the search worked on (taken back
+		// wherever they still are), and every unit (blocks and the features' own: a table, a comment).
+		const takeBack: { live: DocxEditorSession; doc: Node; nodes: (Node | null)[]; units: readonly RevertibleUnit[] }[] = []
+		const texts: string[] = []
+		let count = 0
 
-		for (const { session, positions } of found) {
+		for (const { session, units } of found) {
 			const live = sessions[frozen.indexOf(session)]
+			const doc = session.state.doc
+			const positions = blockPositions(units)
+
+			count += units.length
+
+			for (const pos of positions) {
+				texts.push(plainText(doc, pos, pos + (doc.nodeAt(pos)?.nodeSize ?? 0), () => ""))
+			}
 
 			if (live !== undefined) {
-				blocks.set(
-					live,
-					positions.map(pos => session.state.doc.nodeAt(pos))
-				)
+				takeBack.push({ live, doc, nodes: positions.map(pos => doc.nodeAt(pos)), units })
 			}
 		}
-		const text = found
-			.flatMap(({ session, positions }) =>
-				positions.map(pos => plainText(session.state.doc, pos, pos + (session.state.doc.nodeAt(pos)?.nodeSize ?? 0), () => ""))
-			)
-			.join("\n")
+
 		const write = frozen.map(session => {
-			const positions = found.find(entry => entry.session === session)?.positions
+			const units = found.find(entry => entry.session === session)?.units
 
-			return positions === undefined ? session : session.withReverted(positions)
+			return units === undefined ? session : withRevertedUnits(session, units)
 		})
-		const written = await writeOnce(host, sessions, write, started)
-		const count = found.reduce((sum, { positions }) => sum + positions.length, 0)
+		let written: DocxSaveSnapshot
 
-		log.warn("docx", "edited blocks written as last saved", { count, reason: error.reason, message: error.message })
+		try {
+			written = await writeOnce(host, sessions, write, started)
+		} catch (retryError) {
+			// Refused even with what the search found taken back: this state is not searched again.
+			if (retryError instanceof DocxSaveError) {
+				refusedStates.set(host, { docs, error: retryError })
+			}
 
-		const locked = { count, text, reverted: 0 }
+			throw retryError
+		}
+
+		log.warn("docx", "edited units written as last saved", { count, reason: error.reason, message: error.message })
+
+		const locked = { count, text: texts.join("\n"), reverted: 0 }
 
 		return {
 			...written,
 			commit: () => {
-				// What was stored: those blocks as last saved (an edit made to one since stays, unsaved).
-				for (const [session, nodes] of blocks) {
-					locked.reverted += session.revert(nodes.filter(node => node !== null))
+				// What was stored: those units as last saved (an edit made to one since stays, unsaved).
+				for (const { live, doc, nodes, units } of takeBack) {
+					// A feature's keys are found again in the live document, whatever was typed since: taken back only
+					// while the document is the one the search worked on, so no later edit goes with them.
+					const unchanged = live.state.doc === doc
+
+					locked.reverted += live.revert(nodes.filter(node => node !== null))
+
+					if (unchanged) {
+						locked.reverted += revertFeatureUnits(live, units)
+					}
 				}
 
 				written.commit()

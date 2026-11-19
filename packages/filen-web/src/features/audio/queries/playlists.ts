@@ -5,9 +5,9 @@ import { patchQuery, replaceOrAppend } from "@/queries/patch"
 import { fetchPlaylistEntries } from "@/features/audio/lib/playlists"
 import type { Playlist } from "@filen/shared"
 
-// One global playlists list query — every playlist surface (the now-playing panel's Playlists tab, a
-// playlist detail dialog, the add-tracks picker's "already in this playlist" check) reads this one
-// cache slice, same one-list-per-session rationale as NOTES_QUERY_KEY/CONTACTS_QUERY_KEY.
+// One global playlists list query — the playlists sidebar and screen (and the add-tracks picker they
+// open) and the assistant's tools all read this one cache slice, same one-list-per-session rationale as
+// NOTES_QUERY_KEY/CONTACTS_QUERY_KEY.
 export const PLAYLISTS_QUERY_KEY = ["audio", "playlists"] as const
 
 // A row this list can render: a successfully parsed playlist, or a degraded placeholder for a

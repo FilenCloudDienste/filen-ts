@@ -12,7 +12,7 @@ const CATALOGUES = ["previewDocx", "previewSheet", "previewOffice", "previewPdf"
 // A word of the app's code (outside locales and tests) holding a catalogue's prefix. A key is all word characters, so
 // the code names it exactly when one of these words contains it: one pass over the sources, instead of a search of
 // all of them per key.
-const NAMING_WORD = /\w*preview(?:Docx|Sheet|Pdf)\w*/g
+const NAMING_WORD = /\w*preview(?:Docx|Sheet|Pdf|Office|Command)\w*/g
 
 function collectNamingWords(directory: string, into: Set<string>): void {
 	for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -81,7 +81,8 @@ describe("the office editors' string catalogues", () => {
 	it.each([
 		["previewDocx", "previewDocx"],
 		["previewSheet", "previewSheet"],
-		["previewPdf", "previewPdf"]
+		["previewPdf", "previewPdf"],
+		["previewOffice", "preview(?:Office|Command)"]
 	] as const)("ship no %s string the app never names", (name, prefix) => {
 		const directory = join(ROOT, "src/locales/en", name)
 		const unused = catalogueFiles(name)

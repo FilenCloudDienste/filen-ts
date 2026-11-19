@@ -3,14 +3,22 @@ import { describe, expect, it } from "vitest"
 import { build } from "vite"
 
 // Each engine build's OCR worker builds into one module holding that build's glue alone (no request for code at run
-// time) and naming the wasm and models by their hashed same-origin URLs.
+// time) and naming the wasm and models by their hashed same-origin URLs. Each build's glue names its own wasm file
+// (`tesseract-core-<build>.wasm`) and no other, which ties a worker to the build whose glue it bundled; the hashed URLs
+// of OCR_ASSETS (`tesseract-core-<build>-<hash>.wasm`) never match that name.
 
-const WORKERS = ["ocrRelaxedSimd.worker.ts", "ocrSimd.worker.ts", "ocrPlain.worker.ts"]
+const { OCR_ENGINE_VARIANTS } = await import("../../vite/ocr-assets-plugin")
+
+const WORKERS = [
+	["ocrRelaxedSimd.worker.ts", "relaxedsimd-lstm"],
+	["ocrSimd.worker.ts", "simd-lstm"],
+	["ocrPlain.worker.ts", "lstm"]
+]
 
 describe("the OCR workers", () => {
 	it.each(WORKERS)(
-		"%s builds into one module with its build's glue bundled",
-		async worker => {
+		"%s builds into one module with the %s build's glue bundled",
+		async (worker, variant) => {
 			const result: unknown = await build({
 				configFile: join(import.meta.dirname, "../../vite.config.ts"),
 				logLevel: "silent",
@@ -35,6 +43,11 @@ describe("the OCR workers", () => {
 			expect(code).toMatch(/\/assets\/ocr\/tesseract-core-simd-lstm-[0-9a-f]{8}\.wasm/)
 			expect(code).toMatch(/\/assets\/ocr\/eng\.traineddata-[0-9a-f]{8}\.bin/)
 			expect(code).not.toMatch(/import\s*\(/)
+
+			for (const other of OCR_ENGINE_VARIANTS) {
+				expect(code.includes(`tesseract-core-${other}.wasm`)).toBe(other === variant)
+			}
+
 			expect(
 				files.some(file => file.type === "asset" && /assets\/ocr\/tesseract-core-lstm-[0-9a-f]{8}\.wasm$/.test(file.fileName))
 			).toBe(true)

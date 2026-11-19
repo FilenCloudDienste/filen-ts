@@ -1,4 +1,4 @@
-import { listRest } from "@filen/shared/assistant"
+import { datedElsewhereNote, listRest, matchScore, NOTES_ITEMS, searchTokens } from "@filen/shared/assistant"
 import type { Note } from "@filen/sdk-rs"
 import { notesQueryRead } from "@/features/notes/queries/notes"
 import { noteContentQueryRead } from "@/features/notes/queries/noteContent"
@@ -20,10 +20,9 @@ import {
 	type ToolAdapter,
 	type ToolScope
 } from "@/features/assistant/tools/entities"
-import { AssistantToolError, clipText, isoDate, matchScore, searchTokens } from "@/features/assistant/tools/format"
+import { AssistantToolError, clipText, isoDate } from "@/features/assistant/tools/format"
 import { dateSelection, datesField, emptyDatesNote, selects } from "@/features/assistant/tools/dates"
 
-const LIST_LIMIT = 40
 export const NOTE_MAX_CHARS = 4_000
 
 async function resolveNote(scope: ToolScope, handle: string): Promise<Note> {
@@ -94,7 +93,7 @@ export const listNotesTool: ToolAdapter = async (input, scope) => {
 
 	return {
 		value: {
-			notes: notes.slice(0, LIST_LIMIT).map(note => {
+			notes: notes.slice(0, NOTES_ITEMS).map(note => {
 				const title = noteTitle(note)
 				const tags = note.tags.map(tagDisplayName)
 
@@ -109,10 +108,10 @@ export const listNotesTool: ToolAdapter = async (input, scope) => {
 					...(note.archive ? { archived: true } : {})
 				}
 			}),
-			...listRest(notes.length, LIST_LIMIT),
+			...listRest(notes.length, NOTES_ITEMS),
 			...(undated ? {} : datesField(selection)),
 			...(undated && selection.range !== null
-				? { note: `None of these is dated ${selection.range}; they match the words at other dates.` }
+				? { note: datedElsewhereNote(selection.range) }
 				: emptyDatesNote(selection, notes.length, matching.length))
 		}
 	}

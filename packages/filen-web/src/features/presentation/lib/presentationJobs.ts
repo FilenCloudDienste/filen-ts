@@ -13,6 +13,7 @@ import { fileStem } from "@/features/spreadsheet/save/sheetSave.logic"
 import { i18n } from "@/lib/i18n"
 import PresentationJobsWorker from "@/features/presentation/workers/presentationJobs.worker.ts?worker"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import { SavePortAbortedError } from "@filen/shared/savePort"
 
 // The page's side of the presentation exports: one jobs worker per export, reading the open session through its
 // presentation worker (unsaved edits included) and streaming its bytes back, which go into a Blob for a download or
@@ -30,7 +31,9 @@ const run = presentationJobsClient(() => {
 			worker.postMessage(message, transfer as Transferable[])
 		},
 		addEventListener: (type, listener) => {
-			worker.addEventListener(type, listener)
+			worker.addEventListener(type, event => {
+				listener({ data: "data" in event ? event.data : undefined })
+			})
 		},
 		terminate: () => {
 			worker.terminate()
@@ -73,23 +76,40 @@ export async function runPresentationJob<K extends JobKind>(
 	options.signal.addEventListener("abort", onAbort, { once: true })
 
 	try {
+		// A sink that failed, or an output that stalled (its worker may never have started), ends the job here: the
+		// worker would wait for the next read forever, or post no outcome at all.
+		let failure: { readonly error: unknown } | undefined
+		let writing = false
 		const reading = (async () => {
-			for (;;) {
-				const chunk = await handle.output.read()
+			try {
+				for (;;) {
+					const chunk = await handle.output.read()
 
-				if (chunk === undefined) return
+					if (chunk === undefined) return
 
-				await sink.write(chunk)
+					writing = true
+					await sink.write(chunk)
+					writing = false
+				}
+			} catch (error) {
+				// A read the writer's own abort (a refusal, a cancel) rejected comes with the job's outcome.
+				if (writing || !(error instanceof SavePortAbortedError) || error.reason === "closed") {
+					failure = { error }
+					handle.abort()
+				}
+
+				throw error
 			}
 		})()
-		// The outcome first: a refused job aborts the output, whose read then rejects.
+
+		reading.catch(() => undefined)
+
+		// The outcome first: a refused or cancelled job aborts the output, whose read then rejects. After a failure
+		// here the outcome is only the abort's, which the client bounds.
 		const outcome = await handle.done
 
-		if (outcome.kind !== "done") {
-			reading.catch(() => undefined)
-
-			throw options.signal.aborted ? options.signal.reason : new PresentationJobRefused(outcome)
-		}
+		if (failure !== undefined) throw options.signal.aborted ? options.signal.reason : failure.error
+		if (outcome.kind !== "done") throw options.signal.aborted ? options.signal.reason : new PresentationJobRefused(outcome)
 
 		await reading
 		handle.output.settled(true)

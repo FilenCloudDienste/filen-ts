@@ -14,21 +14,24 @@ export interface PreloadedPreference<T> {
 }
 
 // A kv-backed preference held in memory, read during boot before anything renders (lib/sdk/boot.ts), so a first
-// render reads the user's value synchronously and never a default that a later read replaces.
+// render reads the user's value synchronously and never a default that a later read replaces. `normalize` (a clamp,
+// a snap to steps) runs on every stored read and write (kvPreference).
 export function preloadedPreference<T>({
 	key,
 	schema,
 	fallback,
 	scope,
-	same
+	same,
+	normalize
 }: {
 	key: string
 	schema: Type<T>
 	fallback: T
 	scope: string
 	same: (a: T, b: T) => boolean
+	normalize?: (value: T) => T
 }): PreloadedPreference<T> {
-	const preference = kvPreference({ key, schema, fallback })
+	const preference = kvPreference({ key, schema, fallback, ...(normalize === undefined ? {} : { normalize }) })
 	const listeners = new Set<() => void>()
 	let value = fallback
 	let loading: Promise<void> | null = null

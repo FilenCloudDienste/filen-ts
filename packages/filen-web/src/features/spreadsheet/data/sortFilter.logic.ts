@@ -5,6 +5,8 @@ import {
 	filterNumber,
 	localizedInput,
 	localizedNumber,
+	MAX_SERIAL_1900,
+	MAX_SERIAL_1904,
 	type SheetDynamicFilter,
 	type SheetFilterCondition,
 	type SheetFilterCriteria,
@@ -353,8 +355,11 @@ export function isoSerial(iso: string, date1904: boolean): number {
 	return date1904 ? days - 1462 : days
 }
 
-// A serial as an ISO date (for a date field).
+// A serial as an ISO date (for a date field); "" for one outside the date system (a stored value as large as 1e300 has
+// no date, and a far year is no four-digit one a date field takes).
 export function serialIso(serial: number, date1904: boolean): string {
+	if (!(serial >= 0 && serial <= (date1904 ? MAX_SERIAL_1904 : MAX_SERIAL_1900))) return ""
+
 	const days = Math.floor(serial) + (date1904 ? 1462 : 0)
 	const date = new Date((days - 25_569) * 86_400_000)
 
@@ -477,7 +482,7 @@ export function dialogConditions(
 		if (kind === "date") {
 			const serial = filterNumber(value)
 
-			text = Number.isNaN(serial) ? "" : serialIso(serial, date1904)
+			text = serialIso(serial, date1904)
 		} else if (kind === "number") text = localizedInput(value, locale)
 
 		conditions.push({ operator, value: text })
@@ -582,14 +587,9 @@ export function isFiltered(range: SheetFilterRange, col: number): boolean {
 	return ((range.buttons[col - range.range.startCol] ?? 0) & FilterButton.FILTERED) !== 0
 }
 
-// The criteria "Filter by selected cell's value" makes: the cell's text (a date by its day), or its blank.
-export function valueCriteria(
-	text: string,
-	date: { readonly year: number; readonly month: number; readonly day: number } | null
-): SheetFilterCriteria {
-	if (text === "") return { kind: "values", values: [], blank: true, dates: [] }
-
-	return date === null
-		? { kind: "values", values: [text], blank: false, dates: [] }
-		: { kind: "values", values: [], blank: false, dates: [{ grouping: "day", ...date }] }
+// The criteria "Filter by selected cell's value" makes: the cell's text as shown, or its blank.
+export function valueCriteria(text: string): SheetFilterCriteria {
+	return text === ""
+		? { kind: "values", values: [], blank: true, dates: [] }
+		: { kind: "values", values: [text], blank: false, dates: [] }
 }

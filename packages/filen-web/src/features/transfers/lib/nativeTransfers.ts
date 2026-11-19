@@ -424,11 +424,22 @@ function uploadParent(parentUuid: string | null): DesktopUploadParent | null {
 	return uploadParentOf(uuid, findCachedListingItem(uuid))
 }
 
-async function uploadNatively(files: File[], parentUuid: string | null, noun: "files" | "items"): Promise<void> {
+// `pendingToastId`: a toast already showing for this work (a drop's scan), turned into the started toast or dismissed.
+async function uploadNatively(
+	files: File[],
+	parentUuid: string | null,
+	noun: "files" | "items",
+	pendingToastId?: string | number
+): Promise<void> {
 	const bridge = desktopBridge()
 	const parent = bridge === undefined || files.length === 0 ? null : uploadParent(parentUuid)
+	let pendingToastReplaced = false
 
 	if (bridge === undefined || parent === null) {
+		if (pendingToastId !== undefined) {
+			toast.dismiss(pendingToastId)
+		}
+
 		return
 	}
 
@@ -454,12 +465,18 @@ async function uploadNatively(files: File[], parentUuid: string | null, noun: "f
 				}
 
 				if (first !== undefined && result.value.ids.length > 0) {
-					toastTransferStarted({ direction: "upload", name: first.name, count: result.value.ids.length, noun })
+					toastTransferStarted({ direction: "upload", name: first.name, count: result.value.ids.length, noun }, pendingToastId)
+
+					pendingToastReplaced = true
 				}
 			}
 		} catch (e) {
 			toast.error(errorLabel(e))
 		}
+	}
+
+	if (pendingToastId !== undefined && !pendingToastReplaced) {
+		toast.dismiss(pendingToastId)
 	}
 
 	await Promise.all(uploads)
@@ -572,22 +589,30 @@ export async function startNativeDrop(files: File[], entries: readonly FileSyste
 		byName.set(file.name, [...(byName.get(file.name) ?? []), file])
 	}
 
+	// The trees are read at once; the scanning toast shows until the host's upload starts. Classified in drop order,
+	// which the by-name pairing relies on.
+	const scanningToastId = toast.loading(i18n.t("transfers:transfersScanningDirectory"))
+	const heic = await Promise.all(entries.map(entry => (isDirectoryEntry(entry) ? holdsHeic(entry) : Promise.resolve(false))))
 	const walked: FileSystemEntry[] = []
 	const native: File[] = []
 
-	for (const entry of entries) {
+	for (const [index, entry] of entries.entries()) {
 		const file = byName.get(entry.name)?.shift()
 
-		if (isDirectoryEntry(entry) && (await holdsHeic(entry))) {
+		if (heic[index]) {
 			walked.push(entry)
 		} else if (file !== undefined) {
 			native.push(file)
 		}
 	}
 
+	if (native.length === 0) {
+		toast.dismiss(scanningToastId)
+	}
+
 	await Promise.all([
 		walked.length === 0 ? undefined : startDirectoryUpload({ kind: "entries", entries: walked }, parentUuid),
-		native.length === 0 ? undefined : uploadNatively(native, parentUuid, "items")
+		native.length === 0 ? undefined : uploadNatively(native, parentUuid, "items", scanningToastId)
 	])
 }
 

@@ -8,8 +8,9 @@ import {
 	type LibraryScanDir,
 	type VideoLibrary
 } from "@filen/shared/videos"
-import type { DirsAndFiles, DriveEvent, File, SocketEvent, UuidStr } from "@filen/sdk-rs"
+import type { DirsAndFiles, DriveEvent, File, SocketEvent } from "@filen/sdk-rs"
 import { log } from "@/lib/log"
+import { isUuidStr } from "@/lib/uuidStr"
 import type { ArtSlotCode } from "@/features/videos/lib/artStore.logic"
 import { rootSize } from "@/features/videos/lib/library.logic"
 import {
@@ -276,10 +277,6 @@ function snapshotCrc(bytes: Uint8Array): number {
 	return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true)
 }
 
-function isUuidStr(value: string): value is UuidStr {
-	return value.split("-").length >= 4
-}
-
 function drainSync<T>(steps: Generator<void, T>): T {
 	for (;;) {
 		const step = steps.next()
@@ -377,6 +374,8 @@ export class VideoIndexEngine {
 	private sawReconnecting = false
 	private rebuilding: Promise<void> | null = null
 	private rebuildAgain = false
+	// The last classification failed: until another one runs, calls answer from what is held instead of waiting.
+	private classificationFailed = false
 	private patchTimer: ReturnType<typeof setTimeout> | null = null
 	private firstPatchAt = 0
 	// Drive events applied while a lookup or scoped walk is out, re-applied over its result.
@@ -945,6 +944,11 @@ export class VideoIndexEngine {
 
 		try {
 			const watermark = knownWatermark ?? (this.socketLive ? this.lastEventId : null) ?? (await this.deps.lastDriveEventId())
+			// Events held by now were delivered before the listing is taken, and each delivery stops a listing begun
+			// earlier from being joined, so the listing reflects those up to the watermark. One delivered later may
+			// have changed what a joined listing had already read, even with an id up to the watermark.
+			const held = rt.buffer
+			const heldBefore = held?.length ?? 0
 			const startedAt = this.deps.now()
 			const outcome = await this.deps.walkRoot(uuid, mark)
 
@@ -1004,9 +1008,15 @@ export class VideoIndexEngine {
 			rt.buffer = null
 			rt.bufferOverflow = false
 
-			// Everything delivered since the walk began is applied over it in order; an event the walk already
-			// reflects sets what is already there.
-			for (const event of buffer) {
+			// Everything held is applied over the walk in order; an event the walk already reflects sets what is
+			// already there. Those held before the listing was taken with ids up to the watermark are skipped, as
+			// `settle` does: the listing reflects them, and a held event from before a drop would otherwise undo a later
+			// one the drop swallowed.
+			for (const [index, event] of buffer.entries()) {
+				if (buffer === held && index < heldBefore && event.id <= watermark) {
+					continue
+				}
+
 				if (event.id >= expected) {
 					contiguous &&= event.id === expected && event.inner !== null
 					expected = event.id + 1n
@@ -1617,6 +1627,8 @@ export class VideoIndexEngine {
 			return this.rebuilding
 		}
 
+		const token = this.token
+
 		this.rebuilding = this.runRebuild()
 			.catch((e: unknown) => {
 				log.error("videos.index", "classification failed", e)
@@ -1627,7 +1639,9 @@ export class VideoIndexEngine {
 				}
 
 				this.pushRoots()
-				// Nothing is coming for calls waiting on it: they answer from what is held.
+				// Nothing is coming for calls waiting on it, nor for later ones: they answer from what is held. A reset
+				// meanwhile started over: calls before the next configuration wait for its classification.
+				this.classificationFailed = token === this.token
 				this.settleWaiters()
 			})
 			.finally(() => {
@@ -1643,6 +1657,8 @@ export class VideoIndexEngine {
 	}
 
 	private async runRebuild(): Promise<void> {
+		this.classificationFailed = false
+
 		const token = this.token
 		const overrides = this.overrides
 		const overridesSignature = this.overridesSignature
@@ -1938,18 +1954,23 @@ export class VideoIndexEngine {
 		})
 	}
 
+	// No classification is coming: the last one failed and no rerun is queued (a rerun clears the flag as it starts).
+	private classificationGaveUp(): boolean {
+		return this.classificationFailed && !this.rebuildAgain
+	}
+
 	// Resolves once the catalog holds something to show: the persisted one or the first classification.
 	private catalogReady(): Promise<void> {
-		return this.catalogSource === "none"
+		return this.catalogSource === "none" && !this.classificationGaveUp()
 			? new Promise(resolve => {
 					this.catalogWaiters.push(resolve)
 				})
 			: Promise.resolve()
 	}
 
-	// Resolves once a classification is held, or the one under way failed.
+	// Resolves once a classification is held, or the last one failed.
 	private whenClassified(): Promise<void> {
-		return this.current === null
+		return this.current === null && !this.classificationGaveUp()
 			? new Promise(resolve => {
 					this.classifiedWaiters.push(resolve)
 				})
@@ -2607,6 +2628,7 @@ export class VideoIndexEngine {
 		this.socketLive = false
 		this.sawReconnecting = false
 		this.rebuildAgain = false
+		this.classificationFailed = false
 		this.firstPatchAt = 0
 		this.overrides = {}
 		this.overridesSignature = "{}"

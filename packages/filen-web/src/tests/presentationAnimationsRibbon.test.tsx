@@ -102,7 +102,7 @@ function clicksTiming(effects: readonly unknown[]): unknown {
 }
 
 // One effect of `preset` on shape 2, its node id `id`.
-function effectOf(presetClass: "entr" | "exit", presetId: number, id: number): unknown {
+function effectOf(presetClass: "entr" | "exit" | "emph", presetId: number, id: number): unknown {
 	const preset = EFFECT_PRESETS.find(p => p.presetClass === presetClass && p.id === presetId)
 	const op = preset === undefined ? undefined : addEffectsOp(ref, [], [{ id: 2 }], { preset, aspect: 16 / 9 })
 
@@ -113,10 +113,25 @@ function effectOf(presetClass: "entr" | "exit", presetId: number, id: number): u
 
 let answer: (() => unknown) | undefined
 
+// `tree` with every timed behaviour lasting `ms` and effect `node` starting `delay` ms late (as a file may write them,
+// off the 10 ms grid).
+function offGrid(tree: unknown, ms: number, node: number, delay: number): unknown {
+	return JSON.parse(JSON.stringify(tree), (key: string, value: unknown) => {
+		if (key === "dur" && typeof value === "number" && value > 1) return ms
+
+		const ctn = key === "ctn" ? (value as { id?: number; stCondLst?: unknown }) : null
+
+		return ctn?.id === node ? { ...ctn, stCondLst: [{ delay }] } : value
+	}) as unknown
+}
+
 // The timing the fake worker answers with: one Fly In on shape 2 and a Spin after it on shape 3.
 function timing(): unknown {
-	if (answer !== undefined) return answer()
+	return answer === undefined ? twoEffects() : answer()
+}
 
+// One Fly In on shape 2 and a Spin after it on shape 3.
+function twoEffects(): unknown {
 	const fly = EFFECT_PRESETS.find(p => p.presetClass === "entr" && p.id === 2)
 	const spin = EFFECT_PRESETS.find(p => p.presetClass === "emph" && p.id === 8)
 
@@ -343,6 +358,75 @@ describe("presentation Animations tab", () => {
 		fireEvent.change(delay, { target: { value: "1.5" } })
 		fireEvent.keyDown(delay, { key: "Enter" })
 		expect(ops).toEqual([{ family: "timing", kind: "setEffectTiming", slide: ref, node: 20, timing: { delayMs: 1500 } }])
+	})
+})
+
+describe("moving an effect in the pane", () => {
+	it("announces a move that was made, and nothing for one past the start or onto itself", async () => {
+		mount(true, [])
+		act(() => {
+			animationPane.setOpen(true)
+		})
+
+		const rows = await screen.findAllByRole("option")
+
+		fireEvent.click(at(rows, 0))
+		fireEvent.keyDown(at(rows, 0), { key: "ArrowUp", altKey: true })
+		fireEvent.drop(at(rows, 0), { dataTransfer: { types: ["application/x-filen-effect"], getData: () => "10" } })
+		expect(ops).toEqual([])
+		expect(screen.queryByText(/Moved to position/u)).toBeNull()
+
+		fireEvent.keyDown(at(rows, 0), { key: "ArrowDown", altKey: true })
+		expect(await screen.findByText("Moved to position 2.")).toBeTruthy()
+	})
+})
+
+describe("a ribbon seconds field left untouched", () => {
+	it("sends nothing on blur for a value off the 10 ms grid, and what was typed otherwise", async () => {
+		answer = () => offGrid(twoEffects(), 333, 20, 1234)
+		mount(true, [])
+		act(() => {
+			animationPane.setOpen(true)
+		})
+		fireEvent.click(at(await screen.findAllByRole("option"), 1))
+
+		const duration = within(commands()).getByLabelText<HTMLInputElement>("Duration")
+		const delay = within(commands()).getByLabelText<HTMLInputElement>("Delay")
+
+		expect(duration.value).toBe("0.33")
+		expect(delay.value).toBe("1.23")
+
+		for (const field of [duration, delay]) {
+			fireEvent.focus(field)
+			fireEvent.blur(field)
+		}
+
+		expect(ops).toEqual([])
+
+		fireEvent.change(duration, { target: { value: "0.5" } })
+		fireEvent.blur(duration)
+		expect(ops).toEqual([{ family: "timing", kind: "setEffectTiming", slide: ref, node: 20, timing: { durationMs: 500 } }])
+	})
+})
+
+describe("Effect Options colours", () => {
+	it("are plain items, Accent 3 recolouring the effect", async () => {
+		answer = () => clicksTiming([effectOf("emph", 1, 10)])
+		mount(true, [])
+		act(() => {
+			animationPane.setOpen(true)
+		})
+		fireEvent.click(at(await screen.findAllByRole("option"), 0))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Effect Options" }))
+
+		const accent = await screen.findByRole("menuitem", { name: "Accent 3" })
+
+		expect(screen.queryAllByRole("menuitemradio", { name: /Accent/u })).toEqual([])
+		fireEvent.click(accent)
+		await waitFor(() => {
+			expect(ops).toHaveLength(1)
+		})
+		expect(JSON.stringify(ops[0])).toContain("accent3")
 	})
 })
 

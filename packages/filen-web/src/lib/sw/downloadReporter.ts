@@ -1,4 +1,4 @@
-import type { ErrorDTO } from "@/lib/sdk/errors"
+import { DOWNLOAD_GONE, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { SW_DOWNLOAD_HEARTBEAT_MS, type SwDownloadStatus } from "@/lib/sw/protocol"
 import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 
@@ -107,7 +107,7 @@ export class DownloadReporter {
 			// never stream. Saying so now fails the row instead of leaving it waiting out the stall timer.
 			port.postMessage({
 				type: "failed",
-				error: { species: "plain", message: "download is no longer available", label: "download is no longer available" }
+				error: plainErrorDTO("download is no longer available", DOWNLOAD_GONE)
 			} satisfies SwDownloadStatus)
 			port.close()
 

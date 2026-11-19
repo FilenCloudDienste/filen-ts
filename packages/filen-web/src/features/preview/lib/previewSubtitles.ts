@@ -2,8 +2,7 @@ import { MAX_SUBTITLE_CHARS, parseSubtitle, type CueStore } from "@filen/shared/
 import { decodeSubtitleBytes } from "@filen/shared/textEncoding"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { DRIVE_LISTING_KEY_PREFIX } from "@/features/drive/queries/drive"
-import { cachedQueriesWithPrefix } from "@/queries/patch"
+import { findCachedDirectoryListing } from "@/features/drive/queries/drive"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { sidecarSubtitles, type PreviewSidecarSubtitle, type SidecarCandidate } from "@/features/preview/lib/previewPlayback.logic"
@@ -12,28 +11,9 @@ import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 // A preview's sidecar subtitles: found by name among the files beside the video, as a listing already
 // held has them (never a fetch), and read only once chosen.
 
-// A directory's own listing: the drive's, or a shared directory's below the shared root. A flat listing
-// (recents, favorites, trash, links) or the shared root holds files from anywhere.
-function isDirectoryListing(params: unknown): boolean {
-	if (typeof params !== "object" || params === null || !("variant" in params) || !("uuid" in params)) {
-		return false
-	}
-
-	return params.variant === "drive" || ((params.variant === "sharedIn" || params.variant === "sharedOut") && params.uuid !== null)
-}
-
 // The files of the first cached directory listing holding `uuid`; empty when none does.
 export function cachedSiblings(uuid: string): readonly DriveItem[] {
-	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
-		// Every query under the listing prefix holds a listing's rows.
-		const data = query.state.data as DriveItem[] | undefined
-
-		if (data !== undefined && isDirectoryListing(query.queryKey[2]) && data.some(item => item.data.uuid === uuid)) {
-			return data
-		}
-	}
-
-	return []
+	return findCachedDirectoryListing(listing => listing.rows.some(item => item.data.uuid === uuid))?.rows ?? []
 }
 
 export interface PreviewSubtitleFile extends PreviewSidecarSubtitle {
@@ -66,8 +46,14 @@ export function previewSidecars(name: string, siblings: readonly DriveItem[]): P
 export type SidecarLoad = { status: "ok"; cues: CueStore } | { status: "unreadable" }
 
 // One read of the whole (small, size-checked) subtitle file, decoded with the language's legacy codepage
-// as the fallback, and parsed. Cancelled through `signal`.
-export async function loadSidecar(subtitle: PreviewSubtitleFile, access: PreviewAccessMode, signal: AbortSignal): Promise<SidecarLoad> {
+// as the fallback, and parsed; a frame-based (MicroDVD) file is timed by the video's `fps` when known. Cancelled
+// through `signal`.
+export async function loadSidecar(
+	subtitle: PreviewSubtitleFile,
+	access: PreviewAccessMode,
+	signal: AbortSignal,
+	fps: number | null = null
+): Promise<SidecarLoad> {
 	const file = narrowToAnyFile(subtitle.item)
 	const token = crypto.randomUUID()
 	const stop = (): void => {
@@ -81,7 +67,7 @@ export async function loadSidecar(subtitle: PreviewSubtitleFile, access: Preview
 			access === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token)
 		)
 		const text = decodeSubtitleBytes(bytes, { languageHint: subtitle.lang })
-		const cues = text === null ? null : parseSubtitle(text.text, subtitle.format)
+		const cues = text === null ? null : parseSubtitle(text.text, subtitle.format, fps === null ? {} : { fps })
 
 		return cues === null || cues.texts.length === 0 ? { status: "unreadable" } : { status: "ok", cues }
 	} finally {

@@ -1,5 +1,5 @@
-// "preview" namespace, PDF viewer — printing: the print dialog (pages, quality, annotations) and its messages. Composed
-// by previewPdf/index.ts; same catalog rules.
+// "preview" namespace, PDF viewer — printing: the print dialog (pages, quality, annotations) and its messages. Spread
+// into preview.ts; same catalog rules.
 export const previewPdfPrint = {
 	/** PDF viewer — File menu item that opens the print dialog */
 	previewPdfPrintMenu: "Print…",

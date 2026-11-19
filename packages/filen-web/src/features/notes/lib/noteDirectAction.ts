@@ -2,7 +2,7 @@ import type { TFunction } from "i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { copyText } from "@/lib/copyText"
+import { copyText, copyTextLater } from "@/lib/copyText"
 import type { VoidActionOutcome } from "@/lib/actions/outcome"
 import { runOutcomeActivity } from "@/lib/activity/activity"
 import type { ActivityKeys, ActivityValues } from "@/lib/activity/activity.logic"
@@ -93,14 +93,14 @@ export async function runNoteDirectAction(
 
 			return
 		}
+		// The content may be a network read away: the write starts before any await, taking the content as a promise, so
+		// a browser that ends the click's activation at the first await (Safari) still copies. A failed read says its own
+		// error's label (copyTextLater); a read that never arrives says the content couldn't load.
 		case "copyContent": {
-			try {
-				const content = await resolveNoteContent(note)
-				await navigator.clipboard.writeText(content)
-				toast.success(t("noteCopyContentToast"))
-			} catch (e) {
-				toast.error(errorLabel(e))
-			}
+			await copyTextLater(resolveNoteContent(note), {
+				copied: t("noteCopyContentToast"),
+				failed: t("notesContentLoadError")
+			})
 
 			return
 		}

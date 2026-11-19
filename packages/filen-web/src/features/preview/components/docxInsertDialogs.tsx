@@ -263,8 +263,9 @@ function LinkDialog({ editor, snapshot, enabled, run, close }: DialogProps) {
 	const [text, setText] = useState(link?.text ?? "")
 	const [address, setAddress] = useState(link?.target ?? "")
 	const [place, setPlace] = useState(places.initial)
-	const target = linkTarget(address)
-	// A new address goes only to the web, email or a phone; the link's own target stays whatever it is.
+	// The link's own target, while its address is untouched, goes back verbatim (a relative path or an app's scheme is
+	// never read as a typed web address); a new address goes only to the web, email or a phone.
+	const target = link !== null && link.target !== null && address === link.target ? link.target : linkTarget(address)
 	const refusal = target === null ? undefined : linkTargetRefusal(target, link?.target)
 	const shownText = showText && text.trim() !== "" ? text : undefined
 	const extra = shownText === undefined ? {} : { text: shownText }

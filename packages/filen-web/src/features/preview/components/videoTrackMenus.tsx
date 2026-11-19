@@ -319,7 +319,7 @@ function ChapterItems({ chapters, media }: { chapters: readonly StageChapter[]; 
 	)
 }
 
-// The section headings of the mock: AUDIO, SUBTITLES, CHAPTERS.
+// The section headings: AUDIO, SUBTITLES, CHAPTERS.
 const SECTION_LABEL_CLASS = "text-[11px] font-medium tracking-wide uppercase"
 
 // A menu that goes away while open (its tracks or chapters went with a new probe) still reports itself closed, so the

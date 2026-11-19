@@ -522,6 +522,8 @@ export const videos = {
 	playerChannelsMono: "Mono",
 	/** Tracks popover — stereo audio */
 	playerChannelsStereo: "Stereo",
+	/** Tracks popover — audio with another channel count than mono, stereo, 5.1 or 7.1; {{channels}} = the count */
+	playerChannelsCount: "{{channels, number}} ch",
 	/** Tracks popover — a commentary track */
 	playerAudioCommentary: "Commentary",
 	/** Tracks popover — tooltip on an audio track this browser can't play as it is */
@@ -781,6 +783,8 @@ export const videos = {
 	detailEditDescription: "Corrections are saved with your library and win over what the file names say.",
 	/** Corrections field */
 	detailFieldTitle: "Title",
+	/** Corrections field — error when the title is left empty */
+	detailFieldTitleRequired: "Enter a title.",
 	/** Corrections field */
 	detailFieldYear: "Year",
 	/** Corrections field — error */

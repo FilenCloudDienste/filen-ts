@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { ImageIcon, ImagePlusIcon, XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import type { DeckOp, ShapeRef, SmartArtOp } from "@filen/office/core/presentation"
+import type { CommandResult } from "@filen/office/dom/presentation"
 import type { SmartArtInfo, SmartArtNodeInfo } from "@filen/office/core/smartart"
 import { Button } from "@/components/ui/button"
 import { FIELD_CONTROL_CLASS } from "@/components/ui/surface"
@@ -63,6 +64,13 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 	const sentRef = useRef(node.text)
 	const valueRef = useRef(node.text)
 	const idleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+	// What was sent before the Design tab took this field's unsent text (restored when its command is refused).
+	const tookFromRef = useRef(node.text)
+	// Commands carrying this field's text that have not answered yet: an outline arriving meanwhile may be older than
+	// them, so it is never taken as the node's text.
+	const unresolvedRef = useRef(0)
+	// The focus as of the last focus or blur (read when a command answers, after the render that set `focused`).
+	const focusedRef = useRef(false)
 
 	// A new answer shows the node's text, unless it is being typed in.
 	if (seen !== node.text) {
@@ -70,6 +78,18 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 
 		if (!focused) setValue(node.text)
 	}
+
+	// A field holding nothing unsent takes a text it did not send (an undo while it keeps the focus, or another edit of
+	// the node) as both shown and sent; typing not sent yet, and text sent in a command not answered yet, is kept.
+	const text = node.text
+
+	useEffect(() => {
+		if (unresolvedRef.current > 0 || valueRef.current !== sentRef.current || text === sentRef.current) return
+
+		sentRef.current = text
+		valueRef.current = text
+		setValue(text)
+	}, [text])
 
 	const pending = (): Extract<SmartArtOp, { readonly kind: "setNodeText" }> | undefined => {
 		const text = valueRef.current
@@ -85,6 +105,16 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 
 		idleRef.current = undefined
 	}
+	// A command counted in unresolvedRef answered: true when it applied (a failed one counts as refused).
+	const answered = (command: Promise<CommandResult>): Promise<boolean> =>
+		command
+			.then(
+				result => result.ok,
+				() => false
+			)
+			.finally(() => {
+				unresolvedRef.current -= 1
+			})
 	const send = (): void => {
 		stopIdle()
 
@@ -92,26 +122,53 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 
 		if (op === undefined) return
 
-		void editor.command(op).then(result => {
+		unresolvedRef.current += 1
+		void answered(editor.command(op)).then(ok => {
 			// Refused (the shell says why): the field shows the node's text again.
-			if (!result.ok && valueRef.current === op.text) {
+			if (!ok && valueRef.current === op.text) {
 				sentRef.current = node.text
 				valueRef.current = node.text
 				setValue(node.text)
 			}
 		})
 	}
-	// Ops from a key: the unsent text first, in the same undo step.
-	const run = (op: SmartArtOp | undefined, focus?: { readonly node: string; readonly caret: number | "end" }): void => {
+	// A refused command that carried `held` (what the field held when it went): the field shows `shown` again and
+	// counts `sent` as sent, so a later send retries the rest; typing since then is kept as it is. A field left while
+	// the command was out (its blur found nothing unsent) sends it at once, as that blur would have.
+	const restore = (held: string, shown: string, sent: string): void => {
+		if (valueRef.current !== held) return
+
+		sentRef.current = sent
+		valueRef.current = shown
+		setValue(shown)
+
+		if (!focusedRef.current) send()
+	}
+	// Ops from a key: the unsent text first, in the same undo step. `shown` and `sent` are the field's text and sent
+	// text before the key (restored when the command is refused).
+	const run = (
+		op: SmartArtOp | undefined,
+		focus: { readonly node: string; readonly caret: number | "end" } | undefined,
+		shown: string = valueRef.current,
+		sent: string = sentRef.current
+	): void => {
 		stopIdle()
 
 		if (op === undefined) return
 
+		const held = valueRef.current
 		const draft = pending()
 		const ops: DeckOp = draft === undefined ? op : { family: "batch", kind: "batch", ops: [draft, op] }
 
-		void editor.command(ops).then(result => {
-			if (result.ok && focus !== undefined) smartArtPane.focusNode(focus.node, focus.caret)
+		unresolvedRef.current += 1
+		void answered(editor.command(ops)).then(ok => {
+			if (!ok) {
+				restore(held, shown, sent)
+
+				return
+			}
+
+			if (focus !== undefined) smartArtPane.focusNode(focus.node, focus.caret)
 		})
 	}
 
@@ -139,13 +196,17 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 		) {
 			event.preventDefault()
 
-			const before = field.value.slice(0, field.selectionStart)
-			const after = field.value.slice(field.selectionEnd)
+			const whole = field.value
+			const before = whole.slice(0, field.selectionStart)
+			const after = whole.slice(field.selectionEnd)
 			const id = newNodeId()
+			const op = addNodeOp(target, info, index, "after", id, after)
+
+			if (op === undefined) return
 
 			valueRef.current = before
 			setValue(before)
-			run(addNodeOp(target, info, index, "after", id, after), { node: id, caret: 0 })
+			run(op, { node: id, caret: 0 }, whole)
 
 			return
 		}
@@ -164,11 +225,15 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 
 			const previous = info.nodes[index - 1]
 			const next = info.nodes[index + 1]
+			const sent = sentRef.current
 
+			// The node goes: its emptied text is never sent.
 			sentRef.current = ""
 			run(
 				{ family: "smartart", kind: "removeNode", target, node: node.id },
-				previous !== undefined ? { node: previous.id, caret: "end" } : next !== undefined ? { node: next.id, caret: 0 } : undefined
+				previous !== undefined ? { node: previous.id, caret: "end" } : next !== undefined ? { node: next.id, caret: 0 } : undefined,
+				"",
+				sent
 			)
 
 			return
@@ -223,13 +288,34 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 					"[field-sizing:content] min-w-0 flex-1 resize-none px-2 py-1 text-sm leading-5 placeholder:text-muted-foreground"
 				)}
 				onFocus={() => {
+					focusedRef.current = true
 					setFocused(true)
 					smartArtPane.setNode(node.id)
-					smartArtPane.setDraft(node.id, pending, op => {
-						void editor.command(op)
-					})
+					smartArtPane.setDraft(
+						node.id,
+						() => {
+							const before = sentRef.current
+							const op = pending()
+
+							if (op !== undefined) {
+								tookFromRef.current = before
+								unresolvedRef.current += 1
+							}
+
+							return op
+						},
+						op => {
+							void answered(editor.command(op))
+						},
+						(op, ok) => {
+							unresolvedRef.current -= 1
+
+							if (!ok && op.kind === "setNodeText") restore(op.text, op.text, tookFromRef.current)
+						}
+					)
 				}}
 				onBlur={() => {
+					focusedRef.current = false
 					setFocused(false)
 					smartArtPane.releaseDraft(node.id, false)
 					send()

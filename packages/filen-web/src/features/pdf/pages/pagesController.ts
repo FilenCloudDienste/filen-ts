@@ -11,8 +11,8 @@ import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { PdfEngine } from "@/features/pdf/session/engineWorker"
-import { checkHeldOutput, serveHeldOutput, streamHeldOutput } from "@/features/pdf/save/pdfSave"
-import { pageChangeAnnouncement, remapSelection, type PageChange } from "@/features/pdf/pages/organise.logic"
+import { checkHeldOutput, serveHeldOutput, uploadHeldOutput } from "@/features/pdf/save/pdfSave"
+import { actionPages, pageChangeAnnouncement, remapSelection, type PageChange } from "@/features/pdf/pages/organise.logic"
 import type { CopySuffix } from "@/features/pdf/pages/names"
 import { openSyncRange, syncRangeSlots } from "@/lib/media/syncRange"
 import type { ActionOutcome } from "@/lib/actions/outcome"
@@ -268,6 +268,13 @@ export class PdfPagesController {
 		this.sources = keep
 	}
 
+	// The viewer is gone (after its engines were closed): the open draft ends unsaved and every second PDF's channel is
+	// released.
+	dispose(): void {
+		this.closeDraft(false)
+		this.sessionChanged(null)
+	}
+
 	setCurrent(index: number): void {
 		this.chosen = false
 
@@ -324,9 +331,7 @@ export class PdfPagesController {
 
 	// The pages a page action applies to: the selection, or the current page.
 	targets(): number[] {
-		const { selected, current } = this.view
-
-		return selected.size > 0 ? [...selected].sort((a, b) => a - b) : [current]
+		return actionPages(this.view.selected, this.view.current)
 	}
 
 	// After a change: ids moved with their pages (`from`), the selection with them, the touched pages' thumbnails
@@ -469,7 +474,8 @@ export class PdfPagesController {
 		this.run(async session => {
 			const bytes = new Uint8Array(await file.arrayBuffer())
 			const count = session.getSnapshot().state.pageCount
-			const result = await session.dispatch("pages.insertImage", { at, bytes }).catch((error: unknown) => {
+			// Moved to the engine, not copied (up to PDF_INSERT_IMAGE_MAX_BYTES): nothing here reads it again.
+			const result = await session.dispatch("pages.insertImage", { at, bytes }, undefined, [bytes.buffer]).catch((error: unknown) => {
 				log.warn("pdf", "inserting a picture failed", { error })
 				this.host?.onFailed(overBudget(error) ? "previewPdfOverBudget" : "previewPdfPagesInsertImageFailed")
 
@@ -584,39 +590,53 @@ export class PdfPagesController {
 			readonly failedKey: "previewPdfExtractFailed" | "previewPdfSplitFailed"
 		}
 	): Promise<boolean> {
+		// Without a host nothing runs (run() does nothing).
+		if (this.host === null) return Promise.resolve(false)
+
 		const done = Promise.withResolvers<boolean>()
 
 		this.set({ progress: { done: 0, count: files.length } })
-		this.run(async session => {
-			const saved = await this.copies(session, files, options.protect).catch((error: unknown) => {
-				log.warn("pdf", "making new files of pages failed", { error })
+		this.run(
+			async session => {
+				const saved = await this.copies(session, files, options.protect).catch((error: unknown) => {
+					log.warn("pdf", "making new files of pages failed", { error })
 
-				return null
-			})
+					return null
+				})
 
-			this.set({ progress: undefined })
+				this.set({ progress: undefined })
 
-			if (saved === null) {
+				if (saved === null) {
+					this.host?.onFailed(options.failedKey)
+					done.resolve(false)
+
+					return
+				}
+
+				this.host?.onCopied(
+					saved.map(entry => entry.name),
+					saved.map(entry => entry.item)
+				)
+
+				// The files exist whatever the delete does: a failed delete is the editor's to report (onChangeFailed).
+				try {
+					if (options.deletes.length > 0) {
+						const count = session.getSnapshot().state.pageCount
+						const result = await session.dispatch("pages.delete", { pages: options.deletes })
+
+						this.changed(result, deleteOrder(count, options.deletes), { kind: "deleted", pages: options.deletes })
+					}
+				} finally {
+					done.resolve(true)
+				}
+			},
+			() => {
+				// The editor did not start: nothing was made.
+				this.set({ progress: undefined })
 				this.host?.onFailed(options.failedKey)
 				done.resolve(false)
-
-				return
 			}
-
-			this.host?.onCopied(
-				saved.map(entry => entry.name),
-				saved.map(entry => entry.item)
-			)
-
-			if (options.deletes.length > 0) {
-				const count = session.getSnapshot().state.pageCount
-				const result = await session.dispatch("pages.delete", { pages: options.deletes })
-
-				this.changed(result, deleteOrder(count, options.deletes), { kind: "deleted", pages: options.deletes })
-			}
-
-			done.resolve(true)
-		})
+		)
 
 		return done.promise
 	}
@@ -766,16 +786,19 @@ export class PdfPagesController {
 
 				if (!check.ok) throw new Error(`the new file failed its check: ${"reason" in check ? check.reason : "redaction"}`)
 
-				const upload = streamHeldOutput(engine)
-				const [written, uploaded] = await Promise.all([
-					upload.announced.then(() => host.write({ port: upload.port, size: begun.size }, file.suffix)),
-					upload.uploaded
-				])
+				// A refused upload (over quota) never reads the port: the helper frees the engine's write, so saveEnd below runs.
+				const { written, made: uploaded } = await uploadHeldOutput(engine, port =>
+					host.write({ port, size: begun.size }, file.suffix)
+				)
 
-				if (!uploaded || written?.outcome.status !== "success") throw new Error("the upload failed")
+				if (!written.ok) throw written.error
+
+				const value = written.value
+
+				if (!uploaded || value?.outcome.status !== "success") throw new Error("the upload failed")
 
 				made = true
-				saved.push({ name: written.name, item: written.outcome.item })
+				saved.push({ name: value.name, item: value.outcome.item })
 			} finally {
 				await engine.call("saveEnd", { outcome: made ? "copied" : "failed", next: "continue" }).catch(() => undefined)
 			}

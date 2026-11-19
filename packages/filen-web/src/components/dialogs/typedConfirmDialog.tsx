@@ -95,6 +95,7 @@ function TypedConfirmDialog({
 			<AlertDialogContent>
 				<form
 					onSubmit={handleSubmit}
+					aria-busy={pending}
 					className="flex flex-col gap-6"
 				>
 					<AlertDialogHeader>
@@ -110,7 +111,10 @@ function TypedConfirmDialog({
 							autoComplete="off"
 							autoCorrect="off"
 							spellCheck={false}
-							disabled={pending}
+							// readOnly, not disabled: a disabled field drops focus and nothing gives it back when a
+							// failed confirm clears `pending`. Dimmed so it does not look editable meanwhile.
+							readOnly={pending}
+							className={pending ? "opacity-50" : undefined}
 							onChange={e => {
 								setTyped(e.target.value)
 							}}

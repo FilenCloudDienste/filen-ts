@@ -650,24 +650,28 @@ describe("runCopyJob quota", () => {
 })
 
 describe("cancel", () => {
-	it("trashes exactly the created top-level items when asked to, and nothing when kept", async () => {
-		const dir = mockDir("copied")
+	it.each([
+		["trash", true],
+		["keep", false]
+	] as const)(
+		"cancels the transfer once and, on %s, trashes exactly the created top-level items or nothing",
+		async (mode, trashCopied) => {
+			const dir = mockDir("copied")
 
-		for (const trashCopied of [true, false]) {
 			useDriveJobsStore.setState({ jobs: {} })
 
 			const deps = makeDeps()
 
 			deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 				onEvent({ type: "created", item: created(dir) })
-				requestJobCancel(id, trashCopied ? "trash" : "keep")
+				requestJobCancel(id, mode)
 
 				return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 			})
 
 			const job = await runCopyJob(deps, request())
 
-			expect(cancelTransfer).toHaveBeenCalledWith("job")
+			expect(cancelTransfer).toHaveBeenCalledExactlyOnceWith("job")
 
 			if (trashCopied) {
 				expect(deps.trash).toHaveBeenCalledTimes(1)
@@ -678,7 +682,7 @@ describe("cancel", () => {
 
 			expect(job?.created).toEqual([])
 		}
-	})
+	)
 
 	// A store write per created item copied the whole list each time.
 	it("writes nothing to the job store per created item, and still trashes every one on a stop", async () => {

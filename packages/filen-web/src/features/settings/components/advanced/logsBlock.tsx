@@ -19,7 +19,7 @@ const LEVEL_CLASS: Record<string, string> = {
 // Renders this browser TAB's own in-memory ring buffer (log.dump(), see src/lib/log.ts) — not a
 // merge with the SDK worker's own separate ring buffer instance (different JS realm); see logs.ts's
 // own comment on that scope limit. No live subscription: the ring buffer is a plain array, not an
-// event source, so "Refresh" just re-reads it into local state — cheap (capped at 500 entries).
+// event source, so "Refresh" just re-reads it into local state — cheap (capped at LOG_RING_MAX entries).
 function LogsBlock() {
 	const { t } = useTranslation("settings")
 	const [entries, setEntries] = useState(() => log.dump())

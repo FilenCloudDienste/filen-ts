@@ -79,6 +79,49 @@ export async function maybeConvertHeicUpload(deps: HeicUploadConvertDeps, file: 
 	}
 }
 
+// A converted JPEG is held in memory (a worker-made Blob, unlike the disk-backed original) until its upload settles, and
+// the decode workers convert faster than a typical uplink uploads: this bounds the converted files held, and so
+// uploading, at once. The SDK caps the chunks in flight, not the files.
+export const HEIC_CONVERTED_BACKLOG = 8
+
+const heicBacklogLock = new Semaphore(HEIC_CONVERTED_BACKLOG)
+
+// Runs `run` (the file's upload) on the file as maybeConvertHeicUpload prepares it. A file to convert takes a backlog
+// permit before its decode slot (so no decode slot waits on the backlog) and keeps it until `run` settled, however it
+// ends; a failed conversion gives it back at once, its original being disk-backed. Anything else runs as it is.
+export async function withConvertedHeic<T>(
+	deps: HeicUploadConvertDeps,
+	file: File,
+	enabled: boolean,
+	run: (prepared: File) => Promise<T>
+): Promise<T> {
+	if (!enabled || !isHeicUploadCandidate(file)) {
+		return await run(file)
+	}
+
+	await heicBacklogLock.acquire()
+
+	let held = true
+	const release = (): void => {
+		if (held) {
+			held = false
+			heicBacklogLock.release()
+		}
+	}
+
+	try {
+		const prepared = await maybeConvertHeicUpload(deps, file, true)
+
+		if (prepared === file) {
+			release()
+		}
+
+		return await run(prepared)
+	} finally {
+		release()
+	}
+}
+
 export interface HeicUploadDeps {
 	convert: HeicUploadConvertDeps
 	readPreference: () => Promise<boolean>

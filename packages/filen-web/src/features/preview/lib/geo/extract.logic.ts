@@ -145,19 +145,76 @@ function isSpaceByte(byte: number): boolean {
 	return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d
 }
 
-// Each whitespace-separated "lon,lat[,alt]" tuple of a KML <coordinates>; whitespace around a comma (written by some
-// exporters) does not split a tuple.
-function eachTuple(doc: XmlDocument, node: number, visit: (lon: number, lat: number, ele: number) => void): void {
-	for (const tuple of doc
-		.textContent(node)
-		.replace(/\s*,\s*/g, ",")
-		.split(/\s+/)) {
-		if (tuple === "") continue
+// What a regular expression's \s matches.
+function isSpaceCode(code: number): boolean {
+	if (code <= 0x20) return code === 0x20 || (code >= 0x09 && code <= 0x0d)
+	if (code < 0xa0) return false
 
-		const parts = tuple.split(",")
+	return (
+		code === 0xa0 ||
+		code === 0x1680 ||
+		(code >= 0x2000 && code <= 0x200a) ||
+		code === 0x2028 ||
+		code === 0x2029 ||
+		code === 0x202f ||
+		code === 0x205f ||
+		code === 0x3000 ||
+		code === 0xfeff
+	)
+}
 
-		visit(number(parts[0]), number(parts[1]), number(parts[2]))
+// Each whitespace-separated "lon,lat[,alt]" tuple of a KML <coordinates> text, in one linear pass: whitespace around a
+// comma (written by some exporters) does not split a tuple, a missing field reads as NaN and fields past the third are
+// skipped unread.
+export function eachCoordinateTuple(text: string, visit: (lon: number, lat: number, ele: number) => void): void {
+	const length = text.length
+	let at = 0
+
+	while (at < length) {
+		if (isSpaceCode(text.charCodeAt(at))) {
+			at++
+
+			continue
+		}
+
+		let lon: string | undefined
+		let lat: string | undefined
+		let ele: string | undefined
+		let field = 0
+
+		for (;;) {
+			const start = at
+
+			while (at < length) {
+				const code = text.charCodeAt(at)
+
+				if (code === 0x2c || isSpaceCode(code)) break
+
+				at++
+			}
+
+			if (field === 0) lon = text.slice(start, at)
+			else if (field === 1) lat = text.slice(start, at)
+			else if (field === 2) ele = text.slice(start, at)
+
+			// The whitespace after a field is scanned once: before a comma it is part of the separator, otherwise it ends
+			// the tuple and the outer loop resumes past it.
+			while (at < length && isSpaceCode(text.charCodeAt(at))) at++
+
+			if (at >= length || text.charCodeAt(at) !== 0x2c) break
+
+			at++
+			field++
+
+			while (at < length && isSpaceCode(text.charCodeAt(at))) at++
+		}
+
+		visit(number(lon), number(lat), number(ele))
 	}
+}
+
+function eachTuple(doc: XmlDocument, node: number, visit: (lon: number, lat: number, ele: number) => void): void {
+	eachCoordinateTuple(doc.textContent(node), visit)
 }
 
 // At least as many as the tuples of a <coordinates>, counted over its raw bytes without decoding them: every run of

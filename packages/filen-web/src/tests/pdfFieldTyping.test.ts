@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest"
+import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import { pdfViewerKey } from "@/features/preview/lib/pdfKeys.logic"
+import { FormOverlaySession, type FormDraftEdit } from "@/features/pdf/session/fieldOverlay.logic"
 import { pdfToolLetterAllowed } from "@/features/pdf/lib/toolKeys"
 
 // A letter typed into a field over the PDF (a form field, a text box being edited, a select) is typed there: the
-// viewer's N, P and F and the tools' letters never take it, while on the page they still act.
+// viewer's N, P and F and the tools' letters never take it, while on the page they still act. Text committed into a
+// field is one undo step, however many ways it is committed before the editor runs it.
 
 afterEach(() => {
 	document.body.replaceChildren()
@@ -63,5 +66,72 @@ describe("letters typed into a field over the PDF", () => {
 				false
 			)
 		).toBe("preview.pdfZoomIn")
+	})
+})
+
+describe("text committed into a form field", () => {
+	// The editor still starting: changes wait in order until `run` (as PdfEditSwap.edit queues them).
+	function startingEditor() {
+		const queued: { readonly change: Parameters<FormDraftEdit>[0]; readonly dropped: () => void }[] = []
+		const dispatched: string[] = []
+		const session = {
+			dispatch: (command: string, args: unknown) => {
+				dispatched.push(`${command} ${JSON.stringify(args)}`)
+
+				return Promise.resolve(null)
+			}
+		} as unknown as PdfEditSessionModel
+		const edit: FormDraftEdit = (change, dropped) => {
+			queued.push({ change, dropped })
+		}
+		const run = async (): Promise<void> => {
+			await Promise.all(queued.splice(0).map(({ change }) => change(session)))
+		}
+		const drop = (): void => {
+			for (const { dropped } of queued.splice(0)) dropped()
+		}
+
+		return { edit, run, drop, dispatched }
+	}
+
+	it("is set once when Enter, leaving the field and a save all commit it before the editor started", async () => {
+		const form = new FormOverlaySession()
+		const editor = startingEditor()
+
+		form.setDraft(7, { page: 1, text: "Ada" })
+
+		// Enter, then the blur of tabbing on.
+		void form.commitText(7, 1, "Ada", editor.edit)
+		void form.commitText(7, 1, "Ada", editor.edit)
+
+		// Mod+S.
+		const committed = form.commitDrafts(editor.edit)
+
+		await editor.run()
+		await committed
+
+		expect(editor.dispatched).toEqual(['forms.setField {"page":1,"widget":7,"value":{"kind":"text","text":"Ada"}}'])
+		expect(form.drafted()).toBe(false)
+	})
+
+	it("is set again after the change was dropped", async () => {
+		const form = new FormOverlaySession()
+		const editor = startingEditor()
+
+		form.setDraft(7, { page: 1, text: "Ada" })
+
+		const first = form.commitText(7, 1, "Ada", editor.edit)
+		const saved = form.commitDrafts(editor.edit)
+
+		editor.drop()
+		expect(await first).toBe(false)
+		await saved
+		expect(form.drafted()).toBe(true)
+
+		const second = form.commitText(7, 1, "Ada", editor.edit)
+
+		await editor.run()
+		expect(await second).toBe(true)
+		expect(editor.dispatched).toHaveLength(1)
 	})
 })

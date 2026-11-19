@@ -340,20 +340,22 @@ describe("presentation save on the page", () => {
 		expect(patchListing).toHaveBeenCalledOnce()
 	})
 
-	it("fails a port save without a port upload, closing the port", async () => {
+	it("fails a port save without a port upload, aborting the writer and closing the port", async () => {
 		const item = deckItem("deck.pptx")
 		const { port1, port2 } = channel()
-		const closed = new Promise(resolve => {
-			port1.addEventListener("close", resolve)
-		})
+		const writer = savePortWriter(port1)
+		const close = vi.spyOn(port2, "close")
 		const outcome = await runPreviewSave(
 			{ uploadFileBytes: vi.fn(), patchListing: vi.fn(), rootUuid: testUuid("root") },
 			{ item, content: { port: port2 } }
 		)
 
 		expect(outcome.status).toBe("error")
-		port1.start()
-		await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 50))])
+		await expect(writer.aborted).resolves.toBe("upload")
+		// The reading end closes once the writer acknowledged the abort.
+		await vi.waitFor(() => {
+			expect(close).toHaveBeenCalledOnce()
+		})
 	})
 
 	it("commits a written save with the saved file's range port and the save's revision", async () => {

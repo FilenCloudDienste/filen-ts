@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AudioSample, type AudioSampleSource, type VideoSample, type VideoSampleSource } from "mediabunny"
 import { outputGeometry } from "@/features/preview/videoEdit/lib/plan"
 import {
+	decodedAudioFormat,
 	gainFactor,
 	RangeAudio,
 	transcodeAudio,
@@ -86,6 +87,9 @@ describe("frame stages", () => {
 
 		expect(kind({})).toBe("pass")
 		expect(kind({ rotate: 90 })).toBe("pass")
+		expect(kind({ keep: [{ start: 1, end: 2 }], speed: 2 })).toBe("pass")
+		expect(kind({ audio: { mute: true, gainDb: 3, keepTracks: [1] } })).toBe("pass")
+		expect(kind({ flipH: true })).toBe("gpu")
 		expect(kind({ output: { resolution: "original", quality: "low" } })).toBe("pass")
 		expect(kind({ crop: { x: 0, y: 0, width: 960, height: 540 } })).toBe("crop")
 		expect(kind({ crop: { x: 0, y: 0, width: 960, height: 540 }, rotate: 270 })).toBe("crop")
@@ -147,7 +151,7 @@ describe("frame stages", () => {
 
 	it("never sends kept HDR through the GPU pass", () => {
 		const recipe = recipeFor(60, { flipH: true })
-		const pipeline: FramePipelineLike = { renderAsync: vi.fn(), needsGpu: () => true, dispose: vi.fn() }
+		const pipeline: FramePipelineLike = { renderAsync: vi.fn(), dispose: vi.fn() }
 
 		expect(() => createFrameStage({ kind: "gpu", recipe, geometry: outputGeometry(recipe, source), hdr: "hevc10", pipeline })).toThrow()
 	})
@@ -167,7 +171,6 @@ describe("frame stages", () => {
 		const render = vi.fn(() => Promise.resolve(rendered))
 		const pipeline: FramePipelineLike = {
 			renderAsync: render,
-			needsGpu: () => true,
 			dispose: vi.fn()
 		}
 		const stage = createFrameStage({ kind: "gpu", recipe, geometry, hdr: "toSdr", pipeline })
@@ -182,7 +185,6 @@ describe("frame stages", () => {
 		const recipe = recipeFor(60, { flipH: true })
 		const pipeline: FramePipelineLike = {
 			renderAsync: () => Promise.reject(new Error("context lost")),
-			needsGpu: () => true,
 			dispose: () => undefined
 		}
 		const stage = createFrameStage({ kind: "gpu", recipe, geometry: outputGeometry(recipe, source), hdr: null, pipeline })
@@ -307,6 +309,42 @@ describe("transcodeVideo", () => {
 				signal: controller.signal
 			})
 		).rejects.toMatchObject({ name: "ExportCancelledError" })
+	})
+
+	it("stops when cancelled mid-run and closes every frame it made", async () => {
+		const { output, samples } = recordingVideoOutput()
+		const gate = new InterleaveGate(1)
+		const controller = new AbortController()
+		let staged = 0
+
+		gate.addLane("video")
+
+		await expect(
+			transcodeVideo({
+				decode: decodedAt(30, 10),
+				ranges: [{ start: 0, end: 2 }],
+				speed: 1,
+				maxFrameRate: 30,
+				stage: decodedFrame => {
+					staged++
+
+					if (staged === 3) {
+						controller.abort()
+					}
+
+					return Promise.resolve(decodedFrame)
+				},
+				output,
+				gate,
+				lane: "video",
+				signal: controller.signal
+			})
+		).rejects.toMatchObject({ name: "ExportCancelledError" })
+
+		expect(staged).toBe(3)
+		expect(samples.length).toBeLessThan(3)
+		expect(FakeVideoFrame.made.length).toBeGreaterThanOrEqual(3)
+		expect(FakeVideoFrame.made.every(made => made.closed)).toBe(true)
 	})
 })
 
@@ -434,6 +472,107 @@ describe("RangeAudio", () => {
 	})
 })
 
+describe("RangeAudio gaps", () => {
+	// Runs `samples` (timestamp, frames) of ones through one range, as transcodeAudio does: each sample's gap, then the
+	// sample, then the range's end. Returns what came out, a 0 for silence and a 1 for audio per frame.
+	function lay(audio: RangeAudio, range: TimeRange, samples: readonly [number, number][]): { out: number[]; trailing: number } {
+		const out: number[] = []
+		let trailing = 0
+
+		audio.begin(range)
+
+		for (const [timestamp, count] of samples) {
+			const sample = planarOf([new Float32Array(count).fill(1)], timestamp)
+
+			for (const planes of audio.gap(sample)) {
+				out.push(...(planes[0] ?? []))
+			}
+
+			out.push(...(audio.push(sample)?.[0] ?? []))
+		}
+
+		for (const planes of audio.end()) {
+			trailing += planes[0]?.length ?? 0
+			out.push(...(planes[0] ?? []))
+		}
+
+		return { out, trailing }
+	}
+
+	const mono = (): RangeAudio => new RangeAudio({ sampleRate: 1000, channels: 1, gainDb: 0, speed: 1, createStretch: null })
+
+	it("lays a track that starts late after that much silence, with no pad at the end", () => {
+		const samples = Array.from({ length: 15 }, (_, index): [number, number] => [0.5 + index * 0.1, 100])
+		const { out, trailing } = lay(mono(), { start: 0, end: 2 }, samples)
+
+		expect(out).toHaveLength(2000)
+		expect(out.slice(0, 500).every(value => value === 0)).toBe(true)
+		expect(out.slice(500).every(value => value === 1)).toBe(true)
+		expect(trailing).toBe(0)
+	})
+
+	it("keeps a hole in the middle in place", () => {
+		const before = Array.from({ length: 10 }, (_, index): [number, number] => [index * 0.1, 100])
+		const after = Array.from({ length: 5 }, (_, index): [number, number] => [1.5 + index * 0.1, 100])
+		const { out } = lay(mono(), { start: 0, end: 2 }, [...before, ...after])
+
+		expect(out).toHaveLength(2000)
+		expect(out.slice(0, 1000).every(value => value === 1)).toBe(true)
+		expect(out.slice(1000, 1500).every(value => value === 0)).toBe(true)
+		expect(out.slice(1500).every(value => value === 1)).toBe(true)
+	})
+
+	it("inserts nothing for a gap under a packet, as AAC priming and timestamp jitter make", () => {
+		const { out, trailing } = lay(mono(), { start: 0, end: 1 }, [
+			[0.05, 100],
+			[0.2, 100],
+			[0.3, 100]
+		])
+
+		expect(out.slice(0, 300).every(value => value === 1)).toBe(true)
+		expect(trailing).toBe(700)
+	})
+
+	it("feeds a gap's silence through the stretch, keeping the range's frame count exact", () => {
+		const sampleRate = 48_000
+		const audio = new RangeAudio({ sampleRate, channels: 2, gainDb: 0, speed: 1.5, createStretch: () => lossyStretch(1.5) })
+		const pushed: number[] = []
+		const stretch = lossyStretch(1.5)
+		const spy: TimeStretchLike = {
+			push: planar => {
+				pushed.push(planar[0]?.length ?? 0)
+
+				return stretch.push(planar)
+			},
+			flush: () => stretch.flush()
+		}
+		const spied = new RangeAudio({ sampleRate, channels: 2, gainDb: 0, speed: 1.5, createStretch: () => spy })
+
+		for (const target of [audio, spied]) {
+			target.begin({ start: 0, end: 3 })
+
+			for (let at = 1; at < 3; at += 1024 / sampleRate) {
+				const sample = planarOf([new Float32Array(1024), new Float32Array(1024)], at)
+
+				for (const planes of target.gap(sample)) {
+					expect(planes).toHaveLength(2)
+				}
+
+				target.push(sample)
+			}
+
+			for (const planes of target.end()) {
+				expect(planes).toHaveLength(2)
+			}
+
+			expect(target.written).toBe(Math.round((3 / 1.5) * sampleRate))
+		}
+
+		// The second's silence went through the stretch before the audio did.
+		expect(pushed.slice(0, 6).reduce((total, frames) => total + frames, 0)).toBe(sampleRate)
+	})
+})
+
 describe("transcodeAudio", () => {
 	it("encodes contiguous samples whose total matches the kept duration", async () => {
 		const added: { timestamp: number; frames: number }[] = []
@@ -486,5 +625,160 @@ describe("transcodeAudio", () => {
 		}
 
 		expect(expected).toBe(Math.round((0.8 + 0.55) * sampleRate))
+	})
+
+	it("encodes at the decoder's rate and channels where the track declares others (implicit HE-AAC v2)", async () => {
+		const added: { sampleRate: number; channels: number; frames: number }[] = []
+		const output = {
+			add: (sample: AudioSample) => {
+				added.push({ sampleRate: sample.sampleRate, channels: sample.numberOfChannels, frames: sample.numberOfFrames })
+
+				return Promise.resolve()
+			}
+		} as unknown as AudioSampleSource
+		// The track says 24 kHz mono; every decoded sample is 48 kHz stereo, 2048 frames.
+		const decodedRate = 48_000
+		const closed: boolean[] = []
+		const decode = async function* (range: TimeRange): AsyncGenerator<AudioSample> {
+			const step = 2048 / decodedRate
+
+			for (let at = Math.floor(range.start / step) * step; at < range.end; at += step) {
+				await Promise.resolve()
+
+				const sample = new AudioSample({
+					data: new Float32Array(2048 * 2).fill(0.25),
+					format: "f32-planar",
+					numberOfChannels: 2,
+					sampleRate: decodedRate,
+					timestamp: at
+				})
+				const close = sample.close.bind(sample)
+
+				closed.push(false)
+
+				const index = closed.length - 1
+
+				sample.close = () => {
+					closed[index] = true
+					close()
+				}
+
+				yield sample
+			}
+		}
+		const range = { start: 0.5, end: 2 }
+		const format = await decodedAudioFormat(decode, [range], { sampleRate: 24_000, channels: 1 })
+
+		expect(format).toEqual({ sampleRate: decodedRate, channels: 2 })
+		expect(closed).toEqual([true])
+
+		const gate = new InterleaveGate(1)
+
+		gate.addLane("audio1")
+
+		await transcodeAudio({
+			decode,
+			bounds: [range],
+			audio: new RangeAudio({ ...format, gainDb: 0, speed: 1, createStretch: null }),
+			sampleRate: format.sampleRate,
+			output,
+			gate,
+			lane: "audio1",
+			signal: new AbortController().signal
+		})
+
+		expect(added.every(sample => sample.sampleRate === decodedRate && sample.channels === 2)).toBe(true)
+		// The whole range, at the decoded rate.
+		expect(added.reduce((total, sample) => total + sample.frames, 0)).toBe(Math.round(1.5 * decodedRate))
+	})
+
+	it("keeps the declared format where nothing decodes in the range", async () => {
+		const decode = async function* (): AsyncGenerator<AudioSample> {
+			await Promise.resolve()
+			yield* []
+		}
+
+		expect(await decodedAudioFormat(decode, [{ start: 0, end: 1 }], { sampleRate: 44_100, channels: 1 })).toEqual({
+			sampleRate: 44_100,
+			channels: 1
+		})
+	})
+
+	it("reads the format from the first kept range that decodes a sample", async () => {
+		const asked: number[] = []
+		const decode = async function* (range: TimeRange): AsyncGenerator<AudioSample> {
+			await Promise.resolve()
+			asked.push(range.start)
+
+			// The track starts after the first range: nothing decodes there.
+			if (range.start < 5) {
+				return
+			}
+
+			yield new AudioSample({
+				data: new Float32Array(1024 * 2),
+				format: "f32-planar",
+				numberOfChannels: 2,
+				sampleRate: 48_000,
+				timestamp: range.start
+			})
+		}
+		const bounds = [
+			{ start: 0, end: 1 },
+			{ start: 5, end: 6 },
+			{ start: 8, end: 9 }
+		]
+
+		expect(await decodedAudioFormat(decode, bounds, { sampleRate: 24_000, channels: 1 })).toEqual({
+			sampleRate: 48_000,
+			channels: 2
+		})
+		expect(asked).toEqual([0, 5])
+	})
+
+	it("starts a track that begins late with silence, encoded at output 0", async () => {
+		const added: { timestamp: number; frames: number; silent: boolean }[] = []
+		const output = {
+			add: (sample: AudioSample) => {
+				const data = new Float32Array(sample.numberOfFrames)
+
+				sample.copyTo(data, { planeIndex: 0, format: "f32-planar" })
+				added.push({ timestamp: sample.timestamp, frames: sample.numberOfFrames, silent: data.every(value => value === 0) })
+
+				return Promise.resolve()
+			}
+		} as unknown as AudioSampleSource
+		const sampleRate = 8000
+		const decode = async function* (range: TimeRange): AsyncGenerator<AudioSample> {
+			for (let at = Math.max(4, Math.floor(range.start * 8)); at < range.end * 8; at++) {
+				await Promise.resolve()
+
+				yield new AudioSample({
+					data: new Float32Array(1000).fill(0.5),
+					format: "f32-planar",
+					numberOfChannels: 1,
+					sampleRate,
+					timestamp: at / 8
+				})
+			}
+		}
+		const gate = new InterleaveGate(1)
+
+		gate.addLane("audio1")
+
+		await transcodeAudio({
+			decode,
+			bounds: [{ start: 0, end: 1 }],
+			audio: new RangeAudio({ sampleRate, channels: 1, gainDb: 0, speed: 1, createStretch: null }),
+			sampleRate,
+			output,
+			gate,
+			lane: "audio1",
+			signal: new AbortController().signal
+		})
+
+		expect(added[0]).toEqual({ timestamp: 0, frames: 4000, silent: true })
+		expect(added.slice(1).every(sample => !sample.silent)).toBe(true)
+		expect(added.reduce((total, sample) => total + sample.frames, 0)).toBe(sampleRate)
 	})
 })

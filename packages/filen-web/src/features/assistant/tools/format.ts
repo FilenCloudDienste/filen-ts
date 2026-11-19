@@ -1,6 +1,9 @@
 import { sanitizeUntrustedText, type AssistantSignal } from "@filen/shared/assistant"
 import type { AssistantHandleRef } from "@/features/assistant/runtime/executor"
 
+// Name matching lives in @filen/shared, where the eval's fake app matches names the same way.
+export { matchScore, sameName, searchTokens } from "@filen/shared/assistant"
+
 // Model-facing text is English, like the system prompt; names keep the app's own labels.
 
 // A call the app refused, worded for the model. `invalid` marks a malformed call (wrong handle kind, a
@@ -86,99 +89,4 @@ export function isoDate(timestamp: bigint | number): string {
 	const pad = (value: number) => String(value).padStart(2, "0")
 
 	return `${String(date.getFullYear()).padStart(4, "0")}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-// Accents, marks and invisible characters go: a name the model copies back matches with or without a
-// Persian name's zero-width non-joiner.
-export function normalizeText(value: string): string {
-	return value
-		.normalize("NFKD")
-		.replace(/[\p{M}\p{Default_Ignorable_Code_Point}]/gu, "")
-		.toLowerCase()
-}
-
-const UNSPACED =
-	/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u
-
-const KANA_PARTICLE = /^[\p{Script=Hiragana}]$/u
-
-// Created once: a segmenter loads the locale's word data.
-let segmenter: Intl.Segmenter | null = null
-
-// The words of a query, in the case and form the user wrote them: scripts written without spaces
-// ("2024年の請求書", "報告書をArchiveに") are split into words, a change of script splits too, and a lone
-// kana particle is dropped.
-function queryWords(value: string): string[] {
-	const text = value.normalize("NFC").toLowerCase()
-
-	if (!UNSPACED.test(text)) {
-		return text.split(/[^\p{L}\p{M}\p{N}]+/u).filter(word => word.length > 0)
-	}
-
-	segmenter ??= new Intl.Segmenter(undefined, { granularity: "word" })
-
-	return [...segmenter.segment(text)]
-		.filter(segment => segment.isWordLike === true)
-		.flatMap(segment =>
-			segment.segment.split(
-				/(?<=\p{Script=Latin}|\p{N})(?=[^\p{Script=Latin}\p{N}])|(?<=[^\p{Script=Latin}\p{N}])(?=\p{Script=Latin}|\p{N})/u
-			)
-		)
-		.filter(word => word.length > 0 && !KANA_PARTICLE.test(word))
-}
-
-// For the app's own matching, where both sides are folded the same way (accents and marks removed).
-export function searchTokens(value: string): string[] {
-	return queryWords(value)
-		.map(normalizeText)
-		.filter(token => token.length > 0)
-}
-
-// For a matcher that compares names as written (the SDK's search engine: NFC, case-folded, nothing else
-// folded): accents, Devanagari vowel signs and voiced kana stay.
-export function rawSearchTokens(value: string): string[] {
-	return queryWords(value)
-}
-
-// A word's singular, for a substring engine: "invoices" asks for "invoice", "boxes" for "box".
-function singularStem(token: string): string {
-	if (token.length > 4 && /(?:s|x|z|ch|sh)es$/u.test(token)) {
-		return token.slice(0, -2)
-	}
-
-	return token.length > 3 && token.endsWith("s") && !token.endsWith("ss") ? token.slice(0, -1) : token
-}
-
-// The words a substring engine may be asked for, the likeliest to narrow the hits first: words before
-// numbers, longer before shorter, each as its singular so it also finds the other form, none twice.
-export function engineTokens(tokens: readonly string[], max: number): string[] {
-	const ranked = tokens
-		.filter(token => token.length > 0)
-		.toSorted((a, b) => Number(/^\p{N}+$/u.test(a)) - Number(/^\p{N}+$/u.test(b)) || b.length - a.length)
-		.map(singularStem)
-
-	return [...new Set(ranked)].slice(0, max)
-}
-
-// "invoices" finds "Invoice_2024.pdf": names are matched word by word with crude plural folding.
-export function tokenMatches(haystack: string, token: string): boolean {
-	if (haystack.includes(token)) {
-		return true
-	}
-
-	if (token.length > 4 && token.endsWith("es") && haystack.includes(token.slice(0, -2))) {
-		return true
-	}
-
-	return token.length > 3 && token.endsWith("s") && haystack.includes(token.slice(0, -1))
-}
-
-export function matchScore(name: string, tokens: readonly string[]): number {
-	const haystack = normalizeText(name)
-
-	return tokens.filter(token => tokenMatches(haystack, token)).length
-}
-
-export function sameName(a: string, b: string): boolean {
-	return normalizeText(a.trim()) === normalizeText(b.trim())
 }

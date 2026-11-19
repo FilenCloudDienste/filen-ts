@@ -14,6 +14,7 @@ import type { RecordStore } from "@/features/videos/lib/recordStore.logic"
 import { artRecords } from "@/features/videos/lib/records"
 import { ART_STORE, artKey, type ArtSlotCode } from "@/features/videos/lib/artStore.logic"
 import { probeService, type ProbeService } from "@/features/videos/lib/probeService"
+import { PROBE_REVISION } from "@/features/videos/lib/probeService.logic"
 import { frameGenerator, type FrameGenerator, type GeneratedFrame } from "@/features/videos/lib/frames"
 import {
 	ART_CONCURRENCY,
@@ -71,7 +72,7 @@ export interface ArtLoaderDeps {
 	sampleImage: (blob: Blob) => Promise<FrameSample | null>
 	measureImage: (blob: Blob) => Promise<MeasuredImage | null>
 	probes: Pick<ProbeService, "request">
-	frames: Pick<FrameGenerator, "generate">
+	frames: Pick<FrameGenerator, "generate" | "settledMiss">
 	records: RecordStore<ArtRecord>
 	reads: Pick<RangeReadBudget, "run">
 	devicePixelRatio: () => number
@@ -258,6 +259,11 @@ export class ArtLoader {
 			}
 
 			if (record.miss === true) {
+				// A no-cover verdict of an older probe revision: its probe reads the covers again.
+				if (record.rev !== undefined && record.rev < PROBE_REVISION) {
+					continue
+				}
+
 				return "miss"
 			}
 
@@ -266,6 +272,11 @@ export class ArtLoader {
 			if (blob !== null && blob.size > 0) {
 				return { type: "image", blob, source, width: record.w, height: record.h, fit: record.fit, dominant: record.dom }
 			}
+		}
+
+		// The frame generator's own lasting verdict (its hint): no frame can be made of the file.
+		if (source === "frame" && (await this.deps.frames.settledMiss(uuid))) {
+			return "miss"
 		}
 
 		return null
@@ -294,9 +305,14 @@ export class ArtLoader {
 		const probeOptions = { rank: context.rank, signal: context.signal }
 
 		if (source === "sidecar") {
-			return file.size > ART_SOURCE_MAX_BYTES
-				? null
-				: this.makeArt(source, file, { offset: 0, size: file.size }, slot, box, context, epoch)
+			if (file.size > ART_SOURCE_MAX_BYTES) {
+				// Too large for every slot, for as long as the file (its uuid) lasts.
+				this.settle(source, file.uuid, slot, epoch)
+
+				return null
+			}
+
+			return this.makeArt(source, file, { offset: 0, size: file.size }, slot, box, context, epoch)
 		}
 
 		if (source === "embedded") {
@@ -304,7 +320,28 @@ export class ArtLoader {
 			// A backdrop comes from the landscape cover, a poster or still from the front one.
 			const cover = slot === "b" ? probeLandscapeCover(record?.probe) : (record?.probe?.cover ?? null)
 
-			return cover === null || cover.size > ART_SOURCE_MAX_BYTES ? null : this.makeArt(source, file, cover, slot, box, context, epoch)
+			if (cover !== null && cover.size <= ART_SOURCE_MAX_BYTES) {
+				return this.makeArt(source, file, cover, slot, box, context, epoch)
+			}
+
+			// Only a probe that read the file answers for good (no record: offline, a failed or dropped probe). Kept for
+			// this slot only (a poster's miss leaves the backdrop's landscape cover alone), stamped with the probe
+			// revision, so a newer one asks again.
+			if ((record?.probe ?? null) !== null && !dropped() && this.persisting(epoch)) {
+				this.deps.records.put(artKey(file.uuid, slot), {
+					slot,
+					source,
+					fit: "contain",
+					w: 0,
+					h: 0,
+					dom: [0, 0, 0],
+					miss: true,
+					rev: PROBE_REVISION,
+					at: this.deps.now()
+				})
+			}
+
+			return null
 		}
 
 		const record = await this.deps.probes.request({ uuid: file.uuid, file: file.file }, "card", probeOptions)

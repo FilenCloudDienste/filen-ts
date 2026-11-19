@@ -363,7 +363,7 @@ export function PaneToggles() {
 				label={t(view.notesOpen ? "previewPptxNotesHide" : "previewPptxNotesShow")}
 				icon={<StickyNoteIcon />}
 				disabled={empty}
-				pressed={view.notesOpen}
+				active={view.notesOpen}
 				onClick={view.toggleNotes}
 			/>
 		</>

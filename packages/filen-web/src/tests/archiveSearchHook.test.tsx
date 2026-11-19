@@ -134,4 +134,47 @@ describe("useArchiveSearch", () => {
 
 		expect(hook.result.current.shown?.refs).toHaveLength(1)
 	})
+
+	it("lets go of the answer for a replaced store, so it never comes back with that store", async () => {
+		const first = streamOf(["a hit"], 10).next()
+		const hook = render(first)
+
+		await waitFor(() => {
+			expect(hook.result.current.shown?.refs).toHaveLength(1)
+		})
+
+		hook.rerender({ snapshot: streamOf(["b hit", "c hit"], 10).next(), query: "hit" })
+
+		expect(hook.result.current.shown).toBeNull()
+
+		// Back on the first store before any search of it answered again: the old answer was dropped, not hidden.
+		hook.rerender({ snapshot: first, query: "hit" })
+
+		expect(hook.result.current.shown).toBeNull()
+		expect(hook.result.current.pending).toBe(true)
+
+		await waitFor(() => {
+			expect(hook.result.current.shown?.store).toBe(first.store)
+		})
+	})
+
+	it("lets go of the answer once the query is emptied", async () => {
+		const snapshot = streamOf(["a hit"], 10).next()
+		const hook = render(snapshot)
+
+		await waitFor(() => {
+			expect(hook.result.current.shown?.query).toBe("hit")
+		})
+
+		hook.rerender({ snapshot, query: "" })
+		hook.rerender({ snapshot, query: "hit" })
+
+		// The same query typed again answers afresh, after its debounce.
+		expect(hook.result.current.shown).toBeNull()
+		expect(hook.result.current.pending).toBe(true)
+
+		await waitFor(() => {
+			expect(hook.result.current.shown?.query).toBe("hit")
+		})
+	})
 })

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ChevronDownIcon, ChevronRightIcon, XIcon } from "lucide-react"
@@ -70,7 +70,9 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 	const [, setResolvedCount] = useState(0)
 	const focusAfterRender = useRef(false)
 	const resolved = resolvedOf(document, outline)
-	const rows = visibleRows(outline, collapsed)
+	// Memoized by hand: useVirtualizer opts this component out of the compiler, and it re-renders on every range,
+	// page and resolved destination.
+	const rows = useMemo(() => visibleRows(outline, collapsed), [outline, collapsed])
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => scrollElement,
@@ -82,7 +84,7 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 	const first = range?.startIndex ?? 0
 	const last = range?.endIndex ?? -1
 	const current = currentSection(resolved, page)
-	const positions = outlinePositions(outline)
+	const positions = useMemo(() => outlinePositions(outline), [outline])
 	const virtualRows = virtualizer.getVirtualItems()
 	// The roving tab stop is the focused row while it is rendered; scrolled away, the tree itself takes Tab and hands
 	// focus to the first row on screen.
@@ -90,7 +92,7 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 
 	// The rows on screen and the margin, resolved in idle time a few at a time; never the rest.
 	useEffect(() => {
-		const wanted = rowsToResolve(visibleRows(outline, collapsed), first, last, resolved)
+		const wanted = rowsToResolve(rows, first, last, resolved)
 
 		if (wanted.length === 0) return
 
@@ -117,7 +119,7 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 			live = false
 			cancel()
 		}
-	}, [document, outline, collapsed, first, last, resolved])
+	}, [document, outline, rows, first, last, resolved])
 
 	// Focus follows a key that moved it, once the row is rendered.
 	useEffect(() => {

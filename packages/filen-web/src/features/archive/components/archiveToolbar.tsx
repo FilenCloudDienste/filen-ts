@@ -10,7 +10,7 @@ export interface ArchiveCrumb {
 	name: string
 }
 
-// A level of the archives holding this one (W6 §6.1 A): an outer archive's root or one of its directories, left for it.
+// A level of the archives holding this one: an outer archive's root or one of its directories, left for it.
 export interface OuterCrumb {
 	key: string
 	name: string

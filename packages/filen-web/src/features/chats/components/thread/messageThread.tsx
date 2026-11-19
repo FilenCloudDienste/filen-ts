@@ -58,6 +58,7 @@ import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { ChatInfoHost, ChatInfoToggle } from "@/features/chats/components/chatInfoPanel"
 import { useAccountQuery } from "@/queries/account"
+import { blockingQueryError } from "@/queries/blockingError"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
@@ -125,6 +126,9 @@ function UnreadDivider({ chat }: { chat: Chat }) {
 			<button
 				type="button"
 				disabled={pending}
+				// The visible pill only says "New"; the name and tooltip also say what activating it does.
+				aria-label={t("chatUnreadDividerMarkRead")}
+				title={t("chatUnreadDividerMarkRead")}
 				onClick={() => {
 					void handleClick()
 				}}
@@ -243,7 +247,9 @@ interface ThreadListProps {
 	messageKeys: ReadonlySet<string>
 	newestMessageKey: string | null
 	isPending: boolean
+	// Only an error with nothing to show: a failed background refetch keeps the cached rows up.
 	isError: boolean
+	onRetry: () => void
 	currentUserId: bigint | undefined
 	ownAvatarUrl: string | undefined
 	blocked: BlockedUsers
@@ -269,11 +275,12 @@ function ThreadList({
 	newestMessageKey,
 	isPending,
 	isError,
+	onRetry,
 	currentUserId,
 	ownAvatarUrl,
 	blocked
 }: ThreadListProps) {
-	const { t } = useTranslation("chats")
+	const { t } = useTranslation(["chats", "common"])
 	// The roving message: the last one focused while it is still in the thread, else the newest.
 	const [focusKey, setFocusKey] = useState<string | null>(null)
 	const activeKey = focusKey !== null && messageKeys.has(focusKey) ? focusKey : newestMessageKey
@@ -733,6 +740,7 @@ function ThreadList({
 		<TypingIndicator
 			chatUuid={chat.uuid}
 			currentUserId={currentUserId}
+			blocked={blocked}
 		/>
 	)
 
@@ -746,7 +754,14 @@ function ThreadList({
 				<EmptyMessage
 					icon={AlertCircleIcon}
 					title={t("chatThreadLoadError")}
-				/>
+				>
+					<Button
+						variant="outline"
+						onClick={onRetry}
+					>
+						{t("common:tryAgain")}
+					</Button>
+				</EmptyMessage>
 			)
 		}
 
@@ -1002,7 +1017,10 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				messageKeys={messageKeys}
 				newestMessageKey={newestMessageKey}
 				isPending={messagesQuery.isPending}
-				isError={messagesQuery.isError}
+				isError={blockingQueryError(messagesQuery) !== null}
+				onRetry={() => {
+					void messagesQuery.refetch()
+				}}
 				currentUserId={currentUserId}
 				ownAvatarUrl={accountQuery.data?.avatarUrl}
 				blocked={blocked}

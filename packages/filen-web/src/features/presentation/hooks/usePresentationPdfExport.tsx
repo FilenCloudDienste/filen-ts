@@ -68,7 +68,7 @@ export function exportToast(progressKey: PreviewKey): {
 
 			toast.error(
 				i18n.t(
-					refused?.reason === "unsupported" && refused.detail?.includes("password") === true
+					refused?.reason === "passwordUnsupported"
 						? "preview:previewPptxExportPasswordUnsupported"
 						: "preview:previewPptxExportFailed"
 				)

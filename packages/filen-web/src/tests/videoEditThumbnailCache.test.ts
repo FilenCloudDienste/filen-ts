@@ -54,6 +54,11 @@ describe("ThumbnailCache", () => {
 		expect(cache.has("0")).toBe(false)
 	})
 
+	it("keys a tile by its keyframe time alone, so it outlives a zoom", () => {
+		expect(ThumbnailCache.key(2)).toBe(ThumbnailCache.key(2))
+		expect(ThumbnailCache.key(2)).not.toBe(ThumbnailCache.key(2.5))
+	})
+
 	it("closes tiles that arrive after it was cleared, until opened again", () => {
 		const cache = new ThumbnailCache(1_000_000)
 		const kept = tile()

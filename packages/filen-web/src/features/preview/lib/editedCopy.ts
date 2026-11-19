@@ -7,7 +7,7 @@ import { editedSaveTimes, runPreviewSave, type PreviewSaveDeps } from "@/feature
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
-import { takenNames } from "@/features/preview/imageEdit/editSession"
+import { takenNamesInDirectory } from "@/features/drive/lib/nameTaken"
 import type { ActionOutcome } from "@/lib/actions/outcome"
 import { sdkApi } from "@/lib/sdk/client"
 
@@ -76,7 +76,7 @@ export async function writeEditedCopy(
 		return null
 	}
 
-	const taken = await takenNames(normalizeParentUuid(base.data.parent, currentRootUuid())).catch((e: unknown) => {
+	const taken = await takenNamesInDirectory(normalizeParentUuid(base.data.parent, currentRootUuid())).catch((e: unknown) => {
 		closePort()
 
 		throw e

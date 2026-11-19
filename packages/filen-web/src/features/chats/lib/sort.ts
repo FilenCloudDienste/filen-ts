@@ -31,8 +31,8 @@ export function otherParticipants(chat: Chat, userId: bigint | undefined): ChatP
 // (shared with mobile's chatDisplayName, lib/decryption.ts).
 //
 // Undecryptable-placeholder COPY (mobile's i18n `cannot_decrypt_${uuid}` string) is passed in by the
-// rendering components through chatTitle — same posture notes/lib/sort.ts takes for noteDisplayTitle
-// (falls back to the raw uuid, not a placeholder string, at this foundation layer).
+// rendering components through chatTitle, so this foundation layer falls back to the raw uuid, not a
+// placeholder string.
 export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback: string): string {
 	if (isChatUndecryptable(chat)) {
 		return chat.uuid

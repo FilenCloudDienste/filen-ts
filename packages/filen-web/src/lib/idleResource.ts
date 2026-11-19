@@ -6,8 +6,9 @@ export interface IdleResource<T> {
 	use<R>(run: (resource: T) => Promise<R>): Promise<R>
 	// Disposes now when idle; a resource still in use is disposed by its own idle timer instead.
 	disposeIfIdle(): void
-	// Disposes `resource` now even while in use, because it broke (a worker that died): its users' calls
-	// fail on their own, and the next use creates a fresh one. A no-op for a resource already replaced.
+	// Disposes `resource` now even while in use, because it broke (a worker that died), and the next use creates a
+	// fresh one. A Comlink call in flight on a dead worker never settles by itself: its user must reject it (and end
+	// its use) on the worker's loss. A no-op for a resource already replaced.
 	invalidate(resource: T): void
 }
 

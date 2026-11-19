@@ -459,7 +459,15 @@ const FIXTURES: Fixture[] = [
 		])
 	},
 
-	// Not playable in any browser: listed with a badge, never probed.
+	// MPEG-TS: BDAV (192-byte packets, the AAC as private data) from the ISOBMFF source with an "und"
+	// language descriptor, and 188-byte TS from the Matroska remux, whose millisecond timestamps it keeps.
+	{
+		name: "h264-aac-faststart.m2ts",
+		make: ffmpeg(["-i", intermediate("base.mp4"), "-c", "copy", "-metadata:s:a:0", "language=und"])
+	},
+	{ name: "h264-ac3-51.ts", make: ffmpeg(["-i", join(OUT, "h264-ac3-51.mkv"), "-c", "copy"]) },
+
+	// AVI, which no browser plays natively.
 	{ name: "mpeg4-mp3.avi", make: ffmpeg([...video(640, 360, 24, 5), ...stereo(5), "-c:v", "mpeg4", "-q:v", "5", "-c:a", "libmp3lame"]) },
 
 	// Sidecars, named after h264-aac-faststart.mp4.
@@ -553,7 +561,7 @@ function groundTruth(name: string): unknown {
 	}
 }
 
-const MEDIA = /\.(mp4|mov|mkv|webm|avi)$/
+const MEDIA = /\.(mp4|mov|mkv|webm|avi|ts|m2ts)$/
 
 mkdirSync(TMP, { recursive: true })
 

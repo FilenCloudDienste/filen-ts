@@ -6,6 +6,7 @@ import { CheckIcon, PlayIcon, RotateCcwIcon } from "lucide-react"
 import { formatSecondsToMediaClock } from "@filen/shared"
 import { log } from "@/lib/log"
 import { useNowMinute } from "@/lib/useNowMinute"
+import { formatClockTime } from "@/lib/formatDate"
 import { useTitleWatch } from "@/features/videos/hooks/useTitleWatch"
 import { defaultAudioIndex } from "@/features/videos/lib/player/audioChoice.logic"
 import { watchState } from "@/features/videos/lib/watchState"
@@ -22,7 +23,7 @@ import {
 	type Slot
 } from "@/features/videos/lib/titleDetail.logic"
 import { subtitleTracksOf } from "@/features/videos/lib/player/subtitles.logic"
-import { channelLabel, trackLanguageName } from "@/features/videos/lib/player/trackLabels.logic"
+import { audioTrackName, subtitleTrackName } from "@/features/videos/lib/player/trackLabels.logic"
 import { useDetailProbeQuery, useLadderBadgesQuery, useNfoQuery, useStoredProbesQuery } from "@/features/videos/queries/detail"
 import { DetailHeader, ResumeBar, SlotFade } from "@/features/videos/components/detail/detailHeader"
 import { ExtrasShelf } from "@/features/videos/components/detail/extrasShelf"
@@ -127,7 +128,7 @@ export function MovieDetail({
 	onBack: () => void
 	onEdit: () => void
 }) {
-	const { t, i18n } = useTranslation("videos")
+	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
 	const headingId = useId()
 	const extrasId = useId()
@@ -241,30 +242,13 @@ export function MovieDetail({
 	const audioOptions: PickOption[] =
 		probe === null || probe === undefined
 			? []
-			: probe.audio.map((track, index) => ({
-					value: String(index),
-					label: [
-						trackLanguageName(track.lang, i18n.language) ?? t("playerTrackNumber", { number: index + 1 }),
-						channelLabel(track.ch, k => t(k))
-					]
-						.filter(item => item !== null)
-						.join(" ")
-				}))
+			: probe.audio.map((track, index) => ({ value: String(index), label: audioTrackName(track, index, t) }))
 	const subtitleOptions: PickOption[] = [
 		{ value: AUTO, label: t("subtitleAuto") },
 		{ value: "off", label: t("subtitleOff") },
 		...subtitleTracks
 			.filter(track => track.unavailable === null)
-			.map(track => ({
-				value: track.id,
-				label: [
-					trackLanguageName(track.lang, i18n.language) ?? t("subtitleUnknownLanguage"),
-					track.forced ? t("subtitleForced") : null,
-					track.hi ? t("subtitleSdh") : null
-				]
-					.filter(item => item !== null)
-					.join(" · ")
-			}))
+			.map(track => ({ value: track.id, label: subtitleTrackName(track, t) }))
 	]
 	const menu = (
 		<TitleMenu
@@ -337,7 +321,7 @@ export function MovieDetail({
 							>
 								{slots.endsAtMs.state === "ready"
 									? t("videosHomeEndsAt", {
-											time: new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(slots.endsAtMs.value)
+											time: formatClockTime(slots.endsAtMs.value)
 										})
 									: null}
 							</SlotFade>

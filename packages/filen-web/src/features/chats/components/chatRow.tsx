@@ -1,4 +1,4 @@
-import { type MouseEvent } from "react"
+import { memo, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { VolumeOffIcon } from "lucide-react"
@@ -55,7 +55,11 @@ export interface ChatRowProps {
 // <button> nested inside an <a> is invalid content model — same rationale as noteRow.tsx). Carries its own
 // row-level context menu (right-click) and ⋯ trigger (hover-revealed), both rendering the SAME shared
 // descriptor list (chatMenu.logic.ts) the thread header's own menu uses.
-export function ChatRow({
+//
+// Memoized: its host (chatsSidebar.tsx's ChatsVirtualList) runs the virtualizer, which opts it out of the React
+// Compiler and re-renders it on every range change; with identity-stable props from there, only a row whose own
+// props changed (its selection, its chat) renders again.
+export const ChatRow = memo(function ChatRow({
 	chat,
 	selected,
 	multiSelected,
@@ -71,7 +75,7 @@ export function ChatRow({
 	const { t: tCommon } = useTranslation("common")
 	const now = useNowMinute()
 	const name = chatTitle(chat, currentUserId, t("chatUndecryptable"), t("chatJustYou"))
-	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
+	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId, blocked)
 	// chatPreviewTier owns the DECISION (typing > blocked > message > empty); this row owns the COPY.
 	const tier = chatPreviewTier(chat, typingLabel, blocked)
 	const avatarUrl = chatAvatarUrl(chat, currentUserId)
@@ -216,4 +220,4 @@ export function ChatRow({
 			/>
 		</ContextMenu>
 	)
-}
+})

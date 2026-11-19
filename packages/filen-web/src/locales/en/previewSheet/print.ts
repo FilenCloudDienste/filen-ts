@@ -97,5 +97,15 @@ export const previewSheetPrint = {
 	/** Print dialog preview and toast — one page holds more cells than a page can be drawn with; {{page}} is its number */
 	previewSheetPrintPageTooLarge: "Page {{page}} holds too many cells to print. Set a print area, a larger scale or a smaller paper size.",
 	/** Toast — the pages could not be prepared */
-	previewSheetPrintFailed: "This spreadsheet couldn't be printed."
+	previewSheetPrintFailed: "This spreadsheet couldn't be printed.",
+	/** Printed page listing a sheet's notes at the end — the line naming a note's cell; {{cell}} is a cell reference such as B2 */
+	previewSheetPrintNoteCell: "Cell: {{cell}}",
+	/** Printed page listing a sheet's notes at the end — the line with a note's text; {{note}} is the note */
+	previewSheetPrintNoteText: "Note: {{note}}",
+	/** Saved PDF — text a screen reader reads for a chart that has no description of its own */
+	previewSheetPrintChartAlt: "Chart",
+	/** Saved PDF — text a screen reader reads for a picture that has no description of its own */
+	previewSheetPrintPictureAlt: "Picture",
+	/** Saved PDF — text a screen reader reads for a chart sheet's chart; {{name}} is the sheet's name */
+	previewSheetPrintChartSheetAlt: "Chart: {{name}}"
 }

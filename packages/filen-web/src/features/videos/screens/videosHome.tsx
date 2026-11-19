@@ -180,6 +180,17 @@ function EmptyLibrary({ uuids, roots }: { uuids: string[]; roots: readonly Video
 	)
 }
 
+// A Videos screen whose read failed: the error and a retry (Home, a library view, a title page).
+export function VideosLoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+	return (
+		<EmptyState
+			variant="error"
+			error={asErrorDTO(error)}
+			onRetry={onRetry}
+		/>
+	)
+}
+
 // The library's home: first run, the per-directory notices and, once titles exist, the hero and the rows.
 export function VideosHomeScreen() {
 	const { configQuery, snapshot, roots } = useVideoLibraryView()
@@ -191,9 +202,8 @@ export function VideosHomeScreen() {
 
 	if (configQuery.status === "error") {
 		return (
-			<EmptyState
-				variant="error"
-				error={asErrorDTO(configQuery.error)}
+			<VideosLoadError
+				error={configQuery.error}
 				onRetry={() => {
 					void configQuery.refetch()
 				}}

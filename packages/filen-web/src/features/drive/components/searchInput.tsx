@@ -25,7 +25,7 @@ export function SearchInput({ action, label, value, onChange, onClear, onFocusLi
 	const { t } = useTranslation("drive")
 	const inputRef = useRef<HTMLInputElement>(null)
 
-	// Registered above at module scope. Every browser intercepts mod+f for its own find-in-page, which the
+	// drive.search is defined in features/drive/lib/keymap.ts. Every browser intercepts mod+f for its own find-in-page, which the
 	// listing takes over. Stands down under any open dialog or menu (the preview overlay, the startup
 	// reminders and the narrow-viewport sidebar drawer included): focus would land on this input behind that
 	// surface's focus trap, and the key stays that layer's.

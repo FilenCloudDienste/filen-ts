@@ -65,7 +65,7 @@ export interface ArchiveHandleDeps {
 	newId: () => string
 }
 
-const NO_EVENTS: EntryReaderEvents = {
+export const NO_EVENTS: EntryReaderEvents = {
 	phase: () => undefined,
 	verified: () => undefined,
 	failed: () => undefined

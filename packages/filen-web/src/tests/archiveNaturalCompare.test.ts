@@ -64,12 +64,118 @@ describe("compareNames", () => {
 		}
 	})
 
-	it("hands non-ASCII differences to the collator, case-insensitively", () => {
+	it("places accented letters at their base letter, case-insensitively", () => {
 		expect(compareNames("Äpfel", "apfel")).toBeGreaterThan(0)
 		expect(compareNames("äpfel", "Äpfel")).toBe(0)
 		expect(compareNames("Äpfel", "apple")).toBeLessThan(0)
 		expect(compareNames("x é2", "x é10")).toBeLessThan(0)
 		expect(compareNames("日本 2", "日本 10")).toBeLessThan(0)
 		expect(compareNames("zebra", "Äpfel")).toBeGreaterThan(0)
+	})
+
+	it("orders a mixed set of names transitively, whatever the input order", () => {
+		const names = [
+			"zeta",
+			"~temp",
+			"übung",
+			"{a",
+			"|a",
+			"}a",
+			"Éb",
+			"_a",
+			"a1",
+			"a10",
+			"~$Bericht.docx",
+			"Ärger.docx",
+			"日本",
+			"日本 2",
+			"9z",
+			"-a",
+			"e{",
+			"ez",
+			"éa",
+			"resume~x",
+			"resumez",
+			"résuméa",
+			"cafe-menu.pdf",
+			"cafe_menu.pdf",
+			"café_menu.pdf",
+			"ch",
+			"ci",
+			"cí",
+			"cs",
+			"cz",
+			"cž",
+			"ΑΣz",
+			"ΑΣ~",
+			"ασa",
+			"ΑΣé"
+		]
+
+		for (const a of names) {
+			for (const b of names) {
+				for (const c of names) {
+					if (compareNames(a, b) < 0 && compareNames(b, c) < 0) {
+						expect([a, b, c, compareNames(a, c) < 0]).toEqual([a, b, c, true])
+					}
+				}
+			}
+		}
+
+		const expected = [...names].sort(compareNames)
+		const next = random(7)
+
+		for (let round = 0; round < 50; round++) {
+			const shuffled = [...names]
+
+			for (let i = shuffled.length - 1; i > 0; i--) {
+				const k = Math.floor(next() * (i + 1))
+				const swap = shuffled[i] ?? ""
+
+				shuffled[i] = shuffled[k] ?? ""
+				shuffled[k] = swap
+			}
+
+			expect(shuffled.sort(compareNames)).toEqual(expected)
+		}
+	})
+
+	it("sorts { | } ~ after letters, ASCII or not", () => {
+		expect(compareNames("zeta", "~temp")).toBeLessThan(0)
+		expect(compareNames("übung", "~temp")).toBeLessThan(0)
+		expect(compareNames("Ärger.docx", "~$Bericht.docx")).toBeLessThan(0)
+	})
+
+	it("orders names sharing a prefix up to an accented letter in one order, whatever the input order", () => {
+		const triples = [
+			["e{", "ez", "éa"],
+			["resume~x", "resumez", "résuméa"],
+			["cafe-menu.pdf", "cafe_menu.pdf", "café_menu.pdf"],
+			["ch", "ci", "cí"],
+			["cs", "cz", "cž"],
+			["ΑΣz", "ΑΣ~", "ασa"],
+			["ΑΣz", "ΑΣ~", "ΑΣé"]
+		]
+
+		for (const [a = "", b = "", c = ""] of triples) {
+			const expected = [a, b, c].sort(compareNames)
+
+			for (const permutation of [
+				[a, c, b],
+				[b, a, c],
+				[b, c, a],
+				[c, a, b],
+				[c, b, a]
+			]) {
+				expect(permutation.sort(compareNames)).toEqual(expected)
+			}
+		}
+
+		expect(["e{", "ez", "éa"].sort(compareNames)).toEqual(["éa", "ez", "e{"])
+		expect(["café_menu.pdf", "cafe_menu.pdf", "cafe-menu.pdf"].sort(compareNames)).toEqual([
+			"cafe-menu.pdf",
+			"cafe_menu.pdf",
+			"café_menu.pdf"
+		])
 	})
 })

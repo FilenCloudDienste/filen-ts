@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { SAVE_PORT_CHUNK, SavePortAbortedError, savePortWriter } from "@filen/shared/savePort"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import {
 	canEditImage,
@@ -10,6 +11,7 @@ import {
 	isViewOnlyPdf,
 	pdfTooLargeToEdit,
 	runPreviewSave,
+	settledStorageRefusal,
 	type PreviewSaveDeps
 } from "@/features/drive/lib/previewSave.logic"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -198,10 +200,6 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "trash")).toBe(false)
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "favorites")).toBe(false)
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "sharedIn")).toBe(false)
-	})
-
-	it("is false for an undecryptable markdown row", () => {
-		expect(isEditable(fileItem({ meta: { type: "encrypted", data: "cipher" } }), "drive")).toBe(false)
 	})
 
 	it("is false for an undecryptable file", () => {
@@ -557,11 +555,24 @@ describe("runPreviewSave storage pre-flight", () => {
 		expect(rewriteOrientation).not.toHaveBeenCalled()
 	})
 
-	it("closes a refused port save's channel, so the writer on its other end never blocks", async () => {
+	// The engine's writer on the other end of the save port, its worker serving one request at a time: a request queued
+	// behind the write only runs once the write settles.
+	function blockedWriter(port: MessagePort): { readonly write: Promise<void>; readonly queued: Promise<string> } {
+		const writer = savePortWriter(port)
+		const write = writer.write(new Uint8Array(SAVE_PORT_CHUNK))
+		const queued = write.then(
+			() => "saveEnd",
+			() => "saveEnd"
+		)
+
+		return { write, queued }
+	}
+
+	it("aborts a port save refused by the quota pre-flight, so the writer on its other end never blocks", async () => {
 		const h = makeHarness()
 		const uploadFileFromPort = vi.fn<NonNullable<PreviewSaveDeps["uploadFileFromPort"]>>()
 		const channel = new MessageChannel()
-		const close = vi.spyOn(channel.port2, "close")
+		const engine = blockedWriter(channel.port1)
 		h.checkQuota.mockResolvedValue(exceeds)
 
 		const outcome = await runPreviewSave(
@@ -570,10 +581,45 @@ describe("runPreviewSave storage pre-flight", () => {
 		)
 
 		expect(h.checkQuota).toHaveBeenCalledExactlyOnceWith(9n)
-		expect(close).toHaveBeenCalledOnce()
 		expect(uploadFileFromPort).not.toHaveBeenCalled()
+		expect(outcome).toMatchObject({ status: "error", dto: { kind: "MaxStorageReached" } })
+		await expect(engine.write).rejects.toEqual(new SavePortAbortedError("upload"))
+		await expect(engine.queued).resolves.toBe("saveEnd")
+	})
+
+	it("aborts a port save where no port upload is wired", async () => {
+		const h = makeHarness()
+		const channel = new MessageChannel()
+		const engine = blockedWriter(channel.port1)
+
+		const outcome = await runPreviewSave(h.deps, { item: fileItem(), content: { port: channel.port2, size: 9 } })
+
 		expect(outcome.status).toBe("error")
-		channel.port1.close()
+		await expect(engine.write).rejects.toEqual(new SavePortAbortedError("upload"))
+		await expect(engine.queued).resolves.toBe("saveEnd")
+	})
+
+	it("hands a refused port save the quota refusal its upload already answered, never waiting for one still running", async () => {
+		const h = makeHarness()
+		const channel = new MessageChannel()
+		const engine = blockedWriter(channel.port1)
+		h.checkQuota.mockResolvedValue(exceeds)
+
+		const upload = runPreviewSave(
+			{ ...h.deps, uploadFileFromPort: vi.fn() },
+			{ item: fileItem(), content: { port: channel.port2, size: 9 } }
+		)
+
+		// The writer's refusal (the session's save result) only follows the abort the refused upload sent.
+		await expect(engine.write).rejects.toEqual(new SavePortAbortedError("upload"))
+		await expect(settledStorageRefusal(upload)).resolves.toMatchObject({ kind: "MaxStorageReached" })
+
+		const pending = new Promise<never>(() => undefined)
+		const otherError = Promise.resolve({ status: "error", dto: sdkDto("Unauthenticated") } as const)
+
+		await expect(settledStorageRefusal(pending)).resolves.toBeNull()
+		await expect(settledStorageRefusal(otherError)).resolves.toBeNull()
+		await expect(settledStorageRefusal(Promise.reject(new Error("upload threw")))).resolves.toBeNull()
 	})
 
 	it("leaves a port save of unknown size to the server", async () => {

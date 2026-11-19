@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react"
+import { useState, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import {
@@ -115,7 +115,9 @@ export function DriveJobToast({ jobId, onHeightChange, onDismiss, onRetried, onS
 						<XIcon />
 					</Button>
 				</div>
-				<JobStatusLine model={model} />
+				<QuietWhile quiet={actions.pauseCancel}>
+					<JobStatusLine model={model} />
+				</QuietWhile>
 				{model.summary === null ? null : (
 					<p className="text-xs text-muted-foreground tabular-nums">
 						{t("transfersExtractSummary", {
@@ -134,17 +136,19 @@ export function DriveJobToast({ jobId, onHeightChange, onDismiss, onRetried, onS
 						<span className="min-w-0 flex-1">{t(warning.key, { count: warning.count })}</span>
 					</p>
 				))}
-				<div className="flex items-center gap-2">
-					<Progress
-						value={model.percent}
-						aria-label={t(model.labels.progress)}
-						className="min-w-0 flex-1 gap-0"
-					/>
-					{percentLabel === null ? null : (
-						<span className="shrink-0 text-xs text-muted-foreground tabular-nums">{percentLabel}</span>
-					)}
-				</div>
-				{bytesLine.length > 0 ? <p className="truncate text-xs text-muted-foreground tabular-nums">{bytesLine}</p> : null}
+				<QuietWhile quiet>
+					<div className="flex items-center gap-2">
+						<Progress
+							value={model.percent}
+							aria-label={t(model.labels.progress)}
+							className="min-w-0 flex-1 gap-0"
+						/>
+						{percentLabel === null ? null : (
+							<span className="shrink-0 text-xs text-muted-foreground tabular-nums">{percentLabel}</span>
+						)}
+					</div>
+					{bytesLine.length > 0 ? <p className="truncate text-xs text-muted-foreground tabular-nums">{bytesLine}</p> : null}
+				</QuietWhile>
 				<div className="flex items-center gap-1">
 					<Button
 						variant="ghost"
@@ -222,6 +226,24 @@ export function RoutedDriveJobToast(props: Omit<DriveJobToastProps, "onShowDirec
 				})
 			}}
 		/>
+	)
+}
+
+// Sonner renders every toast inside a polite live region. What ticks with each progress update sits in a
+// region of its own that is off, so a long job is not read out tick by tick; it stays readable to whoever
+// navigates to the card. Off the quiet wrapper, a settling status line is announced once.
+function QuietWhile({ quiet, children }: { quiet: boolean; children: ReactNode }) {
+	if (!quiet) {
+		return children
+	}
+
+	return (
+		<div
+			aria-live="off"
+			className="flex flex-col gap-2"
+		>
+			{children}
+		</div>
 	)
 }
 
@@ -384,7 +406,10 @@ function JobDetails({ job, model, onRetried }: { job: DriveJob; model: JobCardMo
 	return (
 		<div className="flex max-h-60 flex-col gap-3 overflow-y-auto border-t pt-2 text-xs">
 			{active.length > 0 ? (
-				<section className="flex flex-col gap-1">
+				<section
+					aria-live="off"
+					className="flex flex-col gap-1"
+				>
 					<h3 className="font-medium">{t(model.labels.current)}</h3>
 					<ul className="flex flex-col gap-0.5 text-muted-foreground">
 						{active.map(file => (

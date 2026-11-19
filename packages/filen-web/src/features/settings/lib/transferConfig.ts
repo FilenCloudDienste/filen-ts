@@ -6,8 +6,7 @@ import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset, DEFAULT_T
 // Advanced settings → transfer performance preset. Scoped to THIS web app's own uploads/downloads
 // (the worker-held wasm Client every drive/notes/chats transfer runs through) — worded that way
 // everywhere this reaches the UI, since the app also serves as the Electron frontend and the desktop
-// client's future file-sync/network-drive engine will carry its own, separate bandwidth/concurrency
-// settings.
+// client's file-sync/network-drive engine carries its own, separate bandwidth/concurrency settings.
 //
 // The wasm `Client` exposes no live concurrency setter (unlike the RN uniffi client mobile builds
 // against, which has `setBandwidthLimits`) — every one of these knobs is a `JsClientConfig` field

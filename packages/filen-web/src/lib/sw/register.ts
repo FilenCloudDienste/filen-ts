@@ -1,4 +1,4 @@
-import { SW_MSG_BUILD, SW_MSG_CLAIM, SW_PROTOCOL_VERSION, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
+import { SW_MSG_ACTIVE_STREAMS, SW_MSG_BUILD, SW_MSG_CLAIM, SW_PROTOCOL_VERSION, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
 import { log } from "@/lib/log"
 
 let started = false
@@ -10,6 +10,9 @@ let updateRequested = false
 // `controllerchange` can in principle fire more than once — guards the reload to exactly once so a
 // second firing can never re-navigate mid-flight.
 let reloaded = false
+// Told when a confirmed update is held back by a running download, so the prompt the user just
+// dismissed by confirming can say why nothing happened yet.
+let onUpdateDeferred: (() => void) | undefined
 
 // Dev has no built `sw.js` (that is a separate build, see vite.sw.config.ts), so it registers the
 // worker's SOURCE module and lets the dev server transform it — sw.ts imports one module of
@@ -34,35 +37,117 @@ const PAGE_BUILD = import.meta.env.VITE_BUILD_ID ?? null
 // A worker answers from its own message handler, so silence this long means it cannot be compared:
 // one older than this protocol, or one gone redundant.
 const BUILD_QUERY_TIMEOUT_MS = 5_000
+// The active worker's stream count gates an update. A worker older than that query never answers, and
+// waiting on it would block every update, so a short silence lets the update through.
+const STREAMS_QUERY_TIMEOUT_MS = 2_000
+// While a download streams through the active worker, the deferred update asks again this often.
+const STREAMS_RECHECK_MS = 5_000
 
-// Resolves undefined when the worker does not answer.
-function workerBuild(worker: ServiceWorker): Promise<string | null | undefined> {
+// Posts `type` to `worker` with a reply port. Resolves the reply's data, or undefined after `timeoutMs`
+// of silence.
+function askWorker(worker: ServiceWorker, type: string, timeoutMs: number): Promise<unknown> {
 	return new Promise(resolve => {
 		const channel = new MessageChannel()
 		const timeout = setTimeout(() => {
 			channel.port1.close()
 			resolve(undefined)
-		}, BUILD_QUERY_TIMEOUT_MS)
+		}, timeoutMs)
 
-		channel.port1.onmessage = (event: MessageEvent<{ build?: unknown } | null>) => {
+		channel.port1.onmessage = (event: MessageEvent<unknown>) => {
 			clearTimeout(timeout)
 			channel.port1.close()
-
-			const build = event.data?.build
-
-			resolve(typeof build === "string" ? build : null)
+			resolve(event.data ?? null)
 		}
 
-		worker.postMessage({ type: SW_MSG_BUILD }, [channel.port2])
+		worker.postMessage({ type }, [channel.port2])
 	})
 }
 
-export function registerSW(onUpdateReady: () => void): void {
+// Resolves undefined when the worker does not answer.
+async function workerBuild(worker: ServiceWorker): Promise<string | null | undefined> {
+	const answer = await askWorker(worker, SW_MSG_BUILD, BUILD_QUERY_TIMEOUT_MS)
+
+	if (answer === undefined) {
+		return undefined
+	}
+
+	return typeof answer === "object" && answer !== null && "build" in answer && typeof answer.build === "string" ? answer.build : null
+}
+
+// Streams in flight in `worker`, every tab's: each tab's downloads run through the one active worker. No
+// answer or an unreadable one counts as none.
+async function workerActiveStreams(worker: ServiceWorker): Promise<number> {
+	const answer = await askWorker(worker, SW_MSG_ACTIVE_STREAMS, STREAMS_QUERY_TIMEOUT_MS)
+
+	return typeof answer === "object" && answer !== null && "active" in answer && typeof answer.active === "number" ? answer.active : 0
+}
+
+// The waiting worker held back until the active one streams nothing, so one takeover runs per worker.
+let pendingTakeover: ServiceWorker | null = null
+// Whether a stream currently holds `pendingTakeover` back, and who to tell when it does.
+let takeoverHeldBack = false
+let takeoverOnDeferred: (() => void) | undefined
+
+// Activating the waiting worker replaces the active one, cutting off every download streaming through it,
+// so the active worker is asked first and the takeover waits for its last stream to end. Ends without
+// posting once `waiting` is no longer the registration's waiting worker (activated, or replaced by a newer
+// one, which is compared on its own). `onDeferred` runs the first time a stream holds the takeover back,
+// and again for each later call while it is held back (a Reload prompt shown again turns back into the note).
+function activateWhenIdle(reg: ServiceWorkerRegistration, waiting: ServiceWorker, onDeferred?: () => void): void {
+	if (pendingTakeover === waiting) {
+		takeoverOnDeferred = onDeferred ?? takeoverOnDeferred
+
+		if (takeoverHeldBack) {
+			onDeferred?.()
+		}
+
+		return
+	}
+
+	pendingTakeover = waiting
+	takeoverHeldBack = false
+	takeoverOnDeferred = onDeferred
+
+	void (async () => {
+		try {
+			for (;;) {
+				const active = reg.active
+				const streams = active === null || active === waiting ? 0 : await workerActiveStreams(active)
+
+				if (reg.waiting !== waiting) {
+					return
+				}
+
+				if (streams === 0) {
+					waiting.postMessage({ type: SW_SKIP_WAITING_MESSAGE })
+
+					return
+				}
+
+				if (!takeoverHeldBack) {
+					takeoverHeldBack = true
+					takeoverOnDeferred?.()
+				}
+
+				await new Promise(resolve => setTimeout(resolve, STREAMS_RECHECK_MS))
+			}
+		} finally {
+			if (pendingTakeover === waiting) {
+				pendingTakeover = null
+				takeoverHeldBack = false
+				takeoverOnDeferred = undefined
+			}
+		}
+	})()
+}
+
+export function registerSW(onUpdateReady: () => void, onDeferred?: () => void): void {
 	if (started || !("serviceWorker" in navigator)) {
 		return
 	}
 
 	started = true
+	onUpdateDeferred = onDeferred
 
 	navigator.serviceWorker.addEventListener("controllerchange", () => {
 		if (!updateRequested || reloaded) {
@@ -94,7 +179,7 @@ export function registerSW(onUpdateReady: () => void): void {
 			if (build !== PAGE_BUILD) {
 				onUpdateReady()
 			} else if (reg.waiting === worker && reg.active !== null && reg.active !== worker) {
-				worker.postMessage({ type: SW_SKIP_WAITING_MESSAGE })
+				activateWhenIdle(reg, worker)
 			}
 		})
 	}
@@ -151,20 +236,21 @@ export function registerSW(onUpdateReady: () => void): void {
 		})
 }
 
-// Tells the waiting worker to activate; the `controllerchange` listener set up in registerSW performs
-// the actual reload once it does.
+// Tells the waiting worker to activate once no download streams through the active one; the
+// `controllerchange` listener set up in registerSW performs the actual reload once it does.
 export function applyUpdate(): void {
-	const waiting = registration?.waiting
+	const reg = registration
+	const waiting = reg?.waiting
 
 	// No waiting worker: the prompt came from a newer build found another way (appUpdate.ts) before the
 	// worker update was, and the page reload alone picks up the new build.
-	if (!waiting) {
+	if (!reg || !waiting) {
 		window.location.reload()
 		return
 	}
 
 	updateRequested = true
-	waiting.postMessage({ type: SW_SKIP_WAITING_MESSAGE })
+	activateWhenIdle(reg, waiting, onUpdateDeferred)
 }
 
 // The protocol version of the worker controlling this page, which answers `/__sw/version` itself (no

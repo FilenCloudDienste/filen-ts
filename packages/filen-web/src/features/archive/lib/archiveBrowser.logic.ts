@@ -410,6 +410,12 @@ export function failureLabelKey(error: ErrorDTO): PreviewKey | null {
 	}
 }
 
+// A listing or entry read refused for its password: none was given, or the one given is wrong.
+export function isArchivePasswordError(error: ErrorDTO): boolean {
+	return error.kind === "ArchivePasswordRequired" || error.kind === "ArchiveWrongPassword"
+}
+
+// What a finished, stopped or failed listing read; null while one runs or waits.
 export function summaryOf(phase: ListingPhase): ListSummary | null {
 	switch (phase.type) {
 		case "done":

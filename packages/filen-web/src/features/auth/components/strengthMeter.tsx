@@ -19,11 +19,15 @@ const STRENGTH_FILL_CLASS: Record<PasswordStrength, string> = {
 	best: "bg-green-500"
 }
 
+// The label is the only text naming the tier, so each shade clears 4.5:1 on the card in both themes; the
+// bar keeps its 500 fills. destructive is already a per-theme token. The 500 shades fall to ~1.9-3.8:1 on
+// the light card, so light goes darker: yellow-700 4.9:1, blue-600 5.3:1, green-700 4.9:1; dark keeps a
+// lighter shade: yellow-500 9.3:1, blue-400 6.7:1, green-500 8.0:1.
 const STRENGTH_TEXT_CLASS: Record<PasswordStrength, string> = {
 	weak: "text-destructive",
-	normal: "text-yellow-500",
-	strong: "text-blue-500",
-	best: "text-green-500"
+	normal: "text-yellow-700 dark:text-yellow-500",
+	strong: "text-blue-600 dark:text-blue-400",
+	best: "text-green-700 dark:text-green-500"
 }
 
 const STRENGTH_LABEL_KEY = {

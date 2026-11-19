@@ -1,5 +1,6 @@
 import type { AspectPreset, Geometry, MarkupItem } from "@/features/preview/imageEdit/types"
 import { aspectRatio, MIN_CROP, type Crop, type Size } from "@/features/preview/imageEdit/lib/recipe"
+import { MARKUP_TEXT_LINE_HEIGHT, type MarkupTextMeasure } from "@/features/preview/imageEdit/components/markupStyle"
 
 // The editor surface's own math: where the picture sits on screen, the crop tab's gestures, and which markup item a
 // point hits. The recipe's geometry itself (orientation, straighten scale, output size, the output↔source mapping)
@@ -167,9 +168,15 @@ export function strokeHit(items: readonly MarkupItem[], x: number, y: number, to
 	return null
 }
 
-// A text item's box on screen: anchored at its top left, one line, glyphs about 0.6 em wide.
-export function textBox(anchor: readonly [number, number], text: string, fontSize: number): Box {
-	return { left: anchor[0], top: anchor[1], width: Math.max(1, text.length) * fontSize * 0.6, height: fontSize * 1.2 }
+// A text item's box on screen: anchored at its top left, one line, as wide as `measure` says its glyphs are (at least
+// 0.6 em, so an empty item can still be hit).
+export function textBox(anchor: readonly [number, number], text: string, fontSize: number, measure: MarkupTextMeasure): Box {
+	return {
+		left: anchor[0],
+		top: anchor[1],
+		width: Math.max(measure(text, fontSize), fontSize * 0.6),
+		height: fontSize * MARKUP_TEXT_LINE_HEIGHT
+	}
 }
 
 export function inBox(box: Box, x: number, y: number, slack: number): boolean {

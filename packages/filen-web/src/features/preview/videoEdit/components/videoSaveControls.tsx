@@ -349,7 +349,7 @@ export type ExportState =
 
 // The export's progress under the header while it runs in the editor, or why it failed or was refused, with Retry where
 // trying again can help (the edits stay; offline it waits). Focus follows it: to Continue in background as it starts,
-// to Retry (or Dismiss) when it stops (the editor puts it back on its Save once the bar goes).
+// to Retry when it stops (Dismiss when Retry is not offered or offline) (the editor puts it back on its Save once the bar goes).
 export function ExportBar(props: {
 	state: ExportState
 	online: boolean
@@ -363,6 +363,8 @@ export function ExportBar(props: {
 	const state = props.state
 	const focusRef = useRef<HTMLButtonElement | null>(null)
 	const retries = state.status === "failed" || (state.status === "refused" && refusalRetries(state.reason))
+	// Offline, Retry is disabled and cannot take focus, so Dismiss does instead of focus dropping to the page.
+	const focusRetry = retries && props.online
 
 	useEffect(() => {
 		focusRef.current?.focus()
@@ -388,7 +390,7 @@ export function ExportBar(props: {
 					)}
 				</span>
 				<Button
-					ref={retries ? undefined : focusRef}
+					ref={focusRetry ? undefined : focusRef}
 					size="sm"
 					variant="ghost"
 					onClick={props.onDismiss}
@@ -397,7 +399,7 @@ export function ExportBar(props: {
 				</Button>
 				{retries ? (
 					<Button
-						ref={focusRef}
+						ref={focusRetry ? focusRef : undefined}
 						size="sm"
 						disabled={!props.online}
 						title={props.online ? undefined : t("common:offlineActionDisabled")}

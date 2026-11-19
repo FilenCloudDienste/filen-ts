@@ -78,6 +78,14 @@ function RunProgress({ run }: { run: Exclude<OcrDialogRun, { phase: "modelsFaile
 
 	return (
 		<div className="flex flex-col gap-3">
+			{run.phase === "failed" ? (
+				<p
+					role="alert"
+					className="text-sm text-destructive"
+				>
+					{t("previewPdfOcrRunFailed")}
+				</p>
+			) : null}
 			{run.phase === "recognising" ? (
 				<Progress
 					value={run.pages.length > 0 ? Math.floor((done / run.pages.length) * 100) : 0}
@@ -90,7 +98,7 @@ function RunProgress({ run }: { run: Exclude<OcrDialogRun, { phase: "modelsFaile
 					role="status"
 					className="flex flex-col gap-1 text-sm"
 				>
-					{run.cancelled ? <p>{t("previewPdfOcrCancelled")}</p> : null}
+					{run.phase === "finished" && run.cancelled ? <p>{t("previewPdfOcrCancelled")}</p> : null}
 					<p>{t("previewPdfOcrDone", { count: searchable })}</p>
 					{failed > 0 ? <p className="text-destructive">{t("previewPdfOcrFailed", { count: failed })}</p> : null}
 				</div>

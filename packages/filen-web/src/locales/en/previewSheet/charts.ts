@@ -55,6 +55,8 @@ export const previewSheetCharts = {
 	previewSheetChartPlot: "Series group {{number}}",
 	/** Chart editor panel — chart type field */
 	previewSheetChartType: "Chart type",
+	/** Chart editor panel — the read-only type line of a chart whose type cannot be changed here; {{type}} is the type's name (e.g. "Radar") */
+	previewSheetChartTypeReadOnly: "Chart type: {{type}}",
 	/** Chart editor panel — grouping field */
 	previewSheetChartGrouping: "Layout",
 	/** Chart editor panel — a combination chart's groups take column, line or area only */

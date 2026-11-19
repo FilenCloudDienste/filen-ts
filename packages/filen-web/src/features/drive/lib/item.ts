@@ -4,6 +4,8 @@ import type {
 	DecryptedDirMeta,
 	DecryptedFileMeta,
 	DirColor,
+	DirMeta,
+	FileMeta,
 	SharedDir,
 	SharedRootDir,
 	SharedFile,
@@ -428,6 +430,52 @@ export function withNameOf(row: DriveItem, renamed: DriveItem): DriveItem {
 			const { meta, decryptedMeta, undecryptable } = source.data
 
 			return withData(row, data => ({ ...data, meta, decryptedMeta, undecryptable }))
+		}
+	}
+}
+
+// A cached row refreshed with the metadata a remote change carried, keeping its arm and sharing context like
+// withNameOf. Only a decoded meta reaches a shared row: an undecryptable one would blank a name it displays.
+export function withFileMeta(row: DriveItem, meta: FileMeta): DriveItem {
+	switch (row.type) {
+		case "directory":
+		case "sharedDirectory":
+		case "sharedRootDirectory": {
+			return row
+		}
+
+		case "file":
+		case "sharedFile":
+		case "sharedRootFile": {
+			if (row.type !== "file" && meta.type !== "decoded") {
+				return row
+			}
+
+			const decryptedMeta = meta.type === "decoded" ? meta.data : null
+
+			return withData(row, data => ({ ...data, meta, decryptedMeta, undecryptable: decryptedMeta === null }))
+		}
+	}
+}
+
+export function withDirMeta(row: DriveItem, meta: DirMeta): DriveItem {
+	switch (row.type) {
+		case "directory":
+		case "sharedDirectory":
+		case "sharedRootDirectory": {
+			if (row.type !== "directory" && meta.type !== "decoded") {
+				return row
+			}
+
+			const decryptedMeta = meta.type === "decoded" ? meta.data : null
+
+			return withData(row, data => ({ ...data, meta, decryptedMeta, undecryptable: decryptedMeta === null }))
+		}
+
+		case "file":
+		case "sharedFile":
+		case "sharedRootFile": {
+			return row
 		}
 	}
 }

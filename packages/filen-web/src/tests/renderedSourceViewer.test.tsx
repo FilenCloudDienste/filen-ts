@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
@@ -21,6 +22,7 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 }))
 
 const { RenderedSourceViewer } = await import("@/features/preview/components/renderedSourceViewer")
+const { PreviewMarkdown } = await import("@/features/preview/components/previewMarkdown")
 
 registerAllActions()
 
@@ -68,5 +70,79 @@ describe("RenderedSourceViewer", () => {
 
 		expect(await screen.findByText("graph TD; A-->B")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Bold" })).toBeNull()
+	})
+
+	// Escape and F6 on the switch hand focus to the rendered pane, whatever the renderer draws.
+	const renderPane = (renderer: (source: { file: { text: string } }) => ReactNode) => {
+		render(
+			<RenderedSourceViewer
+				item={ITEM}
+				alt="flow.mmd"
+				renderer={renderer}
+				tag=""
+				formatting={false}
+				labels={{ view: "Diagram view", rendered: "Diagram" }}
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+
+		const toggle = screen.getByRole("button", { name: "Diagram" })
+		const pane = screen.getByTestId("rendered").parentElement
+
+		if (pane === null) {
+			throw new Error("No rendered pane")
+		}
+
+		return { toggle, pane }
+	}
+
+	const expectKeysLandInPane = (toggle: HTMLElement, pane: HTMLElement, landing: HTMLElement) => {
+		for (const key of ["Escape", "F6"]) {
+			toggle.focus()
+
+			expect(fireEvent.keyDown(toggle, { key })).toBe(false)
+			expect(document.activeElement).toBe(landing)
+			expect(pane.contains(document.activeElement)).toBe(true)
+		}
+
+		// From the content, Escape is left to the overlay: it closes the preview.
+		expect(fireEvent.keyDown(landing, { key: "Escape" })).toBe(true)
+	}
+
+	it("lands Escape and F6 on the pane for a renderer without a document", () => {
+		const { toggle, pane } = renderPane(({ file }) => <pre data-testid="rendered">{file.text}</pre>)
+
+		expectKeysLandInPane(toggle, pane, pane)
+	})
+
+	it("lands Escape and F6 on the pane when the renderer's document is not focusable (the notebook's)", () => {
+		// A notebook's root is a document without tabindex; its markdown cells nest focusable markdown documents.
+		const { toggle, pane } = renderPane(({ file }) => (
+			<div
+				data-testid="rendered"
+				role="document"
+				aria-label="flow.mmd"
+			>
+				<PreviewMarkdown
+					text={file.text}
+					alt="cell"
+				/>
+			</div>
+		))
+
+		expectKeysLandInPane(toggle, pane, pane)
+	})
+
+	it("lands Escape and F6 on markdown's own document", () => {
+		const { toggle, pane } = renderPane(({ file }) => (
+			<div data-testid="rendered">
+				<PreviewMarkdown
+					text={file.text}
+					alt="flow.mmd"
+				/>
+			</div>
+		))
+
+		expectKeysLandInPane(toggle, pane, screen.getByRole("document"))
 	})
 })

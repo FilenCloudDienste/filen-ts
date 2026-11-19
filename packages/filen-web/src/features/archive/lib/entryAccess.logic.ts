@@ -119,11 +119,11 @@ export function sniffedEntryCategory(item: DriveItem, origin: ByteOrigin): Previ
 	return item.data.size <= cap || (opensAsLargeText(category, item.data.size, profile) && originServesRanges(origin)) ? category : null
 }
 
-// Owner decision E5: a media entry read only whole plays from a buffer up to this size.
+// A media entry read only whole plays from a buffer up to this size.
 export const NON_SEEKABLE_MEDIA_MAX_BYTES = 64 * 1024 * 1024
 
-// Why an entry is extracted to be seen instead: a solid block too large (E3, "read"), media that cannot be played from
-// here ("play"), a RAW or a nested archive that cannot be opened from here ("open"; W6 §3.10).
+// Why an entry is extracted to be seen instead: a solid block too large ("read"), media that cannot be played from
+// here ("play"), a RAW or a nested archive that cannot be opened from here ("open").
 export type ExtractReason = "read" | "play" | "open"
 
 // The "Extract to …" card an entry opening by access shows instead of a viewer, once its access kind is known; null when
@@ -159,7 +159,7 @@ export function canOpenEntry(store: EntryStore, slot: number): boolean {
 	return category !== null && entryAdmits(category, BigInt(store.size(slot)), deviceProfile())
 }
 
-// An archive (or a comic book) held in the entry, which the browser opens in its place (W6 §3.4, §6.1 A): one read alone
+// An archive (or a comic book) held in the entry, which the browser opens in its place: one read alone
 // and named as an archive. A ZIP package (a document) is its own viewer's. How deep it may lie is the caller's
 // (nestedTarget).
 export function holdsNestedArchive(store: EntryStore, slot: number): boolean {
@@ -168,12 +168,12 @@ export function holdsNestedArchive(store: EntryStore, slot: number): boolean {
 	return canReadEntry(store, slot) && isArchiveCandidateName(name) && !isZipPackageName(name)
 }
 
-// An archive in a seekable entry is inflated whole before it opens, its index lying at its end (W6 §3.4, B#9): above
+// An archive in a seekable entry is inflated whole before it opens, its index lying at its end: above
 // this, the user confirms that first.
 export const NESTED_INFLATE_CONFIRM_BYTES = 256 * 1024 * 1024
 
 // How a held archive opens once its entry's access kind is known: in the browser's place (`enter`), after the inflate is
-// confirmed (`confirm`), or as the "Extract to open" card (`extract`: read only whole or front to back, W6 §3.10).
+// confirmed (`confirm`), or as the "Extract to open" card (`extract`: read only whole or front to back).
 export function nestedOpening(access: EntryAccessKind, size: number): "enter" | "confirm" | "extract" {
 	switch (access) {
 		case "mapped":
@@ -199,7 +199,7 @@ export interface EntryCost {
 }
 
 // Above this much of the archive in one solid block, a file deep in it decodes most of the block: it is extracted to
-// read (owner decision E3; measured, never lowered without the owner). Accepting a cost never covers one.
+// read (measured; never lower it without re-measuring). Accepting a cost never covers one.
 export const SOLID_BLOCK_READ_MAX_BYTES = 512 * 1024 * 1024
 
 // The entry lies in a solid block too large to read alone (SOLID_BLOCK_READ_MAX_BYTES).

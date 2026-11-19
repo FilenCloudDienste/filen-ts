@@ -5,6 +5,7 @@ import {
 	type LadderDecision,
 	type MediaCodec,
 	type ProbeContainer,
+	type SubtitleFormat,
 	type VideoProbe
 } from "@filen/shared/videos"
 import { extensionStart } from "@filen/shared"
@@ -141,15 +142,12 @@ export interface SidecarCandidate {
 export interface PreviewSidecarSubtitle {
 	uuid: string
 	name: string
-	format: "srt" | "vtt" | "ass" | "smi" | "microdvd"
+	format: SubtitleFormat
 	lang: string | null
 	forced: boolean
 	sdh: boolean
 	title: string
 }
-
-// Text subtitles the browser can show; an image format (PGS, VobSub) never matches.
-const SIDECAR_FORMATS = new Set(["srt", "vtt", "ass", "smi", "sub"])
 
 function extensionOfName(name: string): string {
 	const dot = extensionStart(name)
@@ -178,8 +176,10 @@ export function sidecarSubtitles(videoName: string, siblings: readonly SidecarCa
 	for (const sibling of siblings) {
 		const dot = extensionStart(sibling.name)
 		const extension = extensionOfName(sibling.name)
+		// Text subtitles the browser can show; an image format (PGS, VobSub) has no parser.
+		const format = dot === -1 ? null : subtitleFormatFromExtension(extension)
 
-		if (dot === -1 || !SIDECAR_FORMATS.has(extension) || sibling.size > maxBytes || sibling.size === 0) {
+		if (format === null || sibling.size > maxBytes || sibling.size === 0) {
 			continue
 		}
 
@@ -194,12 +194,6 @@ export function sidecarSubtitles(videoName: string, siblings: readonly SidecarCa
 			continue
 		}
 
-		const format = subtitleFormatFromExtension(extension)
-
-		if (format === null) {
-			continue
-		}
-
 		const end = stemEnd(name, stem)
 		const tokens = end === name.length ? [] : name.slice(end + 1).split(".")
 		const info = parseSubtitleTokens(tokens)
@@ -207,7 +201,7 @@ export function sidecarSubtitles(videoName: string, siblings: readonly SidecarCa
 		found.push({
 			uuid: sibling.uuid,
 			name: sibling.name,
-			format: format === "sub" ? "microdvd" : format,
+			format,
 			lang: info.language,
 			forced: info.forced,
 			sdh: info.sdh,

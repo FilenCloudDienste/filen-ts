@@ -308,7 +308,7 @@ function GeoPlot({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Array
 						session={generation}
 						label={t("previewGeoMapLabel")}
 						connect={port => {
-							void owned.run(remote => remote.attach(Comlink.transfer(port, [port])))
+							void owned.run(remote => remote.attach(Comlink.transfer(port, [port]))).catch(() => undefined)
 						}}
 						onReload={() => {
 							setAttempt(previous => previous + 1)
@@ -326,7 +326,7 @@ function GeoPlot({ item, bytes, onSource }: { item: DriveItem; bytes: Uint8Array
 									variant="ghost"
 									size="sm"
 									onClick={() => {
-										void owned.run(remote => remote.fit())
+										void owned.run(remote => remote.fit()).catch(() => undefined)
 									}}
 								>
 									<MaximizeIcon data-icon="inline-start" />

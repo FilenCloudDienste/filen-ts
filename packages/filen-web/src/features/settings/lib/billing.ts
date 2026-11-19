@@ -1,5 +1,6 @@
 import type { UserAccountSubs, UserInfo } from "@filen/sdk-rs"
 import type { SettingsKey } from "@/lib/i18n"
+import type { PaymentMethod } from "@/features/settings/lib/plans"
 
 // The account-plans-stack rule (project memory: Filen accounts can stack multiple, even different,
 // plans to combine their total storage — a single plan/sub name is never a tier label): derive Free
@@ -86,6 +87,28 @@ export function cancelAvailableFrom(sub: Pick<UserAccountSubs, "startTimestamp">
 // The recurring card subscription has a self-service portal; one-off card purchases ("stripe_sale") do not.
 export function isRecurringStripe(sub: Pick<UserAccountSubs, "gateway">): boolean {
 	return sub.gateway === "stripe"
+}
+
+// What the purchase menu calls each payment method; invoices name theirs the same way.
+export const PAYMENT_METHOD_KEYS: Record<PaymentMethod, SettingsKey> = {
+	stripe: "settingsBillingMethodCard",
+	paypal: "settingsBillingMethodPaypal",
+	crypto: "settingsBillingMethodCrypto"
+}
+
+// The known gateway ids, recurring and one-off ("_sale"), by the payment method they bill through.
+const GATEWAY_METHODS = new Map<string, PaymentMethod>([
+	["stripe", "stripe"],
+	["stripe_sale", "stripe"],
+	["paypal", "paypal"],
+	["paypal_sale", "paypal"]
+])
+
+// The translated payment method a gateway id names, null for an id this client does not know (shown as it is).
+export function gatewayLabelKey(gateway: string): SettingsKey | null {
+	const method = GATEWAY_METHODS.get(gateway)
+
+	return method === undefined ? null : PAYMENT_METHOD_KEYS[method]
 }
 
 export const STRIPE_BILLING_PORTAL_URL = "https://billing.stripe.com/p/login/6oE9Bl8Lxey0ayI9AA"

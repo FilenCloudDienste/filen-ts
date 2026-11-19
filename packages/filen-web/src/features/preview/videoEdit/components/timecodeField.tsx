@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input"
 import { formatTimecode, parseTimecode } from "@/features/preview/videoEdit/lib/timeline.logic"
 
 // A time typed as a timecode ("01:05.25"), committed on Enter or on leaving the field; a typo is said and the field
-// goes back to the time it shows. Its own draft only while focused, so the value follows the timeline otherwise.
+// goes back to the time it shows. Its own draft only while focused, so the value follows the timeline otherwise. The
+// error belongs to the value it was raised for: once the timeline moves the value, it is dropped.
 export function TimecodeField(props: {
 	label: string
 	value: number
@@ -14,7 +15,13 @@ export function TimecodeField(props: {
 	const { t } = useTranslation("preview")
 	const id = useId()
 	const [draft, setDraft] = useState<string | null>(null)
-	const [invalid, setInvalid] = useState(false)
+	const [invalidFor, setInvalidFor] = useState<number | null>(null)
+
+	if (invalidFor !== null && invalidFor !== props.value) {
+		setInvalidFor(null)
+	}
+
+	const invalid = invalidFor !== null
 	const shown = draft ?? formatTimecode(props.value)
 
 	const commit = (): void => {
@@ -25,7 +32,7 @@ export function TimecodeField(props: {
 		const seconds = parseTimecode(draft)
 
 		setDraft(null)
-		setInvalid(seconds === null)
+		setInvalidFor(seconds === null ? props.value : null)
 
 		if (seconds !== null && Math.abs(seconds - props.value) >= 0.005) {
 			props.onCommit(seconds)
@@ -43,7 +50,7 @@ export function TimecodeField(props: {
 			<Input
 				id={id}
 				value={shown}
-				inputMode="decimal"
+				inputMode="text"
 				spellCheck={false}
 				autoComplete="off"
 				disabled={props.disabled}
@@ -52,7 +59,7 @@ export function TimecodeField(props: {
 				className="h-8 font-mono text-xs tabular-nums"
 				onChange={event => {
 					setDraft(event.target.value)
-					setInvalid(false)
+					setInvalidFor(null)
 				}}
 				onBlur={commit}
 				onKeyDown={event => {
@@ -69,6 +76,7 @@ export function TimecodeField(props: {
 			{invalid ? (
 				<span
 					id={`${id}-error`}
+					role="alert"
 					className="text-[11px] text-destructive"
 				>
 					{t("previewVideoEditTimecodeInvalid")}

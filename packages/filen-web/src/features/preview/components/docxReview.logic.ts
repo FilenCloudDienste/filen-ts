@@ -252,6 +252,16 @@ export class ReviewView {
 
 		return () => {
 			this.listeners.delete(listener)
+
+			// An observed scroller keeps its observer (and through it this view and the editor) alive: let both go
+			// with the last listener; the next subscribe observes it again.
+			if (this.listeners.size === 0) {
+				cancelAnimationFrame(this.frameId)
+				this.frameId = 0
+				this.resizes?.disconnect()
+				this.resizes = null
+				this.observed = null
+			}
 		}
 	}
 

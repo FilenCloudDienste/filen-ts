@@ -174,8 +174,8 @@ describe("the slide show menu", () => {
 
 	it("lists every slide, the one on stage checked and hidden ones marked, and goes to the one chosen", async () => {
 		const { show, calls } = controller()
+		const { onClose } = openMenu(show)
 
-		openMenu(show)
 		await submenu("See all slides")
 
 		const current = screen.getByRole("menuitemradio", { name: "Slide 2" })
@@ -186,12 +186,14 @@ describe("the slide show menu", () => {
 			fireEvent.click(screen.getByRole("menuitemradio", { name: "Slide 1" }))
 		})
 		expect(calls.goto).toHaveBeenCalledExactlyOnceWith(0)
+		// Closes on the choice: the snapshot the menu opened with no longer says where the show is.
+		expect(onClose).toHaveBeenCalledExactlyOnceWith(false)
 	})
 
 	it("turns the black and white screens on and off, showing which is on", async () => {
 		const { show, calls } = controller()
+		const { onClose } = openMenu(show, { screen: "black" })
 
-		openMenu(show, { screen: "black" })
 		await submenu("Screen")
 		expect(screen.getByRole("menuitemcheckbox", { name: "Black screen" }).getAttribute("aria-checked")).toBe("true")
 		expect(screen.getByRole("menuitemcheckbox", { name: "White screen" }).getAttribute("aria-checked")).toBe("false")
@@ -200,10 +202,11 @@ describe("the slide show menu", () => {
 		})
 		expect(calls.white).toHaveBeenCalledTimes(1)
 		expect(calls.black).not.toHaveBeenCalled()
+		expect(onClose).toHaveBeenCalledExactlyOnceWith(false)
 	})
 
 	it("picks the presenter's pointer and ink tools", async () => {
-		const { ink } = openMenu(controller().show)
+		const { ink, onClose } = openMenu(controller().show)
 
 		await submenu("Pointer options")
 		expect(screen.getByRole("menuitemradio", { name: "Arrow" }).getAttribute("aria-checked")).toBe("true")
@@ -211,6 +214,8 @@ describe("the slide show menu", () => {
 			fireEvent.click(screen.getByRole("menuitemradio", { name: "Pen" }))
 		})
 		expect(ink.getSnapshot().tool).toBe("pen")
+		// Stays open: its marks follow the live ink.
+		expect(onClose).not.toHaveBeenCalled()
 	})
 
 	it("gives focus back to the stage and says whether Escape closed it", async () => {

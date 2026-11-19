@@ -1,7 +1,7 @@
 import mermaid from "mermaid"
 import { mermaidFrameConfig, type MermaidJob, type MermaidReply, type MermaidTheme } from "@/mermaidFrame/config"
 
-// The diagram frame's script (a classic script of its own, built by vite/mermaidFrame.ts): it renders the page's jobs
+// The diagram frame's script (a classic script of its own, built by vite/mermaid-frame-plugin.ts): it renders the page's jobs
 // to SVG strings, one at a time, and answers only its parent. It runs in a sandboxed, opaque-origin frame whose policy
 // loads nothing but this script, so whatever a diagram names is never fetched.
 

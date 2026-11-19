@@ -1,6 +1,6 @@
 import { useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
-import type { SheetRefusalReason, SheetValidationRule } from "@filen/office/core/sheet"
+import type { SheetFileKind, SheetRefusal, SheetValidationRule } from "@filen/office/core/sheet"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { FIELD_CONTROL_CLASS, INVALID_RING_CLASS } from "@/components/ui/surface"
 import { cn } from "@filen/shared"
 import type { PreviewKey } from "@/lib/i18n"
+import { refusalKey } from "@/features/spreadsheet/lib/sheetMessages.logic"
 import {
 	ERROR_STYLES,
 	VALIDATION_OPERATORS,
@@ -27,9 +28,11 @@ import {
 export interface ValidationDialogProps {
 	// The rule to start from (the active cell's, or a new one); null while closed.
 	rule: SheetValidationRule | null
+	// The file's kind, which a view-only refusal's words name.
+	kind: SheetFileKind
 	onClose: () => void
 	// Resolves with why the rule was refused, null once applied.
-	onApply: (rule: SheetValidationRule) => Promise<SheetRefusalReason | null>
+	onApply: (rule: SheetValidationRule) => Promise<SheetRefusal | null>
 	onClear: () => void
 }
 
@@ -168,7 +171,7 @@ function Text({
 }
 
 // Mounted per opening, so it starts from the cell's rule each time.
-function ValidationForm({ initial, onClose, onApply, onClear }: ValidationDialogProps & { initial: SheetValidationRule }) {
+function ValidationForm({ initial, kind, onClose, onApply, onClear }: ValidationDialogProps & { initial: SheetValidationRule }) {
 	const { t } = useTranslation(["preview", "common"])
 	const [rule, setRule] = useState(initial)
 	const [refused, setRefused] = useState<PreviewKey | null>(null)
@@ -186,17 +189,18 @@ function ValidationForm({ initial, onClose, onApply, onClear }: ValidationDialog
 
 		setPending(true)
 
-		const reason = await onApply(rule)
+		const refusal = await onApply(rule)
 
 		setPending(false)
 
-		if (reason === null) {
+		if (refusal === null) {
 			onClose()
 
 			return
 		}
 
-		setRefused(validationRefusalKey(reason, rule) ?? "previewSheetValidationInvalidValue")
+		// A refusal of the rule itself in the dialog's words, any other (a view-only file, a protected sheet) in the app's.
+		setRefused(validationRefusalKey(refusal.reason, rule) ?? refusalKey(refusal, kind))
 	}
 
 	const valueLabel = (field: "minimum" | "maximum" | "value"): string =>

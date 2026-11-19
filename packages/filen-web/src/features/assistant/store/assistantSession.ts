@@ -1,6 +1,5 @@
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import { awaitingConfirmation, pendingProposalIds } from "@/features/assistant/store/transcript"
-import { createMockAssistantSession } from "@/features/assistant/store/mockAssistantSession"
 import {
 	adoptConversationSlot,
 	clearConversations,
@@ -169,12 +168,6 @@ export function registerAssistantSession(next: AssistantSession): () => void {
 
 export function getAssistantSession(): AssistantSession | null {
 	return session
-}
-
-// Development builds render against the scripted mock until a real runtime registers over it; production
-// stays on the store's initial "unavailable" state. The branch is dropped from production bundles.
-if (import.meta.env.DEV) {
-	registerAssistantSession(createMockAssistantSession())
 }
 
 // The panel surface mounts exactly while the panel is on screen (inline only when open, the drawer's only

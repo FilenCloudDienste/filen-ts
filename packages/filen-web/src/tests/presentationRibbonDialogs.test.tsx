@@ -9,6 +9,8 @@ import type { CommandResult, OpenInfo, PresentationSessionApi, SlideLayer, Slide
 import { createShapeSelection } from "@filen/office/react/presentation"
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
 import { arrangeGroups } from "@/features/presentation/components/ribbon/arrange"
+import { insertMediaGroups } from "@/features/presentation/components/ribbon/insertMedia"
+import { insertObjectsGroups } from "@/features/presentation/components/ribbon/insertObjects"
 import { insertSmartArtGroups, smartArtPane } from "@/features/presentation/components/ribbon/insertSmartArt"
 import { pictureGroups } from "@/features/presentation/components/ribbon/picture"
 import { RibbonDialogsHost } from "@/features/presentation/components/ribbon/ribbonDialogs"
@@ -32,6 +34,23 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@filen/office/core/smartart", async importOriginal => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	SMARTART_LAYOUTS: [{ uniqueId: "urn:test:row", category: "list", nameKey: "previewPptxSmartArtLayoutRow", sample: [] }]
+}))
+
+// The drive picker as far as these tests go: a dialog by its title that stays until it is closed.
+vi.mock("@/features/drive/components/driveFilePickerDialog", () => ({
+	DriveFilePickerDialog: ({ title, onClose }: { title: string; onClose: () => void }) => (
+		<div
+			role="dialog"
+			aria-label={title}
+		>
+			<button
+				type="button"
+				onClick={onClose}
+			>
+				Close picker
+			</button>
+		</div>
+	)
 }))
 
 i18n.addResourceBundle("en", "preview", previewPptxSmartArt, true, false)
@@ -112,6 +131,44 @@ async function fromOverflow(name: string): Promise<void> {
 	})
 }
 
+// Runs the item `name` of the menu `menu` from More commands, then has the overflow closed (a command in it closes it
+// in the browser), which unmounts the menu's control.
+async function menuFromOverflow(menu: string, name: string): Promise<void> {
+	const more = screen.getByRole("button", { name: "More commands" })
+
+	fireEvent.click(more)
+	fireEvent.click(await screen.findByRole("button", { name: menu }))
+	fireEvent.click(await screen.findByRole("menuitem", { name }))
+
+	if (more.getAttribute("aria-expanded") === "true") fireEvent.click(more)
+
+	await waitFor(() => {
+		expect(screen.queryByRole("menuitem", { name })).toBeNull()
+		expect(screen.queryByRole("button", { name: menu })).toBeNull()
+	})
+}
+
+// A 2 x 1 px PNG's header (what the picture preparation sizes it from).
+function png(): File {
+	const bytes = new Uint8Array(33)
+
+	bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
+	new DataView(bytes.buffer).setUint32(16, 2)
+	new DataView(bytes.buffer).setUint32(20, 1)
+	bytes.set([8, 6, 0, 0, 0], 24)
+
+	return new File([bytes], "photo.png", { type: "image/png" })
+}
+
+// The file chooser the last click opened, given `file` once the control that opened it is gone.
+function choose(click: { mock: { contexts: unknown[] } }, file: File): void {
+	const input = click.mock.contexts.at(-1) as HTMLInputElement
+
+	expect(input.isConnected).toBe(false)
+	Object.defineProperty(input, "files", { value: [file] })
+	input.dispatchEvent(new Event("change"))
+}
+
 beforeEach(() => {
 	smartArtPane.reset()
 	vi.stubGlobal(
@@ -185,6 +242,123 @@ async function settled(): Promise<void> {
 		await new Promise(resolve => requestAnimationFrame(resolve))
 	})
 }
+
+describe("Insert and Picture commands run from the overflow", () => {
+	it("keeps a picture's drive picker open after the overflow closes", async () => {
+		mount(insertObjectsGroups, "shape", false)
+
+		await menuFromOverflow("Pictures", "From Filen…")
+
+		const picker = await screen.findByRole("dialog", { name: "Insert a picture" })
+
+		await settled()
+		expect(picker.isConnected).toBe(true)
+
+		fireEvent.click(within(picker).getByRole("button", { name: "Close picker" }))
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog", { name: "Insert a picture" })).toBeNull()
+		})
+	})
+
+	it("inserts a picture from this device chosen after the overflow closed", async () => {
+		const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined)
+		const ops = mount(insertObjectsGroups, "shape", false)
+
+		await menuFromOverflow("Pictures", "This device…")
+		choose(click, png())
+
+		await waitFor(() => {
+			expect(ops).toMatchObject([{ family: "picture", kind: "insert", slide: ref }])
+		})
+	})
+
+	it("changes a picture to one from this device chosen after the overflow closed", async () => {
+		const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined)
+		const ops = mount(pictureGroups, "picture", true)
+
+		await menuFromOverflow("Change picture", "This device…")
+		choose(click, png())
+
+		await waitFor(() => {
+			expect(ops).toMatchObject([{ family: "picture", kind: "replace", target: { slide: ref, id: 7 } }])
+		})
+	})
+
+	it("keeps the custom table size dialog open after the overflow closes, and inserts from it", async () => {
+		const ops = mount(insertObjectsGroups, "shape", false)
+
+		await menuFromOverflow("Table", "Insert table…")
+
+		const dialog = await screen.findByRole("dialog", { name: "Insert table" })
+
+		await settled()
+		expect(dialog.isConnected).toBe(true)
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Insert" }))
+
+		await waitFor(() => {
+			expect(ops).toMatchObject([{ family: "shape", kind: "insert", slide: ref, shape: { kind: "frame", frame: { kind: "table" } } }])
+		})
+	})
+
+	it("keeps a video's drive picker open after the overflow closes", async () => {
+		mount(insertMediaGroups, "shape", false)
+
+		await menuFromOverflow("Video", "From Filen…")
+
+		const picker = await screen.findByRole("dialog", { name: "Insert a video" })
+
+		await settled()
+		expect(picker.isConnected).toBe(true)
+	})
+
+	it("reads a video from this device chosen after the overflow closed", async () => {
+		const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined)
+		const read = vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:video")
+		const file = new File(["x"], "clip.mp4", { type: "video/mp4" })
+
+		mount(insertMediaGroups, "shape", false)
+
+		await menuFromOverflow("Video", "From this device…")
+
+		expect((click.mock.contexts.at(-1) as HTMLInputElement).accept.startsWith("video/*")).toBe(true)
+		choose(click, file)
+
+		expect(read).toHaveBeenCalledWith(file)
+	})
+})
+
+describe("picture crop and corrections", () => {
+	it("takes a decimal comma", async () => {
+		const ops = mount(pictureGroups, "picture", true)
+
+		await fromOverflow("Crop")
+
+		const dialog = await screen.findByRole("dialog", { name: "Crop" })
+
+		fireEvent.change(within(dialog).getByRole("textbox", { name: "Top (%)" }), { target: { value: "12,5" } })
+
+		expect(within(dialog).queryByText("Enter a number from 0 to 99.")).toBeNull()
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+
+		await waitFor(() => {
+			expect(ops).toEqual([{ family: "picture", kind: "crop", target: { slide: ref, id: 7 }, crop: { l: 0, t: 12_500, r: 0, b: 0 } }])
+		})
+	})
+
+	it("refuses what is no number", async () => {
+		mount(pictureGroups, "picture", true)
+
+		await fromOverflow("Crop")
+
+		const dialog = await screen.findByRole("dialog", { name: "Crop" })
+
+		fireEvent.change(within(dialog).getByRole("textbox", { name: "Top (%)" }), { target: { value: "abc" } })
+
+		expect(within(dialog).getByText("Enter a number from 0 to 99.")).toBeTruthy()
+	})
+})
 
 describe("focus after a ribbon dialog closes", () => {
 	it("goes to More commands when the dialog was opened from the overflow, which closed", async () => {

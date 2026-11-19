@@ -138,8 +138,20 @@ async function bodyOf(response: Response): Promise<number[]> {
 	return Array.from(new Uint8Array(await response.arrayBuffer()))
 }
 
+// A fixed wait, only before an assertion that nothing more has happened; an awaited event is waited for with vi.waitFor.
 function tick(ms = 20): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function status(id: string): Promise<unknown> {
+	return message({ type: SW_MSG_PREVIEW_STATUS, id })
+}
+
+// The worker has seen the port's serving side close.
+async function untilLost(id: string): Promise<void> {
+	await vi.waitFor(async () => {
+		expect(await status(id)).toEqual({ status: "lost" })
+	})
 }
 
 beforeEach(async () => {
@@ -256,6 +268,9 @@ describe("sw.ts port-backed preview", () => {
 		const first = body?.read()
 		const spans = () => reads.map(read => [read.start, read.end])
 
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(1)
+		})
 		await tick()
 		expect(spans()).toEqual([[0, BLOCK_BYTES]])
 		reads[0]?.answer()
@@ -264,6 +279,9 @@ describe("sw.ts port-backed preview", () => {
 		// The second pull reads the next window and one ahead.
 		const second = body?.read()
 
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(3)
+		})
 		await tick()
 		expect(spans()).toEqual([
 			[0, BLOCK_BYTES],
@@ -279,8 +297,9 @@ describe("sw.ts port-backed preview", () => {
 		// The third keeps two ahead, as far as the served piece goes.
 		const third = body?.read()
 
-		await tick()
-		expect(spans()).toHaveLength(4)
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(4)
+		})
 		expect(spans()[3]).toEqual([3 * BLOCK_BYTES, 4 * BLOCK_BYTES])
 		reads[3]?.answer()
 		expect(Array.from((await third)?.value ?? []).slice(0, 2)).toEqual(expected(2 * BLOCK_BYTES, 2 * BLOCK_BYTES + 1))
@@ -354,10 +373,14 @@ describe("sw.ts port-backed preview", () => {
 
 		await body?.read()
 		void body?.read().catch(() => undefined)
-		await tick()
+		await vi.waitFor(() => {
+			expect(answered).toBe(3)
+		})
 		await body?.cancel()
 		await settled
-		await tick()
+		await vi.waitFor(() => {
+			expect(aborted).toHaveLength(2)
+		})
 
 		expect(aborted.sort((a, b) => a - b)).toEqual([BLOCK_BYTES, 2 * BLOCK_BYTES])
 	})
@@ -370,6 +393,9 @@ describe("sw.ts port-backed preview", () => {
 
 		await body?.read()
 		await body?.read()
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(3)
+		})
 		await tick()
 		expect(reads).toEqual([
 			[0, BLOCK_BYTES],
@@ -406,7 +432,9 @@ describe("sw.ts port-backed preview", () => {
 
 		await body?.read()
 		await body?.read()
-		await tick()
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(3)
+		})
 		await body?.cancel()
 		await abandoned.settled
 
@@ -458,16 +486,20 @@ describe("sw.ts port-backed preview", () => {
 		const failed = get("p1")
 		const failedBody = failed.response.arrayBuffer()
 
-		await tick()
+		await vi.waitFor(() => {
+			expect(failing.reads).toHaveLength(1)
+		})
 		failing.lifetime.abort()
 		await expect(failedBody).rejects.toThrow()
 		await failed.settled
 
-		await registerPort("p2", 3 * BLOCK_BYTES, "image/heic", true)
+		const releasing = await registerPort("p2", 3 * BLOCK_BYTES, "image/heic", true)
 		const released = get("p2")
 		const releasedBody = released.response.arrayBuffer()
 
-		await tick()
+		await vi.waitFor(() => {
+			expect(releasing.reads).toHaveLength(1)
+		})
 		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p2" }, ports: [] })
 		await releasedBody
 		await released.settled
@@ -495,9 +527,10 @@ describe("sw.ts port-backed preview", () => {
 		const { lifetime } = await registerPort("p1", 100)
 
 		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1" }, ports: [] })
-		await tick()
+		await vi.waitFor(() => {
+			expect(lifetime.signal.aborted).toBe(true)
+		})
 
-		expect(lifetime.signal.aborted).toBe(true)
 		expect(get("p1", "bytes=0-9").response.status).toBe(404)
 	})
 
@@ -505,9 +538,10 @@ describe("sw.ts port-backed preview", () => {
 		const first = await registerPort("p1", 100)
 
 		await registerPort("p1", 100)
-		await tick()
+		await vi.waitFor(() => {
+			expect(first.lifetime.signal.aborted).toBe(true)
+		})
 
-		expect(first.lifetime.signal.aborted).toBe(true)
 		expect(get("p1", "bytes=0-9").response.status).toBe(206)
 	})
 
@@ -515,7 +549,7 @@ describe("sw.ts port-backed preview", () => {
 		const { lifetime } = await registerPort("p1", 100)
 
 		lifetime.abort()
-		await tick()
+		await untilLost("p1")
 
 		expect(get("p1", "bytes=0-9").response.status).toBe(404)
 	})
@@ -524,7 +558,7 @@ describe("sw.ts port-backed preview", () => {
 		const { lifetime } = await registerPort("p1", 100)
 
 		lifetime.abort()
-		await tick()
+		await untilLost("p1")
 
 		const first = get("p1", "bytes=0-9")
 
@@ -546,17 +580,20 @@ describe("sw.ts port-backed preview", () => {
 	// The page let go of the stream (a media element dropped while its request was still open): the response ends as
 	// a complete body, not an error (Firefox logs an errored intercepted media load); the port closes once it has.
 	it("ends a response quietly when its registration is released mid-stream, then closes the port", async () => {
-		const { lifetime } = await registerPort("p1", 3 * BLOCK_BYTES, "video/mp4", true)
+		const { lifetime, reads } = await registerPort("p1", 3 * BLOCK_BYTES, "video/mp4", true)
 		const { response, settled } = get("p1", "bytes=0-")
 		const body = response.arrayBuffer()
 
-		await tick()
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(1)
+		})
 		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1" }, ports: [] })
 
 		expect((await body).byteLength).toBe(0)
 		await settled
-		await tick()
-		expect(lifetime.signal.aborted).toBe(true)
+		await vi.waitFor(() => {
+			expect(lifetime.signal.aborted).toBe(true)
+		})
 		expect(get("p1", "bytes=0-9").response.status).toBe(404)
 	})
 
@@ -571,11 +608,13 @@ describe("sw.ts port-backed preview", () => {
 	})
 
 	it("errors a response whose port's serving side dies mid-stream", async () => {
-		const { lifetime } = await registerPort("p1", 100, "video/mp4", true)
+		const { lifetime, reads } = await registerPort("p1", 100, "video/mp4", true)
 		const { response, settled } = get("p1", "bytes=0-9")
 		const body = response.arrayBuffer()
 
-		await tick()
+		await vi.waitFor(() => {
+			expect(reads).toHaveLength(1)
+		})
 		lifetime.abort()
 
 		await expect(body).rejects.toThrow()
@@ -649,8 +688,9 @@ describe("sw.ts port registration order", () => {
 		await spared.settled
 
 		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1", generation: 5 }, ports: [] })
-		await tick()
-		expect(held.lifetime.signal.aborted).toBe(true)
+		await vi.waitFor(() => {
+			expect(held.lifetime.signal.aborted).toBe(true)
+		})
 		expect(get("p1", "bytes=0-9").response.status).toBe(404)
 	})
 
@@ -673,8 +713,6 @@ describe("sw.ts port registration order", () => {
 })
 
 describe("sw.ts preview status", () => {
-	const status = (id: string) => message({ type: SW_MSG_PREVIEW_STATUS, id })
-
 	it("answers present, lost and missing from the registry, without reading through the port", async () => {
 		const { lifetime, reads } = await registerPort("p1", 100)
 
@@ -683,9 +721,7 @@ describe("sw.ts preview status", () => {
 		expect(reads).toEqual([])
 
 		lifetime.abort()
-		await tick()
-
-		expect(await status("p1")).toEqual({ status: "lost" })
+		await untilLost("p1")
 
 		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1" }, ports: [] })
 		expect(await status("p1")).toEqual({ status: "missing" })

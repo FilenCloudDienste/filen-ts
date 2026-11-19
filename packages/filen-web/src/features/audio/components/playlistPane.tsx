@@ -26,6 +26,7 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { KeyTooltip } from "@/lib/keymap/kbdHints"
 import { Spinner } from "@/components/ui/spinner"
+import { REVEAL_CLASS } from "@/components/rowReveal"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
@@ -633,10 +634,7 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 					size="icon-xs"
 					aria-label={t("removeFromPlaylist")}
 					disabled={disabled || removing}
-					className={cn(
-						"opacity-0 transition-opacity group-hover/trow:opacity-100 focus-visible:opacity-100",
-						removing && "opacity-100"
-					)}
+					className={cn(REVEAL_CLASS.trow, "transition-opacity", removing && "opacity-100")}
 					onClick={() => {
 						void handleRemove()
 					}}

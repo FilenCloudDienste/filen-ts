@@ -45,6 +45,10 @@ export const EXPORT_STALL_MS = 120_000
 
 const WATCHDOG_INTERVAL_MS = 5_000
 
+// A watchdog tick this late means the page itself was not running (a closed lid, a backgrounded tab), its worker frozen
+// with it. Background timer throttling (up to a minute between ticks) also lands here.
+const PAGE_SUSPENDED_MS = HEARTBEAT_LOST_MS
+
 // ETA only once enough of the output exists to extrapolate from.
 const ETA_MIN_FRACTION = 0.02
 
@@ -381,8 +385,21 @@ async function runSave(
 			stop()
 		}
 
+		let lastTick = deps.now()
 		const watchdog = deps.setInterval(() => {
 			const now = deps.now()
+			const gap = now - lastTick
+
+			lastTick = now
+
+			// The time the page missed is not held against the worker: shifting its windows rather than restarting them
+			// keeps a throttled page (a late tick every time) detecting a dead worker, one interval's worth per tick.
+			if (gap > PAGE_SUSPENDED_MS) {
+				const missed = gap - WATCHDOG_INTERVAL_MS
+
+				liveness.lastBeat = Math.min(now, liveness.lastBeat + missed)
+				liveness.lastAdvance = Math.min(now, liveness.lastAdvance + missed)
+			}
 
 			if (now - liveness.lastBeat > HEARTBEAT_LOST_MS) {
 				stalled = "workerLost"

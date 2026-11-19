@@ -96,12 +96,7 @@ export const IN_EDITORS_AND_FIELDS: Options = {
 	enableOnFormTags: ["option", "textbox", "input", "textarea"]
 }
 
-export function useAction(
-	id: string,
-	handler: HotkeyCallback,
-	options?: Options,
-	deps: DependencyList = []
-): RefCallback<HTMLElement | null> {
+export function useAction(id: string, handler: HotkeyCallback, options?: Options, _deps?: DependencyList): RefCallback<HTMLElement | null> {
 	const combo = useComboFor(id)
 	const merged: Options = { ...DEFAULT_OPTIONS, ...options }
 
@@ -111,5 +106,8 @@ export function useAction(
 		merged.preventDefault = true
 	}
 
-	return useHotkeys<HTMLElement>(combo, handler, merged, [combo, ...deps])
+	// No dependency array: with one, react-hotkeys-hook memoises the handler on it and a stale closure runs from the key
+	// while the menu runs the fresh one. Without it the library calls the latest handler; a combo change re-subscribes
+	// through the key string. `_deps` is accepted and ignored until the call sites drop it.
+	return useHotkeys<HTMLElement>(combo, handler, merged)
 }

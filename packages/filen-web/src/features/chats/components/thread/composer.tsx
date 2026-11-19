@@ -8,7 +8,6 @@ import { cn, isProAccount } from "@filen/shared"
 import { isImeKeydown, isMacPlatform } from "@filen/shared/keymap"
 import { useComboFor } from "@/lib/keymap/registry"
 import { insertLineBreak, wrapInlineCode } from "@/features/chats/lib/keyboard.logic"
-import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
@@ -39,7 +38,7 @@ import {
 import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { chatTitle } from "@/features/chats/lib/sort"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
-import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
+import { deleteDraft, loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
 import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
 import { ComposerModeBanner } from "@/features/chats/components/thread/composerModeBanner"
@@ -68,7 +67,7 @@ const MENTION_LIMIT = 12
 const EMOJI_LIMIT = 8
 const IS_MAC = isMacPlatform()
 
-// The composer — replaces the earlier disabled strip. EVERY send goes through the durable outbox (enqueueChatMessage),
+// The composer. EVERY send goes through the durable outbox (enqueueChatMessage),
 // never sdkApi.sendChatMessage directly, so a send survives a window close / lost connection. Edits are
 // the one exception: online-best-effort (editMessage), NOT outbox-queued, mirroring mobile/old-web. The
 // send button is disabled only on an empty / over-limit body — NEVER offline (an offline send queues, the
@@ -158,6 +157,12 @@ export function Composer({
 	const listboxId = useId()
 
 	const overLimit = isOverLimit(draft)
+	const showCounter = shouldShowCounter(draft)
+	const remaining = remainingChars(draft)
+	const counterId = useId()
+	const overLimitId = useId()
+	// The field's description: the counter while shown, the limit error while over it.
+	const describedBy = [showCounter ? counterId : null, overLimit ? overLimitId : null].filter(id => id !== null).join(" ")
 	// Why attaching is refused (trigger tooltip, drop toast). Offline wins when both apply: going online fixes
 	// that one, while reconnecting alone can't fix a non-Pro rejection.
 	const attachGateReason = !isOnline ? t("common:offlineActionDisabled") : !isPro ? t("chatComposerAttachPremiumRequired") : undefined
@@ -327,14 +332,13 @@ export function Composer({
 	}
 
 	// One file → one upload → one link → one append. Every step is confirm-then-patch with an
-	// errorLabel toast (attachments.ts's own header comment); a premium-gate rejection on the
-	// enablePublicLink leg surfaces the SERVER's own label here, unaltered — the FREE e2e account's
-	// expected path (spec item 4).
+	// errorLabel toast (attachments.ts's own header comment); a premium-gate rejection that gets past the
+	// isPro pre-gate surfaces the SERVER's own label here, unaltered.
 	async function attachLocalFile(file: File): Promise<void> {
 		setUploadingCount(count => count + 1)
 
 		// .finally() rather than try/finally: the compiler can't compile a try without a catch.
-		const outcome = await uploadAttachment(file, noop).finally(() => {
+		const outcome = await uploadAttachment(file).finally(() => {
 			setUploadingCount(count => count - 1)
 		})
 
@@ -433,7 +437,8 @@ export function Composer({
 		// Optimistic clear FIRST (the outbox paints the bubble + persists), then enqueue. reset() bumps the
 		// focus nonce so the input keeps focus after send.
 		reset(chatUuid)
-		saveDraftDebounced(chatUuid, "")
+		// Deleted at once, not debounced: a reload right after the send must not bring the sent text back.
+		void deleteDraft(chatUuid)
 
 		// Stick to the bottom BEFORE the enqueue: enqueueChatMessage paints the optimistic bubble
 		// synchronously (growing the thread's row count) before its own disk await, so the flag must be set
@@ -614,6 +619,13 @@ export function Composer({
 			) : null}
 			{/* The popover is the box's sibling, not its child, so the box's rounded clip never cuts it off. */}
 			<div className="relative">
+				{/* Announces that suggestions opened (the listbox itself is driven by aria-activedescendant). */}
+				<div
+					aria-live="polite"
+					className="sr-only"
+				>
+					{suggestCount > 0 ? t("chatComposerSuggestionCount", { count: suggestCount }) : null}
+				</div>
 				{suggestList !== null ? (
 					<ComposerSuggestions
 						listboxId={listboxId}
@@ -713,19 +725,27 @@ export function Composer({
 						aria-controls={suggestList !== null ? listboxId : undefined}
 						aria-activedescendant={suggestList !== null ? suggestionOptionId(listboxId, safeIndex) : undefined}
 						aria-invalid={overLimit}
+						aria-describedby={describedBy.length > 0 ? describedBy : undefined}
+						aria-errormessage={overLimit ? overLimitId : undefined}
 						placeholder={t("chatComposerPlaceholderChat", {
 							name: chatTitle(chat, sender?.id, t("chatUndecryptable"), t("chatJustYou"))
 						})}
 						className="max-h-[200px] min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:text-muted-foreground"
 					/>
-					{shouldShowCounter(draft) ? (
+					{showCounter ? (
 						<span
+							id={counterId}
 							className={cn(
 								"shrink-0 text-xs leading-7 tabular-nums",
 								overLimit ? "font-medium text-destructive" : "text-muted-foreground"
 							)}
 						>
-							{remainingChars(draft)}
+							<span aria-hidden="true">{remaining}</span>
+							<span className="sr-only">
+								{overLimit
+									? t("chatComposerCharsOver", { count: -remaining })
+									: t("chatComposerCharsRemaining", { count: remaining })}
+							</span>
 						</span>
 					) : null}
 					<Button
@@ -745,7 +765,13 @@ export function Composer({
 			</div>
 
 			{overLimit ? (
-				<p className="mt-1.5 px-1 text-xs text-destructive">{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}</p>
+				<p
+					id={overLimitId}
+					role="alert"
+					className="mt-1.5 px-1 text-xs text-destructive"
+				>
+					{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}
+				</p>
 			) : null}
 
 			{attachDriveOpen ? (

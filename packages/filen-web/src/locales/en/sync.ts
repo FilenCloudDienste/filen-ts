@@ -381,7 +381,7 @@ export const sync = {
 	haltRemoteStorageFull: "Your Filen storage is full, so Filen held back what it would upload.",
 	/** Halt — the server couldn't be reached */
 	haltOffline: "Filen can't reach the server right now. It syncs again once it can.",
-	/** Halt — the server's certificate failed the system's verification (an intercepting proxy or security software, or a certificate authority this device does not trust); worded like the errors catalog's TlsVerification */
+	/** Halt — the server's certificate failed the system's verification (an intercepting proxy or security software, or a certificate authority this device does not trust) */
 	haltCertificateUnverified:
 		"A secure connection to Filen couldn't be verified. A proxy or security software may be intercepting it, or this device is missing a certificate it needs. It syncs again once the connection can be verified.",
 	/** Issues — unsyncable section */
@@ -590,8 +590,6 @@ export const sync = {
 	reviewRemove: "Remove pair",
 	/** Review — show what the plan does */
 	reviewShowDetails: "Show changes",
-	/** Review — the preview expired */
-	reviewPlanExpired: "This preview expired.",
 	/** Review — fetch a new preview */
 	reviewRefresh: "Refresh",
 	/** Review — plan lists accessible name */
@@ -637,7 +635,7 @@ export const sync = {
 	/** Error — unknown pair */
 	errorPairNotFound: "This sync pair no longer exists.",
 	/** Error — the preview expired */
-	errorPlanExpired: "This preview expired. Refresh it.",
+	errorPlanExpired: "This preview expired. Try again to refresh it.",
 	/** Error — the chosen local directory expired */
 	errorRootExpired: "The chosen directory expired. Choose it again.",
 	/** Error — the local directory was refused */

@@ -61,7 +61,7 @@ export const drive = {
 	driveNewOfficePptx: "Presentation (.pptx)",
 
 	// ── Upload ───────────────────────────────────────────────────────────────
-	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */
+	/** Drive toolbar — trigger button opening the New menu (new directory and files, upload files or a directory) */
 	driveNewMenuTrigger: "New",
 	/** Drive listing — overlay hint shown over the listing area while dragging files over it */
 	driveUploadDropHint: "Drop files to upload",
@@ -390,7 +390,7 @@ export const drive = {
 	driveActionOpenAsText: "Open as text",
 	/** Item menu (search results only) — navigate to the directory a search hit lives in and reveal the row there */
 	driveActionOpenContainingDirectory: "Open containing directory",
-	/** Item menu — download the selected item to disk; disabled for a directory or a multi-selection until zip download ships */
+	/** Item menu — download the selected item(s) to disk; a directory or a multi-selection downloads as one zip */
 	driveActionDownload: "Download",
 	/** Item menu — copy the selected item(s) into your own drive: a submenu in the item menus (driveMoveChooseDestination plus a directory tree), the destination picker (driveCopyDialogTitle) from the bulk bar; offered wherever the item can be read */
 	driveActionCopy: "Copy",
@@ -607,8 +607,10 @@ export const drive = {
 	// ── Versions bulk-delete confirm ──────────────────────────────────────────
 	/** Bulk version-delete confirm dialog — title (both "delete selected" and "delete all"); the confirm button reuses driveVersionsDeleteSelectedAction/driveVersionsDeleteAllAction */
 	driveVersionsBulkDeleteConfirmTitle: "Delete these versions?",
+	/** Bulk version-delete confirm dialog — body when exactly one version is being deleted; {{count}} = versions being deleted (1); the title above it stays driveVersionsBulkDeleteConfirmTitle */
+	driveVersionsBulkDeleteConfirmBody_one: "Are you sure you want to permanently delete {{count}} version? This cannot be undone.",
 	/** Bulk version-delete confirm dialog — body; {{count}} = versions being deleted */
-	driveVersionsBulkDeleteConfirmBody: "Are you sure you want to permanently delete {{count}} versions? This cannot be undone.",
+	driveVersionsBulkDeleteConfirmBody_other: "Are you sure you want to permanently delete {{count}} versions? This cannot be undone.",
 
 	// ── Version delete guard ─────────────────────────────────────────────────
 	/** File-versions defense-in-depth guard — surfaced only if a caller reaches the delete-version action helper directly on the file's own live version (its uuid IS the file's current content, so deleting it would destroy the file, not just history); the panel's own per-row disabled state already keeps the UI from reaching this, so this message is a last-resort backstop */

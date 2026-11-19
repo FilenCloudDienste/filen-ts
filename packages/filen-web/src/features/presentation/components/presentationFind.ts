@@ -10,12 +10,14 @@ import {
 	FIND_LOCKED,
 	PRESENTATION_FIND_INTS,
 	PRESENTATION_FIND_LIMIT,
+	PresentationCallError,
 	type CommandResult,
 	type OpenInfo,
 	type PresentationSessionApi
 } from "@filen/office/dom/presentation"
 import type { ShapeSelection, TextEditing } from "@filen/office/react/presentation"
 import type { DocxFindControls } from "@/features/preview/components/docxViewer.logic"
+import { log } from "@/lib/log"
 
 // Find and replace in the presentation editor, as the document viewers' find field drives it (DocxFindControls, so
 // the shell mounts DocxFindField unchanged). The worker searches the deck (slides, notes, tables, SmartArt) and
@@ -210,7 +212,21 @@ export function usePresentationFind({ session, info, editor, onReplaced }: Prese
 			return
 		}
 
-		const matches = await session.find(query, { caseSensitive, limit: PRESENTATION_FIND_LIMIT })
+		let matches: Int32Array
+
+		try {
+			matches = await session.find(query, { caseSensitive, limit: PRESENTATION_FIND_LIMIT })
+		} catch (error) {
+			// A closed session or an aborted call is the deck going away: nothing to say. Any other refusal leaves no
+			// result for this query, so the bar shows none rather than the previous query's.
+			if (!(error instanceof PresentationCallError && (error.reason === "closed" || error.reason === "aborted"))) {
+				log.warn("presentation", "find failed", { error })
+			}
+
+			if (ticket === sequence.current) setState({ ...EMPTY, query, caseSensitive })
+
+			return
+		}
 
 		if (ticket !== sequence.current) return
 
@@ -263,7 +279,12 @@ export function usePresentationFind({ session, info, editor, onReplaced }: Prese
 	const replace = async (replacement: string, all: boolean): Promise<void> => {
 		if (editor === undefined || info === undefined || state.count === 0) return
 
-		await editor.text.flush()
+		try {
+			await editor.text.flush()
+		} catch {
+			// The open body's text was not sent (its deck closed): replacing would miss it.
+			return
+		}
 
 		const query = { query: state.query, replacement, caseSensitive: state.caseSensitive } as const
 		let replaced = 0

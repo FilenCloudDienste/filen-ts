@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest"
 import { QueryClient, onlineManager, type Query } from "@tanstack/react-query"
 import { type } from "arktype"
 import type { Note } from "@filen/sdk-rs"
@@ -54,10 +54,10 @@ import { Sync } from "@/features/notes/lib/sync"
 import { NOTES_QUERY_KEY, notesQueryUpdate } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNotesInflightStore, type InflightContent } from "@/features/notes/store/useNotesInflight"
-import { hashNoteContent } from "@filen/shared"
+import { Semaphore, hashNoteContent } from "@filen/shared"
 import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
-import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
+import { heldNotes, holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import { forgetTabEditors, seedTabEditor, tabEditorBaseHash, tabEditorChanged, tabEditorDirty } from "@/features/notes/lib/tabEditors"
 
@@ -98,8 +98,23 @@ function firstCallOrder(spy: { mock: { invocationCallOrder: number[] } }): numbe
 	return order
 }
 
-async function flushAsync(): Promise<void> {
-	await new Promise(resolve => setTimeout(resolve, 15))
+// The outcome a step waits for, checked every turn: a loaded runner can outlast any fixed time budget.
+async function until(outcome: () => unknown): Promise<void> {
+	await vi.waitFor(outcome, { interval: 1, timeout: 5000 })
+}
+
+let mutexes: MockInstance<Semaphore["acquire"]>
+
+// Every outbox is quiet: each restore and push pass started ran to its end (each holds its outbox's
+// mutex), and every lock asked for was granted, or waits on one held.
+async function settled(): Promise<void> {
+	await until(async () => {
+		const { held = [], pending = [] } = await navigator.locks.query()
+		const heldNames = new Set(held.map(lock => lock.name))
+
+		expect(pending.filter(lock => !heldNames.has(lock.name))).toEqual([])
+		expect(mutexes.mock.contexts.filter(mutex => mutex instanceof Semaphore && mutex.count() > 0)).toHaveLength(0)
+	})
 }
 
 // A content read still running, as the editor's mount read would be; `seed` makes it a refetch over data.
@@ -126,12 +141,13 @@ async function startedSync(): Promise<Sync> {
 	const s = new Sync()
 	s.start()
 	// restoreFromDisk (empty disk here) resolves initPromise; let the microtask chain land.
-	await flushAsync()
+	await settled()
 
 	return s
 }
 
 beforeEach(() => {
+	mutexes = vi.spyOn(Semaphore.prototype, "acquire")
 	kvStore.clear()
 	kvGetJson.mockClear()
 	kvSetJson.mockClear()
@@ -240,7 +256,7 @@ describe("push loop — prune by LOCAL author-time during the round trip (#4)", 
 		})
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		// The pass started with only t=100, so syncedUpTo = 100 — it sends t=100's content. The prune
 		// keeps strictly-newer entries, so the t=200 keystroke typed mid-push survives.
@@ -261,7 +277,7 @@ describe("push loop — offline-keep-forever on a network-class rejection (#40/V
 
 		for (let i = 0; i < 4; i++) {
 			s.executeNow()
-			await flushAsync()
+			await settled()
 		}
 
 		expect(getStore()["a"]?.[0]?.content).toBe("offline-edit")
@@ -277,15 +293,15 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 		setNoteContent.mockRejectedValue(sdkError("Server"))
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		expect(queued("a")).toBe(true)
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		expect(queued("a")).toBe(true)
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		expect(queued("a")).toBe(false)
 	})
 
@@ -297,22 +313,22 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 		setStore({ a: [{ timestamp: 1, content: "e1", note }] })
 		setNoteContent.mockRejectedValue(sdkError("Server"))
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		expect(queued("a")).toBe(true)
 
 		// A success drains the note and clears its counter.
 		setNoteContent.mockResolvedValue(note)
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		expect(queued("a")).toBe(false)
 
 		// A brand-new edit that fails ONCE must NOT drop — the counter restarted from zero.
 		setStore({ a: [{ timestamp: 2, content: "e2", note }] })
 		setNoteContent.mockRejectedValue(sdkError("Server"))
 		s.executeNow()
-		await flushAsync()
+		await settled()
 		expect(queued("a")).toBe(true)
 	})
 })
@@ -327,7 +343,7 @@ describe("push loop — Unauthenticated is keep-for-retry, never counted toward 
 
 		for (let i = 0; i < 5; i++) {
 			s.executeNow()
-			await flushAsync()
+			await settled()
 		}
 
 		expect(queued("a")).toBe(true)
@@ -345,7 +361,7 @@ describe("push loop — conflict DETECTION: local wins, one toast per note per p
 		setNoteContent.mockResolvedValue(note)
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		// Local wins: the push carries our text, unconditionally.
 		expect(setNoteContent).toHaveBeenCalledWith(note, "my local text", expect.any(String))
@@ -364,7 +380,7 @@ describe("push loop — conflict DETECTION: local wins, one toast per note per p
 		setNoteContent.mockResolvedValue(note)
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledTimes(1)
 		expect(toast).not.toHaveBeenCalled()
@@ -381,16 +397,18 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		holdNoteForRemoteEdit("a")
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledTimes(1)
 		expect(setNoteContent).toHaveBeenCalledWith(expect.objectContaining({ uuid: "b" }), "other", expect.any(String))
 		expect(queued("a")).toBe(true)
 
 		releaseAllNoteHolds()
-		await flushAsync()
+		await until(async () => {
+			expect((await heldNotes()).has("a")).toBe(false)
+		})
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "mine", expect.any(String))
 		expect(queued("a")).toBe(false)
@@ -404,7 +422,7 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		getNoteContent.mockResolvedValue("theirs")
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).not.toHaveBeenCalled()
 		expect(queued("a")).toBe(false)
@@ -421,7 +439,7 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		setNoteContent.mockResolvedValue(note)
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		// "Load theirs" queued their content; the cloud holds this tab's push of "mine".
 		s.dropEntry("a")
@@ -429,7 +447,7 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		getNoteContent.mockResolvedValue("mine")
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenLastCalledWith(note, "theirs", expect.any(String))
 		expect(toast).not.toHaveBeenCalled()
@@ -444,14 +462,14 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		getNoteContent.mockResolvedValue("old")
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		// Another tab typed on "old" too, never having seen tab 2's text.
 		await s.enqueue(note, "tab 1 text", hashNoteContent("old"))
 		getNoteContent.mockResolvedValue("tab 2 text")
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenLastCalledWith(note, "tab 1 text", expect.any(String))
 		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteOverwroteNewerRemoteChanges")
@@ -471,7 +489,7 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		expect(tabEditorDirty("a")).toBe(true)
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(queued("a")).toBe(false)
 		expect(tabEditorDirty("a")).toBe(false)
@@ -499,7 +517,7 @@ describe("push loop — session-base renewal across a full drain (no false overw
 		// Type "v1" and let the autosave drain the outbox fully.
 		await s.enqueue(note, "v1", base)
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(queued("a")).toBe(false)
 
@@ -515,7 +533,7 @@ describe("push loop — session-base renewal across a full drain (no false overw
 		getNoteContent.mockResolvedValue("v1")
 		await s.enqueue(note, "v2", base)
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenLastCalledWith(note, "v2", expect.any(String))
 		// The renewed base equals the cloud content, so no false overwrite alarm fires.
@@ -533,7 +551,7 @@ describe("push loop — session-base renewal across a full drain (no false overw
 
 		await s.enqueue(note, "v2", base)
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "v2", expect.any(String))
 		expect(toast).toHaveBeenCalledTimes(1)
@@ -561,7 +579,7 @@ describe("cancel() — suppresses the disk flush of an in-flight pass", () => {
 		kvDelete.mockClear()
 		s.cancel()
 		gate.resolve(note)
-		await flushAsync()
+		await settled()
 
 		expect(kvSetJson).not.toHaveBeenCalled()
 		expect(kvDelete).not.toHaveBeenCalled()
@@ -580,7 +598,7 @@ describe("flushToDisk — a snapshot keeps the session it was taken in", () => {
 		s.start()
 
 		await expect(flushed).resolves.toBe(false)
-		await flushAsync()
+		await settled()
 
 		expect(kvSetJson).not.toHaveBeenCalled()
 		expect(kvStore.has("inflightNoteContent")).toBe(false)
@@ -604,7 +622,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		// A was reconciled away (matched cloud); B survives as genuine pending work and then gets pushed.
 		expect(queued("a")).toBe(false)
@@ -622,7 +640,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		expect(queued("gone")).toBe(false)
 	})
@@ -635,7 +653,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		expect(queued("a")).toBe(true)
 		expect(listNotes).not.toHaveBeenCalled()
@@ -651,7 +669,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 
 		const s = await startedSync()
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("pushed-text")
 	})
@@ -670,7 +688,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 		const setSpy = vi.spyOn(testQueryClient, "setQueryData")
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(cancelSpy).toHaveBeenCalledWith({ revert: true })
 		expect(firstCallOrder(cancelSpy)).toBeLessThan(firstCallOrder(setSpy))
@@ -691,7 +709,7 @@ describe("restoreFromDisk — undecryptable cloud content never prunes a persist
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "", expect.any(String))
 	})
@@ -705,7 +723,7 @@ describe("restoreFromDisk — undecryptable cloud content never prunes a persist
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		expect(queued("a")).toBe(false)
 		expect(setNoteContent).not.toHaveBeenCalled()
@@ -722,7 +740,7 @@ describe("conflict peek — an undecryptable peek pushes unchecked", () => {
 
 		const s = await startedSync()
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "local", expect.any(String))
 		expect(toast).not.toHaveBeenCalled()
@@ -746,7 +764,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		expect(hydrated()).toBe(true)
 		expect(s.outboxRole).toBe("leader")
@@ -765,7 +783,9 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 		const s = new Sync()
 
 		s.start()
-		await flushAsync()
+		await until(() => {
+			expect(hydrated()).toBe(true)
+		})
 
 		// The reconcile is still in flight, yet the store already holds the restored draft and the gate is
 		// open — an editor mounting now seeds from the draft, not from the server.
@@ -774,7 +794,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 
 		cloud.resolve([note])
 		getNoteContent.mockResolvedValue("cloud-old")
-		await flushAsync()
+		await settled()
 	})
 
 	it("cancels a content read issued before hydration for a note the disk still owes", async () => {
@@ -789,7 +809,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 		const s = new Sync()
 
 		s.start()
-		await flushAsync()
+		await settled()
 
 		expect(read.state.fetchStatus).toBe("idle")
 		expect(s.outboxRole).toBe("leader")
@@ -799,7 +819,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 		const empty = new Sync()
 
 		empty.start()
-		await flushAsync()
+		await settled()
 
 		expect(hydrated()).toBe(true)
 
@@ -809,7 +829,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 		const failed = new Sync()
 
 		failed.start()
-		await flushAsync()
+		await settled()
 
 		expect(hydrated()).toBe(true)
 	})
@@ -837,7 +857,7 @@ describe("cancel() — TERMINAL shutdown", () => {
 		kvDelete.mockClear()
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(kvSetJson).not.toHaveBeenCalled()
 		expect(kvDelete).not.toHaveBeenCalled()
@@ -862,7 +882,7 @@ describe("cancel() — TERMINAL shutdown", () => {
 
 		s.cancel()
 		s.start()
-		await flushAsync()
+		await settled()
 
 		setStore({ a: [{ timestamp: 1, content: "edit", note }] })
 		setNoteContent.mockResolvedValue(note)
@@ -870,7 +890,7 @@ describe("cancel() — TERMINAL shutdown", () => {
 		kvDelete.mockClear()
 
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "edit", expect.any(String))
 		expect(kvSetJson.mock.calls.length + kvDelete.mock.calls.length).toBeGreaterThan(0)
@@ -1033,7 +1053,7 @@ describe("push loop — the pushed note's sidebar row", () => {
 
 		const s = await startedSync()
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toEqual([
 			{ ...note, favorite: true, preview: "new text", editedTimestamp: 20n }
@@ -1049,7 +1069,7 @@ describe("push loop — the pushed note's sidebar row", () => {
 
 		const s = await startedSync()
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toEqual([note])
 	})
@@ -1062,7 +1082,7 @@ describe("push loop — the pushed note's sidebar row", () => {
 
 		const s = await startedSync()
 		s.executeNow()
-		await flushAsync()
+		await settled()
 
 		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toBeUndefined()
 	})
@@ -1083,7 +1103,9 @@ describe("flushToDisk — one write at a time", () => {
 
 		const flushes = [s.enqueue(note, "a"), s.enqueue(note, "ab"), s.enqueue(note, "abc"), s.enqueue(note, "abcd")]
 
-		await flushAsync()
+		await until(() => {
+			expect(kvSetJson).toHaveBeenCalledTimes(1)
+		})
 		expect(kvSetJson).toHaveBeenCalledTimes(1)
 
 		first.resolve(undefined)
@@ -1103,7 +1125,9 @@ describe("flushToDisk — one write at a time", () => {
 		kvSetJson.mockImplementationOnce(() => first.promise)
 
 		void s.enqueue(note, "a")
-		await flushAsync()
+		await until(() => {
+			expect(kvSetJson).toHaveBeenCalledTimes(1)
+		})
 
 		const queuedFlush = s.enqueue(note, "ab")
 
@@ -1131,7 +1155,9 @@ describe("restoreFromDisk — the reconcile's own reads", () => {
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await until(() => {
+			expect(getNoteContent).toHaveBeenCalledTimes(2)
+		})
 
 		expect(getNoteContent).toHaveBeenCalledTimes(2)
 
@@ -1160,7 +1186,9 @@ describe("restoreFromDisk — the reconcile's own reads", () => {
 
 		const s = new Sync()
 		s.start()
-		await flushAsync()
+		await until(() => {
+			expect(listNotes).toHaveBeenCalledTimes(1)
+		})
 		notesQueryUpdate(prev => prev)
 		cloud.resolve([note])
 

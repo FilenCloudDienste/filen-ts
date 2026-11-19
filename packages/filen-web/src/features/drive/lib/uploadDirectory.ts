@@ -21,12 +21,7 @@ import {
 	type UploadOutcome
 } from "@/features/drive/lib/upload"
 import { useTransfersStore, type UploadBatchRef, type UploadBatchTotals } from "@/features/transfers/store/useTransfersStore"
-import {
-	defaultHeicUploadDeps,
-	heicUploadConversionEnabled,
-	maybeConvertHeicUpload,
-	type HeicUploadDeps
-} from "@/features/drive/lib/heicUpload"
+import { defaultHeicUploadDeps, heicUploadConversionEnabled, withConvertedHeic, type HeicUploadDeps } from "@/features/drive/lib/heicUpload"
 import { batchListingPatches, driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 
@@ -491,22 +486,22 @@ export async function runDirectoryUpload(
 				}
 
 				// renameToJpg only rewrites file.name; `relPath` is untouched and still resolved the parent above.
-				const prepared = await maybeConvertHeicUpload(deps.heic.convert, file, await convertHeic)
+				return await withConvertedHeic(deps.heic.convert, file, await convertHeic, async prepared => {
+					if (isCancelled(run)) {
+						return "cancelled"
+					}
 
-				if (isCancelled(run)) {
-					return "cancelled"
-				}
-
-				return (
-					await runUpload(deps.upload, {
-						parentUuid,
-						file: prepared,
-						batch: run,
-						name: relPath,
-						quotaStop,
-						...(run === undefined ? {} : { counted: file.size })
-					})
-				).status
+					return (
+						await runUpload(deps.upload, {
+							parentUuid,
+							file: prepared,
+							batch: run,
+							name: relPath,
+							quotaStop,
+							...(run === undefined ? {} : { counted: file.size })
+						})
+					).status
+				})
 			})
 		),
 		directoriesCreated

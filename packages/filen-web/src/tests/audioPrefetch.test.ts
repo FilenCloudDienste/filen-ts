@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile } from "@filen/sdk-rs"
 
 // Same leader-mock rationale as audioEngine.test.ts: the engine's output-prefs persistence goes through
@@ -134,6 +134,17 @@ interface Harness {
 	resolveCover: ReturnType<typeof vi.fn<(t: QueueTrack) => Promise<{ cover: Blob | null } | null>>>
 }
 
+// Every engine a test built: disposed after it, so none stays subscribed to the shared stores.
+const engines: AudioEngine[] = []
+
+function makeEngine(deps: AudioEngineDeps): AudioEngine {
+	const engine = new AudioEngine(deps)
+
+	engines.push(engine)
+
+	return engine
+}
+
 function makeHarness(): Harness {
 	const mainFakes: FakeElement[] = []
 	const prefetchFakes: FakeElement[] = []
@@ -166,7 +177,7 @@ function makeHarness(): Harness {
 		resolveCover
 	}
 
-	return { engine: new AudioEngine(deps), mainFakes, prefetchFakes, resolveSource, resolveCover }
+	return { engine: makeEngine(deps), mainFakes, prefetchFakes, resolveSource, resolveCover }
 }
 
 function resetStore(): void {
@@ -189,6 +200,12 @@ beforeEach(() => {
 	fakeStore.clear()
 	resetStore()
 	resetTrackTags()
+})
+
+afterEach(() => {
+	for (const engine of engines.splice(0)) {
+		engine.dispose()
+	}
 })
 
 describe("prefetch — one-ahead warm-up", () => {
@@ -218,7 +235,7 @@ describe("prefetch — one-ahead warm-up", () => {
 
 	it("is a no-op when no prefetch dep is supplied — zero extra resolves, zero extra elements", async () => {
 		const resolveSource = vi.fn<(t: QueueTrack) => Promise<TrackSource>>(t => Promise.resolve(urlSource(`src:${t.uuid}`, released)))
-		const engine = new AudioEngine({ createElement: events => makeFakeElement(events).adapter, resolveSource })
+		const engine = makeEngine({ createElement: events => makeFakeElement(events).adapter, resolveSource })
 
 		await engine.enqueueAndPlay([track("a"), track("b")], 0)
 		await flush()
@@ -301,24 +318,29 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
 	})
 
-	it("a shuffle toggle re-warms only when the next track changed", async () => {
+	// With "a" pinned the shuffle swaps the other two once: a draw of 0.5 or above keeps "b" next, below puts "c" next.
+	it.each([
+		{ random: 0.75, next: "b", resolves: 2 },
+		{ random: 0.25, next: "c", resolves: 3 }
+	])("a shuffle toggle that puts $next next resolves $resolves times", async ({ random, next, resolves }) => {
 		const h = makeHarness()
 
 		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
 		await flush()
 		expect(h.prefetchFakes).toHaveLength(1)
 
+		vi.spyOn(Math, "random").mockReturnValue(random)
 		h.engine.setShuffleEnabled(true)
 		await flush()
 
 		const { queue, shuffleOrder } = useAudioStore.getState()
-		const next = queue[shuffleOrder[1] ?? -1]?.uuid
 		const live = h.prefetchFakes.filter(fake => fake.calls.dispose === 0)
 
+		expect(queue[shuffleOrder[1] ?? -1]?.uuid).toBe(next)
 		expect(live).toHaveLength(1)
-		expect(live[0]?.calls.load).toEqual([`src:${String(next)}`])
+		expect(live[0]?.calls.load).toEqual([`src:${next}`])
 		// "b" still next keeps the warm element; "c" next re-warms once.
-		expect(h.resolveSource).toHaveBeenCalledTimes(next === "b" ? 2 : 3)
+		expect(h.resolveSource).toHaveBeenCalledTimes(resolves)
 	})
 
 	it("a loop toggle mid-queue keeps the warmed next track instead of re-resolving it", async () => {
@@ -407,7 +429,7 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		expect(signals.get("b")?.aborted).toBe(true)
 	})
 
-	it("tears down on clearQueue and dispose", async () => {
+	it("tears down on clearQueue", async () => {
 		const h = makeHarness()
 
 		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
@@ -416,6 +438,19 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		h.engine.clearQueue()
 
 		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
+	})
+
+	it("tears down on dispose, releasing the warmed source", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+		expect(h.prefetchFakes[0]?.calls.load).toEqual(["src:b"])
+
+		h.engine.dispose()
+
+		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
+		expect(released).toContain("src:b")
 	})
 
 	it("tears down a stale cross-queue prefetch instead of promoting it into an unrelated track", async () => {
@@ -671,7 +706,7 @@ describe("metadata extraction — current + one-ahead only", () => {
 	})
 
 	it("is a no-op when no resolveCover dep is supplied", async () => {
-		const engine = new AudioEngine({
+		const engine = makeEngine({
 			createElement: events => makeFakeElement(events).adapter,
 			resolveSource: t => Promise.resolve(urlSource(`src:${t.uuid}`, released))
 		})

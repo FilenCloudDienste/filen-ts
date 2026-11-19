@@ -6,7 +6,7 @@ import type {
 	SaveTarget,
 	SourceInfo
 } from "@/features/preview/imageEdit/types"
-import { composeOrientation, isGeometryOnly, type Crop, type Size } from "@/features/preview/imageEdit/lib/recipe"
+import { composeOrientation, FULL_CROP, isGeometryOnly, type Size } from "@/features/preview/imageEdit/lib/recipe"
 
 // The editor's dealings with its render session that are not drawing: loading the source once, and the export a save
 // reads.
@@ -59,8 +59,6 @@ export function exportForTarget(
 		)
 		.then(blob => ({ blob, geometryOnly: null }))
 }
-
-const FULL_CROP: Crop = { x: 0, y: 0, width: 1, height: 1 }
 
 // What the canvas shows for `recipe`: the whole frame while cropping (the crop frame is drawn over it), and without
 // the text item being edited (its field stands in for it).

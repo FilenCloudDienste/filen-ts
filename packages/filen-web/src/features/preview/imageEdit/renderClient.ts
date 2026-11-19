@@ -80,12 +80,6 @@ function closedError(): Error {
 	return new Error("image edit session closed")
 }
 
-// A WebGL context loss during an export rejects with an error of this name; the export can simply be retried
-// once the context is restored.
-export function isContextLostError(error: unknown): boolean {
-	return error instanceof Error && error.name === "ContextLostError"
-}
-
 export async function openEditSession(): Promise<{ session: EditSession; capabilities: EditCapabilities }> {
 	const hold = Promise.withResolvers<undefined>()
 	const acquired = Promise.withResolvers<RenderWorkerResource>()

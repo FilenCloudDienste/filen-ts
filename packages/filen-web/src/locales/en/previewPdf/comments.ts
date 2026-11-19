@@ -9,6 +9,10 @@ export const previewPdfComments = {
 	previewPdfCommentsList: "Comment threads in this document",
 	/** PDF Comments panel — shown when the document has no comments */
 	previewPdfCommentsEmpty: "This document has no comments.",
+	/** PDF Comments panel — shown while the document's comments are read */
+	previewPdfCommentsLoading: "Reading comments…",
+	/** PDF Comments panel — shown when the document's comments could not be read (closing and opening the panel tries again) */
+	previewPdfCommentsFailed: "The comments of this document could not be read. Close and open Comments to try again.",
 	/** PDF Comments panel — starts placing a sticky note on the page */
 	previewPdfCommentNew: "New comment",
 	/** PDF Comments panel — placeholder of the field editing a comment */

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { MAX_CELLS, MAX_OUTPUTS, MAX_TEXT_CHARS, isSvgDocument, readNotebook } from "@/features/preview/lib/notebookReading"
+import {
+	MAX_CELLS,
+	MAX_IMAGE_BASE64_CHARS,
+	MAX_OUTPUTS,
+	MAX_TEXT_CHARS,
+	isSvgDocument,
+	readNotebook
+} from "@/features/preview/lib/notebookReading"
 
 // A notebook read for its viewer: cells and outputs in the shapes the viewer shows, images as Blobs typed by their bytes
 // and within the pixel budget, ANSI removed, and every bound past which the reading cuts, counts or refuses.
@@ -74,6 +81,19 @@ describe("readNotebook", () => {
 		expect(first(declaredWrong)?.kind === "image" && first(declaredWrong)).toMatchObject({ blob: { type: "image/png" } })
 		expect(first(overBudget)).toEqual({ kind: "tooLarge" })
 		expect(first(notAnImage)).toBeUndefined()
+	})
+
+	it("refuses an image past the base64 cap as too large, and falls back past undecodable base64", () => {
+		const outputs = [
+			{ output_type: "display_data", data: { "image/png": "A".repeat(MAX_IMAGE_BASE64_CHARS + 4), "text/plain": "<Figure>" } },
+			{ output_type: "display_data", data: { "image/png": "!not base64!", "text/plain": "<Figure>" } }
+		]
+		const reading = readNotebook(notebook([code(outputs)]), 1_000_000)
+
+		expect(reading.status === "ok" && reading.cells[0]?.kind === "code" && reading.cells[0].outputs).toEqual([
+			{ kind: "tooLarge" },
+			{ kind: "text", text: "<Figure>", truncated: false }
+		])
 	})
 
 	it("keeps an SVG output only when it is one, and HTML or SVG past the cap as too large", () => {

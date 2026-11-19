@@ -49,6 +49,11 @@ export function SortDialog({ model, open, run }: { model: SheetGridModel; open: 
 	const first = columns ? range.startCol : range.startRow
 	const last = columns ? range.endCol : range.endRow
 	const keys: number[] = []
+	// The order select's options and the closed trigger's text (Base UI shows the value itself without them).
+	const orders = [
+		{ value: "ascending", label: t("previewSheetSortOrderAscending") },
+		{ value: "descending", label: t("previewSheetSortOrderDescending") }
+	]
 
 	for (let index = first; index <= Math.min(last, first + 1023); index++) keys.push(index)
 
@@ -233,6 +238,7 @@ export function SortDialog({ model, open, run }: { model: SheetGridModel; open: 
 								</SelectContent>
 							</Select>
 							<Select
+								items={orders}
 								value={level.descending ? "descending" : "ascending"}
 								onValueChange={(next: string | null) => {
 									setLevel(index, { ...level, descending: next === "descending" })
@@ -246,8 +252,14 @@ export function SortDialog({ model, open, run }: { model: SheetGridModel; open: 
 								</SelectTrigger>
 								<SelectContent data-preview-surface>
 									<SelectGroup>
-										<SelectItem value="ascending">{t("previewSheetSortOrderAscending")}</SelectItem>
-										<SelectItem value="descending">{t("previewSheetSortOrderDescending")}</SelectItem>
+										{orders.map(item => (
+											<SelectItem
+												key={item.value}
+												value={item.value}
+											>
+												{item.label}
+											</SelectItem>
+										))}
 									</SelectGroup>
 								</SelectContent>
 							</Select>

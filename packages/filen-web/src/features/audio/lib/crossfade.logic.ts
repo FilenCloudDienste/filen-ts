@@ -195,23 +195,6 @@ export function fadeCurves(outPeak: number, inPeak: number): FadeCurves {
 	return curves
 }
 
-// The value an automation curve holds `fraction` (0-1) of the way through, linearly interpolated as the browser
-// does. Read instead of AudioParam.value, which Firefox does not update during automation.
-export function curveValueAt(curve: Float32Array, fraction: number): number {
-	const last = curve.length - 1
-
-	if (last < 0) {
-		return 1
-	}
-
-	const position = Math.min(1, Math.max(0, fraction)) * last
-	const index = Math.floor(position)
-	const from = curve[index] ?? 0
-	const to = curve[Math.min(last, index + 1)] ?? from
-
-	return from + (to - from) * (position - index)
-}
-
 // What the next-track decision was taken against. It stays the answer for the track end, the fade, a skip and a
 // failure as long as none of these changed; a shuffle lap's reshuffle is random, so recomputing it would disagree with
 // what was warmed.

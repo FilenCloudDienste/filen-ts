@@ -25,8 +25,8 @@ const COLR_RICC = 0x72494343 // "rICC"
 
 // Image-sequence brands (ISO/IEC 23008-12 Annex B, AV1 Image File Format §6): the file holds an animation.
 const SEQUENCE_BRANDS = new Set(["avis", "msf1", "hevc", "hevs"])
-const AVIF_BRANDS = new Set(["avif", "avis"])
-const HEIF_BRANDS = new Set(["heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs", "mif1", "msf1"])
+export const AVIF_BRANDS: ReadonlySet<string> = new Set(["avif", "avis"])
+export const HEIF_BRANDS: ReadonlySet<string> = new Set(["heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs", "mif1", "msf1"])
 
 // Alpha auxiliary images (AV1 Image File Format §4.1, ISO/IEC 23008-12 for HEVC).
 const ALPHA_URNS = new Set(["urn:mpeg:mpegB:cicp:systems:auxiliary:alpha", "urn:mpeg:hevc:2015:auxid:1"])

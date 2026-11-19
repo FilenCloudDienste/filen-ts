@@ -3,10 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { focusManager, onlineManager } from "@tanstack/react-query"
-import type { File as SdkFile, SocketEvent, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File as SdkFile, SocketEvent, UuidStr } from "@filen/sdk-rs"
 
-const { createDirectory, findDirectoryUuid, listDirectory, downloadFileBytes, uploadFileBytes, subscribeToSocket, socket } = vi.hoisted(
-	() => {
+const { createDirectory, findDirectoryUuid, listDirectory, downloadFileBytes, uploadFileBytes, getFile, subscribeToSocket, socket } =
+	vi.hoisted(() => {
 		// The bridge subscribes once per module life, so the callback it hands over is kept here.
 		const socket: { emit: (event: SocketEvent) => void } = { emit: () => undefined }
 
@@ -16,6 +16,7 @@ const { createDirectory, findDirectoryUuid, listDirectory, downloadFileBytes, up
 			listDirectory: vi.fn(),
 			downloadFileBytes: vi.fn(),
 			uploadFileBytes: vi.fn(),
+			getFile: vi.fn(),
 			subscribeToSocket: vi.fn((callback: (event: SocketEvent) => void) => {
 				socket.emit = callback
 
@@ -23,11 +24,10 @@ const { createDirectory, findDirectoryUuid, listDirectory, downloadFileBytes, up
 			}),
 			socket
 		}
-	}
-)
+	})
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { createDirectory, findDirectoryUuid, listDirectory, downloadFileBytes, uploadFileBytes, subscribeToSocket }
+	sdkApi: { createDirectory, findDirectoryUuid, listDirectory, downloadFileBytes, uploadFileBytes, getFile, subscribeToSocket }
 }))
 
 // The same instance backs the provider below AND the write path's cache patches.
@@ -66,6 +66,10 @@ function fakeJsonFile(uuid: UuidStr, parent: UuidStr = PLAYLISTS_DIR_UUID): SdkF
 		chunks: 1n,
 		canMakeThumbnail: false
 	}
+}
+
+function fakeDir(uuid: UuidStr, name: string, parent: UuidStr): Dir {
+	return { uuid, parent, meta: { type: "decoded", data: { name } }, timestamp: 0n, color: "default" } as Dir
 }
 
 // Empty track lists keep the once-per-session dead-track check out of the counts.
@@ -127,6 +131,7 @@ beforeEach(() => {
 	listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: PLAYLIST_FILE_UUIDS.map(uuid => fakeJsonFile(uuid)) }))
 	downloadFileBytes.mockImplementation((file: SdkFile) => Promise.resolve(playlistBytes(file)))
 	uploadFileBytes.mockImplementation(() => Promise.resolve(fakeJsonFile(testUuid("ownsave"))))
+	getFile.mockImplementation((uuid: string) => Promise.resolve(fakeJsonFile(uuid as UuidStr)))
 
 	// The sync markers and the parsed-playlist memo are module state that outlives a test; each test
 	// starts from none, as a page load does, under a live socket.
@@ -271,6 +276,117 @@ describe("usePlaylistsQuery request counts", () => {
 		await focus()
 
 		expect(counts()).toEqual({ list: 2, download: 3 })
+	})
+
+	it("a first playlist created elsewhere before this tab knew the directory is read on the next focus", async () => {
+		findDirectoryUuid.mockImplementation((parentUuid: string | null, name: string) =>
+			Promise.resolve(name === "playlists" ? undefined : parentUuid === null ? DOT_FILEN_UUID : undefined)
+		)
+
+		await mountLoaded()
+		await focus()
+
+		// No directory is a clean read: focusing asks nothing while it is still absent.
+		expect(findDirectoryUuid).toHaveBeenCalledTimes(2)
+		expect(counts()).toEqual({ list: 0, download: 0 })
+
+		findDirectoryUuid.mockImplementation((parentUuid: string | null, name: string) =>
+			Promise.resolve(name === "playlists" && parentUuid === DOT_FILEN_UUID ? PLAYLISTS_DIR_UUID : DOT_FILEN_UUID)
+		)
+		handlePlaylistsDriveEvent(driveEvent({ type: "folderSubCreated", dir: fakeDir(PLAYLISTS_DIR_UUID, "playlists", DOT_FILEN_UUID) }))
+		handlePlaylistsDriveEvent(driveEvent({ type: "fileNew", file: fakeJsonFile(testUuid("remote")) }))
+		await focus()
+
+		expect(counts()).toEqual({ list: 1, download: 3 })
+	})
+
+	it("a directory named like Playlists created outside `.filen` is ignored while the directory is unknown", async () => {
+		findDirectoryUuid.mockImplementation((parentUuid: string | null, name: string) =>
+			Promise.resolve(name === "playlists" ? undefined : parentUuid === null ? DOT_FILEN_UUID : undefined)
+		)
+
+		await mountLoaded()
+
+		handlePlaylistsDriveEvent(
+			driveEvent({ type: "folderSubCreated", dir: fakeDir(testUuid("other"), "playlists", testUuid("elsewhere")) })
+		)
+		await focus()
+
+		expect(findDirectoryUuid).toHaveBeenCalledTimes(2)
+	})
+
+	it("lists playlists before checking their tracks, then patches the cleaned row in without reading again", async () => {
+		const deadCheck: { release: () => void } = { release: () => undefined }
+
+		downloadFileBytes.mockImplementation((file: SdkFile) =>
+			Promise.resolve(
+				file.uuid === FIRST_PLAYLIST_FILE_UUID
+					? new TextEncoder().encode(
+							JSON.stringify({
+								uuid: "playlist-tracks",
+								name: "Tracks",
+								created: 1,
+								updated: 1,
+								files: ["alive", "dead"].map(uuid => ({
+									uuid,
+									name: `${uuid}.mp3`,
+									mime: "audio/mpeg",
+									size: 1,
+									bucket: "b",
+									key: "k",
+									version: 2,
+									chunks: 1,
+									region: "r",
+									playlist: "playlist-tracks"
+								}))
+							})
+						)
+					: playlistBytes(file)
+			)
+		)
+		getFile.mockImplementation((uuid: string) =>
+			uuid === "dead"
+				? new Promise(resolve => {
+						deadCheck.release = () => {
+							resolve(undefined)
+						}
+					})
+				: Promise.resolve(fakeJsonFile(uuid as UuidStr))
+		)
+
+		vi.useFakeTimers({ toFake: ["Date"] })
+
+		const view = await mountLoaded()
+		const tracks = () =>
+			view.result.current.data?.flatMap(entry =>
+				entry.status === "ok" && entry.playlist.uuid === "playlist-tracks" ? entry.playlist.files.map(file => file.uuid) : []
+			)
+
+		// The list is out while the checks are still pending.
+		expect(tracks()).toEqual(["alive", "dead"])
+		await waitFor(() => {
+			expect(getFile).toHaveBeenCalledTimes(2)
+		})
+
+		act(() => {
+			deadCheck.release()
+		})
+		await waitFor(() => {
+			expect(tracks()).toEqual(["alive"])
+		})
+		await settle()
+		await focus()
+
+		// One check per stored track, one cleanup upload, and neither the patch nor its echo reads again.
+		expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		expect(counts()).toEqual({ list: 1, download: 3 })
+
+		vi.setSystemTime(Date.now() + PLAYLISTS_STALE_TIME + 1)
+		await focus()
+
+		expect(counts()).toEqual({ list: 2, download: 3 })
+		expect(tracks()).toEqual(["alive"])
+		expect(getFile).toHaveBeenCalledTimes(2)
 	})
 
 	it.each<{ name: string; inner: DriveEvent }>([

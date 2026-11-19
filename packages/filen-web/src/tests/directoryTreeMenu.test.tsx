@@ -233,6 +233,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup()
+	onlineManager.setOnline(true)
 })
 
 describe("sidebar tree menu", () => {
@@ -295,7 +296,6 @@ describe("sidebar tree menu", () => {
 
 		await openMenuOn(root)
 		expect(NEW_ENTRIES.map(label => isDisabled(entry(label)))).toEqual([true, true, true, true, true])
-		onlineManager.setOnline(true)
 	})
 
 	it("opens on the Cloud Drive root with the destination entries alone", async () => {

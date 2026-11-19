@@ -36,7 +36,7 @@ export interface ComicPageProps {
 	onCancelWait: () => void
 }
 
-// One page of a comic: W2's image viewer over the page's entry, read through a lease on the archive's reader (the
+// One page of a comic: the preview's image viewer over the page's entry, read through a lease on the archive's reader (the
 // listing's own, for its password), cached like a file's under the entry's key. A page above the image cap keeps its
 // place with a note instead.
 export function ComicPage(props: ComicPageProps) {

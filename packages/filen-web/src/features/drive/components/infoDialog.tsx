@@ -1,7 +1,7 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { formatBytes, driveItemName } from "@filen/shared"
+import { cn, formatBytes, driveItemName } from "@filen/shared"
 import { StarIcon } from "lucide-react"
 import { asDirectoryOrFile, driveItemMime, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -32,12 +32,13 @@ export interface InfoDialogProps {
 
 // One row of the grouped detail card: a muted label, a right-aligned value. The value column opts into
 // text selection (the global user-select policy leaves it off everywhere else) — see the app-shell
-// spec's text-selection rule.
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+// spec's text-selection rule. Short values (sizes, dates, counts) stay on one line; `wrap` is for values
+// that can run long (path, MIME type, sharer, an error message), which wrap in full instead of being cut.
+function InfoRow({ label, wrap = false, children }: { label: string; wrap?: boolean; children: ReactNode }) {
 	return (
-		<div className="flex items-center justify-between gap-4 px-3.5 py-2.5 text-sm">
+		<div className={cn("flex justify-between gap-4 px-3.5 py-2.5 text-sm", wrap ? "items-start" : "items-center")}>
 			<span className="shrink-0 text-muted-foreground">{label}</span>
-			<span className="min-w-0 truncate text-right font-medium select-text">{children}</span>
+			<span className={cn("min-w-0 text-right font-medium select-text", wrap ? "break-words" : "truncate")}>{children}</span>
 		</div>
 	)
 }
@@ -181,18 +182,33 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 
 					{kindKey !== null ? <InfoRow label={t("driveInfoKind")}>{t(kindKey)}</InfoRow> : null}
 
-					{mime !== undefined ? <InfoRow label={t("driveInfoMimeType")}>{mime}</InfoRow> : null}
+					{mime !== undefined ? (
+						<InfoRow
+							label={t("driveInfoMimeType")}
+							wrap
+						>
+							{mime}
+						</InfoRow>
+					) : null}
 
 					<InfoRow label={t("driveInfoCreated")}>{formatCreatedDateTime(item)}</InfoRow>
 					<InfoRow label={t("driveInfoUploaded")}>{formatUploadedDateTime(item)}</InfoRow>
 					<InfoRow label={t("driveInfoModified")}>{formatModifiedDateTime(item)}</InfoRow>
 
 					{shared ? (
-						<InfoRow label={t(variant === "sharedIn" ? "driveInfoSharedBy" : "driveInfoSharedWith")}>{shared.name}</InfoRow>
+						<InfoRow
+							label={t(variant === "sharedIn" ? "driveInfoSharedBy" : "driveInfoSharedWith")}
+							wrap
+						>
+							{shared.name}
+						</InfoRow>
 					) : null}
 
 					{remoteInfoEnabled && (remoteLoading || remoteError || path !== null) ? (
-						<InfoRow label={t("driveInfoPath")}>
+						<InfoRow
+							label={t("driveInfoPath")}
+							wrap
+						>
 							{remoteError ? (
 								<span className="text-destructive">{errorLabel(infoQuery.error)}</span>
 							) : path !== null ? (

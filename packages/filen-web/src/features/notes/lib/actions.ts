@@ -74,7 +74,7 @@ export async function retypeNewNote(note: Note, noteType: NoteType): Promise<Not
 // ── Copy content ─────────────────────────────────────────────────────────
 
 // What gets copied is what the user sees (resolveLocalFirstContent). A fetch failure or undecryptable
-// content throws an ErrorDTO — the caller's own try/catch (noteMenu.tsx's copyContent handler) surfaces
+// content throws an ErrorDTO — the caller's own try/catch (noteDirectAction.ts's copyContent case) surfaces
 // it as an error toast instead of silently copying an empty string.
 export async function resolveNoteContent(note: Note): Promise<string> {
 	const result = await resolveLocalFirstContent(note)
@@ -93,32 +93,51 @@ export async function resolveNoteContent(note: Note): Promise<string> {
 // original and the new row, so an already-open original's editor and a freshly-opened duplicate both
 // see content immediately instead of each issuing its own getNoteContent round trip. The original's
 // content is read from cache first (already loaded, the common case — the user just duplicated a note
-// they have open) and only fetched when that cache is cold.
+// they have open) and only fetched when that cache is cold. That seeding is best-effort: the duplicate
+// exists once the SDK call resolves, so a failed read leaves the caches cold instead of failing it.
 export async function duplicateNote(note: Note): Promise<ActionOutcome<Note>> {
-	let original: Note
-	let duplicated: Note
+	const outcome = await attemptOp(sdkApi.duplicateNote(note))
 
-	try {
-		;({ original, duplicated } = await runOp(sdkApi.duplicateNote(note)))
-
-		const cachedContent = queryClient.getQueryData<string | undefined>(noteContentQueryKey(original.uuid))
-		const content = cachedContent ?? (await runOp(sdkApi.getNoteContent(original)))
-
-		// A warm cache already holds exactly this value, and rewriting it would still move dataUpdatedAt,
-		// which remounts the original's open editor (caret, scroll and undo lost).
-		if (cachedContent === undefined) {
-			queryClient.setQueryData(noteContentQueryKey(original.uuid), content)
-		}
-
-		queryClient.setQueryData(noteContentQueryKey(duplicated.uuid), content)
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status !== "success") {
+		return outcome
 	}
+
+	const { original, duplicated } = outcome.item
 
 	notesQueryUpsert(original)
 	notesQueryUpsert(duplicated)
 
+	await seedDuplicateContent(original, duplicated)
+
 	return { status: "success", item: duplicated }
+}
+
+async function seedDuplicateContent(original: Note, duplicated: Note): Promise<void> {
+	const cachedContent = queryClient.getQueryData<string | undefined>(noteContentQueryKey(original.uuid))
+	let content = cachedContent
+
+	if (content === undefined) {
+		try {
+			content = await runOp(sdkApi.getNoteContent(original))
+		} catch (e) {
+			log.warn("notes", "duplicate content not seeded", asErrorDTO(e).message)
+
+			return
+		}
+	}
+
+	// Undecryptable content resolves undefined: nothing to seed.
+	if (content === undefined) {
+		return
+	}
+
+	// A warm cache already holds exactly this value, and rewriting it would still move dataUpdatedAt,
+	// which remounts the original's open editor (caret, scroll and undo lost).
+	if (cachedContent === undefined) {
+		queryClient.setQueryData(noteContentQueryKey(original.uuid), content)
+	}
+
+	queryClient.setQueryData(noteContentQueryKey(duplicated.uuid), content)
 }
 
 // ── Pin / favorite ───────────────────────────────────────────────────────

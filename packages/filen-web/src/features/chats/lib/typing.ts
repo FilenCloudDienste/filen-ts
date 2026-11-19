@@ -1,4 +1,4 @@
-import { createTypingSender } from "@filen/shared"
+import { contactDisplayName, createTypingSender, isBlocked, type BlockedUsers } from "@filen/shared"
 import type { Chat, ChatTypingType } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
@@ -101,7 +101,7 @@ export function clearAllTyping(): void {
 // ── DISPLAY ──────────────────────────────────────────────────────────────────
 
 export function typingUserName(user: ChatTypingUser): string {
-	return user.senderNickName.length > 0 ? user.senderNickName : user.senderEmail
+	return contactDisplayName({ email: user.senderEmail, nickName: user.senderNickName })
 }
 
 // The i18n key + interpolation params for a set of typing users — the SINGLE source both the thread
@@ -130,17 +130,22 @@ export function typingText(users: readonly ChatTypingUser[]): TypingText | null 
 	return { key: "chatTypingSeveral" }
 }
 
-// The typing users to render for a chat, self excluded (our own echoed signal must never show). Pure.
-export function visibleTypingUsers(users: readonly ChatTypingUser[] | undefined, currentUserId: bigint | undefined): ChatTypingUser[] {
+// The typing users to render for a chat: self excluded (our own echoed signal must never show) and blocked
+// users withheld. Filtered at read time, so a block or unblock applies without a new signal. Pure.
+export function visibleTypingUsers(
+	users: readonly ChatTypingUser[] | undefined,
+	currentUserId: bigint | undefined,
+	blocked: BlockedUsers
+): ChatTypingUser[] {
 	if (users === undefined || users.length === 0) {
 		return []
 	}
 
-	if (currentUserId === undefined) {
-		return [...users]
-	}
-
-	return users.filter(u => u.senderId !== currentUserId)
+	return users.filter(
+		u =>
+			(currentUserId === undefined || u.senderId !== currentUserId) &&
+			!isBlocked({ userId: u.senderId, email: u.senderEmail }, blocked)
+	)
 }
 
 // ── SEND ─────────────────────────────────────────────────────────────────────

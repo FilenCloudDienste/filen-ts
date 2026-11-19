@@ -290,6 +290,10 @@ interface HarnessOptions {
 	route?: SourceRoute
 }
 
+// Every engine a test built: disposed after it, so none stays subscribed to the shared stores and writes them on a
+// later test's prefs change.
+const engines: AudioEngine[] = []
+
 function makeHarness(options: HarnessOptions = {}): Harness {
 	const mains: FakeElement[] = []
 	const warms: FakeElement[] = []
@@ -358,8 +362,12 @@ function makeHarness(options: HarnessOptions = {}): Harness {
 		...(options.smooth === false ? {} : { smoothTransitions: smooth })
 	}
 
+	const engine = new AudioEngine(deps)
+
+	engines.push(engine)
+
 	return {
-		engine: new AudioEngine(deps),
+		engine,
 		output,
 		mains,
 		warms,
@@ -427,6 +435,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	for (const engine of engines.splice(0)) {
+		engine.dispose()
+	}
+
 	vi.useRealTimers()
 })
 

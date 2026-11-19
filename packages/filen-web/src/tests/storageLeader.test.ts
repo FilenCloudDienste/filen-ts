@@ -1,24 +1,45 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Each "tab" is a fresh import of the leader module over shared fakes: an exclusive Web Locks queue and
-// an in-memory BroadcastChannel hub. The db worker is a stub whose open() resolves.
+// an in-memory BroadcastChannel hub. The db worker is a stub whose open() resolves unless a test swaps it.
 
-vi.mock("@/workers/db.worker.ts?worker", () => ({ default: vi.fn() }))
-vi.mock("comlink", () => ({
-	wrap: () => ({
-		open: () => Promise.resolve(),
-		kvGet: () => Promise.resolve("from-leader"),
-		kvPrefixBytes: (prefixes: string[]) => Promise.resolve(prefixes.map(prefix => prefix.length)),
-		// A full VACUUM on a large database, well past the default RPC timeout.
-		vacuum: () =>
-			new Promise(resolve => {
-				setTimeout(() => {
-					resolve(4096)
-				}, 30_000)
-			}),
-		kvKeys: () => new Promise(() => undefined)
-	})
+const worker = vi.hoisted(() => ({
+	terminate: vi.fn(),
+	release: vi.fn(),
+	open: { current: (): Promise<void> => Promise.resolve() },
+	kvGets: [] as string[]
 }))
+
+vi.mock("@/workers/db.worker.ts?worker", () => ({
+	default: class {
+		public terminate = worker.terminate
+	}
+}))
+vi.mock("comlink", () => {
+	const releaseProxy = Symbol("releaseProxy")
+
+	return {
+		releaseProxy,
+		wrap: () => ({
+			[releaseProxy]: worker.release,
+			open: () => worker.open.current(),
+			kvGet: (key: string) => {
+				worker.kvGets.push(key)
+
+				return Promise.resolve("from-leader")
+			},
+			kvPrefixBytes: (prefixes: string[]) => Promise.resolve(prefixes.map(prefix => prefix.length)),
+			// A full VACUUM on a large database, well past the default RPC timeout.
+			vacuum: () =>
+				new Promise(resolve => {
+					setTimeout(() => {
+						resolve(4096)
+					}, 30_000)
+				}),
+			kvKeys: () => new Promise(() => undefined)
+		})
+	}
+})
 
 type LockCallback = (lock: { name: string } | null) => unknown
 interface Waiter {
@@ -99,6 +120,7 @@ class FakeLocks {
 }
 
 const channels = new Set<FakeChannel>()
+const deliveries: { to: string; kind: unknown }[] = []
 
 class FakeChannel {
 	public onmessage: ((ev: MessageEvent) => void) | null = null
@@ -130,6 +152,11 @@ class FakeChannel {
 	}
 
 	private deliver(ev: MessageEvent): void {
+		if (!channels.has(this)) {
+			return // closed while the message was queued
+		}
+
+		deliveries.push({ to: this.name, kind: (ev.data as { kind?: unknown }).kind })
 		this.onmessage?.(ev)
 
 		for (const listener of this.listeners) {
@@ -150,6 +177,11 @@ beforeEach(() => {
 	vi.useFakeTimers()
 	locks = new FakeLocks()
 	channels.clear()
+	deliveries.length = 0
+	worker.terminate.mockClear()
+	worker.release.mockClear()
+	worker.open.current = () => Promise.resolve()
+	worker.kvGets.length = 0
 	vi.stubGlobal("navigator", { locks })
 	vi.stubGlobal("BroadcastChannel", FakeChannel)
 })
@@ -197,9 +229,9 @@ describe("acquireStorage", () => {
 
 		expect(handle.role).toBe("leader")
 		expect(tab.storageRole()).toBe("leader")
-		// The abandoned handshake stopped pinging and closed its channel; only the new leader's remains.
+		// The abandoned handshake stopped pinging and closed its channel; only the new leader's remain.
 		expect(vi.getTimerCount()).toBe(0)
-		expect(channels.size).toBe(1)
+		expect([...channels].map(ch => ch.name.split(":").slice(0, 2).join(":"))).toEqual(["filen-web-db-rpc", "filen-web-db-rpc:req"])
 	})
 
 	it("fails after 10s when the holder never answers, and does not take the lock afterwards", async () => {
@@ -224,7 +256,7 @@ describe("acquireStorage", () => {
 
 		leaderChannel.onmessage = (ev: MessageEvent<{ kind: string }>) => {
 			if (ev.data.kind === "leader?") {
-				leaderChannel.postMessage({ kind: "leader-ready" })
+				leaderChannel.postMessage({ kind: "leader-ready", leader: "dead" })
 			}
 		}
 
@@ -283,7 +315,7 @@ describe("storageHasPeers", () => {
 
 		leaderChannel.onmessage = (ev: MessageEvent<{ kind: string }>) => {
 			if (ev.data.kind === "leader?") {
-				leaderChannel.postMessage({ kind: "leader-ready" })
+				leaderChannel.postMessage({ kind: "leader-ready", leader: "dead" })
 			}
 		}
 
@@ -343,5 +375,165 @@ describe("follower RPC", () => {
 		await vi.advanceTimersByTimeAsync(5000)
 
 		expect(await keys).toEqual(new Error("db rpc timeout: kvKeys"))
+	})
+})
+
+// A leader in another tab, seen only through its hello channel: it answers the handshake with `id`.
+function remoteLeader(id: string): FakeChannel {
+	const hello = new FakeChannel("filen-web-db-rpc")
+
+	hello.onmessage = (ev: MessageEvent<{ kind: string }>) => {
+		if (ev.data.kind === "leader?") {
+			hello.postMessage({ kind: "leader-ready", leader: id })
+		}
+	}
+
+	return hello
+}
+
+async function followRemoteLeader(id: string) {
+	const release = locks.holdExternally()
+	const hello = remoteLeader(id)
+	const tab = await openTab()
+	const acquired = tab.acquireStorage()
+
+	await vi.advanceTimersByTimeAsync(0)
+
+	return { tab, handle: await acquired, hello, release }
+}
+
+function channelKinds(): string[] {
+	return [...channels].map(ch => ch.name.split(":").slice(0, 2).join(":")).sort()
+}
+
+describe("leader hand-over", () => {
+	it("runs calls in flight at the leader's death and calls made during the promotion on the new leader, in order", async () => {
+		const { tab, handle, hello, release } = await followRemoteLeader("dead")
+		const inFlight = handle.api.kvGet("in-flight")
+		const opened = Promise.withResolvers<undefined>()
+
+		worker.open.current = () => opened.promise
+		await vi.advanceTimersByTimeAsync(0)
+		hello.close()
+		release()
+		await vi.advanceTimersByTimeAsync(0)
+
+		const during = handle.api.kvGet("during")
+
+		// Longer than the RPC timeout: held calls do not time out while the promotion runs.
+		await vi.advanceTimersByTimeAsync(10_000)
+		opened.resolve(undefined)
+		await vi.advanceTimersByTimeAsync(0)
+
+		await expect(inFlight).resolves.toBe("from-leader")
+		await expect(during).resolves.toBe("from-leader")
+		expect(worker.kvGets).toEqual(["in-flight", "during"])
+		expect(handle.role).toBe("leader")
+		expect(tab.storageRole()).toBe("leader")
+		// The follower's channels are closed; only the new leader's hello and request channels remain.
+		expect(channelKinds()).toEqual(["filen-web-db-rpc", "filen-web-db-rpc:req"])
+	})
+
+	it("fails the held calls with the promotion's error and terminates the worker", async () => {
+		const { tab, handle, hello, release } = await followRemoteLeader("dead")
+		const inFlight = handle.api.kvGet("in-flight").catch((e: unknown) => e)
+		const opened = Promise.withResolvers<undefined>()
+		const failure = new Error("opfs gone")
+
+		worker.open.current = () => opened.promise
+		await vi.advanceTimersByTimeAsync(0)
+		hello.close()
+		release()
+		await vi.advanceTimersByTimeAsync(0)
+
+		const during = handle.api.kvGet("during").catch((e: unknown) => e)
+
+		opened.reject(failure)
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(await inFlight).toBe(failure)
+		expect(await during).toBe(failure)
+		expect(worker.kvGets).toEqual([])
+		expect(worker.terminate).toHaveBeenCalledTimes(1)
+		expect(worker.release).toHaveBeenCalledTimes(1)
+		expect(handle.role).toBe("follower")
+		expect(tab.storageRole()).toBe("follower")
+	})
+
+	it("re-posts unanswered calls to the next leader when it announces itself", async () => {
+		const { handle, hello } = await followRemoteLeader("dead")
+		const lost = handle.api.kvGet("k")
+		const requests = new FakeChannel("filen-web-db-rpc:req:next")
+
+		requests.onmessage = (ev: MessageEvent<{ id: string; tab: string }>) => {
+			new FakeChannel(`filen-web-db-rpc:res:${ev.data.tab}`).postMessage({
+				kind: "res",
+				id: ev.data.id,
+				ok: true,
+				value: "from-next"
+			})
+		}
+
+		await vi.advanceTimersByTimeAsync(1000)
+		hello.postMessage({ kind: "leader-ready", leader: "next" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		await expect(lost).resolves.toBe("from-next")
+	})
+})
+
+describe("becomeLeader", () => {
+	it("terminates the worker and rethrows when open() rejects", async () => {
+		const failure = new Error("opfs gone")
+
+		worker.open.current = () => Promise.reject(failure)
+
+		const tab = await openTab()
+
+		await expect(tab.acquireStorage()).rejects.toBe(failure)
+		expect(worker.terminate).toHaveBeenCalledTimes(1)
+		expect(worker.release).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("follower RPC transport", () => {
+	async function follower() {
+		const acquired = (await openTab()).acquireStorage()
+
+		await vi.advanceTimersByTimeAsync(0)
+
+		return (await acquired).api
+	}
+
+	it("leaves no timer behind for an answered call, and the leader closes an idle response channel", async () => {
+		await (await openTab()).acquireStorage()
+
+		const api = await follower()
+
+		await expect(api.kvGet("k")).resolves.toBe("from-leader")
+		// Only the leader's idle timer for the follower's response channel is left.
+		expect(vi.getTimerCount()).toBe(1)
+		expect(channelKinds().filter(kind => kind.endsWith(":res"))).toHaveLength(2)
+
+		await vi.advanceTimersByTimeAsync(30_000)
+
+		expect(vi.getTimerCount()).toBe(0)
+		expect(channelKinds().filter(kind => kind.endsWith(":res"))).toHaveLength(1)
+	})
+
+	it("delivers a request only to the leader and a response only to the follower that asked", async () => {
+		await (await openTab()).acquireStorage()
+
+		const a = await follower()
+
+		await follower()
+		deliveries.length = 0
+
+		await expect(a.kvGet("k")).resolves.toBe("from-leader")
+		expect(
+			deliveries
+				.filter(d => d.kind === "req" || d.kind === "res")
+				.map(d => `${d.to.split(":").slice(0, 2).join(":")} ${String(d.kind)}`)
+		).toEqual(["filen-web-db-rpc:req req", "filen-web-db-rpc:res res"])
 	})
 })

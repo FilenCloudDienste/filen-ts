@@ -1,7 +1,13 @@
 import { Buffer } from "buffer"
 import { describe, expect, it } from "vitest"
 import { segmentMessage } from "@filen/shared"
-import { embedCandidatesForLinks, linksFromSegments, MAX_MESSAGE_EMBEDS } from "@/features/chats/lib/embeds.logic"
+import {
+	embedCandidatesForLinks,
+	inlinesEmbedImage,
+	linksFromSegments,
+	MAX_INLINE_EMBED_IMAGE_BYTES,
+	MAX_MESSAGE_EMBEDS
+} from "@/features/chats/lib/embeds.logic"
 
 // Version 4 (third group starts "4"), variant 8 (fourth "8") — @filen/shared's parseFilenPublicLink
 // validates both nibbles via the 'uuid' package, unlike a plain 8-4-4-4-12 hex-shape regex.
@@ -104,5 +110,17 @@ describe("linksFromSegments", () => {
 		expect(embedCandidatesForLinks(extractLinks(`see "${url}" now`))).toEqual([
 			{ kind: "filenLink", url, link: { type: "file", uuid: UUID, key: KEY_PLAINTEXT } }
 		])
+	})
+})
+
+describe("inlinesEmbedImage", () => {
+	it("inlines an image up to the cap and not one byte over", () => {
+		expect(inlinesEmbedImage(0)).toBe(true)
+		expect(inlinesEmbedImage(MAX_INLINE_EMBED_IMAGE_BYTES)).toBe(true)
+		expect(inlinesEmbedImage(MAX_INLINE_EMBED_IMAGE_BYTES + 1)).toBe(false)
+	})
+
+	it("leaves room for ordinary phone photos", () => {
+		expect(inlinesEmbedImage(12 * 1024 * 1024)).toBe(true)
 	})
 })

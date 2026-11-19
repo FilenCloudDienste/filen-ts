@@ -24,11 +24,19 @@ describe("pdf.js assets", () => {
 
 		for (const name of decoders) expect(files).toContain(`wasm/${name}`)
 
-		for (const name of matches(/\$\{this\.#wasmUrl\}([\w.-]+)`/g)) expect(files).toContain(`wasm/${name}`)
+		const wasmUrlFiles = matches(/\$\{this\.#wasmUrl\}([\w.-]+)`/g)
+
+		expect(wasmUrlFiles.length).toBeGreaterThanOrEqual(1)
+
+		for (const name of wasmUrlFiles) expect(files).toContain(`wasm/${name}`)
 	})
 
 	it("ship the ICC profile and every standard font the worker maps a base font to", () => {
-		for (const name of matches(/#iccUrl\}([\w.-]+\.icc)`/g)) expect(files).toContain(`iccs/${name}`)
+		const profiles = matches(/#iccUrl\}([\w.-]+\.icc)`/g)
+
+		expect(profiles.length).toBeGreaterThanOrEqual(1)
+
+		for (const name of profiles) expect(files).toContain(`iccs/${name}`)
 
 		const fonts = new Set(matches(/"([\w-]+\.(?:pfb|ttf))"/g))
 
@@ -47,6 +55,16 @@ describe("pdf.js assets", () => {
 		}
 
 		expect(files).toContain("LICENSE")
+	})
+
+	it("ship every decoder and profile pdf.js packages, so a new one cannot be left off the lists", () => {
+		for (const dir of ["wasm", "iccs"]) {
+			for (const name of readdirSync(join(PDFJS_DIR, dir))) {
+				if (name.startsWith("LICENSE") || name.startsWith("quickjs")) continue
+
+				expect(files).toContain(`${dir}/${name}`)
+			}
+		}
 	})
 
 	it("never ship the scripting engine", () => {

@@ -116,30 +116,55 @@ describe("isAllowedInlineContentType — interior whitespace is never normalized
 
 // The predicate's load-bearing consumer is sw.ts's serve path, which cannot be imported here: it is a
 // ServiceWorkerGlobalScope module that registers listeners and pulls the SW-hosted wasm SDK at import.
-// So this is a source-level drift guard over that one decision — the shape of the check, and that the
-// only inline Content-Type the SW ever emits sits behind it. A page-supplied contentType served inline
-// without this re-validation is a same-origin XSS primitive.
+// So this is a source-level drift guard over that decision. The SW emits the page-claimed Content-Type
+// inline at exactly two sites (handleDownload and handlePortPreview), and each must sit behind the
+// re-validation. A page-supplied contentType served inline without it is a same-origin XSS primitive.
 describe("sw.ts inline-serve gate", () => {
 	const source = readFileSync("src/sw/sw.ts", "utf8")
-	const start = source.indexOf("function handleDownload(")
-	const handleDownload = source.slice(start, source.indexOf("\n}", start))
 
-	it("re-validates the registered contentType inside the download route", () => {
+	function functionBody(name: string): string {
+		const start = source.indexOf(`function ${name}(`)
+
 		expect(start).toBeGreaterThan(-1)
-		expect(handleDownload).toMatch(/if\s*\(!isAllowedInlineContentType\(pending\.contentType\)\)/)
-	})
+
+		return source.slice(start, source.indexOf("\n}", start))
+	}
 
 	it("imports the predicate from the shared protocol contract rather than restating the allowlist", () => {
 		expect(source).toMatch(/import\s*\{[^}]*isAllowedInlineContentType[^}]*\}\s*from\s*"@\/lib\/sw\/protocol"/s)
 	})
 
-	it("serves the claimed contentType inline only after that gate, and degrades to an attachment otherwise", () => {
-		const gate = handleDownload.search(/if\s*\(!isAllowedInlineContentType\(pending\.contentType\)\)/)
+	it("re-validates the registered contentType inside the enclosing function of every inline serve", () => {
+		const offsets = [...source.matchAll(/contentType: pending\.contentType/g)].map(match => match.index)
+
+		expect(offsets).toHaveLength(2)
+
+		for (const offset of offsets) {
+			const enclosing = source.slice(source.lastIndexOf("\nfunction ", offset), offset)
+
+			expect(enclosing).toContain("isAllowedInlineContentType(pending.contentType)")
+		}
+	})
+
+	it("handleDownload returns the forced-attachment response when the gate rejects, before the inline serve", () => {
+		const handleDownload = functionBody("handleDownload")
+		const gate = handleDownload.search(
+			/if\s*\(!isAllowedInlineContentType\(pending\.contentType\)\)\s*\{\s*return streamFileRange\([^)]*attachmentHeaders\(pending\.name\)/
+		)
 		const inlineServe = handleDownload.indexOf("contentType: pending.contentType")
 
 		expect(gate).toBeGreaterThan(-1)
 		expect(inlineServe).toBeGreaterThan(gate)
-		// The rejected arm falls back to the forced-attachment response a plain file download gets.
-		expect(handleDownload.slice(gate, inlineServe)).toContain("attachmentHeaders(pending.name)")
+	})
+
+	it("handlePortPreview serves inline only when the gate allows, and degrades to an attachment otherwise", () => {
+		const handlePortPreview = functionBody("handlePortPreview")
+		const gate = handlePortPreview.search(/const inline = isAllowedInlineContentType\(pending\.contentType\)/)
+		const ternary = handlePortPreview.search(
+			/inline\s*\?\s*\{\s*contentType: pending\.contentType[^}]*\}\s*:\s*attachmentHeaders\(pending\.name\)/
+		)
+
+		expect(gate).toBeGreaterThan(-1)
+		expect(ternary).toBeGreaterThan(gate)
 	})
 })

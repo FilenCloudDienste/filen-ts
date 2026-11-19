@@ -241,15 +241,15 @@ describe("CompressSubmenu", () => {
 
 describe("ExtractSubmenu", () => {
 	it("asks the worker once for the name, and not again when opened a second time", async () => {
-		renderExtract(archive("photos.zip"))
+		renderExtract(archive("once.zip"))
 
 		await openSubmenu("Extract")
 		await settle()
 
-		expect(sdk.archiveNameInfo).toHaveBeenCalledExactlyOnceWith(["photos.zip"])
+		expect(sdk.archiveNameInfo).toHaveBeenCalledExactlyOnceWith(["once.zip"])
 		expect(labels()).toEqual([
 			"Extract",
-			"Extract here to “photos/”",
+			"Extract here to “once/”",
 			"Extract here",
 			"Extract to",
 			"Choose destination…",
@@ -262,7 +262,7 @@ describe("ExtractSubmenu", () => {
 		await openSubmenu("Extract")
 		await settle()
 
-		expect(entry("Extract here to “photos/”")).toBeDefined()
+		expect(entry("Extract here to “once/”")).toBeDefined()
 		expect(sdk.archiveNameInfo).toHaveBeenCalledOnce()
 	})
 

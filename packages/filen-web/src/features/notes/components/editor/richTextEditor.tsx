@@ -16,6 +16,7 @@ import {
 	LinkIcon,
 	UnlinkIcon
 } from "lucide-react"
+import { RICH_TEXT_QUILL_FORMATS } from "@filen/shared/dom"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { Button } from "@/components/ui/button"
@@ -131,7 +132,10 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 			return
 		}
 
+		// Only the formats the sanitizer keeps, so what the editor shows is what the note keeps. `image` is not
+		// registered, so the default uploader inserts nothing for pasted or dropped image files.
 		const quill = new Quill(el, {
+			formats: [...RICH_TEXT_QUILL_FORMATS],
 			modules: {
 				toolbar: false
 			},

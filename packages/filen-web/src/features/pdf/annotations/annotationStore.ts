@@ -1,5 +1,6 @@
-import type { PdfAnnotationInfo, PdfAnnotationRef, PdfCommentThread, PdfPoint } from "@filen/office/core/pdfedit/annotations"
+import type { PdfAnnotationInfo, PdfAnnotationRef, PdfCommentThread, PdfPoint, PdfRect } from "@filen/office/core/pdfedit/annotations"
 import type { PdfAttachmentInfo } from "@filen/office/core/pdfedit/annotations"
+import { PdfEngineError, type PdfPageAnnotations } from "@filen/office/dom/pdfedit"
 import type { PdfEditSessionModel, PdfEditSnapshot } from "@filen/office/react/pdfedit"
 import type { ToolKey } from "@filen/office/react/pdfedit/tools"
 import type { PdfEditSwap } from "@/features/pdf/session/swap"
@@ -39,6 +40,9 @@ export interface PdfAnnotationState {
 	// (asked for while the attachments are open). Held here, not handed out by a method: a view compiled by the React
 	// Compiler caches a method's answer for as long as the store is the same object.
 	readonly threads: readonly PdfCommentThread[] | null
+	// Where reading every page's threads is: not started (no editor yet), under way, or failed (asked again when the
+	// Comments panel opens next).
+	readonly threadsStatus: "idle" | "reading" | "failed"
 	readonly attachments: readonly PdfAttachmentInfo[] | null
 	// Bumped when the editor's annotations or threads change (a view reads them through the store).
 	readonly revision: number
@@ -53,6 +57,7 @@ const INITIAL: PdfAnnotationState = {
 	imageWanted: null,
 	attachmentsOpen: false,
 	threads: null,
+	threadsStatus: "idle",
 	attachments: null,
 	revision: 0
 }
@@ -79,6 +84,10 @@ export class PdfAnnotationStore {
 	private ink: { readonly page: number; readonly id: number; readonly revision: number } | null = null
 	private askAuthor: (() => Promise<string | null>) | null = null
 	private readonly keys = new Map<number, (key: ToolKey) => boolean>()
+	// The page box of each page an overlay was shown for, for the keyboard's nudge and resize. Not cleared on a new
+	// session or when an overlay unmounts: the store is the opened PDF's, and an overlay writes its box again on every
+	// mount and change, so a selected annotation whose page scrolled out of view keeps its box.
+	private readonly boxes = new Map<number, PdfRect>()
 
 	subscribe = (listener: () => void): (() => void) => {
 		this.listeners.add(listener)
@@ -104,6 +113,10 @@ export class PdfAnnotationStore {
 	bind(session: PdfEditSessionModel | null): void {
 		if (session === this.session) return
 
+		// A comment begun before the editor arrived (a note placed or a comment asked for from the viewer) keeps its
+		// field and text; one begun on an editor that went away or was replaced is dropped with it.
+		const before = this.session
+
 		this.unsubscribe?.()
 		this.unsubscribe = null
 		this.session = session
@@ -123,8 +136,17 @@ export class PdfAnnotationStore {
 			})
 		}
 
-		this.set({ selected: null, composing: null, threads: null, attachments: null, revision: this.state.revision + 1 })
+		this.set({
+			selected: null,
+			composing: before === null ? this.state.composing : null,
+			threads: null,
+			threadsStatus: "idle",
+			attachments: null,
+			revision: this.state.revision + 1
+		})
 
+		// Opened before the editor was there (or kept open across sessions): read now.
+		if (this.state.commentsOpen) void this.readThreads(null)
 		if (this.state.attachmentsOpen) this.readAttachments()
 	}
 
@@ -175,20 +197,50 @@ export class PdfAnnotationStore {
 
 		if (session === null || pages.length === 0) return
 
+		// A page whose read failed stays asked: it is read again once a change touches it (follow) or with a new session
+		// (bind), never straight away (a failed read that asked again on the next render would loop).
+		let stored = 0
+		const keep = (read: readonly PdfPageAnnotations[]): number => {
+			let kept = 0
+
+			for (const entry of read) {
+				if (!this.asked.has(entry.page)) continue
+
+				this.pages.set(entry.page, entry.annotations)
+				kept++
+			}
+
+			return kept
+		}
+
 		for (let at = 0; at < pages.length; at += READ_BATCH) {
 			const batch = pages.slice(at, at + READ_BATCH)
-			const read = await session.engine.call("annotations", { pages: batch }).catch(() => null)
+			const read = await readAnnotations(session, batch)
 
 			if (session !== this.session) return
 
-			if (read === null) {
-				for (const page of batch) this.asked.delete(page)
+			if (read === "ended") break
+
+			if (read !== "failed") {
+				stored += keep(read)
 
 				continue
 			}
 
-			for (const entry of read) if (this.asked.has(entry.page)) this.pages.set(entry.page, entry.annotations)
+			// One bad page fails its whole batch: the batch is read once more page by page, then left.
+			if (batch.length === 1) continue
+
+			const alone = await Promise.all(batch.map(page => readAnnotations(session, [page])))
+
+			if (session !== this.session) return
+
+			for (const answer of alone) if (answer !== "ended" && answer !== "failed") stored += keep(answer)
+
+			if (alone.includes("ended")) break
 		}
+
+		// Nothing stored: no render (that would ask the failed pages again) and no selection to follow.
+		if (stored === 0) return
 
 		this.refreshSelection()
 		this.changed()
@@ -262,15 +314,27 @@ export class PdfAnnotationStore {
 
 		if (session === null) return
 
-		if (pages === null) this.threadsAsked = true
+		if (pages === null) {
+			this.threadsAsked = true
+
+			if (this.threads === null) this.set({ threadsStatus: "reading" })
+		}
 
 		// The revision read: a change made while every page's threads are read is not in them, and is not read on its
 		// own either (follow reads touched pages only once there are threads), so the read starts again.
 		const asOf = this.shown
 		const read = await session.engine.call("comments", pages === null ? {} : { pages }).catch(() => null)
 
-		if (session !== this.session || read === null) {
-			if (pages === null) this.threadsAsked = false
+		// A read of a session since replaced leaves the new session's reading alone.
+		if (session !== this.session) return
+
+		if (read === null) {
+			if (pages === null) {
+				// Asked again when Comments opens next; threads already shown stay.
+				this.threadsAsked = false
+
+				if (this.threads === null) this.set({ threadsStatus: "failed" })
+			}
 
 			return
 		}
@@ -284,6 +348,7 @@ export class PdfAnnotationStore {
 		this.threads = threads
 		this.set({
 			threads: [...threads.entries()].sort((a, b) => a[0] - b[0]).flatMap(([, list]) => list),
+			threadsStatus: "idle",
 			revision: this.state.revision + 1
 		})
 
@@ -367,6 +432,26 @@ export class PdfAnnotationStore {
 
 	key(page: number, key: ToolKey): boolean {
 		return this.keys.get(page)?.(key) ?? false
+	}
+
+	setPageBox(page: number, box: PdfRect): void {
+		this.boxes.set(page, box)
+	}
+
+	pageBox(page: number): PdfRect | undefined {
+		return this.boxes.get(page)
+	}
+}
+
+// A batch of pages' annotations; "ended" when the engine is closed or poisoned (not asked again), "failed" otherwise.
+async function readAnnotations(
+	session: PdfEditSessionModel,
+	pages: readonly number[]
+): Promise<readonly PdfPageAnnotations[] | "ended" | "failed"> {
+	try {
+		return await session.engine.call("annotations", { pages })
+	} catch (error) {
+		return error instanceof PdfEngineError && (error.failure === "closed" || error.failure === "poisoned") ? "ended" : "failed"
 	}
 }
 

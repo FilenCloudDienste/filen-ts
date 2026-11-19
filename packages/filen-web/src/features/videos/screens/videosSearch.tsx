@@ -16,6 +16,7 @@ import { cardCommand, cardCommandAction } from "@/features/videos/lib/cardKeys"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { VideoCard, type VideoCardAction } from "@/features/videos/components/videoCard"
+import { VideosLoadError } from "@/features/videos/screens/videosHome"
 import { EmptyMessage } from "@/components/emptyMessage"
 
 const IS_MAC = isMacPlatform()
@@ -180,8 +181,12 @@ export function VideosSearchScreen() {
 	// Results render at transition priority (in short slices, never one long task).
 	const searchQuery = useCatalogSearchQuery(trimmed)
 	const results = useDeferredValue(searchQuery.data)
+	// A result kept from an earlier query still shows its cards while the next one is pending, but its count and its
+	// "no results" are not this query's.
+	const current = results?.query === trimmed
 	const groups = trimmed.length === 0 ? [] : (results?.groups ?? [])
 	const total = groups.reduce((sum, group) => sum + group.total, 0)
+	const failed = trimmed.length > 0 && searchQuery.status === "error"
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -202,7 +207,7 @@ export function VideosSearchScreen() {
 					role="status"
 					className="ml-auto text-xs text-muted-foreground tabular-nums"
 				>
-					{trimmed.length > 0 ? t("videosSearchResults", { count: total }) : ""}
+					{trimmed.length > 0 && current && !failed ? t("videosSearchResults", { count: total }) : ""}
 				</span>
 			</div>
 			<div
@@ -215,12 +220,21 @@ export function VideosSearchScreen() {
 						title={t("videosSearchEmptyTitle")}
 						description={t("videosSearchEmptyBody")}
 					/>
-				) : results === undefined ? null : groups.length === 0 ? (
-					<EmptyMessage
-						icon={SearchXIcon}
-						title={t("videosSearchNoResultsTitle", { query: trimmed })}
-						description={t("videosSearchNoResultsBody")}
+				) : failed ? (
+					<VideosLoadError
+						error={searchQuery.error}
+						onRetry={() => {
+							void searchQuery.refetch()
+						}}
 					/>
+				) : results === undefined ? null : groups.length === 0 ? (
+					current ? (
+						<EmptyMessage
+							icon={SearchXIcon}
+							title={t("videosSearchNoResultsTitle", { query: trimmed })}
+							description={t("videosSearchNoResultsBody")}
+						/>
+					) : null
 				) : width > 0 ? (
 					groups.map(group => (
 						<ResultGroup

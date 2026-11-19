@@ -190,6 +190,8 @@ test("videos: first-run directory, scan, direct and remuxed playback, watch stat
 
 	const scratchName = `e2e-videos-${crypto.randomUUID()}`
 	let snapshot: VideosSyncSnapshot | null = null
+	// Set in the finally below and rethrown only after it, so it fails the test only when the body passed.
+	let restoreError: Error | undefined = undefined
 
 	await bootTo(page)
 
@@ -289,10 +291,22 @@ test("videos: first-run directory, scan, direct and remuxed playback, watch stat
 			.poll(() => syncedPlayed(page, REMUX_DURATION_SEC + 1), { timeout: LIVE_WRITE_TIMEOUT_MS, intervals: [2_000, 5_000] })
 			.toBe(true)
 	} finally {
-		if (snapshot !== null) {
-			await restoreVideosSync(page, snapshot)
-		}
+		// Nothing here may throw: a throw would replace the body's own error and skip the trash. A failed
+		// restore is logged, and reaches the throw after this block only when the body passed.
+		try {
+			if (snapshot !== null) {
+				await restoreVideosSync(page, snapshot)
+			}
+		} catch (error) {
+			restoreError = error instanceof Error ? error : new Error(String(error))
 
-		await trashScratchDirectory(page, scratchName)
+			console.error("videos: restoring .filen/videos failed, the account's Videos state may be left changed", error)
+		} finally {
+			await trashScratchDirectory(page, scratchName)
+		}
+	}
+
+	if (restoreError !== undefined) {
+		throw restoreError
 	}
 })

@@ -3,13 +3,21 @@ import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { PREVIEW_MAX_BYTES, SPREADSHEET_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { EXTENSION_TIERS, PREVIEW_MAX_BYTES, SPREADSHEET_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
+import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { mockSharedFile } from "@/tests/fixtures/sdk"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
-import { DOWNLOAD_AS_TARGETS, canDownloadAs, downloadAsSource, downloadAsTargets } from "@/features/drive/lib/downloadAs.logic"
+import {
+	DOWNLOAD_AS_FORMATS,
+	DOWNLOAD_AS_TARGETS,
+	canDownloadAs,
+	downloadAsSource,
+	downloadAsTargets
+} from "@/features/drive/lib/downloadAs.logic"
 import { applyOfflineGate, driveItemActions } from "@/features/drive/components/itemMenu.logic"
 import { driveBulkActions, isBulkActionOfflineDisabled } from "@/features/drive/components/bulkActionBar.logic"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
@@ -55,6 +63,16 @@ const SPREADSHEETS = ["xlsx", "xlsm", "xltx", "xltm", "xls", "xlt", "ods", "ots"
 function ids(item: DriveItem, variant: DriveVariant): string[] {
 	return driveItemActions(item, variant).map(descriptor => descriptor.id)
 }
+
+describe("downloadAsFormat", () => {
+	it("has a row for every extension the viewers' own tables open, and none besides", () => {
+		const documents = EXTENSION_TIERS.filter(([, category]) => category === "docx").flatMap(([extensions]) => [...extensions])
+		const owned = new Set([...documents, ...SPREADSHEET_EXTENSIONS, ...PRESENTATION_EXTENSIONS])
+
+		expect(documents.length).toBeGreaterThan(0)
+		expect(Object.keys(DOWNLOAD_AS_FORMATS).sort()).toEqual([...owned].sort())
+	})
+})
 
 describe("downloadAsSource", () => {
 	it("exports every format the document viewer opens from the document engine", () => {

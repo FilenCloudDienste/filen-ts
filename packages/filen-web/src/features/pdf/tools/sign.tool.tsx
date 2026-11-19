@@ -11,7 +11,6 @@ export const SIGN_CERTIFICATE_TOOL: PdfTool = {
 	labelKey: "previewPdfSigningTool",
 	icon: FileKeyIcon,
 	toolClass: "sign",
-	actionIds: [],
 	actions: [],
 	enabledWhen: policy => toolEnabled("sign", policy),
 	commands: ["sign.addField"],

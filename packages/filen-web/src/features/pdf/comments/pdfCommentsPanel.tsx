@@ -12,6 +12,9 @@ import { PdfSidePanel } from "@/features/pdf/tools/pdfSidePanel"
 
 export interface PdfCommentsPanelProps {
 	readonly threads: readonly PdfCommentThread[]
+	// Whether the threads have been read (before, the panel says they are being read), and whether reading them failed.
+	readonly loaded: boolean
+	readonly failed: boolean
 	readonly editable: boolean
 	readonly phone: boolean
 	readonly open: boolean
@@ -41,6 +44,8 @@ const SCOPE = "document"
 
 export function PdfCommentsPanel({
 	threads,
+	loaded,
+	failed,
 	editable,
 	phone,
 	open,
@@ -84,6 +89,8 @@ export function PdfCommentsPanel({
 		close: t("previewPdfCommentsClose"),
 		list: t("previewPdfCommentsList"),
 		empty: t("previewPdfCommentsEmpty"),
+		loading: t("previewPdfCommentsLoading"),
+		failed: t("previewPdfCommentsFailed"),
 		new: t("previewPdfCommentNew"),
 		placeholder: t("previewPdfCommentPlaceholder"),
 		replyPlaceholder: t("previewPdfCommentReplyPlaceholder"),
@@ -116,8 +123,8 @@ export function PdfCommentsPanel({
 			open={open}
 			scope={SCOPE}
 			threads={shown}
-			loaded
-			failed={false}
+			loaded={loaded}
+			failed={failed}
 			labels={labels}
 			editable={editable}
 			phone={phone}

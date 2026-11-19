@@ -118,12 +118,11 @@ function makeAccessors(
 	}
 }
 
-// Directories sort before files, always (dirs-first is a partition, not a sort key — see the
-// design note above). `directorySizes` lets a caller feed in real directory byte counts (keyed by
-// uuid, e.g. from a size query cache) for the size modes; a directory absent from the map sorts by
-// its raw synthetic 0n size and falls into the deterministic name tiebreak. Wiring real sizes in by
-// default is a later enhancement — the 0n fallback is well-defined on its own. `leadsDirectories` (the root `.filen`
-// where it is shown, lib/dotFilenGuard.ts's isRootDotFilenItem) leads the directories whatever the sort.
+// Directories sort before files, always (dirs-first is a partition, not a sort key). `directorySizes` lets a caller
+// feed in real directory byte counts (keyed by uuid, e.g. from a size query cache) for the size modes; a directory
+// absent from the map sorts by its raw synthetic 0n size and falls into the deterministic name tiebreak.
+// `leadsDirectories` (the root `.filen` where it is shown, lib/dotFilenGuard.ts's isRootDotFilenItem) leads the
+// directories whatever the sort.
 export function sortDriveItems(
 	items: DriveItem[],
 	sortBy: DriveSortBy,

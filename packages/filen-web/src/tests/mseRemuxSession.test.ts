@@ -79,6 +79,9 @@ class FakeSourceBuffer extends EventTarget {
 	public updating = false
 	public ranges: Range[] = []
 	public quotaOnce = false
+	// Every append throws QuotaExceededError, as a full SourceBuffer does.
+	public quotaAlways = false
+	public appendAttempts = 0
 	// A removal stays in progress until finishRemove().
 	public holdRemoves = false
 	public readonly removes: Range[] = []
@@ -95,6 +98,17 @@ class FakeSourceBuffer extends EventTarget {
 	}
 
 	public appendBuffer(): void {
+		this.appendAttempts++
+
+		// A runaway retry loop never yields to the timers a test waits on: end it with a non-quota error.
+		if (this.appendAttempts > 100) {
+			throw new Error("append retried without end")
+		}
+
+		if (this.quotaAlways) {
+			throw new DOMException("full", "QuotaExceededError")
+		}
+
 		if (this.quotaOnce) {
 			this.quotaOnce = false
 
@@ -232,6 +246,12 @@ class FakeElement extends EventTarget {
 				mediaSource.dispatchEvent(new Event("sourceopen"))
 			}, 0)
 		}
+	}
+
+	// Playback moving on, without a seek.
+	public advance(time: number): void {
+		this.time = time
+		this.dispatchEvent(new Event("timeupdate"))
 	}
 
 	public play(): Promise<void> {
@@ -408,6 +428,41 @@ describe("MediaSource remux session", () => {
 		await settle()
 
 		expect(worker.seek).toHaveBeenCalledTimes(3)
+		expect(failures).toEqual([])
+		session.dispose()
+	})
+
+	it("holds each full SourceBuffer on its own wait without releasing the other", async () => {
+		const { session, element, failures } = await open()
+		const { video, audio } = buffersOf(lastMediaSource())
+
+		element.loadMetadata()
+		element.currentTime = 20
+		await settle()
+
+		const generation = worker.seek.mock.calls.at(-1)?.[1].generation ?? 0
+
+		// Nothing behind the playhead to evict: each quota error shrinks the window and holds its track.
+		video.ranges = [[20, 40]]
+		audio.ranges = [[20, 40]]
+		video.quotaAlways = true
+		audio.quotaAlways = true
+		await worker.onEvent?.(segment("video", generation))
+		await settle()
+		element.advance(21)
+		await worker.onEvent?.(segment("audio", generation))
+		await settle()
+
+		expect(video.appendAttempts).toBe(1)
+		expect(audio.appendAttempts).toBe(1)
+
+		// Only the video wait has seen the playhead move on enough: video evicts and retries, audio stays held.
+		element.advance(22.5)
+		await settle()
+
+		expect(video.removes).toEqual([[20, 20.5]])
+		expect(video.appendAttempts).toBe(3)
+		expect(audio.appendAttempts).toBe(1)
 		expect(failures).toEqual([])
 		session.dispose()
 	})

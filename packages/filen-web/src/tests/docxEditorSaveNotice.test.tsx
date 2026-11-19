@@ -8,7 +8,7 @@ import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import type { DocxEditingHost, DocxSealer } from "@filen/office/dom/docx/editing"
 import { toast } from "sonner"
-import "@/lib/i18n"
+import { i18n } from "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
 
 // What a save's own writer stored otherwise than the editor has it (an ODF 1.1 document's comment kept at the start
@@ -158,8 +158,37 @@ describe("DocxEditView, a save its writer stored otherwise", () => {
 
 		expect(toast.warning).toHaveBeenCalledWith(
 			"This document's older OpenDocument version can't mark which text a comment covers, so 1 comment was saved at the start of its text.",
-			{ duration: Infinity }
+			{ id: "docx-save-notice-commentPoint", duration: Infinity }
 		)
+	})
+
+	it("shows one toast per notice kind however many saves report it, dismissed when the document goes, not on a language change", async () => {
+		const { editor, save } = await openWritable()
+
+		hooks.notices = [{ kind: "commentPoint", count: 1 }]
+
+		for (const text of ["One ", "Two "]) {
+			act(() => {
+				editor.dispatch(editor.state.tr.insertText(text, 1))
+			})
+
+			const snapshot = await act(() => save())
+
+			act(() => {
+				snapshot.commit()
+			})
+		}
+
+		const ids = vi.mocked(toast.warning).mock.calls.map(call => (call[1] as { id?: string } | undefined)?.id)
+
+		expect(ids).toEqual(["docx-save-notice-commentPoint", "docx-save-notice-commentPoint"])
+
+		await act(() => i18n.changeLanguage("de"))
+		await act(() => i18n.changeLanguage("en"))
+		expect(toast.dismiss).not.toHaveBeenCalledWith("docx-save-notice-commentPoint")
+
+		cleanup()
+		expect(toast.dismiss).toHaveBeenCalledWith("docx-save-notice-commentPoint")
 	})
 
 	it("tells nothing of a save stored as edited", async () => {

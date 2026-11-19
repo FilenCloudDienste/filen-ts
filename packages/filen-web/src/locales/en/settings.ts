@@ -4,7 +4,6 @@ import { settingsLanguage } from "@/locales/en/settings/language"
 import { settingsAccountFixes } from "@/locales/en/settings/accountFixes"
 import { settingsBilling } from "@/locales/en/settings/billing"
 import { settingsDesktopPrefs } from "@/locales/en/settings/desktopPrefs"
-import { settingsMigration } from "@/locales/en/settings/migration"
 import { settingsOffice } from "@/locales/en/settings/office"
 import { settingsOfficePdf } from "@/locales/en/settings/officePdf"
 import { settingsKeyboard } from "@/locales/en/settings/keyboard"
@@ -20,7 +19,7 @@ export const settings = {
 	// ── Sidebar section nav ────────────────────────────────────────────
 	/** Settings sidebar — Account section nav label and that section's page heading */
 	settingsSectionAccount: "Account",
-	/** Settings sidebar — Security section nav label (the page itself renders its own "auth:securityTitle" heading) */
+	/** Settings sidebar — Security section nav label and that section's page heading */
 	settingsSectionSecurity: "Security",
 	/** Settings sidebar — Appearance section nav label and that section's page heading */
 	settingsSectionAppearance: "Appearance",
@@ -176,10 +175,14 @@ export const settings = {
 
 	// ── Account: destructive data controls ──────────────────────────────
 	settingsDeleteAllVersionsTitle: "Delete all versioned files",
+	/** Delete-versions row description, one versioned file; {{count}} is the number of versioned files, {{size}} a pre-formatted byte size */
+	settingsDeleteAllVersionsDescription_one: "Permanently delete {{count}} versioned file, freeing up {{size}}. This cannot be undone.",
 	/** Delete-versions row description; {{count}} is the number of versioned files, {{size}} a pre-formatted byte size */
-	settingsDeleteAllVersionsDescription: "Permanently delete {{count}} versioned file(s), freeing up {{size}}. This cannot be undone.",
+	settingsDeleteAllVersionsDescription_other: "Permanently delete {{count}} versioned files, freeing up {{size}}. This cannot be undone.",
 	settingsDeleteAllVersionsSubmit: "Delete versioned files",
-	/** {{phrase}} interpolates DELETE_ALL_VERSIONS_PHRASE (dangerPhrases.ts) */
+	/** Delete-versions confirm dialog — the phrase the user must type EXACTLY (character for character, including case) to confirm; translate as a short, natural phrase a user can type in your language, different from settingsDeleteAllItemsTypedConfirmPhrase — it is compared verbatim against what they type */
+	settingsDeleteAllVersionsTypedConfirmPhrase: "DELETE VERSIONS",
+	/** {{phrase}} interpolates settingsDeleteAllVersionsTypedConfirmPhrase */
 	settingsDeleteAllVersionsConfirmBody: 'Type "{{phrase}}" below to permanently delete every versioned file. This cannot be undone.',
 	settingsDeleteAllVersionsSuccess: "All versioned files have been deleted.",
 	settingsDeleteAllItemsTitle: "Delete all files and directories",
@@ -187,7 +190,9 @@ export const settings = {
 	settingsDeleteAllItemsDescription:
 		"Permanently delete every file and directory in your account ({{size}} total). This cannot be undone.",
 	settingsDeleteAllItemsSubmit: "Delete everything",
-	/** {{phrase}} interpolates DELETE_ALL_ITEMS_PHRASE (dangerPhrases.ts) */
+	/** Delete-everything confirm dialog — the phrase the user must type EXACTLY (character for character, including case) to confirm; translate as a short, natural phrase a user can type in your language, different from settingsDeleteAllVersionsTypedConfirmPhrase — it is compared verbatim against what they type */
+	settingsDeleteAllItemsTypedConfirmPhrase: "DELETE EVERYTHING",
+	/** {{phrase}} interpolates settingsDeleteAllItemsTypedConfirmPhrase */
 	settingsDeleteAllItemsConfirmBody: 'Type "{{phrase}}" below to permanently delete every file and directory. This cannot be undone.',
 	settingsDeleteAllItemsSuccess: "Everything has been deleted.",
 
@@ -216,8 +221,10 @@ export const settings = {
 	settingsBillingStatusPending: "Pending",
 	settingsBillingReferralTitle: "Invite friends",
 	settingsBillingReferralLinkLabel: "Your referral link",
+	/** One referral; {{earned}} is a pre-formatted byte size, {{count}} the number of people referred */
+	settingsBillingReferralEarned_one: "{{earned}} earned from {{count}} referral",
 	/** {{earned}} is a pre-formatted byte size, {{count}} the number of people referred */
-	settingsBillingReferralEarned: "{{earned}} earned from {{count}} referral(s)",
+	settingsBillingReferralEarned_other: "{{earned}} earned from {{count}} referrals",
 	settingsBillingReferralCopy: "Copy link",
 	settingsBillingReferralCopied: "Referral link copied to clipboard.",
 
@@ -332,7 +339,6 @@ export const settings = {
 	...settingsAccountFixes,
 	...settingsBilling,
 	...settingsDesktopPrefs,
-	...settingsMigration,
 	...settingsOffice,
 	...settingsOfficePdf,
 	...settingsKeyboard,

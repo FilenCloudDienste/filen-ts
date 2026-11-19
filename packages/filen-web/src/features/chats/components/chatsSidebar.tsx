@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import type { Options } from "react-hotkeys-hook"
@@ -29,7 +29,7 @@ import { adjacentChatUuid, adjacentUnreadChatUuid, chatCommandTargets } from "@/
 import { runMarkChatRead, runMarkChatsRead, runSetChatMuted, runSetChatsMuted } from "@/features/chats/lib/directActions"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import { useChatsListSelection } from "@/features/chats/hooks/useChatsListSelection"
-import { ChatRow } from "@/features/chats/components/chatRow"
+import { ChatRow, type ChatRowProps } from "@/features/chats/components/chatRow"
 import { ChatsBulkActionBar } from "@/features/chats/components/chatsBulkActionBar"
 import { applyOfflineGate, chatMenuActions, type ChatActionDialogKind, type ChatActionId } from "@/features/chats/components/chatMenu.logic"
 import { chatBulkActions, isChatBulkActionOfflineDisabled } from "@/features/chats/components/chatsBulkActionBar.logic"
@@ -542,6 +542,47 @@ function ChatSectionHeader({
 	)
 }
 
+type ChatListCallbacks = Pick<ChatsVirtualListProps, "onAction" | "onPointerSelect" | "onToggleSelect">
+
+interface RowHandlerCache {
+	onAction: ChatRowProps["onAction"]
+	rowAt: (index: number) => Pick<ChatRowProps, "onPointerSelect" | "onLongPress">
+	setLatest: (callbacks: ChatListCallbacks) => void
+}
+
+// Identity-stable row handlers for the memoized ChatRow: built in the uncompiled list host below, fresh closures would
+// re-render every mounted row on each range change. Each handler is bound to its index once and calls the newest
+// callbacks when it runs (set after every commit, so before any event can reach a row).
+function createRowHandlerCache(initial: ChatListCallbacks): RowHandlerCache {
+	let latest = initial
+	const byIndex = new Map<number, Pick<ChatRowProps, "onPointerSelect" | "onLongPress">>()
+
+	return {
+		onAction: (kind, chat) => {
+			latest.onAction(kind, chat)
+		},
+		rowAt: index => {
+			let handlers = byIndex.get(index)
+
+			if (handlers === undefined) {
+				handlers = {
+					onPointerSelect: (event, pointerType) => latest.onPointerSelect(index, event, pointerType),
+					onLongPress: () => {
+						latest.onToggleSelect(index)
+					}
+				}
+
+				byIndex.set(index, handlers)
+			}
+
+			return handlers
+		},
+		setLatest: callbacks => {
+			latest = callbacks
+		}
+	}
+}
+
 // Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
 // change while scrolling; split out so ChatsSidebar itself compiles and those renders stay here. Mounted in
 // every state, so the virtualizer lives exactly as long as the sidebar.
@@ -567,6 +608,11 @@ export function ChatsVirtualList({
 	onToggleSelect
 }: ChatsVirtualListProps) {
 	const baseId = useId()
+	const [rowHandlers] = useState(() => createRowHandlerCache({ onAction, onPointerSelect, onToggleSelect }))
+
+	useLayoutEffect(() => {
+		rowHandlers.setLatest({ onAction, onPointerSelect, onToggleSelect })
+	})
 
 	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
 	// recomputes its window whenever the extractor changes.
@@ -616,6 +662,7 @@ export function ChatsVirtualList({
 			}
 
 			const { chat, index } = item
+			const handlers = rowHandlers.rowAt(index)
 
 			options.push(
 				// Presentational: this wrapper only positions the row, and a generic container between
@@ -634,11 +681,9 @@ export function ChatsVirtualList({
 						setSize={item.setSize}
 						currentUserId={currentUserId}
 						blocked={blocked}
-						onAction={onAction}
-						onPointerSelect={(event, pointerType) => onPointerSelect(index, event, pointerType)}
-						onLongPress={() => {
-							onToggleSelect(index)
-						}}
+						onAction={rowHandlers.onAction}
+						onPointerSelect={handlers.onPointerSelect}
+						onLongPress={handlers.onLongPress}
 					/>
 				</div>
 			)

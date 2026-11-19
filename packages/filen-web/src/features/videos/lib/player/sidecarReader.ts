@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { MAX_SUBTITLE_CHARS, parseEdl, parseSubtitle, type CueStore, type SkipSegment } from "@filen/shared/videos"
+import { MAX_SUBTITLE_CHARS, parseEdl, parseSmi, parseSubtitle, type CueStore, type SkipSegment, type SmiTrack } from "@filen/shared/videos"
 import { decodeSubtitleBytes } from "@filen/shared/textEncoding"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
@@ -7,7 +7,7 @@ import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
 import { SUBTITLE_ENCODING_KV_PREFIX } from "@/features/videos/lib/cacheKeys.logic"
 import { videoLibrary } from "@/features/videos/lib/index"
-import { parseFormatOf, type PlayerSubtitleTrack } from "@/features/videos/lib/player/subtitles.logic"
+import { parseFormatOf, type PlayerSubtitleTrack, type SmiClasses } from "@/features/videos/lib/player/subtitles.logic"
 import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
 
 // Reads a player's small sidecars: a chosen subtitle file (one read, refused over 8 MiB) and the .edl. The latest
@@ -86,11 +86,14 @@ async function readBytes(ref: VideoFileRef, token: string, maxBytes: number): Pr
 export class SidecarReader {
 	private readonly bytes = new Map<string, Promise<ByteRead>>()
 	private readonly decoded = new Map<string, SubtitleLoad>()
+	// A SAMI file's classes, parsed once per file and text encoding: every class's track takes its cues from it.
+	private readonly smi = new Map<string, SmiTrack[] | null>()
 	private readonly edls = new Map<string, Promise<SkipSegment[]>>()
 	private readonly tokens = new Set<string>()
 
-	// `encoding` null: detect (BOM, strict UTF-8, then the language's legacy codepage).
-	public async subtitle(track: PlayerSubtitleTrack, encoding: string | null): Promise<SubtitleLoad> {
+	// `encoding` null: detect (BOM, strict UTF-8, then the language's legacy codepage). `fps`: the video's frame rate,
+	// which times a frame-based (MicroDVD) file; null for MicroDVD's usual rate.
+	public async subtitle(track: PlayerSubtitleTrack, encoding: string | null, fps: number | null = null): Promise<SubtitleLoad> {
 		const file = track.file
 		const format = track.format === null ? null : parseFormatOf(track.format)
 
@@ -98,7 +101,9 @@ export class SidecarReader {
 			return { status: "unavailable" }
 		}
 
-		const key = `${file.uuid}:${encoding ?? ""}`
+		// Only a frame-based parse depends on the rate; a SAMI class is a store of its own (a later class may be nameless,
+		// so the first class is told apart by having none set, not by an empty name).
+		const key = `${file.uuid}:${encoding ?? ""}:${format === "sub" ? String(fps ?? "") : track.smiClass === undefined ? "" : `c:${track.smiClass}`}`
 		const known = recall(this.decoded, key)
 
 		if (known !== undefined) {
@@ -112,7 +117,14 @@ export class SidecarReader {
 		}
 
 		const text = decodeSubtitleBytes(read.bytes, { languageHint: track.lang, encoding })
-		const cues = text === null ? null : parseSubtitle(text.text, format)
+		const cues =
+			text === null
+				? null
+				: format === "smi"
+					? (this.smiTracksOf(file, text.text, text.encoding)?.find((smi, index) =>
+							track.smiClass === undefined ? index === 0 : smi.className === track.smiClass
+						)?.store ?? null)
+					: parseSubtitle(text.text, format, fps === null ? {} : { fps })
 		const result: SubtitleLoad =
 			text === null
 				? { status: "tooLarge" }
@@ -125,20 +137,61 @@ export class SidecarReader {
 		return result
 	}
 
-	// A Kodi .edl's skips; empty when there is none or it can't be read.
-	public edl(file: VideoFileRef | null): Promise<SkipSegment[]> {
+	// The classes of a SAMI file (one read, kept like any chosen subtitle file): empty when it is too large or can't be
+	// parsed, null when it could not be read (a dropped connection, a file gone), which is worth asking again.
+	public async smiClasses(file: VideoFileRef, lang: string | null): Promise<SmiClasses | null> {
+		const read = await this.read(file, MAX_SUBTITLE_CHARS, true)
+
+		if (read.status === "unavailable") {
+			return null
+		}
+
+		if (read.status !== "ok") {
+			return []
+		}
+
+		const text = decodeSubtitleBytes(read.bytes, { languageHint: lang, encoding: null })
+		const tracks = text === null ? null : this.smiTracksOf(file, text.text, text.encoding)
+
+		return tracks === null ? [] : tracks.map(({ className, lang: classLang }) => ({ className, lang: classLang }))
+	}
+
+	private smiTracksOf(file: VideoFileRef, text: string, encoding: string): SmiTrack[] | null {
+		const key = `${file.uuid}:${encoding}`
+		let tracks = recall(this.smi, key)
+
+		if (tracks === undefined) {
+			tracks = parseSmi(text)
+			keep(this.smi, key, tracks, MAX_KEPT_SUBTITLE_FILES)
+		}
+
+		return tracks
+	}
+
+	// A Kodi .edl's skips; empty when there is none or it can't be read. `fps` (the video's frame rate) reads its
+	// frame-numbered entries, which are left out without it.
+	public edl(file: VideoFileRef | null, fps: number | null = null): Promise<SkipSegment[]> {
 		if (file === null) {
 			return Promise.resolve([])
 		}
 
-		let load = recall(this.edls, file.uuid)
+		const key = `${file.uuid}:${String(fps ?? "")}`
+		const known = recall(this.edls, key)
 
-		if (load === undefined) {
-			load = this.read(file, MAX_EDL_BYTES, false).then(read =>
-				read.status === "ok" ? parseEdl(new TextDecoder().decode(read.bytes)) : []
-			)
-			keep(this.edls, file.uuid, load, MAX_KEPT_EDLS)
+		if (known !== undefined) {
+			return known
 		}
+
+		// A failed download is not kept: the next opening of the item reads the file again.
+		const load: Promise<SkipSegment[]> = this.read(file, MAX_EDL_BYTES, false).then(read => {
+			if (read.status === "unavailable" && this.edls.get(key) === load) {
+				this.edls.delete(key)
+			}
+
+			return read.status === "ok" ? parseEdl(new TextDecoder().decode(read.bytes), fps) : []
+		})
+
+		keep(this.edls, key, load, MAX_KEPT_EDLS)
 
 		return load
 	}

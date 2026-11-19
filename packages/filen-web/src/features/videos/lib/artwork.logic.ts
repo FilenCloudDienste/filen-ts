@@ -11,6 +11,7 @@ import {
 	type VideoProbe
 } from "@filen/shared/videos"
 import type { Rgb, Size } from "@/lib/media/framePick.logic"
+import { fnv1a } from "@/lib/fnv1a"
 import type { ArtSlotCode } from "@/features/videos/lib/artStore.logic"
 
 // Which image fills a title's poster, backdrop or still: an ordered list of candidate sources per slot,
@@ -244,6 +245,9 @@ export const artRecordSchema = type({
 	// The source answered for good that it has no image (not an image, a format the decoder refuses):
 	// nothing was stored, and it is never read again.
 	"miss?": "boolean",
+	// On an embedded miss, the probe revision that found no cover: a newer one reads the covers again, so the
+	// miss stops counting then. Absent on a decoder's verdict, which lasts.
+	"rev?": "number",
 	at: "number"
 })
 
@@ -251,13 +255,7 @@ export type ArtRecord = typeof artRecordSchema.infer
 
 // The typographic card's colour: stable per title, dark enough for white text.
 export function titleColour(title: string): Rgb {
-	let hash = 2_166_136_261
-
-	for (let i = 0; i < title.length; i++) {
-		hash = Math.imul(hash ^ title.charCodeAt(i), 16_777_619)
-	}
-
-	const hue = ((hash >>> 0) % 360) / 360
+	const hue = (fnv1a(title) % 360) / 360
 	const saturation = 0.45
 	const lightness = 0.3
 	const q = lightness + saturation - lightness * saturation

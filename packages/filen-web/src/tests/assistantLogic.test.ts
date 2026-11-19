@@ -12,6 +12,7 @@ import {
 	resumedDownloadEnded,
 	resumedDownloadStarted,
 	proposalTargetKind,
+	removableModelBytes,
 	spokenText,
 	stepCountNoun,
 	stepsSummary,
@@ -101,6 +102,23 @@ describe("canRemoveModel", () => {
 		expect(canRemoveModel({ kind: "downloading", model: MODEL, receivedBytes: 1, waiting: false, resumed: false })).toBe(false)
 		expect(canRemoveModel({ kind: "loading", model: MODEL, verifying: false })).toBe(false)
 		expect(canRemoveModel({ kind: "unavailable", reason: "in-use-elsewhere", model: MODEL })).toBe(false)
+	})
+})
+
+describe("removableModelBytes", () => {
+	it("quotes what Remove frees, not the manifest size", () => {
+		expect(removableModelBytes({ kind: "not-downloaded", model: MODEL, partialBytes: 30 })).toBe(30)
+		expect(removableModelBytes({ kind: "not-downloaded", model: MODEL, staleBytes: 250 })).toBe(250)
+		expect(removableModelBytes({ kind: "not-downloaded", model: MODEL, partialBytes: 30, staleBytes: 250 })).toBe(280)
+		expect(removableModelBytes({ kind: "error", error: "storage-full", model: MODEL, partialBytes: 40 })).toBe(40)
+		expect(removableModelBytes({ kind: "error", error: "download-failed", model: MODEL, partialBytes: 40 })).toBe(40)
+	})
+
+	it("quotes the whole model while it is on disk", () => {
+		expect(removableModelBytes({ kind: "error", error: "load-failed", model: MODEL })).toBe(100)
+		expect(removableModelBytes({ kind: "error", error: "out-of-memory", model: MODEL })).toBe(100)
+		expect(removableModelBytes({ kind: "downloaded", model: MODEL, idleUnloaded: false })).toBe(100)
+		expect(removableModelBytes({ kind: "ready", model: MODEL })).toBe(100)
 	})
 })
 

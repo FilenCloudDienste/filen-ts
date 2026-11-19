@@ -6,11 +6,8 @@ import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { Button } from "@/components/ui/button"
 import { DriveFilePickerDialog } from "@/features/drive/components/driveFilePickerDialog"
-import { currentRootUuid } from "@/features/drive/lib/actions"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { normalizeParentUuid } from "@/features/drive/queries/drive"
-import { takenNames } from "@/features/preview/imageEdit/editSession"
 import { PdfExtractDialog, type PdfCopyContext } from "@/features/pdf/pages/extractDialog"
 import { extractSuffix, partSuffix, unsignedSuffix } from "@/features/pdf/pages/names"
 import { PdfOrganiseGrid } from "@/features/pdf/pages/organiseGrid"
@@ -232,14 +229,16 @@ export function PdfInsertFromFilenDialog({ onClose }: { onClose: () => void }) {
 	)
 }
 
-// Names already in the PDF's directory, read once per dialog (the names the dialog shows are the ones files get).
-function useTakenNames(item: DriveItem): ReadonlySet<string> {
+// Names already in the PDF's directory, read once per dialog through the tool host (the directory the copies are
+// written to): the names the dialog shows are the ones files get.
+function useTakenNames(item: DriveItem, read: () => Promise<ReadonlySet<string>>): ReadonlySet<string> {
 	const [taken, setTaken] = useState<ReadonlySet<string>>(() => new Set())
+	const readNames = useEffectEvent(read)
 
 	useEffect(() => {
 		let live = true
 
-		void takenNames(normalizeParentUuid(item.type === "file" ? item.data.parent : null, currentRootUuid()))
+		void readNames()
 			.then(names => {
 				if (live) setTaken(names)
 			})
@@ -255,8 +254,8 @@ function useTakenNames(item: DriveItem): ReadonlySet<string> {
 
 function useCopyContext(surface: PdfPagesSurfaceValue): PdfCopyContext {
 	const view = usePagesView(surface.controller)
-	const taken = useTakenNames(surface.item)
 	const { toolContext } = surface
+	const taken = useTakenNames(surface.item, () => toolContext.host.takenNames())
 
 	// What the dialog says (encryption, signatures) is the editor's to know: it starts while the dialog is open.
 	const startEditor = useEffectEvent(() => {

@@ -178,6 +178,83 @@ describe("thumbnail window", () => {
 		thumbnails.dispose()
 		expect(signals[1]?.aborted).toBe(true)
 	})
+
+	it("draws a page once when the window is set again while it renders, and again at a new width", async () => {
+		const pending: { page: number; width: number; resolve: (bitmap: ThumbnailBitmap) => void }[] = []
+		const render = vi.fn(
+			(page: number, width: number) =>
+				new Promise<ThumbnailBitmap>(resolve => {
+					pending.push({ page, width, resolve })
+				})
+		)
+		const thumbnails = new PageThumbnails(render, () => undefined)
+		const window = [
+			{ id: "a", page: 0 },
+			{ id: "b", page: 1 }
+		]
+
+		thumbnails.setWindow(window, 96)
+		// The rail sets the window again while "a" renders, as it does on every thumbnail change.
+		thumbnails.setWindow(window, 96)
+		pending[0]?.resolve(bitmap())
+		await vi.waitFor(() => {
+			expect(pending).toHaveLength(2)
+		})
+		thumbnails.setWindow(window, 96)
+		pending[1]?.resolve(bitmap())
+		await vi.waitFor(() => {
+			expect(thumbnails.get("b")).toBeDefined()
+		})
+		expect(render.mock.calls.map(call => call[0])).toEqual([0, 1])
+
+		// A new width draws both again, the one in flight included.
+		thumbnails.setWindow(window, 128)
+		thumbnails.setWindow(window, 160)
+		pending[2]?.resolve(bitmap())
+		await vi.waitFor(() => {
+			expect(pending).toHaveLength(4)
+		})
+		expect(pending.slice(2).map(call => [call.page, call.width])).toEqual([
+			[0, 128],
+			[0, 160]
+		])
+		thumbnails.dispose()
+	})
+
+	it("draws a page again when it is invalidated while its first render is in flight", async () => {
+		const pending: { page: number; resolve: (bitmap: ThumbnailBitmap) => void }[] = []
+		const render = vi.fn(
+			(page: number) =>
+				new Promise<ThumbnailBitmap>(resolve => {
+					pending.push({ page, resolve })
+				})
+		)
+		const thumbnails = new PageThumbnails(render, () => undefined)
+		const window = [
+			{ id: "a", page: 0 },
+			{ id: "b", page: 1 }
+		]
+
+		thumbnails.setWindow(window, 96)
+		pending[0]?.resolve(bitmap())
+		await vi.waitFor(() => {
+			expect(pending).toHaveLength(2)
+		})
+		thumbnails.setWindow(window, 96)
+		thumbnails.invalidate(["b"])
+		// The first render of "b" settles after the abort; no setWindow follows.
+		pending[1]?.resolve(bitmap())
+		await vi.waitFor(() => {
+			expect(pending).toHaveLength(3)
+		})
+		expect(render.mock.calls.map(call => call[0])).toEqual([0, 1, 1])
+		expect(thumbnails.get("b")).toBeUndefined()
+		pending[2]?.resolve(bitmap())
+		await vi.waitFor(() => {
+			expect(thumbnails.get("b")).toBeDefined()
+		})
+		thumbnails.dispose()
+	})
 })
 
 describe("thumbnailWindow", () => {

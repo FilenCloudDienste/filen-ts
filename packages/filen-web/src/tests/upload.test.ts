@@ -49,7 +49,10 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 	return {
 		...actual,
 		heicUploadConversionEnabled: heicUploadConversionEnabledMock,
-		maybeConvertHeicUpload: maybeConvertHeicUploadMock
+		maybeConvertHeicUpload: maybeConvertHeicUploadMock,
+		// The backlog bound itself is unit-tested in heicUpload.test.ts; here the conversion is the mock's.
+		withConvertedHeic: async <T>(deps: unknown, file: File, enabled: boolean, run: (prepared: File) => Promise<T>): Promise<T> =>
+			await run(await maybeConvertHeicUploadMock(deps, file, enabled))
 	}
 })
 

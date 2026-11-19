@@ -1,6 +1,6 @@
 // "preview" namespace, PDF viewer — digital signatures: the one-line status under the command bar and the Signatures
 // dialog. Nothing here vouches for who signed: the identity is never checked against a trust list or for revocation,
-// and every string says only what was checked. Spread into previewPdf/index.ts; same catalog rules.
+// and every string says only what was checked. Spread into preview.ts; same catalog rules.
 export const previewPdfSignatures = {
 	/** PDF signature status line while the document's signatures are being checked */
 	previewPdfSignatureChecking: "Checking signatures…",

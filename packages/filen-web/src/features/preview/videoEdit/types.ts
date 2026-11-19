@@ -91,15 +91,26 @@ export interface SnappedEdge {
 	actual: number
 }
 
+// Why the copy path cannot be used (ExportPlan.transcodeReasons).
+export type TranscodeReason =
+	"precise" | "crop" | "flip" | "resize" | "quality" | "adjust" | "text" | "speed" | "videoCodec" | "keyframes" | "gop"
+
+// What in a recipe this browser (or this source) cannot export; any of them refuses the export (ExportPlan.blockers).
+export type ExportBlocker = TranscodeReason | "gain" | "audioCodec"
+
+// Editing controls this browser can never do for a source, whatever the recipe (ExportPlan.unavailable): the editor
+// disables each one listed there with the reason beside it, never hides it, and never silently drops it from a save.
+export type EditFeature = "crop" | "flip" | "resize" | "quality" | "adjust" | "text" | "gain" | "precise"
+
 // The pure answer of plan(recipe, probe, capabilities); never touches I/O.
 export interface ExportPlan {
 	mode: ExportMode
 	// Why the plan could not use the copy path (empty when mode is "copy").
-	transcodeReasons: readonly string[]
+	transcodeReasons: readonly TranscodeReason[]
 	// Options the recipe asks for that this browser cannot do (disabled in the UI with the reason).
-	unavailable: readonly string[]
-	// What in this recipe this browser cannot export (plan.ts ExportBlocker ids): a save is refused while any remain.
-	blockers: readonly string[]
+	unavailable: readonly EditFeature[]
+	// What in this recipe this browser cannot export: a save is refused while any remain.
+	blockers: readonly ExportBlocker[]
 	// Muting the audio would clear every blocker (an audio codec, gain or speed this browser cannot re-encode).
 	mutingUnblocks: boolean
 	dropped: readonly ExportDrop[]
@@ -189,6 +200,9 @@ export interface VideoEditClient {
 	// Exact frame at `time` (nearest real sample at or before it), scaled to fit `maxWidth`, with the recipe's
 	// geometry + colour applied by the same GPU pass the export uses. The caller owns and closes the bitmap.
 	frameAt(time: number, recipe: VideoEditRecipe, maxWidth: number): Promise<ImageBitmap>
+	// The same frame for saving as a still, on a lane of its own: a stage frame never supersedes it, nor it a stage
+	// frame; a newer still does (AbortError), as does an export holding the decoder. The caller owns and closes it.
+	stillAt(time: number, recipe: VideoEditRecipe, maxWidth: number): Promise<ImageBitmap>
 	// The frame at `time` drawn once per filter (`recipe` with that filter and without its text boxes), at most `height`
 	// px high, in `filters` order: one decode, N GPU passes. Runs behind stage frames and never supersedes one; a newer
 	// call supersedes this one (AbortError). The caller owns and closes the bitmaps.

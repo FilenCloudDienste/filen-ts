@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { MaximizeIcon, MinimizeIcon, PauseIcon, PictureInPicture2Icon, PlayIcon, XIcon } from "lucide-react"
-import { cn } from "@filen/shared"
-import { MediaElementScrubber } from "@/components/media/mediaScrubber"
+import { cn, formatSecondsToMediaClock } from "@filen/shared"
+import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { MediaCurrentTime, MediaDuration } from "@/components/media/mediaTime"
 import { VolumeControl } from "@/components/media/volumeControl"
 import { Button } from "@/components/ui/button"
@@ -19,13 +19,19 @@ import { Spinner } from "@/components/ui/spinner"
 import { MEDIA_GLASS_SURFACE_CLASS, MEDIA_GLASS_TONE_CLASS } from "@/components/ui/surface"
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer } from "@/lib/media/autoHide.logic"
 import { fullscreenSupported, toggleFullscreen, useIsFullscreen } from "@/lib/media/fullscreen"
-import { handlePlayerKeyDown } from "@/lib/media/playerKeyboard"
+import { handlePlayerKeyDown, seekPlayerTo } from "@/lib/media/playerKeyboard"
+import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { useBindings } from "@/lib/keymap/registry"
 import {
+	mediaDuration,
 	mediaValue,
 	playMedia,
+	seekMedia,
 	setPlaybackRate,
 	toggleMediaPlayback,
+	useMediaBuffered,
+	useMediaCurrentTime,
+	useMediaDuration,
 	useMediaPaused,
 	useMediaPictureInPicture,
 	useMediaPlaybackRate,
@@ -96,6 +102,81 @@ function useVideoContinuity(video: HTMLVideoElement | null, positionKey: string)
 	}, [video, positionKey])
 }
 
+// Coalesces a held seek key's relative seeks on the element (seekCoalescer.logic.ts), made per element on first use
+// (event handlers only). A seek still pending when the element is emptied (a new source, a restart) or goes is
+// dropped rather than landing on what plays next. `pending` is where a held seek is headed until it lands, for the
+// playhead readouts; `seekTo` is a pointer's absolute seek, which supersedes it; `flush` applies it now.
+function useSeekCoalescer(video: HTMLVideoElement | null): {
+	seeksFor: (element: HTMLVideoElement) => SeekCoalescer
+	pending: number | null
+	seekTo: (seconds: number) => void
+	flush: () => void
+} {
+	const coalescerRef = useRef<{ element: HTMLVideoElement; seeks: SeekCoalescer } | null>(null)
+	const [pending, setPending] = useState<number | null>(null)
+
+	useEffect(() => {
+		if (video === null) {
+			return
+		}
+
+		function cancel(): void {
+			coalescerRef.current?.seeks.cancel()
+		}
+
+		video.addEventListener("emptied", cancel)
+		video.addEventListener("loadstart", cancel)
+
+		return () => {
+			video.removeEventListener("emptied", cancel)
+			video.removeEventListener("loadstart", cancel)
+			cancel()
+			coalescerRef.current = null
+		}
+	}, [video])
+
+	function seeksFor(element: HTMLVideoElement): SeekCoalescer {
+		const existing = coalescerRef.current
+
+		if (existing !== null && existing.element === element) {
+			return existing.seeks
+		}
+
+		existing?.seeks.cancel()
+
+		const seeks = new SeekCoalescer({
+			current: () => element.currentTime,
+			duration: () => mediaDuration(element),
+			seek: seconds => {
+				seekMedia(element, seconds)
+			},
+			onPending: setPending,
+			now: () => performance.now(),
+			setTimer: (callback, ms) => setTimeout(callback, ms),
+			clearTimer: timer => {
+				clearTimeout(timer)
+			}
+		})
+
+		coalescerRef.current = { element, seeks }
+
+		return seeks
+	}
+
+	return {
+		seeksFor,
+		pending,
+		seekTo: seconds => {
+			if (video !== null) {
+				seekPlayerTo(video, seeksFor(video), seconds)
+			}
+		},
+		flush: () => {
+			coalescerRef.current?.seeks.flush()
+		}
+	}
+}
+
 // The preview's video player: our own controls on a glass bar floating over the picture, hidden while
 // playback runs untouched. Loops, like the rest of the full preview experience; a chat's inline embed
 // keeps the browser's controls.
@@ -139,6 +220,8 @@ export function VideoPlayer({
 	const silentCodec = snapshot?.silentCodec ?? null
 	const chapters: StageChapter[] = (snapshot?.probe?.chapters ?? []).map(chapter => ({ start: chapter.t, title: chapter.title }))
 	const chapterStarts = chapters.length >= 2 ? chapters.map(chapter => chapter.start) : []
+
+	const { seeksFor, pending: pendingSeek, seekTo, flush: flushSeek } = useSeekCoalescer(video)
 
 	useSyncedMediaVolume(video)
 	useHoldReadsWhilePlaying(video)
@@ -238,7 +321,7 @@ export function VideoPlayer({
 						}
 					}}
 					onKeyDown={event => {
-						if (handlePlayerKeyDown(event, video, container, combos, chapterStarts)) {
+						if (video !== null && handlePlayerKeyDown(event, video, container, combos, chapterStarts, seeksFor(video))) {
 							idleTimer.poke()
 						}
 					}}
@@ -340,16 +423,29 @@ export function VideoPlayer({
 						>
 							{paused ? <PlayIcon className="fill-current" /> : <PauseIcon className="fill-current" />}
 						</Button>
-						<MediaCurrentTime
+						{pendingSeek === null ? (
+							<MediaCurrentTime
+								media={video}
+								className="min-w-9 text-right"
+							/>
+						) : (
+							<span className="min-w-9 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+								{formatSecondsToMediaClock(pendingSeek)}
+							</span>
+						)}
+						<PreviewScrubber
 							media={video}
-							className="min-w-9 text-right"
-						/>
-						<MediaElementScrubber
-							media={video}
+							pending={pendingSeek}
 							label={t("audio:seek")}
 							markers={chapters.length >= 2 ? chapters : undefined}
 							onScrub={seconds => {
 								setScrubbing(seconds !== null)
+							}}
+							onSeek={seekTo}
+							onSeekBy={delta => {
+								if (video !== null) {
+									seeksFor(video).seekBy(delta)
+								}
 							}}
 							className="mx-2 flex-1"
 						/>
@@ -363,7 +459,14 @@ export function VideoPlayer({
 								chapters={chapters}
 								media={video}
 								container={fullscreen ? container : null}
-								onOpenChange={setMenuOpen}
+								onOpenChange={open => {
+									// A held seek lands before the menu can seek, never after the chapter picked.
+									if (open) {
+										flushSeek()
+									}
+
+									setMenuOpen(open)
+								}}
 							/>
 						) : null}
 						<TracksMenu
@@ -396,6 +499,46 @@ export function VideoPlayer({
 				</div>
 			</div>
 		</div>
+	)
+}
+
+// MediaElementScrubber with a held seek key's pending target as the playhead until it lands, its own arrow and page keys
+// going through the player's coalescer, and its pointer seeks superseding a pending one.
+function PreviewScrubber({
+	media,
+	pending,
+	label,
+	markers,
+	onScrub,
+	onSeek,
+	onSeekBy,
+	className
+}: {
+	media: HTMLMediaElement | null
+	pending: number | null
+	label: string
+	markers: readonly StageChapter[] | undefined
+	onScrub: (seconds: number | null) => void
+	onSeek: (seconds: number) => void
+	onSeekBy: (delta: number) => void
+	className: string
+}) {
+	const currentTime = useMediaCurrentTime(media)
+	const duration = useMediaDuration(media)
+	const buffered = useMediaBuffered(media)
+
+	return (
+		<MediaScrubber
+			value={pending ?? currentTime}
+			duration={duration}
+			buffered={buffered}
+			label={label}
+			onScrub={onScrub}
+			markers={markers}
+			className={className}
+			onSeek={onSeek}
+			onSeekBy={onSeekBy}
+		/>
 	)
 }
 

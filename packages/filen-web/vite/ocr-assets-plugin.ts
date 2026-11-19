@@ -50,9 +50,18 @@ function modelPath(file: TessdataFile): string {
 	return `assets/ocr/${file.file}-${file.sha256.slice(0, 8)}.bin`
 }
 
+// Each build's hashed wasm path, hashed once per process however many instances (page, every worker) ask.
+let wasmPaths: ReadonlyMap<Variant, string> | undefined
+
+function wasmPathsOnce(): ReadonlyMap<Variant, string> {
+	wasmPaths ??= new Map(OCR_ENGINE_VARIANTS.map(variant => [variant, wasmPath(variant, wasmSource(variant))]))
+
+	return wasmPaths
+}
+
 export function ocrAssets(options: { readonly emit?: boolean } = {}): Plugin {
 	const manifest = readTessdataManifest()
-	const wasm = new Map(OCR_ENGINE_VARIANTS.map(variant => [variant, wasmPath(variant, wasmSource(variant))]))
+	const wasm = wasmPathsOnce()
 	const models = new Map(manifest.languages.map(language => [modelPath(language), language]))
 	const engines = new Map([...wasm].map(([variant, path]) => [path, variant]))
 	let cache: Promise<string> | undefined

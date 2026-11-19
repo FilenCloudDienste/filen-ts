@@ -27,6 +27,8 @@ vi.mock("@/features/preview/hooks/usePreviewVideo", () => ({ usePreviewVideo: ()
 
 const { VideoEditor } = await import("@/features/preview/videoEdit/components/videoEditor")
 
+type VideoFrameSaveOutcome = Awaited<ReturnType<Parameters<typeof VideoEditor>[0]["onSaveFrame"]>>
+
 type VideoEditorCommands = NonNullable<Parameters<typeof VideoEditor>[0]["commandsRef"]["current"]>
 
 const ITEM = { type: "file", data: { uuid: "video-1" } } as unknown as DriveItem
@@ -47,7 +49,9 @@ function mount(options: { info?: Partial<VideoSourceInfo>; planFor?: (recipe: Vi
 		onSaveSettled(saved, target)
 	})
 	const onCancel = vi.fn()
-	const onSaveFrame = vi.fn(() => Promise.resolve("clip.jpg"))
+	const onSaveFrame = vi.fn((_blob: Blob, _extension: "jpg"): Promise<VideoFrameSaveOutcome> =>
+		Promise.resolve({ status: "success", name: "clip (edited).jpg" })
+	)
 	const commandsRef = createRef<VideoEditorCommands | null>()
 	const view = render(
 		<VideoEditor
@@ -260,7 +264,7 @@ describe("VideoEditor", () => {
 	})
 
 	it("disables what this browser cannot save, saying why", async () => {
-		mount({ planFor: () => ({ unavailable: ["adjust", "speed"] }) })
+		mount({ planFor: () => ({ unavailable: ["adjust", "text"] }) })
 
 		await waitFor(() => {
 			expect(screen.getByRole("tab", { name: "Adjust" })).toBeTruthy()
@@ -278,8 +282,8 @@ describe("VideoEditor", () => {
 			expect(slider.hasAttribute("data-disabled")).toBe(true)
 		}
 
-		fireEvent.click(screen.getByRole("tab", { name: "Speed" }))
-		expect(screen.getByRole("button", { name: "2×" })).toHaveProperty("disabled", true)
+		fireEvent.click(screen.getByRole("tab", { name: "Text" }))
+		expect(screen.getByRole("button", { name: "Add text" })).toHaveProperty("disabled", true)
 	})
 
 	it("says that colour work saves an HDR video as SDR", async () => {
@@ -367,6 +371,48 @@ describe("VideoEditor", () => {
 
 		expect(exports[1]?.target).toBe("copy")
 		expect(screen.queryByRole("alertdialog")).toBeNull()
+	})
+
+	it("opens the Save popover when Save mine as a copy cannot start, offline", async () => {
+		const { exports, client } = mount()
+
+		trimAFrame()
+		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
+
+		// The connection drops while the dialog comes up.
+		state.online = false
+		await act(async () => {
+			exports[0]?.settle({ status: "remoteChanged", currentUuid: "newer" })
+			await Promise.resolve()
+		})
+
+		const dialog = await screen.findByRole("alertdialog")
+
+		fireEvent.click(within(dialog).getByRole("button", { name: /copy/i }))
+
+		expect(client.exportVideo).toHaveBeenCalledTimes(1)
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(await screen.findByRole("dialog")).toBeTruthy()
+	})
+
+	it("keeps a failure shown and opens the Save popover when Retry comes before the plan for new edits", async () => {
+		const { exports, client } = mount()
+
+		trimAFrame()
+		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
+
+		await act(async () => {
+			exports[0]?.settle({ status: "error", code: "uploadFailed" })
+			await Promise.resolve()
+		})
+
+		// A nudge: the plan for these edits is not in yet.
+		trimAFrame()
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+		expect(client.exportVideo).toHaveBeenCalledTimes(1)
+		expect(screen.getByText("The video couldn't be saved.")).toBeTruthy()
+		expect(await screen.findByRole("dialog")).toBeTruthy()
 	})
 
 	it("shows the export's progress and continues it in the background", async () => {
@@ -692,6 +738,130 @@ describe("VideoEditor", () => {
 
 		await waitFor(() => {
 			expect(lastPlanned(plans).keep).toEqual([{ start: 0, end: 100 }])
+		})
+	})
+})
+
+describe("VideoEditor saving a frame", () => {
+	beforeEach(() => {
+		// jsdom encodes no canvas: the still is any JPEG blob.
+		vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (callback: BlobCallback) {
+			callback(new Blob(["jpeg"], { type: "image/jpeg" }))
+		})
+	})
+
+	async function saveFrame(outcome: VideoFrameSaveOutcome | Error): Promise<void> {
+		const { onSaveFrame } = mount()
+
+		onSaveFrame.mockImplementationOnce(() => (outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome)))
+		fireEvent.click(screen.getByRole("button", { name: "Save frame as image" }))
+		await waitFor(() => {
+			expect(onSaveFrame).toHaveBeenCalledTimes(1)
+		})
+		await act(async () => {
+			await Promise.resolve()
+		})
+	}
+
+	it("says the saved still's name", async () => {
+		await saveFrame({ status: "success", name: "clip (edited).jpg" })
+
+		await waitFor(() => {
+			expect(toast.success).toHaveBeenCalledWith("Saved clip (edited).jpg")
+		})
+		expect(toast.error).not.toHaveBeenCalled()
+	})
+
+	it("says why the SDK refused the still", async () => {
+		await saveFrame({
+			status: "error",
+			dto: { species: "sdk", message: "upload failed", label: "upload failed", serverMessage: "Your storage is full" }
+		})
+
+		await waitFor(() => {
+			expect(toast.error).toHaveBeenCalledWith("Your storage is full")
+		})
+	})
+
+	it("says the frame could not be saved when there is nothing to save it beside", async () => {
+		await saveFrame({ status: "unavailable" })
+
+		await waitFor(() => {
+			expect(toast.error).toHaveBeenCalledWith("The frame couldn't be saved.")
+		})
+	})
+
+	it("takes the still on its own lane, once per press while one is in flight", async () => {
+		const { client, onSaveFrame } = mount()
+		const upload = Promise.withResolvers<VideoFrameSaveOutcome>()
+
+		onSaveFrame.mockImplementationOnce(() => upload.promise)
+
+		const button = screen.getByRole("button", { name: "Save frame as image" })
+
+		fireEvent.click(button)
+		fireEvent.click(button)
+		await waitFor(() => {
+			expect(onSaveFrame).toHaveBeenCalledTimes(1)
+		})
+
+		expect(client.stillAt).toHaveBeenCalledTimes(1)
+		expect(client.stillAt).toHaveBeenCalledWith(expect.any(Number), expect.anything(), 1920)
+		expect(button).toHaveProperty("disabled", true)
+
+		await act(async () => {
+			upload.resolve({ status: "success", name: "clip (edited).jpg" })
+			await upload.promise
+		})
+
+		await waitFor(() => {
+			expect(button).toHaveProperty("disabled", false)
+		})
+		expect(toast.success).toHaveBeenCalledWith("Saved clip (edited).jpg")
+		expect(toast.error).not.toHaveBeenCalled()
+	})
+
+	it("stays silent when the still was superseded or the decoder taken", async () => {
+		const { client, onSaveFrame } = mount()
+
+		client.stillAt.mockRejectedValueOnce(new DOMException("superseded", "AbortError"))
+		fireEvent.click(screen.getByRole("button", { name: "Save frame as image" }))
+
+		await waitFor(() => {
+			expect(client.stillAt).toHaveBeenCalledTimes(1)
+		})
+		await act(async () => {
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(screen.getByRole("button", { name: "Save frame as image" })).toHaveProperty("disabled", false)
+		})
+		expect(onSaveFrame).not.toHaveBeenCalled()
+		expect(toast.error).not.toHaveBeenCalled()
+	})
+
+	it("closes the still's bitmap when encoding it fails", async () => {
+		const { client, onSaveFrame } = mount()
+		const bitmap = { width: 160, height: 90, close: vi.fn() }
+
+		client.stillAt.mockResolvedValueOnce(bitmap)
+		vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (callback: BlobCallback) {
+			callback(null)
+		})
+		fireEvent.click(screen.getByRole("button", { name: "Save frame as image" }))
+
+		await waitFor(() => {
+			expect(toast.error).toHaveBeenCalledWith("The frame couldn't be saved.")
+		})
+		expect(bitmap.close).toHaveBeenCalledTimes(1)
+		expect(onSaveFrame).not.toHaveBeenCalled()
+	})
+
+	it("says the frame could not be saved when saving it threw", async () => {
+		await saveFrame(new Error("listing the directory failed"))
+
+		await waitFor(() => {
+			expect(toast.error).toHaveBeenCalledWith("The frame couldn't be saved.")
 		})
 	})
 })

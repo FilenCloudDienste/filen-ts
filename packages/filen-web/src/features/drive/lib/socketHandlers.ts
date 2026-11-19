@@ -14,7 +14,7 @@ import {
 	queueListingCreate,
 	queuedTrashHolds
 } from "@/features/drive/queries/drive"
-import { narrowItem, withColor, withFavorited, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, withColor, withDirMeta, withFavorited, withFileMeta, type DriveItem } from "@/features/drive/lib/item"
 import {
 	currentRootUuid,
 	insertIntoTrashListing,
@@ -468,12 +468,10 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		}
 
 		case "fileMetadataChanged": {
-			// Only an owned file row can be rebuilt from its own cached shape + the new meta (web has no item
-			// cache to reconstruct a share from). Re-narrow so name/undecryptable derive from the fresh meta.
 			driveListingQueryUpdateGlobal({
 				type: "replace",
 				uuid: inner.uuid,
-				replace: row => (row.type === "file" ? narrowItem({ ...row.data, meta: inner.metadata }) : row)
+				replace: row => withFileMeta(row, inner.metadata)
 			})
 			// A preview open on this file re-derives its header title from the fresh meta (rename).
 			emitPreviewFileMetaChanged(inner.uuid, inner.metadata)
@@ -485,7 +483,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			driveListingQueryUpdateGlobal({
 				type: "replace",
 				uuid: inner.uuid,
-				replace: row => (row.type === "directory" ? narrowItem({ ...row.data, meta: inner.meta }) : row)
+				replace: row => withDirMeta(row, inner.meta)
 			})
 			emitPreviewFolderMetaChanged(inner.uuid, inner.meta)
 
@@ -496,7 +494,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			driveListingQueryUpdateGlobal({
 				type: "replace",
 				uuid: inner.uuid,
-				replace: row => (row.type === "directory" ? { ...row, data: { ...row.data, color: inner.color } } : row)
+				replace: row => withColor(row, inner.color)
 			})
 
 			break

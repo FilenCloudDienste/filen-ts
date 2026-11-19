@@ -77,7 +77,10 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 							value={value}
 							autoFocus
 							autoComplete="one-time-code"
-							disabled={pending}
+							// Read-only, not disabled, while a retry runs: disabling drops focus, and the dialog stays
+							// open after a rejected code, so the next digits would land nowhere.
+							readOnly={pending}
+							aria-busy={pending}
 							aria-invalid={error !== undefined}
 							// Same condition the error below renders on — a describedby pointing at an id that is
 							// not in the document describes nothing.

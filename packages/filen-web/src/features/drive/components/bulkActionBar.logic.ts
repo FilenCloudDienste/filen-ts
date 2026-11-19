@@ -38,9 +38,8 @@ export type BulkActionDescriptor = ActionDescriptor<
 >
 
 // Pure gating builder for the bulk-action bar — mirrors itemMenu.logic.ts's driveItemActions
-// (variant/flag-gated descriptor list, trivially testable without rendering anything). Covers all 6
-// web variants, sharedIn/sharedOut included (mobile's buildBulkActionMenu also covers links/offline,
-// neither of which exist on web yet).
+// (variant/flag-gated descriptor list, trivially testable without rendering anything). Covers all 7
+// web variants, sharedIn/sharedOut included; links adds disableLink below.
 export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFlags): BulkActionDescriptor[] {
 	// Trash's own bulk menu is the maximally-reduced set — restore (confirmed) and permanent delete,
 	// neither gated by undecryptable (both are pure-uuid dispositions, no decrypted metadata needed).

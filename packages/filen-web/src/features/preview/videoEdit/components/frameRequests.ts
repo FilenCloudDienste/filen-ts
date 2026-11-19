@@ -65,7 +65,7 @@ export class FrameRequests {
 				(error: unknown) => {
 					// Superseded, or an export took the decoder meanwhile: nothing went wrong.
 					if (!isAbortError(error)) {
-						log.warn("[videoEditor] frame failed", error)
+						log.warn("video-edit", "a frame failed", error)
 					}
 				}
 			)

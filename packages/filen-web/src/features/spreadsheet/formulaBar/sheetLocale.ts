@@ -1,6 +1,6 @@
 import { territoryCurrency, type SheetLocale } from "@filen/office/core/sheet"
 import type { SheetShortcut } from "@filen/office/react/sheet"
-import { numFmtLocaleOf, shortcutDateTimeCodes } from "@/features/spreadsheet/formulaBar/numFmtLocale"
+import { numFmtLocaleOf, quotedText, shortcutDateTimeCodes } from "@/features/spreadsheet/formulaBar/numFmtLocale"
 
 // The locale entries are typed in, from the browser's formatting locale (the core reads no Intl locale; the app
 // injects it): its decimal point and grouping, its date order, ";" between arguments where "," is the decimal
@@ -86,16 +86,6 @@ function currencySymbols(language: string): string[] {
 	} catch {
 		return []
 	}
-}
-
-// Text a format code shows as it is, quoted (each character escaped where it holds a quote); no-break spaces as plain
-// ones, as the system patterns have them.
-function quotedText(raw: string): string {
-	const text = raw.replace(/[\u00a0\u202f]/gu, " ")
-
-	if (text === "") return ""
-
-	return text.includes('"') ? Array.from(text, ch => `\\${ch}`).join("") : `"${text}"`
 }
 
 // One section of a currency code from how the locale writes an amount: the number as `number`, the symbol and the

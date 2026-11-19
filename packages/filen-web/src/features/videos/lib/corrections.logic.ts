@@ -1,6 +1,7 @@
 import {
 	activeLibraryOverrides,
 	episodeOverrideKey,
+	newSeriesId,
 	rawLibraryOverride,
 	seriesOverrideKey,
 	splitOverrideKey,
@@ -142,16 +143,21 @@ function parseCount(value: string, min: number): number | null {
 	return n >= min ? n : null
 }
 
-// Fields that block saving: a year outside 1800-2200, and an episode without its season and number (an end before
-// its first episode too).
-export function draftErrors(draft: CorrectionDraft): DraftError[] {
+// Whether the dialog shows the year, and a save stores it: a series' and a movie's.
+export function showsYear(subject: CorrectionSubject, draft: Pick<CorrectionDraft, "kind">): boolean {
+	return subject.original.kind === "series" || draft.kind === "movie"
+}
+
+// Fields that block saving: an empty title, a shown year outside 1800-2200, and an episode without its season and
+// number (an end before its first episode too).
+export function draftErrors(subject: CorrectionSubject, draft: CorrectionDraft): DraftError[] {
 	const errors: DraftError[] = []
 
 	if (draft.title.trim().length === 0) {
 		errors.push("title")
 	}
 
-	if (draft.year.trim().length > 0) {
+	if (showsYear(subject, draft) && draft.year.trim().length > 0) {
 		const year = parseCount(draft.year, 1800)
 
 		if (year === null || year > 2200) {
@@ -173,6 +179,20 @@ export function draftErrors(draft: CorrectionDraft): DraftError[] {
 	}
 
 	return errors
+}
+
+// Where the page goes after a save: the title the subject is shown as now (null to stay).
+export function destinationOf(subject: CorrectionSubject, draft: CorrectionDraft): string | null {
+	if (subject.original.kind === "series") {
+		return null
+	}
+
+	if (draft.kind === "episode") {
+		return draft.series === NEW_SERIES ? newSeriesId(subject.key.slice(2)) : draft.series.slice(2)
+	}
+
+	// A movie's or other video's id is its key's.
+	return subject.key.slice(2)
 }
 
 type Fields = Record<string, unknown>
@@ -204,7 +224,7 @@ export function overrideFromDraft({
 
 	setDiff(out, "title", title.length > 0 ? title : undefined, original.title)
 
-	if (original.kind === "series" || draft.kind === "movie") {
+	if (showsYear(subject, draft)) {
 		setDiff(out, "year", parseCount(draft.year, 1800) ?? undefined, original.year)
 	}
 

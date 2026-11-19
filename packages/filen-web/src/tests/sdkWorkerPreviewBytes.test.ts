@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Remote } from "comlink"
 import type { AnyFile, StringifiedClient } from "@filen/sdk-rs"
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
@@ -70,10 +70,6 @@ async function writeFrames(params: WriterParams, frames: number[][]): Promise<vo
 
 beforeEach(async () => {
 	await api.injectClient("session" as unknown as StringifiedClient)
-})
-
-afterEach(() => {
-	vi.clearAllMocks()
 })
 
 describe("sdk worker whole-buffer preview reads", () => {
@@ -231,6 +227,45 @@ describe("sdk worker preview cancels", () => {
 		await api.cancelPreviewDownloadUnlessFinishing("keep", 1)
 		expect(signals[0]?.aborted).toBe(true)
 		await expect(kept).rejects.toThrow()
+	})
+
+	it.each([
+		{ written: 1, aborted: true },
+		{ written: 5, aborted: false },
+		{ written: 6, aborted: false }
+	])("cancels a whole-buffer read that has $written of 10 bytes unless it is past half", async ({ written, aborted }) => {
+		const signals: AbortSignal[] = []
+		const hang = hangingDownload(signals)
+
+		// The bytes reach the writer (and so the read's progress) before the download hangs.
+		fakeClient.downloadFileToWriter.mockImplementation(async params => {
+			await params.writer.getWriter().write(new Uint8Array(written))
+
+			return hang(params)
+		})
+
+		const read = api.downloadFileBytes(fileOf(10), "thumb")
+
+		await vi.waitFor(() => {
+			expect(signals).toHaveLength(1)
+		})
+		await api.cancelPreviewDownloadIfEarly("thumb", 0.5)
+
+		expect(signals[0]?.aborted).toBe(aborted)
+
+		await api.cancelPreviewDownload("thumb")
+		await expect(read).rejects.toThrow("Cancelled")
+	})
+
+	it("cancels a read under an unknown token whatever the fraction", async () => {
+		const signals: AbortSignal[] = []
+
+		fakeClient.downloadFileToWriter.mockImplementation(hangingDownload(signals))
+
+		await api.cancelPreviewDownloadIfEarly("unknown", 0)
+
+		await expect(api.downloadFileBytes(fileOf(10), "unknown")).rejects.toThrow("Cancelled")
+		expect(signals[0]?.aborted).toBe(true)
 	})
 })
 

@@ -167,6 +167,14 @@ export function DeckSlideShow({
 				linkLabel={link =>
 					t("previewPptxShowLink", { target: link.tooltip ?? (link.kind === "external" ? link.href : link.anchor) })
 				}
+				mediaLabel={layer => {
+					const name = layer.alt?.trim() ?? ""
+					const audio = layer.media?.kind === "audio"
+
+					if (name === "") return t(audio ? "previewPptxShowMediaAudioUnnamed" : "previewPptxShowMediaVideoUnnamed")
+
+					return t(audio ? "previewPptxShowMediaAudio" : "previewPptxShowMediaVideo", { name })
+				}}
 				policy={policy}
 				media={media}
 				{...(overlay === undefined ? {} : { overlay })}

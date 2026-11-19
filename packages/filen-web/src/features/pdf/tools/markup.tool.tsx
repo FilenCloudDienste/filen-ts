@@ -14,7 +14,6 @@ export const MARKUP_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolHighlight",
 	icon: HighlighterIcon,
 	toolClass: "annotate",
-	actionIds: ["annotations.markup"],
 	actions: [pdfToolAction("annotations.markup", "u", "preview:previewPdfKeyToolHighlight")],
 	enabledWhen: policy => toolEnabled("annotate", policy),
 	commands: ["annotations.markup"],

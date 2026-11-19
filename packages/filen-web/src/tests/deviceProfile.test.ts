@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import { narrowItem } from "@/features/drive/lib/item"
 import { canPreview } from "@/features/drive/lib/preview.logic"
@@ -27,7 +27,11 @@ function heicFile(size: bigint, mime: string) {
 	})
 }
 
-// Runs in file order: the profile is module state, refined step by step.
+// The profile is module state: each test leaves the probes unknown again, as the page starts.
+afterEach(() => {
+	refineDeviceProfile({ heicNative: "unknown", jxlNative: "unknown" })
+})
+
 describe("deviceProfile", () => {
 	it("starts with every probe unknown and the desktop's ranged PDF ceiling", () => {
 		expect(deviceProfile()).toMatchObject({ heicNative: "unknown", jxlNative: "unknown", pdfRangedMax: 8192n * MIB })

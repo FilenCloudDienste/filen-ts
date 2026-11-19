@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronDownIcon } from "lucide-react"
 import type { DvListItem, SheetCommand, SheetSessionApi } from "@filen/office/core/sheet"
@@ -9,7 +9,17 @@ import {
 	type SheetGridState,
 	type ValidationPlacement
 } from "@filen/office/react/sheet"
-import { columnListKey, columnListShown, listCellKey, listShown, sortedEntries } from "@/features/spreadsheet/data/dvOverlay.logic"
+import {
+	LIST_ROW,
+	columnListKey,
+	columnListShown,
+	listCellKey,
+	listHeight,
+	listShown,
+	listWindow,
+	scrollToRow,
+	sortedEntries
+} from "@/features/spreadsheet/data/dvOverlay.logic"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -159,7 +169,8 @@ function ValidationList({
 
 					return false
 				}}
-				className="max-h-72 w-auto min-w-40 gap-0 overflow-y-auto p-1"
+				// A fixed width: only the rows in view are drawn, so the widest value is not known.
+				className="w-56 gap-0 p-1"
 			>
 				<ListItems
 					listRef={listRef}
@@ -214,6 +225,11 @@ function ListItems({
 	const id = useId()
 	const [list, setList] = useState<ListState>({ status: "loading" })
 	const [active, setActive] = useState(0)
+	// The list's scroll offset, which picks the rows drawn. Only read from the list: the offsets the code chooses are
+	// written to it directly, never from this state, which a scroll event can bring in older than the list is (WebKit).
+	const [scroll, setScroll] = useState(0)
+	// The offset that shows the cell's value, put on the list once it is drawn.
+	const openScroll = useRef<number | null>(null)
 	const typed = useRef({ text: "", at: 0 })
 
 	// The values are the session's, read once the list opens (this mounts then).
@@ -234,13 +250,17 @@ function ListItems({
 					return
 				}
 
-				setList({ status: "ready", items: result.items })
-				setActive(
-					Math.max(
-						0,
-						result.items.findIndex(item => item.text === current)
-					)
+				const initial = Math.max(
+					0,
+					result.items.findIndex(item => item.text === current)
 				)
+
+				const offset = scrollToRow(initial, 0, result.items.length)
+
+				openScroll.current = offset
+				setList({ status: "ready", items: result.items })
+				setActive(initial)
+				setScroll(offset)
 			},
 			() => {
 				if (live) setList({ status: "unavailable" })
@@ -261,13 +281,29 @@ function ListItems({
 
 	const items = list.status === "ready" ? list.items : []
 
+	// The opening offset, onto the list once its rows are drawn.
+	useLayoutEffect(() => {
+		const node = listRef.current
+		const offset = openScroll.current
+
+		if (node === null || offset === null || list.status !== "ready") return
+
+		openScroll.current = null
+		node.scrollTop = offset
+	}, [listRef, list])
+
 	function move(index: number): void {
 		if (items.length === 0) return
 
 		const next = Math.max(0, Math.min(items.length - 1, index))
 
+		const node = listRef.current
+		const offset = scrollToRow(next, node?.scrollTop ?? scroll, items.length)
+
+		if (node !== null && node.scrollTop !== offset) node.scrollTop = offset
+
 		setActive(next)
-		listRef.current?.querySelector(`[data-index="${String(next)}"]`)?.scrollIntoView({ block: "nearest" })
+		setScroll(offset)
 	}
 
 	function jump(char: string): void {
@@ -329,6 +365,43 @@ function ListItems({
 		event.preventDefault()
 	}
 
+	function option(index: number): ReactNode {
+		const item = items[index]
+
+		if (item === undefined) return null
+
+		return (
+			<div
+				// Items may repeat (a list from cells).
+				key={index}
+				id={`${id}-${String(index)}`}
+				data-index={index}
+				role="option"
+				aria-selected={index === active}
+				className="absolute right-0 left-0 cursor-default truncate rounded-md px-2 hover:bg-muted aria-selected:bg-accent"
+				style={{ top: `${String(index * LIST_ROW)}px`, height: `${String(LIST_ROW)}px`, lineHeight: `${String(LIST_ROW)}px` }}
+				onPointerMove={() => {
+					if (index !== active) setActive(index)
+				}}
+				onClick={() => {
+					onPick(item)
+				}}
+			>
+				{item.text === "" ? "\u00a0" : item.text}
+			</div>
+		)
+	}
+
+	// Only the rows in view are drawn, and the highlighted one wherever it is, as aria-activedescendant names it.
+	const { first, last } = listWindow(scroll, items.length)
+	const rows: ReactNode[] = []
+
+	if (active < first) rows.push(option(active))
+
+	for (let index = first; index < last; index++) rows.push(option(index))
+
+	if (active >= last) rows.push(option(active))
+
 	return (
 		<div
 			ref={listRef}
@@ -337,33 +410,24 @@ function ListItems({
 			aria-label={t(source === "validation" ? "previewSheetValidationListLabel" : "previewSheetAutoCompleteListLabel")}
 			aria-busy={list.status === "loading"}
 			aria-activedescendant={items.length === 0 ? undefined : `${id}-${String(active)}`}
-			className="outline-hidden"
+			className="overflow-y-auto outline-hidden"
+			style={list.status === "ready" ? { height: `${String(listHeight(items.length))}px` } : undefined}
 			onKeyDown={onKeyDown}
+			onScroll={event => {
+				setScroll(event.currentTarget.scrollTop)
+			}}
 		>
 			{list.status === "loading" ? (
 				<Spinner className="m-2 size-4" />
 			) : list.status === "unavailable" ? (
 				<p className="p-2 text-muted-foreground">{t("previewSheetValidationListUnavailable")}</p>
 			) : (
-				items.map((item, index) => (
-					<div
-						// Items may repeat (a list from cells).
-						key={index}
-						id={`${id}-${String(index)}`}
-						data-index={index}
-						role="option"
-						aria-selected={index === active}
-						className="block w-full cursor-default truncate rounded-md px-2 py-1 text-left hover:bg-muted aria-selected:bg-accent"
-						onPointerMove={() => {
-							if (index !== active) setActive(index)
-						}}
-						onClick={() => {
-							onPick(item)
-						}}
-					>
-						{item.text === "" ? "\u00a0" : item.text}
-					</div>
-				))
+				<div
+					className="relative"
+					style={{ height: `${String(items.length * LIST_ROW)}px` }}
+				>
+					{rows}
+				</div>
 			)}
 		</div>
 	)

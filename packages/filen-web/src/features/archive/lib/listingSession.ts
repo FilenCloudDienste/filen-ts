@@ -6,6 +6,7 @@ import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { ArchiveNameInfo, ListJobEvent, ListJobParams } from "@/workers/sdk.worker"
 import { archiveNameInfo, cachedArchiveNameInfo } from "@/features/drive/lib/archiveHelpers"
 import { AUTO_LIST_DELAY_MS, gateFor } from "@/features/archive/lib/archiveGate.logic"
+import { isArchivePasswordError, summaryOf } from "@/features/archive/lib/archiveBrowser.logic"
 import { comicFormatOfName, isZipPackageName } from "@/features/drive/lib/archiveFormats"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { createEntryStore, type EntryStore } from "@/features/archive/lib/entryStore"
@@ -197,17 +198,6 @@ function readingPhase(update: ListUpdate): ListingPhase {
 	}
 }
 
-function summaryOfPhase(phase: ListingPhase): ListSummary | null {
-	switch (phase.type) {
-		case "done":
-		case "stopped":
-		case "failed":
-			return phase.summary
-		default:
-			return null
-	}
-}
-
 function withSummary(phase: ListingPhase, summary: ListSummary): ListingPhase {
 	switch (phase.type) {
 		case "done":
@@ -217,10 +207,6 @@ function withSummary(phase: ListingPhase, summary: ListSummary): ListingPhase {
 		default:
 			return phase
 	}
-}
-
-function isPasswordError(error: ErrorDTO): boolean {
-	return error.kind === "ArchivePasswordRequired" || error.kind === "ArchiveWrongPassword"
 }
 
 // A full run lists into a fresh store; a verify run checks a password against what is shown, its entries
@@ -291,7 +277,7 @@ export function openListingSession(
 	const isCurrent = (current: Run): boolean => !disposed && current.token === token
 
 	const setVerifyWaiting = (waiting: boolean): void => {
-		const summary = summaryOfPhase(snapshot.phase)
+		const summary = summaryOf(snapshot.phase)
 
 		if (summary !== null && summary.verifying && summary.verifyWaiting !== waiting) {
 			setPhase(withSummary(snapshot.phase, { ...summary, verifyWaiting: waiting }))
@@ -317,7 +303,7 @@ export function openListingSession(
 					: { type: "stopped", summary },
 				current.store
 			)
-		} else if (isPasswordError(error)) {
+		} else if (isArchivePasswordError(error)) {
 			setPhase({ type: "needsPassword", wrong: error.kind === "ArchiveWrongPassword" || password !== undefined }, current.store)
 		} else {
 			setPhase({ type: "failed", error, summary }, current.store)
@@ -325,7 +311,7 @@ export function openListingSession(
 	}
 
 	const settleVerify = (report: ListReportDTO | null, error: ErrorDTO | null, password: string): void => {
-		const summary = summaryOfPhase(snapshot.phase)
+		const summary = summaryOf(snapshot.phase)
 
 		if (summary === null) {
 			return
@@ -335,7 +321,7 @@ export function openListingSession(
 		const check = failure === null ? (report?.password ?? "wrong") : "wrong"
 		let next: ListSummary
 
-		if (failure !== null && !isPasswordError(failure)) {
+		if (failure !== null && !isArchivePasswordError(failure)) {
 			// A stop or a dropped connection says nothing about the password.
 			next = { ...summary, verifying: false, verifyWaiting: false, verifyError: failure.kind === "Cancelled" ? null : failure }
 		} else if (check === "right" || check === "unchecked") {
@@ -415,7 +401,7 @@ export function openListingSession(
 
 			if (current.kind === "verify" && password !== undefined) {
 				settleVerify(null, error, password)
-			} else if (isPasswordError(error)) {
+			} else if (isArchivePasswordError(error)) {
 				// The reader's opening refused it: a 7z or RAR whose index is encrypted.
 				setPhase({ type: "needsPassword", wrong: error.kind === "ArchiveWrongPassword" || password !== undefined }, current.store)
 			} else {
@@ -451,7 +437,7 @@ export function openListingSession(
 			dirPath = ""
 			setPhase({ type: "starting" }, current.store)
 		} else {
-			const summary = summaryOfPhase(snapshot.phase)
+			const summary = summaryOf(snapshot.phase)
 
 			if (summary !== null) {
 				setPhase(withSummary(snapshot.phase, { ...summary, verifying: true, verifyWaiting: false, verifyError: null }))
@@ -546,7 +532,7 @@ export function openListingSession(
 			return
 		}
 
-		if (snapshot.phase.type !== "resolving" && summaryOfPhase(snapshot.phase) === null) {
+		if (snapshot.phase.type !== "resolving" && summaryOf(snapshot.phase) === null) {
 			setPhase({ type: "resolving" })
 		}
 
@@ -604,7 +590,7 @@ export function openListingSession(
 				return
 			}
 
-			const summary = summaryOfPhase(snapshot.phase)
+			const summary = summaryOf(snapshot.phase)
 
 			// Entries already shown are kept: the password is only checked against them.
 			if (summary !== null && snapshot.phase.type !== "failed" && snapshot.store.entryCount > 0) {
@@ -633,7 +619,7 @@ export function openListingSession(
 			accepted = password
 			holdAccepted()
 
-			const summary = summaryOfPhase(snapshot.phase)
+			const summary = summaryOf(snapshot.phase)
 
 			if (summary !== null && !summary.verifying && (summary.password === "required" || summary.password === "wrong")) {
 				setPhase(withSummary(snapshot.phase, { ...summary, password: "right", verifyError: null }))

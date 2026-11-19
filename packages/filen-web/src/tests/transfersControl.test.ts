@@ -189,14 +189,16 @@ describe("copy transfers", () => {
 		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
 	})
 
+	// The job is still running, so only the row's terminal status can stop the cancel.
 	it("is a no-op for a finished copy", () => {
+		useDriveJobsStore.setState({ jobs: { c1: createCopyJob("c1", DESTINATION, 1) } })
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "completedWithErrors" })] })
 
 		cancelTransfer("c1")
 		setTransferPaused("c1", true)
 
 		expect(sdkCancel).not.toHaveBeenCalled()
-		expect(getCopyJob("c1")?.cancelRequest ?? null).toBeNull()
+		expect(getCopyJob("c1")?.cancelRequest).toBeNull()
 		expect(sdkPause).not.toHaveBeenCalled()
 	})
 

@@ -20,7 +20,15 @@ import {
 	SW_REQUEST_TIMEOUT_MS,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
-import { asErrorDTO, DOWNLOAD_NEEDS_RELOAD, plainErrorDTO } from "@/lib/sdk/errors"
+import {
+	asErrorDTO,
+	DOWNLOAD_GONE,
+	DOWNLOAD_NEEDS_RELOAD,
+	DOWNLOAD_STALLED,
+	DOWNLOAD_WORKER_UNAVAILABLE,
+	plainErrorDTO
+} from "@/lib/sdk/errors"
+import { DownloadReporter } from "@/lib/sw/downloadReporter"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { errors } from "@/locales/en/errors"
 
@@ -586,16 +594,39 @@ describe("a watched service-worker download", () => {
 
 			const { triggerSwDownload } = await freshModule()
 			const outcome = triggerSwDownload(testFile(), save, "transfer-1", () => undefined).then(
-				() => "resolved",
-				(e: unknown) => asErrorDTO(e).message
+				() => null,
+				(e: unknown) => e
 			)
 
 			await vi.advanceTimersByTimeAsync(SW_DOWNLOAD_STALL_MS)
 
-			expect(await outcome).toBe("the download stopped responding")
+			const failure = await outcome
+
+			expect(asErrorDTO(failure).kind).toBe(DOWNLOAD_STALLED)
+			expect(errorLabel(failure)).toBe(errors.DownloadStalled)
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("fails a download the restarted worker no longer knows with a translated label", async () => {
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			(report, id) => {
+				new DownloadReporter(8).attach(id, { postMessage: report, close: () => undefined } as unknown as MessagePort, false)
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwDownload } = await freshModule()
+		const failure: unknown = await triggerSwDownload(testFile(), save, "transfer-1", () => undefined).then(
+			() => null,
+			(e: unknown) => e
+		)
+
+		expect(asErrorDTO(failure).kind).toBe(DOWNLOAD_GONE)
+		expect(errorLabel(failure)).toBe(errors.DownloadGone)
 	})
 
 	it("refuses to navigate from a page no worker controls", async () => {
@@ -744,11 +775,19 @@ describe("sendToSw", () => {
 			stubServiceWorkerReady(fakeServiceWorker(() => null))
 
 			const { saveDownload } = await freshModule()
-			const pending = expect(saveDownload("a.txt")).rejects.toThrow("service worker did not respond")
+			const pending = saveDownload("a.txt").then(
+				() => null,
+				(error: unknown) => error
+			)
 
 			await vi.advanceTimersByTimeAsync(SW_INIT_CLIENT_TIMEOUT_MS + 1)
-			await pending
 
+			const failure = await pending
+
+			expect(failure).toBeInstanceOf(Error)
+			expect(failure instanceof Error ? failure.message : null).toBe("service worker did not respond")
+			expect(asErrorDTO(failure).kind).toBe(DOWNLOAD_WORKER_UNAVAILABLE)
+			expect(errorLabel(failure)).toBe(errors.DownloadWorkerUnavailable)
 			expect(openChannels.every(channel => channel.port1.closed)).toBe(true)
 		} finally {
 			vi.useRealTimers()
@@ -788,6 +827,25 @@ describe("sendToSw", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("labels a refused request and a missing worker through the errors catalog, keeping the worker's text", async () => {
+		stubWindow()
+		stubServiceWorkerReady(fakeServiceWorker(() => ({ ok: false, error: "quota exceeded in the worker" })))
+
+		const { activeServiceWorker, sendToSw } = await freshModule()
+		const refused = await sendToSw(await activeServiceWorker(), "anything", {}).catch((error: unknown) => error)
+
+		expect(refused instanceof Error ? refused.message : null).toBe("quota exceeded in the worker")
+		expect(asErrorDTO(refused).kind).toBe(DOWNLOAD_WORKER_UNAVAILABLE)
+		expect(errorLabel(refused)).toBe(errors.DownloadWorkerUnavailable)
+
+		stubServiceWorkerReady(null)
+
+		const missing = await activeServiceWorker().catch((error: unknown) => error)
+
+		expect(asErrorDTO(missing).kind).toBe(DOWNLOAD_WORKER_UNAVAILABLE)
+		expect(errorLabel(missing)).toBe(errors.DownloadWorkerUnavailable)
 	})
 
 	it("keeps the ordinary bound for every other message", async () => {

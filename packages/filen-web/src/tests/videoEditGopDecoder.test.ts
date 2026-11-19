@@ -52,6 +52,8 @@ class FakeFrame {
 
 let frames: FakeFrame[] = []
 let clones = 0
+// Every GopDecoder a test made, released after it so that only leaked frames stay open.
+let made: GopDecoder<EncodedPacket>[] = []
 
 class FakeDecoder extends EventTarget {
 	public static delay = 0
@@ -111,6 +113,11 @@ class FakeDecoder extends EventTarget {
 		this.flushes++
 		await new Promise(resolve => setTimeout(resolve, 0))
 
+		// A closed or reset decoder puts out nothing more.
+		if (this.state !== "configured") {
+			return
+		}
+
 		for (const timestamp of this.held.splice(0)) {
 			this.emit(timestamp)
 		}
@@ -136,13 +143,21 @@ beforeEach(() => {
 	vi.stubGlobal("EncodedVideoChunk", FakeChunk)
 	frames = []
 	clones = 0
+	made = []
 	FakeDecoder.created = []
 	FakeDecoder.delay = 0
 	FakeDecoder.failAt = null
 })
 
-afterEach(() => {
-	expect(frames.filter(frame => !frame.closed).length).toBeLessThanOrEqual(5)
+afterEach(async () => {
+	for (const gop of made) {
+		gop.release()
+	}
+
+	// Lets a queued decode or a flush timer that was still pending run out.
+	await new Promise(resolve => setTimeout(resolve, 0))
+
+	expect(frames.filter(frame => !frame.closed)).toHaveLength(0)
 })
 
 async function sinkOf(bytes: Uint8Array): Promise<EncodedPacketSink> {
@@ -157,7 +172,11 @@ async function sinkOf(bytes: Uint8Array): Promise<EncodedPacketSink> {
 }
 
 function decoder(sink: EncodedPacketSink): GopDecoder<EncodedPacket> {
-	return new GopDecoder<EncodedPacket>({ codec: "avc1.64001f" }, sink, init => new FakeDecoder(init) as unknown as VideoDecoder)
+	const gop = new GopDecoder<EncodedPacket>({ codec: "avc1.64001f" }, sink, init => new FakeDecoder(init) as unknown as VideoDecoder)
+
+	made.push(gop)
+
+	return gop
 }
 
 function us(seconds: number): number {

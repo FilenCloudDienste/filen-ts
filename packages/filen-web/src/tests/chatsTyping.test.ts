@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Chat } from "@filen/sdk-rs"
+import { contactDisplayName, deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 // typing.ts imports the real sdk client (a Vite `?worker`, unresolvable under node) and the log module —
 // mock both at the boundary, same posture as chatsUnreadLogic.test.ts.
@@ -7,7 +8,8 @@ const { sendTypingSignalOp } = vi.hoisted(() => ({ sendTypingSignalOp: vi.fn() }
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendTypingSignal: sendTypingSignalOp } }))
 
-import { signalStopped, signalTyping } from "@/features/chats/lib/typing"
+import { signalStopped, signalTyping, typingUserName, visibleTypingUsers } from "@/features/chats/lib/typing"
+import type { ChatTypingUser } from "@/features/chats/store/useChatTyping"
 import { testUuid } from "@/tests/support/uuid"
 
 // typing.ts keeps its per-chat send state in a module-global Map with no reset, and vitest evaluates the
@@ -113,5 +115,50 @@ describe("signalTyping / signalStopped cadence", () => {
 		await flushSignals()
 
 		expect(sendTypingSignalOp).not.toHaveBeenCalled()
+	})
+})
+
+function typingUser(senderId: bigint, senderEmail: string, senderNickName = ""): ChatTypingUser {
+	return { senderId, senderEmail, senderNickName, senderAvatar: undefined, timestamp: 0n }
+}
+
+describe("visibleTypingUsers", () => {
+	const me = typingUser(1n, "me@filen.io")
+	const mallory = typingUser(2n, "mallory@filen.io", "M")
+	const bob = typingUser(3n, "bob@filen.io")
+
+	it("drops the current user", () => {
+		expect(visibleTypingUsers([me, bob], 1n, EMPTY_BLOCKED_USERS)).toEqual([bob])
+	})
+
+	it("withholds a typist blocked by user id", () => {
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "other@filen.io" }])
+
+		expect(visibleTypingUsers([mallory, bob], 1n, blocked)).toEqual([bob])
+	})
+
+	it("withholds a typist blocked by email only", () => {
+		const blocked = { userIds: new Set<bigint>(), emails: new Set(["mallory@filen.io"]) }
+
+		expect(visibleTypingUsers([mallory, bob], undefined, blocked)).toEqual([bob])
+	})
+
+	it("shows the typist again once unblocked, without a new signal", () => {
+		const users = [mallory, bob]
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "mallory@filen.io" }])
+
+		expect(visibleTypingUsers(users, 1n, blocked)).toEqual([bob])
+		expect(visibleTypingUsers(users, 1n, EMPTY_BLOCKED_USERS)).toEqual([mallory, bob])
+	})
+})
+
+describe("typingUserName", () => {
+	it("follows contactDisplayName for nickname and email-only users", () => {
+		const nicknamed = typingUser(2n, "mallory@filen.io", "M")
+		const emailOnly = typingUser(3n, "bob@filen.io")
+
+		expect(typingUserName(nicknamed)).toBe(contactDisplayName({ email: "mallory@filen.io", nickName: "M" }))
+		expect(typingUserName(emailOnly)).toBe(contactDisplayName({ email: "bob@filen.io", nickName: "" }))
+		expect(typingUserName(emailOnly)).toBe("bob@filen.io")
 	})
 })

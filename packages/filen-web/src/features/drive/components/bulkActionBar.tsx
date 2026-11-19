@@ -24,8 +24,8 @@ export interface BulkActionBarProps {
 	onDialogAction: (kind: BulkDialogActionKind) => void
 }
 
-// Bottom-anchored floating selection bar (directoryListing.tsx overlays it on the listing container
-// while a selection exists) — the toolbar stays put; this replaces nothing.
+// Floating selection bar (directoryListing.tsx portals it into the shell's window bar slot while a
+// selection exists) — the toolbar stays put; this replaces nothing.
 export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkActionBarProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()

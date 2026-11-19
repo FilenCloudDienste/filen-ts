@@ -47,15 +47,16 @@ export function fileAccessState(input: { status: "pending" | "error" | "success"
 // DIRECTORY links report password protection up front via DirPublicInfo.hasPassword, but the info call
 // itself succeeds WITHOUT the password (it only says one is needed). The password is then validated by
 // a second call — listing the root WITH the password set — so acceptance is an explicit imperative
-// step the view owns: `verifying` while that listing is in flight, `failed` after it rejects, `accepted`
-// once it resolves. An unprotected link (or an already-accepted one) is immediately ready.
+// step the view owns: `verifying` while that listing is in flight, `verifyError` holding its rejection
+// (undefined when none), `accepted` once it resolves. An unprotected link (or an already-accepted one)
+// is immediately ready.
 export function dirAccessState(input: {
 	infoStatus: "pending" | "error" | "success"
 	infoError: unknown
 	hasPassword: boolean
 	accepted: boolean
 	verifying: boolean
-	failed: boolean
+	verifyError: unknown
 }): LinkAccessState {
 	if (input.infoStatus === "pending") {
 		return "loading"
@@ -73,7 +74,14 @@ export function dirAccessState(input: {
 		return "checking"
 	}
 
-	return input.failed ? "wrong" : "prompt"
+	if (input.verifyError === undefined) {
+		return "prompt"
+	}
+
+	// A wire/transport failure says nothing about the password, so it gets the retryable surface
+	// instead of "wrong". Every other rejection stays "wrong": the listing endpoint's kind for a refused
+	// directory-link password is unconfirmed, so it cannot yet be told apart from a dead link.
+	return isNetworkClassError(input.verifyError) ? "error" : "wrong"
 }
 
 // The link handle every browse call (list/size/zip) uses, with the session's accepted password folded

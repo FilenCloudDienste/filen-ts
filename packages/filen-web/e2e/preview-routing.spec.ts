@@ -147,7 +147,7 @@ test("JPEG under an alias name, and JPEG stored with a generic type, stream over
 
 test("a 3GPP video previews as a video and plays", async ({ page, context }) => {
 	const cspViolations = trackCspViolations(page)
-	const foreign = trackForeignRequests(context, { strictPreview: true })
+	const { foreign, cspBlocked } = trackForeignRequests(context, { strictPreview: true })
 
 	await bootTo(page)
 
@@ -185,6 +185,7 @@ test("a 3GPP video previews as a video and plays", async ({ page, context }) => 
 	await expect(video).toHaveCount(0)
 	expect(cspViolations).toEqual([])
 	expect(foreign).toEqual([])
+	expect(cspBlocked).toEqual([])
 })
 
 test("a zip-based package lists at once at any size, and extracts into a directory", async ({ page, context }) => {

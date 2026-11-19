@@ -9,13 +9,17 @@ import {
 	type Program,
 	type ProgramName
 } from "@/features/preview/imageEdit/worker/shaders"
-import { invertMatrix3, type Matrix3, type Rect } from "@/features/preview/imageEdit/lib/recipe"
+import {
+	affineMatrix3,
+	invertMatrix3,
+	matrixScale,
+	multiplyMatrix3,
+	type Matrix3,
+	type Rect
+} from "@/features/preview/imageEdit/lib/recipe"
 import { TRANSFER_SRGB, type GradeUniforms, type TransferFunction } from "@/lib/gl/colorGrade"
 import {
-	affine,
-	composeMatrix3,
 	matrixRows,
-	matrixScale,
 	containTransform,
 	coverTransform,
 	expandRect,
@@ -334,7 +338,7 @@ export class Renderer {
 		gl.activeTexture(gl.TEXTURE0 + UNIT_MAIN)
 		gl.bindTexture(gl.TEXTURE_2D, inter.texture)
 		this.rows(program, "u_fragToOut", fragToOutput)
-		this.rows(program, "u_outToInter", composeMatrix3(scaleTranslate(1 / inter.width, 1 / inter.height, 0, 0), outputToInter))
+		this.rows(program, "u_outToInter", multiplyMatrix3(scaleTranslate(1 / inter.width, 1 / inter.height, 0, 0), outputToInter))
 		this.uniform(program, "u_outSize", frame.output.width, frame.output.height)
 		this.uniform(program, "u_amount", frame.sharpness * SHARPEN_MAX)
 		this.uniform(program, "u_radius", radius)
@@ -359,7 +363,7 @@ export class Renderer {
 
 		const canvas = layers.ink.canvas
 
-		this.rows(program, "u_outToMarkup", composeMatrix3(scaleTranslate(1 / canvas.width, 1 / canvas.height, 0, 0), outputToCanvas))
+		this.rows(program, "u_outToMarkup", multiplyMatrix3(scaleTranslate(1 / canvas.width, 1 / canvas.height, 0, 0), outputToCanvas))
 		gl.activeTexture(gl.TEXTURE0 + UNIT_INK)
 		gl.bindTexture(gl.TEXTURE_2D, layers.inkTexture)
 		gl.activeTexture(gl.TEXTURE0 + UNIT_HIGHLIGHT)
@@ -544,7 +548,7 @@ export class Renderer {
 		const height = gl.drawingBufferHeight
 		const fit = containTransform(frame.output, { width, height })
 		// The canvas's fragment rows count from the bottom.
-		const fragToOutput = composeMatrix3(invertMatrix3(fit), affine(1, 0, 0, -1, 0, height))
+		const fragToOutput = multiplyMatrix3(invertMatrix3(fit), affineMatrix3(1, 0, 0, -1, 0, height))
 		const whole = { x: 0, y: 0, width: preview.width, height: preview.height }
 		let markup: Matrix3 | null = null
 
@@ -613,7 +617,7 @@ export class Renderer {
 			frames.forEach((frame, index) => {
 				gl.viewport(index * size, 0, size, size)
 				// Strip fragment → thumbnail pixel (top-down, as read back) → output pixel.
-				const fragToOutput = composeMatrix3(
+				const fragToOutput = multiplyMatrix3(
 					invertMatrix3(coverTransform(frame.output, size)),
 					scaleTranslate(1, 1, -index * size, 0)
 				)

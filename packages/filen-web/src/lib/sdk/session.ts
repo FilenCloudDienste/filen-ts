@@ -9,6 +9,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { writeSignedInHint } from "@/lib/signedInHint"
 import { clearSessionEndedNote } from "@/lib/sessionEndedNote"
+import { readSignOutPending, writeSignOutPending } from "@/lib/signOutPending"
 
 // The single kv key the persisted SDK session blob lives under in the browser. The blob is written via
 // `kvSetJson` (envelope-serialized, bigint-safe — the StringifiedClient carries a bigint `userId`).
@@ -19,12 +20,40 @@ const AUTH_CHANNEL = "filen.auth.v1"
 
 type AuthMessage = { kind: "login" } | { kind: "logout" }
 
+// A boot that could not finish a pending sign-out (its wipes failed) opened signed out and leaves the wipes here: boot.ts
+// imports this module, so they cannot be imported back. Null otherwise.
+let unfinishedSignOut: (() => Promise<boolean>) | null = null
+
+export function deferPendingSignOut(finish: () => Promise<boolean>): void {
+	unfinishedSignOut = finish
+}
+
+// The next sign-in redoes the sign-out's wipes before its session is written (they would clear it), then clears the
+// flag even when a wipe still fails: left set, the next boot would wipe the new session or open signed out again, and
+// a failing wipe must never block signing in.
+async function finishSignOutBeforeSignIn(): Promise<void> {
+	const finish = unfinishedSignOut
+
+	if (finish === null) {
+		return
+	}
+
+	unfinishedSignOut = null
+
+	if (readSignOutPending() && !(await finish())) {
+		log.warn("session", "signing in although the pending sign-out's wipes failed again")
+		writeSignOutPending(false)
+	}
+}
+
 // On desktop the session lives only in the shell's keychain-backed vault, never in web storage; the same envelope
 // string crosses the bridge. The browser stores it PLAIN in kv, by decision: a best-effort WebCrypto wrap buys no
 // real protection (the unwrap key would have to live beside it), so XSS defense is the CSP, not a storage trick.
 // The blob is secret-equivalent regardless — never log it, never put it in an error/trace. Every session write and
 // delete goes through these two, so the splash's signed-in hint follows them here.
 export async function persistSession(blob: StringifiedClient): Promise<void> {
+	await finishSignOutBeforeSignIn()
+
 	const vault = desktopBridge()?.session
 
 	await (vault === undefined ? kvSetJson(SESSION_KV_KEY, blob) : vault.set(stringifyEnvelope(blob)))

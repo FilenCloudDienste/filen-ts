@@ -330,11 +330,16 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 	const showQuality = source.kind !== "shows"
 	const filtersActive = prefs.watch !== "all" || prefs.quality !== "all" || prefs.root !== "" || query.length > 0
 
-	function updatePrefs(next: GridPrefs): void {
-		setGridPrefs(source, next)
+	// A new order or query starts from its first card: the scroller stays mounted across them, its offset with it.
+	function resetView(): void {
 		pendingFocus.current = null
 		setActiveIndex(0)
 		scrollElement?.scrollTo({ top: 0 })
+	}
+
+	function updatePrefs(next: GridPrefs): void {
+		setGridPrefs(source, next)
+		resetView()
 	}
 
 	// The cursor's card may not be on screen yet (its page on the way): `act` runs on it once it is, unless the cursor
@@ -475,10 +480,11 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 					value={query}
 					onChange={next => {
 						setQuery(next)
-						setActiveIndex(0)
+						resetView()
 					}}
 					onClear={() => {
 						setQuery("")
+						resetView()
 					}}
 				/>
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-2 max-sm:hidden">{controls}</div>
@@ -691,9 +697,11 @@ function VideoGridRows({
 					indices.push(index)
 				}
 
+				// Keyed by index, not by the layout-dependent virtualizer key: a width change resizes the mounted rows
+				// rather than remounting every card (and reloading its art).
 				return (
 					<div
-						key={virtualRow.key}
+						key={virtualRow.index}
 						style={{
 							position: "absolute",
 							top: 0,

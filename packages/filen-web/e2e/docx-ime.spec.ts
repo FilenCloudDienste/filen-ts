@@ -6,6 +6,7 @@ import { DOCX_FIXTURE_TEXT, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
+import { E2E_AUTOSAVE_KEY } from "@/e2e-hooks/storageKeys"
 
 // IME composition in the DOCX editor with track changes on, through Chromium's input method protocol (CDP
 // Input.imeSetComposition / insertText): in a table cell, a footnote and an endnote the composed text lands
@@ -20,15 +21,13 @@ test.describe.configure({ mode: "default" })
 // Wide enough for the balloon column beside the page at 100 %.
 const WIDE = { width: 1600, height: 900 }
 const AUTHOR = "E2E Reviewer"
-// features/office/lib/officeAutosave.ts's E2E_AUTOSAVE_KEY: an E2E build reads it before the app loads.
-const AUTOSAVE_KEY = "filen-e2e-docx-autosave"
 
 test.beforeEach(async ({ page, browserName }) => {
 	test.skip(browserName !== "chromium", "IME composition is driven through CDP, which is Chromium's")
 
 	await page.context().addInitScript(key => {
 		sessionStorage.setItem(key, "off")
-	}, AUTOSAVE_KEY)
+	}, E2E_AUTOSAVE_KEY)
 })
 
 function pageText(page: Page, text: string): Locator {

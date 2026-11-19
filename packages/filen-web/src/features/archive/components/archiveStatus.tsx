@@ -58,19 +58,23 @@ export function ArchiveWaiting({ onCancel }: { onCancel: () => void }) {
 	)
 }
 
+// `alert`: announced at once as it appears (an outcome the user is waiting on that went wrong).
 export function Banner({
 	tone,
 	icon,
 	children,
-	action
+	action,
+	alert = false
 }: {
 	tone: "info" | "warning" | "error"
 	icon: ReactNode
 	children: ReactNode
 	action?: ReactNode
+	alert?: boolean
 }) {
 	return (
 		<div
+			role={alert ? "alert" : undefined}
 			className={cn(
 				"flex min-h-9 shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-sm",
 				tone === "error" && "text-destructive",
@@ -150,97 +154,114 @@ export function ArchiveStatus({ phase, summary, entries, onListAgain, onEnterPas
 
 	return (
 		<>
-			{phase.type === "stopped" ? (
-				<Banner
-					tone="info"
-					icon={<InfoIcon className="size-4 text-muted-foreground" />}
-					action={
-						<Button
-							variant="outline"
-							size="xs"
-							onClick={onListAgain}
-						>
-							{t("previewArchiveListAgain")}
-						</Button>
-					}
-				>
-					{t("previewArchiveStopped", { count: entries })}
-				</Banner>
-			) : null}
-			{phase.type === "failed" ? (
-				<Banner
-					tone="error"
-					icon={<TriangleAlertIcon className="size-4" />}
-					action={
-						<Button
-							variant="outline"
-							size="xs"
-							onClick={onListAgain}
-						>
-							{t("common:tryAgain")}
-						</Button>
-					}
-				>
-					{failureKey === null ? errorLabel(phase.error) : t(failureKey)}
-					{entries > 0 ? <span className="text-muted-foreground"> {t("previewArchivePartial", { count: entries })}</span> : null}
-				</Banner>
-			) : null}
-			{summary === null ? null : summary.verifying ? (
-				<Banner
-					tone="info"
-					icon={<Spinner className="size-4 text-muted-foreground" />}
-					action={
-						<Button
-							variant="outline"
-							size="xs"
-							onClick={onCancelCheck}
-						>
-							{t("common:cancel")}
-						</Button>
-					}
-				>
-					{summary.verifyWaiting ? (
-						<>
-							{t("previewArchiveCheckingPasswordWaiting")}
-							<PausedHolderHint />
-						</>
-					) : (
-						t("previewArchiveCheckingPassword")
-					)}
-				</Banner>
-			) : summary.verifyError !== null ? (
-				<Banner
-					tone="error"
-					icon={<TriangleAlertIcon className="size-4" />}
-					action={
-						<Button
-							variant="outline"
-							size="xs"
-							onClick={onEnterPassword}
-						>
-							{t("common:tryAgain")}
-						</Button>
-					}
-				>
-					{errorLabel(summary.verifyError)}
-				</Banner>
-			) : summary.password === "required" || summary.password === "wrong" ? (
-				<Banner
-					tone="warning"
-					icon={<LockIcon className="size-4 text-muted-foreground" />}
-					action={
-						<Button
-							variant="outline"
-							size="xs"
-							onClick={onEnterPassword}
-						>
-							{t(summary.password === "wrong" ? "common:tryAgain" : "previewArchiveEnterPassword")}
-						</Button>
-					}
-				>
-					{t(summary.password === "wrong" ? "previewArchiveWrongPasswordBanner" : "previewArchiveEncryptedBanner")}
-				</Banner>
-			) : null}
+			{/* Mounted before any outcome, so the banners it gains as the listing or a password check ends are announced.
+			A box of its own would break the column of rows it sits in. */}
+			<div
+				role="status"
+				aria-live="polite"
+				className="contents"
+			>
+				{phase.type === "stopped" ? (
+					<Banner
+						tone="info"
+						icon={<InfoIcon className="size-4 text-muted-foreground" />}
+						action={
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={onListAgain}
+							>
+								{t("previewArchiveListAgain")}
+							</Button>
+						}
+					>
+						{t("previewArchiveStopped", { count: entries })}
+					</Banner>
+				) : null}
+				{phase.type === "failed" ? (
+					<Banner
+						tone="error"
+						alert
+						icon={<TriangleAlertIcon className="size-4" />}
+						action={
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={onListAgain}
+							>
+								{t("common:tryAgain")}
+							</Button>
+						}
+					>
+						{failureKey === null ? errorLabel(phase.error) : t(failureKey)}
+						{entries > 0 ? (
+							<span className="text-muted-foreground"> {t("previewArchivePartial", { count: entries })}</span>
+						) : null}
+					</Banner>
+				) : null}
+				{summary === null ? null : summary.verifying ? (
+					<Banner
+						tone="info"
+						icon={
+							<Spinner
+								aria-hidden="true"
+								className="size-4 text-muted-foreground"
+							/>
+						}
+						action={
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={onCancelCheck}
+							>
+								{t("common:cancel")}
+							</Button>
+						}
+					>
+						{summary.verifyWaiting ? (
+							<>
+								{t("previewArchiveCheckingPasswordWaiting")}
+								<PausedHolderHint />
+							</>
+						) : (
+							t("previewArchiveCheckingPassword")
+						)}
+					</Banner>
+				) : summary.verifyError !== null ? (
+					<Banner
+						tone="error"
+						alert
+						icon={<TriangleAlertIcon className="size-4" />}
+						action={
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={onEnterPassword}
+							>
+								{t("common:tryAgain")}
+							</Button>
+						}
+					>
+						{errorLabel(summary.verifyError)}
+					</Banner>
+				) : summary.password === "required" || summary.password === "wrong" ? (
+					<Banner
+						tone="warning"
+						icon={<LockIcon className="size-4 text-muted-foreground" />}
+						action={
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={onEnterPassword}
+							>
+								{t(summary.password === "wrong" ? "common:tryAgain" : "previewArchiveEnterPassword")}
+							</Button>
+						}
+					>
+						{t(summary.password === "wrong" ? "previewArchiveWrongPasswordBanner" : "previewArchiveEncryptedBanner")}
+					</Banner>
+				) : null}
+			</div>
 			{summary !== null && summary.undelivered > 0 ? (
 				<Banner
 					tone="info"

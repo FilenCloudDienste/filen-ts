@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fakeToolContext } from "@/tests/support/pdfToolContext"
+import type { PdfDomDocument } from "@filen/office/react/pdf"
 
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
@@ -21,6 +23,16 @@ vi.mock("@/lib/storage/adapter", () => ({
 	}
 }))
 
+// The recognition pipeline, as each run test has it answer.
+const pipeline = vi.hoisted((): { run: (signal: AbortSignal) => Promise<never> } => ({
+	run: () => Promise.reject(new Error("unset"))
+}))
+
+vi.mock("@/features/pdf/ocr/ocrSession", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/pdf/ocr/ocrSession")>()),
+	recogniseDocument: (options: { signal: AbortSignal }) => pipeline.run(options.signal)
+}))
+
 const { RecogniseTextDialog } = await import("@/features/pdf/ocr/recogniseTextDialog")
 const { OcrLanguagesRow } = await import("@/features/pdf/ocr/ocrLanguagesRow")
 const {
@@ -32,7 +44,9 @@ const {
 	useOcrLanguagePreference
 } = await import("@/features/pdf/ocr/ocrLanguagePreference")
 const { ocrChosenPages, updatePageState, waitingPages, settledCount } = await import("@/features/pdf/ocr/recogniseText.logic")
-const { ocrWorkerCount } = await import("@/features/pdf/ocr/ocrSession")
+const { ocrWorkerCount, OcrModelsError } = await import("@/features/pdf/ocr/ocrSession")
+const { startOcrRun } = await import("@/features/pdf/ocr/ocrRun")
+const { OcrPanel } = await import("@/features/pdf/ocr/ocrPanel")
 const { ocrEngineVariant } = await import("@/features/pdf/ocr/ocrWorkerHost")
 
 type DialogProps = Parameters<typeof RecogniseTextDialog>[0]
@@ -87,6 +101,81 @@ describe("Recognise text logic", () => {
 		expect(ocrEngineVariant(() => true)).toBe("relaxedsimd-lstm")
 		expect(ocrEngineVariant(bytes => bytes.length < 33)).toBe("simd-lstm")
 		expect(ocrEngineVariant(() => false)).toBe("lstm")
+	})
+})
+
+describe("startOcrRun", () => {
+	const engine = {
+		render: () => Promise.reject(new Error("unused")),
+		flush: () => Promise.resolve(),
+		apply: () => Promise.resolve()
+	}
+
+	async function lastState(run: (signal: AbortSignal) => Promise<never>, cancel = false) {
+		pipeline.run = run
+
+		const onState = vi.fn()
+		const handle = startOcrRun({ engine, pages: [0, 2], languages: ["eng"], onState })
+
+		if (cancel) handle.cancel()
+		expect(await handle.done).toBeNull()
+
+		return onState.mock.lastCall?.[0] as unknown
+	}
+
+	it("reports a run that broke off as failed", async () => {
+		expect(await lastState(() => Promise.reject(new Error("worker died")))).toEqual({
+			phase: "failed",
+			pages: [
+				{ page: 0, status: "waiting", words: 0 },
+				{ page: 2, status: "waiting", words: 0 }
+			]
+		})
+	})
+
+	it("reports models that did not download apart", async () => {
+		expect(await lastState(() => Promise.reject(new OcrModelsError("offline")))).toEqual({ phase: "modelsFailed" })
+	})
+
+	it("never reports a cancelled run as failed", async () => {
+		const rejectOnAbort = (signal: AbortSignal) =>
+			new Promise<never>((_resolve, reject) => {
+				signal.addEventListener("abort", () => {
+					reject(new OcrModelsError("aborted"))
+				})
+			})
+
+		expect(await lastState(rejectOnAbort, true)).toMatchObject({ phase: "finished", cancelled: true })
+	})
+})
+
+describe("OcrPanel", () => {
+	it("says so before closing when the scanned pages could not be found", async () => {
+		const order: string[] = []
+		const context = fakeToolContext({
+			edit: (_change, dropped) => {
+				dropped?.()
+			},
+			notify: vi.fn((notice: unknown) => {
+				if (notice !== null) order.push("notify")
+			}),
+			finish: vi.fn(() => {
+				order.push("finish")
+			})
+		})
+
+		render(
+			<OcrPanel
+				context={context}
+				document={{} as PdfDomDocument}
+				active
+				phone={false}
+			/>
+		)
+
+		await waitFor(() => {
+			expect(order).toEqual(["notify", "finish"])
+		})
 	})
 })
 
@@ -185,6 +274,15 @@ describe("RecogniseTextDialog", () => {
 		expect(screen.getByText("previewPdfOcrPageFailed")).toBeTruthy()
 		fireEvent.click(screen.getByText("common:close"))
 		expect(props.onClose).toHaveBeenCalled()
+	})
+
+	it("says when a run broke off, with what it made searchable", () => {
+		dialog({ run: { phase: "failed", pages: [{ page: 0, status: "done", words: 3 }] } })
+
+		expect(screen.getByRole("alert").textContent).toBe("previewPdfOcrRunFailed")
+		expect(screen.getByText('previewPdfOcrDone {"count":1}')).toBeTruthy()
+		expect(screen.queryByText("previewPdfOcrCancelled")).toBeNull()
+		expect(screen.getByText("common:close")).toBeTruthy()
 	})
 
 	it("says when the language data could not be downloaded", () => {

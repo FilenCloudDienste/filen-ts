@@ -3,12 +3,21 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { PdfAnnotationRef, PdfComment, PdfCommentThread, PdfReviewState } from "@filen/office/core/pdfedit/annotations"
+import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
+import { applied, postComment } from "@/features/pdf/annotations/annotationActions"
+import { annotationStoreOf, PdfAnnotationStore } from "@/features/pdf/annotations/annotationStore"
+import { PdfAnnotationsHost } from "@/features/pdf/annotations/annotationsHost"
 import { PdfCommentsPanel, type PdfCommentsPanelProps } from "@/features/pdf/comments/pdfCommentsPanel"
+import type { PdfEditPhase, PdfEditSwap } from "@/features/pdf/session/swap"
+import type { PdfToolContext } from "@/features/pdf/tools/registry"
+import { fakeToolContext } from "@/tests/support/pdfToolContext"
 import "@/lib/i18n"
 
 // The PDF Comments panel on the generic thread list: lists the document's threads with page, replies and state, opens
 // one whole, and replies, edits one's own, deletes and resolves through the host's callbacks; the first reply asks the
-// author name once; a selection on the page opens its thread; text is shown as text, never markup.
+// author name once; a selection on the page opens its thread; text is shown as text, never markup. Threads not read
+// yet or not readable say so; the store reads them once the editor arrives; a change the editor drops settles as not
+// applied and keeps the field usable.
 
 const settings = vi.hoisted(() => ({ authorName: null as string | null }))
 
@@ -85,6 +94,8 @@ function panel(threads: readonly PdfCommentThread[], extra: Partial<PdfCommentsP
 	const calls: Calls = { reply: [], edit: [], remove: [], state: [], select: [] }
 	const props: PdfCommentsPanelProps = {
 		threads,
+		loaded: true,
+		failed: false,
 		editable: true,
 		phone: false,
 		open: true,
@@ -347,5 +358,288 @@ describe("PDF comments panel", () => {
 		})
 		expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull()
 		expect(document.querySelector("[data-comments-pane]")).not.toBeNull()
+	})
+
+	it("says the threads are being read until they are, and says a failed read", () => {
+		const { props, view } = panel([], { loaded: false })
+
+		expect(screen.getByRole("status").textContent).toBe("Reading comments…")
+		expect(screen.queryByText("This document has no comments.")).toBeNull()
+
+		view.rerender(
+			<PdfCommentsPanel
+				{...props}
+				failed
+			/>
+		)
+		expect(screen.getByText("The comments of this document could not be read. Close and open Comments to try again.")).toBeTruthy()
+		expect(screen.queryByText("This document has no comments.")).toBeNull()
+	})
+
+	it("a reply the editor drops settles as not applied, and the field takes a second submit", async () => {
+		settings.authorName = "Tess Ter"
+
+		const edit = vi.fn((_change: unknown, dropped?: () => void) => {
+			dropped?.()
+		})
+		const context = fakeToolContext({ edit })
+
+		panel([thread(0, 3, "Root")], {
+			onReply: (root, text, author) => applied(context, live => live.dispatch("annotations.reply", { ...root, text, author }))
+		})
+
+		fireEvent.click(await screen.findByRole("button", { name: /: Root, Page 1$/u }))
+		fireEvent.click(await screen.findByRole("button", { name: "Reply" }))
+		fireEvent.change(screen.getByRole("textbox", { name: "Reply" }), { target: { value: "Fixed" } })
+		fireEvent.click(screen.getByRole("button", { name: "Reply" }))
+
+		await waitFor(() => {
+			expect(edit).toHaveBeenCalledTimes(1)
+		})
+		await act(() => Promise.resolve())
+
+		fireEvent.click(screen.getByRole("button", { name: "Reply" }))
+
+		await waitFor(() => {
+			expect(edit).toHaveBeenCalledTimes(2)
+		})
+	})
+})
+
+// An editor session whose engine answers `comments` through `read`.
+function commentsSession(read: () => Promise<readonly PdfCommentThread[]>) {
+	const calls: string[] = []
+	const session = {
+		engine: {
+			call: (op: string) => {
+				calls.push(op)
+
+				return op === "comments" ? read() : Promise.reject(new Error(op))
+			}
+		},
+		subscribe: () => () => undefined,
+		getSnapshot: () => ({ document: {}, touched: [] })
+	} as unknown as PdfEditSessionModel
+
+	return { calls, session }
+}
+
+describe("PDF comment threads in the annotation store", () => {
+	it("Comments opened before the editor reads the threads once the session binds", async () => {
+		const store = new PdfAnnotationStore()
+		const { calls, session } = commentsSession(() => Promise.resolve([thread(0, 3, "Root")]))
+
+		store.openComments(true)
+		expect(store.getState().threads).toBeNull()
+		expect(store.getState().threadsStatus).toBe("idle")
+
+		store.bind(session)
+		expect(store.getState().threadsStatus).toBe("reading")
+
+		await waitFor(() => {
+			expect(store.getState().threads).toHaveLength(1)
+		})
+		expect(store.getState().threadsStatus).toBe("idle")
+		expect(calls).toEqual(["comments"])
+	})
+
+	it("a failed read is told, and read again when Comments opens next", async () => {
+		const store = new PdfAnnotationStore()
+		const read = vi.fn<() => Promise<readonly PdfCommentThread[]>>(() => Promise.reject(new Error("busy")))
+		const { session } = commentsSession(read)
+
+		store.bind(session)
+		store.openComments(true)
+
+		await waitFor(() => {
+			expect(store.getState().threadsStatus).toBe("failed")
+		})
+		expect(store.getState().threads).toBeNull()
+
+		read.mockImplementation(() => Promise.resolve([]))
+		store.openComments(false)
+		store.openComments(true)
+
+		await waitFor(() => {
+			expect(store.getState().threads).toEqual([])
+		})
+		expect(store.getState().threadsStatus).toBe("idle")
+		expect(read).toHaveBeenCalledTimes(2)
+	})
+
+	it("a dropped comment keeps the field; a posted one ends it", async () => {
+		const store = new PdfAnnotationStore()
+		const composing = { kind: "note", page: 0, at: [10, 10] } as const
+		const dropping = fakeToolContext({
+			edit: (_change, dropped) => {
+				dropped?.()
+			}
+		})
+
+		store.compose(composing)
+		await expect(applied(dropping, () => Promise.reject(new Error("never runs")))).resolves.toBe(false)
+		await expect(postComment(dropping, store, composing, "Hi", "Ann")).resolves.toBeNull()
+		expect(store.getState().composing).toBe(composing)
+
+		const live = {
+			dispatch: () => Promise.resolve({ state: { revision: 2 }, created: { page: 0, id: 9 } })
+		} as unknown as PdfEditSessionModel
+		const running = fakeToolContext({
+			edit: change => {
+				void change(live)
+			}
+		})
+
+		await expect(postComment(running, store, composing, "Hi", "Ann")).resolves.toBe("9")
+		expect(store.getState().composing).toBeNull()
+	})
+	it("a comment begun before the editor keeps its field when the editor arrives; one on an editor that went away ends", () => {
+		const store = new PdfAnnotationStore()
+		const { session } = commentsSession(() => Promise.resolve([]))
+		const composing = { kind: "note", page: 0, at: [10, 10] } as const
+
+		store.compose(composing)
+		store.bind(session)
+		expect(store.getState().composing).toBe(composing)
+
+		store.bind(null)
+		expect(store.getState().composing).toBeNull()
+
+		store.compose(composing)
+		store.bind(session)
+		expect(store.getState().composing).toBe(composing)
+
+		const { session: replaced } = commentsSession(() => Promise.resolve([]))
+
+		store.bind(replaced)
+		expect(store.getState().composing).toBeNull()
+	})
+})
+
+describe("PDF Comments in the annotation host", () => {
+	it("a note placed from the viewer keeps its field and text while the editor starts, and posts once it is there", async () => {
+		settings.authorName = "Ann"
+
+		const read = vi.fn<() => Promise<readonly PdfCommentThread[]>>(() => Promise.resolve([]))
+		const { session } = commentsSession(read)
+		const dispatch = vi.fn(() => Promise.resolve({ state: { revision: 2 }, created: { page: 0, id: 9 } }))
+		const live = Object.assign(session, { dispatch })
+		const listeners = new Set<() => void>()
+		// The placement started the editor (swap.warm) in the same call.
+		let phase = { kind: "starting" } as unknown as PdfEditPhase
+		const swap = {
+			subscribe: (listener: () => void) => {
+				listeners.add(listener)
+
+				return () => {
+					listeners.delete(listener)
+				}
+			},
+			getSnapshot: () => phase
+		} as unknown as PdfEditSwap
+		const store = annotationStoreOf(swap)
+		const edit = vi.fn((change: (session: PdfEditSessionModel) => Promise<unknown>) => {
+			void change(live)
+		})
+
+		render(
+			<PdfAnnotationsHost
+				context={fakeToolContext({ swap, edit: edit as unknown as PdfToolContext["edit"] })}
+				document={{} as never}
+				active
+				phone={false}
+			/>
+		)
+
+		const composing = { kind: "note", page: 0, at: [10, 10] } as const
+
+		act(() => {
+			store.compose(composing)
+		})
+		fireEvent.change(screen.getByRole("textbox", { name: "Add a comment" }), { target: { value: "Check this" } })
+
+		act(() => {
+			phase = { kind: "editing", session: live } as unknown as PdfEditPhase
+
+			for (const listener of listeners) listener()
+		})
+
+		expect(store.getState().composing).toBe(composing)
+		expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Add a comment" }).value).toBe("Check this")
+
+		await waitFor(() => {
+			expect(store.getState().threads).toEqual([])
+		})
+		expect(read).toHaveBeenCalledTimes(1)
+
+		fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+
+		await waitFor(() => {
+			expect(store.getState().composing).toBeNull()
+		})
+		expect(dispatch).toHaveBeenCalledWith("annotations.note", { page: 0, at: [10, 10], text: "Check this", author: "Ann" })
+		expect(screen.queryByRole("textbox", { name: "Add a comment" })).toBeNull()
+	})
+
+	it.each(["failed", "poisoned", "reopenFailed"] as const)("says the threads cannot be read when the editor is %s", kind => {
+		const phase: PdfEditPhase = { kind }
+		const swap = { subscribe: () => () => undefined, getSnapshot: () => phase } as unknown as PdfEditSwap
+
+		annotationStoreOf(swap).openComments(true)
+		render(
+			<PdfAnnotationsHost
+				context={fakeToolContext({ swap })}
+				document={{} as never}
+				active
+				phone={false}
+			/>
+		)
+
+		expect(screen.getByText("The comments of this document could not be read. Close and open Comments to try again.")).toBeTruthy()
+		expect(screen.queryByText("Reading comments…")).toBeNull()
+	})
+
+	it("closes Comments and Attachments when the editor goes back to the viewer", async () => {
+		const { session } = commentsSession(() => Promise.resolve([thread(0, 3, "Root")]))
+		const listeners = new Set<() => void>()
+		let phase = { kind: "editing", session } as unknown as PdfEditPhase
+		const swap = {
+			subscribe: (listener: () => void) => {
+				listeners.add(listener)
+
+				return () => {
+					listeners.delete(listener)
+				}
+			},
+			getSnapshot: () => phase
+		} as unknown as PdfEditSwap
+		const store = annotationStoreOf(swap)
+
+		render(
+			<PdfAnnotationsHost
+				context={fakeToolContext({ swap })}
+				document={{} as never}
+				active
+				phone={false}
+			/>
+		)
+		act(() => {
+			store.openComments(true)
+			store.openAttachments(true)
+		})
+
+		await waitFor(() => {
+			expect(store.getState().threads).toHaveLength(1)
+		})
+
+		act(() => {
+			phase = { kind: "view" }
+
+			for (const listener of listeners) listener()
+		})
+
+		expect(store.getState().commentsOpen).toBe(false)
+		expect(store.getState().attachmentsOpen).toBe(false)
+		expect(screen.queryByText("Reading comments…")).toBeNull()
 	})
 })

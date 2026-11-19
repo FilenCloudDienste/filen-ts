@@ -210,6 +210,52 @@ describe("preview worker", () => {
 		expect(h.decodes.map(decode => decode.time)).toEqual([1, 3, 1])
 	})
 
+	it("finishes a still although stage frames arrive after it", async () => {
+		const recipe = recipeFor(4)
+		const still = api.stillAt(2, recipe, 1920)
+
+		await vi.waitFor(() => {
+			expect(h.decodes[0]).toBeDefined()
+		})
+
+		// The stage frame a pause posts right after: it waits for the still, and never makes it stale.
+		const stage = api.frameAt(2, recipe, 640)
+
+		expect(h.decodes[0]?.current()).toBe(true)
+		h.decodes[0]?.gate.resolve(undefined)
+		expect(await still).toBeDefined()
+		await answer(1)
+		expect(await stage).toBeDefined()
+		// A still never prunes the stage's text textures.
+		expect(h.pruned).toEqual([0])
+	})
+
+	it("never supersedes a stage frame in flight with a still; a newer still supersedes an older", async () => {
+		const recipe = recipeFor(4)
+		const stage = api.frameAt(1, recipe, 640)
+
+		await vi.waitFor(() => {
+			expect(h.decodes[0]).toBeDefined()
+		})
+
+		const older = api.stillAt(1, recipe, 1920)
+
+		expect(h.decodes[0]?.current()).toBe(true)
+		h.decodes[0]?.gate.resolve(undefined)
+		expect(await stage).toBeDefined()
+
+		await vi.waitFor(() => {
+			expect(h.decodes[1]).toBeDefined()
+		})
+
+		const newer = api.stillAt(3, recipe, 1920)
+
+		h.decodes[1]?.gate.resolve(undefined)
+		await expect(older).rejects.toMatchObject({ name: "AbortError" })
+		await answer(2)
+		expect(await newer).toBeDefined()
+	})
+
 	it("opens a source suspended while decoding is suspended, until resumed", async () => {
 		api.suspendDecoding()
 		api.close()
@@ -217,6 +263,7 @@ describe("preview worker", () => {
 
 		await expect(api.frameAt(1, recipeFor(4), 640)).rejects.toMatchObject({ name: "AbortError" })
 		await expect(api.filterThumbnails(1, recipeFor(4), [null], 64)).rejects.toMatchObject({ name: "AbortError" })
+		await expect(api.stillAt(1, recipeFor(4), 640)).rejects.toMatchObject({ name: "AbortError" })
 		expect(h.decodes).toEqual([])
 
 		api.resumeDecoding()

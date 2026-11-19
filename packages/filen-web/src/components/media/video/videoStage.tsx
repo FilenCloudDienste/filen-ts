@@ -341,6 +341,18 @@ export function VideoStage(props: VideoStageProps) {
 		}
 	}, [container])
 
+	// A focused control that unmounts (Next at the queue's end, Retry once the stall ends, Skip intro) leaves focus on
+	// the body, outside the stage's key handler: the stage takes it back. Focus anywhere else (a popup, a card) stays.
+	const hasCornerCard = props.cornerCard !== undefined && props.cornerCard !== null
+	const hasCenterCard = props.centerCard !== undefined && props.centerCard !== null
+	const hasFailure = props.failure !== undefined && props.failure !== null
+
+	useEffect(() => {
+		if (container !== null && (document.activeElement === null || document.activeElement === document.body)) {
+			container.focus({ preventScroll: true })
+		}
+	}, [container, props.hasNext, props.hasPrevious, stall, props.loading, hasFailure, hasCornerCard, hasCenterCard, phone])
+
 	useEffect(() => {
 		const root = document.getElementById("root")
 

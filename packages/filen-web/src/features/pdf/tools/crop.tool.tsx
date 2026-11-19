@@ -11,7 +11,6 @@ export const CROP_TOOL: PdfTool = {
 	labelKey: "previewPdfCrop",
 	icon: CropIcon,
 	toolClass: "pages",
-	actionIds: ["pdf.tool.crop"],
 	actions: [pdfToolAction("pdf.tool.crop", "k", "preview:previewPdfKeyCrop")],
 	enabledWhen: policy => toolEnabled("pages", policy),
 	commands: ["crop.set", "crop.toContent", "crop.removeOutside"],

@@ -255,7 +255,10 @@ describe("photos selection bar Compress", () => {
 		onlineManager.setOnline(false)
 		renderBar([COLOSSEUM, EIFFEL])
 
-		expect(screen.getByRole("button", { name: "Compress" }).hasAttribute("disabled")).toBe(true)
+		const compress = screen.getByRole("button", { name: "Compress" })
+
+		expect(compress.getAttribute("aria-disabled")).toBe("true")
+		expect(document.getElementById(compress.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Unavailable while offline")
 	})
 
 	it("offers no Extract", () => {

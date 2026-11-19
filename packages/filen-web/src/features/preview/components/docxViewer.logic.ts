@@ -173,15 +173,16 @@ export function notConvertedKey(kind: DocNotConvertedKind): NotConvertedKey {
 	}
 }
 
-// A converted Word 97–2003 document, held in the docx worker while its preview shows it, released a turn after the
-// preview let go of it (so a remount in the same turn, React's Strict Mode check, keeps it).
-export interface DocxConversionKey {
-	readonly document: DocxConvertedDocument
+// A document held in the docx worker while its preview shows it (hold), released a turn after the preview let go
+// of it (drop), so the viewer and editor close first and a remount in the same turn (React's Strict Mode check)
+// keeps it.
+export interface HeldDocument<T> {
+	readonly document: T
 	hold: () => void
 	drop: () => void
 }
 
-export function docxConversionKey(document: DocxConvertedDocument): DocxConversionKey {
+export function heldDocument<T extends { release(): void }>(document: T): HeldDocument<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined
 
 	return {
@@ -198,31 +199,15 @@ export function docxConversionKey(document: DocxConvertedDocument): DocxConversi
 	}
 }
 
-// An unlocked document, held where it was decrypted (the docx worker) while its preview shows it, and released
-// once the preview let go of it (drop). The release waits a turn, so the viewer and editor close first and a
-// remount in the same turn (React's Strict Mode check) keeps it.
-export interface DocxSessionKey {
-	readonly document: DocxUnlockedDocument
-	hold: () => void
-	drop: () => void
-}
+// A converted Word 97–2003 document.
+export type DocxConversionKey = HeldDocument<DocxConvertedDocument>
 
-export function docxSessionKey(document: DocxUnlockedDocument): DocxSessionKey {
-	let timer: ReturnType<typeof setTimeout> | undefined
+export const docxConversionKey: (document: DocxConvertedDocument) => DocxConversionKey = heldDocument
 
-	return {
-		document,
-		hold: () => {
-			clearTimeout(timer)
-		},
-		drop: () => {
-			clearTimeout(timer)
-			timer = setTimeout(() => {
-				document.release()
-			}, 0)
-		}
-	}
-}
+// An unlocked document, held where it was decrypted.
+export type DocxSessionKey = HeldDocument<DocxUnlockedDocument>
+
+export const docxSessionKey: (document: DocxUnlockedDocument) => DocxSessionKey = heldDocument
 
 // Why a document opens view-only: the file's own gate reasons (protection, signature, template, Strict
 // markup, damage) and where the file was opened from.

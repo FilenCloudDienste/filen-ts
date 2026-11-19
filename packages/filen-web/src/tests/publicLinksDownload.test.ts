@@ -6,10 +6,15 @@ import {
 	chooseDownloadStrategy,
 	anonPreviewability,
 	createCollectingSink,
-	PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES
+	PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES,
+	publicBufferedDownloadCap
 } from "@/features/publicLinks/lib/download.logic"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { deviceProfile } from "@/lib/deviceProfile"
+
+const MOBILE = { ...deviceProfile(), mobile: true }
+const DESKTOP = { ...deviceProfile(), mobile: false }
+const MIB_300 = 300n * 1_048_576n
 
 describe("chooseDownloadStrategy", () => {
 	it("streams via FSA whenever available, regardless of size", () => {
@@ -39,6 +44,19 @@ describe("chooseDownloadStrategy", () => {
 	it("honors an explicit cap override", () => {
 		expect(chooseDownloadStrategy({ fsaAvailable: false, streamAvailable: false, size: 2048n, cap: 1024n })).toEqual({
 			kind: "too-large"
+		})
+	})
+
+	it("refuses a 300 MiB buffered file on a mobile device", () => {
+		expect(chooseDownloadStrategy({ fsaAvailable: false, streamAvailable: false, size: MIB_300, profile: MOBILE })).toEqual({
+			kind: "too-large"
+		})
+	})
+
+	it("keeps the 1 GiB buffered ceiling on desktop", () => {
+		expect(publicBufferedDownloadCap(DESKTOP)).toBe(PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES)
+		expect(chooseDownloadStrategy({ fsaAvailable: false, streamAvailable: false, size: MIB_300, profile: DESKTOP })).toEqual({
+			kind: "buffered"
 		})
 	})
 })
@@ -127,5 +145,18 @@ describe("createCollectingSink", () => {
 
 		await expect(writer.write(new Uint8Array([4, 5, 6]))).rejects.toThrow()
 		await expect(sink.done).rejects.toThrow()
+	})
+
+	it("refuses a zip past the mobile cap", async () => {
+		const cap = publicBufferedDownloadCap(MOBILE)
+
+		expect(cap).toBe(PREVIEW_MAX_BYTES)
+
+		const sink = createCollectingSink(cap)
+		const writer = sink.writable.getWriter()
+
+		await expect(writer.write(new Uint8Array(Number(cap) + 1))).rejects.toThrow()
+		await expect(sink.done).rejects.toThrow()
+		expect(sink.capExceeded()).toBe(true)
 	})
 })

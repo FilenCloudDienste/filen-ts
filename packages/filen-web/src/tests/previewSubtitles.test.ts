@@ -1,4 +1,7 @@
+// @vitest-environment jsdom
+
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import type { DriveItem } from "@/features/drive/lib/item"
 
 // A preview's sidecar subtitles come from a listing already held (never a fetch) and cost one read when
@@ -19,10 +22,11 @@ vi.mock("@/lib/sdk/client", () => ({
 	}
 }))
 vi.mock("@/queries/patch", () => ({ cachedQueriesWithPrefix: () => mocks.queries }))
-vi.mock("@/features/drive/queries/drive", () => ({ DRIVE_LISTING_KEY_PREFIX: ["drive", "listing"] }))
 
 const { cachedSiblings, loadSidecar, previewSidecars } = await import("@/features/preview/lib/previewSubtitles")
 const { linkedFileItem } = await import("@/tests/fixtures/sdk")
+const { findCachedDirectoryListing } = await import("@/features/drive/queries/drive")
+const { usePreviewSubtitles } = await import("@/features/preview/hooks/usePreviewSubtitles")
 
 const SRT = new TextEncoder().encode("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 
@@ -51,6 +55,44 @@ describe("cachedSiblings", () => {
 		mocks.queries = [listing("favorites", null, [video]), listing("sharedIn", null, [video])]
 
 		expect(cachedSiblings(video.data.uuid)).toEqual([])
+	})
+})
+
+describe("findCachedDirectoryListing", () => {
+	it("yields the drive's listings and shared directories below the root, skipping flat listings and shared roots", () => {
+		const file = linkedFileItem("a.txt")
+		const seen: string[] = []
+
+		mocks.queries = [
+			listing("recents", null, [file]),
+			listing("sharedIn", null, [file]),
+			listing("sharedOut", null, [file]),
+			listing("trash", null, [file]),
+			listing("drive", null, [file]),
+			listing("sharedIn", "in", [file]),
+			listing("sharedOut", "out", [file])
+		]
+
+		findCachedDirectoryListing(({ params, own }) => {
+			seen.push(`${params.variant}:${params.uuid ?? ""}:${String(own)}`)
+
+			return false
+		})
+
+		expect(seen).toEqual(["drive::true", "sharedIn:in:false", "sharedOut:out:false"])
+	})
+
+	it("returns the first match in cache order with its rows", () => {
+		const file = linkedFileItem("a.txt")
+
+		mocks.queries = [listing("sharedIn", "in", [file]), listing("drive", "dir", [file])]
+
+		expect(findCachedDirectoryListing(({ rows }) => rows.includes(file))).toEqual({
+			params: { variant: "sharedIn", uuid: "in" },
+			rows: [file],
+			own: false
+		})
+		expect(findCachedDirectoryListing(() => false)).toBeNull()
 	})
 })
 
@@ -96,5 +138,36 @@ describe("loadSidecar", () => {
 		}
 
 		expect((await loadSidecar(found, "authed", new AbortController().signal)).status).toBe("unreadable")
+	})
+})
+
+describe("usePreviewSubtitles", () => {
+	it("reads a file that failed to load again when it is chosen again", async () => {
+		const video = linkedFileItem("Movie.mkv")
+		const subtitle = linkedFileItem("Movie.en.srt", { size: BigInt(SRT.length) })
+		const id = `s:${subtitle.data.uuid}`
+
+		mocks.queries = [listing("drive", "dir", [video, subtitle])]
+		mocks.downloadFileBytes.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(SRT)
+
+		const { result } = renderHook(() => usePreviewSubtitles(video, null, null))
+
+		act(() => {
+			result.current.select(id)
+		})
+
+		await waitFor(() => {
+			expect(result.current.failed).toBe(true)
+		})
+
+		act(() => {
+			result.current.select(id)
+		})
+
+		await waitFor(() => {
+			expect(result.current.cues?.texts).toEqual(["Hello"])
+		})
+		expect(result.current.failed).toBe(false)
+		expect(mocks.downloadFileBytes).toHaveBeenCalledTimes(2)
 	})
 })

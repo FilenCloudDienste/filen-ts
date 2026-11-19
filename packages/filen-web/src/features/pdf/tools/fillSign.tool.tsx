@@ -37,7 +37,6 @@ function fillSignTool(
 		labelKey,
 		icon,
 		toolClass,
-		actionIds: key === undefined ? [] : [key.id],
 		actions: key === undefined ? [] : [key],
 		enabledWhen: policy => toolEnabled(toolClass, policy),
 		commands: [command],

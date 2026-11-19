@@ -22,7 +22,6 @@ export interface FramePipelineLike {
 		outputTimeSec: number,
 		hdr: HdrHandling | null
 	): Promise<VideoFrame>
-	needsGpu(recipe: VideoEditRecipe): boolean
 	dispose(): void
 }
 

@@ -98,7 +98,8 @@ function continuesBurst(previous: ChatMessage, previousDay: number, current: Cha
 // A time header precedes the first message of each calendar day (keyed on the day number, so React and the
 // virtualizer keep it stable when older pages prepend and it moves up to a new first message) and any
 // message sent an hour or more after the one before it (keyed on that message). Message rows key on the
-// server uuid.
+// server uuid. Pending and failed bubbles sort after every confirmed message whatever their timestamp, so a
+// day can recur; a repeat header of an already emitted day keys on its message to stay unique.
 //
 // `unread`, when given, inserts a single `{kind:"unread"}` divider row immediately before the first
 // message that qualifies (old-web's NewDivider placement/guard), and that message opens a new run. Omitted
@@ -116,13 +117,17 @@ export function buildThreadRows(
 	let previous: ChatMessage | undefined
 	let previousDay: number | undefined
 	let unreadInserted = false
+	const emittedDays = new Set<number>()
 
 	for (const message of messages) {
 		const day = dayNumber(new Date(Number(message.sentTimestamp)))
 		let runStart = previous === undefined || previousDay === undefined || !continuesBurst(previous, previousDay, message, day)
 
 		if (day !== previousDay) {
-			rows.push({ kind: "time", key: `day-${String(day)}`, timestamp: message.sentTimestamp })
+			const key = emittedDays.has(day) ? `day-${String(day)}-${message.uuid}` : `day-${String(day)}`
+
+			emittedDays.add(day)
+			rows.push({ kind: "time", key, timestamp: message.sentTimestamp })
 		} else if (previous !== undefined && Number(message.sentTimestamp) - Number(previous.sentTimestamp) >= TIME_HEADER_GAP_MS) {
 			rows.push({ kind: "time", key: `gap-${message.uuid}`, timestamp: message.sentTimestamp })
 		}

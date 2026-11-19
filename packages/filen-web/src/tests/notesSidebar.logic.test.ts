@@ -241,6 +241,13 @@ describe("notesSidebar.logic — selectableNotesFromRows (click-selection range)
 const GROUP_NOW = new Date("2026-07-12T12:00:00.000Z").getTime()
 const GROUP_DAY = 24 * 60 * 60 * 1000
 
+// Local midnight on the first day of the timestamp's calendar month, the shared core's month bucket key.
+function monthStartOf(ts: number): number {
+	const date = new Date(ts)
+
+	return new Date(date.getFullYear(), date.getMonth(), 1).getTime()
+}
+
 function headerIds(rows: NotesSidebarRow[]): string[] {
 	return rows.filter((row): row is Extract<NotesSidebarRow, { kind: "header" }> => row.kind === "header").map(row => row.id)
 }
@@ -270,7 +277,7 @@ describe("notesSidebar.logic — groupNotesForView (date grouping)", () => {
 			"today",
 			"previous7Days",
 			"previous30Days",
-			"month",
+			`month-${String(monthStartOf(GROUP_NOW - 45 * GROUP_DAY))}`,
 			"year-2025",
 			"year-2024",
 			"archived",
@@ -330,6 +337,42 @@ describe("notesSidebar.logic — groupNotesForView (date grouping)", () => {
 		const header = rows.find((row): row is Extract<NotesSidebarRow, { kind: "header" }> => row.kind === "header")
 
 		expect(header?.label.kind).toBe("literal")
+	})
+
+	it("gives each calendar-month bucket its own header id and its own month name", () => {
+		const now = new Date(2025, 10, 18, 12).getTime()
+		const oct5 = new Date(2025, 9, 5, 12).getTime()
+		const sep20 = new Date(2025, 8, 20, 12).getTime()
+		const rows = groupNotesForView(
+			[
+				mockNote({ uuid: testUuid("sep"), editedTimestamp: BigInt(sep20) }),
+				mockNote({ uuid: testUuid("oct"), editedTimestamp: BigInt(oct5) })
+			],
+			now
+		)
+		const headers = rows.filter((row): row is Extract<NotesSidebarRow, { kind: "header" }> => row.kind === "header")
+		const monthName = (ts: number): string => new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(ts))
+
+		expect(headers.map(header => header.id)).toStrictEqual([
+			`month-${String(monthStartOf(oct5))}`,
+			`month-${String(monthStartOf(sep20))}`
+		])
+		expect(headers.map(header => header.label)).toStrictEqual([
+			{ kind: "literal", text: monthName(oct5) },
+			{ kind: "literal", text: monthName(sep20) }
+		])
+	})
+
+	it("names the year in the header of a month from the previous year", () => {
+		const now = new Date(2026, 0, 10, 12).getTime()
+		const dec5 = new Date(2025, 11, 5, 12).getTime()
+		const rows = groupNotesForView([mockNote({ editedTimestamp: BigInt(dec5) })], now)
+		const header = rows.find((row): row is Extract<NotesSidebarRow, { kind: "header" }> => row.kind === "header")
+
+		expect(header?.label).toStrictEqual({
+			kind: "literal",
+			text: new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(dec5))
+		})
 	})
 })
 

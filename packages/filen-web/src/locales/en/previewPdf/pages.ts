@@ -161,6 +161,8 @@ export const previewPdfPages = {
 	previewPdfSplitByCount: "By page count",
 	/** PDF Split dialog — accessible name of the number of pages per file */
 	previewPdfSplitCountLabel: "Pages per file",
+	/** PDF Split dialog — error under the pages-per-file field when it is not a whole number in range; {{last}} is the page count */
+	previewPdfSplitCountInvalid: "Enter a number of pages from 1 to {{last}}",
 	/** PDF Split dialog — cut before each page selected in the pages rail */
 	previewPdfSplitBySelection: "Before each selected page",
 	/** PDF Split dialog — cut where each top-level bookmark begins */

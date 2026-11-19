@@ -118,6 +118,31 @@ describe("createOwnedWorker", () => {
 		await expect(call).resolves.toBe("done")
 		owned.terminate()
 	})
+
+	// A reaction on the long-lived `gone` per call would hold every call's result until the worker ends.
+	it("registers nothing on gone per call, so a settled call's result is not retained", async () => {
+		const owned = createOwnedWorker<Api>(create, "geo")
+		const subscribe = vi.spyOn(owned.gone, "then")
+		const call = owned.run(remote => remote.work())
+
+		await Promise.resolve()
+		remotes[0]?.pending[0]?.("done")
+
+		await expect(call).resolves.toBe("done")
+		await expect(owned.run(() => Promise.resolve("again"))).resolves.toBe("again")
+		expect(subscribe).not.toHaveBeenCalled()
+		owned.terminate()
+	})
+
+	it("rejects a call made after it ended with the end reason, without starting it", async () => {
+		const owned = createOwnedWorker<Api>(create, "geo")
+		const work = vi.fn(() => Promise.resolve("never"))
+
+		owned.terminate()
+
+		await expect(owned.run(work)).rejects.toMatchObject({ name: "AbortError" })
+		expect(work).not.toHaveBeenCalled()
+	})
 })
 
 describe("statelessWorker", () => {
@@ -199,6 +224,20 @@ describe("statelessWorker", () => {
 
 		await expect(next).resolves.toBe("second")
 		expect(workers).toHaveLength(2)
+	})
+
+	it("registers nothing on gone per call", async () => {
+		const pool = statelessWorker<Api>(create, 30_000, "raster")
+		const handle = await pool.use(current => Promise.resolve(current))
+		const subscribe = vi.spyOn(handle.gone, "then")
+		const call = pool.use(({ remote }) => remote.work())
+
+		await Promise.resolve()
+		await Promise.resolve()
+		remotes[0]?.pending[0]?.("ok")
+
+		await expect(call).resolves.toBe("ok")
+		expect(subscribe).not.toHaveBeenCalled()
 	})
 })
 

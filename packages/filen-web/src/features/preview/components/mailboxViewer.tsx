@@ -21,6 +21,7 @@ import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { log } from "@/lib/log"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@filen/shared"
 
 // A mailbox (F1): its messages listed on the left, found only as far as the list is scrolled ("≥ N messages" until the
@@ -47,29 +48,56 @@ type Opened =
 	| { readonly status: "ok"; readonly index: number; readonly blob: Blob }
 	| { readonly status: "tooLarge" | "failed"; readonly index: number }
 
-function MessageRow({ row, selected, onOpen }: { row: EmailHeaderSummary | undefined; selected: boolean; onOpen: () => void }) {
+// `position`: the row's 1-based place in the list, its name while its header is still being read. Never disabled then:
+// keyboard navigation focuses rows still loading, and opening one works.
+function MessageRow({
+	row,
+	position,
+	selected,
+	onOpen
+}: {
+	row: EmailHeaderSummary | undefined
+	position: number
+	selected: boolean
+	onOpen: () => void
+}) {
 	const { t } = useTranslation("preview")
 	const date = row?.date === null || row === undefined ? null : Date.parse(row.date)
+	const className = cn(
+		"flex size-full flex-col justify-center gap-0.5 border-b border-border/50 px-3 text-left text-sm hover:bg-accent",
+		selected ? "bg-accent" : null
+	)
+
+	if (row === undefined) {
+		return (
+			<button
+				type="button"
+				aria-current={selected ? "true" : undefined}
+				aria-label={t("previewMailboxRowLoading", { index: position })}
+				aria-busy="true"
+				onClick={onOpen}
+				className={className}
+			>
+				<Skeleton className="h-4 w-1/2" />
+				<Skeleton className="h-4 w-3/4" />
+			</button>
+		)
+	}
 
 	return (
 		<button
 			type="button"
 			aria-current={selected ? "true" : undefined}
 			onClick={onOpen}
-			className={cn(
-				"flex size-full flex-col justify-center gap-0.5 border-b border-border/50 px-3 text-left text-sm hover:bg-accent",
-				selected ? "bg-accent" : null
-			)}
+			className={className}
 		>
 			<span className="flex min-w-0 items-baseline justify-between gap-2">
-				<bdi className="min-w-0 truncate font-medium">{row === undefined ? "" : (row.from ?? t("previewMailboxNoSender"))}</bdi>
+				<bdi className="min-w-0 truncate font-medium">{row.from ?? t("previewMailboxNoSender")}</bdi>
 				<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-					{date === null || Number.isNaN(date) ? (row?.date ?? "") : formatDateTime(date)}
+					{date === null || Number.isNaN(date) ? (row.date ?? "") : formatDateTime(date)}
 				</span>
 			</span>
-			<bdi className="min-w-0 truncate text-muted-foreground">
-				{row === undefined ? "" : (row.subject ?? t("previewMailboxNoSubject"))}
-			</bdi>
+			<bdi className="min-w-0 truncate text-muted-foreground">{row.subject ?? t("previewMailboxNoSubject")}</bdi>
 		</button>
 	)
 }
@@ -220,8 +248,13 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 						Comlink.proxy((searched: number, found: readonly number[]) => {
 							if (!live) return
 
+							// An empty stretch keeps the matches as they are: the rows in view are not read again.
 							setSearch(current =>
-								current?.query !== query ? current : { ...current, searched, matches: [...current.matches, ...found] }
+								current?.query !== query
+									? current
+									: found.length === 0
+										? { ...current, searched }
+										: { ...current, searched, matches: [...current.matches, ...found] }
 							)
 						})
 					)
@@ -246,16 +279,23 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 		}
 	}, [pager, query])
 
+	// The rows read near the view; while a query is active, the messages they show, as a key: a search's progress reads
+	// rows again only when the matches near the view change, not whenever matches are found further on. A search's end
+	// reads them once more: until then a match past the messages the list scanned is readable only while the worker
+	// still keeps its row, and its index adopts the search's scanner when the search ends.
+	const from = Math.max(0, first - OVERSCAN)
+	const to = Math.min(shown, last + OVERSCAN + 1)
+	const nearMatches = matches === null ? null : matches.slice(from, to).join(",")
+	const searchEnded = search !== null && search.end !== null
+
 	useEffect(() => {
 		let live = true
-		const from = Math.max(0, first - OVERSCAN)
-		const to = Math.min(shown, last + OVERSCAN + 1)
 
 		if (to <= from) {
 			return
 		}
 
-		const indexes = matches === null ? null : matches.slice(from, to)
+		const indexes = nearMatches === null ? null : nearMatches.split(",").map(Number)
 
 		pager
 			.run(remote => (indexes === null ? remote.mboxRows(from, to - from) : remote.mboxRowsOf(indexes)))
@@ -263,13 +303,20 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 				read => {
 					if (!live) return
 
-					// Only the rows near the view are kept on the page, by message; the worker keeps more.
-					const next = new Map<number, EmailHeaderSummary>()
+					// Only the rows near the view are kept on the page, by message; the worker keeps more. A match the worker no
+					// longer keeps (read null) keeps the row the page already shows.
+					setRows(previous => {
+						const next = new Map<number, EmailHeaderSummary>()
 
-					read.forEach((row, offset) => {
-						if (row !== null) next.set(indexes === null ? from + offset : (indexes[offset] ?? -1), row)
+						read.forEach((row, offset) => {
+							const index = indexes === null ? from + offset : (indexes[offset] ?? -1)
+							const kept = row ?? (indexes === null ? undefined : previous.get(index))
+
+							if (kept !== undefined) next.set(index, kept)
+						})
+
+						return next
 					})
-					setRows(next)
 				},
 				(e: unknown) => {
 					log.error("preview", "reading a mailbox's rows failed", e)
@@ -280,7 +327,7 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 		return () => {
 			live = false
 		}
-	}, [pager, first, last, shown, matches])
+	}, [pager, from, to, nearMatches, searchEnded])
 
 	const [back, setBack] = useState<HTMLButtonElement | null>(null)
 	// The mailbox is the file its messages' attachments are saved from, unless another file holds it.
@@ -353,10 +400,10 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 	}
 
 	const stopCount = (): void => {
-		void pager.run(remote => remote.mboxStop())
+		void pager.run(remote => remote.mboxStop()).catch(() => undefined)
 	}
 	const stopSearch = (): void => {
-		void pager.run(remote => remote.mboxStopSearch())
+		void pager.run(remote => remote.mboxStopSearch()).catch(() => undefined)
 	}
 
 	const summary =
@@ -462,6 +509,7 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 								>
 									<MessageRow
 										row={rows.get(index)}
+										position={entry.index + 1}
 										selected={opened?.index === index}
 										onOpen={() => {
 											open(index)

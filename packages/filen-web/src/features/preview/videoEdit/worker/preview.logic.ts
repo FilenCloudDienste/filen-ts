@@ -65,7 +65,7 @@ export interface FilmstripSlot {
 }
 
 // `keys[i]` is the keyframe time for requested time i (null: none). Requests sharing a keyframe share its slot; past
-// `max` distinct keyframes the rest are dropped (the filmstrip asks again). Slots in time order, so a file read walks
+// `max` distinct keyframes the rest are dropped (the timeline asks for them again). Slots in time order, so a file read walks
 // forward.
 export function planFilmstrip(keys: readonly (number | null)[], max: number): FilmstripSlot[] {
 	const byTime = new Map<number, FilmstripSlot>()

@@ -129,12 +129,12 @@ import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import { driveListingQueryKey, driveNamesQueryKey, itemInfoQueryKey } from "@/features/drive/queries/drive"
 import { narrowItem } from "@/features/drive/lib/item"
 import { playPlaylistFrom } from "@/features/audio/lib/playlistPlayback"
-import { loadPreviewBytes } from "@/features/preview/lib/previewCache"
+import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
-import { forgetTabEditor, seedTabEditor, tabEditorChanged } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, seedTabEditor, tabEditorChanged } from "@/features/notes/lib/tabEditors"
 import { setAssistantRouter } from "@/features/assistant/tools/navigation"
 import { CHATS_QUERY_KEY } from "@/features/chats/queries/chats"
 import { createAssistantToolExecutor } from "@/features/assistant/tools/executor"
@@ -364,9 +364,18 @@ beforeEach(() => {
 	useAudioStore.setState({ queue: [], currentIndex: 0, status: "idle" })
 	useChatComposerStore.setState({ entries: {} })
 	useNotesInflightStore.setState({ inflightContent: {}, editingSessions: {} })
+	useTransfersStore.setState({ transfers: [], speedSamples: [], rowSpeedSamples: {} })
+	clearPreviewCache()
+	photosRoots.value = []
+	mailboxBytes.current = new Uint8Array(0)
 	at("/drive")
 	setAssistantRouter(router as unknown as RegisteredRouter)
 	executor = createAssistantToolExecutor()
+})
+
+// After each test, so a failed assertion cannot leave an editor for the next one to read.
+afterEach(() => {
+	forgetTabEditors()
 })
 
 describe("get_context", () => {
@@ -921,7 +930,6 @@ describe("read_text_file", () => {
 	})
 
 	it("keeps the joiners a word is spelled with, and drops hidden characters", async () => {
-		// Its own file: the preview cache keeps what another test read.
 		const letters = rawFile(testUuid("letters"), "letters.txt", ROOT, "text/plain")
 
 		sdk.listDirectory.mockResolvedValue({ dirs: [], files: [letters] })
@@ -1076,7 +1084,6 @@ describe("notes", () => {
 		expect(result).toMatchObject({ ok: true })
 		expect(json(result)).toEqual({ handle: "n1", title: "Trip plan", content: "Day 1: Lisbon\nDay 2: Porto" })
 		expect(sdk.getNoteContent).not.toHaveBeenCalled()
-		forgetTabEditor(plan.uuid)
 	})
 
 	it("reads a note's unsynced edits and writes nothing back", async () => {
@@ -1524,8 +1531,6 @@ describe("date filters and insights", () => {
 	})
 
 	it("says when Photos has no directory yet", async () => {
-		photosRoots.value = []
-
 		expect(await call("list_photos", {})).toMatchObject({ ok: false })
 	})
 

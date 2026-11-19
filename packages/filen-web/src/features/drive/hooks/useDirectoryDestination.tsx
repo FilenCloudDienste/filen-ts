@@ -24,7 +24,7 @@ export interface DirectoryDestination {
 // One host for every directory a surface's menus can create or upload into — a listing's own directory
 // and each of its directory rows, or whichever sidebar tree node was right-clicked. An action first
 // points the host at its directory; a picker's change and a dialog's submit arrive after that render,
-// so they land there.
+// so they land there. The desktop's native dialog reads its destination within the click, so it is passed in.
 export function useDirectoryDestination({
 	disabled,
 	openPreview,
@@ -51,11 +51,11 @@ export function useDirectoryDestination({
 			},
 			pickFiles: () => {
 				setTarget(uuid)
-				upload.pickFiles()
+				upload.pickInto("file", uuid)
 			},
 			pickDirectory: () => {
 				setTarget(uuid)
-				upload.pickDirectory()
+				upload.pickInto("directory", uuid)
 			}
 		}),
 		busy: upload.busy || newDirectoryOpen,

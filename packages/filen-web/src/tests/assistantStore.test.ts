@@ -28,7 +28,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 	}
 }))
 
-import { useAssistantStore, toggleAssistant, hydrateAssistantPanelOpen } from "@/features/assistant/store/useAssistantStore"
+import { useAssistantStore, toggleAssistant } from "@/features/assistant/store/useAssistantStore"
 import {
 	cancelAssistantTurn,
 	confirmAssistantProposal,
@@ -70,6 +70,14 @@ function state(): ReturnType<typeof useAssistantStore.getState> {
 	return useAssistantStore.getState()
 }
 
+// The panel loader is load-once per module and the toggle flag is module state, so each hydration case
+// gets its own module instance; the helpers above stay bound to the static import.
+async function freshAssistantStore(): Promise<typeof import("@/features/assistant/store/useAssistantStore")> {
+	vi.resetModules()
+
+	return import("@/features/assistant/store/useAssistantStore")
+}
+
 beforeEach(() => {
 	vi.useFakeTimers()
 	kvStore.clear()
@@ -107,19 +115,40 @@ describe("panel open state", () => {
 		expect(kvStore.has("assistant.v1.panelOpen")).toBe(false)
 	})
 
-	// The loader is load-once per module, so this is the file's only hydration case: a toggle has already
-	// happened in the tests above, and that choice must win over the stored value.
+	it("applies the stored value when the user has not toggled", async () => {
+		kvStore.set("assistant.v1.panelOpen", true)
+
+		const fresh = await freshAssistantStore()
+
+		await fresh.hydrateAssistantPanelOpen()
+
+		expect(fresh.useAssistantStore.getState().panelOpen).toBe(true)
+	})
+
 	it("never lets a late stored value override the user's own toggle", async () => {
 		kvStore.set("assistant.v1.panelOpen", true)
-		useAssistantStore.setState({ panelOpen: false })
 
-		await hydrateAssistantPanelOpen()
+		const fresh = await freshAssistantStore()
+		// The read is in flight with the stored value when the user closes the panel.
+		const hydrated = fresh.hydrateAssistantPanelOpen()
 
-		expect(state().panelOpen).toBe(false)
+		fresh.useAssistantStore.getState().setPanelOpen(false)
+
+		await hydrated
+
+		expect(fresh.useAssistantStore.getState().panelOpen).toBe(false)
 	})
 })
 
 describe("session wiring", () => {
+	it("registers no session at import: only a runtime that registers itself is ever current", async () => {
+		vi.resetModules()
+
+		const fresh = await import("@/features/assistant/store/assistantSession")
+
+		expect(fresh.getAssistantSession()).toBeNull()
+	})
+
 	it("tells a newly registered session whether the panel already shows, and every change after", () => {
 		const calls: boolean[] = []
 		const mock = createMockAssistantSession()

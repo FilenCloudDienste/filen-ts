@@ -32,3 +32,32 @@ export function listShown(grid: SheetGridState, canEdit: boolean): boolean {
 
 	return validationEntry(grid.layout, row, col)?.dropdown === true && canEdit && !grid.readOnly && grid.editing === null
 }
+
+// The list's row height (px) and how many rows it shows at most: only the rows in view are drawn, so a list of
+// 32,767 values (or a long column's entries) costs a screenful of rows.
+export const LIST_ROW = 28
+export const LIST_ROWS = 9
+
+// The list's visible height for this many values.
+export function listHeight(count: number): number {
+	return Math.min(count, LIST_ROWS) * LIST_ROW
+}
+
+// The rows drawn at a scroll offset, [first, last): those in view and a few either side.
+export function listWindow(scrollTop: number, count: number): { readonly first: number; readonly last: number } {
+	const first = Math.max(0, Math.floor(scrollTop / LIST_ROW) - 2)
+
+	return { first, last: Math.min(count, first + LIST_ROWS + 4) }
+}
+
+// The scroll offset that brings a row into view, moving as little as it can (as scrollIntoView's "nearest").
+export function scrollToRow(index: number, scrollTop: number, count: number): number {
+	const top = index * LIST_ROW
+	const view = listHeight(count)
+
+	if (top < scrollTop) return top
+
+	if (top + LIST_ROW > scrollTop + view) return top + LIST_ROW - view
+
+	return scrollTop
+}

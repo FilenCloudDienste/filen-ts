@@ -136,6 +136,23 @@ describe("exportAllNotes", () => {
 		expect(downloadBlob).not.toHaveBeenCalled()
 	})
 
+	it("zips one entry per note when titles collide with a generated suffix or differ only in case", async () => {
+		getNoteContent.mockResolvedValue("body")
+
+		await expect(
+			exportAllNotes([
+				mockNote({ uuid: testUuid("a"), title: "Foo" }),
+				mockNote({ uuid: testUuid("b"), title: "Foo (2)" }),
+				mockNote({ uuid: testUuid("c"), title: "foo" })
+			])
+		).resolves.toStrictEqual({ status: "success", skipped: 0 })
+
+		const names = zipEntries.map(entry => entry.name)
+
+		expect(names).toHaveLength(3)
+		expect(new Set(names.map(name => name.toLowerCase())).size).toBe(3)
+	})
+
 	it("excludes trashed notes from both the archive and the skip count", async () => {
 		const active = mockNote({ uuid: testUuid("a"), title: "active" })
 		const trashed = mockNote({ uuid: testUuid("b"), title: "trashed", trash: true })

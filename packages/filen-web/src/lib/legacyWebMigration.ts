@@ -41,7 +41,7 @@ import {
 const LOCK_NAME = "filen.legacyWebMigration"
 
 // The import's one request. A slower answer leaves the session unverified, as offline does.
-const VERIFY_TIMEOUT_MS = 15_000
+export const VERIFY_TIMEOUT_MS = 15_000
 
 // An IndexedDB delete waits while a previous-app tab holds the database open; it is retried on a later boot.
 const IDB_DELETE_TIMEOUT_MS = 5_000

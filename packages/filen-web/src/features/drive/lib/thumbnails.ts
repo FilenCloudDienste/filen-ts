@@ -33,8 +33,8 @@ const OFFSCREEN_HOLD_MS = 50
 
 // Permanent-failure threshold — the third failed generation for a uuid blacklists it for the rest of
 // the session, short-circuiting every later call instead of repeating pointless work (a download that
-// keeps failing, a decode worker that keeps dying, or — until generators are registered — an
-// unimplemented category). A SETTLED verdict is NOT one of these; see `unavailable` below.
+// keeps failing, a decode worker that keeps dying, or a category
+// without a generator). A SETTLED verdict is NOT one of these; see `unavailable` below.
 const BLACKLIST_LIMIT = 3
 
 // Every non-"none" category routes through the generator registry — sdk/video/pdf/svg alike. The service
@@ -117,7 +117,7 @@ const failures = new Map<string, number>()
 // budget that exists for flaky ones.
 const unavailable = new Set<string>()
 
-// An offline -> online transition clears every settled verdict. Query's onlineManager only notifies
+// An offline -> online transition clears every settled verdict and every failure strike. Query's onlineManager only notifies
 // its listeners when the value actually changes, so `online === true` here IS that transition, never
 // a repeat of a state already held. The reason to clear: a verdict reached while the tab was offline
 // was reached under a degraded read path, and coming back online is the one cheap, obvious moment to
@@ -127,6 +127,7 @@ const unavailable = new Set<string>()
 onlineManager.subscribe(online => {
 	if (online) {
 		unavailable.clear()
+		failures.clear()
 	}
 })
 // How long a generation nobody wants keeps running before its generator is told to stop: long enough
@@ -427,6 +428,11 @@ async function generate(
 	if (generated.type === "failed" && claim.controller.signal.aborted) {
 		claim.dropped = true
 
+		return null
+	}
+
+	// A failure while offline is the connection's, not the file's: no strike (read after the generator returned).
+	if (generated.type === "failed" && !onlineManager.isOnline()) {
 		return null
 	}
 

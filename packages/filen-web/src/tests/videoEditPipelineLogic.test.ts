@@ -3,7 +3,6 @@ import { transformPoint } from "@/features/preview/imageEdit/lib/recipe"
 import {
 	fitWidth,
 	minification,
-	needsGpuPass,
 	outputToTexture,
 	overlayBox,
 	overlayVisible,
@@ -162,36 +161,6 @@ describe("videoGrade", () => {
 
 		expect(grade.exposure).toBe(20)
 		expect(grade.vignette).toBe(0)
-	})
-})
-
-describe("needsGpuPass", () => {
-	it("is false for an untouched recipe, a trim, a crop, a speed change or audio edits", () => {
-		expect(needsGpuPass(recipe())).toBe(false)
-		expect(needsGpuPass(recipe({ keep: [{ start: 1, end: 2 }], crop: { x: 0, y: 0, width: 640, height: 480 }, speed: 2 }))).toBe(false)
-		expect(needsGpuPass(recipe({ audio: { mute: true, gainDb: 3, keepTracks: [1, 2] } }))).toBe(false)
-	})
-
-	it("is false for a rotation alone (metadata), true for colour, text, flips and a tone map", () => {
-		expect(needsGpuPass(recipe({ filter: "mono" }))).toBe(true)
-		expect(
-			needsGpuPass(
-				recipe({
-					text: [{ id: "a", text: "hi", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }]
-				})
-			)
-		).toBe(true)
-		expect(needsGpuPass(recipe({ flipV: true }))).toBe(true)
-		expect(needsGpuPass(recipe({ rotate: 270 }))).toBe(false)
-		expect(needsGpuPass(recipe(), { hdr: "toSdr" })).toBe(true)
-		expect(needsGpuPass(recipe(), { hdr: "keep" })).toBe(false)
-	})
-
-	it("needs a resize only when the plan scales the output", () => {
-		const r = recipe({ output: { resolution: 1080, quality: "high" } })
-
-		expect(needsGpuPass(r)).toBe(false)
-		expect(needsGpuPass(r, { scaled: true })).toBe(true)
 	})
 })
 

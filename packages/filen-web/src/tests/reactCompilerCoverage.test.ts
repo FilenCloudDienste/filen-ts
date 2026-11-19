@@ -55,23 +55,40 @@ function compileWithCode(file: string): { events: CompilerEvent[]; code: string 
 	return output
 }
 
+// The compiled body of `fnName`, after checking that every one of `calls` occurs in it: a renamed function or call
+// would otherwise match no line and pass every check vacuously.
+function compiledBodyLines(code: string, fnName: string, calls: readonly string[]): string[] {
+	const start = code.indexOf(`function ${fnName}(`)
+
+	if (start === -1) {
+		throw new Error(`${fnName} not found in compiled output`)
+	}
+
+	const body = code.slice(start, code.indexOf("\n}\n", start))
+	const missing = calls.filter(call => !body.includes(call))
+
+	if (missing.length > 0) {
+		throw new Error(`${fnName} no longer contains ${missing.join(", ")}`)
+	}
+
+	return body.split("\n")
+}
+
 // A compiled function can still recompute a value on every render: the compiler drops the memo scope of a
 // value whose mutable range spans a hook call. Guarded statements sit inside an `if ($[n] ...)` block, one
 // indent level below the function body's own.
 function unguardedCalls(code: string, fnName: string, calls: readonly string[]): string[] {
-	const start = code.indexOf(`function ${fnName}(`)
-	const body = code.slice(start, code.indexOf("\n}\n", start))
+	const lines = compiledBodyLines(code, fnName, calls)
 
-	return calls.filter(call => body.split("\n").some(line => /^ {2}\S/.test(line) && line.includes(call)))
+	return calls.filter(call => lines.some(line => /^ {2}\S/.test(line) && line.includes(call)))
 }
 
 // A call the function's render makes, in its body or in one of its memo blocks: where the compiler keeps a layout
 // read (a box, a size, a scroll offset) for as long as the element read is the same one.
 function renderCalls(code: string, fnName: string, calls: readonly string[]): string[] {
-	const start = code.indexOf(`function ${fnName}(`)
-	const body = code.slice(start, code.indexOf("\n}\n", start))
+	const lines = compiledBodyLines(code, fnName, calls)
 
-	return calls.filter(call => body.split("\n").some(line => /^ {2}(?: {2})?\S/.test(line) && line.includes(call)))
+	return calls.filter(call => lines.some(line => /^ {2}(?: {2})?\S/.test(line) && line.includes(call)))
 }
 
 describe("React Compiler coverage", () => {
@@ -135,6 +152,7 @@ describe("React Compiler coverage", () => {
 	it("compiles the DOCX viewer and @filen/office's page list, so a scroll step re-renders only the pages that changed", () => {
 		for (const [file, fnName] of [
 			["src/features/preview/components/docxViewer.tsx", "DocxPageList"],
+			["src/features/preview/components/rtfDocument.tsx", "RtfDocument"],
 			["src/features/preview/components/docxToolbar.tsx", "DocxToolbar"],
 			["src/features/preview/components/docxToolbar.tsx", "DocxFindField"],
 			["src/features/preview/components/docxAnnotations.tsx", "DocxAnnotationLayer"],
@@ -269,7 +287,7 @@ describe("React Compiler coverage", () => {
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "PagesOverlay" && (event.memoSlots ?? 0) > 0)).toBe(
 			true
 		)
-		expect(unguardedCalls(code, "PagesOverlay", ["pageLayout(", "props.overlay("])).toEqual([])
+		expect(unguardedCalls(code, "PagesOverlay", ["frameLeft(", "props.overlay("])).toEqual([])
 	})
 
 	it("compiles the archive browser, its rows and footer, so a listing notification re-renders only what changed", () => {
@@ -308,10 +326,10 @@ describe("React Compiler coverage", () => {
 		}
 	})
 
-	it("compiles QueueRow, so a track change re-renders only the queue rows whose props changed", () => {
+	it("compiles QueueRow, so a track change re-renders only the queue rows whose props changed, leaving only QueueList to the virtualizer", () => {
 		const events = compile("src/features/audio/components/nowPlayingPanel.tsx")
 
-		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "QueueRow" && (event.memoSlots ?? 0) > 0)).toBe(
 			true
 		)
@@ -386,14 +404,13 @@ describe("React Compiler coverage", () => {
 				"selectableNotesFromRows(",
 				"selectableRowIndexByKey(",
 				"headerRowIndices(",
-				"new Map(",
-				"new Set("
+				"new Map("
 			]
 		],
 		[
 			"src/features/chats/components/chatsSidebar.tsx",
 			"ChatsSidebar",
-			["chatsWithoutBlockedOneOnOne(", "filterChats(", "buildChatList(", "new Map(", ".sort()", "new Set("]
+			["chatsWithoutBlockedOneOnOne(", "filterChats(", "buildChatList(", "new Map(", ".sort()"]
 		]
 	])("compiles %s, leaving only its list child to the virtualizer", (file, fnName, derivations) => {
 		const { events, code } = compileWithCode(file)
@@ -575,7 +592,11 @@ describe("React Compiler coverage", () => {
 	})
 
 	it("memoizes the event dialog's derivations, so a minute tick or a copy skips re-describing the event", () => {
-		const { code } = compileWithCode("src/features/settings/components/events/eventDetailDialog.tsx")
+		const { events, code } = compileWithCode("src/features/settings/components/events/eventDetailDialog.tsx")
+
+		for (const fnName of ["EventDetailBody", "EventDetailContent"]) {
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName)).toBe(true)
+		}
 
 		expect(unguardedCalls(code, "EventDetailBody", ["describeEvent("])).toEqual([])
 		expect(unguardedCalls(code, "EventDetailContent", ["buildEventDetailView(", "eventLocationUuid(", "eventLookupRef("])).toEqual([])
@@ -778,7 +799,8 @@ describe("React Compiler coverage of the PDF viewer", () => {
 		["src/features/preview/components/commandBarControls.tsx", "CommandFileMenu"],
 		["src/features/preview/components/commandBarControls.tsx", "FullScreenButton"],
 		["src/features/office/components/ribbon/officeRibbon.tsx", "OfficeCommandBar"],
-		["src/features/shell/components/sessionUnreadableScreen.tsx", "SessionUnreadableScreen"]
+		["src/features/shell/components/sessionUnreadableScreen.tsx", "SessionUnreadableScreen"],
+		["src/features/shell/components/iconRail.tsx", "AccountMenu"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 
@@ -854,5 +876,23 @@ describe("React Compiler coverage of the spreadsheet grid and its shell", () => 
 
 		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+	})
+})
+
+// Find & redact's results are a window over their rows: useVirtualizer opts its host out, so it lives in FindingRows;
+// the panel itself compiles, so a scroll step reaches only the rows.
+describe("React Compiler coverage of Find & redact", () => {
+	it("compiles FindRedactPanel, leaving only FindingRows to the virtualizer", () => {
+		const events = compile("src/features/pdf/redact/findRedactPanel.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+
+		for (const fnName of ["FindRedactPanel", "Option"]) {
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "FindingRows")).toBe(false)
 	})
 })

@@ -1,13 +1,30 @@
+import { createElement } from "react"
+import { renderToString } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { ConversionLossKind, ConversionReport, PortLike, PresentationSessionApi } from "@filen/office/dom/presentation"
 import { savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
 import { i18n } from "@/lib/i18n"
-import { conversionLossLines, joinFreshPackage, readFreshPackage } from "@/features/presentation/lib/presentationConvert"
+import type { DriveItem } from "@/features/drive/lib/item"
+import {
+	conversionLossLines,
+	joinFreshPackage,
+	readFreshPackage,
+	saveConvertedCopy,
+	showSavedCopy,
+	useSavedCopy,
+	type SavedPresentationCopy
+} from "@/features/presentation/lib/presentationConvert"
 
 // A converted deck's package read from the worker's save port as the chunks it came in, its refusal thrown, its read
-// cancelled; and what the copy holds differently, in words for every loss kind the engine reports.
+// cancelled; joined into a copy without holding it twice; and what the copy holds differently, in words for every loss
+// kind the engine reports.
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+
+const upload = vi.hoisted(() => vi.fn())
+
+vi.mock("@/features/drive/lib/convertedCopy", () => ({ uploadConvertedCopy: upload }))
 
 // Every kind, once (a kind the engine adds fails the typecheck here until the test names it).
 const KINDS: Readonly<Record<ConversionLossKind, true>> = {
@@ -125,7 +142,7 @@ describe("readFreshPackage", () => {
 		expect(fresh.size).toBe(big.length + 2)
 		expect(fresh.report.target).toBe("pptx")
 
-		const bytes = joinFreshPackage(fresh)
+		const bytes = new Uint8Array(await new Blob(fresh.chunks as Uint8Array<ArrayBuffer>[]).arrayBuffer())
 
 		expect([...bytes.subarray(0, 3)]).toEqual([1, 2, 5])
 		expect(bytes.length).toBe(fresh.size)
@@ -146,5 +163,51 @@ describe("readFreshPackage", () => {
 
 		await expect(reading).rejects.toThrow()
 		await expect(deck.aborted).resolves.toBe("cancelled")
+	})
+})
+
+describe("joinFreshPackage", () => {
+	it("joins the chunks and empties every slot it copied", () => {
+		const chunks = [Uint8Array.of(1, 2), Uint8Array.of(3), new Uint8Array(0), Uint8Array.of(4, 5, 6)]
+		const bytes = joinFreshPackage({ chunks, size: 6 })
+
+		expect([...bytes]).toEqual([1, 2, 3, 4, 5, 6])
+		expect(chunks).toEqual([])
+	})
+})
+
+// The copy a deck's surface shows, read as the surface reads it.
+function shownCopy(session: PresentationSessionApi): SavedPresentationCopy | null {
+	let shown: SavedPresentationCopy | null = null
+
+	function Surface() {
+		shown = useSavedCopy(session)
+
+		return null
+	}
+
+	renderToString(createElement(Surface))
+
+	return shown
+}
+
+describe("saveConvertedCopy", () => {
+	it("uploads the joined package and still words what the copy holds differently", async () => {
+		const item = { uuid: "deck" } as unknown as DriveItem
+		const saved = { uuid: "copy" } as unknown as DriveItem
+		const session = writing([Uint8Array.of(1, 2), Uint8Array.of(3)], [{ kind: "chart", count: 2 }])
+
+		upload.mockResolvedValueOnce({ status: "saved", item: saved, name: "deck.pptx" })
+
+		await saveConvertedCopy({ item, session, encrypted: false }, "pptx")
+
+		expect(upload).toHaveBeenCalledTimes(1)
+		expect(upload.mock.calls[0]?.[0]).toBe(item)
+		expect([...(upload.mock.calls[0]?.[1] as Uint8Array)]).toEqual([1, 2, 3])
+		expect(upload.mock.calls[0]?.[2]).toBe("pptx")
+		expect(shownCopy(session)?.item).toBe(saved)
+		expect(shownCopy(session)?.differently).toEqual(["2 charts, left out"])
+
+		showSavedCopy(null)
 	})
 })

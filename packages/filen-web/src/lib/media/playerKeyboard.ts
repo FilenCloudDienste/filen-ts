@@ -10,14 +10,19 @@ import {
 	MEDIA_VOLUME_STEP,
 	jumpFraction,
 	mediaKeyAction,
-	mediaKeyRepeats
+	mediaKeyRepeats,
+	type MediaKeyEvent
 } from "@/lib/media/mediaKeys.logic"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
+import type { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { stepMediaVolume, toggleMediaMuted } from "@/lib/media/mediaVolume"
 import { chapterTarget, frameDuration, stepPlaybackRate } from "@/lib/media/videoKeys.logic"
 import { mediaDuration, seekMedia, setPlaybackRate, toggleMediaPlayback } from "@/lib/media/useMediaState"
 
 const IS_MAC = isMacPlatform()
+
+// What the keys use of a seek coalescer, whatever its timer.
+type PlayerSeeks = Pick<SeekCoalescer, "target" | "seekBy" | "cancel">
 
 // The preview player's media keys: what a lone <video> can do. Fullscreen joins them where the browser has it.
 const PREVIEW_VIDEO_ACTIONS: readonly MediaAction[] = [
@@ -65,13 +70,15 @@ function togglePictureInPicture(video: HTMLVideoElement): void {
 // A preview player's keydown handler, under `combos` (useBindings). Returns whether the key was the player's. A handled
 // key stops here: past the player, the preview overlay would page on the same arrow and a single-letter app shortcut
 // would fire. `fullscreenTarget` is the container F fullscreens; null until it has mounted. `chapterStarts` are the
-// video's chapter starts in order, in seconds.
+// video's chapter starts in order, in seconds. `seeks` coalesces the relative seeks of a held key on `video`; an
+// absolute seek drops what it still holds.
 export function handlePlayerKeyDown(
-	event: KeyboardEvent,
+	event: Pick<KeyboardEvent, "defaultPrevented" | "target" | "repeat" | "preventDefault" | "stopPropagation"> & MediaKeyEvent,
 	video: HTMLVideoElement | null,
 	fullscreenTarget: HTMLElement | null,
 	combos: Readonly<Record<string, string>>,
-	chapterStarts: readonly number[]
+	chapterStarts: readonly number[],
+	seeks: PlayerSeeks
 ): boolean {
 	if (video === null || event.defaultPrevented || isRecordingCombo()) {
 		return false
@@ -91,21 +98,33 @@ export function handlePlayerKeyDown(
 		return true
 	}
 
-	runPreviewAction(action, video, fullscreenTarget, chapterStarts)
+	runPreviewAction(action, video, fullscreenTarget, chapterStarts, seeks)
 
 	return true
+}
+
+// An absolute seek on a player whose relative seeks `seeks` coalesces (keys, its scrubber): a pending relative seek is
+// superseded, not applied first, nor left to land after it.
+export function seekPlayerTo(video: HTMLMediaElement, seeks: Pick<SeekCoalescer, "cancel">, seconds: number): void {
+	seeks.cancel()
+	seekMedia(video, seconds)
 }
 
 function runPreviewAction(
 	action: MediaAction,
 	video: HTMLVideoElement,
 	fullscreenTarget: HTMLElement | null,
-	chapterStarts: readonly number[]
+	chapterStarts: readonly number[],
+	seeks: PlayerSeeks
 ): void {
 	const fraction = jumpFraction(action)
 
+	function seekTo(seconds: number): void {
+		seekPlayerTo(video, seeks, seconds)
+	}
+
 	if (fraction !== null) {
-		seekMedia(video, mediaDuration(video) * fraction)
+		seekTo(mediaDuration(video) * fraction)
 
 		return
 	}
@@ -115,22 +134,22 @@ function runPreviewAction(
 			toggleMediaPlayback(video)
 			break
 		case "media.seekBack":
-			seekMedia(video, video.currentTime - MEDIA_SEEK_STEP_SECONDS)
+			seeks.seekBy(-MEDIA_SEEK_STEP_SECONDS)
 			break
 		case "media.seekForward":
-			seekMedia(video, video.currentTime + MEDIA_SEEK_STEP_SECONDS)
+			seeks.seekBy(MEDIA_SEEK_STEP_SECONDS)
 			break
 		case "media.seekBackLong":
-			seekMedia(video, video.currentTime - MEDIA_LONG_SEEK_STEP_SECONDS)
+			seeks.seekBy(-MEDIA_LONG_SEEK_STEP_SECONDS)
 			break
 		case "media.seekForwardLong":
-			seekMedia(video, video.currentTime + MEDIA_LONG_SEEK_STEP_SECONDS)
+			seeks.seekBy(MEDIA_LONG_SEEK_STEP_SECONDS)
 			break
 		case "media.toStart":
-			seekMedia(video, 0)
+			seekTo(0)
 			break
 		case "media.toEnd":
-			seekMedia(video, mediaDuration(video))
+			seekTo(mediaDuration(video))
 			break
 		case "media.volumeUp":
 			stepMediaVolume(MEDIA_VOLUME_STEP)
@@ -156,17 +175,18 @@ function runPreviewAction(
 				pauseMedia(video)
 			}
 
-			seekMedia(video, video.currentTime + (action === "media.frameBack" ? -1 : 1) * frameDuration(null))
+			// From where a held seek is headed, not from the position it left.
+			seekTo(seeks.target() + (action === "media.frameBack" ? -1 : 1) * frameDuration(null))
 			break
 		case "media.pictureInPicture":
 			togglePictureInPicture(video)
 			break
 		case "media.chapterPrevious":
 		case "media.chapterNext": {
-			const target = chapterTarget(chapterStarts, video.currentTime, action === "media.chapterPrevious" ? -1 : 1)
+			const target = chapterTarget(chapterStarts, seeks.target(), action === "media.chapterPrevious" ? -1 : 1)
 
 			if (target !== null) {
-				seekMedia(video, target)
+				seekTo(target)
 			}
 
 			break

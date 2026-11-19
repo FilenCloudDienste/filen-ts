@@ -14,12 +14,10 @@ import {
 	CHUNK_ANIM,
 	CHUNK_EXIF as WEBP_EXIF,
 	CHUNK_ICCP as WEBP_ICCP,
-	CHUNK_VP8,
 	CHUNK_VP8L,
 	CHUNK_VP8X,
-	VP8X_ALPHA,
-	VP8X_ANIMATION,
 	VP8X_EXIF,
+	readWebpHeader,
 	vp8lHasAlpha,
 	walkWebpChunks
 } from "@/features/preview/imageEdit/lib/webpMeta"
@@ -329,51 +327,27 @@ function sniffPng(head: Uint8Array): SourceInfo | null {
 // ── WebP ─────────────────────────────────────────────────────────────────────
 
 function sniffWebp(head: Uint8Array, totalSize: number): SourceInfo | null {
-	const view = viewOf(head)
+	// The size and VP8X flags come from the first chunk's header, which a head holds even when that chunk's
+	// payload runs past it (a simple file is one VP8 or VP8L chunk spanning it all, never visited by the walk).
+	const header = readWebpHeader(head)
+
+	if (header === null || header.width === 0 || header.height === 0) {
+		return null
+	}
+
 	const found: {
-		width: number
-		height: number
-		flags: number
 		alpha: boolean
 		animated: boolean
 		lossless: boolean
 		icc: Uint8Array | null
 		exif: Uint8Array | null
-		first: boolean
-	} = { width: 0, height: 0, flags: -1, alpha: false, animated: false, lossless: false, icc: null, exif: null, first: true }
-	const stop = walkWebpChunks(head, chunk => {
-		const isFirst = found.first
-
-		found.first = false
-
-		if (isFirst && chunk.type === CHUNK_VP8X && chunk.size >= 10) {
-			// Flags, 3 reserved bytes, canvas width − 1 and height − 1 as 24-bit little endian (RFC 9649 §2.7).
-			found.flags = view.getUint8(chunk.data)
-			found.width = 1 + view.getUint16(chunk.data + 4, true) + (view.getUint8(chunk.data + 6) << 16)
-			found.height = 1 + view.getUint16(chunk.data + 7, true) + (view.getUint8(chunk.data + 9) << 16)
-		}
-
+	} = { alpha: header.alpha, animated: false, lossless: header.type === CHUNK_VP8L, icc: null, exif: null }
+	// The walk visits whole chunks only: an extended file's VP8L, ALPH, ANIM, ICCP and EXIF.
+	walkWebpChunks(head, chunk => {
 		switch (chunk.type) {
-			// A key frame starts with the 9D 01 2A start code, then 14-bit width and height (RFC 6386 §9.1).
-			case CHUNK_VP8: {
-				if (isFirst && chunk.size >= 10 && view.getUint32(chunk.data + 3) >>> 8 === 0x9d012a) {
-					found.width = view.getUint16(chunk.data + 6, true) & 0x3fff
-					found.height = view.getUint16(chunk.data + 8, true) & 0x3fff
-				}
-
-				break
-			}
-
 			case CHUNK_VP8L: {
 				found.lossless = true
 				found.alpha ||= vp8lHasAlpha(head, chunk)
-
-				if (isFirst && chunk.size >= 5) {
-					const bits = view.getUint32(chunk.data + 1, true)
-
-					found.width = (bits & 0x3fff) + 1
-					found.height = ((bits >>> 14) & 0x3fff) + 1
-				}
 
 				break
 			}
@@ -406,14 +380,11 @@ function sniffWebp(head: Uint8Array, totalSize: number): SourceInfo | null {
 
 		return true
 	})
-	const { width, height, flags, exif } = found
 
-	if (stop < 0 || width === 0 || height === 0) {
-		return null
-	}
-
-	const extended = flags >= 0
-	const animated = found.animated || (extended && (flags & VP8X_ANIMATION) !== 0)
+	const { width, height } = header
+	const { exif } = found
+	const extended = header.type === CHUNK_VP8X
+	const animated = found.animated || header.animated
 
 	return {
 		...BASE,
@@ -423,14 +394,14 @@ function sniffWebp(head: Uint8Array, totalSize: number): SourceInfo | null {
 		width,
 		height,
 		orientation: exif === null ? 1 : readExifOrientation(exif),
-		hasAlpha: found.alpha || (extended && (flags & VP8X_ALPHA) !== 0),
+		hasAlpha: found.alpha,
 		animated,
 		// An animation's frames may mix both; only a still is classified.
 		webpLossless: found.lossless && !animated,
 		icc: found.icc,
 		exif,
 		// The EXIF chunk sits after the image data (RFC 9649 §2.7), beyond a head of a large file.
-		needsTail: extended && (flags & VP8X_EXIF) !== 0 && exif === null && head.length < totalSize
+		needsTail: extended && (header.flags & VP8X_EXIF) !== 0 && exif === null && head.length < totalSize
 	}
 }
 

@@ -86,12 +86,13 @@ export interface DetailHeaderProps {
 export function DetailHeader({ mode, titleId, title, headingId, eyebrow, onBack, menu, meta, actions }: DetailHeaderProps) {
 	const [posterElement, setPosterElement] = useState<HTMLDivElement | null>(null)
 	const [backdropElement, setBackdropElement] = useState<HTMLDivElement | null>(null)
-	const poster = useVideoArt({ titleId, stableUuid: null, slot: "p", title, near: true, element: posterElement })
-	const backdrop = useVideoArt({ titleId, stableUuid: null, slot: "b", title, near: mode === "backdrop", element: backdropElement })
 	// Below the layout breakpoint both forms stack as the phone layout: a backdrop is a 16:9 strip on top.
 	const narrow = useIsNarrowViewport()
 	const cinematic = mode === "backdrop"
 	const overlay = cinematic && !narrow
+	// The phone's backdrop strip shows no poster, so none is looked up or decoded there.
+	const poster = useVideoArt({ titleId, stableUuid: null, slot: "p", title, near: !cinematic || overlay, element: posterElement })
+	const backdrop = useVideoArt({ titleId, stableUuid: null, slot: "b", title, near: cinematic, element: backdropElement })
 	const text = (
 		<div className={cn("flex min-w-0 flex-1 flex-col gap-1", narrow && "items-center text-center")}>
 			<p className={cn("text-xs font-medium tracking-wide text-muted-foreground uppercase", cinematic && "sr-only")}>{eyebrow}</p>
@@ -136,16 +137,15 @@ export function DetailHeader({ mode, titleId, title, headingId, eyebrow, onBack,
 						overlay ? "dark absolute inset-x-0 bottom-0 flex-row items-end text-foreground" : "flex-col items-center pt-5"
 					)}
 				>
-					<div
-						ref={setPosterElement}
-						className={overlay ? undefined : "hidden"}
-					>
-						<PosterArt
-							art={poster}
-							title={title}
-							className="aspect-[2/3] w-40"
-						/>
-					</div>
+					{overlay ? (
+						<div ref={setPosterElement}>
+							<PosterArt
+								art={poster}
+								title={title}
+								className="aspect-[2/3] w-40"
+							/>
+						</div>
+					) : null}
 					{text}
 				</div>
 			</header>

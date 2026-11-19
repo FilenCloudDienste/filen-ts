@@ -68,7 +68,7 @@ export function DicomTagTree({
 	// The whole value of the row at a path, for a copy of one cut for its row.
 	loadValue: (path: readonly number[]) => Promise<string | null>
 }) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "drive"])
 	const [levels, setLevels] = useState<ReadonlyMap<string, DicomTagLevel>>(new Map())
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
@@ -125,6 +125,7 @@ export function DicomTagTree({
 			className="size-full overflow-y-auto"
 		>
 			<ul
+				role="none"
 				className="relative w-full"
 				style={{ height: virtualizer.getTotalSize() }}
 			>
@@ -156,7 +157,16 @@ export function DicomTagTree({
 									<button
 										type="button"
 										disabled={row.children === 0}
-										aria-label={row.children > 0 ? (row.name ?? row.tag) : undefined}
+										aria-label={
+											row.children > 0
+												? t(expanded.has(shown.key) ? "drive:driveTreeCollapseNode" : "drive:driveTreeExpandNode", {
+														name:
+															row.item !== null
+																? t("previewDicomTagItem", { number: row.item })
+																: (row.name ?? row.tag)
+													})
+												: undefined
+										}
 										className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted disabled:invisible"
 										onClick={() => {
 											toggle(shown)

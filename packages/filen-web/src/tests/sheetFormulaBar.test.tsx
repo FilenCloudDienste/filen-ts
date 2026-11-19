@@ -11,10 +11,24 @@ import { preview } from "@/locales/en/preview"
 // Typing a formula in the viewer over a real session on this thread: function names offered as a word is typed (Tab
 // takes one), the syntax of the call the caret is in, AutoSum, and entries read in the browser's locale.
 
-const { bytes } = vi.hoisted(() => {
+const { bytes, nameLists } = vi.hoisted(() => {
 	const held: { current: Uint8Array } = { current: new Uint8Array(0) }
 
-	return { bytes: held }
+	return { bytes: held, nameLists: { count: 0 } }
+})
+
+// Counts how often the name box works out the names its list offers.
+vi.mock("@/features/spreadsheet/lib/nameBox.logic", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/spreadsheet/lib/nameBox.logic")>()
+
+	return {
+		...actual,
+		nameBoxNames: (...args: Parameters<typeof actual.nameBoxNames>) => {
+			nameLists.count++
+
+			return actual.nameBoxNames(...args)
+		}
+	}
 })
 
 vi.mock("@/providers/themeProvider", async importOriginal => ({
@@ -307,6 +321,59 @@ describe("the name box", () => {
 		})
 	})
 
+	it("works out the names it offers once as it takes focus, not again per key typed nor while blurred", async () => {
+		bytes.current = await writeXlsx({
+			sheets: [
+				{ name: "Data", rows: [["here"], ["there"]] },
+				{ name: "Other", rows: [["far"]] }
+			],
+			namedRanges: [
+				{ name: "Here", range: "Data!$A$1" },
+				{ name: "There", range: "Data!$A$2" }
+			]
+		})
+		render(
+			<SheetViewer
+				item={file("listed.xlsx")}
+				documentKey="listed"
+				alt="listed.xlsx"
+				editable
+				saveRef={{ current: null }}
+			/>
+		)
+		await screen.findByRole("grid")
+
+		const box = nameBox()
+
+		fireEvent.focus(box)
+		await waitFor(() => {
+			const list = box.getAttribute("list")
+
+			expect([...(document.getElementById(list ?? "")?.querySelectorAll("option") ?? [])].map(option => option.value)).toEqual([
+				"Here",
+				"There"
+			])
+		})
+
+		const counted = nameLists.count
+
+		for (const text of ["T", "Th", "The", "Ther"]) {
+			fireEvent.change(box, { target: { value: text } })
+		}
+
+		expect(box.value).toBe("Ther")
+		expect(nameLists.count).toBe(counted)
+
+		// Blurred, the box holds no list: showing another sheet does not work the names out again.
+		fireEvent.blur(box)
+		expect(box.hasAttribute("list")).toBe(false)
+		fireEvent.click(screen.getByRole("tab", { name: /Other/u }))
+		await waitFor(() => {
+			expect(bar().value).toBe("far")
+		})
+		expect(nameLists.count).toBe(counted)
+	})
+
 	it("refuses a range on a protected sheet whose cells may not be selected", async () => {
 		bytes.current = await writeXlsx({
 			sheets: [{ name: "Locked", rows: [["a"]], protection: { sheet: true, selectLockedCells: false, selectUnlockedCells: true } }]
@@ -327,6 +394,26 @@ describe("the name box", () => {
 			await Promise.resolve()
 		})
 		expect(nameBox().value).toBe("A1")
+	})
+})
+
+describe("a read-only formula bar", () => {
+	it("names the active cell's contents", async () => {
+		bytes.current = await writeXlsx({ sheets: [{ name: "Data", rows: [["here"]] }] })
+		render(
+			<SheetViewer
+				item={file("view.xlsx")}
+				documentKey="view"
+				alt="view.xlsx"
+				saveRef={{ current: null }}
+			/>
+		)
+		await screen.findByRole("grid")
+
+		await waitFor(() => {
+			expect(screen.getByRole("status", { name: preview.previewSpreadsheetCellContents }).textContent).toBe("here")
+		})
+		expect(screen.queryByRole("textbox", { name: preview.previewSpreadsheetCellContents })).toBeNull()
 	})
 })
 

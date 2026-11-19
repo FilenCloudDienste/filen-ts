@@ -744,7 +744,14 @@ describe("openListingSession", () => {
 		call(2).resolve(report({ password: "right" }))
 		await settled()
 
-		const logged = JSON.stringify([...spies.flatMap(spy => spy.mock.calls), log.dump()])
+		// An Error stringifies to {}: keep its message and stack so a password inside one is seen.
+		const logged = JSON.stringify(
+			[
+				...[log.debug, log.info, log.warn, log.error].flatMap(fn => vi.mocked(fn).mock.calls),
+				...spies.flatMap(spy => spy.mock.calls)
+			],
+			(_key, value: unknown) => (value instanceof Error ? { message: value.message, stack: value.stack } : value)
+		)
 
 		expect(logged).not.toContain("hunter2-secret")
 		expect(JSON.stringify(session.getSnapshot())).not.toContain("hunter2-secret")
@@ -752,9 +759,5 @@ describe("openListingSession", () => {
 		session.dispose()
 
 		expect(session.password()).toBeUndefined()
-
-		for (const spy of spies) {
-			spy.mockRestore()
-		}
 	})
 })

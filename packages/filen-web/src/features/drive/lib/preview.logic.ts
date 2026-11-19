@@ -149,7 +149,7 @@ export interface CategoryPolicy {
 	// What opens above the cap.
 	aboveCap: "refuse" | "largeText"
 	// How an archive entry opens. Video, audio and RAW entries open by their access kind (entryOpensByAccess): streamed
-	// or walked by range when mapped or seekable, else as their "Extract to …" card (W6 §3.10).
+	// or walked by range when mapped or seekable, else as their "Extract to …" card.
 	entry: "whole" | "ranged" | "none"
 	// How a public link previews it. "comic": read page by page through the public-link client's archive reader.
 	anon: "stream" | "ranged" | "archive" | "comic" | "buffer" | "none"
@@ -922,7 +922,7 @@ export function linkAdmits(category: PreviewCategory, size: bigint, profile: Dev
 	}
 }
 
-// Categories an archive entry opens in at any size, its viewer deciding by the entry's access kind (W6 §3.10): video and
+// Categories an archive entry opens in at any size, its viewer deciding by the entry's access kind: video and
 // audio stream when mapped or seekable, play from a buffer when read only whole up to 64 MiB, else show "Extract to
 // play"; a RAW shows its embedded preview when mapped or seekable, else "Extract to open".
 const ENTRY_OPENS_BY_ACCESS: ReadonlySet<PreviewCategory> = new Set<PreviewCategory>(["video", "audio", "rawImage"])

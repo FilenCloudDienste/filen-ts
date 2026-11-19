@@ -58,6 +58,15 @@ export function OcrPanel({ context }: PdfToolPanelProps) {
 			return { pageCount: state.pageCount, scanned, tagged: state.tagged }
 		}).then(setScan, (error: unknown) => {
 			log.warn("pdf", "finding scanned pages failed", { error })
+			context.notify(
+				<PdfNoticeLine
+					onDismiss={() => {
+						context.notify(null)
+					}}
+				>
+					{t("previewPdfOcrFindingFailed")}
+				</PdfNoticeLine>
+			)
 			context.finish()
 		})
 	})

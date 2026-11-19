@@ -494,12 +494,39 @@ describe("warmUploadThumbnail", () => {
 		expect(frameGenerateMock).not.toHaveBeenCalled()
 	})
 
-	it("seeds a video from the local file in a generation slot, never streaming it back", async () => {
+	// The local file's typed slice is played through a blob URL, released once the grab unwinds.
+	it("seeds a video's frame from the local file in a generation slot, never streaming it back", async () => {
 		allowedMediaContentTypeMock.mockReturnValue("video/mp4")
+		const events: string[] = []
+		const { seeks } = stubVideoDom(() => 120, events)
+		const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:local")
+		const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
+
+		warmUploadThumbnail(namedFile("clip.mp4", "video/mp4"), browserFile("clip.mp4"))
+
+		await expect(seededProduction()()).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([1]) })
+		expect(seeks).toEqual([1])
+		expect(events).toEqual(["emptied"])
+		expect(createObjectURL).toHaveBeenCalledTimes(1)
+		expect((createObjectURL.mock.calls[0]?.[0] as Blob).type).toBe("video/mp4")
+		expect(revokeObjectURL).toHaveBeenCalledTimes(1)
+		expect(revokeObjectURL).toHaveBeenCalledWith("blob:local")
+		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
+		expect(withGenerationSlotMock.mock.calls[0]?.[0]).toBe("video")
+		expect(previewStreamUrlMock).not.toHaveBeenCalled()
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	// No DOM here, so the grab throws once the blob URL exists: settled, and the URL is still released.
+	it("settles a local video grab that throws as none, still releasing its blob URL", async () => {
+		allowedMediaContentTypeMock.mockReturnValue("video/mp4")
+		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:local")
+		const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
 
 		warmUploadThumbnail(namedFile("clip.mp4", "video/mp4"), browserFile("clip.mp4"))
 
 		await expect(seededProduction()()).resolves.toEqual({ type: "none" })
+		expect(revokeObjectURL).toHaveBeenCalledWith("blob:local")
 		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
 		expect(withGenerationSlotMock.mock.calls[0]?.[0]).toBe("video")
 		expect(previewStreamUrlMock).not.toHaveBeenCalled()
@@ -1061,6 +1088,8 @@ function probeRecord(probe: RecordedProbe | null): ProbeRecord {
 const FRAME_BYTES = new Uint8Array([7, 7])
 
 function keyframeReady(): void {
+	// Node has no WebCodecs; without it the keyframe read is never attempted.
+	vi.stubGlobal("VideoDecoder", {})
 	probeRequestMock.mockResolvedValue(probeRecord(videoProbe()))
 	frameGenerateMock.mockResolvedValue({ bytes: FRAME_BYTES, width: 384, height: 216, dominant: [1, 2, 3] })
 	frameHintGetMock.mockResolvedValue(null)

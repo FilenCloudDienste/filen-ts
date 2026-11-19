@@ -65,6 +65,8 @@ export const previewPdfFillSign = {
 	previewPdfSignatureStyleQuick: "Quick",
 	/** Signature dialog — handwriting style: an elegant calligraphic script */
 	previewPdfSignatureStyleFormal: "Formal",
+	/** Signature dialog — the handwriting fonts for the Type tab could not be loaded (offline, blocked); a Try again button follows */
+	previewPdfSignatureFontsFailed: "The handwriting styles couldn't be loaded. Try again, or draw or choose an image instead.",
 	/** Signature dialog — button on the Image tab opening the device's file picker */
 	previewPdfSignatureChooseImage: "Choose image…",
 	/** Signature dialog — the chosen file could not be read as an image */

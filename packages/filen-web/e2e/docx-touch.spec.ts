@@ -7,6 +7,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
 import { menuItemName } from "./helpers/menu"
+import { E2E_AUTOSAVE_KEY } from "@/e2e-hooks/storageKeys"
 
 // The DOCX editor under touch: a long press selects the word with a handle at each end and the touch menu
 // above it, a handle dragged moves its end, the menu's Select all selects everything, and below 600 px the
@@ -196,7 +197,7 @@ async function openDocument(
 	await expect(pageText(page, DOCX_FIXTURE_TEXT[name])).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByRole("button", { name: preview.previewDocxBold, exact: true })).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	// A read lane: the shared tree is never saved into by the editor's idle autosave (e2e/fixtures.ts `page`).
-	expect(await page.evaluate(() => sessionStorage.getItem("filen-e2e-docx-autosave"))).toBe("off")
+	expect(await page.evaluate(key => sessionStorage.getItem(key), E2E_AUTOSAVE_KEY)).toBe("off")
 }
 
 test("a long press selects the word: handles at its ends, the touch menu, a handle dragged, Select all", async ({ page, browserName }) => {

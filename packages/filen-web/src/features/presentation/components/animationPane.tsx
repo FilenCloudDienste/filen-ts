@@ -293,8 +293,10 @@ export function AnimationPane({
 		// The effect's object is selected on the slide too, as PowerPoint does.
 		if (row.shape !== undefined) editor.selection.set([row.shape])
 	}
+	// Announced and refocused only for a move that was made (not past either end, nor onto itself).
 	const move = (row: EffectRow, to: number): void => {
-		moveEffect(editor, state, row, to)
+		if (!moveEffect(editor, state, row, to)) return
+
 		setAnnounce(t("previewPptxAnimMoved", { n: to + 1 }))
 		setFocusId(row.id)
 	}
@@ -539,7 +541,7 @@ export function AnimationPane({
 											const target =
 												row.paragraph === undefined
 													? nameOf(row.shape)
-													: `${nameOf(row.shape)}, ${t("previewPptxAnimParagraph", { n: row.paragraph + 1 })}`
+													: t("previewPptxAnimParagraphTarget", { name: nameOf(row.shape), n: row.paragraph + 1 })
 
 											return (
 												<EffectItem
@@ -547,7 +549,7 @@ export function AnimationPane({
 													row={row}
 													top={at * ROW_PX}
 													count={members.length}
-													text={`${effect}: ${target}`}
+													text={t("previewPptxAnimRowText", { effect, target })}
 													label={t("previewPptxAnimRow", { effect, target, start: starts[row.start] })}
 													selected={chosen.has(row.id)}
 													timeline={timeline}

@@ -13,7 +13,6 @@ function tool(id: string, tab: PdfRibbonTab, group: string, order: number, label
 		labelKey,
 		icon: EraserIcon,
 		toolClass: "formFill",
-		actionIds: [],
 		actions: [],
 		enabledWhen: policy => toolEnabled("formFill", policy),
 		commands: []

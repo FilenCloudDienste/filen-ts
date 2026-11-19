@@ -85,10 +85,6 @@ export function FileHero({
 	// offered.
 	const pane = showContents && archiveSource !== null ? "contents" : !previewHidden && previewable ? "preview" : null
 
-	function downloadError(dto: ErrorDTO): string {
-		return `${t("downloadFailed")} ${errorLabel(dto)}`
-	}
-
 	// No bar until the download reports a share: a buffered one reports none before it is done, and an
 	// empty bar standing there the whole time reads as stuck.
 	function handleDownload(): void {
@@ -161,8 +157,11 @@ export function FileHero({
 							end={12}
 							className="truncate text-sm font-medium"
 						/>
-						{download.status === "error" ? (
-							<span className="truncate text-xs text-destructive">{downloadError(download.dto)}</span>
+						{download.status === "error" || download.status === "too-large" ? (
+							<DownloadOutcome
+								download={download}
+								compact
+							/>
 						) : (
 							<span className="text-xs text-muted-foreground">{formatBytes(Number(size))}</span>
 						)}
@@ -191,15 +190,23 @@ export function FileHero({
 						<Button
 							variant="outline"
 							size="sm"
-							aria-label={t("download")}
+							aria-label={download.status === "running" ? t("downloading") : t("download")}
 							onClick={handleDownload}
 							disabled={download.status === "running"}
 						>
-							<DownloadIcon data-icon="inline-start" />
-							<span className="hidden sm:inline">{t("download")}</span>
+							{download.status === "running" ? (
+								<Spinner data-icon="inline-start" />
+							) : (
+								<DownloadIcon data-icon="inline-start" />
+							)}
+							<span className="hidden sm:inline">{download.status === "running" ? t("downloading") : t("download")}</span>
 						</Button>
 					)}
 				</div>
+				<DownloadProgress
+					download={download}
+					className="shrink-0"
+				/>
 				<div className="min-h-0 flex-1">
 					{pane === "contents" && archiveSource !== null ? (
 						<PublicArchiveBrowser
@@ -297,15 +304,70 @@ export function FileHero({
 					</div>
 				)}
 				{!downloadEnabled && <p className="text-sm text-muted-foreground">{t("downloadDisabled")}</p>}
-				{download.status === "too-large" && <DownloadTooLargeNote message={t("downloadTooLarge")} />}
-				{download.status === "error" && <p className="text-sm text-destructive">{downloadError(download.dto)}</p>}
-
-				{download.status === "running" && download.total !== null && download.total > 0 && (
-					<div className="flex w-full max-w-xs flex-col gap-1">
-						<Progress value={Math.round((download.loaded / download.total) * 100)} />
-					</div>
-				)}
+				<DownloadOutcome
+					download={download}
+					compact={false}
+				/>
+				<DownloadProgress
+					download={download}
+					className="w-full max-w-xs"
+				/>
 			</div>
 		</div>
+	)
+}
+
+// A finished download's outcome, the same in both layouts: a full note on the card, one truncating line (its whole
+// text in the title) in the preview's bar. Mounted with its text, so an alert, which is announced on mount.
+function DownloadOutcome({ download, compact }: { download: DownloadUiState; compact: boolean }) {
+	const { t } = useTranslation("publicLinks")
+
+	if (download.status === "too-large") {
+		return (
+			<DownloadTooLargeNote
+				message={t("downloadTooLarge")}
+				compact={compact}
+			/>
+		)
+	}
+
+	if (download.status !== "error") {
+		return null
+	}
+
+	const text = `${t("downloadFailed")} ${errorLabel(download.dto)}`
+
+	return compact ? (
+		<span
+			role="alert"
+			className="truncate text-xs text-destructive"
+			title={text}
+		>
+			{text}
+		</span>
+	) : (
+		<p
+			role="alert"
+			className="text-sm text-destructive"
+		>
+			{text}
+		</p>
+	)
+}
+
+// A running download's share, once it reports one (see handleDownload).
+function DownloadProgress({ download, className }: { download: DownloadUiState; className: string }) {
+	const { t } = useTranslation("publicLinks")
+
+	if (download.status !== "running" || download.total === null || download.total <= 0) {
+		return null
+	}
+
+	return (
+		<Progress
+			aria-label={t("downloading")}
+			className={className}
+			value={Math.round((download.loaded / download.total) * 100)}
+		/>
 	)
 }

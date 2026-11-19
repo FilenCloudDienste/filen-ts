@@ -25,7 +25,7 @@ import "@/lib/i18n"
 
 // The Home tab's Font and Paragraph groups against a fake editor: with a body open each control runs its command on
 // the body and shows the body's format; with text shapes selected and no body open a command formats their whole
-// text (seed, command, setText per shape); nothing text-bearing selected turns them off; a narrow row collapses
+// text (seed, command, one setText per shape, sent as one command through the shell); nothing text-bearing selected turns them off; a narrow row collapses
 // them; links take only http, https, mailto and slides.
 
 const size = vi.hoisted(() => ({ width: 2400 }))
@@ -68,7 +68,9 @@ const INFO = {
 const BODY: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text: "Title", rPr: { lang: "en-GB" } }] }] }
 
 interface Mounted {
+	// The ops sent through the shell's command path (editor.command), and those sent to the session past it.
 	readonly ops: DeckOp[]
+	readonly sessionOps: DeckOp[]
 	readonly runs: TextCommand[]
 	readonly bodyPrs: unknown[]
 	readonly session: PresentationSessionApi
@@ -103,16 +105,26 @@ function mount(options: {
 	readonly editable?: boolean
 	// The editor's link host beside the ribbon, as the editor mounts it.
 	readonly linkHost?: boolean
+	// The shell refuses every command (as for a deck only viewed).
+	readonly refuse?: boolean
 }): Mounted {
 	const selection = createShapeSelection()
 	const text: TextEditing = createTextEditing()
 	const ops: DeckOp[] = []
 	const runs: TextCommand[] = []
 	const bodyPrs: unknown[] = []
+	const sessionOps: DeckOp[] = []
 	const command = (op: DeckOp): Promise<CommandResult> => {
 		ops.push(op)
 
-		return Promise.resolve({ ok: true, revision: ops.length, dirty: true })
+		return Promise.resolve(
+			options.refuse === true ? { ok: false, refusal: "viewOnly" } : { ok: true, revision: ops.length, dirty: true }
+		)
+	}
+	const sessionCommand = (op: DeckOp): Promise<CommandResult> => {
+		sessionOps.push(op)
+
+		return Promise.resolve({ ok: true, revision: sessionOps.length, dirty: true })
 	}
 	const session = {
 		textSeed: (shape: { slide: number; id: number }) =>
@@ -125,7 +137,7 @@ function mount(options: {
 				layout: {},
 				matrix: []
 			} as unknown as TextSeed),
-		command
+		command: sessionCommand
 	} as unknown as PresentationSessionApi
 
 	selection.show(ref)
@@ -161,7 +173,7 @@ function mount(options: {
 			/>
 		)
 
-	return { ops, runs, bodyPrs, session }
+	return { ops, sessionOps, runs, bodyPrs, session }
 }
 
 afterEach(() => {
@@ -231,6 +243,53 @@ describe("presentation Home text groups", () => {
 
 		mount({ selected: [3] })
 		expect(within(commands()).getByRole<HTMLButtonElement>("button", { name: "Bold" }).disabled).toBe(true)
+	})
+
+	it("formats several selected text shapes as one command through the shell: one undo step for them all", async () => {
+		const mounted = mount({ roles: ["placeholder", "shape"], selected: [2, 3] })
+
+		fireEvent.click(within(commands()).getByRole("button", { name: "Bold" }))
+		await waitFor(() => {
+			expect(mounted.ops).toHaveLength(1)
+		})
+		expect(mounted.ops[0]).toMatchObject({
+			family: "batch",
+			kind: "batch",
+			ops: [
+				{ family: "text", kind: "setText", target: { slide: ref, id: 2 } },
+				{ family: "text", kind: "setText", target: { slide: ref, id: 3 } }
+			]
+		})
+		expect(mounted.sessionOps).toEqual([])
+	})
+
+	it("sets the columns of several selected text shapes as one command through the shell", async () => {
+		const mounted = mount({ roles: ["placeholder", "shape"], selected: [2, 3] })
+
+		fireEvent.click(within(commands()).getByRole("button", { name: "Columns" }))
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "2 columns" }))
+		await waitFor(() => {
+			expect(mounted.ops).toHaveLength(1)
+		})
+		expect(mounted.ops[0]).toMatchObject({
+			family: "batch",
+			ops: [
+				{ kind: "setText", target: { id: 2 }, body: { bodyPr: { columns: 2 } } },
+				{ kind: "setText", target: { id: 3 }, body: { bodyPr: { columns: 2 } } }
+			]
+		})
+		expect(mounted.sessionOps).toEqual([])
+	})
+
+	it("sends a selected shape's formatting through the shell, which tells a refusal, never past it to the session", async () => {
+		const mounted = mount({ selected: [2], refuse: true })
+
+		fireEvent.click(within(commands()).getByRole("button", { name: "Underline" }))
+		await waitFor(() => {
+			expect(mounted.ops).toHaveLength(1)
+		})
+		expect(mounted.ops[0]).toMatchObject({ family: "text", kind: "setText", target: { slide: ref, id: 2 } })
+		expect(mounted.sessionOps).toEqual([])
 	})
 
 	it("leaves the font box empty with no text to read a font from, and says several only for an open body's mix", () => {

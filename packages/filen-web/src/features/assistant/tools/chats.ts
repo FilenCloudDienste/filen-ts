@@ -1,6 +1,16 @@
 import type { Chat } from "@filen/sdk-rs"
 import { isBlocked } from "@filen/shared"
-import { listRest, sanitizeUntrustedText } from "@filen/shared/assistant"
+import {
+	composerBusyMessage,
+	CONTACT_NEEDS_WORDS,
+	CONTACT_WITHOUT_CHAT_NOTE,
+	DRAFTED_NOTE,
+	listRest,
+	matchScore,
+	NO_CONTACT_NOTE,
+	sanitizeUntrustedText,
+	searchTokens
+} from "@filen/shared/assistant"
 import { contactsQueryRead } from "@/features/contacts/queries/contacts"
 import { chatsQueryRead } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet, chatMessagesQueryRead } from "@/features/chats/queries/chatMessages"
@@ -26,7 +36,7 @@ import {
 	type ToolAdapter,
 	type ToolScope
 } from "@/features/assistant/tools/entities"
-import { AssistantToolError, clipText, isoDate, matchScore, searchTokens, throwIfStopped } from "@/features/assistant/tools/format"
+import { AssistantToolError, clipText, isoDate, throwIfStopped } from "@/features/assistant/tools/format"
 
 const LIST_LIMIT = 30
 const DEFAULT_MESSAGES = 20
@@ -119,7 +129,7 @@ export const findContactsTool: ToolAdapter = async (input, scope) => {
 	const tokens = searchTokens(query)
 
 	if (address === undefined && tokens.length === 0) {
-		throw new AssistantToolError("Pass words from the contact's name or email address", { invalid: true })
+		throw new AssistantToolError(CONTACT_NEEDS_WORDS, { invalid: true })
 	}
 
 	const [{ contacts }, chats] = await Promise.all([contactsQueryRead(), chatsQueryRead()])
@@ -152,9 +162,9 @@ export const findContactsTool: ToolAdapter = async (input, scope) => {
 			contacts: rows,
 			...listRest(matches.length, CONTACT_LIMIT),
 			...(rows.length === 0
-				? { note: "No contact matches. Ask the user for the contact's name or exact email address." }
+				? { note: NO_CONTACT_NOTE }
 				: rows.some(row => row.chat === undefined)
-					? { note: "A contact without a chat handle has no chat with the user yet; the user can start one from Contacts." }
+					? { note: CONTACT_WITHOUT_CHAT_NOTE }
 					: {})
 		}
 	}
@@ -245,7 +255,7 @@ export async function draftProblem({ chat, text }: { chat: Chat; text: string })
 	const saved = entry === undefined ? await loadDraft(chat.uuid) : ""
 
 	if ((entry !== undefined && (entry.draft.trim().length > 0 || entry.mode.kind !== "new")) || saved.trim().length > 0) {
-		return `The message box of "${chatName(chat)}" already holds unsent text; the user has to clear it first`
+		return composerBusyMessage(chatName(chat))
 	}
 
 	return null
@@ -293,6 +303,6 @@ export const draftChatMessageTool: ToolAdapter = async (input, scope) => {
 	useChatComposerStore.getState().setDraft(chat.uuid, text)
 
 	return {
-		value: { drafted: true, chat: name, note: "The message is in the input field; the user sends it." }
+		value: { drafted: true, chat: name, note: DRAFTED_NOTE }
 	}
 }

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createRef } from "react"
+import { createElement, createRef, type ReactElement, type ReactNode } from "react"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { EraserIcon, PenLineIcon } from "lucide-react"
 import type { PdfViewerState } from "@filen/office/dom/pdf"
@@ -14,6 +14,12 @@ import { PDF_SCROLL_ROOM_ANY } from "@/features/preview/lib/pdfScrollRoom.logic"
 // active, a tool not offered carrying its reason, and Undo / Redo / Save / Discard once the document has changes.
 
 vi.mock("@/lib/useElementSize", () => ({ useElementSize: () => ({ width: 4000, height: 40 }) }))
+// The tooltip's parts, flattened: its content renders beside its trigger, so a test reads what it would show.
+vi.mock("@/components/ui/tooltip", () => ({
+	Tooltip: (props: { children: ReactNode }) => props.children,
+	TooltipTrigger: (props: { render: ReactElement }) => props.render,
+	TooltipContent: (props: { children: ReactNode }) => createElement("div", { "data-testid": "tooltip" }, props.children)
+}))
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),
@@ -22,6 +28,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 
 const { PdfRibbon } = await import("@/features/pdf/ribbon/pdfRibbon")
 const { toolEnabled } = await import("@/features/pdf/tools/registry")
+const { pdfToolAction } = await import("@/features/pdf/lib/toolKeys")
 const { registerAllActions } = await import("@/lib/keymap/actions")
 
 registerAllActions()
@@ -64,7 +71,6 @@ function setup(overrides: Partial<Props>): Props {
 				labelKey: "previewPdfUndo",
 				icon: PenLineIcon,
 				toolClass: "annotate",
-				actionIds: [],
 				actions: [],
 				enabledWhen: () => ({ enabled: true }),
 				commands: []
@@ -75,7 +81,6 @@ function setup(overrides: Partial<Props>): Props {
 				labelKey: "previewPdfClearForm",
 				icon: EraserIcon,
 				toolClass: "formFill",
-				actionIds: [],
 				actions: [],
 				enabledWhen: policy => toolEnabled("formFill", policy),
 				commands: [],
@@ -158,6 +163,26 @@ describe("PdfRibbon", () => {
 		expect(props.onActivateTool).toHaveBeenLastCalledWith(null, undefined)
 	})
 
+	it("shows a tool's key, its first action, in its tooltip", () => {
+		const props = setup({})
+		const [draw, reset] = props.tools
+
+		if (draw === undefined || reset === undefined) {
+			throw new Error("fixture tools missing")
+		}
+
+		render(
+			<PdfRibbon
+				{...props}
+				tools={[{ ...draw, actions: [pdfToolAction("annotations.draw", "d", "preview:previewPdfKeyToolDraw")] }, reset]}
+			/>
+		)
+
+		const tooltip = screen.queryAllByTestId("tooltip").find(content => content.textContent.startsWith("Undo"))
+
+		expect([...(tooltip?.querySelectorAll("[data-slot=kbd]") ?? [])].map(key => key.textContent)).toEqual(["D"])
+	})
+
 	it("shows a tool with variants as its chosen variant, with a menu choosing another, and the idle tool pressed", async () => {
 		const props = setup({
 			tools: [
@@ -167,7 +192,6 @@ describe("PdfRibbon", () => {
 					labelKey: "previewPdfAnnotToolSelect",
 					icon: PenLineIcon,
 					toolClass: "annotate",
-					actionIds: [],
 					actions: [],
 					enabledWhen: () => ({ enabled: true }),
 					commands: [],
@@ -182,7 +206,6 @@ describe("PdfRibbon", () => {
 					labelKey: "previewPdfAnnotToolHighlight",
 					icon: PenLineIcon,
 					toolClass: "annotate",
-					actionIds: [],
 					actions: [],
 					enabledWhen: () => ({ enabled: true }),
 					commands: [],
@@ -240,8 +263,9 @@ describe("PdfRibbon", () => {
 
 		const off = screen.getByRole("button", { name: "Clear form" })
 
-		expect(off).toHaveProperty("disabled", true)
-		expect(off.getAttribute("title")).toBe("You're offline.")
+		expect(off.getAttribute("aria-disabled")).toBe("true")
+		expect(off.getAttribute("title")).toBeNull()
+		expect(document.getElementById(off.getAttribute("aria-describedby") ?? "")?.textContent).toBe("You're offline.")
 	})
 
 	it("starts with the pages rail closed and opens and closes it from the Pages tab's toggle", async () => {

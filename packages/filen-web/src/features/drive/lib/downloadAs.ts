@@ -1212,7 +1212,7 @@ async function presentationPdf(session: ConvertSession["client"], name: string, 
 		if (error instanceof PresentationJobRefused) {
 			const refusal = error.outcome
 
-			if (refusal.reason === "unsupported" && refusal.detail?.startsWith("password") === true) {
+			if (refusal.reason === "passwordUnsupported") {
 				return failed("previewPptxExportPasswordUnsupported")
 			}
 

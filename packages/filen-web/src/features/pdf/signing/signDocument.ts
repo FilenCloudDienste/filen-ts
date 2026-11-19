@@ -5,6 +5,8 @@ import type { PdfSignFieldArgs } from "@filen/office/dom/pdfedit"
 import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import type { PdfSigner } from "@/features/pdf/signing/signerClient"
 import type { PdfSignerSummary } from "@/features/pdf/workers/pdfSignerCore"
+import type { PdfToolSaveOutcome } from "@/features/pdf/tools/registry"
+import { SaveRefusedError } from "@/features/drive/lib/previewSave.logic"
 import { log } from "@/lib/log"
 
 // Signing with a certificate, from the placed signature to the saved file. Unsaved changes go into the signed file
@@ -36,8 +38,8 @@ export interface PdfSigningDeps {
 	// The open file's size.
 	readonly fileSize: () => number
 	readonly memory: PdfMemoryProfile
-	// Saves a new version (the preview overlay's Save), signing as its last step with `job`; true once saved.
-	readonly save: (job: PdfSignedSaveJob | null) => Promise<boolean>
+	// Saves a new version (the preview overlay's Save), signing as its last step with `job`: how it ended.
+	readonly save: (job: PdfSignedSaveJob | null) => Promise<PdfToolSaveOutcome["status"]>
 	readonly job: (signer: PdfSigner, digest: PdfDigestName) => PdfSignedSaveJob
 	// The changes are saved as a version of their own first.
 	readonly onSaveChangesFirst: () => void
@@ -54,6 +56,12 @@ export function signsInOneVersion(dirty: boolean, signed: boolean, fileSize: num
 export async function signWithCertificate(deps: PdfSigningDeps, request: PdfSigningRequest): Promise<boolean> {
 	const { signer, summary } = request
 	let placed = false
+	// A save that failed was told by the overlay; one that could not start (another save, a dialog open) is told here.
+	const saved = (status: PdfToolSaveOutcome["status"]): boolean => {
+		if (status === "cancelled") deps.onFailed(new SaveRefusedError("previewPdfSaveFailed"))
+
+		return status === "saved"
+	}
 
 	try {
 		const state = await deps.session(session => Promise.resolve(session.getSnapshot().state))
@@ -67,17 +75,17 @@ export async function signWithCertificate(deps: PdfSigningDeps, request: PdfSign
 		if (saveFirst) {
 			deps.onSaveChangesFirst()
 
-			if (!(await deps.save(null))) return false
+			if (!saved(await deps.save(null))) return false
 		}
 
 		await deps.session(session => session.dispatch("sign.addField", { ...request.field, time: Date.now(), capacity: summary.capacity }))
 		placed = true
 
-		const saved = await deps.save(deps.job(signer, summary.digest))
+		if (!saved(await deps.save(deps.job(signer, summary.digest)))) return false
 
-		if (saved) placed = false
+		placed = false
 
-		return saved
+		return true
 	} catch (error) {
 		log.warn("pdf", "signing failed", { error })
 		deps.onFailed(error)

@@ -23,6 +23,7 @@ import { noop } from "@/lib/utils"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { formatShortDate } from "@/lib/formatDate"
 import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
+import { inlinesEmbedImage } from "@/features/chats/lib/embeds.logic"
 
 // Cards sit under the message text on the neutral chat surface; media sits bare.
 const CARD_CLASS =
@@ -406,7 +407,8 @@ export function FilenLinkCard({
 
 	const name = data.name ?? link.uuid
 	const item = linkedFileIntoDriveItem(data.linkedFile)
-	const sizeLabel = formatBytes(Number(data.size))
+	const size = Number(data.size)
+	const sizeLabel = formatBytes(size)
 	const { downloadable } = data.linkedFile
 	const previewCategory = previewType(item, verdict)
 	const icon = (
@@ -417,8 +419,13 @@ export function FilenLinkCard({
 	)
 
 	// A video the browser cannot play from a plain src (Matroska, a transport stream) gets the card: its
-	// overlay plays it through the playback ladder.
-	if (isStreamedCategory(previewCategory) && (previewCategory !== "video" || playsFromPlainSrc(itemTypeExtension(item, verdict)))) {
+	// overlay plays it through the playback ladder. So does an image over the inline cap, which would
+	// otherwise stream and decode in full for every reader the row scrolls past.
+	if (
+		isStreamedCategory(previewCategory) &&
+		(previewCategory !== "video" || playsFromPlainSrc(itemTypeExtension(item, verdict))) &&
+		(previewCategory !== "image" || inlinesEmbedImage(size))
+	) {
 		return (
 			<FilenInlineMedia
 				item={item}
@@ -451,7 +458,7 @@ export function FilenLinkCard({
 	}
 
 	// pdf | docx | text | code | markdown | archive (the overlay's archive browser, extracting only when the
-	// link allows downloads)
+	// link allows downloads), and the streamed media the inline branch above declined
 	return (
 		<FilenPreviewCard
 			item={item}

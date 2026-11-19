@@ -12,7 +12,7 @@ import type { VideoFileRef, VideoPartView, VideoTitleDetail } from "@/workers/vi
 // screen after the dwell. Nothing is listed, walked or checked against the drive; the extras' stills wait for the
 // shelf to come near.
 
-const { sdkApi, library, observers } = vi.hoisted(() => ({
+const { sdkApi, library, observers, viewport } = vi.hoisted(() => ({
 	sdkApi: {
 		readVideoProbe: vi.fn(),
 		makeArtFromRange: vi.fn(),
@@ -39,7 +39,9 @@ const { sdkApi, library, observers } = vi.hoisted(() => ({
 	library: {
 		snapshot: { roots: [], loaded: true, version: 1, summary: { titleCount: 1, total: {}, byRoot: new Map(), hiddenCount: 0 } }
 	},
-	observers: [] as { callback: IntersectionObserverCallback; options: IntersectionObserverInit | undefined; targets: Set<Element> }[]
+	observers: [] as { callback: IntersectionObserverCallback; options: IntersectionObserverInit | undefined; targets: Set<Element> }[],
+	// The layout breakpoint's query is created once per module and kept, so its answer is read live from here.
+	viewport: { wide: true }
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi }))
@@ -228,12 +230,15 @@ beforeEach(() => {
 		"matchMedia",
 		(query: string) =>
 			({
-				matches: true,
+				get matches() {
+					return viewport.wide
+				},
 				media: query,
 				addEventListener: () => undefined,
 				removeEventListener: () => undefined
 			}) as unknown as MediaQueryList
 	)
+	viewport.wide = true
 	observers.length = 0
 	sdkApi.videoCatalogTitle.mockImplementation((id: string) => Promise.resolve(id === MOVIE.id ? MOVIE : null))
 	sdkApi.videoTitleDetail.mockResolvedValue(DETAIL)
@@ -321,6 +326,7 @@ describe("title page request counts", () => {
 		})
 
 		expect(networkCalls()).toEqual({ probes: 1, nfoReads: 1, art: 2, listings: 0 })
+		expect(sdkApi.videoTitleArt.mock.calls.map(call => call[1] as string).sort()).toEqual(["b", "p"])
 
 		// The shelf comes near: its stills are looked up (worker calls, local reads), still no listing.
 		act(() => {
@@ -331,6 +337,24 @@ describe("title page request counts", () => {
 		expect(sdkApi.videoItemArt).toHaveBeenCalledTimes(2)
 		expect(networkCalls().listings).toBe(0)
 
+		view.unmount()
+	})
+
+	it("looks up no poster on a narrow viewport, where the backdrop strip shows none", async () => {
+		viewport.wide = false
+
+		const client = new QueryClient()
+		const view = render(createElement(QueryClientProvider, { client }, createElement(VideoTitleScreen, { titleId: MOVIE.id })))
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(100)
+		})
+		await flush()
+		await flush()
+
+		// The backdrop is looked up; the poster's candidates are never asked for, so nothing is read or decoded.
+		expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Heat")
+		expect(sdkApi.videoTitleArt.mock.calls.map(call => call[1] as string)).toEqual(["b"])
 		view.unmount()
 	})
 

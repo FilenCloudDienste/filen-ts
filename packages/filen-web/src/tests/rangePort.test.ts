@@ -79,9 +79,9 @@ describe("range port", () => {
 
 		reader.onLost(lost)
 		lifetime.abort()
-		await new Promise(resolve => setTimeout(resolve, 20))
-
-		expect(lost).toHaveBeenCalledTimes(1)
+		await vi.waitFor(() => {
+			expect(lost).toHaveBeenCalledTimes(1)
+		})
 
 		const other = setUp(() => Promise.resolve(new Uint8Array(1)))
 		const quiet = vi.fn()
@@ -97,9 +97,9 @@ describe("range port", () => {
 		const { reader, lifetime } = setUp(() => Promise.resolve(new Uint8Array(1)))
 
 		reader.close()
-		await new Promise(resolve => setTimeout(resolve, 20))
-
-		expect(lifetime.signal.aborted).toBe(true)
+		await vi.waitFor(() => {
+			expect(lifetime.signal.aborted).toBe(true)
+		})
 	})
 
 	it("shuts down a port nobody has read from for the idle period, while its reader is not known to hold on", () => {
@@ -213,8 +213,10 @@ describe("range port", () => {
 
 		const read = reader.readRange(0, 10, new AbortController().signal)
 
+		await vi.waitFor(() => {
+			expect(lockName).not.toBeNull()
+		})
 		await new Promise(resolve => setTimeout(resolve, 20))
-		expect(lockName).not.toBeNull()
 		expect(lost).not.toHaveBeenCalled()
 
 		died.resolve(undefined)
@@ -228,16 +230,16 @@ describe("range port", () => {
 		const before = await names()
 		const { lifetime } = setUp(() => Promise.resolve(new Uint8Array(1)))
 
-		await new Promise(resolve => setTimeout(resolve, 20))
+		let added: (string | undefined)[] = []
 
-		const added = [...(await names())].filter(name => name !== undefined && !before.has(name) && name.startsWith("filen-range-port-"))
-
-		expect(added).toHaveLength(1)
-
+		await vi.waitFor(async () => {
+			added = [...(await names())].filter(name => name !== undefined && !before.has(name) && name.startsWith("filen-range-port-"))
+			expect(added).toHaveLength(1)
+		})
 		lifetime.abort()
-		await new Promise(resolve => setTimeout(resolve, 20))
-
-		expect((await names()).has(added[0])).toBe(false)
+		await vi.waitFor(async () => {
+			expect((await names()).has(added[0])).toBe(false)
+		})
 	})
 
 	it("lives as long as a reader holding its lock, past the idle period, and ends when that reader goes", async () => {

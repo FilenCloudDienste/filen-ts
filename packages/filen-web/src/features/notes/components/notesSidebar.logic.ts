@@ -47,11 +47,13 @@ function compareByEditedDesc(a: GroupEntry, b: GroupEntry): number {
 	return compareEditedDescThenUuid(a.note, b.note)
 }
 
-// The previous-month header label — the calendar month name of the bucket's lower bound (mobile names
-// this `twoMonthsAgo` but it labels the single "one month back" window). `undefined` locale defers to
-// the runtime's own, same posture as lib/relativeTime.ts's absolute fallback.
-function monthLabel(timestamp: number): string {
-	return new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(timestamp))
+// A month bucket's header label: the name of the notes' own calendar month, with the year when that
+// month lies in the previous year. `undefined` locale defers to the runtime's own, same posture as
+// lib/relativeTime.ts's absolute fallback.
+function monthLabel(timestamp: number, inCurrentYear: boolean): string {
+	return new Intl.DateTimeFormat(undefined, inCurrentYear ? { month: "long" } : { month: "long", year: "numeric" }).format(
+		new Date(timestamp)
+	)
 }
 
 // Header label key for every string bucket id; the Record keeps it exhaustive over the shared ids.
@@ -73,7 +75,11 @@ function headerForBucket(bucketId: NoteBucketId): Extract<NotesSidebarRow, { kin
 	}
 
 	if (bucketId.kind === "month") {
-		return { kind: "header", id: "month", label: { kind: "literal", text: monthLabel(bucketId.monthTimestamp) } }
+		return {
+			kind: "header",
+			id: `month-${String(bucketId.monthTimestamp)}`,
+			label: { kind: "literal", text: monthLabel(bucketId.monthTimestamp, bucketId.inCurrentYear) }
+		}
 	}
 
 	return { kind: "header", id: `year-${String(bucketId.year)}`, label: { kind: "literal", text: String(bucketId.year) } }

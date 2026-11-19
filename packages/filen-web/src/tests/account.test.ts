@@ -68,3 +68,38 @@ describe("account writes", () => {
 		queryClient.clear()
 	})
 })
+
+// The quota pre-flight trusts the cached account only after a server read this page that no write overlapped.
+describe("account read recency", () => {
+	async function freshModule() {
+		vi.resetModules()
+
+		return await import("@/queries/account")
+	}
+
+	it("an uninterrupted read counts as recent", async () => {
+		const account = await freshModule()
+
+		expect(account.isAccountReadRecent()).toBe(false)
+
+		getUserInfo.mockResolvedValueOnce({ storageUsed: 1n } as UserInfo)
+		await account.fetchAccount()
+
+		expect(account.isAccountReadRecent()).toBe(true)
+	})
+
+	it("a read a write overlapped does not count as recent", async () => {
+		const account = await freshModule()
+		const { promise, resolve } = Promise.withResolvers<UserInfo>()
+
+		getUserInfo.mockReturnValueOnce(promise)
+
+		const read = account.fetchAccount()
+
+		account.markAccountStale()
+		resolve({ storageUsed: 1n } as UserInfo)
+		await read
+
+		expect(account.isAccountReadRecent()).toBe(false)
+	})
+})

@@ -29,6 +29,11 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 	const state = useSyncExternalStore(store.subscribe, store.getState)
 	const phase = useSyncExternalStore(context.swap.subscribe, context.swap.getSnapshot)
 	const session = phase.kind === "editing" ? phase.session : null
+	// No editor will read the threads: it did not start, or was poisoned.
+	const unreadable = phase.kind === "failed" || phase.kind === "poisoned" || phase.kind === "reopenFailed"
+	// Back on the viewer (Discard, or the editor closed): no editor is there or starting (opening Comments or Attachments
+	// starts one, leaving this phase in the same call).
+	const viewing = phase.kind === "view"
 	const author = useCommentAuthor()
 	const ask = useEffectEvent(() => author.ask())
 	const fileInput = useRef<HTMLInputElement | null>(null)
@@ -36,6 +41,16 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 	useEffect(() => {
 		store.bind(session)
 	}, [store, session])
+
+	// What was open on the editor closes with it, instead of waiting for a read nothing will make.
+	useEffect(() => {
+		if (!viewing) return
+
+		const open = store.getState()
+
+		if (open.commentsOpen) store.openComments(false)
+		if (open.attachmentsOpen) store.openAttachments(false)
+	}, [store, viewing])
 
 	useEffect(() => {
 		store.setAuthorAsk(() => ask())
@@ -81,6 +96,8 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 		<>
 			<PdfCommentsPanel
 				threads={state.threads ?? []}
+				loaded={state.threads !== null}
+				failed={state.threadsStatus === "failed" || (state.threads === null && unreadable)}
 				editable={context.editable}
 				phone={phone}
 				open={state.commentsOpen}

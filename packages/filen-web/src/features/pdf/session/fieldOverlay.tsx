@@ -251,7 +251,9 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 	const commit = (): void => {
 		if (draft === null || draft === field.value) return
 
-		dispatch({ kind: "text", text: draft })
+		void form.commitText(field.id, page, draft, (change, dropped) => {
+			swap.edit(change, dropped)
+		})
 	}
 
 	// Escape takes typed text back (and stays in the field); without any, it is the viewer's.

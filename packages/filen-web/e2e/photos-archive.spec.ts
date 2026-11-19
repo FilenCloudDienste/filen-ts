@@ -252,7 +252,7 @@ test.describe("photos compress", () => {
 			const barCompress = selectionBar(page).getByRole("button", { name: "Compress", exact: true })
 
 			await expect(barCompress).toBeDisabled()
-			await expect(barCompress).toHaveAttribute("title", OFFLINE_TITLE)
+			await expect(barCompress).toHaveAccessibleDescription(OFFLINE_TITLE)
 			await clearSelection(page, grid)
 
 			const tileMenu = await openTileMenu(page, tileB)

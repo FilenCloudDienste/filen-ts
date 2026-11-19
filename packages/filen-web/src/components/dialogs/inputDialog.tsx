@@ -1,4 +1,4 @@
-import { type ComponentProps, type SubmitEvent } from "react"
+import { useState, type ComponentProps, type SubmitEvent } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -79,6 +79,21 @@ function InputDialog({
 	onValueChange
 }: InputDialogProps) {
 	const [value, setValue] = useSeededOnOpen(open, initialValue ?? "")
+	// Focus selects the value once per open. The browser fires focus again on the still-active field
+	// when the window or tab regains it, and re-selecting then would let the next keystroke or paste
+	// replace an edit in progress. Re-armed during render on the closed-to-open transition (the one
+	// useSeededOnOpen detects), so it is armed before Base UI's initial focus lands, not after.
+	const [wasOpen, setWasOpen] = useState(open)
+	const [selectOnFocus, setSelectOnFocus] = useState(true)
+
+	if (open !== wasOpen) {
+		setWasOpen(open)
+
+		if (open) {
+			setSelectOnFocus(true)
+		}
+	}
+
 	const valid = validate(value)
 	const error = errorFor?.(value) ?? null
 
@@ -99,7 +114,10 @@ function InputDialog({
 		value,
 		autoFocus: true,
 		placeholder,
-		disabled: pending,
+		// readOnly, not disabled: a disabled field drops focus and nothing gives it back when a failed
+		// submit clears `pending`. Dimmed like a disabled field so it does not look editable meanwhile.
+		readOnly: pending,
+		className: pending ? "opacity-50" : undefined,
 		"aria-invalid": error !== null ? true : undefined,
 		"aria-describedby": error !== null ? "input-dialog-error" : undefined,
 		onChange: e => {
@@ -107,13 +125,15 @@ function InputDialog({
 			onValueChange?.(e.target.value)
 		},
 		onFocus: e => {
-			if (secret === true) {
+			if (secret === true || !selectOnFocus) {
 				return
 			}
 
 			// Base UI's Dialog re-focuses the popup's initial-focus target (this input, via
-			// FloatingFocusManager) on every open, not just first mount — so this reliably
-			// selects the pre-filled value each time, not only once.
+			// FloatingFocusManager) on every open, not just first mount, so this selects the pre-filled
+			// value on each open.
+			setSelectOnFocus(false)
+
 			const dot = e.target.value.lastIndexOf(".")
 
 			if (selectBaseName === true && dot > 0) {
@@ -132,6 +152,7 @@ function InputDialog({
 			<DialogContent closeButtonDisabled={pending}>
 				<form
 					onSubmit={handleSubmit}
+					aria-busy={pending}
 					className="flex flex-col gap-6"
 				>
 					<DialogHeader>

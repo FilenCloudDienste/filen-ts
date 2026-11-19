@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // The boot's import of the previous web app's session and settings, against mocked SDK, kv and browser storage.
 const { sdkApi, kv, session, fetchAccount, setQueryData, bridge } = vi.hoisted(() => ({
@@ -26,7 +26,7 @@ vi.mock("@/queries/account", () => ({ ACCOUNT_QUERY_KEY: ["account"], fetchAccou
 vi.mock("@/features/notes/lib/preferences", () => ({ DEFAULT_NOTE_TYPE_KV_KEY: "notes.defaultType.v1" }))
 vi.mock("@/features/settings/lib/remoteConfig", () => ({ DISMISSED_ANNOUNCEMENTS_KV_KEY: "remoteConfig.dismissedAnnouncements.v1" }))
 
-import { runLegacyWebMigration, wipeLegacyWebOnSignOut } from "@/lib/legacyWebMigration"
+import { runLegacyWebMigration, VERIFY_TIMEOUT_MS, wipeLegacyWebOnSignOut } from "@/lib/legacyWebMigration"
 import { LEGACY_KEEP_MS, readLegacyMarker, writeLegacyMarker } from "@/lib/legacyWebMigration.logic"
 
 const ROOT = "00000000-0000-4000-8000-000000000001"
@@ -117,6 +117,10 @@ beforeEach(() => {
 	})
 })
 
+afterEach(() => {
+	vi.useRealTimers()
+})
+
 // The wipe runs behind the boot; let it settle.
 async function settle(): Promise<void> {
 	for (let i = 0; i < 5; i++) {
@@ -164,6 +168,37 @@ describe("runLegacyWebMigration", () => {
 
 		await expect(runLegacyWebMigration(1000)).resolves.toBe(true)
 		expect(readLegacyMarker()).toMatchObject({ stage: "imported", verified: false })
+	})
+
+	it("continues unverified when the account read gives no answer in time", async () => {
+		seedOldSession()
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+		fetchAccount.mockReturnValue(new Promise(() => undefined))
+
+		const result = runLegacyWebMigration(1000)
+
+		await vi.waitUntil(() => fetchAccount.mock.calls.length > 0)
+		await vi.advanceTimersByTimeAsync(VERIFY_TIMEOUT_MS)
+
+		await expect(result).resolves.toBe(true)
+		expect(session.persistSession).toHaveBeenCalledTimes(1)
+		expect(readLegacyMarker()).toMatchObject({ stage: "imported", verified: false })
+	})
+
+	it("keeps the import pending when saving the session fails, and imports again on the next start", async () => {
+		seedOldSession()
+		session.persistSession.mockRejectedValueOnce(new Error("quota"))
+
+		await expect(runLegacyWebMigration(1000)).resolves.toBe(true)
+
+		expect(readLegacyMarker()).toMatchObject({ stage: "pending", attempts: 1 })
+		expect(store.has("sdkConfig:4:4")).toBe(true)
+		expect(sdkApi.logout).not.toHaveBeenCalled()
+
+		await expect(runLegacyWebMigration(2000)).resolves.toBe(true)
+
+		expect(session.persistSession).toHaveBeenCalledTimes(2)
+		expect(readLegacyMarker()).toMatchObject({ stage: "imported", at: 2000, attempts: 2 })
 	})
 
 	it("imports nothing from a session the server refuses, and wipes it at once", async () => {

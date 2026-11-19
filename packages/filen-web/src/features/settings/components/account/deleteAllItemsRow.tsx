@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { DELETE_ALL_ITEMS_PHRASE } from "@/features/settings/lib/dangerPhrases"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { invalidateDriveListings } from "@/features/drive/queries/drive"
 import { invalidatePhotosListing } from "@/features/photos/queries/photos"
@@ -18,14 +17,16 @@ interface DeleteAllItemsRowProps {
 function DeleteAllItemsRow({ accountQuery }: DeleteAllItemsRowProps) {
 	const { t } = useTranslation("settings")
 	const { storageUsed } = accountQuery.data
+	// Resolved once for both the body and the match, so the phrase shown is the phrase compared.
+	const phrase = t("settingsDeleteAllItemsTypedConfirmPhrase")
 
 	return (
 		<TypedDeleteRow
 			title={t("settingsDeleteAllItemsTitle")}
 			description={t("settingsDeleteAllItemsDescription", { size: formatBytes(Number(storageUsed)) })}
 			submitLabel={t("settingsDeleteAllItemsSubmit")}
-			confirmBody={t("settingsDeleteAllItemsConfirmBody", { phrase: DELETE_ALL_ITEMS_PHRASE })}
-			phrase={DELETE_ALL_ITEMS_PHRASE}
+			confirmBody={t("settingsDeleteAllItemsConfirmBody", { phrase })}
+			phrase={phrase}
 			successMessage={t("settingsDeleteAllItemsSuccess")}
 			run={async () => {
 				await sdkApi.deleteAllItems()

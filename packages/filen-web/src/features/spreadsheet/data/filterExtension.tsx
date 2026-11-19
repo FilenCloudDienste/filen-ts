@@ -94,7 +94,7 @@ export function useSheetSortFilter({ grid, gridRef, handle, canEdit, text, run }
 		const found = model.entry(snapshot.sheet, row, col)
 		const fill = found === null ? undefined : model.style(found.tile.styles[found.entry] ?? 0).fill
 		const criteria: SheetFilterCriteria =
-			by === "color" ? { kind: "color", cell: true, color: fill ?? null } : valueCriteria(snapshot.active.text, null)
+			by === "color" ? { kind: "color", cell: true, color: fill ?? null } : valueCriteria(snapshot.active.text)
 
 		if (filterAt(snapshot.layout, row, col) === null) {
 			if (!(await toggleFilter(model))) {
@@ -150,6 +150,11 @@ export function useSheetSortFilter({ grid, gridRef, handle, canEdit, text, run }
 		return false
 	}
 
+	// A text file's keys: only the sorts, so the filter keys stay the grid's.
+	function textShortcut(key: SheetShortcut): boolean {
+		return (key === "sortAscending" || key === "sortDescending") && shortcut(key)
+	}
+
 	const active = selection.active
 	const inFilter = filterAt(layout, active.row, active.col)
 	const filtered = clearTarget(layout, active.row, active.col) !== null
@@ -195,8 +200,8 @@ export function useSheetSortFilter({ grid, gridRef, handle, canEdit, text, run }
 			/>
 		) : null
 
-	// A text file sorts; it holds no filter.
-	if (text) return { id: "sortFilter", menuItems: sortItems, dialogs: sortDialog }
+	// A text file sorts (its menu's and the sort keys); it holds no filter.
+	if (text) return { id: "sortFilter", menuItems: sortItems, dialogs: sortDialog, shortcut: textShortcut }
 
 	return {
 		id: "sortFilter",

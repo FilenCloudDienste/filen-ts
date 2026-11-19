@@ -166,13 +166,9 @@ describe("applyOfflineGate", () => {
 	it("disables mute/rename/delete while offline (owner)", () => {
 		const chat = mockChat({ ownerId: 1n, muted: false })
 		const gated = applyOfflineGate(chatMenuActions(chat, 1n, true), false)
-		const gatedIds = new Set(["mute", "rename", "delete"])
+		const disabledIds = new Set(gated.filter(descriptor => descriptor.enabled === false).map(descriptor => descriptor.id))
 
-		for (const descriptor of gated) {
-			if (gatedIds.has(descriptor.id)) {
-				expect(descriptor.enabled).toBe(false)
-			}
-		}
+		expect(disabledIds).toEqual(new Set(["mute", "rename", "delete"]))
 	})
 
 	// It only opens the chat info panel, whose writes are gated one by one.

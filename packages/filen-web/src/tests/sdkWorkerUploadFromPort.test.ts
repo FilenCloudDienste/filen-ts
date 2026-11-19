@@ -103,8 +103,6 @@ afterEach(() => {
 		made.port1.close()
 		made.port2.close()
 	}
-
-	vi.clearAllMocks()
 })
 
 describe("uploadFileFromPort", () => {

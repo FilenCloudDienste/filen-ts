@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import { stringifyEnvelope } from "@filen/shared/session"
 import { log } from "@/lib/log"
 import { persister, restorePersistedQueries, purgePersistedQueries, removeQueriesAndPersisted, PERSIST_PREFIX } from "@/queries/persist"
+import { registerCheckQueryOptions } from "@/features/auth/queries/registerCheck"
 
 // Map-backed fake of the kv worker api (mirrors src/lib/storage/adapter.test.ts), mocked at
 // `@/lib/storage/adapter`'s `storage()` — the persister's kv bridge calls that directly with RAW
@@ -101,6 +102,30 @@ describe("per-query persister (Map-backed fake kv)", () => {
 
 		expect(writes).not.toContain(notesKey)
 		expect(fakeStore.get(notesKey)).toBe(notesRowBefore)
+	})
+
+	it("never writes a row for the register check (its own noDiskPersister override), while other queries still persist", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ status: true, data: { ok: true } }) }))
+		)
+
+		const client = makeClient()
+
+		try {
+			await expect(client.query(registerCheckQueryOptions)).resolves.toEqual({ ok: true })
+			await client.query({ queryKey: ["auth", "other"], queryFn: () => 1 })
+
+			await vi.waitFor(() => {
+				expect(writes.length).toBe(1)
+			})
+
+			expect(writes[0]).toContain("other")
+			expect(writes.some(key => key.includes("registerCheck"))).toBe(false)
+			expect(reads.count).toBe(1)
+		} finally {
+			vi.unstubAllGlobals()
+		}
 	})
 
 	it("skips persisting an unserializable update (warn, no write, previous row kept) without an unhandled rejection", async () => {

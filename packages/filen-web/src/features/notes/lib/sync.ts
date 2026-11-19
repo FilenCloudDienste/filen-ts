@@ -950,9 +950,6 @@ export class Sync {
 			// Notes whose remote-edit dialog is open in some tab keep their entries until it is answered.
 			const held = await heldNotes()
 
-			// SINGLE-TAB SEAM: this loop is not yet gated behind the leader election used elsewhere in this
-			// class (broadcastState/followerEnqueue) — that gating (only the elected tab flushes) is future
-			// work. Today every authed tab runs its own loop.
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
 					if (isAborted(signal)) {

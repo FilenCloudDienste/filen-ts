@@ -84,7 +84,11 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 	const origin = usePreviewOrigin(item)
 	const access = usePreviewAccessMode()
 	const profile = useDeviceProfile()
-	const [state, setState] = useState<OpenState>({ status: "opening" })
+	// Kept with the worker it was read from: a new worker (Reload, a restart) is opening until its own open resolved.
+	const [opened, setOpened] = useState<{ owned: DicomWorkerHandle | null; state: OpenState }>({
+		owned: null,
+		state: { status: "opening" }
+	})
 	const [attempt, setAttempt] = useState(0)
 	const readOrigin = useRef(origin)
 	const decodeBytes = workerDecodeBytes(profile)
@@ -145,12 +149,16 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 			result => {
 				if (!live) return
 
-				setState(
-					result.info !== null ? { status: "open", info: result.info } : { status: "failed", reason: result.failure ?? "damaged" }
-				)
+				setOpened({
+					owned,
+					state:
+						result.info !== null
+							? { status: "open", info: result.info }
+							: { status: "failed", reason: result.failure ?? "damaged" }
+				})
 			},
 			() => {
-				if (live) setState({ status: "failed", reason: "unreadable" })
+				if (live) setOpened({ owned, state: { status: "failed", reason: "unreadable" } })
 			}
 		)
 
@@ -163,9 +171,9 @@ function useDicomOpen(item: DriveItem, owned: DicomWorkerHandle | null): { state
 	}, [owned, access, budgetBytes, attempt])
 
 	return {
-		state,
+		state: opened.owned !== null && opened.owned === owned ? opened.state : { status: "opening" },
 		retry: () => {
-			setState({ status: "opening" })
+			setOpened({ owned, state: { status: "opening" } })
 			setAttempt(previous => previous + 1)
 		}
 	}

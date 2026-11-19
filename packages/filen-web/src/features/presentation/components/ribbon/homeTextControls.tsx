@@ -33,6 +33,7 @@ import {
 	FONT_SIZES,
 	changeLevel,
 	clearFormatting,
+	oneStep,
 	setBullet,
 	setHyperlink,
 	setParaProps,
@@ -43,6 +44,7 @@ import {
 	toggleStrike,
 	toggleUnderline,
 	type Bullet,
+	type DeckOp,
 	type ParaPatch,
 	type ParaProps,
 	type RunProps,
@@ -50,6 +52,7 @@ import {
 	type TextCommand,
 	type TextDefaults
 } from "@filen/office/core/presentation"
+import type { CommandResult } from "@filen/office/dom/presentation"
 import { formatShapes, selectedShapes, useShapeSelection, useTextEditing } from "@filen/office/react/presentation"
 import { cn } from "@filen/shared"
 import { FormDialog } from "@/components/dialogs/formDialog"
@@ -102,8 +105,19 @@ import { i18n } from "@/lib/i18n"
 // The Home tab's Font and Paragraph groups of the presentation editor: every a:rPr and a:pPr property a user sets in
 // PowerPoint's ribbon, and the body properties of the box (direction, anchoring, columns). With a body open the
 // commands act on its selection (the text editor's controller; focus stays in the body); with shapes selected and no
-// body open they format those shapes' whole text, one command each. What a control shows comes from the open body's
-// format (the selection's properties as the inheritance chain shows them).
+// body open they format those shapes' whole text, as one command through the shell (one undo step for the selection,
+// as a formatting key on the canvas gives; a refusal is told). What a control shows comes from the open body's format
+// (the selection's properties as the inheritance chain shows them).
+
+// What formatShapes is told for each op it hands over: the op is only collected here, sent with the others after.
+const COLLECTED: CommandResult = { ok: true, revision: 0, dirty: false }
+
+// The ops as one command (a batch for several) through the shell's command path; nothing when there are none.
+async function sendAsOne(editor: TextRibbonEditor, ops: readonly DeckOp[]): Promise<void> {
+	const op = oneStep(ops)[0]
+
+	if (op !== undefined) await editor.command(op)
+}
 
 function useTextTarget(editor: TextRibbonEditor, editable: boolean): TextTarget {
 	const controller = useTextEditing(editor.text)
@@ -130,7 +144,17 @@ function useTextTarget(editor: TextRibbonEditor, editable: boolean): TextTarget 
 				return
 			}
 
-			void formatShapes(editor.session, shapes, make)
+			// A shape whose body cannot be read is left out, as the canvas's formatting keys leave it.
+			void (async () => {
+				const ops: DeckOp[] = []
+
+				await formatShapes(editor.session, shapes, make, op => {
+					ops.push(op)
+
+					return Promise.resolve(COLLECTED)
+				})
+				await sendAsOne(editor, ops)
+			})()
 		},
 		setBodyPr: patch => {
 			if (controller !== undefined) {
@@ -140,18 +164,21 @@ function useTextTarget(editor: TextRibbonEditor, editable: boolean): TextTarget 
 			}
 
 			void (async () => {
+				const ops: DeckOp[] = []
+
 				for (const shape of shapes) {
 					const seed = await editor.session.textSeed(shape).catch(() => undefined)
 
-					if (seed !== undefined) {
-						await editor.command({
+					if (seed !== undefined)
+						ops.push({
 							family: "text",
 							kind: "setText",
 							target: shape,
 							body: { ...seed.body, bodyPr: { ...seed.body.bodyPr, ...patch } }
 						})
-					}
 				}
+
+				await sendAsOne(editor, ops)
 			})()
 		}
 	}

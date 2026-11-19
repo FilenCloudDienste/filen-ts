@@ -16,7 +16,7 @@ export const OBJ_MAX_VERTICES = 3_000_000
 export const MODEL_MAX_UNPACKED_BYTES = MODEL_MAX_BYTES
 // The GPU memory a scene may take: attributes, textures with mipmaps, the framebuffer.
 export const MODEL_MAX_GPU_BYTES = 768 * 1024 * 1024
-// A texture's decoded RGBA bytes per pixel before resizing (W2's pixel budget figure).
+// A texture's decoded RGBA bytes per pixel before resizing: what workerDecodePixels weighs its pixel budget by.
 export const TEXTURE_BPP = 4
 
 // The 3D viewer's formats by extension: the one list the category table and the viewer read.
@@ -245,8 +245,10 @@ export function gltfMeshoptBytes(json: unknown): number {
 const GLTF_COMPONENTS: Readonly<Record<string, number>> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 }
 const GLTF_COMPONENT_BYTES: Readonly<Record<number, number>> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 }
 
-// The bytes every accessor's elements take (count × components × component size): what GLTFLoader allocates for an
-// accessor with no buffer view, and what its attributes hold.
+// The bytes GLTFLoader allocates itself for accessors (count × components × component size, an unknown type or
+// component weighed at its largest): one with no buffer view gets a zero-filled array, a sparse one a fresh array or a
+// copy of its view. An accessor read in place from its buffer view is bounded by the file, and may alias another's
+// bytes, so it is not counted.
 export function gltfAccessorBytes(json: unknown): number {
 	const accessors = typeof json === "object" && json !== null ? (json as { accessors?: unknown }).accessors : undefined
 
@@ -257,7 +259,16 @@ export function gltfAccessorBytes(json: unknown): number {
 	for (const accessor of accessors as unknown[]) {
 		if (typeof accessor !== "object" || accessor === null) continue
 
-		const { count, type, componentType } = accessor as { count?: unknown; type?: unknown; componentType?: unknown }
+		const { count, type, componentType, bufferView, sparse } = accessor as {
+			count?: unknown
+			type?: unknown
+			componentType?: unknown
+			bufferView?: unknown
+			sparse?: unknown
+		}
+
+		if (bufferView !== undefined && sparse === undefined) continue
+
 		const components = typeof type === "string" ? (GLTF_COMPONENTS[type] ?? 16) : 16
 		const bytes = typeof componentType === "number" ? (GLTF_COMPONENT_BYTES[componentType] ?? 4) : 4
 
@@ -293,7 +304,9 @@ export function preflightGltf(bytes: Uint8Array, binary: boolean): Preflight {
 		return { ok: false, reason: "malformed" }
 	}
 
-	return gltfElements(json) > MODEL_MAX_VERTICES * 3 || gltfMeshoptBytes(json) > MODEL_MAX_GPU_BYTES
+	return gltfElements(json) > MODEL_MAX_VERTICES * 3 ||
+		gltfMeshoptBytes(json) > MODEL_MAX_GPU_BYTES ||
+		gltfAccessorBytes(json) > MODEL_MAX_GPU_BYTES
 		? { ok: false, reason: "tooLarge" }
 		: OK
 }

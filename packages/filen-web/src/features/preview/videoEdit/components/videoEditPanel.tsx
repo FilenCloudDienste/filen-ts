@@ -31,6 +31,7 @@ import {
 	clampSpeed,
 	clampTextSize,
 	clampTextTimes,
+	DEFAULT_TEXT_SIZE,
 	keepsTrack,
 	MAX_GAIN_DB,
 	MAX_SPEED,
@@ -49,6 +50,7 @@ import { formatTimecode } from "@/features/preview/videoEdit/lib/timeline.logic"
 import type { EditFeature } from "@/features/preview/videoEdit/lib/availability"
 import { TimecodeField } from "@/features/preview/videoEdit/components/timecodeField"
 import type { NamespaceKey } from "@/lib/i18n"
+import { trackLanguageName } from "@/features/videos/lib/player/trackLabels.logic"
 
 type PreviewKey = NamespaceKey<"preview">
 
@@ -100,6 +102,21 @@ const TEXT_COLORS: readonly { color: string; labelKey: PreviewKey }[] = [
 ]
 
 // Why a control is off: this browser cannot save it.
+// The gain (signed, one decimal) and speed (up to two decimals) formats of the UI language, built once per language.
+let numberFormats: { language: string; gain: Intl.NumberFormat; speed: Intl.NumberFormat } | null = null
+
+function numberFormatsFor(language: string): { gain: Intl.NumberFormat; speed: Intl.NumberFormat } {
+	if (numberFormats?.language !== language) {
+		numberFormats = {
+			language,
+			gain: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: "exceptZero" }),
+			speed: new Intl.NumberFormat(language, { maximumFractionDigits: 2 })
+		}
+	}
+
+	return numberFormats
+}
+
 function Unavailable(props: { show: boolean; text: string }) {
 	return props.show ? <p className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">{props.text}</p> : null
 }
@@ -147,8 +164,9 @@ export interface VideoEditPanelProps {
 
 // The tools beside the video (beneath it under the sm breakpoint): Trim, Crop, Adjust, Audio, Speed and Text tabs.
 export function VideoEditPanel(props: VideoEditPanelProps) {
-	const { t } = useTranslation("preview")
+	const { t, i18n } = useTranslation("preview")
 	const { recipe, info, unavailable } = props
+	const formats = numberFormatsFor(i18n.language)
 	const duration = info.duration
 	const output = outputDuration(recipe.keep, recipe.speed)
 	const first = recipe.keep[0]
@@ -378,7 +396,6 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 							<TurnButton
 								label={t("previewVideoEditRotateLeft")}
 								icon={<RotateCcwSquareIcon />}
-								disabled={unavailable.has("rotate")}
 								onClick={() => {
 									props.onTurn("left")
 								}}
@@ -386,7 +403,6 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 							<TurnButton
 								label={t("previewVideoEditRotateRight")}
 								icon={<RotateCwSquareIcon />}
-								disabled={unavailable.has("rotate")}
 								onClick={() => {
 									props.onTurn("right")
 								}}
@@ -513,7 +529,7 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 										disabled={recipe.audio.mute || unavailable.has("gain")}
 										format={value =>
 											t("previewVideoEditGainValue", {
-												gain: `${value > 0 ? "+" : ""}${clampGain(value).toFixed(1)}`
+												gain: formats.gain.format(clampGain(value))
 											})
 										}
 										onChange={value => {
@@ -532,10 +548,6 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 								</div>
 								{info.audio.length > 1 ? (
 									<Section label={t("previewVideoEditTracks")}>
-										<Unavailable
-											show={unavailable.has("audioTracks")}
-											text={unavailableText}
-										/>
 										{info.audio.map(track => (
 											<SwitchRow
 												key={track.number}
@@ -544,11 +556,11 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 														? t("previewVideoEditTrack", { number: track.number })
 														: t("previewVideoEditTrackLanguage", {
 																number: track.number,
-																language: track.language
+																language: trackLanguageName(track.language, i18n.language) ?? track.language
 															})
 												}
 												checked={keepsTrack(recipe.audio.keepTracks, track.number, info.audio[0]?.number)}
-												disabled={recipe.audio.mute || unavailable.has("audioTracks")}
+												disabled={recipe.audio.mute}
 												onChange={() => {
 													props.onChange(current => ({
 														...current,
@@ -572,22 +584,17 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 				) : null}
 				{props.tab === "speed" ? (
 					<div className="flex flex-col gap-6">
-						<Unavailable
-							show={unavailable.has("speed")}
-							text={unavailableText}
-						/>
 						<Section label={t("previewVideoEditSpeed")}>
 							<div className="flex flex-wrap gap-1.5">
 								{SPEED_PRESETS.map(speed => (
 									<Chip
 										key={speed}
 										selected={recipe.speed === speed}
-										disabled={unavailable.has("speed")}
 										onClick={() => {
 											props.onChange(current => ({ ...current, speed }))
 										}}
 									>
-										{t("previewVideoEditSpeedValue", { speed })}
+										{t("previewVideoEditSpeedValue", { speed: formats.speed.format(speed) })}
 									</Chip>
 								))}
 							</div>
@@ -599,8 +606,7 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 							max={MAX_SPEED}
 							step={0.05}
 							neutral={1}
-							disabled={unavailable.has("speed")}
-							format={value => t("previewVideoEditSpeedValue", { speed: clampSpeed(value) })}
+							format={value => t("previewVideoEditSpeedValue", { speed: formats.speed.format(clampSpeed(value)) })}
 							onChange={value => {
 								props.onChange(current => ({ ...current, speed: clampSpeed(value) }), "speed")
 							}}
@@ -639,7 +645,9 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 											props.onSelectText(text.id)
 										}}
 									>
-										<span className="block max-w-32 truncate">{text.text}</span>
+										<span className="block max-w-32 truncate">
+											{text.text.trim() === "" ? t("previewVideoEditTextEmpty") : text.text}
+										</span>
 									</Chip>
 								))}
 							</div>
@@ -664,7 +672,7 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 									min={Math.round(MIN_TEXT_SIZE * 100)}
 									max={Math.round(MAX_TEXT_SIZE * 100)}
 									step={1}
-									neutral={8}
+									neutral={Math.round(DEFAULT_TEXT_SIZE * 100)}
 									onChange={value => {
 										changeText(
 											selectedText.id,
@@ -673,7 +681,7 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 										)
 									}}
 									onReset={() => {
-										changeText(selectedText.id, text => ({ ...text, size: 0.08 }))
+										changeText(selectedText.id, text => ({ ...text, size: DEFAULT_TEXT_SIZE }))
 									}}
 								/>
 								<Section label={t("previewVideoEditTextColor")}>

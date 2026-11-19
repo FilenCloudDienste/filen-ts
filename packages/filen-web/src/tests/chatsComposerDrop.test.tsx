@@ -9,10 +9,13 @@ import type { Chat, ChatMessage } from "@filen/sdk-rs"
 // Dropping files on the composer starts an upload, so it answers to the same gate as the attach menu:
 // offline, on a free account, or while an attachment is still uploading, the drop is refused with a
 // reason instead of uploading a file whose link can only fail (or racing the one in flight). Also the
-// edit mode's emptied-input behaviour, the reply banner, and the suggestion listbox's keyboard/ARIA wiring.
+// edit mode's emptied-input behaviour, the reply banner, the suggestion listbox's keyboard/ARIA wiring, the
+// immediate draft delete on send, and the over-limit counter and error tied to the field.
 
-const { state, preflightAttachments, uploadAttachment, toastError, navigate } = vi.hoisted(() => ({
+const { state, preflightAttachments, uploadAttachment, toastError, navigate, deleteDraft, saveDraftDebounced } = vi.hoisted(() => ({
 	navigate: vi.fn(),
+	deleteDraft: vi.fn(() => Promise.resolve()),
+	saveDraftDebounced: vi.fn(),
 	// Pro follows the subscriptions (isProAccount, the backend's isUserPro), never the account's isPremium flag:
 	// the default here is a subscriber whose isPremium is false, as it is for every subscription-only account.
 	state: { isOnline: true, subs: [{ activated: true }] as { activated: boolean }[], isPremium: false },
@@ -25,9 +28,9 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => state.isOnline }))
 vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { isPremium: state.isPremium, subs: state.subs } }) }))
 vi.mock("@/features/chats/lib/attachments", () => ({ preflightAttachments, uploadAttachment }))
-vi.mock("@/features/chats/lib/sync", () => ({ enqueueChatMessage: vi.fn() }))
+vi.mock("@/features/chats/lib/sync", () => ({ enqueueChatMessage: vi.fn(() => Promise.resolve(true)) }))
 vi.mock("@/features/chats/lib/typing", () => ({ signalTyping: vi.fn(), signalStopped: vi.fn() }))
-vi.mock("@/features/chats/lib/drafts", () => ({ loadDraft: () => Promise.resolve(""), saveDraftDebounced: vi.fn() }))
+vi.mock("@/features/chats/lib/drafts", () => ({ loadDraft: () => Promise.resolve(""), saveDraftDebounced, deleteDraft }))
 vi.mock("@/features/chats/components/thread/attachDriveDialog", () => ({ AttachDriveDialog: () => null }))
 vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
@@ -36,6 +39,7 @@ import "@/lib/i18n"
 import { Composer } from "@/features/chats/components/thread/composer"
 import { beginMessageEdit } from "@/features/chats/lib/composerEdit"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
+import { MAX_CHAT_MESSAGE_LENGTH } from "@/features/chats/lib/composer.logic"
 import { registerAllActions } from "@/lib/keymap/actions"
 
 // The composer reads its keys from the registry.
@@ -292,6 +296,12 @@ describe("Composer — mention suggestions", () => {
 		return input
 	}
 
+	it("announces how many suggestions opened", () => {
+		openMentions()
+
+		expect(screen.getByText("2 suggestions available")).toBeTruthy()
+	})
+
 	it("exposes the popover as a listbox the input controls, tracking the active option", () => {
 		const input = openMentions()
 		const listbox = screen.getByRole("listbox")
@@ -346,5 +356,83 @@ describe("Composer — mention suggestions", () => {
 		fireEvent.mouseDown(option)
 
 		expect(useChatComposerStore.getState().entries[PARTICIPANT_CHAT.uuid]?.draft).toMatch(/^hi @\S+@filen\.io $/)
+	})
+})
+
+describe("Composer — sending", () => {
+	it("deletes the persisted draft at once instead of through the debounce", () => {
+		deleteDraft.mockClear()
+		saveDraftDebounced.mockClear()
+		renderComposer()
+
+		const input = screen.getByRole("textbox", { name: "Message" })
+
+		fireEvent.change(input, { target: { value: "hello" } })
+		saveDraftDebounced.mockClear()
+		fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+
+		expect(deleteDraft).toHaveBeenCalledWith(CHAT.uuid)
+		expect(saveDraftDebounced).not.toHaveBeenCalledWith(CHAT.uuid, "hello")
+	})
+})
+
+describe("Composer — length limit", () => {
+	// The description as assistive tech reads it: aria-hidden descendants of a referenced node are left out.
+	function describedText(input: HTMLElement): string {
+		return (input.getAttribute("aria-describedby") ?? "")
+			.split(" ")
+			.map(id => {
+				const clone = document.getElementById(id)?.cloneNode(true)
+
+				if (!(clone instanceof HTMLElement)) {
+					return ""
+				}
+
+				for (const hidden of clone.querySelectorAll("[aria-hidden='true']")) {
+					hidden.remove()
+				}
+
+				return clone.textContent
+			})
+			.join(" ")
+	}
+
+	it("ties the counter and the error to the field while over the limit", () => {
+		renderComposer()
+
+		const input = screen.getByRole("textbox", { name: "Message" })
+
+		fireEvent.change(input, { target: { value: "a".repeat(MAX_CHAT_MESSAGE_LENGTH + 3) } })
+
+		const errorId = input.getAttribute("aria-errormessage")
+		const error = errorId !== null ? document.getElementById(errorId) : null
+
+		expect(input.getAttribute("aria-invalid")).toBe("true")
+		expect(error?.textContent).toMatch(/^Message is too long/)
+		expect(error?.getAttribute("role")).toBe("alert")
+		expect(describedText(input)).toContain("3 characters over the limit")
+		expect(describedText(input)).toContain("Message is too long")
+	})
+
+	it("names the counter near the limit without marking the field invalid", () => {
+		renderComposer()
+
+		const input = screen.getByRole("textbox", { name: "Message" })
+
+		fireEvent.change(input, { target: { value: "a".repeat(MAX_CHAT_MESSAGE_LENGTH - 1) } })
+
+		expect(describedText(input)).toBe("1 character remaining")
+		expect(input.hasAttribute("aria-errormessage")).toBe(false)
+	})
+
+	it("sets neither reference well under the limit", () => {
+		renderComposer()
+
+		const input = screen.getByRole("textbox", { name: "Message" })
+
+		fireEvent.change(input, { target: { value: "short" } })
+
+		expect(input.hasAttribute("aria-describedby")).toBe(false)
+		expect(input.hasAttribute("aria-errormessage")).toBe(false)
 	})
 })

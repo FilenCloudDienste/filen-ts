@@ -174,10 +174,24 @@ describe("transformHeicBytes", () => {
 		transformMock.mockRejectedValue(new Error("heic transform failed"))
 
 		await expect(transformHeicBytes(new Uint8Array([1]))).rejects.toThrow("heic transform failed")
-		// A failed transform (as opposed to a failed spin-up) leaves the worker memoized — the next
-		// call reuses it rather than respawning.
 		await expect(transformHeicBytes(new Uint8Array([2]))).rejects.toThrow("heic transform failed")
-		expect(WorkerCtor).toHaveBeenCalledTimes(1)
+		// One worker call per transform: a rejection is surfaced, never retried.
+		expect(transformMock).toHaveBeenCalledTimes(2)
+	})
+
+	// Transform and RGBA decode share one libheif module per worker, and an aborted module fails every later call.
+	it("ends a worker whose transform failed, so the next transform gets a fresh one", async () => {
+		const { transformHeicBytes } = await freshModule()
+
+		transformMock.mockRejectedValueOnce(new Error("RuntimeError: Aborted(OOM)"))
+
+		await expect(transformHeicBytes(new Uint8Array([1]))).rejects.toThrow("Aborted(OOM)")
+
+		transformMock.mockResolvedValue(new Blob())
+
+		await expect(transformHeicBytes(new Uint8Array([2]))).resolves.toBeInstanceOf(Blob)
+		expect(terminateMock).toHaveBeenCalledOnce()
+		expect(WorkerCtor).toHaveBeenCalledTimes(2)
 	})
 
 	// The upload path reads each file fresh and never touches the buffer again, so no copy is made.

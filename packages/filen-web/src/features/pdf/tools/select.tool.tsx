@@ -16,7 +16,6 @@ export const SELECT_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolSelect",
 	icon: MousePointer2Icon,
 	toolClass: "annotate",
-	actionIds: ["annotations.select"],
 	actions: [pdfToolAction("annotations.select", "v", "preview:previewPdfKeyToolSelect")],
 	enabledWhen: () => ({ enabled: true }),
 	commands: ["annotations.move", "annotations.resize", "annotations.style", "annotations.text", "annotations.delete"],

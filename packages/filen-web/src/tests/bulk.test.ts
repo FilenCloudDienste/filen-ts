@@ -87,19 +87,48 @@ describe("runBulk", () => {
 		expect(callOrder).toEqual(["called:a", "called:b", "resolved:a", "resolved:b"])
 	})
 
-	it("keeps succeeded/failed in input order regardless of resolution order", async () => {
-		const error = new Error("slow one fails")
-		const perItem = vi.fn(async (item: string) => {
-			if (item === "slow") {
-				await new Promise(resolve => setTimeout(resolve, 10))
-				throw error
-			}
+	it("keeps succeeded in input order when items resolve in reverse", async () => {
+		const resolvers = new Map<string, () => void>()
+		const perItem = vi.fn(
+			(item: string) =>
+				new Promise<void>(resolve => {
+					resolvers.set(item, resolve)
+				})
+		)
+
+		const bulkPromise = runBulk(["a", "b"], perItem)
+
+		resolvers.get("b")?.()
+		await Promise.resolve()
+		resolvers.get("a")?.()
+
+		expect(await bulkPromise).toEqual({ succeeded: ["a", "b"], failed: [] })
+	})
+
+	it("keeps failed in input order when items reject in reverse", async () => {
+		const errorA = new Error("boom a")
+		const errorB = new Error("boom b")
+		const rejecters = new Map<string, (error: Error) => void>()
+		const perItem = vi.fn(
+			(item: string) =>
+				new Promise<void>((_resolve, reject) => {
+					rejecters.set(item, reject)
+				})
+		)
+
+		const bulkPromise = runBulk(["a", "b"], perItem)
+
+		rejecters.get("b")?.(errorB)
+		await Promise.resolve()
+		rejecters.get("a")?.(errorA)
+
+		expect(await bulkPromise).toEqual({
+			succeeded: [],
+			failed: [
+				{ item: "a", error: errorA },
+				{ item: "b", error: errorB }
+			]
 		})
-
-		const result = await runBulk(["slow", "fast"], perItem)
-
-		expect(result.failed).toEqual([{ item: "slow", error }])
-		expect(result.succeeded).toEqual(["fast"])
 	})
 })
 
@@ -136,5 +165,33 @@ describe("runBulkOutcomes", () => {
 		const result = await runBulkOutcomes(["a", "b"], perItem)
 
 		expect(result).toEqual({ succeeded: ["b"], failed: [{ item: "a", error }] })
+	})
+
+	it("keeps succeeded and failed in input order when outcomes settle in reverse", async () => {
+		const dtoA: ErrorDTO = { species: "plain", message: "forbidden a", label: "forbidden a" }
+		const dtoB: ErrorDTO = { species: "plain", message: "forbidden b", label: "forbidden b" }
+		const resolvers = new Map<string, (outcome: VoidActionOutcome) => void>()
+		const perItem = vi.fn(
+			(item: string) =>
+				new Promise<VoidActionOutcome>(resolve => {
+					resolvers.set(item, resolve)
+				})
+		)
+
+		const bulkPromise = runBulkOutcomes(["a", "b", "c", "d"], perItem)
+
+		resolvers.get("d")?.({ status: "error", dto: dtoB })
+		resolvers.get("c")?.({ status: "success" })
+		await Promise.resolve()
+		resolvers.get("b")?.({ status: "error", dto: dtoA })
+		resolvers.get("a")?.({ status: "success" })
+
+		expect(await bulkPromise).toEqual({
+			succeeded: ["a", "c"],
+			failed: [
+				{ item: "b", error: dtoA },
+				{ item: "d", error: dtoB }
+			]
+		})
 	})
 })

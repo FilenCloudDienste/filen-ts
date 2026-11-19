@@ -14,6 +14,8 @@ interface MediaScrubberProps {
 	duration: number
 	label: string
 	onSeek: (seconds: number) => void
+	// A relative key seek (the arrows, PageUp/PageDown), for a player that coalesces held keys; onSeek otherwise.
+	onSeekBy?: ((delta: number) => void) | undefined
 	// useMediaBuffered's snapshot.
 	buffered?: string | undefined
 	// The time under a drag as it moves, and null once it ends.
@@ -29,7 +31,18 @@ interface MediaScrubberProps {
 // so a stream is asked for the bytes of one position instead of every one the pointer crossed. The
 // range input underneath carries the value, the keyboard and the accessible name; the pointer is handled
 // on the rail so the drawn fill and the pointer agree to the pixel.
-export function MediaScrubber({ value, duration, label, onSeek, buffered, onScrub, tooltip, markers, className }: MediaScrubberProps) {
+export function MediaScrubber({
+	value,
+	duration,
+	label,
+	onSeek,
+	onSeekBy,
+	buffered,
+	onScrub,
+	tooltip,
+	markers,
+	className
+}: MediaScrubberProps) {
 	const { t } = useTranslation("common")
 	const inputRef = useRef<HTMLInputElement>(null)
 	const [dragTime, setDragTime] = useState<number | null>(null)
@@ -108,7 +121,12 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 		}
 
 		event.preventDefault()
-		onSeek(target)
+
+		if (onSeekBy !== undefined && event.key !== "Home" && event.key !== "End") {
+			onSeekBy(target - shown)
+		} else {
+			onSeek(target)
+		}
 	}
 
 	// Only an assistive technology's own increment reaches here: the keys and the pointer are handled above.

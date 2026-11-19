@@ -37,9 +37,52 @@ export function normalizeSearchText(text: string): string {
 }
 
 export function searchTokens(text: string): string[] {
-	return normalizeSearchText(text)
-		.split(SEPARATORS)
-		.filter(token => token.length > 0)
+	return splitTokens(normalizeSearchText(text))
+}
+
+function splitTokens(normalized: string): string[] {
+	return normalized.split(SEPARATORS).filter(token => token.length > 0)
+}
+
+// Scripts written without spaces between words: one token is a whole phrase there.
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u
+
+// What an index holds of `text`: its tokens and, inside a token with unspaced-script letters, the suffix starting at
+// each of them and right after each of them, so a query word from the middle of "千と千尋の神隠し" or "報告書Archive"
+// still starts one. Folded like the query (normalizeSearchText) before the script test and the split.
+function indexTokens(text: string): string[] {
+	const normalized = normalizeSearchText(text)
+	const tokens = splitTokens(normalized)
+
+	if (!UNSPACED.test(normalized)) {
+		return tokens
+	}
+
+	const out: string[] = []
+
+	for (const token of tokens) {
+		out.push(token)
+
+		if (!UNSPACED.test(token)) {
+			continue
+		}
+
+		let offset = 0
+		let afterUnspaced = false
+
+		for (const char of token) {
+			const unspaced = UNSPACED.test(char)
+
+			if (offset > 0 && (unspaced || afterUnspaced)) {
+				out.push(token.slice(offset))
+			}
+
+			afterUnspaced = unspaced
+			offset += char.length
+		}
+	}
+
+	return out
 }
 
 export type SearchGroupKind = "movies" | "shows" | "episodes" | "other"
@@ -64,7 +107,7 @@ function addTokens(postings: Map<string, number[]>, entry: number, texts: readon
 	const seen = new Set<string>()
 
 	for (const text of texts) {
-		for (const token of searchTokens(text)) {
+		for (const token of indexTokens(text)) {
 			if (seen.has(token)) {
 				continue
 			}
@@ -227,7 +270,8 @@ export interface SearchResultGroup {
 
 const GROUP_ORDER: readonly SearchGroupKind[] = ["movies", "shows", "episodes", "other"]
 
-// Every query token must start a token of the entry. Names the whole query starts rank first, then by name.
+// Every query token must start a token of the entry (in unspaced scripts, a suffix of one: indexTokens). Names the
+// whole query starts rank first, then by name.
 export function searchVideos({
 	index,
 	query,
@@ -304,10 +348,10 @@ export function searchVideos({
 
 // Per title, the tokens a grid's own search box matches: its name and year.
 export function titleSearchTokens(titles: readonly VideoTitleView[]): Map<string, string[]> {
-	return new Map(titles.map(title => [title.id, searchTokens(`${title.title} ${title.year > 0 ? String(title.year) : ""}`)]))
+	return new Map(titles.map(title => [title.id, indexTokens(`${title.title} ${title.year > 0 ? String(title.year) : ""}`)]))
 }
 
-// The titles every query token starts a token of, in their order.
+// The titles every query token starts a token (or indexed suffix) of, in their order.
 export function filterTitlesByQuery({
 	titles,
 	query,

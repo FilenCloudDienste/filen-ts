@@ -59,6 +59,8 @@ const ERROR_CODES = [
 	"credentialsInvalid",
 	"credentialsWeak",
 	"acknowledgementRequired",
+	"driveUnmounted",
+	"daemonUnstable",
 	"unknown"
 ]
 

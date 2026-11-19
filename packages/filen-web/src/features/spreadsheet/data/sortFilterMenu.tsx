@@ -1,8 +1,8 @@
-import { useState } from "react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ArrowDownAZIcon, ArrowDownZAIcon, ChevronDownIcon, FilterIcon, FilterXIcon, ListFilterIcon, RefreshCwIcon } from "lucide-react"
-import { isMacPlatform, type SheetGridState } from "@filen/office/react/sheet"
+import type { SheetGridState } from "@filen/office/react/sheet"
 import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
@@ -20,11 +20,10 @@ import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 
 // The toolbar's sort and filter menu, beside Find: sort the selection (or the data around the active cell) by the
 // active column, the custom sort dialog, and the autofilter: on or off, cleared, applied again (a text file sorts,
-// and holds no filter).
-export function SortFilterMenu({ grid, disabled }: { grid: SheetGridState; disabled: boolean }) {
+// and holds no filter). Filter's keys are the ribbon's (sheetToolbar.tsx keys): the binding in effect, none when unbound.
+export function SortFilterMenu({ grid, disabled, filterKeys }: { grid: SheetGridState; disabled: boolean; filterKeys?: ReactNode }) {
 	const { t } = useTranslation("preview")
 	const model = grid.model
-	const [mac] = useState(isMacPlatform)
 	const filtered = clearTarget(grid.layout, grid.selection.active.row, grid.selection.active.col) !== null
 	const filterOn = grid.layout?.extensions?.filters?.ranges.some(range => range.table === null) === true
 	const text = isTextSheetKind(model.kind)
@@ -93,7 +92,7 @@ export function SortFilterMenu({ grid, disabled }: { grid: SheetGridState; disab
 						>
 							<FilterIcon />
 							{t("previewSheetFilter")}
-							<MenuShortcut className="text-xs text-muted-foreground">{mac ? "⇧⌘F" : "Ctrl+Shift+L"}</MenuShortcut>
+							{filterKeys === undefined ? null : <MenuShortcut>{filterKeys}</MenuShortcut>}
 						</DropdownMenuCheckboxItem>
 						<DropdownMenuItem
 							disabled={!filtered}

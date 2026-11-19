@@ -1,8 +1,8 @@
-// English source catalog — "common" namespace: the minimal boot/theme vocabulary needed so far;
-// feature catalogs land per-area as they ship, mirroring filen-mobile's per-area-file convention.
+// English source catalog — "common" namespace: vocabulary shared across the app (boot screen, theme, icon rail,
+// shared buttons and states); each feature area keeps its own namespace file beside this one.
 // Flat `as const` object: i18next's default `keySeparator` ('.') and `nsSeparator` (':') stay ON
 // here (unlike mobile, which disables both to run one flat namespace) — this app declares real
-// namespaces ("common", "errors", "auth"), so keys must avoid literal '.' or ':' characters.
+// namespaces, so keys must avoid literal '.' or ':' characters.
 export const common = {
 	/** Product name — rendered beside the logo on the boot screen and as the icon rail's accessible home label; brand, never translated */
 	appName: "Filen",
@@ -70,21 +70,21 @@ export const common = {
 	openNavigation: "Open navigation",
 	/** Drive module — icon rail tooltip/accessible label and the drive page heading */
 	moduleDrive: "Cloud Drive",
-	/** Notes module — icon rail tooltip/accessible label (not available yet) */
+	/** Notes module — icon rail tooltip/accessible label */
 	moduleNotes: "Notes",
-	/** Chats module — icon rail tooltip/accessible label (not available yet) */
+	/** Chats module — icon rail tooltip/accessible label */
 	moduleChats: "Chats",
 	/** Chats module — icon rail accessible label when there are unread messages (singular) */
 	chatsUnreadBadge_one: "Chats, {{count}} unread message",
 	/** Chats module — icon rail accessible label when there are unread messages (plural) */
 	chatsUnreadBadge_other: "Chats, {{count}} unread messages",
-	/** Contacts module — icon rail tooltip/accessible label (not available yet) */
+	/** Contacts module — icon rail tooltip/accessible label */
 	moduleContacts: "Contacts",
 	/** Contacts module — icon rail accessible label when there are pending incoming requests (singular) */
 	contactRequestsBadge_one: "Contacts, {{count}} pending request",
 	/** Contacts module — icon rail accessible label when there are pending incoming requests (plural) */
 	contactRequestsBadge_other: "Contacts, {{count}} pending requests",
-	/** Transfers module — icon rail tooltip/accessible label (not available yet) */
+	/** Transfers module — icon rail tooltip/accessible label */
 	moduleTransfers: "Transfers",
 	/** Playlists module — icon rail tooltip/accessible label, and the /playlists screen's own heading */
 	modulePlaylists: "Playlists",
@@ -105,6 +105,8 @@ export const common = {
 	// Account menu
 	/** Account menu — trigger's accessible label and the dropdown's heading */
 	account: "Account",
+	/** Account menu — trigger's accessible label while a withdrawal is pending; {{status}} is the withdrawal status line (e.g. "Withdrawal until 12 May") */
+	accountWithStatus: "Account: {{status}}",
 	/** Icon rail — settings item tooltip/accessible label; opens the settings page (security: change password, two-factor authentication, master-keys export, delete account) */
 	settings: "Settings",
 	/** Account menu — item that signs the user out; the sign-out confirm dialog reuses it as its confirm button */
@@ -147,6 +149,8 @@ export const common = {
 	updateReadyTitle: "Update ready",
 	/** Update toast — body; the toast's action button reloads the page to apply the update */
 	updateReadyBody: "A new version of Filen has been downloaded. Reload to use it.",
+	/** Update toast — body shown after Reload was pressed while a download or media stream is still running; the page reloads by itself once it ends */
+	updateAfterDownload: "The update will apply once the running download finishes.",
 
 	// Relative timestamps — the shared lib/relativeTime.ts helper (note rows today; chat/events rows
 	// later). Plural via i18next's own _one/_other pipeline.

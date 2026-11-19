@@ -3,7 +3,7 @@
 // Deleting several versions runs as an activity whose running state the panel's own spinner shows: only
 // its result toasts, and the panel stays open.
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, FileVersion } from "@filen/sdk-rs"
@@ -97,7 +97,7 @@ describe("VersionsDialog deleting every old version", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete all" }))
 
-		fireEvent.click(screen.getByRole("button", { name: "Delete selected" }))
+		fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete all" }))
 
 		expect(deleteVersions).toHaveBeenCalledExactlyOnceWith(file, versions, expect.any(Function))
 		expect(toast).not.toHaveBeenCalled()
@@ -109,5 +109,34 @@ describe("VersionsDialog deleting every old version", () => {
 
 		expect(toast.error).toHaveBeenCalledExactlyOnceWith("Deleted 1 version, 1 failed", expect.anything())
 		expect(onClose).not.toHaveBeenCalled()
+	})
+
+	it("asks about one version in the singular", () => {
+		const removed = versions.splice(1)
+
+		try {
+			render(createElement(VersionsDialog, { file, onClose: vi.fn() }))
+
+			fireEvent.click(screen.getByRole("button", { name: "Delete all" }))
+
+			expect(screen.getByText("Are you sure you want to permanently delete 1 version? This cannot be undone.")).toBeTruthy()
+		} finally {
+			versions.push(...removed)
+		}
+	})
+
+	it("confirms Delete all with Delete all, and select mode with Delete selected even when every row is selected", () => {
+		render(createElement(VersionsDialog, { file, onClose: vi.fn() }))
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete all" }))
+		expect(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete all" })).toBeTruthy()
+		expect(within(screen.getByRole("alertdialog")).queryByRole("button", { name: "Delete selected" })).toBeNull()
+		fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
+
+		fireEvent.click(screen.getByRole("button", { name: "Select" }))
+		fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+		fireEvent.click(screen.getByRole("button", { name: "Delete selected" }))
+		expect(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete selected" })).toBeTruthy()
+		expect(within(screen.getByRole("alertdialog")).queryByRole("button", { name: "Delete all" })).toBeNull()
 	})
 })

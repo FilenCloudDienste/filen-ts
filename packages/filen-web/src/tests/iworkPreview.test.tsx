@@ -57,6 +57,7 @@ function renderPreview(name: string) {
 afterEach(() => {
 	cleanup()
 	vi.clearAllMocks()
+	acquire.refused = false
 })
 
 describe("IworkPreview", () => {
@@ -130,7 +131,6 @@ describe("IworkPreview", () => {
 
 		expect(await screen.findByText("This document can't be previewed here yet.")).toBeTruthy()
 		expect(opener.openIworkPreview).not.toHaveBeenCalled()
-		acquire.refused = false
 	})
 
 	it("offers to try again after a failed read, and reads again", async () => {

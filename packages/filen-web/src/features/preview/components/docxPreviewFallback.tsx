@@ -55,6 +55,14 @@ export function DocxPreviewFallback({ bytes, alt }: { bytes: Uint8Array; alt: st
 		// Each run renders into its own host: a run still in flight when the next one starts (a retry, a
 		// new buffer) can then only write into its own host, which the newer run has already detached.
 		const host = document.createElement("div")
+
+		// docx-preview copies a VML shape's style verbatim onto an <svg>: layout + paint containment makes
+		// the host the containing block of a `position: fixed` shape and clips it, so a shared document
+		// cannot draw over the app. Paint containment clips at the host box, so the host is fit-content
+		// wide and never narrower than the scroller: a fixed-width page wider than the viewport widens it
+		// and stays reachable by scrolling, while text in a section without a page size still wraps at
+		// the scroller width.
+		host.className = "w-fit min-w-full contain-layout contain-paint"
 		// The object URLs this run's render minted; revoked on teardown, not right after renderAsync,
 		// since @font-face rules and images keep reading them while the document is shown.
 		let urls: string[] = []

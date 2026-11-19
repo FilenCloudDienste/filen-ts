@@ -5,8 +5,6 @@ import type {
 	DesktopDrive,
 	DesktopMounts,
 	DesktopMountsOverview,
-	DesktopMountsRole,
-	DesktopMountsRoleState,
 	DesktopMountsStats,
 	DesktopServe,
 	DesktopServeProtocol,
@@ -94,19 +92,6 @@ export function useMountsDrive(): DesktopDrive | null {
 
 export function useMountsServe(protocol: DesktopServeProtocol): DesktopServe | null {
 	return useMountsStore(state => state.overview?.serves.find(serve => serve.protocol === protocol) ?? null)
-}
-
-// null before the first overview, and for a protocol this platform does not offer.
-export function useMountsRoleState(role: DesktopMountsRole): DesktopMountsRoleState | null {
-	return useMountsStore(state => {
-		const overview = state.overview
-
-		if (overview === null) {
-			return null
-		}
-
-		return role === "drive" ? overview.drive.state : (overview.serves.find(serve => serve.protocol === role)?.state ?? null)
-	})
 }
 
 export function useMountsAggregate(): MountsAggregate | null {

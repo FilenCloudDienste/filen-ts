@@ -336,6 +336,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 
 			{download.status === "running" && (
 				<Progress
+					aria-label={download.kind === "zip" ? t("preparingDownload") : t("downloading")}
 					value={download.total !== null && download.total > 0 ? Math.round((download.loaded / download.total) * 100) : null}
 				/>
 			)}
@@ -351,7 +352,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				/>
 			)}
 			{downloadNotice?.status === "error" && (
-				<p className="text-sm text-destructive">{`${t("downloadFailed")} ${errorLabel(downloadNotice.dto)}`}</p>
+				<p
+					role="alert"
+					className="text-sm text-destructive"
+				>{`${t("downloadFailed")} ${errorLabel(downloadNotice.dto)}`}</p>
 			)}
 
 			<div className="flex shrink-0 items-center gap-2">
@@ -473,8 +477,11 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 }
 
 function Breadcrumbs({ stack, onJump }: { stack: BrowseCrumb[]; onJump: (index: number) => void }) {
+	const { t } = useTranslation("publicLinks")
+
 	return (
 		<nav
+			aria-label={t("publicLinksBreadcrumbLabel")}
 			className="flex shrink-0 flex-wrap items-center gap-1 text-sm text-muted-foreground"
 			{...KEEP_SELECTION_PROPS}
 		>
@@ -488,7 +495,12 @@ function Breadcrumbs({ stack, onJump }: { stack: BrowseCrumb[]; onJump: (index: 
 					>
 						{index > 0 && <ChevronRightIcon className="size-3.5 shrink-0" />}
 						{isLast ? (
-							<span className="max-w-[12rem] truncate font-medium text-foreground">{crumb.name}</span>
+							<span
+								aria-current="location"
+								className="max-w-[12rem] truncate font-medium text-foreground"
+							>
+								{crumb.name}
+							</span>
 						) : (
 							<button
 								type="button"

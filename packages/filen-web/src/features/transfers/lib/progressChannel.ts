@@ -6,23 +6,10 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 // download moves its bytes through this, one store write per batch, rather than one Comlink proxy and
 // MessageChannel per transfer.
 
-const listeners = new Map<string, (bytes: number) => void>()
 let opened = false
 
 export function applyProgressBatch(bytesById: Readonly<Record<string, number>>): void {
 	useTransfersStore.getState().setProgressMany(bytesById)
-
-	if (listeners.size === 0) {
-		return
-	}
-
-	for (const id in bytesById) {
-		const bytes = bytesById[id]
-
-		if (bytes !== undefined) {
-			listeners.get(id)?.(bytes)
-		}
-	}
 }
 
 // Called before every transfer op that reports through the channel: the registration is posted on the
@@ -35,14 +22,4 @@ export function openProgressChannel(): void {
 	opened = true
 
 	void sdkApi.setProgressSink(Comlink.proxy(applyProgressBatch))
-}
-
-// A transfer whose bytes something besides its row follows (a chat attachment's composer); returns the
-// unsubscribe.
-export function onTransferProgress(id: string, listener: (bytes: number) => void): () => void {
-	listeners.set(id, listener)
-
-	return () => {
-		listeners.delete(id)
-	}
 }

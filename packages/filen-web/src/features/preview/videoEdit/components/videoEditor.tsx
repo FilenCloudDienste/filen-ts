@@ -91,6 +91,8 @@ import { useMediaPaused } from "@/lib/media/useMediaState"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { log } from "@/lib/log"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The overlay's handle on the open editor: its Mod+S (preview.save) opens the Save popover; its remote-change dialog's
 // "save mine as a copy" starts the copy export; its dismissal (Escape, Back) waits while an export runs here.
@@ -99,6 +101,9 @@ export interface VideoEditorCommands {
 	saveCopy: () => void
 	exporting: () => boolean
 }
+
+// A saved still: its file name; the SDK's error; or nothing to save it beside (no file on screen).
+export type VideoFrameSaveOutcome = { status: "success"; name: string } | { status: "error"; dto: ErrorDTO } | { status: "unavailable" }
 
 export interface VideoEditorProps {
 	client: VideoEditClient
@@ -116,8 +121,8 @@ export interface VideoEditorProps {
 	// An export started. The returned call is told how it ended exactly once, whether the editor is still open by then
 	// or not (a background export): what it made (the new version, or the copy), null when nothing was saved.
 	onSaveStarted: (target: VideoSaveTarget) => (saved: DriveItem | null) => void
-	// Uploads a still beside the video; resolves with its file name.
-	onSaveFrame: (blob: Blob, extension: "jpg") => Promise<string>
+	// Uploads a still beside the video.
+	onSaveFrame: (blob: Blob, extension: "jpg") => Promise<VideoFrameSaveOutcome>
 	commandsRef: RefObject<VideoEditorCommands | null>
 }
 
@@ -234,6 +239,9 @@ export function VideoEditor(props: VideoEditorProps) {
 	const lastTarget = useRef<VideoSaveTarget>("inPlace")
 	const lastPercent = useRef(-1)
 	const dirtyRef = useRef(false)
+	// A still being decoded, encoded and uploaded: a second press meanwhile starts nothing.
+	const savingFrameRef = useRef(false)
+	const [savingFrame, setSavingFrame] = useState(false)
 	const bindings = useBindings()
 	const online = useIsOnline()
 	const paused = useMediaPaused(video)
@@ -406,7 +414,7 @@ export function VideoEditor(props: VideoEditorProps) {
 					}
 				},
 				(error: unknown) => {
-					log.warn("[videoEditor] plan failed", error)
+					log.warn("video-edit", "planning the export failed", error)
 
 					if (alive) {
 						setPlanned(previous => ({ recipe, attempt: planAttempt, result: "failed", lastGood: previous?.lastGood ?? null }))
@@ -481,7 +489,7 @@ export function VideoEditor(props: VideoEditorProps) {
 			(error: unknown) => {
 				// Superseded by a newer call, or an export took the decoder: nothing went wrong.
 				if (!isAbortError(error)) {
-					log.warn("[videoEditor] filter thumbnails failed", error)
+					log.warn("video-edit", "filter thumbnails failed", error)
 				}
 			}
 		)
@@ -573,9 +581,11 @@ export function VideoEditor(props: VideoEditorProps) {
 		}
 	}
 
-	const startExport = (target: VideoSaveTarget): void => {
+	// Whether the export started: offline, with nothing to save, before the plan for these edits landed, or with the
+	// target not offered or blocked, it does not.
+	const startExport = (target: VideoSaveTarget): boolean => {
 		if (running.current !== null || !online || !dirty || !plan?.targets.includes(target) || plan.blockers.length > 0) {
-			return
+			return false
 		}
 
 		setSaveOpen(false)
@@ -587,7 +597,7 @@ export function VideoEditor(props: VideoEditorProps) {
 
 		const handle = client.exportVideo(history.current, target, progressOf)
 		const done = handle.done.catch((error: unknown): VideoSaveOutcome => {
-			log.error("[videoEditor] the export failed", error)
+			log.error("video-edit", "the export failed", error)
 
 			return { status: "error", code: "unknown" }
 		})
@@ -605,6 +615,16 @@ export function VideoEditor(props: VideoEditorProps) {
 			settled(outcome.status === "done" ? outcome.item : null)
 			settle(handle, target, outcome)
 		})
+
+		return true
+	}
+
+	// An export that cannot start now opens the Save popover instead, which says why (offline, a blocker) or waits for
+	// the plan: never a press that does nothing.
+	const exportOrOpenSave = (target: VideoSaveTarget): void => {
+		if (!startExport(target)) {
+			openSave(target)
+		}
 	}
 
 	// The export goes on as a transfer; its end is told by a toast, wherever the user is by then.
@@ -666,28 +686,54 @@ export function VideoEditor(props: VideoEditorProps) {
 	}
 
 	const saveFrame = (): void => {
+		if (savingFrameRef.current) {
+			return
+		}
+
 		const time = playback.time
 		const full = croppedSize(history.current, { width: info.width, height: info.height })
 
+		savingFrameRef.current = true
+		setSavingFrame(true)
 		playback.pause()
 		void client
-			.frameAt(time, history.current, full.width)
+			.stillAt(time, history.current, full.width)
 			.then(async bitmap => {
-				const blob = await stillBlob(bitmap)
+				let blob: Blob
 
-				bitmap.close()
+				try {
+					blob = await stillBlob(bitmap)
+				} finally {
+					bitmap.close()
+				}
 
 				return await props.onSaveFrame(blob, "jpg")
 			})
 			.then(
-				name => {
-					toast.success(t("previewVideoEditFrameSaved", { name }))
+				outcome => {
+					if (outcome.status === "success") {
+						toast.success(t("previewVideoEditFrameSaved", { name: outcome.name }))
+					} else if (outcome.status === "error") {
+						log.error("video-edit", "saving the frame failed", outcome.dto)
+						toast.error(errorLabel(outcome.dto))
+					} else {
+						toast.error(t("previewVideoEditFrameFailed"))
+					}
 				},
 				(error: unknown) => {
-					log.error("[videoEditor] saving the frame failed", error)
+					// A newer still, or an export took the decoder (iOS): nothing went wrong.
+					if (isAbortError(error)) {
+						return
+					}
+
+					log.error("video-edit", "saving the frame failed", error)
 					toast.error(t("previewVideoEditFrameFailed"))
 				}
 			)
+			.finally(() => {
+				savingFrameRef.current = false
+				setSavingFrame(false)
+			})
 	}
 
 	const openSave = (focus: VideoSaveTarget | null): void => {
@@ -700,8 +746,8 @@ export function VideoEditor(props: VideoEditorProps) {
 	// Mod+Shift+S: a copy at once when the popover would have nothing to say (no HDR conversion, nothing dropped, nothing
 	// blocking); otherwise the popover, its Save as copy focused, so nothing is lost unread.
 	const saveCopyFromKeys = (): void => {
-		if (plan !== null && plan.targets.includes("copy") && savesSilently(plan) && online) {
-			startExport("copy")
+		if (plan !== null && savesSilently(plan)) {
+			exportOrOpenSave("copy")
 		} else {
 			openSave("copy")
 		}
@@ -712,7 +758,7 @@ export function VideoEditor(props: VideoEditorProps) {
 			openSave(null)
 		},
 		saveCopy: () => {
-			startExport("copy")
+			exportOrOpenSave("copy")
 		},
 		exporting: () => running.current !== null
 	})
@@ -991,9 +1037,9 @@ export function VideoEditor(props: VideoEditorProps) {
 						running.current?.handle.cancel()
 					}}
 					onRetry={() => {
+						// The failure stays shown until a new export replaces it.
 						if (online) {
-							setExportState(null)
-							startExport(lastTarget.current)
+							exportOrOpenSave(lastTarget.current)
 						}
 					}}
 					onDismiss={() => {
@@ -1130,7 +1176,7 @@ export function VideoEditor(props: VideoEditorProps) {
 							<TooltipIconButton
 								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditSaveFrame")}
-								disabled={!online}
+								disabled={!online || savingFrame}
 								title={!online ? t("common:offlineActionDisabled") : undefined}
 								shortcut={<Kbd action="preview.videoSaveFrame" />}
 								onClick={saveFrame}
@@ -1167,6 +1213,7 @@ export function VideoEditor(props: VideoEditorProps) {
 							playback={playback}
 							duration={duration}
 							fps={fps}
+							keyframes={info.keyframes}
 							keep={recipe.keep}
 							view={view}
 							selection={selection}
@@ -1256,7 +1303,10 @@ export function VideoEditor(props: VideoEditorProps) {
 					}}
 					onLoadTheirs={discard}
 					onSaveMineAsNew={() => {
-						startExport("copy")
+						if (!startExport("copy")) {
+							setRemoteChange(null)
+							openSave("copy")
+						}
 					}}
 					onDiscardMine={discard}
 				/>

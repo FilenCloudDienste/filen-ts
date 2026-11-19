@@ -113,10 +113,16 @@ export function gridPageCard({ first, pages }: GridPages, index: number): VideoC
 	return pages[Math.floor(index / GRID_PAGE_SIZE) - first]?.cards[index % GRID_PAGE_SIZE]
 }
 
-export function useCatalogSearchQuery(query: string): UseQueryResult<SearchResult> {
+// A search result with the query it answers: a result kept from an earlier query (while the next one is pending) is
+// told apart by its query, which a deferred render keeps in step with its groups.
+export interface CatalogSearchResult extends SearchResult {
+	query: string
+}
+
+export function useCatalogSearchQuery(query: string): UseQueryResult<CatalogSearchResult> {
 	return useQuery({
 		queryKey: [...VIDEO_CATALOG_KEY_PREFIX, "search", query] as const,
-		queryFn: () => sdkApi.videoCatalogSearch(query),
+		queryFn: async (): Promise<CatalogSearchResult> => ({ ...(await sdkApi.videoCatalogSearch(query)), query }),
 		enabled: query.trim().length > 0,
 		staleTime: Infinity,
 		gcTime: PAGE_GC_MS,

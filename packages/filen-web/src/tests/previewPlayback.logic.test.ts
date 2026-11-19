@@ -145,9 +145,18 @@ describe("sidecarSubtitles", () => {
 		])
 	})
 
+	it("matches every text extension the shared table knows, .ssa and .sami included", () => {
+		expect(
+			sidecarSubtitles("Movie.mkv", files(["Movie.en.ssa", "Movie.sami"]), 8_000_000).map(file => [file.name, file.format, file.lang])
+		).toEqual([
+			["Movie.en.ssa", "ass", "en"],
+			["Movie.sami", "smi", null]
+		])
+	})
+
 	it("leaves out image formats, VobSub pairs, empty and oversize files", () => {
 		expect(sidecarSubtitles("Movie.mp4", files(["Movie.sup", "Movie.idx", "Movie.sub"]), 100)).toEqual([])
-		expect(sidecarSubtitles("Movie.mp4", files(["Movie.sub"]), 8_000_000).map(file => file.format)).toEqual(["microdvd"])
+		expect(sidecarSubtitles("Movie.mp4", files(["Movie.sub"]), 8_000_000).map(file => file.format)).toEqual(["sub"])
 		expect(sidecarSubtitles("Movie.mp4", files(["Movie.srt"], 0), 100)).toEqual([])
 		expect(sidecarSubtitles("Movie.mp4", files(["Movie.srt"], 101), 100)).toEqual([])
 	})

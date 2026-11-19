@@ -70,10 +70,6 @@ export function revealTime(view: TimelineView, time: number, duration: number): 
 	return time < view.start + margin ? placed(time - margin, span, duration) : placed(time - span + margin, span, duration)
 }
 
-export function isZoomed(view: TimelineView, duration: number): boolean {
-	return viewSpan(view) < Math.max(duration, MIN_VIEW_SPAN) - 1e-6
-}
-
 export function timeToX(view: TimelineView, width: number, time: number): number {
 	const span = viewSpan(view)
 
@@ -182,6 +178,33 @@ export function filmstripSlots(view: TimelineView, width: number, tileWidth: num
 	}
 
 	return { step, times }
+}
+
+// The keyframe a filmstrip tile at `time` shows: the last listed at or before it, else the first (a time before the
+// first keyframe); null when none is listed. The worker decodes it and the timeline caches and draws it by this time,
+// so slots sharing a keyframe share one tile.
+export function keyframeAtOrBefore(keyframes: ArrayLike<number>, time: number): number | null {
+	if (keyframes.length === 0) {
+		return null
+	}
+
+	let low = 0
+	let high = keyframes.length - 1
+	let found = keyframes[0] ?? null
+
+	while (low <= high) {
+		const mid = (low + high) >> 1
+		const value = keyframes[mid] ?? 0
+
+		if (value <= time) {
+			found = value
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+
+	return found
 }
 
 // The filmstrip cache's byte budget: `screens` times the RGBA tiles (`tileWidth` × `tileHeight` CSS px at `ratio`

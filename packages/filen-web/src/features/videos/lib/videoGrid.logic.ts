@@ -2,6 +2,7 @@ import { type } from "arktype"
 import type { VideoTitleView } from "@/workers/videoIndex/view.logic"
 import type { TitleWatch, WatchCategory } from "@/features/videos/lib/titleWatch.logic"
 import { byTitleName } from "@/features/videos/lib/homeRows.logic"
+import { FNV1A_OFFSET_BASIS, fnv1a } from "@/lib/fnv1a"
 
 // A library view's grid: its remembered sort and filters, and the titles they leave in order. Plain and DOM-free.
 
@@ -118,13 +119,7 @@ export function qualityLabel(height: number): string {
 
 // FNV-1a over the id and the session's seed: a stable shuffle per session.
 function shuffleKey(id: string, seed: number): number {
-	let hash = 2_166_136_261 ^ seed
-
-	for (let i = 0; i < id.length; i++) {
-		hash = Math.imul(hash ^ id.charCodeAt(i), 16_777_619)
-	}
-
-	return hash >>> 0
+	return fnv1a(id, (FNV1A_OFFSET_BASIS ^ seed) >>> 0)
 }
 
 // Unknown values (null) last, whatever the direction.

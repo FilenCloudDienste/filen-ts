@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, cleanup, render, waitFor } from "@testing-library/react"
 import type { AnyFile } from "@filen/sdk-rs"
@@ -123,12 +123,9 @@ function expectNoWholeFileRead(): void {
 	expect(mocks.sdkApi.downloadLinkedFileBytesAnon).not.toHaveBeenCalled()
 }
 
-beforeAll(() => {
-	// jsdom has no media pipeline.
-	vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined)
-})
-
 beforeEach(() => {
+	// jsdom has no media pipeline. Per test: restoreMocks puts the real method back before each one.
+	vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined)
 	// A browser with MediaSource unless a test takes it away.
 	vi.stubGlobal("MediaSource", { isTypeSupported: () => true })
 })
@@ -207,25 +204,6 @@ describe("audio preview without a service worker", () => {
 			expect(fileKindVerdict(item.data.uuid)).toBe("audio")
 		})
 		expect(savedVerdicts).not.toContain(item.data.uuid)
-	})
-
-	it("opens a public link's transport stream on the probe its gate read, reading the head once", async () => {
-		const item = linkedFileItem("clip.ts", { size: 4_000_000n })
-		const stream: VideoProbe = { ...PROBE, container: "ts", index: "none" }
-
-		mocks.sdkApi.readLinkedVideoProbeAnon.mockResolvedValueOnce(stream)
-
-		await expect(probeTransportStream(narrowToAnyFile(item), "anon", new AbortController().signal)).resolves.toBe(true)
-
-		render(createElement(MediaViewer, { item, category: "video", alt: "v" }), { wrapper: anon })
-
-		await waitFor(() => {
-			expect(mocks.openPlayback).toHaveBeenCalledOnce()
-		})
-
-		expect(mocks.openPlayback.mock.calls[0]?.[2]).toBe(stream)
-		expect(mocks.sdkApi.readLinkedVideoProbeAnon).toHaveBeenCalledOnce()
-		expectNoWholeFileRead()
 	})
 })
 

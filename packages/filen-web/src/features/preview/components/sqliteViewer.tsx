@@ -1,7 +1,9 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, CircleAlertIcon, DatabaseIcon, EyeIcon, TableIcon } from "lucide-react"
 import { cn, driveItemName, formatBytes } from "@filen/shared"
+import { isImeKeydown } from "@filen/shared/keymap"
 import type { SheetGridHandle } from "@filen/office/react/sheet"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
@@ -372,10 +374,13 @@ function GoToRow({ onGo }: { onGo: (row: number) => void }) {
 	const { t } = useTranslation("preview")
 	const [open, setOpen] = useState(false)
 	const [value, setValue] = useState("")
+	const [invalid, setInvalid] = useState(false)
+	const buttonRef = useRef<HTMLButtonElement | null>(null)
 
 	if (!open) {
 		return (
 			<Button
+				ref={buttonRef}
 				size="sm"
 				variant="outline"
 				onClick={() => {
@@ -398,17 +403,35 @@ function GoToRow({ onGo }: { onGo: (row: number) => void }) {
 				if (Number.isSafeInteger(row) && row >= 1) {
 					onGo(row)
 					setOpen(false)
+					setInvalid(false)
+				} else {
+					setInvalid(true)
 				}
 			}}
 		>
 			<Input
 				aria-label={t("previewSqliteGoToRowLabel")}
+				aria-invalid={invalid}
 				inputMode="numeric"
 				className="h-8 w-28 leading-5"
 				value={value}
 				autoFocus
 				onChange={event => {
 					setValue(event.target.value)
+					setInvalid(false)
+				}}
+				onKeyDown={event => {
+					// Escape cancels the field, not the preview (which closes only on an Escape nothing took).
+					if (event.key !== "Escape" || isImeKeydown(event.nativeEvent)) {
+						return
+					}
+
+					event.preventDefault()
+					flushSync(() => {
+						setOpen(false)
+						setInvalid(false)
+					})
+					buttonRef.current?.focus()
 				}}
 			/>
 			<Button
@@ -426,6 +449,16 @@ function cellPreview(value: SqliteCellValue): string {
 	if (typeof value.value === "string") return value.value
 
 	return hexDump(value.value.subarray(0, 256))
+}
+
+// Its own component: the dialog mounts its content only while open (and through its close animation), so the full
+// text or hex dump is built only when it is shown.
+function FullValueText({ value }: { value: SqliteCellValue | null }) {
+	return (
+		<pre className="min-h-0 flex-1 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap select-text">
+			{value === null ? "" : fullValueText(value.value)}
+		</pre>
+	)
 }
 
 function SelectedCell({ table, column, row, value }: { table: string; column: string; row: number; value: SqliteCellValue | null }) {
@@ -470,9 +503,7 @@ function SelectedCell({ table, column, row, value }: { table: string; column: st
 							{t("previewSqliteValueTooLarge", { size: formatBytes(value.bytes) })}
 						</p>
 					) : null}
-					<pre className="min-h-0 flex-1 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap select-text">
-						{value === null ? "" : fullValueText(value.value)}
-					</pre>
+					<FullValueText value={value} />
 				</DialogContent>
 			</Dialog>
 		</div>
@@ -496,7 +527,8 @@ function TableView({
 	const [tab, setTab] = useState<"data" | "schema">(table.kind === "table" ? "data" : "schema")
 	const [base, setBase] = useState(0)
 	const [active, setActive] = useState<{ row: number; col: number }>({ row: 0, col: 0 })
-	const [value, setValue] = useState<SqliteCellValue | null>(null)
+	// Kept with its coordinates, so a cell whose read has not resolved shows no value rather than the last cell's.
+	const [cell, setCell] = useState<{ base: number; row: number; col: number; value: SqliteCellValue } | null>(null)
 	const gridRef = useRef<SheetGridHandle | null>(null)
 	const browsable = table.kind === "table" && table.columns.length > 0
 	const rowCount = useRowCount(database, browsable ? index : null, base)
@@ -515,8 +547,8 @@ function TableView({
 			.reads(index)
 			.cell(base, active.row, active.col)
 			.then(
-				cell => {
-					if (live) setValue(cell)
+				value => {
+					if (live) setCell({ base, row: active.row, col: active.col, value })
 				},
 				() => undefined
 			)
@@ -525,6 +557,8 @@ function TableView({
 			live = false
 		}
 	}, [browsable, database, index, base, active.row, active.col])
+
+	const shown = cell !== null && cell.base === base && cell.row === active.row && cell.col === active.col ? cell.value : null
 
 	const goTo = (row: number): void => {
 		const target = goToRow(row, base, SQLITE_WINDOW_ROWS, counted)
@@ -602,7 +636,7 @@ function TableView({
 								table={table.name}
 								column={column.name}
 								row={base + active.row}
-								value={value}
+								value={shown}
 							/>
 						) : null}
 					</>

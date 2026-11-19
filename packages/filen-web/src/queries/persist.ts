@@ -4,7 +4,6 @@ import { hashKey, type QueryClient, type QueryFunction, type QueryFunctionContex
 import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { log } from "@/lib/log"
-import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 
 // PER-QUERY persistence: `persistQueryClient` re-serializes the ENTIRE dehydrated client on every
 // cache change — O(cache) write amplification through the envelope serializer into sqlite on
@@ -24,11 +23,10 @@ import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 //   and the facade is explicitly version-pinned to library internals. Our kv writes already leave
 //   the main thread (worker-owned sqlite); add batching only if profiling demands it.
 // - Mobile uses its `serialize` option as a should-persist FILTER (returning `undefined` into an
-//   object-typed buffer). That policy filter is not ported: `persisterFn` persists only after a
-//   SUCCESSFUL queryFn run by construction, so nothing needs filtering yet — and when the first
-//   genuinely non-persistable query appears, the API's first-class `filters` option is the
-//   sanctioned tool, not the serialize-undefined trick. Our `serialize` below returns `undefined`
-//   only on serialization failure and for a removed query's late write (see removedStates).
+//   object-typed buffer). That policy filter is not ported, and neither is a central `filters`
+//   predicate: a query that must stay off disk sets `persister: noDiskPersister` (below) on its own
+//   definition — the one opt-out, visible where the query is declared. Our `serialize` below returns
+//   `undefined` only on serialization failure and for a removed query's late write (see removedStates).
 
 // Versioned kv-key prefix AND cache-buster in one: bumping this moves every persisted row to a
 // fresh key family and makes the persister's own expired-or-busted check drop any older-versioned
@@ -203,25 +201,18 @@ const kvStorage: AsyncStorage<string | undefined> = {
 	}
 }
 
-// The register-eligibility check is never persisted: it is IP/region + time sensitive and already
-// refetches on every mount (staleTime 0 + refetchOnMount "always"), so a disk row would only ever
-// serve a stale banner for an instant. Matched exactly by hash, so other auth queries still persist.
-const REGISTER_CHECK_QUERY_HASH = hashKey(REGISTER_CHECK_QUERY_KEY)
-
 export const persister = experimental_createQueryPersister({
 	storage: kvStorage,
 	prefix: PERSIST_PREFIX,
 	buster: PERSIST_PREFIX,
 	maxAge: PERSIST_MAX_AGE,
 	serialize,
-	deserialize,
-	filters: {
-		predicate: query => query.queryHash !== REGISTER_CHECK_QUERY_HASH
-	}
+	deserialize
 })
 
-// For a query whose answer must not reach disk: runs the queryFn with no storage round trip (an explicit
-// `undefined` is rejected under exactOptionalPropertyTypes, so this overrides the client's default).
+// The one way to keep a query off disk: set `persister: noDiskPersister` on the query. It runs the
+// queryFn with no storage round trip (an explicit `undefined` is rejected under
+// exactOptionalPropertyTypes, so this overrides the client's default).
 export function noDiskPersister<T, K extends QueryKey>(queryFn: QueryFunction<T, K>, context: QueryFunctionContext<K>): T | Promise<T> {
 	return queryFn(context)
 }

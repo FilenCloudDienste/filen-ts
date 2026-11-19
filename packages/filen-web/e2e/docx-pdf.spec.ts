@@ -1,20 +1,18 @@
-import { readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, selectAndTrashRow, uploadFiles, withScratchDirectory } from "./helpers/listing"
-import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, docxViewerBytes, DOCX_VIEWER_TEXT } from "./helpers/docxFixtures"
+import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes } from "./helpers/docxFixtures"
 import { openTrash, revealRow } from "./helpers/archive"
 import { ENCRYPTED_DOCX_PASSWORD, ENCRYPTED_DOCX_TEXT, encryptedDocxBytes } from "./helpers/docxEncryptedFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { preview } from "@/locales/en/preview"
-import { menuItemName } from "./helpers/menu"
+import { downloadDocxPdf, readPdf } from "./helpers/docxPdf"
 
-// Download as ▸ PDF from the Word document's File menu, in a real browser against the backend: the viewer's file
-// laid out again in the PDF worker, the editor's pages with an unsaved edit, and a password-protected document whose
-// PDF asks for, checks and keeps its password. The PDFs are read back with pdf.js: pages, text, title, the structure
-// tree. Nothing is saved to the drive by the export (it is a local download).
+// Download as ▸ PDF from the Word document's File menu, in a real browser against the backend: the editor's pages with
+// an unsaved edit, and a password-protected document whose PDF asks for, checks and keeps its password. The PDFs are
+// read back with pdf.js: text, title, the structure tree. Nothing is saved to the drive by the export (it is a local
+// download). A drive file opens in the editor; the viewer's export (a read-only archive entry) is docx-a11y.spec.ts's.
 
 test.describe.configure({ mode: "default" })
 
@@ -26,32 +24,7 @@ function pageText(page: Page, text: string): Locator {
 	return page.locator(".fo-docx-page").getByText(text, { exact: false }).first()
 }
 
-async function downloadPdf(page: Page): Promise<void> {
-	await page.getByRole("button", { name: preview.previewDocxFileMenu, exact: true }).click()
-	await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxDownloadAs) }).click()
-	await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxDownloadPdf) }).click()
-}
-
-async function readPdf(path: string, password?: string): Promise<{ pdf: pdfjs.PDFDocumentProxy; text: string }> {
-	const pdf = await pdfjs.getDocument({
-		data: new Uint8Array(readFileSync(path)),
-		verbosity: 0,
-		...(password === undefined ? {} : { password })
-	}).promise
-	let text = ""
-
-	for (let index = 1; index <= pdf.numPages; index++) {
-		const content = await (await pdf.getPage(index)).getTextContent()
-
-		text += content.items.map(item => ("str" in item ? item.str : "")).join("") + "\n"
-	}
-
-	return { pdf, text }
-}
-
-test("Download as PDF from the viewer and the editor: the pages as shown, an unsaved edit included, tagged and titled", async ({
-	page
-}) => {
+test("Download as PDF from the editor: the pages as shown, an unsaved edit included, tagged and titled", async ({ page }) => {
 	test.slow()
 
 	const cspViolations = trackCspViolations(page)
@@ -73,7 +46,7 @@ test("Download as PDF from the viewer and the editor: the pages as shown, an uns
 
 		const downloading = page.waitForEvent("download", { timeout: EXPORT_TIMEOUT_MS })
 
-		await downloadPdf(page)
+		await downloadDocxPdf(page)
 
 		const download = await downloading
 		const { pdf, text } = await readPdf(await download.path())
@@ -85,32 +58,6 @@ test("Download as PDF from the viewer and the editor: the pages as shown, an uns
 		expect(((await pdf.getMetadata()).info as { Title?: string }).Title).toBeTruthy()
 		expect(structure?.children?.length ?? 0).toBeGreaterThan(0)
 		expect(cspViolations).toEqual([])
-	})
-})
-
-test("Download as PDF from the viewer: a document read from an archive, every page", async ({ page }) => {
-	test.slow()
-
-	await withScratchDirectory(page, "docx-pdf-viewer", async ({ listbox, runId }) => {
-		const name = `e2e-${runId}-links.docx`
-
-		await uploadFiles(page, [{ name, mimeType: DOCX_MIME, buffer: docxViewerBytes("viewer-links.docx") }], listbox)
-		await listbox.getByRole("option", { name }).dblclick()
-		await expect(pageText(page, DOCX_VIEWER_TEXT["viewer-links.docx"])).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-
-		const downloading = page.waitForEvent("download", { timeout: EXPORT_TIMEOUT_MS })
-
-		await downloadPdf(page)
-
-		const { pdf, text } = await readPdf(await (await downloading).path())
-		const shown = await page.locator(".fo-docx-page").count()
-
-		expect(pdf.numPages).toBeGreaterThanOrEqual(shown)
-		expect(text).toContain(DOCX_VIEWER_TEXT["viewer-links.docx"])
-		// Links keep working in the PDF.
-		const annotations = (await (await pdf.getPage(1)).getAnnotations()) as readonly { readonly subtype?: string }[]
-
-		expect(annotations.some(annotation => annotation.subtype === "Link")).toBe(true)
 	})
 })
 
@@ -133,7 +80,7 @@ test("Download as PDF of a password-protected document: asks the password, refus
 		await opening.getByRole("button", { name: preview.previewDocxPasswordSubmit, exact: true }).click()
 		await expect(pageText(page, ENCRYPTED_DOCX_TEXT)).toBeVisible({ timeout: UNLOCK_TIMEOUT_MS })
 
-		await downloadPdf(page)
+		await downloadDocxPdf(page)
 
 		const prompt = page.getByRole("dialog", { name: preview.previewOfficePdfPasswordTitle })
 		const field = prompt.getByLabel(preview.previewOfficePdfPasswordLabel, { exact: true })

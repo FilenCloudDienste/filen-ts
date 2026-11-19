@@ -218,8 +218,9 @@ describe("PreviewOverlay — video editing", () => {
 
 		const edit = await screen.findByRole("button", { name: "Edit video" })
 
-		expect(edit.hasAttribute("disabled")).toBe(true)
-		expect(edit.getAttribute("title")).toBe(RUNNING)
+		expect(edit.getAttribute("aria-disabled")).toBe("true")
+		expect(edit.getAttribute("title")).toBeNull()
+		expect(document.getElementById(edit.getAttribute("aria-describedby") ?? "")?.textContent).toBe(RUNNING)
 
 		act(() => {
 			harness.running.delete(UUID)
@@ -230,7 +231,8 @@ describe("PreviewOverlay — video editing", () => {
 		})
 
 		expect(edit.hasAttribute("disabled")).toBe(false)
-		expect(edit.getAttribute("title")).toBeNull()
+		expect(edit.getAttribute("aria-disabled")).toBeNull()
+		expect(edit.getAttribute("aria-describedby")).toBeNull()
 	})
 
 	it("refuses the Edit video key while a save of the same video runs, saying why", async () => {

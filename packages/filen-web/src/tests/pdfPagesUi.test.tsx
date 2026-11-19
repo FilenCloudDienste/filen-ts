@@ -157,7 +157,14 @@ describe("organise grid", () => {
 		expect(props.onRotate).toHaveBeenCalledWith([0, 1, 2, 3, 4, 5], -90)
 		fireEvent.click(within(toolbar).getByRole("button", { name: "Duplicate" }))
 		expect(onDuplicate).toHaveBeenCalledWith([0, 1, 2, 3, 4, 5])
-		expect(within(toolbar).getByRole("button", { name: "Delete" }).hasAttribute("disabled")).toBe(true)
+		const deleteButton = within(toolbar).getByRole("button", { name: "Delete" })
+
+		expect(deleteButton.getAttribute("aria-disabled")).toBe("true")
+		expect(document.getElementById(deleteButton.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+			"A PDF needs at least one page, so not every page can be deleted."
+		)
+		fireEvent.click(deleteButton)
+		expect(props.onDelete).not.toHaveBeenCalled()
 		expect(within(toolbar).getByText("6 pages selected")).toBeTruthy()
 	})
 })
@@ -308,6 +315,30 @@ describe("split dialog", () => {
 			],
 			protect: false
 		})
+	})
+
+	it("tells an invalid page count apart from an invalid range", () => {
+		render(
+			<PdfSplitDialog
+				{...copyContext()}
+				bookmarks={[]}
+				onSplit={vi.fn()}
+				onClose={vi.fn()}
+			/>
+		)
+
+		const count = screen.getByRole("spinbutton", { name: "Pages per file" })
+
+		for (const value of ["0", "20"]) {
+			fireEvent.change(count, { target: { value } })
+			expect(screen.getByRole("alert").textContent).toBe("Enter a number of pages from 1 to 10")
+			expect(screen.queryByText("Enter pages from 1 to 10, such as 1-3, 7, 10-")).toBeNull()
+			expect(count.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id)
+		}
+
+		fireEvent.change(screen.getByRole("textbox", { name: "Ranges, one file each" }), { target: { value: "12-15" } })
+		expect(screen.getByRole("alert").textContent).toBe("Enter pages from 1 to 10, such as 1-3, 7, 10-")
+		expect(count.hasAttribute("aria-describedby")).toBe(false)
 	})
 })
 

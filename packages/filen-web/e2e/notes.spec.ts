@@ -14,11 +14,14 @@ import { menuItemName } from "./helpers/menu"
 // created note is torn down through the programmatic e2e hook (this shell has no trash UI yet; that
 // lands in the actions step).
 //
-// Serial, not parallel (same rationale as drive-actions.spec.ts): the shared FREE account's note cap
-// is a hard 10 (server-enforced `note_limit_reached`), and several tests in this file create a real
-// note — running them concurrently across workers risks stacking enough live notes to trip that cap
-// well before any of their own net-zero teardowns run.
-test.describe.configure({ mode: "serial" })
+// One test at a time, not in parallel: the shared FREE account's note cap is a hard 10 (server-enforced
+// `note_limit_reached`), and several tests in this file create a real note — running them concurrently
+// risks stacking enough live notes to trip that cap well before any of their own net-zero teardowns run.
+// The notes lane's `workers: 1` (playwright.config.ts) plus the cross-process notes account lock
+// (fixtures.ts) guarantee that. Default mode, not serial: a serial group skips every later test after one
+// failure, which would hide the rest of the file's coverage for that browser. Kept explicit so the file
+// does not turn parallel-eligible under fullyParallel if the lane's worker count ever rises.
+test.describe.configure({ mode: "default" })
 
 async function gotoNotes(page: Page): Promise<void> {
 	await bootTo(page)
@@ -159,7 +162,7 @@ async function sweepLeakedNotes(page: Page, before: Set<string>): Promise<void> 
 // can never match by prefix — the exact class that once poisoned the 10-cap account during a live
 // rate-limit episode. Snapshot the account's uuids up front and sweep the DIFF in finally; any new uuid
 // belongs to the running test because the notes lane is `workers: 1` (playwright.config.ts) and this is
-// the only spec that touches notes — not because of the file's serial mode. Best-effort like every teardown
+// the only spec that touches notes. Best-effort like every teardown
 // here: a page killed by the test budget makes the sweep's evaluate throw, and that residue is
 // reported (rare) rather than masked or allowed to replace the test's real error.
 async function withNoteLeakGuard(page: Page, body: () => Promise<void>): Promise<void> {
@@ -446,8 +449,8 @@ test.describe("notes", () => {
 			// evaluate here throws against the closed target, and a throw escaping a finally would both
 			// replace the REAL failure and skip whatever came after it. Each step names what it could not
 			// remove instead, and cleanup-setup's own notes/tags sweep self-heals the rest on the next
-			// suite run. The note teardown is the uuid DIFF against the pre-test snapshot (serial mode:
-			// any new uuid is this test's), which covers failures before the uuid was ever known.
+			// suite run. The note teardown is the uuid DIFF against the pre-test snapshot (the lane's
+			// single worker: any new uuid is this test's), which covers failures before the uuid was ever known.
 			await sweepLeakedNotes(page, uuidsBefore)
 
 			try {
@@ -607,8 +610,8 @@ async function openCreatedNote(page: Page, noteType: NoteTypeUnderTest, title: s
 // try/finally (not a trailing call) around every assertion below: the shared FREE account's note cap
 // is a hard 10 (server-enforced), so a note leaked by a failed assertion is not just untidy but can
 // starve every LATER run's own createNote calls — the finally still fires when an expect() throws.
-// This file's top-level test.describe.configure({ mode: "serial" }) already keeps every note-creating
-// test (this block's and the "notes" block's own) from stacking concurrently against that cap.
+// The notes lane's `workers: 1` plus the cross-process notes account lock already keep every
+// note-creating test (this block's and the "notes" block's own) from stacking concurrently against that cap.
 test.describe("notes: read-only content renderers", () => {
 	test("text note renders its raw content", async ({ page }) => {
 		const content = "Hello from a plain text e2e note."
@@ -1062,9 +1065,14 @@ test.describe("notes: realtime", () => {
 		const main = page.getByRole("main")
 		const sidebar = page.getByRole("complementary")
 
-		const pageB = await bootSecondPage(page, injectedSession)
+		// Booted inside the try: a second boot that times out must still reach the note teardown below.
+		let secondPage: Page | undefined
 
 		try {
+			const pageB = await bootSecondPage(page, injectedSession)
+
+			secondPage = pageB
+
 			// Page B renames the note through its own client — a real second-connection metadata edit.
 			await pageB.evaluate(args => window.__filenE2E.renameTestNoteByUuid(args.uuid, args.title), { uuid, title: newTitle })
 
@@ -1088,7 +1096,10 @@ test.describe("notes: realtime", () => {
 			// Each step guarded on its own: a throw here would replace the body's real error AND skip
 			// every statement after it — the two prefix sweeps below are precisely the backstop for the
 			// case where the uuid delete is the thing that failed.
-			await closeTrackedPage(pageB)
+			if (secondPage !== undefined) {
+				await closeTrackedPage(secondPage)
+			}
+
 			await deleteNoteQuietly(page, uuid)
 			// Backstop: sweep either title prefix in case a dead page skipped the uuid teardown.
 			await sweepNotesQuietly(page, "e2e realtime-meta")
@@ -1119,14 +1130,20 @@ test.describe("notes: realtime", () => {
 			title
 		})
 
-		await openNoteByTitle(page, title, note.uuid)
-
 		const uuid = note.uuid
-		// Page B writes through its own client straight to the server, past every outbox: to page A that is
-		// the same account editing on another device, which is not an echo of anything page A pushed.
-		const pageB = await bootSecondPage(page, injectedSession)
+		// Everything after the create runs inside the try, so a failed open or second boot still deletes
+		// the note: a leaked one is younger than the cleanup sweep's age gate and the account caps at 10.
+		let secondPage: Page | undefined
 
 		try {
+			await openNoteByTitle(page, title, uuid)
+
+			// Page B writes through its own client straight to the server, past every outbox: to page A that
+			// is the same account editing on another device, which is not an echo of anything page A pushed.
+			const pageB = await bootSecondPage(page, injectedSession)
+
+			secondPage = pageB
+
 			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
 
 			// Clean: the editor reloads with the other client's content, and says so.
@@ -1164,7 +1181,10 @@ test.describe("notes: realtime", () => {
 			await expect(main.locator(".cm-content")).toContainText(mine.trim())
 			await expect(prompt).toHaveCount(0)
 		} finally {
-			await closeTrackedPage(pageB)
+			if (secondPage !== undefined) {
+				await closeTrackedPage(secondPage)
+			}
+
 			await deleteNoteQuietly(page, uuid)
 			await sweepNotesQuietly(page, "e2e realtime-content")
 		}
@@ -1173,7 +1193,7 @@ test.describe("notes: realtime", () => {
 
 // History's full list→preview→restore round trip, and participants' owner
 // management surface (render-only past the point a second account would be needed — see below).
-// Serial + net-zero like every other note-creating block in this file.
+// Net-zero like every other note-creating block in this file.
 test.describe("notes: participants and history dialogs", () => {
 	test("history dialog lists both versions, previews the old one read-only, and restores it", async ({ page }) => {
 		const v1 = `HistV1-${uniqueSuffix()}`
@@ -1287,7 +1307,7 @@ test.describe("notes: participants and history dialogs", () => {
 // BroadcastChannel in one Playwright context: the FIRST to boot wins the db lock and runs the single
 // push loop; the second is a follower that FORWARDS its edits to the leader. The money test is the
 // failover — kill the leader inside the debounce window and the follower, promoted via the released db
-// lock, still pushes the pending edit with no user action. Serial + net-zero like every note test here.
+// lock, still pushes the pending edit with no user action. Net-zero like every note test here.
 async function typeIntoTextEditor(target: Page, text: string): Promise<void> {
 	await focusEditorSurface(target.getByRole("main").locator(".cm-content"))
 	await target.keyboard.type(text)

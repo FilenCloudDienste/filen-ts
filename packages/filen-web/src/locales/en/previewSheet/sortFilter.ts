@@ -186,8 +186,10 @@ export const previewSheetSortFilter = {
 	previewSheetFilterCustomTitle: "Custom filter",
 	/** Custom filter dialog — what the conditions apply to */
 	previewSheetFilterShowRowsWhere: "Show rows where “{{name}}”",
-	/** Custom filter dialog — the value of a condition */
-	previewSheetFilterValue: "Value",
+	/** Custom filter dialog — accessible name of a condition's operator (number: the condition's place, 1 or 2) */
+	previewSheetFilterConditionOperator: "Condition {{number}}",
+	/** Custom filter dialog — accessible name of a condition's value (number: the condition's place, 1 or 2) */
+	previewSheetFilterConditionValue: "Value {{number}}",
 	/** Custom filter dialog — both conditions must hold */
 	previewSheetFilterAnd: "And",
 	/** Custom filter dialog — either condition may hold */
@@ -240,6 +242,10 @@ export const previewSheetSortFilter = {
 	previewSheetFilterBottom: "Bottom",
 	/** Top 10 dialog — how many */
 	previewSheetFilterTopCount: "How many",
+	/** Top 10 dialog — accessible name of the choice between the largest and the smallest values */
+	previewSheetFilterTopDirection: "Top or bottom",
+	/** Top 10 dialog — accessible name of the choice between counting items and percent */
+	previewSheetFilterTopUnit: "Items or percent",
 	/** Top 10 dialog — count in items */
 	previewSheetFilterItems: "Items",
 	/** Top 10 dialog — count in percent of the items */

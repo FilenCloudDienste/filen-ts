@@ -144,6 +144,38 @@ describe("function suggestions", () => {
 		expect([input.getAttribute("aria-controls"), input.getAttribute("aria-activedescendant")]).toEqual([null, null])
 	})
 
+	it("take the one suggestion left with Tab after the list narrowed, and open the next word's list on its first row", async () => {
+		await openViewer()
+		await goTo("B2")
+
+		const input = await typeInBar("=sum")
+		// The list is drawn again as the entry changes: each check reads the one shown.
+		const options = (): HTMLElement[] =>
+			within(screen.getByRole("listbox", { name: preview.previewSheetFormulaSuggestions })).getAllByRole("option")
+
+		await screen.findByRole("listbox", { name: preview.previewSheetFormulaSuggestions })
+		for (let step = 0; step < 3; step++) fireEvent.keyDown(input, { key: "ArrowDown" })
+		await waitFor(() => {
+			expect(options().findIndex(option => option.getAttribute("aria-selected") === "true")).toBe(3)
+		})
+
+		fireEvent.input(input, { target: { value: "=sumifs" } })
+		await waitFor(() => {
+			expect(options().map(option => option.textContent)).toEqual(["SUMIFS"])
+		})
+		fireEvent.keyDown(input, { key: "Tab" })
+		await waitFor(() => {
+			expect(input.value).toBe("=SUMIFS(")
+		})
+
+		fireEvent.input(input, { target: { value: "=SUMIFS(s" } })
+
+		await waitFor(() => {
+			expect(options().length).toBeGreaterThan(3)
+		})
+		expect(options()[0]?.getAttribute("aria-selected")).toBe("true")
+	})
+
 	it("show the call's syntax above the cell's editor where below it would cover the sheet tabs", async () => {
 		const grid = await openViewer()
 

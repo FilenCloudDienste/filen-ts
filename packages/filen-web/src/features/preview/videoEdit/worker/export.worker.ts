@@ -7,7 +7,7 @@ import type { RemuxStats } from "@/lib/media/remuxTypes"
 import { containerPackets, ffmpegSampleReader, probedCodecFor, probedCodecs, type ProbedCodec } from "@/workers/remux/audioInput"
 import { createFramePipeline } from "@/features/preview/videoEdit/gl/pipeline"
 import { createTimeStretch } from "@/features/preview/videoEdit/audio/timeStretch"
-import { planExport, sourceFrame } from "@/features/preview/videoEdit/lib/plan"
+import { sourceFrame } from "@/features/preview/videoEdit/lib/plan"
 import type { TimeRange } from "@/features/preview/videoEdit/types"
 import { runExport, type EngineDeps } from "@/features/preview/videoEdit/worker/engine"
 import { ExportCancelledError, ExportRefusedError } from "@/features/preview/videoEdit/worker/errors"
@@ -96,7 +96,6 @@ function failure(error: unknown): ExportWorkerResult {
 }
 
 const api: ExportWorkerApi = {
-	plan: (recipe, source, caps, context) => planExport(recipe, source, caps, context),
 	async startExport(args: StartExportArgs, onProgress: (progress: ExportWorkerProgress) => unknown): Promise<ExportWorkerResult> {
 		const controller = new AbortController()
 		const writer = savePortWriter(args.output)

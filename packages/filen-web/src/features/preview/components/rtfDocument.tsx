@@ -12,8 +12,8 @@ import { log } from "@/lib/log"
 
 // An RTF file in the docx viewer (or an OpenDocument text file opened for editing): read in the docx worker into the
 // package the viewer opens where it is held (none of it on the page), then `children` with it. To be edited the editor
-// takes its own copy and opens on it while the document is proved there (Gate 1: blocks the writer cannot write stay
-// locked; editing starts once it is known), and saves are written back in the file's format there (rtfEditing.ts).
+// takes its own copy and opens on it while the document is proved there (blocks the writer cannot write stay locked;
+// editing starts once it is known), and saves are written back in the file's format there (rtfEditing.ts).
 // Released when the preview closes. An OpenDocument file the writer cannot hold (encrypted, damaged) shows
 // `unopened` instead: the viewer, which tells why.
 
@@ -35,7 +35,7 @@ export function RtfDocument({
 	item,
 	bytes,
 	edit,
-	format = "rtf",
+	format: formatProp,
 	unopened,
 	children
 }: {
@@ -46,6 +46,8 @@ export function RtfDocument({
 	unopened?: () => ReactNode
 	children: (opened: RtfOpened) => ReactNode
 }) {
+	// Not a parameter default: the React Compiler skips a component that has one.
+	const format = formatProp ?? "rtf"
 	const { t } = useTranslation("preview")
 	const fallback = unopened !== undefined
 	const [state, setState] = useState<{ bytes: Uint8Array; state: State }>({ bytes, state: { kind: "reading" } })

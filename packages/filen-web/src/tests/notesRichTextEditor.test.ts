@@ -3,7 +3,12 @@
 // jsdom (per-file pragma, same as notesSanitizeRichText.test.ts): seedRichEditor routes through
 // DOMPurify, which is a passthrough without a real `document`. The rest of the suite stays on node.
 
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { act, cleanup, render } from "@testing-library/react"
+import Quill from "quill"
+import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
+import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 import {
 	shouldPropagateRichChange,
 	seedRichEditor,
@@ -16,6 +21,10 @@ import {
 	cycleHeaderValue,
 	EMPTY_RICH_FORMATS
 } from "@/features/notes/components/editor/richTextEditor.logic"
+
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+
+const { RichTextEditor } = await import("@/features/notes/components/editor/richTextEditor")
 
 describe("shouldPropagateRichChange — #39 source gate", () => {
 	it("propagates only genuine user edits", () => {
@@ -126,5 +135,149 @@ describe("toolbar format-value helpers", () => {
 		expect(nextListValue("unchecked", "checklist")).toBe(false)
 		expect(nextListValue(null, "checklist")).toBe("unchecked")
 		expect(nextListValue("bullet", "ordered")).toBe("ordered")
+	})
+})
+
+// The mounted editor (real Quill on jsdom), so the test covers the constructor options the component passes.
+function mountEditor(seed: string): Quill {
+	const controller: NoteEditorController = {
+		status: "ready",
+		errorDto: undefined,
+		seed,
+		remountKey: "note",
+		readOnly: false,
+		sizeReached: false,
+		onChange: () => undefined
+	}
+	const { container } = render(createElement(RichTextEditor, { controller }))
+	const node = container.querySelector(".ql-container")
+	const quill = node ? Quill.find(node) : null
+
+	if (!(quill instanceof Quill)) {
+		throw new Error("Quill did not mount")
+	}
+
+	return quill
+}
+
+const PNG = new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "shot.png", { type: "image/png" })
+
+// The uploader's default handler reads the file with a FileReader before inserting, so give it time to land.
+async function settle(): Promise<void> {
+	await act(async () => {
+		await new Promise(resolve => setTimeout(resolve, 50))
+	})
+}
+
+function hasEmbed(quill: Quill): boolean {
+	return quill.getContents().ops.some(op => typeof op.insert === "object")
+}
+
+describe("RichTextEditor — only the formats the sanitizer keeps", () => {
+	// jsdom has no layout: Quill measures the selection when a paste focuses the editor.
+	beforeAll(() => {
+		Range.prototype.getBoundingClientRect = () => new DOMRect()
+		Range.prototype.getClientRects = () => document.createElement("div").getClientRects()
+	})
+
+	afterEach(() => {
+		cleanup()
+	})
+
+	it("inserts nothing for a pasted image file", async () => {
+		const quill = mountEditor("<p>hello</p>")
+
+		quill.setSelection(5, 0, "silent")
+
+		const paste = new Event("paste", { bubbles: true, cancelable: true })
+
+		Object.defineProperty(paste, "clipboardData", { value: { getData: () => "", files: [PNG] } })
+		quill.root.dispatchEvent(paste)
+		await settle()
+
+		expect(hasEmbed(quill)).toBe(false)
+		expect(quill.root.querySelector("img")).toBeNull()
+	})
+
+	it("inserts nothing for a dropped image file", async () => {
+		const quill = mountEditor("<p>hello</p>")
+		const text = quill.root.querySelector("p")?.firstChild
+
+		if (!text) {
+			throw new Error("seed did not render")
+		}
+
+		Object.defineProperty(document, "caretRangeFromPoint", {
+			configurable: true,
+			value: () => {
+				const range = document.createRange()
+
+				range.setStart(text, 2)
+				range.setEnd(text, 2)
+
+				return range
+			}
+		})
+
+		try {
+			const drop = new Event("drop", { bubbles: true, cancelable: true })
+
+			Object.defineProperty(drop, "dataTransfer", { value: { files: [PNG] } })
+			quill.root.dispatchEvent(drop)
+			await settle()
+		} finally {
+			Reflect.deleteProperty(document, "caretRangeFromPoint")
+		}
+
+		expect(hasEmbed(quill)).toBe(false)
+		expect(quill.root.querySelector("img")).toBeNull()
+	})
+
+	it("does not keep pasted strike, subscript or superscript", () => {
+		const quill = mountEditor("")
+
+		quill.clipboard.dangerouslyPasteHTML(0, "<p><s>struck</s> <sub>low</sub> <sup>high</sup></p>", "user")
+
+		const saved = serializeRichEditor(quill.root)
+
+		expect(saved).not.toMatch(/<(s|sub|sup)>/)
+		expect(saved).toContain("struck low high")
+		expect(quill.getContents().ops.some(op => op.attributes && ("strike" in op.attributes || "script" in op.attributes))).toBe(false)
+	})
+
+	it("round-trips every supported format through the sanitizer unchanged", () => {
+		const quill = mountEditor(
+			[
+				"<h2>Title</h2>",
+				'<p><strong>bold</strong> <em>it</em> <u>under</u> <a href="https://filen.io" rel="noopener noreferrer" target="_blank">link</a> <span style="color: rgb(230, 0, 0);">red</span></p>',
+				'<p class="ql-align-center">centered</p>',
+				"<ol><li>one</li></ol>",
+				"<ul><li>bullet</li></ul>",
+				'<ul data-checked="true"><li>done</li></ul>',
+				'<ul data-checked="false"><li>todo</li></ul>',
+				"<blockquote>quote</blockquote>",
+				'<pre class="ql-syntax" spellcheck="false">a &lt; b\n</pre>'
+			].join("")
+		)
+		// What the next load sees: the saved document after the sanitizer, still carrying every format.
+		const reloaded = sanitizeRichTextHtml(serializeRichEditor(quill.root))
+
+		for (const fragment of [
+			"<h2>Title</h2>",
+			"<strong>bold</strong>",
+			"<em>it</em>",
+			"<u>under</u>",
+			'href="https://filen.io"',
+			'style="color: rgb(230, 0, 0)',
+			'class="ql-align-center"',
+			"<ol><li>one</li></ol>",
+			"<ul><li>bullet</li></ul>",
+			'<ul data-checked="true"><li>done</li></ul>',
+			'<ul data-checked="false"><li>todo</li></ul>',
+			"<blockquote>quote</blockquote>",
+			'<pre class="ql-syntax">a &lt; b\n</pre>'
+		]) {
+			expect(reloaded).toContain(fragment)
+		}
 	})
 })

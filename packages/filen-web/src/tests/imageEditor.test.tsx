@@ -461,6 +461,104 @@ describe("ImageEditor", () => {
 		expect(lastRendered(session).markup).toHaveLength(0)
 	})
 
+	it("saves text still in its field, and counts it as an unsaved edit until then", async () => {
+		const { session, saveRef, onDirtyChange } = mount()
+
+		await waitFor(() => {
+			expect(session.render).toHaveBeenCalled()
+		})
+
+		resizeStage(400, 300)
+		fireEvent.click(screen.getByRole("tab", { name: "Markup" }))
+		fireEvent.click(screen.getByRole("button", { name: "Text" }))
+		fireEvent.pointerDown(screen.getByRole("application", { name: "Drawing surface" }), {
+			button: 0,
+			pointerId: 1,
+			clientX: 20,
+			clientY: 30
+		})
+		fireEvent.change(screen.getByRole("textbox", { name: "Text on the image" }), { target: { value: "Invoice paid" } })
+
+		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+
+		let save: Promise<unknown> | undefined
+
+		act(() => {
+			save = saveRef.current?.({ kind: "copy", mime: "image/jpeg", extension: "jpg" })
+		})
+		await save
+
+		expect(session.export).toHaveBeenCalledWith(
+			expect.objectContaining({ markup: [expect.objectContaining({ kind: "text", text: "Invoice paid", at: [20, 30] })] }),
+			expect.anything(),
+			expect.anything()
+		)
+		expect(screen.queryByRole("textbox", { name: "Text on the image" })).toBeNull()
+	})
+
+	it("counts an emptied or cancelled field as no edit", async () => {
+		const { session, onDirtyChange } = mount()
+
+		await waitFor(() => {
+			expect(session.render).toHaveBeenCalled()
+		})
+
+		resizeStage(400, 300)
+		fireEvent.click(screen.getByRole("tab", { name: "Markup" }))
+		fireEvent.click(screen.getByRole("button", { name: "Text" }))
+		fireEvent.pointerDown(screen.getByRole("application", { name: "Drawing surface" }), {
+			button: 0,
+			pointerId: 1,
+			clientX: 20,
+			clientY: 30
+		})
+
+		const field = screen.getByRole("textbox", { name: "Text on the image" })
+
+		fireEvent.change(field, { target: { value: "Draft" } })
+		expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+		fireEvent.change(field, { target: { value: "  " } })
+		expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+		fireEvent.change(field, { target: { value: "Draft" } })
+		fireEvent.keyDown(field, { key: "Escape" })
+		expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+	})
+
+	it("leaves text an input method is composing out of a save", async () => {
+		const { session, saveRef } = mount()
+
+		await waitFor(() => {
+			expect(session.render).toHaveBeenCalled()
+		})
+
+		resizeStage(400, 300)
+		fireEvent.click(screen.getByRole("tab", { name: "Filters" }))
+		fireEvent.click(screen.getByRole("button", { name: "Mono" }))
+		fireEvent.click(screen.getByRole("tab", { name: "Markup" }))
+		fireEvent.click(screen.getByRole("button", { name: "Text" }))
+		fireEvent.pointerDown(screen.getByRole("application", { name: "Drawing surface" }), {
+			button: 0,
+			pointerId: 1,
+			clientX: 20,
+			clientY: 30
+		})
+
+		const field = screen.getByRole("textbox", { name: "Text on the image" })
+
+		fireEvent.compositionStart(field)
+		fireEvent.change(field, { target: { value: "にほ" } })
+
+		let save: Promise<unknown> | undefined
+
+		act(() => {
+			save = saveRef.current?.({ kind: "copy", mime: "image/jpeg", extension: "jpg" })
+		})
+		await save
+
+		expect(session.export).toHaveBeenCalledWith(expect.objectContaining({ markup: [] }), expect.anything(), expect.anything())
+		expect(screen.getByRole("textbox", { name: "Text on the image" })).toHaveProperty("value", "にほ")
+	})
+
 	it("compares while the button is held", async () => {
 		const { session } = mount()
 

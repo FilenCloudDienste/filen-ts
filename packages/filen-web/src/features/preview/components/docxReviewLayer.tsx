@@ -45,14 +45,8 @@ const IS_MAC = isMacPlatform()
 // Takes comment.add input requests (a new comment composed at the selection).
 export interface DocxReviewLayerProps extends DocxInputChannelProps {
 	editor: PagedEditor
-	// Unused: the hub's to drop (nothing here depends on the renderer's document).
-	document?: unknown
 	markup: DocxMarkupMode
 	zoom: number
-	// Space between pages (px at 100 %).
-	gap: number
-	// The scrolling element the pages are in.
-	container: HTMLDivElement | null
 	readOnly: boolean
 	execute: (command: DocxEditorCommand) => void
 	withAuthor: DocxAuthorGate

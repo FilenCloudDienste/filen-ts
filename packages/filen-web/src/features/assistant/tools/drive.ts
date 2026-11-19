@@ -3,9 +3,22 @@ import { looksLikeText } from "@filen/shared/textEncoding"
 import {
 	ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS,
 	DIRECTORIES_BY_SIZE_NOTE,
+	DIRECTORY_SIZE_READS,
+	engineTokens,
+	joinNotes,
 	listingOffset,
 	listingPage,
 	listRest,
+	matchScore,
+	normalizeText,
+	OWN_SHARING_UNCHECKED,
+	PARTIAL_MATCH_NOTE,
+	rawSearchTokens,
+	SEARCH_ENGINE_WORDS,
+	SEARCH_NEEDS_WORDS,
+	SEARCH_RESULT_ITEMS,
+	searchTokens,
+	unknownSizesNote,
 	type AssistantSignal
 } from "@filen/shared/assistant"
 import type { DirSizeResponse } from "@filen/sdk-rs"
@@ -57,21 +70,10 @@ import {
 	type ToolAdapter,
 	type ToolScope
 } from "@/features/assistant/tools/entities"
-import {
-	AssistantToolError,
-	clipText,
-	engineTokens,
-	isoDate,
-	matchScore,
-	normalizeText,
-	rawSearchTokens,
-	searchTokens,
-	throwIfStopped
-} from "@/features/assistant/tools/format"
+import { AssistantToolError, clipText, isoDate, throwIfStopped } from "@/features/assistant/tools/format"
 import { ROOT_HANDLE, type AssistantEntity } from "@/features/assistant/tools/handles"
 import { dateSelection, datesField, emptyDatesNote, selects, type DateSelection } from "@/features/assistant/tools/dates"
 
-const SEARCH_LIMIT = 12
 // How long a turn's searches may wait for the drive's index in all: a first index of a very large drive
 // takes minutes, and the step shows the progress meanwhile. Stop ends it at once.
 export const SEARCH_CAP_MS = 300_000
@@ -82,8 +84,6 @@ const SEARCH_FLOOR_MS = 2_000
 const SEARCH_STALL_MS = WATCHDOG_MS
 // The engine keeps the drive registered this long after a search, so a follow-up costs no new resync.
 const SEARCH_KEEP_MS = 10 * 60_000
-// The words the engine may try in turn while one matches more names than its window holds.
-const ENGINE_WORDS = 3
 // read_text_file downloads the whole file, so only small ones; the model sees far less of it.
 export const TEXT_FILE_MAX_BYTES = 1_048_576n
 export const TEXT_FILE_MAX_CHARS = 4_000
@@ -165,7 +165,7 @@ export function sortListing(
 
 // How many directories of a size-sorted listing may have their size read when the cache lacks it: each is a
 // server-side walk of the directory. The info dialog's query, so the drive's size column reuses them.
-export const DIRECTORY_SIZE_READS = 12
+export { DIRECTORY_SIZE_READS }
 
 // The total sizes of the listing's directories, from the cache or read once (with `read`); `unknown` counts
 // those left out.
@@ -213,23 +213,6 @@ export async function directorySizes(
 	})
 
 	return { sizes, unknown }
-}
-
-export function joinNotes(...notes: { note?: string }[]): { note?: string } {
-	const text = notes.flatMap(({ note }) => (note === undefined ? [] : [note])).join(" ")
-
-	return text.length === 0 ? {} : { note: text }
-}
-
-export function unknownSizesNote(unknown: number): { note?: string } {
-	return unknown === 0
-		? {}
-		: {
-				note:
-					unknown === 1
-						? "1 directory's size is not loaded; it is listed last. get_item_info gives a directory's size."
-						: `${String(unknown)} directories' sizes are not loaded; they are listed last. get_item_info gives a directory's size.`
-			}
 }
 
 // What a filtered or sorted listing adds to each row: the date it went by, the size it sorted by.
@@ -343,10 +326,10 @@ export const searchItemsTool: ToolAdapter = async (input, scope) => {
 	const query = requiredString(input, "query")
 	const selection = dateSelection(input, DRIVE_DATE_FIELDS, scope.calendar)
 	const tokens = searchTokens(query)
-	const words = engineTokens(rawSearchTokens(query), ENGINE_WORDS)
+	const words = engineTokens(rawSearchTokens(query), SEARCH_ENGINE_WORDS)
 
 	if (words.length === 0 || tokens.length === 0) {
-		throw new AssistantToolError("Pass words from the item name", { invalid: true })
+		throw new AssistantToolError(SEARCH_NEEDS_WORDS, { invalid: true })
 	}
 
 	const engine = await engineSearch(words, kind, scope)
@@ -381,7 +364,7 @@ export const searchItemsTool: ToolAdapter = async (input, scope) => {
 				driveItemName(a.item).length - driveItemName(b.item).length ||
 				Number(lastModifiedOf(b.item) - lastModifiedOf(a.item))
 		)
-		.slice(0, SEARCH_LIMIT)
+		.slice(0, SEARCH_RESULT_ITEMS)
 	const shown = all.length > 0 ? all.length : scored.length
 	const note = searchNote(engine)
 	const partial = all.length === 0 && scored.length > 0 && tokens.length > 1
@@ -397,11 +380,11 @@ export const searchItemsTool: ToolAdapter = async (input, scope) => {
 			})),
 			// Incomplete (a failed search, an index still building, too many names to check): cut off at an
 			// unknown length, which is what `more: true` says.
-			...(note !== null ? { more: true } : listRest(shown, SEARCH_LIMIT)),
+			...(note !== null ? { more: true } : listRest(shown, SEARCH_RESULT_ITEMS)),
 			...datesField(selection),
 			...joinNotes(
 				note === null ? emptyDatesNote(selection, scored.length, matching.length) : { note },
-				partial ? { note: "No name contains all of the words; these contain only some of them." } : {}
+				partial ? { note: PARTIAL_MATCH_NOTE } : {}
 			)
 		}
 	}
@@ -565,8 +548,6 @@ export const listDirectoryTool: ToolAdapter = async (input, scope) => {
 		}
 	}
 }
-
-const OWN_SHARING_UNCHECKED = "unknown: this tool does not show shares or links"
 
 export const getItemInfoTool: ToolAdapter = async (input, scope) => {
 	const entity = await resolveHandle(scope, requiredString(input, "handle"), ["root", "drive"])

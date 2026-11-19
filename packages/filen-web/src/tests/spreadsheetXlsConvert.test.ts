@@ -6,7 +6,8 @@ import { bytesSource } from "@filen/office/core/opc"
 import { XlsxReadError } from "@filen/office/core/xlsx"
 import { workbookOpener } from "@filen/office/dom/sheet"
 import { xlsChart, xlsFile, xlsLabel, xlsNumber, xlsRecord, xlsWorkbookStream, XLS_CHART } from "@filen/office/testing/encryption"
-import { xlsToXlsx, xlsxCopyName } from "@/features/spreadsheet/lib/xlsConvert"
+import { convertedCopyName } from "@/features/drive/lib/copyName"
+import { xlsToXlsx } from "@/features/spreadsheet/lib/xlsConvert"
 
 const XLS = new Uint8Array(readFileSync(join(__dirname, "fixtures/spreadsheet/budget.xls")))
 
@@ -101,15 +102,15 @@ describe("xlsToXlsx", () => {
 	})
 })
 
-describe("xlsxCopyName", () => {
+describe("an .xls's converted copy name", () => {
 	it("swaps the extension for .xlsx", async () => {
-		expect(await xlsxCopyName("budget.xls", () => Promise.resolve(false))).toBe("budget.xlsx")
-		expect(await xlsxCopyName("Q3 Report.XLS", () => Promise.resolve(false))).toBe("Q3 Report.xlsx")
+		expect(await convertedCopyName("budget.xls", "xlsx", () => Promise.resolve(false))).toBe("budget.xlsx")
+		expect(await convertedCopyName("Q3 Report.XLS", "xlsx", () => Promise.resolve(false))).toBe("Q3 Report.xlsx")
 	})
 
 	it("numbers the copy when the name is taken, the way a file manager does", async () => {
 		const taken = new Set(["budget.xlsx", "budget (2).xlsx"])
 
-		expect(await xlsxCopyName("budget.xls", name => Promise.resolve(taken.has(name)))).toBe("budget (3).xlsx")
+		expect(await convertedCopyName("budget.xls", "xlsx", name => Promise.resolve(taken.has(name)))).toBe("budget (3).xlsx")
 	})
 })

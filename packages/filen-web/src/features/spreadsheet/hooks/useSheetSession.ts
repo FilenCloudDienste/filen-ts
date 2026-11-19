@@ -10,6 +10,7 @@ import { openSheet } from "@/features/spreadsheet/lib/sheetHosts"
 import { SheetEventRelay } from "@/features/spreadsheet/lib/sheetEvents"
 import { withWorkbookDigit } from "@/features/spreadsheet/lib/sheetDigitWidth"
 import { sheetKindOf } from "@/features/spreadsheet/lib/sheetKind"
+import { log } from "@/lib/log"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
 // An open session, with its events from the moment it opened.
@@ -55,6 +56,11 @@ function newSessionId(): number {
 	lastSession += 1
 
 	return lastSession
+}
+
+// The log's ring keeps a non-string argument as its JSON, which is `{}` for an Error.
+function errorText(error: unknown): unknown {
+	return error instanceof Error ? error.message : error
 }
 
 function nameFormat(item: DriveItem): string | null {
@@ -105,7 +111,14 @@ export function useSheetSession(item: DriveItem, documentKey: string): SheetSess
 				result.session.close()
 			}
 			void withWorkbookDigit(result, events)
-				.catch(() => result)
+				.catch((error: unknown) => {
+					// Closing the session (the user left) rejects the pending query: that is no failure.
+					if (live) {
+						log.warn("preview", "spreadsheet digit width failed", errorText(error))
+					}
+
+					return result
+				})
 				.then(measured => {
 					if (live) {
 						show({ status: "ready", id: newSessionId(), handle: { ...measured, events }, kind, unnamed, format })
@@ -118,7 +131,11 @@ export function useSheetSession(item: DriveItem, documentKey: string): SheetSess
 			password: string,
 			signal: AbortSignal
 		) {
-			const answer = await locked.unlock(password, { signal }).catch(() => null)
+			const answer = await locked.unlock(password, { signal }).catch((error: unknown) => {
+				log.warn("preview", "spreadsheet unlock failed", errorText(error))
+
+				return null
+			})
 
 			if (!live) {
 				if (answer?.ok === true) {
@@ -186,13 +203,18 @@ export function useSheetSession(item: DriveItem, documentKey: string): SheetSess
 						show({ status: "refused", reason: result.reason })
 						break
 					case "failed":
+						// The worker's reason and message only: never the file's name or content.
+						log.warn("preview", "spreadsheet open failed", result.reason, result.message)
+						show({ status: "unreadable" })
+						break
 					case "aborted":
 						show({ status: "unreadable" })
 						break
 				}
 			},
-			() => {
+			(error: unknown) => {
 				if (live) {
+					log.warn("preview", "spreadsheet open failed", errorText(error))
 					show({ status: "unreadable" })
 				}
 			}

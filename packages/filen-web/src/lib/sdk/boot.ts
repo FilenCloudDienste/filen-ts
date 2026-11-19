@@ -1,7 +1,14 @@
 import type { JsClientConfig, StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
-import { clearSessionOutsideKv, discardUnreadableSession, persistSession, resumeSession, SessionUnreadableError } from "@/lib/sdk/session"
+import {
+	clearSessionOutsideKv,
+	deferPendingSignOut,
+	discardUnreadableSession,
+	persistSession,
+	resumeSession,
+	SessionUnreadableError
+} from "@/lib/sdk/session"
 import { parseEnvelope } from "@filen/shared/session"
 import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
 import { kvClear, storage } from "@/lib/storage/adapter"
@@ -32,6 +39,8 @@ import { getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFER
 import { loadOfficeViewSettings } from "@/features/office/lib/officeViewSettings"
 import { loadRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
 import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
+import { loadCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
+import { loadPresentationNotesLayout } from "@/features/presentation/components/commentsPane.logic"
 import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
 import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
@@ -59,8 +68,9 @@ export function whenBootReady(): Promise<void> {
 // Finishes a sign-out the previous page did not live to complete (see signOutPending.ts): every wipe again,
 // before any session could be resumed from what it left. After a sign-out that did complete, each of these
 // finds next to nothing to do. The flag clears only once all of them succeeded, so a failure retries on the
-// next boot rather than being forgotten.
-async function finishPendingSignOut(): Promise<void> {
+// next boot, or on the next sign-in (session.ts), rather than being forgotten. False while the sign-out is still pending: whatever session a failed wipe
+// left behind is the one the user signed out of, so this boot must not resume it.
+async function finishPendingSignOut(): Promise<boolean> {
 	wipePendingWatch(() => localStorage)
 
 	const outcomes = await Promise.allSettled([
@@ -76,10 +86,12 @@ async function finishPendingSignOut(): Promise<void> {
 	if (failed !== undefined) {
 		log.error("boot", "finishing a pending sign-out failed", asErrorDTO(failed.reason))
 
-		return
+		return false
 	}
 
 	writeSignOutPending(false)
+
+	return true
 }
 
 // A preference that can't be read applies its own default without dropping the other's, never wasm's
@@ -102,11 +114,13 @@ function readClientConfig<P>(
 // the tab unauthed. Runs before the query-cache restore, which is gated on whether this boot is authed. False when
 // the desktop vault cannot read its session: BootGate shows the recovery screen instead of the routes until a retry
 // gets through. `injected`: the previous web app's session import already injected (and saved) the session.
-async function resumeAndOpen(injected = false): Promise<boolean> {
+// `signedOut`: a sign-out is still pending (its wipes failed again), so no saved session is read at all and the boot
+// opens signed out.
+async function resumeAndOpen(injected = false, signedOut = false): Promise<boolean> {
 	let resumed: boolean
 
 	try {
-		resumed = injected || (await resumeSession())
+		resumed = injected || (!signedOut && (await resumeSession()))
 	} catch (e) {
 		if (!(e instanceof SessionUnreadableError)) {
 			throw e
@@ -176,8 +190,10 @@ export async function retrySessionResume(discard: boolean): Promise<boolean> {
 function preloadDevicePreferences(): Promise<void> {
 	return Promise.all([
 		loadOfficeViewSettings(),
+		loadPresentationNotesLayout(),
 		loadRibbonCollapsed(),
 		loadDocxFormattingMarks(),
+		loadCodeViewSettings(),
 		loadSidebarHidden(),
 		loadOcrLanguages(),
 		loadPdfPagesRailOpen(),
@@ -234,8 +250,12 @@ export async function bootSdk(): Promise<void> {
 			return
 		}
 		advanceBootSplash("storage")
-		if (readSignOutPending()) {
-			await finishPendingSignOut()
+		// A sign-out whose wipes failed again: this boot opens signed out instead of resuming what they left, and the next
+		// sign-in redoes them before it saves its session.
+		let signedOut = readSignOutPending() && !(await finishPendingSignOut())
+
+		if (signedOut) {
+			deferPendingSignOut(finishPendingSignOut)
 		}
 		// This device's view settings (the editors', the shell's hidden sidebar), read before anything renders (lib/storage/preloadedPreference.ts): a
 		// document opens with them from its first render. Alongside the client config below; never fails boot.
@@ -272,10 +292,12 @@ export async function bootSdk(): Promise<void> {
 			if (seeded !== null) {
 				await persistSession(parseEnvelope(seeded) as StringifiedClient)
 				injected = false
+				// The session resumed is the one just seeded, never one a sign-out left.
+				signedOut = false
 			}
 		}
 		await Promise.all([devicePreferences, defaultNoteType])
-		if (await resumeAndOpen(injected)) {
+		if (await resumeAndOpen(injected, signedOut)) {
 			log.info("boot", `ready (${String(result.threads)} threads)`)
 		}
 	} catch (e) {

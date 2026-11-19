@@ -18,13 +18,19 @@ import { log } from "@/lib/log"
 // on as it was (its marks back, nothing unsaved but them), the redacted file beside it.
 
 // The Find & redact searches of one editor session: the verifier is told the terms whose every finding stayed marked.
-const searches = new WeakMap<PdfEditSessionModel, RedactionQuery[]>()
+// Each distinct query once (by its terms with their options, and its presets), in the order first searched: Apply
+// searches the whole document again per query.
+const searches = new WeakMap<PdfEditSessionModel, Map<string, RedactionQuery>>()
+
+function queryKey(query: RedactionQuery): string {
+	return JSON.stringify([query.terms.map(term => [term.text, term.matchCase, term.wholeWord]), query.presets])
+}
 
 export function rememberSearch(session: PdfEditSessionModel, query: RedactionQuery): void {
-	const list = searches.get(session) ?? []
+	const known = searches.get(session)
 
-	list.push(query)
-	searches.set(session, list)
+	if (known === undefined) searches.set(session, new Map([[queryKey(query), query]]))
+	else known.set(queryKey(query), query)
 }
 
 // One Find & redact search: its findings, or null when the engine failed to search (logged; never "no matches"). Only
@@ -45,6 +51,8 @@ export function findForRedaction(session: PdfEditSessionModel, query: RedactionQ
 }
 
 const REDACTION_STEPS: ReadonlySet<string> = new Set(["redact.apply", "redact.scrub", "redact.sanitize"])
+// The step "Flatten annotations" adds before a version save writes (flattenedFirst).
+const FLATTEN_STEP = "annotations.flatten"
 
 export interface ApplyRedactionsRequest {
 	readonly sanitize: boolean
@@ -59,11 +67,12 @@ export type ApplyRedactionsOutcome =
 	// The written file failed the redaction check: nothing was uploaded.
 	| { readonly kind: "refused"; readonly failure: RedactionFailure }
 	| { readonly kind: "failed"; readonly error: unknown }
-	| { readonly kind: "cancelled" }
+	// Nothing was marked ("nothing"), or the save did not start ("save": told to the user).
+	| { readonly kind: "cancelled"; readonly reason: "nothing" | "save" }
 
 // The terms searched in this session that the marks now cover everywhere they were found.
 async function termsToVerify(session: PdfEditSessionModel): Promise<RedactionTerm[]> {
-	const queries = searches.get(session) ?? []
+	const queries = [...(searches.get(session)?.values() ?? [])]
 
 	if (queries.length === 0) return []
 
@@ -97,8 +106,14 @@ async function applySteps(session: PdfEditSessionModel, request: ApplyRedactions
 	return pages.length + (terms.length > 0 ? 1 : 0) + (request.sanitize ? 1 : 0)
 }
 
+function isRedactionStep(label: string | null): boolean {
+	return label !== null && REDACTION_STEPS.has(label)
+}
+
 // Undoes the redaction steps at the top of the history (the marks come back); `count` of them at once when known (a
-// save wrote the document since, so the journal cannot take them back: one rebuild instead of one per step).
+// save wrote the document since, so the journal cannot take them back: one rebuild instead of one per step). Without a
+// count, a flatten step right above them (the failed version save's own) goes with them; one further down (an earlier
+// save's) stays.
 async function undoSteps(session: PdfEditSessionModel, count: number | null): Promise<void> {
 	if (count !== null) {
 		await session.undo(count)
@@ -106,10 +121,21 @@ async function undoSteps(session: PdfEditSessionModel, count: number | null): Pr
 		return
 	}
 
-	for (let guard = 0; guard < 100_000; guard++) {
-		const { state } = session.getSnapshot()
+	const top = (): string | null => session.getSnapshot().state.undoLabel
 
-		if (state.undoLabel === null || !REDACTION_STEPS.has(state.undoLabel)) return
+	if (top() === FLATTEN_STEP) {
+		await session.undo()
+
+		// No redaction step under it: it was not the save's, and is put back.
+		if (!isRedactionStep(top())) {
+			await session.redo()
+
+			return
+		}
+	}
+
+	for (let guard = 0; guard < 100_000; guard++) {
+		if (!isRedactionStep(top())) return
 
 		await session.undo()
 	}
@@ -134,7 +160,7 @@ export async function applyRedactions(context: PdfToolContext, request: ApplyRed
 		return { kind: "failed", error: applied.error }
 	}
 
-	if (applied.value === 0) return { kind: "cancelled" }
+	if (applied.value === 0) return { kind: "cancelled", reason: "nothing" }
 
 	const saved = await context.host.save(
 		request.destination.kind === "copy" ? { kind: "copy", suffix: request.copySuffix } : { kind: "version" }
@@ -143,12 +169,12 @@ export async function applyRedactions(context: PdfToolContext, request: ApplyRed
 	if (saved.status === "saved" && request.destination.kind !== "copy") return { kind: "saved", copy: null }
 
 	// A copy's save holds no other step than the redaction's (changes wait for it): all of them at once. A version's
-	// may add its own on top (Flatten annotations), so its redaction steps are found by name.
+	// may add its own flatten step on top (Flatten annotations), undone with them, so they are found by name.
 	await undoRedaction(context, request.destination.kind === "copy" ? applied.value : null)
 
 	if (saved.status === "saved") return { kind: "saved", copy: saved.name }
 
-	if (saved.status === "cancelled") return { kind: "cancelled" }
+	if (saved.status === "cancelled") return { kind: "cancelled", reason: "save" }
 
 	return isRedactionRefusal(saved.error) ? { kind: "refused", failure: saved.error.failure } : { kind: "failed", error: saved.error }
 }

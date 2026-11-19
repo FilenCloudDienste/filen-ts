@@ -224,7 +224,10 @@ describe("the Selection Pane", () => {
 	it("the eye hides and shows one object; Show All and Hide All the whole slide", async () => {
 		mount()
 
-		fireEvent.click(await screen.findByRole("button", { name: "Hide Box A" }))
+		// The name says what a press does, so no pressed state contradicts it.
+		expect((await screen.findByRole("button", { name: "Hide Box A" })).hasAttribute("aria-pressed")).toBe(false)
+		expect(screen.getByRole("button", { name: "Show Box B" }).hasAttribute("aria-pressed")).toBe(false)
+		fireEvent.click(screen.getByRole("button", { name: "Hide Box A" }))
 		fireEvent.click(screen.getByRole("button", { name: "Show Box B" }))
 		fireEvent.click(screen.getByRole("button", { name: "Show All" }))
 		fireEvent.click(screen.getByRole("button", { name: "Hide All" }))
@@ -316,6 +319,68 @@ describe("the Selection Pane", () => {
 		fireEvent.keyDown(row("Box A"), { key: "F", code: "KeyF", altKey: true, shiftKey: true })
 		expect(ops).toEqual([{ family: "shape", kind: "zOrder", slide: ref, shapes: [3], to: "forward" }])
 		await act(() => clearUserCombo("presentation.objects.bringForward"))
+	})
+
+	it("announces a restack by name and the place it took, once the slide's new outline is drawn", async () => {
+		const m = mount()
+		const live = (): string => document.querySelector('[aria-live="polite"]')?.textContent ?? ""
+		const restack = (order: readonly number[], revision: number): void => {
+			shapes = order.flatMap(id => SHAPES.filter(shape => shape.id === id))
+			m.rerender(revision)
+		}
+
+		await screen.findByRole("tree")
+		act(() => {
+			m.selection.set([3])
+		})
+		fireEvent.keyDown(row("Box A"), { key: "]", code: "BracketRight", ctrlKey: true })
+		// Not before the move is drawn: the place it left is not the one it takes.
+		expect(live()).toBe("")
+		restack([2, 4, 3, 6, 9], 2)
+		await waitFor(() => {
+			expect(live()).toBe("Box A moved to position 3 of 5")
+		})
+
+		fireEvent.keyDown(row("Box A"), { key: "]", code: "BracketRight", ctrlKey: true })
+		restack([2, 4, 6, 3, 9], 3)
+		await waitFor(() => {
+			expect(live()).toBe("Box A moved to position 2 of 5")
+		})
+		expect(ops).toHaveLength(2)
+	})
+
+	it("announces a restack again when it ends in the same words as the last one", async () => {
+		const m = mount()
+		const live = (): string => document.querySelector('[aria-live="polite"]')?.textContent ?? ""
+		const restack = (order: readonly number[], revision: number): void => {
+			shapes = order.flatMap(id => SHAPES.filter(shape => shape.id === id))
+			m.rerender(revision)
+		}
+		const initial = shapes.map(shape => shape.id)
+
+		await screen.findByRole("tree")
+		act(() => {
+			m.selection.set([3])
+		})
+		fireEvent.keyDown(row("Box A"), { key: "]", code: "BracketRight", ctrlKey: true })
+		restack([2, 4, 3, 6, 9], 2)
+		await waitFor(() => {
+			expect(live()).toBe("Box A moved to position 3 of 5")
+		})
+
+		// Undone outside the pane: the order goes back, the region keeps its text.
+		restack(initial, 3)
+		await waitFor(() => {
+			expect(names()).toEqual(["Picture 9", "Group 5", "Inner 2", "Inner 1", "Box B, hidden", "Box A", "Title 1"])
+		})
+		expect(live()).toBe("Box A moved to position 3 of 5")
+		fireEvent.keyDown(row("Box A"), { key: "]", code: "BracketRight", ctrlKey: true })
+		expect(live()).toBe("")
+		restack([2, 4, 3, 6, 9], 4)
+		await waitFor(() => {
+			expect(live()).toBe("Box A moved to position 3 of 5")
+		})
+		expect(ops).toHaveLength(2)
 	})
 
 	it("the arrows are offered while the chosen objects can move that way", async () => {

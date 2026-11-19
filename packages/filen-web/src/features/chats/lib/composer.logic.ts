@@ -1,7 +1,6 @@
 import type { ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
-import { contactDisplayName } from "@filen/shared"
 import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
-import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
+import { matchesContactSearch, sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
 import { isOwnMessage } from "@/features/chats/lib/sender"
 
 // Pure, testable core of the chat composer — a port of filen-mobile's input send()/autocomplete logic
@@ -50,7 +49,7 @@ export function isAttachDisabled(uploadingCount: number, isOnline: boolean, isPr
 // single separating space (never a newline — the composer is a single logical message, and a bare url
 // on its own trailing token is exactly what embeds.logic.ts's classifier needs to recognize it later).
 export function appendAttachmentUrl(draft: string, url: string): string {
-	const trimmedEnd = draft.replace(/\s+$/, "")
+	const trimmedEnd = draft.trimEnd()
 
 	return trimmedEnd.length === 0 ? url : `${trimmedEnd} ${url}`
 }
@@ -215,20 +214,15 @@ export function filterMentionParticipants(
 ): ChatParticipant[] {
 	const normalized = query.trim().toLowerCase()
 
-	return participants
-		.filter(participant => {
+	return sortContactsByDisplayName(
+		participants.filter(participant => {
 			if (currentUserId !== undefined && participant.userId === currentUserId) {
 				return false
 			}
 
 			return matchesContactSearch(participant, normalized)
 		})
-		.sort((a, b) => {
-			const an = contactDisplayName(a).toLowerCase()
-			const bn = contactDisplayName(b).toLowerCase()
-
-			return an < bn ? -1 : an > bn ? 1 : 0
-		})
+	)
 }
 
 export interface Replacement {

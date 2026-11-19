@@ -30,6 +30,9 @@ export interface UseUploadMenuActionsParams {
 export interface UploadMenuActions {
 	pickFiles: () => void
 	pickDirectory: () => void
+	// A picker for an explicit directory, for a host retargeted in the same click: the native dialog reads its
+	// destination before that retarget renders.
+	pickInto: (kind: "file" | "directory", parent: string | null) => void
 	newTextFile: () => void
 	newOffice: (kind: NewOfficeKind) => void
 	// A picker or a name dialog is in use, so the host has to stay mounted until it settles.
@@ -106,11 +109,11 @@ export function useUploadMenuActions({
 	// On desktop with HEIC conversion off, the desktop app's own open dialog: the picked paths go straight to its
 	// native host. Otherwise the hidden input, whose click must stay inside the user's gesture, so the preference is
 	// read from what is already loaded.
-	function pick(kind: "file" | "directory", input: HTMLInputElement | null): void {
+	function pick(kind: "file" | "directory", input: HTMLInputElement | null, parent: string | null): void {
 		setPickerOpen(true)
 
 		if (nativeTransfersAvailable() && heicUploadConvertPreferenceCached() === false) {
-			void pickNativeUpload(kind, parentUuid).then(settlePicker)
+			void pickNativeUpload(kind, parent).then(settlePicker)
 
 			return
 		}
@@ -179,10 +182,13 @@ export function useUploadMenuActions({
 
 	return {
 		pickFiles: () => {
-			pick("file", inputRef.current)
+			pick("file", inputRef.current, parentUuid)
 		},
 		pickDirectory: () => {
-			pick("directory", directoryInputRef.current)
+			pick("directory", directoryInputRef.current, parentUuid)
+		},
+		pickInto: (kind, parent) => {
+			pick(kind, kind === "file" ? inputRef.current : directoryInputRef.current, parent)
 		},
 		newTextFile: () => {
 			setTakenTextFileName(null)

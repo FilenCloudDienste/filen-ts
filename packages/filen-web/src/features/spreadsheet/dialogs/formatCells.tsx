@@ -1,6 +1,6 @@
 import { useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { formatValue, numFmtProblem, type NumFmtCategory, type NumFmtProblem } from "@filen/office/core/sheet"
+import { formatValue, numFmtProblem, type NumFmtCategory, type NumFmtOptions, type NumFmtProblem } from "@filen/office/core/sheet"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
@@ -19,6 +19,8 @@ import {
 	type FormatOptions
 } from "@/features/spreadsheet/dialogs/formatCells.logic"
 import { CATEGORIES, CATEGORY_LABELS } from "@/features/spreadsheet/toolbar/toolbar.logic"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
 
 // The Format Cells dialog's Number tab: a category, its options, the code they make (editable: an edited code is a
 // custom one), and the active cell's value shown in it. Apply sends the code; the session refuses what
@@ -66,9 +68,13 @@ function FormatCellsForm({ numFmt, sample, date1904, onOpenChange, onApply }: Fo
 	const problem = numFmtProblem(code)
 	const offered = offers(options.category)
 	const value = sample ?? DEFAULT_SAMPLE
+	// Shown in the regional format the grid shows cells in (separators, month and day names, date patterns), so the
+	// preview reads as the cell will; followed live.
+	const locale = sheetLocaleOf(useRegionalLanguage()).numFmt
+	const sampleOptions: NumFmtOptions = locale === undefined ? { date1904 } : { date1904, locale }
 	// A value through a code, or nothing for a code Excel would refuse.
 	const shown = (candidate: string, of = value): string =>
-		numFmtProblem(candidate) === null ? formatValue(of, candidate, { date1904 }).text : ""
+		numFmtProblem(candidate) === null ? formatValue(of, candidate, sampleOptions).text : ""
 	const change = (next: Partial<FormatOptions>): void => {
 		setOptions(current => {
 			const merged = { ...current, ...next }

@@ -12,12 +12,15 @@ import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 // the top, retrying a failed older page, and keeping an in-flight older page from one chat out of the next
 // chat. The scroller's keyboard contract: it is a focusable, named region, Home and End jump, and neither
 // the focused row nor the pill's focus is dropped to the body. Also the unread divider's
-// click-to-mark-read, which must report a failure.
+// click-to-mark-read, which must report a failure and name its action, and the load-error state: a failed
+// refetch keeps cached rows up, a failure with nothing cached offers a retry.
 // jsdom has no layout (and no Element.scrollTo, so the virtualizer's own writes are inert here): the scroll
 // container's geometry is faked and every collaborator is stubbed.
 
-const { messagesByChat, loadOlderChatMessages, markChatRead, toastError } = vi.hoisted(() => ({
+const { messagesByChat, failedChats, refetchMessages, loadOlderChatMessages, markChatRead, toastError } = vi.hoisted(() => ({
 	messagesByChat: new Map<string, ChatMessage[]>(),
+	failedChats: new Set<string>(),
+	refetchMessages: vi.fn(),
 	loadOlderChatMessages: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
 	markChatRead: vi.fn<(chat: Chat) => Promise<{ status: "success" } | { status: "error"; dto: unknown }>>(),
 	toastError: vi.fn()
@@ -25,7 +28,18 @@ const { messagesByChat, loadOlderChatMessages, markChatRead, toastError } = vi.h
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/chats/queries/chatMessages", () => ({
-	useChatMessages: (chatUuid: string) => ({ data: messagesByChat.get(chatUuid), isPending: false, isError: false }),
+	useChatMessages: (chatUuid: string) => {
+		const failed = failedChats.has(chatUuid)
+
+		return {
+			data: messagesByChat.get(chatUuid),
+			status: failed ? "error" : "success",
+			error: failed ? new Error("read failed") : null,
+			isPending: false,
+			isError: failed,
+			refetch: refetchMessages
+		}
+	},
 	loadOlderChatMessages
 }))
 vi.mock("@/queries/account", () => ({
@@ -134,6 +148,8 @@ function message(chatLabel: string, label: string, sentTimestamp: bigint, sender
 
 beforeEach(() => {
 	messagesByChat.clear()
+	failedChats.clear()
+	refetchMessages.mockReset()
 	loadOlderChatMessages.mockReset()
 	geometry.scrollHeight = 1000
 })
@@ -396,6 +412,45 @@ describe("MessageThread — unread divider", () => {
 
 		expect(markChatRead).toHaveBeenCalledTimes(1)
 		expect(toastError).toHaveBeenCalledWith("Could not mark as read")
+	})
+
+	it("names the mark-as-read action and keeps the visible word in its accessible name", () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [message("a", "m1", 100n), message("a", "m2", 20_000n)])
+
+		render(createElement(MessageThread, { chat: a }))
+
+		const divider = screen.getByRole("button", { name: /new/i })
+
+		expect(divider.textContent).toBe("New")
+		expect(divider.getAttribute("aria-label")).toMatch(/^New.*mark as read/i)
+		expect(divider.getAttribute("title")).toBe(divider.getAttribute("aria-label"))
+	})
+})
+
+describe("MessageThread — load error", () => {
+	it("keeps the cached rows up when a background refetch fails", () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [message("a", "m1", 100n), message("a", "m2", 200n)])
+		failedChats.add(a.uuid)
+
+		render(createElement(MessageThread, { chat: a }))
+
+		expect(screen.getAllByTestId("message").map(row => row.textContent)).toEqual(["m1", "m2"])
+		expect(screen.queryByText("Couldn't load messages")).toBeNull()
+	})
+
+	it("shows the error with a retry when nothing is cached", () => {
+		const a = chat("a")
+		failedChats.add(a.uuid)
+
+		render(createElement(MessageThread, { chat: a }))
+
+		expect(screen.getByText("Couldn't load messages")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+
+		expect(refetchMessages).toHaveBeenCalledTimes(1)
 	})
 })
 

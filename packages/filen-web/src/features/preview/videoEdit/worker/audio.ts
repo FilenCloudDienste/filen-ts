@@ -5,7 +5,9 @@ import type { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
 
 // Re-encoded audio: decoded samples cut to the kept ranges sample-exactly, a gain, a pitch-keeping time stretch for a
 // speed change, and an exact count of output frames per range (the stretch's own rounding is padded or trimmed), so
-// the audio's running length matches the video's to the sample after any number of joins.
+// the audio's running length matches the video's to the sample after any number of joins. A sample is laid where its
+// timestamp puts it: audio that starts after the range does, or has a hole, gets that much silence first (the video is
+// laid from the range's start too), so it stays in sync instead of sliding early.
 
 // The time stretch (audio/timeStretch.ts, WSOLA): planar in, planar out (views valid until its next call).
 export interface TimeStretchLike {
@@ -21,7 +23,7 @@ export interface PlanarSampleLike {
 	copyTo(destination: Float32Array, options: { planeIndex: number; format: "f32-planar"; frameOffset: number; frameCount: number }): void
 }
 
-// Frames of silence emitted at once when a range's audio ends short of its video.
+// Frames of silence emitted at once when a range's audio ends short of its video or has a gap.
 const PAD_BLOCK_FRAMES = 8192
 
 // The most a sample may be amplified to: louder clips, and an encoder fed values past full scale distorts worse.
@@ -50,7 +52,11 @@ export class RangeAudio {
 	private target = 0
 	private stretch: TimeStretchLike | null = null
 	private writtenFrames = 0
+	// Source frames of this range laid down so far (kept audio and silence for gaps): where the next sample belongs.
+	private sourceFrames = 0
 	private elapsed = 0
+	// Silence for gaps, read only, shared by every channel.
+	private zeros: Float32Array | null = null
 	// The kept part of the latest sample, every channel back to back; reused (grown when a sample holds more).
 	private scratch = new Float32Array(0)
 
@@ -78,6 +84,43 @@ export class RangeAudio {
 		this.elapsed += range.end - range.start
 		this.target = Math.round((this.elapsed / this.speed) * this.sampleRate)
 		this.stretch = this.createStretch?.() ?? null
+		this.sourceFrames = 0
+	}
+
+	// Silence for the gap before `sample`, when it starts more than a packet (its own length) past the audio laid so
+	// far in this range: the source's own gap, kept in place. Under a packet is AAC priming or timestamp jitter, never
+	// filled (it would click). Fed through the stretch like audio, so the range's frame count stays exact. Call before
+	// push(); each block is valid until the next is asked for.
+	public *gap(sample: PlanarSampleLike): Generator<Float32Array[]> {
+		const from = Math.max(0, Math.round((this.range.start - sample.timestamp) * this.sampleRate))
+		const to = Math.min(sample.numberOfFrames, Math.round((this.range.end - sample.timestamp) * this.sampleRate))
+
+		if (to <= from) {
+			return
+		}
+
+		const at = Math.round((Math.max(sample.timestamp, this.range.start) - this.range.start) * this.sampleRate)
+		let missing = at - this.sourceFrames
+
+		if (missing <= sample.numberOfFrames) {
+			return
+		}
+
+		this.sourceFrames = at
+		this.zeros ??= new Float32Array(PAD_BLOCK_FRAMES)
+
+		while (missing > 0 && this.writtenFrames < this.target) {
+			const count = Math.min(PAD_BLOCK_FRAMES, missing)
+			const block = this.zeros.subarray(0, count)
+			const planes = Array.from({ length: this.channels }, () => block)
+			const taken = this.take(this.stretch === null ? planes : this.stretch.push(planes))
+
+			missing -= count
+
+			if (taken !== null) {
+				yield taken
+			}
+		}
 	}
 
 	// What of a decoded sample (source seconds) falls in the range, ready to encode, or null. Only that part is copied
@@ -92,6 +135,8 @@ export class RangeAudio {
 		}
 
 		const count = to - from
+
+		this.sourceFrames += count
 
 		if (this.scratch.length < count * this.channels) {
 			this.scratch = new Float32Array(count * this.channels)
@@ -168,6 +213,35 @@ export function planarSample(planes: readonly Float32Array[], sampleRate: number
 	return new AudioSample({ data, format: "f32-planar", numberOfChannels: planes.length, sampleRate, timestamp })
 }
 
+export interface AudioFormat {
+	sampleRate: number
+	channels: number
+}
+
+// The rate and channel count the decoder puts out, read from the first sample it decodes in the first of `bounds` that
+// holds one (closed at once): a track's declared ones (its AudioSpecificConfig) can differ, as implicitly signalled
+// HE-AAC decodes at twice the rate and v2 turns one channel into two. `declared` when no range decodes anything.
+export async function decodedAudioFormat(
+	decode: (range: TimeRange) => AsyncIterable<AudioSample>,
+	bounds: readonly TimeRange[],
+	declared: AudioFormat
+): Promise<AudioFormat> {
+	for (const range of bounds) {
+		for await (const sample of decode(range)) {
+			try {
+				return {
+					sampleRate: sample.sampleRate > 0 ? sample.sampleRate : declared.sampleRate,
+					channels: sample.numberOfChannels > 0 ? sample.numberOfChannels : declared.channels
+				}
+			} finally {
+				sample.close()
+			}
+		}
+	}
+
+	return declared
+}
+
 export interface TranscodeAudioParams {
 	// Decoded samples covering `range` (from the one holding its start), in order. Each is closed by the caller.
 	decode: (range: TimeRange) => AsyncIterable<AudioSample>
@@ -203,6 +277,10 @@ export async function transcodeAudio(params: TranscodeAudioParams): Promise<void
 
 			try {
 				throwIfCancelled(signal)
+
+				for (const silence of audio.gap(sample)) {
+					await emit(silence)
+				}
 
 				planes = audio.push(sample)
 			} finally {

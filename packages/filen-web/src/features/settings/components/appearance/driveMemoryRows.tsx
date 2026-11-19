@@ -15,7 +15,7 @@ import {
 import type { DriveSortBy } from "@/features/drive/lib/sort"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { PreferenceToggleRow, ResetRow } from "@/features/settings/components/settingRows"
-import { saveSetting } from "@/features/settings/components/appearance/saveSetting"
+import { saveSetting } from "@/lib/saveSetting"
 
 type ResetTarget = "sort" | "view" | null
 

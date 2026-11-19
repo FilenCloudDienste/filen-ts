@@ -78,6 +78,9 @@ const LEGACY_RUN_BYTES = 4096
 class UnitWalker {
 	private unit = 0
 	private byte: number
+	// The last UTF-8 step's bytes and units, set by utf8Step.
+	private stepBytes = 0
+	private stepUnits = 0
 	private readonly segments: readonly Segment[]
 	private readonly end: number
 	private readonly encoding: PagerEncoding
@@ -108,14 +111,53 @@ class UnitWalker {
 			return this.legacyTo(target)
 		}
 
-		while (this.unit < target && this.byte < this.end) {
-			const [length, units] = encoding.kind === "utf32" ? this.utf32Step() : utf8Step(at => this.byteAt(at), this.byte)
+		// Segment by segment (they are contiguous), its bytes read directly; a character may run into the next.
+		const utf32 = encoding.kind === "utf32"
+		let { unit, byte } = this
 
-			this.byte += length
-			this.unit += units
+		for (const { base, bytes } of this.segments) {
+			const end = base + bytes.length
+
+			while (unit < target && byte < end) {
+				const lead = bytes[byte - base] ?? 0
+
+				if (utf32) {
+					const point =
+						byte + 4 <= end
+							? encoding.littleEndian
+								? (lead |
+										((bytes[byte - base + 1] ?? 0) << 8) |
+										((bytes[byte - base + 2] ?? 0) << 16) |
+										((bytes[byte - base + 3] ?? 0) << 24)) >>>
+									0
+								: ((lead << 24) |
+										((bytes[byte - base + 1] ?? 0) << 16) |
+										((bytes[byte - base + 2] ?? 0) << 8) |
+										(bytes[byte - base + 3] ?? 0)) >>>
+									0
+							: this.utf32Across(byte)
+
+					byte += 4
+					unit += point > 0xffff && point <= 0x10ffff ? 2 : 1
+				} else if (lead < 0x80) {
+					byte++
+					unit++
+				} else {
+					this.utf8Step(lead, byte, bytes, base)
+					byte += this.stepBytes
+					unit += this.stepUnits
+				}
+			}
+
+			if (unit >= target) {
+				break
+			}
 		}
 
-		return this.byte
+		this.unit = unit
+		this.byte = byte
+
+		return byte
 	}
 
 	private byteAt(at: number): number | undefined {
@@ -143,17 +185,63 @@ class UnitWalker {
 		return out
 	}
 
-	private segmentEnd(at: number): number {
-		const segment = this.segments.find(each => at >= each.base && at < each.base + each.bytes.length)
+	// A UTF-32 unit not inside one segment: across two, or cut by the last one's end (then 0).
+	private utf32Across(at: number): number {
+		const bytes = this.span(at, at + 4)
 
-		return segment === undefined ? this.end : segment.base + segment.bytes.length
+		return bytes.length < 4 ? 0 : new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, this.encoding.littleEndian)
 	}
 
-	private utf32Step(): [number, number] {
-		const bytes = this.span(this.byte, this.byte + 4)
-		const point = bytes.length < 4 ? 0 : new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, this.encoding.littleEndian)
+	// One UTF-8 decoder step at `at` (lead byte `lead`, not ASCII, in `bytes` from `base`): a valid sequence, or the bytes
+	// one U+FFFD stands for (the maximal subpart of a sequence; the byte that broke it starts the next step).
+	private utf8Step(lead: number, at: number, bytes: Uint8Array, base: number): void {
+		let needed: number
+		let lower = 0x80
+		let upper = 0xbf
 
-		return [4, point > 0xffff && point <= 0x10ffff ? 2 : 1]
+		this.stepBytes = 1
+		this.stepUnits = 1
+
+		if (lead >= 0xc2 && lead <= 0xdf) {
+			needed = 1
+		} else if (lead >= 0xe0 && lead <= 0xef) {
+			needed = 2
+			lower = lead === 0xe0 ? 0xa0 : 0x80
+			upper = lead === 0xed ? 0x9f : 0xbf
+		} else if (lead >= 0xf0 && lead <= 0xf4) {
+			needed = 3
+			lower = lead === 0xf0 ? 0x90 : 0x80
+			upper = lead === 0xf4 ? 0x8f : 0xbf
+		} else {
+			return
+		}
+
+		const end = base + bytes.length
+
+		for (let seen = 1; seen <= needed; seen++) {
+			const next = at + seen < end ? bytes[at + seen - base] : this.byteAt(at + seen)
+
+			if (next === undefined || next < lower || next > upper) {
+				this.stepBytes = seen
+
+				return
+			}
+
+			lower = 0x80
+			upper = 0xbf
+		}
+
+		this.stepBytes = needed + 1
+		this.stepUnits = needed === 3 ? 2 : 1
+	}
+
+	// A legacy character's byte length at `at`, read in `segment` when its two lead bytes are in it.
+	private legacyLength(at: number, segment: Segment | undefined): number {
+		const { label } = this.encoding
+
+		return segment !== undefined && at + 2 <= segment.base + segment.bytes.length
+			? legacyCharLength(segment.bytes, at - segment.base, label)
+			: legacyCharLength(this.span(at, at + 2), 0, label)
 	}
 
 	// A legacy character may decode to two units (GB18030 and Big5 HKSCS past the Basic Multilingual Plane, Big5's
@@ -161,13 +249,21 @@ class UnitWalker {
 	// time, then one character at a time inside the run that holds the target.
 	private legacyTo(target: number): number {
 		const { encoding } = this
-		const charLength = (at: number): number => legacyCharLength(this.span(at, at + 2), 0, encoding.label)
 
 		while (this.unit < target && this.byte < this.end) {
-			const limit = Math.min(this.segmentEnd(this.byte), this.byte + LEGACY_RUN_BYTES)
+			const segment = this.segments.find(each => this.byte >= each.base && this.byte < each.base + each.bytes.length)
+			const limit = Math.min(segment === undefined ? this.end : segment.base + segment.bytes.length, this.byte + LEGACY_RUN_BYTES)
 			let end = this.byte
 
-			while (end < limit && end + charLength(end) <= limit) end += charLength(end)
+			while (end < limit) {
+				const length = this.legacyLength(end, segment)
+
+				if (end + length > limit) {
+					break
+				}
+
+				end += length
+			}
 
 			const units = end > this.byte ? decodeSpan(this.span(this.byte, end), encoding).length : 0
 
@@ -182,7 +278,7 @@ class UnitWalker {
 			const stop = Math.max(end, this.byte + 1)
 
 			while (this.unit < target && this.byte < stop) {
-				const length = charLength(this.byte)
+				const length = this.legacyLength(this.byte, segment)
 
 				this.unit += decodeSpan(this.span(this.byte, this.byte + length), encoding).length
 				this.byte += length
@@ -191,44 +287,6 @@ class UnitWalker {
 
 		return this.byte
 	}
-}
-
-// One UTF-8 decoder step at `at`: a valid sequence, or the bytes one U+FFFD stands for (the maximal subpart of a
-// sequence; the byte that broke it starts the next step).
-function utf8Step(byteAt: (at: number) => number | undefined, at: number): [number, number] {
-	const lead = byteAt(at) ?? 0
-	let needed: number
-	let lower = 0x80
-	let upper = 0xbf
-
-	if (lead < 0x80) {
-		return [1, 1]
-	} else if (lead >= 0xc2 && lead <= 0xdf) {
-		needed = 1
-	} else if (lead >= 0xe0 && lead <= 0xef) {
-		needed = 2
-		lower = lead === 0xe0 ? 0xa0 : 0x80
-		upper = lead === 0xed ? 0x9f : 0xbf
-	} else if (lead >= 0xf0 && lead <= 0xf4) {
-		needed = 3
-		lower = lead === 0xf0 ? 0x90 : 0x80
-		upper = lead === 0xf4 ? 0x8f : 0xbf
-	} else {
-		return [1, 1]
-	}
-
-	for (let seen = 1; seen <= needed; seen++) {
-		const next = byteAt(at + seen)
-
-		if (next === undefined || next < lower || next > upper) {
-			return [seen, 1]
-		}
-
-		lower = 0x80
-		upper = 0xbf
-	}
-
-	return [needed + 1, needed === 3 ? 2 : 1]
 }
 
 function countChar(text: string, char: string, from: number, to: number): number {

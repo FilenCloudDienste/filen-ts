@@ -53,6 +53,7 @@ function previewRemote() {
 	return {
 		open: vi.fn(() => Promise.resolve(INFO)),
 		frameAt: vi.fn(() => Promise.resolve("bitmap")),
+		stillAt: vi.fn(() => Promise.resolve("still")),
 		filterThumbnails: vi.fn(() => Promise.resolve([{ filter: "vivid", bitmap: "thumb" }])),
 		filmstrip: vi.fn(() => Promise.resolve([{ time: 1, bitmap: "still" }])),
 		cancelFilmstrip: vi.fn(() => Promise.resolve()),
@@ -72,6 +73,7 @@ interface FakeSave {
 
 let preview: ReturnType<typeof previewRemote>
 let saves: FakeSave[] = []
+let workers: FakeWorker[] = []
 
 async function load() {
 	vi.resetModules()
@@ -79,10 +81,34 @@ async function load() {
 	const { releaseProxy } = await import("comlink")
 
 	preview = previewRemote()
+	workers = []
 	h.PreviewCtor.mockImplementation(function Preview() {
-		return new FakeWorker()
+		const worker = new FakeWorker()
+
+		workers.push(worker)
+
+		return worker
 	})
-	h.wrap.mockImplementation(() => ({ ...preview, [releaseProxy]: vi.fn() }))
+	// As comlink's own: every use after releaseProxy throws.
+	h.wrap.mockImplementation(() => {
+		let released = false
+		const target = {
+			...preview,
+			[releaseProxy]: vi.fn(() => {
+				released = true
+			})
+		}
+
+		return new Proxy(target, {
+			get(object, key, receiver) {
+				if (released && key !== releaseProxy) {
+					throw new Error("Proxy has been released and is not useable")
+				}
+
+				return Reflect.get(object, key, receiver) as unknown
+			}
+		})
+	})
 
 	return import("@/features/preview/videoEdit/client")
 }
@@ -408,6 +434,29 @@ describe("createVideoEditClient", () => {
 		client.dispose()
 	})
 
+	it("starts an iOS export whose decoder hand-over never answers once the worker is lost", async () => {
+		h.ios.value = true
+
+		const { createVideoEditClient } = await load()
+		const client = createVideoEditClient({ item: ITEM })
+
+		await client.loadSource()
+		preview.suspendDecoding.mockImplementationOnce(() => new Promise<undefined>(() => undefined))
+
+		const running = client.exportVideo(RECIPE, "inPlace", vi.fn())
+
+		await flush()
+		expect(h.startVideoSave).not.toHaveBeenCalled()
+
+		workers[0]?.dispatchEvent(new Event("error"))
+		await flush()
+
+		expect(h.startVideoSave).toHaveBeenCalledTimes(1)
+		saves[0]?.finish({ status: "done", item: ITEM })
+		expect(await running.done).toEqual({ status: "done", item: ITEM })
+		client.dispose()
+	})
+
 	it("closes the source and its port on dispose, and the worker once idle", async () => {
 		vi.useFakeTimers()
 
@@ -426,6 +475,69 @@ describe("createVideoEditClient", () => {
 
 		expect(h.terminated).toBe(1)
 		await expect(client.frameAt(0, RECIPE, 10)).rejects.toThrow(/disposed/)
+	})
+
+	it("rejects a frame in flight when the worker is lost, and asks the next one of a fresh worker with the source reopened", async () => {
+		const { createVideoEditClient, PreviewWorkerLostError } = await load()
+		const client = createVideoEditClient({ item: ITEM })
+
+		preview.frameAt.mockImplementationOnce(() => new Promise<never>(() => undefined))
+
+		const inFlight = client.frameAt(1, RECIPE, 640)
+
+		await flush()
+		workers[0]?.dispatchEvent(new Event("error"))
+
+		await expect(inFlight).rejects.toBeInstanceOf(PreviewWorkerLostError)
+		// The lost worker's range port is cancelled with it.
+		expect(h.cancelPreviewDownload).toHaveBeenCalledTimes(1)
+		expect(h.terminated).toBe(1)
+
+		expect(await client.frameAt(2, RECIPE, 640)).toBe("bitmap")
+		expect(h.PreviewCtor).toHaveBeenCalledTimes(2)
+		expect(h.openRangePort).toHaveBeenCalledTimes(2)
+		expect(preview.open).toHaveBeenCalledTimes(2)
+		client.dispose()
+	})
+
+	it("ends its use of a lost worker, so dispose afterwards closes the port and the next worker idles out", async () => {
+		vi.useFakeTimers()
+
+		const { createVideoEditClient } = await load()
+		const client = createVideoEditClient({ item: ITEM })
+
+		await client.loadSource()
+		workers[0]?.dispatchEvent(new Event("error"))
+		await vi.advanceTimersByTimeAsync(0)
+
+		// Reacquired, then closed: both ports cancelled, and the second worker goes once idle.
+		await client.loadSource()
+		client.dispose()
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(h.cancelPreviewDownload).toHaveBeenCalledTimes(2)
+		expect(h.terminated).toBe(1)
+
+		await vi.advanceTimersByTimeAsync(30_000)
+
+		expect(h.terminated).toBe(2)
+	})
+
+	it("disposes cleanly after its worker was lost", async () => {
+		const { createVideoEditClient } = await load()
+		const client = createVideoEditClient({ item: ITEM })
+
+		await client.loadSource()
+		workers[0]?.dispatchEvent(new Event("error"))
+		await flush()
+
+		expect(() => {
+			client.dispose()
+		}).not.toThrow()
+		await flush()
+
+		expect(h.cancelPreviewDownload).toHaveBeenCalledTimes(1)
+		expect(preview.close).not.toHaveBeenCalled()
 	})
 
 	it("ends every client and the worker at logout", async () => {

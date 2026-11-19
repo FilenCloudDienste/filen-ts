@@ -161,7 +161,7 @@ export class CodeChrome {
 			EditorView.updateListener.of(update => {
 				if (update.docChanged || update.selectionSet) {
 					this.schedule()
-					this.find.schedule()
+					this.find.schedule(update.docChanged)
 				}
 			})
 		]

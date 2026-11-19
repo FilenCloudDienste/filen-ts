@@ -219,15 +219,20 @@ export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 				) : null}
 				<PickerListShell
 					listingQuery={listingQuery}
-					isEmpty={filteredDirectories.length === 0}
 					noResults={filter.trim().length > 0}
-				>
-					{filteredDirectories.map(directory => {
+					count={filteredDirectories.length}
+					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
+					renderRow={index => {
+						const directory = filteredDirectories[index]
+
+						if (directory === undefined) {
+							return null
+						}
+
 						const root = isRootRow(directory.data.uuid, chooserRoots)
 
 						return (
 							<PickerDirectoryRow
-								key={directory.data.uuid}
 								directory={directory}
 								disabled={directory.data.undecryptable || busy}
 								hint={root ? t("videosChooserAlreadyRoot") : undefined}
@@ -238,8 +243,8 @@ export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 								}}
 							/>
 						)
-					})}
-				</PickerListShell>
+					}}
+				/>
 				{warning === null ? null : (
 					<div
 						role="alert"

@@ -11,6 +11,8 @@ import { neutralTone } from "@/features/videos/lib/videoCard.logic"
 import { ArtImage } from "@/features/videos/components/videoCard"
 import { qualityLabel } from "@/features/videos/lib/videoGrid.logic"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { formatClockTime } from "@/lib/formatDate"
+import { useNowMinute } from "@/lib/useNowMinute"
 
 // What the file's stored probe says (a local read; nothing is probed for the hero).
 function useStoredProbe(uuid: string | null): ProbeRecord | null {
@@ -40,9 +42,22 @@ function useStoredProbe(uuid: string | null): ProbeRecord | null {
 	return state.uuid === uuid ? state.record : null
 }
 
+// When the title ends if played now, on the clock: its own component, so the minute tick re-renders this line alone.
+function HeroEndsAt({ remainingSec, separated }: { remainingSec: number; separated: boolean }) {
+	const { t } = useTranslation("videos")
+	const now = useNowMinute()
+
+	return (
+		<>
+			{separated ? " · " : null}
+			<span>{t("videosHomeEndsAt", { time: formatClockTime(now + remainingSec * 1000) })}</span>
+		</>
+	)
+}
+
 // The home's static hero: one title per session on a dark rounded card under the header, its backdrop behind a
 // scrim, the title, what is known of it, Play or Resume, and More info (the title's page). No rotation, no trailer.
-export function HomeHero({ hero, now, onShown }: { hero: HeroModel; now: number; onShown: (titleId: string) => void }) {
+export function HomeHero({ hero, onShown }: { hero: HeroModel; onShown: (titleId: string) => void }) {
 	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
 	const headingId = useId()
@@ -92,11 +107,7 @@ export function HomeHero({ hero, now, onShown }: { hero: HeroModel; now: number;
 		meta.push(`${String(channels - 1)}.1`)
 	}
 
-	if (duration !== null && duration > resumeSec) {
-		const endsAt = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(now + (duration - resumeSec) * 1000)
-
-		meta.push(t("videosHomeEndsAt", { time: endsAt }))
-	}
+	const remainingSec = duration !== null && duration > resumeSec ? duration - resumeSec : null
 
 	return (
 		<section
@@ -133,7 +144,17 @@ export function HomeHero({ hero, now, onShown }: { hero: HeroModel; now: number;
 				>
 					{title.title}
 				</h2>
-				{meta.length > 0 ? <p className="text-sm text-white/80 tabular-nums">{meta.join(" · ")}</p> : null}
+				{meta.length > 0 || remainingSec !== null ? (
+					<p className="text-sm text-white/80 tabular-nums">
+						{meta.join(" · ")}
+						{remainingSec === null ? null : (
+							<HeroEndsAt
+								remainingSec={remainingSec}
+								separated={meta.length > 0}
+							/>
+						)}
+					</p>
+				) : null}
 				<div className="mt-2 flex gap-2">
 					{playUuid === null ? null : (
 						<Button

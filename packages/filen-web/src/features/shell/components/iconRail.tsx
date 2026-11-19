@@ -55,6 +55,7 @@ import { settingsRoute } from "@/features/shell/lib/railGroups.logic"
 import { useSyncAggregate } from "@/features/sync/lib/syncStore"
 import { useMountsAggregate } from "@/features/mounts/lib/mountsStore"
 import { useTheme } from "@/providers/themeProvider"
+import { log } from "@/lib/log"
 import { desktopBridge, desktopPlatform } from "@/lib/desktop"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -124,20 +125,23 @@ function AccountMenu() {
 	)
 	useAction("app.signOut", confirmSignOut, OUTSIDE_OVERLAYS)
 
+	// No `finally`: the React Compiler cannot lower one yet and would skip this whole component.
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
+
 		try {
 			if (!(await performLogout())) {
 				// Declined at the unsaved-preview prompt — don't leave this confirm sitting open behind an
 				// already-answered dialog.
 				setConfirmOpen(false)
 			}
-		} finally {
-			// performLogout isolates every phase internally (log-and-continue) and never rejects; this
-			// mirrors login-form's unconditional reset — harmless even though a successful sign-out
-			// reloads the page shortly after.
-			setPending(false)
+		} catch (e) {
+			// performLogout isolates its phases, but the reload it ends with can throw synchronously.
+			log.error("session", "sign-out failed", e)
 		}
+
+		// Re-enabled on any outcome; harmless after a successful sign-out, which reloads the page shortly after.
+		setPending(false)
 	}
 
 	return (
@@ -154,7 +158,9 @@ function AccountMenu() {
 							aria-label={
 								withdrawUntil === undefined
 									? t("account")
-									: `${t("account")}, ${t("settings:settingsBillingWithdrawStatus", { date: withdrawUntil })}`
+									: t("accountWithStatus", {
+											status: t("settings:settingsBillingWithdrawStatus", { date: withdrawUntil })
+										})
 							}
 							className="relative rounded-full app-region-no-drag"
 						>

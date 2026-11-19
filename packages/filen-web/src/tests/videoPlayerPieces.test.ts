@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { CueBuilder, MAX_CONCURRENT_CUES, type VideoProbe } from "@filen/shared/videos"
 import type { VideoTitleView } from "@/workers/videoIndex/view.logic"
-import type { PlayerSubtitleTrack } from "@/features/videos/lib/player/subtitles.logic"
+import { subtitleTracksOf, type PlayerSubtitleTrack } from "@/features/videos/lib/player/subtitles.logic"
 
 const mocks = vi.hoisted(() => ({
 	download: vi.fn(),
@@ -265,6 +265,16 @@ describe("SubtitleTrackPool", () => {
 	})
 })
 
+const SMI = `<SAMI><HEAD><STYLE TYPE="text/css"><!--
+.ENCC { Name: English; lang: en-US; }
+.KRCC { Name: Korean; lang: ko-KR; }
+--></STYLE></HEAD><BODY>
+<SYNC Start=1000><P Class=ENCC>Hello
+<P Class=KRCC>안녕
+<SYNC Start=3000><P Class=ENCC>&nbsp;
+<P Class=KRCC>&nbsp;
+</BODY></SAMI>`
+
 describe("SidecarReader", () => {
 	const track: PlayerSubtitleTrack = {
 		id: "s:ru",
@@ -331,6 +341,166 @@ describe("SidecarReader", () => {
 		mocks.download.mockClear()
 		await reader.subtitle(episode(29), "windows-1252")
 		expect(mocks.download).not.toHaveBeenCalled()
+	})
+
+	it("reads an .edl again after a failed download, but keeps a too-large answer", async () => {
+		const edl = { stableUuid: "edl", uuid: "edl-u", name: "a.edl", size: 10 }
+		const reader = new SidecarReader()
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "edl-u", size: 10n }])
+		mocks.download.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(new TextEncoder().encode("10 20 0\n"))
+
+		expect(await reader.edl(edl)).toEqual([])
+		expect(await reader.edl(edl)).toEqual([{ kind: "commercial", start: 10, end: 20, source: "edl", mustSkip: true }])
+		expect(mocks.download).toHaveBeenCalledTimes(2)
+
+		const large = { stableUuid: "big", uuid: "big-u", name: "b.edl", size: 10 }
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "big-u", size: 1024n * 1024n }])
+		expect(await reader.edl(large)).toEqual([])
+		expect(await reader.edl(large)).toEqual([])
+		expect(mocks.playableFiles).toHaveBeenCalledTimes(3)
+	})
+
+	it("times a MicroDVD file and a frame-based .edl by the video's frame rate", async () => {
+		const sub: PlayerSubtitleTrack = {
+			...track,
+			id: "s:sub",
+			file: { stableUuid: "sub", uuid: "sub-u", name: "a.sub", size: 20 },
+			format: "microdvd"
+		}
+		const edl = { stableUuid: "fe", uuid: "fe-u", name: "a.edl", size: 20 }
+		const reader = new SidecarReader()
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "x", size: 20n }])
+		mocks.download.mockResolvedValue(new TextEncoder().encode("{90000}{90050}Late\n"))
+
+		const atDefault = await reader.subtitle(sub, null)
+		const at25 = await reader.subtitle(sub, null, 25)
+
+		expect(atDefault.status === "ok" ? atDefault.cues.starts[0] : null).toBeCloseTo(90000 / 23.976, 3)
+		expect(at25.status === "ok" ? at25.cues.starts[0] : null).toBe(3600)
+		expect(mocks.download).toHaveBeenCalledTimes(1)
+
+		mocks.download.mockResolvedValue(new TextEncoder().encode("#1500 #3000 0\n"))
+		expect(await reader.edl(edl)).toEqual([])
+		expect(await reader.edl(edl, 25)).toEqual([{ kind: "commercial", start: 60, end: 120, source: "edl", mustSkip: true }])
+	})
+
+	it("lists each class of a SAMI file as a track and reads its cues from one parse", async () => {
+		const smiFile = { stableUuid: "smi", uuid: "smi-u", name: "a.smi", size: 400 }
+		const part = {
+			file: { stableUuid: "v", uuid: "v-u", name: "a.mkv", size: 1 },
+			container: "mkv",
+			unsupported: false,
+			height: 1080,
+			subtitles: [{ file: smiFile, format: "smi" as const, language: null, forced: false, sdh: false, isDefault: false, title: "" }],
+			nfo: null,
+			thumb: null,
+			edl: null
+		}
+		const reader = new SidecarReader()
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "smi-u", size: 400n }])
+		mocks.download.mockResolvedValue(new TextEncoder().encode(SMI))
+
+		const classes = await reader.smiClasses(smiFile, null)
+
+		expect(classes).toEqual([
+			{ className: "ENCC", lang: "en" },
+			{ className: "KRCC", lang: "ko" }
+		])
+		expect(subtitleTracksOf(part, null).map(entry => entry.id)).toEqual(["s:smi"])
+
+		const tracks = subtitleTracksOf(part, null, new Map([["smi-u", classes ?? []]]))
+
+		expect(tracks.map(entry => [entry.id, entry.lang, entry.smiClass])).toEqual([
+			["s:smi", "en", undefined],
+			["s:smi:KRCC", "ko", "KRCC"]
+		])
+
+		const [first, second] = tracks
+
+		if (first === undefined || second === undefined) {
+			throw new Error("no SAMI class tracks")
+		}
+
+		const english = await reader.subtitle(first, null)
+		const korean = await reader.subtitle(second, null)
+
+		expect(english.status === "ok" ? english.cues.texts : []).toEqual(["Hello"])
+		expect(korean.status === "ok" ? korean.cues.texts : []).toEqual(["안녕"])
+		expect(mocks.download).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps a nameless SAMI class apart from the first class", async () => {
+		const smiFile = { stableUuid: "smi4", uuid: "smi4-u", name: "d.smi", size: 200 }
+		const part = {
+			file: { stableUuid: "v", uuid: "v-u", name: "a.mkv", size: 1 },
+			container: "mkv",
+			unsupported: false,
+			height: 1080,
+			subtitles: [{ file: smiFile, format: "smi" as const, language: null, forced: false, sdh: false, isDefault: false, title: "" }],
+			nfo: null,
+			thumb: null,
+			edl: null
+		}
+		const reader = new SidecarReader()
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "smi4-u", size: 200n }])
+		mocks.download.mockResolvedValue(
+			new TextEncoder().encode("<SAMI><BODY><SYNC Start=1000><P Class=KRCC>안녕\n<SYNC Start=2000><P>Hello\n</BODY></SAMI>")
+		)
+
+		const classes = await reader.smiClasses(smiFile, null)
+
+		expect(classes?.map(entry => entry.className)).toEqual(["KRCC", ""])
+
+		const tracks = subtitleTracksOf(part, null, new Map([["smi4-u", classes ?? []]]))
+		const [first, second] = tracks
+
+		if (first === undefined || second === undefined) {
+			throw new Error("no SAMI class tracks")
+		}
+
+		expect(second.smiClass).toBe("")
+		expect(new Set(tracks.map(entry => entry.title)).size).toBe(2)
+
+		// Read in both orders: neither class's cached cues answer for the other.
+		const named = await reader.subtitle(first, null)
+		const nameless = await reader.subtitle(second, null)
+
+		expect(named.status === "ok" ? named.cues.texts : []).toEqual(["안녕"])
+		expect(nameless.status === "ok" ? nameless.cues.texts : []).toEqual(["Hello"])
+
+		const otherOrder = new SidecarReader()
+
+		expect((await otherOrder.subtitle(second, null)).status === "ok").toBe(true)
+
+		const namedAfter = await otherOrder.subtitle(first, null)
+
+		expect(namedAfter.status === "ok" ? namedAfter.cues.texts : []).toEqual(["안녕"])
+		expect(mocks.download).toHaveBeenCalledTimes(2)
+	})
+
+	it("tells a failed SAMI read from a file without classes, and reads it again after a failure", async () => {
+		const smiFile = { stableUuid: "smi2", uuid: "smi2-u", name: "b.smi", size: 400 }
+		const reader = new SidecarReader()
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "smi2-u", size: 400n }])
+		mocks.download.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(new TextEncoder().encode(SMI))
+
+		expect(await reader.smiClasses(smiFile, null)).toBeNull()
+		expect(await reader.smiClasses(smiFile, null)).toEqual([
+			{ className: "ENCC", lang: "en" },
+			{ className: "KRCC", lang: "ko" }
+		])
+		expect(mocks.download).toHaveBeenCalledTimes(2)
+
+		const large = { stableUuid: "smi3", uuid: "smi3-u", name: "c.smi", size: 400 }
+
+		mocks.playableFiles.mockResolvedValue([{ uuid: "smi3-u", size: 9n * 1024n * 1024n }])
+		expect(await reader.smiClasses(large, null)).toEqual([])
 	})
 
 	it("refuses by the file's size on the drive now, not the indexed one", async () => {
@@ -422,6 +592,37 @@ describe("prewarm", () => {
 		expect(source.presetId).toBe(id)
 		cancelPrewarm()
 		expect(mocks.release).not.toHaveBeenCalled()
+	})
+
+	it("releases a direct registration when the ladder remuxes that file instead", () => {
+		prewarmPlayback({ file: FILE as never, name: "next.mp4", probe: probeOf("mp4"), idrOnlyStart: false })
+
+		const id = mocks.register.mock.calls.at(-1)?.[3]
+		const source = remuxSource(FILE as never)
+
+		expect(source.warmKey).toBeUndefined()
+		expect(mocks.release).toHaveBeenCalledExactlyOnceWith(id)
+	})
+
+	it("lets a remux warm go when that file is played directly instead", async () => {
+		prewarmPlayback({ file: FILE as never, name: "next.mkv", probe: probeOf("mkv"), idrOnlyStart: false })
+
+		const source = directSource({ file: FILE as never, name: "next.mkv", contentType: "video/webm" })
+
+		expect(source.presetId).toBeUndefined()
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(mocks.cancel).toHaveBeenCalledTimes(1)
+		expect(mocks.warmCancel).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps a warm of another file when a session opens", () => {
+		prewarmPlayback({ file: FILE as never, name: "next.mp4", probe: probeOf("mp4"), idrOnlyStart: false })
+		remuxSource({ uuid: "other-u", size: 10n } as never)
+
+		expect(mocks.release).not.toHaveBeenCalled()
+		cancelPrewarm()
+		// What the watch screen's unmount does: a registration kept for the item it was advancing to goes too.
+		expect(mocks.release).toHaveBeenCalledTimes(1)
 	})
 
 	it("streams a public link's file through the anon registration, never taking a prewarmed one", async () => {

@@ -35,19 +35,17 @@ export interface NoteEditorController {
 	// The frozen mount seed (inflight-first). The editor freezes this at mount; consume it keyed on
 	// `remountKey` so a re-render can never re-paste it into a live editor and revert typed text.
 	seed: string
-	// note.uuid + dataUpdatedAt — the editor's remount key. Cannot advance mid-edit (the content query
+	// note.uuid + dataUpdatedAt + reseeds — the editor's remount key. Cannot advance mid-edit (the content query
 	// is disabled for the whole editing session), so a keyed editor never remounts and wipes the cursor
 	// mid-session.
 	remountKey: string
 	readOnly: boolean
-	isInflight: boolean
 	// True once a change pushed the content past MAX_NOTE_SIZE — the over-cap change was NOT enqueued.
 	sizeReached: boolean
 	onChange: (value: string) => void
 }
 
-// The shared editing controller for every note-type editor (text/code/md here; rich/checklist reuse it
-// next). It never calls the SDK: onChange writes to the fault-tolerant outbox (sync.enqueue), the only
+// The shared editing controller for every note-type editor (text, code, md, rich and checklist). It never calls the SDK: onChange writes to the fault-tolerant outbox (sync.enqueue), the only
 // thing that pushes. Derivations are the pure functions in useNoteEditor.logic.ts (unit-tested); this
 // hook only wires them to the live query + outbox store. A faithful port of mobile's content/index.tsx
 // editor coordination (editorSeed, sessionBaseHashRef, the read-only/size enqueue guards).
@@ -177,5 +175,5 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 		})
 	}
 
-	return { status, errorDto, seed, remountKey, readOnly, isInflight, sizeReached, onChange }
+	return { status, errorDto, seed, remountKey, readOnly, sizeReached, onChange }
 }

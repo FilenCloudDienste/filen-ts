@@ -1,6 +1,6 @@
 import type { Chat, ChatParticipant, Contact } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { chatsQueryUpsert } from "@/features/chats/queries/chats"
+import { chatsQueryMerge } from "@/features/chats/queries/chats"
 import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome }
@@ -36,7 +36,7 @@ export async function addChatParticipants(chat: Chat, contacts: readonly Contact
 		updated = outcome.item
 	}
 
-	chatsQueryUpsert(updated)
+	chatsQueryMerge(updated, current => ({ ...current, participants: updated.participants }))
 
 	return { status: "success", item: updated }
 }
@@ -51,7 +51,7 @@ export async function removeChatParticipant(chat: Chat, participant: ChatPartici
 	const outcome = await attemptOp(sdkApi.removeChatParticipant(chat, participant.userId))
 
 	if (outcome.status === "success") {
-		chatsQueryUpsert(outcome.item)
+		chatsQueryMerge(outcome.item, current => ({ ...current, participants: outcome.item.participants }))
 	}
 
 	return outcome

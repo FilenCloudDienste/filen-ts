@@ -1,4 +1,12 @@
-import { listRest, OUTSIDE_DATES_ITEMS } from "@filen/shared/assistant"
+import {
+	joinNotes,
+	listRest,
+	OUTSIDE_DATES_ITEMS,
+	PHOTOS_ITEMS,
+	RECENT_ITEMS,
+	recentsReachNote,
+	unknownSizesNote
+} from "@filen/shared/assistant"
 import { storageSummary } from "@filen/shared"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, ACCOUNT_STALE_TIME, fetchAccount } from "@/queries/account"
@@ -21,16 +29,11 @@ import { dateSelection, datesField, emptyDatesNote, selects } from "@/features/a
 import {
 	directorySizes,
 	inDriveSelection,
-	joinNotes,
 	listingFields,
 	matchesKind,
 	sortListing,
-	unknownSizesNote,
 	type ListingSort
 } from "@/features/assistant/tools/drive"
-
-const RECENT_LIMIT = 20
-const PHOTOS_LIMIT = 30
 
 // The Recents screen's own listing and query. Its rows carry no location, so a path comes from the My Drive
 // listings already cached, when they hold the item's ancestors.
@@ -51,7 +54,7 @@ export const recentItemsTool: ToolAdapter = async (input, scope) => {
 	throwIfStopped(scope)
 
 	const items = sortListing(kept, sort, selection.field, sizes.sizes)
-	const shown = items.slice(0, RECENT_LIMIT)
+	const shown = items.slice(0, RECENT_ITEMS)
 	// The latest files, when the dates left none (OUTSIDE_DATES_ITEMS).
 	const newest =
 		selection.range !== null && items.length === 0 && sort === "newest"
@@ -71,7 +74,7 @@ export const recentItemsTool: ToolAdapter = async (input, scope) => {
 	const oldest = recents.reduce((min, item) => Math.min(min, Number(item.data.timestamp)), Infinity)
 	const reach =
 		selection.bounds !== null && recents.length > 0 && selection.bounds.start < oldest
-			? { note: `Recents reaches back to uploads of ${isoDate(oldest)}; a file uploaded earlier would not be listed here.` }
+			? { note: recentsReachNote(isoDate(oldest)) }
 			: {}
 
 	const row = (item: (typeof recents)[number]) => {
@@ -90,7 +93,7 @@ export const recentItemsTool: ToolAdapter = async (input, scope) => {
 		value: {
 			items: shown.map(row),
 			...(newest.length === 0 ? {} : { newest: newest.map(row) }),
-			...listRest(items.length, RECENT_LIMIT),
+			...listRest(items.length, RECENT_ITEMS),
 			...datesField(selection),
 			...joinNotes(emptyDatesNote(selection, items.length, ofKind.length), reach, unknownSizesNote(sizes.unknown))
 		}
@@ -124,12 +127,12 @@ export const listPhotosTool: ToolAdapter = async (input, scope) => {
 
 	return {
 		value: {
-			photos: ordered.slice(0, PHOTOS_LIMIT).map(photo => ({
+			photos: ordered.slice(0, PHOTOS_ITEMS).map(photo => ({
 				handle: showDrive(scope, photo, undefined),
 				name: driveName(photo),
 				taken: isoDate(captureTimestamp(photo))
 			})),
-			...listRest(ordered.length, PHOTOS_LIMIT),
+			...listRest(ordered.length, PHOTOS_ITEMS),
 			...datesField(selection),
 			...emptyDatesNote(selection, kept.length, ofKind.length)
 		}

@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { DELETE_ALL_VERSIONS_PHRASE } from "@/features/settings/lib/dangerPhrases"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { TypedDeleteRow } from "@/features/settings/components/account/typedDeleteRow"
 
@@ -16,6 +15,8 @@ interface DeleteAllVersionsRowProps {
 function DeleteAllVersionsRow({ accountQuery }: DeleteAllVersionsRowProps) {
 	const { t } = useTranslation("settings")
 	const { versionedFiles, versionedStorage } = accountQuery.data
+	// Resolved once for both the body and the match, so the phrase shown is the phrase compared.
+	const phrase = t("settingsDeleteAllVersionsTypedConfirmPhrase")
 
 	return (
 		<TypedDeleteRow
@@ -25,8 +26,8 @@ function DeleteAllVersionsRow({ accountQuery }: DeleteAllVersionsRowProps) {
 				size: formatBytes(Number(versionedStorage))
 			})}
 			submitLabel={t("settingsDeleteAllVersionsSubmit")}
-			confirmBody={t("settingsDeleteAllVersionsConfirmBody", { phrase: DELETE_ALL_VERSIONS_PHRASE })}
-			phrase={DELETE_ALL_VERSIONS_PHRASE}
+			confirmBody={t("settingsDeleteAllVersionsConfirmBody", { phrase })}
+			phrase={phrase}
 			successMessage={t("settingsDeleteAllVersionsSuccess")}
 			run={() => sdkApi.deleteAllVersions()}
 			onDeleted={() => {

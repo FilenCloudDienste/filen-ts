@@ -1,4 +1,5 @@
 import {
+	assBlockText,
 	normalizeCueText,
 	type CueTextMode,
 	BLOCK_BYTES,
@@ -89,24 +90,6 @@ const TEXT_MODES: ReadonlyMap<string, CueTextMode> = new Map<string, CueTextMode
 
 export function isTapTextCodec(codecId: string): boolean {
 	return TEXT_MODES.has(codecId)
-}
-
-// An ASS/SSA block is "ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text": the text is what follows
-// the eighth comma.
-export function assBlockText(line: string): string {
-	let at = 0
-
-	for (let commas = 0; commas < 8; commas++) {
-		const next = line.indexOf(",", at)
-
-		if (next === -1) {
-			return line
-		}
-
-		at = next + 1
-	}
-
-	return line.slice(at)
 }
 
 interface Cursor {

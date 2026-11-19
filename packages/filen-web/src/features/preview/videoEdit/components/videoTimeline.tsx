@@ -6,6 +6,7 @@ import { edgeBounds, MIN_KEEP_SECONDS, removedRanges, type KeepEdge } from "@/fe
 import {
 	filmstripBudget,
 	filmstripSlots,
+	keyframeAtOrBefore,
 	formatTimecode,
 	pinchFactor,
 	panView,
@@ -52,6 +53,8 @@ export interface VideoTimelineProps {
 	playback: EditorPlayback
 	duration: number
 	fps: number
+	// The source's keyframe times: the filmstrip shows and caches one tile per keyframe.
+	keyframes: Float64Array
 	keep: readonly TimeRange[]
 	view: TimelineView
 	selection: TimeRange | null
@@ -141,7 +144,7 @@ export function VideoTimeline(props: VideoTimelineProps) {
 	const press = useRef<TrackPress | null>(null)
 	const pointers = useRef(new Map<number, { x: number }>())
 	const pinch = useRef<Pinch | null>(null)
-	const { view, duration, client, onLoupeCanvas } = props
+	const { view, duration, client, keyframes, onLoupeCanvas } = props
 	const span = viewSpan(view)
 
 	// The track's width, the one layout figure everything here is drawn against.
@@ -206,8 +209,10 @@ export function VideoTimeline(props: VideoTimelineProps) {
 		return props.playback.subscribe(move)
 	}, [props.playback, view, width])
 
-	// The filmstrip: tiles from the cache drawn at once, the missing ones fetched once the view settles. A view that
-	// moved on meanwhile still keeps what came back (the cache), drawing only the current slots.
+	// The filmstrip: each slot shows its keyframe's tile (a slot between keyframes shows the one before it), drawn from
+	// the cache at once; the keyframes missing are fetched once the view settles, and asked again for what an answer
+	// left out (a batch is capped) until one adds nothing. A view that moved on meanwhile still keeps what came back
+	// (the cache), drawing only the current slots.
 	useEffect(() => {
 		const canvas = filmstripRef.current
 
@@ -217,6 +222,9 @@ export function VideoTimeline(props: VideoTimelineProps) {
 
 		const ratio = window.devicePixelRatio
 		const slots = filmstripSlots(view, width, TILE_WIDTH, duration)
+		// Without a keyframe list a slot asks for its own time (the worker answers what it can), and nothing is asked again.
+		const keyed = keyframes.length > 0
+		const tiles = slots.times.map(time => ({ time, key: keyed ? (keyframeAtOrBefore(keyframes, time) ?? time) : time }))
 		let alive = true
 
 		const draw = (): void => {
@@ -231,11 +239,11 @@ export function VideoTimeline(props: VideoTimelineProps) {
 			context.fillStyle = "rgb(255 255 255 / 0.06)"
 			context.fillRect(0, 0, canvas.width, canvas.height)
 
-			for (const time of slots.times) {
-				const start = time - slots.step / 2
+			for (const tile of tiles) {
+				const start = tile.time - slots.step / 2
 				const x = timeToX(view, width, start) * ratio
 				const tileWidth = (slots.step / viewSpan(view)) * width * ratio
-				const bitmap = cache.get(ThumbnailCache.key(slots.step, time))
+				const bitmap = cache.get(ThumbnailCache.key(tile.key))
 
 				if (bitmap === undefined || bitmap.width === 0) {
 					continue
@@ -252,7 +260,7 @@ export function VideoTimeline(props: VideoTimelineProps) {
 
 		draw()
 
-		const missing = slots.times.filter(time => !cache.has(ThumbnailCache.key(slots.step, time)))
+		const missing = [...new Set(tiles.map(tile => tile.key))].filter(key => !cache.has(ThumbnailCache.key(key)))
 
 		// Nothing is asked while an export holds the decoder (iOS); the next view change asks again.
 		if (missing.length === 0 || props.decodingSuspended) {
@@ -261,28 +269,46 @@ export function VideoTimeline(props: VideoTimelineProps) {
 			}
 		}
 
-		const timer = window.setTimeout(() => {
-			client.filmstrip(missing, Math.round(FILMSTRIP_HEIGHT * ratio)).then(
-				tiles => {
-					for (const tile of tiles) {
-						cache.set(ThumbnailCache.key(slots.step, tile.time), tile.bitmap)
+		const height = Math.round(FILMSTRIP_HEIGHT * ratio)
+		// Asks for `wanted`, then for what the answer left out while it still adds something: a superseded or suspended
+		// batch answers short or empty, and a keyframe that never decodes is never answered, so this always ends.
+		const ask = (wanted: readonly number[]): void => {
+			client.filmstrip(wanted, height).then(
+				answered => {
+					const got = new Set<number>()
+
+					for (const tile of answered) {
+						cache.set(ThumbnailCache.key(tile.time), tile.bitmap)
+						got.add(tile.time)
 					}
 
-					if (alive) {
-						draw()
+					if (!alive) {
+						return
+					}
+
+					draw()
+
+					const rest = wanted.filter(key => !got.has(key))
+
+					if (keyed && got.size > 0 && rest.length > 0) {
+						ask(rest)
 					}
 				},
 				(error: unknown) => {
-					log.warn("[videoEditor] filmstrip failed", error)
+					log.warn("video-edit", "the filmstrip failed", error)
 				}
 			)
+		}
+
+		const timer = window.setTimeout(() => {
+			ask(missing)
 		}, FETCH_DELAY_MS)
 
 		return () => {
 			alive = false
 			window.clearTimeout(timer)
 		}
-	}, [client, cache, view, width, duration, props.decodingSuspended])
+	}, [client, cache, view, width, duration, keyframes, props.decodingSuspended])
 
 	// The waveform: peaks for the visible window from what is already fetched, redrawn as more arrives.
 	useEffect(() => {

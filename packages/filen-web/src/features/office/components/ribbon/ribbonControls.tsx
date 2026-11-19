@@ -15,6 +15,7 @@ export function RibbonButton({
 	text,
 	disabled,
 	pressed,
+	active,
 	shortcut,
 	onClick
 }: {
@@ -24,6 +25,8 @@ export function RibbonButton({
 	text?: string | undefined
 	disabled?: boolean | undefined
 	pressed?: boolean | undefined
+	// Drawn as pressed without aria-pressed: for a toggle whose label already says what a press does (Show / Hide).
+	active?: boolean | undefined
 	shortcut?: ReactNode
 	onClick: () => void
 }) {
@@ -37,7 +40,11 @@ export function RibbonButton({
 						aria-label={label}
 						aria-pressed={pressed}
 						disabled={disabled}
-						className={cn("shrink-0", text !== undefined && "gap-1 px-2", pressed === true && "bg-accent text-foreground")}
+						className={cn(
+							"shrink-0",
+							text !== undefined && "gap-1 px-2",
+							(pressed === true || active === true) && "bg-accent text-foreground"
+						)}
 						onMouseDown={keepFocus}
 						onClick={onClick}
 					>

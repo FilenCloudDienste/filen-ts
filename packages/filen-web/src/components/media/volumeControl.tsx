@@ -24,8 +24,8 @@ export function VolumeControl({ className, sliderClassName }: { className?: stri
 			<Button
 				variant="ghost"
 				size="icon-sm"
+				// The flipping label carries the state; aria-pressed on top would announce "Unmute, pressed".
 				aria-label={muted ? t("unmute") : t("mute")}
-				aria-pressed={muted}
 				onClick={toggleMediaMuted}
 			>
 				{level === 0 ? <VolumeXIcon /> : level < 0.5 ? <Volume1Icon /> : <Volume2Icon />}

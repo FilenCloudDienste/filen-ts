@@ -3,7 +3,7 @@ import { flushSync } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { HistoryIcon } from "lucide-react"
 import { toast } from "sonner"
-import { CellFlag, type SheetId, type SheetLayout, type SheetRange } from "@filen/office/core/sheet"
+import { CellFlag, type SheetId, type SheetLayout, type SheetRange, type SheetSummary } from "@filen/office/core/sheet"
 import { cellsEditable, celllessSheet, type SheetGridHandle, type SheetGridModel, type SheetGridState } from "@filen/office/react/sheet"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -53,6 +53,21 @@ function shownLayout(model: SheetGridModel, sheet: SheetId): Promise<SheetLayout
 	})
 }
 
+// The names the box's list offers, worked out once per answer from the session and per shown sheet (not per key typed).
+interface OfferedNames {
+	readonly names: NameBoxDefinedNames
+	readonly sheet: SheetId
+	readonly sheets: readonly SheetSummary[]
+	readonly list: readonly string[]
+	readonly listed: ReadonlySet<string>
+}
+
+function offeredNames(names: NameBoxDefinedNames, sheet: SheetId, sheets: readonly SheetSummary[]): OfferedNames {
+	const list = nameBoxNames(sheet, sheets, names)
+
+	return { names, sheet, sheets, list, listed: new Set(list) }
+}
+
 // The name box: the active cell's name, the workbook's names in its list, and where to go when one is typed (a cell,
 // a range, whole rows or columns, on this sheet or another, or a defined name). A sheet without cells (a chartsheet)
 // has neither: the box is empty and disabled.
@@ -65,9 +80,16 @@ function NameBox({ grid, gridRef }: { grid: SheetGridState; gridRef: RefObject<S
 	// What is typed while the box has focus; null shows the selection.
 	const [typed, setTyped] = useState<string | null>(null)
 	// The workbook's names, asked for as the box takes focus (an edit elsewhere may have changed them).
-	const [names, setNames] = useState<NameBoxDefinedNames | null>(null)
+	const [offered, setOffered] = useState<OfferedNames | null>(null)
 	const asked = useRef<Promise<NameBoxDefinedNames> | null>(null)
-	const listed = typed === null || names === null ? [] : nameBoxNames(grid.sheet, grid.sheets, names)
+
+	// Another sheet shown (or the sheets changed) while the box has focus: its names, worked out again from the answer
+	// held. A blurred box holds no list, so sheet switches and sheets parsing cost nothing.
+	if (typed !== null && offered !== null && (offered.sheet !== grid.sheet || offered.sheets !== grid.sheets)) {
+		setOffered(offeredNames(offered.names, grid.sheet, grid.sheets))
+	}
+
+	const listed = typed === null || offered === null ? [] : offered.list
 
 	function askNames(): Promise<NameBoxDefinedNames> {
 		const pending = model.session.query("names.list", {}).catch(() => [])
@@ -75,7 +97,9 @@ function NameBox({ grid, gridRef }: { grid: SheetGridState; gridRef: RefObject<S
 		asked.current = pending
 		void pending.then(found => {
 			if (asked.current === pending) {
-				setNames(found)
+				const { sheet, sheets } = model.getSnapshot()
+
+				setOffered(offeredNames(found, sheet, sheets))
 			}
 		})
 
@@ -158,7 +182,12 @@ function NameBox({ grid, gridRef }: { grid: SheetGridState; gridRef: RefObject<S
 					const native = event.nativeEvent
 
 					// A name picked from the list goes there at once, as in Excel's Name Box.
-					if (native instanceof InputEvent && native.inputType === "insertReplacementText" && listed.includes(value)) {
+					if (
+						native instanceof InputEvent &&
+						native.inputType === "insertReplacementText" &&
+						typed !== null &&
+						offered?.listed.has(value) === true
+					) {
 						go(value)
 
 						return
@@ -168,6 +197,9 @@ function NameBox({ grid, gridRef }: { grid: SheetGridState; gridRef: RefObject<S
 				}}
 				onBlur={() => {
 					setTyped(null)
+					// Focus asks again; an answer still on its way is dropped.
+					setOffered(null)
+					asked.current = null
 				}}
 				onKeyDown={event => {
 					if (isImeKeydown(event.nativeEvent)) {
@@ -336,12 +368,14 @@ export function SheetFormulaBar({
 					/>
 				</div>
 			) : (
-				<span
+				// An output names its contents (a span may not carry a name); not a live region: the grid says where it is.
+				<output
 					aria-label={t("previewSpreadsheetCellContents")}
+					aria-live="off"
 					className="min-w-0 flex-1 truncate font-mono text-xs"
 				>
 					{active.input}
-				</span>
+				</output>
 			)}
 			{cached ? (
 				<Tooltip>

@@ -2,6 +2,7 @@ import {
 	DOT_FILEN_SUBDIRS,
 	KeyedSemaphores,
 	driveItemName,
+	isDotFilenSubdirName,
 	parsePlaylist,
 	type Playlist,
 	type PlaylistFile,
@@ -22,6 +23,7 @@ import {
 	findDotFilenSubdir,
 	forgetDotFilenSubdir,
 	getDotFilenSubdir,
+	knownDotFilenUuid,
 	noteDotFilenFile,
 	onDotFilenSubdirForgotten
 } from "@/lib/dotFilen"
@@ -103,12 +105,77 @@ function safeJsonParse(bytes: Uint8Array): unknown {
 // Dead-track existence checks + the resulting cleanup persist run AT MOST ONCE per playlist per tab
 // session — mirrors mobile's playlistCleanupDone discipline. A page reload (which a full sign-out
 // already forces — see performLogout) is what resets this, same as every other module-level session
-// cache in this feature (the audio store's own prefs-load memo, the engine's output-prefs memo).
+// cache in this feature (the audio store's own prefs-load memo, the engine's output-prefs memo). A
+// playlist joins only once its checks completed; `pruning` holds the ones whose checks are still out.
 const prunedThisSession = new Set<string>()
+const pruning = new Set<string>()
 
-// One read's existence checks by track uuid, so a track shared by several playlists (or listed twice in
-// one) costs one getFile. Scoped to the read rather than the session: a later read checking a newly
-// seen playlist asks afresh instead of trusting an answer that may have gone stale.
+// The dead tracks each checked playlist held, by playlist uuid, so a later read of a copy that still
+// lists them (the cleanup upload failed, or a listing raced it) shows it pruned without asking again. A
+// uuid leaves once a read sees a copy without it, or once it is added again (addedDuringPass covers an
+// add while the checks are out): a track added back later is not dropped by a stale set.
+const deadByPlaylist = new Map<string, Set<string>>()
+const addedDuringPass = new Map<string, Set<string>>()
+
+function forgetDead(playlistUuid: string, trackUuids: readonly string[]): void {
+	const dead = deadByPlaylist.get(playlistUuid)
+
+	if (dead !== undefined) {
+		for (const uuid of trackUuids) {
+			dead.delete(uuid)
+		}
+
+		if (dead.size === 0) {
+			deadByPlaylist.delete(playlistUuid)
+		}
+	}
+
+	if (pruning.has(playlistUuid)) {
+		const added = addedDuringPass.get(playlistUuid) ?? new Set<string>()
+
+		for (const uuid of trackUuids) {
+			added.add(uuid)
+		}
+
+		addedDuringPass.set(playlistUuid, added)
+	}
+}
+
+// A filled cache without the playlist's row means it was deleted (here, or elsewhere and re-read) since it
+// was checked: its cleanup must not upload it back.
+function deletedSinceChecked(uuid: string): boolean {
+	const entries = playlistsQueryGet()
+
+	return entries !== undefined && !entries.some(entry => entry.status === "ok" && entry.playlist.uuid === uuid)
+}
+
+function withoutKnownDead(playlist: Playlist): Playlist {
+	const dead = deadByPlaylist.get(playlist.uuid)
+
+	if (dead === undefined) {
+		return playlist
+	}
+
+	const listed = new Set(playlist.files.map(file => file.uuid))
+
+	for (const uuid of dead) {
+		if (!listed.has(uuid)) {
+			dead.delete(uuid)
+		}
+	}
+
+	if (dead.size === 0) {
+		deadByPlaylist.delete(playlist.uuid)
+
+		return playlist
+	}
+
+	return pruneDeadTracksPure(playlist, dead) ?? playlist
+}
+
+// One pass's existence checks by track uuid, so a track shared by several playlists (or listed twice in
+// one) costs one getFile. Scoped to the read that started the pass rather than the session: a later
+// read checking a newly seen playlist asks afresh instead of trusting an answer that may have gone stale.
 type TrackExistence = Map<string, Promise<boolean>>
 
 function trackIsDead(uuid: string, existence: TrackExistence): Promise<boolean> {
@@ -131,39 +198,82 @@ function trackIsDead(uuid: string, existence: TrackExistence): Promise<boolean> 
 	return check
 }
 
-async function pruneDeadTracksOnce(playlist: Playlist, existence: TrackExistence): Promise<Playlist> {
-	if (prunedThisSession.has(playlist.uuid) || playlist.files.length === 0) {
-		return playlist
-	}
+async function prunePass(playlist: Playlist, existence: TrackExistence): Promise<void> {
+	try {
+		const dead = await Promise.all(playlist.files.map(file => trackIsDead(file.uuid, existence)))
+		const added = addedDuringPass.get(playlist.uuid)
+		const deadUuids = new Set(
+			playlist.files.filter((file, index) => dead[index] === true && added?.has(file.uuid) !== true).map(file => file.uuid)
+		)
 
-	prunedThisSession.add(playlist.uuid)
+		prunedThisSession.add(playlist.uuid)
 
-	const dead = await Promise.all(playlist.files.map(file => trackIsDead(file.uuid, existence)))
-	const deadUuids = new Set(playlist.files.filter((_file, index) => dead[index] === true).map(file => file.uuid))
-	const cleaned = pruneDeadTracksPure(playlist, deadUuids)
+		if (deadUuids.size === 0) {
+			return
+		}
 
-	if (cleaned === null) {
-		return playlist
-	}
+		deadByPlaylist.set(playlist.uuid, deadUuids)
 
-	// Fire-and-forget persist through the write-lock, recomposed against the freshest copy — a
-	// concurrent user edit landing in the same tick is never clobbered by this cleanup. The cache is not
-	// patched: the read running this prune returns `cleaned` for the row itself, and a patch landing
-	// mid-read would cancel that read and start another full one. A cached copy older than the one just
-	// downloaded (restored from a previous session) is not a base to write back over it.
-	void mutatePlaylist(
-		playlist.uuid,
-		playlist,
-		current => pruneDeadTracksPure(current.updated > playlist.updated ? current : playlist, deadUuids),
-		{ patchCache: false }
-	).catch((error: unknown) => {
+		// Through the write-lock, recomposed against the freshest copy — a concurrent user edit is never
+		// clobbered by this cleanup. A cached copy older than the one checked (restored from a previous
+		// session) is not a base to write back over it. The dead set is read under the lock, so a track
+		// added back while this waited stays. The listed row is patched before the upload, so a failed
+		// cleanup upload still leaves the dead tracks out of the list; an unfilled cache is left alone.
+		await mutatePlaylist(
+			playlist.uuid,
+			playlist,
+			current => {
+				const stillDead = deadByPlaylist.get(playlist.uuid)
+
+				if (stillDead === undefined || deletedSinceChecked(playlist.uuid)) {
+					return null
+				}
+
+				const next = pruneDeadTracksPure(current.updated > playlist.updated ? current : playlist, stillDead)
+
+				if (next !== null && playlistsQueryGet() !== undefined) {
+					playlistsQueryUpsert(next)
+				}
+
+				return next
+			},
+			{ patchCache: false }
+		)
+	} catch (error) {
 		log.warn("audio", "playlist dead-track cleanup persist failed", { uuid: playlist.uuid, error })
-	})
-
-	return cleaned
+	} finally {
+		pruning.delete(playlist.uuid)
+		addedDuringPass.delete(playlist.uuid)
+	}
 }
 
-async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence, nextParsed: Map<string, Playlist>): Promise<PlaylistEntry> {
+// The list never waits on the checks (one getFile per track). They start a task after the read returned,
+// once its rows are in the cache, so the cleanup's cache patch neither cancels that read nor finds an
+// unfilled cache to collapse to one row.
+function startPrunePasses(playlists: Playlist[]): void {
+	const unchecked: Playlist[] = []
+
+	for (const playlist of playlists) {
+		if (playlist.files.length > 0 && !prunedThisSession.has(playlist.uuid) && !pruning.has(playlist.uuid)) {
+			pruning.add(playlist.uuid)
+			unchecked.push(playlist)
+		}
+	}
+
+	if (unchecked.length === 0) {
+		return
+	}
+
+	setTimeout(() => {
+		const existence: TrackExistence = new Map()
+
+		for (const playlist of unchecked) {
+			void prunePass(playlist, existence)
+		}
+	}, 0)
+}
+
+async function readOnePlaylistEntry(file: SdkFile, nextParsed: Map<string, Playlist>): Promise<PlaylistEntry> {
 	const item = narrowItem(file)
 	const base = asDirectoryOrFile(item)
 	const fallbackName = driveItemName(base)
@@ -183,7 +293,7 @@ async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence, ne
 
 		nextParsed.set(base.data.uuid, parsed)
 
-		return { status: "ok", playlist: await pruneDeadTracksOnce(parsed, existence) }
+		return { status: "ok", playlist: withoutKnownDead(parsed) }
 	} catch (error) {
 		// AU-05 parity: an isolated per-playlist read failure never collapses the whole screen — skip
 		// just this row, keep the rest.
@@ -217,11 +327,11 @@ export async function fetchPlaylistEntries(): Promise<PlaylistEntry[]> {
 		noteDotFilenFile(file.uuid)
 	}
 
-	const existence: TrackExistence = new Map()
 	const nextParsed = new Map<string, Playlist>()
-	const entries = await Promise.all(files.map(file => readOnePlaylistEntry(file, existence, nextParsed)))
+	const entries = await Promise.all(files.map(file => readOnePlaylistEntry(file, nextParsed)))
 
 	parsedByFileUuid = nextParsed
+	startPrunePasses([...nextParsed.values()])
 
 	return entries
 }
@@ -231,11 +341,28 @@ export async function fetchPlaylistEntries(): Promise<PlaylistEntry[]> {
 // for a uuid this tab already knows is its own save echoing back (an echo that beats the upload's return
 // still counts, costing a refetch, never a missed change). Every other event counts when it lands a file
 // in the directory or names a known one — version-only deletes and edit-retirements excepted.
+// While no Playlists directory is known (a read found none, which counts as a clean read), one created or
+// restored elsewhere is the only sign its first playlist may follow: a fileNew into it can't be tied to it
+// yet. Under the known `.filen`, or under any parent while `.filen` itself is unknown.
+function isPlaylistsDirectoryArrival(inner: DriveEvent): boolean {
+	if (inner.type !== "folderSubCreated" && inner.type !== "folderRestore") {
+		return false
+	}
+
+	const dotFilenUuid = knownDotFilenUuid()
+
+	return (
+		inner.dir.meta.type === "decoded" &&
+		isDotFilenSubdirName(inner.dir.meta.data.name, PLAYLISTS_DIR_NAME) &&
+		(dotFilenUuid === null || inner.dir.parent === dotFilenUuid)
+	)
+}
+
 export function isPlaylistsDriveEvent(inner: DriveEvent): boolean {
 	const playlistsDirUuid = dotFilenSubdirUuid(PLAYLISTS_DIR_NAME)
 
 	if (playlistsDirUuid === null) {
-		return false
+		return isPlaylistsDirectoryArrival(inner)
 	}
 
 	switch (inner.type) {
@@ -339,6 +466,12 @@ export function addTracksToPlaylistAction(playlist: Playlist, items: DriveItem[]
 	let added = 0
 
 	return mutatePlaylist(playlist.uuid, playlist, current => {
+		// Picked again, so live: a set from an earlier check must not prune it.
+		forgetDead(
+			playlist.uuid,
+			candidates.map(file => file.uuid)
+		)
+
 		const result = addTracksPure(current, candidates, Date.now())
 
 		added = result.added
@@ -384,6 +517,7 @@ export async function deletePlaylistAction(playlist: Playlist): Promise<void> {
 		}
 
 		playlistsQueryRemove(playlist.uuid)
+		deadByPlaylist.delete(playlist.uuid)
 	} finally {
 		release()
 	}

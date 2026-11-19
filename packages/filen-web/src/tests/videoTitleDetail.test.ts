@@ -3,6 +3,7 @@ import type { DirsAndFiles } from "@filen/sdk-rs"
 import {
 	activeLibraryOverrides,
 	emptyLibraryConfig,
+	newSeriesId,
 	selectSeriesPrimaryAction,
 	rawLibraryOverride,
 	splitOverrideKey,
@@ -29,19 +30,25 @@ import {
 import {
 	NEW_SERIES,
 	canSplit,
+	destinationOf,
 	draftErrors,
 	draftFor,
+	episodeSubject,
+	hasCorrection,
 	hideEdit,
 	mergeEdit,
 	overrideFromDraft,
+	resetEdit,
 	sameOverride,
 	splitEdit,
+	titleSubject,
 	unhideEdit,
 	type CorrectionSubject
 } from "@/features/videos/lib/corrections.logic"
 import { buildVideoHomeIndex } from "@/features/videos/lib/titleWatch.logic"
 import { VideoIndexEngine, type SnapshotStore } from "@/workers/videoIndex/engine"
 import type {
+	VideoEpisodeView,
 	VideoExtraView,
 	VideoHomeItem,
 	VideoPartView,
@@ -380,10 +387,10 @@ describe("manual corrections", () => {
 	it("requires a season and episode number (and an end not before it) to show something as an episode", () => {
 		const draft = { ...draftFor(movie, null), kind: "episode" as const }
 
-		expect(draftErrors(draft)).toEqual(["season", "episode"])
-		expect(draftErrors({ ...draft, season: "1", episode: "0" })).toEqual(["episode"])
-		expect(draftErrors({ ...draft, season: "1", episode: "4", episodeEnd: "3" })).toEqual(["episode"])
-		expect(draftErrors({ ...draftFor(movie, null), year: "12" })).toEqual(["year"])
+		expect(draftErrors(movie, draft)).toEqual(["season", "episode"])
+		expect(draftErrors(movie, { ...draft, season: "1", episode: "0" })).toEqual(["episode"])
+		expect(draftErrors(movie, { ...draft, season: "1", episode: "4", episodeEnd: "3" })).toEqual(["episode"])
+		expect(draftErrors(movie, { ...draftFor(movie, null), year: "12" })).toEqual(["year"])
 		expect(
 			overrideFromDraft({ subject: movie, draft: { ...draft, season: "2", episode: "5", series: NEW_SERIES }, raw: null })
 		).toEqual({
@@ -404,6 +411,107 @@ describe("manual corrections", () => {
 			episodeEnd: 6,
 			mergeInto: "d:show"
 		})
+	})
+
+	it("checks the year only where the dialog shows it (a movie's or a series')", () => {
+		const draft = { ...draftFor(movie, null), year: "19" }
+
+		expect(draftErrors(movie, draft)).toEqual(["year"])
+		expect(draftErrors(movie, { ...draft, kind: "episode", season: "1", episode: "2" })).toEqual([])
+		expect(draftErrors(movie, { ...draft, kind: "other" })).toEqual([])
+		expect(draftErrors(series, { ...draftFor(series, null), year: "19" })).toEqual(["year"])
+		expect(draftErrors(movie, { ...draft, year: "", title: "  " })).toEqual(["title"])
+	})
+
+	it("follows a saved item to the title it is shown as now", () => {
+		const draft = draftFor(movie, null)
+
+		expect(destinationOf(series, draftFor(series, null))).toBeNull()
+		expect(destinationOf(movie, draft)).toBe("dir")
+		expect(destinationOf(movie, { ...draft, kind: "other" })).toBe("dir")
+		expect(destinationOf(movie, { ...draft, kind: "episode", series: NEW_SERIES })).toBe(newSeriesId("dir"))
+		expect(destinationOf(movie, { ...draft, kind: "episode", series: "d:show" })).toBe("show")
+		expect(destinationOf(episode, draftFor(episode, null))).toBe("show")
+	})
+
+	it("builds a title's subject from its detail, under its own key unless the index names another", () => {
+		const twoVersions = { kind: "movie" as const, versions: [version("m1"), version("m1-cut")], extras: [], nfo: null }
+
+		// A movie without a directory of its own has one of its files' stable uuids as its id.
+		expect(titleSubject({ ...twoVersions, title: title("m1", { year: 1995 }) })).toEqual({
+			key: "s:m1",
+			original: { ...plain, kind: "movie", title: "m1", year: 1995 },
+			seriesId: "",
+			mergeKey: "",
+			autoMergedRoots: 1
+		})
+		expect(titleSubject({ ...twoVersions, title: title("dir") }).key).toBe("d:dir")
+		expect(titleSubject({ ...twoVersions, title: title("m1"), overrideKey: "d:elsewhere", original: movie.original })).toMatchObject({
+			key: "d:elsewhere",
+			original: movie.original,
+			mergeKey: ""
+		})
+
+		const show = title("show", { kind: "series", title: "Show", year: 2020, mergeKey: "show|2020" })
+		const seriesDetail = { kind: "series" as const, title: show, seasons: [], extras: [], nfo: null }
+
+		expect(titleSubject({ ...seriesDetail, autoMergedRoots: 2 })).toEqual(series)
+		expect(titleSubject(seriesDetail)).toMatchObject({ key: "d:show", seriesId: "show", mergeKey: "show|2020", autoMergedRoots: 1 })
+		expect(titleSubject({ ...seriesDetail, overrideKey: "d:root-b", original: series.original }).key).toBe("d:root-b")
+	})
+
+	it("builds an episode's subject from its first file, and none for an episode without files", () => {
+		const view: VideoEpisodeView = {
+			season: 1,
+			episode: 1,
+			episodeEnd: 1,
+			date: 0,
+			title: "Pilot",
+			dateAdded: 0,
+			versions: [version("ep"), version("ep-hd")]
+		}
+
+		expect(episodeSubject("show", view)).toEqual(episode)
+		expect(episodeSubject("show", { ...view, overrideKey: "s:moved", original: episode.original })).toMatchObject({
+			key: "s:moved",
+			original: episode.original
+		})
+		expect(episodeSubject("show", { ...view, versions: [] })).toBeNull()
+	})
+
+	it("resets a split series completely, and leaves other titles' splits alone", () => {
+		let doc: LibraryConfigDoc = withLibraryOverride({
+			doc: emptyLibraryConfig(),
+			key: series.key,
+			override: { title: "The Show" },
+			stamp: { t: 1, d: "w" },
+			at: 1
+		})
+
+		doc = splitEdit(series)(doc, { t: 2, d: "w" })
+		doc = splitEdit({ seriesId: "other", mergeKey: "other|1999", autoMergedRoots: 2 })(doc, { t: 3, d: "w" })
+
+		expect(hasCorrection(doc, series)).toBe(true)
+		// The split alone is something Reset removes too.
+		expect(hasCorrection(withLibraryOverride({ doc, key: series.key, override: null, stamp: { t: 4, d: "w" }, at: 4 }), series)).toBe(
+			true
+		)
+
+		const reset = resetEdit(series)(doc, { t: 5, d: "w" })
+
+		expect(rawLibraryOverride(reset, series.key)).toBeNull()
+		expect(rawLibraryOverride(reset, splitOverrideKey("show|2020"))).toBeNull()
+		expect(rawLibraryOverride(reset, splitOverrideKey("other|1999"))).toEqual({ split: true })
+		expect(hasCorrection(reset, series)).toBe(false)
+
+		const withMovie = withLibraryOverride({ doc, key: movie.key, override: { title: "Heat!" }, stamp: { t: 6, d: "w" }, at: 6 })
+
+		expect(hasCorrection(withMovie, movie)).toBe(true)
+
+		const movieReset = resetEdit(movie)(withMovie, { t: 7, d: "w" })
+
+		expect(hasCorrection(movieReset, movie)).toBe(false)
+		expect(activeLibraryOverrides(movieReset)).toEqual(activeLibraryOverrides(doc))
 	})
 
 	it("moves an episode to another series, renumbers it as a whole, or makes it a movie", () => {

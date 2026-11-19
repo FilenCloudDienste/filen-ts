@@ -1,8 +1,29 @@
-import type { ComponentProps, ReactNode } from "react"
+import { useId, type ComponentProps, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@filen/shared"
 
 type ButtonProps = ComponentProps<typeof Button>
+
+// A disabled button with a reason stays focusable and hoverable (aria-disabled, which still blocks activation) so
+// its tooltip and accessible description can say why; without one it stays natively disabled and out of the tab order.
+export const EXPLAINED_DISABLED_CLASS = "aria-disabled:cursor-default aria-disabled:opacity-50"
+
+// The sr-only accessible description carrying a disabled button's reason, referenced by its aria-describedby.
+export function DisabledReason(props: { id: string; reason: string | undefined }) {
+	if (props.reason === undefined) {
+		return null
+	}
+
+	return (
+		<span
+			id={props.id}
+			className="sr-only"
+		>
+			{props.reason}
+		</span>
+	)
+}
 
 // An icon-only button whose label is both its accessible name and its tooltip; `shortcut` (a Kbd chip)
 // follows the label in the tooltip. `pressed` stays undefined for a button that is not a toggle.
@@ -14,11 +35,15 @@ export function TooltipIconButton(props: {
 	pressed?: boolean | undefined
 	variant?: ButtonProps["variant"]
 	className?: string | undefined
-	// Why a disabled button is (the tooltip never opens over one).
+	// Why a disabled button is: it replaces the label in the tooltip and becomes the accessible description.
 	title?: string | undefined
 	shortcut?: ReactNode
 	children: ReactNode
 }) {
+	const reasonId = useId()
+	const reason = props.disabled === true ? props.title : undefined
+	const explained = reason !== undefined
+
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -28,18 +53,23 @@ export function TooltipIconButton(props: {
 						size="icon-sm"
 						aria-label={props.label}
 						aria-pressed={props.pressed}
+						aria-describedby={explained ? reasonId : undefined}
 						disabled={props.disabled}
-						className={props.className}
-						title={props.title}
+						focusableWhenDisabled={explained}
+						className={explained ? cn(EXPLAINED_DISABLED_CLASS, props.className) : props.className}
 						onMouseDown={props.onMouseDown}
 						onClick={props.onClick}
 					>
 						{props.children}
+						<DisabledReason
+							id={reasonId}
+							reason={reason}
+						/>
 					</Button>
 				}
 			/>
 			<TooltipContent>
-				{props.label}
+				{reason ?? props.label}
 				{props.shortcut}
 			</TooltipContent>
 		</Tooltip>

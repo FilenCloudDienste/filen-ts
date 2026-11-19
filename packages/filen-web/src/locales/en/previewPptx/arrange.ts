@@ -233,6 +233,6 @@ export const previewPptxArrange = {
 	previewPptxSelectionRename: "Name of {{name}}",
 	/** Selection Pane — the name shown for an object the file gives no name; {{kind}} is what it is, e.g. "Picture 4" */
 	previewPptxSelectionUnnamed: "{{kind}} {{id}}",
-	/** Selection Pane — screen reader announcement after objects were moved by dragging */
-	previewPptxSelectionMoved: "Moved"
+	/** Selection Pane — screen reader announcement after objects were restacked (dragged, or moved with the arrows or keys); {{name}} is the object's name, {{position}} its new place counted from the top of the list and {{count}} the number of objects there, e.g. "Box A moved to position 2 of 5" */
+	previewPptxSelectionMovedTo: "{{name}} moved to position {{position}} of {{count}}"
 } as const

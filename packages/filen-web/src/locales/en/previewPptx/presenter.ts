@@ -55,8 +55,6 @@ export const previewPptxPresenter = {
 	previewPptxPresenterShowAudience: "Show slide show",
 	/** Presentation slideshow — button over the slideshow that brings the presenter view back */
 	previewPptxPresenterShowPresenter: "Show presenter view",
-	/** Presentation slideshow — button that starts the slideshow with the presenter view */
-	previewPptxPresenterOpen: "Presenter view",
 	/** Presentation shortcuts — next slide or animation in a slideshow */
 	previewPptxShortcutShowNext: "Slide show: next slide or animation",
 	/** Presentation shortcuts — previous slide or animation in a slideshow */

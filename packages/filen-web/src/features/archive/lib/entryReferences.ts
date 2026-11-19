@@ -5,14 +5,14 @@ import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryRequest, type EntryRequest } from "@/features/archive/lib/entryDownload"
-import { entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
+import { entryLeaseOrigin, leaseEntry, NO_EVENTS } from "@/features/archive/lib/archiveHandle"
 import { entryPlanOf, extractsToRead, needsCostConfirm } from "@/features/archive/lib/entryAccess.logic"
 
 // An archive entry's references, from the archive's own listing: its directory and the directories below it. An entry
 // the SDK cannot read alone (a single compressed file's) is listed as not readable, and so is one no cost the user
-// accepted covers: in a solid block above E3's ceiling, or reading earlier files of its block before this listing
-// session accepted that (a model's texture never asks a cost of its own). Each one is read through a lease of its own on
-// the archive's reader for the password the viewed entry took.
+// accepted covers: in a solid block above SOLID_BLOCK_READ_MAX_BYTES, or reading earlier files of its block before
+// this listing session accepted that (a model's texture never asks a cost of its own). Each one is read through a
+// lease of its own on the archive's reader for the password the viewed entry took.
 
 export function entryListing(
 	source: ArchiveSource,
@@ -34,12 +34,6 @@ export function entryListing(
 					] as const
 			)
 	}
-}
-
-const NO_EVENTS = {
-	phase: () => undefined,
-	verified: () => undefined,
-	failed: () => undefined
 }
 
 async function readEntry(

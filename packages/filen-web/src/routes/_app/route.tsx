@@ -4,8 +4,8 @@ import { AppShell } from "@/features/shell/components/appShell"
 import { validatePlansSearch } from "@/features/settings/lib/billingLinks"
 import { rememberPlansTarget } from "@/features/settings/lib/pendingPlans"
 
-// Authed layout: everything under it (Drive today; the other modules later) requires a session — the
-// worker holding a Client (`hasClient()`) — and bounces to sign-in otherwise. `_app` is a pathless
+// Authed layout: every module under it requires a session — the worker holding a Client
+// (`hasClient()`) — and bounces to sign-in otherwise. `_app` is a pathless
 // layout, so its children keep clean URLs (e.g. /drive).
 export const Route = createFileRoute("/_app")({
 	beforeLoad: async ({ location }) => {

@@ -1,4 +1,5 @@
-import { selectKey, type ToolKey } from "@filen/office/react/pdfedit/tools"
+import { canMove, canResize, selectKey, type ToolKey } from "@filen/office/react/pdfedit/tools"
+import type { PdfAnnotationInfo } from "@filen/office/core/pdfedit/annotations"
 import { annotationStoreOf } from "@/features/pdf/annotations/annotationStore"
 import type { PdfToolContext, PdfToolKeyEvent } from "@/features/pdf/tools/registry"
 
@@ -19,6 +20,14 @@ function hand(event: PdfToolKeyEvent, context: PdfToolContext): boolean {
 	return true
 }
 
+// An arrow the selection takes even when it changes nothing (already at the minimum size, or flush with the page
+// edge), so it does not scroll the pages instead; one that cannot move or resize it (locked, a markup) is not taken.
+function takesArrow(selected: PdfAnnotationInfo, key: ToolKey): boolean {
+	if (!key.key.startsWith("Arrow")) return false
+
+	return key.alt === true ? canResize(selected) : canMove(selected)
+}
+
 export function selectionKey(event: PdfToolKeyEvent, context: PdfToolContext): boolean {
 	if (hand(event, context)) return true
 
@@ -28,12 +37,18 @@ export function selectionKey(event: PdfToolKeyEvent, context: PdfToolContext): b
 
 	if (event.kind !== "down" || key === null || selected === null) return false
 
-	const step = selectKey({ selected, drag: null }, key)
+	// An arrow stays inside the selected annotation's page (Escape and Delete do not read the box): with that box not
+	// known yet, it is taken and does nothing, so it cannot walk the annotation off the page.
+	const box = store.pageBox(selected.page)
+
+	if (box === undefined && key.key.startsWith("Arrow")) return takesArrow(selected, key)
+
+	const step = selectKey({ selected, drag: null }, key, box ?? selected.rect)
 	const commit = step.commit
 
 	if (step.state.selected !== selected) store.select(step.state.selected)
 
-	if (commit === undefined) return step.state.selected !== selected
+	if (commit === undefined) return step.state.selected !== selected || takesArrow(selected, key)
 	if (commit.kind === "select") return true
 	if (!context.editable) return true
 

@@ -19,6 +19,7 @@ import {
 	appendAttachmentUrl
 } from "@/features/chats/lib/composer.logic"
 import { emojiForShortcode, customEmojiImageForShortcode, searchEmoji } from "@/features/chats/lib/emoji"
+import { sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Pure composer core — no React/store/IO. Uuid-shaped fields are the SDK's branded UuidStr; literal
 // strings with 3+ dashes satisfy that template type directly.
@@ -172,6 +173,19 @@ describe("filterMentionParticipants", () => {
 		expect(filterMentionParticipants([alice, bob], "ali", undefined)).toEqual([alice])
 		expect(filterMentionParticipants([alice, bob], "BOB@", undefined)).toEqual([bob])
 	})
+
+	it("sorts in the pickers' display-name order (numeric-aware, accented and mixed case)", () => {
+		const emile = participant(3n, "emile@filen.io", "\u00c9mile")
+		const zoe = participant(4n, "zoe@filen.io", "Zoe")
+		const anna = participant(5n, "anna@filen.io", "anna")
+		const user10 = participant(6n, "user10@filen.io")
+		const user9 = participant(8n, "user9@filen.io")
+		const all = [user10, zoe, emile, user9, anna]
+		const result = filterMentionParticipants(all, "", undefined)
+
+		expect(result).toEqual(sortContactsByDisplayName(all))
+		expect(result.indexOf(user9)).toBeLessThan(result.indexOf(user10))
+	})
 })
 
 describe("applyMention", () => {
@@ -312,5 +326,14 @@ describe("appendAttachmentUrl", () => {
 		const twice = appendAttachmentUrl(once, "https://x.example.com/b")
 
 		expect(twice).toBe("https://x.example.com/a https://x.example.com/b")
+	})
+
+	it("trims a long inner whitespace run in linear time", () => {
+		const draft = `${" ".repeat(60000)}x${" ".repeat(60000)}`
+		const started = performance.now()
+		const result = appendAttachmentUrl(draft, "https://x.example.com/a")
+
+		expect(performance.now() - started).toBeLessThan(200)
+		expect(result).toBe(`${" ".repeat(60000)}x https://x.example.com/a`)
 	})
 })

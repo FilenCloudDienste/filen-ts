@@ -63,8 +63,9 @@ export interface MotionPathsState {
 	// The tool drawing a path for `shape`.
 	readonly tool?: MotionTool
 	readonly shape?: number
-	// The behaviour in Edit Points, its slide, and the selected point.
+	// The behaviour in Edit Points, and the selected point.
 	readonly editing?: number
+	// The slide of the tool or of Edit Points (shape ids repeat across slides).
 	readonly slide?: SlideRef
 	readonly point?: number | undefined
 }
@@ -87,8 +88,8 @@ function createMotionPaths() {
 			}
 		},
 		getSnapshot: (): MotionPathsState => state,
-		draw: (tool: MotionTool, shape: number): void => {
-			set({ tool, shape })
+		draw: (slide: SlideRef, tool: MotionTool, shape: number): void => {
+			set({ tool, shape, slide })
 		},
 		edit: (slide: SlideRef, node: number): void => {
 			set({ editing: node, slide })
@@ -217,7 +218,8 @@ export function PresentationMotionPaths({ editor, scale }: { editor: Presentatio
 	const render = editor.render
 	const slide = render?.ref
 	const editingView = state.editing === undefined || state.slide !== slide ? undefined : views.find(view => view.node === state.editing)
-	const shape = state.shape === undefined ? undefined : slideShapes(render).find(candidate => candidate.id === state.shape)
+	const shape =
+		state.shape === undefined || state.slide !== slide ? undefined : slideShapes(render).find(candidate => candidate.id === state.shape)
 
 	// Another slide, or the path or the object gone: the tool and Edit Points end.
 	useEffect(() => {
@@ -286,6 +288,7 @@ function DrawMenu({ editor, animations }: { editor: PresentationRibbonEditor; an
 	const { t } = useTranslation("preview")
 	const focus = useCommandMenuFocus()
 	const only = animations.shapes.length === 1 ? animations.shapes[0] : undefined
+	const slide = editor.render?.ref
 
 	return (
 		<DropdownMenu
@@ -296,7 +299,7 @@ function DrawMenu({ editor, animations }: { editor: PresentationRibbonEditor; an
 				label={only === undefined ? t("previewPptxMotionSelectOne") : t("previewPptxMotionDraw")}
 				text={t("previewPptxMotionDraw")}
 				icon={<PenToolIcon />}
-				disabled={!editor.info.editable || only === undefined || animations.unsupported}
+				disabled={!editor.info.editable || only === undefined || slide === undefined || animations.unsupported}
 			/>
 			<DropdownMenuContent
 				finalFocus={focus.finalFocus}
@@ -311,11 +314,11 @@ function DrawMenu({ editor, animations }: { editor: PresentationRibbonEditor; an
 							<DropdownMenuItem
 								key={tool}
 								onClick={() => {
-									if (only === undefined) return
+									if (only === undefined || slide === undefined) return
 
 									// After the menu gives focus back, so the slide keeps it for the drawing.
 									focus.afterClose(() => {
-										motionPaths.draw(tool, only.id)
+										motionPaths.draw(slide, tool, only.id)
 									})
 								}}
 							>

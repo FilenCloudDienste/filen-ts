@@ -104,16 +104,27 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 	const [addError, setAddError] = useState<string | null>(null)
 	const [busy, setBusy] = useState<Busy>(null)
 	const [added, setAdded] = useState<AddedPair | null>(null)
+	// The dry run expired and planning again found none to page (unconverged): its totals stay, its lists go.
+	const [listsGone, setListsGone] = useState(false)
+	// A plan asked for again, while it is out: a second click must not leave a plan nothing releases.
+	const replanningRef = useRef(false)
 	const [wholeDrive, setWholeDrive] = useState(false)
 	// The unstarted pair, for the unmount cleanup: leaving the Sync section must not leave it behind, paused.
 	const unstartedRef = useRef<AddedPair | null>(null)
+	// Set by the unmount cleanup, so a pair addPair answers with after the dialog is gone is removed, not kept.
+	const unmountedRef = useRef(false)
 	const remote = remotePick(picker.targetUuid, accountRoot, wholeDrive)
 	const form: AddPairForm = { ...fields, remote }
 	const remoteName =
 		remote === null ? null : remote === accountRoot ? t("drive:driveMyDrive") : (picker.namesQuery.data?.[remote] ?? null)
 
 	useEffect(() => {
+		// Reset on setup: StrictMode's mount-cleanup-mount must not leave it set.
+		unmountedRef.current = false
+
 		return () => {
+			unmountedRef.current = true
+
 			const unstarted = unstartedRef.current
 
 			if (unstarted !== null) {
@@ -133,6 +144,54 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 		}
 
 		onClose()
+	}
+
+	// The review's dry run expired (the shell releases it minutes after its last read): plan the pair again, from the
+	// list's retry. The new plan replaces the old one in both places, so a discard releases the right one.
+	async function replan(): Promise<void> {
+		const pairId = added?.pairId
+
+		if (pairId === undefined || replanningRef.current) {
+			return
+		}
+
+		replanningRef.current = true
+
+		try {
+			const result = await syncApi().plan(pairId)
+
+			if (!result.ok) {
+				toast.error(syncErrorLabel(result.error))
+
+				return
+			}
+
+			const plan = result.value
+
+			// Started, removed or closed meanwhile.
+			if (unmountedRef.current || unstartedRef.current?.pairId !== pairId) {
+				releasePlan(plan)
+
+				return
+			}
+
+			if (plan === null) {
+				// Nothing to release any more; the recorded totals stay on show.
+				unstartedRef.current = { pairId, plan: null }
+				setListsGone(true)
+
+				return
+			}
+
+			unstartedRef.current = { pairId, plan }
+			setAdded({ pairId, plan })
+			setListsGone(false)
+		} catch (error) {
+			log.warn("sync", "pair could not be planned again", error)
+			toast.error(t("errorUnknown"))
+		} finally {
+			replanningRef.current = false
+		}
 	}
 
 	async function chooseLocal(): Promise<void> {
@@ -173,6 +232,12 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 
 		try {
 			const result = await syncApi().addPair(request)
+
+			if (result.ok && unmountedRef.current) {
+				void discardPair(result.value)
+
+				return
+			}
 
 			if (result.ok) {
 				unstartedRef.current = result.value
@@ -447,7 +512,10 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 							<ReviewSummary
 								summary={added.plan?.summary ?? null}
 								findings={[]}
-								planId={added.plan?.planId ?? null}
+								planId={listsGone ? null : (added.plan?.planId ?? null)}
+								onPlanExpired={() => {
+									void replan()
+								}}
 							/>
 						</div>
 						<DialogFooter className="mt-auto">

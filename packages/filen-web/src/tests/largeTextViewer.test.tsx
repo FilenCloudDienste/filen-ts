@@ -32,6 +32,9 @@ const state = vi.hoisted((): State => ({
 	open: { text: true, executable: false, unicode: "utf-8", head: null }
 }))
 
+// The open a test that swaps state.open gets back after it.
+const defaultOpen = state.open
+
 function row(start: number, text: string, line: number | null): PagerRowView {
 	return { start, end: start + text.length + 1, text, continuation: false, breaks: true, line }
 }
@@ -124,6 +127,8 @@ afterEach(() => {
 	state.failLocate = false
 	state.opens = 0
 	state.closes = 0
+	state.open = defaultOpen
+	guesses.calls = 0
 })
 
 async function renderViewer(origin?: ByteOrigin) {
@@ -246,15 +251,11 @@ describe("LargeTextViewer", () => {
 	})
 
 	it("guesses a legacy file's encoding once, from the first block's copy", async () => {
-		const unicode = state.open
-
 		state.open = { text: true, executable: false, unicode: null, head: new Uint8Array([0xcf, 0xf0, 0xe8]) }
-		guesses.calls = 0
 		await renderViewer()
 
 		expect(await screen.findByText("first line")).toBeTruthy()
 		expect(screen.getByRole("button", { name: /Encoding: Windows-1251/ })).toBeTruthy()
 		expect(guesses.calls).toBe(1)
-		state.open = unicode
 	})
 })

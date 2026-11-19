@@ -6,6 +6,7 @@ import { useTrustedDomainsQuery } from "@/lib/trustedLinks/trustedDomainsQuery"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { EMAIL_LINK_ATTRIBUTE } from "@filen/shared/dom"
 import { safeAbsoluteHref } from "@/lib/safeUrl"
+import { log } from "@/lib/log"
 
 // The part of a DOM node linkHrefOf reads, whichever window it belongs to.
 interface LinkNode {
@@ -92,7 +93,11 @@ export function useTrustedLinkGate(): TrustedLinkGate {
 				window.open(pending.href, "_blank", "noopener,noreferrer")
 				setPending(null)
 
-				void trustDomain(pending.domain).then(() => trustedQuery.refetch())
+				void trustDomain(pending.domain)
+					.then(() => trustedQuery.refetch())
+					.catch((error: unknown) => {
+						log.warn("trustedLinks", "could not persist a trusted link domain", error)
+					})
 			}}
 		/>
 	)

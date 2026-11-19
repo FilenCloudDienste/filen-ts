@@ -33,11 +33,6 @@ import { startNativeImageProbes } from "@/lib/nativeImageSupport"
 // router-internal not-found state for a page whose only action is a router Link.
 const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScreen, notFoundMode: "root" })
 
-// Kick the SDK boot as a module-level side effect, BEFORE <RouterProvider> mounts, so the boot-ready
-// gate (whenBootReady) is already in flight when the router runs its initial route guards. It must
-// NOT live inside a render effect: a guard awaiting boot while boot awaited first paint would
-// deadlock. Not awaited — BootGate observes the zustand boot phases and holds the boot screen until
-// ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
 // The previous web app's language and signed-in state, read before the splash weights its phases and the language is
 // detected. The desktop app never ran it.
 if (desktopBridge() === undefined) {
@@ -48,6 +43,12 @@ if (desktopBridge() === undefined) {
 installSessionEndedCheck()
 
 advanceBootSplash("bundle")
+
+// Kick the SDK boot as a module-level side effect, BEFORE <RouterProvider> mounts, so the boot-ready
+// gate (whenBootReady) is already in flight when the router runs its initial route guards. It must
+// NOT live inside a render effect: a guard awaiting boot while boot awaited first paint would
+// deadlock. Not awaited — BootGate observes the zustand boot phases and holds the boot screen until
+// ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
 void bootSdk()
 
 // Fetched alongside the SDK boot; the first render waits for it briefly (English if it is late).

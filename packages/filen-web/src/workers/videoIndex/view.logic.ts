@@ -18,6 +18,7 @@ import {
 	type CorrectionOriginal
 } from "@filen/shared/videos"
 import type { IndexFile } from "@/workers/videoIndex/rootIndex.logic"
+import { FNV1A_OFFSET_BASIS, fnv1a } from "@/lib/fnv1a"
 import type { CatalogSummary } from "@/workers/videoIndex/catalog.logic"
 import { artCandidates, type ArtCandidate, type ArtSubject } from "@/features/videos/lib/artwork.logic"
 import type { ArtSlotCode } from "@/features/videos/lib/artStore.logic"
@@ -62,8 +63,9 @@ export interface VideoTitleView {
 	episodeCount: number
 	// A manual correction hides it: left out of home rows, grids and search, still reachable to unhide.
 	hidden?: true
-	// Changes with the title's versions, extras, seasons and episodes (by stable uuid: a new version of a file isn't a
-	// change) and its card art's candidates, so a change only they see still refreshes it (set by buildTitlesSteps).
+	// Changes with everything its detail holds that this view doesn't: versions, extras, seasons (and their art and nfo),
+	// episodes, each part's sidecar subtitles, nfo, thumb and edl (files by stable uuid: a new version of a file isn't
+	// a change), and its card art's candidates, so a change only they see still refreshes it (set by buildTitlesSteps).
 	detailHash?: number
 }
 
@@ -407,7 +409,7 @@ export function* buildTitlesSteps(files: LibraryFiles): Generator<void, VideoTit
 	let built = 0
 
 	for (const movie of library.movies) {
-		hashes.set(movie.id, versionsHash(files, movie.versions, movie.extras, 0x811c9dc5))
+		hashes.set(movie.id, fold(versionsHash(files, movie.versions, movie.extras, FNV1A_OFFSET_BASIS), fileKey(files, movie.nfo)))
 
 		if (++built % BUILD_STEP === 0) {
 			yield
@@ -415,14 +417,23 @@ export function* buildTitlesSteps(files: LibraryFiles): Generator<void, VideoTit
 	}
 
 	for (const series of library.series) {
-		let hash = versionsHash(files, [], series.extras, 0x811c9dc5)
+		let hash = fold(versionsHash(files, [], series.extras, FNV1A_OFFSET_BASIS), fileKey(files, series.nfo))
 
 		for (const season of series.seasons) {
+			hash = fold(hash, String(season.number))
+			hash = fold(hash, season.dirUuid)
+			hash = fold(hash, fileKey(files, season.art.poster))
+			hash = fold(hash, fileKey(files, season.art.backdrop))
+			hash = fold(hash, fileKey(files, season.nfo))
+			hash = fold(hash, String(season.episodes.length))
+
 			for (const episode of season.episodes) {
-				hash = fnv(
-					`${String(episode.season)}.${String(episode.episode)}.${String(episode.episodeEnd)}.${String(episode.date)}.${episode.title}`,
-					versionsHash(files, episode.versions, [], hash)
-				)
+				hash = versionsHash(files, episode.versions, [], hash)
+				hash = fold(hash, String(episode.season))
+				hash = fold(hash, String(episode.episode))
+				hash = fold(hash, String(episode.episodeEnd))
+				hash = fold(hash, String(episode.date))
+				hash = fold(hash, episode.title)
 			}
 		}
 
@@ -433,10 +444,18 @@ export function* buildTitlesSteps(files: LibraryFiles): Generator<void, VideoTit
 		}
 	}
 
+	for (const other of library.others) {
+		hashes.set(other.id, partHash(files, other.video, FNV1A_OFFSET_BASIS))
+
+		if (++built % BUILD_STEP === 0) {
+			yield
+		}
+	}
+
 	const out: VideoTitleView[] = []
 
 	for (const title of visibleTitles(files)) {
-		const withHash = { ...title, detailHash: hashes.get(title.id) ?? 0x811c9dc5 }
+		const withHash = { ...title, detailHash: hashes.get(title.id) ?? FNV1A_OFFSET_BASIS }
 
 		out.push(files.hidden.has(title.id) ? { ...withHash, hidden: true } : withHash)
 
@@ -448,30 +467,69 @@ export function* buildTitlesSteps(files: LibraryFiles): Generator<void, VideoTit
 	return out
 }
 
-// 32-bit FNV-1a over `text`, continuing from `hash`.
-function fnv(text: string, hash: number): number {
-	let out = hash
+// Ends every folded field, so adjacent values can't alias ("ab" + "c" vs "a" + "bc").
+const FIELD_END = "\u0000"
 
-	for (let i = 0; i < text.length; i++) {
-		out = Math.imul(out ^ text.charCodeAt(i), 16_777_619) >>> 0
+// `hash` continued over one field.
+function fold(hash: number, field: string): number {
+	return fnv1a(FIELD_END, fnv1a(field, hash))
+}
+
+function flag(value: boolean): string {
+	return value ? "1" : "0"
+}
+
+// A file by its stable uuid (a new version of it isn't a change), empty for none.
+function fileKey(files: LibraryFiles, index: number): string {
+	return files.file(index)?.stableUuid ?? ""
+}
+
+// Everything LibraryFiles.part emits of a video: its file, sidecar subtitles, nfo, thumb and edl.
+function partHash(files: LibraryFiles, video: number, seed: number): number {
+	const entry = files.library.videos[video]
+
+	if (entry === undefined) {
+		return fold(seed, "")
 	}
 
-	return out
+	let hash = fold(seed, fileKey(files, entry.file))
+
+	hash = fold(hash, String(entry.subtitles.length))
+
+	for (const subtitle of entry.subtitles) {
+		hash = fold(hash, fileKey(files, subtitle.file))
+		hash = fold(hash, subtitle.format)
+		hash = fold(hash, subtitle.language ?? "")
+		hash = fold(hash, flag(subtitle.forced))
+		hash = fold(hash, flag(subtitle.sdh))
+		hash = fold(hash, flag(subtitle.isDefault))
+		hash = fold(hash, subtitle.title)
+	}
+
+	hash = fold(hash, fileKey(files, entry.nfo))
+	hash = fold(hash, fileKey(files, entry.thumb))
+
+	return fold(hash, fileKey(files, entry.edl))
 }
 
 function versionsHash(files: LibraryFiles, versions: readonly LibraryVersion[], extras: readonly LibraryExtra[], seed: number): number {
-	let hash = seed
+	let hash = fold(seed, String(versions.length))
 
 	for (const version of versions) {
-		hash = fnv(version.label, hash)
+		hash = fold(hash, version.label)
+		hash = fold(hash, String(version.parts.length))
 
 		for (const video of version.parts) {
-			hash = fnv(files.file(files.library.videos[video]?.file ?? NO_FILE)?.stableUuid ?? "", hash)
+			hash = partHash(files, video, hash)
 		}
 	}
 
+	hash = fold(hash, String(extras.length))
+
 	for (const extra of extras) {
-		hash = fnv(`${extra.type}${extra.title}${files.file(files.library.videos[extra.video]?.file ?? NO_FILE)?.stableUuid ?? ""}`, hash)
+		hash = fold(hash, extra.type)
+		hash = fold(hash, extra.title)
+		hash = partHash(files, extra.video, hash)
 	}
 
 	return hash

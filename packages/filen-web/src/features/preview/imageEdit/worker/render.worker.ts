@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { isWideGamutIcc } from "@/features/preview/imageEdit/lib/icc"
+import { isWideGamutIcc, isWideGamutPngIccp } from "@/features/preview/imageEdit/lib/icc"
 import * as Comlink from "comlink"
 import { Semaphore } from "@filen/shared"
 import type { ImageEditRecipe, ImageEditSource, MarkupItem, SourceInfo } from "@/features/preview/imageEdit/types"
@@ -305,7 +305,7 @@ const api = {
 
 			s.renderer = new Renderer(gl)
 			ensurePreview(s).catch((error: unknown) => {
-				log.error("imageEdit", "preview rebuild after context restore failed", error)
+				log.error("image-edit", "preview rebuild after context restore failed", error)
 			})
 		})
 
@@ -331,7 +331,11 @@ const api = {
 
 	async load(id: number, source: ImageEditSource, info: SourceInfo): Promise<{ width: number; height: number }> {
 		const s = current(id)
-		const pixels = await decode(source)
+		// A PNG's icc is its iCCP chunk data, the profile zlib-compressed inside it.
+		const [pixels, wideGamut] = await Promise.all([
+			decode(source),
+			info.mime === "image/png" && info.icc !== null ? isWideGamutPngIccp(info.icc) : isWideGamutIcc(info.icc)
+		])
 
 		if (session !== s) {
 			if (pixels.kind === "bitmap") {
@@ -345,7 +349,7 @@ const api = {
 		s.source = pixels
 		// The header's word, never a pixel scan: a source without alpha draws opaque whatever its fourth channel.
 		s.opaque = !info.hasAlpha
-		s.wideGamut = isWideGamutIcc(info.icc)
+		s.wideGamut = wideGamut
 		applyColorSpace(s)
 
 		await ensurePreview(s).catch(ignoreContextLoss)

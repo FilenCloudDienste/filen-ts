@@ -7,7 +7,8 @@ export interface LogEntry {
 	msg: string
 }
 
-const RING_MAX = 500
+// Read by the Advanced settings page so its copy always states the real cap.
+export const LOG_RING_MAX = 500
 const ring: LogEntry[] = []
 
 // lib.es5's JSON.stringify signature always claims `string`, but it genuinely returns
@@ -29,7 +30,7 @@ function safeInspect(v: unknown): string {
 function push(level: LogLevel, scope: string, args: unknown[]): void {
 	ring.push({ t: Date.now(), level, scope, msg: args.map(a => (typeof a === "string" ? a : safeInspect(a))).join(" ") })
 
-	if (ring.length > RING_MAX) {
+	if (ring.length > LOG_RING_MAX) {
 		ring.shift()
 	}
 

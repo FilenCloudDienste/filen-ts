@@ -20,7 +20,7 @@ const { sdk, takenNames, patchListing, warmUploadThumbnail, holdUploadEchoes, re
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: sdk }))
-vi.mock("@/features/preview/imageEdit/editSession", () => ({ takenNames }))
+vi.mock("@/features/drive/lib/nameTaken", () => ({ takenNamesInDirectory: takenNames }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => ROOT_UUID }))
 vi.mock("@/features/drive/lib/thumbGenerators", () => ({ warmUploadThumbnail }))
 vi.mock("@/features/drive/lib/uploadEchoes", () => ({ holdUploadEchoes }))

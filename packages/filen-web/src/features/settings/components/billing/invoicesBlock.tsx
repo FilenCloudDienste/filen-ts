@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { UserAccountSubsInvoices } from "@filen/sdk-rs"
 import { DownloadIcon, ReceiptIcon } from "lucide-react"
-import { formatBillingCost, toMillis } from "@/features/settings/lib/billing"
+import { formatBillingCost, gatewayLabelKey, toMillis } from "@/features/settings/lib/billing"
 import { billingErrorLabel, downloadInvoice } from "@/features/settings/lib/billingActions"
 import { formatShortDate } from "@/lib/formatDate"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -48,8 +48,13 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 				{ header: t("settingsBillingColumnPlan"), className: "font-medium", cell: invoice => invoice.planName },
 				{
 					header: t("settingsBillingColumnGateway"),
-					className: "capitalize text-muted-foreground",
-					cell: invoice => invoice.gateway
+					className: "text-muted-foreground",
+					// An unknown gateway id shows as it is.
+					cell: invoice => {
+						const labelKey = gatewayLabelKey(invoice.gateway)
+
+						return labelKey === null ? <span className="capitalize">{invoice.gateway}</span> : t(labelKey)
+					}
 				},
 				{ header: t("settingsBillingColumnCost"), className: "tabular-nums", cell: invoice => formatBillingCost(invoice.planCost) },
 				{ header: t("settingsBillingColumnDate"), className: "tabular-nums text-muted-foreground", cell: invoiceDate },

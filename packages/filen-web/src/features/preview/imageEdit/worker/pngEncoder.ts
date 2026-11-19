@@ -1,12 +1,11 @@
 import { crc32 } from "@/features/preview/imageEdit/lib/crc32"
+import { PNG_SIGNATURE } from "@/features/preview/imageEdit/lib/pngMeta"
 
 // An 8-bit truecolour PNG (PNG 3rd ed.) from an RGBA buffer: colour type 6 with alpha, else 2 (the alpha bytes
 // dropped). Every row uses filter type 1, Sub (§9.2): one subtraction per byte, far cheaper than Paeth's
 // per-byte predictor search for a modest size cost. The filtered rows stream through the platform's
 // CompressionStream("deflate"), which is the zlib format (RFC 1950) IDAT requires (§10.1), so the filtered image is
 // never held whole; only its compressed output is, written into ONE IDAT of the final file.
-
-const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
 // Filtered bytes handed to the compressor per write: large enough that per-chunk overhead vanishes, small enough
 // that the queue between this loop and the deflater stays a few MB.
@@ -101,13 +100,13 @@ export async function encodePng(data: Uint8Array, width: number, height: number,
 	}
 
 	// Signature, IHDR (13 data bytes), one IDAT, IEND; 12 bytes of length + type + CRC per chunk.
-	const ihdrAt = SIGNATURE.length
+	const ihdrAt = PNG_SIGNATURE.length
 	const idatAt = ihdrAt + 12 + 13
 	const iendAt = idatAt + 12 + compressed
 	const png = new Uint8Array(iendAt + 12)
 	const view = new DataView(png.buffer)
 
-	png.set(SIGNATURE, 0)
+	png.set(PNG_SIGNATURE, 0)
 
 	writeChunkHeader(view, ihdrAt, 13, "IHDR")
 	view.setUint32(ihdrAt + 8, width)

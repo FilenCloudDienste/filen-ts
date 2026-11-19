@@ -87,7 +87,7 @@ const VARIANT_MENU_COARSE = 44
 function PdfToolButton({ tool, props }: { tool: PdfTool; props: PdfRibbonProps }) {
 	const { t } = useTranslation("preview")
 	const control = pdfToolControl(tool, props.policy, props.activeTool)
-	const action = tool.actionIds[0]
+	const action = tool.actions[0]?.id
 	const variant = toolVariant(tool, props.toolVariants?.[tool.id])
 	const Icon = variant?.icon ?? tool.icon
 	const button = (

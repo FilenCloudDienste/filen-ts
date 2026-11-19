@@ -11,7 +11,7 @@ import {
 	VolumeXIcon,
 	type LucideIcon
 } from "lucide-react"
-import type { MediaPlayback, SlideMediaInfo, ShapeRef } from "@filen/office/core/presentation"
+import type { InsertedImage, MediaPlayback, SlideMediaInfo, ShapeRef } from "@filen/office/core/presentation"
 import { selectedShapes, useShapeSelection } from "@filen/office/react/presentation"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
@@ -22,6 +22,7 @@ import type {
 	PresentationRibbonEditor
 } from "@/features/presentation/components/ribbon/tabs"
 import { mediaTimingGroups } from "@/features/presentation/components/ribbon/mediaTiming"
+import { posterFromSource } from "@/features/presentation/lib/poster"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Video tab (and, through mediaPlaybackGroups, the Audio tab): how the selected medium plays in the show —
@@ -29,8 +30,6 @@ import type { PreviewKey } from "@/lib/i18n"
 // a video's poster frame from a picture on this device.
 
 type MediaKind = SlideMediaInfo["kind"]
-
-const POSTER_MAX = 1280
 
 // The selected medium of `kind` on the slide in view (exactly one shape selected).
 function useSelectedMedia(
@@ -148,28 +147,12 @@ function PlaybackControls({ editor, kind }: { editor: PresentationRibbonEditor; 
 	)
 }
 
-// A picture from this device as the poster: drawn at most POSTER_MAX px on its longest side (PNG keeps its alpha).
-async function posterFrom(
-	file: File
-): Promise<{ bytes: Uint8Array; contentType: "image/png" | "image/jpeg"; width: number; height: number }> {
+// A picture from this device as the poster (PNG keeps its alpha).
+async function posterFrom(file: File): Promise<InsertedImage> {
 	const bitmap = await createImageBitmap(file)
 
 	try {
-		const scale = Math.min(1, POSTER_MAX / Math.max(bitmap.width, bitmap.height))
-		const canvas = document.createElement("canvas")
-
-		canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-		canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-		canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-
-		const contentType = file.type === "image/png" ? "image/png" : "image/jpeg"
-		const blob = await new Promise<Blob | null>(resolve => {
-			canvas.toBlob(resolve, contentType, 0.85)
-		})
-
-		if (blob === null) throw new Error("the poster could not be encoded")
-
-		return { bytes: new Uint8Array(await blob.arrayBuffer()), contentType, width: canvas.width, height: canvas.height }
+		return await posterFromSource(bitmap, bitmap.width, bitmap.height, file.type === "image/png" ? "image/png" : "image/jpeg")
 	} finally {
 		bitmap.close()
 	}

@@ -31,8 +31,9 @@ export interface PreviewSubtitles {
 	failed: boolean
 }
 
-// A chosen file's outcome, kept for the preview's life: switching back costs no second read.
-type SidecarState = { status: "ok"; cues: CueStore } | { status: "failed" }
+// A chosen file's outcome, kept for the preview's life: switching back costs no second read. `fps`: the rate a
+// frame-based file was timed at (null for MicroDVD's usual rate and for every other format).
+type SidecarState = { status: "ok"; cues: CueStore; fps: number | null } | { status: "failed" }
 
 function sidecarOption(file: PreviewSubtitleFile): PreviewSubtitleOption {
 	return { id: `s:${file.uuid}`, lang: file.lang, title: file.title, forced: file.forced, sdh: file.sdh, embedded: false }
@@ -52,6 +53,7 @@ export function usePreviewSubtitles(
 		previewSidecars(driveItemName(item), provided ?? (access === "authed" ? cachedSiblings(item.data.uuid) : []))
 	)
 	const probe = snapshot?.probe ?? null
+	const fps = probe?.video?.fps ?? null
 	const embedded: PreviewSubtitleOption[] =
 		probe === null || !embeddedTextContainer(probe)
 			? []
@@ -66,8 +68,13 @@ export function usePreviewSubtitles(
 						embedded: true
 					}))
 	const options = [...sidecars.map(sidecarOption), ...embedded]
+	const selectedSidecar = selected.startsWith("s:") ? sidecars.find(file => `s:${file.uuid}` === selected) : undefined
+	// Only a frame-based (MicroDVD) file is timed by the rate: it is read again when the probe states another one, while
+	// a read of any other format is not restarted when the probe lands.
+	const chosenFps = selectedSidecar?.format === "sub" ? fps : null
+	const selectedState = loaded.get(selected)
 	const chosenSidecar =
-		selected.startsWith("s:") && !loaded.has(selected) ? sidecars.find(file => `s:${file.uuid}` === selected) : undefined
+		selectedState === undefined || (selectedState.status === "ok" && selectedState.fps !== chosenFps) ? selectedSidecar : undefined
 
 	useEffect(() => {
 		if (chosenSidecar === undefined) {
@@ -82,9 +89,9 @@ export function usePreviewSubtitles(
 			}
 		}
 
-		void loadSidecar(chosenSidecar, access, abort.signal).then(
+		void loadSidecar(chosenSidecar, access, abort.signal, chosenFps).then(
 			result => {
-				settle(result.status === "ok" ? { status: "ok", cues: result.cues } : { status: "failed" })
+				settle(result.status === "ok" ? { status: "ok", cues: result.cues, fps: chosenFps } : { status: "failed" })
 			},
 			() => {
 				settle({ status: "failed" })
@@ -94,21 +101,31 @@ export function usePreviewSubtitles(
 		return () => {
 			abort.abort()
 		}
-	}, [chosenSidecar, access])
+	}, [chosenSidecar, access, chosenFps])
 
 	function select(id: string): void {
+		// Choosing a failed file again reads it once more: the failure may have been a dropped connection.
+		if (loaded.get(id)?.status === "failed") {
+			setLoaded(previous => {
+				const next = new Map(previous)
+
+				next.delete(id)
+
+				return next
+			})
+		}
+
 		setSelected(id)
 		controller?.setSubtitle(id === "off" ? "none" : id.startsWith("e:") ? "embedded-text" : "sidecar")
 	}
 
-	const state = loaded.get(selected)
 	let cues: CueStore | null = null
 
 	if (selected.startsWith("e:") && controller !== null && snapshot !== null) {
 		cues = controller.embeddedCues(Number(selected.slice(2)), snapshot.embeddedVersion)
-	} else if (state?.status === "ok") {
-		cues = state.cues
+	} else if (selectedState?.status === "ok") {
+		cues = selectedState.cues
 	}
 
-	return { options, selected, select, cues, failed: state?.status === "failed" }
+	return { options, selected, select, cues, failed: selectedState?.status === "failed" }
 }

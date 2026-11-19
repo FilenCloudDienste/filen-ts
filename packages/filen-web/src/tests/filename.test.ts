@@ -109,7 +109,8 @@ describe("contentDispositionAttachment", () => {
 // Reproduces the actual crash site the SW hit: `new Response(body, { headers })` runs a WHATWG
 // ByteString validation on every header value and throws synchronously on any code point > 255. That
 // synchronous throw is what both broke the download AND leaked activeStreams (the increment ran before
-// the throw, so its decrement never did, permanently gating SKIP_WAITING). The header build now
+// the throw, so its decrement never did: the worker would report a running stream for ever, so the page
+// would hold every update back). The header build now
 // happens before the counter is touched, and the value is always byte-safe — so this construction can
 // never throw for a non-Latin-1 name.
 describe("Content-Disposition header is a legal ByteString at the Response boundary", () => {

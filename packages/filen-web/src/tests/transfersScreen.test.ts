@@ -142,6 +142,31 @@ describe("TransfersScreen — Cancel all confirm gate", () => {
 		expect(screen.queryByRole("alertdialog", { name: "Cancel all transfers?" })).toBeNull()
 		expect(sdkCancel).not.toHaveBeenCalled()
 	})
+
+	it("closes once the last active transfer settles, and stays closed when a new one starts", () => {
+		useTransfersStore.setState({ transfers: [transfer({ id: "a", status: "uploading" })] })
+
+		render(createElement(TransfersScreen))
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel all" }))
+
+		expect(screen.getByRole("alertdialog", { name: "Cancel all transfers?" })).toBeTruthy()
+
+		act(() => {
+			useTransfersStore.getState().settle("a", "done")
+		})
+
+		expect(screen.queryByRole("alertdialog", { name: "Cancel all transfers?" })).toBeNull()
+
+		act(() => {
+			useTransfersStore.setState({
+				transfers: [...useTransfersStore.getState().transfers, transfer({ id: "b", status: "uploading" })]
+			})
+		})
+
+		expect(screen.queryByRole("alertdialog", { name: "Cancel all transfers?" })).toBeNull()
+		expect(sdkCancel).not.toHaveBeenCalled()
+	})
 })
 
 // Its row stays active while the copies it made move to the trash, which can be neither paused nor

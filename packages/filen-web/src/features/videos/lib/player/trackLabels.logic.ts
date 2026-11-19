@@ -25,7 +25,7 @@ export function trackLanguageName(code: string | null | undefined, uiLanguage: s
 	return name === undefined || name === tag ? languageName(tag) : name
 }
 
-export function channelLabel(channels: number | null, t: (key: "playerChannelsMono" | "playerChannelsStereo") => string): string | null {
+export function channelLabel(channels: number | null, t: TFunction<"videos">): string | null {
 	switch (channels) {
 		case null:
 			return null
@@ -38,16 +38,13 @@ export function channelLabel(channels: number | null, t: (key: "playerChannelsMo
 		case 8:
 			return "7.1"
 		default:
-			return `${String(channels)} ch`
+			return t("playerChannelsCount", { channels })
 	}
 }
 
 // An audio track as the tracks menu names it: its language (else its number) and channels ("English 5.1").
 export function audioTrackName(track: Pick<ProbeAudio, "lang" | "ch">, index: number, t: TFunction<"videos">): string {
-	return [
-		trackLanguageName(track.lang, i18n.language) ?? t("playerTrackNumber", { number: index + 1 }),
-		channelLabel(track.ch, key => t(key))
-	]
+	return [trackLanguageName(track.lang, i18n.language) ?? t("playerTrackNumber", { number: index + 1 }), channelLabel(track.ch, t)]
 		.filter(part => part !== null)
 		.join(" ")
 }

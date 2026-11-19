@@ -15,7 +15,11 @@ const { cached, fetchDirectoryListing, loadOriginBytes } = vi.hoisted(() => ({
 	loadOriginBytes: vi.fn(() => Promise.resolve(new Uint8Array(4)))
 }))
 
-vi.mock("@/features/drive/queries/drive", () => ({ fetchDirectoryListing, DRIVE_LISTING_KEY_PREFIX: ["drive", "listing"] }))
+// The cache lookup (findCachedDirectoryListing) is the real one, over the mocked cache below.
+vi.mock("@/features/drive/queries/drive", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
+	fetchDirectoryListing
+}))
 vi.mock("@/queries/patch", () => ({ cachedQueriesWithPrefix: () => cached }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root" }))
 vi.mock("@/features/preview/lib/origin/loadBytes", () => ({ loadOriginBytes }))

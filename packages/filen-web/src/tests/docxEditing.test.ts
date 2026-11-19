@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
+import { TextSelection } from "prosemirror-state"
 import { DocxEditorSession, openDocxEditContext } from "@filen/office/core/docx/edit"
 import type { DocxPrepareOptions, DocxSaveInput } from "@filen/office/core/docx/write"
 import type { DocxEditingHost } from "@filen/office/dom/docx/editing"
@@ -11,7 +12,15 @@ import { inThreadDocxZipper } from "@filen/office/dom/docx/save"
 // Saving with the writer refusing some edited blocks: they are locked back to the file's own and the rest is
 // written (decision 5 at save time); a refusal no lock resolves leaves the document as it was.
 
-const writer = vi.hoisted(() => ({ refuse: "", always: false, runs: 0, during: undefined as (() => void) | undefined }))
+// `tables`: refuses a document holding a table; `from`: refuses every run from that one on.
+const writer = vi.hoisted(() => ({
+	refuse: "",
+	always: false,
+	tables: false,
+	from: 0,
+	runs: 0,
+	during: undefined as (() => void) | undefined
+}))
 
 type Doc = DocxEditorSession["state"]["doc"]
 
@@ -29,6 +38,18 @@ function holds(doc: Doc, text: string): boolean {
 	return found
 }
 
+function hasTable(doc: Doc): boolean {
+	let found = false
+
+	doc.descendants(node => {
+		if (node.type.name === "table") found = true
+
+		return !found && !node.isTextblock
+	})
+
+	return found
+}
+
 vi.mock("@filen/office/core/docx/write", async () => {
 	const actual = await vi.importActual<typeof import("@filen/office/core/docx/write")>("@filen/office/core/docx/write")
 	const refused = (input: DocxSaveInput): boolean => {
@@ -36,7 +57,12 @@ vi.mock("@filen/office/core/docx/write", async () => {
 		// The user types while the writer runs (from its second run: the search).
 		if (writer.runs === 2) writer.during?.()
 
-		return writer.always || (writer.refuse.length > 0 && input.sessions.some(session => holds(session.state.doc, writer.refuse)))
+		return (
+			writer.always ||
+			(writer.from > 0 && writer.runs >= writer.from) ||
+			(writer.tables && input.sessions.some(session => hasTable(session.state.doc))) ||
+			(writer.refuse.length > 0 && input.sessions.some(session => holds(session.state.doc, writer.refuse)))
+		)
 	}
 
 	return {
@@ -116,6 +142,8 @@ function texts(doc: Doc): string[] {
 afterEach(() => {
 	writer.refuse = ""
 	writer.always = false
+	writer.tables = false
+	writer.from = 0
 	writer.runs = 0
 	writer.during = undefined
 })
@@ -279,5 +307,35 @@ describe("writeDocx", () => {
 		writer.always = true
 		await expect(writeDocx(host)).rejects.toBeInstanceOf(DocxSaveError)
 		expect(session.state.doc).toBe(before)
+	})
+	it("writes without a table the writer refuses, takes it back once stored, and remembers a refusal it does not resolve", async () => {
+		const { session, host } = await openSession(BYTES)
+		const insertTable = (): void => {
+			session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 1)))
+			expect(session.execute({ type: "table.insert", rows: 1, cols: 1 })).toBe(true)
+		}
+
+		expect(hasTable(session.state.doc)).toBe(false)
+		insertTable()
+		writer.tables = true
+
+		const written = await writeDocx(host)
+
+		expect(written.locked).toMatchObject({ count: 1, reverted: 0 })
+		expect(hasTable(session.state.doc)).toBe(true)
+		written.commit()
+		expect(written.locked?.reverted).toBe(1)
+		expect(hasTable(session.state.doc)).toBe(false)
+
+		// Refused again even with the table taken back: that state is not searched again.
+		insertTable()
+		writer.runs = 0
+		writer.from = 3
+		await expect(writeDocx(host)).rejects.toBeInstanceOf(DocxSaveError)
+
+		const runs = writer.runs
+
+		await expect(writeDocx(host)).rejects.toBeInstanceOf(DocxSaveError)
+		expect(writer.runs).toBe(runs)
 	})
 })

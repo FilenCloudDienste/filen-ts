@@ -1,6 +1,5 @@
 import { readXls, writeXlsx } from "hucre/xlsx"
 import { XlsxReadError } from "@filen/office/core/xlsx"
-import { convertedCopyName } from "@/features/drive/lib/copyName"
 
 // hucre's .xls reader raises its cell limit as a plain ParseError; only the message tells it from damage.
 const CELL_LIMIT = /^Sheet spans \d+ cells, over the \d+ limit\./
@@ -23,9 +22,4 @@ export async function xlsToXlsx(bytes: Uint8Array, maxTotalCells?: number): Prom
 			...(sheet.merges === undefined ? {} : { merges: sheet.merges })
 		}))
 	})
-}
-
-// "budget.xls" → "budget.xlsx", or "budget (2).xlsx", "(3)"… while `taken` says the name is in use.
-export function xlsxCopyName(original: string, taken: (name: string) => Promise<boolean>): Promise<string> {
-	return convertedCopyName(original, "xlsx", taken)
 }

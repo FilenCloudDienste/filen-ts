@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
-import type { RedactionFailure, RedactionFinding, RedactionMark } from "@filen/office/core/pdfedit/redactVerify"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import type { RedactionFailure, RedactionFinding, RedactionMark, RedactionQuery } from "@filen/office/core/pdfedit/redactVerify"
+import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
+import type { PdfDomDocument } from "@filen/office/react/pdf"
+import type { PdfToolContext, PdfToolSaveOutcome } from "@/features/pdf/tools/registry"
 import { previewPdfRedaction } from "@/locales/en/previewPdf/redaction"
 
 vi.mock("react-i18next", () => ({
@@ -15,10 +18,15 @@ const logError = vi.fn()
 
 vi.mock("@/lib/log", () => ({ log: { error: logError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
+const toastError = vi.fn()
+
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }))
+
 const { FindRedactPanel } = await import("@/features/pdf/redact/findRedactPanel")
 const { RedactionMarksList } = await import("@/features/pdf/redact/redactionMarksList")
 const { ApplyRedactionsDialog } = await import("@/features/pdf/redact/applyRedactionsDialog")
-const { findForRedaction } = await import("@/features/pdf/redact/redactFlow")
+const { applyRedactions, findForRedaction, rememberSearch } = await import("@/features/pdf/redact/redactFlow")
+const { RedactAreaPanel } = await import("@/features/pdf/redact/redactPanel")
 const { addTerm, failureReason, findQuery, markLabel, redactedCopyName } = await import("@/features/pdf/redact/redaction.logic")
 
 const suffix = (number: number): string => (number <= 1 ? "redacted" : `redacted ${String(number)}`)
@@ -32,6 +40,18 @@ const finding = (id: string, page: number, text: string): RedactionFinding => ({
 })
 
 const mark = (id: number, kind: RedactionMark["kind"], page = 0): RedactionMark => ({ id, page, kind, rect: [0, 0, 10, 10], quads: [] })
+
+// jsdom lays nothing out, and the results' virtualizer renders no rows into a viewport of no size: every element
+// reports a 440px client height (ten rows) until restored.
+function sizedViewport(): { restore: () => void } {
+	const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(440)
+
+	return {
+		restore: () => {
+			height.mockRestore()
+		}
+	}
+}
 
 describe("redaction rules", () => {
 	it("names the redacted copy beside the original", () => {
@@ -96,6 +116,7 @@ describe("redaction rules", () => {
 
 describe("redaction controls", () => {
 	it("searches the typed terms with the options and marks the selected results", () => {
+		const viewport = sizedViewport()
 		const onSearch = vi.fn()
 		const onMark = vi.fn()
 		const props = { searching: false, failed: false, onSearch, onMark, onClose: vi.fn() }
@@ -138,6 +159,7 @@ describe("redaction controls", () => {
 			/>
 		)
 		expect(screen.getByRole("button", { name: 'previewPdfFindRedactMark {"count":2}' })).toBeTruthy()
+		viewport.restore()
 	})
 
 	it("says a failed search failed, never that nothing matched", () => {
@@ -321,5 +343,229 @@ describe("redaction controls", () => {
 		)
 
 		expect(screen.getByText("previewPdfTagged")).toBeTruthy()
+	})
+})
+
+// An editor session keeping its history as labels (dispatch adds one, undo and redo move it), its marks and the
+// searches its engine ran.
+function historySession(options: { history?: string[]; marks?: RedactionMark[]; failing?: boolean } = {}) {
+	const history = [...(options.history ?? [])]
+	const redo: string[] = []
+	const finds: RedactionQuery[] = []
+	const listeners = new Set<() => void>()
+	let snapshot = { state: { revision: 1, undoLabel: history.at(-1) ?? null, tagged: false } }
+	const changed = (): void => {
+		snapshot = { state: { revision: snapshot.state.revision + 1, undoLabel: history.at(-1) ?? null, tagged: false } }
+
+		for (const listener of listeners) listener()
+	}
+	const session = {
+		getSnapshot: () => snapshot,
+		subscribe: (listener: () => void) => {
+			listeners.add(listener)
+
+			return () => {
+				listeners.delete(listener)
+			}
+		},
+		dispatch: (command: string) => {
+			history.push(command)
+			redo.length = 0
+			changed()
+
+			return Promise.resolve({})
+		},
+		undo: (count = 1) => {
+			for (let step = 0; step < count; step++) {
+				const label = history.pop()
+
+				if (label !== undefined) redo.push(label)
+			}
+
+			changed()
+
+			return Promise.resolve({})
+		},
+		redo: () => {
+			const label = redo.pop()
+
+			if (label !== undefined) history.push(label)
+
+			changed()
+
+			return Promise.resolve({})
+		},
+		engine: {
+			call: (op: string, args: { query?: RedactionQuery }) => {
+				if (options.failing === true) return Promise.reject(new Error("engine trap"))
+
+				if (op === "redactMarks") return Promise.resolve(options.marks ?? [mark(1, "area", 0)])
+
+				if (op === "redactFind" && args.query !== undefined) finds.push(args.query)
+
+				return Promise.resolve([])
+			}
+		}
+	} as unknown as PdfEditSessionModel
+
+	return { session, history, finds }
+}
+
+function toolContext(session: PdfEditSessionModel, save: (session: PdfEditSessionModel) => Promise<PdfToolSaveOutcome>): PdfToolContext {
+	return {
+		edit: (change: (current: PdfEditSessionModel) => Promise<unknown>) => {
+			void change(session)
+		},
+		finish: vi.fn(),
+		host: {
+			fileName: "contract.pdf",
+			takenNames: () => Promise.resolve(new Set<string>()),
+			canSaveInPlace: true,
+			save: () => save(session),
+			close: vi.fn()
+		}
+	} as unknown as PdfToolContext
+}
+
+const inPlace = { sanitize: true, removeAnnotations: true, destination: { kind: "inPlace" }, copySuffix: suffix } as const
+
+describe("applying redactions", () => {
+	it("undoes the version save's flatten step with the redaction steps when the save fails", async () => {
+		const { session, history } = historySession({ history: ["annotations.add"] })
+		const context = toolContext(session, async current => {
+			// Flatten annotations: the save's own step on top, then the save fails.
+			await current.dispatch("annotations.flatten", {})
+
+			return { status: "failed", error: new Error("upload failed") }
+		})
+
+		expect(await applyRedactions(context, inPlace)).toMatchObject({ kind: "failed" })
+		expect(history).toEqual(["annotations.add"])
+	})
+
+	it("keeps a flatten step an earlier save left below the redaction steps", async () => {
+		const { session, history } = historySession({ history: ["annotations.flatten"] })
+		const context = toolContext(session, () => Promise.resolve({ status: "failed", error: new Error("upload failed") }))
+
+		expect(await applyRedactions(context, inPlace)).toMatchObject({ kind: "failed" })
+		expect(history).toEqual(["annotations.flatten"])
+	})
+
+	it("puts back a flatten step on top with no redaction step under it", async () => {
+		// Applying fails before any step: the flatten on top is not the save's.
+		const { session, history } = historySession({ history: ["annotations.flatten"], failing: true })
+		const context = toolContext(session, () => Promise.resolve({ status: "saved", name: null }))
+
+		expect(await applyRedactions(context, inPlace)).toMatchObject({ kind: "failed" })
+		expect(history).toEqual(["annotations.flatten"])
+	})
+
+	it("tells a save that did not start from nothing to apply", async () => {
+		const empty = historySession({ marks: [] })
+
+		expect(
+			await applyRedactions(
+				toolContext(empty.session, () => Promise.resolve({ status: "saved", name: null })),
+				inPlace
+			)
+		).toEqual({
+			kind: "cancelled",
+			reason: "nothing"
+		})
+
+		const { session, history } = historySession()
+
+		expect(
+			await applyRedactions(
+				toolContext(session, () => Promise.resolve({ status: "cancelled" })),
+				inPlace
+			)
+		).toEqual({
+			kind: "cancelled",
+			reason: "save"
+		})
+		expect(history).toEqual([])
+	})
+
+	it("searches each distinct remembered query once before applying", async () => {
+		const { session, finds } = historySession()
+		const query = (matchCase: boolean): RedactionQuery => ({ terms: [{ text: "Ada", matchCase, wholeWord: false }], presets: [] })
+
+		for (let search = 0; search < 5; search++) rememberSearch(session, query(false))
+
+		await applyRedactions(
+			toolContext(session, () => Promise.resolve({ status: "saved", name: null })),
+			inPlace
+		)
+		expect(finds).toEqual([query(false)])
+
+		rememberSearch(session, query(true))
+		finds.length = 0
+		await applyRedactions(
+			toolContext(session, () => Promise.resolve({ status: "saved", name: null })),
+			inPlace
+		)
+		expect(finds).toEqual([query(false), query(true)])
+	})
+
+	it("says once that the save failed when it could not start, and nothing when there was nothing to apply", async () => {
+		toastError.mockClear()
+
+		const { session } = historySession()
+		const view = render(
+			<RedactAreaPanel
+				context={toolContext(session, () => Promise.resolve({ status: "cancelled" }))}
+				document={{} as PdfDomDocument}
+				active
+				phone={false}
+			/>
+		)
+
+		await waitFor(() => {
+			expect(screen.getByRole<HTMLButtonElement>("button", { name: "previewPdfRedactApply" }).disabled).toBe(false)
+		})
+		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApply" }))
+		fireEvent.click(screen.getByRole("radio", { name: "previewPdfRedactSaveInPlace" }))
+		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApplyConfirm" }))
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledTimes(1)
+		})
+		expect(toastError).toHaveBeenCalledWith("previewPdfSaveFailed")
+		view.unmount()
+	})
+})
+
+describe("find & redact with many results", () => {
+	it("mounts a window of rows, counts and marks every selected finding", () => {
+		const viewport = sizedViewport()
+		const onMark = vi.fn()
+		const findings = Array.from({ length: 20_000 }, (_, index) => finding(`${String(index)}:0`, index, `match ${String(index)}`))
+
+		render(
+			<FindRedactPanel
+				findings={findings}
+				searching={false}
+				failed={false}
+				onSearch={vi.fn()}
+				onMark={onMark}
+				onClose={vi.fn()}
+			/>
+		)
+
+		const rows = screen.getAllByRole("listitem")
+
+		expect(rows.length).toBeGreaterThan(0)
+		expect(rows.length).toBeLessThan(100)
+		expect(screen.getByRole("status").textContent).toBe('previewPdfFindRedactResults {"count":20000}')
+
+		fireEvent.click(screen.getByLabelText(/^match 3previewPdfPageNumber/))
+		fireEvent.click(screen.getByRole("button", { name: 'previewPdfFindRedactMark {"count":19999}' }))
+
+		const marked = onMark.mock.calls[0]?.[0] as RedactionFinding[]
+
+		expect(marked).toHaveLength(19_999)
+		expect(marked.some(item => item.id === "3:0")).toBe(false)
+		expect(marked.at(-1)?.id).toBe("19999:0")
+		viewport.restore()
 	})
 })

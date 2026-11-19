@@ -29,6 +29,7 @@ import {
 	mdhd,
 	mvhd,
 	segment,
+	stsd,
 	stringElement,
 	text,
 	tkhd,
@@ -809,6 +810,40 @@ describe("probeVideo — review regressions (MP4)", () => {
 
 		expect(record).toMatchObject({ partial: true, video: null })
 		expect(reads).toEqual([0])
+	})
+})
+
+describe("probeVideo — MP4 frame rate", () => {
+	// A picture trak whose stts holds `entries` (sample count, sample delta) at `timescale` ticks per second.
+	function timedMp4(timescale: number, entries: [number, number][], keyframes = false): Promise<Probed> {
+		const stts = fullBox("stts", 0, 0, u32(entries.length), ...entries.map(([count, delta]) => concat(u32(count), u32(delta))))
+		const video = box(
+			"trak",
+			tkhd({ id: 1 }),
+			box("mdia", mdhd({ timescale }), hdlr("vide"), box("minf", box("stbl", stsd(videoEntry("avc1", {}, AVCC)), stts)))
+		)
+
+		return probe(concat(FTYP, box("moov", mvhd({ duration: 1000 }), video)), keyframes ? "full" : "card")
+	}
+
+	it("states the rate of the delta most samples take", async () => {
+		expect((await timedMp4(25_000, [[250, 1000]])).record?.video?.fps).toBe(25)
+		// A first frame of an odd duration does not set the rate.
+		expect(
+			(
+				await timedMp4(24_000, [
+					[1, 1],
+					[500, 1001]
+				])
+			).record?.video?.fps
+		).toBeCloseTo(24000 / 1001, 6)
+		expect((await timedMp4(25_000, [[250, 1000]], true)).record?.video?.fps).toBe(25)
+	})
+
+	it("states none for an empty stts or a rate no picture has", async () => {
+		expect((await timedMp4(25_000, [])).record?.video?.fps).toBeUndefined()
+		expect((await timedMp4(1_000_000, [[10, 1]])).record?.video?.fps).toBeUndefined()
+		expect((await probe(mp4Video(videoEntry("avc1", {}, AVCC)), "card")).record?.video?.fps).toBeUndefined()
 	})
 })
 

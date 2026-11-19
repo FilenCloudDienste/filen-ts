@@ -31,7 +31,7 @@ import {
 	defaultHeicUploadDeps,
 	heicUploadConversionEnabled,
 	isHeicUploadCandidate,
-	maybeConvertHeicUpload
+	withConvertedHeic
 } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
@@ -39,8 +39,9 @@ import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/q
 
 // Injected collaborators so a single upload attempt is unit-testable without a worker or a query
 // client — mirrors runCreateDirectory's shape (features/drive/lib/createDirectory.ts). `store` needs `remove`
-// too now: a Cancelled rejection drops the row entirely (mirrors runDownload). `cancel` is unused by
-// runUpload itself, same as RunDownloadDeps' own (download.ts) — kept for DI/testability parity. Progress
+// too now: a Cancelled rejection drops the row entirely (mirrors runDownload). `cancel` is what
+// quotaStopFailure (reached from runUpload's catch) uses to stop the batch's other in-flight files once the server
+// refused one for storage. Progress
 // reaches the store on its own, through the worker's one progress channel (progressChannel.ts); `runId`
 // names the directory run whose stop and pause the file shares.
 export interface RunUploadDeps {
@@ -341,8 +342,8 @@ function isDirectorySizeKeyIn(queryKey: readonly unknown[], uuids: ReadonlySet<s
 
 // The real wiring behind RunUploadDeps.upload: crosses to the sdk worker, its progress coming back through
 // the worker's one progress channel (opened ahead of the op, see progressChannel.ts).
-// `cancel` mirrors defaultDownloadDeps.cancel (download.ts): fire-and-forget straight to the worker,
-// unused by runUpload itself. `useTransfersStore.getState()` grabs the store's ACTIONS once — they're
+// `cancel` mirrors defaultDownloadDeps.cancel (download.ts): fire-and-forget straight to the worker, used to stop
+// a batch's other files after a storage refusal (quotaStopFailure). `useTransfersStore.getState()` grabs the store's ACTIONS once — they're
 // stable references for the store's entire lifetime (zustand never reassigns them), so reading them
 // here at module scope is safe as non-render orchestration code, unlike reading state itself outside
 // a selector hook. Exported so uploadDirectory.ts's own defaultDirectoryUploadDeps can reuse this
@@ -470,14 +471,14 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 				return await runUpload(defaultUploadDeps, { parentUuid, file, batch, row, quotaStop })
 			}
 
-			const prepared = await maybeConvertHeicUpload(defaultHeicUploadDeps.convert, file, convertHeic)
+			return await withConvertedHeic(defaultHeicUploadDeps.convert, file, convertHeic, async prepared => {
+				// Cancelled from the listing while this one was still being prepared.
+				if (uploadBatchControl.isCancelled(batch.id)) {
+					return { status: "cancelled" }
+				}
 
-			// Cancelled from the listing while this one was still being prepared.
-			if (uploadBatchControl.isCancelled(batch.id)) {
-				return { status: "cancelled" }
-			}
-
-			return await runUpload(defaultUploadDeps, { parentUuid, file: prepared, batch, counted: file.size, quotaStop })
+				return await runUpload(defaultUploadDeps, { parentUuid, file: prepared, batch, counted: file.size, quotaStop })
+			})
 		})
 	)
 

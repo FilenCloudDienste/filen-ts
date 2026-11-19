@@ -188,6 +188,30 @@ describe("library search", () => {
 		expect(searchVideos({ index, query: "soren" })[0]?.results.map(result => result.title.id)).toEqual(["Søren"])
 	})
 
+	it("finds a word inside a title written without spaces", () => {
+		const spirited = title("千と千尋の神隠し", { year: 2001 })
+		const thai = title("ฟ้าทะลายโจร")
+		const report = title("報告書Archive")
+		const latin = title("Archives")
+		const titles = [spirited, thai, report, latin]
+		const index = buildVideoSearchIndex({
+			titles,
+			items: [episodeItem("千と千尋の神隠し", 1, 1, { episodeTitle: "トンネルの向こう" })]
+		})
+		const found = (query: string) => searchVideos({ index, query }).flatMap(group => group.results.map(result => result.title.id))
+
+		expect(found("神隠し")).toEqual(["千と千尋の神隠し"])
+		expect(found("千尋 2001")).toEqual(["千と千尋の神隠し"])
+		expect(found("向こう")).toEqual(["千と千尋の神隠し"])
+		expect(found("ทะลาย")).toEqual(["ฟ้าทะลายโจร"])
+		expect(found("archive")).toEqual(["Archives", "報告書Archive"])
+		expect(found("報告")).toEqual(["報告書Archive"])
+		// Latin letters keep matching at word starts only.
+		expect(found("rchive")).toEqual([])
+		expect(ids(filterTitlesByQuery({ titles, query: "神隠し", tokens: titleSearchTokens(titles) }))).toEqual(["千と千尋の神隠し"])
+		expect(ids(filterTitlesByQuery({ titles, query: "書archive", tokens: titleSearchTokens(titles) }))).toEqual(["報告書Archive"])
+	})
+
 	it("needs every token and finds nothing for an empty query", () => {
 		expect(search("lost pilot")).toEqual([])
 		expect(search("  ")).toEqual([])

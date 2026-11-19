@@ -91,6 +91,9 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const retuneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	// Mirrors whether pushState.hits is non-empty, written at every place the hits change, so a
+	// heartbeat can pick the watchdog ceiling without reading state through a (must-be-pure) updater.
+	const hasHitsRef = useRef(false)
 
 	function clearTimers(): void {
 		if (graceTimerRef.current !== null) {
@@ -146,6 +149,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		}
 
 		if (push.type === "snapshot") {
+			hasHitsRef.current = push.hits.length > 0
 			setPushState(prev => ({ ...prev, hits: push.hits, total: push.total, live: push.live, hasSnapshot: true }))
 			armGrace()
 			armWatchdog(push.hits.length > 0)
@@ -165,11 +169,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 		if (push.type === "heartbeat") {
 			armGrace()
-			setPushState(prev => {
-				armWatchdog(prev.hits.length > 0)
-
-				return prev
-			})
+			armWatchdog(hasHitsRef.current)
 
 			return
 		}
@@ -183,6 +183,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 		const generation = ++generationRef.current
 
+		hasHitsRef.current = false
 		setPushState(INITIAL_PUSH_STATE)
 		armGrace()
 		armWatchdog(false)
@@ -200,6 +201,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 			}
 
 			engagedRef.current = true
+			hasHitsRef.current = snapshot.hits.length > 0
 			setPushState(prev => ({ ...prev, hits: snapshot.hits, total: snapshot.total, live: snapshot.live, hasSnapshot: true }))
 			armGrace()
 			armWatchdog(snapshot.hits.length > 0)
@@ -280,6 +282,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		openInFlightRef.current = false
 		pendingQueryRef.current = null
 		clearTimers()
+		hasHitsRef.current = false
 		setPushState(INITIAL_PUSH_STATE)
 		setGraceElapsed(false)
 		setWatchdogTripped(false)

@@ -2,13 +2,13 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { driveItemName } from "@filen/shared"
-import { usePdfEditSession, type PdfEditSnapshot } from "@filen/office/react/pdfedit"
+import { usePdfEditSession, type PdfEditSessionModel, type PdfEditSnapshot } from "@filen/office/react/pdfedit"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { SaveRefusedError, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
+import { SaveRefusedError, type PresentationSaveEdits, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import { normalizeParentUuid } from "@/features/drive/queries/drive"
-import { takenNames } from "@/features/preview/imageEdit/editSession"
+import { takenNamesInDirectory } from "@/features/drive/lib/nameTaken"
 import { failureReason } from "@/features/pdf/redact/redaction.logic"
 import { EarlierVersionsWarning } from "@/features/pdf/save/earlierVersionsWarning"
 import { PdfRedactionRefusedError } from "@/features/pdf/save/pdfSave"
@@ -199,12 +199,12 @@ export function usePdfEdit(
 		onDirtyChange?.(dirty || openDraft !== null)
 	}, [dirty, openDraft, onDirtyChange])
 
-	// The viewer going away closes the editor with it, and drops a draft of its pages left open (its unsaved changes were
-	// asked about by the overlay).
+	// The viewer going away closes the editor with it, drops a draft of its pages left open (its unsaved changes were
+	// asked about by the overlay), and then releases the second PDFs the closed engine read for inserting.
 	useEffect(
 		() => () => {
-			pages.closeDraft(false)
 			swap.close()
+			pages.dispose()
 		},
 		[swap, pages]
 	)
@@ -367,9 +367,31 @@ export function usePdfEdit(
 
 	const actions = pdfEditActions(saveDeps, item)
 
+	// A Save refused before saveVersion took a tool's parked request: the request ends here (cancelled when another save
+	// holds the document, failed otherwise), so the tool hears and the next plain Save is not run as its save.
+	const refusedBeforeSave = (error: SaveRefusedError, cancelled: boolean): Promise<never> => {
+		saveRequest.current?.settle(cancelled ? { status: "cancelled" } : { status: "failed", error })
+
+		return Promise.reject(error)
+	}
+
+	// The overlay's Save on `live`. With "Flatten annotations" chosen the annotations are drawn in first, except for a
+	// signing save (signBegin needs the placed signature as the last step). A failed flatten ends a parked request.
+	const versionSave = (live: PdfEditSessionModel | null): Promise<PresentationSaveEdits> => {
+		const request = saveRequest.current
+
+		return flattenedFirst(live, flatten && (request?.job ?? null) === null, () => actions.saveVersion()).catch((error: unknown) => {
+			// saveVersion takes the request first: still parked, the save never reached it.
+			if (request !== null && saveRequest.current === request) request.settle({ status: "failed", error })
+
+			throw error
+		})
+	}
+
 	// A Save the overlay runs now, for a tool (a save in place, or a signing save with `job`): how it ended. The overlay's
-	// Save is retried while it has not seen the change yet (its dirty bit follows the editor's after a render), and is
-	// cancelled when it cannot start (one under way, a dialog open).
+	// Save is retried while it has not seen the change yet (its dirty bit follows the editor's after a render), waited
+	// for while another save holds the document (a Save as copy taken during the tool's step), and is cancelled when it
+	// cannot start (a dialog open).
 	const requestSave = async (job: PdfSignedSaveJob | null, adopt = false): Promise<PdfToolSaveOutcome> => {
 		// A draft is no file to save in place.
 		if (host?.writable !== true || draft !== undefined) return { status: "cancelled" }
@@ -390,8 +412,18 @@ export function usePdfEdit(
 
 		saveRequest.current = request
 
-		for (let attempt = 0; attempt < 20; attempt++) {
-			if (host.onSave()) return ended
+		for (let attempt = 0; attempt < 20;) {
+			// Ended meanwhile (a Save refused during a hold): the overlay is not asked again for it.
+			if (saveRequest.current !== request) return ended
+
+			const current = swap.getSnapshot()
+
+			// A hold is no refusal: the save source would refuse it now, so the poll waits for the hold to end.
+			if (current.kind !== "editing" || !current.saving) {
+				if (host.onSave()) return ended
+
+				attempt++
+			}
 
 			await new Promise(resolve => setTimeout(resolve, 50))
 		}
@@ -523,7 +555,7 @@ export function usePdfEdit(
 				const base = asDirectoryOrFile(item)
 
 				return base.type === "file"
-					? takenNames(normalizeParentUuid(base.data.parent, currentRootUuid()))
+					? takenNamesInDirectory(normalizeParentUuid(base.data.parent, currentRootUuid()))
 					: Promise.resolve(new Set<string>())
 			},
 			canSaveInPlace: host?.writable === true && draft === undefined,
@@ -547,7 +579,7 @@ export function usePdfEdit(
 					fileSize: () => Number(item.data.size),
 					memory: pdfEngineMemory(),
 					// The changes saved first are signed on next: the session goes on on that file.
-					save: job => requestSave(job, job === null).then(outcome => outcome.status === "saved"),
+					save: job => requestSave(job, job === null).then(outcome => outcome.status),
 					job: (signer, digest) => ({
 						signer,
 						digest,
@@ -665,8 +697,8 @@ export function usePdfEdit(
 							options.auto
 								? Promise.resolve(null)
 								: saving
-									? Promise.reject(new SaveRefusedError("previewPdfSaveFailed", { silent: true }))
-									: flattenedFirst(session, flatten, () => actions.saveVersion())
+									? refusedBeforeSave(new SaveRefusedError("previewPdfSaveFailed", { silent: true }), true)
+									: versionSave(session)
 					: // A Save while the editor starts (text typed into a field starts it) runs once it has the document.
 						phase.kind === "starting"
 						? options =>
@@ -676,8 +708,8 @@ export function usePdfEdit(
 											.started()
 											.then(started =>
 												started === null
-													? Promise.reject(new SaveRefusedError("previewPdfSaveFailed"))
-													: flattenedFirst(started, flatten, () => actions.saveVersion())
+													? refusedBeforeSave(new SaveRefusedError("previewPdfSaveFailed"), false)
+													: versionSave(started)
 											)
 						: null,
 		activeTool,

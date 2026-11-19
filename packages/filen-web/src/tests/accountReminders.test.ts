@@ -52,8 +52,10 @@ function renderReminders(): void {
 }
 
 // The store lives for the page load, so a test that dismisses one reminder would otherwise decide the
-// next one's starting state.
+// next one's starting state. desktopBridge goes back to the browser default for the same reason: clearMocks
+// keeps a value a test armed on it.
 beforeEach(() => {
+	desktopBridge.mockReset()
 	useReminderStore.setState({ keysDismissed: false, storageDismissed: false, storageFullRequested: false })
 })
 

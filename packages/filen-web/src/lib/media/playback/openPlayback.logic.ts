@@ -16,7 +16,7 @@ export type SessionPlan =
 
 // The Content-Type a direct stream is served with. MOV is probed and served as MP4: Chrome plays it by
 // sniffing but answers canPlayType("video/quicktime") with nothing.
-function directContentType(container: string): string | null {
+export function directContentType(container: string): string | null {
 	switch (normalizeLadderContainer(container)) {
 		case "mp4":
 		case "m4v":

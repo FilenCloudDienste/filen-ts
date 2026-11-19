@@ -808,6 +808,69 @@ describe("an archive entry on its own", () => {
 		expect(outer.acceptPassword).not.toHaveBeenCalled()
 	})
 
+	it("keeps the inner archive's own password prompt when the password typed for it is refused", async () => {
+		const outer = fakeSession(storeOf([{ path: "inner.zip", size: MiB, access: DIRECT, encrypted: true }]))
+		// An inner archive whose index is encrypted: it asks a password of its own, which then proves wrong.
+		const listeners = new Set<() => void>()
+		let snapshot: ListingSnapshot = { phase: { type: "needsPassword", wrong: false }, store: storeOf([]), version: 0, info: INFO }
+		const inner: ListingSession = {
+			...fakeSession(snapshot.store),
+			getSnapshot: () => snapshot,
+			subscribe: listener => {
+				listeners.add(listener)
+
+				return () => {
+					listeners.delete(listener)
+				}
+			}
+		}
+		const opened: ArchiveSource[] = []
+
+		archiveEntryAccess.mockResolvedValue("mapped")
+		openListingSession.mockImplementation((source: ArchiveSource) => {
+			opened.push(source)
+
+			return source.nested === null ? outer : inner
+		})
+		renderBrowser()
+
+		fireEvent.doubleClick(row("inner.zip"))
+
+		const outerPrompt = await screen.findByRole("dialog", { name: "Archive password" })
+
+		fireEvent.change(within(outerPrompt).getByLabelText("Password"), { target: { value: "outer-pw" } })
+		fireEvent.click(within(outerPrompt).getByRole("button", { name: "Unlock" }))
+
+		const innerPrompt = await screen.findByRole("dialog", { name: "Archive password" })
+
+		await vi.waitFor(() => {
+			expect(screen.getByRole("dialog", { name: "Archive password" }).textContent).toContain("inner.zip")
+		})
+		fireEvent.change(within(innerPrompt).getByLabelText("Password"), { target: { value: "typo" } })
+		fireEvent.click(within(innerPrompt).getByRole("button", { name: "Unlock" }))
+		expect(inner.submitPassword).toHaveBeenCalledWith("typo")
+
+		const openedBefore = opened.length
+
+		// The run it started ends refusing that password.
+		for (const phase of [{ type: "starting" }, { type: "needsPassword", wrong: true }] as const) {
+			snapshot = { ...snapshot, phase, version: snapshot.version + 1 }
+			act(() => {
+				for (const listener of listeners) {
+					listener()
+				}
+			})
+		}
+
+		// Still inside: the inner archive asks its own password again, and the outer one is not asked for anew.
+		const again = await screen.findByRole("dialog", { name: "Archive password" })
+
+		expect(again.textContent).toContain("inner.zip")
+		expect(again.textContent).not.toContain("bundle.7z")
+		expect(opened).toHaveLength(openedBefore)
+		expect(outer.acceptPassword).not.toHaveBeenCalled()
+	})
+
 	it("gives the outer listing the typed password once the inner archive lists, and keeps the outer level's session", async () => {
 		const outer = fakeSession(storeOf([{ path: "inner.zip", size: MiB, access: DIRECT, encrypted: true }]))
 		const inner = fakeSession(storeOf([{ path: "a.txt", size: 3, access: DIRECT }]))

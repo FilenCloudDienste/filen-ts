@@ -81,7 +81,7 @@ const INFO: ChartInfo = {
 	]
 }
 
-function panel(readOnly = false) {
+function panel(readOnly = false, info: ChartInfo = INFO) {
 	const edits: SheetChartEdit[] = []
 	const onClose = vi.fn()
 
@@ -89,7 +89,7 @@ function panel(readOnly = false) {
 		<ChartPanel
 			sheet={1}
 			part="xl/charts/chart1.xml"
-			state={{ status: "ready", info: INFO, readOnly }}
+			state={{ status: "ready", info, readOnly }}
 			canEdit
 			selection={{ startRow: 1, startCol: 3, endRow: 3, endCol: 3 }}
 			onEdit={edit => {
@@ -176,6 +176,16 @@ describe("chart editor panel", () => {
 		expect(screen.getByText(/can't be changed here/)).toBeTruthy()
 		expect(screen.getByLabelText<HTMLInputElement>("Chart title").disabled).toBe(true)
 		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Add series from selection" }).disabled).toBe(true)
+	})
+
+	it("names the type of a plot it cannot change in one line", () => {
+		const [plot] = INFO.plots
+
+		if (plot === undefined) throw new Error("no plot")
+
+		panel(false, { ...INFO, plots: [{ ...plot, type: "radar", element: "radarChart" }] })
+
+		expect(screen.getByText("Chart type: Radar")).toBeTruthy()
 	})
 
 	it("takes focus when it opens, at its heading", () => {

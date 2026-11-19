@@ -3,5 +3,13 @@
 .fo-pdf-text-layer {
 	--fo-pdf-highlight: rgb(180 0 170 / 0.25);
 	--fo-pdf-highlight-selected: rgb(0 100 0 / 0.25);
-	--fo-pdf-selection: color-mix(in srgb, AccentColor, transparent 50%);
+	--fo-pdf-selection: rgb(0 0 255 / 0.25);
+}
+
+/* A var() declaration always parses, so the AccentColor mix is set only where the engine resolves it; elsewhere it
+   would be invalid at computed time and leave the selection transparent. */
+@supports (color: color-mix(in srgb, AccentColor, transparent 50%)) {
+	.fo-pdf-text-layer {
+		--fo-pdf-selection: color-mix(in srgb, AccentColor, transparent 50%);
+	}
 }

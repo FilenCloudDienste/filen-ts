@@ -129,7 +129,7 @@ export function buildMediaSessionActionHandlers(
 
 // Pure metadata projection for the current track. `tags` is the resolved (or not-yet-resolved) tag
 // read: a resolved title wins over the filename (a tag read that came back with no title at all is
-// `null`, not an empty string — see metadata.ts's tagsFromParsed); artist/album fall back to empty
+// `null`, not an empty string — trackTags.logic.ts's trackTagRecordSchema); artist/album fall back to empty
 // strings (the OS surface has no concept of "unknown", only absent). null for no current track (the
 // binder clears the OS metadata).
 export function mediaSessionMetadataFor(

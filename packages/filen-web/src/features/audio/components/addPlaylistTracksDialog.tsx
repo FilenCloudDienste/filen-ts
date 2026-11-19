@@ -39,43 +39,41 @@ interface AddTrackRowProps {
 	onToggle: (item: DriveItem) => void
 }
 
-// Its own component so a selection toggle re-renders only the toggled row, not the whole unvirtualized list.
+// Its own component so a selection toggle re-renders only the toggled row, not every row in the window.
 function AddTrackRow({ item, alreadyAdded, selected, disabled, alreadyAddedLabel, onDescend, onToggle }: AddTrackRowProps) {
 	return (
-		<li>
-			<button
-				type="button"
-				disabled={disabled}
-				onClick={() => {
-					if (item.type === "directory") {
-						onDescend(item.data.uuid)
-						return
-					}
+		<button
+			type="button"
+			disabled={disabled}
+			onClick={() => {
+				if (item.type === "directory") {
+					onDescend(item.data.uuid)
+					return
+				}
 
-					onToggle(item)
-				}}
-				aria-pressed={item.type === "file" ? selected : undefined}
-				className={cn(PICKER_ROW_CLASS, selected && "bg-accent/70 text-accent-foreground")}
-			>
-				{item.type === "directory" ? (
-					<DirectoryGlyph
-						color={item.data.color}
-						className="size-4 shrink-0"
-					/>
-				) : (
-					<ItemIcon
-						item={item}
-						className="size-4 shrink-0"
-					/>
-				)}
-				<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
-				{alreadyAdded ? (
-					<span className="shrink-0 text-xs text-muted-foreground">{alreadyAddedLabel}</span>
-				) : selected ? (
-					<CheckIcon className="size-4 shrink-0 text-primary" />
-				) : null}
-			</button>
-		</li>
+				onToggle(item)
+			}}
+			aria-pressed={item.type === "file" ? selected : undefined}
+			className={cn(PICKER_ROW_CLASS, selected && "bg-accent/70 text-accent-foreground")}
+		>
+			{item.type === "directory" ? (
+				<DirectoryGlyph
+					color={item.data.color}
+					className="size-4 shrink-0"
+				/>
+			) : (
+				<ItemIcon
+					item={item}
+					className="size-4 shrink-0"
+				/>
+			)}
+			<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
+			{alreadyAdded ? (
+				<span className="shrink-0 text-xs text-muted-foreground">{alreadyAddedLabel}</span>
+			) : selected ? (
+				<CheckIcon className="size-4 shrink-0 text-primary" />
+			) : null}
+		</button>
 	)
 }
 
@@ -226,14 +224,19 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 				) : null}
 				<PickerListShell
 					listingQuery={listingQuery}
-					isEmpty={filtered.length === 0}
-				>
-					{filtered.map(item => {
+					count={filtered.length}
+					rowKey={index => filtered[index]?.data.uuid ?? String(index)}
+					renderRow={index => {
+						const item = filtered[index]
+
+						if (item === undefined) {
+							return null
+						}
+
 						const alreadyAdded = item.type === "file" && existingUuids.has(item.data.uuid)
 
 						return (
 							<AddTrackRow
-								key={item.data.uuid}
 								item={item}
 								alreadyAdded={alreadyAdded}
 								selected={selected.has(item.data.uuid)}
@@ -243,8 +246,8 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 								onToggle={toggle}
 							/>
 						)
-					})}
-				</PickerListShell>
+					}}
+				/>
 				<DialogFooter>
 					<Button
 						disabled={pending || selected.size === 0}

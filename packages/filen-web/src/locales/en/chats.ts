@@ -68,6 +68,8 @@ export const chats = {
 	chatHeaderParticipants_other: "{{count}} participants",
 	/** Thread — label on the one-time "New" divider inserted at the first unread message; click marks read */
 	chatUnreadDivider: "New",
+	/** Thread — accessible label and tooltip on the "New" divider button; activating it marks the chat read */
+	chatUnreadDividerMarkRead: "New messages. Mark as read",
 	/** Thread — accessible label on the floating scroll-to-bottom pill (singular) */
 	chatScrollToBottom_one: "{{count}} new message",
 	/** Thread — accessible label on the floating scroll-to-bottom pill (plural) */
@@ -132,6 +134,18 @@ export const chats = {
 	chatComposerCancelEdit: "Cancel edit",
 	/** Composer — shown under the input when the message exceeds the maximum length */
 	chatComposerOverLimit: "Message is too long (max {{max}} characters)",
+	/** Composer — accessible label on the near-limit character counter (singular) */
+	chatComposerCharsRemaining_one: "{{count}} character remaining",
+	/** Composer — accessible label on the near-limit character counter (plural) */
+	chatComposerCharsRemaining_other: "{{count}} characters remaining",
+	/** Composer — accessible label on the character counter once the message is over the limit (singular) */
+	chatComposerCharsOver_one: "{{count}} character over the limit",
+	/** Composer — accessible label on the character counter once the message is over the limit (plural) */
+	chatComposerCharsOver_other: "{{count}} characters over the limit",
+	/** Composer — screen-reader announcement when the mention or emoji suggestion list opens (singular) */
+	chatComposerSuggestionCount_one: "{{count}} suggestion available",
+	/** Composer — screen-reader announcement when the mention or emoji suggestion list opens (plural) */
+	chatComposerSuggestionCount_other: "{{count}} suggestions available",
 	/** Composer — toast when a queued send couldn't be written to disk (survives in memory only) */
 	chatMessageNotSaved: "Message couldn't be saved to this device",
 

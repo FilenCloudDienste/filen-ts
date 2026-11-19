@@ -41,7 +41,11 @@ async function uploadTextFile(page: Page, listbox: Locator, name: string): Promi
 	await uploadFiles(page, [{ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) }], listbox)
 }
 
-test.describe.configure({ mode: "serial" })
+// One test at a time through the write lane's `workers: 1` (playwright.config.ts) plus the cross-process
+// drive account lock (fixtures.ts). Default mode, not serial: a serial group skips every later test after
+// one failure, and each test here brackets its own scratch directory. Kept explicit so the file does not
+// turn parallel-eligible under fullyParallel if the lane's worker count ever rises.
+test.describe.configure({ mode: "default" })
 
 test.describe("drive copy", () => {
 	test("copies a file into another directory through the item menu's tree, leaving the source in place", async ({ page }) => {

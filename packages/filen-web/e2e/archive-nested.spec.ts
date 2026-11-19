@@ -1,14 +1,14 @@
-import { test, expect, settleLeases } from "./fixtures"
+import { test, expect } from "./fixtures"
 import { archivePasswordPrompt, expectRows, openArchive } from "./helpers/archive"
-import { NESTED_TEXTS, nestedZip, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
+import { NESTED_TEXTS, ZIPCRYPTO_PASSWORD } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
-import { BOOT_SETTLE_TIMEOUT_MS, bootTo, enterScratchDirectory, trashScratchDirectory, uploadFiles } from "./helpers/listing"
-import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
+import { bootTo } from "./helpers/listing"
 import { observeEgest } from "./helpers/requests"
 
 // Archives inside an archive (W6 §6.1 A, fixtures in helpers/archiveFixtures.ts): a zip and a tar stored in a zip, and a
-// zip deflated in it, each browsed in the outer one's place, the crumbs running on through it. A pure read.
+// zip deflated in it, each browsed in the outer one's place, the crumbs running on through it. A pure read of the shared fixture tree;
+// the public-link case writes, so it lives in archive-surfaces.spec.ts.
 
 const [NESTED] = FIXTURE_FILES["archive-nested"]
 
@@ -154,42 +154,5 @@ test.describe("archives inside an archive: their cases", () => {
 		await expect(browser.overlay.getByText(/can't be opened from inside this archive/)).toBeVisible()
 		await expect(browser.overlay.getByRole("button", { name: "Extract to open", exact: true })).toBeVisible()
 		await browser.close()
-	})
-})
-
-test.describe("archives inside an archive on a public link", () => {
-	test.skip(!process.env["E2E_PREMIUM"], "public links need a premium account")
-
-	test("the owner browses into a zip held in a linked zip", async ({ page }) => {
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-nested-link-${runId}`
-		const archiveName = `e2e-nested-${runId}.zip`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
-
-			await uploadFiles(page, [{ name: archiveName, mimeType: "application/zip", buffer: nestedZip() }], listbox)
-
-			const dialog = await openLinkDialog(page, listbox, archiveName)
-			const url = await createLink(dialog)
-
-			await closeLinkDialog(page, dialog)
-			await settleLeases(page)
-			await page.goto(url)
-			await page.getByRole("button", { name: "Browse contents", exact: true }).click({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-
-			const list = page.getByRole("listbox", { name: /^Contents of / })
-			const crumbs = page.getByRole("navigation", { name: "Location in the archive", exact: true })
-
-			await list.getByRole("option", { name: /^trip/ }).dblclick()
-			await list.getByRole("option", { name: /^inner\.zip/ }).dblclick()
-			await expect(list).toHaveAccessibleName("Contents of inner.zip")
-			await expect(crumbs.getByRole("button")).toHaveText([archiveName, "trip", "inner.zip"])
-		} finally {
-			await bootTo(page).catch(() => undefined)
-			await trashScratchDirectory(page, scratchName)
-		}
 	})
 })

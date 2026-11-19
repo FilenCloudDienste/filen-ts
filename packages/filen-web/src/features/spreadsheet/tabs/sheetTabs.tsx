@@ -370,7 +370,16 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 				aria-label={t("previewSpreadsheetSheets")}
 				className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
 				onKeyDown={event => {
-					// A rename field's input method keeps its keys.
+					// Only keys pressed on a tab: the menu button and the tab menus (portaled, but bubbling through React) keep theirs.
+					if (
+						!(event.target instanceof Element) ||
+						event.target.closest("[role=tab]") === null ||
+						!event.currentTarget.contains(event.target)
+					) {
+						return
+					}
+
+					// Keys still being composed by an input method are not navigation.
 					if (isImeKeydown(event.nativeEvent)) {
 						return
 					}

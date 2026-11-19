@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { BufferSource, CustomSource, EncodedPacketSink, Input, type InputFormat, type InputTrack } from "mediabunny"
+import { BufferSource, CustomSource, EncodedPacketSink, Input, InputFormat, type Demuxer, type InputTrack } from "mediabunny"
 import { ASF_SIMPLE_INDEX, parseAsfHeader } from "@filen/shared/videos"
 import { ASF } from "@/lib/media/demux/asfDemuxer"
 import { AVI, KeyIndexBuilder } from "@/lib/media/demux/aviDemuxer"
 import { FLV } from "@/lib/media/demux/flvDemuxer"
+import { PacketDemuxer, packetDemuxerOf, type ContainerReader, type DemuxPacket } from "@/lib/media/demux/packetDemuxer"
 
 // Real files with one header size made hostile, served as the head of a 2 GiB file: opening and reading them stays
 // within the probe's own read budget instead of fetching what the header claims.
@@ -245,5 +246,137 @@ describe("ASF reassembly", () => {
 		await new EncodedPacketSink(defined(await input.getPrimaryAudioTrack())).getFirstPacket()
 
 		expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(48 * 1024 * 1024)
+	})
+})
+
+// ── Key packet search over a long group of pictures ──
+
+// One video picture per 16-byte unit, at 30 fps unless given, read 64 units at a time; packets carry no payload, so
+// only the record budget (about 2730 packets) evicts.
+const PICTURE_UNIT = 16
+const PICTURE_SECONDS = 1 / 30
+
+function pictures(units: number, isKey: (unit: number) => boolean, seconds: number): ContainerReader {
+	// A search that rereads the file endlessly fails here instead of hanging (reads resolve at once, so no timeout fires).
+	const readLimit = units
+	let reads = 0
+
+	return {
+		tracks: [
+			{
+				type: "video",
+				number: 1,
+				name: null,
+				language: "und",
+				isDefault: true,
+				internalCodecId: null,
+				codec: "avc",
+				width: 16,
+				height: 16,
+				squarePixelWidth: 16,
+				squarePixelHeight: 16,
+				decoderConfig: { codec: "avc1.42001e", codedWidth: 16, codedHeight: 16 }
+			}
+		],
+		duration: units * seconds,
+		dataStart: 0,
+		readPackets: pos => {
+			reads++
+
+			if (reads > readLimit) {
+				throw new Error(`read ${String(reads)} times`)
+			}
+
+			const start = pos / PICTURE_UNIT
+
+			if (start >= units) {
+				return Promise.resolve(null)
+			}
+
+			const packets: DemuxPacket[] = []
+			const end = Math.min(units, start + 64)
+
+			for (let unit = start; unit < end; unit++) {
+				packets.push({
+					track: 1,
+					pts: unit * seconds,
+					duration: seconds,
+					key: isKey(unit),
+					unit: unit * PICTURE_UNIT,
+					part: 0,
+					pos: unit * PICTURE_UNIT,
+					size: 1
+				})
+			}
+
+			return Promise.resolve({ packets, next: end * PICTURE_UNIT })
+		},
+		resync: pos => Promise.resolve(Math.ceil(pos / PICTURE_UNIT) * PICTURE_UNIT)
+	}
+}
+
+class PictureFormat extends InputFormat {
+	public readonly name = "pictures"
+	public readonly mimeType = "video/x-pictures"
+	public readonly supportsTimestampedMediaData = true
+	private readonly reader: ContainerReader
+
+	public constructor(reader: ContainerReader) {
+		super()
+		this.reader = reader
+	}
+
+	public override _getMatchPosition(): Promise<number | null> {
+		return Promise.resolve(0)
+	}
+
+	public override _createDemuxer(input: Input): Demuxer {
+		return new PacketDemuxer(input, this.mimeType, () => Promise.resolve(this.reader))
+	}
+}
+
+async function packetAt(units: number, isKey: (unit: number) => boolean, unit: number, key: boolean, seconds = PICTURE_SECONDS) {
+	const input = new Input({
+		formats: [new PictureFormat(pictures(units, isKey, seconds))],
+		source: new BufferSource(new Uint8Array(units * PICTURE_UNIT))
+	})
+
+	await input.getTracks()
+
+	return defined(packetDemuxerOf(input)).at(1, unit * seconds, key, { metadataOnly: true })
+}
+
+async function keyPacketAt(units: number, isKey: (unit: number) => boolean, unit: number) {
+	return packetAt(units, isKey, unit, true)
+}
+
+describe("PacketDemuxer key packet search", () => {
+	it("finds the only key picture more than 3000 packets before the target", async () => {
+		for (const keyUnit of [0, 1000]) {
+			const found = await keyPacketAt(6000, unit => unit === keyUnit, keyUnit + 3500)
+
+			expect([keyUnit, found?.type, found?.timestamp]).toEqual([keyUnit, "key", keyUnit * PICTURE_SECONDS])
+		}
+	})
+
+	it("gives the latest key picture before the target, not an earlier one", async () => {
+		const found = await keyPacketAt(9000, unit => unit === 0 || unit === 1000 || unit === 5000, 8000)
+
+		expect(found?.timestamp).toBe(5000 * PICTURE_SECONDS)
+	})
+
+	it("ends with no key packet where the file has none", async () => {
+		expect(await keyPacketAt(6000, () => false, 4500)).toBeNull()
+	})
+
+	// 4000 pictures a second: the second read past the target holds more packets than the kept budget.
+	it("ends where more than the kept budget lies within the margin past the target", async () => {
+		const seconds = 1 / 4000
+		const isKey = (unit: number) => unit % 7000 === 0
+
+		const key = await packetAt(50_000, isKey, 40_000, true, seconds)
+		const any = await packetAt(50_000, isKey, 40_000, false, seconds)
+
+		expect([key?.type, key?.timestamp, any?.timestamp]).toEqual(["key", 35_000 * seconds, 40_000 * seconds])
 	})
 })

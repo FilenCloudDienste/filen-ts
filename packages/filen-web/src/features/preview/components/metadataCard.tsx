@@ -126,7 +126,8 @@ function MetadataTable({ table }: { table: MetadataTableData }) {
 				<div
 					ref={setScrollElement}
 					role="rowgroup"
-					className="overflow-y-auto"
+					tabIndex={0}
+					className="overflow-y-auto focus-ring-row outline-none focus-visible:ring-inset"
 					style={{ maxHeight: ROW_HEIGHT * VISIBLE_ROWS }}
 				>
 					<div

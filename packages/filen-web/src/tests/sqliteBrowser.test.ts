@@ -163,6 +163,25 @@ describe("SqliteBrowser", () => {
 		browser.close()
 	})
 
+	it("reads a table's SQL from the table, never from a trigger of the same name", async () => {
+		const browser = await open({
+			kind: "ranged",
+			reader: memoryReader(
+				database(db => {
+					db.exec(
+						"CREATE TABLE x (a); CREATE TRIGGER t AFTER INSERT ON x BEGIN SELECT 1; END; CREATE TABLE t (a); CREATE VIEW v AS SELECT a FROM t"
+					)
+				})
+			)
+		})
+		const t = only(browser.schema.tables.find(table => table.name === "t"))
+
+		expect(t.kind).toBe("table")
+		expect(t.sql).toBe("CREATE TABLE t (a)")
+		expect(only(browser.schema.tables.find(table => table.name === "v")).kind).toBe("view")
+		browser.close()
+	})
+
 	it("answers the same through the range VFS and whole in memory", async () => {
 		const bytes = database(APP)
 		const reader = memoryReader(bytes)

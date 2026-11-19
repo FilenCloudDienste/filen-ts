@@ -3,7 +3,8 @@ import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from 
 import { sdkApi } from "@/lib/sdk/client"
 import { accountQueryGet } from "@/queries/account"
 import { stringifyEnvelope } from "@filen/shared/session"
-import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
+import { kvGetJson, kvHas, kvSetJson, storage } from "@/lib/storage/adapter"
+import { kvKeysHolding } from "@/e2e-hooks/kvScan"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { runPreviewDisposers } from "@/lib/workers/previewDisposers"
 import { whenBootReady } from "@/lib/sdk/boot"
@@ -36,10 +37,10 @@ import {
 // the no-flag build grep). Nothing here ships to production.
 //
 // The e2e harness logs in once through the real form, harvests the session via `dumpSession`
-// (`mint` is kept only as a fallback), stores the blob to a file, and re-seeds it on later loads via
-// sessionStorage, which bootSdk drains into kv before its own resumeSession (@/lib/sdk/boot). The blob carries
-// a bigint (`StringifiedClient.userId`), so it always travels as an envelope STRING (@filen/shared/session),
-// never raw JSON.
+// (`mint` is kept only as a fallback), stores the blob to a file, and serves it on every later navigation through
+// the session page binding (@/e2e-hooks/sessionSeed), which bootSdk reads before its own resumeSession
+// (@/lib/sdk/boot). The blob carries a bigint (`StringifiedClient.userId`), so it always travels as an envelope
+// STRING (@filen/shared/session), never raw JSON.
 
 // Test kv probes go through the normal adapter, which requires an arktype schema on read.
 const stringSchema = type("string")
@@ -76,6 +77,9 @@ interface E2eHooks {
 	// holds that exact schema. Used by auth.spec's logout test to check the session key without
 	// depending on sessionSchema.
 	kvHas: (key: string) => Promise<boolean>
+	// The keys of every kv row whose key or stored value holds `needle` (also in its JSON-escaped form): the password
+	// canary's scan of the OPFS kv, the store the app persists to.
+	kvFindValue: (needle: string) => Promise<string[]>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
 	// Runs every preview disposer in this tab (what a sign-out or an account switch does before anything else): open
@@ -271,6 +275,11 @@ export function installE2eHooks(): void {
 		kvSet: (key, value) => kvSetJson(key, value),
 		kvGet: key => kvGetJson(key, stringSchema),
 		kvHas: key => kvHas(key),
+		kvFindValue: async needle => {
+			const { api } = await storage()
+
+			return kvKeysHolding((prefix, after, limit) => api.kvEntriesPage(prefix, after, limit), needle)
+		},
 		setUserCombo: (actionId, combo) => setUserCombo(actionId, combo),
 		comboFor: actionId => comboFor(actionId),
 		clearPreviews: () => {

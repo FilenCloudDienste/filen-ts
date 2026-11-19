@@ -20,8 +20,6 @@ export class NonMonotonicWriteError extends Error {
 
 export interface AppendOnlyTarget {
 	readonly target: StreamTarget
-	// Bytes accepted so far.
-	readonly written: () => number
 }
 
 export function appendOnlyTarget(sink: SavePortSink): AppendOnlyTarget {
@@ -42,7 +40,6 @@ export function appendOnlyTarget(sink: SavePortSink): AppendOnlyTarget {
 	)
 
 	return {
-		target: new StreamTarget(stream, { chunked: true, chunkSize: OUTPUT_CHUNK_BYTES }),
-		written: () => expected
+		target: new StreamTarget(stream, { chunked: true, chunkSize: OUTPUT_CHUNK_BYTES })
 	}
 }

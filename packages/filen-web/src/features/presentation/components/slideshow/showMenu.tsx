@@ -169,6 +169,7 @@ export function ShowMenu({
 									<DropdownMenuRadioItem
 										key={slide.ref}
 										value={index}
+										closeOnClick
 									>
 										{t(slide.hidden ? "previewPptxShowMenuSlideHidden" : "previewPptxShowMenuSlide", {
 											number: index + 1
@@ -187,12 +188,14 @@ export function ShowMenu({
 						<DropdownMenuSubContent>
 							<DropdownMenuCheckboxItem
 								checked={at.screen === "black"}
+								closeOnClick
 								onCheckedChange={() => controller()?.black()}
 							>
 								{t("previewPptxPresenterBlack")}
 							</DropdownMenuCheckboxItem>
 							<DropdownMenuCheckboxItem
 								checked={at.screen === "white"}
+								closeOnClick
 								onCheckedChange={() => controller()?.white()}
 							>
 								{t("previewPptxPresenterWhite")}

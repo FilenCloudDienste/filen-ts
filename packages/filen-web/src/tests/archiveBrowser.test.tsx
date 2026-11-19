@@ -387,6 +387,67 @@ describe("ArchiveSourceBrowser states", () => {
 		expect(fake.session.retry).toHaveBeenCalledTimes(1)
 	})
 
+	it("announces how a listing or a password check ends from a region mounted before it", () => {
+		mockListViewport()
+
+		const fake = fakeSession(
+			{ type: "reading", bytesRead: 0, archiveBytes: 0, entries: 2, bytesPerSecond: null, etaMs: null },
+			storeOf(TREE)
+		)
+
+		show(fake)
+
+		const region = screen.getByRole("status")
+
+		expect(region.getAttribute("aria-live")).toBe("polite")
+		expect(region.className).toBe("contents")
+		expect(region.childElementCount).toBe(0)
+
+		fake.set({ type: "stopped", summary: SUMMARY })
+
+		expect(within(region).getByText(/Listing stopped after/)).toBeTruthy()
+
+		fake.set({ type: "failed", error: error("ArchiveCorrupt"), summary: SUMMARY })
+
+		const alert = within(region).getByRole("alert")
+
+		expect(alert.textContent).toContain("This archive is damaged.")
+		// The banner keeps its row's layout.
+		expect(alert.className).toContain("shrink-0")
+		expect(screen.getByRole("status")).toBe(region)
+
+		fake.set(done({ password: "wrong", verifying: true }))
+
+		// The check's spinner says nothing of its own: the region reads the banner once.
+		expect(screen.getAllByRole("status")).toEqual([region])
+		expect(within(region).getByText("Checking the password…")).toBeTruthy()
+
+		fake.set(done({ password: "wrong" }))
+
+		expect(within(region).getByText("That password didn't open the encrypted entries.")).toBeTruthy()
+		expect(within(region).queryByRole("alert")).toBeNull()
+
+		fake.set(done({ verifyError: error("NetworkError") }))
+
+		expect(within(region).getByRole("alert").textContent).toContain("NetworkError")
+	})
+
+	it("keeps the duplicate names and undelivered note out of the announced region", () => {
+		mockListViewport()
+
+		const fake = fakeSession({ type: "stopped", summary: SUMMARY }, storeOf(["a.txt", "a.txt"]))
+
+		show(fake)
+		fake.set({ type: "stopped", summary: { ...SUMMARY, undelivered: 3, duplicates: { names: ["a.txt"], count: 1 } } })
+
+		const region = screen.getByRole("status")
+
+		expect(region.textContent).toContain("Listing stopped after")
+		expect(region.textContent).not.toContain("couldn't be shown")
+		expect(region.textContent).not.toContain("same name")
+		expect(screen.getByText("1 entry is left out because a later entry has the same name.")).toBeTruthy()
+	})
+
 	it("notes undelivered entries and duplicate paths", () => {
 		mockListViewport()
 		show(fakeSession(done({ undelivered: 3, duplicates: { names: ["a.txt"], count: 1 } }), storeOf(["a.txt", "a.txt"])))
@@ -608,6 +669,47 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		press("a", { ctrlKey: true })
 
 		expect(screen.getByText("5 files selected · 5 B")).toBeTruthy()
+	})
+
+	it("drops the selection of a store a new run replaced", () => {
+		const first = storeOf(TREE)
+		const fake = fakeSession(done(), first)
+
+		show(fake)
+		press("a", { ctrlKey: true })
+
+		expect(selectedNames()).toHaveLength(3)
+
+		fake.set(done(), storeOf(TREE))
+
+		expect(selectedNames()).toEqual([])
+
+		// The first store's selection was let go, not merely hidden: back on it, nothing is selected.
+		fake.set(done(), first)
+
+		expect(selectedNames()).toEqual([])
+	})
+
+	it("says the sort direction of the active column, which a second press reverses", () => {
+		show(fakeSession(done(), storeOf(TREE)))
+
+		const sortButtons = ["Name", "Size", "Modified"].map(name => screen.getByRole("button", { name: new RegExp(`^${name}`) }))
+
+		for (const button of sortButtons) {
+			expect(button.hasAttribute("aria-pressed")).toBe(false)
+		}
+
+		expect(screen.getByRole("button", { name: "Name sorted ascending" })).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Size" })).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Name sorted ascending" }))
+
+		expect(screen.getByRole("button", { name: "Name sorted descending" })).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Size" }))
+
+		expect(screen.getByRole("button", { name: "Size sorted ascending" })).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Name" })).toBeTruthy()
 	})
 
 	it("reopens a cached listing where it was left", () => {

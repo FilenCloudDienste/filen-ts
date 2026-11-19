@@ -34,7 +34,8 @@ export interface VersionsDialogProps {
 // A row's pending confirmation — restore/delete (single version) and the two multi-version bulk
 // actions (delete-selected, delete-all) all share this one nested ConfirmDialog (below) rather than
 // four near-duplicate instances, so at most one in-flight confirmation can ever exist at a time.
-type PendingConfirm = { kind: "restore" | "delete"; version: FileVersion } | { kind: "bulkDelete"; versions: FileVersion[] }
+// `all`: from Delete all rather than Delete selected (which can select every row and still says "selected").
+type PendingConfirm = { kind: "restore" | "delete"; version: FileVersion } | { kind: "bulkDelete"; versions: FileVersion[]; all: boolean }
 
 // File-version history panel — mounted-when-active by the listing's dialog host. Restoring rotates
 // the file's own uuid (actions.ts's restoreVersion already patches the drive-listing cache for that),
@@ -315,7 +316,7 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 									disabled={pending || selectedVersions.length === 0 || !isOnline}
 									title={offlineTitle}
 									onClick={() => {
-										setConfirming({ kind: "bulkDelete", versions: selectedVersions })
+										setConfirming({ kind: "bulkDelete", versions: selectedVersions, all: false })
 									}}
 								>
 									{pending && <Spinner data-icon="inline-start" />}
@@ -328,7 +329,7 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 								disabled={pending || !isOnline}
 								title={offlineTitle}
 								onClick={() => {
-									setConfirming({ kind: "bulkDelete", versions: candidates })
+									setConfirming({ kind: "bulkDelete", versions: candidates, all: true })
 								}}
 							>
 								{pending && <Spinner data-icon="inline-start" />}
@@ -364,7 +365,9 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 					confirming?.kind === "restore"
 						? t("driveVersionsRestoreAction")
 						: confirming?.kind === "bulkDelete"
-							? t("driveVersionsDeleteSelectedAction")
+							? confirming.all
+								? t("driveVersionsDeleteAllAction")
+								: t("driveVersionsDeleteSelectedAction")
 							: t("driveVersionsDeleteAction")
 				}
 				cancelLabel={t("common:cancel")}

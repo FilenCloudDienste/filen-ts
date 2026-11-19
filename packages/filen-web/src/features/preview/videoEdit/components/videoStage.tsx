@@ -26,6 +26,17 @@ import {
 	type Size
 } from "@/features/preview/videoEdit/lib/recipe"
 import { drawBitmap, type FrameRequests } from "@/features/preview/videoEdit/components/frameRequests"
+import {
+	pillColor,
+	TEXT_FONT_STACK,
+	TEXT_FONT_WEIGHT,
+	TEXT_LINE_HEIGHT,
+	TEXT_MAX_WIDTH_FRACTION,
+	TEXT_PAD_X,
+	TEXT_PAD_Y,
+	textDirection
+} from "@/features/preview/videoEdit/gl/textRaster.logic"
+import { overlayVisible } from "@/features/preview/videoEdit/gl/pipeline.logic"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { mediaValue, useMediaValue } from "@/lib/media/useMediaState"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -222,6 +233,21 @@ export function VideoStage(props: VideoStageProps) {
 		}
 	}
 
+	// A drag the browser cancelled (a system gesture, palm rejection, rotation) or whose capture was lost: the box goes
+	// back to its recipe position, which never changed, so React would not rewrite it.
+	const textDragLost = (): void => {
+		const drag = textDrag.current
+
+		textDrag.current = null
+
+		if (drag === null) {
+			return
+		}
+
+		drag.element.style.left = `${String(drag.x * 100)}%`
+		drag.element.style.top = `${String(drag.y * 100)}%`
+	}
+
 	const textKey = (event: ReactKeyboardEvent<HTMLDivElement>, text: TextOverlay): void => {
 		const step = event.shiftKey ? TEXT_NUDGE * 10 : TEXT_NUDGE
 		const delta: Readonly<Record<string, readonly [number, number]>> = {
@@ -299,18 +325,22 @@ export function VideoStage(props: VideoStageProps) {
 				</div>
 				{mode === "text" ? (
 					<div className="absolute inset-0">
+						{/* Styled from the export's own layout constants, so the box placed here is the box saved: the same face,
+						    padding, line pitch, pill and wrap width (wrapped by CSS, so a line may break apart from the export's). */}
 						{recipe.text.map(text => {
-							const active = props.settledOutputTime >= text.startSec && props.settledOutputTime < text.endSec
+							const active = overlayVisible(text, props.settledOutputTime)
 
 							return (
 								<div
 									key={text.id}
 									role="button"
 									tabIndex={0}
-									aria-label={t("previewVideoEditTextBox", { text: text.text })}
+									aria-label={t("previewVideoEditTextBox", {
+										text: text.text.trim() === "" ? t("previewVideoEditTextEmpty") : text.text
+									})}
 									aria-pressed={props.selectedText === text.id}
 									className={cn(
-										"absolute max-w-full cursor-move touch-none rounded-[0.3em] px-[0.45em] py-[0.15em] leading-tight font-semibold whitespace-pre outline-none select-none",
+										"absolute cursor-move touch-none text-center break-words whitespace-pre-wrap outline-none select-none",
 										props.selectedText === text.id
 											? "ring-2 ring-primary"
 											: "outline-1 outline-white/50 outline-dashed",
@@ -320,19 +350,28 @@ export function VideoStage(props: VideoStageProps) {
 										left: `${String(text.x * 100)}%`,
 										top: `${String(text.y * 100)}%`,
 										transform: "translate(-50%, -50%)",
+										// The export's wrap width includes the padding; max-content keeps an absolute box from
+										// shrinking to the space right of its left edge.
+										width: "max-content",
+										maxWidth: `${String(TEXT_MAX_WIDTH_FRACTION * 100)}%`,
+										boxSizing: "border-box",
+										padding: `${String(TEXT_PAD_Y)}em ${String(TEXT_PAD_X)}em`,
+										lineHeight: TEXT_LINE_HEIGHT,
+										borderRadius: `${String(TEXT_LINE_HEIGHT / 2)}em`,
 										fontSize: Math.max(6, text.size * box.height),
+										fontFamily: TEXT_FONT_STACK,
+										fontWeight: TEXT_FONT_WEIGHT,
+										direction: textDirection(text.text),
 										color: text.color,
-										backgroundColor: text.background ? "rgb(0 0 0 / 0.55)" : "transparent",
-										fontFamily: "system-ui, sans-serif"
+										backgroundColor: text.background ? pillColor(text.color) : "transparent"
 									}}
 									onPointerDown={event => {
 										textPointerDown(event, text)
 									}}
 									onPointerMove={textPointerMove}
 									onPointerUp={textPointerUp}
-									onPointerCancel={() => {
-										textDrag.current = null
-									}}
+									onPointerCancel={textDragLost}
+									onLostPointerCapture={textDragLost}
 									onKeyDown={event => {
 										textKey(event, text)
 									}}

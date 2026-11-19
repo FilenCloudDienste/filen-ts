@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest"
-import { BufferTarget, EncodedPacketSink } from "mediabunny"
+import { describe, expect, it, vi } from "vitest"
+import {
+	BufferTarget,
+	EncodedAudioPacketSource,
+	EncodedPacket,
+	EncodedPacketSink,
+	EncodedVideoPacketSource,
+	Mp4OutputFormat,
+	Output
+} from "mediabunny"
 import { runExport, type EngineDeps, type ExportSummary } from "@/features/preview/videoEdit/worker/engine"
-import { copyBounds, copyVideo, GopRule } from "@/features/preview/videoEdit/worker/copy"
+import { copyAudio, copyBounds, copyVideo, GopRule } from "@/features/preview/videoEdit/worker/copy"
 import { ExportRefusedError } from "@/features/preview/videoEdit/worker/errors"
 import { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
 import { appendOnlyTarget, NonMonotonicWriteError } from "@/features/preview/videoEdit/worker/sink"
@@ -353,12 +361,133 @@ describe("copy path", () => {
 		}
 
 		expect(closed).toBe(true)
-		expect(sink.written()).toBe(total)
 		expect(chunks.length).toBeGreaterThan(1)
 		expect(chunks.slice(0, -1).every(chunk => chunk.length === 1024 * 1024)).toBe(true)
 		expect((await outputPackets(bytes)).video.length).toBe(4 * FPS)
 		// The fragmented output names its duration (mvex/mehd) for players and the probe.
 		expect(await openInput(bytes).computeDuration()).toBeCloseTo(4, 1)
+	})
+})
+
+describe("copy path, stopped mid-run", () => {
+	// The append-only save sink over a recording, which can cancel or fail from inside a write.
+	function recordingSink(onWrite: (index: number) => Promise<void>) {
+		const state = { writes: 0, writesAfterStop: 0, stopped: false }
+		const sink = appendOnlyTarget({
+			write: () => {
+				const index = state.writes++
+
+				if (state.stopped) {
+					state.writesAfterStop++
+				}
+
+				return onWrite(index)
+			},
+			close: () => Promise.resolve()
+		})
+
+		return { sink, state }
+	}
+
+	// The run, or a rejection naming a hang once `ms` pass without it settling.
+	function settledWithin<T>(run: Promise<T>, ms: number): Promise<T> {
+		return Promise.race([
+			run,
+			new Promise<never>((_, reject) => {
+				setTimeout(() => {
+					reject(new Error("the export hung"))
+				}, ms)
+			})
+		])
+	}
+
+	it("cancels from inside the run without a further write", async () => {
+		const source = await sourceFixture({ seconds: 6, gop: GOP_2S, bframes: true, audio: true, padding: 20_000 })
+		const info = await sourceInfoOf(source)
+		const controller = new AbortController()
+		const { sink, state } = recordingSink(index => {
+			if (index === 0) {
+				state.stopped = true
+				controller.abort()
+			}
+
+			return Promise.resolve()
+		})
+
+		await expect(
+			settledWithin(
+				runExport({
+					input: openInput(source),
+					info,
+					recipe: recipeFor(6),
+					caps: NO_WEBCODECS,
+					context: {},
+					target: sink.target,
+					signal: controller.signal,
+					fallbackCreationTime: null,
+					deps: DEPS
+				}),
+				10_000
+			)
+		).rejects.toMatchObject({ name: "ExportCancelledError" })
+
+		// output.cancel() ends the stream (close() on the sink only flushes; the save's commit, never reached, ends
+		// the upload), but nothing is written after the cancel.
+		expect(state.writesAfterStop).toBe(0)
+	})
+
+	it("fails, not hangs, when the audio lane fails mid-run while the video lane copies", async () => {
+		const source = await sourceFixture({ seconds: 6, gop: GOP_2S, bframes: true, audio: true, padding: 20_000 })
+		const info = await sourceInfoOf(source)
+		const failure = new Error("the audio could not be read")
+		const lanes = new Set<string>()
+		const next = Object.getOwnPropertyDescriptor(EncodedPacketSink.prototype, "getNextPacket")?.value as (
+			this: EncodedPacketSink,
+			...args: Parameters<EncodedPacketSink["getNextPacket"]>
+		) => ReturnType<EncodedPacketSink["getNextPacket"]>
+		// An audio packet is a few bytes, a video packet the fixture's padding.
+		const spy = vi.spyOn(EncodedPacketSink.prototype, "getNextPacket").mockImplementation(function (
+			this: EncodedPacketSink,
+			packet,
+			options
+		) {
+			lanes.add(packet.byteLength < 1024 ? "audio" : "video")
+
+			if (packet.byteLength < 1024 && packet.timestamp > 3) {
+				// Answering a little later, as a decoder does: the video lane has run ahead to the gate and waits there.
+				return new Promise((_, reject) => {
+					setTimeout(() => {
+						reject(failure)
+					}, 50)
+				})
+			}
+
+			return next.call(this, packet, options)
+		})
+
+		try {
+			await expect(
+				settledWithin(
+					runExport({
+						input: openInput(source),
+						info,
+						recipe: recipeFor(6),
+						caps: NO_WEBCODECS,
+						context: {},
+						target: new BufferTarget(),
+						signal: new AbortController().signal,
+						fallbackCreationTime: null,
+						deps: DEPS
+					}),
+					4_000
+				)
+			).rejects.toBe(failure)
+		} finally {
+			spy.mockRestore()
+		}
+
+		// Both lanes really copied, so the video lane was left waiting on the failed audio lane.
+		expect([...lanes].sort()).toEqual(["audio", "video"])
 	})
 })
 
@@ -414,5 +543,169 @@ describe("copy path guards", () => {
 
 		await writer.write({ type: "write", data: new Uint8Array(4), position: 0 })
 		await expect(writer.write({ type: "write", data: new Uint8Array(4), position: 2 })).rejects.toBeInstanceOf(NonMonotonicWriteError)
+	})
+})
+
+describe("copy path audio gaps", () => {
+	const PACKET = AUDIO_PACKET_SECONDS
+
+	// An audio track's packets at `starts` (seconds), each one packet long, read as EncodedPacketSink reads them.
+	function audioSink(starts: readonly number[]): EncodedPacketSink {
+		const packets = starts.map((start, index) => {
+			const bytes = new Uint8Array(32)
+
+			new DataView(bytes.buffer).setUint32(0, index)
+
+			return new EncodedPacket(bytes, "key", start, PACKET)
+		})
+		const at = (packet: EncodedPacket): number => packets.indexOf(packet)
+
+		return {
+			getPacket: (time: number) => Promise.resolve(packets.findLast(packet => packet.timestamp <= time) ?? null),
+			getFirstPacket: () => Promise.resolve(packets[0] ?? null),
+			getNextPacket: (packet: EncodedPacket) => Promise.resolve(packets[at(packet) + 1] ?? null)
+		} as unknown as EncodedPacketSink
+	}
+
+	// Packets one after another from `from` up to `to` (seconds).
+	function run(from: number, to: number): number[] {
+		return Array.from({ length: Math.floor((to - from) / PACKET + 1e-9) }, (_, index) => from + index * PACKET)
+	}
+
+	async function copied(starts: readonly number[], bounds: { start: number; end: number }[]) {
+		const added: EncodedPacket[] = []
+		const gate = new InterleaveGate(1000)
+
+		gate.addLane("audio1")
+
+		const lead = await copyAudio({
+			sink: audioSink(starts),
+			bounds,
+			output: {
+				add: (packet: EncodedPacket) => {
+					added.push(packet)
+
+					return Promise.resolve()
+				}
+			} as unknown as EncodedAudioPacketSource,
+			decoderConfig: { codec: "mp4a.40.2", numberOfChannels: 2, sampleRate: 48_000 },
+			gate,
+			lane: "audio1",
+			signal: new AbortController().signal
+		})
+
+		return { added, lead }
+	}
+
+	// The source start of a copied packet, from the index its bytes carry.
+	function sourceStart(starts: readonly number[], packet: EncodedPacket | undefined): number | undefined {
+		return packet === undefined ? undefined : starts[new DataView(packet.data.buffer, packet.data.byteOffset).getUint32(0)]
+	}
+
+	it("lays a track whose first packet is at 0.5 s at 0.5 s on the output", async () => {
+		const { added } = await copied(run(0.5, 2), [{ start: 0, end: 2 }])
+
+		expect(added[0]?.timestamp).toBeCloseTo(0.5, 9)
+		expect(added.at(-1)?.timestamp).toBeCloseTo(added.length * PACKET + 0.5 - PACKET, 6)
+	})
+
+	it("keeps a hole in the middle in place", async () => {
+		const { added } = await copied([...run(0, 1), ...run(1.5, 2)], [{ start: 0, end: 2 }])
+		const resumed = added.find(packet => packet.timestamp > 1)
+
+		expect(resumed?.timestamp).toBeCloseTo(1.5, 9)
+		expect(added.every((packet, index) => index === 0 || packet.timestamp > (added[index - 1]?.timestamp ?? 0))).toBe(true)
+	})
+
+	it("closes a gap under a packet as before, gap-free", async () => {
+		// A third of a packet of jitter before the second half.
+		const first = run(0, 1)
+		const starts = [...first, ...run(first.length * PACKET + PACKET / 3, 2)]
+		const { added } = await copied(starts, [{ start: 0, end: 2 }])
+
+		expect(added).toHaveLength(starts.length)
+		added.forEach((packet, index) => {
+			expect(packet.timestamp).toBeCloseTo(index * PACKET, 9)
+		})
+	})
+
+	it("starts the next range in step when a late start runs past a short first range", async () => {
+		const starts = run(0.5, 11)
+		const { added, lead } = await copied(starts, [
+			{ start: 0, end: 0.3 },
+			{ start: 5, end: 10 }
+		])
+
+		expect(added[0]?.timestamp).toBeCloseTo(0.3, 9)
+		expect(Math.abs((sourceStart(starts, added[0]) ?? 0) - 5)).toBeLessThanOrEqual(PACKET / 2 + 1e-9)
+		expect(Math.abs(lead)).toBeLessThanOrEqual(PACKET / 2 + 1e-9)
+	})
+
+	it("starts the next range in step when a hole straddles the cut", async () => {
+		const starts = [...run(0, 8), ...run(12, 31)]
+		const { added, lead } = await copied(starts, [
+			{ start: 0, end: 10 },
+			{ start: 20, end: 30 }
+		])
+		const resumed = added.find(packet => packet.timestamp > 8)
+
+		expect(resumed?.timestamp).toBeCloseTo(10, 9)
+		expect(Math.abs((sourceStart(starts, resumed) ?? 0) - 20)).toBeLessThanOrEqual(PACKET / 2 + 1e-9)
+		expect(Math.abs(lead)).toBeLessThanOrEqual(PACKET / 2 + 1e-9)
+	})
+
+	it("keeps a late first audio packet's offset against the video once muxed", async () => {
+		const source = await sourceFixture({ seconds: 2, gop: GOP_2S, bframes: false, audio: false })
+		const track = await openInput(source).getPrimaryVideoTrack()
+		const decoderConfig = await track?.getDecoderConfig()
+
+		if (track === null || decoderConfig === null || decoderConfig === undefined) {
+			throw new Error("no video track")
+		}
+
+		const videoSink = new EncodedPacketSink(track)
+		const bounds = await copyBounds(videoSink, [{ start: 0, end: 2 }])
+		const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() })
+		const video = new EncodedVideoPacketSource("avc")
+		const audio = new EncodedAudioPacketSource("aac")
+		const gate = new InterleaveGate(1)
+
+		output.addVideoTrack(video)
+		output.addAudioTrack(audio)
+		gate.addLane("video")
+		gate.addLane("audio1")
+		await output.start()
+		await Promise.all([
+			copyVideo({
+				sink: videoSink,
+				bounds,
+				speed: 1,
+				output: video,
+				decoderConfig,
+				gate,
+				lane: "video",
+				signal: new AbortController().signal,
+				gopByteCap: null
+			}),
+			copyAudio({
+				sink: audioSink(run(0.5, 2)),
+				bounds,
+				output: audio,
+				decoderConfig: { codec: "mp4a.40.2", numberOfChannels: 2, sampleRate: 48_000, description: Uint8Array.from([0x11, 0x90]) },
+				gate,
+				lane: "audio1",
+				signal: new AbortController().signal
+			})
+		])
+		await output.finalize()
+
+		if (output.target.buffer === null) {
+			throw new Error("no output")
+		}
+
+		const packets = await outputPackets(new Uint8Array(output.target.buffer))
+
+		expect(packets.video[0]?.timestamp).toBeCloseTo(0, 6)
+		expect(packets.audio[0]?.timestamp).toBeCloseTo(0.5, 3)
 	})
 })

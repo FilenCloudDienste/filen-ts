@@ -717,7 +717,7 @@ function DeckSurface({
 						label={t(notesOpen ? "previewPptxNotesHide" : "previewPptxNotesShow")}
 						icon={<StickyNoteIcon />}
 						disabled={count === 0}
-						pressed={notesOpen}
+						active={notesOpen}
 						onClick={() => {
 							setNotesOpen(open => !open)
 						}}

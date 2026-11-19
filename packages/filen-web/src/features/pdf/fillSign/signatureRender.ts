@@ -3,7 +3,7 @@ import type { PdfSignatureImage } from "@filen/office/core/pdfedit/visualSignatu
 import { PDF_SIGNATURE_MAX_PNG_BYTES } from "@filen/shared/pdfSignatures"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { HEIC_EXTENSIONS } from "@/features/preview/lib/imageFormat"
-import { transformHeicBytesOwned } from "@/features/preview/lib/rasterDecode"
+import { fittedHeicBitmap } from "@/features/pdf/annotations/stampImage"
 import {
 	needsSignatureFallback,
 	SIGNATURE_FALLBACK_FAMILY,
@@ -208,13 +208,12 @@ export async function renderTypedSignature(text: string, style: SignatureStyle):
 }
 
 // A picture from the device as a PNG of at most IMAGE_MAX_SIDE px a side and PDF_SIGNATURE_MAX_PNG_BYTES (scaled down
-// further until it fits). HEIC/HEIF is decoded by the HEIC worker first. Throws for anything that is not a readable
-// image.
+// further until it fits). HEIC/HEIF is decoded by the HEIC worker, its bitmap made no larger than IMAGE_MAX_SIDE. Throws
+// for anything that is not a readable image.
 export async function imageFileSignature(file: File): Promise<PdfSignatureImage> {
-	const source: Blob = HEIC_EXTENSIONS.has(extensionOf(file.name))
-		? await transformHeicBytesOwned(new Uint8Array(await file.arrayBuffer()))
-		: file
-	const bitmap = await createImageBitmap(source)
+	const bitmap = HEIC_EXTENSIONS.has(extensionOf(file.name))
+		? await fittedHeicBitmap(new Uint8Array(await file.arrayBuffer()), IMAGE_MAX_SIDE)
+		: await createImageBitmap(file)
 
 	try {
 		for (let side = IMAGE_MAX_SIDE; ; side = Math.round(side * 0.7)) {

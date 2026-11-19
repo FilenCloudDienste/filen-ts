@@ -69,8 +69,8 @@ export function linkedArchiveSource(item: DriveItem, file?: AnyFile): ArchiveSou
 	return fileSource(item, undefined, true, file)
 }
 
-// The archive held in the entry `slot` of `parent`'s listing (opened with `parentPassword`), browsed in its place (W6
-// §6.1 A); null past MAX_NESTED_DEPTH. Never extracted from (no drive file of its own), and nowhere to extract next to.
+// The archive held in the entry `slot` of `parent`'s listing (opened with `parentPassword`), browsed in its
+// place; null past MAX_NESTED_DEPTH. Never extracted from (no drive file of its own), and nowhere to extract next to.
 export function nestedArchiveSource(
 	parent: ArchiveSource,
 	parentPassword: string | undefined,

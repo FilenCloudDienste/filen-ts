@@ -1,9 +1,11 @@
 import type { SpellingChecker } from "@filen/office/core/docx/spelling"
 import type { SpellcheckResponse } from "@filen/spellcheck"
 import { SpellcheckHost } from "@filen/spellcheck/host"
+import { toast } from "sonner"
 import { SPELLCHECK_ASSETS } from "virtual:spellcheck-assets"
 import SpellcheckWorker from "@/features/spellcheck/workers/spellcheck.worker.ts?worker"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import { i18n } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { userDictionary } from "@/features/spellcheck/lib/userDictionary"
 
@@ -66,6 +68,7 @@ export const documentSpellingChecker: SpellingChecker = {
 		void followUserWords()
 		userDictionary.add(word).catch((error: unknown) => {
 			log.warn("spellcheck", "user dictionary not saved", { error })
+			toast.error(i18n.t("settings:settingsDocumentsSaveFailed"))
 		})
 
 		return Promise.resolve()

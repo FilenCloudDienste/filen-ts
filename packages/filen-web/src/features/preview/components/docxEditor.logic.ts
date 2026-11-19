@@ -472,14 +472,12 @@ export interface DocxToolbarSlotProps extends DocxInputChannelProps {
 	surface: DocxSurface
 }
 
-// The feature whose commands act on each kind of object a press on the pages can hit; links keep the pages'
-// own handling.
-const OBJECT_FEATURES: Readonly<Record<ObjectHitKind, DocxCommandFeature | null>> = {
+// The feature whose commands act on each kind of object a press on the pages can hit.
+const OBJECT_FEATURES: Readonly<Record<ObjectHitKind, DocxCommandFeature>> = {
 	drawing: "drawings",
 	control: "forms",
 	commentMarker: "comments",
 	field: "fields",
-	link: null,
 	noteRef: "notes",
 	equation: "math",
 	tableBorder: "tables"
@@ -506,7 +504,7 @@ export function objectInteractions(
 	for (const kind of Object.keys(OBJECT_FEATURES) as ObjectHitKind[]) {
 		const feature = OBJECT_FEATURES[kind]
 
-		if (feature !== null && featureLanded(feature)) {
+		if (featureLanded(feature)) {
 			entries.push([
 				kind,
 				press => {
@@ -1140,7 +1138,28 @@ export function paragraphCommands(initial: DocxParagraphForm, form: DocxParagrap
 		out.push({ type: "paragraph.lineSpacing", rule: form.rule, value })
 	}
 
-	return out
+	// The command parser's bounds apply here as for every other dialog: a value it refuses is not a valid value.
+	const parsed: DocxEditorCommand[] = []
+
+	for (const command of out) {
+		const checked = parseDocxEditorCommand(command)
+
+		if (checked === undefined) return null
+
+		parsed.push(checked)
+	}
+
+	return parsed
+}
+
+// The Paragraph dialog's At field when its line spacing rule changes: lines (auto) and points convert at Word's
+// 1 line = 12 pt, rounded as paragraphForm shows them; an empty or non-numeric field stays as typed.
+export function lineSpacingAtForRule(at: string, from: DocxLineSpacingRule, to: DocxLineSpacingRule): string {
+	const amount = Number(at.trim().replace(",", "."))
+
+	if (at.trim() === "" || !Number.isFinite(amount) || (from === "auto") === (to === "auto")) return at
+
+	return to === "auto" ? String(Math.round((amount / 12) * 100) / 100) : String(Math.round(amount * 12 * 10) / 10)
 }
 
 // ---- page setup ------------------------------------------------------------------------------------------

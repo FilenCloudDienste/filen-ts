@@ -9,13 +9,13 @@ export const TEXT_FONT_STACK =
 
 export const TEXT_FONT_WEIGHT = 600
 
-// Line pitch, and the pill's padding, as multiples of the font size.
-const LINE_HEIGHT = 1.25
-const PAD_X = 0.6
-const PAD_Y = 0.3
+// Line pitch, and the pill's padding, as multiples of the font size. The editor's text boxes are styled from these too.
+export const TEXT_LINE_HEIGHT = 1.25
+export const TEXT_PAD_X = 0.6
+export const TEXT_PAD_Y = 0.3
 
-// A box may span this fraction of the frame's width before its text wraps.
-const MAX_WIDTH_FRACTION = 0.9
+// A box, padding included, may span this fraction of the frame's width before its text wraps.
+export const TEXT_MAX_WIDTH_FRACTION = 0.9
 
 // A raster never exceeds this edge, whatever the output (a texture every GPU takes).
 export const MAX_RASTER_EDGE = 4096
@@ -125,10 +125,10 @@ export function layoutText(
 	segmenters: Segmenters
 ): TextLayout {
 	const fontPx = textFontPx(overlay.size, out.height)
-	const padX = Math.round(fontPx * PAD_X)
-	const padY = Math.round(fontPx * PAD_Y)
-	const lineHeight = Math.round(fontPx * LINE_HEIGHT)
-	const maxWidth = Math.max(fontPx, out.width * MAX_WIDTH_FRACTION - 2 * padX)
+	const padX = Math.round(fontPx * TEXT_PAD_X)
+	const padY = Math.round(fontPx * TEXT_PAD_Y)
+	const lineHeight = Math.round(fontPx * TEXT_LINE_HEIGHT)
+	const maxWidth = Math.max(fontPx, out.width * TEXT_MAX_WIDTH_FRACTION - 2 * padX)
 	const lines = wrapLines(overlay.text, maxWidth, text => measure(text, fontPx), segmenters)
 	const textWidth = Math.max(0, ...lines.map(line => measure(line, fontPx)))
 

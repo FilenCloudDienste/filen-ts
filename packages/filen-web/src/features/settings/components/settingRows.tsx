@@ -1,23 +1,28 @@
+import { useId } from "react"
 import { useTranslation } from "react-i18next"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { LoadingState } from "@/components/loadingState"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
+import { DisabledReason } from "@/components/ui/tooltipIconButton"
 
 interface PreferenceToggleRowProps {
 	title: string
 	description: string
 	checked: boolean
 	disabled: boolean
-	// Native tooltip saying why the switch is disabled, only when that reason is worth telling (offline);
-	// never for a toggle that is merely in flight.
+	// Why the switch is disabled, as its accessible description, only when that reason is worth telling
+	// (offline); never for a toggle that is merely in flight.
 	disabledReason?: string | undefined
 	onCheckedChange: (checked: boolean) => void
 }
 
 // A settings row whose switch sets the preference its title names.
 function PreferenceToggleRow({ title, description, checked, disabled, disabledReason, onCheckedChange }: PreferenceToggleRowProps) {
+	const reasonId = useId()
+	const reason = disabled ? disabledReason : undefined
+
 	return (
 		<SettingsRow
 			label={title}
@@ -27,8 +32,12 @@ function PreferenceToggleRow({ title, description, checked, disabled, disabledRe
 				checked={checked}
 				disabled={disabled}
 				aria-label={title}
-				title={disabledReason}
+				aria-describedby={reason === undefined ? undefined : reasonId}
 				onCheckedChange={onCheckedChange}
+			/>
+			<DisabledReason
+				id={reasonId}
+				reason={reason}
 			/>
 		</SettingsRow>
 	)

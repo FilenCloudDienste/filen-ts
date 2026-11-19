@@ -8,6 +8,7 @@ import type { SheetGridHandle, SheetGridState } from "@filen/office/react/sheet"
 import "@/lib/i18n"
 import { preview } from "@/locales/en/preview"
 import { ValidationOverlay } from "@/features/spreadsheet/data/dvOverlay"
+import { LIST_ROW, LIST_ROWS } from "@/features/spreadsheet/data/dvOverlay.logic"
 
 // A list validation's button beside the active cell (its values picked and written as typed), and the input
 // message under it; neither while the cell is being edited, the list not on a read-only sheet.
@@ -267,6 +268,99 @@ describe("data validation over the grid", () => {
 
 		expect(screen.queryByRole("listbox")).toBeNull()
 		expect(focus).toHaveBeenCalled()
+	})
+
+	it("draws only the rows in view of a long list, keeping the highlighted one drawn as the keys move it", async () => {
+		const run = vi.fn<(command: SheetCommand) => void>()
+		const items = Array.from({ length: 30_000 }, (_, index) => ({ text: `v${String(index)}`, input: `i${String(index)}` }))
+		const query = vi.fn().mockResolvedValue({ items })
+
+		render(
+			<Overlay
+				grid={grid(2, 0)}
+				gridRef={{ current: HANDLE }}
+				session={{ query } as unknown as SheetSessionApi}
+				canEdit
+				run={run}
+				opened="3:2:0"
+			/>
+		)
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const list = screen.getByRole("listbox")
+		const activeOption = (): HTMLElement | null => document.getElementById(list.getAttribute("aria-activedescendant") ?? "")
+
+		// A screenful, not 30,000.
+		expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(LIST_ROWS + 5)
+		expect(activeOption()?.textContent).toBe("v0")
+
+		for (let k = 0; k < 20; k++) fireEvent.keyDown(list, { key: "ArrowDown" })
+
+		// Scrolled just far enough to show it at the bottom.
+		expect(list.scrollTop).toBe(21 * LIST_ROW - LIST_ROWS * LIST_ROW)
+		expect(activeOption()?.textContent).toBe("v20")
+		expect(activeOption()?.getAttribute("aria-selected")).toBe("true")
+
+		fireEvent.keyDown(list, { key: "End" })
+
+		expect(activeOption()?.textContent).toBe("v29999")
+
+		// Scrolled away by hand, the highlighted row stays drawn for aria-activedescendant.
+		list.scrollTop = 0
+		fireEvent.scroll(list)
+
+		expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(LIST_ROWS + 6)
+		expect(screen.getByRole("option", { name: "v0" })).toBeTruthy()
+		expect(activeOption()?.textContent).toBe("v29999")
+
+		fireEvent.keyDown(list, { key: "Enter" })
+
+		expect(run).toHaveBeenCalledWith({
+			type: "cells.set",
+			sheet: 3,
+			cells: { rows: Uint32Array.of(2), cols: Uint16Array.of(0), inputs: ["i29999"] }
+		})
+	})
+
+	it("leaves a hand scroll where it is when a scroll event arrives older than the list", async () => {
+		const items = Array.from({ length: 30_000 }, (_, index) => ({ text: `v${String(index)}`, input: `i${String(index)}` }))
+		const query = vi.fn().mockResolvedValue({ items })
+
+		render(
+			<Overlay
+				grid={grid(2, 0)}
+				gridRef={{ current: HANDLE }}
+				session={{ query } as unknown as SheetSessionApi}
+				canEdit
+				run={vi.fn()}
+				opened="3:2:0"
+			/>
+		)
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		const list = screen.getByRole("listbox")
+		// WebKit: the list is already at 900 when the event for 500 is handled (its first read sees 500).
+		let offset = 900
+		let reads = 0
+
+		Object.defineProperty(list, "scrollTop", {
+			configurable: true,
+			get: () => (reads++ === 0 ? 500 : offset),
+			set: (value: number) => {
+				offset = value
+			}
+		})
+
+		fireEvent.scroll(list)
+
+		expect(offset).toBe(900)
+		expect(screen.getByRole("option", { name: "v17" })).toBeTruthy()
 	})
 
 	it("moves the input message beside the open list, so both show", async () => {

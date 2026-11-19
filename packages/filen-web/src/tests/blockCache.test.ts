@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { BlockAbortError, BlockCache, type AbortableReadRange } from "@/lib/media/blockCache"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 
@@ -185,6 +185,66 @@ describe("BlockCache", () => {
 		expect(cache.stats.readAheadBlocks).toBe(3)
 		expect(requests.at(-1)).toEqual([3 * BLOCK_BYTES, 6 * BLOCK_BYTES])
 		expect(cache.read(4 * BLOCK_BYTES, 4 * BLOCK_BYTES + 1)).toBeInstanceOf(Uint8Array)
+	})
+
+	it("schedules no further read-ahead for reads inside a block the window already covers", async () => {
+		const { cache, requests } = harness({ blocks: 10, readAhead: 3 })
+
+		await cache.read(0, 10)
+		await cache.read(BLOCK_BYTES, BLOCK_BYTES + 10)
+		await cache.read(2 * BLOCK_BYTES, 2 * BLOCK_BYTES + 10)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		const timers = vi.spyOn(globalThis, "setTimeout")
+
+		try {
+			for (let offset = 100; offset < 1100; offset += 10) {
+				expect(cache.read(2 * BLOCK_BYTES + offset, 2 * BLOCK_BYTES + offset + 10)).toBeInstanceOf(Uint8Array)
+			}
+
+			expect(timers).not.toHaveBeenCalled()
+		} finally {
+			timers.mockRestore()
+		}
+
+		expect(cache.stats.readAheadBlocks).toBe(3)
+		expect(requests).toEqual([
+			[0, BLOCK_BYTES],
+			[BLOCK_BYTES, 2 * BLOCK_BYTES],
+			[2 * BLOCK_BYTES, 3 * BLOCK_BYTES],
+			[3 * BLOCK_BYTES, 6 * BLOCK_BYTES]
+		])
+
+		// Advancing a block extends the window by one.
+		await cache.read(3 * BLOCK_BYTES, 3 * BLOCK_BYTES + 10)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(cache.stats.readAheadBlocks).toBe(4)
+		expect(requests.at(-1)).toEqual([6 * BLOCK_BYTES, 7 * BLOCK_BYTES])
+	})
+
+	it("schedules read-ahead again for a window block evicted before the reader reached it", async () => {
+		const { cache, requests } = harness({ blocks: 10, capacity: 4, readAhead: 3 })
+
+		await cache.read(0, 10)
+		await cache.read(BLOCK_BYTES, BLOCK_BYTES + 10)
+		await cache.read(2 * BLOCK_BYTES, 2 * BLOCK_BYTES + 10)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(cache.stats.readAheadBlocks).toBe(3)
+
+		// Resident 2..5. Touching 2 leaves 3 the oldest; fetching block 1 again evicts it.
+		expect(cache.read(2 * BLOCK_BYTES, 2 * BLOCK_BYTES + 10)).toBeInstanceOf(Uint8Array)
+		await cache.read(BLOCK_BYTES, BLOCK_BYTES + 10)
+
+		expect(cache.isResident(3 * BLOCK_BYTES)).toBe(false)
+
+		await cache.read(2 * BLOCK_BYTES + 20, 2 * BLOCK_BYTES + 30)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(cache.stats.readAheadBlocks).toBe(4)
+		expect(requests.at(-1)).toEqual([3 * BLOCK_BYTES, 4 * BLOCK_BYTES])
+		expect(cache.isResident(3 * BLOCK_BYTES)).toBe(true)
 	})
 
 	it("does not read ahead for a reader that jumps around", async () => {

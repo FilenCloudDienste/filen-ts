@@ -6,16 +6,21 @@ import type { PdfSignatureInfo, PdfSignatureReport } from "@filen/office/core/pd
 import type { PdfDocument } from "@filen/office/dom/pdf"
 import { previewPdfSignatures } from "@/locales/en/previewPdf/signatures"
 
-const { verifier } = vi.hoisted(() => ({ verifier: { current: null as null | ((...args: unknown[]) => Promise<PdfSignatureReport>) } }))
+const { verifier, i18n } = vi.hoisted(() => ({
+	verifier: { current: null as null | ((...args: unknown[]) => Promise<PdfSignatureReport>) },
+	i18n: { language: "en" }
+}))
 
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
-		t: (key: string, params?: Record<string, unknown>) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`)
+		t: (key: string, params?: Record<string, unknown>) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`),
+		i18n
 	})
 }))
 
 const { PdfSignatureStatus } = await import("@/features/pdf/signatures/pdfSignatureStatus")
 const { signatureBanner } = await import("@/features/pdf/signatures/signatureStatus.logic")
+const { PdfSignaturesDialog } = await import("@/features/pdf/signatures/pdfSignaturesDialog")
 
 function info(overrides: Partial<PdfSignatureInfo>): PdfSignatureInfo {
 	return {
@@ -218,5 +223,30 @@ describe("PdfSignatureStatus", () => {
 		await waitFor(() => {
 			expect(verify).toHaveBeenCalledTimes(2)
 		})
+	})
+})
+
+describe("PdfSignaturesDialog", () => {
+	function allowedChanges(language: string): string {
+		i18n.language = language
+
+		const { unmount } = render(
+			<PdfSignaturesDialog
+				open
+				onOpenChange={() => undefined}
+				report={report(info({ state: "changed", changes: { allowed: true, kinds: ["form", "annotation"] }, signedLength: 9 }))}
+			/>
+		)
+		const text = screen.getByText(/previewPdfSignatureChangesAllowed/).textContent
+
+		unmount()
+		i18n.language = "en"
+
+		return text
+	}
+
+	it("joins the allowed change kinds with the language's list format", () => {
+		expect(allowedChanges("en")).toContain("previewPdfSignatureChangeForm and previewPdfSignatureChangeAnnotation")
+		expect(allowedChanges("ja")).toContain("previewPdfSignatureChangeForm、previewPdfSignatureChangeAnnotation")
 	})
 })

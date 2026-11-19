@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { CaptionsIcon, CheckIcon } from "lucide-react"
@@ -6,6 +6,7 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { SuspendDragRegions } from "@/components/ui/suspendDragRegions"
 import { StageTooltip } from "@/components/media/video/stageButton"
+import { useRovingRadioGroup } from "@/components/media/video/useRovingRadioGroup"
 import { STAGE_POPUP_TONE_CLASS, useStagePopupOpen, useVideoStageContainer } from "@/components/media/video/stageContext"
 
 // Audio and subtitles side by side in one popover over the picture. Each column is a radio list
@@ -33,38 +34,12 @@ function RadioColumn({
 	value: string | null
 	onSelect: (id: string) => void
 }) {
-	const items = useRef<(HTMLButtonElement | null)[]>([])
-	const selectedIndex = Math.max(
-		0,
-		options.findIndex(option => option.id === value)
-	)
-
-	function move(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
-		const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
-		const edge = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : null
-
-		if (step === 0 && edge === null) {
-			return
-		}
-
-		event.preventDefault()
-
-		let next = edge ?? index
-
-		if (edge === null) {
-			let tries = options.length
-
-			while (tries-- > 0) {
-				next = (next + step + options.length) % options.length
-
-				if (options[next]?.disabled !== true) {
-					break
-				}
-			}
-		}
-
-		items.current[next]?.focus()
-	}
+	// Focus moves without selecting: a track switch is expensive, so it waits for Enter, Space or a click.
+	const roving = useRovingRadioGroup({
+		count: options.length,
+		checked: options.findIndex(option => option.id === value),
+		isDisabled: index => options[index]?.disabled === true
+	})
 
 	return (
 		<div
@@ -79,21 +54,15 @@ function RadioColumn({
 				return (
 					<button
 						key={option.id}
-						ref={element => {
-							items.current[index] = element
-						}}
+						{...roving(index)}
 						type="button"
 						role="radio"
 						aria-checked={checked}
 						aria-disabled={option.disabled === true}
-						tabIndex={index === selectedIndex ? 0 : -1}
 						className={cn(
 							"flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left outline-none hover:bg-white/10 focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/40",
 							option.disabled === true && "cursor-not-allowed opacity-50 hover:bg-transparent"
 						)}
-						onKeyDown={event => {
-							move(event, index)
-						}}
 						onClick={() => {
 							if (option.disabled !== true) {
 								onSelect(option.id)

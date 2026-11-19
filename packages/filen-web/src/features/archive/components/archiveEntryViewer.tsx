@@ -8,7 +8,8 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryReferences } from "@/features/archive/lib/entryReferences"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
-import { isArchivePasswordError, type EntryRequest } from "@/features/archive/lib/entryDownload"
+import type { EntryRequest } from "@/features/archive/lib/entryDownload"
+import { isArchivePasswordError } from "@/features/archive/lib/archiveBrowser.logic"
 import { entryAccessOf, entryLeaseOrigin, leaseEntry } from "@/features/archive/lib/archiveHandle"
 import type { EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
@@ -32,7 +33,7 @@ export interface ViewedEntry {
 	// NaN when absent.
 	modified: number
 	encrypted: boolean
-	// Not read from here: its card offers to extract the archive instead (a solid block too large, E3).
+	// Not read from here: its card offers to extract the archive instead (a solid block too large).
 	extract?: ExtractReason | undefined
 }
 
@@ -55,7 +56,7 @@ export interface ArchiveEntryViewerProps {
 }
 
 // One entry shown in the archive browser's place: read through the archive's reader, or, one not read from here (a
-// solid block too large, E3), the card offering to extract the archive.
+// solid block too large), the card offering to extract the archive.
 export function ArchiveEntryViewer(props: ArchiveEntryViewerProps) {
 	return props.entry.extract === undefined ? (
 		<ReadEntryViewer {...props} />
@@ -262,7 +263,7 @@ function ReadEntryViewer({
 		})
 	}, [leaseId])
 
-	// The "Extract to …" card for media and RAW the reader cannot serve from here (W6 §3.10): by its name, or by what its
+	// The "Extract to …" card for media and RAW the reader cannot serve from here: by its name, or by what its
 	// content read found.
 	const cardFor = (category: PreviewCategory | null): ExtractReason | null =>
 		kind === null ? null : entryExtractCard(category, kind, request.size)

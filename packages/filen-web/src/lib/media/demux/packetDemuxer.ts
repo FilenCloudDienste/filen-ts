@@ -128,6 +128,14 @@ interface Run {
 	fresh: number
 }
 
+// The packet a search under way looks for: of `track`, at or before `target`, a key one when `key`.
+interface Watch {
+	track: number
+	target: number
+	key: boolean
+	found: DemuxPacket | null
+}
+
 function keptCost(runs: readonly Run[]): { records: number; payloads: number } {
 	let records = 0
 	let payloads = 0
@@ -191,6 +199,9 @@ export class PacketDemuxer implements Demuxer {
 	private offset: number | null = null
 	// The header's duration, else the estimate; undefined until known.
 	private knownDuration: number | null | undefined = undefined
+	// While a packet is looked for by time: the latest one it wants that eviction dropped, so a packet further back than
+	// the kept runs reach is still found once read.
+	private watch: Watch | null = null
 
 	public constructor(input: Input, mimeType: string, open: (input: Input) => Promise<ContainerReader>) {
 		this.input = input
@@ -386,6 +397,7 @@ export class PacketDemuxer implements Demuxer {
 				break
 			}
 
+			this.watchDropped(oldest.packets, oldest.packets.length)
 			this.runs.splice(this.runs.indexOf(oldest), 1)
 		}
 
@@ -400,8 +412,32 @@ export class PacketDemuxer implements Demuxer {
 			}
 
 			if (drop > 0) {
+				this.watchDropped(keep.packets, drop)
 				keep.start = keep.packets[drop]?.unit ?? keep.next
 				keep.packets.splice(0, drop)
+			}
+		}
+	}
+
+	// Offers the first `end` of `packets`, about to be dropped, to the search under way.
+	private watchDropped(packets: readonly DemuxPacket[], end: number): void {
+		const watch = this.watch
+
+		if (watch === null) {
+			return
+		}
+
+		for (let index = 0; index < end; index++) {
+			const packet = packets[index]
+
+			if (
+				packet !== undefined &&
+				(!watch.key || packet.key) &&
+				packet.track === watch.track &&
+				packet.pts <= watch.target &&
+				(watch.found === null || packet.pts >= watch.found.pts)
+			) {
+				watch.found = packet
 			}
 		}
 	}
@@ -516,7 +552,9 @@ export class PacketDemuxer implements Demuxer {
 		return Number.isFinite(first) ? { first, last } : null
 	}
 
-	// A run whose packets of `track` reach from at or before `target` past it (or to the end of the file).
+	// A run whose packets of `track` reach from at or before `target` past it (or to the end of the file). The run is
+	// read on from where it held a packet at or before the target, so when more than the kept budget lies before the
+	// margin past it, its packets at or before the target were dropped on the way and offered to the search's watch.
 	private async covering(reader: ContainerReader, track: number, target: number): Promise<Run> {
 		for (let jumps = 0; ;) {
 			// Out of jumps with nothing at or before the target: read forward from the data's start.
@@ -529,10 +567,12 @@ export class PacketDemuxer implements Demuxer {
 					return best
 				}
 
+				// Held until it is past the margin, not chosen again after each read: a cut of its oldest packets would
+				// otherwise send the search back to the data's start, to read the same stretch again for ever.
 				if (jumps >= MAX_JUMPS || this.closeEnough(reader, best, target)) {
-					await this.advance(reader, best)
+					await this.readPast(reader, best, track, target + REORDER_MARGIN_SECONDS)
 
-					continue
+					return best
 				}
 			}
 
@@ -708,32 +748,77 @@ export class PacketDemuxer implements Demuxer {
 		const found = await this.mutex.run(async () => {
 			await this.durationOf(reader)
 
-			const target = timestamp + (await this.timeOffset(reader))
-			const run = await this.covering(reader, track, target)
-			const exact = PacketDemuxer.latest(run, track, target, key)
+			const offset = await this.timeOffset(reader)
+			const target = timestamp + offset
 
-			if (exact !== null || !key) {
-				return exact
-			}
+			const watch: Watch = { track, target, key, found: null }
 
-			// No key picture between this run's start and the target: look further back until one is found or the file
-			// starts.
-			for (let back = KEY_BACKOFF_SECONDS; ; back *= 2) {
-				const earlier = await this.covering(reader, track, target - back)
+			this.watch = watch
 
-				while (!earlier.done && (PacketDemuxer.span(earlier, track)?.last ?? -Infinity) <= target) {
-					await this.advance(reader, earlier)
+			try {
+				if (key) {
+					return await this.keyAt(reader, watch, offset)
 				}
 
-				const keyed = PacketDemuxer.latest(earlier, track, target, true)
+				// Any packet of the track at or before the target comes no later than the latest one, which the run covering
+				// it either still holds or dropped into the watch.
+				const kept = PacketDemuxer.latest(await this.covering(reader, track, target), track, target, false)
 
-				if (keyed !== null || earlier.start <= reader.dataStart) {
-					return keyed
-				}
+				return PacketDemuxer.later(watch.found, kept)
+			} finally {
+				this.watch = null
 			}
 		})
 
 		return found === null ? null : this.packet(reader, found, options)
+	}
+
+	// The latest key packet of the watched track at or before its target. Every packet read meanwhile is either still
+	// kept or was offered to `watch` as eviction dropped it, so a key picture is found however far back it lies.
+	private async keyAt(reader: ContainerReader, watch: Watch, offset: number): Promise<DemuxPacket | null> {
+		const { track, target } = watch
+		const exact = PacketDemuxer.latest(await this.covering(reader, track, target), track, target, true)
+
+		if (exact !== null) {
+			return exact
+		}
+
+		// No key picture between that run's start and the target: look further back, doubling the stretch, while it
+		// still starts after the file's first packet. Each pass reads its stretch whole, so a key dropped from it counts.
+		for (let back = KEY_BACKOFF_SECONDS; Number.isFinite(target) && target - back > offset; back *= 2) {
+			const from = target - back
+			const earlier = await this.covering(reader, track, from)
+
+			await this.readPast(reader, earlier, track, target)
+
+			const kept = PacketDemuxer.latest(earlier, track, target, true)
+			const dropped = watch.found !== null && (watch.found.pts >= from || earlier.start <= reader.dataStart) ? watch.found : null
+			const keyed = PacketDemuxer.later(dropped, kept)
+
+			if (keyed !== null || earlier.start <= reader.dataStart) {
+				return keyed
+			}
+		}
+
+		// The stretch reaches the file's start: one pass from the data's start to the target settles it, null included.
+		// A run starting there has lost none of its packets (eviction moves a run's start past what it drops).
+		const whole = this.runAt(reader.dataStart)
+
+		await this.readPast(reader, whole, track, target)
+
+		return PacketDemuxer.later(watch.found, PacketDemuxer.latest(whole, track, target, true))
+	}
+
+	// Reads `run` on until it holds a packet of `track` past `limit` or reaches the end of the file.
+	private async readPast(reader: ContainerReader, run: Run, track: number, limit: number): Promise<void> {
+		while (!run.done && (PacketDemuxer.span(run, track)?.last ?? -Infinity) <= limit) {
+			await this.advance(reader, run)
+		}
+	}
+
+	// The later of two packets by presentation time, `b` on a tie (it comes later in decode order).
+	private static later(a: DemuxPacket | null, b: DemuxPacket | null): DemuxPacket | null {
+		return a === null || (b !== null && b.pts >= a.pts) ? b : a
 	}
 
 	// The packet of `track` in `run` with the latest presentation time at or before `target`, a key one when `key`.

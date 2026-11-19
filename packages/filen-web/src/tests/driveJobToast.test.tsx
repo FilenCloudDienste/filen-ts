@@ -148,6 +148,19 @@ describe("DriveJobToast for a copy", () => {
 		expect(screen.getByRole("progressbar", { name: "Copy progress" })).toBeTruthy()
 	})
 
+	// Sonner's toaster is a polite live region: the lines that tick with each update opt out of it.
+	it("keeps the ticking lines out of the toaster's live region while running", () => {
+		seed({ ...COPYING, active: [{ destUuid: "d", name: "holiday.jpg", size: 2_048, bytesDone: 1_024 }] })
+		renderCard()
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		for (const text of ["12 of 40 files", "25%", /^\S+ \S+ of \S+ \S+ · \S+ \S+\/s · 0:06 left$/, "holiday.jpg"]) {
+			expect(screen.getByText(text).closest("[aria-live=off]")).not.toBeNull()
+		}
+
+		expect(screen.getByText("Copying 3 items → Photos").closest("[aria-live=off]")).toBeNull()
+	})
+
 	it("hides through its dismiss button", () => {
 		seed(COPYING)
 
@@ -388,6 +401,15 @@ describe("DriveJobToast for a copy", () => {
 		expect(screen.getByText("Done")).toBeTruthy()
 		expect(screen.getByText("100%")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
+	})
+
+	// Settled, the status line leaves the quiet region so the end is announced once.
+	it("announces the settled status line", () => {
+		seed({ ...COPYING, outcome: { status: "done" } })
+		renderCard()
+
+		expect(screen.getByText("Done").closest("[aria-live=off]")).toBeNull()
+		expect(screen.getByText("Copied 3 items → Photos").closest("[aria-live=off]")).toBeNull()
 	})
 
 	// The stop reached it only after the copy had finished; what it copied went to the trash all the same.

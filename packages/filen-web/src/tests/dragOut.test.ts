@@ -97,6 +97,7 @@ function fakeDrag() {
 		calls,
 		prepares,
 		begins,
+		listenerCount: () => listeners.size,
 		emit: (state: DesktopDragState) => {
 			for (const listener of listeners) {
 				listener(state)
@@ -480,14 +481,10 @@ describe("drag-out hand-off", () => {
 	})
 
 	it("a browser build never touches the bridge: an outside drag stays in the page", () => {
-		const fake = fakeDrag()
-
 		setPointerDragHooks(null)
 		press()
 		move(-5, 30)
 
-		expect(fake.drag.onState).not.toHaveBeenCalled()
-		expect(fake.drag.prepare).not.toHaveBeenCalled()
 		expect(pointerDragChip()?.style.display).toBe("")
 		expect(dragOutActive()).toBe(false)
 	})
@@ -496,10 +493,16 @@ describe("drag-out hand-off", () => {
 		const fake = fakeDrag()
 		const uninstall = installDragOut({ drag: fake.drag })
 
+		expect(fake.listenerCount()).toBe(1)
+
 		uninstall()
+
+		expect(fake.listenerCount()).toBe(0)
+
 		press()
 		move(-5, 30)
 
 		expect(fake.drag.prepare).not.toHaveBeenCalled()
+		expect(dragOutActive()).toBe(false)
 	})
 })

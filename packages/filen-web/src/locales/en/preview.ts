@@ -58,6 +58,7 @@ import { previewTextNotebook } from "@/locales/en/previewText/notebook"
 import { previewTextMermaid } from "@/locales/en/previewText/mermaid"
 import { previewTextMailbox } from "@/locales/en/previewText/mailbox"
 import { previewTextLargeText } from "@/locales/en/previewText/largeText"
+import { previewTextCodeEditor } from "@/locales/en/previewText/codeEditor"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
 import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
@@ -162,9 +163,9 @@ export const preview = {
 	previewUnsavedChangesBody: "You have unsaved changes to this file. Discard them?",
 	/** Unsaved-changes confirm dialog — the destructive confirm button, discards the buffer and proceeds */
 	previewDiscardAction: "Discard",
-	/** Toast shown after a save fails because the file's own parent directory no longer exists — the editor locks read-only for the rest of this session (mobile parity: retrying against the same broken parent would only fail again); every other save failure keeps the editor open for a retry instead */
 	/** Toast — the editor's content could not be read for saving (the spreadsheet could not be written out) */
 	previewSaveFailed: "This file couldn't be saved.",
+	/** Toast shown after a save fails because the file's own parent directory no longer exists — the editor locks read-only for the rest of this session (mobile parity: retrying against the same broken parent would only fail again); every other save failure keeps the editor open for a retry instead */
 	previewReadOnlyAfterSaveFailure: "This file is now read-only — saving failed and can't be retried until you reopen it.",
 
 	// ── Changes made elsewhere ───────────────────────────────────────────────
@@ -978,5 +979,6 @@ export const preview = {
 	...previewTextNotebook,
 	...previewTextMermaid,
 	...previewTextMailbox,
-	...previewTextLargeText
+	...previewTextLargeText,
+	...previewTextCodeEditor
 } as const

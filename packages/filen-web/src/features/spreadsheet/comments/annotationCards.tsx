@@ -104,7 +104,8 @@ function fieldKeys(event: KeyboardEvent<HTMLTextAreaElement>, submit: () => void
 	}
 }
 
-// A text field with Cancel and a submit button. `allowEmpty`: a note may be emptied; a comment may not.
+// A text field with Cancel and a submit button. `allowEmpty`: a note may be emptied; a comment may not. When `onSubmit`
+// returns a promise (the author name may be asked for first), a second submit is ignored until it settles.
 export function CardField({
 	initial,
 	label,
@@ -119,16 +120,26 @@ export function CardField({
 	placeholder: string
 	submitLabel: string
 	allowEmpty: boolean
-	onSubmit: (text: string) => void
+	onSubmit: (text: string) => Promise<unknown> | undefined
 	onCancel: () => void
 }) {
 	const { t } = useTranslation("preview")
 	const [text, setText] = useState(initial)
+	const [pending, setPending] = useState(false)
 	const ref = useRef<HTMLTextAreaElement>(null)
 	const blocked = !allowEmpty && text.trim().length === 0
 	const submit = (): void => {
-		if (!blocked) {
-			onSubmit(text.replace(/\r\n?/g, "\n"))
+		if (blocked || pending) {
+			return
+		}
+
+		const result = onSubmit(text.replace(/\r\n?/g, "\n"))
+
+		if (result !== undefined) {
+			setPending(true)
+			void result.finally(() => {
+				setPending(false)
+			})
 		}
 	}
 
@@ -168,7 +179,7 @@ export function CardField({
 				<Button
 					type="button"
 					size="xs"
-					disabled={blocked}
+					disabled={blocked || pending}
 					onClick={submit}
 				>
 					{submitLabel}
@@ -189,7 +200,8 @@ export function NoteBody({
 	note: SheetNote | null
 	editing: boolean
 	initial: string
-	onSave: (text: string) => void
+	// Resolves whether the note was written (false: the author name was not given); the field stays until it was.
+	onSave: (text: string) => Promise<boolean>
 	onCancel: () => void
 }) {
 	const { t } = useTranslation("preview")
@@ -254,7 +266,8 @@ export function ThreadBody({
 	thread: SheetThread | null
 	opened: boolean
 	canEdit: boolean
-	onPost: (text: string) => void
+	// Resolves whether the comment was written (false: the author name was not given); the field stays until it was.
+	onPost: (text: string) => Promise<boolean>
 	onEdit: (id: string, text: string) => void
 	onDelete: (id: string) => void
 	onCancel: () => void
@@ -337,10 +350,13 @@ export function ThreadBody({
 						placeholder={t("previewSheetCommentReplyPlaceholder")}
 						submitLabel={t("previewSheetCommentReply")}
 						allowEmpty={false}
-						onSubmit={text => {
-							setReplying(false)
-							onPost(text)
-						}}
+						onSubmit={text =>
+							onPost(text).then(posted => {
+								if (posted) {
+									setReplying(false)
+								}
+							})
+						}
 						onCancel={() => {
 							setReplying(false)
 						}}

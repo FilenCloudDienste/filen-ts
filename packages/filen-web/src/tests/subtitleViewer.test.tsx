@@ -75,6 +75,7 @@ describe("SubtitleViewer", () => {
 		expect(asked.current).toEqual([[SRT, "srt"]])
 		expect(screen.getByRole("table", { name: "Cues" }).getAttribute("aria-rowcount")).toBe("3")
 		expect(screen.getByRole("button", { name: "Cues" }).getAttribute("aria-pressed")).toBe("true")
+		expect(screen.getByRole("rowgroup").tabIndex).toBe(0)
 
 		fireEvent.change(screen.getByRole("searchbox", { name: "Find in cues" }), { target: { value: "KENOBI" } })
 

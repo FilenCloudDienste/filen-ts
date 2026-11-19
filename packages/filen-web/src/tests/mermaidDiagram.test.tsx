@@ -156,7 +156,7 @@ describe("Mermaid fences in the file preview", () => {
 		expect(renderSpy).not.toHaveBeenCalled()
 	})
 
-	it("says a diagram the frame gave up on is too complex, and shows one it could not draw as its source", async () => {
+	it("says a diagram the frame gave up on is too complex, and shows one it could not draw with a visible note above its source", async () => {
 		renderSpy.mockResolvedValueOnce({ kind: "tooComplex" }).mockResolvedValueOnce({ kind: "failed" })
 
 		render(
@@ -172,8 +172,12 @@ describe("Mermaid fences in the file preview", () => {
 		expect(await screen.findByText("Diagram too complex to preview")).toBeTruthy()
 
 		const source = await screen.findByText("graph TD; A1-->B")
+		const note = screen.getByText("This diagram can't be shown.")
 
-		expect(source.getAttribute("title")).toBe("This diagram can't be shown.")
+		// Visible text, not a tooltip, and the source below it.
+		expect(note.tagName).toBe("P")
+		expect(source.hasAttribute("title")).toBe(false)
+		expect(note.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 	})
 
 	it("leaves notes and assistant replies with the fence as code", () => {

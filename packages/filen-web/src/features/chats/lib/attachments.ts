@@ -14,7 +14,7 @@ import { createLink } from "@/features/drive/lib/actions"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
-import { onTransferProgress, openProgressChannel } from "@/features/transfers/lib/progressChannel"
+import { openProgressChannel } from "@/features/transfers/lib/progressChannel"
 import { noop } from "@/lib/utils"
 import { getDotFilenSubdir } from "@/lib/dotFilen"
 import { markAccountStale } from "@/queries/account"
@@ -29,11 +29,10 @@ import { isStorageRefusal, reactToStorageRefusal } from "@/features/drive/lib/up
 // patch call (queries/client.ts convention) — no outbox, no retry logic of our own (the SDK's Tower
 // stack owns upload retries; a link-creation failure is surfaced once, not auto-retried).
 //
-// PREMIUM GATE (binding context — the shared e2e account is FREE): `createFileLink`/`createDirectoryLink`
-// reject on a free account with the server's own error. That rejection is NOT special-cased here — it
-// flows through the exact same asErrorDTO → errorLabel path as any other failure, so the composer shows
-// whatever label the server sent (LABEL-FIRST, lib/sdk/errors.ts's own rule) rather than a bespoke
-// "upgrade to premium" message this app doesn't otherwise author.
+// PREMIUM GATE: `createFileLink`/`createDirectoryLink` reject on a free account with the server's own
+// error. The composer pre-gates attaching on the account's Pro status (with its own upgrade prompt);
+// this layer stays the backstop: a rejection that still arrives flows through the same asErrorDTO →
+// errorLabel path as any other failure, so the server's label is shown (LABEL-FIRST, lib/sdk/errors.ts).
 
 export type AttachmentOutcome = { status: "success"; url: string } | { status: "error"; dto: ErrorDTO }
 
@@ -118,7 +117,7 @@ export function preflightAttachments(files: readonly File[]): Promise<boolean> {
 // runUpload's own VoidActionOutcome doesn't carry — a thin sibling rather than a signature change to
 // that shared, separately-tested helper), then a straight link create: the upload is a fresh file under
 // a unique name, so it cannot already carry a link and the status read would be a wasted round trip.
-export async function uploadAttachment(file: File, onProgress: (bytesTransferred: number) => void): Promise<AttachmentOutcome> {
+export async function uploadAttachment(file: File): Promise<AttachmentOutcome> {
 	const parent = await attemptOp(getDotFilenSubdir(CHAT_UPLOADS_DIR_NAME))
 
 	if (parent.status === "error") {
@@ -141,9 +140,6 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 		startedAt: Date.now()
 	})
 
-	// The row's bytes come through the worker's progress channel; the composer follows them too.
-	const stopFollowing = onTransferProgress(transferId, onProgress)
-
 	let uploaded: SdkFile
 	// Wraps the same bytes (no copy) under the unique name.
 	const named = new File([file], uniqueAttachmentName(file.name), { type: file.type, lastModified: file.lastModified })
@@ -162,8 +158,6 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 		}
 
 		return { status: "error", dto }
-	} finally {
-		stopFollowing()
 	}
 
 	store.settle(transferId, "done")

@@ -116,8 +116,7 @@ function ItemMenuEntries({
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
 		// Checked FIRST, before any `await` below — startDownloads' FSA save picker needs this
 		// click's own live user gesture (see download.ts), so nothing here may yield to the event loop
-		// ahead of it. disabled=false is already guaranteed by the Item's own `disabled` prop below (a
-		// disabled MenuItem never fires onClick at all), so this never runs for a directory.
+		// ahead of it. Download is always enabled (downloadDescriptor), directories included.
 		if (descriptor.id === "download") {
 			void startDownloads([item])
 			return

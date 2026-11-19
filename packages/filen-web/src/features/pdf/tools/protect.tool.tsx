@@ -14,7 +14,6 @@ export const PROTECT_DOCUMENT_TOOL: PdfTool = {
 	labelKey: "previewPdfSecurityTitle",
 	icon: LockKeyholeIcon,
 	toolClass: "security",
-	actionIds: [],
 	actions: [],
 	enabledWhen: policy => editorWritable(policy) ?? { enabled: true },
 	commands: [],

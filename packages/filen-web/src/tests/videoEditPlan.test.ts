@@ -268,6 +268,21 @@ describe("planExport modes", () => {
 		expect(plan.snapped).toEqual([])
 	})
 
+	it("copies a recipe whose only text box was cleared: it draws nothing", () => {
+		const blank = recipeFor(60, {
+			text: [{ id: "t", text: " \n ", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }]
+		})
+
+		expect(planExport(blank, source, ALL_ENCODERS)).toMatchObject({ mode: "copy", transcodeReasons: [] })
+		expect(exportBlockers(blank, source, NO_WEBCODECS)).toEqual([])
+
+		// A crop of an HDR source still keeps it HDR (no pixel pass) beside the blank box.
+		const hlg = sourceInfo({ transfer: "hlg", bitDepth: 10, videoCodec: "hvc1.2.4.L150.B0", container: "mov" })
+		const cropped = { ...blank, crop: { x: 0, y: 0, width: 960, height: 540 } }
+
+		expect(planExport(cropped, hlg, ALL_ENCODERS).hdr).toBe("hevc10")
+	})
+
 	it("ignores an unknown filter id", () => {
 		expect(planExport(recipeFor(60, { filter: "no-such-filter" }), source, ALL_ENCODERS).mode).toBe("copy")
 	})

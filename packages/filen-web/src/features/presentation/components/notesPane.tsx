@@ -1,46 +1,25 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { NotesPanel, PresentationTextEditor } from "@filen/office/react/presentation"
 import type { SlideRef, SlideReview } from "@filen/office/core/presentation"
 import { useElementSize } from "@/lib/useElementSize"
-import { askSlideNotesAgain, useAskSlideNotes, useSlideNotesAnswer } from "@/features/presentation/components/commentsPane.logic"
+import {
+	askSlideNotesAgain,
+	presentationNotesLayout,
+	setPresentationNotesLayout,
+	useAskSlideNotes,
+	useSlideNotesAnswer,
+	type NotesLayout
+} from "@/features/presentation/components/commentsPane.logic"
 import { focusSettled } from "@/features/office/components/commentThreads.logic"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { refusalKey } from "@/features/presentation/hooks/usePresentationSession"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 
-const STORAGE_KEY = "filen.presentation.notes"
-
-interface NotesLayout {
-	collapsed: boolean
-	height: number
-}
-
-// The viewer's own preference, remembered in this browser only (absent or unreadable storage: the defaults).
-function readLayout(): NotesLayout | null {
-	try {
-		const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")
-
-		if (typeof parsed === "object" && parsed !== null) {
-			const { collapsed, height } = parsed as Partial<NotesLayout>
-
-			if (typeof collapsed === "boolean" && typeof height === "number" && Number.isFinite(height)) return { collapsed, height }
-		}
-	} catch {
-		// Storage blocked or the value damaged: the defaults.
-	}
-
-	return null
-}
-
-function writeLayout(layout: NotesLayout): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(layout))
-	} catch {
-		// Storage blocked: the layout lasts for this viewer only.
-	}
-}
+// How long the pane's height stays unchanged before it is stored: a drag of the resize handle (or a run of keyboard
+// steps) is stored once, when it ends.
+const LAYOUT_WRITE_DELAY_MS = 300
 
 // Padding around the notes body (px), as the pane shows it.
 const INSET = 8
@@ -66,6 +45,7 @@ function NotesEditor({
 	const { t } = useTranslation("preview")
 	const bindings = usePresentationTextBindings()
 	const [host, setHost] = useState<HTMLElement | null>(null)
+	const hintId = useId()
 	// Focus goes back to the notes once the editor has closed.
 	const refocus = useRef(false)
 	// The editor's page takes focus as it opens, so a key before the editor has focused its own view (Escape at once)
@@ -89,7 +69,7 @@ function NotesEditor({
 		setOpened(null)
 	}
 
-	const answer = useSlideNotesAnswer(slide)
+	const answer = useSlideNotesAnswer(editor.session, slide)
 	const review = answer.review
 	const notes = review?.notes
 	const box: NotesBox | undefined = review?.notesBox
@@ -291,12 +271,13 @@ function NotesEditor({
 
 	const paragraphs = shown === "" ? [] : shown.split("\n")
 
+	// Readable content, not a button (a button's name would replace the notes' text): focusable, a click or Enter edits,
+	// which the hint tells. The empty notes' placeholder says it itself.
 	return (
 		<div
 			ref={setHost}
-			role="button"
 			tabIndex={0}
-			aria-label={notes === undefined ? t("previewPptxNotesAdd") : t("previewPptxNotesEditor")}
+			{...(paragraphs.length === 0 ? {} : { "aria-describedby": hintId })}
 			className="size-full cursor-text overflow-auto p-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
 			onClick={event => {
 				const rect = event.currentTarget.getBoundingClientRect()
@@ -324,14 +305,22 @@ function NotesEditor({
 			{paragraphs.length === 0 ? (
 				<p className="text-muted-foreground">{t("previewPptxNotesAdd")}</p>
 			) : (
-				paragraphs.map((paragraph, index) => (
-					<p
-						key={index}
-						className="min-h-5 break-words whitespace-pre-wrap"
+				<>
+					{paragraphs.map((paragraph, index) => (
+						<p
+							key={index}
+							className="min-h-5 break-words whitespace-pre-wrap"
+						>
+							{paragraph}
+						</p>
+					))}
+					<span
+						id={hintId}
+						className="sr-only"
 					>
-						{paragraph}
-					</p>
-				))
+						{t("previewPptxNotesEditHint")}
+					</span>
+				</>
 			)}
 		</div>
 	)
@@ -354,11 +343,48 @@ export function PresentationNotesPane({
 	onEditStart?: () => void
 }) {
 	const { t } = useTranslation("preview")
-	const [layout, setLayout] = useState<NotesLayout>(() => readLayout() ?? { collapsed: phone, height: 120 })
-	const update = (next: NotesLayout): void => {
-		setLayout(next)
-		writeLayout(next)
+	// As read during boot; collapsed at phone widths while nothing is stored.
+	const [layout, setLayout] = useState<NotesLayout>(() => presentationNotesLayout() ?? { collapsed: phone, height: 120 })
+	// A height not stored yet (its write waits for the resize to settle).
+	const unsaved = useRef<{ readonly timer: ReturnType<typeof setTimeout>; readonly layout: NotesLayout } | null>(null)
+	const save = (next: NotesLayout): void => {
+		if (unsaved.current !== null) clearTimeout(unsaved.current.timer)
+
+		unsaved.current = null
+		setPresentationNotesLayout(next)
 	}
+	const update = (next: NotesLayout, settle: boolean): void => {
+		setLayout(next)
+
+		if (!settle) {
+			save(next)
+
+			return
+		}
+
+		if (unsaved.current !== null) clearTimeout(unsaved.current.timer)
+
+		unsaved.current = {
+			timer: setTimeout(() => {
+				save(next)
+			}, LAYOUT_WRITE_DELAY_MS),
+			layout: next
+		}
+	}
+
+	// A height still waiting when the pane goes is stored then.
+	useEffect(
+		() => () => {
+			const pending = unsaved.current
+
+			if (pending === null) return
+
+			clearTimeout(pending.timer)
+			unsaved.current = null
+			setPresentationNotesLayout(pending.layout)
+		},
+		[]
+	)
 
 	return (
 		<div
@@ -375,11 +401,11 @@ export function PresentationNotesPane({
 				emptyText={t("previewPptxNotesEmpty")}
 				collapsed={layout.collapsed}
 				onCollapsedChange={collapsed => {
-					update({ ...layout, collapsed })
+					update({ ...layout, collapsed }, false)
 				}}
 				height={layout.height}
 				onHeightChange={height => {
-					update({ ...layout, height })
+					update({ ...layout, height }, true)
 				}}
 				maxHeight={phone ? 240 : 480}
 				{...(editor === undefined || layout.collapsed

@@ -141,6 +141,11 @@ function boxType(bytes: Uint8Array, at: number): string {
 	return String.fromCharCode(bytes[at] ?? 0, bytes[at + 1] ?? 0, bytes[at + 2] ?? 0, bytes[at + 3] ?? 0)
 }
 
+// A version 1 mvhd's 64-bit duration as a number, 0 for all ones ("unknown") or past a safe integer.
+function safeDuration(duration: bigint): number {
+	return duration > BigInt(Number.MAX_SAFE_INTEGER) ? 0 : Number(duration)
+}
+
 // An MP4/MOV's length from its mvhd (ISO/IEC 14496-12 §8.2.2), read by box headers (a moov at the end, as a
 // camera writes it, takes a few small reads, never the media): "unknown" for a file that is no ISO BMFF (it goes to a
 // media element), "unreadable" for one whose boxes or mvhd do not hold together (an element could not play it either).
@@ -169,13 +174,18 @@ export async function isobmffLength(size: number, read: (start: number, end: num
 
 				if (innerLength < 8) return { kind: "unreadable" }
 
-				if (boxType(moov, inner + 4) === "mvhd" && inner + 32 <= moov.length) {
+				if (boxType(moov, inner + 4) === "mvhd") {
 					const version = moov[inner + 8] ?? 0
-					const timescale = box.getUint32(inner + (version === 1 ? 28 : 20))
-					const duration = version === 1 ? Number(box.getBigUint64(inner + 32)) : box.getUint32(inner + 24)
 
-					// All ones is QuickTime's "unknown"; zero, a fragmented file's empty movie.
-					return timescale > 0 && duration > 0 && duration !== 0xffffffff && Number.isFinite(duration)
+					// A version 1 mvhd ends its 64-bit duration at byte 40, a version 0 one its 32-bit duration at 28.
+					if (inner + (version === 1 ? 40 : 28) > moov.length) return { kind: "unreadable" }
+
+					const timescale = box.getUint32(inner + (version === 1 ? 28 : 20))
+					// All ones (in either width) is QuickTime's "unknown", and a 64-bit length past a safe integer is
+					// no real one (both read as 0); zero is a fragmented file's empty movie.
+					const duration = version === 1 ? safeDuration(box.getBigUint64(inner + 32)) : box.getUint32(inner + 24)
+
+					return timescale > 0 && duration > 0 && (version === 1 || duration !== 0xffffffff)
 						? { kind: "known", ms: (duration / timescale) * 1000 }
 						: { kind: "unreadable" }
 				}

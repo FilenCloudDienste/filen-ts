@@ -72,7 +72,14 @@ describe("signing with a certificate", () => {
 		expect(signsInOneVersion(true, false, 120 * MIB, PDF_DESKTOP_MEMORY)).toBe(false)
 	})
 
-	function harness(options: { dirty: boolean; size: number; saves: boolean[]; protecting?: boolean; redacting?: boolean }) {
+	// `saves`: how each save ends, true and false for saved and failed.
+	function harness(options: {
+		dirty: boolean
+		size: number
+		saves: (boolean | "cancelled")[]
+		protecting?: boolean
+		redacting?: boolean
+	}) {
 		const calls: string[] = []
 		const signer = {
 			unlock: vi.fn(),
@@ -108,7 +115,9 @@ describe("signing with a certificate", () => {
 			save: job => {
 				calls.push(job === null ? "save" : "signedSave")
 
-				return Promise.resolve(options.saves.shift() ?? false)
+				const outcome = options.saves.shift() ?? false
+
+				return Promise.resolve(outcome === "cancelled" ? outcome : outcome ? "saved" : "failed")
 			},
 			job: (jobSigner, digest) => ({
 				signer: jobSigner,
@@ -116,7 +125,7 @@ describe("signing with a certificate", () => {
 				hints: () => Promise.resolve([])
 			}),
 			onSaveChangesFirst: () => calls.push("notice"),
-			onFailed: () => calls.push("failed")
+			onFailed: error => calls.push(`failed ${error instanceof Error ? error.message : ""}`)
 		}
 		const request: PdfSigningRequest = {
 			signer,
@@ -171,5 +180,19 @@ describe("signing with a certificate", () => {
 
 		expect(await signWithCertificate(deps, request)).toBe(false)
 		expect(calls).toEqual(["notice", "save", "terminate"])
+	})
+
+	it("says once that the save failed when it could not start, and takes the signature back", async () => {
+		const { calls, deps, request } = harness({ dirty: false, size: 1000, saves: ["cancelled"] })
+
+		expect(await signWithCertificate(deps, request)).toBe(false)
+		expect(calls).toEqual(["sign.addField", "signedSave", "failed previewPdfSaveFailed", "terminate", "discard"])
+	})
+
+	it("says once that the save failed when the changes' own save could not start", async () => {
+		const { calls, deps, request } = harness({ dirty: true, size: 200 * MIB, saves: ["cancelled"] })
+
+		expect(await signWithCertificate(deps, request)).toBe(false)
+		expect(calls).toEqual(["notice", "save", "failed previewPdfSaveFailed", "terminate"])
 	})
 })

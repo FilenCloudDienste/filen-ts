@@ -1,7 +1,8 @@
-// E2E builds: the sessionStorage key ("on") a test lane sets so every PDF export (the editors' File menus, the
+import { E2E_PDF_DETERMINISTIC_KEY } from "@/e2e-hooks/storageKeys"
+
+// E2E builds: a test lane sets E2E_PDF_DETERMINISTIC_KEY to "on" so every PDF export (the editors' File menus, the
 // drive's Download as) is deterministic: no creation date, a file identifier from the title, so two exports of
 // the same file compare byte for byte.
-const E2E_PDF_DETERMINISTIC_KEY = "filen-e2e-pdf-deterministic"
 
 function e2ePdfDeterministic(): boolean {
 	try {

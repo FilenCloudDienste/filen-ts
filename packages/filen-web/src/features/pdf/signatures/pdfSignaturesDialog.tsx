@@ -64,11 +64,16 @@ function SignatureEntry({
 	revisions: number
 	onViewSignedVersion: (() => void) | undefined
 }) {
-	const { t } = useTranslation("preview")
+	const { t, i18n } = useTranslation("preview")
 	const reason = reasonKey(signature)
 	const certification = certificationKey(signature.certification)
 	const name = signerName(signature)
-	const kinds = signature.changes?.kinds.map(kind => t(CHANGE_KIND_KEYS[kind])).join(", ") ?? ""
+	const kinds =
+		signature.changes === null
+			? ""
+			: new Intl.ListFormat(i18n.language, { style: "long", type: "conjunction" }).format(
+					signature.changes.kinds.map(kind => t(CHANGE_KIND_KEYS[kind]))
+				)
 	const changes =
 		signature.changes === null
 			? null

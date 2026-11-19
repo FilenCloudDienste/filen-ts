@@ -1,9 +1,9 @@
 import { type } from "arktype"
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { queryOptions, useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { noDiskPersister } from "@/queries/persist"
 
-// Query key taxonomy per client.ts: [domain, entity]. persist.ts imports this exact constant to
-// exclude the query from disk persistence, rather than re-literaling the key.
-export const REGISTER_CHECK_QUERY_KEY = ["auth", "registerCheck"] as const
+// Query key taxonomy per client.ts: [domain, entity].
+const REGISTER_CHECK_QUERY_KEY = ["auth", "registerCheck"] as const
 
 const REGISTER_CHECK_URL = "https://gateway.filen.io/v3/registerCheck"
 
@@ -44,16 +44,20 @@ export async function fetchRegisterCheck(): Promise<RegisterCheckResult> {
 	}
 }
 
-// IP/region + time sensitive: gcTime 0 drops it from memory the instant nothing observes it, and
-// refetchOnMount "always" refetches even over an unexpired restored value. Window-focus/reconnect
-// refetch is off — this is a one-shot signup-time check, not a value worth keeping live.
+// IP/region + time sensitive: never persisted (a disk row would only serve a stale banner for an
+// instant), gcTime 0 drops it from memory the instant nothing observes it, and refetchOnMount "always"
+// refetches on every mount. Window-focus/reconnect refetch is off — this is a one-shot signup-time
+// check, not a value worth keeping live.
+export const registerCheckQueryOptions = queryOptions({
+	queryKey: REGISTER_CHECK_QUERY_KEY,
+	queryFn: fetchRegisterCheck,
+	persister: noDiskPersister,
+	gcTime: 0,
+	refetchOnMount: "always",
+	refetchOnWindowFocus: false,
+	refetchOnReconnect: false
+})
+
 export function useRegisterCheckQuery(): UseQueryResult<RegisterCheckResult> {
-	return useQuery({
-		queryKey: REGISTER_CHECK_QUERY_KEY,
-		queryFn: fetchRegisterCheck,
-		gcTime: 0,
-		refetchOnMount: "always",
-		refetchOnWindowFocus: false,
-		refetchOnReconnect: false
-	})
+	return useQuery(registerCheckQueryOptions)
 }

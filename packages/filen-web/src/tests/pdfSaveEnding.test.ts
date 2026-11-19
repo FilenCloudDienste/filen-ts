@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { AnyFile } from "@filen/sdk-rs"
 import { PDF_DESKTOP_MEMORY, type PdfEditState } from "@filen/office/core/pdfedit"
-import { PdfEngineError, type PdfOpenResult, type PdfSaveBegun } from "@filen/office/dom/pdfedit"
+import type { PdfOpenResult, PdfSaveBegun } from "@filen/office/dom/pdfedit"
 import { engineDocumentPermissions, type PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -11,7 +11,7 @@ import type { PdfToolContext } from "@/features/pdf/tools/registry"
 // Every save ends, whatever fails on its way, and holds the editor's changes until it did; an account whose versioning
 // is not known is taken as keeping none; a fresh engine that does not open after a save is told apart from a lost session; drafts typed into
 // fields are saved; the engine's own reading of the document's restrictions decides printing; a redaction saved as a
-// copy is taken back out of the document.
+// copy is taken back out of the document; a save past the size the engine edits is refused as such, nothing uploaded.
 
 vi.mock("@/features/pdf/session/engineModule", () => ({ prefetchPdfEngine: () => undefined }))
 vi.mock("@/features/preview/lib/editedCopy", () => ({ writeEditedCopy: vi.fn() }))
@@ -60,14 +60,17 @@ interface Calls {
 
 // A save's deps over a fake engine that runs one request at a time, as the engine does: writeOutput holds the requests
 // after it until `upload` answers it, or the page aborts its end of the port (never, when neither comes).
-function saveDeps(calls: Calls, options: { upload?: Promise<{ uploaded: boolean }>; versioning?: () => boolean } = {}) {
+function saveDeps(
+	calls: Calls,
+	options: { upload?: Promise<{ uploaded: boolean }>; versioning?: () => boolean; begun?: PdfSaveBegun } = {}
+) {
 	let writing: Promise<unknown> = Promise.resolve()
 	const call = (op: string, args: unknown): Promise<unknown> => {
 		calls.ops.push({ op, args })
 
 		switch (op) {
 			case "saveBegin":
-				return Promise.resolve(WRITTEN)
+				return Promise.resolve(options.begun ?? WRITTEN)
 			case "saveEnd":
 				return writing.then(() => ({ state: STATE, heapBytes: 0, history: "kept" }))
 			case "writeOutput": {
@@ -206,6 +209,29 @@ describe("every PDF save ends", () => {
 		expect(deps.respawn).toHaveBeenCalledTimes(1)
 		expect(deps.onHistoryReset).not.toHaveBeenCalled()
 		expect(calls.held).toBe(0)
+	})
+
+	it("refuses a save past the size the engine edits, said as such, with nothing uploaded", async () => {
+		const begun: PdfSaveBegun = {
+			status: "refused",
+			plan: { mode: "full", encryption: "keep", invalidates: [], peakBytes: 1, options: "", refuse: "overBudget" },
+			reason: "overBudget"
+		}
+		const refusal = { name: "SaveRefusedError", messageKey: "previewPdfOverBudget", silent: false }
+		const version: Calls = { ops: [], held: 0 }
+
+		await expect(savePdfVersion(saveDeps(version, { begun }), ITEM)).rejects.toMatchObject(refusal)
+
+		const copy: Calls = { ops: [], held: 0 }
+		const write = vi.fn(() => Promise.resolve(null))
+
+		await expect(savePdfCopy(saveDeps(copy, { begun }), write)).rejects.toMatchObject(refusal)
+		expect(write).not.toHaveBeenCalled()
+
+		for (const calls of [version, copy]) {
+			expect(calls.ops.map(entry => entry.op)).toEqual(["saveBegin"])
+			expect(calls.held).toBe(0)
+		}
 	})
 })
 
@@ -477,9 +503,5 @@ describe("a redaction saved as a copy", () => {
 		expect(outcome).toEqual({ kind: "saved", copy: "a (redacted).pdf" })
 		// The page's mark applied, then the sanitize.
 		expect(undone).toEqual([2])
-	})
-
-	it("is refused by the engine past the size it edits, said as such", () => {
-		expect(new PdfEngineError("overBudget", "").failure).toBe("overBudget")
 	})
 })

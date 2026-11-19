@@ -34,8 +34,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 
 	return {
 		...actual,
-		heicUploadConversionEnabled: () => Promise.resolve(false),
-		maybeConvertHeicUpload: (_deps: unknown, file: File) => Promise.resolve(file)
+		heicUploadConversionEnabled: () => Promise.resolve(false)
 	}
 })
 

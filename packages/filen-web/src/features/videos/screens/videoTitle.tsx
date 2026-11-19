@@ -14,6 +14,7 @@ import { useStoredProbesQuery } from "@/features/videos/queries/detail"
 import { MovieDetail } from "@/features/videos/components/detail/movieDetail"
 import { SeriesDetail } from "@/features/videos/components/detail/seriesDetail"
 import { CorrectionsDialog } from "@/features/videos/components/detail/correctionsDialog"
+import { VideosLoadError } from "@/features/videos/screens/videosHome"
 import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Button } from "@/components/ui/button"
@@ -61,6 +62,28 @@ export function VideoTitleScreen({ titleId }: { titleId: string }) {
 		}
 
 		void navigate({ to: title?.kind === "series" ? "/videos/shows" : title?.kind === "other" ? "/videos/other" : "/videos/movies" })
+	}
+
+	// A failed read without data to show is an error with a retry, never "not in your library" (and never a spinner
+	// held while the roots scan).
+	const titleFailed = titleQuery.isError && title === null
+	const detailFailed = detailQuery.isError && detail === null
+
+	if (titleFailed || detailFailed) {
+		return (
+			<VideosLoadError
+				error={titleFailed ? titleQuery.error : detailQuery.error}
+				onRetry={() => {
+					if (titleFailed) {
+						void titleQuery.refetch()
+					}
+
+					if (detailFailed) {
+						void detailQuery.refetch()
+					}
+				}}
+			/>
+		)
 	}
 
 	if (

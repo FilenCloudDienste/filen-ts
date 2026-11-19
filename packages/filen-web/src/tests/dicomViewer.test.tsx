@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import "@/lib/i18n"
 import type { DicomInfo, DicomOpenResult, DicomStatus, DicomTagLevel } from "@/features/preview/lib/dicom/protocol"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
@@ -45,7 +45,7 @@ const worker = vi.hoisted(() => ({
 	generation: 1,
 	owned: { run: (call: (api: unknown) => unknown) => Promise.resolve(call(remote)) }
 }))
-const shellStatus = vi.hoisted(() => ({ push: (_status: DicomStatus): void => undefined }))
+const shellStatus = vi.hoisted(() => ({ push: (_status: DicomStatus): void => undefined, reload: (): void => undefined }))
 
 // The device profile, refined from desktop to mobile by a test.
 const device = vi.hoisted(() => {
@@ -95,15 +95,20 @@ vi.mock("@/features/preview/components/canvasViewerShell", () => ({
 		toolbar,
 		sidePanel,
 		notice,
-		onStatus
+		onStatus,
+		onReload
 	}: {
 		toolbar?: unknown
 		sidePanel?: unknown
 		notice?: unknown
 		onStatus?: (status: DicomStatus) => void
+		onReload?: () => void
 	}) => {
 		shellStatus.push = status => {
 			onStatus?.(status)
+		}
+		shellStatus.reload = () => {
+			onReload?.()
 		}
 
 		return (
@@ -189,6 +194,81 @@ describe("DicomViewer", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Tags" }))
 		expect(await screen.findByText("Doe^Jane")).toBeTruthy()
 		expect(screen.getByRole("tree", { name: "DICOM tags" })).toBeTruthy()
+	})
+
+	it("owns its tag rows as treeitems of the tree, and names a row's chevron as its expand control", async () => {
+		remote.tags.mockResolvedValueOnce({
+			rows: [
+				{
+					tag: "(0008,1115)",
+					vr: "SQ",
+					name: "Referenced Series Sequence",
+					item: null,
+					value: null,
+					truncated: false,
+					length: 24,
+					children: 1,
+					isPrivate: false
+				}
+			],
+			more: 0
+		})
+		renderViewer({ info: INFO, failure: null })
+		fireEvent.click(await screen.findByRole("button", { name: "Tags" }))
+
+		const tree = screen.getByRole("tree", { name: "DICOM tags" })
+
+		await vi.waitFor(() => {
+			expect(within(tree).getAllByRole("treeitem").length).toBeGreaterThan(0)
+		})
+		expect(within(tree).queryByRole("list")).toBeNull()
+		expect(within(tree).queryByRole("listitem")).toBeNull()
+		fireEvent.click(within(tree).getByRole("button", { name: "Expand Referenced Series Sequence" }))
+		expect(within(tree).getByRole("button", { name: "Collapse Referenced Series Sequence" })).toBeTruthy()
+	})
+
+	it("draws the image again after Reload only once the new worker opened the file", async () => {
+		const first = worker.owned
+		let opened: (result: DicomOpenResult) => void = () => undefined
+		const reopen = vi.fn(
+			() =>
+				new Promise<DicomOpenResult>(done => {
+					opened = done
+				})
+		)
+
+		renderViewer({ info: INFO, failure: null })
+		await screen.findByText("CT · 3×2")
+		await vi.waitFor(() => {
+			expect(remote.show).toHaveBeenCalledWith(0)
+		})
+		remote.show.mockClear()
+		remote.tags.mockClear()
+
+		try {
+			worker.owned = { run: call => Promise.resolve(call({ ...remote, open: reopen })) }
+			worker.generation = 2
+			act(() => {
+				shellStatus.reload()
+			})
+			await vi.waitFor(() => {
+				expect(reopen).toHaveBeenCalledTimes(1)
+			})
+			expect(screen.queryByText("CT · 3×2")).toBeNull()
+			expect(remote.show).not.toHaveBeenCalled()
+			expect(remote.tags).not.toHaveBeenCalled()
+
+			act(() => {
+				opened({ info: INFO, failure: null })
+			})
+			expect(await screen.findByText("CT · 3×2")).toBeTruthy()
+			await vi.waitFor(() => {
+				expect(remote.show).toHaveBeenCalledWith(0)
+			})
+		} finally {
+			worker.owned = first
+			worker.generation = 1
+		}
 	})
 
 	it("steps a multi-frame image with Page Down and the scrubber", async () => {

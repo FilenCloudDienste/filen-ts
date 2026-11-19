@@ -3,7 +3,7 @@ import { Trans, useTranslation } from "react-i18next"
 import { formatBytes, cn } from "@filen/shared"
 import { ArrowUpRightIcon, CheckIcon, ChevronDownIcon } from "lucide-react"
 import type { SettingsKey } from "@/lib/i18n"
-import { formatBillingCost } from "@/features/settings/lib/billing"
+import { formatBillingCost, PAYMENT_METHOD_KEYS } from "@/features/settings/lib/billing"
 import { PRICE_SUFFIX_KEYS, type PaymentMethod, type PlanCard as PlanCardModel } from "@/features/settings/lib/plans"
 import { markAccountStale } from "@/queries/account"
 import { Badge } from "@/components/ui/badge"
@@ -24,12 +24,6 @@ const FEATURE_KEYS: readonly SettingsKey[] = [
 	"settingsBillingFeatureNotes",
 	"settingsBillingFeatureChats"
 ]
-
-const METHOD_KEYS: Record<PaymentMethod, SettingsKey> = {
-	stripe: "settingsBillingMethodCard",
-	paypal: "settingsBillingMethodPaypal",
-	crypto: "settingsBillingMethodCrypto"
-}
 
 // The card's purchase state, owned by the plans view so one checkout runs at a time.
 export type PlanPurchase = { status: "idle" } | { status: "pending" } | { status: "ready"; url: string }
@@ -197,7 +191,7 @@ function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, loc
 											onBuy(method)
 										}}
 									>
-										{t(METHOD_KEYS[method])}
+										{t(PAYMENT_METHOD_KEYS[method])}
 									</DropdownMenuItem>
 								))}
 							</DropdownMenuGroup>

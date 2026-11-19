@@ -1,7 +1,7 @@
 import * as Comlink from "comlink"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO } from "@/lib/sdk/errors"
 import type { ArchiveEntryId } from "@filen/sdk-rs"
 import type { EntryJobParams, EntryProgress } from "@/workers/sdk.worker"
 import {
@@ -20,6 +20,10 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { canReadEntry, maxSolidSkipFor } from "@/features/archive/lib/entryAccess.logic"
 import { acquireArchiveReader, type ReaderTarget } from "@/features/archive/lib/archiveReaders"
+import { isArchivePasswordError } from "@/features/archive/lib/archiveBrowser.logic"
+
+// Callers outside the archive browser (the comic pager) read the predicate from here, next to the read it classifies.
+export { isArchivePasswordError }
 
 // One archive entry saved on its own, through the archive's reader (archiveReaders.ts): with the index the browser's
 // listing left it, only the entry is read. Never for a selection, which extracts.
@@ -53,10 +57,6 @@ export function entryRequest(source: ArchiveSource, store: EntryStore, slot: num
 		name: store.name(slot),
 		size: store.size(slot)
 	}
-}
-
-export function isArchivePasswordError(dto: ErrorDTO): boolean {
-	return dto.kind === "ArchivePasswordRequired" || dto.kind === "ArchiveWrongPassword"
 }
 
 export interface EntryDownloadReporters {

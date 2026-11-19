@@ -311,6 +311,33 @@ describe("DocxViewer", () => {
 		view.unmount()
 	})
 
+	it("confines what docx-preview renders to its host, so a fixed shape cannot cover the app", async () => {
+		const view = render(
+			<DocxViewer
+				item={item}
+				alt="doc.docx"
+			/>
+		)
+
+		await emit({ type: "error", reason: "failed", message: "boom" })
+
+		await waitFor(() => {
+			expect(renderAsync).toHaveBeenCalledTimes(1)
+		})
+
+		const target = renderAsync.mock.calls[0]?.[1]
+
+		// Layout + paint containment: the host is the containing block of `position: fixed` and clips it.
+		expect(target?.classList.contains("contain-layout")).toBe(true)
+		expect(target?.classList.contains("contain-paint")).toBe(true)
+		// Fit-content wide, never narrower than the scroller: a fixed-width page widens the host so the
+		// clip never cuts it, and text without a page size still wraps (max-content would unwrap it).
+		expect(target?.classList.contains("w-fit")).toBe(true)
+		expect(target?.classList.contains("w-max")).toBe(false)
+		expect(target?.classList.contains("min-w-full")).toBe(true)
+		view.unmount()
+	})
+
 	it("shows the error instead of docx-preview when the document is too large for it", async () => {
 		render(
 			<DocxViewer

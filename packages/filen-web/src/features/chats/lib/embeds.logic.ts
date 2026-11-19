@@ -33,6 +33,16 @@ export interface EmbedCandidate {
 // deterministically rather than silently degrading to zero.
 export const MAX_MESSAGE_EMBEDS = 6
 
+// Largest linked image a message inlines: a bigger one is a click-to-preview card, so a message of huge
+// image links never streams and decodes them for every reader who scrolls past. Generous enough for
+// ordinary phone photos. A byte cap does not bound decoded dimensions. Video and audio inline at any size:
+// their elements fetch metadata only.
+export const MAX_INLINE_EMBED_IMAGE_BYTES = 32 * 1024 * 1024
+
+export function inlinesEmbedImage(size: number): boolean {
+	return size <= MAX_INLINE_EMBED_IMAGE_BYTES
+}
+
 // Every UNIQUE, in-scope embed candidate for a message's link segments, capped and order-preserving
 // (first occurrence wins on a repeated URL). Pure — callers feed it the urls linksFromSegments
 // already extracted and hardened, so this never re-implements url extraction or hardening.

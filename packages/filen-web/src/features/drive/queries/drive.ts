@@ -315,6 +315,37 @@ export function cachedListing(variant: DriveVariant, uuid: string | null): Drive
 	return queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid }))
 }
 
+// A directory's own cached listing; `own` when it is the drive's rather than a shared directory's.
+export interface CachedDirectoryListing {
+	readonly params: DriveListingParams
+	readonly rows: readonly DriveItem[]
+	readonly own: boolean
+}
+
+// The first cached directory listing, in cache order, that `match` accepts: the drive's, or a shared
+// directory's below the shared root. A flat listing (recents, favorites, trash, links) or the shared root
+// holds files from anywhere, so it is never one. A cache read, never a fetch.
+export function findCachedDirectoryListing(match: (listing: CachedDirectoryListing) => boolean): CachedDirectoryListing | null {
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
+		// Every query under the listing prefix is keyed and filled by driveListingQueryOptions.
+		const params = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
+		const rows = query.state.data as DriveItem[] | undefined
+		const own = params.variant === "drive"
+
+		if (rows === undefined || !(own || ((params.variant === "sharedIn" || params.variant === "sharedOut") && params.uuid !== null))) {
+			continue
+		}
+
+		const listing = { params, rows, own }
+
+		if (match(listing)) {
+			return listing
+		}
+	}
+
+	return null
+}
+
 // The row behind a sidebar tree node, as the "drive" listing its level rendered from holds it: a cache
 // read, never a fetch — that level is mounted, so its listing is cached. `parentUuid` is null for a
 // root-level node.

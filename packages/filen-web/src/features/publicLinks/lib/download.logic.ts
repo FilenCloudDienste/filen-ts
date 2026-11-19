@@ -5,6 +5,7 @@ import {
 	CATEGORY_POLICY,
 	linkAdmits,
 	needsContentSniff,
+	PREVIEW_MAX_BYTES,
 	previewType,
 	sniffAdmits
 } from "@/features/drive/lib/preview.logic"
@@ -22,6 +23,12 @@ import { deviceProfile, type DeviceProfile } from "@/lib/deviceProfile"
 // tab, so the UI shows an honest "too large — use a Chromium browser or the desktop app" note instead.
 export const PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES = 1_073_741_824n // 1 GiB
 
+// The buffered ceiling for this device: a phone or tablet tab is killed far below the desktop value (the file is held
+// as bytes and again as a Blob), so it gets the app's whole-buffer preview ceiling instead.
+export function publicBufferedDownloadCap(profile: DeviceProfile = deviceProfile()): bigint {
+	return profile.mobile ? PREVIEW_MAX_BYTES : PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES
+}
+
 export type DownloadStrategy = { kind: "fsa" } | { kind: "stream" } | { kind: "buffered" } | { kind: "too-large" }
 
 // Chooses how a single file saves. FSA and the service worker stream and are never capped; otherwise a file over
@@ -31,6 +38,7 @@ export function chooseDownloadStrategy(input: {
 	streamAvailable: boolean
 	size: bigint
 	cap?: bigint
+	profile?: DeviceProfile
 }): DownloadStrategy {
 	if (input.fsaAvailable) {
 		return { kind: "fsa" }
@@ -40,7 +48,7 @@ export function chooseDownloadStrategy(input: {
 		return { kind: "stream" }
 	}
 
-	if (input.size > (input.cap ?? PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES)) {
+	if (input.size > (input.cap ?? publicBufferedDownloadCap(input.profile))) {
 		return { kind: "too-large" }
 	}
 
@@ -112,7 +120,7 @@ export interface CollectingSink {
 	capExceeded: () => boolean
 }
 
-export function createCollectingSink(cap: bigint = PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES): CollectingSink {
+export function createCollectingSink(cap: bigint = publicBufferedDownloadCap()): CollectingSink {
 	const chunks: Uint8Array[] = []
 	let total = 0n
 	let exceeded = false

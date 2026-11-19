@@ -1,3 +1,4 @@
+import type { BlockedUsers } from "@filen/shared"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 
 // The thread's typing line — at the bottom of the scroller, outside the virtualized rows, so it never moves
@@ -5,8 +6,16 @@ import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 // dots in the avatar gutter and the label in the text column. The live region stays mounted while nobody
 // types, so the label is announced when it appears; the label is the shared typingText derivation, so its
 // copy matches the sidebar-row preview override exactly.
-export function TypingIndicator({ chatUuid, currentUserId }: { chatUuid: string; currentUserId: bigint | undefined }) {
-	const label = useChatTypingLabel(chatUuid, currentUserId)
+export function TypingIndicator({
+	chatUuid,
+	currentUserId,
+	blocked
+}: {
+	chatUuid: string
+	currentUserId: bigint | undefined
+	blocked: BlockedUsers
+}) {
+	const label = useChatTypingLabel(chatUuid, currentUserId, blocked)
 
 	return (
 		<div

@@ -43,7 +43,7 @@ import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import { testUuid } from "@/tests/support/uuid"
-import { receiverRole } from "@/tests/fixtures/sdk"
+import { mockSharedFile, mockSharedRootDir, receiverRole } from "@/tests/fixtures/sdk"
 
 const ROOT_UUID = testUuid("root")
 const PARENT_A = testUuid("parent-a")
@@ -1085,6 +1085,123 @@ describe("drive socket handlers — itemFavorite on Shared by me rows", () => {
 		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
 
 		expect(getListing(PARENT_A)).toBe(listing)
+	})
+})
+
+// Renames and colours made elsewhere reach the user's own items on Shared by me too, which list them as
+// shared arms; each row keeps its arm, receiver and retained share source.
+describe("drive socket handlers — attribute patches on Shared by me rows", () => {
+	const renamedFile: FileMeta = {
+		type: "decoded",
+		data: { name: "renamed.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
+	}
+
+	function sharedRootDir(): Extract<DriveItem, { type: "sharedRootDirectory" }> {
+		const item = narrowItem(mockSharedRootDir({ inner: mockDir(), sharingRole: receiverRole(1, "1@filen.io") }))
+
+		if (item.type !== "sharedRootDirectory") {
+			throw new Error("expected a sharedRootDirectory arm")
+		}
+
+		return item
+	}
+
+	function sharedDir(): Extract<DriveItem, { type: "sharedDirectory" }> {
+		const item = narrowItem({ inner: mockDir(), sharedTag: true, sharingRole: receiverRole(2, "2@filen.io") })
+
+		if (item.type !== "sharedDirectory") {
+			throw new Error("expected a sharedDirectory arm")
+		}
+
+		return item
+	}
+
+	function sharedRootFile(): Extract<DriveItem, { type: "sharedRootFile" }> {
+		const item = narrowItem(mockSharedFile({ uuid: testUuid("file"), sharingRole: receiverRole(3, "3@filen.io") }))
+
+		if (item.type !== "sharedRootFile") {
+			throw new Error("expected a sharedRootFile arm")
+		}
+
+		return item
+	}
+
+	it("folderColorChanged recolours shared directory rows in place", () => {
+		const root = sharedRootDir()
+		const nested = sharedDir()
+		seedFlat("sharedOut", [root])
+		seedFlat("sharedOut", [nested], PARENT_A)
+
+		handleDriveEvent(driveEvt({ type: "folderColorChanged", uuid: testUuid("dir"), color: "blue" }))
+
+		expect(getFlat("sharedOut")?.[0]).toMatchObject({
+			type: "sharedRootDirectory",
+			data: { color: "blue", sharingRole: root.data.sharingRole, shareSource: root.data.shareSource }
+		})
+		expect(getFlat("sharedOut", PARENT_A)?.[0]).toMatchObject({
+			type: "sharedDirectory",
+			data: { color: "blue", sharingRole: nested.data.sharingRole, shareSource: nested.data.shareSource }
+		})
+	})
+
+	it("folderMetadataChanged renames shared directory rows in place", () => {
+		const root = sharedRootDir()
+		const nested = sharedDir()
+		seedFlat("sharedOut", [root])
+		seedFlat("sharedOut", [nested], PARENT_A)
+
+		handleDriveEvent(
+			driveEvt({ type: "folderMetadataChanged", uuid: testUuid("dir"), meta: { type: "decoded", data: { name: "Renamed" } } })
+		)
+
+		expect(getFlat("sharedOut")?.[0]).toMatchObject({
+			type: "sharedRootDirectory",
+			data: {
+				decryptedMeta: { name: "Renamed" },
+				undecryptable: false,
+				sharingRole: root.data.sharingRole,
+				shareSource: root.data.shareSource
+			}
+		})
+		expect(getFlat("sharedOut", PARENT_A)?.[0]).toMatchObject({
+			type: "sharedDirectory",
+			data: {
+				decryptedMeta: { name: "Renamed" },
+				undecryptable: false,
+				sharingRole: nested.data.sharingRole,
+				shareSource: nested.data.shareSource
+			}
+		})
+	})
+
+	it("fileMetadataChanged renames a shared root file row in place", () => {
+		const row = sharedRootFile()
+		seedFlat("sharedOut", [row])
+
+		handleDriveEvent(driveEvt({ type: "fileMetadataChanged", uuid: testUuid("file"), metadata: renamedFile }))
+
+		expect(getFlat("sharedOut")?.[0]).toMatchObject({
+			type: "sharedRootFile",
+			data: {
+				meta: renamedFile,
+				decryptedMeta: { name: "renamed.pdf" },
+				undecryptable: false,
+				sharingRole: row.data.sharingRole,
+				shareSource: row.data.shareSource
+			}
+		})
+	})
+
+	it("an undecryptable meta leaves a shared row's displayed name alone", () => {
+		const file = sharedRootFile()
+		const dir = sharedRootDir()
+		const listing = [file, dir]
+		seedFlat("sharedOut", listing)
+
+		handleDriveEvent(driveEvt({ type: "fileMetadataChanged", uuid: testUuid("file"), metadata: { type: "encrypted", data: "x" } }))
+		handleDriveEvent(driveEvt({ type: "folderMetadataChanged", uuid: testUuid("dir"), meta: { type: "encrypted", data: "x" } }))
+
+		expect(getFlat("sharedOut")).toBe(listing)
 	})
 })
 

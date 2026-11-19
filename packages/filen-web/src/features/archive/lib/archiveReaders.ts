@@ -15,18 +15,18 @@ export const READER_LINGER_MS = 30_000
 // retained budget bounds across readers).
 export const READER_CLOSE_AT_ONCE_BYTES = 4 * 1024 * 1024
 
-// An archive inside another's entry (W6 §3.4, §6.1 A): read through its parent's reader, at most three deep.
+// An archive inside another's entry: read through its parent's reader, at most three deep.
 export interface NestedSource {
 	readonly parent: ReaderTarget
 	// The parent's password, which its reader was opened with.
 	readonly parentPassword: string | undefined
 	// The entry holding it, in the parent's listing.
 	readonly index: number
-	// 2 for an archive inside a drive file's, 3 at most (owner decision E6).
+	// 2 for an archive inside a drive file's, 3 at most.
 	readonly depth: number
 }
 
-// Archives in all, the file's own counted first (owner decision E6, "to depth 3"). Stricter than the SDK on purpose: its
+// Archives in all, the file's own counted first. Stricter than the SDK on purpose: its
 // MAX_NESTING allows three archives nested inside the file's (four in all), so the page's cap is the one that binds, and
 // a nested open never meets the SDK's refusal.
 export const MAX_NESTED_DEPTH = 3

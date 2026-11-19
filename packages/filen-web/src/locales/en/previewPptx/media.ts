@@ -29,12 +29,6 @@ export const previewPptxMedia = {
 	previewPptxMediaFailed: "The media couldn't be added.",
 	/** Presentation editor — Video/Audio tab group: how the medium plays in the slide show */
 	previewPptxPlaybackGroup: "Playback",
-	/** Presentation editor — Video/Audio tab group: previewing the medium on the slide */
-	previewPptxPreviewGroup: "Preview",
-	/** Presentation editor — button that plays the selected medium on the slide */
-	previewPptxMediaPlay: "Play",
-	/** Presentation editor — button that pauses the selected medium on the slide */
-	previewPptxMediaPause: "Pause",
 	/** Presentation editor — Playback group menu: how loud the medium plays */
 	previewPptxMediaVolume: "Volume",
 	/** Presentation editor — Volume menu item */
@@ -67,8 +61,6 @@ export const previewPptxMedia = {
 	previewPptxMediaUnavailable: "This media isn't available.",
 	/** Presentation slide and show — button over a medium that lives on the web: opens it in a new tab */
 	previewPptxMediaOpenLink: "Open link",
-	/** Presentation slide and show — chip over a medium stored outside the presentation that is not on the web */
-	previewPptxMediaLinkedFile: "This media is stored outside the presentation.",
 	/** Presentation editor — accessible name of the play button over a video on the slide */
 	previewPptxMediaPlayNamed: "Play {{name}}",
 	/** Presentation editor — accessible name of the pause button over a video on the slide */

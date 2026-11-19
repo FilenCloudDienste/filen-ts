@@ -37,20 +37,21 @@ export function RemoteDirectoryChooser({ picker, disabled }: { picker: Directory
 			) : null}
 			<PickerListShell
 				listingQuery={listingQuery}
-				isEmpty={filteredDirectories.length === 0}
 				noResults={filter.trim().length > 0}
-			>
-				{filteredDirectories.map(directory =>
-					directory.type === "directory" ? (
+				count={filteredDirectories.length}
+				rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
+				renderRow={index => {
+					const directory = filteredDirectories[index]
+
+					return directory?.type === "directory" ? (
 						<PickerDirectoryRow
-							key={directory.data.uuid}
 							directory={directory}
 							disabled={directory.data.undecryptable || disabled}
 							onDescend={descend}
 						/>
 					) : null
-				)}
-			</PickerListShell>
+				}}
+			/>
 		</>
 	)
 }

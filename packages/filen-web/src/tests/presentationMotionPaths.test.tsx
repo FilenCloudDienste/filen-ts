@@ -4,7 +4,7 @@ import "@/tests/support/officeKeys"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import i18n from "i18next"
-import { addEffectsOp, slideRef, type DeckOp } from "@filen/office/core/presentation"
+import { addEffectsOp, slideRef, type DeckOp, type SlideRef } from "@filen/office/core/presentation"
 import type { CommandResult, OpenInfo, PresentationSessionApi, SlideLayer, SlideRender } from "@filen/office/dom/presentation"
 import { createShapeSelection, customPathPreset } from "@filen/office/react/presentation"
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
@@ -33,11 +33,11 @@ const ref = slideRef(256)
 let revision = 1
 
 // Shapes 2 and 3; shape 2's box is 200..290 × 0..50 slide px, its centre (245, 25).
-function renderOf(animated: boolean): SlideRender {
+function renderOf(animated: boolean, slide: SlideRef = ref): SlideRender {
 	const layers = [2, 3].map(
 		id =>
 			({
-				shape: { slide: ref, id },
+				shape: { slide, id },
 				role: "shape",
 				drawing: {},
 				matrix: [1, 0, 0, 1, 0, 0],
@@ -45,7 +45,16 @@ function renderOf(animated: boolean): SlideRender {
 			}) as unknown as SlideLayer
 	)
 
-	return { ref, index: 0, revision: revision++, hidden: false, background: {}, layers, notesText: "", animated } as unknown as SlideRender
+	return {
+		ref: slide,
+		index: 0,
+		revision: revision++,
+		hidden: false,
+		background: {},
+		layers,
+		notesText: "",
+		animated
+	} as unknown as SlideRender
 }
 
 const INFO = {
@@ -210,7 +219,7 @@ describe("presentation motion paths", () => {
 	it("adds a drawn line as one custom path effect, relative to the object's centre", async () => {
 		mount({ animated: false, selected: [2] })
 		act(() => {
-			motionPaths.draw("line", 2)
+			motionPaths.draw(ref, "line", 2)
 		})
 
 		const target = layer()
@@ -238,10 +247,32 @@ describe("presentation motion paths", () => {
 		expect(motionPaths.getSnapshot().tool).toBeUndefined()
 	})
 
+	it("ends a tool armed on one slide when another slide with a shape of the same id comes into view", () => {
+		const editor = mount({ animated: false, selected: [2] })
+
+		act(() => {
+			motionPaths.draw(ref, "line", 2)
+		})
+		expect(layer().getAttribute("role")).toBe("application")
+		cleanup()
+		render(
+			<PresentationMotionPaths
+				editor={{ ...editor, render: renderOf(false, slideRef(257)) }}
+				scale={1}
+			/>
+		)
+
+		expect(motionPaths.getSnapshot().tool).toBeUndefined()
+		expect(layer().getAttribute("role")).not.toBe("application")
+		fireEvent.pointerDown(layer(), { clientX: 245, clientY: 25, pointerId: 1, button: 0 })
+		fireEvent.pointerUp(layer(), { clientX: 341, clientY: 79, pointerId: 1 })
+		expect(ops).toEqual([])
+	})
+
 	it("Escape leaves a tool without adding anything", () => {
 		mount({ animated: false, selected: [2] })
 		act(() => {
-			motionPaths.draw("curve", 2)
+			motionPaths.draw(ref, "curve", 2)
 		})
 		fireEvent.pointerDown(layer(), { clientX: 245, clientY: 25, pointerId: 1, button: 0 })
 		fireEvent.pointerUp(layer(), { clientX: 245, clientY: 25, pointerId: 1 })
@@ -322,7 +353,7 @@ describe("presentation motion paths", () => {
 	it("draws a line from the keyboard: arrows move the cursor from the object's centre, Space places each end", async () => {
 		mount({ animated: false, selected: [2] })
 		act(() => {
-			motionPaths.draw("line", 2)
+			motionPaths.draw(ref, "line", 2)
 		})
 
 		const target = layer()
@@ -349,7 +380,7 @@ describe("presentation motion paths", () => {
 	it("draws a curve from the keyboard and ends it with Enter", async () => {
 		mount({ animated: false, selected: [2] })
 		act(() => {
-			motionPaths.draw("curve", 2)
+			motionPaths.draw(ref, "curve", 2)
 		})
 
 		const target = layer()

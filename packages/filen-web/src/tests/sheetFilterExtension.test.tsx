@@ -8,13 +8,21 @@ import "@/lib/i18n"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
 import { useSheetSortFilter } from "@/features/spreadsheet/data/filterExtension"
 import { setSortFilterOpen, useSortFilterOpen } from "@/features/spreadsheet/data/sortFilterState"
+import { quickSort, toggleFilter } from "@/features/spreadsheet/data/sortCommands"
+
+vi.mock("@/features/spreadsheet/data/sortCommands", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/spreadsheet/data/sortCommands")>()),
+	quickSort: vi.fn(() => Promise.resolve(true)),
+	toggleFilter: vi.fn(() => Promise.resolve(true))
+}))
 
 // The sort and filter extension's grid parts: a press on a header's filter button (and only on it) opens that
 // header's menu and a second press closes it, Alt+Down on a filter header opens it, and a text file gets the sort
-// alone.
+// (its items and keys) alone.
 
 afterEach(() => {
 	cleanup()
+	vi.clearAllMocks()
 })
 
 const LAYOUT = {
@@ -113,11 +121,25 @@ describe("the sort and filter extension", () => {
 		expect(data.result.current.open).toBeNull()
 	})
 
-	it("gives a text file the sort items and no filter", () => {
-		const { result } = setup(true)
+	it("gives a text file the sort items and keys and no filter", () => {
+		const { model, result } = setup(true)
+		const shortcut = result.current.extension.shortcut
 
 		expect(result.current.extension.grid).toBeUndefined()
 		expect(result.current.extension.menuItems).toBeTruthy()
-		expect(result.current.extension.shortcut).toBeUndefined()
+
+		expect(shortcut?.("sortAscending")).toBe(true)
+		expect(shortcut?.("sortDescending")).toBe(true)
+		expect(vi.mocked(quickSort).mock.calls).toEqual([
+			[model, false],
+			[model, true]
+		])
+
+		// The filter keys, and Alt+Down on what would be a filter header, stay the grid's.
+		act(() => {
+			for (const key of ["filter", "clearFilters", "reapplyFilter", "openDropdown"] as const) expect(shortcut?.(key)).toBe(false)
+		})
+		expect(toggleFilter).not.toHaveBeenCalled()
+		expect(result.current.open).toBeNull()
 	})
 })

@@ -1,4 +1,4 @@
-// "preview" namespace, PDF viewer: reading the file on demand. Composed by previewPdf/index.ts; same catalog rules as
+// "preview" namespace, PDF viewer: reading the file on demand. Spread into preview.ts; same catalog rules as
 // preview.ts.
 export const previewPdfView = {
 	/** PDF viewer — error shown when part of the file could not be downloaded while the document was open or opening (a dropped connection); a Retry button follows */

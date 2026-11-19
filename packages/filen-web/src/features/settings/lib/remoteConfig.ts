@@ -61,8 +61,6 @@ export interface Pricing {
 
 export interface RemoteConfig {
 	maintenance: boolean
-	// Parsed for completeness; nothing acts on it yet.
-	readOnly: boolean
 	announcements: Announcement[]
 	// null when the section is malformed: plans are hidden, the rest of the config still applies.
 	pricing: Pricing | null
@@ -114,7 +112,6 @@ export function parseRemoteConfig(raw: unknown): RemoteConfig | null {
 
 	return {
 		maintenance: raw["maintenance"] === true,
-		readOnly: raw["readOnly"] === true,
 		announcements: parseItems(raw["announcements"], announcementSchema),
 		pricing: parsePricing(raw["pricing"])
 	}

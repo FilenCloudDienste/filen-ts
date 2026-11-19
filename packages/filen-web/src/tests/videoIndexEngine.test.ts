@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { DirsAndFiles } from "@filen/sdk-rs"
-import { CLASSIFIER_VERSION, HLC_SPAN, itemKey, type ItemRec } from "@filen/shared/videos"
+import { CLASSIFIER_VERSION, HLC_SPAN, itemKey, type ItemRec, type LibraryOverride } from "@filen/shared/videos"
 import {
 	CatalogCallAbandoned,
 	VideoIndexEngine,
@@ -261,6 +261,76 @@ describe("library index classification", () => {
 		expect(episodes[1]?.versions[0]?.parts[0]?.subtitles.map(subtitle => subtitle.language)).toEqual(["en"])
 		expect(JSON.stringify(detail)).not.toContain('"key"')
 	})
+
+	it("answers calls made after a failed classification from what is held, and waits for a rerun under way", async () => {
+		const flush = (): Promise<void> =>
+			new Promise(resolve => {
+				setImmediate(resolve)
+			})
+		// Holds every slice of the rerun once `slow` lets its slices run out.
+		let held: Promise<void> | null = null
+		let open = (): void => undefined
+		const engine = engineFor(memoryCatalogStore(), () => held ?? Promise.resolve())
+		const root = drive.addDir(hexUuid(), "Films")
+		const grid = { source: { kind: "movies" as const }, prefs: DEFAULT_GRID_PREFS, query: "", seed: 0 }
+		let armed = false
+
+		drive.addFile(drive.addDir(root, "Heat (1995)"), "Heat (1995).mkv")
+		// A correction the classification throws on, once.
+		engine.setOverrides({
+			get "m:heat"(): LibraryOverride {
+				if (armed) {
+					armed = false
+
+					throw new Error("unhandled correction")
+				}
+
+				return {}
+			}
+		})
+		armed = true
+		await engine.configure(roots([root, "auto"]))
+		await flush()
+
+		let answered = false
+
+		void engine.catalogGrid(grid, 0, 10).then(() => {
+			answered = true
+		})
+		void engine.titleDetail("unknown").then(() => undefined)
+		await flush()
+
+		expect(armed).toBe(false)
+		expect(answered).toBe(true)
+		expect(await engine.titleDetail("unknown")).toBeNull()
+
+		// A walk landing classifies again; its slices are held, so a call made meanwhile waits for it.
+		let clock = performance.now()
+		const now = vi.spyOn(performance, "now").mockImplementation(() => (clock += 50))
+
+		held = new Promise(resolve => {
+			open = resolve
+		})
+		await engine.check(latest)
+		await flush()
+
+		let page: Awaited<ReturnType<VideoIndexEngine["catalogGrid"]>> | null = null
+
+		void engine.catalogGrid(grid, 0, 10).then(result => {
+			page = result
+		})
+		await flush()
+
+		expect(page).toBeNull()
+
+		now.mockRestore()
+		held = null
+		open()
+		await settle()
+		await flush()
+
+		expect(page).toMatchObject({ total: 1 })
+	})
 })
 
 describe("library index art", () => {
@@ -317,8 +387,13 @@ describe("library index art", () => {
 		await settle()
 		await engine.flush()
 
-		// The title's own fields are as they were; its card art is not.
-		expect(titles.get(id)).toEqual(before)
+		// The title's view fields are as they were; its card art is not, and neither is its detail
+		// hash, the part's thumb being a detail field.
+		const now = titles.get(id)
+
+		expect(before).toBeDefined()
+		expect({ ...now, detailHash: 0 }).toEqual({ ...before, detailHash: 0 })
+		expect(now?.detailHash).not.toBe(before?.detailHash)
 		expect(await sidecars()).toEqual(["Heat (1995)-thumb.jpg"])
 		// After the current state a subscriber is handed at once: that title alone.
 		expect(changed).toEqual([null, [id]])
@@ -789,6 +864,85 @@ describe("library index lifecycle", () => {
 		expect(calls.walks).toBe(0)
 		expect(second.rootStatuses()[0]?.current).toBe(true)
 		expect([...titles.values()].map(title => title.title).sort()).toEqual(["Heat", "Ronin"])
+	})
+
+	it("doesn't replay an event held from before a drop over a walk that already reflects a later one", async () => {
+		const root = drive.addDir(hexUuid(), "Films")
+
+		drive.addFile(drive.addDir(root, "Heat (1995)"), "Heat (1995).mkv")
+
+		const first = engineFor()
+
+		first.setWriter(true)
+		await first.configure(roots([root, "auto"]))
+		await first.check(latest)
+		await first.flush()
+		// Past the walk floor, so the check's walk runs rather than giving up on the held events.
+		await vi.advanceTimersByTimeAsync(WALK_FLOOR_MS + 1_000)
+
+		const second = engineFor()
+
+		await second.configure(roots([root, "auto"]))
+
+		// Held while the loaded root is unchecked; the socket then drops, and its trash is never delivered.
+		const ronin = drive.addFile(root, "Ronin (1998).mkv")
+
+		second.onSocketEvent(driveEvent(++latest, { type: "fileNew", file: ronin }))
+		second.onSocketEvent({ type: "reconnecting" })
+		drive.files.delete(ronin.uuid)
+		latest += 5n
+		second.onSocketEvent(driveEvent(++latest, { type: "trashEmpty" }))
+		await second.check(latest)
+		await settle()
+
+		expect([...titles.values()].map(title => title.title)).toEqual(["Heat"])
+		expect(second.rootStatuses()[0]?.current).toBe(true)
+	})
+
+	it("applies an event up to the watermark delivered after the walk's listing was taken", async () => {
+		const root = drive.addDir(hexUuid(), "Films")
+
+		drive.addFile(drive.addDir(root, "Heat (1995)"), "Heat (1995).mkv")
+
+		const first = engineFor()
+
+		first.setWriter(true)
+		await first.configure(roots([root, "auto"]))
+		await first.check(latest)
+		await first.flush()
+		await vi.advanceTimersByTimeAsync(WALK_FLOOR_MS + 1_000)
+
+		const second = engineFor()
+
+		await second.configure(roots([root, "auto"]))
+
+		let release = (): void => undefined
+
+		walkGate = new Promise(resolve => {
+			release = resolve
+		})
+
+		// The drive's latest id already covers the file, but the listing (shared, begun earlier) read the tree before
+		// it; its event reaches the socket only after the listing was taken.
+		const ronin = drive.addFile(root, "Ronin (1998).mkv")
+
+		drive.files.delete(ronin.uuid)
+		latest++
+		calls = { walks: 0, lastEventIds: 0, getFile: 0 }
+
+		const checking = second.check()
+
+		await vi.advanceTimersByTimeAsync(0)
+		expect(calls.walks).toBe(1)
+
+		drive.files.set(ronin.uuid, ronin)
+		second.onSocketEvent(driveEvent(latest, { type: "fileNew", file: ronin }))
+		release()
+		await checking
+		await settle()
+
+		expect([...titles.values()].map(title => title.title).sort()).toEqual(["Heat", "Ronin"])
+		expect(second.rootStatuses()[0]?.current).toBe(true)
 	})
 
 	it("rebuilds a playable file for a live indexed video only", async () => {

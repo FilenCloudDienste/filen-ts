@@ -25,13 +25,16 @@ class CopyTextUnavailable extends Error {
 
 // Copies text that is still on its way (a worker's answer) within the click that asked for it: a browser that ends the
 // click's activation at the first await (Safari) takes the write as a promise of the text, where it accepts one. Null,
-// or nothing within COPY_TEXT_WAIT_MS, writes nothing and says `failedMessage`.
+// or nothing within COPY_TEXT_WAIT_MS, writes nothing and runs `failed` (a callback) or says it (a message). A text
+// promise that rejects says its error's label. The outcome is read from the text promise itself, never from the write's
+// rejection, which a browser may replace with its own error when the item's promise fails.
 export async function copyTextLater(
 	text: Promise<string | null>,
-	messages: { readonly copied: string; readonly failed: string },
+	messages: { readonly copied: string; readonly failed: string | (() => void) },
 	waitMs = COPY_TEXT_WAIT_MS
 ): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined
+	let textFailure: { readonly error: unknown } | undefined
 	const arrived = Promise.race([
 		text,
 		new Promise<never>((_, reject) => {
@@ -45,6 +48,11 @@ export async function copyTextLater(
 
 			return value
 		})
+		.catch((e: unknown) => {
+			textFailure = { error: e }
+
+			throw e
+		})
 		.finally(() => {
 			clearTimeout(timer)
 		})
@@ -55,14 +63,24 @@ export async function copyTextLater(
 				new ClipboardItem({ "text/plain": arrived.then(value => new Blob([value], { type: "text/plain" })) })
 			])
 		} else {
-			await navigator.clipboard.writeText(await arrived)
+			const value = await arrived
+
+			await navigator.clipboard.writeText(value)
 		}
 
 		toast.success(messages.copied)
 
 		return true
 	} catch (e) {
-		toast.error(e instanceof CopyTextUnavailable ? messages.failed : errorLabel(e))
+		const error = textFailure === undefined ? e : textFailure.error
+
+		if (!(error instanceof CopyTextUnavailable)) {
+			toast.error(errorLabel(error))
+		} else if (typeof messages.failed === "function") {
+			messages.failed()
+		} else {
+			toast.error(messages.failed)
+		}
 
 		return false
 	}

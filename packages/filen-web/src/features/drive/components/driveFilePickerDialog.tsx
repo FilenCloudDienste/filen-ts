@@ -29,10 +29,16 @@ export function DriveFilePickerList({ listingQuery, rows, accept, pending, onDes
 	return (
 		<PickerListShell
 			listingQuery={listingQuery}
-			isEmpty={shown.length === 0}
-		>
-			{shown.map(item => (
-				<li key={item.data.uuid}>
+			count={shown.length}
+			rowKey={index => shown[index]?.data.uuid ?? String(index)}
+			renderRow={index => {
+				const item = shown[index]
+
+				if (item === undefined) {
+					return null
+				}
+
+				return (
 					<button
 						type="button"
 						disabled={item.data.undecryptable || pending !== null}
@@ -52,9 +58,9 @@ export function DriveFilePickerList({ listingQuery, rows, accept, pending, onDes
 						<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
 						{pending === item.data.uuid ? <Spinner className="size-3.5 shrink-0" /> : null}
 					</button>
-				</li>
-			))}
-		</PickerListShell>
+				)
+			}}
+		/>
 	)
 }
 

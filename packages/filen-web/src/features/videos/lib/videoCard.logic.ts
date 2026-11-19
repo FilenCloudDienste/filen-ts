@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next"
+import { fnv1a } from "@/lib/fnv1a"
 import type { CardSubline, VideoCardModel } from "@/features/videos/lib/homeRows.logic"
 
 // Card text and colour that need no DOM: the title-set card's tone, the episode code and the link's accessible name.
@@ -8,13 +9,7 @@ const NEUTRAL_LIGHTNESS = [0.3, 0.34, 0.38, 0.42, 0.46] as const
 
 // A neutral grey, stable per title.
 export function neutralTone(title: string): string {
-	let hash = 2_166_136_261
-
-	for (let i = 0; i < title.length; i++) {
-		hash = Math.imul(hash ^ title.charCodeAt(i), 16_777_619)
-	}
-
-	return `oklch(${String(NEUTRAL_LIGHTNESS[(hash >>> 0) % NEUTRAL_LIGHTNESS.length] ?? 0.38)} 0 0)`
+	return `oklch(${String(NEUTRAL_LIGHTNESS[fnv1a(title) % NEUTRAL_LIGHTNESS.length] ?? 0.38)} 0 0)`
 }
 
 // "S2E5", "S1E1-E2" for a multi-episode file; empty for an unnumbered episode.

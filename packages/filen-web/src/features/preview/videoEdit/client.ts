@@ -28,6 +28,40 @@ const PREVIEW_WORKER_IDLE_MS = 30_000
 interface PreviewResource {
 	worker: Worker
 	remote: Comlink.Remote<PreviewWorkerApi>
+	// Set once the worker died or was torn down: its proxy is released and a call in flight would never answer.
+	gone: boolean
+	// Settles at that moment.
+	lost: Promise<undefined>
+	// The calls in flight on it, each rejected with PreviewWorkerLostError then.
+	pending: Set<(error: Error) => void>
+	markLost: () => void
+}
+
+// What a call answers when the preview worker died under it (a crash, an out-of-memory kill) or was torn down. The
+// client's next call starts a fresh worker and reopens the source.
+export class PreviewWorkerLostError extends Error {
+	public constructor() {
+		super("the video edit preview worker stopped")
+		this.name = "PreviewWorkerLostError"
+	}
+}
+
+// `run` on `resource`'s remote, rejected with PreviewWorkerLostError when the worker goes first. Each call registers
+// itself only while in flight, so a long session of frame requests holds nothing per finished call.
+async function callOn<T>(resource: PreviewResource, run: (remote: Comlink.Remote<PreviewWorkerApi>) => Promise<T>): Promise<T> {
+	if (resource.gone) {
+		throw new PreviewWorkerLostError()
+	}
+
+	const lost = Promise.withResolvers<never>()
+
+	resource.pending.add(lost.reject)
+
+	try {
+		return await Promise.race([run(resource.remote), lost.promise])
+	} finally {
+		resource.pending.delete(lost.reject)
+	}
 }
 
 const live = new Set<PreviewResource>()
@@ -58,7 +92,8 @@ async function handOverDecoder(ios: boolean): Promise<() => void> {
 	exportsHoldingDecoder++
 
 	if (exportsHoldingDecoder === 1) {
-		suspending = Promise.all([...live].map(resource => resource.remote.suspendDecoding().catch(() => undefined)))
+		// Each through callOn: a worker lost meanwhile settles its part, or the export waiting here would never start.
+		suspending = Promise.all([...live].map(resource => callOn(resource, remote => remote.suspendDecoding()).catch(() => undefined)))
 		announceSuspended(true)
 	}
 
@@ -76,7 +111,7 @@ async function handOverDecoder(ios: boolean): Promise<() => void> {
 
 		if (exportsHoldingDecoder === 0) {
 			for (const resource of live) {
-				void resource.remote.resumeDecoding().catch(() => undefined)
+				void callOn(resource, remote => remote.resumeDecoding()).catch(() => undefined)
 			}
 
 			announceSuspended(false)
@@ -92,27 +127,54 @@ export class DecodingSuspendedError extends Error {
 	}
 }
 
+// `post` unless an export holds the decoder (iOS), when a frame request is answered here, never posted.
+function unlessSuspended<T>(post: () => Promise<T>): Promise<T> {
+	return decodingSuspended() ? Promise.reject(new DecodingSuspendedError()) : post()
+}
+
 const previewWorker = idleResource<PreviewResource>(
 	() => {
 		const worker = new PreviewWorker({ name: "video-edit-preview" })
-		const resource: PreviewResource = { worker, remote: Comlink.wrap<PreviewWorkerApi>(worker) }
+		const lost = Promise.withResolvers<undefined>()
+		const resource: PreviewResource = {
+			worker,
+			remote: Comlink.wrap<PreviewWorkerApi>(worker),
+			gone: false,
+			lost: lost.promise,
+			pending: new Set(),
+			markLost: () => {
+				if (resource.gone) {
+					return
+				}
+
+				resource.gone = true
+
+				for (const reject of [...resource.pending]) {
+					reject(new PreviewWorkerLostError())
+				}
+
+				lost.resolve(undefined)
+			}
+		}
 
 		worker.addEventListener("error", () => {
 			// A deploy that changed this worker removes its old file (appUpdate.ts).
 			recoverIfNewerBuild()
+			resource.markLost()
 			previewWorker.invalidate(resource)
 		})
 		live.add(resource)
 
 		// Posted before anything else, so the source it opens starts suspended.
 		if (decodingSuspended()) {
-			void resource.remote.suspendDecoding().catch(() => undefined)
+			void callOn(resource, remote => remote.suspendDecoding()).catch(() => undefined)
 		}
 
 		return resource
 	},
 	resource => {
 		live.delete(resource)
+		resource.markLost()
 		resource.remote[Comlink.releaseProxy]()
 		resource.worker.terminate()
 	},
@@ -168,6 +230,18 @@ function copySuffix(number: number): string {
 	return number <= 1 ? i18n.t("preview:previewImageSaveCopySuffix") : i18n.t("preview:previewImageSaveCopySuffixNumbered", { number })
 }
 
+// One client's use of a preview worker, ended on dispose or when that worker is lost.
+interface Hold {
+	resource: Promise<PreviewResource>
+	// The resource once acquired, so dispose can end the hold synchronously.
+	value: PreviewResource | null
+	// The source opened on this worker.
+	source: Promise<VideoSourceInfo> | null
+	// Its range port.
+	port: { close: () => void } | null
+	end: () => void
+}
+
 export function createVideoEditClient(params: VideoEditClientParams): VideoEditClient {
 	const { item } = params
 	const base = asDirectoryOrFile(item)
@@ -180,38 +254,72 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 	const file: AnyFile = base.data
 	const size = Number(file.size)
 	const ios = isAppleMobile()
-	const hold = Promise.withResolvers<undefined>()
-	const acquired = Promise.withResolvers<Comlink.Remote<PreviewWorkerApi>>()
 	let disposed = false
-	let held = false
-	let source: Promise<VideoSourceInfo> | null = null
-	let previewPort: { close: () => void } | null = null
+	// This client's use of the preview worker, from the first call until dispose or until that worker is lost.
+	let hold: Hold | null = null
 	let saveDeps: VideoSaveDeps | null = null
 	let nextId = 1
 	const filmstrips = new Set<number>()
 	// This client's suspension listeners, dropped on dispose.
 	const listeners = new Set<(suspended: boolean) => void>()
 
-	// The preview worker, held from the first use until dispose.
-	const remote = (): Promise<Comlink.Remote<PreviewWorkerApi>> => {
+	// A lost worker drops the hold and the source opened on it, and its range port: the next call starts afresh.
+	const drop = (current: Hold): void => {
+		if (hold === current) {
+			hold = null
+		}
+
+		current.port?.close()
+		current.port = null
+		current.end()
+	}
+
+	const acquire = (): Hold => {
+		if (hold !== null) {
+			return hold
+		}
+
+		const ended = Promise.withResolvers<undefined>()
+		const acquired = Promise.withResolvers<PreviewResource>()
+		const current: Hold = {
+			resource: acquired.promise,
+			value: null,
+			source: null,
+			port: null,
+			end: () => {
+				ended.resolve(undefined)
+			}
+		}
+
+		hold = current
+		previewWorker
+			.use(async resource => {
+				current.value = resource
+				acquired.resolve(resource)
+				void resource.lost.then(() => {
+					drop(current)
+				})
+				await Promise.race([ended.promise, resource.lost])
+			})
+			// A worker that failed to start: nothing is held, and the next call tries again.
+			.catch((error: unknown) => {
+				acquired.reject(error)
+
+				if (hold === current) {
+					hold = null
+				}
+			})
+
+		return current
+	}
+
+	// `run` on the held preview worker.
+	const call = async <T>(run: (remote: Comlink.Remote<PreviewWorkerApi>) => Promise<T>): Promise<T> => {
 		if (disposed) {
-			return Promise.reject(new ClientDisposedError())
+			throw new ClientDisposedError()
 		}
 
-		if (!held) {
-			held = true
-			previewWorker
-				.use(async resource => {
-					acquired.resolve(resource.remote)
-					await hold.promise
-				})
-				// A worker that failed to start: nothing is held.
-				.catch((error: unknown) => {
-					acquired.reject(error)
-				})
-		}
-
-		return acquired.promise
+		return await callOn(await acquire().resource, run)
 	}
 
 	const deps = (): VideoSaveDeps => {
@@ -220,27 +328,51 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 		return saveDeps
 	}
 
-	const loadSource = (): Promise<VideoSourceInfo> => {
-		source ??= (async () => {
-			const [worker, probe] = await Promise.all([remote(), probeOf(file, params.probe)])
+	const loadSourceOn = (current: Hold): Promise<VideoSourceInfo> => {
+		if (current.source !== null) {
+			return current.source
+		}
+
+		const source = (async () => {
+			const [resource, probe] = await Promise.all([current.resource, probeOf(file, params.probe)])
 			const opened = await openPort(file)
 
-			if (disposed) {
+			if (disposed || hold !== current) {
 				opened.close()
 
-				throw new ClientDisposedError()
+				throw disposed ? new ClientDisposedError() : new PreviewWorkerLostError()
 			}
 
-			previewPort = opened
+			current.port = opened
 
-			return await worker.open(Comlink.transfer({ port: opened.port, size, probe }, [opened.port]))
+			return await callOn(resource, remote => remote.open(Comlink.transfer({ port: opened.port, size, probe }, [opened.port])))
 		})()
+
+		current.source = source
 		// A failed open is asked again on the next call.
 		source.catch(() => {
-			source = null
+			if (current.source === source) {
+				current.source = null
+			}
 		})
 
 		return source
+	}
+
+	const loadSource = (): Promise<VideoSourceInfo> => (disposed ? Promise.reject(new ClientDisposedError()) : loadSourceOn(acquire()))
+
+	// `run` on the worker the source was opened on: one lost meanwhile rejects it rather than ask a fresh worker that
+	// has no source yet.
+	const callWithSource = async <T>(run: (remote: Comlink.Remote<PreviewWorkerApi>) => Promise<T>): Promise<T> => {
+		if (disposed) {
+			throw new ClientDisposedError()
+		}
+
+		const current = acquire()
+
+		await loadSourceOn(current)
+
+		return await callOn(await current.resource, run)
 	}
 
 	// Ends the preview; a running export is a save with its own transfer row and goes on.
@@ -258,27 +390,43 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 
 		listeners.clear()
 
-		if (!held) {
-			hold.resolve(undefined)
+		const current = hold
+
+		hold = null
+
+		if (current === null) {
+			return
+		}
+
+		// The port is closed and the hold ended whatever the worker answers: a worker already gone (its proxy
+		// released) must not leave the range token open or the idle resource pinned.
+		const end = (resource: PreviewResource): void => {
+			try {
+				if (!resource.gone) {
+					for (const id of filmstrips) {
+						void resource.remote.cancelFilmstrip(id).catch(() => undefined)
+					}
+
+					// Posted before the hold ends, so it runs before any idle teardown could.
+					void resource.remote.close().catch(() => undefined)
+				}
+			} finally {
+				current.port?.close()
+				current.port = null
+				current.end()
+			}
+		}
+
+		// Ended at once when the worker is up, so logout's teardown right after finds the hold over.
+		if (current.value !== null) {
+			end(current.value)
 
 			return
 		}
 
-		void acquired.promise.then(
-			worker => {
-				for (const id of filmstrips) {
-					void worker.cancelFilmstrip(id).catch(() => undefined)
-				}
-
-				// Posted before the hold ends, so it runs before any idle teardown could.
-				void worker.close().catch(() => undefined)
-				previewPort?.close()
-				hold.resolve(undefined)
-			},
-			() => {
-				hold.resolve(undefined)
-			}
-		)
+		void current.resource.then(end, () => {
+			current.end()
+		})
 	}
 
 	openClients.add(dispose)
@@ -286,26 +434,12 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 	return {
 		loadSource,
 
-		// While an export holds the decoder (iOS), frame requests are answered here, never posted.
-		frameAt: async (time, recipe, maxWidth) => {
-			await loadSource()
+		frameAt: (time, recipe, maxWidth) => callWithSource(remote => unlessSuspended(() => remote.frameAt(time, recipe, maxWidth))),
 
-			if (decodingSuspended()) {
-				throw new DecodingSuspendedError()
-			}
+		stillAt: (time, recipe, maxWidth) => callWithSource(remote => unlessSuspended(() => remote.stillAt(time, recipe, maxWidth))),
 
-			return await (await remote()).frameAt(time, recipe, maxWidth)
-		},
-
-		filterThumbnails: async (time, recipe, filters, height) => {
-			await loadSource()
-
-			if (decodingSuspended()) {
-				throw new DecodingSuspendedError()
-			}
-
-			return await (await remote()).filterThumbnails(time, recipe, filters, height)
-		},
+		filterThumbnails: (time, recipe, filters, height) =>
+			callWithSource(remote => unlessSuspended(() => remote.filterThumbnails(time, recipe, filters, height))),
 
 		isDecodingSuspended: decodingSuspended,
 
@@ -338,16 +472,15 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 			}
 
 			const id = nextId++
-			const worker = await remote()
 
 			for (const running of filmstrips) {
-				void worker.cancelFilmstrip(running).catch(() => undefined)
+				void call(remote => remote.cancelFilmstrip(running)).catch(() => undefined)
 			}
 
 			filmstrips.add(id)
 
 			try {
-				return await worker.filmstrip(id, times, height)
+				return await callWithSource(remote => remote.filmstrip(id, times, height))
 			} finally {
 				filmstrips.delete(id)
 			}
@@ -360,10 +493,8 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 			void (async () => {
 				await loadSource()
 
-				const worker = await remote()
-
 				if (!watch.stopped) {
-					await worker.watchWaveform(id, range, columns, Comlink.proxy(onUpdate))
+					await callWithSource(remote => remote.watchWaveform(id, range, columns, Comlink.proxy(onUpdate)))
 				}
 			})().catch(() => undefined)
 
@@ -374,8 +505,11 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 
 				watch.stopped = true
 
-				if (held && !disposed) {
-					void acquired.promise.then(worker => worker.unwatchWaveform(id)).catch(() => undefined)
+				// Only on the worker held now: a lost one took its watches with it.
+				const current = hold
+
+				if (current !== null && !disposed) {
+					void current.resource.then(resource => callOn(resource, remote => remote.unwatchWaveform(id))).catch(() => undefined)
 				}
 			}
 		},

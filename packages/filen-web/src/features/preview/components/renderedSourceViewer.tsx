@@ -118,14 +118,26 @@ export function RenderedSourceViewer({
 		}
 	}, [focusAfterToggle, mode])
 
+	// The rendered pane: the host's own focus stop, so Escape and F6 land somewhere whatever the renderer draws. Null in
+	// Source, whose editor surface answers both keys itself.
+	const renderedRef = useRef<HTMLDivElement>(null)
+
+	// The renderer's top document when it is focusable itself (markdown's), else the pane. Only the first document
+	// counts: one nested in a non-focusable document (a notebook's markdown cell) is not the landing.
 	const focusDocument = (): void => {
-		containerRef.current?.querySelector<HTMLElement>('[role="document"]')?.focus()
+		const pane = renderedRef.current
+		const first = pane?.querySelector<HTMLElement>('[role="document"]')
+		const target = first?.hasAttribute("tabindex") === true ? first : pane
+
+		target?.focus()
 	}
 
 	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
 	// macOS Firefox do).
 	useEditorLayerKeys(containerRef, (event, root) => {
-		onCommandBarF6(event, root, focusDocument)
+		if (renderedRef.current !== null) {
+			onCommandBarF6(event, root, focusDocument)
+		}
 	})
 
 	if (text.status === "pending") {
@@ -169,10 +181,12 @@ export function RenderedSourceViewer({
 			className="flex size-full flex-col"
 			// The source's F6 is the editor surface's own (it takes the key first).
 			onKeyDownCapture={event => {
-				onRibbonEscape(event, event.currentTarget, focusDocument, "capture")
+				if (renderedRef.current !== null) {
+					onRibbonEscape(event, event.currentTarget, focusDocument, "capture")
+				}
 			}}
 			onKeyDown={event => {
-				if (!onRibbonEscape(event, event.currentTarget, focusDocument, "bubble"))
+				if (renderedRef.current !== null && !onRibbonEscape(event, event.currentTarget, focusDocument, "bubble"))
 					onCommandBarF6(event, event.currentTarget, focusDocument)
 			}}
 		>
@@ -197,7 +211,13 @@ export function RenderedSourceViewer({
 						markdown={bar}
 						onDownload={download}
 					/>
-					<div className="min-h-0 flex-1">{renderer({ bytes: text.bytes, file })}</div>
+					<div
+						ref={renderedRef}
+						tabIndex={-1}
+						className="min-h-0 flex-1 outline-none"
+					>
+						{renderer({ bytes: text.bytes, file })}
+					</div>
 				</>
 			)}
 		</div>

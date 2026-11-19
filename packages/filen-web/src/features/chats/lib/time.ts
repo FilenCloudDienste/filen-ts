@@ -24,13 +24,25 @@ export function dayKind(timestamp: bigint, now: number = Date.now()): "today" | 
 	return key === dayNumber(today) ? "yesterday" : "other"
 }
 
+// Compiled once: formatClockTime runs per message row and per list row. `undefined` locale defers to the
+// runtime's own.
+const CLOCK_TIME = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" })
+
 // HH:MM in the viewer's locale — a message line's hover time, the time-header clock and the compact list-row
 // time for a same-day chat.
 export function formatClockTime(timestamp: bigint): string {
-	return new Date(Number(timestamp)).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+	const date = new Date(Number(timestamp))
+
+	// DateTimeFormat.format throws on an Invalid Date where toLocaleTimeString returned a label.
+	return Number.isNaN(date.getTime()) ? date.toLocaleTimeString() : CLOCK_TIME.format(date)
 }
+
+const FULL_DATE = new Intl.DateTimeFormat(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
 
 // Full localized date, used for a time header that is neither today nor yesterday.
 export function formatFullDate(timestamp: bigint): string {
-	return new Date(Number(timestamp)).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
+	const date = new Date(Number(timestamp))
+
+	// DateTimeFormat.format throws on an Invalid Date where toLocaleDateString returned a label.
+	return Number.isNaN(date.getTime()) ? date.toLocaleDateString() : FULL_DATE.format(date)
 }

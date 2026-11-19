@@ -637,6 +637,31 @@ describe("PreviewVideo — the direct start's registration", () => {
 			expect(harness.release).toHaveBeenCalledExactlyOnceWith("/__sw/stream/1")
 		})
 	})
+
+	it("is handed back, and never played, when it lands after playback moved to the ladder", async () => {
+		const registration = Promise.withResolvers<undefined>()
+		const harness = setUp({ route: "direct", registration: registration.promise })
+
+		await vi.waitFor(() => {
+			expect(harness.registerDirect).toHaveBeenCalledOnce()
+		})
+		harness.controller.setSubtitle("embedded-text")
+		await vi.waitFor(() => {
+			expect(harness.open).toHaveBeenCalledOnce()
+		})
+		registration.resolve(undefined)
+
+		await vi.waitFor(() => {
+			expect(harness.release).toHaveBeenCalledExactlyOnceWith("/__sw/stream/1")
+		})
+		await flush()
+		expect(harness.video.src).toBe("")
+		expect(harness.holdAlive).not.toHaveBeenCalled()
+		expect(harness.controller.getSnapshot().route).toBe("ladder")
+
+		harness.controller.dispose()
+		expect(harness.release).toHaveBeenCalledOnce()
+	})
 })
 
 describe("PreviewVideo — the direct start keeps the worker alive", () => {

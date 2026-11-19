@@ -94,7 +94,9 @@ describe("MPEG-TS probe", () => {
 				par: 1,
 				rotation: 0,
 				bitDepth: 8,
-				transfer: "sdr"
+				transfer: "sdr",
+				// The SPS's VUI timing: a tick of 1/48 s, two a frame.
+				fps: 24
 			},
 			audio: [
 				{

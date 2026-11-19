@@ -96,6 +96,12 @@ export function useArchiveSearch(snapshot: ListingSnapshot, scopeDir: number, qu
 	const trimmed = query.trim()
 	const store = snapshot.store
 
+	// An answer for a replaced store or an emptied query is never shown again: dropped, it no longer holds the
+	// replaced listing's entries.
+	if (result !== null && (result.store !== store || trimmed === "")) {
+		setResult(null)
+	}
+
 	useEffect(() => {
 		if (trimmed === "") {
 			return

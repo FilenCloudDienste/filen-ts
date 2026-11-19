@@ -44,9 +44,14 @@ function setStorageRole(role: "leader" | "follower"): void {
 	leadershipListeners.emit()
 }
 
+// Transport: the shared CHANNEL carries only the hellos. Each leader serves requests on its own channel,
+// named by the id it announces, and answers each follower on that follower's own channel, so no request or
+// response is cloned into a tab it is not for. A new id in "leader-ready" means a new leader: a follower
+// re-posts its pending requests there.
 interface Req {
 	kind: "req"
 	id: string
+	tab: string
 	method: keyof StorageApi
 	args: unknown[]
 }
@@ -57,8 +62,15 @@ interface Res {
 	value?: unknown
 	error?: SerializedError
 }
-type Hello = { kind: "leader-ready" } | { kind: "leader?" }
-type Msg = Req | Res | Hello
+type Hello = { kind: "leader-ready"; leader: string } | { kind: "leader?" }
+
+function requestChannelName(leader: string): string {
+	return `${CHANNEL}:req:${leader}`
+}
+
+function responseChannelName(tab: string): string {
+	return `${CHANNEL}:res:${tab}`
+}
 
 const STORAGE_METHODS = [
 	"open",
@@ -80,21 +92,73 @@ const RPC_TIMEOUT_MS = 5000
 // A full VACUUM holds the db worker for as long as the database takes to rebuild, which can be well past the default.
 const RPC_TIMEOUT_OVERRIDES: Partial<Record<keyof StorageApi, number>> = { vacuum: 600_000 }
 
-// Spin up this tab's own db worker, open OPFS, and start serving the RPC channel — the work a tab does
-// the moment it holds the lock, whether it was the FIRST leader or a promoted follower. Returns the
-// direct worker api. A thrown open() (see db.worker.ts) propagates so the caller releases the lock and
-// the next queued tab is granted instead of everyone hanging.
+// A follower's response channel stays open this long after its last answer, so a burst of calls reuses it.
+const RESPONSE_CHANNEL_IDLE_MS = 30_000
+
+function invoke(api: StorageApi, method: keyof StorageApi, args: unknown[]): Promise<unknown> {
+	return (api[method] as (...a: unknown[]) => Promise<unknown>)(...args)
+}
+
+// Spin up this tab's own db worker, open OPFS, and start serving — the work a tab does the moment it holds
+// the lock, whether it was the FIRST leader or a promoted follower. Returns the direct worker api. A thrown
+// open() (see db.worker.ts) terminates the worker, so a failed attempt keeps no sqlite module or pool files,
+// and propagates so the caller releases the lock and the next queued tab is granted instead of everyone hanging.
 async function becomeLeader(): Promise<StorageApi> {
 	const worker = new DbWorker()
 	const remote = Comlink.wrap<StorageApi>(worker)
 
-	await remote.open()
+	try {
+		await remote.open()
+	} catch (e) {
+		remote[Comlink.releaseProxy]()
+		worker.terminate()
 
-	const ch = new BroadcastChannel(CHANNEL)
-	ch.onmessage = (ev: MessageEvent<Msg>) => {
-		void serve(ev.data, remote, ch)
+		throw e
 	}
-	ch.postMessage({ kind: "leader-ready" } satisfies Hello)
+
+	const leader = crypto.randomUUID()
+	const hello = new BroadcastChannel(CHANNEL)
+	const requests = new BroadcastChannel(requestChannelName(leader))
+	const responders = new Map<string, { ch: BroadcastChannel; inFlight: number; idle: ReturnType<typeof setTimeout> | undefined }>()
+
+	const respond = async (msg: Req): Promise<void> => {
+		let responder = responders.get(msg.tab)
+
+		if (responder === undefined) {
+			responder = { ch: new BroadcastChannel(responseChannelName(msg.tab)), inFlight: 0, idle: undefined }
+			responders.set(msg.tab, responder)
+		}
+
+		responder.inFlight++
+		clearTimeout(responder.idle)
+
+		try {
+			responder.ch.postMessage(await serve(msg, remote))
+		} finally {
+			responder.inFlight--
+
+			if (responder.inFlight === 0) {
+				const idle = responder
+
+				idle.idle = setTimeout(() => {
+					idle.ch.close()
+					responders.delete(msg.tab)
+				}, RESPONSE_CHANNEL_IDLE_MS)
+			}
+		}
+	}
+
+	hello.onmessage = (ev: MessageEvent<Hello>) => {
+		if (ev.data.kind === "leader?") {
+			peerSeen = true
+			hello.postMessage({ kind: "leader-ready", leader } satisfies Hello)
+		}
+	}
+	requests.onmessage = (ev: MessageEvent<Req>) => {
+		peerSeen = true
+		void respond(ev.data)
+	}
+	hello.postMessage({ kind: "leader-ready", leader } satisfies Hello)
 
 	// Comlink.Remote<StorageApi> is structurally StorageApi here (every method already returns a Promise).
 	return remote
@@ -140,16 +204,23 @@ export function acquireStorage(): Promise<StorageHandle> {
 function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: (reason: unknown) => void): void {
 	const handshake = new AbortController()
 	const queue = new AbortController()
-	let handle: StorageHandle | null = null
+	let follower: Follower | null = null
+	let promoting = false
 	let settled = false
 
 	const promoted = navigator.locks.request(LOCK, { signal: queue.signal }, async () => {
+		// The old leader is gone: hold this tab's calls until its own leader is up instead of posting them
+		// to a channel nobody serves.
+		promoting = true
+		follower?.suspend()
+
 		const api = await becomeLeader()
 
-		if (handle) {
+		if (follower) {
 			peerSeen = true
-			handle.role = "leader"
-			handle.api = api
+			follower.handle.role = "leader"
+			follower.handOver(api)
+			follower.handle.api = api
 		} else {
 			settled = true
 			handshake.abort()
@@ -162,9 +233,9 @@ function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: 
 	})
 
 	// A failed promotion (e.g. OPFS open() throws) releases the lock so the next queued tab is tried.
-	// Before the handshake settled, nothing else can answer this tab: fail its storage. After it, this
-	// tab stays a follower with an api pointed at the now-dead leader (its kv times out) — a degraded
-	// state, not a hang.
+	// Before the handshake settled, nothing else can answer this tab: fail its storage. After it, the calls
+	// held for the promotion fail with its error and this tab stays a follower; it follows whichever tab
+	// leads next once that one announces itself.
 	void promoted.catch((e: unknown) => {
 		if (queue.signal.aborted) {
 			return
@@ -178,19 +249,27 @@ function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: 
 			return
 		}
 
+		follower?.resume(e instanceof Error ? e : new Error(String(e)))
 		log.error("db.leader", "promotion failed", e)
 	})
 
 	followerHandle(handshake.signal).then(
-		follower => {
+		link => {
 			if (settled) {
+				link.close()
+
 				return
 			}
 
 			settled = true
-			handle = follower
+			follower = link
+
+			if (promoting) {
+				link.suspend()
+			}
+
 			setStorageRole("follower")
-			resolve(follower)
+			resolve(link.handle)
 		},
 		(e: unknown) => {
 			if (settled) {
@@ -205,82 +284,107 @@ function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: 
 	)
 }
 
-async function serve(msg: Msg, remote: Comlink.Remote<StorageApi>, ch: BroadcastChannel): Promise<void> {
-	peerSeen = true
-
-	if (msg.kind === "leader?") {
-		ch.postMessage({ kind: "leader-ready" } satisfies Hello)
-		return
-	}
-
-	if (msg.kind !== "req") {
-		return
-	}
-
+async function serve(msg: Req, remote: Comlink.Remote<StorageApi>): Promise<Res> {
 	try {
-		const value = await (remote[msg.method] as (...a: unknown[]) => Promise<unknown>)(...msg.args)
-		ch.postMessage({ kind: "res", id: msg.id, ok: true, value } satisfies Res)
+		return { kind: "res", id: msg.id, ok: true, value: await invoke(remote, msg.method, msg.args) }
 	} catch (e) {
-		ch.postMessage({
-			kind: "res",
-			id: msg.id,
-			ok: false,
-			error: serializeError(e instanceof Error ? e : new Error(String(e)))
-		} satisfies Res)
 		log.error("db.leader", e)
+
+		return { kind: "res", id: msg.id, ok: false, error: serializeError(e instanceof Error ? e : new Error(String(e))) }
 	}
 }
 
-async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
-	const ch = new BroadcastChannel(CHANNEL)
-	const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+interface Follower {
+	handle: StorageHandle
+	// Promotion started: hold new and pending calls, without timeouts, until handOver or resume.
+	suspend(): void
+	// Promotion done: run the held calls on the tab's own api in the order they were made and close the follower's channels.
+	handOver(api: StorageApi): void
+	// Promotion failed: fail the held calls and go back to following.
+	resume(error: Error): void
+	close(): void
+}
+
+interface PendingCall {
+	method: keyof StorageApi
+	args: unknown[]
+	resolve: (v: unknown) => void
+	reject: (e: Error) => void
+	timer: ReturnType<typeof setTimeout> | undefined
+}
+
+async function followerHandle(signal: AbortSignal): Promise<Follower> {
+	const tab = crypto.randomUUID()
+	const hello = new BroadcastChannel(CHANNEL)
+	const pending = new Map<string, PendingCall>()
+	let leader: string | null = null
+	let requests: BroadcastChannel | null = null
+	let responses: BroadcastChannel | null = null
+	let held = false
+	let direct: StorageApi | null = null
 
 	const ready = Promise.withResolvers<undefined>()
 
-	ch.addEventListener("message", (ev: MessageEvent<Msg>) => {
-		if (ev.data.kind === "leader-ready") {
-			ready.resolve(undefined)
-		}
-	})
-
-	ch.addEventListener("message", (ev: MessageEvent<Msg>) => {
-		if (ev.data.kind !== "res") {
+	const send = (id: string, call: PendingCall): void => {
+		if (leader === null) {
 			return
 		}
 
-		const p = pending.get(ev.data.id)
+		requests ??= new BroadcastChannel(requestChannelName(leader))
+		requests.postMessage({ kind: "req", id, tab, method: call.method, args: call.args } satisfies Req)
+		clearTimeout(call.timer)
+		call.timer = setTimeout(() => {
+			if (pending.delete(id)) {
+				call.reject(new Error(`db rpc timeout: ${call.method}`))
+			}
+		}, RPC_TIMEOUT_OVERRIDES[call.method] ?? RPC_TIMEOUT_MS)
+	}
 
-		if (!p) {
-			return // response addressed to another follower — ids are globally unique
+	const close = (): void => {
+		hello.close()
+		requests?.close()
+		responses?.close()
+		requests = null
+		responses = null
+	}
+
+	hello.onmessage = (ev: MessageEvent<Hello>) => {
+		if (ev.data.kind !== "leader-ready" || held || ev.data.leader === leader) {
+			return
 		}
 
-		pending.delete(ev.data.id)
+		// A new leader (the old one died, or this is the handshake): anything still unanswered goes to it.
+		leader = ev.data.leader
+		requests?.close()
+		requests = null
 
-		if (ev.data.ok) {
-			p.resolve(ev.data.value)
-		} else {
-			p.reject(ev.data.error ? deserializeError(ev.data.error) : new Error("db rpc failed"))
+		for (const [id, call] of pending) {
+			send(id, call)
 		}
-	})
+
+		ready.resolve(undefined)
+	}
 
 	// The leader announces itself only once, on taking the lock, so ask now; the interval is only the retry.
-	ch.postMessage({ kind: "leader?" } satisfies Hello)
+	hello.postMessage({ kind: "leader?" } satisfies Hello)
 
 	const ping = setInterval(() => {
-		ch.postMessage({ kind: "leader?" } satisfies Hello)
+		hello.postMessage({ kind: "leader?" } satisfies Hello)
 	}, 250)
 
 	// Teardown must hang off THIS race, not off `ready` — on the 10s no-leader path the rejection
 	// comes from the race's own timer while `ready` (settled only by a leader-ready message) stays
 	// pending forever, so a `ready.promise.finally(...)` hook would never fire and the ping interval
 	// would keep posting `leader?` every 250ms for the rest of the tab's life. The ping stops on
-	// every exit; the channel closes ONLY on rejection (this handle is never returned then, so
-	// nothing downstream could tear it down) — on success it stays open: it IS the RPC transport.
+	// every exit; the channel closes on rejection (this handle is never returned then, so nothing
+	// downstream could tear it down). The 10s deadline is cleared on every exit too.
+	let deadline: ReturnType<typeof setTimeout> | undefined
+
 	try {
 		await Promise.race([
 			ready.promise,
 			new Promise<never>((_, reject) => {
-				const timer = setTimeout(() => {
+				deadline = setTimeout(() => {
 					reject(new Error("no db leader after 10s"))
 				}, 10_000)
 
@@ -288,7 +392,6 @@ async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 				signal.addEventListener(
 					"abort",
 					() => {
-						clearTimeout(timer)
 						reject(new Error("db leader handshake aborted"))
 					},
 					{ once: true }
@@ -296,35 +399,98 @@ async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 			})
 		])
 	} catch (e) {
-		ch.close()
+		close()
 		throw e
 	} finally {
 		clearInterval(ping)
+		clearTimeout(deadline)
 	}
 
-	// The tab's own new leader channel also answers the handshake, possibly just before the abort lands.
+	// The tab's own new leader also answers the handshake, possibly just before the abort lands.
 	if (signal.aborted) {
-		ch.close()
+		close()
 		throw new Error("db leader handshake aborted")
+	}
+
+	responses = new BroadcastChannel(responseChannelName(tab))
+	responses.onmessage = (ev: MessageEvent<Res>) => {
+		const call = pending.get(ev.data.id)
+
+		if (!call) {
+			return // already timed out
+		}
+
+		clearTimeout(call.timer)
+		pending.delete(ev.data.id)
+
+		if (ev.data.ok) {
+			call.resolve(ev.data.value)
+		} else {
+			call.reject(ev.data.error ? deserializeError(ev.data.error) : new Error("db rpc failed"))
+		}
 	}
 
 	const call =
 		(method: keyof StorageApi) =>
-		(...args: unknown[]) =>
-			new Promise((resolve, reject) => {
+		(...args: unknown[]): Promise<unknown> => {
+			// A caller still holding this api after the promotion goes straight to the tab's own worker.
+			if (direct !== null) {
+				return invoke(direct, method, args)
+			}
+
+			return new Promise((resolve, reject) => {
 				const id = crypto.randomUUID()
+				const entry: PendingCall = { method, args, resolve, reject, timer: undefined }
 
-				pending.set(id, { resolve, reject })
-				ch.postMessage({ kind: "req", id, method, args } satisfies Req)
+				pending.set(id, entry)
 
-				setTimeout(() => {
-					if (pending.delete(id)) {
-						reject(new Error(`db rpc timeout: ${method}`))
-					}
-				}, RPC_TIMEOUT_OVERRIDES[method] ?? RPC_TIMEOUT_MS)
+				if (!held) {
+					send(id, entry)
+				}
 			})
+		}
 
-	const api = Object.fromEntries(STORAGE_METHODS.map(m => [m, call(m)])) as unknown as StorageApi
+	const handle: StorageHandle = {
+		role: "follower",
+		api: Object.fromEntries(STORAGE_METHODS.map(m => [m, call(m)])) as unknown as StorageApi
+	}
 
-	return { role: "follower", api }
+	return {
+		handle,
+		suspend: () => {
+			held = true
+
+			for (const entry of pending.values()) {
+				clearTimeout(entry.timer)
+				entry.timer = undefined
+			}
+		},
+		// A call the dead leader ran but never answered runs again here. Every method tolerates that: writes and
+		// deletes are idempotent, kvDeleteIfAt only reports fewer keys (its callers drop just those from memory),
+		// and wipe/vacuum repeat on an already wiped or compacted database.
+		handOver: api => {
+			direct = api
+			close()
+
+			const calls = [...pending.values()]
+
+			pending.clear()
+
+			for (const entry of calls) {
+				void invoke(api, entry.method, entry.args).then(entry.resolve, entry.reject)
+			}
+		},
+		resume: error => {
+			held = false
+
+			const calls = [...pending.values()]
+
+			pending.clear()
+
+			for (const entry of calls) {
+				entry.reject(error)
+			}
+		},
+		close
+	}
 }

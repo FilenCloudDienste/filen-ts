@@ -1,23 +1,19 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { XIcon } from "lucide-react"
 import type { RedactionFinding, RedactionPreset, RedactionQuery } from "@filen/office/core/pdfedit/redactVerify"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-	addTerm,
-	canSearch,
-	DEFAULT_FIND_FORM,
-	findQuery,
-	selectedFindings,
-	togglePreset,
-	type FindRedactForm
-} from "@/features/pdf/redact/redaction.logic"
+import { addTerm, canSearch, DEFAULT_FIND_FORM, findQuery, togglePreset, type FindRedactForm } from "@/features/pdf/redact/redaction.logic"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Find & redact: literal words or phrases (never patterns) with case and whole-word options, and ready-made searches
 // for email addresses and phone numbers. The results arrive from the engine as a review list, all selected; the
-// selected ones are marked for redaction (nothing is removed until the marks are applied).
+// selected ones are marked for redaction (nothing is removed until the marks are applied). A search may find hundreds
+// of thousands (a one-letter term, a preset over a long document): the list is a window over fixed-height rows, and
+// the selection is kept as the few unselected ids.
 
 export interface FindRedactPanelProps {
 	// The last search's results; null before any search.
@@ -38,6 +34,10 @@ const PRESETS: readonly {
 	{ preset: "phoneNumbers", label: "previewPdfFindRedactPhones" }
 ]
 
+// A result row: its text and its page, one line each (py-1, a 20px and a 16px line).
+const ROW_HEIGHT = 44
+const OVERSCAN = 10
+
 export function FindRedactPanel({ findings, searching, failed, onSearch, onMark, onClose }: FindRedactPanelProps) {
 	const { t } = useTranslation("preview")
 	const id = useId()
@@ -53,8 +53,8 @@ export function FindRedactPanel({ findings, searching, failed, onSearch, onMark,
 	}
 
 	const results = findings ?? []
-	const selected = new Set(results.filter(finding => !unselected.has(finding.id)).map(finding => finding.id))
-	const chosen = selectedFindings(results, selected)
+	// Every unselected id is one of the results (the set starts empty with each search).
+	const chosenCount = results.length - unselected.size
 	const withTyped = addTerm(form.terms, typed)
 	const ready = canSearch({ ...form, terms: withTyped }) && !searching
 
@@ -209,50 +209,98 @@ export function FindRedactPanel({ findings, searching, failed, onSearch, onMark,
 				<div className="flex min-h-0 flex-1 flex-col gap-2">
 					<Option
 						id={`${id}-all`}
-						checked={chosen.length === results.length}
+						checked={unselected.size === 0}
 						label={t("previewPdfFindRedactSelectAll")}
 						onChange={on => {
 							setUnselected(on ? new Set() : new Set(results.map(finding => finding.id)))
 						}}
 					/>
-					<ul className="min-h-0 flex-1 overflow-y-auto">
-						{results.map(finding => (
-							<li
-								key={finding.id}
-								className="flex items-start gap-2 py-1"
-							>
-								<input
-									id={`${id}-f-${finding.id}`}
-									type="checkbox"
-									className="mt-0.5 size-4 shrink-0 accent-primary"
-									checked={selected.has(finding.id)}
-									onChange={event => {
-										toggle(finding, event.target.checked)
-									}}
-								/>
-								<Label
-									htmlFor={`${id}-f-${finding.id}`}
-									className="flex min-w-0 flex-col items-start gap-0 font-normal"
-								>
-									<span className="max-w-full truncate">{finding.text}</span>
-									<span className="text-xs text-muted-foreground">
-										{t("previewPdfPageNumber", { page: finding.page + 1 })}
-									</span>
-								</Label>
-							</li>
-						))}
-					</ul>
+					<FindingRows
+						id={id}
+						findings={results}
+						unselected={unselected}
+						onToggle={toggle}
+					/>
 					<Button
-						disabled={chosen.length === 0}
+						disabled={chosenCount === 0}
 						onClick={() => {
-							onMark(chosen)
+							onMark(results.filter(finding => !unselected.has(finding.id)))
 						}}
 					>
-						{t("previewPdfFindRedactMark", { count: chosen.length })}
+						{t("previewPdfFindRedactMark", { count: chosenCount })}
 					</Button>
 				</div>
 			)}
 		</section>
+	)
+}
+
+// The results as a window over fixed-height rows. Its own component, as useVirtualizer opts its host out of the React
+// Compiler (the panel stays compiled).
+function FindingRows({
+	id,
+	findings,
+	unselected,
+	onToggle
+}: {
+	id: string
+	findings: readonly RedactionFinding[]
+	unselected: ReadonlySet<string>
+	onToggle: (finding: RedactionFinding, on: boolean) => void
+}) {
+	const { t } = useTranslation("preview")
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const virtualizer = useVirtualizer({
+		count: findings.length,
+		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
+		estimateSize: () => ROW_HEIGHT,
+		overscan: OVERSCAN
+	})
+
+	return (
+		<div
+			ref={setScrollElement}
+			className="min-h-0 flex-1 overflow-y-auto"
+		>
+			<ul
+				className="relative w-full"
+				style={{ height: virtualizer.getTotalSize() }}
+			>
+				{virtualizer.getVirtualItems().map(row => {
+					const finding = findings[row.index]
+
+					if (finding === undefined) return null
+
+					return (
+						<li
+							key={finding.id}
+							className="absolute top-0 left-0 flex w-full items-start gap-2 py-1"
+							style={{ height: ROW_HEIGHT, transform: `translateY(${String(row.start)}px)` }}
+						>
+							<input
+								id={`${id}-f-${finding.id}`}
+								type="checkbox"
+								className="mt-0.5 size-4 shrink-0 accent-primary"
+								checked={!unselected.has(finding.id)}
+								onChange={event => {
+									onToggle(finding, event.target.checked)
+								}}
+							/>
+							<Label
+								htmlFor={`${id}-f-${finding.id}`}
+								className="flex min-w-0 flex-col items-start gap-0 font-normal"
+							>
+								<span className="max-w-full truncate">{finding.text}</span>
+								<span className="text-xs text-muted-foreground">
+									{t("previewPdfPageNumber", { page: finding.page + 1 })}
+								</span>
+							</Label>
+						</li>
+					)
+				})}
+			</ul>
+		</div>
 	)
 }
 

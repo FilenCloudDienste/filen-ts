@@ -17,7 +17,7 @@ import {
 } from "@/features/assistant/store/assistantSession"
 import { useAssistantHistoryStore } from "@/features/assistant/store/conversationHistory"
 import { ASSISTANT_TITLE_ID, assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
-import { canRemoveModel, downloadPercent, modelShowsLoading } from "@/features/assistant/components/assistant.logic"
+import { canRemoveModel, downloadPercent, modelShowsLoading, removableModelBytes } from "@/features/assistant/components/assistant.logic"
 import type { AssistantModelState } from "@/features/assistant/types"
 
 const CHIP_CLASS = "shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] leading-4 font-medium"
@@ -65,7 +65,6 @@ function ModelMenu({ state }: { state: AssistantModelState }) {
 	const { t } = useTranslation(["assistant", "common"])
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [pending, setPending] = useState(false)
-	const model = state.model
 
 	// Removing the model takes this menu, the dialog's way back, with it: focus goes to the screen that
 	// replaced the conversation instead, once it is in the DOM.
@@ -129,7 +128,7 @@ function ModelMenu({ state }: { state: AssistantModelState }) {
 				open={confirmOpen}
 				pending={pending}
 				title={t("assistant:assistantRemoveModelTitle")}
-				body={t("assistant:assistantRemoveModelBody", { size: model === null ? "" : formatBytes(model.sizeBytes) })}
+				body={t("assistant:assistantRemoveModelBody", { size: formatBytes(removableModelBytes(state)) })}
 				confirmLabel={t("assistant:assistantRemoveModelConfirm")}
 				cancelLabel={t("common:cancel")}
 				destructive

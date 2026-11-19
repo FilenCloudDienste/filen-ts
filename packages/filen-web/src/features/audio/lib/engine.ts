@@ -420,17 +420,32 @@ export class AudioEngine {
 					}
 	}
 
-	// The real playback callbacks, for a freshly created element and for a promoted warm one.
+	// The element holds the store's current track. Not while a cold load is in flight: the store already names the
+	// incoming track and the element still plays the previous one.
+	private holdsCurrent(): boolean {
+		const state = useAudioStore.getState()
+
+		return this.loadedTrackUuid !== null && state.queue[state.currentIndex]?.uuid === this.loadedTrackUuid
+	}
+
+	// The real playback callbacks, for a freshly created element and for a promoted warm one. The previous track's
+	// element drives nothing while the next one loads: its position, duration and end belong to another track.
 	private playbackEvents(): AudioElementEvents {
 		return {
 			onTimeUpdate: () => {
-				this.onTimeUpdate()
+				if (this.holdsCurrent()) {
+					this.onTimeUpdate()
+				}
 			},
 			onDurationChange: () => {
-				this.onDurationChange()
+				if (this.holdsCurrent()) {
+					this.onDurationChange()
+				}
 			},
 			onEnded: () => {
-				void this.handleTrackEnd()
+				if (this.holdsCurrent()) {
+					void this.handleTrackEnd()
+				}
 			},
 			onError: failure => {
 				void failure().then(error => {
@@ -1987,21 +2002,23 @@ export class AudioEngine {
 		this.demoted.add(source)
 		source.demote()
 
+		const resumeAt = this.element?.sample().currentTimeMs ?? 0
+
+		// The reload starts from where the track stood, seeked before play(): never heard or shown from 0:00 first. The
+		// guard above leaves loadedTrackUuid naming the current track.
+		if (resumeAt > 0) {
+			this.pendingResume = { uuid: this.loadedTrackUuid, ms: resumeAt }
+		}
+
 		// Paused (the user paused while the track loaded): nothing plays now; the element no longer counts as
-		// holding the track, so resuming loads it again, through the route it now resolves to.
+		// holding the track, so resuming loads it again, through the route it now resolves to, from that position.
 		if (state.status === "paused") {
 			this.loadedTrackUuid = null
 
 			return true
 		}
 
-		const resumeAt = this.element?.sample().currentTimeMs ?? 0
-
-		void this.loadAndPlay(state.currentIndex).then(() => {
-			if (resumeAt > 0 && useAudioStore.getState().queue[useAudioStore.getState().currentIndex]?.uuid === this.loadedTrackUuid) {
-				this.element?.seek(resumeAt / 1000)
-			}
-		})
+		void this.loadAndPlay(state.currentIndex)
 
 		return true
 	}
@@ -2196,7 +2213,11 @@ export class AudioEngine {
 		void element.play().then(
 			() => {
 				if (!this.superseded(generation, pauseGeneration)) {
+					// Playing again in place: a failure that left the track paused is over, and the next one gets a full skip pass.
+					this.skipGuard = 0
 					this.degradeRetry = false
+					useAudioStore.getState().setError(null)
+					this.deps.mediaSession?.setPositionState(element.sample())
 					this.armTransitionTimer()
 
 					if (this.prefetchElement === null) {
@@ -2372,9 +2393,11 @@ export class AudioEngine {
 
 	// Remove one track from the queue (a per-row remove). A background track leaves playback untouched
 	// (only the index label shifts); removing the CURRENT track loads whatever now fills its slot, or
-	// clears everything when it was the last track.
+	// clears everything when it was the last track. A paused transport stays paused: the track filling the slot loads
+	// onto the element (duration, live scrubber, resume without a second download) but does not start.
 	public async removeAt(index: number): Promise<void> {
 		const state = useAudioStore.getState()
+		const wasPlaying = state.status === "playing" || state.status === "loading"
 		const mutation = removeFromQueue(state.queue, state.currentIndex, state.shuffleEnabled, state.shuffleOrder, index)
 
 		// Indices shift under any removal, so whatever was warmed is stale regardless of which slot was
@@ -2390,8 +2413,19 @@ export class AudioEngine {
 
 		if (mutation.currentRemoved) {
 			this.bumpLoadGeneration()
+			this.pendingResume = null
 			useAudioStore.getState().loadQueue(mutation.queue, mutation.currentIndex, mutation.shuffleOrder)
-			await this.loadAndPlay(mutation.currentIndex)
+
+			const load = this.loadAndPlay(mutation.currentIndex)
+
+			// The load ran synchronously up to its first await; this is the paused-during-load path from here.
+			if (!wasPlaying) {
+				this.pauseGeneration++
+				useAudioStore.getState().setStatus("paused")
+				this.deps.mediaSession?.setPlaybackState("paused")
+			}
+
+			await load
 
 			return
 		}
@@ -2489,6 +2523,11 @@ export class AudioEngine {
 		if (this.degradeRetry && useAudioStore.getState().status === "paused") {
 			this.resume()
 
+			return
+		}
+
+		// The previous track's sample says nothing about the one the store names while it loads.
+		if (!this.holdsCurrent()) {
 			return
 		}
 

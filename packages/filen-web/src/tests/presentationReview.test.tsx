@@ -9,7 +9,13 @@ import type { CommandResult, OpenInfo, PresentationSessionApi, SlideRender } fro
 import { createShapeSelection, createTextEditing } from "@filen/office/react/presentation"
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
 import { PresentationCommentsPane } from "@/features/presentation/components/commentsPane"
-import { slideReview } from "@/features/presentation/components/commentsPane.logic"
+import {
+	resetSlideReview,
+	slideReview,
+	useAskSlideNotes,
+	useSlideNotesAnswer,
+	useSlideReview
+} from "@/features/presentation/components/commentsPane.logic"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { reviewGroups } from "@/features/presentation/components/ribbon/review"
 import { PresentationEditorContext, type PresentationEditorScope } from "@/features/presentation/hooks/usePresentationSession"
@@ -66,6 +72,16 @@ function first(elements: readonly HTMLElement[]): HTMLElement {
 
 	return element
 }
+// The notes as read (not edited): focusable content whose click or Enter starts editing them.
+async function notesReadView(text: string | RegExp = "Click to add notes"): Promise<HTMLElement> {
+	const shown = await screen.findByText(text)
+	const view = shown.closest<HTMLElement>("[tabindex='0']")
+
+	if (view === null) throw new Error("no notes read view")
+
+	return view
+}
+
 let revision = 1
 
 function renderOf(): SlideRender {
@@ -175,8 +191,7 @@ afterEach(() => {
 	cleanup()
 	toast.error.mockClear()
 	act(() => {
-		slideReview.setOpen(false)
-		slideReview.openThread(undefined)
+		resetSlideReview()
 	})
 })
 
@@ -282,6 +297,115 @@ describe("presentation review", () => {
 		expect(ops[1]).toEqual({ family: "comment", kind: "resolve", slide: ref, id: "{T0}", resolved: true })
 	})
 
+	it("a deck closed with a thread open leaves nothing to the next one: its pane starts closed and shows its own review", async () => {
+		const deckA = editorWith({
+			slide: ref,
+			format: "modern",
+			comments: [comment("{A}", "Deck A thread")],
+			can: { reply: true, resolve: true }
+		})
+
+		act(() => {
+			slideReview.setOpen(true)
+		})
+
+		const view = render(
+			<PresentationCommentsPane
+				editor={deckA.editor}
+				editable
+				phone={false}
+			/>
+		)
+
+		fireEvent.click(first(within(await screen.findByRole("list", { name: "Comment threads on this slide" })).getAllByRole("button")))
+		expect(slideReview.getSnapshot().thread).toBe("{A}")
+
+		// Deck A's editor closes (PresentationEditor's unmount).
+		view.unmount()
+		act(() => {
+			resetSlideReview()
+		})
+		expect(slideReview.getSnapshot()).toMatchObject({ open: false, composing: false, failed: false })
+		expect(slideReview.getSnapshot().thread).toBeUndefined()
+		expect(slideReview.getSnapshot().review).toBeUndefined()
+
+		// Deck B: another session, the same slide ref, its review not answered yet.
+		const deckB = editorWith({ slide: ref, format: "modern", comments: [], can: { reply: true, resolve: true } })
+		let answerB: (review: SlideReview) => void = () => undefined
+		const sessionB = {
+			...deckB.editor.session,
+			review: () =>
+				new Promise<SlideReview>(resolve => {
+					answerB = resolve
+				})
+		} as unknown as PresentationSessionApi
+
+		act(() => {
+			slideReview.setOpen(true)
+		})
+		render(
+			<PresentationCommentsPane
+				editor={{ ...deckB.editor, session: sessionB }}
+				editable
+				phone={false}
+			/>
+		)
+
+		expect(screen.queryByText("Deck A thread")).toBeNull()
+		await act(async () => {
+			answerB({
+				slide: ref,
+				format: "modern",
+				notesText: "",
+				comments: [comment("{B}", "Deck B thread")],
+				can: { reply: true, resolve: true }
+			})
+			await Promise.resolve()
+		})
+		expect(await screen.findByText(/Deck B thread/u)).toBeTruthy()
+		expect(screen.queryByText(/Deck A thread/u)).toBeNull()
+	})
+
+	it("reads a review for its own deck's session only, on the very first render of another deck on the same slide ref", async () => {
+		// What the readers return on every render, the Comments pane's (with the comments) and the notes pane's.
+		const reviews: (SlideReview | undefined)[] = []
+		const notes: (string | undefined)[] = []
+
+		function Probe({ editor }: { readonly editor: PresentationRibbonEditor }): null {
+			reviews.push(useSlideReview(editor, true))
+			useAskSlideNotes(editor, true)
+			notes.push(useSlideNotesAnswer(editor.session, editor.render?.ref).review?.notesText)
+
+			return null
+		}
+
+		const deckA = editorWith({
+			slide: ref,
+			format: "modern",
+			notesText: "Deck A notes",
+			comments: [comment("{A}", "Deck A thread")],
+			can: { reply: true, resolve: true }
+		})
+		const view = render(<Probe editor={deckA.editor} />)
+
+		await waitFor(() => {
+			expect(reviews.at(-1)?.comments[0]?.text).toBe("Deck A thread")
+			expect(notes.at(-1)).toBe("Deck A notes")
+		})
+
+		// Another deck on the same ref, its answers still on their way: deck A's review and notes are not its own, not even
+		// on the render before its own request replaces them.
+		const deckB = editorWith({ slide: ref, format: "modern", comments: [], can: { reply: true, resolve: true } })
+		const sessionB = { ...deckB.editor.session, review: () => new Promise(() => undefined) } as unknown as PresentationSessionApi
+		const switched = reviews.length
+
+		view.rerender(<Probe editor={{ ...deckB.editor, render: deckA.editor.render, session: sessionB }} />)
+
+		expect(reviews.length).toBeGreaterThan(switched)
+		expect(reviews.slice(switched)).toEqual(reviews.slice(switched).map(() => undefined))
+		expect(notes.slice(switched)).toEqual(notes.slice(switched).map(() => undefined))
+	})
+
 	it("a legacy thread offers no resolve", async () => {
 		const { editor } = editorWith({
 			slide: ref,
@@ -317,11 +441,45 @@ describe("presentation review", () => {
 			/>
 		)
 
-		fireEvent.click(await screen.findByRole("button", { name: "Click to add notes" }))
+		fireEvent.click(await notesReadView())
 
 		await waitFor(() => {
 			expect(ops).toEqual([{ family: "notes", kind: "setNotes", slide: ref, body: { bodyPr: {}, paragraphs: [] } }])
 		})
+	})
+
+	it("the notes as read are content a screen reader reads, not a button's name; Enter on them still opens the editor", async () => {
+		const { editor } = editorWith({
+			slide: ref,
+			format: "modern",
+			comments: [],
+			notes: { slide: slideRef(512), id: 3 },
+			notesBox: { x: 0, y: 0, width: 400, height: 200 },
+			notesText: "Greet the room\nThen the agenda",
+			can: { reply: true, resolve: true }
+		})
+
+		render(
+			<PresentationNotesPane
+				text=""
+				phone={false}
+				editor={editor}
+			/>
+		)
+
+		const line = await screen.findByText("Greet the room")
+		const view = await notesReadView("Greet the room")
+
+		expect(within(screen.getByRole("document")).getByText("Then the agenda")).toBeTruthy()
+		expect(line.closest("[role='button']")).toBeNull()
+		expect(view.hasAttribute("aria-label")).toBe(false)
+		expect(document.getElementById(view.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+			"Speaker notes. Press Enter to edit them."
+		)
+
+		view.focus()
+		fireEvent.keyDown(view, { key: "Enter" })
+		expect(await screen.findByLabelText("Notes page")).toBeTruthy()
 	})
 
 	it("the notes pane asks for the notes without the comments and shows what the worker last answered after each op", async () => {
@@ -598,7 +756,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		const add = await screen.findByRole("button", { name: "Click to add notes" })
+		const add = await notesReadView()
 
 		fireEvent.keyDown(add, { key: "Enter" })
 
@@ -646,7 +804,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 
 		const page = await screen.findByLabelText("Notes page")
 
@@ -657,7 +815,7 @@ describe("presentation review", () => {
 			expect(retracts).toEqual([2])
 		})
 		// The read view again (the fake keeps answering the notes slide the undo took back).
-		expect(await screen.findByRole("button", { name: "Speaker notes" })).toBeTruthy()
+		expect(await notesReadView()).toBeTruthy()
 	})
 
 	it("notes left by going to another slide are taken back, and coming back offers to start them again", async () => {
@@ -681,7 +839,7 @@ describe("presentation review", () => {
 		const here = renderOf()
 		const view = render(pane(here))
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		await waitFor(() => {
 			expect(ops).toHaveLength(1)
 		})
@@ -692,7 +850,7 @@ describe("presentation review", () => {
 		})
 
 		view.rerender(pane(here))
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		await waitFor(() => {
 			expect(ops).toHaveLength(2)
 		})
@@ -727,7 +885,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		expect(await screen.findByLabelText("Notes page")).toBeTruthy()
 
 		// The worker's undo took the notes back (and undid the step before them).
@@ -736,7 +894,7 @@ describe("presentation review", () => {
 			history.bump()
 		})
 
-		const add = await screen.findByRole("button", { name: "Click to add notes" })
+		const add = await notesReadView()
 
 		await waitFor(() => {
 			expect(document.activeElement).toBe(add)
@@ -765,7 +923,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		await waitFor(() => {
 			expect(ops).toHaveLength(1)
 		})
@@ -780,7 +938,7 @@ describe("presentation review", () => {
 			document.body.dispatchEvent(key)
 			expect(key.defaultPrevented).toBe(false)
 		})
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		await waitFor(() => {
 			expect(ops).toHaveLength(2)
 		})
@@ -815,7 +973,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 
 		const page = await screen.findByLabelText("Notes page")
 
@@ -861,7 +1019,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		expect(await screen.findByLabelText("Notes page")).toBeTruthy()
 		await waitFor(() => {
 			expect(seeds).toHaveLength(1)
@@ -907,7 +1065,7 @@ describe("presentation review", () => {
 			)
 		)
 
-		fireEvent.keyDown(await screen.findByRole("button", { name: "Click to add notes" }), { key: "Enter" })
+		fireEvent.keyDown(await notesReadView(), { key: "Enter" })
 		expect(await screen.findByLabelText("Notes page")).toBeTruthy()
 
 		// Typed in (a new revision with text), then undone from the ribbon (the notes go, a new revision).
@@ -920,7 +1078,7 @@ describe("presentation review", () => {
 			history.bump()
 		})
 
-		const add = await screen.findByRole("button", { name: "Click to add notes" })
+		const add = await notesReadView()
 
 		await waitFor(() => {
 			expect(document.activeElement).toBe(add)

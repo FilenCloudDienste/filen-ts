@@ -58,6 +58,9 @@ export function FilterConditionDialog({
 	const conditions = second === null || second.value === "" ? [first] : [first, second]
 	const criteria = first.value === "" ? null : dialogCriteria(conditions, and, open.kind, date1904, locale)
 	const operators = operatorsFor(open.kind)
+	// The select's options and the closed trigger's text (Base UI shows the value itself without them).
+	const operatorItems = operators.map(operator => ({ value: operator, label: t(operatorKey(operator, open.kind)) }))
+	const optionalItems = [{ value: NONE, label: t("previewSheetFilterOpNone") }, ...operatorItems]
 
 	function close(): void {
 		setSortFilterOpen(model, null)
@@ -65,9 +68,13 @@ export function FilterConditionDialog({
 
 	// A condition's operator and value; the second may be none.
 	function field(condition: DialogCondition | null, index: number, onChange: (next: DialogCondition | null) => void, optional: boolean) {
+		const items = optional ? optionalItems : operatorItems
+		const number = index + 1
+
 		return (
 			<div className="flex gap-2">
 				<Select
+					items={items}
 					value={condition === null ? NONE : condition.operator}
 					onValueChange={(value: string | null) => {
 						const operator = operators.find(candidate => candidate === value)
@@ -77,20 +84,19 @@ export function FilterConditionDialog({
 				>
 					<SelectTrigger
 						id={`${id}-operator-${String(index)}`}
-						aria-label={t("previewSheetFilterCustom")}
+						aria-label={t("previewSheetFilterConditionOperator", { number })}
 						className="w-56 shrink-0"
 					>
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent data-preview-surface>
 						<SelectGroup>
-							{optional ? <SelectItem value={NONE}>{t("previewSheetFilterOpNone")}</SelectItem> : null}
-							{operators.map(operator => (
+							{items.map(item => (
 								<SelectItem
-									key={operator}
-									value={operator}
+									key={item.value}
+									value={item.value}
 								>
-									{t(operatorKey(operator, open.kind))}
+									{item.label}
 								</SelectItem>
 							))}
 						</SelectGroup>
@@ -98,7 +104,7 @@ export function FilterConditionDialog({
 				</Select>
 				<Input
 					id={`${id}-value-${String(index)}`}
-					aria-label={t("previewSheetFilterValue")}
+					aria-label={t("previewSheetFilterConditionValue", { number })}
 					className="min-w-0 flex-1 leading-5"
 					type={open.kind === "date" ? "date" : "text"}
 					inputMode={open.kind === "number" ? "decimal" : undefined}
@@ -197,8 +203,17 @@ export function FilterTop10Dialog({ model, open, run }: { model: SheetGridModel;
 	const [percent, setPercent] = useState(current?.percent ?? false)
 	const [count, setCount] = useState(String(current?.value ?? 10))
 	const value = Number(count)
-	const valid = Number.isFinite(value) && value > 0 && value <= (percent ? 100 : 500)
+	// A whole number of items (up to 500) or percent (up to 100), as Excel's dialog takes.
+	const valid = Number.isInteger(value) && value > 0 && value <= (percent ? 100 : 500)
 	const criteria: SheetFilterCriteria | null = valid ? { kind: "top10", top, percent, value } : null
+	const directions = [
+		{ value: "top", label: t("previewSheetFilterTop") },
+		{ value: "bottom", label: t("previewSheetFilterBottom") }
+	]
+	const units = [
+		{ value: "items", label: t("previewSheetFilterItems") },
+		{ value: "percent", label: t("previewSheetFilterPercent") }
+	]
 
 	function close(): void {
 		setSortFilterOpen(model, null)
@@ -230,21 +245,28 @@ export function FilterTop10Dialog({ model, open, run }: { model: SheetGridModel;
 		>
 			<div className="flex items-center gap-2">
 				<Select
+					items={directions}
 					value={top ? "top" : "bottom"}
 					onValueChange={(next: string | null) => {
 						setTop(next !== "bottom")
 					}}
 				>
 					<SelectTrigger
-						aria-label={t("previewSheetFilterTop10Title")}
+						aria-label={t("previewSheetFilterTopDirection")}
 						className="w-28"
 					>
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent data-preview-surface>
 						<SelectGroup>
-							<SelectItem value="top">{t("previewSheetFilterTop")}</SelectItem>
-							<SelectItem value="bottom">{t("previewSheetFilterBottom")}</SelectItem>
+							{directions.map(item => (
+								<SelectItem
+									key={item.value}
+									value={item.value}
+								>
+									{item.label}
+								</SelectItem>
+							))}
 						</SelectGroup>
 					</SelectContent>
 				</Select>
@@ -261,21 +283,28 @@ export function FilterTop10Dialog({ model, open, run }: { model: SheetGridModel;
 					}}
 				/>
 				<Select
+					items={units}
 					value={percent ? "percent" : "items"}
 					onValueChange={(next: string | null) => {
 						setPercent(next === "percent")
 					}}
 				>
 					<SelectTrigger
-						aria-label={t("previewSheetFilterTopCount")}
+						aria-label={t("previewSheetFilterTopUnit")}
 						className="w-32"
 					>
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent data-preview-surface>
 						<SelectGroup>
-							<SelectItem value="items">{t("previewSheetFilterItems")}</SelectItem>
-							<SelectItem value="percent">{t("previewSheetFilterPercent")}</SelectItem>
+							{units.map(item => (
+								<SelectItem
+									key={item.value}
+									value={item.value}
+								>
+									{item.label}
+								</SelectItem>
+							))}
 						</SelectGroup>
 					</SelectContent>
 				</Select>

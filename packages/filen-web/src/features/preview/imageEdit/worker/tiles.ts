@@ -1,36 +1,13 @@
-import type { Matrix3, Rect } from "@/features/preview/imageEdit/lib/recipe"
+import { affineMatrix3, type Matrix3, type Rect } from "@/features/preview/imageEdit/lib/recipe"
 
 // The render worker's plane math: affine helpers over recipe.ts's Matrix3, tile plans for the full-resolution
 // export and the preview texture build, and the fit of the output into a viewport. Pure, so node tests cover it.
 
 export type { Rect }
 
-// A column-major affine Matrix3 (recipe.ts's layout) from canvas-order coefficients: x' = a·x + c·y + e,
-// y' = b·x + d·y + f.
-export function affine(a: number, b: number, c: number, d: number, e: number, f: number): Matrix3 {
-	return [a, b, 0, c, d, 0, e, f, 1]
-}
-
-// `outer` after `inner`: transformPoint(composeMatrix3(outer, inner), p) === transformPoint(outer, transformPoint(inner, p)).
-export function composeMatrix3(outer: Matrix3, inner: Matrix3): Matrix3 {
-	return affine(
-		outer[0] * inner[0] + outer[3] * inner[1],
-		outer[1] * inner[0] + outer[4] * inner[1],
-		outer[0] * inner[3] + outer[3] * inner[4],
-		outer[1] * inner[3] + outer[4] * inner[4],
-		outer[0] * inner[6] + outer[3] * inner[7] + outer[6],
-		outer[1] * inner[6] + outer[4] * inner[7] + outer[7]
-	)
-}
-
 // Scale then translate: (x, y) → (x·sx + tx, y·sy + ty).
 export function scaleTranslate(sx: number, sy: number, tx: number, ty: number): Matrix3 {
-	return affine(sx, 0, 0, sy, tx, ty)
-}
-
-// The uniform scale of a similarity map (rotation, flips and one zoom): lengths grow by this factor.
-export function matrixScale(m: Matrix3): number {
-	return Math.sqrt(Math.abs(m[0] * m[4] - m[1] * m[3]))
+	return affineMatrix3(sx, 0, 0, sy, tx, ty)
 }
 
 // The two rows as GLSL vec3s: x' = dot(rowX, vec3(x, y, 1)).

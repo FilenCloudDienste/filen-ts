@@ -38,7 +38,11 @@ export function OfficePdfRows() {
 				label={t("settingsOfficeSavedSignatures")}
 				description={t("settingsOfficeSavedSignaturesDescription")}
 			>
-				<div className="flex min-w-0 items-center gap-3">
+				{/* Busy until the synced file is read: "None" and a disabled Manage do not yet mean there are none. */}
+				<div
+					className="flex min-w-0 items-center gap-3"
+					aria-busy={saved.loaded ? undefined : true}
+				>
 					<span className="truncate text-sm text-muted-foreground">
 						{count === 0 ? t("settingsOfficeSavedSignaturesNone") : t("settingsOfficeSavedSignaturesCount", { count })}
 					</span>

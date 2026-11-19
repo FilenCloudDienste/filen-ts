@@ -7,12 +7,15 @@ import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 //
 // Hostile-input bounds: the text is at most the text cap (the category's); at most MAX_CELLS cells and MAX_OUTPUTS
 // outputs a cell (the rest counted); a source or a text output past MAX_TEXT_CHARS is cut (marked), an HTML or SVG
-// output past it is not shown; images past `maxPixels` together (what the device can decode beside the held file) are
-// not made Blobs. ANSI escapes are removed from streams and tracebacks. A cell or output of an unknown shape is skipped.
+// output past it is not shown, an image past MAX_IMAGE_BASE64_CHARS is not decoded; images past `maxPixels` together
+// (what the device can decode beside the held file) are not made Blobs. ANSI escapes are removed from streams and
+// tracebacks. A cell or output of an unknown shape is skipped.
 
 export const MAX_CELLS = 10_000
 export const MAX_OUTPUTS = 200
 export const MAX_TEXT_CHARS = 1_048_576
+// An image's base64 text, about 6 MiB decoded.
+export const MAX_IMAGE_BASE64_CHARS = MAX_TEXT_CHARS * 8
 
 export type NotebookOutput =
 	| { readonly kind: "stream"; readonly text: string; readonly error: boolean; readonly truncated: boolean }
@@ -23,7 +26,7 @@ export type NotebookOutput =
 	| { readonly kind: "image"; readonly blob: Blob; readonly width: number; readonly height: number }
 	// SVG text, shown as an image (a data: URL, never a blob URL that could be opened as a document).
 	| { readonly kind: "svg"; readonly svg: string }
-	// Past a bound: an HTML or SVG output past MAX_TEXT_CHARS, an image past the pixel budget.
+	// Past a bound: an HTML or SVG output past MAX_TEXT_CHARS, an image past MAX_IMAGE_BASE64_CHARS or the pixel budget.
 	| { readonly kind: "tooLarge" }
 
 export type NotebookCell =
@@ -162,8 +165,10 @@ function image(data: Readonly<Record<string, unknown>>, pixels: PixelBudget): No
 		if (!text.allows(value)) continue
 
 		const encoded = joined(value)
-		// Base64 holds 3 bytes in 4 characters: a value past the cap is past it decoded too.
-		const bytes = encoded.length > MAX_TEXT_CHARS * 8 ? null : base64Bytes(encoded)
+
+		if (encoded.length > MAX_IMAGE_BASE64_CHARS) return { kind: "tooLarge" }
+
+		const bytes = base64Bytes(encoded)
 		const info = bytes === null ? null : sniffImage(bytes.subarray(0, 65_536), bytes.length)
 
 		if (bytes === null || info === null || !RASTER.some(raster => raster === info.mime)) return null

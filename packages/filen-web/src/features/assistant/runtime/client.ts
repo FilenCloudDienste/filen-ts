@@ -397,6 +397,18 @@ export class AssistantRuntime implements AssistantModel {
 		this.releaseLock = null
 	}
 
+	// A sign-out that came while a download or load awaited: it lets go of a lock taken after shutdown let go,
+	// and leaves the state alone, as the page is being torn down.
+	private abandonedAtSignOut(): boolean {
+		if (!this.shutDown) {
+			return false
+		}
+
+		this.unlock()
+
+		return true
+	}
+
 	// Another tab downloads or runs the model. Waits in the lock's queue and re-checks once that tab lets go.
 	private inUseElsewhere(): void {
 		this.setState({ kind: "unavailable", reason: "in-use-elsewhere", model: this.info() })
@@ -410,6 +422,11 @@ export class AssistantRuntime implements AssistantModel {
 			.request(LOCK, () => undefined)
 			.then(() => {
 				this.watchingLock = false
+
+				if (this.shutDown) {
+					return
+				}
+
 				this.ready = null
 
 				return this.init()
@@ -689,6 +706,10 @@ export class AssistantRuntime implements AssistantModel {
 			return
 		}
 
+		if (this.abandonedAtSignOut()) {
+			return
+		}
+
 		// Another model kept because the server could not be asked as the download started: asked again at its end.
 		let undecided = false
 
@@ -748,8 +769,16 @@ export class AssistantRuntime implements AssistantModel {
 					return
 				}
 
+				if (this.abandonedAtSignOut()) {
+					return
+				}
+
 				if (other.stale) {
 					await this.pruneOtherModels()
+				}
+
+				if (this.abandonedAtSignOut()) {
+					return
 				}
 
 				const sizeBytes = manifestBytes(this.manifest)
@@ -934,6 +963,10 @@ export class AssistantRuntime implements AssistantModel {
 			return
 		}
 
+		if (this.abandonedAtSignOut()) {
+			return
+		}
+
 		this.setState({ kind: "loading", model: this.info(), verifying: false })
 
 		try {
@@ -949,27 +982,41 @@ export class AssistantRuntime implements AssistantModel {
 
 			const name = errorName(e)
 
-			if (name === "ModelLoadError:missing") {
-				const inspection = await inspectModel(this.manifest)
-
-				if (inspection.complete) {
-					this.settleDownloaded()
-				} else if (inspection.presentBytes > 0) {
-					this.settleNotDownloaded(inspection.presentBytes)
-				} else {
-					this.settleNotDownloaded(0, await this.checkOutdated())
-				}
-
-				// Some shards are gone or were damaged, the rest are still verified: the user opted in already, so
-				// only the missing ones are fetched again, right after this load has wound down.
-				this.redownload = !inspection.complete && inspection.verifiedBytes > 0
-			} else {
-				this.setState({
-					kind: "error",
-					error: name === "ModelLoadError:out-of-memory" ? "out-of-memory" : "load-failed",
-					model: this.info()
-				})
+			if (name === "ModelLoadError:missing" && (await this.settleMissing())) {
+				return
 			}
+
+			this.setState({
+				kind: "error",
+				error: name === "ModelLoadError:out-of-memory" ? "out-of-memory" : "load-failed",
+				model: this.info()
+			})
+		}
+	}
+
+	// A load that found shards missing or damaged settles on what the disk holds now. False when the disk
+	// could not be read either (storage pressure, eviction): the load then simply failed, and Retry is offered.
+	private async settleMissing(): Promise<boolean> {
+		try {
+			const inspection = await inspectModel(this.manifest)
+
+			if (inspection.complete) {
+				this.settleDownloaded()
+			} else if (inspection.presentBytes > 0) {
+				this.settleNotDownloaded(inspection.presentBytes)
+			} else {
+				this.settleNotDownloaded(0, await this.checkOutdated())
+			}
+
+			// Some shards are gone or were damaged, the rest are still verified: the user opted in already, so
+			// only the missing ones are fetched again, right after this load has wound down.
+			this.redownload = !inspection.complete && inspection.verifiedBytes > 0
+
+			return true
+		} catch (e) {
+			log.error("assistant", "model check after a failed load failed", e)
+
+			return false
 		}
 	}
 

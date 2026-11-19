@@ -43,6 +43,7 @@ import {
 	presentationSaveRefusalKey,
 	runPreviewSave,
 	SaveRefusedError,
+	settledStorageRefusal,
 	type ImageSaveEdits,
 	type PresentationSaveEdits,
 	type PresentationSaveSource
@@ -62,7 +63,7 @@ import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
 import { createVideoEditClient } from "@/features/preview/videoEdit/client"
 import { isVideoExportRunning, subscribeVideoExports } from "@/features/preview/videoEdit/save"
-import { VideoEditor, type VideoEditorCommands } from "@/features/preview/videoEdit/components/videoEditor"
+import { VideoEditor, type VideoEditorCommands, type VideoFrameSaveOutcome } from "@/features/preview/videoEdit/components/videoEditor"
 import { VIDEO_CANCEL_ACTION } from "@/features/preview/videoEdit/lib/keys"
 import type { VideoSaveTarget } from "@/features/preview/videoEdit/types"
 import { knownUnpreviewable, useVideoEditMode } from "@/features/preview/videoEdit/useVideoEditMode"
@@ -276,10 +277,10 @@ function PreviewRenderError() {
 
 // Full-bleed preview surface, mounted by the drive dialog host (directoryListing.tsx) exactly like its
 // sibling dialog kinds — composed directly from Base UI's dialog primitives (not the shared centered
-// ui/dialog.tsx) since no full-screen surface exists yet to reuse. Closing is blocked on a pending
-// state in exactly one case now: an editable text/code buffer with unsaved edits (see requestOrRun) —
-// every other viewer's own data load stays a read-only, ephemeral fetch never worth protecting an
-// interrupted close against.
+// ui/dialog.tsx) since no full-screen surface exists yet to reuse. Closing asks first while the
+// slot has unsaved edits (see requestOrRun): every editor reports them through setPreviewDirty (text and
+// code, sheets, Word documents, decks, PDFs, the image and video editors). A viewer's own data load is a
+// read-only fetch, never protected against an interrupted close.
 export function PreviewOverlay({
 	variant,
 	items,
@@ -388,6 +389,13 @@ export function PreviewOverlay({
 	// as text only to a surface that opens items (this header menu has its item open already).
 	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
 	const [menuPending, setMenuPending] = useState(false)
+	// The header item menu's dropdown. A save closes it and holds it shut (its trigger disabled, as its keys are):
+	// the save writes by the item it read, so a rename, move or trash meanwhile would see the upload re-create the file.
+	const [menuOpen, setMenuOpen] = useState(false)
+
+	if (saving && menuOpen) {
+		setMenuOpen(false)
+	}
 	// A menu action's Try again can land after this overlay closed, where closing it would close whatever
 	// dialog replaced it.
 	const mountedRef = useRef(false)
@@ -726,24 +734,28 @@ export function PreviewOverlay({
 	}
 
 	// A still of the video beside it, named as an edited copy ("clip (edited).jpg").
-	async function saveVideoFrame(blob: Blob, extension: "jpg"): Promise<string> {
+	async function saveVideoFrame(blob: Blob, extension: "jpg"): Promise<VideoFrameSaveOutcome> {
 		const item = driveItem
 
 		if (item === undefined) {
-			throw new Error("no file on screen")
+			return { status: "unavailable" }
 		}
 
 		const written = await writeEditedCopy(item, { blob }, extension, number =>
 			number <= 1 ? t("previewImageSaveCopySuffix") : t("previewImageSaveCopySuffixNumbered", { number })
 		)
 
-		if (written === null || written.outcome.status === "error") {
-			throw new Error(written?.outcome.status === "error" ? written.outcome.dto.message : "not a file")
+		if (written === null) {
+			return { status: "unavailable" }
+		}
+
+		if (written.outcome.status === "error") {
+			return { status: "error", dto: written.outcome.dto }
 		}
 
 		recordOwnSave(written.outcome.item.data.uuid)
 
-		return written.name
+		return { status: "success", name: written.name }
 	}
 
 	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
@@ -1469,13 +1481,17 @@ export function PreviewOverlay({
 		})
 
 		// A refusal is told at once and the upload behind the port ended (no new version), never waited for: an upload
-		// whose reader missed the abort would never settle.
+		// whose reader missed the abort would never settle. One the quota pre-flight refused (it aborted the port, so the
+		// writer's refusal follows) is told as the storage refusal it is.
 		if (result.kind === "refused") {
 			edits.port.close()
 			void upload.catch(() => undefined)
+
+			const storage = await settledStorageRefusal(upload)
+
 			setSaving(false)
 			remote.saveSettled(null)
-			toast.error(t(presentationSaveRefusalKey(result.reason)))
+			toast.error(storage === null ? t(presentationSaveRefusalKey(result.reason)) : errorLabel(storage))
 
 			return
 		}
@@ -2211,7 +2227,12 @@ export function PreviewOverlay({
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
 						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
 									{!isLinkedEmbedItem(driveItem) ? (
-										<DropdownMenu>
+										<DropdownMenu
+											open={menuOpen}
+											onOpenChange={open => {
+												setMenuOpen(open && !saving)
+											}}
+										>
 											<Tooltip>
 												<TooltipTrigger
 													render={
@@ -2222,6 +2243,7 @@ export function PreviewOverlay({
 																	variant="ghost"
 																	size="icon-sm"
 																	aria-label={t("drive:driveItemMenuTrigger")}
+																	disabled={saving}
 																>
 																	<MoreHorizontalIcon />
 																</Button>
@@ -2238,6 +2260,8 @@ export function PreviewOverlay({
 												item={driveItem}
 												variant={variant}
 												onItemAction={kind => {
+													if (saving) return
+
 													// The move and version-restore dialogs report no outcome, so their echo, whenever it
 													// comes, takes the mark; a mark left by a cancelled dialog only quiets a later
 													// notice of the same kind.
@@ -2752,12 +2776,11 @@ interface PreviewBodyProps {
 // Dispatches to the right viewer by category — remounted (keyed by uuid, see the error boundary one
 // level up) on every item change so a viewer's own pending/success/error state never flashes the
 // previous item's content. Bytes are no longer loaded centrally here: image/video/audio each own their
-// own data source (a streamed SW URL or a buffered blob, see imageViewer.tsx/mediaViewer.tsx),
-// pdf/docx each own their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
-// — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
-// `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
-// case's TextViewer, and the source-mode editors of the "markdown", "subtitle", "calendar", "contact" and "mermaid" cases —
-// every other category ignores them.
+// own data source (a streamed SW URL or a buffered blob, see imageViewer.tsx/mediaViewer.tsx), and
+// every other viewer loads its own bytes. The edit props reach the text family (the "text"/"code"
+// case's TextViewer and the source-mode editors of the "markdown", "subtitle", "calendar", "contact" and
+// "mermaid" cases), and the sheet, Word document, deck and PDF viewers; the image and video editors are
+// mounted by the overlay itself. Every other category ignores them.
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
@@ -2841,7 +2864,6 @@ function PreviewBody({
 					item={item}
 					alt={alt}
 					variant={variant}
-					canSaveCopy={canSaveCopy}
 					onOpenFile={onOpenFile}
 					{...(neverEditable
 						? {}

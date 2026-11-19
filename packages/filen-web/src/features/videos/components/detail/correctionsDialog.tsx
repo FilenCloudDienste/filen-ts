@@ -1,7 +1,7 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { activeLibraryOverrides, newSeriesId, rawLibraryOverride } from "@filen/shared/videos"
+import { activeLibraryOverrides, rawLibraryOverride } from "@filen/shared/videos"
 import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -10,6 +10,7 @@ import {
 	NEW_SERIES,
 	canSplit,
 	correctionEdit,
+	destinationOf,
 	draftErrors,
 	draftFor,
 	hasCorrection,
@@ -18,6 +19,7 @@ import {
 	overrideFromDraft,
 	resetEdit,
 	sameOverride,
+	showsYear,
 	splitEdit,
 	type ConfigEdit,
 	type CorrectionDraft,
@@ -89,20 +91,6 @@ function OptionSelect({
 	)
 }
 
-// Where the page goes after a save: the title the subject is shown as now (null to stay).
-function destinationOf(subject: CorrectionSubject, draft: CorrectionDraft): string | null {
-	if (subject.original.kind === "series") {
-		return null
-	}
-
-	if (draft.kind === "episode") {
-		return draft.series === NEW_SERIES ? newSeriesId(subject.key.slice(2)) : draft.series.slice(2)
-	}
-
-	// A movie's or other video's id is its key's.
-	return subject.key.slice(2)
-}
-
 export function CorrectionsDialog({
 	subject,
 	series,
@@ -139,8 +127,10 @@ export function CorrectionsDialog({
 	const [pending, setPending] = useState(false)
 	// Problems show once a save was tried, not while the fields are still being filled in.
 	const [attempted, setAttempted] = useState(false)
-	const errors = draftErrors(draft)
+	const errors = draftErrors(subject, draft)
 	const shown = attempted ? errors : []
+	const episodeInvalid = shown.includes("season") || shown.includes("episode")
+	const episodeErrorId = `${ids.episode}-error`
 	const others = series.filter(item => !isSeries || item.id !== subject.seriesId)
 	const kindOptions: Option[] = [
 		{ value: "movie", label: t("detailKindMovie") },
@@ -232,11 +222,15 @@ export function CorrectionsDialog({
 								id={ids.title}
 								value={draft.title}
 								aria-invalid={shown.includes("title")}
+								aria-describedby={shown.includes("title") ? `${ids.title}-error` : undefined}
 								maxLength={256}
 								onChange={event => {
 									update({ title: event.target.value })
 								}}
 							/>
+							{shown.includes("title") ? (
+								<FieldError id={`${ids.title}-error`}>{t("detailFieldTitleRequired")}</FieldError>
+							) : null}
 						</Field>
 						{!isSeries ? (
 							<Field>
@@ -253,7 +247,7 @@ export function CorrectionsDialog({
 								/>
 							</Field>
 						) : null}
-						{isSeries || draft.kind === "movie" ? (
+						{showsYear(subject, draft) ? (
 							<Field>
 								<FieldLabel htmlFor={ids.year}>{t("detailFieldYear")}</FieldLabel>
 								<Input
@@ -293,6 +287,7 @@ export function CorrectionsDialog({
 											aria-required
 											value={draft.season}
 											aria-invalid={shown.includes("season")}
+											aria-describedby={episodeInvalid ? episodeErrorId : undefined}
 											onChange={event => {
 												update({ season: event.target.value })
 											}}
@@ -306,6 +301,7 @@ export function CorrectionsDialog({
 											aria-required
 											value={draft.episode}
 											aria-invalid={shown.includes("episode")}
+											aria-describedby={episodeInvalid ? episodeErrorId : undefined}
 											onChange={event => {
 												update({ episode: event.target.value })
 											}}
@@ -319,14 +315,13 @@ export function CorrectionsDialog({
 										inputMode="numeric"
 										value={draft.episodeEnd}
 										aria-invalid={shown.includes("episode")}
+										aria-describedby={episodeInvalid ? episodeErrorId : undefined}
 										onChange={event => {
 											update({ episodeEnd: event.target.value })
 										}}
 									/>
 								</Field>
-								{shown.includes("season") || shown.includes("episode") ? (
-									<FieldError>{t("detailFieldEpisodeRequired")}</FieldError>
-								) : null}
+								{episodeInvalid ? <FieldError id={episodeErrorId}>{t("detailFieldEpisodeRequired")}</FieldError> : null}
 							</>
 						) : null}
 						{isEpisode ? null : (

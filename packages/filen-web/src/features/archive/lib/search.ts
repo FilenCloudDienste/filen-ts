@@ -178,8 +178,3 @@ export function createEntrySearch(
 		}
 	}
 }
-
-// One search over the entries the store holds when it begins.
-export function searchEntries(store: EntryStore, scopeDir: number, query: string, options: SearchOptions = {}): Promise<SearchResult> {
-	return createEntrySearch(store, scopeDir, query, options).advance(options.signal)
-}

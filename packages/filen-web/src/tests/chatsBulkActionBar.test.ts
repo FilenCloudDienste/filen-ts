@@ -21,10 +21,10 @@ function ids(descriptors: ReturnType<typeof chatBulkActions>): string[] {
 }
 
 describe("chatBulkActions — undecryptable gate", () => {
-	it("suppresses markRead/mute when the selection includes an undecryptable chat", () => {
+	it("suppresses markRead and mute when the selection includes an undecryptable chat", () => {
 		const descriptors = chatBulkActions(flags({ includesUndecryptable: true, includesUnread: true }))
 
-		expect(ids(descriptors)).not.toEqual(expect.arrayContaining(["markRead", "mute"]))
+		expect(ids(descriptors)).toEqual([])
 	})
 
 	it("still offers mute when nothing is undecryptable", () => {

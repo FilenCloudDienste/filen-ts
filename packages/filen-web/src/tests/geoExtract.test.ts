@@ -1,12 +1,36 @@
 import { describe, expect, it, vi } from "vitest"
 import { zipSync } from "fflate"
-import { GEO_MAX_POINTS, type GeoSource } from "@/features/preview/lib/geo/extract.logic"
+import { eachCoordinateTuple, GEO_MAX_POINTS, type GeoSource } from "@/features/preview/lib/geo/extract.logic"
 import { GeoTooLargeError, geoSource, loadGeo, loadSource } from "@/features/preview/lib/geo/load"
 import { pointAtDistance } from "@/features/preview/lib/geo/stats.logic"
 
 // GPX, KML, KMZ and GeoJSON read into packed arrays: counted first, filled to size, and above the point cap only summed.
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+
+const tuplesOf = (text: string): number[][] => {
+	const tuples: number[][] = []
+
+	eachCoordinateTuple(text, (lon, lat, ele) => tuples.push([lon, lat, ele]))
+
+	return tuples
+}
+
+// The regular-expression split the scanner replaced, kept as the reference for its semantics.
+const referenceTuplesOf = (text: string): number[][] =>
+	text
+		.replace(/\s*,\s*/g, ",")
+		.split(/\s+/)
+		.filter(tuple => tuple !== "")
+		.map(tuple => {
+			const parts = tuple.split(",")
+
+			return [0, 1, 2].map(index => {
+				const part = parts[index]
+
+				return part === undefined || part === "" ? Number.NaN : Number(part)
+			})
+		})
 
 const GPX = `<?xml version="1.0"?>
 <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
@@ -146,6 +170,47 @@ describe("geo extraction", () => {
 		// The count may only exceed what the fill keeps.
 		expect(source.count().points).toBeGreaterThanOrEqual(3)
 		expect([...(loaded.points?.lon ?? [])]).toEqual([8, 8.1, 8.2])
+	})
+
+	it("splits KML coordinate text into tuples exactly as the regular-expression split did", () => {
+		const cases = [
+			"8.5,47.5,1200",
+			"8.0,47.0,0 8.1,47.1,0\n\t\t8.2,47.2,0",
+			"  8,47  ",
+			"8 , 47 , 3",
+			"8,\n47",
+			"8, ,47",
+			"8,47,",
+			"8,47,1,2,3",
+			",",
+			", 1",
+			"8",
+			"x,y",
+			"8,47\u00a0 9,48\u2003\u3000 10,49\ufeff",
+			"1e1,0x10,Infinity -0,+1,.5",
+			"",
+			"   \n "
+		]
+
+		for (const text of cases) expect(tuplesOf(text), JSON.stringify(text)).toEqual(referenceTuplesOf(text))
+	})
+
+	it('reads "lon, lat, alt" with spaces after the commas as one tuple', () => {
+		expect(tuplesOf("8.1, 47.2, 300")).toEqual([[8.1, 47.2, 300]])
+	})
+
+	it("scans a 200,000-blank run in linear time", () => {
+		const blanks = " ".repeat(200_000)
+		const started = performance.now()
+
+		// Blanks not followed by a comma (the backtracking case), and blanks on both sides of one.
+		expect(tuplesOf(`8,47${blanks}9,48`)).toEqual([
+			[8, 47, Number.NaN],
+			[9, 48, Number.NaN]
+		])
+		expect(tuplesOf(`8${blanks},${blanks}47`)).toEqual([[8, 47, Number.NaN]])
+		// A quadratic scan of 200,000 blanks takes tens of seconds.
+		expect(performance.now() - started).toBeLessThan(1000)
 	})
 
 	it("plots GPX points outside any trkseg as a line of their own", async () => {

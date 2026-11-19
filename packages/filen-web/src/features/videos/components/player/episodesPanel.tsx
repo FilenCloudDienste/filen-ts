@@ -7,9 +7,10 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { STAGE_POPUP_TONE_CLASS, useRestoreStageFocus } from "@/components/media/video/stageContext"
 import { episodeCode, type WatchItemTarget } from "@/features/videos/lib/player/watchTarget.logic"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
-// The episodes side sheet: seasons as tabs, the season's episodes as a virtualized list with progress, all
-// from the local index and the watch state already in memory. Picking one plays it on the same element. Only
+// The episodes side sheet: seasons as toggle buttons, the season's episodes as a virtualized list with progress,
+// all from the local index and the watch state already in memory. Picking one plays it on the same element. Only
 // EpisodeRows holds the virtualizer (the React Compiler skips a component that does): the panel and each row compile.
 
 const ROW_HEIGHT = 56
@@ -68,15 +69,14 @@ export function EpisodesPanel({
 			</div>
 			{seasons.length > 1 ? (
 				<div
-					role="tablist"
-					aria-label={t("playerEpisodes")}
+					role="group"
+					aria-label={t("detailSeasons")}
 					className="flex gap-1 overflow-x-auto px-1 pb-1"
 				>
 					{seasons.map(number => (
 						<Button
 							key={number}
-							role="tab"
-							aria-selected={number === season}
+							aria-pressed={number === season}
 							variant={number === season ? "secondary" : "ghost"}
 							size="xs"
 							className="rounded-full"
@@ -91,6 +91,7 @@ export function EpisodesPanel({
 			) : null}
 			<EpisodeRows
 				rows={rows}
+				season={season}
 				currentKey={currentKey}
 				doc={doc}
 				panelRef={panelRef}
@@ -102,12 +103,14 @@ export function EpisodesPanel({
 
 function EpisodeRows({
 	rows,
+	season,
 	currentKey,
 	doc,
 	panelRef,
 	onPick
 }: {
 	rows: readonly WatchItemTarget[]
+	season: number
 	currentKey: string
 	doc: WatchStateDoc
 	panelRef: RefObject<HTMLDivElement | null>
@@ -118,19 +121,21 @@ function EpisodeRows({
 		count: rows.length,
 		getScrollElement: () => scrollRef.current,
 		estimateSize: () => ROW_HEIGHT,
-		overscan: 6
+		overscan: 6,
+		observeElementOffset: observeElementOffsetFromAttach
 	})
 	const currentIndex = rows.findIndex(episode => episode.key === currentKey)
 
+	// A season without the playing episode starts at its top, not at the previous season's offset.
 	useEffect(() => {
 		if (currentIndex >= 0) {
 			virtualizer.scrollToIndex(currentIndex, { align: "center" })
+		} else if (scrollRef.current !== null) {
+			scrollRef.current.scrollTop = 0
 		}
 
-		panelRef.current
-			?.querySelector<HTMLElement>("[aria-current='true'], [role='tab'][aria-selected='true']")
-			?.focus({ preventScroll: true })
-	}, [currentIndex, virtualizer, panelRef])
+		panelRef.current?.querySelector<HTMLElement>("[aria-current='true'], [aria-pressed='true']")?.focus({ preventScroll: true })
+	}, [season, currentIndex, virtualizer, panelRef])
 
 	return (
 		<div

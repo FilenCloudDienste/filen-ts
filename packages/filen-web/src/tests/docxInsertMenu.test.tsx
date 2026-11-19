@@ -244,6 +244,40 @@ describe("DocxInsertDialogs", () => {
 		expect(edited.execute).toHaveBeenCalledWith({ type: "link.set", target: "file:///C:/a.docx", text: "the file" })
 	})
 
+	it("keeps an edited link's untouched target verbatim, and reads a changed one as typed", () => {
+		const state = snapshot()
+
+		// The command carries the target as a file writes it (a space encoded), never a web address made of it.
+		for (const [target, written] of [
+			["appendix.docx", "appendix.docx"],
+			["../reports/q3.docx", "../reports/q3.docx"],
+			["onenote:x", "onenote:x"],
+			["my notes.docx", "my%20notes.docx"]
+		] as const) {
+			const { execute } = renderDialog("link.set", {
+				...state,
+				context: { ...state.context, link: { target, anchor: null, text: "old" } }
+			})
+			const apply = screen.getByRole("button", { name: "Apply" })
+
+			fireEvent.change(screen.getByLabelText("Text to display"), { target: { value: "new" } })
+			expect(screen.queryByRole("alert")).toBeNull()
+			expect(apply.hasAttribute("disabled") || apply.getAttribute("aria-disabled") === "true").toBe(false)
+			fireEvent.click(apply)
+			expect(execute).toHaveBeenCalledWith({ type: "link.set", target: written, text: "new" })
+			cleanup()
+		}
+
+		const { execute } = renderDialog("link.set", {
+			...state,
+			context: { ...state.context, link: { target: "appendix.docx", anchor: null, text: "old" } }
+		})
+
+		fireEvent.change(screen.getByLabelText("Address"), { target: { value: "example.com" } })
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+		expect(execute).toHaveBeenCalledWith({ type: "link.set", target: "https://example.com", text: "old" })
+	})
+
 	it("links to a heading by its position (the core makes or reuses its hidden bookmark); empty ones are not offered", async () => {
 		paged.outline = [
 			{ level: 0, text: " ", pos: 4 },

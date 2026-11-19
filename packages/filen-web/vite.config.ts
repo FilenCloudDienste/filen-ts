@@ -127,9 +127,9 @@ function arkTypeJitless(): Plugin {
 // Hardened CSP, preview/prod only (the dev server needs HMR inline/eval).
 // connect-src: the JS glue (sdk-rs.js) contains NO literal hosts, but the wasm BINARY does —
 // confirmed by running `strings` over sdk-rs_bg.wasm: egest/gateway/ingest hosts across
-// filen.net and filen-1.net … filen-6.net FAILOVER domains, plus socket.filen.io (wss). The
-// current *.filen.io wildcard therefore BLOCKS SDK failover — connect-src must be EXPANDED
-// (add the .net host families), not tightened.
+// filen.net and filen-1.net … filen-6.net FAILOVER domains, plus socket.filen.io (wss). connect-src
+// therefore carries those .net host families beside *.filen.io; do not tighten it to *.filen.io alone,
+// which would block SDK failover.
 // style-src DOES need 'unsafe-inline' — verified empirically (built preview, real Chrome, devtools
 // console). Two independent sources inject parsed inline styles that CSP style-src-elem blocks
 // otherwise: (1) ThemeProvider's disableTransitionsTemporarily() appends a literal
@@ -314,7 +314,12 @@ export default defineConfig(({ mode }) => ({
 	// for the page build: ~70 KB of comments across the workers.
 	worker: {
 		format: "es",
-		plugins: () => [officeFonts(), officeHyphenation(), ocrAssets({ emit: false }), threeAssets({ emit: false })],
+		plugins: () => [
+			officeFonts({ emit: false }),
+			officeHyphenation({ emit: false }),
+			ocrAssets({ emit: false }),
+			threeAssets({ emit: false })
+		],
 		rolldownOptions: { output: { codeSplitting: false, comments: { annotation: false } } }
 	}
 }))

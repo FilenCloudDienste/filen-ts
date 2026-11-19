@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { CHUNK_VP8, CHUNK_VP8L, CHUNK_VP8X, readWebpHeader } from "@/features/preview/imageEdit/lib/webpMeta"
+import { sniffImage } from "@/features/preview/lib/imageSniff/sniffImage"
 import { MAX_EPSI_LINES, sniffEps } from "@/features/preview/lib/imageSniff/eps"
 import { JXL_PREVIEW_SIZE, sniffJxl, sniffJxlImage } from "@/features/preview/lib/imageSniff/jxl"
 import { rasterHeader } from "@/features/preview/lib/imageSniff/raster"
@@ -640,5 +642,151 @@ describe("sniffEps", () => {
 		const head = new Bytes().ascii("%PDF-1.7\n").build()
 
 		expect(sniffEps(head, head.length)).toBeNull()
+	})
+})
+
+// A WebP whose first chunk is `type` with `fields` at its start and `payload` bytes in all.
+function webpFile(type: string, fields: Bytes, payload: number): Uint8Array {
+	const bytes = new Uint8Array(20 + payload)
+	const head = new Bytes()
+		.ascii("RIFF")
+		.u32(12 + payload, true)
+		.ascii("WEBP")
+		.ascii(type)
+		.u32(payload, true)
+		.build()
+
+	bytes.set(head)
+	bytes.set(fields.build(), 20)
+
+	return bytes
+}
+
+// Frame tag, start code, 14-bit width and height (RFC 6386 §9.1).
+function vp8Fields(width: number, height: number): Bytes {
+	return new Bytes().u8(0x10, 0x02, 0x00, 0x9d, 0x01, 0x2a).u16(width, true).u16(height, true)
+}
+
+// Signature, then width − 1 and height − 1 in 14 bits each and the alpha bit (RFC 9649 §3.2.1).
+function vp8lFields(width: number, height: number, alpha: boolean): Bytes {
+	return new Bytes().u8(0x2f).u32(((width - 1) | ((height - 1) << 14) | (alpha ? 1 << 28 : 0)) >>> 0, true)
+}
+
+// Flags, 3 reserved bytes, width − 1 and height − 1 as 24-bit little endian (RFC 9649 §2.7).
+function vp8xFields(flags: number, width: number, height: number): Bytes {
+	return new Bytes()
+		.u8(flags, 0, 0, 0)
+		.u8((width - 1) & 0xff, ((width - 1) >> 8) & 0xff, (width - 1) >> 16)
+		.u8((height - 1) & 0xff, ((height - 1) >> 8) & 0xff, (height - 1) >> 16)
+}
+
+const HEAD_BYTES = 64 * 1024
+
+describe("readWebpHeader", () => {
+	it("reads VP8X, VP8L and VP8 headers", () => {
+		expect(readWebpHeader(webpFile("VP8X", vp8xFields(0x12, 16000, 9000), 10))).toEqual({
+			type: CHUNK_VP8X,
+			width: 16000,
+			height: 9000,
+			flags: 0x12,
+			alpha: true,
+			animated: true
+		})
+		expect(readWebpHeader(webpFile("VP8L", vp8lFields(300, 200, true), 5))).toEqual({
+			type: CHUNK_VP8L,
+			width: 300,
+			height: 200,
+			flags: 0,
+			alpha: true,
+			animated: false
+		})
+		expect(readWebpHeader(webpFile("VP8 ", vp8Fields(640, 480), 10))).toEqual({
+			type: CHUNK_VP8,
+			width: 640,
+			height: 480,
+			flags: 0,
+			alpha: false,
+			animated: false
+		})
+	})
+
+	it("reads the header from a head that stops inside the chunk's payload", () => {
+		expect(readWebpHeader(webpFile("VP8 ", vp8Fields(16000, 16000), 200_000).subarray(0, 30))?.width).toBe(16000)
+	})
+
+	it("refuses input too short for the fields, a bad signature or start code, and other formats", () => {
+		expect(readWebpHeader(webpFile("VP8 ", vp8Fields(640, 480), 10).subarray(0, 29))).toBeNull()
+		expect(readWebpHeader(webpFile("VP8L", vp8lFields(300, 200, false), 5).subarray(0, 24))).toBeNull()
+		expect(readWebpHeader(webpFile("VP8X", vp8xFields(0, 5, 5), 10).subarray(0, 29))).toBeNull()
+		expect(readWebpHeader(webpFile("VP8L", new Bytes().u8(0x2e, 0, 0, 0, 0), 5))).toBeNull()
+		expect(readWebpHeader(webpFile("VP8 ", new Bytes().u8(0, 0, 0, 0x9d, 0x01, 0x2b, 1, 0, 1, 0), 10))).toBeNull()
+		expect(readWebpHeader(webpFile("ALPH", new Bytes().zeros(10), 10))).toBeNull()
+		expect(readWebpHeader(new Bytes().ascii("RIFF").u32(4, true).ascii("WEBP").build())).toBeNull()
+		expect(readWebpHeader(new Bytes().ascii("qoif").zeros(40).build())).toBeNull()
+	})
+})
+
+describe("sniffImage WebP heads", () => {
+	it("reads a simple lossy file's size from a head cut inside its one chunk", () => {
+		const file = webpFile("VP8 ", vp8Fields(16000, 16000), 1_000_000)
+
+		expect(sniffImage(file.subarray(0, HEAD_BYTES), file.length)).toMatchObject({
+			mime: "image/webp",
+			width: 16000,
+			height: 16000,
+			hasAlpha: false,
+			animated: false,
+			webpLossless: false,
+			needsTail: false
+		})
+	})
+
+	it("reads a simple lossless file's size and alpha from a head cut inside its one chunk", () => {
+		const file = webpFile("VP8L", vp8lFields(12000, 8000, true), 1_000_000)
+
+		expect(sniffImage(file.subarray(0, HEAD_BYTES), file.length)).toMatchObject({
+			mime: "image/webp",
+			width: 12000,
+			height: 8000,
+			hasAlpha: true,
+			webpLossless: true
+		})
+		expect(sniffImage(webpFile("VP8L", vp8lFields(12000, 8000, false), 1_000_000).subarray(0, HEAD_BYTES), file.length)).toMatchObject({
+			hasAlpha: false,
+			webpLossless: true
+		})
+	})
+
+	it("still refuses a head too short for the size fields", () => {
+		const file = webpFile("VP8 ", vp8Fields(16000, 16000), 1_000_000)
+
+		expect(sniffImage(file.subarray(0, 29), file.length)).toBeNull()
+	})
+
+	it("refuses a whole lossless file whose first chunk lacks the VP8L signature", () => {
+		const file = webpFile("VP8L", new Bytes().u8(0x00).u32(((100 - 1) | ((50 - 1) << 14)) >>> 0, true), 16)
+
+		expect(sniffImage(file, file.length)).toBeNull()
+		expect(sniffImage(webpFile("VP8L", vp8lFields(100, 50, false), 16), file.length)).toMatchObject({ width: 100, height: 50 })
+	})
+
+	it("reads an extended file as before", () => {
+		const fields = vp8xFields(0x10, 5000, 4000)
+		const vp8x = webpFile("VP8X", fields, 10)
+		const vp8 = new Bytes().ascii("VP8 ").u32(1_000_000, true).build()
+		const file = new Uint8Array(vp8x.length + vp8.length + 1_000_000)
+
+		file.set(vp8x)
+		file.set(vp8, vp8x.length)
+
+		expect(sniffImage(file.subarray(0, HEAD_BYTES), file.length)).toMatchObject({
+			mime: "image/webp",
+			width: 5000,
+			height: 4000,
+			hasAlpha: true,
+			animated: false,
+			webpLossless: false,
+			needsTail: false
+		})
 	})
 })

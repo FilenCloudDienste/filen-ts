@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 import { toast } from "sonner"
 import {
 	ArrowDownIcon,
@@ -46,6 +47,7 @@ import {
 	type ShapeGalleryGroup,
 	type SlideRef
 } from "@filen/office/core/presentation"
+import type { PresentationSessionApi } from "@filen/office/dom/presentation"
 import { slideShapes, useShapeSelection } from "@filen/office/react/presentation"
 import { cn } from "@filen/shared"
 import { FormDialog } from "@/components/dialogs/formDialog"
@@ -73,6 +75,7 @@ import {
 	type PictureCodecs,
 	type PictureSource
 } from "@/features/preview/lib/docxImages.logic"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import type { PreviewKey } from "@/lib/i18n"
 import { log } from "@/lib/log"
@@ -185,12 +188,86 @@ export async function preparePresentationPicture(
 	return { ok: true, image: { bytes, contentType, width: size.width, height: size.height }, ...named }
 }
 
-// Pictures into the slide in view, or in place of a picture (`replace`): prepared one by one, each one op.
+// Pictures into the slide in view, or in place of a picture (`replace`): prepared one by one, each one op. `signal`
+// ends the run; a refusal or a failure before then is said in a toast.
+async function takePictures(
+	editor: PresentationRibbonEditor,
+	sources: readonly PictureSource[],
+	replace: number | undefined,
+	signal: AbortSignal,
+	t: TFunction<"preview">
+): Promise<void> {
+	for (const source of sources) {
+		try {
+			const prepared = await preparePresentationPicture(source, signal)
+
+			if (!prepared.ok) {
+				toast.error(t(pictureRefusalKey(prepared.refusal)))
+
+				continue
+			}
+
+			if (replace !== undefined) {
+				// Change Picture acts on the selected picture, on the slide in view.
+				const slide = editor.render?.ref ?? editor.selection.getSnapshot().slide
+
+				if (slide !== undefined)
+					void editor.command({
+						family: "picture",
+						kind: "replace",
+						target: { slide, id: replace },
+						image: prepared.image
+					})
+			} else {
+				// Onto the slide in view, selected or not (insertObject finds it).
+				const deck: InsertDeck = { size: editor.info.size, format: editor.info.format }
+
+				await insertObject(editor, (at, id) => insertPictureOp(deck, at, prepared.image, id, prepared.name))
+			}
+		} catch (error) {
+			if (!signal.aborted) {
+				log.warn("pptx", "picture not inserted", { error })
+				toast.error(t(pictureRefusalKey("failed")))
+			}
+		}
+	}
+}
+
+// Picture runs a ribbon command started, per session. The command's control may be gone before they end (one run from
+// the ribbon's overflow closes it with the popup), so they end with the session: when the editor's own pictures hook
+// (usePresentationPictures, mounted for the session) lets go of it.
+const sessionRuns = new WeakMap<PresentationSessionApi, Set<AbortController>>()
+
+function takeForSession(
+	editor: PresentationRibbonEditor,
+	sources: readonly PictureSource[],
+	replace: number | undefined,
+	t: TFunction<"preview">
+): void {
+	let runs = sessionRuns.get(editor.session)
+
+	if (runs === undefined) {
+		runs = new Set()
+		sessionRuns.set(editor.session, runs)
+	}
+
+	const all = runs
+	const controller = new AbortController()
+
+	all.add(controller)
+	void takePictures(editor, sources, replace, controller.signal, t).finally(() => {
+		all.delete(controller)
+	})
+}
+
+// Pictures into the slide in view, or in place of a picture (`replace`), for as long as the hook is mounted; the
+// session's ribbon runs (takeForSession) end once it lets go of the session.
 export function usePresentationPictures(editor: PresentationRibbonEditor | undefined): {
 	readonly take: (sources: readonly PictureSource[], replace?: number) => Promise<void>
 } {
 	const { t } = useTranslation("preview")
 	const running = useRef(new Set<AbortController>())
+	const session = editor?.session
 
 	useEffect(() => {
 		const all = running.current
@@ -200,51 +277,28 @@ export function usePresentationPictures(editor: PresentationRibbonEditor | undef
 		}
 	}, [])
 
+	useEffect(() => {
+		if (session === undefined) return
+
+		return () => {
+			for (const controller of sessionRuns.get(session) ?? []) controller.abort()
+
+			sessionRuns.delete(session)
+		}
+	}, [session])
+
 	return {
 		take: async (sources, replace) => {
-			for (const source of sources) {
-				const controller = new AbortController()
+			if (editor === undefined) return
 
-				running.current.add(controller)
+			const controller = new AbortController()
 
-				try {
-					const prepared = await preparePresentationPicture(source, controller.signal)
+			running.current.add(controller)
 
-					if (!prepared.ok) {
-						toast.error(t(pictureRefusalKey(prepared.refusal)))
-
-						continue
-					}
-
-					const target = editor
-
-					if (target === undefined) return
-
-					if (replace !== undefined) {
-						// Change Picture acts on the selected picture, on the slide in view.
-						const slide = target.render?.ref ?? target.selection.getSnapshot().slide
-
-						if (slide !== undefined)
-							void target.command({
-								family: "picture",
-								kind: "replace",
-								target: { slide, id: replace },
-								image: prepared.image
-							})
-					} else {
-						// Onto the slide in view, selected or not (insertObject finds it).
-						const deck: InsertDeck = { size: target.info.size, format: target.info.format }
-
-						await insertObject(target, (at, id) => insertPictureOp(deck, at, prepared.image, id, prepared.name))
-					}
-				} catch (error) {
-					if (!controller.signal.aborted) {
-						log.warn("pptx", "picture not inserted", { error })
-						toast.error(t(pictureRefusalKey("failed")))
-					}
-				} finally {
-					running.current.delete(controller)
-				}
+			try {
+				await takePictures(editor, sources, replace, controller.signal, t)
+			} finally {
+				running.current.delete(controller)
 			}
 		}
 	}
@@ -291,29 +345,24 @@ export function usePresentationPictureDrop(editor: PresentationRibbonEditor | un
 	}
 }
 
-export function PictureFileInput({
-	inputRef,
-	onFiles
-}: {
-	inputRef: React.RefObject<HTMLInputElement | null>
-	onFiles: (files: File[]) => void
-}) {
-	return (
-		<input
-			ref={inputRef}
-			type="file"
-			accept={PICTURE_ACCEPT}
-			multiple
-			hidden
-			data-pptx-picture-input
-			onChange={event => {
-				const files = [...(event.target.files ?? [])]
+// Opens the file chooser for pictures. The input is the chooser's own, not the control's: a command run from the
+// ribbon's overflow closes it, and the control with it, while the chooser is still open.
+export function choosePictures(onFiles: (files: File[]) => void): void {
+	const input = document.createElement("input")
 
-				event.target.value = ""
-				onFiles(files)
-			}}
-		/>
+	input.type = "file"
+	input.accept = PICTURE_ACCEPT
+	input.multiple = true
+	input.addEventListener(
+		"change",
+		() => {
+			const files = [...(input.files ?? [])]
+
+			if (files.length > 0) onFiles(files)
+		},
+		{ once: true }
 	)
+	input.click()
 }
 
 // This device or the drive; `replace` puts the first picture taken in place of that picture.
@@ -332,13 +381,8 @@ export function PictureSourceMenu({
 }) {
 	const { t } = useTranslation("preview")
 	const slide = useSlideInView(editor)
-	const pictures = usePresentationPictures(editor)
-	const input = useRef<HTMLInputElement | null>(null)
-	const [drive, setDrive] = useState(false)
+	const dialog = useRibbonDialog(editor)
 	const focus = useCommandMenuFocus()
-	const take = (files: readonly File[]): void => {
-		void pictures.take((replace === undefined ? files : files.slice(0, 1)).map(fileSource), replace)
-	}
 
 	return (
 		<>
@@ -356,7 +400,9 @@ export function PictureSourceMenu({
 					<DropdownMenuItem
 						onClick={() => {
 							focus.ran()
-							input.current?.click()
+							choosePictures(files => {
+								takeForSession(editor, (replace === undefined ? files : files.slice(0, 1)).map(fileSource), replace, t)
+							})
 						}}
 					>
 						{t("previewPptxInsertPictureDevice")}
@@ -364,31 +410,27 @@ export function PictureSourceMenu({
 					<DropdownMenuItem
 						onClick={() => {
 							focus.ran()
-							setDrive(true)
+							dialog.open((live, close) => (
+								<DriveFilePickerDialog
+									title={t("previewPptxInsertPictureDriveTitle")}
+									description={t("previewPptxInsertPictureDriveDescription")}
+									accept={isPictureFile}
+									onPick={async (item: DriveItem, signal: AbortSignal) => {
+										// The picker's signal: it ends with the dialog, and the dialog with the session.
+										await takePictures(live, [driveSource(item)], replace, signal, t)
+
+										if (!signal.aborted) close()
+									}}
+									onClose={close}
+								/>
+							))
 						}}
 					>
 						{t("previewPptxInsertPictureDrive")}
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
-			<PictureFileInput
-				inputRef={input}
-				onFiles={take}
-			/>
-			{drive ? (
-				<DriveFilePickerDialog
-					title={t("previewPptxInsertPictureDriveTitle")}
-					description={t("previewPptxInsertPictureDriveDescription")}
-					accept={isPictureFile}
-					onPick={async (item: DriveItem, signal: AbortSignal) => {
-						await pictures.take([driveSource(item)], replace)
-						if (!signal.aborted) setDrive(false)
-					}}
-					onClose={() => {
-						setDrive(false)
-					}}
-				/>
-			) : null}
+			{dialog.view}
 		</>
 	)
 }
@@ -462,11 +504,36 @@ function TableSizeDialog({ editor, onClose }: { editor: PresentationRibbonEditor
 	)
 }
 
+// Up and Down in the size grid move a row (the menu's own order moves a cell). Down from the last row goes to the
+// menu's next item (Insert table); Up from the first row is the menu's to take.
+function gridKey(event: React.KeyboardEvent<HTMLElement>, index: number): void {
+	const step = event.key === "ArrowDown" ? GRID_COLS : event.key === "ArrowUp" ? -GRID_COLS : 0
+	const target = index + step
+	const cells = event.currentTarget.parentElement?.children
+
+	if (step === 0 || target < 0 || cells === undefined) return
+
+	let next: Element | null | undefined = cells.item(target)
+
+	if (target >= cells.length) {
+		const last = cells.item(cells.length - 1)
+		const items = [...(event.currentTarget.closest('[role="menu"]')?.querySelectorAll('[role^="menuitem"]') ?? [])]
+
+		next = last === null ? undefined : items[items.indexOf(last) + 1]
+	}
+
+	if (!(next instanceof HTMLElement)) return
+
+	event.preventDefault()
+	event.stopPropagation()
+	next.focus()
+}
+
 function TableMenu({ editor }: { editor: PresentationRibbonEditor }) {
 	const slide = useSlideInView(editor)
 	const { t } = useTranslation("preview")
 	const [hover, setHover] = useState<{ readonly rows: number; readonly cols: number }>({ rows: 0, cols: 0 })
-	const [dialog, setDialog] = useState(false)
+	const dialog = useRibbonDialog(editor)
 	const focus = useCommandMenuFocus()
 	const insert = (rows: number, cols: number): void => {
 		const deck: InsertDeck = { size: editor.info.size, format: editor.info.format }
@@ -487,13 +554,13 @@ function TableMenu({ editor }: { editor: PresentationRibbonEditor }) {
 					data-preview-surface
 				>
 					<DropdownMenuGroup>
-						<DropdownMenuLabel aria-live="polite">
+						<DropdownMenuLabel>
 							{hover.rows === 0
 								? t("previewPptxInsertTable")
 								: t("previewPptxInsertTableGrid", { cols: hover.cols, rows: hover.rows })}
 						</DropdownMenuLabel>
 						<div
-							role="grid"
+							role="group"
 							aria-label={t("previewPptxInsertTable")}
 							className="grid gap-0.5 p-1"
 							style={{ gridTemplateColumns: `repeat(${String(GRID_COLS)}, 1rem)` }}
@@ -521,6 +588,9 @@ function TableMenu({ editor }: { editor: PresentationRibbonEditor }) {
 											setHover({ rows, cols })
 										}}
 										onMouseDown={keepFocus}
+										onKeyDown={event => {
+											gridKey(event, index)
+										}}
 										onClick={() => {
 											focus.ran()
 											insert(rows, cols)
@@ -534,21 +604,19 @@ function TableMenu({ editor }: { editor: PresentationRibbonEditor }) {
 					<DropdownMenuItem
 						onClick={() => {
 							focus.ran()
-							setDialog(true)
+							dialog.open((live, close) => (
+								<TableSizeDialog
+									editor={live}
+									onClose={close}
+								/>
+							))
 						}}
 					>
 						{t("previewPptxInsertTableCustom")}
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
-			{dialog ? (
-				<TableSizeDialog
-					editor={editor}
-					onClose={() => {
-						setDialog(false)
-					}}
-				/>
-			) : null}
+			{dialog.view}
 		</>
 	)
 }

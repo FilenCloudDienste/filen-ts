@@ -171,6 +171,20 @@ describe("duplicateNote", () => {
 		expect(testQueryClient.getQueryData(noteContentQueryKey(duplicated.uuid))).toBe("fetched content")
 	})
 
+	it("succeeds and upserts both notes when only the cold-cache content read fails", async () => {
+		const original = mockNote({ uuid: testUuid("orig") })
+		const duplicated = mockNote({ uuid: testUuid("dup") })
+		duplicateNoteOp.mockResolvedValueOnce({ original, duplicated })
+		getNoteContent.mockRejectedValueOnce(new Error("network"))
+
+		const outcome = await duplicateNote(original)
+
+		expect(outcome).toEqual({ status: "success", item: duplicated })
+		expect(notesQueryGet()).toEqual(expect.arrayContaining([original, duplicated]))
+		expect(testQueryClient.getQueryState(noteContentQueryKey(original.uuid))).toBeUndefined()
+		expect(testQueryClient.getQueryState(noteContentQueryKey(duplicated.uuid))).toBeUndefined()
+	})
+
 	it("returns an error outcome on rejection", async () => {
 		duplicateNoteOp.mockRejectedValueOnce(new Error("fail"))
 

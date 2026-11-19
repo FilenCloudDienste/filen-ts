@@ -92,8 +92,8 @@ describe("the values list", () => {
 	})
 
 	it("filters by a value or by a blank", () => {
-		expect(valueCriteria("fig", null)).toEqual({ kind: "values", values: ["fig"], blank: false, dates: [] })
-		expect(valueCriteria("", null)).toEqual({ kind: "values", values: [], blank: true, dates: [] })
+		expect(valueCriteria("fig")).toEqual({ kind: "values", values: ["fig"], blank: false, dates: [] })
+		expect(valueCriteria("")).toEqual({ kind: "values", values: [], blank: true, dates: [] })
 	})
 })
 
@@ -235,6 +235,9 @@ describe("condition dialogs", () => {
 		expect(isoSerial("2024-03-01", true)).toBe(45_352 - 1462)
 		expect(serialIso(45_352.75, false)).toBe("2024-03-01")
 		expect(serialIso(45_352 - 1462, true)).toBe("2024-03-01")
+		expect(serialIso(0, false)).toBe("1899-12-30")
+		expect(serialIso(2_958_465, false)).toBe("9999-12-31")
+		expect(serialIso(2_958_465 - 1462, true)).toBe("9999-12-31")
 		expect(dialogCriteria([{ operator: "less", value: "2024-03-01" }], false, "date", false, EN)).toEqual({
 			kind: "custom",
 			and: false,
@@ -252,6 +255,18 @@ describe("condition dialogs", () => {
 			conditions: [{ operator: "greater", value: "2024-03-01" }],
 			and: false
 		})
+	})
+
+	it("leaves a date field empty for a stored serial outside the date system", () => {
+		for (const serial of [1e300, Number.POSITIVE_INFINITY, Number.NaN, 1e8, 2_958_466, -1]) expect(serialIso(serial, false)).toBe("")
+		expect(serialIso(2_958_465 - 1461, true)).toBe("")
+		expect(serialIso(-0.5, true)).toBe("")
+
+		for (const value of ["1e300", "1e8", "-1"]) {
+			expect(
+				dialogConditions({ kind: "custom", and: false, conditions: [{ operator: "greaterThan", value }] }, "date", false, EN)
+			).toEqual({ conditions: [{ operator: "greater", value: "" }], and: false })
+		}
 	})
 
 	it("names every operator and condition with a string the catalog has", () => {

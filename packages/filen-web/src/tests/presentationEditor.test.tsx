@@ -18,6 +18,9 @@ import type {
 import type { PresentationConnection } from "@filen/office/react/presentation"
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { chordText } from "@/lib/keymap/keyText"
+import { clearUserCombo, comboFor, setUserCombo, unbindAction } from "@/lib/keymap/registry"
+import { parseCombo } from "@filen/shared/keymap"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import type { PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
@@ -33,6 +36,11 @@ interface FakeEngine {
 	answer: CommandResult
 	steps: string[]
 	saves: { reason: string }[]
+	// Slides whose render the worker holds back until `release` (they never arrive otherwise).
+	held: Map<number, () => void>
+	// Runs as a command arrives, before its answer (a test's "changed" event).
+	onCommand?: ((op: DeckOp) => void) | undefined
+	disposed: number
 }
 
 // Typing in an open body the worker has not answered yet, as the text store reports it; the commands the shell sent
@@ -62,7 +70,9 @@ const { sdk, engine, settings, toasts, typing } = vi.hoisted(() => ({
 		commands: [],
 		answer: { ok: true, revision: 1, dirty: true },
 		steps: [],
-		saves: []
+		saves: [],
+		held: new Map(),
+		disposed: 0
 	}))(),
 	settings: { loaded: true, autosave: true, authorName: null },
 	toasts: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() }
@@ -145,6 +155,10 @@ vi.mock("@filen/office/react/presentation", async importOriginal => ({
 	paintSlide: (_render: unknown, context: { document: Document }) => ({
 		root: context.document.createElement("div"),
 		release: () => undefined
+	}),
+	paintEditorSlide: (_render: unknown, context: { document: Document }) => ({
+		root: context.document.createElement("div"),
+		release: () => undefined
 	})
 }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: sdk }))
@@ -160,11 +174,25 @@ vi.mock("@/features/presentation/lib/presentationEngine", () => ({
 		engine.opens.push({ source, options })
 
 		const session = {
-			render: (refs: number[]) => Promise.resolve(refs.map(ref => slideRender(ref))),
+			render: (refs: number[]) => {
+				const held = refs.filter(ref => engine.held.has(ref))
+
+				if (held.length === 0) return Promise.resolve(refs.map(ref => slideRender(ref)))
+
+				return new Promise(resolve => {
+					for (const ref of held)
+						engine.held.set(ref, () => {
+							resolve(refs.map(each => slideRender(each)))
+						})
+				})
+			},
 			thumbnails: () => new Promise(() => undefined),
 			image: () => Promise.resolve(null),
+			// The notes pane's review of the slide in view: never answered here.
+			review: () => new Promise(() => undefined),
 			command: (op: DeckOp) => {
 				engine.commands.push(op)
+				engine.onCommand?.(op)
 
 				return Promise.resolve(engine.answer)
 			},
@@ -186,12 +214,19 @@ vi.mock("@/features/presentation/lib/presentationEngine", () => ({
 			close: () => undefined
 		} as unknown as PresentationSessionApi
 
-		return { session, unlock: () => undefined, dispose: () => undefined }
+		return {
+			session,
+			unlock: () => undefined,
+			dispose: () => {
+				engine.disposed++
+			}
+		}
 	}
 }))
 
 const { PresentationViewer } = await import("@/features/presentation/components/presentationViewer")
 const { DEFAULT_OFFICE_VIEW_SETTINGS, setOfficeViewSettings } = await import("@/features/office/lib/officeViewSettings")
+const { slideReview } = await import("@/features/presentation/components/commentsPane.logic")
 
 registerAllActions()
 
@@ -208,7 +243,8 @@ function slideRender(ref: number): SlideRender {
 		hidden: false,
 		layout: ref === 1 ? LAYOUT_TITLE : LAYOUT_CONTENT,
 		background: { width: 960, height: 540, itemCount: 0 },
-		layers: [],
+		// The slide a test adds (ref 4) has a title placeholder, the body its first placeholder key opens.
+		layers: ref === 4 ? [{ shape: { slide: 4, id: 7 }, box: { id: 7, body: "placeholder" } }] : [],
 		notesText: "",
 		animated: false
 	} as unknown as SlideRender
@@ -302,6 +338,17 @@ async function openEditor(change: Partial<OpenInfo> = {}, edit = editing(), name
 	return edit
 }
 
+// The key's text as the platform shows it (⌘S on Apple, Ctrl+S elsewhere).
+function saveKey(combo: string): string {
+	const chord = parseCombo(combo)[0]
+
+	if (chord === undefined) {
+		throw new Error("no chord")
+	}
+
+	return chordText(chord)
+}
+
 function commands(): HTMLElement {
 	return screen.getByRole("toolbar", { name: "Commands" })
 }
@@ -320,6 +367,9 @@ afterEach(() => {
 	engine.steps = []
 	engine.saves = []
 	engine.answer = { ok: true, revision: 1, dirty: true }
+	engine.held = new Map()
+	engine.onCommand = undefined
+	engine.disposed = 0
 	settings.autosave = true
 	setOfficeViewSettings(DEFAULT_OFFICE_VIEW_SETTINGS)
 	typing.pending = false
@@ -413,6 +463,80 @@ describe("presentation editor ribbon", () => {
 		await waitFor(() => {
 			expect(engine.steps).toEqual(["undo"])
 		})
+	})
+})
+
+describe("presentation editor new slide from a placeholder key", () => {
+	// Ctrl+Enter past the last placeholder of slide 1: a new slide (ref 4) after it, whose render the worker holds back.
+	async function addSlideFromText(): Promise<void> {
+		await openEditor()
+		// The open window's renders, as the worker streams them.
+		await emit({ type: "slides", renders: [1, 2, 3].map(slideRender), final: true } as unknown as PresentationEvent)
+		engine.held.set(4, () => undefined)
+		engine.onCommand = op => {
+			if (op.family !== "slide" || op.kind !== "add") return
+
+			engine.listener?.({
+				type: "changed",
+				revision: 2,
+				dirty: true,
+				canUndo: true,
+				canRedo: false,
+				slides: [4],
+				info: { slides: [1, 4, 2, 3].map(ref => ({ ref, hidden: false })) }
+			} as unknown as PresentationEvent)
+		}
+		fireEvent.click(screen.getByRole("button", { name: "enter text" }))
+
+		const navigate = typing.editorProps.at(-1)?.["onNavigate"] as (to: { kind: "addSlide" }) => void
+
+		await act(async () => {
+			navigate({ kind: "addSlide" })
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+		// On the layout of the slide the key was pressed on.
+		expect(engine.commands).toContainEqual({ family: "slide", kind: "add", at: 1, layout: LAYOUT_TITLE })
+	}
+
+	function openedOnNewSlide(): number {
+		return typing.editorProps.filter(props => (props["shape"] as { slide: number } | undefined)?.slide === 4).length
+	}
+
+	it("lets the deck close when the editor closes before the new slide rendered, and leaves no Comments pane open", async () => {
+		await addSlideFromText()
+		act(() => {
+			slideReview.setOpen(true)
+		})
+
+		cleanup()
+		await act(() => new Promise(resolve => setTimeout(resolve, 10)))
+
+		expect(engine.disposed).toBeGreaterThan(0)
+		expect(slideReview.getSnapshot().open).toBe(false)
+	})
+
+	it("opens no text on the new slide when its render arrives after another slide is in view", async () => {
+		await addSlideFromText()
+
+		fireEvent.click(screen.getByRole("option", { name: "Slide 1 of 4" }))
+		await act(async () => {
+			engine.held.get(4)?.()
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+		fireEvent.click(screen.getByRole("option", { name: "Slide 2 of 4" }))
+		await act(() => new Promise(resolve => setTimeout(resolve, 0)))
+
+		expect(openedOnNewSlide()).toBe(0)
+	})
+
+	it("opens the new slide's first placeholder once its render arrives while it is in view", async () => {
+		await addSlideFromText()
+		await act(async () => {
+			engine.held.get(4)?.()
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+
+		expect(openedOnNewSlide()).toBeGreaterThan(0)
 	})
 })
 
@@ -762,7 +886,9 @@ describe("presentation editor saving", () => {
 		await openEditor({ packageBytes: 300 * 1024 * 1024 })
 
 		expect(
-			screen.getByText("This presentation is too large to save automatically. Save your changes with Ctrl+S or File → Save.")
+			screen.getByText(
+				`This presentation is too large to save automatically. Save your changes with ${saveKey(comboFor("preview.save"))} or File → Save.`
+			)
 		).toBeTruthy()
 		fireEvent.click(screen.getByRole("button", { name: "File" }))
 
@@ -771,6 +897,26 @@ describe("presentation editor saving", () => {
 		expect(autosave.getAttribute("aria-checked")).toBe("false")
 		expect(autosave.hasAttribute("data-disabled")).toBe(true)
 		expect(within(autosave).getByText("Off for presentations over 256 MB")).toBeTruthy()
+	})
+
+	it("names the Save key as the user bound it in the notice, and File → Save alone when it has none", async () => {
+		await act(() => setUserCombo("preview.save", "mod+shift+s"))
+
+		try {
+			await openEditor({ packageBytes: 300 * 1024 * 1024 })
+
+			expect(
+				screen.getByText(
+					`This presentation is too large to save automatically. Save your changes with ${saveKey("mod+shift+s")} or File → Save.`
+				)
+			).toBeTruthy()
+			await act(() => unbindAction("preview.save"))
+			expect(
+				screen.getByText("This presentation is too large to save automatically. Save your changes with File → Save.")
+			).toBeTruthy()
+		} finally {
+			await act(() => clearUserCombo("preview.save"))
+		}
 	})
 })
 

@@ -30,11 +30,41 @@ vi.mock("@filen/office/react/sheet/print", async original => {
 	}
 })
 
+// Other sheets' settings, held back until released (the workbook's settings still loading).
+const held = vi.hoisted(() => ({ on: false, release: [] as (() => void)[] }))
+
+vi.mock("@/features/spreadsheet/print/printSettings", async original => {
+	const actual = await original<typeof import("@/features/spreadsheet/print/printSettings")>()
+
+	return {
+		...actual,
+		sheetSettings: async (...args: Parameters<typeof actual.sheetSettings>) => {
+			if (held.on) {
+				await new Promise<void>(resolve => {
+					held.release.push(resolve)
+				})
+			}
+
+			return await actual.sheetSettings(...args)
+		}
+	}
+})
+
 afterEach(() => {
 	cleanup()
 	vi.restoreAllMocks()
 	refusing.on = false
+	held.on = false
+	held.release = []
 })
+
+function choose(option: HTMLElement): void {
+	fireEvent.pointerDown(option, { pointerType: "mouse", button: 0 })
+	fireEvent.mouseDown(option, { button: 0 })
+	fireEvent.pointerUp(option, { pointerType: "mouse", button: 0 })
+	fireEvent.mouseUp(option, { button: 0 })
+	fireEvent.click(option)
+}
 
 // The browser's print, which happy-dom lacks: `during` sees the document as the printer would, then the dialog closes.
 function stubPrint(during: () => void): ReturnType<typeof vi.fn> {
@@ -258,6 +288,10 @@ describe("the print dialog", () => {
 		await screen.findByText("Page 1 of 1")
 		expect(screen.getByText(preview.previewSheetPrintNotSaved)).toBeTruthy()
 		fireEvent.click(screen.getByRole("radio", { name: preview.previewSheetPrintLandscape }))
+		// Print waits for the pages laid out for the new choice.
+		await waitFor(() => {
+			expect(screen.getByRole<HTMLButtonElement>("button", { name: preview.previewSheetPrintButton }).disabled).toBe(false)
+		})
 		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetPrintButton }))
 
 		await waitFor(() => {
@@ -306,5 +340,78 @@ describe("the print dialog", () => {
 			expect(error).toHaveBeenCalledWith(message)
 		})
 		expect(print).not.toHaveBeenCalled()
+	}, 30_000)
+
+	it("neither prints nor saves the pages of earlier choices while the next layout or the workbook's settings are pending", async () => {
+		const model = await openGrid(
+			await workbook([
+				{ name: "Data", rows: [["a", 1]] },
+				{ name: "More", rows: [["b", 2]] }
+			]),
+			"xlsx"
+		)
+		const active = await sheetSettings(model, "xlsx", model.getSnapshot().sheets[0] ?? SHEET)
+		const onSavePdf = vi.fn()
+
+		if (active === null) throw new Error("no settings")
+
+		render(
+			<GridHarness model={model}>
+				{grid => (
+					<SheetPrintDialog
+						active={active}
+						grid={grid}
+						model={model}
+						kind="xlsx"
+						name="book.xlsx"
+						canSave={false}
+						run={() => undefined}
+						onSavePdf={onSavePdf}
+						onClose={() => undefined}
+					/>
+				)}
+			</GridHarness>
+		)
+
+		const printButton = (): HTMLButtonElement => screen.getByRole("button", { name: preview.previewSheetPrintButton })
+		const pdfButton = (): HTMLButtonElement => screen.getByRole("button", { name: preview.previewSheetPrintSaveAsPdf })
+
+		await screen.findByText("Page 1 of 1")
+		await waitFor(() => {
+			expect(printButton().disabled).toBe(false)
+		})
+
+		// A form change: the pages shown are the disposed job's until the next layout lands.
+		fireEvent.click(screen.getByRole("radio", { name: preview.previewSheetPrintLandscape }))
+		expect(printButton().disabled).toBe(true)
+		expect(pdfButton().disabled).toBe(true)
+		await waitFor(() => {
+			expect(printButton().disabled).toBe(false)
+		})
+		expect(pdfButton().disabled).toBe(false)
+
+		// The workbook chosen: nothing prints or saves until every sheet's settings are read and laid out.
+		held.on = true
+		fireEvent.click(screen.getByRole("combobox", { name: preview.previewSheetPrintWhat }))
+		choose(await screen.findByRole("option", { name: preview.previewSheetPrintWorkbook }))
+		await waitFor(() => {
+			expect(held.release.length).toBeGreaterThan(0)
+		})
+		expect(printButton().disabled).toBe(true)
+		expect(pdfButton().disabled).toBe(true)
+		fireEvent.click(pdfButton())
+		expect(onSavePdf).not.toHaveBeenCalled()
+
+		held.on = false
+
+		for (const release of held.release) release()
+
+		await waitFor(() => {
+			expect(pdfButton().disabled).toBe(false)
+		})
+		expect(printButton().disabled).toBe(false)
+		fireEvent.click(pdfButton())
+		expect(onSavePdf).toHaveBeenCalledTimes(1)
+		expect(onSavePdf.mock.lastCall?.[0]).toHaveLength(2)
 	}, 30_000)
 })

@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { ChevronDownIcon } from "lucide-react"
-import { formatValue } from "@filen/office/core/sheet"
+import { formatValue, type NumFmtOptions } from "@filen/office/core/sheet"
 import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
@@ -13,13 +13,15 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { NUMBER_ITEMS, numberLabel } from "@/features/spreadsheet/toolbar/toolbar.logic"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
 
 // The Number Format dropdown: Excel's Home tab list, each item showing the active cell's value in it (when the cell
 // holds a number), then "More number formats…" (the Format Cells dialog).
 
 // What a number shows in a code, for a menu item's hint.
-function sampleText(sample: number | null, code: string, date1904: boolean): string {
-	return sample === null ? "" : formatValue(sample, code, { date1904 }).text
+function sampleText(sample: number | null, code: string, options: NumFmtOptions): string {
+	return sample === null ? "" : formatValue(sample, code, options).text
 }
 
 function NumberFormatItems({
@@ -36,6 +38,9 @@ function NumberFormatItems({
 	onMore: () => void
 }) {
 	const { t } = useTranslation("preview")
+	// The regional format the grid shows cells in (separators, month and day names, date patterns), followed live.
+	const locale = sheetLocaleOf(useRegionalLanguage()).numFmt
+	const options: NumFmtOptions = locale === undefined ? { date1904 } : { date1904, locale }
 
 	return (
 		<>
@@ -54,7 +59,7 @@ function NumberFormatItems({
 						<span className="flex min-w-48 flex-1 items-center justify-between gap-4">
 							<span>{t(item.label)}</span>
 							<span className="max-w-32 truncate text-xs text-muted-foreground tabular-nums">
-								{sampleText(sample, item.code, date1904)}
+								{sampleText(sample, item.code, options)}
 							</span>
 						</span>
 					</DropdownMenuRadioItem>

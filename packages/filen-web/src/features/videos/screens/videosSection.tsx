@@ -4,6 +4,7 @@ import { useVideoLibraryView, useVideoRootNames } from "@/features/videos/hooks/
 import { videosSection } from "@/features/videos/lib/libraryView.logic"
 import type { GridSource } from "@/features/videos/lib/videoGrid.logic"
 import { VideoGrid } from "@/features/videos/components/videoGrid"
+import { VideosLoadError } from "@/features/videos/screens/videosHome"
 import { LoadingState } from "@/components/loadingState"
 
 // A library view (Movies, Shows, Other, one directory) under the shared header: its grid.
@@ -16,6 +17,17 @@ export function VideosSectionScreen() {
 
 	if (configQuery.status === "pending") {
 		return <LoadingState size="lg" />
+	}
+
+	if (configQuery.status === "error") {
+		return (
+			<VideosLoadError
+				error={configQuery.error}
+				onRetry={() => {
+					void configQuery.refetch()
+				}}
+			/>
+		)
 	}
 
 	let source: GridSource

@@ -206,19 +206,13 @@ describe("drive and photos list actions — overrides", () => {
 		expect(comboFor("photos.open")).toBe("")
 	})
 
-	// Single-key shortcuts off strips the bare keys, the chords stay.
-	it("drops the bare keys with single-key shortcuts off, keeping the chords", async () => {
+	// Single-key shortcuts off strips bare keys only; the drive chords stay bound.
+	it("keeps the drive chords with single-key shortcuts off", async () => {
 		const { registerAction, comboFor, setCharacterKeys, CURRENT_PLATFORM, defaultComboOn } = await freshRegistry()
 
-		for (const id of ["drive.toggleFavorite", "drive.move", "photos.densityIncrease", "drive.info"]) {
-			registerAction(def(id))
-		}
-
+		registerAction(def("drive.info"))
 		await setCharacterKeys(false)
 
-		expect(comboFor("drive.toggleFavorite")).toBe("")
-		expect(comboFor("drive.move")).toBe("")
-		expect(comboFor("photos.densityIncrease")).toBe("")
 		expect(comboFor("drive.info")).toBe(defaultComboOn(def("drive.info"), CURRENT_PLATFORM))
 	})
 })

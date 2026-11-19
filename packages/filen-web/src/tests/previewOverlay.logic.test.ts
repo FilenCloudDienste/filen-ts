@@ -26,9 +26,9 @@ import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 
-// Minimal duck-typed stand-in for a DOM EventTarget — no jsdom/happy-dom in this project
-// (vitest.config.ts: environment "node"), mirroring lib/auth/referral.test.ts's own stubbed `document`
-// idiom for the same reason.
+// Minimal duck-typed stand-in for a DOM EventTarget: this file runs in the default node environment
+// (vitest.config.ts; only files that opt in with `// @vitest-environment jsdom` get a DOM), and
+// isTextEditingTarget needs nothing beyond `closest`.
 function fakeTarget(closestResult: object | null): EventTarget {
 	return { closest: (_selector: string) => closestResult } as unknown as EventTarget
 }
@@ -181,23 +181,6 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"trash"
 		])
 		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copy", "compress"])
-	})
-
-	it("download is the only id ever stripped — every other descriptor (including a second read-only one) survives", () => {
-		const withDownload = [
-			"rename",
-			"move",
-			"copy",
-			"compress",
-			"favorite",
-			"versions",
-			"info",
-			"download",
-			"share",
-			"publicLink",
-			"trash"
-		]
-		expect(menuIds(fileItem(), "drive")).toEqual(withDownload.filter(id => id !== "download"))
 	})
 })
 

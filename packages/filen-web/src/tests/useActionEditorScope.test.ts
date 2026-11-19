@@ -45,3 +45,19 @@ describe("useAction editor scopes", () => {
 		expect(handler).not.toHaveBeenCalled()
 	})
 })
+
+describe("useAction handler freshness", () => {
+	it("runs the handler of the latest render, with no deps", () => {
+		const first = vi.fn()
+		const second = vi.fn()
+		const { rerender } = renderHook(({ handler }) => useAction("preview.save", handler, IN_EDITORS_AND_FIELDS), {
+			initialProps: { handler: first }
+		})
+
+		rerender({ handler: second })
+		pressModS(field("input"))
+
+		expect(first).not.toHaveBeenCalled()
+		expect(second).toHaveBeenCalledTimes(1)
+	})
+})

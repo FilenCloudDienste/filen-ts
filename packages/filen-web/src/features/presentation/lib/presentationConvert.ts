@@ -22,7 +22,8 @@ import { log } from "@/lib/log"
 
 // A presentation converted from a session (the open editor's, or one opened for the conversion alone): the fresh
 // package the worker streams through a save port, kept as the chunks it came in (a download takes them as a Blob, never
-// joined), and what the copy holds differently, by kind.
+// joined), and what the copy holds differently, by kind. A copy saved beside the deck owns its chunks and empties them
+// as it joins them, so the page never holds the package twice.
 
 export type PresentationTarget = "pptx" | "odp"
 
@@ -32,13 +33,20 @@ export interface FreshPackage {
 	readonly report: ConversionReport
 }
 
+// A package whose reader owns its chunks: only saveConvertedCopy reads one, the readers of a FreshPackage keep theirs.
+interface OwnedPackage {
+	readonly chunks: Uint8Array[]
+	readonly size: number
+	readonly report: ConversionReport
+}
+
 // The worker writes the package to the port and answers with its report. A refusal ends the read (a worker that refuses
 // may never write); the refusal is what is thrown. `signal` cancels the read, which fails the worker's next write.
-export async function readFreshPackage(
-	session: PresentationSessionApi,
-	target: PresentationTarget,
-	signal?: AbortSignal
-): Promise<FreshPackage> {
+export function readFreshPackage(session: PresentationSessionApi, target: PresentationTarget, signal?: AbortSignal): Promise<FreshPackage> {
+	return readPackage(session, target, signal)
+}
+
+async function readPackage(session: PresentationSessionApi, target: PresentationTarget, signal?: AbortSignal): Promise<OwnedPackage> {
 	const channel = new MessageChannel()
 	const reader = savePortReader(channel.port2)
 	const answer = session.freshParts(target, channel.port1)
@@ -74,14 +82,24 @@ export async function readFreshPackage(
 	return { chunks, size, report }
 }
 
-export function joinFreshPackage(fresh: FreshPackage): Uint8Array {
+const EMPTY = new Uint8Array(0)
+
+// Joins the chunks into one buffer, emptying each slot once it is copied (and the array after), so a chunk is
+// collectable as soon as the join is past it and none outlives the join.
+export function joinFreshPackage(fresh: Pick<OwnedPackage, "chunks" | "size">): Uint8Array {
+	const { chunks } = fresh
 	const bytes = new Uint8Array(fresh.size)
 	let at = 0
 
-	for (const chunk of fresh.chunks) {
+	for (let i = 0; i < chunks.length; i++) {
+		const chunk = chunks[i] ?? EMPTY
+
+		chunks[i] = EMPTY
 		bytes.set(chunk, at)
 		at += chunk.length
 	}
+
+	chunks.length = 0
 
 	return bytes
 }
@@ -193,7 +211,7 @@ export async function saveConvertedCopy(
 	options: { readonly always?: boolean; readonly failedKey?: PreviewKey } = {}
 ): Promise<void> {
 	const failedKey = options.failedKey ?? FAILED_KEYS[target]
-	const written = await readFreshPackage(copy.session, target).catch((e: unknown) => {
+	const written = await readPackage(copy.session, target).catch((e: unknown) => {
 		log.error("presentation", `Save as .${target} failed`, e)
 
 		return null
@@ -205,6 +223,7 @@ export async function saveConvertedCopy(
 		return
 	}
 
+	const { report } = written
 	const outcome = await uploadConvertedCopy(copy.item, joinFreshPackage(written), target).catch((e: unknown) => {
 		log.error("presentation", `uploading the .${target} copy failed`, e)
 
@@ -217,7 +236,7 @@ export async function saveConvertedCopy(
 		return
 	}
 
-	const differently = conversionLossLines(written.report, (key, count) => i18n.t(`preview:${key}`, { count }))
+	const differently = conversionLossLines(report, (key, count) => i18n.t(`preview:${key}`, { count }))
 
 	if (differently.length === 0 && options.always !== true) {
 		toast.success(i18n.t("preview:previewPptxSavedAsPptx", { name: outcome.name }))

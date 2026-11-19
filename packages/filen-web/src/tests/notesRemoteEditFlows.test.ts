@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi, type MockInstance } from "vitest"
 import { QueryClient, onlineManager } from "@tanstack/react-query"
 import type { Note, SocketEvent } from "@filen/sdk-rs"
 import { mockNote } from "@/tests/fixtures/notes"
 
 // End to end over the real outbox (sync.ts), socket handlers and tab editor record: a note edited here
 // while another device or tab saves it. Only the SDK, the disk and the toasts are mocked.
-const { setNoteContent, getNoteContent, listNotes, persisted } = vi.hoisted(() => {
+const { setNoteContent, getNoteContent, listNotes, persisted, kvSetJson } = vi.hoisted(() => {
 	// The outbox an earlier page load left on disk.
 	const disk: { value: unknown } = { value: null }
 
@@ -13,14 +13,15 @@ const { setNoteContent, getNoteContent, listNotes, persisted } = vi.hoisted(() =
 		setNoteContent: vi.fn<(note: Note, content: string, preview: string) => Promise<Note>>(),
 		getNoteContent: vi.fn<(note: Note) => Promise<string | undefined>>(),
 		listNotes: vi.fn<() => Promise<Note[]>>(() => Promise.resolve([])),
-		persisted: disk
+		persisted: disk,
+		kvSetJson: vi.fn(() => Promise.resolve())
 	}
 })
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { setNoteContent, getNoteContent, listNotes } }))
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: () => Promise.resolve(persisted.value),
-	kvSetJson: () => Promise.resolve(),
+	kvSetJson,
 	kvDelete: () => Promise.resolve()
 }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -30,13 +31,13 @@ const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
 vi.mock("sonner", () => ({ toast }))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 
-import { buildInflightEntries, hashNoteContent } from "@filen/shared"
+import { Semaphore, buildInflightEntries, hashNoteContent } from "@filen/shared"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { sync } from "@/features/notes/lib/sync"
-import { useNotesInflightStore, beginEditingSession } from "@/features/notes/store/useNotesInflight"
+import { TAB_ID, useNotesInflightStore, beginEditingSession } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit } from "@/features/notes/lib/socketHandlers"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
@@ -81,8 +82,42 @@ function contentEdited(content: string, editorId: number): Extract<SocketEvent, 
 	}
 }
 
-async function tick(): Promise<void> {
-	await new Promise(resolve => setTimeout(resolve, 15))
+// The outcome a step waits for, checked every turn: a loaded runner can outlast any fixed time budget.
+async function until(outcome: () => unknown): Promise<void> {
+	await vi.waitFor(outcome, { interval: 1, timeout: 5000 })
+}
+
+let mutexes: MockInstance<Semaphore["acquire"]>
+
+// The outbox is quiet: every restore and push pass it started ran to its end (each holds its mutex), and
+// every lock asked for was granted, or waits on a tab that holds it.
+async function settled(): Promise<void> {
+	await until(async () => {
+		const { held = [], pending = [] } = await navigator.locks.query()
+		const heldNames = new Set(held.map(lock => lock.name))
+
+		expect(pending.filter(lock => !heldNames.has(lock.name))).toEqual([])
+		expect(mutexes.mock.contexts.filter(mutex => mutex instanceof Semaphore && mutex.count() > 0)).toHaveLength(0)
+	})
+}
+
+// The tab `origin` holds its tab lock, and asks for it no more.
+async function lockHeld(origin: string): Promise<void> {
+	const name = `filen-web-notes-tab:${origin}`
+
+	await until(async () => {
+		const { held = [], pending = [] } = await navigator.locks.query()
+
+		expect(held.map(lock => lock.name)).toContain(name)
+		expect(pending.map(lock => lock.name)).not.toContain(name)
+	})
+}
+
+// The other tabs' locks the leader waits on.
+async function pendingWaits(): Promise<string[]> {
+	const snapshot = await navigator.locks.query()
+
+	return (snapshot.pending ?? []).flatMap(lock => (lock.name?.startsWith("filen-web-notes-tab:") === true ? [lock.name] : []))
 }
 
 // Another tab of this browser, alive until the returned function is called (it holds its tab lock).
@@ -158,8 +193,11 @@ beforeEach(async () => {
 	persisted.value = null
 	queryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: BigInt(ME) })
 	queryClient.setQueryData(NOTES_QUERY_KEY, [note])
+	mutexes = vi.spyOn(Semaphore.prototype, "acquire")
 	sync.start()
-	await tick()
+	// This tab's own lock, taken again after the cancel released it.
+	await lockHeld(TAB_ID)
+	await settled()
 })
 
 describe("notes — this tab's own push", () => {
@@ -172,14 +210,16 @@ describe("notes — this tab's own push", () => {
 		getNoteContent.mockReturnValueOnce(peek.promise)
 		setNoteContent.mockImplementation(n => Promise.resolve(n))
 		sync.executeNow()
-		await tick()
+		await until(() => {
+			expect(getNoteContent).toHaveBeenCalledTimes(1)
+		})
 
 		for (const value of ["v2", "v3", "v4", "v5", "v6"]) {
 			type(value)
 		}
 
 		peek.resolve("old")
-		await tick()
+		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "v1", expect.any(String))
 
@@ -191,7 +231,7 @@ describe("notes — this tab's own push", () => {
 
 		getNoteContent.mockResolvedValue("v1")
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		// The live row, which the echo moved on to the pushed version.
 		expect(setNoteContent).toHaveBeenLastCalledWith(
@@ -210,7 +250,7 @@ describe("notes — this tab's own push", () => {
 
 		for (let i = 0; i < 3; i++) {
 			sync.executeNow()
-			await tick()
+			await settled()
 		}
 
 		expect(queuedContents()).toBeUndefined()
@@ -236,7 +276,9 @@ describe("notes — answering the question", () => {
 			return response.promise
 		})
 		sync.executeNow()
-		await tick()
+		await until(() => {
+			expect(cloud.get()).toBe("mine")
+		})
 
 		expect(cloud.get()).toBe("mine")
 
@@ -248,9 +290,9 @@ describe("notes — answering the question", () => {
 		expect(question()).toEqual({ theirs: "theirs" })
 
 		response.resolve(note)
-		await tick()
+		await settled()
 		await keepMineOverRemoteEdit(note)
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("mine")
 		expect(question()).toBeUndefined()
@@ -267,7 +309,7 @@ describe("notes — answering the question", () => {
 		expect((await heldNotes()).has(note.uuid)).toBe(true)
 
 		await keepMineOverRemoteEdit(note)
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("mine")
 	})
@@ -284,7 +326,7 @@ describe("notes — answering the question", () => {
 		expect(question()).toEqual({ theirs: "theirs1" })
 
 		sync.executeNow()
-		await tick()
+		await settled()
 		handleNoteEvent(contentEdited("mine", ME))
 		cloud.set("theirs2")
 		handleNoteEvent(contentEdited("theirs2", ELSEWHERE))
@@ -294,7 +336,7 @@ describe("notes — answering the question", () => {
 		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
 		await reloadRemoteEdit(note)
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("theirs2")
 	})
@@ -374,7 +416,7 @@ describe("notes — a clean tab when the question is answered in another tab", (
 		})
 		useNotesRemoteEditStore.getState().dropRemoteEdited(note.uuid)
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(setNoteContent).not.toHaveBeenCalled()
 		expect(queuedContents()).toBeUndefined()
@@ -400,7 +442,7 @@ describe("notes — a clean tab when the question is answered in another tab", (
 			tabEditorBaseHash(note.uuid) ?? deriveSessionBaseHash({ seed, hasInflight: false, current: null })
 		)
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("theirs + A")
 		closeB()
@@ -438,7 +480,7 @@ describe("notes — this browser's own writes outside the typing", () => {
 		// Not recorded as this browser's (a write made past the notes feature): the version the typing is on.
 		handleNoteEvent(contentEdited("", ME))
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(question()).toBeUndefined()
 		expect(cloud.get()).toBe("# Heading")
@@ -451,7 +493,7 @@ describe("notes — this browser's own writes outside the typing", () => {
 		sync.executeNow()
 		queryClient.setQueryData(noteContentQueryKey(note.uuid), "# imported")
 		handleNoteEvent(contentEdited("", ME))
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("# imported")
 
@@ -474,8 +516,9 @@ describe("notes — this browser's own writes outside the typing", () => {
 		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
 		// The page reloads: restore, reconcile, push the draft.
 		sync.start()
-		await tick()
-		await tick()
+		await until(() => {
+			expect(setNoteContent).toHaveBeenCalledWith(note, "A", expect.any(String))
+		})
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "A", expect.any(String))
 
@@ -484,7 +527,7 @@ describe("notes — this browser's own writes outside the typing", () => {
 		type("AB")
 		handleNoteEvent(contentEdited("A", ME))
 		response.resolve(note)
-		await tick()
+		await settled()
 
 		expect(question()).toBeUndefined()
 		expect((await heldNotes()).has(note.uuid)).toBe(false)
@@ -520,7 +563,7 @@ describe("notes — what the other tabs hear of a push", () => {
 
 		for (let i = 0; i < 3; i++) {
 			sync.executeNow()
-			await tick()
+			await settled()
 		}
 
 		expect(queuedContents()).toBeUndefined()
@@ -539,7 +582,7 @@ describe("notes — versions this tab builds on, and versions it does not", () =
 
 		type("S+A")
 		sync.executeNow()
-		await tick()
+		await settled()
 		handleNoteEvent(contentEdited("S+A", ME))
 		type("S+A+B")
 
@@ -557,7 +600,9 @@ describe("notes — versions this tab builds on, and versions it does not", () =
 		openNote()
 		cloudOf("old")
 		type("old + mine")
-		await tick()
+		await until(() => {
+			expect(kvSetJson).toHaveBeenCalledTimes(1)
+		})
 
 		handleNoteEvent(contentEdited("X", ME))
 
@@ -594,9 +639,11 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 
 		sync.ingestRemoteEnqueue({ note, content: "old+A", timestamp: 1000, baseContentHash: hashNoteContent("old"), origin: "tab-F" })
 		sync.executeNow()
-		await tick()
+		await until(() => {
+			expect(cloud.get()).toBe("old+A")
+		})
 		response.resolve(note)
-		await tick()
+		await settled()
 
 		// F's store still holds the pushed entry: the keystroke carries its base.
 		const next = buildInflightEntries({
@@ -630,7 +677,7 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("old+A"))
 
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("old+AB")
 		expect(toast).not.toHaveBeenCalled()
@@ -646,7 +693,7 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 
 		releaseAllNoteHolds()
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
 	})
@@ -723,7 +770,7 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 
 		sync.ingestRemoteEnqueue({ note, content: "A", timestamp: 1000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("A")
 
@@ -733,7 +780,7 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("B0"))
 
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
 	})
@@ -743,11 +790,11 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 
 		sync.ingestRemoteEnqueue({ note, content: "A", timestamp: 1000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
 		sync.executeNow()
-		await tick()
+		await settled()
 		cloud.set("B0")
 		sync.ingestRemoteEnqueue({ note, content: "B0+c", timestamp: 5000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("B0+c")
 		expect(toast).not.toHaveBeenCalled()
@@ -767,7 +814,9 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 		})
 		type("A")
 		sync.executeNow()
-		await tick()
+		await until(() => {
+			expect(cloud.get()).toBe("A")
+		})
 		// Another tab, since closed, typed on B0 while the push was out.
 		sync.ingestRemoteEnqueue({
 			note,
@@ -777,12 +826,12 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 			origin: "tab-F2"
 		})
 		response.resolve(note)
-		await tick()
+		await settled()
 
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("B0"))
 
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		// Its tab is gone: the leader tells.
 		expect(cloud.get()).toBe("B0+z")
@@ -797,7 +846,7 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 		sync.ingestDrop(note.uuid)
 		cloud.set("R")
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(queuedContents()).toBeUndefined()
 		expect(setNoteContent).not.toHaveBeenCalled()
@@ -821,14 +870,15 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 			return response.promise
 		})
 		sync.executeNow()
-		await tick()
+		await until(() => {
+			expect(cloud.get()).toBe("D")
+		})
 		beginEditingSession(note.uuid)
 		tabEditorChanged(note.uuid, "D+x")
 		await sync.enqueue(note, "D+x", tabEditorBaseHash(note.uuid) ?? hashNoteContent("D"))
 		sync.executeNow()
 		response.resolve(note)
-		await tick()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("D+x")
 
@@ -935,14 +985,15 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 
 		setNoteContent.mockImplementation(() => pushes.promise)
 		sync.start()
-		await tick()
-		await tick()
+		await until(() => {
+			expect(useNotesInflightStore.getState().inflightContent["a"]?.[0]?.orphan).toBe(true)
+		})
 
 		expect(useNotesInflightStore.getState().inflightContent["a"]?.[0]?.orphan).toBe(true)
 		expect(useNotesInflightStore.getState().inflightContent["b"]?.[0]?.orphan).toBeUndefined()
 		release()
 		pushes.resolve(note)
-		await tick()
+		await settled()
 	})
 
 	it("typing on a restored draft during its push is rebased onto it: no false overwrite", async () => {
@@ -964,7 +1015,9 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 			return response.promise
 		})
 		sync.executeNow()
-		await tick()
+		await until(() => {
+			expect(cloud.get()).toBe("D")
+		})
 		beginEditingSession(note.uuid)
 		tabEditorChanged(note.uuid, "D+x")
 		await sync.enqueue(note, "D+x", tabEditorBaseHash(note.uuid) ?? hashNoteContent("D"))
@@ -972,10 +1025,10 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.carriedFrom).toBe("old-page")
 
 		response.resolve(note)
-		await tick()
+		await settled()
 		handleNoteEvent(contentEdited("D", ME))
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("D+x")
 		expect(toast).not.toHaveBeenCalled()
@@ -999,15 +1052,18 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 		})
 		type("A")
 		sync.executeNow()
-		await tick()
 
 		if (failFirst) {
+			await settled()
 			sync.executeNow()
-			await tick()
 		}
 
+		await until(() => {
+			expect(cloud.get()).toBe("A")
+		})
+
 		response.resolve(note)
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("A")
 
@@ -1024,7 +1080,7 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 			origin: "tab-T2"
 		})
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("Q")
 	}
@@ -1065,8 +1121,7 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 		const cloud = cloudOf("A")
 
 		sync.promoteToLeader()
-		await tick()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("A+x")
 		expect(toast).not.toHaveBeenCalled()
@@ -1074,16 +1129,10 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 })
 
 describe("notes — another tab's draft whose tab is gone", () => {
-	async function pendingWaits(): Promise<string[]> {
-		const snapshot = await navigator.locks.query()
-
-		return (snapshot.pending ?? []).flatMap(lock => (lock.name?.startsWith("filen-web-notes-tab:") === true ? [lock.name] : []))
-	}
-
 	it("becomes an orphan once its tab closes, and the leader stops waiting once it drains", async () => {
 		const closeF1 = liveTab("tab-F1")
 
-		await tick()
+		await lockHeld("tab-F1")
 		sync.ingestRemoteEnqueue({
 			note,
 			content: "old+mine",
@@ -1091,13 +1140,18 @@ describe("notes — another tab's draft whose tab is gone", () => {
 			baseContentHash: hashNoteContent("old"),
 			origin: "tab-F1"
 		})
-		await tick()
+		await until(async () => {
+			expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F1"])
+		})
 
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.orphan).toBeUndefined()
 		expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F1"])
 
 		closeF1()
-		await tick()
+		await until(async () => {
+			expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.orphan).toBe(true)
+			expect(await pendingWaits()).toEqual([])
+		})
 
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.orphan).toBe(true)
 		expect(latestShowableContent(useNotesInflightStore.getState().inflightContent[note.uuid])).toBe("old+mine")
@@ -1109,7 +1163,7 @@ describe("notes — another tab's draft whose tab is gone", () => {
 		const withdrawn = vi.spyOn(AbortController.prototype, "abort")
 
 		cloudOf("old")
-		await tick()
+		await lockHeld("tab-F1")
 		sync.ingestRemoteEnqueue({
 			note,
 			content: "old+mine",
@@ -1117,13 +1171,15 @@ describe("notes — another tab's draft whose tab is gone", () => {
 			baseContentHash: hashNoteContent("old"),
 			origin: "tab-F1"
 		})
-		await tick()
+		await until(async () => {
+			expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F1"])
+		})
 
 		expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F1"])
 		expect(withdrawn).not.toHaveBeenCalled()
 
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(queuedContents()).toBeUndefined()
 		expect(withdrawn).toHaveBeenCalledTimes(1)
@@ -1133,7 +1189,7 @@ describe("notes — another tab's draft whose tab is gone", () => {
 	it("typing over another tab's draft this tab never showed is based on that draft: its push warns", async () => {
 		const closeF1 = liveTab("tab-F1")
 
-		await tick()
+		await lockHeld("tab-F1")
 		onlineManager.setOnline(false)
 		sync.ingestRemoteEnqueue({
 			note,
@@ -1151,7 +1207,7 @@ describe("notes — another tab's draft whose tab is gone", () => {
 
 		onlineManager.setOnline(true)
 		sync.executeNow()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("old!")
 		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
@@ -1208,7 +1264,7 @@ describe("notes — answering about an orphan draft", () => {
 
 		const closeF = liveTab("tab-F")
 
-		await tick()
+		await lockHeld("tab-F")
 		sync.ingestRemoteEnqueue({
 			note,
 			content: "old+f",
@@ -1216,9 +1272,13 @@ describe("notes — answering about an orphan draft", () => {
 			baseContentHash: hashNoteContent("old"),
 			origin: "tab-F"
 		})
-		await tick()
+		await until(async () => {
+			expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F"])
+		})
 		closeF()
-		await tick()
+		await until(() => {
+			expect(question()).toEqual({ theirs: "old+f", base: hashNoteContent("old") })
+		})
 
 		expect(question()).toEqual({ theirs: "old+f", base: hashNoteContent("old") })
 
@@ -1231,8 +1291,7 @@ describe("notes — answering about an orphan draft", () => {
 		const cloud = await askedAboutAnOrphan()
 
 		await keepMineOverRemoteEdit(note)
-		await tick()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("old!")
 		expect(toast).not.toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
@@ -1243,8 +1302,7 @@ describe("notes — answering about an orphan draft", () => {
 
 		await reloadRemoteEdit(note)
 		sync.executeNow()
-		await tick()
-		await tick()
+		await settled()
 
 		expect(cloud.get()).toBe("old+f")
 		expect(toast).not.toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")

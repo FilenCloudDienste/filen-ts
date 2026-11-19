@@ -1239,6 +1239,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 						<SortFilterMenu
 							grid={grid}
 							disabled={noCells}
+							filterKeys={keys("filter")}
 						/>
 						{find}
 					</>

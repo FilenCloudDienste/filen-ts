@@ -6,8 +6,8 @@ import interVietnamese from "@fontsource-variable/inter/files/inter-vietnamese-w
 import interLatinExt from "@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2?url"
 import interLatin from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url"
 import type { MarkupItem } from "@/features/preview/imageEdit/types"
-import { transformPoint, type Matrix3 } from "@/features/preview/imageEdit/lib/recipe"
-import { composeMatrix3, matrixScale } from "@/features/preview/imageEdit/worker/tiles"
+import { matrixScale, multiplyMatrix3, transformPoint, type Matrix3 } from "@/features/preview/imageEdit/lib/recipe"
+import { MARKUP_FONT_FAMILY, MARKUP_TEXT_LINE_HEIGHT, markupFontSpec } from "@/features/preview/imageEdit/components/markupStyle"
 
 // Markup rasterised on a 2D canvas for the GPU passes to composite. Strokes and arrows are drawn in SOURCE pixel
 // space through the full source→canvas map (turns, flips, straighten and zoom included), so widths scale with
@@ -16,7 +16,6 @@ import { composeMatrix3, matrixScale } from "@/features/preview/imageEdit/worker
 // The app's own face, so exported text matches the editor's. These are the very files index.css's
 // @fontsource-variable/inter import emits (same content hash, so the page's cached copy answers), with that
 // package's unicode-range per subset: a face is fetched only once text needs one of its characters.
-const INTER_FAMILY = "Inter Variable"
 const INTER_FACES: readonly (readonly [string, string])[] = [
 	[interCyrillicExt, "U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F"],
 	[interCyrillic, "U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116"],
@@ -36,9 +35,6 @@ const INTER_FACES: readonly (readonly [string, string])[] = [
 	]
 ]
 
-export const TEXT_WEIGHT = 600
-export const TEXT_LINE_HEIGHT = 1.2
-
 // Workers expose a FontFaceSet as `self.fonts` (CSS Font Loading §2.4); an engine without it draws text in its
 // default sans-serif.
 const scope: { fonts?: FontFaceSet } = globalThis
@@ -51,15 +47,11 @@ function workerFonts(): FontFaceSet | null {
 		facesAdded = true
 
 		for (const [url, unicodeRange] of INTER_FACES) {
-			fonts.add(new FontFace(INTER_FAMILY, `url(${url}) format("woff2")`, { weight: "100 900", unicodeRange }))
+			fonts.add(new FontFace(MARKUP_FONT_FAMILY, `url(${url}) format("woff2")`, { weight: "100 900", unicodeRange }))
 		}
 	}
 
 	return fonts
-}
-
-function fontSpec(px: number): string {
-	return `${String(TEXT_WEIGHT)} ${String(px)}px "${INTER_FAMILY}", sans-serif`
 }
 
 function textItems(items: readonly MarkupItem[]): string {
@@ -80,11 +72,11 @@ export function markupFontsReady(items: readonly MarkupItem[], onLoaded: () => v
 	const text = textItems(items)
 	const fonts = text.length === 0 ? null : workerFonts()
 
-	if (fonts === null || fonts.check(fontSpec(16), text)) {
+	if (fonts === null || fonts.check(markupFontSpec(16), text)) {
 		return true
 	}
 
-	void fonts.load(fontSpec(16), text).then(onLoaded, () => undefined)
+	void fonts.load(markupFontSpec(16), text).then(onLoaded, () => undefined)
 
 	return false
 }
@@ -95,7 +87,7 @@ export async function loadMarkupFonts(items: readonly MarkupItem[]): Promise<voi
 	const fonts = text.length === 0 ? null : workerFonts()
 
 	if (fonts !== null) {
-		await fonts.load(fontSpec(16), text).catch(() => undefined)
+		await fonts.load(markupFontSpec(16), text).catch(() => undefined)
 	}
 }
 
@@ -171,7 +163,7 @@ export function rasterizeMarkup(
 	sourceToOutput: Matrix3,
 	outputToCanvas: Matrix3
 ): void {
-	const toCanvas = composeMatrix3(outputToCanvas, sourceToOutput)
+	const toCanvas = multiplyMatrix3(outputToCanvas, sourceToOutput)
 	// The output is a similarity of the source (turns, flips, one zoom): its lengths scale by this.
 	const zoom = matrixScale(sourceToOutput)
 
@@ -193,14 +185,14 @@ export function rasterizeMarkup(
 			const px = item.size * zoom
 
 			setTransform(ctx, outputToCanvas)
-			ctx.font = fontSpec(px)
+			ctx.font = markupFontSpec(px)
 			ctx.textAlign = "left"
 			ctx.textBaseline = "top"
 
 			const lines = item.text.split("\n")
 
 			for (let i = 0; i < lines.length; i++) {
-				ctx.fillText(lines[i] ?? "", x, y + i * px * TEXT_LINE_HEIGHT)
+				ctx.fillText(lines[i] ?? "", x, y + i * px * MARKUP_TEXT_LINE_HEIGHT)
 			}
 
 			continue

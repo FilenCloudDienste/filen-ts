@@ -1,7 +1,7 @@
 // Pure status machine for the cache-backed drive search — the reduced-signal port of the mobile
 // app's own grace/watchdog framing (no "offline-incomplete": this app has no equivalent connectivity
 // signal wired into search yet). Framework-free so the derivation is exhaustively table-tested
-// without a worker, Comlink, or React; the hook that owns the actual timers is a later concern.
+// without a worker, Comlink, or React; the hook (useDriveSearch.ts) owns the actual timers.
 export type SearchStatus = "idle" | "warming" | "searching-empty" | "background" | "settled" | "terminal"
 
 // Debounce before a keystroke reaches searchSetName (engine-local refilter — no network, no reopen).

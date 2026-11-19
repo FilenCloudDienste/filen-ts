@@ -73,7 +73,6 @@ const VALID_PLAN = {
 
 const VALID_CFG = {
 	maintenance: false,
-	readOnly: false,
 	announcements: [
 		{
 			uuid: "89159575-1be0-4971-a29b-8d2f2bb25c86",
@@ -121,7 +120,7 @@ describe("parseRemoteConfig", () => {
 	})
 
 	it("defaults missing or non-boolean flags to false and missing lists to empty", () => {
-		expect(parseRemoteConfig({ maintenance: "yes" })).toEqual({ maintenance: false, readOnly: false, announcements: [], pricing: null })
+		expect(parseRemoteConfig({ maintenance: "yes" })).toEqual({ maintenance: false, announcements: [], pricing: null })
 	})
 
 	it("rejects a body that is not an object", () => {

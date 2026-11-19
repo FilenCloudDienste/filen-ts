@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { useTheme, type Theme } from "@/providers/themeProvider"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
-import { saveSetting } from "@/features/settings/components/appearance/saveSetting"
+import { saveSetting } from "@/lib/saveSetting"
 
 const THEME_OPTIONS: { value: Theme; labelKey: "settingsThemeLight" | "settingsThemeDark" | "settingsThemeSystem" }[] = [
 	{ value: "light", labelKey: "settingsThemeLight" },

@@ -261,7 +261,8 @@
 					"par": 1,
 					"rotation": 0,
 					"bitDepth": 8,
-					"transfer": "sdr"
+					"transfer": "sdr",
+					"fps": 24
 				},
 				"audio": [
 					{
@@ -300,7 +301,8 @@
 					"par": 1,
 					"rotation": 0,
 					"bitDepth": 8,
-					"transfer": "sdr"
+					"transfer": "sdr",
+					"fps": 24
 				},
 				"audio": [
 					{
@@ -339,7 +341,8 @@
 					"par": 1,
 					"rotation": 0,
 					"bitDepth": 8,
-					"transfer": "sdr"
+					"transfer": "sdr",
+					"fps": 24
 				},
 				"audio": [
 					{

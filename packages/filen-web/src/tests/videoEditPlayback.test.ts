@@ -218,8 +218,8 @@ describe("EditorPlayback", () => {
 describe("plan readings", () => {
 	const plan = (patch: Partial<ExportPlan>): ExportPlan => ({ ...FAKE_PLAN, ...patch })
 
-	it("keeps only the features it knows as unavailable", () => {
-		expect([...unavailableFeatures(plan({ unavailable: ["adjust", "somethingElse"] }))]).toEqual(["adjust"])
+	it("reads the plan's unavailable features as a set", () => {
+		expect([...unavailableFeatures(plan({ unavailable: ["adjust", "gain"] }))]).toEqual(["adjust", "gain"])
 		expect(unavailableFeatures(null).size).toBe(0)
 	})
 

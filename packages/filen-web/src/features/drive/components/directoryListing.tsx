@@ -35,6 +35,7 @@ import { driveItemMime, isDirectoryItem, type DriveItem } from "@/features/drive
 import { driveItemName, type SniffId } from "@filen/shared"
 import { openSniffedAudio } from "@/features/drive/lib/openSniffedAudio"
 import { log } from "@/lib/log"
+import { saveSetting } from "@/lib/saveSetting"
 import { needsContentSniff, previewOpenTarget } from "@/features/drive/lib/preview.logic"
 import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.logic"
 import { runContentSniff } from "@/features/preview/lib/contentSniff"
@@ -582,28 +583,39 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	}, [hiddenUuids])
 
 	// null (a column header's third click) clears this location back to the default order.
+	// Each write goes through saveSetting (logged + toasted on failure, never an unhandled rejection); the
+	// refetch, which makes the stored value the displayed one, runs only for a stored write.
 	async function applySortChange(next: DriveSortBy | null): Promise<void> {
-		await setSortPreferences(
-			next === null ? withSortCleared(sortPrefs, driveLocation) : withSortSelection(sortPrefs, driveLocation, next)
+		const stored = await saveSetting(() =>
+			setSortPreferences(
+				next === null ? withSortCleared(sortPrefs, driveLocation) : withSortSelection(sortPrefs, driveLocation, next)
+			)
 		)
-		await sortPrefsQuery.refetch()
+
+		if (stored) {
+			await sortPrefsQuery.refetch()
+		}
 	}
 
 	async function applyViewModeChange(next: DriveViewMode): Promise<void> {
-		await setViewModePreferences(withViewModeSelection(viewModePrefs, driveLocation, next))
-		await viewModePrefsQuery.refetch()
+		if (await saveSetting(() => setViewModePreferences(withViewModeSelection(viewModePrefs, driveLocation, next)))) {
+			await viewModePrefsQuery.refetch()
+		}
 	}
 
 	async function applyHideHiddenItemsChange(next: boolean): Promise<void> {
-		await setHideHiddenItems(next)
-		await hiddenPrefQuery.refetch()
+		if (await saveSetting(() => setHideHiddenItems(next))) {
+			await hiddenPrefQuery.refetch()
+		}
 	}
 
+	// The actions below are defined, with their default combos, in features/drive/lib/keymap.ts.
+	//
 	// Every action below stands down under any open dialog or menu (OUTSIDE_OVERLAYS): that layer owns the
 	// keyboard, and the key keeps its default for it, as the guard runs before any preventDefault. A row's
 	// ⋯ menu counts, so nothing here acts on the listing from under it.
 	//
-	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
+	// Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
 	// Withheld (preventDefault still runs, so the browser default stays suppressed either way)
 	// while the cache-backed search is still converging (warming/searching-empty/background) — only
@@ -628,7 +640,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[sortedItems, search.active, search.status]
 	)
 
-	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
+	// No preventDefault — bare Escape has no disruptive browser
 	// default. A dialog or menu takes Escape itself; a bulk context menu whose selection vanished
 	// mid-open would swap its content component underneath Base UI and then stay stuck open.
 	useAction(
@@ -639,7 +651,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		OUTSIDE_OVERLAYS
 	)
 
-	// Registered above at module scope.
 	useAction(
 		"drive.toggleView",
 		() => {
@@ -649,7 +660,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[effectiveViewMode, applyViewModeChange]
 	)
 
-	// Registered above at module scope. No preventDefault — F2 has no disruptive browser default.
+	// No preventDefault — F2 has no disruptive browser default.
 	// Reuses driveItemActions' own gating (rather than re-deriving "not in trash, not undecryptable"
 	// here) so this can never open a rename the item menu itself wouldn't offer for the same item.
 	useAction(
@@ -776,7 +787,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		cursorDeps
 	)
 
-	// Registered above at module scope. preventDefault whenever the listing takes the key, guarded case or
+	// preventDefault whenever the listing takes the key, guarded case or
 	// not — Backspace's "navigate back" in the engines that still have it. What it does is what takes the
 	// selection out of this listing (driveDeleteKeyTarget): trash, stop a share, disable a link. Nothing in
 	// the trash itself, where deleting forever has its own confirmed key.
@@ -945,7 +956,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[setScrollElement, openRef, itemMenuRef, containingDirectoryRef]
 	)
 
-	// Registered above at module scope. preventDefault whenever the listing takes the key — mod+s's
+	// preventDefault whenever the listing takes the key — mod+s's
 	// browser default (Save Page As) must never fire over it. Guards: the trash variant (download isn't
 	// offered there, matching item-menu/bulk-bar's own trash exclusion) plus isBulkDownloadEnabled
 	// (bulkActionBar.logic.ts) — the single unifying ENABLED gate every download entry point shares, empty
@@ -1027,7 +1038,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			}
 		},
 		OUTSIDE_OVERLAYS,
-		[sortedItems, safeActiveIndex]
+		// focusCursor closes over the view mode, column count and active virtualizer, none of which moves sortedItems.
+		[sortedItems, focusCursor]
 	)
 
 	// The trash toolbar's Empty trash, behind its own confirm.

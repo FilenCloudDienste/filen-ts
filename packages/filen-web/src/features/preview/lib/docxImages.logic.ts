@@ -1,6 +1,8 @@
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, sniffImage, type DocxEditorCommand, type DocxImageInfo } from "@filen/office/core/docx/edit"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
+import { AVIF_BRANDS, HEIF_BRANDS } from "@/features/preview/imageEdit/lib/heifMeta"
+import { readWebpHeader } from "@/features/preview/imageEdit/lib/webpMeta"
 import { HEIC_EXTENSIONS, IMAGE_FORMATS, type ImageDecode } from "@/features/preview/lib/imageFormat"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -59,46 +61,17 @@ function ascii(bytes: Uint8Array, at: number, text: string): boolean {
 	return true
 }
 
-function u16le(bytes: Uint8Array, at: number): number {
-	return (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
-}
-
-function u24le(bytes: Uint8Array, at: number): number {
-	return u16le(bytes, at) | ((bytes[at + 2] ?? 0) << 16)
-}
-
 // A WebP picture's canvas size from its first chunk (RFC 9649: VP8, VP8L, VP8X), undefined when the header
 // does not hold one. Read before anything is decoded.
 export function webpSize(bytes: Uint8Array): { width: number; height: number } | undefined {
-	if (bytes.length < 30 || !ascii(bytes, 0, "RIFF") || !ascii(bytes, 8, "WEBP")) {
-		return undefined
-	}
+	const header = bytes.length < 30 ? null : readWebpHeader(bytes)
 
-	if (ascii(bytes, 12, "VP8X")) {
-		return { width: u24le(bytes, 24) + 1, height: u24le(bytes, 27) + 1 }
-	}
-
-	if (ascii(bytes, 12, "VP8L")) {
-		if (bytes[20] !== 0x2f) {
-			return undefined
-		}
-
-		const bits = ((bytes[21] ?? 0) | ((bytes[22] ?? 0) << 8) | ((bytes[23] ?? 0) << 16) | ((bytes[24] ?? 0) << 24)) >>> 0
-
-		return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 }
-	}
-
-	// A key frame's start code, then 14-bit width and height (the top two bits scale, not size).
-	if (ascii(bytes, 12, "VP8 ") && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
-		return { width: u16le(bytes, 26) & 0x3fff, height: u16le(bytes, 28) & 0x3fff }
-	}
-
-	return undefined
+	return header === null ? undefined : { width: header.width, height: header.height }
 }
 
 // Whether a WebP picture is animated (its VP8X header's animation flag, RFC 9649 §2.7).
 export function webpAnimated(bytes: Uint8Array): boolean {
-	return bytes.length >= 21 && ascii(bytes, 12, "VP8X") && ((bytes[20] ?? 0) & 0x02) !== 0
+	return readWebpHeader(bytes)?.animated ?? false
 }
 
 // Whether clipboard HTML holds pictures and nothing else (what a browser's Copy Image writes beside the picture
@@ -119,9 +92,6 @@ export function htmlHoldsOnlyImages(html: string | undefined): boolean {
 }
 
 // ISO-BMFF pictures browsers or Word cannot take, by their major brand.
-const HEIC_BRANDS: ReadonlySet<string> = new Set(["heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs", "mif1", "msf1"])
-const AVIF_BRANDS: ReadonlySet<string> = new Set(["avif", "avis"])
-
 function unsupportedFormat(bytes: Uint8Array): "heic" | "avif" | "format" {
 	if (bytes.length >= 12 && ascii(bytes, 4, "ftyp")) {
 		const brand = String.fromCharCode(bytes[8] ?? 0, bytes[9] ?? 0, bytes[10] ?? 0, bytes[11] ?? 0)
@@ -130,7 +100,7 @@ function unsupportedFormat(bytes: Uint8Array): "heic" | "avif" | "format" {
 			return "avif"
 		}
 
-		if (HEIC_BRANDS.has(brand)) {
+		if (HEIF_BRANDS.has(brand)) {
 			return "heic"
 		}
 	}

@@ -345,51 +345,59 @@ async function reconcile(state: LibraryConfigState): Promise<LibraryConfigState>
 }
 
 // A read, merged with the cached copy (an edit another session's save went over is restored and saved back).
-// `askedAt`: when the caller learned `watermark`; a listing started since reflects it.
+// `askedAt`: when the caller learned `watermark`; a listing started since reflects it. A failed read or repair upload
+// leaves the configuration marked for a read (`currentTo` still follows the event stream, so this tab's own upload
+// echoes keep it current once the repair lands).
 async function readAndReconcile(watermark: bigint | null, askedAt = performance.now()): Promise<LibraryConfigState> {
 	const owner = requireAccount()
 	const previous = cached()
 
 	unsynced = false
 
-	const remote = await readRemote(askedAt)
+	try {
+		const remote = await readRemote(askedAt)
 
-	currentTo = watermark
+		currentTo = watermark
 
-	if (remote.doc === null) {
-		// Shown as last known, never saved over, and read again by the next session.
-		blockedHead = remote.head?.uuid ?? null
-		lastRemote = null
+		if (remote.doc === null) {
+			// Shown as last known, never saved over, and read again by the next session.
+			blockedHead = remote.head?.uuid ?? null
+			lastRemote = null
 
-		return store({
+			return store({
+				account: owner,
+				doc: previous?.doc ?? emptyLibraryConfig(),
+				dirUuid: remote.dirUuid,
+				headUuid: remote.head?.uuid ?? null,
+				watermark: null
+			})
+		}
+
+		blockedHead = null
+		observe(remote.doc)
+		lastRemote = remote.doc
+
+		const read: LibraryConfigState = {
 			account: owner,
-			doc: previous?.doc ?? emptyLibraryConfig(),
+			doc: remote.doc,
 			dirUuid: remote.dirUuid,
 			headUuid: remote.head?.uuid ?? null,
-			watermark: null
-		})
+			watermark
+		}
+
+		return store(
+			previous === undefined
+				? read
+				: await reconcile({
+						...read,
+						doc: mergeLibraryConfig({ local: previous.doc, remote: remote.doc }).doc
+					})
+		)
+	} catch (e) {
+		unsynced = true
+
+		throw e
 	}
-
-	blockedHead = null
-	observe(remote.doc)
-	lastRemote = remote.doc
-
-	const read: LibraryConfigState = {
-		account: owner,
-		doc: remote.doc,
-		dirUuid: remote.dirUuid,
-		headUuid: remote.head?.uuid ?? null,
-		watermark
-	}
-
-	return store(
-		previous === undefined
-			? read
-			: await reconcile({
-					...read,
-					doc: mergeLibraryConfig({ local: previous.doc, remote: remote.doc }).doc
-				})
-	)
 }
 
 // The configuration, current to `watermark` (the drive's latest event id, when the caller has one): the cached

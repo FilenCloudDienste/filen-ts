@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import { test as base, expect, type BrowserContext, type BrowserType, type Page, type Request, type TestInfo } from "@playwright/test"
 import { fixtureManifestName } from "@/e2e-hooks/runManifest"
 import { SESSION_BINDING } from "@/e2e-hooks/sessionSeed"
+import { E2E_AUTOSAVE_KEY } from "@/e2e-hooks/storageKeys"
 import { common } from "@/locales/en/common"
 import { silenceMediaElements } from "./helpers/muteMedia"
 
@@ -48,8 +49,14 @@ export function runChatNamePrefix(runId: string): string {
 	return `e2e-chat-${runId}-`
 }
 
+// Null when auth-setup harvested nothing, which locally means no credentials (the authed specs skip). In CI that is
+// a misconfiguration (the credential secrets missing), and a run of skips would pass, so it throws there.
 export function readHarvestedSession(): string | null {
 	if (!existsSync(SESSION_FILE)) {
+		if (process.env["CI"]) {
+			throw new Error("no harvested session in CI: auth-setup ran without e2e credentials")
+		}
+
 		return null
 	}
 
@@ -809,13 +816,7 @@ export async function throttleCpu(context: BrowserContext, page: Page, browserNa
 	await throttle(page)
 }
 
-// Seeds the saved session blob into every test's page by default: sessionStorage before the app loads
-// on every navigation (page context — the worker-owned sqlite cannot be written from an init script;
-// the app's own e2e hook moves it into the worker + kv and re-runs the route guards). Skips cleanly
-// when no session was minted (no credentials). SDK-free and logged-out tests opt out with
-// `test.use({ injectSession: false })`, which also keeps them running for contributors without
-// credentials. Requested by name only where the blob itself is consumed.
-// cfg.json and dev's cfg.test.json alike.
+// The remote config the app fetches at boot: cfg.json and dev's cfg.test.json alike.
 const REMOTE_CONFIG_ROUTE = /^https:\/\/cdn\.filen\.io\/cfg[^/]*\.json(?:\?.*)?$/
 
 const NEUTRAL_REMOTE_CONFIG = JSON.stringify({
@@ -1007,13 +1008,19 @@ export const test = base.extend<{
 		if (testInfo.project.name.endsWith("-read")) {
 			await context.addInitScript(key => {
 				sessionStorage.setItem(key, "off")
-			}, "filen-e2e-docx-autosave")
+			}, E2E_AUTOSAVE_KEY)
 		}
 
 		await throttleCpu(context, page, browserName)
 
 		await use(page)
 	},
+	// Seeds the session auth-setup harvested (via `dumpSession`, stored to a file) into every test's page by default:
+	// served on every navigation through the session page binding (seedSession, src/e2e-hooks/sessionSeed.ts), which
+	// bootSdk reads before its own resumeSession. Skips when no session was harvested (no credentials), outside CI
+	// (readHarvestedSession). SDK-free and logged-out tests opt out with `test.use({ injectSession: false })`, which
+	// also keeps them running for contributors without credentials. Requested by name only where the blob itself is
+	// consumed.
 	injectedSession: [
 		async ({ page, context, injectSession, accountLock: _accountLock }, use) => {
 			if (!injectSession) {

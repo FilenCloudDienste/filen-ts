@@ -1,10 +1,10 @@
 import { useSyncExternalStore } from "react"
 import { type } from "arktype"
-import { kvPreference } from "@/lib/storage/preference"
-import { log } from "@/lib/log"
+import { preloadedPreference } from "@/lib/storage/preloadedPreference"
 
 // How the text and code viewers show a file: wrapped lines, line numbers and the font size. One value kept on this
-// device for every file (the notes editors keep their own look), read once a viewer first mounts.
+// device for every file (the notes editors keep their own look), read during boot (lib/sdk/boot.ts), so a viewer's
+// first render shows it.
 
 export interface CodeViewSettings {
 	readonly wrap: boolean
@@ -22,62 +22,21 @@ function nearestFontSize(size: number): number {
 	return CODE_FONT_SIZES.reduce((best, candidate) => (Math.abs(candidate - size) < Math.abs(best - size) ? candidate : best))
 }
 
-const preference = kvPreference({
+const preference = preloadedPreference<CodeViewSettings>({
 	key: "preview.codeView.v1",
 	schema: type({ wrap: "boolean", lineNumbers: "boolean", fontSize: "number" }),
 	fallback: DEFAULTS,
+	scope: "preview",
+	same: (a, b) => a.wrap === b.wrap && a.lineNumbers === b.lineNumbers && a.fontSize === b.fontSize,
 	normalize: settings => ({ ...settings, fontSize: nearestFontSize(settings.fontSize) })
 })
 
-let settings: CodeViewSettings = DEFAULTS
-let loading: Promise<void> | null = null
-const listeners = new Set<() => void>()
-
-function notify(): void {
-	for (const listener of listeners) {
-		listener()
-	}
-}
-
-function subscribe(listener: () => void): () => void {
-	listeners.add(listener)
-
-	loading ??= preference.get().then(
-		stored => {
-			// A change made before the stored value arrived wins.
-			if (settings === DEFAULTS) {
-				settings = stored
-				notify()
-			}
-		},
-		(error: unknown) => {
-			log.warn("preview", "code view settings not read", { error })
-		}
-	)
-
-	return () => {
-		listeners.delete(listener)
-	}
-}
-
-function current(): CodeViewSettings {
-	return settings
-}
+export const loadCodeViewSettings = preference.load
 
 export function useCodeViewSettings(): CodeViewSettings {
-	return useSyncExternalStore(subscribe, current, current)
+	return useSyncExternalStore(preference.subscribe, preference.get, preference.get)
 }
 
 export function setCodeViewSettings(change: Partial<CodeViewSettings>): void {
-	const next = { ...settings, ...change }
-
-	if (next.wrap === settings.wrap && next.lineNumbers === settings.lineNumbers && next.fontSize === settings.fontSize) {
-		return
-	}
-
-	settings = next
-	notify()
-	preference.set(next).catch((error: unknown) => {
-		log.warn("preview", "code view settings not saved", { error })
-	})
+	preference.set({ ...preference.get(), ...change })
 }

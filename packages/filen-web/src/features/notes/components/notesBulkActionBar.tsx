@@ -1,4 +1,4 @@
-import { createElement, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
@@ -38,15 +38,8 @@ import {
 } from "@/features/notes/components/notesBulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { NOTE_TYPE_SUBMENU } from "@/features/notes/components/noteMenu.logic"
-import { Button } from "@/components/ui/button"
-import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuCheckboxItem,
-	DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu"
+import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/components/selectionActionBar"
+import { DropdownMenuItem, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
 
 export type { NoteBulkDialogActionKind }
 
@@ -208,24 +201,15 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 								))
 
 					return (
-						<DropdownMenu key={descriptor.id}>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="outline"
-										size="icon-sm"
-										disabled={disabled}
-										aria-label={t(descriptor.labelKey)}
-										title={disabledReason}
-									>
-										{createElement(descriptor.icon, { "aria-hidden": true })}
-									</Button>
-								}
-							/>
-							<DropdownMenuContent align="end">
-								{entries.length === 0 ? <DropdownMenuItem disabled>{t("noteTagsSubmenuEmpty")}</DropdownMenuItem> : entries}
-							</DropdownMenuContent>
-						</DropdownMenu>
+						<BulkActionMenuButton
+							key={descriptor.id}
+							icon={descriptor.icon}
+							label={t(descriptor.labelKey)}
+							disabled={disabled}
+							disabledReason={disabledReason}
+						>
+							{entries.length === 0 ? <DropdownMenuItem disabled>{t("noteTagsSubmenuEmpty")}</DropdownMenuItem> : entries}
+						</BulkActionMenuButton>
 					)
 				}
 

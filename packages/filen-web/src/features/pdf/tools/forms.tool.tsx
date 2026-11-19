@@ -10,7 +10,6 @@ export const FORMS_TOOL: PdfTool = {
 	labelKey: "previewPdfClearForm",
 	icon: EraserIcon,
 	toolClass: "formFill",
-	actionIds: [],
 	actions: [],
 	enabledWhen: policy => toolEnabled("formFill", policy),
 	commands: ["forms.reset", "forms.setField", "forms.removeXfa"],

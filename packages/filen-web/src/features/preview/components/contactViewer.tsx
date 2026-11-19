@@ -1,7 +1,7 @@
-import { useState } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { cn } from "@filen/shared"
 import type { Contact, ContactFile, ContactValue } from "@filen/shared/contactFile"
 import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
@@ -13,7 +13,8 @@ import type { MetadataField, MetadataSectionData } from "@/features/preview/lib/
 import { readContactFile } from "@/features/preview/lib/textFamilyClient"
 import { useTextFamilyReading } from "@/features/preview/hooks/useTextFamilyReading"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
-import { clampListboxIndex } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, listboxKeyTarget, listboxPageStep } from "@/features/drive/lib/listbox"
+import { withActiveRow } from "@/features/videos/lib/videoGrid.logic"
 
 function typed(t: TFunction<"preview">, label: string, value: ContactValue): string {
 	return value.types.length === 0 ? label : t("previewContactsTyped", { label, types: value.types.join(", ") })
@@ -68,17 +69,66 @@ function omittedNote(t: TFunction<"preview">, count: number, truncated: boolean)
 
 const ROW_HEIGHT = 52
 
+// A listbox with one tab stop, the selected card: arrows, Home, End and Page keys move the selection and the focus with it.
 function ContactList({ file, selected, onSelect }: { file: ContactFile; selected: number; onSelect: (index: number) => void }) {
 	const { t } = useTranslation("preview")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const count = file.contacts.length
 	const virtualizer = useVirtualizer({
-		count: file.contacts.length,
+		count,
 		getScrollElement: () => scrollElement,
 		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => ROW_HEIGHT,
-		overscan: 8
+		overscan: 8,
+		// The selected option stays mounted, so the list keeps its tab stop when scrolled away from it.
+		rangeExtractor: range => withActiveRow(defaultRangeExtractor(range), selected, range.count)
 	})
-	const label = t("previewContactsCount", { count: file.contacts.length })
+	// The option a key moved to, focused once it is rendered selected.
+	const focusPending = useRef<number | null>(null)
+	const label = t("previewContactsCount", { count })
+
+	useEffect(() => {
+		const pending = focusPending.current
+
+		if (pending === null || scrollElement === null) {
+			return
+		}
+
+		const option = scrollElement.querySelector<HTMLElement>(`[data-index="${String(pending)}"]`)
+
+		if (option !== null) {
+			focusPending.current = null
+			option.focus({ preventScroll: true })
+		}
+	})
+
+	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || scrollElement === null) {
+			return
+		}
+
+		const target = listboxKeyTarget(event.key, selected, count, 1, false, listboxPageStep(scrollElement.clientHeight, ROW_HEIGHT, 1))
+
+		if (target === null) {
+			return
+		}
+
+		event.preventDefault()
+
+		const next = clampListboxIndex(target, count)
+
+		virtualizer.scrollToIndex(next)
+
+		// A key that keeps the selection commits no render, so a pending focus would fire on some later, unrelated render.
+		if (next === selected) {
+			scrollElement.querySelector<HTMLElement>(`[data-index="${String(next)}"]`)?.focus({ preventScroll: true })
+
+			return
+		}
+
+		focusPending.current = next
+		onSelect(next)
+	}
 
 	return (
 		<div className="flex min-h-0 flex-col border-border/50 max-md:max-h-64 max-md:border-b md:w-72 md:border-e">
@@ -91,6 +141,7 @@ function ContactList({ file, selected, onSelect }: { file: ContactFile; selected
 				role="listbox"
 				aria-label={label}
 				className="min-h-0 flex-1 overflow-y-auto"
+				onKeyDown={onKeyDown}
 			>
 				<div
 					className="relative w-full"
@@ -111,6 +162,10 @@ function ContactList({ file, selected, onSelect }: { file: ContactFile; selected
 								type="button"
 								role="option"
 								aria-selected={active}
+								aria-setsize={count}
+								aria-posinset={virtualRow.index + 1}
+								data-index={virtualRow.index}
+								tabIndex={active ? 0 : -1}
 								className={cn(
 									"absolute top-0 left-0 flex w-full flex-col justify-center px-4 text-start text-sm hover:bg-accent/50",
 									active ? "bg-accent" : null

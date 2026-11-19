@@ -41,7 +41,7 @@ import {
 } from "@filen/office/dom/docx"
 import type { DocxEditingHost, DocxSealer } from "@filen/office/dom/docx/editing"
 import type { DocxSaveNotice } from "@filen/office/dom/docx/save"
-import { isImeKeydown } from "@filen/shared/keymap"
+import { isImeKeydown, parseCombo } from "@filen/shared/keymap"
 import { useDocxDocument, type DocxSource } from "@filen/office/react/docx"
 import {
 	DocxEditor,
@@ -159,6 +159,9 @@ import { log } from "@/lib/log"
 import { useElementSize } from "@/lib/useElementSize"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useLatestRef } from "@/lib/useLatestRef"
+import { chordText } from "@/lib/keymap/keyText"
+import { useKeyboardLayout } from "@/lib/keymap/layout"
+import { useComboFor } from "@/lib/keymap/registry"
 
 // A Word document edited in place: the paged editor (@filen/office) on the page's own thread, its toolbar,
 // find and replace, spelling (marks, and suggestions in the context menu), clipboard commands, touch
@@ -197,6 +200,11 @@ function findOptionsOf(caseSensitive: boolean, wholeWord: boolean): (typeof FIND
 const NO_SPELLING: readonly SpellingMark[] = []
 // The toast shown while a save looks for the blocks the writer refuses.
 const SEARCH_TOAST = "docx-save-search"
+
+// A save notice's toast: one per kind, which the next save's notice of that kind replaces.
+function saveNoticeToastId(kind: DocxSaveNotice["kind"]): string {
+	return `docx-save-notice-${kind}`
+}
 // Suggestions a context menu offers.
 const MAX_SUGGESTIONS = 6
 
@@ -504,6 +512,22 @@ export function DocxProtectedEditView({ document, ...props }: DocxProtectedEditV
 	)
 }
 
+// Autosave held for a save by the user: it names the Save action's key as the user bound it (none when unbound).
+function DocxAutosaveHeldNotice() {
+	const { t } = useTranslation("preview")
+	const chord = parseCombo(useComboFor("preview.save"))[0]
+	const layout = useKeyboardLayout()
+
+	return (
+		<p
+			role="status"
+			className="shrink-0 border-b bg-muted px-3 py-1.5 text-xs text-muted-foreground"
+		>
+			{chord === undefined ? t("previewDocxAutosaveHeldNoKey") : t("previewDocxAutosaveHeld", { shortcut: chordText(chord, layout) })}
+		</p>
+	)
+}
+
 export function DocxEditView({
 	bytes,
 	alt,
@@ -526,6 +550,11 @@ export function DocxEditView({
 	const [opened, setOpened] = useState(() => openEditing(bytes, openedWith.markup, false, encryption, backend))
 	const document = useDocxDocument(opened.source)
 	const [ready, setReady] = useState<Ready | null>(null)
+	// The open whose editor could not be built while the viewer engine laid the document out: shown read-only. Keyed
+	// by the open, so a reopen (unlock, markup, protection) starts clean.
+	const [failed, setFailed] = useState<{ readonly opened: Opened; readonly error: unknown } | null>(null)
+	const failure = failed?.opened === opened ? failed : null
+	const loggedFailure = useRef<unknown>(null)
 	const current = ready?.opened === opened ? ready : null
 	const openedRef = useLatestRef(onEditorOpened)
 	const editor = current?.editor
@@ -639,8 +668,12 @@ export function DocxEditView({
 	// The Word keys in effect, as the user bound them (Settings → Keyboard).
 	const keyBindings = useDocxKeyBindings()
 	const { withAuthor, dialog: authorDialog } = useDocxAuthorGate({ authorName: settings.authorName, editor, execute })
-	// Each mounted page's overlay element and what it was made from (overlays, below).
-	const [overlayElements] = useState(() => new Map<number, OverlayElement>())
+	// Each mounted page's overlay element and what it was made from (overlays, below), for one editor: a reopen (a new
+	// editor) starts an empty cache, so no entry of a page the new one never mounts keeps the previous editor alive.
+	const [overlayCache, setOverlayCache] = useState<{
+		readonly editor: PagedEditor | undefined
+		readonly elements: Map<number, OverlayElement>
+	}>(() => ({ editor: undefined, elements: new Map() }))
 	// The object a press on the pages hit, for the feature that acts on it (handles, pickers, popovers).
 	const [press, setPress] = useState<DocxObjectPress | null>(null)
 	const online = useIsOnline()
@@ -833,14 +866,32 @@ export function DocxEditView({
 					toast.info(t("previewDocxLockedBlocks", { count: locked }))
 				}
 			},
-			// The document failed to open (the viewer shows why) or was closed.
-			() => undefined
+			// Closed (or superseded by a reopen): nothing to say. An engine error is shown by the document's own error state
+			// (document.status); anything else the editor's build threw leaves the document to the read-only viewer.
+			(error: unknown) => {
+				if (live) {
+					setFailed({ opened, error })
+				}
+			}
 		)
 
 		return () => {
 			live = false
 		}
 	}, [opened, t, openedRef])
+
+	// Logged once per failure, unless the engine's own error (the document's error state, which says why) rejected it.
+	useEffect(() => {
+		if (failure === null || loggedFailure.current === failure) {
+			return
+		}
+
+		loggedFailure.current = failure
+
+		if (document.status !== "error") {
+			log.error("docx", "editor could not open", failure.error)
+		}
+	}, [failure, document.status])
 
 	useEffect(() => {
 		void loadOfficeSettings()
@@ -871,6 +922,22 @@ export function DocxEditView({
 		onDirtyChange(dirty)
 	}, [dirty, onDirtyChange])
 
+	// The save notices' toasts shown for this open, dismissed once it goes (closed, or opened again); not on a language
+	// change, which only installs the save source again.
+	const noticeToastsRef = useRef(new Set<string>())
+
+	useEffect(() => {
+		const shown = noticeToastsRef.current
+
+		return () => {
+			for (const id of shown) {
+				toast.dismiss(id)
+			}
+
+			shown.clear()
+		}
+	}, [opened])
+
 	// The overlay saves through this while the document can be saved.
 	useEffect(() => {
 		if (editor === undefined || !writable) {
@@ -895,9 +962,13 @@ export function DocxEditView({
 				}
 			},
 			onNotices: notices => {
-				// One kind so far: comments an ODF 1.0 or 1.1 file keeps at the start of their text.
-				for (const { count } of notices) {
-					toast.warning(t("previewDocxSaveCommentPoint", { count }), { duration: Infinity })
+				// One kind so far: comments an ODF 1.0 or 1.1 file keeps at the start of their text. Each kind has one
+				// toast, which the next save's notice of that kind replaces.
+				for (const { kind, count } of notices) {
+					const id = saveNoticeToastId(kind)
+
+					noticeToastsRef.current.add(id)
+					toast.warning(t("previewDocxSaveCommentPoint", { count }), { id, duration: Infinity })
 				}
 			},
 			onLocked: ({ count, text, reverted }) => {
@@ -1618,12 +1689,26 @@ export function DocxEditView({
 
 		return true
 	}
+	if (overlayCache.editor !== editor) {
+		setOverlayCache({ editor, elements: new Map() })
+	}
+
+	const overlayElements = overlayCache.elements
 	// The pages lay out again on a keystroke and ask each mounted page for its overlay: a page whose frame and
 	// inputs are as they were gets the element it got, so React draws nothing of it again.
 	const overlays =
 		editor === undefined || !(REVIEW_OVERLAY || OBJECT_OVERLAY)
 			? undefined
 			: (page: DocxPageOverlay): ReactNode => {
+					// The last page asking: entries past it are of pages the document no longer has.
+					if (page.index === editor.pageCount - 1) {
+						for (const index of overlayElements.keys()) {
+							if (index > page.index) {
+								overlayElements.delete(index)
+							}
+						}
+					}
+
 					const known = overlayElements.get(page.index)
 
 					if (
@@ -1671,8 +1756,6 @@ export function DocxEditView({
 				editor={editor}
 				markup={shownMode}
 				zoom={zoom}
-				gap={PAGE_GAP}
-				container={wrapper}
 				readOnly={readOnly}
 				execute={execute}
 				withAuthor={withAuthor}
@@ -1744,7 +1827,7 @@ export function DocxEditView({
 		}
 	}
 
-	if (document.status === "error") {
+	if (document.status === "error" || failure !== null) {
 		return viewer()
 	}
 
@@ -1829,14 +1912,7 @@ export function DocxEditView({
 					onUnlock={unlockWrite}
 				/>
 			)}
-			{autosaveHeld && settings.autosave ? (
-				<p
-					role="status"
-					className="shrink-0 border-b bg-muted px-3 py-1.5 text-xs text-muted-foreground"
-				>
-					{t("previewDocxAutosaveHeld", { shortcut: shortcut("S") })}
-				</p>
-			) : null}
+			{autosaveHeld && settings.autosave ? <DocxAutosaveHeldNotice /> : null}
 			{/* The Navigation pane docks left of the pages, which fit the width left to them. */}
 			<div
 				ref={setPaneRow}

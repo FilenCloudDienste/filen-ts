@@ -21,7 +21,14 @@ const { toast, runPreviewSave, nameExistsInDirectory, listings, cachedListings, 
 }))
 
 vi.mock("sonner", () => ({ toast }))
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
+		t: (key: string, args?: { base?: string; date?: string; ext?: string }) =>
+			key === "previewConflictCopyName" && args !== undefined
+				? `${args.base ?? ""} (conflicted copy ${args.date ?? ""})${args.ext ?? ""}`
+				: key
+	})
+}))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { nameExistsInDirectory, uploadFileBytes: vi.fn() } }))
@@ -36,6 +43,7 @@ vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root" }
 vi.mock("@/features/drive/queries/drive", () => ({
 	driveListingQueryOptions: vi.fn(),
 	driveListingQueryUpdate: vi.fn(),
+	flushListingCreates: vi.fn(),
 	listingRowsVerified: () => listings.current,
 	cachedListing: (variant: string, uuid: string | null) => cachedListings.get(`${variant}:${uuid ?? ""}`),
 	normalizeParentUuid: (parent: string) => parent
@@ -49,6 +57,7 @@ const { setPreviewDirty, usePreviewUnsavedGuardStore } = await import("@/feature
 const { emitPreviewItemRestored, emitPreviewResync, subscribePreviewReconcile } = await import("@/features/preview/lib/previewReconcile")
 const { driveListingQueryOptions } = await import("@/features/drive/queries/drive")
 const { clearPreviewCache, getPreviewBytes } = await import("@/features/preview/lib/previewCache")
+const { queryClient } = await import("@/queries/client")
 
 type DriveItem = ReturnType<typeof narrowItem>
 
@@ -161,6 +170,9 @@ async function flush(): Promise<void> {
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	// The directory a new file is named in: empty unless a test serves its own.
+	queryClient.clear()
+	serveListing([])
 	listings.current = true
 	cachedListings.clear()
 	usePreviewUnsavedGuardStore.getState().clear()
@@ -769,7 +781,7 @@ describe("usePreviewRemoteChanges", () => {
 
 		expect(runPreviewSave.mock.lastCall?.[1]).toMatchObject({
 			content: { port: edits.port },
-			asNewFile: expect.stringContaining("a") as unknown
+			asNewFile: expect.stringContaining("(conflicted copy ") as unknown
 		})
 		expect(edits.commits()).toBe(0)
 		expect(commitSaved.mock.lastCall?.[1].data.uuid).toBe(testUuid("a1"))
@@ -792,6 +804,81 @@ describe("usePreviewRemoteChanges", () => {
 		expect(runPreviewSave).not.toHaveBeenCalled()
 		expect(edits.closed()).toBe(true)
 		expect(toast.error).toHaveBeenCalledWith("previewSaveAsNewFileFailed")
+	})
+
+	it("names a new file from one listing read, however many names are taken, without a name lookup per candidate", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(new Date(2026, 10, 18, 14, 3))
+
+		try {
+			const stamp = "2026-11-18 14-03"
+			const listing = serveListing([
+				file("a", { meta: meta("Notes.TXT") }),
+				file("c1", { meta: meta(`notes (conflicted copy ${stamp}).txt`) }),
+				file("c2", { meta: meta(`notes (conflicted copy ${stamp} 2).txt`) })
+			])
+			const { hook } = setup(undefined, undefined, () => Promise.resolve(Uint8Array.of(1)))
+
+			runPreviewSave.mockResolvedValueOnce({ status: "success", item: file("copy", { stableUUID: "copy" as File["stableUUID"] }) })
+
+			act(() => {
+				emitPreviewItemRemoved(testUuid("a"))
+			})
+
+			await act(async () => {
+				await hook.result.current.saveMineAsNewFile()
+			})
+
+			expect(runPreviewSave.mock.lastCall?.[1]).toMatchObject({ asNewFile: `notes (conflicted copy ${stamp} 3).txt` })
+			expect(listing.reads()).toBe(1)
+			expect(nameExistsInDirectory).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("aborts a deck's save and lets its written file go when the directory's names cannot be read", async () => {
+		const { SAVE_PORT_CHUNK, savePortWriter } = await import("@filen/shared/savePort")
+		const channel = new MessageChannel()
+		// The session's writer, blocked until the upload pulls (it never will).
+		const writer = savePortWriter(channel.port1)
+		const blocked = writer.write(new Uint8Array(SAVE_PORT_CHUNK)).then(
+			() => "written",
+			() => "aborted"
+		)
+		const abandon = vi.fn(() => Promise.resolve())
+		const edits: PresentationSaveEdits = {
+			kind: "port",
+			port: channel.port2,
+			announced: Promise.resolve(true),
+			result: blocked.then(() => ({ kind: "written", bytes: 3, revision: 2, notices: [] })),
+			commit: () => Promise.resolve({ dirty: false }),
+			abandon
+		}
+		const { hook } = setup(undefined, undefined, () => Promise.resolve(edits))
+
+		vi.mocked(driveListingQueryOptions).mockImplementation(
+			(variant, uuid) =>
+				({
+					queryKey: ["drive", "listing", { variant, uuid, failing: true }],
+					queryFn: () => Promise.reject(new Error("parent gone")),
+					retry: false
+				}) as unknown as ReturnType<typeof driveListingQueryOptions>
+		)
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("a1") })
+		})
+
+		await act(async () => {
+			await hook.result.current.saveMineAsNewFile()
+		})
+
+		await expect(blocked).resolves.toBe("aborted")
+		await expect(writer.aborted).resolves.toBe("cancelled")
+		expect(abandon).toHaveBeenCalledOnce()
+		expect(runPreviewSave).not.toHaveBeenCalled()
+		expect(toast.error.mock.calls).toEqual([["previewSaveAsNewFileFailed"]])
 	})
 
 	it("drops a deleted file kept on screen from the pager once the user steps away from it", () => {

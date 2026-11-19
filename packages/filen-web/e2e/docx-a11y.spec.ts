@@ -4,17 +4,21 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows, type FixtureScenario } from "./helpers/fixtures"
 import { archiveBrowser } from "./helpers/archive"
 import { DOCX_FIXTURE_TEXT, DOCX_PICTURE_ALT, DOCX_VIEWER_TEXT, type DocxFixtureName } from "./helpers/docxFixtures"
+import { downloadDocxPdf, readPdf } from "./helpers/docxPdf"
 import { preview } from "@/locales/en/preview"
 
 // What a screen reader is told about the DOCX surfaces that are not text: the comment balloons (viewer and
 // editor), a picture's handles, a field's chip and a content control's popover, asserted as roles and
-// accessible names. Read-only: presses select, open and close; nothing is typed or saved.
+// accessible names. Also the viewer's Download as ▸ PDF (a read-only archive entry): every page it counts, its text
+// and links. Read-only: presses select, open and close; nothing is typed or saved (the PDF is a local download).
 
 test.describe.configure({ mode: "default" })
 
 // Wide enough for the balloon column beside the page at 100 %.
 const WIDE = { width: 1600, height: 900 }
 const AUTHOR = "E2E Reviewer"
+// The document laid out again in the PDF worker.
+const PDF_EXPORT_TIMEOUT_MS = 120_000
 
 function pageText(page: Page, text: string): Locator {
 	return page.locator(".fo-docx-page").getByText(text).first()
@@ -88,6 +92,47 @@ test("viewer balloons and pictures: a named comments landmark, each balloon name
 	await expect(column.getByLabel(`Comment by ${AUTHOR}`, { exact: true }).first()).toBeVisible()
 	// The picture is an image named by its alternative text (wp:docPr@descr).
 	await expect(page.getByRole("img", { name: DOCX_PICTURE_ALT, exact: true })).toBeVisible()
+})
+
+// The viewer's own export target (an archive entry has no editing, so the editor's never runs). WIDE is past the sm
+// breakpoint, so the toolbar's page counter is shown.
+test("archive entry: Download as PDF from the viewer, every page the viewer counts, its text and links", async ({ page }) => {
+	test.slow()
+
+	await openRow(page, "docx-viewer", "viewer-archive.zip")
+
+	const browser = archiveBrowser(page)
+	const name = "viewer-links.docx"
+
+	await expect(browser.row(name)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await browser.row(name).dblclick()
+	await expect(browser.overlay.locator(".fo-docx-page").getByText(DOCX_VIEWER_TEXT[name], { exact: true }).first()).toBeVisible({
+		timeout: LAZY_VIEWER_TIMEOUT_MS
+	})
+	await expect(browser.overlay.locator(".docx-wrapper")).toHaveCount(0)
+
+	const downloading = page.waitForEvent("download", { timeout: PDF_EXPORT_TIMEOUT_MS })
+
+	await downloadDocxPdf(page, browser.overlay)
+
+	const download = await downloading
+	const { pdf, text } = await readPdf(await download.path())
+	const counter = browser.overlay.getByText(/^Page 1 of \d+$/)
+
+	await expect(counter).toBeVisible()
+
+	const total = Number(/of (\d+)$/.exec((await counter.textContent()) ?? "")?.[1])
+
+	expect(download.suggestedFilename()).toBe(name.replace(/\.docx$/, ".pdf"))
+	expect(total).toBeGreaterThan(1)
+	expect(pdf.numPages).toBe(total)
+	expect(text).toContain(DOCX_VIEWER_TEXT[name])
+
+	// Links keep working in the PDF.
+	const annotations = (await (await pdf.getPage(1)).getAnnotations()) as readonly { readonly subtype?: string }[]
+
+	expect(annotations.some(annotation => annotation.subtype === "Link")).toBe(true)
+	await browser.close()
 })
 
 test.describe("editor", () => {

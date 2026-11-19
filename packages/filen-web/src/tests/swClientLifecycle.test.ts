@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
 	SW_DOWNLOAD_PREFIX,
 	SW_ERROR_NO_CLIENT,
+	SW_MSG_ACTIVE_STREAMS,
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_PREVIEW,
 	SW_MSG_RELEASE_PREVIEW,
 	SW_MSG_PREVIEW_STATUS,
-	SW_MSG_PREVIEW_DELIVERED
+	SW_MSG_PREVIEW_DELIVERED,
+	SW_SKIP_WAITING_MESSAGE
 } from "@/lib/sw/protocol"
 
 // sw.ts is a ServiceWorkerGlobalScope module: it registers its listeners on `self` at import and pulls
@@ -53,16 +55,18 @@ type Listener = (event: unknown) => void
 let listeners: Map<string, Listener>
 // What the worker posted to its window clients.
 let posted: unknown[] = []
+let skipWaiting = vi.fn(() => Promise.resolve())
 
 async function loadSw(): Promise<void> {
 	listeners = new Map()
 	posted = []
+	skipWaiting = vi.fn(() => Promise.resolve())
 	vi.stubGlobal("self", {
 		location: { origin: "https://app.test" },
 		addEventListener: (type: string, listener: Listener) => {
 			listeners.set(type, listener)
 		},
-		skipWaiting: () => Promise.resolve(),
+		skipWaiting,
 		clients: {
 			claim: () => Promise.resolve(),
 			matchAll: () => Promise.resolve([{ postMessage: (data: unknown) => posted.push(data) }])
@@ -182,6 +186,40 @@ describe("sw.ts Client lifecycle", () => {
 		expect(await adopted).toMatchObject({ ok: false })
 		expect(sdk.clients).toHaveLength(0)
 		expect(await registerDownload("d1")).toEqual({ ok: false, error: SW_ERROR_NO_CLIENT })
+	})
+
+	it("reports its running streams to the page and activates on SKIP_WAITING without a count of its own", async () => {
+		await message({ type: SW_MSG_INIT_CLIENT, blob: {} })
+		await registerDownload("d1")
+
+		expect(await message({ type: SW_MSG_ACTIVE_STREAMS })).toEqual({ active: 0 })
+
+		const pump = streamDownload("d1")
+
+		expect(await message({ type: SW_MSG_ACTIVE_STREAMS })).toEqual({ active: 1 })
+
+		// The page decides from the active worker's count; the one told to activate does.
+		listeners.get("message")?.({ data: { type: SW_SKIP_WAITING_MESSAGE }, ports: [] })
+		expect(skipWaiting).toHaveBeenCalledTimes(1)
+
+		sdk.clients[0]?.finishStream()
+		await pump
+
+		expect(await message({ type: SW_MSG_ACTIVE_STREAMS })).toEqual({ active: 0 })
+	})
+
+	it("loads the SDK again on the next handover after a failed load", async () => {
+		const init = vi.fn((): Promise<void> => Promise.reject(new Error("failed to fetch sdk-rs_bg.wasm")))
+
+		sdk.init.current = init
+
+		expect(await message({ type: SW_MSG_INIT_CLIENT, blob: {} })).toEqual({ ok: false, error: "failed to fetch sdk-rs_bg.wasm" })
+
+		init.mockImplementation(() => Promise.resolve())
+
+		expect(await message({ type: SW_MSG_INIT_CLIENT, blob: {} })).toEqual({ ok: true })
+		expect(init).toHaveBeenCalledTimes(2)
+		expect(await registerDownload("d1")).toEqual({ ok: true })
 	})
 })
 

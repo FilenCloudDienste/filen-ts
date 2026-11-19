@@ -498,14 +498,17 @@ export function removeEffects(editor: PresentationRibbonEditor, state: SlideAnim
 	}
 }
 
-export function moveEffect(editor: PresentationRibbonEditor, state: SlideAnimations, row: EffectRow, to: number): void {
-	if (state.slide === undefined) return
+// Whether a move was asked of the editor (none past either end of its sequence, nor onto its own place).
+export function moveEffect(editor: PresentationRibbonEditor, state: SlideAnimations, row: EffectRow, to: number): boolean {
+	if (state.slide === undefined) return false
 
 	const count = state.rows.filter(other => other.sequence === row.sequence).length
 
-	if (to < 0 || to >= count || to === row.index) return
+	if (to < 0 || to >= count || to === row.index) return false
 
 	void editor.command(moveEffectOp(state.slide, row.id, to))
+
+	return true
 }
 
 function timeEffects(editor: PresentationRibbonEditor, state: SlideAnimations, timing: Parameters<typeof effectTimingOp>[2]): void {
@@ -717,21 +720,17 @@ function EffectOptions({ editor, state }: { editor: PresentationRibbonEditor; st
 						{preset.colored === true ? (
 							<DropdownMenuGroup>
 								<DropdownMenuLabel>{t("previewPptxAnimColor")}</DropdownMenuLabel>
-								<DropdownMenuRadioGroup
-									value=""
-									onValueChange={value => {
-										run({ color: { kind: "scheme", slot: value as (typeof ACCENTS)[number] } })
-									}}
-								>
-									{ACCENTS.map((slot, index) => (
-										<DropdownMenuRadioItem
-											key={slot}
-											value={slot}
-										>
-											{t("previewPptxAnimAccent", { n: index + 1 })}
-										</DropdownMenuRadioItem>
-									))}
-								</DropdownMenuRadioGroup>
+								{/* Plain items: the effect's colour is not known here, so no choice can show as checked. */}
+								{ACCENTS.map((slot, index) => (
+									<DropdownMenuItem
+										key={slot}
+										onClick={() => {
+											run({ color: { kind: "scheme", slot } })
+										}}
+									>
+										{t("previewPptxAnimAccent", { n: index + 1 })}
+									</DropdownMenuItem>
+								))}
 							</DropdownMenuGroup>
 						) : null}
 						{textual ? (
@@ -882,6 +881,9 @@ function SecondsField({
 	}
 
 	const commit = (): void => {
+		// Untouched: the field shows the value rounded to 10 ms, and committing that would change it.
+		if (text === shown) return
+
 		const parsed = parseSeconds(text)
 
 		if (parsed === undefined) {

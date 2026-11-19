@@ -152,6 +152,17 @@ describe("general socket handlers", () => {
 		unsubscribe()
 	})
 
+	// A newer server can send a variant this SDK build has no type for: logged, never acted on.
+	it("logs a general event variant it does not know", () => {
+		const unknownInner = JSON.parse('{"type":"futureKind"}') as Extract<SocketEvent, { type: "general" }>["inner"]
+
+		handleGeneralEvent(generalEvt(unknownInner))
+
+		expect(logError).toHaveBeenCalledExactlyOnceWith("socket", "unhandled general event", "futureKind")
+		expect(performLogout).not.toHaveBeenCalled()
+		expect(getUserEvent).not.toHaveBeenCalled()
+	})
+
 	it("newEvent is a no-op when the events list was never opened (no phantom refetch)", () => {
 		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 

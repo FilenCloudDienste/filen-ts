@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { formatValue, NUMFMT_EN_US, SYSTEM_DATE_TIME, SYSTEM_SHORT_DATE, type NumFmtLocale } from "@filen/office/core/sheet"
-import { numFmtLocaleOf } from "@/features/spreadsheet/formulaBar/numFmtLocale"
+import { numFmtLocaleOf, quotedText, shortcutDateTimeCodes } from "@/features/spreadsheet/formulaBar/numFmtLocale"
 import { sheetLocaleOf, sheetShortcutFormats } from "@/features/spreadsheet/formulaBar/sheetLocale"
 
 // 2023-03-15 18:00 (a Wednesday).
@@ -46,6 +46,24 @@ describe("the number format locale built from Intl", () => {
 	it("reads Gregorian dates in Latin digits whatever the locale's calendar", () => {
 		expect(shown(numFmtLocaleOf("fa-IR", "٫", "٬")).short).toBe("2023/3/15")
 		expect(shown(numFmtLocaleOf("th-TH", ".", ",")).short).toBe("15/3/2023")
+	})
+
+	it("writes no-break spaces in its codes as plain ones", () => {
+		const noBreak = /[\u00a0\u202f]/u
+		const enUS = numFmtLocaleOf("en-US", ".", ",")
+		const bgBG = numFmtLocaleOf("bg-BG", ",", " ")
+
+		expect(enUS.longTime).not.toMatch(noBreak)
+		expect(shortcutDateTimeCodes("en-US", enUS)?.time).not.toMatch(noBreak)
+		expect(bgBG.shortDate).not.toMatch(noBreak)
+		expect(bgBG.longDate).not.toMatch(noBreak)
+	})
+
+	it("quotes literal text with both no-break spaces as plain ones", () => {
+		expect(quotedText("\u00a0\u0433.")).toBe('" \u0433."')
+		expect(quotedText("\u202f")).toBe('" "')
+		expect(quotedText("a\u00a0\u202fb")).toBe('"a  b"')
+		expect(quotedText("")).toBe("")
 	})
 
 	it("falls back to en-US's for an unknown tag, with the given separators", () => {

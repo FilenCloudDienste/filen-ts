@@ -21,21 +21,34 @@ vi.mock("@/features/preview/components/previewOverlay", () => ({
 	}
 }))
 
+// Off by default (as in jsdom, which has no service worker): only the inline-media tests below turn it on.
+const stream = vi.hoisted(() => ({ available: false }))
+
+vi.mock("@/features/preview/lib/previewStream", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/preview/lib/previewStream")>()),
+	isMediaStreamAvailable: () => stream.available
+}))
+
+vi.mock("@/features/preview/hooks/usePreviewStreamUrl", () => ({
+	usePreviewStreamUrl: () => ({ status: "success", url: "blob:stream", refetch: vi.fn() })
+}))
+
 import { FilenLinkCard } from "@/features/chats/components/thread/embeds/filenLinkCard"
+import { MAX_INLINE_EMBED_IMAGE_BYTES } from "@/features/chats/lib/embeds.logic"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 import { mockLinkedFile } from "@/tests/fixtures/sdk"
 
 const URL = "https://app.filen.io/f/f1000000-0000-0000-0000-000000000000#key"
 const LINK: FilenPublicLink = { uuid: "f1000000-0000-0000-0000-000000000000", key: "key", type: "file" }
 
-function renderCard(name: string, downloadable = true): void {
-	const linkedFile = mockLinkedFile({ name: { Decrypted: name }, size: 1024n, downloadable })
+function renderCard(name: string, downloadable = true, size = 1024n, mime = "application/octet-stream"): void {
+	const linkedFile = mockLinkedFile({ name: { Decrypted: name }, mime: { Decrypted: mime }, size, downloadable })
 	const resolution: ChatLinkResolution = {
 		url: URL,
 		kind: "filenLink",
 		link: LINK,
 		success: true,
-		data: { type: "file", name, size: 1024n, linkedFile }
+		data: { type: "file", name, size, linkedFile }
 	}
 
 	render(createElement(FilenLinkCard, { url: URL, link: LINK, resolution }))
@@ -44,6 +57,7 @@ function renderCard(name: string, downloadable = true): void {
 afterEach(() => {
 	cleanup()
 	overlay.props.length = 0
+	stream.available = false
 })
 
 describe("FilenLinkCard for an archive", () => {
@@ -109,5 +123,39 @@ describe("FilenLinkCard for a video", () => {
 
 		expect(document.querySelector("video")).toBeNull()
 		expect(screen.getByRole("button", { name: "Open preview of clip.ts" })).toBeTruthy()
+	})
+})
+
+describe("FilenLinkCard inline media size cap", () => {
+	const CAP = BigInt(MAX_INLINE_EMBED_IMAGE_BYTES)
+
+	it("inlines an image at the cap", () => {
+		stream.available = true
+		renderCard("photo.png", true, CAP, "image/png")
+
+		expect(screen.getByRole("img", { name: "photo.png" }).getAttribute("src")).toBe("blob:stream")
+	})
+
+	it("renders the click-to-preview card for an image one byte over the cap, streaming nothing", () => {
+		stream.available = true
+		renderCard("photo.png", true, CAP + 1n, "image/png")
+
+		expect(screen.queryByRole("img")).toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: "Open preview of photo.png" }))
+
+		expect(overlay.props.at(-1)?.variant).toBe("links")
+	})
+
+	it("still inlines video and audio over the cap", () => {
+		stream.available = true
+		renderCard("clip.mp4", true, CAP + 1n, "video/mp4")
+
+		expect(document.querySelector("video")).not.toBeNull()
+		cleanup()
+
+		renderCard("song.mp3", true, CAP + 1n, "audio/mpeg")
+
+		expect(document.querySelector("audio")).not.toBeNull()
 	})
 })

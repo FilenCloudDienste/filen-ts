@@ -234,15 +234,26 @@ describe("useWithdrawalNotice", () => {
 
 	it("picks the earliest-closing window and disappears when it closes", () => {
 		vi.useFakeTimers()
-		vi.setSystemTime(new Date(2026, 10, 9, 12))
+		// Both contracts are past their first day, so only the windows closing move the clock.
+		vi.setSystemTime(new Date(2026, 10, 10, 12))
 
-		const subs = [sub(new Date(2026, 10, 8, 9).getTime())]
+		// The later window first, so the pick cannot be the array's order.
+		const later = sub(new Date(2026, 10, 9, 9).getTime())
+		const earlier = sub(new Date(2026, 10, 8, 9).getTime())
+		const subs = [later, earlier]
 		const { result } = renderHook(() => useWithdrawalNotice(subs))
 
-		expect(result.current.notice?.sub.id).toBe(subs[0]?.id)
+		expect(result.current.notice?.sub.id).toBe(earlier.id)
+
+		// The earlier window closes at the end of 22 November: the notice moves to the other contract.
+		act(() => {
+			vi.advanceTimersByTime(new Date(2026, 10, 23).getTime() - new Date(2026, 10, 10, 12).getTime() + 1000)
+		})
+
+		expect(result.current.notice?.sub.id).toBe(later.id)
 
 		act(() => {
-			vi.advanceTimersByTime(new Date(2026, 10, 23).getTime() - new Date(2026, 10, 9, 12).getTime() + 1000)
+			vi.advanceTimersByTime(new Date(2026, 10, 24).getTime() - new Date(2026, 10, 23).getTime())
 		})
 
 		expect(result.current.notice).toBeUndefined()

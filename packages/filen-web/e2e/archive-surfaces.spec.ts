@@ -2,7 +2,7 @@ import type { Browser, Locator, Page } from "@playwright/test"
 import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect, settleLeases } from "./fixtures"
 import { escapeRegExp, leadingNamePattern, namePattern, pickDestination, waitForCompressDialog } from "./helpers/archive"
-import { plainTreeZip } from "./helpers/archiveFixtures"
+import { nestedZip, plainTreeZip } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { expectJobCard, hideJobCards, stopAllJobs } from "./helpers/jobs"
 import { observeEgest } from "./helpers/requests"
@@ -26,14 +26,15 @@ import { closeLinkDialog, createLink, openLinkDialog, setLinkDownloads } from ".
 // link the account owns, and creating one is premium, so the whole file runs only against a premium
 // account (E2E_PREMIUM). Signed in, a visitor browses an archive only on a click, extracts it into their
 // own drive while the link allows downloads, and saves a linked directory as an archive; signed out, they
-// get Download and nothing else (the SDK's unauthenticated client cannot list an archive).
+// get Download and nothing else (the SDK's unauthenticated client cannot list an archive). An archive inside a
+// linked archive browses on the link page as it does in the drive.
 
 const NOT_ALLOWED_NOTE = "The link's owner doesn't allow downloads, so nothing can be extracted from it."
 const LINK_PASSWORD = "e2e-link-password"
 
 async function setLinkPassword(dialog: Locator, password: string): Promise<void> {
 	await dialog.getByRole("button", { name: "Set password", exact: true }).click()
-	await dialog.getByPlaceholder("No password", { exact: true }).fill(password)
+	await dialog.getByLabel("Password", { exact: true }).fill(password)
 	await dialog.getByRole("button", { name: "Save", exact: true }).click()
 	await expect(dialog.getByText("Password set", { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 }
@@ -209,6 +210,38 @@ test.describe("archives on links, chats and shares", () => {
 		} finally {
 			await bootTo(page).catch(() => undefined)
 			await stopAllJobs(page)
+			await trashScratchDirectory(page, scratchName)
+		}
+	})
+
+	test("a public file link: the owner browses into a zip held in the linked zip", async ({ page }) => {
+		const runId = crypto.randomUUID()
+		const scratchName = `e2e-nested-link-${runId}`
+		const archiveName = `e2e-nested-${runId}.zip`
+
+		await bootTo(page)
+
+		try {
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await uploadFiles(page, [{ name: archiveName, mimeType: "application/zip", buffer: nestedZip() }], listbox)
+
+			const dialog = await openLinkDialog(page, listbox, archiveName)
+			const url = await createLink(dialog)
+
+			await closeLinkDialog(page, dialog)
+			await visitLink(page, url)
+			await page.getByRole("button", { name: "Browse contents", exact: true }).click({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+			const { list } = linkArchiveBrowser(page)
+			const crumbs = page.getByRole("navigation", { name: "Location in the archive", exact: true })
+
+			await list.getByRole("option", { name: /^trip/ }).dblclick()
+			await list.getByRole("option", { name: /^inner\.zip/ }).dblclick()
+			await expect(list).toHaveAccessibleName("Contents of inner.zip")
+			await expect(crumbs.getByRole("button")).toHaveText([archiveName, "trip", "inner.zip"])
+		} finally {
+			await bootTo(page).catch(() => undefined)
 			await trashScratchDirectory(page, scratchName)
 		}
 	})

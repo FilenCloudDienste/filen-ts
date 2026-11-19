@@ -12,7 +12,6 @@ export const HAND_TOOL: PdfTool = {
 	labelKey: "previewPdfAnnotToolHand",
 	icon: HandIcon,
 	toolClass: "annotate",
-	actionIds: ["annotations.hand"],
 	actions: [pdfToolAction("annotations.hand", "h", "preview:previewPdfKeyToolHand")],
 	enabledWhen: () => ({ enabled: true }),
 	commands: [],

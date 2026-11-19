@@ -6,7 +6,7 @@ import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
 
 // The video stage's share of the Media Session: taken from the audio engine (which pauses) for as long as the
 // stage is open, given back on close. Position state is published on discrete events only (play, pause,
-// seek, rate, a new item), never per timeupdate: the OS extrapolates from the rate.
+// seek, rate, a new item, both edges of a buffering stall), never per timeupdate: the OS extrapolates from the rate.
 
 const SEEK_NUDGE_SECONDS = MEDIA_SEEK_STEP_SECONDS
 
@@ -129,7 +129,7 @@ export function useStageMediaSession(params: {
 		state()
 
 		const stateEvents = ["play", "pause", "ended", "emptied"]
-		const positionEvents = ["seeked", "ratechange", "loadedmetadata", "durationchange"]
+		const positionEvents = ["seeked", "ratechange", "loadedmetadata", "durationchange", "waiting", "playing"]
 
 		for (const event of stateEvents) {
 			element.addEventListener(event, state)

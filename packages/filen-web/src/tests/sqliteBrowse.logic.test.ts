@@ -64,6 +64,7 @@ describe("sqlite browse logic", () => {
 		expect(schemaKind("table", "  create  virtual table r using rtree(id, a, b)")).toBe("virtual")
 		expect(schemaKind("table", "CREATE TABLE t (a)")).toBe("table")
 		expect(schemaKind("view", "CREATE VIEW v AS SELECT 1")).toBe("view")
+		expect(schemaKind("virtual", "")).toBe("virtual")
 	})
 
 	it("rewrites WAL format versions in what is read only, and only where the read covers them", () => {

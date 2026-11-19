@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
@@ -93,7 +93,9 @@ describe("PreviewOverlay — opened as text", () => {
 
 		expect(viewer.dataset["editable"]).toBe("false")
 
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		act(() => {
+			usePreviewUnsavedGuardStore.setState({ dirty: true })
+		})
 
 		expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
 	})
@@ -132,7 +134,9 @@ describe("PreviewOverlay — opened as text", () => {
 		const viewer = await screen.findByTestId("text")
 
 		expect(viewer.dataset["editable"]).toBe("true")
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		act(() => {
+			usePreviewUnsavedGuardStore.setState({ dirty: true })
+		})
 		expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
 
 		reportWritable.current = true

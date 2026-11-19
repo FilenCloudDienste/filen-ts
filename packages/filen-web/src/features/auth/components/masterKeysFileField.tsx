@@ -13,8 +13,9 @@ interface MasterKeysFileFieldProps {
 	onChange: (masterKeysFileText: string | undefined) => void
 }
 
-// Optional master-keys-file import for the reset form. Reads the chosen file as plain text and hands
-// it straight to the caller — NO client-side parsing/validation of the master-key format (the SDK's
+// Optional master-keys-file import for the reset form. Reads the chosen file as plain text, trims the
+// surrounding whitespace an editor or a paste leaves behind (the SDK's base64 decode rejects even a final
+// newline), and hands it to the caller — NO client-side parsing/validation of the master-key format (the SDK's
 // completePasswordReset accepts its recoverKey param as raw or base64 and validates internally; never
 // reimplement crypto/API logic client-side). Uncontrolled by design: a native file input's `value`
 // cannot be set programmatically (only cleared), so this only tracks the chosen file's NAME locally
@@ -22,7 +23,7 @@ interface MasterKeysFileFieldProps {
 // outside the single worker call site). The remove button returns the field to the no-file state
 // without re-opening the picker or reloading.
 function MasterKeysFileField({ disabled, onChange }: MasterKeysFileFieldProps) {
-	const { t } = useTranslation("auth")
+	const { t } = useTranslation(["auth", "errors"])
 	const inputRef = useRef<HTMLInputElement>(null)
 	const [fileName, setFileName] = useState<string>()
 
@@ -31,16 +32,30 @@ function MasterKeysFileField({ disabled, onChange }: MasterKeysFileFieldProps) {
 		if (!file) {
 			return
 		}
+		let text: string
+
 		try {
-			const text = await file.text()
-			setFileName(file.name)
-			onChange(text)
+			text = (await file.text()).trim()
 		} catch (err) {
+			// A failed re-pick must not leave the previous file's text in use.
+			clear()
 			toast.error(errorLabel(err))
+
+			return
 		}
+
+		if (text.length === 0) {
+			clear()
+			toast.error(t("errors:BadRecoveryKey"))
+
+			return
+		}
+
+		setFileName(file.name)
+		onChange(text)
 	}
 
-	function handleRemove(): void {
+	function clear(): void {
 		// Clearing the native input's value lets re-choosing the SAME file fire change again.
 		if (inputRef.current) {
 			inputRef.current.value = ""
@@ -87,7 +102,7 @@ function MasterKeysFileField({ disabled, onChange }: MasterKeysFileFieldProps) {
 							className="shrink-0"
 							aria-label={t("masterKeysFileRemove")}
 							disabled={disabled}
-							onClick={handleRemove}
+							onClick={clear}
 						>
 							<XIcon />
 						</Button>

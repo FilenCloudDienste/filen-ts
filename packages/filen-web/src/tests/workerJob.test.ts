@@ -112,10 +112,28 @@ describe("workerJob", () => {
 
 	it("passes a job's own failure through, and gives up after one retry", async () => {
 		const pool = fakePool()
+		let failedAttempts = 0
 
-		await expect(workerJob(pool, "test", 1000, () => Promise.reject(new Error("bad file")))).rejects.toThrow("bad file")
-		await expect(workerJob(pool, "test", 1000, () => Promise.reject(new WorkerGoneError("test", "terminated")))).rejects.toBeInstanceOf(
-			WorkerGoneError
-		)
+		await expect(
+			workerJob(pool, "test", 1000, () => {
+				failedAttempts++
+
+				return Promise.reject(new Error("bad file"))
+			})
+		).rejects.toThrow("bad file")
+		expect(failedAttempts).toBe(1)
+
+		let goneAttempts = 0
+
+		await expect(
+			workerJob(pool, "test", 1000, () => {
+				goneAttempts++
+
+				return Promise.reject(new WorkerGoneError("test", "terminated"))
+			})
+		).rejects.toBeInstanceOf(WorkerGoneError)
+		expect(goneAttempts).toBe(2)
+		// A rejection from the job leaves the pool's worker in place, so the retry runs on the same one.
+		expect(pool.created()).toBe(1)
 	})
 })

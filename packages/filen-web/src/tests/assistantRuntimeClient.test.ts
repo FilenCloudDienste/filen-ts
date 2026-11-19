@@ -26,12 +26,13 @@ const { remote, inspections, releaseProxy, workers, locks, prune, device, storag
 	inspections: [] as (ModelInspection | Error)[],
 	workers: [] as { terminate: Mock<() => void>; released: Mock<() => void>; fire: (type: string) => void }[],
 	// Model locks currently held by this "tab", how often it was granted one, and whether another tab holds it;
-	// `queued` lets the requests waiting behind that tab through once it lets go.
-	locks: { held: 0, granted: 0, elsewhere: false, queued: [] as (() => void)[] },
+	// `queued` lets the requests waiting behind that tab through once it lets go; `gate` holds a grant back.
+	locks: { held: 0, granted: 0, elsewhere: false, queued: [] as (() => void)[], gate: null as Promise<void> | null },
 	// The pruning of older model versions, when a test holds it open.
 	prune: { pending: null as Promise<void> | null },
-	// Whether WebGPU is offered, and whether the CPU path is.
-	device: { gpu: true, cpu: true },
+	// Whether WebGPU is offered, and whether the CPU path is; how often the device was probed, and `gate`
+	// holds a probe open.
+	device: { gpu: true, cpu: true, probes: 0, gate: null as Promise<void> | null },
 	// Whether the origin's storage is persistent, whether the rest of the model fits, the usage the room was
 	// judged on, and localStorage.
 	storage: { persisted: true, fits: true, judgedUsage: null as number | null, local: new Map<string, string>() },
@@ -39,8 +40,9 @@ const { remote, inspections, releaseProxy, workers, locks, prune, device, storag
 	stale: { bytes: 0 },
 	// The order pruning, removal and the storage estimate ran in.
 	order: [] as string[],
-	// Whether the server still deploys this build, and how often it was asked.
+	// Whether the server still deploys this build, how often it was asked, and an answer a test holds back.
 	appUpdate: {
+		gate: null as Promise<void> | null,
 		recover: vi.fn(),
 		prompt: vi.fn(),
 		update: vi.fn(),
@@ -87,7 +89,7 @@ vi.mock("@/lib/appUpdate", () => ({
 	buildDeployment: () => {
 		appUpdate.probes++
 
-		return Promise.resolve(appUpdate.deployment)
+		return appUpdate.gate === null ? Promise.resolve(appUpdate.deployment) : appUpdate.gate.then(() => appUpdate.deployment)
 	}
 }))
 
@@ -105,7 +107,11 @@ vi.mock("@/queries/client", () => ({
 }))
 
 vi.mock("@/features/assistant/runtime/deviceCheck", () => ({
-	probeDevice: ({ gpu }: { gpu: boolean }) => Promise.resolve({ gpu }),
+	probeDevice: ({ gpu }: { gpu: boolean }) => {
+		device.probes++
+
+		return device.gate === null ? Promise.resolve({ gpu }) : device.gate.then(() => ({ gpu }))
+	},
 	recommendRuntime: ({ gpu }: { gpu: boolean }) =>
 		gpu && device.gpu
 			? { supported: true, backend: "webgpu", threads: 4, estimatedSpeed: "fast" }
@@ -183,11 +189,19 @@ function stubBrowser(): void {
 							})
 				}
 
-				locks.held++
-				locks.granted++
-				void Promise.resolve(callback({})).then(() => {
-					locks.held--
-				})
+				const grant = () => {
+					locks.held++
+					locks.granted++
+					void Promise.resolve(callback({})).then(() => {
+						locks.held--
+					})
+				}
+
+				if (locks.gate !== null) {
+					return locks.gate.then(grant)
+				}
+
+				grant()
 
 				return Promise.resolve()
 			}
@@ -209,10 +223,23 @@ function stubBrowser(): void {
 	})
 }
 
-function settled(runtime: Runtime, kind: AssistantModelState["kind"]): Promise<void> {
-	return vi.waitFor(() => {
-		expect(runtime.getState().kind).toBe(kind)
+// A promise a test resolves when it chooses.
+function gate(): { promise: Promise<void>; open: () => void } {
+	let open: () => void = () => undefined
+	const promise = new Promise<void>(resolve => {
+		open = resolve
 	})
+
+	return { promise, open }
+}
+
+function settled(runtime: Runtime, kind: AssistantModelState["kind"]): Promise<void> {
+	return vi.waitFor(
+		() => {
+			expect(runtime.getState().kind).toBe(kind)
+		},
+		{ interval: 1 }
+	)
 }
 
 // Under fake timers: lets the promise chains run without moving the clock.
@@ -232,6 +259,7 @@ beforeEach(() => {
 	locks.granted = 0
 	locks.elsewhere = false
 	locks.queued.length = 0
+	locks.gate = null
 	prune.pending = null
 	stale.bytes = 0
 	order.length = 0
@@ -244,9 +272,12 @@ beforeEach(() => {
 	appUpdate.update.mockClear()
 	appUpdate.deployment = "unknown"
 	appUpdate.probes = 0
+	appUpdate.gate = null
 	account.id = 7n
 	device.gpu = true
 	device.cpu = true
+	device.probes = 0
+	device.gate = null
 	remote.download.mockReset()
 	remote.load.mockReset()
 	remote.unload.mockReset()
@@ -1228,6 +1259,123 @@ describe("AssistantRuntime failures", () => {
 		await runtime.load()
 
 		expect(workers).toHaveLength(1)
+	})
+
+	it("starts no download whose server check was still out at sign-out, and lets go of the lock", async () => {
+		const answer = gate()
+
+		deployment("deployed")
+		remote.download.mockResolvedValue(undefined)
+
+		const runtime = new AssistantRuntime()
+
+		await runtime.init()
+		appUpdate.gate = answer.promise
+		runtime.download()
+		await vi.waitFor(
+			() => {
+				expect(appUpdate.probes).toBe(1)
+			},
+			{ interval: 1 }
+		)
+		runtime.shutdown()
+		answer.open()
+		await vi.waitFor(
+			() => {
+				expect(locks.held).toBe(0)
+			},
+			{ interval: 1 }
+		)
+		await runtime.load()
+
+		expect(workers).toHaveLength(0)
+		expect(remote.download).not.toHaveBeenCalled()
+		expect(readDownloadIntent()).toBeNull()
+		expect(runtime.getState().kind).not.toBe("downloading")
+	})
+
+	it("starts no download whose lock was granted only after sign-out, and lets go of that lock", async () => {
+		const grant = gate()
+
+		remote.download.mockResolvedValue(undefined)
+
+		const runtime = new AssistantRuntime()
+
+		await runtime.init()
+		locks.gate = grant.promise
+		runtime.download()
+		runtime.shutdown()
+		grant.open()
+		await vi.waitFor(
+			() => {
+				expect(locks.granted).toBe(1)
+			},
+			{ interval: 1 }
+		)
+		await vi.waitFor(
+			() => {
+				expect(locks.held).toBe(0)
+			},
+			{ interval: 1 }
+		)
+		await runtime.load()
+
+		expect(workers).toHaveLength(0)
+		expect(remote.download).not.toHaveBeenCalled()
+		expect(readDownloadIntent()).toBeNull()
+		expect(appUpdate.probes).toBe(0)
+	})
+
+	it("starts no load whose device probe was still out at sign-out, and lets go of the lock", async () => {
+		const probed = gate()
+
+		inspections.push(COMPLETE)
+		remote.load.mockResolvedValue({ specialTokens: [] })
+
+		const runtime = new AssistantRuntime()
+
+		await runtime.init()
+		device.gate = probed.promise
+
+		const probes = device.probes
+		const loading = runtime.load()
+
+		await vi.waitFor(
+			() => {
+				expect(device.probes).toBe(probes + 1)
+			},
+			{ interval: 1 }
+		)
+		runtime.shutdown()
+		probed.open()
+		await loading
+
+		expect(locks.granted).toBe(1)
+		expect(locks.held).toBe(0)
+		expect(workers).toHaveLength(0)
+		expect(remote.load).not.toHaveBeenCalled()
+		expect(runtime.getState().kind).toBe("downloaded")
+	})
+
+	it("fails a load whose damaged shard could not be looked into, and loads again on Retry", async () => {
+		inspections.push(COMPLETE, Object.assign(new Error("storage"), { name: "InvalidStateError" }))
+		remote.load
+			.mockRejectedValueOnce(Object.assign(new Error("damaged"), { name: "ModelLoadError:missing" }))
+			.mockResolvedValue({ specialTokens: [] })
+
+		const runtime = new AssistantRuntime()
+
+		await runtime.init()
+		await expect(runtime.load()).resolves.toBeUndefined()
+
+		expect(runtime.getState()).toMatchObject({ kind: "error", error: "load-failed" })
+		expect(locks.held).toBe(0)
+		expect(remote.download).not.toHaveBeenCalled()
+
+		runtime.retry()
+		await settled(runtime, "ready")
+
+		expect(remote.load).toHaveBeenCalledTimes(2)
 	})
 })
 

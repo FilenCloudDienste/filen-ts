@@ -11,28 +11,44 @@ import { readDriveFileBytes } from "@/features/preview/lib/docxImages"
 
 // The annotation host's changes as plain functions (each one editor command through the tool context).
 
-// Runs `change`, answering whether it applied: a refusal is shown by the host (onChangeFailed) and answers false.
-export function applied(context: PdfToolContext, change: (session: PdfEditSessionModel) => Promise<PdfCommandResult>): Promise<boolean> {
+// Runs `change`, answering whether it applied: a refusal is shown by the host (onChangeFailed) and answers false, as
+// does a change that never runs (the editor did not start, was poisoned or closed).
+export async function applied(
+	context: PdfToolContext,
+	change: (session: PdfEditSessionModel) => Promise<PdfCommandResult>
+): Promise<boolean> {
+	return (await outcome(context, change)) === "applied"
+}
+
+// What became of `change`: applied, refused by the editor, or dropped (it never ran).
+function outcome(
+	context: PdfToolContext,
+	change: (session: PdfEditSessionModel) => Promise<PdfCommandResult>
+): Promise<"applied" | "refused" | "dropped"> {
 	return new Promise(resolve => {
-		context.edit(session =>
-			change(session).then(
-				result => {
-					resolve(true)
+		context.edit(
+			session =>
+				change(session).then(
+					result => {
+						resolve("applied")
 
-					return result
-				},
-				(error: unknown) => {
-					resolve(false)
+						return result
+					},
+					(error: unknown) => {
+						resolve("refused")
 
-					throw error
-				}
-			)
+						throw error
+					}
+				),
+			() => {
+				resolve("dropped")
+			}
 		)
 	})
 }
 
 // A comment written in the Comments panel: a new sticky note, or the first note of an annotation. The new thread's
-// id, null when refused.
+// id, null when refused or dropped; a dropped comment keeps its field and text, to post again.
 export async function postComment(
 	context: PdfToolContext,
 	store: PdfAnnotationStore,
@@ -41,20 +57,22 @@ export async function postComment(
 	author: string
 ): Promise<string | null> {
 	const target: { ref: PdfAnnotationRef | null } = { ref: composing.kind === "comment" ? composing.ref : null }
-	const ok = await applied(context, async session => {
-		const result =
+	const result = await outcome(context, async session => {
+		const done =
 			composing.kind === "note"
 				? await session.dispatch("annotations.note", { page: composing.page, at: composing.at, text, author })
 				: await session.dispatch("annotations.text", { ...composing.ref, text })
 
-		target.ref = result.created ?? target.ref
+		target.ref = done.created ?? target.ref
 
-		return result
+		return done
 	})
+
+	if (result === "dropped") return null
 
 	store.compose(null)
 
-	if (!ok || target.ref === null) return null
+	if (result === "refused" || target.ref === null) return null
 
 	store.selectRef(target.ref)
 

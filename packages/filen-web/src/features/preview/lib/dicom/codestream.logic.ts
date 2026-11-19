@@ -281,15 +281,16 @@ export function jpeg2000Header(bytes: Uint8Array): Jpeg2000Header | null {
 	}
 
 	// The main header's COD, and any COC (a component's own levels) after it.
-	const main = codingLevels(bytes, 4 + sizLength, components)
+	const main = codingLevels(bytes, 4 + sizLength, bytes.length, components)
 	let levels = main.cod < 0 ? -1 : Math.min(main.cod, main.coc)
 	let codeBlock = main.codeBlock
 
 	// Each tile part's header may code with fewer levels still (its own COD or COC): a reduction past them fails. Tile
-	// parts are found by their lengths (Psot), as far as the bytes in hand reach.
+	// parts are found by their lengths (Psot), as far as the bytes in hand reach; each header is read only within its own
+	// part, so the walk stays linear in the parts.
 	for (let part = main.end, parts = 0; levels >= 0 && u16(bytes, part) === 0xff90 && parts <= MAX_TILE_PARTS; parts++) {
 		const length = u32(bytes, part + 6)
-		const tile = codingLevels(bytes, part + 12, components)
+		const tile = codingLevels(bytes, part + 12, length === null || length < 14 ? bytes.length : part + length, components)
 
 		levels = Math.min(levels, tile.cod < 0 ? levels : tile.cod, tile.coc)
 		codeBlock = Math.min(codeBlock, tile.codeBlock)
@@ -310,8 +311,14 @@ const MAX_TILE_PARTS = 65_535 * 255
 
 // The decomposition levels a header's marker segments from `start` set, up to its end (SOT or SOD): COD's (-1 without
 // one), the fewest of any COC's (Infinity without one), the smallest code-block side either sets (Infinity without
-// one; each is 2^(xcb + 2) × 2^(ycb + 2), the two bytes after the levels), and where the header ends.
-function codingLevels(bytes: Uint8Array, start: number, components: number): { cod: number; coc: number; codeBlock: number; end: number } {
+// one; each is 2^(xcb + 2) × 2^(ycb + 2), the two bytes after the levels), and where the header ends. No marker at or past
+// `end` is read.
+function codingLevels(
+	bytes: Uint8Array,
+	start: number,
+	end: number,
+	components: number
+): { cod: number; coc: number; codeBlock: number; end: number } {
 	let cod = -1
 	let coc = Number.POSITIVE_INFINITY
 	let codeBlock = Number.POSITIVE_INFINITY
@@ -319,9 +326,11 @@ function codingLevels(bytes: Uint8Array, start: number, components: number): { c
 	const side = (levelsAt: number): number => 2 ** (Math.min(bytes[levelsAt + 1] ?? 0, bytes[levelsAt + 2] ?? 0) + 2)
 
 	for (;;) {
+		if (at + 2 > end) break
+
 		const marker = u16(bytes, at)
 
-		if (marker === null || marker === 0xff90 || marker === 0xff93) break
+		if (marker === null || marker >> 8 !== 0xff || marker === 0xff90 || marker === 0xff93) break
 
 		const length = u16(bytes, at + 2)
 

@@ -76,7 +76,6 @@ const controller: NoteEditorController = {
 	seed: "# seed",
 	remountKey: "key",
 	readOnly: false,
-	isInflight: false,
 	sizeReached: false,
 	onChange
 }

@@ -24,7 +24,7 @@ import {
 	type ArtCandidate,
 	type ArtRecord
 } from "@/features/videos/lib/artwork.logic"
-import { mergeProbe } from "@/features/videos/lib/probeService.logic"
+import { mergeProbe, PROBE_REVISION, type ProbeRecord } from "@/features/videos/lib/probeService.logic"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 import { RecordStore } from "@/features/videos/lib/recordStore.logic"
 import { memoryKv } from "@/tests/support/memoryKv"
@@ -234,7 +234,7 @@ function loader(overrides: Partial<ArtLoaderDeps> = {}) {
 			Promise.resolve({ width: 384, height: 216, sample: { luma: 100, dominant: [1, 2, 3] as [number, number, number] } })
 		),
 		probes: { request: vi.fn(() => Promise.resolve(mergeProbe(null, "full", probe(null), 1))) },
-		frames: { generate: vi.fn(() => Promise.resolve(null)) },
+		frames: { generate: vi.fn(() => Promise.resolve(null)), settledMiss: vi.fn(() => Promise.resolve(false)) },
 		records,
 		reads: { run: (_rank, read) => read() },
 		devicePixelRatio: () => 1,
@@ -298,6 +298,16 @@ describe("ArtLoader", () => {
 
 		expect(result).toEqual({ type: "typographic", title: "Up", colour: titleColour("Up") })
 		expect(deps.makeArt).not.toHaveBeenCalled()
+		// Too large for good: the next mount answers locally.
+		expect(
+			await art.loadLocal({
+				candidates: [{ source: "sidecar", file: 0 }, { source: "typographic" }],
+				slot: "b",
+				title: "Up",
+				resolveFile: files({ ...POSTER, size: ART_SOURCE_MAX_BYTES + 1 }),
+				fileUuid: () => POSTER.uuid
+			})
+		).toMatchObject({ type: "typographic" })
 	})
 
 	it("reuses the drive's thumbnail without any download, unless it is black", async () => {
@@ -361,22 +371,108 @@ describe("ArtLoader", () => {
 		expect(records.peek("video.p")).toMatchObject({ source: "embedded", miss: true })
 	})
 
-	it("passes over the embedded cover when the probe found none", async () => {
-		const { loader: art, deps } = loader()
-
-		await art.load({
-			candidates: [{ source: "embedded", file: 0 }, { source: "gradient" }],
-			slot: "p",
-			title: "Up",
-			resolveFile: files(VIDEO)
+	it("passes over the embedded cover when the probe found none, and remembers it for that slot", async () => {
+		const {
+			loader: art,
+			deps,
+			records
+		} = loader({
+			readDriveThumb: vi.fn(() => Promise.resolve(new Blob([new Uint8Array([1])])))
 		})
+		const candidates = [
+			{ source: "embedded", file: 0 },
+			{ source: "driveThumb", file: 0 },
+			{ source: "typographic" }
+		] satisfies ArtCandidate[]
+		const local = { candidates, slot: "p" as const, title: "Up", resolveFile: files(VIDEO), fileUuid: () => VIDEO.uuid }
+
+		// Not read yet: the embedded cover needs the probe.
+		expect(await art.loadLocal(local)).toBe("network")
+
+		await art.load({ candidates, slot: "p", title: "Up", resolveFile: files(VIDEO) })
 
 		expect(deps.makeArt).not.toHaveBeenCalled()
+		// A stored verdict for this slot, stamped with the probe revision that found no cover.
+		expect(records.peek("video.p")).toMatchObject({ slot: "p", source: "embedded", miss: true, rev: PROBE_REVISION })
+		expect(await art.loadLocal(local)).toMatchObject({ type: "image", source: "driveThumb" })
+		expect(await art.loadLocal({ ...local, candidates: [{ source: "embedded", file: 0 }, { source: "typographic" }] })).toMatchObject({
+			type: "typographic"
+		})
+
+		// A later session (a new loader over the same records) passes over it without asking the probe again.
+		const later = new ArtLoader(deps)
+
+		expect(await later.loadLocal(local)).toMatchObject({ type: "image", source: "driveThumb" })
+		expect(deps.probes.request).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks the probe again once its revision is newer than the one that found no cover", async () => {
+		const { loader: art, records } = loader()
+		const local = {
+			candidates: [{ source: "embedded", file: 0 }, { source: "typographic" }] satisfies ArtCandidate[],
+			slot: "p" as const,
+			title: "Up",
+			resolveFile: files(VIDEO),
+			fileUuid: () => VIDEO.uuid
+		}
+		const miss: ArtRecord = { slot: "p", source: "embedded", fit: "contain", w: 0, h: 0, dom: [0, 0, 0], miss: true, at: 1 }
+
+		records.put("video.p", { ...miss, rev: PROBE_REVISION - 1 })
+		expect(await art.loadLocal(local)).toBe("network")
+
+		// A decoder's verdict (no revision) lasts.
+		records.put("video.p", miss)
+		expect(await art.loadLocal(local)).toMatchObject({ type: "typographic" })
+	})
+
+	it("keeps no cover verdict when the probe gave no record, and a poster's miss leaves the backdrop alone", async () => {
+		const request = vi.fn(() => Promise.resolve<ProbeRecord | null>(null))
+		const { loader: art } = loader({ probes: { request } })
+		const local = (slot: "p" | "b") => ({
+			candidates: [{ source: "embedded", file: 0 }, { source: "typographic" }] satisfies ArtCandidate[],
+			slot,
+			title: "Up",
+			resolveFile: files(VIDEO),
+			fileUuid: () => VIDEO.uuid
+		})
+
+		// Offline, or a failed probe: nothing is settled.
+		await art.load(local("p"))
+		expect(await art.loadLocal(local("p"))).toBe("network")
+
+		// The probe read the file: no front cover, so the poster slot misses; the backdrop still asks.
+		request.mockResolvedValue(mergeProbe(null, "full", probe(null), 1))
+		await art.load(local("p"))
+		expect(await art.loadLocal(local("p"))).toMatchObject({ type: "typographic" })
+		expect(await art.loadLocal(local("b"))).toBe("network")
+	})
+
+	it("passes over a frame the generator settled it can never make, without waiting for a generation", async () => {
+		const settledMiss = vi.fn((uuid: string) => Promise.resolve(uuid === VIDEO.uuid))
+		const { loader: art, deps } = loader({ frames: { generate: vi.fn(() => Promise.resolve(null)), settledMiss } })
+
+		expect(
+			await art.loadLocal({
+				candidates: [{ source: "frame", file: 0 }, { source: "typographic" }],
+				slot: "s",
+				title: "Up",
+				resolveFile: files(VIDEO),
+				fileUuid: () => VIDEO.uuid
+			})
+		).toMatchObject({ type: "typographic" })
+		expect(deps.frames.generate).not.toHaveBeenCalled()
+		expect(deps.probes.request).not.toHaveBeenCalled()
 	})
 
 	it("stores a generated frame under the video's uuid", async () => {
 		const frame = { bytes: new Uint8Array([4, 5]), width: 480, height: 270, dominant: [7, 8, 9] as [number, number, number] }
-		const { loader: art, deps, records } = loader({ frames: { generate: vi.fn(() => Promise.resolve(frame)) } })
+		const {
+			loader: art,
+			deps,
+			records
+		} = loader({
+			frames: { generate: vi.fn(() => Promise.resolve(frame)), settledMiss: vi.fn(() => Promise.resolve(false)) }
+		})
 		const result = await art.load({
 			candidates: [{ source: "frame", file: 0 }, { source: "gradient" }],
 			slot: "s",

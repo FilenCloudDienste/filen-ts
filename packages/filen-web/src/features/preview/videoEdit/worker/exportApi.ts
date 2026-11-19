@@ -12,8 +12,8 @@
 // outWidth × outHeight. Text overlay positions stay in output space.
 
 import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
-import type { ExportBlocker, PlanContext } from "@/features/preview/videoEdit/lib/plan"
-import type { ExportPlan, TimeRange, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type { PlanContext } from "@/features/preview/videoEdit/lib/plan"
+import type { ExportBlocker, TimeRange, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
 
 export interface StartExportArgs {
 	// Names the export for cancel().
@@ -63,8 +63,6 @@ export type ExportWorkerResult =
 	  }
 
 export interface ExportWorkerApi {
-	// planExport (lib/plan.ts) answered from the worker, for a client that already holds it.
-	plan(recipe: VideoEditRecipe, source: VideoSourceInfo, caps: EncodeCapabilities, context?: PlanContext): ExportPlan
 	// Runs one export into `args.output`. Resolves once the upload made the file ("done"), or with why not; never rejects.
 	// The save is only committed (the upload allowed to finish) after the muxer finalised cleanly: a cancel or a failure
 	// aborts the channel first, so no partial version is ever made. `onProgress` is a Comlink proxy, called at most

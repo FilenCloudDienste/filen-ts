@@ -82,6 +82,12 @@ class Server {
 	public headLookup: (() => SdkFile | undefined) | null = null
 	// A listing of the directory the library configuration made, and when it started.
 	public sharedListing: { startedAt: number; files: SdkFile[] } | null = null
+	// `.filen/videos` exists (false: a new account), and the SDK has it cached; creations by `videosDir()`.
+	public dirExists = true
+	public dirKnown = true
+	public dirCreated = 0
+	// Head lookups by lineage that fail (offline) before one answers.
+	public failLookups = 0
 	private eventId = 1_000n
 	private hung: ((error: Error) => void) | null = null
 
@@ -117,6 +123,20 @@ class Server {
 
 		this.oldLineages.push(this.lineage.splice(0).map(entry => ({ ...entry, file: { ...entry.file, parent: "trash" } })))
 		this.event({ type: "fileTrash", uuid: head.uuid, stableUUID: head.stableUUID, newUUID: undefined })
+	}
+
+	// The user moves the state file out of `.filen/videos`: a new one is started in its place by the next save.
+	public moveHeadOut(): void {
+		const head = this.head()
+
+		if (head === undefined) {
+			return
+		}
+
+		const elsewhere = hexUuid()
+
+		this.oldLineages.push(this.lineage.splice(0).map(entry => ({ ...entry, file: { ...entry.file, parent: elsewhere } })))
+		this.event({ type: "fileMove", file: { ...head, parent: elsewhere } })
 	}
 
 	// Another client deletes the live head as a version.
@@ -166,12 +186,31 @@ class Server {
 	public sdk(account: string): WatchStateSdk {
 		return {
 			account: () => Promise.resolve(account),
-			videosDir: () => Promise.resolve(VIDEOS_DIR),
-			findVideosDir: () => Promise.resolve(VIDEOS_DIR),
-			knownVideosDir: () => VIDEOS_DIR,
+			videosDir: () => {
+				if (!this.dirExists) {
+					this.dirCreated++
+					this.dirExists = true
+				}
+
+				this.dirKnown = true
+
+				return Promise.resolve(VIDEOS_DIR)
+			},
+			findVideosDir: () => {
+				this.dirKnown = this.dirExists
+
+				return Promise.resolve(this.dirExists ? VIDEOS_DIR : null)
+			},
+			knownVideosDir: () => (this.dirExists && this.dirKnown ? VIDEOS_DIR : null),
 			noteSystemFile: () => undefined,
 			getFileByStableUuid: stable => {
 				this.counts.getFile++
+
+				if (this.failLookups > 0) {
+					this.failLookups--
+
+					return Promise.reject(new Error("offline"))
+				}
 
 				const head = this.headLookup?.() ?? this.head()
 
@@ -1552,5 +1591,288 @@ describe("watch-state on a new page", () => {
 		expect(server.counts.upload).toBe(1)
 		await advance(2_000, engine)
 		expect(server.counts.upload).toBe(2)
+	})
+})
+
+describe("watch-state after a gap in the socket", () => {
+	it("looks the head up on the next open after the socket stopped vouching, and reads a save made meanwhile", async () => {
+		const { engine } = openTab()
+		const mine = movie()
+		const theirs = movie()
+
+		await engine.open()
+		await engine.markWatched({ stableUuids: [mine.stableUuid] })
+		await advance(2_000, engine)
+
+		// The socket reconnects; another device saved while it was down (no event reached this page).
+		engine.loseHead()
+		foreignSaveOver(theirs.stableUuid, (T0 + 5_000) * 1000)
+		server.reset()
+		await engine.open()
+		await settle(engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 1, upload: 0, versions: 0, deletes: 0 })
+		expect(engine.getSnapshot().doc.items[itemKey(theirs.stableUuid)]?.w?.pl).toBe(true)
+
+		// Looked up in this epoch: the next open costs nothing.
+		server.reset()
+		await engine.open()
+		await settle(engine)
+
+		expect(server.requests()).toBe(0)
+	})
+
+	it("looks the head up instead of reading a save the socket named before a gap that later saves overtook", async () => {
+		const { engine } = openTab()
+		const seen = movie()
+		const unseen = movie()
+
+		await engine.open()
+		await engine.markWatched({ stableUuids: [movie().stableUuid] })
+		await advance(2_000, engine)
+
+		// The socket named one save, then dropped while the other device saved again.
+		server.emit(foreignSaveOver(seen.stableUuid, (T0 + 5_000) * 1000))
+		engine.loseHead()
+		foreignSaveOver(unseen.stableUuid, (T0 + 6_000) * 1000)
+		server.reset()
+		await engine.open()
+		await settle(engine)
+
+		// One lookup and one download: the overtaken save is never downloaded.
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 1, upload: 0, versions: 0, deletes: 0 })
+		expect(engine.getSnapshot().doc.items[itemKey(seen.stableUuid)]?.w?.pl).toBe(true)
+		expect(engine.getSnapshot().doc.items[itemKey(unseen.stableUuid)]?.w?.pl).toBe(true)
+
+		server.reset()
+		await engine.open()
+		await settle(engine)
+
+		expect(server.requests()).toBe(0)
+	})
+
+	it("reads a save the socket named in the current epoch without a lookup", async () => {
+		const { engine } = openTab()
+		const theirs = movie()
+
+		await engine.open()
+		await engine.markWatched({ stableUuids: [movie().stableUuid] })
+		await advance(2_000, engine)
+
+		server.emit(foreignSaveOver(theirs.stableUuid, (T0 + 5_000) * 1000))
+		server.reset()
+		await engine.open()
+		await settle(engine)
+
+		expect(server.counts).toEqual({ getFile: 0, list: 0, download: 1, upload: 0, versions: 0, deletes: 0 })
+		expect(engine.getSnapshot().doc.items[itemKey(theirs.stableUuid)]?.w?.pl).toBe(true)
+	})
+
+	it("keeps a save the socket named when the cached head was trashed, and reads it on the next open", async () => {
+		const { engine } = openTab()
+		const theirs = movie()
+
+		await engine.open()
+		await engine.markWatched({ stableUuids: [movie().stableUuid] })
+		await advance(2_000, engine)
+
+		// The state file is trashed and another device starts a new one, which the socket names; then the socket drops.
+		server.trashHead()
+		server.emit(foreignSaveOver(theirs.stableUuid, (T0 + 5_000) * 1000))
+		engine.loseHead()
+		server.reset()
+		await engine.open()
+		await settle(engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 1, upload: 0, versions: 0, deletes: 0 })
+		expect(engine.getSnapshot().doc.items[itemKey(theirs.stableUuid)]?.w?.pl).toBe(true)
+		expect(engine.getSnapshot().unsynced).toBe(false)
+	})
+
+	it("clears unsynced when the head lookup finds the pending save already read by another tab", async () => {
+		const a = openTab()
+		const b = openTab()
+		const theirs = movie()
+
+		await a.engine.open()
+		await b.engine.open()
+		await a.engine.markWatched({ stableUuids: [movie().stableUuid] })
+		await advance(2_000, a.engine, b.engine)
+
+		server.emit(foreignSaveOver(theirs.stableUuid, (T0 + 5_000) * 1000))
+		// The other tab reads it: the shared cached head is now that save.
+		await b.engine.open()
+		await settle(a.engine, b.engine)
+
+		expect(a.engine.getSnapshot().unsynced).toBe(true)
+
+		a.engine.loseHead()
+		server.reset()
+		await a.engine.open()
+		await settle(a.engine, b.engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 0, upload: 0, versions: 0, deletes: 0 })
+		expect(a.engine.getSnapshot().unsynced).toBe(false)
+		expect(a.engine.getSnapshot().doc.items[itemKey(theirs.stableUuid)]?.w?.pl).toBe(true)
+	})
+
+	it("retries a first open's head lookup that failed on the next open", async () => {
+		const { engine } = openTab()
+		const theirs = movie()
+
+		await engine.markWatched({ stableUuids: [movie().stableUuid] })
+		await advance(2_000, engine)
+		engine.hold()
+		// No version cleanup in the count.
+		versioning = false
+
+		// Saved elsewhere while this browser's pages were closed.
+		foreignSaveOver(theirs.stableUuid, (T0 + 5_000) * 1000)
+		server.failLookups = 1
+		server.reset()
+
+		const next = openTab()
+
+		await next.engine.open()
+		await settle(next.engine)
+
+		expect(server.counts).toMatchObject({ getFile: 1, download: 0 })
+
+		server.reset()
+		await next.engine.open()
+		await settle(next.engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 1, upload: 0, versions: 0, deletes: 0 })
+		expect(next.engine.getSnapshot().doc.items[itemKey(theirs.stableUuid)]?.w?.pl).toBe(true)
+	})
+
+	it("a direct loseHead makes the next flush look the head up and merge a save it was never told about", async () => {
+		const { engine } = openTab()
+		const mine = movie()
+		const theirs = movie()
+		const later = movie()
+
+		await engine.markWatched({ stableUuids: [mine.stableUuid] })
+		await advance(2_000, engine)
+		foreignSaveOver(theirs.stableUuid, (T0 + 5_000) * 1000)
+		engine.loseHead()
+		server.reset()
+		await engine.markWatched({ stableUuids: [later.stableUuid] })
+		await advance(10_000, engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 1, upload: 1, versions: 0, deletes: 0 })
+		expect(Object.keys(server.headDoc().items).sort()).toEqual(
+			[itemKey(mine.stableUuid), itemKey(theirs.stableUuid), itemKey(later.stableUuid)].sort()
+		)
+	})
+
+	it("takes a restored version of its own upload for a change of the head, read by the next flush", async () => {
+		// No version cleanup: it would delete the superseded upload restored below.
+		versioning = false
+
+		const { engine } = openTab()
+		const first = movie()
+		const second = movie()
+		const third = movie()
+
+		await engine.markWatched({ stableUuids: [first.stableUuid] })
+		await advance(2_000, engine)
+		await engine.markWatched({ stableUuids: [second.stableUuid] })
+		await advance(10_000, engine)
+
+		const old = server.lineage[0]
+		const current = server.head()
+
+		if (old === undefined || current === undefined) {
+			throw new Error("no version")
+		}
+
+		// Another device restores the first upload: an older version of this browser's own becomes the head.
+		server.lineage.push({ ...old })
+		server.event({ type: "fileArchiveRestored", currentUuid: current.uuid, file: old.file })
+
+		expect(engine.getSnapshot().unsynced).toBe(true)
+
+		server.reset()
+		await engine.markWatched({ stableUuids: [third.stableUuid] })
+		await advance(10_000, engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 0, download: 1, upload: 1, versions: 0, deletes: 0 })
+		expect(Object.keys(server.headDoc().items).sort()).toEqual(
+			[itemKey(first.stableUuid), itemKey(second.stableUuid), itemKey(third.stableUuid)].sort()
+		)
+	})
+
+	it("looks the head up on the next flush once the state file moved out of the directory", async () => {
+		const { engine } = openTab()
+		const mine = movie()
+
+		await engine.markWatched({ stableUuids: [mine.stableUuid] })
+		await advance(2_000, engine)
+
+		const moved = server.head()
+
+		server.moveHeadOut()
+		server.reset()
+		await engine.markWatched({ stableUuids: [movie().stableUuid] })
+		await advance(10_000, engine)
+
+		// The lineage resolves outside the directory, the listing finds nothing: a new state file is started.
+		expect(server.counts).toEqual({ getFile: 1, list: 1, download: 0, upload: 1, versions: 0, deletes: 0 })
+		expect(server.head()?.stableUUID).not.toBe(moved?.stableUUID)
+		expect(server.headDoc().items[itemKey(mine.stableUuid)]?.w?.pl).toBe(true)
+	})
+})
+
+describe("watch-state without the directory", () => {
+	it("opens a new account with no request and no directory created; the first save creates it once", async () => {
+		server.dirExists = false
+		server.dirKnown = false
+
+		const { engine } = openTab()
+		const item = movie()
+
+		await engine.open()
+		await settle(engine)
+		await engine.open()
+		await settle(engine)
+
+		expect(server.requests()).toBe(0)
+		expect(server.dirCreated).toBe(0)
+
+		await engine.markWatched({ stableUuids: [item.stableUuid] })
+		await advance(2_000, engine)
+
+		expect(server.counts).toEqual({ getFile: 0, list: 0, download: 0, upload: 1, versions: 0, deletes: 0 })
+		expect(server.dirCreated).toBe(1)
+		expect(server.head()?.parent).toBe(VIDEOS_DIR)
+		expect(server.headDoc().items[itemKey(item.stableUuid)]?.w?.pl).toBe(true)
+
+		server.reset()
+		await engine.markUnwatched({ stableUuids: [item.stableUuid] })
+		await advance(10_000, engine)
+
+		expect(server.counts).toEqual({ getFile: 0, list: 0, download: 0, upload: 1, versions: 0, deletes: 0 })
+		expect(server.dirCreated).toBe(1)
+	})
+
+	it("looks the directory up again before uploading once it was forgotten", async () => {
+		const { engine } = openTab()
+		const item = movie()
+
+		await engine.markWatched({ stableUuids: [item.stableUuid] })
+		await advance(2_000, engine)
+
+		// `.filen/videos` was moved away and back: neither the SDK nor the engine trusts the cached directory.
+		server.dirKnown = false
+		engine.forgetDirectory()
+		server.reset()
+		await engine.markUnwatched({ stableUuids: [item.stableUuid] })
+		await advance(10_000, engine)
+
+		expect(server.counts).toEqual({ getFile: 1, list: 1, download: 0, upload: 1, versions: 0, deletes: 0 })
+		expect(server.dirKnown).toBe(true)
+		expect(server.dirCreated).toBe(0)
+		expect(server.headDoc().items[itemKey(item.stableUuid)]?.w?.pl).toBe(false)
 	})
 })

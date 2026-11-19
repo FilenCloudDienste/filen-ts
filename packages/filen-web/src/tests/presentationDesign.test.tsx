@@ -6,7 +6,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import i18n from "i18next"
 import { slideRef, type DeckOp, type PresentationDesignInfo } from "@filen/office/core/presentation"
 import { FILEN_THEMES } from "@filen/office/core/templates"
-import type { CommandResult, OpenInfo } from "@filen/office/dom/presentation"
+import type { CommandResult, OpenInfo, SlideLayer, SlideRender } from "@filen/office/dom/presentation"
+import { createShapeSelection } from "@filen/office/react/presentation"
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
 import {
 	defaultScale,
@@ -19,11 +20,16 @@ import {
 } from "@/features/presentation/components/design/design.logic"
 import { designGroups } from "@/features/presentation/components/ribbon/design"
 import { RibbonDialogsHost } from "@/features/presentation/components/ribbon/ribbonDialogs"
+import { tableGroups } from "@/features/presentation/components/ribbon/table"
+import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { PresentationEditorContext, type PresentationEditorScope } from "@/features/presentation/hooks/usePresentationSession"
+import { previewPptxObjects } from "@/locales/en/previewPptx/objects"
 import "@/lib/i18n"
 
 // The Design tab against a fake editor: the theme gallery (the presentation's own themes, Filen's eight, all slides or
 // the selected ones), the variants of the current Filen theme, Slide Size and Format Background, each sending its op.
+
+i18n.addResourceBundle("en", "preview", previewPptxObjects, true, false)
 
 // The ribbon's width: room for every group, unless a test leaves none (every group under More commands).
 const size = vi.hoisted(() => ({ width: 2000 }))
@@ -473,5 +479,87 @@ describe("Design tab logic", () => {
 		expect(validSlideLength(unitToEmu("56", "in"))).toBe(true)
 		expect(defaultScale({ cx: 12_192_000, cy: 6_858_000 }, { cx: 9_144_000, cy: 6_858_000 })).toBe("ensureFit")
 		expect(defaultScale({ cx: 9_144_000, cy: 6_858_000 }, { cx: 12_192_000, cy: 6_858_000 })).toBe("ensureFit")
+	})
+})
+
+describe("Table styles", () => {
+	// A table selected alone on the current slide, its Table styles menu open, the deck's design as given.
+	async function openTableStyles(design: PresentationDesignInfo): Promise<HTMLElement> {
+		const ref = SLIDES[1]?.ref
+
+		if (ref === undefined) throw new Error("no slide")
+
+		const selection = createShapeSelection()
+
+		selection.show(ref)
+		selection.set([4])
+
+		const layer = {
+			shape: { slide: ref, id: 4 },
+			role: "table",
+			drawing: {},
+			matrix: [1, 0, 0, 1, 0, 0],
+			box: { id: 4, xfrm: { x: 0, y: 0, cx: 952_500, cy: 952_500, rot: 0, flipH: false, flipV: false } },
+			table: { columnEdges: [0, 100], rowEdges: [0, 100], areas: Int32Array.from([0, 0, 1, 1]), textBoxes: [], flags: {} }
+		} as unknown as SlideLayer
+		const info = { format: "pptx", slides: SLIDES, editable: true, design } as unknown as OpenInfo
+		const editor: PresentationRibbonEditor = {
+			info,
+			render: { ref, index: 1, revision: 1, hidden: false, background: {}, layers: [layer] } as unknown as SlideRender,
+			selection,
+			session: {} as never,
+			command: () => Promise.resolve({ ok: true, revision: 1, dirty: true })
+		}
+		const scope = {
+			editor: {
+				currentLayout: LAYOUT,
+				layouts: [{ ref: LAYOUT, master: MASTER, type: "obj" }],
+				document: { slides: SLIDES, info, renders: new Map() }
+			},
+			view: {}
+		} as unknown as PresentationEditorScope
+		const styles = tableGroups({ editor, editable: true, t: i18n.getFixedT("en", "preview") } as never).find(
+			group => group.id === "styles"
+		)?.content
+
+		render(<PresentationEditorContext value={scope}>{styles}</PresentationEditorContext>)
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Table styles" }))
+			await Promise.resolve()
+		})
+
+		return screen.findByRole("menu")
+	}
+
+	const swatchOf = (menu: HTMLElement, name: string) =>
+		within(menu).getByRole("menuitem", { name }).querySelector<HTMLElement>("span[aria-hidden='true']")
+
+	it("paints each style's swatch in the current slide's theme colours", async () => {
+		const menu = await openTableStyles({
+			themes: [{ master: MASTER, key: "k", colors: { background: "FFFFFF", text: "1F2937", accents: ["F97316", "2563EB"] } }]
+		})
+
+		expect(swatchOf(menu, "Medium Style 2 – Accent 1")?.style.backgroundColor).toBe("#F97316")
+		expect(swatchOf(menu, "Medium Style 2 – Accent 2")?.style.backgroundColor).toBe("#2563EB")
+		expect(swatchOf(menu, "Medium Style 2")?.style.backgroundColor).toBe("#1F2937")
+		// The theme has no third accent.
+		expect(swatchOf(menu, "Medium Style 2 – Accent 3")).toBeNull()
+	})
+
+	it("paints the dark style in the theme's dk1 on a dark-mapped master", async () => {
+		// tx1 maps to lt1 here, so the theme's dark colour is the mapped background.
+		const menu = await openTableStyles({
+			themes: [{ master: MASTER, key: "k", colors: { background: "111827", text: "F9FAFB", accents: ["F97316"] } }]
+		})
+
+		expect(swatchOf(menu, "Medium Style 2")?.style.backgroundColor).toBe("#111827")
+		expect(swatchOf(menu, "Medium Style 2 – Accent 1")?.style.backgroundColor).toBe("#F97316")
+	})
+
+	it("shows no swatch when the theme's colours are unknown", async () => {
+		const menu = await openTableStyles({ themes: [] })
+
+		expect(swatchOf(menu, "Medium Style 2 – Accent 1")).toBeNull()
+		expect(swatchOf(menu, "Medium Style 2")).toBeNull()
 	})
 })

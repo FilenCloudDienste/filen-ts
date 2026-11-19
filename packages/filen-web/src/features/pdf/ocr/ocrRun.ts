@@ -55,13 +55,14 @@ export function startOcrRun(options: OcrRunOptions): OcrRunHandle {
 			return report
 		},
 		(error: unknown) => {
-			if (error instanceof OcrModelsError && !controller.signal.aborted) {
+			// A cancel rejects the pipeline too: never reported as a failure.
+			if (controller.signal.aborted) options.onState({ phase: "finished", pages: settled(), cancelled: true })
+			else if (error instanceof OcrModelsError) {
 				log.warn("pdf", "ocr models failed", error)
 				options.onState({ phase: "modelsFailed" })
 			} else {
-				if (!controller.signal.aborted) log.warn("pdf", "ocr failed", error)
-
-				options.onState({ phase: "finished", pages: settled(), cancelled: controller.signal.aborted })
+				log.warn("pdf", "ocr failed", error)
+				options.onState({ phase: "failed", pages: settled() })
 			}
 
 			return null

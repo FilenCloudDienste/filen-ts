@@ -56,8 +56,11 @@ export function handleGeneralEvent(event: GeneralSocketEvent): void {
 		}
 
 		default: {
-			// Exhaustive over the wasm GeneralEvent union — a new variant fails to compile here until mapped.
-			log.error("socket", "unhandled general event", (inner as { type: string }).type)
+			// Exhaustive over the wasm GeneralEvent union: a new SDK variant fails to compile here until mapped.
+			// A newer server can still deliver one this build doesn't know, so it is logged at runtime too.
+			const unhandled: never = inner
+
+			log.error("socket", "unhandled general event", (unhandled as { type: string }).type)
 
 			break
 		}

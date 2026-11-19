@@ -1,6 +1,12 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import type { DesktopSyncIgnored, DesktopSyncPlanAction, DesktopSyncSkippedSymlink, DesktopSyncUnsyncable } from "@filen/shared/desktop"
+import type {
+	DesktopSyncError,
+	DesktopSyncIgnored,
+	DesktopSyncPlanAction,
+	DesktopSyncSkippedSymlink,
+	DesktopSyncUnsyncable
+} from "@filen/shared/desktop"
 import { formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -82,27 +88,48 @@ export function IgnoredEntry({ entry }: { entry: DesktopSyncIgnored }) {
 	)
 }
 
+// A sync read that failed, with a retry.
+export function SyncReadError({ error, onRetry }: { error: DesktopSyncError; onRetry: () => void }) {
+	const { t } = useTranslation("common")
+
+	return (
+		<SettingsBlock className="flex flex-wrap items-center justify-between gap-2">
+			<p
+				role="alert"
+				className="text-sm text-destructive"
+			>
+				{syncErrorLabel(error)}
+			</p>
+			<Button
+				variant="outline"
+				size="sm"
+				onClick={onRetry}
+			>
+				{t("tryAgain")}
+			</Button>
+		</SettingsBlock>
+	)
+}
+
 // What follows a paged list's rows: its first-page spinner, its error with a retry, or the next page's button.
-export function PagedFooter<T>({ paged }: { paged: PagedEntries<T> }) {
-	const { t } = useTranslation(["sync", "common"])
+// `onPlanExpired`: for a dry run's list, whose plan the shell released (planExpired, minutes after its last read) and
+// never reads again: the retry plans again instead, through the plan's owner. Only from the click, never on its own,
+// so a failing host cannot loop.
+export function PagedFooter<T>({ paged, onPlanExpired }: { paged: PagedEntries<T>; onPlanExpired?: (() => void) | undefined }) {
+	const { t } = useTranslation("sync")
 
 	if (paged.error !== null) {
 		return (
-			<SettingsBlock className="flex flex-wrap items-center justify-between gap-2">
-				<p
-					role="alert"
-					className="text-sm text-destructive"
-				>
-					{syncErrorLabel(paged.error)}
-				</p>
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={paged.entries.length === 0 ? paged.reload : paged.loadMore}
-				>
-					{t("common:tryAgain")}
-				</Button>
-			</SettingsBlock>
+			<SyncReadError
+				error={paged.error}
+				onRetry={
+					paged.error.code === "planExpired" && onPlanExpired !== undefined
+						? onPlanExpired
+						: paged.entries.length === 0
+							? paged.reload
+							: paged.loadMore
+				}
+			/>
 		)
 	}
 

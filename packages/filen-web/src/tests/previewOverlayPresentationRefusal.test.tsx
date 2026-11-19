@@ -6,11 +6,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { QueryClient } from "@tanstack/react-query"
 
 // A deck save the session refuses after it said it would write: the overlay tells the user why at once and ends the
-// upload behind the port, never waiting for an upload that may not settle.
+// upload behind the port, never waiting for an upload that may not settle. One the upload's quota pre-flight refused is
+// told as the storage refusal it is.
 
 const harness = vi.hoisted(() => ({
 	uploads: 0,
 	closed: 0,
+	// The upload's answer; null: it never settles.
+	upload: null as Promise<unknown> | null,
+	// The session's answer to the save.
+	result: { kind: "refused", reason: "notImplemented" },
 	toasts: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }
 }))
 
@@ -29,11 +34,10 @@ vi.mock("@/features/preview/lib/previewCache", async () => ({
 }))
 vi.mock("@/features/drive/lib/previewSave.logic", async () => ({
 	...(await vi.importActual<typeof import("@/features/drive/lib/previewSave.logic")>("@/features/drive/lib/previewSave.logic")),
-	// The upload never settles.
 	runPreviewSave: () => {
 		harness.uploads++
 
-		return new Promise(() => undefined)
+		return harness.upload ?? new Promise(() => undefined)
 	}
 }))
 vi.mock("@/features/presentation/components/presentationViewer", () => ({
@@ -50,7 +54,7 @@ vi.mock("@/features/presentation/components/presentationViewer", () => ({
 						}
 					},
 					announced: Promise.resolve(true),
-					result: Promise.resolve({ kind: "refused", reason: "notImplemented" }),
+					result: Promise.resolve(harness.result),
 					commit: () => Promise.resolve({ dirty: false })
 				})
 			editing.onDirtyChange(true)
@@ -61,6 +65,8 @@ vi.mock("@/features/presentation/components/presentationViewer", () => ({
 }))
 
 import "@/lib/i18n"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -97,6 +103,8 @@ function deck() {
 beforeEach(() => {
 	harness.uploads = 0
 	harness.closed = 0
+	harness.upload = null
+	harness.result = { kind: "refused", reason: "notImplemented" }
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
 
@@ -105,18 +113,22 @@ afterEach(() => {
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
 })
 
+function renderOverlay() {
+	render(
+		createElement(PreviewOverlay, {
+			variant: "drive" as const,
+			items: [deck()],
+			index: 0,
+			onStep: vi.fn(),
+			onClose: vi.fn(),
+			onItemRemoved: vi.fn()
+		})
+	)
+}
+
 describe("PreviewOverlay — a deck save the session refuses", () => {
 	it("says why at once and ends the upload, without waiting for it", async () => {
-		render(
-			createElement(PreviewOverlay, {
-				variant: "drive" as const,
-				items: [deck()],
-				index: 0,
-				onStep: vi.fn(),
-				onClose: vi.fn(),
-				onItemRemoved: vi.fn()
-			})
-		)
+		renderOverlay()
 
 		const save = await screen.findByRole("button", { name: "Save" })
 
@@ -127,6 +139,36 @@ describe("PreviewOverlay — a deck save the session refuses", () => {
 		await waitFor(() => {
 			expect(harness.toasts.error).toHaveBeenCalledWith("This presentation has a change that can't be saved in this format yet.")
 		})
+		expect(harness.uploads).toBe(1)
+		expect(harness.closed).toBe(1)
+		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(false)
+	})
+
+	it("tells a save the quota pre-flight refused as the storage refusal, not a generic failure", async () => {
+		const dto: ErrorDTO = {
+			species: "sdk",
+			kind: "MaxStorageReached",
+			message: "MaxStorageReached message",
+			label: "MaxStorageReached label"
+		}
+		const generic = "This file couldn't be saved."
+
+		// The pre-flight aborted the port, so the writer's refusal follows the upload's.
+		harness.upload = Promise.resolve({ status: "error", dto })
+		harness.result = { kind: "refused", reason: "failed" }
+		expect(errorLabel(dto)).not.toBe(generic)
+		renderOverlay()
+
+		const save = await screen.findByRole("button", { name: "Save" })
+
+		await act(async () => {
+			fireEvent.click(save)
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(harness.toasts.error).toHaveBeenCalledWith(errorLabel(dto))
+		})
+		expect(harness.toasts.error).not.toHaveBeenCalledWith(generic)
 		expect(harness.uploads).toBe(1)
 		expect(harness.closed).toBe(1)
 		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(false)

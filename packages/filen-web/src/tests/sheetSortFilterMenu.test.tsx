@@ -4,19 +4,39 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { SheetCommand, SheetLayout } from "@filen/office/core/sheet"
 import type { SheetGridModel, SheetGridState } from "@filen/office/react/sheet"
+import type { ReactNode } from "react"
 import "@/lib/i18n"
 import { preview } from "@/locales/en/preview"
-import { SortFilterMenu } from "@/features/spreadsheet/data/sortFilterMenu"
 
 // The toolbar's sort and filter menu: a quick sort of the data around the active cell by its column (the header row
-// guessed and kept), the filter turned on over that data, and a text file offered the sort alone.
+// guessed and kept), the filter turned on over that data, a text file offered the sort alone, and Filter's keys the
+// binding in effect (none when unbound).
+
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	kvDelete: () => Promise.resolve()
+}))
+
+const { SortFilterMenu } = await import("@/features/spreadsheet/data/sortFilterMenu")
+const { SHEET_ACTIONS, sheetActionId } = await import("@/features/spreadsheet/lib/keymap")
+const { Kbd } = await import("@/lib/keymap/kbd")
+const { registerAction, registeredAction, setUserCombo } = await import("@/lib/keymap/registry")
+
+const FILTER = sheetActionId("filter")
+
+for (const def of SHEET_ACTIONS) {
+	if (def.id === FILTER && registeredAction(def.id) === undefined) {
+		registerAction(def)
+	}
+}
 
 afterEach(() => {
 	cleanup()
 })
 
 // A header of text over numbers in A1:B4, the active cell B3.
-function fixture(kind: "xlsx" | "csv", layout: SheetLayout | null = null) {
+function fixture(kind: "xlsx" | "csv", layout: SheetLayout | null = null, filterKeys?: ReactNode) {
 	const command = vi.fn<(command: SheetCommand) => Promise<unknown>>().mockResolvedValue({ ok: true })
 	const region = { startRow: 0, startCol: 0, endRow: 3, endCol: 1 }
 	const selection = {
@@ -40,6 +60,7 @@ function fixture(kind: "xlsx" | "csv", layout: SheetLayout | null = null) {
 		<SortFilterMenu
 			grid={grid}
 			disabled={false}
+			filterKeys={filterKeys}
 		/>
 	)
 
@@ -88,5 +109,28 @@ describe("the sort and filter menu", () => {
 
 		expect(await screen.findByRole("menuitem", { name: preview.previewSheetSortAscending })).toBeTruthy()
 		expect(screen.queryByRole("menuitemcheckbox", { name: new RegExp(preview.previewSheetFilter) })).toBeNull()
+	})
+
+	it("shows Filter's keys as the user has them bound", async () => {
+		await act(() => setUserCombo(FILTER, "alt+f"))
+		fixture("xlsx", null, <Kbd action={FILTER} />)
+
+		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetSortFilter }))
+
+		const filter = await screen.findByRole("menuitemcheckbox", { name: new RegExp(preview.previewSheetFilter) })
+
+		expect(filter.querySelector("[data-slot=menu-shortcut]")?.textContent).toContain("Alt")
+		expect(filter.textContent).not.toContain("Ctrl+Shift+L")
+		expect(filter.textContent).not.toContain("⇧⌘F")
+	})
+
+	it("shows no keys for Filter when it is unbound", async () => {
+		fixture("xlsx")
+
+		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetSortFilter }))
+
+		const filter = await screen.findByRole("menuitemcheckbox", { name: new RegExp(preview.previewSheetFilter) })
+
+		expect(filter.querySelector("[data-slot=menu-shortcut]")).toBeNull()
 	})
 })

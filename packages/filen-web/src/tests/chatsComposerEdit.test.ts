@@ -1,7 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import type { ChatMessage } from "@filen/sdk-rs"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
+
+// messageActions imports the real sdk client (a Vite `?worker`, unresolvable under node) and the query client.
+const { editMessageOp } = vi.hoisted(() => ({ editMessageOp: vi.fn() }))
+
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { editMessage: editMessageOp } }))
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
+import { editMessage } from "@/features/chats/lib/messageActions"
 
 // Starting an edit loads the message body over the composer's draft; ending it (save, cancel, emptied
 // input) must bring back whatever was typed before, including a pending reply quote.
@@ -118,5 +127,35 @@ describe("beginMessageEdit / endMessageEdit", () => {
 		endMessageEdit(CHAT, "edit-2-2-2")
 
 		expect(entry()?.draft).toBe("typed after")
+	})
+})
+
+describe("editMessage", () => {
+	const chat: Chat = {
+		uuid: CHAT,
+		ownerId: 7n,
+		key: "chat-key",
+		participants: [],
+		muted: false,
+		created: 0n,
+		lastFocus: 0n
+	}
+
+	beforeEach(() => {
+		editMessageOp.mockReset()
+	})
+
+	it("resolves success without an SDK call when the text is unchanged", async () => {
+		await expect(editMessage(chat, message("edit-1-1-1", "same text"), "same text")).resolves.toEqual({ status: "success" })
+		expect(editMessageOp).not.toHaveBeenCalled()
+	})
+
+	it("still sends a changed text", async () => {
+		const original = message("edit-1-1-1", "old text")
+
+		editMessageOp.mockResolvedValue({ ...original, message: "new text", edited: true })
+
+		await expect(editMessage(chat, original, "new text")).resolves.toEqual({ status: "success" })
+		expect(editMessageOp).toHaveBeenCalledWith(chat, original, "new text")
 	})
 })

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest"
 import {
 	SIMPLE_BLOCK_CUE_SECONDS,
 	TextTap,
-	assBlockText,
 	embeddedCueCharge,
 	isTapTextCodec,
 	type TextTapCue,
@@ -343,10 +342,5 @@ describe("TextTap", () => {
 
 		expect(cues).toHaveLength(10)
 		expect(instance.active).toBe(false)
-	})
-
-	it("reads the text field of an ASS block", () => {
-		expect(assBlockText("12,0,Default,Bob,0,0,0,,Hi, there")).toBe("Hi, there")
-		expect(assBlockText("broken")).toBe("broken")
 	})
 })

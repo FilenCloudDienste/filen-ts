@@ -49,7 +49,7 @@ describe("noteBulkActions — undecryptable gate", () => {
 	it("suppresses every metadata-needing action (pin/favorite/type/tags/duplicate/export) when the selection includes an undecryptable note", () => {
 		const descriptors = noteBulkActions(flags({ includesUndecryptable: true, everyOwned: true, hasWriteAccessToAll: true }))
 
-		expect(ids(descriptors)).not.toEqual(expect.arrayContaining(["pin", "favorite", "type", "tags", "duplicate", "export"]))
+		expect(ids(descriptors)).toEqual(["trash"])
 	})
 
 	it("still offers pin/favorite/type/tags/duplicate/export when nothing is undecryptable and write access is granted", () => {
@@ -108,9 +108,16 @@ describe("noteBulkActions — duplicate/export descriptor shape", () => {
 
 describe("noteBulkActions — owner-gated lifecycle (archive/restore/trash/delete)", () => {
 	it("offers nothing lifecycle-related when the current user does not own every selected note", () => {
-		const descriptors = noteBulkActions(flags({ everyOwned: false }))
+		// Active notes would offer archive/trash and trashed notes restore/delete, were it not for the owner gate.
+		const active = ids(noteBulkActions(flags({ everyOwned: false })))
+		const trashed = ids(
+			noteBulkActions(flags({ everyOwned: false, includesTrashed: true, everyTrashed: true, everyArchivedOrTrashed: true }))
+		)
 
-		expect(ids(descriptors)).not.toEqual(expect.arrayContaining(["archive", "restore", "trash", "delete"]))
+		for (const id of ["archive", "restore", "trash", "delete"]) {
+			expect(active).not.toContain(id)
+			expect(trashed).not.toContain(id)
+		}
 	})
 
 	it("archive requires everyOwned, none archived, none trashed, none undecryptable", () => {

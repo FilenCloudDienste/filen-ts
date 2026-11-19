@@ -52,6 +52,7 @@ const probeVideoSchema = type({
 	rotation: "number",
 	bitDepth: "number | null",
 	transfer: "'sdr' | 'pq' | 'hlg'",
+	"fps?": "number",
 	"dv?": { profile: "number", compat: "number" }
 })
 
@@ -105,9 +106,9 @@ export const probeRecordSchema = type({
 export type ProbeRecord = typeof probeRecordSchema.infer
 
 // The probe as it reads now. Revision 2: transport streams, and Matroska's landscape cover. Revision 3: Ogg, AVI, FLV,
-// ASF and MPEG program streams, and the 3GPP codecs (H.263, AMR). Revision 4: MPEG audio layers I and II (MP1, MP2). A record from before keeps answering unless it is one
-// this probe would read differently (outdatedRecord).
-export const PROBE_REVISION = 4
+// ASF and MPEG program streams, and the 3GPP codecs (H.263, AMR). Revision 4: MPEG audio layers I and II (MP1, MP2). Revision 5: the picture's frame rate. A record from before keeps
+// answering unless it is one this probe would read differently (outdatedRecord).
+export const PROBE_REVISION = 5
 
 const TRANSPORT_STREAM_EXTENSIONS: ReadonlySet<string> = new Set(["ts", "mts", "m2ts", "m2t"])
 
@@ -125,7 +126,9 @@ function extensionOfName(name: string | null): string | null {
 // A record a probe now would answer otherwise, by the revision that changed the answer: before 2, no container for a
 // transport stream's name, or a Matroska cover read that never looked for the landscape one; before 3, no container
 // for a name the new walkers read, or a 3GPP file's track whose codec its sample entries now name; before 4, a
-// transport stream's or Matroska file's audio track with no codec, which MP1 or MP2 now names.
+// transport stream's or Matroska file's audio track with no codec, which MP1 or MP2 now names; before 5, a full read
+// of a picture without a frame rate, which the player times frame-based subtitles and .edl entries by (read again
+// once, when the player or the detail page asks).
 function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => string | null): boolean {
 	const revision = record.rev ?? 1
 	const probe = record.probe
@@ -150,6 +153,10 @@ function outdatedRecord(record: ProbeRecord, tier: ProbeTier, nameOf: () => stri
 	}
 
 	if (revision < 2 && tier !== "card" && outdatedCover(record)) {
+		return true
+	}
+
+	if (revision < 5 && tier === "full" && probe.video !== null && probe.video.fps === undefined) {
 		return true
 	}
 

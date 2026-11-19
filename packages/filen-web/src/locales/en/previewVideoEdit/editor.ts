@@ -46,8 +46,6 @@ export const previewVideoEditor = {
 	previewVideoEditZoomIn: "Zoom in",
 	/** Video editor — zoom the timeline out */
 	previewVideoEditZoomOut: "Zoom out",
-	/** Video editor — show the whole video on the timeline */
-	previewVideoEditZoomFit: "Fit timeline",
 	/** Video editor — undo the last edit */
 	previewVideoEditUndo: "Undo",
 	/** Video editor — redo the edit just undone */
@@ -184,6 +182,8 @@ export const previewVideoEditor = {
 	previewVideoEditTextUseSelection: "Show during selection",
 	/** Video editor, Text tab — remove the selected text box */
 	previewVideoEditTextDelete: "Delete text",
+	/** Video editor, Text tab — the chip of a text box whose text was cleared (it shows nothing on the video) */
+	previewVideoEditTextEmpty: "Empty text",
 	/** Video editor, Text tab — no text boxes yet */
 	previewVideoEditNoText: "No text yet.",
 	/** Video editor, Text tab — how to place text */

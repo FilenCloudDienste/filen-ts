@@ -2,7 +2,7 @@ import * as Comlink from "comlink"
 import { VIDEO_CONTAINERS } from "@filen/shared/videos"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
-import { savePortAnnounced } from "@filen/shared/savePort"
+import { abortSavePort, savePortAnnounced } from "@filen/shared/savePort"
 import { driveItemName, type QuotaVerdict } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import {
@@ -27,12 +27,6 @@ import type { PreviewKey } from "@/lib/i18n"
 import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 
-// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file, spreadsheet, Word document, deck or image
-// inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
-// writable parent context, or a variant this app never lets a write reach), never an undecryptable
-// row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
-// which mounts the same CodeMirror surface text/code use; its rendered arm is never an editing
-// surface.
 // Whether a new file may be written beside this one (a converted copy): any readable file in the user's
 // own drive, whatever its format — unlike isEditable, which also needs the file's own format to save.
 export function canSaveCopyBeside(item: DriveItem, variant: DriveVariant): boolean {
@@ -65,6 +59,12 @@ export class SaveRefusedError extends Error {
 // lossless RTF and ODT writers).
 const DOCX_EDITABLE_EXTENSIONS: ReadonlySet<string> = new Set(["docx", "docm", "dotx", "dotm", "rtf", "odt", "ott"])
 
+// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file, spreadsheet, Word document, deck or image
+// inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
+// writable parent context, or a variant this app never lets a write reach), never an undecryptable
+// row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
+// which mounts the same CodeMirror surface text/code use; its rendered arm is never an editing
+// surface.
 export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 	if (variant !== "drive") {
 		return false
@@ -301,9 +301,10 @@ export async function runPreviewSave(
 		const verdict = await (deps.checkQuota ?? checkUploadQuota)(needed)
 
 		if (verdict.status === "exceeds") {
-			// The writer on the port's other end would otherwise block on a reader that never comes.
+			// The writer on the port's other end waits for a pull with no timeout: a bare close() would leave it (and every
+			// request queued behind it in its worker) blocked.
 			if (!(body instanceof Uint8Array) && "port" in body) {
-				body.port.close()
+				abortSavePort(body.port, "upload")
 			}
 
 			// Tagged as the server's refusal so callers treat both alike; the buffer stays dirty for a retry.
@@ -376,7 +377,7 @@ function upload(
 	}
 
 	if (deps.uploadFileFromPort === undefined) {
-		content.port.close()
+		abortSavePort(content.port, "upload")
 
 		return Promise.reject(new Error("runPreviewSave: no port upload"))
 	}
@@ -386,6 +387,16 @@ function upload(
 		...(content.size === undefined ? {} : { size: content.size }),
 		...(content.transferId === undefined ? {} : { transferId: content.transferId })
 	})
+}
+
+// The storage refusal a port save's upload already answered, for a save its writer then reported refused: the quota
+// pre-flight aborts the port, so the writer's refusal follows the upload's and the user is told the quota, not a
+// generic failure. Never waits: an upload still running (its reader missed the abort) answers null.
+export async function settledStorageRefusal(upload: Promise<ActionOutcome<DriveItem>>): Promise<ErrorDTO | null> {
+	// An already settled upload wins the race (its reaction is queued first).
+	const settled = await Promise.race([upload, Promise.resolve(null)]).catch(() => null)
+
+	return settled?.status === "error" && settled.dto.kind === "MaxStorageReached" ? settled.dto : null
 }
 
 // An edited image as the remote-change dialog's "save mine as new" writes it. `extension`: the format it was written in

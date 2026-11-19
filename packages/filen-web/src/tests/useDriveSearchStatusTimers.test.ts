@@ -197,6 +197,74 @@ describe("useDriveSearch — watchdog ceilings", () => {
 		expect(result.current.status).toBe("terminal")
 	})
 
+	// The ceiling a heartbeat arms must come from the hits the hook already holds, armed synchronously in
+	// the push handler, never from a setState updater (impure, and deferred to render when another update
+	// is already queued, e.g. a snapshot in the same tick).
+	describe("heartbeat ceiling", () => {
+		function watchdogDelaysDuring(fn: () => void): number[] {
+			const spy = vi.spyOn(globalThis, "setTimeout")
+			const from = spy.mock.calls.length
+
+			fn()
+
+			const delays = spy.mock.calls.slice(from).map(call => call[1] ?? 0)
+
+			spy.mockRestore()
+
+			return delays.filter(delay => delay === WATCHDOG_MS || delay === STALL_CEILING_MS)
+		}
+
+		it("a heartbeat right after a snapshot with hits arms the with-results ceiling in the same tick", async () => {
+			const { result } = renderHook(() => useDriveSearch(null, true))
+
+			await typeQuery(result.current.setInput)
+
+			const push = pushFn()
+			let delays: number[] = []
+
+			act(() => {
+				push({ type: "snapshot", hits: [hit("a")], total: 1n, live: true })
+				delays = watchdogDelaysDuring(() => {
+					push({ type: "heartbeat" })
+				})
+			})
+
+			expect(delays).toEqual([STALL_CEILING_MS])
+		})
+
+		it("a heartbeat after a reset arms the no-results ceiling", async () => {
+			searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true }))
+
+			const { result, rerender } = renderHook(({ root }: { root: string | null }) => useDriveSearch(root, true), {
+				initialProps: { root: null as string | null }
+			})
+
+			await typeQuery(result.current.setInput)
+
+			expect(result.current.results.length).toBe(1)
+
+			rerender({ root: testUuid("other") })
+
+			// The next open stays in flight, so only the reset has touched the hits.
+			const inFlight = Promise.withResolvers<SnapshotDTO>()
+
+			searchOpen.mockImplementation(() => inFlight.promise)
+
+			await typeQuery(result.current.setInput)
+
+			const push = pushFn()
+			let delays: number[] = []
+
+			act(() => {
+				delays = watchdogDelaysDuring(() => {
+					push({ type: "heartbeat" })
+				})
+			})
+
+			expect(delays).toEqual([WATCHDOG_MS])
+		})
+	})
+
 	it("a deleted search root is terminal regardless of any timer", async () => {
 		const { result } = renderHook(() => useDriveSearch(null, true))
 

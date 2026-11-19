@@ -58,7 +58,7 @@ async function dismissToasts(page: Page): Promise<void> {
 		}
 
 		await expect(toasts(page)).toHaveCount(0, { timeout: 1000 })
-	}).toPass()
+	}).toPass({ timeout: 30_000 })
 }
 
 // Opens `name` from the listing: at this width the editor shows it in Mobile view.

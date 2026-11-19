@@ -94,7 +94,7 @@ async function onWorker<T>(
 }
 
 async function transferToWorker(take: () => Uint8Array, signal: AbortSignal | undefined): Promise<Blob> {
-	return await onWorker(take, signal, (remote, bytes) => remote.transform(bytes))
+	return await onWorker(take, signal, (remote, bytes) => remote.transform(bytes), true)
 }
 
 // The one entry point for both HEIC callers — decode + JPEG re-encode run off the main thread in the

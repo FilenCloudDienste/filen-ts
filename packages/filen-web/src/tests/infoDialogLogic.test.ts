@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { CATEGORY_POLICY, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 
 describe("previewKindLabelKey", () => {
@@ -19,26 +19,11 @@ describe("previewKindLabelKey", () => {
 		expect(previewKindLabelKey("other")).toBeNull()
 	})
 
-	it("covers every PreviewCategory (no unmapped arm slips through)", () => {
-		const categories: PreviewCategory[] = [
-			"image",
-			"rawImage",
-			"video",
-			"audio",
-			"pdf",
-			"docx",
-			"spreadsheet",
-			"text",
-			"code",
-			"markdown",
-			"archive",
-			"other"
-		]
-
-		for (const category of categories) {
+	it("names a Kind for every PreviewCategory but 'other' (no unmapped row slips through)", () => {
+		for (const category of Object.keys(CATEGORY_POLICY) as PreviewCategory[]) {
 			const key = previewKindLabelKey(category)
 
-			expect(category === "other" ? key === null : typeof key === "string").toBe(true)
+			expect({ category, mapped: key !== null }).toEqual({ category, mapped: category !== "other" })
 		}
 	})
 })

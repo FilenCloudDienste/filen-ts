@@ -3,7 +3,6 @@ import {
 	compressJobPercent,
 	compressJobRowFigures,
 	copyJobPercent,
-	copyJobRate,
 	copyJobShownBytes,
 	extractJobPercent,
 	extractJobRowFigures,
@@ -23,7 +22,7 @@ import {
 import type { DriveItem } from "@/features/drive/lib/item"
 
 // Reads of any drive job, whatever its kind, for the surfaces that show one by id alone (the transfers
-// row, the card, the pending rows). Copy goes through its own functions, unchanged.
+// row, the card, the pending rows). Copy keeps its own percent and row figures; the rate is shared.
 
 export type DriveJob = CopyJob | CompressJob | ExtractJob
 
@@ -56,7 +55,7 @@ export function driveJobRowFigures(job: DriveJob): JobRowFigures {
 }
 
 export function driveJobRate(job: DriveJob): { bytesPerSecond: number; etaSeconds: number | null } | null {
-	return job.kind === "copy" ? copyJobRate(job) : jobRate(job)
+	return jobRate(job)
 }
 
 // A settled job whose stop is still moving what it made to the trash. A compress stop leaves nothing.

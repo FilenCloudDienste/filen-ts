@@ -38,12 +38,12 @@ const BASE_URL = e2eBaseUrl()
 // against an account that is, by the very fact of the first failure, already contended.
 //
 // Most of this lane's newer members (archive-browse, archive-dialogs, downloads, drive-marquee,
-// preview-media, preview-media-formats, thumbnails) are here because they no longer PROVISION anything: they read a shared, read-only
-// fixture tree the fixtures-setup project builds once (e2e/helpers/fixtures.ts), instead of each test
+// preview-legacy-bframes, preview-legacy-media, preview-media, preview-media-formats, thumbnails) are here because they no longer
+// PROVISION anything: they read a shared, read-only fixture tree the fixtures-setup project builds once (e2e/helpers/fixtures.ts), instead of each test
 // creating a scratch directory and uploading its own files. Provisioning was the only reason those
 // specs ever took the lock.
 const READ_SPECS =
-	/\/(archive-browse|archive-dialogs|archive-nested|archive-rar|auth|boot|bootCost|comics|contacts|docx-a11y|docx-equation|docx-insert|docx-smoke|docx-touch|downloads|drive|drive-marquee|ebookLayout|keymap|narrow-viewport|nativeImageDecode|no-coi|no-opfs|pdf-print|preview-iwork|preview-media|preview-media-formats|preview-rich|preview-text-read|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch|turnstile-frame|w7-webgl-probe)\.spec\.ts$/
+	/\/(archive-browse|archive-dialogs|archive-nested|archive-rar|auth|boot|bootCost|comics|contacts|docx-a11y|docx-equation|docx-insert|docx-smoke|docx-touch|downloads|drive|drive-marquee|ebookLayout|keymap|narrow-viewport|nativeImageDecode|no-coi|no-opfs|pdf-print|preview-iwork|preview-legacy-bframes|preview-legacy-media|preview-media|preview-media-formats|preview-rich|preview-text-read|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch|turnstile-frame|w7-webgl-probe)\.spec\.ts$/
 // Own surfaces, own limits: notes hits the free plan's 10-note cap, chats the conversation-create rate
 // limiter. Neither touches the drive lock, but both race THEMSELVES, so each owns a serial lane.
 const NOTES_SPEC = /\/notes\.spec\.ts$/
@@ -120,8 +120,8 @@ function lanes(browser: Browser): Project[] {
 			//
 			// 480s, rather than a ceiling sized off the single most expensive spec in the lane: it holds
 			// that 290s preamble with a body's worth of headroom left over for the specs that read the tree
-			// (archive-browse, archive-dialogs, downloads, drive-marquee, narrow-viewport, preview-media,
-			// preview-media-formats, thumbnails), while the rest here never touch it and would only inherit dead headroom — and none of those
+			// (archive-browse, archive-dialogs, downloads, drive-marquee, narrow-viewport, preview-legacy-bframes,
+			// preview-legacy-media, preview-media, preview-media-formats, thumbnails), while the rest here never touch it and would only inherit dead headroom — and none of those
 			// waits is spent on a healthy run, each closes on a rendered row. A spec whose own pinned waits
 			// need more says so with test.setTimeout, where the cost is visible in the file —
 			// downloads.spec.ts (it enters the tree TWICE, so it pays the whole preamble again) and
@@ -200,8 +200,8 @@ function lanes(browser: Browser): Project[] {
 		// Serial lanes for the two surfaces that race THEMSELVES rather than the drive: notes against the
 		// free plan's 10-note cap, chats against the conversation-create rate limiter. Neither takes the
 		// drive lock, so neither is ordered after anything — but neither is it free of the lanes above:
-		// they all draw on the one `workers` pool, so on CI, where that pool is 3 and the read lane caps
-		// at 2, these two contend with the write lane for the remaining slot.
+		// they all draw on the one `workers` pool below, so on CI, where the read lane is capped under that
+		// pool, these two share what the cap leaves with the write lane.
 		// Both lanes below carry a derived ceiling for the same reason chromium-read and chromium-write
 		// do: a test that outruns its budget is killed by the HARNESS, which names nothing and dies before
 		// teardown — and here that strands notes against the free plan's 10-note cap. Their longest tests

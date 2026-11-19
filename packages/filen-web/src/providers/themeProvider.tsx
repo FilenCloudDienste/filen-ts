@@ -65,28 +65,40 @@ function applyTheme(nextTheme: Theme) {
 	restoreTransitions()
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-	const [theme, setThemeState] = React.useState<Theme>(() => {
+// Site data can be blocked for the origin, and this provider renders above BootGate, which routes that case to
+// /no-opfs: reading falls back to the default and writing is best effort, as in public/theme.js.
+export function readStoredTheme(): Theme {
+	try {
 		const storedTheme = localStorage.getItem(STORAGE_KEY)
+
 		if (isThemeSetting(storedTheme)) {
 			return storedTheme
 		}
+	} catch {
+		// Storage unavailable: the default applies.
+	}
 
-		return DEFAULT_THEME_SETTING
-	})
+	return DEFAULT_THEME_SETTING
+}
+
+export function storeTheme(theme: Theme): void {
+	try {
+		localStorage.setItem(STORAGE_KEY, theme)
+	} catch {
+		// Storage unavailable or full: the theme applies for this page only.
+	}
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+	const [theme, setThemeState] = React.useState<Theme>(readStoredTheme)
 
 	const setTheme = (nextTheme: Theme) => {
-		localStorage.setItem(STORAGE_KEY, nextTheme)
+		storeTheme(nextTheme)
 		setThemeState(nextTheme)
 	}
 
 	const toggleTheme = () => {
-		setThemeState(currentTheme => {
-			const nextTheme = toggledTheme(currentTheme, getSystemTheme())
-
-			localStorage.setItem(STORAGE_KEY, nextTheme)
-			return nextTheme
-		})
+		setTheme(toggledTheme(theme, getSystemTheme()))
 	}
 
 	React.useEffect(() => {
@@ -108,17 +120,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 		}
 	}, [theme])
 
-	// Registered above as "app.toggleTheme" (default combo "d") — modifier-held presses and
-	// editable-target focus (input/textarea/select/contenteditable/ARIA textbox roles) are already
-	// excluded by react-hotkeys-hook's own combo-matching and `enableOnFormTags`/
-	// `enableOnContentEditable` defaults (both false), and `useAction`'s default `ignoreEventWhen`
-	// drops key-repeat — together the same guards the old hand-rolled listener implemented itself.
-	// That combo-matching alone does NOT cover a READ-ONLY surface with focus (e.g. the preview
-	// overlay's rendered-markdown or read-only-CodeMirror panes: neither is a form tag, and neither
-	// sets `contenteditable`), so this provider — mounted above the whole app, outside the drive
-	// feature's own isDialogOpen chain (directoryListing.tsx/useDriveDialogHost.tsx) — additionally
-	// stands down under any open dialog or menu (OUTSIDE_OVERLAYS, the shared Base UI signal in
-	// dialogGuard.ts), which catches the preview overlay the same way it catches every other dialog.
+	// "app.toggleTheme" (default combo "d"): modifier-held presses and editable-target focus
+	// (input/textarea/select/contenteditable/ARIA textbox roles) are excluded by react-hotkeys-hook's
+	// combo-matching and `enableOnFormTags`/`enableOnContentEditable` defaults (both false), and
+	// `useAction`'s default `ignoreEventWhen` drops key-repeat. Combo-matching alone does NOT cover a
+	// READ-ONLY surface with focus (e.g. the preview overlay's rendered-markdown or read-only-CodeMirror
+	// panes: neither is a form tag, and neither sets `contenteditable`), so this provider — mounted above
+	// the whole app, outside the drive feature's own isDialogOpen chain — additionally stands down under
+	// any open dialog or menu (OUTSIDE_OVERLAYS, the shared Base UI signal in dialogGuard.ts), which
+	// catches the preview overlay the same way it catches every other dialog.
 	useAction(
 		"app.toggleTheme",
 		() => {
@@ -151,10 +161,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 	React.useEffect(() => {
 		const handleStorageChange = (event: StorageEvent) => {
-			if (event.storageArea !== localStorage) {
-				return
-			}
-
+			// Keyed on the name alone: reading `localStorage` itself throws when site data is blocked.
 			if (event.key !== STORAGE_KEY) {
 				return
 			}

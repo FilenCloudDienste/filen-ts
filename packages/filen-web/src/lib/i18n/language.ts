@@ -116,9 +116,10 @@ let generation = 0
 /**
  * Switches the UI to `lang`: fetches its catalog and its base's (zh-TW reads zh before English) unless held already,
  * drops the previous language's, then changes i18next's language. A catalog that cannot be loaded leaves English.
- * A later call supersedes one still loading.
+ * A later call supersedes one still loading. Resolves false only when `lang` could not be loaded; a superseded call
+ * resolves true, the later call reports for both.
  */
-export async function applyLanguage(lang: SupportedLanguage): Promise<void> {
+export async function applyLanguage(lang: SupportedLanguage): Promise<boolean> {
 	const current = ++generation
 	const chain = languageChain(lang, AVAILABLE_LANGUAGES)
 	const loaded = await Promise.all(
@@ -126,7 +127,7 @@ export async function applyLanguage(lang: SupportedLanguage): Promise<void> {
 	)
 
 	if (current !== generation) {
-		return
+		return true
 	}
 
 	const usable = loaded.filter(entry => registered.includes(entry.code) || entry.catalog !== null).map(entry => entry.code)
@@ -148,6 +149,8 @@ export async function applyLanguage(lang: SupportedLanguage): Promise<void> {
 	registered = keep
 
 	await i18n.changeLanguage(target)
+
+	return target === lang
 }
 
 const preferenceListeners = new Set<() => void>()
@@ -167,8 +170,8 @@ function notifyPreference(): void {
 	}
 }
 
-/** Stores the pick (null = follow the browser) and applies it. */
-export async function setLanguagePreference(lang: SupportedLanguage | null): Promise<void> {
+/** Stores the pick (null = follow the browser) and applies it. Resolves false when its catalog could not be loaded. */
+export async function setLanguagePreference(lang: SupportedLanguage | null): Promise<boolean> {
 	try {
 		if (lang === null) {
 			localStorage.removeItem(LANGUAGE_STORAGE_KEY)
@@ -181,7 +184,7 @@ export async function setLanguagePreference(lang: SupportedLanguage | null): Pro
 
 	notifyPreference()
 
-	await applyLanguage(lang ?? detectLanguage())
+	return await applyLanguage(lang ?? detectLanguage())
 }
 
 let started = false

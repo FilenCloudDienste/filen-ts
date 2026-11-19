@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest"
-import type { EditAnnotationRevision } from "@filen/office/core/docx/paged"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import type { EditAnnotationRevision, PagedEditor } from "@filen/office/core/docx/paged"
 import {
+	ReviewView,
 	asideRoom,
 	changeLabel,
 	changeTitle,
@@ -12,6 +13,29 @@ import {
 	type ReviewTranslate
 } from "@/features/preview/components/docxReview.logic"
 import { preview } from "@/locales/en/preview"
+
+// The view's annotation and comment stores, without a document: no comments, no tracked changes.
+vi.mock("@filen/office/core/docx/paged", async () => {
+	const actual = await vi.importActual<typeof import("@filen/office/core/docx/paged")>("@filen/office/core/docx/paged")
+
+	return {
+		...actual,
+		EditAnnotations: class {
+			subscribe(): () => void {
+				return () => undefined
+			}
+
+			pageVersion(): number {
+				return 0
+			}
+
+			read(): unknown {
+				return { authors: [], comments: [], revisions: [], rectPages: new Int32Array(0), rectFloats: new Float32Array(0) }
+			}
+		},
+		docxComments: () => ({ version: 0, threads: () => [] })
+	}
+})
 
 const CHANGE: EditAnnotationRevision = {
 	kind: "formatting",
@@ -201,5 +225,53 @@ describe("formatting changes in Word's words", () => {
 		expect(changeTitle({ ...base, format: [] }, t)).toBe("Formatted")
 		expect(changeTitle({ kind: "formatting", target: "table", format: [] }, t)).toBe("Formatted Table")
 		expect(changeTitle({ kind: "insertion", target: "text", format: [] }, t)).toBe("Inserted")
+	})
+})
+
+describe("review view", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals()
+	})
+
+	it("lets the scroller's observer go with the last listener and observes it again on the next", () => {
+		const frames: (() => void)[] = []
+		const observers: { readonly observe: ReturnType<typeof vi.fn>; readonly disconnect: ReturnType<typeof vi.fn> }[] = []
+
+		vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback))
+		vi.stubGlobal("cancelAnimationFrame", vi.fn())
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				readonly observe = vi.fn()
+				readonly disconnect = vi.fn()
+
+				constructor() {
+					observers.push(this)
+				}
+			}
+		)
+
+		const flush = (): void => {
+			for (const callback of frames.splice(0)) callback()
+		}
+		const scroller = { clientWidth: 900, clientHeight: 700 }
+		const page = { style: { top: "0px", left: "0px", width: "816px", height: "1056px" }, closest: () => scroller }
+		const view = new ReviewView({} as PagedEditor)
+
+		view.mount(0, page as unknown as HTMLElement)
+
+		const unsubscribe = view.subscribe(() => undefined)
+
+		flush()
+		expect(observers).toHaveLength(1)
+		expect(observers[0]?.observe).toHaveBeenCalledWith(scroller)
+
+		unsubscribe()
+		expect(observers[0]?.disconnect).toHaveBeenCalledTimes(1)
+
+		view.subscribe(() => undefined)
+		flush()
+		expect(observers).toHaveLength(2)
+		expect(observers[1]?.observe).toHaveBeenCalledWith(scroller)
 	})
 })

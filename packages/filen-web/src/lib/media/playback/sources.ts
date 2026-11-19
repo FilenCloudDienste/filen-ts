@@ -13,6 +13,7 @@ import {
 import type { DirectSource } from "@/lib/media/playback/directSession"
 import type { RemuxSource } from "@/lib/media/playback/remuxSession"
 import { warmRemuxFile, type RemuxWarmth } from "@/lib/media/mseController"
+import { directContentType } from "@/lib/media/playback/openPlayback.logic"
 import type { VideoProbe } from "@filen/shared/videos"
 
 // The app's byte sources for playback sessions: the service worker's range route and the SDK worker's
@@ -23,6 +24,11 @@ import type { VideoProbe } from "@filen/shared/videos"
 export function directSource(params: { file: AnyFile; name: string; contentType: string; access?: RangeAccess }): DirectSource {
 	const { file, name, contentType, access = "authed" } = params
 	const presetId = access === "anon" ? null : takeWarmDirect(file.uuid)
+
+	// A remux warm of this file is not what plays it: let it go.
+	if (access === "authed" && presetId === null) {
+		cancelPrewarm(file.uuid)
+	}
 
 	return {
 		register: id =>
@@ -80,7 +86,16 @@ export function originRemuxSource(origin: ByteOrigin, access: OriginAccess): Rem
 }
 
 export function remuxSource(file: AnyFile): RemuxSource {
-	return takeWarmRemux(file.uuid) ?? createRemuxSource(file)
+	const taken = takeWarmRemux(file.uuid)
+
+	if (taken !== null) {
+		return taken
+	}
+
+	// A direct registration readied for this file is not what plays it (the ladder remuxes it): let it go.
+	cancelPrewarm(file.uuid)
+
+	return createRemuxSource(file)
 }
 
 // An audio file's bytes for its edge analysis: always a port of its own, never the file warmed for playback.
@@ -104,8 +119,6 @@ type Warm =
 	| { kind: "direct"; fileUuid: string; id: string; registered: Promise<unknown> }
 
 let warm: Warm | null = null
-
-const DIRECT_TYPES: Readonly<Record<string, string>> = { mp4: "video/mp4", mov: "video/mp4", webm: "video/webm" }
 
 export function prewarmPlayback(params: { file: AnyFile; name: string; probe: VideoProbe; idrOnlyStart: boolean }): void {
 	const { file, name, probe } = params
@@ -146,9 +159,9 @@ export function prewarmPlayback(params: { file: AnyFile; name: string; probe: Vi
 		return
 	}
 
-	const contentType = DIRECT_TYPES[probe.container]
+	const contentType = directContentType(probe.container)
 
-	if (contentType !== undefined) {
+	if (contentType !== null) {
 		const id = crypto.randomUUID()
 
 		warm = { kind: "direct", fileUuid: file.uuid, id, registered: previewStreamUrl(file, name, contentType, id).catch(() => undefined) }

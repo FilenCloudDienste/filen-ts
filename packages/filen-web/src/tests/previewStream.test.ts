@@ -11,9 +11,9 @@ import {
 	SW_PROTOCOL_VERSION
 } from "@/lib/sw/protocol"
 
-// previewStreamUrl is the request half of the inline-preview seam (usePreviewStreamUrl.ts's own
-// abort surface is just a `live` flag guarding a late setState — no cancellation message exists,
-// see that hook's own doc comment — so there is nothing server-side here to pin an abort against).
+// previewStreamUrl is the request half of the inline-preview seam; its release side
+// (SW_MSG_RELEASE_PREVIEW) and the SDK-side cancel of an anon range port (cancelPreviewDownload)
+// are pinned further down.
 // registerWithSw is saveDownload.ts's shared registration seam (session handoff, restart healing, ack
 // plumbing), already pinned by saveDownload.test.ts; only the registration payload/URL shape unique to
 // the preview route is re-verified here.
@@ -59,7 +59,6 @@ describe("previewStreamUrl", () => {
 		const url = await previewStreamUrl(file, "clip.mp4", "video/mp4")
 
 		expect(url.startsWith(SW_DOWNLOAD_PREFIX)).toBe(true)
-		expect(url).toBe(`${SW_DOWNLOAD_PREFIX}${url.slice(SW_DOWNLOAD_PREFIX.length)}`)
 
 		expect(registerWithSw).toHaveBeenCalledTimes(1)
 		const [type, payload] = registerWithSw.mock.calls[0] as [string, Record<string, unknown>]

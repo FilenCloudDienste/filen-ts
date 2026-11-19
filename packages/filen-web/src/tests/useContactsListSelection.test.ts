@@ -2,11 +2,30 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react"
-import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
+import { useEffect, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
+import { useContactsListSelection, type ContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
 import { EMPTY_CONTACT_SELECTION } from "@/features/contacts/lib/selection"
 
 const UUIDS = ["a", "b", "c", "d", "e"]
+
+// Records what every committed render exposed: an effect runs once per commit, never for a render React
+// discarded, so a reset that lands one frame late shows up as a stale entry here.
+function useCommittedSelection(
+	resetKey: string,
+	commits: { resetKey: string; selected: string[]; cursor: number }[]
+): ContactsListSelection {
+	const selection = useContactsListSelection({ resetKey })
+
+	useEffect(() => {
+		commits.push({
+			resetKey,
+			selected: [...selection.selection.contacts],
+			cursor: selection.activeIndexFor("contacts", UUIDS)
+		})
+	})
+
+	return selection
+}
 
 function clickEvent(modifiers: Partial<Pick<ReactMouseEvent, "shiftKey" | "metaKey" | "ctrlKey">> = {}): ReactMouseEvent {
 	return { shiftKey: false, metaKey: false, ctrlKey: false, ...modifiers } as ReactMouseEvent
@@ -170,6 +189,31 @@ describe("useContactsListSelection — pointer model", () => {
 		expect(result.current.activeIndexFor("contacts", UUIDS)).toBe(0)
 
 		// A shift click after the reset has no anchor left to range from — it collapses to a plain select.
+		act(() => {
+			result.current.handlePointerSelect("contacts", UUIDS, 2, clickEvent({ shiftKey: true }), "mouse")
+		})
+
+		expect([...result.current.selection.contacts]).toEqual(["c"])
+	})
+
+	it("the first commit after a resetKey change already has an empty selection, anchor and cursor", () => {
+		const commits: { resetKey: string; selected: string[]; cursor: number }[] = []
+		const { result, rerender } = renderHook(({ resetKey }) => useCommittedSelection(resetKey, commits), {
+			initialProps: { resetKey: "all" }
+		})
+
+		act(() => {
+			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent(), "mouse")
+		})
+
+		commits.length = 0
+
+		rerender({ resetKey: "blocked" })
+
+		expect(commits[0]).toEqual({ resetKey: "blocked", selected: [], cursor: 0 })
+		expect(commits.every(commit => commit.selected.length === 0 && commit.cursor === 0)).toBe(true)
+
+		// No anchor survived into that first commit either: a shift click collapses to a plain select.
 		act(() => {
 			result.current.handlePointerSelect("contacts", UUIDS, 2, clickEvent({ shiftKey: true }), "mouse")
 		})

@@ -1,10 +1,11 @@
 import { isImeKeydown } from "@filen/shared/keymap"
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { MarkupColor, MarkupItem } from "@/features/preview/imageEdit/types"
 import { inBox, strokeHit, textBox, type Box } from "@/features/preview/imageEdit/components/editorGeometry"
 import {
 	HIGHLIGHTER_ALPHA,
+	measureMarkupText,
 	strokeWidth,
 	textSize,
 	type MarkupMapping,
@@ -50,9 +51,27 @@ function newId(): string {
 	return crypto.randomUUID()
 }
 
+// `markup` with the text being edited in it: added, changed, or (emptied) removed. Null when that changes nothing (a new
+// item left empty).
+function withDraft(markup: readonly MarkupItem[], draft: TextDraft): readonly MarkupItem[] | null {
+	const text = draft.text.trim()
+	const existing = markup.some(item => item.id === draft.id)
+
+	if (text.length === 0) {
+		return existing ? markup.filter(item => item.id !== draft.id) : null
+	}
+
+	const item: MarkupItem = { kind: "text", id: draft.id, color: draft.color, size: draft.size, at: draft.at, text }
+
+	return existing ? markup.map(other => (other.id === draft.id ? item : other)) : [...markup, item]
+}
+
 // The drawing surface over the picture while the Markup tab is open. A stroke is drawn live on this layer's own
 // canvas and committed once, on release, in source pixels; the render worker draws every committed item. The text
-// item being edited is an input in place (the editor leaves it out of the rendered picture meanwhile).
+// item being edited is an input in place (the editor leaves it out of the rendered picture meanwhile). `flushRef` holds,
+// while a text is being edited, what ends the edit and returns the markup with the text in it (null: no change), so a
+// save started from the keyboard with the caret in the field writes the text; `onPendingTextChange` says whether text
+// is being typed, an unsaved edit before it is committed.
 export function MarkupLayer(props: {
 	frame: Box
 	mapping: MarkupMapping
@@ -63,6 +82,8 @@ export function MarkupLayer(props: {
 	width: MarkupWidth
 	onCommit: (markup: readonly MarkupItem[], coalesceKey: string | undefined) => void
 	onEditingChange: (id: string | null) => void
+	flushRef: RefObject<(() => readonly MarkupItem[] | null) | null>
+	onPendingTextChange: (pending: boolean) => void
 }) {
 	const { t } = useTranslation("preview")
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -78,6 +99,48 @@ export function MarkupLayer(props: {
 
 	// The item whose edit is open: a blur after Enter or a click beside the field must not end it twice.
 	const editingRef = useRef<string | null>(null)
+	// An input method is composing in the field: its text is not the user's yet, so nothing flushes it.
+	const composingRef = useRef(false)
+	const { markup, flushRef, onEditingChange, onPendingTextChange } = props
+	const pendingText = draft !== null && draft.text.trim().length > 0
+
+	useEffect(() => {
+		if (draft === null) {
+			return undefined
+		}
+
+		const flush = (): readonly MarkupItem[] | null => {
+			if (composingRef.current || editingRef.current !== draft.id) {
+				return null
+			}
+
+			editingRef.current = null
+			setDraft(null)
+			onEditingChange(null)
+
+			return withDraft(markup, draft)
+		}
+
+		flushRef.current = flush
+
+		return () => {
+			if (flushRef.current === flush) {
+				flushRef.current = null
+			}
+		}
+	}, [draft, markup, flushRef, onEditingChange])
+
+	useEffect(() => {
+		if (!pendingText) {
+			return undefined
+		}
+
+		onPendingTextChange(true)
+
+		return () => {
+			onPendingTextChange(false)
+		}
+	}, [pendingText, onPendingTextChange])
 
 	const startEditing = (next: TextDraft): void => {
 		editingRef.current = next.id
@@ -102,23 +165,11 @@ export function MarkupLayer(props: {
 			return
 		}
 
-		const text = draft.text.trim()
-		const existing = props.markup.some(item => item.id === draft.id)
+		const next = withDraft(props.markup, draft)
 
-		if (text.length === 0) {
-			if (existing) {
-				props.onCommit(
-					props.markup.filter(item => item.id !== draft.id),
-					undefined
-				)
-			}
-
-			return
+		if (next !== null) {
+			props.onCommit(next, undefined)
 		}
-
-		const item: MarkupItem = { kind: "text", id: draft.id, color: draft.color, size: draft.size, at: draft.at, text }
-
-		props.onCommit(existing ? props.markup.map(other => (other.id === draft.id ? item : other)) : [...props.markup, item], undefined)
 	}
 
 	const textAt = (x: number, y: number): Extract<MarkupItem, { kind: "text" }> | null => {
@@ -128,7 +179,7 @@ export function MarkupLayer(props: {
 			if (item?.kind === "text") {
 				const anchor = props.mapping.toScreen(item.at[0], item.at[1])
 
-				if (inBox(textBox(anchor, item.text, item.size * props.mapping.scale), x, y, ERASER_SLACK)) {
+				if (inBox(textBox(anchor, item.text, item.size * props.mapping.scale, measureMarkupText), x, y, ERASER_SLACK)) {
 					return item
 				}
 			}
@@ -373,10 +424,17 @@ export function MarkupLayer(props: {
 						top: editingAnchor[1],
 						fontSize: editingFontSize,
 						color: draft.color,
-						width: `${String(Math.max(1, draft.text.length + 1) * 0.6)}em`
+						// Measured as the worker draws it, a space wider so the caret has room.
+						width: measureMarkupText(`${draft.text} `, editingFontSize)
 					}}
 					onChange={event => {
 						setDraft({ ...draft, text: event.target.value })
+					}}
+					onCompositionStart={() => {
+						composingRef.current = true
+					}}
+					onCompositionEnd={() => {
+						composingRef.current = false
 					}}
 					onBlur={() => {
 						finishEditing(true)

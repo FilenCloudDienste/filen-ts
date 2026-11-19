@@ -48,7 +48,8 @@ import {
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
-import { exportAllNotes, toastNotesExportOutcome } from "@/features/notes/lib/export"
+import { exportAllNotes, toastNotesExportOutcome, type ExportAllOutcome } from "@/features/notes/lib/export"
+import { asErrorDTO } from "@/lib/sdk/errors"
 import { createFailedAs, runNoteCreateActivity } from "@/features/notes/lib/activity"
 import { importNoteFromFile } from "@/features/notes/lib/import"
 import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
@@ -298,6 +299,8 @@ export function NotesSidebar() {
 	const [expandedTags, setExpandedTags] = useState<ReadonlySet<string>>(() => new Set())
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const importInputRef = useRef<HTMLInputElement | null>(null)
+	const exportingAllRef = useRef(false)
+	const [exportingAll, setExportingAll] = useState(false)
 	// The header holding the filter field notes.search focuses (ListFilterInput takes no ref).
 	const sidebarHeaderRef = useRef<HTMLDivElement | null>(null)
 
@@ -391,8 +394,24 @@ export function NotesSidebar() {
 		}
 	}
 
+	// One Export all at a time, from the menu item and the shortcut alike: a walk over every note can take
+	// minutes with nothing on screen, and a second trigger would double the reads and the download. The
+	// ref shuts the gate synchronously, the state disables the menu item; both reopen on a rejection too,
+	// which takes the same error toast as a failed outcome. A rejection is turned into that outcome rather
+	// than caught with try/finally, which the React Compiler does not compile.
 	async function handleExportAll(): Promise<void> {
-		toastNotesExportOutcome(await exportAllNotes(allNotes))
+		if (exportingAllRef.current) {
+			return
+		}
+
+		exportingAllRef.current = true
+		setExportingAll(true)
+
+		const outcome = await exportAllNotes(allNotes).catch((e: unknown): ExportAllOutcome => ({ status: "error", dto: asErrorDTO(e) }))
+
+		exportingAllRef.current = false
+		setExportingAll(false)
+		toastNotesExportOutcome(outcome)
 	}
 
 	// The hidden file input's onChange: detect+sanitize+create all happen inside importNoteFromFile
@@ -712,6 +731,8 @@ export function NotesSidebar() {
 							variant="outline"
 							size="sm"
 							className="mt-1 app-region-no-drag"
+							disabled={!isOnline}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 							onClick={() => {
 								dialogHost.openCreateTagDialog()
 							}}
@@ -777,7 +798,7 @@ export function NotesSidebar() {
 							/>
 							<DropdownMenuContent align="end">
 								<DropdownMenuItem
-									disabled={notesQuery.isPending || allNotes.length === 0}
+									disabled={exportingAll || notesQuery.isPending || allNotes.length === 0}
 									onClick={() => {
 										void handleExportAll()
 									}}

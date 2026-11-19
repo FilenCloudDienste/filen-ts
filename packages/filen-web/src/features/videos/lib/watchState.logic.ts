@@ -1,6 +1,6 @@
 import { type } from "arktype"
-import type { File as SdkFile, FileVersion, UuidStr } from "@filen/sdk-rs"
-import { isUuid } from "@filen/shared"
+import type { File as SdkFile, FileVersion } from "@filen/sdk-rs"
+import { isUuidStr } from "@/lib/uuidStr"
 import {
 	emptyWatchState,
 	mergeRecordMaps,
@@ -330,10 +330,6 @@ export function gcTargets({
 		.sort((a, b) => (a.timestamp === b.timestamp ? 0 : a.timestamp < b.timestamp ? 1 : -1))
 		.slice(GC_KEEP_NEWEST)
 		.filter(version => now - Number(version.timestamp) > GC_MIN_AGE_MS && !protect.has(version.uuid))
-}
-
-function isUuidStr(value: string): value is UuidStr {
-	return isUuid(value)
 }
 
 // The version of `head`'s lineage with uuid `uuid`, as a delete takes it (the delete sends only the uuid).

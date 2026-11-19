@@ -113,4 +113,10 @@ describe("MetadataCard", () => {
 		expect(within(table).queryByText("dir/file-999.bin")).toBeNull()
 		expect(within(table).getByText("0 KB").className).toContain("text-end")
 	})
+
+	it("lets the keyboard reach the table's scroller", () => {
+		renderCard({ table: TABLE })
+
+		expect(within(screen.getByRole("table", { name: "Files" })).getByRole("rowgroup").tabIndex).toBe(0)
+	})
 })

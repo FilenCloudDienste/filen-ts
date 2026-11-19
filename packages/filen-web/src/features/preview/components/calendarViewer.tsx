@@ -25,6 +25,7 @@ import {
 import { readCalendarFile } from "@/features/preview/lib/textFamilyClient"
 import { useTextFamilyReading } from "@/features/preview/hooks/useTextFamilyReading"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { i18n } from "@/lib/i18n"
 
 // Wall times are formatted from epoch ms read as UTC, so they show exactly as written.
 const WALL_DAY = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeZone: "UTC" })
@@ -33,20 +34,46 @@ const WALL_TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short", timeZ
 const WALL_DATE_TIME = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })
 const LOCAL_TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 const LOCAL_DATE_TIME = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
-const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "long", timeZone: "UTC" })
-const MONTH = new Intl.DateTimeFormat(undefined, { month: "long", timeZone: "UTC" })
-const LIST = new Intl.ListFormat(undefined, { style: "long", type: "conjunction" })
+
+// Weekday, month and list words go inside translated sentences, so they follow the app language, not the browser's.
+// Built once per language: the language switches without a reload.
+interface RecurrenceFormats {
+	weekday: Intl.DateTimeFormat
+	month: Intl.DateTimeFormat
+	list: Intl.ListFormat
+}
+
+const RECURRENCE_FORMATS = new Map<string, RecurrenceFormats>()
+
+function recurrenceFormats(): RecurrenceFormats {
+	const language = i18n.language
+	const cached = RECURRENCE_FORMATS.get(language)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	const formats: RecurrenceFormats = {
+		weekday: new Intl.DateTimeFormat(language, { weekday: "long", timeZone: "UTC" }),
+		month: new Intl.DateTimeFormat(language, { month: "long", timeZone: "UTC" }),
+		list: new Intl.ListFormat(language, { style: "long", type: "conjunction" })
+	}
+
+	RECURRENCE_FORMATS.set(language, formats)
+
+	return formats
+}
 
 // 2024-01-01 was a Monday.
 const WEEKDAY_INDEX: Readonly<Record<string, number>> = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 }
 
-function weekdayName(code: string): string {
-	return WEEKDAY.format(Date.UTC(2024, 0, 1 + (WEEKDAY_INDEX[code] ?? 0)))
+function weekdayName(weekday: Intl.DateTimeFormat, code: string): string {
+	return weekday.format(Date.UTC(2024, 0, 1 + (WEEKDAY_INDEX[code] ?? 0)))
 }
 
-function nthWeekday(t: TFunction<"preview">, rule: string): string {
+function nthWeekday(t: TFunction<"preview">, weekday: Intl.DateTimeFormat, rule: string): string {
 	const match = /^([+-]?\d{1,2})?([A-Z]{2})$/.exec(rule)
-	const day = weekdayName(match?.[2] ?? "MO")
+	const day = weekdayName(weekday, match?.[2] ?? "MO")
 	const n = match?.[1] === undefined ? null : Number(match[1])
 
 	switch (n) {
@@ -91,14 +118,19 @@ function every(t: TFunction<"preview">, rule: CalendarRecurrence): string {
 // "Every 2 weeks on Monday and Wednesday, 10 times".
 function recurrenceWords(t: TFunction<"preview">, rule: CalendarRecurrence): string {
 	const parts = [every(t, rule)]
+	const formats = recurrenceFormats()
 
-	if (rule.byDay.length > 0) parts.push(t("previewCalendarOnDays", { days: LIST.format(rule.byDay.map(day => nthWeekday(t, day))) }))
+	if (rule.byDay.length > 0) {
+		parts.push(t("previewCalendarOnDays", { days: formats.list.format(rule.byDay.map(day => nthWeekday(t, formats.weekday, day))) }))
+	}
 
-	if (rule.byMonthDay.length > 0) parts.push(t("previewCalendarOnMonthDays", { days: LIST.format(rule.byMonthDay.map(String)) }))
+	if (rule.byMonthDay.length > 0) parts.push(t("previewCalendarOnMonthDays", { days: formats.list.format(rule.byMonthDay.map(String)) }))
 
 	if (rule.byMonth.length > 0) {
 		parts.push(
-			t("previewCalendarInMonths", { months: LIST.format(rule.byMonth.map(month => MONTH.format(Date.UTC(2024, month - 1, 1)))) })
+			t("previewCalendarInMonths", {
+				months: formats.list.format(rule.byMonth.map(month => formats.month.format(Date.UTC(2024, month - 1, 1))))
+			})
 		)
 	}
 

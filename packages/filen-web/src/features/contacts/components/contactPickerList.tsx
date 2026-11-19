@@ -6,6 +6,8 @@ import type { ContactsQueryData } from "@/features/contacts/queries/contacts"
 import { contactsNotIn, filterContactsBySearch, sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
 import { ContactRow } from "@/features/contacts/components/contactRow"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { blockingQueryError } from "@/queries/blockingError"
+import { Button } from "@/components/ui/button"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage, NoResultsMessage } from "@/components/emptyMessage"
@@ -39,7 +41,7 @@ export function ContactPickerList({
 	emptyDescription,
 	exclude
 }: ContactPickerListProps) {
-	const { t } = useTranslation("contacts")
+	const { t } = useTranslation(["contacts", "common"])
 	const contacts = contactsQuery.data?.contacts ?? []
 	const candidates = sortContactsByDisplayName(exclude === undefined ? contacts : contactsNotIn(contacts, exclude))
 
@@ -48,13 +50,25 @@ export function ContactPickerList({
 			return <LoadingState size="md" />
 		}
 
-		if (contactsQuery.status === "error") {
+		// A failed background refetch keeps the already loaded contacts up.
+		const queryError = blockingQueryError(contactsQuery)
+
+		if (queryError !== null) {
 			return (
 				<EmptyMessage
 					icon={UsersIcon}
 					title={t("contactsLoadError")}
-					description={errorLabel(contactsQuery.error)}
-				/>
+					description={errorLabel(queryError)}
+				>
+					<Button
+						variant="outline"
+						onClick={() => {
+							void contactsQuery.refetch()
+						}}
+					>
+						{t("common:tryAgain")}
+					</Button>
+				</EmptyMessage>
 			)
 		}
 

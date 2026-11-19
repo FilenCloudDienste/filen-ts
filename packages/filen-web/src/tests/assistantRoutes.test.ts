@@ -11,11 +11,11 @@ describe("assistant routes", () => {
 		expect(screenOfPath("/settings/account")).toBe("settings_account")
 	})
 
-	it("opens and reports the Office page as settings_office", () => {
+	it("reports the Office page as settings_office", () => {
 		expect(screenOfPath("/settings/office")).toBe("settings_office")
 	})
 
-	it("opens and reports the Audio page as settings_audio", () => {
+	it("reports the Audio page as settings_audio", () => {
 		expect(screenOfPath("/settings/audio")).toBe("settings_audio")
 	})
 })

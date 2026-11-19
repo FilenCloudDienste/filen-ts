@@ -8,7 +8,6 @@ import {
 	invertMatrix3,
 	isGeometryOnly,
 	isIdentity,
-	mapMarkupPoint,
 	outputSize,
 	sourceRectForTile,
 	straightenScale,
@@ -349,7 +348,7 @@ describe("geometryMatrix", () => {
 		const m = geometryMatrix(recipe, SOURCE)
 		const [sx, sy] = transformPoint(m, 37, 91)
 
-		expectPoint(mapMarkupPoint(recipe, SOURCE, sx, sy), [37, 91])
+		// As the editor places markup: invert once, then map every point.
 		expectPoint(transformPoint(invertMatrix3(m), sx, sy), [37, 91])
 	})
 })

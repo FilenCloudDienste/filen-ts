@@ -229,6 +229,8 @@ export type FormDraftEdit = (change: (session: PdfEditSessionModel) => Promise<u
 export class FormOverlaySession {
 	readonly scope: FormWidgetScope = createFormWidgetScope()
 	private readonly drafts = new Map<number, FieldDraft>()
+	// Text committed as a field's value and not run yet, by widget.
+	private readonly sending = new Map<number, { readonly text: string; readonly ran: Promise<boolean> }>()
 	private refocus: FieldFocus | null = null
 	private warned = false
 	private readonly listeners = new Set<() => void>()
@@ -264,37 +266,52 @@ export class FormOverlaySession {
 		if (had !== (draft !== null)) this.changed()
 	}
 
+	// Commits `text` as `widget`'s value, as one step, unless the same text is on its way to the editor already (Enter,
+	// then leaving the field, then a save, all before the editor ran it): resolves whether it ran (false: dropped or
+	// refused, and it can be committed again).
+	commitText(widget: number, page: number, text: string, edit: FormDraftEdit): Promise<boolean> {
+		const current = this.sending.get(widget)
+
+		if (current?.text === text) return current.ran
+
+		const ran = new Promise<boolean>(resolve => {
+			edit(
+				session =>
+					session.dispatch("forms.setField", { page, widget, value: { kind: "text", text } }).then(
+						() => {
+							resolve(true)
+						},
+						(error: unknown) => {
+							resolve(false)
+
+							throw error
+						}
+					),
+				() => {
+					resolve(false)
+				}
+			)
+		})
+		const entry = { text, ran }
+
+		this.sending.set(widget, entry)
+		void ran.then(() => {
+			if (this.sending.get(widget) === entry) this.sending.delete(widget)
+		})
+
+		return ran
+	}
+
 	// Every draft committed as the field's value (one step each, in order), once each: resolves when the editor ran
 	// them. One that does not run is a draft again.
 	commitDrafts(edit: FormDraftEdit): Promise<void> {
-		const pending = [...this.drafts].map(
-			([widget, draft]) =>
-				new Promise<void>(resolve => {
-					const keep = (): void => {
-						if (!this.drafts.has(widget)) this.setDraft(widget, draft)
+		const pending = [...this.drafts].map(([widget, draft]) => {
+			this.setDraft(widget, null)
 
-						resolve()
-					}
-
-					this.setDraft(widget, null)
-					edit(
-						session =>
-							session
-								.dispatch("forms.setField", { page: draft.page, widget, value: { kind: "text", text: draft.text } })
-								.then(
-									() => {
-										resolve()
-									},
-									(error: unknown) => {
-										keep()
-
-										throw error
-									}
-								),
-						keep
-					)
-				})
-		)
+			return this.commitText(widget, draft.page, draft.text, edit).then(ran => {
+				if (!ran && !this.drafts.has(widget)) this.setDraft(widget, draft)
+			})
+		})
 
 		return Promise.all(pending).then(() => undefined)
 	}

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetSta
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import { toast } from "sonner"
-import { conflictCopyName, decideRevision, driveItemName } from "@filen/shared"
+import { conflictCopyName, decideRevision, driveItemName, nameCollisionKey } from "@filen/shared"
+import { abortSavePort } from "@filen/shared/savePort"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import {
@@ -14,6 +15,7 @@ import {
 	type PreviewSaveContent
 } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid } from "@/features/drive/lib/actions"
+import { takenNamesInDirectory } from "@/features/drive/lib/nameTaken"
 import {
 	cachedListing,
 	driveListingQueryOptions,
@@ -459,7 +461,7 @@ async function writeAsNewFile(
 	// Not offered without a save source; never silent if it gets here anyway.
 	if (content === null || base.type !== "file") {
 		if (content !== null && "kind" in content && content.kind === "port") {
-			content.port.close()
+			await releaseDeckSave(content)
 		}
 
 		toast.error(t("previewSaveAsNewFileFailed"))
@@ -474,11 +476,26 @@ async function writeAsNewFile(
 	const rootUuid = currentRootUuid()
 	const parent = normalizeParentUuid(base.data.parent, rootUuid)
 	const original = extension === null ? driveItemName(base) : withExtension(driveItemName(base), extension)
-	const taken = (name: string) => sdkApi.nameExistsInDirectory(parent, name)
-	const name =
-		asked.kind === "deleted" && !(await taken(original))
-			? original
-			: await conflictCopyName(original, new Date(), args => t("previewConflictCopyName", args), taken)
+	let name: string
+
+	// The directory's names read once (its cached listing when current), the original and every conflict name answered
+	// from them. A deck's session already writes: a failed read releases it before the failure is told.
+	try {
+		const names = await takenNamesInDirectory(parent)
+		const taken = (candidate: string) => Promise.resolve(names.has(nameCollisionKey(candidate)))
+
+		name =
+			asked.kind === "deleted" && !(await taken(original))
+				? original
+				: await conflictCopyName(original, new Date(), args => t("previewConflictCopyName", args), taken)
+	} catch (e) {
+		if ("kind" in content && content.kind === "port") {
+			await releaseDeckSave(content)
+		}
+
+		throw e
+	}
+
 	const outcome = !("kind" in content)
 		? await uploadCopy(item, content, name, rootUuid)
 		: content.kind === "port"
@@ -499,6 +516,18 @@ async function writeAsNewFile(
 	}
 
 	return { item: outcome.item, name, bytes }
+}
+
+// A deck's save that will not be uploaded: its session's writer, waiting for a pull with no timeout, is aborted (a bare
+// close() tells it nothing, and every later save of the deck would wait behind it), and a file it wrote anyway is let go.
+async function releaseDeckSave(edits: PresentationSaveEdits): Promise<void> {
+	abortSavePort(edits.port, "cancelled")
+
+	const result = await edits.result.catch(() => null)
+
+	if (result?.kind === "written") {
+		await edits.abandon?.()
+	}
 }
 
 // "photo.heic" → "photo.jpg".

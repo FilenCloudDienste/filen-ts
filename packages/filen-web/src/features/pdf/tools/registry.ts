@@ -157,8 +157,7 @@ export interface PdfTool {
 	readonly icon: LucideIcon
 	// The kind of change it makes (the signature policy and the author's restrictions speak of these).
 	readonly toolClass: PdfToolClass
-	// Its keys: the ids it handles, defined in `actions` (registered in the pdfEditor section).
-	readonly actionIds: readonly string[]
+	// Its keys (registered in the pdfEditor section).
 	readonly actions: readonly ActionDef[]
 	readonly enabledWhen: (policy: PdfPolicyState) => PdfToolVerdict
 	// The commands it dispatches (for review: a tool never changes the document any other way).

@@ -48,7 +48,7 @@ describe("dirAccessState", () => {
 				hasPassword: false,
 				accepted: false,
 				verifying: false,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("loading")
 	})
@@ -61,7 +61,7 @@ describe("dirAccessState", () => {
 				hasPassword: false,
 				accepted: false,
 				verifying: false,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("invalid")
 	})
@@ -74,7 +74,7 @@ describe("dirAccessState", () => {
 				hasPassword: false,
 				accepted: false,
 				verifying: false,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("error")
 	})
@@ -87,7 +87,7 @@ describe("dirAccessState", () => {
 				hasPassword: false,
 				accepted: false,
 				verifying: false,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("ready")
 	})
@@ -100,7 +100,7 @@ describe("dirAccessState", () => {
 				hasPassword: true,
 				accepted: false,
 				verifying: false,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("prompt")
 	})
@@ -113,22 +113,40 @@ describe("dirAccessState", () => {
 				hasPassword: true,
 				accepted: false,
 				verifying: true,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("checking")
 	})
 
-	it("reports wrong after a failed verification", () => {
-		expect(
-			dirAccessState({
-				infoStatus: "success",
-				infoError: undefined,
-				hasPassword: true,
-				accepted: false,
-				verifying: false,
-				failed: true
-			})
-		).toBe("wrong")
+	function verifiedWith(verifyError: unknown) {
+		return dirAccessState({
+			infoStatus: "success",
+			infoError: undefined,
+			hasPassword: true,
+			accepted: false,
+			verifying: false,
+			verifyError
+		})
+	}
+
+	it("reports wrong after a verification refused with a password error", () => {
+		expect(verifiedWith(passwordError)).toBe("wrong")
+	})
+
+	// Until the listing endpoint's kind for a refused directory-link password is confirmed, a
+	// non-network rejection must still read as wrong, never as a dead link.
+	it("keeps any other non-network verification failure as wrong", () => {
+		expect(verifiedWith(deadLinkError)).toBe("wrong")
+	})
+
+	it("offers the retryable surface, not wrong, when verification fails on the wire", () => {
+		expect(verifiedWith(transientError)).toBe("error")
+	})
+
+	// The view's retry for a failed verify clears the stored rejection, which lands back on the prompt.
+	it("returns to the prompt once the verify error is cleared", () => {
+		expect(verifiedWith(transientError)).toBe("error")
+		expect(verifiedWith(undefined)).toBe("prompt")
 	})
 
 	it("is ready once the password is accepted, never re-prompting", () => {
@@ -139,7 +157,7 @@ describe("dirAccessState", () => {
 				hasPassword: true,
 				accepted: true,
 				verifying: false,
-				failed: false
+				verifyError: undefined
 			})
 		).toBe("ready")
 	})

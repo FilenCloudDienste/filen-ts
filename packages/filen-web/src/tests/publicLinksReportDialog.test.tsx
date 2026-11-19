@@ -253,6 +253,40 @@ describe("ReportAbuseDialog", () => {
 			expect(screen.getByRole("alert").textContent).toBe("The security check couldn't load. Check your connection and try again.")
 		})
 	})
+
+	it("retries a challenge that could not load and keeps what was typed", async () => {
+		turnstile.render.mockImplementationOnce((_container, options) => {
+			queueMicrotask(() => {
+				options["error-callback"]("110200")
+			})
+
+			return "widget-x"
+		})
+		renderButton()
+		openDialog()
+		fill("visitor@example.com")
+		fireEvent.change(screen.getByLabelText("Details (optional)"), { target: { value: "phishing kit" } })
+
+		await waitFor(() => {
+			expect(screen.getByRole("alert").textContent).toBe("The security check couldn't load. Check your connection and try again.")
+		})
+		expect(send().disabled).toBe(true)
+
+		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+
+		await waitFor(() => {
+			expect(turnstile.render).toHaveBeenCalledTimes(2)
+		})
+		await waitFor(() => {
+			expect(send().disabled).toBe(false)
+		})
+		expect(screen.queryByRole("alert")).toBeNull()
+		expect(screen.queryByRole("button", { name: "Try again" })).toBeNull()
+		expect(turnstile.remove).toHaveBeenCalledWith("widget-x")
+		expect(emailInput().value).toBe("visitor@example.com")
+		expect(screen.getByRole("radio", { name: "Malware" }).getAttribute("aria-checked")).toBe("true")
+		expect(screen.getByLabelText<HTMLTextAreaElement>("Details (optional)").value).toBe("phishing kit")
+	})
 })
 
 describe("report subject", () => {

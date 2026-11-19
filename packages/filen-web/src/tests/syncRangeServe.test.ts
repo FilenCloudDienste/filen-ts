@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createSyncRangeBuffer } from "@filen/office/dom/pdfedit"
 import { serveFileSyncRange } from "@/lib/media/syncRangeServe"
 
@@ -59,11 +59,19 @@ describe("serveFileSyncRange", () => {
 		const bridge = harness()
 
 		wake(bridge.buffer, bridge.port1, 0)
+		await vi.waitFor(() => {
+			expect(bridge.reads).toHaveLength(1)
+		})
+		// Exactly the woken block, no read ahead.
 		await tick()
 		expect(bridge.reads).toEqual([0])
 		bridge.port1.postMessage({ [CLOSE]: true })
-		await tick()
+		await vi.waitFor(() => {
+			expect(bridge.released).toHaveLength(1)
+		})
 		expect(bridge.lifetime.signal.aborted).toBe(true)
+		// Released once, after the one read.
+		await tick()
 		expect(bridge.released).toEqual([1])
 		bridge.port1.close()
 	})
@@ -72,13 +80,17 @@ describe("serveFileSyncRange", () => {
 		const bridge = harness({ slowRead: true })
 
 		wake(bridge.buffer, bridge.port1, 2)
-		await tick()
+		await vi.waitFor(() => {
+			expect(bridge.reads).toHaveLength(1)
+		})
 		bridge.lifetime.abort()
+		// Nothing to wait for: the release must not happen while the read is gated.
 		await tick()
 		expect(bridge.released).toEqual([])
 		bridge.gate.resolve(undefined)
-		await tick()
-		expect(bridge.released).toEqual([1])
+		await vi.waitFor(() => {
+			expect(bridge.released).toEqual([1])
+		})
 		bridge.port1.close()
 	})
 
@@ -89,8 +101,9 @@ describe("serveFileSyncRange", () => {
 		expect(bridge.lifetime.signal.aborted).toBe(false)
 		bridge.granted[0]?.()
 		expect(bridge.lifetime.signal.aborted).toBe(true)
-		await tick()
-		expect(bridge.released).toEqual([0])
+		await vi.waitFor(() => {
+			expect(bridge.released).toEqual([0])
+		})
 		bridge.port1.close()
 	})
 })

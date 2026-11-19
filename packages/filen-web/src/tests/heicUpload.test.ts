@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+	HEIC_CONVERTED_BACKLOG,
 	heicUploadConversionEnabled,
 	isHeicUploadCandidate,
 	maybeConvertHeicUpload,
 	renameToJpg,
 	type HeicUploadConvertDeps,
-	type HeicUploadDeps
+	type HeicUploadDeps,
+	withConvertedHeic
 } from "@/features/drive/lib/heicUpload"
 
 function mockFile(name: string, bytes = new Uint8Array([1, 2, 3])): File {
@@ -158,6 +160,89 @@ describe("maybeConvertHeicUpload", () => {
 		const result = await maybeConvertHeicUpload(h.deps, file, true)
 
 		expect(result).toBe(file)
+	})
+})
+
+describe("withConvertedHeic", () => {
+	const jpeg = (): Promise<Blob> => Promise.resolve(new Blob([new Uint8Array([9])], { type: "image/jpeg" }))
+
+	async function idle(): Promise<void> {
+		for (let i = 0; i < 20; i++) await new Promise(resolve => setTimeout(resolve, 0))
+	}
+
+	it("runs a file that needs no conversion as it is, holding nothing", async () => {
+		const transform = vi.fn<HeicUploadConvertDeps["transform"]>()
+		const file = mockFile("report.pdf")
+
+		await expect(withConvertedHeic({ transform }, file, true, prepared => Promise.resolve(prepared))).resolves.toBe(file)
+		expect(transform).not.toHaveBeenCalled()
+	})
+
+	it("holds at most the backlog of converted files whose upload has not settled, one more per settled upload", async () => {
+		const transform = vi.fn<HeicUploadConvertDeps["transform"]>(jpeg)
+		const uploads: PromiseWithResolvers<string>[] = []
+		const runs = Array.from({ length: HEIC_CONVERTED_BACKLOG + 3 }, (_, index) =>
+			withConvertedHeic({ transform }, mockFile(`photo${String(index)}.heic`), true, () => {
+				const upload = Promise.withResolvers<string>()
+
+				uploads.push(upload)
+
+				return upload.promise
+			})
+		)
+		// Handled from the start: one upload below fails long before the batch is awaited.
+		const settledRuns = Promise.allSettled(runs)
+
+		await idle()
+		expect(transform).toHaveBeenCalledTimes(HEIC_CONVERTED_BACKLOG)
+
+		uploads[0]?.resolve("done")
+		await idle()
+		expect(transform).toHaveBeenCalledTimes(HEIC_CONVERTED_BACKLOG + 1)
+
+		// A failed upload gives its permit back too.
+		uploads[1]?.reject(new Error("upload failed"))
+		await idle()
+		expect(transform).toHaveBeenCalledTimes(HEIC_CONVERTED_BACKLOG + 2)
+
+		for (const upload of uploads) upload.resolve("done")
+		await idle()
+		for (const upload of uploads) upload.resolve("done")
+
+		const settled = await settledRuns
+
+		expect(transform).toHaveBeenCalledTimes(HEIC_CONVERTED_BACKLOG + 3)
+		expect(settled.filter(result => result.status === "rejected")).toHaveLength(1)
+	})
+
+	it("gives the permit back at once for a cancelled file and for a failed conversion", async () => {
+		// Cancelled while being prepared: the run answers at once without uploading.
+		const cancelled = await Promise.all(
+			Array.from({ length: HEIC_CONVERTED_BACKLOG * 2 }, (_, index) =>
+				withConvertedHeic({ transform: jpeg }, mockFile(`c${String(index)}.heic`), true, () => Promise.resolve("cancelled"))
+			)
+		)
+
+		expect(cancelled).toHaveLength(HEIC_CONVERTED_BACKLOG * 2)
+
+		// Failed conversions upload their disk-backed originals without holding a permit.
+		const failing = vi.fn<HeicUploadConvertDeps["transform"]>(() => Promise.reject(new Error("decode failed")))
+		const pending = Promise.withResolvers<string>()
+		const originals = Array.from({ length: HEIC_CONVERTED_BACKLOG }, (_, index) =>
+			withConvertedHeic({ transform: failing }, mockFile(`f${String(index)}.heic`), true, () => pending.promise)
+		)
+
+		await idle()
+		expect(failing).toHaveBeenCalledTimes(HEIC_CONVERTED_BACKLOG)
+
+		const transform = vi.fn<HeicUploadConvertDeps["transform"]>(jpeg)
+
+		await expect(
+			withConvertedHeic({ transform }, mockFile("next.heic"), true, prepared => Promise.resolve(prepared.name))
+		).resolves.toBe("next.jpg")
+
+		pending.resolve("done")
+		await Promise.all(originals)
 	})
 })
 

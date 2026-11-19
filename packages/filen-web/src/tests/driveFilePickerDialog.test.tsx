@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { mockViewportHeight } from "@/tests/support/viewport"
 
 // Picking one file from the drive: rows the caller does not accept are left out, undecryptable ones disabled,
 // directories descend, a pick gets a signal that aborts when the dialog closes first.
@@ -54,6 +55,12 @@ function dir(name: string): DriveItem {
 	} satisfies Dir)
 }
 
+// The picker's scroll box (the only overflow-y-auto element here) gets a height: nothing is laid out otherwise, and the
+// windowed list shows no rows.
+function layOutPicker(): void {
+	mockViewportHeight(element => element.classList.contains("overflow-y-auto"), 400)
+}
+
 afterEach(() => {
 	cleanup()
 	vi.clearAllMocks()
@@ -61,6 +68,7 @@ afterEach(() => {
 
 describe("DriveFilePickerDialog", () => {
 	it("lists accepted files and every directory, undecryptable rows disabled", () => {
+		layOutPicker()
 		picker.items = [dir("Photos"), file("a.png"), file("notes.txt"), file("broken.png", true)]
 
 		render(
@@ -83,6 +91,7 @@ describe("DriveFilePickerDialog", () => {
 	})
 
 	it("aborts a pick under way when the dialog closes, and disables the rows meanwhile", async () => {
+		layOutPicker()
 		picker.items = [file("a.png"), file("b.png")]
 
 		let signal: AbortSignal | undefined
@@ -114,5 +123,30 @@ describe("DriveFilePickerDialog", () => {
 
 		expect(onClose).toHaveBeenCalled()
 		expect(signal?.aborted).toBe(true)
+	})
+
+	it("mounts only a window of a directory of 10 000 files, and a row in it still picks", () => {
+		layOutPicker()
+		picker.items = Array.from({ length: 10_000 }, (_, index) => file(`f${String(index).padStart(5, "0")}.png`))
+
+		const onPick = vi.fn(() => Promise.resolve())
+
+		render(
+			<DriveFilePickerDialog
+				title="Pick"
+				description="Pick one"
+				onPick={onPick}
+				onClose={vi.fn()}
+			/>
+		)
+
+		const rows = screen.getAllByRole("listitem")
+
+		expect(rows.length).toBeGreaterThan(0)
+		expect(rows.length).toBeLessThan(50)
+		expect(screen.queryByRole("button", { name: "f09999.png" })).toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: "f00003.png" }))
+		expect(onPick).toHaveBeenCalledWith(picker.items[3], expect.any(AbortSignal))
 	})
 })

@@ -35,11 +35,10 @@ export function sortNotes(notes: readonly Note[]): Note[] {
 	return [...notes].sort(compareNotes)
 }
 
-// Undecryptable-placeholder handling is a presentation concern (mobile's cannotDecryptPlaceholder)
-// left to the component that renders note rows; this module only needs the raw fallback so
-// search has stable text to match against.
-export function noteDisplayTitle(note: Note): string {
-	return note.title ?? note.uuid
+// The text search substring-matches. The label a note goes by lives in lib/displayTitle.ts; an
+// undecryptable note has no title, so it searches as empty (its hidden uuid is never substring-matched).
+function noteSearchTitle(note: Note): string {
+	return note.title ?? ""
 }
 
 export function tagDisplayName(tag: NoteTag): string {
@@ -70,9 +69,10 @@ export function normalizeSearch(search: string): string {
 
 // Title-only half of the search match — exported so useNoteSearchBodies.ts can skip fetching a note's
 // body when its title already qualifies (a title hit never needs its body checked too), keeping the
-// eager content fetch scoped to only the notes that actually need it.
+// eager content fetch scoped to only the notes that actually need it. A query equal to the full uuid
+// also matches, so an undecryptable note stays findable without phantom single-character hits.
 export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): boolean {
-	return noteDisplayTitle(note).toLowerCase().includes(normalizedSearch)
+	return note.uuid.toLowerCase() === normalizedSearch || noteSearchTitle(note).toLowerCase().includes(normalizedSearch)
 }
 
 // Search filter over title + full decrypted body (mirrors mobile's filterNoteListItemsBySearchQuery

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Remote } from "comlink"
 import type { AnyFile, EntryDownloadReport, ReaderDownloadEntryParams, StringifiedClient } from "@filen/sdk-rs"
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
@@ -133,10 +133,6 @@ beforeEach(async () => {
 
 		return { checked: true } as EntryDownloadReport
 	})
-})
-
-afterEach(() => {
-	vi.clearAllMocks()
 })
 
 describe("sdk worker origin range ports", () => {

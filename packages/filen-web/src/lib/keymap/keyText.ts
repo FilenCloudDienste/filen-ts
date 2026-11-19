@@ -37,15 +37,16 @@ const SPOKEN_KEYS: ReadonlyMap<string, SettingsKey> = new Map<string, SettingsKe
 
 type Translate = (key: SettingsKey) => string
 
+// One key as a word ("Command", "Enter"), for an accessible name or a list that names keys.
+export function spokenKey(token: string, t: Translate, layout?: KeyboardLayout | null): string {
+	const spoken = SPOKEN_KEYS.get(token)
+
+	return spoken === undefined ? keyLabel(token, IS_MAC, layout) : t(spoken)
+}
+
 // A chord as words ("Command Shift Z"), for an accessible name.
 export function spokenChord(chord: Chord, t: Translate, layout?: KeyboardLayout | null): string {
-	return [...displayModifiers(chord, IS_MAC), chord.key]
-		.map(token => {
-			const spoken = SPOKEN_KEYS.get(token)
-
-			return spoken === undefined ? keyLabel(token, IS_MAC, layout) : t(spoken)
-		})
-		.join(" ")
+	return [...displayModifiers(chord, IS_MAC), chord.key].map(token => spokenKey(token, t, layout)).join(" ")
 }
 
 // A chord as glyphs ("⌘⇧Z"), for a short text.

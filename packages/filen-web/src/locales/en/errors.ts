@@ -1,16 +1,16 @@
 import { type SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 import type { MediaErrorKind } from "@/lib/media/mediaFailure"
-import type { DOWNLOAD_NEEDS_RELOAD } from "@/lib/sdk/errors"
+import type { DOWNLOAD_GONE, DOWNLOAD_NEEDS_RELOAD, DOWNLOAD_STALLED, DOWNLOAD_WORKER_UNAVAILABLE } from "@/lib/sdk/errors"
 
 // English source catalog — "errors" namespace, keyed by the SDK's finite `SdkErrorKind` taxonomy
 // (@/lib/sdk/errorKinds.gen, generated from @filen/sdk-rs's ErrorKind enum) so a lookup is
 // a plain namespaced `i18n.exists`/`t()` call keyed on the live `kind` string — no hand-maintained
 // mapping table that can drift from the SDK (see @/lib/i18n/errorLabel). `satisfies Partial<...>`
-// seeds only a few representative kinds while still catching a typo'd key at compile
-// time; every unseeded SdkErrorKind member (and any error with no `kind` at all — plain
-// marshalling errors) falls back to `labelFirst`'s LABEL-FIRST server/inner/message chain, never a
-// raw untranslated technical string. The app's own media failure kinds (lib/media/mediaFailure.ts) are
-// labelled here too, so every player shows one wording, as is a download refused on a page it cannot save from.
+// labels the kinds a user can meet while still catching a typo'd key at compile time. A kind with no
+// entry here (internal ones such as Walk, Conversion or InvalidState, and any error with no `kind` at
+// all — plain marshalling errors) falls back to `labelFirst`'s LABEL-FIRST server/inner/message chain,
+// which can be the SDK's own English message. The app's own media failure kinds (lib/media/mediaFailure.ts)
+// are labelled here too, so every player shows one wording, as are the download kinds of lib/sdk/errors.ts.
 export const errors = {
 	/** Fires when the server rejects a call because the session is no longer authenticated; surfaces via errorLabel wherever the failing operation reports */
 	Unauthenticated: "You're not signed in. Please sign in again.",
@@ -59,6 +59,20 @@ export const errors = {
 	ArchiveTooLarge: "This archive is too large to extract here.",
 	/** Fires when a compress format's encoder needs more than the archive memory set in Advanced settings (also, rarely, when the browser can't hold a very large response) */
 	InsufficientMemory: "This needs more archive memory than Advanced settings allow. Raise it there, or choose another format.",
+	/** Fires when a request kept failing after the SDK's own retries; on the web mostly while taking the account lock, which another device or tab may be holding; the operation can simply be tried again */
+	RetryFailed: "Another device may be changing this right now, or the connection is unstable. Please try again.",
+	/** Fires when an item's metadata could not be decrypted (made with a different key or damaged); surfaces via errorLabel wherever the operation reports */
+	MetadataWasNotDecrypted: "This item could not be decrypted. It may have been created with a different account or key.",
+	/** Fires when an image could not be decoded (e.g. for a thumbnail or an image conversion); surfaces via errorLabel wherever the operation reports */
+	ImageError: "This image couldn't be read.",
+	/** Fires when a HEIC/HEIF image could not be decoded; surfaces via errorLabel wherever the operation reports */
+	HeifError: "This HEIC image couldn't be read.",
+	/** Fires when the item changed elsewhere (another device or tab) while an operation was working on it; the operation can be tried again */
+	StaleState: "This changed elsewhere in the meantime. Please try again.",
+	/** Fires when a file changed while it was being transferred; the transfer can be tried again */
+	FileChangedDuringSync: "This file changed while it was being transferred. Please try again.",
+	/** Fires when a piece of a file is larger than the transfer format allows (the file is damaged or was stored by an incompatible app) */
+	ChunkTooLarge: "This file is damaged or in a format Filen can't transfer.",
 	/** Fires when a write lost the account lock it held (e.g. the tab slept past the lock's lease, or another device took it); the write stopped part way and can simply be tried again */
 	LockLost: "Another device may be changing this right now. Please try again.",
 	/** Fires when the background worker running an archive job stopped mid-job (e.g. it ran out of memory) */
@@ -74,5 +88,21 @@ export const errors = {
 	/** Raised by the app (not the SDK) when a video/audio file stopped playing for any other reason (the stream broke, the file couldn't be read); shown wherever the player reports */
 	MediaPlaybackFailed: "This file couldn't be played.",
 	/** Raised by the app (not the SDK) when a download starts on a page the service worker does not control (after a hard reload), which cannot save a streamed file; shown wherever the download reports (a drive download, Download as, an archive entry) */
-	DownloadNeedsReload: "Reload Filen to download files."
-} as const satisfies Partial<Record<SdkErrorKind | MediaErrorKind | typeof DOWNLOAD_NEEDS_RELOAD, string>>
+	DownloadNeedsReload: "Reload Filen to download files.",
+	/** Raised by the app (not the SDK) when the browser's background download helper restarted before the download began, so the download can't continue; shown on the download's row in transfers */
+	DownloadGone: "This download is no longer available. Please try again.",
+	/** Raised by the app (not the SDK) when a download running in the browser's download manager stopped reporting progress for a long time; shown on the download's row in transfers */
+	DownloadStalled: "The download stopped responding. Please try again.",
+	/** Raised by the app (not the SDK) when the browser's background download helper is missing, did not answer or refused the download; shown on the download's row in transfers */
+	DownloadWorkerUnavailable: "The download couldn't start. Please try again."
+} as const satisfies Partial<
+	Record<
+		| SdkErrorKind
+		| MediaErrorKind
+		| typeof DOWNLOAD_NEEDS_RELOAD
+		| typeof DOWNLOAD_GONE
+		| typeof DOWNLOAD_STALLED
+		| typeof DOWNLOAD_WORKER_UNAVAILABLE,
+		string
+	>
+>

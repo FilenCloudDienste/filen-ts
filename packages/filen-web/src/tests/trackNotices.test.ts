@@ -15,6 +15,23 @@ describe("track notices", () => {
 		// No language: its number; no channel count: nothing after it.
 		expect(audioTrackNotice({ lang: null, ch: null }, 2, t)).toBe("Audio: Track 3")
 		expect(audioTrackNotice({ lang: "de", ch: 2 }, 1, t)).toBe("Audio: German Stereo")
+		expect(audioTrackName({ lang: "en", ch: 4 }, 0, t)).toBe("English 4 ch")
+	})
+
+	it("names an uncommon channel count in the UI language", () => {
+		const before = i18n.getResource("de", "videos", "playerChannelsCount") as unknown
+
+		i18n.addResource("de", "videos", "playerChannelsCount", "{{channels, number}} Kanäle")
+
+		try {
+			expect(audioTrackName({ lang: null, ch: 4 }, 0, i18n.getFixedT("de", "videos"))).toMatch(/ 4 Kanäle$/)
+		} finally {
+			if (typeof before === "string") {
+				i18n.addResource("de", "videos", "playerChannelsCount", before)
+			} else {
+				i18n.removeResourceBundle("de", "videos")
+			}
+		}
 	})
 
 	it("names a subtitle track, or says subtitles are off", () => {

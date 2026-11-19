@@ -338,15 +338,15 @@ describe("AudioOutput", () => {
 		output.unlock()
 
 		const gain = output.connect(element)
-		let heard = false
+		const results: boolean[] = []
 
-		void gain?.whenAudible(600).then(() => {
-			heard = true
+		void gain?.whenAudible(600).then(heard => {
+			results.push(heard)
 		})
 		vi.advanceTimersByTime(100)
 		await Promise.resolve()
 
-		expect(heard).toBe(false)
+		expect(results).toEqual([])
 
 		const context = contexts[0]
 
@@ -357,21 +357,19 @@ describe("AudioOutput", () => {
 		vi.advanceTimersByTime(10)
 		await Promise.resolve()
 
-		expect(heard).toBe(true)
-
-		let timedOut = false
+		expect(results).toEqual([true])
 
 		if (context !== undefined) {
 			context.audible = false
 		}
 
-		void gain?.whenAudible(200).then(() => {
-			timedOut = true
+		void gain?.whenAudible(200).then(heard => {
+			results.push(heard)
 		})
 		vi.advanceTimersByTime(250)
 		await Promise.resolve()
 
-		expect(timedOut).toBe(true)
+		expect(results).toEqual([true, false])
 	})
 
 	it("reports state changes to its listener", () => {

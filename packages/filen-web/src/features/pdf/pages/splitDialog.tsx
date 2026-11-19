@@ -122,6 +122,7 @@ export function PdfSplitDialog({ bookmarks, onSplit, onClose, ...context }: PdfS
 								<Input
 									aria-label={t("previewPdfSplitCountLabel")}
 									aria-invalid={form.mode === "count" && invalid}
+									aria-describedby={form.mode === "count" && invalid ? `${id}-error` : undefined}
 									type="number"
 									inputMode="numeric"
 									min={1}
@@ -139,6 +140,7 @@ export function PdfSplitDialog({ bookmarks, onSplit, onClose, ...context }: PdfS
 								<Input
 									aria-label={t("previewPdfSplitRangesLabel")}
 									aria-invalid={form.mode === "ranges" && invalid}
+									aria-describedby={form.mode === "ranges" && invalid ? `${id}-error` : undefined}
 									placeholder={t("previewPdfSplitRangesPlaceholder")}
 									autoComplete="off"
 									spellCheck={false}
@@ -154,7 +156,13 @@ export function PdfSplitDialog({ bookmarks, onSplit, onClose, ...context }: PdfS
 					))}
 				</RadioGroup>
 				{bookmarks.length === 0 ? <FieldDescription>{t("previewPdfSplitNoBookmarks")}</FieldDescription> : null}
-				{invalid ? <FieldError>{t("previewPdfPageRangeInvalid", { last: context.pageCount })}</FieldError> : null}
+				{invalid ? (
+					<FieldError id={`${id}-error`}>
+						{form.mode === "count"
+							? t("previewPdfSplitCountInvalid", { last: context.pageCount })
+							: t("previewPdfPageRangeInvalid", { last: context.pageCount })}
+					</FieldError>
+				) : null}
 				{plan !== null && plan.length === 1 ? <FieldDescription>{t("previewPdfSplitNothing")}</FieldDescription> : null}
 			</Field>
 			<CopyOptions

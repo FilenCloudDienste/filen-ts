@@ -64,8 +64,11 @@ vi.mock("@/features/drive/lib/previewSave.logic", async () => {
 		}
 	}
 })
+vi.mock("@/features/drive/lib/nameTaken", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/nameTaken")>()),
+	takenNamesInDirectory: () => Promise.resolve(new Set(["photo (edited).jpg"]))
+}))
 vi.mock("@/features/preview/imageEdit/editSession", () => ({
-	takenNames: () => Promise.resolve(new Set(["photo (edited).jpg"])),
 	enterImageEdit: ({ item, frozenUuid }: { item: DriveItem; frozenUuid: string }) =>
 		Promise.resolve({
 			status: "ready",

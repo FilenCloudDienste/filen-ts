@@ -33,3 +33,45 @@ export interface SynthResponse extends NestedResponse {
 // synthesizer reads, with why.
 export const SYNTH_SOURCE_ERROR = "source"
 export const SYNTH_UNSUPPORTED_PREFIX = "unsupported:"
+
+// Thrown by a synthesizer's answer: the file is not one it reads (the message says why), or the bytes of its key are
+// gone. Anything else thrown is fatal.
+export class SynthUnsupported extends Error {}
+export class SynthSourceLost extends Error {}
+
+// The part of a synthesizer worker's scope its message loop uses.
+export interface SynthScope {
+	addEventListener(type: "message", listener: (event: MessageEvent<SynthRequest & { id: number }>) => void): void
+	postMessage(message: unknown, transfer?: Transferable[]): void
+	close(): void
+}
+
+// A synthesizer worker's message loop: each request is acknowledged as taken up, then answered (its samples
+// transferred), or its error is answered as unsupported, source lost or fatal. After a fatal one (a trap or an abort)
+// nothing in the instance can be trusted any more: the worker closes.
+export function serveSynth(scope: SynthScope, answer: (request: SynthRequest) => Promise<Omit<SynthResponse, "id">>): void {
+	scope.addEventListener("message", event => {
+		const { id } = event.data
+
+		// Taken up now: the remux worker counts the request's deadline from here, not from the time it queued behind others.
+		scope.postMessage({ id, started: true })
+
+		answer(event.data).then(
+			response => {
+				const transfer = response.data === undefined ? [] : [response.data]
+
+				scope.postMessage({ id, ...response }, transfer)
+			},
+			(error: unknown) => {
+				if (error instanceof SynthUnsupported) {
+					scope.postMessage({ id, error: `${SYNTH_UNSUPPORTED_PREFIX}${error.message}` })
+				} else if (error instanceof SynthSourceLost) {
+					scope.postMessage({ id, error: SYNTH_SOURCE_ERROR })
+				} else {
+					scope.postMessage({ id, fatal: error instanceof Error ? error.message : String(error) })
+					scope.close()
+				}
+			}
+		)
+	})
+}

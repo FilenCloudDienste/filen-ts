@@ -64,7 +64,7 @@ function sliderPage(moved: number | readonly number[]): number {
 	return (typeof moved === "number" ? moved : (moved[0] ?? 1)) - 1
 }
 
-// A comic's pages, a page or a spread at a time (owner decisions E7/E8, W6 §6.3 A). PageUp/PageDown and the on-screen
+// A comic's pages, a page or a spread at a time. PageUp/PageDown and the on-screen
 // arrows turn pages; ←/→ stay with paging between files. Right to left puts the earlier page of a spread on the right,
 // makes ◀ go forward and runs the slider from the right. Below the layout breakpoint a spread shows as single pages, the
 // stored setting kept. A solid archive's later pages ask their cost once (the listing session's), as the archive

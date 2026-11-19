@@ -127,7 +127,7 @@ export function ArchiveEntryList({
 	onMarquee,
 	onCursor
 }: ArchiveEntryListProps) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "drive"])
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const focusedOnce = useRef(false)
 	// A keyboard menu asked for while the cursor row was out of the mounted rows.
@@ -364,7 +364,6 @@ export function ArchiveEntryList({
 							key={column.key}
 							type="button"
 							disabled={searchMode}
-							aria-pressed={active}
 							className={cn(
 								"flex items-center gap-1 rounded-md outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none",
 								active && "text-foreground",
@@ -377,15 +376,21 @@ export function ArchiveEntryList({
 							{t(SORT_LABEL_KEYS[column.key])}
 							{active && !searchMode ? (
 								sort.descending ? (
-									<ArrowDownIcon
-										aria-hidden="true"
-										className="size-3"
-									/>
+									<>
+										<ArrowDownIcon
+											aria-hidden="true"
+											className="size-3"
+										/>{" "}
+										<span className="sr-only">{t("drive:driveColumnSortedDescending")}</span>
+									</>
 								) : (
-									<ArrowUpIcon
-										aria-hidden="true"
-										className="size-3"
-									/>
+									<>
+										<ArrowUpIcon
+											aria-hidden="true"
+											className="size-3"
+										/>{" "}
+										<span className="sr-only">{t("drive:driveColumnSortedAscending")}</span>
+									</>
 								)
 							) : null}
 						</button>

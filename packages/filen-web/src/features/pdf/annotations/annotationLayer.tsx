@@ -35,6 +35,7 @@ import {
 	textBoxPointer,
 	type InkState,
 	type MarkupState,
+	type PdfTextLine,
 	type PdfToolDraft,
 	type RectSize,
 	type RectToolState,
@@ -82,6 +83,8 @@ import "@filen/office/css/pdfedit.css"
 // How far (CSS pixels) a press may miss an annotation or a handle.
 const HIT_SLOP_PX = 5
 const POPOVER_GAP_PX = 8
+// The text lines of a page whose text is not read (yet).
+const NO_LINES: readonly PdfTextLine[] = []
 
 type PointerType = ToolPointer["type"]
 
@@ -230,7 +233,21 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const hintId = useId()
 	const dropped = useRef(false)
-	const hand = useRef<{ readonly x: number; readonly y: number; readonly left: number; readonly top: number } | null>(null)
+	// The markup tool's text lines and what they were built from (built once per text and page space, when a drag
+	// first needs them).
+	const linesBuilt = useRef<{
+		readonly items: readonly unknown[]
+		readonly space: PageSpace
+		readonly lines: readonly PdfTextLine[]
+	} | null>(null)
+	// A hand drag: where it started, and the scroller it pans (found once, on the press).
+	const hand = useRef<{
+		readonly x: number
+		readonly y: number
+		readonly left: number
+		readonly top: number
+		readonly scroller: HTMLElement
+	} | null>(null)
 	const [select, setSelect] = useState<SelectState>(SELECT_IDLE)
 	const [textBox, setTextBox] = useState<TextBoxState>(TEXT_BOX_IDLE)
 	const [ink, setInk] = useState<InkState>(INK_IDLE)
@@ -264,6 +281,20 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 		const box = rootRef.current?.getBoundingClientRect()
 
 		return box === undefined ? [0, 0] : space.toPage(event.clientX - box.left, event.clientY - box.top)
+	}
+	// The page's text lines for the markup tool (none while its text is read).
+	const textLinesOf = (): readonly PdfTextLine[] => {
+		if (items === null) return NO_LINES
+
+		const built = linesBuilt.current
+
+		if (built !== null && built.items === items && built.space === space) return built.lines
+
+		const lines = textLines(items, space)
+
+		linesBuilt.current = { items, space, lines }
+
+		return lines
 	}
 	const toolPointer = (type: PointerType, event: ReactPointerEvent): ToolPointer => ({
 		type,
@@ -363,6 +394,8 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 		if (!context.editable) return
 
 		store.compose({ kind: "note", page, at })
+		// The note is posted through the editor: from the viewer, it starts (and reads the threads once it is there).
+		context.swap.warm()
 		context.finish()
 	}
 
@@ -376,16 +409,19 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 		}
 
 		if (handing) {
-			const scroller = scrollParent(rootRef.current)
+			const drag = hand.current
 
-			if (type === "down" && scroller !== null)
-				hand.current = { x: event.clientX, y: event.clientY, left: scroller.scrollLeft, top: scroller.scrollTop }
-			else if (type === "move" && hand.current !== null && scroller !== null)
-				scroller.scrollTo({
-					left: hand.current.left - (event.clientX - hand.current.x),
-					top: hand.current.top - (event.clientY - hand.current.y)
-				})
-			else if (type === "up" || type === "cancel") hand.current = null
+			if (type === "down") {
+				const scroller = scrollParent(rootRef.current)
+
+				hand.current =
+					scroller === null
+						? null
+						: { x: event.clientX, y: event.clientY, left: scroller.scrollLeft, top: scroller.scrollTop, scroller }
+			} else if (type === "move") {
+				if (drag !== null)
+					drag.scroller.scrollTo({ left: drag.left - (event.clientX - drag.x), top: drag.top - (event.clientY - drag.y) })
+			} else hand.current = null
 
 			return
 		}
@@ -396,7 +432,8 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 			case "select": {
 				const step = selectPointer({ selected, drag: select.drag }, input, { annotations, tolerance })
 
-				setSelect({ selected: null, drag: step.state.drag })
+				// A move with nothing dragged changes nothing: no render.
+				if (step.state.drag !== select.drag) setSelect({ selected: null, drag: step.state.drag })
 
 				if (step.state.selected !== selected) store.select(step.state.selected)
 
@@ -451,7 +488,10 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 				return
 			}
 			case "markup": {
-				const lines = textLines(items ?? [], space)
+				// Hover: nothing is dragged, nothing changes.
+				if (type === "move" && markup.drag === null) return
+
+				const lines = textLinesOf()
 				const step = markupPointer(markup, input, { quads: (_page, from, to) => quadsFromLines(lines, from, to) })
 				const anchor = markup.drag?.anchor
 
@@ -551,6 +591,13 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 
 	useEffect(() => store.listenKeys(page, key => onKey(key)), [store, page])
 
+	// The page box the selection keys keep a nudge or resize inside.
+	const [boxLeft, boxTop, boxRight, boxBottom] = space.box
+
+	useEffect(() => {
+		store.setPageBox(page, [boxLeft, boxTop, boxRight, boxBottom])
+	}, [store, page, boxLeft, boxTop, boxRight, boxBottom])
+
 	// Leaving the draw tool ends its drawing: the next one starts anew.
 	useEffect(() => {
 		if (mode !== "draw") return
@@ -577,6 +624,8 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 
 	const comment = (info: PdfAnnotationInfo): void => {
 		store.openComments(true)
+		// The threads are the editor's: from the viewer, it starts (the panel reads them once it is there).
+		context.swap.warm()
 
 		// An annotation without a note yet: its first comment becomes its note.
 		if (info.text === "" && info.type !== "Text" && context.editable && !info.locked)

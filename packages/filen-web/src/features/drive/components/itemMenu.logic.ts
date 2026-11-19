@@ -151,7 +151,7 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 }
 // Copies the item anywhere in the caller's own drive. Offered wherever the item can be read — owned or
 // shared in, any listing but the trash — since a copy changes nothing about the source. A submenu in the
-// item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
+// item menus (transferSubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
 const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
 // Packs the item into an archive. Offered wherever COPY is (it only reads the item), right after it. A
 // submenu in the item menus (archiveSubmenus.tsx) whose presets start the job; "dialog" opens the

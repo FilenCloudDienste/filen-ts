@@ -17,24 +17,24 @@ export const Route = createFileRoute("/_app/settings/security")({
 })
 
 function SecurityPage() {
-	const { t } = useTranslation(["auth", "settings"])
+	const { t } = useTranslation("settings")
 
 	return (
 		<AccountGate
 			icon={ShieldIcon}
-			title={t("securityTitle")}
+			title={t("settingsSectionSecurity")}
 		>
 			{accountQuery => (
 				<>
-					<SettingsGroup title={t("settings:settingsGroupSignIn")}>
+					<SettingsGroup title={t("settingsGroupSignIn")}>
 						<ChangePasswordRow />
 						<TwoFactorRow accountQuery={accountQuery} />
 					</SettingsGroup>
-					<SettingsGroup title={t("settings:settingsGroupRecovery")}>
+					<SettingsGroup title={t("settingsGroupRecovery")}>
 						<ExportMasterKeysRow accountQuery={accountQuery} />
 					</SettingsGroup>
 					<SettingsGroup
-						title={t("settings:settingsGroupDangerZone")}
+						title={t("settingsGroupDangerZone")}
 						variant="danger"
 					>
 						<DeleteAccountRow accountQuery={accountQuery} />

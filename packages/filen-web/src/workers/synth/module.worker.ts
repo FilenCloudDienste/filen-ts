@@ -1,7 +1,14 @@
 /// <reference lib="webworker" />
 import { synthCap } from "@filen/shared"
 import createLibopenmpt, { type LibopenmptModule } from "@/vendor/libopenmpt/libopenmpt.js"
-import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
+import {
+	SYNTH_SOURCE_ERROR,
+	SynthSourceLost,
+	SynthUnsupported,
+	serveSynth,
+	type SynthRequest,
+	type SynthResponse
+} from "@/workers/synth/protocol"
 
 // Tracker modules rendered by libopenmpt (src/vendor/libopenmpt), started by the remux worker for module playback
 // and analysis. libopenmpt is instantiated on first use from the wasm the remux worker compiled once and handed over
@@ -28,9 +35,6 @@ let wasm: WebAssembly.Module | null = null
 let libopenmpt: Promise<LibopenmptModule> | null = null
 let ready: LibopenmptModule | null = null
 
-class Unsupported extends Error {}
-class SourceLost extends Error {}
-
 function instantiate(module: WebAssembly.Module): Promise<LibopenmptModule> {
 	return new Promise((resolve, reject) => {
 		createLibopenmpt({
@@ -47,7 +51,7 @@ function instantiate(module: WebAssembly.Module): Promise<LibopenmptModule> {
 
 function lib(): Promise<LibopenmptModule> {
 	if (wasm === null) {
-		return Promise.reject(new SourceLost("libopenmpt was not handed over"))
+		return Promise.reject(new SynthSourceLost("libopenmpt was not handed over"))
 	}
 
 	libopenmpt ??= instantiate(wasm).then(module => {
@@ -59,12 +63,12 @@ function lib(): Promise<LibopenmptModule> {
 	return libopenmpt
 }
 
-// `size` bytes of the heap, or Unsupported when the capped heap has no room.
+// `size` bytes of the heap, or SynthUnsupported when the capped heap has no room.
 function allocate(lib: LibopenmptModule, size: number): number {
 	const pointer = lib._malloc(size)
 
 	if (pointer === 0) {
-		throw new Unsupported("too large for the module player")
+		throw new SynthUnsupported("too large for the module player")
 	}
 
 	return pointer
@@ -92,7 +96,7 @@ function create(lib: LibopenmptModule, bytes: Uint8Array, skipSamples: boolean):
 			const module = lib._filen_open(data, bytes.length, skipSamples ? 1 : 0, error)
 
 			if (module === 0) {
-				throw new Unsupported(`libopenmpt error ${String(new DataView(lib.HEAPU8.buffer).getInt32(error, true))}`)
+				throw new SynthUnsupported(`libopenmpt error ${String(new DataView(lib.HEAPU8.buffer).getInt32(error, true))}`)
 			}
 
 			return module
@@ -104,7 +108,7 @@ function create(lib: LibopenmptModule, bytes: Uint8Array, skipSamples: boolean):
 
 async function load(key: string, data: ArrayBuffer): Promise<Omit<SynthResponse, "id">> {
 	if (data.byteLength > MODULE_CAP) {
-		throw new Unsupported("larger than the module player reads")
+		throw new SynthUnsupported("larger than the module player reads")
 	}
 
 	const bytes = new Uint8Array(data)
@@ -119,7 +123,7 @@ async function load(key: string, data: ArrayBuffer): Promise<Omit<SynthResponse,
 	}
 
 	if (!Number.isFinite(duration) || duration <= 0) {
-		throw new Unsupported("the module has no length")
+		throw new SynthUnsupported("the module has no length")
 	}
 
 	files.set(key, bytes)
@@ -225,34 +229,4 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 	return render(openmpt, renderer, request.frames)
 }
 
-scope.addEventListener("message", (event: MessageEvent<SynthRequest & { id: number }>) => {
-	const { id } = event.data
-
-	// Taken up now: the remux worker counts the request's deadline from here, not from the time it queued behind others.
-	scope.postMessage({ id, started: true })
-
-	answer(event.data).then(
-		response => {
-			const transfer = response.data === undefined ? [] : [response.data]
-
-			scope.postMessage({ id, ...response }, transfer)
-		},
-		(error: unknown) => {
-			if (error instanceof Unsupported) {
-				scope.postMessage({ id, error: `${SYNTH_UNSUPPORTED_PREFIX}${error.message}` })
-
-				return
-			}
-
-			if (error instanceof SourceLost) {
-				scope.postMessage({ id, error: SYNTH_SOURCE_ERROR })
-
-				return
-			}
-
-			// A trap or an abort in the module: nothing in this instance can be trusted any more.
-			scope.postMessage({ id, fatal: error instanceof Error ? error.message : String(error) })
-			scope.close()
-		}
-	)
-})
+serveSynth(scope, answer)

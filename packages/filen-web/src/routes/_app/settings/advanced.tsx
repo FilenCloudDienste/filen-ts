@@ -11,6 +11,7 @@ import { DotFilenRow } from "@/features/settings/components/advanced/dotFilenRow
 import { StorageCaches } from "@/features/settings/components/storage/storageCaches"
 import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
+import { LOG_RING_MAX } from "@/lib/log"
 import { i18n } from "@/lib/i18n"
 
 export const Route = createFileRoute("/_app/settings/advanced")({
@@ -53,7 +54,7 @@ function AdvancedPage() {
 			<StorageCaches />
 			<SettingsGroup
 				title={t("settingsLogsTitle")}
-				description={t("settingsLogsDescription", { count: 500 })}
+				description={t("settingsLogsDescription", { count: LOG_RING_MAX })}
 			>
 				<LogsBlock />
 			</SettingsGroup>

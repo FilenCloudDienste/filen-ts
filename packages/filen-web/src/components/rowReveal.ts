@@ -7,6 +7,7 @@ const BASE_CLASS =
 // Keyed by the hover group of the surrounding row or tile; a tile also pins the trigger to its corner.
 export const REVEAL_CLASS = {
 	row: `${BASE_CLASS} group-hover/row:opacity-100`,
+	trow: `${BASE_CLASS} group-hover/trow:opacity-100`,
 	tile: `${BASE_CLASS} absolute top-1 right-1 group-hover/tile:opacity-100`,
 	plain: `${BASE_CLASS} group-hover:opacity-100`
 } as const

@@ -24,10 +24,7 @@ export type AccountQuerySuccess = Extract<UseQueryResult<UserInfo>, { data: User
 // change made elsewhere while the app was closed.
 let readThisSession = false
 
-// Plain, testable query function. `useAccountQuery` itself is a one-line hook wrapper this
-// project's node-environment unit tests cannot exercise (no DOM/React renderer — see
-// vitest.config.ts), so the fetch itself is exported and unit-tested against a mocked `sdkApi`
-// instead, mirroring how session.test.ts mocks the same module boundary.
+// The one server read every account path goes through; it notes the session as verified on its first success.
 async function readUserInfo(): Promise<UserInfo> {
 	const info = await sdkApi.getUserInfo()
 
@@ -43,17 +40,28 @@ async function readUserInfo(): Promise<UserInfo> {
 	return info
 }
 
-export async function fetchAccount(): Promise<UserInfo> {
-	const info = await readUserInfo()
-
-	lastServerReadAt = Date.now()
-
-	return info
-}
-
 // When the cached account last took a server read this page. Kept apart from the query's
 // dataUpdatedAt, which every local patch (one per uploaded file) moves to now.
 let lastServerReadAt: number | undefined
+
+// Counts this tab's writes to the cached account, patches and stale marks alike.
+let accountWrites = 0
+
+// Plain, testable query function. `useAccountQuery` itself is a one-line hook wrapper this
+// project's node-environment unit tests cannot exercise (no DOM/React renderer — see
+// vitest.config.ts), so the fetch itself is exported and unit-tested against a mocked `sdkApi`
+// instead, mirroring how session.test.ts mocks the same module boundary. A write during the read
+// cancels it and keeps the cached account, so only a read no write overlapped counts as recent.
+export async function fetchAccount(): Promise<UserInfo> {
+	const writes = accountWrites
+	const info = await readUserInfo()
+
+	if (accountWrites === writes) {
+		lastServerReadAt = Date.now()
+	}
+
+	return info
+}
 
 // How long upload pre-flights answer from the cached account, local patches on top included.
 export const ACCOUNT_QUOTA_TRUST_MS = 10 * 60 * 1000
@@ -109,9 +117,6 @@ function selectMasterKeysNotExported(info: UserInfo): boolean {
 export function useMasterKeysNotExported(): boolean {
 	return useAccountSelect(selectMasterKeysNotExported) === true
 }
-
-// Counts this tab's writes to the cached account, patches and stale marks alike.
-let accountWrites = 0
 
 // By the key's hash (cachedQuery): an upload batch writes once per file.
 function accountQuery(): Query<UserInfo> | undefined {

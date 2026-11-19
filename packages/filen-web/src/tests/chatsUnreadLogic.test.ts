@@ -4,6 +4,14 @@ import type { Chat, ChatMessage } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
+// Wrapped (not spied: an ESM spy would not intercept sumUnread's own import) so the memo test can count
+// recounts; every other caller still runs the real implementation.
+vi.mock("@/features/chats/hooks/useChatUnreadCount", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/chats/hooks/useChatUnreadCount")>()
+
+	return { ...actual, countUnreadMessages: vi.fn(actual.countUnreadMessages) }
+})
+
 import { isMessageUnread, chatHasUnread, chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import { sumUnread } from "@/features/chats/hooks/useChatsUnreadCount"
@@ -221,6 +229,7 @@ describe("sumUnread (global tally + missing-cache self-heal signal)", () => {
 	})
 
 	it("reuses a chat's count only while its message array, chat, user and blocked set are unchanged", () => {
+		const counted = vi.mocked(countUnreadMessages)
 		const messagesA = [mockMessage({ uuid: testUuid("m1"), senderId: 2, sentTimestamp: 150n })]
 		const messagesB = [mockMessage({ uuid: testUuid("m2"), senderId: 2, sentTimestamp: 150n })]
 		const cache = new Map<string, ChatMessage[]>([
@@ -228,24 +237,51 @@ describe("sumUnread (global tally + missing-cache self-heal signal)", () => {
 			[chatB.uuid, messagesB]
 		])
 		const read = (uuid: string) => cache.get(uuid)
+		const recounted = () => {
+			const arrays = counted.mock.calls.map(([messages]) => messages)
+
+			counted.mockClear()
+
+			return arrays
+		}
+
+		counted.mockClear()
 
 		expect(sumUnread([chatA, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(2)
+		expect(recounted()).toEqual([messagesA, messagesB])
 
-		// Same inputs: served from the per-chat memo, same total.
+		// Same inputs: served from the per-chat memo, no chat recounted.
 		expect(sumUnread([chatA, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(2)
+		expect(recounted()).toHaveLength(0)
 
-		// A new array for one chat recounts that chat.
-		cache.set(chatB.uuid, [...messagesB, mockMessage({ uuid: testUuid("m3"), senderId: 2, sentTimestamp: 200n })])
+		// A new array for one chat recounts that chat only.
+		const nextB = [...messagesB, mockMessage({ uuid: testUuid("m3"), senderId: 2, sentTimestamp: 200n })]
+
+		cache.set(chatB.uuid, nextB)
 		expect(sumUnread([chatA, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(3)
 
-		// A new chat object (focus moved) over the same array recounts.
+		const afterNewArray = recounted()
+
+		expect(afterNewArray).toHaveLength(1)
+		expect(afterNewArray[0]).toBe(nextB)
+
+		// A new chat object (focus moved) over the same array recounts that chat only.
 		expect(sumUnread([{ ...chatA, lastFocus: 150n }, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(2)
 
-		// A new blocked set over the same arrays recounts.
-		expect(sumUnread([chatA, chatB], read, SELF, deriveBlockedUsers([{ userId: 2n, email: "peer@x.io" }])).count).toBe(0)
+		const afterNewChat = recounted()
 
-		// A different user over the same arrays recounts.
-		expect(sumUnread([chatA, chatB], read, undefined, EMPTY_BLOCKED_USERS).count).toBe(0)
+		expect(afterNewChat).toHaveLength(1)
+		expect(afterNewChat[0]).toBe(messagesA)
+
+		// A new blocked set over the same arrays recounts both chats.
+		const blockedPeer = deriveBlockedUsers([{ userId: 2n, email: "peer@x.io" }])
+
+		expect(sumUnread([chatA, chatB], read, SELF, blockedPeer).count).toBe(0)
+		expect(recounted()).toHaveLength(2)
+
+		// A different user over the same arrays and blocked set recounts both chats.
+		expect(sumUnread([chatA, chatB], read, undefined, blockedPeer).count).toBe(0)
+		expect(recounted()).toHaveLength(2)
 	})
 
 	it("is a clean zero for no chats", () => {

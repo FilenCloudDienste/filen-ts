@@ -18,7 +18,8 @@ import type { VideoFileRef, VideoPartView } from "@/workers/videoIndex/view.logi
 // What the detail pages read beyond the index: the chosen version's full probe (explicit, one per file), stored
 // probes of the other versions (local), the NFO (one read per file, kept in kv), and the season last viewed.
 
-// The full probe of the part about to be played; null when none can be had (offline, unreadable, gone).
+// The full probe of the part about to be played; null when none can be had (offline, unreadable, gone). A null is
+// stale at once, so the next mount, focus or reconnect asks again (a stored verdict answers from memory or kv).
 export function useDetailProbeQuery(part: VideoPartView | null): UseQueryResult<VideoProbe | null> {
 	const ref = part?.file ?? null
 
@@ -40,7 +41,7 @@ export function useDetailProbeQuery(part: VideoPartView | null): UseQueryResult<
 			return record?.probe ?? null
 		},
 		enabled: part !== null && !part.unsupported,
-		staleTime: Infinity,
+		staleTime: query => (query.state.data === null ? 0 : Infinity),
 		persister: noDiskPersister
 	})
 }

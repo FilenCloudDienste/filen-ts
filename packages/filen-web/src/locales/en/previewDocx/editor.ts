@@ -128,6 +128,9 @@ export const previewDocxEditor = {
 	previewDocxSaveSearching: "Checking which changes can be saved…",
 	/** Docx editor — notice under the toolbar while autosave is held because the save check refused the document; {{shortcut}} is the save shortcut, e.g. ⌘S */
 	previewDocxAutosaveHeld: "Changes aren't being saved automatically: this document needs a save by you. Press {{shortcut}} to save.",
+	/** Docx editor — the same notice when the user has no key bound to Save (Settings → Keyboard): points to the Save button instead */
+	previewDocxAutosaveHeldNoKey:
+		"Changes aren't being saved automatically: this document needs a save by you. Use the Save button to save.",
 	/** Docx editor — tooltip of the thin bar along the top of the pages while their layout is being redone */
 	previewDocxLayoutUpdating: "Laying out pages…",
 	/** Docx editor — action on the save-locked toast: copies the text the user had typed into those parts */

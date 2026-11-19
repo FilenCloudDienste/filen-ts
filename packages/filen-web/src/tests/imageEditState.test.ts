@@ -210,6 +210,8 @@ describe("saveTargets", () => {
 		expect(isEditableSource(info({ mime: "image/gif", animated: true }), "a.gif")).toBe(false)
 		expect(isEditableSource(info({ mime: "image/jpeg" }), "noextension")).toBe(false)
 		expect(isEditableSource(info({ mime: "image/bmp" }), "a.dib")).toBe(true)
+		// A TIFF whose first IFD lies past the sniffed head has no size yet: its page engine knows it.
+		expect(isEditableSource(info({ mime: "image/tiff", width: 0, height: 0 }), "a.tif")).toBe(true)
 	})
 
 	it("matches a name to its sniffed format by the one family table the session and the save share", () => {

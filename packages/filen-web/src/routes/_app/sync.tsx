@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router"
 import { desktopBridge } from "@/lib/desktop"
 import { routeHead } from "@/lib/head/routeHead"
@@ -18,8 +19,11 @@ export const Route = createFileRoute("/_app/sync")({
 })
 
 // The add-pair dialog mounts here rather than in the sidebar, which unmounts with the narrow-viewport drawer.
+// Leaving the section closes it, so returning does not reopen it at its first step.
 function SyncLayout() {
 	const addPairOpen = useSyncStore(state => state.addPairOpen)
+
+	useEffect(() => closeAddPair, [])
 
 	return (
 		<>

@@ -29,20 +29,22 @@ import {
 	tableStyleOp,
 	wholeTable,
 	type CellRange,
+	type DesignThemeInfo,
 	type ShapeRef,
 	type TableCommand,
 	type TableShape
 } from "@filen/office/core/presentation"
 import type { SlideLayer, SlideRender } from "@filen/office/dom/presentation"
 import { createTextEditing, selectedShapes, useShapeSelection, useTextEditing, type ShapeSelection } from "@filen/office/react/presentation"
-import { cn } from "@filen/shared"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { DocxColorGrid } from "@/features/office/components/officeColorGrid"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { STANDARD_SWATCHES } from "@/features/office/lib/officeControls"
 import { DocxColorButton } from "@/features/preview/components/docxFormatControls"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
+import { designState } from "@/features/presentation/components/design/designState"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Table tab (PowerPoint's Table Layout and Table Design in one): rows and columns beside the selected cells (a
@@ -492,19 +494,34 @@ function SizeControls({ editor }: { editor: PresentationRibbonEditor }) {
 	)
 }
 
-const ACCENTS: readonly string[] = [
-	"var(--chart-1)",
-	"var(--chart-2)",
-	"var(--chart-3)",
-	"var(--chart-4)",
-	"var(--chart-5)",
-	"var(--primary)"
-]
+// A colour's luma (0-255) from its RRGGBB hex.
+function luma(hex: string): number {
+	const value = Number.parseInt(hex, 16)
+
+	return ((value >> 16) & 255) * 0.299 + ((value >> 8) & 255) * 0.587 + (value & 255) * 0.114
+}
+
+// A gallery style's swatch in the current slide's theme: accent N, or dk1 for the dark style; none when the theme or that
+// accent is unknown. dk1 is the theme slot unmapped, while colors carries bg1/tx1 through the master's colour map, so dk1 is
+// the text colour on a light-mapped master and the background on a dark-mapped one: the darker of the two.
+function tableStyleSwatch(colors: DesignThemeInfo["colors"], accent: number | undefined): string | undefined {
+	const rgb =
+		colors === undefined
+			? undefined
+			: accent === undefined
+				? luma(colors.background) <= luma(colors.text)
+					? colors.background
+					: colors.text
+				: colors.accents[accent - 1]
+
+	return rgb === undefined ? undefined : `#${rgb}`
+}
 
 function StylesMenu({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
 	const table = useSelectedTable(editor)
 	const focus = useCommandMenuFocus()
+	const colors = designState(usePresentationEditor()?.editor).current?.colors
 	// ODF has no table styles of these (an ODP table carries its look in its cells).
 	const pptx = editor.info.format !== "odp"
 
@@ -519,25 +536,31 @@ function StylesMenu({ editor }: { editor: PresentationRibbonEditor }) {
 				finalFocus={focus.finalFocus}
 				data-preview-surface
 			>
-				{TABLE_STYLE_GALLERY.map(style => (
-					<DropdownMenuItem
-						key={style.id}
-						onClick={() => {
-							focus.ran()
+				{TABLE_STYLE_GALLERY.map(style => {
+					const swatch = tableStyleSwatch(colors, style.accent)
 
-							if (table !== undefined) void editor.command(tableStyleOp(table.target, { styleId: style.id }))
-						}}
-					>
-						<span
-							aria-hidden="true"
-							className={cn("size-4 rounded-sm ring-1 ring-border")}
-							style={{ backgroundColor: style.accent === undefined ? "var(--foreground)" : ACCENTS[style.accent - 1] }}
-						/>
-						{style.accent === undefined
-							? t("previewPptxTableStyleDark")
-							: t("previewPptxTableStyleAccent", { accent: style.accent })}
-					</DropdownMenuItem>
-				))}
+					return (
+						<DropdownMenuItem
+							key={style.id}
+							onClick={() => {
+								focus.ran()
+
+								if (table !== undefined) void editor.command(tableStyleOp(table.target, { styleId: style.id }))
+							}}
+						>
+							{swatch === undefined ? null : (
+								<span
+									aria-hidden="true"
+									className="size-4 rounded-sm ring-1 ring-border"
+									style={{ backgroundColor: swatch }}
+								/>
+							)}
+							{style.accent === undefined
+								? t("previewPptxTableStyleDark")
+								: t("previewPptxTableStyleAccent", { accent: style.accent })}
+						</DropdownMenuItem>
+					)
+				})}
 				<DropdownMenuItem
 					onClick={() => {
 						focus.ran()

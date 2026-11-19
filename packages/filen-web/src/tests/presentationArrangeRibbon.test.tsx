@@ -27,7 +27,11 @@ const EMU = 9525
 const ref = slideRef(256)
 const box = (x: number, y: number): Xfrm => ({ x: x * EMU, y: y * EMU, cx: 100 * EMU, cy: 50 * EMU, rot: 0, flipH: false, flipV: false })
 
-function renderOf(roles: readonly SlideLayer["role"][], locks: Readonly<Record<number, ShapeLocks>> = {}): SlideRender {
+function renderOf(
+	roles: readonly SlideLayer["role"][],
+	locks: Readonly<Record<number, ShapeLocks>> = {},
+	actions: Readonly<Record<number, unknown>> = {}
+): SlideRender {
 	const layers = roles.map(
 		(role, index) =>
 			({
@@ -41,7 +45,8 @@ function renderOf(roles: readonly SlideLayer["role"][], locks: Readonly<Record<n
 					...(index === 0 ? { alt: { descr: "Logo" } } : {}),
 					...(locks[index + 2] === undefined ? {} : { locks: locks[index + 2] })
 				},
-				...(index === 1 ? { actions: { click: { kind: "refused", what: "macro", raw: "macro?name=x" } } } : {})
+				...(index === 1 ? { actions: { click: { kind: "refused", what: "macro", raw: "macro?name=x" } } } : {}),
+				...(actions[index + 2] === undefined ? {} : { actions: actions[index + 2] })
 			}) as unknown as SlideLayer
 	)
 
@@ -63,7 +68,8 @@ let ops: DeckOp[]
 function mount(
 	roles: readonly SlideLayer["role"][],
 	selected: readonly number[],
-	locks: Readonly<Record<number, ShapeLocks>> = {}
+	locks: Readonly<Record<number, ShapeLocks>> = {},
+	{ actions, info = INFO }: { actions?: Readonly<Record<number, unknown>>; info?: OpenInfo } = {}
 ): ShapeSelection {
 	const selection = createShapeSelection()
 
@@ -77,8 +83,8 @@ function mount(
 		selection: new Set(),
 		t: i18n.t.bind(i18n),
 		editor: {
-			info: INFO,
-			render: renderOf(roles, locks),
+			info,
+			render: renderOf(roles, locks, actions),
 			selection,
 			// Arrange never calls the session directly; every command goes through `command`.
 			session: {} as PresentationSessionApi,
@@ -257,6 +263,98 @@ describe("presentation Arrange tab", () => {
 			await Promise.resolve()
 		})
 		expect(ops).toEqual([])
+	})
+
+	async function choose(dialog: HTMLElement, field: string, option: string): Promise<void> {
+		fireEvent.click(within(dialog).getByRole("combobox", { name: field }))
+
+		const item = await screen.findByRole("option", { name: option })
+
+		fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 })
+		fireEvent.mouseDown(item, { button: 0 })
+		fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 })
+		fireEvent.mouseUp(item, { button: 0 })
+		fireEvent.click(item)
+	}
+
+	async function applyAction(dialog: HTMLElement): Promise<void> {
+		await act(async () => {
+			fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+			await Promise.resolve()
+		})
+	}
+
+	const DECK = {
+		...INFO,
+		slides: Array.from({ length: 8 }, (_, index) => ({ ref: slideRef(256 + index), hidden: false })),
+		customShows: [
+			{ id: 3, name: "Intro" },
+			{ id: 5, name: "Deep dive" }
+		]
+	} as unknown as OpenInfo
+
+	it("shows and applies each trigger's own slide when the trigger is switched", async () => {
+		mount(
+			["shape"],
+			[2],
+			{},
+			{
+				actions: { 2: { click: { kind: "slide", slide: slideRef(262) }, hover: { kind: "slide", slide: slideRef(257) } } },
+				info: DECK
+			}
+		)
+		fireEvent.click(within(commands()).getByRole("button", { name: "Action…" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Action" })
+		const slideField = (): string => within(dialog).getByRole("combobox", { name: "Slide" }).textContent.replace("▼", "")
+
+		expect(slideField()).toBe("Slide 7")
+		await choose(dialog, "When", "Pointed at (not run in the slide show)")
+		expect(slideField()).toBe("Slide 2")
+		await choose(dialog, "When", "Clicked")
+		expect(slideField()).toBe("Slide 7")
+		await choose(dialog, "When", "Pointed at (not run in the slide show)")
+		await applyAction(dialog)
+		expect(ops).toEqual([
+			{
+				family: "shape",
+				kind: "setAction",
+				target: { slide: ref, id: 2 },
+				trigger: "hover",
+				action: { kind: "slide", slide: slideRef(257) }
+			}
+		])
+	})
+
+	it("shows and applies the hover custom show and its return flag after switching from a click link", async () => {
+		mount(
+			["shape"],
+			[2],
+			{},
+			{
+				actions: {
+					2: { click: { kind: "url", href: "https://filen.io" }, hover: { kind: "customShow", id: 5, returnAfter: true } }
+				},
+				info: DECK
+			}
+		)
+		fireEvent.click(within(commands()).getByRole("button", { name: "Action…" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Action" })
+
+		await choose(dialog, "When", "Pointed at (not run in the slide show)")
+		expect(within(dialog).getByRole("combobox", { name: "Custom show" }).textContent).toContain("Deep dive")
+		expect(within(dialog).getByRole("switch", { name: "Return after showing" }).getAttribute("aria-checked")).toBe("true")
+		await applyAction(dialog)
+		expect(ops).toEqual([
+			{
+				family: "shape",
+				kind: "setAction",
+				target: { slide: ref, id: 2 },
+				trigger: "hover",
+				action: { kind: "customShow", id: 5, returnAfter: true }
+			}
+		])
 	})
 
 	it("builds only http, https and mailto links, and slide jumps to slides the deck has", () => {

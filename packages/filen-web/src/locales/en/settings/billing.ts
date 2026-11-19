@@ -90,8 +90,6 @@ export const settingsBilling = {
 	settingsBillingManageOnWeb: "Manage plan and billing on the web",
 
 	// ── Subscriptions ──
-	/** Subscriptions and invoices tables — header of the column holding row actions */
-	settingsBillingColumnActions: "Actions",
 	/** Subscriptions table — button cancelling a recurring subscription */
 	settingsBillingCancelAction: "Cancel subscription",
 	/** Subscriptions table — note on the disabled cancel button within a day of the purchase; {{date}} is a date and time */

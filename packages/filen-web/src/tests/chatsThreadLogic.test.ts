@@ -145,6 +145,21 @@ describe("buildThreadRows — message runs", () => {
 		expect(buildThreadRows([b])[0]?.key).toBe(buildThreadRows([a, b])[0]?.key)
 	})
 
+	// Pending and failed bubbles sort after every confirmed message, so one dated an earlier day than the
+	// newest confirmed message repeats that day's header; its key must not collide with the first one.
+	it("keys a repeated day header uniquely when a pending message is older than the newest day", () => {
+		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 23, 0) })
+		const b = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 2, 9, 0) })
+		const pending = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 23, 58) })
+		const rows = buildThreadRows([a, b, pending])
+		const keys = rows.map(r => r.key)
+
+		expect(rows.map(r => r.kind)).toEqual(["time", "message", "time", "message", "time", "message"])
+		expect(new Set(keys).size).toBe(keys.length)
+		expect(keys[0]).toBe(buildThreadRows([a])[0]?.key)
+		expect(keys[4]).toBe(`${String(keys[0])}-${pending.uuid}`)
+	})
+
 	it("breaks a run at the unread divider", () => {
 		const a = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 0) })
 		const b = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 1) })

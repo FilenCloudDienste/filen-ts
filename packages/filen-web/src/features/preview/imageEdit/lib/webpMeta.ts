@@ -66,8 +66,94 @@ export function walkWebpChunks(bytes: Uint8Array, visit: (chunk: RiffChunk) => b
 }
 
 // The VP8L bitstream's alpha_is_used bit (RFC 9649 §3.2.1: 14 bits width − 1, 14 bits height − 1, then it).
+function vp8lAlphaAt(bytes: Uint8Array, data: number): boolean {
+	return bytes[data] === VP8L_SIGNATURE && ((bytes[data + 4] ?? 0) & 0x10) !== 0
+}
+
 export function vp8lHasAlpha(bytes: Uint8Array, chunk: RiffChunk): boolean {
-	return chunk.size >= 5 && bytes[chunk.data] === VP8L_SIGNATURE && ((bytes[chunk.data + 4] ?? 0) & 0x10) !== 0
+	return chunk.size >= 5 && vp8lAlphaAt(bytes, chunk.data)
+}
+
+export interface WebpHeader {
+	// The first chunk's type: CHUNK_VP8X, CHUNK_VP8L or CHUNK_VP8.
+	type: number
+	width: number
+	height: number
+	// VP8X's flags; 0 for a simple file.
+	flags: number
+	// VP8X's alpha flag, or the VP8L alpha_is_used bit.
+	alpha: boolean
+	animated: boolean
+}
+
+// The canvas size and flags from the first chunk's header alone, which a head of the file holds even when the
+// chunk's payload runs past it (a simple file is one VP8 or VP8L chunk spanning it all). Null when the bytes are
+// not WebP or stop before the fields.
+export function readWebpHeader(bytes: Uint8Array): WebpHeader | null {
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+
+	if (!isWebp(view) || bytes.length < 20) {
+		return null
+	}
+
+	const type = view.getUint32(12)
+	const data = 20
+
+	switch (type) {
+		// Flags, 3 reserved bytes, canvas width − 1 and height − 1 as 24-bit little endian (RFC 9649 §2.7).
+		case CHUNK_VP8X: {
+			if (bytes.length < data + 10) {
+				return null
+			}
+
+			const flags = view.getUint8(data)
+
+			return {
+				type,
+				width: 1 + view.getUint16(data + 4, true) + (view.getUint8(data + 6) << 16),
+				height: 1 + view.getUint16(data + 7, true) + (view.getUint8(data + 9) << 16),
+				flags,
+				alpha: (flags & VP8X_ALPHA) !== 0,
+				animated: (flags & VP8X_ANIMATION) !== 0
+			}
+		}
+
+		// The signature, then 14 bits width − 1 and 14 bits height − 1 (RFC 9649 §3.2.1).
+		case CHUNK_VP8L: {
+			if (bytes.length < data + 5 || view.getUint8(data) !== VP8L_SIGNATURE) {
+				return null
+			}
+
+			const bits = view.getUint32(data + 1, true)
+
+			return {
+				type,
+				width: (bits & 0x3fff) + 1,
+				height: ((bits >>> 14) & 0x3fff) + 1,
+				flags: 0,
+				alpha: vp8lAlphaAt(bytes, data),
+				animated: false
+			}
+		}
+
+		// A key frame's 9D 01 2A start code, then 14-bit width and height; the top two bits scale (RFC 6386 §9.1).
+		case CHUNK_VP8: {
+			if (bytes.length < data + 10 || view.getUint32(data + 3) >>> 8 !== 0x9d012a) {
+				return null
+			}
+
+			return {
+				type,
+				width: view.getUint16(data + 6, true) & 0x3fff,
+				height: view.getUint16(data + 8, true) & 0x3fff,
+				flags: 0,
+				alpha: false,
+				animated: false
+			}
+		}
+	}
+
+	return null
 }
 
 function writeChunkHeader(view: DataView, at: number, type: number, size: number): number {

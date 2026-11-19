@@ -243,8 +243,8 @@ describe("Download as of a presentation", () => {
 		expect((await downloaded())[0]).toBe("secret.pdf")
 	})
 
-	it("tells a deck whose password cannot protect a PDF so", async () => {
-		mocks.pdf.refuse = { reason: "unsupported", detail: "password: mixes text directions" }
+	it("maps a PDF refused for its password to the password message", async () => {
+		mocks.pdf.refuse = { reason: "passwordUnsupported", detail: "password: mixes text directions" }
 		await startDownloadAs([file("talk.pptx")], "pdf", CONTEXT)
 
 		expect(mocks.downloadBlob).not.toHaveBeenCalled()

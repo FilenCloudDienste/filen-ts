@@ -28,13 +28,13 @@ import {
 	planExport,
 	plannedRanges,
 	rangesDuration,
-	transcodeBitrate,
 	transcodeFrameRate,
+	transcodeVideoBitrate,
 	transcodeVideoCodec,
 	type PlanContext
 } from "@/features/preview/videoEdit/lib/plan"
 import type { ExportPlan, TimeRange, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
-import { RangeAudio, transcodeAudio, type TimeStretchLike } from "@/features/preview/videoEdit/worker/audio"
+import { decodedAudioFormat, RangeAudio, transcodeAudio, type TimeStretchLike } from "@/features/preview/videoEdit/worker/audio"
 import { copyAudio, copyBounds, copyVideo } from "@/features/preview/videoEdit/worker/copy"
 import { ExportCancelledError, ExportRefusedError } from "@/features/preview/videoEdit/worker/errors"
 import { PROGRESS_INTERVAL_MS } from "@/features/preview/videoEdit/worker/exportApi"
@@ -230,17 +230,7 @@ export async function runExport(params: RunExportParams): Promise<ExportSummary>
 			const frameRate = transcodeFrameRate(info, recipe.speed)
 			const source = new VideoSampleSource({
 				codec,
-				quality: new Quality({
-					bitrate: transcodeBitrate({
-						width: geometry.width,
-						height: geometry.height,
-						frameRate,
-						quality: recipe.output.quality,
-						codec,
-						sourceVideoBitrate: info.duration > 0 ? (info.bytes * 8) / info.duration : null,
-						sourcePixels: info.width * info.height
-					})
-				}),
+				quality: new Quality({ bitrate: transcodeVideoBitrate(recipe, info, geometry, codec, frameRate) }),
 				keyFrameInterval: KEY_FRAME_INTERVAL_SECONDS,
 				hardwareAcceleration: "no-preference",
 				...(plan.hdr === "hevc10" ? { fullCodecString: HEVC_MAIN10_CODEC_STRING } : {})
@@ -299,8 +289,9 @@ export async function runExport(params: RunExportParams): Promise<ExportSummary>
 				throw new ExportRefusedError("codec", `audio track ${String(track.number)} cannot be decoded`)
 			}
 
-			const sampleRate = await track.getSampleRate()
-			const channels = await track.getNumberOfChannels()
+			const declared = { sampleRate: await track.getSampleRate(), channels: await track.getNumberOfChannels() }
+			// The PCM is labelled, cut and stretched at what the decoder puts out, not what the track declares.
+			const { sampleRate, channels } = await decodedAudioFormat(decode, bounds, declared)
 			const outputChannels = Math.min(Math.max(channels, 1), 2)
 			const outputRate = KEPT_SAMPLE_RATES.has(sampleRate) ? sampleRate : 48_000
 			const source = new AudioSampleSource({

@@ -28,6 +28,7 @@ import {
 	pageSetupForm,
 	painterAction,
 	paperOf,
+	lineSpacingAtForRule,
 	paragraphCommands,
 	paragraphForm,
 	drawingItems,
@@ -347,7 +348,6 @@ describe("object presses", () => {
 		)
 
 		expect(interactions?.control?.(press) ?? false).toBe(false)
-		expect(interactions?.link).toBeUndefined()
 		expect(pressed).toEqual([])
 	})
 })
@@ -534,6 +534,20 @@ describe("formatting, tables and page setup logic", () => {
 			{ type: "paragraph.lineSpacing", rule: "exact", value: 280 }
 		])
 		expect(paragraphCommands(initial, { ...initial, before: "lots" }, "in")).toBeNull()
+		// Out of the command parser's bounds: no commands, as for a non-number.
+		expect(paragraphCommands(initial, { ...initial, at: "200" }, "in")).toBeNull()
+		expect(paragraphCommands(initial, { ...initial, start: "99999" }, "in")).toBeNull()
+		expect(paragraphCommands(initial, { ...initial, rule: "exact", at: "2000" }, "in")).toBeNull()
+		// The rule's change carries At over between lines and points (1 line = 12 pt), so At alone keeps its spacing.
+		expect(lineSpacingAtForRule("1.15", "auto", "exact")).toBe("13.8")
+		expect(lineSpacingAtForRule("14", "exact", "auto")).toBe("1.17")
+		expect(lineSpacingAtForRule("14", "exact", "atLeast")).toBe("14")
+		expect(lineSpacingAtForRule("", "auto", "exact")).toBe("")
+		expect(lineSpacingAtForRule("lots", "auto", "atLeast")).toBe("lots")
+		expect(lineSpacingAtForRule("0", "exact", "auto")).toBe("0")
+		expect(
+			paragraphCommands(initial, { ...initial, rule: "exact", at: lineSpacingAtForRule(initial.at, initial.rule, "exact") }, "in")
+		).toEqual([{ type: "paragraph.lineSpacing", rule: "exact", value: 276 }])
 		// Mixed values start empty, and an empty field changes nothing.
 		expect(paragraphForm({ ...VALUES, indent: "mixed" }, "cm").start).toBe("")
 		expect(fromTwips(1440, "cm")).toBe(2.54)

@@ -31,7 +31,7 @@ const PRESET_LABEL_KEYS = {
 	"tar.gz": "archiveCompressPresetTarGz"
 } as const satisfies Record<PresetFormat, ArchiveKey>
 
-// A directory name per uuid, read once per open menu: a bulk selection mostly shares one parent, and
+// A directory name per uuid, read once per render of the open menu: a bulk selection mostly shares one parent, and
 // each read scans the cached listings.
 function memoizedNameOf(): (uuid: string) => string | undefined {
 	const names = new Map<string, string | undefined>()

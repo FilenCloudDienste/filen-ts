@@ -16,6 +16,7 @@ import {
 	BookmarkTriggerItems,
 	bookmarkTriggerOf,
 	bookmarkTriggerValue,
+	isobmffLength,
 	parseMediaSeconds,
 	readMediaDuration
 } from "@/features/presentation/components/ribbon/mediaTiming"
@@ -384,6 +385,27 @@ describe("a clip's length", () => {
 		expect(reads.length).toBeGreaterThan(0)
 	})
 
+	it('reads a version 1 mvhd\'s 64-bit length, and never takes its all-ones "unknown" for one', async () => {
+		expect(await isobmffLength(...bytesReader(mp4V1(1000, 12_345n)))).toEqual({ kind: "known", ms: 12_345 })
+		expect(await isobmffLength(...bytesReader(mp4V1(1000, 0xffffffffffffffffn)))).toEqual({ kind: "unreadable" })
+		expect(await isobmffLength(...bytesReader(mp4V1(1000, BigInt(Number.MAX_SAFE_INTEGER) + 1n)))).toEqual({ kind: "unreadable" })
+	})
+
+	it("finds a moov that ends inside its version 1 mvhd's duration unreadable", async () => {
+		// The mvhd's box header claims its full size, but the moov stops 4 bytes into the 64-bit duration.
+		const truncated = box("moov", box("mvhd", mvhdV1(1000, 12_345n).slice(0, 28)))
+		const ftyp = box("ftyp", new TextEncoder().encode("isom\u0000\u0000\u0002\u0000isom"))
+
+		new DataView(truncated.buffer).setUint32(8, 120)
+
+		const bytes = new Uint8Array(ftyp.length + truncated.length)
+
+		bytes.set(ftyp)
+		bytes.set(truncated, ftyp.length)
+
+		expect(await isobmffLength(...bytesReader(bytes))).toEqual({ kind: "unreadable" })
+	})
+
 	it("gives up on a container it cannot read, never loading it into an element (an unreadable clip)", async () => {
 		const url = vi.fn()
 		const junk = new Uint8Array(4096)
@@ -599,6 +621,36 @@ function mp4WithDuration(timescale: number, duration: number): Uint8Array {
 	out.set(box("mdat", new Uint8Array(8192 - at - 8)), at)
 
 	return out
+}
+
+// A version 1 mvhd payload (64-bit times and duration) of `duration` at `timescale`.
+function mvhdV1(timescale: number, duration: bigint): Uint8Array {
+	const mvhd = new Uint8Array(112)
+	const view = new DataView(mvhd.buffer)
+
+	view.setUint8(0, 1)
+	view.setUint32(20, timescale)
+	view.setBigUint64(24, duration)
+	view.setUint32(108, 2)
+
+	return mvhd
+}
+
+// An MP4 (ftyp, then moov with a version 1 mvhd of `duration` at `timescale`).
+function mp4V1(timescale: number, duration: bigint): Uint8Array {
+	const ftyp = box("ftyp", new TextEncoder().encode("isom\u0000\u0000\u0002\u0000isom"))
+	const moov = box("moov", box("mvhd", mvhdV1(timescale, duration)))
+	const out = new Uint8Array(ftyp.length + moov.length)
+
+	out.set(ftyp)
+	out.set(moov, ftyp.length)
+
+	return out
+}
+
+// isobmffLength's size and range read over `bytes`.
+function bytesReader(bytes: Uint8Array): [number, (start: number, end: number) => Promise<Uint8Array>] {
+	return [bytes.length, (start, end) => Promise.resolve(bytes.slice(start, end))]
 }
 
 // A session whose media(part, port) serves `bytes` on the port, as the worker does. happy-dom's navigator has a null

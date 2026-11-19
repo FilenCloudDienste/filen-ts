@@ -438,6 +438,10 @@ export const mounts = {
 	errorCredentialsWeak: "That password is too easy to guess. Use at least 12 characters and avoid the user name.",
 	/** Error — a server without sign-in needs the user's word */
 	errorAcknowledgementRequired: "Confirm that the server may run without sign-in.",
+	/** Error — the drive was unmounted outside Filen (by the user or the system) */
+	errorDriveUnmounted: "The drive was unmounted outside Filen. Try again to mount it.",
+	/** Error — the mount service stopped by itself too often and isn't restarted */
+	errorDaemonUnstable: "The drive and servers kept stopping unexpectedly. Try again.",
 	/** Error — anything else */
 	errorUnknown: "Something went wrong. Try again.",
 

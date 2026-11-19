@@ -74,7 +74,7 @@ function renderDialog(): void {
 
 async function savePassword(plaintext: string): Promise<void> {
 	fireEvent.click(screen.getByRole("button", { name: "Set password" }))
-	fireEvent.change(screen.getByPlaceholderText("No password"), { target: { value: plaintext } })
+	fireEvent.change(screen.getByLabelText("Password"), { target: { value: plaintext } })
 
 	await act(async () => {
 		fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -90,7 +90,7 @@ describe("LinkDialog", () => {
 		await savePassword("correct horse battery staple")
 
 		expect(updateLink).toHaveBeenCalledTimes(1)
-		expect(screen.getByPlaceholderText<HTMLInputElement>("No password").value).toBe("correct horse battery staple")
+		expect(screen.getByLabelText<HTMLInputElement>("Password").value).toBe("correct horse battery staple")
 	})
 
 	it("closes the password editor once the save lands", async () => {
@@ -100,6 +100,37 @@ describe("LinkDialog", () => {
 		await savePassword("correct horse battery staple")
 
 		expect(screen.getByRole("button", { name: "Set password" })).toBeTruthy()
+	})
+
+	it("saves the password exactly as typed, edge spaces included", async () => {
+		updateLink.mockResolvedValueOnce({ status: "success", link: { type: "file", status: LINK } })
+		renderDialog()
+
+		await savePassword(" secret ")
+
+		const [item, update] = updateLink.mock.calls[0] as [unknown, { status: { password: unknown } }]
+
+		expect(item).toBe(FILE)
+		expect(update.status.password).toEqual({ type: "known", data: " secret " })
+	})
+
+	it("keeps Save disabled for a whitespace-only password", () => {
+		renderDialog()
+		fireEvent.click(screen.getByRole("button", { name: "Set password" }))
+		fireEvent.change(screen.getByLabelText("Password"), { target: { value: "   " } })
+
+		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(true)
+	})
+
+	it("names the password input by its label, not a placeholder", () => {
+		renderDialog()
+		fireEvent.click(screen.getByRole("button", { name: "Set password" }))
+
+		const input = screen.getByLabelText<HTMLInputElement>("Password")
+
+		expect(input.tagName).toBe("INPUT")
+		expect(input.placeholder).toBe("")
+		expect(input.id).not.toMatch(/password/i)
 	})
 
 	it("offers a retry when the account read failed with nothing cached, instead of spinning", () => {

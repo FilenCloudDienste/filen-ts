@@ -52,6 +52,7 @@ async function findObject(name: string): Promise<HTMLElement> {
 }
 
 // A grid handle; with `model`, an 800 by 600 px view of its sheet at the top left, drawn whenever the model repaints.
+// Its frames: schedule draws one on the next animation frame, which calls the frame listeners.
 function gridHandle(focus: () => void, model?: SheetGridModel): SheetGridHandle {
 	const currentView = () => {
 		const axes = model?.axes(0) ?? null
@@ -59,10 +60,30 @@ function gridHandle(focus: () => void, model?: SheetGridModel): SheetGridHandle 
 
 		return axes === null || layout === null ? null : gridView(axes, layout, { top: 0, left: 0 }, 800, 600)
 	}
+	const frames = new Set<() => void>()
+	let frame = 0
+	const schedule = () => {
+		if (frame !== 0) return
+
+		frame = requestAnimationFrame(() => {
+			frame = 0
+
+			for (const listener of frames) listener()
+		})
+	}
 
 	return {
-		renderer: { currentView, scrollBy: () => undefined },
-		onFrame: (listener: () => void) => model?.onPaint(listener) ?? (() => undefined),
+		renderer: { currentView, schedule, scrollBy: () => undefined },
+		onFrame: (listener: () => void) => {
+			const unpaint = model?.onPaint(listener)
+
+			frames.add(listener)
+
+			return () => {
+				frames.delete(listener)
+				unpaint?.()
+			}
+		},
 		reveal: vi.fn(),
 		focus
 	} as unknown as SheetGridHandle
@@ -282,7 +303,9 @@ describe("sheet objects view", () => {
 
 		fireEvent.pointerDown(picture, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 10, clientY: 10 })
 		fireEvent.pointerMove(picture, { pointerId: 1, clientX: 110, clientY: 60 })
-		expect(picture.style.transform).not.toBe(before)
+		await waitFor(() => {
+			expect(picture.style.transform).not.toBe(before)
+		})
 		fireEvent.pointerUp(picture, { pointerId: 1, clientX: 110, clientY: 60 })
 
 		await waitFor(() => {

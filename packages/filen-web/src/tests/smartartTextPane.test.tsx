@@ -6,7 +6,7 @@ import i18n from "i18next"
 import { slideRef, type DeckOp, type Xfrm } from "@filen/office/core/presentation"
 import type { CommandResult, OpenInfo, PresentationSessionApi, SlideLayer, SlideRender } from "@filen/office/dom/presentation"
 import { createShapeSelection } from "@filen/office/react/presentation"
-import { smartArtPane } from "@/features/presentation/components/ribbon/insertSmartArt"
+import { runSmartArtOp, smartArtPane } from "@/features/presentation/components/ribbon/insertSmartArt"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { SmartArtPrompts, SmartArtTextPane } from "@/features/presentation/components/smartartTextPane"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
@@ -61,6 +61,11 @@ function renderOf(revision: number): SlideRender {
 
 let ops: DeckOp[]
 let info: ReturnType<typeof diagram>
+// Commands the worker refuses (recorded all the same), decided when it answers.
+let refuse: (op: DeckOp) => boolean
+// Commands left unanswered until the test answers them (`answers`, in order).
+let hold: (op: DeckOp) => boolean
+let answers: (() => void)[]
 const smartArtInfo = vi.fn(() => Promise.resolve(info))
 
 function mount() {
@@ -81,7 +86,16 @@ function mount() {
 		command: (op: DeckOp): Promise<CommandResult> => {
 			ops.push(op)
 
-			return Promise.resolve({ ok: true, revision: ops.length + 1, dirty: true })
+			const answer = (): CommandResult =>
+				refuse(op) ? { ok: false, refusal: "unsupported" } : { ok: true, revision: ops.length + 1, dirty: true }
+
+			if (!hold(op)) return Promise.resolve(answer())
+
+			return new Promise(resolve => {
+				answers.push(() => {
+					resolve(answer())
+				})
+			})
 		}
 	})
 	const view = render(
@@ -93,6 +107,7 @@ function mount() {
 	)
 
 	return {
+		editorAt,
 		// The slide renders again after a command.
 		rerender: (revision: number) => {
 			view.rerender(
@@ -114,6 +129,9 @@ beforeEach(() => {
 	smartArtPane.reset()
 	smartArtPane.setOpen(true)
 	smartArtInfo.mockClear()
+	refuse = () => false
+	hold = () => false
+	answers = []
 	info = diagram([
 		["One", 1],
 		["Two", 2],
@@ -283,6 +301,210 @@ describe("SmartArt text pane", () => {
 			{ family: "smartart", kind: "promote", target, node: "{2}" },
 			{ family: "smartart", kind: "moveNode", target, node: "{3}", direction: "up" }
 		])
+	})
+
+	it("takes a text it did not send while focused with nothing unsent (an undo kept in the field)", async () => {
+		const { rerender } = mount()
+		const one = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 1, level 1" })
+
+		vi.useFakeTimers()
+		fireEvent.focus(one)
+		fireEvent.change(one, { target: { value: "abc" } })
+		act(() => {
+			vi.advanceTimersByTime(1000)
+		})
+		expect(ops).toEqual([{ family: "smartart", kind: "setNodeText", target, node: "{1}", text: "abc" }])
+		vi.useRealTimers()
+
+		// The worker applied it, then the ribbon's Undo (the focus stays in the field) put the old text back.
+		info = diagram([
+			["abc", 1],
+			["Two", 2],
+			["Three", 1]
+		])
+		rerender(2)
+		await waitFor(() => {
+			expect(smartArtInfo).toHaveBeenCalledTimes(2)
+		})
+		info = diagram([
+			["One", 1],
+			["Two", 2],
+			["Three", 1]
+		])
+		rerender(3)
+		await waitFor(() => {
+			expect(field("Shape 1, level 1").value).toBe("One")
+		})
+
+		// It counts as sent: leaving sends nothing more.
+		fireEvent.blur(field("Shape 1, level 1"))
+		expect(ops).toHaveLength(1)
+	})
+
+	it("keeps typing not sent yet when another text arrives while focused", async () => {
+		const { rerender } = mount()
+		const one = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 1, level 1" })
+
+		fireEvent.focus(one)
+		fireEvent.change(one, { target: { value: "Typing" } })
+		info = diagram([
+			["Other", 1],
+			["Two", 2],
+			["Three", 1]
+		])
+		rerender(2)
+		await waitFor(() => {
+			expect(smartArtInfo).toHaveBeenCalledTimes(2)
+		})
+		expect(field("Shape 1, level 1").value).toBe("Typing")
+
+		fireEvent.blur(field("Shape 1, level 1"))
+		expect(ops).toEqual([{ family: "smartart", kind: "setNodeText", target, node: "{1}", text: "Typing" }])
+	})
+
+	it("keeps the whole text after a refused Enter, and sends it when the field is left", async () => {
+		mount()
+		refuse = op => op.kind === "batch"
+
+		const one = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 1, level 1" })
+
+		fireEvent.focus(one)
+		fireEvent.change(one, { target: { value: "Unotwo" } })
+		one.setSelectionRange(3, 3)
+		await act(async () => {
+			fireEvent.keyDown(one, { key: "Enter" })
+			await Promise.resolve()
+		})
+		expect(ops).toHaveLength(1)
+		await waitFor(() => {
+			expect(field("Shape 1, level 1").value).toBe("Unotwo")
+		})
+
+		fireEvent.blur(field("Shape 1, level 1"))
+		expect(ops[1]).toEqual({ family: "smartart", kind: "setNodeText", target, node: "{1}", text: "Unotwo" })
+	})
+
+	it("leaves a letter typed before a refused Tab unsent, not lost", async () => {
+		mount()
+		refuse = op => op.kind === "batch"
+
+		const three = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 3, level 1" })
+
+		fireEvent.focus(three)
+		fireEvent.change(three, { target: { value: "Threex" } })
+		await act(async () => {
+			fireEvent.keyDown(three, { key: "Tab" })
+			await Promise.resolve()
+		})
+		expect(ops).toEqual([
+			{
+				family: "batch",
+				kind: "batch",
+				ops: [
+					{ family: "smartart", kind: "setNodeText", target, node: "{3}", text: "Threex" },
+					{ family: "smartart", kind: "demote", target, node: "{3}" }
+				]
+			}
+		])
+		expect(field("Shape 3, level 1").value).toBe("Threex")
+
+		fireEvent.blur(field("Shape 3, level 1"))
+		expect(ops[1]).toEqual({ family: "smartart", kind: "setNodeText", target, node: "{3}", text: "Threex" })
+	})
+
+	it.each([
+		["refused", true],
+		["applied", false]
+	] as const)(
+		"keeps the text of a later command not answered yet when an earlier one's outline arrives (later one %s)",
+		async (_, refused) => {
+			const { rerender } = mount()
+			const three = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 3, level 1" })
+
+			fireEvent.focus(three)
+			fireEvent.change(three, { target: { value: "Threex" } })
+			await act(async () => {
+				fireEvent.keyDown(three, { key: "Tab" })
+				await Promise.resolve()
+			})
+
+			// The second Tab goes on the outline as it was (the first one's answer is not in yet), and waits.
+			hold = () => true
+			fireEvent.change(field("Shape 3, level 1"), { target: { value: "Threexy" } })
+			fireEvent.keyDown(field("Shape 3, level 1"), { key: "Tab" })
+			expect(ops).toHaveLength(2)
+
+			info = diagram([
+				["One", 1],
+				["Two", 2],
+				["Threex", 2]
+			])
+			rerender(2)
+			await waitFor(() => {
+				expect(field("Shape 3, level 2")).toBeDefined()
+			})
+			expect(field("Shape 3, level 2").value).toBe("Threexy")
+
+			refuse = () => refused
+			await act(async () => {
+				for (const answer of answers) answer()
+				await Promise.resolve()
+			})
+			expect(field("Shape 3, level 2").value).toBe("Threexy")
+
+			fireEvent.blur(field("Shape 3, level 2"))
+
+			if (refused) expect(ops[2]).toEqual({ family: "smartart", kind: "setNodeText", target, node: "{3}", text: "Threexy" })
+			else expect(ops).toHaveLength(2)
+		}
+	)
+
+	it("sends the text of a refused Tab at once when the field was left before the answer", async () => {
+		mount()
+		hold = () => true
+		refuse = () => true
+
+		const three = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 3, level 1" })
+
+		fireEvent.focus(three)
+		fireEvent.change(three, { target: { value: "Threex" } })
+		fireEvent.keyDown(three, { key: "Tab" })
+		// Leaving finds nothing unsent: the Tab carried it.
+		fireEvent.blur(three)
+		expect(ops).toHaveLength(1)
+
+		hold = () => false
+		refuse = op => op.kind === "batch"
+		await act(async () => {
+			for (const answer of answers) answer()
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(ops[1]).toEqual({ family: "smartart", kind: "setNodeText", target, node: "{3}", text: "Threex" })
+		})
+		expect(field("Shape 3, level 1").value).toBe("Threex")
+	})
+
+	it("counts the text a refused Design command took from the field as unsent again", async () => {
+		const { editorAt } = mount()
+
+		refuse = op => op.kind === "batch"
+
+		const three = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Shape 3, level 1" })
+
+		fireEvent.focus(three)
+		fireEvent.change(three, { target: { value: "Thr" } })
+
+		let applied = true
+
+		await act(async () => {
+			applied = await runSmartArtOp(editorAt(1), { family: "smartart", kind: "demote", target, node: "{3}" })
+		})
+		expect(applied).toBe(false)
+		expect(ops).toHaveLength(1)
+
+		fireEvent.blur(field("Shape 3, level 1"))
+		expect(ops[1]).toEqual({ family: "smartart", kind: "setNodeText", target, node: "{3}", text: "Thr" })
 	})
 
 	it("removes an empty node on Backspace and focuses the one before it", async () => {

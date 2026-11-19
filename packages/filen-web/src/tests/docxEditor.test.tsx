@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { bytesSource } from "@filen/office/core/opc"
 import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
 import { DocxEditorSession, findInStory, openDocxEditContext, selectMatch } from "@filen/office/core/docx/edit"
@@ -14,7 +14,9 @@ import type { DocxEditingHost } from "@filen/office/dom/docx/editing"
 import { i18n } from "@/lib/i18n"
 import { officeSettingsView } from "@/tests/support/officeSettingsView"
 import { registerAllActions } from "@/lib/keymap/actions"
-import { clearUserCombo, setUserCombo } from "@/lib/keymap/registry"
+import { clearUserCombo, setUserCombo, unbindAction } from "@/lib/keymap/registry"
+import { chordText } from "@/lib/keymap/keyText"
+import { parseCombo } from "@filen/shared/keymap"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // The DOCX editor's web side on a real document: the in-thread editing host with the writer's proof, the
@@ -40,6 +42,8 @@ const hooks = vi.hoisted(() => ({
 	clipboard: null as { html?: string; text?: string } | null,
 	// The one word spelling flags (none when unset).
 	misspelled: undefined as string | undefined,
+	// The editor promise the next host hands out in place of its own (an editor whose build fails).
+	editor: undefined as Promise<PagedEditor> | undefined,
 	// Replaces the writer when set.
 	write: undefined as
 		| ((
@@ -90,7 +94,26 @@ vi.mock("@/features/preview/lib/docxEditing", async () => {
 
 			hooks.hosts.push(host)
 
-			return host
+			const editor = hooks.editor
+
+			if (editor === undefined) {
+				return host
+			}
+
+			// The host's own editor, which nothing reads now, is rejected when the view closes it.
+			host.editor.catch(() => undefined)
+
+			return new Proxy(host, {
+				get: (target, key) => {
+					if (key === "editor") {
+						return editor
+					}
+
+					const value: unknown = Reflect.get(target, key)
+
+					return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value
+				}
+			})
 		}
 	}
 })
@@ -123,6 +146,7 @@ vi.mock("@/features/preview/lib/docxClipboard", async () => ({
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
 
 const { DocxEditView } = await import("@/features/preview/components/docxEditor")
+const { log } = await import("@/lib/log")
 const { SaveRefusedError } = await import("@/features/drive/lib/previewSave.logic")
 const { DocxSaveError } = await import("@filen/office/core/docx/write")
 
@@ -219,6 +243,7 @@ afterEach(() => {
 	hooks.write = undefined
 	hooks.clipboard = null
 	hooks.misspelled = undefined
+	hooks.editor = undefined
 	vi.clearAllMocks()
 })
 
@@ -1064,5 +1089,138 @@ describe("DocxEditView", () => {
 	it("counts matches in the locale's numbers, past the most a find shows", () => {
 		expect(i18n.t("preview:previewDocxFindCountCapped", { current: 1234, total: 10_000 })).toBe("1,234/10,000+")
 		expect(i18n.t("preview:previewDocxFindStatus", { current: 3, total: 1500 })).toBe("Match 3 of 1,500")
+	})
+})
+
+describe("DocxEditView, an editor that could not open", () => {
+	function failingEditor(): { reject: (error: Error) => void } {
+		let reject: (error: Error) => void = () => undefined
+
+		hooks.editor = new Promise<PagedEditor>((_resolve, fail) => {
+			reject = fail
+		})
+		// Not a test failure: the editor's own handler takes the rejection.
+		hooks.editor.catch(() => undefined)
+
+		return { reject }
+	}
+
+	function renderEditView() {
+		return render(
+			<DocxEditView
+				bytes={BYTES}
+				alt="report.docx"
+				writable
+				renamed={false}
+				onDirtyChange={vi.fn()}
+				saveRef={{ current: null }}
+				onAutosave={() => true}
+				viewer={() => <div>viewer</div>}
+			/>
+		)
+	}
+
+	it("falls back to the read-only viewer and logs why when the editor's build fails on a document the viewer laid out", async () => {
+		const { reject } = failingEditor()
+
+		renderEditView()
+		await act(() => new Promise(resolve => setTimeout(resolve, 50)))
+		expect(screen.queryByText("viewer")).toBeNull()
+
+		await act(async () => {
+			reject(new Error("edit context"))
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+
+		expect(await screen.findByText("viewer")).toBeTruthy()
+		expect(screen.queryByRole("textbox", { name: "report.docx" })).toBeNull()
+		expect(log.error).toHaveBeenCalledTimes(1)
+		expect(log.error).toHaveBeenCalledWith("docx", "editor could not open", expect.any(Error))
+	})
+
+	it("says nothing of an editor rejected after the view closed", async () => {
+		const { reject } = failingEditor()
+		const view = renderEditView()
+
+		view.unmount()
+		await act(async () => {
+			reject(new Error("closed"))
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+
+		expect(log.error).not.toHaveBeenCalled()
+	})
+})
+
+describe("DocxEditView, keys pressed outside the document", () => {
+	it("seeds Find with the selection when its key is pressed on a ribbon control", async () => {
+		const { editor } = await openEditor()
+
+		typeAtStart(editor, "zebra zebra ")
+		selectWord(editor, "zebra")
+
+		const bold = screen.getByRole("button", { name: "Bold" })
+
+		bold.focus()
+		fireEvent.keyDown(bold, { key: "f", code: "KeyF", ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) })
+
+		const navigation = await screen.findByRole("complementary", { name: "Navigation" })
+
+		expect((await within(navigation).findByRole<HTMLInputElement>("searchbox", { name: "Search document" })).value).toBe("zebra")
+	})
+})
+
+describe("DocxEditView, autosave held for a save by the user", () => {
+	async function holdAutosave(): Promise<void> {
+		const { editor, saveRef } = await openEditor()
+
+		typeAtStart(editor, "Edited: ")
+		hooks.write = () => Promise.reject(new DocxSaveError("content", "refused"))
+
+		const save = saveRef.current
+
+		if (save === null) {
+			throw new Error("no save source")
+		}
+
+		await act(() => save().catch(() => undefined))
+	}
+
+	it("names the Save key as the user bound it", async () => {
+		await act(() => setUserCombo("preview.save", "mod+shift+s"))
+
+		try {
+			await holdAutosave()
+
+			const chord = parseCombo("mod+shift+s")[0]
+
+			if (chord === undefined) {
+				throw new Error("no chord")
+			}
+
+			expect(
+				await screen.findByText(
+					`Changes aren't being saved automatically: this document needs a save by you. Press ${chordText(chord)} to save.`
+				)
+			).toBeTruthy()
+		} finally {
+			await act(() => clearUserCombo("preview.save"))
+		}
+	})
+
+	it("points to the Save button when Save has no key", async () => {
+		await act(() => unbindAction("preview.save"))
+
+		try {
+			await holdAutosave()
+
+			expect(
+				await screen.findByText(
+					"Changes aren't being saved automatically: this document needs a save by you. Use the Save button to save."
+				)
+			).toBeTruthy()
+		} finally {
+			await act(() => clearUserCombo("preview.save"))
+		}
 	})
 })

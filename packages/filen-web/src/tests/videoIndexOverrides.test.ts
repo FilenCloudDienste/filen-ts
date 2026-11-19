@@ -36,7 +36,7 @@ import { VideoIndexEngine, type SnapshotStore } from "@/workers/videoIndex/engin
 import { readSnapshotHeader } from "@/workers/videoIndex/snapshot.logic"
 import type { VideoIndexUpdate, VideoTitleView } from "@/workers/videoIndex/view.logic"
 import { memoryCatalogStore, trackCatalogTitles } from "@/tests/support/videoIndex"
-import { FakeDrive, hexUuid } from "@/tests/support/videoDrive"
+import { FakeDrive, driveEvent, driveFile, hexUuid } from "@/tests/support/videoDrive"
 
 let drive: FakeDrive
 let titles: Map<string, VideoTitleView>
@@ -217,6 +217,97 @@ describe("corrections in the library index", () => {
 		expect(upserted).toEqual([id])
 		expect(titles.get(id)?.detailHash).not.toBe(hash)
 		expect(titles.get(id)?.title).toBe("Show")
+	})
+})
+
+describe("detail-only changes in the library index", () => {
+	let latest = 50n
+
+	async function indexed(root: string, type: "movies" | "shows" | "other"): Promise<VideoIndexEngine> {
+		const engine = engineFor()
+
+		latest = 50n
+		await engine.configure([{ uuid: root, type, enabled: true }])
+		await engine.check(latest)
+		await settle()
+		upserted = []
+
+		return engine
+	}
+
+	function only(): string {
+		return [...titles.keys()][0] ?? ""
+	}
+
+	it("refreshes a movie when a sidecar subtitle is added or removed, not for a new version of its video", async () => {
+		const root = drive.addDir(hexUuid(), "Movies")
+		const dir = drive.addDir(root, "Heat (1995)")
+		const video = drive.addFile(dir, "Heat (1995).mkv")
+		const engine = await indexed(root, "movies")
+		const id = only()
+
+		const subtitle = drive.addFile(dir, "Heat (1995).en.srt", { size: 40_000 })
+
+		engine.onSocketEvent(driveEvent(++latest, { type: "fileNew", file: subtitle }))
+		await settle()
+
+		expect(upserted).toEqual([id])
+
+		upserted = []
+		drive.files.delete(subtitle.uuid)
+		engine.onSocketEvent(
+			driveEvent(++latest, { type: "fileTrash", uuid: subtitle.uuid, stableUUID: subtitle.uuid, newUUID: undefined })
+		)
+		await settle()
+
+		expect(upserted).toEqual([id])
+
+		// A new version of the video: its playable file rotates in the view, its detail hash stays.
+		const hash = titles.get(id)?.detailHash
+		const version = driveFile(dir, "Heat (1995).mkv", { stableUuid: video.uuid, size: 5 })
+
+		drive.files.delete(video.uuid)
+		drive.files.set(version.uuid, version)
+		engine.onSocketEvent(
+			driveEvent(++latest, { type: "fileArchived", uuid: video.uuid, stableUUID: video.uuid, newUUID: version.uuid })
+		)
+		engine.onSocketEvent(driveEvent(++latest, { type: "fileNew", file: version }))
+		await settle()
+
+		expect(titles.get(id)?.primary?.uuid).toBe(version.uuid)
+		expect(titles.get(id)?.detailHash).toBe(hash)
+	})
+
+	// A season poster already reaches the series card's art candidates; a season's nfo reaches only the detail.
+	it("refreshes a series when a season's nfo is added", async () => {
+		const root = drive.addDir(hexUuid(), "Shows")
+		const season = drive.addDir(drive.addDir(root, "Show"), "Season 1")
+
+		drive.addFile(season, "Show S01E01.mkv")
+
+		const engine = await indexed(root, "shows")
+		const id = only()
+
+		engine.onSocketEvent(driveEvent(++latest, { type: "fileNew", file: drive.addFile(season, "season.nfo", { size: 4_000 }) }))
+		await settle()
+
+		expect(upserted).toEqual([id])
+	})
+
+	it("refreshes an other video when a subtitle appears beside it", async () => {
+		const root = drive.addDir(hexUuid(), "Clips")
+
+		drive.addFile(root, "VID_0001.mp4")
+
+		const engine = await indexed(root, "other")
+		const id = only()
+
+		expect(titles.get(id)?.kind).toBe("other")
+
+		engine.onSocketEvent(driveEvent(++latest, { type: "fileNew", file: drive.addFile(root, "VID_0001.en.srt", { size: 40_000 }) }))
+		await settle()
+
+		expect(upserted).toEqual([id])
 	})
 })
 

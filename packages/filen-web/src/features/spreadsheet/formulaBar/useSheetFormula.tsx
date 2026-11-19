@@ -8,7 +8,6 @@ import {
 	pointedReference,
 	type HighlightedReference,
 	type SheetCommand,
-	type SheetLocale,
 	type SheetRange
 } from "@filen/office/core/sheet"
 import {
@@ -75,16 +74,14 @@ function spanOf(anchor: GridPoint, focus: GridPoint): SheetRange {
 	}
 }
 
-export interface FormulaCaret {
+interface FormulaCaret {
 	readonly editor: Editor | null
 	readonly caret: number
 }
 
-// The view's part (sheetExtension.ts), with what the formula bar shares: the locale's argument separator, the caret,
-// the entry with its references coloured (null when none is), and AutoSum for its button.
+// The view's part (sheetExtension.ts), with what the formula bar shares: the entry with its references coloured (null
+// when none is), and AutoSum for its button.
 export interface SheetFormulaExtension extends SheetBodyExtension {
-	readonly locale: SheetLocale
-	readonly caret: FormulaCaret
 	readonly coloredText: ReactNode
 	readonly autoSum: () => void
 	// The in-cell editor's keys before the grid's (SheetGrid onEditorKey): arrows point in a formula.
@@ -109,15 +106,21 @@ export function useSheetFormula({
 	// One object per language (cached), so the session is configured again only when the regional format changes.
 	const locale = sheetLocaleOf(useRegionalLanguage())
 	const [caret, setCaret] = useState<FormulaCaret>({ editor: null, caret: 0 })
-	// The suggestion list's choice, and the word it was dismissed for (Escape).
-	const [choice, setChoice] = useState(0)
+	// The suggestion list's choice, for the word it was made in (another word starts on the first), and the word the list
+	// was dismissed for (Escape).
+	const [chosen, setChosen] = useState<{ readonly word: string; readonly index: number }>({ word: "", index: 0 })
 	const [dismissed, setDismissed] = useState<string | null>(null)
 	const pointed = useRef<Pointed | null>(null)
 	const { model, editing } = grid
 	const text = editing?.text ?? ""
 	const context = editing === null ? null : formulaContext(text, caret.caret, locale.argument)
 	const word = context?.word ?? null
-	const suggestions = word === null || `${String(word.start)}:${word.text}` === dismissed ? [] : functionSuggestions(word.text, 8)
+	const wordKey = word === null ? null : `${String(word.start)}:${word.text}`
+	const suggestions = word === null || wordKey === dismissed ? [] : functionSuggestions(word.text, 8)
+	// One clamped choice for the list, the arrows and Tab: the list may have narrowed since it was made.
+	const choiceIn = (made: { readonly word: string; readonly index: number }): number =>
+		made.word === wordKey ? Math.min(made.index, Math.max(0, suggestions.length - 1)) : 0
+	const choice = choiceIn(chosen)
 	const sheetName = (sheet: number | undefined): string => grid.sheets.find(entry => entry.id === sheet)?.name ?? ""
 
 	// A text entry completes from the column's entries (formulaBar/autoComplete.ts).
@@ -188,18 +191,18 @@ export function useSheetFormula({
 
 			const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
 
-			if (step !== 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+			if (step !== 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && wordKey !== null) {
 				event.preventDefault()
 				event.stopPropagation()
-				setChoice(current => (current + step + suggestions.length) % suggestions.length)
+				setChosen(current => ({ word: wordKey, index: (choiceIn(current) + step + suggestions.length) % suggestions.length }))
 			} else if (event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
 				event.preventDefault()
 				event.stopPropagation()
 				accept(choice)
-			} else if (event.key === "Escape" && word !== null) {
+			} else if (event.key === "Escape" && wordKey !== null) {
 				event.preventDefault()
 				event.stopPropagation()
-				setDismissed(`${String(word.start)}:${word.text}`)
+				setDismissed(wordKey)
 			}
 		}
 
@@ -363,8 +366,6 @@ export function useSheetFormula({
 
 	return {
 		id: "formula",
-		locale,
-		caret,
 		coloredText,
 		grid: {
 			id: "formula",
@@ -378,7 +379,7 @@ export function useSheetFormula({
 					editor={caret.editor}
 					gridRef={gridRef}
 					suggestions={suggestions}
-					choice={Math.min(choice, Math.max(0, suggestions.length - 1))}
+					choice={choice}
 					call={context?.call ?? null}
 					separator={locale.argument}
 					onChoose={index => {

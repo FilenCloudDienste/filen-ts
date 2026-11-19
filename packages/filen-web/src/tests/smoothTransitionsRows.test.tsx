@@ -34,20 +34,22 @@ describe("Settings › Audio smooth transitions", () => {
 		render(createElement(SmoothTransitionsRows))
 
 		expect(masterSwitch().getAttribute("aria-checked")).toBe("false")
-		expect(masterSwitch().hasAttribute("title")).toBe(false)
+		expect(masterSwitch().hasAttribute("aria-describedby")).toBe(false)
 		expect(screen.getByText("Off until you reload: this device stopped the audio mixer.")).toBeTruthy()
 
 		fireEvent.click(masterSwitch())
 
 		expect(useSmoothTransitionsStore.getState().prefs.enabled).toBe(false)
-		expect(masterSwitch().getAttribute("title")).toBe("Off until you reload: this device stopped the audio mixer.")
+		expect(document.getElementById(masterSwitch().getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+			"Off until you reload: this device stopped the audio mixer."
+		)
 
 		act(() => {
 			setSmooth(true, null)
 		})
 
 		expect(masterSwitch().getAttribute("aria-checked")).toBe("true")
-		expect(masterSwitch().hasAttribute("title")).toBe(false)
+		expect(masterSwitch().hasAttribute("aria-describedby")).toBe(false)
 	})
 
 	it("offers the preset lengths as one radio group named by the row's label", () => {

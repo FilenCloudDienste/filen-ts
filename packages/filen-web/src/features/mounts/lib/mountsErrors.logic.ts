@@ -21,6 +21,8 @@ export const MOUNTS_ERROR_KEY: Record<DesktopMountsErrorCode, MountsKey> = {
 	credentialsInvalid: "errorCredentialsInvalid",
 	credentialsWeak: "errorCredentialsWeak",
 	acknowledgementRequired: "errorAcknowledgementRequired",
+	driveUnmounted: "errorDriveUnmounted",
+	daemonUnstable: "errorDaemonUnstable",
 	unknown: "errorUnknown"
 }
 

@@ -276,7 +276,7 @@ test.describe("archive dialogs", () => {
 				const button = selectionBar(page).getByRole("button", { name, exact: true })
 
 				await expect(button).toBeDisabled()
-				await expect(button).toHaveAttribute("title", OFFLINE_TITLE)
+				await expect(button).toHaveAccessibleDescription(OFFLINE_TITLE)
 			}
 
 			// The options dialog opens online and loses its submit offline.

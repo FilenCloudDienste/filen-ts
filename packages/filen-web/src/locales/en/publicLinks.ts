@@ -123,6 +123,8 @@ export const publicLinks = {
 	saveAsArchive: "Save as archive",
 	/** Directory view — preparing/streaming the zip */
 	preparingDownload: "Preparing download…",
+	/** Directory view — accessible label of the breadcrumb navigation landmark (the shared directory's levels) */
+	publicLinksBreadcrumbLabel: "Location in the shared directory",
 	/** Directory view — filter box placeholder */
 	filterPlaceholder: "Search this directory",
 	/** Directory view — empty directory */

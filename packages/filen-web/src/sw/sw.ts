@@ -16,6 +16,7 @@ import {
 	SW_STREAM_GONE_INTERVAL_MS,
 	SW_SKIP_WAITING_MESSAGE,
 	SW_MSG_BUILD,
+	SW_MSG_ACTIVE_STREAMS,
 	SW_MSG_CLAIM,
 	SW_DOWNLOAD_PREFIX,
 	SW_MSG_INIT_CLIENT,
@@ -112,8 +113,9 @@ type PendingDownload = PendingFileDownload | PendingZipDownload | PendingPreview
 // A generous concurrent-download ceiling — bounded retention is the only guard against unbounded growth
 // of decrypted key material across the SW's lifetime (no page-side signal ever says a download
 // finished, by design — see the registration handlers below). The registry's own eviction policy keeps
-// entries that are still being read; its in-flight count also guards SKIP_WAITING, since activating an
-// update through a running save would truncate that download.
+// entries that are still being read; its in-flight count is what the page asks this worker, while it is
+// the active one, before activating an update (SW_MSG_ACTIVE_STREAMS), since activating it through a
+// running save would truncate that download.
 const MAX_PENDING_DOWNLOADS = 32
 // Players and short-lived preview registrations (a thumbnail's one frame) get buckets of their own, so
 // neither a burst of thumbnails nor of downloads can evict a player's entry, paused or not.
@@ -145,8 +147,20 @@ function closePortIfDone(entry: PendingPortPreview): void {
 // How each attachment download ended, for the page that started it (downloadReporter.ts).
 const reporter = new DownloadReporter(MAX_PENDING_DOWNLOADS)
 
+// A failed init is dropped, so the page's next session handover tries again: the SDK's own init fetches
+// and compiles anew after a failure.
 function ensureSdkInit(): Promise<void> {
-	sdkReady ??= initSdk().then(() => undefined)
+	if (sdkReady === null) {
+		const attempt = initSdk().then(() => undefined)
+
+		sdkReady = attempt
+		attempt.catch(() => {
+			if (sdkReady === attempt) {
+				sdkReady = null
+			}
+		})
+	}
+
 	return sdkReady
 }
 
@@ -274,8 +288,8 @@ function failedOutcome(e: unknown, cancelled: boolean): { type: "failed"; error:
 
 // Pumps `run` into a Response the caller has ALREADY built: constructing it validates every header value
 // as a ByteString and can throw synchronously, and counting the stream first would leave the in-flight
-// count stuck above zero (the finally never runs because nothing consumes the readable), permanently
-// gating SKIP_WAITING so the SW could never activate an update. On failure the writable is aborted so the
+// count stuck above zero (the finally never runs because nothing consumes the readable), so this worker
+// would report a stream for ever and the page would hold every update back. On failure the writable is aborted so the
 // Response readable ERRORS (never hangs).
 //
 // waitUntil is what keeps this worker alive for the pump: respondWith gets an already-resolved Response,
@@ -948,8 +962,9 @@ function hasClient(port: MessagePort | null): boolean {
 }
 
 // Update policy: no skipWaiting at install — a new worker stays in "waiting" until the page confirms
-// the update prompt (register.ts's applyUpdate posts this message), so activation never interrupts
-// whatever the currently-controlling worker is already doing. Hence: no install handler at all.
+// the update prompt (register.ts's applyUpdate posts this message). The page posts it only once the
+// active worker reports no stream in flight (SW_MSG_ACTIVE_STREAMS), since the count lives there: a
+// waiting worker serves no fetch and always counts none. Hence: no install handler at all.
 self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	const data = event.data as { type?: string } | null
 	const type = data?.type
@@ -965,10 +980,7 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	}
 
 	if (type === SW_SKIP_WAITING_MESSAGE) {
-		// Never truncate a running save — only honor the update switch when no stream is in flight.
-		if (downloads.activeStreams === 0) {
-			void self.skipWaiting()
-		}
+		void self.skipWaiting()
 		return
 	}
 
@@ -976,6 +988,11 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 
 	if (type === SW_MSG_BUILD) {
 		port?.postMessage({ build: import.meta.env.VITE_BUILD_ID ?? null })
+		return
+	}
+
+	if (type === SW_MSG_ACTIVE_STREAMS) {
+		port?.postMessage({ active: downloads.activeStreams })
 		return
 	}
 

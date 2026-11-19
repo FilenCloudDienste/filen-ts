@@ -199,7 +199,7 @@ type HoldReason = "setup" | "switch" | "quota"
 interface TrackHooks {
 	// Returns whether to retry the append right away; the hook may instead hold the track.
 	onQuota(track: TrackBuffer, piece: Piece): Promise<boolean>
-	onAppended(): void
+	onAppended(track: TrackBuffer): void
 	// After every SourceBuffer operation and whenever the append queue runs dry.
 	onSettled(): void
 	onError(error: unknown): void
@@ -430,7 +430,7 @@ class TrackBuffer {
 					this.appendedBytes += current.bytes.length
 					this.appendedSeconds += Math.max(0, totalSeconds(ranges) - before)
 					this.seen = unionRanges(this.seen, ranges)
-					this.hooks.onAppended()
+					this.hooks.onAppended(this)
 				}
 			}
 		} finally {
@@ -635,8 +635,8 @@ class MseRemuxSession implements RemuxSession {
 	}
 	private readonly hooks: TrackHooks = {
 		onQuota: (track, piece) => this.handleQuota(track, piece),
-		onAppended: () => {
-			this.quotaAttempts = 0
+		onAppended: track => {
+			this.quotaAttempts.delete(track)
 			this.maintain()
 		},
 		onSettled: () => {
@@ -669,10 +669,12 @@ class MseRemuxSession implements RemuxSession {
 	private audioMime: string | null = null
 	private aheadScale = 1
 	private horizon = 0
-	private quotaAttempts = 0
+	// Per track: the two SourceBuffers fill up and drain on their own.
+	private readonly quotaAttempts = new Map<TrackBuffer, number>()
 	private quotaErrors = 0
-	// The quota hold in force, and how to undo its wait; cleared by any restart.
-	private quotaWait: { track: TrackBuffer; cancel: () => void } | null = null
+	// How to undo each track's quota hold and its wait; cleared by any restart. Ending one track's wait never
+	// releases the other: nothing was freed in that SourceBuffer, and the two would re-hold each other without end.
+	private readonly quotaWaits = new Map<TrackBuffer, () => void>()
 	// When refetches after browser eviction happened, recent ones only.
 	private evictions: number[] = []
 	private internalSeekTo: number | null = null
@@ -885,8 +887,7 @@ class MseRemuxSession implements RemuxSession {
 		this.releaseReads?.()
 		this.releaseReads = null
 		clearInterval(this.stallTimer)
-		this.quotaWait?.cancel()
-		this.quotaWait = null
+		this.clearQuotaWaits()
 
 		for (const [type, listener] of this.elementListeners) {
 			this.element?.removeEventListener(type, listener)
@@ -1177,7 +1178,7 @@ class MseRemuxSession implements RemuxSession {
 		const mediaSource = this.mediaSource
 
 		this.restarts++
-		this.clearQuotaWait()
+		this.clearQuotaWaits()
 		this.video.reset(generation, mediaSource)
 		this.audio.reset(generation, mediaSource)
 		this.horizon = Math.max(time, playhead + this.ahead)
@@ -1422,7 +1423,7 @@ class MseRemuxSession implements RemuxSession {
 		const ahead = this.ahead
 		const seen = playableRanges(this.audioOnly ? null : this.video.seen, this.audio.buffer === null ? null : this.audio.seen)
 
-		if (this.quotaWait === null && !this.openGopBlocked && evictedAhead({ currentTime: now, ranges: this.playable(), seen })) {
+		if (this.quotaWaits.size === 0 && !this.openGopBlocked && evictedAhead({ currentTime: now, ranges: this.playable(), seen })) {
 			this.refetchEvicted(now)
 
 			return
@@ -1469,10 +1470,18 @@ class MseRemuxSession implements RemuxSession {
 		}
 	}
 
-	private clearQuotaWait(): void {
-		this.quotaWait?.cancel()
-		this.quotaWait = null
-		this.quotaAttempts = 0
+	private clearQuotaWait(track: TrackBuffer): void {
+		const cancel = this.quotaWaits.get(track)
+
+		this.quotaWaits.delete(track)
+		this.quotaAttempts.delete(track)
+		cancel?.()
+	}
+
+	private clearQuotaWaits(): void {
+		for (const track of [this.video, this.audio]) {
+			this.clearQuotaWait(track)
+		}
 	}
 
 	// Returns whether the append should be retried now; false holds the track until playback drains.
@@ -1485,8 +1494,12 @@ class MseRemuxSession implements RemuxSession {
 
 		this.quotaErrors++
 
+		const attempt = this.quotaAttempts.get(track) ?? 0
+
+		this.quotaAttempts.set(track, attempt + 1)
+
 		const action = quotaAction({
-			attempt: this.quotaAttempts++,
+			attempt,
 			currentTime: element.currentTime,
 			ranges: track.ranges,
 			scale: this.aheadScale
@@ -1505,7 +1518,7 @@ class MseRemuxSession implements RemuxSession {
 		}
 
 		this.aheadScale = action.scale
-		this.clearQuotaWait()
+		this.clearQuotaWait(track)
 		track.hold("quota")
 
 		// Retried once the playhead has moved on enough to free some of what is buffered; a restart
@@ -1516,18 +1529,14 @@ class MseRemuxSession implements RemuxSession {
 				return
 			}
 
-			this.clearQuotaWait()
-			track.release("quota")
+			this.clearQuotaWait(track)
 		}
 
 		element.addEventListener("timeupdate", resume)
-		this.quotaWait = {
-			track,
-			cancel: () => {
-				element.removeEventListener("timeupdate", resume)
-				track.release("quota")
-			}
-		}
+		this.quotaWaits.set(track, () => {
+			element.removeEventListener("timeupdate", resume)
+			track.release("quota")
+		})
 
 		return true
 	}
@@ -1565,7 +1574,7 @@ class MseRemuxSession implements RemuxSession {
 		}
 
 		// Held for room the playhead never frees, seeking or not.
-		if (this.quotaWait !== null && !element.paused && now - this.lastAdvanceAt >= STALL_DETECTION_MS) {
+		if (this.quotaWaits.size > 0 && !element.paused && now - this.lastAdvanceAt >= STALL_DETECTION_MS) {
 			this.fail("keyframeIntervalTooLarge", "playback stalled with the buffer full")
 
 			return

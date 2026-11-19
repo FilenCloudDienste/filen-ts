@@ -50,7 +50,7 @@ const BROWSE: ChooserStep = { kind: "browse" }
 // picker browses the own drive only, so a shared-in directory never shows. No create-directory-in-place: unlike
 // a move destination, a photos directory doesn't need one carved out on the spot.
 export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryChooserDialogProps) {
-	const { t } = useTranslation(["photos", "drive"])
+	const { t, i18n } = useTranslation(["photos", "drive"])
 	const { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const driveRoot = useAccountQuery().data?.rootDirUuid
@@ -126,7 +126,10 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 		step.kind === "replace"
 			? t("photosChooserReplaceBody", {
 					name: pickName,
-					names: step.replace.map(uuid => roots.find(root => root.uuid === uuid)?.name ?? "").join(", ")
+					// A list in the locale's words ("A and B", "A und B").
+					names: new Intl.ListFormat(i18n.language, { type: "conjunction" }).format(
+						step.replace.map(uuid => roots.find(root => root.uuid === uuid)?.name ?? "")
+					)
 				})
 			: step.kind === "blocked"
 				? blockedMessage(step.reason)
@@ -168,22 +171,25 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 				) : null}
 				<PickerListShell
 					listingQuery={listingQuery}
-					isEmpty={filteredDirectories.length === 0}
 					noResults={filter.trim().length > 0}
-				>
-					{filteredDirectories.map(directory => (
-						<PickerDirectoryRow
-							key={directory.data.uuid}
-							directory={directory}
-							disabled={directory.data.undecryptable || busy}
-							hint={isRootRow(directory.data.uuid, roots) ? t("photosChooserAlreadyRoot") : undefined}
-							onDescend={uuid => {
-								setStep(BROWSE)
-								descend(uuid)
-							}}
-						/>
-					))}
-				</PickerListShell>
+					count={filteredDirectories.length}
+					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
+					renderRow={index => {
+						const directory = filteredDirectories[index]
+
+						return directory === undefined ? null : (
+							<PickerDirectoryRow
+								directory={directory}
+								disabled={directory.data.undecryptable || busy}
+								hint={isRootRow(directory.data.uuid, roots) ? t("photosChooserAlreadyRoot") : undefined}
+								onDescend={uuid => {
+									setStep(BROWSE)
+									descend(uuid)
+								}}
+							/>
+						)
+					}}
+				/>
 				{warning === null ? null : (
 					<div
 						role="alert"

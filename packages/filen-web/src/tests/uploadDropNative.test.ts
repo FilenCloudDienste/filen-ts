@@ -26,8 +26,10 @@ function drop(): { dataTransfer: DataTransfer; file: File } {
 	return { dataTransfer, file }
 }
 
+// clearMocks keeps a value a test armed on a vi.fn, so each test starts from the desktop default.
 beforeEach(() => {
 	vi.clearAllMocks()
+	available.mockReturnValue(true)
 })
 
 describe("uploadDroppedFiles", () => {
@@ -46,6 +48,22 @@ describe("uploadDroppedFiles", () => {
 		uploadDroppedFiles(drop().dataTransfer, "parent")
 
 		expect(startDirectoryUpload).toHaveBeenCalledWith({ kind: "entries", entries: [directory] }, "parent")
+		expect(startNativeDrop).not.toHaveBeenCalled()
+	})
+
+	it("in a browser uploads plain dropped files as picked, skipping items that are no entry", () => {
+		available.mockReturnValue(false)
+
+		const file = new File([], "a.txt")
+		const dataTransfer = {
+			items: [{ webkitGetAsEntry: () => ({ name: "a.txt", isDirectory: false, isFile: true }) }, { webkitGetAsEntry: () => null }],
+			files: [file]
+		} as unknown as DataTransfer
+
+		uploadDroppedFiles(dataTransfer, "parent")
+
+		expect(startUploads).toHaveBeenCalledWith([file], "parent")
+		expect(startDirectoryUpload).not.toHaveBeenCalled()
 		expect(startNativeDrop).not.toHaveBeenCalled()
 	})
 })

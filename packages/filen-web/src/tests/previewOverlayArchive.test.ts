@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -77,7 +77,9 @@ describe("PreviewOverlay — archive", () => {
 		render(overlay(named("photos.zip")))
 		await screen.findByTestId("archive")
 
-		usePreviewUnsavedGuardStore.setState({ dirty: true })
+		act(() => {
+			usePreviewUnsavedGuardStore.setState({ dirty: true })
+		})
 
 		expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
 	})

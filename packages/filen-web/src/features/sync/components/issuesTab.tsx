@@ -19,7 +19,7 @@ import { SettingsBlock, SettingsGroup } from "@/features/settings/components/set
 import { type PagedEntries, usePagedEntries } from "@/features/sync/hooks/usePagedEntries"
 import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
-import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
+import { runSyncAction } from "@/features/sync/lib/syncActions"
 import {
 	bulkResolutions,
 	canRestoreHeld,
@@ -34,7 +34,7 @@ import {
 	SCAN_GAP_KEY
 } from "@/features/sync/lib/syncStatus.logic"
 import { EntryRow } from "@/features/desktop/components/entryRow"
-import { ActionEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
+import { ActionEntry, PagedFooter, SyncReadError, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
 import { PlannedEntries } from "@/features/sync/components/plannedEntries"
 import { SkippedSymlinksSection } from "@/features/sync/components/skippedSymlinksSection"
 
@@ -371,18 +371,16 @@ function HeldSection({ pairId, count, paused }: { pairId: string; count: number;
 		<>
 			<SettingsGroup title={t("heldTitle")}>
 				{held === undefined ? (
-					<SettingsBlock className="flex justify-center">
-						{read.error === null ? (
+					read.error === null ? (
+						<SettingsBlock className="flex justify-center">
 							<Spinner className="size-5 text-muted-foreground" />
-						) : (
-							<p
-								role="alert"
-								className="text-sm text-destructive"
-							>
-								{syncErrorLabel(read.error)}
-							</p>
-						)}
-					</SettingsBlock>
+						</SettingsBlock>
+					) : (
+						<SyncReadError
+							error={read.error}
+							onRetry={read.reload}
+						/>
+					)
 				) : (
 					<HeldList held={held} />
 				)}

@@ -113,6 +113,13 @@ export function TransfersScreen() {
 	// synchronous/fire-and-forget (control.ts), so there is nothing to await — `pending` stays a
 	// constant false, unlike a real async confirm flow.
 	const [cancelAllConfirmOpen, setCancelAllConfirmOpen] = useState(false)
+
+	// Cleared during render once nothing is left to cancel: the dialog closes as the last transfer settles, and
+	// the next transfer to start does not reopen it.
+	if (cancelAllConfirmOpen && cancellable.length === 0) {
+		setCancelAllConfirmOpen(false)
+	}
+
 	// Single-row cancel — a stable id, not a per-row boolean: this screen owns the confirm (rather than
 	// each TransferRow owning its own), because buildTransfersDisplayList moves a row whose state changes,
 	// across sections too — a row settling mid-confirm unmounts in one section and remounts in the
@@ -283,7 +290,7 @@ export function TransfersScreen() {
 				)}
 			</div>
 			<ConfirmDialog
-				open={cancelAllConfirmOpen}
+				open={cancelAllConfirmOpen && cancellable.length > 0}
 				pending={false}
 				title={t("transfersScreenCancelAllConfirmTitle")}
 				body={withHint(

@@ -100,25 +100,40 @@ export function exportMimeType(filename: string): string {
 // name -> deduplicated name, suffixing " (2)", " (3)", ... BEFORE the extension on every repeat past
 // the first (Finder/Explorer's own convention) — used by exportAllNotes so two notes that faithfully
 // export to the identical file name (same sanitized title + type) don't silently clobber each other
-// inside the zip. Order-preserving and pure: same input array always yields the same output array.
-// Does not defend against a name that ALREADY looks like a suffixed collision (a real note titled
-// "Foo (2)" sitting next to two "Foo" notes) — an accepted, documented simplification of the same
-// convention every OS file manager takes.
+// inside the zip. Every EMITTED name is reserved under its NFC + lower-cased key, and every name (first
+// occurrences included) is checked against it: a generated "Foo (2)" never collides with a real note
+// titled "Foo (2)", and "Todo" / "todo" stay apart after extraction on case-insensitive file systems.
+// Order-preserving and pure: same input array always yields the same output array.
 export function dedupeExportNames(names: readonly string[]): string[] {
-	const seen = new Map<string, number>()
+	const emitted = new Set<string>()
+	// Next suffix to try per original key, so a long run of one name stays linear.
+	const nextSuffix = new Map<string, number>()
 
 	return names.map(name => {
-		const count = seen.get(name) ?? 0
-		seen.set(name, count + 1)
+		const key = name.normalize("NFC").toLowerCase()
 
-		if (count === 0) {
+		if (!emitted.has(key)) {
+			emitted.add(key)
+
 			return name
 		}
 
 		const dot = extensionStart(name)
 		const base = dot === -1 ? name : name.slice(0, dot)
 		const ext = dot === -1 ? "" : name.slice(dot)
+		let suffix = nextSuffix.get(key) ?? 2
+		let candidate = `${base} (${String(suffix)})${ext}`
+		let candidateKey = candidate.normalize("NFC").toLowerCase()
 
-		return `${base} (${String(count + 1)})${ext}`
+		while (emitted.has(candidateKey)) {
+			suffix += 1
+			candidate = `${base} (${String(suffix)})${ext}`
+			candidateKey = candidate.normalize("NFC").toLowerCase()
+		}
+
+		nextSuffix.set(key, suffix + 1)
+		emitted.add(candidateKey)
+
+		return candidate
 	})
 }

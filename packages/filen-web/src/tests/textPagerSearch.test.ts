@@ -90,6 +90,47 @@ describe("textPager search", () => {
 		expect(reads).toEqual([SCAN_BYTES, SCAN_BYTES, 100])
 	})
 
+	// The first stretch's text ends before the cut character, so the walker reads it from the kept bytes into the next.
+	it.each([
+		["a 3-byte character", [0xe2, 0x82, 0xac], 1, 1],
+		["a 4-byte character", [0xf0, 0x9f, 0x98, 0x80], 2, 1],
+		["a truncated 3-byte sequence", [0xe2, 0x82, 0x41], 1, 1],
+		["a truncated 4-byte sequence", [0xf0, 0x9f, 0x98, 0x0a], 3, 2],
+		["a sequence broken by an out-of-range byte", [0xe0, 0x80, 0x80], 1, 1]
+	] as const)("keeps UTF-8 offsets exact past %s cut by a stretch's end", async (_, char, cut, line) => {
+		const at = SCAN_BYTES - cut
+		const bytes = new Uint8Array(2 * SCAN_BYTES).fill(0x61)
+
+		bytes.set(char, at)
+		bytes.set(utf8("needle"), at + char.length + 1)
+		bytes.set(utf8("needle"), SCAN_BYTES + 2000)
+
+		const { matches } = await search(bytes, "needle")
+
+		expect(all(matches)).toEqual([
+			{ offset: at + char.length + 1, line },
+			{ offset: SCAN_BYTES + 2000, line }
+		])
+	})
+
+	it.each(["utf-32le", "utf-32be"])("keeps %s offsets exact past characters outside the Basic Multilingual Plane", async label => {
+		const text = "😀x\n😀 key 😀key"
+		const points = Array.from(text, char => char.codePointAt(0) ?? 0)
+		const bytes = new Uint8Array(4 + points.length * 4)
+		const view = new DataView(bytes.buffer)
+		const littleEndian = label === "utf-32le"
+
+		view.setUint32(0, 0xfeff, littleEndian)
+		points.forEach((point, index) => {
+			view.setUint32(4 + index * 4, point, littleEndian)
+		})
+
+		const { matches } = await search(bytes, "key", { label })
+		const keys = points.flatMap((point, index) => (point === 0x6b ? [4 + index * 4] : []))
+
+		expect(all(matches)).toEqual(keys.map(offset => ({ offset, line: 2 })))
+	})
+
 	it("finds a match on a line cut by a stretch's end, and counts each break once", async () => {
 		const lines = Array.from({ length: 300_000 }, (_, index) => `line ${String(index)}`)
 		const bytes = utf8(lines.join("\n"))

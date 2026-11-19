@@ -403,7 +403,9 @@ class RowsDraft {
 		return removed
 	}
 
-	// Drops the oldest finished rows past the cap (capFinishedTransfers' rule); returns their ids.
+	// Drops the oldest finished rows once their count exceeds MAX_FINISHED_TRANSFERS and returns their ids. Active
+	// rows are never dropped. Rows are insertion-ordered (append() adds at the end), so position is start order: the
+	// first `excess` finished rows met walking forward are the oldest.
 	capFinished(): string[] {
 		const finished = this.rows.length - (this.copy?.index ?? transfersIndexOf(this.source)).activeCount
 		const excess = finished - MAX_FINISHED_TRANSFERS
@@ -463,40 +465,9 @@ export function hasActiveDriveJobs(transfers: readonly Transfer[]): boolean {
 	return transfersIndexOf(transfers).activeJobs > 0
 }
 
-// Drop the OLDEST finished (non-active) rows once the finished count exceeds the cap — active rows
-// are never dropped. `transfers` is insertion-ordered (add() appends), so array position already IS
-// startedAt order; this walks forward and only skips (drops) the first `excess` finished rows it
-// meets, keeping every later one — mirrors mobile's MAX_FINISHED_TRANSFERS.
+// Finished (non-active) rows kept in history; capFinished drops the oldest past it. Mirrors mobile's
+// MAX_FINISHED_TRANSFERS.
 const MAX_FINISHED_TRANSFERS = 200
-
-export function capFinishedTransfers(transfers: Transfer[]): Transfer[] {
-	let finishedCount = 0
-
-	for (const transfer of transfers) {
-		if (!isActiveTransfer(transfer.status)) {
-			finishedCount++
-		}
-	}
-
-	let toDrop = finishedCount - MAX_FINISHED_TRANSFERS
-
-	if (toDrop <= 0) {
-		return transfers
-	}
-
-	const kept: Transfer[] = []
-
-	for (const transfer of transfers) {
-		if (toDrop > 0 && !isActiveTransfer(transfer.status)) {
-			toDrop--
-			continue
-		}
-
-		kept.push(transfer)
-	}
-
-	return kept
-}
 
 // One (timestamp, totalBytes) sample — the raw material for the rolling-window speed below. For the
 // aggregate, totalBytes counts every byte moved since the window last emptied, never the live sum over

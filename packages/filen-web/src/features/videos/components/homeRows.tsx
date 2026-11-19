@@ -331,7 +331,7 @@ function useHomeRows(roots: readonly VideoLibraryRootView[]) {
 	// long task.
 	const data = useDeferredValue(query.data)
 
-	return { rows: data?.rows ?? NO_ROWS, hero: data?.hero ?? null, ready: data !== undefined, now }
+	return { rows: data?.rows ?? NO_ROWS, hero: data?.hero ?? null, ready: data !== undefined }
 }
 
 // The cursor and a focus handler that stays the same function across cursor moves, so the cards it is passed to
@@ -350,7 +350,7 @@ function useRowCursor() {
 // the cursor stays mounted. The page's and each row's scroll position come back with Back.
 export function VideosHomeRows({ roots, scrollElement }: { roots: readonly VideoLibraryRootView[]; scrollElement: HTMLElement | null }) {
 	const { t } = useTranslation("videos")
-	const { rows, hero, ready: rowsReady, now } = useHomeRows(roots)
+	const { rows, hero, ready: rowsReady } = useHomeRows(roots)
 	const names = useVideoRootNames(roots)
 	const onAction = useVideoCardActions()
 	const combos = useBindings()
@@ -471,7 +471,6 @@ export function VideosHomeRows({ roots, scrollElement }: { roots: readonly Video
 				<div className="px-4 pb-3">
 					<HomeHero
 						hero={hero}
-						now={now}
 						onShown={rememberHero}
 					/>
 				</div>

@@ -28,7 +28,7 @@ export function splatToUuids(splat: string): string[] {
 	return splat === "" ? [] : splat.split("/")
 }
 
-// Files never navigate here — opening one is a preview, a later concern.
+// Files never navigate here: opening one is a preview.
 //
 // The target route is driveRouteIdFor(variant): the two shared variants descend into their own
 // splat routes (a nested share stays under "/shared-in/$" / "/shared-out/$"), everything else funnels

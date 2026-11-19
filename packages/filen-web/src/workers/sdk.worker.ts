@@ -19,7 +19,6 @@ import init, {
 	type ArchiveFormat,
 	type ArchiveLevels,
 	type EntryDownloadPhase,
-	type EntryDownloadReport,
 	type CompressFormat,
 	type EntryNameErrorKindJS,
 	type CopyEntry,
@@ -89,13 +88,12 @@ import init, {
 	type LockId
 } from "@filen/sdk-rs"
 import { InFlight, isUuid, nameCollisionKey, run, runEffect, runTimeout } from "@filen/shared"
-import { asErrorDTO, ErrorWithDTO, toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
+import { asErrorDTO, toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import {
 	compressReportToDTO,
 	copyReportToDTO,
 	copyUpdateToDTO,
 	extractReportToDTO,
-	liftError,
 	listReportToDTO,
 	type CompressReportDTO,
 	type CopyReportDTO,
@@ -147,7 +145,7 @@ import {
 	type SearchSnapshotDTO
 } from "@/workers/searchEngine"
 import { createListBatcher } from "@/workers/archiveListPacker"
-import { createArchiveReaders, readerClosed } from "@/workers/archiveReaders"
+import { createArchiveReaders, readerClosed, settleEntryReport } from "@/workers/archiveReaders"
 import { readAheadBudget, type EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import { readAudioMetadata as parseAudioMetadata, type AudioMetadataDeps, type AudioMetadataResult } from "@/workers/audioMetadata"
@@ -471,17 +469,6 @@ export interface EntryJobParams {
 export interface EntryProgress {
 	phase: EntryDownloadPhase
 	bytesWritten: number
-}
-
-// The SDK resolves with its report however the download ended, the writer aborted on an early end: a
-// failed one rejects here, so neither a picked file nor a buffer is taken for the whole entry. An entry
-// without a CRC passes, answering `checked` false: whatever password it took is proven by nothing.
-function settleEntryReport(report: EntryDownloadReport): boolean {
-	if (report.error !== undefined) {
-		throw new ErrorWithDTO(liftError(report.error))
-	}
-
-	return report.checked
 }
 
 export interface ArchiveFormatInfo {
@@ -1780,7 +1767,7 @@ const api = {
 	// Same cache-first parent resolve as every create/move op; a missing parent throws (caught by the
 	// Comlink.expose proxy below, surfaced to the caller as a read-only outcome — mobile parity).
 	// Files are never cached in features/drive/lib/cache.ts (directories only — see deleteFilePermanently
-	// above), so there is nothing to evict on the old, now-stale uuid the backend rotates in.
+	// below), so there is nothing to evict on the old, now-stale uuid the backend rotates in.
 	// `options` bounds a background save: `deadlineMs` aborts it once that long has passed (the SDK's own lock
 	// wait is otherwise days), and `abortToken` registers it so cancelPreviewDownload(token) aborts it. Its times are
 	// the new file's (`noExifOverride`: the file's own Exif dates do not replace them).
@@ -2410,8 +2397,7 @@ const api = {
 	// re-resolve. That shape is a structural superset of the plain Dir/File these ops declare, so it
 	// passes through with no adapter (see driveItem.test.ts's assignability check); the wasm
 	// serde layer has no deny_unknown_fields, so the extra own fields cross the boundary as harmless
-	// JSON. A live authed call confirming this at runtime has not been run in this environment (no
-	// login available) — flagged for QA.
+	// JSON.
 	async renameDirectory(dir: Dir, name: string): Promise<Dir> {
 		const c = requireClient()
 		const renamed = await c.updateDirMetadata(dir, { name })
@@ -2570,7 +2556,7 @@ const api = {
 	// UnauthClient) — NONE touch requireClient, so a logged-out tab reaches them. Chat embeds resolve
 	// pasted links through the same two metadata lookups. `password` is passed through for a protected
 	// file link (the dir side verifies a password by re-listing with the password set on its own
-	// DirPublicLink — a later step's concern).
+	// DirPublicLink).
 	getLinkedFileAnon(linkUuid: string, fileKey: string, password?: string): Promise<LinkedFile> {
 		return withLinkedUnauth(unauth => unauth.getLinkedFile(linkUuid, fileKey, password ?? null))
 	},
@@ -2952,7 +2938,7 @@ const api = {
 		return { dirs: result.dirs, files: result.files, role: context.role }
 	},
 	// Stops sharing a shared-root item (a directory shared out, or an item shared in the caller wants
-	// gone). The caller-side arg shape is a later concern; this only exposes the op.
+	// gone).
 	removeSharedItem(item: SharedRootItem): Promise<void> {
 		return requireClient().removeSharedItem(item)
 	},

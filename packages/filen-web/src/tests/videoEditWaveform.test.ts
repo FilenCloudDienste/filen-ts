@@ -1,8 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { BufferTarget, EncodedAudioPacketSource, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from "mediabunny"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import { BlockCache } from "@/lib/media/blockCache"
 import { WaveformTap } from "@/features/preview/videoEdit/worker/waveform"
-import { fragmentedMp4 } from "@/tests/support/fragmentedMp4"
+import { AVC_PRIVATE, FPS, GOP_FRAMES, fragmentedMp4, videoPacket } from "@/tests/support/fragmentedMp4"
 
 // The waveform tap over a real demuxer (mediabunny reading an MP4 written by mediabunny, audio packets filled with a
 // byte that names them) and a stand-in AudioDecoder whose samples are that byte / 255: peaks appear only for audio
@@ -96,22 +97,22 @@ interface Harness {
 	requests: [number, number][]
 }
 
-function harness(): Harness {
+function harness(file = bytes): Harness {
 	const requests: [number, number][] = []
 	let tap: WaveformTap | null = null
 	const cache = new BlockCache(
-		bytes.length,
+		file.length,
 		(start, end) => {
 			requests.push([start, end])
 
-			return Promise.resolve(bytes.slice(start, end))
+			return Promise.resolve(file.slice(start, end))
 		},
 		{ capacity: 64, readAhead: 0, maxRunBlocks: 1, onBlock: index => tap?.onBlock(index) }
 	)
 
 	tap = new WaveformTap({
 		cache,
-		size: bytes.length,
+		size: file.length,
 		duration: SECONDS,
 		createDecoder: init => new FakeAudioDecoder(init) as unknown as AudioDecoder,
 		isConfigSupported: () => Promise.resolve(true),
@@ -138,6 +139,83 @@ function knownBuckets(tap: WaveformTap): number[] {
 	}
 
 	return known
+}
+
+// An ordinary MP4 (moov first) of SECONDS whose first video packet carries `lead` extra bytes, which moves every
+// later packet by that much.
+async function shiftedMp4(lead: number): Promise<Uint8Array> {
+	const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() })
+	const video = new EncodedVideoPacketSource("avc")
+	const audio = new EncodedAudioPacketSource("aac")
+
+	output.addVideoTrack(video, { frameRate: FPS })
+	output.addAudioTrack(audio)
+	await output.start()
+
+	let audioPacket = 0
+
+	for (let frame = 0; frame < SECONDS * FPS; frame++) {
+		const time = frame / FPS
+
+		await video.add(
+			new EncodedPacket(
+				videoPacket(frame, frame === 0 ? 20_000 + lead : 20_000),
+				frame % GOP_FRAMES === 0 ? "key" : "delta",
+				time,
+				1 / FPS
+			),
+			frame === 0
+				? { decoderConfig: { codec: "avc1.64001f", codedWidth: 1280, codedHeight: 720, description: AVC_PRIVATE } }
+				: undefined
+		)
+
+		while (audioPacket * PACKET_SECONDS < time + 1 / FPS) {
+			await audio.add(
+				new EncodedPacket(new Uint8Array(64).fill(fill(audioPacket)), "key", audioPacket * PACKET_SECONDS, PACKET_SECONDS),
+				audioPacket === 0
+					? {
+							decoderConfig: {
+								codec: "mp4a.40.2",
+								numberOfChannels: 2,
+								sampleRate: 48_000,
+								description: Uint8Array.from([0x11, 0x90])
+							}
+						}
+					: undefined
+			)
+			audioPacket++
+		}
+	}
+
+	await output.finalize()
+
+	if (output.target.buffer === null) {
+		throw new Error("no output")
+	}
+
+	return new Uint8Array(output.target.buffer)
+}
+
+// Where each audio packet starts: the runs of exactly 64 equal bytes (video packets are far longer).
+function audioOffsets(file: Uint8Array): number[] {
+	const offsets: number[] = []
+	let i = 0
+
+	while (i < file.length) {
+		let j = i + 1
+
+		while (j < file.length && file[j] === file[i]) {
+			j++
+		}
+
+		if (j - i === 64) {
+			offsets.push(i)
+		}
+
+		i = j
+	}
+
+	return offsets
 }
 
 describe("WaveformTap", () => {
@@ -219,6 +297,42 @@ describe("WaveformTap", () => {
 		expect(last?.some(value => Number.isNaN(value))).toBe(true)
 
 		tap.unsubscribe(1)
+		tap.close()
+	})
+
+	it("re-probes a bucket whose read straddles a resident and an absent block once the absent one lands", async () => {
+		const probe = harness()
+		const grid = probe.tap.bucketGrid
+
+		probe.tap.close()
+
+		// The bucket whose probe packet starts last before the first block boundary, shifted to straddle it.
+		const plain = audioOffsets(await shiftedMp4(0))
+		const packetOf = (bucket: number): number => Math.floor(grid.timeOf(bucket) / PACKET_SECONDS)
+		let bucket = 0
+
+		while ((plain[packetOf(bucket + 1)] ?? Infinity) < BLOCK_BYTES - 32) {
+			bucket++
+		}
+
+		const packet = packetOf(bucket)
+		const file = await shiftedMp4(BLOCK_BYTES - 32 - (plain[packet] ?? 0))
+
+		expect(audioOffsets(file)[packet]).toBe(BLOCK_BYTES - 32)
+
+		const { cache, tap } = harness(file)
+
+		await cache.read(0, 64)
+		tap.start()
+		await settle()
+
+		expect(Number.isNaN(tap.bucketGrid.peakOf(bucket))).toBe(true)
+		expect(tap.bucketGrid.offsetOf(bucket)).toBe(BLOCK_BYTES)
+
+		await cache.read(BLOCK_BYTES, BLOCK_BYTES + 10)
+		await settle()
+
+		expect(tap.bucketGrid.peakOf(bucket)).toBeCloseTo(Math.max(fill(packet), fill(packet + 1)) / 255, 6)
 		tap.close()
 	})
 

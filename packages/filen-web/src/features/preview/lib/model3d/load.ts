@@ -124,8 +124,17 @@ async function unpack(bytes: Uint8Array): Promise<Record<string, Uint8Array>> {
 export function mtlLibraries(obj: string): string[] {
 	const names: string[] = []
 
-	for (const match of obj.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)) {
-		const line = match[1] ?? ""
+	// The rest of the line in one linear step, its trailing blanks trimmed by hand: a lazy capture before a blank run
+	// backtracks quadratically on a long run of blanks.
+	for (const match of obj.matchAll(/^[ \t]*mtllib[ \t]+([^\r\n\u2028\u2029]*)$/gm)) {
+		const rest = match[1] ?? ""
+		let end = rest.length
+
+		while (end > 0 && (rest.charCodeAt(end - 1) === 0x20 || rest.charCodeAt(end - 1) === 0x09)) end--
+
+		if (end === 0) continue
+
+		const line = rest.slice(0, end)
 		const words = line.split(/[ \t]+/)
 		const listed = words.length > 1 && words.every(word => word.toLowerCase().endsWith(".mtl")) ? words : [line]
 

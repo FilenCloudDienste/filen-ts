@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
 	EMPTY_SELECTION,
-	clearSelection,
 	isSelectable,
 	isSelected,
 	rowCheck,
@@ -190,9 +189,5 @@ describe("archive selection", () => {
 
 		expect(isSelected(store, selection, 1)).toBe(true)
 		expect(selectionTotals(store, selection)).toEqual({ files: 2, bytes: 17, entries: 2 })
-	})
-
-	it("clears", () => {
-		expect(clearSelection()).toBe(EMPTY_SELECTION)
 	})
 })

@@ -98,6 +98,12 @@ function sameKeepTracks(a: VideoEditRecipe["audio"]["keepTracks"], b: VideoEditR
 	return a.length === b.length && a.every((track, index) => track === b[index])
 }
 
+// Whether a recipe has a text box that draws. A box whose text was cleared stays in the recipe (the user may be
+// retyping) but draws nothing (gl/textRaster rasterizeText), so it changes no pixel and needs no pass.
+export function hasVisibleText(recipe: Pick<VideoEditRecipe, "text">): boolean {
+	return recipe.text.some(overlay => overlay.text.trim() !== "")
+}
+
 // Whether `recipe` changes anything at all (what makes the editor dirty). `precise` and the output settings change
 // nothing on their own: a save of an otherwise untouched recipe would only re-encode the same picture.
 export function isIdentityVideoRecipe(recipe: VideoEditRecipe, duration: number): boolean {
@@ -118,7 +124,7 @@ export function isIdentityVideoRecipe(recipe: VideoEditRecipe, duration: number)
 		recipe.speed === 1 &&
 		VIDEO_ADJUSTMENT_KEYS.every(key => recipe.adjust[key] === 0) &&
 		recipe.filter === null &&
-		recipe.text.length === 0 &&
+		!hasVisibleText(recipe) &&
 		!recipe.removeLocation
 	)
 }

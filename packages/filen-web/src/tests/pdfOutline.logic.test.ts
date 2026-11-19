@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { PdfOutlineItem } from "@filen/office/dom/pdf"
 import {
 	currentSection,
 	hasChildren,
 	outlineKeyMove,
 	outlineKeyTarget,
+	outlinePositions,
 	OUTLINE_RESOLVE_MARGIN,
 	parentOf,
 	rowsToResolve,
@@ -75,5 +76,48 @@ describe("the outline pane's tree", () => {
 		expect(outlineKeyTarget({ ...base, editing: true })).toBe("rail")
 		expect(outlineKeyTarget({ ...base, editing: true, railShows: false })).toBe("none")
 		expect(outlineKeyTarget({ ...base, hasOutline: false })).toBe("none")
+	})
+})
+
+describe("the outline's sibling positions", () => {
+	it("states each item's place among its siblings", () => {
+		expect(outlinePositions(OUTLINE)).toEqual([
+			{ posInSet: 1, setSize: 3 },
+			{ posInSet: 2, setSize: 3 },
+			{ posInSet: 1, setSize: 2 },
+			{ posInSet: 2, setSize: 2 },
+			{ posInSet: 1, setSize: 1 },
+			{ posInSet: 3, setSize: 3 }
+		])
+		// A sibling after a deeper subtree is counted under its own parent, not the subtree's.
+		expect(outlinePositions([item("A", 0), item("A1", 1), item("A1a", 2), item("A2", 1), item("B", 0)])).toEqual([
+			{ posInSet: 1, setSize: 2 },
+			{ posInSet: 1, setSize: 2 },
+			{ posInSet: 1, setSize: 1 },
+			{ posInSet: 2, setSize: 2 },
+			{ posInSet: 2, setSize: 2 }
+		])
+		expect(outlinePositions([])).toEqual([])
+	})
+
+	it("is linear in a large flat outline: no sibling search per item", () => {
+		const flat = Array.from({ length: 20_000 }, (_, index) => item(String(index), 0))
+		const searches = [
+			vi.spyOn(Array.prototype, "indexOf"),
+			vi.spyOn(Array.prototype, "lastIndexOf"),
+			vi.spyOn(Array.prototype, "findIndex"),
+			vi.spyOn(Array.prototype, "includes")
+		]
+
+		try {
+			const positions = outlinePositions(flat)
+			const calls = searches.reduce((total, spy) => total + spy.mock.calls.length, 0)
+
+			expect(calls).toBe(0)
+			expect(positions[0]).toEqual({ posInSet: 1, setSize: 20_000 })
+			expect(positions[19_999]).toEqual({ posInSet: 20_000, setSize: 20_000 })
+		} finally {
+			for (const spy of searches) spy.mockRestore()
+		}
 	})
 })

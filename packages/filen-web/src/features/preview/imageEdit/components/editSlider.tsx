@@ -8,7 +8,8 @@ function percentOf(value: number, min: number, max: number): number {
 }
 
 // One labelled editing slider: its name, its value in a pill (marked once it moved off `neutral`), and a fill from
-// `neutral` to the thumb, so a slider centred on 0 fills outwards from the middle. A double click puts it back to
+// `neutral` to the thumb, so a slider centred on 0 fills outwards from the middle; a `neutral` inside the range is
+// marked on the track. A double click puts it back to
 // `neutral`. Arrow keys nudge by a step and Shift+Arrow by ten (the slider's own keys); the editor coalesces a drag
 // or a run of nudges into one undo step.
 export function EditSlider(props: {
@@ -18,7 +19,7 @@ export function EditSlider(props: {
 	max: number
 	step: number
 	neutral: number
-	// The value as read out and shown; the number itself (signed when the slider is centred) when absent.
+	// The value as read out and shown; the number itself (signed when the slider runs either side of 0) when absent.
 	format?: ((value: number) => string) | undefined
 	// A scale of ticks under the track every `step`, taller every `major`, for a slider read against its centre.
 	scale?: { step: number; major: number } | undefined
@@ -30,8 +31,9 @@ export function EditSlider(props: {
 	const id = useId()
 	const rounded = Math.round(props.value)
 	const spoken = props.format === undefined ? String(rounded) : props.format(props.value)
-	const centred = props.min < props.neutral
-	const shown = props.format === undefined && centred && rounded > 0 ? `+${String(rounded)}` : spoken
+	const signed = props.min < 0 && props.neutral === 0
+	const shown = props.format === undefined && signed && rounded > 0 ? `+${String(rounded)}` : spoken
+	const marked = props.min < props.neutral && props.neutral < props.max
 	const modified = props.value !== props.neutral
 	const at = percentOf(props.value, props.min, props.max)
 	const origin = percentOf(props.neutral, props.min, props.max)
@@ -74,11 +76,15 @@ export function EditSlider(props: {
 					aria-hidden="true"
 					className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-input"
 				>
-					{centred ? (
-						<span className="absolute top-1/2 left-1/2 h-2.5 w-px -translate-1/2 rounded-full bg-muted-foreground" />
-					) : null}
 					{/* The thumb's centre travels between half a thumb in from either end. */}
 					<div className="absolute inset-x-2 inset-y-0">
+						{marked ? (
+							<span
+								data-slot="edit-slider-neutral"
+								className="absolute top-1/2 h-2.5 w-px -translate-1/2 rounded-full bg-muted-foreground"
+								style={{ left: `${String(origin)}%` }}
+							/>
+						) : null}
 						<div
 							className="absolute inset-y-0 rounded-full bg-edit-modified"
 							style={{ left: `${String(Math.min(at, origin))}%`, width: `${String(Math.abs(at - origin))}%` }}

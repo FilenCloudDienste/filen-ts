@@ -97,7 +97,8 @@ function CueRows({ cues, matches }: { cues: SubtitleCues; matches: Int32Array | 
 			<div
 				ref={setScrollElement}
 				role="rowgroup"
-				className="min-h-0 flex-1 overflow-y-auto"
+				tabIndex={0}
+				className="min-h-0 flex-1 overflow-y-auto focus-ring-row outline-none focus-visible:ring-inset"
 			>
 				<div
 					className="relative w-full"

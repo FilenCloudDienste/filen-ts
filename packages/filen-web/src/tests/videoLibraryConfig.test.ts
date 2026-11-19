@@ -427,6 +427,43 @@ describe("library config", () => {
 		expect(videosListings()).toBe(before + 3)
 	})
 
+	it("a read that fails leaves the configuration marked for a read", async () => {
+		await ensureLibraryConfig(eventId)
+
+		// Another device saves; this tab's next read fails once.
+		echo(put(encode(rooted(emptyLibraryConfig(), "theirs", 1, "z"))))
+		sdkApi.listDirectory.mockRejectedValueOnce(new Error("offline"))
+
+		await expect(ensureLibraryConfig(eventId)).rejects.toThrow()
+		expect(libraryConfigNeedsRead()).toBe(true)
+
+		const state = await ensureLibraryConfig(eventId)
+
+		expect(activeLibraryRoots(state.doc).map(root => root.dirUuid)).toEqual(["theirs"])
+	})
+
+	it("a repair whose upload fails is not marked current, nor persisted as current", async () => {
+		await ensureLibraryConfig(eventId)
+		await updateLibraryConfig((doc, stamp) => rooted(doc, "mine", stamp.t, stamp.d))
+
+		// Another device saved over ours without it; the repair's upload fails.
+		echo(put(encode(rooted(emptyLibraryConfig(), "theirs", 1, "z"))))
+		sdkApi.uploadFileBytes.mockRejectedValueOnce(new Error("offline"))
+
+		await expect(ensureLibraryConfig(eventId)).rejects.toThrow()
+		expect(libraryConfigNeedsRead()).toBe(true)
+
+		persistQuery.mockClear()
+		persistLibraryConfigWatermark()
+
+		expect(persistQuery).not.toHaveBeenCalled()
+
+		const state = await ensureLibraryConfig(eventId)
+
+		expect(activeLibraryRoots(state.doc).map(root => root.dirUuid)).toEqual(["theirs", "mine"])
+		expect(activeLibraryRoots(remoteDoc()).map(root => root.dirUuid)).toEqual(["theirs", "mine"])
+	})
+
 	it("ignores a cached configuration of another account", async () => {
 		queryClient.setQueryData(LIBRARY_CONFIG_QUERY_KEY, {
 			account: hexUuid(),

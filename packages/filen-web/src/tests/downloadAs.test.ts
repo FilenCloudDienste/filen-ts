@@ -160,7 +160,10 @@ function cancelAction(): () => void {
 	return options.action.onClick
 }
 
+// clearMocks keeps what a test armed on a vi.fn (an implementation, a resolved value, a Once queue): reset every mock,
+// then re-arm the defaults.
 beforeEach(() => {
+	vi.resetAllMocks()
 	mocks.save.fsa = false
 	mocks.save.streams = false
 	mocks.joinPreviewBytes.mockResolvedValue(undefined)

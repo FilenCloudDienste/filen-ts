@@ -3,7 +3,6 @@ import {
 	filterNotesBySearch,
 	isNoteUndecryptable,
 	isTagUndecryptable,
-	noteDisplayTitle,
 	noteTitleMatchesSearch,
 	sortAndFilterNotes,
 	sortNotes,
@@ -84,12 +83,7 @@ describe("sortNotes — bucket rules", () => {
 	})
 })
 
-describe("noteDisplayTitle / tagDisplayName", () => {
-	it("falls back to uuid when title is undefined", () => {
-		const uuid = testUuid("fallback")
-		expect(noteDisplayTitle(undecryptableNote({ uuid }))).toBe(uuid)
-	})
-
+describe("tagDisplayName", () => {
 	it("falls back to uuid when tag name is undefined", () => {
 		const uuid = testUuid("fallback")
 		expect(tagDisplayName(tagWithoutName({ uuid }))).toBe(uuid)
@@ -179,11 +173,28 @@ describe("noteTitleMatchesSearch", () => {
 		expect(noteTitleMatchesSearch(note, "zzz")).toBe(false)
 	})
 
-	it("falls back to matching the uuid text for a title-less (undecryptable) note", () => {
-		const uuid = testUuid("titleless-match")
-		const note = undecryptableNote({ uuid })
+	it("never substring-matches the hidden uuid of an undecryptable note", () => {
+		const note = undecryptableNote({ uuid: "a4c1e2f0-0000-4000-8000-000000000000" })
 
-		expect(noteTitleMatchesSearch(note, "titleless-match")).toBe(true)
+		expect(noteTitleMatchesSearch(note, "a")).toBe(false)
+		expect(noteTitleMatchesSearch(note, "4")).toBe(false)
+		expect(noteTitleMatchesSearch(note, "-")).toBe(false)
+		expect(filterNotesBySearch([note], "a")).toEqual([])
+		expect(filterNotesBySearch([note], "-")).toEqual([])
+	})
+
+	it("matches an undecryptable note on its full uuid", () => {
+		const note = undecryptableNote({ uuid: "a4c1e2f0-0000-4000-8000-000000000000" })
+
+		expect(noteTitleMatchesSearch(note, note.uuid)).toBe(true)
+		expect(filterNotesBySearch([note], ` ${note.uuid.toUpperCase()} `)).toEqual([note])
+	})
+
+	it("still matches a titled note by title substring", () => {
+		const note = mockNote({ uuid: testUuid("titled"), title: "A-4 checklist" })
+
+		expect(noteTitleMatchesSearch(note, "a")).toBe(true)
+		expect(noteTitleMatchesSearch(note, "-4")).toBe(true)
 	})
 })
 

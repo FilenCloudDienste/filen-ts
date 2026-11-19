@@ -130,16 +130,15 @@ function readManifest(): { faces: Face[]; pdfFaces: Face[]; signatureFaces: Sign
 	return { faces, pdfFaces, signatureFaces, licences: [...licences] }
 }
 
-export function officeFonts(): Plugin {
+// `emit: false` is the workers' instance: the same virtual modules and URLs, without the dev middleware or the build's
+// verify-and-emit (the page build emits every file once).
+export function officeFonts(options: { readonly emit?: boolean } = {}): Plugin {
 	const { faces, pdfFaces, signatureFaces, licences } = readManifest()
-	// Exactly the manifest's files, so the dev middleware needs no path containment of its own.
-	const served = new Set([...[...faces, ...pdfFaces, ...signatureFaces].map(face => face.file), ...licences])
 	const urlOf = (face: Face) => (build ? `/${hashedPath(face)}` : OFFICE_FONTS_BASE + face.file)
-	const outDir = OFFICE_FONTS_BASE.slice(1)
 	let build = false
 
-	return {
-		name: "filen:office-fonts",
+	const plugin: Plugin = {
+		name: options.emit === false ? "filen:office-fonts-modules" : "filen:office-fonts",
 		configResolved(config) {
 			build = config.command === "build"
 		},
@@ -167,7 +166,17 @@ export function officeFonts(): Plugin {
 			const urls = Object.fromEntries(list.map(face => [face.file, urlOf(face)]))
 
 			return `export const ${id === RESOLVED_ID ? "OFFICE_FONT_URLS" : "OFFICE_PDF_FONT_URLS"} = Object.freeze(${JSON.stringify(urls)})\n`
-		},
+		}
+	}
+
+	if (options.emit === false) return plugin
+
+	// Exactly the manifest's files, so the dev middleware needs no path containment of its own.
+	const served = new Set([...[...faces, ...pdfFaces, ...signatureFaces].map(face => face.file), ...licences])
+	const outDir = OFFICE_FONTS_BASE.slice(1)
+
+	return {
+		...plugin,
 		// The preview serves the build's copies from dist/ instead, under the preview header set.
 		configureServer(server) {
 			server.middlewares.use((req, res, next) => {

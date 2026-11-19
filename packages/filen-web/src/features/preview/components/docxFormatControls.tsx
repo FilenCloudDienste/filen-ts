@@ -29,6 +29,7 @@ import {
 	HIGHLIGHT_SWATCHES,
 	STANDARD_SWATCHES,
 	lengthUnit,
+	lineSpacingAtForRule,
 	paragraphCommands,
 	paragraphForm,
 	single,
@@ -951,7 +952,7 @@ export function DocxParagraphDialog({ values, execute, inputRequest, onInputDone
 						value={form.rule}
 						items={LINE_RULES.map(rule => ({ value: rule.rule, label: t(rule.label) }))}
 						onChange={rule => {
-							set({ rule })
+							set({ rule, at: lineSpacingAtForRule(form.at, form.rule, rule) })
 						}}
 					/>
 					<Field>

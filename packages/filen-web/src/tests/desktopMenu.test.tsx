@@ -43,6 +43,8 @@ function click(action: DesktopMenuAction): void {
 }
 
 describe("desktop menu actions", () => {
+	// Must run first: the module subscribes to the bridge once, on its first handler, and clearMocks wipes that call
+	// for every later test (modules are not reset here, which would split the keymap registry from the hook's).
 	it("subscribes with the first handler and reports the menu actions' combos", () => {
 		renderHook(() => {
 			useMenuAction("app.toggleTheme", vi.fn())

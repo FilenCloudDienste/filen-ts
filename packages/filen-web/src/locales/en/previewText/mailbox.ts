@@ -25,6 +25,8 @@ export const previewTextMailbox = {
 	previewMailboxStop: "Stop",
 	/** Mailbox preview — the message list's accessible name */
 	previewMailboxList: "Messages",
+	/** Mailbox preview — a message row's accessible name while its sender and subject are still being read; {{index}} is its place in the list */
+	previewMailboxRowLoading: "Message {{index}}, loading",
 	/** Mailbox preview — a row's sender or subject when the message has none */
 	previewMailboxNoSender: "(no sender)",
 	previewMailboxNoSubject: "(no subject)",

@@ -63,6 +63,7 @@ import {
 	subtitleChoiceFor,
 	type ItemSubtitleChoice,
 	type PlayerSubtitleTrack,
+	type SmiClasses,
 	type SubtitleChoice
 } from "@/features/videos/lib/player/subtitles.logic"
 import { EpisodesPanel } from "@/features/videos/components/player/episodesPanel"
@@ -190,6 +191,8 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	// remembered language applies.
 	const [choiceState, setChoiceState] = useState<ItemSubtitleChoice>(() => initialSubtitleChoice(search))
 	const [encodings, setEncodings] = useState<ReadonlyMap<string, string | null>>(new Map())
+	// The language classes of the part's SAMI files (by file uuid), each shown as a track of its own.
+	const [smiClasses, setSmiClasses] = useState<ReadonlyMap<string, SmiClasses>>(new Map())
 	const [loadedCues, setLoadedCues] = useState<LoadedCues | null>(null)
 	// The notice over the picture (the subtitle delay, a track the keys switched to, a sidecar that would not load). A new
 	// object per notice, so the same text shown again (a second track of the same name) starts its time over.
@@ -215,6 +218,8 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const trackerRef = useRef<{ key: string; tracker: SkipPromptTracker } | null>(null)
 	const prewarmed = useRef<string | null>(null)
 	const autoplayFired = useRef<string | null>(null)
+	// SAMI files whose classes were asked for (answered or pending).
+	const smiRequested = useRef(new Set<string>())
 	const targetKey = target?.key ?? null
 	const versions = versionCount(detail)
 	const next = detail === null || target === null ? null : adjacentEpisode(detail, target, 1)
@@ -222,7 +227,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const episodes = detail === null ? [] : allEpisodes(detail, target?.versionLabel ?? null)
 	const probe = snap.target?.key === targetKey ? snap.probe : null
 	const part = target?.parts[snap.part] ?? target?.parts[0] ?? null
-	const subtitleTracks = part === null ? [] : subtitleTracksOf(part, probe)
+	const subtitleTracks = part === null ? [] : subtitleTracksOf(part, probe, smiClasses)
 	const seriesPrefs = target?.seriesDirUuid === null || target === null ? undefined : doc.series[seriesKey(target.seriesDirUuid)]
 	const audioLang = probe?.audio[snap.audioIndex]?.lang ?? null
 	const choice = subtitleChoiceFor(choiceState, targetKey)
@@ -238,11 +243,18 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const subtitleUuid = subtitle?.file?.uuid ?? null
 	const encodingPicked = subtitleUuid !== null && encodings.has(subtitleUuid)
 	const encodingChoice = subtitleUuid === null ? null : (encodings.get(subtitleUuid) ?? null)
-	const cuesKey = subtitleUuid === null ? null : `${subtitleUuid}:${encodingChoice ?? ""}`
+	// A SAMI file's first class has no smiClass; a later nameless class has "" and must not share its key.
+	const smiClassKey = subtitle?.smiClass === undefined ? "" : `c:${subtitle.smiClass}`
+	const cuesKey = subtitleUuid === null ? null : `${subtitleUuid}:${smiClassKey}:${encodingChoice ?? ""}`
 	const cues = cuesKey !== null && loadedCues?.key === cuesKey ? loadedCues : null
 	const cuesLoading = cuesKey !== null && cues === null
 	const duration = probe?.durationSec ?? 0
 	const edlRef = part?.edl ?? null
+	// The picture's frame rate times frame-based subtitles and .edl entries; null until probed or when unstated.
+	const probed = probe !== null
+	const fps = probe?.video?.fps ?? null
+	// Only a frame-based (MicroDVD) file is read again when the rate lands; any other file's read is left alone.
+	const subtitleFps = subtitle?.format === "microdvd" ? fps : null
 	const chapterSegments = segmentsFromChapters(
 		(probe?.chapters ?? []).map(chapter => ({ start: chapter.t, end: chapter.end, title: chapter.title, skipType: chapter.skipType })),
 		duration
@@ -502,6 +514,14 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 		}
 	}, [upNextShown, nextKey, nextName])
 
+	// Closing the player lets go of a warm nobody took, also one kept for the item it was advancing to.
+	useEffect(
+		() => () => {
+			cancelPrewarm()
+		},
+		[]
+	)
+
 	// The resume pill goes after 8 s.
 	useEffect(() => {
 		if (snap.resumedAt === null) {
@@ -518,15 +538,15 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 		}
 	}, [snap.resumedAt, snap.epoch])
 
-	// The part's .edl, read once.
+	// The part's .edl, read once its probe has said the frame rate.
 	useEffect(() => {
-		if (edlRef === null) {
+		if (edlRef === null || !probed) {
 			return
 		}
 
 		let live = true
 
-		void reader.edl(edlRef).then(fromEdl => {
+		void reader.edl(edlRef, fps).then(fromEdl => {
 			if (live) {
 				setEdlSegments({ uuid: edlRef.uuid, segments: fromEdl })
 			}
@@ -535,7 +555,34 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 		return () => {
 			live = false
 		}
-	}, [edlRef, reader])
+	}, [edlRef, reader, probed, fps])
+
+	// A SAMI file can hold several languages, one per class: its content is read (once, kept like a chosen file's) for
+	// the menu to list each. Each file is asked once while its answer is pending or held; a failed read is not held, so
+	// the next opening of the part asks again. The reader lives as long as this screen, and its reads stop with it.
+	useEffect(() => {
+		const requested = smiRequested.current
+
+		for (const entry of part?.subtitles ?? []) {
+			const uuid = entry.file.uuid
+
+			if (entry.format !== "smi" || requested.has(uuid)) {
+				continue
+			}
+
+			requested.add(uuid)
+
+			void reader.smiClasses(entry.file, entry.language).then(classes => {
+				if (classes === null) {
+					requested.delete(uuid)
+
+					return
+				}
+
+				setSmiClasses(current => new Map(current).set(uuid, classes))
+			})
+		}
+	}, [part, reader])
 
 	// The chosen subtitle file's cues (one read each, kept for the player's life), in its remembered encoding.
 	useEffect(() => {
@@ -549,7 +596,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 
 		void (async () => {
 			const stored = encodingPicked ? encodingChoice : await readSubtitleEncoding(subtitleUuid)
-			const result = await reader.subtitle(track, stored === null || stored.length === 0 ? null : stored)
+			const result = await reader.subtitle(track, stored === null || stored.length === 0 ? null : stored, subtitleFps)
 
 			if (!run.live) {
 				return
@@ -574,7 +621,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 		return () => {
 			run.live = false
 		}
-	}, [subtitleUuid, cuesKey, encodingChoice, encodingPicked, reader, t])
+	}, [subtitleUuid, cuesKey, encodingChoice, encodingPicked, reader, subtitleFps, t])
 
 	useEffect(() => {
 		if (subtitleNotice === null) {

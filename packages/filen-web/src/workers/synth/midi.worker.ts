@@ -2,7 +2,14 @@
 import { BasicMIDI, BasicSample, SoundBankLoader, SpessaSynthProcessor, SpessaSynthSequencer, type BasicSoundBank } from "spessasynth_core"
 import { MIDI_MAX_EVENTS, midiEventCount, synthCap } from "@filen/shared"
 import { SampleBudget } from "@/workers/synth/sampleBudget"
-import { SYNTH_SOURCE_ERROR, SYNTH_UNSUPPORTED_PREFIX, type SynthRequest, type SynthResponse } from "@/workers/synth/protocol"
+import {
+	SYNTH_SOURCE_ERROR,
+	SynthSourceLost,
+	SynthUnsupported,
+	serveSynth,
+	type SynthRequest,
+	type SynthResponse
+} from "@/workers/synth/protocol"
 
 // MIDI songs rendered by spessasynth with the bundled SoundFont, started by the remux worker for MIDI playback and
 // analysis. The bank is fetched and parsed once per worker and kept across songs; its samples decode lazily under a
@@ -60,21 +67,18 @@ BasicSample.admitDecode = bytes => budget.admit(bytes)
 
 const budget = new SampleBudget(DECODED_SAMPLE_BUDGET, () => [...renderers.values()].map(renderer => renderer.synth))
 
-class Unsupported extends Error {}
-class SourceLost extends Error {}
-
 function loadBank(url: string): Promise<BasicSoundBank> {
 	bankUrl = url
 	bank ??= fetch(url).then(
 		async response => {
 			if (!response.ok) {
-				throw new SourceLost(`the SoundFont answered ${String(response.status)}`)
+				throw new SynthSourceLost(`the SoundFont answered ${String(response.status)}`)
 			}
 
 			return SoundBankLoader.fromArrayBuffer(await response.arrayBuffer())
 		},
 		(error: unknown) => {
-			throw new SourceLost(error instanceof Error ? error.message : String(error))
+			throw new SynthSourceLost(error instanceof Error ? error.message : String(error))
 		}
 	)
 	// A failed fetch is tried again by the next open.
@@ -88,7 +92,7 @@ function loadBank(url: string): Promise<BasicSoundBank> {
 // Parses the song once for every renderer of its key, and answers its length (with the release tail) without one.
 function load(key: string, data: ArrayBuffer): { duration: number } {
 	if (data.byteLength > MIDI_CAP) {
-		throw new Unsupported("larger than the MIDI player reads")
+		throw new SynthUnsupported("larger than the MIDI player reads")
 	}
 
 	const bytes = new Uint8Array(data)
@@ -96,11 +100,11 @@ function load(key: string, data: ArrayBuffer): { duration: number } {
 	const events = midiEventCount(bytes, MIDI_MAX_EVENTS)
 
 	if (events === null) {
-		throw new Unsupported("not a MIDI file this player reads")
+		throw new SynthUnsupported("not a MIDI file this player reads")
 	}
 
 	if (events > MIDI_MAX_EVENTS) {
-		throw new Unsupported(`more than ${String(MIDI_MAX_EVENTS)} events`)
+		throw new SynthUnsupported(`more than ${String(MIDI_MAX_EVENTS)} events`)
 	}
 
 	let midi: BasicMIDI
@@ -108,12 +112,12 @@ function load(key: string, data: ArrayBuffer): { duration: number } {
 	try {
 		midi = BasicMIDI.fromArrayBuffer(data)
 	} catch (error) {
-		throw new Unsupported(error instanceof Error ? error.message : String(error))
+		throw new SynthUnsupported(error instanceof Error ? error.message : String(error))
 	}
 
 	// A header dividing a beat into 0 ticks makes the song endless.
 	if (!Number.isFinite(midi.duration) || midi.duration < 0) {
-		throw new Unsupported("the song has no length")
+		throw new SynthUnsupported("the song has no length")
 	}
 
 	let bank: BasicSoundBank | null = null
@@ -122,7 +126,7 @@ function load(key: string, data: ArrayBuffer): { duration: number } {
 		try {
 			bank = SoundBankLoader.fromArrayBuffer(midi.embeddedSoundBank)
 		} catch (error) {
-			throw new Unsupported(error instanceof Error ? error.message : String(error))
+			throw new SynthUnsupported(error instanceof Error ? error.message : String(error))
 		}
 
 		// Taken here: the sequencer would otherwise parse it again for each renderer.
@@ -138,11 +142,11 @@ async function open(key: string, sampleRate: number): Promise<{ handle: number }
 	const song = songs.get(key)
 
 	if (song === undefined) {
-		throw new SourceLost("the song was unloaded")
+		throw new SynthSourceLost("the song was unloaded")
 	}
 
 	if (bankUrl === null) {
-		throw new SourceLost("no sound bank")
+		throw new SynthSourceLost("no sound bank")
 	}
 
 	const soundBank = await loadBank(bankUrl)
@@ -257,7 +261,7 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 		// libopenmpt's alone.
 		case "init":
 		case "probe":
-			throw new Unsupported(`${request.type} is the module synthesizer's`)
+			throw new SynthUnsupported(`${request.type} is the module synthesizer's`)
 		case "load":
 			return load(request.key, request.data)
 		case "unload":
@@ -282,25 +286,4 @@ async function answer(request: SynthRequest): Promise<Omit<SynthResponse, "id">>
 	}
 }
 
-scope.addEventListener("message", (event: MessageEvent<SynthRequest & { id: number }>) => {
-	const { id } = event.data
-
-	// Taken up now: the remux worker counts the request's deadline from here, not from the time it queued behind others.
-	scope.postMessage({ id, started: true })
-
-	answer(event.data).then(
-		response => {
-			scope.postMessage({ id, ...response }, response.data === undefined ? [] : [response.data])
-		},
-		(error: unknown) => {
-			if (error instanceof Unsupported) {
-				scope.postMessage({ id, error: `${SYNTH_UNSUPPORTED_PREFIX}${error.message}` })
-			} else if (error instanceof SourceLost) {
-				scope.postMessage({ id, error: SYNTH_SOURCE_ERROR })
-			} else {
-				scope.postMessage({ id, fatal: error instanceof Error ? error.message : String(error) })
-				scope.close()
-			}
-		}
-	)
-})
+serveSynth(scope, answer)

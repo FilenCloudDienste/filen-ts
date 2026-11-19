@@ -7,13 +7,19 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 export const SW_PROTOCOL_VERSION = 20
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
-// a typo'd literal.
+// a typo'd literal. The waiting worker activates on it unconditionally: the page first waits for the
+// active worker to report no streams (SW_MSG_ACTIVE_STREAMS).
 export const SW_SKIP_WAITING_MESSAGE = "SKIP_WAITING"
 
 // page → SW: answered on `event.ports[0]` with `{ build: string | null }`, the build the worker was
 // built from. Asked of a worker that is not (yet) the page's controller, which `/__sw/version` cannot
 // reach: the page's own fetches go to its controller.
 export const SW_MSG_BUILD = "FILEN_SW_BUILD"
+
+// page → SW: answered on `event.ports[0]` with `{ active: number }`, the streams the worker is pumping for
+// every tab. Asked of the active worker before the waiting one is told to activate: the count lives in the
+// worker that serves the downloads, and a waiting worker serves none.
+export const SW_MSG_ACTIVE_STREAMS = "FILEN_SW_ACTIVE_STREAMS"
 
 // page → SW: claim the clients in scope that no worker controls. In Firefox a page loads uncontrolled beside an
 // active worker after any reload (seen with this cross-origin isolated app), and a hard reload does everywhere;

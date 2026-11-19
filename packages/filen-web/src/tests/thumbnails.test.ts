@@ -373,6 +373,50 @@ describe("getThumbnailUrl — failure and the 3-strike blacklist", () => {
 		expect(fourth).toBeNull()
 		expect(generator).toHaveBeenCalledTimes(3) // unchanged — short-circuited before generating
 	})
+
+	it("a failure while offline costs no strike", async () => {
+		const item = imageItem()
+		const generator = vi.fn().mockResolvedValue({ type: "failed" })
+		const deps = depsWithGenerator(generator)
+
+		onlineManager.setOnline(false)
+
+		try {
+			for (let i = 0; i < 4; i++) expect(await getThumbnailUrl(item, deps)).toBeNull()
+		} finally {
+			onlineManager.setOnline(true)
+		}
+
+		expect(generator).toHaveBeenCalledTimes(4)
+
+		// The full budget is still there once back online.
+		await getThumbnailUrl(item, deps)
+		await getThumbnailUrl(item, deps)
+		await getThumbnailUrl(item, deps)
+		await getThumbnailUrl(item, deps)
+
+		expect(generator).toHaveBeenCalledTimes(7)
+	})
+
+	it("the offline -> online transition clears the strikes, so a blacklisted item is generated again", async () => {
+		const item = imageItem()
+		const generator = vi.fn().mockResolvedValue({ type: "failed" })
+		const deps = depsWithGenerator(generator)
+
+		await getThumbnailUrl(item, deps)
+		await getThumbnailUrl(item, deps)
+		await getThumbnailUrl(item, deps)
+		await getThumbnailUrl(item, deps)
+
+		expect(generator).toHaveBeenCalledTimes(3)
+
+		onlineManager.setOnline(false)
+		onlineManager.setOnline(true)
+
+		await getThumbnailUrl(item, deps)
+
+		expect(generator).toHaveBeenCalledTimes(4)
+	})
 })
 
 // A generator can answer definitively about a file's CONTENT — no decoder for the format, past the

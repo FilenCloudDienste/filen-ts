@@ -19,8 +19,8 @@ test.describe.configure({ mode: "default" })
 const FIXTURE = new URL("../../filen-office/src/tests/fixtures/pdfforms/acroform.pdf", import.meta.url)
 const PDF_MIME = "application/pdf"
 const SWAP_TIMEOUT_MS = 60_000
-// Reading the account's synced saved signatures (one small file).
-const SAVED_SIGNATURES_READ_MS = 15_000
+// Reading the account's synced saved signatures (one small file): an upper bound only, the row says when it has.
+const SAVED_SIGNATURES_READ_MS = 60_000
 
 async function open(page: Page, listbox: Locator, name: string): Promise<void> {
 	await listbox.getByRole("option", { name }).dblclick()
@@ -127,16 +127,12 @@ async function clearSavedSignatures(page: Page): Promise<void> {
 
 	const none = page.getByText(settings.settingsOfficeSavedSignaturesNone, { exact: true })
 	const manage = page.getByRole("button", { name: settings.settingsOfficeSavedSignaturesManageLabel })
-	// The row reads "None" with Manage disabled until the synced file is read, and says nothing of that: Manage that
-	// stays disabled this long means there are none.
-	const some = await expect(manage)
-		.toBeEnabled({ timeout: SAVED_SIGNATURES_READ_MS })
-		.then(
-			() => true,
-			() => false
-		)
+	// The row is aria-busy until the synced file is read; then a disabled Manage means there are none.
+	const row = manage.locator("xpath=..")
 
-	if (!some) {
+	await expect(row).not.toHaveAttribute("aria-busy", "true", { timeout: SAVED_SIGNATURES_READ_MS })
+
+	if (await manage.isDisabled()) {
 		await expect(none).toBeVisible()
 
 		return

@@ -107,6 +107,23 @@ async function mupdfPage(
 	}
 }
 
+// A HEIC picture as a bitmap whose long side is at most `maxSide`, never scaled up. The worker decodes it at full size
+// (orientation applied); the bitmap is made at the smaller size, so the page never holds a full-size bitmap beside that
+// frame, and the frame goes with this call.
+export async function fittedHeicBitmap(bytes: Uint8Array, maxSide: number): Promise<ImageBitmap> {
+	const decoded = await decodeRasterRgba("heic", bytes, Number.POSITIVE_INFINITY)
+	const frame = new ImageData(decoded.data, decoded.width, decoded.height)
+	const scale = maxSide / Math.max(decoded.width, decoded.height)
+
+	if (scale >= 1) return await createImageBitmap(frame)
+
+	return await createImageBitmap(frame, {
+		resizeWidth: Math.max(1, Math.round(decoded.width * scale)),
+		resizeHeight: Math.max(1, Math.round(decoded.height * scale)),
+		resizeQuality: "high"
+	})
+}
+
 async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage> {
 	const format = IMAGE_FORMATS.get(extensionOf(name))
 	const decode = format?.decode
@@ -135,8 +152,7 @@ async function prepared(bytes: Uint8Array, name: string): Promise<PdfStampImage>
 	}
 
 	if (decode === "heic") {
-		const decoded = await decodeRasterRgba(decode, bytes, Number.POSITIVE_INFINITY)
-		const bitmap = await createImageBitmap(new ImageData(decoded.data, decoded.width, decoded.height))
+		const bitmap = await fittedHeicBitmap(bytes, STAMP_MAX_SIDE)
 
 		try {
 			return await drawn(bitmap, bitmap.width, bitmap.height)

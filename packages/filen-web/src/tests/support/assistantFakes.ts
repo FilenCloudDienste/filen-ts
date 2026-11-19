@@ -179,13 +179,16 @@ export function fakeExecutor(results: Record<string, unknown> = {}): ToolExecuto
 }
 
 export function waitFor(events: AssistantEvent[], predicate: (event: AssistantEvent) => boolean): Promise<AssistantEvent> {
-	return vi.waitFor(() => {
-		const found = events.find(predicate)
+	return vi.waitFor(
+		() => {
+			const found = events.find(predicate)
 
-		if (found === undefined) {
-			throw new Error("not yet")
-		}
+			if (found === undefined) {
+				throw new Error("not yet")
+			}
 
-		return found
-	})
+			return found
+		},
+		{ interval: 1 }
+	)
 }

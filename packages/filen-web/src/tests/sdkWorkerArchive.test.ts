@@ -7,6 +7,8 @@ import type {
 	CompressFormat,
 	CompressItemsParams,
 	CompressReport,
+	Dir,
+	DirMeta,
 	DownloadArchiveEntryParams,
 	EntryDownloadPhase,
 	EntryDownloadReport,
@@ -56,6 +58,7 @@ const { exposed, fakeClient, helpers } = vi.hoisted(() => ({
 	fakeClient: {
 		root: () => ({ uuid: "root" }),
 		getDirOptional: vi.fn<(uuid: string) => Promise<unknown>>(),
+		listDir: vi.fn<(dir: unknown) => Promise<{ dirs: unknown[]; files: unknown[] }>>(),
 		compressItems: vi.fn<(params: CompressItemsParams & Signals, password?: Password) => Promise<CompressReport>>(),
 		extractArchive: vi.fn<(params: ExtractArchiveParams & Signals, password?: Password) => Promise<ExtractReport>>(),
 		extractArchiveEntries: vi.fn<(params: ExtractArchiveEntriesParams & Signals, password?: Password) => Promise<ExtractReport>>(),
@@ -322,6 +325,78 @@ describe("sdk worker lookups", () => {
 
 		await expect(api.getDirectory(DEST)).resolves.toEqual(DEST_DIR)
 		expect(fakeClient.getDirOptional).toHaveBeenCalledWith(DEST)
+	})
+
+	// The breadcrumb's request contract on the shipped wiring: a crumb's name and the current directory's listing
+	// share one lookup when cold, and a directory this session already holds costs none.
+	describe("owned directory resolve", () => {
+		const CRUMB = "0c0c0c0c-0000-4000-8000-000000000000" as UuidStr
+
+		function crumbDir(meta: DirMeta): Dir {
+			return { uuid: CRUMB, parent: testUuid("parent"), color: "default", timestamp: 1n, favorited: false, meta }
+		}
+
+		// Holds every lookup open until released, so concurrent asks overlap for certain.
+		function gateLookups(dir: Dir): () => void {
+			let release = (): void => undefined
+			const gate = new Promise<void>(resolve => {
+				release = resolve
+			})
+
+			fakeClient.getDirOptional.mockClear()
+			fakeClient.getDirOptional.mockImplementation(async uuid => {
+				await gate
+
+				return uuid === dir.uuid ? dir : undefined
+			})
+
+			return release
+		}
+
+		beforeEach(() => {
+			fakeClient.listDir.mockClear()
+			fakeClient.listDir.mockResolvedValue({ dirs: [], files: [] })
+		})
+
+		it("shares one cold lookup between a listing and its crumb's name, and none once warm", async () => {
+			const dir = crumbDir({ type: "decoded", data: { name: "Crumb" } })
+			const release = gateLookups(dir)
+			const listing = api.listDirectory({ kind: "uuid", uuid: CRUMB })
+			const name = api.resolveDirectoryName(CRUMB)
+
+			release()
+
+			await expect(Promise.all([listing, name])).resolves.toEqual([{ dirs: [], files: [] }, "Crumb"])
+			expect(fakeClient.getDirOptional).toHaveBeenCalledTimes(1)
+			expect(fakeClient.listDir).toHaveBeenCalledWith(dir)
+
+			await expect(api.resolveDirectoryName(CRUMB)).resolves.toBe("Crumb")
+			await expect(api.listDirectory({ kind: "uuid", uuid: CRUMB })).resolves.toEqual({ dirs: [], files: [] })
+			expect(fakeClient.getDirOptional).toHaveBeenCalledTimes(1)
+		})
+
+		it("shares one cold lookup between concurrent name resolves", async () => {
+			const release = gateLookups(crumbDir({ type: "decoded", data: { name: "Crumb" } }))
+			const names = Promise.all([api.resolveDirectoryName(CRUMB), api.resolveDirectoryName(CRUMB)])
+
+			release()
+
+			await expect(names).resolves.toEqual(["Crumb", "Crumb"])
+			expect(fakeClient.getDirOptional).toHaveBeenCalledTimes(1)
+		})
+
+		// No cached name to answer from, so the resolve reaches the held directory itself.
+		it("resolves a held directory whose name did not decrypt without a lookup", async () => {
+			const release = gateLookups(crumbDir({ type: "encrypted", data: "ciphertext" }))
+
+			release()
+
+			await expect(api.resolveDirectoryName(CRUMB)).resolves.toBeNull()
+			expect(fakeClient.getDirOptional).toHaveBeenCalledTimes(1)
+
+			await expect(api.resolveDirectoryName(CRUMB)).resolves.toBeNull()
+			expect(fakeClient.getDirOptional).toHaveBeenCalledTimes(1)
+		})
 	})
 })
 

@@ -140,12 +140,32 @@ export function chatsQueryUpdate(updater: (prev: Chat[]) => Chat[]): void {
 	patchQuery<Chat[]>(CHATS_QUERY_KEY, prev => updater(prev ?? []))
 }
 
-// Replaces (or inserts) a single chat by uuid, preserving every other row's position — the
-// common shape for an action that returns the one Chat it touched (rename/mute/addParticipant/
-// markRead all read back through this too), plus create's
-// append case.
+// Replaces (or inserts) a single chat by uuid, preserving every other row's position — for a chat
+// this client has no newer view of (create's append case, a new conversation from the socket).
 export function chatsQueryUpsert(chat: Chat): void {
 	chatsQueryUpdate(prev => replaceOrAppend(prev, chat, c => c.uuid === chat.uuid))
+}
+
+// For an action's result: the SDK hands back the snapshot the caller passed in with the action's own
+// change applied, so upserting it whole would revert whatever a socket event patched onto the row while
+// the request was in flight (lastMessage, lastFocus). `merge` applies only the action's fields onto the
+// CURRENT cached row, or returns null to leave it alone. A row not in the cache is appended as returned.
+export function chatsQueryMerge(chat: Chat, merge: (current: Chat) => Chat | null): void {
+	const current = chatsQueryGet()?.find(c => c.uuid === chat.uuid)
+
+	if (current === undefined) {
+		chatsQueryUpsert(chat)
+
+		return
+	}
+
+	const next = merge(current)
+
+	if (next === null) {
+		return
+	}
+
+	chatsQueryUpdate(prev => replaceOrAppend(prev, next, c => c.uuid === chat.uuid))
 }
 
 export function chatsQueryRemove(uuid: string): void {

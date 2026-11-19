@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, SocketEvent, UuidStr } from "@filen/sdk-rs"
 import { DIRECTORY_NOT_FOUND_PREFIX, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 import { testUuid } from "@/tests/support/uuid"
+import type { Playlist } from "@filen/shared"
 
 const DOT_FILEN_UUID = testUuid("dotfilen")
 const PLAYLISTS_DIR_UUID = testUuid("playlistsdir")
@@ -295,72 +296,181 @@ describe("write-lock serialization", () => {
 })
 
 describe("dead-track prune (once per session)", () => {
-	it("checks existence, persists the cleaned copy once, and skips the check entirely on a later read", async () => {
+	function okTrackUuids(entries: Awaited<ReturnType<Awaited<ReturnType<typeof freshPlaylists>>["fetchPlaylistEntries"]>>) {
+		return entries.map(entry => (entry.status === "ok" ? entry.playlist.files.map(file => file.uuid) : null))
+	}
+
+	// One stored playlist ["alive", "dead"] whose file keeps its uuid, as when the cleanup upload failed or a
+	// listing raced it.
+	function mockAliveDead(): void {
 		mockDirectoryResolve()
-
-		const jsonFileUuid = testUuid("playlistfile")
-		const storedPlaylist = {
-			uuid: "p-1",
-			name: "Mix",
-			created: 1000,
-			updated: 1000,
-			files: [
-				{
-					uuid: "alive",
-					name: "alive.mp3",
-					mime: "audio/mpeg",
-					size: 1,
-					bucket: "b",
-					key: "k",
-					version: 2,
-					chunks: 1,
-					region: "r",
-					playlist: "p-1"
-				},
-				{
-					uuid: "dead",
-					name: "dead.mp3",
-					mime: "audio/mpeg",
-					size: 1,
-					bucket: "b",
-					key: "k",
-					version: 2,
-					chunks: 1,
-					region: "r",
-					playlist: "p-1"
-				}
-			]
-		}
-
-		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(jsonFileUuid, "p-1.json")] })
-		downloadFileBytes.mockResolvedValue(playlistJsonBytes(storedPlaylist))
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("playlistfile"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(playlistWith("p-1", ["alive", "dead"])))
 		getFile.mockImplementation((uuid: string) => Promise.resolve(uuid === "dead" ? undefined : fakeDir(testUuid("exists"))))
 		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+	}
+
+	it("checks existence after the read, persists the cleaned copy once, and keeps later reads pruned", async () => {
+		mockAliveDead()
 
 		const { fetchPlaylistEntries } = await freshPlaylists()
 
-		const first = await fetchPlaylistEntries()
-		const firstOk = first.find(e => e.status === "ok")
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive", "dead"]])
 
-		expect(firstOk?.status === "ok" ? firstOk.playlist.files.map(f => f.uuid) : null).toEqual(["alive"])
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+
 		expect(getFile).toHaveBeenCalledTimes(2) // one existence check per stored track
-
-		// Let the fire-and-forget cleanup persist settle before asserting on it.
-		await Promise.resolve()
-		await Promise.resolve()
-
-		expect(uploadFileBytes).toHaveBeenCalledTimes(1) // the cleanup persist, exactly once
+		expect(uploadedPlaylist(0).files.map(file => file.uuid)).toEqual(["alive"])
 
 		getFile.mockClear()
 
-		const second = await fetchPlaylistEntries()
-		const secondOk = second.find(e => e.status === "ok")
-
-		// Second read within the SAME session: the guard skips the existence check entirely, and the
-		// unchanged file uuid reuses the raw parse instead of downloading it again.
+		// Same session, same file uuid: no check, no download, and the dead track stays out.
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive"]])
 		expect(getFile).not.toHaveBeenCalled()
 		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
-		expect(secondOk?.status === "ok" ? secondOk.playlist.files.map(f => f.uuid) : null).toEqual(["alive", "dead"])
+		expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps a read pruned after the cleanup upload failed, without checking again", async () => {
+		mockAliveDead()
+		uploadFileBytes.mockRejectedValueOnce(new Error("connection dropped"))
+
+		const { fetchPlaylistEntries } = await freshPlaylists()
+
+		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+		getFile.mockClear()
+
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive"]])
+		expect(getFile).not.toHaveBeenCalled()
+	})
+
+	it("does not drop a track added back after the check", async () => {
+		mockAliveDead()
+
+		const { fetchPlaylistEntries } = await freshPlaylists()
+
+		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+
+		// The cleaned copy lands, then the file comes back (restored) and is added again.
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("cleaned"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValueOnce(playlistJsonBytes(playlistWith("p-1", ["alive"])))
+		await fetchPlaylistEntries()
+
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("readded"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValueOnce(playlistJsonBytes(playlistWith("p-1", ["alive", "dead"], 2000)))
+		getFile.mockClear()
+
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive", "dead"]])
+		expect(getFile).not.toHaveBeenCalled()
+	})
+
+	it("keeps a track added back after the cleanup when no read came in between", async () => {
+		const dead = testUuid("dead")
+
+		mockDirectoryResolve()
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("playlistfile"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(playlistWith("p-1", ["alive", dead])))
+		getFile.mockImplementation((uuid: string) => Promise.resolve(uuid === dead ? undefined : fakeDir(testUuid("exists"))))
+		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+
+		const { fetchPlaylistEntries, addTracksToPlaylistAction } = await freshPlaylists()
+		const { narrowItem } = await import("@/features/drive/lib/item")
+
+		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+		await flushTasks()
+
+		await expect(addTracksToPlaylistAction(uploadedPlaylist(0), [narrowItem(fakeJsonFile(dead, "dead.mp3"))])).resolves.toBe(1)
+		expect(uploadedPlaylist(1).files.map(file => file.uuid)).toEqual(["alive", dead])
+
+		// The re-added copy listed under its new file uuid, with no read of the cleaned one in between.
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("readded"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(uploadedPlaylist(1)))
+		getFile.mockClear()
+
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive", dead]])
+		expect(getFile).not.toHaveBeenCalled()
+	})
+
+	it("keeps a track added back while the checks were out", async () => {
+		const dead = testUuid("dead")
+		let releaseDeadCheck: () => void = () => undefined
+
+		mockDirectoryResolve()
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("playlistfile"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(playlistWith("p-1", ["alive", dead])))
+		getFile.mockImplementation((uuid: string) =>
+			uuid === dead
+				? new Promise(resolve => {
+						releaseDeadCheck = () => {
+							resolve(undefined)
+						}
+					})
+				: Promise.resolve(fakeDir(testUuid("exists")))
+		)
+		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+
+		const { fetchPlaylistEntries, addTracksToPlaylistAction } = await freshPlaylists()
+		const { narrowItem } = await import("@/features/drive/lib/item")
+
+		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(getFile).toHaveBeenCalledTimes(2)
+		})
+
+		// Removed and picked again while its check is out: the track is live after all.
+		await addTracksToPlaylistAction(playlistWith("p-1", ["alive"], 2000), [narrowItem(fakeJsonFile(dead, "dead.mp3"))])
+		releaseDeadCheck()
+		await flushTasks()
+
+		expect(uploadFileBytes).toHaveBeenCalledTimes(1) // the add only, no cleanup
+		expect(uploadedPlaylist(0).files.map(file => file.uuid)).toEqual(["alive", dead])
+	})
+
+	it("a read during an unfinished pass neither checks again nor marks it done", async () => {
+		mockAliveDead()
+
+		let releaseDeadCheck: () => void = () => undefined
+
+		getFile.mockImplementation((uuid: string) =>
+			uuid === "dead"
+				? new Promise(resolve => {
+						releaseDeadCheck = () => {
+							resolve(undefined)
+						}
+					})
+				: Promise.resolve(fakeDir(testUuid("exists")))
+		)
+
+		const { fetchPlaylistEntries } = await freshPlaylists()
+
+		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(getFile).toHaveBeenCalledTimes(2)
+		})
+
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive", "dead"]])
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(getFile).toHaveBeenCalledTimes(2)
+
+		releaseDeadCheck()
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+
+		expect(okTrackUuids(await fetchPlaylistEntries())).toEqual([["alive"]])
+		expect(getFile).toHaveBeenCalledTimes(2)
 	})
 })
 
@@ -604,10 +714,17 @@ function playlistWith(uuid: string, trackUuids: string[], updated = 1000) {
 	return { uuid, name: uuid, created: 1000, updated, files: trackUuids.map(trackUuid => playlistFile(trackUuid, uuid)) }
 }
 
-function uploadedPlaylist(call: number): { files: { uuid: string }[] } {
+// Lets detached passes (a task after the read, then their awaited checks and lock) run to the end.
+async function flushTasks(): Promise<void> {
+	for (let task = 0; task < 5; task++) {
+		await new Promise(resolve => setTimeout(resolve, 0))
+	}
+}
+
+function uploadedPlaylist(call: number): Playlist {
 	const bytes = uploadFileBytes.mock.calls[call]?.[1] as Uint8Array
 
-	return JSON.parse(new TextDecoder().decode(bytes)) as { files: { uuid: string }[] }
+	return JSON.parse(new TextDecoder().decode(bytes)) as Playlist
 }
 
 describe("reorderPlaylistFileAction", () => {
@@ -659,14 +776,21 @@ describe("dead-track prune during a list read", () => {
 		const { fetchPlaylistEntries } = await freshPlaylists()
 
 		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(getFile).toHaveBeenCalledTimes(3)
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
 
 		expect(getFile.mock.calls.map(call => call[0] as string).sort()).toEqual(["a", "b", "c"])
 	})
 
-	it("persists the prune without patching the cache the read has not filled yet", async () => {
+	it("returns the rows before any check settles, then persists the cleaned copy", async () => {
 		mockDirectoryResolve()
 
-		let releaseSlowCheck: () => void = () => undefined
+		let releaseChecks: () => void = () => undefined
+		const held = new Promise<void>(resolve => {
+			releaseChecks = resolve
+		})
 
 		listDirectory.mockResolvedValue({
 			dirs: [],
@@ -677,44 +801,103 @@ describe("dead-track prune during a list read", () => {
 				playlistJsonBytes(file.uuid === testUuid("pl1") ? playlistWith("p-1", ["alive", "dead"]) : playlistWith("p-2", ["slow"]))
 			)
 		)
-		getFile.mockImplementation((uuid: string) => {
-			if (uuid === "dead") {
-				return Promise.resolve(undefined)
-			}
+		getFile.mockImplementation(async (uuid: string) => {
+			await held
 
-			if (uuid === "slow") {
-				return new Promise(resolve => {
-					releaseSlowCheck = () => {
-						resolve(fakeDir(testUuid("exists")))
-					}
-				})
-			}
-
-			return Promise.resolve(fakeDir(testUuid("exists")))
+			return uuid === "dead" ? undefined : fakeDir(testUuid("exists"))
 		})
 		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
 
-		const { fetchPlaylistEntries, playlistsQueryGet } = await freshPlaylists()
-		const read = fetchPlaylistEntries()
+		const { fetchPlaylistEntries } = await freshPlaylists()
+		const entries = await fetchPlaylistEntries()
 
+		expect(entries.map(entry => (entry.status === "ok" ? entry.playlist.files.map(file => file.uuid) : null))).toEqual([
+			["alive", "dead"],
+			["slow"]
+		])
+		expect(uploadFileBytes).not.toHaveBeenCalled()
+
+		releaseChecks()
 		await vi.waitFor(() => {
 			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
 		})
-		await Promise.resolve()
 
-		// The small playlist's prune landed while the other is still being checked: a patch here would
-		// collapse the list to one row and restart the read.
-		expect(playlistsQueryGet()).toBeUndefined()
 		expect(uploadedPlaylist(0).files.map(file => file.uuid)).toEqual(["alive"])
+	})
 
-		releaseSlowCheck()
+	it("does not upload a playlist deleted while its checks were out", async () => {
+		mockDirectoryResolve()
 
-		const entries = await read
+		let releaseChecks: () => void = () => undefined
+		const held = new Promise<void>(resolve => {
+			releaseChecks = resolve
+		})
+		const jsonFile = fakeJsonFile(testUuid("pl1"), "p-1.json")
 
-		expect(entries.map(entry => (entry.status === "ok" ? entry.playlist.files.map(file => file.uuid) : null))).toEqual([
-			["alive"],
-			["slow"]
-		])
+		listDirectory.mockResolvedValue({ dirs: [], files: [jsonFile] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(playlistWith("p-1", ["alive", "dead"])))
+		getFile.mockImplementation(async (uuid: string) => {
+			await held
+
+			return uuid === "dead" ? undefined : fakeDir(testUuid("exists"))
+		})
+		deleteFilePermanently.mockResolvedValue(undefined)
+		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+
+		const { fetchPlaylistEntries, deletePlaylistAction, playlistsQueryGet, playlistsQueryUpdate } = await freshPlaylists()
+
+		// Fake timers hold the unobserved row against collection, as a mounted list would.
+		vi.useFakeTimers()
+
+		try {
+			const entries = await fetchPlaylistEntries()
+
+			// Stands in for the query committing the read's rows.
+			playlistsQueryUpdate(() => entries)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(getFile).toHaveBeenCalledTimes(2)
+
+			await deletePlaylistAction(playlistWith("p-1", ["alive", "dead"]))
+			releaseChecks()
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(deleteFilePermanently).toHaveBeenCalledExactlyOnceWith(jsonFile)
+			expect(uploadFileBytes).not.toHaveBeenCalled()
+			expect(playlistsQueryGet()).toEqual([])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("drops the dead track from the listed row even when the cleanup upload fails", async () => {
+		mockDirectoryResolve()
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("pl1"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(playlistWith("p-1", ["alive", "dead"])))
+		getFile.mockImplementation((uuid: string) => Promise.resolve(uuid === "dead" ? undefined : fakeDir(testUuid("exists"))))
+		uploadFileBytes.mockRejectedValue(new Error("connection dropped"))
+
+		const { fetchPlaylistEntries, playlistsQueryGet, playlistsQueryUpdate } = await freshPlaylists()
+
+		// Fake timers hold the unobserved row against collection, as a mounted list would.
+		vi.useFakeTimers()
+
+		try {
+			const entries = await fetchPlaylistEntries()
+
+			// Stands in for the query committing the read's rows.
+			playlistsQueryUpdate(() => entries)
+
+			for (let task = 0; task < 5; task++) {
+				await vi.advanceTimersByTimeAsync(0)
+			}
+
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+			expect(playlistsQueryGet()?.map(entry => (entry.status === "ok" ? entry.playlist.files.map(file => file.uuid) : null))).toEqual(
+				[["alive"]]
+			)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("prunes the downloaded copy, not an older cached one restored from a previous session", async () => {

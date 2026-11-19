@@ -19,7 +19,9 @@ export type DownloadAsTarget = "pdf" | "docx" | "odt" | "xlsx" | "ods" | "pptx" 
 // OpenDocument presentation, PowerPoint 97–2003.
 export type DownloadAsFormat = "docx" | "odt" | "rtf" | "doc" | "xlsx" | "ods" | "xls" | "text" | "pptx" | "odp" | "ppt"
 
-const FORMATS: Readonly<Record<string, DownloadAsFormat>> = {
+// Every extension the document, spreadsheet and presentation viewers open by name (their tables, which a test keeps
+// these rows in step with); a miss is offered the PDF only.
+export const DOWNLOAD_AS_FORMATS: Readonly<Record<string, DownloadAsFormat>> = {
 	docx: "docx",
 	docm: "docx",
 	dotx: "docx",
@@ -88,7 +90,7 @@ const DOWNLOAD_AS_GROUPS: readonly (readonly DownloadAsTarget[])[] = [["pdf"], [
 // What format an exportable file is in, by its extension; null for one named otherwise (opened by its content), which
 // is offered the PDF only: what it converts to is not known before it is read. A presentation is always named as one.
 export function downloadAsFormat(item: DriveItem): DownloadAsFormat | null {
-	return FORMATS[extensionOf(driveItemName(item))] ?? null
+	return DOWNLOAD_AS_FORMATS[extensionOf(driveItemName(item))] ?? null
 }
 
 // What a file is exported from; null for anything the viewers do not open: a directory, an undecryptable file, a

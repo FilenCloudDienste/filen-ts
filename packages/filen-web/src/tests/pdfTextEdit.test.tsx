@@ -13,7 +13,8 @@ vi.mock("@/lib/keymap/kbd.logic", () => ({ isMacPlatform: () => false }))
 
 const { PdfTextEditor } = await import("@/features/pdf/textEdit/pdfTextEditor")
 const { PdfTextEditNotice } = await import("@/features/pdf/textEdit/pdfTextEditNotice")
-const { cssColor, editorFontFamily, editorKey, editorPlacement, textRows } = await import("@/features/pdf/textEdit/textEdit.logic")
+const { changedSpan, cssColor, editorFontFamily, editorKey, editorPlacement, textRows } =
+	await import("@/features/pdf/textEdit/textEdit.logic")
 type Source = import("@/features/pdf/textEdit/textEdit.logic").TextEditorSource
 
 function source(overrides: Partial<Source> = {}): Source {
@@ -85,6 +86,40 @@ describe("text editor geometry and keys", () => {
 		expect(editorFontFamily("cousine", "Cousine")).toBe('"Cousine", monospace')
 		expect(textRows("")).toBe(1)
 		expect(textRows("a\nb")).toBe(2)
+	})
+})
+
+// Whether `text` holds half of a surrogate pair.
+function hasLoneSurrogate(text: string): boolean {
+	return /\p{Cs}/u.test(text)
+}
+
+describe("changedSpan and astral characters", () => {
+	it("replaces an astral character changed alone whole", () => {
+		const change = changedSpan("\u{1d465}", "\u{1d466}")
+
+		expect(change).toEqual({ start: 0, end: 2, text: "\u{1d466}" })
+		expect(hasLoneSurrogate(change?.text ?? "")).toBe(false)
+	})
+
+	it("starts the span on the astral character changed with a neighbour", () => {
+		const change = changedSpan("\u{1d465}+1", "\u{1d466}+2")
+
+		expect(change).toEqual({ start: 0, end: 4, text: "\u{1d466}+2" })
+		expect(hasLoneSurrogate(change?.text ?? "")).toBe(false)
+	})
+
+	it("ends the span after an astral character sharing only its low surrogate", () => {
+		const change = changedSpan("\u{1d465} b", "\u{1f465} b")
+
+		expect(change).toEqual({ start: 0, end: 2, text: "\u{1f465}" })
+		expect(hasLoneSurrogate(change?.text ?? "")).toBe(false)
+	})
+
+	it("widens to whole words across astral letters", () => {
+		expect(changedSpan("a \u{1d465}\u{1d466}z b", "a \u{1d465}\u{1d466}y b")).toEqual({ start: 2, end: 7, text: "\u{1d465}\u{1d466}y" })
+		expect(changedSpan("\u{1d465} world", "\u{1d465} big world")).toEqual({ start: 3, end: 8, text: "big world" })
+		expect(changedSpan("\u{1d465}", "\u{1d465} again")).toEqual({ start: 0, end: 2, text: "\u{1d465} again" })
 	})
 })
 

@@ -89,8 +89,6 @@ export const previewPptxAnimations = {
 	previewPptxAnimRepeatEndOfSlide: "Until End of Slide",
 	/** Presentation editor, Animations tab — option: the object goes back to how it was when the effect ends */
 	previewPptxAnimRewind: "Rewind When Done",
-	/** Presentation editor, Animations tab — status: select an object on the slide to animate it */
-	previewPptxAnimNoSelection: "Select an object to animate it.",
 	/** Presentation editor, Animations tab — the slide's animations are arranged in a way the editor can't change; they still play */
 	previewPptxAnimUnsupported: "This slide's animations can't be edited here, but they still play in the slide show.",
 	/** Presentation editor — title of the pane listing the slide's animations */
@@ -111,8 +109,10 @@ export const previewPptxAnimations = {
 	previewPptxAnimTriggerHeading: "Trigger: {{name}}",
 	/** Presentation editor — name of an object on the slide by its number, where it has no alt text */
 	previewPptxAnimShape: "Object {{id}}",
-	/** Presentation editor, Animation Pane — an effect on one paragraph of an object's text; {{n}} is the paragraph number */
-	previewPptxAnimParagraph: "paragraph {{n}}",
+	/** Presentation editor, Animation Pane — the target of an effect on one paragraph of an object's text; {{name}} is the object, {{n}} the paragraph number */
+	previewPptxAnimParagraphTarget: "{{name}}, paragraph {{n}}",
+	/** Presentation editor, Animation Pane — visible text of one effect in the list; {{effect}} is the effect's name, {{target}} the object it animates */
+	previewPptxAnimRowText: "{{effect}}: {{target}}",
 	/** Presentation editor, Animation Pane — an effect named with its class, so an entrance and an exit of the same name differ; {{kind}} is Entrance, Emphasis, Exit or Motion Paths, {{effect}} the effect's name */
 	previewPptxAnimEffectOfClass: "{{kind}}: {{effect}}",
 	/** Presentation editor, Animation Pane — accessible name of one effect in the list: its number, effect name, object and start */

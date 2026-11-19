@@ -44,7 +44,8 @@ export class PageThumbnails {
 	private readonly entries = new Map<string, Entry>()
 	private queue: { readonly id: string; readonly page: number }[] = []
 	private width = 0
-	private running: { readonly id: string; readonly page: number; readonly controller: AbortController } | undefined = undefined
+	private running:
+		{ readonly id: string; readonly page: number; readonly width: number; readonly controller: AbortController } | undefined = undefined
 	private disposed = false
 	// Bumped on every change, for useSyncExternalStore.
 	version = 0
@@ -83,10 +84,15 @@ export class PageThumbnails {
 		// A render for a page that left the window, or that moved (its index now draws another page), stops.
 		if (this.running !== undefined && wanted.get(this.running.id) !== this.running.page) this.running.controller.abort()
 
-		this.queue = pages.filter(page => {
-			const entry = this.entries.get(page.id)
+		// The page being rendered stays out of the queue while its render still counts (not aborted, same width): queued
+		// again, it would be drawn twice.
+		const running =
+			this.running !== undefined && !this.running.controller.signal.aborted && this.running.width === width ? this.running : undefined
 
-			return entry?.bitmap === undefined || entry.width !== width
+		this.queue = pages.filter(page => {
+			if (page.id === running?.id) return false
+
+			return !this.drawn(page.id, width)
 		})
 
 		if (changed) this.bump()
@@ -107,7 +113,15 @@ export class PageThumbnails {
 				changed = true
 			}
 
-			if (this.running?.id === id) this.running.controller.abort()
+			// The render in flight draws the old look: it stops and the page goes back to the front of the queue, so it is
+			// drawn again without waiting for the next window. One setWindow already aborted is queued by setWindow itself.
+			if (this.running?.id === id && !this.running.controller.signal.aborted) {
+				const page = this.running.page
+
+				this.running.controller.abort()
+
+				if (!this.queue.some(item => item.id === id)) this.queue.unshift({ id, page })
+			}
 		}
 
 		if (changed) this.bump()
@@ -129,17 +143,26 @@ export class PageThumbnails {
 		this.onChange()
 	}
 
+	private drawn(id: string, width: number): boolean {
+		const entry = this.entries.get(id)
+
+		return entry?.bitmap !== undefined && entry.width === width
+	}
+
 	private pump(): void {
 		if (this.running !== undefined || this.disposed) return
 
-		const next = this.queue.shift()
+		const width = this.width
+		let next = this.queue.shift()
+
+		// A page that already holds a bitmap at this width needs no render.
+		while (next !== undefined && this.drawn(next.id, width)) next = this.queue.shift()
 
 		if (next === undefined) return
 
 		const controller = new AbortController()
-		const width = this.width
 
-		this.running = { id: next.id, page: next.page, controller }
+		this.running = { id: next.id, page: next.page, width, controller }
 		this.render(next.page, width, controller.signal).then(
 			bitmap => {
 				this.running = undefined

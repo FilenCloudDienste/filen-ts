@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { TFunction } from "i18next"
+import type { AnyFile } from "@filen/sdk-rs"
 import { savePortReader, savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY } from "@filen/office/core/pdfedit"
 import type { PdfCommandResult, PdfEditState } from "@filen/office/core/pdfedit"
@@ -9,6 +10,23 @@ import { PdfPagesController, type PdfPagesHost } from "@/features/pdf/pages/page
 import { bookmarkStarts, cropMargins, hasMargins, pageShown, unrotateMargins } from "@/features/pdf/pages/pagesSurface.logic"
 import type { PdfEngine } from "@/features/pdf/session/engineWorker"
 import { previewPdfPages } from "@/locales/en/previewPdf/pages"
+
+// A drive PDF's sync range channel: its close counted (the real one holds a Web Lock and a shared buffer).
+const syncRange = vi.hoisted(() => ({ closed: 0 }))
+
+vi.mock("@/lib/media/syncRange", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/media/syncRange")>()),
+	openSyncRange: (file: { size: bigint }) => {
+		const { port1 } = new MessageChannel()
+
+		return Promise.resolve({
+			channel: { buffer: new SharedArrayBuffer(8), port: port1, length: Number(file.size) },
+			close: () => {
+				syncRange.closed++
+			}
+		})
+	}
+}))
 
 // The pages controller: page ids and the selection following each change, the live region's sentence, the last-page
 // refusal, the rail's current page against the viewer's, a second PDF's password prompt, and new files made one at a
@@ -48,8 +66,11 @@ function fakeSession(
 	}
 	const session = {
 		getSnapshot: () => ({ state: state(fake.count) }),
-		dispatch: (command: string, args: unknown): Promise<PdfCommandResult> => {
+		dispatch: (command: string, args: unknown, _op?: unknown, transfer?: Transferable[]): Promise<PdfCommandResult> => {
 			fake.dispatched.push({ command, args })
+
+			// As postMessage would: a transferred buffer is detached here.
+			if (transfer !== undefined) structuredClone(args, { transfer })
 
 			const result = touched(command, args)
 
@@ -189,6 +210,22 @@ describe("page changes", () => {
 		expect(bound.failed).toEqual(["previewPdfPagesLastPage", "previewPdfPagesInsertImageFailed"])
 	})
 
+	it("moves an inserted picture's bytes to the engine instead of copying them", async () => {
+		const fake = fakeSession(2, () => ({ pages: [1], count: 3 }))
+		const controller = new PdfPagesController()
+
+		controller.bind(host(fake))
+		controller.sync(2)
+		controller.insertImage(new File([new Uint8Array(16)], "scan.png"))
+
+		for (let turn = 0; turn < 5 && fake.dispatched.length === 0; turn++) await new Promise(resolve => setTimeout(resolve, 0))
+
+		const sent = fake.dispatched[0]
+
+		expect(sent?.command).toBe("pages.insertImage")
+		expect((sent?.args as { bytes: Uint8Array }).bytes.byteLength).toBe(0)
+	})
+
 	it("keeps a page chosen in the rail current while it shows, then follows the view", () => {
 		const controller = new PdfPagesController()
 
@@ -262,6 +299,31 @@ describe("page changes", () => {
 		await settle()
 		expect(fake.dispatched).toHaveLength(1)
 		controller.sessionChanged(null)
+	})
+
+	it("releases a drive PDF held for inserting once when the viewer goes, even with the session unchanged", async () => {
+		syncRange.closed = 0
+
+		const fake = fakeSession(
+			2,
+			() => ({ pages: [2], count: 3 }),
+			op => Promise.resolve(op === "attachSource" ? { status: "open", source: 3, pageCount: 1 } : null)
+		)
+		const controller = new PdfPagesController()
+
+		controller.bind(host(fake))
+		controller.sync(2)
+		controller.insertPdf({ kind: "drive", file: { size: 10n } as unknown as AnyFile })
+		await vi.waitFor(() => {
+			expect(fake.dispatched).toHaveLength(1)
+		})
+		// The same session goes on: nothing is released yet.
+		controller.sessionChanged(fake.session)
+		expect(syncRange.closed).toBe(0)
+
+		controller.dispose()
+		controller.dispose()
+		expect(syncRange.closed).toBe(1)
 	})
 })
 
@@ -353,6 +415,46 @@ describe("new files of pages", () => {
 		expect(controller.getSnapshot().progress).toBeUndefined()
 	})
 
+	it("frees the engine and fails the job when the upload is refused without reading the port", async () => {
+		const engine = copyEngine(new Uint8Array([37, 80, 68, 70]))
+		let writeOutput: "pending" | "settled" = "pending"
+		const fake = fakeSession(
+			3,
+			() => ({ pages: [], count: 3 }),
+			async (op, args) => {
+				if (op !== "writeOutput") return engine(op, args)
+
+				// The engine's write waits for the upload's pulls; only an abort on the other end lets it go.
+				return engine(op, args).finally(() => {
+					writeOutput = "settled"
+				})
+			}
+		)
+		const controller = new PdfPagesController()
+		const bound = host(fake, {
+			openVerifier: verifier({ ok: true }),
+			// Over quota: answered at once, the port never read.
+			write: () => Promise.resolve({ outcome: { status: "error" }, name: "copy.pdf" } as never)
+		})
+
+		controller.bind(bound)
+		controller.sync(3)
+
+		const saved = await controller.makeCopies([{ ranges: [{ first: 1, last: 1 }], suffix: () => "a" }], {
+			protect: false,
+			deletes: [],
+			failedKey: "previewPdfSplitFailed"
+		})
+
+		expect(saved).toBe(false)
+		expect(bound.failed).toEqual(["previewPdfSplitFailed"])
+		expect(controller.getSnapshot().progress).toBeUndefined()
+		expect(fake.calls.filter(call => call.op === "saveEnd").map(call => (call.args as { outcome: string }).outcome)).toEqual(["failed"])
+		await vi.waitFor(() => {
+			expect(writeOutput).toBe("settled")
+		})
+	})
+
 	it("uploads nothing and deletes nothing when a file fails its check", async () => {
 		const fake = fakeSession(3, () => ({ pages: [], count: 2 }), copyEngine(new Uint8Array([1])))
 		const write = vi.fn()
@@ -373,6 +475,95 @@ describe("new files of pages", () => {
 		expect(bound.failed).toEqual(["previewPdfSplitFailed"])
 		expect(fake.calls.filter(call => call.op === "saveEnd").map(call => (call.args as { outcome: string }).outcome)).toEqual(["failed"])
 		expect(fake.dispatched).toEqual([])
+	})
+
+	it("says it failed, and settles, when the editor never starts", async () => {
+		const fake = fakeSession(3, () => ({ pages: [], count: 3 }), copyEngine(new Uint8Array([1])))
+		const controller = new PdfPagesController()
+		const bound = host(fake, {
+			edit: (_change, dropped) => {
+				dropped?.()
+			}
+		})
+
+		controller.bind(bound)
+		controller.sync(3)
+
+		const saved = await controller.makeCopies([{ ranges: [{ first: 1, last: 1 }], suffix: () => "a" }], {
+			protect: false,
+			deletes: [0],
+			failedKey: "previewPdfSplitFailed"
+		})
+
+		expect(saved).toBe(false)
+		expect(controller.getSnapshot().progress).toBeUndefined()
+		expect(bound.failed).toEqual(["previewPdfSplitFailed"])
+		expect(fake.calls).toEqual([])
+	})
+
+	it("settles at once, showing no progress, when nothing is bound", async () => {
+		const controller = new PdfPagesController()
+
+		expect(
+			await controller.makeCopies([{ ranges: [{ first: 1, last: 1 }], suffix: () => "a" }], {
+				protect: false,
+				deletes: [],
+				failedKey: "previewPdfExtractFailed"
+			})
+		).toBe(false)
+		expect(controller.getSnapshot().progress).toBeUndefined()
+	})
+
+	it("settles as saved when the files were made and deleting the pages fails, the failure left to the editor", async () => {
+		const fake = fakeSession(
+			3,
+			command => {
+				if (command === "pages.delete") throw new Error("refused")
+
+				return { pages: [], count: 3 }
+			},
+			copyEngine(new Uint8Array([37, 80, 68, 70]))
+		)
+		const refused: unknown[] = []
+		const controller = new PdfPagesController()
+		const bound = host(fake, {
+			edit: change => {
+				change(fake.session).catch((error: unknown) => {
+					refused.push(error)
+				})
+			},
+			openVerifier: verifier({ ok: true }),
+			write: async (content, suffix) => {
+				const reader = savePortReader(content.port)
+
+				while ((await reader.read()) !== undefined) {
+					// Drained.
+				}
+
+				reader.settled(true)
+
+				return {
+					outcome: { status: "success", item: { data: { uuid: "u" } } as DriveItem },
+					name: `copy ${suffix(1)}.pdf`
+				} as never
+			}
+		})
+
+		controller.bind(bound)
+		controller.sync(3)
+
+		const saved = await controller.makeCopies([{ ranges: [{ first: 1, last: 1 }], suffix: () => "a" }], {
+			protect: false,
+			deletes: [0],
+			failedKey: "previewPdfExtractFailed"
+		})
+
+		expect(saved).toBe(true)
+		expect(bound.copied).toEqual([["copy a.pdf"]])
+		expect(controller.getSnapshot().progress).toBeUndefined()
+		await vi.waitFor(() => {
+			expect(refused).toHaveLength(1)
+		})
 	})
 })
 

@@ -3,12 +3,15 @@ import {
 	selectSubtitleTrack,
 	type RememberedSubtitle,
 	type SidecarSubtitleFormat,
-	type SubtitleFormat,
+	type SmiTrack,
 	type SubtitleTrackInfo,
 	type VideoProbe
 } from "@filen/shared/videos"
 import { isTapTextCodec } from "@/workers/remux/textTap"
 import type { VideoFileRef, VideoPartView } from "@/workers/videoIndex/view.logic"
+
+// The parser for a sidecar's format, from the one shared table.
+export { parseFormatOf } from "@filen/shared/videos"
 
 // The subtitles a part offers: sidecars beside it (read when chosen, one read each) and the tracks inside the
 // file. Text tracks inside a Matroska file come from the remux engine's tap over what playback reads; image
@@ -28,27 +31,66 @@ export interface PlayerSubtitleTrack {
 	external: boolean
 	file: VideoFileRef | null
 	format: SidecarSubtitleFormat | null
+	// A SAMI file's class this track shows; absent for its first (or only) class and for every other format.
+	smiClass?: string
 	unavailable: SubtitleUnavailable | null
 }
+
+// A SAMI file's language classes, as its content names them (the sidecar reader reads them).
+export type SmiClasses = readonly Pick<SmiTrack, "className" | "lang">[]
 
 // What the subtitle menu's choice is: Smart (resolved per item), off, or one track.
 export type SubtitleChoice = { kind: "auto" } | { kind: "off" } | { kind: "track"; id: string }
 
 const IMAGE_CODECS = /PGS|VOBSUB|DVB|HDMV|S_IMAGE/i
 
-export function subtitleTracksOf(part: VideoPartView, probe: VideoProbe | null): PlayerSubtitleTrack[] {
-	const tracks: PlayerSubtitleTrack[] = part.subtitles.map(subtitle => ({
-		id: `s:${subtitle.file.stableUuid}`,
-		lang: subtitle.language,
-		title: subtitle.title,
-		forced: subtitle.forced,
-		hi: subtitle.sdh,
-		isDefault: subtitle.isDefault,
-		external: true,
-		file: subtitle.file,
-		format: subtitle.format,
-		unavailable: subtitle.format === "pgs" || subtitle.format === "vobsub" ? "image" : null
-	}))
+// `smiClasses` (by file uuid): a SAMI file with several classes is one track per class. The first keeps the file's
+// own id, so a choice made before its classes were read still holds.
+export function subtitleTracksOf(
+	part: VideoPartView,
+	probe: VideoProbe | null,
+	smiClasses?: ReadonlyMap<string, SmiClasses>
+): PlayerSubtitleTrack[] {
+	const tracks: PlayerSubtitleTrack[] = []
+
+	for (const subtitle of part.subtitles) {
+		const track: PlayerSubtitleTrack = {
+			id: `s:${subtitle.file.stableUuid}`,
+			lang: subtitle.language,
+			title: subtitle.title,
+			forced: subtitle.forced,
+			hi: subtitle.sdh,
+			isDefault: subtitle.isDefault,
+			external: true,
+			file: subtitle.file,
+			format: subtitle.format,
+			unavailable: subtitle.format === "pgs" || subtitle.format === "vobsub" ? "image" : null
+		}
+		const classes = subtitle.format === "smi" ? smiClasses?.get(subtitle.file.uuid) : undefined
+
+		if (classes === undefined || classes.length < 2) {
+			tracks.push(track)
+
+			continue
+		}
+
+		classes.forEach((smi, index) => {
+			tracks.push({
+				...track,
+				id: index === 0 ? track.id : `${track.id}:${smi.className}`,
+				lang: smi.lang ?? track.lang,
+				// Told apart by the class's name when its style names no language, by its place when it has no name either.
+				title:
+					smi.lang !== null || track.title.length > 0
+						? track.title
+						: smi.className.length > 0
+							? smi.className
+							: `#${String(index + 1)}`,
+				isDefault: track.isDefault && index === 0,
+				...(index === 0 ? {} : { smiClass: smi.className })
+			})
+		})
+	}
 
 	for (const sub of probe?.subs ?? []) {
 		tracks.push({
@@ -141,23 +183,6 @@ export function decodeRememberedSubtitle(value: string | null | undefined): Reme
 		lang: lang === "und" || lang.length === 0 ? null : normalizeLanguage(lang),
 		forced: flags.includes("f"),
 		hi: flags.includes("h")
-	}
-}
-
-// The parser for a sidecar's format; `.sub` is told from VobSub by its content.
-export function parseFormatOf(format: SidecarSubtitleFormat): SubtitleFormat | "sub" | null {
-	switch (format) {
-		case "srt":
-		case "vtt":
-		case "smi":
-			return format
-		case "ass":
-		case "ssa":
-			return "ass"
-		case "microdvd":
-			return "sub"
-		default:
-			return null
 	}
 }
 
