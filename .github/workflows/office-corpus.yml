@@ -612,7 +612,8 @@ jobs:
         run: pnpm exec vitest run --reporter=verbose src/tests/sheetSessionPerf.test.ts src/tests/sheetGridPerf.dom.test.tsx
 
   # Nightly and on demand: every ODF save and conversion against the ODF Toolkit's odfvalidator (ODF 1.3) and,
-  # where a suite also writes OOXML, the Open XML SDK validator. Each oracle adds no error its source lacks.
+  # where a suite also writes OOXML, the Open XML SDK validator, which also reads the RTF writer's saves. Each
+  # oracle adds no error its source lacks.
   odf-office-corpus:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: test-office-corpus
@@ -708,3 +709,24 @@ jobs:
           pnpm exec vitest run --reporter=verbose src/tests/presentationShowOracle.test.ts
           src/tests/presentationTransitionsOracle.test.ts src/tests/animPresetMatrix.test.ts
           src/tests/presentationMediaTiming.test.ts
+      # The RTF writer's corpus saves, kept in FILEN_OFFICE_RTF_WRITE_OUT, then read back against the Open XML SDK
+      # validator. The validator file skips without the saves, so its step fails unless the report was written.
+      - name: RTF saves
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_RTF_WRITE_OUT: ${{ runner.temp }}/office-rtf-saves
+        run: |
+          mkdir -p "$FILEN_OFFICE_RTF_WRITE_OUT"
+          pnpm exec vitest run --reporter=verbose src/tests/rtfWriterCorpus.test.ts
+          test -f "$FILEN_OFFICE_RTF_WRITE_OUT/report.json" || { echo "::error::no RTF writer report in $FILEN_OFFICE_RTF_WRITE_OUT"; exit 1; }
+      - name: RTF saves against the Open XML SDK
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_RTF_WRITE_OUT: ${{ runner.temp }}/office-rtf-saves
+        run: |
+          pnpm exec vitest run --reporter=verbose src/tests/rtfWriterValidator.test.ts
+          test -f "$FILEN_OFFICE_RTF_WRITE_OUT/sdk.json" || { echo "::error::the RTF validator suite did not run"; exit 1; }
