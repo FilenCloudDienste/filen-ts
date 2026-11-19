@@ -33,7 +33,7 @@ export default defineConfig(
 		files: ["**/*.ts"],
 		rules: {
 			eqeqeq: 2,
-			quotes: ["error", "double"],
+			quotes: ["error", "double", { avoidEscape: true }],
 			"no-mixed-spaces-and-tabs": 0,
 			"no-duplicate-imports": "error",
 			"no-extra-semi": 0,
