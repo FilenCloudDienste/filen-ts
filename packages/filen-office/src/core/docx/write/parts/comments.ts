@@ -1,5 +1,6 @@
 import type { Node } from "prosemirror-model"
 import { BytePieces, relativeTarget } from "../../../opc/index"
+import { concatBytes } from "../../../xml/bytes"
 import { XmlEditor, decodeCharacterData, encodeUtf8, escapeAttribute, type SliceClock, type XmlDocument } from "../../../xml/index"
 import type { StoryDoc } from "../../edit/build"
 import type { DocxEditContext } from "../../edit/context"
@@ -567,7 +568,7 @@ async function writtenAuthors(
 			continue
 		}
 
-		const joined = run.fresh.length === 1 ? (run.fresh[0] as Uint8Array) : concat(run.fresh)
+		const joined = run.fresh.length === 1 ? (run.fresh[0] as Uint8Array) : concatBytes(run.fresh)
 
 		await scanAuthors(joined, 0, joined.length, clock, (_at, author) => named(author))
 	}
@@ -585,18 +586,6 @@ function lowerBound(sorted: readonly number[], value: number): number {
 	}
 
 	return low
-}
-
-function concat(chunks: readonly Uint8Array[]): Uint8Array {
-	const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
 }
 
 // Bytes read between looks at the clock.

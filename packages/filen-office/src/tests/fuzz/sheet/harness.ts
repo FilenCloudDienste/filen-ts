@@ -330,7 +330,7 @@ export async function runSequence(
 const APPEND_ONLY = /^xl\/(styles|sharedStrings|calcChain)\.xml$|^\[Content_Types\]\.xml$|^xl\/_rels\/workbook\.xml\.rels$/
 
 // After every edit is undone: what the save holds equals the source (cells, rows, columns, merges, data validations,
-// the autoFilter, hyperlinks, sheets, names),
+// the autoFilter, hyperlinks, notes' and threaded comments' cells, sheets, names),
 // and every part but the append-only ones keeps its bytes, or differs in its text only where shown.
 // Worksheet parts are compared by what they hold: a rewritten row loses source cells that hold nothing (no value, no
 // style, no formula: `<c r="F5"/>`), and a dimension that did not cover the cells is widened.

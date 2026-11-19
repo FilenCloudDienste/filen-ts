@@ -594,8 +594,12 @@ function decodeAttribute(raw: string): string {
 
 // --- Sheets now ---
 
+// A sheet model with its source axes when it has them: an OdsSheet's, absent on a copied or new sheet's. The `object`
+// half lets any sheet model in (a type of optional members alone takes only one sharing a member).
+type AxesNow = object & { readonly rowAxis?: SourceAxis; readonly colAxis?: SourceAxis }
+
 interface WorkbookNow {
-	readonly sheets: readonly { readonly id: number; readonly name: string; readonly model: object | null }[]
+	readonly sheets: readonly { readonly id: number; readonly name: string; readonly model: AxesNow | null }[]
 }
 
 // How each source table moved: renamed, its rows and columns inserted or deleted, or deleted.
@@ -604,15 +608,16 @@ export function shifterOf(workbook: WorkbookNow, tables: readonly { readonly id:
 
 	for (const table of tables) {
 		const entry = workbook.sheets.find(sheet => sheet.id === table.id)
-		const model = entry?.model as { rowAxis?: SourceAxis; colAxis?: SourceAxis } | null | undefined
+		const rows = entry?.model?.rowAxis
+		const cols = entry?.model?.colAxis
 
-		if (entry === undefined || model === null || model === undefined || !("rowAxis" in model)) {
+		if (entry === undefined || rows === undefined || cols === undefined) {
 			moves.set(table.name, null)
 
 			continue
 		}
 
-		moves.set(table.name, { name: entry.name, rows: model.rowAxis as SourceAxis, cols: model.colAxis as SourceAxis })
+		moves.set(table.name, { name: entry.name, rows, cols })
 	}
 
 	return new Shifter(moves)

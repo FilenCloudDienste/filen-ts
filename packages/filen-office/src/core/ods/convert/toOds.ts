@@ -1815,7 +1815,7 @@ export async function xlsxToOds(source: Uint8Array, options: SheetConvertOptions
 		const placed =
 			drawing === undefined || theme === null
 				? null
-				: await sheetFrames(workbook, drawing, entry.name, model, view, files, theme, shapeStyles, clock).catch(
+				: await sheetFrames(workbook, drawing, entry.name, model, view, files, theme, shapeStyles, clock, options.chartText).catch(
 						(error: unknown) => {
 							if (error instanceof DrawingRefused) return error
 

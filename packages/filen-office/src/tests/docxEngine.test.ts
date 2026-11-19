@@ -23,7 +23,6 @@ import { engineServices } from "./engineFixtures"
 // A picture whose header the viewer reads (one it cannot read is not served).
 const IMAGE = png(4, 3)
 
-// A measurer without a browser: every character half an em wide.
 function fixture(name: string): Uint8Array {
 	return new Uint8Array(readFileSync(new URL(`./fixtures/${name}`, import.meta.url)))
 }

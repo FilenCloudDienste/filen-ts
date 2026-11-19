@@ -1,3 +1,4 @@
+import { CHART_TEXT_EN, type ChartText } from "../../drawingml/chart/builder"
 import type { DrawingTheme } from "../../drawingml/color"
 import type { SliceClock } from "../../slicing"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
@@ -271,7 +272,8 @@ export async function sheetFrames(
 	files: PackageFiles,
 	theme: DrawingTheme,
 	shapeStyles: ShapeStyles,
-	clock?: SliceClock
+	clock?: SliceClock,
+	chartText: ChartText = CHART_TEXT_EN
 ): Promise<SheetFrames> {
 	const frames = new Map<string, string>()
 	let lostPictures = 0
@@ -352,7 +354,9 @@ export async function sheetFrames(
 			const chart =
 				part === undefined || workbook.parts.get(part) === undefined ? null : parseChartPart(await workbook.parts.read(part))
 			const written =
-				chart === null ? null : chartObject(chart, theme, sheet, cmLength(Math.max(0, box.cx)), cmLength(Math.max(0, box.cy)))
+				chart === null
+					? null
+					: chartObject(chart, theme, sheet, cmLength(Math.max(0, box.cx)), cmLength(Math.max(0, box.cy)), chartText)
 
 			if (written === null) {
 				lostCharts++

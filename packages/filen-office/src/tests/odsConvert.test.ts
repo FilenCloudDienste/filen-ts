@@ -18,6 +18,7 @@ import { cellRef } from "../core/xlsx/write/text"
 import { renameSheetInFormula } from "../core/sheet/refs/formulaRefs"
 import { PackageFiles } from "../core/ods/convert/drawings"
 import { XlsxParts } from "../core/xlsx/package/parts"
+import type { ChartText } from "../core/drawingml/chart/builder"
 
 function converted(result: SheetConversion): Extract<SheetConversion, { ok: true }> {
 	if (!result.ok) throw new Error(`${result.reason}: ${result.message}`)
@@ -1625,6 +1626,51 @@ describe("saveAs.format on an open workbook", () => {
 		} finally {
 			session.close()
 		}
+	})
+
+	it("writes a chart's automatic title in the session's chart text, English without it", async () => {
+		const parts = CHART_PARTS("worksheets/_rels/sheet2.xml.rels")
+		// An automatic title over two unnamed series.
+		const chart = (parts["xl/charts/chart1.xml"] ?? "")
+			.replace(/<c:title>[\s\S]*?<\/c:title>/, "<c:title/>")
+			.replace(
+				"</c:ser>",
+				'</c:ser><c:ser><c:idx val="1"/><c:order val="1"/><c:val><c:numRef><c:f>Data!$B$1:$B$2</c:f></c:numRef></c:val></c:ser>'
+			)
+		const source = (): Uint8Array =>
+			buildWorkbook({
+				sheets: [
+					{
+						name: "Data",
+						body: '<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>3</v></c></row><row r="2"><c r="A2"><v>2</v></c><c r="B2"><v>4</v></c></row></sheetData>'
+					},
+					{ name: "Chart", type: "chartsheet", xml: CHART_SHEET }
+				],
+				extra: { ...parts, "xl/charts/chart1.xml": chart }
+			})
+		const title = async (settings?: { readonly chartText: ChartText }): Promise<string | undefined> => {
+			const opened = await inThreadSheetHost().open(
+				source(),
+				{ kind: "xlsx", slicing: IMMEDIATE, ...(settings !== undefined && { settings }) },
+				() => undefined
+			)
+
+			if (opened.kind !== "opened") throw new Error(opened.kind)
+
+			try {
+				const result = converted(await opened.session.query("saveAs.format", { format: "ods" }))
+				const object = strFromU8(unzipSync(result.bytes)["Object 1/content.xml"] ?? new Uint8Array(0))
+
+				return /<chart:chart [^>]*><chart:title><text:p>([^<]*)<\/text:p><\/chart:title>/.exec(object)?.[1]
+			} finally {
+				opened.session.close()
+			}
+		}
+
+		expect(await title({ chartText: { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" } })).toBe(
+			"Diagrammtitel"
+		)
+		expect(await title()).toBe("Chart Title")
 	})
 
 	it("converts an open ods to xlsx", async () => {

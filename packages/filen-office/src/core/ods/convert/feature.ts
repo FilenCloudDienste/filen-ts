@@ -92,7 +92,8 @@ export const saveAsFormatFeature = defineSheetFeature<XlsxDocument>({
 
 				const converted = await convertSheet(own.bytes, family, request.format, {
 					turns: { signal, slicing },
-					...(request.language !== undefined && { language: request.language })
+					...(request.language !== undefined && { language: request.language }),
+					...(context.settings.chartText !== undefined && { chartText: context.settings.chartText })
 				})
 
 				return converted.ok && read.length > 0 ? { ...converted, lossy: [...read, ...converted.lossy] } : converted

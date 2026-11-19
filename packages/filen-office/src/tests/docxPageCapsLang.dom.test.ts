@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache } from "@filen/office/react/docx"
 import { FragmentFlag, FragmentKind } from "../core/text/index"
 import { paintPage } from "../react/docx/paint/page"
 import { ReflowView } from "../react/docx/reflow/view"
 import { NUMBERING_PART } from "./docxEditFixtures"
 import { FIXTURE_TABLES, fixturePage, paragraph, text } from "./docxPageFixture"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { buildDocx } from "./docxSynthetic"
 import { pagedEditor } from "./pagedDomFixtures"
 
@@ -49,15 +48,6 @@ describe("caps on a page in another language", () => {
 		expect(small?.hasAttribute("lang")).toBe(false)
 	})
 })
-
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
 
 const STYLES =
 	'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
@@ -104,16 +94,7 @@ describe("caps in Mobile view in another language", () => {
 			onFind: undefined,
 			marks: [],
 			interactions: undefined,
-			document: {
-				status: "ready",
-				info: undefined,
-				pages: [],
-				pageCount: 0,
-				tables: { styles: [], decorations: [], links: [] },
-				session: SESSION,
-				media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-				error: undefined
-			}
+			document: emptyDocxDocument()
 		})
 
 		try {

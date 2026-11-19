@@ -9,8 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RevisionView } from "../core/docx/model/kinds"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import { saveDocx } from "@filen/office/core/docx/write"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import {
 	DocxEditor,
 	DocxReflow,
@@ -32,32 +30,11 @@ import { docxComments } from "../core/docx/review/comments"
 import { BlockHeights, estimateHeight } from "../react/docx/reflow/heights"
 import { ReflowView, type ReflowViewOptions } from "../react/docx/reflow/view"
 import { LiveStarts } from "../react/docx/edit/window"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { buildDocx, p } from "./docxSynthetic"
 import { pagedEditor } from "./pagedDomFixtures"
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
-
-function documentOf(): DocxDocument {
-	return {
-		status: "ready",
-		info: undefined,
-		pages: [],
-		pageCount: 0,
-		tables: { styles: [], decorations: [], links: [] },
-		session: SESSION,
-		media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-		error: undefined
-	}
-}
 
 function optionsOf(overrides: Partial<ReflowViewOptions> = {}): ReflowViewOptions {
 	return {
@@ -67,7 +44,7 @@ function optionsOf(overrides: Partial<ReflowViewOptions> = {}): ReflowViewOption
 		onFind: undefined,
 		marks: [],
 		interactions: undefined,
-		document: documentOf(),
+		document: emptyDocxDocument(),
 		...overrides
 	}
 }
@@ -1696,7 +1673,7 @@ describe("DocxReflow", () => {
 						handle.current = value
 					}}
 					editor={editor}
-					document={documentOf()}
+					document={emptyDocxDocument()}
 					label="Document"
 					onFind={onFind}
 				/>
@@ -1740,7 +1717,7 @@ describe("DocxReflow", () => {
 			root.render(
 				<DocxEditor
 					editor={editor}
-					document={documentOf()}
+					document={emptyDocxDocument()}
 					zoom={1}
 					label="Document"
 				/>
@@ -1764,7 +1741,7 @@ describe("DocxReflow", () => {
 				root.render(
 					<DocxEditor
 						editor={editor}
-						document={documentOf()}
+						document={emptyDocxDocument()}
 						zoom={1}
 						label="Document"
 						gap={16}
@@ -1789,7 +1766,7 @@ describe("DocxReflow", () => {
 			root.render(
 				<DocxEditor
 					editor={editor}
-					document={documentOf()}
+					document={emptyDocxDocument()}
 					zoom={1}
 					label="Document"
 				/>

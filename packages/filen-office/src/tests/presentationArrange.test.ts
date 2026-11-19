@@ -15,7 +15,7 @@ import { sessionEdits } from "../dom/presentation/engine/edit"
 import { OpenXmlSdk, loadAllowlist, newSdkErrors, openXmlSdkMissing, sdkErrorCounts } from "./oracles/openXmlSdk"
 import { openRenderDeck } from "./fixtures/presentation/renderDeck"
 import { editDeck, editHarness, shapeById, type EditHarness } from "./presentationEditFixtures"
-import { changedParts, saveEdits } from "./pptxWriteFixtures"
+import { differingParts, saveEdits } from "./pptxWriteFixtures"
 
 // The arrange commands through the edit session with the real pptx emitter: each op changes the model as the
 // command says, saves only its slide (and that slide's relationships when a link is added), reads back the same,
@@ -48,7 +48,7 @@ async function session(): Promise<{ h: EditHarness; slide: SlideNode }> {
 // to the same slide.
 async function saved(h: EditHarness): Promise<{ bytes: Uint8Array; slide: SlideNode }> {
 	const bytes = await saveEdits(h, sessionEdits(h.session).history.revision)
-	const changed = await changedParts(editDeck(), bytes)
+	const changed = await differingParts(editDeck(), bytes)
 
 	expect(changed.filter(name => name !== "ppt/slides/slide1.xml" && name !== "ppt/slides/_rels/slide1.xml.rels")).toEqual([])
 

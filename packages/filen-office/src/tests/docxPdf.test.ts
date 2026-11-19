@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest"
 import { openPdf, pageText, paragraph, pdfOf, snapshotOf, structRoles, structuredDocx } from "./docxPdfFixtures"
 import { ObjectKind, RevisionView } from "@filen/office/core/docx"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
-import { DocxEngine, type DocxEngineServices, type DocxPageData } from "@filen/office/dom/docx"
+import { DocxEngine, type DocxPageData } from "@filen/office/dom/docx"
 import { cellOrder } from "../core/docx/pdf/paint"
 import type { DocxPdfCell, DocxPdfRole } from "../core/docx/pdf/types"
 import { bookmarkIndex } from "../dom/docx/links"
 import { docxPdfSnapshot } from "../dom/docx/pdfSnapshot"
 import { buildDocx } from "./docxSynthetic"
+import { engineServices } from "./engineFixtures"
 import { layOut } from "./layoutFixtures"
 import { embeddedFontNames } from "./pdfWriteFixtures"
 
@@ -22,32 +22,6 @@ function pictures(count: number): string {
 		'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="190500" cy="190500"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
 
 	return `<w:p><w:r><w:t xml:space="preserve">Pictures </w:t></w:r>${Array.from({ length: count }, (_, k) => picture(k + 1)).join("")}</w:p>`
-}
-
-// A measurer without a browser: every character half an em wide.
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
-function engineServices(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
-		yield: () => Promise.resolve(),
-		sliceMs: Infinity
-	}
 }
 
 interface StructNode {

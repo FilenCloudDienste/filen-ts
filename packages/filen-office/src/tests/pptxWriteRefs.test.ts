@@ -9,7 +9,7 @@ import type { Paragraph, SlideRef, Xfrm } from "../core/presentation/model"
 import { buildPptx, body, para, sp } from "./pptxFixtures"
 import {
 	Changes,
-	changedParts,
+	differingParts,
 	danglingReferences,
 	openDeck,
 	partsOf,
@@ -247,7 +247,7 @@ describe("pptx writer referential integrity", () => {
 
 			const again = await saveEdits(h, 2)
 
-			expect(await changedParts(first, again)).toEqual([part.slice(1)])
+			expect(await differingParts(first, again)).toEqual([part.slice(1)])
 
 			const back = await openDeck(again)
 			const node = await back.parts.slide(back.deck.slides[2] ?? (0 as SlideRef))

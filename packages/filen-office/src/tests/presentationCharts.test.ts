@@ -160,6 +160,25 @@ describe("Insert ▸ Chart in a pptx", () => {
 		expect(await textOf(third, "ppt/charts/chart1.xml")).toContain("Sales")
 	})
 
+	it("refuses an axis value the user can correct as the value, and what the editor cannot change as unsupported", async () => {
+		const d = await driveSession(deckOf("pptx"), "pptx")
+		const slide = d.session.deck.slides[0] as SlideRef
+
+		await insertChart(d, slide)
+
+		const xml = await textOf(await saved(d), "ppt/charts/chart1.xml")
+		const valueAxis = Number(/<c:valAx><c:axId val="(\d+)"/u.exec(xml)?.[1])
+		const categoryAxis = Number(/<c:catAx><c:axId val="(\d+)"/u.exec(xml)?.[1])
+		const target = { slide, id: chartShape(d, slide).id }
+		const axis = (axisId: number, patch: object) => d.command(chartEditOp(target, { kind: "axis", axis: axisId, patch }))
+
+		expect(await axis(valueAxis, { min: Number.NaN })).toMatchObject({ ok: false, refusal: "invalidValue" })
+		expect(await axis(valueAxis, { min: 5, max: 1 })).toMatchObject({ ok: false, refusal: "invalidValue" })
+		expect(await axis(valueAxis, { major: 0 })).toMatchObject({ ok: false, refusal: "invalidValue" })
+		expect(await axis(categoryAxis, { min: 0 })).toMatchObject({ ok: false, refusal: "unsupported" })
+		expect(await axis(valueAxis, { min: 0, max: 10 })).toMatchObject({ ok: true })
+	})
+
 	it("names what the first save wrote after an undo past a save and a redo", async () => {
 		const d = await driveSession(deckOf("pptx"), "pptx")
 		const slide = d.session.deck.slides[0] as SlideRef

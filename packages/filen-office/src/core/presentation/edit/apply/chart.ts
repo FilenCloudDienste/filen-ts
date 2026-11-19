@@ -36,6 +36,7 @@ import {
 	refused,
 	type Deck,
 	type FrameRef,
+	type PresentationRefusal,
 	type Refused,
 	type ShapeNode,
 	type ShapeRef,
@@ -994,11 +995,23 @@ function parsed(bytes: Uint8Array): XmlDocument | Refused {
 	return parsedOrUndefined(bytes) ?? refused("malformed", "a chart part")
 }
 
+// A chart edit's refusal as the presentation's: a value the user can correct stays one.
+function chartEditRefusal(reason: ChartEditRefused["reason"]): PresentationRefusal {
+	switch (reason) {
+		case "tooLarge":
+			return "tooLarge"
+		case "chartValue":
+			return "invalidValue"
+		default:
+			return "unsupported"
+	}
+}
+
 function edited<T>(make: () => T): T | Refused {
 	try {
 		return make()
 	} catch (error) {
-		if (error instanceof ChartEditRefused) return refused(error.reason === "tooLarge" ? "tooLarge" : "unsupported", error.message)
+		if (error instanceof ChartEditRefused) return refused(chartEditRefusal(error.reason), error.message)
 		if (error instanceof ChartRefused) return refused("unsupported", error.message)
 
 		throw error

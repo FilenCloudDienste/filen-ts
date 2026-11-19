@@ -17,7 +17,7 @@ import {
 	type Xfrm
 } from "../../presentation/model"
 import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument, type XmlEditor } from "../../xml/index"
-import { concatBytes } from "../../opc/pieces"
+import { concatBytes } from "../../xml/bytes"
 import { SECTIONS_EXT } from "../read/sections"
 import { readSlidePart, SlidePartError } from "../read/slide"
 import { timingContainer } from "./emit/timing"

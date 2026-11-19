@@ -1,5 +1,5 @@
 import { partKey } from "../../../opc/index"
-import { concatBytes } from "../../../opc/pieces"
+import { concatBytes } from "../../../xml/bytes"
 import type { DeckChanges } from "../../../presentation/edit/apply"
 import { formerName, noteFormerName } from "../../../presentation/issuedNames"
 import { refused, type Deck, type Refused, type SlideNode, type SlideRef } from "../../../presentation/model"

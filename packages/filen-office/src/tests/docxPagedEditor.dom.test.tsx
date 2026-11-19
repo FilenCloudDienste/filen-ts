@@ -17,20 +17,12 @@ import { DrawingList, ItemKind, type DrawingImage } from "../core/drawingml/disp
 import { PageGraphic } from "../core/docx/layout/output"
 import { EditSurface } from "../react/docx/edit/surface"
 import { FIXTURE_TABLES, fixturePage, paragraph, type FixtureGraphic, type FixtureObject } from "./docxPageFixture"
+import { emptyDocxSession } from "./docxDocumentStubs.dom"
 import { buildDocx } from "./docxSynthetic"
 import { pagedEditor, settle } from "./pagedDomFixtures"
 import { classicScrollbars } from "./scrollbars.dom"
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
 
 // The renderer's view of a layout page (no objects or links in these documents).
 function pageData(page: PageDisplayList): DocxPageData {
@@ -99,14 +91,16 @@ function documentOf(editor: PagedEditor): DocxDocument {
 		if (page !== undefined) pages.push(pageData(page))
 	}
 
+	const session = emptyDocxSession()
+
 	return {
 		status: "ready",
 		info: undefined,
 		pages,
 		pageCount: pages.length,
 		tables: tablesOf(editor.layout),
-		session: SESSION,
-		media: new DocxMediaCache(SESSION),
+		session,
+		media: new DocxMediaCache(session),
 		error: undefined
 	}
 }
@@ -281,7 +275,7 @@ describe("object patching", () => {
 	it("keeps the boxes of objects that moved, fills only new ones and releases only those taken away", async () => {
 		const { editor } = await pagedEditor(LONG)
 		const session: DocxSessionApi = {
-			...SESSION,
+			...emptyDocxSession(),
 			objects: ids => Promise.resolve(ids.map(id => ({ kind: "drawing" as const, id, drawing: drawing(parts[id] ?? "") })))
 		}
 		const requested = vi.spyOn(session, "objects")
@@ -355,7 +349,7 @@ describe("object patching", () => {
 	it("stops watching the zoom for a shaded drawing once every object of its paint went one by one", async () => {
 		const { editor } = await pagedEditor(LONG)
 		const session: DocxSessionApi = {
-			...SESSION,
+			...emptyDocxSession(),
 			objects: ids => Promise.resolve(ids.map(id => ({ kind: "drawing" as const, id, drawing: drawing("", true) })))
 		}
 		const media = new DocxMediaCache(session, undefined, { create: () => "blob:shade", revoke: () => undefined })

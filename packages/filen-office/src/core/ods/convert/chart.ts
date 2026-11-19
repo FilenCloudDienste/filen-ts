@@ -1,5 +1,5 @@
 import { appendAll } from "../../arrays"
-import { CHART_TEXT_EN } from "../../drawingml/chart/builder"
+import { CHART_TEXT_EN, type ChartText } from "../../drawingml/chart/builder"
 import { seriesColor } from "../../drawingml/chart/palette"
 import { readColorIn, type DrawingTheme } from "../../drawingml/color"
 import { rgbaHex } from "../../drawingml/displayList"
@@ -151,7 +151,15 @@ function solid(reader: DrawingReader, owner: number, theme: DrawingTheme, lose: 
 	return gradient >= 0 || reader.child(owner, D.A, "pattFill") >= 0 || reader.child(owner, D.A, "blipFill") >= 0 ? "other" : undefined
 }
 
-export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: string, width: string, height: string): ChartObject | null {
+// chartText: what an automatic title reads where the file names none, in the app's language.
+export function chartObject(
+	document: XmlDocument,
+	theme: DrawingTheme,
+	sheet: string,
+	width: string,
+	height: string,
+	chartText: ChartText = CHART_TEXT_EN
+): ChartObject | null {
 	const info = readChartInfo(document)
 
 	if (info === null) return null
@@ -421,7 +429,7 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 		],
 		[]
 	)
-	const titleText = info.title === "" ? (total === 1 ? (first.series[0]?.name ?? "") : CHART_TEXT_EN.chartTitle) : info.title
+	const titleText = info.title === "" ? (total === 1 ? (first.series[0]?.name ?? "") : chartText.chartTitle) : info.title
 	const title = titleText === null || titleText === "" ? "" : `<chart:title>${paragraphs(titleText)}</chart:title>`
 	const legend = info.legend === null ? "" : `<chart:legend chart:legend-position="${ODF_LEGENDS.get(info.legend) ?? "end"}"/>`
 	const area = styles.style(

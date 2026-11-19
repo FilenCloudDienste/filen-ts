@@ -11,13 +11,16 @@ import {
 	type XlsxSheetStore
 } from "../../../core/xlsx/model/types"
 import type { XlsxWorkbook } from "../../../core/xlsx/read/index"
+import type { SheetId } from "../../../core/sheet/protocol"
+import { annotationStore } from "../../../core/xlsx/comments/store"
 import { formatA1, parseA1, readXlsxCells, type CellScalar, type XlsxCell } from "../../oracles/sheet/xlsxCells"
 
 // The fuzz's invariant: what a session holds equals what its save holds, read back without the engine. Cell
 // values, cached results and formulas come from the oracles' plain reader (xlsxCells.ts); everything else a
 // session edits is read here from the part text (ECMA-376 Part 1 §18.3.1: rows, cols, mergeCells, the cell
 // style index, the cells of each data validation, the autoFilter's range and each hyperlink's; §18.2: sheets and
-// definedNames; §18.8: cellXfs, fonts and numFmts), and compared with the model section by section. A difference is
+// definedNames; §18.8: cellXfs, fonts and numFmts; §18.7 and [MS-XLSX] §2.1.17: the cells of the notes and threaded
+// comments in the parts the sheet's relationships name), and compared with the model section by section. A difference is
 // reported in words, the first few per section.
 
 const SHEET_MAX_COLS = 16_384
@@ -55,6 +58,10 @@ export interface SheetRecord {
 	readonly validations?: string[]
 	readonly autoFilter?: string
 	readonly links?: string[]
+	// The cells holding a note (the first of a cell counts), and each threaded comment's cell, as "row,col". Left out
+	// on the model's side when the sheet's annotation parts were not read or do not read (nothing to compare).
+	readonly notes?: string[]
+	readonly threads?: string[]
 }
 
 export interface XfRecord {
@@ -183,6 +190,50 @@ const RELATIONSHIP_NAMESPACES = [
 
 function relationshipId(namespaces: Namespaces, node: number): string | undefined {
 	return RELATIONSHIP_NAMESPACES.map(uri => namespaces.attribute(node, uri, "id")).find(value => value !== undefined)
+}
+
+// A cell reference as "row,col", undefined when it is not one.
+function cellKey(ref: string | undefined): string | undefined {
+	const at = ref === undefined ? undefined : parseA1(ref)
+
+	return at === undefined ? undefined : `${at.row},${at.column}`
+}
+
+// The notes' cells (a cell's first note) and the threaded comments' cells, from the parts the worksheet part's
+// relationships name.
+async function annotationRecord(pkg: OpcPackage, part: string): Promise<{ notes: string[]; threads: string[] }> {
+	const notes = new Set<string>()
+	const threads: string[] = []
+
+	for (const relationship of (await pkg.relationships(part)).all) {
+		const target = relationship.partName
+
+		if (relationship.external || target === undefined || !pkg.has(target)) continue
+
+		const comments = relationship.type.endsWith("/comments")
+
+		if (!comments && !relationship.type.endsWith("/threadedComment")) continue
+
+		const document = await pkg.xml(target)
+		const root = document.documentElement()
+
+		if (comments) {
+			const list = child(document, root, "commentList")
+
+			for (const comment of list < 0 ? [] : children(document, list, "comment")) {
+				const key = cellKey(document.attribute(comment, "ref"))
+
+				if (key !== undefined) notes.add(key)
+			}
+		} else
+			for (const comment of children(document, root, "threadedComment")) {
+				const key = cellKey(document.attribute(comment, "ref"))
+
+				if (key !== undefined && (document.attribute(comment, "id") ?? "") !== "") threads.push(key)
+			}
+	}
+
+	return { notes: [...notes], threads }
 }
 
 function fontRecord(document: XmlDocument, font: number): FontRecord {
@@ -333,7 +384,16 @@ export async function readSaved(bytes: Uint8Array, source?: Uint8Array | Workboo
 			})
 		}
 
-		sheets.push({ name, state, cells: record, rows, cols, merges, ...featureRecord(document, document.documentElement()) })
+		sheets.push({
+			name,
+			state,
+			cells: record,
+			rows,
+			cols,
+			merges,
+			...featureRecord(document, document.documentElement()),
+			...(await annotationRecord(pkg, part))
+		})
 	}
 
 	const names = new Set<string>()
@@ -462,6 +522,25 @@ function colRecord(range: XlsxColRange): ColRecord {
 	}
 }
 
+// The notes' and threaded comments' cells as the session's annotation parts now hold them; each left out when the
+// sheet's parts were not read or do not read.
+function modelAnnotations(workbook: XlsxWorkbook, sheet: SheetId): { notes?: string[]; threads?: string[] } {
+	const store = annotationStore(workbook)
+
+	if (!store.loaded(sheet)) return {}
+
+	const notes = store.failure(sheet, "notes") === null ? store.commentsOf(sheet) : undefined
+	const threads = store.failure(sheet, "threads") === null ? store.threadedOf(sheet) : undefined
+
+	return {
+		...(notes !== undefined && { notes: [...(notes?.notes.values() ?? [])].map(note => `${note.row},${note.col}`) }),
+		...(threads !== undefined && {
+			// The key is cellKeyOf(row, col): row × the sheet's columns + col.
+			threads: [...(threads?.comments.values() ?? [])].map(({ key }) => `${Math.floor(key / SHEET_MAX_COLS)},${key % SHEET_MAX_COLS}`)
+		})
+	}
+}
+
 // What the session's model holds. Unparsed sheets carry their name and state only (their parts are copied).
 export function modelRecord(workbook: XlsxWorkbook): WorkbookRecord {
 	const sheets: SheetRecord[] = []
@@ -540,7 +619,8 @@ export function modelRecord(workbook: XlsxWorkbook): WorkbookRecord {
 			rows,
 			cols,
 			merges,
-			...(wrapped === null ? { validations: [], autoFilter: "", links: [] } : featureRecord(wrapped, wrapped.documentElement()))
+			...(wrapped === null ? { validations: [], autoFilter: "", links: [] } : featureRecord(wrapped, wrapped.documentElement())),
+			...modelAnnotations(workbook, entry.id)
 		})
 	}
 
@@ -704,6 +784,10 @@ export function compareRecords(expected: WorkbookRecord, actual: WorkbookRecord,
 			(sheet.autoFilter ?? "") === (saved.autoFilter ?? "") ? [] : [`${sheet.autoFilter || "∅"}≠${saved.autoFilter || "∅"}`]
 		)
 		push(`${sheet.name} hyperlinks`, listDifferences(sheet.links ?? [], saved.links ?? []))
+
+		if (sheet.notes !== undefined && saved.notes !== undefined) push(`${sheet.name} notes`, listDifferences(sheet.notes, saved.notes))
+		if (sheet.threads !== undefined && saved.threads !== undefined)
+			push(`${sheet.name} threadedComments`, listDifferences(sheet.threads, saved.threads))
 	}
 
 	// A save writes the model's records up to the last one a cell refers to (records an undone edit appended stay

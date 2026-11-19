@@ -2,24 +2,14 @@
 import type { Node } from "prosemirror-model"
 import type { EditorView } from "prosemirror-view"
 import { describe, expect, it } from "vitest"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache } from "@filen/office/react/docx"
 import { docxSchema } from "../core/docx/edit/index"
 import { clipboardSerializer, plainText } from "../react/docx/edit/clipboard"
 import { NODE_VIEWS } from "../react/docx/edit/sink"
 import { reflowNodeViews } from "../react/docx/reflow/nodes"
 import { ReflowView } from "../react/docx/reflow/view"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { buildDocx } from "./docxSynthetic"
 import { pagedEditor } from "./pagedDomFixtures"
-
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
 
 const field = (instruction: string, result: string | undefined): string =>
 	'<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
@@ -46,16 +36,7 @@ describe("MACROBUTTON fields in Mobile view, the input view and a copy", () => {
 			onFind: undefined,
 			marks: [],
 			interactions: undefined,
-			document: {
-				status: "ready",
-				info: undefined,
-				pages: [],
-				pageCount: 0,
-				tables: { styles: [], decorations: [], links: [] },
-				session: SESSION,
-				media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-				error: undefined
-			}
+			document: emptyDocxDocument()
 		})
 		const session = editor.body.session
 		const doc = session.state.doc

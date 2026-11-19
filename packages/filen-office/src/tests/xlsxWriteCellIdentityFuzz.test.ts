@@ -2,27 +2,13 @@ import { unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import type { SheetCommand } from "../core/sheet/protocol"
 import { R, SML, firstTile, openFixture } from "./sheetSessionFixtures"
+import { rng } from "./mulberry32"
 
 // Every cell carries an attribute the model does not hold (its identity). Random formats, value edits and row and
 // column inserts and deletes over equal values; after the save every identity is where its cell went, once.
 
 const RUNS = 300
 const ID = "urn:cell-identity"
-
-function rng(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 function colName(col: number): string {
 	let name = ""

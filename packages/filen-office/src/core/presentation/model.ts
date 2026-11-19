@@ -49,8 +49,11 @@ export type GateReason = "signed" | "strict" | "writeProtected" | "malformed"
 
 // Why something is refused (typed, never silent). notImplemented: a capability not built yet. passwordUnsupported: a
 // protected PDF was asked for, but the deck has no password, or one the PDF security handler cannot take.
+// invalidValue: a value the user typed and can correct (an axis bound that is not a number, a unit that is not
+// positive, a minimum not below the maximum).
 export type PresentationRefusal =
 	| "notImplemented"
+	| "invalidValue"
 	| "tooLarge"
 	| "tooDeep"
 	| "malformed"

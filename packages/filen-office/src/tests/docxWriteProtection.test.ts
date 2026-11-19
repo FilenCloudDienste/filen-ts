@@ -24,7 +24,7 @@ import { inThreadEditingHost } from "@filen/office/dom/docx/editing"
 import { legacyPasswordBytes, legacyVerifierText, protectionHashInputs } from "../core/docx/protection/hash"
 import { CORPUS_DIR } from "./corpusDir"
 import { buildDocx, p } from "./docxSynthetic"
-import { measurer } from "./engineFixtures"
+import { engineServices } from "./engineFixtures"
 
 // Password to modify (w:writeProtection) and the hash form w:documentProtection shares with it.
 
@@ -275,17 +275,7 @@ describe("the write protection gate", () => {
 
 	it("opens editable through an editing host told the password was given", async () => {
 		for (const writeUnlocked of [false, true]) {
-			const editing = inThreadEditingHost(
-				() => ({
-					fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-					replayFonts: false,
-					fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-					measurer,
-					yield: () => Promise.resolve(),
-					sliceMs: 8
-				}),
-				{ writeUnlocked }
-			)
+			const editing = inThreadEditingHost(() => engineServices({ sliceMs: 8 }), { writeUnlocked })
 			const session = editing.host(bytesSource(buildDocx({ body: p("Some text"), settings: WORD_WRITE_PROTECTION })), () => undefined)
 			const editor = await editing.editor
 
@@ -397,17 +387,7 @@ describe("stopping document protection", () => {
 
 	it("opens unprotected through an editing host told protection was stopped", async () => {
 		for (const protectionUnlocked of [false, true]) {
-			const editing = inThreadEditingHost(
-				() => ({
-					fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-					replayFonts: false,
-					fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-					measurer,
-					yield: () => Promise.resolve(),
-					sliceMs: 8
-				}),
-				{ protectionUnlocked }
-			)
+			const editing = inThreadEditingHost(() => engineServices({ sliceMs: 8 }), { protectionUnlocked })
 			const session = editing.host(
 				bytesSource(buildDocx({ body: p("Some text"), settings: '<w:documentProtection w:edit="readOnly" w:enforcement="1"/>' })),
 				() => undefined

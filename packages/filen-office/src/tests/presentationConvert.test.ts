@@ -511,6 +511,53 @@ describe("presentation conversions of a damaged part", () => {
 		expect(await outcome(deck)).toBe("malformed")
 	})
 
+	// A slide's or theme's .rels part is read when the deck opens (a damaged one refuses the open); a drawing cache's is
+	// read by the conversion only.
+	it("refuses an .odp copy of a deck whose diagram drawing cache .rels part is not well-formed as malformed", async () => {
+		const DIAGRAM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+		const DSP = "http://schemas.microsoft.com/office/drawing/2008/diagram"
+		const diagramDeck = (drawingRels: string): Uint8Array =>
+			buildPptx({
+				slides: [
+					{
+						shapes:
+							'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Diagram 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>' +
+							'<p:xfrm><a:off x="100000" y="900000"/><a:ext cx="6000000" cy="3000000"/></p:xfrm>' +
+							`<a:graphic><a:graphicData uri="${DIAGRAM}"><dgm:relIds xmlns:dgm="${DIAGRAM}" r:dm="rId11" r:lo="rId12" r:qs="rId13" r:cs="rId14"/></a:graphicData></a:graphic></p:graphicFrame>`,
+						rels: [
+							["rId11", "diagramData", "../diagrams/data1.xml"],
+							["rId15", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing", "../diagrams/drawing1.xml"]
+						]
+					}
+				],
+				parts: {
+					"ppt/diagrams/data1.xml": {
+						data: `<dgm:dataModel xmlns:dgm="${DIAGRAM}"><dgm:ptLst/><dgm:extLst><a:ext xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="${DSP}" relId="rId15"/></a:ext></dgm:extLst></dgm:dataModel>`,
+						type: "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml"
+					},
+					"ppt/diagrams/drawing1.xml": {
+						data:
+							`<dsp:drawing xmlns:dsp="${DSP}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dsp:spTree>` +
+							'<dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/>' +
+							'<dsp:sp modelId="{00000000-0000-0000-0000-000000000001}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>' +
+							'<dsp:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000000" cy="1000000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr></dsp:sp>' +
+							"</dsp:spTree></dsp:drawing>",
+						type: "application/vnd.ms-office.drawingml.diagramDrawing+xml"
+					},
+					"ppt/diagrams/_rels/drawing1.xml.rels": { data: drawingRels }
+				}
+			})
+
+		expect(
+			await outcome(
+				diagramDeck('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>')
+			)
+		).toBe("converted")
+		expect(await outcome(diagramDeck('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'))).toBe(
+			"malformed"
+		)
+	})
+
 	it("still reports a cancelled conversion as aborted", async () => {
 		const slicing = {
 			pause: () => Promise.reject(new PresentationError("aborted", "cancelled")),

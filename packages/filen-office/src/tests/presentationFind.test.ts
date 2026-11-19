@@ -16,7 +16,7 @@ import { findInDeck } from "../dom/presentation/engine/find"
 import { FIND_IN_NOTES, FIND_IN_TABLE, FIND_LOCKED, PRESENTATION_FIND_INTS } from "../dom/presentation/protocol"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { editHarness, shapeById, type EditHarness } from "./presentationEditFixtures"
-import { changedParts, partsOf, saveEdits, text } from "./pptxWriteFixtures"
+import { differingParts, partsOf, saveEdits, text } from "./pptxWriteFixtures"
 
 // Find and replace over text bodies: matching (case, whole words, never across a break, a field or kept content),
 // replacement keeping the formatting of the first replaced character, the deck-wide search (slides, groups, tables,
@@ -256,7 +256,7 @@ describe("presentation text.replace", () => {
 		)
 
 		const saved = await saveEdits(h, result.ok ? result.revision : -1)
-		const changed = (await changedParts(bytes, saved)).sort()
+		const changed = (await differingParts(bytes, saved)).sort()
 
 		expect(changed).toEqual(["ppt/notesSlides/notesSlide3.xml", "ppt/slides/slide1.xml", "ppt/slides/slide3.xml"])
 

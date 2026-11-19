@@ -1,3 +1,4 @@
+import type { ChartText } from "../../drawingml/chart/builder"
 import type { InflateHook } from "../../opc/zipReader"
 import { SliceClock, type Slicing } from "../../slicing"
 import { parseNumFmt, Tok } from "../../sheet/numfmt/parse"
@@ -31,6 +32,8 @@ export interface SheetConvertOptions {
 	// The user's language (BCP 47): an .ods written takes it as its default cell style's (fo:language, fo:country), as
 	// a blank one does, so a reader shows and reads numbers in it. en-US without one.
 	readonly language?: string
+	// What a chart's automatic title reads in an .ods written, in the app's language; English without it.
+	readonly chartText?: ChartText
 }
 
 export class Aborted extends Error {

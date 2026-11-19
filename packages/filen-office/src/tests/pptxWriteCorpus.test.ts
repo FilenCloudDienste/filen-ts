@@ -13,7 +13,7 @@ import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import {
 	Changes,
 	applyShapeAndSlideEdits,
-	changedParts,
+	differingParts,
 	danglingReferences,
 	openDeck,
 	partsOf,
@@ -394,7 +394,7 @@ describe.skipIf(PRESENT.length === 0)("pptx splice writer over the corpus", () =
 					return
 				}
 
-				const changed = await changedParts(saved, again)
+				const changed = await differingParts(saved, again)
 
 				if (changed.some(name => !parts.includes(name)) || changed.length === 0)
 					failures.push(`${path}: second save changed ${changed.join(", ")}`)

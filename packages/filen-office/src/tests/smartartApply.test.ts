@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest"
 import { diagramRelationshipOwner } from "../core/presentation/edit/apply/smartart"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { FrameRef, ShapeRef, SlideNode } from "../core/presentation/model"
-import type { RenderServices } from "../core/presentation/render/services"
 import { parseDataModel } from "../core/smartart/data"
 import { diagramFindTexts, diagramOutline, newDiagramData, withDrawingReference, type DiagramOutlineNode } from "../core/smartart/edit"
 import { emitDiagram } from "../core/smartart/emit"
@@ -13,7 +12,7 @@ import { parseLayoutDef } from "../core/smartart/layoutDef"
 import { encodeUtf8, parseXml, type XmlDocument } from "../core/xml/index"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { sessionEdits } from "../dom/presentation/engine/edit"
-import { layoutEditedDiagrams, smartartCapability, smartArtRenderer } from "../dom/presentation/engine/smartart"
+import { layoutEditedDiagrams, smartartCapability } from "../dom/presentation/engine/smartart"
 import { editHarness, shapeById, type EditHarness } from "./presentationEditFixtures"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { danglingReferences, openDeck, partsOf, rebaseSession, saveEdits, text } from "./pptxWriteFixtures"
@@ -131,8 +130,7 @@ async function open(bytes = diagramDeck()): Promise<Diagram> {
 	const node = await h.slide(0)
 	const target = { slide: node.ref, id: 4 }
 	const parts = pptxParts(h.session.deck)
-	const services: RenderServices = { xml: part => parts?.document(part), relationship: () => undefined, contentType: () => undefined }
-	const renderer = smartArtRenderer(h.session, { services })
+	const renderer = diagramRenderer(h.session)
 
 	// The text pane's query reads the diagram's parts, as the page asks it before any edit.
 	await smartartCapability.info(h.session, target)

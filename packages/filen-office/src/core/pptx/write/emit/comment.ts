@@ -1,5 +1,5 @@
 import { partKey } from "../../../opc/index"
-import { concatBytes } from "../../../opc/pieces"
+import { concatBytes } from "../../../xml/bytes"
 import { commentTime, drawingParagraphs, slideComments, type CommentEntry, type SlideComments } from "../../../presentation/comments"
 import { parseInScope } from "../../../presentation/edit/canonical"
 import { refused, type Author, type Deck, type Refused, type SlideNode } from "../../../presentation/model"

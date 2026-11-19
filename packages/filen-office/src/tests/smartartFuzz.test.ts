@@ -3,6 +3,7 @@ import { DEFAULT_SMARTART_BUDGETS, SmartArtError, type SmartArtBudgets } from ".
 import type { DiagramLayout, LayoutNode } from "../core/smartart/interp"
 import { budget, cpuMs } from "./timing"
 import { data, layout, model, MM, run, type PointSpec } from "./smartartFixtures"
+import { rng } from "./mulberry32"
 
 // Hostile and random layout definitions and data models: every SmartArt budget (plan §1.12: points, layout nodes,
 // forEach nesting, constraint passes, rule steps) either refuses with a typed SmartArtError or bounds the work, and
@@ -95,22 +96,6 @@ describe("SmartArt budgets", () => {
 	})
 })
 
-// A small deterministic generator (mulberry32): the same seeds give the same cases on every run.
-function random(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
-
 const ALGS = ["composite", "lin", "snake", "tx", "sp", "cycle", "hierRoot", "conn", "pyra", "bogus"]
 const TYPES = ["w", "h", "l", "t", "r", "b", "ctrX", "ctrY", "wOff", "lOff", "sp", "primFontSz", "secFontSz", "tMarg", "userA", "connDist"]
 const RELS = ["self", "ch", "des"]
@@ -180,7 +165,7 @@ describe("SmartArt layout of random definitions", () => {
 		let worst = 0
 
 		for (let seed = 1; seed <= 300; seed++) {
-			const next = random(seed)
+			const next = rng(seed)
 			const xml = layout(generate(next, names, 0))
 			const count = 1 + Math.floor(next() * 12)
 			const pres = Array.from({ length: 4 }, (_, i) => ({

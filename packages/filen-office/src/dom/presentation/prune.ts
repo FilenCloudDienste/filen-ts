@@ -392,7 +392,7 @@ function pruneHeld(session: EngineSession, history: DeckHistory | undefined): vo
 	}
 
 	for (const text of reach.markup.texts.slice(from))
-		for (const match of text.matchAll(/inserted:(\d+)/gu)) reach.images.add(Number(match[1] ?? ""))
+		for (const match of text.matchAll(INSERTED_NAMES)) reach.images.add(Number(match[1] ?? ""))
 
 	// Version names in held bytes (a chart frame's copy).
 	for (const text of reach.markup.texts) for (const match of text.matchAll(/chart:(\d+)/gu)) reach.charts.add(`chart:${match[1] ?? ""}`)
@@ -426,7 +426,7 @@ export function insertedImagesNamed(session: EngineSession, values: readonly unk
 		if (bytes !== undefined) reach.markup.add(bytes)
 	}
 
-	for (const text of reach.markup.texts) for (const match of text.matchAll(/inserted:(\d+)/gu)) reach.images.add(Number(match[1] ?? ""))
+	for (const text of reach.markup.texts) for (const match of text.matchAll(INSERTED_NAMES)) reach.images.add(Number(match[1] ?? ""))
 
 	return [...reach.images].filter(id => id > 0)
 }

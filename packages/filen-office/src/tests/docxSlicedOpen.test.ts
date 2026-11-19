@@ -18,7 +18,7 @@ import { partReader } from "../core/docx/model/reader"
 import { prepareReviewIndex } from "../core/docx/review/index"
 import { openSpec } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
-import { measurer } from "./engineFixtures"
+import { engineServices } from "./engineFixtures"
 
 // Opening a long document gives the host a turn inside a long table too, at every stage: the model build, the
 // editing build, Gate 1 and the review index, each with the same result as at once.
@@ -143,14 +143,7 @@ describe("docx open in slices: long tables", () => {
 
 	it("opens through the in-thread host with the same locks, a turn inside the table", async () => {
 		const pauses = counting()
-		const services = (): DocxEngineServices => ({
-			fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-			replayFonts: false,
-			fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-			measurer,
-			yield: pauses.pause,
-			sliceMs: 0
-		})
+		const services = (): DocxEngineServices => engineServices({ yield: pauses.pause, sliceMs: 0 })
 		const editing = inThreadEditingHost(services, { proof: () => marking(false) })
 		const handle = editing.host(bytesSource(buildDocx({ body: BODY })), () => undefined)
 		const editor = await editing.editor
@@ -235,14 +228,8 @@ describe("xml parse in slices", () => {
 describe("docx editor open before background layout", () => {
 	it("lays out the first pages, then builds and proves the body before laying out more", { timeout: 60_000 }, async () => {
 		const body = Array.from({ length: 3000 }, (_, k) => p(`Paragraph ${String(k)} with a few words in it`)).join("")
-		const services = (): DocxEngineServices => ({
-			fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-			replayFonts: false,
-			fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-			measurer,
-			yield: () => new Promise(resolve => setImmediate(resolve)),
-			sliceMs: 0
-		})
+		const services = (): DocxEngineServices =>
+			engineServices({ yield: () => new Promise(resolve => setImmediate(resolve)), sliceMs: 0 })
 		let shipped = 0
 		const editing = inThreadEditingHost(services, { proof: writerProof })
 		const handle = editing.host(bytesSource(buildDocx({ body })), event => {

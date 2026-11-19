@@ -16,6 +16,7 @@ import { odpBytes } from "./odpFixtures"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { danglingReferences } from "./pptxWriteFixtures"
 import { image } from "./presentationObjectsFixtures"
+import { rng } from "./mulberry32"
 
 // Random sessions of edits (pictures, diagrams, charts, notes, comments, moves, slides duplicated, deleted and
 // hidden), undo, redo and saves. Every written save is whole and shows what the session shows (modelVsFile); so is the
@@ -32,21 +33,6 @@ const BOX = { x: 1_000_000, y: 1_000_000, cx: 3_000_000, cy: 2_000_000, rot: 0, 
 const LAYOUTS = ["picture-caption-list", "process-basic", "venn", "picture-grid", "pyramid-basic"]
 const STYLES = ["intense", "moderate", "simple"]
 const CELLS = sampleChartCells({ categories: ["A", "B"], series: ["North"] })
-
-function random(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 const notes = (text: string): TextBody => ({ bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] })
 
@@ -236,7 +222,7 @@ describe("random sessions of edits, undo, redo and saves", () => {
 				async () => {
 					const { bytes, format } = deckOf(name) as { readonly bytes: Uint8Array; readonly format: Format }
 					const d = await reopened(bytes, format)
-					const next = random(seed * 7919 + name.length)
+					const next = rng(seed * 7919 + name.length)
 					const problems: string[] = []
 
 					for (let n = 0; n < STEPS; n++) {
@@ -367,7 +353,7 @@ describe("random sessions whose saves are refused for one edit", () => {
 					const { bytes, format } = deckOf(name) as { readonly bytes: Uint8Array; readonly format: Format }
 					const refusal: Refusal = { detail: undefined, shape: undefined }
 					const d = await reopened(bytes, format, { dependencies: refusing(format, refusal) })
-					const next = random(seed * 104_729 + name.length)
+					const next = rng(seed * 104_729 + name.length)
 					const problems: string[] = []
 					// The slides of the last save written.
 					let savedSlides = new Set(d.session.deck.slides)

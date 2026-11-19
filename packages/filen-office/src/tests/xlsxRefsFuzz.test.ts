@@ -8,6 +8,7 @@ import { MODEL_SECTIONS } from "../core/xlsx/refs/sections"
 import { refState } from "../core/xlsx/refs/state"
 import { R, TYPES, relationship, rels } from "./xlsxRefsFixtures"
 import { buildFixture, changedEntries, openWorkbook, parts, saved, type Fixture } from "./xlsxWriteFixtures"
+import { rng } from "./mulberry32"
 
 // Random insert and delete sequences over a workbook holding most of the catalogue. Every step saves through the
 // gate; reverting every step gives the source's bytes back; an insert followed by the delete of the same rows or
@@ -17,21 +18,6 @@ const RUNS = Number(process.env["FILEN_OFFICE_REFS_FUZZ_RUNS"] ?? "120")
 const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 const xdr = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
 const C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
-
-function random(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 function cells(): string {
 	let rows = ""
@@ -163,7 +149,7 @@ describe("structure edit fuzz", () => {
 		let applied = 0
 
 		for (let run = 0; run < RUNS; run++) {
-			const next = random(run + 1)
+			const next = rng(run + 1)
 			const workbook = await openWorkbook(SOURCE)
 			const plans: RefPlan[] = []
 			const steps = 1 + Math.floor(next() * 5)
@@ -200,7 +186,7 @@ describe("structure edit fuzz", () => {
 		const original = await meaning(workbook)
 
 		for (let run = 0; run < RUNS; run++) {
-			const next = random(10_000 + run)
+			const next = rng(10_000 + run)
 			const edit = randomEdit(next)
 
 			if (edit.kind !== "axis") continue
@@ -223,7 +209,7 @@ describe("structure edit fuzz", () => {
 
 	it("plans as a pure function of the workbook, and applies again after a revert alike", { timeout: 600_000 }, async () => {
 		for (let run = 0; run < Math.min(RUNS, 40); run++) {
-			const edit = randomEdit(random(20_000 + run))
+			const edit = randomEdit(rng(20_000 + run))
 			const first = await openWorkbook(SOURCE)
 			const second = await openWorkbook(SOURCE)
 			const a = await plan(first, edit)
@@ -246,7 +232,7 @@ describe("structure edit fuzz", () => {
 	})
 
 	it("moves shared formula text as the reader expands it", () => {
-		const next = random(7)
+		const next = rng(7)
 		const atoms = [
 			"A1",
 			"$B$2",

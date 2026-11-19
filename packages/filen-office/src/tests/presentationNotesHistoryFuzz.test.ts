@@ -11,6 +11,7 @@ import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { modelVsFile } from "./modelVsFile"
 import { danglingReferences, partsOf } from "./pptxWriteFixtures"
+import { rng } from "./mulberry32"
 
 // The deck history over notes (notes started, their first text continuing that step, typing bursts, retract), slide
 // text, moves, duplicates, undo, redo and saves, against a reference timeline of states: coming back to a state already
@@ -20,17 +21,6 @@ const nb = (...t: string[]): TextBody => ({
 	bodyPr: {},
 	paragraphs: t.map(x => ({ pPr: {}, runs: x === "" ? [] : [{ kind: "r" as const, text: x, rPr: {} }] }))
 })
-
-function rng(seed: number): () => number {
-	let s = seed >>> 0
-	return () => {
-		s = (s + 0x6d2b79f5) >>> 0
-		let t = s
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 type Format = "pptx" | "odp"
 function deckOf(name: string): { bytes: Uint8Array; format: Format } {

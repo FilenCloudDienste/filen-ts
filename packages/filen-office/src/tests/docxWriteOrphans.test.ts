@@ -367,4 +367,43 @@ describe("docx save drops a note whose every reference went", () => {
 		expect(text(saved, "word/footnotes.xml")).toContain("note 8<")
 		editor.dispose()
 	})
+
+	it("keeps a note whose only reference sits in a locked block the save copies as its source bytes", async () => {
+		// A field that never ends locks its paragraph: the reference inside is no note_ref node, only source bytes.
+		const opened = await pagedEditor(
+			buildDocx({
+				body:
+					p("Edit here") +
+					`<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:t>never ends</w:t></w:r>${reference(1)}</w:p>` +
+					`<w:p><w:r><w:t>gone</w:t></w:r>${reference(2)}</w:p>` +
+					SECTION(""),
+				footnotes: note(1) + note(2)
+			})
+		)
+		const { editor, context } = opened
+		const session = editor.session
+		const doc = session.state.doc
+
+		expect(doc.child(1).type.name).toBe("locked_block")
+
+		session.dispatch(session.state.tr.delete(doc.child(0).nodeSize + doc.child(1).nodeSize, doc.content.size))
+		session.dispatch(session.state.tr.insertText("More ", 1))
+
+		const orphans = orphanedNotes(
+			context,
+			editor.sessions,
+			editor.sessions.map(candidate => candidate.state.doc)
+		)
+
+		expect(
+			[...orphans.values()].flat().map(item => context.model.parts[context.model.footnotes.get("1")?.part ?? -1]?.id(item))
+		).toEqual(["2"])
+
+		const saved = await save(opened)
+
+		expect(text(saved, "word/document.xml")).toContain('<w:footnoteReference w:id="1"/>')
+		expect(text(saved, "word/footnotes.xml")).toContain("note 1<")
+		expect(text(saved, "word/footnotes.xml")).not.toContain("note 2<")
+		editor.dispose()
+	})
 })

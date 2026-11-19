@@ -9,7 +9,8 @@ import { DEFAULT_SEQUENCE, runSequence } from "./fuzz/sheet/harness"
 import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // The sheet fuzz reads back the worksheet sections its ops edit beyond cells (data validations, the autoFilter,
-// hyperlinks), and reads its source once per sequence.
+// hyperlinks) and the cells of the notes and threaded comments in the sheet's own parts, and reads its source once per
+// sequence.
 
 const reads = vi.hoisted(() => ({ sources: [] as Uint8Array[] }))
 
@@ -48,85 +49,101 @@ function applied(result: SheetCommandResult): void {
 	if (!result.ok) throw new Error(`refused: ${result.refusal.reason} ${result.refusal.detail ?? ""}`)
 }
 
-// The save with `pattern` taken out of every worksheet part.
-function without(bytes: Uint8Array, pattern: RegExp): Uint8Array {
+// The save with `pattern` taken out of every part `parts` matches (the worksheet parts by default).
+function without(bytes: Uint8Array, pattern: RegExp, parts = /^xl\/worksheets\/[^/]+\.xml$/): Uint8Array {
 	const files = unzipSync(bytes)
 
 	for (const name of Object.keys(files))
-		if (/^xl\/worksheets\/[^/]+\.xml$/.test(name)) files[name] = strToU8(strFromU8(files[name] as Uint8Array).replace(pattern, ""))
+		if (parts.test(name)) files[name] = strToU8(strFromU8(files[name] as Uint8Array).replace(pattern, ""))
 
 	return zipSync(files)
 }
 
 describe("sheet fuzz read-back", () => {
-	it("compares data validations, the autoFilter and hyperlinks with the model", { timeout: 60_000 }, async () => {
-		const opened = await openXlsxSession(
-			bytesSource(fixtureBytes("rich")),
-			{ kind: "xlsx", slicing: IMMEDIATE, settings: { author: "Fuzz", clock: () => 0 } },
-			() => undefined
-		)
-
-		if (opened.kind !== "opened") throw new Error(`expected an open, got ${opened.kind}`)
-
-		const session = opened.session
-
-		try {
-			await session.document.readyAllSheets(IMMEDIATE)
-
-			const sheet = session.document.worksheets()[0]?.id ?? 0
-
-			applied(
-				await session.command({
-					type: "validation.set",
-					sheet,
-					ranges: [
-						{ startRow: 0, startCol: 0, endRow: 3, endCol: 1 },
-						{ startRow: 8, startCol: 4, endRow: 9, endCol: 4 }
-					],
-					rule: RULE
-				})
-			)
-			applied(
-				await session.command({
-					type: "filter.toggle",
-					sheet,
-					range: { startRow: 0, startCol: 0, endRow: 9, endCol: 2 },
-					active: { row: 0, col: 0 }
-				})
-			)
-			applied(
-				await session.command({
-					type: "link.set",
-					sheet,
-					ranges: [{ startRow: 12, startCol: 1, endRow: 12, endCol: 1 }],
-					target: { url: "https://example.com/" }
-				})
+	it(
+		"compares data validations, the autoFilter, hyperlinks, notes and threaded comments with the model",
+		{ timeout: 60_000 },
+		async () => {
+			const opened = await openXlsxSession(
+				bytesSource(fixtureBytes("rich")),
+				{ kind: "xlsx", slicing: IMMEDIATE, settings: { author: "Fuzz", clock: () => 0 } },
+				() => undefined
 			)
 
-			const saved = await session.save()
+			if (opened.kind !== "opened") throw new Error(`expected an open, got ${opened.kind}`)
 
-			if (!saved.ok) throw new Error(`${saved.reason}: ${saved.message}`)
+			const session = opened.session
 
-			const model = modelRecord(session.document.workbook)
-			const record = model.sheets[0]
+			try {
+				await session.document.readyAllSheets(IMMEDIATE)
 
-			expect(record?.validations).toEqual(["0,0:3,1 8,4:9,4"])
-			expect(record?.autoFilter).toBe("0,0:9,2")
-			expect(record?.links).toEqual(["12,1:12,1"])
-			expect(compareRecords(model, await readSaved(saved.bytes))).toEqual([])
+				const sheet = session.document.worksheets()[0]?.id ?? 0
 
-			const dropped = (pattern: RegExp): Promise<string[]> =>
-				readSaved(without(saved.bytes, pattern)).then(actual => compareRecords(model, actual))
+				applied(
+					await session.command({
+						type: "validation.set",
+						sheet,
+						ranges: [
+							{ startRow: 0, startCol: 0, endRow: 3, endCol: 1 },
+							{ startRow: 8, startCol: 4, endRow: 9, endCol: 4 }
+						],
+						rule: RULE
+					})
+				)
+				applied(
+					await session.command({
+						type: "filter.toggle",
+						sheet,
+						range: { startRow: 0, startCol: 0, endRow: 9, endCol: 2 },
+						active: { row: 0, col: 0 }
+					})
+				)
+				applied(
+					await session.command({
+						type: "link.set",
+						sheet,
+						ranges: [{ startRow: 12, startCol: 1, endRow: 12, endCol: 1 }],
+						target: { url: "https://example.com/" }
+					})
+				)
 
-			expect(await dropped(/<dataValidations\b[\s\S]*?<\/dataValidations>/)).toEqual([
-				"Data dataValidations: missing 0,0:3,1 8,4:9,4"
-			])
-			expect(await dropped(/<autoFilter\b[^>]*?(?:\/>|>[\s\S]*?<\/autoFilter>)/)).toEqual(["Data autoFilter: 0,0:9,2≠∅"])
-			expect(await dropped(/<hyperlinks\b[\s\S]*?<\/hyperlinks>/)).toEqual(["Data hyperlinks: missing 12,1:12,1"])
-		} finally {
-			session.close()
+				applied(await session.command({ type: "note.set", sheet, row: 4, col: 2, text: "Note" }))
+				applied(await session.command({ type: "thread.add", sheet, row: 6, col: 3, text: "Thread" }))
+
+				const saved = await session.save()
+
+				if (!saved.ok) throw new Error(`${saved.reason}: ${saved.message}`)
+
+				const model = modelRecord(session.document.workbook)
+				const record = model.sheets[0]
+
+				expect(record?.validations).toEqual(["0,0:3,1 8,4:9,4"])
+				expect(record?.autoFilter).toBe("0,0:9,2")
+				expect(record?.links).toEqual(["12,1:12,1"])
+				// The thread's placeholder note is a note of its cell.
+				expect(record?.notes?.toSorted()).toEqual(["4,2", "6,3"])
+				expect(record?.threads).toEqual(["6,3"])
+				expect(compareRecords(model, await readSaved(saved.bytes))).toEqual([])
+
+				const dropped = (pattern: RegExp, parts?: RegExp): Promise<string[]> =>
+					readSaved(without(saved.bytes, pattern, parts)).then(actual => compareRecords(model, actual))
+
+				expect(await dropped(/<dataValidations\b[\s\S]*?<\/dataValidations>/)).toEqual([
+					"Data dataValidations: missing 0,0:3,1 8,4:9,4"
+				])
+				expect(await dropped(/<autoFilter\b[^>]*?(?:\/>|>[\s\S]*?<\/autoFilter>)/)).toEqual(["Data autoFilter: 0,0:9,2≠∅"])
+				expect(await dropped(/<hyperlinks\b[\s\S]*?<\/hyperlinks>/)).toEqual(["Data hyperlinks: missing 12,1:12,1"])
+				expect(await dropped(/<comment\b[^>]*\bref="C5"[\s\S]*?<\/comment>/, /^xl\/comments[^/]*\.xml$/)).toEqual([
+					"Data notes: missing 4,2"
+				])
+				expect(await dropped(/<threadedComment\b[\s\S]*?<\/threadedComment>/, /^xl\/threadedComments\/[^/]+\.xml$/)).toEqual([
+					"Data threadedComments: missing 6,3"
+				])
+			} finally {
+				session.close()
+			}
 		}
-	})
+	)
 
 	it("reads the source once per sequence", { timeout: 120_000 }, async () => {
 		const bytes = fixtureBytes("rich")

@@ -5,36 +5,13 @@ import type { EditorView } from "prosemirror-view"
 import { afterEach, describe, expect, it } from "vitest"
 import { RevisionFlag, RevisionView, revisionHidden } from "../core/docx/model/kinds"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { EditSink } from "@filen/office/react/docx/editor"
 import { ReflowView, type ReflowViewOptions } from "../react/docx/reflow/view"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { buildDocx, p } from "./docxSynthetic"
 import { pagedEditor } from "./pagedDomFixtures"
 
 // Tab as Word has it, in the paged editor's input view and in Mobile view alike.
-
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
-
-function documentOf(): DocxDocument {
-	return {
-		status: "ready",
-		info: undefined,
-		pages: [],
-		pageCount: 0,
-		tables: { styles: [], decorations: [], links: [] },
-		session: SESSION,
-		media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-		error: undefined
-	}
-}
 
 interface Surface {
 	readonly view: EditorView
@@ -91,7 +68,7 @@ const SURFACES: readonly { readonly name: string; open(editor: PagedEditor, opti
 				onFind: undefined,
 				marks: [],
 				interactions: undefined,
-				document: documentOf()
+				document: emptyDocxDocument()
 			}
 			const reflow = new ReflowView(editor, scroller, reflowOptions)
 			const surface = {

@@ -8,7 +8,7 @@ import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { entriesOf, text } from "./odpWriteFixtures"
 import { editDeck, editHarness, shapeById } from "./presentationEditFixtures"
-import { changedParts, saveEdits } from "./pptxWriteFixtures"
+import { differingParts, saveEdits } from "./pptxWriteFixtures"
 
 // Duplicate (Ctrl+D on selected objects): copies of the shapes, offset and on top, saved as elements of their own.
 
@@ -47,7 +47,7 @@ describe("shape duplicate", () => {
 
 		const bytes = await saveEdits(h, sessionEdits(h.session).history.revision)
 
-		expect((await changedParts(editDeck(), bytes)).filter(name => !name.startsWith("ppt/slides/slide1.xml"))).toEqual([])
+		expect((await differingParts(editDeck(), bytes)).filter(name => !name.startsWith("ppt/slides/slide1.xml"))).toEqual([])
 
 		const reopened = await editHarness(bytes, EDIT)
 		const back: SlideNode = await reopened.slide(0)

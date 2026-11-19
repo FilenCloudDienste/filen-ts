@@ -17,6 +17,7 @@ import { budget, cpuMs } from "./timing"
 // compile. A converted deck the pptx reader refuses is a converter bug, so no `pptx:` key is allowed.
 const REFUSALS: Record<PresentationRefusal, true> = {
 	notImplemented: true,
+	invalidValue: true,
 	tooLarge: true,
 	tooDeep: true,
 	malformed: true,

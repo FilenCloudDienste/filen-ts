@@ -8,6 +8,7 @@ import { viewCapability } from "../dom/presentation/engine/view"
 import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
+import { rng } from "./mulberry32"
 
 // Random text edits on a body animated by paragraph, with saves, undos and redos between them (both formats): every
 // paragraph that is left keeps its effect, none gets two, every saved file names only paragraphs it has, the reopened
@@ -38,22 +39,6 @@ function odpDeck(): Uint8Array {
 			LABELS.map(label => `<text:list-item><text:p>${label}</text:p></text:list-item>`).join("") +
 			"</text:list></draw:text-box></draw:frame></draw:page>"
 	})
-}
-
-// mulberry32.
-function random(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
 }
 
 function labelOf(paragraph: Paragraph): string {
@@ -153,7 +138,7 @@ function current(session: Session): Uint8Array {
 }
 
 async function run(format: "odp" | "pptx", seed: number, copiedSources: boolean): Promise<void> {
-	const next = random(seed)
+	const next = rng(seed)
 	const session = await opened(format === "odp" ? odpDeck() : pptxDeck(), format)
 	const slide = slideOf(session)
 	const shape = bodyOf(session)

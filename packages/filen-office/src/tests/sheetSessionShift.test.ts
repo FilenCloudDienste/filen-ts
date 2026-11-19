@@ -2,24 +2,10 @@ import { describe, expect, it } from "vitest"
 import type { AxisEdit } from "../core/sheet/model/edits"
 import { shiftFormula } from "../core/sheet/refs/formulaRefs"
 import { quickShift } from "../core/xlsx/refs/quick"
+import { rng } from "./mulberry32"
 
 // The quick scan that moves plain formulas for an inserted or deleted run gives the formula parser's text, or
 // leaves the formula to it.
-
-function rng(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 const COLS = ["A", "B", "C", "Z", "AA", "XFD", "xfe", "b", "TAX"]
 const TOKENS = [
