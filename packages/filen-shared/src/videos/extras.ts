@@ -73,6 +73,17 @@ function alternation(words: Iterable<string>): string {
 // personal videos.
 const EXTRA_STEM_WORDS: readonly string[] = ["trailer", "teaser", "featurette", "behindthescenes", "deleted", "deletedscene", "interview"]
 
+// Types only the common suffix words outside the stem list name ("-clip", "-short", "-scene", "-extra", "-other"):
+// "Holiday 2023-clip" is as likely a personal video as bonus material.
+const AMBIGUOUS_SUFFIX_TYPES: ReadonlySet<ExtraType> = new Set(
+	Array.from(EXTRA_SUFFIXES).flatMap(([word, type]) => (EXTRA_STEM_WORDS.includes(word) ? [] : [type]))
+)
+
+// Whether a suffix extra of this type is a title of its own when no title owns it.
+export function isAmbiguousExtraType(type: ExtraType): boolean {
+	return AMBIGUOUS_SUFFIX_TYPES.has(type)
+}
+
 // "-trailer", " - Featurette 2". Only a hyphen introduces the suffix: dots and underscores separate title words
 // ("The.Big.Short").
 const EXTRA_SUFFIX = new RegExp(`-\\s*(${alternation(EXTRA_SUFFIXES.keys())})[\\s._-]*\\d*$`, "iu")

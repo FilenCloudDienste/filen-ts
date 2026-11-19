@@ -140,7 +140,24 @@ export interface CopyJob<TItem, TFailure, TRetryable, TError> {
 	outcome: CopyJobOutcome<TError>
 }
 
-const ZERO_COUNTS: CopyJobCounts = {
+// Every counter of an item count, for code that treats them alike (adding two counts). A test holds it
+// to the CopyJobCounts fields.
+export const ITEM_COUNT_KEYS: readonly (keyof CopyJobCounts)[] = [
+	"dirsCreated",
+	"dirsFailed",
+	"filesDone",
+	"filesFailed",
+	"bytesDone",
+	"bytesFailed",
+	"dirsNotAttempted",
+	"filesNotAttempted",
+	"bytesNotAttempted",
+	"entriesSkipped",
+	"bytesSkipped"
+]
+
+// Shared by every job that starts with nothing done; never mutated.
+export const ZERO_ITEM_COUNTS: Readonly<CopyJobCounts> = {
 	dirsCreated: 0,
 	dirsFailed: 0,
 	filesDone: 0,
@@ -169,7 +186,7 @@ export function createCopyJob<TItem, TFailure, TRetryable, TError>(
 		cancelling: false,
 		scan: { sourcesDone: 0, sourcesTotal: 0 },
 		totals: { dirs: 0, files: 0, bytes: 0 },
-		counts: ZERO_COUNTS,
+		counts: ZERO_ITEM_COUNTS,
 		active: [],
 		bytesPerSecond: null,
 		etaMs: null,

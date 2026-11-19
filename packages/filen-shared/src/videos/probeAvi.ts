@@ -1,8 +1,8 @@
 import { avcConfigCodecString, mp4aCodecString, parseAudioSpecificConfig, parseAvcSps, simpleAudioCodecString } from "./codecString"
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
-import { ascii, readBytes, seconds } from "./probeBytes"
+import { ascii, readBytes, seconds, uint16le, uint32le } from "./probeBytes"
 import { annexBNal } from "./probeElementary"
-import type { ByteRange, MediaCodec, ParsedContainer, ProbeAudio, ProbeVideo } from "./probeTypes"
+import { boundedFps, type ByteRange, type MediaCodec, type ParsedContainer, type ProbeAudio, type ProbeVideo } from "./probeTypes"
 
 // AVI (RIFF "AVI "): the stream headers of the hdrl list, and the first H.264 picture's SPS where the stream carries
 // one in band. Windows codec identifiers (BITMAPINFOHEADER compression, WAVEFORMATEX format tags) are named here
@@ -16,13 +16,7 @@ const AVIF_HASINDEX = 0x10
 // Chunk headers walked to find a list or the first picture chunk.
 const MAX_SCANNED_CHUNKS = 64
 
-export function uint16le(bytes: Uint8Array, at: number): number {
-	return (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
-}
-
-export function uint32le(bytes: Uint8Array, at: number): number {
-	return uint16le(bytes, at) + uint16le(bytes, at + 2) * 0x10000
-}
+export { uint16le, uint32le }
 
 const VIDEO_FOURCCS: Readonly<Record<string, MediaCodec>> = {
 	H264: "h264",
@@ -379,7 +373,8 @@ export async function walkAvi(source: BlockSource, result: ParsedContainer): Pro
 
 	for (const [index, stream] of streams.entries()) {
 		if (stream.video !== null) {
-			const video = { ...stream.video }
+			const fps = stream.scale > 0 ? boundedFps(stream.rate / stream.scale) : null
+			const video = fps === null ? { ...stream.video } : { ...stream.video, fps }
 
 			if (video.codec === "h264" && movi !== null) {
 				video.codecString = spsCodecString(await aviFirstChunk(read, movi, index, SPS_SEARCH_BYTES))

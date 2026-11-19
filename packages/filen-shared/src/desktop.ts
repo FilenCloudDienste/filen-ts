@@ -733,6 +733,10 @@ export type DesktopMountsErrorCode =
 	| "credentialsInvalid"
 	| "credentialsWeak"
 	| "acknowledgementRequired"
+	// The drive was unmounted outside the app (by the user or the OS).
+	| "driveUnmounted"
+	// rclone stopped by itself too often; the roles are not restarted.
+	| "daemonUnstable"
 	| "unknown"
 
 export interface DesktopMountsError {

@@ -228,6 +228,51 @@ describe("movies", () => {
 		expect(summary.others).toEqual([])
 	})
 
+	it("keeps unowned videos named with a common extra word as titles and still drops unowned trailers", () => {
+		const { summary } = classifyPaths([
+			{
+				name: "Media",
+				paths: [
+					"Holiday 2023-clip.mp4",
+					"wedding - short.mp4",
+					"Unknown Film-trailer.mkv",
+					"Only Clip/match-scene 2.mkv",
+					"Heat (1995)/Heat (1995).mkv",
+					"Heat (1995)/Heat (1995)-clip.mkv",
+					"Mixed/Ronin (1998).mkv",
+					"Mixed/Ronin (1998)-clip.mkv",
+					"backup-other.mp4"
+				]
+			}
+		])
+
+		expect(summary.movies).toEqual([
+			{
+				title: "Holiday",
+				year: 2023,
+				versions: ["Media/Holiday 2023-clip.mp4"],
+				extras: []
+			},
+			{
+				title: "Heat",
+				year: 1995,
+				versions: ["Media/Heat (1995)/Heat (1995).mkv"],
+				extras: ["clip: Media/Heat (1995)/Heat (1995)-clip.mkv"]
+			},
+			{
+				title: "Ronin",
+				year: 1998,
+				versions: ["Media/Mixed/Ronin (1998).mkv"],
+				extras: ["clip: Media/Mixed/Ronin (1998)-clip.mkv"]
+			}
+		])
+		expect(summary.others.toSorted()).toEqual([
+			"Media/Only Clip/match-scene 2.mkv",
+			"Media/backup-other.mp4",
+			"Media/wedding - short.mp4"
+		])
+	})
+
 	it("treats DVD and Blu-ray folder structures as one unplayable movie", () => {
 		const { library, summary } = classifyPaths([
 			{

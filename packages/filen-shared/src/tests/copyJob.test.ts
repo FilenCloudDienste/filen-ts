@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+	ITEM_COUNT_KEYS,
+	ZERO_ITEM_COUNTS,
 	applyCopyUpdate,
 	copyJobGlyph,
 	copyMaxBytes,
@@ -14,6 +16,20 @@ import {
 	type CopySettlement,
 	type CopyUpdateInput
 } from "@filen/shared"
+
+const ZERO_COUNTS_INPUT: CopyCountsInput = {
+	dirsCreated: 0n,
+	dirsFailed: 0n,
+	filesDone: 0n,
+	filesFailed: 0n,
+	bytesDone: 0n,
+	bytesFailed: 0n,
+	dirsNotAttempted: 0n,
+	filesNotAttempted: 0n,
+	bytesNotAttempted: 0n,
+	entriesSkipped: 0n,
+	bytesSkipped: 0n
+}
 
 interface Failure {
 	destName: string
@@ -306,5 +322,19 @@ describe("toItemCounts and toPlanTotals", () => {
 			bytesSkipped: 5
 		})
 		expect(toPlanTotals({ dirs: 1n, files: 2n, bytes: 3n })).toEqual({ dirs: 1, files: 2, bytes: 3 })
+	})
+})
+
+describe("ITEM_COUNT_KEYS", () => {
+	it("names every item counter once, so the count adders miss none", () => {
+		expect(new Set(ITEM_COUNT_KEYS).size).toBe(ITEM_COUNT_KEYS.length)
+		expect([...ITEM_COUNT_KEYS].sort()).toEqual(Object.keys(ZERO_ITEM_COUNTS).sort())
+		expect(Object.keys(toItemCounts(ZERO_COUNTS_INPUT)).sort()).toEqual([...ITEM_COUNT_KEYS].sort())
+	})
+
+	it("starts a copy job with nothing counted", () => {
+		const { counts } = createCopyJob("job", { uuid: null, name: "Drive" }, 1)
+
+		expect(Object.values(counts).every(value => value === 0)).toBe(true)
 	})
 })

@@ -150,6 +150,18 @@ export function screenOpened(route: string): { opened: string; contentsRead: fal
 // How many rows a long directory listing shows at a time; the model pages on with an offset.
 export const LISTING_PAGE_ITEMS = 30
 
+// How many rows the other listing tools show: shared, so the eval's fake app lists what the apps list.
+export const SEARCH_RESULT_ITEMS = 12
+export const RECENT_ITEMS = 20
+export const PHOTOS_ITEMS = 30
+export const NOTES_ITEMS = 40
+
+// How many words of a query a drive search asks its substring engine for.
+export const SEARCH_ENGINE_WORDS = 3
+
+// How many directory sizes a size-sorted listing reads.
+export const DIRECTORY_SIZE_READS = 12
+
 // Listings longer than this many pages say how many items they hold.
 const LISTING_COUNTED_PAGES = 3
 

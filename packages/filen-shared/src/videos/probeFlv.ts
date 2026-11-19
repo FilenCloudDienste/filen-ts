@@ -8,7 +8,7 @@ import {
 } from "./codecString"
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
 import { ascii, readBytes, seconds, uint16, uint32 } from "./probeBytes"
-import type { MediaCodec, ParsedContainer, ProbeAudio, ProbeVideo } from "./probeTypes"
+import { boundedFps, type MediaCodec, type ParsedContainer, type ProbeAudio, type ProbeVideo } from "./probeTypes"
 
 // FLV (FLV\x01): the onMetaData script tag's duration, size and keyframe index, and the first audio and video tags'
 // codec configuration (legacy and Enhanced RTMP), all from the head; the last tag's timestamp when onMetaData has no
@@ -278,7 +278,9 @@ export async function walkFlv(source: BlockSource, result: ParsedContainer): Pro
 	}
 
 	if (video !== null) {
-		result.tracks.push({ kind: "video", enabled: true, video })
+		const fps = meta === null || meta.frameRate === null ? null : boundedFps(meta.frameRate)
+
+		result.tracks.push({ kind: "video", enabled: true, video: fps === null ? video : { ...video, fps } })
 	}
 
 	if (audio !== null) {

@@ -1,5 +1,5 @@
 import { AUDIO_FORMATS, SYNTH_CAPS, type AudioFormat } from "./fileFamilies"
-import { uint32le } from "./videos/probeAvi"
+import { fourCC, uint32be, uint32le } from "./bytes"
 
 // Audio a synthesizer renders: a MIDI song, or a tracker module.
 export type AudioSynthKind = NonNullable<AudioFormat["synth"]>
@@ -18,7 +18,7 @@ export function synthCap(kind: AudioSynthKind): number {
 // Whether a file's first bytes start a MIDI song: a Standard MIDI File's header, or an RMI's RIFF RMID. Checked before
 // a file is read whole for the MIDI synthesizer.
 export function isMidiHead(head: Uint8Array): boolean {
-	return ascii(head, 0) === "MThd" || (ascii(head, 0) === "RIFF" && ascii(head, 8) === "RMID")
+	return fourCC(head, 0) === "MThd" || (fourCC(head, 0) === "RIFF" && fourCC(head, 8) === "RMID")
 }
 
 // The most events a MIDI song may hold, and the most ports (16 channels each) it may address: its parse holds about
@@ -35,9 +35,9 @@ const CHANNEL_DATA_BYTES: Readonly<Record<number, number>> = { 8: 2, 9: 2, 10: 2
 // Null for what that parser refuses, and for a chunk declaring more bytes than the file holds, or more than
 // MIDI_MAX_PORTS ports; the count stops past `limit`, where it no longer matters by how much.
 export function midiEventCount(bytes: Uint8Array, limit = Number.POSITIVE_INFINITY): number | null {
-	const smf = ascii(bytes, 0) === "RIFF" ? rmidData(bytes) : bytes
+	const smf = fourCC(bytes, 0) === "RIFF" ? rmidData(bytes) : bytes
 
-	if (smf === null || ascii(smf, 0) !== "MThd" || smf.length < 14 || uint32be(smf, 4) !== 6) {
+	if (smf === null || fourCC(smf, 0) !== "MThd" || smf.length < 14 || uint32be(smf, 4) !== 6) {
 		return null
 	}
 
@@ -47,7 +47,7 @@ export function midiEventCount(bytes: Uint8Array, limit = Number.POSITIVE_INFINI
 	let at = 14
 
 	for (let track = 0; track < tracks && count <= limit; track++) {
-		if (at + 8 > smf.length || ascii(smf, at) !== "MTrk") {
+		if (at + 8 > smf.length || fourCC(smf, at) !== "MTrk") {
 			return null
 		}
 
@@ -148,19 +148,11 @@ function trackEvents(track: Uint8Array, limit: number, ports: Set<number>): numb
 
 // The Standard MIDI File of an RMI: its first chunk after RMID must be "data", as spessasynth_core reads it.
 function rmidData(bytes: Uint8Array): Uint8Array | null {
-	if (ascii(bytes, 8) !== "RMID" || ascii(bytes, 12) !== "data") {
+	if (fourCC(bytes, 8) !== "RMID" || fourCC(bytes, 12) !== "data") {
 		return null
 	}
 
 	const length = uint32le(bytes, 16)
 
 	return length > bytes.length - 20 ? null : bytes.subarray(20, 20 + length)
-}
-
-function ascii(bytes: Uint8Array, at: number): string {
-	return String.fromCharCode(bytes[at] ?? 0, bytes[at + 1] ?? 0, bytes[at + 2] ?? 0, bytes[at + 3] ?? 0)
-}
-
-function uint32be(bytes: Uint8Array, at: number): number {
-	return (((bytes[at] ?? 0) << 24) >>> 0) + ((bytes[at + 1] ?? 0) << 16) + ((bytes[at + 2] ?? 0) << 8) + (bytes[at + 3] ?? 0)
 }

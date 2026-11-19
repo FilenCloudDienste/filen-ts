@@ -1,8 +1,18 @@
-import { avcConfigCodecString, hevcConfigCodecString, isAvcLevel, parseAvcSps, parseHevcSps, type SpsPicture } from "./codecString"
+import { avcConfigCodecString, hevcConfigCodecString, isAvcLevel, parseAvcSps, parseHevcSps } from "./codecString"
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
-import { AUDIO_HEADERS, pesStart, pesTimestamp, type ElementaryAudio } from "./probeElementary"
-import { readBytes, seconds, transferKind, uint16 } from "./probeBytes"
-import type { MediaCodec, ParsedContainer, ParsedTrack } from "./probeTypes"
+import {
+	AUDIO_HEADERS,
+	elementaryAudioTrack,
+	elementaryVideoTrack,
+	pesStart,
+	pesTimestamp,
+	ptsSpan,
+	ptsSpanSeconds,
+	type ElementaryAudio,
+	type StreamPicture
+} from "./probeElementary"
+import { readBytes, uint16 } from "./probeBytes"
+import type { MediaCodec, ParsedContainer } from "./probeTypes"
 
 // MPEG program streams (ISO/IEC 11172-1 and 13818-1: .mpg, .mpeg, .vob): the program stream map's stream types where
 // there is one, else each stream's first payload, read from the head; the timing stream's PTS span from the head and
@@ -13,8 +23,6 @@ const TAIL_BYTES = BLOCK_BYTES
 const MAX_STREAMS = 32
 const VIDEO_PREFIX_BYTES = 65_536
 const AUDIO_PREFIX_BYTES = 256
-const PTS_MODULUS = 2 ** 33
-const PTS_HZ = 90_000
 
 export const MPEG_PS_PACK = 0xba
 const PACK = MPEG_PS_PACK
@@ -33,7 +41,7 @@ export interface MpegPsStream {
 	need: "avc" | "hevc" | "mpeg-video" | ElementaryAudio | null
 	ch: number | null
 	rate: number | null
-	picture: SpsPicture | null
+	picture: StreamPicture | null
 	buffer: Uint8Array | null
 	length: number
 	// Video: where the next start code search begins in `buffer`, a header waiting for its end there (-1 for none),
@@ -216,6 +224,25 @@ function resolveVideo(stream: Stream): void {
 	stream.pending = -1
 }
 
+// frame_rate_code (ISO/IEC 13818-2 Table 6-4, the same for MPEG-1): frames per second as a ratio, by code 1-8.
+const SEQUENCE_FRAME_RATES: readonly (readonly [number, number])[] = [
+	[24000, 1001],
+	[24, 1],
+	[25, 1],
+	[30000, 1001],
+	[30, 1],
+	[50, 1],
+	[60000, 1001],
+	[60, 1]
+]
+
+// A frame's duration by its sequence header's frame rate code; null for a forbidden or reserved code.
+function sequenceFrameSeconds(code: number): number | null {
+	const rate = SEQUENCE_FRAME_RATES[code - 1]
+
+	return rate === undefined ? null : rate[1] / rate[0]
+}
+
 // The sequence header at `stream.pending`: MPEG-2 when the next start code is a sequence extension (B5). Waits for that
 // start code unless `final` or a full header's span is already buffered. False while waiting.
 function finishSequenceHeader(stream: Stream, data: Uint8Array, final: boolean): boolean {
@@ -253,7 +280,8 @@ function finishSequenceHeader(stream: Stream, data: Uint8Array, final: boolean):
 		height: uint16(data, at + 5) & 0xfff,
 		bitDepth: 8,
 		par: 1,
-		transfer: null
+		transfer: null,
+		frameSeconds: sequenceFrameSeconds((data[at + 7] ?? 0) & 0x0f)
 	}
 	resolveVideo(stream)
 
@@ -523,26 +551,6 @@ export function forEachMpegPsUnit(bytes: Uint8Array, start: number, visit: (id: 
 	}
 }
 
-function videoTrack(stream: Stream): ParsedTrack {
-	const { picture } = stream
-
-	return {
-		kind: "video",
-		enabled: true,
-		video: {
-			codec: stream.codec,
-			fourcc: stream.fourcc,
-			codecString: stream.codecString,
-			w: picture?.width ?? 0,
-			h: picture?.height ?? 0,
-			par: picture?.par ?? 1,
-			rotation: 0,
-			bitDepth: picture?.bitDepth ?? null,
-			transfer: transferKind(picture?.transfer ?? null)
-		}
-	}
-}
-
 function headWalk(head: Uint8Array): Walk {
 	const walk: Walk = { streams: new Map(), types: new Map(), firstPts: new Map() }
 
@@ -578,27 +586,12 @@ export async function walkMpegPs(source: BlockSource, result: ParsedContainer): 
 
 	for (const stream of walk.streams.values()) {
 		if (stream.kind === "video") {
-			result.tracks.push(videoTrack(stream))
+			result.tracks.push(elementaryVideoTrack(stream))
 
 			continue
 		}
 
-		result.tracks.push({
-			kind: "audio",
-			enabled: true,
-			audio: {
-				id: stream.key,
-				codec: stream.codec,
-				codecString: stream.codecString,
-				ch: stream.ch,
-				rate: stream.rate,
-				lang: null,
-				name: null,
-				def: firstAudio,
-				forced: false,
-				commentary: false
-			}
-		})
+		result.tracks.push(elementaryAudioTrack(stream.key, stream, null, firstAudio))
 		firstAudio = false
 	}
 
@@ -624,17 +617,16 @@ export async function walkMpegPs(source: BlockSource, result: ParsedContainer): 
 			return
 		}
 
-		const pts = pes.pts
-		const elapsed = pts === null ? -1 : (((pts - first) % PTS_MODULUS) + PTS_MODULUS) % PTS_MODULUS
-
-		if (elapsed >= 0 && elapsed < PTS_MODULUS / 2) {
-			span = Math.max(span, elapsed)
+		if (pes.pts !== null) {
+			span = Math.max(span, ptsSpan(first, pes.pts))
 		}
 	})
 
-	if (span > 0) {
-		result.durationSec = seconds(span / PTS_HZ)
-	} else {
+	const duration = ptsSpanSeconds(span)
+
+	if (duration === null) {
 		result.partial = true
+	} else {
+		result.durationSec = duration
 	}
 }

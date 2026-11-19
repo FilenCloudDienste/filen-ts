@@ -2,23 +2,23 @@ import { describe, expect, it } from "vitest"
 import {
 	activeCueIndices,
 	applyCueOffset,
+	assBlockText,
 	CueBuilder,
 	firstCueAtOrAfter,
-	formatAssTime,
 	isMicroDvd,
 	MAX_CONCURRENT_CUES,
 	MAX_CUE_SECONDS,
 	MAX_SUBTITLE_CUES,
-	matroskaAssBlockToCue,
-	matroskaAssBlockToDialogue,
 	normalizeCueText,
 	parseAss,
+	parseFormatOf,
 	parseMicroDvd,
 	parseSmi,
 	parseSrt,
 	parseSubtitle,
 	parseSubtitleTimestamp,
 	parseVtt,
+	subtitleFormat,
 	subtitleFormatFromExtension,
 	type CueStore
 } from "@filen/shared/videos"
@@ -678,19 +678,11 @@ Dialogue: 1,0:01:00.00,0:01:01.25,Default,,0,0,0,,a & b <c>
 		expect(store.texts).toEqual(["Hi, there"])
 	})
 
-	it("re-synthesizes Matroska blocks into cues and dialogue lines", () => {
-		const block = "12,0,Default,Bob,10,20,30,Banner,{\\an2}Hello\\Nthere, friend"
-		const cue = matroskaAssBlockToCue(block)
-
-		expect(cue).toMatchObject({ text: "Hello\nthere, friend", hint: 2, readOrder: 12 })
-		expect(matroskaAssBlockToDialogue(block, 1.5, 3725.255)).toBe(
-			"Dialogue: 0,0:00:01.50,1:02:05.26,Default,Bob,10,20,30,Banner,{\\an2}Hello\\Nthere, friend"
-		)
-		expect(matroskaAssBlockToCue("nope")).toBeNull()
-		expect(matroskaAssBlockToCue("x,0,Default,,0,0,0,,text")).toBeNull()
-		expect(matroskaAssBlockToCue("1,0,Default,,0,0,0,,{\\p1}m 0 0{\\p0}")).toBeNull()
-		expect(matroskaAssBlockToDialogue("bad", 0, 1)).toBeNull()
-		expect(formatAssTime(-3)).toBe("0:00:00.00")
+	it("reads the text field of a Matroska ASS block, and a malformed block whole", () => {
+		expect(assBlockText("12,0,Default,Bob,0,0,0,,Hi, there")).toBe("Hi, there")
+		expect(assBlockText("12,0,Default,Bob,0,0,0,,")).toBe("")
+		expect(assBlockText("broken")).toBe("broken")
+		expect(assBlockText("1,0,Default,,0,0,0")).toBe("1,0,Default,,0,0,0")
 	})
 })
 
@@ -706,6 +698,20 @@ describe("parseSubtitle", () => {
 		expect(mustParse(parseSubtitle("{25}{50}x", "sub", { fps: 25 })).starts[0]).toBe(1)
 		expect(parseSubtitle("# VobSub index", "sub")).toBeNull()
 		expect(parseSubtitle("x".repeat(8 * 1024 * 1024 + 1), "vtt")).toBeNull()
+	})
+
+	it("gives every text extension the same parser through the extension and the sidecar entry points", () => {
+		for (const extension of ["srt", "vtt", "ass", "ssa", "smi", "sami", "sub", "idx", "sup", "txt"]) {
+			const sidecar = subtitleFormat(extension, false)
+
+			expect(subtitleFormatFromExtension(extension)).toBe(sidecar === null ? null : parseFormatOf(sidecar))
+		}
+
+		// A `.sub` without an `.idx` partner is MicroDVD only when its content says so.
+		expect(parseFormatOf("microdvd")).toBe("sub")
+		expect(parseFormatOf("vobsub")).toBeNull()
+		expect(parseFormatOf("pgs")).toBeNull()
+		expect(subtitleFormatFromExtension("sup")).toBeNull()
 	})
 })
 

@@ -1,4 +1,4 @@
-import type { CopyDestination, CopyJobCounts } from "./copyJob"
+import { ITEM_COUNT_KEYS, type CopyDestination, type CopyJobCounts } from "./copyJob"
 
 // What every drive job (copy, compress, extract) shares: its kind, run state, bounded report lists,
 // the sources an archive job removes, and the SDK's one archive slot per page.
@@ -47,19 +47,13 @@ export function jobNumberOrNull(value: bigint | undefined): number | null {
 
 // What the earlier calls of a multi-call job did, added to the current call's own counts.
 export function addItemCounts(a: CopyJobCounts, b: CopyJobCounts): CopyJobCounts {
-	return {
-		dirsCreated: a.dirsCreated + b.dirsCreated,
-		dirsFailed: a.dirsFailed + b.dirsFailed,
-		filesDone: a.filesDone + b.filesDone,
-		filesFailed: a.filesFailed + b.filesFailed,
-		bytesDone: a.bytesDone + b.bytesDone,
-		bytesFailed: a.bytesFailed + b.bytesFailed,
-		dirsNotAttempted: a.dirsNotAttempted + b.dirsNotAttempted,
-		filesNotAttempted: a.filesNotAttempted + b.filesNotAttempted,
-		bytesNotAttempted: a.bytesNotAttempted + b.bytesNotAttempted,
-		entriesSkipped: a.entriesSkipped + b.entriesSkipped,
-		bytesSkipped: a.bytesSkipped + b.bytesSkipped
+	const sum: CopyJobCounts = { ...a }
+
+	for (const key of ITEM_COUNT_KEYS) {
+		sum[key] += b[key]
 	}
+
+	return sum
 }
 
 // The SDK's own report cap: past it a list only counts.

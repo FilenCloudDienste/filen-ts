@@ -1,4 +1,4 @@
-import { getUuidNumber, getNameParts, comparePartsNumeric } from "./naturalSort"
+import { getUuidNumber, getNameParts, comparePartsNumeric, type NamePart } from "./naturalSort"
 
 // Generic index-array decorate/sort/permute engine behind drive-item sorting on both platforms —
 // three mode kinds (size / timestamp / lexicographic "parts"), a lazy name tiebreak nested inside
@@ -110,10 +110,10 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 		// sizes are mostly distinct, so precomputing name keys for the whole partition would tax
 		// the common case for the rare tie. The tie-dense case this chain exists for — directories,
 		// whose sizes are all equal/unknown — resolves each index once instead of once per tie.
-		const nameParts: ((string | number)[] | undefined)[] = new Array<(string | number)[] | undefined>(length)
+		const nameParts: (NamePart[] | undefined)[] = new Array<NamePart[] | undefined>(length)
 
 		// Reads the slot directly: at() throws on the unresolved (undefined) slots.
-		const namePartsAt = (i: number): (string | number)[] => {
+		const namePartsAt = (i: number): NamePart[] => {
 			const cached = nameParts[i]
 
 			if (cached !== undefined) {
@@ -177,11 +177,11 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 			throw new Error("driveSortEngine.ts: parts sort mode missing stringKey")
 		}
 
-		const allParts: (string | number)[][] = new Array<(string | number)[]>(length)
+		const allParts: NamePart[][] = new Array<NamePart[]>(length)
 		// Only tiebreakByName modes need the name secondary — for the name modes the primary
 		// already IS the name, so a tie means identical names and the chain skips straight to the
 		// uuids.
-		const tieParts: (string | number)[][] | null = mode.tiebreakByName ? new Array<(string | number)[]>(length) : null
+		const tieParts: NamePart[][] | null = mode.tiebreakByName ? new Array<NamePart[]>(length) : null
 
 		for (let i = 0; i < length; i++) {
 			const item = at(partition, i)

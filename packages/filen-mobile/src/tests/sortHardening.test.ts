@@ -76,7 +76,7 @@ describe("hardening — group() full header sequence + completeness", () => {
 			"header-today",
 			"header-7days",
 			"header-30days",
-			"header-month",
+			`header-month-${new Date(new Date(FROZEN_NOW - 45 * day).getFullYear(), new Date(FROZEN_NOW - 45 * day).getMonth(), 1).getTime()}`,
 			"header-2023",
 			"header-2021",
 			"header-archived",

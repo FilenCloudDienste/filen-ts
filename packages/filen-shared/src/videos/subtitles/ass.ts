@@ -1,12 +1,4 @@
-import {
-	CueBuilder,
-	SubtitleLineReader,
-	MAX_SUBTITLE_CHARS,
-	normalizeCueText,
-	parseSubtitleTimestamp,
-	type CueStore,
-	type NormalizedCueText
-} from "./cues"
+import { CueBuilder, SubtitleLineReader, MAX_SUBTITLE_CHARS, normalizeCueText, parseSubtitleTimestamp, type CueStore } from "./cues"
 
 const DEFAULT_COLUMNS = ["layer", "start", "end", "style", "name", "marginl", "marginr", "marginv", "effect", "text"]
 
@@ -113,81 +105,20 @@ export function parseAss(input: string): CueStore | null {
 	return builder.finish()
 }
 
-export interface MatroskaAssBlock {
-	readOrder: number
-	layer: number
-	style: string
-	name: string
-	marginL: string
-	marginR: string
-	marginV: string
-	effect: string
-	// Raw override-laden text.
-	text: string
-}
+// A Matroska S_TEXT/ASS or SSA block is "ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text": the text is
+// what follows the eighth comma. A block with fewer commas is taken whole.
+export function assBlockText(line: string): string {
+	let at = 0
 
-// A Matroska S_TEXT/ASS block payload: `ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text`.
-export function parseMatroskaAssBlock(payload: string): MatroskaAssBlock | null {
-	const fields = splitFields(payload, 0, 9)
+	for (let commas = 0; commas < 8; commas++) {
+		const next = line.indexOf(",", at)
 
-	if (fields === null) {
-		return null
+		if (next === -1) {
+			return line
+		}
+
+		at = next + 1
 	}
 
-	const readOrder = Number(fields[0])
-	const layer = Number(fields[1])
-
-	if (!Number.isInteger(readOrder) || !Number.isInteger(layer)) {
-		return null
-	}
-
-	return {
-		readOrder,
-		layer,
-		style: fields[2] as string,
-		name: fields[3] as string,
-		marginL: fields[4] as string,
-		marginR: fields[5] as string,
-		marginV: fields[6] as string,
-		effect: fields[7] as string,
-		text: fields[8] as string
-	}
-}
-
-// Plain-text cue for an ASS block; null for unparseable payloads and vector drawings.
-export function matroskaAssBlockToCue(payload: string): (NormalizedCueText & { readOrder: number }) | null {
-	const block = parseMatroskaAssBlock(payload)
-
-	if (block === null) {
-		return null
-	}
-
-	const cleaned = normalizeCueText(block.text, "ass")
-
-	return cleaned.drawing || cleaned.text.length === 0
-		? null
-		: {
-				...cleaned,
-				readOrder: block.readOrder
-			}
-}
-
-export function formatAssTime(seconds: number): string {
-	const cs = Math.max(0, Math.round(seconds * 100))
-	const h = Math.floor(cs / 360000)
-	const m = Math.floor((cs % 360000) / 6000)
-	const s = Math.floor((cs % 6000) / 100)
-
-	return `${String(h)}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`
-}
-
-// Rebuilds the full `Dialogue:` line (standard ASS column order) a renderer expects from a Matroska block and its times.
-export function matroskaAssBlockToDialogue(payload: string, startSeconds: number, endSeconds: number): string | null {
-	const block = parseMatroskaAssBlock(payload)
-
-	if (block === null) {
-		return null
-	}
-
-	return `Dialogue: ${String(block.layer)},${formatAssTime(startSeconds)},${formatAssTime(endSeconds)},${block.style},${block.name},${block.marginL},${block.marginR},${block.marginV},${block.effect},${block.text}`
+	return line.slice(at)
 }

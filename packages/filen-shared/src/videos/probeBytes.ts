@@ -23,29 +23,48 @@ export async function readBytes(source: BlockSource, start: number, length: numb
 	return bytes
 }
 
-export function uint16(bytes: Uint8Array, at: number): number {
+// Fixed-width unsigned integer readers for the container and file-format parsers. Each reads a missing byte past the
+// end as zero, so a hostile length can only produce a wrong value, never an exception, and none can come out negative.
+
+export function uint16le(bytes: Uint8Array, at: number): number {
+	return (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8)
+}
+
+export function uint16be(bytes: Uint8Array, at: number): number {
 	return ((bytes[at] ?? 0) << 8) + (bytes[at + 1] ?? 0)
 }
 
-function uint24(bytes: Uint8Array, at: number): number {
+export function uint24be(bytes: Uint8Array, at: number): number {
 	return ((bytes[at] ?? 0) << 16) + ((bytes[at + 1] ?? 0) << 8) + (bytes[at + 2] ?? 0)
 }
 
-export function uint32(bytes: Uint8Array, at: number): number {
-	return (bytes[at] ?? 0) * 0x1000000 + uint24(bytes, at + 1)
+export function uint32le(bytes: Uint8Array, at: number): number {
+	return uint16le(bytes, at) + uint16le(bytes, at + 2) * 0x10000
 }
 
+export function uint32be(bytes: Uint8Array, at: number): number {
+	return (bytes[at] ?? 0) * 0x1000000 + uint24be(bytes, at + 1)
+}
+
+// The four bytes at `at` as Latin-1 text: a FourCC or chunk id.
+export function fourCC(bytes: Uint8Array, at: number): string {
+	return String.fromCharCode(bytes[at] ?? 0, bytes[at + 1] ?? 0, bytes[at + 2] ?? 0, bytes[at + 3] ?? 0)
+}
+
+// The walkers' names for the big-endian readers.
+export { uint16be as uint16, uint32be as uint32 }
+
 export function int32(bytes: Uint8Array, at: number): number {
-	const value = uint32(bytes, at)
+	const value = uint32be(bytes, at)
 
 	return value >= 0x80000000 ? value - 0x100000000 : value
 }
 
 // Null past 2^53, where a JS number stops being exact.
 export function uint64(bytes: Uint8Array, at: number): number | null {
-	const high = uint32(bytes, at)
+	const high = uint32be(bytes, at)
 
-	return high >= 0x200000 ? null : high * 0x100000000 + uint32(bytes, at + 4)
+	return high >= 0x200000 ? null : high * 0x100000000 + uint32be(bytes, at + 4)
 }
 
 export function ascii(bytes: Uint8Array, start: number, end: number): string {

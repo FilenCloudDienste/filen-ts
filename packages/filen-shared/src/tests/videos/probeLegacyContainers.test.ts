@@ -283,7 +283,12 @@ const H264_SPS = [
 	0x03, 0x00, 0xf1, 0x83, 0x19, 0x60
 ]
 
-function asf(withIndex: boolean, fourcc = "WMV3", payload: number[] = new Array<number>(50).fill(0)): Uint8Array {
+function asf(
+	withIndex: boolean,
+	fourcc = "WMV3",
+	payload: number[] = new Array<number>(50).fill(0),
+	extraHeaderObjects: number[] = []
+): Uint8Array {
 	const fileProperties = asfObject("a1dcab8c47a9cf118ee400c00c205365", [
 		...new Array<number>(40).fill(0),
 		...le(1_230_000_000, 8),
@@ -300,7 +305,7 @@ function asf(withIndex: boolean, fourcc = "WMV3", payload: number[] = new Array<
 		...le(40, 2),
 		...bitmapInfo(fourcc, 1280, 720)
 	])
-	const children = [...fileProperties, ...video, ...audio]
+	const children = [...fileProperties, ...video, ...audio, ...extraHeaderObjects]
 	const header = asfObject("3026b2758e66cf11a6d900aa0062ce6c", [...le(3, 4), 1, 2, ...children])
 	const data = asfObject("3626b2758e66cf11a6d900aa0062ce6c", payload)
 
@@ -473,5 +478,76 @@ describe("probeVideo — MPEG-PS", () => {
 		for (const end of [4, 14, 20, 40, file.length - 7]) {
 			await expect(probe(file.slice(0, end))).resolves.not.toThrow()
 		}
+	})
+})
+
+// ── Frame rate ──
+
+// A header extension holding one extended stream properties object: `stream`'s average time per frame, 100 ns units.
+function asfFrameTime(stream: number, frameTime: number): number[] {
+	const extended = asfObject("14e68a292226174cb935dae07ee9289c", [
+		...new Array<number>(48).fill(0),
+		...le(stream, 2),
+		...le(0, 2),
+		...le(frameTime, 8),
+		...le(0, 2),
+		...le(0, 2)
+	])
+
+	return asfObject("b503bf5f2ea9cf118ee300c00c205365", [...new Array<number>(18).fill(0), ...le(extended.length, 4), ...extended])
+}
+
+describe("probeVideo — frame rate", () => {
+	it("reads an AVI picture stream's rate over its scale", async () => {
+		expect((await probe(avi("XVID", false)))?.video?.fps).toBe(25)
+	})
+
+	it("reads FLV's onMetaData framerate, and states none without it", async () => {
+		const file = flv(true)
+		const withRate = concat(
+			text("FLV"),
+			[1, 0x05, ...be(9, 4), 0, 0, 0, 0],
+			flvTag(18, 0, [
+				0x02,
+				...amfString("onMetaData"),
+				0x08,
+				...be(1, 4),
+				...amfString("framerate"),
+				0x00,
+				...f64(29.97),
+				0,
+				0,
+				0x09
+			]),
+			flvTag(9, 0, [0x17, 0, 0, 0, 0, ...AVCC])
+		)
+
+		expect((await probe(withRate))?.video?.fps).toBe(29.97)
+		expect((await probe(file))?.video?.fps).toBeUndefined()
+	})
+
+	it("reads an ASF picture stream's average time per frame from its extended stream properties", async () => {
+		expect((await probe(asf(true, "WMV3", undefined, asfFrameTime(2, 400_000))))?.video?.fps).toBe(25)
+		expect((await probe(asf(true, "WMV3", undefined, asfFrameTime(1, 400_000))))?.video?.fps).toBeUndefined()
+		expect((await probe(asf(true)))?.video?.fps).toBeUndefined()
+	})
+
+	it("reads an MPEG-2 sequence header's frame rate code, and an H.264 SPS's VUI timing in a program stream", async () => {
+		expect((await probe(mpegPs(true)))?.video?.fps).toBeCloseTo(30000 / 1001, 6)
+
+		const avc = new Uint8Array([...pack(), ...pes(0xe0, 90_000, [0, 0, 0, 1, ...SPS, 0, 0, 0, 1, ...PPS])])
+
+		// x264's SPS: one tick of 1/48 s, two ticks a frame.
+		expect((await probe(avc))?.video).toMatchObject({ codec: "h264", fps: 24 })
+	})
+
+	it("drops a rate outside any real picture's", async () => {
+		const broken = avi("XVID", false)
+		// The picture strh's data starts with its type.
+		const strhAt = Buffer.from(broken).indexOf("vids")
+
+		// Its rate over its scale of 1: 0 frames per second.
+		broken.set(le(0, 4), strhAt + 24)
+		expect((await probe(broken))?.video?.fps).toBeUndefined()
 	})
 })

@@ -645,8 +645,7 @@ describe("notesSorter", () => {
 
 			const result = notesSorter.group([favorited])
 			const header = result.find(item => item.type === "header" && "id" in item && item.id === "header-favorited") as
-				| { title?: string }
-				| undefined
+				{ title?: string } | undefined
 
 			expect(header?.title).toBe("favorited")
 		})
@@ -743,8 +742,7 @@ describe("notesSorter", () => {
 
 			// It should be under a year header with title "0"
 			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-0") as
-				| { title?: string }
-				| undefined
+				{ title?: string } | undefined
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe("0")
@@ -834,8 +832,7 @@ describe("notesSorter", () => {
 			expect((noteItems[0] as { uuid?: string }).uuid).toBe("epoch-note")
 
 			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-1970") as
-				| { title?: string }
-				| undefined
+				{ title?: string } | undefined
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe("1970")
@@ -921,14 +918,15 @@ describe("notesSorter", () => {
 			expect(header7d).toBeUndefined()
 		})
 
-		it("note edited ~45 days ago lands in the single month bucket", () => {
-			const ts = BigInt(FROZEN_NOW - 45 * 24 * 60 * 60 * 1000)
-			const note = makeNote({ uuid: "month-note", editedTimestamp: ts })
+		it("note edited ~45 days ago lands in the bucket of its own calendar month", () => {
+			const noteMs = FROZEN_NOW - 45 * 24 * 60 * 60 * 1000
+			const note = makeNote({ uuid: "month-note", editedTimestamp: BigInt(noteMs) })
+			const noteDate = new Date(noteMs)
+			const monthStart = new Date(noteDate.getFullYear(), noteDate.getMonth(), 1).getTime()
 
 			const result = notesSorter.group([note])
-			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
-				| { title?: string }
-				| undefined
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-month-${monthStart}`) as
+				{ title?: string } | undefined
 
 			expect(monthHeader).toBeDefined()
 			// No 30-days header
@@ -936,23 +934,39 @@ describe("notesSorter", () => {
 			expect(header30d).toBeUndefined()
 		})
 
-		it("month-bucket header title equals the Intl name of two-months-ago (frozen clock)", () => {
-			const ts = BigInt(FROZEN_NOW - 45 * 24 * 60 * 60 * 1000)
-			const note = makeNote({ uuid: "month-label", editedTimestamp: ts })
+		it("month-bucket header title is the Intl name of the note's own month (frozen clock)", () => {
+			const noteMs = FROZEN_NOW - 45 * 24 * 60 * 60 * 1000
+			const note = makeNote({ uuid: "month-label", editedTimestamp: BigInt(noteMs) })
 
 			const result = notesSorter.group([note])
-			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
-				| { title?: string }
-				| undefined
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id.startsWith("header-month-")) as
+				{ title?: string } | undefined
 
 			expect(monthHeader).toBeDefined()
 
-			// Two months before June 2025 = April 2025
-			const frozenDate = new Date(FROZEN_NOW)
-			const twoMonthsAgoDate = new Date(frozenDate.getFullYear(), frozenDate.getMonth() - 2, frozenDate.getDate())
-			const expectedLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(twoMonthsAgoDate)
+			// 45 days before 15 June 2025 is 1 May 2025, so the header reads May (not April).
+			const expectedLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(noteMs))
 
 			expect(monthHeader?.title).toBe(expectedLabel)
+		})
+
+		it("each calendar month gets its own header with a unique id, newest month first", () => {
+			const frozenDate = new Date(FROZEN_NOW)
+			const mayMs = new Date(frozenDate.getFullYear(), frozenDate.getMonth() - 1, 5, 12).getTime()
+			const aprilMs = new Date(frozenDate.getFullYear(), frozenDate.getMonth() - 2, 20, 12).getTime()
+
+			const result = notesSorter.group([
+				makeNote({ uuid: "april", editedTimestamp: BigInt(aprilMs) }),
+				makeNote({ uuid: "may", editedTimestamp: BigInt(mayMs) })
+			])
+			const headers = result.filter(item => item.type === "header") as { id: string; title: string }[]
+			const monthName = (ms: number): string => new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(ms))
+
+			expect(headers.map(header => header.id)).toEqual([
+				`header-month-${new Date(frozenDate.getFullYear(), frozenDate.getMonth() - 1, 1).getTime()}`,
+				`header-month-${new Date(frozenDate.getFullYear(), frozenDate.getMonth() - 2, 1).getTime()}`
+			])
+			expect(headers.map(header => header.title)).toEqual([monthName(mayMs), monthName(aprilMs)])
 		})
 
 		it("note edited 2 years ago lands in the correct year bucket (frozen clock)", () => {
@@ -963,14 +977,13 @@ describe("notesSorter", () => {
 			const result = notesSorter.group([note])
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
 			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
-				| { title?: string }
-				| undefined
+				{ title?: string } | undefined
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe(String(expectedYear))
 
-			// Must NOT be in the month bucket
-			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month")
+			// Must NOT be in a month bucket
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id.startsWith("header-month-"))
 			expect(monthHeader).toBeUndefined()
 		})
 	})
@@ -1027,6 +1040,28 @@ describe("clearSortCaches", () => {
 // binding — without that key a language change would keep rendering the old locale's month name.
 // ---------------------------------------------------------------------------
 
+describe("notesSorter.group — month of the previous year", () => {
+	beforeAll(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 10, 12))
+	})
+
+	afterAll(() => {
+		vi.useRealTimers()
+	})
+
+	it("names the year in the header of a December note seen in January", () => {
+		const decemberMs = new Date(2025, 11, 5, 12).getTime()
+		const grouped = notesSorter.group([makeNote({ uuid: "december", editedTimestamp: BigInt(decemberMs) })])
+		const header = grouped.find(entry => entry.type === "header")
+
+		expect(header && header.type === "header" ? header.id : undefined).toBe(`header-month-${new Date(2025, 11, 1).getTime()}`)
+		expect(header && header.type === "header" ? header.title : undefined).toBe(
+			new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(new Date(decemberMs))
+		)
+	})
+})
+
 describe("notesSorter.group — month header formatter", () => {
 	// Two months before this is January, whose name differs between the two languages compared below. An
 	// unpinned clock made the test fail whenever that month was spelled alike (April, August, …).
@@ -1050,7 +1085,7 @@ describe("notesSorter.group — month header formatter", () => {
 		})
 
 		const grouped = notesSorter.group([note])
-		const header = grouped.find(entry => entry.type === "header" && entry.id === "header-month")
+		const header = grouped.find(entry => entry.type === "header" && entry.id.startsWith("header-month-"))
 
 		return header && header.type === "header" ? header.title : undefined
 	}

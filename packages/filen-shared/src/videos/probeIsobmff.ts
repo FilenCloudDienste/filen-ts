@@ -34,6 +34,7 @@ import {
 } from "./probeBytes"
 import {
 	MAX_CHAPTERS,
+	boundedFps,
 	type MediaCodec,
 	type ParsedContainer,
 	type ParsedTrack,
@@ -57,6 +58,8 @@ const MAX_SAMPLE_ENTRY_BYTES = 262_144
 const MAX_CHPL_BYTES = 131_072
 const MAX_STRING_BYTES = 4096
 const MAX_FTYP_BYTES = 256
+// The head of a picture track's stts read for its frame duration: 511 entries, enough to find the usual one.
+const MAX_STTS_BYTES = 4096
 
 interface Box {
 	type: string
@@ -354,7 +357,7 @@ interface TrackHeader {
 // The sample entry child a decoder is configured with, for the codecs that have one.
 const DESCRIPTION_BOXES: Partial<Record<MediaCodec, string>> = { h264: "avcC", hevc: "hvcC", av1: "av1C" }
 
-function videoTrack(entry: Uint8Array, header: TrackHeader, tables: SampleTables | null): ParsedTrack {
+function videoTrack(entry: Uint8Array, header: TrackHeader, tables: SampleTables | null, fps: number | null): ParsedTrack {
 	const box = entryBox(entry)
 	const children = box.dataStart + 78
 	const fourcc = originalFormat(entry, children, box.end, box.type)
@@ -440,6 +443,7 @@ function videoTrack(entry: Uint8Array, header: TrackHeader, tables: SampleTables
 			rotation: header.rotation,
 			bitDepth,
 			transfer: transferKind(transfer),
+			...(fps === null ? {} : { fps }),
 			...(dv === null ? {} : { dv: { profile: dv.profile, compat: dv.compat } })
 		}
 	}
@@ -684,8 +688,8 @@ async function walkTrak(walk: Walk, trak: Box): Promise<ParsedTrack | null> {
 				} else if (child.type === "hdlr") {
 					state.handler = ascii(await payload(walk, child, 12), 8, 12)
 				} else if (child.type === "minf") {
-					// hdlr precedes minf, so only a picture track pays for locating its tables.
-					state.entry = await firstSampleEntry(walk, child, walk.keyframes && state.handler === "vide")
+					// hdlr precedes minf, so only a picture track pays for locating its tables and reading its frame duration.
+					state.entry = await firstSampleEntry(walk, child, walk.keyframes && state.handler === "vide", state.handler === "vide")
 				}
 			})
 
@@ -706,7 +710,9 @@ async function walkTrak(walk: Walk, trak: Box): Promise<ParsedTrack | null> {
 	}
 
 	if (handler === "vide") {
-		return videoTrack(entry.bytes, header, entry.tables === null ? null : { ...entry.tables, timescale: state.timescale })
+		const fps = entry.frameDelta === null || state.timescale === 0 ? null : boundedFps(state.timescale / entry.frameDelta)
+
+		return videoTrack(entry.bytes, header, entry.tables === null ? null : { ...entry.tables, timescale: state.timescale }, fps)
 	}
 
 	if (handler === "soun") {
@@ -738,6 +744,25 @@ interface SampleEntry {
 	stsdVersion: number
 	// Located only when asked for; the timescale is filled in by the trak.
 	tables: Omit<SampleTables, "timescale"> | null
+	// The picture's usual frame duration in mdhd ticks (stts), when asked for and stated.
+	frameDelta: number | null
+}
+
+// The sample delta most of the samples in the head of an stts payload take; null without one.
+function dominantDelta(stts: Uint8Array): number | null {
+	const entries = Math.min(uint32(stts, 4), Math.floor((stts.length - 8) / 8))
+	let best: { count: number; delta: number } | null = null
+
+	for (let index = 0; index < entries; index++) {
+		const count = uint32(stts, 8 + index * 8)
+		const delta = uint32(stts, 12 + index * 8)
+
+		if (delta > 0 && count > (best?.count ?? 0)) {
+			best = { count, delta }
+		}
+	}
+
+	return best?.delta ?? null
 }
 
 function range(box: Box): { start: number; end: number } {
@@ -745,9 +770,10 @@ function range(box: Box): { start: number; end: number } {
 }
 
 // minf → stbl → stsd's first entry, read whole; the sample tables after it are skipped by size, or with
-// `locateTables` located by their headers (never read).
-async function firstSampleEntry(walk: Walk, minf: Box, locateTables: boolean): Promise<SampleEntry | null> {
-	const found: { entry: SampleEntry | null } = { entry: null }
+// `locateTables` located by their headers (never read). `frameTiming` also reads the head of stts, which follows stsd.
+async function firstSampleEntry(walk: Walk, minf: Box, locateTables: boolean, frameTiming: boolean): Promise<SampleEntry | null> {
+	// `delta` undefined: stts not reached yet.
+	const found: { entry: SampleEntry | null; delta: number | null | undefined } = { entry: null, delta: frameTiming ? undefined : null }
 	const tables: Omit<SampleTables, "timescale"> = {
 		stts: null,
 		stss: null,
@@ -762,6 +788,8 @@ async function firstSampleEntry(walk: Walk, minf: Box, locateTables: boolean): P
 			return
 		}
 
+		// Past the sample entry only for the frame duration, a box that can't be read (broken, or beyond the read budget)
+		// costs the rate alone, never the track.
 		await forEachChild(walk, box, 5, async child => {
 			if (locateTables) {
 				if (child.type === "stts" || child.type === "stss" || child.type === "stsc" || child.type === "stsz") {
@@ -770,6 +798,12 @@ async function firstSampleEntry(walk: Walk, minf: Box, locateTables: boolean): P
 					tables.chunkOffsets = range(child)
 					tables.wideOffsets = child.type === "co64"
 				}
+			}
+
+			if (child.type === "stts" && found.delta === undefined) {
+				found.delta = child.dataStart + 16 <= child.end ? dominantDelta(await payload(walk, child, MAX_STTS_BYTES)) : null
+
+				return locateTables || found.entry === null
 			}
 
 			if (child.type !== "stsd") {
@@ -788,14 +822,23 @@ async function firstSampleEntry(walk: Walk, minf: Box, locateTables: boolean): P
 			found.entry = {
 				bytes: await readBytes(walk.source, first.start, Math.min(size, MAX_SAMPLE_ENTRY_BYTES)),
 				stsdVersion: version[0] ?? 0,
-				tables: locateTables ? tables : null
+				tables: locateTables ? tables : null,
+				frameDelta: null
 			}
 
-			return locateTables
+			return locateTables || found.delta === undefined
+		}).catch((error: unknown) => {
+			if (locateTables || found.entry === null || !(error instanceof MalformedError || error instanceof ReadBudgetError)) {
+				throw error
+			}
 		})
 
 		return false
 	})
+
+	if (found.entry !== null) {
+		found.entry.frameDelta = found.delta ?? null
+	}
 
 	return found.entry
 }

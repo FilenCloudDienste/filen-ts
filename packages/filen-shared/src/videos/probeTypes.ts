@@ -78,7 +78,19 @@ export interface ProbeVideo {
 	rotation: number
 	bitDepth: number | null
 	transfer: ProbeTransfer
+	// Frames per second of the picture track, when the container states it; frame-based subtitles and .edl
+	// entries are timed by it.
+	fps?: number
 	dv?: { profile: number; compat: number }
+}
+
+// The frame rates a probe accepts from a container; anything outside is a broken header.
+export const MIN_FPS = 1
+export const MAX_FPS = 1000
+
+// A container's stated frame rate when it is a real picture rate, else null.
+export function boundedFps(fps: number): number | null {
+	return Number.isFinite(fps) && fps >= MIN_FPS && fps <= MAX_FPS ? fps : null
 }
 
 export interface ProbeAudio {

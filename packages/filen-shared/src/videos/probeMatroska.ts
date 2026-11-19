@@ -41,7 +41,15 @@ import {
 	type EbmlContext,
 	type EbmlElement
 } from "./probeEbml"
-import { MAX_CHAPTERS, type MediaCodec, type ParsedContainer, type ParsedTrack, type ProbeChapter, type ProbeTier } from "./probeTypes"
+import {
+	MAX_CHAPTERS,
+	boundedFps,
+	type MediaCodec,
+	type ParsedContainer,
+	type ParsedTrack,
+	type ProbeChapter,
+	type ProbeTier
+} from "./probeTypes"
 import { EBML_ID } from "./transportStreamHead"
 
 // Matroska/WebM: the Segment's top-level elements are walked by header; the few a probe needs (SeekHead,
@@ -226,6 +234,8 @@ interface RawTrack {
 	outputSamplingFrequency: number | null
 	channels: number | null
 	dolbyVision: DolbyVisionConfig | null
+	// Nanoseconds per frame.
+	defaultDuration: number | null
 }
 
 // Fourccs of the Dolby Vision configuration records a BlockAdditionMapping may carry.
@@ -373,7 +383,8 @@ function parseTrackEntry(bytes: Uint8Array, entry: EbmlElement, context: EbmlCon
 		samplingFrequency: null,
 		outputSamplingFrequency: null,
 		channels: null,
-		dolbyVision: null
+		dolbyVision: null,
+		defaultDuration: null
 	}
 
 	for (const field of ebmlChildren(bytes, entry.dataStart, entry.end ?? entry.dataStart, 3, context)) {
@@ -413,6 +424,9 @@ function parseTrackEntry(bytes: Uint8Array, entry: EbmlElement, context: EbmlCon
 				break
 			case 0x63a2:
 				raw.codecPrivate = ebmlBinary(bytes, field)
+				break
+			case 0x23e383:
+				raw.defaultDuration = ebmlUint(bytes, field)
 				break
 			case 0xe0:
 				parseVideo(bytes, field, raw, context)
@@ -545,6 +559,15 @@ function colourInfo(raw: RawTrack): ColourInfo | null {
 	}
 }
 
+// Frames per second from DefaultDuration; null when absent or outside any real picture rate.
+function frameRateOf(defaultDuration: number | null): number | null {
+	if (defaultDuration === null || defaultDuration <= 0) {
+		return null
+	}
+
+	return boundedFps(1e9 / defaultDuration)
+}
+
 function videoTrack(raw: RawTrack, codecPrivate: Uint8Array | null): ParsedTrack {
 	const codec = matroskaCodec(raw.codecId)
 	const colour = colourInfo(raw)
@@ -593,6 +616,7 @@ function videoTrack(raw: RawTrack, codecPrivate: Uint8Array | null): ParsedTrack
 			: 1
 	// ProjectionPoseRoll turns the picture counter-clockwise.
 	const rotation = raw.roll === null ? 0 : (((Math.round(-raw.roll / 90) * 90) % 360) + 360) % 360
+	const fps = frameRateOf(raw.defaultDuration)
 
 	return {
 		kind: "video",
@@ -607,6 +631,7 @@ function videoTrack(raw: RawTrack, codecPrivate: Uint8Array | null): ParsedTrack
 			rotation,
 			bitDepth: raw.bitsPerChannel !== null && raw.bitsPerChannel > 0 ? raw.bitsPerChannel : configBitDepth,
 			transfer: transferKind(raw.colour?.transfer ?? null),
+			...(fps === null ? {} : { fps }),
 			...(dv === null ? {} : { dv: { profile: dv.profile, compat: dv.compat } })
 		}
 	}

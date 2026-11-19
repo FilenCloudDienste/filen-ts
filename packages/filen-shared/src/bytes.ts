@@ -1,5 +1,8 @@
 // Byte helpers every platform shares.
 
+// The fixed-width readers live with the container walkers, which cannot import from a parent directory.
+export { fourCC, uint16be, uint16le, uint24be, uint32be, uint32le } from "./videos/probeBytes"
+
 export interface PlatformTextDecoder {
 	readonly encoding: string
 	decode(input?: Uint8Array, options?: { stream?: boolean }): string

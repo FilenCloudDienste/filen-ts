@@ -1,7 +1,7 @@
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
 import { readBytes, seconds } from "./probeBytes"
 import { bitmapVideo, spsCodecString, uint16le, uint32le, waveFormatAudio } from "./probeAvi"
-import type { ParsedContainer, ProbeAudio, ProbeVideo } from "./probeTypes"
+import { boundedFps, type ParsedContainer, type ProbeAudio, type ProbeVideo } from "./probeTypes"
 
 // ASF (Windows Media: .wmv, .wma, .asf): the header object's file and stream properties, read from the head, and
 // whether a Simple Index object follows the data object.
@@ -220,7 +220,10 @@ export async function walkAsf(source: BlockSource, result: ParsedContainer): Pro
 						}
 					: stream.video
 
-			result.tracks.push({ kind: "video", enabled: true, video })
+			const frameTime = header.frameTime.get(stream.number)
+			const fps = frameTime === undefined ? null : boundedFps(1 / frameTime)
+
+			result.tracks.push({ kind: "video", enabled: true, video: fps === null ? video : { ...video, fps } })
 		} else {
 			result.tracks.push({
 				kind: "audio",

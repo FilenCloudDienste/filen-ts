@@ -7,11 +7,12 @@ import {
 	type LibraryScanInput,
 	type VideoLibrary
 } from "@filen/shared/videos"
-import { classifyVideoLibrary as referenceClassify } from "./classifyReference"
 import { syntheticLibrary } from "./syntheticLibrary"
 
-// The sliced classifier against the frozen one it was split from: the same library for every input, stepped one
-// `next()` at a time the way the worker drives it.
+// Golden output of the classifier, stepped one `next()` at a time the way the worker drives it: a digest per library,
+// committed in __snapshots__. A rule change that classifies any of these libraries differently fails here; when the
+// change is deliberate, bump CLASSIFIER_VERSION and regenerate with
+// `pnpm vitest run src/tests/videos/classifyReference.test.ts -u` from packages/filen-shared.
 
 function stepped(input: LibraryScanInput): { library: VideoLibrary; steps: number } {
 	const steps = classifyVideoLibrarySteps(input)
@@ -24,6 +25,19 @@ function stepped(input: LibraryScanInput): { library: VideoLibrary; steps: numbe
 	}
 
 	return { library: step.value, steps: count }
+}
+
+// Canonical JSON (object keys sorted) so the digest depends on the output, not on property insertion order.
+async function digest(library: VideoLibrary): Promise<string> {
+	const json = JSON.stringify(library, (_key, value: unknown) =>
+		value !== null && typeof value === "object" && !Array.isArray(value)
+			? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+			: value
+	)
+
+	const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(json)))
+
+	return Array.from(hash, byte => byte.toString(16).padStart(2, "0")).join("")
 }
 
 function rng(seed: number): () => number {
@@ -52,7 +66,13 @@ function randomLibrary(seed: number): LibraryScanInput {
 		return uuid
 	}
 	const file = (parent: string, name: string): void => {
-		files.push({ uuid: `f${String(next++)}`, parent, name, size: Math.floor(random() * 4e9) + 1, timestamp: Math.floor(random() * 1e12) })
+		files.push({
+			uuid: `f${String(next++)}`,
+			parent,
+			name,
+			size: Math.floor(random() * 4e9) + 1,
+			timestamp: Math.floor(random() * 1e12)
+		})
 	}
 	const titles = ["Heat", "Alien", "The Matrix", "Dune", "Up", "Léon", "Ronin", "Se7en", "Amélie", "2001 A Space Odyssey"]
 	const shows = ["Lost", "The Wire", "Dark", "Fargo", "Twin Peaks"]
@@ -68,18 +88,35 @@ function randomLibrary(seed: number): LibraryScanInput {
 			const title = `${pick(titles)} (${String(1970 + Math.floor(random() * 50))})`
 			const folder = random() < 0.7 ? dir(root.uuid, title) : root.uuid
 
-			file(folder, `${title}${pick(["", " - 1080p", " - 2160p", " [Director's Cut]", ".cd1", " part2"])}.${pick(["mkv", "mp4", "avi", "ts"])}`)
+			file(
+				folder,
+				`${title}${pick(["", " - 1080p", " - 2160p", " [Director's Cut]", ".cd1", " part2"])}.${pick(["mkv", "mp4", "avi", "ts"])}`
+			)
 
 			if (random() < 0.4) {
 				file(folder, `${title}${pick(["", " - 720p", ".cd2", " part1"])}.mkv`)
 			}
 
 			if (random() < 0.5) {
-				file(folder, pick(["poster.jpg", "fanart.jpg", `${title}-poster.png`, "folder.jpg", "movie.nfo", `${title}.en.srt`, `${title}.de.forced.ass`]))
+				file(
+					folder,
+					pick([
+						"poster.jpg",
+						"fanart.jpg",
+						`${title}-poster.png`,
+						"folder.jpg",
+						"movie.nfo",
+						`${title}.en.srt`,
+						`${title}.de.forced.ass`
+					])
+				)
 			}
 
 			if (random() < 0.2 && folder !== root.uuid) {
-				file(dir(folder, pick(["Extras", "Featurettes", "Behind The Scenes", "Trailers"])), `${pick(["Making of", "Interview", "Trailer"])}.mkv`)
+				file(
+					dir(folder, pick(["Extras", "Featurettes", "Behind The Scenes", "Trailers"])),
+					`${pick(["Making of", "Interview", "Trailer"])}.mkv`
+				)
 			}
 
 			if (random() < 0.1) {
@@ -99,7 +136,16 @@ function randomLibrary(seed: number): LibraryScanInput {
 				const seasonDir =
 					random() < 0.2
 						? show
-						: dir(show, season === 0 ? pick(["Specials", "Season 0"]) : pick([`Season ${String(season)}`, `S${String(season).padStart(2, "0")}`, `${name} S0${String(season)} 1080p`]))
+						: dir(
+								show,
+								season === 0
+									? pick(["Specials", "Season 0"])
+									: pick([
+											`Season ${String(season)}`,
+											`S${String(season).padStart(2, "0")}`,
+											`${name} S0${String(season)} 1080p`
+										])
+							)
 
 				for (let episode = 1; episode <= 2 + Math.floor(random() * 6); episode++) {
 					const code = `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`
@@ -124,7 +170,15 @@ function randomLibrary(seed: number): LibraryScanInput {
 			const camera = dir(root.uuid, pick(["Camera", "DCIM", "Phone 2023", "Holiday Lisbon"]))
 
 			for (let clip = 0; clip < 3 + Math.floor(random() * 8); clip++) {
-				file(camera, pick([`VID_2023010${String(clip)}_101010.mp4`, `IMG_${String(clip)}.MOV`, `PXL_2023${String(clip)}.mp4`, `IMG_${String(clip)}.jpg`]))
+				file(
+					camera,
+					pick([
+						`VID_2023010${String(clip)}_101010.mp4`,
+						`IMG_${String(clip)}.MOV`,
+						`PXL_2023${String(clip)}.mp4`,
+						`IMG_${String(clip)}.jpg`
+					])
+				)
 			}
 		}
 
@@ -141,14 +195,18 @@ function randomLibrary(seed: number): LibraryScanInput {
 }
 
 describe("sliced classifier", () => {
-	it.each(Array.from({ length: 40 }, (_, index) => index + 1))("classifies a mixed library as the unsliced one did (seed %i)", seed => {
-		const input = randomLibrary(seed)
+	it("classifies 40 mixed libraries to their golden output", async () => {
+		const digests: Record<string, string> = {}
 
-		expect(stepped(input).library).toEqual(referenceClassify(input))
+		for (let seed = 1; seed <= 40; seed++) {
+			digests[`seed ${String(seed)}`] = await digest(stepped(randomLibrary(seed)).library)
+		}
+
+		expect(digests).toMatchSnapshot()
 	})
 
 	it("covers movies with versions and extras, series, and other videos across the mixed libraries", () => {
-		const libraries = Array.from({ length: 40 }, (_, index) => referenceClassify(randomLibrary(index + 1)))
+		const libraries = Array.from({ length: 40 }, (_, index) => stepped(randomLibrary(index + 1)).library)
 
 		expect(libraries.every(library => library.movies.length + library.series.length + library.others.length > 0)).toBe(true)
 		expect(libraries.some(library => library.movies.some(movie => movie.versions.length > 1))).toBe(true)
@@ -157,11 +215,10 @@ describe("sliced classifier", () => {
 		expect(libraries.some(library => library.others.length > 0)).toBe(true)
 	})
 
-	it("classifies a 50k-file library as the unsliced one did, one step at a time", () => {
-		const input = syntheticLibrary(50_000)
-		const { library, steps } = stepped(input)
+	it("classifies a 50k-file library to its golden output, one step at a time", async () => {
+		const { library, steps } = stepped(syntheticLibrary(50_000))
 
 		expect(steps).toBeGreaterThan(1000)
-		expect(library).toEqual(referenceClassify(input))
+		expect(await digest(library)).toMatchSnapshot()
 	})
 })

@@ -167,6 +167,53 @@ export const listDirectory = defineTool({
 export const DIRECTORIES_BY_SIZE_NOTE =
 	"Directories are ranked by the total size of everything inside them; they are not files. Listing a directory by size shows the largest files inside it."
 
+// Notes and refusals in tool results, shared so the eval's fake app gives the model the apps' own words.
+
+// A result's notes joined into one field; without a note, no field.
+export function joinNotes(...notes: { note?: string }[]): { note?: string } {
+	const text = notes.flatMap(({ note }) => (note === undefined ? [] : [note])).join(" ")
+
+	return text.length === 0 ? {} : { note: text }
+}
+
+export function unknownSizesNote(unknown: number): { note?: string } {
+	return unknown === 0
+		? {}
+		: {
+				note:
+					unknown === 1
+						? "1 directory's size is not loaded; it is listed last. get_item_info gives a directory's size."
+						: `${String(unknown)} directories' sizes are not loaded; they are listed last. get_item_info gives a directory's size.`
+			}
+}
+
+export const SEARCH_NEEDS_WORDS = "Pass words from the item name"
+export const PARTIAL_MATCH_NOTE = "No name contains all of the words; these contain only some of them."
+export const OWN_SHARING_UNCHECKED = "unknown: this tool does not show shares or links"
+
+export function recentsReachNote(oldestUpload: string): string {
+	return `Recents reaches back to uploads of ${oldestUpload}; a file uploaded earlier would not be listed here.`
+}
+
+export function datedElsewhereNote(range: string): string {
+	return `None of these is dated ${range}; they match the words at other dates.`
+}
+
+export const CONTACT_NEEDS_WORDS = "Pass words from the contact's name or email address"
+export const NO_CONTACT_NOTE = "No contact matches. Ask the user for the contact's name or exact email address."
+export const CONTACT_WITHOUT_CHAT_NOTE =
+	"A contact without a chat handle has no chat with the user yet; the user can start one from Contacts."
+
+export function composerBusyMessage(chatName: string): string {
+	return `The message box of "${chatName}" already holds unsent text; the user has to clear it first`
+}
+
+export const DRAFTED_NOTE = "The message is in the input field; the user sends it."
+export const TRASH_NOTE = "Only the user can restore or delete these, in the app. Do not offer to."
+export const ROOT_NOT_SHAREABLE = "The drive root cannot be shared or linked; ask about an item in it"
+export const SHARED_WITH_YOU_NOTE = "Its owner manages its links and shares."
+export const NO_TRANSFERS_NOTE = "No uploads or downloads in this tab since it was opened."
+
 const listDirectoryPlain = defineTool({
 	...listDirectory,
 	description: "List the contents of a directory, given its handle or its path (\"/\" is the drive root). Can sort by size or date.",

@@ -2,29 +2,35 @@ import { MAX_SUBTITLE_CHARS, applyCueOffset, type CueStore } from "./subtitles/c
 import { parseAss } from "./subtitles/ass"
 import { DEFAULT_MICRODVD_FPS, isMicroDvd, parseMicroDvd } from "./subtitles/microdvd"
 import { parseSmi } from "./smi"
+import { subtitleFormat, type SidecarSubtitleFormat } from "./sidecars"
 import { parseSrt } from "./subtitles/srt"
 import { parseVtt } from "./subtitles/vtt"
 
-export type SubtitleFormat = "srt" | "vtt" | "ass" | "microdvd" | "smi"
+// The parser a text subtitle takes; "sub" is told from VobSub by its content (`isMicroDvd`).
+export type SubtitleFormat = "srt" | "vtt" | "ass" | "smi" | "sub"
 
-// By file extension; `.sub` needs the content check (`isMicroDvd`) to tell MicroDVD from VobSub.
-export function subtitleFormatFromExtension(extension: string): SubtitleFormat | "sub" | null {
-	switch (extension.replace(/^\./, "").toLowerCase()) {
+// The parser for a sidecar's format; image formats (VobSub, PGS) have none.
+export function parseFormatOf(format: SidecarSubtitleFormat): SubtitleFormat | null {
+	switch (format) {
 		case "srt":
-			return "srt"
 		case "vtt":
-			return "vtt"
+		case "smi":
+			return format
 		case "ass":
 		case "ssa":
 			return "ass"
-		case "smi":
-		case "sami":
-			return "smi"
-		case "sub":
+		case "microdvd":
 			return "sub"
 		default:
 			return null
 	}
+}
+
+// By file extension, through the one sidecar extension table; `.sub` takes the content check.
+export function subtitleFormatFromExtension(extension: string): SubtitleFormat | null {
+	const format = subtitleFormat(extension.replace(/^\./, "").toLowerCase(), false)
+
+	return format === null ? null : parseFormatOf(format)
 }
 
 export interface ParseSubtitleOptions {
@@ -37,7 +43,7 @@ export interface ParseSubtitleOptions {
 }
 
 // Parses text of a known format into one cue store; null when refused (over the size cap, VobSub `.sub`, no SAMI track).
-export function parseSubtitle(text: string, format: SubtitleFormat | "sub", options: ParseSubtitleOptions = {}): CueStore | null {
+export function parseSubtitle(text: string, format: SubtitleFormat, options: ParseSubtitleOptions = {}): CueStore | null {
 	if (text.length > MAX_SUBTITLE_CHARS) {
 		return null
 	}
@@ -55,10 +61,6 @@ export function parseSubtitle(text: string, format: SubtitleFormat | "sub", opti
 			break
 		case "ass":
 			store = parseAss(text)
-
-			break
-		case "microdvd":
-			store = parseMicroDvd(text, options.fps ?? DEFAULT_MICRODVD_FPS)
 
 			break
 		case "sub":

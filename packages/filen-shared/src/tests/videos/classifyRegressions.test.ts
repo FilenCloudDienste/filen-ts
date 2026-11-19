@@ -479,3 +479,67 @@ describe("titles sharing a mixed directory", () => {
 		])
 	})
 })
+
+describe("unowned videos named with a common extra word", () => {
+	it("lists them as titles in every root type and keeps unambiguous orphans dropped", () => {
+		const { summary } = classifyPaths([
+			{
+				name: "Movies",
+				type: "movies",
+				paths: [
+					"Holiday 2023-clip.mp4",
+					"Party/party-short.mp4",
+					"Mixed/Alien (1979).mkv",
+					"Mixed/Heat (1995).mkv",
+					"Mixed/Heat (1995)-clip.mkv",
+					"Mixed/Lost-teaser.mkv"
+				]
+			},
+			{
+				name: "Shows",
+				type: "shows",
+				paths: ["match-scene 2.mkv", "Lost-featurette.mkv"]
+			}
+		])
+
+		expect(summary.movies.map(movie => `${movie.title} (${String(movie.year)}): ${movie.extras.join(", ")}`)).toEqual([
+			"Holiday (2023): ",
+			"party-short (0): ",
+			"Alien (1979): ",
+			"Heat (1995): clip: Movies/Mixed/Heat (1995)-clip.mkv"
+		])
+		expect(summary.others).toEqual(["Shows/match-scene 2.mkv"])
+	})
+})
+
+describe("unowned common-word extras beside a version-suffixed movie", () => {
+	it.each<["auto" | "movies", string]>([
+		["auto", "Mixed/"],
+		["movies", "Mixed/"],
+		["movies", ""]
+	])("joins the movie of the same title and year in a %s root (%s)", (type, dir) => {
+		const { summary } = classifyPaths([
+			{
+				name: "Media",
+				type,
+				paths: [`${dir}Alien (1979) - Director's Cut.mkv`, `${dir}Alien (1979)-clip.mkv`, `${dir}Other (1990).mkv`]
+			}
+		])
+
+		expect(summary.movies).toEqual([
+			{
+				title: "Alien",
+				year: 1979,
+				versions: [`Media/${dir}Alien (1979) - Director's Cut.mkv`],
+				extras: [`clip: Media/${dir}Alien (1979)-clip.mkv`]
+			},
+			{
+				title: "Other",
+				year: 1990,
+				versions: [`Media/${dir}Other (1990).mkv`],
+				extras: []
+			}
+		])
+		expect(summary.others).toEqual([])
+	})
+})

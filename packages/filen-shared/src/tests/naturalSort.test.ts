@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest"
-import { getUuidNumber, getNameParts, comparePartsNumeric, clearNaturalSortCaches, NATURAL_SORT_CACHE_CAP } from "@filen/shared"
+import {
+	getUuidNumber,
+	getNameParts,
+	comparePartsNumeric,
+	clearNaturalSortCaches,
+	NATURAL_SORT_CACHE_CAP,
+	compareNames,
+	compareTextRuns,
+	fastLocaleCompare,
+	sortItems,
+	type SortEngineAccessors,
+	type SortMode
+} from "@filen/shared"
 
 describe("getNameParts", () => {
 	it("splits a name into alternating string/number runs", () => {
@@ -135,5 +147,202 @@ describe("cache bound", () => {
 		}
 
 		expect(getUuidNumber("1a2b3c")).toBe(value)
+	})
+})
+
+interface NamedItem {
+	uuid: string
+	name: string
+}
+
+const namedAccessors: SortEngineAccessors<NamedItem> = {
+	getUuid: item => item.uuid,
+	getSize: () => 0n,
+	isDirectory: () => false,
+	nameKey: item => item.name
+}
+
+const nameAscending: SortMode<NamedItem> = {
+	kind: "parts",
+	isAsc: true,
+	stringKey: item => item.name
+}
+
+function driveOrder(names: string[]): string[] {
+	return sortItems(
+		names.map((name, index) => ({ uuid: `uuid-${index}`, name })),
+		nameAscending,
+		namedAccessors
+	).map(item => item.name)
+}
+
+const MIXED_NAMES = [
+	"zeta",
+	"~temp",
+	"~$Bericht.docx",
+	"übung",
+	"{a",
+	"|pipe",
+	"}brace",
+	"Éb",
+	"éclair.txt",
+	"Ärger.txt",
+	"apple.txt",
+	"Zebra.txt",
+	"Émile",
+	"Zoe",
+	"_a",
+	"a1",
+	"a10",
+	"file2",
+	"file10",
+	"日本 2",
+	"日本 10",
+	"Ωmega",
+	"Яблоко",
+	"x é2",
+	"x é10",
+	"-dash",
+	"e{",
+	"ez",
+	"éa",
+	"resume~x",
+	"resumez",
+	"résuméa",
+	"cafe-menu.pdf",
+	"cafe_menu.pdf",
+	"café_menu.pdf",
+	"ch",
+	"ci",
+	"cí",
+	"cs",
+	"cz",
+	"cž",
+	"Ørsted",
+	"Łódź",
+	"ё",
+	"е",
+	"ж",
+	"e\u0301clair",
+	"éclair",
+	"ΑΣz",
+	"ΑΣ~",
+	"ασa",
+	"ΑΣé"
+]
+
+const PREFIX_TRIPLES = [
+	["e{", "ez", "éa"],
+	["resume~x", "resumez", "résuméa"],
+	["cafe-menu.pdf", "cafe_menu.pdf", "café_menu.pdf"],
+	["ch", "ci", "cí"],
+	["cs", "cz", "cž"],
+	["ΑΣz", "ΑΣ~", "ασa"],
+	["ΑΣz", "ΑΣ~", "ΑΣé"]
+]
+
+function permutations(names: string[]): string[][] {
+	if (names.length <= 1) {
+		return [names]
+	}
+
+	return names.flatMap((name, index) => permutations([...names.slice(0, index), ...names.slice(index + 1)]).map(rest => [name, ...rest]))
+}
+
+describe("natural order across non-ASCII names", () => {
+	it("is transitive over mixed ASCII punctuation, accented, Cyrillic and CJK names", () => {
+		const comparators = [
+			compareNames,
+			fastLocaleCompare,
+			(a: string, b: string) => comparePartsNumeric(getNameParts(a), getNameParts(b))
+		]
+
+		for (const compare of comparators) {
+			for (const a of MIXED_NAMES) {
+				for (const b of MIXED_NAMES) {
+					expect(Math.sign(compare(a, b)) + Math.sign(compare(b, a))).toBe(0)
+
+					for (const c of MIXED_NAMES) {
+						if (compare(a, b) < 0 && compare(b, c) < 0) {
+							expect([a, b, c, compare(a, c) < 0]).toEqual([a, b, c, true])
+						}
+					}
+				}
+			}
+		}
+	})
+
+	it("gives the drive listing, fastLocaleCompare and compareNames the same order", () => {
+		const expected = [...MIXED_NAMES].sort(compareNames)
+
+		expect(driveOrder(MIXED_NAMES)).toEqual(expected)
+		expect(driveOrder([...MIXED_NAMES].reverse())).toEqual(expected)
+		expect([...MIXED_NAMES].reverse().sort(fastLocaleCompare)).toEqual(expected)
+		expect([...MIXED_NAMES].reverse().sort(compareNames)).toEqual(expected)
+	})
+
+	it("orders accented and non-Latin names alphabetically, not by code unit", () => {
+		expect(driveOrder(["Zebra.txt", "éclair.txt", "apple.txt", "Ärger.txt"])).toEqual([
+			"apple.txt",
+			"Ärger.txt",
+			"éclair.txt",
+			"Zebra.txt"
+		])
+		expect(["Zoe", "Émile"].sort(fastLocaleCompare)).toEqual(["Émile", "Zoe"])
+		expect(["Zoe", "Émile"].sort(compareNames)).toEqual(["Émile", "Zoe"])
+	})
+
+	it("sorts { | } ~ after every letter, ASCII or not", () => {
+		expect(compareNames("zeta", "~temp")).toBeLessThan(0)
+		expect(compareNames("übung", "~temp")).toBeLessThan(0)
+		expect(compareNames("übung", "zeta")).toBeLessThan(0)
+		expect(compareTextRuns("{", "é")).toBe(1)
+		expect(compareTextRuns("é", "~")).toBe(-1)
+	})
+
+	it("keeps ASCII text runs in code-unit order", () => {
+		expect(compareTextRuns("-a", "_a")).toBe(-1)
+		expect(compareTextRuns("ab", "abc")).toBe(-1)
+		expect(compareTextRuns("abc", "abc")).toBe(0)
+		expect(compareTextRuns("z", "~")).toBe(-1)
+	})
+
+	it("gives every permutation of names sharing a prefix up to an accented letter one order", () => {
+		for (const triple of PREFIX_TRIPLES) {
+			const expected = driveOrder(triple)
+
+			for (const permutation of permutations(triple)) {
+				expect(driveOrder(permutation)).toEqual(expected)
+				expect([...permutation].sort(fastLocaleCompare)).toEqual(expected)
+				expect([...permutation].sort(compareNames)).toEqual(expected)
+			}
+		}
+
+		expect(driveOrder(["e{", "ez", "éa"])).toEqual(["éa", "ez", "e{"])
+		expect(driveOrder(["café_menu.pdf", "cafe_menu.pdf", "cafe-menu.pdf"])).toEqual(["cafe-menu.pdf", "cafe_menu.pdf", "café_menu.pdf"])
+		expect(driveOrder(["cí", "ci", "ch"])).toEqual(["ch", "ci", "cí"])
+	})
+
+	it("places letters at their base letter and the rest after ASCII by code unit", () => {
+		expect(compareTextRuns("ørsted", "oz")).toBe(-1)
+		expect(compareTextRuns("łódź", "lz")).toBe(-1)
+		expect(compareTextRuns("ё", "ж")).toBe(-1)
+		expect(compareTextRuns("е", "ё")).toBe(-1)
+		expect(compareTextRuns("~", "日")).toBe(-1)
+		expect(compareTextRuns("e\u0301clair", "éclair")).toBe(-1)
+		expect(compareTextRuns("e\u0301clair", "eclair")).toBe(1)
+		expect(compareTextRuns("e\u0301clair", "ed")).toBe(-1)
+	})
+
+	it("breaks fastLocaleCompare ties between case-only non-ASCII names, lowercase first", () => {
+		expect(fastLocaleCompare("école", "École")).toBe(-1)
+		expect(fastLocaleCompare("École", "école")).toBe(1)
+		expect(fastLocaleCompare("Écolé", "ÉcolÉ")).toBe(-1)
+		expect(fastLocaleCompare("École2", "école1")).toBe(1)
+	})
+
+	it("calls case-only non-ASCII differences equal", () => {
+		expect(compareNames("äpfel", "Äpfel")).toBe(0)
+		expect(comparePartsNumeric(getNameParts("ÄPFEL2"), getNameParts("äpfel2"))).toBe(0)
 	})
 })

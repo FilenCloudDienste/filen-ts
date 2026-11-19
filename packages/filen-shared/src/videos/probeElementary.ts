@@ -1,12 +1,90 @@
-import { mp4aCodecString, parseAudioSpecificConfig, simpleAudioCodecString } from "./codecString"
+import { mp4aCodecString, parseAudioSpecificConfig, simpleAudioCodecString, type SpsPicture } from "./codecString"
+import { seconds, transferKind } from "./probeBytes"
 import { AC3_CHANNELS, AC3_RATES } from "./probeIsobmff"
-import type { MediaCodec } from "./probeTypes"
+import { boundedFps, type MediaCodec, type ParsedTrack } from "./probeTypes"
 
 // PES packets (ISO/IEC 13818-1) and the elementary-stream headers inside them: MPEG audio, ADTS, AC-3/E-AC-3
 // and DTS. Shared by the transport stream walker and the raw-audio duration estimate, so each header has
 // one parser.
 
 const NO_PES_HEADER = new Set([0xbc, 0xbe, 0xbf, 0xf0, 0xf1, 0xf2, 0xf8, 0xff])
+const PTS_MODULUS = 2 ** 33
+const PTS_HZ = 90_000
+
+// The ticks from the `first` PTS to a `last` one, across at most one 33-bit wrap; -1 when `last` lies past half the
+// clock's range, where it is one before the first rather than a wrap.
+export function ptsSpan(first: number, last: number): number {
+	const elapsed = (((last - first) % PTS_MODULUS) + PTS_MODULUS) % PTS_MODULUS
+
+	return elapsed < PTS_MODULUS / 2 ? elapsed : -1
+}
+
+// The duration the longest PTS span gives, in seconds; null when no tail PTS lies after the first, which times
+// nothing.
+export function ptsSpanSeconds(span: number): number | null {
+	return span > 0 ? seconds(span / PTS_HZ) : null
+}
+
+// A PS or TS picture as its sequence header or SPS states it; `frameSeconds` is a frame's duration when the stream
+// says (an AVC SPS's VUI timing, an MPEG-1/2 frame rate code).
+export type StreamPicture = SpsPicture & { frameSeconds?: number | null }
+
+// The fields a PS or TS stream carries for its track.
+interface ElementaryVideo {
+	codec: MediaCodec | null
+	fourcc: string
+	codecString: string | null
+	picture: StreamPicture | null
+}
+
+interface ElementaryAudioStream {
+	codec: MediaCodec | null
+	codecString: string | null
+	ch: number | null
+	rate: number | null
+}
+
+export function elementaryVideoTrack(stream: ElementaryVideo): ParsedTrack {
+	const { picture } = stream
+	const frameSeconds = picture?.frameSeconds ?? null
+	const fps = frameSeconds === null || frameSeconds <= 0 ? null : boundedFps(1 / frameSeconds)
+
+	return {
+		kind: "video",
+		enabled: true,
+		video: {
+			codec: stream.codec,
+			fourcc: stream.fourcc,
+			codecString: stream.codecString,
+			w: picture?.width ?? 0,
+			h: picture?.height ?? 0,
+			par: picture?.par ?? 1,
+			rotation: 0,
+			bitDepth: picture?.bitDepth ?? null,
+			transfer: transferKind(picture?.transfer ?? null),
+			...(fps === null ? {} : { fps })
+		}
+	}
+}
+
+export function elementaryAudioTrack(id: number, stream: ElementaryAudioStream, lang: string | null, def: boolean): ParsedTrack {
+	return {
+		kind: "audio",
+		enabled: true,
+		audio: {
+			id,
+			codec: stream.codec,
+			codecString: stream.codecString,
+			ch: stream.ch,
+			rate: stream.rate,
+			lang,
+			name: null,
+			def,
+			forced: false,
+			commentary: false
+		}
+	}
+}
 
 // A 33-bit PTS/DTS in its five-byte PES encoding.
 export function pesTimestamp(bytes: Uint8Array, at: number): number {

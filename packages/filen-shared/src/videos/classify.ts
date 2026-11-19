@@ -3,7 +3,7 @@
 // Output records reference files by their index in the input `files` array and videos by their index in
 // `VideoLibrary.videos`, so the result is flat, acyclic and cheap to structured-clone.
 
-import { EXTRA_TYPE_ORDER, extraTypeForDirName, parseExtraName, type ExtraName, type ExtraType } from "./extras"
+import { EXTRA_TYPE_ORDER, extraTypeForDirName, isAmbiguousExtraType, parseExtraName, type ExtraName, type ExtraType } from "./extras"
 import {
 	displayTitle,
 	episodeSeriesKey,
@@ -44,7 +44,7 @@ import { groupStacks } from "./stacks"
 import { commonStemPrefix, compareVersionCandidates, compareVideoNames, versionLabel, versionSuffix } from "./versions"
 
 // Bumped whenever a rule change can classify the same listing differently, so persisted results get rebuilt.
-export const CLASSIFIER_VERSION = 1
+export const CLASSIFIER_VERSION = 2
 
 // "No file" in any file-index slot.
 export const NO_FILE = -1
@@ -1629,6 +1629,9 @@ class LibraryClassifier {
 		sidecars: DirSidecars
 	): Generator<void, void> {
 		const movieByStem = new Map<string, MovieBuild>()
+		// Movies by title and year, for unowned common-word extras ("Alien (1979)-clip" beside only
+		// "Alien (1979) - Director's Cut"), which join that title the way a version-suffixed name would.
+		const movieByTitle = new Map<string, MovieBuild>()
 		const entries: VersionGroup[] = []
 		const titleKeys: string[] = []
 
@@ -1713,13 +1716,39 @@ class LibraryClassifier {
 			for (const member of titleEntries) {
 				movieByStem.set(identityKey(member.stem), movie)
 			}
+
+			const titleKey = titleKeys[g] ?? ""
+
+			if (titleKey.length > 0) {
+				movieByTitle.set(titleKey, movie)
+			}
 		}
 
-		// Suffix extras belong to the title whose name precedes the suffix; others have no owner and are dropped.
-		for (const extra of extras) {
-			const owner = extra.owner.length > 0 ? movieByStem.get(identityKey(extra.owner)) : undefined
+		// Suffix extras belong to the title whose name precedes the suffix. Without one, a common suffix word ("-clip")
+		// joins a movie of the same title and year, else is a title of its own; any other orphan is dropped.
+		let orphans: number[] | null = null
 
-			owner?.extras.push(this.extraEntry(extra.file, extra.type))
+		for (const extra of extras) {
+			let owner = extra.owner.length > 0 ? movieByStem.get(identityKey(extra.owner)) : undefined
+
+			if (owner === undefined && !isAmbiguousExtraType(extra.type)) {
+				continue
+			}
+
+			if (owner === undefined && movieByTitle.size > 0 && extra.owner.length > 0) {
+				owner = movieByTitle.get(mergeKey(extra.owner))
+			}
+
+			if (owner !== undefined) {
+				owner.extras.push(this.extraEntry(extra.file, extra.type))
+			} else {
+				orphans ??= []
+				orphans.push(extra.file)
+			}
+		}
+
+		if (orphans !== null) {
+			yield* this.addLooseTitles(root, rootType, orphans, groupStacks(orphans.map(file => this.stem(file))), [], sidecars)
 		}
 	}
 

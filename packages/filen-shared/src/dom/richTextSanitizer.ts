@@ -31,6 +31,28 @@ export const RICH_TEXT_ALLOWED_TAGS = [
 
 export const RICH_TEXT_ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "class", "style"] as const
 
+// The Quill formats an editor registers (its `formats` option), matching the tag allowlist above: a format the
+// sanitizer drops (image, video, strike, script) would render and save, then vanish on the next load.
+// Registered Quill format names only; `list` and `code-block` bring their containers.
+export const RICH_TEXT_QUILL_FORMATS = [
+	"bold",
+	"italic",
+	"underline",
+	"link",
+	"header",
+	"blockquote",
+	"code-block",
+	"code",
+	"list",
+	"indent",
+	"align",
+	"color",
+	"background",
+	"size",
+	"font",
+	"direction"
+] as const
+
 // The part of DOMPurify this module uses.
 export interface RichTextPurifier {
 	addHook(entryPoint: "afterSanitizeAttributes", hook: (node: Element) => void): void

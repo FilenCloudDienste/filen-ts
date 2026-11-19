@@ -20,20 +20,27 @@ import { isDirectoryItem, isFileItem } from "@/features/drive/driveSelectors"
 // keystroke in the notes search bar, every note socket event and every refetch. Keyed on the live
 // `intlLanguage` (a mutable module binding that setIntlLanguage reassigns) so a language change still
 // takes effect on the next call, mirroring how time.ts invalidates its own cachedLocaleInfo.
+// The month+year variant labels a month bucket that lies in the previous year.
 let cachedMonthFormatter: { language: string; formatter: Intl.DateTimeFormat } | null = null
+let cachedMonthYearFormatter: { language: string; formatter: Intl.DateTimeFormat } | null = null
 
-function monthFormatter(): Intl.DateTimeFormat {
-	if (cachedMonthFormatter && cachedMonthFormatter.language === intlLanguage) {
-		return cachedMonthFormatter.formatter
+function monthFormatter(withYear: boolean): Intl.DateTimeFormat {
+	const cached = withYear ? cachedMonthYearFormatter : cachedMonthFormatter
+
+	if (cached && cached.language === intlLanguage) {
+		return cached.formatter
 	}
 
-	const formatter = new Intl.DateTimeFormat(intlLanguage, {
-		month: "long"
-	})
-
-	cachedMonthFormatter = {
+	const formatter = new Intl.DateTimeFormat(intlLanguage, withYear ? { month: "long", year: "numeric" } : { month: "long" })
+	const entry = {
 		language: intlLanguage,
 		formatter
+	}
+
+	if (withYear) {
+		cachedMonthYearFormatter = entry
+	} else {
+		cachedMonthFormatter = entry
 	}
 
 	return formatter
@@ -278,8 +285,8 @@ function headerForBucket(bucketId: NoteBucketId): NoteListItem {
 	if (bucketId.kind === "month") {
 		return {
 			type: "header",
-			id: "header-month",
-			title: monthFormatter().format(new Date(bucketId.monthTimestamp)),
+			id: `header-month-${bucketId.monthTimestamp}`,
+			title: monthFormatter(!bucketId.inCurrentYear).format(new Date(bucketId.monthTimestamp)),
 			icon: "calendar-outline"
 		}
 	}

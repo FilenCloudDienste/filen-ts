@@ -1,5 +1,5 @@
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
-import { ascii, readBytes, seconds } from "./probeBytes"
+import { ascii, readBytes, seconds, uint16be, uint24be, uint32be, uint32le } from "./probeBytes"
 import type { MediaCodec, ParsedContainer, ParsedTrack } from "./probeTypes"
 
 // Ogg (RFC 3533): the logical streams its beginning-of-stream pages announce, each identified by its first
@@ -23,22 +23,6 @@ interface Page {
 	lacing: number
 	dataStart: number
 	end: number
-}
-
-function uint32le(bytes: Uint8Array, at: number): number {
-	return ((bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8) | ((bytes[at + 2] ?? 0) << 16)) + (bytes[at + 3] ?? 0) * 0x1000000
-}
-
-function uint16be(bytes: Uint8Array, at: number): number {
-	return ((bytes[at] ?? 0) << 8) | (bytes[at + 1] ?? 0)
-}
-
-function uint24be(bytes: Uint8Array, at: number): number {
-	return ((bytes[at] ?? 0) << 16) | uint16be(bytes, at + 1)
-}
-
-function uint32be(bytes: Uint8Array, at: number): number {
-	return (bytes[at] ?? 0) * 0x1000000 + uint24be(bytes, at + 1)
 }
 
 // The page header at `at`, when it and its segment table lie within `bytes`.
@@ -82,7 +66,7 @@ interface Packet {
 	bos: boolean
 }
 
-interface Partial {
+interface OpenPacket {
 	head: number[]
 	length: number
 	bos: boolean
@@ -91,7 +75,7 @@ interface Partial {
 // Each whole packet in `bytes`, in order, until `visit` returns false or a page runs past the end. Pages that
 // do not line up end the walk: a capture pattern is only looked for where the previous page ends.
 function forEachPacket(bytes: Uint8Array, visit: (packet: Packet, page: Page) => boolean): void {
-	const open = new Map<number, Partial>()
+	const open = new Map<number, OpenPacket>()
 
 	for (let page = pageAt(bytes, 0); page !== null && page.end <= bytes.length; page = pageAt(bytes, page.end)) {
 		let partial = open.get(page.serial)

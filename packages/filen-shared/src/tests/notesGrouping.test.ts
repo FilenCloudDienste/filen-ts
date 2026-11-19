@@ -116,18 +116,77 @@ describe("partitionNotesByBucket", () => {
 		expect(result).toEqual([{ bucketId: "previous30Days", notes: [note] }])
 	})
 
-	it("places a note edited ~45 days ago into the single month bucket, labelled with twoMonthsAgo", () => {
+	it("places a note edited ~45 days ago into the bucket of its own calendar month", () => {
 		const note = item({ id: "month-1", ts: FROZEN_NOW - 45 * DAY_MS })
 
 		const result = partitionNotesByBucket([note], FROZEN_NOW, byTsDesc)
 
-		const nowDate = new Date(FROZEN_NOW)
-		const twoMonthsAgo = new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, nowDate.getDate()).getTime()
+		const noteDate = new Date(note.ts)
+		const monthStart = new Date(noteDate.getFullYear(), noteDate.getMonth(), 1).getTime()
 
-		expect(result).toEqual([{ bucketId: { kind: "month", monthTimestamp: twoMonthsAgo }, notes: [note] }])
+		expect(result).toEqual([{ bucketId: { kind: "month", monthTimestamp: monthStart, inCurrentYear: true }, notes: [note] }])
 	})
 
-	it("places a note older than two months into a calendar-year bucket, not the month bucket", () => {
+	describe("calendar-month buckets", () => {
+		// Local components so the bounds hold in every time zone.
+		const NOV_18 = new Date(2025, 10, 18, 12).getTime()
+
+		it("buckets notes older than 30 days by their own month, newest month first", () => {
+			const oct5 = item({ id: "oct-5", ts: new Date(2025, 9, 5, 12).getTime() })
+			const oct18 = item({ id: "oct-18", ts: new Date(2025, 9, 18, 9).getTime() })
+			const sep20 = item({ id: "sep-20", ts: new Date(2025, 8, 20, 12).getTime() })
+			const sep1 = item({ id: "sep-1", ts: new Date(2025, 8, 1, 0).getTime() })
+
+			const result = partitionNotesByBucket([sep1, sep20, oct5, oct18], NOV_18, byTsDesc)
+
+			expect(result).toEqual([
+				{
+					bucketId: { kind: "month", monthTimestamp: new Date(2025, 9, 1).getTime(), inCurrentYear: true },
+					notes: [oct18, oct5]
+				},
+				{
+					bucketId: { kind: "month", monthTimestamp: new Date(2025, 8, 1).getTime(), inCurrentYear: true },
+					notes: [sep20, sep1]
+				}
+			])
+		})
+
+		it("sends a note from before the month two months back to its year bucket", () => {
+			const aug31 = item({ id: "aug-31", ts: new Date(2025, 7, 31, 23, 59).getTime() })
+
+			const result = partitionNotesByBucket([aug31], NOV_18, byTsDesc)
+
+			expect(result).toEqual([{ bucketId: { kind: "year", year: 2025 }, notes: [aug31] }])
+		})
+
+		it("keeps a note from the first day of a 31-day current month in that month's bucket", () => {
+			const oct31 = new Date(2025, 9, 31, 23).getTime()
+			const oct1 = item({ id: "oct-1", ts: new Date(2025, 9, 1, 0, 30).getTime() })
+
+			const result = partitionNotesByBucket([oct1], oct31, byTsDesc)
+
+			expect(result).toEqual([
+				{ bucketId: { kind: "month", monthTimestamp: new Date(2025, 9, 1).getTime(), inCurrentYear: true }, notes: [oct1] }
+			])
+		})
+
+		it("marks a month of the previous year so the label can name the year (January now)", () => {
+			const jan10 = new Date(2026, 0, 10, 12).getTime()
+			const dec5 = item({ id: "dec-5", ts: new Date(2025, 11, 5, 12).getTime() })
+			const nov20 = item({ id: "nov-20", ts: new Date(2025, 10, 20, 12).getTime() })
+			const oct20 = item({ id: "oct-20", ts: new Date(2025, 9, 20, 12).getTime() })
+
+			const result = partitionNotesByBucket([oct20, nov20, dec5], jan10, byTsDesc)
+
+			expect(result).toEqual([
+				{ bucketId: { kind: "month", monthTimestamp: new Date(2025, 11, 1).getTime(), inCurrentYear: false }, notes: [dec5] },
+				{ bucketId: { kind: "month", monthTimestamp: new Date(2025, 10, 1).getTime(), inCurrentYear: false }, notes: [nov20] },
+				{ bucketId: { kind: "year", year: 2025 }, notes: [oct20] }
+			])
+		})
+	})
+
+	it("places a note older than two months into a calendar-year bucket, not a month bucket", () => {
 		const twoYearsAgoMs = FROZEN_NOW - 2 * 365 * DAY_MS
 		const note = item({ id: "year-1", ts: twoYearsAgoMs })
 

@@ -229,6 +229,31 @@ describe("ratePasswordStrength", () => {
 	it("should rate password with all criteria and length >= 16 as best", () => {
 		expect(ratePasswordStrength("Abcdefghijk!@#$%")).toBe("best")
 	})
+
+	it("should rate a long Cyrillic password above weak", () => {
+		expect(ratePasswordStrength("пароль очень надёжный и длинный")).not.toBe("weak")
+		expect(ratePasswordStrength("парольоченьнадёжныйидлинный")).toBe("normal")
+	})
+
+	it("should rate a long CJK password above weak", () => {
+		expect(ratePasswordStrength("我的密码非常安全而且很长很长很长很长很长")).toBe("normal")
+		expect(ratePasswordStrength("我的密码非常安全2024")).toBe("normal")
+	})
+
+	it("should count digits and spaces, not only a fixed ASCII symbol list", () => {
+		expect(ratePasswordStrength("correct horse battery staple 2024")).toBe("best")
+		expect(ratePasswordStrength("passphrase-2024")).toBe("strong")
+		expect(ratePasswordStrength("ПарольПароль")).toBe("normal")
+	})
+
+	it("should keep passwords under 10 characters weak whatever they hold", () => {
+		expect(ratePasswordStrength("Ab1!Ж日")).toBe("weak")
+		expect(ratePasswordStrength("Ab1!Ab1!A")).toBe("weak")
+	})
+
+	it("should rate a short single-class password weak", () => {
+		expect(ratePasswordStrength("abcdefghijkl")).toBe("weak")
+	})
 })
 
 describe("sortParams", () => {
@@ -330,6 +355,18 @@ describe("fastLocaleCompare", () => {
 	it("should handle prefix strings", () => {
 		expect(fastLocaleCompare("abc", "abcd")).toBeLessThan(0)
 		expect(fastLocaleCompare("abcd", "abc")).toBeGreaterThan(0)
+	})
+
+	it("should order accented names alphabetically, not by code unit", () => {
+		expect(fastLocaleCompare("Émile", "Zoe")).toBeLessThan(0)
+		expect(fastLocaleCompare("Ärger", "banana")).toBeLessThan(0)
+		expect(fastLocaleCompare("Ärger", "Ärger2")).toBeLessThan(0)
+		expect(fastLocaleCompare("x é2", "x é10")).toBeLessThan(0)
+	})
+
+	it("should sort { | } ~ after non-ASCII letters", () => {
+		expect(fastLocaleCompare("~$Bericht.docx", "Ärger.docx")).toBeGreaterThan(0)
+		expect(fastLocaleCompare("zeta", "~temp")).toBeLessThan(0)
 	})
 
 	it("should handle empty strings", () => {

@@ -1,4 +1,4 @@
-import { toItemCounts, type CopyCountsInput, type CopyJobCounts } from "./copyJob"
+import { ITEM_COUNT_KEYS, ZERO_ITEM_COUNTS, toItemCounts, type CopyCountsInput, type CopyJobCounts } from "./copyJob"
 import {
 	EMPTY_CAPPED_LIST,
 	REPORT_LIST_CAP,
@@ -263,20 +263,6 @@ export interface ExtractJobInit {
 	basis: ExtractProgressBasis
 }
 
-const ZERO_COUNTS: CopyJobCounts = {
-	dirsCreated: 0,
-	dirsFailed: 0,
-	filesDone: 0,
-	filesFailed: 0,
-	bytesDone: 0,
-	bytesFailed: 0,
-	dirsNotAttempted: 0,
-	filesNotAttempted: 0,
-	bytesNotAttempted: 0,
-	entriesSkipped: 0,
-	bytesSkipped: 0
-}
-
 export function createExtractJob<TItem, TDir, TError>(id: string, init: ExtractJobInit): ExtractJob<TItem, TDir, TError> {
 	return {
 		id,
@@ -296,7 +282,7 @@ export function createExtractJob<TItem, TDir, TError>(id: string, init: ExtractJ
 		cancelling: false,
 		archiveBytes: 0,
 		bytesRead: 0,
-		counts: ZERO_COUNTS,
+		counts: ZERO_ITEM_COUNTS,
 		active: [],
 		bytesPerSecond: null,
 		etaMs: null,
@@ -540,19 +526,13 @@ function mergeCapped<T>(a: readonly T[], aOmitted: bigint, b: readonly T[], bOmi
 }
 
 function addCounts(a: CopyCountsInput, b: CopyCountsInput): CopyCountsInput {
-	return {
-		dirsCreated: a.dirsCreated + b.dirsCreated,
-		dirsFailed: a.dirsFailed + b.dirsFailed,
-		filesDone: a.filesDone + b.filesDone,
-		filesFailed: a.filesFailed + b.filesFailed,
-		bytesDone: a.bytesDone + b.bytesDone,
-		bytesFailed: a.bytesFailed + b.bytesFailed,
-		dirsNotAttempted: a.dirsNotAttempted + b.dirsNotAttempted,
-		filesNotAttempted: a.filesNotAttempted + b.filesNotAttempted,
-		bytesNotAttempted: a.bytesNotAttempted + b.bytesNotAttempted,
-		entriesSkipped: a.entriesSkipped + b.entriesSkipped,
-		bytesSkipped: a.bytesSkipped + b.bytesSkipped
+	const sum: { -readonly [K in keyof CopyCountsInput]: bigint } = { ...a }
+
+	for (const key of ITEM_COUNT_KEYS) {
+		sum[key] += b[key]
 	}
+
+	return sum
 }
 
 // One report for the calls of a multi-call job. Every call reads the same archive, so its own figures

@@ -100,6 +100,15 @@ function closeOnAck(port: SavePortEnd, ms: number): void {
 	port.addEventListener("message", ack)
 }
 
+// Ends a save channel from the reading end without reading it (a save refused before its upload, or given up on after
+// the producer started): the writer, whose writes wait for a pull with no timeout, gets the abort and fails them. The
+// port closes once the writer acknowledged, or after the linger. A bare close() tells the writer nothing.
+export function abortSavePort(port: SavePortEnd, reason: SavePortAbortReason, lingerMs: number = SAVE_PORT_LINGER_MS): void {
+	port.postMessage({ [KEY]: "abort", reason } satisfies ToWriter)
+	closeOnAck(port, lingerMs)
+	port.start?.()
+}
+
 function messageOf(data: unknown): { readonly [KEY]: string; readonly [field: string]: unknown } | undefined {
 	return typeof data === "object" && data !== null && typeof (data as Record<string, unknown>)[KEY] === "string"
 		? (data as { readonly [KEY]: string })

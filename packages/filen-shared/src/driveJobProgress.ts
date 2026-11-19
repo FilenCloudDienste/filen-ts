@@ -9,7 +9,8 @@ import type { ExtractJob } from "./extractJob"
 type AnyCompressJob = CompressJob<unknown, unknown>
 type AnyExtractJob = ExtractJob<unknown, unknown, unknown>
 
-const RUNNING_MAX_PERCENT = 99
+// The cap every drive job kind (copy included) is shown under while it runs.
+export const RUNNING_MAX_PERCENT = 99
 
 // The size and shown bytes a generic transfer row is given. While the job runs the shown bytes stay at
 // or below 99% of the size, so a percent derived from them reads at most 99.
@@ -18,11 +19,12 @@ export interface JobRowFigures {
 	shown: number
 }
 
-function runningCap(running: boolean, size: number, shown: number): number {
+export function runningShownBytes(running: boolean, size: number, shown: number): number {
 	return running ? Math.min(shown, Math.floor((size * RUNNING_MAX_PERCENT) / 100)) : shown
 }
 
-function toPercent(running: boolean, fraction: number): number {
+// 0-100 from a done fraction, held at the cap while the job runs.
+export function runningPercent(running: boolean, fraction: number): number {
 	const percent = Math.min(100, Math.max(0, fraction * 100))
 
 	return running ? Math.min(percent, RUNNING_MAX_PERCENT) : percent
@@ -74,7 +76,7 @@ export function compressJobPercent(job: AnyCompressJob): number | null {
 		return running ? null : 0
 	}
 
-	return toPercent(running, fraction)
+	return runningPercent(running, fraction)
 }
 
 // The row reads "X of <source size>": the share of the work done, measured in the sources' bytes.
@@ -87,7 +89,7 @@ export function compressJobRowFigures(job: AnyCompressJob): JobRowFigures {
 
 	const running = isJobRunning(job)
 
-	return { size, shown: runningCap(running, size, Math.floor(size * (compressFraction(job) ?? 0))) }
+	return { size, shown: runningShownBytes(running, size, Math.floor(size * (compressFraction(job) ?? 0))) }
 }
 
 // The bytes done against the basis: failed bytes count too, as they are done with.
@@ -125,7 +127,7 @@ export function extractJobPercent(job: AnyExtractJob): number | null {
 
 	const fraction = extractFraction(job)
 
-	return fraction === null ? null : toPercent(running, fraction)
+	return fraction === null ? null : runningPercent(running, fraction)
 }
 
 // Without a basis the row has no size: it shows the bytes extracted alone.
@@ -144,5 +146,5 @@ export function extractJobRowFigures(job: AnyExtractJob): JobRowFigures {
 
 	const shown = basis.type === "archiveRead" ? job.bytesRead : job.counts.bytesDone
 
-	return { size, shown: runningCap(isJobRunning(job), size, shown) }
+	return { size, shown: runningShownBytes(isJobRunning(job), size, shown) }
 }

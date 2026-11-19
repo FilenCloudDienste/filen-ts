@@ -1,15 +1,17 @@
-import {
-	avcConfigCodecString,
-	hevcConfigCodecString,
-	parseAvcSps,
-	parseHevcSps,
-	simpleAudioCodecString,
-	type SpsPicture
-} from "./codecString"
+import { avcConfigCodecString, hevcConfigCodecString, parseAvcSps, parseHevcSps, simpleAudioCodecString } from "./codecString"
 import { BLOCK_BYTES, type BlockSource } from "./blockSource"
-import { ascii, readBytes, seconds, transferKind, uint16 } from "./probeBytes"
-import { AUDIO_HEADERS, pesStart, type ElementaryAudio } from "./probeElementary"
-import type { MediaCodec, ParsedContainer, ParsedTrack, ProbeTier } from "./probeTypes"
+import { ascii, readBytes, uint16 } from "./probeBytes"
+import {
+	AUDIO_HEADERS,
+	elementaryAudioTrack,
+	elementaryVideoTrack,
+	pesStart,
+	ptsSpan,
+	ptsSpanSeconds,
+	type ElementaryAudio,
+	type StreamPicture
+} from "./probeElementary"
+import type { MediaCodec, ParsedContainer, ProbeTier } from "./probeTypes"
 import {
 	TS_MIN_PACKETS,
 	TS_PACKET_BYTES,
@@ -40,8 +42,6 @@ const VIDEO_PREFIX_BYTES = 16_384
 const AUDIO_PREFIX_BYTES = 256
 // PES starts read from the tail: B-frames put the latest PTS a few pictures before the last one.
 const TAIL_PES = 4
-const PTS_MODULUS = 2 ** 33
-const PTS_HZ = 90_000
 
 type Need = "avc" | "hevc" | ElementaryAudio | null
 
@@ -56,7 +56,7 @@ interface StreamKind {
 interface Stream extends StreamKind {
 	pid: number
 	lang: string | null
-	picture: SpsPicture | null
+	picture: StreamPicture | null
 	ch: number | null
 	rate: number | null
 	// The current PES's payload while `need` is unmet.
@@ -577,26 +577,6 @@ async function tailTimestamps(source: BlockSource, pid: number, layout: TsLayout
 	return found
 }
 
-function videoTrack(stream: Stream): ParsedTrack {
-	const { picture } = stream
-
-	return {
-		kind: "video",
-		enabled: true,
-		video: {
-			codec: stream.codec,
-			fourcc: stream.fourcc,
-			codecString: stream.codecString,
-			w: picture?.width ?? 0,
-			h: picture?.height ?? 0,
-			par: picture?.par ?? 1,
-			rotation: 0,
-			bitDepth: picture?.bitDepth ?? null,
-			transfer: transferKind(picture?.transfer ?? null)
-		}
-	}
-}
-
 // The duration is the timing stream's PTS span, head to tail, across one 33-bit wrap. The index is "none":
 // TS has none, and the remux's demuxer seeks by bisecting PES timestamps, so no seek scans the file.
 export async function walkMpegTs(source: BlockSource, tier: ProbeTier, result: ParsedContainer, layout: TsLayout): Promise<void> {
@@ -624,27 +604,12 @@ export async function walkMpegTs(source: BlockSource, tier: ProbeTier, result: P
 
 	for (const stream of walk.streams) {
 		if (stream.kind === "video") {
-			result.tracks.push(videoTrack(stream))
+			result.tracks.push(elementaryVideoTrack(stream))
 
 			continue
 		}
 
-		result.tracks.push({
-			kind: "audio",
-			enabled: true,
-			audio: {
-				id: stream.pid,
-				codec: stream.codec,
-				codecString: stream.codecString,
-				ch: stream.ch,
-				rate: stream.rate,
-				lang: stream.lang,
-				name: null,
-				def: firstAudio,
-				forced: false,
-				commentary: false
-			}
-		})
+		result.tracks.push(elementaryAudioTrack(stream.pid, stream, stream.lang, firstAudio))
 		firstAudio = false
 	}
 
@@ -660,17 +625,14 @@ export async function walkMpegTs(source: BlockSource, tier: ProbeTier, result: P
 	let span = -1
 
 	for (const last of lasts) {
-		const elapsed = modulo(last - (first ?? 0), PTS_MODULUS)
-
-		// Past half the clock's range the "last" PTS is one before the first, not a wrap.
-		if (elapsed < PTS_MODULUS / 2) {
-			span = Math.max(span, elapsed)
-		}
+		span = Math.max(span, ptsSpan(first ?? 0, last))
 	}
 
-	if (span < 0) {
+	const duration = ptsSpanSeconds(span)
+
+	if (duration === null) {
 		result.partial = true
 	} else {
-		result.durationSec = seconds(span / PTS_HZ)
+		result.durationSec = duration
 	}
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	SAVE_PORT_CHUNK,
 	SAVE_PORT_IN_FLIGHT,
+	abortSavePort,
 	SavePortAbortedError,
 	savePortReader,
 	savePortWriter,
@@ -304,6 +305,43 @@ describe("save port pull protocol", () => {
 		}
 
 		savePortWriter(writerEnd, { lingerMs: 30 }).abort("refused")
+		expect(closed).toBe(false)
+		await new Promise(resolve => setTimeout(resolve, 60))
+		expect(closed).toBe(true)
+	})
+
+	it("fails a writer blocked in a write when the reading end is aborted unread, then closes that end", async () => {
+		const { writerEnd, readerEnd } = channel()
+		let closed = false
+		const close = readerEnd.close.bind(readerEnd)
+
+		readerEnd.close = () => {
+			closed = true
+			close()
+		}
+
+		const writer = savePortWriter(writerEnd)
+		// No pull ever comes: the write waits until the abort.
+		const blocked = writer.write(pattern(SAVE_PORT_CHUNK, 3))
+
+		abortSavePort(readerEnd, "cancelled")
+		await expect(blocked).rejects.toEqual(new SavePortAbortedError("cancelled"))
+		await expect(writer.aborted).resolves.toBe("cancelled")
+		await settle()
+		expect(closed).toBe(true)
+	})
+
+	it("closes an end aborted unread whose writer never answers after the linger time", async () => {
+		const { readerEnd } = channel()
+		let closed = false
+		const close = readerEnd.close.bind(readerEnd)
+
+		readerEnd.close = () => {
+			closed = true
+			close()
+		}
+
+		abortSavePort(readerEnd, "upload", 30)
 		expect(closed).toBe(false)
 		await new Promise(resolve => setTimeout(resolve, 60))
 		expect(closed).toBe(true)

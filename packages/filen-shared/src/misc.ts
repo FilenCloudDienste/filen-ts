@@ -36,13 +36,7 @@ export function isValidHexColor(value: string): boolean {
 
 // C0 and C1 controls, DEL, soft hyphen, zero-width space/joiners and the BOM
 function isInvisibleCharCode(code: number): boolean {
-	return (
-		code <= 0x1f ||
-		(code >= 0x7f && code <= 0x9f) ||
-		code === 0xad ||
-		(code >= 0x200b && code <= 0x200d) ||
-		code === 0xfeff
-	)
+	return code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0xad || (code >= 0x200b && code <= 0x200d) || code === 0xfeff
 }
 
 // A scan rather than a regex: a control-character class trips `no-control-regex`.
@@ -124,9 +118,17 @@ export function findClosestIndexString(sourceString: string, targetString: strin
 	return sourceString.slice(0, givenIndex + 1).lastIndexOf(targetString)
 }
 
-const HAS_UPPERCASE_RE = /[A-Z]/
-const HAS_LOWERCASE_RE = /[a-z]/
-const HAS_SPECIAL_CHARS_RE = /[!@#$%^&*(),.?":{}|<>]/
+// Unicode classes, so a password in any script is rated by what it holds, not only its ASCII letters.
+// Every class the former ASCII rule counted is a subset of one of these, so the rating only ever rises.
+const HAS_UPPERCASE_RE = /[\p{Lu}\p{Lt}]/u
+const HAS_LOWERCASE_RE = /\p{Ll}/u
+// Letters of scripts without case (CJK, Arabic, Hebrew, ...) count as a class of their own.
+const HAS_CASELESS_RE = /[\p{Lo}\p{Lm}]/u
+const HAS_DIGIT_RE = /\p{Nd}/u
+const HAS_SPECIAL_CHARS_RE = /[^\p{L}\p{Nd}]/u
+
+// At this length a password rates at least "normal" whatever it holds.
+const LONG_PASSWORD_LENGTH = 20
 
 export type PasswordStrength = "weak" | "normal" | "strong" | "best"
 
@@ -137,15 +139,18 @@ export function ratePasswordStrength(password: string): PasswordStrength {
 		return "weak"
 	}
 
-	const hasUppercase = HAS_UPPERCASE_RE.test(password)
-	const hasLowercase = HAS_LOWERCASE_RE.test(password)
-	const hasSpecialChars = HAS_SPECIAL_CHARS_RE.test(password)
+	const classes =
+		Number(HAS_UPPERCASE_RE.test(password)) +
+		Number(HAS_LOWERCASE_RE.test(password)) +
+		Number(HAS_CASELESS_RE.test(password)) +
+		Number(HAS_DIGIT_RE.test(password)) +
+		Number(HAS_SPECIAL_CHARS_RE.test(password))
 
-	if (hasUppercase && hasLowercase && hasSpecialChars) {
+	if (classes >= 3) {
 		return length >= 16 ? "best" : "strong"
 	}
 
-	if ((hasUppercase && hasLowercase) || (hasUppercase && hasSpecialChars) || (hasLowercase && hasSpecialChars)) {
+	if (classes === 2 || length >= LONG_PASSWORD_LENGTH) {
 		return "normal"
 	}
 
@@ -180,9 +185,192 @@ export function createExecutableTimeout(callback: () => void, delay?: number) {
 	}
 }
 
+function isAsciiDigit(code: number): boolean {
+	return code >= 48 && code <= 57
+}
+
+// Combining marks (Combining Diacritical Marks and their supplements, extended and for symbols, half marks).
+function isCombiningMark(code: number): boolean {
+	return (
+		(code >= 0x0300 && code <= 0x036f) ||
+		(code >= 0x1ab0 && code <= 0x1aff) ||
+		(code >= 0x1dc0 && code <= 0x1dff) ||
+		(code >= 0x20d0 && code <= 0x20ff) ||
+		(code >= 0xfe20 && code <= 0xfe2f)
+	)
+}
+
+// Letters with a stroke or ligatures that have no canonical decomposition, placed at the letter they are read as.
+function strokeLetterBase(code: number): number | undefined {
+	switch (code) {
+		case 0xdf: // ß
+			return 115
+
+		case 0xe6: // æ
+			return 97
+
+		case 0xf8: // ø
+		case 0x153: // œ
+			return 111
+
+		case 0x111: // đ
+			return 100
+
+		case 0x127: // ħ
+			return 104
+
+		case 0x131: // ı
+			return 105
+
+		case 0x142: // ł
+			return 108
+
+		case 0x167: // ŧ
+			return 116
+
+		default:
+			return undefined
+	}
+}
+
+// Code unit -> primary weight for the units below U+2000 that were already looked up. Derived from Unicode data only,
+// never from a name, so it holds nothing to clear on logout, and it stays under the 8192 units it can hold.
+const textUnitWeights = new Map<number, number>()
+
+function decomposedWeight(code: number): number {
+	const stroke = strokeLetterBase(code)
+
+	if (stroke !== undefined) {
+		return stroke
+	}
+
+	const decomposed = String.fromCharCode(code).normalize("NFD")
+	const length = decomposed.length
+
+	if (length < 2) {
+		return code
+	}
+
+	for (let i = 1; i < length; i++) {
+		if (!isCombiningMark(decomposed.charCodeAt(i))) {
+			return code
+		}
+	}
+
+	const base = decomposed.charCodeAt(0)
+
+	return base >= 65 && base <= 90 ? base + 32 : base
+}
+
 /**
- * Fast numeric-aware comparator: digit runs compare by value, A-Z folds to a-z (case breaks ties), and every other
- * character compares by raw UTF-16 code unit. Not locale-aware, so it does not match `localeCompare` outside ASCII.
+ * The primary weight of one code unit, or -1 for a combining mark, which carries none. An ASCII unit weighs its code
+ * unit; a letter that decomposes into a base letter and marks (é, Ä, ő, ё, ά) weighs its base letter, lowercased;
+ * every other unit weighs its own code unit, after all of ASCII.
+ */
+function textUnitWeight(code: number): number {
+	if (code < 128) {
+		return code
+	}
+
+	if (isCombiningMark(code)) {
+		return -1
+	}
+
+	// Scripts past U+2000 (CJK, Hangul, symbols, surrogates) have no base letter to place them at.
+	if (code >= 0x2000) {
+		return code
+	}
+
+	// Final sigma weighs as sigma: toLowerCase picks one or the other from the text after a capital sigma, so a
+	// separate weight would let a later unit change the order of an earlier one.
+	if (code === 0x3c2) {
+		return 0x3c3
+	}
+
+	let weight = textUnitWeights.get(code)
+
+	if (weight === undefined) {
+		weight = decomposedWeight(code)
+
+		textUnitWeights.set(code, weight)
+	}
+
+	return weight
+}
+
+// compareTextRuns from the first differing code unit `start`, at least one of the two being non-ASCII.
+function compareTextWeights(a: string, b: string, start: number): number {
+	const aLength = a.length
+	const bLength = b.length
+	let i = start
+	let j = start
+
+	for (;;) {
+		let aWeight = -1
+		let bWeight = -1
+
+		while (aWeight === -1 && i < aLength) {
+			aWeight = textUnitWeight(a.charCodeAt(i))
+			i++
+		}
+
+		while (bWeight === -1 && j < bLength) {
+			bWeight = textUnitWeight(b.charCodeAt(j))
+			j++
+		}
+
+		// -1 here is a run that ran out: the shorter one sorts first.
+		if (aWeight !== bWeight) {
+			return aWeight < bWeight ? -1 : 1
+		}
+
+		if (aWeight === -1) {
+			break
+		}
+	}
+
+	// Same letters, different accents (or the same text composed differently): the code unit decides.
+	return a.charCodeAt(start) < b.charCodeAt(start) ? -1 : 1
+}
+
+/**
+ * Orders two lowercased runs of text holding no ASCII digit, the string half of every natural-order comparator here.
+ * It is a total order and the same on every device and locale: runs compare unit by unit on primary weights (see
+ * textUnitWeight), so "é" sorts with "e", before "f", and "日" after all of ASCII; runs with the same weights compare
+ * by code unit. ASCII-only runs therefore compare exactly by code unit, as they always did, and the first difference
+ * between two ASCII units is answered without a lookup or an allocation. Returns 0 only for identical runs.
+ */
+export function compareTextRuns(a: string, b: string): number {
+	if (a === b) {
+		return 0
+	}
+
+	const aLength = a.length
+	const bLength = b.length
+	const length = aLength < bLength ? aLength : bLength
+
+	for (let i = 0; i < length; i++) {
+		const ca = a.charCodeAt(i)
+		const cb = b.charCodeAt(i)
+
+		if (ca === cb) {
+			continue
+		}
+
+		if (ca < 128 && cb < 128) {
+			return ca < cb ? -1 : 1
+		}
+
+		return compareTextWeights(a, b, i)
+	}
+
+	return aLength === bLength ? 0 : aLength < bLength ? -1 : 1
+}
+
+/**
+ * Fast numeric-aware comparator: digit runs compare by value, A-Z folds to a-z (case breaks ties), and other ASCII
+ * characters compare by code unit. A difference involving non-ASCII text compares the two text runs it sits in with
+ * `compareTextRuns`, so accented and non-Latin names order like the drive listing and the archive browser.
  */
 export function fastLocaleCompare(a: string, b: string): number {
 	// Fast path: identical strings
@@ -195,6 +383,9 @@ export function fastLocaleCompare(a: string, b: string): number {
 	let idxA = 0
 	let idxB = 0
 	let caseDiff = 0 // Track first case difference for tiebreaker
+	// Where the current text run began, the same text in both up to idxA / idxB.
+	let runA = 0
+	let runB = 0
 
 	while (idxA < lenA && idxB < lenB) {
 		const charA = a.charCodeAt(idxA)
@@ -234,6 +425,9 @@ export function fastLocaleCompare(a: string, b: string): number {
 			if (numA !== numB) {
 				return numA < numB ? -1 : 1
 			}
+
+			runA = idxA
+			runB = idxB
 		} else if (isDigitA) {
 			// Numbers come before non-numbers
 			return -1
@@ -245,8 +439,46 @@ export function fastLocaleCompare(a: string, b: string): number {
 			const lowerB = charB >= 65 && charB <= 90 ? charB + 32 : charB
 
 			if (lowerA !== lowerB) {
-				// Different letters entirely
-				return lowerA < lowerB ? -1 : 1
+				if (lowerA < 128 && lowerB < 128) {
+					// Different letters entirely
+					return lowerA < lowerB ? -1 : 1
+				}
+
+				let endA = idxA + 1
+				let endB = idxB + 1
+
+				while (endA < lenA && !isAsciiDigit(a.charCodeAt(endA))) {
+					endA++
+				}
+
+				while (endB < lenB && !isAsciiDigit(b.charCodeAt(endB))) {
+					endB++
+				}
+
+				const order = compareTextRuns(a.slice(runA, endA).toLowerCase(), b.slice(runB, endB).toLowerCase())
+
+				if (order !== 0) {
+					return order
+				}
+
+				// The runs differ only in case: the first such unit breaks a tie, lowercase (the higher unit) first.
+				if (caseDiff === 0) {
+					for (let k = 0; runA + k < endA && runB + k < endB; k++) {
+						const unitA = a.charCodeAt(runA + k)
+						const unitB = b.charCodeAt(runB + k)
+
+						if (unitA !== unitB) {
+							caseDiff = unitA > unitB ? -1 : 1
+
+							break
+						}
+					}
+				}
+
+				idxA = runA = endA
+				idxB = runB = endB
+
+				continue
 			}
 
 			// Same letter but might differ in case - remember first case difference
