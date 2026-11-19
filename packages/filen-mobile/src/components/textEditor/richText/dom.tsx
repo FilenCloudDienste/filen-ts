@@ -11,7 +11,7 @@ import { installDomViewportReset, onViewportChange, VIEWPORT_HEIGHT } from "@/li
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { FLUSH_COMPOSITION_COMMIT_MS } from "@/components/textEditor/domTiming"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
-import { quillV2ToLegacyV1 } from "@filen/shared/dom"
+import { quillV2ToLegacyV1, RICH_TEXT_ALLOWED_TAGS, RICH_TEXT_ALLOWED_ATTR } from "@filen/shared/dom"
 import Quill from "quill"
 import DOMPurify from "dompurify"
 import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
@@ -411,29 +411,8 @@ const RichTextEditorDom = ({
 
 		if (initialValue) {
 			const sanitized = DOMPurify.sanitize(decodeEditorInitialValue(initialValue), {
-				ALLOWED_TAGS: [
-					"p",
-					"strong",
-					"em",
-					"u",
-					"a",
-					"h1",
-					"h2",
-					"h3",
-					"h4",
-					"h5",
-					"h6",
-					"code",
-					"ol",
-					"ul",
-					"li",
-					"blockquote",
-					"pre",
-					"br",
-					"span",
-					"div"
-				],
-				ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "class", "style"]
+				ALLOWED_TAGS: [...RICH_TEXT_ALLOWED_TAGS],
+				ALLOWED_ATTR: [...RICH_TEXT_ALLOWED_ATTR]
 			})
 
 			quillRef.current.clipboard.dangerouslyPasteHTML(sanitized, "silent")

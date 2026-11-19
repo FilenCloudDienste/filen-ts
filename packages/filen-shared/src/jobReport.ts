@@ -1,8 +1,9 @@
 import type { CappedList, JobDisposition, KeptReason, SourceDisposalKind } from "./driveJob"
 import type { CompressJob } from "./compressJob"
+import type { CopyJob } from "./copyJob"
 import type { ExtractJob } from "./extractJob"
 
-// The data model of an archive job's report: sections of rows, flattened into the lines a virtualized
+// The data model of a drive job's report: sections of rows, flattened into the lines a virtualized
 // list renders. Rows reference the job's records; one flatten runs per open or toggle.
 
 export type JobReportSectionKind =
@@ -205,6 +206,24 @@ export function extractReportSections<TDir, TError>(job: ExtractJob<unknown, TDi
 		...dispositionSections(job.dispositions, () => job.archiveName),
 		section<TError>("savedAsVersion", [], job.savedAsVersionCount),
 		section<TError>("propagationFailed", [], job.propagationFailedCount)
+	])
+}
+
+// A copy reports only what failed: its card counts everything else.
+export function copyReportSections<TError>(
+	job: Pick<CopyJob<unknown, { sourcePath: string; error: TError }, unknown, TError>, "failures">
+): JobReportSection<TError>[] {
+	return nonEmpty([
+		section(
+			"failed",
+			job.failures.map((item, index): JobReportRow<TError> => ({
+				key: `failed:${index}`,
+				path: item.sourcePath,
+				note: { type: "error", error: item.error },
+				retryable: false
+			})),
+			0
+		)
 	])
 }
 

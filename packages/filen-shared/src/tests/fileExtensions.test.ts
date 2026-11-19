@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CODE_FILE_EXTENSIONS, extensionStart } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, extensionOf, extensionStart, fileStem } from "@filen/shared"
 
 describe("CODE_FILE_EXTENSIONS", () => {
 	it("is the verified 53-entry intersection, lowercase and dot-less", () => {
@@ -41,5 +41,37 @@ describe("extensionStart", () => {
 		expect(extensionStart("report.")).toBe(-1)
 		expect(extensionStart("README")).toBe(-1)
 		expect(extensionStart("")).toBe(-1)
+	})
+})
+
+describe("extensionOf", () => {
+	it("returns the last extension, lowercased and dot-less", () => {
+		expect(extensionOf("photo.JPG")).toBe("jpg")
+		expect(extensionOf("archive.tar.gz")).toBe("gz")
+	})
+
+	it("is empty for a dotfile, a trailing dot or no dot", () => {
+		expect(extensionOf(".gitignore")).toBe("")
+		expect(extensionOf("scan.")).toBe("")
+		expect(extensionOf("README")).toBe("")
+		expect(extensionOf("")).toBe("")
+	})
+})
+
+describe("fileStem", () => {
+	it("drops the last extension only", () => {
+		expect(fileStem("budget.csv")).toBe("budget")
+		expect(fileStem("archive.tar.gz")).toBe("archive.tar")
+	})
+
+	it("drops a trailing dot", () => {
+		expect(fileStem("scan.")).toBe("scan")
+		expect(`${fileStem("scan.")}.jpg`).toBe("scan.jpg")
+	})
+
+	it("keeps a dotfile or a name with no dot whole", () => {
+		expect(fileStem(".csv")).toBe(".csv")
+		expect(fileStem("README")).toBe("README")
+		expect(fileStem("")).toBe("")
 	})
 })

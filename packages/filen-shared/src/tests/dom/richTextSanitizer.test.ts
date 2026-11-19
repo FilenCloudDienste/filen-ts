@@ -53,8 +53,28 @@ describe("createRichTextSanitizer", () => {
 
 		expect(configs).toEqual([{ ALLOWED_TAGS: [...RICH_TEXT_ALLOWED_TAGS], ALLOWED_ATTR: [...RICH_TEXT_ALLOWED_ATTR] }])
 		expect(RICH_TEXT_ALLOWED_ATTR).toEqual(["href", "target", "rel", "src", "alt", "class", "style"])
-		expect(RICH_TEXT_ALLOWED_TAGS).toContain("a")
-		expect(RICH_TEXT_ALLOWED_TAGS).not.toContain("img")
+		expect(RICH_TEXT_ALLOWED_TAGS).toEqual([
+			"p",
+			"strong",
+			"em",
+			"u",
+			"a",
+			"h1",
+			"h2",
+			"h3",
+			"h4",
+			"h5",
+			"h6",
+			"code",
+			"ol",
+			"ul",
+			"li",
+			"blockquote",
+			"pre",
+			"br",
+			"span",
+			"div"
+		])
 	})
 
 	it("forces a link with an href to open in a new tab without opener or referrer", () => {

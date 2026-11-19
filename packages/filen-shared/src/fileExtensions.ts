@@ -68,3 +68,19 @@ export function extensionStart(name: string): number {
 
 	return dot > 0 && dot < name.length - 1 ? dot : -1
 }
+
+// Lowercased extension with no leading dot; "" when the name has none (a dotfile such as ".gitignore", a trailing
+// dot, no dot at all).
+export function extensionOf(name: string): string {
+	const dot = extensionStart(name)
+
+	return dot === -1 ? "" : name.slice(dot + 1).toLowerCase()
+}
+
+// The name without its extension ("budget.csv" → "budget"); a trailing dot goes with it ("scan." → "scan", so a new
+// extension appends cleanly). A dotfile (".csv") or a name with no dot stays whole.
+export function fileStem(name: string): string {
+	const dot = name.lastIndexOf(".")
+
+	return dot > 0 ? name.slice(0, dot) : name
+}

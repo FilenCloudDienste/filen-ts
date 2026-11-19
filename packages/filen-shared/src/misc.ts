@@ -592,3 +592,37 @@ export function trimmedOrUndefined(value: string): string | undefined {
 
 	return trimmed.length > 0 ? trimmed : undefined
 }
+
+function isAsciiOnly(value: string): boolean {
+	for (let i = 0; i < value.length; i++) {
+		if (value.charCodeAt(i) > 127) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Lowercased, then NFC only when it holds a non-ASCII unit: names are stored as uploaded, so one typed on macOS
+// can be decomposed (NFD) where the query is composed, or the reverse. ASCII is its own NFC form.
+function foldForNameSearch(value: string): string {
+	const lower = value.toLowerCase()
+
+	return isAsciiOnly(lower) ? lower : lower.normalize("NFC")
+}
+
+/**
+ * The search key for `matchesNameSearch`: trimmed, lowercased and NFC-normalized. Compute it once per query, not
+ * per row. An empty key matches every name.
+ */
+export function nameSearchKey(text: string): string {
+	return foldForNameSearch(text.trim())
+}
+
+/**
+ * Case-insensitive substring match of `name` against a key from `nameSearchKey`, independent of how either side
+ * was composed. An ASCII name is only lowercased, so the common path stays a plain `toLowerCase().includes`.
+ */
+export function matchesNameSearch(name: string, key: string): boolean {
+	return foldForNameSearch(name).includes(key)
+}

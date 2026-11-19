@@ -13,7 +13,9 @@ import {
 	formatBytesPerSecond,
 	errorMessage,
 	isAbortError,
-	trimmedOrUndefined
+	trimmedOrUndefined,
+	nameSearchKey,
+	matchesNameSearch
 } from "@filen/shared"
 
 describe("parseNumbersFromString", () => {
@@ -522,5 +524,47 @@ describe("trimmedOrUndefined", () => {
 
 	it("should return the value unchanged when already trimmed", () => {
 		expect(trimmedOrUndefined("hello")).toBe("hello")
+	})
+})
+
+describe("nameSearchKey / matchesNameSearch", () => {
+	const nfc = "Übersicht"
+	const nfd = nfc.normalize("NFD")
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("trims and lowercases the key", () => {
+		expect(nameSearchKey("  Report ")).toBe("report")
+	})
+
+	it("matches an NFD name against an NFC query", () => {
+		expect(nfd).not.toBe(nfc)
+		expect(matchesNameSearch(`${nfd}.pdf`, nameSearchKey("übers"))).toBe(true)
+	})
+
+	it("matches an NFC name against an NFD query", () => {
+		expect(matchesNameSearch(`${nfc}.pdf`, nameSearchKey("ÜBERS".normalize("NFD")))).toBe(true)
+	})
+
+	it("matches decomposed Hangul against composed Hangul", () => {
+		expect(matchesNameSearch("회의록".normalize("NFD"), nameSearchKey("회의"))).toBe(true)
+	})
+
+	it("matches case-insensitively and rejects a non-substring", () => {
+		expect(matchesNameSearch("Quarterly Report.docx", nameSearchKey("REPORT"))).toBe(true)
+		expect(matchesNameSearch("Quarterly Report.docx", nameSearchKey("invoice"))).toBe(false)
+	})
+
+	it("matches every name for an empty key", () => {
+		expect(matchesNameSearch("anything", nameSearchKey("   "))).toBe(true)
+	})
+
+	it("does not normalize an ASCII name or key", () => {
+		const normalize = vi.spyOn(String.prototype, "normalize")
+
+		expect(matchesNameSearch("Quarterly Report.docx", nameSearchKey("report"))).toBe(true)
+		expect(normalize).not.toHaveBeenCalled()
 	})
 })
