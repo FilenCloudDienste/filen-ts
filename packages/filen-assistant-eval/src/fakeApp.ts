@@ -2,18 +2,47 @@ import { formatBytes, storageSummary } from "@filen/shared"
 import {
 	ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS,
 	assistantToolByName,
+	composerBusyMessage,
+	CONTACT_NEEDS_WORDS,
+	CONTACT_WITHOUT_CHAT_NOTE,
+	contextName,
+	datedElsewhereNote,
 	dateFilterNote,
 	dayRangeBounds,
 	describeDayRange,
 	DIRECTORIES_BY_SIZE_NOTE,
+	DIRECTORY_SIZE_READS,
+	DRAFTED_NOTE,
+	engineTokens,
 	inDayRange,
+	joinNotes,
 	listingPage,
 	listRest,
 	MAX_ARRAY_ITEMS,
+	NO_CONTACT_NOTE,
+	NO_TRANSFERS_NOTE,
+	normalizeText,
+	NOTES_ITEMS,
 	OUTSIDE_DATES_ITEMS,
+	OWN_SHARING_UNCHECKED,
+	PARTIAL_MATCH_NOTE,
 	parseToolInput,
+	PHOTOS_ITEMS,
+	rawSearchTokens,
+	RECENT_ITEMS,
+	recentsReachNote,
 	resolveDateFilter,
+	ROOT_NOT_SHAREABLE,
+	sameName,
 	screenOpened,
+	SEARCH_ENGINE_WORDS,
+	SEARCH_NEEDS_WORDS,
+	SEARCH_RESULT_ITEMS,
+	searchTokens,
+	SHARED_WITH_YOU_NOTE,
+	tokenMatches,
+	TRASH_NOTE,
+	unknownSizesNote,
 	type AssistantPeriodFilter
 } from "@filen/shared/assistant"
 import { createFixtureState, type AppContext, type AppState, type DriveItem, type Note, type NoteType } from "./fixture"
@@ -76,23 +105,11 @@ const TEXT_EXTENSIONS = ["txt", "md", "csv", "json", "eml", "msg", "mbox"]
 // Screens where the web app's context names a current directory and a selection.
 const DRIVE_SCREENS: ReadonlySet<string> = new Set(["drive"])
 
-const CONTEXT_NAME_MAX_CHARS = 80
-
-// A name in the context line, as the web app writes it: on one line, shortened, quoted.
-function contextName(name: string): string {
-	const flat = Array.from(name.replace(/\s+/g, " ").trim())
-
-	return JSON.stringify(flat.length > CONTEXT_NAME_MAX_CHARS ? `${flat.slice(0, CONTEXT_NAME_MAX_CHARS - 1).join("")}…` : flat.join(""))
-}
-
-const SEARCH_LIMIT = 12
 // Like the app's Recents screen, which ages files out by upload time.
 const RECENT_DAYS = 45
-const RECENT_LIMIT = 20
-const PHOTOS_LIMIT = 30
-const NOTES_LIMIT = 40
-// Like the app: how many directory sizes a size-sorted listing reads.
-const DIRECTORY_SIZE_READS = 12
+
+// The graders fold names as the app does.
+export { normalizeText }
 
 const EVAL_CALENDAR = {
 	now: EVAL_NOW,
@@ -114,93 +131,10 @@ type ListingSort = "name" | "largest" | "smallest" | "newest" | "oldest"
 // The directory the Photos screen shows.
 const PHOTOS_ROOT = "d4"
 
-function joinNotes(...notes: Record<string, string>[]): Record<string, string> {
-	const text = notes.flatMap(({ note }) => (note === undefined ? [] : [note])).join(" ")
-
-	return text.length === 0
-		? {}
-		: {
-				note: text
-			}
-}
-
-// As the app folds names: accents, marks and invisible characters go.
-export function normalizeText(value: string): string {
-	return value
-		.normalize("NFKD")
-		.replace(/[\p{M}\p{Default_Ignorable_Code_Point}]/gu, "")
-		.toLowerCase()
-}
-
-function tokens(value: string): string[] {
-	return normalizeText(value)
-		.split(/[^\p{L}\p{N}]+/u)
-		.filter(token => token.length > 0)
-}
-
-const UNSPACED =
-	/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u
-
-const segmenter = new Intl.Segmenter(undefined, { granularity: "word" })
-
-// The words of a query as the app's search splits them (features/assistant/tools/format.ts queryWords): case
-// folded only, scripts written without spaces split into words, a lone kana particle dropped.
-function queryWords(value: string): string[] {
-	const text = value.normalize("NFC").toLowerCase()
-
-	if (!UNSPACED.test(text)) {
-		return text.split(/[^\p{L}\p{M}\p{N}]+/u).filter(word => word.length > 0)
-	}
-
-	return [...segmenter.segment(text)]
-		.filter(segment => segment.isWordLike === true)
-		.flatMap(segment =>
-			segment.segment.split(
-				/(?<=\p{Script=Latin}|\p{N})(?=[^\p{Script=Latin}\p{N}])|(?<=[^\p{Script=Latin}\p{N}])(?=\p{Script=Latin}|\p{N})/u
-			)
-		)
-		.filter(word => word.length > 0 && !/^[\p{Script=Hiragana}]$/u.test(word))
-}
-
-// The words the app asks its search engine for, in turn: words before numbers, longer first, as singulars.
-function engineWords(value: string): string[] {
-	const singular = (word: string) =>
-		word.length > 4 && /(?:s|x|z|ch|sh)es$/u.test(word)
-			? word.slice(0, -2)
-			: word.length > 3 && word.endsWith("s") && !word.endsWith("ss")
-				? word.slice(0, -1)
-				: word
-
-	return [
-		...new Set(
-			queryWords(value)
-				.toSorted((a, b) => Number(/^\p{N}+$/u.test(a)) - Number(/^\p{N}+$/u.test(b)) || b.length - a.length)
-				.map(singular)
-		)
-	].slice(0, 3)
-}
-
-// Crude plural folding so "invoices" finds "Invoice_…"; the real search is name-based too.
-function tokenMatches({ haystack, token }: { haystack: string; token: string }): boolean {
-	if (haystack.includes(token)) {
-		return true
-	}
-
-	if (token.length > 4 && token.endsWith("es") && haystack.includes(token.slice(0, -2))) {
-		return true
-	}
-
-	return token.length > 3 && token.endsWith("s") && haystack.includes(token.slice(0, -1))
-}
-
 function extension(name: string): string {
 	const dot = name.lastIndexOf(".")
 
 	return dot === -1 ? "" : name.slice(dot + 1).toLowerCase()
-}
-
-function sameName(a: string, b: string): boolean {
-	return normalizeText(a.trim()) === normalizeText(b.trim())
 }
 
 export class FakeApp {
@@ -680,7 +614,7 @@ export class FakeApp {
 	}
 
 	// The note a date-filtered result carries when the filter alone emptied it.
-	private emptyNote(selection: DateSelection, kept: number, outside: number): Record<string, string> {
+	private emptyNote(selection: DateSelection, kept: number, outside: number): { note?: string } {
 		return selection.range !== null && kept === 0 && outside > 0
 			? {
 					note: dateFilterNote(selection.range, outside)
@@ -753,17 +687,6 @@ export class FakeApp {
 		return [...items.filter(item => item.kind === "file").sort(order), ...items.filter(item => item.kind === "directory").sort(order)]
 	}
 
-	private unknownSizesNote(unknown: number): Record<string, string> {
-		return unknown === 0
-			? {}
-			: {
-					note:
-						unknown === 1
-							? "1 directory's size is not loaded; it is listed last. get_item_info gives a directory's size."
-							: `${String(unknown)} directories' sizes are not loaded; they are listed last. get_item_info gives a directory's size.`
-				}
-	}
-
 	// The extra fields a filtered or sorted listing shows: the date it went by, the size it sorted by.
 	private listingFields(
 		item: DriveItem,
@@ -810,13 +733,13 @@ export class FakeApp {
 
 	private search({ query, kind, input }: { query: string; kind: string | undefined; input: Record<string, unknown> }): unknown {
 		const selection = this.dateSelection(input, ["modified", "uploaded", "created"])
-		const queryTokens = tokens(query)
+		const queryTokens = searchTokens(query)
 
-		const words = engineWords(query)
+		const words = engineTokens(rawSearchTokens(query), SEARCH_ENGINE_WORDS)
 
 		// Like the app: a search is by name, so it needs words.
 		if (queryTokens.length === 0 || words.length === 0) {
-			throw new CallError("Pass words from the item name", true)
+			throw new CallError(SEARCH_NEEDS_WORDS, true)
 		}
 
 		// Like the app's search engine: names that contain one word, as written but for case, the first word
@@ -833,12 +756,7 @@ export class FakeApp {
 
 				return {
 					item,
-					score: queryTokens.filter(token =>
-						tokenMatches({
-							haystack,
-							token
-						})
-					).length
+					score: queryTokens.filter(token => tokenMatches(haystack, token)).length
 				}
 			})
 			.filter(({ score }) => score > 0)
@@ -849,14 +767,14 @@ export class FakeApp {
 		const pool = all.length > 0 ? all : scored.sort((a, b) => b.score - a.score)
 
 		return {
-			results: pool.slice(0, SEARCH_LIMIT).map(({ item }) => ({
+			results: pool.slice(0, SEARCH_RESULT_ITEMS).map(({ item }) => ({
 				...this.summary(item),
 				...this.listingFields(item, {
 					date: selection.range === null ? null : selection.field,
 					size: false
 				})
 			})),
-			...listRest(pool.length, SEARCH_LIMIT),
+			...listRest(pool.length, SEARCH_RESULT_ITEMS),
 			...(selection.range === null
 				? {}
 				: {
@@ -864,9 +782,7 @@ export class FakeApp {
 					}),
 			...joinNotes(
 				this.emptyNote(selection, scored.length, matching.length),
-				all.length === 0 && scored.length > 0 && queryTokens.length > 1
-					? { note: "No name contains all of the words; these contain only some of them." }
-					: {}
+				all.length === 0 && scored.length > 0 && queryTokens.length > 1 ? { note: PARTIAL_MATCH_NOTE } : {}
 			)
 		}
 	}
@@ -989,7 +905,7 @@ export class FakeApp {
 							: {
 									note: page.note
 								},
-						this.unknownSizesNote(sizes.unknown),
+						unknownSizesNote(sizes.unknown),
 						bySize && kept.some(item => item.kind === "directory")
 							? {
 									note: DIRECTORIES_BY_SIZE_NOTE
@@ -1041,13 +957,13 @@ export class FakeApp {
 				}
 
 				return {
-					items: kept.slice(0, RECENT_LIMIT).map(row),
+					items: kept.slice(0, RECENT_ITEMS).map(row),
 					...(newest.length === 0
 						? {}
 						: {
 								newest: newest.map(row)
 							}),
-					...listRest(kept.length, RECENT_LIMIT),
+					...listRest(kept.length, RECENT_ITEMS),
 					...(selection.range === null
 						? {}
 						: {
@@ -1057,7 +973,7 @@ export class FakeApp {
 						this.emptyNote(selection, kept.length, ofKind.length),
 						reachesBack
 							? {
-									note: `Recents reaches back to uploads of ${evalLocalDay(new Date(oldest).toISOString())}; a file uploaded earlier would not be listed here.`
+									note: recentsReachNote(evalLocalDay(new Date(oldest).toISOString()))
 								}
 							: {}
 					)
@@ -1080,7 +996,7 @@ export class FakeApp {
 				const ordered = optionalStr("sort") === "oldest" ? kept.toReversed() : kept
 
 				return {
-					photos: ordered.slice(0, PHOTOS_LIMIT).map(item => {
+					photos: ordered.slice(0, PHOTOS_ITEMS).map(item => {
 						this.exposed.add(item.handle)
 
 						return {
@@ -1089,7 +1005,7 @@ export class FakeApp {
 							taken: evalLocalDay(item.modified)
 						}
 					}),
-					...listRest(ordered.length, PHOTOS_LIMIT),
+					...listRest(ordered.length, PHOTOS_ITEMS),
 					...(selection.range === null
 						? {}
 						: {
@@ -1131,7 +1047,7 @@ export class FakeApp {
 					// Like the app: only what the row says, so an owned item's shares and links are get_sharing's.
 					...(item.sharedBy === undefined
 						? {
-								sharing: "unknown: this tool does not show shares or links"
+								sharing: OWN_SHARING_UNCHECKED
 							}
 						: {
 								sharedWithYou: true
@@ -1308,7 +1224,7 @@ export class FakeApp {
 
 			case "list_notes": {
 				const query = optionalStr("query")
-				const queryTokens = query === undefined ? [] : tokens(query)
+				const queryTokens = query === undefined ? [] : searchTokens(query)
 				const selection = this.dateSelection(input, ["edited"])
 				const only = optionalStr("only") ?? "any"
 				const matches = this.state.notes.filter(item => {
@@ -1323,28 +1239,20 @@ export class FakeApp {
 
 					const haystack = normalizeText(`${item.title} ${item.tags.join(" ")}`)
 
-					return (
-						queryTokens.length === 0 ||
-						queryTokens.some(token =>
-							tokenMatches({
-								haystack,
-								token
-							})
-						)
-					)
+					return queryTokens.length === 0 || queryTokens.some(token => tokenMatches(haystack, token))
 				})
 
 				const dated = matches.filter(item => selection.bounds === null || inDayRange(Date.parse(item.edited), selection.bounds))
 				// Like the app: a period that alone empties a search by words gives way to the word matches.
 				const undated = dated.length === 0 && queryTokens.length > 0 && matches.length > 0 && selection.range !== null
 				const kept = undated ? matches : dated
-				// Like the app's sidebar: pinned first, archived last, newest edit first, at most NOTES_LIMIT.
+				// Like the app's sidebar: pinned first, archived last, newest edit first, at most NOTES_ITEMS.
 				const rank = (item: Note) => (item.pinned ? 0 : item.archived ? 2 : 1)
 				const ordered = kept.toSorted((a, b) => rank(a) - rank(b) || Date.parse(b.edited) - Date.parse(a.edited))
 
 				return {
-					notes: ordered.slice(0, NOTES_LIMIT).map(item => this.noteSummary(item)),
-					...listRest(ordered.length, NOTES_LIMIT),
+					notes: ordered.slice(0, NOTES_ITEMS).map(item => this.noteSummary(item)),
+					...listRest(ordered.length, NOTES_ITEMS),
 					...(selection.range === null || undated
 						? {}
 						: {
@@ -1352,7 +1260,7 @@ export class FakeApp {
 							}),
 					...(undated
 						? {
-								note: `None of these is dated ${selection.range ?? ""}; they match the words at other dates.`
+								note: datedElsewhereNote(selection.range ?? "")
 							}
 						: this.emptyNote(selection, kept.length, matches.length))
 				}
@@ -1419,19 +1327,11 @@ export class FakeApp {
 
 			case "list_chats": {
 				const query = optionalStr("query")
-				const queryTokens = query === undefined ? [] : tokens(query)
+				const queryTokens = query === undefined ? [] : searchTokens(query)
 				const matches = this.state.chats.filter(item => {
 					const haystack = normalizeText(`${item.name} ${item.participants.join(" ")}`)
 
-					return (
-						queryTokens.length === 0 ||
-						queryTokens.some(token =>
-							tokenMatches({
-								haystack,
-								token
-							})
-						)
-					)
+					return queryTokens.length === 0 || queryTokens.some(token => tokenMatches(haystack, token))
 				})
 
 				return {
@@ -1499,10 +1399,7 @@ export class FakeApp {
 
 				// Like the app: text the user left in the chat's message box is never overwritten.
 				if (this.state.busyComposers.includes(item.handle)) {
-					throw new CallError(
-						`The message box of "${item.name}" already holds unsent text; the user has to clear it first`,
-						false
-					)
+					throw new CallError(composerBusyMessage(item.name), false)
 				}
 
 				this.state.context.screen = "chat"
@@ -1515,7 +1412,7 @@ export class FakeApp {
 				return {
 					drafted: true,
 					chat: item.name,
-					note: "The message is in the input field; the user sends it."
+					note: DRAFTED_NOTE
 				}
 			}
 
@@ -1685,18 +1582,13 @@ export class FakeApp {
 							return item.link !== undefined && !item.trashed
 					}
 				})
-				const queryTokens = tokens(optionalStr("query") ?? "")
+				const queryTokens = searchTokens(optionalStr("query") ?? "")
 				// Like the app: the words narrow by name or by whom an item is shared with or by, and a long list is cut.
 				const kept = this.sortListing(
 					items.filter(item => {
 						const haystack = normalizeText([item.name, item.sharedBy ?? "", ...(item.sharedWith ?? [])].join(" "))
 
-						return queryTokens.every(token =>
-							tokenMatches({
-								haystack,
-								token
-							})
-						)
+						return queryTokens.every(token => tokenMatches(haystack, token))
 					}),
 					"name",
 					"modified"
@@ -1731,7 +1623,7 @@ export class FakeApp {
 					...listRest(kept.length, MAX_ARRAY_ITEMS),
 					...(section === "trash" && kept.length > 0
 						? {
-								note: "Only the user can restore or delete these, in the app. Do not offer to."
+								note: TRASH_NOTE
 							}
 						: {})
 				}
@@ -1741,7 +1633,7 @@ export class FakeApp {
 				const item = this.driveItem(str("handle"))
 
 				if (item.parent === null && item.handle === "d0") {
-					throw new CallError("The drive root cannot be shared or linked; ask about an item in it", false)
+					throw new CallError(ROOT_NOT_SHAREABLE, false)
 				}
 
 				if (item.sharedBy !== undefined) {
@@ -1750,7 +1642,7 @@ export class FakeApp {
 						name: item.name,
 						sharedWithYou: true,
 						sharedBy: item.sharedBy,
-						note: "Its owner manages its links and shares."
+						note: SHARED_WITH_YOU_NOTE
 					}
 				}
 
@@ -1790,10 +1682,10 @@ export class FakeApp {
 			case "find_contacts": {
 				const query = str("query")
 				const address = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u.exec(query)?.[0].toLowerCase()
-				const queryTokens = tokens(query)
+				const queryTokens = searchTokens(query)
 
 				if (address === undefined && queryTokens.length === 0) {
-					throw new CallError("Pass words from the contact's name or email address", true)
+					throw new CallError(CONTACT_NEEDS_WORDS, true)
 				}
 
 				// Like the app: an address matches only itself, words must all match the name or the address before
@@ -1805,12 +1697,7 @@ export class FakeApp {
 
 					const haystack = normalizeText(`${contact.name} ${contact.email.split("@")[0] ?? ""}`)
 
-					return queryTokens.every(token =>
-						tokenMatches({
-							haystack,
-							token
-						})
-					)
+					return queryTokens.every(token => tokenMatches(haystack, token))
 				})
 				const returned: Candidate[] = []
 				const rows = matches.map(contact => {
@@ -1841,11 +1728,11 @@ export class FakeApp {
 					contacts: rows,
 					...(rows.length === 0
 						? {
-								note: "No contact matches. Ask the user for the contact's name or exact email address."
+								note: NO_CONTACT_NOTE
 							}
 						: rows.some(row => row.chat === undefined)
 							? {
-									note: "A contact without a chat handle has no chat with the user yet; the user can start one from Contacts."
+									note: CONTACT_WITHOUT_CHAT_NOTE
 								}
 							: {})
 				}
@@ -1908,7 +1795,7 @@ export class FakeApp {
 					],
 					...(transfers.length === 0
 						? {
-								note: "No uploads or downloads in this tab since it was opened."
+								note: NO_TRANSFERS_NOTE
 							}
 						: {})
 				}
