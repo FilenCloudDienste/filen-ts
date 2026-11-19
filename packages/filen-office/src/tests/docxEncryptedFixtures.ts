@@ -5,7 +5,6 @@ import { TextSelection } from "prosemirror-state"
 import { docxSchema } from "@filen/office/core/docx/edit"
 import { prepareDocxSave, writerProof } from "@filen/office/core/docx/write"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import {
 	docxWorkerPool,
 	inThreadDocxProtection,
@@ -19,32 +18,15 @@ import {
 } from "@filen/office/dom/docx"
 import { docxSealer, inThreadEditingHost, type DocxWritten } from "@filen/office/dom/docx/editing"
 import { encryptedOfficeFile } from "@filen/office/testing/encryption"
+import { engineServices } from "./engineFixtures"
 
 // Opening, editing and saving password-protected documents through the hosts the apps use.
 
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
 export function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
+	return engineServices({
 		yield: () => new Promise(resolve => setTimeout(resolve, 0)),
 		sliceMs: 50
-	}
+	})
 }
 
 export const CFB_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]

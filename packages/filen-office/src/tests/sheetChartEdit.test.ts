@@ -145,8 +145,14 @@ describe("chart editing", () => {
 		const edit = (patch: object, axis = 222) =>
 			session.command({ type: "chart.edit", sheet, part: CHART_PART, edit: { kind: "axis", axis, patch } })
 
-		expect(refusalOf(await edit({ min: 5, max: 1 }))).toBe("chartUnsupported")
-		expect(refusalOf(await edit({ major: 0 }))).toBe("chartUnsupported")
+		// A value the user typed and can correct, refused as the value, not the chart.
+		expect(refusalOf(await edit({ min: 5, max: 1 }))).toBe("chartValue")
+		expect(refusalOf(await edit({ min: 3, max: 3 }))).toBe("chartValue")
+		expect(refusalOf(await edit({ major: 0 }))).toBe("chartValue")
+		expect(refusalOf(await edit({ minor: -1 }))).toBe("chartValue")
+		expect(refusalOf(await edit({ min: Number.NaN }))).toBe("chartValue")
+		expect(refusalOf(await edit({ major: Number.POSITIVE_INFINITY }))).toBe("chartValue")
+		// What the editor cannot change on this chart.
 		expect(refusalOf(await edit({ min: 0 }, 111))).toBe("chartUnsupported")
 		session.close()
 	})

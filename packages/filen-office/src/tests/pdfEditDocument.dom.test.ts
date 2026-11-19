@@ -4,7 +4,17 @@ import { makePdf } from "./pdfedit/fixtures"
 import { pdfLinks } from "../dom/pdf/links"
 import { PdfFinder } from "../dom/pdf/find"
 import type { PdfPageText } from "../dom/pdfedit/text"
-import { MupdfPdfDocument, PageViewport, placementKey, placementPosition, placementStart, type PdfEditEngine } from "../react/pdfedit/index"
+import {
+	MupdfPdfDocument,
+	PageViewport,
+	placementPosition,
+	placementRectKey,
+	placementStart,
+	rectPosition,
+	type PdfEditEngine
+} from "../react/pdfedit/index"
+import { placementKey, startPlacement } from "../react/pdfedit/tools/placement"
+import type { ToolKeyName } from "../react/pdfedit/tools/types"
 
 // The editor's engine behind pdf.js's document contract (react/pdfedit/mupdfDocument.ts), over a stand-in engine.
 
@@ -190,7 +200,7 @@ describe("keyboard placement", () => {
 		expect(rect).toEqual({ x: 250, y: 375, width: 100, height: 50 })
 
 		const step = (key: string, shiftKey = false, altKey = false) => {
-			const next = placementKey(rect, page, { key, shiftKey, altKey })
+			const next = placementRectKey(rect, page, { key, shiftKey, altKey })
 
 			if (next?.kind === "move") rect = next.rect
 
@@ -210,5 +220,67 @@ describe("keyboard placement", () => {
 		expect(step("Enter")).toEqual({ kind: "commit" })
 		expect(step("Escape")).toEqual({ kind: "cancel" })
 		expect(step("a")).toBeNull()
+	})
+
+	it("clips an Alt-resize at the page edge and keeps the top left corner", () => {
+		let rect = placementStart(page, { width: 100, height: 50 }, { x: 50, y: 0 })
+
+		expect(rect).toEqual({ x: 0, y: 0, width: 100, height: 50 })
+
+		const next = placementRectKey(rect, page, { key: "ArrowDown", shiftKey: true, altKey: true })
+
+		if (next?.kind === "move") rect = next.rect
+
+		expect(rect).toEqual({ x: 0, y: 0, width: 100, height: 50 })
+	})
+
+	it("steps as the tools' placement does, after converting the y axis", () => {
+		const keys: readonly ToolKeyName[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+		const box = [0, 0, page.width, page.height] as const
+		const starts = [
+			{ x: 250, y: 375 },
+			{ x: 0, y: 0 },
+			{ x: 500, y: 750 },
+			{ x: 595, y: 3 }
+		]
+
+		for (const start of starts) {
+			for (const key of keys) {
+				for (const shift of [false, true]) {
+					for (const alt of [false, true]) {
+						const rect = { ...start, width: 100, height: 50 }
+						const clamped = placementStart(page, rect, { x: start.x + 50, y: start.y + 25 })
+						const top = page.height - clamped.y - clamped.height
+						const tool = placementKey(
+							{ page: 0, box: [...box], rect: [clamped.x, top, clamped.x + clamped.width, top + clamped.height] },
+							{ key, shift, alt }
+						)
+						const adapter = placementRectKey(clamped, page, { key, shiftKey: shift, altKey: alt })
+
+						expect(adapter?.kind).toBe("move")
+
+						if (adapter?.kind !== "move" || tool.state === null) throw new Error("expected a move")
+
+						const [x0, y0, x1, y1] = tool.state.rect
+
+						expect(adapter.rect).toEqual({ x: x0, y: page.height - y1, width: x1 - x0, height: y1 - y0 })
+						expect(placementPosition(adapter.rect, page)).toEqual(rectPosition(tool.state.rect, [...box]))
+					}
+				}
+			}
+		}
+
+		expect(placementStart(page, { width: 100, height: 50 })).toEqual({ x: 250, y: 375, width: 100, height: 50 })
+		expect(startPlacement({ page: 0, box: [...box] }, { width: 100, height: 50 }).rect).toEqual([250, 375, 350, 425])
+		expect(
+			placementRectKey(placementStart(page, { width: 10, height: 10 }), page, { key: "Enter", shiftKey: false, altKey: false })
+		).toEqual({
+			kind: "commit"
+		})
+		expect(
+			placementRectKey(placementStart(page, { width: 10, height: 10 }), page, { key: "Escape", shiftKey: true, altKey: true })
+		).toEqual({
+			kind: "cancel"
+		})
 	})
 })

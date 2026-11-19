@@ -1057,7 +1057,13 @@ export function showValue(tr: Transaction, context: DocxEditContext, part: Story
 	const state = controlState(around.holder) ?? {}
 
 	if (value === "") {
-		writeControl(tr, context, around, placeholderText(part, around.holder, info), placeholderState(around.holder, info, true))
+		writeControl(
+			tr,
+			context,
+			around,
+			placeholderText(part, around.holder, info, context.strings.placeholders),
+			placeholderState(around.holder, info, true)
+		)
 
 		return
 	}
@@ -1826,7 +1832,7 @@ function placeholders(tr: Transaction, session: DocxEditorSession, forms: boolea
 		const mark = marks.content_control.create({ ...entry.mark.attrs, state: placeholderState(entry.mark, info, true) })
 		const markSet = placeholderMarks(context, mark.addToSet(entry.mark.removeFromSet(entry.markSet)))
 
-		tr.insert(pos, placeholderContent(placeholderText(part, entry.mark, info), markSet))
+		tr.insert(pos, placeholderContent(placeholderText(part, entry.mark, info, context.strings.placeholders), markSet))
 	}
 
 	return tr.steps.length > before
@@ -2042,7 +2048,7 @@ function wholePlaceholders(tr: Transaction, session: DocxEditorSession, from: nu
 		})
 
 	for (const around of copies.sort((a, b) => b.from - a.from)) {
-		const text = placeholderText(part, around.holder, around.info)
+		const text = placeholderText(part, around.holder, around.info, session.context.strings.placeholders)
 
 		if (controlText(doc, around) === text) continue
 
@@ -2193,6 +2199,9 @@ function restoreBlock(tr: Transaction, context: DocxEditContext, part: StoryPart
 		return markSet.length === 0 && !child.isInline
 	})
 
-	tr.insert(at, placeholderContent(placeholderText(part, node, around.info), placeholderMarks(context, markSet)))
+	tr.insert(
+		at,
+		placeholderContent(placeholderText(part, node, around.info, context.strings.placeholders), placeholderMarks(context, markSet))
+	)
 	tr.setNodeAttribute(around.pos, "state", placeholderState(node, around.info, true))
 }

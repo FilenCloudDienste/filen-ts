@@ -8,70 +8,26 @@ import { partReader } from "../core/pptx/read/xml"
 import { parseXml } from "../core/xml/index"
 import { bytesSource } from "../core/opc/index"
 import { pptToPptx } from "../core/ppt/toPptx"
-import { buildPpt, concat, container, record } from "./pptFixtures"
+import {
+	buildPpt,
+	concat,
+	container,
+	f32,
+	record,
+	u32,
+	utf16,
+	timeBehavior as behavior,
+	timeCondition as condition,
+	timeInt as int,
+	timeNode as node,
+	timeNodeAtom as nodeAtom,
+	timeProperties as properties,
+	timeStr as str,
+	pageTarget,
+	shapeTarget
+} from "./pptFixtures"
 
 // A slide's animations ([MS-PPT] §2.8) to p:timing (ECMA-376 Part 1 §19.5), read back with the pptx timing reader.
-
-function u32(value: number): Uint8Array {
-	const out = new Uint8Array(4)
-
-	new DataView(out.buffer).setUint32(0, value >>> 0, true)
-
-	return out
-}
-
-function f32(value: number): Uint8Array {
-	const out = new Uint8Array(4)
-
-	new DataView(out.buffer).setFloat32(0, value, true)
-
-	return out
-}
-
-function utf16(text: string): Uint8Array {
-	const out = new Uint8Array(text.length * 2 + 2)
-
-	for (let k = 0; k < text.length; k++) out[2 * k] = text.charCodeAt(k)
-
-	return out
-}
-
-const int = (id: number, value: number): Uint8Array => record(0xf142, concat(Uint8Array.of(1), u32(value)), id)
-const str = (instance: number, value: string): Uint8Array => record(0xf142, concat(Uint8Array.of(3), utf16(value)), instance)
-const properties = (...items: Uint8Array[]): Uint8Array => container(0xf13d, items)
-
-// TimeNodeAtom: type (0 par, 1 seq, 3 behaviour, 4 media), fill and duration when given.
-function nodeAtom(type: number, options: { fill?: number; dur?: number; restart?: number } = {}): Uint8Array {
-	const flags =
-		0x8 | (options.fill === undefined ? 0 : 0x1) | (options.dur === undefined ? 0 : 0x10) | (options.restart === undefined ? 0 : 0x2)
-
-	return record(
-		0xf127,
-		concat(u32(0), u32(options.restart ?? 0), u32(type), u32(options.fill ?? 0), u32(0), u32(0), u32(options.dur ?? 0), u32(flags))
-	)
-}
-
-function condition(instance: number, object: number, event: number, delay: number, target?: Uint8Array): Uint8Array {
-	return container(
-		0xf125,
-		[record(0xf128, concat(u32(object), u32(event), u32(0), u32(delay))), ...(target === undefined ? [] : [target])],
-		instance
-	)
-}
-
-const pageTarget = (): Uint8Array => container(0xf13c, [record(0x2b01, u32(1))])
-const shapeTarget = (spid: number, type = 0, start = 0, end = 0): Uint8Array =>
-	container(0xf13c, [record(0x2afb, concat(u32(type), u32(1), u32(spid), u32(start), u32(end)))])
-
-function behavior(target: Uint8Array, attribute?: string): Uint8Array {
-	return container(0xf12a, [
-		record(0xf133, concat(u32(attribute === undefined ? 0 : 0x4), u32(0), u32(0), u32(0))),
-		...(attribute === undefined ? [] : [container(0xf13e, [str(0, attribute)], 1)]),
-		target
-	])
-}
-
-const node = (...children: Uint8Array[]): Uint8Array => container(0xf144, children, 1)
 
 // The PowerPoint 2002 tree of one click that shows shape 5 and fades it in, its builds, and a slide holding it.
 function treeSlide(effect: Uint8Array[], extra: readonly Uint8Array[] = []): Uint8Array {
@@ -88,7 +44,7 @@ function treeSlide(effect: Uint8Array[], extra: readonly Uint8Array[] = []): Uin
 		)
 	)
 	const blob = record(0x138b, concat(tree, ...extra), 0, 0)
-	const tag = container(0x138a, [record(0x0fba, utf16("___PPT10").subarray(0, 16)), blob])
+	const tag = container(0x138a, [record(0x0fba, utf16("___PPT10")), blob])
 
 	return container(0x03ee, [container(0x1388, [tag])])
 }
@@ -227,7 +183,7 @@ describe("ppt time trees", () => {
 
 	it("writes no timing for a root without children", () => {
 		const blob = record(0x138b, node(nodeAtom(0, { dur: -1 }), properties(int(20, 9))), 0, 0)
-		const slide = container(0x03ee, [container(0x1388, [container(0x138a, [record(0x0fba, utf16("___PPT10").subarray(0, 16)), blob])])])
+		const slide = container(0x03ee, [container(0x1388, [container(0x138a, [record(0x0fba, utf16("___PPT10")), blob])])])
 
 		expect(slideTiming(recordAt(slide, 0), [], contextOf(slide, SHAPE5))).toEqual({ xml: "", lost: false })
 	})

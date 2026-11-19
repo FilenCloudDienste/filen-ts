@@ -31,19 +31,3 @@ export interface XlsxSaveRefusal {
 	readonly reason: XlsxSaveFailure
 	readonly message: string
 }
-
-const FAILURES: ReadonlySet<string> = new Set<XlsxSaveFailure>([
-	"write",
-	"invalidPackage",
-	"untouchedChanged",
-	"malformedPart",
-	"elementOrder",
-	"contentType",
-	"relationship",
-	"reference",
-	"model"
-])
-
-export function isXlsxSaveFailure(value: unknown): value is XlsxSaveFailure {
-	return typeof value === "string" && FAILURES.has(value)
-}

@@ -1,81 +1,18 @@
 // @vitest-environment happy-dom
 import { act } from "react"
-import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { rgba } from "../core/drawingml/index"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import { slideRef, type ShapeRef, type TextBody } from "../core/presentation/model"
 import type { SlideRender, TextSeed } from "../core/presentation/output"
-import { layoutBody } from "../core/presentation/text/body"
-import { resolveBody } from "../core/presentation/text/resolve"
-import { transferableLayout } from "../core/presentation/text/transfer"
-import { MeasureCache } from "../core/text/index"
-import type { CommandResult, PresentationSessionApi } from "../dom/presentation/protocol"
-import { PresentationTextEditor } from "../react/presentation/edit/text/TextEditor"
-import { createTextEditing } from "../react/presentation/edit/text/editing"
-import { FakeMeasurer, testFont } from "./textFixtures"
+import type { PresentationSessionApi } from "../dom/presentation/protocol"
+import { createTextEditing, type TextEditing } from "../react/presentation/edit/text/editing"
+import { fakeSession, flushAll, frameWithLayers, laid, mountEditor, seedOf, SHAPE, THEME_TEXT } from "./presentationTextEditorFixtures.dom"
 
 // The editor view on a slide: it paints the worker's page under the text matrix, hides the slide's own painting of
 // the shape while open, takes keys through its input sink (Enter splits, composition replaces a selection, Mod+Z is
 // the worker's undo with the body open), and leaves on Escape with its text sent and the slide's text shown again.
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-const SHAPE: ShapeRef = { slide: slideRef(7), id: 3 }
-const ENV = { fonts: { resolve: () => testFont() }, cache: new MeasureCache(new FakeMeasurer()) }
-
-// The theme's colour for every scheme slot: what a run without its own colour is painted in (here the text colour).
-const THEME_TEXT = "336699"
-
-function laid(body: TextBody) {
-	const result = layoutBody(
-		resolveBody(body, {
-			listStyles: [],
-			bodyPr: [],
-			fonts: { color: color => rgba(color.kind === "srgb" ? color.rgb : THEME_TEXT), typeface: typeface => typeface }
-		}),
-		{ width: 300, height: 100 },
-		ENV
-	)
-
-	return { page: result.page, layout: transferableLayout(result) }
-}
-
-function seedOf(text: string): TextSeed {
-	const body: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text, rPr: {} }] }] }
-
-	return { shape: SHAPE, revision: 1, body, resolved: [{ pPr: {}, runs: [{}] }], ...laid(body), matrix: [1, 0, 0, 1, 40, 50] }
-}
-
-function fakeSession(ops: DeckOp[], undos: (ShapeRef | undefined)[]): PresentationSessionApi {
-	return {
-		textSeed: () => Promise.resolve(seedOf("Hello")),
-		layoutText: (_shape: ShapeRef, body: TextBody) => Promise.resolve({ ...laid(body), revision: 2 }),
-		command: (op: DeckOp): Promise<CommandResult> => {
-			ops.push(op)
-
-			return Promise.resolve({ ok: true, revision: ops.length + 1, dirty: true })
-		},
-		undo: (open?: ShapeRef): Promise<CommandResult> => {
-			undos.push(open)
-
-			return Promise.resolve({ ok: true, revision: 9, dirty: false, seed: seedOf("Hello") })
-		}
-	} as unknown as PresentationSessionApi
-}
-
-// A slide painted the way paintSlide marks it: layer 0 is the layout's, layer 1 the shape's own.
-function frameWithLayers(): HTMLElement {
-	const frame = document.createElement("div")
-
-	frame.className = "fo-slide-frame"
-	frame.innerHTML =
-		'<div class="fo-slide-content"><div class="fo-slide-layer" data-fo-layer="0"><div class="fo-slide-text">layout</div></div>' +
-		'<div class="fo-slide-layer" data-fo-layer="1"><div class="fo-slide-text">Hello</div></div></div>'
-	document.body.append(frame)
-
-	return frame
-}
 
 const RENDER = {
 	ref: SHAPE.slide,
@@ -91,10 +28,19 @@ const RENDER = {
 	animated: false
 } as unknown as SlideRender
 
-async function flushAll(): Promise<void> {
-	await act(async () => {
-		await new Promise(resolve => setTimeout(resolve, 0))
-	})
+// Where position `pos` of the open body is on screen, mid-line: the seed sits at (40, 50) on a slide at scale 1.
+function clientAt(editing: TextEditing, pos: number): { clientX: number; clientY: number } {
+	const caret = editing.active?.map.caret(pos)
+
+	if (caret === undefined) throw new Error("no caret at " + String(pos))
+
+	return { clientX: caret.x + 40, clientY: caret.top + caret.height / 2 + 50 }
+}
+
+function selected(editing: TextEditing): [number, number] | undefined {
+	const selection = editing.active?.state.selection
+
+	return selection === undefined ? undefined : [selection.anchor, selection.head]
 }
 
 function key(target: Element, init: KeyboardEventInit): void {
@@ -116,25 +62,13 @@ describe("presentation text editor view", () => {
 
 		frame.append(host)
 
-		const root = createRoot(host)
-
-		await act(async () => {
-			root.render(
-				<PresentationTextEditor
-					session={fakeSession(ops, [])}
-					shape={SHAPE}
-					scale={0.5}
-					editing={editing}
-					labels={{ editor: "Slide text" }}
-					render={RENDER}
-					apple={false}
-					measurer={new FakeMeasurer()}
-					onExit={() => exits.push(1)}
-					onRefused={() => undefined}
-				/>
-			)
+		const { root } = await mountEditor(host, {
+			session: fakeSession(ops, []),
+			scale: 0.5,
+			editing,
+			render: RENDER,
+			onExit: () => exits.push(1)
 		})
-		await flushAll()
 
 		const layers = frame.querySelectorAll<HTMLElement>(".fo-slide-text")
 
@@ -171,24 +105,7 @@ describe("presentation text editor view", () => {
 		const undos: (ShapeRef | undefined)[] = []
 		const frame = frameWithLayers()
 		const editing = createTextEditing()
-		const root = createRoot(frame)
-
-		await act(async () => {
-			root.render(
-				<PresentationTextEditor
-					session={fakeSession(ops, undos)}
-					shape={SHAPE}
-					scale={1}
-					editing={editing}
-					labels={{ editor: "Slide text" }}
-					apple={false}
-					measurer={new FakeMeasurer()}
-					onExit={() => undefined}
-					onRefused={() => undefined}
-				/>
-			)
-		})
-		await flushAll()
+		const { root } = await mountEditor(frame, { session: fakeSession(ops, undos), editing })
 
 		const controller = editing.active
 
@@ -220,24 +137,7 @@ describe("presentation text editor view", () => {
 	it("a composition over a selection first deletes the selection, as typing over it does", async () => {
 		const frame = frameWithLayers()
 		const editing = createTextEditing()
-		const root = createRoot(frame)
-
-		await act(async () => {
-			root.render(
-				<PresentationTextEditor
-					session={fakeSession([], [])}
-					shape={SHAPE}
-					scale={1}
-					editing={editing}
-					labels={{ editor: "Slide text" }}
-					apple={false}
-					measurer={new FakeMeasurer()}
-					onExit={() => undefined}
-					onRefused={() => undefined}
-				/>
-			)
-		})
-		await flushAll()
+		const { root } = await mountEditor(frame, { editing })
 
 		editing.active?.setSelection(2, 5)
 
@@ -286,24 +186,7 @@ describe("presentation text editor view", () => {
 		const session = { ...fakeSession([], []), textSeed: () => Promise.resolve(seed) } as PresentationSessionApi
 		const frame = frameWithLayers()
 		const editing = createTextEditing()
-		const root = createRoot(frame)
-
-		await act(async () => {
-			root.render(
-				<PresentationTextEditor
-					session={session}
-					shape={SHAPE}
-					scale={1}
-					editing={editing}
-					labels={{ editor: "Slide text" }}
-					apple={false}
-					measurer={new FakeMeasurer()}
-					onExit={() => undefined}
-					onRefused={() => undefined}
-				/>
-			)
-		})
-		await flushAll()
+		const { root } = await mountEditor(frame, { session, editing })
 
 		const caretAt = (pos: number): string => {
 			editing.active?.setSelection(pos)
@@ -326,6 +209,140 @@ describe("presentation text editor view", () => {
 		expect(colors(THEME_TEXT)).toContain(caretAt(21))
 		// An empty paragraph: the body's default text colour too.
 		expect(colors(THEME_TEXT)).toContain(caretAt(24))
+
+		await act(async () => {
+			root.unmount()
+		})
+	})
+	it("a finger or a pen dragging across a line selects the range, the pointer captured on the box", async () => {
+		const frame = frameWithLayers()
+		const session = { ...fakeSession([], []), textSeed: () => Promise.resolve(seedOf("Hello world")) } as PresentationSessionApi
+		const { root, editing } = await mountEditor(frame, { session })
+		const box = frame.querySelector(".fo-text-edit-box") as HTMLElement
+		const pointer = (type: string, pos: number, init: PointerEventInit = {}): void => {
+			box.dispatchEvent(
+				new PointerEvent(type, {
+					bubbles: true,
+					cancelable: true,
+					pointerId: 5,
+					pointerType: "touch",
+					isPrimary: true,
+					button: type === "pointermove" ? -1 : 0,
+					...clientAt(editing, pos),
+					...init
+				})
+			)
+		}
+
+		// The body takes no touch panning while open: the page neither scrolls nor zooms under the drag.
+		expect(box.style.touchAction).toBe("none")
+
+		pointer("pointerdown", 2)
+		expect(selected(editing)).toEqual([2, 2])
+		expect(box.hasPointerCapture(5)).toBe(true)
+
+		pointer("pointermove", 5)
+		expect(selected(editing)).toEqual([2, 5])
+
+		// Another finger does not move the range.
+		pointer("pointermove", 9, { pointerId: 6, isPrimary: false })
+		expect(selected(editing)).toEqual([2, 5])
+
+		pointer("pointerup", 5)
+		pointer("pointermove", 9)
+		expect(selected(editing)).toEqual([2, 5])
+
+		// A pen, its compatibility mouse press arriving while it drags: the pen places the selection.
+		pointer("pointerdown", 3, { pointerId: 7, pointerType: "pen" })
+		box.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, detail: 1, ...clientAt(editing, 3) }))
+		pointer("pointermove", 10, { pointerId: 7, pointerType: "pen" })
+		document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, ...clientAt(editing, 8) }))
+		expect(selected(editing)).toEqual([3, 10])
+		pointer("pointerup", 10, { pointerId: 7, pointerType: "pen" })
+		document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))
+
+		// A pen's double tap selects the word, and the rest of that contact does not drag it away.
+		const penTap = (pos: number, detail: number, id: number): void => {
+			pointer("pointerdown", pos, { pointerId: id, pointerType: "pen" })
+			box.dispatchEvent(
+				new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, detail, ...clientAt(editing, pos) })
+			)
+			pointer("pointermove", pos + 1, { pointerId: id, pointerType: "pen" })
+		}
+
+		penTap(8, 2, 8)
+		expect(selected(editing)).toEqual([7, 12])
+		pointer("pointerup", 9, { pointerId: 8, pointerType: "pen" })
+
+		// A triple tap: the paragraph stays selected.
+		penTap(3, 3, 9)
+		expect(selected(editing)).toEqual([1, 12])
+		pointer("pointerup", 4, { pointerId: 9, pointerType: "pen" })
+
+		// A finger whose up never reached the box does not hold the drag: the next finger and the mouse drag again.
+		pointer("pointerdown", 2, { pointerId: 10 })
+		pointer("pointerdown", 4, { pointerId: 11 })
+		pointer("pointermove", 6, { pointerId: 11 })
+		expect(selected(editing)).toEqual([4, 6])
+		pointer("pointermove", 9, { pointerId: 10 })
+		expect(selected(editing)).toEqual([4, 6])
+
+		box.dispatchEvent(
+			new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0 })
+		)
+		box.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, detail: 1, ...clientAt(editing, 2) }))
+		document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, ...clientAt(editing, 5) }))
+		document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))
+		expect(selected(editing)).toEqual([2, 5])
+
+		await act(async () => {
+			root.unmount()
+		})
+	})
+
+	it("the mouse places the caret, drags a range, and selects a word on a double click and a paragraph on a triple", async () => {
+		const frame = frameWithLayers()
+		const session = { ...fakeSession([], []), textSeed: () => Promise.resolve(seedOf("Hello world")) } as PresentationSessionApi
+		const { root, editing } = await mountEditor(frame, { session })
+		const box = frame.querySelector(".fo-text-edit-box") as HTMLElement
+		const press = (pos: number, detail: number): MouseEvent => {
+			const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, detail, ...clientAt(editing, pos) })
+
+			box.dispatchEvent(event)
+
+			return event
+		}
+
+		const opened = selected(editing)
+
+		// The mouse's own pointer events leave the selection to its mouse events.
+		box.dispatchEvent(
+			new PointerEvent("pointerdown", {
+				bubbles: true,
+				pointerId: 1,
+				pointerType: "mouse",
+				isPrimary: true,
+				button: 0,
+				...clientAt(editing, 9)
+			})
+		)
+		expect(selected(editing)).toEqual(opened)
+
+		expect(press(2, 1).defaultPrevented).toBe(true)
+		expect(selected(editing)).toEqual([2, 2])
+
+		document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, ...clientAt(editing, 5) }))
+		expect(selected(editing)).toEqual([2, 5])
+
+		document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))
+		document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, ...clientAt(editing, 9) }))
+		expect(selected(editing)).toEqual([2, 5])
+
+		press(8, 2)
+		expect(selected(editing)).toEqual([7, 12])
+
+		press(3, 3)
+		expect(selected(editing)).toEqual([1, 12])
 
 		await act(async () => {
 			root.unmount()

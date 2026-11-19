@@ -1,37 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { Item, RevisionView } from "@filen/office/core/docx"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
-import { DocxEngine, type DocxEngineServices, type DocxEvent, type DocxLinkTarget, type DocxPageData } from "@filen/office/dom/docx"
+import { DocxEngine, type DocxEvent, type DocxLinkTarget, type DocxPageData } from "@filen/office/dom/docx"
 import { crossReferenceTarget, paragraphLinks } from "../dom/docx/links"
 import { buildDocx, modelOf, type SyntheticDocx } from "./docxSynthetic"
+import { engineServices } from "./engineFixtures"
 
 // Every character half an em wide.
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
-function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
-		yield: () => Promise.resolve(),
-		sliceMs: Infinity
-	}
-}
-
 const run = (text: string): string => `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`
 
 function field(instruction: string, result: string): string {
@@ -56,7 +31,7 @@ interface Placed {
 async function placed(spec: SyntheticDocx): Promise<Placed[]> {
 	const pages: DocxPageData[] = []
 	const links: DocxLinkTarget[] = []
-	const engine = new DocxEngine(bytesSource(buildDocx(spec)), services(), (event: DocxEvent) => {
+	const engine = new DocxEngine(bytesSource(buildDocx(spec)), engineServices(), (event: DocxEvent) => {
 		if (event.type !== "pages") return
 
 		for (const page of event.pages) pages[page.index] = page

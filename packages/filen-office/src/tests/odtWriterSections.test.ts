@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { TextSelection } from "prosemirror-state"
 import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
-import { ZipArchive, bytesSource } from "@filen/office/core/opc"
-import { decodeUtf8 } from "@filen/office/core/xml"
 import { writeOdt } from "../core/odt/write/writer"
 import { paragraphAttributes } from "../core/odt/write/inverse"
 import { documentXml, odtBytes, type OdtParts } from "./odtFixtures"
-import { editOdt, odtEditsOf, type OdtEditing } from "./odtWriteFixtures"
+import { editOdt, odtEditsOf, paragraphAt, zipPartText, type OdtEditing } from "./odtWriteFixtures"
 
 // Saves of page styles, section breaks and lists the writer once refused or wrote wrongly, each read back by the
 // writer's proof (a save that reads otherwise than its edit is refused).
@@ -31,26 +29,6 @@ const TITLED: OdtParts = {
 
 type Edit = (e: OdtEditing) => Promise<void> | void
 
-function paragraphAt(e: OdtEditing, index: number): number {
-	let found = -1
-	let k = 0
-
-	e.session.state.doc.descendants((node, pos) => {
-		if (found >= 0) return false
-		if (node.type.name === "paragraph") {
-			if (k++ === index) found = pos
-
-			return false
-		}
-
-		return true
-	})
-
-	if (found < 0) throw new Error(`no paragraph ${index}`)
-
-	return found
-}
-
 const caret =
 	(index: number, command: DocxEditorCommand): Edit =>
 	async e => {
@@ -66,16 +44,8 @@ async function save(parts: OdtParts, ...edits: Edit[]): Promise<{ content: strin
 	for (const edit of edits) await edit(e)
 
 	const bytes = (await writeOdt(e.source, await odtEditsOf(e))).bytes
-	const archive = await ZipArchive.open(bytesSource(bytes))
-	const read = async (name: string): Promise<string> => {
-		const entry = archive.get(name)
 
-		if (entry === undefined) throw new Error(name)
-
-		return decodeUtf8(await archive.read(entry))
-	}
-
-	return { content: await read("content.xml"), styles: await read("styles.xml") }
+	return { content: await zipPartText(bytes), styles: await zipPartText(bytes, "styles.xml") }
 }
 
 const PAGE = caret(1, { type: "page.setup", orientation: "landscape", margins: { left: 1080 } } as DocxEditorCommand)

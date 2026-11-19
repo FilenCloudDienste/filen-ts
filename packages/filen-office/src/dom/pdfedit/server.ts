@@ -20,9 +20,9 @@ import { PDF_ENGINE_REQUESTS, type PdfRequestTable } from "./requests"
 import { READ_REQUESTS } from "./readRequests"
 import { wasmHeapBytes } from "./render"
 
-// The engine worker's side: requests are taken from the scope's messages and run one at a time. Renders wait in a
-// queue ordered by priority (visible tiles before overlays, thumbnails and prefetch) and can be cancelled until they
-// start; every other request runs in arrival order ahead of queued renders. Any wasm trap, out-of-memory or internal
+// The engine worker's side: requests are taken from the scope's messages and run one at a time. Only the `render` op is
+// prioritised: its tiles wait in a queue ordered by priority (visible tiles before overlays, thumbnails and prefetch) and
+// can be cancelled until they start; every other request (renderPage too) runs in arrival order ahead of queued renders. Any wasm trap, out-of-memory or internal
 // abort poisons the engine: it answers everything with "poisoned" from then on, and the page terminates it. While a
 // read document (the read role) is open, only the read requests and heap are served; every other request is refused.
 
@@ -91,28 +91,6 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 			if (reading === null) throw new PdfEngineRefusal("closed", "no document is open")
 
 			return reading
-		},
-		readBytes(offset, length) {
-			const { reader, heap } = context.open()
-
-			if (heap !== null) {
-				if (offset + length > heap.getLength()) throw new PdfEngineRefusal("readFailed", "end of file")
-
-				return heap.asUint8Array().slice(offset, offset + length)
-			}
-
-			const bytes = new Uint8Array(length)
-			let at = 0
-
-			while (at < length) {
-				const read = reader.read(bytes, at, length - at, offset + at)
-
-				if (read <= 0) throw new PdfEngineRefusal("readFailed", reader.failure ?? "end of file")
-
-				at += read
-			}
-
-			return bytes
 		},
 		heapBytes: () => wasmHeapBytes(mupdf)
 	}

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 const PACKAGE = join(import.meta.dirname, "..", "..")
@@ -24,3 +24,18 @@ function corpusDir(): string {
 // (it must exist), else the cache `pnpm run corpus:fetch` fills, else the legacy location. Corpus tests skip
 // while this directory does not exist.
 export const CORPUS_DIR = corpusDir()
+
+// The corpus's files of `extensions` (its directory per extension), each directory's in name order.
+export function corpusFiles(extensions: readonly string[]): string[] {
+	const files: string[] = []
+
+	for (const extension of extensions) {
+		const directory = join(CORPUS_DIR, extension)
+
+		if (!existsSync(directory)) continue
+
+		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
+	}
+
+	return files
+}

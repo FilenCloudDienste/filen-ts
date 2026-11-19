@@ -1,13 +1,14 @@
-import { ISO_1900 } from "../../numfmt/date"
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { foldText } from "../../find/match"
-import { formatValue, NUMFMT_EN_US, type NumFmtOptions } from "../../numfmt"
+import { formatValue, type NumFmtLocale, type NumFmtOptions } from "../../numfmt"
 import {
 	dateBaseOf,
+	engineLocale,
 	MAX_TEXT,
 	naError,
 	rawNumber,
 	SheetFunctionPlugin,
+	shownLocaleOf,
 	textOf,
 	valueError,
 	type PluginCall,
@@ -20,12 +21,12 @@ import { flatten, rowsOf } from "./values"
 
 // Text functions as Excel calculates them.
 
-// Delimiters given as text or an array of texts.
-function delimitersOf(value: PluginValue): string[] | CellError {
+// Delimiters given as text or an array of texts; a number in the locale's General text (`decimal`).
+function delimitersOf(value: PluginValue, decimal: string): string[] | CellError {
 	const out: string[] = []
 
 	for (const item of flatten(rowsOf(value))) {
-		const text = textOf(item)
+		const text = textOf(item, decimal)
 
 		if (text instanceof CellError) return text
 
@@ -79,10 +80,6 @@ function occurrences(text: string, delimiters: readonly string[], caseless: bool
 
 	return found
 }
-
-const OPTIONS_1900: NumFmtOptions = { locale: NUMFMT_EN_US }
-const OPTIONS_1904: NumFmtOptions = { locale: NUMFMT_EN_US, date1904: true }
-const OPTIONS_ISO_1900: NumFmtOptions = { locale: NUMFMT_EN_US, date1904: ISO_1900 }
 
 const PIECES = {
 	parameters: [
@@ -143,20 +140,23 @@ function decimalDigits(value: number, places: number): { readonly whole: string;
 	return { whole: kept.slice(0, point), fraction: kept.slice(point) }
 }
 
-// A number rounded to `decimals` (left of the point when negative), with its digits grouped by thousands or not.
-// support.microsoft.com "FIXED function": decimals as large as 127, numbers of at most 15 significant digits.
-function fixedText(value: number, decimals: number, grouped: boolean, prefix = ""): string | CellError {
+// A number rounded to `decimals` (left of the point when negative), with its digits grouped by thousands or not, in
+// the locale's separators. support.microsoft.com "FIXED function": decimals as large as 127, numbers of at most 15
+// significant digits.
+function fixedText(value: number, decimals: number, grouped: boolean, locale: NumFmtLocale, prefix = ""): string | CellError {
 	const places = Math.trunc(decimals)
 
 	if (places > 127) return valueError()
 
 	const { whole, fraction } = decimalDigits(value, places)
-	const integer = grouped ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : whole
-	const text = fraction === "" ? integer : `${integer}.${fraction}`
+	const integer = grouped ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, locale.group) : whole
+	const text = fraction === "" ? integer : `${integer}${locale.decimal}${fraction}`
 	const zero = whole === "0" && !/[1-9]/.test(fraction)
 
 	return value < 0 && !zero ? (prefix === "" ? `-${text}` : `(${prefix}${text})`) : `${prefix}${text}`
 }
+
+type ShownOptions = NumFmtOptions & { readonly locale: NumFmtLocale }
 
 export class TextFunctions extends SheetFunctionPlugin {
 	static override implementedFunctions: ImplementedFunctions = {
@@ -207,15 +207,24 @@ export class TextFunctions extends SheetFunctionPlugin {
 		}
 	}
 
-	private get formatOptions(): NumFmtOptions {
-		const base = dateBaseOf(this.config)
+	// The engine's config is its own for its life: built once, on first use.
+	private options: ShownOptions | undefined
 
-		return base === true ? OPTIONS_1904 : base === ISO_1900 ? OPTIONS_ISO_1900 : OPTIONS_1900
+	// The session's locale as the cells show it (shownLocaleOf), and the workbook's date base.
+	private get formatOptions(): ShownOptions {
+		if (this.options === undefined) {
+			const base = dateBaseOf(this.config)
+
+			this.options = { locale: shownLocaleOf(engineLocale(this.config)), ...(base !== false && { date1904: base }) }
+		}
+
+		return this.options
 	}
 
 	// TEXT(value, format_text): the value as the number format shows it (support.microsoft.com "TEXT function"),
-	// through the same format engine the cells use: a number, or text that reads as one, through its number
-	// section; other text through the text section. No fill: a "*" repeat shows nothing. A date the format
+	// through the same format engine the cells use, in the session's locale as the cells show it, so the locale's
+	// text reading reads it back (format codes stay en-US's syntax, as files store them): a number, or text that
+	// reads as one, through its number section; other text through the text section. No fill: a "*" repeat shows nothing. A date the format
 	// cannot show is #VALUE!.
 	text(ast: PluginCall, state: PluginState): unknown {
 		return this.runFunction(ast.args, state, this.metadata("TEXT"), (value: PluginScalar, code: string) => {
@@ -241,11 +250,12 @@ export class TextFunctions extends SheetFunctionPlugin {
 	concat(ast: PluginCall, state: PluginState): unknown {
 		if (ast.args.length === 0) return naError()
 
+		const decimal = engineLocale(this.config).decimal
 		let out = ""
 
 		for (const arg of ast.args) {
 			for (const value of flatten(rowsOf(this.evaluateAst(arg, state)))) {
-				const text = textOf(value)
+				const text = textOf(value, decimal)
 
 				if (text instanceof CellError) return text
 
@@ -275,7 +285,7 @@ export class TextFunctions extends SheetFunctionPlugin {
 				matchEnd: number,
 				notFound: PluginScalar | undefined
 			) => {
-				const delimiters = delimitersOf(delimiter)
+				const delimiters = delimitersOf(delimiter, engineLocale(this.config).decimal)
 
 				if (delimiters instanceof CellError) return delimiters
 				if (
@@ -329,8 +339,9 @@ export class TextFunctions extends SheetFunctionPlugin {
 				matchMode: number,
 				pad: PluginScalar | undefined
 			) => {
-				const columnDelimiters = columns === undefined || columns === EmptyValue ? [] : delimitersOf(columns)
-				const rowDelimiters = rows === undefined || rows === EmptyValue ? [] : delimitersOf(rows)
+				const decimal = engineLocale(this.config).decimal
+				const columnDelimiters = columns === undefined || columns === EmptyValue ? [] : delimitersOf(columns, decimal)
+				const rowDelimiters = rows === undefined || rows === EmptyValue ? [] : delimitersOf(rows, decimal)
 
 				if (columnDelimiters instanceof CellError) return columnDelimiters
 				if (rowDelimiters instanceof CellError) return rowDelimiters
@@ -411,18 +422,29 @@ export class TextFunctions extends SheetFunctionPlugin {
 		})
 	}
 
+	// The session's own currency symbol (its first), else "$": what DOLLAR writes, so the locale's text reading reads it.
+	private symbol: string | undefined
+
 	// DOLLAR(number, [decimals]): the number as currency text, $#,##0.00_);($#,##0.00) rounded to decimals
-	// (support.microsoft.com "DOLLAR function"); en-US's symbol.
+	// (support.microsoft.com "DOLLAR function"), in the locale's separators and with its currency symbol, as Excel
+	// writes it under the regional settings. Without a symbol for the locale, "$", which only a "." locale reads back.
 	dollar(ast: PluginCall, state: PluginState): unknown {
+		if (this.symbol === undefined) {
+			this.symbol = engineLocale(this.config).currencies?.find(symbol => symbol !== "") ?? "$"
+		}
+
+		const symbol = this.symbol
+
 		return this.runFunction(ast.args, state, this.metadata("DOLLAR"), (number: number, decimals: number) =>
-			fixedText(number, decimals, true, "$")
+			fixedText(number, decimals, true, this.formatOptions.locale, symbol)
 		)
 	}
 
-	// FIXED(number, [decimals], [no_commas]): the number rounded to decimals as text, grouped unless no_commas.
+	// FIXED(number, [decimals], [no_commas]): the number rounded to decimals as text, grouped unless no_commas, in the
+	// locale's separators.
 	fixed(ast: PluginCall, state: PluginState): unknown {
 		return this.runFunction(ast.args, state, this.metadata("FIXED"), (number: number, decimals: number, noCommas: boolean) =>
-			fixedText(number, decimals, !noCommas)
+			fixedText(number, decimals, !noCommas, this.formatOptions.locale)
 		)
 	}
 }

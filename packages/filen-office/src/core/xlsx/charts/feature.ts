@@ -305,7 +305,10 @@ export const chartsFeature = defineSheetFeature<XlsxDocument>({
 		}
 	},
 	queries: {
-		"chart.render": { run: (context, request) => renderChart(context.doc, request.part, request.width, request.height, request.since) },
+		"chart.render": {
+			run: (context, request) =>
+				renderChart(context.doc, request.part, request.width, request.height, request.since, context.settings.chartText)
+		},
 		"chart.sheet": { run: (context, request) => chartSheetChart(context.doc, request.sheet) },
 		"chart.get": {
 			run: async (context, request) => {

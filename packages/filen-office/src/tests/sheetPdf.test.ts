@@ -14,7 +14,7 @@ import { nodeFontAssets, pdfBytes } from "./sheetPdfFixtures"
 import { openFixture } from "./sheetSessionFixtures"
 import { buildFixture } from "./xlsxWriteFixtures"
 import { KEPT, SOLD, barChart, chartFixture, withChartsheet } from "./sheetChartFixtures"
-import { CHART_FRAME, wsDr } from "./sheetDrawingsFixtures"
+import { CHART_FRAME, openDrawings, wsDr } from "./sheetDrawingsFixtures"
 import { NOTES } from "./sheetNotesFixtures"
 import { TYPES } from "./xlsxRefsFixtures"
 import { unzipSync, zipSync } from "fflate"
@@ -393,6 +393,69 @@ describe("a sheet's print as a PDF", () => {
 		if (!labelled.ok) throw new Error(labelled.reason)
 
 		expect(readable(pdfBytes(labelled.output.parts))).toContain("(Diagramm: Graph)")
+		session.close()
+	})
+
+	it("counts an object whose render fails and leaves it off, drawing the others", async () => {
+		const { session } = await openDrawings()
+		const ranges = [{ startRow: 0, startCol: 0, endRow: 20, endCol: 8 }]
+		const sheet = { sheet: 0, name: "One", setup: DEFAULT_PAGE_SETUP, ranges, used: ranges[0] ?? null }
+		const pdf: SheetPdfRequest = {
+			sheets: [sheet],
+			values: VALUES,
+			title: "book.xlsx",
+			kind: "xlsx",
+			summaries: [],
+			date1904: false,
+			showFormulas: false
+		}
+		// The session with drawing.render rejecting for the first object it is asked for, with `error`.
+		const failing = (error: Error): SheetSessionApi => {
+			let failed: unknown = null
+
+			return new Proxy(session, {
+				get: (target, property) => {
+					if (property !== "query") {
+						const value: unknown = Reflect.get(target, property)
+
+						return typeof value === "function" ? value.bind(target) : value
+					}
+
+					return (name: string, args: { key?: unknown }, options?: unknown) => {
+						if (name === "drawing.render" && (failed === null || failed === args.key)) {
+							failed = args.key
+
+							return Promise.reject(error)
+						}
+
+						return (target.query as (...all: unknown[]) => Promise<unknown>)(name, args, options)
+					}
+				}
+			})
+		}
+		const figures = (bytes: Uint8Array): number => readable(bytes).match(/\/S \/Figure/g)?.length ?? 0
+		const whole = await exportSheetPdf(pdf, { session, assets: nodeFontAssets, deterministic: true })
+		const missing = await exportSheetPdf(pdf, {
+			session: failing(new Error("render failed")),
+			assets: nodeFontAssets,
+			deterministic: true
+		})
+
+		if (!whole.ok || !missing.ok) throw new Error("not exported")
+
+		expect(whole.missingObjects).toBe(0)
+		expect(missing.missingObjects).toBe(1)
+		expect(figures(pdfBytes(whole.output.parts))).toBeGreaterThan(1)
+		expect(figures(pdfBytes(missing.output.parts))).toBe(figures(pdfBytes(whole.output.parts)) - 1)
+
+		// An abort met while an object renders ends the export as aborted: nothing is counted or cached as failed.
+		const aborted = exportSheetPdf(pdf, {
+			session: failing(Object.assign(new Error("The PDF export was aborted"), { name: "AbortError" })),
+			assets: nodeFontAssets,
+			deterministic: true
+		})
+
+		await expect(aborted).rejects.toMatchObject({ name: "AbortError" })
 		session.close()
 	})
 

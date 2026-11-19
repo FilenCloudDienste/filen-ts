@@ -30,16 +30,31 @@ console.log(JSON.stringify({ result: converted.ok ? "ok" : converted.refusal.rea
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
-function outcome(name: string, spec: SyntheticDocx): { result: string; ms: number; peak: number; buffers: number } {
+// The wall clock a case's process may run before it is killed: spawnSync blocks the worker, so the test's own timeout
+// cannot fire while a conversion hangs. Generous over the CPU allowance, as it also counts start-up and the machine's
+// other work.
+function wallCap(time: number): number {
+	return budget(time) * 3 + 30_000
+}
+
+function outcome(name: string, spec: SyntheticDocx, time: number): { result: string; ms: number; peak: number; buffers: number } {
 	const file = join(scratch, `${name}.docx`)
 
 	writeFileSync(file, buildDocx(spec))
 
+	const cap = wallCap(time)
 	const run = spawnSync(process.execPath, ["--expose-gc", "--import", "tsx", "--input-type=module", "-e", RUN, file], {
-		encoding: "utf8"
+		encoding: "utf8",
+		timeout: cap,
+		killSignal: "SIGKILL"
 	})
 
-	if (run.status !== 0) throw new Error(run.stderr.slice(0, 2000))
+	if (run.error !== undefined || run.signal !== null)
+		throw new Error(
+			`${name}: conversion process ${run.signal === null ? "failed" : `killed by ${run.signal}`} (wall cap ${String(cap)} ms): ${run.error?.message ?? run.stderr.slice(0, 2000)}`
+		)
+
+	if (run.status !== 0) throw new Error(`${name}: conversion process exited with ${String(run.status)}: ${run.stderr.slice(0, 2000)}`)
 
 	return JSON.parse(run.stdout.trim().split("\n").at(-1) ?? "{}") as { result: string; ms: number; peak: number; buffers: number }
 }
@@ -130,8 +145,8 @@ const CASES: Readonly<Record<string, readonly [() => SyntheticDocx, string, numb
 
 describe("docx → odt in bounded memory", () => {
 	for (const [name, [make, expected, time = 2000]] of Object.entries(CASES))
-		it(`${name}: ${expected}, in under ${String(time / 1000)} s and 1 GiB`, { timeout: 120_000 }, () => {
-			const { result, ms, peak, buffers } = outcome(name, make())
+		it(`${name}: ${expected}, in under ${String(time / 1000)} s and 1 GiB`, { timeout: wallCap(time) + 120_000 }, () => {
+			const { result, ms, peak, buffers } = outcome(name, make(), time)
 
 			process.stdout.write(`${name}: ${result} ${String(Math.round(ms))} ms, peak ${String(Math.round(peak / 1e6))} MB\n`)
 

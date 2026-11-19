@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { ItemInt, ItemKind } from "../core/drawingml/displayList"
 import { Bytes } from "../core/metafile/bytes"
 import { convertPict, isPict } from "../core/metafile/pict"
+import { SYMBOL_CHARSET, decodeAnsi } from "../core/metafile/text"
 import { decodePng } from "./oracles/presentation/pixel"
 
 // A version 2 picture (Inside Macintosh: Imaging With QuickDraw, Appendix A): big-endian words, opcodes word-aligned.
@@ -281,5 +282,33 @@ describe("QuickDraw pictures", () => {
 		expect(result.list.itemCount).toBe(1)
 		expect(result.truncated).toBe(true)
 		expect(convertPict(new Bytes(new Uint8Array(64)))).toEqual({ ok: false, reason: "malformed" })
+	})
+})
+
+// LOGFONT text decodes through the same charset tables as RTF font text.
+describe("metafile text charsets", () => {
+	const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values)
+
+	it("keeps symbol-charset codes as they are", () => {
+		expect(decodeAnsi(bytes(0x61, 0x80, 0xb7), SYMBOL_CHARSET)).toBe("a\u0080\u00b7")
+	})
+
+	it("reads ANSI and DEFAULT as Windows-1252", () => {
+		expect(decodeAnsi(bytes(0x80, 0x81, 0xe9), 0)).toBe("\u20ac\u0081\u00e9")
+		expect(decodeAnsi(bytes(0x80, 0x93, 0xe9), 1)).toBe("\u20ac\u201c\u00e9")
+	})
+
+	it("falls back to Windows-1252 for Johab and unknown charsets", () => {
+		expect(decodeAnsi(bytes(0x80, 0xe9), 130)).toBe("\u20ac\u00e9")
+		expect(decodeAnsi(bytes(0x80, 0xe9), 99)).toBe("\u20ac\u00e9")
+	})
+
+	it("decodes Mac and OEM charsets", () => {
+		expect(decodeAnsi(bytes(0x8e, 0xa5), 77)).toBe("\u00e9\u2022")
+		expect(decodeAnsi(bytes(0x82, 0xb0), 255)).toBe("\u00e9\u2591")
+	})
+
+	it("decodes double-byte charsets", () => {
+		expect(decodeAnsi(bytes(0x82, 0xa0), 128)).toBe("\u3042")
 	})
 })

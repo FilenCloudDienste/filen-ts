@@ -102,10 +102,8 @@ export interface Conversion {
 	readonly writtenBoxes: Set<number>
 }
 
-const GTEXT_UNICODE = 0x00c0
-
 function wordArtText(shape: ArtShape): string | undefined {
-	const text = complexText(shape.properties.get(GTEXT_UNICODE))
+	const text = complexText(shape.properties.get(PID.gtextUNICODE))
 
 	return text === undefined || text.trim() === "" ? undefined : text
 }
@@ -676,7 +674,7 @@ export class StoryWriter {
 
 			const width = Math.max(1, picture.width) * EMU_PER_TWIP
 			const height = Math.max(1, picture.height) * EMU_PER_TWIP
-			const name = this.name("Picture", complexText(picture.shape?.properties.get(PID.description)))
+			const name = this.name("Picture", complexText(picture.shape?.properties.get(PID.wzDescription)))
 
 			return inline(pictureGraphic(rel, width, height, name, picture.crop), width, height, name)
 		}
@@ -713,7 +711,7 @@ export class StoryWriter {
 
 		const placement = this.placement(placeholder, box, shape)
 		const transform = shapeTransform(shape)
-		const description = complexText(shape.properties.get(PID.description))
+		const description = complexText(shape.properties.get(PID.wzDescription))
 
 		if (shape.children !== undefined) {
 			// Word 2010 writes a .doc's group as a wpg:wgp: its members at their child anchors in its coordinate space.
@@ -840,7 +838,7 @@ export class StoryWriter {
 				continue
 			}
 
-			const description = complexText(member.properties.get(PID.description))
+			const description = complexText(member.properties.get(PID.wzDescription))
 			const rel = this.shapePicture(member)
 
 			if (rel !== undefined) {

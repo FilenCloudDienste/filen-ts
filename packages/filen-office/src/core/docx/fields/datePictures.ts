@@ -28,6 +28,7 @@ const US_DATE_PICTURES: readonly string[] = [
 ]
 
 const US = "M/d/yyyy"
+const US_TIME = "h:mm am/pm"
 // A day, month and hour below ten: padding shows in what a format writes.
 const SAMPLE = new Date(Date.UTC(2026, 2, 4, 5, 6, 7))
 const BIDI_MARKS = /[؜‎‏‪-‮⁦-⁩]/g
@@ -116,6 +117,16 @@ export function numericDatePicture(lang: string | undefined): string {
 	if (language === undefined || english(language)) return US
 
 	return intlDatePicture(language, { year: "numeric", month: "2-digit", day: "2-digit" }) ?? US
+}
+
+// The language's short time (Word's default time picture for a language): en-US's "h:mm am/pm" for English (United
+// States), a language Intl cannot read or one without a picture of it.
+export function shortTimePicture(lang: string | undefined): string {
+	const language = lang === undefined ? undefined : languageTag(lang)
+
+	if (language === undefined || english(language)) return US_TIME
+
+	return intlDatePicture(language, { timeStyle: "short" }) ?? US_TIME
 }
 
 // The formats a date dialog offers for `language` (the caret's w:lang): Word's own for English (United States),

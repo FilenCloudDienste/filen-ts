@@ -20,7 +20,8 @@ import {
 	threadOrder,
 	type CommentEntry
 } from "../../presentation/comments"
-import type { Deck, ShapeNode, SlideNode, SlideRef } from "../../presentation/model"
+import type { Deck, SlideNode, SlideRef } from "../../presentation/model"
+import { shapeById } from "../../presentation/shapes"
 import type { Slicing } from "../../slicing"
 import { escapeAttribute, escapeText } from "../../xml/index"
 import type { ConversionReport } from "./report"
@@ -83,18 +84,6 @@ function cm(emu: number): string {
 	return `${String(Math.round((emu / EMU_PER_CM) * 1000) / 1000)}cm`
 }
 
-function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.id === id) return shape
-
-		const inner = shape.children === undefined ? undefined : findShape(shape.children, id)
-
-		if (inner !== undefined) return inner
-	}
-
-	return undefined
-}
-
 // Where a comment is placed (EMU): its own place, else the top left of the shape it is anchored to, else its
 // thread's, else the slide's top left.
 function placeOf(
@@ -109,7 +98,7 @@ function placeOf(
 
 	if (anchor?.x !== undefined && anchor.y !== undefined) return { x: anchor.x, y: anchor.y }
 
-	const shape = anchor?.shape === undefined ? undefined : findShape(slide.shapes, anchor.shape)?.xfrm
+	const shape = anchor?.shape === undefined ? undefined : shapeById(slide.shapes, anchor.shape)?.xfrm
 
 	if (shape !== undefined) return { x: shape.x, y: shape.y }
 

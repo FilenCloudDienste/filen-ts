@@ -1,19 +1,17 @@
 import { readFileSync } from "node:fs"
-import { MessageChannel } from "node:worker_threads"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY, type PdfWidgetSummary } from "../../core/pdfedit"
 import { normalizeStrokes } from "../../core/pdfedit/visualSignature"
-import { pdfSignatureFields, type PdfSignatureFieldHint } from "../../dom/pdf"
 import { flattenAnnotations } from "../../dom/pdfedit/annotations/flatten"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
 import { missingRequiredFields, placeVisualSignature, resetForm, setFieldValue } from "../../dom/pdfedit/fillSign"
 import { cropPages, outsideCropRects } from "../../dom/pdfedit/pages/crop"
 import { addPdfSignatureField } from "../../dom/pdfedit/sign"
 import { makeFormPdf, makePdf } from "./fixtures"
-import { startEngine, stopEngines } from "./harness"
+import { startEngine, stopEngines, upload } from "./harness"
+import { pdfjsHints } from "./pdfjsFixtures"
 import { budget } from "../timing"
 
 // Forms and Fill & Sign as the editor runs them: the commands (one journal step each, undo and redo), the widgets'
@@ -47,44 +45,11 @@ async function saved(client: PdfEngineClient, inputBytes: number): Promise<Uint8
 
 	if (begun.status !== "written") throw new Error("refused")
 
-	const bytes = await upload(client)
+	const { bytes } = await upload(client)
 
 	await client.call("saveEnd", { outcome: "copied", next: "continue" })
 
 	return bytes
-}
-
-// The held output, streamed as an upload reads it.
-async function upload(client: PdfEngineClient): Promise<Uint8Array> {
-	const channel = new MessageChannel()
-	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
-	const written = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
-	const chunks: Uint8Array[] = []
-
-	for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
-
-	reader.settled(true)
-	await written
-
-	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let at = 0
-
-	for (const chunk of chunks) {
-		bytes.set(chunk, at)
-		at += chunk.length
-	}
-
-	return bytes
-}
-
-// The signatures pdf.js reads, the hints the engine's check cross-checks.
-async function pdfjsHints(bytes: Uint8Array): Promise<PdfSignatureFieldHint[] | null> {
-	const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 })
-	const hints = pdfSignatureFields(await (await task.promise).getSignatures())
-
-	await task.destroy()
-
-	return hints
 }
 
 async function pdfjsAnnotations(bytes: Uint8Array): Promise<Record<string, unknown>[][]> {
@@ -266,7 +231,7 @@ describe("form commands", () => {
 			})
 
 			expect(confirmed).toMatchObject({ status: "written", plan: { mode: "full", invalidates: ["Signature1"] } })
-			const written = await upload(engine.client)
+			const { bytes: written } = await upload(engine.client)
 
 			const ended = await engine.client.call("saveEnd", { outcome: "saved", next: "continue" })
 

@@ -65,17 +65,19 @@ export type SheetChartEdit =
 			readonly values?: string
 	  }
 
+type ChartEditRefusal = "chartUnsupported" | "chartValue" | "formula" | "tooLarge"
+
 // Why an edit cannot be made (SheetRefusal detail).
 export class ChartEditRefused extends Error {
-	readonly reason: "chartUnsupported" | "formula" | "tooLarge"
+	readonly reason: ChartEditRefusal
 
-	constructor(reason: "chartUnsupported" | "formula" | "tooLarge", detail: string) {
+	constructor(reason: ChartEditRefusal, detail: string) {
 		super(detail)
 		this.reason = reason
 	}
 }
 
-function refuse(detail: string, reason: "chartUnsupported" | "formula" | "tooLarge" = "chartUnsupported"): never {
+function refuse(detail: string, reason: ChartEditRefusal = "chartUnsupported"): never {
 	throw new ChartEditRefused(reason, detail)
 }
 
@@ -623,7 +625,7 @@ function editLabels(context: Context, plots: readonly number[], labels: ChartLab
 }
 
 function checkNumber(value: number | null | undefined, what: string): void {
-	if (value !== null && value !== undefined && !Number.isFinite(value)) refuse(what)
+	if (value !== null && value !== undefined && !Number.isFinite(value)) refuse(what, "chartValue")
 }
 
 function editAxis(context: Context, axis: number, patch: ChartAxisPatch): void {
@@ -643,7 +645,7 @@ function editAxis(context: Context, axis: number, patch: ChartAxisPatch): void {
 	checkNumber(patch.major, "axis unit")
 	checkNumber(patch.minor, "axis unit")
 
-	for (const unit of [patch.major, patch.minor]) if (unit !== undefined && unit !== null && unit <= 0) refuse("axis unit")
+	for (const unit of [patch.major, patch.minor]) if (unit !== undefined && unit !== null && unit <= 0) refuse("axis unit", "chartValue")
 
 	if (patch.min !== undefined || patch.max !== undefined) {
 		const scaling = chartChild(context, axis, "scaling")
@@ -653,7 +655,7 @@ function editAxis(context: Context, axis: number, patch: ChartAxisPatch): void {
 		const max =
 			patch.max === undefined ? (reader.child(scaling, D.C, "max") >= 0 ? Number(val(reader, scaling, "max")) : null) : patch.max
 
-		if (min !== null && max !== null && !(min < max)) refuse("axis bounds")
+		if (min !== null && max !== null && !(min < max)) refuse("axis bounds", "chartValue")
 		if (scaling < 0) refuse("axis scaling")
 
 		checkExtensions(context, scaling, "axis scaling")

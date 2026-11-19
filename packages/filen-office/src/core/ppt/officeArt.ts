@@ -1,4 +1,19 @@
-import { readProperties, records as artRecords, type ArtProperty, type ArtRecord } from "../doc/toDocx/officeArt"
+import {
+	PID as P,
+	readProperties,
+	records as artRecords,
+	RT_CHILD_ANCHOR,
+	RT_DG_CONTAINER,
+	RT_FSP,
+	RT_FSPGR,
+	RT_OPT,
+	RT_SECONDARY_OPT,
+	RT_SP_CONTAINER,
+	RT_SPGR_CONTAINER,
+	RT_TERTIARY_OPT,
+	type ArtProperty,
+	type ArtRecord
+} from "../doc/toDocx/officeArt"
 import { tooDeep, tooLarge } from "../presentation/refusal"
 import type { PptFile } from "./document"
 import { i16, i32, RT, u16, u32, type PptRecord } from "./records"
@@ -10,17 +25,10 @@ import { interactionOf, pp9Records, readStyleTextProp9, readTextBlocks, type Int
 // group rectangle, and the PowerPoint client data (§2.7.3: placeholder, interactions, external object) and text box
 // (§2.9.76 OfficeArtClientTextbox: inline text or an OutlineTextRefAtom into the slide list's text).
 
-const RT_SPGR_CONTAINER = 0xf003
-const RT_SP_CONTAINER = 0xf004
-const RT_FSPGR = 0xf009
-const RT_FSP = 0xf00a
-const RT_OPT = 0xf00b
+// PowerPoint's client records ([MS-PPT] §2.7.1, §2.7.3, §2.9.76); the OfficeArt ones come from the shared reader.
 const RT_CLIENT_TEXTBOX = 0xf00d
-const RT_CHILD_ANCHOR = 0xf00f
 const RT_CLIENT_ANCHOR = 0xf010
 const RT_CLIENT_DATA = 0xf011
-const RT_SECONDARY_OPT = 0xf121
-const RT_TERTIARY_OPT = 0xf122
 
 export interface Rect {
 	readonly left: number
@@ -297,7 +305,7 @@ export function readDrawing(file: PptFile, drawing: PptRecord | undefined): Draw
 	if (drawing === undefined) return { shapes: [], background: undefined }
 
 	const reader = new ShapeReader(file)
-	const dg = artRecords(file.stream, drawing.start, drawing.end).find(record => record.type === 0xf002)
+	const dg = artRecords(file.stream, drawing.start, drawing.end).find(record => record.type === RT_DG_CONTAINER)
 
 	if (dg === undefined) return { shapes: [], background: undefined }
 
@@ -319,84 +327,8 @@ export function readDrawing(file: PptFile, drawing: PptRecord | undefined): Draw
 
 // --- Properties ---
 
-// MS-ODRAW §2.3 property ids the conversion reads.
-export const P = {
-	rotation: 0x0004,
-	lTxid: 0x0080,
-	dxTextLeft: 0x0081,
-	dyTextTop: 0x0082,
-	dxTextRight: 0x0083,
-	dyTextBottom: 0x0084,
-	wrapText: 0x0085,
-	anchorText: 0x0087,
-	txflTextFlow: 0x0088,
-	textBooleans: 0x00bf,
-	gtextUNICODE: 0x00c0,
-	gtextSize: 0x00c3,
-	gtextFont: 0x00c5,
-	gtextBooleans: 0x00ff,
-	cropFromTop: 0x0100,
-	cropFromBottom: 0x0101,
-	cropFromLeft: 0x0102,
-	cropFromRight: 0x0103,
-	pib: 0x0104,
-	pictureTransparent: 0x0107,
-	pictureContrast: 0x0108,
-	pictureBrightness: 0x0109,
-	blipBooleans: 0x013f,
-	geoLeft: 0x0140,
-	geoTop: 0x0141,
-	geoRight: 0x0142,
-	geoBottom: 0x0143,
-	shapePath: 0x0144,
-	pVertices: 0x0145,
-	pSegmentInfo: 0x0146,
-	adjustValue: 0x0147,
-	geometryBooleans: 0x017f,
-	fillType: 0x0180,
-	fillColor: 0x0181,
-	fillOpacity: 0x0182,
-	fillBackColor: 0x0183,
-	fillBackOpacity: 0x0184,
-	fillBlip: 0x0186,
-	fillAngle: 0x018b,
-	fillFocus: 0x018c,
-	fillToLeft: 0x018d,
-	fillToTop: 0x018e,
-	fillToRight: 0x018f,
-	fillToBottom: 0x0190,
-	fillShadeColors: 0x0197,
-	fillShadeType: 0x019c,
-	fillStyleBooleans: 0x01bf,
-	lineColor: 0x01c0,
-	lineOpacity: 0x01c1,
-	lineBackColor: 0x01c2,
-	lineType: 0x01c4,
-	lineWidth: 0x01cb,
-	lineStyle: 0x01cd,
-	lineDashing: 0x01ce,
-	lineStartArrowhead: 0x01d0,
-	lineEndArrowhead: 0x01d1,
-	lineStartArrowWidth: 0x01d2,
-	lineStartArrowLength: 0x01d3,
-	lineEndArrowWidth: 0x01d4,
-	lineEndArrowLength: 0x01d5,
-	lineJoinStyle: 0x01d6,
-	lineEndCapStyle: 0x01d7,
-	lineStyleBooleans: 0x01ff,
-	shadowType: 0x0200,
-	shadowColor: 0x0201,
-	shadowOpacity: 0x0204,
-	shadowOffsetX: 0x0205,
-	shadowOffsetY: 0x0206,
-	shadowStyleBooleans: 0x023f,
-	hspMaster: 0x0301,
-	shapeBooleans: 0x033f,
-	wzName: 0x0380,
-	wzDescription: 0x0381,
-	tableProperties: 0x039f,
-	groupShapeBooleans: 0x03bf
-} as const
+// MS-ODRAW §2.3 property ids, one table shared with the Word conversion.
+export { P }
 
 // A property, looked up through the shape, its master shape, then the drawing group's defaults.
 export type PropertyChain = readonly ReadonlyMap<number, ArtProperty>[]

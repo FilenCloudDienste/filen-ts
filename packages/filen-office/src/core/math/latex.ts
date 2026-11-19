@@ -1255,12 +1255,6 @@ function readAs(latex: string, display: boolean): LatexRead {
 	}
 }
 
-// Reads `latex` into Office Math, or says where and why it cannot. Line breaks (\\) separate the equations of
-// a display equation.
-export function readLatex(latex: string): LatexRead {
-	return readAs(latex, true)
-}
-
 // `latex` as an equation's m:oMath (m:oMathPara when `display`), as writeOmml writes it; inline, a line break
 // is an error.
 export function latexToOmml(latex: string, display: boolean): LatexOmml {

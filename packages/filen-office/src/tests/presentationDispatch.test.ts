@@ -15,6 +15,8 @@ import {
 } from "../core/smartart/gallery/index"
 import { smartArtColorsDef, smartArtLayoutDef, smartArtStyleDef } from "../core/smartart/gallery/defs"
 import { CAPABILITIES, METHOD_HANDLERS, OPENERS, PRESENTATION_LANES, SERVICES, type EngineSession } from "../dom/presentation/engine"
+import { embeddedFaceBytes } from "../dom/presentation/engine/fonts"
+import { smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { PRESENTATION_JOBS, runPresentationJob, type JobContext } from "../dom/presentation/jobs/registry"
 import { PRESENTATION_METHODS, type PresentationMethod } from "../dom/presentation/protocol"
 import { bytesSource, memorySink } from "../core/opc/index"
@@ -77,6 +79,7 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"smartArtInfo",
 	"registerMedia",
 	"chartData",
+	"pictureFormat",
 	"freshParts",
 	"jobsPort",
 	"review",
@@ -218,13 +221,20 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("serves no embedded faces before a deck declared any, refuses SmartArt before any render as notFound, and empty bytes in every reader typed", async () => {
+	it("serves no embedded faces before a deck declared any, leaves a diagram of a missing slide undrawn, refuses a SmartArt preview typed, and empty bytes in every reader typed", async () => {
 		const session = { s: 1 } as unknown as EngineSession
 
-		await expect(SERVICES.fonts.faces(session)).resolves.toEqual([])
+		expect(
+			embeddedFaceBytes(session, { family: "x-e1", weight: 400, italic: false, source: "embedded", declaredFamily: "X" })
+		).toBeUndefined()
 		const slicing = { pause: () => Promise.resolve(), sliceMs: 8, now: () => 0 }
 
-		await expect(SERVICES.smartart.relayout(session, target, slicing)).rejects.toMatchObject({ reason: "notFound" })
+		const frame = { kind: "smartart", data: "/ppt/diagrams/data1.xml", layout: "/l.xml", style: "/s.xml", colors: "/c.xml" } as const
+		const renderer = smartArtRenderer({ s: 2, deck: { nodes: new Map() } } as unknown as EngineSession, {
+			services: { xml: () => undefined, relationship: () => undefined, contentType: () => undefined }
+		})
+
+		await expect(renderer.relayout(target, frame, slicing)).resolves.toBeUndefined()
 		await expect(
 			SERVICES.smartart.preview(session, { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }, slicing)
 		).rejects.toBeInstanceOf(PresentationError)

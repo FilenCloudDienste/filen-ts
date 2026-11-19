@@ -4,9 +4,9 @@ import { TextSelection } from "prosemirror-state"
 import { DocxEditorSession, openDocxEditContext, type DocxEditContext, type DocxEditorCommand } from "@filen/office/core/docx/edit"
 import { DocumentEdits, PagedEditor } from "@filen/office/core/docx/paged"
 import { prepareDocxSave, writerProof } from "@filen/office/core/docx/write"
-import { bytesSource, joinBytes } from "@filen/office/core/opc"
+import { ZipArchive, bytesSource, joinBytes } from "@filen/office/core/opc"
 import { HitTester } from "@filen/office/core/text"
-import type { XmlDocument } from "@filen/office/core/xml"
+import { decodeUtf8, type XmlDocument } from "@filen/office/core/xml"
 import { rtfBlockProof } from "../core/rtf/write/proof"
 import { openOdtSource, type OdtSource } from "../core/odt/write/source"
 import { proveOdt, writeOdt, type OdtEdits, type OdtWritten } from "../core/odt/write/writer"
@@ -91,6 +91,38 @@ export async function odtEditsOf(editing: OdtEditing): Promise<OdtEdits> {
 
 export async function saveOdt(editing: OdtEditing): Promise<OdtWritten> {
 	return writeOdt(editing.source, await odtEditsOf(editing))
+}
+
+// The position of the paragraph `index` in document order. `intoTables: false` counts only paragraphs outside tables.
+export function paragraphAt(editing: OdtEditing, index: number, options: { readonly intoTables?: boolean } = {}): number {
+	const intoTables = options.intoTables ?? true
+	let found = -1
+	let k = 0
+
+	editing.session.state.doc.descendants((node, pos) => {
+		if (found >= 0) return false
+		if (node.type.name === "paragraph") {
+			if (k++ === index) found = pos
+
+			return false
+		}
+
+		return intoTables || node.type.name !== "table"
+	})
+
+	if (found < 0) throw new Error(`no paragraph ${index}`)
+
+	return found
+}
+
+// A part of a saved package as text.
+export async function zipPartText(bytes: Uint8Array, name = "content.xml"): Promise<string> {
+	const archive = await ZipArchive.open(bytesSource(bytes))
+	const entry = archive.get(name)
+
+	if (entry === undefined) throw new Error(name)
+
+	return decodeUtf8(await archive.read(entry))
 }
 
 function select(session: DocxEditorSession, from: number, to = from): void {

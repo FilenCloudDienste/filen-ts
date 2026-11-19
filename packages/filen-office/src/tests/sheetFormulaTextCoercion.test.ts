@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest"
 import { FormulaEngine, type EngineSheet } from "../core/sheet/formula/index"
+import { NUMFMT_EN_US } from "../core/sheet/numfmt/locale"
+import type { SheetLocale } from "../core/sheet/protocol"
 import { engineCellFormula } from "../core/sheet/refs/formulaRefs"
+import { RenderStyleTable } from "../core/sheet/session"
+import { XlsxDocument } from "../core/xlsx/edit/document"
+import { openOdsFixture, table } from "./odsFixtures"
 
 // Text, wildcards and comparison in the engine as Excel reads them, where HyperFormula alone differs.
 
 type Typed = string | number | boolean | null
 
 // The value of each formula cell ("=..." in Excel's syntax) by its A1 name; an error as "!#NAME".
-function calculate(rows: Typed[][]): Record<string, unknown> {
+function calculate(rows: Typed[][], locale?: SheetLocale): Record<string, unknown> {
 	const sheets: EngineSheet[] = [
 		{
 			name: "S",
@@ -17,7 +22,7 @@ function calculate(rows: Typed[][]): Record<string, unknown> {
 			formulas: []
 		}
 	]
-	const engine = new FormulaEngine(sheets, [])
+	const engine = new FormulaEngine(sheets, [], false, undefined, undefined, locale)
 	const out: Record<string, unknown> = {}
 
 	try {
@@ -38,8 +43,11 @@ function calculate(rows: Typed[][]): Record<string, unknown> {
 }
 
 // Formulas in column B, row by row, beside the values in column A given by row index.
-function column(formulas: string[], prefix: Readonly<Record<number, Typed>> = {}): Record<string, unknown> {
-	const values = calculate(formulas.map((formula, index) => [prefix[index] ?? null, formula]))
+function column(formulas: string[], prefix: Readonly<Record<number, Typed>> = {}, locale?: SheetLocale): Record<string, unknown> {
+	const values = calculate(
+		formulas.map((formula, index) => [prefix[index] ?? null, formula]),
+		locale
+	)
 
 	return Object.fromEntries(formulas.map((_, index) => [index, values[`B${String(index + 1)}`]]))
 }
@@ -85,6 +93,130 @@ describe("numbers as text", () => {
 			7: "a0.3b",
 			8: "1E+211"
 		})
+	})
+})
+
+describe("numbers as text in the session's locale", () => {
+	const ITALIAN_MONTHS = [
+		"gennaio",
+		"febbraio",
+		"marzo",
+		"aprile",
+		"maggio",
+		"giugno",
+		"luglio",
+		"agosto",
+		"settembre",
+		"ottobre",
+		"novembre",
+		"dicembre"
+	]
+	const MONTH_ROW =
+		'<table:table-row><table:table-cell table:formula="of:=TEXT(DATE(2024;3;1);&quot;mmmm&quot;)" office:value-type="string" office:string-value="March"><text:p>March</text:p></table:table-cell></table:table-row>'
+	const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"]
+	const GERMAN: SheetLocale = {
+		decimal: ",",
+		group: ".",
+		argument: ";",
+		dateOrder: "dmy",
+		currencies: ["€"],
+		numFmt: { ...NUMFMT_EN_US, decimal: ",", group: ".", months: MONTHS }
+	}
+	// Separators alone: the cells show en-US's names with them.
+	const SEPARATORS: SheetLocale = { decimal: ",", group: ".", argument: ";", dateOrder: "dmy" }
+	const FORMULAS = [
+		'=TEXT(1234.5,"#,##0.00")',
+		'=VALUE(TEXT(1234.5,"#,##0.00"))',
+		'=TEXT(1234.5,"0.00")*1',
+		'=A4&""',
+		'=(A4&"")*1',
+		"=FIXED(1234.5,1)",
+		"=DOLLAR(-1234.5)",
+		"=VALUE(FIXED(1234.5))",
+		"=CONCATENATE(1/4)",
+		'=TEXT(DATE(2024,3,1),"mmmm")',
+		"=VALUE(DOLLAR(1234.5))",
+		"=DOLLAR(-1234.5)*1",
+		"=VALUETOTEXT(1.5)",
+		"=VALUETOTEXT(1.5)*1",
+		"=ARRAYTOTEXT({1.5,2})",
+		"=ENCODEURL(1.5)"
+	]
+
+	// Excel writes text in the regional settings it reads text in, so the text a formula gives reads back.
+	it("writes what the locale reads back", () => {
+		expect(column(FORMULAS, { 3: 1234.5 }, GERMAN)).toEqual({
+			0: "1.234,50",
+			1: 1234.5,
+			2: 1234.5,
+			3: "1234,5",
+			4: 1234.5,
+			5: "1.234,5",
+			6: "(€1.234,50)",
+			7: 1234.5,
+			8: "0,25",
+			9: "März",
+			10: 1234.5,
+			11: -1234.5,
+			12: "1,5",
+			13: 1.5,
+			14: "1,5, 2",
+			15: "1%2C5"
+		})
+		expect(column([FORMULAS[0] ?? "", FORMULAS[9] ?? ""], {}, SEPARATORS)).toEqual({ 0: "1.234,50", 1: "March" })
+	})
+
+	it("keeps en-US's text without a locale", () => {
+		expect(column(FORMULAS, { 3: 1234.5 })).toEqual({
+			0: "1,234.50",
+			1: 1234.5,
+			2: 1234.5,
+			3: "1234.5",
+			4: 1234.5,
+			5: "1,234.5",
+			6: "($1,234.50)",
+			7: 1234.5,
+			8: "0.25",
+			9: "March",
+			10: 1234.5,
+			11: -1234.5,
+			12: "1.5",
+			13: 1.5,
+			14: "1.5, 2",
+			15: "1.5"
+		})
+	})
+
+	// An OpenDocument session's entries read without the locale's patterns; its formulas still write what cells show.
+	it("writes month names as an OpenDocument session's cells show them", async () => {
+		const document = new XlsxDocument((await openOdsFixture({ body: table("S", MONTH_ROW) })).workbook, new RenderStyleTable(), {
+			kind: "ods",
+			settings: { locale: GERMAN }
+		})
+
+		document.buildEngine()
+
+		expect(document.numFmtLocale?.months[2]).toBe("März")
+		expect(document.engine?.result(0, 0, 0).value).toBe("März")
+		document.dropEngine()
+	})
+
+	// Another locale with the same separators and order but other names: TEXT gives the new names.
+	it("writes the new names after a change of the shown locale alone", async () => {
+		const document = new XlsxDocument((await openOdsFixture({ body: table("S", MONTH_ROW) })).workbook, new RenderStyleTable(), {
+			kind: "ods",
+			settings: { locale: GERMAN }
+		})
+
+		document.buildEngine()
+		expect(document.engine?.result(0, 0, 0).value).toBe("März")
+
+		document.settings = { locale: { ...GERMAN, numFmt: { ...NUMFMT_EN_US, decimal: ",", group: ".", months: ITALIAN_MONTHS } } }
+
+		expect(document.engine).toBeNull()
+		document.buildEngine()
+		expect(document.engine?.result(0, 0, 0).value).toBe("marzo")
+		document.dropEngine()
 	})
 })
 

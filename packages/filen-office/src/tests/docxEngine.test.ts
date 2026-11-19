@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { bytesSource, type ByteSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import {
 	DocxEngine,
 	FIND_INTS,
@@ -10,7 +9,7 @@ import {
 	inThreadDocxHost,
 	parseHyperlinkField,
 	serveDocxWorker,
-	type DocxEngineServices,
+	type DocxEngineOptions,
 	type DocxEvent,
 	type DocxPageData,
 	type DocxWorkerLike,
@@ -19,36 +18,12 @@ import {
 import { fontFaceHost } from "@filen/office/dom"
 import { buildDocx } from "./docxSynthetic"
 import { png } from "./security/generate"
+import { engineServices } from "./engineFixtures"
 
 // A picture whose header the viewer reads (one it cannot read is not served).
 const IMAGE = png(4, 3)
 
 // A measurer without a browser: every character half an em wide.
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
-function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
-		yield: () => Promise.resolve(),
-		sliceMs: Infinity
-	}
-}
-
 function fixture(name: string): Uint8Array {
 	return new Uint8Array(readFileSync(new URL(`./fixtures/${name}`, import.meta.url)))
 }
@@ -75,6 +50,27 @@ const LINKED = buildDocx({
 	parts: [{ name: "word/media/image1.png", data: IMAGE }]
 })
 
+// A chart whose one series has no name, with a legend that shows it.
+const UNNAMED_CHART = buildDocx({
+	body:
+		'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="3048000" cy="1905000"/><wp:docPr id="1" name="c"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">' +
+		'<c:chart r:id="rIdChart"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>',
+	relationships: [{ id: "rIdChart", type: "chart", target: "charts/chart1.xml" }],
+	parts: [
+		{
+			name: "word/charts/chart1.xml",
+			contentType: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
+			data:
+				'<?xml version="1.0" encoding="UTF-8"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+				'<c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:ser><c:idx val="0"/><c:order val="0"/>' +
+				'<c:cat><c:strRef><c:strCache><c:ptCount val="2"/><c:pt idx="0"><c:v>A</c:v></c:pt><c:pt idx="1"><c:v>B</c:v></c:pt></c:strCache></c:strRef></c:cat>' +
+				'<c:val><c:numRef><c:numCache><c:ptCount val="2"/><c:pt idx="0"><c:v>3</c:v></c:pt><c:pt idx="1"><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>' +
+				'<c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:axPos val="b"/><c:crossAx val="2"/></c:catAx>' +
+				'<c:valAx><c:axId val="2"/><c:axPos val="l"/><c:crossAx val="1"/></c:valAx></c:plotArea><c:legend><c:legendPos val="r"/></c:legend></c:chart></c:chartSpace>'
+		}
+	]
+})
+
 interface Run {
 	readonly events: DocxEvent[]
 	readonly pages: DocxPageData[]
@@ -84,7 +80,7 @@ interface Run {
 async function run(bytes: Uint8Array): Promise<Run> {
 	const events: DocxEvent[] = []
 	const pages: DocxPageData[] = []
-	const engine = new DocxEngine(bytesSource(bytes), services(), event => {
+	const engine = new DocxEngine(bytesSource(bytes), engineServices(), event => {
 		events.push(event)
 
 		if (event.type === "pages") for (const page of event.pages) pages[page.index] = page
@@ -202,7 +198,7 @@ describe("DocxEngine", () => {
 		const engine = new DocxEngine(
 			bytesSource(bytes),
 			{
-				...services(),
+				...engineServices(),
 				sliceMs: 0,
 				now: () => clock++,
 				// The release after the last page stops at its first yield until let go.
@@ -257,7 +253,7 @@ describe("DocxEngine", () => {
 	})
 
 	it("keeps the model when asked to", async () => {
-		const engine = new DocxEngine(bytesSource(LINKED), services(), () => undefined, { retain: true })
+		const engine = new DocxEngine(bytesSource(LINKED), engineServices(), () => undefined, { retain: true })
 
 		await engine.run()
 		expect(Reflect.get(engine, "model")).toBeDefined()
@@ -285,7 +281,7 @@ describe("DocxEngine", () => {
 
 	it("stops when closed and answers nothing afterwards", async () => {
 		const events: DocxEvent[] = []
-		const engine = new DocxEngine(bytesSource(fixture("08-large-300p.docx")), { ...services(), sliceMs: 1 }, event => {
+		const engine = new DocxEngine(bytesSource(fixture("08-large-300p.docx")), { ...engineServices(), sliceMs: 1 }, event => {
 			events.push(event)
 
 			if (event.type === "pages" && event.pages.length > 0) engine.close()
@@ -297,6 +293,35 @@ describe("DocxEngine", () => {
 		expect(events.filter(event => event.type === "pages")).toHaveLength(1)
 		expect(await engine.objects([0])).toEqual([])
 		expect(await engine.media("word/document.xml")).toBeNull()
+	})
+
+	it("draws an unnamed chart series in the chart text it was opened with", async () => {
+		const shown = async (options: DocxEngineOptions): Promise<string> => {
+			const pages: DocxPageData[] = []
+			const engine = new DocxEngine(
+				bytesSource(UNNAMED_CHART),
+				engineServices(),
+				event => {
+					if (event.type === "pages") for (const page of event.pages) pages[page.index] = page
+				},
+				options
+			)
+
+			await engine.run()
+
+			const [object] = await engine.objects([pages[0]?.objectInts[0] ?? -1])
+
+			if (object?.kind !== "drawing") throw new Error("the chart is drawn")
+
+			return JSON.stringify(object.drawing.texts)
+		}
+
+		expect(await shown({})).toContain("Series1")
+
+		const german = await shown({ chartText: { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" } })
+
+		expect(german).toContain("Datenreihe1")
+		expect(german).not.toContain("Series1")
 	})
 })
 
@@ -349,7 +374,7 @@ describe("worker host", () => {
 		}
 		const pair = channel()
 
-		serveDocxWorker(pair.scope, () => services())
+		serveDocxWorker(pair.scope, () => engineServices())
 
 		const pool = docxWorkerPool(() => pair.worker, 10)
 		const host = pool.host
@@ -429,7 +454,7 @@ describe("worker host", () => {
 				removed.push(family)
 			}
 		}
-		const host = inThreadDocxHost(() => ({ ...services(), fontHost, replayFonts: false }))
+		const host = inThreadDocxHost(() => ({ ...engineServices(), fontHost, replayFonts: false }))
 		const done = Promise.withResolvers<void>()
 		const session = host(bytesSource(fixture("05-fields-toc.docx")), event => {
 			if (event.type === "pages" && event.final) done.resolve()
@@ -446,7 +471,7 @@ describe("worker host", () => {
 
 	it("in-thread host gives the same pages", async () => {
 		const bytes = fixture("05-fields-toc.docx")
-		const host = inThreadDocxHost(() => services())
+		const host = inThreadDocxHost(() => engineServices())
 		const done = Promise.withResolvers<number>()
 		const session = host(bytesSource(bytes), event => {
 			if (event.type === "pages" && event.final) done.resolve(event.pageCount)

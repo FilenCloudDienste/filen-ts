@@ -10,7 +10,7 @@ import { splitParagraph } from "../core/docx/paged/index"
 import { openOdtAsDocx } from "../core/odt/index"
 import { writeOdt } from "../core/odt/write/writer"
 import { odtBytes } from "./odtFixtures"
-import { editOdt, odtEditsOf, type OdtEditing } from "./odtWriteFixtures"
+import { editOdt, odtEditsOf, paragraphAt, type OdtEditing } from "./odtWriteFixtures"
 
 // List labels of saved ODT files against LibreOffice 7.5's: each list edit is saved, and the labels LibreOffice's
 // text export shows for the save must be those our reading of it shows (which the writer's proof holds to the edit).
@@ -29,26 +29,6 @@ const NUMBERED =
 	"</text:list-style>"
 const item = (text: string, attributes = ""): string => `<text:list-item${attributes}><text:p>${text}</text:p></text:list-item>`
 const FOUR = `<text:list text:style-name="L1">${["one", "two", "three", "four"].map(text => item(text)).join("")}</text:list>`
-
-function paragraphAt(e: OdtEditing, index: number): number {
-	let found = -1
-	let k = 0
-
-	e.session.state.doc.descendants((node, pos) => {
-		if (found >= 0) return false
-		if (node.type.name === "paragraph") {
-			if (k++ === index) found = pos
-
-			return false
-		}
-
-		return true
-	})
-
-	if (found < 0) throw new Error(`no paragraph ${index}`)
-
-	return found
-}
 
 function caret(e: OdtEditing, index: number, offset: number): void {
 	const at = paragraphAt(e, index) + 1 + offset

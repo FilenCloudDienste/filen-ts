@@ -1,4 +1,5 @@
 import { LINE_METRICS, symbolTable, symbolToUnicode, type SymbolTable } from "../fonts/index"
+import { charsetCodepage, decodeCodepage } from "../text/codepage"
 import { MT_EXTRA } from "./mtextra"
 
 // Fonts and strings of metafile text: LOGFONT fields, the ANSI code pages of 8-bit text, and symbol fonts
@@ -149,83 +150,20 @@ export function emHeight(font: MetafileFont, fallback: number): number {
 	return fallback
 }
 
-// Windows-1252 at 0x80..0x9F (the rest of the page is Latin-1); 0 where it defines nothing.
-const CP1252 = [
-	0x20ac, 0, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152, 0, 0x17d, 0, 0, 0x2018, 0x2019, 0x201c,
-	0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0, 0x17e, 0x178
-]
-
-// WHATWG encoding labels of the LOGFONT charsets other than ANSI and symbol.
-const CHARSET_ENCODINGS: ReadonlyMap<number, string> = new Map([
-	[128, "shift_jis"],
-	[129, "euc-kr"],
-	[130, "euc-kr"],
-	[134, "gbk"],
-	[136, "big5"],
-	[161, "windows-1253"],
-	[162, "windows-1254"],
-	[163, "windows-1258"],
-	[177, "windows-1255"],
-	[178, "windows-1256"],
-	[186, "windows-1257"],
-	[204, "windows-1251"],
-	[222, "windows-874"],
-	[238, "windows-1250"]
-])
-
-interface Decoder {
-	decode(input: Uint8Array): string
-}
-
-type DecoderConstructor = new (label: string) => Decoder
-
-// Hermes has no TextDecoder: there, text in those code pages falls back to Windows-1252.
-const decoders = new Map<string, Decoder | null>()
-
-function decoderFor(label: string): Decoder | null {
-	const cached = decoders.get(label)
-
-	if (cached !== undefined) return cached
-
-	const constructor = (globalThis as { TextDecoder?: DecoderConstructor }).TextDecoder
-	let decoder: Decoder | null = null
-
-	if (typeof constructor === "function") {
-		try {
-			decoder = new constructor(label)
-		} catch {
-			decoder = null
-		}
-	}
-
-	decoders.set(label, decoder)
-
-	return decoder
-}
-
-// 8-bit metafile text as UTF-16. Symbol-charset text keeps its codes (the symbol table maps them).
+// 8-bit metafile text as UTF-16, in the code page its LOGFONT charset implies; ANSI, DEFAULT (the system's,
+// taken as ANSI) and charsets without a decodable code page read as Windows-1252. Symbol-charset text keeps its
+// codes (the symbol table maps them).
 export function decodeAnsi(bytes: Uint8Array, charset: number): string {
-	const label = CHARSET_ENCODINGS.get(charset)
+	if (charset !== SYMBOL_CHARSET) {
+		const codepage = charsetCodepage(charset)
 
-	if (label !== undefined) {
-		const decoder = decoderFor(label)
-
-		if (decoder !== null) return decoder.decode(bytes)
+		return decodeCodepage(bytes, 0, bytes.length, codepage === undefined || codepage === 0 ? 1252 : codepage)
 	}
 
 	let out = ""
 
 	for (let start = 0; start < bytes.length; start += 4096) {
-		const end = Math.min(bytes.length, start + 4096)
-		const units = new Array<number>(end - start)
-
-		for (let i = start; i < end; i++) {
-			const byte = bytes[i] ?? 0
-
-			units[i - start] = charset !== SYMBOL_CHARSET && byte >= 0x80 && byte < 0xa0 ? CP1252[byte - 0x80] || byte : byte
-		}
-
-		out += String.fromCharCode(...units)
+		out += String.fromCharCode(...bytes.subarray(start, Math.min(bytes.length, start + 4096)))
 	}
 
 	return out

@@ -1,5 +1,7 @@
 import { ISO_1900, type DateBase } from "../../numfmt/date"
+import { NUMFMT_EN_US, type NumFmtLocale } from "../../numfmt/locale"
 import { textNumberParser } from "../../input/locale"
+import type { SheetLocale } from "../../protocol"
 import { parserLocale } from "../textDates"
 import {
 	ArraySize,
@@ -77,8 +79,40 @@ export { MAX_RANGE_CELLS } from "../../refs/formulaRefs"
 // The longest text a cell holds ("Excel specifications and limits"): longer results are #VALUE!.
 export const MAX_TEXT = 32767
 
-// A number as text in a formula (""&A1): at most 15 significant digits, exponential from 1E+15 and below 1E-9.
-export function numberText(value: number): string {
+// The session's locale an engine reads text in (formula/textDates.ts parserLocale), from its config.
+export function engineLocale(config: { readonly parseDateTime: ConfigParams["parseDateTime"] }): SheetLocale {
+	return parserLocale(config.parseDateTime)
+}
+
+const shownLocales = new WeakMap<SheetLocale, NumFmtLocale>()
+
+// What numbers and dates show in under `locale`, as the cells show them (xlsx/edit/document.ts formatOptions): its
+// NumFmtLocale, else en-US's with its separators.
+export function shownLocaleOf(locale: SheetLocale): NumFmtLocale {
+	if (locale.numFmt !== undefined) return locale.numFmt
+
+	let shown = shownLocales.get(locale)
+
+	if (shown === undefined) {
+		shown =
+			locale.decimal === NUMFMT_EN_US.decimal && locale.group === NUMFMT_EN_US.group
+				? NUMFMT_EN_US
+				: { ...NUMFMT_EN_US, decimal: locale.decimal, group: locale.group }
+		shownLocales.set(locale, shown)
+	}
+
+	return shown
+}
+
+// A number as text in a formula (""&A1): at most 15 significant digits, exponential from 1E+15 and below 1E-9, with
+// the session locale's decimal separator (`decimal`), as Excel writes it and the locale's text reading reads it back.
+export function numberText(value: number, decimal = "."): string {
+	const text = generalText(value)
+
+	return decimal === "." ? text : text.replace(".", decimal)
+}
+
+function generalText(value: number): string {
 	if (value === 0 || !Number.isFinite(value)) return "0"
 
 	const rounded = Number(value.toPrecision(15))
@@ -96,14 +130,14 @@ export function numberText(value: number): string {
 		: String(rounded)
 }
 
-// A value as text, as & and the text functions read it.
-export function textOf(value: PluginScalar): string | CellError {
+// A value as text, as & and the text functions read it: a number with the locale's decimal separator (numberText).
+export function textOf(value: PluginScalar, decimal = "."): string | CellError {
 	if (value instanceof CellError) return value
 	if (value === EmptyValue) return ""
 	if (typeof value === "string") return value
 	if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
 
-	return numberText(rawNumber(value) ?? 0)
+	return numberText(rawNumber(value) ?? 0, decimal)
 }
 
 // The engine's helpers adjusted to Excel, once per engine (they are shared by every plugin of one engine).
@@ -143,8 +177,8 @@ type ExcelInterpreter = { concatOp: (left: PluginScalar, right: PluginScalar) =>
 //   itself ("a|c" was an alternation): COUNTIF and the other criteria, SEARCH, XLOOKUP's match_mode 2. Matched by a
 //   linear walk (find/match.ts wildcardMatcher), not the engine's regular expression, whose backtracking a pattern of
 //   a few stars over a long text never finishes;
-// - & turns a number into its General text (numberText; the engine's gave all 17 digits) and gives #VALUE! past
-//   MAX_TEXT characters.
+// - & turns a number into its General text (numberText, with the locale's decimal separator; the engine's gave all 17
+//   digits) and gives #VALUE! past MAX_TEXT characters.
 function adjustToExcel(interpreter: Interpreter, helper: Helper): void {
 	if (adjusted.has(helper)) return
 
@@ -153,7 +187,8 @@ function adjustToExcel(interpreter: Interpreter, helper: Helper): void {
 	const coerce = helper.coerceNonDateScalarToMaybeNumber.bind(helper)
 	const excel = helper as unknown as ExcelHelper
 	const config = excel.config
-	const read = textNumberParser(parserLocale(config.parseDateTime))
+	const locale = engineLocale(config)
+	const read = textNumberParser(locale)
 
 	helper.coerceNonDateScalarToMaybeNumber = arg => (typeof arg === "string" ? (arg === "" ? undefined : read(arg)) : coerce(arg))
 
@@ -192,11 +227,11 @@ function adjustToExcel(interpreter: Interpreter, helper: Helper): void {
 	}
 
 	;(interpreter as unknown as ExcelInterpreter).concatOp = (left, right) => {
-		const first = textOf(left)
+		const first = textOf(left, locale.decimal)
 
 		if (first instanceof CellError) return first
 
-		const second = textOf(right)
+		const second = textOf(right, locale.decimal)
 
 		if (second instanceof CellError) return second
 
@@ -206,8 +241,8 @@ function adjustToExcel(interpreter: Interpreter, helper: Helper): void {
 
 let textInstalled = false
 
-// The engine's own text functions as Excel's, once: a number argument read as its General text (numberText; the
-// engine's gave all 17 digits), REPT past MAX_TEXT characters #VALUE! before it builds the text.
+// The engine's own text functions as Excel's, once: a number argument read as its General text (numberText, in the
+// engine's locale; the engine's gave all 17 digits), REPT past MAX_TEXT characters #VALUE! before it builds the text.
 function installExcelText(): void {
 	if (textInstalled) return
 
@@ -223,12 +258,12 @@ function installExcelText(): void {
 
 		const value = arg instanceof SimpleRangeValue ? coerce.call(this, arg, SCALAR, state) : arg
 
-		return value === undefined ? undefined : textOf(value as PluginScalar)
+		return value === undefined ? undefined : textOf(value as PluginScalar, engineLocale(this.config).decimal)
 	}
 
 	const text = HyperFormula.getFunctionPlugin("REPT")?.prototype as unknown as
 		| {
-				flattenArgToStrings?: (arg: PluginValue) => string[] | CellError
+				flattenArgToStrings?: (this: FunctionPlugin, arg: PluginValue) => string[] | CellError
 				rept?: (this: FunctionPlugin, ast: PluginCall, state: PluginState) => unknown
 		  }
 		| undefined
@@ -236,12 +271,13 @@ function installExcelText(): void {
 	if (text === undefined) throw new Error("No REPT")
 
 	// TEXTJOIN's delimiters and texts.
-	text.flattenArgToStrings = arg => {
+	text.flattenArgToStrings = function (arg) {
+		const decimal = engineLocale(this.config).decimal
 		const out: string[] = []
 
 		for (const value of arg instanceof SimpleRangeValue ? arg.valuesFromTopLeftCorner() : [arg]) {
 			// The engine types the empty value as any symbol.
-			const item = textOf(value as PluginScalar)
+			const item = textOf(value as PluginScalar, decimal)
 
 			if (item instanceof CellError) return item
 

@@ -3,7 +3,7 @@ import { bytesSource } from "../core/opc/index"
 import { openOds } from "../core/ods/open"
 import type { SheetCommand } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
-import { ODS_NS, odsBytes, odsDocument, shownRows, table, type OdsParts } from "./odsFixtures"
+import { ODS_NS, odsBytes, odsContent, odsDocument, shownRows, table, type OdsParts } from "./odsFixtures"
 import { IMMEDIATE } from "./sheetSessionFixtures"
 import { budget, cpuMs } from "./timing"
 import { unzipSync, strFromU8 } from "fflate"
@@ -54,10 +54,6 @@ async function rows(bytes: Uint8Array, sheet = 0): Promise<string[][]> {
 	return shownRows(document, sheet)
 }
 
-function content(bytes: Uint8Array): string {
-	return strFromU8(unzipSync(bytes)["content.xml"] ?? new Uint8Array(0))
-}
-
 const ROWS =
 	'<table:table-column table:number-columns-repeated="3"/><table:table-row><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>a</text:p></table:table-cell><table:table-cell table:formula="of:=[.A1]*2" office:value-type="float" office:value="2"><text:p>2</text:p></table:table-cell></table:table-row><table:table-row table:number-rows-repeated="3"><table:table-cell office:value-type="float" office:value="7"><text:p>7</text:p></table:table-cell><table:table-cell table:number-columns-repeated="2"/></table:table-row>'
 
@@ -79,7 +75,7 @@ describe("an ODS save", () => {
 		const written = await saved(session)
 
 		expect(await rows(written)).toEqual([["1", "hello", "2"], ["7"], ["7"], ["7"]])
-		expect(content(written)).toContain(
+		expect(odsContent(written)).toContain(
 			'<table:table-row table:number-rows-repeated="3"><table:table-cell office:value-type="float" office:value="7"><text:p>7</text:p></table:table-cell><table:table-cell table:number-columns-repeated="2"/></table:table-row>'
 		)
 		session.close()
@@ -104,7 +100,7 @@ describe("an ODS save", () => {
 		const written = await saved(session)
 
 		expect(await rows(written)).toEqual([["5", "a", "10"], ["7"], ["7"], ["7"]])
-		expect(content(written)).toContain('table:formula="of:=[.A1]*2"')
+		expect(odsContent(written)).toContain('table:formula="of:=[.A1]*2"')
 		session.close()
 	})
 
@@ -123,7 +119,7 @@ describe("an ODS save", () => {
 
 			const written = await saved(session)
 
-			expect(content(written).includes('calcext:value-type="error"')).toBe(marked)
+			expect(odsContent(written).includes('calcext:value-type="error"')).toBe(marked)
 			expect((await rows(written))[1]).toEqual(["7", "#DIV/0!"])
 			session.close()
 		}
@@ -140,7 +136,7 @@ describe("an ODS save", () => {
 		}
 
 		const written = await saved(session)
-		const xml = content(written)
+		const xml = odsContent(written)
 
 		expect(xml).toContain('table:formula="of:=#N/A" office:value-type="float" office:value="0"><text:p>#N/A</text:p>')
 		expect(xml).not.toContain("calcext:value-type")
@@ -176,7 +172,7 @@ describe("an ODS save", () => {
 
 		await session.command(set(sheet, 0, 0, "2"))
 
-		const xml = content(await saved(session))
+		const xml = odsContent(await saved(session))
 
 		expect(xml).toContain(`<text:p>2</text:p>${frame}</table:table-cell>`)
 		expect(xml.split("<draw:image").length - 1).toBe(1)
@@ -197,14 +193,14 @@ describe("an ODS save", () => {
 
 		await session.command(set(sheet, 0, 1, "2"))
 
-		const unrelated = content(await saved(session))
+		const unrelated = odsContent(await saved(session))
 
 		expect(unrelated).toContain('office:date-value="2024-01-01"')
 		expect(unrelated).toContain('<table:null-date table:date-value="1900-01-01"/>')
 
 		await session.command(set(sheet, 0, 0, "2024-02-01"))
 
-		const typed = content(await saved(session))
+		const typed = odsContent(await saved(session))
 
 		expect(typed).toContain('office:date-value="2024-02-01"')
 		expect(typed).not.toContain('office:date-value="2024-01-01"')
@@ -430,7 +426,7 @@ describe("an ODS save of names and sheets as other producers write them", () => 
 
 		const written = await saved(session)
 
-		expect(content(written)).toContain("table:print-ranges=\"$'Q1, Q2'.$A$1:$'Q1, Q2'.$C$4\"")
+		expect(odsContent(written)).toContain("table:print-ranges=\"$'Q1, Q2'.$A$1:$'Q1, Q2'.$C$4\"")
 		session.close()
 	})
 })

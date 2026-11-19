@@ -7,6 +7,9 @@ import { REF_CONSTRUCTS, planRefEdit, shiftEdges, shiftVmlAnchor, specifierColum
 import { rewriteStructured } from "../core/xlsx/refs/structured"
 import { MC, R, TYPES, X14, XM, cols, covered, edited, refused, relationship, rels, rows, sheetBody } from "./xlsxRefsFixtures"
 import { buildFixture, openWorkbook, parts, saved, type Fixture } from "./xlsxWriteFixtures"
+import { quotedSheetName } from "../core/sheet/index"
+import type { SheetCommandResult } from "../core/sheet/protocol"
+import { openFixture, savedBytes } from "./sheetSessionFixtures"
 
 // The reference catalogue: every construct that refers to cells, moved by row and column inserts and deletes and
 // by sheet deletes, renames and moves as Excel moves it, each saved through the gate and reverted to the source's
@@ -719,6 +722,76 @@ describe("tables", () => {
 		}
 
 		expect(await refused(withQuery, cols("delete", 1, 1), "queryTables")).toEqual({ reason: "structureLocked", detail: "queryTables" })
+	})
+})
+
+describe("a table part read by every reader alike", () => {
+	const ok = (result: SheetCommandResult): void => {
+		if (!result.ok) throw new Error(`refused: ${JSON.stringify(result.refusal)}`)
+	}
+	// Valid XML from a writer other than Excel: attributes in single quotes.
+	const singleQuoted =
+		`${DECLARATION}<table xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' id='7' name='T' displayName='T' ref='A1:B2'>` +
+		"<autoFilter ref='A1:B2'/><tableColumns count='2'><tableColumn id='1' name='K'/><tableColumn id='2' name='V'/></tableColumns></table>"
+	const body =
+		'<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>K</t></is></c><c r="B1" t="inlineStr"><is><t>V</t></is></c></row>' +
+		'<row r="2"><c r="A2"><v>1</v></c><c r="B2"><v>2</v></c><c r="D2"><f>SUM(Shown[V])</f><v>2</v></c></row></sheetData>' +
+		'<tableParts count="1"><tablePart r:id="rId1"/></tableParts>'
+	const fixture = (table: string): Fixture => ({
+		sheets: [{ name: "One", body, rels: relationship("rId1", "table", "../tables/table1.xml") }],
+		parts: { "xl/tables/table1.xml": { text: table, type: TYPES.table } }
+	})
+
+	it("gives a duplicated sheet's table a fresh id when the part's attributes are single-quoted", async () => {
+		const { session, info } = await openFixture(fixture(singleQuoted))
+
+		ok(await session.command({ type: "sheet.duplicate", sheet: info.sheets[0]!.id }))
+
+		const copy = parts(await savedBytes(session))["xl/tables/table2.xml"] ?? ""
+
+		expect(copy).toMatch(/\sid=["']8["']/)
+		expect(copy).toMatch(/\sdisplayName=["']T_2["']/)
+		session.close()
+	})
+
+	it("refuses a merge through a table whose part's attributes are single-quoted", async () => {
+		const { session, info } = await openFixture(fixture(singleQuoted))
+		const result = await session.command({
+			type: "merge.cells",
+			sheet: info.sheets[0]!.id,
+			ranges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 2 }],
+			mode: "merge",
+			discard: true
+		})
+
+		expect(result.ok ? null : result.refusal).toEqual({ reason: "merged", detail: "table" })
+		session.close()
+	})
+
+	it("names a table by its displayName in the filter layout and in structured references", async () => {
+		const table = singleQuoted.replace("name='T' displayName='T'", 'name="Internal" displayName="Shown"')
+		const { session, info } = await openFixture(fixture(table))
+		const sheetId = info.sheets[0]!.id
+		const values = await session.query("filter.values", { sheet: sheetId, row: 0, col: 0, limit: 4 })
+
+		expect(values?.table).toBe("Shown")
+		expect((await session.layout(sheetId)).extensions?.filters?.ranges[0]?.table).toBe("Shown")
+		session.close()
+
+		const { sheet } = await edited(fixture(table), cols("delete", 1, 1), ["tableColumns", "structuredReferences"])
+
+		expect(sheet).toContain("<f>SUM(#REF!)</f>")
+	})
+})
+
+describe("a sheet's name in a reference", () => {
+	it("is quoted when it reads as a cell, an R1C1 reference or a logical value, or is no plain name", () => {
+		for (const name of ["RC", "R1C1", "r2c", "TRUE", "false", "A1", "XFD1048576", "My Sheet", "1st", ""])
+			expect(quotedSheetName(name)).toBe(`'${name}'`)
+
+		expect(quotedSheetName("Bob's")).toBe("'Bob''s'")
+
+		for (const name of ["Data", "Sheet1", "Q1.Sales", "_x", "TRUEish", "RCX"]) expect(quotedSheetName(name)).toBe(name)
 	})
 })
 

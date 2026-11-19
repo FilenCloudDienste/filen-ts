@@ -3,21 +3,14 @@ import { describe, expect, it } from "vitest"
 import { codepageSupported, decodeCodepage } from "../core/rtf/codepage"
 import { readRtf } from "../core/rtf/index"
 import { encodeText } from "../core/rtf/write/encode"
-
-function bytes(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
-
-	return out
-}
+import { latin1 } from "./rtfLatin1"
 
 function hex(values: readonly number[]): Uint8Array {
 	return Uint8Array.from(values)
 }
 
 async function decoded(rtf: string): Promise<{ text: string; unsupported: readonly number[] }> {
-	const result = await readRtf(bytes(rtf))
+	const result = await readRtf(latin1(rtf))
 
 	if (!result.ok) throw new Error(result.reason)
 
@@ -95,12 +88,12 @@ describe("RTF code pages", () => {
 		const kanji = hex([0x1b, 0x24, 0x42, 0x30, 0x6c, 0x1b, 0x28, 0x42])
 
 		expect(decodeCodepage(kanji, 0, kanji.length, 50220)).toBe("\u4e00")
-		expect(decodeCodepage(bytes("plain text"), 0, 10, 50220)).toBe("plain text")
+		expect(decodeCodepage(latin1("plain text"), 0, 10, 50220)).toBe("plain text")
 
 		// A call left in the two-byte set does not carry it into the next.
 		const open = hex([0x1b, 0x24, 0x42, 0x30, 0x6c])
 
 		expect(decodeCodepage(open, 0, open.length, 50220)).toBe("\u4e00")
-		expect(decodeCodepage(bytes("0l"), 0, 2, 50220)).toBe("0l")
+		expect(decodeCodepage(latin1("0l"), 0, 2, 50220)).toBe("0l")
 	})
 })

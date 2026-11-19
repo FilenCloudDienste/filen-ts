@@ -41,7 +41,6 @@ import { PdfCanvas, PdfShapeCache, canvasFont, canvasText } from "./pdfCanvas"
 import {
 	LIST_FONT_PT,
 	LIST_LINE_PT,
-	NOTE_FONT,
 	NOTE_FONT_PX,
 	NOTE_LINE_PX,
 	blackAndWhite,
@@ -49,20 +48,32 @@ import {
 	labelText,
 	layOutPrint,
 	MAX_PAGE_CELLS,
+	overPlacement,
 	pageCount,
 	printedTile,
 	printPageAt,
 	PrintPageTooLarge,
-	wrap,
+	shownNoteLines,
 	type NotesPage,
 	type PrintJob,
 	type PrintChart,
 	type PrintJobSheet,
 	type PrintSheetRequest
 } from "./printLayout"
-import { POINTS_PER_PX, PRINT_THEME, bandLayout, pageTiles, pageView, paintPrintedCells } from "./printPage"
+import {
+	POINTS_PER_PX,
+	PRINT_THEME,
+	bandLayout,
+	bandPictureSlot,
+	bandVariant,
+	pagePlacement,
+	pageTiles,
+	pageView,
+	paintPrintedCells,
+	type BandSide
+} from "./printPage"
 import { planSlices, slicePage, SliceTiles, sliceView, smallPage, surveyPage, type PageSurvey } from "./printSlices"
-import { noteBox, wholeAxes } from "./printRanges"
+import { noteBox } from "./printRanges"
 
 // A print as a PDF, made where the session runs (the sheet worker): the pages the print dialog would print, cut by the
 // same pagination and drawn by the grid's own painters onto PdfCanvas, the sheet's objects and charts from their
@@ -119,6 +130,8 @@ export type SheetPdfResult =
 			readonly pages: number
 			// Pictures that could not be embedded (a format no decoder here reads), drawn as placeholders.
 			readonly missingImages: number
+			// Objects and charts whose display list could not be made (the session's render failed): left off their pages.
+			readonly missingObjects: number
 			// Characters no font has, by script: drawn as missing glyphs.
 			readonly missingGlyphs: number
 			// Runs drawn without their font's layout tables: shaping them went past the shaper's limits.
@@ -186,6 +199,7 @@ class SheetPdfExport {
 	private readonly drawn = new Map<string, Promise<PdfDrawingData | null>>()
 	private readonly images = new Map<string, Promise<PdfImage | undefined>>()
 	private missingImages = 0
+	private missingObjects = 0
 	private writer: PdfWriter | null = null
 
 	private readonly request: SheetPdfRequest
@@ -328,7 +342,15 @@ class SheetPdfExport {
 
 			for (const count of this.fonts.missing().values()) missingGlyphs += count
 
-			return { ok: true, output, pages: total, missingImages: this.missingImages, missingGlyphs, unshapedRuns: this.fonts.unshaped() }
+			return {
+				ok: true,
+				output,
+				pages: total,
+				missingImages: this.missingImages,
+				missingObjects: this.missingObjects,
+				missingGlyphs,
+				unshapedRuns: this.fonts.unshaped()
+			}
 		} finally {
 			job?.dispose()
 			base.dispose()
@@ -378,7 +400,7 @@ class SheetPdfExport {
 		const at = chartPlacement(sheet, chart)
 		const rendered = await this.session
 			.query("chart.render", { part: chart.part, width: chart.width, height: chart.height })
-			.catch(() => null)
+			.catch((error: unknown) => this.objectFailed(error))
 
 		if (rendered?.kind !== "drawing" || !(rendered.drawing.width > 0 && rendered.drawing.height > 0)) return
 
@@ -406,11 +428,8 @@ class SheetPdfExport {
 
 	// The page's content transform: the view at 100 % (px) onto the page (px), as printPageSvg places it.
 	private placement(sheet: PrintJobSheet, view: GridView): Matrix {
-		const { area, scale } = sheet.pagination
-		const { setup } = sheet
-		const k = POINTS_PER_PX * scale
-		const x = area.x + (setup.horizontalCentered ? Math.max(0, (area.width - view.width * k) / 2) : 0)
-		const y = area.y + (setup.verticalCentered ? Math.max(0, (area.height - view.height * k) / 2) : 0)
+		const { scale } = sheet.pagination
+		const { x, y } = pagePlacement(sheet, view)
 
 		return [scale, 0, 0, scale, x / POINTS_PER_PX, y / POINTS_PER_PX]
 	}
@@ -815,27 +834,13 @@ class SheetPdfExport {
 	private async over(sheet: PrintJobSheet, printPage: PrintPage, view: GridView, base: Matrix, page: PdfPage): Promise<void> {
 		if (sheet.objects.length === 0 && sheet.shownNotes.length === 0) return
 
-		const axes = wholeAxes(sheet.layout, sheet.rowSizes)
-		const left = axes.cols.offset(printPage.cols.first)
-		const top = axes.rows.offset(printPage.rows.first)
-		const right = axes.cols.offset(printPage.cols.last + 1)
-		const bottom = axes.rows.offset(printPage.rows.last + 1)
-		const paneX = view.cols.header + view.cols.frozenSize
-		const paneY = view.rows.header + view.rows.frozenSize
-		const mirrored = sheet.layout.rightToLeft
-		const place = (box: SheetBox): SheetBox => {
-			const x = paneX + box.x - left
-
-			return { x: mirrored ? view.width - x - box.width : x, y: paneY + box.y - top, width: box.width, height: box.height }
-		}
-		const meets = (box: SheetBox): boolean => box.x < right && box.x + box.width > left && box.y < bottom && box.y + box.height > top
-		const clipX = mirrored ? view.width - paneX - (right - left) : paneX
+		const { axes, place, meets, clip } = overPlacement(sheet, printPage, view)
 		const writer = this.writer as PdfWriter
 		const gray = sheet.setup.blackAndWhite
 
 		page.saveState()
 		page.concat(base)
-		page.rect(clipX, paneY, right - left, bottom - top).clip()
+		page.rect(clip.x, clip.y, clip.width, clip.height).clip()
 
 		for (const object of sheet.objects) {
 			const box = anchorBox(object.anchor, axes)
@@ -898,14 +903,30 @@ class SheetPdfExport {
 					})
 
 					return rendered?.kind === "drawing" ? rendered.drawing : null
-				} catch {
-					return null
+				} catch (error) {
+					return this.objectFailed(error, key)
 				}
 			})()
 			this.drawn.set(key, made)
 		}
 
 		return made
+	}
+
+	// An object or chart whose render failed: counted, the export going on without it. An abort is the export's own
+	// end, not the object's: it propagates, and the object (`key`) is not cached as failed.
+	private objectFailed(error: unknown, key?: string): null {
+		if ((error instanceof Error && error.name === "AbortError") || this.signal?.aborted === true) {
+			if (key !== undefined) this.drawn.delete(key)
+
+			this.aborted()
+
+			throw error
+		}
+
+		this.missingObjects++
+
+		return null
 	}
 
 	// A drawing's picture embedded once per export: its own bytes (a metafile's bitmap), else its part (an SVG's raster
@@ -1007,10 +1028,7 @@ class SheetPdfExport {
 		await this.load(`${note.author} ${note.text}`, regular)
 		await this.load(note.author, bold)
 
-		const lines = wrap(note.author === "" ? note.text : `${note.author}:\n${note.text}`, Math.max(1, box.width - 8), text =>
-			this.measure(NOTE_FONT, text)
-		)
-		const fitting = lines.slice(0, Math.max(1, Math.floor((box.height - 4) / NOTE_LINE_PX)))
+		const fitting = shownNoteLines(note, box, this.measure)
 
 		page.beginArtifact({ type: "Layout" })
 		page.fillColor(this.color(NOTE_FILL, gray))
@@ -1072,12 +1090,7 @@ class SheetPdfExport {
 	private async bands(sheet: PrintJobSheet, number: number, pages: number, first: boolean, page: PdfPage, gray: boolean): Promise<void> {
 		const { setup, pagination } = sheet
 		const { headerFooter, margins } = setup
-		const texts =
-			first && headerFooter.differentFirst
-				? headerFooter.first
-				: headerFooter.differentOddEven && number % 2 === 0
-					? headerFooter.even
-					: headerFooter.odd
+		const { texts } = bandVariant(headerFooter, number, first)
 		const values: HeaderFooterValues = { ...this.request.values, sheet: sheet.name, page: number, pages }
 		const family = familyOf(this.styles[0]?.font, "Calibri")
 		const scale = headerFooter.scaleWithDoc ? pagination.scale : 1
@@ -1163,21 +1176,17 @@ class SheetPdfExport {
 		number: number,
 		first: boolean
 	): Promise<{
-		header: Partial<Record<"left" | "center" | "right", SheetHeaderImage>>
-		footer: Partial<Record<"left" | "center" | "right", SheetHeaderImage>>
+		header: Partial<Record<BandSide, SheetHeaderImage>>
+		footer: Partial<Record<BandSide, SheetHeaderImage>>
 	}> {
-		const header: Partial<Record<"left" | "center" | "right", SheetHeaderImage>> = {}
-		const footer: Partial<Record<"left" | "center" | "right", SheetHeaderImage>> = {}
-		const { headerFooter } = sheet.setup
-		const variant = first && headerFooter.differentFirst ? "FIRST" : headerFooter.differentOddEven && number % 2 === 0 ? "EVEN" : ""
-		const sections: Readonly<Record<string, "left" | "center" | "right">> = { L: "left", C: "center", R: "right" }
+		const header: Partial<Record<BandSide, SheetHeaderImage>> = {}
+		const footer: Partial<Record<BandSide, SheetHeaderImage>> = {}
+		const { pictures } = bandVariant(sheet.setup.headerFooter, number, first)
 
 		for (const image of sheet.headerImages) {
-			const section = sections[image.position[0] ?? ""]
+			const slot = bandPictureSlot(image.position, pictures)
 
-			if (section === undefined || image.position.slice(2) !== variant) continue
-
-			;(image.position[1] === "H" ? header : footer)[section] = image
+			if (slot !== null) (slot.header ? header : footer)[slot.side] = image
 		}
 
 		return { header, footer }

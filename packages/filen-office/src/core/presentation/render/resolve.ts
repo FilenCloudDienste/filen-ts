@@ -1,8 +1,9 @@
+import { insertedPartName } from "../inserted"
 import { fillChild } from "../../drawingml/fill"
 import { D, drawingReader, type DrawingReader } from "../../drawingml/reader"
 import type { TextBodyProps } from "../../drawingml/index"
 import { inheritLevels, nearestGroup, resolveShape } from "../inherit"
-import type { Deck, ShapeNode, SlideNode, Xfrm } from "../model"
+import { bodyHasText, type Deck, type ShapeNode, type SlideNode, type Xfrm } from "../model"
 import { bodyPrXml, colorXml, effectsXml, fillXml, geometryXml, lineXml, type ScratchWriter } from "./markup"
 import type { PlaceholderLevel, RenderServices } from "./services"
 
@@ -114,7 +115,7 @@ function pictureImage(writer: ScratchWriter): Parameters<typeof fillXml>[1] {
 		fill.part !== undefined
 			? writer.target(fill.part)
 			: fill.inserted !== undefined
-				? writer.target(`inserted:${String(fill.inserted)}`)
+				? writer.target(insertedPartName(fill.inserted))
 				: undefined
 }
 
@@ -276,5 +277,5 @@ export function writeBlipFill(writer: ScratchWriter, levels: readonly ResolveLev
 }
 
 export function hasText(shape: ShapeNode): boolean {
-	return shape.text?.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== "")) === true
+	return shape.text !== undefined && bodyHasText(shape.text)
 }

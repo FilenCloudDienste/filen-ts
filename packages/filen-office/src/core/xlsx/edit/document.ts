@@ -2,7 +2,7 @@ import { appendAll } from "../../arrays"
 import type { RawCellContent } from "hyperformula"
 import { isSealedOfficeFile } from "../../encryption/index"
 import type { SliceClock, Slicing } from "../../slicing"
-import { decodeUtf8, encodeUtf8 } from "../../xml/index"
+import { encodeUtf8 } from "../../xml/index"
 import { csvField, utf8Length } from "../../sheet/csv/csvParse"
 import {
 	CYCLE,
@@ -112,6 +112,7 @@ import { readEntry } from "./cells"
 import type { ChangeLog } from "../model/changes"
 import { RefRefused } from "../refs/catalogue"
 import { refState } from "../refs/state"
+import { tableName, tablePart } from "../refs/tables"
 import { ABSENT, cellKeyOf, cellState, type CellLog, type CellState, type ShownResult } from "./history"
 import { dynamicArrayCm, ODS_DYNAMIC_ARRAYS, readDynamicArrays, type DynamicArrays, type MadeMetadata } from "./spill"
 
@@ -517,10 +518,12 @@ export class XlsxDocument {
 	}
 
 	// New settings: the locale's separators show in every tile built from now on. Text dates and numbers in formulas
-	// read in the locale: an engine built for another is dropped (built again when next needed).
+	// read in the locale, and TEXT writes in what the cells show: an engine built for another is dropped (built again
+	// when next needed).
 	set settings(settings: SheetSessionSettings) {
 		const before = this.ownSettings.locale
 		const after = settings.locale
+		const shownBefore = this.shownLocale
 
 		// The same locale handed back (settings merged into these) keeps the patterns entrySettings left out.
 		if (after !== before) this.shownLocale = after?.numFmt
@@ -531,7 +534,8 @@ export class XlsxDocument {
 			before?.dateOrder !== after?.dateOrder ||
 			before?.decimal !== after?.decimal ||
 			before?.group !== after?.group ||
-			before?.currencies?.join("\u0000") !== after?.currencies?.join("\u0000")
+			before?.currencies?.join("\u0000") !== after?.currencies?.join("\u0000") ||
+			this.shownLocale !== shownBefore
 		)
 			this.dropEngine()
 	}
@@ -1946,12 +1950,15 @@ export class XlsxDocument {
 
 				if (bytes === null) continue
 
-				const text = decodeUtf8(bytes)
-				const root = /<(?:\w+:)?table\b[^>]*>/.exec(text)?.[0] ?? ""
-				const name = /\sdisplayName="([^"]*)"/.exec(root)?.[1] ?? /\sname="([^"]*)"/.exec(root)?.[1]
-				const ref = /\sref="([^"]*)"/.exec(root)?.[1]
+				const markup = tablePart(bytes)
+
+				if (markup === null) continue
+
+				const root = markup.documentElement()
+				const name = tableName(markup, root)
+				const ref = markup.attribute(root, "ref")
 				const range = ref === undefined ? null : parseRange(ref)
-				const headerRows = Number(/\sheaderRowCount="(\d+)"/.exec(root)?.[1] ?? "1")
+				const headerRows = Number(markup.attribute(root, "headerRowCount") ?? "1")
 
 				if (name !== undefined && range !== null) tables.push({ name: name.toUpperCase(), sheet: entry.id, range, headerRows })
 			}
@@ -2401,6 +2408,10 @@ export class XlsxDocument {
 		})
 		const sheetAt = (index: number): SheetId | undefined =>
 			this.engineSheets.length > 0 ? this.engineSheets[index] : entries[index]?.id
+		// Formulas write text (TEXT, &) in what the cells show and read text back in it: an OpenDocument session's
+		// entries leave the locale's patterns out (entrySettings), its formulas keep them.
+		const locale = this.ownSettings.locale
+		const shown = this.shownLocale
 		const engine = new FormulaEngine(
 			sheets,
 			names,
@@ -2411,7 +2422,7 @@ export class XlsxDocument {
 				if (sheet !== undefined) this.markAlone(sheet, row, col)
 			},
 			(index, row) => this.rowState(sheetAt(index), row),
-			this.ownSettings.locale,
+			locale === undefined || shown === undefined || locale.numFmt === shown ? locale : { ...locale, numFmt: shown },
 			(index, range) => this.spillBlocked(sheetAt(index), range),
 			(index, row, col) => this.formulaInput(sheetAt(index), row, col),
 			this.workbook.format === "ods",

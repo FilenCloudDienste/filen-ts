@@ -1,18 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { openTextSession } from "../core/sheet/text"
 import { encodeUtf8 } from "../core/xml/index"
 import { parts } from "./xlsxWriteFixtures"
-import { IMMEDIATE, cells, openFixture, savedBytes } from "./sheetSessionFixtures"
+import { IMMEDIATE, cells, openFixture, savedBytes, changeOf } from "./sheetSessionFixtures"
 
 // Frozen panes: written into the sheet's first view (§18.3.1.66), shown in the layout; a text file keeps them in
 // the session alone.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
-}
 
 describe("sheet session: frozen panes", () => {
 	it("freezes rows and columns into the first view, unfreezes, and undoes to the source", async () => {

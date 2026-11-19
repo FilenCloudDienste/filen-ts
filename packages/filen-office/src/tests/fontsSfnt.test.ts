@@ -7,7 +7,6 @@ import {
 	SUBSTITUTIONS,
 	deobfuscateFont,
 	lineSpacingUnits,
-	obfuscateFont,
 	parseFontKey,
 	readSfnt
 } from "@filen/office/core/fonts"
@@ -429,7 +428,7 @@ describe("embedded font obfuscation", () => {
 
 		header.set([0x00, 0x01, 0x00, 0x00, 0x00, 0x15, 0x01, 0x00])
 
-		const obfuscated = obfuscateFont(header, "{75E47363-20F1-45D4-9A84-815E26C8EAAE}")
+		const obfuscated = deobfuscateFont(header, "{75E47363-20F1-45D4-9A84-815E26C8EAAE}")
 
 		expect(Buffer.from(obfuscated.subarray(0, 8)).toString("hex")).toBe("aeebc8265e94859a")
 		expect([...parseFontKey("75e47363-20f1-45d4-9a84-815e26c8eaae").subarray(0, 3)]).toEqual([0xae, 0xea, 0xc8])
@@ -438,7 +437,7 @@ describe("embedded font obfuscation", () => {
 	it("round-trips a real font and leaves the input alone unless asked", () => {
 		const font = sfntOf("caladea/Caladea-Regular.woff2")
 		const key = "{1DF903E3-2F14-4575-8028-881FEBABF2AB}"
-		const obfuscated = obfuscateFont(font, key)
+		const obfuscated = deobfuscateFont(font, key)
 
 		expect(obfuscated).not.toBe(font)
 		expect(Buffer.compare(obfuscated.subarray(32), font.subarray(32))).toBe(0)

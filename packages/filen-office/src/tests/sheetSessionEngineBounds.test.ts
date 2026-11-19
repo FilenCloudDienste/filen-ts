@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { parts } from "./xlsxWriteFixtures"
-import { cells, firstTile, openFixture, savedBytes, tileTexts } from "./sheetSessionFixtures"
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason} ${result.refusal.detail ?? ""}`)
-
-	return result.change
-}
+import { cells, firstTile, openFixture, savedBytes, tileTexts, changeOf } from "./sheetSessionFixtures"
 
 const FORMULAS = '<sheetData><row r="1"><c r="A1"><v>2</v></c><c r="B1"><f>A1*2</f><v>4</v></c></row></sheetData>'
 

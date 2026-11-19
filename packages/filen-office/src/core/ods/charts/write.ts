@@ -11,11 +11,12 @@ import { readDrawingPart } from "../../xlsx/drawings/read"
 import { drawingStore } from "../../xlsx/drawings/store"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import { Namespaces, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
+import { EMU_PER_PT } from "../convert/shapes"
 import { parseCaptured } from "../read/captured"
 import { odsSource, type OdsSource } from "../source"
 import { addressBoxes } from "../unheld"
 import { ofSheetName } from "../formula/toOf"
-import { EMU_PER_PT, ODF_LEGENDS, chartOf, labelProperties, translateChart, type OdsChartSource } from "./read"
+import { ODF_LEGENDS, chartOf, labelProperties, translateChart, type OdsChartSource } from "./read"
 
 // What a save writes of the charts an edit changed. A chart the editor changed is its object's content.xml patched
 // where the chart part now differs from what was read (title, legend, plot type and grouping, axes, series and their

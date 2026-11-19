@@ -9,7 +9,7 @@ import type { SheetCommand, SheetId } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import type { XlsxDocument } from "../core/xlsx/edit/document"
 import { CORPUS_DIR } from "./corpusDir"
-import { odsDocument, shownRows } from "./odsFixtures"
+import { odsDocument, shownRows, trimmedRows } from "./odsFixtures"
 import { exportShown, sheetOffices, sheetProfile } from "./oracles/sheet/libreOffice"
 import { IMMEDIATE } from "./sheetSessionFixtures"
 
@@ -159,20 +159,6 @@ async function ourShown(path: string): Promise<Map<string, string[][]> | null> {
 	return out
 }
 
-function trimmed(rows: readonly (readonly string[])[]): string[][] {
-	const out = rows.map(row => {
-		const copy = [...row]
-
-		while (copy.length > 0 && copy[copy.length - 1] === "") copy.pop()
-
-		return copy
-	})
-
-	while (out.length > 0 && out[out.length - 1]?.length === 0) out.pop()
-
-	return out
-}
-
 describe.skipIf(!existsSync(DIR) || (VALIDATOR === "" && OFFICE === undefined))(
 	"ODS saves against odfvalidator and LibreOffice 7.5",
 	() => {
@@ -251,7 +237,7 @@ describe.skipIf(!existsSync(DIR) || (VALIDATOR === "" && OFFICE === undefined))(
 
 						return sheet === undefined
 							? /[/\\:*?"<>|]/.test(name)
-							: JSON.stringify(rows) === JSON.stringify(trimmed(sheet.text))
+							: JSON.stringify(rows) === JSON.stringify(trimmedRows(sheet.text))
 					})
 				}
 

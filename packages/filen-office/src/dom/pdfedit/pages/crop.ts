@@ -12,19 +12,6 @@ export interface CropResult {
 	readonly touched: readonly number[]
 }
 
-// The visible box of a page in view space.
-export function pageBounds(doc: PDFDocument, page: number): CropRect {
-	const loaded = doc.loadPage(page)
-
-	try {
-		const [x0, y0, x1, y1] = loaded.getBounds()
-
-		return [x0, y0, x1, y1]
-	} finally {
-		loaded.destroy()
-	}
-}
-
 // Crops pages by `margins` (points off each side of each page's visible box, as the page shows). Pages the margins
 // would leave smaller than MIN_CROP_SIDE are left as they are. Each page loaded is closed again: MuPDF keeps a page
 // open while a wrapper of it lives, and an open page does not follow a later flatten.

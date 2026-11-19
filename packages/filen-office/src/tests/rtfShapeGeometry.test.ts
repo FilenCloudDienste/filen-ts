@@ -1,20 +1,13 @@
 import { strFromU8, unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { readRtf, type RtfReadResult } from "../core/rtf/index"
+import { latin1 } from "./rtfLatin1"
 
 // RTF shapes without a picture, text box or WordArt (RTF 1.9.1 "Shapes") drawn from their property list as Word draws
 // them: the preset geometry of their shapeType with their fill and line, where they are placed.
 
-function bytes(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
-
-	return out
-}
-
 async function read(body: string): Promise<RtfReadResult> {
-	const result = await readRtf(bytes(`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Times;}}${body}}`))
+	const result = await readRtf(latin1(`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Times;}}${body}}`))
 
 	if (!result.ok) throw new Error(result.reason)
 

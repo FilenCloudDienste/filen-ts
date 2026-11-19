@@ -1,6 +1,8 @@
+import { closeHistory } from "prosemirror-history"
 import type { Node } from "prosemirror-model"
 import { TextSelection, type Transaction } from "prosemirror-state"
 import { isDeleted } from "../review/track"
+import { replaceInFewSteps } from "./find"
 import { wordAround } from "./formats"
 import type { StoryCommandContext } from "./registry"
 import { docxSchema } from "./schema"
@@ -144,9 +146,9 @@ function textPieces(doc: Node, ranges: readonly { readonly from: number; readonl
 	return { pieces, text }
 }
 
-// Replaces only what differs between `before` and `after` (never splitting a surrogate pair), so the rest of
-// the run, and a tracked change's record of it, stays.
-function replaceDiff(tr: Transaction, piece: TextPiece, after: string): void {
+// The replace of only what differs between `before` and `after` (never splitting a surrogate pair), so the
+// rest of the run, and a tracked change's record of it, stays.
+function diffOf(piece: TextPiece, after: string): { readonly from: number; readonly to: number; readonly text: Node | undefined } {
 	const before = piece.text
 	let head = 0
 
@@ -165,12 +167,9 @@ function replaceDiff(tr: Transaction, piece: TextPiece, after: string): void {
 
 	if (tail > 0 && (before.charCodeAt(before.length - tail) & 0xfc00) === 0xdc00) tail--
 
-	const from = piece.from + head
-	const to = piece.to - tail
 	const middle = after.slice(head, after.length - tail)
 
-	if (middle === "") tr.delete(from, to)
-	else tr.replaceWith(from, to, docxSchema.text(middle, piece.node.marks))
+	return { from: piece.from + head, to: piece.to - tail, text: middle === "" ? undefined : docxSchema.text(middle, piece.node.marks) }
 }
 
 export function changeCase(context: StoryCommandContext): Transaction | null {
@@ -199,17 +198,17 @@ export function changeCase(context: StoryCommandContext): Transaction | null {
 		if (results.some((result, k) => result !== pieces[k]?.text)) break
 	}
 
-	const tr = state.tr
 	const caret = selection.empty ? selection.from : undefined
+	const changes: { readonly from: number; readonly to: number; readonly text: Node | undefined }[] = []
 	let shift = 0
 
-	for (let k = pieces.length - 1; k >= 0; k--) {
+	for (let k = 0; k < pieces.length; k++) {
 		const piece = pieces[k] as TextPiece
 		const result = results[k] ?? piece.text
 
 		if (result === piece.text) continue
 
-		replaceDiff(tr, piece, result)
+		changes.push(diffOf(piece, result))
 
 		if (caret !== undefined) {
 			if (piece.to <= caret) shift += result.length - piece.text.length
@@ -217,10 +216,17 @@ export function changeCase(context: StoryCommandContext): Transaction | null {
 		}
 	}
 
-	if (!tr.docChanged) return null
+	// In document order (a selection's ranges need not be), rebuilt in few steps: a step per run would copy the
+	// block list each time and keep every intermediate document.
+	changes.sort((a, b) => a.from - b.from)
+
+	const tr = replaceInFewSteps(state, changes, k => changes[k]?.text)
+
+	if (tr === null || tr === "tooLarge") return null
 
 	// The caret stays where it was in the word (a replaced span would carry it to its end).
 	if (caret !== undefined) tr.setSelection(TextSelection.create(tr.doc, caret + shift))
 
-	return tr.scrollIntoView()
+	// Its own undo step (one rebuild touching the last one's ranges would join it).
+	return closeHistory(tr).scrollIntoView()
 }

@@ -306,6 +306,20 @@ describe("ODF data styles as number formats", () => {
 		expect(formatWith(1234.5, converted, { localeFor: numFmtLocaleFor }).text).toBe("1,234.50")
 	})
 
+	it("shows a style's language's month and day names whatever the app's language", () => {
+		const converted = code(
+			'<number:date-style style:name="D" number:language="de" number:country="DE"><number:day-of-week number:style="long"/><number:text>, </number:text><number:day/><number:text>. </number:text><number:month number:textual="true" number:style="long"/><number:text> </number:text><number:year number:style="long"/></number:date-style>',
+			"D"
+		).code
+		const germanApp = { ...NUMFMT_EN_US, decimal: ",", group: ".", months: ["Januar"], days: ["Sonntag"] }
+
+		expect(converted).toBe('[$-407]dddd", "d". "mmmm yyyy')
+		// 46027: Monday 5 January 2026.
+		expect(formatWith(46027, converted, { localeFor: numFmtLocaleFor }).text).toBe("Montag, 5. Januar 2026")
+		expect(formatWith(46027, converted, { localeFor: numFmtLocaleFor, locale: germanApp }).text).toBe("Montag, 5. Januar 2026")
+		expect(formatWith(46027, "dddd, d. mmmm yyyy", { localeFor: numFmtLocaleFor }).text).toBe("Monday, 5. January 2026")
+	})
+
 	it("gives one formatter locale per locale id, and none for an id with sort bits", () => {
 		const german = numFmtLocaleFor(0x407)
 

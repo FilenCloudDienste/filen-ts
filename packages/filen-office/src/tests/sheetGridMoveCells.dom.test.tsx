@@ -1,121 +1,25 @@
 // @vitest-environment happy-dom
-import { act, createRef } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act } from "react"
+import { describe, expect, it } from "vitest"
 import type { SheetCommand } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
-import { SheetGrid, SheetGridModel, type SheetGridHandle, type SheetGridProps } from "../react/sheet/index"
+import type { SheetGridHandle, SheetGridModel, SheetGridProps } from "../react/sheet/index"
 import { LONG_PRESS_MS } from "../react/sheet/touch/gestures"
-import { RecordingCanvas } from "./sheetGridCanvas"
-import { BASIC, IMMEDIATE, buildFixture } from "./sheetSessionFixtures"
+import { type MountedGrid, mountGrid, pointer, registerSheetGridDom, settleGrid } from "./sheetGridDomFixtures.dom"
+import { BASIC, buildFixture } from "./sheetSessionFixtures"
 
 // Dragging the selection by its border in the grid: the move cursor over the border, a drag moving the block (Ctrl
 // copying it, Shift inserting it at the nearest gridline, the keys read as the pointer lets go), a drop over data
 // asking first, Esc cancelling, and a finger dragging after a long press on the selection.
 
-const WIDTH = 800
-const HEIGHT = 400
-const canvases = new WeakMap<HTMLCanvasElement, RecordingCanvas>()
+registerSheetGridDom()
 
-Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-beforeEach(() => {
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-		let canvas = canvases.get(this)
-
-		if (canvas === undefined) {
-			canvas = new RecordingCanvas()
-			canvases.set(this, canvas)
-		}
-
-		return canvas as unknown as CanvasRenderingContext2D
-	} as unknown as typeof HTMLCanvasElement.prototype.getContext)
-	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? WIDTH : 0
-	})
-	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? HEIGHT : 0
-	})
-	vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
-})
-
-const roots: Root[] = []
-
-afterEach(() => {
-	for (const root of roots.splice(0)) act(() => root.unmount())
-
-	document.body.innerHTML = ""
-})
-
-async function settle(): Promise<void> {
-	for (let k = 0; k < 6; k++) await act(() => new Promise(resolve => setTimeout(resolve, 0)))
-}
-
-interface Mounted {
-	readonly model: SheetGridModel
-	readonly handle: SheetGridHandle
-	readonly scroller: HTMLElement
-	readonly root: HTMLElement
-	readonly commands: SheetCommand[]
-}
+// The grid's own element as the root.
+type Mounted = Omit<MountedGrid, "root"> & { readonly root: HTMLElement }
 
 async function mount(props: Partial<SheetGridProps> = {}): Promise<Mounted> {
-	const host = inThreadSheetHost()
-	const opened = await host.open(buildFixture(BASIC), { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
+	const mounted = await mountGrid({ bytes: buildFixture(BASIC), recordCommands: true, props: { mac: false, ...props } })
 
-	if (opened.kind !== "opened") throw new Error(opened.kind)
-
-	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
-	const commands: SheetCommand[] = []
-	const command = model.command.bind(model)
-
-	vi.spyOn(model, "command").mockImplementation((sent, report) => {
-		commands.push(sent)
-
-		return command(sent, report)
-	})
-
-	const container = document.createElement("div")
-	const ref = createRef<SheetGridHandle>()
-	const root = createRoot(container)
-
-	roots.push(root)
-	document.body.appendChild(container)
-	await act(async () => {
-		root.render(
-			<SheetGrid
-				ref={ref}
-				grid={model}
-				label="Sheet"
-				editorLabel="Cell entry"
-				mac={false}
-				{...props}
-			/>
-		)
-	})
-	await settle()
-
-	const handle = ref.current as SheetGridHandle
-
-	act(() => handle.renderer.paint())
-	await settle()
-	act(() => handle.renderer.paint())
-
-	return {
-		model,
-		handle,
-		scroller: container.querySelector<HTMLElement>(".fo-sheet-scroller") as HTMLElement,
-		root: container.querySelector<HTMLElement>(".fo-sheet") as HTMLElement,
-		commands
-	}
-}
-
-function pointer(target: Element, type: string, init: PointerEventInit): void {
-	act(() => {
-		target.dispatchEvent(
-			new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, ...init })
-		)
-	})
+	return { ...mounted, root: mounted.sheet }
 }
 
 function box(handle: SheetGridHandle, row: number, col: number): { x: number; y: number; width: number; height: number } {
@@ -163,7 +67,7 @@ async function drag(
 	pointer(mounted.scroller, "pointerdown", { ...from, ...keys })
 	pointer(mounted.scroller, "pointermove", { ...to, ...keys, buttons: 1 })
 	pointer(mounted.scroller, "pointerup", { ...to, ...keys })
-	await settle()
+	await settleGrid()
 }
 
 describe("the selection's border", () => {
@@ -226,7 +130,7 @@ describe("the selection's border", () => {
 		await drag(mounted, rightEdge(handle, 0, 0), center(handle, 0, 1))
 		expect(asked).toHaveLength(1)
 		act(() => asked[0]?.())
-		await settle()
+		await settleGrid()
 		expect(moves(mounted.commands).map(command => command.type === "cells.move" && command.replace)).toEqual([undefined, true])
 		expect(model.getSnapshot().selection.ranges).toEqual([{ startRow: 0, startCol: 1, endRow: 0, endCol: 1 }])
 	})
@@ -242,7 +146,7 @@ describe("the selection's border", () => {
 			scroller.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
 		})
 		pointer(scroller, "pointerup", center(handle, 3, 3))
-		await settle()
+		await settleGrid()
 		expect(moves(mounted.commands)).toEqual([])
 		await drag(mounted, center(handle, 0, 0), center(handle, 2, 0))
 		expect(moves(mounted.commands)).toEqual([])
@@ -258,7 +162,7 @@ describe("the selection's border", () => {
 		await act(() => new Promise(resolve => setTimeout(resolve, LONG_PRESS_MS + 20)))
 		pointer(scroller, "pointermove", { ...center(handle, 3, 2), pointerType: "touch", buttons: 1 })
 		pointer(scroller, "pointerup", { ...center(handle, 3, 2), pointerType: "touch" })
-		await settle()
+		await settleGrid()
 		expect(moves(mounted.commands).map(command => command.type === "cells.move" && command.to)).toEqual([{ row: 3, col: 2 }])
 	})
 })

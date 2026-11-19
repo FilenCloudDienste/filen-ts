@@ -1,6 +1,7 @@
 import { spliceAll } from "../../../arrays"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import {
+	bodyHasText,
 	refused,
 	type Deck,
 	type Paragraph,
@@ -79,10 +80,6 @@ function firstRunProps(body: TextBody | undefined): Paragraph["endRPr"] {
 	}
 
 	return undefined
-}
-
-export function cellHasText(body: TextBody): boolean {
-	return body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))
 }
 
 // The merged areas of a table, origins in row-major order; undefined when its rows are not one cell per grid column
@@ -450,7 +447,7 @@ function merge(table: TableModel, op: Op<"merge">): TableModel | Refused {
 	const texts = areas
 		.filter(inside)
 		.map(area => next.rows[area.r]?.cells[area.c]?.text)
-		.filter((text): text is TextBody => text !== undefined && cellHasText(text))
+		.filter((text): text is TextBody => text !== undefined && bodyHasText(text))
 	const origin = next.rows[range.row]?.cells[range.col] as TableCell
 	const text: TextBody =
 		texts.length < 2 ? (texts[0] ?? origin.text) : { ...(texts[0] as TextBody), paragraphs: texts.flatMap(body => body.paragraphs) }

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { DocxDrawings } from "../core/docx/drawing"
@@ -8,26 +7,12 @@ import { buildDocxModel, openDocxPackage } from "../core/docx/index"
 import { ItemKind, type DrawingList } from "../core/drawingml/displayList"
 import { convertMetafile } from "../core/metafile/index"
 import { bytesSource } from "../core/opc/index"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 
 // Every EMF/WMF picture of the real-world corpus through the converter (once per distinct file), then the
 // documents holding them through the docx bridge; runs only where the corpus exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
 const METAFILE = /\.(emf|wmf|emz|wmz)$/i
-
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of EXTENSIONS) {
-		const directory = join(CORPUS, extension)
-
-		if (!existsSync(directory)) continue
-
-		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
 
 function bump(counts: Record<string, number>, key: string, by: number = 1): void {
 	counts[key] = (counts[key] ?? 0) + by
@@ -67,7 +52,7 @@ describe.skipIf(!existsSync(CORPUS))("metafiles over the real-world corpus", () 
 		const holders = new Set<string>()
 		let parts = 0
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(EXTENSIONS)) {
 			let entries: Record<string, Uint8Array>
 
 			try {

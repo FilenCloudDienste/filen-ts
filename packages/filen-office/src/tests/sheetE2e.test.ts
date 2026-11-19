@@ -1,19 +1,18 @@
 import { unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
+import type { SheetChange, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
 import type { SheetSession } from "../core/sheet/session"
 import type { XlsxDocument } from "../core/xlsx/edit/document"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { compareRecords, modelRecord, readSaved } from "./fuzz/sheet/compare"
 import { fixtureBytes } from "./fuzz/sheet/fixtures"
 import { equalBytes } from "./xlsxWriteFixtures"
+import { changeOf, IMMEDIATE } from "./sheetSessionFixtures"
 
 // A session end to end through the in-thread host, as a renderer drives it: open, hold tiles, prove, then one
 // edit of every command family (cells, formats, rows, sizes, sheets, the clipboard) with undo and redo, each
 // answered by patches to the held tiles; the save passes its gate, reads back without the engine as the model
 // holds it, keeps every part it did not change byte for byte, and a fresh session on it shows the same cells.
-
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 
 async function open(bytes: Uint8Array): Promise<{ session: SheetSessionApi; sheets: Map<string, number> }> {
 	const host = inThreadSheetHost()
@@ -22,12 +21,6 @@ async function open(bytes: Uint8Array): Promise<{ session: SheetSessionApi; shee
 	if (result.kind !== "opened") throw new Error(`expected an open, got ${result.kind}`)
 
 	return { session: result.session, sheets: new Map(result.info.sheets.map(sheet => [sheet.name, sheet.id])) }
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason} ${result.refusal.detail ?? ""}`)
-
-	return result.change
 }
 
 function shown(tile: SheetTile, row: number, col: number): string {

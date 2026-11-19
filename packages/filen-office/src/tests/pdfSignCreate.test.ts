@@ -14,7 +14,7 @@ import {
 import { parseCms, verifyCms } from "../core/pdfsign/cms"
 import { cmsCapacity } from "../core/pdfsign/cmsBuild"
 import { createPdfDigest } from "../dom/pdfedit/digest"
-import { addPdfSignatureField, PdfSignRefusal } from "../dom/pdfedit/sign"
+import { addPdfSignatureField, PdfSignRefusal, signPdfDocument } from "../dom/pdfedit/sign"
 import { signedFixture } from "./pdfSignFixtures"
 import {
 	P12_UNICODE_PASSWORD,
@@ -33,6 +33,19 @@ async function digestOf(bytes: Uint8Array, identity: PdfSigningIdentity): Promis
 	digest.update(bytes)
 
 	return digest.digest()
+}
+
+// Grows MuPDF's heap (large pixmaps until it grows, then freed): views of it taken before are detached (length 0).
+function growHeap(): void {
+	const probe = new mupdf.Buffer()
+	const view = probe.asUint8Array()
+	const held: mupdf.Pixmap[] = []
+
+	while (view.buffer.byteLength !== 0) held.push(new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 4096, 4096], false))
+
+	for (const pixmap of held) pixmap.destroy()
+
+	probe.destroy()
 }
 
 async function importFailure(name: string, password?: string): Promise<string> {
@@ -306,6 +319,80 @@ describe("signing a PDF", () => {
 			expect(report.signatures[0]).toMatchObject({ state: "unchanged", revision: 3, signedLength: signed.length })
 			expect(report.revisions).toBe(3)
 			expect(signed.subarray(0, original.length)).toEqual(original)
+		},
+		budget(30_000)
+	)
+
+	it(
+		"saves again with room for a larger signature when the wasm memory grew after the first pass",
+		async () => {
+			const original = signedFixture("unsigned.pdf")
+			const identity = await loadIdentity("rsa4096")
+			const document = new mupdf.PDFDocument(original.slice())
+			const draft = addPdfSignatureField(mupdf, document, signRequest({ capacity: 64 }))
+			let grown = false
+			const revision = await signPdfDocument(mupdf, document, draft, {
+				baseLength: original.length,
+				password: null,
+				capacity: 64,
+				digest: identity.scheme.digest,
+				createDigest: createPdfDigest,
+				sign: async digest => {
+					const cms = await buildPdfCms(identity, digest, signingSubtle)
+
+					if (!grown) {
+						growHeap()
+						grown = true
+					}
+
+					return cms
+				}
+			})
+			const signed = revision.buffer.asUint8Array().slice()
+
+			revision.destroy()
+			document.destroy()
+
+			const report = await verifySigned(signed)
+
+			expect(report.signatures[0]).toMatchObject({ state: "unchanged", revision: 3, signedLength: signed.length })
+			expect(signed.subarray(0, original.length)).toEqual(original)
+		},
+		budget(30_000)
+	)
+
+	it(
+		"patches the signature into the output when the wasm memory grew while it was signed",
+		async () => {
+			const original = signedFixture("unsigned.pdf")
+			const identity = await loadIdentity("rsa2048")
+			const document = new mupdf.PDFDocument(original.slice())
+			const capacity = cmsCapacity(identity)
+			const draft = addPdfSignatureField(mupdf, document, signRequest({ capacity }))
+			const revision = await signPdfDocument(mupdf, document, draft, {
+				baseLength: original.length,
+				password: null,
+				capacity,
+				digest: identity.scheme.digest,
+				createDigest: createPdfDigest,
+				sign: async digest => {
+					const cms = await buildPdfCms(identity, digest, signingSubtle)
+
+					growHeap()
+
+					return cms
+				}
+			})
+			const signed = revision.bytes.slice()
+
+			revision.destroy()
+			document.destroy()
+
+			expect((await verifySigned(signed)).signatures[0]).toMatchObject({
+				state: "unchanged",
+				revision: 2,
+				signedLength: signed.length
+			})
 		},
 		budget(30_000)
 	)

@@ -171,11 +171,13 @@ describe("Insert PAGE, DATE and TIME fields (Alt+Shift+P, D, T)", () => {
 			expect(commandForKey(key({ key: "P", code: "KeyP", ...mods }), apple)).toEqual({ type: "insert.pageNumber" })
 			expect(commandForKey(key({ key: "D", code: "KeyD", ...mods }), apple)).toEqual({
 				type: "insert.field",
-				instruction: ' DATE \\@ "M/d/yyyy" '
+				instruction: ' DATE \\@ "M/d/yyyy" ',
+				caretLanguage: true
 			})
 			expect(commandForKey(key({ key: "T", code: "KeyT", ...mods }), apple)).toEqual({
 				type: "insert.field",
-				instruction: ' TIME \\@ "h:mm am/pm" '
+				instruction: ' TIME \\@ "h:mm am/pm" ',
+				caretLanguage: true
 			})
 		}
 

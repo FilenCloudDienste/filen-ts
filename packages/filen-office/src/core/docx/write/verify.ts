@@ -552,11 +552,87 @@ async function checkRemovedRelationships(
 
 // ---- parts --------------------------------------------------------------------------------------------------
 
-// Every namespace declared on the root: copies keep their meaning wherever they go in the part.
-function flat(document: XmlDocument): boolean {
-	const root = document.documentElement()
+// The elements below the root of a part that declare namespaces, in document order: their byte spans and, for each,
+// the nearest one around it (-1 for none).
+interface DeclaringSpans {
+	readonly starts: readonly number[]
+	readonly ends: readonly number[]
+	readonly parents: readonly number[]
+}
 
-	for (const node of partReader(document).namespaces.declarations().keys()) if (node !== root) return false
+const declaringSpans = new WeakMap<XmlDocument, DeclaringSpans>()
+
+function declaringSpansOf(document: XmlDocument): DeclaringSpans {
+	let spans = declaringSpans.get(document)
+
+	if (spans !== undefined) return spans
+
+	const root = document.documentElement()
+	const nodes = [...partReader(document).namespaces.declarations().keys()].filter(node => node !== root)
+	const starts: number[] = []
+	const ends: number[] = []
+	const parents: number[] = []
+	// The spans around the one added next, innermost last.
+	const open: number[] = []
+
+	nodes.sort((a, b) => document.start(a) - document.start(b))
+
+	for (const node of nodes) {
+		const start = document.start(node)
+
+		while (open.length > 0 && (ends[open[open.length - 1] ?? 0] ?? 0) <= start) open.pop()
+
+		parents.push(open[open.length - 1] ?? -1)
+		open.push(starts.length)
+		starts.push(start)
+		ends.push(document.end(node))
+	}
+
+	spans = { starts, ends, parents }
+	declaringSpans.set(document, spans)
+
+	return spans
+}
+
+// Whether source byte `at` lies inside an element below the root that declares namespaces and starts before it.
+function enclosed(spans: DeclaringSpans, at: number): boolean {
+	let low = 0
+	let high = spans.starts.length
+
+	// The last span starting before `at`; any span around `at` is it or one around it.
+	while (low < high) {
+		const middle = (low + high) >>> 1
+
+		if ((spans.starts[middle] ?? 0) < at) low = middle + 1
+		else high = middle
+	}
+
+	for (let span = low - 1; span >= 0; span = spans.parents[span] ?? -1) if ((spans.ends[span] ?? 0) > at) return true
+
+	return false
+}
+
+// Whether the skeleton reads the rewritten stories of `part` as the part does: no story container, source copy or
+// copied container's properties lies inside an element below the root that declares namespaces (Word's a:graphic,
+// pic:pic), so whatever a copy binds is the root's or travels with it (a declaration at or below the copied node).
+// Copies taken from inside such an element (a text box paragraph under a:graphic) rely on bindings that do not
+// travel with them: such a part is checked whole.
+function skeletonReadable(name: string, part: StoryPart, stories: readonly StoryChange[]): boolean {
+	const document = part.document
+	const spans = declaringSpansOf(document)
+
+	if (spans.starts.length === 0) return true
+
+	for (const story of stories) {
+		const trusted = story.output.trusted
+
+		if (enclosed(spans, storyRange(name, part, story, true).from)) return false
+
+		for (let k = 0; k < trusted.length; k += 4) if (enclosed(spans, trusted[k + 2] ?? 0)) return false
+
+		for (const container of story.output.containers)
+			for (const node of container.properties) if (enclosed(spans, document.start(node))) return false
+	}
 
 	return true
 }
@@ -964,7 +1040,13 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 			await checkParagraphs(name, part, stories, skeletonDocument, rewritten, clock)
 		}
 
-		if (part !== undefined && outputs !== undefined && skeletonDocument !== undefined && flat(part.document) && original.has(name)) {
+		if (
+			part !== undefined &&
+			stories !== undefined &&
+			skeletonDocument !== undefined &&
+			original.has(name) &&
+			skeletonReadable(name, part, stories)
+		) {
 			// The new markup of the rewritten stories; the rest of the part is the source's.
 			const document = skeletonDocument
 			const relationships = await relationshipsOf(name)
@@ -1020,8 +1102,9 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 
 			await checkPart(checks, checkInput, { name, part, document, skeleton: true })
 		} else {
-			// Joined only here: a part that is not a story part, one with namespaces declared below its root, a
-			// story part the save creates, or one the save only takes containers out of.
+			// Joined only here: a part that is not a story part, one whose copies sit inside an element below its root
+			// that declares namespaces (skeletonReadable), a story part the save creates, or one the save only takes
+			// containers out of.
 			const document = await parseCheckedSliced(name, await joinBytes(change.bytes), clock)
 
 			if (part !== undefined) {
@@ -1039,8 +1122,8 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 
 			await checkPart(checks, checkInput, { name, part, document, skeleton: false })
 
-			// A story part with namespaces declared below its root: what judges only the save's own markup reads it
-			// in the skeleton, as on a flat part (the checks above left the source's copies alone).
+			// A story part whose copies the skeleton cannot stand for: what judges only the save's own markup reads it
+			// in the skeleton, as on any other part (the checks above left the source's copies alone).
 			if (part !== undefined && skeletonDocument !== undefined && original.has(name)) {
 				await checkContainersWritten(name, part, stories ?? [], skeletonDocument, clock)
 				await checkPart(newMarkupChecks, checkInput, { name, part, document: skeletonDocument, skeleton: true })

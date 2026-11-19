@@ -21,7 +21,8 @@ const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[ T](.+)$/
 const TIME = /^(\d{1,4}):(\d{2})(?::(\d{2}))?$/
 // 2:30 PM, 9:30am, 2 p.
 const HALF_DAY_TIME = /^(\d{1,2})(?::(\d{2})(?::(\d{2}))?)? ?([ap])m?$/i
-const DATE_TOKENS = /\d+|[a-z]+/gi
+// Numbers and words, a word in any script ("März", "जनवरी") as the month-name patterns read one.
+const DATE_TOKENS = /\d+|[\p{L}\p{M}]+/gu
 const SECONDS_PER_DAY = 86_400
 // Excel's largest elapsed time typed (9999:59:59).
 const MAX_HOURS = 9999

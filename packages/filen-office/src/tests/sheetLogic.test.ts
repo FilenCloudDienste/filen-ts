@@ -60,10 +60,16 @@ describe("gridMove", () => {
 		})
 	})
 
-	it("jumps to the used area's edge, then the sheet's", () => {
-		expect(gridMove(key("ArrowDown", { ctrlKey: true }), at(2, 0), bounds)?.focus).toEqual({ row: 9, col: 0 })
-		expect(gridMove(key("ArrowDown", { metaKey: true }), at(9, 0), bounds)?.focus).toEqual({ row: 199, col: 0 })
+	it("leaves mod+arrow to the data region's jump, AltGr (Ctrl+Alt) included, and goes to the used area's end on mod+End", () => {
+		for (const name of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+			expect(gridMove(key(name, { ctrlKey: true }), at(2, 0), bounds)).toBeNull()
+			expect(gridMove(key(name, { metaKey: true, shiftKey: true }), at(2, 0), bounds)).toBeNull()
+			expect(gridMove(key(name, { ctrlKey: true, altKey: true }), at(2, 0), bounds)).toBeNull()
+		}
+
 		expect(gridMove(key("End", { ctrlKey: true }), at(0, 0), bounds)?.focus).toEqual({ row: 9, col: 4 })
+		expect(gridMove(key("Home", { ctrlKey: true }), at(5, 3), bounds)?.focus).toEqual({ row: 0, col: 0 })
+		expect(gridMove(key("End"), at(5, 0), bounds)?.focus).toEqual({ row: 5, col: 4 })
 	})
 
 	it("steps with Tab and Enter, collapsing the selection", () => {

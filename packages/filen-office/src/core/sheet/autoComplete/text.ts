@@ -15,11 +15,10 @@ export const textAutoCompleteFeature = defineSheetFeature<TextSheetDocument>({
 				const field = (row: number, col: number): string => rows[row]?.[col] ?? ""
 				const found = columnEntries(
 					{
-						filled: (row, col) => field(row, col) !== "",
-						text: (row, col) => {
+						entry: (row, col) => {
 							const text = field(row, col)
 
-							return text === "" || csvCellView(text)?.numeric === true ? null : text
+							return text === "" ? undefined : csvCellView(text)?.numeric === true ? null : text
 						}
 					},
 					cell.row,
@@ -27,7 +26,7 @@ export const textAutoCompleteFeature = defineSheetFeature<TextSheetDocument>({
 					rows.length
 				)
 
-				return { entries: found.map(entry => ({ text: entry.text, input: entry.text })) }
+				return { entries: found.entries.map(entry => ({ text: entry.text, input: entry.text })), more: found.more }
 			}
 		}
 	}

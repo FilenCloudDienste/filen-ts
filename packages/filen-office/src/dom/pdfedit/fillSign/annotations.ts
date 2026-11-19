@@ -1,4 +1,6 @@
 import type { AnnotColor, PDFAnnotation, PDFPage, Point } from "mupdf"
+import { clamp01, normalizeRect, type PdfRgb } from "../../../core/pdfedit/annotations"
+import { FLAG_PRINT, mutableRect, stampCreated } from "../annotations/shared"
 import type { MupdfModule } from "../protocol"
 import {
 	fitBox,
@@ -17,8 +19,7 @@ import {
 // The standard fonts a FreeText appearance can use without embedding.
 export type PdfFillFont = "sans" | "serif" | "mono"
 export type PdfFillMark = "check" | "cross" | "dot"
-// [r, g, b], each 0..1.
-export type PdfRgb = readonly [number, number, number]
+export type { PdfRgb } from "../../../core/pdfedit/annotations"
 
 export interface PdfAnnotationMeta {
 	// The annotation's author (the user's author name); empty: none written.
@@ -54,28 +55,15 @@ export const PDF_FILL_DEFAULT_INK: PdfRgb = [0.05, 0.1, 0.35]
 const FONT_NAMES: Record<PdfFillFont, string> = { sans: "Helv", serif: "TiRo", mono: "Cour" }
 // The subject written on signature annotations, so another viewer's comment list says what they are.
 const SUBJECTS: Record<PdfSignatureRole, string> = { signature: "Signature", initials: "Initials" }
-const PRINT_FLAG = 1 << 2
 
 function color(rgb: PdfRgb): AnnotColor {
 	return [clamp01(rgb[0]), clamp01(rgb[1]), clamp01(rgb[2])]
 }
 
-function clamp01(value: number): number {
-	return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
-}
-
-function normalizedBox(box: PdfPageRect): [number, number, number, number] {
-	const [a, b, c, d] = box
-
-	return [Math.min(a, c), Math.min(b, d), Math.max(a, c), Math.max(b, d)]
-}
-
+// Author and dates as every annotation gets them, and Print: Fill & Sign marks are part of the filled-in document.
 function stamp(annotation: PDFAnnotation, meta: PdfAnnotationMeta): void {
-	if (meta.author !== "") annotation.setAuthor(meta.author)
-
-	annotation.setCreationDate(meta.date)
-	annotation.setModificationDate(meta.date)
-	annotation.setFlags(annotation.getFlags() | PRINT_FLAG)
+	stampCreated(annotation, meta.author, meta.date)
+	annotation.setFlags(annotation.getFlags() | FLAG_PRINT)
 }
 
 function points(flat: readonly number[]): Point[] {
@@ -90,7 +78,7 @@ function points(flat: readonly number[]): Point[] {
 export function addFillText(page: PDFPage, options: PdfFillTextOptions): PDFAnnotation {
 	const annotation = page.createAnnotation("FreeText")
 
-	annotation.setRect(normalizedBox(options.box))
+	annotation.setRect(mutableRect(normalizeRect(options.box)))
 	annotation.setContents(options.text)
 	annotation.setDefaultAppearance(FONT_NAMES[options.font], Math.max(1, options.size), color(options.color))
 	annotation.setBorderWidth(0)
@@ -102,7 +90,7 @@ export function addFillText(page: PDFPage, options: PdfFillTextOptions): PDFAnno
 
 // A check mark, a cross or a dot filling `box`.
 export function addFillMark(page: PDFPage, options: PdfFillMarkOptions): PDFAnnotation {
-	const [x0, y0, x1, y1] = normalizedBox(options.box)
+	const [x0, y0, x1, y1] = normalizeRect(options.box)
 	const width = x1 - x0
 	const height = y1 - y0
 	const line = Math.max(0.75, Math.min(width, height) * 0.12)
@@ -146,7 +134,7 @@ export function placeVisualSignature(
 	signature: PdfVisualSignature,
 	options: PdfPlaceSignatureOptions
 ): PDFAnnotation {
-	const box = normalizedBox(options.box)
+	const box = normalizeRect(options.box)
 	const fitted = fitBox(signatureAspect(signature), box)
 	let annotation: PDFAnnotation
 

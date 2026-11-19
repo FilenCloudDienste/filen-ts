@@ -37,7 +37,8 @@ import { decodeUtf8, parseXml, XmlEditor } from "../../xml/index"
 import type { SheetStore } from "../model/store"
 import { CellKind, RowFlag, type XlsxDefinedName, type XlsxSheetModel } from "../model/types"
 import { RefRefused } from "../refs/catalogue"
-import { readTable, type TableInfo } from "../refs/tables"
+import { editMarkup } from "../refs/markup"
+import { tableInfo, type TableInfo } from "../refs/tables"
 import { liveRelationships, refState } from "../refs/state"
 import { intersects } from "../refs/moveRefs"
 import { inGrid, parseSqref, sectionSqrefs } from "../refs/sqref"
@@ -109,8 +110,8 @@ function tableRelationships(document: XlsxDocument, model: XlsxSheetModel): { id
 function parseTable(document: XlsxDocument, sheet: SheetId, relationship: string, part: string, bytes: Uint8Array): FilterTable | null {
 	try {
 		const contentType = document.workbook.parts.get(part)?.contentType ?? TABLE_CONTENT_TYPE
-		const info = readTable(part, contentType, sheet, relationship, bytes, [])
-		const xml = parseXml(bytes)
+		const xml = editMarkup(bytes, `table ${part}`).document
+		const info = tableInfo(xml, part, contentType, sheet, relationship, bytes, [])
 		const root = xml.documentElement()
 		let filter: AutoFilter | null = null
 
@@ -713,13 +714,15 @@ function tableWith(table: FilterTable, filterMarkup: string | null, sort?: strin
 	return editor.serialize()
 }
 
-function quotedSheet(name: string): string {
+// A sheet's name as a reference to it writes it before the "!": as it is, or in quotes (doubled inside) when it is not a
+// plain name or reads as a cell (A1), an R1C1 reference (RC, R1C1) or a logical value (TRUE, FALSE).
+export function quotedSheetName(name: string): string {
 	return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) &&
 		!/^[A-Za-z]{1,3}\d+$/.test(name) &&
 		!/^[Rr]\d*[Cc]\d*$/.test(name) &&
 		!/^(TRUE|FALSE)$/i.test(name)
-		? `${name}!`
-		: `'${name.replaceAll("'", "''")}'!`
+		? name
+		: `'${name.replaceAll("'", "''")}'`
 }
 
 function absoluteRange(range: SheetRange): string {
@@ -733,7 +736,7 @@ function namesWith(document: XlsxDocument, sheet: SheetId, range: SheetRange): X
 
 	if (entry === undefined) return null
 
-	const formula = `${quotedSheet(entry.name)}${absoluteRange(range)}`
+	const formula = `${quotedSheetName(entry.name)}!${absoluteRange(range)}`
 	const names = document.workbook.definedNames
 	const at = names.findIndex(name => name.sheet === sheet && name.name.toUpperCase() === FILTER_DATABASE.toUpperCase())
 	const existing = names[at]

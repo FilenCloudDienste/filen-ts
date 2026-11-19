@@ -146,6 +146,7 @@ describe.skipIf(!SLIDES.every(([path]) => existsSync(join(CORPUS_DIR, path))))("
 							s: 1,
 							deck: open.deck,
 							package: open.package,
+							options: { format: odp ? "odp" : "pptx", fileName: path },
 							emit: () => undefined,
 							onClose: (listener: () => void) => closers.push(listener)
 						} as unknown as EngineSession,

@@ -777,6 +777,44 @@ describe("shaded paints while zooming", () => {
 	})
 })
 
+describe("paintObjects: form check boxes", () => {
+	it("gives a painted check box its role, state and name from the labels supplied", async () => {
+		const session: DocxSessionApi = {
+			objects: ids => Promise.resolve(ids.map(id => ({ kind: "checkbox" as const, id, checked: id === 1 }))),
+			media: () => Promise.resolve(null),
+			locate: () => Promise.resolve(null),
+			find: () => Promise.resolve(new Int32Array(0)),
+			close: () => undefined
+		}
+		const media = new DocxMediaCache(session, undefined, { create: () => "", revoke: () => undefined })
+		const checked = document.createElement("div")
+		const unchecked = document.createElement("div")
+		const release = paintObjects(
+			[
+				{ element: checked, id: 1, kind: 0, width: 10, height: 10 },
+				{ element: unchecked, id: 2, kind: 0, width: 10, height: 10 }
+			],
+			{ document, session, media, signal: { aborted: false }, labels: { checkbox: "Kontrollkästchen" } }
+		)
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		for (const [element, state] of [
+			[checked, "true"],
+			[unchecked, "false"]
+		] as const) {
+			expect(element.getAttribute("role")).toBe("checkbox")
+			expect(element.getAttribute("aria-checked")).toBe(state)
+			expect(element.getAttribute("aria-readonly")).toBe("true")
+			expect(element.getAttribute("aria-label")).toBe("Kontrollkästchen")
+		}
+
+		expect(checked.dataset["foChecked"]).toBe("")
+		expect(unchecked.dataset["foChecked"]).toBeUndefined()
+		release()
+	})
+})
+
 describe("textMeasurer", () => {
 	it("makes one canvas per document, however many painters measure with it", () => {
 		const other = document.implementation.createHTMLDocument("")

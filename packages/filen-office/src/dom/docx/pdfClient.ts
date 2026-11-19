@@ -1,4 +1,5 @@
 import type { DocxPdfRefusal } from "../../core/docx/pdf/paint"
+import type { ChartText } from "../../core/drawingml/chart/builder"
 import type { DocxPdfDocument } from "../../core/docx/pdf/types"
 import type { DocxPdfReport } from "../../core/docx/pdf/write"
 import type { DocxWorkerLike } from "./host"
@@ -56,6 +57,8 @@ export interface DocxPdfExportOptions {
 	readonly deterministic?: boolean
 	// A document given as bytes: its format (default docx).
 	readonly format?: "docx" | "odt"
+	// A document given as bytes: what its charts show where the file names nothing, in the app's language.
+	readonly chartText?: ChartText
 	// What the source file shows that the document exported leaves out (DocxRtfDocument.untranslated): reported as
 	// content left out ("untranslated").
 	readonly untranslated?: number

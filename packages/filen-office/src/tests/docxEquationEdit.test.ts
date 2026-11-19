@@ -10,13 +10,12 @@ import { decodeUtf8, encodeUtf8, parseXml } from "@filen/office/core/xml"
 import { equationTree } from "../core/docx/math/edit"
 import { builtInStyleId } from "../core/docx/edit/formats"
 import { OMML_ELEMENTS, mathChecks } from "../core/docx/write/checks/math"
-import type { CheckInput, CheckedPart } from "../core/docx/write/checks/index"
-import { partReader } from "../core/docx/model/reader"
 import { ommlWithPrefix } from "../core/docx/write/atoms/math"
 import { MAX_OMML_DEPTH } from "../core/math/ommlWriter"
 import { openBytes } from "./docxEditFixtures"
 import { NAMESPACES, buildDocx, p } from "./docxSynthetic"
 import { SCHEMA_ARCHIVE, XMLLINT, schemaOracle } from "./fuzz/harness"
+import { MATH_CHECK_INPUT, checkedPart, mathGate } from "./mathGate"
 import { pageDigest, pagedEditor, savedDigest, settleAll } from "./pagedFixtures"
 
 const nodes = docxSchema.nodes
@@ -308,30 +307,7 @@ describe("equations on the pages", () => {
 
 // ---- gate 2 -------------------------------------------------------------------------------------------------
 
-function checkedPart(inner: string, root = NAMESPACES): CheckedPart {
-	const document = parseXml(encodeUtf8(`<w:document ${root}><w:body><w:p>${inner}</w:p></w:body></w:document>`))
-
-	return { name: "word/document.xml", part: sourcePart(), document, skeleton: true }
-}
-
-// The source part a checked skeleton stands in (what its copies are of): `body`'s.
-function sourcePart(body = ""): CheckedPart["part"] {
-	const document = parseXml(encodeUtf8(`<w:document ${NAMESPACES}><w:body>${body}</w:body></w:document>`))
-
-	return { document, reader: partReader(document) } as unknown as CheckedPart["part"]
-}
-
-const INPUT = { original: { has: () => true }, context: { model: { strict: false } } } as unknown as CheckInput
-
-async function gate(inner: string, root?: string): Promise<string | undefined> {
-	try {
-		for (const check of mathChecks) await check.part?.(INPUT, checkedPart(inner, root))
-
-		return undefined
-	} catch (error) {
-		return (error as Error).message
-	}
-}
+const gate = (inner: string, root?: string): Promise<string | undefined> => mathGate(inner, root === undefined ? {} : { root })
 
 describe("gate 2 on written equations", () => {
 	it("passes what the writer writes, under any prefix", async () => {
@@ -367,7 +343,7 @@ describe("gate 2 on written equations", () => {
 	it("checks only the save's own markup of a source part", async () => {
 		const part = checkedPart("<m:oMath><m:frac/></m:oMath>")
 
-		expect(() => mathChecks[0]?.part?.(INPUT, { ...part, skeleton: false })).not.toThrow()
+		expect(() => mathChecks[0]?.part?.(MATH_CHECK_INPUT, { ...part, skeleton: false })).not.toThrow()
 	})
 })
 

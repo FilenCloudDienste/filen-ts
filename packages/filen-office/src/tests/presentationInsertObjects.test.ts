@@ -61,7 +61,8 @@ describe("inserting objects", () => {
 
 		for (const op of [
 			insertTextBoxOp(deck, slide, 0),
-			insertPictureOp(deck, slide, image(400, 300), 0, "photo.png"),
+			insertPictureOp(deck, slide, image(400, 300), 0),
+			insertPictureOp(deck, slide, image(40, 30), 0, "A sunset over the bay"),
 			insertTableOp(deck, slide, 3, 4, 0)
 		]) {
 			const result = await h.command(op ?? (undefined as never))
@@ -82,16 +83,21 @@ describe("inserting objects", () => {
 		const reopened = await openDeck(saved)
 		const shapes = slideNode(reopened, 0).shapes
 
-		expect(shapes.length).toBe(2 + presets.length + 3)
+		expect(shapes.length).toBe(2 + presets.length + 4)
 
 		const table = lastShape(shapes)
 
 		expect(table.frame?.kind === "table" ? table.frame.table.rows.length : 0).toBe(3)
 
-		const picture = shapes[shapes.length - 2] as ShapeNode
+		const picture = shapes[shapes.length - 3] as ShapeNode
+		const described = shapes[shapes.length - 2] as ShapeNode
 
-		expect(picture).toMatchObject({ kind: "pic", alt: { descr: "photo.png" } })
+		// No alt text unless the user typed one: the Alt Text dialog shows it as missing.
+		expect(picture.kind).toBe("pic")
+		expect(picture.alt?.descr).toBeUndefined()
 		expect(picture.xfrm).toMatchObject({ cx: 400 * 9525, cy: 300 * 9525 })
+		expect(described).toMatchObject({ kind: "pic", alt: { descr: "A sunset over the bay" } })
+		expect(xml.match(/descr="/g)?.length).toBe(1)
 	})
 
 	it("inserts the same objects into an ODP deck, written whole and read back", async () => {

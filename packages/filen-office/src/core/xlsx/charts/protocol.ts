@@ -43,5 +43,8 @@ declare module "../../sheet/protocol" {
 		// The chart holds something this editor cannot change without losing it (detail: what), or the part is not a
 		// chart this sheet shows.
 		chartUnsupported: true
+		// A value typed into the chart editor cannot be used (detail: which): not a number, a unit that is not
+		// positive, or a minimum not below the maximum. The user can correct it.
+		chartValue: true
 	}
 }

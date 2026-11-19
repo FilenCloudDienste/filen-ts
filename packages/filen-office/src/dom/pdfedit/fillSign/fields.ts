@@ -1,6 +1,6 @@
 import type { PDFDocument, PDFObject, PDFPage, PDFWidget } from "mupdf"
 import type { PdfPageRect } from "../../../core/pdfedit/visualSignature"
-import { deref, lazyPages } from "../fields"
+import { deref, lazyPages, MAX_FIELD_DEPTH, MAX_FIELDS } from "../fields"
 
 // AcroForm fields of an open MuPDF document: what a field overlay shows (kind, value, flags, options, the /TU
 // label) and the value setters a form edit applies. Each setter changes one field and regenerates the appearance
@@ -72,9 +72,6 @@ export class PdfFieldError extends Error {
 const FF_REQUIRED = 1 << 1
 const FF_MULTI_SELECT = 1 << 21
 const FF_EDIT = 1 << 18
-// Bounds against hostile documents.
-const MAX_PARENT_DEPTH = 32
-const MAX_KIDS = 10_000
 
 function kindOf(widget: PDFWidget): PdfFieldKind {
 	switch (widget.getFieldType()) {
@@ -120,7 +117,7 @@ function onStateOf(widget: PDFWidget): string | null {
 function fieldOf(widget: PDFObject): PDFObject {
 	let current = widget
 
-	for (let depth = 0; depth < MAX_PARENT_DEPTH; depth++) {
+	for (let depth = 0; depth < MAX_FIELD_DEPTH; depth++) {
 		if (!deref(current).get("T").isNull()) return current
 
 		const parent = deref(current).get("Parent")
@@ -146,10 +143,10 @@ function siblingWidgets(widget: PDFObject): number[] {
 			return
 		}
 
-		for (let index = 0; index < kids.length && numbers.length < MAX_KIDS; index++) {
+		for (let index = 0; index < kids.length && numbers.length < MAX_FIELDS; index++) {
 			const kid = kids.get(index)
 
-			if (depth < MAX_PARENT_DEPTH) visit(kid, depth + 1)
+			if (depth < MAX_FIELD_DEPTH) visit(kid, depth + 1)
 		}
 	}
 
@@ -383,7 +380,7 @@ function widgetPages(document: PDFDocument, pageOf: PdfPageResolver): Map<number
 	const byPage = new Map<number, Set<number>>()
 	const seen = new Set<number>()
 	const visit = (node: PDFObject, depth: number): void => {
-		if (depth > MAX_PARENT_DEPTH || seen.size > MAX_KIDS) return
+		if (depth > MAX_FIELD_DEPTH || seen.size > MAX_FIELDS) return
 		if (node.isIndirect()) {
 			if (seen.has(node.asIndirect())) return
 

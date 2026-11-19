@@ -3,12 +3,14 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import { CfbFile, cfbBytes } from "../core/cfb/index"
+import { cfbBytes } from "../core/cfb/index"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { openPptxPackage } from "../core/pptx/package"
 import { PresentationError, type PresentationRefusal } from "../core/presentation/model"
 import { CORPUS_DIR } from "./corpusDir"
+import { streams } from "./pptConvertFixtures"
 import { buildPpt, FIXTURE_PNG, richDeck } from "./pptFixtures"
+import { random } from "./random"
 
 // Hostile .ppt input: the PowerPoint Document stream of a synthetic deck (and of a corpus deck when present) with
 // bytes flipped and cut, decrypted or not. Every outcome is a converted deck the pptx reader opens and parses, or a
@@ -43,29 +45,6 @@ const ALLOWED = new Set(["converted", ...Object.keys(REFUSALS)])
 // The outcomes outside the allow-list, each with the first seed and round that produced it.
 function unexpected(seen: ReadonlyMap<string, string>): string[] {
 	return [...seen].filter(([key]) => !ALLOWED.has(key)).map(([key, first]) => `${key} (${first})`)
-}
-
-// A small deterministic generator (xorshift32), so a failure reproduces from its seed.
-function random(seed: number): () => number {
-	let state = seed >>> 0 || 1
-
-	return () => {
-		state ^= state << 13
-		state ^= state >>> 17
-		state ^= state << 5
-
-		return (state >>> 0) / 0x100000000
-	}
-}
-
-async function streams(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
-	const cfb = await CfbFile.open(bytesSource(bytes))
-	const out = new Map<string, Uint8Array>()
-
-	for (const entry of cfb.walk())
-		if (entry.kind === "stream" && entry.path.length === 1) out.set(entry.name, (await cfb.read(entry)).slice())
-
-	return out
 }
 
 async function rebuilt(parts: ReadonlyMap<string, Uint8Array>): Promise<Uint8Array> {

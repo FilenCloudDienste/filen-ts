@@ -12,7 +12,16 @@ import { formulaTranslator } from "../refs/formulaRefs"
 import { SHEET_MAX_CELL_TEXT, SHEET_MAX_COLS, type SheetId, type SheetRange } from "../protocol"
 import { filteredOutRows } from "../../xlsx/edit/filter"
 import { visibleRanges } from "../visibleRows"
-import { autoFillWrites, entryCells, seriesWrites, visibleFillPlan, type FillDirection, type FillPlan, type FillWrites } from "./fill"
+import {
+	autoFillWrites,
+	entryCells,
+	seriesWrites,
+	visibleFillPlan,
+	visibleWrites,
+	type FillDirection,
+	type FillPlan,
+	type FillWrites
+} from "./fill"
 import { fillSeries, seriesLine, type FillCalendar, type FillSourceCell, type FillTemporal, type FillValue } from "./series"
 
 // Fill over an xlsx sheet: each target takes its source cell as it is (its value of whatever type, its format), a
@@ -239,11 +248,15 @@ export const xlsxFillFeature = defineSheetFeature<XlsxDocument>({
 				const model = await document.ready(command.sheet)
 				const read = (row: number, col: number): FillSourceCell => sourceCell(document, model, command.sheet, row, col)
 				const dates = calendar(document)
+				// A filter's hidden rows are left as they are, as Fill Down leaves them.
 				const handled = await writeFill(
 					document,
 					command.sheet,
-					autoFillWrites(command.source, command.target, command.mode, read, (cells, mode, backward) =>
-						fillSeries(cells, mode, backward, dates)
+					visibleWrites(
+						autoFillWrites(command.source, command.target, command.mode, read, (cells, mode, backward) =>
+							fillSeries(cells, mode, backward, dates)
+						),
+						filteredOutRows(document, model)
 					),
 					context.changes,
 					context.slicing
@@ -279,7 +292,10 @@ export const xlsxFillFeature = defineSheetFeature<XlsxDocument>({
 				return writeFill(
 					document,
 					command.sheet,
-					seriesWrites(command.range, command.orientation, read, cells => seriesLine(cells, options, dates)),
+					visibleWrites(
+						seriesWrites(command.range, command.orientation, read, cells => seriesLine(cells, options, dates)),
+						filteredOutRows(document, model)
+					),
 					context.changes,
 					context.slicing
 				)

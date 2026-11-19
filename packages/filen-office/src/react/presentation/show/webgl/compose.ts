@@ -135,9 +135,12 @@ export function composeSlide(
 		const clip: Affine = [2 / slide.w, 0, 0, 2 / slide.h, -1, -1]
 
 		for (const draw of draws) {
-			scratch = device.upload(draw.canvas, draw.canvas.width, draw.canvas.height, scratch)
+			const next = device.upload(draw.canvas, draw.canvas.width, draw.canvas.height, scratch)
 
-			if (scratch === undefined) return false
+			// A failed upload into the scratch texture leaves it to the finally's free.
+			if (next === undefined) return false
+
+			scratch = next
 
 			gl.uniformMatrix3fv(program.uniform("uPlace"), false, mat3(multiply(clip, draw.place)))
 			gl.uniform1f(program.uniform("uAlpha"), draw.alpha)

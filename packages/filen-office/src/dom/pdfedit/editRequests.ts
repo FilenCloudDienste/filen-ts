@@ -19,7 +19,7 @@ import { pendingSignature } from "./commands/sign"
 import { PdfEngineRefusal, type OpenDocument, type PdfEngineContext } from "./context"
 import { EngineLifetime, PdfEditSession, restrictionsOf, type LoggedStep, type PendingSecurity } from "./editSession"
 import { pageWidgets, type PdfRevisions } from "./formState"
-import type { PdfOpenResult, PdfSaveProtection } from "./protocol"
+import { PDF_STEP_WIDGET_PAGES, type PdfOpenResult, type PdfSaveProtection } from "./protocol"
 import type { PdfRequestHandler } from "./requests"
 import { TileRenderer } from "./render"
 import { syncRangeStreamHandle } from "./stream"
@@ -339,7 +339,24 @@ export function changed(open: Editing, pages: readonly number[]): PdfCommandResu
 }
 
 // Undo and redo change whatever the step changed: every page's rendering is dropped (pages with no cached list cost
-// nothing), and the page asks again for the widgets it shows.
+// nothing), and the answer carries the widgets of the pages the page shows only (reading every page's would load each).
+function changedAll(open: Editing, shown: readonly number[]): PdfCommandResult {
+	const pages = allPages(open.document)
+
+	open.renderer.evict(pages)
+
+	return { pages, state: open.edit.snapshot(open.document), widgets: widgetsOf(open, shown) }
+}
+
+// The pages an undo or redo reads widgets for: each once, at most PDF_STEP_WIDGET_PAGES (widgetsOf drops the ones
+// past the document's end once the step ran).
+function shownPages(pages: unknown): readonly number[] {
+	if (pages === undefined) return []
+	if (!Array.isArray(pages) || pages.length > PDF_STEP_WIDGET_PAGES) throw new PdfEngineRefusal("badRequest", "pages")
+
+	return [...new Set(pages.filter((page): page is number => typeof page === "number"))]
+}
+
 export function allPages(document: Mupdf.PDFDocument): number[] {
 	return Array.from({ length: document.countPages() }, (_, index) => index)
 }
@@ -452,8 +469,9 @@ export const EDIT_REQUESTS: Handlers = {
 
 		return { value: "created" in outcome ? { ...result, created: outcome.created } : result }
 	},
-	undo: (context, { steps }) => {
+	undo: (context, { steps, pages }) => {
 		const open = editing(context)
+		const shown = shownPages(pages)
 
 		if (steps !== undefined && !(Number.isInteger(steps) && steps >= 1)) throw new PdfEngineRefusal("badRequest", "steps")
 
@@ -468,10 +486,11 @@ export const EDIT_REQUESTS: Handlers = {
 		)
 		open.edit.pagesChanged()
 
-		return { value: changed(editing(context), allPages(context.open().document)) }
+		return { value: changedAll(editing(context), shown) }
 	},
-	redo: context => {
+	redo: (context, { pages }) => {
 		const open = editing(context)
+		const shown = shownPages(pages)
 
 		idle(open.edit)
 		open.edit.endOpen(open.document)
@@ -480,7 +499,7 @@ export const EDIT_REQUESTS: Handlers = {
 		})
 		open.edit.pagesChanged()
 
-		return { value: changed(open, allPages(open.document)) }
+		return { value: changedAll(open, shown) }
 	},
 	saveBegin: (context, { inputBytes, memory, invalidateConfirmed }) => {
 		const { document, edit } = editing(context)

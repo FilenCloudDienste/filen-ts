@@ -1,7 +1,8 @@
+import { insertedPartId } from "../../../core/presentation/inserted"
 import { heldOdpMedia } from "../../../core/odp/write/save"
 import { releasedMediaBytes, releasedMediaRelationship } from "../../../core/pptx/write/parts"
 import { scriptForLanguage } from "../../../core/docx/theme/index"
-import { FontManager, type FontRequest } from "../../../core/fonts/index"
+import { FontManager, logEmbeddedFontFailures, type FontRequest } from "../../../core/fonts/index"
 import { partKey, type Relationships, type Slicing, type ZipEntry } from "../../../core/opc/index"
 import { imageWithinBudget } from "../../../core/opc/mediaPolicy"
 import type { PresentationBudgets } from "../../../core/presentation/budget"
@@ -11,6 +12,7 @@ import { diagramRelationshipOwner } from "../../../core/presentation/edit/apply/
 import { prepareSlideMedia } from "../media"
 import { cloneModel } from "../../../core/presentation/edit/changes"
 import {
+	bodyHasText,
 	PresentationError,
 	refused,
 	type Deck,
@@ -93,6 +95,8 @@ interface ViewText {
 	pending: Promise<boolean> | undefined
 	// Registrations of `fonts` already sent to the page.
 	replayed: number
+	// Embedded-font failures of `fonts` already logged.
+	logged: number
 	// The requests of shapes' bodies, captured during renders (one per shapeText call in flight: any render fills
 	// every capture its shape matches).
 	readonly captures: Set<TextCapture>
@@ -170,6 +174,7 @@ function stateOf(session: EngineSession): ViewState {
 							missing: new Map<string, FontRequest>(),
 							pending: undefined,
 							replayed: 0,
+							logged: 0,
 							captures: new Set(),
 							shapes: new Map()
 						}
@@ -198,6 +203,7 @@ function stateOf(session: EngineSession): ViewState {
 		},
 		contentType: part => insertedContentType(session.deck, part) ?? parts.contentTypes.typeOf(partKey(part)),
 		budgets: parts.budgets,
+		...(session.options.chartText === undefined ? {} : { chartText: session.options.chartText }),
 		// EMF/WMF pictures and OLE previews, converted into the drawing by the renderer.
 		async bytes(part, limit) {
 			const key = partKey(part)
@@ -466,7 +472,7 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 	}
 
 	// A shape body with nothing visible in it paints nothing: the render hands it over only so the editor can enter it.
-	if (own && !visibleText(request.body)) return undefined
+	if (own && !bodyHasText(request.body)) return undefined
 
 	// A table cell's text laid out before, unchanged (its body is the same object until an edit replaces it): a copy
 	// of that layout (the answer transfers its buffers), so a one-cell edit lays out one cell.
@@ -572,10 +578,6 @@ function cellLayoutKey(request: TextLayoutRequest): string {
 	].join("|")
 }
 
-function visibleText(body: TextLayoutRequest["body"]): boolean {
-	return body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))
-}
-
 function slideIndexOf(deck: EngineSession["deck"], node: TextLayoutRequest["slide"]): number {
 	const index = deck.slides.indexOf(node.ref)
 
@@ -606,6 +608,8 @@ async function prepareFaces(session: EngineSession, text: ViewText, requests: It
 	await text.fonts.prepare(wanted)
 
 	for (const request of wanted) text.prepared.add(requestKey(request))
+
+	text.logged = logEmbeddedFontFailures(text.fonts.failures(), text.logged)
 
 	const registrations = text.fonts.registrations()
 	const faces: DocxFontFace[] = []
@@ -664,6 +668,9 @@ export async function sessionFaces(session: EngineSession): Promise<DocxFontFace
 
 	// An export takes the font list before it lays out its pages: the deck's embedded faces are loaded first.
 	await loadEmbeddedFaces(session)
+
+	// Faces refused here may be on slides no render reached: logged now, or never.
+	text.logged = logEmbeddedFontFailures(text.fonts.failures(), text.logged)
 
 	const faces: DocxFontFace[] = []
 
@@ -732,20 +739,22 @@ export const presentationTextServices: TextServices = {
 		if (held === undefined || held.revision !== node.revision) {
 			const signal = { aborted: false, onAbort: () => undefined }
 			const capture: TextCapture = { shape, request: undefined }
+			let revision: number
 
 			text.captures.add(capture)
 
 			try {
 				const render = node.kind === "notes" ? renderNodeFor : renderSlideFor
 
-				await render({ session, signal, lane: "priority", slicing }, shape.slide)
+				// The revision the render was built from: an edit landing during it leaves the capture behind.
+				revision = (await render({ session, signal, lane: "priority", slicing }, shape.slide)).revision
 			} finally {
 				text.captures.delete(capture)
 			}
 
 			if (capture.request === undefined) return refused("notFound", "the shape has no text body")
 
-			held = { revision: node.revision, request: capture.request }
+			held = { revision, request: capture.request }
 			text.shapes.set(key, held)
 		}
 
@@ -773,9 +782,9 @@ const IMAGE_TYPES = /^image\/(?:png|jpeg|gif|bmp|webp|svg\+xml|tiff|x-emf|x-wmf|
 // The type of an image an op inserted ("inserted:<id>", edit/apply/picture.ts), held or written by a save; undefined
 // for any other part.
 function insertedContentType(deck: Deck, part: string): string | undefined {
-	if (!part.startsWith("inserted:")) return undefined
+	const id = insertedPartId(part)
 
-	const id = Number(part.slice("inserted:".length))
+	if (id === undefined) return undefined
 
 	return insertedImage(deck, id)?.contentType ?? insertedImageWritten(deck, id)?.contentType
 }
@@ -792,8 +801,9 @@ export async function readImage(
 
 	// An image an op inserted, not stored yet (edit/apply/picture.ts): a copy, as the answer transfers its bytes. Once
 	// a save wrote it, the part it was written to.
-	if (part.startsWith("inserted:")) {
-		const id = Number(part.slice("inserted:".length))
+	const id = insertedPartId(part)
+
+	if (id !== undefined) {
 		const image = insertedImage(session.deck, id)
 
 		if (image !== undefined) return { bytes: image.bytes.slice(), type: image.contentType }

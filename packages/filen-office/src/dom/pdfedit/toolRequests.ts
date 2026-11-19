@@ -53,12 +53,19 @@ export const TOOL_REQUESTS: Handlers = {
 	textPrepare: () => {
 		throw new PdfEngineRefusal("badRequest", "text layout is not served")
 	},
-	ocrScan: context => {
+	ocrScan: (context, { from, count }) => {
 		const { document } = context.open()
-		const count = document.countPages()
+		const total = document.countPages()
+		const start = from ?? 0
+		const end = count === undefined ? total : Math.min(total, start + count)
+
+		if (!Number.isInteger(start) || start < 0 || start > total) throw new PdfEngineRefusal("badRequest")
+
+		if (count !== undefined && (!Number.isInteger(count) || count < 1)) throw new PdfEngineRefusal("badRequest")
+
 		const scanned: number[] = []
 
-		for (let index = 0; index < count; index++) {
+		for (let index = start; index < end; index++) {
 			const page = document.loadPage(index)
 
 			try {
@@ -68,10 +75,10 @@ export const TOOL_REQUESTS: Handlers = {
 			}
 		}
 
-		// The pass read every page's resources: let them go.
+		// The pass loaded the run's images (their compressed streams) and resources: let them go.
 		context.mupdf.shrinkStore(50)
 
-		return { value: { scanned } }
+		return { value: { scanned, pageCount: total } }
 	},
 	ocrRender: (context, { page }) => {
 		const { document } = context.open()

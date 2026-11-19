@@ -13,6 +13,7 @@ import { rng } from "./fuzz/config"
 import { KNOWN_REFUSALS, OpPicker, type Outcome } from "./fuzz/sheet/ops"
 import { odsBytes, table } from "./odsFixtures"
 import { sameBytes } from "../core/docx/write/bytes"
+import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // Random command sequences through ODS sessions, awaited one by one ("sync") and sent in bursts that interleave with
 // tile requests and saves ("race"). At every checkpoint the save passes its proof (the file read back equals the
@@ -20,7 +21,6 @@ import { sameBytes } from "../core/docx/write/bytes"
 // the source's bytes. Refusals are typed, never findings. FILEN_OFFICE_ODS_FUZZ=<seeds> runs more seeds over the
 // corpus too.
 
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 const STEPS = 16
 const CHECK_EVERY = 6
 const CALL_TIMEOUT_MS = 60_000

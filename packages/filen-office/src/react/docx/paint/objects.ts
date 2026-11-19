@@ -59,12 +59,24 @@ export function textMeasurer(document: Document): (text: string, font: string) =
 	}
 }
 
+// The names objects are given for assistive technology, in the host's language.
+export interface DocxObjectLabels {
+	// A legacy form check box (FORMCHECKBOX); its state is told by aria-checked.
+	readonly checkbox: string
+}
+
+export const DOCX_OBJECT_LABELS: DocxObjectLabels = {
+	checkbox: "Check box"
+}
+
 export interface ObjectPaintOptions {
 	readonly document: Document
 	readonly session: DocxSessionApi
 	readonly media: DocxMediaCache
 	// Stops painting when the page goes away first.
 	readonly signal: { readonly aborted: boolean }
+	// DOCX_OBJECT_LABELS without them.
+	readonly labels?: DocxObjectLabels
 }
 
 // Pixels of one shaded raster, and of all a page's shaded rasters over its life.
@@ -428,6 +440,13 @@ export function paintObjects(objects: readonly PaintedObject[], options: ObjectP
 								object.element.classList.add("fo-docx-checkbox")
 
 								if (result.checked) object.element.dataset["foChecked"] = ""
+
+								// A check box to assistive technology, its state told; read-only, as only the viewer's pages
+								// expose it (the editor's pages are aria-hidden, the Mobile view shows it as field text).
+								object.element.setAttribute("role", "checkbox")
+								object.element.setAttribute("aria-checked", result.checked ? "true" : "false")
+								object.element.setAttribute("aria-readonly", "true")
+								object.element.setAttribute("aria-label", (options.labels ?? DOCX_OBJECT_LABELS).checkbox)
 
 								break
 							case "math":

@@ -7,15 +7,14 @@ import {
 	type FontManager,
 	type FontRequest
 } from "../../../core/fonts/index"
-import type { DocxFontFace } from "../../docx/protocol"
-import type { EngineSession, FontsCapability } from "../engine"
+import type { EngineSession } from "../engine"
 
 // The fonts a deck embeds (p:embeddedFontLst, ECMA-376 Part 1 §19.2.1.9: one font part per style, Embedded OpenType
 // with MicroType Express compression, or a plain TrueType font), declared to the session's font manager so its text is
 // measured and drawn in them. A part is read and decoded only when text first needs its face; a part that does not
 // decode refuses that face alone (a FontError the manager records with the family and style), and that text falls back
-// to the font's substitute. The decoded faces are what the page and the jobs worker register too (faces(), and the
-// view's "fonts" events through embeddedFaceBytes).
+// to the font's substitute (the view logs the manager's failures). The decoded faces are what the page and the jobs
+// worker register too (the view's "fonts" events and the export's sessionFaces, through embeddedFaceBytes).
 
 // Reads a package part, at most `limit` bytes of it (undefined when the package has no such part or it is larger).
 export type PartReader = (part: string, limit: number) => Promise<Uint8Array | undefined>
@@ -103,27 +102,4 @@ export function embeddedFontRefusals(session: EngineSession): readonly EmbeddedF
 // any other face.
 export function embeddedFaceBytes(session: EngineSession, registration: FaceRegistration): Uint8Array | undefined {
 	return sessions.get(session)?.manager.embeddedData(registration)
-}
-
-// The decoded embedded faces loaded so far, under the aliases the session's text uses; each call hands out copies
-// (a sender hands off what it sends).
-export const fontsCapability: FontsCapability = {
-	faces(session) {
-		const held = sessions.get(session)
-		const faces: DocxFontFace[] = []
-
-		for (const registration of held?.manager.registrations() ?? []) {
-			const bytes = embeddedFaceBytes(session, registration)
-
-			if (bytes !== undefined) {
-				faces.push({
-					kind: "bytes",
-					face: { family: registration.family, weight: registration.weight, italic: registration.italic },
-					bytes: bytes.slice()
-				})
-			}
-		}
-
-		return Promise.resolve(faces)
-	}
 }

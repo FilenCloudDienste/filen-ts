@@ -1,3 +1,4 @@
+import { insertedPartName } from "../../../core/presentation/inserted"
 import { relationshipKind } from "../../../core/docx/index"
 import { partKey, Relationships, type PartBytes } from "../../../core/opc/index"
 import {
@@ -818,7 +819,7 @@ function pictureOf(node: SlideNode, shape: ShapeNode, reading: ClipReading): str
 	const fill = shape.props?.fill
 	const typed = fill !== undefined && fill !== "none" && fill.kind === "picture" ? fill : undefined
 
-	if (typed !== undefined) return typed.part ?? (typed.inserted === undefined ? undefined : `inserted:${String(typed.inserted)}`)
+	if (typed !== undefined) return typed.part ?? (typed.inserted === undefined ? undefined : insertedPartName(typed.inserted))
 
 	const read = reading.pictureFill?.(node, shape)
 

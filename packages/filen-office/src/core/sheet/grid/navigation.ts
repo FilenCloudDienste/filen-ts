@@ -4,7 +4,7 @@ import type { CellRange } from "../model/model"
 export interface GridBounds {
 	rowCount: number
 	colCount: number
-	// The last row and column holding anything: where mod+arrow and mod+End stop.
+	// The last row and column holding anything: where End, mod+End and mod+A stop.
 	lastUsedRow: number
 	lastUsedCol: number
 	pageRows: number
@@ -46,10 +46,11 @@ function settle(index: number, count: number, hidden: ((index: number) => boolea
 }
 
 // The selection after a navigation key, or null for any other key. Arrows move, and with Shift extend
-// from the anchor; mod+arrow jumps to the edge of the used area (then to the sheet's); Tab and Enter step
-// right and down (backwards with Shift) and collapse the selection; Home and End go to the row's start and
-// the used area's end column (mod: the sheet's first and last used cell); PageUp and PageDown move a
-// screen; mod+A selects the used area. Hidden rows and columns are passed over, and a merge is one cell.
+// from the anchor; mod+arrow is not one (Ctrl+arrow goes to the data region's edge, the session's navigate
+// query; AltGr, arriving as Ctrl+Alt, moves nothing); Tab and Enter step right and down (backwards with
+// Shift) and collapse the selection; Home and End go to the row's start and the used area's end column (mod:
+// the sheet's first and last used cell); PageUp and PageDown move a screen; mod+A selects the used area.
+// Hidden rows and columns are passed over, and a merge is one cell.
 export function gridMove(event: KeyLike, selection: Selection, bounds: GridBounds): Selection | null {
 	const mod = event.ctrlKey || event.metaKey
 	const { focus } = selection
@@ -63,18 +64,22 @@ export function gridMove(event: KeyLike, selection: Selection, bounds: GridBound
 	let col = focus.col
 	let extend = event.shiftKey
 
+	if (mod && event.key.startsWith("Arrow")) {
+		return null
+	}
+
 	switch (event.key) {
 		case "ArrowUp":
-			row = mod ? settle(0, rowCount, hiddenRow, 1) : up()
+			row = up()
 			break
 		case "ArrowDown":
-			row = mod ? settle(focus.row < bounds.lastUsedRow ? bounds.lastUsedRow : rowCount - 1, rowCount, hiddenRow, -1) : down()
+			row = down()
 			break
 		case "ArrowLeft":
-			col = mod ? settle(0, colCount, hiddenCol, 1) : left()
+			col = left()
 			break
 		case "ArrowRight":
-			col = mod ? settle(focus.col < bounds.lastUsedCol ? bounds.lastUsedCol : colCount - 1, colCount, hiddenCol, -1) : right()
+			col = right()
 			break
 		case "Tab":
 			if (mod || event.altKey) {

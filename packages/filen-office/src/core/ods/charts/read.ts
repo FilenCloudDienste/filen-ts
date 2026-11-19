@@ -1,9 +1,11 @@
 import type { OdfPackage } from "../../odf/package"
 import { elementName, readElement, type OdfElement } from "../../odf/tree"
 import { parseLength } from "../../odf/units"
+import { columnIndex } from "../../sheet/refs/cellRef"
 import type { ChartLabels } from "../../xlsx/charts/model"
 import type { XlsxSection } from "../../xlsx/model/types"
 import { Namespaces, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
+import { EMU_PER_PT } from "../convert/shapes"
 import { rangeAddress } from "../formula/toXlsx"
 import type { OdsIssues } from "../issues"
 import type { SliceClock } from "../../slicing"
@@ -94,7 +96,6 @@ const MAX_OBJECT_BYTES = 16 * 1024 * 1024
 // The objects' content one workbook reads, all told (each object once, however many frames show it).
 export const MAX_CHART_BYTES = 64 * 1024 * 1024
 const MAX_POINT_STYLES = 4096
-export const EMU_PER_PT = 12_700
 
 // --- The chart object ---
 
@@ -723,11 +724,7 @@ function endCell(address: string | undefined): { row: number; col: number } | nu
 
 	if (match === null) return null
 
-	let col = 0
-
-	for (const letter of (match[1] ?? "").toUpperCase()) col = col * 26 + letter.charCodeAt(0) - 64
-
-	return { row: Number(match[2]) - 1, col: col - 1 }
+	return { row: Number(match[2]) - 1, col: columnIndex(match[1] ?? "") }
 }
 
 // The xdr anchor's open tag and placement of a frame (§20.5.2.2 absoluteAnchor, .24 oneCellAnchor, .33

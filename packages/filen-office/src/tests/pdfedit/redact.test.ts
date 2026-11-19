@@ -20,10 +20,12 @@ import {
 	markFindings,
 	markPage,
 	markText,
+	pageRedactionMarks,
 	removeRedactionMark,
 	sanitizeForRedaction,
 	scrubTermsForRedaction,
-	verifyRedactedPdf
+	verifyRedactedPdf,
+	withMarkedText
 } from "../../dom/pdfedit/redact"
 import { markedSections } from "../../dom/pdfedit/redact/content"
 import { makeFormPdf, makePdf } from "./fixtures"
@@ -130,6 +132,26 @@ describe("redaction marks", () => {
 		expect(removeRedactionMark(page, box)).toBe(true)
 		expect(removeRedactionMark(page, box)).toBe(false)
 		expect(listRedactionMarks(document).map(mark => mark.id)).toEqual([text, whole])
+	})
+
+	it("reads the text under each text mark for the review list", () => {
+		const document = open(fixture("text"))
+		const page = document.loadPage(0)
+		const [finding] = findRedactions(document, { terms: [SECRET_TERM], presets: [] })
+
+		if (finding === undefined) throw new Error("no finding")
+
+		markText(page, finding.quads)
+		markArea(page, toPage(SPEC.text.lineArea))
+
+		const marks = withMarkedText(page, pageRedactionMarks(page, 0))
+
+		expect(marks.map(mark => [mark.kind, mark.text])).toEqual([
+			["text", finding.text],
+			["area", undefined]
+		])
+		page.destroy()
+		document.destroy()
 	})
 
 	it("finds terms with case and whole-word options, and the presets", () => {

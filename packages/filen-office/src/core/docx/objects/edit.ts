@@ -167,11 +167,12 @@ function locksAspect(part: StoryPart, drawing: DrawingInfo): boolean {
 
 	const frameLocks = reader.descendant(reader.child(drawing.frame, Ns.WP, "cNvGraphicFramePr"), Ns.A, "graphicFrameLocks")
 
-	if (frameLocks >= 0 && reader.equals(frameLocks, Ns.None, "noChangeAspect", "1")) return true
+	// xsd:boolean: "1" or "true" (some producers write words).
+	if (frameLocks >= 0 && reader.flag(frameLocks, Ns.None, "noChangeAspect")) return true
 
 	const picLocks = drawing.graphicData < 0 ? -1 : reader.descendant(drawing.graphicData, Ns.A, "picLocks")
 
-	return picLocks >= 0 && reader.equals(picLocks, Ns.None, "noChangeAspect", "1")
+	return picLocks >= 0 && reader.flag(picLocks, Ns.None, "noChangeAspect")
 }
 
 function wrapOf(drawing: DrawingInfo): DocxWrapMode {
@@ -214,8 +215,7 @@ function sourceFacts(context: DocxEditContext, drawing: DrawingInfo): SourceFact
 	const anchor = drawing.anchor
 	const fill = part === undefined ? -1 : pictureFill(part, drawing)
 	const crop = fill < 0 || part === undefined ? undefined : cropOf(part, fill)
-	const flipped = (name: string): boolean =>
-		part !== undefined && xfrm >= 0 && /^(1|true)$/.test(part.reader.attr(xfrm, Ns.None, name) ?? "")
+	const flipped = (name: string): boolean => part !== undefined && xfrm >= 0 && part.reader.flag(xfrm, Ns.None, name)
 	// Charts and diagrams have no shape of their own: only their frame's size changes.
 	const known =
 		drawing.graphic !== "ink" &&

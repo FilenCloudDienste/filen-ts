@@ -114,6 +114,8 @@ export interface FormatPainter {
 	// The host as it is now (a newer render of the slide), while the painter is on.
 	rebind(host: FormatPainterHost): void
 	cancel(): void
+	// The deck closed: off for good; a copy still reading its format no longer turns it on.
+	dispose(): void
 	// Copy Formatting (Ctrl+Shift+C): holds the formatting of what `host` has selected for pasteFormat, without turning
 	// the painter on; false when there is none (the held format stays).
 	copyFormat(host: FormatPainterHost): Promise<boolean>
@@ -138,6 +140,7 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 	// A click opened a body: it takes the paint once ready (any controller other than `opening.from`).
 	let opening: { readonly from: TextEditController | undefined } | undefined
 	let detach: (() => void) | undefined
+	let disposed = false
 
 	const notify = (): void => {
 		for (const listener of listeners) listener()
@@ -197,7 +200,8 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 		}
 
 		if (shapes.length > 0) {
-			void paintShapes(host, shapes)
+			// A command on a session that is gone rejects; the painter has already moved on.
+			void paintShapes(host, shapes).catch(() => undefined)
 
 			return
 		}
@@ -269,7 +273,7 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 		copy: async (target, sticky = false) => {
 			const format = await readFormat(target)
 
-			if (format === undefined) return false
+			if (format === undefined || disposed) return false
 
 			carried = format
 			host = target
@@ -285,6 +289,10 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 			if (mode !== "off") host = target
 		},
 		cancel: off,
+		dispose: () => {
+			disposed = true
+			off()
+		},
 		copyFormat: async target => {
 			const format = await readFormat(target)
 
@@ -311,9 +319,9 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 
 			if (shapes.length === 0) return false
 
-			void formatShapesOp(target.session, shapes, defaults => paintRuns(format, defaults)).then(op =>
-				op === undefined ? undefined : target.command(op)
-			)
+			void formatShapesOp(target.session, shapes, defaults => paintRuns(format, defaults))
+				.then(op => (op === undefined ? undefined : target.command(op)))
+				.catch(() => undefined)
 
 			return true
 		}
@@ -344,6 +352,12 @@ export function formatPainterOf(text: TextEditing): FormatPainter {
 	}
 
 	return painter
+}
+
+// The deck closed: its painter turns off (its document listeners go) and the store hands out a fresh one if asked.
+export function disposeFormatPainter(text: TextEditing): void {
+	painters.get(text)?.dispose()
+	painters.delete(text)
 }
 
 export function useFormatPainter(painter: FormatPainter): FormatPainterMode {

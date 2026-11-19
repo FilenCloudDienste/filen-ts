@@ -4,11 +4,10 @@ import { inThreadSheetHost } from "../dom/sheet/host"
 import { buildXlsx } from "./oracles/sheet/synthetic"
 import { FormulaEngine } from "../core/sheet/formula/index"
 import { engineCellFormula, storedFormula } from "../core/sheet/refs/formulaRefs"
+import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // FORMULATEXT (support.microsoft.com "FORMULATEXT function"): the formula as a string, as the formula bar shows it;
 // #N/A for a cell without one. Its own cell is no circular reference.
-
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 
 async function texts(session: SheetSessionApi, sheet: number, cells: readonly string[]): Promise<string[]> {
 	const { tiles } = await session.tiles(sheet, Uint32Array.of(0, 0))

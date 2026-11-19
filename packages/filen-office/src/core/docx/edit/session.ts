@@ -69,9 +69,11 @@ import {
 
 export type FormatState = "on" | "off" | "mixed"
 
-// Why a user's edit came to nothing: tracking records an author and none is set, or what tracking would record
-// cannot be saved (the deletion of an equation nested too deep).
-export type DocxRefusalReason = "authorNeeded" | "unsupported"
+// Why a user's edit came to nothing: tracking records an author and none is set, what tracking would record
+// cannot be saved (the deletion of an equation nested too deep), or the edit would break what the document keeps
+// (a section break, a locked block, a table's merged cells, a content control or form field, text another author
+// deleted).
+export type DocxRefusalReason = "authorNeeded" | "unsupported" | "protected"
 
 export type { DocxReadOnlyReason } from "./readOnly"
 
@@ -163,9 +165,37 @@ const BULLET_PREFIXES: ReadonlySet<string> = new Set(["*", "-", ">"])
 const ROMAN: Readonly<Record<string, number>> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 }
 // What a typed quote opens after (else it closes, as an apostrophe in a word does): white space, an opening
 // bracket or quote, a dash.
-const OPENS_AFTER = /[\s([{<‘“–—]/u
-// English curly quotes: Word follows the run's language; quotes of other languages are not told apart here.
-const CURLY: Readonly<Record<string, readonly [string, string]>> = { '"': ["“", "”"], "'": ["‘", "’"] }
+const OPENS_AFTER = /[\s([{<‘“„‚«–—]/u
+
+// Typographic quotes of a language: [opening, closing] for each straight quote typed.
+type QuotePairs = Readonly<Record<string, readonly [string, string]>>
+
+// A single quote closes as the apostrophe (’) in every language: one inside a word is far more common than a
+// closing single quote, and typing cannot tell them apart.
+const ENGLISH_QUOTES: QuotePairs = { '"': ["“", "”"], "'": ["‘", "’"] }
+const GERMAN_QUOTES: QuotePairs = { '"': ["„", "“"], "'": ["‚", "’"] }
+const POLISH_QUOTES: QuotePairs = { '"': ["„", "”"], "'": ["‚", "’"] }
+const SWEDISH_QUOTES: QuotePairs = { '"': ["”", "”"], "'": ["’", "’"] }
+// French guillemets with a no-break space inside, as Word types them.
+const FRENCH_QUOTES: QuotePairs = { '"': ["«\u00a0", "\u00a0»"], "'": ["‘", "’"] }
+// By primary language subtag of the run's w:lang; any other (or none) takes English quotes, as Word's en-US default.
+const QUOTES_OF_LANGUAGE: ReadonlyMap<string, QuotePairs> = new Map([
+	["de", GERMAN_QUOTES],
+	["fr", FRENCH_QUOTES],
+	["pl", POLISH_QUOTES],
+	["ro", POLISH_QUOTES],
+	["hu", POLISH_QUOTES],
+	["sv", SWEDISH_QUOTES],
+	["fi", SWEDISH_QUOTES]
+])
+
+function quotesOf(language: string | null | undefined): QuotePairs {
+	if (language === null || language === undefined) return ENGLISH_QUOTES
+
+	const dash = language.indexOf("-")
+
+	return QUOTES_OF_LANGUAGE.get((dash < 0 ? language : language.slice(0, dash)).toLowerCase()) ?? ENGLISH_QUOTES
+}
 
 // The character a user transaction typed at a caret that AutoFormat As You Type acts on (a space, a tab, a
 // straight quote); undefined for anything else (a paste, a composition, a replacement, an undo).
@@ -260,12 +290,12 @@ function leafText(leaf: Node): string {
 	return leaf.type === nodes.marker || leaf.type === nodes.proof_err ? "" : OBJECT
 }
 
-// The straight quote typed right before the caret as Word's smart quote: opening at the start of a paragraph or
+// The straight quote typed right before the caret as Word's smart quote in the quotes of `language` (the run's): opening at the start of a paragraph or
 // after OPENS_AFTER, else closing.
-function smartQuote(state: EditorState, typed: string): Transaction | null {
+function smartQuote(state: EditorState, typed: string, language: string | null | undefined): Transaction | null {
 	const $caret = state.selection.$from
 	const quote = $caret.nodeBefore
-	const pair = CURLY[typed]
+	const pair = quotesOf(language)[typed]
 
 	if (quote === null || pair === undefined) return null
 
@@ -863,11 +893,17 @@ export class DocxEditorSession {
 					? this.autoList(state)
 					: null
 				: this.autoFormat.quotes
-					? smartQuote(state, typed)
+					? smartQuote(state, typed, this.languageOf($from.parent, before.marks))
 					: null
 
 		// Typing after it starts an undo step of its own too.
 		if (tr !== null && this.apply(closeHistory(tr))) this.apply(closeHistory(this.current.tr))
+	}
+
+	// The language (w:lang, Latin script) of text with `marks` in `paragraph`, through its styles and the
+	// document's defaults.
+	private languageOf(paragraph: Node, marksOf: readonly Mark[]): string | null | undefined {
+		return this.context.resolver.run(this.formats.paragraph(paragraph), this.formats.runProps(marksOf)).lang.latin
 	}
 
 	// "1. " (a number or letter and "." or ")") or "* ", "- ", "> " typed at the start of a paragraph in no list
@@ -971,7 +1007,7 @@ export class DocxEditorSession {
 	}
 
 	// Hears each user edit (typing, composition, paste, drop, a shortcut) the session refused, with why; never
-	// an undo or the editor's own changes.
+	// an undo, the editor's own changes, a selection change or an edit refused because the session is read-only.
 	onRefused(listener: (reason: DocxRefusalReason) => void): () => void {
 		this.refusedListeners.add(listener)
 
@@ -1040,13 +1076,8 @@ export class DocxEditorSession {
 		const result = this.current.applyTransaction(transformed)
 
 		if (result.transactions.length === 0) {
-			// Only the transformer marks a transaction refused for its author (never an undo or the session's own).
-			if (this.refusedListeners.size > 0 && refusedForAuthor(transformed)) {
-				const reason: DocxRefusalReason | undefined = refusedUnsupported(transformed)
-					? "unsupported"
-					: (this.author ?? "") === ""
-						? "authorNeeded"
-						: undefined
+			if (this.refusedListeners.size > 0) {
+				const reason = this.refusalOf(tr, transformed)
 
 				if (reason !== undefined) for (const listener of this.refusedListeners) listener(reason)
 			}
@@ -1062,6 +1093,17 @@ export class DocxEditorSession {
 		this.changed()
 
 		return true
+	}
+
+	// Why the session refused `tr` (as `transformed`), for refusal listeners: undefined for an undo, the session's
+	// own transactions, one changing no content and any while read-only.
+	private refusalOf(tr: Transaction, transformed: Transaction): DocxRefusalReason | undefined {
+		// Only the transformer marks a transaction refused for its author (never an undo or the session's own).
+		if (refusedForAuthor(transformed)) {
+			return refusedUnsupported(transformed) ? "unsupported" : (this.author ?? "") === "" ? "authorNeeded" : undefined
+		}
+
+		return tr.docChanged && !isInternal(tr) && !isHistoryTransaction(tr) && !this.readOnly ? "protected" : undefined
 	}
 
 	// Listeners hear once per burst of changes (a microtask later), with the snapshot then current.

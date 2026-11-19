@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest"
 import { NumberingCounters, englishCardinal, englishOrdinal, formatNumber, parseNumbering } from "../core/docx/numbering/index"
+import { englishLanguage } from "../core/docx/numbering/formats"
+import { numberText } from "../core/docx/layout/fields"
+import { pageNumberText } from "../core/docx/layout/content"
 import { PropsStore } from "../core/docx/props/index"
 import { parseStyles } from "../core/docx/styles/index"
 import { abstractNumbering } from "../core/docx/write/numbering"
 import { Names } from "../core/docx/write/markup"
 import { stylesXml, wordPart } from "./docxFixtures"
+import { buildDocx } from "./docxSynthetic"
+import { pageDigest, pagedEditor, settleAll } from "./pagedFixtures"
+import { layOut } from "./layoutFixtures"
 
 function level(ilvl: number, format: string, text: string, extra: string = ""): string {
 	return `<w:lvl w:ilvl="${ilvl}"><w:start w:val="1"/><w:numFmt w:val="${format}"/><w:lvlText w:val="${text}"/>${extra}<w:lvlJc w:val="left"/><w:pPr><w:ind w:left="${720 * (ilvl + 1)}" w:hanging="360"/></w:pPr></w:lvl>`
@@ -283,6 +289,156 @@ describe("number formats", () => {
 		expect(englishCardinal(105)).toBe("one hundred five")
 		expect(englishCardinal(1_000_000)).toBe("one million")
 		expect(englishOrdinal(100)).toBe("one hundredth")
+	})
+
+	it("writes the English word and ordinal formats as decimal in another language", () => {
+		expect(formatNumber(1, "ordinal", undefined, "de-DE")).toBe("1")
+		expect(formatNumber(21, "cardinalText", undefined, "fr-FR")).toBe("21")
+		expect(formatNumber(3, "ordinalText", undefined, "de-DE")).toBe("3")
+		// English, of any region, and no language: unchanged.
+		expect(formatNumber(1, "ordinal", undefined, "en-GB")).toBe("1st")
+		expect(formatNumber(21, "cardinalText", undefined, "en-GB")).toBe("Twenty-one")
+		expect(formatNumber(3, "ordinalText", undefined, "en-US")).toBe("Third")
+		expect(formatNumber(3, "ordinalText")).toBe("Third")
+		// Other formats do not depend on it.
+		expect(formatNumber(4, "upperRoman", undefined, "de-DE")).toBe("IV")
+		expect([undefined, "en", "EN-gb", "de-DE", "eng"].map(englishLanguage)).toEqual([true, true, true, false, false])
+	})
+
+	it("numbers a list level whose run is in another language as decimal, an English one in words", () => {
+		const store = new PropsStore()
+		const lvl = (format: string, lang: string): string =>
+			`<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="${format}"/><w:lvlText w:val="%1:"/>` +
+			`${lang === "" ? "" : `<w:rPr><w:lang w:val="${lang}"/></w:rPr>`}</w:lvl>`
+		const numbering = parseNumbering(
+			wordPart(
+				"numbering",
+				`<w:abstractNum w:abstractNumId="0">${lvl("ordinalText", "de-DE")}</w:abstractNum>` +
+					`<w:abstractNum w:abstractNumId="1">${lvl("ordinalText", "en-GB")}</w:abstractNum>` +
+					`<w:abstractNum w:abstractNumId="2">${lvl("ordinal", "")}</w:abstractNum>` +
+					'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>' +
+					'<w:num w:numId="3"><w:abstractNumId w:val="2"/></w:num>'
+			),
+			store
+		)
+		const counters = new NumberingCounters(numbering)
+
+		expect([1, 1].map(numId => counters.next(numId, 0)?.text)).toEqual(["1:", "2:"])
+		expect([2, 2].map(numId => counters.next(numId, 0)?.text)).toEqual(["First:", "Second:"])
+		expect(counters.next(3, 0)?.text).toBe("1st:")
+	})
+
+	it("numbers a list in its marker run's language: the paragraph mark's, then the document default", async () => {
+		const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+		const docx = (defaults: string, body: string): Uint8Array =>
+			buildDocx({
+				body,
+				relationships: [
+					{ id: "rIdN", type: "numbering", target: "numbering.xml" },
+					{ id: "rIdS", type: "styles", target: "styles.xml" }
+				],
+				parts: [
+					{
+						name: "word/numbering.xml",
+						contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml",
+						data:
+							`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="${W}">` +
+							'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="ordinalText"/><w:lvlText w:val="%1:"/></w:lvl></w:abstractNum>' +
+							'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>'
+					},
+					{
+						name: "word/styles.xml",
+						contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+						data:
+							`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${W}">` +
+							`${defaults === "" ? "" : `<w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="${defaults}"/></w:rPr></w:rPrDefault></w:docDefaults>`}</w:styles>`
+					}
+				]
+			})
+		const item = (text: string, lang = ""): string =>
+			`<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>${lang === "" ? "" : `<w:rPr><w:lang w:val="${lang}"/></w:rPr>`}</w:pPr>` +
+			`<w:r><w:t>${text}</w:t></w:r></w:p>`
+		const markers = async (bytes: Uint8Array): Promise<string[]> =>
+			pageDigest(await layOut(bytes))
+				.join("\n")
+				.split("\n")
+				.flatMap(line => /"([^"]*)"/.exec(line)?.[1]?.split("\\t")[0] ?? [])
+
+		// German by default; the English item's mark is English.
+		expect(await markers(docx("de-DE", item("Eins") + item("Two", "en-GB") + item("Drei")))).toEqual(["1:", "Second:", "3:"])
+		// English by default (no language anywhere: English); only the French mark's item is in French.
+		expect(await markers(docx("", item("One") + item("Deux", "fr-FR") + item("Three")))).toEqual(["First:", "2:", "Third:"])
+	})
+
+	it("writes a field's \\* OrdText, CardText and DollarText in its language", () => {
+		expect(numberText(3, "ordText", "de-DE")).toBe("3")
+		expect(numberText(3, "cardText", "fr-FR")).toBe("3")
+		expect(numberText(3, "dollarText", "de-DE")).toBe("3")
+		expect(numberText(2, "ordinal", "de-DE")).toBe("2")
+		expect(numberText(3, "ordText", "en-GB")).toBe("third")
+		expect(numberText(3, "ordText")).toBe("third")
+		expect(numberText(2, "ordinal")).toBe("2nd")
+	})
+
+	it("updates a \\* OrdText field in its run's language", async () => {
+		const field = (lang: string): string => {
+			const rPr = lang === "" ? "" : `<w:rPr><w:lang w:val="${lang}"/></w:rPr>`
+
+			return (
+				`<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve"> SEQ Figure \\* OrdText </w:instrText></w:r>` +
+				`<w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>stale</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`
+			)
+		}
+		const { editor } = await pagedEditor(
+			buildDocx({ body: `<w:p>${field("de-DE")}</w:p><w:p>${field("")}</w:p><w:p>${field("en-GB")}</w:p>` })
+		)
+		const results: string[] = []
+
+		await settleAll(editor)
+		expect(await editor.execute({ type: "field.updateAll" })).toBe(true)
+		editor.session.state.doc.descendants(node => {
+			if (node.type.name === "field") results.push(node.attrs["result"] as string)
+		})
+		expect(results).toEqual(["1", "second", "third"])
+	})
+
+	it("lays out and updates a page-number field in its run's language", async () => {
+		const field = (instruction: string, lang: string): string => {
+			const rPr = `<w:rPr><w:lang w:val="${lang}"/></w:rPr>`
+
+			return (
+				`<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve"> ${instruction} </w:instrText></w:r>` +
+				`<w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>stale</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`
+			)
+		}
+		const { editor } = await pagedEditor(
+			buildDocx({
+				body:
+					`<w:p>${field("PAGE \\* OrdText", "de-DE")}</w:p><w:p>${field("NUMPAGES \\* CardText", "de-DE")}</w:p>` +
+					`<w:p>${field("PAGE \\* OrdText", "en-GB")}</w:p>`
+			})
+		)
+		const results: string[] = []
+
+		await settleAll(editor)
+
+		const shown = (): string[] =>
+			pageDigest(editor.layout)
+				.join("\n")
+				.split("\n")
+				.flatMap(line => /"([^"]*)"/.exec(line)?.[1] ?? [])
+
+		expect(shown()).toEqual(["1", "1", "first"])
+		expect(await editor.execute({ type: "field.updateAll" })).toBe(true)
+		editor.session.state.doc.descendants(node => {
+			if (node.type.name === "field") results.push(node.attrs["result"] as string)
+		})
+		// The update stores what the page shows.
+		expect(results).toEqual(["1", "1", "first"])
+		await settleAll(editor)
+		expect(shown()).toEqual(["1", "1", "first"])
+		expect(pageNumberText(1, "ordText", undefined, "de-DE")).toBe("1")
+		expect(pageNumberText(1, "ordText", undefined)).toBe("first")
 	})
 
 	it("formats East Asian, Hebrew, Arabic and other scripts", () => {

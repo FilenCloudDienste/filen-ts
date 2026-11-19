@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import type { Transition } from "../core/anim/model"
 import { planMorph, type MorphShape } from "../core/anim/morph"
 import { slideRef } from "../core/presentation/model"
-import { slideDraws } from "../react/presentation/show/webgl/compose"
+import { composeSlide, slideDraws } from "../react/presentation/show/webgl/compose"
+import { GlDevice, type GlTexture } from "../react/presentation/show/webgl/device"
 import { warmWebgl, webglTransitions } from "../react/presentation/show/webgl/index"
 import { framePaths, vectorBox, vectorPlan } from "../react/presentation/show/webgl/vector"
 import { PRESET_GEOMETRY } from "../core/drawingml/geometry/presets.generated"
@@ -224,6 +225,74 @@ describe("what of the stage a particle transition draws", () => {
 		expect(slideDraws(clipped)).toBeUndefined()
 		expect(slideDraws(dom)).toBeUndefined()
 		expect(slideDraws(svg)).toBeUndefined()
+	})
+})
+
+describe("composing a slide for a particle transition", () => {
+	// A device over a context whose texture uploads succeed except the `failing`-th (a GPU out of memory).
+	function failingDevice(failing: number): { device: GlDevice; deleted: WebGLTexture[] } {
+		const deleted: WebGLTexture[] = []
+		let uploads = 0
+		let error = 0
+		const constants: Record<string, number> = { NO_ERROR: 0, FRAMEBUFFER_COMPLETE: 36053 }
+		const calls: Record<string, (...args: unknown[]) => unknown> = {
+			createTexture: () => ({}),
+			createFramebuffer: () => ({}),
+			deleteTexture: texture => {
+				deleted.push(texture as WebGLTexture)
+			},
+			texImage2D: () => {
+				uploads++
+				error = uploads === failing ? 1285 : 0
+			},
+			getError: () => {
+				const out = error
+
+				error = 0
+
+				return out
+			},
+			checkFramebufferStatus: () => constants["FRAMEBUFFER_COMPLETE"],
+			isContextLost: () => false
+		}
+		const gl = new Proxy(
+			{},
+			{ get: (_target, name: string) => constants[name] ?? calls[name] ?? (() => undefined) }
+		) as WebGL2RenderingContext
+		const device = Object.create(GlDevice.prototype) as GlDevice
+
+		Object.assign(device, {
+			gl,
+			canvas: { width: 0, height: 0 },
+			quad: {},
+			textureBytes: 1000,
+			dead: false,
+			programs: new Map([["compose", { program: {}, uniform: () => null }]])
+		})
+
+		return { device, deleted }
+	}
+
+	it("frees the scratch texture when a later layer's upload fails", () => {
+		const box = document.createElement("div")
+		const shown = layer(0)
+
+		box.append(bitmap(0, 0, 960, 540), shown)
+		shown.append(bitmap(10, 20, 100, 50))
+
+		const { device, deleted } = failingDevice(2)
+		const target: GlTexture = { texture: {} as WebGLTexture, width: 960, height: 540 }
+		const free = vi.spyOn(device, "free")
+		const before = device.bytes
+
+		expect(composeSlide(device, box, { w: 960, h: 540 }, target)).toBe(false)
+		expect(free).toHaveBeenCalledTimes(1)
+
+		const scratch = free.mock.calls[0]?.[0]
+
+		expect(scratch?.width).toBe(1920)
+		expect(deleted).toContain(scratch?.texture)
+		expect(device.bytes).toBe(before)
 	})
 })
 

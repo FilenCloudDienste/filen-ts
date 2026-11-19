@@ -1,7 +1,8 @@
 import type { LinkedPart } from "../opc/package"
 import { children, RT, u32, utf16Text, type PptRecord, type RecordCounter } from "./records"
 import type { PptSound } from "./transitions"
-import { xmlText } from "./text"
+import { escapeAttribute } from "../xml/entities"
+import { withoutControls } from "./text"
 
 // Sounds and movies ([MS-PPT] §2.4.16 SoundCollectionContainer, §2.10.4–§2.10.9 and §2.10.25–§2.10.33) as
 // PresentationML media (ECMA-376 Part 1 §20.1.3.1–§20.1.3.6 on the picture shape's p:nvPr): an embedded sound becomes
@@ -49,7 +50,7 @@ export function pathUri(path: string): string {
 }
 
 function cString(data: Uint8Array, record: PptRecord): string {
-	return utf16Text(data, record.start, record.end)
+	return withoutControls(utf16Text(data, record.start, record.end))
 }
 
 // §2.10.6 ExMediaAtom: its exObjId.
@@ -251,7 +252,7 @@ export class PptMedia {
 
 				if (held === undefined) return undefined
 
-				return `<a:wavAudioFile r:embed="${add("audio", `../media/${held.part.slice(held.part.lastIndexOf("/") + 1)}`)}" name="${xmlText(held.name)}"/>`
+				return `<a:wavAudioFile r:embed="${add("audio", `../media/${held.part.slice(held.part.lastIndexOf("/") + 1)}`)}" name="${escapeAttribute(held.name)}"/>`
 			}
 			case "cd": {
 				// §2.12.10 TmsfTimeStruct: track, minute, second, frame (75 frames a second).

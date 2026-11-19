@@ -205,4 +205,42 @@ describe("link targets", () => {
 		select(3, 3)
 		expect(session.snapshot().context.link).toEqual({ target: "file:///C:/a.docx", anchor: null, text: "the file" })
 	})
+
+	// Word stores https://host/page#part as the relationship's target plus w:anchor.
+	it("takes a target with its anchor, and a link's text edit keeps both, saved", async () => {
+		expect(parseDocxEditorCommand({ type: "link.set", target: "https://e.example/docs", anchor: "sec-2.1", text: "Docs" })).toEqual({
+			type: "link.set",
+			target: "https://e.example/docs",
+			anchor: "sec-2.1",
+			text: "Docs"
+		})
+
+		const opened = await openBytes(
+			buildDocx({
+				body: '<w:p><w:hyperlink r:id="rIdL" w:anchor="install"><w:r><w:t>Install</w:t></w:r></w:hyperlink></w:p>',
+				relationships: [{ id: "rIdL", type: "hyperlink", target: "https://e.example/docs", external: true }]
+			})
+		)
+		const session = new DocxEditorSession(opened.context, { proof: writerProof(opened.context) })
+		const select = (from: number, to: number): void => {
+			session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, from, to)))
+		}
+
+		select(3, 3)
+		expect(session.snapshot().context.link).toEqual({ target: "https://e.example/docs", anchor: "install", text: "Install" })
+		// Unchanged: nothing to do.
+		expect(session.execute({ type: "link.set", target: "https://e.example/docs", anchor: "install" })).toBe(true)
+		expect(session.state.doc.textContent).toBe("Install")
+		expect(session.execute({ type: "link.set", target: "https://e.example/docs", anchor: "install", text: "Setup" })).toBe(true)
+		select(3, 3)
+		expect(session.snapshot().context.link).toEqual({ target: "https://e.example/docs", anchor: "install", text: "Setup" })
+
+		const result = await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+		const pkg = await OpcPackage.open(bytesSource(result.bytes as Uint8Array))
+		const rels = new TextDecoder().decode(await pkg.read("word/_rels/document.xml.rels"))
+		const document = new TextDecoder().decode(await pkg.read("word/document.xml"))
+
+		expect(rels).toContain('Target="https://e.example/docs"')
+		expect(document).toMatch(/<w:hyperlink r:id="[^"]+" w:anchor="install"><w:r><w:t>Setup<\/w:t><\/w:r><\/w:hyperlink>/)
+	})
 })

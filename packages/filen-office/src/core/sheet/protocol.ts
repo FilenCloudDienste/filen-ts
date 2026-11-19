@@ -1,3 +1,4 @@
+import type { ChartText } from "../drawingml/chart/builder"
 import type { ByteSource } from "../opc/io"
 import type { Slicing } from "../slicing"
 import type { NumFmtLocale } from "./numfmt/locale"
@@ -647,14 +648,14 @@ export interface SheetQueryMap {
 		// Triples: sheet, row, col.
 		result: { readonly cells: Uint32Array; readonly more: boolean; readonly version: number }
 	}
-	// Where Ctrl+arrow lands from `from`: the edge of the data region, or of the used area.
+	// Where Ctrl+arrow lands from `from`: the edge of the data region.
 	navigate: {
 		request: {
 			readonly sheet: SheetId
 			readonly row: number
 			readonly col: number
 			readonly direction: "up" | "down" | "left" | "right"
-			readonly to: "dataEdge" | "usedEdge"
+			readonly to: "dataEdge"
 		}
 		result: { readonly row: number; readonly col: number }
 	}
@@ -875,6 +876,9 @@ export interface SheetSessionSettings {
 	readonly author?: string
 	// The clock dates in the file are read from (ms since the epoch).
 	readonly clock?: () => number
+	// What charts show where the file names nothing (unnamed series, automatic titles), in the app's language;
+	// English without it.
+	readonly chartText?: ChartText
 }
 
 // What a grid reads from: tiles, layouts and queries. A read-only source (a database's tables) implements only this;

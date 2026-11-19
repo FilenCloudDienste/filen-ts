@@ -3,6 +3,7 @@ import { equationAuthors } from "./objects"
 import {
 	cssFont,
 	forEachSlotRun,
+	isChineseCharset,
 	isChineseLanguage,
 	symbolTable,
 	symbolText,
@@ -27,10 +28,12 @@ import { shadingColor } from "../theme/color"
 import { eighthPoints, halfPoints, points, twips } from "./units"
 
 // What layout needs from a font manager (FontManager satisfies it): faces are loaded by prepare() and
-// resolve() must only be trusted for requests that were prepared.
+// resolve() must only be trusted for requests that were prepared. charset() is the w:charset the font table
+// declares for a family; a source without it never applies Word's Chinese-font rule.
 export interface FontSource {
 	prepare(requests: Iterable<FontRequest>): Promise<void>
 	resolve(request: FontRequest): ResolvedFont
+	charset?(family: string): number | undefined
 }
 
 // Tracked-change look of a run in the Markup view.
@@ -289,6 +292,8 @@ export class RunStyles {
 	private readonly prepared = new Set<string>()
 	private readonly pending = new Set<string>()
 	private readonly loads = new Set<Promise<void>>()
+	// Per eastAsia family: whether the font table declares it GB2312 or Big5 (Word's Chinese-font rule).
+	private readonly chineseFonts = new Map<string, boolean>()
 	// Per style, the code table of a symbol font drawn without the font itself, whose characters must be
 	// drawn as the Unicode characters they show.
 	private readonly symbols: (SymbolTable | undefined)[] = []
@@ -407,10 +412,22 @@ export class RunStyles {
 				hint: run.fonts.hint,
 				complexScript: false,
 				chineseLanguage: isChineseLanguage(run.lang.eastAsia),
-				chineseFontCharset: false
+				// Only the eastAsia hint consults it.
+				chineseFontCharset: run.fonts.hint === "eastAsia" && this.chineseFont(run.fonts.eastAsia)
 			},
 			(start, end, slot) => out(start, end, this.style(run, slot, revision))
 		)
+	}
+
+	private chineseFont(family: string): boolean {
+		let chinese = this.chineseFonts.get(family)
+
+		if (chinese === undefined) {
+			chinese = isChineseCharset(this.fonts.charset?.(family))
+			this.chineseFonts.set(family, chinese)
+		}
+
+		return chinese
 	}
 
 	// Whether the run's automatic colour turns white over what lies behind it: its highlight, its shading, then

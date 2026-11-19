@@ -5,7 +5,6 @@ import {
 	MathFrame,
 	MathTreeError,
 	assertMathTree,
-	ommlParagraphToMathTrees,
 	ommlToMathTree,
 	styleText,
 	MathStyle,
@@ -301,10 +300,13 @@ describe("equations and paragraphs", () => {
 		expect(tree && show(tree)).toBe(
 			'math[display=block,align=left](mtable(mtr(mtd[columnalign=left](mi"a")) mtr(mtd[columnalign=left](mi"b"))))'
 		)
-		expect(ommlParagraphToMathTrees(document, node).map(show)).toEqual([
-			'math[display=block,align=left](mi"a")',
-			'math[display=block,align=left](mi"b")'
-		])
+
+		const single = parse(
+			`<m:oMathPara><m:oMathParaPr><m:jc m:val="right"/></m:oMathParaPr><m:oMath>${run("a")}</m:oMath></m:oMathPara>`
+		)
+		const one = ommlToMathTree(single, firstMath(single))
+
+		expect(one && show(one)).toBe('math[display=block,align=right](mi"a")')
 	})
 
 	it("matches Strict namespaces and other prefixes", () => {

@@ -50,6 +50,7 @@ export function sheetPdfJob(assets: PdfFontAssets, slicing: Slicing = WORKER_SLI
 				blob: new Blob(result.output.parts as ConstructorParameters<typeof Blob>[0], { type: "application/pdf" }),
 				pages: result.pages,
 				missingImages: result.missingImages,
+				missingObjects: result.missingObjects,
 				missingGlyphs: result.missingGlyphs,
 				unshapedRuns: result.unshapedRuns
 			}

@@ -411,6 +411,52 @@ describe("what a sheet's print settings change on paper", () => {
 		expect((await pages(bytes, { draft: true }))[0]).not.toContain("<image")
 	})
 
+	it("leaves an object that fails to draw off the page, records it as failed and draws the others", async () => {
+		const bytes = withMedia(buildFixture(DRAWINGS), { "xl/media/image1.png": PNG })
+		const { session, info } = await openFixture(bytes)
+
+		for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))
+
+		let failing: unknown = null
+		// drawing.render rejects for the first object it is asked for.
+		const source = new Proxy(session, {
+			get: (target, property) => {
+				const value: unknown = Reflect.get(target, property)
+
+				if (property !== "query") return typeof value === "function" ? value.bind(target) : value
+
+				return (name: string, args: { key?: unknown }, options?: unknown) => {
+					if (name === "drawing.render" && (failing === null || failing === args.key)) {
+						failing = args.key
+
+						return Promise.reject(new Error("render failed"))
+					}
+
+					return (target.query as (...all: unknown[]) => Promise<unknown>)(name, args, options)
+				}
+			}
+		})
+		const model = new SheetGridModel({ source, edit: session, info })
+		const settings = await model.session.query("print.settings", { sheet: 0 })
+
+		if (settings === null) throw new Error("no settings")
+
+		const job = await layOutPrint(
+			model,
+			[{ sheet: 0, name: "S", setup: settings.setup, ranges: settings.used === null ? [] : [settings.used], used: settings.used }],
+			MEASURE
+		)
+		const page = (await renderPrintPage({ job, values: VALUES, id: "f" }, 0)) ?? ""
+
+		expect(failing).not.toBeNull()
+		expect([...job.failed]).toEqual([`0:${String(failing)}:${job.sheets[0]?.objects.find(o => o.key === failing)?.stamp ?? ""}`])
+		// The picture and the text box: one of them is left off, the other drawn.
+		expect(Number(page.includes("<image")) + Number(page.includes(">Hello<"))).toBe(1)
+
+		job.dispose()
+		expect(job.failed.size).toBe(0)
+	})
+
 	it("prints a chart drawn from its cells at its frame's size", async () => {
 		const page = (await pages(buildFixture(chartFixture(barChart([SOLD, KEPT], { title: "Fruit sold" }))), {}))[0] ?? ""
 

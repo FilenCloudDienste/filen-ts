@@ -15,6 +15,7 @@ import {
 	type Xfrm
 } from "../../presentation/model"
 import { Namespaces, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
+import { concatBytes } from "../../xml/bytes"
 import { heldStyles } from "../../presentation/edit/apply/design"
 import { inheritedDeclarations } from "../../presentation/edit/canonical"
 import { RAW_PART_PREFIX } from "../../presentation/edit/ops"
@@ -150,7 +151,7 @@ export class OdpWriteSource {
 		const marker = encodeUtf8(`<office:automatic-styles>${[...this.retired.values()].join("")}</office:automatic-styles>`)
 		const sheet = new OdfStyleSheet(
 			styles === undefined ? parts.sheet.stylesDocument : parseXml(styles),
-			readContentPrologue(concat(head, marker, encodeUtf8("<office:body/>"), parts.content.rootClose))
+			readContentPrologue(concatBytes([head, marker, encodeUtf8("<office:body/>"), parts.content.rootClose]))
 		)
 		// The deck's context in all but its styles (pages, package facts, tallies).
 		const context = Object.create(parts.context) as OdpContext
@@ -360,7 +361,7 @@ export class OdpWriteSource {
 
 		return span.inject === undefined
 			? bytes.slice(span.start, span.end)
-			: concat(bytes.subarray(span.start, span.insertAt), span.inject, bytes.subarray(span.insertAt, span.end))
+			: concatBytes([bytes.subarray(span.start, span.insertAt), span.inject, bytes.subarray(span.insertAt, span.end)])
 	}
 
 	// The markup a source ref names, with the namespace declarations it needs to be read on its own (an inverse holds
@@ -434,22 +435,6 @@ export function odpWriteSource(parts: OdpParts): OdpWriteSource {
 	}
 
 	return source
-}
-
-function concat(...chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
 }
 
 // A value with each slide jump in it ({kind: "slide", slide}) naming the slide `refs` maps its ref to (copied where

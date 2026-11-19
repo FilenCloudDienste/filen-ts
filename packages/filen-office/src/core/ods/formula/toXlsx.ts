@@ -1,7 +1,7 @@
 import { functionPrefix } from "../../sheet/functions/catalogue"
 import { SHEET_MAX_COLS, SHEET_MAX_FORMULA_TEXT, SHEET_MAX_ROWS } from "../../sheet/protocol"
 import { prefixParameters, sheetNameNeedsQuotes, wellFormedFormula } from "../../sheet/refs/formulaRefs"
-import { columnName } from "../../sheet/refs/cellRef"
+import { columnIndex, columnName } from "../../sheet/refs/cellRef"
 
 // OpenFormula (ODF 1.3 Part 4) as the store's formula grammar (SpreadsheetML file syntax without "="): references
 // [.A1] [Sheet.A1:.B2] become A1 Sheet!A1:B2, ";" separates arguments as ",", inline arrays {1;2|3;4} become
@@ -64,12 +64,10 @@ const ERRORS = /#(?:NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|GETTING_DATA)/y
 const MAX_SOURCE = 4 * SHEET_MAX_FORMULA_TEXT
 
 // A column's letters as its index, -1 past the grid.
-function columnIndex(letters: string): number {
-	let index = 0
+function gridColumn(letters: string): number {
+	const index = columnIndex(letters)
 
-	for (let k = 0; k < letters.length; k++) index = index * 26 + (letters.charCodeAt(k) - 64)
-
-	return index <= SHEET_MAX_COLS ? index - 1 : -1
+	return index < SHEET_MAX_COLS ? index : -1
 }
 
 // Whether an address's column and row (either may be absent) are on the grid.
@@ -77,7 +75,7 @@ function inGrid(address: Address): boolean {
 	const column = address.column.replace("$", "")
 	const row = address.row.replace("$", "")
 
-	return (column === "" || columnIndex(column) >= 0) && (row === "" || Number(row) <= SHEET_MAX_ROWS)
+	return (column === "" || gridColumn(column) >= 0) && (row === "" || Number(row) <= SHEET_MAX_ROWS)
 }
 
 export function sheetRef(name: string): string {
@@ -154,7 +152,7 @@ function shifted(address: Address, shift: ReferenceShift): Address | null {
 	let row = address.row
 
 	if (column !== "" && !column.startsWith("$")) {
-		const index = columnIndex(column) + shift.cols
+		const index = gridColumn(column) + shift.cols
 
 		if (index < 0 || index >= SHEET_MAX_COLS) return null
 
@@ -178,7 +176,7 @@ export function cellAddress(address: string): { readonly row: number; readonly c
 
 	if (read === null || read.error || read.column === "" || read.row === "" || !inGrid(read)) return null
 
-	return { row: Number(read.row.replace("$", "")) - 1, col: columnIndex(read.column.replace("$", "")) }
+	return { row: Number(read.row.replace("$", "")) - 1, col: gridColumn(read.column.replace("$", "")) }
 }
 
 // The text of a reference in brackets (§5.8), without them; `shift` moves its relative parts.

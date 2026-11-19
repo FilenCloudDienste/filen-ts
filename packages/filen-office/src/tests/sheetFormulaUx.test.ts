@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sheetFunction } from "../core/sheet/functions/catalogue"
+import { ARGUMENT_LABELS, sheetFunction } from "../core/sheet/functions/catalogue"
 import {
 	acceptSuggestion,
 	argumentAt,
@@ -59,6 +59,17 @@ describe("the formula being typed", () => {
 				.map(part => part.text)
 				.join("")
 		).toMatch(/^SUM\(number; \[number\]; …\)$/)
+		// Each argument part carries the id that keys its label, so the app can show it translated.
+		expect(
+			signatureParts(ifs)
+				.filter(part => part.argument !== undefined)
+				.map(part => [part.id, part.optional, part.id === undefined ? "" : ARGUMENT_LABELS[part.id]])
+		).toEqual([
+			["logical_test", false, "logical test"],
+			["value_if_true", false, "value if true"],
+			["value_if_false", true, "value if false"]
+		])
+		expect(signatureParts(ifs).filter(part => part.argument === undefined && part.id !== undefined)).toEqual([])
 		expect([0, 1, 2, 5].map(index => argumentAt(sum, index))).toEqual([0, 1, 1, 1])
 		expect(argumentAt(ifs, 3)).toBe(-1)
 	})

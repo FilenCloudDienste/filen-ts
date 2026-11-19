@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import { docxSchema, freshSlice } from "@filen/office/core/docx/edit"
 import { sourceCopies } from "../core/docx/edit/session"
+import { docxComments } from "../core/docx/review/comments"
 import { EditSink } from "@filen/office/react/docx/editor"
 import { safeClipboardHtml } from "../react/docx/edit/sink"
 import { buildDocx, p } from "./docxSynthetic"
@@ -288,6 +289,102 @@ describe("EditSink clipboard commands", () => {
 		expect(sink.selectAll()).toBe(true)
 		expect(editor.selection().from).toBe(0)
 		expect(editor.selection().to).toBe(editor.state.doc.content.size)
+		sink.destroy()
+	})
+})
+
+// A Wingdings check mark (F0FC, U+2713 as shown) inserted with Insert > Symbol, and a Wingdings pencil (F021, U+1F589,
+// a surrogate pair) under a comment.
+const SYMBOL_DOC = buildDocx({
+	body:
+		'<w:p><w:r><w:t xml:space="preserve">Done </w:t></w:r><w:r><w:sym w:font="Wingdings" w:char="F0FC"/></w:r>' +
+		'<w:r><w:t xml:space="preserve"> end</w:t></w:r></w:p>' +
+		'<w:p><w:r><w:t xml:space="preserve">Write </w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:sym w:font="Wingdings" w:char="F021"/></w:r>' +
+		'<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r><w:r><w:t xml:space="preserve"> here</w:t></w:r></w:p>' +
+		p("Third paragraph"),
+	comments: '<w:comment w:id="0" w:author="Bo"><w:p><w:r><w:t>Pencil</w:t></w:r></w:p></w:comment>'
+})
+
+function symbols(editor: PagedEditor): { char: unknown; font: unknown }[] {
+	const out: { char: unknown; font: unknown }[] = []
+
+	editor.state.doc.descendants(node => {
+		if (node.type.name === "symbol") out.push({ char: node.attrs["char"], font: node.attrs["font"] })
+
+		return true
+	})
+
+	return out
+}
+
+describe("EditSink clipboard of symbol-font characters", () => {
+	let host: HTMLDivElement
+
+	beforeEach(() => {
+		host = document.createElement("div")
+		document.body.appendChild(host)
+	})
+
+	afterEach(() => host.remove())
+
+	it("copies a symbol as the character it shows, reads it so, and pastes the HTML back as the symbol", async () => {
+		const { editor } = await pagedEditor(SYMBOL_DOC)
+		const sink = new EditSink(editor, host, { label: "Document", caretClientRect: () => undefined })
+		const start = paragraphStart(editor, 0)
+
+		select(sink, start, start + "Done ✓ end".length)
+
+		const content = sink.clipboardContent()
+		const shown = document.createElement("div")
+
+		shown.innerHTML = content?.html ?? ""
+		expect(content?.text).toBe("Done \u2713 end")
+		expect(shown.textContent).toContain("Done \u2713 end")
+		expect(shown.textContent).not.toContain("\uf0fc")
+		// What assistive technology reads in the sink.
+		expect(sink.view.dom.textContent).toContain("Done \u2713 end")
+		expect(sink.view.dom.textContent).not.toContain("\uf0fc")
+
+		const third = paragraphStart(editor, 2)
+
+		select(sink, third, third)
+		expect(sink.paste({ html: content?.html ?? "" })).toBe(true)
+		expect(symbols(editor)).toEqual([
+			{ char: 0xf0fc, font: "Wingdings" },
+			{ char: 0xf021, font: "Wingdings" },
+			{ char: 0xf0fc, font: "Wingdings" }
+		])
+		expect(paragraphs(editor)[2]).toBe("Done  endThird paragraph")
+		sink.destroy()
+	})
+
+	it("keeps a pasted symbol's code and font as attribute values only", () => {
+		expect(safeClipboardHtml('<span data-fo-sym="61692" data-fo-sym-font="W&quot;><img src=x>">x</span>')).toBe(
+			'<p><span data-fo-sym="61692" data-fo-sym-font="W&quot;&gt;&lt;img src=x&gt;"></span></p>'
+		)
+		expect(safeClipboardHtml('<span data-fo-sym="99999999">x</span>')).toBe("<p>x</p>")
+	})
+
+	it("moves a comment on a symbol a cut takes when its text is pasted back", async () => {
+		const { editor } = await pagedEditor(SYMBOL_DOC)
+		const sink = new EditSink(editor, host, { label: "Document", caretClientRect: () => undefined })
+		const store = docxComments(editor)
+		const second = paragraphStart(editor, 1)
+		const end = second + editor.state.doc.child(1).content.size
+
+		select(sink, second, end)
+
+		const content = sink.clipboardContent()
+
+		expect(content?.text).toBe("Write \u{1f589} here")
+		expect(sink.deleteSelection()).toBe(true)
+		expect(store.threads()).toEqual([])
+
+		const third = paragraphStart(editor, 2)
+
+		select(sink, third, third)
+		expect(sink.paste({ text: content?.text ?? "" })).toBe(true)
+		expect(store.threads().map(thread => thread.id)).toEqual(["0"])
 		sink.destroy()
 	})
 })

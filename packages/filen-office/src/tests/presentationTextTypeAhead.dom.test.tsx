@@ -2,41 +2,18 @@
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
-import { rgba } from "../core/drawingml/index"
-import { slideRef, type ShapeRef, type TextBody } from "../core/presentation/model"
+import type { ShapeRef, TextBody } from "../core/presentation/model"
 import type { TextSeed } from "../core/presentation/output"
-import { layoutBody } from "../core/presentation/text/body"
-import { resolveBody } from "../core/presentation/text/resolve"
-import { transferableLayout } from "../core/presentation/text/transfer"
-import { MeasureCache } from "../core/text/index"
 import type { PresentationSessionApi } from "../dom/presentation/protocol"
 import { PresentationTextEditor } from "../react/presentation/edit/text/TextEditor"
 import { createTextEditing } from "../react/presentation/edit/text/editing"
-import { FakeMeasurer, testFont } from "./textFixtures"
+import { laid, seedOf, SHAPE } from "./presentationTextEditorFixtures.dom"
+import { FakeMeasurer } from "./textFixtures"
 
 // Keys typed from the moment a body is asked for until its editor is ready (its seed still on the way) are held and
 // then typed into it, in order: none is dropped, whether the body is a slide's text box or notes still being made.
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-const SHAPE: ShapeRef = { slide: slideRef(7), id: 3 }
-const ENV = { fonts: { resolve: () => testFont() }, cache: new MeasureCache(new FakeMeasurer()) }
-
-function laid(body: TextBody) {
-	const result = layoutBody(
-		resolveBody(body, { listStyles: [], bodyPr: [], fonts: { color: () => rgba("000000"), typeface: typeface => typeface } }),
-		{ width: 300, height: 100 },
-		ENV
-	)
-
-	return { page: result.page, layout: transferableLayout(result) }
-}
-
-function seedOf(text: string): TextSeed {
-	const body: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: text === "" ? [] : [{ kind: "r", text, rPr: {} }] }] }
-
-	return { shape: SHAPE, revision: 1, body, resolved: [{ pPr: {}, runs: [{}] }], ...laid(body), matrix: [1, 0, 0, 1, 40, 50] }
-}
 
 function frame(): HTMLElement {
 	const element = document.createElement("div")

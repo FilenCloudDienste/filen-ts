@@ -2,15 +2,16 @@ import { describe, expect, it } from "vitest"
 import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import { insertedImage, insertedImageWritten } from "../core/presentation/edit/apply/picture"
 import type { DeckOp } from "../core/presentation/edit/ops"
+import type { SmartArtRenderer } from "../core/presentation/render/services"
 import type { ShapeNode, ShapeRef, SlideNode } from "../core/presentation/model"
 import { diagramOutline, type DiagramOutlineNode, type SmartArtInfo } from "../core/smartart/edit"
 import { parseXml } from "../core/xml/index"
-import { pptxParts } from "../dom/presentation/engine/open/pptx"
-import { smartartCapability, smartArtRenderer } from "../dom/presentation/engine/smartart"
+import { smartartCapability } from "../dom/presentation/engine/smartart"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { image } from "./presentationObjectsFixtures"
 import { danglingReferences } from "./pptxWriteFixtures"
+import { diagramRenderer } from "./smartartDriveFixtures"
 
 // A picture put into a SmartArt picture placeholder through the engine (apply, relayout, save, commit, rebase): the
 // placeholder shows it at once, a save stores the image once and relates it from the diagram's data and drawing, an
@@ -28,13 +29,10 @@ function deck(): Uint8Array {
 	})
 }
 
-async function diagram(): Promise<{ d: Drive; target: ShapeRef }> {
+async function diagram(): Promise<{ d: Drive; target: ShapeRef; renderer: SmartArtRenderer }> {
 	const d = await driveSession(deck(), "pptx")
 	const slide = d.session.deck.slides[0] as SlideNode["ref"]
-
-	smartArtRenderer(d.session, {
-		services: { xml: part => pptxParts(d.session.deck)?.document(part), relationship: () => undefined, contentType: () => undefined }
-	})
+	const renderer = diagramRenderer(d.session)
 
 	const inserted = await d.command({
 		family: "smartart",
@@ -55,7 +53,7 @@ async function diagram(): Promise<{ d: Drive; target: ShapeRef }> {
 
 	const shape = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(each => each.name === "Diagram") as ShapeNode
 
-	return { d, target: { slide, id: shape.id } }
+	return { d, target: { slide, id: shape.id }, renderer }
 }
 
 async function info(d: Drive, target: ShapeRef): Promise<SmartArtInfo> {
@@ -255,17 +253,17 @@ describe("a picture in a SmartArt picture placeholder", () => {
 	})
 
 	it("relays the diagram out with the picture before the save, and draws it from the slide", async () => {
-		const { d, target } = await diagram()
+		const { d, target, renderer } = await diagram()
 
 		expect(await setPicture(d, target, 32)).toBe(true)
 
-		const laid = await smartartCapability.relayout(d.session, target, SLICING)
-		const pictureShapes = laid.shapes.filter(shape => {
-			const fill = shape.props?.fill
+		const frame = (d.session.deck.nodes.get(target.slide) as SlideNode).shapes.find(each => each.id === target.id)?.frame
 
-			return fill !== undefined && fill !== "none" && fill.kind === "picture" && fill.inserted !== undefined
-		})
+		if (frame?.kind !== "smartart") throw new Error("not a diagram")
 
-		expect(pictureShapes).toHaveLength(1)
+		const laid = await renderer.relayout(target, frame, SLICING)
+
+		// The drawing the slide shows fills one shape with the inserted picture.
+		expect(laid?.drawingXml.match(/<a:blip r:embed="inserted:\d+"/gu)).toHaveLength(1)
 	})
 })

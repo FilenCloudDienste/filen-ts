@@ -1,6 +1,5 @@
 import type { Paint, Stroke } from "../../drawingml/index"
 import type { PdfDrawingData } from "../../drawingml/pdf"
-import type { RenderEffects } from "../../presentation/output"
 import type { BundledFamily } from "../../fonts/substitutes"
 import type { FontSlot } from "../../fonts/slots"
 import type { MathElement } from "../../math/index"
@@ -40,12 +39,12 @@ export interface DocxPdfStyle {
 	readonly emphasis?: number
 	readonly markY?: number
 	// DrawingML text (presentations; DocxTextStyle's fields of the same names): the fill drawn in place of `color`
-	// (DocxPdfDocument.paints index), the glyphs' opacity, their outline (DocxPdfDocument.strokes index) and effects
-	// (DocxPdfDocument.textEffects index). Absent, the run draws exactly as without them.
+	// (DocxPdfDocument.paints index), the glyphs' opacity and their outline (DocxPdfDocument.strokes index). Absent,
+	// the run draws exactly as without them. Text effects (shadow, glow, reflection) are not drawn: the presentation
+	// export counts them as left out instead of carrying them here.
 	readonly paint?: number
 	readonly alpha?: number
 	readonly outline?: number
-	readonly effects?: number
 }
 
 // Where a style's glyphs come from: a bundled family (substitutes, and faces a document may not have
@@ -187,8 +186,7 @@ export interface DocxPdfDocument {
 	readonly title: string
 	// Its core properties' author, subject and keywords (Info /Author, /Subject, /Keywords).
 	readonly properties?: PdfDocumentProperties
-	// The tables DrawingML text styles index (DocxPdfStyle.paint, .outline, .effects); absent for documents.
+	// The tables DrawingML text styles index (DocxPdfStyle.paint, .outline); absent for documents.
 	readonly paints?: readonly Paint[]
 	readonly strokes?: readonly Stroke[]
-	readonly textEffects?: readonly RenderEffects[]
 }

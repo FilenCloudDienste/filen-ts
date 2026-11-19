@@ -36,6 +36,7 @@ import {
 	type TextBody
 } from "../../presentation/model"
 import { notesBody } from "../../presentation/notes"
+import { shapeById } from "../../presentation/shapes"
 import { builtinTableStyle, builtinTableStyleFamily } from "../../presentation/render/tableStyles"
 import { D } from "../../drawingml/reader"
 import { resolveColor, themeTypeface, type ColorContext, type PresentationTheme } from "../../presentation/theme"
@@ -949,7 +950,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		const out = new Map<string, string>()
 
 		for (const { shape: id, paragraph } of odpParagraphTargets(owner.timing)) {
-			const shape = findShape(owner.shapes, id)
+			const shape = shapeById(owner.shapes, id)
 
 			if (shape !== undefined) out.set(odpParagraphKey(id, paragraph), odpParagraphId(shape, paragraph, undefined, idPrefix(owner)))
 		}
@@ -1250,7 +1251,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			const gone = new Set<number>()
 
 			for (const id of odpTargetIds(slide.timing)) {
-				const shape = findShape(slide.shapes, id)
+				const shape = shapeById(slide.shapes, id)
 
 				if (shape === undefined || !shapes.includes(` xml:id="${escapeAttribute(odpTargetId(shape, undefined, idPrefix(slide)))}"`))
 					gone.add(id)
@@ -1391,16 +1392,4 @@ export async function writeFreshOdp(
 	await writeZip(newOdfPlan({ mediaType: fresh.mediaType, parts: fresh.parts }), null, sink)
 
 	return { report: fresh.report }
-}
-
-function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.id === id) return shape
-
-		const inner = shape.children === undefined ? undefined : findShape(shape.children, id)
-
-		if (inner !== undefined) return inner
-	}
-
-	return undefined
 }

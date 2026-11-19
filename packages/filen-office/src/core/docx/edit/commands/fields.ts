@@ -15,8 +15,10 @@ export type FieldCommand =
 	// A Word date picture ("d MMMM yyyy"): a DATE field, or with `field` false the date as text (Word's Date and
 	// Time without Update automatically).
 	| { readonly type: "insert.date"; readonly format: string; readonly field?: boolean }
-	// A field of FIELD_CATALOGUE by its code (` SEQ Figure \* ARABIC `, ` PAGEREF _Ref1 \h `).
-	| { readonly type: "insert.field"; readonly instruction: string }
+	// A field of FIELD_CATALOGUE by its code (` SEQ Figure \* ARABIC `, ` PAGEREF _Ref1 \h `). `caretLanguage`: a
+	// DATE or TIME field's picture is the short date or time of the language at the caret instead (Word's Alt+Shift+D
+	// and T), the code's own in English.
+	| { readonly type: "insert.field"; readonly instruction: string; readonly caretLanguage?: boolean }
 	| { readonly type: "bookmark.add"; readonly name: string }
 	| { readonly type: "bookmark.delete"; readonly name: string }
 	| { readonly type: "bookmark.rename"; readonly name: string; readonly to: string }
@@ -46,9 +48,11 @@ export const FIELD_COMMANDS: readonly DocxCommandInfo<FieldCommand["type"]>[] = 
 	{ type: "bookmark.rename", labelKey: "docx.bookmark.rename", icon: "bookmark-rename", input: "text", ...document }
 ]
 
-// The codes Word's Alt+Shift+D and Alt+Shift+T insert (Control+Shift+D and T on a Mac).
+// The codes en-US Word's Alt+Shift+D and Alt+Shift+T insert (Control+Shift+D and T on a Mac); in another language
+// the date is its short date and the time 24-hour (TIME_24_FIELD_CODE).
 export const DATE_FIELD_CODE = ' DATE \\@ "M/d/yyyy" '
 export const TIME_FIELD_CODE = ' TIME \\@ "h:mm am/pm" '
+export const TIME_24_FIELD_CODE = ' TIME \\@ "HH:mm" '
 
 // The fields insert.field makes (those an update computes), with an example code each for a picker.
 export const FIELD_CATALOGUE: readonly { readonly type: string; readonly example: string }[] = [
@@ -64,10 +68,10 @@ export const FIELD_CATALOGUE: readonly { readonly type: string; readonly example
 ]
 
 // Word's bookmark names: a letter, then letters, digits and underscores, 40 at most (hidden ones, starting
-// with "_", are Word's own).
-const BOOKMARK_NAME = /^\p{L}[\p{L}\p{N}_]{0,39}$/u
+// with "_", are Word's own). Here, not with the bookmarks, so the command parsers stay free of the engine.
+export const BOOKMARK_NAME = /^\p{L}[\p{L}\p{N}_]{0,39}$/u
 // An existing bookmark: Word's hidden ones included.
-const ANY_BOOKMARK_NAME = /^[\p{L}_][\p{L}\p{N}_]{0,39}$/u
+export const ANY_BOOKMARK_NAME = /^[\p{L}_][\p{L}\p{N}_]{0,39}$/u
 // A date picture: no quotes or backslashes (it is written inside a quoted switch argument).
 const DATE_PICTURE = /^[\p{L}\p{N} .,:/\-']{1,64}$/u
 // A field code: printable, at most what Word's field dialog takes.
@@ -102,13 +106,18 @@ export const parseFieldCommand: DocxCommandParser<FieldCommand> = (type, value) 
 		}
 		case "insert.field": {
 			const instruction = stringArg(value, "instruction", 255, 1)
+			const caretLanguage = optional(value, "caretLanguage", boolArg)
 
-			return instruction === undefined ||
+			if (
+				instruction === undefined ||
+				!caretLanguage.ok ||
 				!INSTRUCTION.test(instruction) ||
 				hasControl(instruction) ||
 				!CATALOGUE_TYPES.has(fieldCodeType(instruction))
-				? undefined
-				: { type, instruction }
+			)
+				return undefined
+
+			return caretLanguage.value === undefined ? { type, instruction } : { type, instruction, caretLanguage: caretLanguage.value }
 		}
 		case "bookmark.add":
 		case "bookmark.delete": {

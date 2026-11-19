@@ -61,35 +61,6 @@ export interface DocxViewerState {
 	}
 }
 
-export type DocxCommandGroup = "navigation" | "zoom" | "find"
-
-export interface DocxCommandInfo {
-	readonly type: DocxViewerCommandType
-	// A stable id an app maps to its own translation.
-	readonly labelKey: string
-	// A neutral icon id an app maps to its own icon set; absent for commands without one.
-	readonly icon?: string
-	// Platform-neutral shortcut ("mod" = Cmd on Apple platforms, Ctrl elsewhere).
-	readonly shortcut?: string
-	readonly group: DocxCommandGroup
-}
-
-export const DOCX_VIEWER_COMMANDS: readonly DocxCommandInfo[] = [
-	{ type: "page.previous", labelKey: "docx.page.previous", icon: "chevron-left", group: "navigation" },
-	{ type: "page.next", labelKey: "docx.page.next", icon: "chevron-right", group: "navigation" },
-	{ type: "page.goto", labelKey: "docx.page.goto", group: "navigation" },
-	{ type: "zoom.out", labelKey: "docx.zoom.out", icon: "zoom-out", shortcut: "mod+-", group: "zoom" },
-	{ type: "zoom.in", labelKey: "docx.zoom.in", icon: "zoom-in", shortcut: "mod+=", group: "zoom" },
-	{ type: "zoom.set", labelKey: "docx.zoom.set", group: "zoom" },
-	{ type: "zoom.by", labelKey: "docx.zoom.by", group: "zoom" },
-	{ type: "zoom.fitWidth", labelKey: "docx.zoom.fitWidth", icon: "fit-width", group: "zoom" },
-	{ type: "find.open", labelKey: "docx.find.open", icon: "search", shortcut: "mod+f", group: "find" },
-	{ type: "find.close", labelKey: "docx.find.close", icon: "close", shortcut: "escape", group: "find" },
-	{ type: "find.query", labelKey: "docx.find.query", group: "find" },
-	{ type: "find.next", labelKey: "docx.find.next", icon: "chevron-down", shortcut: "enter", group: "find" },
-	{ type: "find.previous", labelKey: "docx.find.previous", icon: "chevron-up", shortcut: "shift+enter", group: "find" }
-]
-
 export function clampZoom(zoom: number): number {
 	return Number.isFinite(zoom) ? Math.min(DOCX_MAX_ZOOM, Math.max(DOCX_MIN_ZOOM, zoom)) : 1
 }

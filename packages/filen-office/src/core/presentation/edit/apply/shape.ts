@@ -6,16 +6,19 @@ import { matchShapes } from "./match"
 import { applyMotionPath, lockedPathOps } from "./motionPath"
 import { classifyHref } from "../../actions"
 import { motionBehaviors } from "../../../anim/motionEdit"
-import { inheritLevels, resolveShape } from "../../inherit"
+import { inheritLevels, nearestGroup, resolveShape } from "../../inherit"
 import {
 	refused,
 	type Deck,
+	type FillProps,
+	type LineProps,
 	type Refused,
 	type ShapeNode,
 	type ShapePropsEdit,
 	type ShapeRef,
 	type SlideNode,
 	type SlideRef,
+	type SourceRef,
 	type Xfrm
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
@@ -40,6 +43,8 @@ export interface SourceReading extends ApplyContext {
 	readShape(slide: SlideNode, raw: Uint8Array): ShapeNode | Refused
 	// Whether a shape locked by proof gate 1 still moves (its xfrm proves on its own).
 	movable(shape: ShapeNode): boolean
+	// A pptx shape's own a:ln (its spPr's) as the source holds it, read as the model's type; undefined when it has none.
+	sourceLine?(src: SourceRef): LineProps | undefined | Refused
 	// Pasted markup and the relationships it names given to `slide` (pptx): each relationship under an id the slide has
 	// free (its own where it is), the markup renamed to match, a part of another deck named in this one. Applied again
 	// (a redo), the op as applied keeps its ids.
@@ -732,6 +737,42 @@ function setProps(
 	bump(node)
 
 	return { kind: "applied", inverse: back, op }
+}
+
+const BLACK: FillProps = { kind: "solid", color: { kind: "srgb", rgb: "000000" } }
+
+// The line as drawn now with the op's fields replaced, set as one setProps: the nearest level's line (an edit's value,
+// else its pptx source a:ln, stopping at a level with its own p:style, which then gives the rest). A line turned on
+// over none (a "none" line, a line with no fill as PowerPoint writes No Outline, or no line at any level and no
+// p:style) without a colour is drawn solid black.
+function patchLine(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "patchLine" }, context: ApplyContext): ApplyResult<typeof op> {
+	const at = findShape(node.shapes, op.target.id)
+
+	if (at === undefined) return refused("notFound", `shape ${String(op.target.id)}`)
+
+	const { levels } = inheritLevels(deck, node, at.shape)
+	const source = reading(context)
+	const current = nearestGroup<(typeof levels)[number], LineProps | "none" | Refused>(levels, true, level => {
+		const own = level.shape.props?.ln
+
+		if (own !== undefined) return own
+
+		const src = level.shape.src
+
+		if (src?.format !== "pptx") return undefined
+
+		return source?.sourceLine === undefined ? refused("notImplemented", "a source line") : source.sourceLine(src)
+	})
+
+	if (current !== undefined && isRefused(current)) return current
+
+	const line: LineProps = { ...(current === undefined || current === "none" ? {} : current), ...op.line }
+	const off =
+		current === "none" || current?.fill === "none" || (current === undefined && !levels.some(level => level.shape.style !== undefined))
+	const ln = op.line.fill === undefined && off ? { ...line, fill: BLACK } : line
+	const result = setProps(node, { family: "shape", kind: "setProps", target: op.target, props: { ln } }, context, deck.format)
+
+	return isRefused(result) ? result : { kind: "applied", inverse: result.inverse, op }
 }
 
 // setStyle, setAlt and setAction: a typed inverse for a shape an op made, a replacement for one backed by source.
@@ -1499,6 +1540,8 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 			return namesLostImage(deck, op.props)
 				? refused("notFound", "an image no longer held")
 				: setProps(node, op, context, deck.format)
+		case "patchLine":
+			return patchLine(deck, node, op, context)
 		case "setStyle":
 			return applied(
 				setField(
@@ -1643,6 +1686,8 @@ function shapeTouches(op: ShapeOp): readonly Touch[] {
 				shape: op.target.id,
 				dirt: { kind: "props", group }
 			}))
+		case "patchLine":
+			return [{ kind: "shape", slide: op.target.slide, shape: op.target.id, dirt: { kind: "props", group: "ln" } }]
 		case "setStyle":
 			return [{ kind: "shape", slide: op.target.slide, shape: op.target.id, dirt: { kind: "props", group: "style" } }]
 		case "group":

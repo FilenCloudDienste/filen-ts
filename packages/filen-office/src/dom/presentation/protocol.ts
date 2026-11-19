@@ -1,6 +1,6 @@
 import type { CompiledTimegraph } from "../../core/anim/model"
 import type { PresentationDesignInfo } from "../../core/presentation/edit/commands/design"
-import type { DeckOp, FileLike, ImportedSlide, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { DeckOp, FileLike, ImportedSlide, InsertedMedia, PictureAdjust, SmartArtDefRef } from "../../core/presentation/edit/ops"
 import type { PresentationClip } from "../../core/presentation/edit/clip"
 import type { SlideReview } from "../../core/presentation/comments"
 import type { SlideOutline } from "../../core/presentation/outline"
@@ -8,6 +8,7 @@ import type { SmartArtInfo } from "../../core/smartart/edit"
 import type {
 	CustomShow,
 	DeckVariant,
+	EdgeFractions,
 	Format,
 	GateReason,
 	PresentationRefusal,
@@ -20,6 +21,7 @@ import type {
 } from "../../core/presentation/model"
 import type { SlideRender, TextPage, TextSeed, TransferableTextLayout } from "../../core/presentation/output"
 import type { PlaceholderPrompts } from "../../core/presentation/render/prompts"
+import type { ChartText } from "../../core/drawingml/chart/builder"
 import type { DocxFontFace } from "../docx/protocol"
 import type { TextMailboxTicket } from "./textMailbox"
 import type { ChartData } from "../../core/presentation/edit/apply/chart"
@@ -164,7 +166,9 @@ export type PresentationEvent =
 // seed: the body open in the text editor view, laid out again, when the step touched it (the view reseeds from it).
 export type CommandResult =
 	| { readonly ok: true; readonly revision: number; readonly dirty: boolean; readonly seed?: TextSeed }
-	| { readonly ok: false; readonly refusal: PresentationRefusal }
+	// detail: what the apply family named as refused (the blocking shape, say), English, for logs and reports only, never
+	// shown raw to a user.
+	| { readonly ok: false; readonly refusal: PresentationRefusal; readonly detail?: string }
 
 // Cut and Copy (engine/clip.ts): the shapes of one slide, or slides (a cut's held as its delete holds them, for the
 // paste that puts them back).
@@ -283,6 +287,12 @@ export interface ConversionReport {
 	readonly losses: readonly { readonly kind: string; readonly count: number; readonly slides?: readonly number[] }[]
 }
 
+// A picture's crop (1/100,000 of the box per edge) and adjustments, each absent when it has none.
+export interface PictureFormat {
+	readonly crop?: EdgeFractions
+	readonly adjust?: PictureAdjust
+}
+
 export interface PresentationSessionApi {
 	// prompts: the editor's view of an editable deck: empty placeholders carry their prompt (SlideLayer.prompt) in the
 	// open's prompt strings. Nothing else asks for them.
@@ -340,6 +350,8 @@ export interface PresentationSessionApi {
 	// A chart frame's chart for the Chart tab (info null when the chart does not read) and, with `workbook`, its data
 	// as a workbook for Edit Data (kind "xls": an embedded .xls the first Edit Data turns into an .xlsx part).
 	chartData(target: ShapeRef, options?: { readonly workbook?: boolean }): Promise<ChartData>
+	// A picture's crop and adjustments as an edit of it starts from (the Picture tab's Crop and Corrections dialogs).
+	pictureFormat(target: ShapeRef): Promise<PictureFormat>
 	timegraph(slide: SlideRef): Promise<CompiledTimegraph>
 	layers(slide: SlideRef, widthPx: number, plan: LayerPlan): Promise<readonly ShowLayer[]>
 	// Writes to the save port (pull protocol, ≤ 1 MiB chunks, ≤ 4 in flight).
@@ -386,6 +398,7 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"smartArtPreview",
 	"smartArtInfo",
 	"chartData",
+	"pictureFormat",
 	"timegraph",
 	"layers",
 	"save",
@@ -409,6 +422,9 @@ export interface PresentationOpenOptions {
 	// The editor's empty-placeholder prompts in the page's locale: the open window streams with them, and render()
 	// adds them when asked (an editable deck only).
 	readonly prompts?: PlaceholderPrompts
+	// What charts show where the file names nothing (unnamed series, automatic titles) in the page's locale; English
+	// without it.
+	readonly chartText?: ChartText
 }
 
 export type PresentationCall = {

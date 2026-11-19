@@ -1,6 +1,6 @@
+import { escapeAttribute } from "../xml/entities"
 import { u32 } from "./records"
 import type { SlideShowInfo } from "./slides"
-import { xmlText } from "./text"
 
 // A slide's transition ([MS-PPT] §2.6.6 SlideShowSlideInfoAtom) as PresentationML p:transition (ECMA-376 Part 1
 // §19.3.1.50, §19.5): the effect and its variant, its speed, how the slide advances and the sound it starts or stops.
@@ -104,7 +104,7 @@ export function transitionXml(show: SlideShowInfo, sound: (soundIdRef: number) =
 		const held = sound(u32(show.raw, 4))
 
 		if (held !== undefined)
-			soundXml = `<p:sndAc><p:stSnd${(flags & LOOP) !== 0 ? ' loop="1"' : ""}><p:snd r:embed="${held.rId}" name="${xmlText(held.name)}"/></p:stSnd></p:sndAc>`
+			soundXml = `<p:sndAc><p:stSnd${(flags & LOOP) !== 0 ? ' loop="1"' : ""}><p:snd r:embed="${held.rId}" name="${escapeAttribute(held.name)}"/></p:stSnd></p:sndAc>`
 	}
 
 	const content = (effect ?? "") + soundXml

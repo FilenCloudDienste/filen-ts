@@ -1,5 +1,5 @@
 export { builtinFormatCode, EXCEL_BUILTIN_FORMATS, IMPLIED_BUILTINS } from "./builtins"
-export { MAX_SERIAL_1900, MAX_SERIAL_1904, serialDate, type DateParts } from "./date"
+export { dateSerial, MAX_SERIAL_1900, MAX_SERIAL_1904, serialDate, type DateParts } from "./date"
 export {
 	formatGeneral,
 	formatNumberInto,
@@ -19,10 +19,12 @@ export {
 	COMMA_STYLE,
 	MAX_NUMFMT_LENGTH,
 	NUMBER_FORMAT_PRESETS,
+	numberFormatPresets,
 	PERCENT_STYLE,
 	changedDecimals,
 	numFmtCategory,
 	numFmtProblem,
+	type NumberFormatPreset,
 	type NumFmtCategory,
 	type NumFmtProblem
 } from "./edit"

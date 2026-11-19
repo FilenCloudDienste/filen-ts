@@ -7,8 +7,7 @@ import { abortSyncRange } from "../../dom/pdfedit/syncRange"
 import { estimateSavePeak, fitsBudget, PDF_DESKTOP_MEMORY, PDF_MOBILE_MEMORY } from "../../core/pdfedit/budget"
 import { makePdf, wasmTrap } from "./fixtures"
 import { startEngine, stopEngines } from "./harness"
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { pdfSignatureFields } from "../../dom/pdf/signatureFields"
+import { pdfjsHints } from "./pdfjsFixtures"
 import { signedFixture } from "../pdfSignFixtures"
 import { budget } from "../timing"
 
@@ -234,16 +233,6 @@ describe("the PDF engine over the sync range bridge", () => {
 		TIMEOUT
 	)
 })
-
-// What pdf.js reads of the signatures, the cross-check the page passes in.
-async function pdfjsHints(bytes: Uint8Array) {
-	const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 })
-	const hints = pdfSignatureFields(await (await task.promise).getSignatures())
-
-	await task.destroy()
-
-	return hints
-}
 
 describe("signature verification in the engine", () => {
 	it(

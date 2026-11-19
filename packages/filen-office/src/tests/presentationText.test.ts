@@ -705,19 +705,39 @@ describe("text fields", () => {
 		expect(fieldText("datetime1", "stored", {})).toBe("stored")
 	})
 
-	it("names months and days in the field run's language, the numeric patterns as ECMA-376 lists them", () => {
-		const german = new Intl.DateTimeFormat("de-DE", { weekday: "long" }).format(now)
-		const month = new Intl.DateTimeFormat("de-DE", { month: "long" }).format(now)
+	it("writes dates and times in the field run's language, US English with no language or one Intl cannot format", () => {
+		const intl = (locale: string, options: Intl.DateTimeFormatOptions): string => new Intl.DateTimeFormat(locale, options).format(now)
+		const numeric: Intl.DateTimeFormatOptions = { year: "numeric", month: "numeric", day: "numeric" }
+		const long: Intl.DateTimeFormatOptions = { weekday: "long", year: "numeric", month: "long", day: "numeric" }
+		const clock12: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", hour12: true }
+		const german = intl("de-DE", long)
 		const field: TextBody = {
 			bodyPr: {},
 			paragraphs: [{ pPr: {}, runs: [{ kind: "fld", type: "datetime2", id: "{1}", text: "x", rPr: { lang: "de-DE" } }] }]
 		}
 		const laid = layoutBody(resolveBody(field, CONTEXT), { width: 2000, height: 300 }, environment(), { fields: { now } })
 
-		expect(fieldText("datetime2", "x", { now }, "de-DE")).toBe(`${german}, ${month} 26, 2026`)
-		expect(fieldText("datetime1", "x", { now }, "de-DE")).toBe("10/26/2026")
+		expect(fieldText("datetime2", "x", { now }, "de-DE")).toBe(german)
+		expect(fieldText("datetime1", "x", { now }, "de-DE")).toBe(intl("de-DE", numeric))
+		expect(fieldText("datetime1", "x", { now }, "de-DE")).not.toBe("10/26/2026")
+		expect(fieldText("datetime6", "x", { now }, "de-DE")).toBe(intl("de-DE", { month: "long", year: "2-digit" }))
+		expect(fieldText("datetime8", "x", { now }, "ja-JP")).toBe(intl("ja-JP", { ...numeric, ...clock12 }))
+		expect(fieldText("datetime12", "x", { now }, "ja-JP")).toBe(intl("ja-JP", clock12))
+		expect(fieldText("datetime12", "x", { now }, "ja-JP")).not.toContain("PM")
+		expect(fieldText("datetime11", "x", { now }, "ja-JP")).toBe(
+			intl("ja-JP", { hour: "numeric", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+		)
+
+		// en-GB is day-first; en-US, a bare "en" and a run with no language keep the US patterns.
+		expect(fieldText("datetime1", "x", { now }, "en-GB")).toBe(intl("en-GB", numeric))
+		expect(fieldText("datetime1", "x", { now }, "en-GB").startsWith("26")).toBe(true)
+		expect(fieldText("datetime1", "x", { now }, "en-US")).toBe("10/26/2026")
+		expect(fieldText("datetime2", "x", { now }, "en")).toBe("Monday, October 26, 2026")
+		expect(fieldText("datetime8", "x", { now }, undefined)).toBe("10/26/2026 2:05 PM")
+		expect(fieldText("datetime1", "x", { now, locale: "de-DE" })).toBe(intl("de-DE", numeric))
 		expect(fieldText("datetime2", "x", { now }, "x-none")).toBe("Monday, October 26, 2026")
-		expect(laid.page.page.sourceTexts).toEqual([`${german}, ${month} 26, 2026`])
+		expect(fieldText("datetime14", "stored", { now }, "de-DE")).toBe("stored")
+		expect(laid.page.page.sourceTexts).toEqual([german])
 	})
 })
 

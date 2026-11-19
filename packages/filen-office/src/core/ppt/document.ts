@@ -1,6 +1,6 @@
 import { CfbError, CfbFile, isCompoundFile } from "../cfb/index"
 import type { DocBlockKey } from "../doc/decrypt"
-import { records as artRecords } from "../doc/toDocx/officeArt"
+import { records as artRecords, RT_BLIP_FIRST, RT_BLIP_LAST, RT_BSTORE_CONTAINER, RT_DGG_CONTAINER, RT_FBSE } from "../doc/toDocx/officeArt"
 import type { ByteSource } from "../opc/index"
 import { DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../presentation/budget"
 import { PresentationError } from "../presentation/model"
@@ -26,6 +26,7 @@ import {
 	readRuler,
 	readStyleTextProp9,
 	readTextBlocks,
+	withoutControls,
 	type MasterStyle,
 	type ParaProps,
 	type Ruler,
@@ -227,7 +228,7 @@ export interface PptDocument {
 }
 
 function cString(file: PptFile, record: PptRecord): string {
-	return utf16Text(file.stream, record.start, record.end)
+	return withoutControls(utf16Text(file.stream, record.start, record.end))
 }
 
 function readFonts(file: PptFile, collection: PptRecord | undefined): FontEntry[] {
@@ -241,7 +242,7 @@ function readFonts(file: PptFile, collection: PptRecord | undefined): FontEntry[
 		const data = file.stream
 
 		fonts[atom.instance] = {
-			name: utf16Text(data, atom.start, atom.start + 64),
+			name: withoutControls(utf16Text(data, atom.start, atom.start + 64)),
 			charset: data[atom.start + 64] ?? 0,
 			pitchFamily: data[atom.start + 67] ?? 0
 		}
@@ -430,7 +431,7 @@ function readDrawingGroup(file: PptFile, group: PptRecord | undefined): Pick<Ppt
 
 	if (group === undefined) return { blips }
 
-	const dgg = artRecords(data, group.start, group.end).find(record => record.type === 0xf000)
+	const dgg = artRecords(data, group.start, group.end).find(record => record.type === RT_DGG_CONTAINER)
 
 	if (dgg === undefined) return { blips }
 
@@ -439,13 +440,13 @@ function readDrawingGroup(file: PptFile, group: PptRecord | undefined): Pick<Ppt
 	file.counter.add(inner.length)
 
 	for (const record of inner) {
-		if (record.type === 0xf001) {
+		if (record.type === RT_BSTORE_CONTAINER) {
 			const store = artRecords(data, record.start, record.end)
 
 			file.counter.add(store.length)
 
 			for (const entry of store) {
-				if (entry.type === 0xf007 && entry.end - entry.start >= 36) {
+				if (entry.type === RT_FBSE && entry.end - entry.start >= 36) {
 					const size = u32(data, entry.start + 20)
 					const delay = u32(data, entry.start + 28)
 					const cbName = data[entry.start + 33] ?? 0
@@ -469,7 +470,7 @@ function readDrawingGroup(file: PptFile, group: PptRecord | undefined): Pick<Ppt
 									}
 								})
 					})
-				} else if (entry.type >= 0xf018 && entry.type <= 0xf117) {
+				} else if (entry.type >= RT_BLIP_FIRST && entry.type <= RT_BLIP_LAST) {
 					blips.push({
 						type: 0,
 						embedded: { data, start: entry.start, end: entry.end, type: entry.type, instance: entry.instance }

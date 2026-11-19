@@ -2,35 +2,16 @@
 import { AllSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { RevisionView } from "../core/docx/model/kinds"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { ReflowView } from "../react/docx/reflow/view"
 import { buildDocx, p } from "./docxSynthetic"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { pagedEditor } from "./pagedDomFixtures"
 
 // A drag out of Mobile view writes what the revision view shows, as a copy does: No Markup (Final) leaves deleted
 // text out, Original inserted text; Markup drags the tracked changes as they are. (The pages' input view is
 // never seen, so never dragged.)
 
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
-
-const DOCUMENT: DocxDocument = {
-	status: "ready",
-	info: undefined,
-	pages: [],
-	pageCount: 0,
-	tables: { styles: [], decorations: [], links: [] },
-	session: SESSION,
-	media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-	error: undefined
-}
+const DOCUMENT = emptyDocxDocument()
 
 const BY = 'w:author="Ann" w:date="2024-01-01T00:00:00Z"'
 const DOC = buildDocx({

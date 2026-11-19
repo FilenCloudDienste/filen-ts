@@ -2,7 +2,8 @@ import type { TimingBudgets } from "../anim/model"
 import { children, i16, i32, RT, u16, u32, utf16Text, type PptRecord, type RecordCounter } from "./records"
 import type { PptSound } from "./transitions"
 import { PresentationError } from "../presentation/model"
-import { xmlText, type TextBlock } from "./text"
+import { escapeAttribute, escapeText } from "../xml/entities"
+import { withoutControls, type TextBlock } from "./text"
 
 // A slide's animations as PresentationML p:timing (ECMA-376 Part 1 §19.5). PowerPoint 2002 and later keep the time
 // tree in the slide's "___PPT10" programmable tag ([MS-PPT] §2.5.24, §2.8.15 ExtTimeNodeContainer and its build list
@@ -181,7 +182,7 @@ function attr(name: string, value: string | number | undefined, min?: number, ma
 		return ""
 	}
 
-	return ` ${name}="${typeof value === "number" ? int(value, min, max) : xmlText(value)}"`
+	return ` ${name}="${typeof value === "number" ? int(value, min, max) : escapeAttribute(value)}"`
 }
 
 // An xsd:float as plain decimals (at most six places), finite: values past a float's range are clamped to it.
@@ -235,7 +236,7 @@ function variant(data: Uint8Array, record: PptRecord): Variant | undefined {
 			return undefined
 		}
 		case 3:
-			return { type: "string", value: utf16Text(data, record.start + 1, record.end) }
+			return { type: "string", value: withoutControls(utf16Text(data, record.start + 1, record.end)) }
 		default:
 			return undefined
 	}
@@ -265,7 +266,7 @@ function variantXml(value: Variant): string {
 		case "float":
 			return `<p:fltVal val="${float(value.value)}"/>`
 		case "string":
-			return `<p:strVal val="${xmlText(value.value)}"/>`
+			return `<p:strVal val="${escapeAttribute(value.value)}"/>`
 	}
 }
 
@@ -345,7 +346,7 @@ class TreeWriter {
 		if (refType === 2) {
 			const sound = this.context.sound(id)
 
-			return sound === undefined ? undefined : `<p:sndTgt r:embed="${sound.rId}" name="${xmlText(sound.name)}"/>`
+			return sound === undefined ? undefined : `<p:sndTgt r:embed="${sound.rId}" name="${escapeAttribute(sound.name)}"/>`
 		}
 
 		const spid = ` spid="${String(id)}"`
@@ -643,7 +644,7 @@ class TreeWriter {
 			(target === undefined ? "" : `<p:tgtEl>${target}</p:tgtEl>`) +
 			(attributeNames.length === 0
 				? ""
-				: `<p:attrNameLst>${attributeNames.map(name => `<p:attrName>${xmlText(name)}</p:attrName>`).join("")}</p:attrNameLst>`) +
+				: `<p:attrNameLst>${attributeNames.map(name => `<p:attrName>${escapeText(name)}</p:attrName>`).join("")}</p:attrNameLst>`) +
 			"</p:cBhvr>"
 		)
 	}
@@ -808,7 +809,7 @@ class TreeWriter {
 			const type = (flags & 0x1) !== 0 && atom !== undefined ? u32(data, atom.start + 4) : 1
 			const text = (flags & 0x2) !== 0 ? (stringOf(this.variantOf(inner.first(RT.variant, 1))) ?? "") : ""
 
-			return `<p:cmd type="${type === 0 ? "evt" : type === 2 ? "verb" : "call"}" cmd="${xmlText(text)}">${this.behavior(inner.first(RT.behavior), common)}</p:cmd>`
+			return `<p:cmd type="${type === 0 ? "evt" : type === 2 ? "verb" : "call"}" cmd="${escapeAttribute(text)}">${this.behavior(inner.first(RT.behavior), common)}</p:cmd>`
 		}
 
 		// A behaviour node without a behaviour (a file that broke §2.8.15): kept as an empty group so its timing holds.
@@ -1340,7 +1341,7 @@ class LegacyWriter {
 
 		if (sound === undefined) return ""
 
-		return `<p:audio><p:cMediaNode><p:cTn id="${String(this.next())}" display="0" masterRel="sameClick"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:endCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:endCondLst></p:cTn><p:tgtEl><p:sndTgt r:embed="${sound.rId}" name="${xmlText(sound.name)}"/></p:tgtEl></p:cMediaNode></p:audio>`
+		return `<p:audio><p:cMediaNode><p:cTn id="${String(this.next())}" display="0" masterRel="sameClick"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:endCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:endCondLst></p:cTn><p:tgtEl><p:sndTgt r:embed="${sound.rId}" name="${escapeAttribute(sound.name)}"/></p:tgtEl></p:cMediaNode></p:audio>`
 	}
 
 	private effectXml(step: LegacyStep, delay: number): { readonly xml: string; readonly duration: number } {

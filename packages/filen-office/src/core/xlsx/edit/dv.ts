@@ -25,10 +25,10 @@ import type { XlsxDocument } from "./document"
 const DV_EXT = "{CCE6A557-97BC-4B89-ADB6-D9C93CAAB3DF}"
 // Excel's limits on a validation ("Apply data validation to cells", support.microsoft.com): a typed list of 255
 // characters, input and error titles of 32, an input message of 255 and an error message of 225.
-const MAX_LIST = 255
-const MAX_TITLE = 32
-const MAX_PROMPT = 255
-const MAX_ERROR = 225
+export const MAX_VALIDATION_LIST = 255
+export const MAX_VALIDATION_TITLE = 32
+export const MAX_VALIDATION_PROMPT = 255
+export const MAX_VALIDATION_ERROR = 225
 // Ranges one edit may name (Excel keeps the cells of a validation as a list of ranges).
 const MAX_RANGES = 2_048
 
@@ -225,7 +225,7 @@ function listSource(value: string, locale: SheetLocale | undefined): Bound {
 
 	const items = locale?.argument === ";" ? text.split(";").join(",") : text
 
-	if (items.length > MAX_LIST) return { refused: "tooLarge" }
+	if (items.length > MAX_VALIDATION_LIST) return { refused: "tooLarge" }
 
 	return { formula: `"${items.replace(/"/gu, '""')}"` }
 }
@@ -243,10 +243,10 @@ function ruleMarkup(
 
 	if (texts.some(unwritableText)) return { refused: "unsupported" }
 	if (
-		rule.promptTitle.length > MAX_TITLE ||
-		rule.errorTitle.length > MAX_TITLE ||
-		rule.prompt.length > MAX_PROMPT ||
-		rule.error.length > MAX_ERROR
+		rule.promptTitle.length > MAX_VALIDATION_TITLE ||
+		rule.errorTitle.length > MAX_VALIDATION_TITLE ||
+		rule.prompt.length > MAX_VALIDATION_PROMPT ||
+		rule.error.length > MAX_VALIDATION_ERROR
 	)
 		return { refused: "tooLarge" }
 

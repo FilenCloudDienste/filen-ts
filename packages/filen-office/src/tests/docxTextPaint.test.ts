@@ -37,8 +37,7 @@ function documentOf(styles: readonly DocxPdfStyle[]): DocxPdfDocument {
 		lang: "en-GB",
 		title: "Deck",
 		paints: text.paints,
-		strokes: text.strokes,
-		textEffects: text.textEffects
+		strokes: text.strokes
 	}
 }
 
@@ -52,7 +51,7 @@ describe("PDF page painter: DrawingML text paint", () => {
 	it("draws an outlined, gradient-filled title and translucent text with their outline and opacity", async () => {
 		const content = await contentOf([
 			{ ...PLAIN, alpha: 0.5, outline: 0 },
-			{ ...PLAIN, paint: 1, alpha: 0.8, outline: 0, effects: 0 }
+			{ ...PLAIN, paint: 1, alpha: 0.8, outline: 0 }
 		])
 
 		// A solid fill with an outline: fill then stroke (mode 2), reset after the text.

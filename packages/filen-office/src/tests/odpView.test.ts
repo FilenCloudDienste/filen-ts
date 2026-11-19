@@ -34,6 +34,7 @@ async function opened(): Promise<{ readonly context: CallContext; close(): void 
 		s: 1,
 		deck: outcome.deck,
 		package: outcome.package,
+		options: { format: "odp" },
 		emit: (_event: PresentationEvent) => undefined,
 		onClose: (listener: () => void) => closers.push(listener)
 	} as unknown as EngineSession

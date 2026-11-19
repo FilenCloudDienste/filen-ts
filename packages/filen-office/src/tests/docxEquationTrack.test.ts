@@ -6,16 +6,14 @@ import { ObjectKind, RevisionView } from "@filen/office/core/docx"
 import { docxSchema, equationTree, selectEquation, storyReviewIndex, type DocxEditorCommand } from "@filen/office/core/docx/edit"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import { saveDocx } from "@filen/office/core/docx/write"
-import { encodeUtf8, decodeUtf8, parseXml } from "@filen/office/core/xml"
+import { encodeUtf8, decodeUtf8 } from "@filen/office/core/xml"
 import { ReviewKind } from "../core/docx/review/index"
-import { mathChecks } from "../core/docx/write/checks/math"
-import type { CheckInput, CheckedPart } from "../core/docx/write/checks/index"
-import { partReader } from "../core/docx/model/reader"
 import { ommlStringTree, treeChanges, treeXml, diffTrees, type XElement } from "../core/math/ommlTrack"
 import { openBytes } from "./docxEditFixtures"
 import { NAMESPACES, buildDocx, p } from "./docxSynthetic"
 import { SCHEMA_ARCHIVE, XMLLINT, schemaOracle } from "./fuzz/harness"
 import { layOut } from "./layoutFixtures"
+import { mathGate } from "./mathGate"
 import { pageDigest, pagedEditor, settleAll } from "./pagedFixtures"
 import { EditAnnotations } from "../core/docx/paged/annotations"
 import { modelAuthors, revisionAuthors } from "../core/docx/layout/styles"
@@ -401,27 +399,7 @@ describe("tracked changes recorded in equations", () => {
 
 // ---- gate 2 and the schemas ---------------------------------------------------------------------------
 
-// The source part a checked skeleton stands in (what its copies are of): `body`'s.
-function sourcePart(body = ""): CheckedPart["part"] {
-	const document = parseXml(encodeUtf8(`<w:document ${NAMESPACES}><w:body>${body}</w:body></w:document>`))
-
-	return { document, reader: partReader(document) } as unknown as CheckedPart["part"]
-}
-
-const INPUT = { original: { has: () => true }, context: { model: { strict: false } } } as unknown as CheckInput
-
-function gate(inner: string, source = ""): string | undefined {
-	try {
-		const document = parseXml(encodeUtf8(`<w:document ${NAMESPACES}><w:body><w:p>${inner}</w:p></w:body></w:document>`))
-
-		for (const check of mathChecks)
-			void check.part?.(INPUT, { name: "word/document.xml", part: sourcePart(source), document, skeleton: true })
-
-		return undefined
-	} catch (error) {
-		return (error as Error).message
-	}
-}
+const gate = (inner: string, source = ""): Promise<string | undefined> => mathGate(inner, { source })
 
 // ---- review fixes ---------------------------------------------------------------------------------------------
 
@@ -783,30 +761,30 @@ describe("a deletion nested in an insertion", () => {
 })
 
 describe("gate 2 on tracked equations", () => {
-	it("leaves an equation of the source copied as it was to the source, and judges new ones", () => {
+	it("leaves an equation of the source copied as it was to the source, and judges new ones", async () => {
 		const deep = `<m:oMath>${nested(110, plainRun("q"))}</m:oMath>`
 		const own = '<m:oMath xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du"><m:r><m:t>x</m:t></m:r></m:oMath>'
 
-		expect(gate(deep, `<w:p>${deep}</w:p>`)).toBeUndefined()
-		expect(gate(deep)).toMatch(/nested too deep/)
-		expect(gate(`<m:oMath>${nested(110, plainRun("r"))}</m:oMath>`, `<w:p>${deep}</w:p>`)).toMatch(/nested too deep/)
+		expect(await gate(deep, `<w:p>${deep}</w:p>`)).toBeUndefined()
+		expect(await gate(deep)).toMatch(/nested too deep/)
+		expect(await gate(`<m:oMath>${nested(110, plainRun("r"))}</m:oMath>`, `<w:p>${deep}</w:p>`)).toMatch(/nested too deep/)
 		// A namespace an equation of the source declares itself is the source's for its new XML too.
-		expect(gate(own.replace("<m:t>x", "<m:t>y"), `<w:p>${own}</w:p>`)).toBeUndefined()
-		expect(gate(own.replace("<m:t>x", "<m:t>y"))).toMatch(/declares another namespace/)
+		expect(await gate(own.replace("<m:t>x", "<m:t>y"), `<w:p>${own}</w:p>`)).toBeUndefined()
+		expect(await gate(own.replace("<m:t>x", "<m:t>y"))).toMatch(/declares another namespace/)
 	})
 
-	it("passes Word's markup and refuses a change without an id or author", () => {
-		expect(gate(INSERTED.replace(/^<w:p>|<\/w:p>$/g, ""))).toBeUndefined()
+	it("passes Word's markup and refuses a change without an id or author", async () => {
+		expect(await gate(INSERTED.replace(/^<w:p>|<\/w:p>$/g, ""))).toBeUndefined()
 		// Word 365's: m:brk's m:alnAt, w14 effects in w:rPr, a namespace the part's root declares.
-		expect(gate('<m:oMath><m:r><m:rPr><m:brk m:alnAt="1"/></m:rPr><m:t>x</m:t></m:r></m:oMath>')).toBeUndefined()
-		expect(gate('<m:oMath><m:r><w:rPr><w14:glow w14:rad="1"/></w:rPr><m:t>x</m:t></m:r></m:oMath>')).toBeUndefined()
+		expect(await gate('<m:oMath><m:r><m:rPr><m:brk m:alnAt="1"/></m:rPr><m:t>x</m:t></m:r></m:oMath>')).toBeUndefined()
+		expect(await gate('<m:oMath><m:r><w:rPr><w14:glow w14:rad="1"/></w:rPr><m:t>x</m:t></m:r></m:oMath>')).toBeUndefined()
 		expect(
-			gate('<m:oMath xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><m:r><m:t>x</m:t></m:r></m:oMath>')
+			await gate('<m:oMath xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><m:r><m:t>x</m:t></m:r></m:oMath>')
 		).toBeUndefined()
-		expect(gate('<m:oMath><m:r m:foo="1"><m:t>x</m:t></m:r></m:oMath>')).toMatch(/has attribute/)
-		expect(gate("<m:oMath><w14:glow/></m:oMath>")).toMatch(/another vocabulary/)
-		expect(gate(`<m:oMath><w:ins w:author="Ada">${run("x")}</w:ins></m:oMath>`)).toMatch(/without an id/)
-		expect(gate(`<m:oMath><w:del w:id="4">${run("x")}</w:del></m:oMath>`)).toMatch(/without an author/)
+		expect(await gate('<m:oMath><m:r m:foo="1"><m:t>x</m:t></m:r></m:oMath>')).toMatch(/has attribute/)
+		expect(await gate("<m:oMath><w14:glow/></m:oMath>")).toMatch(/another vocabulary/)
+		expect(await gate(`<m:oMath><w:ins w:author="Ada">${run("x")}</w:ins></m:oMath>`)).toMatch(/without an id/)
+		expect(await gate(`<m:oMath><w:del w:id="4">${run("x")}</w:del></m:oMath>`)).toMatch(/without an author/)
 	})
 })
 

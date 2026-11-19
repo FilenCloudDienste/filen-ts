@@ -1,3 +1,4 @@
+import { insertedPartName } from "../inserted"
 import {
 	DrawingList,
 	IDENTITY,
@@ -25,6 +26,7 @@ import { mediaPlayback } from "../edit/apply/media"
 import { notesParagraphs, notesText } from "../notes"
 import {
 	PresentationError,
+	bodyHasText,
 	type Deck,
 	type MediaRef,
 	type ShapeNode,
@@ -467,7 +469,7 @@ function backgroundMarkup(writer: ScratchWriter, services: RenderServices, deck:
 					fill.part !== undefined
 						? writer.target(fill.part)
 						: fill.inserted !== undefined
-							? writer.target(`inserted:${String(fill.inserted)}`)
+							? writer.target(insertedPartName(fill.inserted))
 							: undefined
 				)
 			)
@@ -573,11 +575,50 @@ function mostPathCommands(
 	return { shape, total }
 }
 
-function revisionKey(deck: Deck, node: SlideNode): string {
+function revisionKey(deck: Deck, chain: readonly SlideNode[]): string {
 	return [
 		deck.revision,
-		...chainOf(deck, node).map(level => `${String(level.ref)}:${String(level.revision)}:${String(level.theme?.revision ?? "")}`)
+		...chain.map(level => `${String(level.ref)}:${String(level.revision)}:${String(level.theme?.revision ?? "")}`)
 	].join("/")
+}
+
+// What a render read, as numbers: the deck's revision and each level's node, revision and theme revision.
+interface RenderStamp {
+	readonly deck: number
+	readonly chain: readonly SlideNode[]
+	readonly revisions: readonly number[]
+	readonly themes: readonly number[]
+}
+
+function stampOf(deck: Deck, chain: readonly SlideNode[]): RenderStamp {
+	const revisions: number[] = []
+	const themes: number[] = []
+
+	for (const level of chain) {
+		revisions.push(level.revision)
+		themes.push(level.theme?.revision ?? -1)
+	}
+
+	return { deck: deck.revision, chain, revisions, themes }
+}
+
+// An edit to the deck, a level of the chain or its theme, or a level replaced or dropped since the stamp.
+function stampChanged(deck: Deck, stamp: RenderStamp): boolean {
+	if (deck.revision !== stamp.deck) return true
+
+	for (let index = 0; index < stamp.chain.length; index++) {
+		const level = stamp.chain[index] as SlideNode
+
+		if (
+			deck.nodes.get(level.ref) !== level ||
+			level.revision !== stamp.revisions[index] ||
+			(level.theme?.revision ?? -1) !== stamp.themes[index]
+		) {
+			return true
+		}
+	}
+
+	return false
 }
 
 export function drawingData(list: DrawingList): DrawingData {
@@ -650,14 +691,14 @@ export async function renderSlide(
 ): Promise<SlideRender> {
 	const clock = sliceClock(slicing)
 
-	// An edit landing during a pause changes what was read: the render starts over on the new state.
-	for (let attempt = 0; attempt < MAX_RESTARTS; attempt++) {
-		const render = await renderOnce(deck, ref, services, clock, report, options)
+	// An edit landing during a pause changes what was read: the render starts over on the new state. The last attempt
+	// runs to its end and carries the revision it started from, so a slide edited on every pause still renders and the
+	// page asks again for the newer revision.
+	for (let attempt = 0; ; attempt++) {
+		const render = await renderOnce(deck, ref, services, clock, report, options, attempt === MAX_RESTARTS)
 
 		if (render !== undefined) return render
 	}
-
-	throw new PresentationError("stale", "the slide kept changing while it rendered")
 }
 
 const MAX_RESTARTS = 4
@@ -668,14 +709,22 @@ async function renderOnce(
 	services: RenderServices,
 	clock: SliceClock,
 	report: RenderReport,
-	options: RenderOptions
+	options: RenderOptions,
+	final: boolean
 ): Promise<SlideRender | undefined> {
 	const node = deck.nodes.get(ref)
 
 	if (node === undefined) throw new PresentationError("notFound", "slide not parsed")
 
 	const cache = cacheOf(services)
-	const key = revisionKey(deck, node)
+	const chain = chainOf(deck, node)
+	const key = revisionKey(deck, chain)
+	// Read before any await: the render is stamped with the revision its targets were built from.
+	const revision = node.revision
+	const stamp = stampOf(deck, chain)
+	// Every await (a slice pause, a picture's bytes, a diagram's relayout) can let an edit land. A parent change bumps
+	// the child's revision, so comparing the levels read here covers a chain that changed shape.
+	const stale = (): boolean => !final && stampChanged(deck, stamp)
 	let cached = cache.scratch.get(node)
 
 	cache.scratch.delete(node)
@@ -705,6 +754,9 @@ async function renderOnce(
 	)
 
 	const background = (await finishPictures(backgroundList, services, report)).list
+
+	if (stale()) return undefined
+
 	const layers: SlideLayer[] = []
 	const tally = new DrawingTally(budgetsOf(services))
 
@@ -740,6 +792,8 @@ async function renderOnce(
 				// Prompts are a slide's own (never a layout's or master's on their own render).
 				node.kind === "slide" ? options.prompts : undefined
 			)
+
+			if (stale()) return undefined
 		}
 
 		// The slide's own shapes carry their box for the editor (every layer the entry made, overlays included).
@@ -767,16 +821,18 @@ async function renderOnce(
 		if (clock.due) {
 			await clock.pause()
 
-			if (deck.nodes.get(ref) !== node || revisionKey(deck, node) !== key) return undefined
+			if (stale()) return undefined
 		}
 	}
+
+	if (stale()) return undefined
 
 	const notes = notesParagraphs(deck, node)
 
 	return {
 		ref,
 		index: deck.slides.indexOf(ref),
-		revision: node.revision,
+		revision,
 		hidden: node.hidden,
 		...(node.parent === undefined ? {} : { layout: node.parent }),
 		...(node.showMasterShapes ? {} : { hidesMasterShapes: true as const }),
@@ -1250,6 +1306,16 @@ interface Overlay {
 	readonly at: number
 }
 
+// Where a layer is cut from an entry's drawing: after an item, a text page under the overlay (a table or SmartArt frame)
+// that follows the same item. A total order: two overlays at one item compare equal and keep their spTree order (the
+// sort is stable).
+export function cutOrder(
+	a: { readonly at: number; readonly overlay?: unknown },
+	b: { readonly at: number; readonly overlay?: unknown }
+): number {
+	return a.at - b.at || Number(a.overlay !== undefined) - Number(b.overlay !== undefined)
+}
+
 // A drawing as layers, cut at every story text (laid out by the text adapter) and every overlay, so each paints in its
 // shape's own z position: a child's text right after that child's drawing, under the next sibling (spTree order).
 async function layersOf(input: {
@@ -1284,7 +1350,7 @@ async function layersOf(input: {
 	}
 
 	for (const overlay of input.overlays) cuts.push(overlay)
-	cuts.sort((a, b) => a.at - b.at || (a.overlay === undefined ? -1 : 1))
+	cuts.sort(cutOrder)
 
 	let start = 0
 	let first = true
@@ -1605,7 +1671,7 @@ async function renderTableLayer(
 		if (clock.due) await clock.pause()
 
 		const turned = turnedCellBody(cell.vert)
-		const hasText = cellHasText(cell.cell.text)
+		const hasText = bodyHasText(cell.cell.text)
 
 		if (turned !== undefined) {
 			// Laid out in the turned inner box (textBox swaps its sides), anchored across the cell. An empty one still gets
@@ -1698,10 +1764,6 @@ function longestLine(page: TextPage): number {
 	}
 
 	return longest
-}
-
-function cellHasText(body: TextBody): boolean {
-	return body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))
 }
 
 // The tableStyles part (the presentation's relationship of that type), else its usual name.

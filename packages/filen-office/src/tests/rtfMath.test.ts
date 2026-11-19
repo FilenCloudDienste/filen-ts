@@ -4,20 +4,13 @@ import { ommlToLatex } from "../core/math/toLatex"
 import { readRtf, type RtfReadResult } from "../core/rtf/index"
 import { NodeKind, parseXml, type XmlDocument } from "../core/xml/index"
 import { budget, cpuMs } from "./timing"
+import { latin1 } from "./rtfLatin1"
 
 // RTF equations (RTF 1.9.1 "Math": \mmath, \moMath and the \m words naming Office Math elements) read as the Office
 // Math Word opens them as, their groups kept in the source.
 
-function bytes(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
-
-	return out
-}
-
 async function read(rtf: string): Promise<RtfReadResult> {
-	const result = await readRtf(bytes(rtf))
+	const result = await readRtf(latin1(rtf))
 
 	if (!result.ok) throw new Error(result.reason)
 
@@ -69,7 +62,7 @@ describe("RTF equations", () => {
 		expect(result.undrawn).toBe(0)
 
 		const math = result.preserved.filter(entry => entry.kind === "math")
-		const source = strFromU8(bytes(`${HEADER}\\pard\\plain Before ${FRACTION} after\\par}`))
+		const source = strFromU8(latin1(`${HEADER}\\pard\\plain Before ${FRACTION} after\\par}`))
 
 		expect(math.map(entry => source.slice(entry.start, entry.end))).toEqual([FRACTION])
 		// The equation's group lies inside its paragraph's source range.

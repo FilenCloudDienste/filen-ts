@@ -16,11 +16,15 @@ import { layerTree } from "../react/presentation/show/layers"
 import { DEFAULT_SHOW_BINDINGS, type ShowKeyBindings } from "../react/presentation/presenter/keys"
 import { SlideShow } from "../react/presentation/show/player"
 import { ShowPlayer } from "../react/presentation/show/runtime"
+import type { ShowOptions } from "../react/presentation/show/timeline"
+import { transitions3d } from "../react/presentation/show/transitions3d"
+import { webglTransitions } from "../react/presentation/show/webgl/index"
 import { POINTER_IDLE_MS } from "../react/presentation/show/pointer"
 import { buildStageSlide, type ShowMediaMount } from "../react/presentation/show/stage"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import { TimingBuilder } from "./animFixtures"
 import { budget, cpuMs } from "./timing"
+import { fixtureTextPage } from "./fixtures/presentation/textPage"
 import { codeOf } from "./showKeyFixtures"
 
 // Every timeline sample the player takes.
@@ -95,10 +99,15 @@ function layer(ref: SlideRef, id: number, x: number, actions?: { click: Action }
 interface SlideSpec {
 	readonly timing?: TimingTree
 	readonly transition?: Transition
+	// The file's own transition beside `transition` (its fallback), for a renderer.
+	readonly authored?: Transition
 	readonly actions?: Readonly<Record<number, Action>>
 	readonly broken?: true
 	// Shapes that are click-to-play videos.
 	readonly media?: readonly number[]
+	// Per shape, the paragraphs of its text, and its alt text.
+	readonly texts?: Readonly<Record<number, readonly string[]>>
+	readonly alts?: Readonly<Record<number, string>>
 }
 
 const slides = [0, 1, 2, 3].map(n => ({ ref: slideRef(300 + n), hidden: n === 2 }))
@@ -112,7 +121,13 @@ function renderOf(ref: SlideRef, spec: SlideSpec | undefined): SlideRender {
 		background: drawing(1280, 720),
 		layers: [2, 3, 4].map(id => {
 			const click = spec?.actions?.[id]
-			const drawn = layer(ref, id, id * 150, click === undefined ? undefined : { click })
+			const paragraphs = spec?.texts?.[id]
+			const alt = spec?.alts?.[id]
+			const drawn = {
+				...layer(ref, id, id * 150, click === undefined ? undefined : { click }),
+				...(paragraphs === undefined ? {} : { text: fixtureTextPage(paragraphs) }),
+				...(alt === undefined ? {} : { alt })
+			}
 
 			return spec?.media?.includes(id) === true
 				? {
@@ -144,7 +159,8 @@ function session(
 				slideSize: SIZE,
 				geometry,
 				colors: [],
-				...(spec?.transition === undefined ? {} : { transition: spec.transition })
+				...(spec?.transition === undefined ? {} : { transition: spec.transition }),
+				...(spec?.authored === undefined ? {} : { authored: spec.authored })
 			}
 			const graph = compileSource(ref, source, DEFAULT_PRESENTATION_BUDGETS.timing)
 
@@ -227,6 +243,7 @@ async function mount(
 		// The pointer's idle timer off, for counting the player's own timers.
 		keepPointer?: true
 		bindings?: ShowKeyBindings
+		options?: Partial<ShowOptions>
 	} = {}
 ): Promise<Mounted> {
 	const { api, plans } = session(specs, extra.background)
@@ -248,11 +265,14 @@ async function mount(
 				{...(extra.policy === undefined ? {} : { policy: extra.policy })}
 				{...(extra.overlay === undefined ? {} : { overlay: extra.overlay })}
 				{...(extra.media === undefined ? {} : { media: extra.media })}
+				{...(extra.options === undefined ? {} : { options: extra.options })}
 				{...(extra.keepPointer === true ? { autoHidePointer: false } : {})}
 				bindings={extra.bindings ?? DEFAULT_SHOW_BINDINGS}
 				onSlide={onSlide}
 				onEnd={onEnd}
 				label="Slide show"
+				blackLabel="Black screen"
+				whiteLabel="White screen"
 				slideLabel={(index, count) => `Slide ${String(index + 1)} of ${String(count)}`}
 				ref={controller}
 			/>
@@ -301,12 +321,17 @@ const TIMED: ShowSettings = {
 // An after-previous fly-in that starts with the slide (PowerPoint: the first group begins on the main sequence's begin).
 function withSlide(duration: number): TimingTree {
 	const b = new TimingBuilder()
-	const fly = b.flyIn(3, "afterEffect", duration)
+
+	return startingWithSlide(b, [b.flyIn(3, "afterEffect", duration)])
+}
+
+// After-previous effects that start with the slide, and sequences of their own beside the main one.
+function startingWithSlide(b: TimingBuilder, effects: readonly TimeNode[], beside: readonly TimeNode[] = []): TimingTree {
 	const probe = b.mainSeq([])
-	const group = b.click([[0, [fly]]], [{ delay: "indefinite" }, { evt: "onBegin", delay: 0, tn: probe.ctn.id }])
+	const group = b.click([[0, effects]], [{ delay: "indefinite" }, { evt: "onBegin", delay: 0, tn: probe.ctn.id }])
 	const sequence: TimeNode = { kind: "seq", ctn: { ...probe.ctn, children: [group] } }
 
-	return b.root([sequence])
+	return b.root([sequence, ...beside])
 }
 
 function flyIn(): TimingTree {
@@ -385,6 +410,48 @@ describe("SlideShow", () => {
 		show.key("ArrowRight")
 		await settle(100)
 		expect(live?.textContent).toBe(`Slide 2 of ${String(slides.length)}`)
+	})
+
+	it("gives each slide a hidden text alternative in layer order, its drawings hidden, and announces black and white", async () => {
+		const flip: Transition = { kind: "fade", namespace: "p", options: {}, durationMs: 800, advance: { onClick: true } }
+		const run = vi.spyOn(transitions3d, "start")
+		const show = await mount(
+			new Map<SlideRef, SlideSpec>([
+				[
+					slides[0]!.ref,
+					{ texts: { 2: ["Quarterly results", "Up 4%"], 4: ["Thanks"] }, alts: { 2: "Not this", 3: "Bar chart of sales" } }
+				],
+				[slides[1]!.ref, { transition: flip, authored: { ...flip, kind: "flip", namespace: "p14" }, texts: { 3: ["Next"] } }]
+			])
+		)
+		const alternative = (): (string | null)[] => [...host.querySelectorAll(".fo-show-text p")].map(line => line.textContent)
+		const live = host.querySelector<HTMLElement>("[aria-live]")
+
+		try {
+			expect(alternative()).toEqual(["Quarterly results Up 4%", "Bar chart of sales", "Thanks"])
+			expect(shown().length).toBeGreaterThan(0)
+			expect(shown().every(canvas => canvas.getAttribute("aria-hidden") === "true")).toBe(true)
+			// Outside the slide boxes, which the transition renderers walk.
+			expect(host.querySelector(".fo-show-slide-box .fo-show-text")).toBeNull()
+
+			show.key("b")
+			expect(live?.textContent).toBe("Black screen")
+			expect(alternative()).toEqual([])
+			show.key("w")
+			expect(live?.textContent).toBe("White screen")
+			act(() => show.stage.click())
+			expect(live?.textContent).toBe(`Slide 1 of ${String(slides.length)}`)
+
+			// The 3D transition still runs on its renderer, not its fallback.
+			show.key("ArrowRight")
+			await settle(100)
+			expect(run).toHaveBeenCalledTimes(1)
+			expect(run.mock.results[0]?.value).toBeDefined()
+			await settle(1000)
+			expect(alternative()).toEqual(["Next"])
+		} finally {
+			run.mockRestore()
+		}
 	})
 
 	it("gives each medium of a slide a labelled keyboard hotspot that plays it without advancing, and its chords", async () => {
@@ -890,6 +957,124 @@ describe("SlideView in the editor", () => {
 		expect(show.onSlide).toHaveBeenLastCalledWith(0)
 		await settle(3000)
 		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+	})
+
+	it("advances at its timing over an effect repeating until the end of the slide, and arms no timer after", async () => {
+		const cut: Transition = { kind: "cut", namespace: "p", options: {}, durationMs: 0, advance: { onClick: true, afterMs: 1000 } }
+		const b = new TimingBuilder()
+		const timing = startingWithSlide(b, [b.spin(3, "afterEffect", 400, { repeatCount: "indefinite" })])
+		const show = await mount(new Map([[slides[0]!.ref, { timing, transition: cut }]]), { settings: TIMED, keepPointer: true })
+
+		await settle(500)
+		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+		await settle(700)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+		await settle(1000)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("holds the timed advance for a finite effect longer than it, and for an effect a medium's end begins", async () => {
+		const cut: Transition = { kind: "cut", namespace: "p", options: {}, durationMs: 0, advance: { onClick: true, afterMs: 1000 } }
+		const b = new TimingBuilder()
+		const play = b.behavior(
+			{ type: "cmd", common: { target: { kind: "shape", shape: 3 }, attrNames: [] }, cmdType: "call", cmd: "playFrom(0.0)" },
+			{ dur: 3000 }
+		)
+		const afterEnd: TimeNode = {
+			kind: "par",
+			ctn: b.ctn({
+				fill: "hold",
+				stCondLst: [{ evt: "onEnd", delay: 0, tgtEl: { kind: "shape", shape: 3 } }],
+				children: [b.spin(4, "withEffect", 2000)]
+			})
+		}
+		const timing = startingWithSlide(b, [b.spin(2, "afterEffect", 400, { repeatCount: "indefinite" }), play], [afterEnd])
+		let ended: (() => void) | undefined
+		const media: ShowMediaMount = {
+			mount: (_box, _layer, _session, events) => {
+				ended = events.ended
+
+				return { command: () => undefined, click: () => undefined, release: () => undefined }
+			}
+		}
+		const show = await mount(new Map([[slides[0]!.ref, { timing, transition: cut, media: [3] }]]), { settings: TIMED, media })
+
+		// The medium plays past the advance time.
+		await settle(2500)
+		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+		act(() => ended?.())
+		// Its end began a two-second spin.
+		await settle(1500)
+		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+	})
+
+	it("plays transitions as cross-fades under reduced motion, keeping their sounds and timings, unless the page says not", async () => {
+		const sounds: string[] = []
+		const media: ShowMediaMount = {
+			mount: () => ({ command: () => undefined, click: () => undefined, release: () => undefined }),
+			sound: (_session, sound) => {
+				sounds.push(sound.part)
+
+				return { stop: () => undefined }
+			}
+		}
+		const push: Transition = {
+			kind: "push",
+			namespace: "p",
+			options: { dir: "l" },
+			durationMs: 1000,
+			advance: { onClick: true, afterMs: 500 },
+			sound: { kind: "embedded", part: "/ppt/media/audio1.wav", loop: false }
+		}
+		const specs = new Map<SlideRef, SlideSpec>([
+			[slides[1]!.ref, { transition: push, authored: { ...push, kind: "flip", namespace: "p14" } }],
+			[slides[3]!.ref, { transition: push, authored: { ...push, kind: "particles", namespace: "p14" } }]
+		])
+		const drawn = vi.spyOn(transitions3d, "start").mockReturnValue({ frame: () => true, finish: () => undefined })
+		const draws = vi.spyOn(webglTransitions, "draws").mockImplementation(kind => kind === "particles")
+		const prepare = vi.spyOn(webglTransitions, "prepare").mockResolvedValue(undefined)
+		const reduce = vi.fn((query: string) => ({ matches: query === "(prefers-reduced-motion: reduce)" }))
+
+		vi.stubGlobal("matchMedia", reduce)
+
+		try {
+			const show = await mount(specs, { settings: TIMED, media })
+
+			expect(reduce).toHaveBeenCalled()
+			show.controller.next()
+			await settle(500)
+
+			const [, incoming] = [...host.querySelectorAll<HTMLElement>(".fo-show-slide-box")]
+
+			// Halfway through: a fade in place, no push.
+			expect(Number(incoming?.style.opacity)).toBeGreaterThan(0)
+			expect(Number(incoming?.style.opacity)).toBeLessThan(1)
+			expect(incoming?.style.transform ?? "").not.toContain("translate")
+			expect(sounds).toEqual(["/ppt/media/audio1.wav"])
+			// Its advance-after still moves on, into the next one's cross-fade.
+			await settle(1500)
+			expect(show.onSlide).toHaveBeenLastCalledWith(3)
+			expect(sounds).toHaveLength(2)
+			expect(drawn).not.toHaveBeenCalled()
+			expect(prepare).not.toHaveBeenCalled()
+
+			act(() => root.unmount())
+			root = createRoot(host)
+
+			// The page turns it off: the authored 3D transition plays.
+			const authored = await mount(specs, { settings: TIMED, media, options: { reducedMotion: false } })
+
+			authored.controller.next()
+			await settle(100)
+			expect(drawn).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.unstubAllGlobals()
+			drawn.mockRestore()
+			draws.mockRestore()
+			prepare.mockRestore()
+		}
 	})
 
 	it("advances by timing in a hidden tab, where no animation frame runs", async () => {

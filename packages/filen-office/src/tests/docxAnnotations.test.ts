@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import {
 	DocxEngine,
 	RECT_FLOATS,
@@ -10,7 +9,6 @@ import {
 	parseDocxMarkupMode,
 	revisionColor,
 	type DocxAnnotations,
-	type DocxEngineServices,
 	type DocxOpenOptions,
 	type DocxPageData
 } from "@filen/office/dom/docx"
@@ -18,33 +16,9 @@ import {
 import { indexAnnotations, placeBalloons } from "../react/docx/annotations/layout"
 import { CORPUS_DIR } from "./corpusDir"
 import { buildDocx } from "./docxSynthetic"
+import { engineServices } from "./engineFixtures"
 
 // Every character half an em wide, so positions inside a line are exact multiples.
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
-function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
-		yield: () => Promise.resolve(),
-		sliceMs: Infinity
-	}
-}
-
 async function open(
 	bytes: Uint8Array,
 	options: DocxOpenOptions = {}
@@ -53,7 +27,7 @@ async function open(
 	let counts = {}
 	const engine = new DocxEngine(
 		bytesSource(bytes),
-		services(),
+		engineServices(),
 		event => {
 			if (event.type === "pages") for (const page of event.pages) pages[page.index] = page
 			if (event.type === "opened") counts = { comments: event.info.comments, revisions: event.info.revisions }
@@ -331,6 +305,40 @@ describe("balloon placement", () => {
 		expect(placed.shown).toBe(2)
 		expect(Array.from(placed.tops)).toEqual([0, 60])
 		expect(placed.moreTop).toBe(120)
+		expect(placed.extra).toBe(-1)
+	})
+
+	it("keeps the active balloon beside the page when it would go behind the control, earlier ones making room", () => {
+		const shownOf = (placed: { shown: number; extra: number }): number[] => [
+			...Array.from({ length: placed.shown }, (_, k) => k),
+			...(placed.extra < 0 ? [] : [placed.extra])
+		]
+
+		for (const active of [2, 3]) {
+			const placed = placeBalloons([0, 10, 20, 30], [50, 50, 50, 50], { gap: 10, top: 0, bottom: 150, more: 20, active })
+			const shown = shownOf(placed)
+			const hidden = [0, 1, 2, 3].filter(k => !shown.includes(k))
+
+			expect(shown).toEqual([0, active])
+			expect(hidden).not.toContain(active)
+			expect(hidden.length).toBeGreaterThan(0)
+			expect(Array.from(placed.tops)).toEqual([0, 60])
+			// The shown balloons and the control still fit in the column.
+			expect(placed.moreTop).toBe(120)
+			expect(placed.moreTop + 20).toBeLessThanOrEqual(150)
+		}
+
+		// An active balloon among those that fit changes nothing.
+		const first = placeBalloons([0, 10, 20, 30], [50, 50, 50, 50], { gap: 10, top: 0, bottom: 150, more: 20, active: 1 })
+
+		expect([first.shown, first.extra]).toEqual([2, -1])
+	})
+
+	it("shows an active balloon taller than the column alone", () => {
+		const placed = placeBalloons([0, 10, 20], [50, 50, 400], { gap: 10, top: 0, bottom: 150, more: 20, active: 2 })
+
+		expect([placed.shown, placed.extra]).toEqual([0, 2])
+		expect(placed.tops.length).toBe(1)
 	})
 })
 

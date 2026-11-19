@@ -1,17 +1,13 @@
 import { readFileSync } from "node:fs"
-import { MessageChannel } from "node:worker_threads"
 import { afterEach, describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit"
 import type { RedactionTerm } from "../../core/pdfedit/redactVerify"
 import { PDF_AES256_METHOD, PDF_ALLOW_NONE, permissionsValue } from "../../core/pdfedit/security"
-import type { PdfEngineClient } from "../../dom/pdfedit/client"
 import type { PdfSaveBegun, PdfSaveExpectation } from "../../dom/pdfedit/protocol"
-import { createSyncRangeBuffer, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import { makePdf } from "./fixtures"
-import { spawnEngine, startEngine, stopEngines } from "./harness"
+import { startEngine, stopEngines, upload, verifier } from "./harness"
 import { page as toPage, SECRET, SPEC } from "./redactFixtureSpec"
 import { signedFixture } from "../pdfSignFixtures"
 import { budget } from "../timing"
@@ -31,51 +27,6 @@ function written(begun: PdfSaveBegun): Extract<PdfSaveBegun, { status: "written"
 	if (begun.status !== "written") throw new Error(`refused: ${begun.reason}`)
 
 	return begun
-}
-
-// A verifying engine on the editing engine's held output, opened with `password`.
-async function verifier(client: PdfEngineClient, size: number, password?: string): Promise<PdfEngineClient> {
-	const buffer = createSyncRangeBuffer(8, 64 * 1024)
-	const channel = new MessageChannel()
-
-	await client.call("serveOutput", { buffer, port: channel.port1 as unknown as SyncRangePort }, [channel.port1])
-
-	const engine = spawnEngine({})
-	const opened = await engine.call(
-		"open",
-		{
-			channel: { buffer, port: channel.port2 as unknown as SyncRangePort, length: size },
-			role: "verify",
-			...(password === undefined ? {} : { password })
-		},
-		[channel.port2]
-	)
-
-	expect(opened.status).toBe("open")
-
-	return engine
-}
-
-async function upload(client: PdfEngineClient): Promise<Uint8Array> {
-	const channel = new MessageChannel()
-	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
-	const sent = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
-	const chunks: Uint8Array[] = []
-
-	for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
-
-	reader.settled(true)
-	expect((await sent).uploaded).toBe(true)
-
-	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let at = 0
-
-	for (const chunk of chunks) {
-		bytes.set(chunk, at)
-		at += chunk.length
-	}
-
-	return bytes
 }
 
 async function pdfjsText(bytes: Uint8Array, password?: string): Promise<string> {
@@ -123,13 +74,19 @@ describe("redaction in the engine", () => {
 
 			expect(area.pages).toEqual([0])
 
-			let marks = await client.call("redactMarks", {})
+			// Without `text` the marks come without their text (no structured-text pass).
+			expect((await client.call("redactMarks", {})).map(mark => mark.text)).toEqual([undefined, undefined, undefined])
+
+			let marks = await client.call("redactMarks", { text: true })
 
 			expect(marks.map(mark => [mark.page, mark.kind])).toEqual([
 				[0, "text"],
 				[0, "area"],
 				[1, "text"]
 			])
+			expect(marks.filter(mark => mark.kind === "text").map(mark => mark.text?.toLowerCase())).toEqual(
+				findings.map(finding => finding.text.toLowerCase())
+			)
 
 			// A mark taken back, and the step undone and redone.
 			const areaMark = marks.find(mark => mark.kind === "area")
@@ -174,7 +131,10 @@ describe("redaction in the engine", () => {
 			).toEqual({ ok: true })
 			check.terminate()
 
-			const bytes = await upload(client)
+			const { uploaded, bytes } = await upload(client)
+
+			expect(uploaded).toBe(true)
+
 			const text = await pdfjsText(bytes)
 
 			expect(text).not.toContain(SECRET)
@@ -378,7 +338,9 @@ describe("protection in the engine", () => {
 			expect(await check.call("checkSaved", expectation(begun, 2))).toEqual({ ok: true })
 			check.terminate()
 
-			const bytes = await upload(client)
+			const { uploaded, bytes } = await upload(client)
+
+			expect(uploaded).toBe(true)
 
 			expect(await pdfjsText(bytes, password)).toContain("Page 1")
 			await expect(pdfjsText(bytes)).rejects.toMatchObject({ name: "PasswordException" })
@@ -461,7 +423,10 @@ describe("protection in the engine", () => {
 				security: { ownerAccess: true, openPassword: false }
 			})
 
-			const bytes = await upload(client)
+			const { uploaded, bytes } = await upload(client)
+
+			expect(uploaded).toBe(true)
+
 			const reopened = mupdf.Document.openDocument(bytes, "application/pdf")
 
 			expect(reopened.needsPassword()).toBe(false)

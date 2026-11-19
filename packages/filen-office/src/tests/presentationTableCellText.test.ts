@@ -1,55 +1,26 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { bytesSource } from "../core/opc/index"
 import { emitPptx } from "../core/pptx/write/emit"
 import type { ShapeRef, TableModel, TextBody } from "../core/presentation/model"
-import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
-import { createEditCapability } from "../dom/presentation/engine/edit"
-import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
 import { layoutShapeText, textSeedOf } from "../dom/presentation/engine/text"
 import { presentationTextServices } from "../dom/presentation/engine/view"
 import { installPresentationRealm } from "../dom/presentation/services"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
+import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { tableDeck } from "./presentationObjectsFixtures"
 
 // A table cell's text in the editor: the text editor seeds on a cell (ShapeRef.cell) with that cell's body, its
 // layout in the cell's own box and the matrix of the cell's text (the table's layer and the cell's box for an empty
 // cell), and its setText writes the cell through the table family, undone as one step.
 
-interface Harness {
-	readonly context: CallContext
-	readonly edit: ReturnType<typeof createEditCapability>
+interface Harness extends EditHarness {
 	readonly cell: (row: number, col: number) => ShapeRef
 }
 
 async function harness(): Promise<Harness> {
-	const outcome = await openPptxCapability.open({
-		source: bytesSource(tableDeck()),
-		sourceKind: "bytes",
-		options: { format: "pptx", fileName: "deck.pptx" }
-	})
+	const h = await editHarness(tableDeck(), { emit: emitPptx }, { text: presentationTextServices })
+	const slide = h.session.deck.slides[0] as ShapeRef["slide"]
 
-	if (outcome.kind !== "opened") throw new Error(outcome.kind)
-
-	const session: EngineSession = {
-		s: 1,
-		deck: outcome.deck,
-		package: outcome.package,
-		options: { format: "pptx", fileName: "deck.pptx" },
-		services: { ...SERVICES, text: presentationTextServices },
-		rangeSource: undefined,
-		schedule: () => undefined,
-		emit: () => undefined,
-		onClose: () => undefined
-	}
-	const context: CallContext = {
-		session,
-		signal: { aborted: false, onAbort: () => undefined },
-		lane: "priority",
-		slicing: { pause: () => Promise.resolve(), sliceMs: 8, now: () => Date.now() }
-	}
-	const slide = outcome.deck.slides[0] as ShapeRef["slide"]
-
-	return { context, edit: createEditCapability({ emit: emitPptx }), cell: (row, col) => ({ slide, id: 3, cell: { row, col } }) }
+	return { ...h, cell: (row, col) => ({ slide, id: 3, cell: { row, col } }) }
 }
 
 function words(body: TextBody): string {
@@ -115,6 +86,7 @@ describe("table cell text", () => {
 
 		// The column's width less both margins, never below zero (the fixture's 1000 EMU column is narrower than them).
 		expect(laid.page.page.width).toBeCloseTo(Math.max(0, px(1000) - 2 * marL), 6)
+		h.close()
 	})
 
 	it("writes the cell through setText and undoes it in one step", async () => {
@@ -139,6 +111,7 @@ describe("table cell text", () => {
 			.table
 
 		expect(words(back.rows[0]?.cells[1]?.text as TextBody)).toBe("B1")
+		h.close()
 	})
 
 	it("refuses a lone surrogate and a link the deck cannot carry, but not what the cell already held", async () => {
@@ -165,6 +138,7 @@ describe("table cell text", () => {
 
 		expect(await setText(of(run("kept \ude00"), run(" typed")))).toMatchObject({ ok: true })
 		expect(await setText(of(run("new \ude00")))).toMatchObject({ ok: false, refusal: "malformed" })
+		h.close()
 	})
 
 	it("refuses a cell another cell covers and a frame without a cell", async () => {
@@ -172,5 +146,6 @@ describe("table cell text", () => {
 
 		await expect(textSeedOf(h.context, { ...h.cell(0, 0), cell: { row: 9, col: 0 } })).rejects.toMatchObject({ reason: "unsupported" })
 		await expect(textSeedOf(h.context, { slide: h.cell(0, 0).slide, id: 3 })).rejects.toMatchObject({ reason: "unsupported" })
+		h.close()
 	})
 })

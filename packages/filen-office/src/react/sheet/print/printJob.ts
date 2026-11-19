@@ -28,19 +28,31 @@ import {
 	blackAndWhite,
 	chartPlacement,
 	MAX_PAGE_CELLS,
+	overPlacement,
 	pageCount,
 	printPageAt,
 	PrintPageTooLarge,
 	printedTile,
-	wrap,
+	shownNoteLines,
 	type NotesPage,
 	type PrintChart,
 	type PrintJob,
 	type PrintJobSheet
 } from "./printLayout"
-import { framePage, paintPrintedCells, pageTiles, pageView, placedPage, PRINT_THEME, printPageSvg, type BandPictures } from "./printPage"
+import {
+	bandPictureSlot,
+	bandVariant,
+	framePage,
+	paintPrintedCells,
+	pageTiles,
+	pageView,
+	placedPage,
+	PRINT_THEME,
+	printPageSvg,
+	type BandPictures
+} from "./printPage"
 import { planSlices, slicePage, SliceTiles, sliceView, smallPage, surveyPage, type TileFetch } from "./printSlices"
-import { noteBox, wholeAxes } from "./printRanges"
+import { noteBox } from "./printRanges"
 import { escapeSvgText, SvgCanvas, xmlChars } from "./svgCanvas"
 
 // A print as a list of pages over the grid model's session: each sheet cut into pages (and the pages listing its
@@ -176,7 +188,8 @@ async function drawingMarkup(job: PrintJob, drawing: SheetDrawingData, width: nu
 }
 
 // An object drawn once per print: a chart through the charts feature (chart.render, laid out at the object's size), a
-// picture or shape through the drawings feature (drawing.render). Null when it does not draw.
+// picture or shape through the drawings feature (drawing.render). Null when it does not draw; a failure is also
+// recorded in job.failed.
 function objectMarkup(job: PrintJob, sheet: PrintJobSheet, object: SheetDrawingObject, box: SheetBox): Promise<string | null> {
 	const key = `${String(sheet.sheet)}:${String(object.key)}:${object.stamp}`
 	let made = job.drawn.get(key)
@@ -202,6 +215,8 @@ function objectMarkup(job: PrintJob, sheet: PrintJobSheet, object: SheetDrawingO
 
 				return rendered?.kind === "drawing" ? await drawingMarkup(job, rendered.drawing, box.width, box.height) : null
 			} catch {
+				job.failed.add(key)
+
 				return null
 			}
 		})()
@@ -212,11 +227,7 @@ function objectMarkup(job: PrintJob, sheet: PrintJobSheet, object: SheetDrawingO
 }
 
 function shownNoteMarkup(note: SheetPrintNote, box: SheetBox, measure: (font: string, text: string) => number): string {
-	const lines = wrap(note.author === "" ? note.text : `${note.author}:\n${note.text}`, Math.max(1, box.width - 8), text =>
-		measure(NOTE_FONT, text)
-	)
-	const fitting = lines.slice(0, Math.max(1, Math.floor((box.height - 4) / NOTE_LINE_PX)))
-	const text = fitting
+	const text = shownNoteLines(note, box, measure)
 		.map(
 			(line, k) =>
 				`<text x="${String(box.x + 4)}" y="${String(box.y + 3 + NOTE_FONT_PX + k * NOTE_LINE_PX)}"${k === 0 && note.author !== "" ? ' font-weight="bold"' : ""}>${escapeSvgText(line)}</text>`
@@ -234,21 +245,7 @@ function shownNoteMarkup(note: SheetPrintNote, box: SheetBox, measure: (font: st
 async function overMarkup(job: PrintJob, sheet: PrintJobSheet, page: PrintPage, id: string): Promise<string> {
 	if (sheet.objects.length === 0 && sheet.shownNotes.length === 0) return ""
 
-	const view = pageView(sheet, page)
-	const axes = wholeAxes(sheet.layout, sheet.rowSizes)
-	const left = axes.cols.offset(page.cols.first)
-	const top = axes.rows.offset(page.rows.first)
-	const right = axes.cols.offset(page.cols.last + 1)
-	const bottom = axes.rows.offset(page.rows.last + 1)
-	const paneX = view.cols.header + view.cols.frozenSize
-	const paneY = view.rows.header + view.rows.frozenSize
-	const mirrored = sheet.layout.rightToLeft
-	const place = (box: SheetBox): SheetBox => {
-		const x = paneX + box.x - left
-
-		return { x: mirrored ? view.width - x - box.width : x, y: paneY + box.y - top, width: box.width, height: box.height }
-	}
-	const meets = (box: SheetBox): boolean => box.x < right && box.x + box.width > left && box.y < bottom && box.y + box.height > top
+	const { axes, place, meets, clip } = overPlacement(sheet, page, pageView(sheet, page))
 	let out = ""
 
 	for (const object of sheet.objects) {
@@ -273,13 +270,10 @@ async function overMarkup(job: PrintJob, sheet: PrintJobSheet, page: PrintPage, 
 
 	if (out === "") return ""
 
-	const clip = `${id}-over`
-	const clipX = mirrored ? view.width - paneX - (right - left) : paneX
+	const clipId = `${id}-over`
 
-	return `<clipPath id="${clip}"><rect x="${String(clipX)}" y="${String(paneY)}" width="${String(right - left)}" height="${String(bottom - top)}"/></clipPath><g clip-path="url(#${clip})">${out}</g>`
+	return `<clipPath id="${clipId}"><rect x="${String(clip.x)}" y="${String(clip.y)}" width="${String(clip.width)}" height="${String(clip.height)}"/></clipPath><g clip-path="url(#${clipId})">${out}</g>`
 }
-
-const SECTIONS: Readonly<Record<string, "left" | "center" | "right">> = { L: "left", C: "center", R: "right" }
 
 // The header and footer pictures a page shows: the sheet's first-page, even-page or odd-page set (shape ids LH, CF,
 // RHFIRST, …).
@@ -291,17 +285,16 @@ async function bandPictures(
 ): Promise<{ header: BandPictures; footer: BandPictures }> {
 	const header: { -readonly [K in keyof BandPictures]: BandPictures[K] } = {}
 	const footer: { -readonly [K in keyof BandPictures]: BandPictures[K] } = {}
-	const { headerFooter } = sheet.setup
-	const variant = first && headerFooter.differentFirst ? "FIRST" : headerFooter.differentOddEven && number % 2 === 0 ? "EVEN" : ""
+	const { pictures } = bandVariant(sheet.setup.headerFooter, number, first)
 
 	for (const [index, image] of sheet.headerImages.entries()) {
-		const section = SECTIONS[image.position[0] ?? ""]
+		const slot = bandPictureSlot(image.position, pictures)
 
-		if (section === undefined || image.position.slice(2) !== variant) continue
+		if (slot === null) continue
 
 		const markup = await headerPictureMarkup(job, sheet, index, image)
 
-		if (markup !== null) (image.position[1] === "H" ? header : footer)[section] = { markup, width: image.width, height: image.height }
+		if (markup !== null) (slot.header ? header : footer)[slot.side] = { markup, width: image.width, height: image.height }
 	}
 
 	return { header, footer }
@@ -322,7 +315,11 @@ function headerPictureMarkup(job: PrintJob, sheet: PrintJobSheet, index: number,
 			return url === undefined
 				? null
 				: `<image href="${escapeSvgText(url)}" width="${String(image.width)}" height="${String(image.height)}" preserveAspectRatio="none"/>`
-		})().catch(() => null)
+		})().catch(() => {
+			job.failed.add(key)
+
+			return null
+		})
 		job.drawn.set(key, made)
 	}
 
@@ -346,6 +343,8 @@ async function chartPageMarkup(job: PrintJob, sheet: PrintJobSheet, chart: Print
 
 				return rendered.kind === "drawing" ? await drawingMarkup(job, rendered.drawing, at.width, at.height) : null
 			} catch {
+				job.failed.add(key)
+
 				return null
 			}
 		})()

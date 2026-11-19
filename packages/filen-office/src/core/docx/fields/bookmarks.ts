@@ -1,6 +1,7 @@
 import type { Node } from "prosemirror-model"
 import { TextSelection, type Transaction } from "prosemirror-state"
 import type { DocxEditContext } from "../edit/context"
+import { ANY_BOOKMARK_NAME } from "../edit/commands/fields"
 import { markInternal } from "../edit/invariants/index"
 import { NO_SOURCE, docxSchema, type MarkerAttrs, type MarkerList } from "../edit/schema"
 import type { DocxEditorSession } from "../edit/session"
@@ -17,7 +18,6 @@ const nodes = docxSchema.nodes
 
 // Word's limit on a bookmark name (ECMA-376 Part 1 §17.13.6.2: ST_String; Word refuses longer names).
 export const MAX_BOOKMARK_NAME = 40
-const NAME = /^[\p{L}_][\p{L}\p{N}_]{0,39}$/u
 
 // Where a range marker sits: an inline marker node (`inline`, the commands may move, rename or delete it), or
 // inside bytes kept as they are (an atom, a locked block) or a block's marker list (`kept`).
@@ -65,7 +65,7 @@ interface Found {
 const INDEXES = new WeakMap<Node, BookmarkIndex>()
 
 export function validBookmarkName(name: string): boolean {
-	return NAME.test(name)
+	return ANY_BOOKMARK_NAME.test(name)
 }
 
 // A source bookmark start's w:name.

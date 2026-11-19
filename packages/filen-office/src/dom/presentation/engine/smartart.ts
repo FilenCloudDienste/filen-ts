@@ -580,17 +580,6 @@ function hasPicturePlaceholders(layout: XmlDocument): boolean {
 }
 
 export const smartartCapability: SmartArtCapability = {
-	async relayout(session, target, slicing) {
-		const host = hostOf(session)
-		const { shape, frame } = frameOf(session.deck, target)
-		const xfrm = shape.xfrm
-
-		if (xfrm === undefined || !(xfrm.cx > 0 && xfrm.cy > 0)) throw new PresentationError("malformed", "smartart frame size")
-
-		const emitted = await relayoutTarget(session, host, target, frame, { w: xfrm.cx, h: xfrm.cy }, slicing)
-
-		return { shapes: emitted.shapes, drawingXml: emitted.drawingXml }
-	},
 	async preview(session, layoutRef, options, slicing) {
 		const realm = presentationRealm()
 

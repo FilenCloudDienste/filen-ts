@@ -18,7 +18,7 @@ import {
 	type HeaderFooterValues
 } from "../../../core/sheet/print/headerFooter"
 import { paginate, type PrintPage, type SheetPagination } from "../../../core/sheet/print/paginate"
-import type { SheetPageSetup, SheetPrintSpan } from "../../../core/sheet/print/setup"
+import type { SheetHeaderFooter, SheetHeaderFooterTexts, SheetPageSetup, SheetPrintSpan } from "../../../core/sheet/print/setup"
 import type { SheetPrintRows } from "../../../core/sheet/print/xlsx"
 import { createGridAxis, shownIndex, shownIndices, type GridAxis } from "../axis"
 import { decoratePane, decoratorInset, paintScene, type SheetCellDecorator } from "../layers"
@@ -292,7 +292,47 @@ export interface BandPicture {
 	readonly height: number
 }
 
-export type BandPictures = Partial<Record<"left" | "center" | "right", BandPicture>>
+export type BandSide = "left" | "center" | "right"
+
+export type BandPictures = Partial<Record<BandSide, BandPicture>>
+
+const BAND_SIDES: Readonly<Record<string, BandSide>> = { L: "left", C: "center", R: "right" }
+
+// The header and footer texts a page prints: the first page's when the sheet has its own, an even page number's when
+// it has its own (by the number printed, whatever the first page number), else the odd pages'. `pictures` is the
+// suffix of the header and footer pictures that go with them (shape ids LH, CF, RHFIRST, …).
+export function bandVariant(
+	headerFooter: SheetHeaderFooter,
+	number: number,
+	first: boolean
+): { readonly texts: SheetHeaderFooterTexts; readonly pictures: "FIRST" | "EVEN" | "" } {
+	if (first && headerFooter.differentFirst) return { texts: headerFooter.first, pictures: "FIRST" }
+	if (headerFooter.differentOddEven && number % 2 === 0) return { texts: headerFooter.even, pictures: "EVEN" }
+
+	return { texts: headerFooter.odd, pictures: "" }
+}
+
+// Where a header or footer picture shows, by its position (section letter, H or F, then its set's suffix): null when
+// it is not of the page's set (bandVariant's `pictures`).
+export function bandPictureSlot(position: string, pictures: string): { readonly header: boolean; readonly side: BandSide } | null {
+	const side = BAND_SIDES[position[0] ?? ""]
+
+	if (side === undefined || position.slice(2) !== pictures) return null
+
+	return { header: position[1] === "H", side }
+}
+
+// Where a page's content (its view at 100 %, px) stands on the paper: its top left corner and its scale (points per
+// px), centred inside the margins where the setup says.
+export function pagePlacement(printed: PrintedSheet, view: GridView): { readonly x: number; readonly y: number; readonly k: number } {
+	const { setup, pagination } = printed
+	const { area, scale } = pagination
+	const k = POINTS_PER_PX * scale
+	const x = area.x + (setup.horizontalCentered ? Math.max(0, (area.width - view.width * k) / 2) : 0)
+	const y = area.y + (setup.verticalCentered ? Math.max(0, (area.height - view.height * k) / 2) : 0)
+
+	return { x, y, k }
+}
 
 // One section's place in a band (a header or a footer): its anchor, its picture's box and its lines of text, each
 // line's pieces in their looks (fields joined with the text around them when they share its look). Points; `y` is
@@ -480,13 +520,7 @@ export function printPageSvg(options: PrintPageOptions): string {
 
 // A page around its cells' markup (drawn in `view`, the page's), placed on the paper as the setup says.
 export function placedPage(options: Omit<PrintPageOptions, "measure">, view: GridView, cells: string): string {
-	const { setup, pagination } = options.printed
-	const { area, scale } = pagination
-	const k = POINTS_PER_PX * scale
-	const width = view.width * k
-	const height = view.height * k
-	const x = area.x + (setup.horizontalCentered ? Math.max(0, (area.width - width) / 2) : 0)
-	const y = area.y + (setup.verticalCentered ? Math.max(0, (area.height - height) / 2) : 0)
+	const { x, y, k } = pagePlacement(options.printed, view)
 	const content = `<g transform="translate(${number(x)} ${number(y)}) scale(${String(k)})">${cells}${options.over ?? ""}</g>`
 
 	return framePage(options, content)
@@ -503,12 +537,7 @@ export function framePage(
 	const { paper, area, scale } = pagination
 	const values: HeaderFooterValues = { ...options.values, page: options.number, pages: options.pages }
 	const { headerFooter, margins } = setup
-	const texts =
-		options.first && headerFooter.differentFirst
-			? headerFooter.first
-			: headerFooter.differentOddEven && options.number % 2 === 0
-				? headerFooter.even
-				: headerFooter.odd
+	const { texts } = bandVariant(headerFooter, options.number, options.first)
 	const font = options.model.style(0).font ?? undefined
 	const family = fontFamily(font, theme.font)
 	const textScale = headerFooter.scaleWithDoc ? scale : 1

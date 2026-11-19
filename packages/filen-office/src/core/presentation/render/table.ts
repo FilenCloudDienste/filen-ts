@@ -1,3 +1,4 @@
+import { insertedPartName } from "../inserted"
 import { IDENTITY, ItemKind, rgbaHex, type DrawingList, type Rgba } from "../../drawingml/displayList"
 import { GROUP_PAINT, NO_PAINT, fillChild, readFillElement, shapeLine, styleRef, type PaintContext } from "../../drawingml/fill"
 import { readColorIn } from "../../drawingml/color"
@@ -650,7 +651,7 @@ function editedProps(input: TableRenderInput, table: TableModel): Map<TableCell,
 		fill.part !== undefined
 			? writer.target(fill.part)
 			: fill.inserted !== undefined
-				? writer.target(`inserted:${String(fill.inserted)}`)
+				? writer.target(insertedPartName(fill.inserted))
 				: undefined
 
 	for (const cell of edited) {

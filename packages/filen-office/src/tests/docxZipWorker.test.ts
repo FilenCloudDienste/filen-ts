@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest"
 import { unzipSync, zipSync } from "fflate"
 import { BytePieces, OpcPackage, bytesSource } from "@filen/office/core/opc"
 import { encodeUtf8 } from "@filen/office/core/xml"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import { DocxEditorSession } from "@filen/office/core/docx/edit"
 import { DocxSaveError, prepareDocxSave, saveDocx, writerProof } from "@filen/office/core/docx/write"
 import type { DocxEngineServices, DocxWorkerLike } from "@filen/office/dom/docx"
@@ -14,6 +13,7 @@ import { DocxClosedError, DocxZipWorkerError, docxZipWorker, inThreadDocxZipper,
 import { nodeText, openBytes } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
 import { ZIP_ENTRY_TIME } from "./zipTime"
+import { engineServices } from "./engineFixtures"
 
 // The zip half of a save behind its worker protocol: a real message channel (structured clone, transfers)
 // between the page side and serveDocxZipWorker, the original file read back from the page.
@@ -362,34 +362,16 @@ describe("docx zip worker", () => {
 	})
 })
 
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
 function services(onYield: () => void = () => undefined): DocxEngineServices {
 	// Every slice gives a (microtask) turn.
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
+	return engineServices({
 		yield: () => {
 			onYield()
 
 			return Promise.resolve()
 		},
 		sliceMs: 0
-	}
+	})
 }
 
 describe("editing host saves", () => {

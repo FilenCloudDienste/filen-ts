@@ -5,7 +5,6 @@ import type { PdfGradient } from "../pdfwrite/shading"
 import type { PdfImageData } from "../pdfwrite/images"
 import type { PdfImage, PdfPage } from "../pdfwrite/page"
 import type { PdfImageSource } from "../pdfwrite/writer"
-import { linearGradientLine, recolorPixels, recolors } from "./canvas"
 import { closedCommands, commandBounds, compoundMask, type CompoundMask } from "./compoundLine"
 import type { DrawingData } from "./data"
 import {
@@ -22,12 +21,37 @@ import {
 	type DrawingText,
 	type GradientStops,
 	type ImageTile,
-	type Inset,
 	type Paint,
 	type Stroke,
-	type TextParagraph,
 	type TextRun
 } from "./displayList"
+import {
+	averageColor,
+	blockTop,
+	bodyFrame,
+	boundsThrough,
+	clamp,
+	finite,
+	index,
+	insetOf,
+	lineBaseline,
+	linearGradientLine,
+	MAX_COORD,
+	matrixOf,
+	mixRgba,
+	modify,
+	patternCoverage,
+	presetDashes,
+	PX_PER_PT,
+	recolorPixels,
+	recolors,
+	rgbaFrom,
+	runPx,
+	stopCount,
+	symbolBullet,
+	type BodyLine,
+	type RunBudget
+} from "./paintShared"
 import { averageShade } from "./shade"
 import { layoutBlock } from "./textBlock"
 
@@ -75,59 +99,10 @@ export function pictureSource(image: DrawingImage, data: PdfImageData, key: stri
 }
 
 const MAX_ITEMS = 200_000
-const MAX_COORD = 2 ** 31
 const MAX_RUNS = 50_000
 const MAX_CLIP_CHAIN = 1024
-const PX_PER_PT = 96 / 72
 // Synthetic italic: the slant of a face drawn in place of an italic one.
 const FAUX_ITALIC = 0.21
-
-function finite(value: number | undefined, fallback: number): number {
-	return value !== undefined && Number.isFinite(value) ? value : fallback
-}
-
-function clamp(value: number | undefined, min: number, max: number, fallback: number = min): number {
-	return Math.min(max, Math.max(min, finite(value, fallback)))
-}
-
-function index(value: number | undefined): number {
-	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : -1
-}
-
-function channel(value: number): number {
-	return Math.min(255, Math.max(0, Math.round(value)))
-}
-
-function rgbaFrom(r: number, g: number, b: number, a: number): number {
-	return ((channel(r) << 24) | (channel(g) << 16) | (channel(b) << 8) | channel(a)) >>> 0
-}
-
-export function mixRgba(c1: number, c2: number, t: number): number {
-	const u = 1 - t
-
-	return rgbaFrom(
-		((c1 >>> 24) & 255) * u + ((c2 >>> 24) & 255) * t,
-		((c1 >>> 16) & 255) * u + ((c2 >>> 16) & 255) * t,
-		((c1 >>> 8) & 255) * u + ((c2 >>> 8) & 255) * t,
-		(c1 & 255) * u + (c2 & 255) * t
-	)
-}
-
-// ST_PathFillMode, as a blend toward white or black (as the SVG painter draws it).
-function modify(color: number, modifier: number): number {
-	switch (modifier) {
-		case ItemFlag.LIGHTEN:
-			return mixRgba(color, 0xffffff00 | (color & 255), 0.4)
-		case ItemFlag.LIGHTEN_LESS:
-			return mixRgba(color, 0xffffff00 | (color & 255), 0.2)
-		case ItemFlag.DARKEN:
-			return mixRgba(color, color & 255, 0.4)
-		case ItemFlag.DARKEN_LESS:
-			return mixRgba(color, color & 255, 0.2)
-		default:
-			return color
-	}
-}
 
 // The grey of a colour as SVG's saturate(0) gives it (Filter Effects 1 §feColorMatrix).
 export function grayRgba(color: number): number {
@@ -139,170 +114,12 @@ export function grayRgba(color: number): number {
 	return rgbaFrom(y, y, y, color & 255)
 }
 
-function stopCount(stops: GradientStops): number {
-	return Math.min(stops.offsets.length, stops.colors.length, 64)
-}
-
-function averageColor(stops: GradientStops): number {
-	const count = stopCount(stops)
-	let r = 0
-	let g = 0
-	let b = 0
-	let a = 0
-
-	for (let k = 0; k < count; k++) {
-		const color = (stops.colors[k] ?? 0) >>> 0
-
-		r += (color >>> 24) & 255
-		g += (color >>> 16) & 255
-		b += (color >>> 8) & 255
-		a += color & 255
-	}
-
-	return count === 0 ? 0 : rgbaFrom(r / count, g / count, b / count, a / count)
-}
-
-// The share of the foreground a preset pattern covers (its "pctNN" percentage; half for the line and shape
-// patterns): a pattern is drawn as the blend of its colours.
-function patternCoverage(pattern: string): number {
-	const match = /^pct(\d+)$/.exec(pattern)
-
-	return match === null ? 0.5 : clamp(Number(match[1]) / 100, 0, 1, 0.5)
-}
-
-// Dash, gap lengths in multiples of the line width (ST_PresetLineDashVal).
-function presetDashes(dash: string): readonly number[] | undefined {
-	switch (dash) {
-		case "dot":
-			return [1, 3]
-		case "dash":
-			return [4, 3]
-		case "lgDash":
-			return [8, 3]
-		case "dashDot":
-			return [4, 3, 1, 3]
-		case "lgDashDot":
-			return [8, 3, 1, 3]
-		case "lgDashDotDot":
-			return [8, 3, 1, 3, 1, 3]
-		case "sysDash":
-			return [3, 1]
-		case "sysDot":
-			return [1, 1]
-		case "sysDashDot":
-			return [3, 1, 1, 1]
-		case "sysDashDotDot":
-			return [3, 1, 1, 1, 1, 1]
-		default:
-			return undefined
-	}
-}
-
-function insetOf(inset: Inset | undefined, min: number, max: number): [number, number, number, number] {
-	if (inset === undefined) return [0, 0, 0, 0]
-
-	return [
-		clamp(inset.left, min, max, 0),
-		clamp(inset.top, min, max, 0),
-		clamp(inset.right, min, max, 0),
-		clamp(inset.bottom, min, max, 0)
-	]
-}
-
-function verticalRotation(vertical: string): number {
-	switch (vertical) {
-		case "vert":
-		case "eaVert":
-		case "wordArtVert":
-		case "mongolianVert":
-			return 90
-		case "vert270":
-		case "wordArtVertRtl":
-			return 270
-		default:
-			return 0
-	}
-}
-
-function runPx(run: TextRun, scale: number): number {
-	const px = clamp(run.size, 1, 1000, 11) * PX_PER_PT * scale
-
-	return finite(run.baseline, 0) !== 0 ? (px * 2) / 3 : px
-}
-
-function symbolBullet(font: string): boolean {
-	const name = font.toLowerCase()
-
-	return name === "symbol" || name === "wingdings" || name.startsWith("wingdings ")
-}
-
-const mod = (value: number, by: number): number => ((value % by) + by) % by
-
-function matrixOf(values: ArrayLike<number>, at: number = 0): Matrix {
-	return [
-		finite(values[at], 1),
-		finite(values[at + 1], 0),
-		finite(values[at + 2], 0),
-		finite(values[at + 3], 1),
-		clamp(values[at + 4], -MAX_COORD, MAX_COORD, 0),
-		clamp(values[at + 5], -MAX_COORD, MAX_COORD, 0)
-	]
-}
-
 function identity(m: Matrix): boolean {
 	return m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0
 }
 
-function invert(m: Matrix): Matrix | null {
-	const det = m[0] * m[3] - m[1] * m[2]
-
-	if (!(Math.abs(det) > 1e-12)) return null
-
-	return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det]
-}
-
-// The box (x, y, width, height) seen through `m`'s inverse: min x, min y, max x, max y.
-function boundsThrough(m: Matrix, x: number, y: number, width: number, height: number): [number, number, number, number] {
-	const inverse = invert(m)
-
-	if (inverse === null) return [0, 0, 1, 1]
-
-	let minX = Infinity
-	let minY = Infinity
-	let maxX = -Infinity
-	let maxY = -Infinity
-
-	for (const [px, py] of [
-		[x, y],
-		[x + width, y],
-		[x, y + height],
-		[x + width, y + height]
-	] as const) {
-		const tx = inverse[0] * px + inverse[2] * py + inverse[4]
-		const ty = inverse[1] * px + inverse[3] * py + inverse[5]
-
-		minX = Math.min(minX, tx)
-		minY = Math.min(minY, ty)
-		maxX = Math.max(maxX, tx)
-		maxY = Math.max(maxY, ty)
-	}
-
-	return [minX, minY, maxX, maxY]
-}
-
-interface BodyLine {
-	readonly paragraph: TextParagraph
-	readonly from: number
-	readonly to: number
-	readonly first: boolean
-	readonly size: number
-	readonly height: number
-	before: number
-	after: number
-}
-
 class DrawingPainter {
-	private runsLeft = MAX_RUNS
+	private readonly runs: RunBudget = { left: MAX_RUNS }
 	private readonly chains = new Map<number, readonly number[] | undefined>()
 
 	private readonly data: PdfDrawingData
@@ -384,7 +201,7 @@ class DrawingPainter {
 		while (at >= 0 && chain.length <= MAX_CLIP_CHAIN) {
 			const clip = clips[at]
 
-			if (clip === undefined) break
+			if (clip === undefined || clip === null) break
 
 			chain.push(at)
 
@@ -1053,9 +870,9 @@ class DrawingPainter {
 	private async glyphItem(text: Extract<DrawingText, { kind: "glyphs" }>, opacity: number): Promise<void> {
 		const run = text.run
 
-		if (run.text === "" || this.runsLeft <= 0) return
+		if (run.text === "" || this.runs.left <= 0) return
 
-		this.runsLeft--
+		this.runs.left--
 
 		const size = runPx(run, 1)
 		const color = this.fillOf(text.fill)
@@ -1095,9 +912,9 @@ class DrawingPainter {
 	private async blockItem(text: Extract<DrawingText, { kind: "block" }>, opacity: number): Promise<void> {
 		const run = text.run
 
-		if (run.text === "" || this.runsLeft <= 0) return
+		if (run.text === "" || this.runs.left <= 0) return
 
-		this.runsLeft--
+		this.runs.left--
 
 		const size = runPx(run, 1)
 		const fonts = this.context.fonts
@@ -1131,18 +948,7 @@ class DrawingPainter {
 		}
 
 		const total = lines.length * lineHeight
-		const top =
-			height <= 0
-				? text.lineAlign === "middle"
-					? -total / 2
-					: text.lineAlign === "end"
-						? -total
-						: 0
-				: text.lineAlign === "middle"
-					? (height - total) / 2
-					: text.lineAlign === "end"
-						? height - total
-						: 0
+		const top = blockTop(text.lineAlign, height, total)
 		const ascent = clamp(text.ascent, 0, 3, 0.9) * size
 		const color = this.fillOf(text.fill)
 		const page = this.page
@@ -1167,85 +973,16 @@ class DrawingPainter {
 		page.restoreState()
 	}
 
-	private bodyLines(paragraphs: readonly TextParagraph[], scale: number, reduction: number): BodyLine[] {
-		const lines: BodyLine[] = []
-
-		for (let p = 0; p < paragraphs.length && this.runsLeft > 0; p++) {
-			const paragraph = paragraphs[p]
-
-			if (paragraph === undefined) continue
-
-			const runs = paragraph.runs
-			const count = Math.min(runs.length, this.runsLeft)
-			const spacing = finite(paragraph.lineSpacing, 0)
-			const before = p === 0 ? 0 : clamp(paragraph.spaceBefore, 0, 1000, 0) * PX_PER_PT
-			const after = clamp(paragraph.spaceAfter, 0, 1000, 0) * PX_PER_PT
-			const firstLine = lines.length
-			let from = 0
-
-			this.runsLeft -= count
-
-			for (let k = 0; k <= count; k++) {
-				if (k < count && runs[k]?.lineBreak !== true) continue
-
-				let size = 0
-
-				for (let r = from; r < k; r++) {
-					const sized = runs[r]
-
-					if (sized !== undefined) size = Math.max(size, runPx(sized, scale))
-				}
-
-				if (size === 0) size = clamp(paragraph.endSize, 1, 1000, 11) * PX_PER_PT * scale
-
-				const single = size * 1.2
-				const height =
-					(spacing > 0 ? single * Math.min(spacing, 10) : spacing < 0 ? Math.min(-spacing, 1000) * PX_PER_PT : single) *
-					(1 - reduction)
-
-				lines.push({ paragraph, from, to: k, first: lines.length === firstLine, size, height, before: 0, after: 0 })
-				from = k + 1
-			}
-
-			const first = lines[firstLine]
-			const last = lines[lines.length - 1]
-
-			if (first !== undefined) first.before = before
-			if (last !== undefined) last.after = after
-		}
-
-		return lines
-	}
-
 	// Rich text laid out as the SVG painter lays it out: a line per paragraph or line break, no wrapping, anchored
 	// in the box (rotated with the body and its vertical direction).
 	private async bodyItem(text: Extract<DrawingText, { kind: "body" }>, f: number, opacity: number): Promise<void> {
 		const body = text.body
-		const [x, y, width, height] = this.box(f)
-		const turn = verticalRotation(body.vertical)
-		const rotation = mod(finite(body.rotation, 0) + turn, 360)
-		const swap = turn !== 0
-		const cx = x + width / 2
-		const cy = y + height / 2
-		const boxWidth = swap ? height : width
-		const boxHeight = swap ? width : height
-		const [insetLeft, insetTop, insetRight, insetBottom] = insetOf(body.insets, 0, 10_000)
-		const left = cx - boxWidth / 2 + insetLeft
-		const right = cx + boxWidth / 2 - insetRight
-		const top = cy - boxHeight / 2 + insetTop
-		const bottom = cy + boxHeight / 2 - insetBottom
-		const normal = body.autofit === "normal"
-		const scale = normal ? clamp(body.fontScale, 0.01, 1, 1) : 1
-		const reduction = normal ? clamp(body.lineSpacingReduction, 0, 0.9, 0) : 0
-		const lines = this.bodyLines(text.paragraphs, scale, reduction)
+		const frame = bodyFrame(body, text.paragraphs, this.box(f), this.runs)
 
-		if (lines.length === 0) return
+		if (frame === null) return
 
-		let total = 0
-
-		for (const line of lines) total += line.before + line.height + line.after
-
-		let cursor = body.anchor === "ctr" ? top + (bottom - top - total) / 2 : body.anchor === "b" ? bottom - total : top
+		const { left, right, rotation, cx, cy, scale } = frame
+		let cursor = frame.top
 		const page = this.page
 
 		page.saveState()
@@ -1258,10 +995,10 @@ class DrawingPainter {
 			page.concat([cos, sin, -sin, cos, cx - cos * cx + sin * cy, cy - sin * cx - cos * cy])
 		}
 
-		for (const line of lines) {
+		for (const line of frame.lines) {
 			cursor += line.before
 
-			await this.bodyLine(line, left, right, cursor + (line.height - line.size * 1.2) / 2 + line.size * 0.95, scale, opacity)
+			await this.bodyLine(line, left, right, lineBaseline(line, cursor), scale, opacity)
 
 			cursor += line.height + line.after
 		}

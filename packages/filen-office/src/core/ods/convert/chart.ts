@@ -1,4 +1,5 @@
 import { appendAll } from "../../arrays"
+import { CHART_TEXT_EN } from "../../drawingml/chart/builder"
 import { seriesColor } from "../../drawingml/chart/palette"
 import { readColorIn, type DrawingTheme } from "../../drawingml/color"
 import { rgbaHex } from "../../drawingml/displayList"
@@ -420,7 +421,7 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 		],
 		[]
 	)
-	const titleText = info.title === "" ? (total === 1 ? (first.series[0]?.name ?? "") : "Chart Title") : info.title
+	const titleText = info.title === "" ? (total === 1 ? (first.series[0]?.name ?? "") : CHART_TEXT_EN.chartTitle) : info.title
 	const title = titleText === null || titleText === "" ? "" : `<chart:title>${paragraphs(titleText)}</chart:title>`
 	const legend = info.legend === null ? "" : `<chart:legend chart:legend-position="${ODF_LEGENDS.get(info.legend) ?? "end"}"/>`
 	const area = styles.style(

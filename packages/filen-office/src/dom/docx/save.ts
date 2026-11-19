@@ -12,6 +12,7 @@ import { DocxSaveError, isDocxSaveFailure } from "../../core/docx/write/failure"
 import { zipDocxSave, type DocxPartChanges } from "../../core/docx/write/zip"
 import type { OdtWriteNotice } from "../../core/odt/write/writer"
 import type { DocxWorkerLike, DocxWorkerScope } from "./host"
+import { clearTimer, setTimer } from "../platform"
 
 // The zip half of a save (zipDocxSave: the checked parts written into the original archive, then the zip half
 // of gate 2), behind one interface for both threads: in a worker (web), where deflating and checksumming a
@@ -159,19 +160,6 @@ const PIECE = 4 * 1024 * 1024
 // How often a busy worker says so, and how long the page waits without hearing from it before giving up.
 const ALIVE_MS = 1000
 const STALL_MS = 20_000
-
-// Timers through globalThis: the module type-checks without DOM or Node typings.
-function setTimer(run: () => void, ms: number, repeat = false): unknown {
-	const set: unknown = Reflect.get(globalThis, repeat ? "setInterval" : "setTimeout")
-
-	return typeof set === "function" ? Reflect.apply(set, globalThis, [run, ms]) : undefined
-}
-
-function clearTimer(handle: unknown, repeat = false): void {
-	const clear: unknown = Reflect.get(globalThis, repeat ? "clearInterval" : "clearTimeout")
-
-	if (typeof clear === "function") Reflect.apply(clear, globalThis, [handle])
-}
 
 export class DocxZipWorkerError extends Error {
 	constructor(message: string) {

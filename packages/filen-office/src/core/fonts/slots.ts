@@ -18,13 +18,6 @@ export interface SlotContext {
 	readonly chineseFontCharset: boolean
 }
 
-export const DEFAULT_SLOT_CONTEXT: SlotContext = {
-	hint: "default",
-	complexScript: false,
-	chineseLanguage: false,
-	chineseFontCharset: false
-}
-
 export function isChineseLanguage(lang: string | undefined): boolean {
 	return lang !== undefined && /^zh(?:-|$)/i.test(lang)
 }

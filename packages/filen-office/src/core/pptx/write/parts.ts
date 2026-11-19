@@ -13,7 +13,7 @@ import {
 	type Relationship,
 	type ZipChanges
 } from "../../opc/index"
-import { storedByType } from "../../opc/mediaPolicy"
+import { DEFLATE_HELD, storedByType } from "../../opc/mediaPolicy"
 import { formerName, issuedNames, noteFormerName, noteIssuedNames } from "../../presentation/issuedNames"
 import { PresentationError } from "../../presentation/model"
 import { noteRestoredMedia } from "../../presentation/restoredMedia"
@@ -376,6 +376,8 @@ const retiredIds = new WeakMap<object, Map<string, Set<string>>>()
 
 // The relationship kinds of media a slide's markup names (pictures, video, audio, embedded objects).
 const MEDIA_KINDS: ReadonlySet<string> = new Set(["image", "video", "audio", "media", "oleObject", "package", "hdphoto"])
+// The kinds whose parts are only ever streamed or read by range (core/opc/mediaPolicy.ts): never held as bytes.
+const STREAMED_KINDS: ReadonlySet<string> = new Set(["video", "audio", "media"])
 
 export function hasReleasedMedia(deck: object): boolean {
 	return (releasedMedia.get(deck)?.size ?? 0) > 0
@@ -1488,8 +1490,24 @@ export class PackageWriter {
 			for (const relationship of all) if (!relationship.external) related.add(partKey(relationship.target))
 
 		const keys = [...new Set(this.unrelated.map(partKey))]
-		// Media a written slide no longer names go whatever the history names: an undo adds them again (restoreMedia).
-		const media = new Set(this.releasing.map(each => partKey(each.target)))
+		// Media a written slide no longer names go whatever the history names: an undo adds them again from their held
+		// bytes (restoreMedia). A medium (audio, video) or a part over DEFLATE_HELD is never held whole: while a step the
+		// history holds names it, it stays in the package unrelated, the session's to leave out once none does.
+		const media = new Set<string>()
+
+		for (const { type, target } of this.releasing) {
+			const key = partKey(target)
+			const entry = this.opc.entry(key)
+
+			if (
+				entry === undefined ||
+				!(this.holdAll || this.held.has(key)) ||
+				!(STREAMED_KINDS.has(relationshipKind(type) ?? "") || entry.uncompressedSize > DEFLATE_HELD)
+			)
+				media.add(key)
+			else if (!this.released.includes(entry.name)) this.released.push(entry.name)
+		}
+
 		const loose = keys.filter(
 			key =>
 				!related.has(key) &&
@@ -1532,7 +1550,8 @@ export class PackageWriter {
 	}
 
 	// What the save released that a step the history holds names: kept for an undo (restoreMedia), with the part's
-	// bytes when it left the package; its relationship id never given out again.
+	// bytes when it left the package (never a medium's or a large part's: those stay, removeUnrelated); its
+	// relationship id never given out again.
 	private async holdReleased(gone: ReadonlySet<string>): Promise<void> {
 		const deck = this.deck
 

@@ -1,6 +1,6 @@
 import { Zlib } from "fflate"
 import { describe, expect, it } from "vitest"
-import { bytesSource, memorySink, type ByteSink } from "../core/opc/index"
+import { bytesSource, memorySink } from "../core/opc/index"
 import type { LinkedPart } from "../core/opc/package"
 import { slideTiming, type PptAnimContext, type PptAnimShape } from "../core/ppt/anim"
 import { PptMedia } from "../core/ppt/media"
@@ -9,78 +9,32 @@ import { children, recordAt, RecordCounter } from "../core/ppt/records"
 import { pptToPptx, type PptConversion } from "../core/ppt/toPptx"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
 import { liveHeap, liveHeapNow } from "./liveHeap"
-import { pptAsPptx } from "./pptConvertFixtures"
-import { buildPpt, concat, container, FIXTURE_PNG, record, type FixtureOptions } from "./pptFixtures"
+import { nullSink, pptAsPptx } from "./pptConvertFixtures"
+import {
+	buildPpt,
+	concat,
+	container,
+	f32,
+	FIXTURE_PNG,
+	record,
+	u16,
+	u32,
+	utf16,
+	timeBehavior as behavior,
+	timeCondition as condition,
+	timeInt as int,
+	timeNode as node,
+	timeNodeAtom as nodeAtom,
+	timeProperties as properties,
+	timeStr as str,
+	pageTarget,
+	shapeTarget,
+	type FixtureOptions
+} from "./pptFixtures"
 import { budget, cpuMs } from "./timing"
 
 // Hostile PowerPoint 97–2003 input the converter must survive with its deck: damaged time trees and comments, unpaired
 // surrogates, numbers no attribute can hold, impossible dates, storage bombs and quadratic targets.
-
-function u16(value: number): Uint8Array {
-	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff)
-}
-
-function u32(value: number): Uint8Array {
-	const out = new Uint8Array(4)
-
-	new DataView(out.buffer).setUint32(0, value >>> 0, true)
-
-	return out
-}
-
-function f32(value: number): Uint8Array {
-	const out = new Uint8Array(4)
-
-	new DataView(out.buffer).setFloat32(0, value, true)
-
-	return out
-}
-
-function utf16(text: string): Uint8Array {
-	const out = new Uint8Array(text.length * 2 + 2)
-
-	for (let k = 0; k < text.length; k++) {
-		out[2 * k] = text.charCodeAt(k) & 0xff
-		out[2 * k + 1] = text.charCodeAt(k) >> 8
-	}
-
-	return out
-}
-
-const int = (id: number, value: number): Uint8Array => record(0xf142, concat(Uint8Array.of(1), u32(value)), id)
-const str = (instance: number, value: string): Uint8Array => record(0xf142, concat(Uint8Array.of(3), utf16(value)), instance)
-const properties = (...items: Uint8Array[]): Uint8Array => container(0xf13d, items)
-const node = (...children: Uint8Array[]): Uint8Array => container(0xf144, children, 1)
-
-function nodeAtom(type: number, options: { fill?: number; dur?: number; restart?: number } = {}): Uint8Array {
-	const flags =
-		0x8 | (options.fill === undefined ? 0 : 0x1) | (options.dur === undefined ? 0 : 0x10) | (options.restart === undefined ? 0 : 0x2)
-
-	return record(
-		0xf127,
-		concat(u32(0), u32(options.restart ?? 0), u32(type), u32(options.fill ?? 0), u32(0), u32(0), u32(options.dur ?? 0), u32(flags))
-	)
-}
-
-function condition(instance: number, object: number, event: number, delay: number, target?: Uint8Array): Uint8Array {
-	return container(
-		0xf125,
-		[record(0xf128, concat(u32(object), u32(event), u32(0), u32(delay))), ...(target === undefined ? [] : [target])],
-		instance
-	)
-}
-
-const pageTarget = (): Uint8Array => container(0xf13c, [record(0x2b01, u32(1))])
-const shapeTarget = (spid: number, type = 0, start = 0, end = 0): Uint8Array =>
-	container(0xf13c, [record(0x2afb, concat(u32(type), u32(1), u32(spid), u32(start), u32(end)))])
-
-function behavior(target: Uint8Array, attribute?: string): Uint8Array {
-	return container(0xf12a, [
-		record(0xf133, concat(u32(attribute === undefined ? 0 : 0x4), u32(0), u32(0), u32(0))),
-		...(attribute === undefined ? [] : [container(0xf13e, [str(0, attribute)], 1)]),
-		target
-	])
-}
 
 // The tree of one click playing `effect`.
 function tree(effect: Uint8Array[]): Uint8Array {
@@ -463,8 +417,6 @@ describe("ppt embedded object storage bombs", () => {
 		],
 		objects: new Map([[100, record(0x1011, concat(u32(size), body), 1)]])
 	})
-	const nullSink = (): ByteSink => ({ write: () => Promise.resolve(), close: () => Promise.resolve() })
-
 	it("never inflates a storage at open and streams it into the copy in bounded memory", { timeout: 300_000 }, async () => {
 		const built = await buildPpt(objectOf(zlib(SIZE), SIZE))
 		const start = cpuMs()

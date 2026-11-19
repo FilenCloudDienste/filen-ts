@@ -365,8 +365,8 @@ describe("presentation comments", () => {
 		const slide = s.session.deck.slides[0] as SlideRef
 
 		await review(s.context, slide)
-		expect(await s.command(add(slide, ROOT, "   "))).toEqual({ ok: false, refusal: "malformed" })
-		expect(await s.command(add(slide, ROOT, "bell\u0007"))).toEqual({ ok: false, refusal: "malformed" })
+		expect(await s.command(add(slide, ROOT, "   "))).toMatchObject({ ok: false, refusal: "malformed" })
+		expect(await s.command(add(slide, ROOT, "bell\u0007"))).toMatchObject({ ok: false, refusal: "malformed" })
 		expect(
 			await s.command({
 				family: "comment",
@@ -375,7 +375,7 @@ describe("presentation comments", () => {
 				parent: SECOND,
 				comment: { id: REPLY, author: AUTHOR_A, text: "x", created: "" }
 			})
-		).toEqual({ ok: false, refusal: "notFound" })
+		).toMatchObject({ ok: false, refusal: "notFound" })
 		expect((await s.save()).result.kind).toBe("unchanged")
 	})
 

@@ -6,6 +6,7 @@ import type { MathElement } from "../../core/math/index"
 import type { DocxAnnotations } from "./annotations"
 import type { DocxPageData, DocxTextStyle, DocxLinkTarget } from "../../core/docx/layout/pageData"
 import type { DrawingData } from "../../core/drawingml/data"
+import type { ChartText } from "../../core/drawingml/chart/builder"
 
 // The page and drawing data are core's (the engine builds them); re-exported here for the renderers.
 export type { DocxLinkTarget, DocxPageData, DocxTextStyle } from "../../core/docx/layout/pageData"
@@ -125,4 +126,7 @@ export interface DocxOpenOptions {
 	// The file's format: an OpenDocument text document ("odt") is translated in the engine's realm and shown
 	// through the same layout (default "docx": any word-processing package).
 	readonly format?: "docx" | "odt"
+	// What charts show where the file names nothing (unnamed series, automatic titles) in the page's locale; English
+	// without it.
+	readonly chartText?: ChartText
 }

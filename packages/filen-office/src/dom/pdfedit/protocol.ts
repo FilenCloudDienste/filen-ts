@@ -192,9 +192,10 @@ export interface PdfEngineOps {
 	}
 	// The form's required fields still empty (the warning on save): how many, and the first in page order.
 	requiredFields: { readonly args: Record<string, never>; readonly value: PdfRequiredFields }
-	// `steps` back at once (1 when absent): through the journal where it can, else one rebuild.
-	undo: { readonly args: { readonly steps?: number }; readonly value: PdfCommandResult }
-	redo: { readonly args: Record<string, never>; readonly value: PdfCommandResult }
+	// `steps` back at once (1 when absent): through the journal where it can, else one rebuild. Every page redraws;
+	// the answer carries the widgets of `pages` only (the ones the page shows, at most PDF_STEP_WIDGET_PAGES).
+	undo: { readonly args: { readonly steps?: number; readonly pages?: readonly number[] }; readonly value: PdfCommandResult }
+	redo: { readonly args: { readonly pages?: readonly number[] }; readonly value: PdfCommandResult }
 	// A save: planned (core/pdfedit/savePlan.ts), then written into the heap and held there until saveEnd.
 	saveBegin: {
 		readonly args: {
@@ -278,11 +279,15 @@ export interface PdfEngineOps {
 	// --- The verify role, on a written file (opened, and unlocked with the document's password) ---
 	checkSaved: { readonly args: PdfSaveExpectation; readonly value: PdfSaveCheck }
 	// The written file checked against what the steps redacted (redact/verify.ts). Served by a worker that registers
-	// verifyRedactionRequest (redactRequests.ts); run after checkSaved, as it changes the document in memory.
+	// verifyRedactionRequest (protectRequests.ts); run after checkSaved, as it changes the document in memory.
 	verifyRedaction: { readonly args: { readonly manifest: RedactionManifest }; readonly value: RedactionVerdict }
 	// --- Protect: redaction and security (edit role) ---
-	// The pending redaction marks of these 0-based pages (every page when absent), in page order.
-	redactMarks: { readonly args: { readonly pages?: readonly number[] }; readonly value: readonly RedactionMark[] }
+	// The pending redaction marks of these 0-based pages (every page when absent), in page order. With `text`, each text
+	// mark carries the characters under it (one structured-text pass per page with a text mark: only for a list to read).
+	redactMarks: {
+		readonly args: { readonly pages?: readonly number[]; readonly text?: boolean }
+		readonly value: readonly RedactionMark[]
+	}
 	// Find & redact's search of every page's text.
 	redactFind: { readonly args: { readonly query: RedactionQuery }; readonly value: readonly RedactionFinding[] }
 	// A page's text lines with their characters' edges, in MuPDF page space (the text mark tool's selection).
@@ -309,8 +314,13 @@ export interface PdfEngineOps {
 		readonly args: { readonly source: TextEditSource; readonly text: string; readonly style: TextEditStyle }
 		readonly value: Uint8Array | null
 	}
-	// The pages text recognition would read (isOcrCandidate): scanned, with (near) no text.
-	ocrScan: { readonly args: Record<string, never>; readonly value: { readonly scanned: readonly number[] } }
+	// The pages text recognition would read (isOcrCandidate): scanned, with (near) no text. Pages `from` (0 by default,
+	// at most the page count) on, `count` of them (every page by default), so a large document is scanned in runs that
+	// let renders and cancels in between; `pageCount` is the document's.
+	ocrScan: {
+		readonly args: { readonly from?: number; readonly count?: number }
+		readonly value: { readonly scanned: readonly number[]; readonly pageCount: number }
+	}
 	// A page rendered for the recogniser (its pixels transferred).
 	ocrRender: { readonly args: { readonly page: number }; readonly value: OcrRenderedPage }
 	// Empties MuPDF's resource store (after a batch of renders).
@@ -497,3 +507,6 @@ export function isToPdfEngine(data: unknown): data is ToPdfEngine {
 
 // The compiled MuPDF module handed to a starting engine worker (posted before anything else).
 export const PDF_ENGINE_WASM = "filen.pdfEngine.wasm"
+
+// The most pages an undo or redo answers widgets for: those the page shows, not every page it ever read.
+export const PDF_STEP_WIDGET_PAGES = 32

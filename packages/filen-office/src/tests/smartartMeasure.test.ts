@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { measureText } from "../core/smartart/measure"
-import { adapterMeasurer, data, layout, MM, model, NO_MARGINS, run } from "./smartartFixtures"
+import { emitDiagram } from "../core/smartart/emit"
+import { measureText, type MeasureText, type TextMeasurer } from "../core/smartart/measure"
+import { BULLET_HANG, LINE_PCT, SPACE_AFTER_CHILD_PCT, SPACE_AFTER_NODE_PCT, childFontPt, textLevel } from "../core/smartart/textDefaults"
+import { adapterMeasurer, data, layout, measurer as plainMeasurer, MM, model, NO_MARGINS, run } from "./smartartFixtures"
 
 // The tx algorithm's measurer over the slide text adapter (core/presentation/text layoutBody) on the bundled faces.
 
@@ -112,5 +114,70 @@ describe("SmartArt font fit and words", () => {
 
 		expect(measurer.measure("Children", font, 1e10).width).toBeLessThanOrEqual(20 * MM)
 		expect(measurer.measure("Children", font + 0.5, 1e10).width).toBeGreaterThan(20 * MM)
+	})
+})
+
+describe("SmartArt text defaults shared by measuring and drawing", () => {
+	it("draws a two-level bulleted node with the spacing, levels and hang its text was measured with", () => {
+		const calls: { readonly text: MeasureText; readonly pt: number; readonly childPt: number }[] = []
+		const recording: TextMeasurer = {
+			measure: plainMeasurer.measure,
+			measureText(text, pt, childPt, width) {
+				calls.push({ text, pt, childPt })
+
+				return plainMeasurer.measure(text.paragraphs.map(p => p.runs.map(r => r.text).join("")).join("\n"), pt, width)
+			}
+		}
+		const tree =
+			layout(`<dgm:alg type="lin"/><dgm:constrLst><dgm:constr type="w" for="ch" forName="box" val="60"/><dgm:constr type="h" for="ch" forName="box" val="40"/>
+			<dgm:constr type="primFontSz" for="ch" forName="box" val="24"/></dgm:constrLst>
+			<dgm:forEach axis="ch" ptType="node" cnt="1"><dgm:layoutNode name="box" styleLbl="node1"><dgm:varLst><dgm:bulletEnabled val="1"/></dgm:varLst><dgm:alg type="tx"/>
+			<dgm:shape type="rect"/><dgm:presOf axis="desOrSelf" ptType="node"/></dgm:layoutNode></dgm:forEach>`)
+		const laid = run(
+			data([
+				{ id: "a", text: "Alpha" },
+				{ id: "b", parent: "a", text: "Beta" }
+			]),
+			tree,
+			80 * MM,
+			40 * MM,
+			{},
+			recording
+		)
+		const shape = laid.shapes.find(each => each.name === "box")
+		const measured = calls.find(call => call.pt === shape?.fontPt)
+
+		if (shape === undefined || measured === undefined) throw new Error("fixture")
+
+		const xml = emitDiagram(laid).drawingXml
+		const pPrs = [...xml.matchAll(/<a:pPr marL="(\d+)" lvl="(\d+)" indent="(-?\d+)"[^>]*>(.*?)<a:bu/gu)]
+
+		expect(measured.text.paragraphs.map(p => [p.level, p.bullet])).toEqual([
+			[0, false],
+			[1, true]
+		])
+		expect(pPrs).toHaveLength(measured.text.paragraphs.length)
+		measured.text.paragraphs.forEach((paragraph, k) => {
+			const [, marL, lvl, indent, spacing] = pPrs[k] ?? []
+			const hang = paragraph.bullet ? Math.round(BULLET_HANG * measured.childPt * 12700) : 0
+
+			expect(Number(lvl)).toBe(paragraph.level)
+			expect(Number(marL)).toBe(paragraph.level * hang)
+			expect(Number(indent)).toBe(paragraph.bullet ? -hang : 0)
+			expect(spacing).toBe(
+				`<a:lnSpc><a:spcPct val="${String(LINE_PCT)}"/></a:lnSpc><a:spcBef><a:spcPct val="0"/></a:spcBef>` +
+					`<a:spcAft><a:spcPct val="${String(paragraph.level === 0 ? SPACE_AFTER_NODE_PCT : SPACE_AFTER_CHILD_PCT)}"/></a:spcAft>`
+			)
+		})
+	})
+
+	it("levels text points and sizes child text by the shared rules", () => {
+		expect([0, 1, 2, 12].map((depth, index) => textLevel({ depth }, index, 0))).toEqual([0, 1, 2, 8])
+		expect(textLevel({ depth: 1 }, 1, 1)).toBe(1)
+		expect(childFontPt(undefined, 20)).toBe(20)
+		expect(childFontPt(14, 20)).toBe(14)
+		expect(childFontPt(30, 20)).toBe(20)
+		expect(childFontPt(Number.NaN, 20)).toBe(20)
+		expect(childFontPt(0, 20)).toBe(20)
 	})
 })

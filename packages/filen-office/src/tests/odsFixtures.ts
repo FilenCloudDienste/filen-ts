@@ -1,3 +1,4 @@
+import { strFromU8, unzipSync } from "fflate"
 import { bytesSource } from "@filen/office/core/opc"
 import { openOds, type OdsOpenResult } from "../core/ods/open"
 import { XlsxDocument } from "../core/xlsx/edit/document"
@@ -94,12 +95,27 @@ export function shownRows(document: XlsxDocument, sheet: number): string[][] {
 
 	if (csv !== null && !(csv instanceof Uint8Array)) throw new Error(`csv refused: ${csv.reason}`)
 
-	const rows = csv === null ? [] : parseCsv(new TextDecoder().decode(csv))
+	return trimmedRows(csv === null ? [] : parseCsv(new TextDecoder().decode(csv)))
+}
 
-	for (const row of rows) while (row.length > 0 && row[row.length - 1] === "") row.pop()
-	while (rows.length > 0 && rows[rows.length - 1]?.length === 0) rows.pop()
+// Rows without their trailing empty fields, and without trailing empty rows.
+export function trimmedRows(rows: readonly (readonly string[])[]): string[][] {
+	const out = rows.map(row => {
+		const copy = [...row]
 
-	return rows
+		while (copy.length > 0 && copy[copy.length - 1] === "") copy.pop()
+
+		return copy
+	})
+
+	while (out.length > 0 && out[out.length - 1]?.length === 0) out.pop()
+
+	return out
+}
+
+// A saved package's content.xml as text (empty when it has none).
+export function odsContent(bytes: Uint8Array): string {
+	return strFromU8(unzipSync(bytes)["content.xml"] ?? new Uint8Array(0))
 }
 
 // A manifest entry marking `path` encrypted (ODF 1.3 Part 2 §4.8), as LibreOffice writes a password-protected file.

@@ -1,15 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { bytesSource } from "../core/opc/index"
 import { type ShapeRef, type TextBody } from "../core/presentation/model"
-import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
-import { createEditCapability } from "../dom/presentation/engine/edit"
-import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
 import { layoutShapeText, textSeedOf } from "../dom/presentation/engine/text"
 import { presentationTextServices, renderSlideFor } from "../dom/presentation/engine/view"
 import { installPresentationRealm } from "../dom/presentation/services"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
 import { body, buildPptx, COLOR_MAP, para, sp, tree, xfrm } from "./pptxFixtures"
-import { SOURCE_EMITTER } from "./presentationEditFixtures"
+import { SOURCE_EMITTER, editHarness, type EditHarness } from "./presentationEditFixtures"
 
 // The text context the editor starts from, read in the worker: a body with nothing visible in it (an empty
 // placeholder, a cleared body, a shape without a body) seeds and lays out in its shape's own box; a layer drawn on the
@@ -51,52 +47,17 @@ function deck(): Uint8Array {
 	})
 }
 
-interface Harness {
-	readonly context: CallContext
-	readonly edit: ReturnType<typeof createEditCapability>
+interface Harness extends EditHarness {
 	readonly ref: (id: number) => ShapeRef
-	close(): void
 }
 
 async function harness(): Promise<Harness> {
-	const outcome = await openPptxCapability.open({
-		source: bytesSource(deck()),
-		sourceKind: "bytes",
-		options: { format: "pptx", fileName: "deck.pptx" }
-	})
-
-	if (outcome.kind !== "opened") throw new Error(outcome.kind)
-
-	const closers: (() => void)[] = []
-	const session: EngineSession = {
-		s: 1,
-		deck: outcome.deck,
-		package: outcome.package,
-		options: { format: "pptx", fileName: "deck.pptx" },
-		services: { ...SERVICES, text: presentationTextServices },
-		rangeSource: undefined,
-		schedule: () => undefined,
-		emit: () => undefined,
-		onClose: listener => closers.push(listener)
-	}
-	const context: CallContext = {
-		session,
-		signal: { aborted: false, onAbort: () => undefined },
-		lane: "priority",
-		slicing: { pause: () => Promise.resolve(), sliceMs: 8, now: () => Date.now() }
-	}
-	const slide = outcome.deck.slides[0]
+	const h = await editHarness(deck(), { emit: SOURCE_EMITTER }, { text: presentationTextServices })
+	const slide = h.session.deck.slides[0]
 
 	if (slide === undefined) throw new Error("no slide")
 
-	return {
-		context,
-		edit: createEditCapability({ emit: SOURCE_EMITTER }),
-		ref: id => ({ slide, id }),
-		close: () => {
-			for (const closer of closers) closer()
-		}
-	}
+	return { ...h, ref: id => ({ slide, id }) }
 }
 
 function text(body: TextBody): string[] {

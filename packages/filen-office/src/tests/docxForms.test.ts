@@ -14,7 +14,16 @@ import {
 } from "@filen/office/core/docx/edit"
 import { prepareDocxSave, saveDocx } from "@filen/office/core/docx/write"
 import { bindingsKnown, boundControls, unmappedKeys } from "../core/docx/forms/binding"
-import { controlKey, controlOf, prefixMappings, simpleBinding, sourceControl, type ControlState } from "../core/docx/forms/controls"
+import {
+	controlKey,
+	controlOf,
+	DEFAULT_PLACEHOLDERS,
+	prefixMappings,
+	simpleBinding,
+	sourceControl,
+	type ControlState
+} from "../core/docx/forms/controls"
+import type { DocxEditStrings } from "../core/docx/edit/context"
 import { formatControlDate, parseControlDate } from "../core/docx/forms/dates"
 import { datePicture } from "../core/docx/fields/evaluate"
 import { boundIndex } from "../core/docx/forms/positions"
@@ -49,17 +58,16 @@ interface Opened {
 	readonly session: DocxEditorSession
 }
 
-async function open(source: SyntheticDocx | Uint8Array, author?: string): Promise<Opened> {
+async function open(source: SyntheticDocx | Uint8Array, author?: string, strings?: DocxEditStrings): Promise<Opened> {
 	const opened = await openDocxPackage(bytesSource(source instanceof Uint8Array ? source : buildDocx(source)))
 
 	if (!opened.ok) throw new Error(opened.reason)
 
 	const model = await buildDocxModel(opened.package)
-	const context = await openDocxEditContext(
-		opened.package,
-		model,
-		author === undefined ? {} : { author, clock: () => Date.UTC(2026, 9, 12) }
-	)
+	const context = await openDocxEditContext(opened.package, model, {
+		...(author === undefined ? {} : { author, clock: () => Date.UTC(2026, 9, 12) }),
+		...(strings === undefined ? {} : { strings })
+	})
 
 	return { pkg: opened.package, context, session: new DocxEditorSession(context, { transformer }) }
 }
@@ -2044,5 +2052,162 @@ describe("content controls: list entries and new controls' defaults", () => {
 		for (const language of ["fa-IR", "ar-EG", "th-TH", "bn-BD"]) {
 			expect(shortDatePicture(language), language).toMatch(/^[dMy./\- ]+$/)
 		}
+	})
+})
+
+describe("content controls: the host's language", () => {
+	const FRENCH: DocxEditStrings = {
+		placeholders: {
+			text: "Cliquez ou appuyez ici pour entrer du texte.",
+			date: "Cliquez ou appuyez pour entrer une date.",
+			list: "Choisissez un élément."
+		},
+		noTocEntries: "Aucune entrée de table des matières n'a été trouvée."
+	}
+
+	it("starts a new list with the list placeholder as its first entry", async () => {
+		const opened = await open({ body: p("Pick ") })
+		const session = opened.session
+
+		select(session, find(session, "Pick") + 5)
+		expect(run({ type: "control.insert", kind: "dropDownList", items: [{ text: "One", value: "1" }] }, session)).toBe(true)
+		expect(control(session)?.items[0]?.text).toBe(DEFAULT_PLACEHOLDERS.list)
+		expect(session.state.doc.textContent).toBe(`Pick ${DEFAULT_PLACEHOLDERS.list}`)
+	})
+
+	it("writes the host's placeholders into new controls, and choosing the first entry shows the placeholder again", async () => {
+		const opened = await open({ body: p("Pick ") }, undefined, FRENCH)
+		const session = opened.session
+		const end = find(session, "Pick") + 5
+
+		select(session, end)
+		expect(run({ type: "control.insert", kind: "plainText" }, session)).toBe(true)
+		expect(session.state.doc.textContent).toBe(`Pick ${FRENCH.placeholders.text}`)
+
+		select(session, end)
+		expect(run({ type: "control.insert", kind: "date" }, session)).toBe(true)
+		expect(session.state.doc.textContent).toContain(FRENCH.placeholders.date)
+
+		select(session, end)
+		expect(run({ type: "control.insert", kind: "dropDownList", items: [{ text: "Un", value: "1" }] }, session)).toBe(true)
+		expect(control(session)?.items.map(item => item.text)).toEqual([FRENCH.placeholders.list, "Un"])
+		expect(session.state.doc.textContent).toContain(FRENCH.placeholders.list)
+		expect(run({ type: "control.choose", value: "1" }, session)).toBe(true)
+		expect(control(session)).toMatchObject({ value: "1", placeholder: false })
+		expect(run({ type: "control.choose", value: FRENCH.placeholders.list }, session)).toBe(true)
+		expect(control(session)).toMatchObject({ placeholder: true, value: null })
+		expect(session.state.doc.textContent).toContain(FRENCH.placeholders.list)
+
+		const xml = part(await save(opened), "word/document.xml")
+
+		expect(xml).toContain(`<w:listItem w:value="${FRENCH.placeholders.list}"/>`)
+		expect(xml).not.toContain(DEFAULT_PLACEHOLDERS.text)
+		expect(xml).not.toContain(DEFAULT_PLACEHOLDERS.list)
+	})
+
+	it("still shows the placeholder again for Word's en-US entry under another language", async () => {
+		const opened = await open({ body: inParagraph(LIST("dropDownList", "Pear")), ...STYLED }, undefined, FRENCH)
+		const session = opened.session
+
+		select(session, find(session, "Pear") + 1)
+		expect(control(session)).toMatchObject({ placeholder: false })
+		expect(run({ type: "control.choose", value: "Choose an item." }, session)).toBe(true)
+		expect(control(session)).toMatchObject({ placeholder: true, value: null })
+		// The file has no placeholder text of its own: the host's default shows.
+		expect(session.state.doc.textContent).toContain(FRENCH.placeholders.list)
+	})
+	it("shows the host's placeholder again in a list made in its language, saved with a choice and reopened", async () => {
+		const first = await open({ body: p("Pick ") }, undefined, FRENCH)
+
+		select(first.session, find(first.session, "Pick") + 5)
+		expect(run({ type: "control.insert", kind: "dropDownList", items: [{ text: "Un", value: "1" }] }, first.session)).toBe(true)
+		expect(run({ type: "control.choose", value: "1" }, first.session)).toBe(true)
+
+		const reopened = await open(await save(first), undefined, FRENCH)
+		const session = reopened.session
+
+		select(session, find(session, "Un") + 1)
+		expect(control(session)).toMatchObject({ value: "1", placeholder: false })
+		expect(run({ type: "control.choose", value: FRENCH.placeholders.list }, session)).toBe(true)
+		expect(control(session)).toMatchObject({ placeholder: true, value: null })
+		expect(session.state.doc.textContent).toBe(`Pick ${FRENCH.placeholders.list}`)
+	})
+
+	it("writes the host's placeholder when a filled control read from the file is cleared", async () => {
+		const filled =
+			'<w:sdt><w:sdtPr><w:id w:val="105"/><w:text/></w:sdtPr><w:sdtContent><w:r><w:t>Filled</w:t></w:r></w:sdtContent></w:sdt>'
+		const opened = await open({ body: inParagraph(filled), ...STYLED }, undefined, FRENCH)
+		const session = opened.session
+
+		select(session, find(session, "Filled") + 2)
+		expect(control(session)).toMatchObject({ placeholder: false })
+		expect(run({ type: "control.clear" }, session)).toBe(true)
+		expect(session.state.doc.textContent).toBe(`Before ${FRENCH.placeholders.text} after`)
+		expect(control(session)).toMatchObject({ placeholder: true })
+
+		const xml = part(await save(opened), "word/document.xml")
+
+		expect(xml).toContain(FRENCH.placeholders.text)
+		expect(xml).not.toContain(DEFAULT_PLACEHOLDERS.text)
+	})
+
+	it("writes the host's placeholder when a filled control read from the file is emptied by deleting", async () => {
+		const inline =
+			'<w:sdt><w:sdtPr><w:id w:val="105"/><w:text/></w:sdtPr><w:sdtContent><w:r><w:t>Filled</w:t></w:r></w:sdtContent></w:sdt>'
+		const block =
+			'<w:sdt><w:sdtPr><w:id w:val="106"/></w:sdtPr><w:sdtContent><w:p><w:r><w:t>Whole</w:t></w:r></w:p></w:sdtContent></w:sdt>'
+		const opened = await open({ body: inParagraph(inline) + block, ...STYLED }, undefined, FRENCH)
+		const session = opened.session
+		const filled = find(session, "Filled")
+
+		expect(session.dispatch(session.state.tr.delete(filled, filled + "Filled".length))).toBe(true)
+		expect(session.state.doc.textContent).toBe(`Before ${FRENCH.placeholders.text} afterWhole`)
+		expect(control((select(session, find(session, FRENCH.placeholders.text) + 1), session))).toMatchObject({ placeholder: true })
+
+		const whole = find(session, "Whole")
+
+		select(session, whole + 2)
+		expect(session.dispatch(session.state.tr.delete(whole, whole + "Whole".length))).toBe(true)
+		expect(session.state.doc.textContent).toBe(`Before ${FRENCH.placeholders.text} after${FRENCH.placeholders.text}`)
+
+		const xml = part(await save(opened), "word/document.xml")
+
+		expect(xml).not.toContain(DEFAULT_PLACEHOLDERS.text)
+	})
+
+	it("writes the host's text into a table of contents without entries", async () => {
+		const opened = await pagedEditor(buildDocx({ body: p("No headings") }))
+
+		Object.assign(opened.context, { strings: FRENCH })
+		expect(await opened.editor.execute({ type: "toc.insert", levels: 3, hyperlinks: true })).toBe(true)
+		expect(opened.editor.session.state.doc.textContent).toContain(FRENCH.noTocEntries)
+	})
+
+	it("keeps a \\p reference's stored result in another language, recomputing an English one", async () => {
+		const field = (lang: string, result: string): string => {
+			const rPr = lang === "" ? "" : `<w:rPr><w:lang w:val="${lang}"/></w:rPr>`
+
+			return (
+				`<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve"> PAGEREF Target \\p </w:instrText></w:r>` +
+				`<w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${result}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`
+			)
+		}
+		const opened = await pagedEditor(
+			buildDocx({
+				body:
+					'<w:p><w:bookmarkStart w:id="1" w:name="Target"/><w:r><w:t>Heading</w:t></w:r><w:bookmarkEnd w:id="1"/></w:p>' +
+					`<w:p>${field("de-DE", "oben")}</w:p><w:p>${field("", "stale")}</w:p><w:p>${field("en-GB", "stale")}</w:p>`
+			})
+		)
+
+		await settleAll(opened.editor)
+		expect(await opened.editor.execute({ type: "field.updateAll" })).toBe(true)
+
+		const results: string[] = []
+
+		opened.editor.session.state.doc.descendants(node => {
+			if (node.type === nodes.field) results.push(node.attrs["result"] as string)
+		})
+		expect(results).toEqual(["oben", "above", "above"])
 	})
 })

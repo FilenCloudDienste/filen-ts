@@ -23,6 +23,7 @@ import type { DeckOp, ImportedSlide, NotesOp, OpOf, RawPart, SlideOp } from "../
 import { applyNotes } from "./notes"
 import { replacingDelete, type SourceReading } from "./shape"
 import { isRefused } from "../../refusal"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // The slide ops on the model, in place, with the integrity graph's model half (edit/integrity.ts): a delete takes
 // the slides out of their sections and custom shows and turns jumps to them into "next slide"; an add or a
@@ -393,11 +394,7 @@ function sameRawParts(live: readonly RawPart[] | Refused, held: readonly RawPart
 	return live.every((part, index) => {
 		const other = held[index] as RawPart
 
-		if (part.name !== other.name || part.bytes.length !== other.bytes.length) return false
-
-		for (let at = 0; at < part.bytes.length; at++) if (part.bytes[at] !== other.bytes[at]) return false
-
-		return true
+		return part.name === other.name && sameBytes(part.bytes, other.bytes)
 	})
 }
 

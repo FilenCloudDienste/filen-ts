@@ -8,10 +8,8 @@ import {
 	type DeckVariant,
 	type Format,
 	type Refused,
-	type ShapeNode,
 	type ShapeRef
 } from "../../core/presentation/model"
-import type { DocxFontFace } from "../docx/protocol"
 import { SLICE_MS } from "../../core/slicing"
 import { XmlError } from "../../core/xml/errors"
 import { macrotaskYield } from "../docx/host"
@@ -33,11 +31,11 @@ import { designInfo, designLayouts } from "../../core/presentation/edit/apply/de
 import { chartCapability } from "./engine/chart"
 import { reviewCapability } from "./engine/review"
 import { outlineCapability } from "./engine/outline"
+import { pictureCapability } from "./engine/picture"
 import { clipCapability } from "./engine/clip"
 import { convertCapability } from "./engine/convert"
 import { editCapability } from "./engine/edit"
 import { findCapability } from "./engine/find"
-import { fontsCapability } from "./engine/fonts"
 import { jobsCapability } from "./engine/jobs"
 import { mediaCapability } from "./engine/media"
 import { openOdpCapability } from "./engine/open/odp"
@@ -101,6 +99,7 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	smartArtPreview: "background",
 	smartArtInfo: "priority",
 	chartData: "priority",
+	pictureFormat: "priority",
 	timegraph: "background",
 	layers: "background",
 	save: "background",
@@ -133,7 +132,6 @@ export interface MediaPortServer {
 }
 
 export interface EngineServices {
-	readonly fonts: FontsCapability
 	readonly smartart: SmartArtCapability
 	// Serves media() on the page's port; absent: media() is refused notImplemented.
 	readonly media?: MediaPortServer
@@ -184,21 +182,12 @@ export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
 export type ReviewCapability = Capability<"review">
 export type OutlineCapability = Capability<"outline">
+export type PictureCapability = Capability<"pictureFormat">
 export type ClipCapability = Capability<"clip" | "clipParts" | "clipSlides">
 
-// The faces the deck's text is measured and drawn with (bundled substitutes and decoded embedded fonts).
-export interface FontsCapability {
-	faces(session: EngineSession): Promise<readonly DocxFontFace[]>
-}
-
-// The SmartArt engine: the renderer and the editor reach a diagram's relayout through it, and the gallery its
-// previews (the protocol's smartArtPreview).
+// The SmartArt engine: the gallery's previews (the protocol's smartArtPreview) and the text pane's outline. A
+// diagram's relayout goes through the session's renderer (smartArtRenderer).
 export interface SmartArtCapability extends Capability<"smartArtPreview" | "smartArtInfo"> {
-	relayout(
-		session: EngineSession,
-		target: ShapeRef,
-		slicing: Slicing
-	): Promise<{ readonly shapes: readonly ShapeNode[]; readonly drawingXml: string }>
 	preview(
 		session: EngineSession,
 		layout: SmartArtDefRef,
@@ -240,12 +229,13 @@ export const CAPABILITIES = {
 	jobs: jobsCapability,
 	convert: convertCapability,
 	chart: chartCapability,
+	picture: pictureCapability satisfies PictureCapability,
 	review: reviewCapability satisfies ReviewCapability,
 	outline: outlineCapability satisfies OutlineCapability,
 	clip: clipCapability satisfies ClipCapability
 } as const
 
-export const SERVICES: EngineServices = { fonts: fontsCapability, smartart: smartartCapability }
+export const SERVICES: EngineServices = { smartart: smartartCapability }
 
 export const OPENERS: { readonly [F in Format]: OpenCapability } = {
 	pptx: openPptxCapability,
@@ -267,6 +257,7 @@ export const METHOD_HANDLERS: Handlers = {
 	...CAPABILITIES.jobs,
 	...CAPABILITIES.convert,
 	...CAPABILITIES.chart,
+	...CAPABILITIES.picture,
 	...CAPABILITIES.review,
 	...CAPABILITIES.clip,
 	...CAPABILITIES.outline,

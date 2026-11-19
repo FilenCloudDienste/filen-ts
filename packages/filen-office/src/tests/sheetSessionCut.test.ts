@@ -1,18 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult, SheetRange, SheetSessionApi } from "../core/sheet/protocol"
+import type { SheetCommandResult, SheetRange, SheetSessionApi } from "../core/sheet/protocol"
 import { equalBytes, parts, type Fixture, type FixtureSheet } from "./xlsxWriteFixtures"
-import { cells, firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { cells, firstTile, openFixture, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 import { R, TYPES, relationship, rels } from "./xlsxRefsFixtures"
 
 // A cut and its paste: the source is cleared as cells.clear clears it (and refused where a clear is), and every
 // formula that refers to the moved cells follows them.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
 
 function range(startRow: number, startCol: number, endRow = startRow, endCol = startCol): SheetRange {
 	return { startRow, startCol, endRow, endCol }

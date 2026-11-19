@@ -1,20 +1,13 @@
 import { unzipSync, zipSync } from "fflate"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { decodeUtf8, encodeUtf8 } from "../core/xml/index"
-import { CellFlag, type SheetChange, type SheetCommandResult, type SheetTile } from "../core/sheet/protocol"
+import { CellFlag, type SheetChange, type SheetTile } from "../core/sheet/protocol"
 import { openXlsx } from "../core/xlsx/read/index"
 import { XlsxDocument } from "../core/xlsx/edit/document"
 import { bytesSource } from "../core/opc/index"
 import { changedEntries, equalBytes, parts } from "./xlsxWriteFixtures"
-import { BASIC, SML, buildFixture, cells, firstTile, openFixture, savedBytes, tileEntry, tileTexts } from "./sheetSessionFixtures"
+import { BASIC, SML, buildFixture, cells, firstTile, openFixture, savedBytes, tileEntry, tileTexts, changeOf } from "./sheetSessionFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
 
 function patched(change: SheetChange, sheet: number): SheetTile {
 	const patch = change.patches.find(candidate => candidate.sheet === sheet && candidate.tileRow === 0 && candidate.tileCol === 0)

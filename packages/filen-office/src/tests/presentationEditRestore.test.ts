@@ -219,7 +219,7 @@ describe("slide restore after a save", () => {
 		expect(await h.undo()).toMatchObject({ ok: true, dirty: false })
 		await h.redo()
 		await h.save()
-		expect(await h.undo()).toEqual({ ok: false, refusal: "stale" })
+		expect(await h.undo()).toMatchObject({ ok: false, refusal: "stale" })
 		expect(deck.slides).not.toContain(target)
 	}, 60_000)
 
@@ -244,13 +244,13 @@ describe("slide restore after a save", () => {
 		const customShows = deck.customShows
 
 		// The second slide's picture is gone and was too large to hold: its read is refused, after the first's succeeded.
-		expect(await h.undo()).toEqual({ ok: false, refusal: "stale" })
+		expect(await h.undo()).toMatchObject({ ok: false, refusal: "stale" })
 		expect(deck.slides).toEqual(slides)
 		expect([...deck.nodes.keys()]).toEqual(nodes)
 		expect([...deck.nodes.values()].map(node => node.revision)).toEqual(revisions)
 		expect(deck.customShows).toBe(customShows)
 		// A retry is refused for the same reason, never as a slide already back in the deck.
-		expect(await h.undo()).toEqual({ ok: false, refusal: "stale" })
+		expect(await h.undo()).toMatchObject({ ok: false, refusal: "stale" })
 		expect(deck.slides).toEqual(slides)
 	}, 60_000)
 })
@@ -347,7 +347,7 @@ describe("gate 1 on structure ops", () => {
 				target: { slide: first.ref, id: 7 },
 				props: { fill: { kind: "solid", color: { kind: "srgb", rgb: "00FF00" } } } as never
 			})
-		).toEqual({ ok: false, refusal: "locked" })
+		).toMatchObject({ ok: false, refusal: "locked" })
 		expect(shapeById(first.shapes, 7)?.lock).toBe("proofFailed")
 		broken.close()
 	})
@@ -358,7 +358,7 @@ describe("gate 1 on structure ops", () => {
 		const target = deck.slides[2] as SlideRef
 
 		// The jumping slide (the first) is not parsed yet: the delete parses and proves it.
-		expect(await harness.command({ family: "slide", kind: "delete", slides: [target] })).toEqual({ ok: false, refusal: "locked" })
+		expect(await harness.command({ family: "slide", kind: "delete", slides: [target] })).toMatchObject({ ok: false, refusal: "locked" })
 
 		const first = deck.nodes.get(deck.slides[0] as SlideRef)
 

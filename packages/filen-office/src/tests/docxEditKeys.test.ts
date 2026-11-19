@@ -5,7 +5,8 @@ import type { DocxEditorSession } from "@filen/office/core/docx/edit"
 import { joinBackward, splitParagraph, type KeyLike } from "../core/docx/paged/keys"
 import { commandForKey } from "./docxKeyHelpers"
 import { NUMBERING_PART, STYLES_PART, sessionOf } from "./docxEditFixtures"
-import { p } from "./docxSynthetic"
+import { buildDocx, p } from "./docxSynthetic"
+import { pagedEditor, settleAll } from "./pagedFixtures"
 
 // Enter, Backspace and shortcuts as Word's.
 
@@ -252,5 +253,33 @@ describe("docx shortcuts", () => {
 			rule: "auto",
 			value: 240
 		})
+	})
+})
+
+describe("docx date and time keys", () => {
+	// The code of the field Alt+Shift+D or T inserts at the start of a paragraph whose run has `rPr`.
+	async function inserted(letter: "d" | "t", rPr: string): Promise<string | undefined> {
+		const { editor } = await pagedEditor(buildDocx({ body: `<w:p><w:r>${rPr}<w:t>Text</w:t></w:r></w:p>` }))
+		const command = commandForKey(key(letter.toUpperCase(), `Key${letter.toUpperCase()}`, { altKey: true, shiftKey: true }), false)
+		let code: string | undefined
+
+		await settleAll(editor)
+		caret(editor.session, 2)
+		expect(command === undefined ? false : await editor.execute(command)).toBe(true)
+		editor.session.state.doc.descendants(node => {
+			if (node.type.name === "field") code = node.attrs["instruction"] as string
+		})
+
+		return code
+	}
+
+	it("insert the caret language's short date and a 24-hour time", async () => {
+		expect(await inserted("d", '<w:rPr><w:lang w:val="de-DE"/></w:rPr>')).toBe(' DATE \\@ "dd.MM.yyyy" ')
+		expect(await inserted("t", '<w:rPr><w:lang w:val="de-DE"/></w:rPr>')).toBe(' TIME \\@ "HH:mm" ')
+	})
+
+	it("insert en-US Word's codes without a language", async () => {
+		expect(await inserted("d", "")).toBe(' DATE \\@ "M/d/yyyy" ')
+		expect(await inserted("t", "")).toBe(' TIME \\@ "h:mm am/pm" ')
 	})
 })

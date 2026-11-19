@@ -1,28 +1,13 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
 import { DocxDocBuilder, conservativeProof, openDocxEditContext, proveBlocks, type LockReason } from "@filen/office/core/docx/edit"
 import { bytesSource } from "@filen/office/core/opc"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 import { structureProblems } from "./docxEditFixtures"
 
 // The licensed real-world corpus is kept out of the repository (pnpm run corpus:fetch); this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
-
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of EXTENSIONS) {
-		const directory = join(CORPUS, extension)
-
-		if (!existsSync(directory)) continue
-
-		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
 
 describe.skipIf(!existsSync(CORPUS))("docx editing documents over the real-world corpus", () => {
 	it("builds a valid editing document for every body that matches its model", { timeout: 600_000 }, async () => {
@@ -34,7 +19,7 @@ describe.skipIf(!existsSync(CORPUS))("docx editing documents over the real-world
 		let proofLocked = 0
 		let opened = 0
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(EXTENSIONS)) {
 			const name = file.slice(CORPUS.length + 1)
 
 			try {

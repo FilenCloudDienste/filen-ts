@@ -1,5 +1,6 @@
 import { appendAll } from "../arrays"
-import { columnName } from "../sheet/refs/cellRef"
+import { columnIndex, columnName } from "../sheet/refs/cellRef"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../sheet/protocol"
 import { decodeCharacterData, encodeUtf8, escapeAttribute } from "../xml/index"
 import type { SourceAxis } from "./write/axis"
 import { storeValue } from "./write/cells"
@@ -507,14 +508,6 @@ function parseRange(body: string): Range | "error" | "external" | null {
 	return { first: first.part, second: second.part }
 }
 
-function columnIndex(letters: string): number {
-	let index = 0
-
-	for (const char of letters.toUpperCase()) index = index * 26 + char.charCodeAt(0) - 64
-
-	return index - 1
-}
-
 function sheetText(sheet: SheetPart, move: SheetMove | undefined): string {
 	if (move === undefined || move.name === sheet.name) return sheet.raw
 
@@ -810,8 +803,8 @@ export function addressBoxes(
 			sheet,
 			startRow: range.first.row < 0 ? 0 : Math.min(range.first.row, second.row),
 			startCol: range.first.col < 0 ? 0 : Math.min(range.first.col, second.col),
-			endRow: range.first.row < 0 ? 1_048_575 : Math.max(range.first.row, second.row),
-			endCol: range.first.col < 0 ? 16_383 : Math.max(range.first.col, second.col)
+			endRow: range.first.row < 0 ? SHEET_MAX_ROWS - 1 : Math.max(range.first.row, second.row),
+			endCol: range.first.col < 0 ? SHEET_MAX_COLS - 1 : Math.max(range.first.col, second.col)
 		})
 	}
 

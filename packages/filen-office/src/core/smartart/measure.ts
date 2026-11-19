@@ -5,6 +5,7 @@ import type { ResolvedBody, TextFonts } from "../presentation/text/resolve"
 import type { FontRequest } from "../fonts/index"
 import { LINE_FLOATS, LineFloat, type TextLayout } from "../text/index"
 import type { DataPoint, RichRun } from "./data"
+import { BULLET_HANG, LINE_PCT, SPACE_AFTER_CHILD_PCT, SPACE_AFTER_NODE_PCT, textLevel } from "./textDefaults"
 
 // Text measurement for the tx algorithm. The layout engine sizes text only to choose font sizes and to know when a
 // node overflows, so it measures through a narrow interface; the presentation worker backs it with the slide text
@@ -37,14 +38,11 @@ export interface MeasureText {
 	readonly paragraphs: readonly MeasureParagraph[]
 }
 
-// The paragraph spacing a diagram's text takes where its own pPr sets none, as PowerPoint writes it on every
-// drawing it caches (MS-ODRAWXML §1.3.4 dsp:txBody): 90% lines, nothing before, 35% of the size after a node's own
-// paragraph and 15% after a child's. A child's bullet hangs by three quarters of its size.
-const SMARTART_LINE: Spacing = { pct: 90000 }
+// The paragraph spacing a diagram's text takes where its own pPr sets none (textDefaults.ts).
+const SMARTART_LINE: Spacing = { pct: LINE_PCT }
 const NO_SPACE: Spacing = { pct: 0 }
-const AFTER_NODE: Spacing = { pct: 35000 }
-const AFTER_CHILD: Spacing = { pct: 15000 }
-const BULLET_INDENT = 0.75
+const AFTER_NODE: Spacing = { pct: SPACE_AFTER_NODE_PCT }
+const AFTER_CHILD: Spacing = { pct: SPACE_AFTER_CHILD_PCT }
 const EMU_PER_PT = 12700
 
 // The paragraphs of the text points `points` present, levelled by depth under the presenting node's own point
@@ -55,7 +53,7 @@ export function measureText(points: readonly DataPoint[], bullets: boolean, ownD
 	const base = first === undefined ? 0 : Math.min(first.depth, ownDepth ?? first.depth)
 
 	points.forEach((point, index) => {
-		const level = first === undefined ? 0 : Math.max(index === 0 ? 0 : 1, Math.min(8, point.depth - base))
+		const level = first === undefined ? 0 : textLevel(point, index, base)
 		const rich = point.rich
 		// Rich paragraphs that no longer spell the text (edited since) are not used.
 		const usable =
@@ -151,15 +149,13 @@ function richParagraph(
 	rPr: RunProps
 ): ResolvedBody["paragraphs"][number] {
 	const level = paragraph.level
-	const marL = paragraph.bullet ? level * BULLET_INDENT * fontPt * EMU_PER_PT : 0
+	const marL = paragraph.bullet ? level * BULLET_HANG * fontPt * EMU_PER_PT : 0
 	const pPr: ParaProps = {
 		algn: level === 0 ? "ctr" : "l",
 		lnSpc: paragraph.lnSpc ?? SMARTART_LINE,
 		spcBef: paragraph.spcBef ?? NO_SPACE,
 		spcAft: paragraph.spcAft ?? (level === 0 ? AFTER_NODE : AFTER_CHILD),
-		...(paragraph.bullet
-			? { marL, indent: -BULLET_INDENT * fontPt * EMU_PER_PT, bullet: { kind: "char" as const, char: "\u2022" } }
-			: {})
+		...(paragraph.bullet ? { marL, indent: -BULLET_HANG * fontPt * EMU_PER_PT, bullet: { kind: "char" as const, char: "\u2022" } } : {})
 	}
 	const end = richRunProps(runs[runs.length - 1] ?? { text: "" }, fontPt, rPr)
 	const out: Run[] = []
@@ -302,7 +298,7 @@ export function textAdapterMeasurer(env: TextEnvironment, fonts: TextFonts, opti
 				const [own, children] = widestRich(text)
 				// A child's word starts after its bullet's hanging indent.
 				const childIndent = text.paragraphs.reduce(
-					(max, p) => (p.bullet ? Math.max(max, (p.level * BULLET_INDENT * childPt * EMU_PER_PT) / EMU_PX) : max),
+					(max, p) => (p.bullet ? Math.max(max, (p.level * BULLET_HANG * childPt * EMU_PER_PT) / EMU_PX) : max),
 					0
 				)
 				const words = Math.max((own * fontPt) / REFERENCE_PT, children > 0 ? (children * childPt) / REFERENCE_PT + childIndent : 0)

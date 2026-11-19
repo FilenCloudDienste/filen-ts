@@ -1,5 +1,6 @@
 import type { Slicing } from "../slicing"
 import { Namespaces, encodeUtf8, parseXml, parseXmlSliced, XmlError, type XmlDocument } from "../xml/index"
+import { indexOfBytes, isXmlNameEnd } from "../xml/bytes"
 import { OdfNs } from "./namespaces"
 import { elementName } from "./tree"
 
@@ -25,24 +26,8 @@ const BANG = 33
 const DASH = 45
 const QUOTE = 34
 const APOSTROPHE = 39
-
-function isNameEnd(byte: number | undefined): boolean {
-	return byte === undefined || byte === 32 || byte === 9 || byte === 10 || byte === 13 || byte === GT || byte === SLASH
-}
-
-function indexOfSequence(bytes: Uint8Array, sequence: Uint8Array, from: number): number {
-	const firstByte = sequence[0] ?? 0
-
-	for (let at = bytes.indexOf(firstByte, from); at >= 0; at = bytes.indexOf(firstByte, at + 1)) {
-		let k = 1
-
-		while (k < sequence.length && bytes[at + k] === sequence[k]) k++
-
-		if (k === sequence.length) return at
-	}
-
-	return -1
-}
+const PI_END = encodeUtf8("?>")
+const COMMENT_END = encodeUtf8("-->")
 
 // The root element's start, past the declaration, processing instructions, comments and whitespace; -1 when
 // the stream has something else there (a DOCTYPE, which the full parse then refuses).
@@ -57,7 +42,7 @@ function rootStart(bytes: Uint8Array): number {
 		const next = bytes[at + 1]
 
 		if (next === QUESTION) {
-			const end = indexOfSequence(bytes, encodeUtf8("?>"), at + 2)
+			const end = indexOfBytes(bytes, PI_END, at + 2)
 
 			if (end < 0) return -1
 
@@ -65,7 +50,7 @@ function rootStart(bytes: Uint8Array): number {
 		} else if (next === BANG) {
 			if (bytes[at + 2] !== DASH || bytes[at + 3] !== DASH) return -1
 
-			const end = indexOfSequence(bytes, encodeUtf8("-->"), at + 4)
+			const end = indexOfBytes(bytes, COMMENT_END, at + 4)
 
 			if (end < 0) return -1
 
@@ -141,10 +126,10 @@ export function locateBody(
 
 	const needle = encodeUtf8(prefix === "" ? "<body" : `<${prefix}:body`)
 
-	for (let at = indexOfSequence(bytes, needle, openEnd); at >= 0; at = indexOfSequence(bytes, needle, at + 1)) {
+	for (let at = indexOfBytes(bytes, needle, openEnd); at >= 0; at = indexOfBytes(bytes, needle, at + 1)) {
 		// The byte after the name must be there to tell <office:body from <office:bodyX.
 		if (at + needle.length >= bytes.length) return undefined
-		if (isNameEnd(bytes[at + needle.length])) return { rootStart: start, openEnd, bodyStart: at }
+		if (isXmlNameEnd(bytes[at + needle.length])) return { rootStart: start, openEnd, bodyStart: at }
 	}
 
 	return undefined
@@ -154,7 +139,7 @@ export function locateBody(
 function closeRoot(bytes: Uint8Array, start: number, end: number): Uint8Array {
 	let nameEnd = start + 1
 
-	while (!isNameEnd(bytes[nameEnd])) nameEnd++
+	while (!isXmlNameEnd(bytes[nameEnd])) nameEnd++
 
 	const rootName = bytes.subarray(start + 1, nameEnd)
 	const out = new Uint8Array(end + rootName.length + 3)

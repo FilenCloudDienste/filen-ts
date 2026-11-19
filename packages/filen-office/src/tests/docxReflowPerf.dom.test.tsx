@@ -3,25 +3,18 @@ import { Node as ProseMirrorNode } from "prosemirror-model"
 import { TextSelection } from "prosemirror-state"
 import type { EditorView } from "prosemirror-view"
 import { describe, expect, it, vi } from "vitest"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
 import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { EditSink } from "../react/docx/edit/sink"
 import { ReflowView } from "../react/docx/reflow/view"
 import { buildDocx, p } from "./docxSynthetic"
+import { emptyDocxSession } from "./docxDocumentStubs.dom"
 import { pagedEditor } from "./pagedDomFixtures"
 import { budget, cpuMs } from "./timing"
 
 // Mobile view over a long document: what opening it holds (DOM, blocks in the view) does not grow with the
 // document, and a keystroke stays under a frame (CPU time, which other processes' scheduling does not inflate).
 
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
+const SESSION = emptyDocxSession()
 
 const DOCUMENT: DocxDocument = {
 	status: "ready",

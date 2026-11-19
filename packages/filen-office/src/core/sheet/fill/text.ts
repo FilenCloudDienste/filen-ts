@@ -1,4 +1,5 @@
-import type { SheetId } from "../protocol"
+import type { SheetId, SheetLocale } from "../protocol"
+import { textFieldNumber, textFieldText } from "../csv/csvView"
 import { defineSheetFeature, type SheetCommandContext, type SheetHandled } from "../registry"
 import { textFeature, type TextSheetDocument } from "../text"
 import { autoFillWrites, entryCells, fillPlan, seriesWrites, type FillWrites } from "./fill"
@@ -6,17 +7,20 @@ import { fillSeries, seriesLine, type FillCalendar, type FillSourceCell } from "
 import { dateSerial, MAX_SERIAL_1900, serialDate, type DateParts } from "../numfmt/date"
 
 // Fill over a text file: each target takes its source's text as it is, or a number or text of its own. A field that
-// reads as a plain number is a number; a text file has no dates, so a series by dates counts in 1900-system serials.
+// reads as a plain number in the session's locale is a number, written back with the locale's decimal point (where
+// that is U+066B, which the locale also reads as ".", the one the target's source field used); a text file has no
+// dates, so a series by dates counts in 1900-system serials.
 
-const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
+const ARABIC_POINT = "\u066b"
 
-function read(document: TextSheetDocument, row: number, col: number): FillSourceCell {
+function read(document: TextSheetDocument, locale: SheetLocale | undefined, row: number, col: number): FillSourceCell {
 	const text = document.text(row, col)
 
 	if (text === "") return { kind: "empty" }
-	if (NUMBER.test(text)) return { kind: "number", value: Number(text), temporal: "none" }
 
-	return { kind: "text", text }
+	const value = textFieldNumber(text, locale)
+
+	return value === null ? { kind: "text", text } : { kind: "number", value, temporal: "none" }
 }
 
 const parts: DateParts = { year: 0, month: 0, day: 0, weekday: 0 }
@@ -37,13 +41,19 @@ function writeTexts(
 	if (writes === "tooLarge") return { refused: { reason: "tooLarge" } }
 
 	const set = textFeature.commands?.["cells.set"]
+	const decimal = context.doc.settings.locale?.decimal ?? "."
+	// A field written with "." keeps it, so a "." source never comes back with a point other programs do not read.
+	const point = (i: number): string =>
+		decimal === ARABIC_POINT && !context.doc.text(writes.sourceRows[i] ?? 0, writes.sourceCols[i] ?? 0).includes(ARABIC_POINT)
+			? "."
+			: decimal
 	const inputs = writes.values.map((value, i) =>
 		value.kind === "copy"
 			? context.doc.text(writes.sourceRows[i] ?? 0, writes.sourceCols[i] ?? 0)
 			: value.kind === "number"
 				? // A field holds the text itself: round off a series' binary residue (0.1 + 0.1 * 2) as General would show it.
 					// An integer carries none, and rounding it would cut a 16-digit one.
-					String(Number.isInteger(value.value) ? value.value : Number(value.value.toPrecision(15)))
+					textFieldText(Number.isInteger(value.value) ? value.value : Number(value.value.toPrecision(15)), point(i))
 				: value.text
 	)
 
@@ -63,7 +73,13 @@ export const textFillFeature = defineSheetFeature<TextSheetDocument>({
 				const handled = await writeTexts(
 					context,
 					command.sheet,
-					autoFillWrites(command.source, command.target, command.mode, (row, col) => read(context.doc, row, col), fillSeries)
+					autoFillWrites(
+						command.source,
+						command.target,
+						command.mode,
+						(row, col) => read(context.doc, context.doc.settings.locale, row, col),
+						fillSeries
+					)
 				)
 
 				if (handled !== null && !("refused" in handled))
@@ -79,11 +95,12 @@ export const textFillFeature = defineSheetFeature<TextSheetDocument>({
 		"fill.series": {
 			info: { write: true },
 			run: (context, command) => {
-				const stop = command.options.stop === null ? null : command.options.stop.trim()
+				const locale = context.doc.settings.locale
+				const stop = command.options.stop === null ? null : textFieldNumber(command.options.stop.trim(), locale)
 
-				if (stop !== null && !NUMBER.test(stop)) return { refused: { reason: "unsupported", detail: "stop" } }
+				if (command.options.stop !== null && stop === null) return { refused: { reason: "unsupported", detail: "stop" } }
 
-				const options = { ...command.options, stop: stop === null ? null : Number(stop) }
+				const options = { ...command.options, stop }
 
 				return writeTexts(
 					context,
@@ -91,7 +108,7 @@ export const textFillFeature = defineSheetFeature<TextSheetDocument>({
 					seriesWrites(
 						command.range,
 						command.orientation,
-						(row, col) => read(context.doc, row, col),
+						(row, col) => read(context.doc, locale, row, col),
 						cells => seriesLine(cells, options, SERIALS)
 					)
 				)

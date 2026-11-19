@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { planCellMove, splitsMerge, usedPart } from "../core/sheet/move/plan"
-import { SHEET_MAX_COLS, type SheetChange, type SheetCommandResult, type SheetRange, type SheetSessionApi } from "../core/sheet/protocol"
+import { SHEET_MAX_COLS, type SheetCommandResult, type SheetRange, type SheetSessionApi } from "../core/sheet/protocol"
 import { openTextSession } from "../core/sheet/text"
 import { BORDER_SLOP, cellSpot, draggable, dragKeys, dropAt, onBorder, sameDrop } from "../react/sheet/cellDrag"
 import { equalBytes, parts, type Fixture } from "./xlsxWriteFixtures"
-import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { firstTile, openFixture, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 
 // Dragging the selection's border (cells.move), as Excel: a move (formulas referring to the moved cells follow them,
 // the moved formulas keep what they refer to), a copy (relative references move), an insert (the cells there shift,
@@ -12,13 +12,6 @@ import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFix
 
 function range(startRow: number, startCol: number, endRow = startRow, endCol = startCol): SheetRange {
 	return { startRow, startCol, endRow, endCol }
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
 }
 
 function refusal(result: SheetCommandResult): string | null {

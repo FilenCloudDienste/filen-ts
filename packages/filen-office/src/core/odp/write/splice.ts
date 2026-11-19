@@ -1,5 +1,5 @@
 import { appendAll } from "../../arrays"
-import { canonicalName, readContentPrologue, type ContentPrologue } from "../../odf/index"
+import { OdfNs, canonicalName, readContentPrologue, type ContentPrologue } from "../../odf/index"
 import { emitFamilyOf } from "../../pptx/write/emit"
 import type { PartChange } from "../../opc/index"
 import type { DeckChanges } from "../../presentation/edit/apply"
@@ -16,6 +16,7 @@ import {
 	type SlideNode,
 	type SlideRef
 } from "../../presentation/model"
+import { forEachShape, shapeById } from "../../presentation/shapes"
 import { inScope } from "../../anim/prune"
 import {
 	Namespaces,
@@ -28,6 +29,7 @@ import {
 	parseXml,
 	type XmlDocument
 } from "../../xml/index"
+import { concatBytes, isXmlNameEnd } from "../../xml/bytes"
 import type { Fragment } from "../read/context"
 import type { OdpParts } from "../read/document"
 import type { PageSpan } from "../read/scan"
@@ -117,24 +119,7 @@ const XLINK_HREF = "xlink:href"
 // belong to the families that edit them.
 const WRITTEN_PRESENTATION: ReadonlySet<string> = new Set(["slideList", "customShows", "sections", "show", "size"])
 
-function concat(chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
-}
-
 const LT = 0x3c
-const GT = 0x3e
 const SLASH = 0x2f
 const EQUALS = 0x3d
 const QUOTE = 0x22
@@ -145,10 +130,6 @@ const PAGE_NUMBER = encodeUtf8(":page-number")
 
 function isSpace(byte: number | undefined): boolean {
 	return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d
-}
-
-function isNameEnd(byte: number | undefined): boolean {
-	return byte === undefined || isSpace(byte) || byte === GT || byte === SLASH
 }
 
 function isNameByte(byte: number | undefined): boolean {
@@ -192,7 +173,7 @@ export function staleThumbnailNumber(bytes: Uint8Array, start: number, end: numb
 	let notes = -1
 
 	for (let at = end - NOTES.length; at >= start && notes < 0; at--) {
-		if (bytes[at] !== NOTES[0] || !matchesAt(bytes, at, NOTES) || !isNameEnd(bytes[at + NOTES.length])) continue
+		if (bytes[at] !== NOTES[0] || !matchesAt(bytes, at, NOTES) || !isXmlNameEnd(bytes[at + NOTES.length])) continue
 
 		const tag = tagAt(bytes, at, start)
 
@@ -204,7 +185,7 @@ export function staleThumbnailNumber(bytes: Uint8Array, start: number, end: numb
 	if (notes < 0) return undefined
 
 	for (let at = notes; at + THUMBNAIL.length <= close; at++) {
-		if (bytes[at] !== THUMBNAIL[0] || !matchesAt(bytes, at, THUMBNAIL) || !isNameEnd(bytes[at + THUMBNAIL.length])) continue
+		if (bytes[at] !== THUMBNAIL[0] || !matchesAt(bytes, at, THUMBNAIL) || !isXmlNameEnd(bytes[at + THUMBNAIL.length])) continue
 
 		const tag = tagAt(bytes, at, notes)
 
@@ -226,7 +207,7 @@ function numberAttribute(bytes: Uint8Array, prefix: Uint8Array, from: number, cl
 
 		const nameStart = at
 
-		while (at < close && bytes[at] !== EQUALS && !isNameEnd(bytes[at])) at++
+		while (at < close && bytes[at] !== EQUALS && !isXmlNameEnd(bytes[at])) at++
 
 		const nameEnd = at
 
@@ -267,7 +248,7 @@ function numberAttribute(bytes: Uint8Array, prefix: Uint8Array, from: number, cl
 function withPageNumber(bytes: Uint8Array, number: number): Uint8Array {
 	const patch = staleThumbnailNumber(bytes, 0, bytes.length, number)
 
-	return patch === undefined ? bytes : concat([bytes.subarray(0, patch.start), patch.value, bytes.subarray(patch.end)])
+	return patch === undefined ? bytes : concatBytes([bytes.subarray(0, patch.start), patch.value, bytes.subarray(patch.end)])
 }
 
 // A copied page at position `number` (1-based).
@@ -305,13 +286,6 @@ export function sameCopied(
 	return at === end
 }
 
-function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): void {
-	for (const shape of shapes) {
-		visit(shape)
-		if (shape.children !== undefined) walk(shape.children, visit)
-	}
-}
-
 // A body with its fields' ids left out (each reading numbers them anew).
 function fieldless(body: ShapeNode["text"]): unknown {
 	if (body === undefined) return undefined
@@ -338,13 +312,13 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 	const before = new Map<string, ShapeNode>()
 	const out = new Map<ShapeNode, Aspects>()
 
-	walk(pristine, shape => {
+	forEachShape(pristine, shape => {
 		const key = sourceKey(shape)
 
 		if (key !== undefined) before.set(key, shape)
 	})
 
-	walk(target, shape => {
+	forEachShape(target, shape => {
 		const key = sourceKey(shape)
 		const was = key === undefined ? undefined : before.get(key)
 
@@ -388,7 +362,7 @@ function placeholderKind(ph: ShapeNode["ph"]): unknown {
 function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNode[]): Refused | undefined {
 	const before = new Map<string, ShapeNode>()
 
-	walk(pristine, shape => {
+	forEachShape(pristine, shape => {
 		const key = sourceKey(shape)
 
 		if (key !== undefined) before.set(key, shape)
@@ -396,7 +370,7 @@ function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNod
 
 	let found: Refused | undefined
 
-	walk(target, shape => {
+	forEachShape(target, shape => {
 		if (found !== undefined) return
 
 		const key = sourceKey(shape)
@@ -478,11 +452,7 @@ function contentLayout(prologue: ContentPrologue): ContentLayout | Refused {
 	const root = prologue.root
 
 	for (let node = document.firstChildElement(root); node >= 0; node = document.nextSiblingElement(node)) {
-		if (
-			prologue.namespaces.elementUri(node) !== "urn:oasis:names:tc:opendocument:xmlns:office:1.0" ||
-			document.localName(node) !== "automatic-styles"
-		)
-			continue
+		if (prologue.namespaces.elementUri(node) !== OdfNs.office || document.localName(node) !== "automatic-styles") continue
 
 		if (document.isSelfClosing(node)) {
 			const name = document.name(node)
@@ -505,9 +475,9 @@ function contentLayout(prologue: ContentPrologue): ContentLayout | Refused {
 		}
 	}
 
-	const office = prologue.namespaces.prefixFor(root, "urn:oasis:names:tc:opendocument:xmlns:office:1.0")
+	const office = prologue.namespaces.prefixFor(root, OdfNs.office)
 	const name = office === undefined || office === "" ? "office:automatic-styles" : `${office}:automatic-styles`
-	const declarations = office === undefined ? ' xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"' : ""
+	const declarations = office === undefined ? ` xmlns:office="${OdfNs.office}"` : ""
 
 	return {
 		stylesAt: prologue.bodyStart,
@@ -732,7 +702,7 @@ class Splicer {
 
 		if (aspects.timing === true) {
 			for (const [id, name] of targetIds) {
-				const src = findTarget(node.shapes, id)?.src
+				const src = shapeById(node.shapes, id)?.src
 
 				if (src?.format === "odp" && src.fragment === fragment.offset)
 					given.set(src.node, [
@@ -830,7 +800,7 @@ class Splicer {
 
 		this.written.push(head)
 
-		let bytes = concat([encodeUtf8(head), content, encodeUtf8(close)])
+		let bytes = concatBytes([encodeUtf8(head), content, encodeUtf8(close)])
 
 		// A page written back as the bytes it was (a model the file reads in another form: a relative jump the file
 		// names by page) is copied.
@@ -854,7 +824,7 @@ class Splicer {
 		this.ids ??= contentIds(this.parts.content.bytes)
 
 		for (const id of odpTargetIds(node.timing)) {
-			const shape = findTarget(node.shapes, id)
+			const shape = shapeById(node.shapes, id)
 
 			if (shape === undefined) continue
 
@@ -893,7 +863,7 @@ class Splicer {
 		const out = new Map<string, { readonly node: number; readonly name: string }>()
 
 		for (const { shape: id, paragraph } of odpParagraphTargets(node.timing)) {
-			const shape = findTarget(node.shapes, id)
+			const shape = shapeById(node.shapes, id)
 
 			if (shape === undefined || (shape.src !== undefined && shape.src.format !== "odp")) continue
 
@@ -927,7 +897,7 @@ class Splicer {
 			// file) the shape's paragraph element at its place, where the page holds the same paragraphs in order.
 			const element = sourced
 				? src.node
-				: sameParagraphs(shape, findTarget(pristine.shapes, id))
+				: sameParagraphs(shape, shapeById(pristine.shapes, id))
 					? paragraphElement(fragment, shape, paragraph)
 					: -1
 
@@ -1072,7 +1042,7 @@ class Splicer {
 		this.ids ??= contentIds(content.bytes)
 
 		const document = parseXml(
-			concat([content.rootOpen, span.inject === undefined ? bytes : withInjection(bytes, span.inject), content.rootClose])
+			concatBytes([content.rootOpen, span.inject === undefined ? bytes : withInjection(bytes, span.inject), content.rootClose])
 		)
 		const namespaces = new Namespaces(document, { lenient: true })
 		const canonical = (node: number, name: string): string => {
@@ -1127,7 +1097,7 @@ class Splicer {
 		const out: ShapeNode[] = []
 		const seen = new Set<string>()
 
-		walk(target, shape => {
+		forEachShape(target, shape => {
 			const src = shape.src
 
 			if (src?.format !== "odp" || src.part === page.part || !isRawPart(src.part) || seen.has(src.part)) return
@@ -1221,7 +1191,7 @@ class Splicer {
 			markup.push(this.shapeBytes(pieces, fragment, container))
 		}
 
-		const all = concat(markup)
+		const all = concatBytes(markup)
 		const first = ordered[0]
 
 		if (first !== undefined) {
@@ -1292,7 +1262,7 @@ function leadingSpaces(document: XmlDocument, nodes: readonly number[]): (number
 function groupChanged(group: ShapeNode, aspects: ReadonlyMap<ShapeNode, Aspects>, fragment: Fragment): boolean {
 	let changed = false
 
-	walk(group.children ?? [], shape => {
+	forEachShape(group.children ?? [], shape => {
 		const src = shape.src
 
 		if (hasAspects(aspects.get(shape))) changed = true
@@ -1306,7 +1276,7 @@ function groupChanged(group: ShapeNode, aspects: ReadonlyMap<ShapeNode, Aspects>
 function withInjection(bytes: Uint8Array, inject: Uint8Array): Uint8Array {
 	const end = startTagEnd(bytes)
 
-	return concat([bytes.subarray(0, end), inject, bytes.subarray(end)])
+	return concatBytes([bytes.subarray(0, end), inject, bytes.subarray(end)])
 }
 
 // A source span with the ids this save gives elements in it added to their start tags (each lacks the attribute).
@@ -1337,7 +1307,7 @@ function withGivenIds(document: XmlDocument, hole: number, ids: ReadonlyMap<numb
 
 	chunks.push(document.bytes.subarray(from, end))
 
-	return concat(chunks)
+	return concatBytes(chunks)
 }
 
 function withoutInjection(bytes: Uint8Array, inject: Uint8Array): Uint8Array {
@@ -1346,7 +1316,7 @@ function withoutInjection(bytes: Uint8Array, inject: Uint8Array): Uint8Array {
 
 	for (let k = 0; k < inject.length; k++) if (bytes[from + k] !== inject[k]) return bytes.slice()
 
-	return concat([bytes.subarray(0, from), bytes.subarray(end)])
+	return concatBytes([bytes.subarray(0, from), bytes.subarray(end)])
 }
 
 // Where a start tag's ">" or "/>" is (the injection point a page fragment uses).
@@ -1668,11 +1638,7 @@ function withoutOrphans(
 		const now = styleReferences(current)
 
 		for (let section = document.firstChildElement(prologue.root); section >= 0; section = document.nextSiblingElement(section)) {
-			if (
-				prologue.namespaces.elementUri(section) !== "urn:oasis:names:tc:opendocument:xmlns:office:1.0" ||
-				document.localName(section) !== "automatic-styles"
-			)
-				continue
+			if (prologue.namespaces.elementUri(section) !== OdfNs.office || document.localName(section) !== "automatic-styles") continue
 
 			let previous: string | null = null
 
@@ -1706,7 +1672,7 @@ function withoutOrphans(
 		}
 
 		chunks.push(current.subarray(at))
-		current = concat(chunks)
+		current = concatBytes(chunks)
 	}
 
 	return current
@@ -1728,11 +1694,7 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>, a
 	const defined = new Map<string, number>()
 
 	for (let node = document.firstChildElement(prologue.root); node >= 0; node = document.nextSiblingElement(node)) {
-		if (
-			prologue.namespaces.elementUri(node) !== "urn:oasis:names:tc:opendocument:xmlns:office:1.0" ||
-			document.localName(node) !== "automatic-styles"
-		)
-			continue
+		if (prologue.namespaces.elementUri(node) !== OdfNs.office || document.localName(node) !== "automatic-styles") continue
 
 		section = node
 
@@ -1769,9 +1731,9 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>, a
 		const at = section < 0 ? prologue.bodyStart : document.start(section)
 		const end = section < 0 ? prologue.bodyStart : document.end(section)
 
-		return concat([
+		return concatBytes([
 			output.subarray(0, at),
-			encodeUtf8('<office:automatic-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">'),
+			encodeUtf8(`<office:automatic-styles xmlns:office="${OdfNs.office}">`),
 			encodeUtf8(added.map(name => retired.get(name) ?? "").join("")),
 			encodeUtf8("</office:automatic-styles>"),
 			output.subarray(end)
@@ -1814,7 +1776,7 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>, a
 
 	chunks.push(output.subarray(at))
 
-	return concat(chunks)
+	return concatBytes(chunks)
 }
 
 // The end of an element and the whitespace-only text right after it.
@@ -1847,10 +1809,7 @@ function assemble(
 	const lastEnd = sourcePages[sourcePages.length - 1]?.end
 	const chunks: Uint8Array[] = []
 	const styles = splicer.styles.markup(splicer.written)
-	const presentationPrefix = splicer.prologue.namespaces.prefixFor(
-		splicer.prologue.root,
-		"urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
-	)
+	const presentationPrefix = splicer.prologue.namespaces.prefixFor(splicer.prologue.root, OdfNs.presentation)
 
 	if (show !== undefined && (presentationPrefix === undefined || presentationPrefix === ""))
 		return refused("unsupported", "content.xml binds no presentation prefix")
@@ -1879,7 +1838,7 @@ function assemble(
 		}
 
 		const scope = new Map<string, string>()
-		const rootDocument = parseXml(concat([content.rootOpen, content.rootClose]))
+		const rootDocument = parseXml(concatBytes([content.rootOpen, content.rootClose]))
 		const rootNamespaces = new Namespaces(rootDocument)
 
 		for (const [prefix, uri] of rootNamespaces.inScope(rootDocument.documentElement())) scope.set(prefix, uri)
@@ -1928,7 +1887,7 @@ function assemble(
 
 		const failed = tail(insertAt)
 
-		return failed ?? concat(chunks)
+		return failed ?? concatBytes(chunks)
 	}
 
 	chunks.push(bytes.subarray(bodyFrom, firstStart))
@@ -1955,7 +1914,7 @@ function assemble(
 	// The tail: the settings (custom shows, start page, the show's attributes) as the deck has them.
 	const failed = tail(lastEnd)
 
-	return failed ?? concat(chunks)
+	return failed ?? concatBytes(chunks)
 }
 
 // The start of office:presentation's end tag (the last "</" before office:body ends): where pages and settings go
@@ -1966,16 +1925,4 @@ function lastClose(bytes: Uint8Array): number {
 	const at = text.search(/<\/[\w.-]*:?presentation>\s*<\/[\w.-]*:?body>\s*<\/[\w.-]*:?document-content>\s*$/u)
 
 	return at < 0 ? -1 : bytes.length - encodeUtf8(text.slice(at)).length
-}
-
-function findTarget(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.id === id) return shape
-
-		const inner = shape.children === undefined ? undefined : findTarget(shape.children, id)
-
-		if (inner !== undefined) return inner
-	}
-
-	return undefined
 }

@@ -12,35 +12,15 @@ import { openEncryptedPackage } from "../dom/encryption/index"
 import { isSealedOfficeFile } from "../dom/encryption/seal"
 import { CORPUS_DIR } from "./corpusDir"
 import { pptAsPptx } from "./pptConvertFixtures"
+import { parseXml } from "../core/xml/index"
 import { msoffcryptoPython } from "./encryption/oracles/msoffcrypto"
-import { buildPpt, concat, container, record } from "./pptFixtures"
+import { buildPpt, concat, container, cString, record, u16, u32 } from "./pptFixtures"
 import { budget } from "./timing"
 
 // Download as .pptx of a PowerPoint 97–2003 deck: the converted package written as a file, with the deck's transitions,
 // animations, comments, movies, sounds and embedded objects in it; the same deck always gives the same bytes; an
 // encrypted deck's copy is sealed as Agile under its password.
 
-function u16(value: number): Uint8Array {
-	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff)
-}
-
-function u32(value: number): Uint8Array {
-	const out = new Uint8Array(4)
-
-	new DataView(out.buffer).setUint32(0, value >>> 0, true)
-
-	return out
-}
-
-function utf16(text: string): Uint8Array {
-	const out = new Uint8Array(text.length * 2)
-
-	for (let k = 0; k < text.length; k++) out[2 * k] = text.charCodeAt(k)
-
-	return out
-}
-
-const cString = (instance: number, text: string): Uint8Array => record(0x0fba, utf16(text), instance)
 // A 1 × 1 PNG.
 const PNG = Uint8Array.from(
 	Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABc3UBGAAAAABJRU5ErkJggg==", "base64")
@@ -177,6 +157,70 @@ describe("ppt Download as .pptx", () => {
 		expect(second).toContain('progId="Excel.Sheet.8"><p:embed/><p:pic>')
 		expect(await opened.parts.opc.read("ppt/embeddings/oleObject1.bin")).toEqual(STORAGE)
 		expect(await opened.parts.opc.read("ppt/media/audio1.wav")).toEqual(Uint8Array.of(82, 73, 70, 70))
+	})
+
+	it("escapes names and text with the shared XML escaper and drops the file's stray controls", async () => {
+		const source = (
+			await buildPpt({
+				slides: [
+					{
+						shapes: [{ text: "Fly\u0001 in", anchor: [100, 100, 2000, 600] }],
+						records: [
+							TRANSITION,
+							container(0x1388, [
+								container(0x138a, [
+									cString(0, "___PPT10"),
+									record(
+										0x138b,
+										container(0x2ee0, [
+											cString(0, "A\tn\nn"),
+											cString(1, "Looks\u0002 good\r>"),
+											cString(2, "A\u0001"),
+											record(0x2ee1, concat(u32(1), ...[2020, 5, 1, 4, 10, 30, 0, 0].map(u16), u32(100), u32(200)))
+										]),
+										0,
+										0
+									)
+								])
+							])
+						]
+					}
+				],
+				documentRecords: [
+					container(
+						0x07e4,
+						[
+							record(0x07e5, u32(3)),
+							container(0x07e6, [
+								cString(0, "Chi\rme\u0003"),
+								cString(1, ".wav"),
+								cString(2, "3"),
+								record(0x07e7, Uint8Array.of(82, 73, 70, 70))
+							])
+						],
+						5
+					)
+				],
+				titleMasterName: "Title\u0004 Master"
+			})
+		).bytes
+		const file = await saveAs(source)
+		const opened = await openPptx(bytesSource(file))
+
+		if (opened.kind !== "opened") throw new Error(opened.reason)
+
+		const authors = parseXml(await opened.parts.opc.read("ppt/commentAuthors.xml"))
+		const author = authors.firstChildElement(authors.documentElement())
+
+		// Tab and line feed are character references in an attribute, so they survive attribute-value normalisation.
+		expect(await partText(file, "ppt/commentAuthors.xml")).toContain('name="A&#9;n&#10;n" initials="A" lastIdx="1"')
+		expect(authors.attribute(author, "name")).toBe("A\tn\nn")
+		expect(await partText(file, "ppt/comments/comment1.xml")).toContain("<p:text>Looks good\n&gt;</p:text>")
+		// A carriage return in a name is kept as a character reference.
+		expect(await partText(file, "ppt/slides/slide1.xml")).toContain('name="Chi&#13;me"/></p:stSnd>')
+		expect(await partText(file, "ppt/slides/slide1.xml")).toContain("<a:t>Fly in</a:t>")
+		// A title master's name becomes its layout's name.
+		expect(await partText(file, "ppt/slideLayouts/slideLayout1.xml")).toContain('<p:cSld name="Title Master"><p:spTree>')
 	})
 
 	it("gives the same bytes every time", async () => {

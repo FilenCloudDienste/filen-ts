@@ -1,6 +1,7 @@
 import type * as Mupdf from "mupdf"
 import { BYTE_RANGE_SENTINEL } from "../../../core/pdfsign/placeholder"
 import { PdfEngineRefusal } from "../context"
+import { MAX_FIELD_DEPTH, MAX_FIELDS } from "../fields"
 import { insertedImageBytes } from "../pages/organise"
 import { addPdfSignatureField, PdfSignRefusal, type PdfSignaturePlacement, type PdfVisualSignatureInput } from "../sign"
 import { isFiniteNumber, isFiniteTuple, isIndex, isRecord, isText, parseRect, type PdfCommandTable } from "./types"
@@ -74,10 +75,14 @@ function parseVisual(value: unknown): PdfVisualSignatureInput | null | undefined
 		!isFiniteNumber(height) ||
 		!(width > 0) ||
 		!(height > 0) ||
-		!isFiniteNumber(lineWidth)
+		!isFiniteNumber(lineWidth) ||
+		// A pen no wider than the drawing itself.
+		lineWidth < 0 ||
+		lineWidth > Math.max(width, height)
 	)
 		return undefined
-	if (!isFiniteTuple(color, 3)) return undefined
+	// RGB, each 0..1 (written into the appearance as is).
+	if (!isFiniteTuple(color, 3, 0, 1)) return undefined
 	if (!Array.isArray(strokes) || strokes.length > MAX_STROKES) return undefined
 
 	let points = 0
@@ -166,7 +171,7 @@ export function pendingSignature(document: Mupdf.PDFDocument): PendingSignature 
 	let found: PendingSignature | null = null
 
 	const visit = (field: Mupdf.PDFObject, parent: string | null, depth: number): void => {
-		if (found !== null || depth > 32) return
+		if (found !== null || depth > MAX_FIELD_DEPTH || seen.size >= MAX_FIELDS) return
 
 		if (field.isIndirect()) {
 			if (seen.has(field.asIndirect())) return

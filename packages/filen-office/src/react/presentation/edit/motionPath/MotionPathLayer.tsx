@@ -36,7 +36,8 @@ import {
 //
 // A drag never renders through React: each animation frame computes the edited path from the path the drag began on
 // and sets the SVG elements' path data directly; the drop sends one edit (one op, one undo step). The edited path is
-// shown until the slide's timing comes back with it.
+// shown, and further edits (a held arrow key) build on it, until every edit is answered and the slide's timing comes
+// back with it.
 
 export interface MotionPathView {
 	// The animMotion behaviour's ctn id.
@@ -82,8 +83,8 @@ export interface MotionPathLayerProps {
 	onSelect(effect: number): void
 	// A path drawn with `tool`, relative to `origin`; undefined when the tool was left without one.
 	onDrawn(path: EditablePath | undefined): void
-	// One edit of `node`'s path (a drag, a key).
-	onEdit(node: number, path: EditablePath): void
+	// One edit of `node`'s path (a drag, a key); the command's answer, if the host has one (nothing: taken as answered).
+	onEdit(node: number, path: EditablePath): PromiseLike<{ readonly ok: boolean }> | undefined
 	onPoint(index: number | undefined): void
 	// Edit Points left (Escape, a press away from the path).
 	onEditEnd(): void
@@ -121,6 +122,14 @@ function crossData(at: { readonly x: number; readonly y: number }, k: number, si
 	return `M${(x - arm).toFixed(1)} ${y.toFixed(1)}H${(x + arm).toFixed(1)}M${x.toFixed(1)} ${(y - arm).toFixed(1)}V${(y + arm).toFixed(1)}`
 }
 
+// Whether a path read back from the slide is `sent` (coordinates as written, to the 5 decimals the file keeps).
+function samePath(read: EditablePath, sent: EditablePath): boolean {
+	const near = (a: Float64Array, b: Float64Array): boolean =>
+		a.length === b.length && a.every((value, i) => Math.abs(value - (b[i] ?? 0)) <= 2e-5)
+
+	return read.closed === sent.closed && near(read.xs, sent.xs) && near(read.ys, sent.ys) && near(read.controls, sent.controls)
+}
+
 function aspectOf(size: SlideSize): number {
 	return size.cy > 0 ? size.cx / size.cy : 1
 }
@@ -144,22 +153,48 @@ export function MotionPathLayer(props: MotionPathLayerProps) {
 	const dragRef = useRef<Drag | undefined>(undefined)
 	const frameRef = useRef(0)
 	const pendingRef = useRef<{ x: number; y: number } | undefined>(undefined)
-	// An edit sent and not yet back in `paths`: the path shown meanwhile, and the path text it replaces.
-	const [expected, setExpected] = useState<{ readonly node: number; readonly path: EditablePath; readonly from: string } | undefined>(
-		undefined
-	)
+	// The latest edit sent and not yet back in `paths`: the path shown meanwhile (each further edit builds on it), and
+	// the ones sent before it since it was set (a path the slide comes back with that is one of those is on its way).
+	const [expected, setExpected] = useState<
+		{ readonly node: number; readonly path: EditablePath; readonly earlier: readonly EditablePath[] } | undefined
+	>(undefined)
+	// Edits not answered yet; the last answer bumps `answered`, which looks at the slide's path again.
+	const inflightRef = useRef(0)
+	const [answered, setAnswered] = useState(0)
+	// The path text last seen: whether a render brought a new one.
+	const seenRef = useRef<string | undefined>(undefined)
 	const k = scale / EMU_PER_PX
 	const liveId = useId()
 	const editingView = editing === undefined ? undefined : paths.find(view => view.node === editing)
 	const placement: Placement | undefined = editingView === undefined ? undefined : placementOf(editingView.center, size, scale)
 	const parsed = editingView === undefined ? undefined : readEditablePath(editingView.path, editingView.ptsTypes)
 	const fromFile = parsed === undefined || "reason" in parsed ? undefined : parsed
-	const working = expected !== undefined && expected.node === editing && editingView?.path === expected.from ? expected.path : fromFile
+	const working = expected !== undefined && expected.node === editing ? expected.path : fromFile
 
-	// The edit came back (or the path changed some other way): show the path as the slide has it.
+	// The slide's path is shown again once every edit has been answered and the latest is back in `paths`, or once
+	// the slide comes back with a path none of them wrote (it changed some other way). One of the earlier edits' paths
+	// is on its way to the latest (the slide's timing is read again after each answer).
 	useEffect(() => {
-		if (expected !== undefined && (editingView === undefined || editingView.path !== expected.from)) setExpected(undefined)
-	}, [expected, editingView?.path])
+		const delivered = editingView?.path !== seenRef.current
+
+		seenRef.current = editingView?.path
+
+		if (expected === undefined) return
+
+		if (editingView === undefined || editingView.node !== expected.node || fromFile === undefined) {
+			setExpected(undefined)
+
+			return
+		}
+
+		if (samePath(fromFile, expected.path)) {
+			if (inflightRef.current === 0) setExpected(undefined)
+
+			return
+		}
+
+		if (delivered && !expected.earlier.some(path => samePath(fromFile, path))) setExpected(undefined)
+	}, [expected, editingView?.path, answered])
 
 	const takeFocus = (): void => {
 		const root = rootRef.current
@@ -254,9 +289,28 @@ export function MotionPathLayer(props: MotionPathLayerProps) {
 		props.onDrawn(drawn === undefined || "reason" in drawn ? undefined : drawn)
 	}
 
-	const commit = (node: number, from: string, path: EditablePath): void => {
-		setExpected({ node, path, from })
-		props.onEdit(node, path)
+	const commit = (node: number, path: EditablePath): void => {
+		const settle = (ok: boolean): void => {
+			inflightRef.current--
+
+			if (inflightRef.current > 0) return
+
+			// A refused edit does not come back: the slide's path is the one to show.
+			if (ok) setAnswered(count => count + 1)
+			else setExpected(undefined)
+		}
+
+		setExpected(previous => ({ node, path, earlier: previous?.node === node ? [...previous.earlier, previous.path] : [] }))
+		inflightRef.current++
+
+		const answer = props.onEdit(node, path)
+
+		if (answer === undefined) settle(true)
+		else
+			void answer.then(
+				result => settle(result.ok),
+				() => settle(false)
+			)
 	}
 
 	const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
@@ -376,7 +430,7 @@ export function MotionPathLayer(props: MotionPathLayerProps) {
 			const next = dragged(drag, at)
 
 			paintEdit(next, drag.kind === "point" ? drag.index : point)
-			commit(editingView.node, editingView.path, next)
+			commit(editingView.node, next)
 
 			return
 		}
@@ -472,7 +526,7 @@ export function MotionPathLayer(props: MotionPathLayerProps) {
 				if (next === working) return
 
 				props.onPoint(Math.min(point, next.xs.length - 1))
-				commit(editingView.node, editingView.path, next)
+				commit(editingView.node, next)
 
 				return
 			}
@@ -489,11 +543,7 @@ export function MotionPathLayer(props: MotionPathLayerProps) {
 				const dx = event.key === "ArrowLeft" ? -step / size.cx : event.key === "ArrowRight" ? step / size.cx : 0
 				const dy = event.key === "ArrowUp" ? -step / size.cy : event.key === "ArrowDown" ? step / size.cy : 0
 
-				commit(
-					editingView.node,
-					editingView.path,
-					movePoint(working, point, (working.xs[point] ?? 0) + dx, (working.ys[point] ?? 0) + dy)
-				)
+				commit(editingView.node, movePoint(working, point, (working.xs[point] ?? 0) + dx, (working.ys[point] ?? 0) + dy))
 
 				return
 			}

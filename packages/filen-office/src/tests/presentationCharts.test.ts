@@ -9,6 +9,7 @@ import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, SlideRef, Xfrm } from "../core/presentation/model"
 import { textWorkbookXlsx } from "../core/xlsx/convert/text"
 import { parseXml } from "../core/xml/index"
+import type { ChartText } from "../core/drawingml/chart/builder"
 import { chartData } from "../dom/presentation/engine/chart"
 import { viewCapability } from "../dom/presentation/engine/view"
 import { CORPUS_DIR } from "./corpusDir"
@@ -314,6 +315,28 @@ describe("Edit Data", () => {
 				chartShape(d, slide).frame?.kind === "chart" ? (chartShape(d, slide).frame as { part: string }).part : ""
 			)
 		).toBeDefined()
+	})
+})
+
+describe("chart fallback texts in a presentation", () => {
+	it("draws an unnamed series and the automatic title in the texts the page opened the deck with", async () => {
+		const cells = sampleChartCells({ categories: ["A", "B", "C", "D"], series: ["", "", ""] })
+		const shown = async (chartText?: ChartText): Promise<string> => {
+			const d = await driveSession(deckOf("pptx"), "pptx", [], chartText === undefined ? {} : { chartText })
+			const slide = d.session.deck.slides[0] as SlideRef
+
+			expect(await d.command(insertChartOp(d.session.deck, slide, 0, "column", cells))).toMatchObject({ ok: true })
+
+			return JSON.stringify((await viewCapability.render(d.context, [slide]))[0]?.layers)
+		}
+
+		expect(await shown()).toContain("Series1")
+
+		const german = await shown({ series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" })
+
+		expect(german).toContain("Datenreihe1")
+		expect(german).toContain("Datenreihe3")
+		expect(german).not.toMatch(/Series\d|Chart Title/)
 	})
 })
 

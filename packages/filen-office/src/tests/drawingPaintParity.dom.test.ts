@@ -1,9 +1,22 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { recolorPixels } from "../core/drawingml/canvas"
-import { DrawingList, IDENTITY, ItemKind, rgba, type DrawingImage, type Stroke } from "../core/drawingml/displayList"
+import { paintDrawingCanvas, recolorPixels } from "../core/drawingml/canvas"
+import {
+	DrawingList,
+	IDENTITY,
+	ItemKind,
+	rgba,
+	type DrawingClip,
+	type DrawingImage,
+	type Stroke,
+	type TextParagraph
+} from "../core/drawingml/displayList"
+import { paintDrawingPdf } from "../core/drawingml/pdf"
+import type { PdfFontSet } from "../core/pdfwrite/fonts/fontSet"
+import type { PdfPage } from "../core/pdfwrite/page"
 import type { DrawingData } from "../dom/docx/protocol"
 import { paintDrawing, type DrawingPaintContext } from "../react/docx/paint/drawing"
+import { RecordingCanvas } from "./presentationCanvasRecorder"
 
 function data(list: DrawingList): DrawingData {
 	const compact = list.compact()
@@ -322,5 +335,121 @@ describe("set transparent colour", () => {
 		expect(order.indexOf("feMerge")).toBeGreaterThan(0)
 		expect(order.indexOf("feMerge")).toBeLessThan(order.lastIndexOf("feColorMatrix"))
 		expect(filter?.querySelector("feColorMatrix[type='saturate']")).not.toBeNull()
+	})
+})
+
+describe("symbol-font bullets", () => {
+	// One body whose only paragraph carries `bullet` in `bulletFont` before a run "Item".
+	function bulleted(bullet: string, bulletFont: string): DrawingData {
+		const target = list()
+		const paragraph: TextParagraph = {
+			align: "l",
+			level: 0,
+			marginLeft: 0,
+			indent: 0,
+			lineSpacing: 0,
+			spaceBefore: 0,
+			spaceAfter: 0,
+			rtl: false,
+			bullet,
+			bulletFont,
+			runs: [
+				{
+					text: "Item",
+					size: 12,
+					bold: false,
+					italic: false,
+					underline: "none",
+					strike: "noStrike",
+					color: rgba("000000"),
+					font: "Arial",
+					baseline: 0,
+					caps: "none",
+					spacing: 0,
+					lineBreak: false
+				}
+			],
+			endSize: 12
+		}
+		const text = target.text({
+			kind: "body",
+			body: {
+				insets: { left: 0, top: 0, right: 0, bottom: 0 },
+				anchor: "t",
+				anchorCenter: false,
+				vertical: "horz",
+				wrap: false,
+				rotation: 0,
+				upright: false,
+				columns: 1,
+				columnSpacing: 0,
+				autofit: "none",
+				fontScale: 1,
+				lineSpacingReduction: 0
+			},
+			paragraphs: [paragraph]
+		})
+
+		target.addItem(ItemKind.TEXT, IDENTITY, 0, 0, 100, 50, target.commandCount, target.coordCount, -1, -1, text, -1, 0, 0)
+
+		return data(target)
+	}
+
+	// The bullet text each painter draws: the SVG text's first span, the canvas's first fillText, the PDF's first shaped
+	// text (its fonts and page record calls and draw nothing).
+	async function bullets(drawing: DrawingData): Promise<[string, string, string]> {
+		const svg = paintDrawing(drawing, context()).querySelector("text")?.firstChild?.textContent ?? ""
+		const canvas = new RecordingCanvas()
+
+		paintDrawingCanvas(canvas, drawing, IDENTITY, { image: () => undefined })
+
+		return [svg, String(canvas.ops("fillText")[0]?.args[0] ?? ""), (await shapedPdf(drawing))[0] ?? ""]
+	}
+
+	// The texts the PDF painter shapes for `drawing` (its fonts and page record calls and draw nothing).
+	async function shapedPdf(drawing: DrawingData): Promise<string[]> {
+		const shaped: string[] = []
+		const fonts = {
+			prepare: () => undefined,
+			shape: (text: string, start: number, end: number) => {
+				shaped.push(text.slice(start, end))
+
+				return { runs: [], width: 0 }
+			}
+		}
+		const page: object = new Proxy({}, { get: () => () => page })
+		const { shadows: _shadows, ...pdfData } = drawing
+
+		await paintDrawingPdf(
+			{
+				page: page as PdfPage,
+				fonts: fonts as unknown as PdfFontSet,
+				image: () => Promise.resolve(undefined),
+				defaultFamily: "Arial"
+			},
+			pdfData,
+			[1, 0, 0, 1, 0, 0]
+		)
+
+		return shaped
+	}
+
+	it("draws a plain bullet for every symbol face in all three painters", async () => {
+		for (const font of ["Webdings", "Symbol MT", "Wingdings 2", "Wingdings", "Symbol"])
+			expect(await bullets(bulleted("n", font))).toEqual(["• ", "• ", "• "])
+	})
+
+	it("keeps the bullet of any other face in all three painters", async () => {
+		expect(await bullets(bulleted("-", "Arial"))).toEqual(["- ", "- ", "- "])
+	})
+
+	it("hides an item whose clip entry is null in the canvas and PDF painters instead of throwing", async () => {
+		const drawing = { ...bulleted("-", "Arial"), clips: [null as unknown as DrawingClip], itemClips: Int32Array.of(0) }
+		const canvas = new RecordingCanvas()
+
+		paintDrawingCanvas(canvas, drawing, IDENTITY, { image: () => undefined })
+
+		expect(canvas.ops("fillText")).toEqual([])
+		expect(await shapedPdf(drawing)).toEqual([])
 	})
 })

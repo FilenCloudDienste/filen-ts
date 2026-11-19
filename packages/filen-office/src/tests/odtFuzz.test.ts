@@ -6,6 +6,7 @@ import { openOdtAsDocx } from "../core/odt/index"
 import { CORPUS_DIR } from "./corpusDir"
 import { odtBytes } from "./odtFixtures"
 import { buildZip } from "./zipBuilder"
+import { rng as random } from "./mulberry32"
 
 // Mutated packages: every open either succeeds or fails with a typed reason, never with an exception.
 
@@ -20,22 +21,6 @@ const BASE = odtBytes({
 		'<text:section text:name="s"><text:p>s<draw:frame draw:style-name="fr" svg:width="3cm" svg:height="2cm"><draw:text-box><text:p>t</text:p></draw:text-box></draw:frame>' +
 		'<draw:custom-shape svg:width="1cm" svg:height="1cm"><draw:enhanced-geometry svg:viewBox="0 0 10 10" draw:enhanced-path="M 0 0 L ?a 10 A 0 0 10 10 0 5 10 5 W 0 0 10 10 5 0 5 10 Z N"><draw:equation draw:name="a" draw:formula="sin(pi/2)*10"/></draw:enhanced-geometry></draw:custom-shape></text:p></text:section>'
 })
-
-// A deterministic generator (mulberry32).
-function random(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 const SNIPPETS = [
 	"<text:p>",

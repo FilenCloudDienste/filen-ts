@@ -31,9 +31,10 @@ export interface PageValues {
 	chapter?: string | undefined
 }
 
-// A page number as fields and page lists show it: the chapter prefix, then the number in `format`.
-export function pageNumberText(page: number, format: string | undefined, chapter: string | undefined): string {
-	const text = numberText(page, format)
+// A page number as fields and page lists show it: the chapter prefix, then the number in `format` (words in
+// `language`, numberText).
+export function pageNumberText(page: number, format: string | undefined, chapter: string | undefined, language?: string): string {
+	const text = numberText(page, format, language)
 
 	return chapter === undefined ? text : chapter + text
 }
@@ -103,6 +104,8 @@ export class BuiltParagraph {
 	fieldFlags = 0
 	// PAGE field results: start and end text offsets.
 	readonly pageFields: number[] = []
+	// The language each PAGE field writes its own \* format in (pageFields order; undefined: none or the section's format).
+	readonly pageLanguages: (string | undefined)[] = []
 	// The paragraph has only a mark (no text, tabs or objects).
 	empty = true
 	dropCap: "drop" | "margin" | undefined = undefined
@@ -127,6 +130,7 @@ export class BuiltParagraph {
 		this.renderedBreaks.length = 0
 		this.fieldFlags = 0
 		this.pageFields.length = 0
+		this.pageLanguages.length = 0
 		this.empty = true
 		this.dropCap = undefined
 		this.map = undefined
@@ -431,16 +435,15 @@ export class ContentBuilder {
 
 		const key = services.memoKey(part.index, item)
 		let marker = story.recount ? undefined : services.markers.get(key)
+		const run = services.resolver.listMarker(format)
 
 		if (marker === undefined) {
-			marker = story.counters.next(numbering.numId, numbering.ilvl) ?? null
+			marker = story.counters.next(numbering.numId, numbering.ilvl, run?.lang.latin) ?? null
 
 			if (!story.recount) services.markers.set(key, marker)
 		}
 
 		if (marker === null) return
-
-		const run = services.resolver.listMarker(format)
 
 		if (run?.vanish === true && services.hidden !== undefined) services.hidden.seen = true
 		if (run === undefined || (run.vanish && !this.showHidden)) return
@@ -969,14 +972,18 @@ export class ContentBuilder {
 			const start = this.builder.length
 
 			this.out.fieldFlags |= 1
-			this.text(pageNumberText(page.page, format ?? page.pageFormat, page.chapter), run, revision)
+			// The field's own format in its run's language, as an update writes it (fields/evaluate.ts numberResult).
+			const language = format === undefined ? undefined : run.lang.latin
+
+			this.text(pageNumberText(page.page, format ?? page.pageFormat, page.chapter, language), run, revision)
 			this.out.pageFields.push(start, this.builder.length)
+			this.out.pageLanguages.push(language)
 
 			return
 		}
 
 		this.out.fieldFlags |= 2
-		this.text(numberText(kind === FieldKind.NUMPAGES ? page.numPages : page.sectionPages, format), run, revision)
+		this.text(numberText(kind === FieldKind.NUMPAGES ? page.numPages : page.sectionPages, format, run.lang.latin), run, revision)
 	}
 
 	private noteReference(part: StoryPart, item: number, endnote: boolean, run: ResolvedRunProps, revision: TrackedLook): void {

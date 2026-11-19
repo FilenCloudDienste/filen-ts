@@ -34,10 +34,6 @@ for (const face of BUNDLED_FACES) {
 	else list.push(face)
 }
 
-export function bundledFaces(family: BundledFamily): readonly BundledFace[] {
-	return facesByFamily.get(family) ?? []
-}
-
 function weightDistance(face: BundledFace, weight: number): number {
 	const [min, max] = typeof face.weight === "number" ? [face.weight, face.weight] : face.weight
 

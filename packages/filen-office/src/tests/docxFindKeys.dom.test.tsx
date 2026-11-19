@@ -2,36 +2,20 @@
 import type { EditorView } from "prosemirror-view"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { selectAll, type PagedEditor } from "@filen/office/core/docx/paged"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
+import { type DocxDocument } from "@filen/office/react/docx"
 import { EditSink } from "@filen/office/react/docx/editor"
 import { ReflowView } from "../react/docx/reflow/view"
 import { buildDocx, p } from "./docxSynthetic"
+import { emptyDocxDocument, emptyDocxSession } from "./docxDocumentStubs.dom"
 import { pagedEditor } from "./pagedDomFixtures"
 
 // Word's find keys (Ctrl+H is Find and Replace) and the view's shortcuts in a read-only document, in the paged
 // editor's input view and in Mobile view alike.
 
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
+const SESSION = emptyDocxSession()
 
 function documentOf(): DocxDocument {
-	return {
-		status: "ready",
-		info: undefined,
-		pages: [],
-		pageCount: 0,
-		tables: { styles: [], decorations: [], links: [] },
-		session: SESSION,
-		media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-		error: undefined
-	}
+	return emptyDocxDocument(SESSION)
 }
 
 interface SurfaceOptions {

@@ -1,6 +1,6 @@
 import type { Mark, Node } from "prosemirror-model"
 import type { Transaction } from "prosemirror-state"
-import type { DocxEditContext } from "../edit/context"
+import { DEFAULT_EDIT_STRINGS, type DocxEditContext } from "../edit/context"
 import { NO_MARKERS, NO_SOURCE, docxSchema, markerNodeAttrs, survivorsOf, type MarkerList, type SpacingAttrs } from "../edit/schema"
 import type { DocxEditorSession } from "../edit/session"
 import { FieldCharType, Item, type StoryPart } from "../model/index"
@@ -20,8 +20,8 @@ import { hasSwitch, outlineLevels, parseFieldCode, rangeText, switchOf, type Fie
 
 const nodes = docxSchema.nodes
 const marks = docxSchema.marks
-// Word's text for a table without entries (en-US).
-export const NO_ENTRIES = "No table of contents entries found."
+// Word's text for a table without entries (en-US; a host's own is DocxEditStrings.noTocEntries).
+export const NO_ENTRIES = DEFAULT_EDIT_STRINGS.noTocEntries
 // Word's paragraph style of a table of figures' entries.
 const FIGURES_STYLE = "table of figures"
 // Word's default table: heading levels 1 to 3, links, no tab leaders in Web view, outline levels.
@@ -841,7 +841,7 @@ export function buildToc(input: TocBuildInput): TocBuild {
 		specs.push({ level: entry.level, content, tab: numbered && options.separator === undefined })
 	}
 
-	if (specs.length === 0) specs.push({ level: 1, content: [docxSchema.text(NO_ENTRIES)], tab: false })
+	if (specs.length === 0) specs.push({ level: 1, content: [docxSchema.text(context.strings.noTocEntries)], tab: false })
 
 	const code =
 		input.head !== undefined

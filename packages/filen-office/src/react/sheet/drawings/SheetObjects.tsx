@@ -575,19 +575,14 @@ export function SheetObjects(props: SheetObjectsProps) {
 			props.onSelect(null)
 			handle.current?.focus()
 		} else if (move !== undefined) {
-			if (props.canEdit && !object.noMove && axes !== null) {
-				const box = anchorBox(object.anchor, axes)
-				const dx = grid.layout(sheet)?.rightToLeft === true ? -move[0] : move[0]
+			// The arrows nudge the object; with Shift they resize it from its trailing or bottom edge, as in Excel.
+			const resize = event.shiftKey
 
-				settled(
-					props.onMove(
-						object,
-						anchorOf(object.anchor, { ...box, x: box.x + dx, y: box.y + move[1] }, axes, {
-							rows: SHEET_MAX_ROWS,
-							cols: SHEET_MAX_COLS
-						})
-					)
-				)
+			if (props.canEdit && !(resize ? object.noResize : object.noMove) && axes !== null) {
+				const dx = grid.layout(sheet)?.rightToLeft === true ? -move[0] : move[0]
+				const box = draggedBox(anchorBox(object.anchor, axes), resize ? (move[0] !== 0 ? "e" : "s") : null, dx, move[1], false)
+
+				settled(props.onMove(object, anchorOf(object.anchor, box, axes, { rows: SHEET_MAX_ROWS, cols: SHEET_MAX_COLS })))
 			}
 		} else if (event.key === "Tab") {
 			// Tab walks the objects in z-order, as in Excel; past the last it moves on, before the first back to the cells.

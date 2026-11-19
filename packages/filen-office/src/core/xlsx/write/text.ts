@@ -1,11 +1,12 @@
-import type { SheetRange } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange } from "../../sheet/protocol"
+import { columnIndex, columnName } from "../../sheet/refs/cellRef"
 import { XlsxWriteError } from "./failure"
 
 // Numbers and cell references as SpreadsheetML writes them. Text is kept as written (ST_Xstring escapes
 // included) by the model, so it needs only XML escaping.
 
-export const MAX_ROWS = 1_048_576
-export const MAX_COLS = 16_384
+export const MAX_ROWS = SHEET_MAX_ROWS
+export const MAX_COLS = SHEET_MAX_COLS
 
 // xsd:double as the shortest text that reads back as the same number; NaN and the infinities refuse, `subject`
 // (a constant: nothing is built on the way to a number written) naming what holds one.
@@ -15,13 +16,7 @@ export function formatNumber(value: number, subject: string = "A number"): strin
 	return Object.is(value, -0) ? "0" : String(value)
 }
 
-export function columnName(col: number): string {
-	let name = ""
-
-	for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + ((n - 1) % 26)) + name
-
-	return name
-}
+export { columnIndex, columnName }
 
 export function cellRef(row: number, col: number): string {
 	return `${columnName(col)}${row + 1}`
@@ -39,13 +34,9 @@ export function parseCellRef(text: string): { readonly row: number; readonly col
 
 	if (match === null) return undefined
 
-	let col = 0
-
-	for (const letter of (match[1] as string).toUpperCase()) col = col * 26 + (letter.charCodeAt(0) - 64)
-
 	const row = Number(match[2])
 
-	return row >= 1 ? { row: row - 1, col: col - 1 } : undefined
+	return row >= 1 ? { row: row - 1, col: columnIndex(match[1] as string) } : undefined
 }
 
 // "A1" or "A1:B2" as a range, or undefined (whole rows or columns are not cell ranges).

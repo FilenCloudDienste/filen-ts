@@ -1,5 +1,6 @@
 import type { PDFDocument, PDFGraftMap, PDFObject } from "mupdf"
 import type { PdfMatrix } from "../../../core/pdfedit/matrix"
+import { fieldType } from "../fields"
 import {
 	appearanceMatrix,
 	appendPageContent,
@@ -306,10 +307,6 @@ function inherited(dict: PDFObject, key: string): PDFObject {
 	}
 
 	return value
-}
-
-function fieldType(dict: PDFObject): string | null {
-	return nameOf(inherited(dict, "FT"))
 }
 
 function copyAnnotations(context: Context, sourcePage: PDFObject, targetPage: PDFObject): void {

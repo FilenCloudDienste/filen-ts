@@ -1,15 +1,15 @@
 import { NodeSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import { drawingAltText, vmlAltText } from "@filen/office/core/docx"
-import { DocxEngine, type DocxEngineServices, type DocxEvent, type DocxPageData } from "@filen/office/dom/docx"
+import { DocxEngine, type DocxEvent, type DocxPageData } from "@filen/office/dom/docx"
 import { inThreadEditingHost } from "@filen/office/dom/docx/editing"
 import { writerProof } from "@filen/office/core/docx/write"
 import { parseDocxEditorCommand } from "@filen/office/core/docx/edit"
 import { buildDocx, modelOf, p, type SyntheticDocx } from "./docxSynthetic"
 import { settleAll } from "./pagedFixtures"
 import { drawingName } from "../core/docx/objects/edit"
+import { engineServices } from "./engineFixtures"
 
 // A picture's accessible name: its alternative text (wp:docPr@descr), else its title (ECMA-376 Part 1
 // §20.4.2.5); a VML shape's alt, else title. The engine serves it with the drawing to the viewer and the
@@ -36,35 +36,10 @@ function spec(body: string): SyntheticDocx {
 	}
 }
 
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
-function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
-		yield: () => Promise.resolve(),
-		sliceMs: Infinity
-	}
-}
-
 // The alt text of every object the engine serves for the document, in page order.
 async function served(bytes: Uint8Array): Promise<(string | undefined)[]> {
 	const pages: DocxPageData[] = []
-	const engine = new DocxEngine(bytesSource(bytes), services(), event => {
+	const engine = new DocxEngine(bytesSource(bytes), engineServices(), event => {
 		if (event.type === "pages") for (const page of event.pages) pages[page.index] = page
 	})
 
@@ -114,7 +89,7 @@ describe("picture alt text", () => {
 	})
 
 	it("names a drawing in the editor by its alt text as edited, else its title", async () => {
-		const editing = inThreadEditingHost(services, { proof: writerProof })
+		const editing = inThreadEditingHost(() => engineServices(), { proof: writerProof })
 		const session = editing.host(
 			bytesSource(buildDocx(spec(picture(' descr="Old" title="A title"') + picture("") + VML))),
 			() => undefined
@@ -145,7 +120,7 @@ describe("picture alt text", () => {
 
 	it("follows the editor's alt text edits", async () => {
 		const pages: DocxPageData[] = []
-		const editing = inThreadEditingHost(services, { proof: writerProof })
+		const editing = inThreadEditingHost(() => engineServices(), { proof: writerProof })
 		const session = editing.host(bytesSource(buildDocx(spec(p("Before") + picture(' descr="Old"')))), (event: DocxEvent) => {
 			if (event.type === "pages") for (const page of event.pages) pages[page.index] = page
 		})

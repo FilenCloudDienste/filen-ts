@@ -3,27 +3,24 @@ import { describe, expect, it } from "vitest"
 import type { SheetCommand, SheetCommandResult, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { buildXlsx } from "./oracles/sheet/synthetic"
-import { FormulaEngine, type EngineName, type EngineSheet, type RecalculatedCell } from "../core/sheet/formula/index"
+import { FormulaEngine, type EngineName, type RecalculatedCell } from "../core/sheet/formula/index"
 import { EngineStaleError } from "../core/sheet/formula/formulaEngine"
 import { engineCellFormula, storedFormula } from "../core/sheet/refs/formulaRefs"
 import { budget, cpuMs } from "./timing"
+import { IMMEDIATE } from "./sheetSessionFixtures"
+import { engineRows, shownResult, type Typed } from "./sheetEngineFixtures"
 
 // INDIRECT (support.microsoft.com "INDIRECT function"): the reference a text names, A1 or R1C1, a defined name's
 // included; calculated again whenever a cell it read changes, though the engine never linked it to that cell.
 
-type Typed = string | number | boolean | null
-
-function engineRows(rows: Typed[][]): EngineSheet["rows"] {
-	return rows.map(row =>
-		row.map(cell => (typeof cell === "string" && cell.startsWith("=") ? (engineCellFormula(storedFormula(cell.slice(1))) ?? "") : cell))
-	)
-}
+// Formulas typed as in Excel, stored as a file stores them.
+const STORED = { stored: true }
 
 function build(rows: Typed[][], other: Typed[][] = [], names: EngineName[] = []): FormulaEngine {
 	return new FormulaEngine(
 		[
-			{ name: "S", rows: engineRows(rows), formulas: [] },
-			{ name: "My Sheet", rows: engineRows(other), formulas: [] }
+			{ name: "S", rows: engineRows(rows, STORED), formulas: [] },
+			{ name: "My Sheet", rows: engineRows(other, STORED), formulas: [] }
 		],
 		names
 	)
@@ -32,13 +29,12 @@ function build(rows: Typed[][], other: Typed[][] = [], names: EngineName[] = [])
 function value(engine: FormulaEngine, a1: string, sheet = 0): unknown {
 	const col = a1.charCodeAt(0) - 65
 	const row = Number(a1.slice(1)) - 1
-	const result = engine.result(sheet, row, col)
 
-	return result.error === true ? `!${String(result.value)}` : result.value
+	return shownResult(engine.result(sheet, row, col))
 }
 
 function set(engine: FormulaEngine, a1: string, content: Typed): RecalculatedCell[] {
-	const [cell] = engineRows([[content]])
+	const [cell] = engineRows([[content]], STORED)
 
 	return engine.set(0, [{ row: Number(a1.slice(1)) - 1, col: a1.charCodeAt(0) - 65, content: cell?.[0] ?? null }])
 }
@@ -435,7 +431,7 @@ describe("INDIRECT", () => {
 				engine.set(1, [
 					{ row: 0, col: 0, content: 7 },
 					{ row: 1, col: 0, content: 8 },
-					{ row: 0, col: 1, content: engineRows([['=SUM(INDIRECT("Gone"))']])[0]?.[0] ?? null }
+					{ row: 0, col: 1, content: engineRows([['=SUM(INDIRECT("Gone"))']], STORED)[0]?.[0] ?? null }
 				])
 
 				expect(value(engine, "B1", 1)).toBe("!#REF!")
@@ -447,8 +443,6 @@ describe("INDIRECT", () => {
 })
 
 describe("INDIRECT in a workbook", () => {
-	const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
-
 	async function texts(session: SheetSessionApi, sheet: number, cells: readonly string[]): Promise<string[]> {
 		const { tiles } = await session.tiles(sheet, Uint32Array.of(0, 0))
 		const tile = tiles[0] as SheetTile

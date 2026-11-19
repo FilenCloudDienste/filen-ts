@@ -10,6 +10,7 @@ import type {
 	CustomShow,
 	EdgeFractions,
 	FrameRef,
+	LineProps,
 	ShapeNode,
 	ShapePropsEdit,
 	ShapeRef,
@@ -216,6 +217,9 @@ export type ShapeOp =
 	| { readonly family: "shape"; readonly kind: "restore"; readonly target: ShapeRef; readonly raw: Uint8Array }
 	// Each present group replaces that group; undefined in `props` for a group restores the source group.
 	| { readonly family: "shape"; readonly kind: "setProps"; readonly target: ShapeRef; readonly props: ShapePropsEdit }
+	// The shape's line with these fields replaced and the rest kept as it is drawn now (its own, a placeholder's or its
+	// source's a:ln): an outline weight or colour pick. Applied as the setProps of the line it resolves to.
+	| { readonly family: "shape"; readonly kind: "patchLine"; readonly target: ShapeRef; readonly line: LineProps }
 	| { readonly family: "shape"; readonly kind: "setStyle"; readonly target: ShapeRef; readonly style: ShapeStyleRefs | undefined }
 	// `to` a number (the Selection Pane's drag): the shapes put at that index among their siblings that are not moved,
 	// back to front, keeping their order among themselves.
@@ -627,9 +631,16 @@ export type MotionPathOp = {
 	readonly rAng?: number
 }
 
-// A theme of the Filen gallery by id and variant, or one the deck already has (by its part).
+// A theme of the Filen gallery by id and variant (its layouts named by type in the user's language, else in
+// English), or one the deck already has (by its part).
 export type ThemeChoice =
-	{ readonly kind: "gallery"; readonly id: string; readonly variant: number } | { readonly kind: "deck"; readonly part: string }
+	| {
+			readonly kind: "gallery"
+			readonly id: string
+			readonly variant: number
+			readonly layoutNames?: Readonly<Partial<Record<string, string>>>
+	  }
+	| { readonly kind: "deck"; readonly part: string }
 
 export type DesignOp =
 	| {

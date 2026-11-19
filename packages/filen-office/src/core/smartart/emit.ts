@@ -1,3 +1,4 @@
+import { INSERTED_PREFIX, insertedPartId } from "../presentation/inserted"
 import { evaluateGuides, presetProgram, textRect } from "../drawingml/geometry/evaluate"
 import { D, EMU_PER_PX, type DrawingReader } from "../drawingml/reader"
 import { Relationships } from "../opc/index"
@@ -14,6 +15,7 @@ import { originalShape, param } from "./algorithms/shared"
 import type { DataPoint } from "./data"
 import type { Box, DiagramLayout, LaidShape, LayoutNode } from "./interp"
 import { DiagramStyles, drawingMarkup, type ShapeStyle } from "./style"
+import { BULLET_HANG, LINE_PCT, SPACE_AFTER_CHILD_PCT, SPACE_AFTER_NODE_PCT, childFontPt, textLevel } from "./textDefaults"
 
 // A laid-out diagram as the drawing PowerPoint caches beside it (MS-ODRAWXML §2.4 dsp:drawing, the part named by
 // dsp:dataModelExt@relId), and as the model's shapes. Each laid shape is one dsp:sp: its presentation point's
@@ -56,7 +58,7 @@ export interface PicturePlaceholder {
 
 // An image a diagram's data names before a save gives it a relationship (core/presentation/edit/apply/smartart.ts):
 // an image an op inserted ("inserted:<registry id>") or a package part ("part:/ppt/media/image1.png").
-export const INSERTED_IMAGE_ID = "inserted:"
+export const INSERTED_IMAGE_ID = INSERTED_PREFIX
 export const PART_IMAGE_ID = "part:"
 
 export function isPendingImageId(id: string): boolean {
@@ -124,6 +126,7 @@ function plan(layout: DiagramLayout): Drawn[] {
 	for (const shape of shapes) {
 		if (shape.hideGeom && hasText(shape)) {
 			const moveWith = shape.node.def.moveWith
+			let merged = false
 
 			for (let i = out.length - 1; i >= 0; i--) {
 				const host = out[i] as Drawn
@@ -136,11 +139,12 @@ function plan(layout: DiagramLayout): Drawn[] {
 				if (moveWith !== undefined && (host.shape.node.name !== moveWith || host.shape.node.parent !== shape.node.parent)) continue
 
 				host.text = shape
+				merged = true
 
 				break
 			}
 
-			if (out.some(drawn => drawn.text === shape)) continue
+			if (merged) continue
 		}
 
 		// A shape's own text is drawn when its node lays text out (tx), or when no text node covers it.
@@ -245,13 +249,14 @@ interface TextLevel {
 // One data point's paragraphs: its own text body's, with the diagram's size and alignment.
 function paragraphsOf(point: DataPoint, level: TextLevel, options: EmitOptions): string {
 	const source = options.text?.(point)
-	// A bullet hangs 0.75 of its text size (PowerPoint's caches: 171450 EMU at 18 pt, 228600 at 24 pt).
-	const hang = level.size === undefined ? 171450 : Math.round(0.75 * level.size * 127)
-	// What PowerPoint's drawings carry where the data sets no spacing (the text was measured with it).
+	// A bullet hangs 0.75 of its text size (PowerPoint's caches: 171450 EMU at 18 pt, 228600 at 24 pt); with no size,
+	// the hang at the 18 pt default. `size` is in hundredths of a point (127 EMU each).
+	const hang = level.size === undefined ? 171450 : Math.round(BULLET_HANG * level.size * 127)
+	// What PowerPoint's drawings carry where the data sets no spacing (textDefaults.ts: the text was measured with it).
 	const defaults: Readonly<Record<string, string>> = {
-		lnSpc: '<a:lnSpc><a:spcPct val="90000"/></a:lnSpc>',
+		lnSpc: `<a:lnSpc><a:spcPct val="${String(LINE_PCT)}"/></a:lnSpc>`,
 		spcBef: '<a:spcBef><a:spcPct val="0"/></a:spcBef>',
-		spcAft: `<a:spcAft><a:spcPct val="${level.level === 0 ? "35000" : "15000"}"/></a:spcAft>`
+		spcAft: `<a:spcAft><a:spcPct val="${String(level.level === 0 ? SPACE_AFTER_NODE_PCT : SPACE_AFTER_CHILD_PCT)}"/></a:spcAft>`
 	}
 	const spaced = (own: ReadonlyMap<string, string>): string =>
 		["lnSpc", "spcBef", "spcAft"].map(name => own.get(name) ?? defaults[name] ?? "").join("")
@@ -353,10 +358,7 @@ function textBody(shape: LaidShape, options: EmitOptions): string {
 	const size = shape.fontPt === undefined ? undefined : fontSize(shape.fontPt)
 	const secondary = values.get("secFontSz")
 	// With the user's own text size (custT: no fitted size) the child runs keep theirs too.
-	const childSize =
-		shape.fontPt !== undefined && secondary !== undefined && Number.isFinite(secondary) && secondary > 0
-			? fontSize(Math.min(secondary, shape.fontPt))
-			: size
+	const childSize = shape.fontPt === undefined ? size : fontSize(childFontPt(secondary, shape.fontPt))
 	const bullets = shape.node.vars.get("bulletEnabled") === "1"
 	const align = ALIGN[param(shape.node, "parTxLTRAlign", "ctr")] ?? "ctr"
 	const childAlign = ALIGN[param(shape.node, "shpTxLTRAlignCh", "l")] ?? "l"
@@ -369,7 +371,7 @@ function textBody(shape: LaidShape, options: EmitOptions): string {
 	const base = first === undefined ? 0 : Math.min(first.depth, shape.node.textBase)
 
 	shape.text.forEach((point, i) => {
-		const level = first === undefined ? 0 : Math.max(i === 0 ? 0 : 1, Math.min(8, point.depth - base))
+		const level = first === undefined ? 0 : textLevel(point, i, base)
 
 		paragraphs += paragraphsOf(
 			point,
@@ -436,7 +438,12 @@ function styleIndexes(drawn: readonly Drawn[]): { index: number; total: number }
 const FILLS = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"])
 
 // A presentation point's own fill and line (dgm:spPr), as markup; undefined for what it does not set.
-function ownProps(pres: DataPoint, options: EmitOptions): { fill: string | undefined; line: string | undefined } | undefined {
+interface OwnProps {
+	readonly fill: string | undefined
+	readonly line: string | undefined
+}
+
+function ownProps(pres: DataPoint, options: EmitOptions): OwnProps | undefined {
 	const source = options.shapeProps?.(pres)
 
 	if (source === undefined) return undefined
@@ -493,7 +500,14 @@ function turnedTextBox(shape: LaidShape, geometry: Geometry, turn: number, relat
 	return { x: cx - w / 2, y: cy - h / 2, w, h }
 }
 
-function shapeMarkup(item: Drawn, index: number, style: ShapeStyle, options: EmitOptions): string {
+// One shape's dsp:sp, with the geometry and own properties it was built from (the model shapes and the picture
+// placeholders reuse them).
+function shapeMarkup(
+	item: Drawn,
+	index: number,
+	style: ShapeStyle,
+	options: EmitOptions
+): { readonly xml: string; readonly geometry: Geometry; readonly own: OwnProps | undefined } {
 	const { shape, text } = item
 	const route = connectorRoute(shape.node)
 	const line1D = route !== undefined && route.dim === "1D"
@@ -528,7 +542,11 @@ function shapeMarkup(item: Drawn, index: number, style: ShapeStyle, options: Emi
 		}
 	}
 
-	return `<dsp:sp modelId="${escapeAttribute(modelId(shape, index))}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>${spPr}${styleMarkup(style)}${body}</dsp:sp>`
+	return {
+		xml: `<dsp:sp modelId="${escapeAttribute(modelId(shape, index))}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>${spPr}${styleMarkup(style)}${body}</dsp:sp>`,
+		geometry,
+		own
+	}
 }
 
 // A picture fill naming an image by a pending id (no relationship yet): the inserted image or the part it names.
@@ -541,9 +559,8 @@ function pendingPicture(reader: PartReader, spPr: number): FillProps | undefined
 	const source = reader.child(blipFill, G.A, "srcRect")
 	const edge = (name: string): number => Number(reader.attr(source, name) ?? "0") || 0
 	const crop = source < 0 ? undefined : { l: edge("l"), t: edge("t"), r: edge("r"), b: edge("b") }
-	const image = id.startsWith(INSERTED_IMAGE_ID)
-		? { inserted: Number(id.slice(INSERTED_IMAGE_ID.length)) }
-		: { part: id.slice(PART_IMAGE_ID.length) }
+	const inserted = insertedPartId(id)
+	const image = inserted !== undefined ? { inserted } : { part: id.slice(PART_IMAGE_ID.length) }
 
 	return { kind: "picture", ...image, ...(crop === undefined ? {} : { crop }) }
 }
@@ -600,14 +617,25 @@ export function emitDiagram(layout: DiagramLayout, options: EmitOptions = {}): E
 	const drawn = plan(layout)
 	const indexes = styleIndexes(drawn)
 	const geometries: Geometry[] = []
+	const pictures: PicturePlaceholder[] = []
 	let tree = ""
 
 	drawn.forEach((item, i) => {
 		const counted = indexes[i] as { index: number; total: number }
 		const style = styles.shape(item.shape.styleLbl, counted.index, counted.total)
+		const emitted = shapeMarkup(item, i, style, options)
 
-		geometries.push(geometryMarkup(item.shape, connectorRoute(item.shape.node), item.shape.box).geometry)
-		tree += shapeMarkup(item, i, style, options)
+		geometries.push(emitted.geometry)
+		tree += emitted.xml
+
+		if (originalShape(item.shape.node)?.blipPhldr === true && !item.shape.hideGeom) {
+			pictures.push({
+				box: item.shape.box,
+				node: item.shape.assocId,
+				placeholder: item.shape.name,
+				filled: emitted.own?.fill?.includes("blipFill") === true
+			})
+		}
 	})
 
 	const drawingXml =
@@ -619,19 +647,6 @@ export function emitDiagram(layout: DiagramLayout, options: EmitOptions = {}): E
 	const prompts = drawn
 		.filter(item => item.text === undefined && item.shape.text.length > 0 && !item.shape.hideGeom)
 		.map(item => item.shape.box)
-
-	const pictures = drawn
-		.filter(item => originalShape(item.shape.node)?.blipPhldr === true && !item.shape.hideGeom)
-		.map(item => {
-			const own = item.shape.node.pres === undefined ? undefined : ownProps(item.shape.node.pres, options)
-
-			return {
-				box: item.shape.box,
-				node: item.shape.assocId,
-				placeholder: item.shape.name,
-				filled: own?.fill?.includes("blipFill") === true
-			}
-		})
 
 	return { shapes: modelShapes(drawingXml, drawn, geometries), drawingXml, prompts, pictures }
 }

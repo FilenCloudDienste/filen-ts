@@ -1,12 +1,11 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { MAX_OMML_NESTING, latexPreview, latexToOmml, ommlToLatex, readLatex, writeOmml, type OmmlNode } from "@filen/office/core/docx/edit"
+import { MAX_OMML_NESTING, latexPreview, latexToOmml, ommlToLatex, writeOmml, type OmmlNode } from "@filen/office/core/docx/edit"
 import { assertMathTree, ommlToMathTree } from "@filen/office/core/math"
 import { OpcPackage, bytesSource } from "@filen/office/core/opc"
 import { Namespaces, NodeKind, encodeUtf8, parseXml, type XmlDocument } from "@filen/office/core/xml"
 import { OMML_ELEMENTS } from "../core/docx/write/checks/math"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 import { equationRunProperties } from "../core/docx/math/edit"
 import { diffTrees, firstRunProperties, ommlStringTree, ommlTree, treeXml, withRunProperties } from "../core/math/ommlTrack"
 import { rng } from "./fuzz/config"
@@ -102,7 +101,7 @@ describe("LaTeX subset to OMML", () => {
 
 	it("says where and why it cannot read", () => {
 		const error = (latex: string): unknown => {
-			const read = readLatex(latex)
+			const read = latexToOmml(latex, true)
 
 			return read.ok ? undefined : read.error
 		}
@@ -411,25 +410,13 @@ describe("fuzzed LaTeX", () => {
 
 // ---- the corpus's equations -------------------------------------------------------------------------------
 
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of ["docx", "docm", "dotx", "dotm"]) {
-		const directory = join(CORPUS, extension)
-
-		if (existsSync(directory)) for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
-
 describe.skipIf(!existsSync(CORPUS))("OMML of the real-world corpus as LaTeX", () => {
 	it("reads every equation back as the same equation, or says it is lossy", { timeout: 300_000 }, async () => {
 		let equations = 0
 		let files = 0
 		const failures: string[] = []
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(["docx", "docm", "dotx", "dotm"])) {
 			let opc: OpcPackage
 
 			try {

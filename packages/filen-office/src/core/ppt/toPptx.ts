@@ -1,4 +1,4 @@
-import { blipFile, blipKind, blipSize, type ArtProperty, type ArtRecord } from "../doc/toDocx/officeArt"
+import { blipFile, blipKind, blipSize, complexText, type ArtProperty, type ArtRecord } from "../doc/toDocx/officeArt"
 import {
 	OpcPackage,
 	writeZip,
@@ -13,6 +13,7 @@ import { storedByType } from "../opc/mediaPolicy"
 import type { LinkedPart } from "../opc/package"
 import { PresentationError, refused, type Refused } from "../presentation/model"
 import { tooLarge } from "../presentation/refusal"
+import { escapeAttribute, escapeText } from "../xml/entities"
 import { encodeUtf8 } from "../xml/utf8"
 import { paragraphSpans, pp10Records, timingOf, type PptAnimShape, type PptLegacyBuild } from "./anim"
 import { CommentAuthors, commentsXml, slideComments, type PptComment } from "./comments"
@@ -64,7 +65,7 @@ import {
 	mergePara,
 	paragraphsXml,
 	TEXT_TYPE,
-	xmlText,
+	withoutControls,
 	type Interaction,
 	type Ruler,
 	type StyleLevel,
@@ -136,7 +137,7 @@ class Rels {
 		const id = `rId${String(this.list.length + 1)}`
 
 		this.list.push(
-			`<Relationship Id="${id}" Type="${REL}/${type}" Target="${xmlText(target)}"${external ? ' TargetMode="External"' : ""}/>`
+			`<Relationship Id="${id}" Type="${REL}/${type}" Target="${escapeAttribute(target)}"${external ? ' TargetMode="External"' : ""}/>`
 		)
 		this.byKey.set(key, id)
 
@@ -584,7 +585,7 @@ class Converter {
 			// A macro, a program or an OLE verb is carried as PowerPoint writes it, so the reader classifies it refused
 			// (inert, shown with its reason, a notice when clicked in the show), never run.
 			case 1:
-				return `<a:${element} r:id="" action="ppaction://macro?name=${xmlText(interaction.name ?? "")}"/>`
+				return `<a:${element} r:id="" action="ppaction://macro?name=${escapeAttribute(interaction.name ?? "")}"/>`
 			case 2: {
 				const program = interaction.name ?? ""
 
@@ -676,7 +677,7 @@ class Converter {
 		const hidden = flag([shape.properties], P.groupShapeBooleans, 1) === true
 		const click = shape.click === undefined ? "" : this.action(shape.click, context.rels, context.slideNumber, "hlinkClick")
 		const hover = shape.hover === undefined ? "" : this.action(shape.hover, context.rels, context.slideNumber, "hlinkHover")
-		const cNvPr = `<p:cNvPr id="${String(id)}" name="${xmlText(name)}"${description === undefined ? "" : ` descr="${xmlText(description)}"`}${hidden ? ' hidden="1"' : ""}${click + hover === "" ? "/>" : `>${click}${hover}</p:cNvPr>`}`
+		const cNvPr = `<p:cNvPr id="${String(id)}" name="${escapeAttribute(name)}"${description === undefined ? "" : ` descr="${escapeAttribute(description)}"`}${hidden ? ' hidden="1"' : ""}${click + hover === "" ? "/>" : `>${click}${hover}</p:cNvPr>`}`
 
 		if (
 			shape.children !== undefined &&
@@ -952,7 +953,7 @@ class Converter {
 		const runs = lines
 			.map(
 				line =>
-					`<a:p><a:pPr algn="ctr"/><a:r><a:rPr sz="${String(size)}"><a:solidFill>${colorXml(color)}</a:solidFill>${font === undefined ? "" : `<a:latin typeface="${xmlText(font)}"/>`}</a:rPr><a:t>${xmlText(line)}</a:t></a:r></a:p>`
+					`<a:p><a:pPr algn="ctr"/><a:r><a:rPr sz="${String(size)}"><a:solidFill>${colorXml(color)}</a:solidFill>${font === undefined ? "" : `<a:latin typeface="${escapeAttribute(font)}"/>`}</a:rPr><a:t>${escapeText(line)}</a:t></a:r></a:p>`
 			)
 			.join("")
 
@@ -996,21 +997,13 @@ class Converter {
 
 // UTF-16 text of a complex property (names, WordArt text), up to its terminator.
 function textProperty(property: ArtProperty | undefined): string | undefined {
-	const bytes = property?.complex
+	const text = complexText(property)
 
-	if (bytes === undefined) return undefined
+	if (text === undefined) return undefined
 
-	let out = ""
+	const kept = withoutControls(text)
 
-	for (let at = 0; at + 1 < bytes.length; at += 2) {
-		const unit = u16(bytes, at)
-
-		if (unit === 0) break
-
-		out += String.fromCharCode(unit)
-	}
-
-	return out === "" ? undefined : out
+	return kept === "" ? undefined : kept
 }
 
 // The text type a pptx shape inherits its master style from: title placeholders the title style, notes bodies the
@@ -1322,7 +1315,7 @@ class PackageWriter {
 				part: `slideLayout${String(this.layouts.length + 1)}.xml`,
 				master: index,
 				type: "title",
-				name: titleMaster.name ?? "Title Slide",
+				name: titleMaster.name === undefined ? "Title Slide" : withoutControls(titleMaster.name),
 				titleMaster,
 				placeholders: new Map()
 			})
@@ -1453,7 +1446,7 @@ class PackageWriter {
 		const shows = document.namedShows
 			.map(
 				(show, index) =>
-					`<p:custShow name="${xmlText(show.name)}" id="${String(index)}"><p:sldLst>${show.slideIds
+					`<p:custShow name="${escapeAttribute(show.name)}" id="${String(index)}"><p:sldLst>${show.slideIds
 						.map(id => {
 							const part = converter.slidePartOf.get(id)
 
@@ -1511,14 +1504,15 @@ class PackageWriter {
 		const scheme = master.scheme ?? defaultScheme()
 		const title = this.styleOf(master, TEXT_TYPE.title, 0).cf.font
 		const body = this.styleOf(master, TEXT_TYPE.body, 0).cf.font
-		const font = (ref: number | undefined): string => xmlText(ref === undefined ? "Arial" : (this.document.fonts[ref]?.name ?? "Arial"))
+		const font = (ref: number | undefined): string =>
+			escapeAttribute(ref === undefined ? "Arial" : (this.document.fonts[ref]?.name ?? "Arial"))
 		const color = (name: string, rgb: number | undefined): string => `<a:${name}><a:srgbClr val="${hex(rgb ?? 0)}"/></a:${name}>`
 		const fills = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
 		const lines = '<a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>'
 
 		this.converter.add(
 			`ppt/theme/theme${String(index + 1)}.xml`,
-			`${DECLARATION}<a:theme xmlns:a="${NS_A}" name="${xmlText(master.name ?? `Master ${String(index + 1)}`)}"><a:themeElements><a:clrScheme name="Scheme ${String(index + 1)}">${color("dk1", scheme[1])}${color("lt1", scheme[0])}${color("dk2", scheme[2])}${color("lt2", scheme[3])}${color("accent1", scheme[4])}${color("accent2", scheme[5])}${color("accent3", scheme[6])}${color("accent4", scheme[7])}${color("accent5", scheme[4])}${color("accent6", scheme[5])}${color("hlink", scheme[6])}${color("folHlink", scheme[7])}</a:clrScheme><a:fontScheme name="Fonts ${String(index + 1)}"><a:majorFont><a:latin typeface="${font(title)}"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="${font(body)}"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Format ${String(index + 1)}"><a:fillStyleLst>${fills}${fills}${fills}</a:fillStyleLst><a:lnStyleLst>${lines}${lines}${lines}</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>${fills}${fills}${fills}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>`,
+			`${DECLARATION}<a:theme xmlns:a="${NS_A}" name="${escapeAttribute(withoutControls(master.name ?? `Master ${String(index + 1)}`))}"><a:themeElements><a:clrScheme name="Scheme ${String(index + 1)}">${color("dk1", scheme[1])}${color("lt1", scheme[0])}${color("dk2", scheme[2])}${color("lt2", scheme[3])}${color("accent1", scheme[4])}${color("accent2", scheme[5])}${color("accent3", scheme[6])}${color("accent4", scheme[7])}${color("accent5", scheme[4])}${color("accent6", scheme[5])}${color("hlink", scheme[6])}${color("folHlink", scheme[7])}</a:clrScheme><a:fontScheme name="Fonts ${String(index + 1)}"><a:majorFont><a:latin typeface="${font(title)}"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="${font(body)}"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Format ${String(index + 1)}"><a:fillStyleLst>${fills}${fills}${fills}</a:fillStyleLst><a:lnStyleLst>${lines}${lines}${lines}</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>${fills}${fills}${fills}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>`,
 			CT.theme
 		)
 	}
@@ -1551,7 +1545,7 @@ class PackageWriter {
 
 		converter.add(
 			`ppt/slideMasters/${part}`,
-			`${DECLARATION}<p:sldMaster ${ROOT_NS}><p:cSld${master.name === undefined ? "" : ` name="${xmlText(master.name)}"`}>${background}${this.spTree(shapes)}</p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst>${layouts.join("")}</p:sldLayoutIdLst>${txStyles}</p:sldMaster>`,
+			`${DECLARATION}<p:sldMaster ${ROOT_NS}><p:cSld${master.name === undefined ? "" : ` name="${escapeAttribute(withoutControls(master.name))}"`}>${background}${this.spTree(shapes)}</p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst>${layouts.join("")}</p:sldLayoutIdLst>${txStyles}</p:sldMaster>`,
 			CT.master
 		)
 		converter.addRels(`ppt/slideMasters/${part}`, rels)
@@ -1588,7 +1582,7 @@ class PackageWriter {
 
 		converter.add(
 			`ppt/slideLayouts/${plan.part}`,
-			`${DECLARATION}<p:sldLayout ${ROOT_NS} type="${plan.type}" preserve="1"${showMaster}><p:cSld name="${xmlText(plan.name)}">${background}${this.spTree(content)}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`,
+			`${DECLARATION}<p:sldLayout ${ROOT_NS} type="${plan.type}" preserve="1"${showMaster}><p:cSld name="${escapeAttribute(plan.name)}">${background}${this.spTree(content)}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`,
 			CT.layout
 		)
 		converter.addRels(`ppt/slideLayouts/${plan.part}`, rels)
@@ -1692,7 +1686,7 @@ class PackageWriter {
 
 		converter.add(
 			`ppt/slides/slide${String(number)}.xml`,
-			`${DECLARATION}<p:sld ${ROOT_NS}${showMaster}${hidden}><p:cSld${slide.name === undefined ? "" : ` name="${xmlText(slide.name)}"`}>${background}${this.spTree(shapes)}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${transition?.xml ?? ""}${timing.xml}</p:sld>`,
+			`${DECLARATION}<p:sld ${ROOT_NS}${showMaster}${hidden}><p:cSld${slide.name === undefined ? "" : ` name="${escapeAttribute(withoutControls(slide.name))}"`}>${background}${this.spTree(shapes)}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${transition?.xml ?? ""}${timing.xml}</p:sld>`,
 			CT.slide
 		)
 

@@ -1,3 +1,4 @@
+import { INSERTED_PREFIX, insertedPartId } from "../../core/presentation/inserted"
 import { DIAGRAM_CONTENT_TYPES } from "../../core/smartart/edit"
 import { insertedMediaWritten } from "../../core/presentation/edit/apply/media"
 import {
@@ -17,7 +18,7 @@ import { isRawPart, type DeckOp, type InsertedImage, type RawPart } from "../../
 import type { PartChange } from "../../core/opc/index"
 import { hasHeldOdpMedia, keepHeldOdpMedia } from "../../core/odp/write/save"
 import { isRestoredMedia } from "../../core/presentation/restoredMedia"
-import { hasReleasedMedia, keepReleasedMedia } from "../../core/pptx/write/parts"
+import { hasReleasedMedia, heldRelationships, keepReleasedMedia } from "../../core/pptx/write/parts"
 import type { Deck, SlideRef } from "../../core/presentation/model"
 import { decodeUtf8, NodeKind, transcodeUtf16, type XmlDocument } from "../../core/xml/index"
 import type { EngineSession } from "./engine"
@@ -44,7 +45,8 @@ import { pptxParts } from "./engine/open/pptx"
 
 const AUTHORED_PPTX = /^ppt\/(?:diagrams|media)\/[^/]+$/u
 const AUTHORED_ODP = /^(?:Pictures|Media)\/[^/]+$/u
-const INSERTED = "inserted:"
+// Pending ids in held bytes (a diagram's r:embed, a copied shape's markup).
+const INSERTED_NAMES = new RegExp(`${INSERTED_PREFIX}(\\d+)`, "gu")
 const CHUNK = 8192
 
 // The platform's UTF-8 decoder (one native pass); hosts without one (Hermes) take the bytes as one-byte characters,
@@ -200,8 +202,9 @@ function visit(value: unknown, deck: Deck, reach: Reach, seen: WeakSet<object>, 
 	if (depth > MAX_DEPTH) return
 
 	if (typeof value === "string") {
-		if (value.startsWith(INSERTED)) {
-			const id = Number(value.slice(INSERTED.length))
+		const id = insertedPartId(value)
+
+		if (id !== undefined) {
 			const media = insertedMediaWritten(deck, id)
 			const image = insertedImageWritten(deck, id)?.part
 
@@ -354,7 +357,7 @@ function reachOf(
 
 	// Pending ids in held bytes name parts and inserted images.
 	for (const text of reach.markup.texts)
-		for (const match of text.matchAll(/inserted:(\d+)/gu)) visit(`${INSERTED}${match[1] ?? ""}`, deck, reach, seen, 0)
+		for (const match of text.matchAll(INSERTED_NAMES)) visit(`${INSERTED_PREFIX}${match[1] ?? ""}`, deck, reach, seen, 0)
 
 	return reach
 }
@@ -450,7 +453,9 @@ export function pruneReleased(session: EngineSession, history: DeckHistory, rele
 	}
 
 	const names = (): boolean =>
-		reach.images.size > 0 || reach.charts.size > 0 || reach.markup.texts.some(text => text.includes(INSERTED) || /chart:\d/u.test(text))
+		reach.images.size > 0 ||
+		reach.charts.size > 0 ||
+		reach.markup.texts.some(text => text.includes(INSERTED_PREFIX) || /chart:\d/u.test(text))
 
 	if (names()) {
 		pruneHeld(session, history)
@@ -757,6 +762,21 @@ async function judgePptx(
 	// What a deleted shape the history holds relates: a save that lets it go keeps its bytes for the undo.
 	if (media) keepReleasedMedia(session.deck, heldIds)
 
+	// A released part left in the package unread (a medium, a part over DEFLATE_HELD) the slide no longer relates: the
+	// records that survived for the held markup name it by relationship id (an action sound, an embedded object), so
+	// it stays in use until no step does.
+	const released: string[] = []
+
+	for (const owner of heldIds.keys())
+		for (const relationship of heldRelationships(session.deck, owner).values()) {
+			const name = key(relationship.name)
+
+			if (relationship.external || !entries.has(name)) continue
+
+			released.push(name)
+			reach.history.add(name)
+		}
+
 	for (const [owner, ids] of heldIds)
 		for (const related of index.get(owner) ?? []) if (ids.has(related.id)) reach.history.add(related.target)
 	// What the parts reached relate in turn: a node's own relationships may be dead (a replaced picture's), so only
@@ -850,7 +870,7 @@ async function judgePptx(
 	// And the package pictures held diagram data names by pending ids (an edit's data, a copy's of it).
 	for (const text of reach.markup.texts) for (const match of text.matchAll(/"(part:[^"]+)"/gu)) pictures.add(key(match[1] ?? ""))
 
-	await spread([...[...reach.names].filter(name => entries.has(name) && !nodeParts.has(name)), ...owned, ...pictures])
+	await spread([...[...reach.names].filter(name => entries.has(name) && !nodeParts.has(name)), ...owned, ...pictures, ...released])
 
 	const roots = new Set(list.filter(name => !live.has(name)))
 	const named = [...roots].filter(name => reach.markup.names(name))

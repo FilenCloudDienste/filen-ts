@@ -6,35 +6,10 @@ import { pathUri, PptMedia } from "../core/ppt/media"
 import { PptOle } from "../core/ppt/ole"
 import { children, RecordCounter } from "../core/ppt/records"
 import { PptReport } from "../core/ppt/report"
-import { concat, container, record } from "./pptFixtures"
+import { concat, container, cString, record, u16, u32 } from "./pptFixtures"
 
 // Comments (§2.5.25), sounds and movies (§2.4.16, §2.10.4–§2.10.33) and embedded OLE objects (§2.10.27–§2.10.36) of a
 // PowerPoint 97–2003 deck, as their PresentationML parts and elements.
-
-function u16(value: number): Uint8Array {
-	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff)
-}
-
-function u32(value: number): Uint8Array {
-	const out = new Uint8Array(4)
-
-	new DataView(out.buffer).setUint32(0, value >>> 0, true)
-
-	return out
-}
-
-function utf16(text: string): Uint8Array {
-	const out = new Uint8Array(text.length * 2)
-
-	for (let k = 0; k < text.length; k++) {
-		out[2 * k] = text.charCodeAt(k) & 0xff
-		out[2 * k + 1] = text.charCodeAt(k) >>> 8
-	}
-
-	return out
-}
-
-const cString = (instance: number, text: string): Uint8Array => record(0x0fba, utf16(text), instance)
 
 function comment(author: string, initials: string, text: string, index: number, time: readonly number[], x: number, y: number): Uint8Array {
 	return container(0x2ee0, [

@@ -36,8 +36,8 @@ export interface SmartArtColorsEntry {
 	readonly nameKey: string
 }
 
-// In category order; ours first, so Insert ▸ SmartArt's defaults (the first layout, style and colours) are ours. The
-// test definitions stay registered, last.
+// In category order, so Insert ▸ SmartArt's defaults are the first layout, style and colours here. Only our generated
+// families are registered; the test definitions live with the tests.
 export const SMARTART_LAYOUTS: readonly SmartArtLayoutEntry[] = [
 	...LIST_LAYOUTS,
 	...PROCESS_LAYOUTS,

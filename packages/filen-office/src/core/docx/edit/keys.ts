@@ -127,18 +127,19 @@ const ARGUMENT_KEYS: readonly DocxKey[] = [
 	// Hanging Indent and Unhang, Word for Mac's too (Mod+T opens a browser tab).
 	{ id: "paragraph.hangingIndent", shortcut: "mod+t", desktop: true, run: command({ type: "paragraph.hangingIndent", direction: 1 }) },
 	{ id: "paragraph.unhang", shortcut: "mod+shift+t", desktop: true, run: command({ type: "paragraph.hangingIndent", direction: -1 }) },
-	// DATE and TIME fields: Alt+Shift+D and T, Word for Mac's Control+Shift+D and T (Option+Shift types a character).
+	// DATE and TIME fields: Alt+Shift+D and T, Word for Mac's Control+Shift+D and T (Option+Shift types a character), in
+	// the caret language's short date and time.
 	{
 		id: "insert.dateField",
 		shortcut: "alt+shift+d",
 		appleShortcut: "ctrl+shift+d",
-		run: command({ type: "insert.field", instruction: DATE_FIELD_CODE })
+		run: command({ type: "insert.field", instruction: DATE_FIELD_CODE, caretLanguage: true })
 	},
 	{
 		id: "insert.timeField",
 		shortcut: "alt+shift+t",
 		appleShortcut: "ctrl+shift+t",
-		run: command({ type: "insert.field", instruction: TIME_FIELD_CODE })
+		run: command({ type: "insert.field", instruction: TIME_FIELD_CODE, caretLanguage: true })
 	},
 	// Without a key of Word's: a section break starting on the next page, Layout's commonest.
 	{ id: "insert.sectionBreak", shortcut: "", run: command({ type: "insert.sectionBreak", kind: "nextPage" }) }

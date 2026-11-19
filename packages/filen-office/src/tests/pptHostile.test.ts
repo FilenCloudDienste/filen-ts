@@ -15,20 +15,12 @@ import { servePresentation } from "../dom/presentation/engine"
 import type { OpenInfo, PresentationOpenOptions } from "../dom/presentation/protocol"
 import { cryptoApiKeys, encryptionHeader } from "./docDecryptFixtures"
 import { loopback, LoopbackSession } from "./fixtures/presentation/loopback"
-import { buildPpt, concat, record, type FixtureShape } from "./pptFixtures"
+import { buildPpt, concat, record, u16, u32, type FixtureShape } from "./pptFixtures"
 import { buildPptx, sp, tree } from "./pptxFixtures"
 import { budget, cpuMs } from "./timing"
 
 // Hostile PowerPoint 97–2003 input bounded in CPU and memory: the persist directory, the BLIP store, decryption and
 // the style runs; and a ppt deck only shown, never edited or saved in place.
-
-function u32(value: number): Uint8Array {
-	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff)
-}
-
-function u16(value: number): Uint8Array {
-	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff)
-}
 
 // A PowerPoint Document stream of `edits` UserEditAtoms, edit k naming directories[k] (oldest first) at the stream's
 // start, the newest edit last.

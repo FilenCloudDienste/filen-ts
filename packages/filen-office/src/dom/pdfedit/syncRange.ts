@@ -108,7 +108,7 @@ export class SyncRangeLayout {
 		return Atomics.load(this.ctrl, this.slotWord(slot, SLOT_TICK))
 	}
 
-	// The slot holding `block` with an even generation, or -1.
+	// The slot whose block word is `block`, or -1 (the caller checks its generation).
 	find(block: number, hint: number): number {
 		if (hint >= 0 && hint < this.slots && this.blockOf(hint) === block) return hint
 
@@ -155,7 +155,8 @@ export interface SyncRangeLifetime {
 }
 
 export interface SyncRangeServeOptions {
-	// Ends the serving: pending and later requests are answered "closed" and the port closes.
+	// Ends the serving: the pending request is answered "closed", the buffer is latched aborted (later reads fail at
+	// once) and the port closes.
 	readonly lifetime: SyncRangeLifetime
 	// Blocks read ahead after a sequential request (0 turns it off).
 	readonly readAhead?: number
@@ -358,8 +359,12 @@ export function serveSyncRange(
 		}
 	}
 
+	// The current request answered, then the buffer latched aborted (as abortSyncRange): the closed port answers no
+	// later request, so the reader fails at once instead of waiting out its deadline.
 	const stop = (): void => {
 		answer(Atomics.load(ctrl, CTRL.reqSeq), RESP.closed)
+		Atomics.store(ctrl, CTRL.abort, 1)
+		Atomics.notify(ctrl, CTRL.respSeq)
 		port.close()
 	}
 

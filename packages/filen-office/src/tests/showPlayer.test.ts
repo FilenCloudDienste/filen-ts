@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { LayerState, TimegraphSource, Transition } from "../core/anim/model"
+import { compile, holdsAdvance, instantiate } from "../core/anim/timegraph"
 import { inRegion, transitionFrame } from "../core/anim/transitions"
 import { slideRef, type CustomShow } from "../core/presentation/model"
 import type { ShowLayer } from "../dom/presentation/protocol"
@@ -15,6 +16,7 @@ import {
 	showSequence
 } from "../react/presentation/show/timeline"
 import { transitionDurationMs, transitionStyles } from "../react/presentation/show/transitions"
+import { BUDGETS, TimingBuilder, animatedSlide, layersOf, shape } from "./animFixtures"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
 import { budget, cpuMs } from "./timing"
 
@@ -523,5 +525,34 @@ describe("show navigation", () => {
 		expect(advanceAt(after, { ...DEFAULT_SHOW_OPTIONS, useTimings: false }, 1000, 1500)).toBeUndefined()
 		expect(advanceAt({ ...after, advance: { onClick: true } }, DEFAULT_SHOW_OPTIONS, 1000, 1500)).toBeUndefined()
 		expect(advanceAt(after, DEFAULT_SHOW_OPTIONS, 1000, undefined)).toBeUndefined()
+	})
+
+	it("holds the timed advance while a finite effect plays or waits for its delay, never for an indefinite repeat", () => {
+		const b = new TimingBuilder()
+		const timing = b.root([
+			b.mainSeq([
+				b.click([
+					[
+						0,
+						[
+							b.spin(3, "clickEffect", 400, { repeatCount: "indefinite" }),
+							b.spin(4, "withEffect", 400, { repeatDur: "indefinite" })
+						]
+					],
+					[1000, [b.flyIn(5, "afterEffect", 500)]]
+				])
+			])
+		])
+		const instance = instantiate(compile(animatedSlide(timing, [shape(3), shape(4), shape(5)]), layersOf([3, 4, 5]), BUDGETS))
+
+		instance.fire({ kind: "slideBegin" }, 0)
+		instance.fire({ kind: "next" }, 0)
+
+		// The fly-in waits for its delay, then plays.
+		expect(holdsAdvance(instance, 500)).toBe(true)
+		expect(holdsAdvance(instance, 1200)).toBe(true)
+		// The spins go on, and hold nothing.
+		expect(holdsAdvance(instance, 1600)).toBe(false)
+		expect(holdsAdvance(instance, 60_000)).toBe(false)
 	})
 })

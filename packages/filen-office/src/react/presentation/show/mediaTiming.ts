@@ -5,7 +5,8 @@ import { BookmarkCursor, fadeGain, playWindow, type MediaTiming, type PlayWindow
 // rules): playback starts at the trimmed start and stops (or loops back) at the trimmed end, the volume follows the
 // fade, and each bookmark reached fires its trigger. The element is sampled once per animation frame while it plays
 // and never otherwise; a frame costs a few comparisons (the bookmark cursor walks only what was passed), so a
-// bookmark fires within the frame its time is reached.
+// bookmark fires within the frame its time is reached. A hidden page runs no frames while its media play on: there the
+// element's timeupdate (a few a second) does the frame's work instead, a step behind at most.
 
 export interface MediaTimingHooks {
 	// A bookmark reached while playing (its name).
@@ -76,6 +77,9 @@ export class MediaTimingDriver {
 	private readonly cursor: BookmarkCursor
 	private window: PlayWindow
 	private frame = -1
+	// Frames run, and how many had run at the last timeupdate: none since means the page is not running frames.
+	private framesRun = 0
+	private framesAtUpdate = 0
 	// The medium position the last frame saw (ms); bookmarks between it and the next are crossed.
 	private lastMs = -1
 	private disposed = false
@@ -114,6 +118,11 @@ export class MediaTimingDriver {
 		})
 		this.listen("ended", () => {
 			this.stop()
+		})
+		this.listen("timeupdate", () => {
+			if (this.framesRun === this.framesAtUpdate) this.tick()
+
+			this.framesAtUpdate = this.framesRun
 		})
 		this.applyGain(this.window.startMs)
 	}
@@ -217,6 +226,7 @@ export class MediaTimingDriver {
 
 		this.frame = this.frames.request(() => {
 			this.frame = -1
+			this.framesRun++
 
 			if (this.tick()) this.schedule()
 		})

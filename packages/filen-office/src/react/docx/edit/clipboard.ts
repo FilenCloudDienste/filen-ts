@@ -17,6 +17,7 @@ import { sourceCopies } from "../../../core/docx/edit/session"
 import { RevisionView, revisionHidden } from "../../../core/docx/model/kinds"
 import { shownFieldText } from "../../../core/docx/layout/fields"
 import { docxComments } from "../../../core/docx/review/comments"
+import { symbolTable, symbolToUnicode } from "../../../core/fonts/index"
 
 // The clipboard of the editing views (the paged editor's input sink, the reflowed view): what a copy writes
 // (structure and basic formatting as HTML, and text as Word copies it), how a paste is read (HTML rebuilt from
@@ -25,10 +26,22 @@ import { docxComments } from "../../../core/docx/review/comments"
 
 const nodes = docxSchema.nodes
 
+function symbolCode(char: unknown): char is number {
+	return typeof char === "number" && Number.isInteger(char) && char > 0 && char <= 0x10ffff
+}
+
+// A w:sym as the character it shows: a symbol font's code (Symbol, Wingdings...) as the Unicode character the
+// font draws there, any other code as itself. What the views show, a copy writes and assistive technology reads.
 export function symbolText(node: Node): string {
 	const char = node.attrs["char"]
+	const font = node.attrs["font"]
 
-	return typeof char === "number" && char > 0 && char <= 0x10ffff ? String.fromCodePoint(char) : ""
+	if (!symbolCode(char)) return ""
+
+	const table = typeof font === "string" ? symbolTable(font) : undefined
+	const mapped = table === undefined ? 0 : symbolToUnicode(table, char)
+
+	return String.fromCodePoint(mapped > 0 ? mapped : char)
 }
 
 export function attrText(name: string): (node: Node) => string {
@@ -60,7 +73,16 @@ export function clipboardSerializer(): DOMSerializer {
 		tab: text(() => "\t"),
 		break: () => ["br"],
 		hyphen: text(node => (node.attrs["soft"] === true ? "" : "\u2011")),
-		symbol: text(symbolText),
+		// The character shown, and the code and font that paste it back as the symbol.
+		symbol: node => {
+			const font = node.attrs["font"]
+
+			return [
+				"span",
+				{ [PASTE_SYMBOL]: String(node.attrs["char"]), ...(typeof font === "string" ? { [PASTE_SYMBOL_FONT]: font } : {}) },
+				symbolText(node)
+			]
+		},
 		note_ref: empty,
 		comment_ref: empty,
 		drawing: empty,
@@ -95,6 +117,11 @@ export function clipboardParser(): DOMParser {
 		{ tag: "pre", node: "paragraph", preserveWhitespace: true },
 		{ tag: "br", node: "break" },
 		{ tag: `span[${PASTE_TAB}]`, node: "tab" },
+		{
+			tag: `span[${PASTE_SYMBOL}]`,
+			node: "symbol",
+			getAttrs: dom => ({ char: Number(dom.getAttribute(PASTE_SYMBOL)), font: dom.getAttribute(PASTE_SYMBOL_FONT) })
+		},
 		{ tag: "b", mark: "bold", attrs: { value: true, cs: null } },
 		{ tag: "i", mark: "italic", attrs: { value: true, cs: null } },
 		{ tag: "u", mark: "underline" },
@@ -103,7 +130,8 @@ export function clipboardParser(): DOMParser {
 }
 
 // Pasted HTML is rebuilt from its text and basic formatting before ProseMirror reads it: a flat list of <p>
-// (or <pre>) blocks holding text, <br>, tabs and b/i/u/s only, without attributes; text is escaped. Content
+// (or <pre>) blocks holding text, <br>, tabs, this editor's symbols (by code and font) and b/i/u/s only, without
+// other attributes; text is escaped. Content
 // that is not text is dropped (scripts, styles, embedded and replaced content). A table becomes a paragraph
 // per row, its cells separated by tabs and a cell's paragraphs by line breaks, as Word pastes a table as text
 // (and as a copy's plain text has it): the editor cannot insert a table. Nesting is resolved here, never by
@@ -111,6 +139,10 @@ export function clipboardParser(): DOMParser {
 // drop the rest. The source is parsed by DOMParser, which never runs scripts or loads anything, so what
 // ProseMirror parses next references nothing; ProseMirror's own slice data (data-pm-slice) goes too.
 const PASTE_TAB = "data-fo-tab"
+// A symbol of this editor's copy: its code (decimal) and font, kept so it pastes back as the symbol.
+const PASTE_SYMBOL = "data-fo-sym"
+const PASTE_SYMBOL_FONT = "data-fo-sym-font"
+const MAX_SYMBOL_FONT = 64
 const PASTE_DROPPED = new Set([
 	"script",
 	"style",
@@ -192,7 +224,7 @@ const PASTE_BLOCKS = new Set([
 ])
 // Blocks that are a paragraph of their own even when empty.
 const PASTE_PARAGRAPHS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "dd", "pre"])
-const ESCAPED: Readonly<Record<string, string>> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" }
+const ESCAPED: Readonly<Record<string, string>> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }
 // Word's tab characters in its HTML (`<span style='mso-tab-count:2'>`).
 const MSO_TABS = /mso-tab-count\s*:\s*(\d+)/i
 const MARK_TAGS = ["b", "i", "u", "s"] as const
@@ -305,6 +337,8 @@ class PasteBlocks {
 				this.table(child, inner)
 			} else if (PASTE_BLOCKS.has(tag)) {
 				this.block(child, tag, inner)
+			} else if (tag === "span" && this.symbol(child, inner)) {
+				this.content = true
 			} else {
 				const tabs = MSO_TABS.exec(child.getAttribute?.("style") ?? "")
 
@@ -316,6 +350,24 @@ class PasteBlocks {
 				}
 			}
 		}
+	}
+
+	// A symbol this editor copied, rebuilt from its code and font alone (its text is the character shown); false for
+	// any other span.
+	private symbol(node: ParsedNode, marks: PasteMarks): boolean {
+		const code = node.getAttribute?.(PASTE_SYMBOL) ?? null
+
+		if (code === null || !/^[0-9]{1,7}$/.test(code) || !symbolCode(Number(code))) return false
+
+		const font = node.getAttribute?.(PASTE_SYMBOL_FONT) ?? null
+		const fontAttr =
+			font === null || font.length === 0 || font.length > MAX_SYMBOL_FONT
+				? ""
+				: ` ${PASTE_SYMBOL_FONT}="${font.replace(/[&<>"]/g, c => ESCAPED[c] ?? c)}"`
+
+		this.inline += marked(`<span ${PASTE_SYMBOL}="${code}"${fontAttr}></span>`, marks)
+
+		return true
 	}
 
 	// What is left once the source is read.

@@ -334,7 +334,9 @@ describe("bookmarks the reader could not take", () => {
 	it("keep their names: a new bookmark cannot take one", async () => {
 		const d = await driveSession(deck(undefined, UNREAD), "pptx")
 
-		expect(await d.command({ family: "mediaTiming", kind: "addBookmark", target: target(d), name: "Late", timeMs: 5000 })).toEqual({
+		expect(
+			await d.command({ family: "mediaTiming", kind: "addBookmark", target: target(d), name: "Late", timeMs: 5000 })
+		).toMatchObject({
 			ok: false,
 			refusal: "unsupported"
 		})

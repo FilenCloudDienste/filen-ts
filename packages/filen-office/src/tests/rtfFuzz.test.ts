@@ -6,6 +6,7 @@ import { bytesSource } from "@filen/office/core/opc"
 import { readRtf } from "../core/rtf/index"
 import { CORPUS_DIR } from "./corpusDir"
 import { budget } from "./timing"
+import { latin1 } from "./rtfLatin1"
 
 // Mutated RTF (control words, parameters, braces, \bin lengths, hex data, truncation, splices): the reader
 // answers each with a document or a refusal, never a throw, within a time bound, and the docx engine opens
@@ -39,8 +40,6 @@ class Random {
 		return items[this.below(items.length)] as T
 	}
 }
-
-const latin1 = (text: string): Uint8Array => Uint8Array.from(text, character => character.charCodeAt(0) & 0xff)
 
 const SYNTHETIC = [
 	"{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fcharset0 Arial;}{\\f1\\fcharset2 Symbol;}{\\f2\\fcharset128 MS Mincho;}}{\\colortbl;\\red255\\green0\\blue0;}" +

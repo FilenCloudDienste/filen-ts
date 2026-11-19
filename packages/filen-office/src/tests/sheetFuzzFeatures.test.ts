@@ -6,6 +6,7 @@ import type { SheetCommandResult } from "../core/sheet/protocol"
 import { compareRecords, modelRecord, readSaved } from "./fuzz/sheet/compare"
 import { fixtureBytes } from "./fuzz/sheet/fixtures"
 import { DEFAULT_SEQUENCE, runSequence } from "./fuzz/sheet/harness"
+import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // The sheet fuzz reads back the worksheet sections its ops edit beyond cells (data validations, the autoFilter,
 // hyperlinks), and reads its source once per sequence.
@@ -27,7 +28,6 @@ vi.mock("./fuzz/sheet/compare", async original => {
 	}
 })
 
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 const RULE = {
 	type: "whole",
 	operator: "between",

@@ -164,13 +164,12 @@ describe("document protection: forms", () => {
 		expect(session.execute({ type: "control.check" })).toBe(true)
 		expect(session.state.doc.textContent).toContain("☒ I agree")
 
-		const xml = decoder.decode(
-			unzipSync((await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })).bytes as Uint8Array)[
-				"word/settings.xml"
-			] ?? new Uint8Array()
-		)
+		const settings = unzipSync((await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })).bytes as Uint8Array)[
+			"word/settings.xml"
+		]
 
-		expect(xml === "" || xml.includes(protection("forms"))).toBe(true)
+		expect(settings).toBeDefined()
+		expect(decoder.decode(settings)).toContain(protection("forms"))
 	})
 
 	it("opens ranges an editing permission gives everyone, not one user's", async () => {
@@ -340,6 +339,51 @@ describe("document protection: review fixes", () => {
 
 		expect(type(session, "X", find(session, "Free") + 1).applied).toBe(true)
 		expect(type(session, "X", find(session, "Form") + 1).applied).toBe(false)
+	})
+
+	// A custom XML wrapper is kept as a locked block holding the paragraph that ends its section.
+	const lockedBreak = (formProt: string): string =>
+		`<w:customXml w:element="part"><w:p><w:pPr><w:sectPr>${formProt}<w:type w:val="continuous"/></w:sectPr></w:pPr><w:r><w:t>Held</w:t></w:r></w:p></w:customXml>`
+
+	it("ends a section at a locked block holding its break", async () => {
+		const protectedFirst = await open({
+			body: p("First section") + lockedBreak("") + p("Second section") + '<w:sectPr><w:formProt w:val="0"/></w:sectPr>',
+			settings: protection("forms")
+		})
+		let session = protectedFirst.session
+
+		expect(session.state.doc.child(1).type).toBe(docxSchema.nodes.locked_block)
+		expect(type(session, "X", find(session, "First") + 1).applied).toBe(false)
+		expect(type(session, "X", find(session, "Second") + 1).applied).toBe(true)
+
+		session = (
+			await open({
+				body:
+					p("First section") +
+					lockedBreak('<w:formProt w:val="0"/>') +
+					p("Second section") +
+					"<w:sectPr><w:formProt/></w:sectPr>",
+				settings: protection("forms")
+			})
+		).session
+		expect(type(session, "X", find(session, "First") + 1).applied).toBe(true)
+		expect(type(session, "X", find(session, "Second") + 1).applied).toBe(false)
+	})
+
+	it("ends no section at a locked table holding a break in a cell", async () => {
+		const cell = '<w:p><w:pPr><w:sectPr><w:type w:val="continuous"/></w:sectPr></w:pPr><w:r><w:t>Cell</w:t></w:r></w:p>'
+		const { session } = await open({
+			body:
+				p("Before table") +
+				`<w:customXml w:element="part"><w:tbl><w:tr><w:tc>${cell}</w:tc></w:tr></w:tbl></w:customXml>` +
+				p("After table") +
+				'<w:sectPr><w:formProt w:val="0"/></w:sectPr>',
+			settings: protection("forms")
+		})
+
+		expect(session.state.doc.child(1).type).toBe(docxSchema.nodes.locked_block)
+		expect(type(session, "X", find(session, "Before") + 1).applied).toBe(true)
+		expect(type(session, "X", find(session, "After") + 1).applied).toBe(true)
 	})
 
 	it("refuses direct formatting under enforced formatting restrictions", async () => {

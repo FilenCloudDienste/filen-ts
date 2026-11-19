@@ -8,13 +8,16 @@ import {
 	serveSyncRange,
 	type SyncRangePort
 } from "../../dom/pdfedit/syncRange"
+import { SyncRangeReader } from "../../dom/pdfedit/stream"
 
 // The server side of the sync range bridge, driven the way a reader drives it (request words, then a wake message)
 // without blocking this thread.
 
 const BLOCK = 1024
 
-function fakePort(): SyncRangePort & { send(data: unknown): void; closed: boolean } {
+// `dropAfterClose`: a closed port delivers nothing more (as a real MessagePort); otherwise a message already in flight
+// still arrives.
+function fakePort(dropAfterClose: boolean): SyncRangePort & { send(data: unknown): void; closed: boolean } {
 	const listeners: ((event: { readonly data: unknown }) => void)[] = []
 	const port = {
 		closed: false,
@@ -26,6 +29,8 @@ function fakePort(): SyncRangePort & { send(data: unknown): void; closed: boolea
 			port.closed = true
 		},
 		send: (data: unknown) => {
+			if (dropAfterClose && port.closed) return
+
 			for (const listener of listeners) listener({ data })
 		}
 	}
@@ -33,10 +38,10 @@ function fakePort(): SyncRangePort & { send(data: unknown): void; closed: boolea
 	return port
 }
 
-function setup(length: number, slots = 16, readAhead = 3) {
+function setup(length: number, slots = 16, readAhead = 3, dropAfterClose = false) {
 	const buffer = createSyncRangeBuffer(slots, BLOCK)
 	const layout = new SyncRangeLayout(buffer)
-	const port = fakePort()
+	const port = fakePort(dropAfterClose)
 	const lifetime = new AbortController()
 	const bytes = Uint8Array.from({ length }, (_, index) => (index * 7 + 3) & 0xff)
 	const reads: number[] = []
@@ -64,6 +69,9 @@ function setup(length: number, slots = 16, readAhead = 3) {
 		for (let spin = 0; spin < 1000 && Atomics.load(layout.ctrl, CTRL.respSeq) !== seq; spin++)
 			await new Promise(resolve => setTimeout(resolve, 1))
 
+		// A status left from an earlier request must not pass for this one's answer.
+		if (Atomics.load(layout.ctrl, CTRL.respSeq) !== seq) throw new Error("request not answered")
+
 		return Atomics.load(layout.ctrl, CTRL.respStatus)
 	}
 	const holds = (block: number): boolean => {
@@ -77,7 +85,7 @@ function setup(length: number, slots = 16, readAhead = 3) {
 		return layout.data.subarray(start, start + expected.length).every((byte, index) => byte === expected[index])
 	}
 
-	return { request, holds, reads, stats, lifetime, port }
+	return { request, holds, reads, stats, lifetime, port, buffer, length }
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
@@ -127,5 +135,30 @@ describe("serveSyncRange", () => {
 		server.lifetime.abort()
 		expect(server.port.closed).toBe(true)
 		expect(await server.request(0, 1)).toBe(RESP.closed)
+	})
+
+	it("latches the buffer when its lifetime ends, so a reader asking later fails at once and stays closed", () => {
+		const server = setup(BLOCK * 4, 16, 3, true)
+		const reader = new SyncRangeReader(
+			server.buffer,
+			{
+				postMessage: message => {
+					server.port.send(message)
+				}
+			},
+			server.length,
+			{ deadlineMs: 2000, now: () => performance.now(), sliceMs: 50 }
+		)
+
+		server.lifetime.abort()
+		expect(server.port.closed).toBe(true)
+
+		const started = performance.now()
+
+		expect(reader.read(new Uint8Array(16), 0, 16, 0)).toBe(-1)
+		expect(performance.now() - started).toBeLessThan(500)
+		expect(reader.failure).toBe("aborted")
+		expect(reader.read(new Uint8Array(16), 0, 16, 0)).toBe(-1)
+		expect(reader.failure).toBe("closed")
 	})
 })

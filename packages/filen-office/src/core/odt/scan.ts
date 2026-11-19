@@ -1,3 +1,4 @@
+import { isXmlNameEnd } from "../xml/bytes"
 import { Namespaces, assertWellFormed, parseXml, type XmlDocument } from "../xml/index"
 
 // content.xml's body cut into its top-level blocks (the children of office:text) without ever holding the
@@ -54,14 +55,10 @@ function indexOfAscii(bytes: Uint8Array, ascii: string, from: number, to: number
 	return -1
 }
 
-function isNameEnd(byte: number | undefined): boolean {
-	return byte === undefined || byte === 32 || byte === 9 || byte === 10 || byte === 13 || byte === GT || byte === SLASH
-}
-
 function qualifiedName(tag: Uint8Array): Uint8Array {
 	let end = 1
 
-	while (!isNameEnd(tag[end])) end++
+	while (!isXmlNameEnd(tag[end])) end++
 
 	return tag.subarray(1, end)
 }

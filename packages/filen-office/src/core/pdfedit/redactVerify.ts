@@ -19,6 +19,9 @@ export interface RedactionMark {
 	readonly kind: RedactionMarkKind
 	readonly rect: RedactRect
 	readonly quads: readonly RedactQuad[]
+	// Text marks only: the characters under the mark as the page's text reads them, when the reader asked for them
+	// (redactMarks with `text`); empty when the page draws none there (a scan).
+	readonly text?: string
 }
 
 export interface RedactionRegion {

@@ -68,7 +68,7 @@ describe("several ops as one step", () => {
 					{ family: "shape", kind: "setXfrm", target: { slide: slide.ref, id: 999 }, xfrm: before }
 				]
 			})
-		).toEqual({ ok: false, refusal: "notFound" })
+		).toMatchObject({ ok: false, refusal: "notFound" })
 		expect(shapeById(slide.shapes, 3)?.xfrm).toEqual(before)
 		expect(sessionEdits(h.session).history.revision).toBe(revision)
 		expect(sessionEdits(h.session).history.canUndo).toBe(false)

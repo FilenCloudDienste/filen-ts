@@ -24,6 +24,7 @@ import {
 import { resolvePath, structuralPath, visitSources } from "../../core/pptx/sourcePath"
 import type { OdpSaveSource } from "../../core/odp/write/splice"
 import { IN_MEMORY_LIMIT } from "../../core/pptx/write/save"
+import { sealInto } from "../../core/pptx/write/seal"
 import type { PptxSaveOptions, PptxSnapshot, PptxSource, SpliceWriter } from "../../core/pptx/write/types"
 import type { XmlDocument } from "../../core/xml/index"
 import type { CallContext, EngineSession, OpenedPackage } from "./engine"
@@ -877,12 +878,14 @@ export async function saveSession(
 		let upload = zip
 
 		if (seal !== undefined && zip !== undefined) {
-			const sealed = await seal(joined(zip), deck, context.slicing)
+			const sealed = await sealInto(
+				joined(zip),
+				bytes => seal(bytes, deck, context.slicing),
+				writer,
+				file => progressOf(session, writer, file.length)
+			)
 
 			upload = [sealed]
-			progressOf(session, writer, sealed.length)
-			await writer.write(sealed)
-			await writer.close()
 		}
 
 		const written = writtenNames(snapshot)

@@ -1,4 +1,4 @@
-export { isXlsxSaveFailure, XlsxWriteError, type XlsxSaveFailure, type XlsxSaveRefusal } from "./failure"
+export { XlsxWriteError, type XlsxSaveFailure, type XlsxSaveRefusal } from "./failure"
 export { STRICT, TRANSITIONAL, namespacesOf, relationshipType, type SpreadsheetNamespaces } from "./namespaces"
 export {
 	saveXlsx,

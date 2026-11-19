@@ -2,11 +2,11 @@ import { existsSync, readFileSync } from "node:fs"
 import { MessageChannel, type MessagePort } from "node:worker_threads"
 import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult, SheetFileKind, SheetSessionApi } from "../core/sheet/protocol"
+import { SHEET_MAX_ROWS, type SheetFileKind, type SheetSessionApi } from "../core/sheet/protocol"
 import { openTextSession } from "../core/sheet/text"
 import { sheetWorkerHost, type SheetWorkerLike } from "../dom/sheet/client"
 import { serveTextWorker } from "../dom/sheet/text"
-import { cells, firstTile, numeric, savedBytes, tileEntry, tileTexts } from "./sheetSessionFixtures"
+import { cells, firstTile, numeric, savedBytes, tileEntry, tileTexts, changeOf } from "./sheetSessionFixtures"
 import { equalBytes } from "./xlsxWriteFixtures"
 
 // CSV, TSV and .tab files as sessions: text stored as typed, the file written back in its own encoding, separator
@@ -19,12 +19,6 @@ async function open(bytes: Uint8Array, kind: SheetFileKind = "csv"): Promise<She
 	if (opened.kind !== "opened") throw new Error(opened.kind)
 
 	return opened.session
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(result.refusal.reason)
-
-	return result.change
 }
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
@@ -88,6 +82,23 @@ describe("text sessions", () => {
 		changeOf(await session.undo())
 		changeOf(await session.undo())
 		expect(equalBytes(await savedBytes(session), bytes)).toBe(true)
+		session.close()
+	})
+
+	it("refuses a row insert past a sheet's rows, which would reopen view-only, and leaves the file as it is", async () => {
+		const bytes = utf8("a\n".repeat(SHEET_MAX_ROWS - 1))
+		const session = await open(bytes)
+		const over = await session.command({ type: "axis.insert", sheet: 0, axis: "rows", at: 0, count: 2 })
+
+		expect(over.ok ? null : over.refusal.reason).toBe("tooLarge")
+		expect(equalBytes(await savedBytes(session), bytes)).toBe(true)
+
+		changeOf(await session.command({ type: "axis.insert", sheet: 0, axis: "rows", at: 0, count: 1 }))
+		expect(new TextDecoder().decode(await savedBytes(session)).length).toBe(bytes.length + 1)
+		changeOf(await session.undo())
+		expect(equalBytes(await savedBytes(session), bytes)).toBe(true)
+		changeOf(await session.redo())
+		expect(new TextDecoder().decode(await savedBytes(session)).length).toBe(bytes.length + 1)
 		session.close()
 	})
 

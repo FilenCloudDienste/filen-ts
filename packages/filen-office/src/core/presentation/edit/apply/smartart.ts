@@ -1,3 +1,4 @@
+import { insertedPartName } from "../../inserted"
 import { D, drawingReader } from "../../../drawingml/reader"
 import {
 	DIAGRAM_CONTENT_TYPES,
@@ -19,7 +20,6 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import { findShape } from "../changes"
 import { matcherOf } from "../find"
 import { isRawPart, type DeckOp, type RawPart, type SmartArtDefRef, type SmartArtOp } from "../ops"
-import { INSERTED_IMAGE_ID } from "../../../smartart/emit"
 import { imageWithinBudget } from "../../../opc/mediaPolicy"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import { registerInsertedImage } from "./picture"
@@ -51,22 +51,8 @@ export interface SmartArtSourceReading {
 	diagramRelationshipTarget?(part: string, id: string): string | undefined
 }
 
-// Find & Replace in a diagram (FIND_IN_SMARTART's node index and offsets), written out so this family compiles before
-// and after the op union carries it.
-interface SmartArtReplace {
-	readonly family: "smartart"
-	readonly kind: "replace"
-	readonly target: ShapeRef
-	readonly query: string
-	readonly replacement: string
-	readonly caseSensitive?: boolean
-	readonly wholeWord?: boolean
-	readonly match?: readonly [number, number, number]
-}
-
 type SmartArtSetPicture = Extract<SmartArtOp, { readonly kind: "setPicture" }>
 
-type Op = SmartArtOp | SmartArtReplace
 type DiagramFrame = Extract<FrameRef, { kind: "smartart" }>
 
 // The names the session holds parts under (the writer's raw sources).
@@ -107,7 +93,7 @@ function* diagramFrames(shapes: readonly ShapeNode[], depth = 0): Generator<Diag
 	}
 }
 
-function definitionKind(op: Op): "layout" | "style" | "colors" | undefined {
+function definitionKind(op: SmartArtOp): "layout" | "style" | "colors" | undefined {
 	switch (op.kind) {
 		case "insert":
 		case "setLayout":
@@ -134,7 +120,7 @@ export function deckDefinitionType(op: DeckOp): string | undefined {
 
 // The parts an op reads: the target frame's, a restore's, and for a definition the deck embeds, every parsed
 // diagram's part of that kind (the engine reads them before the op applies).
-export function diagramPartsToRead(deck: Deck, op: Op): string[] {
+export function diagramPartsToRead(deck: Deck, op: SmartArtOp): string[] {
 	const out = new Set<string>()
 
 	if (op.kind !== "insert") {
@@ -535,7 +521,12 @@ function editing(deck: Deck, target: ShapeRef, context: ApplyContext): Editing |
 }
 
 // An edit of the data part: the frame names the new data with no drawing.
-function editData(deck: Deck, op: Exclude<Op, { kind: "insert" }>, edit: DiagramEdit, context: ApplyContext): ApplyResult<SmartArtOp> {
+function editData(
+	deck: Deck,
+	op: Exclude<SmartArtOp, { kind: "insert" }>,
+	edit: DiagramEdit,
+	context: ApplyContext
+): ApplyResult<SmartArtOp> {
 	const at = editing(deck, op.target, context)
 
 	if (isRefused(at)) return at
@@ -543,7 +534,7 @@ function editData(deck: Deck, op: Exclude<Op, { kind: "insert" }>, edit: Diagram
 	const result = editDiagramData(at.data, edit)
 
 	if (isRefused(result)) return result
-	if (result.kind === "unchanged") return { kind: "applied", inverse: NO_INVERSE, op: op as SmartArtOp }
+	if (result.kind === "unchanged") return { kind: "applied", inverse: NO_INVERSE, op }
 
 	const name = hold(at.reading, result.bytes)
 
@@ -558,7 +549,7 @@ function editData(deck: Deck, op: Exclude<Op, { kind: "insert" }>, edit: Diagram
 
 	const applied = op.kind === "addNode" && result.id !== undefined && op.id !== result.id ? { ...op, id: result.id } : op
 
-	return { kind: "applied", inverse: inverseOf(op.target, at.back), op: applied as SmartArtOp }
+	return { kind: "applied", inverse: inverseOf(op.target, at.back), op: applied }
 }
 
 function setDefinition(
@@ -679,7 +670,7 @@ function setPicture(deck: Deck, op: SmartArtSetPicture, context: ApplyContext): 
 		kind: "setPicture",
 		node: op.node,
 		placeholder: op.placeholder,
-		embed: `${INSERTED_IMAGE_ID}${String(inserted)}`,
+		embed: insertedPartName(inserted),
 		...(op.crop === undefined ? {} : { crop: op.crop })
 	})
 
@@ -905,7 +896,7 @@ function insert(deck: Deck, op: SmartArtOp & { readonly kind: "insert" }, contex
 	return { kind: "applied", inverse: result.inverse, op: applied }
 }
 
-function apply(deck: Deck, op: Op, context: ApplyContext): ApplyResult<SmartArtOp> {
+function apply(deck: Deck, op: SmartArtOp, context: ApplyContext): ApplyResult<SmartArtOp> {
 	switch (op.kind) {
 		case "insert":
 			return insert(deck, op, context)
@@ -954,15 +945,15 @@ function apply(deck: Deck, op: Op, context: ApplyContext): ApplyResult<SmartArtO
 	}
 }
 
-function touches(op: Op): readonly Touch[] {
+function touches(op: SmartArtOp): readonly Touch[] {
 	if (op.kind === "insert") return applyShape.touches({ family: "shape", kind: "insert", slide: op.slide, shape: op.shape })
 
 	return [{ kind: "shape", slide: op.target.slide, shape: op.target.id, dirt: { kind: "node" } }]
 }
 
 export const applySmartArt: ApplyFamily<SmartArtOp> = {
-	apply: (deck, op, context) => apply(deck, op, context),
-	touches: op => touches(op)
+	apply,
+	touches
 }
 
 // The parts a step's diagram ops read (a batch's members each), for the engine's prepare: a duplicate reads every part

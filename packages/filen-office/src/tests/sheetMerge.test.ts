@@ -1,18 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { STYLES, parts } from "./xlsxWriteFixtures"
-import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { firstTile, openFixture, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
 
 // Cells merged and unmerged: the value-loss refusal, what a merge keeps, merge and centre, merge across, and the
 // typed refusals.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
 
 const SHEET = {
 	sheets: [

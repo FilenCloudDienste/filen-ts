@@ -1,4 +1,4 @@
-import { readElement, type OdfElement, type OdfProperties } from "../../odf/index"
+import { OdfNs, readElement, type OdfElement, type OdfProperties } from "../../odf/index"
 import { Namespaces, encodeUtf8, parseXml } from "../../xml/index"
 
 // LibreOffice 7.5's own presentation styles of a master page that defines none: what it gives that master's title,
@@ -71,9 +71,7 @@ const MARKUP: Readonly<Record<string, string>> = {
 	)
 }
 
-const SCOPE =
-	'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" ' +
-	'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"'
+const SCOPE = (["style", "fo", "draw", "text"] as const).map(prefix => `xmlns:${prefix}="${OdfNs[prefix]}"`).join(" ")
 
 let parsed: Map<string, ReadonlyMap<string, OdfProperties>> | undefined
 

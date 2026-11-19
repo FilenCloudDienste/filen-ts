@@ -1,3 +1,4 @@
+import { INSERTED_PREFIX } from "../../presentation/inserted"
 import { digestOf, sameDigest } from "../../presentation/edit/changes"
 import type {
 	Action,
@@ -297,7 +298,7 @@ function shapeDiffers(expected: ShapeNode, read: ShapeNode, m: Affine, readM: Af
 
 	// A medium the session inserted: what it is (audio or video, linked or not), not what names it (registry ids in the
 	// session, entries once written; the reader takes its type from the file name).
-	const inserted = expected.media?.part?.startsWith("inserted:") === true
+	const inserted = expected.media?.part?.startsWith(INSERTED_PREFIX) === true
 	const mediaMeaning = (media: MediaRef | undefined): unknown =>
 		media === undefined || !inserted ? media : { kind: media.kind, linked: media.external !== undefined }
 	const frameMeaning = (frame: FrameRef | undefined): unknown =>

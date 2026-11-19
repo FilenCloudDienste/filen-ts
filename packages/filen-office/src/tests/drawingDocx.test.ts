@@ -35,6 +35,43 @@ function pic(embed: string): string {
 }
 
 describe("docx drawing bridge", () => {
+	it("draws an unnamed chart series in the texts the host opened the document with", async () => {
+		const unnamed = CHART.replace("<c:tx><c:v>Sales</c:v></c:tx>", "").replace(
+			"</c:plotArea>",
+			'</c:plotArea><c:legend><c:legendPos val="r"/></c:legend>'
+		)
+		const model = await modelOf({
+			body: `<w:p>${inline(CHART_URI, '<c:chart r:id="rId12"/>', 3048000, 1905000)}</w:p>`,
+			relationships: [{ id: "rId12", type: "chart", target: "charts/chart1.xml" }],
+			parts: [
+				{
+					name: "word/charts/chart1.xml",
+					contentType: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
+					data: unnamed
+				}
+			]
+		})
+		const shown = async (bridge: DocxDrawings): Promise<string> => {
+			const info = model.drawings[0]
+			const result = info === undefined ? undefined : await bridge.drawing(info)
+
+			if (result?.kind !== "drawing") throw new Error("the chart converts")
+
+			return JSON.stringify(result.list.texts)
+		}
+
+		expect(await shown(await DocxDrawings.open(model))).toContain("Series1")
+
+		const german = await shown(
+			await DocxDrawings.open(model, {
+				chartText: { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" }
+			})
+		)
+
+		expect(german).toContain("Datenreihe1")
+		expect(german).not.toContain("Series1")
+	})
+
 	it("converts pictures, shapes with text boxes, charts, VML and equations of a document", async () => {
 		const model = await modelOf({
 			body:

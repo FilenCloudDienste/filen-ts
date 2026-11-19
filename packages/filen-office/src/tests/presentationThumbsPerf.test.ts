@@ -134,6 +134,7 @@ describe.skipIf(!existsSync(DECK))("presentationThumbsPerf", () => {
 				s: 1,
 				deck: opened.deck,
 				package: opened.package,
+				options: { format: "pptx", fileName: "deck.pptx" },
 				emit: (event: PresentationEvent) => events.push(event),
 				onClose: (listener: () => void) => closers.push(listener)
 			} as unknown as EngineSession

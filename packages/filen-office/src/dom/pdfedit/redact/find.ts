@@ -4,9 +4,12 @@ import {
 	isSearchableTerm,
 	matchPreset,
 	matchTerm,
+	quadBounds,
 	type RedactionFinding,
+	type RedactionMark,
 	type RedactionQuery,
 	type RedactQuad,
+	type RedactRect,
 	type TextMatch
 } from "../../../core/pdfedit/redactVerify"
 import { markText } from "./marks"
@@ -85,6 +88,46 @@ export function matchQuads(text: PageText, match: TextMatch): RedactQuad[] {
 	if (current !== null) out.push(current)
 
 	return out
+}
+
+function centreIn(box: RedactRect, bounds: readonly RedactRect[]): boolean {
+	const x = (box[0] + box[2]) / 2
+	const y = (box[1] + box[3]) / 2
+
+	return bounds.some(rect => rect[0] <= x && x <= rect[2] && rect[1] <= y && y <= rect[3])
+}
+
+// The characters whose centre lies in one of `bounds`, in reading order; a skipped stretch reads as one space.
+function coveredText(text: PageText, bounds: readonly RedactRect[]): string {
+	let out = ""
+	let gap = false
+
+	for (let index = 0; index < text.text.length; index++) {
+		const quad = text.quads[index]
+
+		if (quad === null || quad === undefined || !centreIn(quadBounds(quad), bounds)) {
+			gap = out.length > 0
+
+			continue
+		}
+
+		if (gap) out += " "
+
+		gap = false
+		out += text.text[index]
+	}
+
+	return out.replace(/\s+/gu, " ").trim()
+}
+
+// `marks` of one page with the text of each text mark filled in (RedactionMark.text), from one structured-text
+// pass made only when the page has a text mark. Read-only.
+export function withMarkedText(page: Mupdf.PDFPage, marks: readonly RedactionMark[]): readonly RedactionMark[] {
+	if (!marks.some(mark => mark.kind === "text")) return marks
+
+	const text = pageText(page)
+
+	return marks.map(mark => (mark.kind === "text" ? { ...mark, text: coveredText(text, mark.quads.map(quadBounds)) } : mark))
 }
 
 // Every finding on the given pages (all pages when omitted), page by page in reading order. Read-only.

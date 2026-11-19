@@ -139,9 +139,7 @@ const WRAPS: readonly (readonly [string, WrapType])[] = [
 ]
 
 function onOffAttribute(reader: PartReader, node: number, name: string): boolean {
-	const value = reader.attr(node, Ns.None, name)
-
-	return value === "1" || value === "true" || value === "on"
+	return reader.flag(node, Ns.None, name)
 }
 
 function anchor(reader: PartReader, frame: number): AnchorInfo {

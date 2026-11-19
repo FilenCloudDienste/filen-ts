@@ -696,7 +696,10 @@ export function PresentationTextEditor({
 			scheduleAlign()
 		}
 
-		// Pointer: positions come from the painted layout, never from the sink's own text.
+		// Pointer: positions come from the painted layout, never from the sink's own text. The mouse selects through its
+		// mouse events (their `detail` counts the double and triple clicks); a finger or a pen drags a selection through
+		// pointer events captured on the box, whose taps still arrive as compatibility mouse events and count clicks there.
+		// Over the open body (its box takes no touch panning) a finger selects text instead of scrolling or zooming the page.
 		const pagePoint = (event: MouseEvent): { x: number; y: number } | undefined => {
 			const frame = root.getBoundingClientRect()
 			const inverse = invert(controller.matrix)
@@ -708,8 +711,23 @@ export function PresentationTextEditor({
 		}
 		let dragging = false
 		let anchor = 0
+		// The touch or pen pointer dragging a selection, while one does.
+		let pointer: number | undefined
 
-		const onPointerDown = (event: MouseEvent): void => {
+		const startDrag = (event: MouseEvent, pos: number): void => {
+			anchor = event.shiftKey ? controller.state.selection.anchor : pos
+			controller.goalX = undefined
+			controller.setSelection(anchor, pos)
+			view.focus()
+		}
+
+		const dragTo = (event: MouseEvent): void => {
+			const point = pagePoint(event)
+
+			if (point !== undefined) controller.setSelection(anchor, controller.map.posAt(point.x, point.y))
+		}
+
+		const onMouseDown = (event: MouseEvent): void => {
 			if (event.button !== 0) return
 
 			const point = pagePoint(event)
@@ -739,33 +757,71 @@ export function PresentationTextEditor({
 					controller.setSelection($pos.start() + start, $pos.start() + end)
 				}
 
+				// A pen's double or triple tap, its mouse press inside the contact: the rest of the contact keeps the word or
+				// paragraph instead of dragging from the anchor.
+				pointer = undefined
 				view.focus()
 
 				return
 			}
 
-			anchor = event.shiftKey ? controller.state.selection.anchor : pos
+			// A pen's own mouse events while its pointer drags: the pointer places the selection.
+			if (pointer !== undefined) {
+				view.focus()
+
+				return
+			}
+
 			dragging = true
-			controller.goalX = undefined
-			controller.setSelection(anchor, pos)
-			view.focus()
+			startDrag(event, pos)
 		}
 
-		const onPointerMove = (event: MouseEvent): void => {
-			if (!dragging) return
-
-			const point = pagePoint(event)
-
-			if (point !== undefined) controller.setSelection(anchor, controller.map.posAt(point.x, point.y))
+		const onMouseMove = (event: MouseEvent): void => {
+			if (dragging) dragTo(event)
 		}
 
-		const onPointerUp = (): void => {
+		const onMouseUp = (): void => {
 			dragging = false
 		}
 
-		box.addEventListener("mousedown", onPointerDown)
-		document.addEventListener("mousemove", onPointerMove)
-		document.addEventListener("mouseup", onPointerUp)
+		const onPointerDown = (event: PointerEvent): void => {
+			if (!event.isPrimary) return
+
+			// A new primary press ends any earlier drag, so a pointer whose up never reached the box cannot stick.
+			pointer = undefined
+
+			if (event.pointerType === "mouse" || event.button !== 0) return
+
+			const point = pagePoint(event)
+
+			if (point === undefined) return
+
+			pointer = event.pointerId
+
+			try {
+				box.setPointerCapture(event.pointerId)
+			} catch {
+				// The pointer is already gone: its up ends the drag.
+			}
+
+			startDrag(event, controller.map.posAt(point.x, point.y))
+		}
+
+		const onPointerMove = (event: PointerEvent): void => {
+			if (event.pointerId === pointer) dragTo(event)
+		}
+
+		const onPointerEnd = (event: PointerEvent): void => {
+			if (event.pointerId === pointer) pointer = undefined
+		}
+
+		box.addEventListener("mousedown", onMouseDown)
+		document.addEventListener("mousemove", onMouseMove)
+		document.addEventListener("mouseup", onMouseUp)
+		box.addEventListener("pointerdown", onPointerDown)
+		box.addEventListener("pointermove", onPointerMove)
+		box.addEventListener("pointerup", onPointerEnd)
+		box.addEventListener("pointercancel", onPointerEnd)
 
 		const unsubscribe = controller.subscribe(draw)
 
@@ -830,9 +886,13 @@ export function PresentationTextEditor({
 			if (aligning !== 0) frames?.cancelAnimationFrame(aligning)
 
 			blink?.cancel()
-			box.removeEventListener("mousedown", onPointerDown)
-			document.removeEventListener("mousemove", onPointerMove)
-			document.removeEventListener("mouseup", onPointerUp)
+			box.removeEventListener("mousedown", onMouseDown)
+			document.removeEventListener("mousemove", onMouseMove)
+			document.removeEventListener("mouseup", onMouseUp)
+			box.removeEventListener("pointerdown", onPointerDown)
+			box.removeEventListener("pointermove", onPointerMove)
+			box.removeEventListener("pointerup", onPointerEnd)
+			box.removeEventListener("pointercancel", onPointerEnd)
 			view.destroy()
 			sink.replaceChildren()
 		}
@@ -852,7 +912,17 @@ export function PresentationTextEditor({
 			<div
 				ref={boxRef}
 				className="fo-text-edit-box"
-				style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", pointerEvents: "auto", cursor: "text" }}
+				style={{
+					position: "absolute",
+					left: 0,
+					top: 0,
+					transformOrigin: "0 0",
+					pointerEvents: "auto",
+					cursor: "text",
+					touchAction: "none",
+					userSelect: "none",
+					WebkitUserSelect: "none"
+				}}
 			>
 				<div
 					ref={pageRef}

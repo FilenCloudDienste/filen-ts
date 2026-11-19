@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from "react"
-import { placementKey, placementStart, type PlacementPage, type PlacementRect } from "./keyboardPlacement"
+import { placementRectKey, placementStart, type PlacementPage, type PlacementRect } from "./keyboardPlacement"
 
 // Keyboard placement (keyboardPlacement.ts) for one tool on one page: start() puts the rectangle down, the page's
 // keydown handler steps it, and commit or cancel ends it. The host draws `rect` (its indicator) and announces its
@@ -32,7 +32,7 @@ export function useKeyboardPlacement(options: KeyboardPlacementOptions): Keyboar
 		onKeyDown: event => {
 			if (rect === null || event.nativeEvent.isComposing) return false
 
-			const step = placementKey(rect, options.page, event)
+			const step = placementRectKey(rect, options.page, event)
 
 			if (step === null) return false
 

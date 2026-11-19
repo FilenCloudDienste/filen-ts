@@ -1,5 +1,5 @@
 import { referenceSpans, referenceText, type RefArea, type ReferenceSpan } from "../refs/formulaRefs"
-import { ARGUMENT_LABELS, sheetFunctions, type SheetFunction } from "./catalogue"
+import { ARGUMENT_LABELS, sheetFunctions, type ArgumentId, type SheetFunction } from "./catalogue"
 import { skipQuoted } from "../refs/scan"
 
 // What the formula being typed offers at the caret, from its text alone (no engine): the function names a word
@@ -178,9 +178,13 @@ export function acceptSuggestion(text: string, word: FormulaWord, name: string):
 }
 
 export interface SignaturePart {
+	// English, an optional argument in brackets: what shows where the app has no translation of the label.
 	readonly text: string
 	// The argument this part names (its index in the call), when it names one.
 	readonly argument?: number
+	// That argument's catalogue id, which keys its label for translation, and whether it is optional.
+	readonly id?: ArgumentId
+	readonly optional?: boolean
 }
 
 // A function's syntax as signature help shows it: NAME(first, [second], ...) with each argument's label, split so
@@ -194,7 +198,7 @@ export function signatureParts(entry: SheetFunction, separator = ","): readonly 
 
 		const label = ARGUMENT_LABELS[arg.id]
 
-		parts.push({ text: arg.optional ? `[${label}]` : label, argument: index })
+		parts.push({ text: arg.optional ? `[${label}]` : label, argument: index, id: arg.id, optional: arg.optional })
 	})
 
 	if (entry.args.some(arg => arg.repeats)) parts.push({ text: `${between}…` })

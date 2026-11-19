@@ -19,6 +19,7 @@ import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { danglingReferences, openDeck, partsOf, rebaseSession, saveEdits, text } from "./pptxWriteFixtures"
 
 import { changes, odpApplier, odpDeck, openOdpDeck, saveDeck, slideAt } from "./odpWriteFixtures"
+import { diagramRenderer } from "./smartartDriveFixtures"
 import { measurer } from "./smartartFixtures"
 
 // SmartArt edits through the edit session: each op one undo step that puts the diagram's parts back, Find & Replace in
@@ -577,13 +578,7 @@ describe("SmartArt saves", () => {
 
 		if (frame?.kind !== "smartart") throw new Error("not inserted")
 
-		await smartArtRenderer(diagram.h.session, {
-			services: {
-				xml: part => pptxParts(diagram.h.session.deck)?.document(part),
-				relationship: () => undefined,
-				contentType: () => undefined
-			}
-		}).relayout(target, frame, SLICING)
+		await diagramRenderer(diagram.h.session).relayout(target, frame, SLICING)
 
 		const info = await smartartCapability.smartArtInfo(diagram.h.context, target)
 
@@ -635,13 +630,7 @@ describe("SmartArt saves", () => {
 
 		if (frame?.kind !== "smartart") throw new Error("not inserted")
 
-		await smartArtRenderer(diagram.h.session, {
-			services: {
-				xml: part => pptxParts(diagram.h.session.deck)?.document(part),
-				relationship: () => undefined,
-				contentType: () => undefined
-			}
-		}).relayout(target, frame, SLICING)
+		await diagramRenderer(diagram.h.session).relayout(target, frame, SLICING)
 
 		const saved = await saveEdits(diagram.h, 1)
 		const before = new Set(await diagramParts(bytes))

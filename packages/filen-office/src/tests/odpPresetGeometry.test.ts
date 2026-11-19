@@ -6,8 +6,8 @@ import { writeFreshOdp } from "../core/odp/write/fresh"
 import { slideRef, type Geometry, type ShapeNode, type SlideRef, type Xfrm } from "../core/presentation/model"
 import { odpParts } from "../dom/presentation/engine/open/odp"
 import { FIXTURE_FIRST_SLIDE, fixtureDeck } from "./fixtures/presentation/deck"
-import { presetNames, presetProgram } from "../core/drawingml/geometry/evaluate"
-import { PRESET_ANGLE_ADJUSTS } from "../core/drawingml/geometry/presets.generated"
+import { presetProgram } from "../core/drawingml/geometry/evaluate"
+import { PRESET_ANGLE_ADJUSTS, PRESET_GEOMETRY } from "../core/drawingml/geometry/presets.generated"
 import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { freshFromPptx } from "./odpWriteFreshFixtures"
@@ -219,7 +219,7 @@ describe("a preset shape in an ODP moved, resized or turned over", () => {
 describe("every preset converted from pptx to ODP", () => {
 	it("reads back as the preset it was, with its adjustments and flips", { timeout: 60_000 }, async () => {
 		// Connectors convert as lines; the rest once plain, once adjusted (angles turned, fractions scaled) and flipped.
-		const names = presetNames().filter(name => name !== "line" && !name.includes("Connector"))
+		const names = Object.keys(PRESET_GEOMETRY).filter(name => name !== "line" && !name.includes("Connector"))
 		const expected = new Map<string, { readonly geometry: Geometry; readonly flipV: boolean }>()
 		let markup = ""
 

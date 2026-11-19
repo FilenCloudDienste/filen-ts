@@ -96,10 +96,18 @@ export interface SheetGridSnapshot {
 	readonly active: GridActiveCell
 	// The session failed (its worker died): nothing answers any more.
 	readonly failed: string | null
+	// A sheet the session could not read (its layout or a tile was refused, as for a part that does not parse) while
+	// the session lives on: nothing more is asked for it until reloadSheet.
+	readonly sheetError: SheetGridSheetError | null
 	// The app's own view-only (a shared link, a preview): no editing starts.
 	readonly readOnly: boolean
 	// Formulas are shown in their cells instead of their results (Ctrl+`).
 	readonly showFormulas: boolean
+}
+
+export interface SheetGridSheetError {
+	readonly sheet: SheetId
+	readonly message: string
 }
 
 // The session's latest copy or cut (the "copy" query's clip id) and the range it was taken from.
@@ -335,6 +343,7 @@ export class SheetGridModel {
 			editing: null,
 			active: NO_ACTIVE,
 			failed: null,
+			sheetError: null,
 			readOnly: false,
 			showFormulas: false
 		}
@@ -617,7 +626,8 @@ export class SheetGridModel {
 	// The tiles a frame draws (tile row and column pairs of one sheet): missing ones are fetched in one call, the
 	// rest kept as recently used, and the cache trimmed to a multiple of the need.
 	need(sheet: SheetId, coordinates: readonly number[]): void {
-		if (this.disposed || this.snapshot.failed !== null) return
+		// A sheet that could not be read is not asked again frame after frame: reloadSheet asks.
+		if (this.disposed || this.snapshot.failed !== null || this.snapshot.sheetError?.sheet === sheet) return
 
 		const needed = new Set<number>()
 		const missing: number[] = []
@@ -708,8 +718,10 @@ export class SheetGridModel {
 				// The active cell may have arrived.
 				this.update({})
 			},
-			() => {
+			(error: unknown) => {
 				for (const key of keys) this.inFlight.delete(key)
+
+				this.sheetFailed(sheet, error)
 			}
 		)
 	}
@@ -773,10 +785,33 @@ export class SheetGridModel {
 				this.layoutRequests.delete(sheet)
 				this.storeLayout(sheet, layout)
 			},
-			() => {
+			(error: unknown) => {
 				this.layoutRequests.delete(sheet)
+				this.sheetFailed(sheet, error)
 			}
 		)
+	}
+
+	// A request for a sheet refused while the session lives on: the sheet is named, not drawn blank, until reloaded.
+	// No repaint: a frame would ask again and be refused again.
+	private sheetFailed(sheet: SheetId, error: unknown): void {
+		if (this.disposed || this.snapshot.failed !== null || this.snapshot.sheetError?.sheet === sheet) return
+
+		// The active cell as it is: reading it again would ask for its tile again.
+		this.update(
+			{ sheetError: { sheet, message: error instanceof Error ? error.message : String(error) }, active: this.snapshot.active },
+			true
+		)
+	}
+
+	// Asks again for a sheet that could not be read (the host's retry): its layout when none is held, its tiles with
+	// the next frame.
+	reloadSheet(sheet: SheetId): void {
+		if (this.disposed || this.snapshot.sheetError?.sheet !== sheet) return
+
+		this.update({ sheetError: null })
+
+		if (!this.layouts.has(sheet)) this.loadLayout(sheet)
 	}
 
 	private storeLayout(sheet: SheetId, layout: SheetLayout): void {
@@ -785,6 +820,8 @@ export class SheetGridModel {
 		if (held !== undefined && held.version > layout.version) return
 
 		this.layouts.set(sheet, layout)
+
+		if (this.snapshot.sheetError?.sheet === sheet) this.update({ sheetError: null }, true)
 
 		if (!this.selections.has(sheet)) this.selections.set(sheet, fromSelectionState(layout.selection, this.merges(layout)))
 
@@ -872,7 +909,13 @@ export class SheetGridModel {
 			// Asked for now, whether or not a frame draws it (the cell answers once it arrives).
 			const key = cellTileKey(sheet, point.row, point.col)
 
-			if (!this.disposed && this.snapshot.failed === null && !this.inFlight.has(key) && this.layouts.has(sheet))
+			if (
+				!this.disposed &&
+				this.snapshot.failed === null &&
+				this.snapshot.sheetError?.sheet !== sheet &&
+				!this.inFlight.has(key) &&
+				this.layouts.has(sheet)
+			)
 				this.fetch(sheet, [tileRowOf(point.row), tileColOf(point.col)])
 
 			return NO_ACTIVE

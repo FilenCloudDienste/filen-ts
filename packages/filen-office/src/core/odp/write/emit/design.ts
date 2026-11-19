@@ -40,6 +40,8 @@ import {
 	styleChanges,
 	type StyleChanges
 } from "../styles"
+import { EMU_PER_PT } from "../../read/fills"
+import { BOXED, LINES } from "./box"
 import { pictureFillEntry } from "./picture"
 import { IDENTITY, compose, groupAffine, lineEnds, placed, type Affine } from "./shape"
 import { isRefused } from "../../../presentation/refusal"
@@ -217,8 +219,6 @@ export const emitOdpDesign: OdpEmitFamily = {
 }
 
 // --- styles.xml: the slide size ---
-
-const EMU_PER_PT = 12_700
 
 function sizeEdits(deck: Deck, fragment: Fragment, editor: XmlEditor): Refused | undefined {
 	const document = fragment.document
@@ -693,7 +693,7 @@ function moveShapes(
 			continue
 		}
 
-		if (LINE_ELEMENTS.has(name)) {
+		if (LINES.has(name)) {
 			const ends = lineEnds(xfrm, mapping).map(cm)
 			const names = ["svg:x1", "svg:y1", "svg:x2", "svg:y2"] as const
 
@@ -742,12 +742,12 @@ function unmovableMasterShape(shape: ShapeNode, fragment: Fragment): Refused | u
 		return undefined
 	}
 
-	if (LINE_ELEMENTS.has(name))
+	if (LINES.has(name))
 		return fragment.attributes(src.node).has("svg:d")
 			? refused("unsupported", `a routed ${name} on a master page, resized with the slide`)
 			: undefined
 
-	return BOXED_ELEMENTS.test(name) ? undefined : refused("unsupported", `the box of a master page ${name}, resized with the slide`)
+	return BOXED.has(name) ? undefined : refused("unsupported", `the box of a master page ${name}, resized with the slide`)
 }
 
 // A scaled size change that moves the content, refused when it is sent over a master page shape of styles.xml the save
@@ -767,11 +767,6 @@ export function masterMoveRefusal(deck: Deck, fragment: Fragment): Refused | und
 
 	return undefined
 }
-
-// Elements whose box is svg:x/y/width/height, and lines (their ends).
-const BOXED_ELEMENTS =
-	/^(draw:(frame|custom-shape|rect|ellipse|circle|polygon|polyline|path|regular-polygon|caption|control|page-thumbnail)|dr3d:scene)$/u
-const LINE_ELEMENTS: ReadonlySet<string> = new Set(["draw:line", "draw:connector", "draw:measure"])
 
 // Whether a written length is `wanted` (cm, as cm() writes it) within an EMU.
 function sameLength(written: string | undefined, wanted: string | undefined): boolean {

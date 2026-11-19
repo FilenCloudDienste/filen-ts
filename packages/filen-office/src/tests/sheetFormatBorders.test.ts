@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { XLSX_FEATURES } from "../core/sheet/commands"
-import type { SheetChange, SheetCommandResult, SheetRenderStyle, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
+import type { SheetChange, SheetRenderStyle, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
 import { borderPresetEdges, type SheetBorderPreset } from "../core/sheet/style/borders"
 import { formattingFeature } from "../core/xlsx/edit/formatFeature"
 import { inThreadSheetHost } from "../dom/sheet/host"
-import { IMMEDIATE, buildFixture, cells, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { IMMEDIATE, buildFixture, cells, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 import { STYLES, parts, type Fixture } from "./xlsxWriteFixtures"
 
 async function open(fixture: Fixture | Uint8Array): Promise<{ session: SheetSessionApi; sheet: number; looks: Looks }> {
@@ -31,12 +31,6 @@ function grid(rows: number, cols: number, styles?: string): Fixture {
 	}).join("")
 
 	return { sheets: [{ name: "One", body: `<sheetData>${body}</sheetData>` }], ...(styles !== undefined && { styles }) }
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
 }
 
 // Each cell's look in a tile, by "row,col".

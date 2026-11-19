@@ -13,7 +13,9 @@ import { odfPresetAttributes } from "../../odf/presetShapes"
 // fill and outline as a graphic style. What is lost: a preset no ODF type names (drawn as a rectangle), a custom
 // geometry, fills other than a colour, effects, rotated text.
 
-const EMU_PER_CM = 360_000
+// EMU (ECMA-376 Part 1 §20.1.2.1) per centimetre and per point, shared by the ODS converters and chart objects.
+export const EMU_PER_CM = 360_000
+export const EMU_PER_PT = 12_700
 
 // The paths ODF itself gives the two commonest, for readers without LibreOffice's types (§19.145 draw:enhanced-path).
 const PATHS: Readonly<Record<string, string>> = {
@@ -31,7 +33,8 @@ export interface Box {
 	readonly cy: number
 }
 
-function length(emu: number): string {
+// An EMU length as ODF centimetres to three decimals.
+export function cmLength(emu: number): string {
 	return `${String(Math.round((emu / EMU_PER_CM) * 1000) / 1000)}cm`
 }
 
@@ -141,7 +144,7 @@ export class ShapeWriter {
 			out.push(
 				["draw:stroke", color === undefined ? "none" : "solid"],
 				["svg:stroke-color", color],
-				["svg:stroke-width", color === undefined ? undefined : length(width)]
+				["svg:stroke-width", color === undefined ? undefined : cmLength(width)]
 			)
 		}
 
@@ -168,10 +171,10 @@ export class ShapeWriter {
 			["draw:auto-grow-height", "false"],
 			["draw:auto-grow-width", "false"],
 			["fo:wrap-option", document.attribute(bodyPr, "wrap") === "none" ? "no-wrap" : "wrap"],
-			["fo:padding-left", length(number(document, bodyPr, "lIns", 91_440))],
-			["fo:padding-right", length(number(document, bodyPr, "rIns", 91_440))],
-			["fo:padding-top", length(number(document, bodyPr, "tIns", 45_720))],
-			["fo:padding-bottom", length(number(document, bodyPr, "bIns", 45_720))]
+			["fo:padding-left", cmLength(number(document, bodyPr, "lIns", 91_440))],
+			["fo:padding-right", cmLength(number(document, bodyPr, "rIns", 91_440))],
+			["fo:padding-top", cmLength(number(document, bodyPr, "tIns", 45_720))],
+			["fo:padding-bottom", cmLength(number(document, bodyPr, "bIns", 45_720))]
 		]
 
 		if (number(document, bodyPr, "rot", 0) !== 0 || (document.attribute(bodyPr, "vert") ?? "horz") !== "horz") this.lost++
@@ -235,8 +238,8 @@ export class ShapeWriter {
 	private placement(box: Box, rotation: number): [string, string | undefined][] {
 		if (rotation === 0)
 			return [
-				["svg:x", length(box.x)],
-				["svg:y", length(box.y)]
+				["svg:x", cmLength(box.x)],
+				["svg:y", cmLength(box.y)]
 			]
 
 		const theta = (rotation * Math.PI) / 180
@@ -245,7 +248,7 @@ export class ShapeWriter {
 		const tx = cx - ((box.cx / 2) * Math.cos(theta) - (box.cy / 2) * Math.sin(theta))
 		const ty = cy - ((box.cx / 2) * Math.sin(theta) + (box.cy / 2) * Math.cos(theta))
 
-		return [["draw:transform", `rotate (${String(-theta)}) translate (${length(tx)} ${length(ty)})`]]
+		return [["draw:transform", `rotate (${String(-theta)}) translate (${cmLength(tx)} ${cmLength(ty)})`]]
 	}
 
 	// One object (sp, cxnSp, grpSp) in `box`; `z` its draw:z-index, null inside a group.
@@ -324,10 +327,10 @@ export class ShapeWriter {
 			return `<draw:line${attributes([
 				...common,
 				["draw:style-name", graphic],
-				["svg:x1", length(x1)],
-				["svg:y1", length(y1)],
-				["svg:x2", length(x2)],
-				["svg:y2", length(y2)]
+				["svg:x1", cmLength(x1)],
+				["svg:y1", cmLength(y1)],
+				["svg:x2", cmLength(x2)],
+				["svg:y2", cmLength(y2)]
 			])}><text:p/></draw:line>`
 		}
 
@@ -361,8 +364,8 @@ export class ShapeWriter {
 			`<draw:custom-shape${attributes([
 				...common,
 				["draw:style-name", graphic],
-				["svg:width", length(box.cx)],
-				["svg:height", length(box.cy)],
+				["svg:width", cmLength(box.cx)],
+				["svg:height", cmLength(box.cy)],
 				...this.placement(box, rotation)
 			])}>${text.paragraphs}` +
 			`<draw:enhanced-geometry${attributes(enhanced.map(([name, value]): [string, string] => [name, value]))}/></draw:custom-shape>`

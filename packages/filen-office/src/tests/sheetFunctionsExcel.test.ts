@@ -2,41 +2,15 @@ import { describe, expect, it } from "vitest"
 import { FormulaEngine, type EngineSheet } from "../core/sheet/formula/index"
 import { absoluteCell, engineCellFormula, engineFormula, holdsBracket } from "../core/sheet/refs/formulaRefs"
 import { budget } from "./timing"
+import { calculate as calculateTyped, type Typed } from "./sheetEngineFixtures"
 
 // The engine against Excel's own reading of formulas, where HyperFormula alone differs: each case is Excel's result
 // per the function's page on support.microsoft.com (cited by the test).
 
-type Typed = string | number | boolean | null
-
-// Builds an engine over one sheet "S" (and "T" when given) from cells as typed: "=..." is a formula in Excel's
-// syntax, "'..." text, anything else the value. Returns the value of each formula cell by its A1 name.
+// Sheet "S" (and "T" when given) from cells as typed, each formula passed to the engine as typed. Returns the value
+// of each formula cell by its A1 name.
 function calculate(rows: Typed[][], other?: Typed[][]): Record<string, unknown> {
-	const toEngine = (cells: Typed[][]): EngineSheet["rows"] =>
-		cells.map(row =>
-			row.map(cell => (typeof cell === "string" && cell.startsWith("=") ? (engineCellFormula(cell.slice(1)) ?? "") : cell))
-		)
-	const sheets: EngineSheet[] = [{ name: "S", rows: toEngine(rows), formulas: [] }]
-
-	if (other !== undefined) sheets.push({ name: "T", rows: toEngine(other), formulas: [] })
-
-	const engine = new FormulaEngine(sheets, [])
-	const out: Record<string, unknown> = {}
-
-	try {
-		rows.forEach((row, r) =>
-			row.forEach((cell, c) => {
-				if (typeof cell !== "string" || !cell.startsWith("=")) return
-
-				const result = engine.result(0, r, c)
-
-				out[`${String.fromCharCode(65 + c)}${String(r + 1)}`] = result.error === true ? `!${String(result.value)}` : result.value
-			})
-		)
-	} finally {
-		engine.destroy()
-	}
-
-	return out
+	return calculateTyped(rows, { stored: false, other })
 }
 
 // Numbers to the decimals the function pages show.

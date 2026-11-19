@@ -1,6 +1,6 @@
 import type { PdfCommandResult, PdfEditState, PdfWidgetSummary } from "../../core/pdfedit/state"
 import type { PdfCommandArgs, PdfCommandName } from "../../dom/pdfedit/commands/index"
-import type { PdfCommandOp, PdfSaveEnded } from "../../dom/pdfedit/protocol"
+import { PDF_STEP_WIDGET_PAGES, type PdfCommandOp, type PdfSaveEnded } from "../../dom/pdfedit/protocol"
 import { MupdfPdfDocument, type PdfEditEngine } from "./mupdfDocument"
 
 // An editing session on the page, headless: the engine's snapshot of the document, the widgets of the pages shown, and
@@ -26,6 +26,9 @@ export class PdfEditSessionModel {
 	private readonly listeners = new Set<() => void>()
 	// Pages whose widgets were asked for (answered or not).
 	private readonly asked = new Set<number>()
+	// Pages whose widgets are held, least recently read or shown first: an undo or redo reads again the latest of them
+	// (the pages shown), so a shown page never goes without widgets and the cost stays bounded.
+	private readonly held = new Set<number>()
 	private wanted: number[] = []
 	private flushing = false
 
@@ -60,14 +63,31 @@ export class PdfEditSessionModel {
 		const current = this.snapshot
 		const widgets = new Map(current.widgets)
 
+		const answered = new Set(result.widgets.map(entry => entry.page))
+
 		for (const page of result.pages) {
-			if (!result.widgets.some(entry => entry.page === page)) {
+			if (!answered.has(page)) {
 				widgets.delete(page)
 				this.asked.delete(page)
+				this.held.delete(page)
 			}
 		}
 
-		for (const entry of result.widgets) widgets.set(entry.page, entry.widgets)
+		for (const entry of result.widgets) {
+			widgets.set(entry.page, entry.widgets)
+			this.hold(entry.page)
+		}
+
+		// Pages past a shortened document's end hold nothing.
+		if (result.state.pageCount < current.state.pageCount) {
+			for (const page of this.held) {
+				if (page >= result.state.pageCount) {
+					widgets.delete(page)
+					this.asked.delete(page)
+					this.held.delete(page)
+				}
+			}
+		}
 
 		this.set({
 			document: current.document.next(result.pages, result.state.pageCount),
@@ -76,6 +96,16 @@ export class PdfEditSessionModel {
 			pending: current.pending,
 			touched: result.pages
 		})
+	}
+
+	private hold(page: number): void {
+		this.held.delete(page)
+		this.held.add(page)
+	}
+
+	// The pages an undo or redo answers widgets for: the latest read or shown; the others are read again when they show.
+	private shown(): number[] {
+		return Array.from(this.held).slice(-PDF_STEP_WIDGET_PAGES)
 	}
 
 	private async run(call: () => Promise<PdfCommandResult>): Promise<PdfCommandResult> {
@@ -103,11 +133,11 @@ export class PdfEditSessionModel {
 
 	// `steps` back at once (one rebuild at most where the journal cannot take them back).
 	undo(steps?: number): Promise<PdfCommandResult> {
-		return this.run(() => this.engine.call("undo", steps === undefined ? {} : { steps }))
+		return this.run(() => this.engine.call("undo", { ...(steps === undefined ? {} : { steps }), pages: this.shown() }))
 	}
 
 	redo(): Promise<PdfCommandResult> {
-		return this.run(() => this.engine.call("redo", {}))
+		return this.run(() => this.engine.call("redo", { pages: this.shown() }))
 	}
 
 	// A snapshot from a request that is not a change (new protection chosen, owner rights unlocked).
@@ -120,10 +150,13 @@ export class PdfEditSessionModel {
 		return this.run(() => this.engine.call("signDiscard", {}))
 	}
 
-	// The widgets of these pages, read once each (batched).
+	// The widgets of these pages, read once each (batched). A view calls it whenever its page shows: a held page is not
+	// read again, only marked as the latest shown.
 	want(pages: readonly number[]): void {
 		for (const page of pages) {
-			if (!this.asked.has(page)) {
+			if (this.held.has(page)) {
+				this.hold(page)
+			} else if (!this.asked.has(page)) {
 				this.asked.add(page)
 				this.wanted.push(page)
 			}
@@ -153,7 +186,10 @@ export class PdfEditSessionModel {
 
 		const widgets = new Map(this.snapshot.widgets)
 
-		for (const entry of read) widgets.set(entry.page, entry.widgets)
+		for (const entry of read) {
+			widgets.set(entry.page, entry.widgets)
+			this.hold(entry.page)
+		}
 
 		this.set({ ...this.snapshot, widgets })
 	}
@@ -171,6 +207,7 @@ export class PdfEditSessionModel {
 		const all = Array.from({ length: ended.state.pageCount }, (_, index) => index)
 
 		this.asked.clear()
+		this.held.clear()
 		this.set({
 			document: current.document.next(all, ended.state.pageCount),
 			state: ended.state,

@@ -5,6 +5,7 @@ import { parseNumbering, type Numbering } from "../numbering/index"
 import { gateReasons, withGate, type DocxGateReason, type DocxPackage } from "../package"
 import { gateLifted, protectionMode, protectionOf, readOnlyExceptions, type DocxProtectionChange } from "./protection"
 import { bindingsKnown, partHasBindings } from "../forms/binding"
+import { DEFAULT_PLACEHOLDERS, type ControlPlaceholders } from "../forms/controls"
 import { PropsStore } from "../props/index"
 import { DocxStyles, PropertyResolver, parseStyles, styleSettings } from "../styles/index"
 import { parseTheme } from "../theme/index"
@@ -36,6 +37,8 @@ export interface DocxEditContext {
 	readonly media: DocxMediaStore
 	// Review state of the document as edited.
 	readonly review: DocxReviewState
+	// Text the editor writes into the document, in the host's language.
+	readonly strings: DocxEditStrings
 	// Stories the editor added (a new note, comment, header), with where the save puts them.
 	readonly newStories: Map<Story, NewStory>
 	// The document's protection was stopped for this session (EditContextParts.protectionUnlocked).
@@ -55,6 +58,19 @@ export function authorInitials(name: string): string | undefined {
 		.slice(0, 9)
 
 	return initials === "" ? undefined : initials
+}
+
+// Text commands write into the document (Word writes these in its UI language): the placeholders of new content
+// controls (a new drop-down list's first entry is the list one) and a table of contents without entries.
+export interface DocxEditStrings {
+	readonly placeholders: ControlPlaceholders
+	readonly noTocEntries: string
+}
+
+// Word's en-US texts.
+export const DEFAULT_EDIT_STRINGS: DocxEditStrings = {
+	placeholders: DEFAULT_PLACEHOLDERS,
+	noTocEntries: "No table of contents entries found."
 }
 
 export type DocxIdSpace = keyof MaxIds
@@ -265,6 +281,8 @@ export interface EditContextParts {
 	// What makes the document view-only that the package does not say (a signed ODT translates to a package
 	// without its signatures): added to the gate, never lifted.
 	readonly gate?: readonly DocxGateReason[]
+	// Text the editor writes into the document, in the host's language (DEFAULT_EDIT_STRINGS without).
+	readonly strings?: DocxEditStrings
 }
 
 // Reads styles, numbering and theme for `model` (or reuses what a caller already parsed for layout).
@@ -330,6 +348,7 @@ export async function openDocxEditContext(pkg: DocxPackage, model: DocxModel, re
 				protectionMode(pkg.facts.documentProtection?.edit, pkg.facts.documentProtection?.enforced ?? false) === "trackedChanges",
 			persist: true
 		},
+		strings: reuse.strings ?? DEFAULT_EDIT_STRINGS,
 		newStories: new Map(),
 		...(reuse.protectionUnlocked === true ? { protectionUnlocked: true } : {})
 	}

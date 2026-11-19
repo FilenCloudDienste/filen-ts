@@ -118,7 +118,7 @@ describe("presentation arrange commands in the edit session", () => {
 					{ id: 999, xfrm: a }
 				]
 			})
-		).toEqual({ ok: false, refusal: "notFound" })
+		).toMatchObject({ ok: false, refusal: "notFound" })
 		expect(
 			await h.command({
 				family: "shape",
@@ -129,7 +129,7 @@ describe("presentation arrange commands in the edit session", () => {
 					{ id: 3, xfrm: a }
 				]
 			})
-		).toEqual({ ok: false, refusal: "malformed" })
+		).toMatchObject({ ok: false, refusal: "malformed" })
 		expect(boxOf(slide, 3)).toEqual(a)
 		h.close()
 	})

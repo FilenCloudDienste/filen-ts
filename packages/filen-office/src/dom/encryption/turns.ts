@@ -1,4 +1,5 @@
 import { sliceClock, type SliceClock, type Slicing } from "../../core/slicing"
+import { SIGNAL_POLL_MS, clearTimer, macrotaskYield, setTimer } from "../platform"
 import { OfficeCryptoError } from "./errors"
 
 // Chromium settles WebCrypto promises without returning to the event loop, so a chain of awaited calls (the
@@ -22,55 +23,6 @@ export interface Turns {
 
 const SLICE_MS = 8
 
-interface PortLike {
-	onmessage: ((event: unknown) => void) | null
-	postMessage(message: unknown): void
-}
-
-let waiting: (() => void)[] | undefined
-let port: PortLike | undefined
-
-// A macrotask turn: MessageChannel avoids the 4 ms clamp of nested timers; setTimeout is the fallback.
-function macrotask(): Promise<void> {
-	if (waiting === undefined) {
-		waiting = []
-
-		const Channel: unknown = Reflect.get(globalThis, "MessageChannel")
-
-		if (typeof Channel === "function") {
-			const channel = new (Channel as new () => { readonly port1: PortLike; readonly port2: PortLike })()
-			const queue = waiting
-
-			channel.port1.onmessage = () => queue.shift()?.()
-
-			// Node keeps a listening port's process alive; nothing here should.
-			for (const end of [channel.port1, channel.port2]) {
-				const unref: unknown = Reflect.get(end, "unref")
-
-				if (typeof unref === "function") Reflect.apply(unref, end, [])
-			}
-
-			port = channel.port2
-		}
-	}
-
-	const queue = waiting
-
-	return new Promise(resolve => {
-		if (port !== undefined) {
-			queue.push(resolve)
-			port.postMessage(0)
-
-			return
-		}
-
-		const timer: unknown = Reflect.get(globalThis, "setTimeout")
-
-		if (typeof timer === "function") Reflect.apply(timer, globalThis, [resolve, 0])
-		else resolve()
-	})
-}
-
 function now(): number {
 	const performance: unknown = Reflect.get(globalThis, "performance")
 	const read: unknown = typeof performance === "object" && performance !== null ? Reflect.get(performance, "now") : undefined
@@ -79,16 +31,13 @@ function now(): number {
 }
 
 export function turnsOf(options: OfficeCryptoOptions): Turns {
-	return { signal: options.signal, clock: sliceClock(options.slicing ?? { pause: macrotask, sliceMs: SLICE_MS, now }) }
+	return { signal: options.signal, clock: sliceClock(options.slicing ?? { pause: macrotaskYield(), sliceMs: SLICE_MS, now }) }
 }
 
 export async function turn(turns: Turns): Promise<void> {
 	if (turns.signal?.aborted === true) throw new OfficeCryptoError("aborted", "Aborted")
 	if (turns.clock.due) await turns.clock.pause()
 }
-
-// How often a signal without events is looked at while a shared promise is awaited.
-const SIGNAL_POLL_MS = 10
 
 // `promise`, or OfficeCryptoError("aborted") as soon as `signal` fires (its "abort" event when it has one, else
 // looked at every SIGNAL_POLL_MS). The promise itself goes on.
@@ -104,13 +53,11 @@ export function raceSignal<T>(promise: Promise<T>, signal: AbortSignalLike | und
 	return new Promise<T>((resolve, reject) => {
 		let done = false
 		let timer: unknown
-		const setTimer: unknown = Reflect.get(globalThis, "setTimeout")
-		const clearTimer: unknown = Reflect.get(globalThis, "clearTimeout")
 		const finish = (): void => {
 			done = true
 			target.removeEventListener?.("abort", abort)
 
-			if (timer !== undefined && typeof clearTimer === "function") Reflect.apply(clearTimer, globalThis, [timer])
+			if (timer !== undefined) clearTimer(timer)
 		}
 		const abort = (): void => {
 			if (done) return
@@ -123,7 +70,7 @@ export function raceSignal<T>(promise: Promise<T>, signal: AbortSignalLike | und
 
 			if (done) return
 			if (signal.aborted) abort()
-			else if (typeof setTimer === "function") timer = Reflect.apply(setTimer, globalThis, [look, SIGNAL_POLL_MS])
+			else timer = setTimer(look, SIGNAL_POLL_MS)
 		}
 
 		if (typeof target.addEventListener === "function") target.addEventListener("abort", abort)

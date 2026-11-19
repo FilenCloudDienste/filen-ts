@@ -25,6 +25,10 @@ import { markCommand, markInternal } from "../invariants/index"
 import type { DocumentCommandContext, DocumentHandlers, FeatureHandlers } from "../registry"
 import { NO_MARKERS, NO_SOURCE, docxSchema } from "../schema"
 import type { DocxEditorSession } from "../session"
+import { fieldCodeType, TIME_24_FIELD_CODE } from "../commands/fields"
+import { selectionLanguage } from "./forms"
+import { numericDatePicture } from "../../fields/datePictures"
+import { englishLanguage } from "../../numbering/formats"
 
 // Fields, bookmarks and tables of contents (document commands: an update reads the laid-out pages). Updates
 // are Word's manual ones: Update Field (F9) on the selection or the field at the caret, Update All on the
@@ -455,6 +459,20 @@ function insertField(editor: PagedEditor, instruction: string): boolean {
 	return session.dispatch(tr.scrollIntoView())
 }
 
+// A DATE or TIME code in the caret language: its short date (en-US "M/d/yyyy", de-DE "dd.MM.yyyy"), a 24-hour time
+// outside English; other codes, and English times, as they are.
+function caretCode(session: DocxEditorSession, instruction: string): string {
+	const type = fieldCodeType(instruction)
+
+	if (type !== "DATE" && type !== "TIME") return instruction
+
+	const language = selectionLanguage(session)
+
+	if (type === "DATE") return ` DATE \\@ "${numericDatePicture(language)}" `
+
+	return englishLanguage(language) ? instruction : TIME_24_FIELD_CODE
+}
+
 // insert.date as text: what a DATE field with the picture shows at the caret now (its language the caret's),
 // typed there with the caret's formatting (a tracked insertion while tracking).
 function insertDateText(editor: PagedEditor, format: string): boolean {
@@ -620,7 +638,11 @@ const document: DocumentHandlers = {
 	},
 	"insert.field": {
 		enabled: insertable,
-		run: (context, command) => insertField(context.editor, command.instruction)
+		run: (context, command) =>
+			insertField(
+				context.editor,
+				command.caretLanguage === true ? caretCode(context.editor.session, command.instruction) : command.instruction
+			)
 	},
 	"bookmark.add": {
 		enabled: context => writable(context) && canAddBookmark(context.session),

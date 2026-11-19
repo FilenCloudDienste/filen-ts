@@ -5,18 +5,10 @@ import { readRtf, type RtfReadResult } from "../core/rtf/index"
 import { RtfTokenizer, Token } from "../core/rtf/tokenizer"
 import { layOut, pageLines } from "./layoutFixtures"
 import { budget } from "./timing"
-
-function bytes(text: string): Uint8Array {
-	// Latin-1: every character one byte (tests write \'hh for anything else).
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
-
-	return out
-}
+import { latin1 } from "./rtfLatin1"
 
 async function read(rtf: string | Uint8Array): Promise<RtfReadResult> {
-	const result = await readRtf(typeof rtf === "string" ? bytes(rtf) : rtf)
+	const result = await readRtf(typeof rtf === "string" ? latin1(rtf) : rtf)
 
 	if (!result.ok) throw new Error(result.reason)
 
@@ -43,7 +35,7 @@ function texts(xml: string): string {
 
 describe("RTF tokenizer", () => {
 	it("reads control words with signed parameters and the delimiting space as part of the word", () => {
-		const tokens = new RtfTokenizer(bytes("\\fs-24 x\\b0y\\par\r\nz"))
+		const tokens = new RtfTokenizer(latin1("\\fs-24 x\\b0y\\par\r\nz"))
 
 		expect(tokens.next()).toBe(Token.Word)
 		expect([tokens.name, tokens.param, tokens.hasParam, tokens.start, tokens.end]).toEqual(["fs", -24, true, 0, 7])
@@ -61,7 +53,7 @@ describe("RTF tokenizer", () => {
 	})
 
 	it("jumps over \\bin data, braces in it included, and clamps a length past the end", () => {
-		const tokens = new RtfTokenizer(bytes("{\\bin3 {}}x}{\\bin99 ab"))
+		const tokens = new RtfTokenizer(latin1("{\\bin3 {}}x}{\\bin99 ab"))
 
 		expect(tokens.next()).toBe(Token.GroupStart)
 		expect(tokens.next()).toBe(Token.Bin)
@@ -75,7 +67,7 @@ describe("RTF tokenizer", () => {
 	})
 
 	it("reads \\'hh as one byte and a broken escape as nothing", () => {
-		const tokens = new RtfTokenizer(bytes("\\'e9\\'zq\\{"))
+		const tokens = new RtfTokenizer(latin1("\\'e9\\'zq\\{"))
 
 		expect(tokens.next()).toBe(Token.Hex)
 		expect(tokens.value).toBe(0xe9)
@@ -88,7 +80,7 @@ describe("RTF tokenizer", () => {
 
 	it("skips a group in one pass whatever its depth", () => {
 		const nested = "{".repeat(50_000) + "}".repeat(50_000)
-		const tokens = new RtfTokenizer(bytes(`${nested}x`))
+		const tokens = new RtfTokenizer(latin1(`${nested}x`))
 
 		tokens.next()
 		tokens.skipGroup()
@@ -99,8 +91,8 @@ describe("RTF tokenizer", () => {
 
 describe("RTF reader", () => {
 	it("refuses input that is not RTF", async () => {
-		expect(await readRtf(bytes("PK\u0003\u0004"))).toEqual({ ok: false, reason: "notRtf" })
-		expect((await readRtf(bytes(" \r\n{\\rtf1 x}"))).ok).toBe(true)
+		expect(await readRtf(latin1("PK\u0003\u0004"))).toEqual({ ok: false, reason: "notRtf" })
+		expect((await readRtf(latin1(" \r\n{\\rtf1 x}"))).ok).toBe(true)
 	})
 
 	it("decodes text in each font's code page over the document's", async () => {
@@ -273,10 +265,10 @@ describe("RTF reader", () => {
 			character => character.charCodeAt(0)
 		)
 		const hex = [...png].map(byte => byte.toString(16).padStart(2, "0")).join("")
-		const head = bytes(
+		const head = latin1(
 			`{\\rtf1 {\\pict\\pngblip\\picw1\\pich1\\picwgoal1440\\pichgoal720\\picscalex50\\picscaley100 ${hex}}{\\pict\\pngblip\\bin${png.length} `
 		)
-		const tail = bytes("}\\par}")
+		const tail = latin1("}\\par}")
 		const rtf = new Uint8Array(head.length + png.length + tail.length)
 
 		rtf.set(head)

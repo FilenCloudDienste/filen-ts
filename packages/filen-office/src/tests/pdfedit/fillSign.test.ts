@@ -20,6 +20,8 @@ import {
 	type PdfFormField
 } from "../../dom/pdfedit/fillSign"
 import { normalizeStrokes, type PdfPageRect, type PdfSignatureImage } from "../../core/pdfedit/visualSignature"
+import { collectFields } from "../../dom/pdfedit/fields"
+import { parseSignFieldArgs } from "../../dom/pdfedit/commands/sign"
 
 // Fill & Sign over real MuPDF: every widget type set, saved, reopened in MuPDF and in pdf.js (another parser), and
 // signatures / marks surviving a save. Fixtures: src/tests/fixtures/pdfforms (src/scripts/pdfFormFixtures.ts).
@@ -397,6 +399,8 @@ describe("Fill & Sign annotations", () => {
 
 		expect(byType).toEqual(["FreeText", "Ink", "Ink", "Circle", "Stamp", "Ink"])
 		expect(annotations.every(annotation => annotation.getAuthor() === "Jane Doe")).toBe(true)
+		// Fill & Sign marks print with the document.
+		expect(annotations.every(annotation => (annotation.getFlags() & 4) !== 0)).toBe(true)
 		expect(annotations[0]?.getContents()).toBe("Signed in Berlin")
 		expect(annotations[4]?.getSubject()).toBe("Signature")
 		expect(annotations[5]?.getSubject()).toBe("Initials")
@@ -433,5 +437,80 @@ describe("Fill & Sign annotations", () => {
 
 		expect(field(after, "signature").value).toBe("")
 		expect(inkIn(after, 0, target.rect)).toBeGreaterThan(0.01)
+	})
+})
+
+describe("Field tree", () => {
+	it("lists a field's reference and every widget: kids without /T, or the field itself when merged", () => {
+		const document = new mupdf.PDFDocument()
+
+		open.push(document)
+
+		const page = document.addPage([0, 0, 200, 200], 0, document.addObject({}), "")
+
+		document.insertPage(-1, page)
+
+		const group = document.addObject({ FT: "Btn", T: document.newString("choice") })
+		const first = document.addObject({ Type: "Annot", Subtype: "Widget", Rect: [10, 10, 20, 20], P: page, Parent: group })
+		const second = document.addObject({ Type: "Annot", Subtype: "Widget", Rect: [30, 10, 40, 20], P: page, Parent: group })
+		const merged = document.addObject({
+			Type: "Annot",
+			Subtype: "Widget",
+			FT: "Tx",
+			T: document.newString("name"),
+			Rect: [0, 50, 90, 70]
+		})
+
+		group.put("Kids", [first, second])
+		document
+			.getTrailer()
+			.get("Root")
+			.put("AcroForm", document.addObject({ Fields: [group, merged] }))
+
+		const { fields } = collectFields(document)
+		const numbers = (objects: readonly mupdf.PDFObject[]): number[] => objects.map(object => object.asIndirect())
+
+		expect(fields.map(item => [item.name, item.type, item.ref.asIndirect()])).toEqual([
+			["choice", "Btn", group.asIndirect()],
+			["name", "Tx", merged.asIndirect()]
+		])
+		expect(numbers(fields[0]?.widgets ?? [])).toEqual([first.asIndirect(), second.asIndirect()])
+		expect(numbers(fields[1]?.widgets ?? [])).toEqual([merged.asIndirect()])
+		expect(fields[0]?.widget?.isDictionary()).toBe(true)
+	})
+})
+
+describe("Certificate signature arguments", () => {
+	const strokes = (color: readonly number[], lineWidth = 2): unknown => ({
+		placement: { kind: "rect", page: 0, rect: [10, 10, 110, 60] },
+		visual: {
+			kind: "strokes",
+			width: 100,
+			height: 50,
+			lineWidth,
+			color,
+			strokes: [
+				[
+					[0, 0],
+					[10, 10]
+				]
+			]
+		},
+		lines: [],
+		name: null,
+		reason: null,
+		location: null,
+		time: 0,
+		certify: null,
+		capacity: 8192
+	})
+
+	it("takes a drawn signature's colour only as 0..1 components and a pen no wider than the drawing", () => {
+		expect(parseSignFieldArgs(strokes([1, 0, 0.5]))).not.toBeNull()
+		// A null parse is the engine's badRequest.
+		expect(parseSignFieldArgs(strokes([255, 0, 0]))).toBeNull()
+		expect(parseSignFieldArgs(strokes([-0.1, 0, 0]))).toBeNull()
+		expect(parseSignFieldArgs(strokes([0, 0, 0], -1))).toBeNull()
+		expect(parseSignFieldArgs(strokes([0, 0, 0], 101))).toBeNull()
 	})
 })

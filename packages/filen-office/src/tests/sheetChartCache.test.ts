@@ -293,6 +293,25 @@ describe("chart caches", () => {
 		session.close()
 	})
 
+	it("draws an unnamed series in the session's chart text, and again once that text changes", async () => {
+		const { session } = await openCharts(chartFixture(barChart([SOLD, KEPT]).replace(/<c:tx>.*?<\/c:tx>/gu, "")))
+		const request = { part: CHART_PART, width: 4_572_000, height: 2_743_200 }
+		const textOf = (render: Awaited<ReturnType<typeof session.query<"chart.render">>>): string =>
+			render.kind === "drawing" ? JSON.stringify(render.drawing.texts) : ""
+		const first = await session.query("chart.render", request)
+
+		expect(textOf(first)).toContain("Series2")
+		session.configure({ chartText: { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" } })
+
+		const german = await session.query("chart.render", { ...request, since: first.stamp })
+
+		expect(german.kind).toBe("drawing")
+		expect(textOf(german)).toContain("Datenreihe2")
+		expect(textOf(german)).not.toContain("Series")
+		expect((await session.query("chart.render", { ...request, since: german.stamp })).kind).toBe("same")
+		session.close()
+	})
+
 	it("draws a chart from its cells as they now are, and says when nothing changed since", async () => {
 		const { session, sheets } = await openCharts(chartFixture(barChart([SOLD, KEPT])))
 		const request = { part: CHART_PART, width: 4_572_000, height: 2_743_200 }

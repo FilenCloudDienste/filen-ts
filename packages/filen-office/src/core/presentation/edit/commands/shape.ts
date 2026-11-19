@@ -1,7 +1,7 @@
 import { EMU_PER_PX } from "../../../drawingml/reader"
 import { HANDLE_PLACES, type DrawingHandle } from "../../../docx/objects/hits"
 import type { Action, ShapeLocks, ShapeRef, SlideRef, Xfrm } from "../../model"
-import { ownDelta, ownThrough } from "../../groupSpace"
+import { FULL_TURN, ownDelta, ownThrough } from "../../groupSpace"
 import type { DeckOp } from "../ops"
 import { presentationHref, xmlSafeText } from "../xmlText"
 
@@ -37,7 +37,6 @@ export function canTurn(shape: PlacedShape): boolean {
 	return shape.locks?.noRot !== true && shape.line !== true
 }
 
-export const FULL_TURN = 21_600_000
 const DEGREE = 60_000
 // The step a turn snaps to while Shift is held (PowerPoint's).
 export const ROTATE_SNAP = 15 * DEGREE

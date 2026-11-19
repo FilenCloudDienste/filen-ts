@@ -1,4 +1,4 @@
-import { OdfStyleResolver, OdfStyleSheet } from "../../odf/index"
+import { OdfNs, OdfStyleResolver, OdfStyleSheet } from "../../odf/index"
 import { nextShapeId } from "../../presentation/ids"
 import type { DesignReading } from "../../presentation/edit/apply/design"
 import type { ComparingReading } from "../../presentation/edit/apply/table"
@@ -6,6 +6,7 @@ import type { SlideSourceReading } from "../../presentation/edit/apply/slide"
 import type { ReferenceFacts } from "../../presentation/edit/integrity"
 import { refused, type Deck, type Refused, type ShapeNode, type SlideNode, type SlideRef } from "../../presentation/model"
 import { XmlError, decodeUtf8, encodeUtf8, parseXml } from "../../xml/index"
+import { concatBytes } from "../../xml/bytes"
 import { Fragment, type OdpContext } from "../read/context"
 import { fillOf } from "../read/fills"
 import { readShapeElements, readShapes, type ShapeScope } from "../read/shapes"
@@ -31,22 +32,6 @@ export function odpPagePart(ref: SlideRef): string {
 export interface OdpSessionRefs {
 	// A slide reference never used in the session.
 	next(): SlideRef
-}
-
-function concat(...chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
 }
 
 // Master page names design ops gave out in a session (each deck's), so two unsaved gallery masters never share one.
@@ -156,13 +141,13 @@ export function odpSourceReading(
 
 		try {
 			document = parseXml(
-				concat(
+				concatBytes([
 					content.rootOpen,
-					wrap ? encodeUtf8('<draw:page xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0">') : new Uint8Array(0),
+					wrap ? encodeUtf8(`<draw:page xmlns:draw="${OdfNs.draw}">`) : new Uint8Array(0),
 					markup,
 					wrap ? encodeUtf8("</draw:page>") : new Uint8Array(0),
 					content.rootClose
-				)
+				])
 			)
 		} catch (error) {
 			if (error instanceof XmlError) return refused("malformed", "held markup")

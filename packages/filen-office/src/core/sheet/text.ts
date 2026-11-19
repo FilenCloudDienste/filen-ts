@@ -462,6 +462,8 @@ function moveTexts(
 		return { refused: { reason: "tooLarge" } }
 	if (type === "insert" && at >= (axis === "rows" ? document.rows.length : document.width)) return null
 	if (type === "insert" && axis === "cols" && document.width + count > SHEET_MAX_COLS) return { refused: { reason: "tooLarge" } }
+	// More records than a sheet holds would reopen view-only, the last ones out of reach.
+	if (type === "insert" && axis === "rows" && document.rows.length + count > SHEET_MAX_ROWS) return { refused: { reason: "tooLarge" } }
 
 	let removed: string[][] = []
 	const forward = (sink: SheetChangeSink): void => {

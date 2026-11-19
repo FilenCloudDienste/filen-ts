@@ -28,7 +28,8 @@ function clippedArea(ctm: PdfMatrix, width: number, height: number): number {
 }
 
 // The page's characters (visible or not) and images, from one pass over its content in view space (annotations
-// left out). Nothing is decoded or rendered.
+// left out). Nothing is rendered or decoded to pixels, but MuPDF loads each image's compressed stream (through the range
+// reader, for a document read on demand) before the device sees it: callers shrink the store after a batch.
 export function ocrPageSummary(mupdf: MupdfModule, page: Mupdf.PDFPage): OcrPageSummary {
 	const bounds = page.getBounds("CropBox")
 	const width = bounds[2] - bounds[0]

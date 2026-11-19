@@ -1,58 +1,19 @@
 // @vitest-environment happy-dom
-import { act, createRef } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetEvent, type SheetRefusal } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
-import { SheetGrid, SheetGridModel, type SheetGridHandle } from "../react/sheet/index"
-import { RecordingCanvas } from "./sheetGridCanvas"
+import { act } from "react"
+import { describe, expect, it } from "vitest"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRefusal } from "../core/sheet/protocol"
+import type { SheetGridHandle, SheetGridModel } from "../react/sheet/index"
+import { type MountedGrid, key, mountGrid, pointer, registerSheetGridDom, settleGrid } from "./sheetGridDomFixtures.dom"
 import { sheetBody } from "./sheetKeysFixtures"
-import { IMMEDIATE, buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
+import { buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
 import { STYLES } from "./xlsxWriteFixtures"
 
 // The grid's pointer and keys where Excel's are known: a right-click on a header, the Mac's delete key,
 // Ctrl+Shift+Enter, typing on a locked cell, and Page Down scrolling a screen.
 
-const canvases = new WeakMap<HTMLCanvasElement, RecordingCanvas>()
+registerSheetGridDom()
 
-Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-beforeEach(() => {
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-		let canvas = canvases.get(this)
-
-		if (canvas === undefined) {
-			canvas = new RecordingCanvas()
-			canvases.set(this, canvas)
-		}
-
-		return canvas as unknown as CanvasRenderingContext2D
-	} as unknown as typeof HTMLCanvasElement.prototype.getContext)
-	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? 800 : 0
-	})
-	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? 400 : 0
-	})
-	vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
-})
-
-const roots: Root[] = []
-
-afterEach(() => {
-	for (const root of roots.splice(0)) act(() => root.unmount())
-
-	document.body.innerHTML = ""
-})
-
-async function settle(): Promise<void> {
-	for (let k = 0; k < 8; k++) await act(() => new Promise(resolve => setTimeout(resolve, 0)))
-}
-
-interface Mounted {
-	readonly model: SheetGridModel
-	readonly handle: SheetGridHandle
-	readonly scroller: HTMLElement
+interface Mounted extends MountedGrid {
 	readonly refusals: SheetRefusal[]
 }
 
@@ -70,70 +31,12 @@ const BOOK = {
 }
 
 async function mount(fixture: Parameters<typeof buildFixture>[0] = BOOK, mac = false): Promise<Mounted> {
-	const host = inThreadSheetHost()
-	const early: SheetEvent[] = []
-	let target: SheetGridModel | null = null
-	const opened = await host.open(buildFixture(fixture), { kind: "xlsx", slicing: IMMEDIATE }, event => {
-		if (target === null) early.push(event)
-		else target.handleEvent(event)
-	})
-
-	if (opened.kind !== "opened") throw new Error(opened.kind)
-
-	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
+	const mounted = await mountGrid({ bytes: buildFixture(fixture), forwardEvents: true, props: { mac } })
 	const refusals: SheetRefusal[] = []
 
-	target = model
+	mounted.model.setRefusalHandler(refusal => refusals.push(refusal))
 
-	for (const event of early.splice(0)) model.handleEvent(event)
-
-	model.setRefusalHandler(refusal => refusals.push(refusal))
-
-	const container = document.createElement("div")
-	const ref = createRef<SheetGridHandle>()
-	const root = createRoot(container)
-
-	roots.push(root)
-	document.body.appendChild(container)
-	await act(async () => {
-		root.render(
-			<SheetGrid
-				ref={ref}
-				grid={model}
-				label="Sheet"
-				editorLabel="Cell entry"
-				mac={mac}
-			/>
-		)
-	})
-	await settle()
-	act(() => ref.current?.renderer.paint())
-	await settle()
-
-	return {
-		model,
-		handle: ref.current as SheetGridHandle,
-		scroller: container.querySelector<HTMLElement>(".fo-sheet-scroller") as HTMLElement,
-		refusals
-	}
-}
-
-function key(target: Element, init: KeyboardEventInit): KeyboardEvent {
-	const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
-
-	act(() => {
-		target.dispatchEvent(event)
-	})
-
-	return event
-}
-
-function pointer(target: Element, type: string, init: PointerEventInit): void {
-	act(() => {
-		target.dispatchEvent(
-			new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, ...init })
-		)
-	})
+	return { ...mounted, refusals }
 }
 
 function cellBox(handle: SheetGridHandle, row: number, col: number): { x: number; y: number; width: number; height: number } {
@@ -217,7 +120,7 @@ describe("the delete key", () => {
 		selectRange(model, 0, 0, 1, 1)
 
 		expect(key(scroller, { key: "Backspace", code: "Backspace" }).defaultPrevented).toBe(true)
-		await settle()
+		await settleGrid()
 
 		expect(editor()).toBeNull()
 		expect(await text(model, 0, 0)).toBeUndefined()
@@ -246,7 +149,7 @@ describe("Ctrl+Shift+Enter in an entry", () => {
 		selectRange(model, 1, 1, 1, 1)
 		key(scroller, { key: "7", code: "Digit7" })
 		key(editor() as HTMLTextAreaElement, { key: "Enter", code: "Enter", shiftKey: true, ...modifier })
-		await settle()
+		await settleGrid()
 
 		expect(editor()).toBeNull()
 		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 1 })
@@ -274,7 +177,7 @@ describe("a locked cell on a protected sheet", () => {
 		const { model, handle, scroller, refusals } = await mount(PROTECTED)
 
 		act(() => handle.goTo({ row: 0, col: 1 }))
-		await settle()
+		await settleGrid()
 		key(scroller, { key: "x", code: "KeyX" })
 		key(scroller, { key: "F2", code: "F2" })
 		key(scroller, { key: "Delete", code: "Delete" })
@@ -285,7 +188,7 @@ describe("a locked cell on a protected sheet", () => {
 
 		// An unlocked cell takes the entry.
 		act(() => handle.goTo({ row: 0, col: 0 }))
-		await settle()
+		await settleGrid()
 		key(scroller, { key: "x", code: "KeyX" })
 
 		expect(editor()?.value).toBe("x")
@@ -296,7 +199,7 @@ describe("a locked cell on a protected sheet", () => {
 		const { model, handle, scroller, refusals } = await mount(PROTECTED)
 
 		act(() => handle.goTo({ row: 0, col: 1 }))
-		await settle()
+		await settleGrid()
 		act(() => model.setReadOnly(true))
 		key(scroller, { key: "x", code: "KeyX" })
 

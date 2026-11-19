@@ -65,14 +65,27 @@ export interface FixtureOptions {
 	// The drawing group's default properties (OfficeArtDggContainer drawingPrimaryOptions), in place of fill colour
 	// scheme 4 and line colour scheme 1.
 	readonly drawingDefaults?: readonly (readonly [number, number])[]
+	// A title master of the main master (persist id 99, master id 0x80000001), with this name (CString instance 3).
+	readonly titleMasterName?: string
 }
 
-function u16(value: number): Uint8Array {
+const TITLE_MASTER_PERSIST_ID = 99
+
+// Little-endian fields of the records the fixtures build.
+export function u16(value: number): Uint8Array {
 	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff)
 }
 
-function u32(value: number): Uint8Array {
+export function u32(value: number): Uint8Array {
 	return Uint8Array.of(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff)
+}
+
+export function f32(value: number): Uint8Array {
+	const out = new Uint8Array(4)
+
+	new DataView(out.buffer).setFloat32(0, value, true)
+
+	return out
 }
 
 export function concat(...parts: readonly Uint8Array[]): Uint8Array {
@@ -95,8 +108,9 @@ export function container(type: number, children: readonly Uint8Array[], instanc
 	return record(type, concat(...children), instance, 0xf)
 }
 
-function utf16(text: string): Uint8Array {
-	const out = new Uint8Array(text.length * 2)
+// UTF-16LE code units of `text`; `terminated` adds the NUL code unit the PP10 time-tree string variants end with.
+export function utf16(text: string, options: { readonly terminated?: boolean } = {}): Uint8Array {
+	const out = new Uint8Array(text.length * 2 + (options.terminated === true ? 2 : 0))
 
 	for (let k = 0; k < text.length; k++) {
 		out[2 * k] = text.charCodeAt(k) & 0xff
@@ -304,7 +318,16 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 				)
 			])
 		]),
-		container(0x0ff0, [record(0x03f3, concat(u32(2), u32(0), u32(0), u32(0x80000000), u32(0)))], 1),
+		container(
+			0x0ff0,
+			[
+				record(0x03f3, concat(u32(2), u32(0), u32(0), u32(0x80000000), u32(0))),
+				...(options.titleMasterName === undefined
+					? []
+					: [record(0x03f3, concat(u32(TITLE_MASTER_PERSIST_ID), u32(0), u32(0), u32(0x80000001), u32(0)))])
+			],
+			1
+		),
 		container(0x0ff0, list, 0),
 		...(options.documentRecords ?? []),
 		record(0x03ea, new Uint8Array(0))
@@ -332,6 +355,12 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 	])
 
 	slides.forEach((slide, index) => objects.set(3 + index, slideRecord(slide, 0x800 * (index + 2))))
+
+	if (options.titleMasterName !== undefined)
+		objects.set(
+			TITLE_MASTER_PERSIST_ID,
+			container(0x03ee, [slideAtom(0, 0x80000000, 0), record(0x0fba, utf16(options.titleMasterName), 3)])
+		)
 
 	for (const [id, bytes] of options.objects ?? []) objects.set(id, bytes)
 
@@ -465,20 +494,48 @@ export const FIXTURE_PNG = png()
 // --- A deck holding every reader past the slides: a PowerPoint 2002 time tree and a comment in the PP10 tag, a
 // transition with a sound, an Office 97 build, a linked movie, an embedded object with its storage, an embedded sound.
 
-const cString = (instance: number, text: string): Uint8Array => record(0x0fba, utf16(text), instance)
-const timeInt = (id: number, value: number): Uint8Array => record(0xf142, concat(Uint8Array.of(1), u32(value)), id)
-const timeNode = (...children: Uint8Array[]): Uint8Array => container(0xf144, children, 1)
+// A CString atom (§2.13.1).
+export const cString = (instance: number, text: string): Uint8Array => record(0x0fba, utf16(text), instance)
 
-function timeNodeAtom(type: number, duration?: number): Uint8Array {
+// --- PowerPoint 2002 time-tree records (§2.8.15 ExtTimeNodeContainer and its parts).
+
+// TimeVariant (§2.8.73) properties of a TimePropertyList: an integer, a NUL-terminated string.
+export const timeInt = (id: number, value: number): Uint8Array => record(0xf142, concat(Uint8Array.of(1), u32(value)), id)
+export const timeStr = (instance: number, value: string): Uint8Array =>
+	record(0xf142, concat(Uint8Array.of(3), utf16(value, { terminated: true })), instance)
+export const timeProperties = (...items: Uint8Array[]): Uint8Array => container(0xf13d, items)
+export const timeNode = (...children: Uint8Array[]): Uint8Array => container(0xf144, children, 1)
+
+// TimeNodeAtom: type (0 par, 1 seq, 3 behaviour, 4 media), fill, restart and duration when given.
+export function timeNodeAtom(type: number, options: { fill?: number; dur?: number; restart?: number } = {}): Uint8Array {
+	const flags =
+		0x8 | (options.fill === undefined ? 0 : 0x1) | (options.dur === undefined ? 0 : 0x10) | (options.restart === undefined ? 0 : 0x2)
+
 	return record(
 		0xf127,
-		concat(u32(0), u32(0), u32(type), u32(0), u32(0), u32(0), u32(duration ?? 0), u32(0x8 | (duration === undefined ? 0 : 0x10)))
+		concat(u32(0), u32(options.restart ?? 0), u32(type), u32(options.fill ?? 0), u32(0), u32(0), u32(options.dur ?? 0), u32(flags))
 	)
 }
 
-const timeTarget = (spid: number): Uint8Array => container(0xf13c, [record(0x2afb, concat(u32(0), u32(1), u32(spid), u32(0), u32(0)))])
-const timeCondition = (instance: number, delay: number): Uint8Array =>
-	container(0xf125, [record(0xf128, concat(u32(0), u32(0), u32(0), u32(delay)))], instance)
+export function timeCondition(instance: number, object: number, event: number, delay: number, target?: Uint8Array): Uint8Array {
+	return container(
+		0xf125,
+		[record(0xf128, concat(u32(object), u32(event), u32(0), u32(delay))), ...(target === undefined ? [] : [target])],
+		instance
+	)
+}
+
+export const pageTarget = (): Uint8Array => container(0xf13c, [record(0x2b01, u32(1))])
+export const shapeTarget = (spid: number, type = 0, start = 0, end = 0): Uint8Array =>
+	container(0xf13c, [record(0x2afb, concat(u32(type), u32(1), u32(spid), u32(start), u32(end)))])
+
+export function timeBehavior(target: Uint8Array, attribute?: string): Uint8Array {
+	return container(0xf12a, [
+		record(0xf133, concat(u32(attribute === undefined ? 0 : 0x4), u32(0), u32(0), u32(0))),
+		...(attribute === undefined ? [] : [container(0xf13e, [timeStr(0, attribute)], 1)]),
+		target
+	])
+}
 
 // The SlideProgTagsContainer of the rich deck's first slide: one click fading shape 1024 in and playing movie 1025, and
 // a comment.
@@ -489,26 +546,26 @@ export const RICH_TAG = container(0x1388, [
 			0x138b,
 			concat(
 				timeNode(
-					timeNodeAtom(0, -1),
+					timeNodeAtom(0, { dur: -1 }),
 					container(0xf13d, [timeInt(20, 9)]),
 					timeNode(
-						timeNodeAtom(1, -1),
+						timeNodeAtom(1, { dur: -1 }),
 						container(0xf13d, [timeInt(20, 4)]),
 						timeNode(
 							timeNodeAtom(0),
-							timeCondition(1, -1),
+							timeCondition(1, 0, 0, -1),
 							timeNode(
 								timeNodeAtom(0),
 								container(0xf13d, [timeInt(20, 1), timeInt(9, 10), timeInt(11, 1)]),
 								timeNode(
-									timeNodeAtom(3, 500),
+									timeNodeAtom(3, { dur: 500 }),
 									container(0xf12d, [
 										record(0xf136, concat(u32(0x3), u32(0))),
 										record(0xf142, concat(Uint8Array.of(3), utf16("fade")), 1),
-										container(0xf12a, [record(0xf133, concat(u32(0), u32(0), u32(0), u32(0))), timeTarget(1024)])
+										container(0xf12a, [record(0xf133, concat(u32(0), u32(0), u32(0), u32(0))), shapeTarget(1024)])
 									])
 								),
-								timeNode(timeNodeAtom(4, 500), timeTarget(1025), container(0xf13d, [timeInt(22, 50000)]))
+								timeNode(timeNodeAtom(4, { dur: 500 }), shapeTarget(1025), container(0xf13d, [timeInt(22, 50000)]))
 							)
 						)
 					)

@@ -1,28 +1,13 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { assertMathTree, ommlToMathTree } from "../core/math/index"
 import { OpcPackage, bytesSource } from "../core/opc/index"
 import { Namespaces, NodeKind } from "../core/xml/index"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 
 // The licensed real-world corpus is kept out of the repository; this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
 const MATH_URIS = new Set(["http://schemas.openxmlformats.org/officeDocument/2006/math", "http://purl.oclc.org/ooxml/officeDocument/math"])
-
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of EXTENSIONS) {
-		const directory = join(CORPUS, extension)
-
-		if (!existsSync(directory)) continue
-
-		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
 
 describe.skipIf(!existsSync(CORPUS))("OMML over the real-world corpus", () => {
 	it("converts every equation into a valid MathML tree", { timeout: 300_000 }, async () => {
@@ -32,7 +17,7 @@ describe.skipIf(!existsSync(CORPUS))("OMML over the real-world corpus", () => {
 		const failures: string[] = []
 		const documents = new Set<string>()
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(EXTENSIONS)) {
 			const name = file.slice(CORPUS.length + 1)
 			let opc: OpcPackage
 

@@ -24,6 +24,8 @@ function auto(
 	return session.command({ type: "fill.auto", sheet: 0, source, target, mode })
 }
 
+const GERMAN = { decimal: ",", group: ".", argument: ";", dateOrder: "dmy" } as const
+
 const column = (rows: number, col = 0): (readonly [number, number])[] => Array.from({ length: rows }, (_, row) => [row, col] as const)
 
 describe("fill.auto", () => {
@@ -199,6 +201,53 @@ describe("fill.auto", () => {
 		}
 	})
 
+	it("reads and writes a text file's numbers in the session's locale, leaving grouped and percent fields text", async () => {
+		const { session } = await openKeys("1,5;1.234,5;1.234,5;5%\n2,5;1.234,5;x;6%\n")
+
+		session.configure({ locale: GERMAN })
+
+		const result = await auto(
+			session,
+			{ startRow: 0, startCol: 0, endRow: 1, endCol: 3 },
+			{ startRow: 0, startCol: 0, endRow: 3, endCol: 3 }
+		)
+
+		expect(result.ok).toBe(true)
+		expect(
+			await texts(session, [
+				[2, 0],
+				[3, 0],
+				[2, 1],
+				[3, 1],
+				[2, 2],
+				[2, 3],
+				[3, 3]
+			])
+		).toEqual(["3,5", "4,5", "1.234,5", "1.234,5", "1.234,6", "7%", "8%"])
+	})
+
+	it("writes a text file's numbers with the decimal point its fields used where the locale's is U+066B", async () => {
+		const { session } = await openKeys("1.5;1\u066b5\n2.5;2\u066b5\n")
+
+		session.configure({ locale: { decimal: "\u066b", group: "\u066c", argument: ";", dateOrder: "dmy" } })
+
+		const result = await auto(
+			session,
+			{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+			{ startRow: 0, startCol: 0, endRow: 3, endCol: 1 }
+		)
+
+		expect(result.ok).toBe(true)
+		expect(
+			await texts(session, [
+				[2, 0],
+				[3, 0],
+				[2, 1],
+				[3, 1]
+			])
+		).toEqual(["3.5", "4.5", "3\u066b5", "4\u066b5"])
+	})
+
 	it("refuses a source block past the cells one edit takes without reading it", () => {
 		let reads = 0
 		const read = (): FillSourceCell => {
@@ -275,6 +324,36 @@ describe("fill.series", () => {
 
 		expect(result.ok && result.change.patches.length === 0).toBe(true)
 		expect(await texts(session, column(3))).toEqual(["x", "7", ""])
+	})
+
+	it("reads a text file's stop value and fields in the session's locale", async () => {
+		const { session } = await openKeys("0,5;x;y\n;a;b\n")
+
+		session.configure({ locale: GERMAN })
+
+		const range = { startRow: 0, startCol: 0, endRow: 5, endCol: 0 }
+
+		await session.command({
+			type: "fill.series",
+			sheet: 0,
+			range,
+			orientation: "cols",
+			options: { ...LINEAR, step: 2.5, stop: "10,5" }
+		})
+
+		expect(await texts(session, column(6))).toEqual(["0,5", "3", "5,5", "8", "10,5", ""])
+
+		for (const stop of ["1.234,5", "50%"]) {
+			const refused = await session.command({
+				type: "fill.series",
+				sheet: 0,
+				range,
+				orientation: "cols",
+				options: { ...LINEAR, stop }
+			})
+
+			expect(refused.ok ? null : refused.refusal).toEqual({ reason: "unsupported", detail: "stop" })
+		}
 	})
 
 	it("reads the stop value as an entry: a date in a workbook, and refuses one that is not a number", async () => {

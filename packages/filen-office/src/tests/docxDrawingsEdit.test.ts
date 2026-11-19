@@ -29,7 +29,7 @@ function chunk(type: string, data: readonly number[]): number[] {
 }
 
 // A PNG header of a width x height picture (pHYs for `dpi`); the pixels are not needed to place it.
-export function png(width: number, height: number, dpi?: number): Uint8Array {
+function png(width: number, height: number, dpi?: number): Uint8Array {
 	const ppm = dpi === undefined ? 0 : Math.round(dpi / 0.0254)
 
 	return new Uint8Array([
@@ -1034,6 +1034,30 @@ describe("docx drawing state", () => {
 			rotatable: true
 		})
 		expect(opened.model.parts[0]?.kinds.includes(Item.AlternateContent)).toBe(true)
+	})
+
+	it("reads xsd:boolean locks and flips in either spelling", async () => {
+		const stateOf = async (locks: string, flip: string): Promise<{ lockAspect: boolean; flipH: boolean }> => {
+			const picture = inlinePicture(1905000, 952500)
+				.replace('<a:graphicFrameLocks noChangeAspect="1"/>', locks)
+				.replace("<a:xfrm>", `<a:xfrm${flip}>`)
+			const opened = await openBytes(docx(`<w:p>${picture}</w:p>`))
+			const session = new (await import("@filen/office/core/docx/edit")).DocxEditorSession(opened.context)
+
+			return drawingState(opened.context, session.state.doc.nodeAt(drawingPos(session.state.doc)) as Node)
+		}
+
+		expect(await stateOf('<a:graphicFrameLocks noChangeAspect="true"/>', ' flipH="true"')).toMatchObject({
+			lockAspect: true,
+			flipH: true
+		})
+		expect(await stateOf('<a:graphicFrameLocks noChangeAspect="1"/>', ' flipH="1"')).toMatchObject({ lockAspect: true, flipH: true })
+		expect(await stateOf('<a:graphicFrameLocks noChangeAspect="false"/>', ' flipH="false"')).toMatchObject({
+			lockAspect: false,
+			flipH: false
+		})
+		expect(await stateOf('<a:graphicFrameLocks noChangeAspect="0"/>', ' flipH="0"')).toMatchObject({ lockAspect: false, flipH: false })
+		expect(await stateOf("<a:graphicFrameLocks/>", "")).toMatchObject({ lockAspect: false, flipH: false })
 	})
 })
 

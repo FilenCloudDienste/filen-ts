@@ -1,19 +1,12 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { legacySheetPassword, sheetPasswordCheck } from "../core/xlsx/edit/protection"
 import { hashProtectionPassword, verifyProtectionPassword } from "../dom/protection"
-import { cells, openFixture, savedBytes } from "./sheetSessionFixtures"
+import { cells, openFixture, savedBytes, changeOf } from "./sheetSessionFixtures"
 import { parts } from "./xlsxWriteFixtures"
 import { budget } from "./timing"
 
 // Sheet and workbook protection: honoured before any edit runs, set and taken off, and the passwords that guard
 // them ([MS-OFFCRYPTO] §2.3.7.1 legacy verifier, §2.4.2.4 modern hash).
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
-}
 
 describe("protection passwords", () => {
 	it("computes Excel's legacy 16-bit verifier", () => {

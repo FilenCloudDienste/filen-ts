@@ -1,144 +1,40 @@
 // @vitest-environment happy-dom
-import { act, createRef, type ReactNode } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { CellFlag, type SheetCommand } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
-import {
-	SheetGrid,
+import { act, type ReactNode } from "react"
+import { describe, expect, it, vi } from "vitest"
+import { CellFlag } from "../core/sheet/protocol"
+import type {
+	GridDecoration,
 	SheetGridModel,
-	type GridDecoration,
-	type SheetCellPointer,
-	type SheetEntryVerdict,
-	type SheetGridExtension,
-	type SheetGridHandle,
-	type SheetGridLayer
+	SheetCellPointer,
+	SheetEntryVerdict,
+	SheetGridExtension,
+	SheetGridHandle,
+	SheetGridLayer
 } from "../react/sheet/index"
-import { RecordingCanvas } from "./sheetGridCanvas"
-import { IMMEDIATE, buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
+import { type MountedGrid, mountGrid, pointer, recorded, registerSheetGridDom, settleGrid } from "./sheetGridDomFixtures.dom"
+import { buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
 import { sheetBody } from "./sheetKeysFixtures"
 
 // The grid's fill handle (drag out to fill, back in to clear, Escape to cancel) and its extension points as a feature
 // meets them: a press an extension takes selects nothing, hover and leave arrive once per cell, decorators paint,
 // overlays render over the cells and find their cells' boxes.
 
-const WIDTH = 800
-const HEIGHT = 400
-const canvases = new WeakMap<HTMLCanvasElement, RecordingCanvas>()
+registerSheetGridDom()
 
-Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-beforeEach(() => {
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-		let canvas = canvases.get(this)
-
-		if (canvas === undefined) {
-			canvas = new RecordingCanvas()
-			canvases.set(this, canvas)
-		}
-
-		return canvas as unknown as CanvasRenderingContext2D
-	} as unknown as typeof HTMLCanvasElement.prototype.getContext)
-	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? WIDTH : 0
-	})
-	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? HEIGHT : 0
-	})
-	vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
-})
-
-const roots: Root[] = []
-
-afterEach(() => {
-	for (const root of roots.splice(0)) act(() => root.unmount())
-
-	document.body.innerHTML = ""
-})
-
-async function settle(): Promise<void> {
-	for (let k = 0; k < 6; k++) await act(() => new Promise(resolve => setTimeout(resolve, 0)))
-}
-
-interface Mounted {
-	readonly model: SheetGridModel
-	readonly handle: SheetGridHandle
-	readonly container: HTMLElement
-	readonly scroller: HTMLElement
+interface Mounted extends MountedGrid {
 	readonly fill: HTMLElement
-	readonly commands: SheetCommand[]
-	paint(): void
 }
 
 const BODY = sheetBody([[1], [2], ["Mon"]])
 
 async function mount(extensions?: readonly SheetGridExtension[], children?: ReactNode): Promise<Mounted> {
-	const host = inThreadSheetHost()
-	const opened = await host.open(
-		buildFixture({ sheets: [{ name: "S", body: BODY }] }),
-		{ kind: "xlsx", slicing: IMMEDIATE },
-		() => undefined
-	)
-
-	if (opened.kind !== "opened") throw new Error(opened.kind)
-
-	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
-	const commands: SheetCommand[] = []
-	const command = model.command.bind(model)
-
-	vi.spyOn(model, "command").mockImplementation((sent, report) => {
-		commands.push(sent)
-
-		return command(sent, report)
+	const mounted = await mountGrid({
+		bytes: buildFixture({ sheets: [{ name: "S", body: BODY }] }),
+		recordCommands: true,
+		props: { ...(extensions !== undefined && { extensions }), children }
 	})
 
-	const container = document.createElement("div")
-	const ref = createRef<SheetGridHandle>()
-	const root = createRoot(container)
-
-	roots.push(root)
-	document.body.appendChild(container)
-	await act(async () => {
-		root.render(
-			<SheetGrid
-				ref={ref}
-				grid={model}
-				label="Sheet"
-				editorLabel="Cell entry"
-				{...(extensions !== undefined && { extensions })}
-			>
-				{children}
-			</SheetGrid>
-		)
-	})
-	await settle()
-
-	const handle = ref.current as SheetGridHandle
-	const paint = (): void => {
-		act(() => handle.renderer.paint())
-	}
-
-	paint()
-	await settle()
-	paint()
-
-	return {
-		model,
-		handle,
-		container,
-		scroller: container.querySelector<HTMLElement>(".fo-sheet-scroller") as HTMLElement,
-		fill: container.querySelector<HTMLElement>(".fo-sheet-fill-handle") as HTMLElement,
-		commands,
-		paint
-	}
-}
-
-function pointer(target: Element, type: string, init: PointerEventInit): void {
-	act(() => {
-		target.dispatchEvent(
-			new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, ...init })
-		)
-	})
+	return { ...mounted, fill: mounted.container.querySelector<HTMLElement>(".fo-sheet-fill-handle") as HTMLElement }
 }
 
 function center(handle: SheetGridHandle, row: number, col: number): { clientX: number; clientY: number } {
@@ -181,7 +77,7 @@ describe("the fill handle", () => {
 		pointer(mounted.fill, "pointerdown", center(mounted.handle, 1, 0))
 		pointer(mounted.fill, "pointermove", center(mounted.handle, 4, 0))
 		pointer(mounted.fill, "pointerup", center(mounted.handle, 4, 0))
-		await settle()
+		await settleGrid()
 
 		expect(mounted.commands.at(-1)).toEqual({
 			type: "fill.auto",
@@ -201,7 +97,7 @@ describe("the fill handle", () => {
 		pointer(mounted.fill, "pointerdown", center(mounted.handle, 1, 0))
 		pointer(mounted.fill, "pointermove", center(mounted.handle, 3, 0))
 		pointer(mounted.fill, "pointerup", { ...center(mounted.handle, 3, 0), ctrlKey: true })
-		await settle()
+		await settleGrid()
 
 		expect(mounted.commands.at(-1)).toMatchObject({ type: "fill.auto", mode: "alternate" })
 
@@ -209,7 +105,7 @@ describe("the fill handle", () => {
 		pointer(mounted.fill, "pointerdown", center(mounted.handle, 2, 0))
 		pointer(mounted.fill, "pointermove", center(mounted.handle, 1, 0))
 		pointer(mounted.fill, "pointerup", center(mounted.handle, 1, 0))
-		await settle()
+		await settleGrid()
 
 		expect(mounted.commands.at(-1)).toEqual({
 			type: "cells.clear",
@@ -227,7 +123,7 @@ describe("the fill handle", () => {
 			mounted.scroller.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
 		})
 		pointer(mounted.fill, "pointerup", center(mounted.handle, 6, 0))
-		await settle()
+		await settleGrid()
 
 		expect(mounted.commands.length).toBe(sent)
 	})
@@ -350,7 +246,7 @@ describe("grid extensions", () => {
 			mounted.model.startEditing("typed", "enter")
 		})
 		await act(() => mounted.model.commitEditing(null))
-		await settle()
+		await settleGrid()
 
 		expect(mounted.commands.at(-1)).toMatchObject({ type: "cells.set", cells: { inputs: ["checked"] } })
 
@@ -384,9 +280,9 @@ describe("grid extensions", () => {
 		const plain = await mount()
 		const decorated = await mount([inset])
 		const textX = (mounted: Mounted): number | undefined => {
-			const canvas = canvases.get(mounted.container.querySelector("canvas") as HTMLCanvasElement)
+			const canvas = recorded(mounted.container.querySelector("canvas"))
 
-			return canvas?.calls.find(call => call.op === "fillText" && call.args[0] === "Mon")?.args[1] as number | undefined
+			return canvas.calls.find(call => call.op === "fillText" && call.args[0] === "Mon")?.args[1] as number | undefined
 		}
 
 		// "Mon" is text (no NUMBER flag): not moved; a number left-aligned would be.
@@ -400,11 +296,11 @@ describe("grid extensions", () => {
 				patch: { align: "left" }
 			})
 		})
-		await settle()
+		await settleGrid()
 		decorated.paint()
 
-		const canvas = canvases.get(decorated.container.querySelector("canvas") as HTMLCanvasElement)
-		const one = canvas?.calls.filter(call => call.op === "fillText" && call.args[0] === "1").at(-1)
+		const canvas = recorded(decorated.container.querySelector("canvas"))
+		const one = canvas.calls.filter(call => call.op === "fillText" && call.args[0] === "1").at(-1)
 		const box = decorated.handle.cellRect({ row: 0, col: 0 })
 
 		expect((one?.args[1] as number) - (box?.x ?? 0)).toBeGreaterThanOrEqual(40)
@@ -433,7 +329,7 @@ describe("grid extensions", () => {
 					sizes: Float32Array.of(40)
 				})
 			})
-			await settle()
+			await settleGrid()
 			mounted.paint()
 
 			expect(painted).toHaveBeenCalled()

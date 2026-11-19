@@ -1,39 +1,21 @@
 import { describe, expect, it } from "vitest"
-import type { FontExtents, TextMeasurer } from "../core/text/index"
 import type { DocxEngineServices } from "../dom/docx/index"
 import { exportDocxPdf } from "../dom/docx/pdf"
 import { reportOf } from "../dom/docx/pdfClient"
 import { workerHarness } from "./docxEncryptedFixtures"
 import { pdfAssets } from "./docxPdfFixtures"
 import { PNG, latin1 } from "./rtfWriteFixtures"
+import { engineServices } from "./engineFixtures"
 
 // What an RTF file shows that the package it reads as leaves out (a shape with nothing to draw it by, an object without its result...) reaches the
 // PDF's report as the conversions' reports have it, so the export says it was simplified; what no page shows (an
 // unknown destination such as the generator's name) does not.
 
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
 function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
+	return engineServices({
 		yield: () => new Promise(resolve => setTimeout(resolve, 0)),
 		sliceMs: 8
-	}
+	})
 }
 
 const HEADER = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Times;}}{\\*\\generator Some Writer;}"

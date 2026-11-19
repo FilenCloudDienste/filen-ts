@@ -3,7 +3,7 @@ import type { SheetCommandResult } from "../core/sheet/protocol"
 import type { SheetValidationRule } from "../core/sheet/dv/xlsx"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { IMMEDIATE } from "./sheetCfFixtures"
-import { savedBytes } from "./sheetSessionFixtures"
+import { cells, savedBytes } from "./sheetSessionFixtures"
 import { buildFixture, parts, type Fixture } from "./xlsxWriteFixtures"
 
 // Data validation in a session: which cells offer a list or show a message, a list's items, an entry checked as
@@ -103,6 +103,33 @@ describe("data validation in a session", () => {
 			"South"
 		])
 		expect(await session.query("validation.list", { sheet, row: 0, col: 0 })).toBeNull()
+		session.close()
+	})
+
+	// Excel's list leaves out the space typed after each comma, and LibreOffice reads the list without it; the file
+	// keeps the formula as written.
+	it("offers and takes a literal list's items without the spaces after its commas", async () => {
+		const formula = '<formula1>"Yes, No,  Maybe"</formula1>'
+		const { session, sheet } = await open({
+			sheets: [
+				{
+					name: "One",
+					body: `<sheetData/><dataValidations count="1"><dataValidation type="list" showErrorMessage="1" sqref="A1:A5">${formula}</dataValidation></dataValidations>`
+				}
+			]
+		})
+
+		expect((await session.query("validation.list", { sheet, row: 0, col: 0 }))?.items).toEqual([
+			{ text: "Yes", input: "Yes" },
+			{ text: "No", input: "No" },
+			{ text: "Maybe", input: "Maybe" }
+		])
+		expect(await session.query("validation.check", { sheet, row: 0, col: 0, input: "No" })).toBeNull()
+		expect(await session.query("validation.check", { sheet, row: 0, col: 0, input: "maybe" })).toBeNull()
+		expect(await session.query("validation.check", { sheet, row: 0, col: 0, input: "Perhaps" })).not.toBeNull()
+
+		ok(await session.command({ type: "cells.set", sheet, cells: cells([[0, 0, "No"]]) }))
+		expect(parts(await savedBytes(session))["xl/worksheets/sheet1.xml"]).toContain(formula)
 		session.close()
 	})
 

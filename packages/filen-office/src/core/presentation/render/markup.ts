@@ -1,4 +1,4 @@
-import { D, drawingGroupOf, type DrawingReader } from "../../drawingml/reader"
+import { D, EMU_PER_PX, drawingGroupOf, type DrawingReader } from "../../drawingml/reader"
 import type { ImageTarget } from "../../drawingml/picture"
 import type { TextBodyProps } from "../../drawingml/index"
 import { NodeKind, escapeAttribute, escapeText } from "../../xml/index"
@@ -414,8 +414,6 @@ export function geometryXml(geometry: Geometry): string {
 
 	return `<a:custGeom><a:avLst/><a:gdLst>${guides}</a:gdLst>${rect}<a:pathLst>${paths}</a:pathLst></a:custGeom>`
 }
-
-const EMU_PER_PX = 9525
 
 // Resolved body properties as a:bodyPr (px insets back to EMU).
 export function bodyPrXml(body: TextBodyProps): string {

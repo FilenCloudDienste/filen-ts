@@ -7,10 +7,8 @@ import { OfficeCryptoError } from "../encryption/errors"
 import { decryptionOf } from "../encryption/legacyDecryption"
 import { subtle } from "../encryption/subtle"
 import { hashLegacyProtectionKey } from "../protection"
-import type { DocxEngineServices } from "./engine"
-import { inThreadDocxHost, type DocxHost } from "./host"
-import { heldSource, type DocxProtectionOptions } from "./protection"
-import type { DocxOpenOptions } from "./protocol"
+import type { DocxHost } from "./host"
+import type { DocxProtectionOptions } from "./protection"
 
 export type { DocNotConverted, DocNotConvertedKind } from "../../core/doc/toDocx/index"
 
@@ -54,7 +52,7 @@ export interface DocxLegacyOptions extends DocxProtectionOptions {
 	readonly password?: string
 }
 
-// Converts files that may be Word binary documents (docxWorkerPool(...).legacy, or inThreadDocxLegacy).
+// Converts files that may be Word binary documents (docxWorkerPool(...).legacy).
 export interface DocxLegacy {
 	open(source: ByteSource, options?: DocxLegacyOptions): Promise<DocxLegacyOpen>
 }
@@ -170,62 +168,6 @@ export function docxLegacyServer(): DocxLegacyServer {
 		},
 		close(id) {
 			return held.delete(id)
-		}
-	}
-}
-
-// Conversion on the caller's thread, for hosts without a worker (a WebView, tests).
-export function inThreadDocxLegacy(services: (options: DocxOpenOptions) => DocxEngineServices): DocxLegacy {
-	const engines = inThreadDocxHost(services)
-
-	return {
-		async open(source, options = {}) {
-			const aborted = (): boolean => options.signal?.aborted === true
-
-			if (aborted()) return { kind: "aborted" }
-
-			const server = docxLegacyServer()
-			const answer = await server.convert(0, source, options.password)
-
-			if (!answer.ok) return { kind: "refused", refusal: answer.refusal }
-
-			if (aborted()) {
-				server.close(0)
-
-				return { kind: "aborted" }
-			}
-
-			return {
-				kind: "converted",
-				document: {
-					host: (_source, listener, openOptions) => {
-						const bytes = server.package(0)
-
-						if (bytes !== undefined) return engines(bytesSource(bytes), listener, openOptions)
-
-						listener({ type: "error", reason: "failed", message: "The converted document was released" })
-
-						return {
-							objects: () => Promise.resolve([]),
-							media: () => Promise.resolve(null),
-							locate: () => Promise.resolve(null),
-							find: () => Promise.resolve(new Int32Array(0)),
-							close: () => undefined
-						}
-					},
-					bytes: heldSource(answer.size),
-					notConverted: answer.notConverted,
-					decrypted: answer.decrypted,
-					take: (takeOptions = {}) => {
-						if (takeOptions.signal?.aborted === true) return Promise.reject(new Error("Aborted"))
-
-						return server.take(0, takeOptions)
-					},
-					release: () => {
-						server.close(0)
-					}
-				}
-			}
 		}
 	}
 }

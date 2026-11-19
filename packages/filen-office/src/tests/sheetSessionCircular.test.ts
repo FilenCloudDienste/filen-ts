@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult, SheetEvent } from "../core/sheet/protocol"
-import { cells, firstTile, openFixture, tileTexts } from "./sheetSessionFixtures"
+import type { SheetEvent } from "../core/sheet/protocol"
+import { cells, firstTile, openFixture, tileTexts, changeOf } from "./sheetSessionFixtures"
 
 // A session reports circular references as Excel does: "circularReferences" events naming the first circular cell of
 // each sheet, `introduced` once per circle an edit makes (Excel's warning), none under iterative calculation.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
-}
 
 function circular(events: readonly SheetEvent[]): Extract<SheetEvent, { type: "circularReferences" }>[] {
 	return events.filter((event): event is Extract<SheetEvent, { type: "circularReferences" }> => event.type === "circularReferences")

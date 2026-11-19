@@ -133,34 +133,55 @@ export function visibleFillPlan(
 		if (first !== undefined && last !== undefined) trimmed.push({ ...range, startRow: first.startRow, endRow: last.endRow })
 	}
 
-	const plan = fillPlan(trimmed, direction)
+	return visiblePlan(fillPlan(trimmed, direction), hidden)
+}
 
+// The indices of the entries whose target row `hidden` leaves visible: null when every one is.
+function visibleEntries(plan: FillPlan, hidden: readonly RowSpan[]): number[] | null {
+	if (hidden.length === 0) return null
+
+	const kept: number[] = []
+
+	for (let i = 0; i < plan.rows.length; i++) if (!rowHidden(hidden, plan.rows[i] ?? 0)) kept.push(i)
+
+	return kept.length === plan.rows.length ? null : kept
+}
+
+function pickedPlan(plan: FillPlan, kept: readonly number[]): FillPlan {
+	const pick = (from: Uint32Array): Uint32Array => Uint32Array.from(kept, i => from[i] ?? 0)
+
+	return {
+		rows: pick(plan.rows),
+		cols: pick(plan.cols),
+		sourceRows: pick(plan.sourceRows),
+		sourceCols: pick(plan.sourceCols),
+		ranges: plan.ranges
+	}
+}
+
+function visiblePlan(plan: FillPlan | "tooLarge" | null, hidden: readonly RowSpan[]): FillPlan | "tooLarge" | null {
 	if (plan === null || plan === "tooLarge") return plan
 
-	let count = 0
+	const kept = visibleEntries(plan, hidden)
 
-	for (let i = 0; i < plan.rows.length; i++) if (!rowHidden(hidden, plan.rows[i] ?? 0)) count++
+	if (kept === null) return plan
+	if (kept.length === 0) return null
 
-	if (count === plan.rows.length) return plan
-	if (count === 0) return null
+	return pickedPlan(plan, kept)
+}
 
-	const rows = new Uint32Array(count)
-	const cols = new Uint32Array(count)
-	const sourceRows = new Uint32Array(count)
-	const sourceCols = new Uint32Array(count)
-	let at = 0
+// The fill handle's and the Series dialog's writes on a filtered sheet (`hidden`: visibleRows.ts): the targets in
+// hidden rows dropped, left as they are, the rest keeping the values they take; `ranges` stays the whole target, for
+// the merge and array checks.
+export function visibleWrites(plan: FillWrites | "tooLarge" | null, hidden: readonly RowSpan[]): FillWrites | "tooLarge" | null {
+	if (plan === null || plan === "tooLarge") return plan
 
-	for (let i = 0; i < plan.rows.length; i++) {
-		if (rowHidden(hidden, plan.rows[i] ?? 0)) continue
+	const kept = visibleEntries(plan, hidden)
 
-		rows[at] = plan.rows[i] ?? 0
-		cols[at] = plan.cols[i] ?? 0
-		sourceRows[at] = plan.sourceRows[i] ?? 0
-		sourceCols[at] = plan.sourceCols[i] ?? 0
-		at++
-	}
+	if (kept === null) return plan
+	if (kept.length === 0) return null
 
-	return { rows, cols, sourceRows, sourceCols, ranges: plan.ranges }
+	return { ...pickedPlan(plan, kept), values: kept.map(i => plan.values[i] ?? { kind: "copy" }) }
 }
 
 interface Merge {

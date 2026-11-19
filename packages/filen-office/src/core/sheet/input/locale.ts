@@ -1,3 +1,4 @@
+import type { NumFmtLocale } from "../numfmt/locale"
 import type { SheetLocale } from "../protocol"
 import { TERRITORY_CURRENCIES } from "./currencies.generated"
 import { skipQuoted } from "../refs/scan"
@@ -543,10 +544,11 @@ export function entryNumber(text: string, locale: SheetLocale): { value: number;
 const DATE = /^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4})$/
 // Two numbers without a year: "/" or "-" between them ("1.5" stays a number's, or no date, in every locale).
 const DAY_MONTH = /^(\d{1,4})[/-](\d{1,4})$/
-// d-mmm, d mmm yyyy, 5/Jan/24: the day before a month name, the year after it optional.
-const NAMED_DAY_FIRST = /^(\d{1,2})[-/ ]([a-z]+)\.?(?:[-/ ](\d{1,4}))?$/i
+// d-mmm, d mmm yyyy, 5/Jan/24, 5. März 2024: the day before a month name, the year after it optional. A short name may
+// end in "." or the Devanagari abbreviation sign ("जन॰").
+const NAMED_DAY_FIRST = /^(\d{1,2})(?:[-/ ]|\. ?)([\p{L}\p{M}]+)[.\u0970]?(?:[-/ ](\d{1,4}))?$/iu
 // Jan-24, January 5, 2024, Jan 5 2024, Jan-2024: the month name first.
-const NAMED_MONTH_FIRST = /^([a-z]+)\.?[-/ ](\d{1,4})(?:(?:, ?|[-/ ])(\d{1,4}))?$/i
+const NAMED_MONTH_FIRST = /^([\p{L}\p{M}]+)[.\u0970]?[-/ ](\d{1,4})(?:(?:, ?|[-/ ])(\d{1,4}))?$/iu
 
 const MONTH_NAMES = [
 	"january",
@@ -569,10 +571,40 @@ export interface LocalizedDate {
 	readonly day: number
 }
 
-// A month's English name, in full or its first three letters ("Sept" too), any case; 0 for none.
-function monthNamed(word: string): number {
-	const lower = word.toLowerCase()
+// The session language's month names, full and short as it shows them, case-folded without a trailing "." or "॰": built
+// once per locale.
+const localMonths = new WeakMap<NumFmtLocale, ReadonlyMap<string, number>>()
 
+function localMonthNames(locale: NumFmtLocale): ReadonlyMap<string, number> {
+	let names = localMonths.get(locale)
+
+	if (names === undefined) {
+		const built = new Map<string, number>()
+		const add = (list: readonly string[]): void => {
+			list.forEach((name, index) => {
+				const key = name.toLowerCase().replace(/[.\u0970]$/, "")
+
+				if (key !== "" && index < 12 && !built.has(key)) built.set(key, index + 1)
+			})
+		}
+
+		add(locale.months)
+		add(locale.monthsShort)
+		names = built
+		localMonths.set(locale, names)
+	}
+
+	return names
+}
+
+// A month's name in the session's language as it shows it (full or short, a trailing "." optional), or its English
+// name in full or its first three letters ("Sept" too); any case, the session's language first where the two read a
+// word differently. 0 for none.
+function monthNamed(word: string, locale: SheetLocale): number {
+	const lower = word.toLowerCase()
+	const local = locale.numFmt === undefined ? undefined : localMonthNames(locale.numFmt).get(lower)
+
+	if (local !== undefined) return local
 	if (lower.length < 3) return 0
 	if (lower === "sept") return 9
 
@@ -649,7 +681,8 @@ function dayOrYear(month: number, text: string, year: number, leap1900: boolean)
 // A date as text in a formula reads (DATEVALUE, "5-Jan-2024"+0), as Excel reads one by the system's settings
 // (support.microsoft.com "DATEVALUE function": "22-MAY-2011", "5-JUL" in the clock's year): the locale's numeric
 // order with a year, or without one (m/d, or d/m where the day comes first) in `currentYear`, a month and year (1/2024),
-// and an English month name with the day before or after it (d-mmm-yy, d mmm yyyy, mmmm d, yyyy, mmm-yy, d-mmm).
+// and a month name (the session language's, or English) with the day before or after it (d-mmm-yy, d mmm yyyy,
+// mmmm d, yyyy, mmm-yy, d-mmm).
 // `leap1900` reads 1900-02-29, as the 1900 date system does. Null for anything else.
 export function formulaTextDate(text: string, locale: SheetLocale, currentYear: () => number, leap1900: boolean): LocalizedDate | null {
 	const first = text.charCodeAt(0)
@@ -687,7 +720,7 @@ export function formulaTextDate(text: string, locale: SheetLocale, currentYear: 
 		if (named === null) return null
 
 		const [, dayText = "", name = "", yearText] = named
-		const month = monthNamed(name)
+		const month = monthNamed(name, locale)
 		const year = yearText === undefined ? currentYear() : yearOf(yearText)
 		const day = Number(dayText)
 
@@ -699,7 +732,7 @@ export function formulaTextDate(text: string, locale: SheetLocale, currentYear: 
 	if (named === null) return null
 
 	const [, name = "", second = "", third] = named
-	const month = monthNamed(name)
+	const month = monthNamed(name, locale)
 
 	if (month === 0) return null
 	if (third === undefined) return dayOrYear(month, second, currentYear(), leap1900)

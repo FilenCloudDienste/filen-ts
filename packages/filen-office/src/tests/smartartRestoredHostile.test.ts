@@ -2,13 +2,12 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { unzipSync, zipSync } from "fflate"
 import { describe, expect, it } from "vitest"
-import type { ShapeNode, SlideNode, SlideRef } from "../core/presentation/model"
-import { pptxParts } from "../dom/presentation/engine/open/pptx"
+import type { SlideNode, SlideRef } from "../core/presentation/model"
 import { review } from "../dom/presentation/engine/review"
-import { smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { CORPUS_DIR } from "./corpusDir"
 import { driveSession } from "./odpWriteDrive"
 import { danglingReferences } from "./pptxWriteFixtures"
+import { diagramRenderer, frameIn } from "./smartartDriveFixtures"
 
 // A diagram's slide deleted and saved (the package loses its diagram parts), then restored by undo: a diagram op on
 // it reads the parts its restore held. Held markup that does not read is refused as malformed (the file's fault, not
@@ -28,18 +27,6 @@ function variant(part: string, mutate: (xml: string) => string): Uint8Array {
 	return zipSync(files, { level: 6 })
 }
 
-function frameIn(shapes: readonly ShapeNode[]): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.frame?.kind === "smartart") return shape
-
-		const child = shape.children === undefined ? undefined : frameIn(shape.children)
-
-		if (child !== undefined) return child
-	}
-
-	return undefined
-}
-
 const VARIANTS: readonly [string, () => Uint8Array][] = [
 	["colours cut short", () => variant("ppt/diagrams/colors1.xml", xml => xml.slice(0, xml.length / 2))],
 	["style unterminated", () => variant("ppt/diagrams/quickStyle1.xml", xml => xml.replace(/<\/dgm:styleDef>\s*$/u, "<oops"))],
@@ -57,13 +44,7 @@ describe.skipIf(!existsSync(PIE))("held diagram markup that does not read, on a 
 		it(`${label}: the diagram op is refused malformed and the file writes`, async () => {
 			const d = await driveSession(make(), "pptx")
 
-			smartArtRenderer(d.session, {
-				services: {
-					xml: part => pptxParts(d.session.deck)?.document(part),
-					relationship: () => undefined,
-					contentType: () => undefined
-				}
-			})
+			diagramRenderer(d.session)
 
 			const slide = d.session.deck.slides[0] as SlideRef
 

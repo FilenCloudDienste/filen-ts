@@ -47,6 +47,9 @@ export interface SlideShowProps {
 	readonly label: string
 	// The line on the black screen after the last slide ("End of slide show, click to exit.").
 	readonly endLabel?: string
+	// Announced as the show turns to its black or white screen ("Black screen"); the slide's label stays without them.
+	readonly blackLabel?: string
+	readonly whiteLabel?: string
 	readonly slideLabel: (index: number, count: number) => string
 	readonly actionLabel?: (action: Action, layer: SlideLayer) => string
 	// Accessible names of an animation trigger and of a text link.
@@ -112,6 +115,33 @@ function playerProps(props: SlideShowProps): PlayerProps {
 	}
 }
 
+// Read by assistive technology, never seen.
+const VISUALLY_HIDDEN = {
+	position: "absolute",
+	width: 1,
+	height: 1,
+	margin: -1,
+	padding: 0,
+	overflow: "hidden",
+	clipPath: "inset(50%)",
+	whiteSpace: "nowrap",
+	border: 0
+} as const
+
+// The slide's text alternative to its drawings, in layer order: each layer's text, else its alt text.
+function slideTexts(render: SlideRender | undefined): string[] {
+	const out: string[] = []
+
+	for (const layer of render?.layers ?? []) {
+		const text = layer.text?.page.sourceTexts.join(" ").trim() ?? ""
+		const said = text !== "" ? text : (layer.alt?.trim() ?? "")
+
+		if (said !== "") out.push(said)
+	}
+
+	return out
+}
+
 // How long after a menu key the browser's contextmenu for it may come.
 const KEY_ECHO_MS = 1000
 
@@ -127,7 +157,7 @@ function portaled(event: { readonly currentTarget: Node; readonly target: EventT
 }
 
 export function SlideShow(props: SlideShowProps) {
-	const { size, label, endLabel, slideLabel, slides, overlay, onKey, onPointer, ref } = props
+	const { size, label, endLabel, blackLabel, whiteLabel, slideLabel, slides, overlay, onKey, onPointer, ref } = props
 	const [browse] = useState(() => props.statusBar !== undefined)
 	const stageRef = useRef<HTMLDivElement | null>(null)
 	// Where the slide is fitted: the stage, or the part of it over a status bar.
@@ -145,6 +175,18 @@ export function SlideShow(props: SlideShowProps) {
 	const keyedMenu = useRef<number | undefined>(undefined)
 	const slideWidth = size.cx / EMU_PER_PX
 	const slideHeight = size.cy / EMU_PER_PX
+	const shownRef = index === undefined ? undefined : slides[index]?.ref
+	const texts = screen === "slide" && shownRef !== undefined ? slideTexts(props.renders.get(shownRef)) : []
+	const announced =
+		screen === "end" && endLabel !== undefined
+			? endLabel
+			: screen === "black" && blackLabel !== undefined
+				? blackLabel
+				: screen === "white" && whiteLabel !== undefined
+					? whiteLabel
+					: index === undefined
+						? ""
+						: slideLabel(index, slides.length)
 
 	useLayoutEffect(() => {
 		const host = hostRef.current
@@ -160,10 +202,12 @@ export function SlideShow(props: SlideShowProps) {
 			const height = area.clientHeight
 			const scale = width > 0 && height > 0 ? Math.min(width / slideWidth, height / slideHeight) : 0
 
+			const left = (width - slideWidth * scale) / 2
+			const top = (height - slideHeight * scale) / 2
+
+			// The bars move with the area even when the scale does not (a one-axis resize).
 			setFit(previous =>
-				previous.scale === scale
-					? previous
-					: { scale, left: (width - slideWidth * scale) / 2, top: (height - slideHeight * scale) / 2 }
+				previous.scale === scale && previous.left === left && previous.top === top ? previous : { scale, left, top }
 			)
 			player.resize(slideWidth * scale, view?.devicePixelRatio ?? 1)
 		}
@@ -388,8 +432,18 @@ export function SlideShow(props: SlideShowProps) {
 				className="fo-show-live"
 				aria-live="polite"
 			>
-				{screen === "end" && endLabel !== undefined ? endLabel : index === undefined ? "" : slideLabel(index, slides.length)}
+				{announced}
 			</div>
+			{texts.length === 0 ? null : (
+				<div
+					className="fo-show-text"
+					style={VISUALLY_HIDDEN}
+				>
+					{texts.map((text, at) => (
+						<p key={at}>{text}</p>
+					))}
+				</div>
+			)}
 		</div>
 	)
 }

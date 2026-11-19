@@ -120,13 +120,19 @@ function position(rule: DvRule, cell: DvCell): { sheet: SheetId; anchorRow: numb
 	return { sheet: cell.sheet, anchorRow, anchorCol, row: cell.row, col: cell.col }
 }
 
-// A literal list ("a,b,c" in quotes): its items as written.
+// A literal list ("a,b,c" in quotes): its items as written, without the spaces before each ("Yes, No" offers and
+// takes "No"), as Excel's list shows them and LibreOffice reads them (its import of " Yes , No" is "Yes " and "No ").
+// The stored formula keeps them.
 function literalItems(formula: string): string[] | null {
 	const text = formula.trim()
 
 	if (!text.startsWith('"') || !text.endsWith('"') || text.length < 2) return null
 
-	return text.slice(1, -1).replace(/""/gu, '"').split(",")
+	return text
+		.slice(1, -1)
+		.replace(/""/gu, '"')
+		.split(",")
+		.map(item => item.replace(/^ +/u, ""))
 }
 
 // The values a list's source gives: a reference's cells row by row (blank ones too), an array's values.

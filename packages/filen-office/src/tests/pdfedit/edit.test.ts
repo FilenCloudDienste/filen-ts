@@ -1,13 +1,11 @@
-import { MessageChannel } from "node:worker_threads"
 import { afterEach, describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
-import { createSyncRangeBuffer, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import type { PdfSaveCheck, PdfSaveExpectation } from "../../dom/pdfedit/protocol"
 import { makeFormPdf } from "./fixtures"
-import { spawnEngine, startEngine, stopEngines, upload } from "./harness"
+import { startEngine, stopEngines, upload, verifier } from "./harness"
 import { signedFixture } from "../pdfSignFixtures"
 import { pdfSignatureFields } from "../../dom/pdf/signatureFields"
 import { budget } from "../timing"
@@ -42,23 +40,10 @@ async function widget(client: PdfEngineClient, key: string) {
 
 // The written file checked by a second engine reading it from the first one's heap.
 async function checkInVerifier(client: PdfEngineClient, size: number, expected: PdfSaveExpectation): Promise<PdfSaveCheck> {
-	const buffer = createSyncRangeBuffer(8, 64 * 1024)
-	const channel = new MessageChannel()
+	const engine = await verifier(client, size)
+	const check = await engine.call("checkSaved", expected)
 
-	await client.call("serveOutput", { buffer, port: channel.port1 as unknown as SyncRangePort }, [channel.port1])
-
-	const verifier = spawnEngine({})
-	const opened = await verifier.call(
-		"open",
-		{ channel: { buffer, port: channel.port2 as unknown as SyncRangePort, length: size }, role: "verify" },
-		[channel.port2]
-	)
-
-	expect(opened.status).toBe("open")
-
-	const check = await verifier.call("checkSaved", expected)
-
-	verifier.terminate()
+	engine.terminate()
 
 	return check
 }
@@ -178,7 +163,26 @@ describe("editing a form in the engine", () => {
 			const undone = await engine.client.call("undo", {})
 
 			expect(undone.state).toMatchObject({ canRedo: true, redoLabel: "forms.setField" })
+			// Every page redraws; no page's widgets are read for the answer unless the page names it as shown.
+			expect(undone).toMatchObject({ pages: [0, 1], widgets: [] })
 			expect((await widget(engine.client, "colour")).value).toBe("Red")
+
+			const redone = await engine.client.call("redo", { pages: [1] })
+
+			expect(redone.pages).toEqual([0, 1])
+			expect(redone.widgets.map(entry => entry.page)).toEqual([1])
+
+			// The shown page's widgets as the step left them; repeats and pages past the end are not read.
+			const back = await engine.client.call("undo", { pages: [0, 0, 7, -1, 0.5] })
+
+			expect(back.pages).toEqual([0, 1])
+			expect(back.widgets.map(entry => entry.page)).toEqual([0])
+			expect(back.widgets[0]?.widgets.find(entry => entry.field === "colour")?.value).toBe("Red")
+			await expect(engine.client.call("redo", { pages: Array.from({ length: 33 }, () => 0) })).rejects.toMatchObject({
+				failure: "badRequest"
+			})
+			await engine.client.call("redo", {})
+			await engine.client.call("undo", {})
 
 			await engine.client.call("undo", {})
 			await engine.client.call("undo", {})

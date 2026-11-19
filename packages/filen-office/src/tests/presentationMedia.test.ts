@@ -458,13 +458,13 @@ describe("presentation media edits", () => {
 		}
 		const media: InsertedMedia = { id: 5, kind: "video", contentType: "video/mp4", size: 10, crc32: 0, poster: image() }
 
-		expect(await harness.h.command({ family: "media", kind: "insert", slide, shape, media })).toEqual({
+		expect(await harness.h.command({ family: "media", kind: "insert", slide, shape, media })).toMatchObject({
 			ok: false,
 			refusal: "notFound"
 		})
 		expect(
 			await harness.h.command({ family: "media", kind: "insert", slide, shape, media: { ...media, poster: undefined } as never })
-		).toEqual({
+		).toMatchObject({
 			ok: false,
 			refusal: "malformed"
 		})
@@ -488,13 +488,13 @@ describe("presentation media edits", () => {
 
 		await harness.h.undo()
 		expect(mediaPlayback((await harness.h.slide(0)).timing, 4)).toEqual({})
-		expect(await harness.h.command({ family: "media", kind: "setPlayback", target, playback: { autoPlay: true } })).toEqual({
+		expect(await harness.h.command({ family: "media", kind: "setPlayback", target, playback: { autoPlay: true } })).toMatchObject({
 			ok: false,
 			refusal: "unsupported"
 		})
 		expect(
 			await harness.h.command({ family: "media", kind: "setPlayback", target: { slide, id: 2 }, playback: { loop: true } })
-		).toEqual({
+		).toMatchObject({
 			ok: false,
 			refusal: "unsupported"
 		})

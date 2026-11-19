@@ -15,7 +15,8 @@ import {
 import { DocxEditorSession, openDocxEditContext, type DocxEditContext } from "@filen/office/core/docx/edit"
 import { DocumentEdits, PagedEditor } from "@filen/office/core/docx/paged"
 import type { ResolvedFont } from "@filen/office/core/fonts"
-import { HitTester, type TextMeasurer } from "@filen/office/core/text"
+import { HitTester } from "@filen/office/core/text"
+import { measurer } from "./engineFixtures"
 
 // A paged editor for DOM tests (no font files): every font measures half its size per character.
 
@@ -49,20 +50,6 @@ const FONTS: FontSource = {
 		}) satisfies ResolvedFont
 }
 
-function sizeOf(font: string): number {
-	return Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 16)
-}
-
-const MEASURER: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = sizeOf(font)
-
-		for (let k = 0; k < count; k++) widths[k] = (texts[k]?.length ?? 0) * size * 0.5
-	},
-	fontExtents: font => ({ ascent: sizeOf(font) * 0.8, descent: sizeOf(font) * 0.2 })
-}
-
 export async function pagedEditor(
 	bytes: Uint8Array
 ): Promise<{ editor: PagedEditor; layout: DocumentLayout; pkg: DocxPackage; context: DocxEditContext }> {
@@ -80,7 +67,7 @@ export async function pagedEditor(
 	const resolver = new PropertyResolver({ styles, numbering, theme: undefined, settings: styleSettings(model.settings) })
 	const context = await openDocxEditContext(pkg, model, { store, resolver, ...(styles === undefined ? {} : { styles }) })
 	const edits = new DocumentEdits(model)
-	const layout = layoutDocument(edits.model, resolver, FONTS, MEASURER, { store, sliceMs: Infinity, recordMaps: true, edits })
+	const layout = layoutDocument(edits.model, resolver, FONTS, measurer, { store, sliceMs: Infinity, recordMaps: true, edits })
 
 	await layout.done
 

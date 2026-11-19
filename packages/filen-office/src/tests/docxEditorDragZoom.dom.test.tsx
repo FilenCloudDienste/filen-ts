@@ -3,12 +3,11 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { DocxEditor } from "@filen/office/react/docx/editor"
 import { unitDragSelection } from "../react/docx/edit/unitDrag"
 import { anchoredScrollTop } from "../react/docx/viewport"
 import { buildDocx, p } from "./docxSynthetic"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { pagedEditor } from "./pagedDomFixtures"
 
 // Double- and triple-click drags by whole words and paragraphs, and zooming keeping the view on its place.
@@ -16,25 +15,8 @@ import { pagedEditor } from "./pagedDomFixtures"
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const GAP = 16
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
 // No pages from the renderer: the editor stacks them at the default Letter size, as the layout has them.
-const DOCUMENT: DocxDocument = {
-	status: "ready",
-	info: undefined,
-	pages: [],
-	pageCount: 0,
-	tables: { styles: [], decorations: [], links: [] },
-	session: SESSION,
-	media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-	error: undefined
-}
+const DOCUMENT = emptyDocxDocument()
 const LONG = buildDocx({
 	body: Array.from({ length: 60 }, (_, k) => p(`Paragraph ${String(k)} ${"lorem ipsum dolor sit amet ".repeat(12)}`)).join("")
 })

@@ -1,20 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { XlsxParts } from "../core/xlsx/package/parts"
 import type { SheetEvent } from "../core/sheet/protocol"
-import { firstTile, openFixture, tileTexts } from "./sheetSessionFixtures"
-
-// Text deflate cannot shrink much: the part is large compressed too, past what the preview reads.
-function noise(length: number, seed: number): string {
-	let state = seed >>> 0
-	let out = ""
-
-	for (let i = 0; i < length; i++) {
-		state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-		out += String.fromCharCode(97 + (state >>> 27))
-	}
-
-	return out
-}
+import { firstTile, openFixture, tileTexts, noise } from "./sheetSessionFixtures"
 
 async function until(events: readonly SheetEvent[], type: SheetEvent["type"]): Promise<SheetEvent> {
 	for (let i = 0; i < 400; i++) {

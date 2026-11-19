@@ -6,7 +6,7 @@ import { openOds } from "../core/ods/open"
 import type { SheetCommand } from "../core/sheet/protocol"
 import type { SheetStore } from "../core/xlsx/model/store"
 import { inThreadSheetHost } from "../dom/sheet/host"
-import { odsBytes, odsDocument, shownRows, table, type OdsParts } from "./odsFixtures"
+import { odsBytes, odsContent, odsDocument, shownRows, table, type OdsParts } from "./odsFixtures"
 import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // Structure and format edits on an OpenDocument spreadsheet, saved and read back: rows and columns inserted and
@@ -50,10 +50,6 @@ async function readBack(bytes: Uint8Array) {
 	await document.readyAllSheets()
 
 	return { document, names: opened.workbook.sheets.map(sheet => sheet.name), rows: (sheet: number) => shownRows(document, sheet) }
-}
-
-function content(bytes: Uint8Array): string {
-	return strFromU8(unzipSync(bytes)["content.xml"] ?? new Uint8Array(0))
 }
 
 const set = (sheet: number, row: number, col: number, input: string): SheetCommand => ({
@@ -146,7 +142,7 @@ describe("ODS structure edits", () => {
 
 		const bytes = await saved(session)
 		const back = await readBack(bytes)
-		const xml = content(bytes)
+		const xml = odsContent(bytes)
 
 		expect(back.document.workbook.definedNames.map(name => [name.name, name.sheet === null, name.formula])).toEqual([
 			["Block", true, "'S'!$A$4:$B$6"],
@@ -205,7 +201,7 @@ describe("ODS structure edits", () => {
 		const back = await readBack(written)
 
 		expect(back.rows(0)[1]).toEqual(["1.00", "2.00"])
-		expect(content(written)).toMatch(
+		expect(odsContent(written)).toMatch(
 			/<number:number-style style:name="NF1"><number:number number:decimal-places="2" number:min-integer-digits="1"\/><\/number:number-style>/
 		)
 		session.close()
@@ -245,7 +241,7 @@ describe("ODS structure edits", () => {
 			const back = await readBack(bytes)
 
 			expect(mergesOf(back)).toEqual([0, col, 2, col])
-			expect(content(bytes)).toContain('table:number-rows-spanned="3"')
+			expect(odsContent(bytes)).toContain('table:number-rows-spanned="3"')
 			expect(boldAnchor(back, col)).toBe(true)
 			session.close()
 		})
@@ -293,7 +289,7 @@ describe("ODS structure edits", () => {
 
 		const written = await saved(session)
 
-		expect(content(written)).toContain('table:visibility="collapse"')
+		expect(odsContent(written)).toContain('table:visibility="collapse"')
 		session.close()
 	})
 })
@@ -308,13 +304,13 @@ describe("ODS notes and links", () => {
 
 		const written = await saved(session)
 
-		expect(content(written)).toContain(
+		expect(odsContent(written)).toContain(
 			"<office:annotation><dc:creator>Test</dc:creator><text:p>first line</text:p><text:p>second</text:p></office:annotation>"
 		)
 
 		await run(session, { type: "note.delete", sheet, ranges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 1 }] })
 
-		expect(content(await saved(session))).not.toContain("first line")
+		expect(odsContent(await saved(session))).not.toContain("first line")
 		session.close()
 	})
 
@@ -332,7 +328,7 @@ describe("ODS notes and links", () => {
 
 		const written = await saved(session)
 
-		expect(content(written)).toContain('<text:a xlink:href="https://example.com/a" xlink:type="simple">renamed</text:a>')
+		expect(odsContent(written)).toContain('<text:a xlink:href="https://example.com/a" xlink:type="simple">renamed</text:a>')
 		session.close()
 	})
 })
@@ -435,8 +431,8 @@ describe("ODS views, protection and print areas", () => {
 
 		const written = await saved(session)
 
-		expect(content(written)).toContain('table:protected="true"')
-		expect(content(written)).toContain('table:structure-protected="true"')
+		expect(odsContent(written)).toContain('table:protected="true"')
+		expect(odsContent(written)).toContain('table:structure-protected="true"')
 
 		await run(session, { type: "sheet.unprotect", sheet })
 
@@ -476,7 +472,7 @@ describe("ODS validations", () => {
 		await run(session, { type: "validation.set", sheet, ranges: [{ startRow: 1, startCol: 1, endRow: 3, endCol: 1 }], rule: RULE })
 
 		const written = await saved(session)
-		const text = content(written)
+		const text = odsContent(written)
 
 		expect(text).toContain('table:condition="of:cell-content-is-whole-number() and cell-content-is-between(1;10)"')
 		expect(text.match(/table:content-validation-name="valF1"/g)?.length).toBe(3)
@@ -517,7 +513,7 @@ describe("ODS autoFilters", () => {
 		})
 
 		const written = await saved(session)
-		const text = content(written)
+		const text = odsContent(written)
 
 		expect(text).toContain(
 			'<table:database-range table:name="__Anonymous_Sheet_DB__0" table:target-range-address="S.A1:S.B5" table:display-filter-buttons="true">'
@@ -531,7 +527,7 @@ describe("ODS autoFilters", () => {
 			active: { row: 0, col: 0 }
 		})
 
-		expect(content(await saved(session))).not.toContain("table:database-range ")
+		expect(odsContent(await saved(session))).not.toContain("table:database-range ")
 		session.close()
 	})
 })

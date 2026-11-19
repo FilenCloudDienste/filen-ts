@@ -1,13 +1,15 @@
 import { field, hasControl, intArg, stringArg, type DocxCommandInfo, type DocxCommandParser } from "./base"
+import { ANY_BOOKMARK_NAME } from "./fields"
 
 // Links, breaks and characters.
 
 // A link goes to a URL (`target`, written as an external relationship, never fetched), to a bookmark in the
 // document (`anchor`), or to a heading of the story (`heading`: its paragraph's position), through the hidden
 // _Toc bookmark Word's Place in This Document links by (the heading's own, or one made around its text); `text`
-// is inserted as the link's text when the selection is empty.
+// is inserted as the link's text when the selection is empty. A `target` may come with an `anchor`: the location
+// inside it (Word's w:anchor beside an external relationship, as a file holds https://host/page#part), any name.
 export type InsertCommand =
-	| { readonly type: "link.set"; readonly target: string; readonly text?: string }
+	| { readonly type: "link.set"; readonly target: string; readonly anchor?: string; readonly text?: string }
 	| { readonly type: "link.set"; readonly anchor: string; readonly text?: string }
 	| { readonly type: "link.set"; readonly heading: number; readonly text?: string }
 	| { readonly type: "link.remove" }
@@ -66,8 +68,6 @@ export const INSERT_COMMANDS: readonly DocxCommandInfo<InsertCommand["type"]>[] 
 
 // URLs a link may hold (as typed; what opening one allows is the app's link policy).
 export const MAX_LINK_TARGET = 2048
-// Word's bookmark names.
-const BOOKMARK_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/
 export const MAX_LINK_TEXT = 1024
 // A grapheme or a few (a flag, a family emoji): what a symbol picker inserts at once.
 const MAX_SYMBOL = 16
@@ -228,14 +228,22 @@ export const parseInsertCommand: DocxCommandParser<InsertCommand> = (type, value
 	const heading = field(value, "heading")
 	const given = [field(value, "target"), anchor, heading].filter(arg => arg !== undefined).length
 
-	if (given !== 1) return undefined
+	// A target may carry an anchor (the location inside it); else exactly one of them.
+	if (given !== 1 && (given !== 2 || field(value, "target") === undefined || anchor === undefined)) return undefined
+	// A target given but refused never falls through to the anchor alone.
+	if (field(value, "target") !== undefined && target === undefined) return undefined
 	if (target !== undefined) {
 		const written = hasControl(target) ? undefined : linkTargetUri(target)
 
-		return written !== undefined && "uri" in written ? { type, target: written.uri, ...extra } : undefined
+		if (written === undefined || !("uri" in written)) return undefined
+		if (anchor === undefined) return { type, target: written.uri, ...extra }
+
+		const location = stringArg(value, "anchor", MAX_LINK_TARGET, 1)
+
+		return location === undefined || hasControl(location) ? undefined : { type, target: written.uri, anchor: location, ...extra }
 	}
 
-	if (typeof anchor === "string" && BOOKMARK_NAME.test(anchor)) return { type, anchor, ...extra }
+	if (typeof anchor === "string" && ANY_BOOKMARK_NAME.test(anchor)) return { type, anchor, ...extra }
 
 	const pos = intArg(value, "heading", 0, Number.MAX_SAFE_INTEGER)
 

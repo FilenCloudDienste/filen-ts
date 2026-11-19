@@ -185,6 +185,7 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 				deckDefinitions: []
 			}),
 		chartData: () => Promise.resolve({ info: null, data: false }),
+		pictureFormat: (_context, target) => Promise.resolve({ crop: { l: target.id, t: 0, r: 0, b: 0 }, adjust: { grayscale: true } }),
 		timegraph: () => Promise.resolve(timegraph),
 		layers: (_context, _slide, widthPx, plan) =>
 			Promise.resolve(plan.shapes.map(id => ({ shape: id, bitmap: bitmap(widthPx, 10), x: 0, y: 0, width: widthPx, height: 10 }))),
@@ -361,6 +362,10 @@ describe("the presentation protocol", () => {
 			nodes: [{ id: "a", text: "A" }]
 		})
 		expect(await session.call("chartData", shape).answer).toEqual({ info: null, data: false })
+		expect(await session.call("pictureFormat", shape).answer).toEqual({
+			crop: { l: shape.id, t: 0, r: 0, b: 0 },
+			adjust: { grayscale: true }
+		})
 		expect(await session.call("timegraph", slideRef(10)).answer).toEqual(timegraph)
 		expect(await session.call("layers", slideRef(10), 1280, { shapes: [2, 3], dpr: 2 }).answer).toMatchObject([
 			{ shape: 2, width: 1280 },
@@ -494,6 +499,7 @@ describe("the presentation protocol", () => {
 			smartArtPreview: () => session.call("smartArtPreview", { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }).answer,
 			smartArtInfo: () => session.call("smartArtInfo", shape).answer,
 			chartData: () => session.call("chartData", shape).answer,
+			pictureFormat: () => session.call("pictureFormat", shape).answer,
 			jobsPort: () => session.call("jobsPort", ports()).answer,
 			freshParts: () => session.call("freshParts", "pptx", ports()).answer,
 			review: () => session.call("review", slideRef(10)).answer,
@@ -514,6 +520,7 @@ describe("the presentation protocol", () => {
 			"shade",
 			"registerMedia",
 			"chartData",
+			"pictureFormat",
 			"jobsPort",
 			"jobsPort",
 			"freshParts",

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { PdfAnnotationInfo, PdfPoint, PdfRect } from "../core/pdfedit/annotations"
 import { INK_IDLE, inkPointer, smoothStroke, type InkState } from "../react/pdfedit/tools/ink"
 import { markupPointer, markupTool, quadsFromLines, type PdfTextLine } from "../react/pdfedit/tools/markup"
-import { dragRect, placementKey, startPlacement } from "../react/pdfedit/tools/placement"
+import { dragRect, placementKey, rectPosition, startPlacement } from "../react/pdfedit/tools/placement"
 import {
 	RECT_TOOL_IDLE,
 	rectToolKey,
@@ -76,6 +76,31 @@ describe("keyboard placement", () => {
 
 		placement = placementKey(placement, { key: "ArrowRight", shift: true, alt: true }).state ?? placement
 		expect(placement.rect).toEqual([0, 0, 110, 55])
+	})
+
+	it("clips an Alt-resize at the page edge, keeping the top left corner", () => {
+		let placement = startPlacement(PAGE, { width: 100, height: 50 }, [595, 795])
+
+		expect(placement.rect).toEqual([500, 750, 600, 800])
+
+		placement = placementKey(placement, { key: "ArrowRight", shift: true, alt: true }).state ?? placement
+		placement = placementKey(placement, { key: "ArrowDown", shift: true, alt: true }).state ?? placement
+		expect(placement.rect).toEqual([500, 750, 600, 800])
+	})
+
+	it("announces the position the manual y-up conversion did", () => {
+		const rect: PdfRect = [260.4, 374.2, 360.4, 425.2]
+		const [x0, y0, x1, y1] = rect
+		const page = { width: BOX[2], height: BOX[3] }
+		const manual = { x: x0, y: page.height - y1, width: x1 - x0, height: y1 - y0 }
+
+		expect(rectPosition(rect, BOX)).toEqual({
+			left: Math.round(manual.x),
+			top: Math.round(page.height - manual.y - manual.height),
+			width: Math.round(manual.width),
+			height: Math.round(manual.height)
+		})
+		expect(rectPosition(rect, BOX)).toEqual({ left: 260, top: 374, width: 100, height: 51 })
 	})
 })
 

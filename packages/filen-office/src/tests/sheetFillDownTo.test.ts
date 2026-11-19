@@ -18,9 +18,7 @@ function fakeSession(filled: ReadonlySet<string>, hidden: ReadonlySet<number>): 
 		nextInCol: (col, row, step, until) => scan(row, step, until ?? (step === 1 ? 200 : 0), index => has(index, col)),
 		nextInRow: (row, col, step, until) => scan(col, step, until ?? (step === 1 ? 50 : 0), index => has(row, index)),
 		hiddenRow: row => hidden.has(row),
-		hiddenCol: () => false,
-		lastRow: 200,
-		lastCol: 50
+		hiddenCol: () => false
 	}
 	const query = (name: string, request: never): unknown => {
 		queries.push(name)

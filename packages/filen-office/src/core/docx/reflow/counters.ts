@@ -253,8 +253,8 @@ export class StoryCounters {
 				const numbering = format.props.numbering
 
 				if (numbering !== undefined && numbering.numId > 0 && format.level !== undefined && counters !== undefined) {
-					const counted = counters.next(numbering.numId, numbering.ilvl)
 					const run = resolver.listMarker(format)
+					const counted = counters.next(numbering.numId, numbering.ilvl, run?.lang.latin)
 					const text = counted === undefined ? "" : listMarkerText(counted)
 
 					// A marker whose run is hidden still counts (as on the pages); it is not shown. One of no text shows

@@ -5,7 +5,8 @@ import { PresentationError } from "../presentation/model"
 import { persistRecord, type PptFile } from "./document"
 import { children, RT, u32, utf16Text, type PptRecord } from "./records"
 import type { PptReport } from "./report"
-import { xmlText } from "./text"
+import { escapeAttribute } from "../xml/entities"
+import { withoutControls } from "./text"
 
 // Embedded OLE objects ([MS-PPT] §2.10.27 ExOleEmbedContainer, §2.10.34–§2.10.36 ExOleObjStg) as PresentationML
 // OLE objects (ECMA-376 Part 1 §19.3.2.4 p:oleObj in a graphic frame): the object's storage becomes an embedded
@@ -155,7 +156,7 @@ export class PptOle {
 				const text = (instance: number): string => {
 					const found = kids.find(child => child.type === RT.cString && child.instance === instance)
 
-					return found === undefined ? "" : utf16Text(data, found.start, found.end)
+					return found === undefined ? "" : withoutControls(utf16Text(data, found.start, found.end))
 				}
 
 				if (!out.has(id))
@@ -253,7 +254,7 @@ export class PptOle {
 		return (
 			`<p:graphicFrame><p:nvGraphicFramePr>${frame.cNvPr}<p:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></p:cNvGraphicFramePr>${frame.ph === "" ? "<p:nvPr/>" : `<p:nvPr>${frame.ph}</p:nvPr>`}</p:nvGraphicFramePr>` +
 			`${frame.xfrm}<a:graphic><a:graphicData uri="${GRAPHIC_OLE}">` +
-			`<p:oleObj${embed.name === "" ? "" : ` name="${xmlText(embed.name)}"`} r:id="${id}"${embed.progId === "" ? "" : ` progId="${xmlText(embed.progId)}"`}${embed.icon ? ' showAsIcon="1"' : ""}>` +
+			`<p:oleObj${embed.name === "" ? "" : ` name="${escapeAttribute(embed.name)}"`} r:id="${id}"${embed.progId === "" ? "" : ` progId="${escapeAttribute(embed.progId)}"`}${embed.icon ? ' showAsIcon="1"' : ""}>` +
 			`<p:embed/>${frame.picture}</p:oleObj></a:graphicData></a:graphic></p:graphicFrame>`
 		)
 	}

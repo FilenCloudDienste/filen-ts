@@ -15,16 +15,36 @@ import {
 	type DrawingText,
 	type GradientStops,
 	type ImageTile,
-	type Inset,
 	type Paint,
-	type Rgba,
 	type Shadow,
-	type TextParagraph,
 	type TextRun
 } from "../../../core/drawingml/index"
 import { compoundBands, compoundMask, type MaskStroke } from "../../../core/drawingml/compoundLine"
 import { pathGradientCircle, type Stroke } from "../../../core/drawingml/displayList"
 import { lumTransfer } from "../../../core/drawingml/lum"
+import {
+	averageColor,
+	blockTop,
+	bodyFrame,
+	clamp,
+	finite,
+	genericFamily,
+	index,
+	insetOf,
+	lineBaseline,
+	MAX_COORD,
+	mixRgba,
+	mod,
+	modify,
+	presetDashes,
+	PX_PER_PT,
+	rgbaOf,
+	runPx,
+	stopCount,
+	symbolBullet,
+	type BodyLine,
+	type RunBudget
+} from "../../../core/drawingml/paintShared"
 import { layoutBlock } from "../../../core/drawingml/textBlock"
 import type { DrawingData } from "../../../dom/docx/protocol"
 
@@ -53,8 +73,6 @@ const FONT_FAMILY = /^(?:"[A-Za-z0-9_-]{1,128}", )?(?:serif|sans-serif|monospace
 const SVG_NS = "http://www.w3.org/2000/svg"
 const XML_NS = "http://www.w3.org/XML/1998/namespace"
 const MAX_ITEMS = 200_000
-const MAX_COORD = 2 ** 31
-const MAX_STOPS = 64
 const MAX_DASHES = 32
 const MAX_RUNS = 50_000
 const MAX_CLIPS = 100_000
@@ -65,7 +83,6 @@ const MAX_CLIP_ELEMENTS = 200_000
 const EMPTY_CHAIN: readonly number[] = []
 // Characters of positioned text, and of the coordinate list positioning it.
 const MAX_GLYPHS = 20_000
-const PX_PER_PT = 96 / 72
 
 type PaintSlot = "fill" | "stroke"
 
@@ -77,112 +94,12 @@ function fmt(value: number): string {
 	return rounded === 0 ? "0" : String(rounded)
 }
 
-function finite(value: number, fallback: number): number {
-	return Number.isFinite(value) ? value : fallback
-}
-
-function clamp(value: number, min: number, max: number, fallback: number = min): number {
-	return Number.isFinite(value) ? (value < min ? min : value > max ? max : value) : fallback
-}
-
-function index(value: number | undefined): number {
-	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : -1
-}
-
-function rgbaOf(value: Rgba): number {
-	return Number.isFinite(value) ? value >>> 0 : 0
-}
-
 function hex(color: number): string {
 	return `#${((color >>> 8) & 0xffffff).toString(16).padStart(6, "0")}`
 }
 
 function alphaOf(color: number): number {
 	return (color & 255) / 255
-}
-
-function rgbaFrom(r: number, g: number, b: number, a: number): number {
-	const channel = (v: number): number => clamp(Math.round(v), 0, 255)
-
-	return ((channel(r) << 24) | (channel(g) << 16) | (channel(b) << 8) | channel(a)) >>> 0
-}
-
-function mix(c1: number, c2: number, t: number): number {
-	const u = 1 - t
-
-	return rgbaFrom(
-		((c1 >>> 24) & 255) * u + ((c2 >>> 24) & 255) * t,
-		((c1 >>> 16) & 255) * u + ((c2 >>> 16) & 255) * t,
-		((c1 >>> 8) & 255) * u + ((c2 >>> 8) & 255) * t,
-		(c1 & 255) * u + (c2 & 255) * t
-	)
-}
-
-// ST_PathFillMode, approximated as a blend toward white or black.
-function modify(color: number, modifier: number): number {
-	switch (modifier) {
-		case ItemFlag.LIGHTEN:
-			return mix(color, 0xffffff00 | (color & 255), 0.4)
-		case ItemFlag.LIGHTEN_LESS:
-			return mix(color, 0xffffff00 | (color & 255), 0.2)
-		case ItemFlag.DARKEN:
-			return mix(color, color & 255, 0.4)
-		case ItemFlag.DARKEN_LESS:
-			return mix(color, color & 255, 0.2)
-		default:
-			return color
-	}
-}
-
-function stopCount(stops: GradientStops): number {
-	return Math.min(stops.offsets.length, stops.colors.length, MAX_STOPS)
-}
-
-function averageColor(stops: GradientStops): number {
-	const count = stopCount(stops)
-	let r = 0
-	let g = 0
-	let b = 0
-	let a = 0
-
-	for (let k = 0; k < count; k++) {
-		const color = rgbaOf(stops.colors[k] ?? 0)
-
-		r += (color >>> 24) & 255
-		g += (color >>> 16) & 255
-		b += (color >>> 8) & 255
-		a += color & 255
-	}
-
-	return count === 0 ? 0 : rgbaFrom(r / count, g / count, b / count, a / count)
-}
-
-// Dash, gap lengths in multiples of the line width (ST_PresetLineDashVal).
-function presetDashes(dash: string): readonly number[] | undefined {
-	switch (dash) {
-		case "dot":
-			return [1, 3]
-		case "dash":
-			return [4, 3]
-		case "lgDash":
-			return [8, 3]
-		case "dashDot":
-			return [4, 3, 1, 3]
-		case "lgDashDot":
-			return [8, 3, 1, 3]
-		case "lgDashDotDot":
-			return [8, 3, 1, 3, 1, 3]
-		case "sysDash":
-			return [3, 1]
-		case "sysDot":
-			return [1, 1]
-		case "sysDashDot":
-			return [3, 1, 1, 1]
-		case "sysDashDotDot":
-			return [3, 1, 1, 1, 1, 1]
-		default:
-			return undefined
-	}
 }
 
 function dashArray(dashes: ArrayLike<number>, width: number): string {
@@ -224,8 +141,6 @@ function percent(value: number): (x: number, y: number) => boolean {
 
 	return (x, y) => (BAYER[y * 8 + x] ?? 64) < threshold
 }
-
-const mod = (value: number, by: number): number => ((value % by) + by) % by
 
 const SMALL_CONFETTI = [0x80, 0x10, 0x02, 0x40, 0x04, 0x20, 0x01, 0x08]
 const LARGE_CONFETTI = [0xc1, 0x0c, 0x30, 0xc3, 0x18, 0x60, 0x86, 0x03]
@@ -322,24 +237,6 @@ function patternPath(preset: string): string | undefined {
 	return d
 }
 
-function genericFamily(font: string): string {
-	const name = typeof font === "string" ? font.toLowerCase() : ""
-
-	if (name.includes("mono") || name.includes("courier") || name.includes("consol")) return "monospace"
-	if (name.includes("sans")) return "sans-serif"
-	if (
-		name.includes("times") ||
-		name.includes("cambria") ||
-		name.includes("georgia") ||
-		name.includes("garamond") ||
-		name.includes("serif")
-	) {
-		return "serif"
-	}
-
-	return "sans-serif"
-}
-
 function textAnchor(align: string): "start" | "middle" | "end" {
 	switch (align) {
 		case "ctr":
@@ -349,49 +246,6 @@ function textAnchor(align: string): "start" | "middle" | "end" {
 		default:
 			return "start"
 	}
-}
-
-function verticalRotation(vertical: string): number {
-	switch (vertical) {
-		case "vert":
-		case "eaVert":
-		case "wordArtVert":
-		case "mongolianVert":
-			return 90
-		case "vert270":
-		case "wordArtVertRtl":
-			return 270
-		default:
-			return 0
-	}
-}
-
-function insetOf(inset: Inset | undefined, min: number, max: number): [number, number, number, number] {
-	if (inset === undefined || inset === null) return [0, 0, 0, 0]
-
-	return [
-		clamp(inset.left, min, max, 0),
-		clamp(inset.top, min, max, 0),
-		clamp(inset.right, min, max, 0),
-		clamp(inset.bottom, min, max, 0)
-	]
-}
-
-interface Line {
-	readonly paragraph: TextParagraph
-	readonly from: number
-	readonly to: number
-	readonly first: boolean
-	readonly size: number
-	readonly height: number
-	before: number
-	after: number
-}
-
-function runPx(run: TextRun, scale: number): number {
-	const px = clamp(run.size, 1, 1000, 11) * PX_PER_PT * scale
-
-	return finite(run.baseline, 0) !== 0 ? (px * 2) / 3 : px
 }
 
 class Painter {
@@ -405,7 +259,7 @@ class Painter {
 	private readonly clipIds = new Map<number, string | undefined>()
 	private readonly chains = new Map<number, readonly number[] | undefined>()
 	private clipElementsLeft = MAX_CLIP_ELEMENTS
-	private runsLeft = MAX_RUNS
+	private readonly runs: RunBudget = { left: MAX_RUNS }
 	// The opacity of the last paint value resolved.
 	private opacity = 1
 	private readonly data: DrawingData
@@ -1137,7 +991,7 @@ class Painter {
 
 				return this.radial(paintIndex, paint, width, height)
 			case "pattern":
-				if (flat) return this.color(mix(rgbaOf(paint.foreground), rgbaOf(paint.background), 0.5))
+				if (flat) return this.color(mixRgba(rgbaOf(paint.foreground), rgbaOf(paint.background), 0.5))
 
 				return this.pattern(paintIndex, paint)
 			case "image":
@@ -1357,7 +1211,7 @@ class Painter {
 		const background = rgbaOf(paint.background)
 		const d = typeof paint.pattern === "string" ? patternPath(paint.pattern) : undefined
 
-		if (d === undefined) return this.color(mix(foreground, background, 0.5))
+		if (d === undefined) return this.color(mixRgba(foreground, background, 0.5))
 
 		const key = `t${paintIndex}`
 		const cached = this.paintIds.get(key)
@@ -1712,10 +1566,10 @@ class Painter {
 	private glyphItem(text: Extract<DrawingText, { kind: "glyphs" }>, textIndex: number, f: number): SVGElement | undefined {
 		const run = text.run
 
-		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runsLeft <= 0)
+		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runs.left <= 0)
 			return undefined
 
-		this.runsLeft--
+		this.runs.left--
 
 		const element = this.el("text")
 		const transform = this.transform(f)
@@ -1782,10 +1636,10 @@ class Painter {
 	private blockItem(text: Extract<DrawingText, { kind: "block" }>, textIndex: number, f: number): SVGElement | undefined {
 		const run = text.run
 
-		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runsLeft <= 0)
+		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runs.left <= 0)
 			return undefined
 
-		this.runsLeft--
+		this.runs.left--
 
 		const size = runPx(run, 1)
 		const family = this.family(textIndex, run.font)
@@ -1813,18 +1667,7 @@ class Painter {
 		if (lines.length === 0) return undefined
 
 		const total = lines.length * lineHeight
-		const top =
-			height <= 0
-				? text.lineAlign === "middle"
-					? -total / 2
-					: text.lineAlign === "end"
-						? -total
-						: 0
-				: text.lineAlign === "middle"
-					? (height - total) / 2
-					: text.lineAlign === "end"
-						? height - total
-						: 0
+		const top = blockTop(text.lineAlign, height, total)
 		const anchor = text.align === "middle" ? "middle" : text.align === "end" ? "end" : "start"
 		const x = anchor === "middle" ? width / 2 : anchor === "end" ? width : 0
 		const ascent = clamp(text.ascent, 0, 3, 0.9) * size
@@ -1891,41 +1734,22 @@ class Painter {
 
 		if (typeof body !== "object" || body === null) return undefined
 
-		const [x, y, width, height] = this.box(f)
-		const turn = verticalRotation(body.vertical)
-		const rotation = mod(finite(body.rotation, 0) + turn, 360)
-		const swap = turn !== 0
-		const cx = x + width / 2
-		const cy = y + height / 2
-		const boxWidth = swap ? height : width
-		const boxHeight = swap ? width : height
-		const [insetLeft, insetTop, insetRight, insetBottom] = insetOf(body.insets, 0, 10_000)
-		const left = cx - boxWidth / 2 + insetLeft
-		const right = cx + boxWidth / 2 - insetRight
-		const top = cy - boxHeight / 2 + insetTop
-		const bottom = cy + boxHeight / 2 - insetBottom
-		const normal = body.autofit === "normal"
-		const scale = normal ? clamp(body.fontScale, 0.01, 1, 1) : 1
-		const reduction = normal ? clamp(body.lineSpacingReduction, 0, 0.9, 0) : 0
-		const lines = this.lines(text.paragraphs, scale, reduction)
+		const frame = bodyFrame(body, text.paragraphs, this.box(f), this.runs)
 
-		if (lines.length === 0) return undefined
+		if (frame === null) return undefined
 
-		let total = 0
-
-		for (const line of lines) total += line.before + line.height + line.after
-
-		let cursor = body.anchor === "ctr" ? top + (bottom - top - total) / 2 : body.anchor === "b" ? bottom - total : top
+		const { left, right, rotation, cx, cy, scale } = frame
+		let cursor = frame.top
 		const group = this.el("g")
 		let transform = this.transform(f)
 
 		if (rotation !== 0) transform += `${transform === "" ? "" : " "}rotate(${fmt(rotation)} ${fmt(cx)} ${fmt(cy)})`
 		if (transform !== "") group.setAttribute("transform", transform)
 
-		for (const line of lines) {
+		for (const line of frame.lines) {
 			cursor += line.before
 
-			const baseline = cursor + (line.height - line.size * 1.2) / 2 + line.size * 0.95
+			const baseline = lineBaseline(line, cursor)
 			const element = this.line(line, left, right, baseline, scale)
 
 			if (element !== undefined) group.appendChild(element)
@@ -1936,59 +1760,7 @@ class Painter {
 		return group.firstChild === null ? undefined : group
 	}
 
-	private lines(paragraphs: readonly TextParagraph[], scale: number, reduction: number): Line[] {
-		const lines: Line[] = []
-
-		for (let p = 0; p < paragraphs.length && this.runsLeft > 0; p++) {
-			const paragraph = paragraphs[p]
-
-			if (paragraph === undefined || paragraph === null || !Array.isArray(paragraph.runs)) continue
-
-			const runs = paragraph.runs
-			const count = Math.min(runs.length, this.runsLeft)
-			const spacing = finite(paragraph.lineSpacing, 0)
-			const before = p === 0 ? 0 : clamp(paragraph.spaceBefore, 0, 1000, 0) * PX_PER_PT
-			const after = clamp(paragraph.spaceAfter, 0, 1000, 0) * PX_PER_PT
-			const firstLine = lines.length
-			let from = 0
-
-			this.runsLeft -= count
-
-			for (let k = 0; k <= count; k++) {
-				const run = runs[k]
-
-				if (k < count && run?.lineBreak !== true) continue
-
-				let size = 0
-
-				for (let r = from; r < k; r++) {
-					const sized = runs[r]
-
-					if (sized !== undefined) size = Math.max(size, runPx(sized, scale))
-				}
-
-				if (size === 0) size = clamp(paragraph.endSize, 1, 1000, 11) * PX_PER_PT * scale
-
-				const single = size * 1.2
-				const height =
-					(spacing > 0 ? single * Math.min(spacing, 10) : spacing < 0 ? Math.min(-spacing, 1000) * PX_PER_PT : single) *
-					(1 - reduction)
-
-				lines.push({ paragraph, from, to: k, first: lines.length === firstLine, size, height, before: 0, after: 0 })
-				from = k + 1
-			}
-
-			const first = lines[firstLine]
-			const last = lines[lines.length - 1]
-
-			if (first !== undefined) first.before = before
-			if (last !== undefined) last.after = after
-		}
-
-		return lines
-	}
-
-	private line(line: Line, left: number, right: number, baseline: number, scale: number): SVGElement | undefined {
+	private line(line: BodyLine, left: number, right: number, baseline: number, scale: number): SVGElement | undefined {
 		const paragraph = line.paragraph
 		const runs = paragraph.runs
 		const anchor = textAnchor(paragraph.align)
@@ -2080,13 +1852,6 @@ function blendMode(flags: number): "multiply" | "lighten" | "difference" | undef
 		default:
 			return undefined
 	}
-}
-
-// Symbol-font bullets (Wingdings, Symbol) map their glyphs onto letters; a plain bullet reads better.
-function symbolBullet(font: string): boolean {
-	const name = typeof font === "string" ? font.toLowerCase() : ""
-
-	return name.includes("wingdings") || name.includes("symbol") || name.includes("webdings")
 }
 
 function setColor(element: SVGElement, slot: PaintSlot, color: number): void {

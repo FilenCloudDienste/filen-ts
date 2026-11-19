@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
-import { act, createRef } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act } from "react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { SHEET_MAX_ROWS } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
-import { DEFAULT_THEME, SheetGrid, SheetGridModel, type SheetGridHandle, type SheetGridProps } from "../react/sheet/index"
+import { DEFAULT_THEME, type SheetGridHandle, type SheetGridProps } from "../react/sheet/index"
 import { DOUBLE_TAP_MS, LONG_PRESS_MS, dragStartHandle, isDoubleTap, isSoleCell, isTap } from "../react/sheet/touch/gestures"
 import { cellSelection } from "../react/sheet/selection"
 import { toDom } from "../react/sheet/scroll"
 import { bodyTotal } from "../react/sheet/view"
-import { RecordingCanvas } from "./sheetGridCanvas"
-import { BASIC, IMMEDIATE, buildFixture } from "./sheetSessionFixtures"
+import { type MountedGrid, mountGrid, pointer as dispatchPointer, registerSheetGridDom, settleGrid } from "./sheetGridDomFixtures.dom"
+import { BASIC, buildFixture } from "./sheetSessionFixtures"
 import { KEPT, barChart, withChartsheet } from "./sheetChartFixtures"
 
 // The grid under a finger and a screen reader: a tap selects, a double tap opens the entry with the soft keyboard
@@ -18,110 +16,36 @@ import { KEPT, barChart, withChartsheet } from "./sheetChartFixtures"
 // the start handle drags a touch selection wider, keys and the mouse leave touch; a wheel on a sheet past the
 // browsers' scroll range moves the sheet by its own pixels; the live region says the selection.
 
-const WIDTH = 800
-const HEIGHT = 400
-const canvases = new WeakMap<HTMLCanvasElement, RecordingCanvas>()
-
-Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-beforeEach(() => {
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-		let canvas = canvases.get(this)
-
-		if (canvas === undefined) {
-			canvas = new RecordingCanvas()
-			canvases.set(this, canvas)
-		}
-
-		return canvas as unknown as CanvasRenderingContext2D
-	} as unknown as typeof HTMLCanvasElement.prototype.getContext)
-	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? WIDTH : 0
-	})
-	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? HEIGHT : 0
-	})
-	vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
-})
-
-const roots: Root[] = []
-
 afterEach(() => {
-	for (const root of roots.splice(0)) act(() => root.unmount())
-
-	document.body.innerHTML = ""
 	vi.useRealTimers()
 })
-
-async function settle(): Promise<void> {
-	for (let k = 0; k < 6; k++) await act(() => new Promise(resolve => setTimeout(resolve, 0)))
-}
+// Registered after the timers' hook, so the grids unmount before real timers come back.
+registerSheetGridDom()
 
 async function wait(ms: number): Promise<void> {
 	await act(() => new Promise(resolve => setTimeout(resolve, ms)))
 }
 
-interface Mounted {
-	readonly model: SheetGridModel
-	readonly handle: SheetGridHandle
-	readonly scroller: HTMLElement
-	readonly root: HTMLElement
-	readonly menu: boolean[]
-	// The chrome canvas: headers and the selection.
-	readonly chrome: RecordingCanvas
-	paint(): void
-}
+// The grid's own element as the root.
+type Mounted = Omit<MountedGrid, "root"> & { readonly root: HTMLElement; readonly menu: boolean[] }
 
 async function mount(props: Partial<SheetGridProps> = {}, bytes = buildFixture(BASIC)): Promise<Mounted> {
-	const host = inThreadSheetHost()
-	const opened = await host.open(bytes, { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
-
-	if (opened.kind !== "opened") throw new Error(opened.kind)
-
-	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
-	const container = document.createElement("div")
-	const ref = createRef<SheetGridHandle>()
-	const root = createRoot(container)
 	const menu: boolean[] = []
-
-	roots.push(root)
-	document.body.appendChild(container)
-	await act(async () => {
-		root.render(
-			<SheetGrid
-				ref={ref}
-				grid={model}
-				label="Sheet"
-				editorLabel="Cell entry"
-				describeSelection={range => `${range} selected`}
-				onTouchMenu={shown => menu.push(shown)}
-				{...props}
-			/>
-		)
+	const mounted = await mountGrid({
+		bytes,
+		props: {
+			describeSelection: range => `${range} selected`,
+			onTouchMenu: shown => menu.push(shown),
+			...props
+		}
 	})
-	await settle()
 
-	const handle = ref.current as SheetGridHandle
-	const scroller = container.querySelector<HTMLElement>(".fo-sheet-scroller") as HTMLElement
-	const paint = (): void => {
-		act(() => handle.renderer.paint())
-	}
-
-	paint()
-	await settle()
-	paint()
-
-	const chrome = canvases.get(container.querySelectorAll("canvas")[1] as HTMLCanvasElement) as RecordingCanvas
-
-	return { model, handle, scroller, root: container.querySelector<HTMLElement>(".fo-sheet") as HTMLElement, menu, chrome, paint }
+	return { ...mounted, root: mounted.sheet, menu }
 }
 
+// A finger unless init says otherwise.
 function pointer(target: Element, type: string, init: PointerEventInit): void {
-	act(() => {
-		target.dispatchEvent(
-			new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch", button: 0, ...init })
-		)
-	})
+	dispatchPointer(target, type, { pointerType: "touch", ...init })
 }
 
 function cellCenter(handle: SheetGridHandle, row: number, col: number): { clientX: number; clientY: number } {
@@ -623,7 +547,7 @@ describe("SheetGrid on a chartsheet", () => {
 		if (graph === undefined) throw new Error("no chartsheet")
 
 		act(() => model.setSheet(graph.id))
-		await settle()
+		await settleGrid()
 		chrome.reset()
 		paint()
 
@@ -672,7 +596,7 @@ describe("SheetGrid on a chartsheet", () => {
 
 		// The workbook's keys still work: Ctrl+Page Up goes back to the worksheet.
 		key(scroller, { key: "PageUp", code: "PageUp", ctrlKey: true })
-		await settle()
+		await settleGrid()
 
 		expect(model.cellless()).toBe(false)
 	})

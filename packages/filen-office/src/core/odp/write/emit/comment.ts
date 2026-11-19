@@ -9,9 +9,11 @@ import {
 import { parseInScope } from "../../../presentation/edit/canonical"
 import { refused, type Deck, type SlideNode } from "../../../presentation/model"
 import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, type XmlEditor } from "../../../xml/index"
+import { OdfNs } from "../../../odf/index"
 import { ANNOTATION, isAnnotation } from "../../read/annotations"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitFamily } from "../emit"
+import { EMU_PER_CM } from "../styles"
 import { sameBytes } from "../../../docx/write/bytes"
 
 // A page's comments as LibreOffice reads and writes them on draw pages: officeooo:annotation, last in the page, with
@@ -19,12 +21,6 @@ import { sameBytes } from "../../../docx/write/bytes"
 // edited in place: those the session still holds as read stay byte for byte, the ones it no longer has go, new and
 // changed ones go in at their place in the session's order, so an undo after a save gives the page back as it was. A
 // changed annotation keeps its own attributes and author lines; its paragraphs are written anew.
-
-const OFFICEOOO = "http://openoffice.org/2009/office"
-const DC = "http://purl.org/dc/elements/1.1/"
-const TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-const SVG = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
-const EMU_PER_CM = 360_000
 
 export const emitOdpComment: OdpEmitFamily = {
 	emit: request => (request.shape === undefined ? { kind: "unchanged" } : refused("unsupported", "odp emit comment: a shape"))
@@ -38,10 +34,10 @@ function bindings(scope: ReadonlyMap<string, string>): string {
 	let out = ""
 
 	for (const [prefix, uri] of [
-		["officeooo", OFFICEOOO],
-		["dc", DC],
-		["text", TEXT],
-		["svg", SVG]
+		["officeooo", OdfNs.officeooo],
+		["dc", OdfNs.dc],
+		["text", OdfNs.text],
+		["svg", OdfNs.svg]
 	] as const) {
 		if (scope.get(prefix) !== uri) out += ` xmlns:${prefix}="${uri}"`
 	}

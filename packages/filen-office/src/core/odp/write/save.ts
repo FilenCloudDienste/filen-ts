@@ -16,6 +16,7 @@ import { noteIssuedNames } from "../../presentation/issuedNames"
 import { mediaDropped, noteRestoredMedia } from "../../presentation/restoredMedia"
 import { PresentationError, refused, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
 import { Namespaces, NodeKind, XmlError, decodeUtf8, parseXml } from "../../xml/index"
+import { concatBytes } from "../../xml/bytes"
 import { openOdp, type OdpOpen, type OdpParts } from "../read/document"
 import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
@@ -473,7 +474,7 @@ function hrefsOf(bytes: Uint8Array, content: OdpParts["content"]): string[] | un
 	let document
 
 	try {
-		document = parseXml(concat(content.rootOpen, bytes, content.rootClose))
+		document = parseXml(concatBytes([content.rootOpen, bytes, content.rootClose]))
 	} catch (error) {
 		if (error instanceof XmlError) return undefined
 
@@ -492,22 +493,6 @@ function hrefsOf(bytes: Uint8Array, content: OdpParts["content"]): string[] | un
 			if (colon < 0 || attribute.name.slice(colon + 1) !== "href" || attribute.value.startsWith("#")) continue
 			if (namespaces.uri(node, attribute.name.slice(0, colon)) === XLINK) out.push(attribute.value)
 		}
-	}
-
-	return out
-}
-
-function concat(...chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
 	}
 
 	return out

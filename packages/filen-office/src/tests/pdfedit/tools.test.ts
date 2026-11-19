@@ -2,7 +2,6 @@ import { MessageChannel } from "node:worker_threads"
 import { afterEach, describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit"
 import { buildPdfCms, type PdfSigningIdentity } from "../../core/pdfsign"
 import { cmsCapacity } from "../../core/pdfsign/cmsBuild"
@@ -10,10 +9,10 @@ import { matchPdfFont } from "../../core/pdfedit/fontMatch"
 import { PdfEngineError, type PdfEngineClient } from "../../dom/pdfedit/client"
 import { TEXT_EDIT_UNSAFE, type PdfSignFieldArgs } from "../../dom/pdfedit/commands/index"
 import type { PdfSignPort } from "../../dom/pdfedit/protocol"
-import { newTextFrame } from "../../dom/pdfedit/textEdit/target"
+import { narrowTarget, newTextFrame } from "../../dom/pdfedit/textEdit/target"
 import { pdfSignatureFields } from "../../dom/pdf/signatureFields"
 import { makeFormPdf, makePdf } from "./fixtures"
-import { startEngine, stopEngines } from "./harness"
+import { startEngine, stopEngines, upload } from "./harness"
 import { scannedPdf, textPage } from "./ocrFixtures"
 import { LATIN_CONTENT, LINE, makeDocument, save, SECOND } from "./textEditFixtures"
 import { loadIdentity, signingSubtle, verifySigned } from "../pdfSignCreateFixtures"
@@ -62,29 +61,6 @@ async function failureOf(call: Promise<unknown>): Promise<PdfEngineError> {
 	throw new Error("the call did not fail")
 }
 
-// The held output streamed over a save port, read here as an upload would.
-async function upload(client: PdfEngineClient): Promise<Uint8Array> {
-	const channel = new MessageChannel()
-	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
-	const written = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
-	const chunks: Uint8Array[] = []
-
-	for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
-
-	reader.settled(true)
-	expect((await written).uploaded).toBe(true)
-
-	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let at = 0
-
-	for (const chunk of chunks) {
-		bytes.set(chunk, at)
-		at += chunk.length
-	}
-
-	return bytes
-}
-
 // A plain save to the end, kept as a new version. `removesContent`: what the save says of content removed since the
 // last one (the earlier-versions warning).
 async function saveVersion(client: PdfEngineClient, size: number, removesContent = false): Promise<Uint8Array> {
@@ -92,8 +68,9 @@ async function saveVersion(client: PdfEngineClient, size: number, removesContent
 
 	expect(begun).toMatchObject({ status: "written", removesContent })
 
-	const bytes = await upload(client)
+	const { uploaded, bytes } = await upload(client)
 
+	expect(uploaded).toBe(true)
 	await client.call("saveEnd", { outcome: "saved", next: "continue" })
 
 	return bytes
@@ -115,29 +92,36 @@ describe("editing text in the engine", () => {
 			expect(hit.target.text).toBe(LINE)
 
 			const start = hit.target.text.indexOf("brave")
-			const chars = hit.target.chars.filter((_, index) => {
-				const offset = hit.target.offsets[index] ?? -1
+			const word = narrowTarget(hit.target, start, start + 5)
 
-				return offset >= start && offset < start + 5
-			})
-			const overlay = await engine.client.call("textPrepare", { source: hit.target, text: "Hello bold new world", style: {} })
+			if (word === null) throw new Error("no glyphs for the word")
+
+			expect(word.chars.map(char => char.c).join("")).toBe("brave")
+
+			const overlay = await engine.client.call("textPrepare", { source: word, text: "bold", style: {} })
 
 			expect(overlay).toBeInstanceOf(Uint8Array)
 
-			// The whole line replaced (its glyphs), then a word removed.
+			// Only the word's glyphs replaced, the overlay laid out at the word's origin.
 			let result = await engine.client.call("dispatch", {
 				command: "textEdit.replace",
-				args: { page: 0, chars: hit.target.chars, overlay }
+				args: { page: 0, chars: word.chars, overlay }
 			})
 
 			expect(result.pages).toEqual([0])
 			expect(result.state).toMatchObject({ dirty: true, canUndo: true, undoLabel: "textEdit.replace" })
 
-			let text = (await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")
+			let lines = (await engine.client.call("text", { page: 0 })).lines
+			let text = lines.map(line => line.str).join("\n")
+			const bold = lines.find(line => line.str === "bold")
 
-			expect(text).toContain("Hello bold new world")
+			// The neighbours stay, the new word starts where the old one did, on its baseline (lines are in PDF space, y up).
+			expect(text).toContain("Hello ")
+			expect(text).toContain(" new world")
 			expect(text).not.toContain("brave")
 			expect(text).toContain(SECOND)
+			expect(bold?.x).toBeCloseTo(word.frame.origin[0], 0)
+			expect(bold?.y).toBeCloseTo(842 - word.frame.origin[1], 0)
 
 			result = await engine.client.call("undo", {})
 			text = (await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")
@@ -145,16 +129,18 @@ describe("editing text in the engine", () => {
 			expect(result.state.canRedo).toBe(true)
 
 			await engine.client.call("redo", {})
-			text = (await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")
-			expect(text).toContain("Hello bold new world")
+			lines = (await engine.client.call("text", { page: 0 })).lines
+			expect(lines.map(line => line.str)).toContain("bold")
+			expect(lines.map(line => line.str).join("\n")).not.toContain("brave")
 
 			const saved = await saveVersion(engine.client, bytes.length, true)
 			const read = await pageText(saved)
 
-			expect(read).toContain("Hello bold new world")
+			expect(read).toContain("Hello")
+			expect(read).toContain("bold")
+			expect(read).toContain("new world")
 			expect(read).toContain(SECOND)
 			expect(read).not.toContain("brave")
-			expect(chars.map(char => char.c).join("")).toBe("brave")
 		},
 		TIMEOUT
 	)
@@ -268,7 +254,7 @@ describe("recognised text in the engine", () => {
 
 			await engine.open()
 
-			expect(await engine.client.call("ocrScan", {})).toEqual({ scanned: [0] })
+			expect(await engine.client.call("ocrScan", {})).toEqual({ scanned: [0], pageCount: 2 })
 
 			const rendered = await engine.client.call("ocrRender", { page: 0 })
 
@@ -305,6 +291,47 @@ describe("recognised text in the engine", () => {
 					)
 				).failure
 			).toBe("badRequest")
+		},
+		TIMEOUT
+	)
+})
+
+describe("scanning for text recognition in runs", () => {
+	it(
+		"answers only a run's candidates, refuses runs out of range and adds up to the whole scan",
+		async () => {
+			const scan = new mupdf.PDFDocument(scannedPdf({ lines: ["Searchable words here"], dpi: 150 }))
+			const merged = new mupdf.PDFDocument()
+
+			// Scanned, text, scanned, scanned, text.
+			for (const source of [scan, textPage(["One"]), scan, scan, textPage(["Two"])]) merged.graftPage(-1, source, 0)
+
+			const bytes = merged.saveToBuffer("compress").asUint8Array().slice()
+
+			merged.destroy()
+			scan.destroy()
+
+			const engine = startEngine(bytes)
+
+			await engine.open()
+
+			const whole = await engine.client.call("ocrScan", {})
+
+			expect(whole).toEqual({ scanned: [0, 2, 3], pageCount: 5 })
+			expect(await engine.client.call("ocrScan", { from: 1, count: 2 })).toEqual({ scanned: [2], pageCount: 5 })
+
+			const runs: number[] = []
+
+			for (let from = 0; from < whole.pageCount; from += 2) {
+				runs.push(...(await engine.client.call("ocrScan", { from, count: 2 })).scanned)
+			}
+
+			expect(runs).toEqual(whole.scanned)
+			expect(await engine.client.call("ocrScan", { from: 5, count: 2 })).toEqual({ scanned: [], pageCount: 5 })
+
+			for (const args of [{ from: -1 }, { from: 6 }, { from: 0.5 }, { from: 0, count: 0 }, { from: 0, count: 1.5 }]) {
+				expect((await failureOf(engine.client.call("ocrScan", args))).failure).toBe("badRequest")
+			}
 		},
 		TIMEOUT
 	)
@@ -350,8 +377,9 @@ async function signSave(client: PdfEngineClient, identity: PdfSigningIdentity, s
 
 	if (begun.status !== "written") throw new Error("not signed")
 
-	const bytes = await upload(client)
+	const { uploaded, bytes } = await upload(client)
 
+	expect(uploaded).toBe(true)
 	expect(bytes.length).toBe(begun.size)
 
 	return { begun, bytes }

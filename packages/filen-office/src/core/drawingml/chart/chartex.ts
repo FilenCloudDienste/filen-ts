@@ -3,7 +3,17 @@ import type { PaintContext } from "../fill"
 import type { XmlDocument } from "../../xml/index"
 import { D, drawingReader, type DrawingReader } from "../reader"
 import { plainParagraph, readTextBody, type TextDefaults } from "../text"
-import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type LineDefault, type Rect } from "./builder"
+import {
+	ChartBuilder,
+	PX_PER_PT,
+	estimateHeight,
+	estimateWidth,
+	labelBody,
+	unnamedSeries,
+	type ChartText,
+	type LineDefault,
+	type Rect
+} from "./builder"
 import { MAX_POINTS, MAX_SERIES, pointBudget, type PointBudget } from "./data"
 import { formatNumber } from "./format"
 import { backgroundColor, mutedText, seriesColor, textColor } from "./palette"
@@ -1312,7 +1322,7 @@ function titleParagraphs(builder: ChartBuilder, title: number, defaults: TextDef
 
 	const text = textOf(reader, tx)
 
-	return [plainParagraph(tx < 0 ? "Chart Title" : text, defaults)]
+	return [plainParagraph(tx < 0 ? builder.chartText.chartTitle : text, defaults)]
 }
 
 function drawLegend(
@@ -1420,7 +1430,8 @@ export function drawChartex(
 	root: number,
 	W: number,
 	H: number,
-	matrix?: readonly number[]
+	matrix?: readonly number[],
+	chartText?: ChartText
 ): ChartexConversion {
 	const chart = reader.child(root, D.Cx, "chart")
 	const plotArea = reader.child(chart, D.Cx, "plotArea")
@@ -1433,7 +1444,7 @@ export function drawChartex(
 	const theme = context.theme
 	const base: TextDefaults = { size: 10, color: textColor(theme), font: theme.minorFont.latin, bold: false, italic: false }
 	const probe = new ChartBuilder(context, reader, 2, false, base)
-	const builder = new ChartBuilder(context, reader, 2, false, probe.textProps(reader.child(root, D.Cx, "txPr"), base), matrix)
+	const builder = new ChartBuilder(context, reader, 2, false, probe.textProps(reader.child(root, D.Cx, "txPr"), base), matrix, chartText)
 	const axisText: TextDefaults = {
 		...builder.text,
 		color: builder.text.color === base.color ? mutedText(theme, 0.65) : builder.text.color
@@ -1451,7 +1462,7 @@ export function drawChartex(
 		return {
 			node,
 			layout: reader.attr(node, "layoutId") ?? "",
-			name: name === "" ? `Series${String(position + 1)}` : name,
+			name: name === "" ? unnamedSeries(builder.chartText, position + 1) : name,
 			data: data(Math.floor(reader.number(reader.child(node, D.Cx, "dataId"), "val", 0))),
 			spPr: reader.child(node, D.Cx, "spPr"),
 			points,

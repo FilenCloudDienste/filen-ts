@@ -9,6 +9,7 @@ import { openOds } from "../core/ods/open"
 import { bytesSource } from "../core/opc/index"
 import { openXlsx } from "../core/xlsx/package/open"
 import { CORPUS_DIR } from "./corpusDir"
+import { trimmedRows } from "./odsFixtures"
 import { OpenXmlSdk, openXmlSdkMissing } from "./oracles/openXmlSdk"
 import { exportShown, sheetOffices, sheetProfile, type ShownWorkbook } from "./oracles/sheet/libreOffice"
 
@@ -55,24 +56,10 @@ async function sheetCounts(bytes: Uint8Array, format: SheetSourceFormat): Promis
 	return { all: sheets.length, held: sheets.filter(entry => entry.kind === "worksheet" || entry.kind === "chartsheet").length }
 }
 
-function trimmed(rows: readonly (readonly string[])[]): string[][] {
-	const out = rows.map(row => {
-		const copy = [...row]
-
-		while (copy.length > 0 && copy[copy.length - 1] === "") copy.pop()
-
-		return copy
-	})
-
-	while (out.length > 0 && out[out.length - 1]?.length === 0) out.pop()
-
-	return out
-}
-
 function shownBySheet(workbook: ShownWorkbook | undefined): Map<string, string> | null {
 	if (workbook?.ok !== true) return null
 
-	return new Map(workbook.sheets.map(sheet => [sheet.name, JSON.stringify(trimmed(sheet.text))]))
+	return new Map(workbook.sheets.map(sheet => [sheet.name, JSON.stringify(trimmedRows(sheet.text))]))
 }
 
 describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus workbooks", () => {

@@ -19,6 +19,11 @@ export type DocxNoteNumberFormat = (typeof DOCX_NOTE_NUMBER_FORMATS)[number]
 export type DocxNoteRestart = "continuous" | "eachSect" | "eachPage"
 // ST_FtnPos for footnotes, ST_EdnPos for endnotes.
 export type DocxNotePosition = "pageBottom" | "beneathText" | "sectEnd" | "docEnd"
+// Where each kind of note may go (ST_FtnPos, ST_EdnPos: what Word's dialog offers and note.options takes).
+export const DOCX_NOTE_POSITIONS: Readonly<Record<DocxNoteKind, readonly DocxNotePosition[]>> = {
+	footnote: ["pageBottom", "beneathText"],
+	endnote: ["sectEnd", "docEnd"]
+}
 
 // Word's custom marks: a few characters shown instead of the number.
 export const MAX_NOTE_MARK = 10
@@ -79,8 +84,8 @@ const KINDS = new Set<string>(["footnote", "endnote"])
 const FORMATS = new Set<string>(DOCX_NOTE_NUMBER_FORMATS)
 const RESTARTS = new Set<string>(["continuous", "eachSect", "eachPage"])
 const POSITIONS: Readonly<Record<DocxNoteKind, ReadonlySet<string>>> = {
-	footnote: new Set(["pageBottom", "beneathText"]),
-	endnote: new Set(["sectEnd", "docEnd"])
+	footnote: new Set(DOCX_NOTE_POSITIONS.footnote),
+	endnote: new Set(DOCX_NOTE_POSITIONS.endnote)
 }
 const SCOPES = new Set<string>(["section", "document"])
 

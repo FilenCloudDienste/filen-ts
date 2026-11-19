@@ -1,5 +1,6 @@
 import { children, i32, RT, u16, utf16Text, type PptRecord, type RecordCounter } from "./records"
-import { xmlText } from "./text"
+import { escapeAttribute, escapeText } from "../xml/entities"
+import { withoutControls } from "./text"
 
 // Comments ([MS-PPT] §2.5.25–§2.5.29 Comment10Container, in a slide's "___PPT10" tag) as PresentationML comments
 // (ECMA-376 Part 1 §19.4): the deck's authors in ppt/commentAuthors.xml, each slide's comments in its own comments
@@ -65,10 +66,10 @@ export function slideComments(data: Uint8Array, tag: readonly PptRecord[], count
 				const limit = child.instance === 1 ? MAX_TEXT : MAX_NAME
 				const value = utf16Text(data, child.start, Math.min(child.end, child.start + limit), true)
 
-				if (child.instance === 0) author = value
+				if (child.instance === 0) author = withoutControls(value)
 				// Line breaks are carriage returns (and vertical tabs) in the file, line feeds in p:text.
-				else if (child.instance === 1) text = value.replace(/\r\n?|\v/gu, "\n")
-				else if (child.instance === 2) initials = value
+				else if (child.instance === 1) text = withoutControls(value.replace(/\r\n?|\v/gu, "\n"))
+				else if (child.instance === 2) initials = withoutControls(value)
 			}
 		}
 
@@ -113,7 +114,7 @@ export class CommentAuthors {
 	xml(): string {
 		const items = [...this.authors.values()].map(
 			author =>
-				`<p:cmAuthor id="${String(author.id)}" name="${xmlText(author.name)}" initials="${xmlText(author.initials)}" lastIdx="${String(author.last)}" clrIdx="${String(author.id % 8)}"/>`
+				`<p:cmAuthor id="${String(author.id)}" name="${escapeAttribute(author.name)}" initials="${escapeAttribute(author.initials)}" lastIdx="${String(author.last)}" clrIdx="${String(author.id % 8)}"/>`
 		)
 
 		return `<p:cmAuthorLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">${items.join("")}</p:cmAuthorLst>`
@@ -125,7 +126,7 @@ export function commentsXml(comments: readonly PptComment[], authors: CommentAut
 	const items = comments.map(comment => {
 		const id = authors.id(comment)
 
-		return `<p:cm authorId="${String(id)}"${comment.dateTime === undefined ? "" : ` dt="${comment.dateTime}"`} idx="${String(comment.index)}"><p:pos x="${String(comment.x)}" y="${String(comment.y)}"/><p:text>${xmlText(comment.text)}</p:text></p:cm>`
+		return `<p:cm authorId="${String(id)}"${comment.dateTime === undefined ? "" : ` dt="${comment.dateTime}"`} idx="${String(comment.index)}"><p:pos x="${String(comment.x)}" y="${String(comment.y)}"/><p:text>${escapeText(comment.text)}</p:text></p:cm>`
 	})
 
 	return `<p:cmLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">${items.join("")}</p:cmLst>`

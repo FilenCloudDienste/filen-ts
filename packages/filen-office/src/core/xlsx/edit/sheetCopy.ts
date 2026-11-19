@@ -31,6 +31,7 @@ import { rewriteChart } from "../refs/parts"
 import { lastSegment, nameWithFormula } from "../refs/plan"
 import { liveRelationships, refState } from "../refs/state"
 import { renameTables } from "../refs/structured"
+import { tableName, tablePart } from "../refs/tables"
 import { relationshipType } from "../write/index"
 import { utf8Part } from "../write/markup"
 import { OWN_SHEET_SECTIONS } from "../write/sheet"
@@ -342,7 +343,7 @@ function renumberVml(markup: string, blocks: { next: number }): string {
 function renameTable(context: CopyContext, markup: string): string {
 	const document = parseXml(encodeUtf8(markup))
 	const root = document.documentElement()
-	const name = document.attribute(root, "displayName") ?? document.attribute(root, "name") ?? "Table"
+	const name = tableName(document, root) ?? "Table"
 	let next = ""
 
 	for (let n = 2; ; n++) {
@@ -378,16 +379,23 @@ async function usedIds(workbook: XlsxWorkbookModel): Promise<{ table: number; vm
 		return type.endsWith("table+xml") || type.endsWith("vmldrawing")
 	}
 	const scan = (contentType: string, bytes: Uint8Array): void => {
-		const text = decodeUtf8(bytes)
-
 		if (contentType.toLowerCase().endsWith("table+xml")) {
-			const root = /<(?:\w+:)?table\b[^>]*>/.exec(text)?.[0] ?? ""
+			const document = tablePart(bytes)
 
-			table = Math.max(table, Number(/\sid="(\d+)"/.exec(root)?.[1] ?? "0"))
+			if (document === null) return
 
-			for (const match of root.matchAll(/\s(?:displayName|name)="([^"]*)"/g)) names.add((match[1] ?? "").toUpperCase())
+			const root = document.documentElement()
+			const id = Number(document.attribute(root, "id") ?? "0")
+
+			if (Number.isInteger(id)) table = Math.max(table, id)
+
+			for (const attribute of ["displayName", "name"]) {
+				const name = document.attribute(root, attribute)
+
+				if (name !== undefined) names.add(name.toUpperCase())
+			}
 		} else {
-			for (const match of text.matchAll(/<o:idmap\b[^>]*\sdata\s*=\s*"([^"]*)"/g))
+			for (const match of decodeUtf8(bytes).matchAll(/<o:idmap\b[^>]*\sdata\s*=\s*"([^"]*)"/g))
 				for (const block of (match[1] ?? "").split(",")) vml = Math.max(vml, Number(block) || 0)
 		}
 	}

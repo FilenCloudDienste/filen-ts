@@ -1,35 +1,17 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import { DocxEngine, type DocxEngineServices, type DocxEvent, type DocxPageData } from "@filen/office/dom/docx"
 import { openOdtAsDocx } from "../core/odt/index"
 import { odtBytes } from "./odtFixtures"
 import { buildZip, text } from "./zipBuilder"
-
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
+import { engineServices } from "./engineFixtures"
 
 function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
+	return engineServices({
 		yield: () => Promise.resolve(),
 		sliceMs: Infinity,
 		openOdt: openOdtAsDocx
-	}
+	})
 }
 
 async function run(bytes: Uint8Array, withOdt = true): Promise<{ events: DocxEvent[]; pages: DocxPageData[] }> {

@@ -9,8 +9,7 @@ import type { PagedEditor } from "../../../core/docx/paged/index"
 import type { ObjectHitKind } from "../../../core/docx/paged/objects"
 import type { CssFaces } from "../../../core/docx/reflow/css"
 import { docxNotes } from "../../../core/docx/stories/notes"
-import { symbolTable, symbolToUnicode } from "../../../core/fonts/index"
-import { attrText, fieldText } from "../edit/clipboard"
+import { attrText, fieldText, symbolText } from "../edit/clipboard"
 import { EMU_PER_PAGE_PX } from "../edit/objects"
 import { gapRowCount, isGap } from "../edit/window"
 import { paintMath } from "../paint/math"
@@ -53,19 +52,6 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
 	if (className !== undefined) made.className = className
 
 	return made
-}
-
-function symbolChar(node: Node): string {
-	const char = node.attrs["char"]
-	const font = node.attrs["font"]
-
-	if (typeof char !== "number" || char <= 0 || char > 0x10ffff) return ""
-
-	// A symbol font's code (Symbol, Wingdings...): the Unicode character it shows.
-	const table = typeof font === "string" ? symbolTable(font) : undefined
-	const mapped = table === undefined ? 0 : symbolToUnicode(table, char)
-
-	return String.fromCodePoint(mapped > 0 ? mapped : char)
 }
 
 // An inline leaf showing `text` (no caret inside).
@@ -270,7 +256,7 @@ export function reflowNodeViews(host: ReflowNodeHost, session: ReflowSource): Re
 			return { dom: element("br"), ignoreMutation: () => true }
 		},
 		hyphen: leaf(node => (node.attrs["soft"] === true ? "­" : "‑"), "fo-docx-reflow-hyphen"),
-		symbol: leaf(symbolChar, "fo-docx-reflow-symbol"),
+		symbol: leaf(symbolText, "fo-docx-reflow-symbol"),
 		note_ref: (node, _view, getPos, decorations) => {
 			const dom = element("span", "fo-docx-reflow-note-ref")
 			const kind = node.attrs["kind"] === "endnote" ? "endnote" : "footnote"

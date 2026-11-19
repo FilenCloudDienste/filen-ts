@@ -43,6 +43,30 @@ import { NUMBERING_PART, RICH, STYLES_PART, openBytes, type Opened } from "./doc
 import { NAMESPACES, buildDocx, p, type SyntheticDocx } from "./docxSynthetic"
 import { ZIP_ENTRY_TIME } from "./zipTime"
 
+// The byte lengths of the documents parsed while `recording`: gate 2's, for which of its paths a part took.
+const parsed = vi.hoisted(() => ({ recording: false, lengths: [] as number[] }))
+
+vi.mock("../core/xml/index", async importOriginal => {
+	const original = await importOriginal<typeof import("../core/xml/index")>()
+	const record = (input: unknown): void => {
+		if (parsed.recording && input instanceof Uint8Array) parsed.lengths.push(input.length)
+	}
+
+	return {
+		...original,
+		parseXml: (...args: Parameters<typeof original.parseXml>) => {
+			record(args[0])
+
+			return original.parseXml(...args)
+		},
+		parseXmlSliced: (...args: Parameters<typeof original.parseXmlSliced>) => {
+			record(args[0])
+
+			return original.parseXmlSliced(...args)
+		}
+	}
+})
+
 const decoder = new TextDecoder()
 
 async function read(bytes: Uint8Array, name: string): Promise<string> {
@@ -1340,6 +1364,99 @@ describe("docx save verifier: parts with namespaces below the root", () => {
 			reason: "content",
 			message: expect.stringContaining("lost its properties") as unknown
 		})
+	})
+})
+
+// A part whose namespaces are declared below its root where the declaring element travels with the copy (Word's
+// a:graphic and pic:pic in a picture paragraph) is checked by its new markup alone; one whose copies sit inside a
+// declaring element is checked whole.
+describe("docx save verifier: copies and namespaces declared below the root", () => {
+	const PICTURE =
+		'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/><wp:docPr id="90" name="P"/>' +
+		'<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+		'<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+		'<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="90" name="P"/>' +
+		'<pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdGone"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+		'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
+		"</pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+	const FILLER = Array.from({ length: 400 }, (_, i) => p(`filler paragraph ${String(i)} of the document`)).join("")
+	const RUN = "Q".repeat(200)
+
+	// The longest document gate 2 parsed checking `RUN` typed into the last paragraph of `document` (its source
+	// part's length beside it), the written markup in its place when `markup` is given (padded to its length).
+	async function check(source: string, markup?: string): Promise<{ longest: number; part: number; error: unknown }> {
+		const document = await opened({ document: source, ...PARTS })
+		const edit = session(document)
+		const last = edit.state.doc.lastChild
+
+		if (last === null) throw new Error("No paragraph")
+
+		edit.dispatch(edit.state.tr.insertText(RUN, edit.state.doc.content.size - last.nodeSize + 1))
+
+		const changes = await serializeDocx({ pkg: document.pkg, context: document.context, sessions: [edit] })
+		const story = changes.stories[0]
+
+		if (story === undefined) throw new Error("No story change")
+
+		const tamper = async (bytes: PartBytes): Promise<Uint8Array> => {
+			const xml = decoder.decode(await joinBytes(bytes))
+
+			if (markup === undefined) return encodeUtf8(xml)
+			if (!xml.includes(RUN)) throw new Error("Run not written")
+
+			const replacement = `</w:t></w:r>${markup}<w:r><w:t>`
+
+			return encodeUtf8(xml.replace(RUN, replacement + "Q".repeat(RUN.length - replacement.length)))
+		}
+		const replace = await Promise.all(
+			changes.replace.map(async part => (part.name === "word/document.xml" ? { ...part, bytes: await tamper(part.bytes) } : part))
+		)
+		let error: unknown
+
+		parsed.lengths = []
+		parsed.recording = true
+
+		try {
+			await verifyDocxParts({
+				original: document.pkg,
+				context: document.context,
+				changes: {
+					...changes,
+					replace,
+					stories: [{ ...story, output: { ...story.output, bytes: await tamper(story.output.bytes) } }]
+				}
+			})
+		} catch (caught) {
+			error = caught
+		} finally {
+			parsed.recording = false
+		}
+
+		return { longest: Math.max(0, ...parsed.lengths), part: (await read(document.bytes, "word/document.xml")).length, error }
+	}
+
+	const wrapped = (inner: string, body = "<w:body>"): string =>
+		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NAMESPACES}>${body}${inner}</w:body></w:document>`
+
+	it("checks a part holding a Word picture by its new markup alone", async () => {
+		const { longest, part, error } = await check(wrapped(PICTURE + FILLER + p("text")))
+
+		expect(error).toBeUndefined()
+		expect(longest).toBeLessThan(part / 4)
+	})
+
+	it("still refuses an unbound prefix in the new markup of such a part", async () => {
+		const { error } = await check(wrapped(PICTURE + FILLER + p("text")), "<q:r/>")
+
+		expect(error).toMatchObject({ reason: "malformedPart" })
+	})
+
+	// The copies of the body's paragraphs rely on x, declared on w:body: they do not carry it with them.
+	it("checks a part whole when a declaration sits on a container above its copies", async () => {
+		const { longest, part, error } = await check(wrapped(FILLER + p("text"), '<w:body xmlns:x="urn:example:x">'))
+
+		expect(error).toBeUndefined()
+		expect(longest).toBeGreaterThanOrEqual(part)
 	})
 })
 

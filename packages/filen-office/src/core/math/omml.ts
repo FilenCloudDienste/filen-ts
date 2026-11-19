@@ -971,24 +971,6 @@ function displayMath(content: readonly MathElement[], align: MathAlign): MathEle
 	return content.length === 0 ? undefined : element("math", content, { display: "block", align })
 }
 
-// One display math element per m:oMath of an m:oMathPara, each with the paragraph's alignment.
-export function ommlParagraphToMathTrees(document: XmlDocument, node: number, options: OmmlOptions = {}): MathElement[] {
-	const converter = new Converter(document, namespacesOf(document, options.namespaces), options)
-
-	if (!converter.isMath(node, "oMathPara")) return []
-
-	const align = paragraphAlign(converter, node)
-	const out: MathElement[] = []
-
-	for (const equation of converter.children(node, "oMath")) {
-		const math = displayMath(converter.equation(equation), align)
-
-		if (math !== undefined) out.push(math)
-	}
-
-	return out
-}
-
 // The math element for an m:oMath (inline) or m:oMathPara (display; several equations stack as rows of an
 // mtable). Undefined for anything else or an equation without content.
 export function ommlToMathTree(document: XmlDocument, node: number, options: OmmlOptions = {}): MathElement | undefined {

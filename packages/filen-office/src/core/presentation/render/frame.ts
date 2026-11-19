@@ -196,7 +196,8 @@ export async function drawFrame(
 				width,
 				height,
 				matrix === undefined ? undefined : list,
-				matrix
+				matrix,
+				services.chartText
 			)
 
 			for (const name of result.unsupported) report.approximate(`chart:${name}`)

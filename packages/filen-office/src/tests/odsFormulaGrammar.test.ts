@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { translateFormula } from "../core/ods/formula/toXlsx"
 import { FormulaEngine } from "../core/sheet/formula/index"
 import { engineCellFormula, wellFormedFormula } from "../core/sheet/refs/formulaRefs"
+import { rng as generator } from "./mulberry32"
 
 // Every OpenFormula the translation gives text for is in the store's grammar; anything else is refused.
 
@@ -42,21 +43,6 @@ const PIECES = [
 	"FLOOR(",
 	"RAND()"
 ]
-
-// A deterministic generator (mulberry32), so a failure names the same formula every run.
-function generator(seed: number): () => number {
-	let state = seed
-
-	return () => {
-		state = (state + 0x6d2b79f5) | 0
-
-		let t = Math.imul(state ^ (state >>> 15), 1 | state)
-
-		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 describe("OpenFormula translation's grammar", () => {
 	it("gives text in the store's grammar for every formula it does not refuse", () => {

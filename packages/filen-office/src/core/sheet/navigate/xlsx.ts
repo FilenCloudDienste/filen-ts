@@ -16,16 +16,11 @@ class XlsxOccupancy implements SheetOccupancy {
 	private readonly store: SheetStore
 	// Hidden column ranges: first, last pairs.
 	private readonly hiddenCols: number[] = []
-	readonly lastRow: number
-	readonly lastCol: number
 
 	constructor(model: XlsxSheetModel) {
 		this.store = model.store as SheetStore
 
 		for (const range of model.cols) if ((range.flags & ColFlag.HIDDEN) !== 0) this.hiddenCols.push(range.first, range.last)
-
-		this.lastRow = this.store.rowExtent - 1
-		this.lastCol = this.store.colExtent - 1
 	}
 
 	filled(row: number, col: number): boolean {

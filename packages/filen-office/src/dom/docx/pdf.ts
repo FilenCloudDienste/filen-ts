@@ -49,7 +49,8 @@ async function laidOut(
 	const options: DocxOpenOptions = {
 		view: "final",
 		retain: true,
-		...(run.options.format === undefined ? {} : { format: run.options.format })
+		...(run.options.format === undefined ? {} : { format: run.options.format }),
+		...(run.options.chartText === undefined ? {} : { chartText: run.options.chartText })
 	}
 	const engine = new DocxEngine(
 		source,

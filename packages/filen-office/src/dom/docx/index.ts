@@ -43,7 +43,6 @@ export {
 	type DocxWorkerScope
 } from "./host"
 export {
-	inThreadDocxLegacy,
 	type DocNotConverted,
 	type DocNotConvertedKind,
 	type DocxConvertedDocument,
@@ -68,7 +67,6 @@ export {
 	DOCX_MAX_ZOOM,
 	DOCX_MIN_ZOOM,
 	DOCX_VIEWER_CAPABILITIES,
-	DOCX_VIEWER_COMMANDS,
 	DOCX_ZOOM_STEPS,
 	canZoomIn,
 	canZoomOut,
@@ -78,8 +76,6 @@ export {
 	parseDocxViewerCommand,
 	stepZoom,
 	type DocxCapabilities,
-	type DocxCommandGroup,
-	type DocxCommandInfo,
 	type DocxViewerCommand,
 	type DocxViewerCommandType,
 	type DocxViewerState

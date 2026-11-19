@@ -10,6 +10,7 @@ import { CORPUS_DIR } from "./corpusDir"
 import { openBytes, sessionOf } from "./docxEditFixtures"
 import { p } from "./docxSynthetic"
 import { budget } from "./timing"
+import { rng as random } from "./mulberry32"
 
 // Paragraph commands set the attributes of every paragraph in one step whatever the selection covers: the same
 // document as a step per attribute, an exact undo, and the same mapping as AttrStep.
@@ -18,20 +19,6 @@ const nodes = docxSchema.nodes
 const TARIFF = join(CORPUS_DIR, "docx", "govuk__Tariff_of_the_United_Kingdom_v1.34.docx")
 const cell = (text: string): string => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`
 const TABLE = `<w:tbl><w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid><w:tr>${cell("a")}${cell("b")}</w:tr><w:tr>${cell("c")}${cell("d")}</w:tr></w:tbl>`
-
-function random(seed: number): () => number {
-	let state = seed
-
-	return () => {
-		state = (state + 0x6d2b79f5) | 0
-
-		let t = Math.imul(state ^ (state >>> 15), 1 | state)
-
-		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 function paragraphsOf(doc: Node): { node: Node; pos: number }[] {
 	const out: { node: Node; pos: number }[] = []

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { DrawingList, PathCommand } from "../core/drawingml/displayList"
 import { compileCustomGeometry } from "../core/drawingml/geometry/custom"
-import { emitPaths, evaluateGuides, evaluateOp, presetNames, presetProgram, textRect } from "../core/drawingml/geometry/evaluate"
+import { emitPaths, evaluateGuides, evaluateOp, presetProgram, textRect } from "../core/drawingml/geometry/evaluate"
 import { BUILTIN_COUNT, GuideOp, encodeSlot, parseProgram } from "../core/drawingml/geometry/program"
 import { PRESET_GEOMETRY } from "../core/drawingml/geometry/presets.generated"
 import { drawingReader } from "../core/drawingml/reader"
@@ -30,8 +30,8 @@ function bounds(list: DrawingList): number[] {
 describe("preset geometry table", () => {
 	it("holds every ECMA-376 preset", () => {
 		// Every ST_ShapeType value (§20.1.10.56), upArrow included.
-		expect(presetNames()).toHaveLength(187)
-		expect(presetNames()).toContain("upArrow")
+		expect(Object.keys(PRESET_GEOMETRY)).toHaveLength(187)
+		expect(Object.hasOwn(PRESET_GEOMETRY, "upArrow")).toBe(true)
 		expect(Object.hasOwn(PRESET_GEOMETRY, "rect")).toBe(true)
 		expect(presetProgram("constructor")).toBeUndefined()
 		expect(presetProgram("noSuchShape")).toBeUndefined()
@@ -52,7 +52,7 @@ describe("preset geometry table", () => {
 	})
 
 	it("evaluates every preset to finite paths at any aspect ratio", () => {
-		for (const name of presetNames()) {
+		for (const name of Object.keys(PRESET_GEOMETRY)) {
 			for (const [w, h] of [
 				[100 * EMU, 100 * EMU],
 				[300 * EMU, 40 * EMU],

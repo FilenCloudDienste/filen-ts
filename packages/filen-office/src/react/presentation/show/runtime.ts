@@ -10,7 +10,7 @@ import type {
 	Transition
 } from "../../../core/anim/model"
 import { attributeEntry } from "../../../core/anim/attributes"
-import { compileSource, instantiate } from "../../../core/anim/timegraph"
+import { compileSource, holdsAdvance, instantiate } from "../../../core/anim/timegraph"
 import { randomTransitionKind } from "../../../core/anim/transitions"
 import type { DocxLinkTarget } from "../../../core/docx/layout/pageData"
 import { EMU_PER_PX } from "../../../core/drawingml/index"
@@ -150,6 +150,15 @@ function resolveRandom(transition: Transition | undefined): Transition | undefin
 	if (transition?.kind !== "random" || transition.namespace !== "p") return transition
 
 	return { ...transition, kind: randomTransitionKind(Math.random()), options: {} }
+}
+
+// Reduced motion: a transition plays as a plain cross-fade of its duration (its sound and advance kept); a cut stays one.
+function crossFade(transition: Transition | undefined): Transition | undefined {
+	if (transition === undefined) return undefined
+
+	const durationMs = transitionDurationMs(transition)
+
+	return durationMs === 0 ? transition : { ...transition, kind: "fade", namespace: "p", options: {}, durationMs }
 }
 
 // A renderer's preparation for a slide, held with the slide.
@@ -418,6 +427,8 @@ export class ShowPlayer implements ShowController {
 	private activator: PresentationActionActivator | undefined
 	// Live copies of the stage (the presenter's current slide), given each frame as it is written.
 	private readonly mirrors = new Set<StageMirror>()
+	// The viewer's prefers-reduced-motion (live), for a show whose options leave reducedMotion out.
+	private readonly motionQuery: MediaQueryList | undefined
 
 	constructor(host: HTMLDivElement, props: PlayerProps, view: PlayerView) {
 		this.host = host
@@ -426,11 +437,18 @@ export class ShowPlayer implements ShowController {
 		this.document = host.ownerDocument
 		this.window = this.document.defaultView ?? (globalThis as unknown as Window)
 		this.nav = new ShowNavigator(props.slides, props.customShows, props.options)
+		this.motionQuery =
+			typeof this.window.matchMedia === "function" ? this.window.matchMedia("(prefers-reduced-motion: reduce)") : undefined
 		this.blackout = this.document.createElement("div")
 		this.blackout.className = "fo-show-black"
 		this.blackout.style.cssText = "position:absolute;inset:0;background:#000000;opacity:0;pointer-events:none;z-index:2"
 		this.host.appendChild(this.blackout)
 		this.activator = this.activatorOf(props)
+	}
+
+	// Transitions play as cross-fades, without their renderers (ShowOptions.reducedMotion, else the viewer's setting).
+	private reducedMotion(): boolean {
+		return this.props.options.reducedMotion ?? this.motionQuery?.matches === true
 	}
 
 	// --- Props and size ---
@@ -870,7 +888,7 @@ export class ShowPlayer implements ShowController {
 		// does not hold the slide itself.
 		this.arriving = prepared === undefined ? undefined : { prepared, generation }
 
-		const authored = how.transition && this.playing !== undefined ? prepared?.authored : undefined
+		const authored = how.transition && this.playing !== undefined && !this.reducedMotion() ? prepared?.authored : undefined
 		const renderer = rendererOf(authored)
 
 		if (prepared !== undefined && renderer !== undefined) {
@@ -922,7 +940,12 @@ export class ShowPlayer implements ShowController {
 
 		prepared.stage.element.style.zIndex = "1"
 
-		const transition = how.transition && from !== undefined ? resolveRandom(prepared.transition) : undefined
+		const transition =
+			!how.transition || from === undefined
+				? undefined
+				: this.reducedMotion()
+					? crossFade(prepared.transition)
+					: resolveRandom(prepared.transition)
 
 		// The slide entered with its transition plays its sound: a new one ends the one playing, as "stop previous sound"
 		// does.
@@ -1294,7 +1317,7 @@ export class ShowPlayer implements ShowController {
 
 					const kinds = compiled.source.transitionKinds
 
-					if (kinds !== undefined && this.warmed === undefined && !this.disposed) {
+					if (kinds !== undefined && this.warmed === undefined && !this.disposed && !this.reducedMotion()) {
 						this.warmed = TRANSITION_RENDERERS.flatMap(renderer => renderer.warm?.(this.document, kinds) ?? [])
 					}
 				}
@@ -1372,7 +1395,7 @@ export class ShowPlayer implements ShowController {
 		this.place(prepared)
 
 		// Prepared against the slide on stage now (the likely outgoing one); show() prepares again for another.
-		const renderer = rendererOf(prepared.authored)
+		const renderer = this.reducedMotion() ? undefined : rendererOf(prepared.authored)
 
 		if (renderer !== undefined) this.requestPreparation(prepared, renderer, this.playing?.prepared)
 
@@ -1397,6 +1420,8 @@ export class ShowPlayer implements ShowController {
 			})
 
 			prepared.painted = painted
+			// The slide's text alternative (show/player.tsx) speaks for it; its click targets are placed beside it.
+			painted.root.setAttribute("aria-hidden", "true")
 			yieldFocus(prepared.stage.element)
 			prepared.stage.element.replaceChildren(painted.root)
 		}
@@ -1651,7 +1676,8 @@ export class ShowPlayer implements ShowController {
 	}
 
 	// The slide's timed advance, on timers only (they run in a hidden tab, animation frames do not): at its advance
-	// time, once nothing on it moves or waits to begin; probed again until then.
+	// time, once no finitely timed effect on it plays or waits to begin (indefinite repeats play on); probed again until
+	// then.
 	private armAdvance(playing: Playing, after = 0): void {
 		if (this.advance !== undefined) return
 
@@ -1673,21 +1699,15 @@ export class ShowPlayer implements ShowController {
 		)
 	}
 
-	// Nothing on the slide moves or waits for a timed begin (sampled here, so a hidden tab's timeline goes on too).
+	// No finitely timed effect on the slide plays or waits for a timed begin (applied here, so a hidden tab's timeline
+	// goes on too).
 	private idle(playing: Playing): boolean {
 		const instance = playing.instance
-		const now = this.now()
-		const at = this.applyAt(playing, now)
+		const at = this.applyAt(playing, this.now())
 
 		if (instance === undefined || at === undefined) return true
 
-		const next = instance.nextActivation(at.t)
-
-		if (next !== undefined && Number.isFinite(next)) return false
-
-		playing.busyUntil = 0
-
-		return !this.busy(playing, instance, now, at.t, at.states)
+		return !holdsAdvance(instance, at.t)
 	}
 
 	// A font-size effect plays as each run scaled about its baseline start, not laid out again: said once per shape.

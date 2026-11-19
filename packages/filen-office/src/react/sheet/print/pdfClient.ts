@@ -14,6 +14,7 @@ export type SheetPdfJobResult =
 			readonly blob: Blob
 			readonly pages: number
 			readonly missingImages: number
+			readonly missingObjects: number
 			readonly missingGlyphs: number
 			readonly unshapedRuns: number
 	  }

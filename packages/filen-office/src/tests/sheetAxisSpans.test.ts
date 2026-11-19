@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { axisMoveOrder, orderedAxisSpans } from "../core/sheet/axisSpans"
-import { SHEET_MAX_ROWS, type SheetChange, type SheetCommandResult } from "../core/sheet/protocol"
+import { SHEET_MAX_ROWS } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { parts, type FixtureSheet } from "./xlsxWriteFixtures"
-import { IMMEDIATE, firstTile, openFixture, savedBytes, tileTexts } from "./sheetSessionFixtures"
+import { IMMEDIATE, firstTile, openFixture, savedBytes, tileTexts, changeOf } from "./sheetSessionFixtures"
 
 // Rows and columns inserted or deleted at several spans at once (a selection of several ranges), as Excel does: an
 // insert before each span, a delete of every span, in one undo step; what refers to the cells moves with them.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
-}
 
 // A1:A8 hold 1..8; B1 sums them; C3:D3 merged; a rule over A5:A6, a validation on A7.
 const SHEET: FixtureSheet = {

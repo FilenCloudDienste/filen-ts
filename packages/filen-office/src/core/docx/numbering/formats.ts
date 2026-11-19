@@ -2,7 +2,8 @@
 // contributors, licensed under the GNU Affero General Public License v3.0. Modified for @filen/office.
 
 // Number formats of ST_NumberFormat (ECMA-376 Part 1 §17.18.59). Formats without a dedicated rule fall
-// back to decimal, as Word does for formats a locale cannot display.
+// back to decimal, as Word does for formats a locale cannot display; so do the English word and ordinal formats
+// (ordinal, cardinalText, ordinalText) in a language other than English, which has no rule here.
 
 const ROMAN: readonly (readonly [number, string])[] = [
 	[1000, "M"],
@@ -274,7 +275,13 @@ function custom(value: number, format: string | undefined): string {
 	return String(value)
 }
 
-export function formatNumber(value: number, format: string, customFormat?: string): string {
+// Whether a w:lang value is English; text without one is.
+export function englishLanguage(language: string | undefined): boolean {
+	return language === undefined || /^en(?:-|$)/i.test(language)
+}
+
+// `language`: the w:lang the number is written in (English without one).
+export function formatNumber(value: number, format: string, customFormat?: string, language?: string): string {
 	switch (format) {
 		case "decimal":
 		case "decimalHalfWidth":
@@ -290,11 +297,11 @@ export function formatNumber(value: number, format: string, customFormat?: strin
 		case "lowerLetter":
 			return repeatedLetter(value, LATIN).toLowerCase()
 		case "ordinal":
-			return ordinalSuffix(value)
+			return englishLanguage(language) ? ordinalSuffix(value) : String(value)
 		case "cardinalText":
-			return capitalize(englishCardinal(value))
+			return englishLanguage(language) ? capitalize(englishCardinal(value)) : String(value)
 		case "ordinalText":
-			return capitalize(englishOrdinal(value))
+			return englishLanguage(language) ? capitalize(englishOrdinal(value)) : String(value)
 		case "hex":
 			return value.toString(16).toUpperCase()
 		case "chicago":

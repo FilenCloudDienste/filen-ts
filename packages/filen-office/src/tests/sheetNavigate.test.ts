@@ -75,13 +75,6 @@ describe("Ctrl+arrow", () => {
 		expect(await to(session, 0, 0, "down")).toEqual([2, 0])
 	})
 
-	it("goes to the used area's edge when asked", async () => {
-		const { session } = await openKeys({ sheets: [{ name: "One", body: sheetBody(ROWS) }] })
-		const at = await session.query("navigate", { sheet: 0, row: 0, col: 0, direction: "down", to: "usedEdge" })
-
-		expect([at.row, at.col]).toEqual([6, 0])
-	})
-
 	it("works on a text file", async () => {
 		const { session } = await openKeys("a,b,,d\nx\nx\n\nx\n")
 

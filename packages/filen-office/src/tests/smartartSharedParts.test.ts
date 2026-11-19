@@ -3,12 +3,11 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { strToU8, unzipSync, zipSync } from "fflate"
 import type { ShapeNode, SlideNode, SlideRef } from "../core/presentation/model"
-import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { review } from "../dom/presentation/engine/review"
-import { smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { CORPUS_DIR } from "./corpusDir"
 import { driveSession } from "./odpWriteDrive"
-import { danglingReferences, partsOf } from "./pptxWriteFixtures"
+import { partsOf } from "./pptxWriteFixtures"
+import { differingBytes, frameIn, openedDiagram, written } from "./smartartDriveFixtures"
 
 // Diagram parts more than one frame names (a duplicated slide's copy, a file whose slides share them): an edit of one
 // frame writes its own parts and leaves the others' as they were.
@@ -42,16 +41,7 @@ function sharedPie(path: string = PIE): Uint8Array {
 	return zipSync(files)
 }
 
-async function differing(a: Uint8Array, b: Uint8Array): Promise<string[]> {
-	const left = await partsOf(a)
-	const right = await partsOf(b)
-	const same = (x: Uint8Array | undefined, y: Uint8Array | undefined): boolean =>
-		x !== undefined && y !== undefined && x.length === y.length && x.every((byte, at) => byte === y[at])
-
-	return [...new Set([...left.keys(), ...right.keys()])].filter(name => !same(left.get(name), right.get(name))).sort()
-}
-
-// As `differing`, with each slide's diagram relationships read by what they name: an edit of a diagram the file shares
+// As `differingBytes`, with each slide's diagram relationships read by what they name: an edit of a diagram the file shares
 // between slides writes parts of its own under new relationship ids, and an undo relates the file's parts again under
 // ids of the slide's (the drawing's keeps the id its data names) in an a:graphic written anew.
 async function differingParts(a: Uint8Array, b: Uint8Array): Promise<string[]> {
@@ -127,56 +117,10 @@ async function diagramContents(bytes: Uint8Array): Promise<string[]> {
 	return out
 }
 
-function frameIn(shapes: readonly ShapeNode[]): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.frame?.kind === "smartart") return shape
-
-		const child = shape.children === undefined ? undefined : frameIn(shape.children)
-
-		if (child !== undefined) return child
-	}
-
-	return undefined
-}
-
-async function opened(bytes: Uint8Array) {
-	const d = await driveSession(bytes, "pptx")
-
-	smartArtRenderer(d.session, {
-		services: {
-			xml: part => pptxParts(d.session.deck)?.document(part),
-			relationship: () => undefined,
-			contentType: () => undefined
-		}
-	})
-
-	for (const slide of d.session.deck.slides) {
-		await review(d.context, slide)
-
-		const frame = frameIn((d.session.deck.nodes.get(slide) as SlideNode).shapes)
-
-		if (frame !== undefined) return { d, slide, frame }
-	}
-
-	throw new Error("no diagram")
-}
-
-async function written(d: Awaited<ReturnType<typeof driveSession>>): Promise<Uint8Array> {
-	const saved = await d.save()
-
-	expect(saved.result).toEqual(expect.objectContaining({ kind: "written" }))
-
-	if (saved.bytes === undefined) throw new Error("not saved")
-
-	expect(await danglingReferences(saved.bytes)).toEqual([])
-
-	return saved.bytes
-}
-
 describe.skipIf(!existsSync(STRIP))("a file diagram with pictures of its own, its slide duplicated", () => {
 	for (const save of [false, true])
 		it(`edited${save ? " and saved" : ""}, moved, then its slide duplicated: written`, async () => {
-			const { d, slide, frame } = await opened(new Uint8Array(readFileSync(STRIP)))
+			const { d, slide, frame } = await openedDiagram(new Uint8Array(readFileSync(STRIP)))
 			const target = { slide: slide as SlideRef, id: frame.id }
 
 			expect(
@@ -224,7 +168,7 @@ describe.skipIf(!existsSync(PIE))("two slides relating the same diagram parts", 
 	for (const kind of ["setLayout", "setStyle", "setColors"] as const)
 		it(`${kind} on one writes its own parts, the other's stay as they were, and an undo after the save names the file's again`, async () => {
 			const source = sharedPie()
-			const { d, slide, frame } = await opened(source)
+			const { d, slide, frame } = await openedDiagram(source)
 			const def =
 				kind === "setLayout"
 					? "urn:filen:smartart:layout:process-basic"
@@ -244,7 +188,9 @@ describe.skipIf(!existsSync(PIE))("two slides relating the same diagram parts", 
 					})
 				).ok
 			).toBe(true)
-			expect((await differing(source, await written(d))).filter(name => /^ppt\/diagrams\/[a-z]+1\.xml$/iu.test(name))).toEqual([])
+			expect((await differingBytes(source, await written(d))).filter(name => /^ppt\/diagrams\/[a-z]+1\.xml$/iu.test(name))).toEqual(
+				[]
+			)
 			expect((await d.undo()).ok).toBe(true)
 			expect(await differingParts(source, await written(d))).toEqual([])
 		})
@@ -252,7 +198,7 @@ describe.skipIf(!existsSync(PIE))("two slides relating the same diagram parts", 
 
 describe.skipIf(!existsSync(PIE))("an edited diagram's slide duplicated and its original deleted", () => {
 	it("undone to before the save without saving between: the slides restored relate every drawing their data names", async () => {
-		const { d, slide, frame } = await opened(new Uint8Array(readFileSync(PIE)))
+		const { d, slide, frame } = await openedDiagram(new Uint8Array(readFileSync(PIE)))
 		const def = { uniqueId: "urn:filen:smartart:layout:venn", source: "gallery" } as const
 
 		expect((await d.command({ family: "slide", kind: "duplicate", slide })).ok).toBe(true)
@@ -317,7 +263,7 @@ for (const path of DIAGRAM_DECKS)
 	describe.skipIf(!existsSync(path))(`two slides relating one diagram of ${path.split("/").pop() ?? ""}, both edited`, () => {
 		async function edited(): Promise<{ d: Awaited<ReturnType<typeof driveSession>>; source: Uint8Array; states: Uint8Array[] }> {
 			const source = sharedPie(path)
-			const { d } = await opened(source)
+			const { d } = await openedDiagram(source)
 			const slides = d.session.deck.slides as SlideRef[]
 			const states: Uint8Array[] = [source]
 
@@ -345,7 +291,7 @@ for (const path of DIAGRAM_DECKS)
 
 		it("edited with one save, then undone to the start and saved: each slide's diagram again, its drawing related", async () => {
 			const source = sharedPie(path)
-			const { d } = await opened(source)
+			const { d } = await openedDiagram(source)
 			const slides = d.session.deck.slides as SlideRef[]
 
 			for (const slide of slides) await review(d.context, slide)

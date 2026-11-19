@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { AxisFlag, type SheetChange, type SheetCommandResult } from "../core/sheet/protocol"
+import { AxisFlag } from "../core/sheet/protocol"
 import { withHidden } from "../core/xlsx/edit/hide"
 import { ColFlag } from "../core/xlsx/model/types"
 import { parts } from "./xlsxWriteFixtures"
-import { openFixture, savedBytes } from "./sheetSessionFixtures"
+import { openFixture, savedBytes, changeOf } from "./sheetSessionFixtures"
 import { budget } from "./timing"
 
 // Rows and columns hidden and shown: the row and col records written, the layout's flags, protection.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
-}
 
 const SHEET = {
 	sheets: [

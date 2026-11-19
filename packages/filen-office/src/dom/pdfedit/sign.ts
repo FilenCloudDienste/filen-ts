@@ -8,7 +8,7 @@ import {
 	type SignaturePlaceholder
 } from "../../core/pdfsign/placeholder"
 import { digestRanges, type PdfDigestFactory } from "../../core/pdfsign/source"
-import { deref, name as nameOf } from "./fields"
+import { collectFields, deref, type FieldRecord, name as nameOf } from "./fields"
 import type { PdfDigestName } from "../../core/pdfsign/types"
 
 // Signing an open MuPDF document with a certificate, in two steps around the CMS signature that is made elsewhere (the
@@ -95,8 +95,6 @@ export class PdfSignRefusal extends Error {
 
 const WIDGET_FLAGS = 132 // Print | Locked
 const SIG_FLAGS = 3 // SignaturesExist | AppendOnly
-const MAX_FIELD_DEPTH = 32
-const MAX_FIELDS = 100_000
 const MAX_FONT_SIZE = 24
 const MIN_FONT_SIZE = 2
 const LINE_GAP = 1.2
@@ -117,60 +115,6 @@ function pdfDate(date: Date): string {
 	return `D:${pad(date.getUTCFullYear(), 4)}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(
 		date.getUTCMinutes()
 	)}${pad(date.getUTCSeconds())}+00'00'`
-}
-
-interface FieldEntry {
-	readonly name: string
-	readonly type: string | null
-	readonly dict: PDFObject
-	// The field as listed (an indirect reference, normally): what is written to, resolved at the time of writing.
-	readonly ref: PDFObject
-	// The field's widgets (the field itself when merged).
-	readonly widgets: readonly PDFObject[]
-}
-
-// Terminal fields of the AcroForm tree by fully qualified name.
-function formFields(document: PDFDocument): FieldEntry[] {
-	const fields: FieldEntry[] = []
-	const seen = new Set<number>()
-	const roots = deref(document.getTrailer().get("Root", "AcroForm", "Fields"))
-
-	const visit = (field: PDFObject, parent: string | null, inheritedType: string | null, depth: number): void => {
-		const dict = deref(field)
-
-		if (depth > MAX_FIELD_DEPTH || fields.length >= MAX_FIELDS || !dict.isDictionary()) return
-		if (field.isIndirect()) {
-			if (seen.has(field.asIndirect())) return
-
-			seen.add(field.asIndirect())
-		}
-
-		const partialObject = deref(dict.get("T"))
-		const partial = partialObject.isString() ? partialObject.asString() : null
-		const name = partial === null ? parent : parent === null ? partial : `${parent}.${partial}`
-		const type = nameOf(dict.get("FT")) ?? inheritedType
-		const kids = deref(dict.get("Kids"))
-		const children: PDFObject[] = []
-		const widgets: PDFObject[] = nameOf(dict.get("Subtype")) === "Widget" ? [field] : []
-
-		if (kids.isArray()) {
-			for (let i = 0; i < kids.length; i++) {
-				const kid = kids.get(i)
-				const kidDict = deref(kid)
-
-				if (kidDict.isDictionary() && kidDict.get("T").isNull()) widgets.push(kid)
-				else children.push(kid)
-			}
-		}
-
-		if (name !== null && children.length === 0) fields.push({ name, type, dict, ref: field, widgets })
-
-		for (const child of children) visit(child, name, type, depth + 1)
-	}
-
-	if (roots.isArray()) for (let i = 0; i < roots.length; i++) visit(roots.get(i), null, null, 0)
-
-	return fields
 }
 
 // The DocMDP level of the document's certification, if any.
@@ -218,7 +162,7 @@ function pageOf(document: PDFDocument, widget: PDFObject): number {
 	return refuse("fieldNotFound")
 }
 
-function uniqueFieldName(fields: readonly FieldEntry[]): string {
+function uniqueFieldName(fields: readonly FieldRecord[]): string {
 	const names = new Set(fields.map(field => field.name))
 	let n = fields.filter(field => field.type === "Sig").length + 1
 
@@ -429,7 +373,7 @@ function findPlacedWidget(page: Mupdf.PDFPage, num: number): Mupdf.PDFWidget {
 }
 
 export function addPdfSignatureField(mupdf: MupdfModule, document: PDFDocument, request: PdfSignatureFieldRequest): PdfSignatureDraft {
-	const fields = formFields(document)
+	const { fields } = collectFields(document)
 	const signed = fields.some(field => field.type === "Sig" && deref(field.dict.get("V")).isDictionary())
 
 	if (certification(document) === 1) refuse("certifiedLocked")
@@ -579,26 +523,21 @@ export function addPdfSignatureField(mupdf: MupdfModule, document: PDFDocument, 
 export interface PdfSignedRevision {
 	// The whole output, in MuPDF's heap until destroy().
 	readonly buffer: Mupdf.Buffer
-	// A view of it, valid until destroy() (or the heap grows).
+	// A fresh view of it on each read, valid until destroy() or the heap grows: read it again after anything that may
+	// allocate in MuPDF's heap.
 	readonly bytes: Uint8Array
 	readonly byteRange: ByteRange
-	// Offset of the `<` of /Contents.
-	readonly contentsOffset: number
-	// Bytes the CMS may take.
-	readonly gap: number
 	// Writes the CMS into /Contents; false when it does not fit (a second pass with more room).
 	patch(cms: Uint8Array): boolean
 	destroy(): void
 }
 
-export interface WritePdfSignatureOptions {
+interface WritePdfSignatureOptions {
 	// Length of the file the document was opened from: the appended revision starts there.
 	readonly baseLength: number
 	// /Contents room in bytes; the placeholder is resized when it differs from the draft's.
 	readonly capacity: number
 }
-
-type WrittenRevision = PdfSignedRevision
 
 function sentinelRange(document: PDFDocument): PDFObject {
 	const range = document.newArray()
@@ -624,7 +563,7 @@ function setPlaceholder(document: PDFDocument, draft: PdfSignatureDraft, capacit
 	if (range.toString(true) !== sentinelRange(document).toString(true)) signature.put("ByteRange", sentinelRange(document))
 }
 
-function writeRevision(document: PDFDocument, draft: PdfSignatureDraft, options: WritePdfSignatureOptions): WrittenRevision {
+function writeRevision(document: PDFDocument, draft: PdfSignatureDraft, options: WritePdfSignatureOptions): PdfSignedRevision {
 	if (!document.canBeSavedIncrementally()) refuse("notIncremental")
 
 	setPlaceholder(document, draft, options.capacity)
@@ -645,11 +584,12 @@ function writeRevision(document: PDFDocument, draft: PdfSignatureDraft, options:
 
 	return {
 		buffer,
-		bytes,
+		get bytes() {
+			return buffer.asUint8Array()
+		},
 		byteRange,
-		contentsOffset: placeholder.contentsStart,
-		gap: options.capacity,
-		patch: cms => patchContents(bytes, placeholder, cms),
+		// A view taken now: the signing awaits in between may have grown the heap.
+		patch: cms => patchContents(buffer.asUint8Array(), placeholder, cms),
 		destroy: () => {
 			buffer.destroy()
 		}
@@ -666,9 +606,10 @@ export interface SignPdfDocumentOptions extends WritePdfSignatureOptions {
 }
 
 async function signRevision(revision: PdfSignedRevision, options: SignPdfDocumentOptions): Promise<Uint8Array> {
-	const { bytes, byteRange } = revision
+	const { buffer, byteRange } = revision
+	// A view per read: the digest awaits between reads.
 	const digests = await digestRanges(
-		{ length: bytes.length, read: (offset, length) => Promise.resolve(bytes.subarray(offset, offset + length)) },
+		{ length: buffer.getLength(), read: (offset, length) => Promise.resolve(buffer.asUint8Array().subarray(offset, offset + length)) },
 		[
 			[byteRange[0], byteRange[1]],
 			[byteRange[2], byteRange[3]]
@@ -683,7 +624,7 @@ async function signRevision(revision: PdfSignedRevision, options: SignPdfDocumen
 // Digests the revision's signed ranges, has them signed and patches the CMS in; false when it does not fit. The
 // revision is destroyed when signing fails.
 async function completeRevision(
-	revision: WrittenRevision,
+	revision: PdfSignedRevision,
 	options: SignPdfDocumentOptions
 ): Promise<{ readonly fits: boolean; readonly size: number }> {
 	let cms: Uint8Array
@@ -714,7 +655,10 @@ export async function signPdfDocument(
 
 	if (firstPass.fits) return first
 
-	let second: WrittenRevision
+	let second: PdfSignedRevision
+
+	// Read before reopening: the reopen allocates in MuPDF's heap, which may grow it and detach earlier views.
+	const baseLength = first.buffer.getLength()
 
 	try {
 		const reopened = new mupdf.PDFDocument(first.buffer)
@@ -722,7 +666,7 @@ export async function signPdfDocument(
 		try {
 			if (reopened.needsPassword() && reopened.authenticatePassword(options.password ?? "") === 0) refuse("placeholder")
 
-			second = writeRevision(reopened, draft, { baseLength: first.bytes.length, capacity: firstPass.size + RESIZE_MARGIN })
+			second = writeRevision(reopened, draft, { baseLength, capacity: firstPass.size + RESIZE_MARGIN })
 		} finally {
 			reopened.destroy()
 		}

@@ -20,11 +20,11 @@ import { RebuildStep } from "./invariants/core"
 import { DOCX_PARAGRAPH_STYLES, PARAGRAPH_STYLE_NAMES, type DocxEditorCommandType, type DocxParagraphStyle } from "./commands"
 import { canonicalStyleName } from "../styles/styles"
 import type { DocxEditContext } from "./context"
-import { docxSchema, NO_SOURCE, type MarkerKind, type MarkerList } from "./schema"
-import { sectionNode } from "../stories/sections"
+import { docxSchema, NO_SOURCE, REVISION_MARKS, type MarkerKind, type MarkerList } from "./schema"
+import { endsSection, sectionNode } from "../stories/sections"
 import { rowGrid } from "./tables/map"
 import type { DocxEditorSession } from "./session"
-import type { DocxGateReason } from "../package"
+import { LIMITED_PROTECTION, type DocxGateReason } from "../package"
 import { wantReviewIndex } from "../review/index"
 import { documentProtectionHashRead, readProtectionHash, type DocumentProtectionHash, type ProtectionHashRead } from "../protection/hash"
 
@@ -67,13 +67,12 @@ export interface DocxProtectionSetting {
 // What the session changed of the file's protection: one set, or the file's stopped.
 export type DocxProtectionChange = DocxProtectionSetting | "stopped"
 
-const LIMITED_MODES = new Set<string>(["forms", "comments", "trackedChanges"])
 const protections = new WeakMap<DocxEditContext, { readonly change: DocxProtectionChange | undefined; readonly found: DocxProtection }>()
 
 // The mode an enforced w:documentProtection w:edit opens the document in ("none" for the view-only and
 // unprotected ones).
 export function protectionMode(edit: string | undefined, enforced: boolean): DocxProtectionMode {
-	return enforced && edit !== undefined && LIMITED_MODES.has(edit) ? (edit as DocxProtectionMode) : "none"
+	return enforced && edit !== undefined && LIMITED_PROTECTION.has(edit) ? (edit as DocxProtectionMode) : "none"
 }
 
 interface Enforced {
@@ -522,21 +521,17 @@ function formProtOff(part: StoryPart, sectPr: number): boolean {
 	return node >= 0 && !part.reader.onOff(node)
 }
 
-// The body's sections form protection leaves editable, as ranges.
+// The body's sections form protection leaves editable, as ranges. A section ends where layout ends it
+// (endsSection: a paragraph, or a locked block holding the paragraph, with a break written as one).
 function openSections(part: StoryPart, doc: Node): number[] {
 	const out: number[] = []
 	let start = 0
 
 	doc.descendants((node, pos) => {
-		if (!node.isTextblock) return node.type === docxSchema.nodes.sdt
+		if (!endsSection(part, node)) return node.type === docxSchema.nodes.sdt
+		if (formProtOff(part, sectionNode(part, node.attrs["sectPr"] as number))) out.push(start, pos + node.nodeSize)
 
-		const item = (node.attrs["sectPr"] as number | undefined) ?? NO_SOURCE
-
-		if (item !== NO_SOURCE) {
-			if (formProtOff(part, sectionNode(part, item))) out.push(start, pos + node.nodeSize)
-
-			start = pos + node.nodeSize
-		}
+		start = pos + node.nodeSize
 
 		return false
 	})
@@ -768,17 +763,18 @@ function anchorsComment(step: Step, doc: Node): boolean {
 	return only
 }
 
+// The marks a recording of changes adds: the revisions and the record of formatting changed.
+const RECORDING_MARKS: ReadonlySet<string> = new Set([...REVISION_MARKS, "format_change"])
+
 // Formatting set on content (not a revision a recording adds, nor a control): what Word's forms protection lets
 // no one change, inside a control too (format commands are refused there).
 function directFormatting(step: Step): boolean {
 	return (
 		markStepsOf(step)?.some(part =>
-			markStepTypes(part).some(type => type.name !== "content_control" && !REVISION_MARKS.has(type.name))
+			markStepTypes(part).some(type => type.name !== "content_control" && !RECORDING_MARKS.has(type.name))
 		) ?? false
 	)
 }
-
-const REVISION_MARKS = new Set(["insertion", "deletion", "move_from", "move_to", "format_change"])
 
 // A picture control's picture replaced (Word lets a form's user change it).
 function swapsPicture(part: StoryPart, doc: Node, step: Step): boolean {

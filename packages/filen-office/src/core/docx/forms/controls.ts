@@ -114,6 +114,9 @@ export interface MadeControl {
 	readonly items?: readonly ControlListItem[]
 	readonly dateFormat?: string
 	readonly lid?: string
+	// The text the control shows while empty, in the host's language (DocxEditStrings.placeholders); Word's
+	// default placeholder for the type without one.
+	readonly placeholder?: string
 }
 
 // Word's checkbox glyphs (MS-DOCX §2.6.1.2: the defaults of w14:checkedState and w14:uncheckedState).
@@ -121,19 +124,22 @@ export const CHECKED_GLYPH = 0x2612
 export const UNCHECKED_GLYPH = 0x2610
 export const GLYPH_FONT = "MS Gothic"
 
-// The placeholder texts of Word's default building blocks (DefaultPlaceholder_*), by control type.
-export const DEFAULT_PLACEHOLDERS: Readonly<Record<string, string>> = {
+// Placeholder texts by kind of control: text (and every type but these), date, and drop-down list or combo box.
+export interface ControlPlaceholders {
+	readonly text: string
+	readonly date: string
+	readonly list: string
+}
+
+// The placeholder texts of Word's default building blocks (DefaultPlaceholder_*), by control type (en-US).
+export const DEFAULT_PLACEHOLDERS: ControlPlaceholders = {
 	text: "Click or tap here to enter text.",
 	date: "Click or tap to enter a date.",
 	list: "Choose an item."
 }
 
-export function defaultPlaceholder(type: ControlType): string {
-	return type === "date"
-		? (DEFAULT_PLACEHOLDERS["date"] ?? "")
-		: type === "dropDownList" || type === "comboBox"
-			? (DEFAULT_PLACEHOLDERS["list"] ?? "")
-			: (DEFAULT_PLACEHOLDERS["text"] ?? "")
+export function defaultPlaceholder(type: ControlType, placeholders: ControlPlaceholders = DEFAULT_PLACEHOLDERS): string {
+	return type === "date" ? placeholders.date : type === "dropDownList" || type === "comboBox" ? placeholders.list : placeholders.text
 }
 
 const LOCKS = new Set<ControlLock>(["sdtLocked", "contentLocked", "sdtContentLocked", "unlocked"])
@@ -611,36 +617,41 @@ function withState(base: ControlInfo, state: ControlState): ControlInfo {
 	return info
 }
 
-const placeholders = new WeakMap<StoryPart, Map<number, string>>()
+const sourcePlaceholders = new WeakMap<StoryPart, Map<number, string>>()
 
 // The placeholder text of a control: its source content when the source shows the placeholder (the text of
-// the building block w:docPart names, as Word copied it in), else the text of Word's default placeholder for
-// the type.
-export function placeholderText(part: StoryPart, holder: Node | Mark, info: ControlInfo): string {
+// the building block w:docPart names, as Word copied it in), else the one the editor made it with, else the text
+// of the default placeholder for the type in the host's language (`placeholders`, DocxEditStrings.placeholders).
+export function placeholderText(
+	part: StoryPart,
+	holder: Node | Mark,
+	info: ControlInfo,
+	placeholders: ControlPlaceholders = DEFAULT_PLACEHOLDERS
+): string {
 	const src = holder.attrs["src"] as number
+	const state = controlState(holder)
 	// A copy (a repeating section item added) has its source's placeholder.
-	const own = src === NO_SOURCE ? (controlState(holder)?.copy ?? NO_SOURCE) : src
+	const own = src === NO_SOURCE ? (state?.copy ?? NO_SOURCE) : src
 
-	if (own === NO_SOURCE || own >= part.count || !sourceControl(part, own).showingPlaceholder) return defaultPlaceholder(info.type)
+	if (own === NO_SOURCE || own >= part.count || !sourceControl(part, own).showingPlaceholder)
+		return state?.made?.placeholder ?? defaultPlaceholder(info.type, placeholders)
 
-	let cache = placeholders.get(part)
+	let cache = sourcePlaceholders.get(part)
 
 	if (cache === undefined) {
 		cache = new Map()
-		placeholders.set(part, cache)
+		sourcePlaceholders.set(part, cache)
 	}
 
+	// The source's own text is cached; an empty one takes the host's default per call.
 	let text = cache.get(own)
 
 	if (text === undefined) {
 		text = contentText(part, part.sdts.content[part.aux[own] ?? -1] ?? -1)
-
-		if (text === "") text = defaultPlaceholder(info.type)
-
 		cache.set(own, text)
 	}
 
-	return text
+	return text === "" ? defaultPlaceholder(info.type, placeholders) : text
 }
 
 // The text of a w:sdtContent's runs (w:t, tabs as tab characters), its first paragraph's only.

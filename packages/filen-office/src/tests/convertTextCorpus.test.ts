@@ -8,7 +8,7 @@ import { buildDocxModel, openDocxPackage, type DocxModel } from "@filen/office/c
 import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import { openOdtAsDocx } from "../core/odt/index"
 import { decodeUtf8 } from "@filen/office/core/xml"
-import { convertText, textSourceFormat, type TextRefusalReason, type TextSourceFormat } from "../core/convert/text/index"
+import { convertText, type TextRefusalReason, type TextSourceFormat } from "../core/convert/text/index"
 import { symbolTable, symbolText } from "../core/fonts/symbols"
 import { CORPUS_DIR } from "./corpusDir"
 import { docxBodyText } from "./docToDocxFixtures"
@@ -38,6 +38,11 @@ function files(...families: string[]): string[] {
 			existsSync(join(CORPUS_DIR, family)) ? readdirSync(join(CORPUS_DIR, family)).map(name => `${family}/${name}`) : []
 		)
 		.sort()
+}
+
+// The corpus files of families in one source format, each with that format.
+function sources(from: TextSourceFormat, ...families: string[]): (readonly [string, TextSourceFormat])[] {
+	return files(...families).map(path => [path, from] as const)
 }
 
 function load(path: string): Uint8Array {
@@ -132,11 +137,7 @@ describe.skipIf(!fetched)("text conversions over the corpus", () => {
 		const differing: string[] = []
 		const slow: string[] = []
 
-		for (const path of files("odt", "ott", "rtf")) {
-			const from = textSourceFormat(path)
-
-			if (from === undefined) continue
-
+		for (const [path, from] of [...sources("odt", "odt", "ott"), ...sources("rtf", "rtf")]) {
 			const bytes = load(path)
 			const started = performance.now()
 			const converted = await convertText(bytes, from, "docx")
@@ -230,10 +231,8 @@ describe.skipIf(!fetched)("text conversions over the corpus", () => {
 		const failures: string[] = []
 
 		try {
-			for (const path of files("odt", "ott", "rtf", "doc")) {
-				const from = textSourceFormat(path)
-
-				if (from === undefined || REFUSED[path] !== undefined) continue
+			for (const [path, from] of [...sources("odt", "odt", "ott"), ...sources("rtf", "rtf"), ...sources("doc", "doc")]) {
+				if (REFUSED[path] !== undefined) continue
 
 				const converted = await convertText(load(path), from, target(from))
 

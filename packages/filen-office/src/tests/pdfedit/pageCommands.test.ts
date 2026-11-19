@@ -1,7 +1,5 @@
-import { MessageChannel } from "node:worker_threads"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as mupdf from "mupdf"
-import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
 import { CROP_COMMANDS } from "../../dom/pdfedit/commands/crop"
@@ -11,12 +9,11 @@ import type { PdfCommandContext } from "../../dom/pdfedit/commands/types"
 import { PDF_AES256_METHOD } from "../../core/pdfedit/security"
 import type { PdfSaveExpectation } from "../../dom/pdfedit/protocol"
 import { markArea, markText, pageRedactionMarks } from "../../dom/pdfedit/redact"
-import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import { PDF_UNSIGNED } from "../../core/pdfedit/signaturePolicy"
 import type { RedactionManifest, RedactionVerdict } from "../../core/pdfedit/redactVerify"
-import { openPdf, pageText } from "../docxPdfFixtures"
 import { budget } from "../timing"
-import { spawnEngine, startEngine, stopEngines, syncPort } from "./harness"
+import { serveBytes, startEngine, stopEngines, upload, verifier } from "./harness"
+import { pdfjsTexts } from "./pdfjsFixtures"
 import { makeMarginsPdf, makeOrganisedPdf, makeOtherPdf } from "./pageFixtures"
 
 // The page and crop commands through a real engine: each a journal step with undo and redo, a second document held
@@ -25,23 +22,6 @@ import { makeMarginsPdf, makeOrganisedPdf, makeOtherPdf } from "./pageFixtures"
 afterEach(stopEngines)
 
 const TIMEOUT = budget(60_000)
-
-// A channel the engine reads `bytes` through (its port is transferred with the request).
-function serveBytes(bytes: Uint8Array): { readonly channel: { buffer: SharedArrayBuffer; port: SyncRangePort; length: number } } {
-	const blockBytes = 64 * 1024
-	const buffer = createSyncRangeBuffer(8, blockBytes)
-	const channel = new MessageChannel()
-	const lifetime = new AbortController()
-
-	serveSyncRange(
-		buffer,
-		syncPort(channel.port2),
-		{ length: bytes.length, read: (start, end) => Promise.resolve(bytes.slice(start, end)) },
-		{ lifetime: lifetime.signal, readAhead: 2, onReaderClose: () => lifetime.abort() }
-	)
-
-	return { channel: { buffer, port: channel.port1 as unknown as SyncRangePort, length: bytes.length } }
-}
 
 async function texts(client: PdfEngineClient): Promise<string[]> {
 	const { pageCount } = await client.call("state", {})
@@ -56,71 +36,21 @@ async function texts(client: PdfEngineClient): Promise<string[]> {
 	return out
 }
 
-// The held output streamed as an upload would read it.
-async function upload(client: PdfEngineClient): Promise<Uint8Array> {
-	const channel = new MessageChannel()
-	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
-	const written = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
-	const chunks: Uint8Array[] = []
-
-	for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
-
-	reader.settled(true)
-	expect((await written).uploaded).toBe(true)
-
-	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let at = 0
-
-	for (const chunk of chunks) {
-		bytes.set(chunk, at)
-		at += chunk.length
-	}
-
-	return bytes
-}
-
 // The held output's redaction check, in a verifying engine as the page runs it.
 async function verifyRedaction(client: PdfEngineClient, size: number, manifest: RedactionManifest): Promise<RedactionVerdict> {
-	const buffer = createSyncRangeBuffer(8, 64 * 1024)
-	const channel = new MessageChannel()
+	const engine = await verifier(client, size)
+	const verdict = await engine.call("verifyRedaction", { manifest })
 
-	await client.call("serveOutput", { buffer, port: channel.port1 as unknown as SyncRangePort }, [channel.port1])
-
-	const verifier = spawnEngine({})
-
-	await verifier.call("open", { channel: { buffer, port: channel.port2 as unknown as SyncRangePort, length: size }, role: "verify" }, [
-		channel.port2
-	])
-
-	const verdict = await verifier.call("verifyRedaction", { manifest })
-
-	verifier.terminate()
+	engine.terminate()
 
 	return verdict
 }
 
 async function verify(client: PdfEngineClient, size: number, expected: PdfSaveExpectation, password?: string) {
-	const buffer = createSyncRangeBuffer(8, 64 * 1024)
-	const channel = new MessageChannel()
+	const engine = await verifier(client, size, password)
+	const check = await engine.call("checkSaved", expected)
 
-	await client.call("serveOutput", { buffer, port: channel.port1 as unknown as SyncRangePort }, [channel.port1])
-
-	const verifier = spawnEngine({})
-	const opened = await verifier.call(
-		"open",
-		{
-			channel: { buffer, port: channel.port2 as unknown as SyncRangePort, length: size },
-			role: "verify",
-			...(password === undefined ? {} : { password })
-		},
-		[channel.port2]
-	)
-
-	expect(opened.status).toBe("open")
-
-	const check = await verifier.call("checkSaved", expected)
-
-	verifier.terminate()
+	engine.terminate()
 
 	return check
 }
@@ -145,22 +75,12 @@ async function save(
 		expect(await verifyRedaction(client, begun.size, begun.redaction)).toEqual({ ok: true })
 	}
 
-	const bytes = await upload(client)
+	const { uploaded, bytes } = await upload(client)
 
+	expect(uploaded).toBe(true)
 	await client.call("saveEnd", { outcome: "saved", next: "continue" })
 
 	return bytes
-}
-
-async function pdfjsTexts(bytes: Uint8Array, password?: string): Promise<string[]> {
-	const pdf = await openPdf(bytes, password)
-	const out: string[] = []
-
-	for (let page = 1; page <= pdf.numPages; page++) out.push(await pageText(pdf, page))
-
-	await pdf.loadingTask.destroy()
-
-	return out
 }
 
 function mupdfTexts(bytes: Uint8Array, password?: string): string[] {
@@ -415,27 +335,25 @@ describe("page commands", () => {
 			const locked = makeOrganisedPdf({ userPassword: "pässword" })
 			const asked = serveBytes(locked)
 
-			expect(await engine.client.call("attachSource", { channel: asked.channel }, [asked.channel.port])).toEqual({
+			expect(await engine.client.call("attachSource", { channel: asked }, [asked.port])).toEqual({
 				status: "password"
 			})
 
 			const wrong = serveBytes(locked)
 
-			expect(await engine.client.call("attachSource", { channel: wrong.channel, password: "nope" }, [wrong.channel.port])).toEqual({
+			expect(await engine.client.call("attachSource", { channel: wrong, password: "nope" }, [wrong.port])).toEqual({
 				status: "password"
 			})
 
 			const right = serveBytes(locked)
-			const attached = await engine.client.call("attachSource", { channel: right.channel, password: "pässword" }, [
-				right.channel.port
-			])
+			const attached = await engine.client.call("attachSource", { channel: right, password: "pässword" }, [right.port])
 
 			if (attached.status !== "open") throw new Error("not open")
 
 			expect(attached.pageCount).toBe(6)
 
 			const other = serveBytes(makeOtherPdf())
-			const second = await engine.client.call("attachSource", { channel: other.channel }, [other.channel.port])
+			const second = await engine.client.call("attachSource", { channel: other }, [other.port])
 
 			if (second.status !== "open") throw new Error("not open")
 
@@ -458,7 +376,7 @@ describe("page commands", () => {
 
 			const notPdf = serveBytes(new TextEncoder().encode("not a pdf at all"))
 
-			await expect(engine.client.call("attachSource", { channel: notPdf.channel }, [notPdf.channel.port])).rejects.toMatchObject({
+			await expect(engine.client.call("attachSource", { channel: notPdf }, [notPdf.port])).rejects.toMatchObject({
 				failure: "notPdf"
 			})
 
@@ -634,7 +552,10 @@ describe("page commands", () => {
 				await verify(engine.client, begun.size, { pageCount: 2, versions: 1, encryption: begun.encryption }, "pässword")
 			).toEqual({ ok: true })
 
-			const encrypted = await upload(engine.client)
+			const { uploaded: uploadedEncrypted, bytes: encrypted } = await upload(engine.client)
+
+			expect(uploadedEncrypted).toBe(true)
+
 			const ended = await engine.client.call("saveEnd", { outcome: "copied", next: "continue" })
 
 			expect(before.tools.pages).toBe("signed")
@@ -671,7 +592,9 @@ describe("page commands", () => {
 			expect(open.encryption).toBe("None")
 			expect(await verify(owned.client, open.size, { pageCount: 1, versions: 1, encryption: "None" })).toEqual({ ok: true })
 
-			const plain = await upload(owned.client)
+			const { uploaded: uploadedPlain, bytes: plain } = await upload(owned.client)
+
+			expect(uploadedPlain).toBe(true)
 
 			await owned.client.call("saveEnd", { outcome: "copied", next: "continue" })
 			expect(mupdf.Document.openDocument(plain, "application/pdf").needsPassword()).toBe(false)
@@ -693,7 +616,9 @@ describe("page commands", () => {
 			expect(free).toMatchObject({ status: "written", encryption: "None" })
 
 			// The rotation made in the editor is in the new file.
-			const rotated = await upload(unlocked.client)
+			const { uploaded: uploadedRotated, bytes: rotated } = await upload(unlocked.client)
+
+			expect(uploadedRotated).toBe(true)
 
 			expect(mupdf.Document.openDocument(rotated, "application/pdf").asPDF()?.findPage(0).get("Rotate").asNumber()).toBe(90)
 

@@ -1,20 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { firstTile, openFixture, tileTexts } from "./sheetSessionFixtures"
+import { firstTile, openFixture, tileTexts, noise } from "./sheetSessionFixtures"
 
 // The active sheet's preview answers the first tile row only when the start of its part holds every row of it.
-
-// Text deflate cannot shrink much: the part is large compressed too.
-function noise(length: number, seed: number): string {
-	let state = seed >>> 0
-	let out = ""
-
-	for (let i = 0; i < length; i++) {
-		state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-		out += String.fromCharCode(97 + (state >>> 27))
-	}
-
-	return out
-}
 
 function rows(from: number, to: number, cell: (row: number) => string): string {
 	let out = ""

@@ -17,9 +17,6 @@ export interface SheetOccupancy {
 	nextInRow(row: number, col: number, step: 1 | -1, until?: number): number
 	hiddenRow(row: number): boolean
 	hiddenCol(col: number): boolean
-	// The used area's last row and column (-1 when the sheet holds nothing).
-	readonly lastRow: number
-	readonly lastCol: number
 }
 
 type Direction = SheetQueryRequest<"navigate">["direction"]
@@ -79,13 +76,6 @@ export function navigate(occupancy: SheetOccupancy, request: SheetQueryRequest<"
 	const direction: Direction = request.direction
 	const step: 1 | -1 = direction === "down" || direction === "right" ? 1 : -1
 	const vertical = direction === "up" || direction === "down"
-
-	if (request.to === "usedEdge") {
-		const last = vertical ? occupancy.lastRow : occupancy.lastCol
-		const to = step === 1 ? Math.max(0, last) : 0
-
-		return vertical ? { row: to, col } : { row, col: to }
-	}
 
 	if (vertical) {
 		const hidden = (index: number): boolean => occupancy.hiddenRow(index)

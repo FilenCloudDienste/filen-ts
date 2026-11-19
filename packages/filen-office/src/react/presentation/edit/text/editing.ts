@@ -5,7 +5,7 @@ import { oneStep } from "../../../../core/presentation/edit/commands/batch"
 import { selectAllIn, type TextCommand } from "../../../../core/presentation/edit/commands/text"
 import type { DeckOp } from "../../../../core/presentation/edit/ops"
 import type { CommandResult, PresentationSessionApi } from "../../../../dom/presentation/protocol"
-import { PresentationError, type ShapeRef } from "../../../../core/presentation/model"
+import type { ShapeRef } from "../../../../core/presentation/model"
 import { bodyToDoc, docToBody, presentationTextSchema } from "../../../../core/presentation/text/schema"
 import { defaultsOf, type TextEditController } from "./controller"
 import { defaultTextBindings, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
@@ -296,35 +296,6 @@ export function useTextEditing(editing: TextEditing): TextEditController | undef
 	return editing.active
 }
 
-// A text command on whole shapes that are selected but not being edited (the ribbon with shapes selected): each body
-// is seeded, formatted with everything selected and set, one command per shape. The result per shape: the command's,
-// or undefined when the command changed nothing there. `send` runs each setText (the shell's command path, which
-// reports refusals; the session's own by default).
-export async function formatShapes(
-	session: PresentationSessionApi,
-	shapes: readonly ShapeRef[],
-	command: (defaults: ReturnType<typeof defaultsOf>) => TextCommand,
-	send: (op: DeckOp) => Promise<CommandResult> = op => session.command(op)
-): Promise<(CommandResult | undefined)[]> {
-	const results: (CommandResult | undefined)[] = []
-
-	for (const shape of shapes) {
-		let result: CommandResult | undefined
-
-		try {
-			const op = await formattedText(session, shape, command)
-
-			result = op === undefined ? undefined : await send(op)
-		} catch (error) {
-			result = { ok: false, refusal: error instanceof PresentationError ? error.reason : "failed" }
-		}
-
-		results.push(result)
-	}
-
-	return results
-}
-
 // The setText of `shape`'s whole body formatted by `command`; undefined when the command changes nothing there.
 async function formattedText(
 	session: Pick<PresentationSessionApi, "textSeed">,
@@ -349,8 +320,9 @@ async function formattedText(
 		: { family: "text", kind: "setText", target: shape, body: docToBody(next.doc, seed.body, origins) }
 }
 
-// The same over shapes selected as objects (a formatting key on the canvas), as one op: one undo step for them all.
-// A shape whose body cannot be read is left out.
+// A text command on whole shapes selected as objects, not being edited (a formatting key on the canvas, the ribbon
+// with shapes selected): each body seeded, formatted with everything selected and set, as one op: one undo step for
+// them all. A shape whose body cannot be read is left out.
 export async function formatShapesOp(
 	session: Pick<PresentationSessionApi, "textSeed">,
 	shapes: readonly ShapeRef[],

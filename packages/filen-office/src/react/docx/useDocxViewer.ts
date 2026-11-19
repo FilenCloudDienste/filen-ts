@@ -12,6 +12,7 @@ import { DOCX_FIND_LIMIT } from "../../dom/docx/protocol"
 import type { DocxPagesHandle, DocxPagesProps } from "./DocxPages"
 import { findMatchList, type DocxFindMatch } from "./find"
 import type { DocxDocument } from "./store"
+import { pageWidthAt } from "./viewport"
 
 // Applies viewer commands to a DocxPages surface and reports its state, so an app's toolbar (or a native
 // one across the DOM-component bridge) drives navigation, zoom and find without owning any of it.
@@ -64,7 +65,7 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 	const [viewportWidth, setViewportWidth] = useState(0)
 	const [page, setPage] = useState(0)
 	const [find, setFind] = useState<FindState>(CLOSED)
-	const pageWidth = document.pages[0]?.width ?? document.info?.pageWidth ?? 816
+	const pageWidth = pageWidthAt(document, 0, 1)
 	const fitZoom = fitWidthZoom(viewportWidth - aside, pageWidth, gap)
 	const zoom = zoomMode === "fitWidth" ? fitZoom : zoomMode
 	const pendingScroll = useRef<DocxFindMatch | null>(null)

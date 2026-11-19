@@ -1,12 +1,9 @@
-import { MessageChannel } from "node:worker_threads"
 import { describe, expect, it } from "vitest"
 import { CfbFile } from "../core/cfb/index"
 import { isSealedOfficeFile } from "../core/encryption/index"
 import { bytesSource } from "../core/opc/index"
-import type { SheetHost, SheetOpenResult } from "../core/sheet/protocol"
-import { sheetWorkerHost, type SheetWorkerLike } from "../dom/sheet/client"
-import { inThreadSheetHost, workbookOpener, type SheetHostOptions } from "../dom/sheet/host"
-import { serveSheetWorker } from "../dom/sheet/worker"
+import type { SheetOpenResult } from "../core/sheet/protocol"
+import { inThreadSheetHost, type SheetHostOptions } from "../dom/sheet/host"
 import { readCfbStreams } from "./encryption/cfbStreams"
 import { decryptAgileStreams } from "./encryption/generate"
 import { agileStreams, encryptedOfficeFile } from "./encryption/testing"
@@ -19,7 +16,7 @@ import {
 	type XlsEncryptOptions,
 	type XlsSheetSpec
 } from "./encryption/xls"
-import { BASIC, IMMEDIATE, buildFixture } from "./sheetSessionFixtures"
+import { BASIC, IMMEDIATE, buildFixture, workerPair } from "./sheetSessionFixtures"
 
 // An Excel 97–2003 workbook with a password to open, as the sheet host opens it: decrypted with Excel's default
 // password without asking, else after the prompt; its Save as .xlsx sealed under the same password. The BIFF8 reader
@@ -80,34 +77,6 @@ function unsealed(bytes: Uint8Array, password: string): Buffer {
 		},
 		password
 	)
-}
-
-function workerPair(options: SheetHostOptions): { host: SheetHost; close: () => void } {
-	const { port1, port2 } = new MessageChannel()
-	const page: SheetWorkerLike = {
-		postMessage: (message, transfer) => {
-			port1.postMessage(message, transfer ?? [])
-		},
-		addEventListener: (type, listener) => {
-			if (type === "message") port1.on("message", (data: unknown) => listener({ data }))
-		}
-	}
-
-	serveSheetWorker(
-		{ post: (message, transfer) => port2.postMessage(message, [...transfer]), listen: on => port2.on("message", on) },
-		workbookOpener(options)
-	)
-
-	const host = sheetWorkerHost(page)
-
-	return {
-		host,
-		close: () => {
-			host.dispose()
-			port1.close()
-			port2.close()
-		}
-	}
 }
 
 // Each sealed save spins an Agile key 100,000 times.

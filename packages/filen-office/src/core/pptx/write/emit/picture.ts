@@ -1,11 +1,12 @@
 import { insertedImage, insertedImageWritten, pictureFillOf, type PictureFill } from "../../../presentation/edit/apply/picture"
 import { adjustXml } from "../../../presentation/render/markup"
-import { refused, type EdgeFractions, type Refused, type ShapeNode } from "../../../presentation/model"
+import { refused, type ColorModel, type EdgeFractions, type Refused, type ShapeNode } from "../../../presentation/model"
+import type { PictureAdjust } from "../../../presentation/edit/ops"
 import { isRefused } from "../../../presentation/refusal"
 import type { Relationships } from "../../../opc/index"
 import type { DeckTally } from "../../../presentation/budget"
 import type { XmlDocument } from "../../../xml/index"
-import { readBlipFill } from "../../read/drawing"
+import { readBlipFill, readColor } from "../../read/drawing"
 import { G, partReader, type PartReader } from "../../read/xml"
 import type { EmitPiece, EmitResult, PptxEmitFamily } from "../types"
 import {
@@ -183,7 +184,61 @@ export function sourcePictureFill(
 			? undefined
 			: readBlipFill({ reader: r, part: src.part, epoch: src.epoch, relationships, tally, action: () => undefined }, node)
 
-	return fill?.kind === "picture" ? fill : undefined
+	if (fill?.kind !== "picture") return undefined
+
+	const adjust = blipAdjust(r, r.child(node, G.A, "blip"))
+
+	return adjust === undefined ? fill : { ...fill, adjust }
+}
+
+// The adjustments a source a:blip holds (ADJUST_LOCALS, the inverse of render/markup.ts adjustXml); undefined for none.
+// A typed fill writes them from the model in their place, so what is read here is what an edit keeps.
+function blipAdjust(r: PartReader, blip: number): PictureAdjust | undefined {
+	const adjust: { -readonly [K in keyof PictureAdjust]: PictureAdjust[K] } = {}
+
+	for (let child = blip < 0 ? -1 : r.first(blip); child >= 0; child = r.next(child)) {
+		if (r.group(child) !== G.A) continue
+
+		switch (r.local(child)) {
+			case "alphaModFix":
+				adjust.alpha = 100_000 - Math.max(0, Math.min(100_000, r.percent(child, "amt") ?? 100_000))
+				break
+			case "biLevel":
+				adjust.biLevel = r.percent(child, "thresh") ?? 0
+				break
+			case "duotone": {
+				const colors: ColorModel[] = []
+
+				for (let color = r.first(child); color >= 0; color = r.next(color)) {
+					const read = readColor(r, color)
+
+					if (read !== undefined) colors.push(read)
+				}
+
+				const [first, second] = colors
+
+				if (first !== undefined && second !== undefined) adjust.duotone = [first, second]
+
+				break
+			}
+			case "grayscl":
+				adjust.grayscale = true
+				break
+			case "lum": {
+				const bright = r.percent(child, "bright")
+				const contrast = r.percent(child, "contrast")
+
+				if (bright !== undefined) adjust.brightness = bright
+				if (contrast !== undefined) adjust.contrast = contrast
+
+				break
+			}
+			default:
+				break
+		}
+	}
+
+	return Object.keys(adjust).length === 0 ? undefined : adjust
 }
 
 export const emitPptxPicture: PptxEmitFamily = {

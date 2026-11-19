@@ -2,6 +2,7 @@ import { PresentationError } from "../presentation/model"
 import { appendAll } from "../arrays"
 import type { AutonumberScheme } from "../presentation/text/autonum"
 import { tooLarge } from "../presentation/refusal"
+import { escapeAttribute, escapeText } from "../xml/entities"
 import { i16, i32, malformed, RT, u16, u32, utf16Text, type PptBudgets, type PptRecord } from "./records"
 
 // PowerPoint 97–2003 text ([MS-PPT] §2.9): a body of text (TextHeaderAtom and the records after it), its paragraph
@@ -382,7 +383,7 @@ export function interactionOf(
 
 	if (interaction === undefined || name === undefined) return interaction
 
-	return { ...interaction, name: utf16Text(data, name.start, name.end) }
+	return { ...interaction, name: withoutControls(utf16Text(data, name.start, name.end)) }
 }
 
 const FIELD_TYPES: ReadonlyMap<number, FieldKind> = new Map([
@@ -1044,34 +1045,23 @@ function emuOf(units: number): number {
 	return Math.round(units * EMU_PER_MASTER_UNIT)
 }
 
-function escapeXml(text: string): string {
+// XML 1.0 carries no C0 control but tab, line feed and carriage return, nor U+FFFE / U+FFFF; legacy PowerPoint text
+// holds stray ones, dropped where the text is read (escapeText / escapeAttribute would write U+FFFD for them). The
+// input is returned as it is when it holds none.
+export function withoutControls(text: string): string {
 	let out = ""
+	let runStart = 0
 
 	for (let k = 0; k < text.length; k++) {
 		const code = text.charCodeAt(k)
 
-		if (code === 0x26) out += "&amp;"
-		else if (code === 0x3c) out += "&lt;"
-		else if (code === 0x3e) out += "&gt;"
-		else if (code === 0x22) out += "&quot;"
-		// XML 1.0 has no control characters but tab, line feed and carriage return.
-		else if ((code < 0x20 && code !== 0x09 && code !== 0x0a) || code === 0xfffe || code === 0xffff) out += ""
-		// Surrogates stay paired; an unpaired one is U+FFFD.
-		else if (code >= 0xd800 && code <= 0xdfff) {
-			const next = text.charCodeAt(k + 1)
-
-			if (code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
-				out += text.slice(k, k + 2)
-				k++
-			} else out += "\ufffd"
-		} else out += text[k]
+		if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0xfffe || code === 0xffff) {
+			out += text.slice(runStart, k)
+			runStart = k + 1
+		}
 	}
 
-	return out
-}
-
-export function xmlText(text: string): string {
-	return escapeXml(text)
+	return runStart === 0 ? text : out + text.slice(runStart)
 }
 
 function colorOf(color: PptColor | undefined, scheme: readonly number[]): number | undefined {
@@ -1132,10 +1122,10 @@ export function runPropsXml(
 	const ea = fontName(context, cf.eaFont)
 	const symbol = fontName(context, cf.symbolFont)
 
-	if (latin !== undefined) children += `<a:latin typeface="${escapeXml(latin)}"/>`
-	if (ea !== undefined) children += `<a:ea typeface="${escapeXml(ea)}"/>`
-	if (latin !== undefined) children += `<a:cs typeface="${escapeXml(latin)}"/>`
-	if (symbol !== undefined) children += `<a:sym typeface="${escapeXml(symbol)}"/>`
+	if (latin !== undefined) children += `<a:latin typeface="${escapeAttribute(latin)}"/>`
+	if (ea !== undefined) children += `<a:ea typeface="${escapeAttribute(ea)}"/>`
+	if (latin !== undefined) children += `<a:cs typeface="${escapeAttribute(latin)}"/>`
+	if (symbol !== undefined) children += `<a:sym typeface="${escapeAttribute(symbol)}"/>`
 
 	children += extra
 
@@ -1203,7 +1193,7 @@ export function paraPropsXml(
 
 		if (pf.bulletHasFont === false) children += "<a:buFontTx/>"
 		else if ((pf.bulletFont !== undefined || pf.bulletHasFont !== undefined || pf.bullet !== undefined) && bulletFont !== undefined)
-			children += `<a:buFont typeface="${escapeXml(bulletFont)}"/>`
+			children += `<a:buFont typeface="${escapeAttribute(bulletFont)}"/>`
 
 		const char = effective.bulletChar
 		const numbering = effective.autoNumber === true ? PPT_AUTONUMBER_SCHEMES[effective.autoNumberScheme ?? 3] : undefined
@@ -1217,7 +1207,7 @@ export function paraPropsXml(
 		) {
 			children += `<a:buAutoNum type="${numbering}"${start > 1 && start <= 32767 ? ` startAt="${String(start)}"` : ""}/>`
 		} else if ((pf.bullet === true || pf.bulletChar !== undefined || pf.autoNumber === false) && char !== undefined && char !== 0) {
-			children += `<a:buChar char="${escapeXml(String.fromCharCode(char)) || "•"}"/>`
+			children += `<a:buChar char="${escapeAttribute(withoutControls(String.fromCharCode(char))) || "•"}"/>`
 		} else if (pf.bullet === true || pf.autoNumber === false) {
 			children += '<a:buChar char="•"/>'
 		}
@@ -1268,7 +1258,7 @@ function runXml(run: TextRun, block: TextBlock, level: number, context: TextEmit
 	if (field !== undefined) {
 		const props = runPropsXml("rPr", run.cf, context, inherited, link)
 		const rest = run.text.length > 1 ? run.text.slice(1) : ""
-		const after = rest === "" ? "" : `<a:r>${props}<a:t>${escapeXml(rest)}</a:t></a:r>`
+		const after = rest === "" ? "" : `<a:r>${props}<a:t>${escapeText(withoutControls(rest))}</a:t></a:r>`
 
 		switch (field.kind) {
 			case "slidenum":
@@ -1276,17 +1266,18 @@ function runXml(run: TextRun, block: TextBlock, level: number, context: TextEmit
 			case "datetime":
 			case "genericDate":
 			case "rtfDate":
-				if (context.fixedDate === true) return `<a:r>${props}<a:t>${escapeXml((context.date ?? "") + rest)}</a:t></a:r>`
+				if (context.fixedDate === true)
+					return `<a:r>${props}<a:t>${escapeText(withoutControls((context.date ?? "") + rest))}</a:t></a:r>`
 
-				return `<a:fld id="${FIELD_GUIDS["datetime"] ?? ""}" type="${dateType(field.format)}">${props}<a:t>${escapeXml(context.date ?? "")}</a:t></a:fld>${after}`
+				return `<a:fld id="${FIELD_GUIDS["datetime"] ?? ""}" type="${dateType(field.format)}">${props}<a:t>${escapeText(context.date ?? "")}</a:t></a:fld>${after}`
 			case "footer":
-				return `<a:r>${props}<a:t>${escapeXml((context.footer ?? "") + rest)}</a:t></a:r>`
+				return `<a:r>${props}<a:t>${escapeText(withoutControls((context.footer ?? "") + rest))}</a:t></a:r>`
 			case "header":
-				return `<a:r>${props}<a:t>${escapeXml((context.header ?? "") + rest)}</a:t></a:r>`
+				return `<a:r>${props}<a:t>${escapeText(withoutControls((context.header ?? "") + rest))}</a:t></a:r>`
 		}
 	}
 
-	return `<a:r>${runPropsXml("rPr", run.cf, context, inherited, link)}<a:t>${escapeXml(run.text)}</a:t></a:r>`
+	return `<a:r>${runPropsXml("rPr", run.cf, context, inherited, link)}<a:t>${escapeText(withoutControls(run.text))}</a:t></a:r>`
 }
 
 // The margins of a paragraph at `level`: its own, else the shape's ruler, else the master style's, else the document's

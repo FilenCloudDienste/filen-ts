@@ -5,9 +5,10 @@ import { drawingTheme } from "../core/drawingml/color"
 import { shapeEffects, styleRef } from "../core/drawingml/fill"
 import { D, drawingGroupOf, drawingReader } from "../core/drawingml/reader"
 import { convertShapeTree } from "../core/drawingml/shape"
-import { slideRef, type ShapeNode, type SourceRef } from "../core/presentation/model"
+import { slideRef, type ShapeNode, type SourceRef, type TableModel } from "../core/presentation/model"
 import { RenderReport } from "../core/presentation/render/effects"
-import { renderSlide } from "../core/presentation/render/slide"
+import { cutOrder, renderSlide } from "../core/presentation/render/slide"
+import { MAX_GRID_COLUMNS } from "../core/presentation/render/table"
 import { parseXml, type XmlDocument } from "../core/xml/index"
 import type { Slicing } from "../core/slicing"
 import {
@@ -911,7 +912,7 @@ describe("tables", () => {
 		expect(render.layers[1]?.textMatrix).toBeDefined()
 	})
 
-	it("refuses a table over the cell budget rather than drawing part of it", async () => {
+	it("refuses a table over the grid column bound rather than drawing part of it", async () => {
 		const fixture = renderServices(withTheme({ parts: {} }), { text: false })
 		const report = new RenderReport()
 		const deck = deckOf(
@@ -927,7 +928,7 @@ describe("tables", () => {
 					frame: {
 						kind: "table",
 						table: {
-							grid: Array.from({ length: 1001 }, () => 9525),
+							grid: Array.from({ length: MAX_GRID_COLUMNS + 1 }, () => 9525),
 							rows: [],
 							flags: { firstRow: false, lastRow: false, firstCol: false, lastCol: false, bandRow: false, bandCol: false }
 						}
@@ -939,5 +940,142 @@ describe("tables", () => {
 		await renderSlide(deck, SLIDE, fixture.services, SLICING, report)
 
 		expect(report.toJSON().unsupported).toEqual({ "table:tooLarge": 1 })
+	})
+})
+
+describe("presentation render staleness and layer order", () => {
+	const FLAGS = { firstRow: false, lastRow: false, firstCol: false, lastCol: false, bandRow: false, bandCol: false }
+	const tableShape = (id: number, text: string, x = 0): ShapeNode => {
+		const table: TableModel = {
+			grid: [50 * EMU, 50 * EMU],
+			rows: [0, 1].map(() => ({ h: 20 * EMU, cells: [{ text: body(text) }, { text: body(text) }] })),
+			flags: FLAGS
+		}
+
+		return {
+			id,
+			name: `T${String(id)}`,
+			hidden: false,
+			kind: "frame",
+			xfrm: xfrm(x, 0, 100 * EMU, 40 * EMU),
+			frame: { kind: "table", table }
+		}
+	}
+	// Every reading of the clock is a slice later, so every sliced step pauses.
+	const pausing = (onPause: () => void): Slicing => {
+		let clock = 0
+
+		return {
+			pause: () => {
+				onPause()
+
+				return Promise.resolve()
+			},
+			sliceMs: 8,
+			now: () => (clock += 8)
+		}
+	}
+	const cellText = (request: {
+		readonly body: { readonly paragraphs: readonly { readonly runs: readonly { readonly kind: string }[] }[] }
+	}): string =>
+		request.body.paragraphs.map(paragraph => paragraph.runs.map(run => ("text" in run ? String(run.text) : "")).join("")).join("\n")
+
+	it("starts over when an edit lands during a pause inside a table, never stamping old cells with the new revision", async () => {
+		const fixture = renderServices(withTheme({ parts: {} }))
+		const deck = deckOf([], [], [tableShape(5, "Old")])
+		const node = deck.nodes.get(SLIDE)
+		let edited = false
+
+		if (node === undefined) throw new Error("no slide")
+
+		let pauses = 0
+		let time = 0
+		let reads = 0
+		// Due once, at the first check inside the table's sliced steps (the first reading starts the clock), and never
+		// after: the pause restarts the slice, so the entry's own `clock.due` check back in the slide loop is false.
+		const slicing: Slicing = {
+			pause: () => {
+				pauses++
+
+				if (!edited) {
+					// A command replacing the table, applied while the render waits inside its sliced steps.
+					edited = true
+					node.shapes = [tableShape(5, "New")]
+					node.revision++
+				}
+
+				return Promise.resolve()
+			},
+			sliceMs: 8,
+			now: () => {
+				if (++reads === 2) time = 100
+
+				return time
+			}
+		}
+		const render = await renderSlide(deck, SLIDE, fixture.services, slicing)
+
+		expect(edited).toBe(true)
+		expect(pauses).toBe(1)
+		expect(render.revision).toBe(node.revision)
+
+		const last = fixture.requests.slice(-4)
+
+		expect(last.map(cellText)).toEqual(["New", "New", "New", "New"])
+	})
+
+	it("returns the revision it started from when every pause brings another edit", async () => {
+		const fixture = renderServices(withTheme({ parts: {} }))
+		const deck = deckOf([], [], [tableShape(5, "Text")])
+		const node = deck.nodes.get(SLIDE)
+
+		if (node === undefined) throw new Error("no slide")
+
+		const render = await renderSlide(
+			deck,
+			SLIDE,
+			fixture.services,
+			pausing(() => {
+				node.shapes = [tableShape(5, `Edit ${String(node.revision)}`)]
+				node.revision++
+			})
+		)
+
+		// Labelled older than the slide now is: the page asks again for the newer revision.
+		expect(render.revision).toBeLessThan(node.revision)
+	})
+
+	it("orders two overlays at one item as they come and text under an overlay at the same item", () => {
+		const first = { at: 3, overlay: {} }
+		const second = { at: 3, overlay: {} }
+		const text = { at: 3 }
+
+		expect(cutOrder(first, second)).toBe(0)
+		expect(cutOrder(second, first)).toBe(0)
+		expect(cutOrder(text, first)).toBeLessThan(0)
+		expect(cutOrder(first, text)).toBeGreaterThan(0)
+		expect(cutOrder({ at: 2, overlay: {} }, text)).toBeLessThan(0)
+	})
+
+	it("layers two adjacent tables of a group in spTree order", async () => {
+		const fixture = renderServices(withTheme({ parts: {} }))
+		const deck = deckOf(
+			[],
+			[],
+			[
+				{
+					id: 2,
+					name: "Group",
+					hidden: false,
+					kind: "grpSp",
+					xfrm: xfrm(0, 0, 200 * EMU, 40 * EMU, { chX: 0, chY: 0, chCx: 200 * EMU, chCy: 40 * EMU }),
+					children: [tableShape(5, "A"), tableShape(6, "B", 50 * EMU)]
+				}
+			]
+		)
+		const render = await renderSlide(deck, SLIDE, fixture.services, SLICING)
+		const order = render.layers.map(layer => layer.shape.id).filter((id, k, ids) => ids[k - 1] !== id)
+
+		expect(order).toEqual([5, 6])
 	})
 })

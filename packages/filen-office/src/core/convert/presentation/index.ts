@@ -5,6 +5,7 @@ import type { PptLoss } from "../../ppt/report"
 import { writePptConversion } from "../../ppt/toPptx"
 import type { PptxParts } from "../../pptx/package"
 import { freshPptxWith } from "../../pptx/write/fresh"
+import { sealInto, type PptxSeal } from "../../pptx/write/seal"
 import type { PptxSource } from "../../pptx/write/types"
 import { PresentationError, refused, type Deck, type Format, type Refused, type SlideNode } from "../../presentation/model"
 import type { Slicing } from "../../slicing"
@@ -44,7 +45,7 @@ export type ConversionSource =
 export interface ConvertOptions {
 	readonly slicing?: Slicing
 	// Seals a PresentationML package under the source's password (an encrypted source only).
-	readonly seal?: (zip: Uint8Array) => Promise<Uint8Array>
+	readonly seal?: PptxSeal
 	// Lays out a diagram that has no drawing cache (to ODF it is written as the shapes it is drawn with).
 	readonly relayout?: PptxServicesOptions["relayout"]
 	// An SVG picture rasterised as PNG (to PresentationML it is shown by one beside the SVG); undefined where it cannot be.
@@ -77,6 +78,8 @@ const FRESH_KINDS: readonly (readonly [RegExp, ConversionLossKind])[] = [
 	[/^(dashed line$|dash pattern$|compound line )/u, "line"],
 	[/^outline level /u, "outlineLevel"],
 	[/^outline /u, "geometry"],
+	// Kept in a nearer form: a shape no level places, a placeholder its class cannot hold, a second notes body.
+	[/^(shape without a box|placeholder written as a shape|notes body placeholder written as a shape)$/u, "geometry"],
 	[/^numbering /u, "numbering"],
 	[/^(vertical |line-breaking|spacing|bullet size|bullet of |run kept|picture bullet)/u, "text"],
 	[/^table style/u, "tableStyle"],
@@ -189,17 +192,6 @@ async function odpExtras(
 	}
 }
 
-const CHUNK = 1024 * 1024
-
-async function sealed(zip: Uint8Array, seal: (zip: Uint8Array) => Promise<Uint8Array>, sink: ByteSink): Promise<number> {
-	const bytes = await seal(zip)
-
-	for (let at = 0; at < bytes.length; at += CHUNK) await sink.write(bytes.subarray(at, Math.min(bytes.length, at + CHUNK)))
-	await sink.close()
-
-	return bytes.length
-}
-
 // A sink counting what passes through it.
 function counted(sink: ByteSink): ByteSink & { readonly size: number } {
 	let size = 0
@@ -296,7 +288,7 @@ async function convert(
 			const held = heldSink()
 
 			await writePptConversion(input.pptx, held, slicing)
-			bytes = await sealed(held.bytes(), options.seal, sink)
+			bytes = (await sealInto(held.bytes(), options.seal, sink)).length
 		} else bytes = (await writePptConversion(input.pptx, sink, slicing)).size
 
 		report.addPpt(input.losses())
@@ -357,7 +349,7 @@ async function convert(
 	if (written.kind === "refused") return written
 	if (written.kind !== "written") return refused("failed", "The fresh package was not written")
 
-	const bytes = held === undefined || options.seal === undefined ? out.size : await sealed(held.bytes(), options.seal, sink)
+	const bytes = held === undefined || options.seal === undefined ? out.size : (await sealInto(held.bytes(), options.seal, sink)).length
 
 	return { target, bytes, losses: report.losses() }
 }

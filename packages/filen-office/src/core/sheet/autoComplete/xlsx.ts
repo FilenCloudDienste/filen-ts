@@ -10,31 +10,23 @@ import { columnEntries, type AutoCompleteCells } from "./autoComplete"
 
 function cellsOf(document: XlsxDocument, model: XlsxSheetModel): AutoCompleteCells {
 	const store = model.store as SheetStore
-	const at = (row: number, col: number): { kind: number; value: number; formula: boolean } | null => {
-		const slot = store.locate(row, col)
-
-		if (slot < 0) return null
-
-		const block = store.blocks[Math.floor(slot / SLOT_BLOCK)]
-		const k = slot % SLOT_BLOCK
-
-		return block === undefined
-			? null
-			: { kind: block.kinds[k] ?? CellKind.EMPTY, value: block.values[k] ?? 0, formula: (block.formulas?.[k] ?? -1) >= 0 }
-	}
 
 	return {
-		filled: (row, col) => {
-			const cell = at(row, col)
+		entry: (row, col) => {
+			const slot = store.locate(row, col)
+			const block = slot < 0 ? undefined : store.blocks[Math.floor(slot / SLOT_BLOCK)]
 
-			return cell !== null && (cell.kind !== CellKind.EMPTY || cell.formula)
-		},
-		text: (row, col) => {
-			const cell = at(row, col)
+			if (block === undefined) return undefined
 
-			return cell === null || cell.formula || (cell.kind !== CellKind.SHARED_STRING && cell.kind !== CellKind.INLINE_STRING)
+			const k = slot % SLOT_BLOCK
+			const kind = block.kinds[k] ?? CellKind.EMPTY
+			const formula = (block.formulas?.[k] ?? -1) >= 0
+
+			if (kind === CellKind.EMPTY && !formula) return undefined
+
+			return formula || (kind !== CellKind.SHARED_STRING && kind !== CellKind.INLINE_STRING)
 				? null
-				: document.stringOf(model, cell.kind as CellKind, cell.value)
+				: document.stringOf(model, kind as CellKind, block.values[k] ?? 0)
 		}
 	}
 }
@@ -50,9 +42,11 @@ export const xlsxAutoCompleteFeature = defineSheetFeature<XlsxDocument>({
 				const locale = context.settings.locale
 
 				// What choosing an entry enters is typed as the cell shows it for editing (a quote before text that
-				// would read as a number), in the session's locale.
+				// would read as a number), in the session's locale: read here, for the bounded entries kept, as the
+				// Alt+Down list enters it on a pick without asking again.
 				return {
-					entries: found.map(entry => {
+					more: found.more,
+					entries: found.entries.map(entry => {
 						const input = document.cellView(cell.sheet, entry.row, cell.col).input
 
 						return { text: entry.text, input: localizedInput(input ?? entry.text, locale) }

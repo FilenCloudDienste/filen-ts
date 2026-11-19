@@ -5,6 +5,7 @@ import { docxSchema, type DocxEditorSession } from "@filen/office/core/docx/edit
 import { markCommand, markInternal } from "../core/docx/edit/invariants/index"
 import { ReviewIndex, ReviewKind } from "../core/docx/review/index"
 import { sessionOf } from "./docxEditFixtures"
+import { rng } from "./mulberry32"
 
 // The review index follows edits incrementally and always equals a fresh scan of the document.
 
@@ -17,21 +18,6 @@ const BODY =
 	`<w:p><w:commentRangeStart w:id="2"/>${run("Second comment across")}</w:p><w:p>${run("two paragraphs")}<w:commentRangeEnd w:id="2"/><w:r><w:commentReference w:id="2"/></w:r></w:p>`
 const COMMENTS =
 	'<w:comment w:id="1" w:author="Ann"><w:p><w:r><w:t>One</w:t></w:r></w:p></w:comment><w:comment w:id="2" w:author="Bob"><w:p><w:r><w:t>Two</w:t></w:r></w:p></w:comment>'
-
-function rng(seed: number): () => number {
-	let a = seed >>> 0
-
-	return () => {
-		a = (a + 0x6d2b79f5) >>> 0
-
-		let t = a
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
 
 function expectFresh(session: DocxEditorSession): void {
 	const index = session.reviewIndex

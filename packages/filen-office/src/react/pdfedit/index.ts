@@ -1,15 +1,13 @@
 export {
-	PLACEMENT_MIN_SIZE,
-	PLACEMENT_STEP,
-	PLACEMENT_STEP_LARGE,
-	placementKey,
 	placementPosition,
+	placementRectKey,
 	placementStart,
 	type PlacementKey,
 	type PlacementPage,
 	type PlacementRect,
 	type PlacementStep
 } from "./keyboardPlacement"
+export { rectPosition } from "./tools/placement"
 export {
 	engineDocumentPermissions,
 	isMupdfDocument,

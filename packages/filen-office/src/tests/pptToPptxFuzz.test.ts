@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { CfbFile, cfbBytes } from "../core/cfb/index"
-import { bytesSource, type ByteSink } from "../core/opc/index"
+import { cfbBytes } from "../core/cfb/index"
+import { bytesSource } from "../core/opc/index"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { openPptxPackage } from "../core/pptx/package"
 import { PresentationError, type PresentationRefusal } from "../core/presentation/model"
-import { pptAsPptx } from "./pptConvertFixtures"
+import { nullSink, pptAsPptx, streams } from "./pptConvertFixtures"
 import { RICH_BUILD, RICH_TAG, RICH_TRANSITION, richDeck } from "./pptFixtures"
+import { random } from "./random"
 import { budget, cpuMs } from "./timing"
 
 // Damaged decks holding every reader past the slides (time tree, comment, transition sound, Office 97 build, linked
@@ -38,29 +39,6 @@ const REFUSALS: Record<PresentationRefusal, true> = {
 }
 const ALLOWED = new Set(["saved", ...Object.keys(REFUSALS).flatMap(reason => [reason, `save:${reason}`])])
 
-// A small deterministic generator (xorshift32), so a failure reproduces from its seed.
-function random(seed: number): () => number {
-	let state = seed >>> 0 || 1
-
-	return () => {
-		state ^= state << 13
-		state ^= state >>> 17
-		state ^= state << 5
-
-		return (state >>> 0) / 0x100000000
-	}
-}
-
-async function streams(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
-	const cfb = await CfbFile.open(bytesSource(bytes))
-	const out = new Map<string, Uint8Array>()
-
-	for (const entry of cfb.walk())
-		if (entry.kind === "stream" && entry.path.length === 1) out.set(entry.name, (await cfb.read(entry)).slice())
-
-	return out
-}
-
 // Where `needle` starts in `hay`, by its first 24 bytes; -1 when absent.
 function indexOf(hay: Uint8Array, needle: Uint8Array): number {
 	const length = Math.min(needle.length, 24)
@@ -73,8 +51,6 @@ function indexOf(hay: Uint8Array, needle: Uint8Array): number {
 
 	return -1
 }
-
-const nullSink = (): ByteSink => ({ write: () => Promise.resolve(), close: () => Promise.resolve() })
 
 async function outcome(bytes: Uint8Array): Promise<string> {
 	const converted = await pptToPptx(bytesSource(bytes))

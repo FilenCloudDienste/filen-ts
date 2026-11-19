@@ -58,9 +58,9 @@ import {
 // reports it, so the page selects it (and the ink tool adds its next stroke to it). Locked annotations are refused
 // ("notAllowed"); a missing one or malformed geometry is a "badRequest".
 
-// The longest text a note, text box or reply takes, and an author's name.
+// The longest text a note, text box or reply takes, and an author's name (every annotation command, Fill & Sign too).
 const MAX_TEXT = 100_000
-const MAX_AUTHOR = 256
+export const MAX_AUTHOR = 256
 // The largest encoded image a stamp takes (the host scales pictures down before).
 export const PDF_STAMP_MAX_BYTES = 16 * 1024 * 1024
 // The most quads one markup takes (a drag over a few pages' worth of lines).

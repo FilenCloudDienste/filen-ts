@@ -1,14 +1,15 @@
 import { unzipSync, zipSync } from "fflate"
-import { expect } from "vitest"
 import { bytesSource } from "../core/opc/index"
 import { openXlsxSession } from "../core/sheet/commands"
-import type { SheetChange, SheetCommandResult, SheetEvent, SheetSessionApi, SheetSessionSettings } from "../core/sheet/protocol"
+import type { SheetEvent, SheetSessionApi, SheetSessionSettings } from "../core/sheet/protocol"
 import { decodeUtf8, encodeUtf8 } from "../core/xml/index"
 import { IMMEDIATE, SML, buildFixture } from "./sheetSessionFixtures"
 import type { Fixture } from "./xlsxWriteFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
 
 // Workbooks with notes, threaded comments and hyperlinks, and sessions over them.
+
+export { changeOf, refusalOf } from "./sheetSessionFixtures"
 
 export const VML_HEAD =
 	'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">' +
@@ -78,19 +79,6 @@ export async function openAnnotated(
 // Lets loads started beside the open land.
 export async function settle(): Promise<void> {
 	for (let k = 0; k < 20; k++) await new Promise(resolve => setTimeout(resolve, 0))
-}
-
-export function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
-
-export function refusalOf(result: SheetCommandResult): string {
-	expect(result.ok).toBe(false)
-
-	return result.ok ? "" : result.refusal.reason
 }
 
 export function entries(bytes: Uint8Array): Record<string, string> {

@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
-import { contentBounds, cropPages, cropPagesToContent, outsideCropRects, pageBounds } from "../../dom/pdfedit/pages"
+import { contentBounds, cropPages, cropPagesToContent, outsideCropRects } from "../../dom/pdfedit/pages"
 import { openPdf } from "../docxPdfFixtures"
 import { makeMarginsPdf } from "./pageFixtures"
+
+// The visible box of a page in view space.
+function pageBounds(doc: mupdf.PDFDocument, page: number): [number, number, number, number] {
+	const loaded = doc.loadPage(page)
+
+	try {
+		const [x0, y0, x1, y1] = loaded.getBounds()
+
+		return [x0, y0, x1, y1]
+	} finally {
+		loaded.destroy()
+	}
+}
 
 // Crop on a live document: /CropBox through setPageBox in view space (rotation applied), the content bounds behind
 // "Remove white margins", and the outside regions handed to redaction; saved files reopened in MuPDF and pdf.js.

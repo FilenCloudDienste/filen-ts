@@ -8,6 +8,7 @@ import { numberSwitchFormat, numberText } from "../layout/fields"
 import { BreakType, FieldCharType, Item, RevisionView, TRANSPARENT, type Story, type StoryPart } from "../model/index"
 import { Ns } from "../model/namespaces"
 import { NumberingCounters, formatNumber, type Numbering } from "../numbering/index"
+import { englishLanguage } from "../numbering/formats"
 import { bookmarkIndex, type DocxBookmark } from "./bookmarks"
 import { type FieldCode, caseFormat, dateTimeResult, generalSwitches, hasSwitch, parseFieldCode, switchOf } from "./code"
 import type { FieldUpdate } from "./result"
@@ -204,15 +205,16 @@ function splitUnquoted(text: string, separator: string): string[] {
 	return out
 }
 
-// A number result: \# picture, else a \* number format, else `fallback` (the page's own format for pages).
-function numberResult(value: number, code: FieldCode, fallback?: string): string {
+// A number result: \# picture, else a \* number format (in the field's `language`, read only for one), else
+// `fallback` (the page's own format for pages).
+function numberResult(value: number, code: FieldCode, fallback?: string, language?: () => string | undefined): string {
 	const picture = switchOf(code, "#")?.arg
 	const format = numberFormatOf(code)
 	const text =
 		picture !== undefined
 			? numericPicture(value, picture)
 			: format !== undefined
-				? numberText(value, format)
+				? numberText(value, format, language?.())
 				: (fallback ?? String(value))
 
 	return caseFormat(text, code)
@@ -674,24 +676,29 @@ export class FieldEvaluation {
 	result(node: Node, pos: number): string | undefined {
 		const code = parseFieldCode(node.attrs["instruction"] as string)
 		const pages = this.host.pages
+		// The field's language, for a number written in words (\* CardText), as the page lays the page-number fields
+		// out live (layout/content.ts computedField).
+		const language = (): string | undefined => this.language(node, pos)?.latin
 
 		switch (code.type) {
 			case "PAGE": {
 				const page = this.pageOf(this.session, pos)
 
-				return page === undefined ? undefined : numberResult(page.number, code, page.numberText)
+				return page === undefined ? undefined : numberResult(page.number, code, page.numberText, language)
 			}
 			case "NUMPAGES":
-				return pages === undefined || pages.count === 0 ? undefined : numberResult(pages.count, code)
+				return pages === undefined || pages.count === 0 ? undefined : numberResult(pages.count, code, undefined, language)
 			case "SECTIONPAGES": {
 				const page = this.pageOf(this.session, pos)
 
-				return page === undefined || pages === undefined ? undefined : numberResult(pages.sectionPages(page.section), code)
+				return page === undefined || pages === undefined
+					? undefined
+					: numberResult(pages.sectionPages(page.section), code, undefined, language)
 			}
 			case "SECTION": {
 				const page = this.pageOf(this.session, pos)
 
-				return page === undefined ? undefined : numberResult(page.section + 1, code)
+				return page === undefined ? undefined : numberResult(page.section + 1, code, undefined, language)
 			}
 			case "DATE":
 			case "TIME": {
@@ -700,11 +707,13 @@ export class FieldEvaluation {
 				return dateTimeResult(code, this.now, lang?.latin, lang?.eastAsia)
 			}
 			case "REF":
-				return this.reference(code, pos)
 			case "PAGEREF":
-				return this.pageReference(code, pos)
+				// \p writes Word's en-US words ("above", "on page"): a result stored in another language stays.
+				if (hasSwitch(code, "p") && (node.attrs["result"] as string) !== "" && !englishLanguage(language())) return undefined
+
+				return code.type === "REF" ? this.reference(code, pos) : this.pageReference(code, pos, language)
 			case "SEQ":
-				return this.sequence(code, pos)
+				return this.sequence(code, pos, language)
 			default:
 				return undefined
 		}
@@ -826,7 +835,7 @@ export class FieldEvaluation {
 			if (pos < scope.from || this.results.has(pos) || deleted(node.marks) || !updatableField(this.session, node)) return false
 
 			const code = parseFieldCode(node.attrs["instruction"] as string)
-			const result = code.type === "SEQ" ? this.sequence(code, pos) : undefined
+			const result = code.type === "SEQ" ? this.sequence(code, pos, () => this.language(node, pos)?.latin) : undefined
 
 			if (result !== undefined) this.results.set(pos, result)
 
@@ -895,7 +904,7 @@ export class FieldEvaluation {
 
 	// PAGEREF (§17.16.5.43): the page number of the bookmark's start in its section's format (or a \* format);
 	// \p "on page N", or "above"/"below" on the same page.
-	private pageReference(code: FieldCode, pos: number): string | undefined {
+	private pageReference(code: FieldCode, pos: number, language: () => string | undefined): string | undefined {
 		const bookmark = this.bookmark(code.args[0])
 
 		if (bookmark === undefined) return MISSING_BOOKMARK
@@ -904,7 +913,7 @@ export class FieldEvaluation {
 
 		if (target === undefined) return undefined
 
-		const text = numberResult(target.number, code, target.numberText)
+		const text = numberResult(target.number, code, target.numberText, language)
 
 		if (!hasSwitch(code, "p")) return text
 
@@ -917,13 +926,13 @@ export class FieldEvaluation {
 	// SEQ (§17.16.5.56): the fields of the story in document order, each identifier counted on its own; \c
 	// repeats the last number, \r n restarts at n, \s n restarts after each heading of level n or above,
 	// \h hides the result.
-	private sequence(code: FieldCode, pos: number): string | undefined {
+	private sequence(code: FieldCode, pos: number, language: () => string | undefined): string | undefined {
 		const value = this.sequenceValues().get(pos)
 
 		if (value === undefined) return undefined
 		if (hasSwitch(code, "h") && generalSwitches(code).length === 0) return ""
 
-		return numberResult(value, code)
+		return numberResult(value, code, undefined, language)
 	}
 
 	// The document's text box stories under each story (by item) and the sessions editing them; undefined when
@@ -1123,6 +1132,8 @@ interface ListEntry {
 	// The counter of each level up to its own as its paragraph was numbered (a level not counted yet: its start).
 	readonly values: readonly number[]
 	readonly bullet: boolean
+	// The language of its marker's run (NumberingCounters.next), which its numbers are written in.
+	readonly language: string | undefined
 }
 
 // The numbered paragraphs of a story's document (outside locked blocks), counted once per update as layout
@@ -1137,6 +1148,7 @@ class ListNumbers {
 
 		const counters = new NumberingCounters(numbering)
 		const formats = session.formats
+		const resolver = session.context.resolver
 		// Per abstract definition, the last value of each level and whether it counted since a higher one did.
 		const state = new Map<number, { values: number[]; active: boolean[] }>()
 
@@ -1144,11 +1156,13 @@ class ListNumbers {
 			if (!node.isTextblock) return node.type !== nodes.locked_block && !node.isInline
 			if (node.type !== nodes.paragraph) return false
 
-			const ref = formats.paragraph(node).props.numbering
+			const format = formats.paragraph(node)
+			const ref = format.props.numbering
 
 			if (ref === undefined || ref.numId <= 0) return false
 
-			const marker = counters.next(ref.numId, ref.ilvl)
+			const language = resolver.listMarker(format)?.lang.latin
+			const marker = counters.next(ref.numId, ref.ilvl, language)
 			const effective = numbering.level(ref.numId, ref.ilvl)
 
 			if (marker === undefined || effective === undefined) return false
@@ -1175,7 +1189,8 @@ class ListNumbers {
 				ilvl: marker.ilvl,
 				abstractId: effective.abstractId,
 				values,
-				bullet: marker.bullet
+				bullet: marker.bullet,
+				language
 			}
 
 			this.byPos.set(pos, entry)
@@ -1238,7 +1253,7 @@ function levelSegments(numbering: Numbering, entry: ListEntry, level: number): N
 		out.push({
 			level: target,
 			lead: out.length === 0 ? lead : "",
-			number: formatNumber(entry.values[target] ?? 0, format, own?.customFormat),
+			number: formatNumber(entry.values[target] ?? 0, format, own?.customFormat, entry.language ?? definition?.run.lang?.latin),
 			after: ""
 		})
 		at = from - 1

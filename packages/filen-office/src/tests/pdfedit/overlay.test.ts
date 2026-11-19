@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import { matchPdfFont } from "../../core/pdfedit/fontMatch"
+import type { PdfMatrix } from "../../core/pdfedit/matrix"
 import { layoutTextOverlay } from "../../core/pdfedit/textLayout"
-import { PdfOverlayError, fitOverlay, graftOverlay } from "../../dom/pdfedit/overlay"
+import { PdfOverlayError, graftOverlay } from "../../dom/pdfedit/overlay"
 import { nodeFontAssets } from "../sheetPdfFixtures"
 import { budget } from "../timing"
 import { LATIN_CONTENT, makeDocument, pageChars, pdfjsRuns, reopen, save, type PageSpec } from "./textEditFixtures"
+
+// The scale that stretches an overlay page of overlayWidth × overlayHeight display points over a target display box
+// of targetWidth × targetHeight.
+function fitOverlay(overlayWidth: number, overlayHeight: number, targetWidth: number, targetHeight: number): PdfMatrix {
+	return [targetWidth / overlayWidth, 0, 0, targetHeight / overlayHeight, 0, 0]
+}
 
 const TIMEOUT = budget(30_000)
 const ARIMO = matchPdfFont({ name: "Arimo", bold: false, italic: false, serif: false, mono: false })

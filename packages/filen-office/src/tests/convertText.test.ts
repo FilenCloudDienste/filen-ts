@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { canConvertText, convertOdtEditToDocx, convertText, textSourceFormat, withoutOrigins } from "../core/convert/text/index"
+import { canConvertText, convertOdtEditToDocx, convertText, withoutOrigins } from "../core/convert/text/index"
 import { translationPackage } from "../core/odt/write/source"
 import { standaloneParts } from "../core/convert/text/odtPackage"
 import { LossyCounts } from "../core/convert/text/report"
@@ -49,10 +49,6 @@ describe("convertText", () => {
 		expect(canConvertText("doc", "docx")).toBe(true)
 		expect(canConvertText("docx", "docx")).toBe(false)
 		expect(canConvertText("rtf", "odt")).toBe(false)
-		expect(textSourceFormat("a.DOTM")).toBe("docx")
-		expect(textSourceFormat("a.ott")).toBe("odt")
-		expect(textSourceFormat("a.dot")).toBe("doc")
-		expect(textSourceFormat("a.txt")).toBeUndefined()
 	})
 
 	it("refuses a conversion that does not exist, and bytes that are not the source format", async () => {

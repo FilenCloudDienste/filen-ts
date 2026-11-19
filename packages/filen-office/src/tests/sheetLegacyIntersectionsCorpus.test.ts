@@ -8,6 +8,7 @@ import type { SheetStore } from "../core/xlsx/model/store"
 import { FormulaKind } from "../core/xlsx/model/types"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { CORPUS_DIR } from "./corpusDir"
+import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // The corpus's workbooks with tables (structured references in their formulas): each formula written before dynamic
 // arrays, typed again as shown (with the @ Excel shows), saves as it was. Opt-in (FILEN_OFFICE_SHEET_CORPUS=1).
@@ -15,7 +16,6 @@ import { CORPUS_DIR } from "./corpusDir"
 const RUN = process.env["FILEN_OFFICE_SHEET_CORPUS"] === "1"
 const DIR = join(CORPUS_DIR, "xlsx")
 const FILES = RUN && existsSync(DIR) ? readdirSync(DIR).filter(name => name.endsWith(".xlsx")) : []
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 // Formula cells committed per workbook: the first of each shape.
 const PER_WORKBOOK = 60
 

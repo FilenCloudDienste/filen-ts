@@ -211,7 +211,7 @@ function markLink(tr: Transaction, context: DocxEditContext, from: number, to: n
 	for (const mark of linkFormatting(context)) changeMarks(tr, pieces, mark.type, () => mark)
 }
 
-// link.set: the link at the selection gets the new target (and text); else the selection becomes a link, or
+// link.set: the link at the selection gets the new target, its anchor (and text); else the selection becomes a link, or
 // the text (by default the target, or the heading linked to) is inserted as one at the caret. A link to a
 // heading goes to its hidden bookmark, made in the same step when it has none (one undo takes both).
 function setLink(context: StoryCommandContext, command: Cmd<"link.set">): Transaction | true | null {
@@ -230,7 +230,7 @@ function setLink(context: StoryCommandContext, command: Cmd<"link.set">): Transa
 
 	const target = written === null ? null : written.uri
 	const anchor =
-		"anchor" in command ? command.anchor : "heading" in command ? headingBookmark(tr, context.session, command.heading) : null
+		"anchor" in command ? (command.anchor ?? null) : "heading" in command ? headingBookmark(tr, context.session, command.heading) : null
 
 	if (anchor === undefined) return null
 

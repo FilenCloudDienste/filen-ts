@@ -53,8 +53,7 @@ describe("painters: upright clusters of sideways text", () => {
 			lang: "en-GB",
 			title: "Deck",
 			paints: text.paints,
-			strokes: text.strokes,
-			textEffects: text.textEffects
+			strokes: text.strokes
 		}
 		const content = new TextDecoder("latin1").decode((await pdfOf(document, { deflate: null })).bytes)
 		const matrices = [...content.matchAll(/\n(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) Tm\n/g)].map(match =>

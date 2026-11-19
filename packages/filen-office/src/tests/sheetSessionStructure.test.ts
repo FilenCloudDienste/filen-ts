@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult, SheetSessionApi } from "../core/sheet/protocol"
+import type { SheetCommandResult, SheetSessionApi } from "../core/sheet/protocol"
 import { parts, type Fixture, type FixtureSheet } from "./xlsxWriteFixtures"
-import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { firstTile, openFixture, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
 
 // Rows and columns inserted and deleted, and sheets renamed, by the session's basic structure path: what moves
@@ -10,13 +10,6 @@ import { TYPES, relationship } from "./xlsxRefsFixtures"
 const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 const MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 const VML_TYPE = TYPES.vml
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
 
 function refusal(result: SheetCommandResult): { reason: string; detail?: string } | null {
 	return result.ok ? null : result.refusal

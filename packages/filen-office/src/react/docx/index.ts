@@ -14,7 +14,7 @@ export { DocxPages, type DocxPageFrame, type DocxPagesFind, type DocxPagesHandle
 export { findInDocument, findMatchList, lineOf, matchTop, type DocxFindMatch, type DocxFindOptions } from "./find"
 export { linkActivator, type DocxLinkPolicy } from "./links"
 export { DEFAULT_MEDIA_LIMITS, DocxMediaCache, type MediaCacheLimits, type UrlFactory } from "./media"
-export { paintObjects, type ObjectPaintOptions } from "./paint/objects"
+export { DOCX_OBJECT_LABELS, paintObjects, type DocxObjectLabels, type ObjectPaintOptions } from "./paint/objects"
 export { paintPage, type PagePaintContext, type PaintedObject, type PaintedPage, type PaintedText } from "./paint/page"
 export { DocxDocumentStore, IDLE_DOCUMENT, type DocxDocument, type DocxSource, type DocxStatus, type DocxTables } from "./store"
 export { useDocxDocument } from "./useDocxDocument"

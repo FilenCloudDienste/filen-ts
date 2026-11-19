@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { strFromU8, unzipSync } from "fflate"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it, vi } from "vitest"
 import {
 	BookmarkCursor,
 	fadeGain,
@@ -21,6 +21,7 @@ import { addEffectsOp, slideEffects } from "../core/presentation/edit/commands/t
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode } from "../core/presentation/model"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
+import { MediaTimingDriver, type FrameSource, type TimedMedia } from "../react/presentation/show/mediaTiming"
 import { viewCapability } from "../dom/presentation/engine/view"
 import { layersOf } from "./animAuthoringFixtures"
 import { BUDGETS } from "./animFixtures"
@@ -419,7 +420,7 @@ describe("bookmark triggers", () => {
 
 		const result = await d2.command({ family: "mediaTiming", kind: "removeBookmark", target: target(d2), name: "Intro" })
 
-		expect(result).toEqual({ ok: false, refusal: "unsupported" })
+		expect(result).toMatchObject({ ok: false, refusal: "unsupported" })
 	})
 })
 
@@ -439,7 +440,7 @@ describe("media timing and ODF", () => {
 			{ family: "mediaTiming", kind: "addBookmark", target: at, name: "a", timeMs: 1 },
 			{ family: "mediaTiming", kind: "removeBookmark", target: at, name: "a" }
 		] as const)
-			expect(await d.command(op)).toEqual({ ok: false, refusal: "unsupported" })
+			expect(await d.command(op)).toMatchObject({ ok: false, refusal: "unsupported" })
 	})
 
 	it(
@@ -527,5 +528,136 @@ describe("the playback schedule", () => {
 		cursor.seek(250)
 		cursor.advance(400, name => fired.push(name))
 		expect(fired).toEqual(["a", "b", "c", "c"])
+	})
+})
+
+// A hidden page runs no animation frames while its media play on: the element's timeupdate does the frame's work.
+describe("media timing on a hidden page", () => {
+	class Media implements TimedMedia {
+		currentTime = 0
+		volume = 1
+		paused = true
+		seeking = false
+		readonly duration = 10
+		private readonly listeners = new Map<string, Set<() => void>>()
+
+		pause(): void {
+			if (this.paused) return
+
+			this.paused = true
+			this.emit("pause")
+		}
+
+		play(): Promise<void> {
+			this.paused = false
+			this.emit("play")
+
+			return Promise.resolve()
+		}
+
+		addEventListener(type: string, listener: () => void): void {
+			const set = this.listeners.get(type) ?? new Set()
+
+			set.add(listener)
+			this.listeners.set(type, set)
+		}
+
+		removeEventListener(type: string, listener: () => void): void {
+			this.listeners.get(type)?.delete(listener)
+		}
+
+		emit(type: string): void {
+			for (const listener of this.listeners.get(type) ?? []) listener()
+		}
+	}
+
+	// Frames requested and never run (a hidden tab), or run on demand.
+	function frames(): FrameSource & { run(): void } {
+		const pending = new Map<number, () => void>()
+		let next = 1
+
+		return {
+			request: callback => {
+				pending.set(next, callback)
+
+				return next++
+			},
+			cancel: handle => {
+				pending.delete(handle)
+			},
+			run: () => {
+				const callbacks = [...pending.values()]
+
+				pending.clear()
+
+				for (const callback of callbacks) callback()
+			}
+		}
+	}
+
+	function driven(loop: boolean, source = frames()) {
+		const media = new Media()
+		let ended = 0
+		const driver = new MediaTimingDriver(
+			media,
+			{ trim: { startMs: 1000, endMs: 2000 } },
+			{
+				bookmark: () => undefined,
+				ended: () => {
+					ended++
+				}
+			},
+			{ loop, volume: 1, frames: source }
+		)
+
+		return { media, driver, source, ended: () => ended }
+	}
+
+	it("stops at the trimmed end from timeupdate when no frame runs", async () => {
+		const h = driven(false)
+
+		await h.media.play()
+		h.media.currentTime = 8.2
+		h.media.emit("timeupdate")
+
+		expect(h.media.paused).toBe(true)
+		expect(h.ended()).toBe(1)
+	})
+
+	it("loops back to the trimmed start from timeupdate when no frame runs", async () => {
+		const h = driven(true)
+
+		await h.media.play()
+		h.media.currentTime = 8.2
+		h.media.emit("timeupdate")
+
+		expect(h.media.paused).toBe(false)
+		expect(h.media.currentTime).toBe(1)
+	})
+
+	it("leaves the work to the frames while they run", async () => {
+		const h = driven(false)
+		const tick = vi.spyOn(h.driver, "tick")
+
+		await h.media.play()
+		h.media.emit("timeupdate")
+		tick.mockClear()
+
+		h.source.run()
+		expect(tick).toHaveBeenCalledTimes(1)
+		h.media.emit("timeupdate")
+		expect(tick).toHaveBeenCalledTimes(1)
+	})
+
+	it("does nothing on timeupdate once disposed", async () => {
+		const h = driven(false)
+
+		await h.media.play()
+		h.driver.dispose()
+		h.media.currentTime = 8.2
+		h.media.emit("timeupdate")
+
+		expect(h.media.paused).toBe(false)
+		expect(h.ended()).toBe(0)
 	})
 })

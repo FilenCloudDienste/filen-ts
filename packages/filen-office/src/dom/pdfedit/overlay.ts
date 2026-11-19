@@ -11,7 +11,7 @@ import type { MupdfModule } from "./protocol"
 // into it). `toDisplay` maps the overlay page's display space into the target page's display space, so producers
 // never see /Rotate, /UserUnit or CropBox origins:
 // - text layout makes the overlay the size of the target's display box: `toDisplay` = identity;
-// - an overlay of another size is stretched over the target's display box by `fitOverlay`;
+// - an overlay of another size is stretched over the target's display box by a scale passed as `toDisplay`;
 // - OCR knows its overlay → page content matrix from the render (core/pdfedit/ocrGeometry.ts) and passes it as
 //   `toPage`, used as it is.
 //
@@ -44,14 +44,6 @@ function pageInverse(page: Mupdf.PDFPage): PdfMatrix {
 	if (inverse === null) throw new PdfOverlayError("The matrix cannot be inverted")
 
 	return inverse
-}
-
-// The scale that stretches an overlay page of overlayWidth × overlayHeight display points over a target display box
-// of targetWidth × targetHeight (OCR: the page rendered at some dpi, read back as points).
-export function fitOverlay(overlayWidth: number, overlayHeight: number, targetWidth: number, targetHeight: number): PdfMatrix {
-	if (!(overlayWidth > 0 && overlayHeight > 0)) throw new PdfOverlayError("The overlay page is empty")
-
-	return [targetWidth / overlayWidth, 0, 0, targetHeight / overlayHeight, 0, 0]
 }
 
 // Grafts page 0 of `overlay` (PDF bytes, copied into MuPDF's heap and freed before returning) onto page `pageIndex`.

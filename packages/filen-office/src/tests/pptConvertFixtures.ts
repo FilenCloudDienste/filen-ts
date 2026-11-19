@@ -1,5 +1,6 @@
 import { convertPresentation, type Converted } from "../core/convert/presentation/index"
-import type { ByteSink, Slicing } from "../core/opc/index"
+import { CfbFile } from "../core/cfb/index"
+import { bytesSource, type ByteSink, type Slicing } from "../core/opc/index"
 import type { PptConversion } from "../core/ppt/toPptx"
 import { openPptxPackage } from "../core/pptx/package"
 import type { Refused } from "../core/presentation/model"
@@ -28,4 +29,33 @@ export async function pptAsPptx(
 			...(options.password === undefined ? {} : { seal: passwordSeal(options.password, options.slicing) })
 		}
 	)
+}
+
+// The compound file's top-level streams by name, copied out.
+export async function streams(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+	const cfb = await CfbFile.open(bytesSource(bytes))
+	const out = new Map<string, Uint8Array>()
+
+	for (const entry of cfb.walk())
+		if (entry.kind === "stream" && entry.path.length === 1) out.set(entry.name, (await cfb.read(entry)).slice())
+
+	return out
+}
+
+// A sink that keeps nothing.
+export const nullSink = (): ByteSink => ({ write: () => Promise.resolve(), close: () => Promise.resolve() })
+
+// A sink that keeps only the count of bytes written.
+export function countingSink(): ByteSink & { readonly size: () => number } {
+	let size = 0
+
+	return {
+		write(chunk) {
+			size += chunk.length
+
+			return Promise.resolve()
+		},
+		close: () => Promise.resolve(),
+		size: () => size
+	}
 }

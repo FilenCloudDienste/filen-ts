@@ -8,7 +8,7 @@ import { RenderReport, layerEffects } from "../core/presentation/render/effects"
 import { resolveTextEffects } from "../core/presentation/text/color"
 import type { SlideNode, TableModel } from "../core/presentation/model"
 import { renderSlide } from "../core/presentation/render/slide"
-import { renderTable, renderTableSteps } from "../core/presentation/render/table"
+import { MAX_GRID_AREA, MAX_GRID_COLUMNS, MAX_TABLE_CELLS, renderTable, renderTableSteps } from "../core/presentation/render/table"
 import { effectiveClrMap, resolveColor } from "../core/presentation/theme"
 import { NS, SLIDE, THEME, THEME_PART, body, deckOf, renderServices, xfrm } from "./fixtures/presentation/renderDeck"
 import { budget, cpuMs } from "./timing"
@@ -105,12 +105,35 @@ describe("hostile tables", () => {
 	})
 
 	it("refuses a grid larger than the occupancy budget", () => {
+		const columns = MAX_GRID_COLUMNS
+		const rows = MAX_GRID_AREA / columns + 1
 		const table: TableModel = {
-			grid: Array.from({ length: 1000 }, () => EMU),
-			rows: Array.from({ length: 1001 }, () => ({ h: EMU, cells: [] })),
+			grid: Array.from({ length: columns }, () => EMU),
+			rows: Array.from({ length: rows }, () => ({ h: EMU, cells: [] })),
 			flags: { firstRow: false, lastRow: false, firstCol: false, lastCol: false, bandRow: false, bandCol: false }
 		}
 
+		// Within the column and cell bounds: only the occupancy one trips.
+		expect(columns).toBeLessThanOrEqual(MAX_GRID_COLUMNS)
+		expect(rows * columns).toBeGreaterThan(MAX_GRID_AREA)
+		expect(renderTable(input(table)).refused).toBe("tooLarge")
+	})
+
+	it("refuses a table holding more cells than the cell budget", () => {
+		const columns = MAX_GRID_COLUMNS / 2
+		const rows = Math.floor(MAX_TABLE_CELLS / columns) + 1
+		// One cell object for all: the guard counts cells before any layout.
+		const cell = { text: body("") }
+		const table: TableModel = {
+			grid: Array.from({ length: columns }, () => EMU),
+			rows: Array.from({ length: rows }, () => ({ h: EMU, cells: Array.from({ length: columns }, () => cell) })),
+			flags: { firstRow: false, lastRow: false, firstCol: false, lastCol: false, bandRow: false, bandCol: false }
+		}
+
+		// Within the column and occupancy bounds: only the cell one trips.
+		expect(columns).toBeLessThanOrEqual(MAX_GRID_COLUMNS)
+		expect(rows * columns).toBeLessThanOrEqual(MAX_GRID_AREA)
+		expect(rows * columns).toBeGreaterThan(MAX_TABLE_CELLS)
 		expect(renderTable(input(table)).refused).toBe("tooLarge")
 	})
 

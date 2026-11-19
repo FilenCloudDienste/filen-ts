@@ -119,6 +119,7 @@ export {
 	builtinFormatCode,
 	changedDecimals,
 	COMMA_STYLE,
+	dateSerial,
 	EXCEL_BUILTIN_FORMATS,
 	formatGeneral,
 	formatNumberInto,
@@ -131,11 +132,15 @@ export {
 	numFmtCategory,
 	numFmtProblem,
 	NUMBER_FORMAT_PRESETS,
+	numberFormatPresets,
+	serialDate,
 	NUMFMT_EN_US,
 	NumFmtOutput,
 	PERCENT_STYLE,
 	SYSTEM_DATE_TIME,
 	SYSTEM_SHORT_DATE,
+	type DateParts,
+	type NumberFormatPreset,
 	type NumFmt,
 	type NumFmtCategory,
 	type NumFmtLocale,
@@ -179,6 +184,10 @@ export { CfBarFlag, ICON_SETS, iconCount, iconSetIndex, type IconSetName } from 
 export type { SheetValidationAlert, SheetValidationLayout, SheetValidationRule } from "./dv/xlsx"
 export type { DvErrorStyle, DvOperator, DvType } from "./dv/rules"
 export type { DvListItem } from "./dv/validate"
+// What the workbook edits refuse and write, for the hosts that limit and write the same: a validation's text lengths,
+// and a sheet's name as a reference writes it.
+export { MAX_VALIDATION_ERROR, MAX_VALIDATION_LIST, MAX_VALIDATION_PROMPT, MAX_VALIDATION_TITLE } from "../xlsx/edit/dv"
+export { quotedSheetName } from "../xlsx/edit/filter"
 export {
 	acceptSuggestion,
 	argumentAt,

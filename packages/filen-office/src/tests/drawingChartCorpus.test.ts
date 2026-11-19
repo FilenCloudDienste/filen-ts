@@ -1,5 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { parseTheme } from "../core/docx/index"
 import { convertChart } from "../core/drawingml/chart/index"
@@ -7,26 +6,12 @@ import { drawingTheme } from "../core/drawingml/color"
 import { DrawingList } from "../core/drawingml/displayList"
 import { OpcPackage, bytesSource } from "../core/opc/index"
 import type { XmlDocument } from "../core/xml/index"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 
 // The licensed real-world corpus is kept out of the repository; this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm"]
 const CHART_PART = /^(word|xl)\/charts\/chart[^/]*\.xml$/
 const THEME_PART = /^(word|xl)\/theme\/theme1\.xml$/
-
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of EXTENSIONS) {
-		const directory = join(CORPUS, extension)
-
-		if (!existsSync(directory)) continue
-
-		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
 
 describe.skipIf(!existsSync(CORPUS))("charts over the real-world corpus", () => {
 	it("converts every cached chart part", { timeout: 300_000 }, async () => {
@@ -37,7 +22,7 @@ describe.skipIf(!existsSync(CORPUS))("charts over the real-world corpus", () => 
 		const unsupported = new Map<string, number>()
 		const failures: string[] = []
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(EXTENSIONS)) {
 			const name = file.slice(CORPUS.length + 1)
 			let opc: OpcPackage
 

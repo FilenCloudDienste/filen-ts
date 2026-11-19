@@ -17,18 +17,12 @@ import { rtfBlockProof } from "../core/rtf/write/proof"
 import { openRtfSource, proveRtf, writeRtf, type RtfEdits, type RtfSource, type RtfWritten } from "../core/rtf/write/writer"
 import { HmtxMeasurer, loadDocx } from "./layoutFixtures"
 
+export { latin1 } from "./rtfLatin1"
+
 // Editing RTF documents in tests as the web editor does: the translation opened in the docx editor, edits made
 // with its commands, the parts the docx writer writes handed to the RTF writer.
 
 const nodes = docxSchema.nodes
-
-export function latin1(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0xff
-
-	return out
-}
 
 export interface RtfEditing {
 	readonly source: RtfSource

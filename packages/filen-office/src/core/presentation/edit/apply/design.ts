@@ -2,7 +2,7 @@ import { filenTheme } from "../../../templates/themes/catalog"
 import { parseThemeName, themeName } from "../../../templates/themes/model"
 import { odpLayoutType } from "../../../odp/read/layoutType"
 import { odpGalleryMaster } from "../../../templates/themes/odp"
-import { LAYOUT_TYPES, designSet, type FilenLayoutType } from "../../../templates/themes/pptx"
+import { LAYOUT_TYPES, designSet, type FilenLayoutType, type LayoutNames } from "../../../templates/themes/pptx"
 import { encodeUtf8 } from "../../../xml/index"
 import { DEFAULT_CLR_MAP } from "../../theme"
 import { refused, type Background, type Deck, type Refused, type ShapeNode, type SlideNode, type SlideRef, type Xfrm } from "../../model"
@@ -84,6 +84,8 @@ export interface GalleryDesign {
 	readonly names: { readonly theme: string; readonly master: string; readonly layouts: readonly string[] }
 	readonly master: SlideRef
 	readonly layouts: readonly SlideRef[]
+	// Pptx: the layouts' names by type, in the user's language (the save makes the parts again with them).
+	readonly layoutNames?: LayoutNames
 }
 
 const GALLERY = new WeakMap<Deck, Map<SlideRef, GalleryDesign>>()
@@ -325,7 +327,8 @@ function holdGallery(deck: Deck, design: GalleryDesign, reading: DesignReading, 
 		design.variant,
 		deck.size,
 		{ theme: zip(design.names.theme), master: zip(design.names.master), layouts: design.names.layouts.map(zip) },
-		2_147_483_648
+		2_147_483_648,
+		design.layoutNames
 	)
 	const themeHeld = reading.holdDesign({ name: design.names.theme, kind: "theme", bytes: encodeUtf8(set.theme.markup) })
 
@@ -476,6 +479,7 @@ function applyGallery(
 	op: SetTheme,
 	themeId: string,
 	variant: number,
+	layoutNames: LayoutNames | undefined,
 	context: ApplyContext,
 	reuse: GalleryDesign | undefined
 ): ApplyResult<SetTheme> {
@@ -513,7 +517,8 @@ function applyGallery(
 						layouts: LAYOUT_TYPES.map(() => reading.newDesignPart("slideLayout"))
 					},
 					master: context.newSlideRef(),
-					layouts: LAYOUT_TYPES.map(() => context.newSlideRef())
+					layouts: LAYOUT_TYPES.map(() => context.newSlideRef()),
+					...(layoutNames === undefined ? {} : { layoutNames })
 				})
 	const held = holdGallery(deck, design, reading, reuse !== undefined)
 
@@ -667,7 +672,7 @@ function setTheme(deck: Deck, op: SetTheme, context: ApplyContext): ApplyResult<
 	}
 
 	return op.theme.kind === "gallery"
-		? applyGallery(deck, op, op.theme.id, op.theme.variant, context, MADE.get(op))
+		? applyGallery(deck, op, op.theme.id, op.theme.variant, op.theme.layoutNames, context, MADE.get(op))
 		: applyDeckTheme(deck, op, op.theme.part, context)
 }
 
@@ -692,11 +697,22 @@ function setVariant(deck: Deck, op: SetVariant, context: ApplyContext): ApplyRes
 
 		return node !== undefined && masterOfSlide(deck, node) === master.ref
 	})
+	// The new variant's layouts keep the names the master's have (the language the deck was made in).
+	const layoutNames: Partial<Record<string, string>> = {}
+
+	for (const ref of deck.layouts) {
+		const layout = deck.nodes.get(ref)
+
+		if (layout?.parent === master.ref && layout.layoutType !== undefined && layout.name !== undefined)
+			layoutNames[layout.layoutType] ??= layout.name
+	}
+
 	const applied = applyGallery(
 		deck,
-		{ family: "design", kind: "setTheme", theme: { kind: "gallery", id: theme.id, variant: op.variant }, slides },
+		{ family: "design", kind: "setTheme", theme: { kind: "gallery", id: theme.id, variant: op.variant, layoutNames }, slides },
 		theme.id,
 		op.variant,
+		layoutNames,
 		context,
 		MADE.get(op)
 	)

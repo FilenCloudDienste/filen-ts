@@ -3,23 +3,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "../core/opc/index"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { openXlsx } from "../core/xlsx/read/index"
 import { CORPUS_DIR } from "./corpusDir"
 import { OpenXmlSdk, openXmlSdkMissing, sdkErrorCounts } from "./oracles/openXmlSdk"
 import { parts } from "./xlsxWriteFixtures"
-import { cells, firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { cells, firstTile, openFixture, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 import { R, TYPES, relationship } from "./xlsxRefsFixtures"
 
 // Sheets duplicated: cells, formats, sections, local names, and the parts cloned for the copy (drawings with their
 // charts retargeted, notes, tables under new names), each save passing the gate and reading back.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
 
 function corpus(name: string): Uint8Array | null {
 	const path = join(CORPUS_DIR, name)

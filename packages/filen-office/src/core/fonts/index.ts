@@ -1,4 +1,4 @@
-export { bundledFace, bundledFaces, type BundledFace, type LineMetricsEntry, type OriginalMetrics } from "./bundled"
+export { bundledFace, type BundledFace, type LineMetricsEntry, type OriginalMetrics } from "./bundled"
 export {
 	declareDocxEmbeddedFonts,
 	readDocxEmbeddedFont,
@@ -25,7 +25,9 @@ export {
 	FontManager,
 	cssFont,
 	glyphWidthScale,
+	logEmbeddedFontFailures,
 	type EmbeddedFontFailure,
+	type EmbeddedFontFailureCode,
 	type EmbeddedFontReader,
 	type FaceRegistration,
 	type FontDeclaration,
@@ -36,10 +38,9 @@ export {
 	type ResolvedFont
 } from "./manager"
 export { lineSpacingUnits, verticalMetrics, type LineSpacingRule, type VerticalMetrics } from "./metrics"
-export { deobfuscateFont, obfuscateFont, parseFontKey } from "./obfuscation"
+export { deobfuscateFont, parseFontKey } from "./obfuscation"
 export { SfntFont, cmapCoverage, readNameValues, readSfnt, sfntDirectory, type SfntNames, type SfntTable } from "./sfnt"
 export {
-	DEFAULT_SLOT_CONTEXT,
 	eastAsiaUsesAscii,
 	fontSlot,
 	forEachSlotRun,

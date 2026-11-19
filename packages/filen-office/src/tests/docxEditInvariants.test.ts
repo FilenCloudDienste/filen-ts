@@ -4,7 +4,14 @@ import { Fragment, Slice, type Node } from "prosemirror-model"
 import { NodeSelection, TextSelection, type EditorState, type Transaction } from "prosemirror-state"
 import { canJoin, canSplit } from "prosemirror-transform"
 import { describe, expect, it } from "vitest"
-import { DocxEditorSession, NO_SOURCE, docxSchema, freshSlice, normalizeListAttrs } from "@filen/office/core/docx/edit"
+import {
+	DocxEditorSession,
+	NO_SOURCE,
+	docxSchema,
+	freshSlice,
+	normalizeListAttrs,
+	type DocxRefusalReason
+} from "@filen/office/core/docx/edit"
 import { freshSliceKeeping, markInternal } from "../core/docx/edit/invariants/index"
 import { joinBackward, joinForward } from "../core/docx/paged/keys"
 import { originOf } from "../core/docx/edit/origin"
@@ -18,6 +25,7 @@ import { RICH, markerKeys, openBytes, openSpec, sessionOf } from "./docxEditFixt
 import { buildDocx, p } from "./docxSynthetic"
 import { pagedEditor, settleAll } from "./pagedFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
+import { rng as random } from "./mulberry32"
 
 function sectionHolders(doc: Node): number[] {
 	const out: number[] = []
@@ -60,22 +68,6 @@ function blockPos(doc: Node, index: number): number {
 
 function run(session: DocxEditorSession, build: (state: EditorState) => Transaction): boolean {
 	return session.dispatch(build(session.state))
-}
-
-// A small deterministic PRNG (mulberry32).
-function random(seed: number): () => number {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
 }
 
 describe("docx editing invariants", () => {
@@ -287,6 +279,45 @@ describe("docx editing invariants", () => {
 		expect(pieces).toContainEqual(["NEW", ["run"]])
 		expect(pieces).toContainEqual(["ins", ["insertion", "run"]])
 		expect(pieces).toContainEqual(["erted", ["insertion", "run"]])
+	})
+
+	it("tells refusal listeners about each edit the invariants refused, not about accepted, selection-only or read-only ones", async () => {
+		const session = await sessionOf(RICH)
+		const heard: DocxRefusalReason[] = []
+
+		session.onRefused(reason => heard.push(reason))
+
+		// A locked block holding structure (the INDEX field), deleted.
+		const toc = blockPos(session.state.doc, 3)
+
+		expect(run(session, state => state.tr.delete(toc, toc + 1))).toBe(false)
+		expect(heard).toEqual(["protected"])
+
+		// The paragraph ending a section, deleted whole.
+		const section = blockPos(session.state.doc, 2)
+
+		expect(run(session, state => state.tr.delete(section, section + state.doc.child(2).nodeSize))).toBe(false)
+		expect(heard).toEqual(["protected", "protected"])
+
+		// A table's merged cells changed.
+		const cell = blockPos(session.state.doc, 1) + 2
+
+		expect(session.state.doc.nodeAt(cell)?.type.name).toBe("table_cell")
+		expect(run(session, state => state.tr.setNodeAttribute(cell, "vMerge", "restart"))).toBe(false)
+		expect(heard).toEqual(["protected", "protected", "protected"])
+
+		// An accepted edit and a selection change are not refusals.
+		expect(run(session, state => state.tr.insertText("x", find(state.doc, "plain")))).toBe(true)
+		expect(run(session, state => state.tr.setSelection(TextSelection.create(state.doc, 3)))).toBe(true)
+		expect(heard).toHaveLength(3)
+
+		// Nor is an edit a read-only session refused.
+		const readOnly = await sessionOf(RICH, { readOnly: true })
+		const quiet: DocxRefusalReason[] = []
+
+		readOnly.onRefused(reason => quiet.push(reason))
+		expect(run(readOnly, state => state.tr.insertText("x", 2))).toBe(false)
+		expect(quiet).toEqual([])
 	})
 
 	it("refuses every change in read-only mode", async () => {

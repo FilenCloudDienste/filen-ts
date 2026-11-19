@@ -28,8 +28,6 @@ export type ConversionLossKind =
 	| "field"
 	// A SmartArt diagram written as a group of its shapes (its data kept only in .pptx targets).
 	| "smartArt"
-	// A 3D scene shown as its picture.
-	| "threeD"
 	// Ink not carried.
 	| "ink"
 	// A shape the target could not hold.

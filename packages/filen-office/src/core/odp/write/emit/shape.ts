@@ -34,7 +34,7 @@ import { odfCustomAttributes, odfPresetAttributes, odfPresetGeometry, presetDepe
 import { canonicalName, parseLength } from "../../../odf/index"
 import { transformMatrix, xfrmOf } from "../../read/shapes"
 import { resourceFillChanges, resourceLineChanges } from "../resources"
-import { LENGTHS, changedLengths, emuOf } from "./box"
+import { BOXED, LENGTHS, LINES, changedLengths, emuOf } from "./box"
 import { textScaleOf } from "../../../presentation/edit/apply/design"
 import { keptTextNames, odpKeptTextMarkup, odpScaledTextChanges, type KeptTextNames } from "./design"
 import { isRefused } from "../../../presentation/refusal"
@@ -295,24 +295,6 @@ const CLASS_OF: Partial<Record<PlaceholderType, string>> = {
 
 const STYLE_SUFFIX: Readonly<Record<string, string>> = { title: "title", subtitle: "subtitle", outline: "outline1", notes: "notes" }
 
-// Elements whose box is svg:x/y/width/height (with draw:transform).
-const BOXED: ReadonlySet<string> = new Set([
-	"draw:frame",
-	"draw:custom-shape",
-	"draw:rect",
-	"draw:ellipse",
-	"draw:circle",
-	"draw:polygon",
-	"draw:polyline",
-	"draw:path",
-	"draw:regular-polygon",
-	"draw:caption",
-	"draw:control",
-	"draw:page-thumbnail",
-	"dr3d:scene"
-])
-
-const LINES: ReadonlySet<string> = new Set(["draw:line", "draw:connector", "draw:measure"])
 const TEXT_ELEMENTS: ReadonlySet<string> = new Set(["text:p", "text:h", "text:list"])
 
 export interface AttributeChange {

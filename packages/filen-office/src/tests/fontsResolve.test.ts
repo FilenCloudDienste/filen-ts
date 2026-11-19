@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
 	ARIAL_NARROW_WIDTH_SCALE,
-	FontError,
 	FontManager,
 	LINE_METRICS,
 	NO_HINTS,
@@ -10,15 +9,15 @@ import {
 	BUNDLED_FACES,
 	CLONE_METRICS,
 	DEFAULT_FONT_LIMITS,
-	DEFAULT_SLOT_CONTEXT,
 	declareDocxEmbeddedFonts,
+	deobfuscateFont,
 	eastAsiaUsesAscii,
 	cssFont,
 	fontSlot,
 	forEachSlotRun,
 	isChineseCharset,
 	isChineseLanguage,
-	obfuscateFont,
+	logEmbeddedFontFailures,
 	readDocxFontTable,
 	type FontAssets,
 	type FontDeclaration,
@@ -491,7 +490,9 @@ describe("lifecycle", () => {
 		const manager = new FontManager(host, new FakeAssets())
 		const font = realFont("caladea/Caladea-Regular.woff2")
 
-		await Promise.all([manager.addEmbedded("Doc Font", font, false, false), manager.addEmbedded("Doc Font", font, true, false)])
+		manager.embed("Doc Font", false, false, () => Promise.resolve(font))
+		manager.embed("Doc Font", true, false, () => Promise.resolve(font))
+		await Promise.all([manager.prepare([request("Doc Font")]), manager.prepare([request("Doc Font", { bold: true })])])
 		expect(host.faces.map(face => face.face.family)).toEqual([alias("e1"), alias("e1")])
 		expect((await resolved(manager, request("Doc Font", { bold: true }))).weight).toBe(700)
 	})
@@ -503,7 +504,7 @@ describe("embedded fonts", () => {
 		const manager = new FontManager(host, new FakeAssets())
 		const caladea = realFont("caladea/Caladea-Bold.woff2")
 
-		expect(await manager.addEmbedded("Calibri", caladea, true, false)).toBe(true)
+		manager.embed("Calibri", true, false, () => Promise.resolve(caladea))
 
 		const font = await resolved(manager, request("Calibri", { bold: true }))
 
@@ -511,7 +512,6 @@ describe("embedded fonts", () => {
 		expect(font.metrics?.unitsPerEm).toBe(1000)
 		// Only the bold face is embedded; regular text draws with it too.
 		expect((await resolved(manager, request("Calibri"))).family).toEqual(alias("e1"))
-		expect(manager.reembeddable("Calibri")).toBe(true)
 		expect(manager.registrations()).toEqual([
 			{ family: alias("e1"), weight: 700, italic: false, source: "embedded", declaredFamily: "Calibri" }
 		])
@@ -522,19 +522,59 @@ describe("embedded fonts", () => {
 		const limits = { maxEmbeddedFaceBytes: font.length * 2, maxEmbeddedBytes: Math.floor(font.length * 1.5), maxLocalProbes: 0 }
 		const manager = new FontManager(new FakeHost(), new FakeAssets(), limits)
 
-		await expect(manager.addEmbedded("A", new Uint8Array(1000), false, false)).rejects.toMatchObject({ code: "notSfnt" })
-		await expect(manager.addEmbedded("B", new Uint8Array(font.length * 3), false, false)).rejects.toBeInstanceOf(FontError)
-		expect(await manager.addEmbedded("X", font, false, false)).toBe(true)
-		expect(await manager.addEmbedded("X", font, false, false)).toBe(false)
-		// The total budget is what is left, not the per-face limit.
-		await expect(manager.addEmbedded("X", font, true, false)).rejects.toMatchObject({ code: "tooLarge" })
-		expect(manager.failures().map(failure => failure.family)).toEqual(["A", "B", "X", "X"])
+		const host = new FakeHost()
+		const rejecting = new FontManager(host, new FakeAssets())
+		const read = (data: Uint8Array) => () => Promise.resolve(data)
+
+		manager.embed("A", false, false, read(new Uint8Array(1000)))
+		manager.embed("B", false, false, read(new Uint8Array(font.length * 3)))
+		manager.embed("C", false, false, () => Promise.reject(new Error("unreadable part")))
+		manager.embed("X", false, false, read(font))
+		// A second face for one style is refused as it is declared; the first is used.
+		manager.embed("X", false, false, read(font))
+		manager.embed("X", true, false, read(font))
+		await manager.prepare([request("A"), request("B"), request("C"), request("X"), request("X", { bold: true })])
+		expect(manager.resolve(request("X")).source).toBe("embedded")
+		expect(manager.failures().map(failure => [failure.family, failure.bold, failure.code])).toEqual([
+			["X", false, "duplicate"],
+			["A", false, "notSfnt"],
+			["B", false, "tooLarge"],
+			["C", false, "unreadable"],
+			// The total budget is what is left, not the per-face limit.
+			["X", true, "tooLarge"]
+		])
+
+		host.rejectBytes = true
+		rejecting.embed("R", false, false, read(font))
+		await rejecting.prepare([request("R")])
+		expect(rejecting.failures().map(failure => failure.code)).toEqual(["rejected"])
+	})
+
+	it("log each failure once, as its code, family and style without the reason", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+		const failures = [
+			{ family: "A", bold: false, italic: true, code: "notSfnt" as const, reason: "word/fonts/font1.odttf is no font" },
+			{ family: "B", bold: true, italic: false, code: "tooLarge" as const, reason: "too large" }
+		]
+
+		try {
+			expect(logEmbeddedFontFailures(failures.slice(0, 1), 0)).toBe(1)
+			expect(logEmbeddedFontFailures(failures, 1)).toBe(2)
+			expect(logEmbeddedFontFailures(failures, 2)).toBe(2)
+			expect(warn.mock.calls).toEqual([
+				["Embedded font not used", { code: "notSfnt", family: "A", bold: false, italic: true }],
+				["Embedded font not used", { code: "tooLarge", family: "B", bold: true, italic: false }]
+			])
+		} finally {
+			warn.mockRestore()
+		}
 	})
 
 	it("load from a docx font table only when text needs them, obfuscated, stored or deflated", async () => {
 		const key = "{1DF903E3-2F14-4575-8028-881FEBABF2AB}"
 		const plain = realFont("caladea/Caladea-Regular.woff2")
-		const obfuscated = obfuscateFont(plain, key)
+		// The obfuscation is an XOR: deobfuscating plain bytes obfuscates them.
+		const obfuscated = deobfuscateFont(plain, key)
 		const fontTable = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:fonts xmlns:x="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <x:font x:name="Cambria"><x:panose1 x:val="02040503050406030204"/><x:charset x:val="00"/><x:family x:val="roman"/><x:pitch x:val="variable"/>
@@ -583,6 +623,12 @@ describe("embedded fonts", () => {
 		manager.declare(declarations)
 		declareDocxEmbeddedFonts(manager, pkg, "word/fontTable.xml", declarations)
 		expect(embeddedFaces()).toEqual([])
+		// The declared w:charset, by name or alternative name.
+		expect([manager.charset("yu gothic light"), manager.charset("游ゴシック Light"), manager.charset("Unknown")]).toEqual([
+			0x80,
+			0x80,
+			undefined
+		])
 
 		await manager.prepare([request("Cambria")])
 		expect(embeddedFaces()).toEqual([[400, false, plain.length]])
@@ -627,7 +673,13 @@ describe("embedded fonts", () => {
 })
 
 describe("font slots", () => {
-	const context = (overrides: Partial<SlotContext> = {}): SlotContext => ({ ...DEFAULT_SLOT_CONTEXT, ...overrides })
+	const context = (overrides: Partial<SlotContext> = {}): SlotContext => ({
+		hint: "default",
+		complexScript: false,
+		chineseLanguage: false,
+		chineseFontCharset: false,
+		...overrides
+	})
 	const hinted = context({ hint: "eastAsia" })
 
 	it("follows Word's Unicode block table", () => {

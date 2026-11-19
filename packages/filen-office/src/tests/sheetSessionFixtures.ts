@@ -1,13 +1,20 @@
+import { MessageChannel } from "node:worker_threads"
 import {
 	CellFlag,
+	type SheetChange,
+	type SheetCommandResult,
 	type SheetEvent,
+	type SheetHost,
 	type SheetOpenOptions,
 	type SheetOpened,
 	type SheetReadSource,
+	type SheetRefusal,
 	type SheetSessionApi,
 	type SheetTile
 } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
+import { sheetWorkerHost, type SheetWorkerLike } from "../dom/sheet/client"
+import { inThreadSheetHost, workbookOpener, type SheetHostOptions } from "../dom/sheet/host"
+import { serveSheetWorker } from "../dom/sheet/worker"
 import { SML, R, buildFixture, type Fixture } from "./xlsxWriteFixtures"
 
 // Sessions over small workbooks built from part text, for the session and host tests.
@@ -96,6 +103,68 @@ export async function savedBytes(session: SheetSessionApi): Promise<Uint8Array> 
 
 export function numeric(flags: number): boolean {
 	return (flags & CellFlag.NUMBER) !== 0
+}
+
+function refusalText(refusal: SheetRefusal): string {
+	return `${refusal.reason}${refusal.detail === undefined ? "" : ` (${refusal.detail})`}`
+}
+
+// A command's change; throws with the refusal's reason and detail when it was refused.
+export function changeOf(result: SheetCommandResult): SheetChange {
+	if (!result.ok) throw new Error(`refused: ${refusalText(result.refusal)}`)
+
+	return result.change
+}
+
+// A refused command's reason; throws when the command was made.
+export function refusalOf(result: SheetCommandResult): string {
+	if (result.ok) throw new Error("expected a refusal, the command was made")
+
+	return result.refusal.reason
+}
+
+// Text of `length` letters from a seeded generator: deflate cannot shrink it much, so a part built from it stays
+// large compressed too.
+export function noise(length: number, seed: number): string {
+	let state = seed >>> 0
+	let out = ""
+
+	for (let i = 0; i < length; i++) {
+		state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+		out += String.fromCharCode(97 + (state >>> 27))
+	}
+
+	return out
+}
+
+// A worker host and its server joined by a real message channel (structured clone and transfer, as a Worker).
+// close disposes the host, then closes both ports.
+export function workerPair(options?: SheetHostOptions): { host: SheetHost; close: () => void } {
+	const { port1, port2 } = new MessageChannel()
+	const page: SheetWorkerLike = {
+		postMessage: (message, transfer) => {
+			port1.postMessage(message, transfer ?? [])
+		},
+		addEventListener: (type, listener) => {
+			if (type === "message") port1.on("message", (data: unknown) => listener({ data }))
+		}
+	}
+
+	serveSheetWorker(
+		{ post: (message, transfer) => port2.postMessage(message, [...transfer]), listen: on => port2.on("message", on) },
+		workbookOpener(options)
+	)
+
+	const host = sheetWorkerHost(page)
+
+	return {
+		host,
+		close: () => {
+			host.dispose()
+			port1.close()
+			port2.close()
+		}
+	}
 }
 
 export const BASIC: Fixture = {

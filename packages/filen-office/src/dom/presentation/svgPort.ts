@@ -1,4 +1,4 @@
-import { clearTimer, setTimer } from "@filen/shared/savePort"
+import { clearTimer, setTimer } from "../platform"
 import { prepareSvgThumb } from "@filen/shared/svgThumb"
 import type { BitmapLike } from "./protocol"
 

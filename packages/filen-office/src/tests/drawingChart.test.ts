@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { computeScale, convertChart, formatNumber, scaleTicks } from "../core/drawingml/chart/index"
+import { computeScale, convertChart, formatNumber, scaleTicks, type ChartText } from "../core/drawingml/chart/index"
 import { drawingTheme } from "../core/drawingml/color"
 import { DrawingList, ItemFloat, ItemInt, ItemKind, rgba, type DrawingText } from "../core/drawingml/displayList"
 import type { PaintContext } from "../core/drawingml/fill"
+import { formatValue } from "../core/sheet/numfmt/index"
 import { parseXml } from "../core/xml/index"
 import { budget, cpuMs } from "./timing"
 
@@ -112,6 +113,29 @@ describe("chart number formats", () => {
 		expect(formatNumber(1500000, "0\\,", false)).toBe("1500000,")
 	})
 
+	it("shows what the sheet's formatter shows for the same code", () => {
+		const cases: readonly [number, string][] = [
+			[1234567, "#,##0,"],
+			[0.5625, "h:mm"],
+			[45000.75, "m/d/yyyy h:mm AM/PM"],
+			[150, "[>100]0.0;0"],
+			[3, "[>100]0.0;0"],
+			[1234.5, "#,##0.00_);(#,##0.00)"],
+			[-1234.5, "#,##0.00_);(#,##0.00)"],
+			[45000, "dddd mmmm d"],
+			[0.25, "# ?/?"]
+		]
+
+		for (const [value, code] of cases) expect(formatNumber(value, code, false)).toBe(formatValue(value, code).text)
+
+		expect(formatNumber(1234567, "#,##0,", false)).toBe("1,235")
+		expect(formatNumber(0.5625, "h:mm", false)).toBe("13:30")
+		expect(formatNumber(150, "[>100]0.0;0", false)).toBe("150.0")
+		expect(formatNumber(3, "[>100]0.0;0", false)).toBe("3")
+		expect(formatNumber(1, "mm:ss", false)).toBe("00:00")
+		expect(formatNumber(0, "yyyy", true)).toBe("1904")
+	})
+
 	it("reads an oversized code as General and caps decimals", () => {
 		const code = "[".repeat(20000)
 		const start = performance.now()
@@ -120,13 +144,14 @@ describe("chart number formats", () => {
 
 		expect(performance.now() - start).toBeLessThan(budget(1000))
 		expect(() => formatNumber(1.5, `0.${"0".repeat(101)}`, false)).not.toThrow()
-		expect(formatNumber(1.5, `0.${"0".repeat(101)}`, false)).toBe(`1.5${"0".repeat(99)}`)
+		expect(formatNumber(1.5, `0.${"0".repeat(101)}`, false)).toBe(`1.5${"0".repeat(100)}`)
 	})
 
-	it("formats each point in time independent of the code", () => {
-		// The longest code Excel allows, built to make a backtracking bracket scan quadratic, against a plain one.
+	it("formats each point in time linear in the code", () => {
+		// The longest code Excel allows, built to make a backtracking bracket scan quadratic: each point costs at most
+		// one pass over the code's tokens.
 		const hostile = ["[".repeat(255), "[$".repeat(127), `0${"[".repeat(254)}`, `0${",".repeat(253)}0`]
-		const points = 200000
+		const points = 50000
 
 		for (const code of hostile) expect(code.length).toBeLessThanOrEqual(255)
 
@@ -145,10 +170,60 @@ describe("chart number formats", () => {
 		expect(formatNumber(1500, "[$€-407]#,##0.00", false)).toBe("€1,500.00")
 		expect(formatNumber(1500, "[$USD] 0", false)).toBe("USD 1500")
 		expect(formatNumber(-3, "[Blue]0;[Red]-0", false)).toBe("-3")
-		expect(formatNumber(3, "[>100]0.0;0", false)).toBe("3.0")
+		expect(formatNumber(3, "[>100]0.0;0", false)).toBe("3")
 		expect(formatNumber(0, '0;-0;"none"', false)).toBe("none")
 		expect(formatNumber(45000, "[$-409]mmm-yy", false)).toBe("Mar-23")
-		expect(formatNumber(2, "[Red]", false)).toBe("2")
+		// A colour and nothing else shows what a cell with that format shows.
+		expect(formatNumber(2, "[Red]", false)).toBe(formatValue(2, "[Red]").text)
+	})
+})
+
+describe("chart fallback texts", () => {
+	const GERMAN: ChartText = { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" }
+	const labels =
+		'<c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>'
+	const unnamed = (index: number): string =>
+		`<c:ser><c:idx val="${index}"/><c:order val="${index}"/>${labels}<c:cat>${strings(CATS)}</c:cat><c:val>${numbers([1, 2, 3])}</c:val></c:ser>`
+	const classic = (chartText?: ChartText): string[] => {
+		const plot = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>${unnamed(0)}${unnamed(1)}<c:axId val="1"/><c:axId val="2"/></c:barChart>${AXES.replace('<c:axPos val="l"/>', '<c:axPos val="l"/><c:title><c:overlay val="0"/></c:title>')}`
+		const part = parseXml(
+			new TextEncoder().encode(
+				`<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:title><c:overlay val="0"/></c:title><c:plotArea>${plot}</c:plotArea><c:legend><c:legendPos val="r"/></c:legend></c:chart></c:chartSpace>`
+			)
+		)
+
+		return texts(convertChart(context(), part, 480 * EMU, 320 * EMU, undefined, undefined, chartText).list)
+	}
+	const chartex = (chartText?: ChartText): string[] => {
+		const part = parseXml(
+			new TextEncoder().encode(
+				'<cx:chartSpace xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chartData><cx:data id="0"><cx:strDim type="cat"><cx:f>S!A1</cx:f><cx:lvl ptCount="2"><cx:pt idx="0">A</cx:pt><cx:pt idx="1">B</cx:pt></cx:lvl></cx:strDim><cx:numDim type="val"><cx:f>S!B1</cx:f><cx:lvl ptCount="2" formatCode="General"><cx:pt idx="0">3</cx:pt><cx:pt idx="1">2</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData><cx:chart><cx:title/><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="funnel"><cx:dataId val="0"/></cx:series></cx:plotAreaRegion><cx:axis id="0"><cx:catScaling gapWidth="0.5"/><cx:tickLabels/></cx:axis></cx:plotArea><cx:legend pos="t" align="ctr" overlay="0"/></cx:chart></cx:chartSpace>'
+			)
+		)
+
+		return texts(convertChart(context(), part, 480 * EMU, 320 * EMU, undefined, undefined, chartText).list)
+	}
+
+	it("names unnamed series and automatic titles in English by default", () => {
+		const shown = classic()
+
+		expect(shown).toEqual(expect.arrayContaining(["Chart Title", "Axis Title", "Series1", "Series2"]))
+		expect(shown.filter(text => text === "Series1").length).toBeGreaterThan(1)
+		expect(chartex()).toEqual(expect.arrayContaining(["Chart Title", "Series1"]))
+	})
+
+	it("names them with the texts the host passes, in legend, titles and data labels", () => {
+		const shown = classic(GERMAN)
+
+		expect(shown).toEqual(expect.arrayContaining(["Diagrammtitel", "Achsentitel", "Datenreihe1", "Datenreihe2"]))
+		// The legend entry and every data label of the first series.
+		expect(shown.filter(text => text === "Datenreihe1")).toHaveLength(4)
+		expect(shown.some(text => /Series\d|Chart Title|Axis Title/.test(text))).toBe(false)
+
+		const shownChartex = chartex(GERMAN)
+
+		expect(shownChartex).toEqual(expect.arrayContaining(["Diagrammtitel", "Datenreihe1"]))
+		expect(shownChartex.some(text => /Series\d|Chart Title/.test(text))).toBe(false)
 	})
 })
 

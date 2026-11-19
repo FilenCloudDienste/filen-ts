@@ -9,7 +9,7 @@ import type { XlsxWorkbook } from "../../xlsx/model/workbook"
 import { decodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
 import type { SheetView } from "../write/sheet"
 import { chartObject } from "./chart"
-import { ShapeStyles, ShapeWriter } from "./shapes"
+import { EMU_PER_PT, ShapeStyles, ShapeWriter, cmLength } from "./shapes"
 import { drawingReader } from "../../drawingml/reader"
 
 // A sheet's drawing (ECMA-376 Part 1 §20.5) as frames anchored to their cells (ODF 1.3 Part 3 §10.4.3 draw:frame
@@ -19,9 +19,7 @@ import { drawingReader } from "../../drawingml/reader"
 // groups and connectors are written (shapes.ts). Ink, controls and hidden objects are reported; so is what a picture
 // holds besides its image (cropping, rotation, effects, an outline, a link).
 
-const EMU_PER_CM = 360_000
 const EMU_PER_PX = 9525
-const EMU_PER_PT = 12_700
 
 // Files the package holds besides content.xml and styles.xml.
 export class PackageFiles {
@@ -71,10 +69,6 @@ export interface SheetFrames {
 	readonly frames: Map<string, string>
 	readonly lostPictures: number
 	readonly lostCharts: number
-}
-
-function length(emu: number): string {
-	return `${String(Math.round((Math.max(0, emu) / EMU_PER_CM) * 1000) / 1000)}cm`
 }
 
 // Sizes along one axis as differences from a default size, over ranges (first, last; ascending, apart), with their
@@ -303,7 +297,7 @@ export async function sheetFrames(
 		const key = `${String(box.row)},${String(box.col)}`
 		const frame =
 			`<draw:frame draw:z-index="${String(z++)}"${object.name === "" ? "" : ` draw:name="${escapeAttribute(object.name)}"`}` +
-			` svg:width="${length(box.cx)}" svg:height="${length(box.cy)}" svg:x="${length(box.x)}" svg:y="${length(box.y)}">` +
+			` svg:width="${cmLength(Math.max(0, box.cx))}" svg:height="${cmLength(Math.max(0, box.cy))}" svg:x="${cmLength(Math.max(0, box.x))}" svg:y="${cmLength(Math.max(0, box.y))}">` +
 			`${inner}${object.alt === "" ? "" : `<svg:desc>${escapeText(object.alt)}</svg:desc>`}</draw:frame>`
 
 		frames.set(key, (frames.get(key) ?? "") + frame)
@@ -357,7 +351,8 @@ export async function sheetFrames(
 			const part = target(object.chartRelationship ?? undefined)
 			const chart =
 				part === undefined || workbook.parts.get(part) === undefined ? null : parseChartPart(await workbook.parts.read(part))
-			const written = chart === null ? null : chartObject(chart, theme, sheet, length(box.cx), length(box.cy))
+			const written =
+				chart === null ? null : chartObject(chart, theme, sheet, cmLength(Math.max(0, box.cx)), cmLength(Math.max(0, box.cy)))
 
 			if (written === null) {
 				lostCharts++

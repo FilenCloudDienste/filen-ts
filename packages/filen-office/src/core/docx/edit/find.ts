@@ -369,29 +369,15 @@ interface TrackedMatch {
 	readonly kept: boolean
 }
 
-interface Planned {
-	readonly matches: StoryMatch[]
-	// For each match while tracking; undefined for all when one cannot be told so (each replaced on its own,
-	// the change tracker recording each).
-	readonly tracked: TrackedMatch[] | undefined
-	// Child slots the matches replaced on their own copy.
-	readonly copied: number
-}
-
-// The matches (in document order) replaceableIn() keeps, how each is tracked (`session` tracking), and the child
-// slots the matches replaced on their own copy, by one walk of the blocks.
+// The matches (in document order) replaceableIn() keeps, by one walk of the blocks.
 function plannedMatches(
 	part: StoryPart | undefined,
 	doc: Node,
 	matches: readonly StoryMatch[],
 	session: DocxEditorSession | undefined
-): Planned {
-	const tracking = session?.context.review.tracking === true
+): StoryMatch[] {
 	const allowed = session === undefined ? undefined : editable(session, doc)
 	const out: StoryMatch[] = []
-	let tracked: TrackedMatch[] | undefined = tracking ? [] : undefined
-	// What replacing every match on its own copies (when tracked one by one).
-	let each = 0
 	let k = 0
 
 	doc.forEach((child, pos) => {
@@ -405,9 +391,32 @@ function plannedMatches(
 			if (allowed !== undefined && !allowed(match)) continue
 
 			out.push(match)
+		}
+	})
 
-			if (!tracking) continue
+	return out
+}
 
+interface Tracking {
+	// For each match; undefined for all when one cannot be told so (each replaced on its own, the change
+	// tracker recording each).
+	readonly tracked: TrackedMatch[] | undefined
+	// Child slots the matches replaced on their own copy.
+	readonly copied: number
+}
+
+// How each match (in document order) is tracked while `session` tracks changes, and the child slots the matches
+// replaced on their own copy, by one walk of the blocks.
+function trackingOf(doc: Node, matches: readonly StoryMatch[], session: DocxEditorSession): Tracking {
+	let tracked: TrackedMatch[] | undefined = []
+	// What replacing every match on its own copies (when tracked one by one).
+	let each = 0
+	let k = 0
+
+	doc.forEach((child, pos) => {
+		const end = pos + child.nodeSize
+
+		for (let match = matches[k]; match !== undefined && match.from < end; match = matches[++k]) {
 			// Replaced on its own when not told as the change tracker records it: a step copying the children of
 			// every node around the match.
 			const $from = child.resolve(match.from - pos - 1)
@@ -416,7 +425,7 @@ function plannedMatches(
 
 			for (let depth = 0; depth < $from.depth; depth++) each += $from.node(depth).childCount
 
-			if (tracked === undefined || session === undefined) continue
+			if (tracked === undefined) continue
 
 			const start = pos + 1 + $from.start()
 			const how = trackedReplace($from.parent, match.from - start, match.to - start, session)
@@ -427,7 +436,7 @@ function plannedMatches(
 		}
 	})
 
-	return { matches: out, tracked, copied: tracking && tracked === undefined ? each : 0 }
+	return { tracked, copied: tracked === undefined ? each : 0 }
 }
 
 // The match each replace a plan makes is of.
@@ -447,16 +456,19 @@ interface Recorded {
 	readonly at: number
 }
 
+// What match `k` is replaced with (`node` the paragraph holding it, its content at `start`); undefined deletes it.
+export type ReplacementOf = (k: number, node: Node, start: number) => Node | undefined
+
 // Builds Replace All's steps over the matches it was given (in document order, all replaceable).
 class ReplaceAllPlan {
 	private readonly matches: readonly StoryMatch[]
-	private readonly replacement: string
+	private readonly replacement: ReplacementOf
 	// How each match is tracked; undefined untracked.
 	private readonly tracked: readonly TrackedMatch[] | undefined
 	// What each match's tracked replace records (by match).
 	private readonly recorded: { deleted: Recorded[]; inserted: Recorded[] }[] = []
 
-	constructor(matches: readonly StoryMatch[], replacement: string, tracked: readonly TrackedMatch[] | undefined) {
+	constructor(matches: readonly StoryMatch[], replacement: ReplacementOf, tracked: readonly TrackedMatch[] | undefined) {
 		this.matches = matches
 		this.replacement = replacement
 		this.tracked = tracked
@@ -646,7 +658,7 @@ class ReplaceAllPlan {
 		k: number
 	): { readonly replaces: Replace[]; readonly marked: readonly (readonly [number, number])[] } {
 		const match = this.matches[k] as StoryMatch
-		const text = this.replacement.length > 0 ? replacementText(node, match.from - start, this.replacement) : undefined
+		const text = this.replacement(k, node, start)
 		const slice = text === undefined ? Slice.empty : new Slice(Fragment.from(text), 0, 0)
 		const how = this.tracked?.[k]
 
@@ -688,26 +700,66 @@ class ReplaceAllPlan {
 }
 
 // Each match replaced on its own step (a tracked edit the change tracker records step by step).
-function eachOnItsOwn(state: EditorState, matches: readonly StoryMatch[], replacement: string): ReplaceAllResult {
+function eachOnItsOwn(state: EditorState, matches: readonly StoryMatch[], replacement: ReplacementOf): Transaction {
 	const tr = state.tr
 
 	for (let k = matches.length - 1; k >= 0; k--) {
 		const match = matches[k] as StoryMatch
+		const $from = state.doc.resolve(match.from)
+		const text = replacement(k, $from.parent, $from.start())
 
-		if (replacement.length === 0) tr.delete(match.from, match.to)
-		else tr.replaceWith(match.from, match.to, docxSchema.text(replacement, state.doc.resolve(match.from + 1).marks()))
+		if (text === undefined) tr.delete(match.from, match.to)
+		else tr.replaceWith(match.from, match.to, text)
 	}
 
-	return { tr: closeHistory(tr), count: matches.length }
+	return tr
+}
+
+// Replaces `matches` (in document order, apart, inline content of paragraphs) with what `replacement` gives each.
+// Few replace steps rebuild the blocks holding matches (each step copies the document's spine, so a step per
+// match grows with the matches times the blocks; the invariants, tracking and protection read each as the
+// replaces of its matches). While changes are tracked, each replace is built as the change tracker records one
+// of a match (its text marked deleted, the replacement inserted after it); when one cannot be told so, each is
+// replaced on its own step, the tracker recording each, refused ("tooLarge") when those steps would copy past
+// MAX_COPIED_SLOTS. Null when nothing changes.
+export function replaceInFewSteps(
+	state: EditorState,
+	matches: readonly StoryMatch[],
+	replacement: ReplacementOf
+): Transaction | "tooLarge" | null {
+	const session = sessionOfDoc(state.doc)
+	const tracking = session !== undefined && session.context.review.tracking
+	const how = tracking ? trackingOf(state.doc, matches, session) : undefined
+
+	if (how !== undefined && how.copied > MAX_COPIED_SLOTS) return "tooLarge"
+
+	if (tracking && how?.tracked === undefined) {
+		const tr = eachOnItsOwn(state, matches, replacement)
+
+		return tr.docChanged ? tr : null
+	}
+
+	const tr = state.tr
+	const plan = new ReplaceAllPlan(matches, replacement, how?.tracked)
+
+	plan.emit(tr, state.doc, 0, 0, matches.length)
+
+	if (session !== undefined && tracking) {
+		const ranges = plan.finalRanges(tr)
+
+		if (!tr.docChanged || !prebuiltTracking(tr, session, ranges.deleted, ranges.inserted)) {
+			const each = eachOnItsOwn(state, matches, replacement)
+
+			return each.docChanged ? each : null
+		}
+	}
+
+	return tr.docChanged ? tr : null
 }
 
 // Replaces every match of `query` in `state`, however many (find shows at most STORY_FIND_LIMIT), in one step
-// of the undo history, each replacement keeping the formatting where its match starts. Few replace steps
-// rebuild the blocks holding matches (each step copies the document's spine, so a step per paragraph grows
-// with the paragraphs times the blocks; the invariants read each as the replaces of its matches); in
-// paragraphs holding a content control each match is replaced on its own. While changes are tracked, each
-// replace is built as the change tracker records one of a match (its text marked deleted, the replacement
-// inserted after it). Null when nothing matches.
+// of the undo history, each replacement keeping the formatting where its match starts (see
+// replaceInFewSteps()). Null when nothing matches.
 export function replaceAll(
 	state: EditorState,
 	query: string,
@@ -720,31 +772,18 @@ export function replaceAll(
 
 	if (found.length === 0) return null
 
-	const planned = plannedMatches(session?.story.part, doc, found, session)
+	const matches = plannedMatches(session?.story.part, doc, found, session)
 
-	if (planned.matches.length === 0) return { refused: "unreplaceable" }
-	if (planned.copied > MAX_COPIED_SLOTS) return { refused: "tooLarge" }
+	if (matches.length === 0) return { refused: "unreplaceable" }
 
-	const tracking = session?.context.review.tracking === true
+	const tr = replaceInFewSteps(state, matches, (k, node, start) =>
+		replacement.length > 0 ? replacementText(node, (matches[k] as StoryMatch).from - start, replacement) : undefined
+	)
 
-	// Tracked, but some match not told as the change tracker would: each replaced on its own, the tracker
-	// recording each.
-	if (tracking && planned.tracked === undefined) return eachOnItsOwn(state, planned.matches, replacement)
-
-	const tr = state.tr
-	const plan = new ReplaceAllPlan(planned.matches, replacement, planned.tracked)
-
-	plan.emit(tr, doc, 0, 0, planned.matches.length)
-
-	if (session !== undefined && tracking) {
-		const ranges = plan.finalRanges(tr)
-
-		if (!tr.docChanged || !prebuiltTracking(tr, session, ranges.deleted, ranges.inserted))
-			return eachOnItsOwn(state, planned.matches, replacement)
-	}
+	if (tr === "tooLarge") return { refused: "tooLarge" }
 
 	// Its own undo step: typing after it never joins it.
-	return tr.docChanged ? { tr: closeHistory(tr), count: planned.matches.length } : { refused: "unreplaceable" }
+	return tr === null ? { refused: "unreplaceable" } : { tr: closeHistory(tr), count: matches.length }
 }
 
 // Selects a match (as Word's find does), or null when it no longer lies in the document.

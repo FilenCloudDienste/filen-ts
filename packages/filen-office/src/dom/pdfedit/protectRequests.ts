@@ -6,7 +6,7 @@ import { isRedactionPresets, isRedactionTerms } from "./commands/redact"
 import { PdfEngineRefusal, type OpenDocument, type PdfEngineContext } from "./context"
 import type { PdfEditSession } from "./editSession"
 import type { PdfTextGeometryLine } from "./protocol"
-import { findRedactions } from "./redact/find"
+import { findRedactions, withMarkedText } from "./redact/find"
 import { pageRedactionMarks } from "./redact/marks"
 import { verifyRedactedPdf } from "./redact/verify"
 import type { PdfRequestHandler } from "./requests"
@@ -123,14 +123,15 @@ export function pageTextGeometry(page: Mupdf.PDFPage): PdfTextGeometryLine[] {
 type Handlers = { readonly [K in ProtectOp]: PdfRequestHandler<K> }
 
 export const PROTECT_REQUESTS: Handlers = {
-	redactMarks: (context, { pages }) => {
+	redactMarks: (context, { pages, text }) => {
 		const { document } = editing(context)
 		const indices = pages === undefined ? Array.from({ length: document.countPages() }, (_, index) => index) : pages
 
 		return {
 			value: indices.flatMap(index => {
 				const page = document.loadPage(pageIndex(document, index))
-				const marks = pageRedactionMarks(page, index)
+				const read = pageRedactionMarks(page, index)
+				const marks = text === true ? withMarkedText(page, read) : read
 
 				page.destroy()
 

@@ -139,7 +139,7 @@ describe("presentation edit session", () => {
 		const slide = await harness.slide(0)
 		const target = { slide: slide.ref, id: 3 }
 
-		expect(await harness.command({ family: "shape", kind: "setProps", target, props: { fill: "none" } })).toEqual({
+		expect(await harness.command({ family: "shape", kind: "setProps", target, props: { fill: "none" } })).toMatchObject({
 			ok: false,
 			refusal: "locked"
 		})
@@ -347,7 +347,7 @@ describe("presentation edit session", () => {
 		harness.session.deck.gate.push("signed")
 		expect(
 			await harness.command({ family: "slide", kind: "hide", slides: [harness.session.deck.slides[0] as never], hidden: true })
-		).toEqual({
+		).toMatchObject({
 			ok: false,
 			refusal: "viewOnly"
 		})

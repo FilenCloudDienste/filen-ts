@@ -1,14 +1,11 @@
-import { MessageChannel, type MessagePort } from "node:worker_threads"
 import { describe, expect, it, vi } from "vitest"
 import { bytesSource } from "../core/opc/index"
 import { openXlsxSession } from "../core/sheet/commands"
-import type { SheetEvent, SheetHost, SheetOpenResult } from "../core/sheet/protocol"
-import { inThreadSheetHost, workbookOpener } from "../dom/sheet/host"
-import { sheetWorkerHost, type SheetWorkerLike } from "../dom/sheet/client"
-import { serveSheetWorker } from "../dom/sheet/worker"
+import type { SheetEvent, SheetOpenResult } from "../core/sheet/protocol"
+import { inThreadSheetHost } from "../dom/sheet/host"
 import { openProtectedWorkbook, sheetUnlockedPackage, takenSheetEncryption } from "../dom/sheet/protection"
 import { agileStreams, encryptedOfficeFile } from "./encryption/testing"
-import { BASIC, IMMEDIATE, buildFixture, cells, firstTile, tileTexts } from "./sheetSessionFixtures"
+import { BASIC, IMMEDIATE, buildFixture, cells, firstTile, tileTexts, workerPair } from "./sheetSessionFixtures"
 
 // The hosts sessions run in: on the calling thread (no Worker, MessageChannel or OffscreenCanvas), in a worker
 // over messages, and for password-protected workbooks (unlocked where the session runs, every save sealed).
@@ -23,33 +20,6 @@ function opened(result: SheetOpenResult): Extract<SheetOpenResult, { kind: "open
 	if (result.kind !== "opened") throw new Error(`expected an open, got ${result.kind}`)
 
 	return result
-}
-
-// A worker host and its server joined by a real message channel (structured clone and transfer, as a Worker).
-function workerPair(): { host: SheetHost; close: () => void } {
-	const { port1, port2 } = new MessageChannel()
-	const page: SheetWorkerLike = {
-		postMessage: (message, transfer) => port1.postMessage(message, transfer ?? []),
-		addEventListener: (type, listener) => {
-			if (type === "message") port1.on("message", (data: unknown) => listener({ data }))
-		}
-	}
-	const scope = {
-		post: (message: unknown, transfer: readonly ArrayBuffer[]) => port2.postMessage(message, [...transfer]),
-		listen: (onMessage: (data: unknown) => void) => {
-			port2.on("message", onMessage)
-		}
-	}
-
-	serveSheetWorker(scope, workbookOpener())
-
-	return {
-		host: sheetWorkerHost(page),
-		close: () => {
-			;(port1 as MessagePort).close()
-			;(port2 as MessagePort).close()
-		}
-	}
 }
 
 describe("in-thread sheet host", () => {

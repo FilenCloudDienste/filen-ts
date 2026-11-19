@@ -39,6 +39,10 @@ export const LAYOUT_TYPES = [
 
 export type FilenLayoutType = (typeof LAYOUT_TYPES)[number]
 
+// The names a layout is written with (p:cSld@name), by type: the caller's, in the user's language, else
+// PowerPoint's English default.
+export type LayoutNames = Readonly<Partial<Record<string, string>>>
+
 const LAYOUT_NAMES: Readonly<Record<FilenLayoutType, string>> = {
 	title: "Title Slide",
 	obj: "Title and Content",
@@ -501,11 +505,17 @@ function layoutPlaceholders(type: FilenLayoutType): Placeholder[] {
 	}
 }
 
-export function layoutXml(type: FilenLayoutType, size: SlideSize): string {
+function layoutName(type: FilenLayoutType, names?: LayoutNames): string {
+	const given = names?.[type]?.trim()
+
+	return given === undefined || given === "" ? LAYOUT_NAMES[type] : given
+}
+
+export function layoutXml(type: FilenLayoutType, size: SlideSize, names?: LayoutNames): string {
 	const shapes = [...layoutPlaceholders(type), ...LAYOUT_FOOTERS].map((ph, index) => placeholderXml(ph, index + 2, size, false)).join("")
 
 	return (
-		`<p:sldLayout ${ROOT_NS} type="${type}" preserve="1"><p:cSld name="${escapeAttribute(LAYOUT_NAMES[type])}">${spTree(shapes)}</p:cSld>` +
+		`<p:sldLayout ${ROOT_NS} type="${type}" preserve="1"><p:cSld name="${escapeAttribute(layoutName(type, names))}">${spTree(shapes)}</p:cSld>` +
 		"<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
 	)
 }
@@ -570,12 +580,14 @@ export interface DesignSet {
 
 // The theme, master and layouts of one Filen theme variant under the given names; `firstId` is the master's
 // p:sldMasterId@id and its layouts take the ids after it (ids ≥ 2^31 shared by masters and layouts, §19.2.1.27).
+// `layoutNames`: the layouts' names in the user's language.
 export function designSet(
 	theme: FilenTheme,
 	variantIndex: number,
 	size: SlideSize,
 	names: { readonly theme: string; readonly master: string; readonly layouts: readonly string[] },
-	firstId: number
+	firstId: number,
+	layoutNames?: LayoutNames
 ): DesignSet {
 	const relative = (from: string, to: string): string => {
 		const fromParts = from.split("/").slice(0, -1)
@@ -593,7 +605,7 @@ export function designSet(
 			type,
 			name,
 			contentType: CONTENT_TYPE.layout,
-			markup: layoutXml(type, size),
+			markup: layoutXml(type, size, layoutNames),
 			rels: relationshipsXml([{ id: "rId1", type: "slideMaster", target: relative(name, names.master) }])
 		}
 	})

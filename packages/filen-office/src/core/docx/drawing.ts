@@ -1,4 +1,4 @@
-import { convertChart } from "../drawingml/chart/index"
+import { CHART_TEXT_EN, convertChart, type ChartText } from "../drawingml/chart/index"
 import { drawingTheme, type DrawingTheme } from "../drawingml/color"
 import { DrawingList } from "../drawingml/displayList"
 import type { ImageResolver } from "../drawingml/picture"
@@ -26,6 +26,8 @@ export interface DocxDrawingOptions {
 	// Draw outer shadows (a:outerShdw, v:shadow).
 	readonly effects?: boolean
 	readonly math?: OmmlOptions
+	// What charts show where the file names nothing (unnamed series, automatic titles); English when absent.
+	readonly chartText?: ChartText
 }
 
 export type DrawingPlaceholderReason =
@@ -91,6 +93,7 @@ export class DocxDrawings {
 	readonly theme: DrawingTheme
 	private readonly effects: boolean
 	private readonly mathOptions: OmmlOptions
+	private readonly chartText: ChartText
 	// Tracked changes' authors as reviewers are numbered (their colours), once an equation shows one.
 	private authors: ((name: string | undefined) => number) | undefined
 	// "part:node" of each w:txbxContent -> its story.
@@ -102,6 +105,7 @@ export class DocxDrawings {
 		this.theme = theme
 		this.effects = options.effects ?? false
 		this.mathOptions = options.math ?? {}
+		this.chartText = options.chartText ?? CHART_TEXT_EN
 	}
 
 	// Loads the document's theme part (when it has one) for scheme colours, fonts and style references.
@@ -262,7 +266,7 @@ export class DocxDrawings {
 		if (typeof loaded === "string") return { kind: "placeholder", reason: loaded }
 
 		const context = this.context(info.part, partResolver(this.model, loaded.relationships))
-		const result = convertChart(context, loaded.document, info.width, info.height)
+		const result = convertChart(context, loaded.document, info.width, info.height, undefined, undefined, this.chartText)
 
 		return result.supported
 			? { kind: "drawing", list: result.list, textboxes: [], unsupported: result.unsupported.length }

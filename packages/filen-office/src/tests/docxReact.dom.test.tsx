@@ -387,6 +387,55 @@ describe("useDocxDocument and DocxPages", () => {
 		expect(container.querySelector(".fo-docx-pages-content .probe-overlay")).not.toBeNull()
 	})
 
+	it("names painted form check boxes with the labels the host supplies", async () => {
+		const manual = manualHost()
+		const source: DocxSource = { host: manual.host, bytes: bytesSource(new Uint8Array(1)) }
+
+		manual.session.objects = ids => Promise.resolve(ids.map(id => ({ kind: "checkbox" as const, id, checked: true })))
+
+		function Labelled() {
+			const document = useDocxDocument(source)
+
+			return (
+				<DocxPages
+					document={document}
+					zoom={1}
+					overscan={0}
+					pageLabel={index => `Page ${index + 1}`}
+					objectLabels={{ checkbox: "Kontrollkästchen" }}
+				/>
+			)
+		}
+
+		act(() => root.render(<Labelled />))
+		manual.emit({
+			type: "opened",
+			info: { variant: "docx", gate: [], estimatedPages: 1, pageWidth: 816, pageHeight: 1056, mainPartBytes: 1000 }
+		})
+		manual.emit(
+			pagesEvent(
+				[
+					{
+						...page(0, ["Done"]),
+						objectCount: 1,
+						objectFloats: Float32Array.from([96, 96, 12, 12]),
+						objectInts: Int32Array.from([7, 1, 0]),
+						objectKinds: Uint8Array.from([0])
+					}
+				],
+				true
+			)
+		)
+		await flush()
+		await flush()
+
+		const box = container.querySelector(".fo-docx-checkbox")
+
+		expect(box?.getAttribute("role")).toBe("checkbox")
+		expect(box?.getAttribute("aria-checked")).toBe("true")
+		expect(box?.getAttribute("aria-label")).toBe("Kontrollkästchen")
+	})
+
 	it("centres the pages in the width a scrollbar the arriving pages bring leaves, in the commit that brings it", async () => {
 		const manual = manualHost()
 		const source: DocxSource = { host: manual.host, bytes: bytesSource(new Uint8Array(1)) }

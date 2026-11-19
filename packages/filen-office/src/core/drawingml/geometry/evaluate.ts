@@ -41,10 +41,6 @@ export function presetProgram(name: string): GeometryProgram | undefined {
 	return program
 }
 
-export function presetNames(): string[] {
-	return Object.keys(PRESET_GEOMETRY)
-}
-
 function finite(value: number): number {
 	return Number.isFinite(value) ? value : 0
 }

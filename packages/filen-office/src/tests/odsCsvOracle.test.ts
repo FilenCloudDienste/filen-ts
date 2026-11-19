@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { bytesSource } from "../core/opc/index"
 import { openOds } from "../core/ods/open"
 import { CORPUS_DIR } from "./corpusDir"
-import { ODS_ENCRYPTED, odsDocument, shownRows } from "./odsFixtures"
+import { ODS_ENCRYPTED, odsDocument, shownRows, trimmedRows } from "./odsFixtures"
 import { exportShown, sheetOffices, sheetProfile } from "./oracles/sheet/libreOffice"
 
 // Each corpus spreadsheet's sheets as shown (CSV, number formats applied, cached results) equal LibreOffice 7.5's
@@ -44,20 +44,6 @@ const ACCEPTED: Readonly<Record<string, string>> = {
 	"lo__user-defined-function.ods": "a Basic function's result is the cached one: macros never run here",
 	"lo__vba_macro_functions.ods": "a VBA function's result is the cached one: macros never run here",
 	"odftk__Basic.ods": "raw white space collapsed (§6.1.2); a row repeated past the row cap is refused with its issue, not drawn"
-}
-
-function trimmed(rows: readonly (readonly string[])[]): string[][] {
-	const out = rows.map(row => {
-		const copy = [...row]
-
-		while (copy.length > 0 && copy[copy.length - 1] === "") copy.pop()
-
-		return copy
-	})
-
-	while (out.length > 0 && out[out.length - 1]?.length === 0) out.pop()
-
-	return out
 }
 
 describe.skipIf(FILES.length === 0 || OFFICE === undefined)("ODS as shown against LibreOffice 7.5", () => {
@@ -104,7 +90,7 @@ describe.skipIf(FILES.length === 0 || OFFICE === undefined)("ODS as shown agains
 					// LibreOffice writes no CSV for a sheet whose name cannot be a file name.
 					if (sheet === undefined) return /[/\\:*?"<>|]/.test(entry.name)
 
-					return JSON.stringify(shownRows(document, entry.id)) === JSON.stringify(trimmed(sheet.text))
+					return JSON.stringify(shownRows(document, entry.id)) === JSON.stringify(trimmedRows(sheet.text))
 				})
 
 				document.dropEngine()

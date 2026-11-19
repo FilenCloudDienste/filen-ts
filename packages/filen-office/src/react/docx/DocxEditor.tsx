@@ -16,7 +16,17 @@ import { EditSurface, type DocxEditorMark } from "./edit/surface"
 import { DOCX_MARK_LABELS, type DocxMarkLabels } from "./paint/marks"
 import { unitDragSelection } from "./edit/unitDrag"
 import type { DocxDocument } from "./store"
-import { anchoredScrollTop, pageAt, readViewport, type PagesViewport } from "./viewport"
+import {
+	anchoredScrollTop,
+	pageAt,
+	pageHeightAt,
+	pageLeft,
+	pageWidthAt,
+	readViewport,
+	stackPages,
+	type PageLayout,
+	type PagesViewport
+} from "./viewport"
 
 // Paged editing on the rendered pages, unstyled: the pages (only those in view mounted, patched line by line
 // as edits lay them out again), the caret, selection and composition drawn over them, pointer and touch
@@ -135,8 +145,6 @@ const REGION_NAMES: Readonly<Record<number, string>> = {
 	[Region.FOOTNOTE]: "footnote",
 	[Region.ENDNOTE]: "endnote"
 }
-const DEFAULT_PAGE_WIDTH = 816
-const DEFAULT_PAGE_HEIGHT = 1056
 // A press held this long without moving selects the word (touch).
 const LONG_PRESS_MS = 500
 const TAP_SLOP = 10
@@ -150,28 +158,10 @@ const AUTO_SCROLL_EDGE = 32
 const AUTO_SCROLL_RATE = 0.02
 const AUTO_SCROLL_MAX = 8
 
-interface Layout {
-	readonly tops: Float64Array
-	readonly heights: Float64Array
-	readonly widths: Float64Array
-	readonly total: number
-	readonly contentWidth: number
+interface Layout extends PageLayout {
 	readonly zoom: number
 	readonly gap: number
 	readonly aside: number
-}
-
-// A page's size on screen; one not laid out yet is sized like the last that is.
-function pageWidth(document: DocxDocument, index: number, zoom: number): number {
-	const page = document.pages[index] ?? document.pages[document.pages.length - 1]
-
-	return (page?.width ?? document.info?.pageWidth ?? DEFAULT_PAGE_WIDTH) * zoom
-}
-
-function pageHeight(document: DocxDocument, index: number, zoom: number): number {
-	const page = document.pages[index] ?? document.pages[document.pages.length - 1]
-
-	return (page?.height ?? document.info?.pageHeight ?? DEFAULT_PAGE_HEIGHT) * zoom
 }
 
 // The pages' places, the same object while they do not change (pages laid out again keep their size as a
@@ -186,29 +176,12 @@ class PageLayouts {
 			let same = true
 
 			for (let i = 0; i < count && same; i++)
-				same = pageWidth(document, i, zoom) === last.widths[i] && pageHeight(document, i, zoom) === last.heights[i]
+				same = pageWidthAt(document, i, zoom) === last.widths[i] && pageHeightAt(document, i, zoom) === last.heights[i]
 
 			if (same) return last
 		}
 
-		const tops = new Float64Array(count)
-		const heights = new Float64Array(count)
-		const widths = new Float64Array(count)
-		let y = gap
-		let widest = 0
-
-		for (let i = 0; i < count; i++) {
-			const width = pageWidth(document, i, zoom)
-			const height = pageHeight(document, i, zoom)
-
-			tops[i] = y
-			heights[i] = height
-			widths[i] = width
-			widest = Math.max(widest, width)
-			y += height + gap
-		}
-
-		this.last = { tops, heights, widths, total: y, contentWidth: widest + 2 * gap + aside, zoom, gap, aside }
+		this.last = { ...stackPages(document, count, zoom, gap, aside), zoom, gap, aside }
 
 		return this.last
 	}
@@ -288,8 +261,7 @@ export function DocxEditor(props: DocxEditorProps) {
 				}
 	// The page in view: the one across the middle of the view, as the viewer counts it (DocxPages).
 	const pageInView = count === 0 ? 0 : Math.min(count - 1, pageAt(layout, viewport.top + viewport.height / 2))
-	const leftOf = (index: number): number =>
-		Math.max(gap, ((Math.max(viewport.width, layout.contentWidth) - aside - (layout.widths[index] ?? 0)) / 2) | 0)
+	const leftOf = (index: number): number => pageLeft(layout, index, viewport.width, aside, gap)
 
 	// The painted caret on screen and its column's width, for the input view to put its own caret there.
 	const caretClientRect = (): { left: number; top: number; height: number; width: number } | undefined => {

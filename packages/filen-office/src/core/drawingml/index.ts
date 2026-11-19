@@ -1,4 +1,4 @@
-export { convertChart, type ChartConversion } from "./chart/index"
+export { convertChart, type ChartConversion, type ChartText } from "./chart/index"
 export {
 	COLOR_ELEMENTS,
 	colorChild,
@@ -70,7 +70,7 @@ export {
 	type StyleRef
 } from "./fill"
 export { compileCustomGeometry } from "./geometry/custom"
-export { appendArc, emitPaths, evaluateGuides, presetNames, presetProgram, textRect, type GeometryPath } from "./geometry/evaluate"
+export { appendArc, emitPaths, evaluateGuides, presetProgram, textRect, type GeometryPath } from "./geometry/evaluate"
 export { parseProgram, type GeometryProgram } from "./geometry/program"
 export { MISSING_IMAGE, imageFormat, imageHandling, readBlip, type ImageResolver, type ImageTarget } from "./picture"
 export { D, DrawingReader, EMU_PER_PT, EMU_PER_PX, drawingReader, emuToPx, parseEmu, parseFraction } from "./reader"

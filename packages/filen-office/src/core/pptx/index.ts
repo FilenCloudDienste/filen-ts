@@ -21,5 +21,4 @@ export { openPptx, openPptxPackage, PptxParts, type PptxOpen, type PptxOpenOptio
 export { IN_MEMORY_LIMIT, pptxSpliceWriter, savePptx, writeSnapshot } from "./write/save"
 export { spliceSnapshot, type PptxSpliceSource, type SpliceSnapshot } from "./write/splice"
 export { freshPptx } from "./write/fresh"
-export { freshPptxSealed, savePptxSealed, type PptxSealer } from "./write/seal"
 export type { SaveNotice } from "./write/parts"

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { strFromU8, unzipSync } from "fflate"
 import type { SheetCommand } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
-import { odsBytes, table, type OdsParts } from "./odsFixtures"
+import { odsBytes, odsContent, table, type OdsParts } from "./odsFixtures"
 import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // The automatic styles an ODS save adds: only those the content names, the same ones again on the next save of the
@@ -40,10 +40,6 @@ async function save(bytes: Uint8Array, commands: (sheet: number) => readonly She
 	return saved.bytes
 }
 
-function content(bytes: Uint8Array): string {
-	return strFromU8(unzipSync(bytes)["content.xml"] ?? new Uint8Array(0))
-}
-
 // Automatic styles content.xml declares that nothing in it names.
 function unreferenced(xml: string): string[] {
 	const start = xml.indexOf("<office:automatic-styles")
@@ -66,7 +62,7 @@ function undefinedNames(bytes: Uint8Array): string[] {
 			[...xml.matchAll(/<style:style style:name="([^"]+)"/g)].map(match => match[1] ?? "")
 		)
 	)
-	const body = content(bytes).slice(content(bytes).indexOf("<office:body"))
+	const body = odsContent(bytes).slice(odsContent(bytes).indexOf("<office:body"))
 
 	return [...new Set([...body.matchAll(/table:(?:style-name|default-cell-style-name)="([^"]+)"/g)].map(match => match[1] ?? ""))].filter(
 		name => !defined.has(name)
@@ -114,7 +110,7 @@ describe("the automatic styles of an ODS save", () => {
 		it(`are each named by the content, in ${label}`, async () => {
 			const first = await save(odsBytes(parts), EDITS)
 
-			expect(unreferenced(content(first))).toEqual([])
+			expect(unreferenced(odsContent(first))).toEqual([])
 			expect(undefinedNames(first)).toEqual([])
 		})
 
@@ -129,7 +125,7 @@ describe("the automatic styles of an ODS save", () => {
 			const first = await save(odsBytes(merged), sheet => [{ type: "axis.insert", sheet, axis: "cols", at: 0, count: 1 }])
 
 			expect(undefinedNames(first)).toEqual([])
-			expect(unreferenced(content(first))).toEqual([])
+			expect(unreferenced(odsContent(first))).toEqual([])
 		})
 
 		it(`name only defined styles where rows the edit left alone change height or hide, in ${label}`, async () => {
@@ -139,14 +135,14 @@ describe("the automatic styles of an ODS save", () => {
 			])
 
 			expect(undefinedNames(first)).toEqual([])
-			expect(unreferenced(content(first))).toEqual([])
+			expect(unreferenced(odsContent(first))).toEqual([])
 		})
 
 		it(`come out the same when the saved file is saved again with the same content, in ${label}`, async () => {
 			const first = await save(odsBytes(parts), EDITS)
 			const second = await save(first, REWRITE)
 
-			expect(content(second)).toBe(content(first))
+			expect(odsContent(second)).toBe(odsContent(first))
 			expect(second).toEqual(first)
 		})
 
@@ -156,19 +152,19 @@ describe("the automatic styles of an ODS save", () => {
 
 			for (let round = 0; round < 3; round++) {
 				bytes = await save(bytes, sheet => [set(sheet, 0, 5, "x"), set(sheet, 0, 5, "")])
-				sizes.push(content(bytes).length)
+				sizes.push(odsContent(bytes).length)
 			}
 
 			expect(sizes[2]).toBe(sizes[1])
-			expect(unreferenced(content(bytes))).toEqual([])
+			expect(unreferenced(odsContent(bytes))).toEqual([])
 		})
 	}
 
 	it("reuse a style the source already has for the same row look", async () => {
 		const first = await save(odsBytes(LIBRE), sheet => [set(sheet, 0, 3, "RT 42")])
 
-		expect(content(first)).not.toContain('style:family="table-row"><style:table-row-properties style:row-height="12.816')
-		expect(unreferenced(content(first))).toEqual([])
+		expect(odsContent(first)).not.toContain('style:family="table-row"><style:table-row-properties style:row-height="12.816')
+		expect(unreferenced(odsContent(first))).toEqual([])
 	})
 })
 
@@ -185,7 +181,7 @@ describe("a sheet an ODS save created", () => {
 	it("writes its rows again as they were, in a spreadsheet that had no table", async () => {
 		const { first, second } = await twice(odsBytes({ body: "" }), 0)
 
-		expect(content(second)).toBe(content(first))
+		expect(odsContent(second)).toBe(odsContent(first))
 		expect(second).toEqual(first)
 	})
 
@@ -193,8 +189,8 @@ describe("a sheet an ODS save created", () => {
 		const { first, second } = await twice(odsBytes(LIBRE), 1, [{ type: "sheet.add" }])
 
 		expect(unzipSync(first)["content.xml"]).toBeDefined()
-		expect(content(first).split("<table:table ").length - 1).toBe(2)
-		expect(content(second)).toBe(content(first))
+		expect(odsContent(first).split("<table:table ").length - 1).toBe(2)
+		expect(odsContent(second)).toBe(odsContent(first))
 		expect(second).toEqual(first)
 	})
 })
@@ -226,7 +222,7 @@ describe("a number format an ODS data style cannot hold", () => {
 			{ type: "format.apply", sheet, ranges: [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }], patch: { numFmt: "#,##0.0#" } }
 		])
 
-		expect(content(first)).toContain('number:min-decimal-places="1"')
+		expect(odsContent(first)).toContain('number:min-decimal-places="1"')
 	})
 })
 
@@ -268,7 +264,7 @@ describe("the names of the automatic styles an ODS save adds", () => {
 
 		if (!saved.ok) throw new Error(`${saved.reason}: ${saved.message}`)
 
-		const names = [...content(saved.bytes).matchAll(/<style:style style:name="(ceF\d+)"/g)].map(match => match[1] ?? "")
+		const names = [...odsContent(saved.bytes).matchAll(/<style:style style:name="(ceF\d+)"/g)].map(match => match[1] ?? "")
 		const added = names.filter(name => name !== "ceF2" && name !== "ceF5")
 		const expected: string[] = []
 

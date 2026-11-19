@@ -17,8 +17,9 @@ import {
 } from "../../dom/pdfedit/pages"
 import { appendPageContent, destPageNum, freeXObjectName, namedDests, pageIndexByNum, targetDest } from "../../dom/pdfedit/pages/objects"
 import { moveBeforeOrder } from "../../core/pdfedit/pageOrder"
-import { openPdf, pageText } from "../docxPdfFixtures"
+import { openPdf } from "../docxPdfFixtures"
 import { makeOrganisedPdf, makeOtherPdf } from "./pageFixtures"
+import { pdfjsTexts } from "./pdfjsFixtures"
 
 // Page organisation on a live journaled MuPDF document: every operation, its undo, and the saved file reopened in
 // MuPDF and pdf.js.
@@ -145,17 +146,6 @@ function linkTargets(doc: mupdf.PDFDocument, page: number): (number | string)[] 
 
 			out.push(num === null ? -1 : (pages.get(num) ?? -2) + 1)
 		})
-
-	return out
-}
-
-async function pdfjsTexts(bytes: Uint8Array, password?: string): Promise<string[]> {
-	const pdf = await openPdf(bytes, password)
-	const out: string[] = []
-
-	for (let page = 1; page <= pdf.numPages; page++) out.push(await pageText(pdf, page))
-
-	await pdf.loadingTask.destroy()
 
 	return out
 }

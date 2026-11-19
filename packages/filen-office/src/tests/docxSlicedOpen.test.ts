@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import { parseXml, parseXmlSliced } from "@filen/office/core/xml"
 import {
 	DocxDocBuilder,
@@ -19,6 +18,7 @@ import { partReader } from "../core/docx/model/reader"
 import { prepareReviewIndex } from "../core/docx/review/index"
 import { openSpec } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
+import { measurer } from "./engineFixtures"
 
 // Opening a long document gives the host a turn inside a long table too, at every stage: the model build, the
 // editing build, Gate 1 and the review index, each with the same result as at once.
@@ -33,20 +33,6 @@ const BODY =
 	TABLE +
 	'<w:p><w:ins w:id="5" w:author="A" w:date="2026-01-01T00:00:00Z"><w:r><w:t>inserted</w:t></w:r></w:ins></w:p>' +
 	p("After")
-
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
 
 // Every slice pauses (sliceMs 0): what one step holds is what one task would.
 const EVERY_STEP = { sliceMs: 0, now: () => 0 }

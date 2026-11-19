@@ -1,4 +1,5 @@
 import { bytesSource, type ByteSource } from "../../core/opc/index"
+import { SIGNAL_POLL_MS, clearTimer, setTimer } from "../platform"
 import type { DocxGateReason } from "../../core/docx/package"
 import type { OfficeKeyTransfer } from "../encryption/webCrypto"
 import { DocxEngine, type DocxEngineServices } from "./engine"
@@ -36,62 +37,8 @@ export type DocxListener = (event: DocxEvent) => void
 // Opens a document; the listener hears every event in order until close().
 export type DocxHost = (source: ByteSource, listener: DocxListener, options?: DocxOpenOptions) => DocxSessionApi
 
-interface MessageChannelLike {
-	readonly port1: { onmessage: ((event: unknown) => void) | null; close?(): void }
-	readonly port2: { postMessage(message: unknown): void; close?(): void }
-}
-
-// The realm's one channel for macrotask turns, made on first use: a started port is kept alive by the engine, so a
-// channel per caller (one per opened document) would never be collected. Each turn posts its own message and the
-// replies come back in order, so one queue serves every caller.
-let turns: { readonly port: MessageChannelLike["port2"]; readonly waiting: (() => void)[] } | undefined
-
-function channelTurns(Channel: new () => MessageChannelLike): NonNullable<typeof turns> {
-	if (turns !== undefined) return turns
-
-	const channel = new Channel()
-	const waiting: (() => void)[] = []
-
-	channel.port1.onmessage = () => {
-		waiting.shift()?.()
-	}
-
-	// Node keeps a listening port's process alive; nothing here should.
-	for (const end of [channel.port1, channel.port2]) {
-		const unref: unknown = Reflect.get(end, "unref")
-
-		if (typeof unref === "function") Reflect.apply(unref, end, [])
-	}
-
-	turns = { port: channel.port2, waiting }
-
-	return turns
-}
-
-// A macrotask turn, so messages queued for the thread (requests, reads) are handled between layout slices.
-// MessageChannel avoids the 4 ms clamp nested timers get; setTimeout is the fallback.
-export function macrotaskYield(): () => Promise<void> {
-	const Channel: unknown = Reflect.get(globalThis, "MessageChannel")
-
-	if (typeof Channel !== "function") {
-		// Looked up per turn: a timer installed later (fake timers in a test) is the one used.
-		return () =>
-			new Promise(resolve => {
-				const timer: unknown = Reflect.get(globalThis, "setTimeout")
-
-				if (typeof timer === "function") timer(resolve, 0)
-				else resolve()
-			})
-	}
-
-	const shared = channelTurns(Channel as new () => MessageChannelLike)
-
-	return () =>
-		new Promise<void>(resolve => {
-			shared.waiting.push(resolve)
-			shared.port.postMessage(0)
-		})
-}
+// The realm's macrotask turn, kept here for the modules that take it from the host.
+export { macrotaskYield } from "../platform"
 
 // --- Messages ---
 
@@ -582,24 +529,109 @@ export interface DocxWorkerPool {
 	dispose(): void
 }
 
-// Timers through globalThis: the module type-checks without DOM or Node typings.
-function setTimer(run: () => void, ms: number): unknown {
-	const set: unknown = Reflect.get(globalThis, "setTimeout")
-
-	return typeof set === "function" ? set(run, ms) : undefined
-}
-
-function clearTimer(handle: unknown): void {
-	const clear: unknown = Reflect.get(globalThis, "clearTimeout")
-
-	if (typeof clear === "function") clear(handle)
-}
-
 interface Connection {
 	readonly worker: DocxWorkerLike
 	readonly sessions: Map<number, (data: FromWorker) => void>
 	readonly failures: Map<number, () => void>
 	idle: unknown
+}
+
+// What a page-side session takes from its pool: the shared worker, a session id, and the idle timer once it ends.
+interface SessionPool {
+	readonly connect: () => Connection
+	readonly nextId: () => number
+	readonly scheduleIdle: (connection: Connection) => void
+}
+
+// `doc`: a held document's session whose package the worker keeps (the engine reads it there).
+type OpenSession = (source: ByteSource, listener: DocxListener, options: DocxOpenOptions, doc?: number) => DocxSessionApi
+
+interface HeldSession {
+	readonly id: number
+	readonly worker: DocxWorkerLike
+	readonly isClosed: () => boolean
+	// Asks the worker to close the session and ends it; nothing once it has ended.
+	readonly close: () => void
+}
+
+interface HeldSessionHandlers {
+	// The worker's messages for the session, while it is open.
+	readonly onMessage: (message: FromWorker) => void
+	// The session ended: reject what still waits, with `error`.
+	readonly onEnd: (error: Error) => void
+	// The message `onEnd` hears when the worker dies, and what follows it.
+	readonly failure: string
+	readonly onFailed?: () => void
+}
+
+// One session on the pool's worker, from registration to its end (close() or the worker's failure).
+function holdSession(pool: SessionPool, handlers: HeldSessionHandlers): HeldSession {
+	const current = pool.connect()
+	const id = pool.nextId()
+	let closed = false
+	const end = (error: Error): void => {
+		if (closed) return
+
+		closed = true
+		current.sessions.delete(id)
+		current.failures.delete(id)
+		handlers.onEnd(error)
+		pool.scheduleIdle(current)
+	}
+
+	current.failures.set(id, () => {
+		if (closed) return
+
+		end(new Error(handlers.failure))
+		handlers.onFailed?.()
+	})
+	current.sessions.set(id, message => {
+		if (!closed) handlers.onMessage(message)
+	})
+
+	return {
+		id,
+		worker: current.worker,
+		isClosed: () => closed,
+		close: () => {
+			if (closed) return
+
+			current.worker.post({ t: "close", s: id } satisfies ToWorker, [])
+			end(new Error("closed"))
+		}
+	}
+}
+
+// Answers the worker's read of the page's `source`: a copy of just that range, transferred. A read that settles after
+// the session closed posts nothing.
+function answerRead(
+	worker: DocxWorkerLike,
+	id: number,
+	source: ByteSource,
+	message: { readonly id: number; readonly offset: number; readonly length: number },
+	isClosed: () => boolean
+): void {
+	source.read(message.offset, message.length).then(
+		view => {
+			if (isClosed()) return
+
+			const copy = view.slice()
+
+			worker.post({ t: "read", s: id, id: message.id, bytes: copy } satisfies ToWorker, [copy.buffer])
+		},
+		(error: unknown) => {
+			if (!isClosed())
+				worker.post(
+					{
+						t: "read",
+						s: id,
+						id: message.id,
+						error: error instanceof Error ? error.message : String(error)
+					} satisfies ToWorker,
+					[]
+				)
+		}
+	)
 }
 
 // One worker shared by every open document and kept `idleMs` after the last one closes, so a second
@@ -652,97 +684,59 @@ export function docxWorkerPool(create: () => DocxWorkerLike, idleMs = 60_000): D
 
 		return current
 	}
+	const pool: SessionPool = { connect, nextId: () => nextSession++, scheduleIdle }
 
-	// `doc`: a protected file's session whose decrypted package the worker holds (the engine reads it there).
-	const openSession = (source: ByteSource, listener: DocxListener, options: DocxOpenOptions, doc?: number): DocxSessionApi => {
-		const current = connect()
-		const id = nextSession++
-		const worker = current.worker
-		let closed = false
+	const openSession: OpenSession = (source, listener, options, doc) => {
 		let nextCall = 1
 		let mainPartBytes: number | undefined
 		const calls = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
-		const end = (): void => {
-			closed = true
-			current.sessions.delete(id)
-			current.failures.delete(id)
+		const session = holdSession(pool, {
+			onMessage: message => {
+				switch (message.t) {
+					case "event":
+						if (message.event.type === "opened") mainPartBytes = message.event.info.mainPartBytes
 
-			for (const call of calls.values()) call.reject(new Error("closed"))
+						listener(message.event)
 
-			calls.clear()
-			scheduleIdle(current)
-		}
-		const close = (): void => {
-			if (closed) return
+						if (message.event.type === "error") session.close()
 
-			worker.post({ t: "close", s: id } satisfies ToWorker, [])
-			end()
-		}
+						break
+					case "read":
+						answerRead(session.worker, session.id, source, message, session.isClosed)
 
-		current.failures.set(id, () => {
-			if (closed) return
+						break
+					case "result": {
+						const call = calls.get(message.id)
 
-			end()
-			listener({
-				type: "error",
-				reason: "failed",
-				message: "The document worker failed",
-				...(mainPartBytes === undefined ? {} : { mainPartBytes })
-			})
-		})
-		current.sessions.set(id, message => {
-			if (closed) return
+						calls.delete(message.id)
 
-			switch (message.t) {
-				case "event":
-					if (message.event.type === "opened") mainPartBytes = message.event.info.mainPartBytes
+						if (message.error === undefined) call?.resolve(message.value)
+						else call?.reject(new Error(message.error))
 
-					listener(message.event)
-
-					if (message.event.type === "error") close()
-
-					break
-				case "read":
-					source.read(message.offset, message.length).then(
-						view => {
-							if (closed) return
-
-							const copy = view.slice()
-
-							worker.post({ t: "read", s: id, id: message.id, bytes: copy } satisfies ToWorker, [copy.buffer])
-						},
-						(error: unknown) => {
-							if (!closed) {
-								worker.post(
-									{
-										t: "read",
-										s: id,
-										id: message.id,
-										error: error instanceof Error ? error.message : String(error)
-									} satisfies ToWorker,
-									[]
-								)
-							}
-						}
-					)
-
-					break
-				case "result": {
-					const call = calls.get(message.id)
-
-					calls.delete(message.id)
-
-					if (message.error === undefined) call?.resolve(message.value)
-					else call?.reject(new Error(message.error))
-
-					break
+						break
+					}
 				}
-			}
+			},
+			onEnd: () => {
+				for (const call of calls.values()) call.reject(new Error("closed"))
+
+				calls.clear()
+			},
+			failure: "closed",
+			onFailed: () =>
+				listener({
+					type: "error",
+					reason: "failed",
+					message: "The document worker failed",
+					...(mainPartBytes === undefined ? {} : { mainPartBytes })
+				})
 		})
+		const { id, worker } = session
+
 		worker.post({ t: "open", s: id, size: source.size, options, ...(doc === undefined ? {} : { doc }) } satisfies ToWorker, [])
 
 		const call = <T>(method: Method, arg: unknown, callOptions?: unknown): Promise<T> => {
-			if (closed) return Promise.reject(new Error("closed"))
+			if (session.isClosed()) return Promise.reject(new Error("closed"))
 
 			const callId = nextCall++
 
@@ -758,35 +752,26 @@ export function docxWorkerPool(create: () => DocxWorkerLike, idleMs = 60_000): D
 			locate: anchor => call<DocxLocation | null>("locate", anchor),
 			find: (query, findOptions) => call<Int32Array>("find", query, findOptions),
 			annotations: () => call<DocxAnnotations | null>("annotations", null),
-			close
+			close: session.close
 		}
 	}
 	const host: DocxHost = (source, listener, options = {}) => openSession(source, listener, options)
 	const protection: DocxProtection = {
-		open: (source, options = {}) => openProtected(connect, () => nextSession++, scheduleIdle, openSession, source, options)
+		open: (source, options = {}) => openProtected(pool, openSession, source, options)
 	}
 
 	const legacy: DocxLegacy = {
-		open: (source, options = {}) => openConverted(connect, () => nextSession++, scheduleIdle, openSession, source, options)
+		open: (source, options = {}) => openConverted(pool, openSession, source, options)
 	}
 	const rtf: DocxRtf = {
-		open: (bytes, options = {}) => openRtf(connect, () => nextSession++, scheduleIdle, openSession, bytes, options, "rtf")
+		open: (bytes, options = {}) => openRtf(pool, openSession, bytes, options, "rtf")
 	}
 	const odt: DocxRtf = {
-		open: (bytes, options = {}) => openRtf(connect, () => nextSession++, scheduleIdle, openSession, bytes, options, "odt")
+		open: (bytes, options = {}) => openRtf(pool, openSession, bytes, options, "odt")
 	}
 	const convert: DocxConverter = {
 		convert: (bytes, from, to, options = {}) =>
-			convertInWorker(
-				connect,
-				() => nextSession++,
-				scheduleIdle,
-				options.owned === true ? bytes : bytes.slice(),
-				from,
-				to,
-				options.signal,
-				options.password
-			)
+			convertInWorker(pool, options.owned === true ? bytes : bytes.slice(), from, to, options.signal, options.password)
 	}
 
 	return {
@@ -815,8 +800,6 @@ export function docxWorkerPool(create: () => DocxWorkerLike, idleMs = 60_000): D
 	}
 }
 
-const SIGNAL_POLL_MS = 10
-
 // Read through a call: a check before an await would narrow the flag for the rest of the function.
 function isAborted(signal: DocxAbortSignal | undefined): boolean {
 	return signal?.aborted === true
@@ -828,9 +811,7 @@ const TEXT_TARGETS: ReadonlySet<unknown> = new Set<TextTargetFormat>(["docx", "o
 // The page's side of a text conversion in the worker: `bytes` (the caller's copy) is transferred there, the converted
 // file comes back transferred. The signal closes the job (the worker ends it at its next slice); the job keeps the worker alive.
 function convertInWorker(
-	connect: () => Connection,
-	nextId: () => number,
-	scheduleIdle: (connection: Connection) => void,
+	pool: SessionPool,
 	bytes: Uint8Array,
 	from: TextSourceFormat,
 	to: TextTargetFormat,
@@ -839,8 +820,8 @@ function convertInWorker(
 ): Promise<DocxConversion> {
 	if (signal?.aborted === true) return Promise.resolve({ kind: "aborted" })
 
-	const current = connect()
-	const id = nextId()
+	const current = pool.connect()
+	const id = pool.nextId()
 
 	return new Promise((resolve, reject) => {
 		let done = false
@@ -851,7 +832,7 @@ function convertInWorker(
 			current.sessions.delete(id)
 			current.failures.delete(id)
 			signal?.removeEventListener?.("abort", abort)
-			scheduleIdle(current)
+			pool.scheduleIdle(current)
 
 			if (answer instanceof Error) reject(answer)
 			else resolve(answer)
@@ -885,51 +866,61 @@ function convertInWorker(
 // The page's side of a protected file in the worker: reads of `source` answered while it is classified and
 // unlocked, then calls on the held document. Its session keeps the worker alive until released.
 function openProtected(
-	connect: () => Connection,
-	nextId: () => number,
-	scheduleIdle: (connection: Connection) => void,
-	openSession: (source: ByteSource, listener: DocxListener, options: DocxOpenOptions, doc?: number) => DocxSessionApi,
+	pool: SessionPool,
+	openSession: OpenSession,
 	source: ByteSource,
 	options: DocxProtectionOptions
 ): Promise<DocxProtectedOpen> {
 	if (options.signal?.aborted === true) return Promise.resolve({ kind: "aborted" })
 
-	const current = connect()
-	const id = nextId()
-	const worker = current.worker
-	let closed = false
 	let nextCall = 1
 	let probed: { resolve: (verdict: DocxProtectVerdict) => void; reject: (error: Error) => void } | undefined
 	const calls = new Map<number, { resolve: (message: FromWorker) => void; reject: (error: Error) => void }>()
-	const end = (error: Error): void => {
-		if (closed) return
+	const session = holdSession(pool, {
+		onMessage: message => {
+			switch (message.t) {
+				case "read":
+					answerRead(session.worker, session.id, source, message, session.isClosed)
 
-		closed = true
-		current.sessions.delete(id)
-		current.failures.delete(id)
-		probed?.reject(error)
+					break
+				case "protected":
+					if (message.verdict === undefined) probed?.reject(new Error(message.error ?? "The protection check failed"))
+					else probed?.resolve(message.verdict)
 
-		for (const pending of calls.values()) pending.reject(error)
+					probed = undefined
 
-		calls.clear()
-		scheduleIdle(current)
-	}
-	const close = (): void => {
-		if (closed) return
+					break
+				case "unlocked":
+				case "taken": {
+					const pending = calls.get(message.id)
 
-		worker.post({ t: "close", s: id } satisfies ToWorker, [])
-		end(new Error("closed"))
-	}
+					calls.delete(message.id)
+					pending?.resolve(message)
+
+					break
+				}
+			}
+		},
+		onEnd: error => {
+			probed?.reject(error)
+
+			for (const pending of calls.values()) pending.reject(error)
+
+			calls.clear()
+		},
+		failure: "The document worker failed"
+	})
+	const { id, worker, isClosed, close } = session
 	// One call on the held document; an abort of `signal` asks the worker to stop it (a signal without events is
 	// looked at every SIGNAL_POLL_MS).
 	const call = (message: (callId: number) => ToWorker, signal: DocxProtectionOptions["signal"]): Promise<FromWorker> => {
-		if (closed) return Promise.reject(new Error("closed"))
+		if (isClosed()) return Promise.reject(new Error("closed"))
 
 		const callId = nextCall++
 		let stopped = false
 		let poll: unknown
 		const stop = (): void => {
-			if (stopped || closed) return
+			if (stopped || isClosed()) return
 
 			stopped = true
 			worker.post({ t: "abort", s: id, id: callId } satisfies ToWorker, [])
@@ -955,54 +946,6 @@ function openProtected(
 			if (poll !== undefined) clearTimer(poll)
 		})
 	}
-
-	current.failures.set(id, () => end(new Error("The document worker failed")))
-	current.sessions.set(id, message => {
-		if (closed) return
-
-		switch (message.t) {
-			case "read":
-				source.read(message.offset, message.length).then(
-					view => {
-						if (closed) return
-
-						const copy = view.slice()
-
-						worker.post({ t: "read", s: id, id: message.id, bytes: copy } satisfies ToWorker, [copy.buffer])
-					},
-					(error: unknown) => {
-						if (!closed)
-							worker.post(
-								{
-									t: "read",
-									s: id,
-									id: message.id,
-									error: error instanceof Error ? error.message : String(error)
-								} satisfies ToWorker,
-								[]
-							)
-					}
-				)
-
-				break
-			case "protected":
-				if (message.verdict === undefined) probed?.reject(new Error(message.error ?? "The protection check failed"))
-				else probed?.resolve(message.verdict)
-
-				probed = undefined
-
-				break
-			case "unlocked":
-			case "taken": {
-				const pending = calls.get(message.id)
-
-				calls.delete(message.id)
-				pending?.resolve(message)
-
-				break
-			}
-		}
-	})
 
 	const abortProbe = (): void => close()
 
@@ -1076,7 +1019,7 @@ function openProtected(
 										}
 									},
 									dropPackage() {
-										if (!closed) worker.post({ t: "drop", s: id } satisfies ToWorker, [])
+										if (!isClosed()) worker.post({ t: "drop", s: id } satisfies ToWorker, [])
 									},
 									release: close
 								}
@@ -1099,90 +1042,52 @@ function openProtected(
 // The page's side of a Word binary document converted in the worker: reads of `source` answered while it converts,
 // then the held package (opened by engine sessions, copied by take()) until released.
 function openConverted(
-	connect: () => Connection,
-	nextId: () => number,
-	scheduleIdle: (connection: Connection) => void,
-	openSession: (source: ByteSource, listener: DocxListener, options: DocxOpenOptions, doc?: number) => DocxSessionApi,
+	pool: SessionPool,
+	openSession: OpenSession,
 	source: ByteSource,
 	options: DocxLegacyOptions
 ): Promise<DocxLegacyOpen> {
 	if (options.signal?.aborted === true) return Promise.resolve({ kind: "aborted" })
 
-	const current = connect()
-	const id = nextId()
-	const worker = current.worker
-	let closed = false
 	let nextCall = 1
 	let converting: { resolve: (answer: DocxConvertAnswer) => void; reject: (error: Error) => void } | undefined
 	const takes = new Map<number, { resolve: (bytes: Uint8Array) => void; reject: (error: Error) => void }>()
-	const end = (error: Error): void => {
-		if (closed) return
+	const session = holdSession(pool, {
+		onMessage: message => {
+			switch (message.t) {
+				case "read":
+					answerRead(session.worker, session.id, source, message, session.isClosed)
 
-		closed = true
-		current.sessions.delete(id)
-		current.failures.delete(id)
-		converting?.reject(error)
+					break
+				case "converted":
+					if (message.answer === undefined) converting?.reject(new Error(message.error ?? "The conversion failed"))
+					else converting?.resolve(message.answer)
 
-		for (const pending of takes.values()) pending.reject(error)
+					converting = undefined
 
-		takes.clear()
-		scheduleIdle(current)
-	}
-	const close = (): void => {
-		if (closed) return
+					break
+				case "taken": {
+					const pending = takes.get(message.id)
 
-		worker.post({ t: "close", s: id } satisfies ToWorker, [])
-		end(new Error("closed"))
-	}
+					takes.delete(message.id)
 
-	current.failures.set(id, () => end(new Error("The document worker failed")))
-	current.sessions.set(id, message => {
-		if (closed) return
+					if (message.bytes === undefined) pending?.reject(new Error(message.error ?? "The document could not be taken"))
+					else pending?.resolve(message.bytes)
 
-		switch (message.t) {
-			case "read":
-				source.read(message.offset, message.length).then(
-					view => {
-						if (closed) return
-
-						const copy = view.slice()
-
-						worker.post({ t: "read", s: id, id: message.id, bytes: copy } satisfies ToWorker, [copy.buffer])
-					},
-					(error: unknown) => {
-						if (!closed)
-							worker.post(
-								{
-									t: "read",
-									s: id,
-									id: message.id,
-									error: error instanceof Error ? error.message : String(error)
-								} satisfies ToWorker,
-								[]
-							)
-					}
-				)
-
-				break
-			case "converted":
-				if (message.answer === undefined) converting?.reject(new Error(message.error ?? "The conversion failed"))
-				else converting?.resolve(message.answer)
-
-				converting = undefined
-
-				break
-			case "taken": {
-				const pending = takes.get(message.id)
-
-				takes.delete(message.id)
-
-				if (message.bytes === undefined) pending?.reject(new Error(message.error ?? "The document could not be taken"))
-				else pending?.resolve(message.bytes)
-
-				break
+					break
+				}
 			}
-		}
+		},
+		onEnd: error => {
+			converting?.reject(error)
+
+			for (const pending of takes.values()) pending.reject(error)
+
+			takes.clear()
+		},
+		failure: "The document worker failed"
 	})
+	const { id, worker, isClosed, close } = session
 
 	const abort = (): void => close()
 
@@ -1217,7 +1122,7 @@ function openConverted(
 						notConverted: answer.notConverted,
 						decrypted: answer.decrypted,
 						take(takeOptions = {}) {
-							if (closed) return Promise.reject(new Error("closed"))
+							if (isClosed()) return Promise.reject(new Error("closed"))
 							if (takeOptions.signal?.aborted === true) return Promise.reject(new Error("Aborted"))
 
 							const callId = nextCall++
@@ -1244,44 +1149,47 @@ function openConverted(
 // The page's side of an RTF (or OpenDocument text) document read in the worker: the file handed over once, then the
 // held package (opened by engine sessions, copied by take()), proofs and writes as calls on it, until released.
 function openRtf(
-	connect: () => Connection,
-	nextId: () => number,
-	scheduleIdle: (connection: Connection) => void,
-	openSession: (source: ByteSource, listener: DocxListener, options: DocxOpenOptions, doc?: number) => DocxSessionApi,
+	pool: SessionPool,
+	openSession: OpenSession,
 	bytes: Uint8Array,
 	options: DocxProtectionOptions,
 	format: DocxSourceFormat
 ): Promise<DocxRtfOpen> {
 	if (options.signal?.aborted === true) return Promise.resolve({ kind: "aborted" })
 
-	const current = connect()
-	const id = nextId()
-	const worker = current.worker
-	let closed = false
 	let nextCall = 1
 	let opening: { resolve: (answer: DocxRtfOpened) => void; reject: (error: Error) => void } | undefined
 	const calls = new Map<number, { resolve: (value: FromWorker) => void; reject: (error: Error) => void }>()
-	const end = (error: Error): void => {
-		if (closed) return
+	const session = holdSession(pool, {
+		onMessage: message => {
+			if (message.t === "rtfOpened") {
+				if (message.answer === undefined) opening?.reject(new Error(message.error ?? "The document could not be read"))
+				else opening?.resolve(message.answer)
 
-		closed = true
-		current.sessions.delete(id)
-		current.failures.delete(id)
-		opening?.reject(error)
+				opening = undefined
 
-		for (const pending of calls.values()) pending.reject(error)
+				return
+			}
 
-		calls.clear()
-		scheduleIdle(current)
-	}
-	const close = (): void => {
-		if (closed) return
+			if (message.t === "taken" || message.t === "rtfProved" || message.t === "rtfWritten" || message.t === "rtfConverted") {
+				const pending = calls.get(message.id)
 
-		worker.post({ t: "close", s: id } satisfies ToWorker, [])
-		end(new Error("closed"))
-	}
+				calls.delete(message.id)
+				pending?.resolve(message)
+			}
+		},
+		onEnd: error => {
+			opening?.reject(error)
+
+			for (const pending of calls.values()) pending.reject(error)
+
+			calls.clear()
+		},
+		failure: "The document worker failed"
+	})
+	const { id, worker, isClosed, close } = session
 	const call = (message: (callId: number) => ToWorker, transfer: readonly ArrayBuffer[] = []): Promise<FromWorker> => {
-		if (closed) return Promise.reject(new Error("closed"))
+		if (isClosed()) return Promise.reject(new Error("closed"))
 
 		const callId = nextCall++
 
@@ -1290,27 +1198,6 @@ function openRtf(
 			worker.post(message(callId), transfer)
 		})
 	}
-
-	current.failures.set(id, () => end(new Error("The document worker failed")))
-	current.sessions.set(id, message => {
-		if (closed) return
-
-		if (message.t === "rtfOpened") {
-			if (message.answer === undefined) opening?.reject(new Error(message.error ?? "The document could not be read"))
-			else opening?.resolve(message.answer)
-
-			opening = undefined
-
-			return
-		}
-
-		if (message.t === "taken" || message.t === "rtfProved" || message.t === "rtfWritten" || message.t === "rtfConverted") {
-			const pending = calls.get(message.id)
-
-			calls.delete(message.id)
-			pending?.resolve(message)
-		}
-	})
 
 	const abort = (): void => close()
 
@@ -1381,7 +1268,7 @@ function openRtf(
 							let onAbort: (() => void) | undefined
 							const aborted = new Promise<"aborted">(resolve => {
 								onAbort = () => {
-									if (!closed) worker.post({ t: "abort", s: id, id: callId } satisfies ToWorker, [])
+									if (!isClosed()) worker.post({ t: "abort", s: id, id: callId } satisfies ToWorker, [])
 
 									resolve("aborted")
 								}

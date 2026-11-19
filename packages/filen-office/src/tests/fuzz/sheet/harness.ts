@@ -8,6 +8,7 @@ import { cellKeyOf } from "../../../core/xlsx/edit/history"
 import { decodeUtf8 } from "../../../core/xml/index"
 import { rng } from "../config"
 import { difference } from "../../xlsxWriteFixtures"
+import { IMMEDIATE } from "../../sheetSessionFixtures"
 import { compareRecords, modelRecord, readSaved, type WorkbookRecord } from "./compare"
 import { KNOWN_REFUSALS, OpPicker, type Outcome } from "./ops"
 
@@ -16,9 +17,6 @@ import { KNOWN_REFUSALS, OpPicker, type Outcome } from "./ops"
 // At every checkpoint the session saves; the save must pass its gate, and the save read back without the engine
 // must equal the session's model (compare.ts). Every answer must be a change or a typed refusal: anything that
 // throws, rejects or does not answer in time is a finding.
-
-// Runs everything at once: no yielding (the in-thread host's slicing, with an endless slice).
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 
 export type FuzzMode = "sync" | "race"
 

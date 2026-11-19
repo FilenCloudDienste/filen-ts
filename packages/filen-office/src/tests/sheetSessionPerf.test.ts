@@ -2,12 +2,12 @@ import { serialize } from "node:v8"
 import { zipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { encodeUtf8 } from "../core/xml/index"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { openTextSession } from "../core/sheet/text"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { R, SML } from "./xlsxWriteFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
 import { budget } from "./timing"
+import { changeOf } from "./sheetSessionFixtures"
 
 // The session's budgets at 1M cells (100k rows by 10 columns, no formulas): a keystroke's commit at most 5 ms of
 // CPU, an inserted row at most 150 ms with a change message of at most 64 KB, and an in-thread open that never
@@ -61,12 +61,6 @@ function bigWorkbook(): Uint8Array {
 		},
 		{ mtime: ZIP_ENTRY_TIME }
 	)
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(result.refusal.reason)
-
-	return result.change
 }
 
 // This thread's CPU time (the worker's, where a session runs), without the engine's helper threads.

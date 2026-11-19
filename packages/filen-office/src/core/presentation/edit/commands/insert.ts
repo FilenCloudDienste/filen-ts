@@ -1,5 +1,7 @@
 import type { Deck, FillProps, LineProps, ShapeNode, SlideRef, TableCell, TableModel, TextBody, Xfrm } from "../../model"
 import type { DeckOp, InsertedImage } from "../ops"
+import { EMU_PER_PX } from "../../../drawingml/reader"
+import { EMU_PER_INCH } from "./design"
 
 // Inserting objects as PowerPoint's Insert tab does: a preset shape, a text box, a picture and a table, each one op
 // (one history step) whose new shape the worker gives an id (0 asks for one). Boxes are slide EMU; with none given,
@@ -7,7 +9,6 @@ import type { DeckOp, InsertedImage } from "../ops"
 // shape style (p:style: line accent1 shaded, fill accent1, font lt1, as PowerPoint writes a new shape); ODP has no
 // shape styles, so an ODP shape carries the same look as colours (ODF graphic properties take sRGB only).
 
-const EMU_PER_INCH = 914_400
 // PowerPoint's size for a shape or text box inserted with a click (no drag): 1 in square; a text box one line high.
 const DEFAULT_SHAPE = EMU_PER_INCH
 const TEXT_BOX_HEIGHT = 369_332
@@ -16,7 +17,6 @@ export const TABLE_ROW_HEIGHT = 370_840
 const TABLE_WIDTH_SHARE = 0.8
 // A picture takes its own size at 96 dpi, held to this share of the slide.
 const PICTURE_SHARE = 0.9
-const EMU_PER_PX = 9525
 
 // PowerPoint's default table style (Medium Style 2 – Accent 1) and flags.
 export const DEFAULT_TABLE_STYLE = "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"
@@ -184,14 +184,16 @@ export function pictureBox(deck: InsertDeck, width: number, height: number): Xfr
 	return centred(deck, Math.max(1, cx), Math.max(1, cy))
 }
 
-export function insertPictureOp(deck: InsertDeck, slide: SlideRef, image: InsertedImage, id: number, name?: string, box?: Xfrm): DeckOp {
+// `altText` is alternative text the user typed; none leaves the picture without it (the Alt Text dialog shows it as
+// missing), never the picked file's name.
+export function insertPictureOp(deck: InsertDeck, slide: SlideRef, image: InsertedImage, id: number, altText?: string, box?: Xfrm): DeckOp {
 	const shape: ShapeNode = {
 		id,
 		name: `Picture ${String(Math.max(1, id - 1))}`,
 		hidden: false,
 		kind: "pic",
 		xfrm: box ?? pictureBox(deck, image.width, image.height),
-		...(name === undefined || name === "" ? {} : { alt: { descr: name } })
+		...(altText === undefined || altText === "" ? {} : { alt: { descr: altText } })
 	}
 
 	return { family: "picture", kind: "insert", slide, shape, image }

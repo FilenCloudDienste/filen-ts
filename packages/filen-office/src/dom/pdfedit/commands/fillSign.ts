@@ -8,6 +8,7 @@ import {
 import { PdfEngineRefusal } from "../context"
 import { insertedImageBytes } from "../pages/organise"
 import { addFillMark, addFillText, placeVisualSignature, type PdfFillFont, type PdfFillMark, type PdfRgb } from "../fillSign"
+import { MAX_AUTHOR } from "./annotations"
 import {
 	isFiniteNumber,
 	isIndex,
@@ -45,7 +46,6 @@ export interface PdfFillSignCommands {
 }
 
 const MAX_TEXT = 100_000
-const MAX_AUTHOR = 1024
 // Points: the largest page side PDF allows (14,400 user units).
 const MAX_COORDINATE = 14_400
 const MIN_SIZE = 1

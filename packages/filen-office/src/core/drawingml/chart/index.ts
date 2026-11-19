@@ -18,7 +18,7 @@ import {
 import { chartDate1904, type ErrorBarData } from "./data"
 import { drawChartex } from "./chartex"
 import { formatNumber } from "./format"
-import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type Rect } from "./builder"
+import { CHART_TEXT_EN, ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type ChartText, type Rect } from "./builder"
 import { emitLabels, type PendingLabel } from "./labels"
 import { readPlotArea, type Plot } from "./model"
 import { backgroundColor, mutedText, seriesColor, textColor } from "./palette"
@@ -43,6 +43,7 @@ import { appendMarker, pointFill, seriesName, seriesStyles, type MarkerStyle, ty
 // Legend entries of a per-point (varyColors) legend.
 const MAX_LEGEND_ENTRIES = 512
 
+export { CHART_TEXT_EN, type ChartText } from "./builder"
 export { formatNumber } from "./format"
 export { computeScale, scaleTicks, type Scale } from "./scale"
 
@@ -183,7 +184,7 @@ function legendEntries(
 
 			if (style !== undefined) {
 				out.push({
-					text: seriesName(series, position),
+					text: seriesName(series, position, builder.chartText),
 					fill: lineKind ? -1 : style.fill,
 					stroke: style.stroke,
 					line: lineKind,
@@ -266,14 +267,16 @@ function paragraphsWidth(paragraphs: readonly TextParagraph[]): number {
 }
 
 // Converts one chart part. `width`/`height` are the frame extent in EMU. `matrix` places the chart in a list that is
-// not its own (a chart inside a group): its items go through it, and the list keeps its own size.
+// not its own (a chart inside a group): its items go through it, and the list keeps its own size. `chartText` names
+// what the file leaves unnamed (unnamed series, automatic titles).
 export function convertChart(
 	context: PaintContext,
 	document: XmlDocument,
 	width: number,
 	height: number,
 	list?: DrawingList,
-	matrix?: readonly number[]
+	matrix?: readonly number[],
+	chartText: ChartText = CHART_TEXT_EN
 ): ChartConversion {
 	const target = list ?? context.list
 	const paintContext: PaintContext = target === context.list ? context : { ...context, list: target }
@@ -290,7 +293,7 @@ export function convertChart(
 
 	// Office 2016 chart types (waterfall, treemap...) live in a cx:chartSpace part.
 	if (root >= 0 && reader.is(root, D.Cx, "chartSpace")) {
-		const result = drawChartex(paintContext, reader, root, W, H, matrix)
+		const result = drawChartex(paintContext, reader, root, W, H, matrix, chartText)
 
 		return { list: target, ...result }
 	}
@@ -322,7 +325,8 @@ export function convertChart(
 		chartStyle(reader, root),
 		date1904,
 		probe.textProps(reader.child(root, D.C, "txPr"), base),
-		matrix
+		matrix,
+		chartText
 	)
 	const blanksNode = reader.child(chart, D.C, "dispBlanksAs")
 	const blanksValue = blanksNode < 0 ? "gap" : (reader.attr(blanksNode, "val") ?? "zero")
@@ -450,7 +454,7 @@ export function convertChart(
 				rows.horizontal = false
 				rows.between = false
 				rows.count = plot.series.length
-				rows.categories = plot.series.map((series, order) => seriesName(series, order))
+				rows.categories = plot.series.map((series, order) => seriesName(series, order, builder.chartText))
 			}
 
 			categories.set(plot, names)
@@ -633,7 +637,10 @@ export function convertChart(
 
 	if (titleNode >= 0 || (autoDeleted >= 0 && !reader.bool(autoDeleted, "val", true) && area.seriesTotal === 1)) {
 		const defaults = builder.textProps(reader.child(titleNode, D.C, "txPr"), { ...builder.text, size: 18, bold: true })
-		const fallback = allSeries.length === 1 ? seriesName(allSeries[0] as (typeof allSeries)[number], 0) : "Chart Title"
+		const fallback =
+			allSeries.length === 1
+				? seriesName(allSeries[0] as (typeof allSeries)[number], 0, builder.chartText)
+				: builder.chartText.chartTitle
 		const text = titleParagraphs(builder, titleNode, defaults, fallback)
 		const titleHeight = paragraphsHeight(text.paragraphs, defaults.size)
 		const titleWidth = Math.min(content.w, paragraphsWidth(text.paragraphs) + 8)

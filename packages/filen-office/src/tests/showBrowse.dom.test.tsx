@@ -251,3 +251,54 @@ describe("browsed show", () => {
 		expect(onSlide).not.toHaveBeenCalledWith(1)
 	})
 })
+
+describe("show stage fit", () => {
+	it("re-centres the slide when the area grows along one axis and the scale stays", async () => {
+		const observers: (() => void)[] = []
+
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				constructor(callback: () => void) {
+					observers.push(callback)
+				}
+
+				observe(): void {}
+
+				disconnect(): void {}
+			}
+		)
+
+		try {
+			const { stage } = await mount(true)
+			const area = stage.querySelector<HTMLElement>(".fo-show-area")
+			const viewport = stage.querySelector<HTMLElement>(".fo-show-viewport")
+
+			if (area === null || viewport === null) throw new Error("no area")
+
+			const resize = (width: number, height: number): void => {
+				Object.defineProperty(area, "clientWidth", { configurable: true, value: width })
+				Object.defineProperty(area, "clientHeight", { configurable: true, value: height })
+				act(() => {
+					for (const observer of observers) observer()
+				})
+			}
+
+			// A 1280 × 720 px slide, height-limited at scale 1: wider areas move it right, the scale unchanged.
+			resize(2560, 720)
+			expect(viewport.style.left).toBe("640px")
+			resize(3000, 720)
+			expect(viewport.style.left).toBe("860px")
+			expect(viewport.style.top).toBe("0px")
+
+			// Width-limited: taller areas move it down.
+			resize(1280, 1000)
+			expect(viewport.style.top).toBe("140px")
+			resize(1280, 1200)
+			expect(viewport.style.top).toBe("240px")
+			expect(viewport.style.left).toBe("0px")
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+})

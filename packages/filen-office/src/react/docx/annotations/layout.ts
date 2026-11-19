@@ -231,9 +231,12 @@ export interface BalloonPlacement {
 }
 
 export interface BalloonLayout {
+	// The tops of the balloons shown: the first `shown`, then the active one at `extra` when there is one.
 	readonly tops: Float64Array
-	// How many balloons (from the first) are shown; the rest go behind the "more" control.
+	// How many balloons (from the first) are shown; the rest, but `extra`, go behind the "more" control.
 	readonly shown: number
+	// The active balloon, shown after the first `shown` when it would not be among them; -1 when none is.
+	readonly extra: number
 	// Where that control goes, when there is one.
 	readonly moreTop: number
 }
@@ -256,7 +259,7 @@ function stack(tops: Float64Array, heights: readonly number[], count: number, ga
 // Tops for balloons wanted at `wanted` (ascending) with `heights`, none overlapping and all inside the
 // column: each takes its anchor's height or the first free place below the one before; an active balloon
 // stays at its anchor and those above it move up while there is room. Balloons that do not fit at all are
-// counted out, last first (the active one stays).
+// counted out, last first; the active one stays, earlier ones making room for it.
 export function placeBalloons(wanted: readonly number[], heights: readonly number[], placement: BalloonPlacement): BalloonLayout {
 	const count = wanted.length
 	const tops = Float64Array.from(wanted)
@@ -275,29 +278,43 @@ export function placeBalloons(wanted: readonly number[], heights: readonly numbe
 
 	const last = count - 1
 
-	if (count === 0 || (tops[last] ?? 0) + (heights[last] ?? 0) <= ceiling) return { tops, shown: count, moreTop: ceiling }
+	if (count === 0 || (tops[last] ?? 0) + (heights[last] ?? 0) <= ceiling) return { tops, shown: count, extra: -1, moreTop: ceiling }
 
 	stack(tops, heights, count, gap, floor, ceiling)
 
-	if ((tops[last] ?? 0) + (heights[last] ?? 0) <= ceiling) return { tops, shown: count, moreTop: ceiling }
+	if ((tops[last] ?? 0) + (heights[last] ?? 0) <= ceiling) return { tops, shown: count, extra: -1, moreTop: ceiling }
 
 	// Too many for the column: as many as fit above the control, the rest behind it.
 	const more = placement.more ?? 0
+	const room = ceiling - floor
 	let used = 0
 	let shown = 0
 
-	while (shown < count && used + (heights[shown] ?? 0) + gap + more <= ceiling - floor) {
+	while (shown < count && used + (heights[shown] ?? 0) + gap + more <= room) {
 		used += (heights[shown] ?? 0) + gap
 		shown++
 	}
 
-	if (active >= shown && active < count) shown = Math.min(shown, active + 1)
+	// The active balloon is not among them: the last of them make room for it (it stays even when it fits alone
+	// no more).
+	const extra = active >= shown && active < count ? active : -1
 
-	const kept = Float64Array.from(wanted.slice(0, shown))
+	if (extra >= 0) {
+		used += (heights[extra] ?? 0) + gap
 
-	stack(kept, heights, shown, gap, floor, ceiling - more - gap)
+		while (shown > 0 && used + more > room) {
+			shown--
+			used -= (heights[shown] ?? 0) + gap
+		}
+	}
 
-	const moreTop = shown === 0 ? floor : (kept[shown - 1] ?? 0) + (heights[shown - 1] ?? 0) + gap
+	const kept = Float64Array.from(extra < 0 ? wanted.slice(0, shown) : [...wanted.slice(0, shown), wanted[extra] ?? 0])
+	const keptHeights = extra < 0 ? heights : [...heights.slice(0, shown), heights[extra] ?? 0]
+	const length = kept.length
 
-	return { tops: kept, shown, moreTop }
+	stack(kept, keptHeights, length, gap, floor, ceiling - more - gap)
+
+	const moreTop = length === 0 ? floor : (kept[length - 1] ?? 0) + (keptHeights[length - 1] ?? 0) + gap
+
+	return { tops: kept, shown, extra, moreTop }
 }

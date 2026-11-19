@@ -1,61 +1,27 @@
-import type { Mark, Node } from "prosemirror-model"
-import { Plugin, Selection, type EditorState, type Transaction } from "prosemirror-state"
+import type { Node } from "prosemirror-model"
+import { Selection, type EditorState } from "prosemirror-state"
 import { EditorView, type NodeView, type NodeViewConstructor } from "prosemirror-view"
 import { docxSchema, isWriteCommand } from "../../../core/docx/edit/index"
 import {
 	besideNode,
 	docxKeyBindings,
 	docxKeyFor,
-	joinBackward,
-	joinForward,
-	lineBreak,
-	selectAll,
-	splitParagraph,
 	type DocxKeyBindings,
 	type DocxKeyRun,
 	type PagedEditor
 } from "../../../core/docx/paged/index"
 import { drawingName } from "../../../core/docx/objects/edit"
-import { docxNotes } from "../../../core/docx/stories/notes"
-import { deletesBreakAtCaret } from "../../../core/docx/stories/sections"
-import {
-	attrText,
-	clipboardParser,
-	clipboardSerializer,
-	cutMemory,
-	type CutMemory,
-	fieldText,
-	plainSlice,
-	plainText,
-	safeClipboardHtml,
-	shownSlice,
-	symbolText,
-	writeClipboardEvent
-} from "./clipboard"
-import {
-	autoLinked,
-	composedFormatting,
-	deleteBeforeComposition,
-	deleteSelectionKey,
-	inputTransaction,
-	selectionFormatting,
-	spaceEndsAddress,
-	spaceTransaction
-} from "./input"
+import { attrText, cutMemory, fieldText, plainSlice, plainText, safeClipboardHtml, symbolText } from "./clipboard"
+import { StoryInput, textboxAttributes, viewPlugins } from "./storyInput"
 import {
 	blockIndex,
-	compositionFrom,
-	readComposition,
 	gapRowCount,
 	mergeWindows,
 	rowsAround,
-	deletesBreakBefore,
 	escapesToHost,
 	isGap,
 	handFocus,
 	releaseGapText,
-	sessionTransaction,
-	tabKey,
 	takeFocus,
 	unreadSelection,
 	windowAround,
@@ -222,12 +188,8 @@ export class EditSink {
 	private gaps: readonly Node[] = []
 	private offsetX = 0
 	private offsetY = 0
-	private compositionStart = -1
-	// The text being composed (the last compositionupdate's).
-	private compositionText = ""
-	// What text composed over a selection takes (selectionFormatting), until the composition ends.
-	private composeFormatting: readonly Mark[] | undefined = undefined
-	private dispatching = false
+	// Transactions, commands, input, composition and the clipboard, as the reflowed view's.
+	private readonly input: StoryInput
 	private readOnlyOption: boolean
 	private label: string
 	private describedBy: string | undefined
@@ -238,15 +200,30 @@ export class EditSink {
 	private readonly stopListening: () => void
 	private warmed = false
 	private destroyed = false
-	// The last cut, when it took out comment anchors (pasted back, it moves them).
-	private readonly cut: CutMemory
 	// Focus as the view's own events tell it (a view taken out of the document hears no blur).
 	private hasFocus = false
 
 	constructor(editor: PagedEditor, parent: HTMLElement, options: EditSinkOptions) {
 		this.editor = editor
 		this.options = options
-		this.cut = cutMemory(editor)
+		this.input = new StoryInput({
+			editor,
+			// The last cut, when it took out comment anchors (pasted back, it moves them).
+			cut: cutMemory(editor),
+			session: () => editor.session,
+			view: () => this.view,
+			readOnly: () => this.readOnly,
+			sync: force => this.sync(force),
+			readSelection: () => this.readSelection(this.view),
+			escape: () => {
+				// Out of a header, footer or note, back to the body.
+				if (editor.activeStory === editor.body.session.story.story.index) return false
+
+				editor.exitStory()
+
+				return true
+			}
+		})
 		this.windowSize = Math.max(1, options.window ?? DEFAULT_WINDOW)
 		this.element = element("div")
 		this.element.className = "fo-docx-sink"
@@ -260,25 +237,17 @@ export class EditSink {
 		this.view = new EditorView(this.element, {
 			state: this.viewState(editor.state),
 			editable: () => !this.readOnly,
-			dispatchTransaction: tr => this.dispatch(tr),
-			// The session's plugins act on its own state; what stateless ones do in a view (paste, drop) acts here.
-			// A stateful plugin's props read its state from the view's, which has none (history's undo is below).
-			plugins: editor.state.plugins.flatMap(plugin =>
-				plugin.spec.props === undefined || plugin.spec.state !== undefined ? [] : [new Plugin({ props: plugin.spec.props })]
-			),
+			dispatchTransaction: tr => this.input.dispatch(tr),
+			// History's undo is below (beforeinput, the keys).
+			plugins: viewPlugins(editor.state),
 			nodeViews: { ...NODE_VIEWS, drawing: drawingView(editor) },
 			markViews: MARK_VIEWS,
-			clipboardSerializer: clipboardSerializer(),
-			clipboardParser: clipboardParser(),
-			transformPastedHTML: safeClipboardHtml,
-			clipboardTextSerializer: () => {
+			...this.input.clipboardProps(() => {
 				const state = this.editor.state
 				const { from, to } = state.selection
 
 				return plainText(state.doc, from, to, pos => this.editor.geometry.markerText(pos), this.editor.view)
-			},
-			clipboardTextParser: (text, $context) => plainSlice(text, $context),
-			handlePaste: (_view, event) => this.pasteCut(event.clipboardData?.getData("text/plain")),
+			}),
 			// The pages scroll to the painted caret; the sink never scrolls anything.
 			handleScrollToSelection: () => true,
 			handleKeyDown: (view, event) => this.keyDown(view, event),
@@ -291,12 +260,10 @@ export class EditSink {
 					// Read-only, the view is not editable and ProseMirror's own key handling is off: selection keys only.
 					return view.editable ? false : this.readOnlyKeyDown(view, event)
 				},
-				// Undo and redo from outside the keyboard (Edit menu, shake, a soft keyboard's key): the editor's,
-				// in its order across stories. Typing over a selection and word or line deletions: transactions.
-				beforeinput: (view, event) => this.historyInput(event) || this.editInput(view, event),
+				beforeinput: (view, event) => this.input.beforeInput(view, event),
 				// The document's selection, not the view's (whose gaps hold no content).
-				copy: (_view, event) => this.copyEvent(event, false),
-				cut: (_view, event) => this.copyEvent(event, true),
+				copy: (_view, event) => this.input.copyEvent(event, false),
+				cut: (_view, event) => this.input.copyEvent(event, true),
 				focus: () => {
 					this.hasFocus = true
 
@@ -308,43 +275,25 @@ export class EditSink {
 					return false
 				},
 				compositionstart: view => {
-					// Composed over a selection: the selection goes first, as a transaction.
-					if (!this.readOnly) {
-						this.readSelection(view)
-						this.composeFormatting =
-							selectionFormatting(this.editor.state) ?? this.editor.session.typingMarks(this.editor.state)
-						this.run(deleteBeforeComposition(this.editor.state))
-					}
-
-					this.compositionStart = view.state.selection.from
-					this.compositionText = ""
+					this.input.compositionStarted(view)
 
 					return false
 				},
 				compositionupdate: (_view, event) => {
-					this.compositionText = event.data
+					this.input.compositionUpdated(event)
 
 					return false
 				},
 				compositionend: (view, event) => {
-					readComposition(view)
-					this.formatComposed(typeof event.data === "string" ? event.data : this.compositionText)
-					this.compositionStart = -1
-					this.compositionText = ""
-					this.editor.setComposition(undefined)
+					this.input.compositionEnded(view, event)
 
 					return false
 				}
 			},
 			attributes: () => ({
-				role: "textbox",
-				"aria-multiline": "true",
-				"aria-label": this.label,
-				...(this.describedBy === undefined ? {} : { "aria-describedby": this.describedBy }),
-				spellcheck: "false",
-				translate: "no",
+				...textboxAttributes(this.label, this.describedBy, this.readOnly),
 				// Not editable but still focused (selection, copy).
-				...(this.readOnly ? { "aria-readonly": "true", inputmode: "none", tabindex: "0" } : {})
+				...(this.readOnly ? { inputmode: "none", tabindex: "0" } : {})
 			})
 		})
 
@@ -357,7 +306,7 @@ export class EditSink {
 				return
 			}
 
-			if (this.dispatching) return
+			if (this.input.applying) return
 
 			if (this.real !== editor.state) {
 				if (event.type === "story") this.windows = []
@@ -459,38 +408,22 @@ export class EditSink {
 	// The selection as a copy writes it (the same HTML and text as a copy event), or undefined when it is
 	// empty. For an app's own Cut and Copy commands (menus, touch), which write the system clipboard itself.
 	clipboardContent(): { readonly html: string; readonly text: string } | undefined {
-		const state = this.editor.state
-
-		if (state.selection.empty) return undefined
-
-		const { dom, text } = this.view.serializeForClipboard(shownSlice(state.selection.content(), this.editor.view))
-
-		return { html: dom.innerHTML, text }
+		return this.input.clipboardContent()
 	}
 
 	// Deletes the selection (the second half of an app's Cut); false when read-only or nothing is selected.
 	deleteSelection(): boolean {
-		if (this.readOnly || this.editor.state.selection.empty) return false
-
-		this.rememberCut()
-
-		return this.run(this.editor.state.tr.deleteSelection())
+		return this.input.deleteSelection()
 	}
 
-	// Pastes what an app read from the system clipboard, through the same parsers as a paste event: HTML
-	// keeps paragraphs and basic formatting only (parsed in an inert document; nothing it references loads),
-	// text is taken as typed. False when read-only or there is nothing to paste.
+	// Pastes what an app read from the system clipboard (StoryInput.paste); false when read-only or there is
+	// nothing to paste.
 	paste(content: { readonly html?: string; readonly text?: string }): boolean {
-		if (this.readOnly) return false
-		if (this.pasteCut(content.text)) return true
-		if (content.html !== undefined && content.html.length > 0) return this.view.pasteHTML(content.html)
-		if (content.text !== undefined && content.text.length > 0) return this.view.pasteText(content.text)
-
-		return false
+		return this.input.paste(content)
 	}
 
 	selectAll(): boolean {
-		return this.run(selectAll(this.editor.state))
+		return this.input.selectAll()
 	}
 
 	get composing(): boolean {
@@ -538,159 +471,12 @@ export class EditSink {
 		this.element.style.transform = `translate(${Math.round(this.offsetX * 10) / 10}px,${Math.round(this.offsetY * 10) / 10}px)`
 	}
 
-	// A transaction of the view: applied to the session's state (positions are the same), and the view brought
-	// to the result (whatever the browser changed that the session did not take is put back).
-	private dispatch(viewTr: Transaction): void {
-		const tr = viewTr.docChanged && this.readOnly ? undefined : sessionTransaction(viewTr, this.view.state.doc, this.editor.state)
-
-		if (tr === undefined) {
-			this.sync(true)
-
-			return
-		}
-
-		this.apply(tr, true)
-	}
-
-	// Applies a transaction on the session's state; `fromView`: it came from the view, which is brought up to
-	// date even when the session refused it.
-	private apply(tr: Transaction, fromView = false): void {
-		if (tr.docChanged && this.readOnly) {
-			this.sync(fromView)
-
-			return
-		}
-
-		if (this.compositionStart >= 0 && tr.docChanged) this.compositionStart = tr.mapping.map(this.compositionStart, -1)
-
-		const event: unknown = tr.getMeta("uiEvent")
-
-		// A pasted reference to a note that stays referenced elsewhere refers to a copy of it; a paste whose note
-		// cannot be copied whole is refused.
-		if ((event === "paste" || event === "drop") && !docxNotes(this.editor).pasted(tr)) {
-			this.sync(fromView)
-
-			return
-		}
-
-		this.dispatching = true
-
-		try {
-			this.editor.dispatch(tr)
-		} finally {
-			this.dispatching = false
-		}
-
-		this.sync(fromView)
-
-		if (this.view.composing && this.compositionStart >= 0) {
-			const state = this.editor.state
-			const from = compositionFrom(state.doc, state.selection.head, this.compositionStart, this.compositionText)
-
-			this.compositionStart = from
-			this.editor.setComposition({
-				from,
-				to: this.compositionText.length > 0 ? from + this.compositionText.length : Math.max(from, state.selection.head)
-			})
-		}
-	}
-
-	// A command's transaction on the session's state.
-	private run(tr: Transaction | null | false): boolean {
-		if (tr === null) return false
-		if (tr !== false) this.apply(tr)
-
-		return true
-	}
-
-	// beforeinput historyUndo / historyRedo: the editor undoes or redoes in its order across stories (the
-	// browser's own never runs).
-	private historyInput(event: InputEvent): boolean {
-		const type = event.inputType === "historyUndo" ? "history.undo" : event.inputType === "historyRedo" ? "history.redo" : undefined
-
-		if (type === undefined) return false
-
-		event.preventDefault()
-
-		if (!this.readOnly) void this.editor.execute({ type })
-
-		return true
-	}
-
-	// A composition that started over a selection ends: its text gets the formatting it takes, wherever the
-	// browser composed it (it composes into the run its selection ended in).
-	private formatComposed(text: string): void {
-		const formatting = this.composeFormatting
-
-		this.composeFormatting = undefined
-
-		if (formatting === undefined || this.compositionStart < 0 || this.readOnly) return
-
-		const state = this.editor.state
-		const from = compositionFrom(state.doc, state.selection.head, this.compositionStart, text)
-
-		this.run(composedFormatting(state, from, text, formatting))
-	}
-
-	// beforeinput that would edit the DOM across runs (see inputTransaction): made on the session's state.
-	private editInput(view: EditorView, event: InputEvent): boolean {
-		if (this.readOnly || !event.cancelable) return false
-
-		this.readSelection(view)
-
-		const session = this.editor.session
-		const tr = inputTransaction(view, this.editor.state, event, state => session.typingMarks(state))
-		const linking = spaceEndsAddress(view, session, event)
-		const typed = tr ?? (linking ? spaceTransaction(session) : undefined)
-
-		if (typed === undefined) return false
-
-		event.preventDefault()
-
-		if (!linking) return this.run(typed)
-
-		return autoLinked(
-			session,
-			() => this.run(typed),
-			link => this.run(link)
-		)
-	}
-
 	// A selection the browser made that the view has not read yet (a key's selectionchange still queued), taken
 	// into the session before an edit replaces it.
 	private readSelection(view: EditorView): void {
 		const moved = unreadSelection(view)
 
 		if (moved !== undefined) view.dispatch(moved)
-	}
-
-	// A copy or cut writes the document's selection, as ProseMirror's own would write the view's.
-	private copyEvent(event: ClipboardEvent, cut: boolean): boolean {
-		const content = event.clipboardData === null ? undefined : this.clipboardContent()
-
-		if (!writeClipboardEvent(event, content) || content === undefined) return false
-
-		this.cut.forget()
-
-		if (cut && !this.readOnly) {
-			this.rememberCut(content.text)
-			this.apply(this.editor.state.tr.deleteSelection().scrollIntoView().setMeta("uiEvent", "cut"))
-		}
-
-		return true
-	}
-
-	private rememberCut(text?: string): void {
-		this.cut.remember(this.editor.session, slice => text ?? this.view.serializeForClipboard(slice).text)
-	}
-
-	// Pastes the last cut as it was (CutMemory.take); false for anything else.
-	private pasteCut(text: string | undefined): boolean {
-		if (this.readOnly) return false
-
-		const tr = this.cut.take(this.editor, this.editor.session, text)
-
-		return tr === undefined ? false : this.run(tr)
 	}
 
 	// Brings the view to the session's state; `force`: also when that did not change (the view's DOM may
@@ -805,7 +591,7 @@ export class EditSink {
 				if (!extend) {
 					const beside = besideNode(state, dir)
 
-					if (beside !== null) return this.run(beside)
+					if (beside !== null) return this.input.run(beside)
 				}
 
 				if (state.selection.empty || extend) {
@@ -833,69 +619,9 @@ export class EditSink {
 			case "PageUp":
 			case "PageDown":
 				return this.options.pageMove?.(event.key === "PageDown" ? 1 : -1, extend) ?? false
-			case "Enter":
-				if (event.altKey || readOnly) return false
-				// Mod+Enter: the page break's shortcut.
-				if (mod) break
-
-				return autoLinked(
-					editor.session,
-					() => this.run(extend ? lineBreak(state) : splitParagraph(state, editor.session.formats)),
-					tr => this.run(tr)
-				)
-			case "Tab":
-				return (
-					!readOnly &&
-					autoLinked(
-						editor.session,
-						() => tabKey(editor, editor.session, event, apple, tr => this.run(tr)),
-						tr => this.run(tr)
-					)
-				)
-			// At a paragraph's edge any deletion (a character, a word, to the line's start) joins paragraphs.
-			case "Backspace":
-				if (readOnly) return false
-				// After a section break: the break goes (the sections merge), as Word deletes it.
-				if (deletesBreakBefore(this.editor)) return true
-
-				this.readSelection(view)
-
-				return this.run(deleteSelectionKey(editor.state) ?? joinBackward(editor.state, editor.session.formats))
-			case "Delete":
-				// Shift+Delete cuts.
-				if (readOnly || extend) return false
-				// Before a section break: the break goes (the sections merge), as Word deletes it.
-				if (deletesBreakAtCaret(editor)) {
-					void editor.execute({ type: "section.deleteBreak" })
-
-					return true
-				}
-
-				this.readSelection(view)
-
-				return this.run(deleteSelectionKey(editor.state) ?? joinForward(editor.state))
-			case "Escape":
-				// The format painter goes first; then out of a header, footer or note, back to the body.
-				if (editor.painter !== undefined) {
-					editor.setPainter(undefined)
-
-					return true
-				}
-
-				if (editor.activeStory === editor.body.session.story.story.index) return false
-
-				editor.exitStory()
-
-				return true
 		}
 
-		if (mod && !event.altKey && !extend) {
-			const key = event.key.toLowerCase()
-
-			if (key === "a") return this.run(selectAll(state))
-		}
-
-		return this.runKey(docxKeyFor(event, this.keyBindings(), apple), readOnly)
+		return this.input.editingKey(event, apple, readOnly, true) ?? this.runKey(docxKeyFor(event, this.keyBindings(), apple), readOnly)
 	}
 
 	private keyBindings(): DocxKeyBindings {

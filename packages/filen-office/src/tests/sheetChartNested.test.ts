@@ -123,4 +123,36 @@ describe("a group holding a chart in the sheet view", () => {
 		expect(again?.kind === "drawing" && again.live).not.toBe(since)
 		session.close()
 	})
+
+	it("draws an unnamed series of a grouped chart in the session's chart text, and again once that text changes", async () => {
+		const fixture = chartFixture(barChart([SOLD, KEPT]).replace(/<c:tx>.*?<\/c:tx>/gu, ""))
+		const { session, sheets } = await openCharts({
+			...fixture,
+			parts: {
+				...fixture.parts,
+				"xl/drawings/drawing1.xml": { text: wsDr(GROUP), type: "application/vnd.openxmlformats-officedocument.drawing+xml" }
+			}
+		})
+		const sheet = sheets[0] ?? 0
+		const group = (await session.layout(sheet)).extensions?.drawings?.objects[0]
+
+		if (group === undefined) throw new Error("no group")
+
+		const ask = (since: string | undefined) =>
+			session.query("drawing.render", { sheet, key: group.key, stamp: group.stamp, ...(since === undefined ? {} : { since }) })
+		const textOf = (render: Awaited<ReturnType<typeof ask>>): string =>
+			render?.kind === "drawing" ? JSON.stringify(render.drawing.texts) : ""
+		const first = await ask(undefined)
+		const since = first?.kind === "drawing" ? first.live : undefined
+
+		expect(textOf(first)).toContain("Series2")
+		session.configure({ chartText: { series: "Datenreihe{n}", chartTitle: "Diagrammtitel", axisTitle: "Achsentitel" } })
+
+		const german = await ask(since)
+
+		expect(german?.kind).toBe("drawing")
+		expect(textOf(german)).toContain("Datenreihe2")
+		expect(textOf(german)).not.toContain("Series")
+		session.close()
+	})
 })

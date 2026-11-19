@@ -13,7 +13,7 @@ import { NAMESPACES, buildDocx, p } from "./docxSynthetic"
 import { STYLES_PART } from "./docxEditFixtures"
 import { layOut } from "./layoutFixtures"
 import { pagedEditor, settleAll } from "./pagedFixtures"
-import { budget } from "./timing"
+import { budget, cpuMs, percentile } from "./timing"
 
 interface Opened {
 	readonly editor: PagedEditor
@@ -622,21 +622,6 @@ describe.skipIf(!existsSync(join(CORPUS_DIR, CORPUS_FILES[0] ?? "")))("live anno
 })
 
 const LARGE = join(import.meta.dirname, "fixtures", "08-large-300p.docx")
-
-// This thread's CPU time in ms where the runtime tells it, else the wall clock.
-function cpuMs(): number {
-	const usage: unknown = Reflect.get(process, "threadCpuUsage")
-
-	if (typeof usage !== "function") return performance.now()
-
-	const { user, system } = Reflect.apply(usage, process, []) as { user: number; system: number }
-
-	return (user + system) / 1000
-}
-
-function percentile(sorted: readonly number[], fraction: number): number {
-	return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0
-}
 
 describe("comment boxes kept per page", () => {
 	it("boxes the comments again only on pages laid out again, as a fresh read boxes them", async () => {

@@ -11,10 +11,9 @@ import { fixtureBytes } from "./fuzz/sheet/fixtures"
 import { isFinding, runSequence, type FuzzMode } from "./fuzz/sheet/harness"
 import { R, SML, buildFixture, equalBytes } from "./xlsxWriteFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
+import { IMMEDIATE } from "./sheetSessionFixtures"
 
 // Sequences the sheet fuzz found, kept as plain tests.
-
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 
 async function open(name: string, bytes = fixtureBytes(name)) {
 	const opened = await openXlsxSession(bytesSource(bytes.slice()), { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)

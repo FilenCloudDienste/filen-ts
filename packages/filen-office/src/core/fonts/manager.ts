@@ -1,5 +1,5 @@
 import { bundledFace } from "./bundled"
-import { FontError } from "./errors"
+import { FontError, type FontErrorCode } from "./errors"
 import type { FontAssets, FontFaceDescriptor, FontHost } from "./host"
 import type { VerticalMetrics } from "./metrics"
 import { readSfnt } from "./sfnt"
@@ -95,11 +95,41 @@ export type PdfFaceSource =
 			readonly substitute: BundledFamily
 	  }
 
+// Why an embedded face is not used: a FontError's code, "duplicate" (a second face for one style, ignored),
+// "rejected" (the platform refused the font) or "unreadable" (reading it failed otherwise).
+export type EmbeddedFontFailureCode = FontErrorCode | "duplicate" | "rejected" | "unreadable"
+
 export interface EmbeddedFontFailure {
 	readonly family: string
 	readonly bold: boolean
 	readonly italic: boolean
+	readonly code: EmbeddedFontFailureCode
 	readonly reason: string
+}
+
+// Hands the failures after the first `from` to the realm's console as structured data (code, family and style,
+// never the reason, which can quote the package), and returns how many there are now: engines call it after
+// each prepare with the count it returned last.
+export function logEmbeddedFontFailures(failures: readonly EmbeddedFontFailure[], from: number): number {
+	if (failures.length <= from) return failures.length
+
+	// The package's lib names no console: read through Reflect, as workers may have none.
+	const console = Reflect.get(globalThis, "console") as { warn?: (...data: unknown[]) => void } | undefined
+
+	for (let index = from; index < failures.length; index++) {
+		const failure = failures[index]
+
+		if (failure !== undefined) {
+			console?.warn?.("Embedded font not used", {
+				code: failure.code,
+				family: failure.family,
+				bold: failure.bold,
+				italic: failure.italic
+			})
+		}
+	}
+
+	return failures.length
 }
 
 const MAX_FONT_PX = 16384
@@ -135,7 +165,6 @@ interface EmbeddedSource {
 	readonly read: EmbeddedFontReader
 	state: "pending" | "loaded" | "failed"
 	load: Promise<void> | null
-	error: unknown
 }
 
 interface EmbeddedFamily {
@@ -309,29 +338,34 @@ export class FontManager {
 	// read only when prepare() meets text that needs it. A second face for the same style is ignored.
 	embed(family: string, bold: boolean, italic: boolean, read: EmbeddedFontReader): void {
 		this.assertLive()
-		this.declareEmbedded(family, bold, italic, read)
+
+		const lower = family.toLowerCase()
+		let entry = this.embedded.get(lower)
+
+		if (entry === undefined) {
+			entry = { alias: `${this.prefix}-e${this.embedded.size + 1}`, name: family, sources: new Map(), faces: [] }
+			this.embedded.set(lower, entry)
+		}
+
+		const key = styleKey(bold, italic)
+
+		if (entry.sources.has(key)) {
+			this.failed.push({ family, bold, italic, code: "duplicate", reason: "the style is embedded twice; the first is used" })
+
+			return
+		}
+
+		entry.sources.set(key, { key, read, state: "pending", load: null })
 	}
 
-	// Registers embedded font data (raw sfnt, already de-obfuscated) now. Throws a FontError for data that is
-	// no usable font or exceeds the limits; resolves false when the platform rejects it or the style was
-	// already embedded.
-	async addEmbedded(family: string, data: Uint8Array, bold: boolean, italic: boolean): Promise<boolean> {
-		this.assertLive()
-
-		const source = this.declareEmbedded(family, bold, italic, () => Promise.resolve(data))
-
-		if (source === null) return false
-
-		await this.loadSource(this.embedded.get(family.toLowerCase()), source)
-
-		if (source.state === "failed" && source.error instanceof FontError) throw source.error
-
-		return source.state === "loaded"
-	}
-
-	// Embedded faces that could not be used, with why.
+	// Embedded faces that could not be used, with why, in the order they failed (logEmbeddedFontFailures).
 	failures(): readonly EmbeddedFontFailure[] {
 		return this.failed
+	}
+
+	// The character set (w:charset) the font table declares for `family`, by its name or an alternative one.
+	charset(family: string): number | undefined {
+		return this.declarations.get(family.toLowerCase())?.hints.charset
 	}
 
 	// Loads what the requests need: embedded faces, installed-font probes and bundled faces.
@@ -443,13 +477,6 @@ export class FontManager {
 			: undefined
 	}
 
-	// Whether an embedded font may be embedded again on save (OS/2 fsType: not restricted-license).
-	reembeddable(family: string): boolean {
-		const entry = this.embedded.get(family.toLowerCase())
-
-		return entry !== undefined && entry.faces.length > 0 && entry.faces.every(face => (face.fsType & 0x0002) === 0)
-	}
-
 	// Unregisters this manager's faces. The manager cannot be used afterwards.
 	dispose(): void {
 		if (this.disposed) return
@@ -476,30 +503,6 @@ export class FontManager {
 		if (added && this.disposed) this.host.remove(alias)
 
 		return added && !this.disposed
-	}
-
-	private declareEmbedded(family: string, bold: boolean, italic: boolean, read: EmbeddedFontReader): EmbeddedSource | null {
-		const lower = family.toLowerCase()
-		let entry = this.embedded.get(lower)
-
-		if (entry === undefined) {
-			entry = { alias: `${this.prefix}-e${this.embedded.size + 1}`, name: family, sources: new Map(), faces: [] }
-			this.embedded.set(lower, entry)
-		}
-
-		const key = styleKey(bold, italic)
-
-		if (entry.sources.has(key)) {
-			this.failed.push({ family, bold, italic, reason: "the style is embedded twice; the first is used" })
-
-			return null
-		}
-
-		const source: EmbeddedSource = { key, read, state: "pending", load: null, error: undefined }
-
-		entry.sources.set(key, source)
-
-		return source
 	}
 
 	// Loads the face CSS would draw `key` with (the style itself, else the closest declared one), falling
@@ -537,6 +540,8 @@ export class FontManager {
 
 		if (this.disposed) return
 
+		let rejected = false
+
 		try {
 			const budget = Math.min(this.limits.maxEmbeddedFaceBytes, this.limits.maxEmbeddedBytes - this.embeddedBytes)
 
@@ -557,7 +562,11 @@ export class FontManager {
 				return
 			}
 
-			if (!added) throw new Error("rejected by the platform")
+			if (!added) {
+				rejected = true
+
+				throw new Error("rejected by the platform")
+			}
 
 			// Counted once the platform holds the face; the queue keeps the next read waiting until then.
 			this.embeddedBytes += data.length
@@ -567,10 +576,13 @@ export class FontManager {
 			source.state = "loaded"
 		} catch (error) {
 			source.state = "failed"
-			// A copy: the thrown error's captured stack can keep the refused bytes alive.
-			source.error = error instanceof FontError ? new FontError(error.code, error.message) : new Error(reasonOf(error))
 
-			if (!this.disposed) this.failed.push({ family: entry.name, bold, italic, reason: reasonOf(error) })
+			// Only the code and message are kept: the thrown error's captured stack can keep the refused bytes alive.
+			if (!this.disposed) {
+				const code = error instanceof FontError ? error.code : rejected ? "rejected" : "unreadable"
+
+				this.failed.push({ family: entry.name, bold, italic, code, reason: reasonOf(error) })
+			}
 		}
 	}
 

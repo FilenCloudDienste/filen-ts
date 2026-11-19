@@ -186,6 +186,58 @@ describe("sheet grid model", () => {
 		expect(text(model, second, 0, 0)).toBe("3")
 	})
 
+	it("names a sheet whose layout is refused, and loads it again on reloadSheet", async () => {
+		const { model, session } = await opened()
+		const second = model.getSnapshot().sheets[1]?.id as number
+		const layout = vi.spyOn(session, "layout").mockRejectedValueOnce(new Error("unparsable part"))
+		const notified = vi.fn()
+
+		model.subscribe(notified)
+		model.setSheet(second)
+		await settle()
+
+		expect(model.getSnapshot()).toMatchObject({
+			sheet: second,
+			layout: null,
+			sheetError: { sheet: second, message: "unparsable part" }
+		})
+		expect(notified).toHaveBeenCalled()
+
+		model.reloadSheet(second)
+
+		expect(model.getSnapshot().sheetError).toBeNull()
+
+		await settle()
+
+		expect(layout).toHaveBeenCalledTimes(2)
+		expect(model.getSnapshot().layout?.sheet).toBe(second)
+		expect(model.getSnapshot().sheetError).toBeNull()
+	})
+
+	it("asks no more tiles of a sheet whose tiles are refused, frame after frame, until reloadSheet", async () => {
+		const { model, session, sheet } = await opened()
+		const tiles = vi.spyOn(session, "tiles").mockRejectedValue(new Error("unparsable part"))
+
+		model.onPaint(() => {
+			model.need(sheet, [0, 0])
+		})
+		model.need(sheet, [0, 0])
+		await settle()
+		model.need(sheet, [0, 0])
+		model.need(sheet, [0, 0])
+		await settle()
+
+		expect(tiles).toHaveBeenCalledTimes(1)
+		expect(model.getSnapshot().sheetError).toEqual({ sheet, message: "unparsable part" })
+
+		tiles.mockRestore()
+		model.reloadSheet(sheet)
+		await settle()
+
+		expect(model.getSnapshot().sheetError).toBeNull()
+		expect(text(model, sheet, 0, 0)).toBe("2")
+	})
+
 	it("commits an entry open as the grid turns read-only, and reports a malformed one rather than reopening it", async () => {
 		const { model, sheet } = await opened()
 		const refusals: string[] = []

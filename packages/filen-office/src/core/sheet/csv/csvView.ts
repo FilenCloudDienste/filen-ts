@@ -10,6 +10,8 @@ import {
 	type CsvEncoding
 } from "./encoding"
 import { MAX_COLUMNS, type CellView } from "../model/model"
+import { EN_US_LOCALE, localizedNumber } from "../input/locale"
+import type { SheetLocale } from "../protocol"
 
 // How a CSV file was written, so a save writes it back the same way: its separator, its line ends, a byte
 // order mark, a final line end, and the byte encoding it was read as. A legacy windows-1252 export is
@@ -248,4 +250,19 @@ const NUMERIC = /^[-+]?(\d+([.,]\d+)?|\d{1,3}([.,]\d{3})+([.,]\d+)?)%?$/
 // A CSV cell shows its text as is; one that reads as a number sits on the right, as a number does.
 export function csvCellView(text: string): CellView | null {
 	return text === "" ? null : NUMERIC.test(text.trim()) ? { text, numeric: true } : { text }
+}
+
+// A field that reads as a plain number in the session's locale (en-US without one), as a text session computes with
+// it; a grouped or percent field is not one, so a fill copies it rather than rewriting it.
+export function textFieldNumber(text: string, locale: SheetLocale | undefined): number | null {
+	const number = localizedNumber(text, locale ?? EN_US_LOCALE)
+
+	return number === null || number.impliedFormat !== undefined ? null : number.value
+}
+
+// A number written as a field with the given decimal point.
+export function textFieldText(value: number, point: string): string {
+	const text = String(value)
+
+	return point === "." ? text : text.replace(".", point)
 }

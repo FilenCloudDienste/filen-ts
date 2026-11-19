@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
 import { parseCellInput } from "../core/sheet/input/cellInput"
-import { delocalizeFormula, localizedDate, localizedInput, localizedNumber, localizeFormula, textNumber } from "../core/sheet/input/locale"
+import {
+	delocalizeFormula,
+	formulaTextDate,
+	localizedDate,
+	localizedInput,
+	localizedNumber,
+	localizeFormula,
+	textNumber
+} from "../core/sheet/input/locale"
+import { textDateParser } from "../core/sheet/formula/textDates"
+import { NUMFMT_EN_US } from "../core/sheet/numfmt/locale"
 import type { SheetLocale } from "../core/sheet/protocol"
 
 const DE: SheetLocale = { decimal: ",", group: ".", argument: ";", dateOrder: "dmy" }
@@ -97,5 +107,127 @@ describe("numbers typed with an Arabic decimal separator locale", () => {
 
 	it("keep '.' as no decimal point where the locale's is a comma", () => {
 		expect(localizedNumber("3.5", DE)).toBeNull()
+	})
+})
+
+// Month names as Intl gives them for de and fr (full, then short).
+const DE_NAMED: SheetLocale = {
+	...DE,
+	numFmt: {
+		...NUMFMT_EN_US,
+		decimal: ",",
+		group: ".",
+		months: ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
+		monthsShort: ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."]
+	}
+}
+const FR_NAMED: SheetLocale = {
+	...FR,
+	numFmt: {
+		...NUMFMT_EN_US,
+		decimal: ",",
+		group: " ",
+		months: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
+		monthsShort: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+	}
+}
+
+// Hindi as Intl gives it: names with combining marks, short names ending in U+0970.
+const HI_NAMED: SheetLocale = {
+	...GB,
+	numFmt: {
+		...NUMFMT_EN_US,
+		months: ["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"],
+		monthsShort: ["जन॰", "फ़र॰", "मार्च", "अप्रैल", "मई", "जून", "जुल॰", "अग॰", "सित॰", "अक्तू॰", "नव॰", "दिस॰"]
+	}
+}
+
+describe("month names typed in a locale", () => {
+	const year = (): number => 2024
+	const date = (text: string, locale: SheetLocale): unknown => formulaTextDate(text, locale, year, false)
+
+	it("read the session language's names, full and short, with or without the short name's dot, any case", () => {
+		expect(date("5-Dez-24", DE_NAMED)).toEqual({ year: 2024, month: 12, day: 5 })
+		expect(date("5. März 2024", DE_NAMED)).toEqual({ year: 2024, month: 3, day: 5 })
+		expect(date("5 MÄRZ 2024", DE_NAMED)).toEqual({ year: 2024, month: 3, day: 5 })
+		expect(date("1 Okt. 2024", DE_NAMED)).toEqual({ year: 2024, month: 10, day: 1 })
+		expect(date("Oktober 3, 2024", DE_NAMED)).toEqual({ year: 2024, month: 10, day: 3 })
+		expect(date("15 mai 2025", FR_NAMED)).toEqual({ year: 2025, month: 5, day: 15 })
+		expect(date("3 déc. 2024", FR_NAMED)).toEqual({ year: 2024, month: 12, day: 3 })
+		expect(date("3 déc 2024", FR_NAMED)).toEqual({ year: 2024, month: 12, day: 3 })
+		expect(date("14 juil. 2024", FR_NAMED)).toEqual({ year: 2024, month: 7, day: 14 })
+		expect(date("1 février 2024", FR_NAMED)).toEqual({ year: 2024, month: 2, day: 1 })
+		expect(parseCellInput("5-Dez-24", DE_NAMED)).toEqual({
+			type: "value",
+			value: new Date(Date.UTC(2024, 11, 5)),
+			impliedFormat: "d-mmm-yy"
+		})
+	})
+
+	it("still read English names, and only the exact names Intl shows", () => {
+		expect(date("5-Dec-24", DE_NAMED)).toEqual({ year: 2024, month: 12, day: 5 })
+		expect(date("January 5, 2024", FR_NAMED)).toEqual({ year: 2024, month: 1, day: 5 })
+		// Not a 3-letter prefix of "juillet" or "juin": "jui" is neither.
+		expect(date("5 jui 2024", FR_NAMED)).toBeNull()
+		// Without the language's names, as before.
+		expect(date("5-Dez-24", DE)).toBeNull()
+		expect(parseCellInput("5-Dez-24", DE)).toEqual({ type: "value", value: "5-Dez-24" })
+	})
+
+	it("read names that carry combining marks", () => {
+		expect(date("5 जनवरी 2024", HI_NAMED)).toEqual({ year: 2024, month: 1, day: 5 })
+		expect(date("मार्च 5, 2024", HI_NAMED)).toEqual({ year: 2024, month: 3, day: 5 })
+		expect(date("12 फ़रवरी 2025", HI_NAMED)).toEqual({ year: 2025, month: 2, day: 12 })
+	})
+
+	it("read short names ending in the Devanagari abbreviation sign, with or without it", () => {
+		expect(date("5 जन॰ 2024", HI_NAMED)).toEqual({ year: 2024, month: 1, day: 5 })
+		expect(date("5 जन 2024", HI_NAMED)).toEqual({ year: 2024, month: 1, day: 5 })
+		expect(date("अक्तू॰ 3, 2024", HI_NAMED)).toEqual({ year: 2024, month: 10, day: 3 })
+	})
+
+	it("imply a format from a name in any script", () => {
+		const implied = (text: string, locale: SheetLocale): unknown => {
+			// The clock's year, for an entry without one.
+			const result = parseCellInput(text, locale, 2024)
+
+			return "impliedFormat" in result ? result.impliedFormat : undefined
+		}
+
+		expect(implied("5-März-24", DE_NAMED)).toBe("d-mmm-yy")
+		expect(implied("März 2024", DE_NAMED)).toBe("mmm-yy")
+		expect(implied("5. März", DE_NAMED)).toBe("d-mmm")
+		expect(implied("5 जनवरी 2024", HI_NAMED)).toBe("d-mmm-yy")
+		expect(implied("जनवरी 5", HI_NAMED)).toBe("d-mmm")
+	})
+
+	it("prefer the session language where a word names another month in English", () => {
+		const shifted: SheetLocale = {
+			...DE,
+			numFmt: { ...NUMFMT_EN_US, monthsShort: ["x", "y", "z", "w", "mar", "v", "u", "t", "s", "r", "q", "p"] }
+		}
+
+		expect(date("5 mar 2024", shifted)).toEqual({ year: 2024, month: 5, day: 5 })
+		expect(date("5 mar 2024", DE)).toEqual({ year: 2024, month: 3, day: 5 })
+	})
+
+	it("leave entries that read as numbers or times as they were", () => {
+		expect(parseCellInput("1,5", DE_NAMED)).toEqual({ type: "value", value: 1.5 })
+		expect(parseCellInput("5.3", DE_NAMED)).toEqual(parseCellInput("5.3", DE))
+		expect(parseCellInput("5 PM", DE_NAMED)).toEqual(parseCellInput("5 PM", DE))
+		expect(parseCellInput("12:30", DE_NAMED)).toEqual(parseCellInput("12:30", DE))
+		expect(parseCellInput("31.12.2024", DE_NAMED)).toEqual({
+			type: "value",
+			value: new Date(Date.UTC(2024, 11, 31)),
+			impliedFormat: "m/d/yyyy"
+		})
+	})
+
+	it("reach DATEVALUE's reading of text", () => {
+		const parse = textDateParser(DE_NAMED, () => new Date(2024, 0, 10).getTime())
+
+		expect(parse("5-Dez-2024")).toEqual({ year: 2024, month: 12, day: 5 })
+		expect(parse("5. März 2024 6:35")).toEqual({ year: 2024, month: 3, day: 5, hours: 6, minutes: 35, seconds: 0 })
+		expect(textDateParser(DE, () => 0)("5-Dez-2024")).toBeUndefined()
 	})
 })

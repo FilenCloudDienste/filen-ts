@@ -1,4 +1,4 @@
-import type { Paragraph, PlaceholderType, RunProps, ShapeNode, TextBody } from "../model"
+import { bodyHasText, type Paragraph, type PlaceholderType, type RunProps, type ShapeNode, type TextBody } from "../model"
 import type { PlaceholderLevel } from "./services"
 
 // The prompt an empty placeholder shows in the editor ("Click to add title"), never in the show, a thumbnail, an
@@ -30,10 +30,6 @@ export function promptKind(type: PlaceholderType): PromptKind | undefined {
 	return KINDS[type]
 }
 
-function visible(body: TextBody | undefined): body is TextBody {
-	return body?.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== "")) === true
-}
-
 // The prompt body of an empty slide placeholder; undefined when it shows none. `chain` is the shape's placeholder
 // chain, nearest first (its layout placeholder).
 export function promptBody(shape: ShapeNode, chain: readonly PlaceholderLevel[], prompts: PlaceholderPrompts): TextBody | undefined {
@@ -47,7 +43,7 @@ export function promptBody(shape: ShapeNode, chain: readonly PlaceholderLevel[],
 	const layout = chain[0]?.shape
 	const custom = ph.hasCustomPrompt === true || layout?.ph?.hasCustomPrompt === true ? layout?.text : undefined
 
-	if (visible(custom)) return { ...frame, paragraphs: custom.paragraphs }
+	if (custom !== undefined && bodyHasText(custom)) return { ...frame, paragraphs: custom.paragraphs }
 
 	const kind = promptKind(ph.type)
 

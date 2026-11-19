@@ -92,9 +92,6 @@ export interface PdfEngineContext {
 	openRead(): ReadDocument
 	readonly reading: ReadDocument | null
 	setReading(read: ReadDocument | null): void
-	// Bytes [offset, offset + length) of the open file, read through the same reader MuPDF uses (a fresh copy). For
-	// checks of the raw file (a signature's byte ranges), in runs of a few MiB.
-	readBytes(offset: number, length: number): Uint8Array
 	// The wasm memory's size in bytes.
 	heapBytes(): number
 }

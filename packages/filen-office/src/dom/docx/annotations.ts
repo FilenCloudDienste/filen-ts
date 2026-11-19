@@ -44,8 +44,6 @@ export type DocxMarkupMode = "all" | "simple" | "none" | "original"
 
 export interface DocxMarkupInfo {
 	readonly mode: DocxMarkupMode
-	// A stable id an app maps to its own translation.
-	readonly labelKey: string
 	// The revision view the document is laid out in (DocxOpenOptions.view).
 	readonly view: "markup" | "final" | "original"
 	// Comment balloons in the margin.
@@ -60,7 +58,6 @@ export interface DocxMarkupInfo {
 
 const SIMPLE_MARKUP: DocxMarkupInfo = {
 	mode: "simple",
-	labelKey: "docx.markup.simple",
 	view: "final",
 	comments: true,
 	formatting: false,
@@ -69,12 +66,11 @@ const SIMPLE_MARKUP: DocxMarkupInfo = {
 }
 
 export const DOCX_MARKUP_MODES: readonly DocxMarkupInfo[] = [
-	{ mode: "all", labelKey: "docx.markup.all", view: "markup", comments: true, formatting: true, changeBars: true, highlights: true },
+	{ mode: "all", view: "markup", comments: true, formatting: true, changeBars: true, highlights: true },
 	SIMPLE_MARKUP,
-	{ mode: "none", labelKey: "docx.markup.none", view: "final", comments: false, formatting: false, changeBars: false, highlights: false },
+	{ mode: "none", view: "final", comments: false, formatting: false, changeBars: false, highlights: false },
 	{
 		mode: "original",
-		labelKey: "docx.markup.original",
 		view: "original",
 		comments: false,
 		formatting: false,

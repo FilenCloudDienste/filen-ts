@@ -11,8 +11,13 @@ export interface FieldRecord {
 	readonly partialName: string
 	readonly type: string | null
 	readonly dict: PDFObject
+	// The field as listed (an indirect reference, normally): what is written to, resolved at the time of writing.
+	readonly ref: PDFObject
 	readonly num: number | null
+	// The first widget, resolved.
 	readonly widget: PDFObject | null
+	// Every widget as listed (the field itself when merged, then its kids without /T), unresolved.
+	readonly widgets: readonly PDFObject[]
 }
 
 export interface SignatureField extends FieldRecord {
@@ -22,6 +27,7 @@ export interface SignatureField extends FieldRecord {
 	readonly rect: readonly [number, number, number, number] | null
 }
 
+// Bounds against hostile documents, shared by every walk of the field tree.
 export const MAX_FIELD_DEPTH = 32
 export const MAX_FIELDS = 100_000
 
@@ -83,7 +89,7 @@ export function rectOf(object: PDFObject): [number, number, number, number] | nu
 	return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]
 }
 
-// Every field of the AcroForm tree by fully qualified name, with its type (inherited) and its first widget.
+// Every terminal field of the AcroForm tree by fully qualified name, with its type (inherited) and its widgets.
 export function collectFields(document: PDFDocument): { readonly fields: FieldRecord[]; readonly names: Map<number, string> } {
 	const fields: FieldRecord[] = []
 	const names = new Map<number, string>()
@@ -106,7 +112,9 @@ export function collectFields(document: PDFDocument): { readonly fields: FieldRe
 		const type = name(ref(dict, "FT")) ?? inheritedType
 		const kids = at(dict, "Kids")
 		const childFields: PDFObject[] = []
-		let widget: PDFObject | null = name(ref(dict, "Subtype")) === "Widget" ? dict : null
+		const merged = name(ref(dict, "Subtype")) === "Widget"
+		const widgets: PDFObject[] = merged ? [field] : []
+		let widget: PDFObject | null = merged ? dict : null
 
 		if (kids.isArray()) {
 			for (let i = 0; i < kids.length; i++) {
@@ -116,6 +124,7 @@ export function collectFields(document: PDFDocument): { readonly fields: FieldRe
 				// A kid without a name is one of this field's widgets.
 				if (kidDict.isDictionary() && ref(kidDict, "T").isNull()) {
 					widget ??= kidDict
+					widgets.push(kid)
 
 					const kidNum = num(kid)
 
@@ -126,7 +135,8 @@ export function collectFields(document: PDFDocument): { readonly fields: FieldRe
 
 		if (fullName !== null) {
 			if (fieldNum !== null) names.set(fieldNum, fullName)
-			if (childFields.length === 0) fields.push({ name: fullName, partialName: partial ?? "", type, dict, num: fieldNum, widget })
+			if (childFields.length === 0)
+				fields.push({ name: fullName, partialName: partial ?? "", type, dict, ref: field, num: fieldNum, widget, widgets })
 		}
 
 		for (const child of childFields) visit(child, fullName, type, depth + 1)

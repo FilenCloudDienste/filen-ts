@@ -7,13 +7,9 @@ import { dataRegion, navigate, type SheetOccupancy } from "./navigate"
 
 class TextOccupancy implements SheetOccupancy {
 	private readonly rows: readonly (readonly string[])[]
-	readonly lastRow: number
-	readonly lastCol: number
 
 	constructor(document: TextSheetDocument) {
 		this.rows = document.rows
-		this.lastRow = document.rows.length - 1
-		this.lastCol = document.width - 1
 	}
 
 	filled(row: number, col: number): boolean {

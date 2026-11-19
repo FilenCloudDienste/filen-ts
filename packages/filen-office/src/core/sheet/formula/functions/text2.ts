@@ -1,5 +1,6 @@
 import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import {
+	engineLocale,
 	ERROR_TEXT,
 	genericErrorText,
 	MAX_TEXT,
@@ -19,14 +20,15 @@ function errorText(error: CellError): string {
 }
 
 // A value as text: concise as a cell in the General format shows it (a number at 15 significant digits, as ""&A1
-// gives it), strict as the formula bar reads it back (text, and an empty cell, in quotes with quotes doubled).
-function valueText(value: PluginScalar, strict: boolean): string {
+// gives it, with the session locale's decimal separator `decimal`), strict as the formula bar reads it back (text,
+// and an empty cell, in quotes with quotes doubled).
+function valueText(value: PluginScalar, strict: boolean, decimal: string): string {
 	if (value instanceof CellError) return errorText(value)
 	if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
 
 	const number = rawNumber(value)
 
-	if (number !== undefined) return numberText(number)
+	if (number !== undefined) return numberText(number, decimal)
 
 	const text = value === EmptyValue ? "" : String(value)
 
@@ -124,7 +126,8 @@ export class Text2Functions extends SheetFunctionPlugin {
 
 			if (strict === null) return valueError()
 
-			const rows = array.data.map(row => row.map(value => valueText(value, strict)).join(strict ? "," : ", "))
+			const decimal = engineLocale(this.config).decimal
+			const rows = array.data.map(row => row.map(value => valueText(value, strict, decimal)).join(strict ? "," : ", "))
 			const text = strict ? `{${rows.join(";")}}` : rows.join(", ")
 
 			return text.length > MAX_TEXT ? valueError() : text
@@ -136,7 +139,7 @@ export class Text2Functions extends SheetFunctionPlugin {
 		return this.runFunction(ast.args, state, this.metadata("VALUETOTEXT"), (value: PluginScalar, format: number) => {
 			const strict = strictFormat(format)
 
-			return strict === null ? valueError() : valueText(value, strict)
+			return strict === null ? valueError() : valueText(value, strict, engineLocale(this.config).decimal)
 		})
 	}
 
@@ -148,7 +151,7 @@ export class Text2Functions extends SheetFunctionPlugin {
 		return this.runFunction(ast.args, state, this.metadata("ENCODEURL"), (value: PluginScalar) => {
 			if (value instanceof CellError) return value
 
-			const text = encodeUrl(valueText(value, false))
+			const text = encodeUrl(valueText(value, false, engineLocale(this.config).decimal))
 
 			return text.length > MAX_TEXT ? valueError() : text
 		})

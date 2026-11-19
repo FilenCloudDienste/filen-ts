@@ -1,4 +1,5 @@
-import { locateBody } from "../../odf/index"
+import { OdfNs, locateBody } from "../../odf/index"
+import { concatBytes, indexOfBytes, isXmlNameEnd } from "../../xml/bytes"
 import { decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 
 // content.xml of a presentation, cut into its pages without building a tree of the whole stream (ODF 1.3 Part 3
@@ -36,24 +37,9 @@ export interface ContentPages {
 	readonly rootClose: Uint8Array
 }
 
-function isNameEnd(byte: number | undefined): boolean {
-	return byte === undefined || byte === 32 || byte === 9 || byte === 10 || byte === 13 || byte === GT || byte === SLASH
-}
-
-function indexOf(bytes: Uint8Array, text: string | Uint8Array, from: number): number {
-	const needle = typeof text === "string" ? encodeUtf8(text) : text
-	const first = needle[0] ?? 0
-
-	for (let at = bytes.indexOf(first, from); at >= 0; at = bytes.indexOf(first, at + 1)) {
-		let k = 1
-
-		while (k < needle.length && bytes[at + k] === needle[k]) k++
-
-		if (k === needle.length) return at
-	}
-
-	return -1
-}
+const COMMENT_END = encodeUtf8("-->")
+const CDATA_END = encodeUtf8("]]>")
+const PI_END = encodeUtf8("?>")
 
 // The byte after a start tag's ">" (quotes respected) and whether it closed itself; undefined when unterminated.
 function tagEnd(bytes: Uint8Array, start: number): { readonly end: number; readonly selfClosing: boolean } | undefined {
@@ -80,20 +66,20 @@ function skipSpecial(bytes: Uint8Array, at: number): number {
 
 	if (next === 0x21) {
 		if (bytes[at + 2] === 0x2d && bytes[at + 3] === 0x2d) {
-			const end = indexOf(bytes, "-->", at + 4)
+			const end = indexOfBytes(bytes, COMMENT_END, at + 4)
 
 			return end < 0 ? bytes.length : end + 3
 		}
 
 		if (bytes[at + 2] === 0x5b) {
-			const end = indexOf(bytes, "]]>", at + 3)
+			const end = indexOfBytes(bytes, CDATA_END, at + 3)
 
 			return end < 0 ? bytes.length : end + 3
 		}
 	}
 
 	if (next === 0x3f) {
-		const end = indexOf(bytes, "?>", at + 2)
+		const end = indexOfBytes(bytes, PI_END, at + 2)
 
 		return end < 0 ? bytes.length : end + 2
 	}
@@ -101,24 +87,7 @@ function skipSpecial(bytes: Uint8Array, at: number): number {
 	return at + 1
 }
 
-function concat(...parts: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const part of parts) length += part.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const part of parts) {
-		out.set(part, at)
-		at += part.length
-	}
-
-	return out
-}
-
 const XMLNS = encodeUtf8("xmlns")
-const DRAWING_NAMESPACE = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
 const PAGE = encodeUtf8("page")
 // Namespace declarations of the body's elements outside the pages that differ from the root's and are in scope at
 // once: each is copied onto every page's start tag, so the bound is what a page fragment can grow by.
@@ -127,10 +96,10 @@ const MAX_INHERITED_DECLARATIONS = 1024
 // The namespace declarations of one start tag (bytes [start, end), ">" or "/>" included) as prefix → URI ("" for
 // the default namespace); undefined when it declares none.
 function declarations(bytes: Uint8Array, start: number, end: number, selfClosing: boolean): Map<string, string> | undefined {
-	if (indexOf(bytes.subarray(start, end), XMLNS, 0) < 0) return undefined
+	if (indexOfBytes(bytes.subarray(start, end), XMLNS, 0) < 0) return undefined
 
 	const tag = bytes.subarray(start, end)
-	const document = parseXml(selfClosing ? tag : concat(tag.subarray(0, tag.length - 1), encodeUtf8("/>")))
+	const document = parseXml(selfClosing ? tag : concatBytes([tag.subarray(0, tag.length - 1), encodeUtf8("/>")]))
 	let found: Map<string, string> | undefined
 
 	for (const { name, value } of document.attributes(document.documentElement())) {
@@ -159,10 +128,10 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 	const rootOpen = bytes.slice(located.rootStart, located.openEnd)
 	let nameEnd = located.rootStart + 1
 
-	while (!isNameEnd(bytes[nameEnd])) nameEnd++
+	while (!isXmlNameEnd(bytes[nameEnd])) nameEnd++
 
 	const rootName = bytes.subarray(located.rootStart + 1, nameEnd)
-	const rootClose = concat(new Uint8Array([LT, SLASH]), rootName, new Uint8Array([GT]))
+	const rootClose = concatBytes([new Uint8Array([LT, SLASH]), rootName, new Uint8Array([GT])])
 	const pages: PageSpan[] = []
 	const skeletonParts: Uint8Array[] = [rootOpen]
 	let copied = located.bodyStart
@@ -227,7 +196,7 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 
 		let nameEnd = at + 1
 
-		while (!isNameEnd(bytes[nameEnd])) nameEnd++
+		while (!isXmlNameEnd(bytes[nameEnd])) nameEnd++
 
 		const own = declarations(bytes, at, tag.end, tag.selfClosing)
 		let isPage = nameEnd - at - 1 >= PAGE.length
@@ -241,7 +210,7 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 		if (isPage) {
 			const prefix = prefixEnd > at ? decodeUtf8(bytes, at + 1, prefixEnd) : ""
 
-			isPage = (own?.get(prefix) ?? bindings.get(prefix)?.at(-1)) === DRAWING_NAMESPACE
+			isPage = (own?.get(prefix) ?? bindings.get(prefix)?.at(-1)) === OdfNs.draw
 		}
 
 		if (!isPage) {
@@ -285,7 +254,7 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 					continue
 				}
 
-				if (after === SLASH && isNameEnd(bytes[scan + 2 + nameLength])) {
+				if (after === SLASH && isXmlNameEnd(bytes[scan + 2 + nameLength])) {
 					let k = 0
 
 					while (k < nameLength && bytes[scan + 2 + k] === bytes[at + 1 + k]) k++
@@ -331,7 +300,7 @@ export function scanPages(bytes: Uint8Array, limit: number, refuse: (count: numb
 
 	skeletonParts.push(bytes.subarray(copied))
 
-	return { bytes, pages, skeleton: parseXml(concat(...skeletonParts)), rootOpen, rootClose }
+	return { bytes, pages, skeleton: parseXml(concatBytes(skeletonParts)), rootOpen, rootClose }
 }
 
 const SELF_CLOSE = encodeUtf8("/>")
@@ -343,7 +312,9 @@ export function pageHead(content: ContentPages, span: PageSpan): XmlDocument {
 	const tag = bytes.subarray(span.start, span.insertAt)
 
 	return parseXml(
-		span.inject === undefined ? concat(rootOpen, tag, SELF_CLOSE, rootClose) : concat(rootOpen, tag, span.inject, SELF_CLOSE, rootClose)
+		span.inject === undefined
+			? concatBytes([rootOpen, tag, SELF_CLOSE, rootClose])
+			: concatBytes([rootOpen, tag, span.inject, SELF_CLOSE, rootClose])
 	)
 }
 
@@ -351,9 +322,9 @@ export function pageHead(content: ContentPages, span: PageSpan): XmlDocument {
 export function pageFragment(content: ContentPages, span: PageSpan): XmlDocument {
 	const { bytes, rootOpen, rootClose } = content
 
-	if (span.inject === undefined) return parseXml(concat(rootOpen, bytes.subarray(span.start, span.end), rootClose))
+	if (span.inject === undefined) return parseXml(concatBytes([rootOpen, bytes.subarray(span.start, span.end), rootClose]))
 
 	return parseXml(
-		concat(rootOpen, bytes.subarray(span.start, span.insertAt), span.inject, bytes.subarray(span.insertAt, span.end), rootClose)
+		concatBytes([rootOpen, bytes.subarray(span.start, span.insertAt), span.inject, bytes.subarray(span.insertAt, span.end), rootClose])
 	)
 }

@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
 import { act, createRef, useEffect, useLayoutEffect } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetSessionApi } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
+import { createRoot } from "react-dom/client"
+import { describe, expect, it, vi } from "vitest"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../core/sheet/protocol"
 import {
 	DEFAULT_THEME,
 	MAX_SCROLL_PX,
@@ -14,119 +13,27 @@ import {
 	type SheetGridKeptSizes,
 	type SheetGridSizes
 } from "../react/sheet/index"
-import { RecordingCanvas } from "./sheetGridCanvas"
-import { BASIC, IMMEDIATE, buildFixture } from "./sheetSessionFixtures"
+import {
+	type MountedGrid,
+	key,
+	mountGrid,
+	openGrid,
+	pointer,
+	recorded,
+	registerSheetGridDom,
+	settleGrid,
+	trackRoot
+} from "./sheetGridDomFixtures.dom"
+import { BASIC, buildFixture } from "./sheetSessionFixtures"
 
 // The grid component on the in-thread host: ARIA grid semantics and the active cell's live region, keyboard and
 // pointer selection, the in-cell editor (typing, input methods, Enter and Escape), resizing and autofit from the
 // headers, and scaled scrolling to the sheet's last row.
 
-const WIDTH = 800
-const HEIGHT = 400
-const canvases = new WeakMap<HTMLCanvasElement, RecordingCanvas>()
+registerSheetGridDom()
 
-Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-beforeEach(() => {
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-		let canvas = canvases.get(this)
-
-		if (canvas === undefined) {
-			canvas = new RecordingCanvas()
-			canvases.set(this, canvas)
-		}
-
-		return canvas as unknown as CanvasRenderingContext2D
-	} as unknown as typeof HTMLCanvasElement.prototype.getContext)
-	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? WIDTH : 0
-	})
-	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? HEIGHT : 0
-	})
-	vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(() => undefined)
-})
-
-const roots: Root[] = []
-
-afterEach(() => {
-	for (const root of roots.splice(0)) act(() => root.unmount())
-
-	document.body.innerHTML = ""
-})
-
-async function settle(): Promise<void> {
-	for (let k = 0; k < 6; k++) await act(() => new Promise(resolve => setTimeout(resolve, 0)))
-}
-
-interface Mounted {
-	readonly model: SheetGridModel
-	// What edits go through.
-	readonly session: SheetSessionApi
-	readonly handle: SheetGridHandle
-	readonly root: Root
-	readonly scroller: HTMLElement
-	readonly cells: RecordingCanvas
-	paint(): void
-}
-
-async function mount(bytes = buildFixture(BASIC)): Promise<Mounted> {
-	const host = inThreadSheetHost()
-	const opened = await host.open(bytes, { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
-
-	if (opened.kind !== "opened") throw new Error(opened.kind)
-
-	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
-	const container = document.createElement("div")
-	const ref = createRef<SheetGridHandle>()
-	const root = createRoot(container)
-
-	roots.push(root)
-
-	document.body.appendChild(container)
-	await act(async () => {
-		root.render(
-			<SheetGrid
-				ref={ref}
-				grid={model}
-				label="Sheet"
-				editorLabel="Cell entry"
-				resizeLabel={(axis, px) => `${axis} ${String(px)}`}
-			/>
-		)
-	})
-	await settle()
-
-	const handle = ref.current as SheetGridHandle
-	const scroller = container.querySelector<HTMLElement>(".fo-sheet-scroller") as HTMLElement
-	const cells = canvases.get(container.querySelector("canvas") as HTMLCanvasElement) as RecordingCanvas
-	const paint = (): void => {
-		act(() => handle.renderer.paint())
-	}
-
-	paint()
-	await settle()
-	paint()
-
-	return { model, session: opened.session, handle, root, scroller, cells, paint }
-}
-
-function key(target: Element, init: KeyboardEventInit & { keyCode?: number }): void {
-	act(() => {
-		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
-
-		if (init.keyCode !== undefined) Object.defineProperty(event, "keyCode", { value: init.keyCode })
-
-		target.dispatchEvent(event)
-	})
-}
-
-function pointer(target: Element, type: string, init: PointerEventInit): void {
-	act(() => {
-		target.dispatchEvent(
-			new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, ...init })
-		)
-	})
+function mount(bytes = buildFixture(BASIC)): Promise<MountedGrid> {
+	return mountGrid({ bytes, props: { resizeLabel: (axis, px) => `${axis} ${String(px)}` } })
 }
 
 function cellCenter(handle: SheetGridHandle, row: number, col: number): { clientX: number; clientY: number } {
@@ -192,7 +99,7 @@ describe("SheetGrid", () => {
 		// Recorded from before the answer: the frame it brings draws the cells again, and a frame after it with nothing
 		// new leaves them as drawn.
 		cells.reset()
-		await settle()
+		await settleGrid()
 		paint()
 
 		expect(cells.texts()).toEqual(expect.arrayContaining(["7", "21"]))
@@ -201,7 +108,7 @@ describe("SheetGrid", () => {
 	it("draws only the chrome for a selection move or an entry's keystroke, and the cells again once what they show changed", async () => {
 		const { scroller, model, cells, paint } = await mount()
 		const canvasList = scroller.parentElement?.querySelectorAll("canvas") ?? []
-		const chrome = canvases.get(canvasList[canvasList.length - 1] as HTMLCanvasElement) as RecordingCanvas
+		const chrome = recorded(canvasList[canvasList.length - 1])
 
 		expect(chrome).not.toBe(cells)
 
@@ -287,13 +194,13 @@ describe("SheetGrid", () => {
 		act(() => model.setEditText("half typ"))
 		// The window goes to the background: the editor blurs with nothing focused after it.
 		blur()
-		await settle()
+		await settleGrid()
 
 		expect(model.getSnapshot().editing?.text).toBe("half typ")
 
 		hasFocus.mockReturnValue(true)
 		blur()
-		await settle()
+		await settleGrid()
 
 		expect(model.getSnapshot().editing).toBeNull()
 		expect(model.pendingText(model.getSnapshot().sheet, 0, 0) ?? model.getSnapshot().active.input).toBe("half typ")
@@ -411,7 +318,7 @@ describe("SheetGrid", () => {
 		expect(scroller.parentElement?.querySelector(".fo-sheet-tip")?.textContent).toBe("cols 100")
 
 		pointer(scroller, "pointerup", { clientX: edge + 36, clientY: 10 })
-		await settle()
+		await settleGrid()
 
 		expect(model.getDraft()).toBeNull()
 		expect(model.axes(model.getSnapshot().sheet)?.cols.size(0)).toBe(100)
@@ -421,7 +328,7 @@ describe("SheetGrid", () => {
 		act(() => {
 			scroller.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: header + 100 - 1, clientY: 10 }))
 		})
-		await settle()
+		await settleGrid()
 
 		// Column A's widest text is "45002" (shown as a date's serial in this fixture's General format) or "2":
 		// fitted to it, padding included, and never wider than before.
@@ -462,12 +369,7 @@ describe("SheetGrid", () => {
 	})
 
 	it("draws the theme an app sets in its own effect when it changes the theme key", async () => {
-		const host = inThreadSheetHost()
-		const opened = await host.open(buildFixture(BASIC), { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
-
-		if (opened.kind !== "opened") throw new Error(opened.kind)
-
-		const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
+		const { model } = await openGrid({ bytes: buildFixture(BASIC) })
 		const container = document.createElement("div")
 		const ref = createRef<SheetGridHandle>()
 		const root = createRoot(container)
@@ -492,13 +394,13 @@ describe("SheetGrid", () => {
 			)
 		}
 
-		roots.push(root)
+		trackRoot(root)
 		document.body.appendChild(container)
 		await act(async () => root.render(<App theme="light" />))
-		await settle()
+		await settleGrid()
 
 		const handle = ref.current as SheetGridHandle
-		const cells = canvases.get(container.querySelector("canvas") as HTMLCanvasElement) as RecordingCanvas
+		const cells = recorded(container.querySelector("canvas"))
 		// The fill of the cells' last clear: a frame with nothing new to draw leaves the canvas as it was.
 		const background = (): unknown => {
 			act(() => handle.renderer.paint())
@@ -522,12 +424,7 @@ describe("SheetGrid", () => {
 	})
 
 	it("keeps one handle across renders with new callbacks, so an overlay mounting in a later render can reach it", async () => {
-		const host = inThreadSheetHost()
-		const opened = await host.open(buildFixture(BASIC), { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
-
-		if (opened.kind !== "opened") throw new Error(opened.kind)
-
-		const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
+		const { model } = await openGrid({ bytes: buildFixture(BASIC) })
 		const container = document.createElement("div")
 		const ref = createRef<SheetGridHandle>()
 		const root = createRoot(container)
@@ -558,10 +455,10 @@ describe("SheetGrid", () => {
 			)
 		}
 
-		roots.push(root)
+		trackRoot(root)
 		document.body.appendChild(container)
 		await act(async () => root.render(<App overlay={false} />))
-		await settle()
+		await settleGrid()
 
 		const first = ref.current
 
@@ -585,7 +482,7 @@ describe("SheetGrid", () => {
 		expect(scrolled).toBeGreaterThan(0)
 
 		act(() => model.setSheet(second))
-		await settle()
+		await settleGrid()
 		paint()
 
 		expect(handle.renderer.currentView()?.rows.scroll).toBe(0)
@@ -639,7 +536,7 @@ describe("SheetGrid", () => {
 		pointer(scroller, "pointerdown", { clientX: edge, clientY: 10 })
 		pointer(scroller, "pointermove", { clientX: edge + 36, clientY: 10 })
 		pointer(scroller, "pointerup", { clientX: edge + 36, clientY: 10 })
-		await settle()
+		await settleGrid()
 
 		expect(updates).toEqual([["cols", [[0, 100]]]])
 		expect(model.getDraft()).toBeNull()
@@ -648,7 +545,7 @@ describe("SheetGrid", () => {
 		act(() => {
 			scroller.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: view.cols.header + 100 - 1, clientY: 10 }))
 		})
-		await settle()
+		await settleGrid()
 
 		expect(updates).toHaveLength(2)
 		expect(model.axes(model.getSnapshot().sheet)?.cols.size(0)).toBeLessThan(100)
@@ -691,13 +588,13 @@ describe("SheetGrid: an entry on a cell whose input is not known yet", () => {
 		key(scroller, { key: "ArrowRight" })
 		key(scroller, { key: "ArrowLeft" })
 		key(scroller, { key: "F2" })
-		await settle()
+		await settleGrid()
 
 		const editor = document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
 
 		expect(editor.value).toBe(LONG)
 		key(editor, { key: "Enter" })
-		await settle()
+		await settleGrid()
 
 		expect(await inputOf(model, 0, 0)).toBe(LONG)
 		expect(model.getSnapshot().state.dirty).toBe(false)
@@ -710,7 +607,7 @@ describe("SheetGrid: an entry on a cell whose input is not known yet", () => {
 		key(scroller, { key: "ArrowLeft" })
 		key(scroller, { key: "F2" })
 		key(document.querySelector("textarea.fo-sheet-editor") as HTMLTextAreaElement, { key: "Enter" })
-		await settle()
+		await settleGrid()
 
 		expect(await inputOf(model, 0, 0)).toBe(LONG)
 		expect(model.getSnapshot().state.dirty).toBe(false)
@@ -723,7 +620,7 @@ describe("SheetGrid: an entry on a cell whose input is not known yet", () => {
 		key(scroller, { key: "ArrowLeft" })
 		key(scroller, { key: "Backspace" })
 		key(document.querySelector("textarea.fo-sheet-editor") as HTMLTextAreaElement, { key: "Enter" })
-		await settle()
+		await settleGrid()
 
 		expect(await inputOf(model, 0, 0)).toBe("")
 	})
@@ -735,12 +632,12 @@ describe("SheetGrid: an entry on a cell whose input is not known yet", () => {
 		key(scroller, { key: "ArrowRight" })
 		key(scroller, { key: "7" })
 		key(document.querySelector("textarea.fo-sheet-editor") as HTMLTextAreaElement, { key: "Enter" })
-		await settle()
+		await settleGrid()
 		key(scroller, { key: "ArrowUp" })
 		key(scroller, { key: "ArrowLeft" })
 		key(scroller, { key: "Backspace" })
 		key(document.querySelector("textarea.fo-sheet-editor") as HTMLTextAreaElement, { key: "Enter" })
-		await settle()
+		await settleGrid()
 
 		expect(await inputOf(model, 0, 0)).toBe("")
 	})
@@ -758,7 +655,7 @@ describe("SheetGrid: a formula pointing at another sheet", () => {
 
 		act(() => model.setEditText("=1+"))
 		key(editor, { key: "PageDown", code: "PageDown", ctrlKey: true, altKey: true })
-		await settle()
+		await settleGrid()
 
 		expect(model.getSnapshot().sheet).toBe(second)
 		expect(model.getSnapshot().editing).toMatchObject({ sheet: first, text: "=1+" })
@@ -768,7 +665,7 @@ describe("SheetGrid: a formula pointing at another sheet", () => {
 
 		act(() => model.setEditText("=1+Two!A1"))
 		key(editor, { key: "Enter" })
-		await settle()
+		await settleGrid()
 
 		expect(model.getSnapshot().sheet).toBe(first)
 		expect(model.getSnapshot().editing).toBeNull()

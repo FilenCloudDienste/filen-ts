@@ -1,12 +1,36 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { DocxEditorSession } from "@filen/office/core/docx/edit"
 import { Out, prepareDocxSave, saveDocx, writerProof, zipDocxSave } from "@filen/office/core/docx/write"
 import { CORPUS_DIR } from "./corpusDir"
 import { openBytes } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
 import { buildDocx } from "./docxSynthetic"
+
+// The byte lengths of the documents parsed while `recording`.
+const parsed = vi.hoisted(() => ({ recording: false, lengths: [] as number[] }))
+
+vi.mock("../core/xml/index", async importOriginal => {
+	const original = await importOriginal<typeof import("../core/xml/index")>()
+	const record = (input: unknown): void => {
+		if (parsed.recording && input instanceof Uint8Array) parsed.lengths.push(input.length)
+	}
+
+	return {
+		...original,
+		parseXml: (...args: Parameters<typeof original.parseXml>) => {
+			record(args[0])
+
+			return original.parseXml(...args)
+		},
+		parseXmlSliced: (...args: Parameters<typeof original.parseXmlSliced>) => {
+			record(args[0])
+
+			return original.parseXmlSliced(...args)
+		}
+	}
+})
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "08-large-300p.docx")
 const TARIFF = join(CORPUS_DIR, "docx", "govuk__Tariff_of_the_United_Kingdom_v1.34.docx")
@@ -201,6 +225,42 @@ describe("docx writer performance: people", () => {
 		// The first save reads the source's authors (what the probe sees), the later ones reuse them.
 		expect(first).toBeGreaterThan(1000)
 		expect(later).toEqual([0, 0, 0])
+	})
+})
+
+describe("docx writer performance: a part with a picture", () => {
+	// Word declares a:graphic's and pic:pic's prefixes on them in every picture.
+	const PICTURE =
+		'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/><wp:docPr id="90" name="P"/>' +
+		'<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+		'<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+		'<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="90" name="P"/>' +
+		'<pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdGone"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+		'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
+		"</pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+	const PARAGRAPH =
+		'<w:p><w:r><w:t xml:space="preserve">The quick brown fox jumps over the lazy dog and a cat and a rat.</w:t></w:r></w:p>'
+
+	// Gate 2 parses the new markup of a one-word edit, not the part around it.
+	it("saves a one-word edit without parsing the whole part", { timeout: 60_000 }, async () => {
+		const opened = await openBytes(buildDocx({ body: PICTURE + PARAGRAPH.repeat(5_000) }))
+		const session = new DocxEditorSession(opened.context, { proof: writerProof(opened.context) })
+		const part = opened.context.model.parts.find(each => each.name === "word/document.xml")?.document.bytes.length ?? 0
+
+		session.dispatch(session.state.tr.insertText("x ", session.state.doc.content.size - 10))
+		parsed.lengths = []
+		parsed.recording = true
+
+		try {
+			const saved = await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+
+			expect(saved.changedParts).toEqual(["word/document.xml"])
+		} finally {
+			parsed.recording = false
+		}
+
+		expect(part).toBeGreaterThan(400_000)
+		expect(Math.max(0, ...parsed.lengths)).toBeLessThan(part / 100)
 	})
 })
 

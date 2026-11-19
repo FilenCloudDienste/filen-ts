@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { OPS } from "pdfjs-dist/legacy/build/pdf.mjs"
 import { Layer, OBJECT_FLOATS, OBJECT_INTS, Region, SOURCE_INTS, SourceInt, type DocumentLayout } from "../core/docx/layout/index"
-import type { FontExtents, TextMeasurer } from "../core/text/index"
 import type { DocxEngineServices } from "../dom/docx/index"
 import { exportDocxPdf } from "../dom/docx/pdf"
 import { openPdf, pdfAssets } from "./docxPdfFixtures"
 import { buildDocx, type SyntheticDocx } from "./docxSynthetic"
 import { layOut } from "./layoutFixtures"
+import { engineServices } from "./engineFixtures"
 
 // Floating objects stack by wp:anchor/@relativeHeight (ECMA-376 §20.4.2.3), not by where they are anchored: those
 // behind the text (behindDoc) among themselves, those in front of it among themselves whatever their wrapping.
@@ -135,29 +135,11 @@ describe("floating object stacking", () => {
 	})
 })
 
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
 function services(): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
+	return engineServices({
 		yield: () => new Promise(resolve => setTimeout(resolve, 0)),
 		sliceMs: 8
-	}
+	})
 }
 
 describe("floating object stacking in the PDF export", () => {

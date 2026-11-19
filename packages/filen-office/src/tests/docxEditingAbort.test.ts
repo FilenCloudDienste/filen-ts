@@ -1,41 +1,23 @@
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import { prepareDocxSave, writerProof } from "@filen/office/core/docx/write"
 import type { DocxEngineServices } from "@filen/office/dom/docx"
 import { inThreadEditingHost } from "@filen/office/dom/docx/editing"
 import { buildDocx, p } from "./docxSynthetic"
+import { engineServices } from "./engineFixtures"
 
 // A write of the editor's document (Download as from the editor) given a signal: an abort before or while it runs ends
 // it at its next slice or stage and hands nothing out; the editor and later saves are unaffected.
 
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
-
 function services(onPause: () => void): DocxEngineServices {
-	return {
-		fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
-		replayFonts: false,
-		fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
-		measurer,
+	return engineServices({
 		yield: () => {
 			onPause()
 
 			return Promise.resolve()
 		},
 		sliceMs: 0
-	}
+	})
 }
 
 const BODY = Array.from({ length: 60 }, (_, k) => p(`Paragraph ${String(k)}`)).join("")

@@ -1,17 +1,10 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { CORPUS_DIR } from "./corpusDir"
 import { parts } from "./xlsxWriteFixtures"
-import { cells, firstTile, openFixture, savedBytes, tileEntry, tileTexts } from "./sheetSessionFixtures"
+import { cells, firstTile, openFixture, savedBytes, tileEntry, tileTexts, changeOf } from "./sheetSessionFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason} ${result.refusal.detail ?? ""}`)
-
-	return result.change
-}
 
 function cellXml(sheet: string, ref: string): string {
 	return new RegExp(`<c r="${ref}"[^>]*>.*?</c>`).exec(sheet)?.[0] ?? ""

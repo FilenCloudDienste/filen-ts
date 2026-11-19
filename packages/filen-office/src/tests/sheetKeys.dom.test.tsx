@@ -1,58 +1,20 @@
 // @vitest-environment happy-dom
-import { act, createRef } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetEvent } from "../core/sheet/protocol"
-import { inThreadSheetHost } from "../dom/sheet/host"
-import { SheetGrid, SheetGridModel, type SheetGridHandle } from "../react/sheet/index"
+import { act } from "react"
+import { describe, expect, it, vi } from "vitest"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../core/sheet/protocol"
+import type { SheetGridModel } from "../react/sheet/index"
 import type { SheetKeyBindings, SheetShortcut } from "../react/sheet/keys"
-import { RecordingCanvas } from "./sheetGridCanvas"
+import { type MountedGrid, key, mountGrid, recorded, registerSheetGridDom, settleGrid, unmountGrids } from "./sheetGridDomFixtures.dom"
 import { sheetBody } from "./sheetKeysFixtures"
-import { IMMEDIATE, buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
+import { buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
 import { STYLES } from "./xlsxWriteFixtures"
 
 // The grid's keyboard shortcuts on the in-thread host: fills, selections, entries, formats, sheets and the ones it
 // hands the app.
 
-const canvases = new WeakMap<HTMLCanvasElement, RecordingCanvas>()
+registerSheetGridDom()
 
-Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
-
-beforeEach(() => {
-	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-		let canvas = canvases.get(this)
-
-		if (canvas === undefined) {
-			canvas = new RecordingCanvas()
-			canvases.set(this, canvas)
-		}
-
-		return canvas as unknown as CanvasRenderingContext2D
-	} as unknown as typeof HTMLCanvasElement.prototype.getContext)
-	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? 800 : 0
-	})
-	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains("fo-sheet-scroller") ? 400 : 0
-	})
-})
-
-const roots: Root[] = []
-
-afterEach(() => {
-	for (const root of roots.splice(0)) act(() => root.unmount())
-
-	document.body.innerHTML = ""
-})
-
-async function settle(): Promise<void> {
-	for (let k = 0; k < 8; k++) await act(() => new Promise(resolve => setTimeout(resolve, 0)))
-}
-
-interface Mounted {
-	readonly model: SheetGridModel
-	readonly handle: SheetGridHandle
-	readonly scroller: HTMLElement
+interface Mounted extends MountedGrid {
 	readonly shortcuts: SheetShortcut[]
 }
 
@@ -68,68 +30,24 @@ async function mount(
 	fixture: Parameters<typeof buildFixture>[0] | string = BOOK,
 	options: { readonly mac?: boolean; readonly take?: readonly SheetShortcut[]; readonly bindings?: SheetKeyBindings } = {}
 ): Promise<Mounted> {
-	const host = inThreadSheetHost()
-	// Events before the model exists wait for it, as an app hands them over from the open on.
-	const early: SheetEvent[] = []
-	let target: SheetGridModel | null = null
 	const csv = typeof fixture === "string"
-	const bytes = csv ? new TextEncoder().encode(fixture) : buildFixture(fixture)
-	const opened = await host.open(bytes, { kind: csv ? "csv" : "xlsx", slicing: IMMEDIATE }, event => {
-		if (target === null) early.push(event)
-		else target.handleEvent(event)
-	})
-
-	if (opened.kind !== "opened") throw new Error(opened.kind)
-
-	const model = new SheetGridModel({ source: opened.session, edit: opened.session, info: opened.info })
-
-	target = model
-
-	for (const event of early.splice(0)) model.handleEvent(event)
-	const container = document.createElement("div")
-	const ref = createRef<SheetGridHandle>()
-	const root = createRoot(container)
 	const shortcuts: SheetShortcut[] = []
+	const mounted = await mountGrid({
+		bytes: csv ? new TextEncoder().encode(fixture) : buildFixture(fixture),
+		kind: csv ? "csv" : "xlsx",
+		forwardEvents: true,
+		props: {
+			mac: options.mac ?? false,
+			...(options.bindings !== undefined && { bindings: options.bindings }),
+			onShortcut: shortcut => {
+				shortcuts.push(shortcut)
 
-	roots.push(root)
-	document.body.appendChild(container)
-	await act(async () => {
-		root.render(
-			<SheetGrid
-				ref={ref}
-				grid={model}
-				label="Sheet"
-				editorLabel="Cell entry"
-				mac={options.mac ?? false}
-				{...(options.bindings !== undefined && { bindings: options.bindings })}
-				onShortcut={shortcut => {
-					shortcuts.push(shortcut)
-
-					return options.take?.includes(shortcut) === true
-				}}
-			/>
-		)
-	})
-	await settle()
-	act(() => ref.current?.renderer.paint())
-	await settle()
-
-	return {
-		model,
-		handle: ref.current as SheetGridHandle,
-		scroller: container.querySelector<HTMLElement>(".fo-sheet-scroller") as HTMLElement,
-		shortcuts
-	}
-}
-
-function key(target: Element, init: KeyboardEventInit): KeyboardEvent {
-	const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
-
-	act(() => {
-		target.dispatchEvent(event)
+				return options.take?.includes(shortcut) === true
+			}
+		}
 	})
 
-	return event
+	return { ...mounted, shortcuts }
 }
 
 async function text(model: SheetGridModel, row: number, col: number, sheet = 0): Promise<string | undefined> {
@@ -149,7 +67,7 @@ describe("grid shortcuts", () => {
 			})
 		)
 		expect(key(scroller, { key: "d", code: "KeyD", ctrlKey: true }).defaultPrevented).toBe(true)
-		await settle()
+		await settleGrid()
 
 		expect(await text(model, 2, 0)).toBe("1")
 		expect(await text(model, 2, 1)).toBe("x")
@@ -163,7 +81,7 @@ describe("grid shortcuts", () => {
 			})
 		)
 		key(scroller, { key: "d", code: "KeyD", ctrlKey: true })
-		await settle()
+		await settleGrid()
 
 		// B4 is blank: B5 takes it, empty.
 		expect(await text(model, 4, 1)).toBeUndefined()
@@ -181,7 +99,7 @@ describe("grid shortcuts", () => {
 			})
 		)
 		key(scroller, { key: "r", code: "KeyR", metaKey: true })
-		await settle()
+		await settleGrid()
 
 		expect(await text(model, 1, 2)).toBe("2")
 	})
@@ -190,11 +108,11 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "ArrowDown", code: "ArrowDown", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().selection.active).toEqual({ row: 2, col: 0 })
 
 		key(scroller, { key: "ArrowDown", code: "ArrowDown", ctrlKey: true, shiftKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().selection.ranges).toEqual([{ startRow: 2, startCol: 0, endRow: 4, endCol: 0 }])
 	})
 
@@ -215,7 +133,7 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "Enter", code: "Enter", keyCode: 229 })
-		await settle()
+		await settleGrid()
 
 		expect(model.getSnapshot().selection.active).toEqual({ row: 0, col: 0 })
 		expect(document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor")?.value).toBe("")
@@ -225,11 +143,11 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "a", code: "KeyA", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().selection.ranges).toEqual([{ startRow: 0, startCol: 0, endRow: 2, endCol: 1 }])
 
 		key(scroller, { key: "a", code: "KeyA", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().selection.ranges).toEqual([
 			{ startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: SHEET_MAX_COLS - 1 }
 		])
@@ -266,7 +184,7 @@ describe("grid shortcuts", () => {
 
 		act(() => model.setEditText("=A1*2"))
 		key(editor, { key: "Enter", ctrlKey: true })
-		await settle()
+		await settleGrid()
 
 		const tile = await firstTile(model.session, 0)
 
@@ -296,7 +214,7 @@ describe("grid shortcuts", () => {
 		// Typed text is no reference: nothing changes, and no command repeats.
 		act(() => model.setEditText("hello"))
 		key(editor, { key: "F4", code: "F4" })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().editing?.text).toBe("hello")
 	})
 
@@ -304,7 +222,7 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "b", code: "KeyB", ctrlKey: true })
-		await settle()
+		await settleGrid()
 
 		const bold = (row: number, col: number): boolean => {
 			const found = model.entry(0, row, col)
@@ -316,12 +234,12 @@ describe("grid shortcuts", () => {
 
 		key(scroller, { key: "ArrowDown", code: "ArrowDown" })
 		key(scroller, { key: "F4", code: "F4" })
-		await settle()
+		await settleGrid()
 
 		expect(bold(1, 0)).toBe(true)
 
 		key(scroller, { key: "$", code: "Digit4", ctrlKey: true, shiftKey: true })
-		await settle()
+		await settleGrid()
 
 		expect(await text(model, 1, 0)).toBe("$2.00 ")
 	})
@@ -350,7 +268,7 @@ describe("grid shortcuts", () => {
 			focus: { row: 0, col: 1 }
 		})
 		key(scroller, { key: "F4", code: "F4" })
-		await settle()
+		await settleGrid()
 
 		// B1's "x" stays, and the app hears the merge it must ask about.
 		expect(await text(model, 0, 1)).toBe("x")
@@ -366,11 +284,11 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "PageDown", code: "PageDown", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().sheet).toBe(1)
 
 		key(scroller, { key: "PageUp", code: "PageUp", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().sheet).toBe(0)
 	})
 
@@ -378,11 +296,11 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "PageDown", code: "PageDown", ctrlKey: true, altKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().sheet).toBe(1)
 
 		key(scroller, { key: "PageUp", code: "PageUp", ctrlKey: true, altKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().sheet).toBe(0)
 	})
 
@@ -400,13 +318,13 @@ describe("grid shortcuts", () => {
 		const { model, scroller } = await mount()
 
 		key(scroller, { key: "b", code: "KeyB", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().state.canUndo).toBe(true)
 
 		// Russian: "я" sits on QWERTY's "z".
 		const undo = key(scroller, { key: "я", code: "KeyZ", ctrlKey: true })
 
-		await settle()
+		await settleGrid()
 		expect(undo.defaultPrevented).toBe(true)
 		expect(model.getSnapshot().state.canUndo).toBe(false)
 	})
@@ -416,11 +334,11 @@ describe("grid shortcuts", () => {
 
 		key(scroller, { key: " ", code: "Space", shiftKey: true })
 		key(scroller, { key: "+", code: "Equal", ctrlKey: true, shiftKey: true })
-		await settle()
+		await settleGrid()
 		expect(await text(model, 1, 0)).toBe("1")
 
 		key(scroller, { key: "-", code: "Minus", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(await text(model, 0, 0)).toBe("1")
 	})
 
@@ -437,11 +355,11 @@ describe("grid shortcuts", () => {
 			})
 		)
 		key(scroller, { key: "-", code: "Minus", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect([await text(model, 0, 0), await text(model, 2, 0)]).toEqual(["2", "10"])
 
 		key(scroller, { key: "z", code: "KeyZ", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect([await text(model, 0, 0), await text(model, 2, 0), await text(model, 4, 0)]).toEqual(["1", "3", "10"])
 	})
 
@@ -462,7 +380,7 @@ describe("grid shortcuts", () => {
 			})
 		)
 		key(scroller, { key: "-", code: "Minus", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(refused).toEqual(["multipleSelection:mixed"])
 		expect(await text(model, 0, 0)).toBe("1")
 		expect(model.getSnapshot().state.canUndo).toBe(false)
@@ -470,7 +388,7 @@ describe("grid shortcuts", () => {
 
 	it("shows formulas in their cells with Ctrl+`, and results again with a second press", async () => {
 		const { model, scroller, handle } = await mount({ sheets: [{ name: "One", body: sheetBody([[2, { f: "A1*3", v: 6 }]]) }] })
-		const cells = canvases.get(scroller.parentElement?.querySelector("canvas") as HTMLCanvasElement) as RecordingCanvas
+		const cells = recorded(scroller.parentElement?.querySelector("canvas"))
 		// What was drawn since the last look (a frame with nothing new leaves the cells as drawn).
 		const drawn = (): string[] => {
 			act(() => handle.renderer.paint())
@@ -520,12 +438,12 @@ describe("grid shortcuts", () => {
 			})
 		)
 		key(scroller, { key: "d", code: "KeyD", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(await text(model, 1, 0)).toBe("2")
 
 		const bold = key(scroller, { key: "b", code: "KeyB", ctrlKey: true, altKey: true })
 
-		await settle()
+		await settleGrid()
 		expect(bold.defaultPrevented).toBe(true)
 		expect(model.getSnapshot().state.canUndo).toBe(true)
 		expect(key(scroller, { key: "e", code: "KeyE", ctrlKey: true }).defaultPrevented).toBe(true)
@@ -549,8 +467,7 @@ describe("grid shortcuts", () => {
 			expect(saved.defaultPrevented).toBe(true)
 			expect(shortcuts).toEqual(["save"])
 
-			for (const root of roots.splice(0)) act(() => root.unmount())
-			document.body.innerHTML = ""
+			unmountGrids()
 		}
 	})
 
@@ -619,11 +536,11 @@ describe("a right-to-left sheet", () => {
 
 		// Ctrl+Left goes on screen to the left: the end of the data in the next columns.
 		key(scroller, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().selection.active).toEqual({ row: 0, col: 2 })
 
 		key(scroller, { key: "ArrowRight", code: "ArrowRight", ctrlKey: true })
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().selection.active).toEqual({ row: 0, col: 0 })
 	})
 })
@@ -695,7 +612,7 @@ describe("Enter after a run of Tabs", () => {
 		// The run ended: Enter goes on down the column.
 		key(scroller, { key: "Enter", code: "Enter" })
 		expect(model.getSnapshot().selection.active).toEqual({ row: 2, col: 0 })
-		await settle()
+		await settleGrid()
 	})
 
 	it("goes back to where Tab moves without entries began", async () => {
@@ -747,16 +664,16 @@ describe("entries in a text file", () => {
 		const editor = document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
 
 		key(editor, { key: "Enter", code: "Enter" })
-		await settle()
+		await settleGrid()
 		act(() => handle.renderer.paint())
-		await settle()
+		await settleGrid()
 
 		act(() => handle.goTo({ row: 4, col: 0 }))
-		await settle()
+		await settleGrid()
 		act(() => handle.goTo({ row: 2, col: 0 }))
-		await settle()
+		await settleGrid()
 		act(() => handle.renderer.paint())
-		await settle()
+		await settleGrid()
 
 		expect(model.getSnapshot().active).toMatchObject({ text: "x", input: "x", known: true })
 	})
@@ -765,7 +682,7 @@ describe("entries in a text file", () => {
 		const { model, handle } = await mount("a,b\r\n1,2\r\n")
 
 		act(() => handle.goTo({ row: 1, col: 0 }))
-		await settle()
+		await settleGrid()
 		expect(model.getSnapshot().active).toMatchObject({ input: "1", known: true })
 
 		// Scrolled a few hundred rows at a time, the view needs other tiles: the cache drops what it does not need.
@@ -774,7 +691,7 @@ describe("entries in a text file", () => {
 				handle.renderer.scrollBy(0, 20_000)
 				handle.renderer.paint()
 			})
-			await settle()
+			await settleGrid()
 		}
 
 		expect(model.tiles.has(0)).toBe(true)
@@ -798,9 +715,9 @@ describe("the active cell after rows and columns move", () => {
 		})
 		const at = async (row: number, col: number): Promise<{ text: string; input: string; known: boolean }> => {
 			act(() => handle.goTo({ row, col }))
-			await settle()
+			await settleGrid()
 			act(() => handle.renderer.paint())
-			await settle()
+			await settleGrid()
 
 			const found = model.entry(0, row, col)
 			const painted = found === null ? "" : (found.tile.strings[found.tile.texts[found.entry] ?? -1] ?? "")
@@ -814,7 +731,7 @@ describe("the active cell after rows and columns move", () => {
 			await act(async () => {
 				await model.command(command)
 			})
-			await settle()
+			await settleGrid()
 		}
 
 		await run({ type: "axis.insert", sheet: 0, axis: "rows", at: 1, count: 1 })

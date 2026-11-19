@@ -3,7 +3,7 @@ import { Item } from "../model/kinds"
 import { Ns } from "../model/namespaces"
 import type { StoryPart } from "../model/part"
 import { macroButtonText } from "../model/macroButton"
-import { englishCardinal, englishOrdinal, formatNumber } from "../numbering/formats"
+import { englishCardinal, englishLanguage, englishOrdinal, formatNumber } from "../numbering/formats"
 import type { ResolvedLanguage } from "../props/types"
 
 // Fields whose result layout computes instead of showing the cached result Word stored: page numbers per page,
@@ -108,7 +108,10 @@ export function shownFieldText(result: string, instruction: string): string {
 }
 
 // A page number as a field shows it: the switch's format, else (PAGE) the section's w:pgNumType format.
-export function numberText(value: number, format: string | undefined): string {
+// `language`: the field's w:lang; the English word formats are decimal in another language (formatNumber).
+export function numberText(value: number, format: string | undefined, language?: string): string {
+	if (!englishLanguage(language) && (format === "cardText" || format === "ordText" || format === "dollarText")) return String(value)
+
 	switch (format) {
 		case "cardText":
 			return englishCardinal(value)
@@ -120,7 +123,7 @@ export function numberText(value: number, format: string | undefined): string {
 			return `${englishCardinal(Math.trunc(cents / 100) * Math.sign(value))} and ${String(cents % 100).padStart(2, "0")}/100`
 		}
 		default:
-			return formatNumber(value, format ?? "decimal")
+			return formatNumber(value, format ?? "decimal", undefined, language)
 	}
 }
 

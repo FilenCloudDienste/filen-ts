@@ -187,8 +187,14 @@ const INVALID: readonly object[] = [
 	{ type: "paragraph.spacing" },
 	{ type: "paragraph.indent", firstLine: 360, hanging: 360 },
 	{ type: "link.set" },
-	{ type: "link.set", target: "https://a", anchor: "B" },
+	{ type: "link.set", target: "https://a", heading: 1 },
+	{ type: "link.set", target: "https://a", anchor: "B", heading: 1 },
+	{ type: "link.set", target: "https://a", anchor: "" },
+	{ type: "link.set", target: "https://a", anchor: "B\u0000" },
 	{ type: "link.set", target: "https://a\u0000b" },
+	{ type: "link.set", target: "", anchor: "B" },
+	{ type: "link.set", target: 5, anchor: "B" },
+	{ type: "link.set", target: `https://a/${"a".repeat(2048)}`, anchor: "B" },
 	{ type: "link.set", anchor: "1starts-with-digit" },
 	{ type: "comment.add" },
 	{ type: "comment.reply", id: "abc", text: "x" },
@@ -346,9 +352,25 @@ describe("docx editor command registry", () => {
 		})
 		expect(parseDocxEditorCommand({ type: "table.cell.shading", fill: null })).toEqual({ type: "table.cell.shading", fill: null })
 		expect(parseDocxEditorCommand({ type: "link.set", anchor: "_Toc1" })).toEqual({ type: "link.set", anchor: "_Toc1" })
+		// Bookmark names as bookmark.add takes them: Unicode letters and digits, 40 characters at most.
+		for (const anchor of ["Einführung", "Глава1", "Résumé_2"])
+			expect(parseDocxEditorCommand({ type: "link.set", anchor }), anchor).toEqual({ type: "link.set", anchor })
+		expect(parseDocxEditorCommand({ type: "link.set", anchor: `É${"a".repeat(39)}` })).toBeDefined()
+		expect(parseDocxEditorCommand({ type: "link.set", anchor: `É${"a".repeat(40)}` })).toBeUndefined()
 		expect(parseDocxEditorCommand({ type: "color.text", color: { kind: "rgb", value: "ff00aa" } })).toEqual({
 			type: "color.text",
 			color: { kind: "rgb", value: "FF00AA" }
+		})
+	})
+
+	it("links to a bookmark with a non-ASCII name", async () => {
+		const session = await sessionOf({ body: p("Einführung text") })
+
+		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 1, 5)))
+		expect(session.execute({ type: "link.set", anchor: "Einführung" })).toBe(true)
+		expect(session.state.doc.nodeAt(1)?.marks.find(mark => mark.type === docxSchema.marks.link)?.attrs).toMatchObject({
+			anchor: "Einführung",
+			target: null
 		})
 	})
 

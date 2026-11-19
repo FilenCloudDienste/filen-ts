@@ -7,6 +7,7 @@ import { resolveParagraph, resolveShape } from "../core/presentation/inherit"
 import { PresentationError, type ShapeNode } from "../core/presentation/model"
 import type { CorpusManifest } from "../scripts/corpusManifest"
 import { CORPUS_DIR } from "./corpusDir"
+import { random } from "./random"
 
 // Damaged decks: truncated and bit-flipped copies of corpus files either open (and every slide parses and
 // resolves) or are refused with a typed reason; nothing else escapes the reader.
@@ -18,18 +19,6 @@ const SAMPLES = manifest.files
 	.filter(file => existsSync(join(CORPUS_DIR, file.path)))
 	.sort((a, b) => a.size - b.size)
 	.slice(0, 20)
-
-function random(seed: number): () => number {
-	let state = seed >>> 0 || 1
-
-	return () => {
-		state ^= state << 13
-		state ^= state >>> 17
-		state ^= state << 5
-
-		return (state >>> 0) / 0x100000000
-	}
-}
 
 function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): void {
 	for (const shape of shapes) {

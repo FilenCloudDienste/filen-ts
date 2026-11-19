@@ -10,6 +10,8 @@ import { createTextEditing } from "../react/presentation/edit/text/editing"
 import {
 	copiedRunProps,
 	createFormatPainter,
+	disposeFormatPainter,
+	formatPainterOf,
 	paintRuns,
 	seedRunProps,
 	type FormatPainterHost
@@ -232,6 +234,112 @@ describe("presentation format painter", () => {
 		await vi.waitFor(() => {
 			expect(commands).toHaveLength(2)
 		})
+	})
+
+	it.each([false, true])("leaves the document alone once its deck is disposed (sticky %s)", async sticky => {
+		const shape: ShapeRef = { slide: SLIDE, id: 3 }
+		const commands: DeckOp[] = []
+		const canvas = document.createElement("div")
+
+		canvas.setAttribute("data-fo-shape-edit", "")
+		document.body.append(canvas)
+
+		const text = createTextEditing()
+		const host: FormatPainterHost = {
+			session: { textSeed: ref => Promise.resolve(seed(ref, [{ i: true }])) },
+			text,
+			targets: () => ({ shapes: [shape], entersText: false }),
+			command: op => {
+				commands.push(op)
+
+				return Promise.resolve({ ok: true, revision: 1 } as Awaited<ReturnType<FormatPainterHost["command"]>>)
+			}
+		}
+		const painter = formatPainterOf(text)
+
+		expect(await painter.copy(host, sticky)).toBe(true)
+		disposeFormatPainter(text)
+		expect(painter.mode).toBe("off")
+
+		const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+		const reached = vi.fn()
+
+		document.addEventListener("keydown", reached)
+		document.dispatchEvent(escape)
+		document.removeEventListener("keydown", reached)
+		expect(escape.defaultPrevented).toBe(false)
+		expect(reached).toHaveBeenCalledTimes(1)
+
+		canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+		canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+		await new Promise(resolve => setTimeout(resolve, 5))
+		expect(commands).toHaveLength(0)
+
+		const fresh = formatPainterOf(text)
+
+		expect(fresh).not.toBe(painter)
+		expect(fresh.mode).toBe("off")
+	})
+
+	it("does not turn on when its deck is disposed while a copy reads the format", async () => {
+		const shape: ShapeRef = { slide: SLIDE, id: 3 }
+		const text = createTextEditing()
+		let resolveSeed: ((value: TextSeed) => void) | undefined
+		const host: FormatPainterHost = {
+			session: {
+				textSeed: () =>
+					new Promise<TextSeed>(resolve => {
+						resolveSeed = resolve
+					})
+			},
+			text,
+			targets: () => ({ shapes: [shape], entersText: false }),
+			command: () => Promise.resolve({ ok: true, revision: 1 } as Awaited<ReturnType<FormatPainterHost["command"]>>)
+		}
+		const painter = formatPainterOf(text)
+		const copied = painter.copy(host, true)
+
+		disposeFormatPainter(text)
+		resolveSeed?.(seed(shape, [{ i: true }]))
+		expect(await copied).toBe(false)
+		expect(painter.mode).toBe("off")
+
+		const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+
+		document.dispatchEvent(escape)
+		expect(escape.defaultPrevented).toBe(false)
+	})
+
+	it("swallows a paint's rejected command", async () => {
+		const shape: ShapeRef = { slide: SLIDE, id: 3 }
+		const canvas = document.createElement("div")
+		const command = vi.fn(() => Promise.reject(new Error("closed")))
+
+		canvas.setAttribute("data-fo-shape-edit", "")
+		document.body.append(canvas)
+
+		// A rejection nobody handles fails the run (vitest reports unhandled errors).
+		const host: FormatPainterHost = {
+			session: { textSeed: ref => Promise.resolve(seed(ref, [{ i: true }])) },
+			text: createTextEditing(),
+			targets: () => ({ shapes: [shape], entersText: false }),
+			command
+		}
+		const painter = createFormatPainter(host.text)
+
+		await painter.copy(host)
+		canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+		canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+		await vi.waitFor(() => {
+			expect(command).toHaveBeenCalledTimes(1)
+		})
+
+		await painter.copyFormat(host)
+		expect(painter.pasteFormat(host)).toBe(true)
+		await vi.waitFor(() => {
+			expect(command).toHaveBeenCalledTimes(2)
+		})
+		await new Promise(resolve => setTimeout(resolve, 5))
 	})
 
 	it("carries a shape's first resolved run", () => {

@@ -13,10 +13,10 @@ import {
 import type { DocxLinkTarget, DocxPageData, DocxSessionApi } from "../../dom/docx/protocol"
 import { matchTop, type DocxFindMatch } from "./find"
 import type { DocxMediaCache } from "./media"
-import { paintObjects } from "./paint/objects"
+import { paintObjects, type DocxObjectLabels } from "./paint/objects"
 import { paintPage, type PaintedPage } from "./paint/page"
 import type { DocxDocument, DocxTables } from "./store"
-import { anchoredScrollTop, pageAt, readViewport, type PagesViewport } from "./viewport"
+import { anchoredScrollTop, pageAt, pageLeft, readViewport, stackPages, type PageLayout, type PagesViewport } from "./viewport"
 
 // The page list: scroll height from the page sizes, only the pages in view (plus `overscan` on each side)
 // mounted, each painted once from its display list and scaled by CSS for zoom. Structure and data-*
@@ -54,6 +54,8 @@ export interface DocxPagesProps {
 	readonly className?: string
 	readonly label?: string
 	readonly pageLabel: (index: number, count: number) => string
+	// Accessible names of painted objects (form check boxes), in the host's language; English without them.
+	readonly objectLabels?: DocxObjectLabels
 	// External links (internal ones scroll to their bookmark). The policy is the caller's.
 	readonly onLinkActivate?: (link: Extract<DocxLinkTarget, { kind: "external" }>) => void
 	readonly onPageChange?: (index: number) => void
@@ -67,8 +69,6 @@ export interface DocxPagesProps {
 	readonly ref?: Ref<DocxPagesHandle>
 }
 
-const DEFAULT_PAGE_WIDTH = 816
-const DEFAULT_PAGE_HEIGHT = 1056
 const FIND_HIGHLIGHT = "fo-docx-find"
 const FIND_ACTIVE_HIGHLIGHT = "fo-docx-find-active"
 
@@ -104,47 +104,11 @@ function highlightApi(): { registry: HighlightRegistry; create: () => HighlightL
 	return { registry: registry as HighlightRegistry, create: () => new (HighlightClass as new () => HighlightLike)() }
 }
 
-interface Layout {
-	readonly tops: Float64Array
-	readonly heights: Float64Array
-	readonly widths: Float64Array
-	readonly total: number
-	readonly contentWidth: number
-}
-
-function pageLayout(document: DocxDocument, zoom: number, gap: number, aside: number): Layout {
-	const count = Math.max(document.pageCount, document.pages.length)
-	const tops = new Float64Array(count)
-	const heights = new Float64Array(count)
-	const widths = new Float64Array(count)
-	const fallback = document.pages[document.pages.length - 1]
-	let y = gap
-	let widest = 0
-
-	for (let i = 0; i < count; i++) {
-		const page = document.pages[i]
-		const width = (page?.width ?? fallback?.width ?? document.info?.pageWidth ?? DEFAULT_PAGE_WIDTH) * zoom
-		const height = (page?.height ?? fallback?.height ?? document.info?.pageHeight ?? DEFAULT_PAGE_HEIGHT) * zoom
-
-		tops[i] = y
-		heights[i] = height
-		widths[i] = width
-		widest = Math.max(widest, width)
-		y += height + gap
-	}
-
-	return { tops, heights, widths, total: y, contentWidth: widest + 2 * gap + aside }
-}
-
-function frameLeft(layout: Layout, index: number, viewportWidth: number, aside: number, gap: number): number {
-	return Math.max(gap, ((Math.max(viewportWidth, layout.contentWidth) - aside - (layout.widths[index] ?? 0)) / 2) | 0)
-}
-
 // The overlay, given where the mounted pages sit. Its own component, so a scroll step within the mounted
 // range renders neither it nor what it draws.
 function PagesOverlay(props: {
 	readonly overlay: (frames: readonly DocxPageFrame[]) => ReactNode
-	readonly layout: Layout
+	readonly layout: PageLayout
 	readonly gap: number
 	readonly aside: number
 	readonly first: number
@@ -158,7 +122,7 @@ function PagesOverlay(props: {
 		frames.push({
 			index,
 			top: layout.tops[index] ?? 0,
-			left: frameLeft(layout, index, props.viewportWidth, props.aside, props.gap),
+			left: pageLeft(layout, index, props.viewportWidth, props.aside, props.gap),
 			width: layout.widths[index] ?? 0,
 			height: layout.heights[index] ?? 0
 		})
@@ -181,6 +145,7 @@ export function DocxPages({
 	className,
 	label,
 	pageLabel,
+	objectLabels,
 	onLinkActivate,
 	onPageChange,
 	onViewportWidth,
@@ -194,14 +159,17 @@ export function DocxPages({
 	const containerRef = useRef<HTMLDivElement | null>(null)
 	const [viewport, setViewport] = useState<PagesViewport>({ top: 0, height: 0, width: 0 })
 	// Page positions change with the pages, not with scrolling: computed once per document, zoom and gap.
-	const layout = useMemo(() => pageLayout(document, zoom, gap, aside), [document, zoom, gap, aside])
+	const layout = useMemo(
+		() => stackPages(document, Math.max(document.pageCount, document.pages.length), zoom, gap, aside),
+		[document, zoom, gap, aside]
+	)
 	const count = layout.tops.length
 	// Where the view is, as a page and a fraction of it: kept across zoom changes.
 	const lastPageRef = useRef(-1)
 	// The scroll position before the commit that changed the zoom (the browser may already have clamped
 	// scrollTop to the new, shorter content when the layout effect reads it).
 	const scrollTopRef = useRef(0)
-	const previousRef = useRef<{ layout: Layout; zoom: number } | null>(null)
+	const previousRef = useRef<{ layout: PageLayout; zoom: number } | null>(null)
 	// Null where the browser has no CSS Custom Highlight API: pages then draw boxes over matches.
 	const [highlights] = useState(createHighlights)
 	const session = document.session
@@ -376,7 +344,7 @@ export function DocxPages({
 
 	for (let index = visible.first; index <= visible.last; index++) {
 		const page = document.pages[index]
-		const left = frameLeft(layout, index, viewport.width, aside, gap)
+		const left = pageLeft(layout, index, viewport.width, aside, gap)
 
 		pages.push(
 			page === undefined || cache === undefined || session === undefined ? (
@@ -397,6 +365,7 @@ export function DocxPages({
 					top={layout.tops[index] ?? 0}
 					left={left}
 					label={pageLabel(index, count)}
+					objectLabels={objectLabels}
 					matches={find?.matches}
 					activeMatch={activeMatch?.page === index ? activeMatch : undefined}
 					highlights={highlights}
@@ -447,6 +416,7 @@ interface DocxPageViewProps {
 	readonly top: number
 	readonly left: number
 	readonly label: string
+	readonly objectLabels: DocxObjectLabels | undefined
 	readonly matches: readonly DocxFindMatch[] | undefined
 	readonly activeMatch: DocxFindMatch | undefined
 	readonly highlights: Highlights | null
@@ -524,7 +494,7 @@ function paintFindBoxes(root: HTMLElement, pageWidth: number, all: readonly Rang
 }
 
 function DocxPageView(props: DocxPageViewProps) {
-	const { page, tables, session, media, matches, activeMatch, highlights } = props
+	const { page, tables, session, media, objectLabels, matches, activeMatch, highlights } = props
 	const hostRef = useRef<HTMLDivElement | null>(null)
 	const paintedRef = useRef<PaintedPage | null>(null)
 
@@ -538,7 +508,13 @@ function DocxPageView(props: DocxPageViewProps) {
 
 		host.replaceChildren(result.root)
 
-		const release = paintObjects(result.objects, { document: host.ownerDocument, session, media, signal })
+		const release = paintObjects(result.objects, {
+			document: host.ownerDocument,
+			session,
+			media,
+			signal,
+			...(objectLabels === undefined ? {} : { labels: objectLabels })
+		})
 
 		paintedRef.current = result
 
@@ -548,7 +524,7 @@ function DocxPageView(props: DocxPageViewProps) {
 			host.replaceChildren()
 			paintedRef.current = null
 		}
-	}, [page, tables, session, media])
+	}, [page, tables, session, media, objectLabels])
 
 	// Runs after the paint above whenever either changes (the page is a dependency of both).
 	useEffect(() => {

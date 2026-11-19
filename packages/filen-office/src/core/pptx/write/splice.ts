@@ -2,6 +2,7 @@ import { relationshipKind } from "../../docx/index"
 import { Relationships, crc32, parseRelationships, partKey } from "../../opc/index"
 import { classifyHyperlink } from "../../presentation/actions"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS } from "../../presentation/budget"
+import { shapeById } from "../../presentation/shapes"
 import type { PartChanges } from "../../presentation/edit/apply"
 import { creationId, nextSlideId } from "../../presentation/ids"
 import {
@@ -173,16 +174,6 @@ function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): 
 		visit(shape)
 		if (shape.children !== undefined) walk(shape.children, visit)
 	}
-}
-
-function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	let found: ShapeNode | undefined
-
-	walk(shapes, shape => {
-		if (found === undefined && shape.id === id) found = shape
-	})
-
-	return found
 }
 
 // The shape elements of a source tree (spTree or grpSp) in order: shapes, opaque content and mc:AlternateContent
@@ -1477,7 +1468,7 @@ class Splice {
 		for (const [at, markup] of overlay) editor.replace(at, markup)
 
 		for (const [id, dirt] of change.shapes) {
-			const shape = findShape(node.shapes, id)
+			const shape = shapeById(node.shapes, id)
 
 			if (shape?.src === undefined) continue
 
@@ -1532,7 +1523,7 @@ class Splice {
 		const dropped =
 			(slide?.kind === "slidePart" && slide.part === "background") ||
 			[...change.shapes].some(
-				([id, dirt]) => (dirt.kind === "props" && dirt.group === "fill") || findShape(node.shapes, id) === undefined
+				([id, dirt]) => (dirt.kind === "props" && dirt.group === "fill") || shapeById(node.shapes, id) === undefined
 			)
 		const restoring = writer.hasReleasedMedia(name)
 

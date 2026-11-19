@@ -62,8 +62,19 @@ export function slideSizeOp(
 	return { family: "design", kind: "setSize", cx, cy, ...(size.type === undefined ? {} : { type: size.type }), scale }
 }
 
-export function galleryThemeOp(id: string, variant: number, slides: readonly SlideRef[]): DesignOp {
-	return { family: "design", kind: "setTheme", theme: { kind: "gallery", id, variant }, slides: [...slides] }
+// `layoutNames`: the new layouts' names by type (ST_SlideLayoutType), in the user's language.
+export function galleryThemeOp(
+	id: string,
+	variant: number,
+	slides: readonly SlideRef[],
+	layoutNames?: Readonly<Partial<Record<string, string>>>
+): DesignOp {
+	return {
+		family: "design",
+		kind: "setTheme",
+		theme: { kind: "gallery", id, variant, ...(layoutNames === undefined ? {} : { layoutNames }) },
+		slides: [...slides]
+	}
 }
 
 export function deckThemeOp(theme: DesignThemeInfo, slides: readonly SlideRef[]): DesignOp {

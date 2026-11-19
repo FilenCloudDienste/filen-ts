@@ -1,27 +1,12 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { buildDocxModel, modelStats, openDocxPackage } from "@filen/office/core/docx"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 import { modelProblems } from "./docxIntegrity"
 
 // The licensed real-world corpus is kept out of the repository (pnpm run corpus:fetch); this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
-
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of EXTENSIONS) {
-		const directory = join(CORPUS, extension)
-
-		if (!existsSync(directory)) continue
-
-		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
 
 function percentile(sorted: readonly number[], fraction: number): number {
 	return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0
@@ -29,7 +14,7 @@ function percentile(sorted: readonly number[], fraction: number): number {
 
 describe.skipIf(!existsSync(CORPUS))("docx model over the real-world corpus", () => {
 	it("opens and models every word-processing file with sound spans", { timeout: 300_000 }, async () => {
-		const files = corpusFiles()
+		const files = corpusFiles(EXTENSIONS)
 		const failures: string[] = []
 		const refused = new Map<string, string>()
 		const times: { name: string; ms: number; bytes: number }[] = []

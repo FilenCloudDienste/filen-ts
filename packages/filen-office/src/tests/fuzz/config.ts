@@ -8,23 +8,7 @@ import { CORPUS_DIR } from "../corpusDir"
 // processes that run the fuzz jobs (run.ts). Nothing here loads the package, so a skipped fuzz test costs
 // nothing.
 
-export type Rand = () => number
-
-// mulberry32
-export function rng(seed: number): Rand {
-	let state = seed >>> 0
-
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0
-
-		let t = state
-
-		t = Math.imul(t ^ (t >>> 15), t | 1)
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-	}
-}
+export { rng, type Rand } from "../mulberry32"
 
 // ---- configuration ----
 

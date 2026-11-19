@@ -10,6 +10,7 @@ import {
 	generalWithin,
 	isPlainGeneral,
 	numFmt,
+	numberFormatPresets,
 	numFmtCategory,
 	numFmtProblem
 } from "../core/sheet/numfmt"
@@ -116,6 +117,38 @@ describe("number format categories", () => {
 
 	it("names each Home tab preset by its own category", () => {
 		for (const preset of NUMBER_FORMAT_PRESETS) expect(numFmtCategory(preset.code), preset.code).toBe(preset.category)
+	})
+
+	it("builds the Home tab list in a locale's currency, still naming each preset and the dollar files", () => {
+		expect(numberFormatPresets("$")).toStrictEqual([
+			{ category: "general", code: "General" },
+			{ category: "number", code: "0.00" },
+			{ category: "currency", code: '"$"#,##0.00' },
+			{ category: "accounting", code: '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)' },
+			{ category: "date", code: "m/d/yyyy" },
+			{ category: "date", code: "[$-F800]dddd, mmmm dd, yyyy" },
+			{ category: "time", code: "[$-F400]h:mm:ss AM/PM" },
+			{ category: "percentage", code: "0.00%" },
+			{ category: "fraction", code: "# ?/?" },
+			{ category: "scientific", code: "0.00E+00" },
+			{ category: "text", code: "@" }
+		])
+		expect(numberFormatPresets("$")).toBe(NUMBER_FORMAT_PRESETS)
+
+		const euro = numberFormatPresets("€")
+
+		expect(euro.find(preset => preset.category === "currency")?.code).toBe('"€"#,##0.00')
+		expect(euro.find(preset => preset.category === "accounting")?.code).toBe(
+			'_("€"* #,##0.00_);_("€"* \\(#,##0.00\\);_("€"* "-"??_);_(@_)'
+		)
+		expect(numberFormatPresets("CHF").find(preset => preset.category === "currency")?.code).toBe("[$CHF]#,##0.00")
+
+		for (const symbol of ["€", "£", "￥", "₺", "zł", "CHF", "kr", "R$"])
+			for (const preset of numberFormatPresets(symbol)) expect(numFmtCategory(preset.code), preset.code).toBe(preset.category)
+
+		expect(numFmt("[$CHF]#,##0.00").sections[0]?.tokens.some(token => token.text === "CHF")).toBe(true)
+		expect(numFmtCategory('"$"#,##0.00')).toBe("currency")
+		expect(numFmtCategory('_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)')).toBe("accounting")
 	})
 
 	it("names a locale's currency and a code it cannot place", () => {

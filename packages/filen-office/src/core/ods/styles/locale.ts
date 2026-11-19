@@ -91,8 +91,60 @@ export function odsLocale(language: string | undefined, country: string | undefi
 	return facts === undefined ? undefined : { ...facts, tag }
 }
 
-// The number formatter's language data for a locale id the converted codes carry: separators of the locale, names
-// as en-US (LibreOffice's localized month and day names are not carried).
+// Sunday 2 January 2000, 09:00 UTC: a day period's sample, and the first of the weekdays.
+const SAMPLE = Date.UTC(2000, 0, 2, 9)
+const BASE = { timeZone: "UTC", calendar: "gregory", numberingSystem: "latn" } as const
+
+type Names = Pick<NumFmtLocale, "months" | "monthsShort" | "days" | "daysShort" | "am" | "pm">
+
+function partOf(format: Intl.DateTimeFormat, time: number, type: Intl.DateTimeFormatPartTypes): string | undefined {
+	return format.formatToParts(time).find(part => part.type === type)?.value
+}
+
+// Twelve names, January first, as a date writes them (some languages decline a month after a day); where that is a
+// number with its unit apart ("1" and "月"), the name alone ("1月").
+function monthNames(tag: string, month: "long" | "short"): string[] {
+	const inDate = new Intl.DateTimeFormat(tag, { ...BASE, day: "numeric", month })
+	const alone = new Intl.DateTimeFormat(tag, { ...BASE, month })
+
+	return Array.from({ length: 12 }, (_, i) => {
+		const time = Date.UTC(2000, i, 15)
+		const name = partOf(inDate, time, "month") ?? ""
+
+		return /^\d*$/.test(name) ? alone.format(time) : name
+	})
+}
+
+// Seven names, Sunday first.
+function dayNames(tag: string, weekday: "long" | "short"): string[] {
+	const format = new Intl.DateTimeFormat(tag, { ...BASE, weekday })
+
+	return Array.from({ length: 7 }, (_, i) => partOf(format, Date.UTC(2000, 0, 2 + i), "weekday") ?? "")
+}
+
+// The month and day names and AM and PM of a language, as a [$-xxxx] tag means them in Excel and LibreOffice (the
+// tag's language, whatever the app's); en-US's where the host cannot format the language.
+function namesOf(tag: string): Names {
+	try {
+		if (Intl.DateTimeFormat.supportedLocalesOf([tag]).length === 0) return NUMFMT_EN_US
+
+		const clock = new Intl.DateTimeFormat(tag, { ...BASE, hour: "numeric", hour12: true })
+
+		return {
+			months: monthNames(tag, "long"),
+			monthsShort: monthNames(tag, "short"),
+			days: dayNames(tag, "long"),
+			daysShort: dayNames(tag, "short"),
+			am: partOf(clock, SAMPLE, "dayPeriod") ?? NUMFMT_EN_US.am,
+			pm: partOf(clock, SAMPLE + 12 * 3_600_000, "dayPeriod") ?? NUMFMT_EN_US.pm
+		}
+	} catch {
+		return NUMFMT_EN_US
+	}
+}
+
+// The number formatter's language data for a locale id the converted codes carry: separators, month and day names
+// and AM and PM of the locale.
 // Asked for every formatted value: one answer per locale id, built once (the first listing of an id wins).
 const NUMFMT_LOCALES = new Map<number, NumFmtLocale | undefined>()
 
@@ -101,9 +153,11 @@ export function numFmtLocaleFor(lcid: number): NumFmtLocale | undefined {
 
 	let locale: NumFmtLocale | undefined
 
-	for (const facts of LOCALES.values()) {
+	for (const [tag, facts] of LOCALES) {
 		if (facts.lcid === lcid) {
-			locale = { ...NUMFMT_EN_US, decimal: facts.decimal, group: facts.group }
+			const { months, monthsShort, days, daysShort, am, pm } = namesOf(tag)
+
+			locale = { ...NUMFMT_EN_US, decimal: facts.decimal, group: facts.group, months, monthsShort, days, daysShort, am, pm }
 
 			break
 		}

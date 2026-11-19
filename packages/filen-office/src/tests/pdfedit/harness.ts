@@ -1,4 +1,5 @@
 import { MessageChannel, Worker, type MessagePort } from "node:worker_threads"
+import { expect } from "vitest"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
 import { PdfEngineClient, type PdfEngineWorkerLike } from "../../dom/pdfedit/client"
@@ -126,6 +127,45 @@ export function spawnEngine(setup: EngineSetup, onTerminate?: () => void): PdfEn
 	running.push(client)
 
 	return client
+}
+
+// A channel the engine reads `bytes` through (its port is transferred with the request).
+export function serveBytes(bytes: Uint8Array): { buffer: SharedArrayBuffer; port: SyncRangePort; length: number } {
+	const buffer = createSyncRangeBuffer(8, 64 * 1024)
+	const channel = new MessageChannel()
+	const lifetime = new AbortController()
+
+	serveSyncRange(
+		buffer,
+		syncPort(channel.port2),
+		{ length: bytes.length, read: (start, end) => Promise.resolve(bytes.slice(start, end)) },
+		{ lifetime: lifetime.signal, readAhead: 2, onReaderClose: () => lifetime.abort() }
+	)
+
+	return { buffer, port: channel.port1 as unknown as SyncRangePort, length: bytes.length }
+}
+
+// A verifying engine on the editing engine's held output, opened with `password`.
+export async function verifier(client: PdfEngineClient, size: number, password?: string): Promise<PdfEngineClient> {
+	const buffer = createSyncRangeBuffer(8, 64 * 1024)
+	const channel = new MessageChannel()
+
+	await client.call("serveOutput", { buffer, port: channel.port1 as unknown as SyncRangePort }, [channel.port1])
+
+	const engine = spawnEngine({})
+	const opened = await engine.call(
+		"open",
+		{
+			channel: { buffer, port: channel.port2 as unknown as SyncRangePort, length: size },
+			role: "verify",
+			...(password === undefined ? {} : { password })
+		},
+		[channel.port2]
+	)
+
+	expect(opened.status).toBe("open")
+
+	return engine
 }
 
 // Terminates every engine the tests started (afterEach).

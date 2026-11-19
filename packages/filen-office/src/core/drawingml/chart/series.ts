@@ -1,6 +1,6 @@
 import type { Rgba } from "../displayList"
 import { D } from "../reader"
-import { PX_PER_PT, type ChartBuilder } from "./builder"
+import { PX_PER_PT, unnamedSeries, type ChartBuilder, type ChartText } from "./builder"
 import type { SeriesData } from "./data"
 import type { Plot } from "./model"
 import { backgroundColor, seriesColor } from "./palette"
@@ -211,6 +211,6 @@ export function appendMarker(builder: ChartBuilder, symbol: MarkerSymbol, x: num
 	}
 }
 
-export function seriesName(series: SeriesData, position: number): string {
-	return series.name !== "" ? series.name : `Series${position + 1}`
+export function seriesName(series: SeriesData, position: number, text: ChartText): string {
+	return series.name !== "" ? series.name : unnamedSeries(text, position + 1)
 }

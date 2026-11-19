@@ -1,4 +1,4 @@
-import { escapeAttribute, decodeUtf8, encodeUtf8 } from "../../xml/index"
+import { escapeAttribute, decodeUtf8, encodeUtf8, parseXml, XmlError, type XmlDocument } from "../../xml/index"
 import type { SheetId, SheetRange } from "../../sheet/protocol"
 import { inBand, shiftRange, straddles, type AxisShift } from "./axis"
 import { refuse } from "./catalogue"
@@ -34,6 +34,27 @@ export interface TableInfo {
 	readonly related: readonly string[]
 }
 
+// A table's name as structured references name it (§18.5.1.2 table@displayName), its name attribute when that is
+// missing.
+export function tableName(document: XmlDocument, root: number): string | undefined {
+	return document.attribute(root, "displayName") ?? document.attribute(root, "name")
+}
+
+// A table part's markup, its root the table element; null when it does not parse or is no table.
+export function tablePart(bytes: Uint8Array): XmlDocument | null {
+	let document: XmlDocument
+
+	try {
+		document = parseXml(bytes)
+	} catch (error) {
+		if (error instanceof XmlError) return null
+
+		throw error
+	}
+
+	return document.localName(document.documentElement()) === "table" ? document : null
+}
+
 export function readTable(
 	part: string,
 	contentType: string,
@@ -42,7 +63,19 @@ export function readTable(
 	bytes: Uint8Array,
 	related: readonly string[]
 ): TableInfo {
-	const { document } = editMarkup(bytes, `table ${part}`)
+	return tableInfo(editMarkup(bytes, `table ${part}`).document, part, contentType, sheet, relationship, bytes, related)
+}
+
+// readTable on the part's markup already parsed.
+export function tableInfo(
+	document: XmlDocument,
+	part: string,
+	contentType: string,
+	sheet: SheetId,
+	relationship: string,
+	bytes: Uint8Array,
+	related: readonly string[]
+): TableInfo {
 	const root = document.documentElement()
 	const ref = parseRef(document.attribute(root, "ref") ?? "")
 
@@ -62,7 +95,7 @@ export function readTable(
 		sheet,
 		relationship,
 		id: Number(document.attribute(root, "id") ?? "0"),
-		name: document.attribute(root, "name") ?? document.attribute(root, "displayName") ?? "",
+		name: tableName(document, root) ?? "",
 		ref,
 		headerRows: Number(document.attribute(root, "headerRowCount") ?? "1"),
 		totalsRows: Number(document.attribute(root, "totalsRowCount") ?? "0"),

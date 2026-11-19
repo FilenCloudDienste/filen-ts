@@ -8,21 +8,52 @@ import { MAX_NUMFMT_LENGTH, SectionKind, Tok, type NumFmt, type NumFmtSection } 
 export type NumFmtCategory =
 	"general" | "number" | "currency" | "accounting" | "date" | "time" | "percentage" | "fraction" | "scientific" | "text" | "custom"
 
-// The Number Format list of Excel's Home tab (en-US), in its order; built-in codes where Excel uses them (ECMA-376
-// Part 1 §18.8.30: 14 short date, 44 accounting; MS-OI29500 §2.1.712 a).
-export const NUMBER_FORMAT_PRESETS: readonly { readonly category: Exclude<NumFmtCategory, "custom">; readonly code: string }[] = [
-	{ category: "general", code: "General" },
-	{ category: "number", code: "0.00" },
-	{ category: "currency", code: '"$"#,##0.00' },
-	{ category: "accounting", code: '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)' },
-	{ category: "date", code: "m/d/yyyy" },
-	{ category: "date", code: "[$-F800]dddd, mmmm dd, yyyy" },
-	{ category: "time", code: "[$-F400]h:mm:ss AM/PM" },
-	{ category: "percentage", code: "0.00%" },
-	{ category: "fraction", code: "# ?/?" },
-	{ category: "scientific", code: "0.00E+00" },
-	{ category: "text", code: "@" }
-]
+export interface NumberFormatPreset {
+	readonly category: Exclude<NumFmtCategory, "custom">
+	readonly code: string
+}
+
+const presetLists = new Map<string, readonly NumberFormatPreset[]>()
+
+// A currency symbol as a code holds it: quoted when it has a currency sign, as typed entries write it; in a [$...]
+// bracket when it is letters only ("CHF", "kr"), as Excel writes those, since quoted letters read as a unit.
+function currencyLiteral(symbol: string): string {
+	const bare = symbol.replace(/["\-\]]/gu, "")
+
+	if (bare === "") return '"$"'
+
+	return /\p{Sc}/u.test(bare) ? `"${bare}"` : `[$${bare}]`
+}
+
+// The Number Format list of Excel's Home tab (en-US), in its order, its currency and accounting formats in `symbol`
+// (the locale's currency); built-in codes where Excel uses them (ECMA-376 Part 1 §18.8.30: 14 short date, 44
+// accounting in "$"; MS-OI29500 §2.1.712 a). Built once per symbol.
+export function numberFormatPresets(symbol: string): readonly NumberFormatPreset[] {
+	let presets = presetLists.get(symbol)
+
+	if (presets === undefined) {
+		const literal = currencyLiteral(symbol)
+
+		presets = [
+			{ category: "general", code: "General" },
+			{ category: "number", code: "0.00" },
+			{ category: "currency", code: `${literal}#,##0.00` },
+			{ category: "accounting", code: `_(${literal}* #,##0.00_);_(${literal}* \\(#,##0.00\\);_(${literal}* "-"??_);_(@_)` },
+			{ category: "date", code: "m/d/yyyy" },
+			{ category: "date", code: "[$-F800]dddd, mmmm dd, yyyy" },
+			{ category: "time", code: "[$-F400]h:mm:ss AM/PM" },
+			{ category: "percentage", code: "0.00%" },
+			{ category: "fraction", code: "# ?/?" },
+			{ category: "scientific", code: "0.00E+00" },
+			{ category: "text", code: "@" }
+		]
+		presetLists.set(symbol, presets)
+	}
+
+	return presets
+}
+
+export const NUMBER_FORMAT_PRESETS: readonly NumberFormatPreset[] = numberFormatPresets("$")
 
 // The Comma Style button's code: accounting without the currency symbol (built-in 43).
 export const COMMA_STYLE = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'
@@ -34,7 +65,7 @@ function hasToken(section: NumFmtSection, kind: number): boolean {
 }
 
 function hasCurrency(code: string, section: NumFmtSection): boolean {
-	return /\[\$[^-\]]/u.test(code) || section.tokens.some(token => token.kind === Tok.LITERAL && /[$€£¥₹₩₽¤]/u.test(token.text))
+	return /\[\$[^-\]]/u.test(code) || section.tokens.some(token => token.kind === Tok.LITERAL && /\p{Sc}/u.test(token.text))
 }
 
 function showsDay(section: NumFmtSection): boolean {

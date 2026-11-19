@@ -1,17 +1,14 @@
 import { strFromU8, unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { readRtf } from "../core/rtf/index"
+import { latin1 } from "./rtfLatin1"
 
 // An RTF style definition is whole (RTF 1.9.1: a style lists its formatting; \sbasedonN names the style it came
 // from): what it leaves at the RTF default stays at that default in the docx style, though its w:basedOn sets it.
 // A character style adds to the text's formatting (\additive), so it is written as it is.
 
-function bytes(text: string): Uint8Array {
-	return Uint8Array.from(text, character => character.charCodeAt(0) & 0xff)
-}
-
 async function styles(rtf: string): Promise<Map<string, string>> {
-	const result = await readRtf(bytes(rtf))
+	const result = await readRtf(latin1(rtf))
 
 	if (!result.ok) throw new Error(result.reason)
 

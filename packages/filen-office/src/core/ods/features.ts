@@ -2,6 +2,7 @@ import { appendAll, minOf } from "../arrays"
 import type { OdfElement } from "../odf/tree"
 import { parseColor } from "../odf/units"
 import { parseRelationships, type Relationship } from "../opc/relationships"
+import { columnIndex } from "../sheet/refs/cellRef"
 import { escapeAttribute, escapeText } from "../xml/index"
 import type { XlsxDefinedName, XlsxDxf, XlsxSection } from "../xlsx/model/types"
 import {
@@ -555,11 +556,8 @@ function targetRange(address: string): TargetRange | null {
 		.replaceAll("''", "'")
 	const ref = text.slice(bang + 1).replaceAll("$", "")
 	const column = /^([A-Z]{1,3})/.exec(ref)?.[1] ?? "A"
-	let firstCol = 0
 
-	for (const letter of column) firstCol = firstCol * 26 + (letter.charCodeAt(0) - 64)
-
-	return { sheet, ref, firstCol: firstCol - 1 }
+	return { sheet, ref, firstCol: columnIndex(column) }
 }
 
 const FILTER_OPERATORS: Readonly<Record<string, string>> = {
@@ -803,14 +801,7 @@ export function conditionalSections(formats: readonly OdfElement[], tableName: s
 			// starts at row 1, a whole row at column A).
 			const corners = sqref.split(" ").map(item => /^([A-Z]{0,3})(\d*)$/.exec(item.split(":")[0] ?? ""))
 			const originRow = Math.max(0, minOf(corners.map(corner => Number(corner?.[2] || "1") - 1)))
-			const originCol = Math.max(
-				0,
-				minOf(
-					corners.map(
-						corner => [...(corner?.[1] || "A")].reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0) - 1
-					)
-				)
-			)
+			const originCol = Math.max(0, minOf(corners.map(corner => columnIndex(corner?.[1] || "A"))))
 			const first = cellRef(originRow, originCol)
 
 			for (const rule of format.children) {

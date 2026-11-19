@@ -2,7 +2,7 @@ import { FontError } from "./errors"
 
 // Fonts embedded in WordprocessingML (ECMA-376 Part 1, font embedding) are obfuscated: the first 32 bytes
 // are XORed with the 16 bytes of the w:fontKey GUID, taken in reverse order of its hex digits. XOR is its
-// own inverse, so the same routine obfuscates for re-embedding.
+// own inverse.
 
 const OBFUSCATED_BYTES = 32
 
@@ -36,5 +36,3 @@ export function deobfuscateFont(data: Uint8Array, fontKey: string | Uint8Array, 
 
 	return out
 }
-
-export const obfuscateFont = deobfuscateFont

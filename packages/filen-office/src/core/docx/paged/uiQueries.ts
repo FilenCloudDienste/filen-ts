@@ -2,6 +2,7 @@ import { sessionBookmarks, type BookmarkIndex, type DocxBookmark } from "../fiel
 import { datePicture } from "../fields/evaluate"
 import {
 	DOCX_NOTE_NUMBER_FORMATS,
+	DOCX_NOTE_POSITIONS,
 	type DocxNoteKind,
 	type DocxNoteNumberFormat,
 	type DocxNotePosition,
@@ -23,6 +24,9 @@ import type { PagedEditor } from "./editor"
 // What an app's dialogs show before they change something: the caret's section's page setup and note numbering
 // (what page.setup and note.options would change, edits included), the bookmarks a link can go to, and a date
 // as a date field's picture shows it. Read on demand (a dialog opening), never per keystroke.
+
+// The positions the Footnote and Endnote dialog offers per kind: the ones note.options takes.
+export { DOCX_NOTE_POSITIONS }
 
 // Every setting of Word's Page Setup dialog, in twips.
 export interface DocxCurrentPageSetup {
@@ -52,7 +56,6 @@ export interface DocxCurrentPageSetup {
 
 const PAGE_NUMBER_FORMATS: ReadonlySet<string> = new Set(DOCX_PAGE_NUMBER_FORMATS)
 const NOTE_NUMBER_FORMATS: ReadonlySet<string> = new Set(DOCX_NOTE_NUMBER_FORMATS)
-const NOTE_POSITIONS: ReadonlySet<string> = new Set(["pageBottom", "beneathText", "sectEnd", "docEnd"])
 // Word's line numbers' distance from the text when the file gives none ("Auto": a quarter inch, as layout takes it).
 const LINE_NUMBER_DISTANCE = 360
 
@@ -133,7 +136,13 @@ export function currentNoteOptions(editor: PagedEditor, kind: DocxNoteKind): Doc
 		start: section?.numStart ?? base.start,
 		// Endnotes never restart on each page.
 		restart: restart === "eachSect" || (restart === "eachPage" && !endnote) ? restart : "continuous",
-		position: NOTE_POSITIONS.has(position) ? (position as DocxNotePosition) : endnote ? "docEnd" : "pageBottom"
+		// One of the kind's own (a footnote at the document's end is schema-valid but no choice of Word's dialog),
+		// else the kind's default.
+		position: (DOCX_NOTE_POSITIONS[kind] as readonly string[]).includes(position)
+			? (position as DocxNotePosition)
+			: endnote
+				? "docEnd"
+				: "pageBottom"
 	}
 }
 

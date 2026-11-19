@@ -563,6 +563,8 @@ interface PageFieldText {
 	// The fields' \* format (undefined: the section's), the kind of characters they show (see resultKind) and the
 	// styles they are drawn in.
 	readonly format: string | undefined
+	// The language they write that format in (BuiltParagraph.pageLanguages).
+	readonly language: string | undefined
 	readonly kind: number
 	readonly styles: readonly number[]
 	// What every field shows now.
@@ -1091,7 +1093,7 @@ export class BlockFlow {
 
 		if (fields === null) return false
 
-		const result = pageNumberText(values.page, fields.format ?? values.pageFormat, values.chapter)
+		const result = pageNumberText(values.page, fields.format ?? values.pageFormat, values.chapter, fields.language)
 
 		if (resultKind(result) !== fields.kind) return false
 
@@ -1191,9 +1193,14 @@ export class BlockFlow {
 
 		const format = this.pageFieldFormat()
 
-		if (format === null || pageNumberText(values.page, format ?? values.pageFormat, values.chapter) !== result) return null
+		// One language for all of them (each field writes its own format in its run's).
+		const languages = built.pageLanguages
+		const language = languages[0]
 
-		return { segments, format, kind, styles, result, next: 0 }
+		if (languages.some(other => other !== language)) return null
+		if (format === null || pageNumberText(values.page, format ?? values.pageFormat, values.chapter, language) !== result) return null
+
+		return { segments, format, language, kind, styles, result, next: 0 }
 	}
 
 	// The \* format all PAGE fields of the pending paragraph share (undefined: the section's), or null when they

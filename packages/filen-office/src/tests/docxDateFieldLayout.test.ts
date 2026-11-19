@@ -61,6 +61,20 @@ describe("DATE and TIME fields as laid out", () => {
 		).toEqual(["12. Oktober 2026"])
 	})
 
+	it("shows a DATE or TIME field without a picture in its language's short date and time (w:lang)", async () => {
+		const german = { rPr: '<w:rPr><w:lang w:val="de-DE"/></w:rPr>' }
+
+		expect(
+			await shown([
+				complex(" DATE ", "1.1.2000", german),
+				complex(" TIME ", "09:00", german),
+				complex(' DATE \\@ "M/d/yyyy" ', "1/1/2000", german),
+				complex(" DATE ", "1/1/2000", { rPr: '<w:rPr><w:lang w:val="en-US"/></w:rPr>' }),
+				complex(" DATE ", "1/1/2000")
+			])
+		).toEqual(["12.10.2026", "14:05", "10/12/2026", "10/12/2026", "10/12/2026"])
+	})
+
 	it("keeps the stored result of locked fields and of CREATEDATE, SAVEDATE and PRINTDATE", async () => {
 		expect(
 			await shown([

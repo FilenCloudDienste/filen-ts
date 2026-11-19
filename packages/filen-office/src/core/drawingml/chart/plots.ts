@@ -734,7 +734,7 @@ export function drawBars(frame: PlotFrame): void {
 			const share = totals === null ? Number.NaN : raw / ((totals[k] ?? 0) || 1)
 			const text = labelText(
 				config,
-				seriesName(series, order),
+				seriesName(series, order, frame.builder.chartText),
 				frame.categories[k] ?? "",
 				raw,
 				valueFormat(series),
@@ -845,7 +845,7 @@ function pointLabels(
 
 		const text = labelText(
 			config,
-			seriesName(series, order),
+			seriesName(series, order, frame.builder.chartText),
 			frame.categories[k] ?? "",
 			raw,
 			valueFormat(series),
@@ -1428,7 +1428,7 @@ export function drawPie(frame: PlotFrame): void {
 
 			const text = labelText(
 				config,
-				seriesName(series, ring),
+				seriesName(series, ring, builder.chartText),
 				frame.categories[k] ?? "",
 				values?.[k] ?? 0,
 				valueFormat(series),

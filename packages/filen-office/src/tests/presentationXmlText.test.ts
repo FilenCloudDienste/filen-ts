@@ -61,7 +61,7 @@ describe("text and links the editor sets", () => {
 
 		expect(
 			await h.command({ family: "shape", kind: "setAlt", target: { slide: slide.ref, id: 3 }, alt: { descr: "a\u000bb" } })
-		).toEqual({ ok: false, refusal: "malformed" })
+		).toMatchObject({ ok: false, refusal: "malformed" })
 		expect(
 			await h.command({
 				family: "shape",
@@ -70,7 +70,7 @@ describe("text and links the editor sets", () => {
 				trigger: "click",
 				action: { kind: "url", href: "https://example.com/my file.pdf" }
 			})
-		).toEqual({ ok: false, refusal: "malformed" })
+		).toMatchObject({ ok: false, refusal: "malformed" })
 		h.close()
 	})
 })

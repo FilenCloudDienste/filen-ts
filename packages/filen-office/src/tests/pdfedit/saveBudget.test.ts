@@ -1,4 +1,3 @@
-import { MessageChannel } from "node:worker_threads"
 import { randomBytes } from "node:crypto"
 import { afterEach, describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
@@ -13,9 +12,8 @@ import {
 } from "../../core/pdfedit"
 import { PDF_UNSIGNED } from "../../core/pdfedit/signaturePolicy"
 import { insertedImageBytes } from "../../dom/pdfedit/pages/organise"
-import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import { makePdf } from "./fixtures"
-import { startEngine, stopEngines, syncPort } from "./harness"
+import { serveBytes, startEngine, stopEngines } from "./harness"
 import { budget } from "../timing"
 
 // The memory budget counts what the edits add (pictures, other files' pages) on top of the file, gates every change
@@ -63,21 +61,6 @@ function picturePdf(pages: number): Uint8Array {
 	document.destroy()
 
 	return bytes
-}
-
-function serveBytes(bytes: Uint8Array): { buffer: SharedArrayBuffer; port: SyncRangePort; length: number } {
-	const buffer = createSyncRangeBuffer(8, 64 * 1024)
-	const channel = new MessageChannel()
-	const lifetime = new AbortController()
-
-	serveSyncRange(
-		buffer,
-		syncPort(channel.port2),
-		{ length: bytes.length, read: (start, end) => Promise.resolve(bytes.slice(start, end)) },
-		{ lifetime: lifetime.signal, readAhead: 2, onReaderClose: () => lifetime.abort() }
-	)
-
-	return { buffer, port: channel.port1 as unknown as SyncRangePort, length: bytes.length }
 }
 
 describe("the memory budget", () => {

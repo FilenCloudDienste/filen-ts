@@ -1,4 +1,5 @@
 import type { FontFaceDescriptor, FontHost } from "../core/fonts/index"
+import { clearTimer, setTimer } from "./platform"
 
 // FontHost over the CSS Font Loading API, for a window (`{ FontFace, fonts: document.fonts }`) or a worker
 // (`self`). Fonts load from bytes or local(): the apps' `font-src 'self'` blocks blob: and data: URLs, and
@@ -56,19 +57,6 @@ export const LOCAL_FONT_TIMEOUT_MS = 3000
 // Faces whose load has not settled. Firefox's workers collect a FontFace that only its own pending load refers to,
 // and that load then never settles; holding each one here until it does keeps it alive.
 const loading = new Set<FontFaceLike>()
-
-// Timers through globalThis: the module type-checks without DOM or Node typings.
-function setTimer(run: () => void, ms: number): unknown {
-	const set: unknown = Reflect.get(globalThis, "setTimeout")
-
-	return typeof set === "function" ? Reflect.apply(set, globalThis, [run, ms]) : undefined
-}
-
-function clearTimer(handle: unknown): void {
-	const clear: unknown = Reflect.get(globalThis, "clearTimeout")
-
-	if (typeof clear === "function") Reflect.apply(clear, globalThis, [handle])
-}
 
 async function load(fontFace: FontFaceLike, timeoutMs: number | undefined): Promise<void> {
 	loading.add(fontFace)

@@ -1,7 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate"
 import { HyperFormula } from "hyperformula"
 import { describe, expect, it, vi } from "vitest"
-import type { SheetChange, SheetCommandResult, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
+import type { SheetChange, SheetSessionApi, SheetTile } from "../core/sheet/protocol"
 import type { SheetSession } from "../core/sheet/session"
 import type { XlsxDocument } from "../core/xlsx/edit/document"
 import { takesOneValue } from "../core/sheet/functions/valueArguments"
@@ -12,7 +12,7 @@ import { inThreadSheetHost } from "../dom/sheet/host"
 import { compareRecords, modelRecord, readSaved } from "./fuzz/sheet/compare"
 import { buildXlsx } from "./oracles/sheet/synthetic"
 import { strictOf } from "./sheetDrawingsFixtures"
-import { openFixture } from "./sheetSessionFixtures"
+import { openFixture, changeOf, IMMEDIATE } from "./sheetSessionFixtures"
 import { TYPES, relationship } from "./xlsxRefsFixtures"
 
 // Dynamic arrays in a workbook (support.microsoft.com "Dynamic array formulas and spilled array behavior"; [MS-XLSX]
@@ -20,7 +20,6 @@ import { TYPES, relationship } from "./xlsxRefsFixtures"
 // over, the values there are written to their cells, and #SPILL! is stored when a cell is in the way. A formula typed
 // that gives an array is stored as one, with the metadata part made for it.
 
-const IMMEDIATE = { sliceMs: 1_000_000, now: () => 0, pause: () => Promise.resolve() }
 const EXCEL = { name: "Microsoft Excel", version: "16.0300" }
 
 // The metadata part Excel writes for dynamic arrays (one XLDAPR record, cm 1).
@@ -71,12 +70,6 @@ async function open(bytes: Uint8Array): Promise<{ session: SheetSessionApi; shee
 	expect(await result.session.intent()).toEqual({ state: "writable" })
 
 	return { session: result.session, sheet }
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason} ${result.refusal.detail ?? ""}`)
-
-	return result.change
 }
 
 async function set(session: SheetSessionApi, sheet: number, cell: string, input: string): Promise<SheetChange> {

@@ -5,6 +5,7 @@ import { matchesType } from "../constraints"
 import { pointText } from "../data"
 import type { LayoutContext, LayoutNode } from "../interp"
 import { measureText } from "../measure"
+import { childFontPt } from "../textDefaults"
 import { sizeOf } from "./shared"
 
 const EMU_PER_PT = 12700
@@ -85,7 +86,7 @@ export function txLayout(node: LayoutNode, context: LayoutContext): void {
 		const width = Math.max(0, inset.w - margin("lMarg", pt) - margin("rMarg", pt))
 		const height = Math.max(0, inset.h - margin("tMarg", pt) - margin("bMarg", pt))
 		// The children's text is set at the secondary size where one is given, never above the node's own.
-		const childPt = secondary !== undefined && Number.isFinite(secondary) && secondary > 0 ? Math.min(secondary, pt) : pt
+		const childPt = childFontPt(secondary, pt)
 		const measured =
 			rich === undefined || measurer.measureText === undefined
 				? measurer.measure(text, pt, width)
@@ -143,7 +144,7 @@ export function textHeight(node: LayoutNode, width: number, context: LayoutConte
 	const margin = (name: string): number => node.values.get(name) ?? DEFAULT_MARGIN * start * EMU_PER_PT
 	const measurer = context.measurer
 	const secondary = node.values.get("secFontSz")
-	const childPt = secondary !== undefined && Number.isFinite(secondary) && secondary > 0 ? Math.min(secondary, start) : start
+	const childPt = childFontPt(secondary, start)
 	const inner = Math.max(0, width - margin("lMarg") - margin("rMarg"))
 	const measured =
 		measurer.measureText === undefined

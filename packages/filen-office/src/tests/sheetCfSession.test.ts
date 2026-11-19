@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest"
-import {
-	CellFlag,
-	type SheetChange,
-	type SheetCommandResult,
-	type SheetRenderStyle,
-	type SheetStyleAppend,
-	type SheetTile
-} from "../core/sheet/protocol"
+import { CellFlag, type SheetRenderStyle, type SheetStyleAppend, type SheetTile } from "../core/sheet/protocol"
 import { ICON_SETS } from "../core/sheet/cf/layers"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { IMMEDIATE, STYLES_WITH, cells, tileEntry } from "./sheetCfFixtures"
 import { buildFixture, type Fixture } from "./xlsxWriteFixtures"
+import { changeOf } from "./sheetSessionFixtures"
 
 // Conditional formats on a session's tiles: each rule type's look, priorities and stopIfTrue, number formats in
 // rules, data bars and icons, and tiles patched when a value a rule reads changes elsewhere.
@@ -61,12 +55,6 @@ async function open(fixture: Fixture) {
 	}
 
 	return { session: result.session, sheet, tile, looks }
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`)
-
-	return result.change
 }
 
 const RED = '<dxf><font><b/><color rgb="FF9C0006"/></font><fill><patternFill><bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf>'

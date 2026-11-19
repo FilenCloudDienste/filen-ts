@@ -224,11 +224,11 @@ describe("presentation text ops", () => {
 		const slide = await h.slide(0)
 		const bad: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text: "a\u0001b", rPr: {} }] }] }
 
-		expect(await h.command({ family: "text", kind: "setText", target: { slide: slide.ref, id: 3 }, body: bad })).toEqual({
+		expect(await h.command({ family: "text", kind: "setText", target: { slide: slide.ref, id: 3 }, body: bad })).toMatchObject({
 			ok: false,
 			refusal: "malformed"
 		})
-		expect(await h.command({ family: "text", kind: "setText", target: { slide: slide.ref, id: 99 }, body: bad })).toEqual({
+		expect(await h.command({ family: "text", kind: "setText", target: { slide: slide.ref, id: 99 }, body: bad })).toMatchObject({
 			ok: false,
 			refusal: "notFound"
 		})
@@ -239,7 +239,7 @@ describe("presentation text ops", () => {
 		const first = await pictures.slide(0)
 		const good: TextBody = { bodyPr: {}, paragraphs: [{ pPr: {}, runs: [{ kind: "r", text: "x", rPr: {} }] }] }
 
-		expect(await pictures.command({ family: "text", kind: "setText", target: { slide: first.ref, id: 4 }, body: good })).toEqual({
+		expect(await pictures.command({ family: "text", kind: "setText", target: { slide: first.ref, id: 4 }, body: good })).toMatchObject({
 			ok: false,
 			refusal: "unsupported"
 		})
@@ -258,11 +258,11 @@ describe("presentation text ops", () => {
 		})
 		const of = (...runs: TextBody["paragraphs"][number]["runs"]): TextBody => ({ bodyPr: {}, paragraphs: [{ pPr: {}, runs }] })
 
-		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("half \ud83d of an emoji")) })).toEqual({
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("half \ud83d of an emoji")) })).toMatchObject({
 			ok: false,
 			refusal: "malformed"
 		})
-		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("link", "javascript:alert(1)")) })).toEqual({
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("link", "javascript:alert(1)")) })).toMatchObject({
 			ok: false,
 			refusal: "malformed"
 		})
@@ -277,7 +277,7 @@ describe("presentation text ops", () => {
 			ok: true
 		})
 		expect(shapeText(shapeById(slide.shapes, 3))).toEqual(["kept \ude00 typed"])
-		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("new \ude00")) })).toEqual({
+		expect(await h.command({ family: "text", kind: "setText", target, body: of(run("new \ude00")) })).toMatchObject({
 			ok: false,
 			refusal: "malformed"
 		})

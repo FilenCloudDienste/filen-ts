@@ -4,35 +4,16 @@ import { TextSelection } from "prosemirror-state"
 import type { EditorView } from "prosemirror-view"
 import { afterEach, describe, expect, it } from "vitest"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { EditSink } from "@filen/office/react/docx/editor"
 import { ReflowView } from "../react/docx/reflow/view"
 import { buildDocx, p } from "./docxSynthetic"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { pagedEditor } from "./pagedDomFixtures"
 
 // Space, Tab, Enter and Shift+Enter after a typed web address make it a link in both editing surfaces, as Word's
 // AutoFormat As You Type does; one undo right after the key takes back only the link.
 
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
-
-const DOCUMENT: DocxDocument = {
-	status: "ready",
-	info: undefined,
-	pages: [],
-	pageCount: 0,
-	tables: { styles: [], decorations: [], links: [] },
-	session: SESSION,
-	media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-	error: undefined
-}
+const DOCUMENT = emptyDocxDocument()
 
 const cleanups: (() => void)[] = []
 

@@ -40,24 +40,6 @@ export function canConvertText(from: TextSourceFormat, to: TextTargetFormat): bo
 	return CONVERSIONS.has(`${from}>${to}`)
 }
 
-const EXTENSIONS: Readonly<Record<string, TextSourceFormat>> = {
-	docx: "docx",
-	docm: "docx",
-	dotx: "docx",
-	dotm: "docx",
-	odt: "odt",
-	ott: "odt",
-	rtf: "rtf",
-	doc: "doc",
-	dot: "doc"
-}
-
-export function textSourceFormat(name: string): TextSourceFormat | undefined {
-	const dot = name.lastIndexOf(".")
-
-	return dot < 0 ? undefined : EXTENSIONS[name.slice(dot + 1).toLowerCase()]
-}
-
 export async function convertText(
 	source: Uint8Array,
 	from: TextSourceFormat,

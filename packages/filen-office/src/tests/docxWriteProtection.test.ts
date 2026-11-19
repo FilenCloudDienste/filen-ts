@@ -19,12 +19,12 @@ import {
 	type ProtectionHash
 } from "@filen/office/core/docx/edit"
 import { saveDocx } from "@filen/office/core/docx/write"
-import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import { verifyProtectionPassword } from "@filen/office/dom"
 import { inThreadEditingHost } from "@filen/office/dom/docx/editing"
 import { legacyPasswordBytes, legacyVerifierText, protectionHashInputs } from "../core/docx/protection/hash"
 import { CORPUS_DIR } from "./corpusDir"
 import { buildDocx, p } from "./docxSynthetic"
+import { measurer } from "./engineFixtures"
 
 // Password to modify (w:writeProtection) and the hash form w:documentProtection shares with it.
 
@@ -38,20 +38,6 @@ const WORD_WRITE_PROTECTION =
 // (Apache-2.0) at apache/poi@ae62bb5116, SHA-256 3abb05a4e76d5f92cf59eb818db7b03e8ff342d051f832a1bee196b1164b3b0d.
 const WORD_DOCUMENT_PROTECTION =
 	'<w:documentProtection w:edit="trackedChanges" w:enforcement="1" w:cryptProviderType="rsaFull" w:cryptAlgorithmClass="hash" w:cryptAlgorithmType="typeAny" w:cryptAlgorithmSid="4" w:cryptSpinCount="100000" w:hash="MUHbcmpC9AnlLsd9v3lW0j30y6E=" w:salt="2Z+i7o/0EZyUNakVeWzU/w=="/>'
-
-const measurer: TextMeasurer = {
-	kerningControl: true,
-	measure(font, _kerning, texts, count, widths) {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		for (let i = 0; i < count; i++) widths[i] = (texts[i] ?? "").length * size * 0.5
-	},
-	fontExtents(font): FontExtents {
-		const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? "16")
-
-		return { ascent: size * 0.8, descent: size * 0.2 }
-	}
-}
 
 async function open(settings: string): Promise<DocxPackage> {
 	const opened = await openDocxPackage(bytesSource(buildDocx({ body: p("Some text"), settings })))

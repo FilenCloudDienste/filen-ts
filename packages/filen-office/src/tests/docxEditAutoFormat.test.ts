@@ -1,12 +1,17 @@
 import type { Node } from "prosemirror-model"
 import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
-import type { DocxEditorSession } from "@filen/office/core/docx/edit"
 import { abstractNumbering, planNumbering } from "../core/docx/write/numbering"
 import { styleDefinition } from "../core/docx/write/styles"
 import { Names } from "../core/docx/write/markup"
+import { bytesSource } from "@filen/office/core/opc"
+import { layoutDocument, openDocxPackage } from "@filen/office/core/docx"
+import { DocxEditorSession, openDocxEditContext } from "@filen/office/core/docx/edit"
+import { DocumentEdits, PagedEditor } from "@filen/office/core/docx/paged"
+import { HitTester } from "@filen/office/core/text"
 import { NUMBERING_PART, STYLES_PART, nodeText, sessionOf } from "./docxEditFixtures"
-import { p } from "./docxSynthetic"
+import { buildDocx, p } from "./docxSynthetic"
+import { HmtxMeasurer, loadDocx } from "./layoutFixtures"
 
 const STYLES = STYLES_PART(
 	'<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:pPr><w:spacing w:after="160"/></w:pPr></w:style>' +
@@ -174,6 +179,83 @@ describe("docx AutoFormat As You Type", () => {
 		// Undo right after a quote gives back the straight one.
 		session.execute({ type: "history.undo" })
 		expect(nodeText(session.state.doc.child(0)).endsWith('c"')).toBe(true)
+	})
+
+	it("types the quotes of the run's language, the apostrophe in a word in every language", async () => {
+		const cases: [string, string][] = [
+			["en-US", "“Er sagt’s ‘x’”"],
+			["de-DE", "„Er sagt’s ‚x’“"],
+			["fr-FR", "«\u00a0Er sagt’s ‘x’\u00a0»"],
+			["pl-PL", "„Er sagt’s ‚x’”"],
+			["sv-SE", "”Er sagt’s ’x’”"],
+			["ja-JP", "“Er sagt’s ‘x’”"]
+		]
+
+		for (const [language, typed] of cases) {
+			const session = await sessionOf({
+				body: `<w:p><w:r><w:rPr><w:lang w:val="${language}"/></w:rPr><w:t>a</w:t></w:r></w:p>`,
+				...PARTS
+			})
+
+			select(session, 1)
+			type(session, "\"Er sagt's 'x'\"")
+			expect(nodeText(session.state.doc.child(0)), language).toBe(`${typed}a`)
+		}
+	})
+
+	it("types the quotes of the document's default language where the run names none", async () => {
+		const styles = STYLES_PART(
+			'<w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="de-DE"/></w:rPr></w:rPrDefault></w:docDefaults>' +
+				'<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>'
+		)
+		const session = await sessionOf({
+			body: p(""),
+			parts: [styles],
+			relationships: [{ id: "rIdS", type: "styles", target: "styles.xml" }]
+		})
+
+		select(session, 1)
+		type(session, '"ja"')
+		expect(nodeText(session.state.doc.child(0))).toBe("„ja“")
+	})
+
+	it("passes the host's AutoFormat setting through the paged editor to every story's session", async () => {
+		const bytes = buildDocx({ body: p(""), ...PARTS })
+		const loaded = await loadDocx(bytes)
+		const opened = await openDocxPackage(bytesSource(bytes))
+
+		if (!opened.ok) throw new Error(opened.message)
+
+		const context = await openDocxEditContext(opened.package, loaded.model, { store: loaded.store, resolver: loaded.resolver })
+		const edits = new DocumentEdits(loaded.model)
+		const layout = layoutDocument(edits.model, loaded.resolver, loaded.fonts, new HmtxMeasurer(), {
+			store: loaded.store,
+			sliceMs: Infinity,
+			edits
+		})
+
+		await layout.done
+
+		const options = { autoFormat: { lists: false, quotes: false } }
+		const editor = new PagedEditor({
+			session: new DocxEditorSession(context, options),
+			edits,
+			layout,
+			tester: new HitTester(layout.styles),
+			sessionOptions: options
+		})
+		const note = editor.addStory("footnote")
+
+		if (note === undefined) throw new Error("no note")
+
+		for (const session of [editor.body.session, note]) {
+			select(session, 1)
+			type(session, '1. "a"')
+			expect(nodeText(session.state.doc.child(0))).toBe('1. "a"')
+			expect(session.state.doc.child(0).attrs["numId"]).toBeNull()
+		}
+
+		editor.dispose()
 	})
 })
 

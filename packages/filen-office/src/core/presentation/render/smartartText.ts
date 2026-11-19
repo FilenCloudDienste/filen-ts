@@ -8,7 +8,7 @@ import { G, partReader, type PartReader } from "../../pptx/read/xml"
 import type { XmlDocument } from "../../xml/index"
 import { classifyAction } from "../actions"
 import { DeckTally } from "../budget"
-import type { ColorModel, Deck, ShapeNode, SlideNode, TextBody } from "../model"
+import { bodyHasText, type ColorModel, type Deck, type ShapeNode, type SlideNode, type TextBody } from "../model"
 import { pickColor } from "../../smartart/style"
 import type { RenderServices } from "./services"
 
@@ -112,7 +112,7 @@ export class SmartArtTexts {
 		}
 		const body = readTextBody(context, txBody)
 
-		if (!body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))) return undefined
+		if (!bodyHasText(body)) return undefined
 
 		const sp = document.parent(txBody)
 		const cached = styleOf(reader, sp < 0 ? -1 : reader.child(sp, G.Dsp, "style"))

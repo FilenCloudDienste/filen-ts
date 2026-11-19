@@ -7,11 +7,10 @@ import { SMARTART_LAYOUTS, type SmartArtCategory } from "../core/smartart/galler
 import { layoutDiagram } from "../core/smartart/interp"
 import { parseLayoutDef } from "../core/smartart/layoutDef"
 import { encodeUtf8, parseXml } from "../core/xml/index"
-import { pptxParts } from "../dom/presentation/engine/open/pptx"
-import { smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { danglingReferences, partsOf, saveEdits, text } from "./pptxWriteFixtures"
+import { diagramRenderer } from "./smartartDriveFixtures"
 import { measurer } from "./smartartFixtures"
 
 // The hierarchy, relationship, matrix and picture layouts of our gallery in a deck: each inserts through
@@ -35,9 +34,7 @@ async function relayout(h: EditHarness, target: ShapeRef): Promise<void> {
 
 	if (frame?.kind !== "smartart") throw new Error("not a diagram")
 
-	await smartArtRenderer(h.session, {
-		services: { xml: part => pptxParts(h.session.deck)?.document(part), relationship: () => undefined, contentType: () => undefined }
-	}).relayout(target, frame, SLICING)
+	await diagramRenderer(h.session).relayout(target, frame, SLICING)
 }
 
 async function insert(h: EditHarness, uniqueId: string): Promise<ShapeRef> {

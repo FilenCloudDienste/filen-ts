@@ -450,6 +450,12 @@ export interface TextBody {
 	paragraphs: Paragraph[]
 }
 
+// Whether a body shows any text: a character in a run, a field or kept content (line breaks and empty runs alone are an
+// empty body, which shows its placeholder's prompt).
+export function bodyHasText(body: TextBody): boolean {
+	return body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))
+}
+
 export interface Paragraph {
 	pPr: ParaProps
 	runs: Run[]

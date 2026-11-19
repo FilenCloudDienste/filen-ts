@@ -43,6 +43,7 @@ import {
 } from "../../core/presentation/pages"
 import { PICTURE_BULLET_OBJECT, bulletImage, toDocxPdfPage } from "../../core/presentation/text/page"
 import type { Slicing } from "../../core/slicing"
+import { FRAGMENT_INTS, FRAGMENT_KIND_MASK, FragmentInt, FragmentKind } from "../../core/text/index"
 import type { DocxFontFace } from "../docx/protocol"
 import { MAX_SVG_SIDE } from "./svgPort"
 
@@ -86,7 +87,8 @@ export interface PresentationPdfSources {
 }
 
 // Drawn approximately or left out, by kind: the docx painter's, and pictures the PDF cannot carry (SVG without a
-// raster fallback, metafiles not converted).
+// raster fallback, metafiles not converted). Text effects the PDF does not draw count as untranslated (content the
+// pages lack).
 export type PresentationPdfRefusal = DocxPdfRefusal | "picture"
 
 export interface PresentationPdfReport {
@@ -872,6 +874,8 @@ export class PresentationPdf {
 			requests.push({ family: `${FACE_PREFIX}${String(face.index)}`, bold: face.weight >= 700, italic: face.italic, slot: "ascii" })
 		}
 
+		this.refuseEffects(text)
+
 		const layer = this.texts++
 		const base = toDocxPdfPage(text)
 		const page = { ...base, roles, keys: base.keys.map(key => `t${String(layer)}:${key}`) }
@@ -888,11 +892,31 @@ export class PresentationPdf {
 			lang: undefined,
 			title: this.options.title,
 			paints: text.paints,
-			strokes: text.strokes,
-			textEffects: text.textEffects
+			strokes: text.strokes
 		}
 
 		return { doc, requests }
+	}
+
+	// Text effects (shadow, glow, reflection, soft edges) the PDF leaves out: one per text fragment drawn with them.
+	private refuseEffects(text: TextPage): void {
+		const styles = text.styles
+		const data = text.page
+		let count = 0
+
+		if (!styles.some(style => (text.textEffects[style.effects ?? -1]?.length ?? 0) > 0)) return
+
+		for (let k = 0; k < data.fragmentCount; k++) {
+			const fi = k * FRAGMENT_INTS
+
+			if (((data.fragmentInts[fi + FragmentInt.INFO] ?? 0) & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT) continue
+
+			const effects = styles[data.fragmentInts[fi + FragmentInt.STYLE] ?? -1]?.effects
+
+			if ((text.textEffects[effects ?? -1]?.length ?? 0) > 0) count++
+		}
+
+		if (count > 0) this.refuse("untranslated", count)
 	}
 
 	// A text page under `matrix` (its px → page px): the painter in its own space, its links mapped onto the page,
@@ -986,8 +1010,7 @@ function pdfStyle(
 		fit: face.fitted ? "scale" : "spread",
 		...(style.paint === undefined ? {} : { paint: style.paint }),
 		...(style.alpha === undefined ? {} : { alpha: style.alpha }),
-		...(style.outline === undefined ? {} : { outline: style.outline }),
-		...(style.effects === undefined ? {} : { effects: style.effects })
+		...(style.outline === undefined ? {} : { outline: style.outline })
 	}
 }
 

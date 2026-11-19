@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { SheetCommand, SheetCommandResult, SheetSessionApi } from "../core/sheet/protocol"
 import { visibleFillPlan } from "../core/sheet/fill/fill"
+import type { SeriesRequest } from "../core/sheet/fill/series"
 import { rowHidden, visibleRanges } from "../core/sheet/visibleRows"
 import { cells, firstTile, tileEntry } from "./sheetSessionFixtures"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
@@ -34,6 +35,7 @@ const FRUIT = sheetBody([
 
 const ALL = { startRow: 0, startCol: 0, endRow: 5, endCol: 1 }
 const BODY = { startRow: 1, startCol: 1, endRow: 5, endCol: 1 }
+const SERIES: SeriesRequest = { type: "linear", dateUnit: "day", step: 5, stop: null, trend: false }
 
 async function filtered(): Promise<SheetSessionApi> {
 	const { session } = await openKeys({ sheets: [{ name: "Data", body: FRUIT }] })
@@ -119,6 +121,21 @@ describe("edits over a filtered selection", () => {
 		expect(await column(session, 1, 6)).toEqual(["Count", "9", "2", "9", "4", "9"])
 	})
 
+	it("the fill handle writes the visible rows only", async () => {
+		const session = await filtered()
+		const source = { startRow: 1, startCol: 1, endRow: 1, endCol: 1 }
+
+		await run(session, { type: "fill.auto", sheet: 0, source, target: BODY, mode: "auto" })
+		expect(await column(session, 1, 6)).toEqual(["Count", "1", "2", "1", "4", "1"])
+	})
+
+	it("the Series dialog writes the visible rows only", async () => {
+		const session = await filtered()
+
+		await run(session, { type: "fill.series", sheet: 0, range: BODY, orientation: "cols", options: SERIES })
+		expect(await column(session, 1, 6)).toEqual(["Count", "1", "2", "11", "4", "21"])
+	})
+
 	it("formats the visible rows only", async () => {
 		const session = await filtered()
 
@@ -136,6 +153,22 @@ describe("edits over a filtered selection", () => {
 
 		await run(filled, { type: "fill.copy", sheet: 0, ranges: [BODY], direction: "down" })
 		expect(await column(filled, 1, 6)).toEqual(["Count", "1", "1", "1", "1", "1"])
+
+		const handle = await handHidden()
+
+		await run(handle, {
+			type: "fill.auto",
+			sheet: 0,
+			source: { startRow: 1, startCol: 1, endRow: 1, endCol: 1 },
+			target: BODY,
+			mode: "auto"
+		})
+		expect(await column(handle, 1, 6)).toEqual(["Count", "1", "1", "1", "1", "1"])
+
+		const series = await handHidden()
+
+		await run(series, { type: "fill.series", sheet: 0, range: BODY, orientation: "cols", options: SERIES })
+		expect(await column(series, 1, 6)).toEqual(["Count", "1", "6", "11", "16", "21"])
 	})
 })
 

@@ -1,5 +1,5 @@
 export { applyAllRedactions, applyPageRedactions, type AppliedRedactions, type ApplyRedactionOptions } from "./apply"
-export { findRedactions, markFindings, pageText, type PageText, type RedactionQuery } from "./find"
+export { findRedactions, markFindings, pageText, withMarkedText, type PageText, type RedactionQuery } from "./find"
 export {
 	isRedaction,
 	listRedactionMarks,

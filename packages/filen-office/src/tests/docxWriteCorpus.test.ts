@@ -1,12 +1,11 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { bytesSource, OpcPackage } from "@filen/office/core/opc"
 import { parseXml } from "@filen/office/core/xml"
 import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
 import { DocxEditorSession, openDocxEditContext } from "@filen/office/core/docx/edit"
 import { DocxSaveError, saveDocx } from "@filen/office/core/docx/write"
-import { CORPUS_DIR as CORPUS } from "./corpusDir"
+import { CORPUS_DIR as CORPUS, corpusFiles } from "./corpusDir"
 import type { Opened } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
 import { scriptOps } from "./fuzz/ops/index"
@@ -15,20 +14,6 @@ import { corePropertiesPart } from "../core/opc/coreProperties"
 
 // The licensed real-world corpus is kept out of the repository (pnpm run corpus:fetch); this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
-
-function corpusFiles(): string[] {
-	const files: string[] = []
-
-	for (const extension of EXTENSIONS) {
-		const directory = join(CORPUS, extension)
-
-		if (!existsSync(directory)) continue
-
-		for (const name of readdirSync(directory).sort()) files.push(join(directory, name))
-	}
-
-	return files
-}
 
 // A refused package (the corpus holds encrypted and malformed files on purpose) opens as undefined; any other
 // failure to open throws for the sweep to report.
@@ -76,7 +61,7 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 		let files = 0
 		let identical = 0
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(EXTENSIONS)) {
 			const name = file.slice(CORPUS.length + 1)
 			const bytes = new Uint8Array(readFileSync(file))
 			let opened: Opened | undefined
@@ -117,7 +102,7 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 		let saved = 0
 		let slowest = { name: "", ms: 0 }
 
-		for (const file of corpusFiles()) {
+		for (const file of corpusFiles(EXTENSIONS)) {
 			const name = file.slice(CORPUS.length + 1)
 			const bytes = new Uint8Array(readFileSync(file))
 			let opened: Opened | undefined

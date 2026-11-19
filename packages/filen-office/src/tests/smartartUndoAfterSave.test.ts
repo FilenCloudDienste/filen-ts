@@ -3,13 +3,11 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, SlideRef, Xfrm } from "../core/presentation/model"
-import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { review } from "../dom/presentation/engine/review"
-import { smartArtRenderer } from "../dom/presentation/engine/smartart"
 import { CORPUS_DIR } from "./corpusDir"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { danglingReferences, partsOf } from "./pptxWriteFixtures"
+import { diagramRenderer, differingBytes, frameIn, written } from "./smartartDriveFixtures"
 
 // A diagram's layout, style or colours changed and saved (its data and drawing rewritten in their parts), then undone:
 // the next save gives every part back byte for byte.
@@ -33,26 +31,8 @@ const CHANGES: Readonly<Record<Change, string>> = {
 }
 const DECKS = ["lo__tdf149551_SmartArt_Pie.pptx", "lo__smartart-children.pptx", "govuk__Shaping_the_Qualifications_Landscape.pptx"]
 
-function frameIn(shapes: readonly ShapeNode[]): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.frame?.kind === "smartart") return shape
-
-		const child = shape.children === undefined ? undefined : frameIn(shape.children)
-
-		if (child !== undefined) return child
-	}
-
-	return undefined
-}
-
 function render(d: Drive): void {
-	smartArtRenderer(d.session, {
-		services: {
-			xml: part => pptxParts(d.session.deck)?.document(part),
-			relationship: () => undefined,
-			contentType: () => undefined
-		}
-	})
+	diagramRenderer(d.session)
 }
 
 async function firstDiagram(d: Drive): Promise<{ slide: SlideRef; id: number }> {
@@ -75,28 +55,6 @@ function change(kind: Change, target: { slide: SlideRef; id: number }): DeckOp {
 		target,
 		def: { uniqueId: CHANGES[kind], source: "gallery" }
 	} as DeckOp
-}
-
-async function written(d: Drive): Promise<Uint8Array> {
-	const result = await d.save()
-
-	expect(result.result.kind).toBe("written")
-
-	if (result.bytes === undefined) throw new Error("not saved")
-
-	expect(await danglingReferences(result.bytes)).toEqual([])
-
-	return result.bytes
-}
-
-// The parts whose bytes differ.
-async function differing(a: Uint8Array, b: Uint8Array): Promise<string[]> {
-	const left = await partsOf(a)
-	const right = await partsOf(b)
-	const same = (x: Uint8Array | undefined, y: Uint8Array | undefined): boolean =>
-		x !== undefined && y !== undefined && x.length === y.length && x.every((byte, at) => byte === y[at])
-
-	return [...new Set([...left.keys(), ...right.keys()])].filter(name => !same(left.get(name), right.get(name))).sort()
 }
 
 async function undoneAfterSave(d: Drive, target: { slide: SlideRef; id: number }, kind: Change): Promise<Uint8Array> {
@@ -148,7 +106,7 @@ describe("a diagram's layout, style or colours undone after a save", () => {
 			const first = await written(d)
 			const id = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(shape => shape.name === "Diagram")?.id ?? 0
 
-			expect(await differing(first, await undoneAfterSave(d, { slide, id }, kind))).toEqual([])
+			expect(await differingBytes(first, await undoneAfterSave(d, { slide, id }, kind))).toEqual([])
 		})
 
 	it("setLayout: undone, redone and undone again across saves, written back as the first save had it each time", async () => {
@@ -190,11 +148,11 @@ describe("a diagram's layout, style or colours undone after a save", () => {
 		const first = await written(d)
 		const id = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(shape => shape.name === "Diagram")?.id ?? 0
 
-		expect(await differing(first, await undoneAfterSave(d, { slide, id }, "setLayout"))).toEqual([])
+		expect(await differingBytes(first, await undoneAfterSave(d, { slide, id }, "setLayout"))).toEqual([])
 		expect((await d.redo()).ok).toBe(true)
 		await written(d)
 		expect((await d.undo()).ok).toBe(true)
-		expect(await differing(first, await written(d))).toEqual([])
+		expect(await differingBytes(first, await written(d))).toEqual([])
 	})
 
 	for (const file of DECKS) {
@@ -207,7 +165,7 @@ describe("a diagram's layout, style or colours undone after a save", () => {
 
 				render(d)
 
-				expect(await differing(source, await undoneAfterSave(d, await firstDiagram(d), kind))).toEqual([])
+				expect(await differingBytes(source, await undoneAfterSave(d, await firstDiagram(d), kind))).toEqual([])
 			})
 	}
 
@@ -235,7 +193,7 @@ describe("a diagram's layout, style or colours undone after a save", () => {
 
 				for (let at = states.length - 2; at >= 0; at--) {
 					expect((await d.undo()).ok).toBe(true)
-					expect(await differing(states[at] ?? source, await written(d))).toEqual([])
+					expect(await differingBytes(states[at] ?? source, await written(d))).toEqual([])
 				}
 			}
 		)

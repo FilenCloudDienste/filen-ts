@@ -22,6 +22,26 @@ export interface Rect {
 
 export const PX_PER_PT = EMU_PER_PT / EMU_PER_PX
 
+// What a chart shows where its file names nothing: an unnamed series, an automatic chart or axis title. The host
+// passes its catalog's texts (plain data: it crosses to a worker); English, as Office writes them, otherwise.
+export interface ChartText {
+	// The name of an unnamed series, "{n}" its 1-based position.
+	readonly series: string
+	readonly chartTitle: string
+	readonly axisTitle: string
+}
+
+export const CHART_TEXT_EN: ChartText = {
+	series: "Series{n}",
+	chartTitle: "Chart Title",
+	axisTitle: "Axis Title"
+}
+
+// The name of the unnamed series at 1-based position `n`.
+export function unnamedSeries(text: ChartText, n: number): string {
+	return text.series.replaceAll("{n}", String(n))
+}
+
 // Text is never measured here. Space reserved for labels and the boxes they are placed in use these
 // estimates: an average glyph advance of 0.6 em and a line height of 1.2 em.
 export function estimateWidth(text: string, size: number): number {
@@ -72,6 +92,7 @@ export class ChartBuilder {
 	readonly text: TextDefaults
 	// Places every item: identity for a chart drawn alone, a group's transform for one inside a group.
 	readonly matrix: readonly number[]
+	readonly chartText: ChartText
 	private commandMark = 0
 	private coordMark = 0
 
@@ -81,9 +102,11 @@ export class ChartBuilder {
 		style: number,
 		date1904: boolean,
 		text: TextDefaults,
-		matrix: readonly number[] = IDENTITY
+		matrix: readonly number[] = IDENTITY,
+		chartText: ChartText = CHART_TEXT_EN
 	) {
 		this.matrix = matrix
+		this.chartText = chartText
 		this.list = context.list
 		this.context = context
 		this.reader = reader

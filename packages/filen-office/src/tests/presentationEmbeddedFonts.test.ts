@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { FontManager, readSfnt } from "../core/fonts/index"
 import type { Deck } from "../core/presentation/model"
 import type { EngineSession } from "../dom/presentation/engine"
-import { declareEmbeddedFonts, embeddedFontRefusals, fontsCapability, loadEmbeddedFaces } from "../dom/presentation/engine/fonts"
+import { declareEmbeddedFonts, embeddedFaceBytes, embeddedFontRefusals, loadEmbeddedFaces } from "../dom/presentation/engine/fonts"
 import { corpusFonts } from "./embeddedFontFixtures"
 import { nodeFontAssets } from "./layoutFixtures"
 
@@ -21,6 +21,15 @@ function session(): { session: EngineSession; close(): void } {
 			for (const closer of closers) closer()
 		}
 	}
+}
+
+// The embedded faces the manager registered, each with the decoded font the session serves for it.
+function servedFaces(engineSession: EngineSession, manager: FontManager) {
+	return manager.registrations().flatMap(registration => {
+		const bytes = embeddedFaceBytes(engineSession, registration)
+
+		return bytes === undefined ? [] : [{ family: registration.family, weight: registration.weight, italic: registration.italic, bytes }]
+	})
 }
 
 describe.skipIf(BOLDONSE === undefined)("a deck's embedded fonts", () => {
@@ -53,22 +62,22 @@ describe.skipIf(BOLDONSE === undefined)("a deck's embedded fonts", () => {
 
 		// Nothing is read before text asks.
 		expect(reads).toEqual([])
-		expect(await fontsCapability.faces(engineSession)).toEqual([])
+		expect(servedFaces(engineSession, manager)).toEqual([])
 
 		await loadEmbeddedFaces(engineSession)
 
-		const faces = await fontsCapability.faces(engineSession)
+		const faces = servedFaces(engineSession, manager)
 
 		expect(faces.length).toBe(1)
-		expect(faces[0]).toMatchObject({ kind: "bytes", face: { family: added[0], weight: 400, italic: false } })
-		expect(readSfnt(faces[0]?.kind === "bytes" ? faces[0].bytes : new Uint8Array(0)).numGlyphs).toBeGreaterThan(0)
+		expect(faces[0]).toMatchObject({ family: added[0], weight: 400, italic: false })
+		expect(readSfnt(faces[0]?.bytes ?? new Uint8Array(0)).numGlyphs).toBeGreaterThan(0)
 		expect(embeddedFontRefusals(engineSession)).toEqual([{ family: "Boldonse", bold: true, italic: false, reason: "notSfnt" }])
 		// Bold text draws in the regular face (the closest the family has), not in a substitute.
 		expect(manager.resolve({ family: "Boldonse", bold: true, italic: false, slot: "ascii" }).source).toBe("embedded")
 
 		close()
 
-		expect(await fontsCapability.faces(engineSession)).toEqual([])
+		expect(servedFaces(engineSession, manager)).toEqual([])
 		manager.dispose()
 	})
 })

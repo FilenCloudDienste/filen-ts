@@ -1,7 +1,8 @@
 import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
-import { docxSchema, type DocxEditorCommand } from "@filen/office/core/docx/edit"
+import { docxSchema, parseDocxEditorCommand, type DocxEditorCommand } from "@filen/office/core/docx/edit"
 import {
+	DOCX_NOTE_POSITIONS,
 	currentNoteOptions,
 	currentPageSetup,
 	docxBookmarkStart,
@@ -228,6 +229,37 @@ describe("note numbering of the caret's section", () => {
 		caret(editor, at(editor, "First"))
 		expect(currentNoteOptions(editor, "footnote")).toMatchObject({ format: "upperLetter", position: "pageBottom" })
 		editor.dispose()
+	})
+
+	it("reads a position of the other kind as the kind's default, which note.options takes", async () => {
+		const positions = ["pageBottom", "beneathText", "sectEnd", "docEnd"] as const
+		const cases: readonly [string, string, string][] = [
+			["footnote", "docEnd", "pageBottom"],
+			["footnote", "sectEnd", "pageBottom"],
+			["footnote", "beneathText", "beneathText"],
+			["endnote", "pageBottom", "docEnd"],
+			["endnote", "beneathText", "docEnd"],
+			["endnote", "sectEnd", "sectEnd"]
+		]
+
+		for (const [kind, stored, read] of cases) {
+			const { editor } = await pagedEditor(
+				buildDocx({ body: p("Text"), settings: `<w:${kind}Pr><w:pos w:val="${stored}"/></w:${kind}Pr>` })
+			)
+			const options = currentNoteOptions(editor, kind as "footnote" | "endnote")
+
+			expect(options.position, `${kind} ${stored}`).toBe(read)
+			expect(parseDocxEditorCommand({ type: "note.options", kind, position: options.position, scope: "document" })).toBeDefined()
+			editor.dispose()
+		}
+
+		// The command takes exactly each kind's positions.
+		for (const kind of ["footnote", "endnote"] as const)
+			for (const position of positions)
+				expect(
+					parseDocxEditorCommand({ type: "note.options", kind, position, scope: "section" }) !== undefined,
+					`${kind} ${position}`
+				).toBe(DOCX_NOTE_POSITIONS[kind].includes(position))
 	})
 })
 

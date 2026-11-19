@@ -1,6 +1,7 @@
 import type { Rgba } from "../drawingml/index"
-import { PresentationError, type ColorModel, type ShapeNode, type SlideNode, type SlideRef } from "../presentation/model"
+import { PresentationError, type ColorModel, type SlideNode, type SlideRef } from "../presentation/model"
 import { tooDeep, tooLarge } from "../presentation/refusal"
+import { shapeById } from "../presentation/shapes"
 import { decodeUtf8, encodeUtf8 } from "../xml/index"
 import {
 	VAR_H,
@@ -229,18 +230,6 @@ class Graph implements CompiledTimegraph {
 
 		return Number.isFinite(active) ? Math.min(active, this.budgets.scheduleMs) : active
 	}
-}
-
-function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.id === id) return shape
-
-		const inner = shape.children === undefined ? undefined : findShape(shape.children, id)
-
-		if (inner !== undefined) return inner
-	}
-
-	return undefined
 }
 
 function targetShape(target: AnimTarget): number {
@@ -922,7 +911,7 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 		const box =
 			own !== undefined && Number.isFinite(own[layer * 4] ?? Number.NaN)
 				? { x: own[layer * 4] ?? 0, y: own[layer * 4 + 1] ?? 0, cx: own[layer * 4 + 2] ?? 0, cy: own[layer * 4 + 3] ?? 0 }
-				: (options.geometry?.(shapeId) ?? findShape(slide.shapes, shapeId)?.xfrm ?? { x: 0, y: 0, cx: size.cx, cy: size.cy })
+				: (options.geometry?.(shapeId) ?? shapeById(slide.shapes, shapeId)?.xfrm ?? { x: 0, y: 0, cx: size.cx, cy: size.cy })
 
 		base[layer * 4] = (box.x + box.cx / 2) * PX_PER_EMU
 		base[layer * 4 + 1] = (box.y + box.cy / 2) * PX_PER_EMU
@@ -2130,10 +2119,45 @@ class Instance implements TimegraphInstance {
 
 		return Number.isFinite(best) ? best : undefined
 	}
+
+	// Whether a node timed finitely still plays after `after` or waits to begin by a delay. A node that repeats
+	// indefinitely (repeatCount or repeatDur) and everything under it is left out, so is one whose dur is indefinite;
+	// a node waiting on an event begins when it fires.
+	holdsAdvance(after: number): boolean {
+		const g = this.graph
+		const now = Math.max(this.now, after)
+		const endless = new Uint8Array(g.count)
+
+		for (let n = 0; n < g.count; n++) {
+			const p = g.parent[n] ?? -1
+
+			if ((p >= 0 && endless[p] === 1) || g.repeat[n] === Number.POSITIVE_INFINITY || g.repeatDur[n] === Number.POSITIVE_INFINITY) {
+				endless[n] = 1
+
+				continue
+			}
+
+			const begin = this.begin[n] ?? Number.NaN
+			const end = this.end[n] ?? Number.NaN
+
+			if (Number.isFinite(begin) && begin > now) return true
+			if (Number.isFinite(end) && end > now) return true
+		}
+
+		return false
+	}
 }
 
 export function instantiate(graph: CompiledTimegraph): TimegraphInstance {
 	if (!(graph instanceof Graph)) throw new PresentationError("failed", "a timegraph compiled elsewhere")
 
 	return new Instance(graph)
+}
+
+// A slide's timed advance waits while this holds at its time (see Instance.holdsAdvance): effects that repeat
+// indefinitely play on over the advance, as PowerPoint plays them.
+export function holdsAdvance(instance: TimegraphInstance, tMs: number): boolean {
+	if (!(instance instanceof Instance)) throw new PresentationError("failed", "a timegraph instance made elsewhere")
+
+	return instance.holdsAdvance(tMs)
 }

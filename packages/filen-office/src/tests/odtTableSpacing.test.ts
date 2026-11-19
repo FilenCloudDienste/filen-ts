@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { TextSelection } from "prosemirror-state"
-import { ZipArchive, bytesSource } from "@filen/office/core/opc"
-import { decodeUtf8 } from "@filen/office/core/xml"
+import { bytesSource } from "@filen/office/core/opc"
 import { pageLines } from "./layoutFixtures"
 import { odtBytes, odtLayout, partText, translated, type OdtParts } from "./odtFixtures"
-import { editOdt, odtEditsOf } from "./odtWriteFixtures"
+import { editOdt, odtEditsOf, paragraphAt, zipPartText } from "./odtWriteFixtures"
 import { translateOdt } from "../core/odt/translate"
 import { writeOdt } from "../core/odt/write/writer"
 import { splitParagraph } from "../core/docx/paged/index"
@@ -37,36 +36,7 @@ function spacing(block: string | undefined): string | undefined {
 	return /<w:spacing\b[^>]*\/>/u.exec(pPr.replace(/<w:rPr>[\s\S]*<\/w:rPr>/u, ""))?.[0]
 }
 
-async function content(bytes: Uint8Array): Promise<string> {
-	const archive = await ZipArchive.open(bytesSource(bytes))
-	const entry = archive.get("content.xml")
-
-	if (entry === undefined) throw new Error("content.xml")
-
-	return decodeUtf8(await archive.read(entry))
-}
-
 type Editing = Awaited<ReturnType<typeof editOdt>>
-
-function paragraphAt(e: Editing, index: number): number {
-	let found = -1
-	let k = 0
-
-	e.session.state.doc.descendants((node, pos) => {
-		if (found >= 0) return false
-		if (node.type.name === "paragraph") {
-			if (k++ === index) found = pos
-
-			return false
-		}
-
-		return node.type.name !== "table"
-	})
-
-	if (found < 0) throw new Error(`no paragraph ${index}`)
-
-	return found
-}
 
 function select(e: Editing, from: number, to = from): void {
 	e.session.dispatch(e.session.state.tr.setSelection(TextSelection.create(e.session.state.doc, from, to)))
@@ -183,7 +153,7 @@ describe("an ODT table's space above and below", () => {
 		const e = await editOdt(odtBytes(parts))
 
 		for (const index of [0, 1]) {
-			select(e, paragraphAt(e, index) + 2)
+			select(e, paragraphAt(e, index, { intoTables: false }) + 2)
 			await e.editor.execute({ type: "align.center" })
 		}
 
@@ -221,10 +191,10 @@ describe("an ODT table's space above and below", () => {
 describe("an ODT table's space above and below on save", () => {
 	it("round-trips unedited byte for byte", async () => {
 		const bytes = odtBytes(PARTS)
-		const before = await content(bytes)
+		const before = await zipPartText(bytes)
 		const written = await save(bytes, () => undefined)
 
-		expect(await content(written)).toBe(before)
+		expect(await zipPartText(written)).toBe(before)
 	})
 
 	it("an alignment change beside the table does not write the table's space into the paragraph", async () => {
@@ -234,12 +204,12 @@ describe("an ODT table's space above and below on save", () => {
 			body: `<text:p text:style-name="Spaced">Alpha</text:p>${TABLE}<text:p text:style-name="Spaced">Gamma</text:p>`
 		})
 		const written = await save(bytes, async e => {
-			select(e, paragraphAt(e, 0) + 2)
+			select(e, paragraphAt(e, 0, { intoTables: false }) + 2)
 			await e.editor.execute({ type: "align.center" })
-			select(e, paragraphAt(e, 1) + 2)
+			select(e, paragraphAt(e, 1, { intoTables: false }) + 2)
 			await e.editor.execute({ type: "align.center" })
 		})
-		const xml = await content(written)
+		const xml = await zipPartText(written)
 
 		expect(xml).not.toMatch(/fo:margin-(?:top|bottom)="(?:62|36)pt"/u)
 		// Read again, the paragraphs show what the edit showed: their style's space plus the table's.
@@ -257,10 +227,10 @@ describe("an ODT table's space above and below on save", () => {
 
 		expect(e.locked).toBe(0)
 
-		e.session.dispatch(e.session.state.tr.insertText("New ", paragraphAt(e, 0) + 1))
-		e.session.dispatch(e.session.state.tr.insertText("New ", paragraphAt(e, 1) + 1))
+		e.session.dispatch(e.session.state.tr.insertText("New ", paragraphAt(e, 0, { intoTables: false }) + 1))
+		e.session.dispatch(e.session.state.tr.insertText("New ", paragraphAt(e, 1, { intoTables: false }) + 1))
 
-		const xml = await content((await writeOdt(e.source, await odtEditsOf(e))).bytes)
+		const xml = await zipPartText((await writeOdt(e.source, await odtEditsOf(e))).bytes)
 
 		expect(xml).toContain('<text:p text:style-name="P1">New Alpha</text:p>')
 		expect(xml).toContain('<text:p text:style-name="P2">New Gamma</text:p>')
@@ -269,11 +239,11 @@ describe("an ODT table's space above and below on save", () => {
 
 	it("a space set beside the table is written less the table's", async () => {
 		const written = await save(odtBytes(PARTS), async e => {
-			select(e, paragraphAt(e, 1) + 2)
+			select(e, paragraphAt(e, 1, { intoTables: false }) + 2)
 			// 40 pt above as the edit shows it: 30 pt of it the table's.
 			await e.editor.execute({ type: "paragraph.spacing", before: 800 })
 		})
-		const xml = await content(written)
+		const xml = await zipPartText(written)
 		const style = /<text:p text:style-name="([^"]+)">Gamma<\/text:p>/u.exec(xml)?.[1]
 
 		expect(style).toBeDefined()
@@ -289,14 +259,14 @@ describe("an ODT table's space above and below on save", () => {
 			body: `<text:p text:style-name="P1">Alpha</text:p>${TABLE}<text:p text:style-name="P2">Gamma</text:p><text:p>Delta</text:p>`
 		})
 		const written = await save(bytes, e => {
-			const at = paragraphAt(e, 1)
+			const at = paragraphAt(e, 1, { intoTables: false })
 			const node = e.session.state.doc.nodeAt(at)
 
 			if (node === null) throw new Error("no paragraph")
 
 			e.session.dispatch(e.session.state.tr.delete(at, at + node.nodeSize))
 		})
-		const xml = await content(written)
+		const xml = await zipPartText(written)
 
 		// Delta, with no space above, now follows the table: the table keeps no space below.
 		expect(xml).not.toContain("Gamma")
@@ -315,10 +285,10 @@ describe("an ODT table's space above and below on save", () => {
 		const bytes = odtBytes({ ...PARTS, body: `${PARTS.body}<text:p>far</text:p><text:p>away</text:p>` })
 		const e = await editOdt(bytes)
 
-		e.session.dispatch(e.session.state.tr.insertText("so ", paragraphAt(e, 3) + 1))
+		e.session.dispatch(e.session.state.tr.insertText("so ", paragraphAt(e, 3, { intoTables: false }) + 1))
 
 		const written = await writeOdt(e.source, await odtEditsOf(e))
-		const xml = await content(written.bytes)
+		const xml = await zipPartText(written.bytes)
 
 		expect(written.proof).toBe("span")
 		expect(xml).toContain(`<text:p text:style-name="P1">Alpha</text:p>${TABLE}<text:p text:style-name="P2">Gamma</text:p>`)
@@ -338,7 +308,7 @@ describe("an ODT table's space above and below on save", () => {
 		expect(e.locked).toBe(0)
 
 		for (const index of [0, 1, 2]) {
-			select(e, paragraphAt(e, index) + 2)
+			select(e, paragraphAt(e, index, { intoTables: false }) + 2)
 			await e.editor.execute({ type: "align.center" })
 		}
 
@@ -349,18 +319,18 @@ describe("an ODT table's space above and below on save", () => {
 		// 30 pt below the first table, 50 pt above the second.
 		expect(spacing(blocks[2])).toBe('<w:spacing w:before="600" w:after="1000"/>')
 		expect(spacing(blocks[4])).toContain('w:before="600"')
-		expect((await content(written)).match(/table:style-name="T1"/gu)?.length).toBe(2)
+		expect((await zipPartText(written)).match(/table:style-name="T1"/gu)?.length).toBe(2)
 	})
 
 	it("a paragraph split beside the table saves", async () => {
 		const written = await save(odtBytes(PARTS), e => {
-			select(e, paragraphAt(e, 1) + 3)
+			select(e, paragraphAt(e, 1, { intoTables: false }) + 3)
 
 			const split = splitParagraph(e.session.state, e.session.formats)
 
 			if (split !== null) e.session.dispatch(split)
 		})
-		const xml = await content(written)
+		const xml = await zipPartText(written)
 
 		expect(xml).toContain(">Ga</text:p>")
 		expect(xml).toContain(">mma</text:p>")

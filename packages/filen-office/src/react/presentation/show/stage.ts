@@ -143,6 +143,8 @@ function canvasOf(document: Document, layer: ShowLayer): HTMLCanvasElement {
 
 	canvas.className = "fo-show-bitmap"
 	canvas.dataset["foShowShape"] = String(layer.shape)
+	// The slide's text alternative (show/player.tsx) speaks for its drawings.
+	canvas.setAttribute("aria-hidden", "true")
 	canvas.width = layer.bitmap.width
 	canvas.height = layer.bitmap.height
 	canvas.style.cssText = `position:absolute;left:${String(layer.x)}px;top:${String(layer.y)}px;width:${String(layer.width)}px;height:${String(layer.height)}px`
@@ -299,6 +301,7 @@ export function buildStageSlide(
 			if (tinted === undefined) {
 				tinted = document.createElement("canvas")
 				tinted.className = "fo-show-tint"
+				tinted.setAttribute("aria-hidden", "true")
 				tinted.width = glyphs.width
 				tinted.height = glyphs.height
 				tinted.style.cssText = glyphs.style.cssText
@@ -529,6 +532,7 @@ export function buildStageSlide(
 				const px = Number(/(\d+(?:\.\d+)?)px/u.exec(font)?.[1] ?? Number.NaN)
 
 				element.className = "fo-show-dom"
+				element.setAttribute("aria-hidden", "true")
 				element.style.cssText = `${LAYER_STYLE};display:none`
 				element.appendChild(painted.root)
 				host.appendChild(element)

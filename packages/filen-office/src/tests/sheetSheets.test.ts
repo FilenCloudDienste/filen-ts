@@ -1,20 +1,12 @@
 import { describe, expect, it } from "vitest"
-import type { SheetChange, SheetCommandResult } from "../core/sheet/protocol"
 import { unzipSync, zipSync } from "fflate"
 import { encodeUtf8 } from "../core/xml/index"
 import { buildFixture, parts, type Fixture } from "./xlsxWriteFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
-import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
+import { firstTile, openFixture, savedBytes, tileEntry, changeOf } from "./sheetSessionFixtures"
 
 // Sheets deleted, moved, hidden and shown, and tab colours: what the saved workbook holds, and that an undo gives
 // the source back.
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok)
-		throw new Error(`refused: ${result.refusal.reason}${result.refusal.detail === undefined ? "" : ` (${result.refusal.detail})`}`)
-
-	return result.change
-}
 
 const THREE = {
 	sheets: [

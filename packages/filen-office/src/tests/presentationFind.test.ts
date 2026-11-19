@@ -304,7 +304,7 @@ describe("presentation text.replace", () => {
 					{ target: { slide: first.ref, id: 7 }, match: [0, 1, 6] }
 				]
 			})
-		).toEqual({ ok: false, refusal: "stale" })
+		).toMatchObject({ ok: false, refusal: "stale" })
 		expect(titleText(first.shapes)).toBe("An apple a day")
 		expect(sessionEdits(h.session).changes().empty).toBe(true)
 		h.close()

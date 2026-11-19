@@ -81,10 +81,12 @@ export { MAX_TABLE_COLUMNS, MAX_TABLE_ROWS, type DocxCellVAlign, type DocxTableA
 export type { ViewCommand } from "./commands/view"
 export {
 	DocxIds,
+	DEFAULT_EDIT_STRINGS,
 	DocxMediaStore,
 	authorInitials,
 	openDocxEditContext,
 	type DocxEditContext,
+	type DocxEditStrings,
 	type DocxIdSpace,
 	type DocxIdentity,
 	type DocxMediaEntry,

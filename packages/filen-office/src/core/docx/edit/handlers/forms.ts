@@ -8,6 +8,8 @@ import {
 	controlKey,
 	controlOf,
 	controlState,
+	defaultPlaceholder,
+	DEFAULT_PLACEHOLDERS,
 	EMPTY_FORM_TEXT,
 	legacyFieldOf,
 	legacyText,
@@ -18,6 +20,8 @@ import {
 	typeable,
 	type ControlAround,
 	type ControlInfo,
+	type ControlListItem,
+	type ControlPlaceholders,
 	type ControlState,
 	type LegacyField,
 	type LegacyFieldState,
@@ -44,6 +48,7 @@ import {
 } from "../invariants/forms"
 import type { DocxTransactionTransformer, FeatureHandlers, StoryCommandContext, StoryCommandHandler } from "../registry"
 import { docxSchema, NO_SOURCE } from "../schema"
+import type { DocxEditorSession } from "../session"
 
 // Form commands: checkboxes, list and date choices, clearing a control, legacy form field values, new controls
 // and repeating section items. Each makes one transaction (one undo step) that sets the control's content as
@@ -149,7 +154,7 @@ function showPlaceholder(context: StoryCommandContext, around: ControlAround): T
 	return setControl(
 		context,
 		around,
-		placeholderText(partOf(context), around.holder, around.info),
+		placeholderText(partOf(context), around.holder, around.info, context.context.strings.placeholders),
 		placeholderState(around.holder, around.info, true)
 	)
 }
@@ -238,8 +243,13 @@ const choose: StoryCommandHandler<"control.choose"> = {
 			const item = listItem(around.info, command.value)
 
 			if (item === undefined) return null
-			// Word's "Choose an item." entry (the placeholder's text as a value) shows the placeholder again.
-			if (item.text === "" || item.text === placeholderText(partOf(context), around.holder, around.info))
+			// Word's "Choose an item." entry (the placeholder's text as a value) shows the placeholder again, also
+			// Word's en-US one under a host in another language.
+			if (
+				item.text === "" ||
+				item.text === DEFAULT_PLACEHOLDERS.list ||
+				item.text === placeholderText(partOf(context), around.holder, around.info, context.context.strings.placeholders)
+			)
 				return showPlaceholder(context, around)
 
 			return setControl(context, around, item.text, { ...(controlState(around.holder) ?? {}), value: item.value, placeholder: false })
@@ -293,11 +303,16 @@ const items: StoryCommandHandler<"control.items"> = {
 				: entries.find(item => item.text === shown)
 
 		if (chosen === undefined)
-			return setControl(context, around, placeholderText(partOf(context), around.holder, around.info), {
-				...next,
-				value: null,
-				placeholder: true
-			})
+			return setControl(
+				context,
+				around,
+				placeholderText(partOf(context), around.holder, around.info, context.context.strings.placeholders),
+				{
+					...next,
+					value: null,
+					placeholder: true
+				}
+			)
 
 		return setControl(context, around, chosen.text, { ...next, value: chosen.value, placeholder: false })
 	}
@@ -365,8 +380,10 @@ const W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
 const W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
 
 // Word's first entry of a new drop-down list or combo box, written value-only (<w:listItem w:value="Choose an
-// item."/>): choosing it shows the placeholder again.
-const CHOOSE_AN_ITEM = { text: "Choose an item.", value: "Choose an item.", valueOnly: true } as const
+// item."/>): the list placeholder, which choosing shows again.
+function chooseAnItem(placeholders: ControlPlaceholders): ControlListItem {
+	return { text: placeholders.list, value: placeholders.list, valueOnly: true }
+}
 
 // The short date picture Word gives a new date control in `language` (w:lid): the language's numeric date with a
 // four-digit year, Latin digits and the Gregorian calendar (en-US "M/d/yyyy", de-DE "dd.MM.yyyy", en-GB
@@ -375,15 +392,14 @@ export function shortDatePicture(language: string): string {
 	return numericDatePicture(language)
 }
 
-// The language of the text at the selection (its w:lang, Latin script), en-US without one.
-function selectionLanguage(context: StoryCommandContext): string {
-	const session = context.session
-	const { $from } = context.state.selection
+// The language of the text at the selection of `state` (its w:lang, Latin script), en-US without one.
+export function selectionLanguage(session: DocxEditorSession, state: EditorState = session.state): string {
+	const { $from } = state.selection
 
 	if (!$from.parent.isTextblock) return "en-US"
 
-	const props = session.formats.runProps(caretMarks(context.state, session.formats))
-	const language = context.context.resolver.run(session.formats.paragraph($from.parent), props).lang.latin
+	const props = session.formats.runProps(caretMarks(state, session.formats))
+	const language = session.context.resolver.run(session.formats.paragraph($from.parent), props).lang.latin
 
 	return language === undefined || language === null || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(language) ? "en-US" : language
 }
@@ -441,30 +457,35 @@ function declares(part: StoryPart, uri: string): boolean {
 	return root >= 0 && part.reader.namespaces.prefixFor(root, uri) !== undefined
 }
 
+// A new control, its placeholder the host's.
 function madeControl(
 	kind: Exclude<DocxControlKind, "repeatingSection">,
 	language: string,
+	placeholders: ControlPlaceholders,
 	items?: readonly { text: string; value: string }[]
 ): MadeControl {
 	const id = newControlId()
+	const placeholder = defaultPlaceholder(kind, placeholders)
 
 	switch (kind) {
 		case "dropDownList":
-		case "comboBox":
+		case "comboBox": {
+			const first = chooseAnItem(placeholders)
+
 			return {
 				type: kind,
 				id,
+				placeholder,
 				items: [
-					...((items ?? []).some(item => item.value === CHOOSE_AN_ITEM.value || item.text === CHOOSE_AN_ITEM.text)
-						? []
-						: [CHOOSE_AN_ITEM]),
+					...((items ?? []).some(item => item.value === first.value || item.text === first.text) ? [] : [first]),
 					...(items ?? [])
 				]
 			}
+		}
 		case "date":
-			return { type: kind, id, dateFormat: shortDatePicture(language), lid: language }
+			return { type: kind, id, placeholder, dateFormat: shortDatePicture(language), lid: language }
 		default:
-			return { type: kind, id }
+			return { type: kind, id, placeholder }
 	}
 }
 
@@ -496,7 +517,7 @@ const insert: StoryCommandHandler<"control.insert"> = {
 		if (!inlineSpot(part, state, mayHoldControls(session)) || (kind === "checkbox" && !declares(part, W14))) return null
 		if (kind === "picture" && !selectedDrawing(state)) return null
 
-		const definition = madeControl(kind, selectionLanguage(context), command.items)
+		const definition = madeControl(kind, selectionLanguage(session, state), context.context.strings.placeholders, command.items)
 		const selection = state.selection
 		const tr = state.tr
 
@@ -530,7 +551,10 @@ const insert: StoryCommandHandler<"control.insert"> = {
 
 			content = textContent(glyph.text, mark.addToSet(withFont(cleaned, glyph.font)))
 		} else {
-			content = placeholderContent(placeholderText(part, mark, info), placeholderMarks(context.context, mark.addToSet(cleaned)))
+			content = placeholderContent(
+				placeholderText(part, mark, info, context.context.strings.placeholders),
+				placeholderMarks(context.context, mark.addToSet(cleaned))
+			)
 		}
 
 		tr.replaceWith(selection.from, selection.to, content)

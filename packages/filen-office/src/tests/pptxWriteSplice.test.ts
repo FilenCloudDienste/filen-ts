@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest"
 import { BytePieces, bytesSource, crc32, memorySink, writeZip, ZipArchive, type ByteChunks } from "@filen/office/core/opc"
 import { DEFLATE_HELD } from "../core/opc/mediaPolicy"
 import { PackageWriter } from "../core/pptx/write/parts"
-import { slideRef, type Deck, type ShapeNode, type SlideNode, type SlideRef } from "../core/presentation/model"
+import { slideRef, type ShapeNode, type SlideNode, type SlideRef } from "../core/presentation/model"
 import { spliceSnapshot, type PptxSpliceSource } from "../core/pptx/write/splice"
 import { savePptx, writeSnapshot } from "../core/pptx/write/save"
 import { parseXml } from "../core/xml/index"
 import { NS, body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { Changes, openDeck, partsOf, save, shapeOf, slideNode, text, type OpenedDeck } from "./pptxWriteFixtures"
+import { Changes, duplicateNode, openDeck, partsOf, save, shapeOf, slideNode, text, type OpenedDeck } from "./pptxWriteFixtures"
 
 const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
 const SECTIONS =
@@ -239,7 +239,7 @@ describe("pptx splice writer", () => {
 		const deck = await opened()
 		const first = slideNode(deck, 0)
 		const ref = slideRef(9000)
-		const copy = duplicate(first, ref, "/ppt/slides/slide4.xml")
+		const copy = duplicateNode(first, ref, "/ppt/slides/slide4.xml")
 
 		deck.deck.nodes.set(ref, copy)
 		deck.deck.slides.splice(1, 0, ref)
@@ -446,14 +446,6 @@ function placeholder(id: number, name: string, type: "title" | "body", idx?: num
 		}
 	}
 }
-
-function duplicate(node: SlideNode, ref: SlideRef, part: string): SlideNode {
-	const { notes: _notes, ...rest } = node
-
-	return { ...rest, ref, part, shapes: node.shapes.map(shape => ({ ...shape })), comments: [], revision: 0 }
-}
-
-export type { Deck }
 
 describe("pptx splice writer media", () => {
 	it("deflates added bitmaps, metafiles and SVG, and stores compressed media and parts over the cap", async () => {

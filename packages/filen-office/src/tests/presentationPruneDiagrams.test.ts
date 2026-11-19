@@ -5,13 +5,13 @@ import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import { DECK_HISTORY_LIMITS } from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, SlideRef, TextBody, Xfrm } from "../core/presentation/model"
-import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { review } from "../dom/presentation/engine/review"
-import { smartartCapability, smartArtRenderer } from "../dom/presentation/engine/smartart"
+import { smartartCapability } from "../dom/presentation/engine/smartart"
 import { CORPUS_DIR } from "./corpusDir"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { danglingReferences } from "./pptxWriteFixtures"
+import { diagramRenderer, frameIn, written } from "./smartartDriveFixtures"
 import { image } from "./presentationObjectsFixtures"
 import type { SmartArtInfo } from "../core/smartart/edit"
 
@@ -36,23 +36,9 @@ function synthetic(): Uint8Array {
 async function session(bytes: Uint8Array): Promise<Drive> {
 	const d = await driveSession(bytes, "pptx")
 
-	smartArtRenderer(d.session, {
-		services: { xml: part => pptxParts(d.session.deck)?.document(part), relationship: () => undefined, contentType: () => undefined }
-	})
+	diagramRenderer(d.session)
 
 	return d
-}
-
-function frameIn(shapes: readonly ShapeNode[]): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.frame?.kind === "smartart") return shape
-
-		const child = shape.children === undefined ? undefined : frameIn(shape.children)
-
-		if (child !== undefined) return child
-	}
-
-	return undefined
 }
 
 async function command(d: Drive, op: DeckOp): Promise<void> {
@@ -83,18 +69,6 @@ async function unrelated(bytes: Uint8Array, source?: Uint8Array): Promise<string
 		.filter(
 			name => /^ppt\/(?:media|diagrams)\/[^/]+$/u.test(name) && !had.has(name) && !rels.includes(`/${name.split("/").pop() ?? ""}"`)
 		)
-}
-
-async function written(d: Drive): Promise<Uint8Array> {
-	const result = await d.save()
-
-	expect(result.result).toEqual(expect.objectContaining({ kind: "written" }))
-
-	if (result.bytes === undefined) throw new Error("not saved")
-
-	expect(await danglingReferences(result.bytes)).toEqual([])
-
-	return result.bytes
 }
 
 // Undo everything, save, redo everything, let the history go, save: written whole, nothing left unrelated.

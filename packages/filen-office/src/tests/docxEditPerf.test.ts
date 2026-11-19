@@ -7,14 +7,10 @@ import { key, openEditor, percentile as share, placeCaret, spreadPosition, typeB
 import { CORPUS_DIR } from "./corpusDir"
 import { openBytes } from "./docxEditFixtures"
 import { liveHeap } from "./liveHeap"
-import { budget, cpuMs } from "./timing"
+import { budget, cpuMs, percentile } from "./timing"
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "08-large-300p.docx")
 const TARIFF = join(CORPUS_DIR, "docx", "govuk__Tariff_of_the_United_Kingdom_v1.34.docx")
-
-function percentile(sorted: readonly number[], fraction: number): number {
-	return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0
-}
 
 const MiB = 1024 * 1024
 // What each holds, with room for the reading's noise and little else: the 300-page story 7.9 MB, its open editor

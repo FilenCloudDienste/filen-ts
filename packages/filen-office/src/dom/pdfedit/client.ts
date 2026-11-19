@@ -8,7 +8,7 @@ import {
 	type PdfEngineValue,
 	type ToPdfEngine
 } from "./protocol"
-import { clearTimer, setTimer } from "@filen/shared/savePort"
+import { clearTimer, setTimer } from "../platform"
 import { abortSyncRange, syncRangeWaiting } from "./syncRange"
 
 // The page's side of one engine worker: a promise per request, the render watchdog and the poisoned state. A worker

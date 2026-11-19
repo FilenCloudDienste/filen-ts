@@ -1,4 +1,5 @@
 import { unzlibSync } from "fflate"
+import { dibToBmp, hasPlaceableHeader, PLACEABLE_HEADER, withPlaceableHeader } from "../../metafile/bitmap"
 import { le16, le32, les32 } from "../bytes"
 
 // [MS-ODRAW] records as Word binary files hold them: the drawing group and per-story drawings of
@@ -15,10 +16,10 @@ export const RT_FSP = 0xf00a
 export const RT_OPT = 0xf00b
 export const RT_SECONDARY_OPT = 0xf121
 export const RT_TERTIARY_OPT = 0xf122
-const RT_FSPGR = 0xf009
-const RT_CHILD_ANCHOR = 0xf00f
-const RT_BLIP_FIRST = 0xf018
-const RT_BLIP_LAST = 0xf117
+export const RT_FSPGR = 0xf009
+export const RT_CHILD_ANCHOR = 0xf00f
+export const RT_BLIP_FIRST = 0xf018
+export const RT_BLIP_LAST = 0xf117
 
 const MAX_DEPTH = 32
 
@@ -314,8 +315,6 @@ const MAX_INFLATED = 64 * 1024 * 1024
 // Deflate's longest match (258 bytes) costs at least two bits, so a zlib stream inflates to at most 1032 times its
 // length: what a metafile can really hold, whatever cbSize declares.
 const DEFLATE_RATIO = 1032
-// [MS-WMF] §2.3.2.3 META_PLACEABLE, put back in front of a WMF stored without it.
-const PLACEABLE_HEADER = 22
 
 interface Metafile {
 	readonly header: number
@@ -371,7 +370,8 @@ export function blipSize(data: Uint8Array, record: ArtRecord): number | undefine
 
 	const length = record.end - (record.start + uids + 1)
 
-	return length <= 0 ? undefined : length + (extension === "bmp" ? 14 : 0)
+	// dibToBmp leaves a DIB too short for its header as it is.
+	return length <= 0 ? undefined : length + (extension === "bmp" && length >= 16 ? 14 : 0)
 }
 
 // The picture file a BLIP holds, or undefined for a record that is not one or is damaged.
@@ -409,7 +409,7 @@ export function blipFile(data: Uint8Array, record: ArtRecord): Blip | undefined 
 			bytes = body.slice()
 		}
 
-		if (extension === "wmf") bytes = withPlaceableHeader(bytes, data, metafile.header)
+		if (extension === "wmf") bytes = placeable(bytes, data, metafile.header)
 
 		return { bytes, extension, contentType }
 	}
@@ -419,13 +419,16 @@ export function blipFile(data: Uint8Array, record: ArtRecord): Blip | undefined 
 
 	if (body.length === 0) return undefined
 
-	return { bytes: extension === "bmp" ? dibToBmp(body) : body.slice(), extension, contentType }
+	const bytes = extension === "bmp" ? dibToBmp(body) : body
+
+	// A copy, so the picture does not keep the whole stream alive.
+	return { bytes: bytes === body ? body.slice() : bytes, extension, contentType }
 }
 
 // A WMF BLIP is stored without its placeable header ([MS-WMF] §2.3.2.3); rcBounds (logical units) and ptSize
-// (EMUs) give it back, so the picture keeps its size wherever it is read.
-function withPlaceableHeader(wmf: Uint8Array, data: Uint8Array, header: number): Uint8Array {
-	if (le32(wmf, 0) === 0x9ac6cdd7) return wmf
+// (EMUs) give it back, so the picture keeps its size wherever it is read. Bounds past int16 leave it bare.
+function placeable(wmf: Uint8Array, data: Uint8Array, header: number): Uint8Array {
+	if (hasPlaceableHeader(wmf)) return wmf
 
 	const left = les32(data, header + 4)
 	const top = les32(data, header + 8)
@@ -444,50 +447,16 @@ function withPlaceableHeader(wmf: Uint8Array, data: Uint8Array, header: number):
 	)
 		return wmf
 
-	const inch = Math.max(1, Math.min(0xffff, Math.round((width * 914400) / widthEmu)))
-	const out = new Uint8Array(PLACEABLE_HEADER + wmf.length)
-	const view = new DataView(out.buffer)
-
-	view.setUint32(0, 0x9ac6cdd7, true)
-	view.setInt16(6, left, true)
-	view.setInt16(8, top, true)
-	view.setInt16(10, right, true)
-	view.setInt16(12, bottom, true)
-	view.setUint16(14, inch, true)
-
-	let checksum = 0
-
-	for (let k = 0; k < 20; k += 2) checksum ^= view.getUint16(k, true)
-
-	view.setUint16(20, checksum, true)
-	out.set(wmf, PLACEABLE_HEADER)
-
-	return out
+	return withPlaceableHeader(wmf, {
+		left,
+		top,
+		right,
+		bottom,
+		inch: Math.max(1, Math.min(0xffff, Math.round((width * 914400) / widthEmu)))
+	})
 }
 
-// A packed DIB with a BITMAPFILEHEADER in front.
-function dibToBmp(dib: Uint8Array): Uint8Array {
-	const headerSize = le32(dib, 0)
-	const bitCount = le16(dib, 14)
-	const compression = le32(dib, 16)
-	let colors = headerSize >= 36 ? le32(dib, 32) : 0
-
-	if (colors === 0 && bitCount <= 8) colors = 1 << bitCount
-
-	const masks = compression === 3 && headerSize === 40 ? 12 : 0
-	const out = new Uint8Array(14 + dib.length)
-	const view = new DataView(out.buffer)
-
-	out[0] = 0x42
-	out[1] = 0x4d
-	view.setUint32(2, out.length, true)
-	view.setUint32(10, Math.min(out.length, 14 + headerSize + masks + 4 * colors), true)
-	out.set(dib, 14)
-
-	return out
-}
-
-// Property ids (§2.3) the conversion reads.
+// Property ids (§2.3) the Word and PowerPoint conversions read.
 export const PID = {
 	rotation: 0x0004,
 	lTxid: 0x0080,
@@ -495,25 +464,78 @@ export const PID = {
 	dyTextTop: 0x0082,
 	dxTextRight: 0x0083,
 	dyTextBottom: 0x0084,
+	wrapText: 0x0085,
+	anchorText: 0x0087,
+	txflTextFlow: 0x0088,
+	textBooleans: 0x00bf,
+	gtextUNICODE: 0x00c0,
+	gtextSize: 0x00c3,
+	gtextFont: 0x00c5,
+	gtextBooleans: 0x00ff,
 	cropFromTop: 0x0100,
 	cropFromBottom: 0x0101,
 	cropFromLeft: 0x0102,
 	cropFromRight: 0x0103,
 	pib: 0x0104,
-	pibName: 0x0105,
+	pictureTransparent: 0x0107,
+	pictureContrast: 0x0108,
+	pictureBrightness: 0x0109,
+	blipBooleans: 0x013f,
+	geoLeft: 0x0140,
+	geoTop: 0x0141,
+	geoRight: 0x0142,
+	geoBottom: 0x0143,
+	shapePath: 0x0144,
+	pVertices: 0x0145,
+	pSegmentInfo: 0x0146,
+	adjustValue: 0x0147,
+	geometryBooleans: 0x017f,
+	fillType: 0x0180,
 	fillColor: 0x0181,
+	fillOpacity: 0x0182,
+	fillBackColor: 0x0183,
+	fillBackOpacity: 0x0184,
 	fillBlip: 0x0186,
+	fillAngle: 0x018b,
+	fillFocus: 0x018c,
+	fillToLeft: 0x018d,
+	fillToTop: 0x018e,
+	fillToRight: 0x018f,
+	fillToBottom: 0x0190,
+	fillShadeColors: 0x0197,
+	fillShadeType: 0x019c,
 	fillStyleBooleans: 0x01bf,
 	lineColor: 0x01c0,
+	lineOpacity: 0x01c1,
+	lineBackColor: 0x01c2,
+	lineType: 0x01c4,
 	lineWidth: 0x01cb,
+	lineStyle: 0x01cd,
 	lineDashing: 0x01ce,
+	lineStartArrowhead: 0x01d0,
+	lineEndArrowhead: 0x01d1,
+	lineStartArrowWidth: 0x01d2,
+	lineStartArrowLength: 0x01d3,
+	lineEndArrowWidth: 0x01d4,
+	lineEndArrowLength: 0x01d5,
+	lineJoinStyle: 0x01d6,
+	lineEndCapStyle: 0x01d7,
 	lineStyleBooleans: 0x01ff,
-	shapeName: 0x0380,
-	description: 0x0381,
+	shadowType: 0x0200,
+	shadowColor: 0x0201,
+	shadowOpacity: 0x0204,
+	shadowOffsetX: 0x0205,
+	shadowOffsetY: 0x0206,
+	shadowStyleBooleans: 0x023f,
+	hspMaster: 0x0301,
+	shapeBooleans: 0x033f,
+	wzName: 0x0380,
+	wzDescription: 0x0381,
 	posH: 0x038f,
 	posRelH: 0x0390,
 	posV: 0x0391,
 	posRelV: 0x0392,
+	tableProperties: 0x039f,
 	groupShapeBooleans: 0x03bf
 } as const
 

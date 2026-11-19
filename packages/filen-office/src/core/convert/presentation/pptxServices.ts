@@ -1,4 +1,3 @@
-import { appendAll } from "../../arrays"
 import type { FreshOdpServices } from "../../odp/write/fresh"
 import type { Relationships } from "../../opc/index"
 import type { PptxParts } from "../../pptx/package"
@@ -14,6 +13,7 @@ import { presentationChartObject } from "../../odp/write/chartObject"
 import { chartDocument, isHeldChart } from "../../presentation/edit/apply/chart"
 import { cm } from "../../odp/write/styles"
 import { themeFillStyle } from "../../presentation/background"
+import { forEachShape } from "../../presentation/shapes"
 import { effectiveClrMap, readTheme, themeOf, themeSlot } from "../../presentation/theme"
 import {
 	PATH_ARC,
@@ -145,30 +145,13 @@ function maxId(shapes: readonly ShapeNode[], depth: number): number {
 	return highest
 }
 
-// The SmartArt frames of a level, at any depth of its groups.
-function frames(shapes: readonly ShapeNode[], depth: number): ShapeNode[] {
+// The frames of one kind of a level, at any depth of its groups.
+function framesOf(shapes: readonly ShapeNode[], kind: "smartart" | "chart"): ShapeNode[] {
 	const out: ShapeNode[] = []
 
-	if (depth > MAX_DIAGRAM_DEPTH) return out
-
-	for (const shape of shapes) {
-		if (shape.frame?.kind === "smartart") out.push(shape)
-		if (shape.children !== undefined) appendAll(out, frames(shape.children, depth + 1))
-	}
-
-	return out
-}
-
-// The chart frames of a level, at any depth of its groups.
-function chartFrames(shapes: readonly ShapeNode[], depth: number): ShapeNode[] {
-	const out: ShapeNode[] = []
-
-	if (depth > MAX_DIAGRAM_DEPTH) return out
-
-	for (const shape of shapes) {
-		if (shape.frame?.kind === "chart") out.push(shape)
-		if (shape.children !== undefined) appendAll(out, chartFrames(shape.children, depth + 1))
-	}
+	forEachShape(shapes, shape => {
+		if (shape.frame?.kind === kind) out.push(shape)
+	})
 
 	return out
 }
@@ -439,7 +422,7 @@ export function pptxServices(deck: Deck, parts: PptxParts, options: PptxServices
 			}
 
 			for (const node of deck.nodes.values()) {
-				for (const shape of chartFrames(node.shapes, 0)) {
+				for (const shape of framesOf(node.shapes, "chart")) {
 					const part = shape.frame?.kind === "chart" ? shape.frame.part : undefined
 					const entry = part === undefined || charts.has(part) || isHeldChart(part) ? undefined : parts.opc.entry(part)
 
@@ -449,7 +432,7 @@ export function pptxServices(deck: Deck, parts: PptxParts, options: PptxServices
 
 				const budget: DiagramRead = { next: maxId(node.shapes, 0) + 1, left: parts.tally.budgets.shapesPerSlide }
 
-				for (const shape of frames(node.shapes, 0)) {
+				for (const shape of framesOf(node.shapes, "smartart")) {
 					const frame = shape.frame as SmartArtFrame
 					const xfrm = shape.xfrm
 

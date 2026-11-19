@@ -1,4 +1,5 @@
 import { sniffImage } from "../docx/objects/images"
+import { dibToBmp, hasPlaceableHeader, withPlaceableHeader } from "../metafile/bitmap"
 
 // \pict pictures (Microsoft RTF Specification 1.9.1, "Pictures"): the blip type, the size and crop words,
 // and the data as hexadecimal text or \binN bytes. PNG, JPEG and EMF are kept as they are; a Windows
@@ -105,7 +106,7 @@ export class PictureBuilder {
 				bytes = placeableWmf(bytes, this.goalW || twipsOfHimetric(this.picw), this.goalH || twipsOfHimetric(this.pich))
 				break
 			case "dib":
-				bytes = bitmapFile(bytes)
+				bytes = dibToBmp(bytes)
 				break
 			default:
 				// Writers mislabel blips: what the bytes are decides.
@@ -206,7 +207,7 @@ function metafileWindow(bytes: Uint8Array): { x: number; y: number; w: number; h
 // A Windows metafile as RTF stores it (no placeable header) with the header [MS-WMF] §2.3.2.3 puts before
 // it: the frame is the records' window, its units per inch whatever makes it `twipsW` wide.
 function placeableWmf(bytes: Uint8Array, twipsW: number, twipsH: number): Uint8Array {
-	if (bytes.length >= 4 && new DataView(bytes.buffer, bytes.byteOffset).getUint32(0, true) === 0x9ac6cdd7) return bytes
+	if (hasPlaceableHeader(bytes)) return bytes
 
 	const window = metafileWindow(bytes)
 	const w = window?.w ?? (twipsW > 0 ? twipsW : 1440)
@@ -214,61 +215,16 @@ function placeableWmf(bytes: Uint8Array, twipsW: number, twipsH: number): Uint8A
 	const x = window?.x ?? 0
 	const y = window?.y ?? 0
 	const inch = twipsW > 0 ? Math.round((Math.abs(w) * 1440) / twipsW) : twipsH > 0 ? Math.round((Math.abs(h) * 1440) / twipsH) : 1440
-	const out = new Uint8Array(22 + bytes.length)
-	const view = new DataView(out.buffer)
 
-	view.setUint32(0, 0x9ac6cdd7, true)
-	view.setInt16(6, x, true)
-	view.setInt16(8, y, true)
-	view.setInt16(10, clamp16(x + w), true)
-	view.setInt16(12, clamp16(y + h), true)
-	view.setUint16(14, Math.max(1, Math.min(0xffff, inch)), true)
-
-	let checksum = 0
-
-	for (let i = 0; i < 20; i += 2) checksum ^= view.getUint16(i, true)
-
-	view.setUint16(20, checksum, true)
-	out.set(bytes, 22)
-
-	return out
+	return withPlaceableHeader(bytes, {
+		left: x,
+		top: y,
+		right: clamp16(x + w),
+		bottom: clamp16(y + h),
+		inch: Math.max(1, Math.min(0xffff, inch))
+	})
 }
 
 function clamp16(value: number): number {
 	return Math.max(-32768, Math.min(32767, value))
-}
-
-// A packed DIB (BITMAPINFO + pixels) as a .bmp file: BITMAPFILEHEADER with the offset of the pixels.
-function bitmapFile(bytes: Uint8Array): Uint8Array {
-	if (bytes.length < 16) return bytes
-
-	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-	const headerSize = view.getUint32(0, true)
-	let palette = 0
-
-	if (headerSize === 12) {
-		const bits = view.getUint16(10, true)
-
-		palette = bits <= 8 ? (1 << bits) * 3 : 0
-	} else if (headerSize >= 40 && bytes.length >= 36) {
-		const bits = view.getUint16(14, true)
-		const compression = view.getUint32(16, true)
-		const used = view.getUint32(32, true)
-
-		palette = (used > 0 ? used : bits <= 8 ? 1 << bits : 0) * 4
-
-		// BI_BITFIELDS masks follow a BITMAPINFOHEADER.
-		if (headerSize === 40 && compression === 3) palette += 12
-	}
-
-	const out = new Uint8Array(14 + bytes.length)
-	const outView = new DataView(out.buffer)
-
-	out[0] = 0x42
-	out[1] = 0x4d
-	outView.setUint32(2, out.length, true)
-	outView.setUint32(10, 14 + headerSize + palette, true)
-	out.set(bytes, 14)
-
-	return out
 }

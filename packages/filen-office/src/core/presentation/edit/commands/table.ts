@@ -1,6 +1,7 @@
 import type { ShapeRef, TableCellProps, TableModel } from "../../model"
 import { areasOf, coveringRange, type CellArea } from "../apply/table"
 import type { CellRange, DeckOp } from "../ops"
+import { EMU_PER_PX } from "../../../drawingml/reader"
 
 // The Table Layout and Table Design commands on a selection of cells (the cell the caret is in, or a range): ops out,
 // each command one history step (several ops go through oneStep). Rows and columns go in beside the selection and
@@ -13,8 +14,6 @@ export interface TableShape {
 	readonly heights: readonly number[]
 	readonly areas: readonly CellArea[]
 }
-
-const EMU_PER_PX = 9525
 
 export function tableShapeOf(table: TableModel): TableShape | undefined {
 	const areas = areasOf(table)

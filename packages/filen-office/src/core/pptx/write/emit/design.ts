@@ -349,7 +349,7 @@ async function addGallery(input: DesignSpliceInput, design: GalleryDesign, maste
 
 		if (type === undefined) continue
 
-		writer.add(name, PART_CONTENT_TYPES.slideLayout, encodeUtf8(XML_DECLARATION + layoutXml(type, deck.size)))
+		writer.add(name, PART_CONTENT_TYPES.slideLayout, encodeUtf8(XML_DECLARATION + layoutXml(type, deck.size, design.layoutNames)))
 		;(await writer.loadRelationships(name)).add(SLIDE_MASTER_RELATIONSHIP, names.master, false, "rId1")
 	}
 
@@ -377,7 +377,7 @@ async function rewriteGallery(input: DesignSpliceInput, design: GalleryDesign, a
 	for (const [index, name] of design.names.layouts.entries()) {
 		const type = LAYOUT_TYPES[index]
 
-		if (type !== undefined) writer.replace(zipName(name), encodeUtf8(XML_DECLARATION + layoutXml(type, deck.size)))
+		if (type !== undefined) writer.replace(zipName(name), encodeUtf8(XML_DECLARATION + layoutXml(type, deck.size, design.layoutNames)))
 	}
 
 	return undefined

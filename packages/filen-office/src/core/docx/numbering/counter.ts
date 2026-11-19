@@ -75,7 +75,9 @@ export class NumberingCounters {
 		for (const [id, applied] of snapshot.overridesApplied) this.overridesApplied.set(id, applied)
 	}
 
-	next(numId: number, ilvl: number): ListMarker | undefined {
+	// `language`: the marker run's (the paragraph mark's resolved w:lang under the level's w:rPr, StyleResolver.listMarker),
+	// which ordinal and number-word formats follow ("the run language", ST_NumberFormat); the level's own w:lang without.
+	next(numId: number, ilvl: number, language?: string): ListMarker | undefined {
 		const effective = this.numbering.level(numId, ilvl)
 
 		if (effective === undefined) return undefined
@@ -121,7 +123,7 @@ export class NumberingCounters {
 			ilvl: level,
 			level: definition,
 			value,
-			text: bullet ? (definition.text ?? "") : this.text(numId, level, value, set, definition),
+			text: bullet ? (definition.text ?? "") : this.text(numId, level, value, set, definition, language),
 			bullet,
 			suffix: definition.suffix,
 			alignment: definition.alignment,
@@ -132,11 +134,20 @@ export class NumberingCounters {
 
 	// Expands %1..%9 in the level text: higher levels show their current value (their start when unused),
 	// deeper levels show nothing. A legal (isLgl) level shows every number in decimal.
-	private text(numId: number, level: number, value: number, set: CounterSet, definition: NumberingLevel): string {
+	private text(
+		numId: number,
+		level: number,
+		value: number,
+		set: CounterSet,
+		definition: NumberingLevel,
+		marker: string | undefined
+	): string {
 		const template = definition.text
 
 		if (template === undefined || template.length === 0) return ""
 
+		// The marker run's language, else the level's own (w:lang); English without one.
+		const language = marker ?? definition.run.lang?.latin
 		let out = ""
 		let from = 0
 
@@ -166,7 +177,7 @@ export class NumberingCounters {
 
 			if (definition.legal && format !== "none" && format !== "bullet") format = "decimal"
 
-			out += formatNumber(number, format, customFormat)
+			out += formatNumber(number, format, customFormat, language)
 			at = from - 1
 		}
 

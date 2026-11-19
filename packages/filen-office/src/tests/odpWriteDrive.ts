@@ -1,4 +1,5 @@
 import { MessageChannel } from "node:worker_threads"
+import type { ChartText } from "../core/drawingml/chart/builder"
 import type { ByteSource } from "../core/opc/index"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
@@ -118,10 +119,12 @@ export async function driveSession(
 		readonly emit?: EmitFunction
 		readonly sample?: () => void
 		readonly dependencies?: (dependencies: SaveDependencies) => SaveDependencies
+		// What charts show where the file names nothing (PresentationOpenOptions.chartText).
+		readonly chartText?: ChartText
 	} = {}
 ) {
 	const drive = new Drive(bytes, tuning.sample)
-	const options = { format, fileName: `deck.${format}` } as const
+	const options = { format, fileName: `deck.${format}`, ...(tuning.chartText === undefined ? {} : { chartText: tuning.chartText }) }
 	const capability = format === "odp" ? openOdpCapability : openPptxCapability
 	const outcome = await capability.open({ source: rebasableSource(drive.source("v1")), sourceKind: "range", options } as never)
 

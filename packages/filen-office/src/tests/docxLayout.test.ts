@@ -1581,3 +1581,52 @@ describe("objects", () => {
 		expect(body(result, 0)[0]?.text).toBe("D")
 	})
 })
+
+describe("font slots", () => {
+	// Word's Chinese-font rule: under w:hint="eastAsia", Latin Extended letters take the eastAsia font when that
+	// font is declared GB2312 (w:charset 86, hex) or Big5 (88), even without a Chinese w:lang.
+	async function slots(charset: string): Promise<Set<string>> {
+		const fontTable =
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+			`<w:font w:name="Arial"><w:charset w:val="00"/></w:font><w:font w:name="SimSun"><w:charset w:val="${charset}"/></w:font></w:fonts>`
+		const seen = new Set<string>()
+
+		await layOut(
+			buildDocx({
+				body: p("ā", "", '<w:rFonts w:ascii="Arial" w:hAnsi="Verdana" w:eastAsia="SimSun" w:hint="eastAsia"/>') + SECTION,
+				parts: [
+					{
+						name: "word/fontTable.xml",
+						contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml",
+						data: fontTable
+					}
+				],
+				relationships: [{ id: "rIdF", type: "fontTable", target: "fontTable.xml" }]
+			}),
+			{},
+			manager => ({
+				prepare: requests => manager.prepare(requests),
+				resolve: request => {
+					seen.add(`${request.slot}:${request.family}`)
+
+					return manager.resolve(request)
+				},
+				charset: family => manager.charset(family)
+			})
+		)
+
+		return seen
+	}
+
+	it("draws Latin Extended letters of an eastAsia-hinted run with a Chinese eastAsia font", async () => {
+		const chinese = await slots("86")
+
+		expect(chinese.has("eastAsia:SimSun")).toBe(true)
+		expect(chinese.has("hAnsi:Verdana")).toBe(false)
+
+		const japanese = await slots("80")
+
+		expect(japanese.has("eastAsia:SimSun")).toBe(false)
+		expect(japanese.has("hAnsi:Verdana")).toBe(true)
+	})
+})

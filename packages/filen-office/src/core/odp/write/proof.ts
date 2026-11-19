@@ -12,9 +12,12 @@ import {
 	type SlideRef,
 	type SourceRef
 } from "../../presentation/model"
+import { forEachShape } from "../../presentation/shapes"
 import { Namespaces, decodeUtf8, encodeUtf8, parseXml } from "../../xml/index"
+import { concatBytes } from "../../xml/bytes"
 import { Fragment, OdpContext } from "../read/context"
 import { readShapeElements, type ShapeScope } from "../read/shapes"
+import { BOXED, LINES } from "./emit/box"
 import { IDENTITY, OdpShapeWriter, type Aspects } from "./emit/shape"
 import { slideDiffers } from "./meaning"
 import { pageNames } from "./integrity"
@@ -27,10 +30,6 @@ import { isRefused } from "../../presentation/refusal"
 // back by the reader; a shape that does not read back as the model holds it is locked (proofFailed): selectable,
 // its bytes kept, moved only when its box alone writes back (isBoxWritable). A locked shape's content is never
 // rewritten. Fill, line, shadow and text-area edits are checked by gate 2 when they are made.
-
-const BOXED =
-	/^(draw:(frame|custom-shape|rect|ellipse|circle|polygon|polyline|path|regular-polygon|caption|control|page-thumbnail)|dr3d:scene)$/u
-const LINE = /^draw:(line|measure|connector)$/u
 
 // Whether a shape's own draw:transform (§19.229) is one the box writes back: none, or turns and moves only (a scale or
 // skew the reader folds into the box would be lost by a rewrite). A group's members are its box.
@@ -68,9 +67,9 @@ export function isBoxWritable(shape: ShapeNode, fragmentOf: (src: SourceRef) => 
 
 	const name = fragment.name(shape.src.node)
 
-	if (LINE.test(name)) return !fragment.attributes(shape.src.node).has("svg:d")
+	if (LINES.has(name)) return !fragment.attributes(shape.src.node).has("svg:d")
 	if (name === "draw:g") return (shape.children ?? []).every(child => isBoxWritable(child, fragmentOf))
-	if (!BOXED.test(name)) return false
+	if (!BOXED.has(name)) return false
 
 	if (!boxProves(fragment, shape)) return false
 
@@ -83,13 +82,6 @@ export interface OdpProofInput {
 	readonly deck: Deck
 	readonly slide: SlideNode
 	readonly source: OdpWriteSource
-}
-
-function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): void {
-	for (const shape of shapes) {
-		visit(shape)
-		if (shape.children !== undefined) walk(shape.children, visit)
-	}
 }
 
 interface DeckPages {
@@ -151,7 +143,7 @@ export function proveOdpSlide(input: OdpProofInput): ProofTally {
 	const src = slide.src
 	const fragment = src === undefined ? undefined : source.fragmentOf(src)
 
-	walk(slide.shapes, () => shapes++)
+	forEachShape(slide.shapes, () => shapes++)
 
 	if (fragment === undefined || src?.format !== "odp") return { shapes, locked, movable, failures }
 
@@ -278,7 +270,9 @@ function readBack(
 		const marker = encodeUtf8(`<office:automatic-styles>${added}</office:automatic-styles>`)
 
 		// A stream of the new styles alone: nothing before office:body to cut out, so it is read as it is.
-		const document = parseXml(concat(rootOpen(parts.content.bytes), marker, encodeUtf8("<office:body/>"), parts.content.rootClose))
+		const document = parseXml(
+			concatBytes([rootOpen(parts.content.bytes), marker, encodeUtf8("<office:body/>"), parts.content.rootClose])
+		)
 
 		sheet = parts.sheet.withAutomatic({
 			document,
@@ -309,13 +303,13 @@ function readBack(
 
 	try {
 		document = parseXml(
-			concat(
+			concatBytes([
 				head,
 				pageOpen.length === 0 ? encodeUtf8("<draw:page>") : pageOpen,
 				...elements,
 				encodeUtf8(`</${fragment.document.name(page)}>`),
 				encodeUtf8(`</${fragment.document.name(fragment.document.documentElement())}>`)
-			)
+			])
 		)
 	} catch {
 		return refused("proofFailed", "written markup is not well formed")
@@ -349,20 +343,4 @@ function readBack(
 	}
 
 	return nodes.map(node => readShapeElements(context, scope, [node])[0]).filter(shape => shape !== undefined)
-}
-
-function concat(...chunks: readonly Uint8Array[]): Uint8Array {
-	let length = 0
-
-	for (const chunk of chunks) length += chunk.length
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.length
-	}
-
-	return out
 }

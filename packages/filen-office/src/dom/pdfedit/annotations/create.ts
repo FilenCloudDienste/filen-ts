@@ -263,7 +263,7 @@ export function addImageStamp(
 	return created(annotation, input.page)
 }
 
-// A standard stamp ("Approved", "Draft", …) placed at `rect`'s top-left; its height follows the stamp's aspect.
+// A standard stamp ("Approved", "Draft", …) placed in `rect` as given (the caller keeps the stamp's aspect).
 export function addPresetStamp(
 	document: PDFDocument,
 	input: PdfAuthored & { readonly rect: PdfRect; readonly name: PdfPresetStamp }

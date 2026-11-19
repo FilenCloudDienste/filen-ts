@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { SheetChange, SheetCommandResult, SheetSessionApi } from "../core/sheet/protocol"
 import { openTextSession } from "../core/sheet/text"
-import { cells } from "./sheetSessionFixtures"
+import { cells, changeOf } from "./sheetSessionFixtures"
 
 // A text session's layout is its row and column counts: kept as edits go, sent only when they change.
 
@@ -11,12 +11,6 @@ async function open(text: string): Promise<SheetSessionApi> {
 	if (opened.kind !== "opened") throw new Error(opened.kind)
 
 	return opened.session
-}
-
-function changeOf(result: SheetCommandResult): SheetChange {
-	if (!result.ok) throw new Error(result.refusal.reason)
-
-	return result.change
 }
 
 function counts(change: SheetChange): { rowCount?: number; colCount?: number } | null {

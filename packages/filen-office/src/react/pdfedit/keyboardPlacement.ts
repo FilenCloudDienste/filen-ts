@@ -1,7 +1,11 @@
-// Placing a rectangle on a page from the keyboard (every rect tool: text box, shape, stamp, signature, redaction area,
-// crop): Enter on the focused page puts a default-size rectangle at its centre (or at a given point), the arrows move
-// it (Shift: ten times as far), Alt with the arrows resizes it, Enter commits and Escape cancels. Coordinates are the
-// page's bottom-left user space in points, as the engine's widgets and annotations; the rectangle never leaves the page.
+import type { PdfRect } from "../../core/pdfedit/annotations"
+import { placementKey, rectPosition, startPlacement, type Placement } from "./tools/placement"
+import type { ToolKeyName } from "./tools/types"
+
+// Keyboard placement of a rectangle in the page's bottom-left user space (points, y up, as the engine's widgets and
+// annotations), for hosts that work in it (signature, fill-and-sign, text edit). The rules (Enter commits, Escape
+// cancels, arrows move, Shift ×10, Alt resizes, the rectangle stays on the page) are the tools' own
+// (tools/placement.ts, page space, y down): this converts at the boundary.
 
 export interface PlacementRect {
 	readonly x: number
@@ -24,22 +28,22 @@ export interface PlacementKey {
 export type PlacementStep =
 	{ readonly kind: "move"; readonly rect: PlacementRect } | { readonly kind: "commit" } | { readonly kind: "cancel" }
 
-// Points per arrow press, and with Shift.
-export const PLACEMENT_STEP = 1
-export const PLACEMENT_STEP_LARGE = 10
-// The smallest rectangle resizing leaves.
-export const PLACEMENT_MIN_SIZE = 4
+function pageBox(page: PlacementPage): PdfRect {
+	return [0, 0, page.width, page.height]
+}
 
-function clampRect(rect: PlacementRect, page: PlacementPage): PlacementRect {
-	const width = Math.min(Math.max(PLACEMENT_MIN_SIZE, rect.width), page.width)
-	const height = Math.min(Math.max(PLACEMENT_MIN_SIZE, rect.height), page.height)
+function toPageSpace(rect: PlacementRect, page: PlacementPage): PdfRect {
+	return [rect.x, page.height - rect.y - rect.height, rect.x + rect.width, page.height - rect.y]
+}
 
-	return {
-		x: Math.min(Math.max(0, rect.x), page.width - width),
-		y: Math.min(Math.max(0, rect.y), page.height - height),
-		width,
-		height
-	}
+function fromPageSpace(rect: PdfRect, page: PlacementPage): PlacementRect {
+	return { x: rect[0], y: page.height - rect[3], width: rect[2] - rect[0], height: rect[3] - rect[1] }
+}
+
+function toolKey(key: string): ToolKeyName | null {
+	return key === "Enter" || key === "Escape" || key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown"
+		? key
+		: null
 }
 
 // The first rectangle: `size` centred on `at` (the page's centre without it), inside the page.
@@ -48,37 +52,24 @@ export function placementStart(
 	size: { readonly width: number; readonly height: number },
 	at?: { readonly x: number; readonly y: number }
 ): PlacementRect {
-	const centre = at ?? { x: page.width / 2, y: page.height / 2 }
+	const placement = startPlacement({ page: 0, box: pageBox(page) }, size, at === undefined ? undefined : [at.x, page.height - at.y])
 
-	return clampRect({ x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height }, page)
+	return fromPageSpace(placement.rect, page)
 }
 
 // What a key does to the rectangle; null for a key placement leaves alone.
-export function placementKey(rect: PlacementRect, page: PlacementPage, event: PlacementKey): PlacementStep | null {
-	if (event.key === "Enter") return { kind: "commit" }
-	if (event.key === "Escape") return { kind: "cancel" }
+export function placementRectKey(rect: PlacementRect, page: PlacementPage, event: PlacementKey): PlacementStep | null {
+	const key = toolKey(event.key)
 
-	const step = event.shiftKey ? PLACEMENT_STEP_LARGE : PLACEMENT_STEP
-	const [dx, dy] =
-		event.key === "ArrowLeft"
-			? [-step, 0]
-			: event.key === "ArrowRight"
-				? [step, 0]
-				: event.key === "ArrowUp"
-					? [0, step]
-					: event.key === "ArrowDown"
-						? [0, -step]
-						: [0, 0]
+	if (key === null) return null
 
-	if (dx === 0 && dy === 0) return null
+	const placement: Placement = { page: 0, box: pageBox(page), rect: toPageSpace(rect, page) }
+	const step = placementKey(placement, { key, shift: event.shiftKey, alt: event.altKey })
 
-	// Resizing keeps the top left corner where it is: right and down grow the rectangle, left and up shrink it (y is up,
-	// so its bottom edge moves).
-	const next = event.altKey
-		? { x: rect.x, y: rect.y + dy, width: rect.width + dx, height: rect.height - dy }
-		: { x: rect.x + dx, y: rect.y + dy, width: rect.width, height: rect.height }
+	if (step.commit !== undefined) return { kind: "commit" }
+	if (step.state === null) return { kind: "cancel" }
 
-	return { kind: "move", rect: clampRect(next, page) }
+	return { kind: "move", rect: fromPageSpace(step.state.rect, page) }
 }
 
 // The rectangle as a live region tells it: its top-left corner from the page's top-left, and its size, in whole points.
@@ -86,10 +77,5 @@ export function placementPosition(
 	rect: PlacementRect,
 	page: PlacementPage
 ): { readonly left: number; readonly top: number; readonly width: number; readonly height: number } {
-	return {
-		left: Math.round(rect.x),
-		top: Math.round(page.height - rect.y - rect.height),
-		width: Math.round(rect.width),
-		height: Math.round(rect.height)
-	}
+	return rectPosition(toPageSpace(rect, page), pageBox(page))
 }

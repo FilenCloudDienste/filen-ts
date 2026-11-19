@@ -1,13 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { FormulaEngine, type EngineSheet } from "../core/sheet/formula/index"
-import { engineCellFormula, storedFormula } from "../core/sheet/refs/formulaRefs"
+import { results as resultsBelow, type Typed } from "./sheetEngineFixtures"
 
 // GROUPBY and PIVOTBY against their pages on support.microsoft.com ("GROUPBY function", "PIVOTBY function"). The
 // pages show their example data only as pictures, so the examples run on a small table of the same shape (year,
 // category, product, sales, units). Formulas are stored as a file stores them; a function in a LAMBDA's place is
 // written as a file stores it (_xleta.SUM).
-
-type Typed = string | number | boolean | null
 
 const DATA: Typed[][] = [
 	["Year", "Category", "Product", "Sales", "Units"],
@@ -27,29 +24,7 @@ function close(value: number): unknown {
 
 // The results of formulas written below the table, one per row.
 function results(formulas: string[]): unknown[] {
-	const rows: Typed[][] = [...DATA, ...formulas.map(formula => [formula])]
-	const sheets: EngineSheet[] = [
-		{
-			name: "S",
-			rows: rows.map(row =>
-				row.map(cell =>
-					typeof cell === "string" && cell.startsWith("=") ? (engineCellFormula(storedFormula(cell.slice(1))) ?? "") : cell
-				)
-			),
-			formulas: []
-		}
-	]
-	const engine = new FormulaEngine(sheets, [])
-
-	try {
-		return formulas.map((_, index) => {
-			const result = engine.result(0, DATA.length + index, 0)
-
-			return result.error === true ? `!${String(result.value)}` : result.value
-		})
-	} finally {
-		engine.destroy()
-	}
+	return resultsBelow(DATA, formulas, { stored: true })
 }
 
 // The size of a result and the values at the given 1-based positions.

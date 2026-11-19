@@ -66,9 +66,23 @@ export function placementKey(placement: Placement, key: ToolKey): ToolStep<Place
 		else width = height * placement.aspect
 	}
 
+	// The top left corner stays; an edge grown past the page is clipped to it.
 	const rect: PdfRect = [x0, y0, Math.min(placement.box[2], x0 + width), Math.min(placement.box[3], y0 + height)]
 
 	return { state: { ...placement, rect } }
+}
+
+// The placement as a live region tells it: its top-left corner from the box's top-left, and its size, in whole points.
+export function rectPosition(
+	rect: PdfRect,
+	box: PdfRect
+): { readonly left: number; readonly top: number; readonly width: number; readonly height: number } {
+	return {
+		left: Math.round(rect[0] - box[0]),
+		top: Math.round(rect[1] - box[1]),
+		width: Math.round(rect[2] - rect[0]),
+		height: Math.round(rect[3] - rect[1])
+	}
 }
 
 export interface RectDrag {

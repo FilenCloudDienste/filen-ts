@@ -459,7 +459,7 @@ function drawAxisTitle(builder: ChartBuilder, state: AxisState, line: number, be
 	} else {
 		const text = reader.text(reader.child(reader.child(reader.child(ref, D.C, "strRef"), D.C, "strCache"), D.C, "pt"))
 
-		paragraphs = [plainParagraph(text === "" ? "Axis Title" : text.trim(), defaults)]
+		paragraphs = [plainParagraph(text === "" ? builder.chartText.axisTitle : text.trim(), defaults)]
 	}
 
 	const middle = (state.from + state.to) / 2

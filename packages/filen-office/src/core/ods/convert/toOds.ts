@@ -388,11 +388,13 @@ function bareSpacing(runs: readonly XlsxRichRun[]): XlsxRichRun[] {
 	return out
 }
 
+// paragraphText's escaped text as the characters it holds; most segments hold no reference and are themselves.
 function decodeEntities(markup: string): string {
-	return markup.replace(
-		/&(lt|gt|amp|quot|apos);/g,
-		(_all, name: string) => ({ lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" })[name] ?? ""
-	)
+	if (!markup.includes("&")) return markup
+
+	const bytes = encodeUtf8(markup)
+
+	return decodeCharacterData(bytes, 0, bytes.length, false)
 }
 
 // Runs as paragraphs hold them: a line end is where one paragraph ends and the next begins, which carries no look of

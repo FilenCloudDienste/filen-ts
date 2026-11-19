@@ -69,6 +69,9 @@ export interface ShowOptions {
 	readonly withoutAnimation?: boolean
 	// Show without narration (an explicit showNarration="0"): recorded narration (p:audio isNarration) never plays.
 	readonly withoutNarration?: boolean
+	// Transitions play as plain cross-fades (their sounds and timings kept), builds inside a slide as authored; the
+	// viewer's prefers-reduced-motion when the host leaves it out.
+	readonly reducedMotion?: boolean
 	// The pen's colour (penClr), RGB hex; the ink's default without it.
 	readonly penColor?: string
 	// Browsed by an individual (p:browse; ODF presentation:full-screen="false"): the page runs it in a window with a

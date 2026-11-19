@@ -5,7 +5,9 @@ import { readBlipFill } from "../core/pptx/read/drawing"
 import { G, partReader } from "../core/pptx/read/xml"
 import { applyPicture, insertedImage, pictureFillOf, type PictureReading } from "../core/presentation/edit/apply/picture"
 import type { ShapeNode } from "../core/presentation/model"
-import { image, pictureDeck } from "./presentationObjectsFixtures"
+import { pictureFormat } from "../dom/presentation/engine/picture"
+import { image, pictureDeck, png } from "./presentationObjectsFixtures"
+import { body, buildPptx, para, sp } from "./pptxFixtures"
 import { editHarness, shapeById } from "./presentationEditFixtures"
 import { differingParts, openDeck, partsOf, saveEdits, slideNode, text } from "./pptxWriteFixtures"
 import { driveSession } from "./odpWriteDrive"
@@ -273,5 +275,57 @@ describe("Change Picture undone and redone", () => {
 
 		// The replaced source image is no longer named; the inserted one is stored once.
 		expect(media).toEqual(["ppt/media/image2.png"])
+	})
+})
+
+// A picture cropped 20 % on the left and drawn in grayscale in its source.
+function formattedPictureDeck(): Uint8Array {
+	return buildPptx({
+		slides: [
+			{
+				shapes:
+					sp(2, "Title 1", 'type="title"', "", body(para("Pictures"))) +
+					'<p:pic><p:nvPicPr><p:cNvPr id="4" name="Picture 3"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>' +
+					'<p:blipFill><a:blip r:embed="rId9"><a:grayscl/></a:blip><a:srcRect l="20000"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+					'<p:spPr><a:xfrm><a:off x="100" y="100"/><a:ext cx="2000" cy="1000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>',
+				rels: [["rId9", "image", "../media/image1.png"]]
+			}
+		],
+		parts: { "ppt/media/image1.png": { data: png(), type: "image/png" } }
+	})
+}
+
+describe("a picture's format for the Picture tab", () => {
+	it("reads a source picture's crop and adjustments before any edit, and the typed ones after", async () => {
+		const h = await editHarness(formattedPictureDeck(), EDIT)
+		const target = { slide: h.session.deck.slides[0] as never, id: 4 }
+
+		expect(await pictureFormat(h.context, target)).toMatchObject({
+			crop: { l: 20_000, t: 0, r: 0, b: 0 },
+			adjust: { grayscale: true }
+		})
+		expect((await h.command({ family: "picture", kind: "crop", target, crop: { l: 20_000, t: 10_000, r: 0, b: 0 } })).ok).toBe(true)
+		const format = await pictureFormat(h.context, target)
+
+		expect(format).toMatchObject({ crop: { l: 20_000, t: 10_000, r: 0, b: 0 }, adjust: { grayscale: true } })
+
+		const adjusted = await h.command({ family: "picture", kind: "adjust", target, adjust: { ...format.adjust, contrast: 30_000 } })
+
+		expect(adjusted.ok).toBe(true)
+
+		const saved = await saveEdits(h, (adjusted as { revision: number }).revision)
+		const slideXml = text((await partsOf(saved)).get("ppt/slides/slide1.xml"))
+
+		// The source's grayscale written once, from the model, with the new contrast and both crops.
+		expect(slideXml.split("<a:grayscl/>").length).toBe(2)
+		expect(slideXml).toContain('<a:grayscl/><a:lum contrast="30000"/></a:blip><a:srcRect l="20000" t="10000" r="0" b="0"/>')
+	})
+
+	it("answers nothing for a plain picture and refuses a shape that is not one", async () => {
+		const h = await editHarness(pictureDeck(), EDIT)
+		const slide = h.session.deck.slides[0] as never
+
+		expect(await pictureFormat(h.context, { slide, id: 4 })).toEqual({})
+		await expect(pictureFormat(h.context, { slide, id: 2 })).rejects.toMatchObject({ reason: "unsupported" })
 	})
 })

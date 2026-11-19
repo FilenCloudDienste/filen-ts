@@ -1,4 +1,5 @@
 import { languageTag, pictureDate } from "../forms/dates"
+import { numericDatePicture, shortTimePicture } from "./datePictures"
 
 // Field codes (ECMA-376 Part 1 §17.16.1): the instruction parsed into its type, arguments and switches, the
 // general formatting switches \* that change case (§17.16.4.3) and DATE/TIME results under a \@ date-time picture
@@ -190,9 +191,31 @@ export function caseFormat(text: string, code: FieldCode): string {
 	return out
 }
 
-// Word's defaults when no \@ is given: the en-US short date and time.
+// Word's defaults when no \@ is given in a field without a language: the en-US short date and time.
 export const DEFAULT_DATE_PICTURE = "M/d/yyyy"
 export const DEFAULT_TIME_PICTURE = "h:mm am/pm"
+
+// The default DATE and TIME pictures of a field's language, by its w:lang: Intl reads each once (layout asks per
+// field per layout).
+const languagePictures = new Map<string, { readonly date: string; readonly time: string }>()
+
+// The picture a DATE or TIME field without \@ shows in: its language's numeric short date or short time (Word takes
+// them from the user's regional settings; the field's language keeps the result the same on every machine), the
+// en-US defaults without a language.
+function defaultPicture(type: string, language: string | undefined): string {
+	const time = type === "TIME"
+
+	if (language === undefined) return time ? DEFAULT_TIME_PICTURE : DEFAULT_DATE_PICTURE
+
+	let pictures = languagePictures.get(language)
+
+	if (pictures === undefined) {
+		pictures = { date: numericDatePicture(language), time: shortTimePicture(language) }
+		languagePictures.set(language, pictures)
+	}
+
+	return time ? pictures.time : pictures.date
+}
 
 // A date under a \@ date-time picture (§17.16.4.1), read as a date control's picture is (forms/dates.ts
 // pictureDate): `date`'s local day and time, month and day names in `language` (the field's w:lang), in `calendar`
@@ -217,10 +240,10 @@ function fieldCalendar(code: FieldCode): string | undefined {
 	return hasSwitch(code, "h") ? "hijri" : hasSwitch(code, "s") ? "saka" : undefined
 }
 
-// A DATE or TIME field's result at `now` (§17.16.5.16, §17.16.5.69): its \@ picture (else the en-US default), \h or
+// A DATE or TIME field's result at `now` (§17.16.5.16, §17.16.5.69): its \@ picture (else its language's default), \h or
 // \s calendar and \* case switches, in the field's language (`language`, `eastAsia`: its w:lang).
 export function dateTimeResult(code: FieldCode, now: Date, language: string | undefined, eastAsia: string | undefined): string {
-	const picture = switchOf(code, "@")?.arg ?? (code.type === "TIME" ? DEFAULT_TIME_PICTURE : DEFAULT_DATE_PICTURE)
+	const picture = switchOf(code, "@")?.arg ?? defaultPicture(code.type, language)
 
 	return caseFormat(datePicture(now, picture, language, fieldCalendar(code), eastAsia), code)
 }

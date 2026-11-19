@@ -1,4 +1,4 @@
-import { convertChart } from "../../drawingml/chart/index"
+import { CHART_TEXT_EN, convertChart, type ChartText } from "../../drawingml/chart/index"
 import { DrawingList } from "../../drawingml/displayList"
 import type { ImageResolver } from "../../drawingml/picture"
 import { D, drawingReader, type DrawingReader } from "../../drawingml/reader"
@@ -20,6 +20,11 @@ export type ChartRender =
 	// missing: no such chart part; unsupported: nothing in it is drawn; failed: it does not read.
 	| { readonly kind: "placeholder"; readonly reason: "missing" | "unsupported" | "failed"; readonly stamp: string }
 
+// What a stamp adds for the chart text a drawing was made with: a chart drawn in other words is not the same.
+export function chartTextStamp(text: ChartText): string {
+	return text === CHART_TEXT_EN ? "" : `|${text.series}|${text.chartTitle}|${text.axisTitle}`
+}
+
 // Frames past this are drawn at it (EMU, about 2,600 px): the list's text and paths are laid out for it.
 const MAX_FRAME = 25_000_000
 
@@ -28,7 +33,8 @@ export async function renderChart(
 	part: string,
 	width: number,
 	height: number,
-	since: string | undefined
+	since: string | undefined,
+	chartText: ChartText = CHART_TEXT_EN
 ): Promise<ChartRender> {
 	const book = chartBook(document.workbook)
 
@@ -38,7 +44,7 @@ export async function renderChart(
 
 	if (bytes === null) return { kind: "placeholder", reason: "missing", stamp: "" }
 
-	const stamp = `${book.stamp(part, bytes)}@${String(Math.round(width))}x${String(Math.round(height))}`
+	const stamp = `${book.stamp(part, bytes)}@${String(Math.round(width))}x${String(Math.round(height))}${chartTextStamp(chartText)}`
 
 	if (since === stamp) return { kind: "same", stamp }
 
@@ -62,7 +68,10 @@ export async function renderChart(
 			{ list: new DrawingList(), theme, images, effects: false },
 			shown.changed ? parseXml(shown.bytes) : source,
 			Math.min(MAX_FRAME, Math.max(0, width)),
-			Math.min(MAX_FRAME, Math.max(0, height))
+			Math.min(MAX_FRAME, Math.max(0, height)),
+			undefined,
+			undefined,
+			chartText
 		)
 
 		if (!result.supported) return { kind: "placeholder", reason: "unsupported", stamp }
@@ -108,7 +117,8 @@ export async function nestedChartFrames(
 	document: XlsxDocument,
 	drawingPart: string,
 	drawing: XmlDocument,
-	within: number = drawing.documentElement()
+	within: number = drawing.documentElement(),
+	chartText: ChartText = CHART_TEXT_EN
 ): Promise<NestedChartFrame | null> {
 	const reader = drawingReader(drawing)
 	const relationships = await partRelationships(document.workbook, drawingPart)
@@ -178,7 +188,8 @@ export async function nestedChartFrames(
 			Math.min(MAX_FRAME, width),
 			Math.min(MAX_FRAME, height),
 			list,
-			matrix
+			matrix,
+			chartText
 		).supported
 	}
 }

@@ -6,9 +6,11 @@ import type { SheetHeaderImage, SheetPrintNote } from "../../../core/sheet/print
 import { columnName } from "../../../core/sheet/refs/cellRef"
 import type { SheetDrawingObject } from "../../../core/xlsx/drawings/feature"
 import { DocxMediaCache } from "../../docx/media"
+import type { SheetBox } from "../drawings/geometry"
 import type { SheetGridModel } from "../model"
+import type { GridView } from "../view"
 import { printAxis, printSheet, type PrintedSheet } from "./printPage"
-import { printRanges } from "./printRanges"
+import { printRanges, wholeAxes } from "./printRanges"
 
 // A print laid out without drawing anything: the sheets cut into pages, the notes listed after them, and the looks
 // a page prints its tiles with. Free of the DOM, so the PDF export runs it in a worker; the SVG print draws from it.
@@ -92,6 +94,9 @@ export interface PrintJob {
 	readonly media: DocxMediaCache | null
 	// Drawn objects, once per object.
 	readonly drawn: Map<string, Promise<string | null>>
+	// The keys in `drawn` whose object failed to draw (a query or picture that threw): left off the pages, for the
+	// caller to report.
+	readonly failed: Set<string>
 	dispose(): void
 }
 
@@ -173,6 +178,50 @@ export function wrap(text: string, width: number, measure: (text: string) => num
 	}
 
 	return out
+}
+
+// A note shown all the time as its box prints it: its author's name (bold) on a line of its own before its text, the
+// lines wrapped inside the box's padding and cut where the box ends.
+export function shownNoteLines(note: SheetPrintNote, box: SheetBox, measure: (font: string, text: string) => number): string[] {
+	const lines = wrap(note.author === "" ? note.text : `${note.author}:\n${note.text}`, Math.max(1, box.width - 8), text =>
+		measure(NOTE_FONT, text)
+	)
+
+	return lines.slice(0, Math.max(1, Math.floor((box.height - 4) / NOTE_LINE_PX)))
+}
+
+// Where what a page draws over its cells (objects and shown notes, by their boxes on the whole sheet at 100 %) goes in
+// the page's view: `place` moves a box there (mirrored on a right-to-left sheet), `meets` says whether a box reaches
+// into the page's own rows and columns, `clip` is the page's own cells' box there (an object across a page break prints
+// in part on each page).
+export interface OverPlacement {
+	// The sheet's whole axes at 100 % (wholeAxes), which the boxes are found on.
+	readonly axes: ReturnType<typeof wholeAxes>
+	readonly place: (box: SheetBox) => SheetBox
+	readonly meets: (box: SheetBox) => boolean
+	readonly clip: SheetBox
+}
+
+export function overPlacement(sheet: PrintedSheet, page: PrintPage, view: GridView): OverPlacement {
+	const axes = wholeAxes(sheet.layout, sheet.rowSizes)
+	const left = axes.cols.offset(page.cols.first)
+	const top = axes.rows.offset(page.rows.first)
+	const right = axes.cols.offset(page.cols.last + 1)
+	const bottom = axes.rows.offset(page.rows.last + 1)
+	const paneX = view.cols.header + view.cols.frozenSize
+	const paneY = view.rows.header + view.rows.frozenSize
+	const mirrored = sheet.layout.rightToLeft
+
+	return {
+		axes,
+		place: box => {
+			const x = paneX + box.x - left
+
+			return { x: mirrored ? view.width - x - box.width : x, y: paneY + box.y - top, width: box.width, height: box.height }
+		},
+		meets: box => box.x < right && box.x + box.width > left && box.y < bottom && box.y + box.height > top,
+		clip: { x: mirrored ? view.width - paneX - (right - left) : paneX, y: paneY, width: right - left, height: bottom - top }
+	}
 }
 
 // The notes listed after a sheet, as Excel prints them: a "Cell:" line and a "Note:" line each, a blank line between;
@@ -316,6 +365,7 @@ export async function layOutPrint(
 	}
 
 	const drawn = new Map<string, Promise<string | null>>()
+	const failed = new Set<string>()
 
 	return {
 		model,
@@ -324,9 +374,11 @@ export async function layOutPrint(
 		measure,
 		media,
 		drawn,
+		failed,
 		dispose: () => {
 			media?.dispose()
 			drawn.clear()
+			failed.clear()
 		}
 	}
 }

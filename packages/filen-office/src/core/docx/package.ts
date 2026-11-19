@@ -55,8 +55,9 @@ export interface DocxFacts {
 export type DocxGateReason = "strict" | "signed" | "protected" | "writeProtected" | "malformed"
 
 // Document protection modes the editor opens editable within their limits (edit/protection.ts: form fields
-// only, comments only, every edit tracked); "readOnly" (and any mode it does not know) stays view-only.
-const LIMITED_PROTECTION: ReadonlySet<string> = new Set(["forms", "comments", "trackedChanges"])
+// only, comments only, every edit tracked); "readOnly" (and any mode it does not know) stays view-only. The
+// editing mode is read from the same set (protectionMode()).
+export const LIMITED_PROTECTION: ReadonlySet<string> = new Set(["forms", "comments", "trackedChanges"])
 
 // Whether enforced document protection makes the document view-only (ECMA-376 Part 1 §17.15.1.29).
 export function viewOnlyProtection(protection: DocumentProtection | undefined): boolean {

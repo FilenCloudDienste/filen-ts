@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import { docxSchema, type DocxEditorCommand, type DocxEditorSession } from "@filen/office/core/docx/edit"
 import type { KeyLike } from "../core/docx/paged/keys"
 import { appKeyFor, commandForKey } from "./docxKeyHelpers"
-import { firstCaseMode } from "../core/docx/edit/changeCase"
+import { changeCase, firstCaseMode } from "../core/docx/edit/changeCase"
 import { sessionOf } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
 import { pagedEditor } from "./pagedFixtures"
@@ -158,6 +158,76 @@ describe("Change Case", () => {
 		expect(run(session, { type: "format.changeCase" })).toBe(false)
 		select(session, 10, 13)
 		expect(run(session, { type: "format.changeCase" })).toBe(false)
+	})
+
+	it("changes a long selection in few steps, not a step per run", async () => {
+		const session = await sessionOf({
+			body: Array.from(
+				{ length: 2000 },
+				(_, k) => `<w:p><w:r><w:t xml:space="preserve">para ${k} </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>bold</w:t></w:r></w:p>`
+			).join("")
+		})
+
+		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 1, session.state.doc.content.size - 1)))
+
+		const tr = changeCase({ session, state: session.state, context: session.context })
+
+		expect(tr).not.toBeNull()
+		expect(tr?.steps.length).toBeLessThan(50)
+		expect(session.dispatch(tr as NonNullable<typeof tr>)).toBe(true)
+		expect(session.state.doc.child(1999).textContent).toBe("Para 1999 Bold")
+		expect(markOf(session.state.doc.child(1999).lastChild, "bold")).toBeDefined()
+	})
+
+	it("records the same tracked revisions as a replace per run", async () => {
+		const body = '<w:p><w:r><w:t xml:space="preserve">hello </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>world</w:t></w:r></w:p>'
+		const tracked = async (): Promise<DocxEditorSession> => {
+			const session = await sessionOf({ body })
+
+			session.context.identity.author = "Ann"
+			session.context.review.tracking = true
+
+			return session
+		}
+		// Revision ids and dates differ between two sessions.
+		const revisions = (session: DocxEditorSession): unknown =>
+			JSON.parse(JSON.stringify(session.state.doc.toJSON()), (key, value: unknown) => (key === "date" || key === "id" ? null : value))
+		const session = await tracked()
+		const reference = await tracked()
+
+		select(session, 1, 12)
+		expect(run(session, { type: "format.changeCase" })).toBe(true)
+
+		const bold = reference.state.doc.nodeAt(7)?.marks ?? []
+
+		expect(
+			reference.dispatch(
+				reference.state.tr
+					.replaceWith(7, 8, docxSchema.text("W", bold))
+					.replaceWith(1, 2, docxSchema.text("H", reference.state.doc.nodeAt(1)?.marks))
+			)
+		).toBe(true)
+		expect(text(session)).toBe(text(reference))
+		expect(revisions(session)).toEqual(revisions(reference))
+		expect(session.state.doc.toString()).toContain("deletion")
+	})
+
+	it("changes a selection inside a table cell", async () => {
+		const session = await sessionOf({
+			body: `<w:tbl><w:tr><w:tc>${p("left cell")}</w:tc><w:tc>${p("right cell")}</w:tc></w:tr></w:tbl>${p("after")}`
+		})
+		let from = 0
+		let to = 0
+
+		session.state.doc.descendants((node, pos) => {
+			if (node.isText && node.text === "right cell") {
+				from = pos
+				to = pos + node.nodeSize
+			}
+		})
+		select(session, from, to)
+		expect(run(session, { type: "format.changeCase" })).toBe(true)
+		expect(text(session)).toBe("left cell\nRight Cell\nafter")
 	})
 })
 

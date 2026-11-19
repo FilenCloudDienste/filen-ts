@@ -17,28 +17,10 @@ import {
 	type PdfSecurityState,
 	type PdfSecuritySummary
 } from "../../../core/pdfedit/security"
-import type { PdfPermission } from "../protocol"
 
 // The security block of the engine: reads a document's encryption, tracks what the session is authenticated with,
 // unlocks owner rights and plans the write options of a save. None of it touches pages or the undo journal; the
 // write options take effect in the save (`saveToBuffer`), which also gives the session's document the new encryption.
-
-// What the Protect dialog and the tools read. Carries no password.
-export interface PdfSecurityDescription extends PdfSecuritySummary {
-	// What the session may do now (MuPDF's hasPermission: everything with owner rights). Tools honour these.
-	readonly granted: Readonly<Record<PdfPermission, boolean>>
-}
-
-const PERMISSIONS: readonly (readonly [PdfPermission, Mupdf.DocumentPermission])[] = [
-	["print", "print"],
-	["printHq", "print-hq"],
-	["copy", "copy"],
-	["edit", "edit"],
-	["annotate", "annotate"],
-	["form", "form"],
-	["assemble", "assemble"],
-	["accessibility", "accessibility"]
-]
 
 function name(object: Mupdf.PDFObject): string | null {
 	return object.isName() ? object.asName() : null
@@ -55,7 +37,7 @@ function encryptDictionary(document: Mupdf.PDFDocument): Mupdf.PDFObject | null 
 }
 
 // The /Encrypt entries that tell the method, or null when the document is not encrypted.
-export function readEncryptFields(document: Mupdf.PDFDocument): PdfEncryptFields | null {
+function readEncryptFields(document: Mupdf.PDFDocument): PdfEncryptFields | null {
 	const dictionary = encryptDictionary(document)
 
 	if (dictionary === null) return null
@@ -83,24 +65,6 @@ export function securityState(document: Mupdf.PDFDocument, held: PdfHeldAccess):
 	}
 }
 
-// What the session may do now, per MuPDF (owner rights grant everything).
-export function grantedPermissions(document: Mupdf.PDFDocument): Readonly<Record<PdfPermission, boolean>> {
-	const granted: Record<PdfPermission, boolean> = {
-		print: false,
-		printHq: false,
-		copy: false,
-		edit: false,
-		annotate: false,
-		form: false,
-		assemble: false,
-		accessibility: false
-	}
-
-	for (const [ours, theirs] of PERMISSIONS) granted[ours] = document.hasPermission(theirs)
-
-	return granted
-}
-
 // The document's protection as the editor reports it (the session's snapshot). Reads the trailer only.
 export function securitySummary(document: Mupdf.PDFDocument, held: PdfHeldAccess): PdfSecuritySummary {
 	const state = securityState(document, held)
@@ -115,29 +79,6 @@ export function securitySummary(document: Mupdf.PDFDocument, held: PdfHeldAccess
 		ownerAccess: hasOwnerAccess(state),
 		upgrade: isRc4(state.method) ? upgradeRefusal(state) : "notRc4"
 	}
-}
-
-// The document's security as the dialog and the tools read it. Reads the trailer only; touches no pages.
-export function describeSecurity(document: Mupdf.PDFDocument, held: PdfHeldAccess): PdfSecurityDescription {
-	return { ...securitySummary(document, held), granted: grantedPermissions(document) }
-}
-
-// What a freshly opened document is authenticated with: call once, right after opening and before any unlock (it
-// authenticates again, replacing what the open did). `accepted`: the password the viewer accepted, null when the
-// document opened without one. Tries it as typed, then SASLprep'd. Null when it unlocks nothing (the document stays
-// locked). Never call `needsPassword()` on the document afterwards: it tries the empty password, dropping access.
-export function heldAccessAtOpen(document: Mupdf.PDFDocument, accepted: string | null): PdfHeldAccess | null {
-	if (encryptDictionary(document) === null) return { password: "", bits: 0, openPassword: false }
-
-	const openPassword = document.needsPassword()
-
-	for (const candidate of passwordCandidates(accepted ?? "")) {
-		const bits = document.authenticatePassword(candidate)
-
-		if (bits !== 0) return { password: candidate, bits, openPassword }
-	}
-
-	return null
 }
 
 // Unlocks owner rights with a typed owner password (as typed, then SASLprep'd). On success the document has owner

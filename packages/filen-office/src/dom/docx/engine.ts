@@ -41,6 +41,7 @@ import {
 	FontManager,
 	cssFont,
 	declareDocxEmbeddedFonts,
+	logEmbeddedFontFailures,
 	readDocxFontTable,
 	type FontAssets,
 	type FontFaceDescriptor,
@@ -276,6 +277,7 @@ export class DocxEngine implements DocxSessionApi {
 	private bookmarks: Map<string, { part: number; item: number }> | undefined = undefined
 	private readonly retain: boolean
 	private readonly format: "docx" | "odt"
+	private readonly chartText: DocxOpenOptions["chartText"]
 	private gate: readonly DocxGateReason[] | undefined
 	// The zip directory and content types: images are read from them after the model is gone.
 	private pkg: { readonly opc: OpcPackage; readonly contentTypes: ContentTypes } | undefined = undefined
@@ -294,6 +296,8 @@ export class DocxEngine implements DocxSessionApi {
 	private annotationCache: DocxAnnotations | undefined = undefined
 	private readonly mathSizes = new Map<number, number>()
 	private readonly pendingFaces: DocxFontFace[] = []
+	// Embedded-font failures of `fonts` already logged.
+	private loggedFontFailures = 0
 	private readonly links: DocxLinkTarget[] = []
 	private readonly linkKeys = new Map<string, number>()
 	// Per part (an edit's overlay part goes with it), by paragraph item, for the text they were placed in (a
@@ -324,6 +328,7 @@ export class DocxEngine implements DocxSessionApi {
 		this.retain = options.retain === true || editing !== undefined
 		this.objectCache = this.retain ? undefined : new Map()
 		this.format = options.format ?? "docx"
+		this.chartText = options.chartText
 		this.editing = editing
 	}
 
@@ -573,7 +578,10 @@ export class DocxEngine implements DocxSessionApi {
 		)
 	}
 
+	// Sends the faces registered since the last call, and logs the embedded faces refused since (both follow a prepare).
 	private flushFaces(): void {
+		if (this.fonts !== undefined) this.loggedFontFailures = logEmbeddedFontFailures(this.fonts.failures(), this.loggedFontFailures)
+
 		if (this.pendingFaces.length === 0) return
 
 		const faces = this.pendingFaces.splice(0)
@@ -818,7 +826,7 @@ export class DocxEngine implements DocxSessionApi {
 	}
 
 	private drawingLayer(model: DocxModel): Promise<DocxDrawings> {
-		this.drawings ??= DocxDrawings.open(model)
+		this.drawings ??= DocxDrawings.open(model, this.chartText === undefined ? {} : { chartText: this.chartText })
 
 		return this.drawings
 	}

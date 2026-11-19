@@ -1,3 +1,4 @@
+import type { ChartText } from "../../drawingml/chart/builder"
 import type { DrawingTheme, TextBodyProps } from "../../drawingml/index"
 import type { XmlDocument } from "../../xml/index"
 import type { Slicing } from "../../slicing"
@@ -86,4 +87,6 @@ export interface RenderServices {
 	smartart?: SmartArtRenderer
 	// The deck's hostile-input budgets (path commands, display items, shapes per slide); the defaults when absent.
 	readonly budgets?: PresentationBudgets
+	// What charts show where the file names nothing (unnamed series, automatic titles); English when absent.
+	readonly chartText?: ChartText
 }

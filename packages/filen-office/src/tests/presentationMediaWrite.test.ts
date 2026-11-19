@@ -1,17 +1,22 @@
-import { describe, expect, it } from "vitest"
-import { bytesSource, crc32, ZipArchive } from "@filen/office/core/opc"
+import { describe, expect, it, vi } from "vitest"
+import { bytesSource, crc32, OpcPackage, ZipArchive } from "@filen/office/core/opc"
+import { DEFLATE_HELD } from "../core/opc/mediaPolicy"
+import { releasedMediaBytes } from "../core/pptx/write/parts"
 import { mediaPlayback, registerInsertedMedia } from "../core/presentation/edit/apply/media"
 import type { FileLike, InsertedMedia } from "../core/presentation/edit/ops"
-import type { ShapeNode } from "../core/presentation/model"
+import type { ShapeNode, SlideRef } from "../core/presentation/model"
+import { sessionEdits } from "../dom/presentation/engine/edit"
 import { mediaCapability } from "../dom/presentation/engine/media"
+import { review } from "../dom/presentation/engine/review"
 import { viewCapability } from "../dom/presentation/engine/view"
 import { selectionKinds, slideShapes } from "../react/presentation/edit/selection"
 import { odpBytes } from "./odpFixtures"
 import { changes, entriesOf, odpApplier, openOdpDeck, saveDeck, shapeNamed, slideAt, text as odpText } from "./odpWriteFixtures"
 import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { body, buildPptx, para, sp } from "./pptxFixtures"
+import { reopened } from "./modelVsFile"
 import { image } from "./presentationObjectsFixtures"
-import { openDeck, partsOf, saveEdits, slideNode, text } from "./pptxWriteFixtures"
+import { danglingReferences, openDeck, partsOf, saveEdits, slideNode, text } from "./pptxWriteFixtures"
 
 // Inserted media saved: a stored entry streamed from where the worker registered it, read once, carrying the CRC-32
 // taken at insert (a file changed since fails the save); pptx relates it as a:videoFile and p14:media with its poster as
@@ -212,7 +217,7 @@ const VIDEO_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relatio
 const MEDIA_REL = "http://schemas.microsoft.com/office/2007/relationships/media"
 
 // A deck whose slide holds a source video (shape 4) trimmed by its p14:media.
-function sourceVideoDeck(): Uint8Array {
+function sourceVideoDeck(video: Uint8Array = mp4(4096)): Uint8Array {
 	const pic =
 		'<p:pic><p:nvPicPr><p:cNvPr id="4" name="Video 4"><a:hlinkClick r:id="" action="ppaction://media"/></p:cNvPr><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr><a:videoFile r:link="rId10"/>' +
 		`<p:extLst><p:ext uri="{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}"><p14:media xmlns:p14="${P14_NS}" r:embed="rId11"><p14:trim st="1500" end="250"/></p14:media></p:ext></p:extLst></p:nvPr></p:nvPicPr>` +
@@ -231,7 +236,7 @@ function sourceVideoDeck(): Uint8Array {
 			}
 		],
 		parts: {
-			"ppt/media/media1.mp4": { data: mp4(4096), type: "video/mp4" },
+			"ppt/media/media1.mp4": { data: video, type: "video/mp4" },
 			"ppt/media/image1.png": { data: image().bytes, type: "image/png" }
 		}
 	})
@@ -287,6 +292,218 @@ describe("source media timing in pptx", () => {
 
 		expect(timingAt(0)).toEqual({ trim: { startMs: 1500, endMs: 250 } })
 		expect(timingAt(1)).toEqual({ trim: { startMs: 3000, endMs: 0 } })
+	})
+})
+
+const MEDIUM = "ppt/media/media1.mp4"
+
+async function zipEntries(bytes: Uint8Array | undefined): Promise<Map<string, Uint8Array>> {
+	const zip = await ZipArchive.open(bytesSource(bytes ?? new Uint8Array(0)))
+	const out = new Map<string, Uint8Array>()
+
+	for (const entry of zip.entries) out.set(entry.name, await zip.read(entry))
+
+	return out
+}
+
+// Compared without a deep equality's per-element walk (a part over DEFLATE_HELD).
+const sameBytes = (a: Uint8Array | undefined, b: Uint8Array): boolean => a !== undefined && Buffer.compare(a, b) === 0
+
+const decoded = (files: Map<string, Uint8Array>, name: string): string => new TextDecoder().decode(files.get(name) ?? new Uint8Array(0))
+
+// A source medium deleted: never read whole to be held for an undo. It stays in the file, unrelated, while a step the
+// history holds names it; an undo relates it again with its bytes as they were, and once no step names it a save
+// leaves it out.
+describe("a source medium deleted in pptx", () => {
+	it("stays unread in the file while the history names it, an undo relating it again", async () => {
+		const video = mp4(200_000, 7)
+		const d = await reopened(sourceVideoDeck(video), "pptx")
+		const slide = d.session.deck.slides[0] as SlideRef
+
+		await review(d.context, slide)
+		expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [4] })).ok).toBe(true)
+
+		const read = vi.spyOn(OpcPackage.prototype, "read")
+		const deleted = await d.save().finally(() => {
+			read.mockRestore()
+		})
+
+		expect(deleted.result.kind).toBe("written")
+		expect(read.mock.calls.filter(([name]) => name.replace(/^\//u, "") === MEDIUM)).toEqual([])
+		expect(releasedMediaBytes(d.session.deck, MEDIUM)).toBeUndefined()
+
+		const afterDelete = await zipEntries(deleted.bytes)
+
+		expect(afterDelete.get(MEDIUM)).toEqual(video)
+		expect(decoded(afterDelete, "ppt/slides/_rels/slide1.xml.rels")).not.toContain("media1.mp4")
+		expect(decoded(afterDelete, "ppt/slides/slide1.xml")).not.toContain("<a:videoFile")
+
+		// Another save between: the medium still stays for the undo.
+		expect((await d.command({ family: "slide", kind: "hide", slides: [slide], hidden: true })).ok).toBe(true)
+
+		const between = await d.save()
+
+		expect(between.result.kind).toBe("written")
+		expect((await zipEntries(between.bytes)).get(MEDIUM)).toEqual(video)
+		expect((await d.undo()).ok).toBe(true)
+		expect((await d.undo()).ok).toBe(true)
+
+		const undone = await d.save()
+
+		expect(undone.result.kind).toBe("written")
+
+		const back = await zipEntries(undone.bytes)
+
+		expect(back.get(MEDIUM)).toEqual(video)
+		expect(decoded(back, "ppt/slides/_rels/slide1.xml.rels")).toMatch(/relationships\/video" Target="\.\.\/media\/media1\.mp4"/u)
+		expect(await danglingReferences(undone.bytes as Uint8Array)).toEqual([])
+		expect(
+			slideNode(await openDeck(undone.bytes as Uint8Array), 0).shapes.find(shape => shape.name === "Video 4")?.media
+		).toMatchObject({
+			kind: "video",
+			part: `/${MEDIUM}`
+		})
+	})
+
+	it("leaves a picture over DEFLATE_HELD unread in the file, an undo relating it again", async () => {
+		const picture = new Uint8Array(DEFLATE_HELD + 4096)
+
+		picture.set(image().bytes, 0)
+
+		const pic =
+			'<p:pic><p:nvPicPr><p:cNvPr id="4" name="Picture 4"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>' +
+			'<p:blipFill><a:blip r:embed="rId12"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+			'<p:spPr><a:xfrm><a:off x="1000000" y="1000000"/><a:ext cx="4000000" cy="3000000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+		const deck = buildPptx({
+			slides: [
+				{ shapes: sp(2, "Title 1", 'type="title"', "", body(para("Big"))) + pic, rels: [["rId12", "image", "../media/image1.png"]] }
+			],
+			parts: { "ppt/media/image1.png": { data: picture, type: "image/png" } }
+		})
+		const PICTURE = "ppt/media/image1.png"
+		const d = await reopened(deck, "pptx")
+		const slide = d.session.deck.slides[0] as SlideRef
+
+		await review(d.context, slide)
+		expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [4] })).ok).toBe(true)
+
+		const read = vi.spyOn(OpcPackage.prototype, "read")
+		const deleted = await d.save().finally(() => {
+			read.mockRestore()
+		})
+
+		expect(deleted.result.kind).toBe("written")
+		expect(read.mock.calls.filter(([name]) => name.replace(/^\//u, "") === PICTURE)).toEqual([])
+		expect(releasedMediaBytes(d.session.deck, PICTURE)).toBeUndefined()
+
+		const afterDelete = await zipEntries(deleted.bytes)
+
+		expect(sameBytes(afterDelete.get(PICTURE), picture)).toBe(true)
+		expect(decoded(afterDelete, "ppt/slides/_rels/slide1.xml.rels")).not.toContain("image1.png")
+
+		// Another save between: the session prune keeps the part for the undo.
+		expect((await d.command({ family: "slide", kind: "hide", slides: [slide], hidden: true })).ok).toBe(true)
+
+		const between = await d.save()
+
+		expect(between.result.kind).toBe("written")
+		expect(sameBytes((await zipEntries(between.bytes)).get(PICTURE), picture)).toBe(true)
+		expect((await d.undo()).ok).toBe(true)
+		expect((await d.undo()).ok).toBe(true)
+
+		const undone = await d.save()
+
+		expect(undone.result.kind).toBe("written")
+
+		const back = await zipEntries(undone.bytes)
+
+		expect(sameBytes(back.get(PICTURE), picture)).toBe(true)
+		expect(decoded(back, "ppt/slides/_rels/slide1.xml.rels")).toMatch(/Id="rId12"[^>]*Target="\.\.\/media\/image1\.png"/u)
+		expect(await danglingReferences(undone.bytes as Uint8Array)).toEqual([])
+	})
+
+	it("keeps a medium the held markup names only by relationship id, an undo relating it again", async () => {
+		const sound = mp4(2048, 3)
+		const SOUND = "ppt/media/audio1.wav"
+		const button =
+			'<p:sp><p:nvSpPr><p:cNvPr id="5" name="Button 5"><a:hlinkClick r:id="" action="ppaction://noaction">' +
+			'<a:snd r:embed="rId20" name="click.wav"/></a:hlinkClick></p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>' +
+			'<p:spPr><a:xfrm><a:off x="1000000" y="1000000"/><a:ext cx="2000000" cy="1000000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:sp>'
+		const deck = buildPptx({
+			slides: [
+				{
+					shapes: sp(2, "Title 1", 'type="title"', "", body(para("Sound"))) + button,
+					rels: [["rId20", "audio", "../media/audio1.wav"]]
+				}
+			],
+			parts: { [SOUND]: { data: sound, type: "audio/wav" } }
+		})
+		const d = await reopened(deck, "pptx")
+		const slide = d.session.deck.slides[0] as SlideRef
+
+		await review(d.context, slide)
+		expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [5] })).ok).toBe(true)
+
+		const deleted = await d.save()
+
+		expect(deleted.result.kind).toBe("written")
+		expect(sameBytes((await zipEntries(deleted.bytes)).get(SOUND), sound)).toBe(true)
+		expect((await d.command({ family: "slide", kind: "hide", slides: [slide], hidden: true })).ok).toBe(true)
+
+		const between = await d.save()
+
+		expect(between.result.kind).toBe("written")
+		expect(sameBytes((await zipEntries(between.bytes)).get(SOUND), sound)).toBe(true)
+		expect((await d.undo()).ok).toBe(true)
+		expect((await d.undo()).ok).toBe(true)
+
+		const undone = await d.save()
+
+		expect(undone.result.kind).toBe("written")
+
+		const back = await zipEntries(undone.bytes)
+
+		expect(sameBytes(back.get(SOUND), sound)).toBe(true)
+		expect(decoded(back, "ppt/slides/_rels/slide1.xml.rels")).toMatch(/Id="rId20"[^>]*Target="\.\.\/media\/audio1\.wav"/u)
+		expect(await danglingReferences(undone.bytes as Uint8Array)).toEqual([])
+
+		// Deleted again and saved, then nothing left to undo it: the next save leaves it out.
+		expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [5] })).ok).toBe(true)
+		expect(sameBytes((await zipEntries((await d.save()).bytes)).get(SOUND), sound)).toBe(true)
+		sessionEdits(d.session).history.clear()
+		expect((await d.command({ family: "slide", kind: "hide", slides: [slide], hidden: true })).ok).toBe(true)
+
+		const pruned = await d.save()
+
+		expect(pruned.result.kind).toBe("written")
+
+		const files = await zipEntries(pruned.bytes)
+
+		expect(files.has(SOUND)).toBe(false)
+		expect(decoded(files, "[Content_Types].xml")).not.toContain("audio1.wav")
+		expect(await danglingReferences(pruned.bytes as Uint8Array)).toEqual([])
+	})
+
+	it("leaves the file once no step the history holds names it", async () => {
+		const d = await reopened(sourceVideoDeck(), "pptx")
+		const slide = d.session.deck.slides[0] as SlideRef
+
+		await review(d.context, slide)
+		expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [4] })).ok).toBe(true)
+		expect((await zipEntries((await d.save()).bytes)).has(MEDIUM)).toBe(true)
+
+		sessionEdits(d.session).history.clear()
+		expect((await d.command({ family: "slide", kind: "hide", slides: [slide], hidden: true })).ok).toBe(true)
+
+		const pruned = await d.save()
+
+		expect(pruned.result.kind).toBe("written")
+
+		const files = await zipEntries(pruned.bytes)
+
+		expect(files.has(MEDIUM)).toBe(false)
+		expect(decoded(files, "[Content_Types].xml")).not.toContain("media1.mp4")
+		expect(await danglingReferences(pruned.bytes as Uint8Array)).toEqual([])
 	})
 })
 

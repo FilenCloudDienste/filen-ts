@@ -8,7 +8,8 @@ import type { DrawingObjectKind, DrawingPartRecord } from "./read"
 import { D, drawingReader } from "../../drawingml/reader"
 import { NodeKind, type XmlDocument } from "../../xml/index"
 import { chartBook } from "../charts/book"
-import { nestedChartFrames } from "../charts/render"
+import { CHART_TEXT_EN } from "../../drawingml/chart/index"
+import { chartTextStamp, nestedChartFrames } from "../charts/render"
 import { renderObject, type DrawingRender } from "./render"
 import { drawingStore, type DrawingStore } from "./store"
 
@@ -219,12 +220,13 @@ export const drawingsFeature = defineSheetFeature<XlsxDocument>({
 
 				if (charts === null) return await renderObject(store, drawing.part, drawing.document, object)
 
-				const stamp = `${request.stamp}|${charts}`
+				const chartText = context.settings.chartText ?? CHART_TEXT_EN
+				const stamp = `${request.stamp}|${charts}${chartTextStamp(chartText)}`
 
 				if (request.since === stamp) return { kind: "same", stamp }
 
 				// The charts are read first, the walk being synchronous.
-				const frame = await nestedChartFrames(context.doc, drawing.part, drawing.document, object.content)
+				const frame = await nestedChartFrames(context.doc, drawing.part, drawing.document, object.content, chartText)
 				const rendered = await renderObject(store, drawing.part, drawing.document, object, frame ?? undefined)
 
 				return rendered.kind === "drawing" ? { ...rendered, live: stamp } : rendered

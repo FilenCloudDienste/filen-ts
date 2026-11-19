@@ -1,3 +1,4 @@
+import { insertedPartId, insertedPartName } from "../../inserted"
 import type { TimeNode, TimingTree } from "../../../anim/model"
 import type { ByteChunks } from "../../../opc/index"
 import { refused, type Deck, type MediaRef, type Refused, type ShapeNode, type SlideNode } from "../../model"
@@ -16,15 +17,11 @@ import { isRefused } from "../../refusal"
 // Playback options live in the slide timing's media node for the shape (p:video/p:audio, §19.5.93/§19.5.1): volume,
 // mute, hide while stopped, full screen, and loop as its repeat count.
 
-export const INSERTED_MEDIA = "inserted:"
-
 // The worker registry id an "inserted:<id>" media part names, else undefined.
 export function insertedMediaId(part: string | undefined): number | undefined {
-	if (part?.startsWith(INSERTED_MEDIA) !== true) return undefined
+	const id = part === undefined ? undefined : insertedPartId(part)
 
-	const id = Number(part.slice(INSERTED_MEDIA.length))
-
-	return Number.isSafeInteger(id) && id > 0 ? id : undefined
+	return id !== undefined && Number.isSafeInteger(id) && id > 0 ? id : undefined
 }
 
 // What a save streams for an inserted medium: its bytes read again (never held), with the size and CRC-32 they had
@@ -154,7 +151,7 @@ function insert(deck: Deck, op: OpOf<"media"> & { kind: "insert" }, context: App
 	const image = registerInsertedImage(deck, poster, pictureFillOf(op.shape)?.inserted ?? insertedMediaId(prior))
 	const media: MediaRef = {
 		kind: op.media.kind,
-		part: `${INSERTED_MEDIA}${String(op.media.id)}`,
+		part: insertedPartName(op.media.id),
 		contentType: op.media.contentType,
 		size: op.media.size
 	}
@@ -166,8 +163,8 @@ function insert(deck: Deck, op: OpOf<"media"> & { kind: "insert" }, context: App
 			? {
 					...base,
 					kind: "frame",
-					media: { ...media, poster: `${INSERTED_MEDIA}${String(image)}` },
-					frame: { kind: "media", media: { ...media, poster: `${INSERTED_MEDIA}${String(image)}` } }
+					media: { ...media, poster: insertedPartName(image) },
+					frame: { kind: "media", media: { ...media, poster: insertedPartName(image) } }
 				}
 			: {
 					...base,

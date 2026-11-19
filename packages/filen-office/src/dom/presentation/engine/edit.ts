@@ -13,6 +13,7 @@ import { odpWriteSource } from "../../../core/odp/write/source"
 import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../../core/xml/index"
 import { crc32, parseRelationships, partKey, relationshipsPartName, Relationships } from "../../../core/opc/index"
 import type { PptxParts } from "../../../core/pptx/package"
+import { readLine } from "../../../core/pptx/read/drawing"
 import { readSlidePart } from "../../../core/pptx/read/slide"
 import { G, P_MAIN, partReader } from "../../../core/pptx/read/xml"
 import { sourcePictureFill } from "../../../core/pptx/write/emit/picture"
@@ -823,6 +824,25 @@ function contextFor(
 		newShapeId: slide => nextShapeId(deck.nodes.get(slide)?.shapes ?? []),
 		newSlideRef: () => slideRef(state.nextRef++),
 		movable: shape => isMovable(shape, part => parts.document(part) ?? state.raw.get(part)?.document),
+		sourceLine: src => {
+			const document = state.raw.get(src.part)?.document ?? (src.epoch === parts.epoch ? parts.document(src.part) : undefined)
+
+			if (document === undefined || src.node <= 0 || src.node >= document.count) return refused("notFound", src.part)
+
+			const reader = partReader(document)
+			const ln = reader.child(reader.child(src.node, G.P, "spPr"), G.A, "ln")
+			// A line holds no picture fill (CT_LineProperties), so the read names none of the part's relationships.
+			const context = {
+				reader,
+				part: src.part,
+				epoch: src.epoch,
+				relationships: new Relationships([]),
+				tally: new DeckTally(),
+				action: () => undefined
+			}
+
+			return ln < 0 ? undefined : readLine(context, ln)
+		},
 		readShape: (slide, raw) => readShapeMarkup(slide, raw, true),
 		// Read under a "raw:" name as readShape reads, then let go: the comparison drops the shape.
 		compareShape: (slide, raw) => readShapeMarkup(slide, raw, false),
@@ -1434,7 +1454,10 @@ function predictedTouches(deck: Deck, op: DeckOp): Touch[] {
 	}
 
 	// A content op on a shape backed by source is undone by replacing the shape (its node).
-	if (op.family === "shape" && (op.kind === "setProps" || op.kind === "setStyle" || op.kind === "setAlt" || op.kind === "setAction")) {
+	if (
+		op.family === "shape" &&
+		(op.kind === "setProps" || op.kind === "patchLine" || op.kind === "setStyle" || op.kind === "setAlt" || op.kind === "setAction")
+	) {
 		out.push({ kind: "shape", slide: op.target.slide, shape: op.target.id, dirt: { kind: "node" } })
 	}
 
@@ -1691,6 +1714,13 @@ function serial<T>(session: EngineSession, task: () => Promise<T>): Promise<T> {
 	return deckTurn(session.deck, task)
 }
 
+// A refused apply as a command result, carrying the detail its family built (for logs, never shown raw).
+function refusedResult(result: Refused): CommandResult {
+	return result.detail === undefined
+		? { ok: false, refusal: result.reason }
+		: { ok: false, refusal: result.reason, detail: result.detail }
+}
+
 function refusal(error: unknown): CommandResult {
 	if (error instanceof PresentationError) return { ok: false, refusal: error.reason }
 
@@ -1841,7 +1871,7 @@ async function applyStep(
 		op.family === "notes" && op.kind === "setNotes" && op.body.paragraphs.length === 0 && deck.nodes.get(op.slide)?.notes === undefined
 	const result = applyOp(deck, op, contextFor(session, state))
 
-	if (result.kind === "refused") return { ok: false, refusal: result.reason }
+	if (result.kind === "refused") return refusedResult(result)
 	// Nothing to undo means nothing changed (aligning one shape to itself): no step.
 	if (result.inverse.ops.length === 0) return { ok: true, revision: state.history.revision, dirty: state.history.dirty }
 
@@ -1910,7 +1940,7 @@ async function step(
 			if (provisional !== undefined) {
 				const back = applyAll(session.deck, provisional.inverse.ops, contextFor(session, state))
 
-				if (isRefused(back)) return { ok: false, refusal: back.reason }
+				if (isRefused(back)) return refusedResult(back)
 
 				history.retract()
 				changed(session, state, provisional.touches)
@@ -1939,7 +1969,7 @@ async function step(
 		// Read against a package a save's commit replaced meanwhile (see command): once more against the new one.
 		const result = isRefused(first) && session.package !== base ? await attempt() : first
 
-		if (isRefused(result)) return { ok: false, refusal: result.reason }
+		if (isRefused(result)) return refusedResult(result)
 
 		if (direction === "undo") {
 			history.undone()
@@ -1998,7 +2028,7 @@ async function retract(context: CallContext, asked: number, options: EditOptions
 
 		const result = applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
 
-		if (isRefused(result)) return { ok: false, refusal: result.reason }
+		if (isRefused(result)) return refusedResult(result)
 
 		history.retract()
 		changed(session, state, entry.touches)

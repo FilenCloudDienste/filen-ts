@@ -7,6 +7,7 @@ import {
 	proveBlocksSteps,
 	type BlockProof,
 	type DocxEditContext,
+	type DocxEditStrings,
 	type DocxEditorOptions,
 	type DocxMediaInfo,
 	type LockReason,
@@ -182,6 +183,9 @@ export interface DocxEditingOptions {
 	readonly encryption?: DocxSealer
 	// What makes the document view-only that its package does not say (DocxRtfDocument.gate: a signed ODT).
 	readonly gate?: readonly DocxGateReason[]
+	// Text the editor writes into the document (new controls' placeholders, an empty table of contents), in the
+	// user's language (DEFAULT_EDIT_STRINGS without).
+	readonly strings?: DocxEditStrings
 }
 
 // A Gate 1 partly made elsewhere (an RTF document's writer proves in its worker): the body is checked with `first`
@@ -560,7 +564,8 @@ export function inThreadEditingHost(
 				...(editing.clock === undefined ? {} : { clock: editing.clock }),
 				...(editing.writeUnlocked === true ? { writeUnlocked: true } : {}),
 				...(editing.protectionUnlocked === true ? { protectionUnlocked: true } : {}),
-				...(editing.gate === undefined ? {} : { gate: editing.gate })
+				...(editing.gate === undefined ? {} : { gate: editing.gate }),
+				...(editing.strings === undefined ? {} : { strings: editing.strings })
 			})
 
 			// The name as it is now (setAuthor may have changed it since the host was made).

@@ -18,4 +18,4 @@ export {
 	type ExtractedDocument,
 	type ExtractSaveOptions
 } from "./extract"
-export { contentBounds, cropPages, cropPagesToContent, outsideCropRects, pageBounds, type CropResult } from "./crop"
+export { contentBounds, cropPages, cropPagesToContent, outsideCropRects, type CropResult } from "./crop"

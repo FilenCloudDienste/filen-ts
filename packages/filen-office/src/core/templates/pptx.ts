@@ -7,6 +7,7 @@ import {
 	designSet,
 	relationshipsXml,
 	slideXml,
+	type LayoutNames,
 	type SlideSize
 } from "./themes/pptx"
 import { templateLocale } from "./locale"
@@ -24,6 +25,8 @@ export interface BlankPptxOptions {
 	readonly size?: SlideSize
 	// Text for the title slide's title (a filled deck for render checks); empty by default.
 	readonly title?: string
+	// The layouts' names by type (ST_SlideLayoutType), in the user's language; PowerPoint's English names otherwise.
+	readonly layoutNames?: LayoutNames
 }
 
 // p:sldMasterId@id values start at 2^31 (§19.2.1.34).
@@ -40,7 +43,8 @@ export function blankPptxParts(options: BlankPptxOptions = {}): TemplatePart[] {
 			master: "ppt/slideMasters/slideMaster1.xml",
 			layouts: Array.from({ length: 11 }, (_, index) => `ppt/slideLayouts/slideLayout${String(index + 1)}.xml`)
 		},
-		FIRST_MASTER_ID
+		FIRST_MASTER_ID,
+		options.layoutNames
 	)
 	const overrides = [
 		["/ppt/presentation.xml", CONTENT_TYPE.presentation],

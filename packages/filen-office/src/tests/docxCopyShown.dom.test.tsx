@@ -3,38 +3,19 @@ import { AllSelection } from "prosemirror-state"
 import { afterEach, describe, expect, it } from "vitest"
 import { RevisionView } from "../core/docx/model/kinds"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
-import type { DocxSessionApi } from "@filen/office/dom/docx"
-import { DocxMediaCache, type DocxDocument } from "@filen/office/react/docx"
 import { EditSink } from "@filen/office/react/docx/editor"
 import { ReflowView } from "../react/docx/reflow/view"
 import { LineFlag } from "../core/text/index"
 import { paintPage, patchPage } from "../react/docx/paint/page"
 import { FIXTURE_TABLES, fixturePage, text, type FixtureLine } from "./docxPageFixture"
 import { buildDocx, p } from "./docxSynthetic"
+import { emptyDocxDocument } from "./docxDocumentStubs.dom"
 import { pagedEditor } from "./pagedDomFixtures"
 
 // A copy writes what the revision view shows: No Markup (Final) leaves deleted text out, Original inserted
 // text; Markup copies the tracked changes as they are. A cut takes what it copied.
 
-const SESSION: DocxSessionApi = {
-	objects: () => Promise.resolve([]),
-	media: () => Promise.resolve(null),
-	locate: () => Promise.resolve(null),
-	find: () => Promise.resolve(new Int32Array(0)),
-	annotations: () => Promise.resolve(null),
-	close: () => undefined
-}
-
-const DOCUMENT: DocxDocument = {
-	status: "ready",
-	info: undefined,
-	pages: [],
-	pageCount: 0,
-	tables: { styles: [], decorations: [], links: [] },
-	session: SESSION,
-	media: new DocxMediaCache(SESSION, undefined, { create: () => "blob:picture", revoke: () => undefined }),
-	error: undefined
-}
+const DOCUMENT = emptyDocxDocument()
 
 const BY = 'w:author="Ann" w:date="2024-01-01T00:00:00Z"'
 const DOC = buildDocx({

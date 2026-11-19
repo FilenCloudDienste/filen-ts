@@ -139,4 +139,32 @@ describe("PAGE fields in a paragraph over many pages", () => {
 			101
 		)
 	})
+
+	it(
+		"break lines as building the paragraph again does with page numbers in words in another language",
+		{ timeout: 600_000 },
+		async () => {
+			const rPr = (lang: string): string => `<w:rPr><w:lang w:val="${lang}"/></w:rPr>`
+			const germanField = (code: string): string =>
+				`<w:r>${rPr("de-DE")}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr("de-DE")}<w:instrText xml:space="preserve">${code}</w:instrText></w:r>` +
+				`<w:r>${rPr("de-DE")}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr("de-DE")}<w:t>1</w:t></w:r><w:r>${rPr("de-DE")}<w:fldChar w:fldCharType="end"/></w:r>`
+			// The oracle's first field writes the same digits with another switch: the fields differ, so it is built again on every page.
+			const body = (first: string): string => {
+				let text = "<w:p>"
+
+				for (let k = 0; k < 150; k++) text += run(WORDS) + germanField(k === 0 ? first : " PAGE \\* OrdText ")
+
+				return `${text}</w:p><w:sectPr>${PAGE}</w:sectPr>`
+			}
+
+			await expectSame(body(" PAGE \\* OrdText "), body(" PAGE \\* Arabic "), 30)
+
+			const layout = await layOut(buildDocx({ body: body(" PAGE \\* OrdText ") }))
+
+			// Not English words: the number (formatNumber's fallback outside English).
+			expect(layout.pages.some(page => page.sourceTexts.slice(0, page.sourceCount).some(text => /first|second/.test(text)))).toBe(
+				false
+			)
+		}
+	)
 })

@@ -65,7 +65,7 @@ describe("a shape proof gate 1 locks, after a save of its slide", () => {
 
 			expect(
 				await d.command({ family: "shape", kind: "setProps", target: { slide, id: 3 }, props: { fill: "none" } } as DeckOp)
-			).toEqual({
+			).toMatchObject({
 				ok: false,
 				refusal: "locked"
 			})

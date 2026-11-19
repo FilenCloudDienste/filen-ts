@@ -1,43 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { FormulaEngine, type EngineSheet } from "../core/sheet/formula/index"
+import { FormulaEngine } from "../core/sheet/formula/index"
 import { MAX_LEVELS } from "../core/sheet/formula/functions/lambda"
 import { engineCellFormula, engineFormula, shownFormula, storedFormula } from "../core/sheet/refs/formulaRefs"
+import { calculate as calculateTyped, type Typed } from "./sheetEngineFixtures"
 
 // LET, LAMBDA and the LAMBDA helpers against their pages on support.microsoft.com (each case cites it). Formulas are
 // typed as in Excel and stored as a file stores them (storedFormula: _xlfn. and _xlpm. prefixes).
 
-type Typed = string | number | boolean | null
-
 function calculate(rows: Typed[][]): Record<string, unknown> {
-	const sheets: EngineSheet[] = [
-		{
-			name: "S",
-			rows: rows.map(row =>
-				row.map(cell =>
-					typeof cell === "string" && cell.startsWith("=") ? (engineCellFormula(storedFormula(cell.slice(1))) ?? "") : cell
-				)
-			),
-			formulas: []
-		}
-	]
-	const engine = new FormulaEngine(sheets, [])
-	const out: Record<string, unknown> = {}
-
-	try {
-		rows.forEach((row, r) =>
-			row.forEach((cell, c) => {
-				if (typeof cell !== "string" || !cell.startsWith("=")) return
-
-				const result = engine.result(0, r, c)
-
-				out[`${String.fromCharCode(65 + c)}${String(r + 1)}`] = result.error === true ? `!${String(result.value)}` : result.value
-			})
-		)
-	} finally {
-		engine.destroy()
-	}
-
-	return out
+	return calculateTyped(rows, { stored: true })
 }
 
 describe("LET", () => {

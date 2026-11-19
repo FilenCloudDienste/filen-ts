@@ -33,15 +33,42 @@ import {
 	type DrawingText,
 	type GradientStops,
 	type ImageTile,
-	type Inset,
 	type Paint,
 	type Rgba,
 	type Shadow,
 	type Stroke,
-	type TextParagraph,
 	type TextRun
 } from "./displayList"
-import { lumTransfer } from "./lum"
+import {
+	averageColor,
+	blockTop,
+	bodyFrame,
+	boundsThrough,
+	clamp,
+	finite,
+	genericFamily,
+	index,
+	insetOf,
+	lineBaseline,
+	linearGradientLine,
+	MAX_COORD,
+	matrixOf,
+	mixRgba,
+	mod,
+	modify,
+	patternCoverage,
+	presetDashes,
+	PX_PER_PT,
+	recolorPixels,
+	recolors,
+	rgbaOf,
+	runPx,
+	stopCount,
+	symbolBullet,
+	type BodyLine,
+	type Matrix,
+	type RunBudget
+} from "./paintShared"
 import { averageShade, shadeRaster } from "./shade"
 import { layoutBlock } from "./textBlock"
 
@@ -154,8 +181,6 @@ export interface CanvasTextFaces {
 // --- Numbers ---
 
 const MAX_ITEMS = 200_000
-const MAX_COORD = 2 ** 31
-const MAX_STOPS = 64
 const MAX_DASHES = 32
 const MAX_RUNS = 50_000
 const MAX_CLIP_CHAIN = 1024
@@ -168,7 +193,6 @@ const MAX_SURFACE_SIDE = 4096
 const MAX_SURFACE_PIXELS = 4096 * 2048
 // Rows recoloured at a time.
 const RECOLOR_BAND = 128
-const PX_PER_PT = 96 / 72
 // A drawing's family list (an internal alias and a generic family), and a text style's CSS font (page.ts's rule).
 const FONT_FAMILY = /^(?:"[A-Za-z0-9_-]{1,128}", )?(?:serif|sans-serif|monospace)$/
 const CSS_FONT =
@@ -179,95 +203,7 @@ const AUTO_TEXT = "#000000"
 const PLACEHOLDER_FILL = "#f1f1f1"
 const PLACEHOLDER_STROKE = "#c8c8c8"
 
-type Matrix = readonly [number, number, number, number, number, number]
-
 const IDENTITY_MATRIX: Matrix = [1, 0, 0, 1, 0, 0]
-
-function finite(value: number | undefined, fallback: number): number {
-	return value !== undefined && Number.isFinite(value) ? value : fallback
-}
-
-function clamp(value: number | undefined, min: number, max: number, fallback: number = min): number {
-	return value !== undefined && Number.isFinite(value) ? (value < min ? min : value > max ? max : value) : fallback
-}
-
-function index(value: number | undefined): number {
-	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : -1
-}
-
-const mod = (value: number, by: number): number => ((value % by) + by) % by
-
-function channel(value: number): number {
-	return Math.min(255, Math.max(0, Math.round(value)))
-}
-
-function rgbaFrom(r: number, g: number, b: number, a: number): number {
-	return ((channel(r) << 24) | (channel(g) << 16) | (channel(b) << 8) | channel(a)) >>> 0
-}
-
-function mix(c1: number, c2: number, t: number): number {
-	const u = 1 - t
-
-	return rgbaFrom(
-		((c1 >>> 24) & 255) * u + ((c2 >>> 24) & 255) * t,
-		((c1 >>> 16) & 255) * u + ((c2 >>> 16) & 255) * t,
-		((c1 >>> 8) & 255) * u + ((c2 >>> 8) & 255) * t,
-		(c1 & 255) * u + (c2 & 255) * t
-	)
-}
-
-// ST_PathFillMode as a blend toward white or black (as the SVG painter draws it).
-function modify(color: number, modifier: number): number {
-	switch (modifier) {
-		case ItemFlag.LIGHTEN:
-			return mix(color, 0xffffff00 | (color & 255), 0.4)
-		case ItemFlag.LIGHTEN_LESS:
-			return mix(color, 0xffffff00 | (color & 255), 0.2)
-		case ItemFlag.DARKEN:
-			return mix(color, color & 255, 0.4)
-		case ItemFlag.DARKEN_LESS:
-			return mix(color, color & 255, 0.2)
-		default:
-			return color
-	}
-}
-
-function rgbaOf(value: Rgba | undefined): number {
-	return value !== undefined && Number.isFinite(value) ? value >>> 0 : 0
-}
-
-// A linear paint's gradient line in pixels (x0, y0, x1, y1): through the box's centre, as long as the box's
-// projection onto it. Unscaled (lin@scaled false), the angle holds in pixels; scaled, it is the unit-square angle
-// stretched with the box, whose pixel normal is (h cos, w sin), as the SVG painter's objectBoundingBox gradient.
-export function linearGradientLine(
-	angle: number | undefined,
-	scaled: boolean | undefined,
-	x: number,
-	y: number,
-	width: number,
-	height: number
-): [number, number, number, number] {
-	const degrees = mod(finite(angle, 0), 360)
-	const radians = (degrees * Math.PI) / 180
-	// Exact on the axes, so a vertical or horizontal line carries no trig residue.
-	let dx = degrees === 90 || degrees === 270 ? 0 : Math.cos(radians)
-	let dy = degrees === 0 || degrees === 180 ? 0 : Math.sin(radians)
-
-	if (scaled === true) {
-		const sx = height * dx
-		const sy = width * dy
-		const length = Math.hypot(sx, sy)
-
-		dx = length > 0 ? sx / length : 1
-		dy = length > 0 ? sy / length : 0
-	}
-
-	const half = (width * Math.abs(dx) + height * Math.abs(dy)) / 2
-	const cx = x + width / 2
-	const cy = y + height / 2
-
-	return [cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half]
-}
 
 const cssColors = new Map<number, string>()
 
@@ -285,164 +221,9 @@ export function canvasColor(color: Rgba): string {
 	return css
 }
 
-function stopCount(stops: GradientStops): number {
-	return Math.min(stops.offsets.length, stops.colors.length, MAX_STOPS)
-}
-
-function averageColor(stops: GradientStops): number {
-	const count = stopCount(stops)
-	let r = 0
-	let g = 0
-	let b = 0
-	let a = 0
-
-	for (let k = 0; k < count; k++) {
-		const color = rgbaOf(stops.colors[k])
-
-		r += (color >>> 24) & 255
-		g += (color >>> 16) & 255
-		b += (color >>> 8) & 255
-		a += color & 255
-	}
-
-	return count === 0 ? 0 : rgbaFrom(r / count, g / count, b / count, a / count)
-}
-
-// Dash, gap lengths in multiples of the line width (ST_PresetLineDashVal).
-function presetDashes(dash: string): readonly number[] | undefined {
-	switch (dash) {
-		case "dot":
-			return [1, 3]
-		case "dash":
-			return [4, 3]
-		case "lgDash":
-			return [8, 3]
-		case "dashDot":
-			return [4, 3, 1, 3]
-		case "lgDashDot":
-			return [8, 3, 1, 3]
-		case "lgDashDotDot":
-			return [8, 3, 1, 3, 1, 3]
-		case "sysDash":
-			return [3, 1]
-		case "sysDot":
-			return [1, 1]
-		case "sysDashDot":
-			return [3, 1, 1, 1]
-		case "sysDashDotDot":
-			return [3, 1, 1, 1, 1, 1]
-		default:
-			return undefined
-	}
-}
-
-function insetOf(inset: Inset | undefined, min: number, max: number): [number, number, number, number] {
-	if (inset === undefined || inset === null) return [0, 0, 0, 0]
-
-	return [
-		clamp(inset.left, min, max, 0),
-		clamp(inset.top, min, max, 0),
-		clamp(inset.right, min, max, 0),
-		clamp(inset.bottom, min, max, 0)
-	]
-}
-
-function matrixAt(values: ArrayLike<number>, at: number = 0): Matrix {
-	return [
-		finite(values[at], 1),
-		finite(values[at + 1], 0),
-		finite(values[at + 2], 0),
-		finite(values[at + 3], 1),
-		clamp(values[at + 4], -MAX_COORD, MAX_COORD, 0),
-		clamp(values[at + 5], -MAX_COORD, MAX_COORD, 0)
-	]
-}
-
-function invert(m: Matrix): Matrix | null {
-	const det = m[0] * m[3] - m[1] * m[2]
-
-	if (!(Math.abs(det) > 1e-12)) return null
-
-	return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det]
-}
-
 // Device pixels per unit of `m` (the square root of its area scale).
 function scaleOf(m: Matrix): number {
 	return Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]))
-}
-
-// The box (x, y, width, height) seen through `m`'s inverse: min x, min y, max x, max y.
-function boundsThrough(m: Matrix, x: number, y: number, width: number, height: number): [number, number, number, number] {
-	const inverse = invert(m)
-
-	if (inverse === null) return [0, 0, 1, 1]
-
-	let minX = Infinity
-	let minY = Infinity
-	let maxX = -Infinity
-	let maxY = -Infinity
-
-	for (const [px, py] of [
-		[x, y],
-		[x + width, y],
-		[x, y + height],
-		[x + width, y + height]
-	] as const) {
-		const tx = inverse[0] * px + inverse[2] * py + inverse[4]
-		const ty = inverse[1] * px + inverse[3] * py + inverse[5]
-
-		minX = Math.min(minX, tx)
-		minY = Math.min(minY, ty)
-		maxX = Math.max(maxX, tx)
-		maxY = Math.max(maxY, ty)
-	}
-
-	return [minX, minY, maxX, maxY]
-}
-
-function genericFamily(font: string): string {
-	const name = typeof font === "string" ? font.toLowerCase() : ""
-
-	if (name.includes("mono") || name.includes("courier") || name.includes("consol")) return "monospace"
-	if (name.includes("sans")) return "sans-serif"
-	if (
-		name.includes("times") ||
-		name.includes("cambria") ||
-		name.includes("georgia") ||
-		name.includes("garamond") ||
-		name.includes("serif")
-	)
-		return "serif"
-
-	return "sans-serif"
-}
-
-function verticalRotation(vertical: string): number {
-	switch (vertical) {
-		case "vert":
-		case "eaVert":
-		case "wordArtVert":
-		case "mongolianVert":
-			return 90
-		case "vert270":
-		case "wordArtVertRtl":
-			return 270
-		default:
-			return 0
-	}
-}
-
-function runPx(run: TextRun, scale: number): number {
-	const px = clamp(run.size, 1, 1000, 11) * PX_PER_PT * scale
-
-	return finite(run.baseline, 0) !== 0 ? (px * 2) / 3 : px
-}
-
-// Symbol-font bullets (Wingdings, Symbol) map their glyphs onto letters; a plain bullet reads better.
-function symbolBullet(font: string): boolean {
-	const name = typeof font === "string" ? font.toLowerCase() : ""
-
-	return name.includes("wingdings") || name.includes("symbol") || name.includes("webdings")
 }
 
 function px3(value: number): string {
@@ -520,14 +301,6 @@ const PATTERN_RULES = new Map<string, (x: number, y: number) => boolean>([
 	["lgConfetti", (x, y) => confetti(LARGE_CONFETTI, x, y)]
 ])
 
-// The share of the foreground a preset pattern covers (its pctN; about half for line and shape presets): what a
-// pattern is drawn as where it is drawn in one colour.
-function patternShare(pattern: string): number {
-	const percent = /^pct(\d+)$/u.exec(pattern)
-
-	return percent === null ? 0.5 : clamp(Number(percent[1]) / 100, 0, 1, 0.5)
-}
-
 const patternMasks = new Map<string, Uint8Array>()
 
 // The 8x8 foreground mask of a preset pattern (1 = foreground, row-major), undefined for presets drawn as the blend of
@@ -550,95 +323,10 @@ export function patternMask(preset: string): Uint8Array | undefined {
 	return mask
 }
 
-// --- Pictures recoloured (grayscale, brightness/contrast, bi-level, duotone, colour change) ---
-
-export function recolors(image: DrawingImage): boolean {
-	return (
-		image.grayscale === true ||
-		clamp(image.biLevel, -1, 1, -1) >= 0 ||
-		(Array.isArray(image.duotone) && image.duotone.length === 2) ||
-		clamp(image.brightness, -1, 1, 0) !== 0 ||
-		clamp(image.contrast, -0.99, 0.99, 0) !== 0 ||
-		(Array.isArray(image.colorChange) && image.colorChange.length === 2)
-	)
-}
-
-// The SVG painter's filter chain on RGBA pixels (sRGB): colour change first (a:clrChange, exact match), then grey
-// (saturate 0), brightness and contrast as one linear transfer, the bi-level threshold, and the duotone ramp.
-export function recolorPixels(pixels: Uint8ClampedArray, image: DrawingImage): void {
-	const biLevel = clamp(image.biLevel, -1, 1, -1)
-	const brightness = clamp(image.brightness, -1, 1, 0)
-	const contrast = clamp(image.contrast, -0.99, 0.99, 0)
-	const duotone = Array.isArray(image.duotone) && image.duotone.length === 2 ? image.duotone : undefined
-	const change = Array.isArray(image.colorChange) && image.colorChange.length === 2 ? image.colorChange : undefined
-	const gray = image.grayscale === true || biLevel >= 0 || duotone !== undefined
-	const [slope, intercept] = lumTransfer(brightness, contrast)
-	const linear = brightness !== 0 || contrast !== 0
-	const from = change === undefined ? 0 : rgbaOf(change[0]) >>> 8
-	const to = change === undefined ? 0 : rgbaOf(change[1])
-	const dark = duotone === undefined ? 0 : rgbaOf(duotone[0])
-	const light = duotone === undefined ? 0 : rgbaOf(duotone[1])
-
-	for (let at = 0; at + 3 < pixels.length; at += 4) {
-		let r = pixels[at] ?? 0
-		let g = pixels[at + 1] ?? 0
-		let b = pixels[at + 2] ?? 0
-
-		if (change !== undefined && ((r << 16) | (g << 8) | b) === from) {
-			r = to >>> 24
-			g = (to >>> 16) & 255
-			b = (to >>> 8) & 255
-			pixels[at + 3] = Math.round(((pixels[at + 3] ?? 0) * (to & 255)) / 255)
-		}
-
-		if (gray) {
-			const y = 0.213 * r + 0.715 * g + 0.072 * b
-
-			r = y
-			g = y
-			b = y
-		}
-
-		if (linear) {
-			r = (slope * (r / 255) + intercept) * 255
-			g = (slope * (g / 255) + intercept) * 255
-			b = (slope * (b / 255) + intercept) * 255
-		}
-
-		if (biLevel >= 0) {
-			// feFuncX type="discrete" with 16 steps (the SVG painter's table).
-			r = Math.floor(clamp(r / 255, 0, 0.9999) * 16) / 16 < biLevel ? 0 : 255
-			g = Math.floor(clamp(g / 255, 0, 0.9999) * 16) / 16 < biLevel ? 0 : 255
-			b = Math.floor(clamp(b / 255, 0, 0.9999) * 16) / 16 < biLevel ? 0 : 255
-		}
-
-		if (duotone !== undefined) {
-			const t = clamp(r / 255, 0, 1)
-			const color = mix(dark, light, t)
-
-			r = color >>> 24
-			g = (color >>> 16) & 255
-			b = (color >>> 8) & 255
-		}
-
-		pixels[at] = channel(r)
-		pixels[at + 1] = channel(g)
-		pixels[at + 2] = channel(b)
-	}
-}
+// Picture recolouring lives with the other painters' shared helpers; its importers read it here too.
+export { recolorPixels } from "./paintShared"
 
 // --- The drawing painter ---
-
-interface BodyLine {
-	readonly paragraph: TextParagraph
-	readonly from: number
-	readonly to: number
-	readonly first: boolean
-	readonly size: number
-	readonly height: number
-	before: number
-	after: number
-}
 
 type Box = readonly [number, number, number, number]
 
@@ -670,7 +358,7 @@ function edgeGutter<I extends CanvasSized>(surface: CanvasSurface<I>, rgba: Uint
 }
 
 class CanvasDrawingPainter<I extends CanvasSized> {
-	private runsLeft = MAX_RUNS
+	private readonly runs: RunBudget = { left: MAX_RUNS }
 	private readonly chains = new Map<number, readonly number[] | undefined>()
 	private readonly patterns = new Map<number, CanvasPatternLike | null>()
 	private readonly recolored = new Map<DrawingImage, I | null>()
@@ -862,7 +550,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		for (const shape of shapes) {
 			if (shape === undefined || shape === null) continue
 
-			const m = multiply(this.base, matrixAt(Array.isArray(shape.matrix) ? shape.matrix : []))
+			const m = multiply(this.base, matrixOf(Array.isArray(shape.matrix) ? shape.matrix : []))
 
 			if (this.appendRange(m, index(shape.firstCommand), index(shape.commandCount), index(shape.firstCoord))) any = true
 		}
@@ -964,7 +652,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 			}
 
 			this.shadow(index(data.itemInts[i + ItemInt.SHADOW]))
-			this.local = multiply(this.base, matrixAt(data.itemFloats, f))
+			this.local = multiply(this.base, matrixOf(data.itemFloats, f))
 
 			switch (data.itemInts[i + ItemInt.KIND]) {
 				case ItemKind.PATH:
@@ -1093,11 +781,11 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 				const foreground = rgbaOf(paint.foreground)
 				const background = rgbaOf(paint.background)
 
-				if (flat) return canvasColor(mix(foreground, background, 0.5))
+				if (flat) return canvasColor(mixRgba(foreground, background, 0.5))
 
 				const pattern = this.pattern(paintIndex, paint.pattern, foreground, background)
 
-				return pattern ?? canvasColor(mix(foreground, background, 0.5))
+				return pattern ?? canvasColor(mixRgba(foreground, background, 0.5))
 			}
 			case "gradient":
 				return stopCount(paint.stops) === 0 ? null : undefined
@@ -1155,7 +843,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 				break
 			}
 			case "gradient": {
-				const m = matrixAt(Array.isArray(paint.matrix) ? paint.matrix : [])
+				const m = matrixOf(Array.isArray(paint.matrix) ? paint.matrix : [])
 				const [minX, minY, maxX, maxY] = boundsThrough(m, x, y, Math.max(width, 1), Math.max(height, 1))
 				const spread = paint.spread === "reflect" ? 1 : paint.spread === "repeat" ? 2 : 0
 
@@ -1252,7 +940,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const { ctx } = this
 		const width = clamp(tile.width, 0, MAX_COORD, 0)
 		const height = clamp(tile.height, 0, MAX_COORD, 0)
-		const m = multiply(this.local, matrixAt(Array.isArray(tile.matrix) ? tile.matrix : []))
+		const m = multiply(this.local, matrixOf(Array.isArray(tile.matrix) ? tile.matrix : []))
 
 		if (!(width > 0 && height > 0)) return
 
@@ -1752,9 +1440,9 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const { ctx } = this
 		const run = text.run
 
-		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runsLeft <= 0) return
+		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runs.left <= 0) return
 
-		this.runsLeft--
+		this.runs.left--
 
 		const size = runPx(run, 1)
 		const style = this.textStyle(run, text.fill, f)
@@ -1787,9 +1475,9 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const { ctx } = this
 		const run = text.run
 
-		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runsLeft <= 0) return
+		if (typeof run !== "object" || run === null || typeof run.text !== "string" || run.text === "" || this.runs.left <= 0) return
 
-		this.runsLeft--
+		this.runs.left--
 
 		const size = runPx(run, 1)
 
@@ -1830,18 +1518,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		}
 
 		const total = lines.length * lineHeight
-		const top =
-			height <= 0
-				? text.lineAlign === "middle"
-					? -total / 2
-					: text.lineAlign === "end"
-						? -total
-						: 0
-				: text.lineAlign === "middle"
-					? (height - total) / 2
-					: text.lineAlign === "end"
-						? height - total
-						: 0
+		const top = blockTop(text.lineAlign, height, total)
 		const ascent = clamp(text.ascent, 0, 3, 0.9) * size
 		const style = this.textStyle(run, text.fill, f, stretch)
 
@@ -1863,56 +1540,6 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		}
 	}
 
-	private bodyLines(paragraphs: readonly TextParagraph[], scale: number, reduction: number): BodyLine[] {
-		const lines: BodyLine[] = []
-
-		for (let p = 0; p < paragraphs.length && this.runsLeft > 0; p++) {
-			const paragraph = paragraphs[p]
-
-			if (paragraph === undefined || paragraph === null || !Array.isArray(paragraph.runs)) continue
-
-			const runs = paragraph.runs
-			const count = Math.min(runs.length, this.runsLeft)
-			const spacing = finite(paragraph.lineSpacing, 0)
-			const before = p === 0 ? 0 : clamp(paragraph.spaceBefore, 0, 1000, 0) * PX_PER_PT
-			const after = clamp(paragraph.spaceAfter, 0, 1000, 0) * PX_PER_PT
-			const firstLine = lines.length
-			let from = 0
-
-			this.runsLeft -= count
-
-			for (let k = 0; k <= count; k++) {
-				if (k < count && runs[k]?.lineBreak !== true) continue
-
-				let size = 0
-
-				for (let r = from; r < k; r++) {
-					const sized = runs[r]
-
-					if (sized !== undefined) size = Math.max(size, runPx(sized, scale))
-				}
-
-				if (size === 0) size = clamp(paragraph.endSize, 1, 1000, 11) * PX_PER_PT * scale
-
-				const single = size * 1.2
-				const height =
-					(spacing > 0 ? single * Math.min(spacing, 10) : spacing < 0 ? Math.min(-spacing, 1000) * PX_PER_PT : single) *
-					(1 - reduction)
-
-				lines.push({ paragraph, from, to: k, first: lines.length === firstLine, size, height, before: 0, after: 0 })
-				from = k + 1
-			}
-
-			const first = lines[firstLine]
-			const last = lines[lines.length - 1]
-
-			if (first !== undefined) first.before = before
-			if (last !== undefined) last.after = after
-		}
-
-		return lines
-	}
-
 	// Rich text laid out as the SVG painter lays it out: a line per paragraph or line break, no wrapping, anchored in
 	// the box (rotated with the body and its vertical direction).
 	private bodyItem(text: Extract<DrawingText, { kind: "body" }>, f: number): void {
@@ -1920,31 +1547,12 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 		if (typeof body !== "object" || body === null || !Array.isArray(text.paragraphs)) return
 
-		const [x, y, width, height] = this.box(f)
-		const turn = verticalRotation(body.vertical)
-		const rotation = mod(finite(body.rotation, 0) + turn, 360)
-		const swap = turn !== 0
-		const cx = x + width / 2
-		const cy = y + height / 2
-		const boxWidth = swap ? height : width
-		const boxHeight = swap ? width : height
-		const [insetLeft, insetTop, insetRight, insetBottom] = insetOf(body.insets, 0, 10_000)
-		const left = cx - boxWidth / 2 + insetLeft
-		const right = cx + boxWidth / 2 - insetRight
-		const top = cy - boxHeight / 2 + insetTop
-		const bottom = cy + boxHeight / 2 - insetBottom
-		const normal = body.autofit === "normal"
-		const scale = normal ? clamp(body.fontScale, 0.01, 1, 1) : 1
-		const reduction = normal ? clamp(body.lineSpacingReduction, 0, 0.9, 0) : 0
-		const lines = this.bodyLines(text.paragraphs, scale, reduction)
+		const frame = bodyFrame(body, text.paragraphs, this.box(f), this.runs)
 
-		if (lines.length === 0) return
+		if (frame === null) return
 
-		let total = 0
-
-		for (const line of lines) total += line.before + line.height + line.after
-
-		let cursor = body.anchor === "ctr" ? top + (bottom - top - total) / 2 : body.anchor === "b" ? bottom - total : top
+		const { left, right, rotation, cx, cy, scale } = frame
+		let cursor = frame.top
 
 		if (rotation !== 0) {
 			const radians = (rotation * Math.PI) / 180
@@ -1956,9 +1564,9 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 		this.ctx.textAlign = "left"
 
-		for (const line of lines) {
+		for (const line of frame.lines) {
 			cursor += line.before
-			this.bodyLine(line, left, right, cursor + (line.height - line.size * 1.2) / 2 + line.size * 0.95, scale)
+			this.bodyLine(line, left, right, lineBaseline(line, cursor), scale)
 			cursor += line.height + line.after
 		}
 	}
@@ -2012,7 +1620,7 @@ export function paintDrawingCanvas<I extends CanvasSized>(
 	matrix: readonly number[],
 	images: CanvasPaintContext<I>
 ): void {
-	new CanvasDrawingPainter(ctx, data, matrixAt(matrix), images).paint()
+	new CanvasDrawingPainter(ctx, data, matrixOf(matrix), images).paint()
 }
 
 // Every image a drawing shows (picture fills and image items, hidden items skipped), once each, so the caller can
@@ -2233,7 +1841,7 @@ class CanvasTextPainter<I> {
 				return this.gradientStops(this.ctx.createRadialGradient(fx, fy, 0, fx, fy, radius), paint.stops)
 			}
 			case "pattern":
-				return canvasColor(mix(rgbaOf(paint.background), rgbaOf(paint.foreground), patternShare(paint.pattern)))
+				return canvasColor(mixRgba(rgbaOf(paint.background), rgbaOf(paint.foreground), patternCoverage(paint.pattern)))
 			case "shaded":
 				return canvasColor(averageShade(paint.colors))
 			default:
@@ -2423,7 +2031,7 @@ class CanvasTextPainter<I> {
 			paint.kind === "solid"
 				? rgbaOf(paint.color)
 				: paint.kind === "pattern"
-					? mix(rgbaOf(paint.background), rgbaOf(paint.foreground), patternShare(paint.pattern))
+					? mixRgba(rgbaOf(paint.background), rgbaOf(paint.foreground), patternCoverage(paint.pattern))
 					: paint.kind === "linear" || paint.kind === "path" || paint.kind === "gradient"
 						? rgbaOf(paint.stops.colors[0] ?? 0x000000ff)
 						: paint.kind === "shaded"
@@ -2660,7 +2268,7 @@ export function paintTextPageCanvas<I>(
 	matrix: readonly number[],
 	faces?: CanvasTextFaces
 ): void {
-	new CanvasTextPainter(ctx, page, matrixAt(matrix), faces).paint()
+	new CanvasTextPainter(ctx, page, matrixOf(matrix), faces).paint()
 }
 
 // The CSS fonts a text page draws in (each style a fragment uses, small capitals included), so the caller can load

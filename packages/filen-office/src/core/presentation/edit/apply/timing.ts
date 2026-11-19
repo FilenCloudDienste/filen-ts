@@ -28,6 +28,7 @@ import {
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, digestOf } from "../changes"
+import { shapeById } from "../../shapes"
 import { heldBytes, type EffectTiming, type OpOf, type TimingOp } from "../ops"
 
 // Applies the timing ops to the model. setTiming sets a slide's timing whole. The effect ops author one effect of a
@@ -369,7 +370,7 @@ function missingTarget(effect: TimeNode, shapes: readonly ShapeNode[]): string |
 			if (target.kind !== "slide" && target.kind !== "sound") {
 				const id = target.shape
 
-				if (!Number.isSafeInteger(id) || findShape(shapes, id) === undefined) return `shape ${String(id)}`
+				if (!Number.isSafeInteger(id) || shapeById(shapes, id) === undefined) return `shape ${String(id)}`
 			}
 		}
 
@@ -397,19 +398,8 @@ function effectKeys(sequences: SlideSequences): Set<string> {
 	return out
 }
 
-function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
-	for (const shape of shapes) {
-		if (shape.id === id) return shape
-
-		const inner = shape.children === undefined ? undefined : findShape(shape.children, id)
-
-		if (inner !== undefined) return inner
-	}
-
-	return undefined
-}
-
-function hasText(shape: ShapeNode | undefined): boolean {
+// Whether a shape's text has any run (an empty run builds too): the rule for adding an effect's build, not bodyHasText.
+function hasRuns(shape: ShapeNode | undefined): boolean {
 	return shape?.text?.paragraphs.some(paragraph => paragraph.runs.length > 0) === true
 }
 
@@ -427,9 +417,9 @@ function buildsAfter(slide: SlideNode, before: ReadonlySet<string>, sequences: S
 	if (added !== undefined && target !== undefined && (target.kind === "text" || target.kind === "shape")) {
 		const grpId = added.ctn.grpId ?? 0
 		const key = buildKey(target.shape, grpId)
-		const shape = findShape(slide.shapes, target.shape)
+		const shape = shapeById(slide.shapes, target.shape)
 
-		if (!builds.some(build => buildKey(build.shape, build.grpId) === key) && shape?.kind === "sp" && hasText(shape)) {
+		if (!builds.some(build => buildKey(build.shape, build.grpId) === key) && shape?.kind === "sp" && hasRuns(shape)) {
 			builds.push(
 				target.kind === "text"
 					? { kind: "bldP", shape: target.shape, grpId, build: "p" }
@@ -560,7 +550,7 @@ function triggerOfOp(trigger: EffectTiming["trigger"], state: Authoring): Effect
 	if (trigger.kind === "shapeClick") return { kind: "shapeClick", shape: trigger.shape }
 	if (state.format === "odp") return refused("unsupported", "an OpenDocument presentation has no media bookmarks")
 
-	const shape = findShape(state.slide.shapes, trigger.shape)
+	const shape = shapeById(state.slide.shapes, trigger.shape)
 	const media = shape?.media ?? (shape?.frame?.kind === "media" ? shape.frame.media : undefined)
 
 	if (media?.timing?.bookmarks?.some(bookmark => bookmark.name === trigger.bookmark) !== true)
@@ -590,7 +580,7 @@ function addEffect(deck: Deck, op: OpOf<"timing"> & { kind: "addEffect" }, conte
 
 	// A master's field the slide shows (ODP) is not the slide's to animate: the file could not name it.
 	const animated = shapeOf(op.effect)
-	const owner = animated === undefined ? undefined : findShape(state.slide.shapes, animated)
+	const owner = animated === undefined ? undefined : shapeById(state.slide.shapes, animated)
 
 	if (owner?.lock === "master") return refused("locked", owner.lock)
 
