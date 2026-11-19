@@ -1070,6 +1070,495 @@ describe("INDIRECT in a workbook", () => {
 		})
 	})
 
+	describe("reads a defined name of one cell where row, column and cell edits move it", () => {
+		// One = S!$B$3 over B2:B4 = 10, 20, 30; Rates = S!$A$2:$A$4 over 1, 2, 3; Total = SUM(Rates). S: C1
+		// =SUM(INDIRECT("Rates")), D1 =SUM(Rates), E1 =SUM(A1:B4), H1 =Total*2, I1 =One+1, J1 =INDIRECT("One")+0. T: A1
+		// =One*3, B1 =SUM(S!A2:A4), C1 =S!B4*2. Typed after opening, the dynamic arrays: S!L6 =FILTER(A1:A9,A1:A9>1),
+		// S!N6 =SEQUENCE(3), T!D1 =FILTER(S!A1:A9,S!A1:A9>1), T!E1 =SEQUENCE(3), T!F1 =SUM(D1#).
+		interface Opened {
+			readonly session: SheetSessionApi
+			readonly sheets: { readonly S: number; readonly T: number }
+		}
+
+		const at = (a1: string): { sheet: "S" | "T"; row: number; col: number } => {
+			const [sheet, cell = ""] = a1.split("!")
+
+			return { sheet: sheet === "T" ? "T" : "S", row: Number(cell.slice(1)) - 1, col: cell.charCodeAt(0) - 65 }
+		}
+		const typed = async ({ session, sheets }: Opened, a1: string, input: string): Promise<void> => {
+			const { sheet, row, col } = at(a1)
+
+			ok(
+				await session.command({
+					type: "cells.set",
+					sheet: sheets[sheet],
+					cells: { rows: Uint32Array.of(row), cols: Uint16Array.of(col), inputs: [input] }
+				})
+			)
+		}
+		const open = async (one = "S!$B$3"): Promise<Opened> => {
+			const formula = (cell: string, text: string, result: number): string =>
+				`<c r="${cell}"><f>${text}</f><v>${String(result)}</v></c>`
+			const files = unzipSync(
+				buildXlsx({
+					sheets: [
+						{
+							name: "S",
+							body:
+								'<sheetData><row r="1">' +
+								formula("C1", 'SUM(INDIRECT("Rates"))', 6) +
+								formula("D1", "SUM(Rates)", 6) +
+								formula("E1", "SUM(A1:B4)", 66) +
+								formula("H1", "Total*2", 12) +
+								formula("I1", "One+1", 21) +
+								formula("J1", 'INDIRECT("One")+0', 20) +
+								'</row><row r="2"><c r="A2"><v>1</v></c><c r="B2"><v>10</v></c></row>' +
+								'<row r="3"><c r="A3"><v>2</v></c><c r="B3"><v>20</v></c></row>' +
+								'<row r="4"><c r="A4"><v>3</v></c><c r="B4"><v>30</v></c></row></sheetData>'
+						},
+						{
+							name: "T",
+							body:
+								'<sheetData><row r="1">' +
+								formula("A1", "One*3", 60) +
+								formula("B1", "SUM(S!A2:A4)", 6) +
+								formula("C1", "S!B4*2", 60) +
+								"</row></sheetData>"
+						}
+					],
+					application: { name: "Microsoft Excel", version: "16.0300" },
+					calcPr: 'calcId="191029"'
+				})
+			)
+			const book = files["xl/workbook.xml"]
+
+			if (book === undefined) throw new Error("no workbook part")
+
+			files["xl/workbook.xml"] = strToU8(
+				strFromU8(book).replace(
+					"</sheets>",
+					`</sheets><definedNames><definedName name="One">${one}</definedName>` +
+						'<definedName name="Rates">S!$A$2:$A$4</definedName><definedName name="Total">SUM(Rates)</definedName></definedNames>'
+				)
+			)
+
+			const result = await inThreadSheetHost().open(zipSync(files), { kind: "xlsx", slicing: IMMEDIATE }, () => undefined)
+
+			if (result.kind !== "opened") throw new Error(`expected an open, got ${result.kind}`)
+
+			await result.session.intent()
+
+			const opened = { session: result.session, sheets: { S: result.info.sheets[0]?.id ?? 0, T: result.info.sheets[1]?.id ?? 0 } }
+
+			await typed(opened, "S!L6", "=FILTER(A1:A9,A1:A9>1)")
+			await typed(opened, "S!N6", "=SEQUENCE(3)")
+			await typed(opened, "T!D1", "=FILTER(S!A1:A9,S!A1:A9>1)")
+			await typed(opened, "T!E1", "=SEQUENCE(3)")
+			await typed(opened, "T!F1", "=SUM(D1#)")
+
+			return opened
+		}
+		// What the cells show, by "Sheet!A1".
+		const shown = async ({ session, sheets }: Opened, expected: Readonly<Record<string, string>>): Promise<void> => {
+			const actual: Record<string, string> = {}
+
+			for (const name of ["S", "T"] as const) {
+				const cells = Object.keys(expected).filter(key => key.startsWith(`${name}!`))
+				const values = await texts(
+					session,
+					sheets[name],
+					cells.map(key => key.slice(2))
+				)
+
+				cells.forEach((key, k) => {
+					actual[key] = values[k] ?? ""
+				})
+			}
+
+			expect(actual).toEqual(expected)
+		}
+		// The cells as the file opens, the dynamic arrays typed.
+		const opening = {
+			"S!C1": "6",
+			"S!D1": "6",
+			"S!E1": "66",
+			"S!H1": "12",
+			"S!I1": "21",
+			"S!J1": "20",
+			"S!L6": "2",
+			"S!L7": "3",
+			"S!N6": "1",
+			"S!N7": "2",
+			"S!N8": "3",
+			"T!A1": "60",
+			"T!B1": "6",
+			"T!C1": "60",
+			"T!D1": "2",
+			"T!D2": "3",
+			"T!E1": "1",
+			"T!E3": "3",
+			"T!F1": "5"
+		}
+
+		it("reads the cell the name moved to in a formula typed after a row insert, through undo and redo", async () => {
+			const opened = await open()
+			const { session, sheets } = opened
+			// Row 2 inserted: One = S!$B$4, everything from row 2 one row down.
+			const inserted = {
+				"S!C1": "6",
+				"S!D1": "6",
+				"S!E1": "66",
+				"S!H1": "12",
+				"S!I1": "21",
+				"S!J1": "20",
+				"S!L7": "2",
+				"S!L8": "3",
+				"S!N7": "1",
+				"S!N9": "3",
+				"T!A1": "60",
+				"T!B1": "6",
+				"T!C1": "60",
+				"T!D1": "2",
+				"T!D2": "3",
+				"T!F1": "5"
+			}
+
+			await shown(opened, opening)
+			ok(await session.command({ type: "axis.insert", sheet: sheets.S, axis: "rows", at: 1, count: 1 }))
+			await shown(opened, inserted)
+			await typed(opened, "S!M1", "=One+1")
+			await shown(opened, { ...inserted, "S!M1": "21" })
+			await typed(opened, "S!B4", "50")
+
+			const changed = { ...inserted, "S!E1": "96", "S!I1": "51", "S!J1": "50", "S!M1": "51", "T!A1": "150" }
+
+			await shown(opened, changed)
+
+			const saved = await session.save()
+
+			if (!saved.ok) throw new Error(saved.reason)
+
+			expect(strFromU8(unzipSync(saved.bytes)["xl/worksheets/sheet1.xml"] as Uint8Array)).toMatch(
+				/<c r="M1"[^>]*><f>One\+1<\/f><v>51<\/v>/
+			)
+			ok(await session.undo())
+			await shown(opened, { ...inserted, "S!M1": "21" })
+			ok(await session.undo())
+			ok(await session.undo())
+			await shown(opened, opening)
+			ok(await session.redo())
+			await shown(opened, inserted)
+			ok(await session.redo())
+			await shown(opened, { ...inserted, "S!M1": "21" })
+			ok(await session.redo())
+			await shown(opened, changed)
+			await typed(opened, "S!B4", "60")
+			await shown(opened, { ...changed, "S!E1": "106", "S!I1": "61", "S!J1": "60", "S!M1": "61", "T!A1": "180" })
+			session.close()
+		})
+
+		it("reads the cell the name moved to in formulas a shift gives the engine again after a column insert", async () => {
+			const opened = await open()
+			const { session, sheets } = opened
+			// Column B inserted: One = S!$C$3, row 1's formulas one column right, the arrays too.
+			const inserted = {
+				"S!D1": "6",
+				"S!E1": "6",
+				"S!F1": "66",
+				"S!I1": "12",
+				"S!J1": "21",
+				"S!K1": "20",
+				"S!M6": "2",
+				"S!M7": "3",
+				"S!O6": "1",
+				"S!O8": "3",
+				"T!A1": "60",
+				"T!B1": "6",
+				"T!C1": "60",
+				"T!D1": "2",
+				"T!D2": "3",
+				"T!F1": "5"
+			}
+			// Delete Cells (shift left) of B1:B2: rows 1 and 2 back one column, the name where it was; E1 =SUM(A1:C4), the
+			// range only partly in the shifted band, reads C1 too.
+			const shifted = {
+				"S!C1": "6",
+				"S!D1": "6",
+				"S!E1": "72",
+				"S!H1": "12",
+				"S!I1": "21",
+				"S!J1": "20",
+				"S!M6": "2",
+				"S!M7": "3",
+				"S!O6": "1",
+				"S!O8": "3",
+				"T!A1": "60",
+				"T!B1": "6",
+				"T!C1": "60",
+				"T!D1": "2",
+				"T!D2": "3",
+				"T!F1": "5"
+			}
+
+			ok(await session.command({ type: "axis.insert", sheet: sheets.S, axis: "cols", at: 1, count: 1 }))
+			await shown(opened, inserted)
+			ok(
+				await session.command({
+					type: "cells.shift",
+					sheet: sheets.S,
+					range: { startRow: 0, startCol: 1, endRow: 1, endCol: 1 },
+					edit: "delete",
+					axis: "cols"
+				})
+			)
+			await shown(opened, shifted)
+			ok(await session.undo())
+			await shown(opened, inserted)
+			ok(await session.undo())
+			await shown(opened, opening)
+			ok(await session.redo())
+			ok(await session.redo())
+			await shown(opened, shifted)
+			await typed(opened, "S!C3", "7")
+			await shown(opened, { ...shifted, "S!E1": "59", "S!I1": "8", "S!J1": "7", "T!A1": "21" })
+			session.close()
+		})
+
+		it.each([
+			{
+				axis: "rows" as const,
+				at: 2,
+				// Row 3 deleted: One is #REF!, Rates S!$A$2:$A$3 over 1, 3.
+				cut: {
+					"S!C1": "4",
+					"S!D1": "4",
+					"S!E1": "44",
+					"S!H1": "8",
+					"S!I1": "#REF!",
+					"S!J1": "#REF!",
+					"S!L5": "3",
+					"S!N5": "1",
+					"S!N7": "3",
+					"T!A1": "#REF!",
+					"T!B1": "4",
+					"T!C1": "60",
+					"T!D1": "3",
+					"T!F1": "3"
+				}
+			},
+			{
+				axis: "cols" as const,
+				at: 1,
+				// Column B deleted: One is #REF!, row 1's formulas one column left.
+				cut: {
+					"S!B1": "6",
+					"S!C1": "6",
+					"S!D1": "6",
+					"S!G1": "12",
+					"S!H1": "#REF!",
+					"S!I1": "#REF!",
+					"S!K6": "2",
+					"S!K7": "3",
+					"S!M6": "1",
+					"S!M8": "3",
+					"T!A1": "#REF!",
+					"T!B1": "6",
+					"T!C1": "#REF!",
+					"T!D1": "2",
+					"T!F1": "5"
+				}
+			}
+		])("follows the cell again once a deletion of the name's $axis is undone", async ({ axis, at: index, cut }) => {
+			const opened = await open()
+			const { session, sheets } = opened
+
+			ok(await session.command({ type: "axis.delete", sheet: sheets.S, axis, at: index, count: 1 }))
+			await shown(opened, cut)
+			ok(await session.undo())
+			await shown(opened, opening)
+			ok(await session.redo())
+			await shown(opened, cut)
+			ok(await session.undo())
+			await shown(opened, opening)
+			await typed(opened, "S!B3", "7")
+			await shown(opened, { ...opening, "S!E1": "53", "S!I1": "8", "S!J1": "7", "T!A1": "21" })
+			ok(await session.undo())
+			await shown(opened, opening)
+			session.close()
+		})
+
+		it("shows #REF! for a name of one cell Delete Cells took, through undo and redo", async () => {
+			const opened = await open()
+			const { session, sheets } = opened
+			// Delete Cells (shift up) of B3: One is S!#REF!, the 30 in B3.
+			const deleted = { ...opening, "S!E1": "46", "S!I1": "#REF!", "S!J1": "#REF!", "T!A1": "#REF!" }
+
+			ok(
+				await session.command({
+					type: "cells.shift",
+					sheet: sheets.S,
+					range: { startRow: 2, startCol: 1, endRow: 2, endCol: 1 },
+					edit: "delete",
+					axis: "rows"
+				})
+			)
+			await shown(opened, deleted)
+
+			const saved = await session.save()
+
+			if (!saved.ok) throw new Error(saved.reason)
+
+			expect(strFromU8(unzipSync(saved.bytes)["xl/worksheets/sheet1.xml"] as Uint8Array)).toMatch(
+				/<c r="I1" t="e"><f>One\+1<\/f><v>#REF!<\/v>/
+			)
+			ok(await session.undo())
+			await shown(opened, opening)
+			ok(await session.redo())
+			await shown(opened, deleted)
+			await typed(opened, "S!B3", "5")
+			await shown(opened, { ...deleted, "S!E1": "21", "T!C1": "10" })
+			ok(await session.undo())
+			ok(await session.undo())
+			await shown(opened, opening)
+			await typed(opened, "S!B3", "7")
+			await shown(opened, { ...opening, "S!E1": "53", "S!I1": "8", "S!J1": "7", "T!A1": "21" })
+			session.close()
+		})
+
+		it.each([
+			{
+				axis: "rows" as const,
+				// Delete Cells (shift up) of A2:A4: column A empty below A1.
+				deleted: { "S!E1": "60", "S!L6": "#CALC!", "T!D1": "#CALC!", "T!F1": "#CALC!" }
+			},
+			{
+				axis: "cols" as const,
+				// Delete Cells (shift left) of A2:A4: 10, 20, 30 in A2:A4, One = S!$A$3.
+				deleted: {
+					"S!E1": "60",
+					"S!L6": "10",
+					"S!L7": "20",
+					"S!L8": "30",
+					"T!D1": "10",
+					"T!D2": "20",
+					"T!D3": "30",
+					"T!F1": "60"
+				}
+			}
+		])("shows #REF! for a range name Delete Cells took by $axis, through undo and redo", async ({ axis, deleted }) => {
+			const opened = await open()
+			const { session, sheets } = opened
+			const after = {
+				"S!C1": "#REF!",
+				"S!D1": "#REF!",
+				"S!H1": "#REF!",
+				"S!I1": "21",
+				"S!J1": "20",
+				"S!N6": "1",
+				"S!N8": "3",
+				"T!A1": "60",
+				"T!E1": "1",
+				"T!E3": "3",
+				...deleted
+			}
+
+			ok(
+				await session.command({
+					type: "cells.shift",
+					sheet: sheets.S,
+					range: { startRow: 1, startCol: 0, endRow: 3, endCol: 0 },
+					edit: "delete",
+					axis
+				})
+			)
+			await shown(opened, after)
+			ok(await session.undo())
+			await shown(opened, opening)
+			ok(await session.redo())
+			await shown(opened, after)
+			ok(await session.undo())
+			await typed(opened, "S!A3", "7")
+			await shown(opened, {
+				...opening,
+				"S!C1": "11",
+				"S!D1": "11",
+				"S!E1": "71",
+				"S!H1": "22",
+				"S!L6": "7",
+				"S!L7": "3",
+				"T!B1": "11",
+				"T!D1": "7",
+				"T!F1": "10"
+			})
+			session.close()
+		})
+
+		it.each([
+			{
+				edit: "a retyped reader",
+				make: async (opened: Opened): Promise<void> => {
+					await typed(opened, "S!D1", "=SUM(Rates)")
+				}
+			},
+			{
+				edit: "a column shift",
+				make: async ({ session, sheets }: Opened): Promise<void> => {
+					ok(
+						await session.command({
+							type: "cells.shift",
+							sheet: sheets.S,
+							range: { startRow: 0, startCol: 2, endRow: 0, endCol: 2 },
+							edit: "insert",
+							axis: "cols"
+						})
+					)
+				}
+			}
+		])("keeps a range name a row deletion left one cell a range for $edit, once both are undone", async ({ make }) => {
+			// One = S!$B$2, so the deletion of rows 3 and 4 cuts no name of one cell; Rates is S!$A$2:$A$2 until it is undone.
+			const opened = await open("S!$B$2")
+			const { session, sheets } = opened
+
+			ok(await session.command({ type: "axis.delete", sheet: sheets.S, axis: "rows", at: 2, count: 2 }))
+			await make(opened)
+			ok(await session.undo())
+			ok(await session.undo())
+			await typed(opened, "S!A3", "7")
+			await shown(opened, { "S!C1": "11", "S!D1": "11", "S!H1": "22", "T!B1": "11" })
+
+			const saved = await session.save()
+
+			if (!saved.ok) throw new Error(saved.reason)
+
+			expect(strFromU8(unzipSync(saved.bytes)["xl/worksheets/sheet1.xml"] as Uint8Array)).toMatch(
+				/<c r="D1"[^>]*><f>SUM\(Rates\)<\/f><v>11<\/v>/
+			)
+			session.close()
+		})
+
+		it("reads the cell under the sheet's new name in a formula typed after a rename, through undo and redo", async () => {
+			const opened = await open()
+			const { session, sheets } = opened
+
+			ok(await session.command({ type: "sheet.rename", sheet: sheets.S, name: "Data" }))
+			ok(await session.undo())
+			ok(await session.redo())
+			await typed(opened, "S!M1", "=One+1")
+			await shown(opened, { ...opening, "S!M1": "21" })
+			await typed(opened, "S!B3", "5")
+			await shown(opened, { ...opening, "S!E1": "51", "S!I1": "6", "S!J1": "5", "S!M1": "6", "T!A1": "15" })
+			ok(await session.undo())
+			ok(await session.undo())
+			ok(await session.undo())
+			await shown(opened, opening)
+			await typed(opened, "S!M1", "=One+1")
+			await shown(opened, { ...opening, "S!M1": "21" })
+			await typed(opened, "S!B3", "5")
+			await shown(opened, { ...opening, "S!E1": "51", "S!I1": "6", "S!J1": "5", "S!M1": "6", "T!A1": "15" })
+			session.close()
+		})
+	})
+
 	describe.each([{ type: "axis.insert" as const }, { type: "axis.delete" as const }])(
 		"moves the engine built after an $type made without one",
 		({ type }) => {

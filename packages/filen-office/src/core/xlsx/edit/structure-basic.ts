@@ -4,7 +4,7 @@ import { SHEET_MAX_COLS, SHEET_MAX_EDIT_CELLS, SHEET_MAX_ROWS, type SheetAxis, t
 import { defaultColWidth } from "../../sheet/sizes/sizes"
 import type { SheetChangeSink, SheetHandled } from "../../sheet/registry"
 import type { AxisEdit } from "../../sheet/model/edits"
-import { sameSheet } from "../../sheet/refs/formulaRefs"
+import { absoluteCell, sameSheet } from "../../sheet/refs/formulaRefs"
 import { ChangeLog } from "../model/changes"
 import { FormulaTable } from "../model/formulas"
 import { BLOCK_ROWS, SheetStore, type CellWrite, type RowProperties } from "../model/store"
@@ -151,8 +151,16 @@ export async function moveAxis(
 
 	const post = new CellLog()
 	const inverse: AxisEdit = { type: type === "insert" ? "delete" : "insert", axis, at, count }
+	// The defined names of one absolute cell before a deletion, by name and scope: one the deletion cuts is held by the
+	// engine as that cell in every formula reading it, and its insert on undo gives those formulas no cell back.
+	const nameKey = (name: { readonly name: string; readonly sheet: SheetId | null }): string =>
+		`${name.name.toUpperCase()}\n${String(name.sheet)}`
+	const cellNames = new Set(
+		type === "delete" ? document.workbook.definedNames.filter(name => absoluteCell(name.formula) !== null).map(nameKey) : []
+	)
 	const forward = (): void => {
 		plan.apply()
+		document.nameCellsMoved()
 		document.shiftShown(sheet, edit)
 		document.structureChanged()
 	}
@@ -205,6 +213,10 @@ export async function moveAxis(
 	await turn(clock)
 	forward()
 
+	// Whether the deletion cut a name of one cell: undone, the engine is built again from the workbook as it was.
+	const cutCellName =
+		cellNames.size > 0 &&
+		document.workbook.definedNames.some(name => cellNames.has(nameKey(name)) && absoluteCell(name.formula) === null)
 	const inherited = type === "insert" ? await inheritFormat(document, sheet, model, axis, at, count, post, clock) : null
 
 	await document.loadTables()
@@ -221,6 +233,7 @@ export async function moveAxis(
 			await document.restoreLogSliced(post, "before", clock)
 			inherited?.revert()
 			plan.revert()
+			document.nameCellsMoved()
 			document.shiftShown(sheet, inverse)
 			document.structureChanged()
 			await document.loadTables()
@@ -231,7 +244,13 @@ export async function moveAxis(
 
 			if (clock !== undefined && live !== null) await clock.pause()
 
-			if (live !== null) {
+			if (live !== null && cutCellName) {
+				// The cells, the names and the results shown are back: the engine is built from them, each formula reading
+				// the name of one cell reading that cell again.
+				document.dropEngine()
+
+				if (document.hasFormulas && document.allReady) document.buildEngine(sink)
+			} else if (live !== null) {
 				await document.guardedSliced(() =>
 					// The edit's undo, so told: a deletion's puts back the defined names it cut.
 					type === "insert"
@@ -673,6 +692,8 @@ export async function renameSheet(
 		else plan.revert()
 
 		target.name = which === "after" ? name : from
+		// The names of one cell are spelled with the sheet's name in the formulas the engine is given from here on.
+		document.nameCellsMoved()
 		workbook.changes.workbookSection("sheets")
 		document.structureChanged()
 

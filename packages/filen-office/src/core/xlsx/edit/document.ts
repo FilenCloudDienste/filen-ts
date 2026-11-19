@@ -2255,6 +2255,55 @@ export class XlsxDocument {
 	private lambdaNames: ReadonlySet<string> = new Set()
 	// Defined names the engine reads under an alias or as the reference they stand for, upper case.
 	private nameAliases: ReadonlyMap<string, string> = new Map()
+	// The aliases alone, as the engine was built with them: its names do not change while it lives.
+	private builtAliases: ReadonlyMap<string, string> = new Map()
+	// The names the engine was built with spelled as their one cell, upper case: only these are spelled anew.
+	private builtCells: ReadonlySet<string> = new Set()
+
+	// `aliases` with every name defined once among `named` as one absolute cell spelled as that cell: the engine would
+	// read the name as a value (an empty cell as 0, which ISBLANK takes for a number). Ranges stay names (one range for
+	// every use).
+	private static spelledNames(named: readonly XlsxDefinedName[], aliases: ReadonlyMap<string, string>): Map<string, string> {
+		const definitions = new Map<string, number>()
+
+		for (const entry of named) definitions.set(entry.name.toUpperCase(), (definitions.get(entry.name.toUpperCase()) ?? 0) + 1)
+
+		const spelled = new Map(aliases)
+
+		for (const entry of named) {
+			const upper = entry.name.toUpperCase()
+			const reference = definitions.get(upper) === 1 ? absoluteCell(entry.formula) : null
+
+			if (reference !== null) spelled.set(upper, reference)
+		}
+
+		return spelled
+	}
+
+	// After an edit that moved the workbook's defined names under a live engine (rows or columns inserted or deleted,
+	// and undone): a name of one cell is spelled where it now is in every formula the engine is given from here on. The
+	// engine moves its own names with the edit. A name the engine holds as a name (a range, which a deletion may leave
+	// one cell) stays that name.
+	nameCellsMoved(): void {
+		if (this.engine === null) return
+
+		const held = new Set(this.engineSheets)
+		const spelled = XlsxDocument.spelledNames(
+			this.workbook.definedNames.filter(entry => entry.sheet === null || held.has(entry.sheet)),
+			this.builtAliases
+		)
+
+		for (const name of [...spelled.keys()]) {
+			if (this.builtCells.has(name)) continue
+
+			const alias = this.builtAliases.get(name)
+
+			if (alias === undefined) spelled.delete(name)
+			else spelled.set(name, alias)
+		}
+
+		this.nameAliases = spelled
+	}
 
 	// The defined names as the engine takes them: under an alias when it cannot take the name, left out when it
 	// cannot take what the name refers to (syntax it has no reading for, a function it lacks, a name it lacks in
@@ -2283,21 +2332,10 @@ export class XlsxDocument {
 			aliases.set(upper, alias)
 		}
 
-		// A name defined once as one absolute cell is spelled as that cell: the engine would read the name as a value
-		// (an empty cell as 0, which ISBLANK takes for a number). Ranges stay names (one range for every use).
-		const definitions = new Map<string, number>()
-
-		for (const { named: entry } of named)
-			definitions.set(entry.name.toUpperCase(), (definitions.get(entry.name.toUpperCase()) ?? 0) + 1)
-
-		const spelled = new Map(aliases)
-
-		for (const { named: entry } of named) {
-			const upper = entry.name.toUpperCase()
-			const reference = definitions.get(upper) === 1 ? absoluteCell(entry.formula) : null
-
-			if (reference !== null) spelled.set(upper, reference)
-		}
+		const spelled = XlsxDocument.spelledNames(
+			named.map(entry => entry.named),
+			aliases
+		)
 
 		// The names holding a LAMBDA, which formulas call as functions (MyFn(2)).
 		const lambdas = new Set(
@@ -2340,6 +2378,8 @@ export class XlsxDocument {
 
 		this.unknownNames = unknown
 		this.nameAliases = spelled
+		this.builtAliases = aliases
+		this.builtCells = new Set([...spelled].filter(([name, spelling]) => spelling !== aliases.get(name)).map(([name]) => name))
 
 		return candidates.filter(candidate => !unknown.has(candidate.named.name.toUpperCase())).map(candidate => candidate.name)
 	}
@@ -3330,16 +3370,19 @@ function shiftedKey(key: number, edit: AxisEdit & { readonly band?: CellBand }):
 	return edit.axis === "rows" ? cellKeyOf(next, col) : cellKeyOf(row, next)
 }
 
-// A reference into a deleted sheet as Excel writes it (#REF!$A$1, #REF!A1:B2, #REF!$A:$A), outside string literals
-// and quoted sheet names: the engine cannot read it, and Excel gives the error itself for it.
+// A reference Excel writes for cells that are gone, outside string literals and quoted sheet names: into a deleted
+// sheet (#REF!$A$1, #REF!A1:B2, #REF!$A:$A), or to a sheet's deleted cells (S!#REF!, 'My Sheet'!#REF!). The engine
+// cannot read it, and Excel gives the error itself for it.
 const DEAD_REFERENCE =
-	/"(?:[^"]|"")*"|'(?:[^']|'')*'|#REF!(?:\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|\$?\d+:\$?\d+)(?![\w.(!$:])/gi
+	/(?:'(?:[^']|'')*'|[A-Z_\u00C0-\uFFFF][\w.\u00C0-\uFFFF]*)!#REF!(?![\w.(!$:])|"(?:[^"]|"")*"|'(?:[^']|'')*'|#REF!(?:\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|\$?\d+:\$?\d+)(?![\w.(!$:])/gi
 const DEAD_ERROR = /#REF!/i
 
-// A defined name's formula with each reference into a deleted sheet spelled as the bare #REF! the engine reads: what
+// A defined name's formula with each reference to cells that are gone spelled as the bare #REF! the engine reads: what
 // reads the name is calculated (#REF!, or what IFERROR makes of it), not held at a result the edit made stale.
 function deadReferences(formula: string): string {
-	return DEAD_ERROR.test(formula) ? formula.replace(DEAD_REFERENCE, match => (match.startsWith("#") ? "#REF!" : match)) : formula
+	return DEAD_ERROR.test(formula)
+		? formula.replace(DEAD_REFERENCE, match => (match.startsWith('"') || match.endsWith("'") ? match : "#REF!"))
+		: formula
 }
 
 // A name reading a block of cells past MAX_RANGE_CELLS is not given to the engine, which reads a name's block address
