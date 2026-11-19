@@ -283,6 +283,42 @@ function retagged(gsub: Uint8Array, tag: string): Uint8Array {
 	return gsub
 }
 
+// A GSUB (DFLT) whose 'ccmp' multiplies `glyph` by `first` and then by `second`, and whose 'pref' is one chained
+// context lookup of 2047 format 3 subtables that cover `glyph` then never cover it again, so no pair of it matches
+// and every check of a pair tries the whole lookup.
+function prefGsub(glyph: number, first: number, second: number): Uint8Array {
+	const subtables = 2047
+	const subtablesAt = 6 + subtables * 2
+	const coverage = subtablesAt + subtables * 14
+	const others = Array.from({ length: 20001 }, (_, k) => k + 1).filter(id => id !== glyph)
+	const pref = [
+		...words(6, 0, subtables, ...Array.from({ length: subtables }, (_, k) => subtablesAt + k * 14)),
+		...Array.from({ length: subtables }, (_, k) =>
+			words(3, 0, 2, coverage - subtablesAt - k * 14, coverage + 6 - subtablesAt - k * 14, 0, 0)
+		).flat(),
+		...words(1, 1, glyph),
+		...words(1, others.length, ...others)
+	]
+	const multiplying = (count: number): number[] => [...words(2, 0, 1, 8), ...multiply(glyph, count)()]
+	const lookups = [multiplying(first), multiplying(second), pref]
+	const offsets = lookups.reduce<number[]>((list, lookup, k) => [...list, (list[k] ?? 0) + lookup.length], [8])
+	const tag = (value: string): number[] => value.split("").map(char => char.charCodeAt(0))
+
+	return Uint8Array.from([
+		...words(1, 0, 10, 32, 60),
+		...words(1),
+		...tag("DFLT"),
+		...words(8, 4, 0, 0, 0xffff, 2, 0, 1),
+		...words(2),
+		...tag("ccmp"),
+		...words(14),
+		...tag("pref"),
+		...words(22, 0, 2, 0, 1, 0, 1, 2),
+		...words(3, ...offsets.slice(0, 3)),
+		...lookups.flat()
+	])
+}
+
 // Caladea with its GPOS replaced and a GDEF without glyph classes (so they follow the characters).
 function withGpos(table: Uint8Array): Uint8Array {
 	return withTable(withTable(CALADEA, "GPOS", table), "GDEF", Uint8Array.from(words(1, 0, 0, 0, 0, 0)))
@@ -547,6 +583,58 @@ describe("PDF font limits", () => {
 		expect(fonts.unshaped()).toBe(1)
 		expect(ms).toBeLessThan(budget(200))
 		fonts.close()
+	})
+
+	it("charges each pre-base-reordering check to the run, so a font that multiplies the glyphs after the base and never forms pref stops at the operations limit", async () => {
+		const matra = DEVANAGARI_SFNT.glyphId(0x93e)
+		const font = withTable(DEVANAGARI, "GSUB", prefGsub(matra, 2, 8159))
+		const { fonts, ms } = await shaped(font, "\u0915\u093e")
+
+		expect(matra).toBeGreaterThan(0)
+		expect(fonts.unshaped()).toBe(1)
+		expect(ms).toBeLessThan(budget(200))
+		fonts.close()
+	})
+
+	it("charges the walk back from each halant after a left matra, so a face without a dotted circle whose font multiplies both stops at the operations limit", () => {
+		const matra = DEVANAGARI_SFNT.glyphId(0x93f)
+		const halant = DEVANAGARI_SFNT.glyphId(0x94d)
+		const font = withTable(
+			DEVANAGARI,
+			"GSUB",
+			gsubTable([
+				[2, multiply(matra, 2)],
+				[2, multiply(matra, 4075)],
+				[2, multiply(halant, 2)],
+				[2, multiply(halant, 4075)]
+			])
+		)
+
+		// Without GPOS, whose mark attachment would stop the run on its own.
+		font[directoryRecord(font, "GPOS")] = 0x58
+
+		const sfnt = readSfnt(font)
+		const glyphId = sfnt.glyphId.bind(sfnt)
+
+		// Without a dotted circle the broken syllable keeps every halant with the left matras.
+		sfnt.glyphId = cp => (cp === 0x25cc ? 0 : glyphId(cp))
+
+		const started = cpuMs()
+		const result = new ShapingFace(sfnt).shape({
+			cps: Uint32Array.of(0x93f, 0x94d),
+			clusters: Uint32Array.of(0, 1),
+			count: 2,
+			before: [],
+			after: [],
+			script: scriptOf(0x93f),
+			rtl: false,
+			language: undefined
+		})
+
+		expect(DEVANAGARI_SFNT.glyphId(0x25cc)).toBeGreaterThan(0)
+		expect(matra * halant).toBeGreaterThan(0)
+		expect(result.limited).toBe(true)
+		expect(cpuMs() - started).toBeLessThan(budget(200))
 	})
 
 	it("counts each lookup of a would-substitute check as a try, with a feature of thousands of empty lookups", () => {

@@ -323,6 +323,12 @@ export function wouldSubstitute(table: LayoutTable, lookups: readonly number[], 
 	return false
 }
 
+// Lookups, subtables, ligatures and rules the last wouldSubstitute call tried, so a caller that runs it over a
+// syllable the font sets the length of can charge them to the run.
+export function wouldSubstituteTries(): number {
+	return WOULD_SUBSTITUTE_TRIES - Math.max(0, triesLeft)
+}
+
 // Counts one try of the running wouldSubstitute call; false: none left.
 function tried(): boolean {
 	return triesLeft-- > 0

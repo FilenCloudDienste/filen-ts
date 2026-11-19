@@ -1,5 +1,6 @@
+import { SUBTABLES_PER_OP } from "./apply"
 import { GlyphFlag, type GlyphBuffer } from "./buffer"
-import { wouldSubstitute } from "./gsub"
+import { wouldSubstitute, wouldSubstituteTries } from "./gsub"
 import type { Plan, Shaper } from "./shape"
 import { IndicCategory as C, MatraPosition, indicCategory, matraPosition, type ScriptCode } from "./unicode"
 
@@ -291,11 +292,20 @@ function isOldSpec(plan: Plan, cfg: Config): boolean {
 	return cfg.oldSpecTag !== "" && plan.gsubScript === cfg.oldSpecTag
 }
 
-function would(plan: Plan, tag: string, glyphs: readonly number[]): boolean {
+// Whether the font's `tag` lookups would substitute `glyphs`. With `run`, the check and the tries it took are
+// charged to that run: checks inside a syllable are as many as the font makes the syllable long, and one check
+// as many tries as the font's lookups hold.
+function would(plan: Plan, tag: string, glyphs: readonly number[], run?: GlyphBuffer): boolean {
 	const gsub = plan.face.gsub
 	const lookups = plan.gsubFeatures.get(tag)
 
-	return gsub !== undefined && lookups !== undefined && wouldSubstitute(gsub, lookups, glyphs)
+	if (gsub === undefined || lookups === undefined) return false
+
+	const result = wouldSubstitute(gsub, lookups, glyphs)
+
+	run?.spend(1 + Math.floor(wouldSubstituteTries() / SUBTABLES_PER_OP))
+
+	return result
 }
 
 function maskOf(plan: Plan, tag: string): number {
@@ -317,7 +327,8 @@ function setup(buffer: GlyphBuffer, plan: Plan): void {
 		buffer.position[i] = initialPosition(cp, category)
 	}
 
-	// Consonants with a below-base or post-base form in this font (either glyph order, as fonts differ).
+	// Consonants with a below-base or post-base form in this font (either glyph order, as fonts differ). The
+	// checks run once per glyph and plan and before any lookup multiplies the run, so they are not charged.
 	const virama = cfg.virama === 0 ? 0 : face.glyphOf(cfg.virama)
 
 	if (virama !== 0) {
@@ -439,6 +450,7 @@ function reorderSyllable(buffer: GlyphBuffer, plan: Plan, start: number, end: nu
 		((cfg.rephMode === RephMode.IMPLICIT && !isJoiner(buffer, start + 2)) ||
 			(cfg.rephMode === RephMode.EXPLICIT && category[start + 2] === C.ZWJ))
 	) {
+		// At most two checks per syllable, which the text sets, so they are not charged.
 		const glyphs = [buffer.glyph[start] ?? 0, buffer.glyph[start + 1] ?? 0]
 
 		if (
@@ -651,12 +663,13 @@ function reorderSyllable(buffer: GlyphBuffer, plan: Plan, start: number, end: nu
 		}
 	}
 
-	// Pre-base-reordering RA: a halant + RA the font's pref forms.
+	// Pre-base-reordering RA: a halant + RA the font's pref forms. A font can multiply the glyphs after the base
+	// into a long syllable, so each pair tried is charged to the run.
 	const prefMask = maskOf(plan, "pref")
 
 	if (prefMask !== 0 && base + 2 < end) {
 		for (let i = base + 1; i + 1 < end; i++) {
-			if (would(plan, "pref", [buffer.glyph[i] ?? 0, buffer.glyph[i + 1] ?? 0])) {
+			if (would(plan, "pref", [buffer.glyph[i] ?? 0, buffer.glyph[i + 1] ?? 0], buffer)) {
 				buffer.mask[i] = (buffer.mask[i] ?? 0) | prefMask
 				buffer.mask[i + 1] = (buffer.mask[i + 1] ?? 0) | prefMask
 				break
