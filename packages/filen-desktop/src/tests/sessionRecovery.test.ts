@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { CHANNELS } from "../shared/channels.ts"
 import { loadAppLock } from "../main/appLock.ts"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "../main/sessionRecovery.ts"
 import { createSessionVault, removeIfUndecryptable, type VaultCipher } from "../main/sessionVault.ts"
 import { fakeCipher, memoryFile } from "./fileFakes.ts"
@@ -188,13 +188,7 @@ describe("sessionDiscarder", () => {
 
 describe("registerSessionRecoveryIpc", () => {
 	function register() {
-		const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-		const ipc: IpcMain = {
-			handle: (channel, listener) => {
-				handlers.set(channel, listener)
-			},
-			on: vi.fn()
-		}
+		const { ipc, handlers } = fakeIpc()
 		const discard = vi.fn(() => Promise.resolve({ status: "absent" as const }))
 
 		registerSessionRecoveryIpc(ipc, discard, url => url?.startsWith(APP) === true)

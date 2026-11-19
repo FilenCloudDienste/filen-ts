@@ -2,8 +2,8 @@ import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, ra
 import type * as Sdk from "@filen/sdk-rs"
 import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../src/main/legacyData.ts"
-import { fail, waitFor } from "../support.ts"
-import { type LegacyAnonymous, legacySeed } from "./seed.ts"
+import { fail } from "../support.ts"
+import { type LegacyAnonymous, legacyAnonymous, legacySeed } from "./seed.ts"
 
 // Chain K's synthetic 3.x account (scripts/ci/e2e/chains/keyring.ts) and what its checks read. No real account is
 // involved: the keys are random (the private key a real RSA key, which the web's session resume parses), the userIds
@@ -120,28 +120,7 @@ export function keyringWrites(seed: KeyringSeed, anonymous: LegacyAnonymous): Re
 // The seed, on 3.0.53's sign-in screen once its signed-out setup stored the anonymous config. The values cross CDP as
 // an evaluate argument; the page is not reloaded, so the old app never acts on the account. Returns the keys written.
 export async function seedKeyringLegacy(page: Page, seed: KeyringSeed, timeoutMs: number): Promise<string[]> {
-	await page.locator("input#email").waitFor({ state: "visible", timeout: timeoutMs })
-
-	const anonymous = await waitFor("the old app's signed-out config", timeoutMs, async () => {
-		const read = (await page
-			.evaluate(
-				([sdkKey, desktopKey]) => {
-					const sdkConfig: unknown = JSON.parse(localStorage.getItem(sdkKey) ?? "null")
-					const desktopConfig: unknown = JSON.parse(localStorage.getItem(desktopKey) ?? "null")
-
-					return sdkConfig !== null && desktopConfig !== null ? { sdkConfig, desktopConfig } : null
-				},
-				[LEGACY_KEYS.sdkConfig, LEGACY_KEYS.desktopConfig] as const
-			)
-			.catch(() => null)) as LegacyAnonymous | null
-
-		return read
-	})
-
-	if (anonymous.sdkConfig["apiKey"] !== "anonymous" || anonymous.sdkConfig["userId"] !== 1) {
-		fail("the old app's stored config is not the signed-out one")
-	}
-
+	const anonymous = await legacyAnonymous(page, timeoutMs)
 	const writes = keyringWrites(seed, anonymous)
 
 	await page.evaluate(values => {

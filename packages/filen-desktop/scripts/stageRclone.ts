@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { type } from "arktype"
 import { unzipSync } from "fflate"
 import { BUILDER_OS, stagedDirName, type BuilderOs } from "../src/shared/buildLayout.ts"
 import { nativeArch, type NativeArch } from "./nativeArch.ts"
+import { ARCHS, packageDir } from "./paths.ts"
 
 // Stages the official rclone of both architectures for this OS at build/rclone/<os>-<arch>/rclone[.exe], where
 // electron-builder picks it up per arch (extraResources) and rclonePath finds it in development; on Windows also the
@@ -21,9 +21,8 @@ import { nativeArch, type NativeArch } from "./nativeArch.ts"
 //
 //   node scripts/stageRclone.ts
 
-const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const cacheDir = path.join(packageDir, "node_modules", ".cache", "filen-rclone")
-export const ARCHS: NativeArch[] = ["x64", "arm64"]
+export { ARCHS }
 // electron-builder's ${os} and rclone's name for the same OS.
 export const OS: Partial<Record<NodeJS.Platform, { builder: BuilderOs; rclone: string }>> = {
 	darwin: { builder: BUILDER_OS.darwin, rclone: "osx" },

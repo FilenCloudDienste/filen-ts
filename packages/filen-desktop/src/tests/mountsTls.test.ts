@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { CERTIFICATE_DAYS, certificateHosts, ensureCertificate, RENEW_DAYS } from "../main/mounts/tls.ts"
+import { CERTIFICATE_DAYS, certificateHosts, ensureCertificate, RECENT_ADDRESSES, RENEW_DAYS } from "../main/mounts/tls.ts"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const NOW = Date.UTC(2026, 9, 26)
@@ -65,6 +65,7 @@ describe("ensureCertificate", () => {
 		expect(cert.publicKey.asymmetricKeyDetails?.namedCurve).toBe("prime256v1")
 		expect(made.fingerprint).toBe(cert.fingerprint256)
 		expect(made.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/)
+		expect(made.regenerated).toBe(false)
 
 		if (process.platform !== "win32") {
 			expect((await stat(made.key)).mode & 0o777).toBe(0o600)
@@ -79,6 +80,7 @@ describe("ensureCertificate", () => {
 		const again = await ensureCertificate(dir, "s3", ["localhost"], NOW + 300 * DAY_MS)
 
 		expect(kept.fingerprint).toBe(seeded.fingerprint)
+		expect(kept.regenerated).toBe(false)
 		expect(again).toEqual(kept)
 		expect((await ensureCertificate(dir, "http", [], NOW)).fingerprint).not.toBe(kept.fingerprint)
 	})
@@ -89,6 +91,7 @@ describe("ensureCertificate", () => {
 		const renewed = await ensureCertificate(dir, "s3", [], NOW + (CERTIFICATE_DAYS - RENEW_DAYS + 1) * DAY_MS)
 
 		expect(renewed.fingerprint).not.toBe(seeded.fingerprint)
+		expect(renewed.regenerated).toBe(true)
 	})
 
 	it("is made anew for another host", async () => {
@@ -97,7 +100,50 @@ describe("ensureCertificate", () => {
 		const moved = await ensureCertificate(dir, "s3", ["10.0.0.5"], NOW)
 
 		expect(moved.fingerprint).not.toBe(seeded.fingerprint)
+		expect(moved.regenerated).toBe(true)
 		expect((await load(moved.cert)).checkIP("10.0.0.5")).toBe("10.0.0.5")
+
+		// One explicit address: the previous one is not carried over.
+		const again = await ensureCertificate(dir, "s3", ["10.0.0.6"], NOW)
+
+		expect((await load(again.cert)).checkIP("10.0.0.5")).toBeUndefined()
+	})
+
+	it("every interface keeps one certificate across known networks", async () => {
+		const home = ["127.0.0.1", "192.168.1.20", "0.0.0.0"]
+		const work = ["127.0.0.1", "10.0.0.5", "0.0.0.0"]
+		const first = await ensureCertificate(dir, "webdav", home, NOW, true)
+		const moved = await ensureCertificate(dir, "webdav", work, NOW, true)
+		const back = await ensureCertificate(dir, "webdav", home, NOW, true)
+		const cert = await load(back.cert)
+
+		expect(moved.fingerprint).not.toBe(first.fingerprint)
+		expect(moved.regenerated).toBe(true)
+		expect(back).toEqual({ ...moved, regenerated: false })
+		expect(cert.checkIP("192.168.1.20")).toBe("192.168.1.20")
+		expect(cert.checkIP("10.0.0.5")).toBe("10.0.0.5")
+	})
+
+	it("every interface carries at most RECENT_ADDRESSES addresses, the newest first", async () => {
+		const old = Array.from({ length: RECENT_ADDRESSES }, (_, index) => `10.0.0.${index + 1}`)
+
+		await ensureCertificate(dir, "webdav", old, NOW, true)
+
+		const made = await ensureCertificate(dir, "webdav", ["192.168.1.20"], NOW, true)
+		const cert = await load(made.cert)
+
+		expect(cert.checkIP("192.168.1.20")).toBe("192.168.1.20")
+		expect(old.filter(ip => cert.checkIP(ip) !== undefined)).toEqual(old.slice(0, -1))
+	})
+
+	it("every interface carries nothing from a certificate near expiry", async () => {
+		const later = NOW + (CERTIFICATE_DAYS - RENEW_DAYS + 1) * DAY_MS
+
+		await ensureCertificate(dir, "webdav", ["10.0.0.5"], NOW, true)
+
+		const made = await ensureCertificate(dir, "webdav", ["192.168.1.20"], later, true)
+
+		expect((await load(made.cert)).checkIP("10.0.0.5")).toBeUndefined()
 	})
 
 	it("is made anew when the key does not match", async () => {

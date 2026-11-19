@@ -16,7 +16,7 @@ const SIGN_OUT_TIMEOUT_MS = 2 * 60 * 1000
 export const CONTRACT_TIMEOUT_MS = 2 * 60 * 1000
 
 // `run` within `timeoutMs`, else a failure naming `what`. The page keeps the call; the harness stops waiting for it.
-async function within<T>(what: string, timeoutMs: number, run: Promise<T>): Promise<T> {
+export async function within<T>(what: string, timeoutMs: number, run: Promise<T>): Promise<T> {
 	let timer: NodeJS.Timeout | undefined
 
 	try {

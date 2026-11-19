@@ -6,13 +6,13 @@ import type { DesktopDragState } from "@filen/shared/desktop"
 import type { Locator } from "playwright-core"
 import { errorMessage, fail, powershellBounded, psQuote, runBounded, startXvfb, waitFor } from "../../support.ts"
 import type { Arch, Platform, Target } from "../../targets.ts"
-import { APP_ORIGIN, clearDialogs, putOffKeysReminder, signOut } from "../app.ts"
+import { APP_ORIGIN, clearDialogs, putOffKeysReminder, signOut, within } from "../app.ts"
 import { dragDesktopFor, type DragDesktop } from "../dragDesktop.ts"
 import { type Calibration, dropPoint, gesture, type Point, type Rect, sideBySide, toScreen } from "../dragInput.ts"
 import { seedSession } from "../seed.ts"
 import { diffSnapshots, localSnapshot, type Snapshot, snapshotText } from "../snapshot.ts"
 import { installFrom, START_TIMEOUT_MS, tail } from "../update.ts"
-import { inventory, json, openChain, pidsOf, SETUP_TIMEOUT_MS } from "./common.ts"
+import { budgetWatchdog, inventory, json, openChain, pidsOf, SETUP_TIMEOUT_MS } from "./common.ts"
 
 // Chain D (plan 2026-11-11 native transfers and drag-out, task X11): drag-out against the packaged app N, with real OS
 // input. N is installed on its own (no update), seeded with the run's handed session (no login), and shown the drive
@@ -166,21 +166,8 @@ async function dropped(dir: string): Promise<Snapshot> {
 	return localSnapshot(dir, { skip: relPath => JUNK.has(path.posix.basename(relPath)) })
 }
 
-// A page call that must not hold the chain: Windows' drag loop stalls CDP.
-async function bounded<T>(what: string, run: Promise<T>, timeoutMs = 10_000): Promise<T> {
-	let timer: NodeJS.Timeout | undefined
-
-	try {
-		return await Promise.race([
-			run,
-			new Promise<never>((_resolve, reject) => {
-				timer = setTimeout(() => reject(new Error(`${what}: no answer in ${String(timeoutMs / 1000)} s`)), timeoutMs)
-			})
-		])
-	} finally {
-		clearTimeout(timer)
-	}
-}
+// How long a page call may hold the chain: Windows' drag loop stalls CDP.
+const PAGE_CALL_TIMEOUT_MS = 10_000
 
 export async function runDragOut(options: DragOutOptions): Promise<void> {
 	const { target, platform, work, artifacts } = options
@@ -202,7 +189,13 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 	const recorded = async (): Promise<Recorded> =>
 		(JSON.parse(
-			String(await bounded("read the recorder", page().evaluate("JSON.stringify(globalThis.__filenE2eDrag ?? null)")))
+			String(
+				await within(
+					"read the recorder",
+					PAGE_CALL_TIMEOUT_MS,
+					page().evaluate("JSON.stringify(globalThis.__filenE2eDrag ?? null)")
+				)
+			)
 		) as Recorded | null) ?? fail("the page has no recorder")
 
 	const appPid = () => target.mainProcesses()[0]?.pid ?? fail("no main process of the app")
@@ -228,8 +221,9 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 	const toastText = async (): Promise<string> =>
 		String(
-			await bounded(
+			await within(
 				"read the toasts",
+				PAGE_CALL_TIMEOUT_MS,
 				page().evaluate(
 					`[...document.querySelectorAll("[data-sonner-toast]")].map(node => node.innerText.replace(/\\s+/g, " ")).join(" | ")`
 				)
@@ -346,7 +340,9 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 					"the hand-off to the OS drag",
 					HAND_OFF_TIMEOUT_MS[platform],
 					async () =>
-						(await bounded("read the hand-off", page().evaluate(HANDED_OFF)).catch(() => false)) === true ? true : null,
+						(await within("read the hand-off", PAGE_CALL_TIMEOUT_MS, page().evaluate(HANDED_OFF)).catch(() => false)) === true
+							? true
+							: null,
 					500
 				).catch(() => false)
 			}
@@ -477,25 +473,9 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 		xvfb?.kill()
 	}
 
-	const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
-	const watchdog =
-		budgetMinutes > 0
-			? setTimeout(() => {
-					void (async () => {
-						console.error(`::error::${NAME}: the chain's ${String(budgetMinutes)}-minute budget ran out`)
-						await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () =>
-							fail("it did not")
-						)
-						await wrapUp().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
-
-						try {
-							findings.finish()
-						} finally {
-							process.exit(1)
-						}
-					})()
-				}, budgetMinutes * 60_000)
-			: undefined
+	const watchdog = budgetWatchdog(NAME, findings, {
+		cleanup: () => wrapUp().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
+	})
 
 	const setUp = async (): Promise<boolean> => {
 		await findings.must("D0 N installed on its own", async () => {

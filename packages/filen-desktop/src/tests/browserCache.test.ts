@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { CHANNELS } from "../shared/channels.ts"
 import { registerBrowserCacheIpc, sessionBrowserCache, type CacheSession } from "../main/browserCache.ts"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 
 const APP = "filen://app/"
 
@@ -15,13 +15,7 @@ function fakeSession(): CacheSession & { clearStorageData: () => Promise<void> }
 }
 
 function register(session: CacheSession) {
-	const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-	const ipc: IpcMain = {
-		handle: (channel, listener) => {
-			handlers.set(channel, listener)
-		},
-		on: vi.fn()
-	}
+	const { ipc, handlers } = fakeIpc()
 
 	registerBrowserCacheIpc(
 		ipc,

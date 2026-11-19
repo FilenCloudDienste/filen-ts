@@ -119,3 +119,56 @@ export function roleFailureMessage(roles: readonly DesktopMountsRole[]): string 
 
 	return shellText(first === undefined || roles.length > 1 ? "shellNotifyMountsStopped" : ROLE_FAILURES[first])
 }
+
+// What the tray last showed, and the pair a sync notification opens.
+export interface TrayView {
+	// Sync's own state, for its notification; the icon shows the more urgent of sync and mounts.
+	sync: TrayState
+	icon: TrayState
+	lines: readonly string[]
+	// Where the drive is mounted, for the menu's "Open network drive".
+	drive: string | null
+	attentionPair: string | null
+}
+
+export const INITIAL_TRAY_VIEW: TrayView = { sync: "idle", icon: "idle", lines: [], drive: null, attentionPair: null }
+
+export interface TrayInputs {
+	syncAggregate: NativeAggregate
+	// Sync holds changes until the user decides on them.
+	syncHeld: boolean
+	host: DesktopSyncHostState
+	mounts: { aggregate: NativeAggregate; mountPoint: string | null }
+}
+
+export interface TrayUpdate {
+	view: TrayView
+	// The icon changed.
+	image: boolean
+	// The status lines or the drive changed: the tooltip and the menu are rebuilt.
+	menu: boolean
+	// Sync just entered attention.
+	notify: boolean
+}
+
+export function nextTray(view: TrayView, { syncAggregate, syncHeld, host, mounts }: TrayInputs): TrayUpdate {
+	const sync = syncHeld ? "attention" : syncAggregate
+	const nextSync = trayState(sync, "idle", host)
+	const icon = trayState(sync, mounts.aggregate, host)
+	const lines = trayStatusLines(sync, mounts.aggregate, host, mounts.mountPoint)
+	const menu = lines.join("\n") !== view.lines.join("\n") || mounts.mountPoint !== view.drive
+
+	return {
+		view: {
+			sync: nextSync,
+			icon,
+			lines: menu ? lines : view.lines,
+			drive: mounts.mountPoint,
+			// Activity names the pair before the aggregate turns; it is forgotten once the attention is over.
+			attentionPair: view.sync === "attention" && nextSync !== "attention" ? null : view.attentionPair
+		},
+		image: icon !== view.icon,
+		menu,
+		notify: attentionTransitions(view.sync, nextSync)
+	}
+}

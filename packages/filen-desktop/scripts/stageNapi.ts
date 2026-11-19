@@ -1,10 +1,10 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { type } from "arktype"
 import { builderOs, stagedDirName } from "../src/shared/buildLayout.ts"
 import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
+import { ARCHS, packageDir } from "./paths.ts"
 
 // Copies the sync addon of every architecture installed for this OS to build/native/<os>-<arch>/sdk-rs.node, where
 // electron-builder picks it up per arch (extraResources) and addonPath finds it in development. The addons come from
@@ -16,10 +16,8 @@ import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
 //
 //   node scripts/stageNapi.ts [--dev]
 
-const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 // The ABI suffix of napi-rs's target triple.
 const ABI: Partial<Record<NodeJS.Platform, string>> = { win32: "-msvc", linux: "-gnu" }
-const ARCHS: NativeArch[] = ["x64", "arm64"]
 
 // What a staged addon was copied from. Beside the per-arch directories, which electron-builder ships whole.
 const stampSchema = type({ source: "string", size: "number", mtimeMs: "number" })

@@ -1,24 +1,13 @@
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import type { DesktopDownloadItem, DesktopDragState, DesktopTransferResult, DesktopTransferStart } from "@filen/shared/desktop"
+import type { DesktopDragState, DesktopTransferResult, DesktopTransferStart } from "@filen/shared/desktop"
 import { type DragSessionEffects, DragSessions } from "../main/dragOut/session.ts"
 import type { DragTemp } from "../main/dragOut/temp.ts"
 import type { DownloadDestination, DownloadWatch, NativeDownloadItem } from "../main/transfers/service.ts"
 import type { NativeTreeEntry } from "../shared/nativeProtocol.ts"
+import { dragItem, flush, treeDir, treeFile } from "./dragOutFakes.ts"
 
 const MIB = 1024 ** 2
-
-function item(name: string, kind: "file" | "directory" = "file", size = 10): DesktopDownloadItem {
-	return { kind, ref: { variant: kind === "file" ? "AnyFile.File" : "AnyNormalDir.Dir", value: `{"name":"${name}"}` }, name, size }
-}
-
-function fileEntry(segments: string[], listIndex: number | null, size = 10, source = 0): NativeTreeEntry {
-	return { segments, directory: false, size, mtimeMs: null, listIndex, source }
-}
-
-function dirEntry(segments: string[], source = 0): NativeTreeEntry {
-	return { segments, directory: true, size: 0, mtimeMs: null, listIndex: null, source }
-}
 
 interface Started {
 	id: string
@@ -28,12 +17,6 @@ interface Started {
 	index: number | null
 	items: readonly NativeDownloadItem[]
 	destination: DownloadDestination | null
-}
-
-const flush = async () => {
-	for (let i = 0; i < 10; i++) {
-		await Promise.resolve()
-	}
 }
 
 function fakes(options: { tree?: NativeTreeEntry[] | { tooMany: number }; startError?: boolean } = {}) {
@@ -195,10 +178,10 @@ function idOf(prepared: Awaited<ReturnType<DragSessions["prepare"]>>): string {
 describe("drag sessions: staged", () => {
 	it("prepare → notReady while staging → ready → ended", async () => {
 		const f = fakes({
-			tree: [fileEntry(["a.txt"], null, 4), dirEntry(["d"], 1), fileEntry(["d", "b"], 0, 6, 1), dirEntry(["d", "e"], 1)]
+			tree: [treeFile(["a.txt"], null, 0, 4), treeDir(["d"], 1), treeFile(["d", "b"], 0, 1, 6), treeDir(["d", "e"], 1)]
 		})
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a.txt", "file", 4), item("d", "directory")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a.txt", "file", 4), dragItem("d", "directory")]))
 
 		expect(f.listings).toEqual([{ listingId: expect.any(String) as unknown, maxEntries: 2_000 }])
 		expect(f.directories).toEqual([["d", "d/e"]])
@@ -247,7 +230,7 @@ describe("drag sessions: staged", () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "linux", "staged")
 
-		expect(await sessions.prepare(1, [item("a", "file", 300 * MIB), item("b", "file", 300 * MIB)])).toEqual({
+		expect(await sessions.prepare(1, [dragItem("a", "file", 300 * MIB), dragItem("b", "file", 300 * MIB)])).toEqual({
 			refused: { reason: "tooLarge", bytes: 600 * MIB, limit: 512 * MIB }
 		})
 		expect(f.calls).toEqual([])
@@ -256,7 +239,7 @@ describe("drag sessions: staged", () => {
 	it("more than 2,000 items are refused without a listing", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const items = Array.from({ length: 2_001 }, (_, index) => item(`f${index}`, "file", 1))
+		const items = Array.from({ length: 2_001 }, (_, index) => dragItem(`f${index}`, "file", 1))
 
 		expect(await sessions.prepare(1, items)).toEqual({ refused: { reason: "tooMany", entries: 2_001, limit: 2_000 } })
 		expect(f.calls).toEqual([])
@@ -266,17 +249,17 @@ describe("drag sessions: staged", () => {
 		const f = fakes({ tree: { tooMany: 2_001 } })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
 
-		expect(await sessions.prepare(1, [item("d", "directory")])).toEqual({
+		expect(await sessions.prepare(1, [dragItem("d", "directory")])).toEqual({
 			refused: { reason: "tooMany", entries: 2_001, limit: 2_000 }
 		})
 		expect(sessions.live()).toBe(0)
 	})
 
 	it("a refused plan downloads nothing and releases the listing", async () => {
-		const f = fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "big"], 0, 600 * MIB)] })
+		const f = fakes({ tree: [treeDir(["d"]), treeFile(["d", "big"], 0, 0, 600 * MIB)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
 
-		expect(await sessions.prepare(1, [item("d", "directory")])).toEqual({
+		expect(await sessions.prepare(1, [dragItem("d", "directory")])).toEqual({
 			refused: { reason: "tooLarge", bytes: 600 * MIB, limit: 512 * MIB }
 		})
 		expect(f.started).toEqual([])
@@ -286,9 +269,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("release before begin cancels staging downloads, deletes temp and emits ended cancelled", async () => {
-		const f = fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "b"], 0), fileEntry(["d", "c"], 1)] })
+		const f = fakes({ tree: [treeDir(["d"]), treeFile(["d", "b"], 0), treeFile(["d", "c"], 1)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory")]))
 
 		f.settle(f.started[0] as Started, "done")
 		sessions.release(1, id)
@@ -305,9 +288,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("release after begin is ignored", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const f = fakes({ tree: [treeFile(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		f.settle(f.started[0] as Started, "done")
 		sessions.markBegun(id)
@@ -318,9 +301,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("a failed download ends the session failed and deletes its temp", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null), fileEntry(["b"], null, 10, 1)] })
+		const f = fakes({ tree: [treeFile(["a"], null), treeFile(["b"], null, 1)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a"), item("b")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a"), dragItem("b")]))
 
 		f.settle(f.started[0] as Started, "error")
 
@@ -332,9 +315,9 @@ describe("drag sessions: staged", () => {
 
 	it("staged Linux files are kept after ended; staged Windows files are deleted 30 min after", async () => {
 		for (const platform of ["linux", "win32"] as const) {
-			const f = fakes({ tree: [fileEntry(["a"], null)] })
+			const f = fakes({ tree: [treeFile(["a"], null)] })
 			const sessions = new DragSessions(f.effects, platform, "staged")
-			const id = idOf(await sessions.prepare(1, [item("a")]))
+			const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 			f.settle(f.started[0] as Started, "done")
 			sessions.markBegun(id)
@@ -346,9 +329,9 @@ describe("drag sessions: staged", () => {
 
 	it("staged temp is removed at once when the drag failed or was cancelled", async () => {
 		for (const outcome of ["failed", "cancelled"] as const) {
-			const f = fakes({ tree: [fileEntry(["a"], null)] })
+			const f = fakes({ tree: [treeFile(["a"], null)] })
 			const sessions = new DragSessions(f.effects, "linux", "staged")
-			const id = idOf(await sessions.prepare(1, [item("a")]))
+			const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 			f.settle(f.started[0] as Started, "done")
 			sessions.markBegun(id)
@@ -359,9 +342,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("the unbegun timer waits while staging and starts again once ready", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const f = fakes({ tree: [treeFile(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		f.advance(61_000)
 		expect(sessions.beginnable(1, id)).toBe("notReady")
@@ -376,9 +359,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("staging that outlasts 10 minutes ends the session", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const f = fakes({ tree: [treeFile(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		f.advance(10 * 60_000 - 1)
 		expect(sessions.beginnable(1, id)).toBe("notReady")
@@ -390,9 +373,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("payload is there only while the session is ready", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const f = fakes({ tree: [treeFile(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		expect(sessions.payload(1, id)).toBeNull()
 		f.settle(f.started[0] as Started, "done")
@@ -402,9 +385,9 @@ describe("drag sessions: staged", () => {
 	})
 
 	it("an empty directory alone is ready at once", async () => {
-		const f = fakes({ tree: [dirEntry(["d"])] })
+		const f = fakes({ tree: [treeDir(["d"])] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory")]))
 
 		expect(sessions.beginnable(1, id)).toBe("ready")
 		expect(f.states).toEqual([{ id, state: "ready" }])
@@ -415,7 +398,7 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("an unbegun session expires after 60 s", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		f.advance(59_999)
 		expect(sessions.beginnable(1, id)).toBe("ready")
@@ -428,7 +411,7 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("an unbegun session ends 10 minutes after prepare, however often the page asks", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		for (let at = 50_000; at < 10 * 60_000; at += 50_000) {
 			f.advance(50_000)
@@ -442,7 +425,7 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("a begun drag the OS never ends is ended failed after 10 minutes", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		sessions.markBegun(id)
 		f.advance(10 * 60_000)
@@ -454,7 +437,7 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("a begun session does not expire", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		sessions.markBegun(id)
 		f.advance(120_000)
@@ -465,9 +448,9 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("a second prepare from the same owner replaces the first unbegun one", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const first = idOf(await sessions.prepare(1, [item("a")]))
-		const other = idOf(await sessions.prepare(2, [item("a")]))
-		const second = idOf(await sessions.prepare(1, [item("b")]))
+		const first = idOf(await sessions.prepare(1, [dragItem("a")]))
+		const other = idOf(await sessions.prepare(2, [dragItem("a")]))
+		const second = idOf(await sessions.prepare(1, [dragItem("b")]))
 
 		expect(second).not.toBe(first)
 		expect(sessions.beginnable(1, first)).toBe("unknown")
@@ -479,7 +462,7 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("another owner cannot begin or release a session", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		expect(sessions.beginnable(2, id)).toBe("unknown")
 		expect(sessions.payload(2, id)).toBeNull()
@@ -490,10 +473,10 @@ describe("drag sessions: ownership and lifetime", () => {
 	})
 
 	it("ownerGone releases that owner's unbegun sessions", async () => {
-		const f = fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] })
+		const f = fakes({ tree: [treeDir(["d"]), treeFile(["d", "b"], 0)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory")]))
-		const kept = idOf(await sessions.prepare(2, [item("d", "directory")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory")]))
+		const kept = idOf(await sessions.prepare(2, [dragItem("d", "directory")]))
 
 		sessions.ownerGone(1)
 
@@ -504,7 +487,7 @@ describe("drag sessions: ownership and lifetime", () => {
 	})
 
 	it("a release while the listing is pending releases it at once, not when it arrives", async () => {
-		const f = fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] })
+		const f = fakes({ tree: [treeDir(["d"]), treeFile(["d", "b"], 0)] })
 		const reply = Promise.withResolvers<Awaited<ReturnType<DragSessionEffects["transfers"]["listTree"]>>>()
 
 		f.effects.transfers.listTree = request => {
@@ -514,7 +497,7 @@ describe("drag sessions: ownership and lifetime", () => {
 		}
 
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const pending = sessions.prepare(1, [item("d", "directory")])
+		const pending = sessions.prepare(1, [dragItem("d", "directory")])
 
 		expect(sessions.live()).toBe(1)
 		sessions.ownerGone(1)
@@ -522,7 +505,7 @@ describe("drag sessions: ownership and lifetime", () => {
 		expect(f.released).toEqual([f.listings[0]?.listingId])
 		expect(sessions.live()).toBe(0)
 
-		reply.resolve({ ok: true, value: { entries: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] } })
+		reply.resolve({ ok: true, value: { entries: [treeDir(["d"]), treeFile(["d", "b"], 0)] } })
 
 		expect(await pending).toEqual({ refused: { reason: "unavailable" } })
 		expect(f.started).toEqual([])
@@ -532,8 +515,8 @@ describe("drag sessions: ownership and lifetime", () => {
 	it("markBegun refuses a second native drag", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const one = idOf(await sessions.prepare(1, [item("a")]))
-		const two = idOf(await sessions.prepare(2, [item("b")]))
+		const one = idOf(await sessions.prepare(1, [dragItem("a")]))
+		const two = idOf(await sessions.prepare(2, [dragItem("b")]))
 
 		expect(sessions.markBegun(one)).toBe(true)
 		expect(sessions.markBegun(one)).toBe(false)
@@ -547,9 +530,9 @@ describe("drag sessions: ownership and lifetime", () => {
 	})
 
 	it("markBegun refuses a staging session", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const f = fakes({ tree: [treeFile(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		expect(sessions.markBegun(id)).toBe(false)
 	})
@@ -561,7 +544,7 @@ describe("drag sessions: ownership and lifetime", () => {
 
 		const sessions = new DragSessions(f.effects, "linux", "staged")
 
-		expect(await sessions.prepare(1, [item("d", "directory")])).toEqual({ refused: { reason: "unavailable" } })
+		expect(await sessions.prepare(1, [dragItem("d", "directory")])).toEqual({ refused: { reason: "unavailable" } })
 	})
 })
 
@@ -569,7 +552,7 @@ describe("drag sessions: promise", () => {
 	it("prepare names the items for Finder without a request", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a/b:c"), item("d", "directory")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a/b:c"), dragItem("d", "directory")]))
 
 		expect(f.calls).toEqual([])
 		expect(sessions.payload(1, id)).toEqual({
@@ -584,7 +567,7 @@ describe("drag sessions: promise", () => {
 	it("downloads replace at the supplied path and report the temp path", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a"), item("d", "directory")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a"), dragItem("d", "directory")]))
 		const progress: [number, number][] = []
 		const temps: string[] = []
 		const done: (string | null)[] = []
@@ -604,7 +587,7 @@ describe("drag sessions: promise", () => {
 		const [transfer] = f.started
 
 		expect(transfer?.destination).toEqual({ kind: "exact", path: "/Users/me/Desktop/d 2", conflict: "replace" })
-		expect(transfer?.items).toEqual([item("d", "directory")])
+		expect(transfer?.items).toEqual([dragItem("d", "directory")])
 
 		transfer?.watch.onTemp?.(transfer.id, "/Users/me/Desktop/uuid.filendl")
 		transfer?.watch.onProgress?.(transfer.id, 5, 10)
@@ -623,7 +606,7 @@ describe("drag sessions: promise", () => {
 	it("Finder cancel of one ticket cancels only that transfer", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a"), item("b")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a"), dragItem("b")]))
 		const done: [number, string | null][] = []
 
 		sessions.markBegun(id)
@@ -657,7 +640,7 @@ describe("drag sessions: promise", () => {
 	it("a Finder cancel before the start was answered cancels once it is", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -679,7 +662,7 @@ describe("drag sessions: promise", () => {
 	it("a failed download completes its ticket with an error and leaves others running", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a"), item("b")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a"), dragItem("b")]))
 		const done: [number, string | null][] = []
 
 		sessions.markBegun(id)
@@ -707,7 +690,7 @@ describe("drag sessions: promise", () => {
 	it("a start that fails completes the ticket with its error", async () => {
 		const f = fakes({ startError: true })
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -728,7 +711,7 @@ describe("drag sessions: promise", () => {
 	it("a write for an unknown session or item completes at once with an error", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 		const done: (string | null)[] = []
 
 		sessions.promise(
@@ -756,18 +739,12 @@ describe("drag sessions: promise", () => {
 })
 
 describe("drag sessions: virtual", () => {
-	const tree = [
-		dirEntry(["d"]),
-		fileEntry(["d", "b"], 0),
-		dirEntry(["d", "e"]),
-		fileEntry(["d", "e", "c"], 1),
-		fileEntry(["top"], null, 10, 1)
-	]
+	const tree = [treeDir(["d"]), treeFile(["d", "b"], 0), treeDir(["d", "e"]), treeFile(["d", "e", "c"], 1), treeFile(["top"], null, 1)]
 
 	it("prepare lists and plans the tree for Windows", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 
 		expect(f.listings[0]?.maxEntries).toBe(10_000)
 		expect(sessions.payload(1, id)).toEqual({
@@ -786,7 +763,7 @@ describe("drag sessions: virtual", () => {
 	it("contents starts that entry and prefetches the next file", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 		const done: [number, string | null][] = []
 
 		sessions.markBegun(id)
@@ -797,7 +774,7 @@ describe("drag sessions: virtual", () => {
 			["ref", null, path.join(`/temp/s-${id}`, "1")],
 			["listed", 0, path.join(`/temp/s-${id}`, "2")]
 		])
-		expect(f.started[0]?.items).toEqual([item("top")])
+		expect(f.started[0]?.items).toEqual([dragItem("top")])
 
 		f.settle(f.started[1] as Started, "done")
 		sessions.contents(id, 1, 2, file => done.push([1, file]))
@@ -818,7 +795,7 @@ describe("drag sessions: virtual", () => {
 	it("contents of a directory fails at once", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -830,7 +807,7 @@ describe("drag sessions: virtual", () => {
 	it("a dropped drag keeps the session until the operation ends", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -852,7 +829,7 @@ describe("drag sessions: virtual", () => {
 	it("a stream released while it waits gives up its download; a shared copy stays until its last reader goes", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -878,7 +855,7 @@ describe("drag sessions: virtual", () => {
 	it("a stream released before its download start answered cancels it once named; the prefetch runs on", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -907,7 +884,7 @@ describe("drag sessions: virtual", () => {
 	it("a cancelled drag releases everything at once", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
-		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("d", "directory"), dragItem("top")]))
 
 		sessions.markBegun(id)
 		sessions.ended(id, "cancelled")
@@ -918,10 +895,10 @@ describe("drag sessions: virtual", () => {
 
 	it("a long path is refused", async () => {
 		const parent = "d".repeat(10)
-		const f = fakes({ tree: [dirEntry([parent]), fileEntry([parent, "x".repeat(258)], 0)] })
+		const f = fakes({ tree: [treeDir([parent]), treeFile([parent, "x".repeat(258)], 0)] })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")
 
-		expect(await sessions.prepare(1, [item(parent, "directory")])).toEqual({
+		expect(await sessions.prepare(1, [dragItem(parent, "directory")])).toEqual({
 			refused: { reason: "pathTooLong", path: `${parent}\\${"x".repeat(255)}` }
 		})
 		expect(f.released).toHaveLength(1)
@@ -932,8 +909,8 @@ describe("drag sessions: quit and demand", () => {
 	it("quit aborts every transfer and completes every pending ticket with an error", async () => {
 		const f = fakes()
 		const sessions = new DragSessions(f.effects, "darwin", "promise")
-		const id = idOf(await sessions.prepare(1, [item("a"), item("b")]))
-		const unbegun = idOf(await sessions.prepare(2, [item("c")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a"), dragItem("b")]))
+		const unbegun = idOf(await sessions.prepare(2, [dragItem("c")]))
 		const done: (string | null)[] = []
 
 		sessions.markBegun(id)
@@ -967,9 +944,9 @@ describe("drag sessions: quit and demand", () => {
 	})
 
 	it("sign-out ends every session and leaves the temp to the caller, once the host stopped writing it", async () => {
-		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const f = fakes({ tree: [treeFile(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
-		const id = idOf(await sessions.prepare(1, [item("a")]))
+		const id = idOf(await sessions.prepare(1, [dragItem("a")]))
 
 		sessions.abortAll("signedOut")
 
@@ -979,19 +956,19 @@ describe("drag sessions: quit and demand", () => {
 	})
 
 	it("live counts sessions with listings or tickets", async () => {
-		const f = fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] })
+		const f = fakes({ tree: [treeDir(["d"]), treeFile(["d", "b"], 0)] })
 		const staged = new DragSessions(f.effects, "linux", "staged")
 
 		expect(staged.live()).toBe(0)
 
-		const id = idOf(await staged.prepare(1, [item("d", "directory")]))
+		const id = idOf(await staged.prepare(1, [dragItem("d", "directory")]))
 
 		expect(staged.live()).toBe(1)
 		staged.release(1, id)
 		expect(staged.live()).toBe(0)
 
-		const virtual = new DragSessions(fakes({ tree: [dirEntry(["d"]), fileEntry(["d", "b"], 0)] }).effects, "win32", "virtual")
-		const listed = idOf(await virtual.prepare(1, [item("d", "directory")]))
+		const virtual = new DragSessions(fakes({ tree: [treeDir(["d"]), treeFile(["d", "b"], 0)] }).effects, "win32", "virtual")
+		const listed = idOf(await virtual.prepare(1, [dragItem("d", "directory")]))
 
 		// Holds its listing until the drag ends.
 		expect(virtual.live()).toBe(1)
@@ -1001,7 +978,7 @@ describe("drag sessions: quit and demand", () => {
 
 		const promised = new DragSessions(fakes().effects, "darwin", "promise")
 
-		idOf(await promised.prepare(1, [item("a")]))
+		idOf(await promised.prepare(1, [dragItem("a")]))
 		expect(promised.live()).toBe(0)
 	})
 })

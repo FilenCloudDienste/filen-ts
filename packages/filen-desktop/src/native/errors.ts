@@ -1,10 +1,8 @@
 import type { DesktopSyncErrorCode } from "@filen/shared/desktop"
-import type { NativeError } from "../shared/nativeProtocol.ts"
+import { type NativeError, TEXT_MAX } from "../shared/nativeProtocol.ts"
 import type { NativeSdk } from "./addon.ts"
 
-// The protocol's text limit; an engine message or path past it would fail main's validation and restart the host.
-const TEXT_MAX = 4096
-
+// An engine message or path past the protocol's text limit would fail main's validation and restart the host.
 export function clip(text: string): string {
 	return text.length > TEXT_MAX ? text.slice(0, TEXT_MAX) : text
 }

@@ -412,6 +412,34 @@ export function inventory(root: string): string {
 	return lines.sort().join("\n") || "(empty)"
 }
 
+// The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout): once it is spent, the
+// evidence so far is written and the run fails by name, instead of the step being cut off with nothing kept. In order:
+// `evidence`, the failing check, `cleanup`, the findings, the exit. Undefined without a budget; the caller clears it.
+export function budgetWatchdog(
+	name: string,
+	findings: Findings,
+	{ evidence, cleanup }: { evidence?: () => Promise<unknown>; cleanup: () => Promise<unknown> }
+): NodeJS.Timeout | undefined {
+	const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
+
+	return budgetMinutes > 0
+		? setTimeout(() => {
+				void (async () => {
+					console.error(`::error::${name}: the chain's ${String(budgetMinutes)}-minute budget ran out`)
+					await evidence?.()
+					await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () => fail("it did not"))
+					await cleanup()
+
+					try {
+						findings.finish()
+					} finally {
+						process.exit(1)
+					}
+				})()
+			}, budgetMinutes * 60_000)
+		: undefined
+}
+
 export interface Chain {
 	readonly name: string
 	readonly target: Target
@@ -776,28 +804,10 @@ export async function openChain(name: string, options: Pick<UpdateOptions, "targ
 				}
 			}
 
-			// The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout): once it is spent, the
-			// evidence so far is written and the run fails by name, instead of the step being cut off with nothing kept.
-			const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
-			const watchdog =
-				budgetMinutes > 0
-					? setTimeout(() => {
-							void (async () => {
-								console.error(`::error::${name}: the chain's ${String(budgetMinutes)}-minute budget ran out`)
-								await beforeReset().catch(() => undefined)
-								await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () =>
-									fail("it did not")
-								)
-								await cloud.purge(chain.cloudDir).catch(() => undefined)
-
-								try {
-									findings.finish()
-								} finally {
-									process.exit(1)
-								}
-							})()
-						}, budgetMinutes * 60_000)
-					: undefined
+			const watchdog = budgetWatchdog(name, findings, {
+				evidence: () => beforeReset().catch(() => undefined),
+				cleanup: () => cloud.purge(chain.cloudDir).catch(() => undefined)
+			})
 
 			try {
 				await runUpdate({

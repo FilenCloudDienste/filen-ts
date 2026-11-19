@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process"
 import { copyFileSync, mkdirSync, readdirSync, statSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
+import { ARCHS, packageDir } from "./paths.ts"
 
 // Builds the Windows drag-out addon (native/dragOut/win, crate filen-drag, its toolchain pinned in rust-toolchain.toml)
 // per architecture and copies filen_drag.dll to build/native/win-<arch>/filen-drag.node, beside the staged sync addon,
@@ -15,10 +15,8 @@ import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
 //
 //   node scripts/buildDragAddon.ts [--dev]
 
-const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const crateDir = path.join(packageDir, "native", "dragOut", "win")
 const targetDir = path.join(crateDir, "target")
-const ARCHS: NativeArch[] = ["x64", "arm64"]
 
 export const DRAG_ADDON_FILE = "filen-drag.node"
 

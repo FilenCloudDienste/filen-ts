@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import type { DesktopThirdPartyNotice, DesktopThirdPartyNotices } from "@filen/shared/desktop"
 import { build } from "esbuild"
 import { THIRD_PARTY_NOTICES_FILE } from "../src/main/thirdPartyNotices.ts"
 import { bundleOptions } from "./bundles.ts"
+import { packageDir } from "./paths.ts"
 
 // What the third-party notices generator (scripts/generateThirdPartyNotices.ts) and its drift test both read, so the
 // two sides of every comparison come from one definition.
 
-export const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+export { packageDir }
 export const THIRD_PARTY_NOTICES_SOURCE = path.join(packageDir, "src", "main", "thirdPartyNotices.gen.json")
 // Beside main.js, where main reads it.
 export const THIRD_PARTY_NOTICES_DIST = path.join(packageDir, "dist", THIRD_PARTY_NOTICES_FILE)

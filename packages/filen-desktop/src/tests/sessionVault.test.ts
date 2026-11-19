@@ -10,8 +10,8 @@ import {
 	vaultMode,
 	type VaultCipher
 } from "../main/sessionVault.ts"
-import { linuxCipher } from "./fileFakes.ts"
-import { atomicFile, type AtomicFile } from "../main/atomicFile.ts"
+import { linuxCipher, memoryFile } from "./fileFakes.ts"
+import { atomicFile } from "../main/atomicFile.ts"
 import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
 
 const BLOB = JSON.stringify({
@@ -42,27 +42,6 @@ function fakeCipher(): VaultCipher & { shouldReEncrypt: boolean; failDecrypt: bo
 	}
 
 	return cipher
-}
-
-function memoryFile(initial: Buffer | null = null): AtomicFile & { data: Buffer | null; writes: number } {
-	const file = {
-		data: initial,
-		writes: 0,
-		read: () => Promise.resolve(file.data),
-		write: (data: Buffer) => {
-			file.data = data
-			file.writes++
-
-			return Promise.resolve()
-		},
-		remove: () => {
-			file.data = null
-
-			return Promise.resolve()
-		}
-	}
-
-	return file
 }
 
 describe("isSessionBlob", () => {

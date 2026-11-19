@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { link, mkdir, open, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import {
+	callIdSchema,
 	type FromNative,
 	isMountsOp,
 	isTransfersOp,
@@ -81,7 +82,7 @@ function isTransfersCall(message: NativeCall): message is TransfersCall {
 const commitFs = { link, mkdir, open, rename, stat, unlink }
 
 // The id of a call that failed validation, so it still gets its one reply.
-const callIdSchema = type({ t: "'call'", id: "0 <= number.integer <= 9007199254740991" })
+const malformedCallSchema = type({ t: "'call'", id: callIdSchema })
 
 // Loaded once, with the transfers that use it; a load failure leaves downloads unmarked (logged).
 function quarantineFor(macAddonPath: string | null): Quarantine {
@@ -445,7 +446,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 			// Never the validation summary: it can quote the values, the session among them.
 			console.error("rejected a malformed message")
 
-			const malformedCall = callIdSchema(data)
+			const malformedCall = malformedCallSchema(data)
 
 			if (!(malformedCall instanceof type.errors)) {
 				post({ t: "reply", id: malformedCall.id, ok: false, error: { code: "unknown", message: "invalid call" } })

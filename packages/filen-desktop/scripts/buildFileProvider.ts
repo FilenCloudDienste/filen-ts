@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
 import { APPEX_EXECUTABLE } from "./fileProviderAppex.ts"
+import { packageDir } from "./paths.ts"
 
 // Builds the File Provider extension from the filen-ios-file-provider and filen-rs submodules: the universal macOS
 // xcframework (build-rust.sh --macos), then the FilenFileProviderMac target, universal and unsigned, to
@@ -12,7 +12,6 @@ import { APPEX_EXECUTABLE } from "./fileProviderAppex.ts"
 //
 //   node scripts/buildFileProvider.ts
 
-const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const providerDir = path.join(packageDir, "filen-ios-file-provider")
 const rustDir = path.join(packageDir, "filen-rs")
 const outDir = path.join(packageDir, "build", "fileProvider")

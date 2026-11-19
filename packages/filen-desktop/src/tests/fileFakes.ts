@@ -1,11 +1,12 @@
 import type { AtomicFile } from "../main/atomicFile.ts"
 import type { VaultCipher } from "../main/sessionVault.ts"
 
-// An AtomicFile in memory that counts its writes.
-export function memoryFile(initial: Buffer | null = null): AtomicFile & { data: Buffer | null; writes: number } {
+// An AtomicFile in memory that counts its writes; `text()` reads what it holds as UTF-8.
+export function memoryFile(initial: Buffer | null = null): AtomicFile & { data: Buffer | null; writes: number; text(): string | null } {
 	const file = {
 		data: initial,
 		writes: 0,
+		text: () => file.data?.toString() ?? null,
 		read: () => Promise.resolve(file.data),
 		write: (data: Buffer) => {
 			file.data = data

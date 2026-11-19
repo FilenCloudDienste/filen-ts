@@ -12,7 +12,8 @@ import {
 	runsTranslocated
 } from "../main/fileProvider/service.ts"
 import { createFileProviderStore } from "../main/fileProvider/store.ts"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import type { IpcEvent } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 import { memoryFile } from "./fileFakes.ts"
 
 function blob(userId: bigint, email = "user@example.com"): string {
@@ -579,13 +580,7 @@ describe("runsTranslocated", () => {
 
 describe("file provider ipc", () => {
 	function ipc() {
-		const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-		const main: IpcMain = {
-			handle: (channel, listener) => {
-				handlers.set(channel, listener)
-			},
-			on: () => undefined
-		}
+		const { ipc: main, handlers } = fakeIpc()
 
 		return { main, handlers }
 	}

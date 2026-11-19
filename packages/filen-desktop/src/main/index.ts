@@ -67,13 +67,24 @@ import {
 	closeAction,
 	HIDDEN_ARG,
 	IDLE_DESTROY_DELAY_MS,
-	keepsRendererAlive,
+	idleDestroyDue,
+	rendererGoneAction,
 	startsHidden,
 	UPDATER_RELAUNCH_ENV
 } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { deleteLegacyStores, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
-import { isDevToolsKey, isMenuAction, type MenuShortcuts, menuTemplate, TRANSPORT_ACTIONS, transportItems, zoomLevelAfter } from "./menu.ts"
+import {
+	deliverMenuAction,
+	flushMenuActions,
+	isDevToolsKey,
+	isMenuAction,
+	type MenuShortcuts,
+	menuTemplate,
+	TRANSPORT_ACTIONS,
+	transportItems,
+	zoomLevelAfter
+} from "./menu.ts"
 import { applyShellStrings, loadShellStrings, shellPlural, shellText } from "./shellStrings.ts"
 import {
 	createMigration,
@@ -84,7 +95,7 @@ import {
 	type PurgeOutcome,
 	purgeBeforeReady
 } from "./migration.ts"
-import { addonPath, macAddonPath } from "./native/addonPath.ts"
+import { addonPath, type AddonPathContext, macAddonPath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
 import { registerMountsIpc } from "./mounts/ipc.ts"
@@ -126,13 +137,13 @@ import { readLegacyIgnorer, retireLegacySyncState } from "./sync/legacyState.ts"
 import { heldRemotes, loadSyncStore, type SyncStore } from "./sync/store.ts"
 import {
 	attentionPair,
-	attentionTransitions,
+	INITIAL_TRAY_VIEW,
+	nextTray,
 	roleFailureMessage,
 	trayIconFile,
-	trayState,
 	type TrayState,
-	trayStatusLines,
-	trayTooltip
+	trayTooltip,
+	type TrayView
 } from "./tray.ts"
 import { registerTransfersIpc } from "./transfers/ipc.ts"
 import { createStagingJournal } from "./transfers/journal.ts"
@@ -477,17 +488,36 @@ async function vaultDependents(): Promise<VaultDependent[]> {
 
 const discardUnreadableSession = sessionDiscarder({ vault: sessionVault, cipher: vaultCipher, dependents: vaultDependents, info, warn })
 
-// The bundled rclone (on Linux with the digest the build baked in) and the FUSE installer shipped beside it.
-const rclone = rclonePaths({
+// Where the bundled native files (addons, rclone) live, for every lookup below.
+const nativeFiles: AddonPathContext = {
 	packaged: app.isPackaged,
 	resourcesPath: process.resourcesPath,
 	env: process.env,
 	appPath: app.getAppPath(),
 	platform: process.platform,
 	arch: process.arch,
-	sha256: bakedRcloneSha256,
 	exists: existsSync
-})
+}
+
+function loadNative(file: string): unknown {
+	return createRequire(import.meta.url)(file)
+}
+
+// A cancellable timeout; an unref'd one does not keep the process alive.
+function startTimer(run: () => void, ms: number, { unref }: { unref: boolean }): () => void {
+	const timer = setTimeout(run, ms)
+
+	if (unref) {
+		timer.unref()
+	}
+
+	return () => {
+		clearTimeout(timer)
+	}
+}
+
+// The bundled rclone (on Linux with the digest the build baked in) and the FUSE installer shipped beside it.
+const rclone = rclonePaths({ ...nativeFiles, sha256: bakedRcloneSha256 })
 const fuseContext: FuseContext = {
 	platform: process.platform,
 	arch: process.arch,
@@ -511,25 +541,8 @@ const nativeSupervisor = createNativeSupervisor({
 		}),
 	forkReady: () => hostProxy?.ready ?? Promise.resolve(),
 	vault: sessionVault,
-	addonPath: () =>
-		addonPath({
-			packaged: app.isPackaged,
-			resourcesPath: process.resourcesPath,
-			env: process.env,
-			appPath: app.getAppPath(),
-			platform: process.platform,
-			arch: process.arch,
-			exists: existsSync
-		}),
-	macAddonPath: () =>
-		macAddonPath({
-			packaged: app.isPackaged,
-			resourcesPath: process.resourcesPath,
-			appPath: app.getAppPath(),
-			platform: process.platform,
-			arch: process.arch,
-			exists: existsSync
-		}),
+	addonPath: () => addonPath(nativeFiles),
+	macAddonPath: () => macAddonPath(nativeFiles),
 	dirFor: engineDir,
 	holdRemotes: async userId => heldRemotes((await syncStoreFor(userId)).get()),
 	demand: userId =>
@@ -561,7 +574,7 @@ const nativeSupervisor = createNativeSupervisor({
 			syncAggregate = message.state
 			applyTray()
 		} else if (message.t === "activity") {
-			syncAttentionPair = attentionPair(message.entries, syncAttentionPair)
+			trayView = { ...trayView, attentionPair: attentionPair(message.entries, trayView.attentionPair) }
 		}
 
 		syncService.nativeEvent(message, userId).catch((error: unknown) => {
@@ -657,28 +670,12 @@ const dragTemp = createDragTemp({
 	root: path.join(userDataPath, "drag-out"),
 	uid: process.getuid?.() ?? null,
 	now: Date.now,
-	setTimer: (run, ms) => {
-		const timer = setTimeout(run, ms)
-
-		timer.unref()
-
-		return () => {
-			clearTimeout(timer)
-		}
-	},
+	setTimer: (run, ms) => startTimer(run, ms, { unref: true }),
 	log: { warn }
 })
 
 function dragOutNative(): DragOutNative {
-	const context = {
-		packaged: app.isPackaged,
-		resourcesPath: process.resourcesPath,
-		appPath: app.getAppPath(),
-		platform: process.platform,
-		arch: process.arch,
-		exists: existsSync,
-		load: (file: string): unknown => createRequire(import.meta.url)(file)
-	}
+	const context = { ...nativeFiles, load: loadNative }
 
 	if (PLATFORM === "darwin") {
 		// Loaded on the first drag out.
@@ -700,13 +697,7 @@ const dragSessions = new DragSessions(
 			dragOut.emit(state, owner)
 		},
 		now: Date.now,
-		setTimer: (run, ms) => {
-			const timer = setTimeout(run, ms)
-
-			return () => {
-				clearTimeout(timer)
-			}
-		}
+		setTimer: (run, ms) => startTimer(run, ms, { unref: false })
 	},
 	PLATFORM,
 	dragNative.mode
@@ -893,15 +884,10 @@ const CLOUD_STORAGE = path.join(os.homedir(), "Library", "CloudStorage")
 
 // Filen in Finder (macOS 14 and later): the addon loads only for a user who has it on, or to switch it off.
 const fileProviderContext: FileProviderAddonContext = {
-	packaged: app.isPackaged,
-	resourcesPath: process.resourcesPath,
-	appPath: app.getAppPath(),
-	platform: process.platform,
-	arch: process.arch,
+	...nativeFiles,
 	release: os.release(),
 	execPath: process.execPath,
-	exists: existsSync,
-	load: file => createRequire(import.meta.url)(file)
+	load: loadNative
 }
 let fileProviderSupport: boolean | undefined
 
@@ -1021,7 +1007,7 @@ let mediaTransport: DesktopMediaTransport = "none"
 let smoothTransitions = false
 // The page listens for menu actions; until then clicked ones wait here.
 let menuReady = false
-let pendingMenuActions: DesktopMenuAction[] = []
+let pendingMenuActions: readonly DesktopMenuAction[] = []
 
 function resetPageState(): void {
 	unloadHolds = 0
@@ -1129,23 +1115,31 @@ function scheduleIdleDestroy(): void {
 	idleTimer = undefined
 
 	const window = mainWindow
+
+	if (window === null) {
+		return
+	}
+
 	const idle = () => {
 		const { chatNotifications, contactNotifications } = currentPrefs()
 
-		return (
-			!window?.isVisible() &&
-			!keepsRendererAlive({ unloadHolds, audioPlaying, socketNotifications: chatNotifications || contactNotifications })
-		)
+		return idleDestroyDue({
+			visible: window.isVisible(),
+			current: mainWindow === window,
+			unloadHolds,
+			audioPlaying,
+			socketNotifications: chatNotifications || contactNotifications
+		})
 	}
 
-	if (window === null || !idle()) {
+	if (!idle()) {
 		return
 	}
 
 	idleTimer = setTimeout(() => {
 		idleTimer = undefined
 
-		if (mainWindow === window && idle()) {
+		if (idle()) {
 			window.destroy()
 		}
 	}, IDLE_DESTROY_DELAY_MS)
@@ -1340,20 +1334,20 @@ function createWindow(): void {
 		recovering = false
 	})
 
-	// The page and its unsaved state are gone either way. A visible window loads the app again; a hidden one, or one
-	// whose reload crashed too, is destroyed, and the next show creates a fresh one.
 	window.webContents.on("render-process-gone", (_event, details) => {
 		resetPageState()
 		dragOut.pageGone(contentsId)
 		foregroundRendering.pageGone(contentsId)
 
-		if (details.reason === "clean-exit") {
+		const action = rendererGoneAction(details.reason, window.isVisible(), recovering)
+
+		if (action === "ignore") {
 			return
 		}
 
 		warn(`renderer gone: ${details.reason}`)
 
-		if (window.isVisible() && !recovering) {
+		if (action === "reload") {
 			recovering = true
 			window.webContents.reload()
 		} else {
@@ -1425,17 +1419,15 @@ function createWindow(): void {
 
 // A menu click reaches the page once it listens; with no window one is created and the action waits for it.
 function runMenuAction(action: DesktopMenuAction): void {
-	// The lock screen takes no web actions; the click only brings the window up.
-	if (isLocked()) {
-		showWindow()
+	const delivery = deliverMenuAction(action, pendingMenuActions, {
+		locked: isLocked(),
+		listening: mainWindow !== null && menuReady
+	})
 
-		return
-	}
+	pendingMenuActions = delivery.pending
 
-	if (mainWindow !== null && menuReady) {
-		mainWindow.webContents.send(CHANNELS.menuAction, action)
-	} else if (!pendingMenuActions.includes(action)) {
-		pendingMenuActions.push(action)
+	if (delivery.send !== null) {
+		mainWindow?.webContents.send(CHANNELS.menuAction, delivery.send)
 	}
 
 	showWindow()
@@ -1517,12 +1509,7 @@ const trayDirectory = app.isPackaged ? path.join(process.resourcesPath, "tray") 
 // what the mounts report.
 let syncAggregate: NativeAggregate = "idle"
 let syncHeld = false
-// Sync's own state, for its notification; the icon shows the more urgent of sync and mounts.
-let syncTray: TrayState = "idle"
-let trayIcon: TrayState = "idle"
-let trayLines: string[] = []
-let trayDrive: string | null = null
-let syncAttentionPair: string | null = null
+let trayView: TrayView = INITIAL_TRAY_VIEW
 // Held so it is not collected before it is clicked.
 let notification: Notification | null = null
 // A pair to open once the page has loaded.
@@ -1561,7 +1548,7 @@ function notify(body: string, onClick: () => void): void {
 
 // The click opens the pair that asked last.
 function notifySyncAttention(host: DesktopSyncHostState): void {
-	const pairId = host.state === "failed" ? null : syncAttentionPair
+	const pairId = host.state === "failed" ? null : trayView.attentionPair
 
 	notify(shellText(host.state === "failed" ? "shellNotifySyncStopped" : "shellNotifySyncAttention"), () => {
 		if (pairId !== null) {
@@ -1578,34 +1565,20 @@ function notifyMountsFailed(roles: readonly DesktopMountsRole[]): void {
 
 function applyTray(): void {
 	const host = nativeSupervisor.state()
-	const mounts = mountsService.trayView()
-	const sync = syncHeld ? "attention" : syncAggregate
-	const nextSync = trayState(sync, "idle", host)
-	const nextIcon = trayState(sync, mounts.aggregate, host)
-	const lines = trayStatusLines(sync, mounts.aggregate, host, mounts.mountPoint)
-	const previousSync = syncTray
+	const update = nextTray(trayView, { syncAggregate, syncHeld, host, mounts: mountsService.trayView() })
 
-	syncTray = nextSync
+	trayView = update.view
 
-	// Activity names the pair before the aggregate turns; it is forgotten once the attention is over.
-	if (previousSync === "attention" && nextSync !== "attention") {
-		syncAttentionPair = null
+	if (update.image) {
+		tray?.setImage(trayImage(trayView.icon))
 	}
 
-	if (tray !== null && nextIcon !== trayIcon) {
-		tray.setImage(trayImage(nextIcon))
-	}
-
-	trayIcon = nextIcon
-
-	if (lines.join("\n") !== trayLines.join("\n") || mounts.mountPoint !== trayDrive) {
-		trayLines = lines
-		trayDrive = mounts.mountPoint
-		tray?.setToolTip(trayTooltip(lines))
+	if (update.menu) {
+		tray?.setToolTip(trayTooltip(trayView.lines))
 		applyTrayMenu()
 	}
 
-	if (attentionTransitions(previousSync, nextSync)) {
+	if (update.notify) {
 		notifySyncAttention(host)
 	}
 }
@@ -1619,8 +1592,8 @@ function canLock(): boolean {
 function applyTrayMenu(): void {
 	tray?.setContextMenu(
 		Menu.buildFromTemplate([
-			...trayLines.map(label => ({ label, enabled: false })),
-			...(trayDrive === null
+			...trayView.lines.map(label => ({ label, enabled: false })),
+			...(trayView.drive === null
 				? []
 				: [
 						{
@@ -1630,7 +1603,7 @@ function applyTrayMenu(): void {
 							}
 						}
 					]),
-			...(trayLines.length === 0 ? [] : [{ type: "separator" as const }]),
+			...(trayView.lines.length === 0 ? [] : [{ type: "separator" as const }]),
 			...transportItems(mediaTransport, smoothTransitions).map(({ action, ...item }) => ({
 				...item,
 				click: () => {
@@ -1647,8 +1620,8 @@ function applyTrayMenu(): void {
 }
 
 function createTray(): void {
-	tray = new Tray(trayImage(trayIcon))
-	tray.setToolTip(trayTooltip(trayLines))
+	tray = new Tray(trayImage(trayView.icon))
+	tray.setToolTip(trayTooltip(trayView.lines))
 	applyTrayMenu()
 	tray.on("click", showWindow)
 }
@@ -1702,8 +1675,13 @@ async function exportLogs(webLog: string): Promise<DesktopLogsExport> {
 	return "saved"
 }
 
+// Whether a sender URL is the app's own top-level document.
+function isTrustedUrl(url: string | undefined): boolean {
+	return isTrustedSender(url, APP_ORIGIN)
+}
+
 function isTrusted(senderFrame: WebFrameMain | null): boolean {
-	return isTrustedSender(senderFrame?.url, APP_ORIGIN)
+	return isTrustedUrl(senderFrame?.url)
 }
 
 const instanceLock = acquireInstanceLock({
@@ -1873,7 +1851,7 @@ if (!instanceLock.held) {
 	// Every invoke handler answers the app's own top-level document only.
 	function handle(channel: string, listener: (...args: unknown[]) => Promise<unknown>): void {
 		ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-			if (!isTrustedSender(event.senderFrame?.url, APP_ORIGIN)) {
+			if (!isTrusted(event.senderFrame)) {
 				throw new Error("untrusted sender")
 			}
 
@@ -2082,11 +2060,13 @@ if (!instanceLock.held) {
 
 		menuReady = true
 
-		for (const action of pendingMenuActions) {
+		const flush = flushMenuActions(pendingMenuActions)
+
+		pendingMenuActions = flush.pending
+
+		for (const action of flush.send) {
 			event.sender.send(CHANNELS.menuAction, action)
 		}
-
-		pendingMenuActions = []
 	})
 
 	ipcMain.on(CHANNELS.installUpdate, event => {
@@ -2179,19 +2159,19 @@ if (!instanceLock.held) {
 		}
 	})
 
-	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
-	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
-	registerTransfersIpc(ipcMain, transfersService, url => isTrustedSender(url, APP_ORIGIN))
-	registerDragOutIpc(ipcMain, dragOut, url => isTrustedSender(url, APP_ORIGIN))
-	registerFileProviderIpc(ipcMain, fileProvider, url => isTrustedSender(url, APP_ORIGIN))
-	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, url => isTrustedSender(url, APP_ORIGIN))
+	registerSyncIpc(ipcMain, syncService, isTrustedUrl)
+	registerMountsIpc(ipcMain, mountsService, isTrustedUrl)
+	registerTransfersIpc(ipcMain, transfersService, isTrustedUrl)
+	registerDragOutIpc(ipcMain, dragOut, isTrustedUrl)
+	registerFileProviderIpc(ipcMain, fileProvider, isTrustedUrl)
+	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, isTrustedUrl)
 	// The session exists only after ready, which every page call comes after.
 	registerBrowserCacheIpc(
 		ipcMain,
 		sessionBrowserCache(() => session.defaultSession),
-		url => isTrustedSender(url, APP_ORIGIN)
+		isTrustedUrl
 	)
-	registerThirdPartyNoticesIpc(ipcMain, fileThirdPartyNotices(import.meta.dirname), url => isTrustedSender(url, APP_ORIGIN))
+	registerThirdPartyNoticesIpc(ipcMain, fileThirdPartyNotices(import.meta.dirname), isTrustedUrl)
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)

@@ -3,9 +3,11 @@ import {
 	acquireInstanceLock,
 	appIdentity,
 	closeAction,
+	idleDestroyDue,
 	keepsRendererAlive,
 	RELAUNCH_LOCK_RETRY_MS,
 	RELAUNCH_LOCK_WAIT_MS,
+	rendererGoneAction,
 	startsHidden
 } from "../main/lifecycle.ts"
 import { SHUTDOWN_TIMEOUT_MS } from "../main/native/supervisor.ts"
@@ -114,5 +116,49 @@ describe("acquireInstanceLock", () => {
 		expect(result.held).toBe(false)
 		expect(result.waitedMs).toBe(RELAUNCH_LOCK_WAIT_MS)
 		expect(result.attempts).toBe(RELAUNCH_LOCK_WAIT_MS / RELAUNCH_LOCK_RETRY_MS + 1)
+	})
+})
+
+describe("idleDestroyDue", () => {
+	const hidden = { visible: false, current: true, unloadHolds: 0, audioPlaying: false, socketNotifications: false }
+
+	it("destroys a hidden window with an idle page", () => {
+		expect(idleDestroyDue(hidden)).toBe(true)
+	})
+
+	it("keeps a visible window", () => {
+		expect(idleDestroyDue({ ...hidden, visible: true })).toBe(false)
+	})
+
+	// The same question when the timer fires: the page may have taken up work or the window may be gone meanwhile.
+	it.each([
+		["shown again", { visible: true }],
+		["started audio", { audioPlaying: true }],
+		["holds an unload", { unloadHolds: 1 }],
+		["owns the notification socket", { socketNotifications: true }],
+		["was replaced", { current: false }]
+	])("keeps the page at fire time when it %s", (_label, change) => {
+		expect(idleDestroyDue(hidden)).toBe(true)
+		expect(idleDestroyDue({ ...hidden, ...change })).toBe(false)
+	})
+})
+
+describe("rendererGoneAction", () => {
+	it("ignores a clean exit", () => {
+		expect(rendererGoneAction("clean-exit", true, false)).toBe("ignore")
+		expect(rendererGoneAction("clean-exit", false, true)).toBe("ignore")
+	})
+
+	it("reloads a visible window on its first crash", () => {
+		expect(rendererGoneAction("crashed", true, false)).toBe("reload")
+		expect(rendererGoneAction("oom", true, false)).toBe("reload")
+	})
+
+	it("destroys a window whose reload crashed too", () => {
+		expect(rendererGoneAction("crashed", true, true)).toBe("destroy")
+	})
+
+	it("destroys a hidden window", () => {
+		expect(rendererGoneAction("killed", false, false)).toBe("destroy")
 	})
 })

@@ -21,8 +21,8 @@ export function dragItem(name: string, kind: "file" | "directory" = "file", size
 	return { kind, ref: { variant: kind === "file" ? "AnyFile.File" : "AnyNormalDir.Dir", value: `{"name":"${name}"}` }, name, size }
 }
 
-export function treeFile(segments: string[], listIndex: number | null, source = 0): NativeTreeEntry {
-	return { segments, directory: false, size: 10, mtimeMs: null, listIndex, source }
+export function treeFile(segments: string[], listIndex: number | null, source = 0, size = 10): NativeTreeEntry {
+	return { segments, directory: false, size, mtimeMs: null, listIndex, source }
 }
 
 export function treeDir(segments: string[], source = 0): NativeTreeEntry {

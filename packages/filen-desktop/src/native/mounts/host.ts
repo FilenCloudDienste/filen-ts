@@ -1,13 +1,14 @@
 import type { JsClient, JsRcloneDaemon, RcloneExit, RcloneStats } from "@filen/sdk-rs"
 import type { DesktopMountsRole, DesktopMountsRoleState } from "@filen/shared/desktop"
-import type {
-	FromNative,
-	MountsOp,
-	NativeMountsDesired,
-	NativeMountsError,
-	NativeMountsStatus,
-	NativeOpArgs,
-	NativeOpResult
+import {
+	driveLetterSchema,
+	type FromNative,
+	type MountsOp,
+	type NativeMountsDesired,
+	type NativeMountsError,
+	type NativeMountsStatus,
+	type NativeOpArgs,
+	type NativeOpResult
 } from "../../shared/nativeProtocol.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import type { NativeSdk } from "../addon.ts"
@@ -153,7 +154,7 @@ export function createMountsHost(deps: MountsHostDeps): MountsHost {
 		if (drive?.state === "running" && mounted !== null && !stats.mounts.some(point => sameMountPoint(point, mounted, deps.platform))) {
 			log.warn("mounts: the drive was unmounted outside the app")
 			drive.state = "error"
-			drive.error = { code: "unknown", message: "The drive was unmounted outside Filen." }
+			drive.error = { code: "driveUnmounted" }
 			drive.mounted = null
 		}
 
@@ -197,7 +198,7 @@ export function createMountsHost(deps: MountsHostDeps): MountsHost {
 			role.serveId = null
 			role.mounted = null
 			role.state = gaveUp ? "error" : "starting"
-			role.error = gaveUp ? { code: "unknown", message: "rclone keeps stopping." } : null
+			role.error = gaveUp ? { code: "daemonUnstable" } : null
 		}
 
 		publish()
@@ -452,7 +453,7 @@ export function createMountsHost(deps: MountsHostDeps): MountsHost {
 
 			return run === null ? EMPTY_STATS : mountsStats(await run.daemon.stats())
 		},
-		driveLetters: async () => (await sdk.rcloneAvailableDriveLetters()).filter(letter => /^[D-Z]$/.test(letter)),
+		driveLetters: async () => (await sdk.rcloneAvailableDriveLetters()).filter(letter => driveLetterSchema.allows(letter)),
 		cacheUsage: ({ dir }) => cacheUsage(dir),
 		// rclone refuses while a daemon runs on the cache or a file in it is not uploaded yet. One a crashed host left
 		// running on `stateDir` is stopped first.

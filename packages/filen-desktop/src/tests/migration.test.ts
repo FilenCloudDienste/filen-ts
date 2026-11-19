@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { type AtomicFile, codedError } from "../main/atomicFile.ts"
+import { codedError } from "../main/atomicFile.ts"
 import { LEGACY_KEYS, type LegacyStash } from "../main/legacyData.ts"
 import { deleteLegacyStores, LEGACY_INDEXEDDB_PREFIX, legacyProfileExists } from "../main/legacyOrigin.ts"
 import {
@@ -32,7 +32,7 @@ import { deleteProfileStorage, removeTree, wipeProfileBeforeReady } from "../mai
 import { applyLegacySync, LEGACY_BUILTIN_RULES, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
 import type { SessionRead } from "../shared/channels.ts"
 import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
-import { fakeCipher as vaultCipher, linuxCipher, memoryFile as vaultFile } from "./fileFakes.ts"
+import { fakeCipher as vaultCipher, linuxCipher, memoryFile } from "./fileFakes.ts"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -221,25 +221,6 @@ const SIGNED_IN = {
 	[LEGACY_KEYS.sync]: { "123456": { syncPairs: [] } }
 }
 
-function memoryFile(initial: string | null = null): AtomicFile & { text: () => string | null } {
-	let data: Buffer | null = initial === null ? null : Buffer.from(initial)
-
-	return {
-		text: () => data?.toString() ?? null,
-		read: () => Promise.resolve(data),
-		write: buffer => {
-			data = buffer
-
-			return Promise.resolve()
-		},
-		remove: () => {
-			data = null
-
-			return Promise.resolve()
-		}
-	}
-}
-
 function setup(
 	options: {
 		marker?: MigrationMarker | undefined
@@ -251,7 +232,7 @@ function setup(
 		real?: Pick<MigrationDeps, "vault" | "lock" | "writeStash">
 	} = {}
 ) {
-	const markerFile = memoryFile(options.marker === undefined ? null : serializeMarker(options.marker))
+	const markerFile = memoryFile(options.marker === undefined ? null : Buffer.from(serializeMarker(options.marker)))
 	const state = { vault: options.vault ?? ({ status: "absent" } as SessionRead), lockEnabled: false, now: options.now ?? 1000 }
 	const deps = {
 		marker: markerFile,
@@ -871,7 +852,7 @@ describe("a first launch with a keychain problem", () => {
 	const keychainError = () => new Error("Error while encrypting the text provided to safeStorage.encryptStringAsync.")
 
 	function disk() {
-		return { session: vaultFile(), lock: vaultFile(), stash: vaultFile() }
+		return { session: memoryFile(), lock: memoryFile(), stash: memoryFile() }
 	}
 
 	async function launch(files: ReturnType<typeof disk>, probe: () => Promise<VaultCipher | null>, stored: MigrationMarker | null) {
@@ -1583,7 +1564,7 @@ describe("stash store", () => {
 	})
 
 	it("consumes one user's part of a feature and deletes the stash once empty", async () => {
-		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
+		const file = memoryFile(Buffer.from(`enc:${JSON.stringify(STASH)}`))
 		const store = createStashStore(file, () => Promise.resolve(fakeCipher()), vi.fn())
 
 		expect(await store.pending("1001", "sync")).toEqual(OLD_SYNC)
@@ -1600,7 +1581,7 @@ describe("stash store", () => {
 	})
 
 	it("reads a stash it cannot decrypt again later, never removing it", async () => {
-		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
+		const file = memoryFile(Buffer.from(`enc:${JSON.stringify(STASH)}`))
 		let locked = true
 		const cipher: VaultCipher = {
 			...fakeCipher(),
@@ -1614,7 +1595,7 @@ describe("stash store", () => {
 	})
 
 	it("discards the stash on a sign-out, in memory too, a volatile one included", async () => {
-		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
+		const file = memoryFile(Buffer.from(`enc:${JSON.stringify(STASH)}`))
 		const store = createStashStore(file, () => Promise.resolve(fakeCipher()), vi.fn())
 
 		expect(await store.pending("1001", "sync")).toEqual(OLD_SYNC)
@@ -1631,7 +1612,7 @@ describe("stash store", () => {
 	})
 
 	it("re-encrypts a stash the fallback key stored once a run has the keyring's key", async () => {
-		const file = memoryFile(null)
+		const file = memoryFile()
 
 		await createStashStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn()).write(JSON.stringify(STASH))
 		expect(file.text()?.startsWith("v10")).toBe(true)

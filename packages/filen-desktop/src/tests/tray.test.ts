@@ -6,7 +6,9 @@ import type { NativeAggregate, NativeMountsStatus } from "../shared/nativeProtoc
 import {
 	attentionPair,
 	attentionTransitions,
+	INITIAL_TRAY_VIEW,
 	mountsAggregate,
+	nextTray,
 	newlyFailedRoles,
 	roleFailureMessage,
 	trayIconFile,
@@ -14,7 +16,8 @@ import {
 	type TrayState,
 	trayStatusLines,
 	traySyncStatus,
-	trayTooltip
+	trayTooltip,
+	type TrayInputs
 } from "../main/tray.ts"
 
 const RUNNING: DesktopSyncHostState = { state: "running" }
@@ -119,5 +122,53 @@ describe("tray", () => {
 			)
 		).toBe("1")
 		expect(attentionPair([{ pairId: "2", at: 2, kind: "passCompleted" }], "1")).toBe("1")
+	})
+})
+
+describe("nextTray", () => {
+	const quiet: TrayInputs = { syncAggregate: "idle", syncHeld: false, host: RUNNING, mounts: { aggregate: "idle", mountPoint: null } }
+
+	it("rebuilds only what changed", () => {
+		const first = nextTray(INITIAL_TRAY_VIEW, quiet)
+
+		expect(first).toMatchObject({ image: false, menu: true, notify: false })
+		expect(first.view.lines).toEqual(trayStatusLines("idle", "idle", RUNNING, null))
+
+		const same = nextTray(first.view, quiet)
+
+		expect(same).toMatchObject({ image: false, menu: false, notify: false })
+		expect(same.view.lines).toBe(first.view.lines)
+
+		const syncing = nextTray(same.view, { ...quiet, syncAggregate: "syncing" })
+
+		expect(syncing).toMatchObject({ image: true, menu: true, notify: false, view: { sync: "syncing", icon: "syncing" } })
+	})
+
+	it("rebuilds the menu when only the drive moves", () => {
+		const mounted = nextTray(INITIAL_TRAY_VIEW, { ...quiet, mounts: { aggregate: "idle", mountPoint: "X:" } })
+		const moved = nextTray(mounted.view, { ...quiet, mounts: { aggregate: "idle", mountPoint: "Y:" } })
+
+		expect(moved).toMatchObject({ menu: true, view: { drive: "Y:" } })
+	})
+
+	it("notifies once per entry into attention and keeps the pair until it is over", () => {
+		const syncing = nextTray(INITIAL_TRAY_VIEW, { ...quiet, syncAggregate: "syncing" }).view
+		const entered = nextTray({ ...syncing, attentionPair: "pair" }, { ...quiet, syncAggregate: "attention" })
+
+		expect(entered).toMatchObject({ notify: true, image: true, view: { sync: "attention", attentionPair: "pair" } })
+
+		const lasting = nextTray(entered.view, { ...quiet, syncHeld: true })
+
+		expect(lasting).toMatchObject({ notify: false, view: { attentionPair: "pair" } })
+
+		const over = nextTray(lasting.view, quiet)
+
+		expect(over).toMatchObject({ notify: false, view: { sync: "idle", attentionPair: null } })
+	})
+
+	it("keeps sync's own state apart from a mount that needs the user", () => {
+		const update = nextTray(INITIAL_TRAY_VIEW, { ...quiet, mounts: { aggregate: "attention", mountPoint: null } })
+
+		expect(update).toMatchObject({ notify: false, image: true, view: { sync: "idle", icon: "attention" } })
 	})
 })

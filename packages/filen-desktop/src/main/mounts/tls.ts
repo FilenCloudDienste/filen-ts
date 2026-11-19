@@ -1,6 +1,6 @@
 import { createPrivateKey, KeyObject, randomBytes, X509Certificate } from "node:crypto"
 import { mkdir } from "node:fs/promises"
-import { isIP } from "node:net"
+import { isIP, SocketAddress } from "node:net"
 import path from "node:path"
 import type { DesktopServeProtocol } from "@filen/shared/desktop"
 import { atomicFile } from "../atomicFile.ts"
@@ -19,6 +19,11 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // Every certificate covers loopback, whatever address the server listens on.
 const LOOPBACK = ["localhost", "127.0.0.1", "::1"]
 
+// An every-interface certificate names at most this many addresses besides loopback: the current ones, then the
+// stored certificate's most recent others, so a machine moving between known networks keeps one certificate. Each one
+// is visible to every client of the server, hence the bound.
+export const RECENT_ADDRESSES = 8
+
 const ECDSA = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" }
 
 export interface ServeCertificate {
@@ -27,6 +32,11 @@ export interface ServeCertificate {
 	key: string
 	// SHA-256, as colon-separated hex, for the user to compare.
 	fingerprint: string
+}
+
+export interface EnsuredCertificate extends ServeCertificate {
+	// A stored certificate was replaced, so clients that trusted it must trust the new one.
+	regenerated: boolean
 }
 
 // The names a certificate must cover: loopback and the given hosts; "every interface" addresses name no host.
@@ -38,9 +48,8 @@ function covers(cert: X509Certificate, host: string): boolean {
 	return (isIP(host) === 0 ? cert.checkHost(host) : cert.checkIP(host)) !== undefined
 }
 
-// The stored pair, when it still serves: it parses, the key is the certificate's, it covers every host and is not
-// about to expire.
-function usable(certPem: Buffer | null, keyPem: Buffer | null, hosts: readonly string[], now: number): X509Certificate | null {
+// The stored pair, when it can still serve: it parses, the key is the certificate's and it is not about to expire.
+function serves(certPem: Buffer | null, keyPem: Buffer | null, now: number): X509Certificate | null {
 	if (certPem === null || keyPem === null) {
 		return null
 	}
@@ -48,14 +57,37 @@ function usable(certPem: Buffer | null, keyPem: Buffer | null, hosts: readonly s
 	try {
 		const cert = new X509Certificate(certPem)
 
-		return cert.checkPrivateKey(createPrivateKey(keyPem)) &&
-			cert.validToDate.getTime() - now > RENEW_DAYS * DAY_MS &&
-			hosts.every(host => covers(cert, host))
-			? cert
-			: null
+		return cert.checkPrivateKey(createPrivateKey(keyPem)) && cert.validToDate.getTime() - now > RENEW_DAYS * DAY_MS ? cert : null
 	} catch {
 		return null
 	}
+}
+
+// One spelling per address: the certificate reads IPv6 back expanded and upper case.
+function canonicalIp(address: string): string {
+	return new SocketAddress({ address, family: isIP(address) === 6 ? "ipv6" : "ipv4" }).address
+}
+
+// `wanted`, then the stored certificate's other IP addresses in its order (generate writes the current ones first),
+// up to RECENT_ADDRESSES besides loopback.
+function withRecent(wanted: readonly string[], stored: X509Certificate): string[] {
+	const current = new Set(wanted.map(host => (isIP(host) === 0 ? host : canonicalIp(host))))
+	const room = RECENT_ADDRESSES - (wanted.length - LOOPBACK.length)
+
+	if (room <= 0) {
+		return [...wanted]
+	}
+
+	const carried = (stored.subjectAltName ?? "")
+		.split(", ")
+		.flatMap(entry => {
+			const address = entry.startsWith("IP Address:") ? entry.slice("IP Address:".length) : ""
+
+			return isIP(address) === 0 ? [] : [canonicalIp(address)]
+		})
+		.filter(address => !current.has(address))
+
+	return [...wanted, ...carried.slice(0, room)]
 }
 
 async function generate(hosts: readonly string[], now: number): Promise<{ cert: string; key: string }> {
@@ -92,19 +124,21 @@ async function generate(hosts: readonly string[], now: number): Promise<{ cert: 
 }
 
 // The last call for each `<dir>/<protocol>`, which the next one waits for: two writers of one pair would interleave.
-const pending = new Map<string, Promise<ServeCertificate>>()
+const pending = new Map<string, Promise<EnsuredCertificate>>()
 
 // `<dir>/<protocol>.crt` and `.key` (owner-only), made anew when missing, unusable, within RENEW_DAYS of expiry, or
-// not covering `hosts` (the address the server listens on; for every interface, the LAN addresses). Calls for one pair
-// run one at a time.
+// not covering `hosts` (the address the server listens on; for every interface, the LAN addresses). With
+// `keepRecent` (every interface), a usable stored certificate's other addresses carry over into the new one. Calls for
+// one pair run one at a time.
 export function ensureCertificate(
 	dir: string,
 	protocol: DesktopServeProtocol,
 	hosts: readonly string[],
-	now: number
-): Promise<ServeCertificate> {
+	now: number,
+	keepRecent = false
+): Promise<EnsuredCertificate> {
 	const id = path.join(dir, protocol)
-	const make = () => certificate(dir, protocol, hosts, now)
+	const make = () => certificate(dir, protocol, hosts, now, keepRecent)
 	const previous = pending.get(id)
 	const run = previous === undefined ? make() : previous.then(make, make)
 	const done = () => {
@@ -119,15 +153,22 @@ export function ensureCertificate(
 	return run
 }
 
-async function certificate(dir: string, protocol: DesktopServeProtocol, hosts: readonly string[], now: number): Promise<ServeCertificate> {
+async function certificate(
+	dir: string,
+	protocol: DesktopServeProtocol,
+	hosts: readonly string[],
+	now: number,
+	keepRecent: boolean
+): Promise<EnsuredCertificate> {
 	const certFile = atomicFile(path.join(dir, `${protocol}.crt`))
 	const keyFile = atomicFile(path.join(dir, `${protocol}.key`))
 	const wanted = certificateHosts(hosts)
 	const [certPem, keyPem] = await Promise.all([certFile.read(), keyFile.read()])
-	let cert = usable(certPem, keyPem, wanted, now)
+	const stored = serves(certPem, keyPem, now)
+	let cert = stored !== null && wanted.every(host => covers(stored, host)) ? stored : null
 
 	if (cert === null) {
-		const made = await generate(wanted, now)
+		const made = await generate(keepRecent && stored !== null ? withRecent(wanted, stored) : wanted, now)
 
 		await mkdir(dir, { recursive: true, mode: 0o700 })
 		// A crash between the two writes leaves a pair whose key does not match, which the next call makes anew.
@@ -136,5 +177,10 @@ async function certificate(dir: string, protocol: DesktopServeProtocol, hosts: r
 		cert = new X509Certificate(made.cert)
 	}
 
-	return { cert: path.join(dir, `${protocol}.crt`), key: path.join(dir, `${protocol}.key`), fingerprint: cert.fingerprint256 }
+	return {
+		cert: path.join(dir, `${protocol}.crt`),
+		key: path.join(dir, `${protocol}.key`),
+		fingerprint: cert.fingerprint256,
+		regenerated: certPem !== null && cert !== stored
+	}
 }

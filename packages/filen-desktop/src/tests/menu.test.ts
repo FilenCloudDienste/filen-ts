@@ -1,7 +1,17 @@
 import type { MenuItemConstructorOptions } from "electron"
 import { describe, expect, it, vi } from "vitest"
 import { DESKTOP_SHELL_STRINGS } from "@filen/shared/desktopShellStrings"
-import { isDevToolsKey, isMenuAction, type MenuOptions, menuTemplate, toAccelerator, transportItems, zoomLevelAfter } from "../main/menu.ts"
+import {
+	deliverMenuAction,
+	flushMenuActions,
+	isDevToolsKey,
+	isMenuAction,
+	type MenuOptions,
+	menuTemplate,
+	toAccelerator,
+	transportItems,
+	zoomLevelAfter
+} from "../main/menu.ts"
 
 describe("toAccelerator", () => {
 	it.each([
@@ -256,5 +266,42 @@ describe("zoomLevelAfter", () => {
 	it("stays within Chromium's zoom range", () => {
 		expect(zoomLevelAfter(8.5, "in")).toBe(8.5)
 		expect(zoomLevelAfter(-7.5, "out")).toBe(-7.5)
+	})
+})
+
+describe("deliverMenuAction", () => {
+	const waiting = { locked: false, listening: false }
+
+	it("sends to a page that listens", () => {
+		expect(deliverMenuAction("app.openTransfers", [], { locked: false, listening: true })).toEqual({
+			send: "app.openTransfers",
+			pending: []
+		})
+	})
+
+	it("holds a click until the page listens, once per action", () => {
+		const first = deliverMenuAction("app.openTransfers", [], waiting)
+		const again = deliverMenuAction("app.openTransfers", first.pending, waiting)
+		const other = deliverMenuAction("app.openSettings", again.pending, waiting)
+
+		expect(first).toEqual({ send: null, pending: ["app.openTransfers"] })
+		expect(again.pending).toBe(first.pending)
+		expect(other.pending).toEqual(["app.openTransfers", "app.openSettings"])
+	})
+
+	it("drops a click while locked", () => {
+		const pending = ["app.openTransfers"] as const
+
+		expect(deliverMenuAction("app.openSettings", pending, { locked: true, listening: true })).toEqual({ send: null, pending })
+		expect(deliverMenuAction("app.openSettings", pending, { locked: true, listening: false })).toEqual({ send: null, pending })
+	})
+})
+
+describe("flushMenuActions", () => {
+	it("sends what waited once, in click order", () => {
+		const first = flushMenuActions(["app.openTransfers", "app.openSettings"])
+
+		expect(first.send).toEqual(["app.openTransfers", "app.openSettings"])
+		expect(flushMenuActions(first.pending).send).toEqual([])
 	})
 })

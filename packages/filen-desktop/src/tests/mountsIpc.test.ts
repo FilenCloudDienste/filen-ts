@@ -10,7 +10,8 @@ import { createCredentialStore } from "../main/mounts/credentials.ts"
 import { registerMountsIpc } from "../main/mounts/ipc.ts"
 import { createMountsService, type MountsServiceDeps } from "../main/mounts/service.ts"
 import { loadMountsStore, type MountsConfig, DEFAULT_MOUNTS } from "../main/mounts/store.ts"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import type { IpcEvent } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 import { createRootTokens, ROOT_TOKEN_TTL_MS } from "../main/sync/localRoot.ts"
 import { fakeCipher, memoryFile } from "./fileFakes.ts"
 
@@ -55,6 +56,8 @@ async function setup(
 		confirm?: boolean
 		install?: MountsServiceDeps["fuse"]["install"]
 		legacy?: MountsServiceDeps["legacy"]
+		// The certificate replaced a stored one.
+		regenerated?: boolean
 	} = {}
 ) {
 	let clock = 1_000
@@ -98,6 +101,14 @@ async function setup(
 	const mountsDir = path.join(directory, "mounts", "1")
 	const fuse: { status: DesktopFuseStatus } = { status: { state: "missing", installable: options.install !== undefined } }
 	const log = { info: vi.fn(), warn: vi.fn() }
+	const certificate = vi.fn<MountsServiceDeps["certificate"]>((_dir, protocol) =>
+		Promise.resolve({
+			cert: `/tls/${protocol}.crt`,
+			key: `/tls/${protocol}.key`,
+			fingerprint: "AA:BB",
+			regenerated: options.regenerated ?? false
+		})
+	)
 	const service = createMountsService({
 		supervisor,
 		platform: options.platform ?? "linux",
@@ -111,8 +122,7 @@ async function setup(
 			gap: () => "fuse3",
 			install: options.install ?? null
 		},
-		certificate: (_dir, protocol) =>
-			Promise.resolve({ cert: `/tls/${protocol}.crt`, key: `/tls/${protocol}.key`, fingerprint: "AA:BB" }),
+		certificate,
 		interfaces: () => ({
 			en0: [{ address: LAN, netmask: "255.255.255.0", family: "IPv4", mac: "00:00:00:00:00:00", internal: false, cidr: `${LAN}/24` }]
 		}),
@@ -130,16 +140,7 @@ async function setup(
 		now: () => clock,
 		log
 	})
-	const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-	const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => void>()
-	const ipc: IpcMain = {
-		handle: (channel, listener) => {
-			handlers.set(channel, listener)
-		},
-		on: (channel, listener) => {
-			listeners.set(channel, listener)
-		}
-	}
+	const { ipc, handlers, listeners } = fakeIpc()
 	const sent: [string, unknown][] = []
 	const event: IpcEvent = {
 		senderFrame: { url: options.senderUrl ?? APP },
@@ -170,6 +171,7 @@ async function setup(
 		sent,
 		mountsDir,
 		log,
+		certificate,
 		ops,
 		argsOf: (op: MountsOp) => callMounts.mock.calls.filter(([name]) => name === op).map(([, args]) => args),
 		advance: (ms: number) => {
@@ -416,6 +418,23 @@ describe("registerMountsIpc", () => {
 			authenticated: true
 		})
 		expect(serves.find(serve => serve.protocol === "ftp")).toMatchObject({ addressKind: "loopback", httpsCapable: false, https: false })
+	})
+
+	it("a certificate made the first time raises no notice", async () => {
+		const { invoke, store, certificate } = await setup()
+
+		expect(await invoke("setServe", "webdav", { enabled: true, address: LAN })).toEqual({ ok: true, value: null })
+		expect(certificate).toHaveBeenCalledWith(expect.any(String), "webdav", [LAN], expect.any(Number), false)
+		expect(store.get().notices).toEqual([])
+	})
+
+	it("a replaced certificate raises the notice once", async () => {
+		const { invoke, store, certificate } = await setup({ regenerated: true })
+
+		expect(await invoke("setServe", "webdav", { enabled: true, address: "0.0.0.0", https: true })).toEqual({ ok: true, value: null })
+		expect(await invoke("setServe", "s3", { enabled: true, address: "0.0.0.0", https: true })).toEqual({ ok: true, value: null })
+		expect(certificate).toHaveBeenCalledWith(expect.any(String), "webdav", ["127.0.0.1", LAN, "0.0.0.0"], expect.any(Number), true)
+		expect(store.get().notices).toEqual(["certificateRegenerated"])
 	})
 
 	it("clearCache refuses with pending uploads", async () => {

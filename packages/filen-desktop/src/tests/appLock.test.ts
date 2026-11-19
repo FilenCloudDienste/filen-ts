@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AtomicFile } from "../main/atomicFile.ts"
 import {
 	BACKOFF_BASE_MS,
 	BACKOFF_MAX_MS,
@@ -18,42 +17,11 @@ import {
 	verifyPin
 } from "../main/appLock.ts"
 import type { VaultCipher } from "../main/sessionVault.ts"
+import { fakeCipher, memoryFile } from "./fileFakes.ts"
 
-function memoryFile(initial: Buffer | null = null): AtomicFile & { data: Buffer | null } {
-	const file = {
-		data: initial,
-		read: () => Promise.resolve(file.data),
-		write: (data: Buffer) => {
-			file.data = data
-
-			return Promise.resolve()
-		},
-		remove: () => {
-			file.data = null
-
-			return Promise.resolve()
-		}
-	}
-
-	return file
-}
-
-function fakeCipher(): VaultCipher & { failDecrypt: boolean } {
-	const cipher = {
-		failDecrypt: false,
-		encrypt: (plain: string) => Promise.resolve(Buffer.from(`enc:${plain}`)),
-		decrypt: (encrypted: Buffer) => {
-			const text = encrypted.toString("utf8")
-
-			if (cipher.failDecrypt || !text.startsWith("enc:")) {
-				return Promise.reject(new Error("decrypt failed"))
-			}
-
-			return Promise.resolve({ result: text.slice(4), shouldReEncrypt: false })
-		}
-	}
-
-	return cipher
+// The record fakeCipher wrote: base64 behind its "enc:" prefix.
+function decrypted(data: Buffer | null | undefined): string {
+	return Buffer.from(data?.toString("utf8").slice(4) ?? "", "base64").toString("utf8")
 }
 
 describe("inactivityLockDue", () => {
@@ -363,7 +331,7 @@ describe("loadAppLock", () => {
 		lock.lock()
 		await lock.unlock("1234")
 
-		expect(writes.map(data => parseLockRecord(data.toString("utf8").slice(4))?.failures)).toEqual([1, 0])
+		expect(writes.map(data => parseLockRecord(decrypted(data))?.failures)).toEqual([1, 0])
 	})
 
 	it("unlocks with the right PIN when the reset write fails, keeping the charged attempt", async () => {
@@ -378,7 +346,7 @@ describe("loadAppLock", () => {
 		await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
 
 		expect(lock.status().locked).toBe(false)
-		expect(parseLockRecord(file.data?.toString("utf8").slice(4) ?? "")?.failures).toBe(1)
+		expect(parseLockRecord(decrypted(file.data))?.failures).toBe(1)
 		expect(warn).toHaveBeenCalledWith("app lock: the attempt count was not reset: EPERM")
 	})
 
@@ -483,7 +451,11 @@ describe("loadAppLock", () => {
 
 		expect(plainInvalid.status()).toMatchObject({ enabled: true, locked: true, unreadable: true })
 
-		const invalid = await loadAppLock(memoryFile(Buffer.from("enc:{}")), () => Promise.resolve(fakeCipher()), warn)
+		const invalid = await loadAppLock(
+			memoryFile(Buffer.from(`enc:${Buffer.from("{}").toString("base64")}`)),
+			() => Promise.resolve(fakeCipher()),
+			warn
+		)
 
 		expect(invalid.status()).toMatchObject({ enabled: true, locked: true, unreadable: true })
 		await invalid.reset()

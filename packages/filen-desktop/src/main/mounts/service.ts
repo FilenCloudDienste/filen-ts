@@ -44,7 +44,7 @@ import { mountsDesired, wantsRoles } from "./desired.ts"
 import { chooseMountPoint, defaultMountPoint, inspectMountPoint, type MountPointContext, validDriveLetter } from "./mountPoint.ts"
 import { mountedDrive, mountsOverview, offeredProtocols } from "./overview.ts"
 import { DEFAULT_MOUNTS, defaultServe, type MountsServe, type MountsStore } from "./store.ts"
-import type { ServeCertificate } from "./tls.ts"
+import type { EnsuredCertificate } from "./tls.ts"
 
 // Overview pushes to a page at most this often.
 export const MOUNTS_PUSH_INTERVAL_MS = 250
@@ -72,7 +72,13 @@ export interface MountsServiceDeps {
 		install: (() => Promise<DesktopFuseInstall>) | null
 	}
 	// tls.ts ensureCertificate.
-	certificate(dir: string, protocol: DesktopServeProtocol, hosts: readonly string[], now: number): Promise<ServeCertificate>
+	certificate(
+		dir: string,
+		protocol: DesktopServeProtocol,
+		hosts: readonly string[],
+		now: number,
+		keepRecent: boolean
+	): Promise<EnsuredCertificate>
 	// os.networkInterfaces().
 	interfaces(): NodeJS.Dict<NetworkInterfaceInfo[]>
 	tokens: RootTokens
@@ -243,12 +249,30 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 		return { state: path.join(dir, "state"), cache: path.join(dir, "cache"), tls: path.join(dir, "tls") }
 	}
 
-	async function certificateFor(userId: string, protocol: DesktopServeProtocol, host: string): Promise<ServeCertificate> {
-		const hosts = host === "0.0.0.0" ? listenAddresses(deps.interfaces()).map(entry => entry.address) : [host]
-		const certificate = await deps.certificate(dirs(userId).tls, protocol, hosts, deps.now())
+	async function certificateFor(userId: string, protocol: DesktopServeProtocol, host: string): Promise<EnsuredCertificate> {
+		const everyInterface = host === "0.0.0.0"
+		const hosts = everyInterface ? listenAddresses(deps.interfaces()).map(entry => entry.address) : [host]
+		const certificate = await deps.certificate(dirs(userId).tls, protocol, hosts, deps.now(), everyInterface)
 
 		if (hostUser === userId) {
 			fingerprints.set(protocol, certificate.fingerprint)
+		}
+
+		if (certificate.regenerated) {
+			deps.log.info(`mounts: ${protocol} certificate made anew`)
+
+			// The server still starts with the new certificate when the notice cannot be stored.
+			await (
+				await deps.storeFor(userId)
+			)
+				.update(config =>
+					config.notices.includes("certificateRegenerated")
+						? config
+						: { ...config, notices: [...config.notices, "certificateRegenerated"] }
+				)
+				.then(schedulePush, (error: unknown) => {
+					deps.log.warn(`mounts: certificate notice not stored: ${errorCode(error)}`)
+				})
 		}
 
 		return certificate

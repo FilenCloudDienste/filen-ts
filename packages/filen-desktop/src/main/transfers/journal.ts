@@ -1,6 +1,6 @@
 import path from "node:path"
 import { type } from "arktype"
-import { absolutePathSchema, transferIdSchema } from "../../shared/nativeProtocol.ts"
+import { absolutePathSchema, isStagingName, transferIdSchema } from "../../shared/nativeProtocol.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import { type AtomicFile, errorCode } from "../atomicFile.ts"
 
@@ -34,13 +34,11 @@ export interface StagingJournal {
 	sweep(): Promise<void>
 }
 
-const STAGING_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.filendl$/i
-
 const storedSchema = type({
 	id: transferIdSchema,
 	dir: absolutePathSchema,
 	names: type("string")
-		.narrow(name => STAGING_NAME.test(name))
+		.narrow(name => isStagingName(name))
 		.array(),
 	tree: "boolean",
 	"+": "delete"
@@ -151,7 +149,7 @@ export function createStagingJournal(deps: {
 
 				if (child.isDirectory()) {
 					stack.push(target)
-				} else if (child.isFile() && STAGING_NAME.test(child.name)) {
+				} else if (child.isFile() && isStagingName(child.name)) {
 					clean = (await removeFile(target)) && clean
 				}
 			}
@@ -164,7 +162,7 @@ export function createStagingJournal(deps: {
 		let done = true
 
 		for (const name of entry.names) {
-			if (STAGING_NAME.test(name)) {
+			if (isStagingName(name)) {
 				done = (await removeFile(path.join(entry.dir, name))) && done
 			}
 		}

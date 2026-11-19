@@ -31,6 +31,30 @@ export function keepsRendererAlive({ unloadHolds, audioPlaying, socketNotificati
 	return unloadHolds > 0 || audioPlaying || socketNotifications
 }
 
+export interface IdleDestroyInput extends RendererKeepAlive {
+	visible: boolean
+	// The window is still the app's window; one replaced or closed meanwhile is not this timer's.
+	current: boolean
+}
+
+// Asked when a hidden window's timer is armed and again when it fires: a page that took up work meanwhile, or a window
+// shown again, stays.
+export function idleDestroyDue({ visible, current, ...keepAlive }: IdleDestroyInput): boolean {
+	return current && !visible && !keepsRendererAlive(keepAlive)
+}
+
+export type RendererGoneAction = "ignore" | "reload" | "destroy"
+
+// The page and its unsaved state are gone either way. A visible window loads the app again; a hidden one, or one whose
+// reload crashed too before its page came up, is destroyed, and the next show creates a fresh one.
+export function rendererGoneAction(reason: string, visible: boolean, recovering: boolean): RendererGoneAction {
+	if (reason === "clean-exit") {
+		return "ignore"
+	}
+
+	return visible && !recovering ? "reload" : "destroy"
+}
+
 // No window at startup: launched at login, or the user asked to start minimized.
 export function startsHidden(argv: readonly string[], startMinimized: boolean, openedAtLogin: boolean): boolean {
 	return startMinimized || openedAtLogin || argv.includes(HIDDEN_ARG)

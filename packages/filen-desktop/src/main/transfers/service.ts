@@ -27,7 +27,10 @@ import {
 	type NativeTreeEntry,
 	sdkValuesFit,
 	specSdkLength,
-	TRANSFER_SDK_MAX_LENGTH
+	stagingName,
+	TEXT_MAX,
+	TRANSFER_SDK_MAX_LENGTH,
+	UUID_STEM
 } from "../../shared/nativeProtocol.ts"
 import type { NativeSupervisor } from "../native/supervisor.ts"
 import { LIST_TREE_TIMEOUT_MS, type NativeTransfersResult } from "../native/rpc.ts"
@@ -135,11 +138,6 @@ export interface TransfersServiceDeps {
 // Finished downloads reveal and open can still reach, oldest dropped first.
 const FINISHED_KEPT = 200
 
-// The protocol's text limit.
-const MESSAGE_MAX = 4096
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 interface Row {
 	transfer: DesktopTransfer
 	userId: string
@@ -185,14 +183,14 @@ function fileUuidOf(ref: DesktopSdkRef): string | null {
 	if (ref.value.startsWith(UUID_KEY) && ref.value.charAt(UUID_KEY.length + 36) === '"') {
 		const uuid = ref.value.slice(UUID_KEY.length, UUID_KEY.length + 36)
 
-		return UUID.test(uuid) ? uuid : null
+		return UUID_STEM.test(uuid) ? uuid : null
 	}
 
 	try {
 		const value: unknown = JSON.parse(ref.value)
 		const uuid = typeof value === "object" && value !== null && "uuid" in value ? value.uuid : undefined
 
-		return typeof uuid === "string" && UUID.test(uuid) ? uuid : null
+		return typeof uuid === "string" && UUID_STEM.test(uuid) ? uuid : null
 	} catch {
 		return null
 	}
@@ -669,7 +667,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 			{
 				path: target,
 				watch: common.watch,
-				temp: uuid === null ? null : path.join(path.dirname(target), `${uuid}.filendl`),
+				temp: uuid === null ? null : path.join(path.dirname(target), stagingName(uuid)),
 				reservation
 			}
 		)
@@ -692,7 +690,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				conflict: destination.kind === "exact" ? destination.conflict : "keepBoth"
 			},
 			row,
-			staging: { id, dir: path.dirname(target), names: [`${id}.filendl`, ...(uuid === null ? [] : [`${uuid}.filendl`])], tree: false }
+			staging: { id, dir: path.dirname(target), names: [stagingName(id), ...(uuid === null ? [] : [stagingName(uuid)])], tree: false }
 		}
 	}
 
@@ -887,7 +885,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				return {
 					spec: { id, t: "downloadListed", listingId: request.listingId, index: entry.index, path: entry.path },
 					row,
-					staging: { id, dir: path.dirname(entry.path), names: [`${id}.filendl`], tree: false }
+					staging: { id, dir: path.dirname(entry.path), names: [stagingName(id)], tree: false }
 				}
 			})
 
@@ -1009,7 +1007,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 			return refusal === ""
 				? { ok: true, value: null }
-				: { ok: false, error: { code: "unknown", message: refusal.slice(0, MESSAGE_MAX) } }
+				: { ok: false, error: { code: "unknown", message: refusal.slice(0, TEXT_MAX) } }
 		},
 		chooseDownloadDirectory: async () => {
 			const picked = await dialogs.open({

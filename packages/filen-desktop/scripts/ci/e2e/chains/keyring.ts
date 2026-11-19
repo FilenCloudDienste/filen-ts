@@ -34,7 +34,7 @@ import { redactor } from "../redact.ts"
 import { mask } from "../session.ts"
 import { filesHolding } from "../snapshot.ts"
 import { installFrom, legacyInstaller, sameVersion, START_TIMEOUT_MS, tail } from "../update.ts"
-import { endLeftovers, EXIT_TIMEOUT_MS, inventory, json, pidsOf, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
+import { budgetWatchdog, endLeftovers, EXIT_TIMEOUT_MS, inventory, json, pidsOf, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
 
 // Chain K (gap 2, proving fix B1 in src/main/migration.ts, sessionVault.ts and appLock.ts): the 3.x import when the
 // keyring is missing, locked or comes back, on Linux deb with no sign-in at all. 3.0.53 is installed and given a
@@ -574,26 +574,10 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 		xvfb?.kill()
 	}
 
-	// The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout), as in chains P and L.
-	const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
-	const watchdog =
-		budgetMinutes > 0
-			? setTimeout(() => {
-					void (async () => {
-						console.error(`::error::keyring: the chain's ${String(budgetMinutes)}-minute budget ran out`)
-						await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () =>
-							fail("it did not")
-						)
-						await wrapUp().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
-
-						try {
-							findings.finish()
-						} finally {
-							process.exit(1)
-						}
-					})()
-				}, budgetMinutes * 60_000)
-			: undefined
+	// The chain's whole budget, as in chains P and L.
+	const watchdog = budgetWatchdog("keyring", findings, {
+		cleanup: () => wrapUp().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
+	})
 
 	try {
 		await setUp()

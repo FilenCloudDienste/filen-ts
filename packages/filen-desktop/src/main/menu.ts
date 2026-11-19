@@ -140,6 +140,38 @@ export function transportItems(transport: DesktopMediaTransport, smoothTransitio
 	]
 }
 
+export interface MenuActionDelivery {
+	// Sent to the page now.
+	send: DesktopMenuAction | null
+	pending: readonly DesktopMenuAction[]
+}
+
+// A menu click reaches a page that listens; otherwise it waits, once, for the page to report it listens. The lock screen
+// takes no web actions: the click is dropped and only brings the window up.
+export function deliverMenuAction(
+	action: DesktopMenuAction,
+	pending: readonly DesktopMenuAction[],
+	{ locked, listening }: { locked: boolean; listening: boolean }
+): MenuActionDelivery {
+	if (locked) {
+		return { send: null, pending }
+	}
+
+	if (listening) {
+		return { send: action, pending }
+	}
+
+	return { send: null, pending: pending.includes(action) ? pending : [...pending, action] }
+}
+
+// The page now listens: what waited is sent once, in click order.
+export function flushMenuActions(pending: readonly DesktopMenuAction[]): {
+	send: readonly DesktopMenuAction[]
+	pending: readonly DesktopMenuAction[]
+} {
+	return { send: pending, pending: [] }
+}
+
 export interface MenuOptions {
 	shortcuts: MenuShortcuts
 	devTools: boolean

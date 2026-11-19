@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process"
 import { chmodSync, cpSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { type SignOptions, signAsync } from "@electron/osx-sign"
 import { Arch, type AfterPackContext, MacPackager } from "electron-builder"
 import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
 import { nativeArchOf } from "./nativeArch.ts"
+import { appleArch, packageDir } from "./paths.ts"
 
 // The File Provider extension (filen-ios-file-provider's FilenFileProviderMac target, a universal unsigned build) in
 // Contents/PlugIns. Its path comes from FILEN_DESKTOP_FP_APPEX, which scripts/dist.ts sets from
@@ -14,9 +14,8 @@ import { nativeArchOf } from "./nativeArch.ts"
 
 // CFBundleExecutable of the extension.
 export const APPEX_EXECUTABLE = "FilenFileProvider"
-const LIPO_ARCH: Record<string, string> = { x64: "x86_64", arm64: "arm64" }
 
-const entitlements = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "build", "entitlements.fileprovider.plist")
+const entitlements = path.join(packageDir, "build", "entitlements.fileprovider.plist")
 
 export function appexSource(): string {
 	const source = process.env["FILEN_DESKTOP_FP_APPEX"]
@@ -71,7 +70,7 @@ export function installAppex(context: AfterPackContext): void {
 	}
 
 	const arch = Arch[context.arch]
-	const lipoArch = LIPO_ARCH[arch]
+	const lipoArch = appleArch(arch)
 
 	if (lipoArch === undefined) {
 		throw new Error(`installAppex: no ${APPEX_NAME} for ${arch}`)

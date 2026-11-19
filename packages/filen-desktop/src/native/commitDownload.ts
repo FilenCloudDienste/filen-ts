@@ -1,5 +1,6 @@
 import path from "node:path"
 import { keepBothName } from "@filen/shared/localName"
+import { stagingName } from "../shared/nativeProtocol.ts"
 import { TransferCommitError } from "./transferErrors.ts"
 
 // The fs calls a download's last steps make (node:fs/promises in the host).
@@ -21,7 +22,7 @@ function codeOf(error: unknown): unknown {
 
 // join(dirname(target), `${id}.filendl`): a uuid-stem .filendl FILE, which sync scans ignore and collect when stale.
 export function stagingPathOf(target: string, id: string): string {
-	return path.join(path.dirname(target), `${id}.filendl`)
+	return path.join(path.dirname(target), stagingName(id))
 }
 
 function candidate(dir: string, name: string, n: number, kind: "file" | "directory"): string {

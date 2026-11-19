@@ -233,6 +233,11 @@ describe("mountsHost", () => {
 				.at(-1)
 				?.roles.every(role => role.state === "error")
 		).toBe(true)
+		expect(
+			statuses()
+				.at(-1)
+				?.roles.map(role => role.error)
+		).toEqual([{ code: "daemonUnstable" }, { code: "daemonUnstable" }])
 
 		await vi.advanceTimersByTimeAsync(10 * 60_000)
 		expect(daemons).toHaveLength(CRASH_LIMIT)
@@ -305,7 +310,7 @@ describe("mountsHost", () => {
 		).toEqual({
 			role: "drive",
 			state: "error",
-			error: { code: "unknown", message: "The drive was unmounted outside Filen." }
+			error: { code: "driveUnmounted" }
 		})
 
 		// The next apply mounts it again.

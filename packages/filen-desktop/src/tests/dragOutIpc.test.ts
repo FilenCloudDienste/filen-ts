@@ -2,7 +2,8 @@ import { stringifyEnvelope } from "@filen/shared/session"
 import { describe, expect, it, vi } from "vitest"
 import { registerDragOutIpc } from "../main/dragOut/ipc.ts"
 import type { DragOutService } from "../main/dragOut/service.ts"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import type { IpcEvent } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 import { CHANNELS, DRAG_CALLS, type DragCall, dragChannel } from "../shared/channels.ts"
 import { dragFakes, dragImage, pngOf } from "./dragOutFakes.ts"
 import { wasmFile } from "./nativeFakes.ts"
@@ -12,16 +13,7 @@ const UUID = "0d3c6b1e-8f4a-4c2d-9b7e-5a1f3e2d4c6b"
 const ITEM = { kind: "file", ref: { variant: "AnyFile.File", value: stringifyEnvelope(wasmFile(UUID, 10n)) }, name: "a.txt", size: 10 }
 
 function setup(service: DragOutService) {
-	const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-	const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => void>()
-	const ipc: IpcMain = {
-		handle: (channel, listener) => {
-			handlers.set(channel, listener)
-		},
-		on: (channel, listener) => {
-			listeners.set(channel, listener)
-		}
-	}
+	const { ipc, handlers, listeners } = fakeIpc()
 	const event = (sender: number, url = APP): IpcEvent => ({
 		senderFrame: { url },
 		sender: { id: sender, send: vi.fn(), isDestroyed: () => false }

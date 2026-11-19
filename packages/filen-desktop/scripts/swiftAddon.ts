@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, readdirSync, statSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { nativeArchOf, type NativeArch } from "./nativeArch.ts"
+import { APPLE_ARCH, ARCHS, packageDir } from "./paths.ts"
 
 // Builds a Swift Node-API addon of native/<sourceDir> per architecture to build/native/mac-<arch>/<file>, beside the
 // staged sync addon, so electron-builder ships it with it and the loader finds it in development. Runs after
@@ -23,12 +23,9 @@ export interface SwiftAddon {
 	macos: string
 }
 
-const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const nativeDir = path.join(packageDir, "native")
 const sharedDir = path.join(nativeDir, "shared")
 const moduleMapDir = path.join(sharedDir, "NodeAPI")
-const ARCHS: NativeArch[] = ["x64", "arm64"]
-const TRIPLE_ARCH: Record<NativeArch, string> = { x64: "x86_64", arm64: "arm64" }
 
 function swiftFiles(dir: string): string[] {
 	return readdirSync(dir)
@@ -86,7 +83,7 @@ export function buildSwiftAddon(addon: SwiftAddon, options: { dev: boolean }): v
 				"swiftc",
 				"-emit-library",
 				"-target",
-				`${TRIPLE_ARCH[arch]}-apple-macos${addon.macos}`,
+				`${APPLE_ARCH[arch]}-apple-macos${addon.macos}`,
 				"-O",
 				"-whole-module-optimization",
 				"-swift-version",

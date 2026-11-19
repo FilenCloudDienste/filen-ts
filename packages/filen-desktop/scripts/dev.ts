@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createServer } from "node:net"
 import { createRequire } from "node:module"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { packageDir } from "./paths.ts"
 
 // Starts filen-web's Vite dev server on a free port, then Electron with the app's protocol proxying to it (serve.ts), so
 // the page hot-reloads and React reports unminified errors. Arguments go to Electron. `pnpm run dev:dist` serves the
@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url"
 //
 //   node scripts/dev.ts [electron args…]
 
-const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const webDir = path.join(packageDir, "../filen-web")
 const READY_TIMEOUT_MS = 60_000
 

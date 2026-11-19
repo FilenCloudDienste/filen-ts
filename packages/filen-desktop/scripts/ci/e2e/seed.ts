@@ -192,10 +192,9 @@ export async function seedSession(page: Page, client: Sdk.StringifiedClient, tim
 	return "seeded through session.set; the reloaded page resumed it"
 }
 
-// The 3.0.53 seed, on its sign-in screen once its signed-out setup has stored the anonymous config: the account written
-// as its login writes it, then a reload. Done when its setup took the account (it leaves the sign-in route only then);
-// returns the userId.
-export async function seedLegacy(page: Page, client: Sdk.StringifiedClient, timeoutMs: number): Promise<number> {
+// 3.0.53's anonymous config, once its signed-out setup stored it on the sign-in screen; fails unless it is the
+// signed-out one.
+export async function legacyAnonymous(page: Page, timeoutMs: number): Promise<LegacyAnonymous> {
 	await page.locator("input#email").waitFor({ state: "visible", timeout: timeoutMs })
 
 	const anonymous = await waitFor("the old app's signed-out config", timeoutMs, async () => {
@@ -218,6 +217,14 @@ export async function seedLegacy(page: Page, client: Sdk.StringifiedClient, time
 		fail("the old app's stored config is not the signed-out one")
 	}
 
+	return anonymous
+}
+
+// The 3.0.53 seed, on its sign-in screen once its signed-out setup has stored the anonymous config: the account written
+// as its login writes it, then a reload. Done when its setup took the account (it leaves the sign-in route only then);
+// returns the userId.
+export async function seedLegacy(page: Page, client: Sdk.StringifiedClient, timeoutMs: number): Promise<number> {
+	const anonymous = await legacyAnonymous(page, timeoutMs)
 	const seed = legacySeed(client, anonymous)
 
 	// Its login also clears the rest of localStorage and its IndexedDB caches, which a fresh install has nothing in.

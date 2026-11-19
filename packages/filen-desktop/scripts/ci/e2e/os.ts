@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
 import path from "node:path"
 import { fail } from "../support.ts"
 import type { Target } from "../targets.ts"
@@ -14,7 +14,7 @@ import {
 	sha256Through,
 	uninstallDeb
 } from "./linux.ts"
-import { MAC_CHOOSER_TIMEOUT_MS, macOs } from "./mac.ts"
+import { MAC_CHOOSER_TIMEOUT_MS, macOs, posixForceKill, posixLegacyDrive, posixRequestQuit } from "./mac.ts"
 import { windowsOs } from "./windows.ts"
 
 // What the deep chains need from the desktop they run on, behind one interface per OS (linux.ts, windows.ts): the
@@ -76,15 +76,7 @@ const linuxOs: DesktopOs = {
 	processStartMs: async pid => processStartMs(pid),
 	crashReport: coreReport,
 	screenDump,
-	async requestQuit(pids) {
-		for (const pid of pids) {
-			try {
-				process.kill(pid, "SIGTERM")
-			} catch {
-				// Already gone.
-			}
-		}
-	},
+	requestQuit: posixRequestQuit,
 	async uninstall(target) {
 		// An AppImage is one file, which a user deletes.
 		if (target.format === "AppImage") {
@@ -112,23 +104,9 @@ const linuxOs: DesktopOs = {
 	// An AppImage runs from where its runtime extracted or mounted it, not from the file's directory.
 	appProcesses: async target =>
 		target.format === "AppImage" ? appImageProcesses(target.executable) : processesUnder(`${path.dirname(target.executable)}/`),
-	async forceKill(pids) {
-		for (const pid of pids) {
-			try {
-				process.kill(pid, "SIGKILL")
-			} catch {
-				// Already gone.
-			}
-		}
-	},
+	forceKill: posixForceKill,
 	// An empty directory beside the chain's own, which 3.x mounts on and 4.x reaches by its real path.
-	legacyDrive(base) {
-		const dir = `${base}-mnt`
-
-		mkdirSync(dir, { recursive: true })
-
-		return { setting: dir, root: realpathSync(dir) }
-	}
+	legacyDrive: posixLegacyDrive
 }
 
 export function osFor(target: Target): DesktopOs {

@@ -1,7 +1,8 @@
 import path from "node:path"
 import { stringifyEnvelope } from "@filen/shared/session"
 import { describe, expect, it, vi } from "vitest"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import type { IpcEvent } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 import { registerTransfersIpc } from "../main/transfers/ipc.ts"
 import type { TransfersService } from "../main/transfers/service.ts"
 import { CHANNELS, TRANSFERS_CALLS, type TransfersCall, transfersChannel } from "../shared/channels.ts"
@@ -14,16 +15,7 @@ const PARENT = { uuid: ID, ref: { variant: "AnyNormalDir.Dir", value: stringifyE
 const ITEM = { kind: "file", ref: FILE_REF, name: "a.txt", size: 10 }
 
 function setup(senderUrl = APP) {
-	const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-	const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => void>()
-	const ipc: IpcMain = {
-		handle: (channel, listener) => {
-			handlers.set(channel, listener)
-		},
-		on: (channel, listener) => {
-			listeners.set(channel, listener)
-		}
-	}
+	const { ipc, handlers, listeners } = fakeIpc()
 	const ok = () => Promise.resolve({ ok: true, value: null })
 	const service = {
 		startDownload: vi.fn(ok),

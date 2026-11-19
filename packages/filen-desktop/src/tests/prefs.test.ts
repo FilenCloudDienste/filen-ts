@@ -1,27 +1,8 @@
 import { type } from "arktype"
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import type { AtomicFile } from "../main/atomicFile.ts"
 import { DEFAULT_PREFS, loadPrefs, parsePrefs, prefsPatchSchema } from "../main/prefs.ts"
-
-function memoryFile(initial: string | null): AtomicFile & { data: string | null } {
-	const file = {
-		data: initial,
-		read: () => Promise.resolve(file.data === null ? null : Buffer.from(file.data)),
-		write: (data: Buffer) => {
-			file.data = data.toString("utf8")
-
-			return Promise.resolve()
-		},
-		remove: () => {
-			file.data = null
-
-			return Promise.resolve()
-		}
-	}
-
-	return file
-}
+import { memoryFile } from "./fileFakes.ts"
 
 describe("parsePrefs", () => {
 	it("falls back to the defaults for a missing, unparsable or non-object file", () => {
@@ -112,21 +93,21 @@ describe("prefsPatchSchema", () => {
 
 describe("loadPrefs", () => {
 	it("serves the stored prefs and persists a set", async () => {
-		const file = memoryFile(JSON.stringify({ startMinimized: true }))
+		const file = memoryFile(Buffer.from(JSON.stringify({ startMinimized: true })))
 		const store = await loadPrefs(file, vi.fn())
 
 		expect(store.get().startMinimized).toBe(true)
 		await expect(store.set({ minimizeToTray: true })).resolves.toEqual({ ...DEFAULT_PREFS, startMinimized: true, minimizeToTray: true })
-		expect(JSON.parse(file.data ?? "")).toEqual(store.get())
+		expect(JSON.parse(file.text() ?? "")).toEqual(store.get())
 	})
 
 	it("setDownloadDirectory stores an absolute path", async () => {
-		const file = memoryFile(null)
+		const file = memoryFile()
 		const store = await loadPrefs(file, vi.fn())
 		const directory = path.resolve("downloads")
 
 		await expect(store.setDownloadDirectory(directory)).resolves.toEqual({ ...DEFAULT_PREFS, downloadDirectory: directory })
-		expect(JSON.parse(file.data ?? "")).toEqual(store.get())
+		expect(JSON.parse(file.text() ?? "")).toEqual(store.get())
 		await expect(store.setDownloadDirectory("relative")).rejects.toThrow("invalid download directory")
 		expect(store.get().downloadDirectory).toBe(directory)
 		await expect(store.setDownloadDirectory(null)).resolves.toEqual(DEFAULT_PREFS)
@@ -134,14 +115,14 @@ describe("loadPrefs", () => {
 
 	it("uses the defaults when the file cannot be read", async () => {
 		const warn = vi.fn()
-		const store = await loadPrefs({ ...memoryFile(null), read: () => Promise.reject(new Error("EACCES")) }, warn)
+		const store = await loadPrefs({ ...memoryFile(), read: () => Promise.reject(new Error("EACCES")) }, warn)
 
 		expect(store.get()).toEqual(DEFAULT_PREFS)
 		expect(warn).toHaveBeenCalledOnce()
 	})
 
 	it("adopts a file that failed its startup read once it reads, before the first set", async () => {
-		const file = memoryFile(JSON.stringify({ startMinimized: true }))
+		const file = memoryFile(Buffer.from(JSON.stringify({ startMinimized: true })))
 		const read = file.read
 		const setAside = vi.fn(() => Promise.resolve())
 		let failures = 1
@@ -153,12 +134,12 @@ describe("loadPrefs", () => {
 		expect(store.get()).toEqual(DEFAULT_PREFS)
 		await store.set({ minimizeToTray: true })
 
-		expect(JSON.parse(file.data ?? "")).toEqual({ ...DEFAULT_PREFS, startMinimized: true, minimizeToTray: true })
+		expect(JSON.parse(file.text() ?? "")).toEqual({ ...DEFAULT_PREFS, startMinimized: true, minimizeToTray: true })
 		expect(setAside).not.toHaveBeenCalled()
 	})
 
 	it("sets a file that stays unreadable aside before the first set, and goes on from the defaults", async () => {
-		const file = memoryFile(JSON.stringify({ startMinimized: true }))
+		const file = memoryFile(Buffer.from(JSON.stringify({ startMinimized: true })))
 		const setAside = vi.fn(() => Promise.resolve())
 		const store = await loadPrefs(
 			{ ...file, read: () => Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" })), setAside },
@@ -173,7 +154,7 @@ describe("loadPrefs", () => {
 	})
 
 	it("keeps the prefs unchanged when a write fails, and runs later writes", async () => {
-		const file = memoryFile(null)
+		const file = memoryFile()
 		const store = await loadPrefs({ ...file, write: () => Promise.reject(new Error("ENOSPC")) }, vi.fn())
 
 		await expect(store.set({ chatNotifications: false })).rejects.toThrow("ENOSPC")
@@ -181,12 +162,12 @@ describe("loadPrefs", () => {
 	})
 
 	it("applies concurrent sets in order", async () => {
-		const file = memoryFile(null)
+		const file = memoryFile()
 		const store = await loadPrefs(file, vi.fn())
 
 		await Promise.all([store.set({ minimizeToTray: true }), store.set({ startMinimized: true })])
 
 		expect(store.get()).toMatchObject({ minimizeToTray: true, startMinimized: true })
-		expect(JSON.parse(file.data ?? "")).toEqual(store.get())
+		expect(JSON.parse(file.text() ?? "")).toEqual(store.get())
 	})
 })

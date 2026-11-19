@@ -5,6 +5,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 import { isFeedPlatform } from "./feed.ts"
 import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
+import { APPEX_EXECUTABLE } from "./fileProviderAppex.ts"
 import { LEGACY_EXECUTABLE, LINUX_INSTALL_DIR, listsLegacyExecutableLink } from "./legacyExecutable.ts"
 import { nativeArchOf } from "./nativeArch.ts"
 import { MAC_TEAM } from "./signRclone.ts"
@@ -126,6 +127,32 @@ function authenticode(file: string): { status: string; subject: string } {
 	return { status: status.trim(), subject: subject.trim() }
 }
 
+// Checks that `file` is in `app` and built for `arch` and, with `authenticode`, that it carries the publisher's valid
+// Authenticode signature. False when it is missing.
+function checkBinary(app: string, file: string, arch: string, options: { authenticode: boolean }): boolean {
+	if (!existsSync(file)) {
+		failures.push(`${app}: ${file} is missing`)
+
+		return false
+	}
+
+	const found = nativeArchOf(file)
+
+	if (found !== arch) {
+		failures.push(`${file}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
+	}
+
+	if (options.authenticode) {
+		const { status, subject } = authenticode(file)
+
+		if (status !== "Valid" || publisher === undefined || !subject.includes(publisher.replace(/ \(.*$/, ""))) {
+			failures.push(`${file}: Authenticode status ${status}, signed by ${subject || "nobody"}`)
+		}
+	}
+
+	return true
+}
+
 const rcloneDigests: Partial<Record<string, string>> =
 	platform === "linux" && existsSync(path.join("build", "rclone", "manifest.json"))
 		? (JSON.parse(readFileSync(path.join("build", "rclone", "manifest.json"), "utf8")) as Partial<Record<string, string>>)
@@ -181,29 +208,13 @@ for (const arch of archs) {
 
 	const addon = path.join(resources, "native", "sdk-rs.node")
 
-	if (existsSync(addon)) {
-		const found = nativeArchOf(addon)
-
-		if (found !== arch) {
-			failures.push(`${addon}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
-		}
-
-		if (values.signed && platform === "mac") {
-			failures.push(...macSignatureProblems(addon))
-		}
-	} else {
-		failures.push(`${app}: ${addon} is missing`)
+	if (checkBinary(app, addon, arch, { authenticode: false }) && values.signed && platform === "mac") {
+		failures.push(...macSignatureProblems(addon))
 	}
 
 	const rclone = path.join(resources, "rclone", platform === "win" ? "rclone.exe" : "rclone")
 
-	if (existsSync(rclone)) {
-		const found = nativeArchOf(rclone)
-
-		if (found !== arch) {
-			failures.push(`${rclone}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
-		}
-
+	if (checkBinary(app, rclone, arch, { authenticode: values.signed && platform === "win" })) {
 		if (platform === "linux") {
 			const sha256 = createHash("sha256").update(readFileSync(rclone)).digest("hex")
 
@@ -217,36 +228,16 @@ for (const arch of archs) {
 		if (values.signed && platform === "mac") {
 			failures.push(...macSignatureProblems(rclone, path.join("build", "entitlements.rclone.plist")))
 		}
-
-		if (values.signed && platform === "win") {
-			const { status, subject } = authenticode(rclone)
-
-			if (status !== "Valid" || publisher === undefined || !subject.includes(publisher.replace(/ \(.*$/, ""))) {
-				failures.push(`${rclone}: Authenticode status ${status}, signed by ${subject || "nobody"}`)
-			}
-		}
-	} else {
-		failures.push(`${app}: ${rclone} is missing`)
 	}
 
 	if (platform === "mac") {
 		const fpAddon = path.join(resources, "native", "filen-fp.node")
 		const macAddon = path.join(resources, "native", "filen-mac.node")
 		const appex = path.join(app, "Contents", "PlugIns", APPEX_NAME)
-		const appexExecutable = path.join(appex, "Contents", "MacOS", "FilenFileProvider")
+		const appexExecutable = path.join(appex, "Contents", "MacOS", APPEX_EXECUTABLE)
 
 		for (const file of [fpAddon, macAddon, appexExecutable]) {
-			if (!existsSync(file)) {
-				failures.push(`${app}: ${file} is missing`)
-
-				continue
-			}
-
-			const found = nativeArchOf(file)
-
-			if (found !== arch) {
-				failures.push(`${file}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
-			}
+			checkBinary(app, file, arch, { authenticode: false })
 		}
 
 		if (values.signed) {
@@ -287,25 +278,7 @@ for (const arch of archs) {
 	}
 
 	if (platform === "win") {
-		const dragAddon = path.join(resources, "native", "filen-drag.node")
-
-		if (existsSync(dragAddon)) {
-			const found = nativeArchOf(dragAddon)
-
-			if (found !== arch) {
-				failures.push(`${dragAddon}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
-			}
-
-			if (values.signed) {
-				const { status, subject } = authenticode(dragAddon)
-
-				if (status !== "Valid" || publisher === undefined || !subject.includes(publisher.replace(/ \(.*$/, ""))) {
-					failures.push(`${dragAddon}: Authenticode status ${status}, signed by ${subject || "nobody"}`)
-				}
-			}
-		} else {
-			failures.push(`${app}: ${dragAddon} is missing`)
-		}
+		checkBinary(app, path.join(resources, "native", "filen-drag.node"), arch, { authenticode: values.signed })
 	}
 
 	if (platform === "win" && !existsSync(path.join(resources, "deps", "winfsp.msi"))) {

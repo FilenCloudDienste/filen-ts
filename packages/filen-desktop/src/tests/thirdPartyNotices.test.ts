@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { lockedCrates, workspacePatches } from "@filen/shared/tooling"
 import { CHANNELS } from "../shared/channels.ts"
 import { fileThirdPartyNotices, registerThirdPartyNoticesIpc, THIRD_PARTY_NOTICES_FILE } from "../main/thirdPartyNotices.ts"
-import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import { fakeIpc } from "./ipcFakes.ts"
 import {
 	bundledNpmPackages,
 	DRAG_ADDON_LOCK,
@@ -214,13 +214,7 @@ describe("third-party notices IPC", () => {
 	})
 
 	function register(read: () => Promise<string>) {
-		const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
-		const ipc: IpcMain = {
-			handle: (channel, listener) => {
-				handlers.set(channel, listener)
-			},
-			on: vi.fn()
-		}
+		const { ipc, handlers } = fakeIpc()
 
 		registerThirdPartyNoticesIpc(ipc, { read }, url => url?.startsWith("filen://app/") === true)
 

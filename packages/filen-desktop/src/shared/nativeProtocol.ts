@@ -62,7 +62,13 @@ export const relPathArgSchema = type("0 < string <= 4096").narrow(noNul)
 // An absolute local path main resolved itself.
 export const localPathSchema = type("0 < string <= 32767").narrow(noNul)
 
-const textSchema = type("string <= 4096")
+// The longest message or name the protocol carries; the host clips what it reports to it.
+export const TEXT_MAX = 4096
+
+const textSchema = type.string.atMostLength(TEXT_MAX)
+
+// The longest SDK error kind name a transfer error carries.
+export const ERROR_KIND_MAX = 64
 
 export const syncModeSchema = pinned<DesktopSyncMode>()(
 	type("'twoWay' | 'localToRemote' | 'remoteToLocal' | 'localBackup' | 'remoteBackup'")
@@ -450,6 +456,8 @@ const mountsErrorCodeSchema = pinned<DesktopMountsErrorCode>()(
 		"credentialsInvalid",
 		"credentialsWeak",
 		"acknowledgementRequired",
+		"driveUnmounted",
+		"daemonUnstable",
 		"unknown"
 	)
 )
@@ -592,6 +600,24 @@ export const MOUNTS_OPS = {
 
 export const transferIdSchema = type("string.uuid")
 
+// A download is staged as `<stem>.filendl` beside its target: ours under the transfer id, the SDK's own temp under the
+// file's uuid. The SDK picks its temp's suffix, so this is an external contract and not ours to rename.
+export const STAGING_EXT = ".filendl"
+
+// A uuid in any case: a staging name's stem.
+export const UUID_STEM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function stagingName(stem: string): string {
+	return `${stem}${STAGING_EXT}`
+}
+
+// A uuid-stem `.filendl` name, the suffix in any case.
+export function isStagingName(name: string): boolean {
+	const stem = name.length - STAGING_EXT.length
+
+	return stem > 0 && name.slice(stem).toLowerCase() === STAGING_EXT && UUID_STEM.test(name.slice(0, stem))
+}
+
 export const listingIdSchema = type("string.uuid")
 
 const transferIdsArgs = type({ ids: transferIdSchema.array().moreThanLength(0).atMostLength(TRANSFER_ITEMS_MAX), "+": "reject" })
@@ -641,7 +667,7 @@ export const transferErrorSchema = pinned<DesktopTransferError>()(
 			"storageFull",
 			"unknown"
 		),
-		"kind?": "string <= 64",
+		"kind?": type.string.atMostLength(ERROR_KIND_MAX),
 		"message?": textSchema,
 		"+": "reject"
 	})
@@ -820,7 +846,7 @@ export function opError(op: NativeOp): Type<DesktopSyncError> | Type<DesktopMoun
 
 const opSchema = type.enumerated(...(Object.keys(NATIVE_OPS) as NativeOp[]))
 
-const callIdSchema = countSchema
+export const callIdSchema = countSchema
 
 export interface NativeInit {
 	t: "init"

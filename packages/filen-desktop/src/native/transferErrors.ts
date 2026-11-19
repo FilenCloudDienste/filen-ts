@@ -1,5 +1,6 @@
 import type { DesktopTransferError, DesktopTransferErrorCode } from "@filen/shared/desktop"
 import { SdkShapeError } from "@filen/shared/sdkShapes"
+import { ERROR_KIND_MAX } from "../shared/nativeProtocol.ts"
 import { clip } from "./errors.ts"
 
 // The SDK surface classifyTransfer reads.
@@ -20,8 +21,6 @@ export class TransferCommitError extends Error {
 		this.code = code
 	}
 }
-
-const KIND_MAX = 64
 
 // Node's codes for a local step the host ran itself (stat, mkdir, link, rename).
 const NODE_CODES: Partial<Record<string, DesktopTransferErrorCode>> = {
@@ -67,7 +66,7 @@ function ioCode(message: string, platform: NodeJS.Platform): DesktopTransferErro
 function kindName(sdk: TransferErrorSdk, kind: number): string {
 	for (const [name, value] of Object.entries(sdk.ErrorKind)) {
 		if (value === kind) {
-			return name.slice(0, KIND_MAX)
+			return name.slice(0, ERROR_KIND_MAX)
 		}
 	}
 

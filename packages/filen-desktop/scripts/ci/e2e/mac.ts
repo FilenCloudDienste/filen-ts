@@ -149,6 +149,37 @@ export async function quarantineOf(target: Target): Promise<string | null> {
 	fail(`xattr: ${result.timedOut ? "timed out" : result.stderr.trim()}`)
 }
 
+// The quit (SIGTERM), the kill and the old drive's setting of macOS and Linux; os.ts takes them from here, as it imports
+// this module already.
+export async function posixRequestQuit(pids: readonly number[]): Promise<void> {
+	for (const pid of pids) {
+		try {
+			process.kill(pid, "SIGTERM")
+		} catch {
+			// Already gone.
+		}
+	}
+}
+
+export async function posixForceKill(pids: readonly number[]): Promise<void> {
+	for (const pid of pids) {
+		try {
+			process.kill(pid, "SIGKILL")
+		} catch {
+			// Already gone.
+		}
+	}
+}
+
+// An empty directory beside the chain's own, which 3.x mounts on and 4.x reaches by its real path.
+export function posixLegacyDrive(base: string): { setting: string; root: string } {
+	const dir = `${base}-mnt`
+
+	mkdirSync(dir, { recursive: true })
+
+	return { setting: dir, root: realpathSync(dir) }
+}
+
 export const macOs: DesktopOs = {
 	legacyDriveLive: false,
 	// Whether System Events answers this process at all, logged for the run (a refusal names itself later too).
@@ -258,15 +289,7 @@ export const macOs: DesktopOs = {
 		await runBounded("screencapture", ["-x", file], TOOL_TIMEOUT_MS)
 	},
 
-	async requestQuit(pids) {
-		for (const pid of pids) {
-			try {
-				process.kill(pid, "SIGTERM")
-			} catch {
-				// Already gone.
-			}
-		}
-	},
+	requestQuit: posixRequestQuit,
 
 	// What a user does: the app out of /Applications. macOS removes nothing else; what stays is the inventory's.
 	async uninstall(target) {
@@ -293,22 +316,7 @@ export const macOs: DesktopOs = {
 			.filter(line => line.includes(`${app}/`))
 	},
 
-	async forceKill(pids) {
-		for (const pid of pids) {
-			try {
-				process.kill(pid, "SIGKILL")
-			} catch {
-				// Already gone.
-			}
-		}
-	},
+	forceKill: posixForceKill,
 
-	// An empty directory beside the chain's own, as on Linux.
-	legacyDrive(base) {
-		const dir = `${base}-mnt`
-
-		mkdirSync(dir, { recursive: true })
-
-		return { setting: dir, root: realpathSync(dir) }
-	}
+	legacyDrive: posixLegacyDrive
 }
