@@ -17,7 +17,7 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Dirt, Touch } from "../app
 import { cloneModel, findShape, sameDigest } from "../changes"
 import { holdDiagramCopies } from "./smartart"
 import { heldChart, isHeldChart } from "./chart"
-import { namesLostImage, reinstateInsertedImage } from "./picture"
+import { namesLostImage, reinstateInsertedImage, reviveWrittenImage, writtenImagesBack } from "./picture"
 import { planDelete, sectionsAfterInsert, sectionsAfterMove, type JumpRewrite, type PartOf, type ReferenceFacts } from "../integrity"
 import type { DeckOp, ImportedSlide, NotesOp, OpOf, RawPart, SlideOp } from "../ops"
 import { applyNotes } from "./notes"
@@ -502,13 +502,18 @@ function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: S
 
 	// A cut's slides pasted back after the history let go of what they name: no save could write a slide naming an image
 	// or a chart version the registries let go of. The images the cut took along come back under their own ids.
-	for (const { entry, nodes } of read) {
-		const carried = entry.images === undefined ? undefined : new Set(entry.images.map(image => image.id))
+	// An image written to a part a later save left out comes back as that part where the restore holds it (pptx: the
+	// cut took the slide's media), else from the bytes the cut took.
+	const back = read.map(({ entry }) => writtenImagesBack(deck, entry.parts))
+
+	for (const [k, { entry, nodes }] of read.entries()) {
+		const carried = new Set([...(entry.images ?? []).map(image => image.id), ...(back[k] ?? [])])
 
 		if (namesLostImage(deck, nodes, carried)) return refused("notFound", "an image no longer held")
 		if (nodes.some(node => lostChart(deck, node.shapes))) return refused("stale", "a chart version no longer held")
 	}
 
+	for (const ids of back) for (const id of ids) reviveWrittenImage(deck, id)
 	for (const { entry } of read) for (const { id, image } of entry.images ?? []) reinstateInsertedImage(deck, id, image)
 
 	const restored: SlideRef[] = []

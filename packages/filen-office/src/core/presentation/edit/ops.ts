@@ -122,8 +122,8 @@ export type SlideOp =
 				// The nodes' typed state when deleted (the slide, then its notes): the edits on them, and the whole of a slide
 				// an op made (it has no parts).
 				readonly nodes?: readonly SlideNode[]
-				// A cut's slides pasted back: the inserted images (by registry id) they name that no save wrote, as the cut
-				// took them; the registry may have let go of them since.
+				// A cut's slides pasted back: the inserted images (by registry id) they name, as the cut took them; the
+				// registry, or a later save leaving its part out, may have let go of them since.
 				readonly images?: readonly CarriedImage[]
 				// On the first entry: the custom shows as they were, and the jumps the delete rewrote (edit/integrity.ts).
 				readonly customShows?: readonly CustomShow[]
@@ -269,6 +269,8 @@ export type ShapeOp =
 			readonly slide: SlideRef
 			readonly shapes: readonly PastedShape[]
 			readonly relationships?: readonly CarriedRelationship[]
+			// The inserted images (by registry id) the typed shapes name, as the copy took them (ODP).
+			readonly images?: readonly CarriedImage[]
 			readonly dx: number
 			readonly dy: number
 			readonly ids?: readonly number[]
@@ -401,7 +403,8 @@ export type TableOp =
 
 // An image prepared in the worker (decoded, size-checked, re-encoded when needed), held by the op until a save
 // gives it a part.
-// An inserted image a cut took along with its registry id (the id the slides' fills and held markup name).
+// An inserted image a clip took along with its registry id (the id the copy's fills and held markup name): held, or
+// written by a save (its part's bytes).
 export interface CarriedImage {
 	readonly id: number
 	readonly image: InsertedImage

@@ -8,10 +8,13 @@ import {
 	insertedDiagramParts
 } from "../../core/presentation/edit/apply/smartart"
 import {
+	dropWrittenImages,
 	holdsInsertedImages,
+	writtenImagesIn,
 	insertedImageWritten,
 	insertedImageWrittenFor,
-	pruneInsertedImages
+	pruneInsertedImages,
+	type StillNamed
 } from "../../core/presentation/edit/apply/picture"
 import { holdsChartVersions, isHeldChart, pruneChartVersions } from "../../core/presentation/edit/apply/chart"
 import { isRawPart, type DeckOp, type InsertedImage, type RawPart } from "../../core/presentation/edit/ops"
@@ -91,8 +94,18 @@ export function authoredEntries(deck: Deck, added: readonly PartChange[] | undef
 	return (added ?? []).map(change => change.name).filter(name => pattern.test(name) && !isRestoredMedia(deck, name))
 }
 
-// A committed save: the entries it added are the session's, those it left out are gone.
-export function commitAuthoredEntries(deck: Deck, added: readonly string[] | undefined, pruned: readonly string[] | undefined): void {
+// A committed save: the entries it added are the session's, those it left out are gone (with the aliases of the
+// inserted images written to them, but for those an edit made while the save was in flight names again).
+export function commitAuthoredEntries(
+	session: EngineSession,
+	added: readonly string[] | undefined,
+	pruned: readonly string[] | undefined
+): void {
+	const deck = session.deck
+	const aliases = writtenImagesIn(deck, pruned ?? [])
+
+	if (aliases.length > 0) dropWrittenImages(deck, aliases, stillNamed(session, saveHistoryOf(deck)?.steps))
+
 	if ((added === undefined || added.length === 0) && (pruned === undefined || pruned.length === 0)) return
 
 	let set = authored.get(deck)
@@ -379,6 +392,22 @@ function pruneHeld(session: EngineSession, history: DeckHistory | undefined): vo
 	if (history?.saving === true || (!holdsInsertedImages(deck) && !holdsChartVersions(deck))) return
 
 	const retained = history?.retained() ?? []
+	const reach = heldReach(session, history, retained)
+
+	pruneInsertedImages(deck, reach.images)
+	pruneChartVersions(
+		deck,
+		reach.charts,
+		[...(history?.steps() ?? []), ...retained].flatMap(step => [
+			step.op,
+			...(step.lead === undefined ? [] : [step.lead]),
+			...step.inverse.ops
+		])
+	)
+}
+
+// The registry ids and chart versions the deck and the history (and `retained`) name, held markup included.
+function heldReach(session: EngineSession, history: DeckHistory | undefined, retained: readonly HistoryStep[]): Reach {
 	const heldMarkup = heldMarkupOf(session)
 	const reach = reachOf(session, heldMarkup, history, retained)
 	const from = reach.markup.texts.length
@@ -393,20 +422,43 @@ function pruneHeld(session: EngineSession, history: DeckHistory | undefined): vo
 
 	for (const text of reach.markup.texts.slice(from))
 		for (const match of text.matchAll(INSERTED_NAMES)) reach.images.add(Number(match[1] ?? ""))
-
 	// Version names in held bytes (a chart frame's copy).
 	for (const text of reach.markup.texts) for (const match of text.matchAll(/chart:(\d+)/gu)) reach.charts.add(`chart:${match[1] ?? ""}`)
 
-	pruneInsertedImages(deck, reach.images)
-	pruneChartVersions(
-		deck,
-		reach.charts,
-		[...(history?.steps() ?? []), ...retained].flatMap(step => [
-			step.op,
-			...(step.lead === undefined ? [] : [step.lead]),
-			...step.inverse.ops
-		])
-	)
+	return reach
+}
+
+// What names the aliases a committed save left the parts of out (picture.ts dropWrittenImages): the deck and the
+// history as they are at the commit, the parts their held restores bring back, and the images their ops carry.
+function stillNamed(session: EngineSession, history: DeckHistory | undefined): StillNamed {
+	const back: string[] = []
+	const carried = new Map<number, InsertedImage>()
+	const retained = history?.retained() ?? []
+	const steps = [...(history?.steps() ?? []), ...retained]
+	const visitOp = (op: DeckOp): void => {
+		if (op.family === "batch") {
+			for (const each of op.ops) visitOp(each)
+
+			return
+		}
+
+		const images =
+			op.family === "shape" && op.kind === "paste"
+				? (op.images ?? [])
+				: op.family === "slide" && op.kind === "restore"
+					? op.slides.flatMap(slide => {
+							for (const part of slide.parts) back.push(part.name)
+
+							return slide.images ?? []
+						})
+					: []
+
+		for (const { id, image } of images) if (!carried.has(id)) carried.set(id, image)
+	}
+
+	for (const step of steps) for (const op of [step.op, ...(step.lead === undefined ? [] : [step.lead]), ...step.inverse.ops]) visitOp(op)
+
+	return { named: heldReach(session, history, retained).images, back, carried }
 }
 
 // The inserted images (registry ids) `values` name, by the prune's own search: fills, pending ids in held bytes, and in

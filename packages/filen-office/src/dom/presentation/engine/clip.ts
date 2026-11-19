@@ -9,7 +9,14 @@ import {
 	type ChartPartSource
 } from "../../../core/presentation/edit/apply/chart"
 import { diagramDrawingRelId, diagramRelationshipOwner } from "../../../core/presentation/edit/apply/smartart"
-import { isRawPart, type CarriedPart, type ImportedSlide, type PastedShape } from "../../../core/presentation/edit/ops"
+import {
+	isRawPart,
+	type CarriedImage,
+	type CarriedPart,
+	type ImportedSlide,
+	type PastedShape,
+	type RawPart
+} from "../../../core/presentation/edit/ops"
 import { notesBody } from "../../../core/presentation/notes"
 import { exportSlides } from "../../../core/pptx/write/splice"
 import { pptxSaveSource } from "./save"
@@ -20,7 +27,12 @@ import { G, partReader } from "../../../core/pptx/read/xml"
 import { DIAGRAM_CONTENT_TYPES, pendingImageIds, withDrawingReference } from "../../../core/smartart/edit"
 import { CHART_TYPE } from "../../../core/xlsx/charts/parts"
 import { insertedMediaId } from "../../../core/presentation/edit/apply/media"
-import { holdsInsertedImages, insertedImage, type PictureReading } from "../../../core/presentation/edit/apply/picture"
+import {
+	insertedImage,
+	insertedImageWritten,
+	namesInsertedImages,
+	type PictureReading
+} from "../../../core/presentation/edit/apply/picture"
 import type { SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
 import { cloneModel, findShape } from "../../../core/presentation/edit/changes"
@@ -56,6 +68,7 @@ import type { CallContext, ClipCapability } from "../engine"
 import type { ClipPart, ClipPartsResult, ClipRequest, ClipResult, ClipSlidesResult } from "../protocol"
 import { chartPartSource, sessionEdits, withClipReading } from "./edit"
 import { pptxParts } from "./open/pptx"
+import { odpParts } from "./open/odp"
 import { insertedImagesNamed } from "../prune"
 
 // Cut and Copy in the worker (core/presentation/edit/clip.ts holds the rest): the clip a copy of shapes or slides makes,
@@ -826,6 +839,42 @@ function pictureOf(node: SlideNode, shape: ShapeNode, reading: ClipReading): str
 	return read === undefined || isRefused(read) ? undefined : read.part
 }
 
+// The inserted images `values` name (a cut's slides, an ODP copy's typed shapes), with their bytes: those no save wrote
+// from the registry, those a save wrote from the part it gave them (`parts`' own bytes where the cut holds that part).
+// Once the history lets go of every step naming one, the registry lets go of it, or a later save leaves its part out:
+// a paste of the clip brings it back under its own id. A deck that never held an inserted image takes none along.
+async function carriedImages(context: CallContext, values: readonly unknown[], parts: readonly RawPart[] = []): Promise<CarriedImage[]> {
+	const deck = context.session.deck
+
+	if (!namesInsertedImages(deck)) return []
+
+	const opc = pptxParts(deck)?.opc ?? odpParts(deck)?.opc
+	const out: CarriedImage[] = []
+
+	for (const id of insertedImagesNamed(context.session, values)) {
+		const image = insertedImage(deck, id)
+
+		if (image !== undefined) {
+			out.push({ id, image })
+
+			continue
+		}
+
+		const written = insertedImageWritten(deck, id)
+
+		if (written === undefined) continue
+
+		const name = zip(written.part)
+		const held = parts.find(part => partKey(part.name) === partKey(name))?.bytes
+		const bytes = held ?? (opc?.has(name) === true ? await opc.read(name) : undefined)
+
+		if (bytes !== undefined)
+			out.push({ id, image: { bytes, contentType: written.contentType, width: written.width, height: written.height } })
+	}
+
+	return out
+}
+
 function shapeClip(context: CallContext, slide: SlideRef, ids: readonly number[]): Promise<ShapeClip | Refused> {
 	const deck = context.session.deck
 
@@ -850,6 +899,7 @@ function shapeClip(context: CallContext, slide: SlideRef, ids: readonly number[]
 
 		const shapes: PastedShape[] = []
 		let relationships: ClipRelationship[] = []
+		let images: CarriedImage[] = []
 
 		if (deck.format === "pptx") {
 			const parts = pptxParts(deck)
@@ -886,6 +936,9 @@ function shapeClip(context: CallContext, slide: SlideRef, ids: readonly number[]
 
 				shapes.push({ shape: cloneModel(shape), ...(raw === undefined ? {} : { raw: raw.slice() }) })
 			}
+
+			// A typed copy names its pictures by registry id (pptx markup carries its own bytes).
+			images = await carriedImages(context, shapes)
 		}
 
 		const lone = chosen.length === 1 ? chosen[0] : undefined
@@ -899,7 +952,8 @@ function shapeClip(context: CallContext, slide: SlideRef, ids: readonly number[]
 			boxes: chosen.map((shape): Xfrm | undefined => (shape.xfrm === undefined ? undefined : { ...shape.xfrm })),
 			relationships,
 			text: chosen.map(shape => shapeText(shape)),
-			...(picture === undefined ? {} : { picture })
+			...(picture === undefined ? {} : { picture }),
+			...(images.length === 0 ? {} : { images })
 		} satisfies ShapeClip
 	})
 }
@@ -939,15 +993,9 @@ function slideClip(context: CallContext, refs: readonly SlideRef[], cut: boolean
 
 			const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
 			const nodes = [cloneModel(node), ...(notes === undefined ? [] : [cloneModel(notes)])]
-			// The inserted images no save wrote that the slide names: the registry lets go of them once the history lets go
-			// of the cut's delete, and a paste brings them back (a deck that holds none takes none along).
-			const images = holdsInsertedImages(deck)
-				? insertedImagesNamed(context.session, [nodes, parts]).flatMap(id => {
-						const image = insertedImage(deck, id)
-
-						return image === undefined ? [] : [{ id, image }]
-					})
-				: []
+			// The inserted images the slide names: what the registry or a later save lets go of once the history lets go
+			// of the cut's delete, which a paste brings back.
+			const images = await carriedImages(context, [nodes, parts], parts)
 
 			held.push({ ref, parts, nodes, ...(images.length === 0 ? {} : { images }) })
 		}

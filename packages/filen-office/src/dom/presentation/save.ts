@@ -1123,7 +1123,7 @@ async function rebaseOnto(
 	// The entries the save added are the session's own from now on; those it left out are gone.
 	// The parts the save's emits let go of are the session's to leave out from now on (once nothing names them).
 	commitAuthoredEntries(
-		session.deck,
+		session,
 		[
 			...(pending.saved.authored ?? []),
 			...releasedDeckParts(session.deck).filter(name => !(pending.saved.pruned ?? []).includes(name))

@@ -47,6 +47,9 @@ export interface ShapeClip {
 	readonly text: readonly (readonly string[])[]
 	// The picture a lone copied picture shows (its part), for other apps.
 	readonly picture?: string
+	// An ODP copy: the inserted images (by registry id) its typed shapes name, with their bytes (the registry, or a
+	// later save, may let go of them before the paste).
+	readonly images?: readonly CarriedImage[]
 }
 
 export interface SlideClip {
@@ -186,6 +189,7 @@ export function pasteShapesOp(clip: ShapeClip, target: ShapePasteTarget): OpOf<"
 		slide: target.slide,
 		shapes: clip.shapes,
 		...(relationships.length === 0 ? {} : { relationships }),
+		...(clip.images === undefined || clip.images.length === 0 ? {} : { images: clip.images }),
 		dx,
 		dy
 	}

@@ -37,6 +37,9 @@ interface ImageRegistry {
 	readonly written: Map<number, WrittenImage>
 	// The images freed into an alias, by their own object (an op redone after the save names it again).
 	readonly writtenFrom: WeakMap<InsertedImage, number>
+	// Aliases whose part a later save left out, by registry id: a restore that brings that part back (a pptx cut's held
+	// parts) makes the alias good again.
+	readonly dropped: Map<number, WrittenImage>
 	next: number
 }
 
@@ -46,7 +49,7 @@ function registryOf(deck: Deck): ImageRegistry {
 	let registry = registries.get(deck)
 
 	if (registry === undefined) {
-		registry = { images: new Map(), ids: new WeakMap(), written: new Map(), writtenFrom: new WeakMap(), next: 1 }
+		registry = { images: new Map(), ids: new WeakMap(), written: new Map(), writtenFrom: new WeakMap(), dropped: new Map(), next: 1 }
 		registries.set(deck, registry)
 	}
 
@@ -63,7 +66,7 @@ export function registerInsertedImage(deck: Deck, image: InsertedImage, id: numb
 	const registry = registryOf(deck)
 	const written = registry.writtenFrom.get(image)
 
-	if (written !== undefined) return written
+	if (written !== undefined && registry.written.has(written)) return written
 
 	const held = registry.ids.get(image)
 
@@ -103,6 +106,7 @@ export function reinstateInsertedImage(deck: Deck, id: number, image: InsertedIm
 
 	registry.images.set(id, image)
 	registry.ids.set(image, id)
+	registry.dropped.delete(id)
 }
 
 // The deepest a lost image is looked for (a slide's nodes nest far less).
@@ -149,6 +153,13 @@ export function holdsInsertedImages(deck: Deck): boolean {
 	return (registries.get(deck)?.images.size ?? 0) > 0
 }
 
+// Whether the deck holds any inserted image, held or written by a save (what a clip may name).
+export function namesInsertedImages(deck: Deck): boolean {
+	const registry = registries.get(deck)
+
+	return registry !== undefined && (registry.images.size > 0 || registry.written.size > 0)
+}
+
 // An inserted image a committed save wrote, once its registry entry was freed: the part it lives in from then on
 // (pptx "/ppt/media/image3.png", ODP "Pictures/…"), and the facts the emitters took from its bytes. A fill (in the
 // model or an undo step) that still names "inserted:<id>" is that part.
@@ -163,6 +174,85 @@ export interface WrittenImage {
 
 export function insertedImageWritten(deck: Deck, id: number): WrittenImage | undefined {
 	return registries.get(deck)?.written.get(id)
+}
+
+// The aliases whose part is among `parts` (zip names a committed save left out), by registry id.
+export function writtenImagesIn(deck: Deck, parts: readonly string[]): number[] {
+	const registry = registries.get(deck)
+
+	if (registry === undefined || registry.written.size === 0 || parts.length === 0) return []
+
+	const gone = new Set(parts.map(partName))
+
+	return [...registry.written].filter(([, written]) => gone.has(partName(written.part))).map(([id]) => id)
+}
+
+// What names an alias at the commit of the save that left its part out (an edit made while that save was in flight
+// can name it again): the registry ids the deck or the history names, the part names a held restore brings back by
+// name (a pptx cut's media), and the bytes an op carries by registry id (a paste's, a cut's restore).
+export interface StillNamed {
+	readonly named: ReadonlySet<number>
+	readonly back: readonly string[]
+	readonly carried: ReadonlyMap<number, InsertedImage>
+}
+
+// A committed save left out the parts of the aliases `ids` (writtenImagesIn): those nothing names go (a fill naming
+// one later is refused up front, unless an op carries its bytes back). One named again meanwhile stays: as it is where
+// a held restore brings its part back, else held again from the bytes an op carries (the next save writes it anew),
+// else as it is.
+export function dropWrittenImages(deck: Deck, ids: readonly number[], still: StillNamed): void {
+	const registry = registries.get(deck)
+
+	if (registry === undefined || ids.length === 0) return
+
+	const back = new Set(still.back.map(partName))
+
+	for (const id of ids) {
+		const written = registry.written.get(id)
+
+		if (written === undefined) continue
+
+		if (!still.named.has(id)) {
+			registry.written.delete(id)
+			registry.dropped.set(id, written)
+
+			continue
+		}
+
+		const image = still.carried.get(id)
+
+		if (back.has(partName(written.part)) || image === undefined || registry.images.has(id)) continue
+
+		registry.written.delete(id)
+		registry.images.set(id, image)
+		registry.ids.set(image, id)
+	}
+}
+
+// The ids of dropped aliases whose part is among `parts` (a restore's held parts, which bring it back by name).
+export function writtenImagesBack(deck: Deck, parts: readonly { readonly name: string }[]): number[] {
+	const dropped = registries.get(deck)?.dropped
+
+	if (dropped === undefined || dropped.size === 0 || parts.length === 0) return []
+
+	const back = new Set(parts.map(part => partName(part.name)))
+
+	return [...dropped].filter(([, written]) => back.has(partName(written.part))).map(([id]) => id)
+}
+
+// A dropped alias good again: the restore that names it brought its part back.
+export function reviveWrittenImage(deck: Deck, id: number): void {
+	const registry = registries.get(deck)
+	const written = registry?.dropped.get(id)
+
+	if (registry === undefined || written === undefined || registry.images.has(id)) return
+
+	registry.dropped.delete(id)
+	registry.written.set(id, written)
+}
+
+function partName(name: string): string {
+	return (name.startsWith("/") ? name.slice(1) : name).toLowerCase()
 }
 
 // The part a committed save wrote an inserted image to, by the image itself (what a redo of its op names).

@@ -93,8 +93,10 @@ async function shown(file: ZipArchive, format: Format): Promise<string> {
 	return `ppt/media/${new RegExp(`Id="${embed}"[^>]*Target="\\.\\./media/([^"]+)"`, "u").exec(rels)?.[1] ?? ""}`
 }
 
-async function pictureDeck(format: Format): Promise<{ d: Drive; slide: SlideNode["ref"]; id: number }> {
-	const d = await driveSession(deckOf(format), format)
+type Tuning = Parameters<typeof driveSession>[3]
+
+async function pictureDeck(format: Format, tuning?: Tuning): Promise<{ d: Drive; slide: SlideNode["ref"]; id: number }> {
+	const d = await driveSession(deckOf(format), format, [], tuning)
 	const slide = d.session.deck.slides[0] as SlideNode["ref"]
 	const shape = {
 		id: 0,
@@ -829,16 +831,36 @@ function pictureShapes(d: Drive, slide: SlideNode["ref"]): ShapeNode[] {
 }
 
 describe("a copy of an unsaved picture", () => {
-	it("odp: is refused once the registry let go of its image, and the deck stays savable", async () => {
+	// The copy takes the image's bytes along: a paste brings it back once the registry let go of it.
+	async function letGo(): Promise<{ d: Drive; slide: SlideNode["ref"]; copy: ShapeClip }> {
 		const { d, slide, id } = await pictureDeck("odp")
 		const copy = await copied(d, slide, id)
 		const box = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(each => each.kind !== "pic") as ShapeNode
+		const inserted = pictureFillOf(pictureShapes(d, slide)[0] as ShapeNode)?.inserted ?? 0
 
 		expect((await d.undo()).ok).toBe(true)
 		// The first move lets go of the insert (the redo), and with it the image.
 		for (let at = 0; at < 2; at++) expect((await d.command(move(slide, box.id, 9000 + at))).ok).toBe(true)
 
-		expect((await d.command(pasted(copy, slide))).ok).toBe(false)
+		expect(insertedImage(d.session.deck, inserted)).toBeUndefined()
+
+		return { d, slide, copy }
+	}
+
+	it("odp: pastes it back from the bytes the copy took once the registry let go of its image", async () => {
+		const { d, slide, copy } = await letGo()
+
+		expect(copy.images).toHaveLength(1)
+		expect((await d.command(pasted(copy, slide))).ok).toBe(true)
+		expect(pictureShapes(d, slide)).toHaveLength(1)
+		expect(pictures(await saved(d, "odp"))).toHaveLength(1)
+	})
+
+	it("odp: refuses a copy carrying no bytes once the registry let go of its image, and the deck stays savable", async () => {
+		const { d, slide, copy } = await letGo()
+		const { images: _images, ...bare } = copy
+
+		expect((await d.command(pasted(bare, slide))).ok).toBe(false)
 		expect(pictureShapes(d, slide)).toHaveLength(0)
 		expect(pictures(await saved(d, "odp"))).toHaveLength(0)
 	})
@@ -946,9 +968,10 @@ function twoSlides(format: Format): Uint8Array {
 // Cuts the second slide (clip, then its delete) once `insert` put something on it, and lets the history go of both.
 async function cutAndTrimmed(
 	format: Format,
-	insert: (d: Drive, slide: SlideNode["ref"]) => Promise<void>
+	insert: (d: Drive, slide: SlideNode["ref"]) => Promise<void>,
+	tuning?: Tuning
 ): Promise<{ d: Drive; held: SlideClip }> {
-	const d = await driveSession(twoSlides(format), format)
+	const d = await driveSession(twoSlides(format), format, [], tuning)
 	const [first, second] = d.session.deck.slides as [SlideNode["ref"], SlideNode["ref"]]
 
 	await insert(d, second)
@@ -1188,4 +1211,180 @@ describe("a picture fill set after the registry let go of its image", () => {
 			expect(pictures(await saved(d, format))).toHaveLength(0)
 		})
 	}
+})
+
+// A picture a save wrote lives in the part the save gave it: once the history let go of every step naming it, a later
+// save leaves that part out. A slide cut or a shape copied before that takes the image's bytes along, so a paste
+// brings it back and the save after it writes it again.
+describe("a held clip naming a picture whose part a save left out", () => {
+	async function insertPicture(d: Drive, slide: SlideNode["ref"]): Promise<number> {
+		expect(
+			(
+				await d.command({
+					family: "picture",
+					kind: "insert",
+					slide,
+					shape: { id: 0, name: "Picture", hidden: false, kind: "pic", xfrm: BOX } as ShapeNode,
+					image: image(64, 32)
+				})
+			).ok
+		).toBe(true)
+
+		const picture = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(shape => shape.kind === "pic") as ShapeNode
+
+		return pictureFillOf(picture)?.inserted ?? 0
+	}
+
+	// maxSteps + 2 moves of the first slide's text box: the history lets go of every earlier step.
+	async function trim(d: Drive): Promise<void> {
+		const first = d.session.deck.slides[0] as SlideNode["ref"]
+		const box = (d.session.deck.nodes.get(first) as SlideNode).shapes.find(shape => shape.synthetic !== true && shape.kind !== "pic")
+
+		if (box === undefined) throw new Error("no box")
+
+		for (let at = 0; at < STEP_LIMIT + 2; at++) expect((await d.command(move(first, box.id, 7000 + at))).ok).toBe(true)
+	}
+
+	for (const format of ["pptx", "odp"] as const) {
+		it(`${format}: a slide cut after the save that wrote its picture pastes it back`, async () => {
+			const { d, held } = await cutAndTrimmed(format, async (drive, slide) => {
+				expect(await insertPicture(drive, slide)).toBeGreaterThan(0)
+				expect(pictures(await saved(drive, format))).toHaveLength(1)
+			})
+
+			// The save after the trim leaves the picture's part out.
+			expect(pictures(await saved(d, format))).toHaveLength(0)
+			expect(await pasteCut(d, held)).toBe(true)
+			expect(d.session.deck.slides).toHaveLength(2)
+
+			const file = await saved(d, format)
+
+			expect(pictures(file)).toHaveLength(1)
+			expect(d.session.deck.slides).toHaveLength(2)
+		})
+
+		it(`${format}: a cut pasted, saved, deleted and let go of again pastes back a second time`, async () => {
+			const { d, held } = await cutAndTrimmed(format, async (drive, slide) => {
+				expect(await insertPicture(drive, slide)).toBeGreaterThan(0)
+			})
+
+			expect(await pasteCut(d, held)).toBe(true)
+			expect(pictures(await saved(d, format))).toHaveLength(1)
+
+			const pasted = held.slides[0] as SlideNode["ref"]
+
+			expect((await d.command({ family: "slide", kind: "delete", slides: [pasted] })).ok).toBe(true)
+			await trim(d)
+			expect(pictures(await saved(d, format))).toHaveLength(0)
+			expect(await pasteCut(d, held)).toBe(true)
+			expect(pictures(await saved(d, format))).toHaveLength(1)
+			expect(d.session.deck.slides).toHaveLength(2)
+		})
+
+		it(`${format}: a picture copied after the save that wrote it, deleted and let go of, pastes back or is refused up front`, async () => {
+			const { d, slide, id } = await pictureDeck(format)
+
+			expect(pictures(await saved(d, format))).toHaveLength(1)
+
+			const copied = await shapeClip(d.context, { kind: "shapes", slide, shapes: [id] })
+
+			if (!copied.ok || copied.clip.kind !== "shapes") throw new Error("not copied")
+
+			expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [id] })).ok).toBe(true)
+			await trim(d)
+			expect(pictures(await saved(d, format))).toHaveLength(0)
+
+			const op = pasteShapesOp(copied.clip, { slide, boxes: [], sameDeck: true, format })
+
+			if (typeof op === "string") throw new Error(op)
+
+			// ODP pastes it from the bytes the copy took; pptx refuses it up front (its markup relates the part a save left
+			// out), and the deck stays savable.
+			if (format === "odp") {
+				expect((await d.command(op)).ok).toBe(true)
+				expect(pictures(await saved(d, format))).toHaveLength(1)
+			} else {
+				expect((await d.command(op)).ok).toBe(false)
+				expect((await d.save()).result.kind).toBe("unchanged")
+			}
+		})
+	}
+})
+
+// A paste between the emit and the commit of the save that leaves the picture's part out (the commit late: the paste's
+// turn waits for it only so long): the commit must not let go of the image the deck names again, so the saves after
+// it write it.
+describe("a held clip pasted while the save that leaves its picture's part out is in flight", () => {
+	const LATE: Tuning = { commitWaitMs: 20 }
+
+	async function insertPicture(d: Drive, slide: SlideNode["ref"]): Promise<void> {
+		expect(
+			(
+				await d.command({
+					family: "picture",
+					kind: "insert",
+					slide,
+					shape: { id: 0, name: "Picture", hidden: false, kind: "pic", xfrm: BOX } as ShapeNode,
+					image: image(64, 32)
+				})
+			).ok
+		).toBe(true)
+	}
+
+	// A save begun (its part left out), `paste` run, then committed; the saves after it write the picture.
+	async function pasteInFlight(d: Drive, format: Format, paste: () => Promise<boolean>): Promise<void> {
+		const begun = await d.begin()
+
+		expect(begun.result.kind).toBe("written")
+
+		if (begun.bytes === undefined) throw new Error("not saved")
+
+		expect(pictures(await ZipArchive.open(bytesSource(begun.bytes)))).toHaveLength(0)
+		// The paste's turn runs once the save stopped waiting for its commit, which comes after it.
+		expect(await paste()).toBe(true)
+		await begun.commit()
+		expect(pictures(await saved(d, format))).toHaveLength(1)
+
+		const first = d.session.deck.slides[0] as SlideNode["ref"]
+		const box = (d.session.deck.nodes.get(first) as SlideNode).shapes.find(shape => shape.synthetic !== true && shape.kind !== "pic")
+
+		if (box === undefined) throw new Error("no box")
+
+		expect((await d.command(move(first, box.id, 4321))).ok).toBe(true)
+		expect(pictures(await saved(d, format))).toHaveLength(1)
+	}
+
+	for (const format of ["pptx", "odp"] as const)
+		it(`${format}: a slide cut after the save that wrote its picture`, async () => {
+			const { d, held } = await cutAndTrimmed(
+				format,
+				async (drive, slide) => {
+					await insertPicture(drive, slide)
+					expect(pictures(await saved(drive, format))).toHaveLength(1)
+				},
+				LATE
+			)
+
+			await pasteInFlight(d, format, () => pasteCut(d, held))
+			expect(d.session.deck.slides).toHaveLength(2)
+		})
+
+	it("odp: a picture copied after the save that wrote it, then deleted", async () => {
+		const { d, slide, id } = await pictureDeck("odp", LATE)
+
+		expect(pictures(await saved(d, "odp"))).toHaveLength(1)
+
+		const copy = await copied(d, slide, id)
+
+		expect((await d.command({ family: "shape", kind: "delete", slide, shapes: [id] })).ok).toBe(true)
+
+		const box = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(shape => shape.synthetic !== true && shape.kind !== "pic")
+
+		if (box === undefined) throw new Error("no box")
+
+		for (let at = 0; at < STEP_LIMIT + 2; at++) expect((await d.command(move(slide, box.id, 7000 + at))).ok).toBe(true)
+
+		await pasteInFlight(d, "odp", async () => (await d.command(pasted(copy, slide))).ok)
+		expect(pictureShapes(d, slide)).toHaveLength(1)
+	})
 })

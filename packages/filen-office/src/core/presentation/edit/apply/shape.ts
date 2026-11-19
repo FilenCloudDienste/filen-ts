@@ -26,7 +26,7 @@ import { cloneModel, findShape, sameDigest } from "../changes"
 import { heldBytes, type CarriedRelationship, type DeckOp, type OpOf, type ShapeOp } from "../ops"
 import { xmlCarries } from "../xmlText"
 import { isRefused } from "../../refusal"
-import { namesLostImage } from "./picture"
+import { namesLostImage, reinstateInsertedImage } from "./picture"
 import { sameBytes } from "../../../docx/write/bytes"
 
 // The shape ops on the model, in place. Inverses follow ops.ts: typed values where the prior state was an edit
@@ -1065,7 +1065,12 @@ function paste(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "paste" 
 		copies.push(copy)
 	}
 
-	if (namesLostImage(deck, copies)) return refused("notFound", "an image no longer held")
+	// The images the copy took along come back under their own ids (the registry, or a later save, let go of them).
+	const carried = op.images === undefined ? undefined : new Set(op.images.map(image => image.id))
+
+	if (namesLostImage(deck, copies, carried)) return refused("notFound", "an image no longer held")
+
+	for (const { id, image } of op.images ?? []) reinstateInsertedImage(deck, id, image)
 
 	const used = idsOf(node.shapes)
 	let next = context.newShapeId(node.ref)
