@@ -165,6 +165,50 @@ describe("AssistantConfirmationCard", () => {
 		expect(within(card).getByText("Text").nextElementSibling?.textContent).toBe("socks")
 	})
 
+	it("states each change a note-flags card makes to its note, never the raw flags", () => {
+		renderCard({
+			id: "p4",
+			action: "note-flags",
+			targets: [{ handle: "n1", name: "Plan" }],
+			destination: null,
+			text: { pinned: "true", archived: "false" }
+		})
+
+		const card = screen.getByRole("group", { name: "Change a note" })
+
+		expect(within(card).getByRole("list", { name: "Items" }).textContent).toBe("Plan")
+		expect(
+			within(within(card).getByRole("list", { name: "Changes" }))
+				.getAllByRole("listitem")
+				.map(item => item.textContent)
+		).toEqual(["Pin", "Take out of the archive"])
+		expect(within(card).queryByText("true")).toBeNull()
+		expect(within(card).getByRole("button", { name: "Confirm" })).toBeDefined()
+		expect(within(card).getByRole("button", { name: "Cancel" })).toBeDefined()
+	})
+
+	it("names a playlist card's playlist and counts and lists every track", () => {
+		renderCard({
+			id: "p5",
+			action: "add-to-playlist",
+			targets: [
+				{ handle: "f1", name: "Bella Ciao.mp3" },
+				{ handle: "t2", name: "Volare.mp3" }
+			],
+			destination: "Road trip",
+			text: {}
+		})
+
+		const card = screen.getByRole("group", { name: "Add 2 tracks to a playlist" })
+
+		expect(
+			within(within(card).getByRole("list", { name: "Items" }))
+				.getAllByRole("listitem")
+				.map(item => item.textContent)
+		).toEqual(["Bella Ciao.mp3", "Volare.mp3"])
+		expect(within(card).getByText("Playlist").nextElementSibling?.textContent).toBe("Road trip")
+	})
+
 	it("labels a trash confirm as what it does", () => {
 		renderCard({ ...MOVE, action: "trash", destination: null })
 

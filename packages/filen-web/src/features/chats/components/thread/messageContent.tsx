@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import { cn, contactDisplayName, isEmojiOnly, parseFilenPublicLink, type MessageSegment } from "@filen/shared"
 import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
-import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
+import { emojiForShortcode, customEmojiImageForShortcode, parseShortcodeToken } from "@/features/chats/lib/emoji"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
 import { ExternalAnchor } from "@/features/chats/components/thread/externalAnchor"
 
@@ -115,8 +115,9 @@ export function MessageContent({ participants, segments }: { participants: reado
 						// Resolve `:shortcode:` to a standard unicode glyph first, then the custom (CDN-image) pack;
 						// emojiForShortcode itself already returns undefined for an id the custom pack owns, so a
 						// colliding shortcode falls through to the image below — a shortcode outside both stays
-						// literal.
-						const glyph = emojiForShortcode(segment.shortcode)
+						// literal. The old web app's `:name::skin-tone-N:` form carries a skin tone for a standard emoji.
+						const { shortcode, tone } = parseShortcodeToken(segment.raw)
+						const glyph = emojiForShortcode(shortcode, tone)
 
 						if (glyph !== undefined) {
 							return (
@@ -129,14 +130,14 @@ export function MessageContent({ participants, segments }: { participants: reado
 							)
 						}
 
-						const customImageUrl = customEmojiImageForShortcode(segment.shortcode)
+						const customImageUrl = customEmojiImageForShortcode(shortcode)
 
 						if (customImageUrl !== undefined) {
 							return (
 								<img
 									key={index}
 									src={customImageUrl}
-									alt={`:${segment.shortcode}:`}
+									alt={`:${shortcode}:`}
 									loading="lazy"
 									// The app's Cross-Origin-Embedder-Policy is require-corp: a plain cross-origin <img>
 									// (no-cors mode) needs a Cross-Origin-Resource-Policy response header the CDN does

@@ -193,7 +193,7 @@ describe("assistant session", () => {
 		])
 	})
 
-	it("refuses a consequential tool that has no adapter yet without asking", async () => {
+	it("never asks about a consequential call its check refused", async () => {
 		const model = new ScriptedModel({
 			route: "notes change",
 			steps: [call("list_notes", { query: "Plan" }), call("set_note_flags", { handle: "n1", archived: true }), "I can't do that yet."]

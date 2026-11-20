@@ -11,7 +11,7 @@ import {
 	type AssistantToolPreview,
 	type ToolExecutor
 } from "@/features/assistant/runtime/executor"
-import type { AssistantProposal, AssistantProposalAction } from "@/features/assistant/types"
+import { NOTE_FLAG_ARGS, type AssistantProposal, type AssistantProposalAction } from "@/features/assistant/types"
 import type { UserCalendar } from "@/features/assistant/tools/dates"
 import { AssistantToolError, unlessStopped } from "@/features/assistant/tools/format"
 
@@ -34,9 +34,18 @@ export function proposalAction({ tool, args }: { tool: string; args: Record<stri
 			return "create-directory"
 		case "create_note":
 			return "create-note"
+		case "set_note_flags":
+			return "note-flags"
+		case "add_tracks_to_playlist":
+			return "add-to-playlist"
 		default:
 			return null
 	}
+}
+
+// The flags a set_note_flags call changes, as the card lists them: the checked call carries only the changes.
+function noteFlagText(args: Record<string, unknown>): Record<string, string> {
+	return Object.fromEntries(NOTE_FLAG_ARGS.flatMap(flag => (typeof args[flag] === "boolean" ? [[flag, String(args[flag])]] : [])))
 }
 
 // A name on the card: other people choose items', chats' and contacts' names, so it is shown without the
@@ -76,7 +85,7 @@ export function buildProposal({
 				...(recipients === undefined ? {} : { recipients: recipients.map(cardName) })
 			})),
 		destination: destination === undefined ? null : cardName(destination.name),
-		text: preview.text
+		text: action === "note-flags" ? noteFlagText(args) : preview.text
 	}
 }
 

@@ -1,32 +1,61 @@
 import { describe, expect, it } from "vitest"
-import { CUSTOM_EMOJIS, EMOJI_SHORTCODES } from "@/features/chats/lib/emoji"
+import { CUSTOM_EMOJIS, emojiSet } from "@/features/chats/lib/emoji"
+import { withSkinTone } from "@/features/chats/lib/emojiData"
 import {
 	EMOJI_PICKER_CATEGORIES,
 	MAX_RECENT_EMOJIS,
-	emojiForInsertText,
+	emojiForRecentToken,
 	emojiInsertText,
+	emojiLabel,
 	emojiPickerCategoryItems,
+	emojiRecentToken,
 	insertEmojiAt,
 	mergeRecentEmojis,
 	moveGridIndex,
 	pushRecentEmoji,
-	searchEmojiPicker,
-	withoutRepeatedGlyphs
+	searchEmojiPicker
 } from "@/features/chats/lib/emojiPicker.logic"
 
 const STANDARD = EMOJI_PICKER_CATEGORIES.filter(category => category !== "recent" && category !== "custom")
 
+function standard(char: string) {
+	const emoji = emojiSet().byChar.get(char)
+
+	if (emoji === undefined) {
+		throw new Error(`${char} is not in the set`)
+	}
+
+	return emoji
+}
+
 describe("emoji picker categories", () => {
-	it("lists every standard glyph exactly once, by a name the table holds", () => {
+	it("offers Unicode's nine groups, flags included, between recently used and the custom pack", () => {
+		expect(EMOJI_PICKER_CATEGORIES).toEqual([
+			"recent",
+			"smileys",
+			"people",
+			"nature",
+			"food",
+			"travel",
+			"activities",
+			"objects",
+			"symbols",
+			"flags",
+			"custom"
+		])
+	})
+
+	it("lists the full set, each emoji once, flags and the newest emoji included", () => {
 		const listed = STANDARD.flatMap(category => emojiPickerCategoryItems(category))
 		const chars = listed.map(item => (item.kind === "standard" ? item.char : ""))
 
+		expect(listed.length).toBeGreaterThan(1900)
 		expect(new Set(chars).size).toBe(chars.length)
-		expect(new Set(chars)).toEqual(new Set(Object.values(EMOJI_SHORTCODES)))
-
-		for (const item of listed) {
-			expect(EMOJI_SHORTCODES[item.name]).toBeDefined()
-		}
+		expect(emojiPickerCategoryItems("flags").map(item => (item.kind === "standard" ? item.char : ""))).toEqual(
+			expect.arrayContaining(["🇩🇪", "🇯🇵", "🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}", "🏁"])
+		)
+		// Unicode 16 (2024): a platform font may lack it, it is still offered.
+		expect(chars).toContain("🫩")
 	})
 
 	it("offers the whole custom pack on the custom tab", () => {
@@ -35,20 +64,17 @@ describe("emoji picker categories", () => {
 
 	it("builds a tab once", () => {
 		expect(emojiPickerCategoryItems("smileys")).toBe(emojiPickerCategoryItems("smileys"))
+		expect(emojiPickerCategoryItems("custom")).toBe(emojiPickerCategoryItems("custom"))
 	})
 })
 
 describe("searchEmojiPicker", () => {
-	it("shows a glyph once although two names spell it", () => {
-		const thumbsup = { kind: "standard" as const, name: "thumbsup", char: "👍" }
-		const plusOne = { kind: "standard" as const, name: "+1", char: "👍" }
-		const custom = { kind: "custom" as const, name: "kekw", imageUrl: "https://cdn.filen.io/x.png" }
-
-		expect(withoutRepeatedGlyphs([thumbsup, custom, plusOne])).toEqual([thumbsup, custom])
-	})
-
-	it("finds by name", () => {
-		expect(searchEmojiPicker("rocket").some(item => item.kind === "standard" && item.char === "🚀")).toBe(true)
+	it("finds by name, by keyword and by shortcode", () => {
+		expect(searchEmojiPicker("rocket")[0]).toBe(standard("🚀"))
+		expect(searchEmojiPicker("cheerful")).toContain(standard("😀"))
+		expect(searchEmojiPicker("flag-de")[0]).toBe(standard("🇩🇪"))
+		expect(searchEmojiPicker("Germany")).toContain(standard("🇩🇪"))
+		expect(searchEmojiPicker("thumbs up")[0]).toBe(standard("👍"))
 	})
 
 	it("returns nothing for a blank query", () => {
@@ -56,25 +82,55 @@ describe("searchEmojiPicker", () => {
 	})
 })
 
-describe("insert tokens", () => {
-	it("round-trips a standard and a custom emoji", () => {
-		const standard = emojiPickerCategoryItems("smileys")[0]
+describe("skin tones", () => {
+	it("applies a tone to an emoji that takes one, on each part that takes it", () => {
+		expect(withSkinTone(standard("👋"), 3)).toBe("👋🏽")
+		expect(withSkinTone(standard("☝️"), 1)).toBe("☝🏻")
+		expect(withSkinTone(standard("🧑‍🤝‍🧑"), 5)).toBe("🧑🏿‍🤝‍🧑🏿")
+		expect(withSkinTone(standard("🏌️‍♀️"), 2)).toBe("🏌🏼‍♀️")
+	})
+
+	it("leaves an emoji that takes none, and the default tone, as they are", () => {
+		expect(withSkinTone(standard("🚀"), 4)).toBe("🚀")
+		expect(withSkinTone(standard("👋"), 0)).toBe("👋")
+	})
+})
+
+describe("insert and recent tokens", () => {
+	it("inserts a standard emoji in the chosen tone and a custom one as its shortcode", () => {
 		const custom = emojiPickerCategoryItems("custom")[0]
 
-		expect(standard).toBeDefined()
-		expect(custom).toBeDefined()
-
-		if (standard === undefined || custom === undefined) {
-			return
+		if (custom === undefined) {
+			throw new Error("no custom emoji")
 		}
 
-		expect(emojiInsertText(custom)).toBe(`:${custom.name}:`)
-		expect(emojiForInsertText(emojiInsertText(standard))).toEqual(standard)
-		expect(emojiForInsertText(emojiInsertText(custom))).toEqual(custom)
+		expect(emojiInsertText(standard("👋"), 4)).toBe("👋🏾")
+		expect(emojiInsertText(custom, 4)).toBe(`:${custom.name}:`)
+	})
+
+	it("remembers a standard emoji untoned and round-trips both kinds", () => {
+		const custom = emojiPickerCategoryItems("custom")[0]
+
+		if (custom === undefined) {
+			throw new Error("no custom emoji")
+		}
+
+		expect(emojiRecentToken(standard("👋"))).toBe("👋")
+		expect(emojiForRecentToken("👋")).toBe(standard("👋"))
+		expect(emojiForRecentToken(emojiRecentToken(custom))).toEqual(custom)
+	})
+
+	it("reads a token stored without its VS16 (the old curated table's form)", () => {
+		expect(emojiForRecentToken("❤")).toBe(standard("❤️"))
 	})
 
 	it("drops a token that names no emoji", () => {
-		expect(emojiForInsertText(":not-an-emoji-anywhere:")).toBeUndefined()
+		expect(emojiForRecentToken(":not-an-emoji-anywhere:")).toBeUndefined()
+		expect(emojiForRecentToken("x")).toBeUndefined()
+	})
+
+	it("labels a standard emoji by its CLDR name", () => {
+		expect(emojiLabel(standard("🇩🇪"))).toBe("flag: Germany")
 	})
 })
 

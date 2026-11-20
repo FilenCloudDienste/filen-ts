@@ -1,7 +1,14 @@
 import { formatBytesFixed } from "@filen/shared"
 import type { AssistantKey } from "@/lib/i18n"
 import type { TranscriptEntry, TranscriptStep } from "@/features/assistant/store/transcript"
-import type { AssistantModelState, AssistantStepFailure, AssistantStepRoute, AssistantTurnError } from "@/features/assistant/types"
+import {
+	NOTE_FLAG_ARGS,
+	type AssistantModelState,
+	type AssistantStepFailure,
+	type AssistantStepRoute,
+	type AssistantTurnError,
+	type NoteFlagArg
+} from "@/features/assistant/types"
 
 export type TranscriptRow = TranscriptEntry | { kind: "thinking"; id: "thinking" }
 
@@ -278,6 +285,24 @@ const TOOL_ACTIVITY_KEYS = new Map<string, AssistantKey>([
 
 export function toolActivityKey(tool: string): AssistantKey {
 	return TOOL_ACTIVITY_KEYS.get(tool) ?? "assistantToolGeneric"
+}
+
+// The words a note-flags card states each change in: [when set, when cleared].
+const NOTE_FLAG_CHANGE_KEYS: Readonly<Record<NoteFlagArg, readonly [AssistantKey, AssistantKey]>> = {
+	pinned: ["assistantProposalPin", "assistantProposalUnpin"],
+	favorite: ["assistantProposalNoteFavorite", "assistantProposalNoteUnfavorite"],
+	archived: ["assistantProposalArchive", "assistantProposalUnarchive"]
+}
+
+// A note-flags card's changes, in the order the call applies them (executorAdapter.ts stores each as "true" or
+// "false").
+export function noteFlagChangeKeys(text: Readonly<Record<string, string>>): AssistantKey[] {
+	return NOTE_FLAG_ARGS.flatMap(flag => {
+		const value = text[flag]
+		const [set, cleared] = NOTE_FLAG_CHANGE_KEYS[flag]
+
+		return value === "true" ? [set] : value === "false" ? [cleared] : []
+	})
 }
 
 export type ProposalTargetKind = "file" | "directory" | "note" | "chat" | "playlist" | "track"

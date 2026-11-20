@@ -470,6 +470,28 @@ export const assistant = {
 	assistantProposalCreateDirectory: "Create a directory",
 	/** Card title — create a note */
 	assistantProposalCreateNote: "Create a note",
+	/** Card title — pin, favorite or archive a note, or undo that */
+	assistantProposalNoteFlags: "Change a note",
+	/** Card title — add tracks to a playlist */
+	assistantProposalAddTracks_one: "Add {{count}} track to a playlist",
+	/** Card title — add tracks to a playlist */
+	assistantProposalAddTracks_other: "Add {{count}} tracks to a playlist",
+	/** Card field — the playlist tracks are added to */
+	assistantProposalPlaylist: "Playlist",
+	/** Card — accessible name of the list of changes to a note */
+	assistantProposalChanges: "Changes",
+	/** Note card change — the note gets pinned */
+	assistantProposalPin: "Pin",
+	/** Note card change — the note gets unpinned */
+	assistantProposalUnpin: "Unpin",
+	/** Note card change — the note is added to favorites */
+	assistantProposalNoteFavorite: "Add to favorites",
+	/** Note card change — the note is removed from favorites */
+	assistantProposalNoteUnfavorite: "Remove from favorites",
+	/** Note card change — the note moves to the archive */
+	assistantProposalArchive: "Move to the archive",
+	/** Note card change — the note leaves the archive */
+	assistantProposalUnarchive: "Take out of the archive",
 	/** Card field — the target directory of a move, copy or create */
 	assistantProposalDestination: "In",
 	/** Card field — the new name of a rename or create */

@@ -62,10 +62,17 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 	})
 
 	it("renders an unresolved skin-tone shortcode exactly as it was sent", () => {
-		const { container } = render(content(mockChat(), "nice :thumbsup::skin-tone-2:"))
+		const { container } = render(content(mockChat(), "nice :definitely_not_a_real_emoji::skin-tone-2:"))
 
-		expect(container.textContent).toBe("nice :thumbsup::skin-tone-2:")
+		expect(container.textContent).toBe("nice :definitely_not_a_real_emoji::skin-tone-2:")
 		expect(container.querySelector("img")).toBeNull()
+	})
+
+	// The old web app wrote emoji-mart's ids for every emoji it offered, with emoji-mart's skin tones 2 to 6.
+	it("renders the old web app's shortcodes from the full set, skin tone included", () => {
+		const { container } = render(content(mockChat(), "nice :thumbsup::skin-tone-2: :flag-de: :woman-kiss-man::skin-tone-6:"))
+
+		expect(container.textContent).toBe("nice 👍🏻 🇩🇪 👩🏿‍❤️‍💋‍👨🏿")
 	})
 
 	it("renders a standard unicode shortcode at jumbo text size when the message is emoji-only", () => {

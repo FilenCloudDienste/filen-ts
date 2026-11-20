@@ -1,6 +1,8 @@
 import { useId, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import {
+	ArchiveIcon,
+	ArchiveRestoreIcon,
 	ArrowRightLeftIcon,
 	CheckIcon,
 	CircleAlertIcon,
@@ -8,12 +10,18 @@ import {
 	FileIcon,
 	FolderClosedIcon,
 	FolderPlusIcon,
+	HeartIcon,
+	HeartOffIcon,
 	ListMusicIcon,
+	ListPlusIcon,
 	MessageSquareTextIcon,
 	MessagesSquareIcon,
 	MusicIcon,
+	NotebookIcon,
 	NotebookPenIcon,
 	PencilIcon,
+	PinIcon,
+	PinOffIcon,
 	StarIcon,
 	StarOffIcon,
 	Trash2Icon,
@@ -28,7 +36,7 @@ import { confirmAssistantProposal, rejectAssistantProposal } from "@/features/as
 import { isTrustedActivation } from "@/features/assistant/components/userActivation"
 import { useProposalTitle } from "@/features/assistant/components/useProposalTitle"
 import { assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
-import { proposalTargetKind, type ProposalTargetKind } from "@/features/assistant/components/assistant.logic"
+import { noteFlagChangeKeys, proposalTargetKind, type ProposalTargetKind } from "@/features/assistant/components/assistant.logic"
 import type { AssistantProposal, AssistantProposalAction } from "@/features/assistant/types"
 
 const ACTION_ICONS: Record<AssistantProposalAction, LucideIcon> = {
@@ -40,7 +48,9 @@ const ACTION_ICONS: Record<AssistantProposalAction, LucideIcon> = {
 	favorite: StarIcon,
 	unfavorite: StarOffIcon,
 	"create-directory": FolderPlusIcon,
-	"create-note": NotebookPenIcon
+	"create-note": NotebookPenIcon,
+	"note-flags": NotebookIcon,
+	"add-to-playlist": ListPlusIcon
 }
 
 const TARGET_ICONS: Record<ProposalTargetKind, LucideIcon> = {
@@ -51,6 +61,16 @@ const TARGET_ICONS: Record<ProposalTargetKind, LucideIcon> = {
 	playlist: ListMusicIcon,
 	track: MusicIcon
 }
+
+// The notes menu's icons for the same actions.
+const NOTE_FLAG_ICONS = new Map<AssistantKey, LucideIcon>([
+	["assistantProposalPin", PinIcon],
+	["assistantProposalUnpin", PinOffIcon],
+	["assistantProposalNoteFavorite", HeartIcon],
+	["assistantProposalNoteUnfavorite", HeartOffIcon],
+	["assistantProposalArchive", ArchiveIcon],
+	["assistantProposalUnarchive", ArchiveRestoreIcon]
+])
 
 const TEXT_LABEL_KEYS = new Map<string, AssistantKey>([
 	["name", "assistantProposalName"],
@@ -139,9 +159,39 @@ function DraftBody({ proposal }: { proposal: AssistantProposal }) {
 	)
 }
 
+// What a note-flags card changes on its note, one line per flag.
+function NoteFlagChanges({ text }: { text: AssistantProposal["text"] }) {
+	const { t } = useTranslation("assistant")
+
+	return (
+		<ul
+			aria-label={t("assistantProposalChanges")}
+			className="flex flex-col gap-1 text-xs leading-5"
+		>
+			{noteFlagChangeKeys(text).map(key => {
+				const ChangeIcon = NOTE_FLAG_ICONS.get(key) ?? NotebookIcon
+
+				return (
+					<li
+						key={key}
+						className="flex items-center gap-2 font-medium"
+					>
+						<ChangeIcon
+							aria-hidden="true"
+							className="size-3.5 shrink-0 text-muted-foreground"
+						/>
+						{t(key)}
+					</li>
+				)
+			})}
+		</ul>
+	)
+}
+
 function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 	const { t } = useTranslation("assistant")
-	const textEntries = Object.entries(proposal.text)
+	const flags = proposal.action === "note-flags"
+	const textEntries = flags ? [] : Object.entries(proposal.text)
 
 	return (
 		<>
@@ -168,11 +218,14 @@ function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 					})}
 				</ul>
 			) : null}
+			{flags ? <NoteFlagChanges text={proposal.text} /> : null}
 			{proposal.destination !== null || textEntries.length > 0 ? (
 				<dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs leading-5">
 					{proposal.destination !== null ? (
 						<>
-							<dt className="text-muted-foreground">{t("assistantProposalDestination")}</dt>
+							<dt className="text-muted-foreground">
+								{t(proposal.action === "add-to-playlist" ? "assistantProposalPlaylist" : "assistantProposalDestination")}
+							</dt>
 							<dd className="min-w-0 font-medium wrap-anywhere">{proposal.destination}</dd>
 						</>
 					) : null}

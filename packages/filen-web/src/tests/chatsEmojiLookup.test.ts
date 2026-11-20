@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { CUSTOM_EMOJIS, customEmojiImageForShortcode, emojiForShortcode, searchEmoji } from "@/features/chats/lib/emoji"
 
 // The full custom pack (CDN-sourced, shared with mobile via @filen/shared/emojis) legitimately collides
-// with a handful of ids in the curated standard-unicode table below — mobile has no textual
+// with a handful of standard shortcodes (emoji.ts's full Unicode set) — mobile has no textual
 // standard-shortcode lookup at all, so for any id its custom pack defines, the custom pack IS mobile's
 // answer. Matching that means: on a collision, the custom pack always wins (emoji.ts's emojiForShortcode
 // comment carries the full rationale). These ids are verified colliding members of the shipped pack.
@@ -27,6 +27,13 @@ describe("emoji shortcode resolution — mobile-parity precedence on standard/cu
 
 		expect(clapMatches).toHaveLength(1)
 		expect(clapMatches[0]?.kind).toBe("custom")
+	})
+
+	it("the `:` autocomplete and shortcode rendering cover the full Unicode set, not a curated subset", () => {
+		expect(searchEmoji("flag-d", 10).some(s => s.kind === "standard" && s.char === "🇩🇪")).toBe(true)
+		expect(emojiForShortcode("flag-de")).toBe("🇩🇪")
+		expect(emojiForShortcode("face_holding_back_tears")).toBe("🥹")
+		expect(emojiForShortcode("+1", 4)).toBe("👍🏾")
 	})
 
 	it("no two custom-pack entries share an id (the pack data itself, not the standard table)", () => {

@@ -100,7 +100,7 @@ const storedEntrySchema = type({ kind: "'user'", turn: "number", text: "string" 
 	.or({
 		kind: "'proposal'",
 		turn: "number",
-		action: "'draft-message' | 'move' | 'copy' | 'trash' | 'rename' | 'favorite' | 'unfavorite' | 'create-directory' | 'create-note'",
+		action: "'draft-message' | 'move' | 'copy' | 'trash' | 'rename' | 'favorite' | 'unfavorite' | 'create-directory' | 'create-note' | 'note-flags' | 'add-to-playlist'",
 		targets: type({ handle: "string", name: "string", "recipients?": "string[]" }).array(),
 		destination: "string | null",
 		text: "Record<string, string>",

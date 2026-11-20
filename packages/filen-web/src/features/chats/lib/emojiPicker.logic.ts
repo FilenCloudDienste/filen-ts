@@ -1,140 +1,63 @@
-import { CUSTOM_EMOJIS, EMOJI_SHORTCODES, searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
+import { CUSTOM_EMOJIS, emojiSet, searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
+import { STANDARD_EMOJI_CATEGORIES, withSkinTone, type StandardEmojiCategory } from "@/features/chats/lib/emojiData"
+import type { SkinTone } from "@/features/chats/lib/skinTone"
 
-// The composer's emoji picker draws on the same two sets the `:` autocomplete and the message renderer use (emoji.ts):
-// the curated standard shortcode table and Filen's custom pack, so whatever the picker offers also renders in a
-// message. Each standard glyph sits in its Unicode emoji group below, by its canonical name (aliases such as "+1"
-// or "collision" are left out, so no glyph shows twice). The names are kept as one string per group and only turned
-// into items the first time the picker asks for them, so the picker costs nothing until it opens.
-
-export type StandardEmojiCategory = "smileys" | "people" | "nature" | "food" | "travel" | "activities" | "objects" | "symbols"
+// The composer's emoji picker offers the full Unicode emoji set (emojiData.ts, split the first time the picker asks for
+// it) in Unicode's groups, flags included, and Filen's custom pack, the same sets the `:` autocomplete and the message
+// renderer use (emoji.ts).
 
 export type EmojiPickerCategory = "recent" | StandardEmojiCategory | "custom"
 
-// Tab order: recently used, the Unicode groups in their standard order, then Filen's own pack. The table holds a
-// single flag (checkered_flag), so it sits with the sports rather than alone in a Flags tab.
-export const EMOJI_PICKER_CATEGORIES: readonly EmojiPickerCategory[] = [
-	"recent",
-	"smileys",
-	"people",
-	"nature",
-	"food",
-	"travel",
-	"activities",
-	"objects",
-	"symbols",
-	"custom"
-]
+// Tab order: recently used, the Unicode groups in their standard order, then Filen's own pack.
+export const EMOJI_PICKER_CATEGORIES: readonly EmojiPickerCategory[] = ["recent", ...STANDARD_EMOJI_CATEGORIES, "custom"]
 
-const STANDARD_CATEGORY_NAMES: Readonly<Record<StandardEmojiCategory, string>> = {
-	smileys:
-		"smile smiley grin laughing joy rofl relaxed blush slightly_smiling_face upside_down_face wink heart_eyes kissing_heart " +
-		"kissing yum stuck_out_tongue stuck_out_tongue_winking_eye stuck_out_tongue_closed_eyes money_mouth_face hugs thinking " +
-		"zipper_mouth_face neutral_face expressionless no_mouth smirk unamused roll_eyes grimacing relieved pensive sleepy " +
-		"drooling_face sleeping mask face_with_thermometer nauseated_face sneezing_face dizzy_face sunglasses nerd_face confused " +
-		"worried slightly_frowning_face frowning_face open_mouth hushed astonished flushed frowning anguished fearful cold_sweat " +
-		"disappointed_relieved cry sob scream confounded persevere disappointed sweat weary tired_face triumph rage angry " +
-		"smiling_imp imp skull poop clown_face ghost alien robot partying_face exploding_head shushing_face star_struck " +
-		"saluting_face melting_face heart orange_heart yellow_heart green_heart blue_heart purple_heart black_heart broken_heart " +
-		"two_hearts sparkling_heart heartpulse cupid 100 boom dizzy sweat_drops",
-	people:
-		"wave raised_hand ok_hand v crossed_fingers point_up point_down point_left point_right thumbsup thumbsdown fist facepunch " +
-		"clap raised_hands heart_hands pray handshake writing_hand nail_care muscle brain eyes",
-	nature:
-		"dog cat mouse rabbit fox_face bear panda_face tiger lion cow pig frog monkey_face chicken penguin bird unicorn bee bug " +
-		"butterfly snail fish whale dolphin white_flower rose sunflower four_leaf_clover",
-	food: "apple banana pizza hamburger fries taco cookie doughnut ice_cream cake birthday chocolate_bar candy coffee tea beer beers wine_glass cocktail",
-	travel:
-		"earth_africa house office hospital school train bus taxi car bike construction anchor airplane rocket hourglass watch " +
-		"moon sunny star star2 dizzy_star cloud rainbow umbrella zap snowflake snowman fire droplet",
-	activities:
-		"jack_o_lantern christmas_tree sparkles balloon tada confetti_ball gift trophy medal soccer basketball football tennis " +
-		"8ball game_die dart art checkered_flag",
-	objects:
-		"eyeglasses crown tophat gem bell microphone musical_note notes headphones guitar iphone battery computer clapper camera " +
-		"tv mag flashlight bulb book books moneybag dollar credit_card email memo pushpin lock key hammer wrench gear shield link",
-	symbols:
-		"no_entry warning recycle white_check_mark heavy_check_mark x negative_squared_cross_mark heavy_plus_sign heavy_minus_sign " +
-		"heavy_multiplication_x heavy_dollar_sign bangbang question exclamation arrow_up arrow_right arrow_down arrow_left up ok new"
-}
+let customItems: readonly EmojiSuggestion[] | null = null
 
-const categoryItems = new Map<Exclude<EmojiPickerCategory, "recent">, readonly EmojiSuggestion[]>()
-
-// The items of one tab, built on first use and kept: the custom tab maps the pack's ~1100 prebuilt entries once.
+// The items of one tab: a Unicode group as the parsed set holds it; the custom tab maps the pack's ~1100 prebuilt
+// entries once and keeps them.
 export function emojiPickerCategoryItems(category: Exclude<EmojiPickerCategory, "recent">): readonly EmojiSuggestion[] {
-	const cached = categoryItems.get(category)
-
-	if (cached !== undefined) {
-		return cached
+	if (category !== "custom") {
+		return emojiSet().categories.get(category) ?? []
 	}
 
-	const items: EmojiSuggestion[] =
-		category === "custom"
-			? CUSTOM_EMOJIS.map(emoji => ({ kind: "custom", name: emoji.name, imageUrl: emoji.imageUrl }))
-			: STANDARD_CATEGORY_NAMES[category].split(" ").flatMap(name => {
-					const char = EMOJI_SHORTCODES[name]
+	customItems ??= CUSTOM_EMOJIS.map(emoji => ({ kind: "custom", name: emoji.name, imageUrl: emoji.imageUrl }))
 
-					return char === undefined ? [] : [{ kind: "standard" as const, name, char }]
-				})
-
-	categoryItems.set(category, items)
-
-	return items
+	return customItems
 }
 
 // Search results cap: past this many matches the query is too loose to scan by eye.
 export const EMOJI_PICKER_SEARCH_LIMIT = 240
 
-// Drops a standard item whose glyph an earlier item already shows (an alias: "+1" after "thumbsup").
-export function withoutRepeatedGlyphs(items: readonly EmojiSuggestion[]): EmojiSuggestion[] {
-	const seenChars = new Set<string>()
-
-	return items.filter(item => {
-		if (item.kind === "custom") {
-			return true
-		}
-
-		if (seenChars.has(item.char)) {
-			return false
-		}
-
-		seenChars.add(item.char)
-
-		return true
-	})
-}
-
-// The `:` autocomplete's ranking (prefix before substring, names and custom keywords), each glyph once.
+// The `:` autocomplete's search (emoji.ts): shortcodes, CLDR names and keywords, and the custom pack.
 export function searchEmojiPicker(query: string): EmojiSuggestion[] {
-	return withoutRepeatedGlyphs(searchEmoji(query.trim(), EMOJI_PICKER_SEARCH_LIMIT))
+	return searchEmoji(query.trim(), EMOJI_PICKER_SEARCH_LIMIT)
 }
 
-// What choosing an item inserts into the composer, and the token the recently used list remembers it by: a standard
-// emoji is its glyph, a custom one its `:name:` shortcode (it has no glyph; the message renderer resolves the
-// shortcode back to the image).
-export function emojiInsertText(item: EmojiSuggestion): string {
+// What choosing an item inserts into the composer: a standard emoji as its characters in the chosen skin tone (when it
+// takes one), a custom one as its `:name:` shortcode (it has no glyph; the message renderer resolves the shortcode back
+// to the image).
+export function emojiInsertText(item: EmojiSuggestion, tone: SkinTone): string {
+	return item.kind === "standard" ? withSkinTone(item, tone) : `:${item.name}:`
+}
+
+// The token the recently used list remembers an item by: a standard emoji's default-tone characters (so the list
+// follows a later skin tone change), a custom one's `:name:`.
+export function emojiRecentToken(item: EmojiSuggestion): string {
 	return item.kind === "standard" ? item.char : `:${item.name}:`
 }
 
-let tokenIndex: Map<string, EmojiSuggestion> | null = null
+let customTokens: Map<string, EmojiSuggestion> | null = null
 
-// A remembered token back to its item, or undefined once the token no longer names an emoji the picker offers
-// (a pack entry since removed, or stored data that is not ours).
-export function emojiForInsertText(token: string): EmojiSuggestion | undefined {
-	if (tokenIndex === null) {
-		tokenIndex = new Map()
-
-		for (const category of EMOJI_PICKER_CATEGORIES) {
-			if (category === "recent") {
-				continue
-			}
-
-			for (const item of emojiPickerCategoryItems(category)) {
-				tokenIndex.set(emojiInsertText(item), item)
-			}
-		}
+// A remembered token back to its item, or undefined once the token no longer names an emoji the picker offers (a pack
+// entry since removed, or stored data that is not ours). A standard token is matched with or without its VS16s.
+export function emojiForRecentToken(token: string): EmojiSuggestion | undefined {
+	if (!token.startsWith(":")) {
+		return emojiSet().byChar.get(token) ?? emojiSet().byChar.get(token.replace(/\ufe0f/g, ""))
 	}
 
-	return tokenIndex.get(token)
+	customTokens ??= new Map(emojiPickerCategoryItems("custom").map(item => [emojiRecentToken(item), item]))
+
+	return customTokens.get(token)
 }
 
 export const MAX_RECENT_EMOJIS = 32
@@ -200,7 +123,7 @@ export function emojiCellId(gridId: string, index: number): string {
 	return `${gridId}-cell-${String(index)}`
 }
 
-// Spoken and hover name: a custom emoji by its shortcode, a standard one by its name in words.
+// Spoken and hover name: a custom emoji by its shortcode, a standard one by its CLDR name.
 export function emojiLabel(item: EmojiSuggestion): string {
-	return item.kind === "custom" ? `:${item.name}:` : item.name.replaceAll("_", " ")
+	return item.kind === "custom" ? `:${item.name}:` : item.label
 }

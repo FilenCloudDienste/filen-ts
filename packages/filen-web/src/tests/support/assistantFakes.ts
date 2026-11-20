@@ -130,7 +130,8 @@ export interface Executed {
 	confirmed: boolean
 }
 
-// A tool executor over three items; read results come from `results`. set_note_flags has no adapter yet.
+// A tool executor over three items; read results come from `results`. Its check turns set_note_flags away, as
+// the app's turns away a call it refuses (an undecryptable or trashed note).
 export function fakeExecutor(results: Record<string, unknown> = {}): ToolExecutor & { executed: Executed[] } {
 	const executed: Executed[] = []
 

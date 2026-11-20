@@ -1827,20 +1827,6 @@ describe("check and preview", () => {
 		})
 	})
 
-	it("turns a write without an adapter away before the guard, as a valid call", async () => {
-		const tool = assistantToolByName("set_note_flags")
-
-		if (tool === undefined) {
-			throw new Error("no tool")
-		}
-
-		await expect(executor.check({ callId: "call", tool, args: { handle: "n1", pinned: true } })).resolves.toMatchObject({
-			ok: false,
-			invalid: false,
-			error: '"Pin, favorite or archive note" is not available yet; the user can do it in the app'
-		})
-	})
-
 	it("fills draft_chat_message's confirmation card with the chat and the text", async () => {
 		const tool = assistantToolByName("draft_chat_message")
 
@@ -1889,26 +1875,6 @@ describe("check and preview", () => {
 			ok: true,
 			args: { chat: "c1", text: "see https://evil.com" }
 		})
-	})
-})
-
-describe("writes without an adapter", () => {
-	it("never run, even confirmed", async () => {
-		const tool = assistantToolByName("add_tracks_to_playlist")
-
-		if (tool === undefined) {
-			throw new Error("no tool")
-		}
-
-		const result = await executor.execute({
-			callId: "call",
-			tool,
-			args: { playlist: "p1", handles: ["f1"] },
-			confirmed: true,
-			signal: new AbortController().signal
-		})
-
-		expect(result).toMatchObject({ ok: false, error: '"Add to playlist" is not available yet; the user can do it in the app' })
 	})
 })
 

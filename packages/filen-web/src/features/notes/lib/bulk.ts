@@ -7,6 +7,7 @@ import {
 	setNoteType,
 	archiveNote,
 	restoreNote,
+	unarchiveNote,
 	trashNote,
 	deleteNote,
 	leaveNote,
@@ -49,6 +50,10 @@ export function archiveNotes(notes: readonly Note[], onSettled?: BulkProgress): 
 
 export function restoreNotes(notes: readonly Note[], onSettled?: BulkProgress): Promise<BulkOutcome<Note>> {
 	return runBulkOutcomes(notes, note => restoreNote(note), onSettled)
+}
+
+export function unarchiveNotes(notes: readonly Note[], onSettled?: BulkProgress): Promise<BulkOutcome<Note>> {
+	return runBulkOutcomes(notes, note => unarchiveNote(note), onSettled)
 }
 
 // Bulk trash needs no nav-away guard (trashNote upserts the note in place, trash:true — it stays

@@ -92,7 +92,22 @@ export function endedStep<T extends AssistantStep>(step: T, status: "stopped" | 
 }
 
 export type AssistantProposalAction =
-	"draft-message" | "move" | "copy" | "trash" | "rename" | "favorite" | "unfavorite" | "create-directory" | "create-note"
+	| "draft-message"
+	| "move"
+	| "copy"
+	| "trash"
+	| "rename"
+	| "favorite"
+	| "unfavorite"
+	| "create-directory"
+	| "create-note"
+	| "note-flags"
+	| "add-to-playlist"
+
+// The flags a note-flags card changes, in the order the card lists them and the call applies them.
+export const NOTE_FLAG_ARGS = ["pinned", "favorite", "archived"] as const
+
+export type NoteFlagArg = (typeof NOTE_FLAG_ARGS)[number]
 
 // An item the call acts on, as the tool preview resolved it. The handle's leading letter picks the icon
 // (f file, d directory, n note, c chat, p playlist, t track); the handle itself is never shown.
@@ -106,8 +121,9 @@ export interface AssistantProposalTarget {
 
 // A consequential call waiting for the user. Nothing happens until its card is confirmed. `targets` are
 // every item it acts on (the card lists each name and counts them); `destination` is the target
-// directory's path for move/copy; `text` holds the free-text arguments verbatim, keyed by argument name
-// ("text" is a draft's message, "name" a new name).
+// directory's path for move/copy, or the playlist's name for add-to-playlist; `text` holds the free-text
+// arguments verbatim, keyed by argument name ("text" is a draft's message, "name" a new name), and a note-flags
+// card's changes as "pinned" / "favorite" / "archived" set to "true" or "false".
 export interface AssistantProposal {
 	id: string
 	action: AssistantProposalAction

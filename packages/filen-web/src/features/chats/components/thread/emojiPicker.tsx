@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import {
 	AppleIcon,
 	ClockIcon,
+	FlagIcon,
 	HandIcon,
 	LightbulbIcon,
 	PawPrintIcon,
@@ -18,15 +19,18 @@ import {
 import type { EmojiSuggestion } from "@/features/chats/lib/emoji"
 import {
 	EMOJI_PICKER_CATEGORIES,
-	emojiForInsertText,
+	emojiForRecentToken,
 	emojiInsertText,
 	emojiPickerCategoryItems,
+	emojiRecentToken,
 	searchEmojiPicker,
 	type EmojiPickerCategory
 } from "@/features/chats/lib/emojiPicker.logic"
+import { applySkinTone, SKIN_TONES, type SkinTone } from "@/features/chats/lib/skinTone"
 import { loadEmojiRecents, useEmojiRecents } from "@/features/chats/store/useEmojiRecents"
 import { EmojiPickerGrid } from "@/features/chats/components/thread/emojiPickerGrid"
 import type { ChatsKey } from "@/lib/i18n"
+import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -41,7 +45,22 @@ const CATEGORY_FACTS: Readonly<Record<EmojiPickerCategory, { labelKey: ChatsKey;
 	activities: { labelKey: "chatEmojiCategoryActivities", icon: TrophyIcon },
 	objects: { labelKey: "chatEmojiCategoryObjects", icon: LightbulbIcon },
 	symbols: { labelKey: "chatEmojiCategorySymbols", icon: ShapesIcon },
+	flags: { labelKey: "chatEmojiCategoryFlags", icon: FlagIcon },
 	custom: { labelKey: "chatEmojiCategoryCustom", icon: SparklesIcon }
+}
+
+const SKIN_TONE_LABELS: Readonly<Record<SkinTone, ChatsKey>> = {
+	0: "chatEmojiSkinToneDefault",
+	1: "chatEmojiSkinToneLight",
+	2: "chatEmojiSkinToneMediumLight",
+	3: "chatEmojiSkinToneMedium",
+	4: "chatEmojiSkinToneMediumDark",
+	5: "chatEmojiSkinToneDark"
+}
+
+// The raised hand (U+270B, which takes a tone on its one part) as each skin tone choice shows it.
+function skinToneSample(tone: SkinTone): string {
+	return applySkinTone("\u270b", "0", tone)
 }
 
 function categoryItems(category: EmojiPickerCategory, recents: readonly string[]): readonly EmojiSuggestion[] {
@@ -50,7 +69,7 @@ function categoryItems(category: EmojiPickerCategory, recents: readonly string[]
 	}
 
 	return recents.flatMap(token => {
-		const item = emojiForInsertText(token)
+		const item = emojiForRecentToken(token)
 
 		return item !== undefined ? [item] : []
 	})
@@ -63,10 +82,12 @@ function EmojiPickerBody({
 	onPick
 }: {
 	searchRef: RefObject<HTMLInputElement | null>
-	onPick: (item: EmojiSuggestion) => void
+	onPick: (item: EmojiSuggestion, tone: SkinTone) => void
 }) {
 	const { t } = useTranslation("chats")
 	const recents = useEmojiRecents(state => state.recents)
+	const skinTone = useEmojiRecents(state => state.skinTone)
+	const [toneChoicesOpen, setToneChoicesOpen] = useState(false)
 	// Opens on the recently used tab when there is one to show.
 	const [category, setCategory] = useState<EmojiPickerCategory>(() =>
 		useEmojiRecents.getState().recents.length > 0 ? "recent" : "smileys"
@@ -85,45 +106,89 @@ function EmojiPickerBody({
 
 	return (
 		<>
-			<div className="relative">
-				<SearchIcon
-					aria-hidden="true"
-					className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-				/>
-				<input
-					ref={searchRef}
-					type="search"
-					value={query}
-					onChange={event => {
-						setQuery(event.target.value)
-						setActiveIndex(0)
-					}}
-					onKeyDown={event => {
-						if (event.key === "ArrowDown" && items.length > 0) {
-							event.preventDefault()
-							gridRef.current?.focus()
+			<div className="flex items-center gap-1">
+				<div className="relative min-w-0 flex-1">
+					<SearchIcon
+						aria-hidden="true"
+						className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+					/>
+					<input
+						ref={searchRef}
+						type="search"
+						value={query}
+						onChange={event => {
+							setQuery(event.target.value)
+							setActiveIndex(0)
+						}}
+						onKeyDown={event => {
+							if (event.key === "ArrowDown" && items.length > 0) {
+								event.preventDefault()
+								gridRef.current?.focus()
 
-							return
-						}
-
-						if (event.key === "Enter") {
-							event.preventDefault()
-
-							const item = items[Math.min(activeIndex, items.length - 1)]
-
-							if (item !== undefined) {
-								onPick(item)
+								return
 							}
-						}
+
+							if (event.key === "Enter") {
+								event.preventDefault()
+
+								const item = items[Math.min(activeIndex, items.length - 1)]
+
+								if (item !== undefined) {
+									onPick(item, skinTone)
+								}
+							}
+						}}
+						aria-label={t("chatEmojiPickerSearch")}
+						aria-controls={gridId}
+						placeholder={t("chatEmojiPickerSearch")}
+						autoComplete="off"
+						spellCheck={false}
+						className="h-8 w-full rounded-xl bg-muted py-1 pr-2 pl-8 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+					/>
+				</div>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					className="shrink-0 rounded-full text-lg"
+					aria-label={t("chatEmojiSkinTone")}
+					title={t("chatEmojiSkinTone")}
+					aria-expanded={toneChoicesOpen}
+					onClick={() => {
+						setToneChoicesOpen(open => !open)
 					}}
-					aria-label={t("chatEmojiPickerSearch")}
-					aria-controls={gridId}
-					placeholder={t("chatEmojiPickerSearch")}
-					autoComplete="off"
-					spellCheck={false}
-					className="h-8 w-full rounded-xl bg-muted py-1 pr-2 pl-8 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-				/>
+				>
+					<span aria-hidden="true">{skinToneSample(skinTone)}</span>
+				</Button>
 			</div>
+			{toneChoicesOpen ? (
+				<div
+					role="radiogroup"
+					aria-label={t("chatEmojiSkinTone")}
+					className="flex justify-between rounded-xl bg-muted p-1"
+				>
+					{SKIN_TONES.map(tone => (
+						<button
+							key={tone}
+							type="button"
+							role="radio"
+							aria-checked={tone === skinTone}
+							aria-label={t(SKIN_TONE_LABELS[tone])}
+							title={t(SKIN_TONE_LABELS[tone])}
+							className={cn(
+								"flex size-8 items-center justify-center rounded-lg text-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+								tone === skinTone ? "bg-accent" : "hover:bg-accent/50"
+							)}
+							onClick={() => {
+								useEmojiRecents.getState().setSkinTone(tone)
+								setToneChoicesOpen(false)
+								searchRef.current?.focus()
+							}}
+						>
+							<span aria-hidden="true">{skinToneSample(tone)}</span>
+						</button>
+					))}
+				</div>
+			) : null}
 			<Tabs
 				value={category}
 				onValueChange={value => {
@@ -177,8 +242,11 @@ function EmojiPickerBody({
 							label={gridLabel}
 							items={items}
 							activeIndex={activeIndex}
+							skinTone={skinTone}
 							onActiveIndexChange={setActiveIndex}
-							onPick={onPick}
+							onPick={item => {
+								onPick(item, skinTone)
+							}}
 						/>
 					) : (
 						<p className="flex h-64 items-center justify-center px-4 text-center text-sm text-muted-foreground">
@@ -198,7 +266,7 @@ export function EmojiPicker({
 	onPick
 }: {
 	returnFocusRef: RefObject<HTMLTextAreaElement | null>
-	onPick: (item: EmojiSuggestion) => void
+	onPick: (text: string) => void
 }) {
 	const { t } = useTranslation("chats")
 	const [open, setOpen] = useState(false)
@@ -232,9 +300,9 @@ export function EmojiPicker({
 			>
 				<EmojiPickerBody
 					searchRef={searchRef}
-					onPick={item => {
-						useEmojiRecents.getState().record(emojiInsertText(item))
-						onPick(item)
+					onPick={(item, tone) => {
+						useEmojiRecents.getState().record(emojiRecentToken(item))
+						onPick(emojiInsertText(item, tone))
 						setOpen(false)
 					}}
 				/>

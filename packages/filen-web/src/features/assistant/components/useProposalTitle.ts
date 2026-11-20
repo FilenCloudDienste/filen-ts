@@ -27,6 +27,10 @@ export function useProposalTitle(): (proposal: AssistantProposal) => string {
 				return t("assistantProposalCreateDirectory")
 			case "create-note":
 				return t("assistantProposalCreateNote")
+			case "note-flags":
+				return t("assistantProposalNoteFlags")
+			case "add-to-playlist":
+				return t("assistantProposalAddTracks", { count })
 		}
 	}
 }

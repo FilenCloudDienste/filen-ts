@@ -7,6 +7,18 @@ import { chatTitle } from "@/features/chats/lib/sort"
 // The OS truncates long bodies anyway; this only bounds what the page hands it.
 export const NOTIFICATION_BODY_MAX_LENGTH = 200
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+
+// The first NOTIFICATION_BODY_MAX_LENGTH UTF-16 units, cut back to the start of the character there, so a body never
+// ends in a lone surrogate or a broken-off piece of an emoji sequence (a flag, a toned or ZWJ emoji).
+function truncateBody(text: string): string {
+	if (text.length <= NOTIFICATION_BODY_MAX_LENGTH) {
+		return text
+	}
+
+	return text.slice(0, graphemes.segment(text).containing(NOTIFICATION_BODY_MAX_LENGTH)?.index ?? NOTIFICATION_BODY_MAX_LENGTH)
+}
+
 export interface NotificationContent {
 	title: string
 	body: string
@@ -42,7 +54,7 @@ export function chatMessageNotification(
 	}
 
 	const sender = contactDisplayName({ email: message.senderEmail, nickName: message.senderNickName })
-	const text = (message.message ?? labels.undecryptableMessage).slice(0, NOTIFICATION_BODY_MAX_LENGTH)
+	const text = truncateBody(message.message ?? labels.undecryptableMessage)
 
 	if (chat === undefined) {
 		return { title: sender, body: text }

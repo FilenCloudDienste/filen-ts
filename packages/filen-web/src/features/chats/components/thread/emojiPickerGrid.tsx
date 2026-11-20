@@ -3,6 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { cn } from "@filen/shared"
 import type { EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { emojiCellId, emojiLabel, moveGridIndex } from "@/features/chats/lib/emojiPicker.logic"
+import { withSkinTone } from "@/features/chats/lib/emojiData"
+import type { SkinTone } from "@/features/chats/lib/skinTone"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 const EMOJI_GRID_COLUMNS = 8
@@ -21,6 +23,7 @@ export function EmojiPickerGrid({
 	label,
 	items,
 	activeIndex,
+	skinTone,
 	onActiveIndexChange,
 	onPick
 }: {
@@ -29,6 +32,7 @@ export function EmojiPickerGrid({
 	label: string
 	items: readonly EmojiSuggestion[]
 	activeIndex: number
+	skinTone: SkinTone
 	onActiveIndexChange: (index: number) => void
 	onPick: (item: EmojiSuggestion) => void
 }) {
@@ -111,7 +115,7 @@ export function EmojiPickerGrid({
 
 							return (
 								<div
-									key={`${item.kind}-${item.name}`}
+									key={item.kind === "standard" ? item.char : `custom-${item.name}`}
 									id={emojiCellId(gridId, index)}
 									role="gridcell"
 									aria-selected={index === active}
@@ -145,7 +149,7 @@ export function EmojiPickerGrid({
 											aria-hidden="true"
 											className="text-2xl leading-none"
 										>
-											{item.char}
+											{withSkinTone(item, skinTone)}
 										</span>
 									)}
 								</div>

@@ -1,13 +1,11 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { CheckIcon } from "lucide-react"
-import { addTracksToPlaylistAction } from "@/features/audio/lib/playlists"
+import { addTracksWithToast } from "@/features/audio/lib/addTracks"
 import { isAudioItem } from "@/features/audio/lib/handoff"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import type { Playlist } from "@filen/shared"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn, driveItemName } from "@filen/shared"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ItemIcon, DirectoryGlyph } from "@/features/drive/components/itemIcon"
@@ -122,24 +120,13 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 
 		setPending(true)
 
-		// No finally: the React Compiler cannot lower one, and would skip this whole component.
-		let added: number
-
-		try {
-			added = await addTracksToPlaylistAction(playlist, [...selected.values()])
-		} catch (error) {
-			setPending(false)
-			toast.error(errorLabel(error))
-			return
-		}
+		const outcome = await addTracksWithToast(playlist, [...selected.values()])
 
 		setPending(false)
 
-		if (added > 0) {
-			toast.success(t("tracksAddedToast", { count: added }))
+		if (outcome.status === "success") {
+			onClose()
 		}
-
-		onClose()
 	}
 
 	// Defs in features/audio/lib/playlistKeymap.ts, scoped to this dialog. Select all takes every track listed here

@@ -64,6 +64,7 @@ import {
 } from "@/features/assistant/tools/chats"
 import { audioControlTool, listPlaylistsTool, openPlaylistTool, playTool } from "@/features/assistant/tools/audio"
 import {
+	addTracksToPlaylistTool,
 	copyItemsTool,
 	createDirectoryTool,
 	createNoteTool,
@@ -71,7 +72,9 @@ import {
 	moveItemsTool,
 	renameItemTool,
 	setFavoriteTool,
+	setNoteFlagsTool,
 	trashItemsTool,
+	WRITE_ARGS,
 	WRITE_PRECHECKS
 } from "@/features/assistant/tools/writes"
 
@@ -225,6 +228,7 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	read_note: readNoteTool,
 	open_note: openNoteTool,
 	create_note: createNoteTool,
+	set_note_flags: setNoteFlagsTool,
 	list_chats: listChatsTool,
 	read_chat: readChatTool,
 	open_chat: openChatTool,
@@ -234,6 +238,7 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	open_playlist: openPlaylistTool,
 	play: playTool,
 	audio_control: audioControlTool,
+	add_tracks_to_playlist: addTracksToPlaylistTool,
 	get_transfers: getTransfersTool,
 	open_route: openRouteTool
 }
@@ -435,8 +440,9 @@ export function createAssistantToolExecutor(): ToolExecutor {
 			}
 
 			try {
-				const resolved = (await resolveArgs(tool, args, scope)).args
-				const problem = await PRECHECKS[tool.name as AssistantToolName]?.(scope, resolved)
+				const full = (await resolveArgs(tool, args, scope)).args
+				const resolved = (await WRITE_ARGS[tool.name]?.(scope, full)) ?? full
+				const problem = await PRECHECKS[tool.name]?.(scope, resolved)
 
 				return problem === undefined || problem === null ? { ok: true, args: resolved } : failureOf(new AssistantToolError(problem))
 			} catch (e) {

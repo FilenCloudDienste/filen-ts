@@ -219,6 +219,16 @@ export async function restoreNote(note: Note): Promise<ActionOutcome<Note>> {
 	return outcome
 }
 
+// Out of the archive only. restoreNote also brings a note back from the trash, so a caller that may only
+// unarchive (the assistant) goes through this, which leaves a trashed note where it is.
+export async function unarchiveNote(note: Note): Promise<ActionOutcome<Note>> {
+	if (!note.archive || note.trash) {
+		return { status: "success", item: note }
+	}
+
+	return restoreNote(note)
+}
+
 export async function trashNote(note: Note): Promise<ActionOutcome<Note>> {
 	if (note.trash) {
 		return { status: "success", item: note }

@@ -87,7 +87,7 @@ export function ComposerSuggestions({
 					})
 				: list.items.map((suggestion, index) => (
 						<div
-							key={`${suggestion.kind}-${suggestion.name}`}
+							key={suggestion.kind === "standard" ? suggestion.char : `custom-${suggestion.name}`}
 							id={suggestionOptionId(listboxId, index)}
 							role="option"
 							aria-selected={index === activeIndex}

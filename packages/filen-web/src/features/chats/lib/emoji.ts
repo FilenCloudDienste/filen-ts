@@ -1,288 +1,12 @@
-// Standard-unicode emoji shortcode table + lookup, PLUS Filen's full custom (non-unicode) emoji pack —
-// see the "Custom emoji pack" section below for how the two are sourced and reconciled.
-//
-// The web completes / renders standard shortcodes against a curated STANDARD-unicode shortcode table (a
-// subset of the gemoji/emoji-mart short-name convention): `:name:` completes to and renders as the native
-// unicode glyph, self-contained and asset-free. An unknown shortcode (neither this table nor the custom
-// pack below) stays literal `:shortcode:` text.
+// Emoji lookup for chats: the full Unicode emoji set (emojiData.ts, parsed on first use) and Filen's custom
+// (non-unicode, image-backed) pack. A standard emoji is inserted into messages as its unicode characters; a custom one
+// as its `:name:` shortcode, which the message renderer resolves back to the image. Standard `:shortcode:` text (the
+// old web app wrote it for every emoji it offered, as emoji-mart's iamcal ids, optionally with `:skin-tone-N:`) renders
+// as the glyph; an unknown shortcode stays literal text.
 
 import { CUSTOM_EMOJI_PACK } from "@filen/shared/emojis"
-
-// shortcode (without the surrounding colons) → unicode glyph. Curated common set; extend as needed.
-export const EMOJI_SHORTCODES: Readonly<Record<string, string>> = {
-	smile: "😄",
-	smiley: "😃",
-	grin: "😁",
-	laughing: "😆",
-	joy: "😂",
-	rofl: "🤣",
-	relaxed: "☺️",
-	blush: "😊",
-	slightly_smiling_face: "🙂",
-	upside_down_face: "🙃",
-	wink: "😉",
-	heart_eyes: "😍",
-	kissing_heart: "😘",
-	kissing: "😗",
-	yum: "😋",
-	stuck_out_tongue: "😛",
-	stuck_out_tongue_winking_eye: "😜",
-	stuck_out_tongue_closed_eyes: "😝",
-	money_mouth_face: "🤑",
-	hugs: "🤗",
-	thinking: "🤔",
-	zipper_mouth_face: "🤐",
-	neutral_face: "😐",
-	expressionless: "😑",
-	no_mouth: "😶",
-	smirk: "😏",
-	unamused: "😒",
-	roll_eyes: "🙄",
-	grimacing: "😬",
-	relieved: "😌",
-	pensive: "😔",
-	sleepy: "😪",
-	drooling_face: "🤤",
-	sleeping: "😴",
-	mask: "😷",
-	face_with_thermometer: "🤒",
-	nauseated_face: "🤢",
-	sneezing_face: "🤧",
-	dizzy_face: "😵",
-	sunglasses: "😎",
-	nerd_face: "🤓",
-	confused: "😕",
-	worried: "😟",
-	slightly_frowning_face: "🙁",
-	frowning_face: "☹️",
-	open_mouth: "😮",
-	hushed: "😯",
-	astonished: "😲",
-	flushed: "😳",
-	frowning: "😦",
-	anguished: "😧",
-	fearful: "😨",
-	cold_sweat: "😰",
-	disappointed_relieved: "😥",
-	cry: "😢",
-	sob: "😭",
-	scream: "😱",
-	confounded: "😖",
-	persevere: "😣",
-	disappointed: "😞",
-	sweat: "😓",
-	weary: "😩",
-	tired_face: "😫",
-	triumph: "😤",
-	rage: "😡",
-	angry: "😠",
-	smiling_imp: "😈",
-	imp: "👿",
-	skull: "💀",
-	poop: "💩",
-	clown_face: "🤡",
-	ghost: "👻",
-	alien: "👽",
-	robot: "🤖",
-	wave: "👋",
-	raised_hand: "✋",
-	ok_hand: "👌",
-	v: "✌️",
-	crossed_fingers: "🤞",
-	point_up: "☝️",
-	point_down: "👇",
-	point_left: "👈",
-	point_right: "👉",
-	thumbsup: "👍",
-	"+1": "👍",
-	thumbsdown: "👎",
-	"-1": "👎",
-	fist: "✊",
-	facepunch: "👊",
-	clap: "👏",
-	raised_hands: "🙌",
-	pray: "🙏",
-	handshake: "🤝",
-	muscle: "💪",
-	writing_hand: "✍️",
-	nail_care: "💅",
-	eyes: "👀",
-	brain: "🧠",
-	heart: "❤️",
-	orange_heart: "🧡",
-	yellow_heart: "💛",
-	green_heart: "💚",
-	blue_heart: "💙",
-	purple_heart: "💜",
-	black_heart: "🖤",
-	broken_heart: "💔",
-	two_hearts: "💕",
-	sparkling_heart: "💖",
-	heartpulse: "💗",
-	cupid: "💘",
-	fire: "🔥",
-	star: "⭐",
-	star2: "🌟",
-	sparkles: "✨",
-	zap: "⚡",
-	boom: "💥",
-	collision: "💥",
-	dizzy: "💫",
-	sweat_drops: "💦",
-	droplet: "💧",
-	tada: "🎉",
-	confetti_ball: "🎊",
-	balloon: "🎈",
-	gift: "🎁",
-	trophy: "🏆",
-	medal: "🏅",
-	rocket: "🚀",
-	airplane: "✈️",
-	sunny: "☀️",
-	cloud: "☁️",
-	rainbow: "🌈",
-	snowflake: "❄️",
-	snowman: "⛄",
-	moon: "🌙",
-	earth_africa: "🌍",
-	dog: "🐶",
-	cat: "🐱",
-	mouse: "🐭",
-	rabbit: "🐰",
-	fox_face: "🦊",
-	bear: "🐻",
-	panda_face: "🐼",
-	tiger: "🐯",
-	lion: "🦁",
-	cow: "🐮",
-	pig: "🐷",
-	frog: "🐸",
-	monkey_face: "🐵",
-	chicken: "🐔",
-	penguin: "🐧",
-	bird: "🐦",
-	unicorn: "🦄",
-	bee: "🐝",
-	bug: "🐛",
-	butterfly: "🦋",
-	snail: "🐌",
-	fish: "🐟",
-	whale: "🐳",
-	dolphin: "🐬",
-	apple: "🍎",
-	banana: "🍌",
-	pizza: "🍕",
-	hamburger: "🍔",
-	fries: "🍟",
-	taco: "🌮",
-	coffee: "☕",
-	tea: "🍵",
-	beer: "🍺",
-	beers: "🍻",
-	wine_glass: "🍷",
-	cocktail: "🍸",
-	cake: "🍰",
-	birthday: "🎂",
-	cookie: "🍪",
-	chocolate_bar: "🍫",
-	candy: "🍬",
-	doughnut: "🍩",
-	ice_cream: "🍨",
-	checkered_flag: "🏁",
-	soccer: "⚽",
-	basketball: "🏀",
-	football: "🏈",
-	tennis: "🎾",
-	"8ball": "🎱",
-	game_die: "🎲",
-	dart: "🎯",
-	musical_note: "🎵",
-	notes: "🎶",
-	microphone: "🎤",
-	headphones: "🎧",
-	guitar: "🎸",
-	bulb: "💡",
-	computer: "💻",
-	iphone: "📱",
-	email: "📧",
-	lock: "🔒",
-	key: "🔑",
-	hourglass: "⌛",
-	watch: "⌚",
-	bell: "🔔",
-	mag: "🔍",
-	link: "🔗",
-	pushpin: "📌",
-	memo: "📝",
-	pencil: "📝",
-	book: "📖",
-	books: "📚",
-	moneybag: "💰",
-	dollar: "💵",
-	credit_card: "💳",
-	gem: "💎",
-	white_check_mark: "✅",
-	heavy_check_mark: "✔️",
-	x: "❌",
-	negative_squared_cross_mark: "❎",
-	warning: "⚠️",
-	no_entry: "⛔",
-	question: "❓",
-	exclamation: "❗",
-	bangbang: "‼️",
-	100: "💯",
-	ok: "🆗",
-	new: "🆕",
-	up: "🔼",
-	arrow_up: "⬆️",
-	arrow_down: "⬇️",
-	arrow_left: "⬅️",
-	arrow_right: "➡️",
-	recycle: "♻️",
-	heavy_plus_sign: "➕",
-	heavy_minus_sign: "➖",
-	heavy_multiplication_x: "✖️",
-	heavy_dollar_sign: "💲",
-	white_flower: "💮",
-	rose: "🌹",
-	sunflower: "🌻",
-	four_leaf_clover: "🍀",
-	christmas_tree: "🎄",
-	jack_o_lantern: "🎃",
-	crown: "👑",
-	eyeglasses: "👓",
-	tophat: "🎩",
-	umbrella: "☂️",
-	house: "🏠",
-	office: "🏢",
-	hospital: "🏥",
-	school: "🏫",
-	car: "🚗",
-	taxi: "🚕",
-	bus: "🚌",
-	train: "🚆",
-	bike: "🚲",
-	anchor: "⚓",
-	construction: "🚧",
-	hammer: "🔨",
-	wrench: "🔧",
-	gear: "⚙️",
-	shield: "🛡️",
-	battery: "🔋",
-	flashlight: "🔦",
-	camera: "📷",
-	tv: "📺",
-	clapper: "🎬",
-	art: "🎨",
-	dizzy_star: "🌠",
-	partying_face: "🥳",
-	exploding_head: "🤯",
-	shushing_face: "🤫",
-	star_struck: "🤩",
-	heart_hands: "🫶",
-	saluting_face: "🫡",
-	melting_face: "🫠"
-}
+import { parseEmojiSet, withSkinTone, type EmojiSet, type StandardEmoji } from "@/features/chats/lib/emojiData"
+import { SKIN_TONES, type SkinTone } from "@/features/chats/lib/skinTone"
 
 // ── Custom emoji pack (non-unicode, image-backed) ───────────────────────────────────────────────────
 // Filen's custom emoji pack is a large (thousand-plus-entry) set of image-backed shortcodes —
@@ -321,34 +45,93 @@ export function customEmojiImageForShortcode(shortcode: string): string | undefi
 	return CUSTOM_EMOJI_MAP.get(shortcode.toLowerCase())
 }
 
-// A handful of the pack's ~1100 ids collide with the curated standard-unicode table above (e.g. "clap",
-// "fire", "ok" — the pack owns the id independently of this web-only table). Mobile has no textual
-// standard-shortcode lookup at all: its regexed.tsx only ever resolves `:id:` against the custom pack
-// (standard unicode emoji reach a message as literal glyph characters typed via the OS keyboard, never
-// as `:name:` text), so for any id the custom pack defines, the custom pack is mobile's ONLY answer —
-// there is nothing else for it to lose to. Matching that on web means the custom pack wins every
-// collision: a colliding shortcode resolves to its CDN image, never the unicode glyph.
-export function emojiForShortcode(shortcode: string): string | undefined {
+// Filen's custom pack owns its ids against the standard set (e.g. "clap", "fire", "ok"). Mobile has no textual
+// standard-shortcode lookup at all: its regexed.tsx only ever resolves `:id:` against the custom pack, so for any id
+// the pack defines, the pack is mobile's only answer. Matching that on web, the custom pack wins every collision: a
+// colliding shortcode resolves to its CDN image, and the standard emoji is reached by its other shortcodes.
+function isCustomShortcode(shortcode: string): boolean {
+	return CUSTOM_EMOJI_MAP.has(shortcode)
+}
+
+let parsedSet: EmojiSet | null = null
+
+// The standard set, split on first use and kept.
+export function emojiSet(): EmojiSet {
+	parsedSet ??= parseEmojiSet(isCustomShortcode)
+
+	return parsedSet
+}
+
+// Whether the standard set has been split yet (tests check the picker costs nothing before it opens).
+export function isEmojiSetParsed(): boolean {
+	return parsedSet !== null
+}
+
+// The glyph a standard `:shortcode:` stands for, in skin tone `tone`; undefined for an id the custom pack owns (it
+// renders as the image) or one neither set knows.
+export function emojiForShortcode(shortcode: string, tone: SkinTone = 0): string | undefined {
 	const normalized = shortcode.toLowerCase()
 
-	if (CUSTOM_EMOJI_MAP.has(normalized)) {
+	if (isCustomShortcode(normalized)) {
 		return undefined
 	}
 
-	return EMOJI_SHORTCODES[normalized]
+	const emoji = emojiSet().byShortcode.get(normalized)
+
+	return emoji !== undefined ? withSkinTone(emoji, tone) : undefined
 }
 
-// A suggestion is either a standard unicode glyph or a custom-pack image — the composer's `:`
-// autocomplete sources both into one merged, ranked list (see searchEmoji below); the render/insertion
-// layers switch on `kind` to pick a unicode-glyph vs. an image-shortcode replacement.
-export type EmojiSuggestion = { name: string } & ({ kind: "standard"; char: string } | { kind: "custom"; imageUrl: string })
+// A message's `:name:` or `:name::skin-tone-N:` token (the old web app's emoji-mart form, N 2 to 6 for the five tones,
+// 1 for the default) as its shortcode and skin tone.
+export function parseShortcodeToken(raw: string): { shortcode: string; tone: SkinTone } {
+	const match = /^:([^:]+):(?::skin-tone-(\d+):)?$/.exec(raw)
+	const shortcode = match?.[1] ?? raw.replaceAll(":", "")
+	const tone = SKIN_TONES.find(entry => entry === Number(match?.[2] ?? "1") - 1) ?? 0
 
-// Suggestion list for the composer's `:` autocomplete. Prefix matches rank above substring matches
-// (both alphabetically inside their tier), so `:sm` surfaces `smile`/`smiley` before `kissing_heart`
-// never would — it just keeps the obvious completions on top. Capped to `limit` (mobile caps at 10).
-// Sources BOTH the standard shortcode table and the custom pack into one ranked list, matching custom
-// entries by id OR keyword. A standard name the custom pack also owns is skipped here — same
-// custom-wins precedence as emojiForShortcode, so the picker never shows two entries for one id.
+	return { shortcode, tone }
+}
+
+// A suggestion is either a standard unicode emoji or a custom-pack image: the `:` autocomplete and the picker list both;
+// the render and insertion layers switch on `kind`.
+export type EmojiSuggestion = StandardEmoji | { kind: "custom"; name: string; imageUrl: string }
+
+// Match tiers, best first: the query is a whole shortcode (or custom id); a shortcode or custom id starts with it; a
+// word of the name or keywords starts with it; it appears anywhere.
+function standardTier(emoji: StandardEmoji, q: string): number {
+	if (emoji.shortcodes.includes(q)) {
+		return 0
+	}
+
+	if (emoji.shortcodes.some(code => code.startsWith(q))) {
+		return 1
+	}
+
+	if (emoji.search.startsWith(q) || emoji.search.includes(` ${q}`)) {
+		return 2
+	}
+
+	return emoji.search.includes(q) ? 3 : -1
+}
+
+function customTier(emoji: CustomEmoji, q: string): number {
+	if (emoji.name === q) {
+		return 0
+	}
+
+	if (emoji.name.startsWith(q)) {
+		return 1
+	}
+
+	if (emoji.keywords.some(keyword => keyword.toLowerCase().startsWith(q))) {
+		return 2
+	}
+
+	return emoji.name.includes(q) || emoji.keywords.some(keyword => keyword.toLowerCase().includes(q)) ? 3 : -1
+}
+
+// Search over the full standard set (shortcodes, CLDR names and keywords) and the custom pack (ids and keywords), for
+// the `:` autocomplete and the picker. Better tiers first; inside a tier, standard emoji in Unicode order, then custom
+// ones alphabetically. Capped to `limit`.
 export function searchEmoji(query: string, limit: number): EmojiSuggestion[] {
 	const q = query.toLowerCase()
 
@@ -356,42 +139,27 @@ export function searchEmoji(query: string, limit: number): EmojiSuggestion[] {
 		return []
 	}
 
-	const prefix: EmojiSuggestion[] = []
-	const contains: EmojiSuggestion[] = []
+	const tiers: EmojiSuggestion[][] = [[], [], [], []]
 
-	for (const name of Object.keys(EMOJI_SHORTCODES)) {
-		if (CUSTOM_EMOJI_MAP.has(name)) {
-			continue
-		}
-
-		const char = EMOJI_SHORTCODES[name]
-
-		if (char === undefined) {
-			continue
-		}
-
-		const item: EmojiSuggestion = { kind: "standard", name, char }
-
-		if (name.startsWith(q)) {
-			prefix.push(item)
-		} else if (name.includes(q)) {
-			contains.push(item)
-		}
+	for (const emoji of emojiSet().all) {
+		tiers[standardTier(emoji, q)]?.push(emoji)
 	}
+
+	const custom: (readonly [number, EmojiSuggestion])[] = []
 
 	for (const emoji of CUSTOM_EMOJIS) {
-		const item: EmojiSuggestion = { kind: "custom", name: emoji.name, imageUrl: emoji.imageUrl }
-		const matches = emoji.name.startsWith(q) || emoji.keywords.some(keyword => keyword.toLowerCase().startsWith(q))
+		const tier = customTier(emoji, q)
 
-		if (matches) {
-			prefix.push(item)
-		} else if (emoji.name.includes(q) || emoji.keywords.some(keyword => keyword.toLowerCase().includes(q))) {
-			contains.push(item)
+		if (tier !== -1) {
+			custom.push([tier, { kind: "custom", name: emoji.name, imageUrl: emoji.imageUrl }])
 		}
 	}
 
-	prefix.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-	contains.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+	custom.sort(([, a], [, b]) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 
-	return [...prefix, ...contains].slice(0, limit)
+	for (const [tier, item] of custom) {
+		tiers[tier]?.push(item)
+	}
+
+	return tiers.flat().slice(0, limit)
 }

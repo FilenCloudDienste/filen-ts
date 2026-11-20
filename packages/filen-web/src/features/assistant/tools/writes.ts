@@ -1,6 +1,8 @@
 import type { Note, NoteType } from "@filen/sdk-rs"
-import type { BulkOutcome } from "@/lib/actions/bulk"
+import type { Playlist } from "@filen/shared"
+import type { BulkOutcome, BulkProgress } from "@/lib/actions/bulk"
 import { runBulkActivity } from "@/lib/activity/activity"
+import type { ActivityKeys } from "@/lib/activity/activity.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { createDirectory, renameItem, setFavoritedItems, trashItems } from "@/features/drive/lib/actions"
@@ -8,16 +10,30 @@ import { driveActivity, DRIVE_TRASH, favoriteKeys } from "@/features/drive/lib/a
 import { moveActivity } from "@/features/drive/lib/dnd"
 import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
-import { notesActivity, NOTES_TRASH } from "@/features/notes/lib/activity"
-import { trashNotes } from "@/features/notes/lib/bulk"
+import {
+	notesActivity,
+	NOTES_ARCHIVE,
+	NOTES_FAVORITE,
+	NOTES_PIN,
+	NOTES_RESTORE,
+	NOTES_TRASH,
+	NOTES_UNFAVORITE,
+	NOTES_UNPIN
+} from "@/features/notes/lib/activity"
+import { archiveNotes, setFavoritedNotes, setPinnedNotes, trashNotes, unarchiveNotes } from "@/features/notes/lib/bulk"
 import { createNoteWithContent } from "@/features/notes/lib/import"
 import { noteContentFromText } from "@/features/notes/lib/import.logic"
 import { exceedsNoteSizeCap } from "@/features/notes/hooks/useNoteEditor.logic"
-import { isNoteOwner } from "@/features/notes/lib/sort"
-import { itemAncestors, itemPath } from "@/features/assistant/tools/drive"
+import { isNoteOwner, isNoteUndecryptable } from "@/features/notes/lib/sort"
+import { findOwnedListingItem } from "@/features/drive/queries/drive"
+import { isAudioItem } from "@/features/audio/lib/handoff"
+import { addTracksWithToast } from "@/features/audio/lib/addTracks"
+import { playlistsQueryGet } from "@/features/audio/queries/playlists"
+import { isTrashed, itemAncestors, itemPath } from "@/features/assistant/tools/drive"
 import {
 	currentUserId,
 	driveName,
+	entityName,
 	freshDriveItem,
 	freshNote,
 	livePath,
@@ -32,6 +48,7 @@ import {
 } from "@/features/assistant/tools/entities"
 import { AssistantToolError, throwIfStopped } from "@/features/assistant/tools/format"
 import type { AssistantEntity } from "@/features/assistant/tools/handles"
+import { NOTE_FLAG_ARGS, type NoteFlagArg } from "@/features/assistant/types"
 
 // The assistant's writes. Each runs only once the user confirmed its card (the executor refuses an unconfirmed
 // consequential call), through the action the user's own menu runs, so the activity toast, the listing patches and
@@ -170,6 +187,155 @@ function noteRequest(input: Record<string, unknown>): { title: string; type: Not
 		content: noteContentFromText(type, optionalString(input, "content") ?? "")
 	}
 }
+
+interface NoteFlagChange {
+	flag: NoteFlagArg
+	on: boolean
+}
+
+function noteFlag(note: Note, flag: NoteFlagArg): boolean {
+	switch (flag) {
+		case "pinned":
+			return note.pinned
+		case "favorite":
+			return note.favorite
+		case "archived":
+			return note.archive
+	}
+}
+
+// The note a set_note_flags call names, as it is now, and the flags the call would change on it. Refused as its
+// menu refuses: an undecryptable or trashed note offers none of these, and only the owner can archive (anyone
+// may take a note out of the archive, pin or favorite it: those are their own).
+async function noteFlagChanges(scope: ToolScope, input: Record<string, unknown>): Promise<{ note: Note; changes: NoteFlagChange[] }> {
+	const entity = await resolveHandle(scope, requiredString(input, "handle"), ["note"])
+
+	if (entity.kind !== "note") {
+		throw new AssistantToolError("Not a note", { invalid: true })
+	}
+
+	const requested = NOTE_FLAG_ARGS.flatMap(flag => {
+		const value = input[flag]
+
+		return typeof value === "boolean" ? [{ flag, on: value }] : []
+	})
+
+	if (requested.length === 0) {
+		throw new AssistantToolError("Pass at least one of pinned, favorite or archived", { invalid: true })
+	}
+
+	const note = freshNote(entity.note)
+	const title = noteTitle(note)
+
+	if (isNoteUndecryptable(note)) {
+		throw new AssistantToolError(`"${title}" cannot be decrypted; only the user can change it, in the app`)
+	}
+
+	if (note.trash) {
+		throw new AssistantToolError(`"${title}" is in the trash; only the user can restore or change it, in the app`)
+	}
+
+	const changes = requested.filter(change => noteFlag(note, change.flag) !== change.on)
+
+	if (changes.some(change => change.flag === "archived" && change.on) && !isNoteOwner(note, currentUserId())) {
+		throw new AssistantToolError(`"${title}" is shared with the user; only its owner can archive it`)
+	}
+
+	if (changes.length === 0) {
+		throw new AssistantToolError(`"${title}" is already like that; nothing to change`)
+	}
+
+	return { note, changes }
+}
+
+// The playlist a call adds to, as the playlists screen holds it now: one deleted since it was listed is gone,
+// and a write to it would bring it back.
+function playlistOf(entity: AssistantEntity): Playlist {
+	if (entity.kind !== "playlist") {
+		throw new AssistantToolError("Not a playlist", { invalid: true })
+	}
+
+	const entry = playlistsQueryGet()?.find(candidate => candidate.status === "ok" && candidate.playlist.uuid === entity.playlist.uuid)
+
+	if (entry?.status !== "ok") {
+		throw new AssistantToolError(`The playlist "${entity.playlist.name}" no longer exists`)
+	}
+
+	return entry.playlist
+}
+
+// A track to add, as the Add tracks dialog picks one: an audio file of the user's own drive that decrypts.
+async function trackItemOf(scope: ToolScope, handle: string): Promise<DriveItem> {
+	const entity = await resolveHandle(scope, handle, ["drive", "track"])
+	const item =
+		entity.kind === "drive"
+			? freshDriveItem(entity.item)
+			: entity.kind === "track"
+				? findOwnedListingItem(entity.track.uuid)?.item
+				: undefined
+
+	if (item === undefined) {
+		throw new AssistantToolError(`"${entityName(entity)}" was not found in the user's drive; search for it by name first`)
+	}
+
+	const problem = itemProblem(item)
+
+	if (problem !== null) {
+		throw new AssistantToolError(problem)
+	}
+
+	if (isTrashed(item)) {
+		throw new AssistantToolError(`"${driveName(item)}" is in the trash; only the user can restore or change it, in the app`)
+	}
+
+	if (isDirectoryItem(item) || !isAudioItem(item)) {
+		throw new AssistantToolError(`"${driveName(item)}" is not an audio file`, { invalid: true })
+	}
+
+	return item
+}
+
+interface PlaylistAddition {
+	playlist: Playlist
+	tracks: { handle: string; item: DriveItem }[]
+}
+
+// The tracks a call would add: each once, and none the playlist already holds.
+async function playlistAddition(scope: ToolScope, input: Record<string, unknown>): Promise<PlaylistAddition> {
+	const playlist = playlistOf(await resolveHandle(scope, requiredString(input, "playlist"), ["playlist"]))
+	const existing = new Set(playlist.files.map(file => file.uuid))
+	const tracks = new Map<string, { handle: string; item: DriveItem }>()
+
+	for (const handle of handleList(input, "handles")) {
+		const item = await trackItemOf(scope, handle)
+
+		if (!existing.has(item.data.uuid) && !tracks.has(item.data.uuid)) {
+			tracks.set(item.data.uuid, { handle, item })
+		}
+	}
+
+	if (tracks.size === 0) {
+		throw new AssistantToolError(`Every one of these is already in "${playlist.name}"; nothing to add`)
+	}
+
+	return { playlist, tracks: [...tracks.values()] }
+}
+
+// The arguments a checked call runs with, cut to what it changes: the card shows that and nothing else, and the
+// call applies exactly that once confirmed.
+export const WRITE_ARGS: Readonly<Record<string, (scope: ToolScope, input: Record<string, unknown>) => Promise<Record<string, unknown>>>> =
+	{
+		set_note_flags: async (scope, input) => {
+			const { changes } = await noteFlagChanges(scope, input)
+
+			return { handle: input["handle"], ...Object.fromEntries(changes.map(change => [change.flag, change.on])) }
+		},
+		add_tracks_to_playlist: async (scope, input) => {
+			const { tracks } = await playlistAddition(scope, input)
+
+			return { playlist: input["playlist"], handles: tracks.map(track => track.handle) }
+		}
+	}
 
 // Checks a write needs before its card shows, so the user never confirms a call that then fails; each adapter checks
 // again when it runs, against the rows as they are then.
@@ -418,4 +584,79 @@ export const createNoteTool: ToolAdapter = async (input, scope) => {
 	const note = outcome.item
 
 	return { value: { created: { handle: scope.show({ kind: "note", note }, noteTitle(note)), title: noteTitle(note) } } }
+}
+
+const NOTE_FLAG_RUNS: Readonly<
+	Record<
+		NoteFlagArg,
+		{ on: ActivityKeys; off: ActivityKeys; run: (notes: Note[], on: boolean, onSettled: BulkProgress) => Promise<BulkOutcome<Note>> }
+	>
+> = {
+	pinned: { on: NOTES_PIN, off: NOTES_UNPIN, run: setPinnedNotes },
+	favorite: { on: NOTES_FAVORITE, off: NOTES_UNFAVORITE, run: setFavoritedNotes },
+	archived: {
+		on: NOTES_ARCHIVE,
+		off: NOTES_RESTORE,
+		run: (notes, on, onSettled) => (on ? archiveNotes(notes, onSettled) : unarchiveNotes(notes, onSettled))
+	}
+}
+
+// Each change as the note's menu or the notes bar runs it, with its own activity toast; never trash or delete.
+export const setNoteFlagsTool: ToolAdapter = async (input, scope) => {
+	const { note, changes } = await noteFlagChanges(scope, input)
+
+	throwIfStopped(scope)
+
+	const done: string[] = []
+	const failed: { change: string; error: string }[] = []
+
+	for (const { flag, on } of changes) {
+		const { run, ...keys } = NOTE_FLAG_RUNS[flag]
+		const outcome = await runBulkActivity(
+			notesActivity([freshNote(note)], on ? keys.on : keys.off, (notes, onSettled) => run(notes, on, onSettled))
+		)
+		const [failure] = outcome.failed
+
+		if (failure === undefined) {
+			done.push(`${flag}: ${String(on)}`)
+		} else {
+			failed.push({ change: `${flag}: ${String(on)}`, error: errorLabel(failure.error) })
+		}
+	}
+
+	const [first] = failed
+
+	if (done.length === 0 && first !== undefined) {
+		throw new AssistantToolError(first.error)
+	}
+
+	const now = freshNote(note)
+
+	return {
+		value: {
+			updated: noteTitle(now),
+			pinned: now.pinned,
+			favorite: now.favorite,
+			archived: now.archive,
+			...(failed.length > 0 ? { failed } : {})
+		}
+	}
+}
+
+// As the Add tracks dialog adds them, toasts included.
+export const addTracksToPlaylistTool: ToolAdapter = async (input, scope) => {
+	const { playlist, tracks } = await playlistAddition(scope, input)
+
+	throwIfStopped(scope)
+
+	const outcome = await addTracksWithToast(
+		playlist,
+		tracks.map(track => track.item)
+	)
+
+	if (outcome.status === "error") {
+		throw new AssistantToolError(errorLabel(outcome.error))
+	}
+
+	return { value: { added: tracks.map(track => driveName(track.item)), count: outcome.added, playlist: playlist.name } }
 }

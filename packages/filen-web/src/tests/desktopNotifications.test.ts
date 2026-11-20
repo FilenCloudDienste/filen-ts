@@ -76,4 +76,13 @@ describe("chatMessageNotification", () => {
 			chatMessageNotification(mockMessage({ message: "x".repeat(1000) }), mockChat(), ME, EMPTY_BLOCKED_USERS, LABELS)?.body
 		).toHaveLength(NOTIFICATION_BODY_MAX_LENGTH)
 	})
+
+	it("never cuts a long body inside an emoji", () => {
+		// The flag's two code points (four UTF-16 units) straddle the limit.
+		const message = `${"x".repeat(NOTIFICATION_BODY_MAX_LENGTH - 2)}🇩🇪 and more`
+
+		expect(chatMessageNotification(mockMessage({ message }), mockChat(), ME, EMPTY_BLOCKED_USERS, LABELS)?.body).toBe(
+			"x".repeat(NOTIFICATION_BODY_MAX_LENGTH - 2)
+		)
+	})
 })

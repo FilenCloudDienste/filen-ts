@@ -36,7 +36,7 @@ import {
 	type TriggerQuery
 } from "@/features/chats/lib/composer.logic"
 import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
-import { emojiInsertText, insertEmojiAt } from "@/features/chats/lib/emojiPicker.logic"
+import { insertEmojiAt } from "@/features/chats/lib/emojiPicker.logic"
 import { EmojiPicker } from "@/features/chats/components/thread/emojiPicker"
 import { chatTitle } from "@/features/chats/lib/sort"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
@@ -306,12 +306,12 @@ export function Composer({
 
 	// A pick from the emoji picker goes in at the field's caret (or over its selection), which the field keeps while the
 	// picker has focus; the picker hands focus back to the field as it closes.
-	function insertPickedEmoji(item: EmojiSuggestion): void {
+	function insertPickedEmoji(text: string): void {
 		const el = textareaRef.current
 		const start = el?.selectionStart ?? draft.length
 		const end = el?.selectionEnd ?? start
 
-		applyReplacement(insertEmojiAt(draft, start, end, emojiInsertText(item)))
+		applyReplacement(insertEmojiAt(draft, start, end, text))
 	}
 
 	function selectActive(): void {

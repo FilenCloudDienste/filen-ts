@@ -353,6 +353,22 @@ export const chats = {
 	chatEmojiCategoryObjects: "Objects",
 	/** Emoji picker tab — the Unicode "Symbols" group */
 	chatEmojiCategorySymbols: "Symbols",
+	/** Emoji picker tab — the Unicode "Flags" group */
+	chatEmojiCategoryFlags: "Flags",
+	/** Emoji picker — accessible label and tooltip of the button that shows the skin tone choices, and of that group */
+	chatEmojiSkinTone: "Skin tone",
+	/** Emoji picker skin tone choice — the default yellow, no skin tone */
+	chatEmojiSkinToneDefault: "Default",
+	/** Emoji picker skin tone choice — Fitzpatrick type 1-2 */
+	chatEmojiSkinToneLight: "Light",
+	/** Emoji picker skin tone choice — Fitzpatrick type 3 */
+	chatEmojiSkinToneMediumLight: "Medium-light",
+	/** Emoji picker skin tone choice — Fitzpatrick type 4 */
+	chatEmojiSkinToneMedium: "Medium",
+	/** Emoji picker skin tone choice — Fitzpatrick type 5 */
+	chatEmojiSkinToneMediumDark: "Medium-dark",
+	/** Emoji picker skin tone choice — Fitzpatrick type 6 */
+	chatEmojiSkinToneDark: "Dark",
 	/** Emoji picker tab — Filen's own image emoji */
 	chatEmojiCategoryCustom: "Filen emoji",
 	/** Composer attach menu — trigger tooltip when disabled for a non-Pro account (pre-gated) */

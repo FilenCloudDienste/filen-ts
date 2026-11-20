@@ -137,6 +137,7 @@
 		"@types/three": "0.187.0",
 		"@vitejs/plugin-react": "^6",
 		"babel-plugin-react-compiler": "^1.0.0",
+		"emojibase-data": "18.0.0",
 		"eslint": "^10",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-react-hooks": "^7.1.1",
