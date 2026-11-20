@@ -70,6 +70,41 @@ export function newTmpStagedFile(name: string): FileSystem.File {
 	return new FileSystem.File(FileSystem.Paths.join(dir.uri, name))
 }
 
+// Document picks are staged here by pickDocuments (see documentPicker.ts) and deleted by whoever
+// consumes them. A pick is only ever consumed in the process that made it, so on the first setup()
+// of a process every entry is a crash orphan.
+const pickDirectory = new FileSystem.Directory(FileSystem.Paths.join(directory.uri, "document-picks"))
+let picksSwept = false
+
+// Returns a fresh File handle under filen-tmp/document-picks/ (created on demand). `extension`
+// includes the leading dot, or is "" for none. The file is NOT created on disk.
+export function newTmpPickFile(extension: string): FileSystem.File {
+	ensureDirectory(pickDirectory)
+
+	return new FileSystem.File(FileSystem.Paths.join(pickDirectory.uri, `${randomUUID()}${extension}`))
+}
+
+// Deletes the picks left behind by an earlier process. Once per process: setup() re-runs on every
+// foreground, by which point picks of this process may be in flight. setup() gates the UI, so the
+// first call always runs before any pick can exist. Best-effort, like sweepTmpDir().
+export function sweepOrphanedPicks(): void {
+	if (picksSwept) {
+		return
+	}
+
+	picksSwept = true
+
+	if (!pickDirectory.exists) {
+		return
+	}
+
+	try {
+		pickDirectory.delete()
+	} catch (e) {
+		logger.warn("tmp", "sweepOrphanedPicks delete failed", { error: e })
+	}
+}
+
 // Wipes every entry under filen-tmp/. Safe to call only when no transfers/uploads/
 // exports can be in flight — the Settings → Advanced action that invokes this gates
 // on the transfers and sync stores. Best-effort; failures are swallowed so an

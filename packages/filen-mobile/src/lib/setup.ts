@@ -18,6 +18,7 @@ import { Platform } from "react-native"
 import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import logger from "@/lib/logger"
 import { connectFileKindVerdictStorage } from "@/lib/fileKindVerdictStorage"
+import { sweepOrphanedPicks } from "@/lib/tmp"
 
 // Serializes setup() so a concurrent invocation (e.g. background task overlapping the
 // foreground launch) can't run the init flow twice. No other instance state -> plain object.
@@ -117,6 +118,9 @@ const setup = {
 				// a heavily offline-marked drive). They live in Settings → Advanced ("Clean up
 				// temporary files"), gated on the transfers/sync stores so they can't race
 				// in-flight downloads.
+				// The one exception is filen-tmp/document-picks/: a single directory delete, run on the
+				// first setup() of the process only, before any pick can exist (see sweepOrphanedPicks).
+				sweepOrphanedPicks()
 
 				const isAuthed = await timed("auth.isAuthed", () => auth.isAuthed())
 				const stringifiedClient = isAuthed.isAuthed && isAuthed.stringifiedClient ? isAuthed.stringifiedClient : null

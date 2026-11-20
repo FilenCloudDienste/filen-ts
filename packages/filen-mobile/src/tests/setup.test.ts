@@ -12,6 +12,7 @@ const {
 	mockRestoreQueries,
 	mockStartReconnectListener,
 	mockSweepTmpDir,
+	mockSweepOrphanedPicks,
 	mockSweepStrayDownloadFiles,
 	mockForegroundService,
 	mockOffline,
@@ -44,6 +45,7 @@ const {
 		mockRestoreQueries: vi.fn(),
 		mockStartReconnectListener: vi.fn(),
 		mockSweepTmpDir: vi.fn(),
+		mockSweepOrphanedPicks: vi.fn(),
 		mockSweepStrayDownloadFiles: vi.fn(),
 		mockForegroundService: { init: vi.fn() },
 		mockOffline: { updateIndex: vi.fn(), sync: vi.fn() },
@@ -122,7 +124,7 @@ vi.mock("@/features/settings/fileProvider", () => ({
 vi.mock("@/features/drive/driveSearch", () => ({
 	default: { init: vi.fn(async () => {}), closeActive: vi.fn(async () => {}), teardownOnLogout: vi.fn(async () => {}) }
 }))
-vi.mock("@/lib/tmp", () => ({ sweepTmpDir: mockSweepTmpDir }))
+vi.mock("@/lib/tmp", () => ({ sweepTmpDir: mockSweepTmpDir, sweepOrphanedPicks: mockSweepOrphanedPicks }))
 vi.mock("@/lib/fsUtils", () => ({ sweepStrayDownloadFiles: mockSweepStrayDownloadFiles }))
 vi.mock("@/lib/reconnect", () => ({ startReconnectListener: mockStartReconnectListener }))
 vi.mock("@/lib/fileCache", () => ({ default: mockFileCache }))
@@ -254,6 +256,15 @@ describe("setup.setup", () => {
 
 		expect(mockSweepTmpDir).not.toHaveBeenCalled()
 		expect(mockSweepStrayDownloadFiles).not.toHaveBeenCalled()
+	})
+
+	// The once-per-process guard lives in sweepOrphanedPicks itself (tmp.test.ts); setup only
+	// has to reach it on every path, background included.
+	it("calls sweepOrphanedPicks on every setup, background included", async () => {
+		await setup.setup()
+		await setup.setup({ background: true })
+
+		expect(mockSweepOrphanedPicks).toHaveBeenCalledTimes(2)
 	})
 
 	it("initialises secureStore, sqlite, queries, i18n, and theme unconditionally", async () => {
