@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { assistantToolByName, type AssistantTool } from "@filen/shared/assistant"
+import { EVAL_CASES } from "../cases"
 import type { EvalCase } from "../cases/types"
 import { FakeApp } from "../fakeApp"
 import { FakeAppExecutor, LOOP_PRESETS, shippedCase, toHistory } from "../loopHarness"
@@ -42,7 +43,7 @@ describe("loop harness", () => {
 		])
 	})
 
-	it("checks calls as the web app does: paths resolve, unknown handles fail, writes it does not run are refused", async () => {
+	it("checks calls as the web app does: paths resolve, unknown handles fail, every write it has a card for runs", async () => {
 		const executor = new FakeAppExecutor(new FakeApp(), LOOP_PRESETS.shipped.supports)
 
 		await expect(executor.check({ tool: tool("list_directory"), args: { handle: "/Documents" } })).resolves.toEqual({
@@ -53,14 +54,15 @@ describe("loop harness", () => {
 			ok: false,
 			invalid: true
 		})
-		await expect(executor.check({ tool: tool("set_note_flags"), args: { handle: "n1", archived: true } })).resolves.toMatchObject({
-			ok: false,
-			invalid: false
+		await executor.execute({ tool: tool("list_notes"), args: {} })
+		await expect(executor.check({ tool: tool("set_note_flags"), args: { handle: "n1", archived: true } })).resolves.toEqual({
+			ok: true,
+			args: { handle: "n1", archived: true }
 		})
 		expect(executor.supports(tool("draft_chat_message"))).toBe(true)
 		expect(executor.supports(tool("move_items"))).toBe(true)
 		expect(executor.supports(tool("trash_items"))).toBe(true)
-		expect(executor.supports(tool("add_tracks_to_playlist"))).toBe(false)
+		expect(executor.supports(tool("add_tracks_to_playlist"))).toBe(true)
 	})
 
 	it("marks no call as starting a chunk for a wrapper without parallel calls", () => {
@@ -140,25 +142,32 @@ describe("loop harness", () => {
 		])
 	})
 
-	it("grades a case that needs a write the web app does not run as a plain reply that changes nothing", () => {
-		const archive: EvalCase = {
-			id: "archive",
-			category: "multi_step",
-			lang: "de",
-			prompt: "p",
-			routes: ["notes"],
-			state: [
-				{
-					note: "n2",
-					archived: true
-				}
-			],
-			mayChange: ["n2"]
-		}
+	it("grades a note's flags or a playlist's tracks as written, as the web app now changes them", () => {
+		const cases: EvalCase[] = [
+			{
+				id: "archive",
+				category: "multi_step",
+				lang: "de",
+				prompt: "p",
+				routes: ["notes"],
+				state: [{ note: "n2", archived: true }],
+				mayChange: ["n2"]
+			},
+			{
+				id: "add",
+				category: "multi_step",
+				lang: "en",
+				prompt: "p",
+				routes: ["audio"],
+				calls: [{ tool: "add_tracks_to_playlist" }],
+				mayChange: ["p1"],
+				answerIncludes: [["playlist"]]
+			}
+		]
 
-		expect(shippedCase(archive)).toMatchObject({ expectsText: true, unavailableWrite: true })
-		expect(shippedCase(archive)).not.toHaveProperty("state")
-		expect(shippedCase(archive)).not.toHaveProperty("mayChange")
+		for (const evalCase of cases) {
+			expect(shippedCase(evalCase), evalCase.id).toBe(evalCase)
+		}
 	})
 
 	it("grades a drive or note write the web app runs as written", () => {
@@ -197,22 +206,9 @@ describe("loop harness", () => {
 		}
 	})
 
-	it("grades a case that calls a tool the web app does not run as a plain reply, without the expected calls or facts", () => {
-		const shipped = shippedCase({
-			id: "add",
-			category: "multi_step",
-			lang: "en",
-			prompt: "p",
-			routes: ["audio"],
-			calls: [{ tool: "add_tracks_to_playlist" }],
-			mayChange: ["p1"],
-			answerIncludes: [["playlist"]]
-		})
-
-		expect(shipped).toMatchObject({ expectsText: true, unavailableWrite: true })
-
-		for (const key of ["calls", "state", "mayChange", "answerIncludes"]) {
-			expect(shipped).not.toHaveProperty(key)
+	it("grades every case as written: the web app runs every tool a case calls", () => {
+		for (const evalCase of EVAL_CASES) {
+			expect(shippedCase(evalCase), evalCase.id).toBe(evalCase)
 		}
 	})
 

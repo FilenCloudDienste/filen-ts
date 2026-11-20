@@ -424,6 +424,18 @@ describe("FakeApp", () => {
 		expect(flags()).toEqual({ pinned: false, favorite: true, archived: true })
 	})
 
+	it("refuses a note-flag or playlist call that would change nothing, as the web app does", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("n2").add("p1").add("f22")
+
+		expect(app.execute({ name: "set_note_flags", args: { handle: "n2", pinned: false } })).toMatchObject({ ok: false, invalid: false })
+		expect(app.execute({ name: "add_tracks_to_playlist", args: { playlist: "p1", handles: ["f22"] } })).toMatchObject({
+			ok: false,
+			invalid: false
+		})
+	})
+
 	it("adds tracks to a playlist once, counting those already there", () => {
 		const app = new FakeApp()
 

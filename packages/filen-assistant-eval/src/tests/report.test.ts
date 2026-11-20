@@ -82,20 +82,13 @@ describe("regradeLanguage", () => {
 		expect(regraded.grade.reasons).toEqual(["matched 0/1 expected calls"])
 	})
 
-	it("re-detects a shipped write case graded as a reply, and leaves its pass alone", () => {
+	it("leaves a shipped playlist write as graded: the app runs it, so it is no plain reply", () => {
 		const id = "multiple-add-track-en"
+		const record = stored({ id, preset: "shipped", answer: "Added Bella Ciao to Road trip." })
+		const stale: MainRecord = { ...record, grade: { ...record.grade, detectedLanguage: "de", languageOk: false } }
 
 		expect(corpusCase(id).expectsText).toBeUndefined()
-
-		const record = stored({ id, preset: "shipped", answer: "I can't add tracks to playlists here; open the playlist to add it." })
-		const stale: MainRecord = { ...record, grade: { ...record.grade, detectedLanguage: "de", languageOk: false } }
-		const regraded = regradeLanguage(stale)
-
-		expect(regraded.grade).toMatchObject({ detectedLanguage: "en", languageOk: true, pass: stale.grade.pass })
-
-		const loop: MainRecord = { ...stale, preset: "loop" }
-
-		expect(regradeLanguage(loop)).toBe(loop)
+		expect(regradeLanguage(stale)).toBe(stale)
 	})
 })
 
@@ -198,21 +191,13 @@ describe("summarizeMain", () => {
 		})
 	})
 
-	it("keeps writes the shipped app does not run out of the shipped preset's pass rate", () => {
-		// In German to an English request: graded on its language, apart.
-		const write = stored({
-			id: "multiple-add-track-en",
-			preset: "shipped",
-			answer: "Ich kann hier leider keine Titel zu Playlists hinzufügen. Öffne dafür bitte die Playlist und füge ihn dort selbst hinzu."
-		})
+	it("counts a note-flag or playlist write in the shipped preset's pass rate, as the app runs both", () => {
+		const write = stored({ id: "multiple-add-track-en", preset: "shipped", answer: "Added." })
 		const read = stored({ id: "language-2-de", preset: "shipped", answer: GERMAN, calls: [call("read_note", { handle: "n2" })] })
-		const shipped = [write, read]
 
-		expect(isUnavailableWrite(write)).toBe(true)
-		expect(isUnavailableWrite({ ...write, preset: "loop" })).toBe(false)
+		expect(isUnavailableWrite(write)).toBe(false)
 		expect(isUnavailableWrite(read)).toBe(false)
-		expect(summarizeMain(shipped.filter(item => !isUnavailableWrite(item)))).toMatchObject({ cases: 1, pass: 1 })
-		expect(summarizeMain(shipped.filter(isUnavailableWrite))).toMatchObject({ cases: 1, languageGraded: 1, languageFidelity: 0 })
+		expect(summarizeMain([write, read].filter(item => !isUnavailableWrite(item)))).toMatchObject({ cases: 2 })
 	})
 })
 

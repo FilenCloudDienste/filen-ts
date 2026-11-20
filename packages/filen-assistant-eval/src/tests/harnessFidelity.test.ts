@@ -4,7 +4,7 @@ import { EVAL_CASES } from "../cases"
 import type { EvalCase } from "../cases/types"
 import { FakeApp } from "../fakeApp"
 import { gradeCase } from "../grader"
-import { FakeAppExecutor, LOOP_PRESETS, shippedCase } from "../loopHarness"
+import { FakeAppExecutor, LOOP_PRESETS } from "../loopHarness"
 import { transcript as base } from "./helpers"
 
 // The fake app and the graders as the web app behaves: what the context grounds, how search builds its pool,
@@ -133,11 +133,12 @@ describe("graders", () => {
 			throw new Error("no case")
 		}
 
-		const shipped = shippedCase(favorite)
+		// As shippedCase grades a case whose write the web app does not run; none is left out today.
+		const { calls: _calls, state: _state, ...rest } = favorite
+		const shipped: EvalCase = { ...rest, expectsText: true, unavailableWrite: true }
 		const app = new FakeApp(favorite.context)
 		const before = structuredClone(app.state)
 
-		expect(shipped.unavailableWrite).toBe(true)
 		expect(gradeCase({ evalCase: shipped, transcript: transcript({ route: "answer", answer: "Erledigt." }), app, before }).pass).toBe(
 			false
 		)

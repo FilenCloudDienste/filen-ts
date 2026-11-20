@@ -1316,6 +1316,11 @@ export class FakeApp {
 					throw new CallError("Pass at least one of pinned, favorite or archived", true)
 				}
 
+				// As the web app: a call that changes nothing is refused before its card.
+				if (flags.every(flag => item[flag] === (input[flag] === true))) {
+					throw new CallError(`"${item.title}" is already like that; nothing to change`, false)
+				}
+
 				for (const flag of flags) {
 					item[flag] = input[flag] === true
 				}
@@ -1556,6 +1561,11 @@ export class FakeApp {
 					return track
 				})
 				const added = tracks.filter(track => !item.tracks.includes(track.handle))
+
+				// As the web app: a call that adds nothing is refused before its card.
+				if (added.length === 0) {
+					throw new CallError(`Every one of these is already in "${item.name}"; nothing to add`, false)
+				}
 
 				item.tracks.push(...added.map(track => track.handle))
 
