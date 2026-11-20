@@ -1,11 +1,9 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
+import { createDirectory } from "@/features/drive/lib/actions"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface NewDirectoryDialogProps {
@@ -25,11 +23,7 @@ export function NewDirectoryDialog({ open, onOpenChange, parentUuid, hiddenNotic
 		setPending(true)
 
 		const trimmed = name.trim()
-		const outcome = await runCreateDirectory(
-			{ createDirectory: (parent, next) => sdkApi.createDirectory(parent, next), patchListing: driveListingQueryUpdate },
-			parentUuid,
-			trimmed
-		)
+		const outcome = await createDirectory(parentUuid, trimmed)
 
 		setPending(false)
 

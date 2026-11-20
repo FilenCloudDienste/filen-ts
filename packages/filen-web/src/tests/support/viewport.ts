@@ -49,3 +49,22 @@ export function mockScrollablePageColumn(): void {
 		})
 	}
 }
+
+// A scroll area `height` tall (jsdom's is 0 either way the virtualizer reads it), appended to the body, for a list
+// to window against.
+export function sizedScrollArea(height: number): HTMLDivElement {
+	const element = document.createElement("div")
+
+	for (const [property, value] of [
+		["clientHeight", height],
+		["offsetHeight", height],
+		["clientWidth", 240],
+		["offsetWidth", 240]
+	] as const) {
+		Object.defineProperty(element, property, { configurable: true, value })
+	}
+
+	document.body.appendChild(element)
+
+	return element
+}

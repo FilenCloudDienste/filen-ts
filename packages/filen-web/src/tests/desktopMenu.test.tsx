@@ -55,7 +55,7 @@ describe("desktop menu actions", () => {
 			"app.openSettings": "mod+comma",
 			"app.openShortcuts": "shift+slash",
 			"app.toggleTheme": "d",
-			"app.toggleAssistant": "",
+			"app.toggleAssistant": "q",
 			"app.openTransfers": "",
 			"app.lock": "mod+alt+l",
 			"desktop.close": "mod+w",

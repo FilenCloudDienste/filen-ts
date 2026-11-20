@@ -1,21 +1,28 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from "vitest"
-import { parsePlanId, validatePlansSearch } from "@/features/settings/lib/billingLinks"
+import { parsePlanId, plansTargetOfPath } from "@/features/settings/lib/billingLinks"
 import { rememberPlansTarget, takePlansTarget } from "@/features/settings/lib/pendingPlans"
 
-describe("validatePlansSearch", () => {
-	it("keeps a valid plan id, numeric strings included", () => {
-		expect(validatePlansSearch({ plan: 27 })).toEqual({ plan: 27 })
-		expect(validatePlansSearch({ plan: "30" })).toEqual({ plan: 30 })
-		expect(validatePlansSearch({})).toEqual({})
+describe("plansTargetOfPath", () => {
+	it("keeps a valid plan id from the path", () => {
+		expect(plansTargetOfPath("/settings/plans/27")).toEqual({ plan: 27 })
+		expect(plansTargetOfPath("/settings/plans/30/")).toEqual({ plan: 30 })
+		expect(plansTargetOfPath("/settings/plans")).toEqual({})
+		expect(plansTargetOfPath("/settings/plans/")).toEqual({})
 	})
 
-	it("drops a bad plan id", () => {
-		expect(validatePlansSearch({ plan: "1e3" })).toEqual({})
-		expect(validatePlansSearch({ plan: 0 })).toEqual({})
-		expect(validatePlansSearch({ plan: 1.5 })).toEqual({})
-		expect(validatePlansSearch({ plan: null })).toEqual({})
+	it("drops a bad plan id, never the page", () => {
+		expect(plansTargetOfPath("/settings/plans/1e3")).toEqual({})
+		expect(plansTargetOfPath("/settings/plans/0")).toEqual({})
+		expect(plansTargetOfPath("/settings/plans/1.5")).toEqual({})
+		expect(plansTargetOfPath("/settings/plans/-3")).toEqual({})
+	})
+
+	it("is null for any other page", () => {
+		expect(plansTargetOfPath("/settings/billing")).toBeNull()
+		expect(plansTargetOfPath("/settings/plansx")).toBeNull()
+		expect(plansTargetOfPath("/settings/plans/27/extra")).toBeNull()
 	})
 
 	it("parses plan ids strictly", () => {

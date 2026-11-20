@@ -27,7 +27,11 @@ const MESSAGE_UUID = "22222222-2222-2222-2222-222222222222"
 const chat = {
 	uuid: "11111111-1111-1111-1111-111111111111",
 	ownerId: 1n,
-	participants: [{ userId: 1n }, { userId: BLOCKED_ID }, { userId: 7n }]
+	participants: [
+		{ userId: 1n, email: "reader@example.com" },
+		{ userId: BLOCKED_ID, email: BLOCKED_EMAIL },
+		{ userId: 7n, email: "other@example.com" }
+	]
 } as unknown as Chat
 
 const blocked: BlockedUsers = deriveBlockedUsers([{ userId: BLOCKED_ID, email: BLOCKED_EMAIL, uuid: "b", timestamp: 0n }] as never)

@@ -36,6 +36,8 @@ import {
 	type TriggerQuery
 } from "@/features/chats/lib/composer.logic"
 import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
+import { emojiInsertText, insertEmojiAt } from "@/features/chats/lib/emojiPicker.logic"
+import { EmojiPicker } from "@/features/chats/components/thread/emojiPicker"
 import { chatTitle } from "@/features/chats/lib/sort"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { deleteDraft, loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
@@ -300,6 +302,16 @@ export function Composer({
 		const replacement = suggestion.kind === "standard" ? suggestion.char : `:${suggestion.name}:`
 
 		applyReplacement(applyEmoji(draft, query, replacement))
+	}
+
+	// A pick from the emoji picker goes in at the field's caret (or over its selection), which the field keeps while the
+	// picker has focus; the picker hands focus back to the field as it closes.
+	function insertPickedEmoji(item: EmojiSuggestion): void {
+		const el = textareaRef.current
+		const start = el?.selectionStart ?? draft.length
+		const end = el?.selectionEnd ?? start
+
+		applyReplacement(insertEmojiAt(draft, start, end, emojiInsertText(item)))
 	}
 
 	function selectActive(): void {
@@ -706,6 +718,10 @@ export function Composer({
 							)}
 						</DropdownMenuContent>
 					</DropdownMenu>
+					<EmojiPicker
+						returnFocusRef={textareaRef}
+						onPick={insertPickedEmoji}
+					/>
 					<textarea
 						ref={textareaRef}
 						value={draft}

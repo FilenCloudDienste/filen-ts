@@ -206,7 +206,7 @@ export function ChatsSidebar() {
 				dialogHost.openChatDialog(descriptor.dialogKind, single)
 			} else if (descriptor.id === "markRead") {
 				runMarkChatRead(single)
-			} else {
+			} else if (descriptor.id === "mute") {
 				runSetChatMuted(single, !single.muted)
 			}
 

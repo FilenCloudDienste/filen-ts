@@ -5,12 +5,22 @@ import { ChevronRightIcon, DownloadIcon } from "lucide-react"
 import type { AnyItemWithContext, DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-rs"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
+import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { SearchInput } from "@/features/drive/components/searchInput"
 import { SortMenu } from "@/features/drive/components/sortMenu"
+import { ViewModeToggle } from "@/features/drive/components/viewModeToggle"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
-import { useLinkSaveable, usePublicDirListing, usePublicDirSize, usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
+import {
+	useLinkSaveable,
+	usePublicDirListing,
+	usePublicDirSize,
+	usePublicViewModeQuery,
+	usePublicVisitorSignedIn
+} from "@/features/publicLinks/queries/publicLink"
+import { DEFAULT_PUBLIC_VIEW_MODE, setPublicViewMode } from "@/features/publicLinks/lib/viewMode"
+import { saveSetting } from "@/lib/saveSetting"
 import {
 	rootCrumb,
 	enterCrumb,
@@ -76,7 +86,8 @@ interface SaveTarget {
 
 // The directory browse surface: a virtual navigation stack (breadcrumb clicks + folder opens mutate a
 // client-side crumb array, the route/hash never change — old-web parity), a client-side filter/sort over the
-// current level's already-fetched entries in drive's list view, a selection over them, and a flag-gated
+// current level's already-fetched entries in drive's list or grid view (one choice per browser), a selection over them,
+// and a flag-gated
 // whole-directory zip download. An opened file shows the shared FileHero in-place (same session, password
 // carried) rather than hard-navigating to /f/ (which would need a per-file link that does not exist).
 export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: DirPublicLink }) {
@@ -102,6 +113,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	// Archive actions ask nothing of the link's owner: signed in with downloads allowed is enough.
 	const signedIn = usePublicVisitorSignedIn().data === true
 	const linkScope = linkFingerprint(link)
+	const viewModeQuery = usePublicViewModeQuery()
+	const viewMode = viewModeQuery.data ?? DEFAULT_PUBLIC_VIEW_MODE
 
 	// An abuse report names where in the link the visitor is.
 	useReportViewing(selected === null ? stack.map(crumb => crumb.name) : [...stack.map(crumb => crumb.name), driveItemName(selected.item)])
@@ -201,6 +214,12 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		}
 	}
 
+	async function applyViewMode(next: DriveViewMode): Promise<void> {
+		if (next !== viewMode && (await saveSetting(() => setPublicViewMode(next)))) {
+			await viewModeQuery.refetch()
+		}
+	}
+
 	// A plain click on empty space anywhere in the window drops the selection, as in drive.
 	useClickAwayDeselect(selected === null && selection.size > 0, clearSelection)
 
@@ -255,6 +274,25 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	)
 
 	useAction("drive.clearSelection", clearSelection, { ...OUTSIDE_OVERLAYS, enabled: selected === null && selection.size > 0 })
+
+	// Drive's own view keys (unbound by default) over the listing.
+	useAction(
+		"drive.listView",
+		event => {
+			event.preventDefault()
+			void applyViewMode("list")
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: selected === null }
+	)
+
+	useAction(
+		"drive.gridView",
+		event => {
+			event.preventDefault()
+			void applyViewMode("grid")
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: selected === null }
+	)
 
 	// An opened child file takes over the whole surface (it carries its own back bar); the browse chrome
 	// returns when it is dismissed, its list resumed (scroll, cursor, focus) rather than kept mounted out of sight.
@@ -375,11 +413,19 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						listRef.current?.focusCursor()
 					}}
 				/>
-				{/* The column header sorts from sm up, where its Size and Modified columns show. */}
-				<div className="ml-auto sm:hidden">
-					<SortMenu
-						value={sort}
-						onChange={setSort}
+				<div className="ml-auto flex items-center gap-2">
+					{/* The list's column header sorts from sm up, where its Size and Modified columns show; the grid has none. */}
+					<div className={viewMode === "list" ? "sm:hidden" : undefined}>
+						<SortMenu
+							value={sort}
+							onChange={setSort}
+						/>
+					</div>
+					<ViewModeToggle
+						value={viewMode}
+						onChange={next => {
+							void applyViewMode(next)
+						}}
 					/>
 				</div>
 			</div>
@@ -403,7 +449,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					</div>
 				) : (
 					<BrowseList
-						key={current.uuid}
+						// Remounted per level and per view, which lays its rows out anew.
+						key={`${current.uuid}:${viewMode}`}
 						ref={listRef}
 						resume={resume}
 						onResumed={() => {
@@ -414,6 +461,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						onSelectionChange={setSelection}
 						sort={sort}
 						onSortChange={setSort}
+						viewMode={viewMode}
 						downloadable={link.enableDownload}
 						downloadBusy={download.status === "running"}
 						saveable={saveable}

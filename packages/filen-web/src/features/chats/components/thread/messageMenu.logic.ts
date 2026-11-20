@@ -7,6 +7,7 @@ import {
 	PencilIcon,
 	ImageOffIcon,
 	UserXIcon,
+	HashIcon,
 	type LucideIcon
 } from "lucide-react"
 import type { ChatMessage } from "@filen/sdk-rs"
@@ -15,7 +16,7 @@ import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
 import { EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { isOwnMessage, isSenderBlocked } from "@/features/chats/lib/sender"
 
-export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "remove" | "disableEmbed" | "block"
+export type MessageActionId = "reply" | "copy" | "copyId" | "edit" | "delete" | "retry" | "remove" | "disableEmbed" | "block"
 
 // "direct" (reply/copy/edit/retry/remove/disableEmbed — no confirm) vs "dialog" (delete, block — confirm
 // first). reply/edit set composer state; retry/remove act on a failed optimistic entry; delete acts on
@@ -33,6 +34,7 @@ interface MessageActionDescriptorShared {
 export type MessageActionDescriptor =
 	| (MessageActionDescriptorShared & { id: "reply"; run: "direct" })
 	| (MessageActionDescriptorShared & { id: "copy"; run: "direct" })
+	| (MessageActionDescriptorShared & { id: "copyId"; run: "direct" })
 	| (MessageActionDescriptorShared & { id: "edit"; run: "direct" })
 	| (MessageActionDescriptorShared & { id: "delete"; run: "dialog"; destructive: true })
 	| (MessageActionDescriptorShared & { id: "retry"; run: "direct" })
@@ -42,6 +44,7 @@ export type MessageActionDescriptor =
 
 const REPLY: MessageActionDescriptor = { id: "reply", labelKey: "chatMessageActionReply", icon: CornerUpLeftIcon, run: "direct" }
 const COPY: MessageActionDescriptor = { id: "copy", labelKey: "chatMessageActionCopy", icon: CopyIcon, run: "direct" }
+const COPY_ID: MessageActionDescriptor = { id: "copyId", labelKey: "chatMessageActionCopyId", icon: HashIcon, run: "direct" }
 const EDIT: MessageActionDescriptor = { id: "edit", labelKey: "chatMessageActionEdit", icon: PencilIcon, run: "direct" }
 const DELETE_MESSAGE: MessageActionDescriptor = {
 	id: "delete",
@@ -83,7 +86,8 @@ const BLOCK: MessageActionDescriptor = {
 //                   unrecallable, so retry/remove (which would act on a snapshot that delivers
 //                   regardless) must stay hidden even if a stale error record from an earlier
 //                   attempt would otherwise have offered them.
-//   - "confirmed" → reply + copy (any decryptable message) + edit + delete (sender-only) +
+//   - "confirmed" → reply + copy (any decryptable message) + copyId (any, even undecryptable: the uuid is
+//                   the server's) + edit + delete (sender-only) +
 //                   disableEmbed (sender-only, only when the message actually has an active embed to
 //                   disable — `hasEmbeds` is the caller's own embeds.logic.ts classification, computed
 //                   once per row rather than re-derived here so this stays a pure, network-free gate).
@@ -118,6 +122,11 @@ export function messageMenuActions(
 
 	if (hasText) {
 		actions.push(COPY)
+	}
+
+	// A pending send's uuid is its local inflightId, which no server or other client knows.
+	if (sendState === "confirmed") {
+		actions.push(COPY_ID)
 	}
 
 	if (sendState === "confirmed" && isSender) {

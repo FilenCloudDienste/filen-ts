@@ -424,7 +424,7 @@ function infoPath(info: ItemInfoResult, item: DriveItem): string {
 	)
 }
 
-async function itemPath(item: DriveItem): Promise<string | undefined> {
+export async function itemPath(item: DriveItem): Promise<string | undefined> {
 	const info = await itemInfo(item)
 
 	return info.path === null ? undefined : infoPath(info, item)

@@ -1,29 +1,21 @@
 import { useEffect } from "react"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useParams } from "@tanstack/react-router"
 import { rememberLastOpened } from "@/features/shell/lib/lastOpened"
-import { syncTab, type SyncTab } from "@/features/sync/lib/syncTabs"
+import { syncTab } from "@/features/sync/lib/syncTabs"
 import { useSyncPair } from "@/features/sync/lib/syncStore"
 import { SyncPairDetail } from "@/features/sync/components/syncPairDetail"
 import { SyncPlaceholder } from "@/features/sync/components/syncPlaceholder"
 
-// One sync pair's detail; `pairId` is the pair's decimal id. An unknown `tab` falls back to the default tab.
-interface SyncPairSearch {
-	tab?: SyncTab
-}
-
-function validateSearch(search: Record<string, unknown>): SyncPairSearch {
-	const raw = search["tab"]
-
-	return syncTab.allows(raw) ? { tab: raw } : {}
-}
-
-export const Route = createFileRoute("/_app/sync/$pairId")({ validateSearch, component: SyncPairPage })
+// One sync pair's detail; `pairId` is the pair's decimal id. A layout: sync.$pairId.index (/sync/$pairId, the
+// activity tab) and sync.$pairId.$tab (/sync/$pairId/$tab) only select the tab, this renders the detail for both, so
+// switching tabs keeps the page's state.
+export const Route = createFileRoute("/_app/sync/$pairId")({ component: SyncPairPage })
 
 // Resolved from the one overview the shell pushes, never a per-pair read. An id it does not hold (a removed
 // pair, a stale notification) shows the placeholder. A resolved pair becomes the one bare /sync reopens.
 function SyncPairPage() {
 	const { pairId } = Route.useParams()
-	const { tab } = Route.useSearch()
+	const tab = useParams({ from: "/_app/sync/$pairId/$tab", shouldThrow: false, select: params => params.tab })
 	const pair = useSyncPair(pairId)
 	const resolvedId = pair?.id
 
@@ -42,7 +34,7 @@ function SyncPairPage() {
 		<SyncPairDetail
 			key={pair.id}
 			pair={pair}
-			tab={tab ?? "activity"}
+			tab={syncTab.allows(tab) ? tab : "activity"}
 		/>
 	)
 }

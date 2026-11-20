@@ -46,6 +46,7 @@ export type ItemActionId =
 	| "color"
 	| "versions"
 	| "info"
+	| "copyId"
 	| "openContainingDirectory"
 	| "download"
 	| "downloadAs"
@@ -113,6 +114,9 @@ const MOVE: ItemActionDescriptor = { id: "move", ...ACTION_DEFS.move, run: "dial
 const COLOR: ItemActionDescriptor = { id: "color", ...ACTION_DEFS.color, run: "dialog", dialogKind: "color" }
 const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
 const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
+// Copies the item's uuid, right after Info on every menu Info is on: it needs no decrypted metadata and no
+// connection, so the trash and an undecryptable item (whose uuid support asks for) offer it too.
+const COPY_ID: ItemActionDescriptor = { id: "copyId", ...ACTION_DEFS.copyId, run: "direct" }
 // Search results only (see driveItemActions' searchHit option) — navigates to the hit's parent and
 // reveals the row there. "direct": itemMenu.tsx resolves the ancestor chain and navigates itself,
 // there is no dialog to route to.
@@ -237,7 +241,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 	// download regardless), so an undecryptable item here needs no further reduction — checked first
 	// so that case never has to be special-cased below.
 	if (variant === "trash") {
-		return [RESTORE, DELETE_PERMANENTLY, INFO]
+		return [RESTORE, DELETE_PERMANENTLY, INFO, COPY_ID]
 	}
 
 	// Root-only — removeSharedItem has no nested-item shape (see item.ts's shareSource retention), so
@@ -258,7 +262,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 	// failure, worse than a disabled control. Same rationale as rename/move/favorite/etc. below, just
 	// enforced by omission since download has no other reason to disable itself (see enabled? above).
 	if (item.data.undecryptable) {
-		const actions: ItemActionDescriptor[] = [INFO]
+		const actions: ItemActionDescriptor[] = [INFO, COPY_ID]
 
 		if (ownerMutable) {
 			actions.push(TRASH)
@@ -281,11 +285,12 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 				COMPRESS,
 				favoriteDescriptor(item),
 				isDirectoryItem(item) ? COLOR : VERSIONS,
-				INFO
+				INFO,
+				COPY_ID
 			]
-		: [INFO]
+		: [INFO, COPY_ID]
 
-	// Right after Info, the other reference/reveal action. Deliberately absent from the trash branch
+	// Right after Info and Copy ID, the other reference/reveal action. Deliberately absent from the trash branch
 	// above (search is drive-variant only) and from the undecryptable branch (its ancestor walk
 	// resolves nothing the user could act on).
 	if (searchHit) {

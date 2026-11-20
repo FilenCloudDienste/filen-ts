@@ -1,4 +1,4 @@
-import { PencilIcon, Volume2Icon, VolumeOffIcon, UsersIcon, MailOpenIcon, Trash2Icon, LogOutIcon } from "lucide-react"
+import { PencilIcon, Volume2Icon, VolumeOffIcon, UsersIcon, MailOpenIcon, Trash2Icon, LogOutIcon, HashIcon } from "lucide-react"
 import { type ActionDef } from "@/lib/actionDescriptor"
 import { type ChatsKey } from "@/lib/i18n"
 
@@ -12,6 +12,7 @@ export const CHAT_ACTION_DEFS = {
 	unmute: { labelKey: "chatActionUnmute", icon: Volume2Icon },
 	participants: { labelKey: "chatActionParticipants", icon: UsersIcon },
 	rename: { labelKey: "chatActionRename", icon: PencilIcon },
+	copyId: { labelKey: "chatActionCopyId", icon: HashIcon },
 	delete: { labelKey: "chatActionDelete", icon: Trash2Icon, destructive: true },
 	leave: { labelKey: "chatActionLeave", icon: LogOutIcon, destructive: true }
 } satisfies Record<string, ActionDef<ChatsKey>>

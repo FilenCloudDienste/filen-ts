@@ -425,7 +425,7 @@ function ContactsEntry({ active, reordering }: RailEntryProps) {
 			label={t("moduleContacts")}
 			ariaLabel={incomingRequestCount > 0 ? t("contactRequestsBadge", { count: incomingRequestCount }) : undefined}
 			icon={UsersIcon}
-			linkOptions={{ to: "/contacts", search: { section: DEFAULT_CONTACTS_SECTION_FILTER } }}
+			linkOptions={{ to: "/contacts/$section", params: { section: DEFAULT_CONTACTS_SECTION_FILTER } }}
 			badgeCount={incomingRequestCount}
 		/>
 	)
@@ -551,7 +551,7 @@ const ROUTE_ACTIONS: readonly { id: string; go: (navigate: Navigate) => Promise<
 	{ id: "app.openChats", go: navigate => navigate({ to: "/chats" }) },
 	{
 		id: "app.openContacts",
-		go: navigate => navigate({ to: "/contacts", search: { section: DEFAULT_CONTACTS_SECTION_FILTER } })
+		go: navigate => navigate({ to: "/contacts/$section", params: { section: DEFAULT_CONTACTS_SECTION_FILTER } })
 	},
 	{ id: "app.openTransfers", go: navigate => navigate({ to: "/transfers" }) },
 	{ id: "app.openPhotos", go: navigate => navigate({ to: "/photos" }) },

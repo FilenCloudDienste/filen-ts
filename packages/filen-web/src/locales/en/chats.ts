@@ -110,6 +110,10 @@ export const chats = {
 	chatMentionEveryone: "everyone",
 	/** Message — rendered mention label for an unresolved participant */
 	chatMentionUnknown: "unknown",
+	/** Message — screen-reader-only note on a message that @mentions the reader or @everyone (the row is also tinted) */
+	chatMessageMentionsYou: "Mentions you",
+	/** Message — screen-reader-only note on a message that replies to one of the reader's messages (the row is also tinted) */
+	chatMessageRepliesToYou: "Replies to you",
 
 	// ── Time headers ───────────────────────────────────────────────────────────
 	/** Thread — time header above messages sent today; {{time}} is the clock time */
@@ -166,6 +170,10 @@ export const chats = {
 	chatActionParticipants: "Participants",
 	/** Conversation menu — renames the conversation (opens chatRenameDialog, owner-only) */
 	chatActionRename: "Rename",
+	/** Conversation menu — copies the conversation's ID to the clipboard */
+	chatActionCopyId: "Copy ID",
+	/** Toast shown after copying a conversation's ID */
+	chatCopyIdToast: "Conversation ID copied to clipboard",
 	/** Conversation menu — permanently deletes the conversation (owner-only) */
 	chatActionDelete: "Delete",
 	/** Conversation menu — a non-owner participant removes themselves (opens chatLeaveDialog) */
@@ -283,6 +291,10 @@ export const chats = {
 	chatMessageActionEdit: "Edit",
 	/** Message menu — copies the message text to the clipboard */
 	chatMessageActionCopy: "Copy",
+	/** Message menu — copies the message's ID to the clipboard */
+	chatMessageActionCopyId: "Copy ID",
+	/** Toast shown after copying a message's ID */
+	chatMessageCopyIdToast: "Message ID copied to clipboard",
 	/** Message menu — deletes the message (sender-only, opens chatMessageDeleteDialog) */
 	chatMessageActionDelete: "Delete",
 	/** Message menu — re-queues a failed send (send outbox), resetting its retry budget */
@@ -313,6 +325,36 @@ export const chats = {
 	chatEmbedOpenLink: "Open {{name}}",
 	/** Composer attach menu — trigger button accessible label */
 	chatComposerAttach: "Attach",
+	/** Composer — accessible label and tooltip of the button that opens the emoji picker, and the picker's own label */
+	chatComposerEmoji: "Emoji",
+	/** Emoji picker — label and placeholder of the search field */
+	chatEmojiPickerSearch: "Search emoji",
+	/** Emoji picker — accessible label of the grid while it shows search results */
+	chatEmojiPickerResults: "Search results",
+	/** Emoji picker — shown when a search matches no emoji */
+	chatEmojiPickerNoResults: "No emoji found",
+	/** Emoji picker — shown on the recently used tab before any emoji was used */
+	chatEmojiPickerNoRecent: "Emoji you use show up here",
+	/** Emoji picker tab — recently used emoji */
+	chatEmojiCategoryRecent: "Recently used",
+	/** Emoji picker tab — the Unicode "Smileys & Emotion" group */
+	chatEmojiCategorySmileys: "Smileys & emotion",
+	/** Emoji picker tab — the Unicode "People & Body" group */
+	chatEmojiCategoryPeople: "People & body",
+	/** Emoji picker tab — the Unicode "Animals & Nature" group */
+	chatEmojiCategoryNature: "Animals & nature",
+	/** Emoji picker tab — the Unicode "Food & Drink" group */
+	chatEmojiCategoryFood: "Food & drink",
+	/** Emoji picker tab — the Unicode "Travel & Places" group */
+	chatEmojiCategoryTravel: "Travel & places",
+	/** Emoji picker tab — the Unicode "Activities" group */
+	chatEmojiCategoryActivities: "Activities",
+	/** Emoji picker tab — the Unicode "Objects" group */
+	chatEmojiCategoryObjects: "Objects",
+	/** Emoji picker tab — the Unicode "Symbols" group */
+	chatEmojiCategorySymbols: "Symbols",
+	/** Emoji picker tab — Filen's own image emoji */
+	chatEmojiCategoryCustom: "Filen emoji",
 	/** Composer attach menu — trigger tooltip when disabled for a non-Pro account (pre-gated) */
 	chatComposerAttachPremiumRequired: "Attachments require a Pro subscription",
 	/** Composer — toast when files are dropped on the composer while an earlier attachment is still uploading */

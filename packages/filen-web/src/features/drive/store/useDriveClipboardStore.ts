@@ -3,8 +3,8 @@ import { shareRoleKind } from "@filen/shared"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
-// Drive's own clipboard: items marked to be copied or moved by a later paste. In memory and per tab,
-// never the system clipboard, which holds no drive items.
+// Drive's own clipboard: items marked to be copied or moved by a later paste. In memory and per tab; the system
+// clipboard only takes the items' names (clipboard.ts), never the items.
 export type DriveClipboardMode = "copy" | "cut"
 
 export interface DriveClipboardEntry {

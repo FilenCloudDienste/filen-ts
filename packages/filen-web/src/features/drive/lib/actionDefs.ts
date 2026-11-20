@@ -8,6 +8,7 @@ import {
 	FileTextIcon,
 	FolderInputIcon,
 	FolderOpenIcon,
+	HashIcon,
 	HistoryIcon,
 	InfoIcon,
 	Link2OffIcon,
@@ -47,6 +48,7 @@ export const ACTION_DEFS = {
 	color: { labelKey: "driveActionColor", icon: PaletteIcon },
 	versions: { labelKey: "driveActionVersions", icon: HistoryIcon },
 	info: { labelKey: "driveActionInfo", icon: InfoIcon },
+	copyId: { labelKey: "driveActionCopyId", icon: HashIcon },
 	openContainingDirectory: { labelKey: "driveActionOpenContainingDirectory", icon: FolderOpenIcon },
 	download: { labelKey: "driveActionDownload", icon: DownloadIcon },
 	// A submenu of export formats (downloadAsSubmenu.tsx), offered beside Download.

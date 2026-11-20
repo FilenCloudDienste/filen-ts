@@ -23,12 +23,11 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
-export interface BrowseRowProps {
+// What a row and a tile (browseTile.tsx) both take.
+export interface BrowseCellProps {
 	entry: BrowseEntry
 	index: number
 	total: number
-	// The virtualizer's offset for this row.
-	start: number
 	selected: boolean
 	// The roving cursor, which holds the listbox's one tab stop.
 	active: boolean
@@ -41,6 +40,11 @@ export interface BrowseRowProps {
 	onToggle: (index: number) => void
 	onAction: (entry: BrowseEntry, action: BrowseEntryAction) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
+}
+
+export interface BrowseRowProps extends BrowseCellProps {
+	// The virtualizer's offset for this row.
+	start: number
 }
 
 // The selection box a row and the column header draw. Decorative: the option's aria-selected, or the
@@ -177,7 +181,8 @@ export function BrowseRow({
 	)
 }
 
-function BrowseEntryMenuItems({
+// The entry's menu, behind a right-click and its ⋯ trigger alike.
+export function BrowseEntryMenuItems({
 	family,
 	entry,
 	actions,

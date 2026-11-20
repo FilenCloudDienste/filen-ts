@@ -17,7 +17,7 @@ import { formatSecondsToMediaClock } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { VideoStage } from "@/components/media/video/videoStage"
 import { StageIconButton } from "@/components/media/video/stageButton"
-import { StageCenterCard, StageNotice, StagePanel } from "@/components/media/video/stageCards"
+import { StageCenterCard, StageNotice } from "@/components/media/video/stageCards"
 import { StageSettingsMenu, type SettingsMenuItem } from "@/components/media/video/settingsMenu"
 import { SubtitleDelayPanel, SubtitleStylePanel } from "@/components/media/video/subtitlePanels"
 import { useStageMediaSession } from "@/components/media/video/useStageMediaSession"
@@ -90,7 +90,7 @@ export interface WatchSearch {
 	sub?: string
 }
 
-type Panel = "episodes" | "style" | "delay" | "cast" | null
+type Panel = "episodes" | "style" | "delay" | null
 
 // What post-play offers next: an episode of the same series, or another movie from the same library directory.
 type PostPlayNext = { kind: "episode"; target: WatchItemTarget } | { kind: "title"; id: string; name: string }
@@ -227,7 +227,8 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const episodes = detail === null ? [] : allEpisodes(detail, target?.versionLabel ?? null)
 	const probe = snap.target?.key === targetKey ? snap.probe : null
 	const part = target?.parts[snap.part] ?? target?.parts[0] ?? null
-	const subtitleTracks = part === null ? [] : subtitleTracksOf(part, probe, smiClasses)
+	const subtitleTracks =
+		part === null ? [] : subtitleTracksOf(part, probe, smiClasses, snap.target?.key === targetKey && snap.embeddedTextBlocked)
 	const seriesPrefs = target?.seriesDirUuid === null || target === null ? undefined : doc.series[seriesKey(target.seriesDirUuid)]
 	const audioLang = probe?.audio[snap.audioIndex]?.lang ?? null
 	const choice = subtitleChoiceFor(choiceState, targetKey)
@@ -1229,13 +1230,6 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 						setPanel("delay")
 					}
 				})
-				items.push({
-					id: "cast",
-					label: t("playerCast"),
-					onSelect: () => {
-						setPanel("cast")
-					}
-				})
 
 				return (
 					<>
@@ -1321,15 +1315,6 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 							setPanel(null)
 						}}
 					/>
-				) : panel === "cast" ? (
-					<StagePanel
-						title={t("playerCast")}
-						onClose={() => {
-							setPanel(null)
-						}}
-					>
-						<p className="text-muted-foreground">{t("playerCastUnavailable")}</p>
-					</StagePanel>
 				) : null
 			}
 			holdControls={card !== null || panel !== null || snap.autoplayBlocked}

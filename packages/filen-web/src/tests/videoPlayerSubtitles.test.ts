@@ -293,12 +293,40 @@ describe("embedded text subtitles", () => {
 	}
 	const bare: VideoPartView = { ...PART, subtitles: [] }
 
-	it("are offered from a Matroska file, never from an MP4", () => {
+	it("are offered from a Matroska file for its text codecs", () => {
 		expect(subtitleTracksOf(bare, forcedEnglish).map(track => track.unavailable)).toEqual([null, null])
-		expect(subtitleTracksOf(bare, { ...forcedEnglish, container: "mp4" }).map(track => track.unavailable)).toEqual([
+	})
+
+	it("are offered from an MP4 for timed text and WebVTT, but not from a fragmented one", () => {
+		const mp4: VideoProbe = {
+			...PROBE,
+			container: "mp4",
+			index: "moov",
+			subs: [
+				{ id: 2, codecId: "tx3g", lang: "eng", name: "English", def: true, forced: false, hi: false },
+				{ id: 3, codecId: "wvtt", lang: "ger", name: null, def: false, forced: false, hi: false },
+				{ id: 4, codecId: "stpp", lang: "fre", name: null, def: false, forced: false, hi: false },
+				{ id: 5, codecId: "mp4s", lang: "spa", name: null, def: false, forced: false, hi: false },
+				{ id: 6, codecId: "S_TEXT/UTF8", lang: "ita", name: null, def: false, forced: false, hi: false }
+			]
+		}
+
+		expect(subtitleTracksOf(bare, mp4).map(track => track.unavailable)).toEqual([null, null, "embedded", "image", "embedded"])
+		expect(subtitleTracksOf(bare, { ...mp4, container: "mov", index: null }).map(track => track.unavailable)).toEqual([
+			null,
+			null,
 			"embedded",
+			"image",
 			"embedded"
 		])
+		expect(subtitleTracksOf(bare, { ...mp4, index: "mfra" }).map(track => track.unavailable)).toEqual([
+			"embedded",
+			"embedded",
+			"embedded",
+			"image",
+			"embedded"
+		])
+		expect(subtitleTracksOf(bare, { ...mp4, container: "ts" }).map(track => track.unavailable)[0]).toBe("embedded")
 	})
 
 	it("Smart shows the file's forced foreign dialogue under audio in a preferred language", () => {

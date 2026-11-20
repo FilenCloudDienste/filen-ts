@@ -1260,11 +1260,11 @@ describe("audio", () => {
 		expect(audioEngine.setLoopMode).toHaveBeenCalledWith("all")
 	})
 
-	it("opens a playlist by its search param", async () => {
+	it("opens a playlist by its path", async () => {
 		await call("list_playlists", {})
 		await call("open_playlist", { handle: "p1" })
 
-		expect(router.navigate).toHaveBeenCalledWith({ to: "/playlists", search: { playlist: playlist.uuid } })
+		expect(router.navigate).toHaveBeenCalledWith({ to: "/playlists/$uuid", params: { uuid: playlist.uuid } })
 	})
 })
 
@@ -1272,7 +1272,7 @@ describe("open_route", () => {
 	it("navigates the way the icon rail does", async () => {
 		const result = await call("open_route", { route: "contacts" })
 
-		expect(router.navigate).toHaveBeenCalledWith({ to: "/contacts", search: { section: "all" } })
+		expect(router.navigate).toHaveBeenCalledWith({ to: "/contacts/$section", params: { section: "all" } })
 		// Says it read nothing there, or the model lists what it imagines the screen shows.
 		expect(result).toMatchObject({ ok: true, result: { opened: "contacts", contentsRead: false } })
 	})
@@ -1828,16 +1828,16 @@ describe("check and preview", () => {
 	})
 
 	it("turns a write without an adapter away before the guard, as a valid call", async () => {
-		const tool = assistantToolByName("move_items")
+		const tool = assistantToolByName("set_note_flags")
 
 		if (tool === undefined) {
 			throw new Error("no tool")
 		}
 
-		await expect(executor.check({ callId: "call", tool, args: { handles: ["d0"], destination: "d0" } })).resolves.toMatchObject({
+		await expect(executor.check({ callId: "call", tool, args: { handle: "n1", pinned: true } })).resolves.toMatchObject({
 			ok: false,
 			invalid: false,
-			error: '"Move" is not available yet; the user can do it in the app'
+			error: '"Pin, favorite or archive note" is not available yet; the user can do it in the app'
 		})
 	})
 
@@ -1894,7 +1894,7 @@ describe("check and preview", () => {
 
 describe("writes without an adapter", () => {
 	it("never run, even confirmed", async () => {
-		const tool = assistantToolByName("set_favorite")
+		const tool = assistantToolByName("add_tracks_to_playlist")
 
 		if (tool === undefined) {
 			throw new Error("no tool")
@@ -1903,12 +1903,12 @@ describe("writes without an adapter", () => {
 		const result = await executor.execute({
 			callId: "call",
 			tool,
-			args: { handles: ["d0"], favorite: true },
+			args: { playlist: "p1", handles: ["f1"] },
 			confirmed: true,
 			signal: new AbortController().signal
 		})
 
-		expect(result).toMatchObject({ ok: false, error: '"Add or remove favorites" is not available yet; the user can do it in the app' })
+		expect(result).toMatchObject({ ok: false, error: '"Add to playlist" is not available yet; the user can do it in the app' })
 	})
 })
 

@@ -301,13 +301,48 @@ function projectRootTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
 	return projectTreeChildren(items).filter(child => !isDotFilenName(child.name))
 }
 
+function directoryTreeChildrenQueryOptions(uuid: string | null, showDotFilen: boolean) {
+	return {
+		...driveListingQueryOptions("drive", uuid),
+		select: uuid === null && !showDotFilen ? projectRootTreeChildren : projectTreeChildren
+	}
+}
+
 export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResult<DirectoryTreeChild[]> {
 	const showDotFilen = useShowDotFilenPreferenceQuery().data ?? DEFAULT_SHOW_DOT_FILEN
 
-	return useQuery({
-		...driveListingQueryOptions("drive", uuid),
-		select: uuid === null && !showDotFilen ? projectRootTreeChildren : projectTreeChildren
+	return useQuery(directoryTreeChildrenQueryOptions(uuid, showDotFilen))
+}
+
+// One open level of the sidebar tree: just what the tree reads of its query.
+export interface DirectoryTreeLevel {
+	readonly status: "pending" | "error" | "success"
+	readonly isFetching: boolean
+	readonly data: readonly DirectoryTreeChild[] | undefined
+}
+
+// Module-level so useQueries keeps its combined result, and so its identity, until a level's fields change.
+function combineTreeLevels(results: readonly UseQueryResult<DirectoryTreeChild[]>[]): DirectoryTreeLevel[] {
+	return results.map(result => ({ status: result.status, isFetching: result.isFetching, data: result.data }))
+}
+
+// Every open level of the sidebar tree in one observer, in `parents` order (null = the root's children): the same
+// cache entries as useDirectoryTreeChildrenQuery, so a level still shares its listing's fetch and socket patches.
+export function useDirectoryTreeLevelsQuery(parents: readonly (string | null)[]): readonly DirectoryTreeLevel[] {
+	const showDotFilen = useShowDotFilenPreferenceQuery().data ?? DEFAULT_SHOW_DOT_FILEN
+
+	return useQueries({
+		queries: parents.map(uuid => directoryTreeChildrenQueryOptions(uuid, showDotFilen)),
+		combine: combineTreeLevels
 	})
+}
+
+// A non-root tree level's directories as the cache already holds them (a level the tree does not observe yet), in
+// the order its query's select gives them: never a fetch.
+export function cachedDirectoryTreeChildren(uuid: string): DirectoryTreeChild[] | undefined {
+	const items = cachedListing("drive", uuid)
+
+	return items === undefined ? undefined : projectTreeChildren(items)
 }
 
 // A listing as the cache holds it: never a fetch.

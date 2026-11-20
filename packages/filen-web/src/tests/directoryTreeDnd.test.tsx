@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { createElement } from "react"
-import { QueryClient, type UseQueryResult } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
 
 const { performMove, startCopyWithCard } = vi.hoisted(() => ({ performMove: vi.fn(), startCopyWithCard: vi.fn() }))
@@ -14,14 +14,29 @@ vi.mock("@/features/drive/lib/dnd", async importOriginal => ({
 	performMove
 }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
+// Every open level straight from the seeded listings, which is what the tree's query hook selects from them.
+vi.mock("@/features/drive/queries/drive", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/drive/queries/drive")>()
+
+	return {
+		...original,
+		useDirectoryTreeLevelsQuery: (parents: readonly (string | null)[]) =>
+			parents.map(uuid => ({
+				status: "success",
+				isFetching: false,
+				data: original.projectTreeChildren(original.cachedListing("drive", uuid) ?? [])
+			}))
+	}
+})
 
 import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { clearDragPayload, getDragPayload } from "@/features/drive/lib/dnd"
-import { driveListingQueryKey, projectTreeChildren, type DirectoryTreeChild } from "@/features/drive/queries/drive"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { testUuid } from "@/tests/support/uuid"
+import { sizedScrollArea } from "@/tests/support/viewport"
 import { endDrag, FAKE_FRAMES, FAKE_FRAMES_AND_TIMEOUTS, moveOver, pressOn, releaseOver, stubHitTest } from "@/tests/support/pointerDrag"
 
 function dirItem(label: string, name: string, parent: string): DriveItem {
@@ -45,9 +60,9 @@ const LISTINGS = new Map<string | null, DriveItem[]>([
 	[testUuid("docs"), [INNER]]
 ])
 
-// A node's navigating button: what the pointer presses and rests on.
+// A node's row: what the pointer presses and rests on.
 function button(name: string): HTMLElement {
-	return screen.getByRole("button", { name })
+	return screen.getByRole("treeitem", { name })
 }
 
 function row(name: string): Element {
@@ -70,12 +85,10 @@ function renderTree(onToggle: (uuid: string) => void = () => undefined) {
 		activePath: [],
 		isOpen: uuid => uuid === testUuid("docs"),
 		onToggle,
-		onNavigate: () => undefined,
-		useChildren: uuid =>
-			({ status: "success", data: projectTreeChildren(LISTINGS.get(uuid) ?? []) }) as UseQueryResult<DirectoryTreeChild[]>
+		onNavigate: () => undefined
 	}
 
-	return render(createElement(DirectoryTree, { tree }))
+	return render(createElement(DirectoryTree, { tree, scrollElement: sizedScrollArea(400) }))
 }
 
 // Presses a node and moves past the drag threshold, over nothing yet.

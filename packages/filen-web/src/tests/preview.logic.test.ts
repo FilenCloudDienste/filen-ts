@@ -293,7 +293,8 @@ describe("previewType — extension category map", () => {
 		"bat",
 		"ps",
 		"protobuf",
-		"proto"
+		"proto",
+		"ahk"
 	])("%s -> code", ext => {
 		expect(previewType(fileNamed(`source.${ext}`))).toBe("code")
 	})

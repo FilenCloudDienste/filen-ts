@@ -137,7 +137,7 @@ export function railShift(index: number, from: number, to: number, pitch: number
 }
 
 // Whether `pathname` is inside the section an entry links to: a group's when it is inside any child's.
-// Drive, Notes, Chats and Settings nest deeper routes under their root; Contacts is a single page.
+// Every entry nests deeper routes under its root (Contacts its sections).
 export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 	switch (id) {
 		case "drive":
@@ -149,7 +149,7 @@ export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 		case "settings":
 			return pathIsUnder(pathname, "/settings")
 		case "contacts":
-			return pathname === "/contacts"
+			return pathIsUnder(pathname, "/contacts")
 		case "media":
 		case "computer":
 			return activeRailChild(id, pathname) !== null

@@ -18,11 +18,20 @@ import { connectFileKindVerdictStorage } from "@/features/drive/lib/fileKindVerd
 import "@/features/assistant/loop/register" // side-effect: registers the on-device assistant with its UI
 import { LANGUAGE_STORAGE_KEY, startLanguage } from "@/lib/i18n/language"
 import { prepareLegacyWebStartup } from "@/lib/legacyWebMigration.logic"
+import { legacyUrlTarget } from "@/lib/legacyUrl.logic"
 import { installSessionEndedCheck } from "@/features/shell/lib/sessionEnded"
 import { desktopBridge } from "@/lib/desktop"
 import { syncDesktopShellStrings } from "@/lib/i18n/desktopShell"
 import { refreshDocumentTitle } from "@/lib/head/refreshTitle"
 import { startNativeImageProbes } from "@/lib/nativeImageSupport"
+
+// A URL an earlier form of the app handed out (a bookmark, a reset email, an old public link) becomes its new address
+// before the router reads it, so every guard and a signed-out visit's return target see only the new one.
+const legacyTarget = legacyUrlTarget(window.location)
+
+if (legacyTarget !== null) {
+	window.history.replaceState(window.history.state, "", legacyTarget)
+}
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
 // rendering it inside whichever ancestor layout happened to match, and makes the root match the

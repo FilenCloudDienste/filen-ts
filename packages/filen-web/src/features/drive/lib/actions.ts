@@ -36,6 +36,7 @@ import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, runBulkOutcomes, type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
 import { attemptOp, runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { emitBranchChange } from "@/features/drive/lib/branchChanges"
+import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 
 export type { VoidActionOutcome }
 
@@ -73,6 +74,18 @@ function withCurrentColor(item: DriveItem): { item: DriveItem; colorKnown: boole
 	const found = findOwnedListingItem(item.data.uuid)
 
 	return found?.current === true ? { item: keepingColor(found.item, item), colorKnown: true } : { item, colorKnown: false }
+}
+
+// ── Create directory ─────────────────────────────────────────────────────
+
+// New directory, as the name dialog and the assistant run it: created, then patched into its listing. A name that
+// already names a directory there resolves to that directory (see runCreateDirectory).
+export function createDirectory(parentUuid: string | null, name: string): Promise<ActionOutcome> {
+	return runCreateDirectory(
+		{ createDirectory: (parent, next) => sdkApi.createDirectory(parent, next), patchListing: driveListingQueryUpdate },
+		parentUuid,
+		name
+	)
 }
 
 // ── Rename ───────────────────────────────────────────────────────────────

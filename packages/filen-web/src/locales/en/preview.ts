@@ -654,6 +654,8 @@ export const preview = {
 	previewMediaSubtitleEmbedded: "Embedded",
 	/** Video player — a chosen subtitle track that could not be read; {{name}} is the track's label */
 	previewMediaSubtitleUnreadable: "{{name}} (couldn't be loaded)",
+	/** Video player — a subtitle track inside the file that this browser could only show by converting the video, which it can't do for this file; {{name}} is the track's label */
+	previewMediaSubtitleUnplayable: "{{name}} (can't be shown in this browser)",
 	/** Video player — announced to screen readers when the chosen subtitle file could not be read */
 	previewMediaSubtitleUnreadableNotice: "The subtitles couldn't be loaded.",
 
@@ -702,8 +704,14 @@ export const preview = {
 	previewIworkSavedCopy: "Preview copy saved in the document. Open in {{app}} for the full document.",
 	/** iWork preview — the document carries no preview of itself (or is no iWork package) */
 	previewIworkNoPreview: "No preview inside this file.",
-	/** iWork preview — the document is opened from a public link or an archive, where its package can't be read yet */
+	/** iWork preview — the document is held where its package can't be read (bytes already loaded, such as an attachment) */
 	previewIworkUnavailableHere: "This document can't be previewed here yet.",
+	/** iWork document inside an archive, confirm dialog title — previewing it means unpacking all of it first (its contents list sits at its end) */
+	previewIworkInflateTitle: "Unpack this document first?",
+	/** iWork document inside an archive, confirm dialog body; {{name}} is the document, {{size}} its unpacked size */
+	previewIworkInflateBody: "“{{name}}” is compressed inside this archive. Previewing it unpacks all {{size}} of it first.",
+	/** iWork document inside an archive, confirm dialog — previews it anyway */
+	previewIworkInflateOpen: "Preview",
 	/** Archive browser — the user stopped the listing */
 	previewArchiveStopped_one: "Listing stopped after {{count}} entry.",
 	/** Archive browser — the user stopped the listing */

@@ -215,9 +215,8 @@ function PairTabs({ pairId, tab, issues }: { pairId: string; tab: SyncTab; issue
 			{TABS.map(entry => (
 				<Link
 					key={entry.tab}
-					to="/sync/$pairId"
-					params={{ pairId }}
-					search={{ tab: entry.tab }}
+					to="/sync/$pairId/$tab"
+					params={{ pairId, tab: entry.tab }}
 					replace
 					aria-current={entry.tab === tab ? "page" : undefined}
 					className={TAB_CLASS}
@@ -299,7 +298,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 	)
 
 	function showTab(next: SyncTab): void {
-		void navigate({ to: "/sync/$pairId", params: { pairId: pair.id }, search: { tab: next }, replace: true })
+		void navigate({ to: "/sync/$pairId/$tab", params: { pairId: pair.id, tab: next }, replace: true })
 	}
 
 	useAction(

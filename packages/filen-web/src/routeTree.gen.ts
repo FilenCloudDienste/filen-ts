@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as NoCoiRouteImport } from './routes/no-coi'
 import { Route as NoOpfsRouteImport } from './routes/no-opfs'
 import { Route as RegisterRouteImport } from './routes/register'
+import { Route as ResetRouteImport } from './routes/reset'
 import { Route as AppChatsRouteImport } from './routes/_app/chats'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
@@ -31,14 +32,17 @@ import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppVideosRouteImport } from './routes/_app/videos'
 import { Route as DUuidRouteImport } from './routes/d.$uuid'
 import { Route as FUuidRouteImport } from './routes/f.$uuid'
-import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
 import { Route as AppChatsUuidRouteImport } from './routes/_app/chats.$uuid'
+import { Route as AppContactsIndexRouteImport } from './routes/_app/contacts.index'
+import { Route as AppContactsSectionRouteImport } from './routes/_app/contacts.$section'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 import { Route as AppMountsIndexRouteImport } from './routes/_app/mounts.index'
 import { Route as AppMountsRoleRouteImport } from './routes/_app/mounts.$role'
 import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
 import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
+import { Route as AppPlaylistsIndexRouteImport } from './routes/_app/playlists.index'
+import { Route as AppPlaylistsUuidRouteImport } from './routes/_app/playlists.$uuid'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
@@ -61,6 +65,10 @@ import { Route as AppVideosMoviesRouteImport } from './routes/_app/videos.movies
 import { Route as AppVideosOtherRouteImport } from './routes/_app/videos.other'
 import { Route as AppVideosSearchRouteImport } from './routes/_app/videos.search'
 import { Route as AppVideosShowsRouteImport } from './routes/_app/videos.shows'
+import { Route as AppSettingsPlansIndexRouteImport } from './routes/_app/settings/plans.index'
+import { Route as AppSettingsPlansPlanRouteImport } from './routes/_app/settings/plans.$plan'
+import { Route as AppSyncPairIdIndexRouteImport } from './routes/_app/sync.$pairId.index'
+import { Route as AppSyncPairIdTabRouteImport } from './routes/_app/sync.$pairId.$tab'
 import { Route as AppVideosLibraryUuidRouteImport } from './routes/_app/videos.library.$uuid'
 import { Route as AppVideosTitleUuidRouteImport } from './routes/_app/videos.title.$uuid'
 import { Route as AppVideosWatchUuidRouteImport } from './routes/_app/videos.watch.$uuid'
@@ -92,6 +100,11 @@ const NoOpfsRoute = NoOpfsRouteImport.update({
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
   path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetRoute = ResetRouteImport.update({
+  id: '/reset',
+  path: '/reset',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppChatsRoute = AppChatsRouteImport.update({
@@ -174,11 +187,6 @@ const FUuidRoute = FUuidRouteImport.update({
   path: '/f/$uuid',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ResetTokenRoute = ResetTokenRouteImport.update({
-  id: '/reset/$token',
-  path: '/reset/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppChatsIndexRoute = AppChatsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -188,6 +196,16 @@ const AppChatsUuidRoute = AppChatsUuidRouteImport.update({
   id: '/$uuid',
   path: '/$uuid',
   getParentRoute: () => AppChatsRoute,
+} as any)
+const AppContactsIndexRoute = AppContactsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppContactsRoute,
+} as any)
+const AppContactsSectionRoute = AppContactsSectionRouteImport.update({
+  id: '/$section',
+  path: '/$section',
+  getParentRoute: () => AppContactsRoute,
 } as any)
 const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
   id: '/drive/$',
@@ -213,6 +231,16 @@ const AppNotesUuidRoute = AppNotesUuidRouteImport.update({
   id: '/$uuid',
   path: '/$uuid',
   getParentRoute: () => AppNotesRoute,
+} as any)
+const AppPlaylistsIndexRoute = AppPlaylistsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppPlaylistsRoute,
+} as any)
+const AppPlaylistsUuidRoute = AppPlaylistsUuidRouteImport.update({
+  id: '/$uuid',
+  path: '/$uuid',
+  getParentRoute: () => AppPlaylistsRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/',
@@ -324,6 +352,26 @@ const AppVideosShowsRoute = AppVideosShowsRouteImport.update({
   path: '/shows',
   getParentRoute: () => AppVideosRoute,
 } as any)
+const AppSettingsPlansIndexRoute = AppSettingsPlansIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsPlansRoute,
+} as any)
+const AppSettingsPlansPlanRoute = AppSettingsPlansPlanRouteImport.update({
+  id: '/$plan',
+  path: '/$plan',
+  getParentRoute: () => AppSettingsPlansRoute,
+} as any)
+const AppSyncPairIdIndexRoute = AppSyncPairIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSyncPairIdRoute,
+} as any)
+const AppSyncPairIdTabRoute = AppSyncPairIdTabRouteImport.update({
+  id: '/$tab',
+  path: '/$tab',
+  getParentRoute: () => AppSyncPairIdRoute,
+} as any)
 const AppVideosLibraryUuidRoute = AppVideosLibraryUuidRouteImport.update({
   id: '/library/$uuid',
   path: '/library/$uuid',
@@ -346,15 +394,16 @@ export interface FileRoutesByFullPath {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof AppSettingsRouteRouteWithChildren
   '/chats': typeof AppChatsRouteWithChildren
-  '/contacts': typeof AppContactsRoute
+  '/contacts': typeof AppContactsRouteWithChildren
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
   '/mounts': typeof AppMountsRouteWithChildren
   '/notes': typeof AppNotesRouteWithChildren
   '/photos': typeof AppPhotosRoute
-  '/playlists': typeof AppPlaylistsRoute
+  '/playlists': typeof AppPlaylistsRouteWithChildren
   '/recents': typeof AppRecentsRoute
   '/sync': typeof AppSyncRouteWithChildren
   '/transfers': typeof AppTransfersRoute
@@ -362,11 +411,12 @@ export interface FileRoutesByFullPath {
   '/videos': typeof AppVideosRouteWithChildren
   '/d/$uuid': typeof DUuidRoute
   '/f/$uuid': typeof FUuidRoute
-  '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
+  '/contacts/$section': typeof AppContactsSectionRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/mounts/$role': typeof AppMountsRoleRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
+  '/playlists/$uuid': typeof AppPlaylistsUuidRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
@@ -376,25 +426,31 @@ export interface FileRoutesByFullPath {
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/office': typeof AppSettingsOfficeRoute
-  '/settings/plans': typeof AppSettingsPlansRoute
+  '/settings/plans': typeof AppSettingsPlansRouteWithChildren
   '/settings/security': typeof AppSettingsSecurityRoute
   '/settings/storage': typeof AppSettingsStorageRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
-  '/sync/$pairId': typeof AppSyncPairIdRoute
+  '/sync/$pairId': typeof AppSyncPairIdRouteWithChildren
   '/videos/movies': typeof AppVideosMoviesRoute
   '/videos/other': typeof AppVideosOtherRoute
   '/videos/search': typeof AppVideosSearchRoute
   '/videos/shows': typeof AppVideosShowsRoute
   '/chats/': typeof AppChatsIndexRoute
+  '/contacts/': typeof AppContactsIndexRoute
   '/mounts/': typeof AppMountsIndexRoute
   '/notes/': typeof AppNotesIndexRoute
+  '/playlists/': typeof AppPlaylistsIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/sync/': typeof AppSyncIndexRoute
   '/videos/': typeof AppVideosIndexRoute
+  '/settings/plans/$plan': typeof AppSettingsPlansPlanRoute
+  '/sync/$pairId/$tab': typeof AppSyncPairIdTabRoute
   '/videos/library/$uuid': typeof AppVideosLibraryUuidRoute
   '/videos/title/$uuid': typeof AppVideosTitleUuidRoute
   '/videos/watch/$uuid': typeof AppVideosWatchUuidRoute
+  '/settings/plans/': typeof AppSettingsPlansIndexRoute
+  '/sync/$pairId/': typeof AppSyncPairIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -402,21 +458,21 @@ export interface FileRoutesByTo {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
-  '/contacts': typeof AppContactsRoute
+  '/reset': typeof ResetRoute
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
   '/photos': typeof AppPhotosRoute
-  '/playlists': typeof AppPlaylistsRoute
   '/recents': typeof AppRecentsRoute
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/d/$uuid': typeof DUuidRoute
   '/f/$uuid': typeof FUuidRoute
-  '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
+  '/contacts/$section': typeof AppContactsSectionRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/mounts/$role': typeof AppMountsRoleRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
+  '/playlists/$uuid': typeof AppPlaylistsUuidRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
@@ -426,25 +482,29 @@ export interface FileRoutesByTo {
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/office': typeof AppSettingsOfficeRoute
-  '/settings/plans': typeof AppSettingsPlansRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/settings/storage': typeof AppSettingsStorageRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
-  '/sync/$pairId': typeof AppSyncPairIdRoute
   '/videos/movies': typeof AppVideosMoviesRoute
   '/videos/other': typeof AppVideosOtherRoute
   '/videos/search': typeof AppVideosSearchRoute
   '/videos/shows': typeof AppVideosShowsRoute
   '/chats': typeof AppChatsIndexRoute
+  '/contacts': typeof AppContactsIndexRoute
   '/mounts': typeof AppMountsIndexRoute
   '/notes': typeof AppNotesIndexRoute
+  '/playlists': typeof AppPlaylistsIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/sync': typeof AppSyncIndexRoute
   '/videos': typeof AppVideosIndexRoute
+  '/settings/plans/$plan': typeof AppSettingsPlansPlanRoute
+  '/sync/$pairId/$tab': typeof AppSyncPairIdTabRoute
   '/videos/library/$uuid': typeof AppVideosLibraryUuidRoute
   '/videos/title/$uuid': typeof AppVideosTitleUuidRoute
   '/videos/watch/$uuid': typeof AppVideosWatchUuidRoute
+  '/settings/plans': typeof AppSettingsPlansIndexRoute
+  '/sync/$pairId': typeof AppSyncPairIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -454,15 +514,16 @@ export interface FileRoutesById {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/reset': typeof ResetRoute
   '/_app/settings': typeof AppSettingsRouteRouteWithChildren
   '/_app/chats': typeof AppChatsRouteWithChildren
-  '/_app/contacts': typeof AppContactsRoute
+  '/_app/contacts': typeof AppContactsRouteWithChildren
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/links': typeof AppLinksRoute
   '/_app/mounts': typeof AppMountsRouteWithChildren
   '/_app/notes': typeof AppNotesRouteWithChildren
   '/_app/photos': typeof AppPhotosRoute
-  '/_app/playlists': typeof AppPlaylistsRoute
+  '/_app/playlists': typeof AppPlaylistsRouteWithChildren
   '/_app/recents': typeof AppRecentsRoute
   '/_app/sync': typeof AppSyncRouteWithChildren
   '/_app/transfers': typeof AppTransfersRoute
@@ -470,11 +531,12 @@ export interface FileRoutesById {
   '/_app/videos': typeof AppVideosRouteWithChildren
   '/d/$uuid': typeof DUuidRoute
   '/f/$uuid': typeof FUuidRoute
-  '/reset/$token': typeof ResetTokenRoute
   '/_app/chats/$uuid': typeof AppChatsUuidRoute
+  '/_app/contacts/$section': typeof AppContactsSectionRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/mounts/$role': typeof AppMountsRoleRoute
   '/_app/notes/$uuid': typeof AppNotesUuidRoute
+  '/_app/playlists/$uuid': typeof AppPlaylistsUuidRoute
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
@@ -484,25 +546,31 @@ export interface FileRoutesById {
   '/_app/settings/events': typeof AppSettingsEventsRoute
   '/_app/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/_app/settings/office': typeof AppSettingsOfficeRoute
-  '/_app/settings/plans': typeof AppSettingsPlansRoute
+  '/_app/settings/plans': typeof AppSettingsPlansRouteWithChildren
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/settings/storage': typeof AppSettingsStorageRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
-  '/_app/sync/$pairId': typeof AppSyncPairIdRoute
+  '/_app/sync/$pairId': typeof AppSyncPairIdRouteWithChildren
   '/_app/videos/movies': typeof AppVideosMoviesRoute
   '/_app/videos/other': typeof AppVideosOtherRoute
   '/_app/videos/search': typeof AppVideosSearchRoute
   '/_app/videos/shows': typeof AppVideosShowsRoute
   '/_app/chats/': typeof AppChatsIndexRoute
+  '/_app/contacts/': typeof AppContactsIndexRoute
   '/_app/mounts/': typeof AppMountsIndexRoute
   '/_app/notes/': typeof AppNotesIndexRoute
+  '/_app/playlists/': typeof AppPlaylistsIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/sync/': typeof AppSyncIndexRoute
   '/_app/videos/': typeof AppVideosIndexRoute
+  '/_app/settings/plans/$plan': typeof AppSettingsPlansPlanRoute
+  '/_app/sync/$pairId/$tab': typeof AppSyncPairIdTabRoute
   '/_app/videos/library/$uuid': typeof AppVideosLibraryUuidRoute
   '/_app/videos/title/$uuid': typeof AppVideosTitleUuidRoute
   '/_app/videos/watch/$uuid': typeof AppVideosWatchUuidRoute
+  '/_app/settings/plans/': typeof AppSettingsPlansIndexRoute
+  '/_app/sync/$pairId/': typeof AppSyncPairIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -512,6 +580,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/reset'
     | '/settings'
     | '/chats'
     | '/contacts'
@@ -528,11 +597,12 @@ export interface FileRouteTypes {
     | '/videos'
     | '/d/$uuid'
     | '/f/$uuid'
-    | '/reset/$token'
     | '/chats/$uuid'
+    | '/contacts/$section'
     | '/drive/$'
     | '/mounts/$role'
     | '/notes/$uuid'
+    | '/playlists/$uuid'
     | '/settings/account'
     | '/settings/advanced'
     | '/settings/appearance'
@@ -553,14 +623,20 @@ export interface FileRouteTypes {
     | '/videos/search'
     | '/videos/shows'
     | '/chats/'
+    | '/contacts/'
     | '/mounts/'
     | '/notes/'
+    | '/playlists/'
     | '/settings/'
     | '/sync/'
     | '/videos/'
+    | '/settings/plans/$plan'
+    | '/sync/$pairId/$tab'
     | '/videos/library/$uuid'
     | '/videos/title/$uuid'
     | '/videos/watch/$uuid'
+    | '/settings/plans/'
+    | '/sync/$pairId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -568,21 +644,21 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
-    | '/contacts'
+    | '/reset'
     | '/favorites'
     | '/links'
     | '/photos'
-    | '/playlists'
     | '/recents'
     | '/transfers'
     | '/trash'
     | '/d/$uuid'
     | '/f/$uuid'
-    | '/reset/$token'
     | '/chats/$uuid'
+    | '/contacts/$section'
     | '/drive/$'
     | '/mounts/$role'
     | '/notes/$uuid'
+    | '/playlists/$uuid'
     | '/settings/account'
     | '/settings/advanced'
     | '/settings/appearance'
@@ -592,25 +668,29 @@ export interface FileRouteTypes {
     | '/settings/events'
     | '/settings/keyboard'
     | '/settings/office'
-    | '/settings/plans'
     | '/settings/security'
     | '/settings/storage'
     | '/shared-in/$'
     | '/shared-out/$'
-    | '/sync/$pairId'
     | '/videos/movies'
     | '/videos/other'
     | '/videos/search'
     | '/videos/shows'
     | '/chats'
+    | '/contacts'
     | '/mounts'
     | '/notes'
+    | '/playlists'
     | '/settings'
     | '/sync'
     | '/videos'
+    | '/settings/plans/$plan'
+    | '/sync/$pairId/$tab'
     | '/videos/library/$uuid'
     | '/videos/title/$uuid'
     | '/videos/watch/$uuid'
+    | '/settings/plans'
+    | '/sync/$pairId'
   id:
     | '__root__'
     | '/'
@@ -619,6 +699,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/reset'
     | '/_app/settings'
     | '/_app/chats'
     | '/_app/contacts'
@@ -635,11 +716,12 @@ export interface FileRouteTypes {
     | '/_app/videos'
     | '/d/$uuid'
     | '/f/$uuid'
-    | '/reset/$token'
     | '/_app/chats/$uuid'
+    | '/_app/contacts/$section'
     | '/_app/drive/$'
     | '/_app/mounts/$role'
     | '/_app/notes/$uuid'
+    | '/_app/playlists/$uuid'
     | '/_app/settings/account'
     | '/_app/settings/advanced'
     | '/_app/settings/appearance'
@@ -660,14 +742,20 @@ export interface FileRouteTypes {
     | '/_app/videos/search'
     | '/_app/videos/shows'
     | '/_app/chats/'
+    | '/_app/contacts/'
     | '/_app/mounts/'
     | '/_app/notes/'
+    | '/_app/playlists/'
     | '/_app/settings/'
     | '/_app/sync/'
     | '/_app/videos/'
+    | '/_app/settings/plans/$plan'
+    | '/_app/sync/$pairId/$tab'
     | '/_app/videos/library/$uuid'
     | '/_app/videos/title/$uuid'
     | '/_app/videos/watch/$uuid'
+    | '/_app/settings/plans/'
+    | '/_app/sync/$pairId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -677,9 +765,9 @@ export interface RootRouteChildren {
   NoCoiRoute: typeof NoCoiRoute
   NoOpfsRoute: typeof NoOpfsRoute
   RegisterRoute: typeof RegisterRoute
+  ResetRoute: typeof ResetRoute
   DUuidRoute: typeof DUuidRoute
   FUuidRoute: typeof FUuidRoute
-  ResetTokenRoute: typeof ResetTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -724,6 +812,13 @@ declare module '@tanstack/react-router' {
       path: '/register'
       fullPath: '/register'
       preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset': {
+      id: '/reset'
+      path: '/reset'
+      fullPath: '/reset'
+      preLoaderRoute: typeof ResetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/chats': {
@@ -838,13 +933,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FUuidRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reset/$token': {
-      id: '/reset/$token'
-      path: '/reset/$token'
-      fullPath: '/reset/$token'
-      preLoaderRoute: typeof ResetTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_app/chats/': {
       id: '/_app/chats/'
       path: '/'
@@ -858,6 +946,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/chats/$uuid'
       preLoaderRoute: typeof AppChatsUuidRouteImport
       parentRoute: typeof AppChatsRoute
+    }
+    '/_app/contacts/': {
+      id: '/_app/contacts/'
+      path: '/'
+      fullPath: '/contacts/'
+      preLoaderRoute: typeof AppContactsIndexRouteImport
+      parentRoute: typeof AppContactsRoute
+    }
+    '/_app/contacts/$section': {
+      id: '/_app/contacts/$section'
+      path: '/$section'
+      fullPath: '/contacts/$section'
+      preLoaderRoute: typeof AppContactsSectionRouteImport
+      parentRoute: typeof AppContactsRoute
     }
     '/_app/drive/$': {
       id: '/_app/drive/$'
@@ -893,6 +995,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/notes/$uuid'
       preLoaderRoute: typeof AppNotesUuidRouteImport
       parentRoute: typeof AppNotesRoute
+    }
+    '/_app/playlists/': {
+      id: '/_app/playlists/'
+      path: '/'
+      fullPath: '/playlists/'
+      preLoaderRoute: typeof AppPlaylistsIndexRouteImport
+      parentRoute: typeof AppPlaylistsRoute
+    }
+    '/_app/playlists/$uuid': {
+      id: '/_app/playlists/$uuid'
+      path: '/$uuid'
+      fullPath: '/playlists/$uuid'
+      preLoaderRoute: typeof AppPlaylistsUuidRouteImport
+      parentRoute: typeof AppPlaylistsRoute
     }
     '/_app/settings/': {
       id: '/_app/settings/'
@@ -1048,6 +1164,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVideosShowsRouteImport
       parentRoute: typeof AppVideosRoute
     }
+    '/_app/settings/plans/': {
+      id: '/_app/settings/plans/'
+      path: '/'
+      fullPath: '/settings/plans/'
+      preLoaderRoute: typeof AppSettingsPlansIndexRouteImport
+      parentRoute: typeof AppSettingsPlansRoute
+    }
+    '/_app/settings/plans/$plan': {
+      id: '/_app/settings/plans/$plan'
+      path: '/$plan'
+      fullPath: '/settings/plans/$plan'
+      preLoaderRoute: typeof AppSettingsPlansPlanRouteImport
+      parentRoute: typeof AppSettingsPlansRoute
+    }
+    '/_app/sync/$pairId/': {
+      id: '/_app/sync/$pairId/'
+      path: '/'
+      fullPath: '/sync/$pairId/'
+      preLoaderRoute: typeof AppSyncPairIdIndexRouteImport
+      parentRoute: typeof AppSyncPairIdRoute
+    }
+    '/_app/sync/$pairId/$tab': {
+      id: '/_app/sync/$pairId/$tab'
+      path: '/$tab'
+      fullPath: '/sync/$pairId/$tab'
+      preLoaderRoute: typeof AppSyncPairIdTabRouteImport
+      parentRoute: typeof AppSyncPairIdRoute
+    }
     '/_app/videos/library/$uuid': {
       id: '/_app/videos/library/$uuid'
       path: '/library/$uuid'
@@ -1072,6 +1216,19 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppSettingsPlansRouteChildren {
+  AppSettingsPlansPlanRoute: typeof AppSettingsPlansPlanRoute
+  AppSettingsPlansIndexRoute: typeof AppSettingsPlansIndexRoute
+}
+
+const AppSettingsPlansRouteChildren: AppSettingsPlansRouteChildren = {
+  AppSettingsPlansPlanRoute: AppSettingsPlansPlanRoute,
+  AppSettingsPlansIndexRoute: AppSettingsPlansIndexRoute,
+}
+
+const AppSettingsPlansRouteWithChildren =
+  AppSettingsPlansRoute._addFileChildren(AppSettingsPlansRouteChildren)
+
 interface AppSettingsRouteRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
   AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
@@ -1082,7 +1239,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
   AppSettingsKeyboardRoute: typeof AppSettingsKeyboardRoute
   AppSettingsOfficeRoute: typeof AppSettingsOfficeRoute
-  AppSettingsPlansRoute: typeof AppSettingsPlansRoute
+  AppSettingsPlansRoute: typeof AppSettingsPlansRouteWithChildren
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
   AppSettingsStorageRoute: typeof AppSettingsStorageRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
@@ -1098,7 +1255,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsEventsRoute: AppSettingsEventsRoute,
   AppSettingsKeyboardRoute: AppSettingsKeyboardRoute,
   AppSettingsOfficeRoute: AppSettingsOfficeRoute,
-  AppSettingsPlansRoute: AppSettingsPlansRoute,
+  AppSettingsPlansRoute: AppSettingsPlansRouteWithChildren,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
   AppSettingsStorageRoute: AppSettingsStorageRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
@@ -1119,6 +1276,20 @@ const AppChatsRouteChildren: AppChatsRouteChildren = {
 
 const AppChatsRouteWithChildren = AppChatsRoute._addFileChildren(
   AppChatsRouteChildren,
+)
+
+interface AppContactsRouteChildren {
+  AppContactsSectionRoute: typeof AppContactsSectionRoute
+  AppContactsIndexRoute: typeof AppContactsIndexRoute
+}
+
+const AppContactsRouteChildren: AppContactsRouteChildren = {
+  AppContactsSectionRoute: AppContactsSectionRoute,
+  AppContactsIndexRoute: AppContactsIndexRoute,
+}
+
+const AppContactsRouteWithChildren = AppContactsRoute._addFileChildren(
+  AppContactsRouteChildren,
 )
 
 interface AppMountsRouteChildren {
@@ -1149,13 +1320,41 @@ const AppNotesRouteWithChildren = AppNotesRoute._addFileChildren(
   AppNotesRouteChildren,
 )
 
+interface AppPlaylistsRouteChildren {
+  AppPlaylistsUuidRoute: typeof AppPlaylistsUuidRoute
+  AppPlaylistsIndexRoute: typeof AppPlaylistsIndexRoute
+}
+
+const AppPlaylistsRouteChildren: AppPlaylistsRouteChildren = {
+  AppPlaylistsUuidRoute: AppPlaylistsUuidRoute,
+  AppPlaylistsIndexRoute: AppPlaylistsIndexRoute,
+}
+
+const AppPlaylistsRouteWithChildren = AppPlaylistsRoute._addFileChildren(
+  AppPlaylistsRouteChildren,
+)
+
+interface AppSyncPairIdRouteChildren {
+  AppSyncPairIdTabRoute: typeof AppSyncPairIdTabRoute
+  AppSyncPairIdIndexRoute: typeof AppSyncPairIdIndexRoute
+}
+
+const AppSyncPairIdRouteChildren: AppSyncPairIdRouteChildren = {
+  AppSyncPairIdTabRoute: AppSyncPairIdTabRoute,
+  AppSyncPairIdIndexRoute: AppSyncPairIdIndexRoute,
+}
+
+const AppSyncPairIdRouteWithChildren = AppSyncPairIdRoute._addFileChildren(
+  AppSyncPairIdRouteChildren,
+)
+
 interface AppSyncRouteChildren {
-  AppSyncPairIdRoute: typeof AppSyncPairIdRoute
+  AppSyncPairIdRoute: typeof AppSyncPairIdRouteWithChildren
   AppSyncIndexRoute: typeof AppSyncIndexRoute
 }
 
 const AppSyncRouteChildren: AppSyncRouteChildren = {
-  AppSyncPairIdRoute: AppSyncPairIdRoute,
+  AppSyncPairIdRoute: AppSyncPairIdRouteWithChildren,
   AppSyncIndexRoute: AppSyncIndexRoute,
 }
 
@@ -1191,13 +1390,13 @@ const AppVideosRouteWithChildren = AppVideosRoute._addFileChildren(
 interface AppRouteRouteChildren {
   AppSettingsRouteRoute: typeof AppSettingsRouteRouteWithChildren
   AppChatsRoute: typeof AppChatsRouteWithChildren
-  AppContactsRoute: typeof AppContactsRoute
+  AppContactsRoute: typeof AppContactsRouteWithChildren
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppLinksRoute: typeof AppLinksRoute
   AppMountsRoute: typeof AppMountsRouteWithChildren
   AppNotesRoute: typeof AppNotesRouteWithChildren
   AppPhotosRoute: typeof AppPhotosRoute
-  AppPlaylistsRoute: typeof AppPlaylistsRoute
+  AppPlaylistsRoute: typeof AppPlaylistsRouteWithChildren
   AppRecentsRoute: typeof AppRecentsRoute
   AppSyncRoute: typeof AppSyncRouteWithChildren
   AppTransfersRoute: typeof AppTransfersRoute
@@ -1211,13 +1410,13 @@ interface AppRouteRouteChildren {
 const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppSettingsRouteRoute: AppSettingsRouteRouteWithChildren,
   AppChatsRoute: AppChatsRouteWithChildren,
-  AppContactsRoute: AppContactsRoute,
+  AppContactsRoute: AppContactsRouteWithChildren,
   AppFavoritesRoute: AppFavoritesRoute,
   AppLinksRoute: AppLinksRoute,
   AppMountsRoute: AppMountsRouteWithChildren,
   AppNotesRoute: AppNotesRouteWithChildren,
   AppPhotosRoute: AppPhotosRoute,
-  AppPlaylistsRoute: AppPlaylistsRoute,
+  AppPlaylistsRoute: AppPlaylistsRouteWithChildren,
   AppRecentsRoute: AppRecentsRoute,
   AppSyncRoute: AppSyncRouteWithChildren,
   AppTransfersRoute: AppTransfersRoute,
@@ -1239,9 +1438,9 @@ const rootRouteChildren: RootRouteChildren = {
   NoCoiRoute: NoCoiRoute,
   NoOpfsRoute: NoOpfsRoute,
   RegisterRoute: RegisterRoute,
+  ResetRoute: ResetRoute,
   DUuidRoute: DUuidRoute,
   FUuidRoute: FUuidRoute,
-  ResetTokenRoute: ResetTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

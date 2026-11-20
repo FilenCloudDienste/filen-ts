@@ -47,6 +47,10 @@ describe("shell actions", () => {
 		expect(defaultComboOn(def("app.focusNotifications"), WEB)).toBe("alt+t")
 	})
 
+	it("opens the assistant with Q everywhere, a key no scope, browser or desktop shell takes", () => {
+		expect(defaults("app.toggleAssistant")).toEqual(["q", "q", "q", "q"])
+	})
+
 	it("leaves the actions without a free key unassigned", () => {
 		for (const id of [
 			"app.openRecents",

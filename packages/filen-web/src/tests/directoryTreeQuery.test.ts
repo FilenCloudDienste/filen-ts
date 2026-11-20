@@ -19,10 +19,12 @@ vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/t
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import {
+	cachedDirectoryTreeChildren,
 	driveListingQueryKey,
 	driveListingQueryUpdate,
 	useDirectoryListingQuery,
-	useDirectoryTreeChildrenQuery
+	useDirectoryTreeChildrenQuery,
+	useDirectoryTreeLevelsQuery
 } from "@/features/drive/queries/drive"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { testUuid } from "@/tests/support/uuid"
@@ -169,5 +171,48 @@ describe("useDirectoryTreeChildrenQuery shares the drive listing's cache entry",
 			expect(result.current.data?.map(child => child.name)).toEqual(["Alpha", "Beta", "Zeta"])
 		})
 		expect(listDirectory).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("useDirectoryTreeLevelsQuery observes every open level in one hook", () => {
+	it("serves each level from its listing's entry, in order, and keeps its result while nothing changes", async () => {
+		const opened = testUuid("opened")
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: opened }), [narrowItem(mockDir("child", "Child"))])
+
+		const { result, rerender } = renderHook(() => useDirectoryTreeLevelsQuery([null, opened]), { wrapper })
+
+		// Rendered straight from the listing's cached data before any fetch resolves.
+		expect(result.current[1]).toMatchObject({
+			status: "success",
+			data: [{ uuid: testUuid("child"), name: "Child", color: "default" }]
+		})
+
+		await waitFor(() => {
+			expect(queryClient.isFetching()).toBe(0)
+		})
+
+		expect(result.current[0]?.data?.map(child => child.name)).toEqual(["Alpha", "Zeta"])
+		expect(listDirectory).toHaveBeenCalledWith({ kind: "root" })
+
+		const settled = result.current
+
+		rerender()
+		expect(result.current).toBe(settled)
+	})
+})
+
+describe("cachedDirectoryTreeChildren reads a level the tree does not observe yet", () => {
+	it("projects a held listing as the level's query would, and never fetches", () => {
+		const held = testUuid("held")
+
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: held }), [
+			narrowItem(mockDir("zeta", "Zeta")),
+			narrowItem(mockFile("file")),
+			narrowItem(mockDir("alpha", "Alpha"))
+		])
+
+		expect(cachedDirectoryTreeChildren(held)?.map(child => child.name)).toEqual(["Alpha", "Zeta"])
+		expect(cachedDirectoryTreeChildren(testUuid("unlisted"))).toBeUndefined()
+		expect(listDirectory).not.toHaveBeenCalled()
 	})
 })

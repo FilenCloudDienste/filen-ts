@@ -2613,6 +2613,18 @@ const api = {
 	fetchLinkedRawPreviewAnon(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
 		return withLinkedUnauth(unauth => writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file, ...params })))
 	},
+	// The anon mirror of makeSdkThumbnail, for a public directory's grid: the same decode through the public-link client.
+	// Never persisted (no thumbnail sweep armed): a visitor's thumbnails stay in the page's memory.
+	async makeLinkedSdkThumbnailAnon(
+		file: AnyFile,
+		maxWidth: number,
+		maxHeight: number,
+		lossyQuality: number
+	): Promise<SdkThumbnailResult> {
+		return withLinkedUnauth(async unauth =>
+			asThumbnailResult(await unauth.makeThumbnailInMemory({ file, maxWidth, maxHeight, lossyQuality }))
+		)
+	},
 	// Anon single-file save — the streaming mirror of downloadFileToWriter, same transferId convention
 	// so cancelTransfer/pauseTransfer/resumeTransfer reach an anon transfer with no changes of their own. The WritableStream sink arrives via Comlink.transfer;
 	// progress is a plain-fn-wrapped proxy (a raw proxy is serde-rejected — same as the authed path).

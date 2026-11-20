@@ -80,8 +80,8 @@ type ActiveContactDialog =
 // Owns both contacts queries, the search box's local state, bulk-selection mode, and the whole
 // status-branch (loading / load-error / empty / sectioned list) — mirrors DirectoryListing's
 // own self-contained shape (route files stay thin; the content component owns its data + its dialog
-// host). `section` is owned by the route (its own `section` search param, see
-// routes/_app/contacts.tsx) — the sidebar and this page are siblings under appShell, not
+// host). `section` is owned by the route (its `section` path param, see
+// routes/_app/contacts.$section.tsx) — the sidebar and this page are siblings under appShell, not
 // parent/child, so the URL is their one shared source of truth for which section is active.
 export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const { t } = useTranslation(["contacts", "common"])
@@ -255,7 +255,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		const next = CONTACTS_SECTION_FILTERS[CONTACTS_SECTION_FILTERS.indexOf(section) + step]
 
 		if (next !== undefined) {
-			void navigate({ to: "/contacts", search: { section: next } })
+			void navigate({ to: "/contacts/$section", params: { section: next } })
 		}
 	}
 

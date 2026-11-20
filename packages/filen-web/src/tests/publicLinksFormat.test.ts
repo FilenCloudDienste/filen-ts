@@ -1,7 +1,7 @@
 import { Buffer } from "buffer"
 import { describe, expect, it } from "vitest"
 import { parseFilenPublicLink } from "@filen/shared"
-import { buildPublicLinkUrl, resolveRouteLink, deriveLegacyRedirect } from "@/features/publicLinks/lib/format.logic"
+import { buildPublicLinkUrl, resolveRouteLink } from "@/features/publicLinks/lib/format.logic"
 
 // Version 4 (third group starts "4"), variant 8 (fourth "8") — @filen/shared's parseFilenPublicLink
 // validates both nibbles via the 'uuid' package.
@@ -12,7 +12,8 @@ const KEY_HEX = Buffer.from(KEY_PLAINTEXT, "utf-8").toString("hex")
 
 // Format-recognition cases (new/legacy eras, rejections) live in @filen/shared's
 // src/tests/publicLink.test.ts. This file keeps what stays web-local: building links (checked against
-// the shared parser) and route-side resolution.
+// the shared parser) and route-side resolution. The previous web app's links are rewritten to the new format
+// before the router starts (legacyUrl.test.ts).
 
 describe("buildPublicLinkUrl", () => {
 	it("builds the NEW file format (/f/, hex key in a literal-# fragment)", () => {
@@ -76,33 +77,5 @@ describe("resolveRouteLink — uuid from the path param, key from the fragment",
 
 	it("rejects a too-short key fragment", () => {
 		expect(resolveRouteLink(UUID, "#abcd")).toBeNull()
-	})
-})
-
-describe("deriveLegacyRedirect — legacy hash → new swapped target", () => {
-	it("legacy /f/ (directory) → new directory target, key verbatim", () => {
-		expect(deriveLegacyRedirect(`#/f/${UUID}%23${KEY_HEX}`)).toEqual({ kind: "directory", uuid: UUID, key: KEY_HEX })
-	})
-
-	it("legacy /d/ (file) → new file target, key verbatim", () => {
-		expect(deriveLegacyRedirect(`#/d/${UUID}#${KEY_HEX}`)).toEqual({ kind: "file", uuid: UUID, key: KEY_HEX })
-	})
-
-	it("preserves a raw legacy key verbatim (no re-encoding)", () => {
-		const rawKey = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
-
-		expect(deriveLegacyRedirect(`#/d/${UUID}%23${rawKey}`)).toEqual({ kind: "file", uuid: UUID, key: rawKey })
-	})
-
-	it("returns null for a non-link hash", () => {
-		expect(deriveLegacyRedirect("#section-heading")).toBeNull()
-	})
-
-	it("returns null for an empty hash", () => {
-		expect(deriveLegacyRedirect("")).toBeNull()
-	})
-
-	it("returns null for a legacy shape with no key", () => {
-		expect(deriveLegacyRedirect(`#/f/${UUID}`)).toBeNull()
 	})
 })

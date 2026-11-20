@@ -135,6 +135,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"share",
 			"publicLink",
 			"trash"
@@ -149,6 +150,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"share",
 			"publicLink",
 			"trash"
@@ -175,7 +177,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 	})
 
 	it("otherwise matches driveItemActions' own variant gating exactly (download aside)", () => {
-		expect(menuIds(dirItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
+		expect(menuIds(dirItem(), "trash")).toEqual(["restore", "deletePermanently", "info", "copyId"])
 		expect(menuIds(fileItem(), "links")).toEqual([
 			"rename",
 			"copy",
@@ -183,12 +185,13 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"share",
 			"publicLink",
 			"copyLink",
 			"trash"
 		])
-		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copy", "compress"])
+		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copyId", "copy", "compress"])
 	})
 })
 

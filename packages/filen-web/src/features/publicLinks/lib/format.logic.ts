@@ -1,9 +1,9 @@
 import { Buffer } from "buffer"
-import { UUID_SUB, decodeHexKey, isUuid } from "@filen/shared"
+import { decodeHexKey, isUuid } from "@filen/shared"
 
 // Single source of truth for what a Filen public link looks like — both BUILDING one (the drive
-// link dialog imports the prefixes + builder here) and resolving one (the legacy redirect and the
-// /f/ /d/ route logic import from here). Pure: no network, no React, no SDK — just string shapes.
+// link dialog imports the prefixes + builder here) and resolving one (the /f/ /d/ route logic imports
+// from here; the previous web app's links are rewritten to this format by lib/legacyUrl.logic.ts). Pure: no network, no React, no SDK — just string shapes.
 //
 // ★ SECURITY: the decryption key ALWAYS rides the URL FRAGMENT (after '#'), never the path or a
 // query param. A fragment is never sent to any server, so the key stays entirely client-side — the
@@ -95,39 +95,4 @@ export function resolveRouteLink(uuidParam: string, hash: string): ResolvedRoute
 	const key = decodeLinkKeyFragment(rawKey)
 
 	return key === null ? null : { uuid, key }
-}
-
-export interface LegacyRedirectTarget {
-	// The RESOLVED content kind (already un-swapped) — the redirect site maps it back to the new route
-	// letter (file → /f/, directory → /d/).
-	kind: PublicLinkKind
-	uuid: string
-	// The key exactly as the legacy fragment carried it — preserved verbatim into the new fragment so
-	// no re-encoding can corrupt a raw-vs-hex legacy key. The new route's resolver decodes it.
-	key: string
-}
-
-// The whole legacy route lives in window.location.hash (old-web was a hash router, so the server
-// never saw it — this is client-side by construction). Given that hash, if it is a legacy public-link
-// shape, derive the NEW swapped-path target (legacy /f/ = dir → new /d/; legacy /d/ = file → new /f/),
-// key preserved verbatim. A non-link hash returns null → the index route keeps its normal behavior.
-const LEGACY_HASH_RE = new RegExp(`^#/([df])/(${UUID_SUB})(?:%23|#)(.+)$`, "i")
-
-export function deriveLegacyRedirect(hash: string): LegacyRedirectTarget | null {
-	const m = LEGACY_HASH_RE.exec(hash)
-
-	if (m === null) {
-		return null
-	}
-
-	const letter = m[1]?.toLowerCase()
-	const uuid = m[2]
-	const key = m[3]
-
-	if (letter === undefined || uuid === undefined || key === undefined || key.length === 0) {
-		return null
-	}
-
-	// Legacy letters are swapped: `d` = file, `f` = directory.
-	return { kind: letter === "d" ? "file" : "directory", uuid, key }
 }

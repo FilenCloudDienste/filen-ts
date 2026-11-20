@@ -14,7 +14,7 @@ const state = vi.hoisted(() => ({ failed: false }))
 vi.mock("@/features/preview/hooks/usePreviewVideo", () => ({ usePreviewVideo: () => ({ controller: null, snapshot: null }) }))
 vi.mock("@/features/preview/hooks/usePreviewSubtitles", () => ({
 	usePreviewSubtitles: (): PreviewSubtitles => ({
-		options: [{ id: "s:1", lang: "en", title: "", forced: false, sdh: false, embedded: false }],
+		options: [{ id: "s:1", lang: "en", title: "", forced: false, sdh: false, embedded: false, unplayable: false }],
 		selected: state.failed ? "s:1" : "off",
 		select: () => undefined,
 		cues: null,

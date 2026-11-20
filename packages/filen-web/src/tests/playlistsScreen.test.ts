@@ -100,16 +100,16 @@ vi.mock("@/features/drive/lib/thumbCache", () => ({
 	deleteThumbnail: vi.fn()
 }))
 
-// Router boundary, same shape as notesSidebarRows.test.ts's: Link renders a plain anchor carrying its
-// target's search param, and the sidebar's loose useSearch reads `router.searchParam`.
-const router = vi.hoisted(() => ({ searchParam: undefined as string | undefined }))
+// Router boundary, same shape as notesSidebarRows.test.ts's: Link renders a plain anchor with its params
+// filled in, and the sidebar's loose useParams reads `router.uuidParam`.
+const router = vi.hoisted(() => ({ uuidParam: undefined as string | undefined }))
 
 vi.mock("@tanstack/react-router", () => ({
-	Link: ({ to, search, children, ...rest }: { to: string; search?: { playlist?: string }; children?: ReactNode }) =>
-		createElement("a", { ...rest, href: search?.playlist === undefined ? to : `${to}?playlist=${search.playlist}` }, children),
+	Link: ({ to, params, children, ...rest }: { to: string; params?: { uuid?: string }; children?: ReactNode }) =>
+		createElement("a", { ...rest, href: params?.uuid === undefined ? to : to.replace("$uuid", params.uuid) }, children),
 	useNavigate: () => () => undefined,
-	useSearch: ({ select }: { select: (search: { playlist?: string }) => unknown }) =>
-		select(router.searchParam === undefined ? {} : { playlist: router.searchParam })
+	useParams: ({ select }: { select: (params: { uuid?: string }) => unknown }) =>
+		router.uuidParam === undefined ? undefined : select({ uuid: router.uuidParam })
 }))
 
 const { PlaylistsScreen } = await import("@/features/audio/screens/playlists")
@@ -158,7 +158,7 @@ function success(entries: PlaylistEntry[]) {
 }
 
 function renderSplitView(selectedUuid?: string) {
-	router.searchParam = selectedUuid
+	router.uuidParam = selectedUuid
 
 	return render(createElement("div", null, createElement(PlaylistsSidebar), createElement(PlaylistsScreen, { selectedUuid })))
 }
@@ -208,7 +208,7 @@ describe("playlists split view", () => {
 		renderSplitView()
 
 		// A row's accessible name folds in its meta line ("Road trip1 track · Just now") — prefix-matched.
-		expect(screen.getByRole("link", { name: /^Road trip/ }).getAttribute("href")).toBe("/playlists?playlist=p1")
+		expect(screen.getByRole("link", { name: /^Road trip/ }).getAttribute("href")).toBe("/playlists/p1")
 		expect(screen.getByRole("link", { name: /^Focus/ }).textContent).toContain("2 tracks")
 	})
 

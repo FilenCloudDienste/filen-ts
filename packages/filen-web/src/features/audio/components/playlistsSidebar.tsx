@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { Link, useSearch } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { ListMusicIcon, PlusIcon } from "lucide-react"
 import { cn, type Playlist } from "@filen/shared"
 import { usePlaylistsQuery, type PlaylistEntry } from "@/features/audio/queries/playlists"
@@ -20,7 +20,7 @@ import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 
 // The shell's playlists contextual sidebar: a resizable panel like notes/chats, one row per playlist.
-// Rows link to /playlists with an always-explicit `playlist` param (see routes/_app/playlists.tsx);
+// Rows link to /playlists/<uuid> (see routes/_app/playlists.tsx);
 // create/rename/delete open the shared PlaylistDialogsHost the route screen mounts.
 export function PlaylistsSidebar() {
 	const { t } = useTranslation(["audio", "common"])
@@ -28,7 +28,7 @@ export function PlaylistsSidebar() {
 	const playlistsQuery = usePlaylistsQuery()
 	// Loose: the shell mounts this panel off the pathname, so it reads the param without asserting the
 	// match (the same render can still hold the previous route's).
-	const selectedParam = useSearch({ strict: false, select: search => search.playlist })
+	const selectedParam = useParams({ from: "/_app/playlists/$uuid", shouldThrow: false, select: params => params.uuid })
 	const selection = usePlaylistSelection(selectedParam)
 	const entries = playlistsQuery.data ?? []
 	const selectedUuid = selection.deciding ? undefined : resolveSelectedPlaylist(entries, selection.uuid)?.uuid
@@ -116,8 +116,8 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 
 	// The wrapper is the hover group and the no-drag region, like the notes/chats/drive rows: the whole
 	// row, ⋯ included, must be outside the panel's Electron drag region for hover to reach it. Highlight
-	// keys on `selected` rather than TanStack's data-status: with no (or a stale) `playlist` param the view
-	// shows the last opened or first playlist, which no Link's own search matches.
+	// keys on `selected` rather than TanStack's data-status: with no (or a stale) uuid in the path the view
+	// shows the last opened or first playlist, which no Link's own path matches.
 	return (
 		<li
 			// The playlist keyboard commands act on the row holding focus (playlistKeys.logic.ts's PLAYLIST_ROW_ATTRIBUTE).
@@ -130,8 +130,8 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 			)}
 		>
 			<Link
-				to="/playlists"
-				search={{ playlist: playlist.uuid }}
+				to="/playlists/$uuid"
+				params={{ uuid: playlist.uuid }}
 				aria-current={selected ? "page" : undefined}
 				className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl py-1.5 pl-1.5 text-sm focus-ring outline-none"
 			>

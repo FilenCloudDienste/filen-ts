@@ -59,8 +59,8 @@ export const openPlaylistTool: ToolAdapter = async (input, scope) => {
 
 	await navigateChecked({
 		router,
-		navigate: () => router.navigate({ to: "/playlists", search: { playlist: playlist.uuid } }),
-		landed: pathname => pathname === "/playlists",
+		navigate: () => router.navigate({ to: "/playlists/$uuid", params: { uuid: playlist.uuid } }),
+		landed: pathname => pathname === `/playlists/${playlist.uuid}`,
 		signal: scope.signal
 	})
 

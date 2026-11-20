@@ -12,6 +12,7 @@ import { copyItemLink } from "@/features/drive/lib/copyLink"
 import { DRIVE_RESTORE, driveActivity } from "@/features/drive/lib/activity"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { startDownloads } from "@/features/drive/lib/download"
+import { copyText } from "@/lib/copyText"
 import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	applyOfflineGate,
@@ -119,6 +120,12 @@ function ItemMenuEntries({
 		// ahead of it. Download is always enabled (downloadDescriptor), directories included.
 		if (descriptor.id === "download") {
 			void startDownloads([item])
+			return
+		}
+
+		// Before any await too: the clipboard write needs the click's activation (Safari ends it at the first one).
+		if (descriptor.id === "copyId") {
+			void copyText(item.data.uuid, t("driveCopyIdToast"))
 			return
 		}
 

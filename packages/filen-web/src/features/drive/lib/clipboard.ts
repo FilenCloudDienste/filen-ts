@@ -10,10 +10,46 @@ import { asListed } from "@/features/drive/lib/clipboardRecheck"
 import { type ClipboardShortcutContext } from "@/features/drive/lib/clipboard.logic"
 import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
 
+// Each copy or cut, and the last one whose names reached the system clipboard.
+let heldCount = 0
+let writtenCount = 0
+
+// The system clipboard takes the items' names, inside the click or key that held them, so the files or screenshot it
+// held before no longer reach a later paste event and the drive clipboard pastes; a copy made elsewhere after it
+// replaces the names and wins in turn. Nothing is said when the write is refused: systemClipboardOutdated tells.
+function writeNames(items: readonly DriveItem[], count: number): void {
+	const names = items.flatMap(item => {
+		const name = item.data.decryptedMeta?.name
+
+		return name === undefined ? [] : [name]
+	})
+
+	try {
+		navigator.clipboard
+			.writeText(names.join("\n"))
+			.then(() => {
+				if (count === heldCount) {
+					writtenCount = count
+				}
+			})
+			.catch(() => undefined)
+	} catch {
+		// No clipboard API (an insecure context): the system clipboard stays as it was.
+	}
+}
+
 function hold(mode: DriveClipboardMode, items: readonly DriveItem[]): void {
 	const listed = asListed(items)
 
+	heldCount++
 	useDriveClipboardStore.getState().set({ mode, items: listed.items }, listed.current)
+	writeNames(items, heldCount)
+}
+
+// Whether the system clipboard may still hold what it held before the drive clipboard's entry was made, its write
+// refused or not yet done: a paste event's files are then older than the entry, which pastes instead.
+export function systemClipboardOutdated(): boolean {
+	return useDriveClipboardStore.getState().entry !== null && writtenCount !== heldCount
 }
 
 export function copyToClipboard(items: readonly DriveItem[]): void {

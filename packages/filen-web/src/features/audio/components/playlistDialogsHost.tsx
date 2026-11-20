@@ -9,7 +9,7 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
 // Renders whichever playlist dialog the sidebar or the pane opened (usePlaylistDialogStore).
-// `selectedUuid` is the route's raw `playlist` param: deleting the playlist it names drops the param,
+// `selectedUuid` is the route's raw `uuid` param: deleting the playlist it names drops the param,
 // so the view falls back to the first remaining playlist instead of carrying a dead uuid in the URL.
 export function PlaylistDialogsHost({ selectedUuid }: { selectedUuid: string | undefined }) {
 	const { t } = useTranslation("audio")
@@ -29,7 +29,7 @@ export function PlaylistDialogsHost({ selectedUuid }: { selectedUuid: string | u
 			const playlist = await createPlaylist(name.trim())
 
 			closePlaylistDialog()
-			void navigate({ to: "/playlists", search: { playlist: playlist.uuid } })
+			void navigate({ to: "/playlists/$uuid", params: { uuid: playlist.uuid } })
 		} catch (error) {
 			toast.error(errorLabel(error))
 		} finally {
@@ -68,7 +68,7 @@ export function PlaylistDialogsHost({ selectedUuid }: { selectedUuid: string | u
 			closePlaylistDialog()
 
 			if (uuid === selectedUuid) {
-				void navigate({ to: "/playlists", search: {}, replace: true })
+				void navigate({ to: "/playlists", replace: true })
 			}
 		} catch (error) {
 			toast.error(errorLabel(error))

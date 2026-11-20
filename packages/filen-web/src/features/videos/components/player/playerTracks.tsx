@@ -90,11 +90,14 @@ export function PlayerTracks({
 			label: subtitleName(track),
 			detail:
 				track.unavailable === "embedded"
-					? t("subtitleEmbeddedUnavailable")
-					: track.unavailable === "image"
-						? t("subtitleImageUnavailable")
-						: [track.title, track.format?.toUpperCase()].filter(part => part !== undefined && part.length > 0).join(" · ") ||
-							undefined,
+					? t("subtitleFormatUnsupported")
+					: track.unavailable === "playback"
+						? t("subtitleEmbeddedUnplayable")
+						: track.unavailable === "image"
+							? t("subtitleImageUnavailable")
+							: [track.title, track.format?.toUpperCase()]
+									.filter(part => part !== undefined && part.length > 0)
+									.join(" · ") || undefined,
 			disabled: track.unavailable !== null
 		}))
 	]

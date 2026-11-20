@@ -18,10 +18,9 @@ async function gotoContacts(page: Page): Promise<void> {
 	await bootTo(page)
 
 	await page.getByRole("link", { name: "Contacts", exact: true }).click()
-	// The rail's own Contacts entry always passes an explicit `section: "all"` search param (see
-	// iconRail.tsx — required by the route's own non-optional search schema), so the landing URL is
-	// never bare "/contacts".
-	await page.waitForURL(/\/contacts\?section=all$/)
+	// The rail's own Contacts entry links the default section's path (see iconRail.tsx), so the landing
+	// URL is never bare "/contacts".
+	await page.waitForURL(/\/contacts\/all$/)
 }
 
 // The content region below the search field has exactly one of three terminal states — loading
@@ -82,24 +81,22 @@ test.describe("contacts", () => {
 			await expect(sidebar.getByRole("link", { name: label, exact: true })).toBeVisible()
 		}
 
-		// gotoContacts already landed on "?section=all" (the rail's own explicit default) — the sidebar's
+		// gotoContacts already landed on "/contacts/all" (the rail's own explicit default) — the sidebar's
 		// "All" entry is current, and the page's own <h1> reads the generic module title rather than any
 		// one section's name.
 		await expect(sidebar.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page")
 		await expect(main.getByRole("heading", { name: "Contacts", exact: true, level: 1 })).toBeVisible()
 
 		await sidebar.getByRole("link", { name: "Blocked", exact: true }).click()
-		await page.waitForURL(/\/contacts\?section=blocked$/)
+		await page.waitForURL(/\/contacts\/blocked$/)
 
 		await expect(sidebar.getByRole("link", { name: "Blocked", exact: true })).toHaveAttribute("aria-current", "page")
 		await expect(sidebar.getByRole("link", { name: "All", exact: true })).not.toHaveAttribute("aria-current", "page")
 		await expect(main.getByRole("heading", { name: "Blocked", exact: true, level: 1 })).toBeVisible()
 
-		// Switching back to All re-serializes "?section=all" explicitly — every filter, "all" included,
-		// always appears in the URL (see routes/_app/contacts.tsx's own doc comment on why no
-		// default-eliding middleware is used here).
+		// Switching back to All puts "all" in the path too: every section, "all" included, has its own URL.
 		await sidebar.getByRole("link", { name: "All", exact: true }).click()
-		await page.waitForURL(/\/contacts\?section=all$/)
+		await page.waitForURL(/\/contacts\/all$/)
 		await expect(sidebar.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 

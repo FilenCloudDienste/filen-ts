@@ -1,7 +1,8 @@
-import { useState } from "react"
+import { use, useState } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
+import { ThumbnailSourceContext } from "@/features/drive/lib/thumbnailSource"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { cn, dirColorHex } from "@filen/shared"
 
@@ -27,6 +28,7 @@ export function ItemThumbnail({
 	iconClassName: string
 }) {
 	const thumbUrl = useThumbnail(item, index)
+	const source = use(ThumbnailSourceContext)
 	// Whether this mount had to wait for its thumbnail.
 	const [waited] = useState(thumbUrl === undefined)
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount. Never reset
@@ -50,7 +52,7 @@ export function ItemThumbnail({
 			decoding="async"
 			className={cn("thumbnail-range", imgClassName, waited && "animate-in fade-in")}
 			onError={() => {
-				invalidateThumbnail(item.data.uuid)
+				invalidateThumbnail(item.data.uuid, source.deps)
 				setThumbFailed(true)
 			}}
 		/>

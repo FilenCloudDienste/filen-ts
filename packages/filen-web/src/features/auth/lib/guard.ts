@@ -20,7 +20,9 @@ export async function redirectIfAuthed(): Promise<void> {
 
 		switch (target?.kind) {
 			case "plans":
-				throw redirect({ to: "/settings/plans", search: target.search })
+				throw target.target.plan === undefined
+					? redirect({ to: "/settings/plans" })
+					: redirect({ to: "/settings/plans/$plan", params: { plan: String(target.target.plan) } })
 			case "path":
 				throw redirect({ href: target.href })
 			default:
@@ -37,7 +39,9 @@ export async function navigateAfterSignIn(navigate: UseNavigateResult<string>): 
 
 	switch (target?.kind) {
 		case "plans":
-			await navigate({ to: "/settings/plans", search: target.search })
+			await (target.target.plan === undefined
+				? navigate({ to: "/settings/plans" })
+				: navigate({ to: "/settings/plans/$plan", params: { plan: String(target.target.plan) } }))
 			break
 		case "path":
 			await navigate({ href: target.href })

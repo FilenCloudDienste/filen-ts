@@ -29,8 +29,13 @@ vi.mock("@/queries/account", () => ({
 	useAccountQuery: () => accountQuery.current
 }))
 vi.mock("@/lib/desktop", () => ({ desktopBridge, desktopPlatform: () => undefined }))
+// The Plans layout reads the preselected plan from its child route's path param.
+const planParam = vi.hoisted(() => ({ current: undefined as string | undefined }))
+
 vi.mock("@tanstack/react-router", async () => ({
 	...(await vi.importActual<object>("@tanstack/react-router")),
+	useParams: ({ select }: { select: (params: { plan: string }) => unknown }) =>
+		planParam.current === undefined ? undefined : select({ plan: planParam.current }),
 	Link: ({ children, to, ...rest }: { children: ReactNode; to: string; "aria-label"?: string; "aria-describedby"?: string }) =>
 		createElement("a", { href: to, "aria-label": rest["aria-label"], "aria-describedby": rest["aria-describedby"] }, children),
 	useNavigate: () => vi.fn()
@@ -78,6 +83,7 @@ beforeEach(() => {
 	onlineManager.setOnline(true)
 	desktopBridge.mockReturnValue(undefined)
 	masterKeys.notExported = false
+	planParam.current = undefined
 })
 
 afterEach(() => {
@@ -165,7 +171,7 @@ describe("Plans page", () => {
 	const beforeLoad = PlansRoute.options.beforeLoad as () => void
 
 	it("renders the plans under its own heading, passing the preselected plan", () => {
-		vi.spyOn(PlansRoute, "useSearch").mockReturnValue({ plan: 27 })
+		planParam.current = "27"
 		accountQuery.current = query(info())
 		render(createElement(page))
 

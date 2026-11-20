@@ -36,12 +36,10 @@ const FILTER_LABEL_KEY: Record<ContactsSectionFilter, ContactsKey> = {
 
 // The shell's contacts contextual sidebar: a flat list of section-filter nav links, same w-52
 // rounded-xl borderless panel geometry as the other module sidebars (SettingsSidebar's shape is the
-// closest match — a flat single-level nav, no tree/search of its own). Every entry targets the same
-// "/contacts" route with a different, always-explicit `section` search param (see
-// routes/_app/contacts.tsx — deliberately no default-eliding middleware there, see its own doc
-// comment) — TanStack stamps `data-status="active"`/`aria-current="page"` on the matching Link by
-// comparing search params too (its default `includeSearch` behavior), so this needs no manual
-// pathname/search comparison here, same as every sibling sidebar.
+// closest match — a flat single-level nav, no tree/search of its own). Every entry targets
+// "/contacts/$section" with its own section — TanStack stamps `data-status="active"`/`aria-current="page"`
+// on the Link whose path matches, so this needs no manual pathname comparison here, same as every
+// sibling sidebar.
 export function ContactsSidebar() {
 	const { t } = useTranslation(["contacts", "common"])
 	// The same two caches ContactsList (and the rail, for requests) already subscribe to — reading them
@@ -68,8 +66,8 @@ export function ContactsSidebar() {
 						return (
 							<Link
 								key={filter}
-								to="/contacts"
-								search={{ section: filter }}
+								to="/contacts/$section"
+								params={{ section: filter }}
 								// Described, not named: the link's accessible name stays its bare label.
 								aria-description={count > 0 ? String(count) : undefined}
 								className={SIDEBAR_NAV_ITEM_CLASS}

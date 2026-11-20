@@ -188,7 +188,8 @@ const contentSecurityPolicy = (connectExtra: readonly string[]) =>
 			"connect-src 'self' https://*.filen.io wss://*.filen.io https://*.filen.net wss://*.filen.net https://*.filen-1.net https://*.filen-2.net https://*.filen-3.net https://*.filen-4.net https://*.filen-5.net https://*.filen-6.net https://filen.io",
 			...connectExtra
 		].join(" "),
-		"manifest-src 'none'",
+		// public/site.webmanifest: the install manifest (its icons are img-src 'self').
+		"manifest-src 'self'",
 		"object-src 'none'",
 		"base-uri 'self'",
 		"form-action 'self'",

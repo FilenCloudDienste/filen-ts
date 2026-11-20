@@ -124,6 +124,8 @@ function setUp(options: {
 	loop?: boolean
 	// Where the playback's stream begins.
 	firstTime?: number
+	// Whether a remux plays the file with an embedded text track.
+	reachable?: boolean
 }): Harness {
 	const video = new DecodingVideo()
 
@@ -185,6 +187,7 @@ function setUp(options: {
 			probe,
 			playbackDeps,
 			openPlayback: open,
+			...(options.reachable === undefined ? {} : { embeddedTextReachable: () => Promise.resolve(options.reachable === true) }),
 			capturePoster: () => options.poster ?? Promise.resolve(null),
 			status: () => Promise.resolve(options.status ?? "present"),
 			release,
@@ -501,6 +504,38 @@ describe("PreviewVideo — the ladder", () => {
 
 		expect(harness.open).toHaveBeenCalledOnce()
 		expect(harness.open.mock.calls[0]?.[3]).toEqual({ audioIndex: 0, subtitle: "embedded-text" })
+	})
+
+	it("an embedded subtitle leaves a direct start playing when no remux plays the file whole", async () => {
+		const probe = probeOf(["aac"], "mp4")
+		const harness = setUp({ route: "direct", peek: probe, probe, reachable: false })
+
+		await flush()
+		harness.controller.setSubtitle("embedded-text")
+		await flush()
+
+		expect(harness.open).not.toHaveBeenCalled()
+		expect(harness.controller.getSnapshot()).toMatchObject({ route: "direct", embeddedTextBlocked: true })
+
+		// Where a remux does play it, the direct start moves there.
+		const reachable = setUp({ route: "direct", peek: probe, probe, reachable: true })
+
+		await flush()
+		reachable.controller.setSubtitle("embedded-text")
+		await flush()
+
+		expect(reachable.open).toHaveBeenCalledOnce()
+		expect(reachable.playbackDeps).toHaveBeenCalledWith(false)
+		expect(reachable.controller.getSnapshot().embeddedTextBlocked).toBe(false)
+	})
+
+	it("marks embedded text unavailable when the ladder plays the file direct without it", async () => {
+		const harness = setUp({ route: "ladder", probe: probeOf(["aac"], "mp4"), path: "direct" })
+
+		await flush()
+		harness.setPlayback({ decision: { path: "direct", reasons: ["subtitle-embedded-unavailable"], audio: { mode: "native" } } })
+
+		expect(harness.controller.getSnapshot().embeddedTextBlocked).toBe(true)
 	})
 
 	it("loops the element itself, back to 0, and hands its loop back on dispose", async () => {

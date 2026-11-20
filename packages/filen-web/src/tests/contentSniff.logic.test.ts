@@ -238,16 +238,17 @@ describe("sniffAdmits", () => {
 		expect(sniffAdmits(fileNamed("calls.vcf", ENTRY_RANGE_BUFFER_CAP + 1n), deviceProfile(), "entry")).toBe(false)
 	})
 
-	// The SDK lists the package at any size on the drive; a public link's or an archive's needs an archive reader.
-	it("admits a .key on the drive only, at any size", () => {
+	// The SDK lists the package at any size, on the drive and through the public-link client alike; an archive's opens
+	// through a nested reader of its own (useEntryActions), never as an entry read whole.
+	it("admits a .key on the drive and a public link at any size, never as an archive entry", () => {
 		for (const size of [3n * MIB, 4n * 1024n * MIB]) {
 			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "drive")).toBe(true)
-			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "link")).toBe(false)
+			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "link")).toBe(true)
 			expect(sniffAdmits(fileNamed("deck.key", size), deviceProfile(), "entry")).toBe(false)
 		}
 
-		expect(anonPreviewability(fileNamed("deck.key", 3n * MIB))).not.toBe("previewable")
-		expect(anonPreviewability(fileNamed("report.pages", 3n * MIB))).not.toBe("previewable")
+		expect(anonPreviewability(fileNamed("deck.key", 4n * 1024n * MIB))).toBe("previewable")
+		expect(anonPreviewability(fileNamed("report.pages", 4n * 1024n * MIB))).toBe("previewable")
 	})
 
 	it("admits an archive's .ts at any size: as a transport stream it plays by its access kind (W6 §3.10)", () => {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { isRedirect } from "@tanstack/react-router"
 
-// redirectIfAuthed guards the unauthed-only pages (/login, /register, /reset/$token): a live
+// redirectIfAuthed guards the unauthed-only pages (/login, /register, /reset): a live
 // session bounces straight to the start screen ("/" resolves it) instead of re-showing the auth form. Real `redirect`/`isRedirect`
 // from the router are used un-mocked below — they're pure (construct + optionally throw a tagged
 // Response), no router instance needed to exercise them.

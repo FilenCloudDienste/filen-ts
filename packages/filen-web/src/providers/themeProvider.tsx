@@ -14,6 +14,10 @@ interface ThemeProviderState {
 }
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
+
+// --canvas in src/index.css as sRGB, for <meta name="theme-color"> (browser chrome, the installed window's title
+// bar). public/theme.js, index.html and public/site.webmanifest carry the same values before the bundle loads.
+export const THEME_COLORS: Readonly<Record<ResolvedTheme, string>> = { light: "#e6e6e6", dark: "#070707" }
 const STORAGE_KEY = "theme"
 
 const ThemeProviderContext = React.createContext<ThemeProviderState | undefined>(undefined)
@@ -54,6 +58,10 @@ function disableTransitionsTemporarily() {
 	}
 }
 
+export function syncThemeColor(resolvedTheme: ResolvedTheme): void {
+	document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[resolvedTheme])
+}
+
 function applyTheme(nextTheme: Theme) {
 	const root = document.documentElement
 	const resolvedTheme = resolveTheme(nextTheme)
@@ -61,6 +69,7 @@ function applyTheme(nextTheme: Theme) {
 
 	root.classList.remove("light", "dark")
 	root.classList.add(resolvedTheme)
+	syncThemeColor(resolvedTheme)
 	syncTitleBarColors()
 	restoreTransitions()
 }

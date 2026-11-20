@@ -9,7 +9,7 @@ import {
 	type ProbeAudio,
 	type VideoProbe
 } from "@filen/shared/videos"
-import { openPlayback, type Playback, type PlaybackDeps } from "@/lib/media/playback/openPlayback"
+import { embeddedTextReachable, openPlayback, type Playback, type PlaybackDeps } from "@/lib/media/playback/openPlayback"
 import { captureFramePoster } from "@/lib/media/playback/poster"
 import type { RemuxTextCue } from "@/lib/media/remuxTypes"
 import { EmbeddedCues } from "@/lib/media/playback/embeddedCues"
@@ -61,6 +61,8 @@ export interface PreviewVideoSnapshot {
 	audioIndex: number
 	// The element's own audio tracks on a direct stream (WebKit), named by the element: the audio menu needs no probe.
 	nativeAudio: readonly NativeAudioTrack[] | null
+	// No remux rung plays the file whole here, so its embedded text tracks can't be shown: it keeps playing direct.
+	embeddedTextBlocked: boolean
 }
 
 export interface NativeAudioTrack {
@@ -106,6 +108,8 @@ export interface PreviewVideoDeps {
 	playbackDeps: (allowDirect: boolean) => Partial<PlaybackDeps>
 	// The ladder; openPlayback when absent.
 	openPlayback?: typeof openPlayback
+	// Whether a remux rung plays the file with an embedded text track; embeddedTextReachable when absent.
+	embeddedTextReachable?: typeof embeddedTextReachable
 	capturePoster?: (video: HTMLVideoElement) => Promise<string | null>
 }
 
@@ -179,7 +183,8 @@ export class PreviewVideo {
 			silentCodec: null,
 			embeddedVersion: 0,
 			audioIndex: -1,
-			nativeAudio: null
+			nativeAudio: null,
+			embeddedTextBlocked: false
 		}
 
 		if (held !== null) {
@@ -265,8 +270,65 @@ export class PreviewVideo {
 		const direct = this.snapshot.route === "direct" || this.snapshot.decision?.path === "direct"
 
 		if (kind === "embedded-text" && direct && this.snapshot.status === "active") {
-			void this.escalate()
+			void this.moveToRemux()
 		}
+	}
+
+	// A direct start moves to the ladder's remux for an embedded text track only when that rung plays the file whole;
+	// otherwise it keeps playing and the tracks are marked unavailable.
+	private async moveToRemux(): Promise<void> {
+		const probe = this.snapshot.probe
+
+		if (this.snapshot.embeddedTextBlocked || this.escalated) {
+			return
+		}
+
+		// Embedded tracks are offered only once the probe is held; without one the ladder decides as before.
+		if (probe === null) {
+			await this.escalate()
+
+			return
+		}
+
+		let reachable = false
+
+		try {
+			reachable = await (this.options.deps.embeddedTextReachable ?? embeddedTextReachable)(
+				this.options.file,
+				probe,
+				{ audioIndex: this.ladderAudio(probe), subtitle: "embedded-text" },
+				this.options.deps.playbackDeps(false)
+			)
+		} catch (error) {
+			log.warn("preview.video", "deciding the embedded subtitle rung failed", error)
+		}
+
+		const direct = this.snapshot.route === "direct" || this.snapshot.decision?.path === "direct"
+
+		if (this.isDisposed() || this.hasEscalated() || this.subtitle !== "embedded-text" || !direct) {
+			return
+		}
+
+		if (reachable) {
+			await this.escalate()
+		} else {
+			this.update({ embeddedTextBlocked: true })
+		}
+	}
+
+	// A method rather than a field read: it changes across awaits.
+	private hasEscalated(): boolean {
+		return this.escalated
+	}
+
+	// The audio track a ladder opened now plays: `asked`, else the one the user picked; otherwise the ladder's own
+	// choice (a playable one in the user's language), not whichever the element had enabled.
+	private ladderAudio(probe: VideoProbe, asked?: number): number {
+		const chosen = asked ?? this.wantedAudio
+
+		return chosen !== null && chosen < probe.audio.length
+			? chosen
+			: defaultAudioIndex({ probe, rememberedLang: null, userLanguages: userLanguages() })
 	}
 
 	// Reads the probe, for the audio and chapter menus, once per open: called on the first engagement with the controls,
@@ -333,6 +395,15 @@ export class PreviewVideo {
 		}
 
 		this.wantedAudio = index
+
+		// Whether a remux plays the file whole depends on the audio track: another one is asked about afresh.
+		if (this.snapshot.embeddedTextBlocked) {
+			this.update({ embeddedTextBlocked: false })
+
+			if (this.subtitle === "embedded-text") {
+				void this.moveToRemux()
+			}
+		}
 
 		const playback = this.playback
 
@@ -785,13 +856,7 @@ export class PreviewVideo {
 			return
 		}
 
-		// The track asked for, else the one the user picked; otherwise the ladder's own choice (a playable one in the
-		// user's language), not whichever the element had enabled.
-		const chosen = params.audioIndex ?? this.wantedAudio
-		const audioIndex =
-			chosen !== null && chosen < probe.audio.length
-				? chosen
-				: defaultAudioIndex({ probe, rememberedLang: null, userLanguages: userLanguages() })
+		const audioIndex = this.ladderAudio(probe, params.audioIndex)
 
 		this.update({ probe, audioIndex, nativeAudio: null })
 
@@ -867,6 +932,7 @@ export class PreviewVideo {
 		this.update({
 			decision: state.decision,
 			audioIndex: state.selection.audioIndex,
+			embeddedTextBlocked: this.snapshot.embeddedTextBlocked || state.decision.reasons.includes("subtitle-embedded-unavailable"),
 			status: state.status === "unsupported" ? "unsupported" : state.status === "failed" ? "failed" : "active",
 			silentCodec:
 				state.decision.path === "video-only" && probe.audio.length > 0 ? silentAudioCodec(probe, state.selection.audioIndex) : null

@@ -12,6 +12,7 @@ import {
 	type ChatActionDialogKind
 } from "@/features/chats/components/chatMenu.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { copyText } from "@/lib/copyText"
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 
@@ -24,7 +25,7 @@ export interface ChatMenuContentProps {
 	// Fires for every "dialog"-run descriptor (rename/delete/leave/participants) — the mounting
 	// surface's own dialog host (useChatDialogHost) turns this into an open dialog (participants: the
 	// chat info panel). Every "direct"
-	// descriptor (markRead/mute-toggle) runs in place below as an activity toast.
+	// descriptor (markRead/mute-toggle as an activity toast, copyId as a copy toast) runs in place below.
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
 }
 
@@ -54,6 +55,9 @@ function ChatMenuEntries({ chat, currentUserId, blocked, onAction, family }: Cha
 				return
 			case "mute":
 				runSetChatMuted(chat, !chat.muted)
+				return
+			case "copyId":
+				void copyText(chat.uuid, t("chatCopyIdToast"))
 				return
 		}
 	}

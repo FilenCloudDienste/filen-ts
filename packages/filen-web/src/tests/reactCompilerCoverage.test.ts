@@ -315,6 +315,7 @@ describe("React Compiler coverage", () => {
 			["src/features/publicLinks/components/directoryBrowser.tsx", "DirectoryBrowser"],
 			["src/features/publicLinks/components/browseRow.tsx", "BrowseRow"],
 			["src/features/publicLinks/components/browseRow.tsx", "SelectionBox"],
+			["src/features/publicLinks/components/browseTile.tsx", "BrowseTile"],
 			["src/features/publicLinks/hooks/usePublicListboxNav.ts", "usePublicListboxNav"]
 		] as const) {
 			const events = compile(file)
@@ -500,6 +501,23 @@ describe("React Compiler coverage", () => {
 				true
 			)
 		}
+	})
+
+	// useVirtualizer opts its host out, so the sidebar tree's window lives in DirectoryTreeRows: a scroll render must
+	// not re-flatten the open levels, and must skip every row it did not move.
+	it("compiles the directory tree and its rows, leaving only DirectoryTreeRows to the virtualizer", () => {
+		const { events, code } = compileWithCode("src/features/drive/components/directoryTree.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "DirectoryTreeRows")).toBe(false)
+
+		for (const fnName of ["DirectoryTree", "DirectoryTreeNode", "DirectoryTreeChevron"]) {
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+
+		expect(unguardedCalls(code, "DirectoryTree", ["flattenDirectoryTree(", "openTreeParents(", "treeLevels("])).toEqual([])
 	})
 
 	it("compiles DriveSidebar, so non-drive navigations skip the mounted directory tree", () => {

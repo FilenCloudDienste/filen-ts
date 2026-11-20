@@ -22,7 +22,8 @@ vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	useLinkSaveable: () => false,
 	usePublicDirListing: () => ({ status: "success", data: LISTING, refetch: vi.fn() }),
 	usePublicDirSize: () => ({ data: undefined }),
-	usePublicVisitorSignedIn: () => ({ data: false })
+	usePublicVisitorSignedIn: () => ({ data: false }),
+	usePublicViewModeQuery: () => ({ data: "list", refetch: () => Promise.resolve() })
 }))
 vi.mock("@/features/publicLinks/components/fileHero", () => ({ FileHero: () => null }))
 vi.mock("@/features/publicLinks/components/saveToDrive", () => ({ SaveToDriveButton: () => null }))

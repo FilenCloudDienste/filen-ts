@@ -10,6 +10,7 @@ import {
 	isEncryptedEntry,
 	maxSolidSkipFor,
 	needsCostConfirm,
+	holdsIworkPackage,
 	holdsNestedArchive,
 	NESTED_INFLATE_CONFIRM_BYTES,
 	nestedOpening,
@@ -253,6 +254,20 @@ describe("archives held in an entry", () => {
 
 		expect([0, 1, 2].map(slot => holdsNestedArchive(store, slot))).toEqual([true, true, false])
 		expect(holdsNestedArchive(store, 3)).toBe(canReadEntry(store, 3))
+	})
+
+	// A document's package is no archive to browse: it is previewed through a reader of its own, its rendering read alone.
+	it("hold an iWork document by its name, read alone, and never as an archive to browse", () => {
+		const store = storeOf([
+			{ path: "report.pages", size: 10, access: DIRECT },
+			{ path: "budget.numbers", size: 10, access: DIRECT },
+			{ path: "deck.key", size: 10, access: DIRECT },
+			{ path: "report.docx", size: 10, access: DIRECT },
+			{ path: "inner.zip", size: 10, access: DIRECT }
+		])
+
+		expect([0, 1, 2, 3, 4].map(slot => holdsIworkPackage(store, slot))).toEqual([true, true, true, false, false])
+		expect([0, 1, 2].map(slot => holdsNestedArchive(store, slot))).toEqual([false, false, false])
 	})
 
 	it("open in place when stored, after a confirm when inflated above 256 MiB, else as the card", () => {

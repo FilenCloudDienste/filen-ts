@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { createElement, type ReactNode } from "react"
 import { cleanup, renderHook, waitFor } from "@testing-library/react"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -15,6 +16,8 @@ vi.mock("@/features/drive/lib/thumbnails", () => ({ getThumbnailUrl: getThumbnai
 vi.mock("@/features/drive/lib/thumbGenerators", () => ({}))
 
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
+import { ThumbnailSourceContext, type ThumbnailSource } from "@/features/drive/lib/thumbnailSource"
+import type { ThumbnailServiceDeps } from "@/features/drive/lib/thumbnails"
 
 afterEach(() => {
 	cleanup()
@@ -122,5 +125,37 @@ describe("useThumbnail", () => {
 		expect(result.current).toBeNull()
 		expect(peekThumbnailUrlMock).not.toHaveBeenCalled()
 		expect(getThumbnailUrlMock).not.toHaveBeenCalled()
+	})
+
+	// A public link's grid: its own collaborators, and only the categories they make.
+	describe("under a thumbnail source of its own", () => {
+		const deps = { getGenerator: () => undefined } as unknown as ThumbnailServiceDeps
+
+		function wrapper(source: ThumbnailSource) {
+			return ({ children }: { children: ReactNode }) => createElement(ThumbnailSourceContext, { value: source }, children)
+		}
+
+		it("asks the service through the source's collaborators", () => {
+			getThumbnailUrlMock.mockReturnValue(new Promise(() => undefined))
+			peekThumbnailUrlMock.mockReturnValue(null)
+
+			renderHook(() => useThumbnail(narrowItem(imageFile())), {
+				wrapper: wrapper({ deps, produces: category => category === "sdk" })
+			})
+
+			expect(getThumbnailUrlMock.mock.calls[0]?.[1]).toBe(deps)
+		})
+
+		it("shows the icon for a category the source does not make, asking nothing", () => {
+			peekThumbnailUrlMock.mockReturnValue("blob:cached")
+
+			const { result } = renderHook(() => useThumbnail(narrowItem(imageFile())), {
+				wrapper: wrapper({ deps, produces: () => false })
+			})
+
+			expect(result.current).toBeNull()
+			expect(peekThumbnailUrlMock).not.toHaveBeenCalled()
+			expect(getThumbnailUrlMock).not.toHaveBeenCalled()
+		})
 	})
 })

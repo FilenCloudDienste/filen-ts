@@ -4,7 +4,7 @@ import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: completePasswordReset() is never called (a real call would hit the live, rate-limited
 // API with a made-up token — out of budget for this suite; see auth.spec's login-budget comment).
-// Visiting /reset/$token makes no network call of its own (the token is only used at submit time),
+// Visiting /reset#<token> makes no network call of its own (the token is only used at submit time),
 // so unlike register.spec there is nothing to intercept just to load the page.
 const RESET_TOKEN = "e2e-fake-reset-token"
 // Strong tier (see register.spec's tier notes) — strength only needs to clear the weak floor here,
@@ -14,7 +14,7 @@ const TYPED_CONFIRM_PHRASE = "DELETE ALL MY DATA"
 
 // First render follows a cold boot (the route waits for the SDK), hence the boot budget.
 async function gotoReset(page: Page): Promise<void> {
-	await page.goto(`/reset/${RESET_TOKEN}`)
+	await page.goto(`/reset#${RESET_TOKEN}`)
 	await expect(page.getByText("Reset your password")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 }
 
@@ -125,6 +125,13 @@ test.describe("reset", { tag: "@no-sdk" }, () => {
 		await page.getByRole("button", { name: "Remove master keys file" }).click()
 
 		await expect(page.getByText("Master keys imported", { exact: false })).toHaveCount(0)
+	})
+
+	test("the previous web app's email link opens the form and the token leaves the address bar", async ({ page }) => {
+		await page.goto(`/#/reset/${RESET_TOKEN}`)
+
+		await expect(page.getByLabel("New password", { exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		await expect(page).toHaveURL(/\/reset$/)
 	})
 
 	test("links to the terms and privacy policy", async ({ page }) => {

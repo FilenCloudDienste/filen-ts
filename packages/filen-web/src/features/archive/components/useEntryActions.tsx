@@ -22,6 +22,7 @@ import {
 	extractsToRead,
 	entryAwaitsSniff,
 	entryPreviewCategory,
+	holdsIworkPackage,
 	holdsNestedArchive,
 	isEncryptedEntry,
 	needsCostConfirm,
@@ -108,10 +109,20 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 		[]
 	)
 
-	// An archive held in the entry, opened in this one's place (`enter`), or one too deep to (`tooDeep`, past
-	// MAX_NESTED_DEPTH), which says why rather than be saved.
+	// An archive held in the entry, opened in this one's place (`enter`), or an iWork document previewed through a
+	// reader of its own (`enter` too); one too deep to (`tooDeep`, past MAX_NESTED_DEPTH) says why rather than be saved.
+	// An iWork document in an encrypted entry opens only once the listing proved the outer password: a wrong one would
+	// read as a package with no preview.
 	function nesting({ store, slot }: EntryTarget): "enter" | "tooDeep" | null {
-		if (onEnterArchive === null || canOpenEntry(store, slot) || !holdsNestedArchive(store, slot)) {
+		if (canOpenEntry(store, slot)) {
+			return null
+		}
+
+		if (holdsIworkPackage(store, slot)) {
+			if (isEncryptedEntry(store, slot) && session()?.password() === undefined) {
+				return null
+			}
+		} else if (onEnterArchive === null || !holdsNestedArchive(store, slot)) {
 			return null
 		}
 
@@ -143,7 +154,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 
 		const inner = nestedArchiveSource(source, password, target.store, target.slot)
 
-		if (inner === null || onEnterArchive === null) {
+		if (inner === null) {
 			return
 		}
 
@@ -180,7 +191,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 				} else if (opening === "confirm" && !costConfirmed) {
 					setInflateAsk({ ...target, inner, entered: { ...entered, confirmed: true } })
 				} else {
-					onEnterArchive(inner, target, entered)
+					enterInner(target, inner, entered)
 				}
 			},
 			(e: unknown) => {
@@ -189,6 +200,31 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 				}
 			}
 		)
+	}
+
+	// The inner archive in this one's place, or the iWork document it is in its own viewer.
+	function enterInner(target: EntryTarget, inner: ArchiveSource, entered: EnteredArchive): void {
+		if (holdsIworkPackage(target.store, target.slot)) {
+			previewIwork(target, inner)
+		} else {
+			onEnterArchive?.(inner, target, entered)
+		}
+	}
+
+	// The document's rendering, read through `inner`, its package's own reader; its download is the entry's.
+	function previewIwork({ store, slot }: EntryTarget, inner: ArchiveSource): void {
+		const request = entryRequest(source, store, slot)
+
+		if (request === null) {
+			return
+		}
+
+		setViewing({
+			store,
+			slot,
+			entry: { request, category: "iwork", modified: store.modified(slot), encrypted: isEncryptedEntry(store, slot), iwork: inner },
+			password: session()?.password()
+		})
 	}
 
 	// `extract`: it is not read from here (a block too large), so it opens as the card offering to extract.
@@ -325,6 +361,9 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 					costAsk.intent === "open" ? entryReadPlan(costAsk.store, costAsk.slot, true) : undefined
 				)
 
+	// The inflate asked for is an iWork document's, previewed rather than browsed.
+	const inflateIwork = inflateAsk !== null && holdsIworkPackage(inflateAsk.store, inflateAsk.slot)
+
 	const dialogs = (
 		<>
 			<ConfirmDialog
@@ -358,13 +397,16 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 			<ConfirmDialog
 				open={inflateAsk !== null}
 				pending={false}
-				title={t("previewArchiveNestedInflateTitle")}
+				title={t(inflateIwork ? "previewIworkInflateTitle" : "previewArchiveNestedInflateTitle")}
 				body={
 					inflateAsk === null
 						? ""
-						: t("previewArchiveNestedInflateBody", { name: inflateAsk.inner.name, size: formatBytes(inflateAsk.inner.size) })
+						: t(inflateIwork ? "previewIworkInflateBody" : "previewArchiveNestedInflateBody", {
+								name: inflateAsk.inner.name,
+								size: formatBytes(inflateAsk.inner.size)
+							})
 				}
-				confirmLabel={t("previewArchiveNestedInflateOpen")}
+				confirmLabel={t(inflateIwork ? "previewIworkInflateOpen" : "previewArchiveNestedInflateOpen")}
 				cancelLabel={t("common:cancel")}
 				onOpenChange={next => {
 					if (!next) {
@@ -374,7 +416,7 @@ export function useEntryActions({ source, session, downloadable, isOnline, onEnt
 				onConfirm={() => {
 					if (inflateAsk !== null) {
 						setInflateAsk(null)
-						onEnterArchive?.(inflateAsk.inner, inflateAsk, inflateAsk.entered)
+						enterInner(inflateAsk, inflateAsk.inner, inflateAsk.entered)
 					}
 				}}
 			/>

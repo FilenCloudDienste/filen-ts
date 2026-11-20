@@ -114,10 +114,8 @@ export const CONTACTS_SECTION_HEADER_KEY: Record<ContactSection["key"], Contacts
 }
 
 // The sidebar's section switch: "all" (every section stacked, the page's original shape) plus one
-// entry per real ContactSection kind. Deep-linked via the /contacts route's own `section` search
-// param (see routes/_app/contacts.tsx) — a URL search param rather than a nested path segment, since
-// the route itself takes no path params today (unlike settings' one-file-per-section layout) and this
-// stays the less invasive of the two shapes.
+// entry per real ContactSection kind. Deep-linked as the path's last segment, /contacts/<section> (see
+// routes/_app/contacts.$section.tsx).
 export type ContactsSectionFilter = "all" | ContactSection["key"]
 
 export const CONTACTS_SECTION_FILTERS: readonly ContactsSectionFilter[] = ["all", "requests", "pending", "contacts", "blocked"]

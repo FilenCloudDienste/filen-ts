@@ -10,7 +10,8 @@ import { bufferedSizeCap, itemTypeExtension } from "@/features/drive/lib/preview
 import { PreviewByteOriginProvider, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { PreviewErrorState, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
-import { acquireArchiveHandle, archiveHandleRefusal } from "@/features/archive/lib/archiveHandle"
+import { acquireArchiveHandle, archiveHandleRefusal, openArchiveHandle } from "@/features/archive/lib/archiveHandle"
+import type { ReaderTarget } from "@/features/archive/lib/archiveReaders"
 import { archiveEntryItem } from "@/features/archive/lib/entryItem"
 import { ArchiveWaiting, Banner } from "@/features/archive/components/archiveStatus"
 import { openIworkPreview } from "@/features/iwork/lib/iworkPreview"
@@ -23,8 +24,10 @@ type IworkState =
 
 // A Pages, Numbers or Keynote document, shown as the rendering of itself it carries (a first-page image, or an older
 // document's PDF copy) under a note that this is only a preview. The package is listed and that one entry read, never
-// the whole file. Stopped while it waits for another archive job, it offers to try again.
-export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): ReactNode {
+// the whole file. Stopped while it waits for another archive job, it offers to try again. `target` is the package as an
+// archive held in another's entry (the archive browser's), read through its parent's reader; without it, the package is
+// the file the preview's origin names (a drive file, or a public link's).
+export function IworkPreview({ item, alt, target }: { item: DriveItem; alt: string; target?: ReaderTarget | undefined }): ReactNode {
 	const { t } = useTranslation("preview")
 	const profile = useDeviceProfile()
 	const origin = usePreviewOrigin(item)
@@ -35,7 +38,11 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 	// The outcome of the run `key` names; any other is still loading.
 	const [outcome, setOutcome] = useState<{ key: string; state: IworkState } | null>(null)
 	const key = `${uuid}:${String(attempt)}`
-	const openFrom = useEffectEvent(() => origin)
+	const openFrom = useEffectEvent(() =>
+		target === undefined
+			? acquireArchiveHandle(origin, undefined)
+			: { type: "opened" as const, handle: openArchiveHandle(target, undefined) }
+	)
 	const onWaiting = useEffectEvent((next: boolean) => {
 		setWaiting(next)
 	})
@@ -50,7 +57,7 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 
 		const runKey = `${uuid}:${String(attempt)}`
 		const abort = new AbortController()
-		const acquired = acquireArchiveHandle(openFrom(), undefined)
+		const acquired = openFrom()
 
 		// Rendered as its card below.
 		if (acquired.type === "refused") {
@@ -122,8 +129,8 @@ export function IworkPreview({ item, alt }: { item: DriveItem; alt: string }): R
 		setAttempt(previous => previous + 1)
 	}
 
-	// Its package cannot be opened from here yet: one inside an archive.
-	if (archiveHandleRefusal(origin) !== null) {
+	// Its package cannot be opened from here: bytes the page holds (an attachment's).
+	if (target === undefined && archiveHandleRefusal(origin) !== null) {
 		return (
 			<PreviewUnsupportedState
 				item={item}

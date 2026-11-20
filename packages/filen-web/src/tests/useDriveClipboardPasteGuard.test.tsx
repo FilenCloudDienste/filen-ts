@@ -24,6 +24,8 @@ vi.mock("@/features/drive/queries/drive", () => ({
 	destinationDirectoryName: () => Promise.resolve("inner"),
 	directoryNameScope: () => "drive"
 }))
+// Pasted files are useDriveClipboard.test.tsx's.
+vi.mock("@/features/drive/lib/uploadDrop", () => ({ uploadFileSet: vi.fn() }))
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
 
 import "@/lib/i18n"

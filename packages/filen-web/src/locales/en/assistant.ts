@@ -474,6 +474,12 @@ export const assistant = {
 	assistantProposalDestination: "In",
 	/** Card field — the new name of a rename or create */
 	assistantProposalName: "Name",
+	/** Card field — the new name a rename gives an item */
+	assistantProposalNewName: "New name",
+	/** Card field — the title of a note the assistant creates */
+	assistantProposalNoteTitle: "Title",
+	/** Card field — the type of a note the assistant creates (text, markdown, checklist, ...) */
+	assistantProposalNoteType: "Type",
 	/** Card field — any other free-text argument */
 	assistantProposalText: "Text",
 	/** Card — accessible name of the affected-items list */

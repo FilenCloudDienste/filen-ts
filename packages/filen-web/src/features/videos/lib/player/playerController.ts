@@ -3,7 +3,7 @@ import { itemKey, seriesKey, type CueStore, type ItemRec, type LadderSubtitle, t
 import type { RemuxTextCue } from "@/lib/media/remuxTypes"
 import type { PlaybackFailure, PlaybackTrigger } from "@/lib/media/playback/types"
 import { EmbeddedCues } from "@/lib/media/playback/embeddedCues"
-import { openPlayback, type Playback, type PlaybackSnapshot } from "@/lib/media/playback/openPlayback"
+import { embeddedTextReachable, openPlayback, type Playback, type PlaybackSnapshot } from "@/lib/media/playback/openPlayback"
 import { createListenerSet } from "@/lib/listenerSet"
 import { log } from "@/lib/log"
 import { videoLibrary } from "@/features/videos/lib/index"
@@ -39,6 +39,9 @@ export interface PlayerSnapshot {
 	epoch: number
 	// Bumped whenever cues of the shown embedded subtitle track arrived (embeddedCues).
 	embeddedVersion: number
+	// No remux rung plays the open part whole in this browser, so its embedded text tracks can't be shown: it keeps
+	// playing direct, and they are offered as unavailable.
+	embeddedTextBlocked: boolean
 }
 
 const IDLE: PlayerSnapshot = {
@@ -52,7 +55,8 @@ const IDLE: PlayerSnapshot = {
 	resumedAt: null,
 	autoplayBlocked: false,
 	epoch: 0,
-	embeddedVersion: 0
+	embeddedVersion: 0,
+	embeddedTextBlocked: false
 }
 
 // After a failure the item opens again by itself after these waits, then the failure card's Retry is left. The
@@ -204,6 +208,7 @@ export class PlayerController {
 			part,
 			// A reopen of the same part keeps its tracks on offer, so a subtitle choice holds while it reopens.
 			probe: keepTarget && part === this.snapshot.part ? this.snapshot.probe : null,
+			embeddedTextBlocked: keepTarget && part === this.snapshot.part && this.snapshot.embeddedTextBlocked,
 			epoch: this.snapshot.epoch + 1,
 			embeddedVersion: this.snapshot.embeddedVersion + 1,
 			partDurations: keepTarget ? this.snapshot.partDurations : target.parts.map(() => null)
@@ -325,7 +330,41 @@ export class PlayerController {
 		this.subtitleKind = kind
 
 		if (kind === "embedded-text" && this.snapshot.playback?.decision.path === "direct") {
-			void this.retry()
+			void this.moveToRemux()
+		}
+	}
+
+	// A direct stream restarts on the remux rung for an embedded text track only when that rung plays the file whole;
+	// otherwise it keeps playing and the tracks are marked unavailable.
+	private async moveToRemux(): Promise<void> {
+		const generation = this.generation
+		const { probe, part, audioIndex, embeddedTextBlocked } = this.snapshot
+		const file = this.files[part]
+
+		if (probe === null || file === undefined || embeddedTextBlocked) {
+			return
+		}
+
+		const reachable = await this.embeddedReachable(file, probe, audioIndex)
+
+		if (generation !== this.generation || this.subtitleKind !== "embedded-text") {
+			return
+		}
+
+		if (reachable) {
+			await this.retry()
+		} else {
+			this.update({ embeddedTextBlocked: true })
+		}
+	}
+
+	private async embeddedReachable(file: SdkFile, probe: VideoProbe, audioIndex: number): Promise<boolean> {
+		try {
+			return await embeddedTextReachable(file, probe, { audioIndex, subtitle: "embedded-text" })
+		} catch (error) {
+			log.warn("videos.player", "deciding the embedded subtitle rung failed", error)
+
+			return false
 		}
 	}
 
@@ -370,7 +409,8 @@ export class PlayerController {
 		const lang = this.snapshot.probe?.audio[index]?.lang ?? null
 
 		this.chosenAudio = { key: target.key, part: this.snapshot.part, index, lang }
-		this.update({ audioIndex: index })
+		// Whether a remux plays the file whole depends on the audio track: another one is asked about afresh.
+		this.update({ audioIndex: index, embeddedTextBlocked: false })
 		await playback.selectAudio(index)
 
 		if (target.seriesDirUuid !== null && lang !== null) {
@@ -523,7 +563,16 @@ export class PlayerController {
 		}
 
 		this.offeredTracks = new Set(probe.subs.map(sub => sub.id))
-		this.update({ probe, part, audioIndex, resumedAt, partDurations, autoplayBlocked: false })
+		this.update({
+			probe,
+			part,
+			audioIndex,
+			resumedAt,
+			partDurations,
+			autoplayBlocked: false,
+			// What another part's playback found says nothing about this one.
+			embeddedTextBlocked: part === this.snapshot.part && this.snapshot.embeddedTextBlocked
+		})
 
 		const subtitleKind = this.subtitleKind
 		let playback: Playback
@@ -562,16 +611,25 @@ export class PlayerController {
 		}
 
 		// An embedded text track chosen while it opened (its tracks show only once the probe is in the snapshot) needs
-		// the remux rung a direct stream lacks.
+		// the remux rung a direct stream lacks, when that rung plays the file whole.
 		if (
 			this.subtitleKind === "embedded-text" &&
 			subtitleKind !== "embedded-text" &&
 			playback.getSnapshot().decision.path === "direct"
 		) {
-			playback.dispose()
-			await this.openPart(generation, target, part, position, autoplay, resumedAt, partDurations)
+			const reachable = await this.embeddedReachable(file, probe, audioIndex)
 
-			return
+			if (generation !== this.generation || reachable) {
+				playback.dispose()
+
+				if (generation === this.generation) {
+					await this.openPart(generation, target, part, position, autoplay, resumedAt, partDurations)
+				}
+
+				return
+			}
+
+			this.update({ embeddedTextBlocked: true })
 		}
 
 		this.playback = playback
@@ -645,7 +703,12 @@ export class PlayerController {
 						? "loading"
 						: "ready"
 
-		this.update({ playback: state, phase, audioIndex: state.selection.audioIndex })
+		this.update({
+			playback: state,
+			phase,
+			audioIndex: state.selection.audioIndex,
+			embeddedTextBlocked: this.snapshot.embeddedTextBlocked || state.decision.reasons.includes("subtitle-embedded-unavailable")
+		})
 	}
 
 	// Never reports a position the element doesn't really hold: while opening or restarting it reads 0.

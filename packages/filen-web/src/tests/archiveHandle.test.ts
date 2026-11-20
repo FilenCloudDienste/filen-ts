@@ -10,8 +10,8 @@ import { packEntries, storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntri
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
-const { acquireArchiveHandle, archiveHandleRefusal } = await import("@/features/archive/lib/archiveHandle")
-const { acquireArchiveReader } = await import("@/features/archive/lib/archiveReaders")
+const { acquireArchiveHandle, archiveHandleRefusal, openArchiveHandle } = await import("@/features/archive/lib/archiveHandle")
+const { acquireArchiveReader, fileTarget, nestedTarget } = await import("@/features/archive/lib/archiveReaders")
 const { runPreviewDisposers } = await import("@/lib/workers/previewDisposers")
 const { createEntryStore } = await import("@/features/archive/lib/entryStore")
 
@@ -269,6 +269,33 @@ describe("acquireArchiveHandle", () => {
 		lease.release()
 		expect(leases.size).toBe(0)
 		expect(deps.releaseLease).toHaveBeenCalledTimes(1)
+		handle.release()
+	})
+
+	// An iWork document in an archive's entry: listed through a reader nested in the archive's, its entries named under
+	// the nested archive's own uuid, so the preview cache never takes them for the outer archive's.
+	it("opens an archive held in another's entry through a nested reader, naming its entries by the nested uuid", async () => {
+		const { deps, pageDeps } = harness()
+		const parent = fileTarget({ uuid: TEST_ARCHIVE } as unknown as AnyFile, true)
+		const nested = nestedTarget(parent, "outer-pw", 4)
+
+		if (nested === null) {
+			throw new Error("two deep is never too deep")
+		}
+
+		const handle = openArchiveHandle({ file: parent.file, uuid: `${TEST_ARCHIVE}/4`, anon: true, nested }, undefined, deps)
+		const store = storeOf([{ path: "preview.jpg", index: 2, size: 64, access: DIRECT }])
+		const lease = await handle.origin(store, 0)
+
+		expect(pageDeps.openNested).toHaveBeenCalledWith(handle.id, expect.any(String), { archive: TEST_ARCHIVE, index: 4 }, undefined)
+		expect(pageDeps.open).toHaveBeenCalledWith(expect.any(String), parent.file, true, "outer-pw")
+		expect(lease.origin).toMatchObject({
+			entry: { archive: `${TEST_ARCHIVE}/4`, index: 2 },
+			anon: true,
+			cacheKey: `${TEST_ARCHIVE}/4#2`
+		})
+
+		lease.release()
 		handle.release()
 	})
 

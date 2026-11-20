@@ -33,6 +33,10 @@ export interface AssistantPreviewTarget extends AssistantHandleRef {
 	recipients?: string[]
 }
 
+// The arguments naming the directory a move, copy or create lands in. The card shows it apart from the items, by
+// its path.
+export const DESTINATION_ARGS = ["destination", "parent"] as const
+
 // A confirmation card's content for a call check() passed.
 export type AssistantToolPreview =
 	| {

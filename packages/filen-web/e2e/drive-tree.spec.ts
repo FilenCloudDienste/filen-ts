@@ -12,18 +12,24 @@ import { menuItemLabels, menuItemName } from "./helpers/menu"
 
 const TREE_ROW_SELECTOR = "[data-tree-path]"
 
-// The sidebar's Cloud Drive tree: rows are plain buttons inside one labelled list.
+// The sidebar's directory tree below its Cloud Drive row: one labelled ARIA tree of treeitems.
 function tree(page: Page) {
-	return page.getByRole("list", { name: "Directory tree" })
+	return page.getByRole("tree", { name: "Directory tree" })
 }
 
-// Opens the scratch directory's node so its children show below it. The tree reads the same listing the
-// main pane just read, so its rows appear as that listing does.
-async function expandInTree(page: Page, name: string): Promise<void> {
-	const expand = tree(page).getByRole("button", { name: `Expand ${name}`, exact: true })
+function treeNode(page: Page, name: string) {
+	return tree(page).getByRole("treeitem", { name, exact: true })
+}
 
-	await expect(expand).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-	await expand.click()
+// Opens the scratch directory's node so its children show below it, from the keyboard as the tree pattern does it.
+// The tree reads the same listing the main pane just read, so its rows appear as that listing does.
+async function expandInTree(page: Page, name: string): Promise<void> {
+	const node = treeNode(page, name)
+
+	await expect(node).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	await node.focus()
+	await page.keyboard.press("ArrowRight")
+	await expect(node).toHaveAttribute("aria-expanded", "true")
 }
 
 test.describe("sidebar directory tree", () => {
@@ -42,7 +48,7 @@ test.describe("sidebar directory tree", () => {
 			await expect(rowMenu).toHaveCount(0)
 
 			await expandInTree(page, scratchName)
-			const node = tree(page).getByRole("button", { name: childName, exact: true })
+			const node = treeNode(page, childName)
 			await expect(node).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 			await node.click({ button: "right" })
 
@@ -68,8 +74,8 @@ test.describe("sidebar directory tree", () => {
 			await createDirectoryViaDialog(page, draggedName, listbox)
 			await createDirectoryViaDialog(page, targetName, listbox)
 			await expandInTree(page, scratchName)
-			await expect(tree(page).getByRole("button", { name: draggedName, exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await expect(tree(page).getByRole("button", { name: targetName, exact: true })).toBeVisible()
+			await expect(treeNode(page, draggedName)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(treeNode(page, targetName)).toBeVisible()
 
 			const options = listbox.getByRole("option")
 			await expect(options).toHaveCount(2)

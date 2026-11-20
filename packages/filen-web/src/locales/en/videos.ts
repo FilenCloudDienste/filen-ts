@@ -426,11 +426,6 @@ export const videos = {
 	playerMute: "Mute",
 	/** Settings menu — unmute toggle on a phone */
 	playerUnmute: "Unmute",
-	/** Settings menu — explains why there is no cast button */
-	playerCast: "Cast to a TV",
-	/** Cast panel — body */
-	playerCastUnavailable:
-		"Casting isn't available for your private library. Files are decrypted only on this device. Use screen mirroring, HDMI or a browser on the TV.",
 	/** Player — keyboard shortcuts button and sheet */
 	playerShortcuts: "Keyboard shortcuts",
 	/** Keyboard shortcuts — where a media key works: in any player */
@@ -546,8 +541,10 @@ export const videos = {
 	subtitleForced: "Forced",
 	/** Tracks popover — subtitles for the deaf and hard of hearing */
 	subtitleSdh: "SDH",
-	/** Tracks popover — a subtitle track inside the file, which can't be shown yet */
-	subtitleEmbeddedUnavailable: "In the file · not supported yet",
+	/** Tracks popover — a subtitle track inside the file in a format that can't be shown (TTML, closed captions, text in a fragmented MP4) */
+	subtitleFormatUnsupported: "In the file · format not supported",
+	/** Tracks popover — a text subtitle track inside the file that this browser could only show by converting the video, which it can't do for this file */
+	subtitleEmbeddedUnplayable: "In the file · can't be shown in this browser",
 	/** Tracks popover — an image subtitle format */
 	subtitleImageUnavailable: "Image subtitles aren't supported",
 	/** Tracks popover footer — opens the subtitle style panel */

@@ -1,5 +1,4 @@
 import {
-	normalizeLadderContainer,
 	parseSubtitleTokens,
 	subtitleFormatFromExtension,
 	type LadderDecision,
@@ -123,14 +122,6 @@ export function confirmedGap(probe: VideoProbe, kinds: readonly TrackKind[], can
 	}
 
 	return null
-}
-
-// Whether embedded text subtitles can be shown for this container: the remux engine taps them from
-// Matroska only.
-export function embeddedTextContainer(probe: VideoProbe): boolean {
-	const container = normalizeLadderContainer(probe.container)
-
-	return container === "mkv" || container === "webm"
 }
 
 export interface SidecarCandidate {

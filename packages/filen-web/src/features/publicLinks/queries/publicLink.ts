@@ -7,6 +7,8 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { isNetworkClassError } from "@/lib/sdk/retry"
 import { publicLinkQueryKey, secretFingerprint, linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
+import { getPublicViewMode } from "@/features/publicLinks/lib/viewMode"
+import type { DriveViewMode } from "@/features/drive/lib/preferences"
 
 // ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key —
 // every secret travels ONLY through the queryFn closures below; the key carries a non-secret djb2
@@ -145,4 +147,16 @@ export function useLinkSaveable(kind: "file" | "directory", uuid: string | null)
 	})
 
 	return signedIn.data === true && owned.data === false
+}
+
+// The directory listing's list or grid (viewMode.ts), read from the kv store like the drive's own view preference: the
+// caller awaits the setter, then refetches this.
+export function usePublicViewModeQuery(): UseQueryResult<DriveViewMode> {
+	return useQuery({
+		queryKey: ["publicLinks", "viewMode"] as const,
+		queryFn: getPublicViewMode,
+		staleTime: Infinity,
+		refetchOnWindowFocus: false,
+		persister: noDiskPersister
+	})
 }

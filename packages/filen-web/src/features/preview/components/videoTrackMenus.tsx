@@ -214,11 +214,16 @@ export function TracksMenu({
 							<DropdownMenuRadioItem
 								key={option.id}
 								value={option.id}
+								disabled={option.unplayable}
 							>
 								<span className="truncate">
-									{subtitles.failed && option.id === subtitles.selected
-										? t("previewMediaSubtitleUnreadable", { name: subtitleLabel(option, i18n.language, key => t(key)) })
-										: subtitleLabel(option, i18n.language, key => t(key))}
+									{option.unplayable
+										? t("previewMediaSubtitleUnplayable", { name: subtitleLabel(option, i18n.language, key => t(key)) })
+										: subtitles.failed && option.id === subtitles.selected
+											? t("previewMediaSubtitleUnreadable", {
+													name: subtitleLabel(option, i18n.language, key => t(key))
+												})
+											: subtitleLabel(option, i18n.language, key => t(key))}
 								</span>
 							</DropdownMenuRadioItem>
 						))}

@@ -239,8 +239,16 @@ export function acquireArchiveHandle(
 		return { type: "refused", reason: "needsArchiveReader" }
 	}
 
-	const file = origin.file
-	const target = fileTarget(file, origin.kind === "linkedFile")
+	return { type: "opened", handle: openArchiveHandle(fileTarget(origin.file, origin.kind === "linkedFile"), password, deps) }
+}
+
+// The archive `target` names (a file's, or one held in another's entry through its parent's reader), opened or joined
+// under `password`.
+export function openArchiveHandle(
+	target: ReaderTarget,
+	password: string | undefined,
+	deps: ArchiveHandleDeps = defaultArchiveHandleDeps
+): ArchiveHandle {
 	const reader = deps.acquireReader(target, password)
 	let released = false
 
@@ -300,7 +308,7 @@ export function acquireArchiveHandle(
 				deps
 			)
 
-			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, file.uuid, reader.anon, index, size), release })
+			return Promise.resolve({ origin: entryLeaseOrigin(leaseId, target.uuid, reader.anon, index, size), release })
 		},
 		release: () => {
 			if (released) {
@@ -312,5 +320,5 @@ export function acquireArchiveHandle(
 		}
 	}
 
-	return { type: "opened", handle }
+	return handle
 }

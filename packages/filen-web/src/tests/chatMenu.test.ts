@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MailOpenIcon, Volume2Icon, VolumeOffIcon, UsersIcon, PencilIcon, Trash2Icon, LogOutIcon } from "lucide-react"
+import { MailOpenIcon, Volume2Icon, VolumeOffIcon, UsersIcon, PencilIcon, Trash2Icon, LogOutIcon, HashIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { applyOfflineGate, chatMenuActions, type ChatActionDescriptor } from "@/features/chats/components/chatMenu.logic"
 import {
@@ -25,14 +25,14 @@ function facts(chat: Chat, userId: bigint | undefined, hasUnread = false): { id:
 }
 
 describe("chatMenuActions — owner, normal (decryptable) chat, no unread", () => {
-	it("mute/participants/rename/delete, in that order (no markRead)", () => {
-		expect(ids(mockChat({ ownerId: 1n }), 1n)).toEqual(["mute", "participants", "rename", "delete"])
+	it("mute/participants/rename/copyId/delete, in that order (no markRead)", () => {
+		expect(ids(mockChat({ ownerId: 1n }), 1n)).toEqual(["mute", "participants", "rename", "copyId", "delete"])
 	})
 })
 
 describe("chatMenuActions — non-owner (participant), normal chat", () => {
 	it("omits rename; ends in leave instead of delete", () => {
-		expect(ids(mockChat({ ownerId: 1n }), 2n)).toEqual(["mute", "participants", "leave"])
+		expect(ids(mockChat({ ownerId: 1n }), 2n)).toEqual(["mute", "participants", "copyId", "leave"])
 	})
 
 	it("an unresolved current user (undefined) is treated as non-owner", () => {
@@ -43,7 +43,7 @@ describe("chatMenuActions — non-owner (participant), normal chat", () => {
 
 describe("chatMenuActions — unread", () => {
 	it("prepends markRead when hasUnread is true", () => {
-		expect(ids(mockChat({ ownerId: 1n }), 1n, true)).toEqual(["markRead", "mute", "participants", "rename", "delete"])
+		expect(ids(mockChat({ ownerId: 1n }), 1n, true)).toEqual(["markRead", "mute", "participants", "rename", "copyId", "delete"])
 	})
 
 	it("omits markRead when hasUnread is false", () => {
@@ -52,12 +52,12 @@ describe("chatMenuActions — unread", () => {
 })
 
 describe("chatMenuActions — undecryptable chat", () => {
-	it("reduces to exactly delete for the owner, regardless of unread", () => {
-		expect(ids(mockUndecryptableChat({ ownerId: 1n }), 1n, true)).toEqual(["delete"])
+	it("reduces to copyId + delete for the owner, regardless of unread", () => {
+		expect(ids(mockUndecryptableChat({ ownerId: 1n }), 1n, true)).toEqual(["copyId", "delete"])
 	})
 
-	it("reduces to exactly leave for a non-owner", () => {
-		expect(ids(mockUndecryptableChat({ ownerId: 1n }), 2n)).toEqual(["leave"])
+	it("reduces to copyId + leave for a non-owner", () => {
+		expect(ids(mockUndecryptableChat({ ownerId: 1n }), 2n)).toEqual(["copyId", "leave"])
 	})
 })
 
@@ -112,6 +112,7 @@ describe("chatMenuActions — descriptor label/icon facts (CHAT_ACTION_DEFS drif
 			{ id: "mute", labelKey: "chatActionMute", icon: VolumeOffIcon },
 			{ id: "participants", labelKey: "chatActionParticipants", icon: UsersIcon },
 			{ id: "rename", labelKey: "chatActionRename", icon: PencilIcon },
+			{ id: "copyId", labelKey: "chatActionCopyId", icon: HashIcon },
 			{ id: "delete", labelKey: "chatActionDelete", icon: Trash2Icon }
 		])
 	})

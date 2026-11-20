@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
 
@@ -16,7 +16,7 @@ vi.mock("sonner", () => ({ toast: { success: toastSuccess } }))
 
 import "@/lib/i18n"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
+import { copyToClipboard, cutToClipboard, pasteClipboard, systemClipboardOutdated } from "@/features/drive/lib/clipboard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 
 function dirItem(label: string): DriveItem {
@@ -40,6 +40,71 @@ function entry() {
 
 beforeEach(() => {
 	useDriveClipboardStore.getState().clear()
+})
+
+afterEach(() => {
+	vi.unstubAllGlobals()
+})
+
+function stubSystemClipboard(writeText: (text: string) => Promise<void>): void {
+	vi.stubGlobal("navigator", { clipboard: { writeText } })
+}
+
+describe("the system clipboard", () => {
+	it("takes the names of what was copied or cut, so the drive clipboard is the latest copy", async () => {
+		const writeText = vi.fn(() => Promise.resolve())
+
+		stubSystemClipboard(writeText)
+		copyToClipboard([DOCS, PHOTOS])
+
+		expect(writeText).toHaveBeenCalledExactlyOnceWith("docs\nphotos")
+		// Until the write lands, what it held before is older than the entry.
+		expect(systemClipboardOutdated()).toBe(true)
+		await vi.waitFor(() => {
+			expect(systemClipboardOutdated()).toBe(false)
+		})
+
+		cutToClipboard([DOCS])
+		expect(writeText).toHaveBeenLastCalledWith("docs")
+	})
+
+	it("counts as outdated while the drive clipboard holds an entry whose names it refused", async () => {
+		stubSystemClipboard(() => Promise.reject(new DOMException("denied", "NotAllowedError")))
+		copyToClipboard([DOCS])
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(systemClipboardOutdated()).toBe(true)
+
+		useDriveClipboardStore.getState().clear()
+		expect(systemClipboardOutdated()).toBe(false)
+	})
+
+	it("counts as outdated without a clipboard API, and copying still works", () => {
+		vi.stubGlobal("navigator", {})
+		copyToClipboard([DOCS])
+
+		expect(entry()).toEqual({ mode: "copy", items: [DOCS] })
+		expect(systemClipboardOutdated()).toBe(true)
+	})
+
+	it("is not outdated by an earlier write that lands after a later copy was refused", async () => {
+		let land: () => void = () => undefined
+		stubSystemClipboard(
+			() =>
+				new Promise<void>(resolve => {
+					land = resolve
+				})
+		)
+		copyToClipboard([DOCS])
+		const first = land
+
+		stubSystemClipboard(() => Promise.reject(new Error("denied")))
+		copyToClipboard([PHOTOS])
+		first()
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(systemClipboardOutdated()).toBe(true)
+	})
 })
 
 describe("drive clipboard", () => {

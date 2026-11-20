@@ -177,6 +177,12 @@ export function useMessageActions({
 			return
 		}
 
+		if (descriptor.id === "copyId") {
+			void copyText(message.uuid, t("chatMessageCopyIdToast"))
+
+			return
+		}
+
 		if (descriptor.id === "retry") {
 			void retryInflightMessage({ chat, message: { ...message, inflightId: message.uuid } })
 

@@ -6,11 +6,12 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // UNASSIGNED (defaultCombo "" matches no key until a user binds it): the keyboard-first contract requires every action
 // be user-mappable, not that every action ship with a default.
 //
-// `app.toggleAssistant` ships unassigned too. Its `global` scope co-mounts with every other scope
-// (conflicts.ts), so a default must avoid every shipped combo. The free modifier chords belong to the
-// browser (mod+j downloads, mod+l address bar, mod+shift+a tab search) or to the editors' own
-// CodeMirror/Quill keys, which the tables do not model. Bare letters are free, but one stray keypress
-// reflowing the whole content column is not a default worth shipping.
+// `app.toggleAssistant` is Q: the shortest key free everywhere. Its `global` scope co-mounts with every other scope
+// (conflicts.ts), so it must avoid every shipped combo; a single key that no scope, browser or desktop shell takes is
+// shorter than any chord. Of the single keys free everywhere (Q, X, Y, Z and `;` `'` `` ` `` `[` `]` `-`), `'` is
+// Firefox's Quick Find and the punctuation sits elsewhere, or behind dead keys, on most layouts. The free modifier chords belong to the browser (mod+j
+// downloads, mod+l address bar, mod+shift+a tab search) or to the editors' own CodeMirror/Quill keys. As a
+// character key it stands down in text fields and goes with the single-key switch (Settings → Keyboard).
 //
 // `app.openSettings` is Mod+, as in every desktop app; a Mac browser keeps Cmd+, for its own settings, so the web on
 // a Mac leaves it unassigned.
@@ -47,7 +48,7 @@ export const APP_ACTIONS: readonly ActionDef[] = [
 	{ id: "app.openPhotos", defaultCombo: "", scope: "global", descriptionKey: "common:modulePhotos" },
 	{ id: "app.openVideos", defaultCombo: "", scope: "global", descriptionKey: "common:moduleVideos" },
 	{ id: "app.openPlaylists", defaultCombo: "", scope: "global", descriptionKey: "common:modulePlaylists" },
-	{ id: "app.toggleAssistant", defaultCombo: "", scope: "global", descriptionKey: "common:toggleAssistant" },
+	{ id: "app.toggleAssistant", defaultCombo: "q", scope: "global", descriptionKey: "common:toggleAssistant" },
 	{ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "common:toggleTheme" },
 	moduleAction("app.openDrive", "common:moduleDrive", 1),
 	moduleAction("app.openNotes", "common:moduleNotes", 2),

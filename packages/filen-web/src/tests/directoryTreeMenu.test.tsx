@@ -3,7 +3,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
-import { QueryClient, QueryClientProvider, onlineManager, type UseQueryResult } from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 
 // Every worker call the tree menu could make lands here: opening it must make none.
@@ -44,6 +44,20 @@ vi.mock("@/lib/keymap/kbd", async () => {
 })
 // The paste itself (recheck + copy card / move) is clipboard.test.ts's; here only what it is asked to do.
 vi.mock("@/features/drive/lib/clipboardPaste", () => ({ pasteWhenStillValid }))
+// Every open level straight from the seeded listings, which is what the tree's query hook selects from them.
+vi.mock("@/features/drive/queries/drive", async importOriginal => {
+	const original = await importOriginal<typeof import("@/features/drive/queries/drive")>()
+
+	return {
+		...original,
+		useDirectoryTreeLevelsQuery: (parents: readonly (string | null)[]) =>
+			parents.map(uuid => ({
+				status: "success",
+				isFetching: false,
+				data: original.projectTreeChildren(original.cachedListing("drive", uuid) ?? [])
+			}))
+	}
+})
 vi.mock("@tanstack/react-router", async importOriginal => ({
 	...(await importOriginal<typeof import("@tanstack/react-router")>()),
 	useNavigate: () => navigate,
@@ -72,13 +86,14 @@ import { queryClient } from "@/queries/client"
 import { registerAction } from "@/lib/keymap/registry"
 import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryKey, projectTreeChildren, type DirectoryTreeChild } from "@/features/drive/queries/drive"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
 import { DriveRow } from "@/features/drive/components/driveRow"
 import { testUuid } from "@/tests/support/uuid"
+import { sizedScrollArea } from "@/tests/support/viewport"
 
 const ROOT = testUuid("root")
 
@@ -119,10 +134,6 @@ const LISTINGS = new Map<string | null, DriveItem[]>([
 	[testUuid("docs"), [INNER]]
 ])
 
-function resolved(data: DirectoryTreeChild[]): UseQueryResult<DirectoryTreeChild[]> {
-	return { status: "success", data } as UseQueryResult<DirectoryTreeChild[]>
-}
-
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
@@ -133,8 +144,7 @@ function renderTree() {
 		activePath: [],
 		isOpen: uuid => uuid === testUuid("docs"),
 		onToggle: () => undefined,
-		onNavigate: () => undefined,
-		useChildren: uuid => resolved(projectTreeChildren(LISTINGS.get(uuid) ?? []))
+		onNavigate: () => undefined
 	}
 	const onNavigate = vi.fn()
 
@@ -142,14 +152,10 @@ function renderTree() {
 		createElement(DirectoryTreeMenu, {
 			onNavigate,
 			render: createElement(
-				"ul",
-				{ "aria-label": "Directory tree" },
-				createElement(
-					"li",
-					null,
-					createElement("div", { "data-tree-path": "" }, createElement("button", { type: "button" }, "Cloud Drive")),
-					createElement(DirectoryTree, { tree })
-				)
+				"div",
+				null,
+				createElement("div", { "data-tree-path": "" }, createElement("button", { type: "button" }, "Cloud Drive")),
+				createElement(DirectoryTree, { tree, scrollElement: sizedScrollArea(400) })
 			)
 		}),
 		{ wrapper }
@@ -158,10 +164,10 @@ function renderTree() {
 	return { onNavigate }
 }
 
-// A row's name button (the chevron is the row's first button). Looked up before a menu opens: an open
-// menu hides the page behind it from the accessibility tree.
+// A node's row, or the root's Cloud Drive button. Looked up before a menu opens: an open menu hides the page behind
+// it from the accessibility tree.
 function rowButton(name: string): HTMLElement {
-	return screen.getByRole("button", { name })
+	return name === "Cloud Drive" ? screen.getByRole("button", { name }) : screen.getByRole("treeitem", { name })
 }
 
 async function openMenuOn(element: HTMLElement): Promise<void> {
@@ -307,7 +313,7 @@ describe("sidebar tree menu", () => {
 
 	it("keeps the browser's own menu off every row", async () => {
 		renderTree()
-		const list = screen.getByRole("list", { name: "Directory tree" })
+		const list = screen.getByRole("tree", { name: "Directory tree" })
 		const event = createEvent.contextMenu(list)
 
 		await act(async () => {

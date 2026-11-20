@@ -113,6 +113,44 @@ export async function openPlayback(
 	return playback
 }
 
+async function decideFor(params: {
+	file: AnyFile
+	probe: VideoProbe
+	ladderProbe: LadderProbe
+	selection: LadderSelection
+	deps: Pick<PlaybackDeps, "capabilities" | "directAvailable">
+	session?: ReadonlyMap<string, { reason: PlaybackTrigger }>
+}): Promise<{ decision: LadderDecision; caps: PlaybackCapabilities }> {
+	const { file, probe, ladderProbe, selection, deps } = params
+	const [probed, learned] = await Promise.all([
+		deps.capabilities.capabilities(ladderProbe, selection, streamFacts({ probe, selection, size: Number(file.size) })),
+		deps.capabilities.learned()
+	])
+	const caps = deps.directAvailable() ? probed : withoutDirect(probed)
+
+	return decideWithDemotions({ probe: ladderProbe, selection, caps, learned: new Map([...learned, ...(params.session ?? [])]) })
+}
+
+// Whether an embedded text track can be shown with `selection` (its audio track): the ladder, deciding as an open
+// would now, lands on a remux rung. False when it would play the file direct without the track, or not at all, so
+// a direct stream is not given up for a track nothing can show.
+export async function embeddedTextReachable(
+	file: AnyFile,
+	probe: VideoProbe,
+	selection: LadderSelection,
+	deps?: Partial<PlaybackDeps>
+): Promise<boolean> {
+	const { decision } = await decideFor({
+		file,
+		probe,
+		ladderProbe: toLadderProbe(probe),
+		selection: { ...selection, subtitle: "embedded-text" },
+		deps: { ...DEFAULT_DEPS, ...deps }
+	})
+
+	return decision.path === "remux" || decision.path === "remux+transcode"
+}
+
 // A demotion waiting to be learned: it is a verdict on the browser only once a lower rung has played the
 // same file.
 interface PendingDemotion {
@@ -257,18 +295,15 @@ class LadderPlayback implements Playback {
 
 	// The ladder's decision for `selection` with what this browser build is known not to play, and what
 	// failed during this playback, taken away.
-	private async decide(selection: LadderSelection): Promise<{ decision: LadderDecision; caps: PlaybackCapabilities }> {
-		const [probed, learned] = await Promise.all([
-			this.deps.capabilities.capabilities(
-				this.ladderProbe,
-				selection,
-				streamFacts({ probe: this.probe, selection, size: Number(this.file.size) })
-			),
-			this.deps.capabilities.learned()
-		])
-		const caps = this.deps.directAvailable() ? probed : withoutDirect(probed)
-
-		return decideWithDemotions({ probe: this.ladderProbe, selection, caps, learned: new Map([...learned, ...this.sessionDemotions]) })
+	private decide(selection: LadderSelection): Promise<{ decision: LadderDecision; caps: PlaybackCapabilities }> {
+		return decideFor({
+			file: this.file,
+			probe: this.probe,
+			ladderProbe: this.ladderProbe,
+			selection,
+			deps: this.deps,
+			session: this.sessionDemotions
+		})
 	}
 
 	private async switchAudio(audioIndex: number): Promise<void> {

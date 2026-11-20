@@ -25,7 +25,7 @@ const PLAYLIST_WRITE_KEYS: Options = {
 }
 
 // The main pane of the /playlists split view; the list is the shell's PlaylistsSidebar. `selectedUuid`
-// is the route's raw `playlist` param, resolved here exactly as the sidebar resolves its highlight
+// is the route's raw `uuid` path param, resolved here exactly as the sidebar resolves its highlight
 // (usePlaylistSelection, then resolveSelectedPlaylist) — both read the one playlists query, so neither
 // costs a request. The playlist shown becomes the one a bare /playlists reopens.
 export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undefined }) {

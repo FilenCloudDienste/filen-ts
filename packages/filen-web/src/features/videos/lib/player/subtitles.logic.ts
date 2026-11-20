@@ -7,17 +7,18 @@ import {
 	type SubtitleTrackInfo,
 	type VideoProbe
 } from "@filen/shared/videos"
-import { isTapTextCodec } from "@/workers/remux/textTap"
+import { embeddedSubtitleSupport } from "@/lib/media/playback/embeddedCues"
 import type { VideoFileRef, VideoPartView } from "@/workers/videoIndex/view.logic"
 
 // The parser for a sidecar's format, from the one shared table.
 export { parseFormatOf } from "@filen/shared/videos"
 
 // The subtitles a part offers: sidecars beside it (read when chosen, one read each) and the tracks inside the
-// file. Text tracks inside a Matroska file come from the remux engine's tap over what playback reads; image
-// formats (PGS, VobSub) and text inside an MP4 can't be shown.
+// file. Text tracks inside a Matroska or MP4 file come from the remux engine's taps over what playback reads; image
+// formats (PGS, VobSub) and other text formats (TTML, closed captions, a fragmented MP4's text) can't be shown.
 
-export type SubtitleUnavailable = "image" | "embedded"
+// "playback": a text track this browser can only show through a remux that doesn't play the file whole.
+export type SubtitleUnavailable = "image" | "embedded" | "playback"
 
 export interface PlayerSubtitleTrack {
 	// "s:<stable uuid>" for a sidecar, "e:<track id>" for a track in the file.
@@ -42,14 +43,14 @@ export type SmiClasses = readonly Pick<SmiTrack, "className" | "lang">[]
 // What the subtitle menu's choice is: Smart (resolved per item), off, or one track.
 export type SubtitleChoice = { kind: "auto" } | { kind: "off" } | { kind: "track"; id: string }
 
-const IMAGE_CODECS = /PGS|VOBSUB|DVB|HDMV|S_IMAGE/i
-
 // `smiClasses` (by file uuid): a SAMI file with several classes is one track per class. The first keeps the file's
-// own id, so a choice made before its classes were read still holds.
+// own id, so a choice made before its classes were read still holds. `embeddedTextBlocked`: the player found that no
+// remux plays this file whole here (PlayerSnapshot.embeddedTextBlocked).
 export function subtitleTracksOf(
 	part: VideoPartView,
 	probe: VideoProbe | null,
-	smiClasses?: ReadonlyMap<string, SmiClasses>
+	smiClasses?: ReadonlyMap<string, SmiClasses>,
+	embeddedTextBlocked = false
 ): PlayerSubtitleTrack[] {
 	const tracks: PlayerSubtitleTrack[] = []
 
@@ -93,6 +94,8 @@ export function subtitleTracksOf(
 	}
 
 	for (const sub of probe?.subs ?? []) {
+		const support = probe === null ? "unsupported" : embeddedSubtitleSupport(probe, sub)
+
 		tracks.push({
 			id: `e:${String(sub.id)}`,
 			lang: sub.lang,
@@ -103,11 +106,7 @@ export function subtitleTracksOf(
 			external: false,
 			file: null,
 			format: null,
-			unavailable: IMAGE_CODECS.test(sub.codecId)
-				? "image"
-				: (probe?.container === "mkv" || probe?.container === "webm") && isTapTextCodec(sub.codecId)
-					? null
-					: "embedded"
+			unavailable: support === "text" ? (embeddedTextBlocked ? "playback" : null) : support === "image" ? "image" : "embedded"
 		})
 	}
 

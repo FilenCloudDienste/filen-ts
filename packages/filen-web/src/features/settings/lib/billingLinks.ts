@@ -9,8 +9,8 @@ export function isDesktopBilling(): boolean {
 
 export const WEB_BILLING_URL = `${WEB_APP_ORIGIN}/settings/billing`
 
-// The Plans route's search: `plan` preselects a plan by its config id.
-export interface PlansSearch {
+// The Plans page's target: `plan` preselects a plan by its config id (/settings/plans/<plan>).
+export interface PlansTarget {
 	plan?: number
 }
 
@@ -20,8 +20,17 @@ export function parsePlanId(value: unknown): number | undefined {
 	return typeof parsed === "number" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-export function validatePlansSearch(search: Record<string, unknown>): PlansSearch {
-	const plan = parsePlanId(search["plan"])
+const PLANS_PATH_RE = /^\/settings\/plans(?:\/([^/]+))?\/?$/
+
+// The Plans page a pathname opens, or null for any other page. A malformed plan id is dropped, never the page.
+export function plansTargetOfPath(pathname: string): PlansTarget | null {
+	const m = PLANS_PATH_RE.exec(pathname)
+
+	if (m === null) {
+		return null
+	}
+
+	const plan = parsePlanId(m[1])
 
 	return plan === undefined ? {} : { plan }
 }

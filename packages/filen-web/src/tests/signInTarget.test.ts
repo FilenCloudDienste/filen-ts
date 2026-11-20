@@ -138,13 +138,13 @@ describe("sign-in return target", () => {
 
 	it("keeps a plans link through registration, ahead of any other target", async () => {
 		await visitSignedOut("/notes/x")
-		await visitSignedOut("/settings/plans?plan=27")
+		await visitSignedOut("/settings/plans/27")
 
 		// Registration and its email confirmation happen signed out: /register's guard lets them through untouched.
 		hasClient.mockResolvedValue(false)
 		await expect(redirectIfAuthed()).resolves.toBeUndefined()
 
-		expect(await signedInRedirect()).toMatchObject({ to: "/settings/plans", search: { plan: 27 } })
+		expect(await signedInRedirect()).toMatchObject({ to: "/settings/plans/$plan", params: { plan: "27" } })
 		// Both were taken: the next sign-in lands normally.
 		expect(takeSignInTarget()).toBeNull()
 	})
@@ -152,6 +152,25 @@ describe("sign-in return target", () => {
 	it("carries the plans page without a plan", async () => {
 		rememberPlansTarget(undefined)
 
-		expect(await signedInRedirect()).toMatchObject({ to: "/settings/plans", search: {} })
+		const options = await signedInRedirect()
+
+		expect(options).toMatchObject({ to: "/settings/plans" })
+		expect(options.params).toBeUndefined()
+	})
+
+	it("keeps the bare plans page and drops a malformed plan id, never the page", async () => {
+		await visitSignedOut("/settings/plans")
+
+		expect(takeSignInTarget()).toEqual({ kind: "plans", target: {} })
+
+		await visitSignedOut("/settings/plans/abc")
+
+		expect(takeSignInTarget()).toEqual({ kind: "plans", target: {} })
+	})
+
+	it("remembers a moved-into-the-path page (a rewritten old bookmark) as the page to return to", async () => {
+		await visitSignedOut("/contacts/blocked")
+
+		expect(takeSignInTarget()).toEqual({ kind: "path", href: "/contacts/blocked" })
 	})
 })

@@ -104,6 +104,12 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
 	isFsaAvailable: () => true
 }))
+// An iWork document's preview is iworkPreview.tsx's: this one says which reader it lists the package through.
+vi.mock("@/features/iwork/components/iworkPreview", () => ({
+	IworkPreview: ({ target }: { target?: { uuid: string; nested: { index: number } | null } }) => (
+		<p>{`iwork: ${target?.uuid ?? "none"} @ ${String(target?.nested?.index)}`}</p>
+	)
+}))
 // The viewers themselves are the preview's; this one shows what usePreviewBytes read.
 vi.mock("@/features/preview/components/readOnlyPreviewBody", async () => {
 	const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
@@ -969,6 +975,57 @@ describe("an archive entry on its own", () => {
 
 		expect(await screen.findByRole("button", { name: "Browse contents" })).toBeTruthy()
 		expect(gated.start).toHaveBeenCalledTimes(1)
+	})
+
+	it("previews an iWork document in a stored entry through a reader of its own, never reading the entry whole", async () => {
+		show([{ path: "report.pages", size: 3 * MiB, access: DIRECT }])
+		archiveEntryAccess.mockResolvedValue("mapped")
+
+		fireEvent.doubleClick(row("report.pages"))
+		expect(await screen.findByText(`iwork: ${TEST_ARCHIVE}/0 @ 0`)).toBeTruthy()
+		expect(loadEntryBytes).not.toHaveBeenCalled()
+		expect(runEntryDownload).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: /Back/ }))
+		expect(row("report.pages")).toBeTruthy()
+	})
+
+	it("confirms unpacking a large iWork document held in a compressed entry before previewing it", async () => {
+		show([{ path: "deck.key", size: 300 * MiB, access: DIRECT }])
+		archiveEntryAccess.mockResolvedValue("seekable")
+
+		fireEvent.doubleClick(row("deck.key"))
+
+		const dialog = await screen.findByRole("alertdialog", { name: "Unpack this document first?" })
+
+		expect(dialog.textContent).toContain("Previewing it unpacks all 300 MiB of it first.")
+		fireEvent.click(within(dialog).getByRole("button", { name: "Preview" }))
+		expect(await screen.findByText(`iwork: ${TEST_ARCHIVE}/0 @ 0`)).toBeTruthy()
+	})
+
+	it("shows an iWork document in an entry read only whole as the card offering to extract the archive", async () => {
+		show([{ path: "sheet.numbers", size: 3 * MiB, access: DIRECT }])
+		archiveEntryAccess.mockResolvedValue("whole")
+
+		fireEvent.doubleClick(row("sheet.numbers"))
+		expect(await screen.findByText(/can't be opened from inside this archive/)).toBeTruthy()
+		expect(screen.queryByText(/^iwork:/)).toBeNull()
+	})
+
+	// A wrong outer password would list as a package with no preview: until the listing proved one, it only saves.
+	it("saves an iWork document in an encrypted entry until the listing holds the password, then previews it", async () => {
+		show([{ path: "report.pages", size: 3, access: DIRECT, encrypted: true }])
+
+		fireEvent.doubleClick(row("report.pages"))
+		expect(archiveEntryAccess).not.toHaveBeenCalled()
+		expect(screen.queryByText(/^iwork:/)).toBeNull()
+
+		cleanup()
+		archiveEntryAccess.mockResolvedValue("mapped")
+		show([{ path: "report.pages", size: 3, access: DIRECT, encrypted: true }], { password: "pw" })
+
+		fireEvent.doubleClick(row("report.pages"))
+		expect(await screen.findByText(`iwork: ${TEST_ARCHIVE}/0 @ 0`)).toBeTruthy()
 	})
 
 	describe("an inner archive showing no list keeps the way back out", () => {

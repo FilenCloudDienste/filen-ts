@@ -138,6 +138,33 @@ describe("AssistantConfirmationCard", () => {
 		expect(reject).toHaveBeenCalledWith("p1")
 	})
 
+	it("labels a rename's new name and a new note's title, type and text", () => {
+		renderCard({
+			id: "p2",
+			action: "rename",
+			targets: [{ handle: "f1", name: "a.pdf" }],
+			destination: null,
+			text: { new_name: "b.pdf" }
+		})
+
+		expect(screen.getByText("New name").nextElementSibling?.textContent).toBe("b.pdf")
+
+		cleanup()
+		renderCard({
+			id: "p3",
+			action: "create-note",
+			targets: [],
+			destination: null,
+			text: { title: "Packing", content: "socks", type: "checklist" }
+		})
+
+		const card = screen.getByRole("group", { name: "Create a note" })
+
+		expect(within(card).getByText("Title").nextElementSibling?.textContent).toBe("Packing")
+		expect(within(card).getByText("Type").nextElementSibling?.textContent).toBe("checklist")
+		expect(within(card).getByText("Text").nextElementSibling?.textContent).toBe("socks")
+	})
+
 	it("labels a trash confirm as what it does", () => {
 		renderCard({ ...MOVE, action: "trash", destination: null })
 

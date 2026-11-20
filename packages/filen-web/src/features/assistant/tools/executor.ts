@@ -17,7 +17,12 @@ import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { findCachedListingItem } from "@/features/drive/queries/drive"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
-import type { AssistantHandleRef, AssistantPreviewTarget, ToolExecutor } from "@/features/assistant/runtime/executor"
+import {
+	DESTINATION_ARGS,
+	type AssistantHandleRef,
+	type AssistantPreviewTarget,
+	type ToolExecutor
+} from "@/features/assistant/runtime/executor"
 import { AssistantHandleRegistry, ROOT_HANDLE, type AssistantEntityKind } from "@/features/assistant/tools/handles"
 import { AssistantToolError, sanitizeStrings, unlessStopped } from "@/features/assistant/tools/format"
 import {
@@ -58,6 +63,17 @@ import {
 	readChatTool
 } from "@/features/assistant/tools/chats"
 import { audioControlTool, listPlaylistsTool, openPlaylistTool, playTool } from "@/features/assistant/tools/audio"
+import {
+	copyItemsTool,
+	createDirectoryTool,
+	createNoteTool,
+	destinationPath,
+	moveItemsTool,
+	renameItemTool,
+	setFavoriteTool,
+	trashItemsTool,
+	WRITE_PRECHECKS
+} from "@/features/assistant/tools/writes"
 
 // Which items each handle argument may name.
 const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly AssistantEntityKind[]>>> = {
@@ -199,9 +215,16 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	get_sharing: getSharingTool,
 	read_text_file: readTextFileTool,
 	reveal_item: revealItemTool,
+	set_favorite: setFavoriteTool,
+	create_directory: createDirectoryTool,
+	rename_item: renameItemTool,
+	move_items: moveItemsTool,
+	copy_items: copyItemsTool,
+	trash_items: trashItemsTool,
 	list_notes: listNotesTool,
 	read_note: readNoteTool,
 	open_note: openNoteTool,
+	create_note: createNoteTool,
 	list_chats: listChatsTool,
 	read_chat: readChatTool,
 	open_chat: openChatTool,
@@ -256,12 +279,19 @@ async function isDrivePath(path: unknown): Promise<boolean> {
 
 // Checks a tool needs before its confirmation card shows, so the user never confirms a call that then fails.
 const PRECHECKS: Partial<Record<AssistantToolName, (scope: ToolScope, input: Record<string, unknown>) => Promise<string | null>>> = {
+	...WRITE_PRECHECKS,
 	draft_chat_message: draftChatProblem
 }
 
 // Free-text arguments the card shows exactly as the call will use them.
+// Names and titles are stored trimmed, so the card shows them trimmed.
+const trimmed = (value: string): string => value.trim()
+
 const TEXT_ARGS: Partial<Record<AssistantToolName, Record<string, (value: string) => string>>> = {
-	draft_chat_message: { text: draftText }
+	draft_chat_message: { text: draftText },
+	create_directory: { name: trimmed },
+	rename_item: { new_name: trimmed },
+	create_note: { title: trimmed }
 }
 
 function notAvailable(tool: AssistantTool): AssistantToolError {
@@ -420,9 +450,19 @@ export function createAssistantToolExecutor(): ToolExecutor {
 
 		preview: async ({ tool, args }) => {
 			try {
-				const { targets, text } = await resolveArgs(tool, args, scopeFor(undefined, new Map()))
+				const resolved = await resolveArgs(tool, args, scopeFor(undefined, new Map()))
+				const destinations = new Set<unknown>(DESTINATION_ARGS.map(key => resolved.args[key]))
+				// A destination by its path: two directories may share a name, never a path.
+				const targets = await Promise.all(
+					resolved.targets.map(async target => {
+						const entity = destinations.has(target.handle) ? registry.get(target.handle)?.entity : undefined
+						const path = entity === undefined ? undefined : await destinationPath(entity)
 
-				return { ok: true, title: tool.title, targets, text }
+						return path === undefined ? target : { ...target, name: path }
+					})
+				)
+
+				return { ok: true, title: tool.title, targets, text: resolved.text }
 			} catch (e) {
 				return { ok: false, error: e instanceof AssistantToolError ? e.message : errorLabel(e) }
 			}

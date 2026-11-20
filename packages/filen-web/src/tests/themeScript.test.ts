@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { runInNewContext } from "node:vm"
 import { beforeEach, describe, expect, it } from "vitest"
+import { THEME_COLORS } from "@/providers/themeProvider"
 
 // public/theme.js runs before the bundle; it is executed here as the browser would, against stubs.
 const SCRIPT = readFileSync(new URL("../../public/theme.js", import.meta.url), "utf8")
@@ -8,11 +9,18 @@ const SCRIPT = readFileSync(new URL("../../public/theme.js", import.meta.url), "
 let store: Map<string, string>
 let cookie: string
 let classes: string[]
+let themeColor: string
 
-function run(systemDark = false): void {
+function run(systemDark = false, storageBlocked = false): void {
 	runInNewContext(SCRIPT, {
 		localStorage: {
-			getItem: (key: string) => store.get(key) ?? null,
+			getItem: (key: string) => {
+				if (storageBlocked) {
+					throw new Error("SecurityError")
+				}
+
+				return store.get(key) ?? null
+			},
 			setItem: (key: string, value: string) => store.set(key, value)
 		},
 		document: {
@@ -22,7 +30,17 @@ function run(systemDark = false): void {
 			set cookie(value: string) {
 				cookie = value
 			},
-			documentElement: { classList: { add: (name: string) => classes.push(name) } }
+			documentElement: { classList: { add: (name: string) => classes.push(name) } },
+			querySelector: (selector: string) =>
+				selector === 'meta[name="theme-color"]'
+					? {
+							setAttribute: (name: string, value: string) => {
+								if (name === "content") {
+									themeColor = value
+								}
+							}
+						}
+					: null
 		},
 		window: { matchMedia: () => ({ matches: systemDark }) }
 	})
@@ -32,6 +50,7 @@ beforeEach(() => {
 	store = new Map()
 	cookie = ""
 	classes = []
+	themeColor = THEME_COLORS.light
 })
 
 describe("theme.js", () => {
@@ -65,5 +84,29 @@ describe("theme.js", () => {
 		run()
 
 		expect(cookie).toBe("refId=abc")
+	})
+
+	it("tints the browser chrome with the saved theme's canvas, not the OS appearance", () => {
+		store.set("theme", "dark")
+		run(false)
+
+		expect(themeColor).toBe(THEME_COLORS.dark)
+
+		store.set("theme", "light")
+		run(true)
+
+		expect(themeColor).toBe(THEME_COLORS.light)
+
+		store.set("theme", "system")
+		run(true)
+
+		expect(themeColor).toBe(THEME_COLORS.dark)
+	})
+
+	it("falls back to the OS appearance for the tint when storage is blocked", () => {
+		run(true, true)
+
+		expect(classes).toEqual([])
+		expect(themeColor).toBe(THEME_COLORS.dark)
 	})
 })

@@ -24,11 +24,11 @@ export function resolveSidebarKind(pathname: string): SidebarKind {
 		return "settings"
 	}
 
-	if (pathname === "/contacts") {
+	if (pathIsUnder(pathname, "/contacts")) {
 		return "contacts"
 	}
 
-	if (pathname === "/playlists") {
+	if (pathIsUnder(pathname, "/playlists")) {
 		return "playlists"
 	}
 

@@ -101,10 +101,10 @@ async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName):
 			await router.navigate({ to: "/chats" })
 			break
 		case "contacts":
-			await router.navigate({ to: "/contacts", search: { section: DEFAULT_CONTACTS_SECTION_FILTER } })
+			await router.navigate({ to: "/contacts/$section", params: { section: DEFAULT_CONTACTS_SECTION_FILTER } })
 			break
 		case "audio":
-			await router.navigate({ to: "/playlists", search: {} })
+			await router.navigate({ to: "/playlists" })
 			break
 		case "transfers":
 			await router.navigate({ to: "/transfers" })

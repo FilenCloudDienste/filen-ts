@@ -3,9 +3,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, createEvent, fireEvent, renderHook } from "@testing-library/react"
 import { onlineManager } from "@tanstack/react-query"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 
-const { copyToClipboard, cutToClipboard, pasteClipboard, recheckClipboard, destinationDirectoryName } = vi.hoisted(() => ({
+const { copyToClipboard, cutToClipboard, pasteClipboard, recheckClipboard, destinationDirectoryName, uploadFileSet } = vi.hoisted(() => ({
+	uploadFileSet: vi.fn(),
 	copyToClipboard: vi.fn(),
 	cutToClipboard: vi.fn(),
 	pasteClipboard: vi.fn(() => Promise.resolve()),
@@ -23,12 +24,17 @@ vi.mock("@/features/drive/lib/clipboard", async importOriginal => ({
 	pasteClipboard
 }))
 // Its lookups after a socket gap are clipboardSync.test.ts's.
-vi.mock("@/features/drive/lib/clipboardRecheck", () => ({ recheckClipboard }))
+vi.mock("@/features/drive/lib/clipboardRecheck", () => ({
+	recheckClipboard,
+	asListed: (items: readonly DriveItem[]) => ({ items: [...items], current: true })
+}))
 // Its resolution order (listing row, breadcrumb entry, one worker call) is drive.test.ts's.
 vi.mock("@/features/drive/queries/drive", () => ({
 	destinationDirectoryName,
 	directoryNameScope: (variant: string) => (variant === "sharedIn" || variant === "sharedOut" ? variant : "drive")
 }))
+// Its routing (native host, directory walk, flat upload) is uploadDropNative.test.ts's.
+vi.mock("@/features/drive/lib/uploadDrop", () => ({ uploadFileSet }))
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
 
 import "@/lib/i18n"
@@ -50,7 +56,7 @@ const REPORT = narrowItem({
 	chunks: 1n,
 	canMakeThumbnail: false,
 	meta: { type: "decoded", data: { name: "report.txt", mime: "text/plain", modified: 0n, size: 1n, key: "key", version: 2 } }
-} satisfies File)
+} satisfies SdkFile)
 
 const DEST = "dest-0000-0000-0000-000000000000"
 
@@ -97,6 +103,21 @@ function press(target: Element, key: "c" | "x" | "v"): Event {
 	return event
 }
 
+// A paste event as the browser fires it after mod+v or the Edit menu's Paste, carrying `files`.
+function pasteEvent(target: Element, files: File[] = []): Event {
+	const event = createEvent.paste(target, {
+		clipboardData: { files, items: files.map(file => ({ kind: "file", getAsFile: () => file })) }
+	})
+
+	fireEvent(target, event)
+
+	return event
+}
+
+function wait(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 function row(): Element {
 	return document.querySelector('[role="option"]') ?? document.body
 }
@@ -120,11 +141,158 @@ describe("useDriveClipboard", () => {
 		const { result } = renderClipboard({ selectedItems: [] })
 
 		expect(result.current.enabled).toBe(true)
-		expect(press(row(), "v").defaultPrevented).toBe(true)
+		// The key leaves the browser its paste event, which tells whether the system clipboard holds files.
+		expect(press(row(), "v").defaultPrevented).toBe(false)
+		expect(pasteEvent(row()).defaultPrevented).toBe(true)
 
 		await vi.waitFor(() => {
 			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "dest" })
 		})
+		await wait(300)
+		expect(pasteClipboard).toHaveBeenCalledOnce()
+	})
+
+	// A browser that fires no paste event outside an editable element.
+	it("pastes on the key alone when no paste event follows it, and once only", async () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		renderClipboard({ selectedItems: [] })
+
+		press(row(), "v")
+		await wait(300)
+		await vi.waitFor(() => {
+			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "dest" })
+		})
+
+		// The event arrives after all.
+		pasteEvent(row())
+		await wait(0)
+		expect(pasteClipboard).toHaveBeenCalledOnce()
+	})
+
+	it("uploads files pasted from the system clipboard into the directory on screen, before the drive clipboard", async () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		renderClipboard({ selectedItems: [] })
+		const notes = new File(["notes"], "notes.txt", { type: "text/plain" })
+		const screenshot = new File(["png"], "image.png", { type: "image/png" })
+
+		press(row(), "v")
+		expect(pasteEvent(row(), [notes, screenshot]).defaultPrevented).toBe(true)
+
+		expect(uploadFileSet).toHaveBeenCalledOnce()
+		const [files, entries, parent] = uploadFileSet.mock.calls[0] as [File[], FileSystemEntry[], string | null]
+
+		expect(files[0]).toBe(notes)
+		expect(files[1]?.name).toMatch(/^Pasted image \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}\.png$/)
+		expect(files[1]?.type).toBe("image/png")
+		expect(entries).toEqual([])
+		expect(parent).toBe(DEST)
+
+		await wait(300)
+		expect(pasteClipboard).not.toHaveBeenCalled()
+	})
+
+	// The system clipboard as a paste event reads it: files until a write replaces them with text.
+	function fakeSystemClipboard(files: File[], refuse = false): { files: File[] } {
+		const system = { files }
+
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: () => {
+					if (refuse) {
+						return Promise.reject(new DOMException("denied", "NotAllowedError"))
+					}
+
+					system.files = []
+
+					return Promise.resolve()
+				}
+			}
+		})
+
+		return system
+	}
+
+	async function copyInApp(items: DriveItem[]): Promise<void> {
+		const actual = await vi.importActual<typeof import("@/features/drive/lib/clipboard")>("@/features/drive/lib/clipboard")
+
+		actual.copyToClipboard(items)
+		await wait(0)
+	}
+
+	it("pastes a drive copy made after a screenshot, uploading nothing", async () => {
+		const system = fakeSystemClipboard([new File(["png"], "image.png", { type: "image/png" })])
+
+		await copyInApp([REPORT])
+		renderClipboard({ selectedItems: [] })
+
+		press(row(), "v")
+		expect(pasteEvent(row(), system.files).defaultPrevented).toBe(true)
+		await vi.waitFor(() => {
+			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "dest" })
+		})
+		expect(uploadFileSet).not.toHaveBeenCalled()
+	})
+
+	it("pastes a drive copy whose names the system clipboard refused over the older files it still holds", async () => {
+		const system = fakeSystemClipboard([new File(["png"], "image.png", { type: "image/png" })], true)
+
+		await copyInApp([REPORT])
+		renderClipboard({ selectedItems: [] })
+
+		expect(pasteEvent(row(), system.files).defaultPrevented).toBe(true)
+		await vi.waitFor(() => {
+			expect(pasteClipboard).toHaveBeenCalledOnce()
+		})
+		expect(uploadFileSet).not.toHaveBeenCalled()
+
+		// A later copy whose names land leaves the system clipboard current again for the tests after this one.
+		fakeSystemClipboard([])
+		await copyInApp([REPORT])
+	})
+
+	it("uploads pasted files from the Edit menu's Paste, with nothing copied in the app", () => {
+		renderClipboard({ selectedItems: [] })
+
+		expect(pasteEvent(row(), [new File(["a"], "a.txt")]).defaultPrevented).toBe(true)
+		expect(uploadFileSet).toHaveBeenCalledOnce()
+	})
+
+	it("leaves a paste of files alone where the directory on screen takes no uploads", () => {
+		for (const overrides of [{ variant: "trash" }, { isOnline: false }, { listing: undefined }] as const) {
+			const { unmount } = renderClipboard({ selectedItems: [], ...overrides })
+
+			expect(pasteEvent(row(), [new File(["a"], "a.txt")]).defaultPrevented).toBe(false)
+			unmount()
+		}
+
+		expect(uploadFileSet).not.toHaveBeenCalled()
+	})
+
+	it("never takes a paste in a field or under a dialog", () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		renderClipboard({ selectedItems: [] })
+
+		expect(pasteEvent(searchField(), [new File(["a"], "a.txt")]).defaultPrevented).toBe(false)
+
+		const dialog = document.createElement("div")
+		dialog.setAttribute("role", "dialog")
+		dialog.setAttribute("data-open", "")
+		document.body.append(dialog)
+
+		expect(pasteEvent(row(), [new File(["a"], "a.txt")]).defaultPrevented).toBe(false)
+		expect(pasteEvent(row()).defaultPrevented).toBe(false)
+		expect(uploadFileSet).not.toHaveBeenCalled()
+		expect(pasteClipboard).not.toHaveBeenCalled()
+	})
+
+	it("stops listening once the listing is gone", () => {
+		const { unmount } = renderClipboard({ selectedItems: [] })
+
+		unmount()
+
+		expect(pasteEvent(row(), [new File(["a"], "a.txt")]).defaultPrevented).toBe(false)
+		expect(uploadFileSet).not.toHaveBeenCalled()
 	})
 
 	// A directory opened by a deep link or a reveal often has no cached parent listing: its name is

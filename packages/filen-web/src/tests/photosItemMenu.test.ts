@@ -105,6 +105,7 @@ describe("photos item menu", () => {
 			"Favorite",
 			"Versions",
 			"Info",
+			"Copy ID",
 			"Download",
 			"Share",
 			"Public link",

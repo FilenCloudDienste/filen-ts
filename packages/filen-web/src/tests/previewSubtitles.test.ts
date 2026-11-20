@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { DriveItem } from "@/features/drive/lib/item"
+import type { PreviewVideo, PreviewVideoSnapshot } from "@/features/preview/lib/previewVideo"
 
 // A preview's sidecar subtitles come from a listing already held (never a fetch) and cost one read when
 // chosen: through the session for the drive, through the unauthenticated client for a public link.
@@ -169,5 +170,60 @@ describe("usePreviewSubtitles", () => {
 		})
 		expect(result.current.failed).toBe(false)
 		expect(mocks.downloadFileBytes).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("usePreviewSubtitles embedded tracks", () => {
+	it("offers the timed text and WebVTT tracks inside an MP4, not its TTML or image ones", () => {
+		const video = linkedFileItem("Movie.mp4")
+		const snapshot: PreviewVideoSnapshot = {
+			status: "active",
+			route: "ladder",
+			decision: null,
+			silentCodec: null,
+			embeddedVersion: 0,
+			audioIndex: 0,
+			nativeAudio: null,
+			embeddedTextBlocked: false,
+			probe: {
+				v: 1,
+				container: "mp4",
+				durationSec: 60,
+				index: "moov",
+				video: null,
+				audio: [],
+				subs: [
+					{ id: 2, codecId: "tx3g", lang: "eng", name: "English", def: true, forced: false, hi: false },
+					{ id: 3, codecId: "stpp", lang: "ger", name: null, def: false, forced: false, hi: false },
+					{ id: 4, codecId: "wvtt", lang: "fre", name: null, def: false, forced: false, hi: false },
+					{ id: 5, codecId: "mp4s", lang: "spa", name: null, def: false, forced: false, hi: false }
+				],
+				chapters: [],
+				cover: null,
+				partial: false
+			}
+		}
+
+		const { result } = renderHook(() => usePreviewSubtitles(video, null, snapshot))
+
+		expect(result.current.options.map(option => [option.id, option.lang, option.title])).toEqual([
+			["e:2", "eng", "English"],
+			["e:4", "fre", ""]
+		])
+		expect(result.current.options.every(option => !option.unplayable)).toBe(true)
+
+		// No remux plays the file whole here: the tracks stay listed but can't be chosen, and a chosen one shows as off.
+		const select = vi.fn()
+		const controller = { setSubtitle: select, embeddedCues: () => null } as unknown as PreviewVideo
+		const blocked = renderHook(() => usePreviewSubtitles(video, controller, { ...snapshot, embeddedTextBlocked: true }))
+
+		act(() => {
+			blocked.result.current.select("e:2")
+		})
+
+		expect(select).toHaveBeenCalledWith("embedded-text")
+		expect(blocked.result.current.options.map(option => option.unplayable)).toEqual([true, true])
+		expect(blocked.result.current.selected).toBe("off")
+		expect(blocked.result.current.cues).toBeNull()
 	})
 })

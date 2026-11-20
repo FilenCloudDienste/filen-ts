@@ -1,7 +1,40 @@
-import { CueBuilder, MAX_SUBTITLE_CUES, type CueStore } from "@filen/shared/videos"
+import {
+	CueBuilder,
+	MAX_SUBTITLE_CUES,
+	normalizeLadderContainer,
+	type CueStore,
+	type ProbeSubtitle,
+	type VideoProbe
+} from "@filen/shared/videos"
 import type { RemuxTextCue } from "@/lib/media/remuxTypes"
-import { MAX_EMBEDDED_CUE_CHARS, embeddedCueCharge } from "@/workers/remux/textTap"
+import { MAX_EMBEDDED_CUE_CHARS, embeddedCueCharge, isTapTextCodec } from "@/workers/remux/textTap"
+import { isMp4TextCodec } from "@/workers/remux/mp4TextTap"
 import { fnv1a } from "@/lib/fnv1a"
+
+// Image subtitle formats (PGS, VobSub, DVB), which no tap turns into text.
+const IMAGE_SUBTITLE_CODECS = /PGS|VOBSUB|DVB|HDMV|S_IMAGE|^mp4s$/i
+
+// What playback makes of a subtitle track inside the file: "text" when the remux reads its cues (text in Matroska,
+// text in an MP4 that is not fragmented, whose moofs are not read), "image" for a bitmap format, and "unsupported"
+// for any other (TTML, closed captions, a fragmented MP4's text, a container without a tap).
+export type EmbeddedSubtitleSupport = "text" | "image" | "unsupported"
+
+export function embeddedSubtitleSupport(probe: VideoProbe, sub: ProbeSubtitle): EmbeddedSubtitleSupport {
+	if (IMAGE_SUBTITLE_CODECS.test(sub.codecId)) {
+		return "image"
+	}
+
+	switch (normalizeLadderContainer(probe.container)) {
+		case "mkv":
+		case "webm":
+			return isTapTextCodec(sub.codecId) ? "text" : "unsupported"
+		case "mp4":
+		case "mov":
+			return probe.index !== "mfra" && probe.index !== "none" && isMp4TextCodec(sub.codecId) ? "text" : "unsupported"
+		default:
+			return "unsupported"
+	}
+}
 
 // Identifies an embedded cue: two blocks of a track may start together (two speakers, a sign and dialogue).
 function embeddedCueIdentity(cue: RemuxTextCue): string {

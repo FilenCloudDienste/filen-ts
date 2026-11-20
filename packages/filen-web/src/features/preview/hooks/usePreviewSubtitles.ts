@@ -2,14 +2,13 @@ import { useEffect, useState } from "react"
 import { driveItemName } from "@filen/shared"
 import type { CueStore } from "@filen/shared/videos"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { isTapTextCodec } from "@/workers/remux/textTap"
+import { embeddedSubtitleSupport } from "@/lib/media/playback/embeddedCues"
 import { usePreviewAccessMode, usePreviewSiblings } from "@/features/preview/lib/accessMode"
 import { cachedSiblings, loadSidecar, previewSidecars, type PreviewSubtitleFile } from "@/features/preview/lib/previewSubtitles"
-import { embeddedTextContainer } from "@/features/preview/lib/previewPlayback.logic"
 import type { PreviewVideo, PreviewVideoSnapshot } from "@/features/preview/lib/previewVideo"
 
 // The subtitles a preview offers: text files beside the video (from a listing already held) and the text
-// tracks inside a Matroska file, which the remux reads as it plays. Nothing is read until one is chosen.
+// tracks inside a Matroska or MP4 file, which the remux reads as it plays. Nothing is read until one is chosen.
 
 export interface PreviewSubtitleOption {
 	// "s:<uuid>" for a file beside the video, "e:<track>" for a track inside it.
@@ -19,6 +18,8 @@ export interface PreviewSubtitleOption {
 	forced: boolean
 	sdh: boolean
 	embedded: boolean
+	// A track inside the file this browser can't show with it (no remux plays the file whole): offered, not choosable.
+	unplayable: boolean
 }
 
 export interface PreviewSubtitles {
@@ -36,7 +37,15 @@ export interface PreviewSubtitles {
 type SidecarState = { status: "ok"; cues: CueStore; fps: number | null } | { status: "failed" }
 
 function sidecarOption(file: PreviewSubtitleFile): PreviewSubtitleOption {
-	return { id: `s:${file.uuid}`, lang: file.lang, title: file.title, forced: file.forced, sdh: file.sdh, embedded: false }
+	return {
+		id: `s:${file.uuid}`,
+		lang: file.lang,
+		title: file.title,
+		forced: file.forced,
+		sdh: file.sdh,
+		embedded: false,
+		unplayable: false
+	}
 }
 
 export function usePreviewSubtitles(
@@ -53,21 +62,26 @@ export function usePreviewSubtitles(
 		previewSidecars(driveItemName(item), provided ?? (access === "authed" ? cachedSiblings(item.data.uuid) : []))
 	)
 	const probe = snapshot?.probe ?? null
+	const blocked = snapshot?.embeddedTextBlocked === true
 	const fps = probe?.video?.fps ?? null
 	const embedded: PreviewSubtitleOption[] =
-		probe === null || !embeddedTextContainer(probe)
+		probe === null
 			? []
 			: probe.subs
-					.filter(sub => isTapTextCodec(sub.codecId))
+					.filter(sub => embeddedSubtitleSupport(probe, sub) === "text")
 					.map(sub => ({
 						id: `e:${String(sub.id)}`,
 						lang: sub.lang,
 						title: sub.name ?? "",
 						forced: sub.forced,
 						sdh: sub.hi,
-						embedded: true
+						embedded: true,
+						unplayable: blocked
 					}))
 	const options = [...sidecars.map(sidecarOption), ...embedded]
+	// A chosen track inside the file that turned out unplayable shows as off; the choice comes back with another audio
+	// track that a remux does play.
+	const shown = blocked && selected.startsWith("e:") ? "off" : selected
 	const selectedSidecar = selected.startsWith("s:") ? sidecars.find(file => `s:${file.uuid}` === selected) : undefined
 	// Only a frame-based (MicroDVD) file is timed by the rate: it is read again when the probe states another one, while
 	// a read of any other format is not restarted when the probe lands.
@@ -121,11 +135,11 @@ export function usePreviewSubtitles(
 
 	let cues: CueStore | null = null
 
-	if (selected.startsWith("e:") && controller !== null && snapshot !== null) {
+	if (shown.startsWith("e:") && controller !== null && snapshot !== null) {
 		cues = controller.embeddedCues(Number(selected.slice(2)), snapshot.embeddedVersion)
 	} else if (selectedState?.status === "ok") {
 		cues = selectedState.cues
 	}
 
-	return { options, selected, select, cues, failed: selectedState?.status === "failed" }
+	return { options, selected: shown, select, cues, failed: selectedState?.status === "failed" }
 }

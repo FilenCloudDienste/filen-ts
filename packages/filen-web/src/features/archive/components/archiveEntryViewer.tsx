@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { CATEGORY_POLICY, type PreviewCategory } from "@/features/drive/lib/preview.logic"
-import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { PreviewDownloadableProvider, usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import { entryReferences } from "@/features/archive/lib/entryReferences"
@@ -25,6 +25,8 @@ import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { NestedFileViewer } from "@/features/preview/components/nestedFileViewer"
 import type { DriveItem } from "@/features/drive/lib/item"
+import type { ReaderTarget } from "@/features/archive/lib/archiveReaders"
+import { IworkPreview } from "@/features/iwork/components/iworkPreview"
 
 export interface ViewedEntry {
 	request: EntryRequest
@@ -35,6 +37,8 @@ export interface ViewedEntry {
 	encrypted: boolean
 	// Not read from here: its card offers to extract the archive instead (a solid block too large).
 	extract?: ExtractReason | undefined
+	// An iWork document: its package as an archive of its own, whose rendering is shown instead of the entry read whole.
+	iwork?: ReaderTarget | undefined
 }
 
 export interface ArchiveEntryViewerProps {
@@ -58,12 +62,54 @@ export interface ArchiveEntryViewerProps {
 // One entry shown in the archive browser's place: read through the archive's reader, or, one not read from here (a
 // solid block too large), the card offering to extract the archive.
 export function ArchiveEntryViewer(props: ArchiveEntryViewerProps) {
-	return props.entry.extract === undefined ? (
+	if (props.entry.extract !== undefined) {
+		return (
+			<EntryExtractCard
+				{...props}
+				reason={props.entry.extract}
+			/>
+		)
+	}
+
+	return props.entry.iwork === undefined ? (
 		<ReadEntryViewer {...props} />
 	) : (
-		<EntryExtractCard
+		<IworkEntryViewer
 			{...props}
-			reason={props.entry.extract}
+			target={props.entry.iwork}
+		/>
+	)
+}
+
+// A Pages, Numbers or Keynote document in the archive, shown as the drive shows one: its package listed through a reader
+// of its own (nested in the archive's) and the rendering it carries read, never the entry whole.
+function IworkEntryViewer({ archiveUuid, entry, onDownload, onBack, target }: ArchiveEntryViewerProps & { target: ReaderTarget }) {
+	const { t } = useTranslation("preview")
+	const { request } = entry
+	const item = archiveEntryItem(archiveUuid, request.params.entry.index, request.name, request.size, entry.modified)
+
+	return (
+		<NestedFileViewer
+			item={item}
+			origin={entryLeaseOrigin("", request.target.uuid, request.anon, request.params.entry.index, request.size)}
+			category="iwork"
+			references={null}
+			backLabel={t("previewArchiveEntryBack")}
+			onBack={onBack}
+			onDownload={onDownload}
+			replacement={
+				// A viewer's own save is the document's, as the header's is.
+				<PreviewDownloadableProvider
+					downloadable={onDownload !== null}
+					onDownload={onDownload}
+				>
+					<IworkPreview
+						item={item}
+						alt={request.name}
+						target={target}
+					/>
+				</PreviewDownloadableProvider>
+			}
 		/>
 	)
 }

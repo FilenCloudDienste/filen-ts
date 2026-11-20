@@ -49,7 +49,8 @@ export function canReadEntry(store: EntryStore, slot: number): boolean {
 }
 
 // The viewer category its name reads as, or null for one the entry preview does not show (CATEGORY_POLICY's `entry`: a
-// nested archive, a comic or an iWork package needs a reader of its own, so those entries only download).
+// nested archive, a comic or an iWork package needs a reader of its own: an archive is entered and an iWork package
+// previewed through one (useEntryActions), a comic only downloads).
 export function entryPreviewCategory(name: string): PreviewCategory | null {
 	const category = previewCategoryForExtension(fileTypeExtension(name, null))
 
@@ -166,6 +167,13 @@ export function holdsNestedArchive(store: EntryStore, slot: number): boolean {
 	const name = store.name(slot)
 
 	return canReadEntry(store, slot) && isArchiveCandidateName(name) && !isZipPackageName(name)
+}
+
+// A Pages, Numbers or Keynote document held in the entry: a ZIP package the browser opens through a nested reader in
+// IworkPreview, listing it and reading the one rendering it carries rather than the entry whole. One read alone, as a
+// nested archive is; how deep it may lie is the caller's (nestedTarget).
+export function holdsIworkPackage(store: EntryStore, slot: number): boolean {
+	return canReadEntry(store, slot) && previewCategoryForExtension(fileTypeExtension(store.name(slot), null)) === "iwork"
 }
 
 // An archive in a seekable entry is inflated whole before it opens, its index lying at its end: above

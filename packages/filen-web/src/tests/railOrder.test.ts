@@ -160,8 +160,10 @@ describe("railEntryActive", () => {
 		expect(railEntryActive("settings", "/settings/appearance")).toBe(true)
 	})
 
-	it("matches the single-page sections exactly", () => {
+	it("covers the contacts sections and nothing that merely shares the prefix", () => {
 		expect(railEntryActive("contacts", "/contacts")).toBe(true)
+		expect(railEntryActive("contacts", "/contacts/requests")).toBe(true)
+		expect(railEntryActive("contacts", "/contactsx")).toBe(false)
 		expect(railEntryActive("drive", "/drivers")).toBe(false)
 	})
 
@@ -169,6 +171,7 @@ describe("railEntryActive", () => {
 		expect(railEntryActive("media", "/photos")).toBe(true)
 		expect(railEntryActive("media", "/videos/library/abc")).toBe(true)
 		expect(railEntryActive("media", "/playlists")).toBe(true)
+		expect(railEntryActive("media", "/playlists/abc")).toBe(true)
 		expect(railEntryActive("media", "/transfers")).toBe(false)
 		expect(railEntryActive("computer", "/sync/1")).toBe(true)
 		expect(railEntryActive("computer", "/mounts/webdav")).toBe(true)

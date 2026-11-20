@@ -392,6 +392,10 @@ export const drive = {
 	driveActionOpen: "Open",
 	/** Item menu — shown for a file of a type nothing can preview: opens it read-only in the text viewer */
 	driveActionOpenAsText: "Open as text",
+	/** Item menu — copy the item's ID (its uuid) to the clipboard, e.g. for a support request */
+	driveActionCopyId: "Copy ID",
+	/** Item menu — toast after Copy ID wrote the item's ID to the clipboard */
+	driveCopyIdToast: "ID copied to clipboard",
 	/** Item menu (search results only) — navigate to the directory a search hit lives in and reveal the row there */
 	driveActionOpenContainingDirectory: "Open containing directory",
 	/** Item menu — download the selected item(s) to disk; a directory or a multi-selection downloads as one zip */
@@ -540,6 +544,10 @@ export const drive = {
 	driveClipboardPaste: "Paste",
 	/** Upload menu and the listing's empty-space menu, under Paste — forgets the copied/cut item(s) without pasting them; disabled when nothing is copied or cut */
 	driveClipboardClear: "Clear clipboard",
+	/** File name (without extension) given to an image pasted from the system clipboard that has no name of its own, e.g. a screenshot; uploaded into the directory on screen. {{time}} is the local date and time, e.g. "2026-11-20 14.03.05" */
+	driveClipboardPastedImageName: "Pasted image {{time}}",
+	/** File name (without extension) given to a file other than an image pasted from the system clipboard that has no name of its own; uploaded into the directory on screen. {{time}} is the local date and time, e.g. "2026-11-20 14.03.05" */
+	driveClipboardPastedFileName: "Pasted file {{time}}",
 	/** Toast after Copy (driveClipboardCopy or its shortcut) */
 	driveClipboardCopiedToast_one: "{{count}} item ready to paste",
 	/** Toast after Copy (driveClipboardCopy or its shortcut) */

@@ -5,7 +5,12 @@ import {
 	type AssistantTool,
 	type AssistantToolExecutor
 } from "@filen/shared/assistant"
-import type { AssistantToolExecution, AssistantToolPreview, ToolExecutor } from "@/features/assistant/runtime/executor"
+import {
+	DESTINATION_ARGS,
+	type AssistantToolExecution,
+	type AssistantToolPreview,
+	type ToolExecutor
+} from "@/features/assistant/runtime/executor"
 import type { AssistantProposal, AssistantProposalAction } from "@/features/assistant/types"
 import type { UserCalendar } from "@/features/assistant/tools/dates"
 import { AssistantToolError, unlessStopped } from "@/features/assistant/tools/format"
@@ -33,9 +38,6 @@ export function proposalAction({ tool, args }: { tool: string; args: Record<stri
 			return null
 	}
 }
-
-// The arguments naming the directory a move, copy or create lands in.
-const DESTINATION_ARGS = ["destination", "parent"]
 
 // A name on the card: other people choose items', chats' and contacts' names, so it is shown without the
 // invisible and direction-changing characters that would make one read as another, and on one line.

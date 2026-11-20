@@ -54,8 +54,12 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe("embedded cue budget", () => {
-	it("is applied by the remux tap and EmbeddedCues only", () => {
-		const owners = new Set([join("src", "workers", "remux", "textTap.ts"), join("src", "lib", "media", "playback", "embeddedCues.ts")])
+	it("is applied by the remux taps and EmbeddedCues only", () => {
+		const owners = new Set([
+			join("src", "workers", "remux", "textTap.ts"),
+			join("src", "workers", "remux", "mp4TextTap.ts"),
+			join("src", "lib", "media", "playback", "embeddedCues.ts")
+		])
 
 		expect(
 			sourceFiles("src").filter(

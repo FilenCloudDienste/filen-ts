@@ -24,10 +24,16 @@ export function uploadDroppedFiles(dataTransfer: DataTransfer, parentUuid: strin
 		}
 	}
 
-	// On desktop the native host uploads from the dropped paths; the drop's Files and entries are read now, while
-	// the event still holds them.
+	// The drop's Files and entries are read now, while the event still holds them.
+	uploadFileSet(Array.from(dataTransfer.files), entries, parentUuid)
+}
+
+// Uploads files read off a drop or a paste into `parentUuid`. On desktop the native host uploads from their paths (a
+// file without one, such as a pasted screenshot, from the page); a set holding a directory recreates its tree, a plain
+// set of files uploads as picked.
+export function uploadFileSet(files: File[], entries: FileSystemEntry[], parentUuid: string | null): void {
 	if (nativeTransfersAvailable()) {
-		void startNativeDrop(Array.from(dataTransfer.files), entries, parentUuid)
+		void startNativeDrop(files, entries, parentUuid)
 
 		return
 	}
@@ -38,5 +44,5 @@ export function uploadDroppedFiles(dataTransfer: DataTransfer, parentUuid: strin
 		return
 	}
 
-	void startUploads(Array.from(dataTransfer.files), parentUuid)
+	void startUploads(files, parentUuid)
 }

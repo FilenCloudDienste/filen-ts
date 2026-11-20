@@ -152,6 +152,10 @@ export const auth = {
 		"This account uses two-factor authentication, so we could not sign you in automatically. Your new password should now be active — sign in with it and your authenticator code. If it is not accepted, request a new reset link.",
 	/** Reset page — button on the terminal panel that leaves for the sign-in screen */
 	resetGoToSignIn: "Go to sign in",
+	/** Reset page — title of the panel shown instead of the form when the address holds no reset token (opened bare, or reloaded after the page took the token out of the address bar) */
+	resetLinkInvalidTitle: "This reset link is incomplete",
+	/** Reset page — body of the no-token panel; points at the sign-in screen's forgot-password option */
+	resetLinkInvalidBody: "Open the link from your password reset email again, or request a new one from the sign-in screen.",
 
 	// ── Master keys file upload (reset page) ────────────────────────────────────
 	/** Reset page — file input label for the exported master keys file */

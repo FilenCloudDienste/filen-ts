@@ -21,7 +21,6 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
 describe("railChildActive", () => {
 	it("matches the single-page children exactly", () => {
 		expect(railChildActive("photos", "/photos")).toBe(true)
-		expect(railChildActive("playlists", "/playlists")).toBe(true)
 		expect(railChildActive("photos", "/photos/x")).toBe(false)
 	})
 
@@ -29,6 +28,9 @@ describe("railChildActive", () => {
 		expect(railChildActive("videos", "/videos")).toBe(true)
 		expect(railChildActive("videos", "/videos/library/abc")).toBe(true)
 		expect(railChildActive("videos", "/videosx")).toBe(false)
+		expect(railChildActive("playlists", "/playlists")).toBe(true)
+		expect(railChildActive("playlists", "/playlists/abc")).toBe(true)
+		expect(railChildActive("playlists", "/playlistsx")).toBe(false)
 		expect(railChildActive("sync", "/sync/1")).toBe(true)
 		expect(railChildActive("sync", "/syncx")).toBe(false)
 		expect(railChildActive("mounts", "/mounts/webdav")).toBe(true)

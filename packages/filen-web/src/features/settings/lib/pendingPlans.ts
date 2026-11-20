@@ -1,4 +1,4 @@
-import { parsePlanId, type PlansSearch } from "@/features/settings/lib/billingLinks"
+import { parsePlanId, type PlansTarget } from "@/features/settings/lib/billingLinks"
 import { log } from "@/lib/log"
 
 // A plans link opened while signed out (a pricing-page link, the desktop app's billing link) waits here through
@@ -32,7 +32,7 @@ function takeItem(key: string): string | null {
 }
 
 // Read once: the target is cleared as it is taken.
-export function takePlansTarget(): PlansSearch | null {
+export function takePlansTarget(): PlansTarget | null {
 	const raw = takeItem(PENDING_PLANS_KEY)
 
 	if (raw === null) {
@@ -100,7 +100,7 @@ export function rememberReturnTarget(href: string): void {
 	}
 }
 
-export type SignInTarget = { kind: "plans"; search: PlansSearch } | { kind: "path"; href: string }
+export type SignInTarget = { kind: "plans"; target: PlansTarget } | { kind: "path"; href: string }
 
 // Where a fresh sign-in goes, read once: the plans first, else the page that asked for it. Both are taken, so neither
 // outlives the sign-in. Another account's ids under the path resolve to the page's own empty state.
@@ -109,7 +109,7 @@ export function takeSignInTarget(): SignInTarget | null {
 	const raw = takeItem(PENDING_TARGET_KEY)
 
 	if (plans !== null) {
-		return { kind: "plans", search: plans }
+		return { kind: "plans", target: plans }
 	}
 
 	const href = raw === null ? null : safeReturnPath(raw)

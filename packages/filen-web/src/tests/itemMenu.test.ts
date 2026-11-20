@@ -10,6 +10,7 @@ import {
 	PaletteIcon,
 	HistoryIcon,
 	InfoIcon,
+	HashIcon,
 	LinkIcon,
 	CopyIcon,
 	UsersIcon,
@@ -153,6 +154,7 @@ describe("driveItemActions (item menu gating)", () => {
 			"favorite",
 			"color",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -169,6 +171,7 @@ describe("driveItemActions (item menu gating)", () => {
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -200,19 +203,19 @@ describe("driveItemActions (item menu gating)", () => {
 	})
 
 	it("trash variant: only restore/deletePermanently/info, regardless of type", () => {
-		expect(ids(dirItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
-		expect(ids(fileItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
+		expect(ids(dirItem(), "trash")).toEqual(["restore", "deletePermanently", "info", "copyId"])
+		expect(ids(fileItem(), "trash")).toEqual(["restore", "deletePermanently", "info", "copyId"])
 	})
 
 	it("undecryptable item outside trash: reduced to info/trash only (download excluded — can never decrypt)", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
-		expect(ids(undecryptable, "drive")).toEqual(["info", "trash"])
-		expect(ids(undecryptable, "favorites")).toEqual(["info", "trash"])
+		expect(ids(undecryptable, "drive")).toEqual(["info", "copyId", "trash"])
+		expect(ids(undecryptable, "favorites")).toEqual(["info", "copyId", "trash"])
 	})
 
 	it("undecryptable item in trash: identical to a normal trash-variant item (no further reduction)", () => {
 		const undecryptable = narrowItem(mockDir({ meta: { type: "encrypted", data: "ciphertext" } }))
-		expect(ids(undecryptable, "trash")).toEqual(["restore", "deletePermanently", "info"])
+		expect(ids(undecryptable, "trash")).toEqual(["restore", "deletePermanently", "info", "copyId"])
 	})
 
 	it("favorite descriptor labels 'Favorite' when not yet favorited", () => {
@@ -278,6 +281,7 @@ describe("driveItemActions — links variant gating", () => {
 			"favorite",
 			"color",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -294,6 +298,7 @@ describe("driveItemActions — links variant gating", () => {
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -315,7 +320,7 @@ describe("driveItemActions — links variant gating", () => {
 
 	it("an undecryptable links item reduces to info/trash (same as any other owned surface)", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
-		expect(ids(undecryptable, "links")).toEqual(["info", "trash"])
+		expect(ids(undecryptable, "links")).toEqual(["info", "copyId", "trash"])
 	})
 })
 
@@ -361,7 +366,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		// Trash IS offered: sharedOut is owner-mutable (the item is the caller's own), so the
 		// ownerMutable push runs same as any owned surface. Download stays absent regardless: an
 		// undecryptable item's meta carries no content key, so it can never decrypt.
-		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "trash", "unshare"])
+		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "copyId", "trash", "unshare"])
 	})
 
 	it("unshare dispatches its own confirm dialog kind and is destructive-styled", () => {
@@ -373,7 +378,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 	it("unshare is the last action offered on a decryptable shared-root item, after info and copy (sharedIn has no owner actions)", () => {
 		const descriptors = ids(sharedRootFileItem(), "sharedIn")
 
-		expect(descriptors).toEqual(["info", "download", "copy", "compress", "unshare"])
+		expect(descriptors).toEqual(["info", "copyId", "download", "copy", "compress", "unshare"])
 	})
 })
 
@@ -395,7 +400,7 @@ describe("driveItemActions — copy gating", () => {
 
 	it("sits right after move where the item is the caller's, and after download where it isn't", () => {
 		expect(ids(fileItem(), "drive").slice(0, 3)).toEqual(["rename", "move", "copy"])
-		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "copy", "compress"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "copyId", "download", "copy", "compress"])
 	})
 
 	it("never offers copy in the trash-reduced menu", () => {
@@ -434,13 +439,13 @@ describe("driveItemActions — sharedIn safe subset (read-only surface)", () => 
 	const OWNER_ONLY_IDS = ["rename", "move", "favorite", "color", "versions", "publicLink", "copyLink", "trash"]
 
 	it("sharedIn root: exactly info + download + import + unshare", () => {
-		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "download", "copy", "compress", "unshare"])
-		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "download", "copy", "compress", "unshare"])
+		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "copyId", "download", "copy", "compress", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "copyId", "download", "copy", "compress", "unshare"])
 	})
 
 	it("sharedIn nested: exactly info + download + import (unshare stays root-only)", () => {
-		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "download", "copy", "compress"])
-		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "copy", "compress"])
+		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "copyId", "download", "copy", "compress"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "copyId", "download", "copy", "compress"])
 	})
 
 	it("never offers an owner-mutating action, root or nested", () => {
@@ -466,6 +471,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"favorite",
 			"color",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -483,6 +489,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -500,6 +507,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"favorite",
 			"color",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -516,6 +524,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -578,6 +587,7 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 			{ id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon },
 			{ id: "color", labelKey: "driveActionColor", icon: PaletteIcon },
 			{ id: "info", labelKey: "driveActionInfo", icon: InfoIcon },
+			{ id: "copyId", labelKey: "driveActionCopyId", icon: HashIcon },
 			{ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon },
 			{ id: "share", labelKey: "driveActionShare", icon: UsersIcon },
 			{ id: "publicLink", labelKey: "driveActionPublicLink", icon: LinkIcon },
@@ -605,7 +615,8 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 		expect(facts(dirItem(), "trash")).toEqual([
 			{ id: "restore", labelKey: "driveActionRestore", icon: RotateCcwIcon },
 			{ id: "deletePermanently", labelKey: "driveActionDeletePermanently", icon: Trash2Icon },
-			{ id: "info", labelKey: "driveActionInfo", icon: InfoIcon }
+			{ id: "info", labelKey: "driveActionInfo", icon: InfoIcon },
+			{ id: "copyId", labelKey: "driveActionCopyId", icon: HashIcon }
 		])
 	})
 
@@ -619,11 +630,11 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 })
 
 describe("driveItemActions — Open containing directory (search hits only)", () => {
-	it("offers it right after Info for a search hit", () => {
+	it("offers it right after Info and Copy ID for a search hit", () => {
 		const offered = driveItemActions(fileItem(), "drive", { searchHit: true }).map(descriptor => descriptor.id)
 
 		expect(offered).toContain("openContainingDirectory")
-		expect(offered.indexOf("openContainingDirectory")).toBe(offered.indexOf("info") + 1)
+		expect(offered.indexOf("openContainingDirectory")).toBe(offered.indexOf("copyId") + 1)
 	})
 
 	it("never offers it outside a search hit", () => {
@@ -778,6 +789,7 @@ describe("driveItemActions — Compress and Extract", () => {
 			"favorite",
 			"versions",
 			"info",
+			"copyId",
 			"download",
 			"share",
 			"publicLink",
@@ -807,7 +819,7 @@ describe("driveItemActions — Compress and Extract", () => {
 			expect(ids(dirItem(), variant)).toContain("compress")
 		}
 
-		expect(ids(ARCHIVE(), "sharedIn")).toEqual(["extract", "info", "download", "copy", "compress"])
+		expect(ids(ARCHIVE(), "sharedIn")).toEqual(["extract", "info", "copyId", "download", "copy", "compress"])
 	})
 
 	it("offers neither in the trash nor for an undecryptable item", () => {
@@ -816,7 +828,7 @@ describe("driveItemActions — Compress and Extract", () => {
 
 		const undecryptable = fileItem({ meta: { type: "encrypted", data: "ciphertext" } })
 
-		expect(ids(undecryptable, "drive")).toEqual(["info", "trash"])
+		expect(ids(undecryptable, "drive")).toEqual(["info", "copyId", "trash"])
 	})
 
 	it("opens the options dialogs and carries the shared label and icon facts", () => {
@@ -905,6 +917,8 @@ describe("applyOfflineGate", () => {
 		color: "gated",
 		versions: "readOnly",
 		info: "readOnly",
+		// The uuid is held locally; only the clipboard is written.
+		copyId: "readOnly",
 		openContainingDirectory: "gated",
 		download: "gated",
 		// Exports read the file over the network as Download does.

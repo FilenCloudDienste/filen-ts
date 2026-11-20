@@ -4,6 +4,8 @@ import {
 	FLAC,
 	MATROSKA,
 	MP3,
+	MP4,
+	QTFF,
 	WEBM,
 	type Input,
 	type AudioCodec,
@@ -64,6 +66,7 @@ import { packetDemuxerOf } from "@/lib/media/demux/packetDemuxer"
 import { FragmentedTrackOutput, FragmentTooLargeError } from "@/workers/remux/output"
 import { PumpGate, runPump, type PumpReader, type PumpResult, type PumpWriter } from "@/workers/remux/pump"
 import { TextTap, isTapTextCodec, type TextTapTrack } from "@/workers/remux/textTap"
+import { Mp4TextTap, isMp4TextCodec, readMp4TextSamples, type Mp4TextTrack } from "@/workers/remux/mp4TextTap"
 
 // Formats whose demuxer has no index: it finds a far position (the file's end too, for its duration) only by
 // reading every cluster or frame before it.
@@ -173,8 +176,9 @@ export class RemuxEngine {
 	// Bumped by every audio start and stop: a start that awaited past a newer one gives up.
 	private audioEpoch = 0
 	private readonly layouts = new Map<number, Promise<Speaker[] | null>>()
-	// Embedded text subtitles, taken from the blocks playback reads (Matroska only).
+	// Embedded text subtitles, taken from the blocks playback reads (Matroska), or found by the sample tables (MP4).
 	private tap: TextTap | null = null
+	private mp4Tap: Mp4TextTap | null = null
 	// The IDR picture the last start resolved to: a seek asks canStartAt first and then starts at the same
 	// time, and the walk back to it is one read per key packet looked at.
 	private lastIdr: { at: number; timestamp: number } | null = null
@@ -184,6 +188,7 @@ export class RemuxEngine {
 			formats: PLAYBACK_INPUT_FORMATS,
 			onBlock: (index, bytes) => {
 				this.tap?.addBlock(index, bytes)
+				this.mp4Tap?.addBlock(index, bytes)
 			}
 		})
 		this.cache = this.source.cache
@@ -237,6 +242,8 @@ export class RemuxEngine {
 
 		if (matroska) {
 			await this.openTextTap(params.size)
+		} else if (format === MP4 || format === QTFF) {
+			await this.openMp4TextTap(params.size)
 		}
 
 		return {
@@ -363,6 +370,7 @@ export class RemuxEngine {
 
 		// Downloads for positions the old pumps were heading to are no longer wanted.
 		this.cache.abort()
+		this.mp4Tap?.seek(params.time)
 
 		try {
 			if (!params.video) {
@@ -446,6 +454,8 @@ export class RemuxEngine {
 		await Promise.race([Promise.all(closing), new Promise(resolve => setTimeout(resolve, CLOSE_TIMEOUT_MS))])
 		this.tap?.close()
 		this.tap = null
+		this.mp4Tap?.close()
+		this.mp4Tap = null
 		this.source.close()
 	}
 
@@ -483,6 +493,50 @@ export class RemuxEngine {
 		}
 	}
 
+	// The text tracks' sample tables, from the moov the demuxer has just read (served by the block cache). Cues are
+	// then read with playback: from the blocks it reads, and directly for samples it passed without them.
+	private async openMp4TextTap(size: number): Promise<void> {
+		try {
+			const read = (start: number, end: number): Promise<Uint8Array> => Promise.resolve(this.cache.read(start, end))
+			const parsed = await walkContainer(new BlockSource(size, read), "card", { keyframes: true })
+
+			const tracks: Mp4TextTrack[] = []
+
+			// A fragmented file's moov holds empty tables: its tracks index no samples and are left out.
+			for (const track of parsed?.tracks ?? []) {
+				if (track.kind !== "subtitle" || track.tables === undefined || !isMp4TextCodec(track.sub.codecId)) {
+					continue
+				}
+
+				const samples = await readMp4TextSamples(track.tables, read)
+
+				if (samples !== null) {
+					tracks.push({ number: track.sub.id, codecId: track.sub.codecId, samples })
+				}
+			}
+
+			if (tracks.length === 0) {
+				return
+			}
+
+			const tap = new Mp4TextTap({
+				tracks,
+				peek: (start, end) => this.cache.peek(start, end),
+				readDirect: (start, end) => this.cache.readThrough(start, end),
+				emit: cues => {
+					this.emit({ type: "textCues", cues })
+				}
+			})
+
+			this.mp4Tap = tap
+			this.cache.forEachResident((index, bytes) => {
+				tap.addBlock(index, bytes)
+			})
+		} catch {
+			// No subtitles from the file; playback goes on.
+		}
+	}
+
 	private async probeIndex(size: number): Promise<RemuxMediaInfo["index"]> {
 		// The demuxer has just read the head; these reads are served from the block cache.
 		const source = new BlockSource(size, (start, end) => Promise.resolve(this.cache.read(start, end)))
@@ -496,6 +550,7 @@ export class RemuxEngine {
 
 	private followVideo(timestamp: number): void {
 		this.videoReadUntil = Math.max(this.videoReadUntil, timestamp)
+		this.mp4Tap?.advance(timestamp)
 		this.runs.get("audio")?.gate.setHorizon(this.videoReadUntil + AUDIO_LEAD_SECONDS)
 	}
 

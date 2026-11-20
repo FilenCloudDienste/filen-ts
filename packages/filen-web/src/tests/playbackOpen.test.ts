@@ -13,7 +13,7 @@ vi.mock("@/lib/media/mseController", () => ({ openRemuxSession }))
 vi.mock("@/lib/media/playback/sources", () => ({ directSource: vi.fn(), remuxSource: vi.fn() }))
 vi.mock("@/features/preview/lib/previewStream", () => ({ isMediaStreamAvailable: () => true }))
 
-const { openPlayback } = await import("@/lib/media/playback/openPlayback")
+const { embeddedTextReachable, openPlayback } = await import("@/lib/media/playback/openPlayback")
 
 const FILE = { uuid: "u", size: 50_000_000n } as unknown as AnyFile
 
@@ -495,5 +495,33 @@ describe("openPlayback", () => {
 		expect(remuxes[1]?.options.audio).toMatchObject({ trackId: 2 })
 		expect(playback.getSnapshot()).toMatchObject({ selection: { audioIndex: 1 }, demotions: 1 })
 		playback.dispose()
+	})
+})
+
+describe("embeddedTextReachable", () => {
+	const learned = () => Promise.resolve(new Map<string, LearnedDemotion>())
+	const learn = () => Promise.resolve()
+	const selection: LadderSelection = { audioIndex: 0, subtitle: "none" }
+
+	it("is true where a remux rung plays the file with the track", async () => {
+		const capabilities = {
+			capabilities: (probe: LadderProbe, chosen: LadderSelection) => Promise.resolve(everything(probe, chosen)),
+			learned,
+			learn
+		}
+
+		expect(await embeddedTextReachable(FILE, videoProbe("mp4"), selection, { capabilities, directAvailable: () => true })).toBe(true)
+	})
+
+	it("is false where only a direct stream plays it (no MediaSource), with or without a direct rung", async () => {
+		const capabilities = {
+			capabilities: (probe: LadderProbe, chosen: LadderSelection) =>
+				Promise.resolve({ ...everything(probe, chosen), mediaSource: false }),
+			learned,
+			learn
+		}
+
+		expect(await embeddedTextReachable(FILE, videoProbe("mp4"), selection, { capabilities, directAvailable: () => true })).toBe(false)
+		expect(await embeddedTextReachable(FILE, videoProbe("mp4"), selection, { capabilities, directAvailable: () => false })).toBe(false)
 	})
 })

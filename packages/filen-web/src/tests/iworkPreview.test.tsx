@@ -16,12 +16,17 @@ const opener = vi.hoisted(() => ({
 	openIworkPreview: vi.fn<(_handle: unknown, _options: OpenIworkPreviewOptions) => Promise<IworkPreviewEntry | null>>()
 }))
 
-const acquire = vi.hoisted(() => ({ refused: false }))
+const acquire = vi.hoisted(() => ({ refused: false, nested: vi.fn() }))
 
 vi.mock("@/features/archive/lib/archiveHandle", () => ({
 	archiveHandleRefusal: () => (acquire.refused ? "needsArchiveReader" : null),
 	acquireArchiveHandle: () =>
-		acquire.refused ? { type: "refused", reason: "needsArchiveReader" } : { type: "opened", handle: { id: "h", ...handle } }
+		acquire.refused ? { type: "refused", reason: "needsArchiveReader" } : { type: "opened", handle: { id: "h", ...handle } },
+	openArchiveHandle: (target: unknown, password: string | undefined) => {
+		acquire.nested(target, password)
+
+		return { id: "nested", ...handle }
+	}
 }))
 vi.mock("@/features/iwork/lib/iworkPreview", () => opener)
 vi.mock("@/features/preview/components/readOnlyPreviewBody", () => ({
@@ -124,7 +129,23 @@ describe("IworkPreview", () => {
 		expect(screen.queryByText(/body:/)).toBeNull()
 	})
 
-	// A package its origin cannot open yet (a public link's, an archive's entry): its card, never a crash.
+	// An archive browser's entry: the package is listed through a reader of its own, nested in the archive's, whatever
+	// the entry's own origin could open.
+	it("reads a package held in an archive through the reader it is given", async () => {
+		acquire.refused = true
+		opener.openIworkPreview.mockResolvedValue(entry("image"))
+
+		const target = { file: {} as never, uuid: `${UUID}/4`, anon: true, nested: null }
+		const item = linkedFileItem("report.pages", { size: 3_000_000n, uuid: UUID })
+
+		render(createElement(IworkPreview, { item, alt: "report.pages", target }))
+
+		expect(await screen.findByText(`body:image:${UUID}#3`)).toBeTruthy()
+		expect(acquire.nested).toHaveBeenCalledWith(target, undefined)
+		expect(screen.queryByText("This document can't be previewed here yet.")).toBeNull()
+	})
+
+	// A package its origin cannot open (bytes the page holds): its card, never a crash.
 	it("shows the card for a document whose package cannot be opened from here", async () => {
 		acquire.refused = true
 		renderPreview("report.pages")

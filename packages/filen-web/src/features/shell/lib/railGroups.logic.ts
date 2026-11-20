@@ -12,7 +12,7 @@ export const RAIL_GROUP_CHILDREN: Readonly<Record<RailGroupId, readonly [RailChi
 	computer: ["sync", "mounts"]
 }
 
-// The route a child links to. Videos, Sync and Mounts nest deeper routes; their bare roots reopen what was
+// The route a child links to. Videos, Playlists, Sync and Mounts nest deeper routes; their bare roots reopen what was
 // open last (playlists reads its own last-opened value when linked bare).
 export const RAIL_CHILD_ROUTE = {
 	photos: "/photos",
@@ -25,8 +25,8 @@ export const RAIL_CHILD_ROUTE = {
 export function railChildActive(id: RailChildId, pathname: string): boolean {
 	switch (id) {
 		case "photos":
-		case "playlists":
 			return pathname === RAIL_CHILD_ROUTE[id]
+		case "playlists":
 		case "videos":
 		case "sync":
 		case "mounts":

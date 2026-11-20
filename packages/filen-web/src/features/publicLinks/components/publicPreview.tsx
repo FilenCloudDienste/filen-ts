@@ -4,6 +4,7 @@ import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider, PreviewDownloadableProvider, PreviewSiblingsProvider } from "@/features/preview/lib/accessMode"
 import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
+import { IworkPreview } from "@/features/iwork/components/iworkPreview"
 import { PreviewReferenceSourceContext, type ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
 
 const NO_SIBLINGS: readonly DriveItem[] = []
@@ -16,7 +17,9 @@ const NO_SIBLINGS: readonly DriveItem[] = []
 // rest is buffered. The caller
 // (fileView) has already gated the buffered categories' size via anonPreviewability. A link that
 // disallows downloads still previews, with no viewer's own way to save the file. `siblings` are the
-// other files of the link's directory, where a video's subtitles are found.
+// other files of the link's directory, where a video's subtitles are found. A Pages, Numbers or Keynote document shows
+// the rendering its package carries, the package listed and that one entry read through the public-link client's
+// archive reader, as the drive's preview does.
 export function PublicPreview({
 	item,
 	linkScope,
@@ -51,13 +54,22 @@ export function PublicPreview({
 							<ContentSniffGate
 								item={item}
 								asText={false}
-								render={() => (
-									<ReadOnlyPreviewBody
-										item={item}
-										category={previewType(item)}
-										alt={alt}
-									/>
-								)}
+								render={() => {
+									const category = previewType(item)
+
+									return category === "iwork" ? (
+										<IworkPreview
+											item={item}
+											alt={alt}
+										/>
+									) : (
+										<ReadOnlyPreviewBody
+											item={item}
+											category={category}
+											alt={alt}
+										/>
+									)
+								}}
 							/>
 						</div>
 					</PreviewReferenceSourceContext>

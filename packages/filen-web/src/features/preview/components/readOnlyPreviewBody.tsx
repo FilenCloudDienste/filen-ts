@@ -191,9 +191,10 @@ export function ReadOnlyViewer({ item, category, alt }: { item: DriveItem; categ
 					alt={alt}
 				/>
 			)
-		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item and an iWork document (whose
-		// package needs a session to list), and keeps an archive and a comic book for FileHero's own browser and reader
-		// (publicArchive.tsx), and an entry opens only in the categories it loads whole (entryAccess.logic.ts).
+		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item and keeps an archive and a comic book
+		// for FileHero's own browser and reader (publicArchive.tsx); an iWork document opens in IworkPreview, which shows
+		// its rendering through this body (publicPreview.tsx, archiveEntryViewer.tsx), and an entry opens only in the
+		// categories it loads whole (entryAccess.logic.ts).
 		case "archive":
 		case "comic":
 		case "iwork":

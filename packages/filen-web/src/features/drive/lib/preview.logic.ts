@@ -393,15 +393,16 @@ export const CATEGORY_POLICY = {
 		labelKey: "drivePreviewKindComic",
 		assistantKind: null
 	},
-	// The SDK lists the package and reads the one rendering it carries (iworkPreview.ts), so any size opens. Inside an
-	// archive the package needs a nested reader, which no entry opens yet; a public link previews none inline.
+	// The SDK lists the package and reads the one rendering it carries (iworkPreview.ts), so any size opens, on a public
+	// link too (through the public-link client's archive reader). Inside an archive the browser opens the package through
+	// a nested reader in its own viewer (useEntryActions), never as an entry read whole, hence "none".
 	iwork: {
 		streamed: false,
 		ranged: true,
 		bufferCap: null,
 		aboveCap: "refuse",
 		entry: "none",
-		anon: "none",
+		anon: "ranged",
 		textFamily: false,
 		editsAsText: false,
 		photo: false,

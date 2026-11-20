@@ -1,4 +1,4 @@
-import type { Note } from "@filen/sdk-rs"
+import type { Note, NoteType } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { plainErrorDTO } from "@/lib/sdk/errors"
@@ -52,8 +52,15 @@ export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note
 		return { status: "error", dto: plainErrorDTO(i18n.t("notes:noteImportTooLarge")) }
 	}
 
-	const title = titleFromFilename(file.name)
+	return createNoteWithContent(titleFromFilename(file.name), noteType, content)
+}
 
+// A note created with a title, a type and its first content, as Import Note and the assistant create one: the type
+// flipped from the SDK's own "text" default when it differs, and the content seeded through the SAME fault-tolerant
+// outbox the live editor writes through — never a raw one-off SDK content call — so a note created offline still
+// durably queues and eventually pushes exactly like a typed edit would. `content` is already in the type's stored
+// form and within the size cap.
+export async function createNoteWithContent(title: string, noteType: NoteType, content: string): Promise<ActionOutcome<Note>> {
 	const created = await attemptOp(sdkApi.createNote(title))
 
 	if (created.status === "error") {
@@ -65,8 +72,8 @@ export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note
 	if (note.noteType !== noteType) {
 		const retyped = await attemptOp(retypeNewNote(note, noteType))
 
-		// A note left in the wrong type would show this file's markup as text (or its Markdown unrendered): it is
-		// removed, so a retried import does not leave a stray behind.
+		// A note left in the wrong type would show its content's markup as text (or its Markdown unrendered): it is
+		// removed, so a retry does not leave a stray behind.
 		if (retyped.status === "error") {
 			await discardPartialNote(note)
 
@@ -80,8 +87,8 @@ export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note
 
 	// Durable enqueue + an immediate flush attempt (best-effort — the outbox itself guarantees eventual
 	// delivery even if this particular flush loses to a dropped connection). The content cache is seeded
-	// synchronously right after so the editor the caller opens next shows the imported text at once,
-	// without waiting on the outbox round trip.
+	// synchronously right after so the editor opened next shows the text at once, without waiting on the
+	// outbox round trip.
 	await sync.enqueue(note, content)
 	sync.executeNow()
 	queryClient.setQueryData(noteContentQueryKey(note.uuid), content)

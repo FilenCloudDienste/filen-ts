@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
 		failure,
 		onOpen: null as (() => void) | null,
 		openPlayback: vi.fn(),
+		reachable: vi.fn(() => Promise.resolve(true)),
 		watchOpen: vi.fn(() => Promise.resolve()),
 		reportProgress: vi.fn(),
 		reportStop: vi.fn(() => Promise.resolve()),
@@ -31,7 +32,10 @@ const mocks = vi.hoisted(() => {
 	}
 })
 
-vi.mock("@/lib/media/playback/openPlayback", () => ({ openPlayback: mocks.openPlayback }))
+vi.mock("@/lib/media/playback/openPlayback", () => ({
+	openPlayback: mocks.openPlayback,
+	embeddedTextReachable: mocks.reachable
+}))
 vi.mock("@/features/videos/lib/index", () => ({ videoLibrary: { playableFiles: mocks.playableFiles } }))
 vi.mock("@/features/videos/lib/probeService", () => ({
 	probeService: { request: () => Promise.resolve({ probe: mocks.probe ?? PROBE }) }
@@ -166,6 +170,7 @@ beforeEach(() => {
 	mocks.probe = null
 	mocks.failure.trigger = "network"
 	mocks.onOpen = null
+	mocks.reachable.mockImplementation(() => Promise.resolve(true))
 	mocks.watchOpen.mockImplementation(() => Promise.resolve())
 	mocks.openPlayback.mockImplementation(
 		(
@@ -610,10 +615,46 @@ describe("PlayerController embedded subtitle on a direct stream", () => {
 		setStatus(0, "ready")
 
 		controller.setSubtitleKind("embedded-text", 3)
+		await flush()
 
 		expect(controller.getSnapshot().phase).toBe("loading")
 		expect(controller.getSnapshot().probe?.subs).toHaveLength(1)
-		await flush()
 		expect(mocks.playbacks[1]?.subtitle).toBe("embedded-text")
+	})
+
+	it("keeps a direct stream playing when no remux plays the file whole, and marks the tracks unavailable", async () => {
+		mocks.reachable.mockImplementation(() => Promise.resolve(false))
+		await controller.open({ target: TARGET, start: "resume", autoplay: false })
+		await flush()
+		setStatus(0, "ready")
+
+		controller.setSubtitleKind("embedded-text", 3)
+		await flush()
+
+		expect(mocks.playbacks).toHaveLength(1)
+		expect(mocks.playbacks[0]?.disposed).toBe(false)
+		expect(controller.getSnapshot().phase).toBe("ready")
+		expect(controller.getSnapshot().embeddedTextBlocked).toBe(true)
+
+		// The mark holds across a reopen of the same part and is asked afresh for another audio track.
+		await controller.retry()
+		await flush()
+		expect(controller.getSnapshot().embeddedTextBlocked).toBe(true)
+		setStatus(1, "ready")
+		await controller.selectAudio(1)
+		expect(controller.getSnapshot().embeddedTextBlocked).toBe(false)
+	})
+
+	it("keeps the stream it opened when the track chosen meanwhile can't be shown", async () => {
+		mocks.reachable.mockImplementation(() => Promise.resolve(false))
+		mocks.onOpen = () => {
+			mocks.onOpen = null
+			controller.setSubtitleKind("embedded-text", 3)
+		}
+		await controller.open({ target: TARGET, start: "resume", autoplay: false })
+
+		expect(mocks.playbacks).toHaveLength(1)
+		expect(mocks.playbacks[0]?.disposed).toBe(false)
+		expect(controller.getSnapshot().embeddedTextBlocked).toBe(true)
 	})
 })

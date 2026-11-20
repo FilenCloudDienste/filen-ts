@@ -52,7 +52,12 @@ const TARGET_ICONS: Record<ProposalTargetKind, LucideIcon> = {
 	track: MusicIcon
 }
 
-const TEXT_LABEL_KEYS = new Map<string, AssistantKey>([["name", "assistantProposalName"]])
+const TEXT_LABEL_KEYS = new Map<string, AssistantKey>([
+	["name", "assistantProposalName"],
+	["new_name", "assistantProposalNewName"],
+	["title", "assistantProposalNoteTitle"],
+	["type", "assistantProposalNoteType"]
+])
 
 function SettledStatus({ status }: { status: Exclude<ProposalStatus, "pending"> }) {
 	const { t } = useTranslation("assistant")

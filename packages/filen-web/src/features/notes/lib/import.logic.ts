@@ -1,5 +1,5 @@
 import type { NoteType } from "@filen/sdk-rs"
-import { extensionStart } from "@filen/shared"
+import { checklistParser, extensionStart } from "@filen/shared"
 import { extensionOf, codeMirrorSupportedExtensions } from "@/features/drive/lib/preview.logic"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 
@@ -65,4 +65,38 @@ export function titleFromFilename(filename: string): string {
 	const dot = extensionStart(filename)
 
 	return dot === -1 ? filename : filename.slice(0, dot)
+}
+
+// A checklist row written as text: "[x] milk", "- [ ] eggs" or just "bread".
+const CHECKLIST_MARKER = /^\s*(?:[-*]\s+)?\[([ xX]?)\]\s*/
+
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+// A new note's content from plain text, as its type stores it: a checklist takes one row per non-blank line, a rich
+// note one paragraph per line (escaped, so the text never becomes markup); text, Markdown and code keep it as it is.
+export function noteContentFromText(noteType: NoteType, text: string): string {
+	const lines = text.split(/\r\n|\r|\n/)
+
+	switch (noteType) {
+		case "checklist":
+			return checklistParser.stringify(
+				lines
+					.map((line, index) => {
+						const marker = CHECKLIST_MARKER.exec(line)
+
+						return {
+							id: String(index),
+							checked: marker !== null && marker[1]?.toLowerCase() === "x",
+							content: (marker === null ? line : line.slice(marker[0].length)).trim()
+						}
+					})
+					.filter(row => row.content.length > 0)
+			)
+		case "rich":
+			return text.length === 0 ? "" : lines.map(line => (line.length === 0 ? "<p><br></p>" : `<p>${escapeHtml(line)}</p>`)).join("")
+		default:
+			return text
+	}
 }

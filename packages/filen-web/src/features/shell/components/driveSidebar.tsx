@@ -4,7 +4,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, UsersIcon, Share2Icon, Link2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
-import { isDriveListingCurrent, useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
+import { isDriveListingCurrent } from "@/features/drive/queries/drive"
 import { isTreeNodeOpen, TREE_ROOT_KEY, useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { DirectoryTree, DirectoryTreeChevron, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
@@ -106,8 +106,6 @@ function CloudDriveRoot({ label, open, loading, onToggle }: { label: string; ope
 	)
 }
 
-// Outside the component: a hook referenced as a value inside it makes the React Compiler skip DriveSidebar.
-const TREE_DATA = { useChildren: useDirectoryTreeChildrenQuery }
 // Shared so the tree context keeps its identity across non-drive navigations.
 const NO_ACTIVE_PATH: string[] = []
 
@@ -127,13 +125,14 @@ export function DriveSidebar() {
 	const reconcileLevel = useDirectoryTreeStore(state => state.reconcileLevel)
 	const rootOpen = isTreeNodeOpen(openMap, TREE_ROOT_KEY)
 	const [rootPending, setRootPending] = useState(false)
+	// The tree's virtualizer windows its rows against this scroll area.
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
 	function navigateTo(path: string[]): void {
 		void navigate({ to: "/drive/$", params: { _splat: path.join("/") } })
 	}
 
 	const tree: DirectoryTreeContext = {
-		...TREE_DATA,
 		activePath,
 		isOpen: uuid => isTreeNodeOpen(openMap, uuid),
 		onToggle: (uuid, parentUuid) => {
@@ -193,42 +192,36 @@ export function DriveSidebar() {
 			{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. A stable gutter:
 				    a scrollbar coming and going as levels open would reflow every row. */}
 			<div
+				ref={setScrollElement}
 				// A drag of drive items resting near its edge scrolls the tree (pointerDrag.ts).
 				data-filen-drag-scroll=""
 				className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col overflow-y-auto px-3 pt-1 pb-3 app-region-pane"
 			>
-				{/* A nested disclosure list, deliberately NOT role="tree": the ARIA tree pattern owes a
-					roving-tabindex/arrow-key focus model this sidebar does not implement, and claiming the
-					role without it sends a screen-reader user into an interaction mode whose items never take
-					focus. Plain list semantics describe what is really here — each row's chevron carries its
-					own aria-expanded, and the subtree it discloses is nested inside its own item. */}
+				{/* The Cloud Drive row (a link, the sidebar's stable landmark for the drive root, with its own disclosure
+					button) and below it the ARIA tree of its directories (directoryTree.tsx), one menu for both. */}
 				<DirectoryTreeMenu
 					onNavigate={navigateTo}
 					render={
-						<ul
-							aria-label={t("driveTreeLabel")}
+						<div
+							aria-busy={rootPending || undefined}
 							className="flex flex-col gap-0.5"
 						>
-							<li
-								aria-busy={rootPending || undefined}
-								className="flex flex-col gap-0.5"
-							>
-								<CloudDriveRoot
-									label={t("driveMyDrive")}
-									open={rootOpen}
-									loading={rootPending}
-									onToggle={() => {
-										toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
-									}}
+							<CloudDriveRoot
+								label={t("driveMyDrive")}
+								open={rootOpen}
+								loading={rootPending}
+								onToggle={() => {
+									toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
+								}}
+							/>
+							{rootOpen ? (
+								<DirectoryTree
+									tree={tree}
+									scrollElement={scrollElement}
+									onPendingChange={setRootPending}
 								/>
-								{rootOpen ? (
-									<DirectoryTree
-										tree={tree}
-										onPendingChange={setRootPending}
-									/>
-								) : null}
-							</li>
-						</ul>
+							) : null}
+						</div>
 					}
 				/>
 				<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>

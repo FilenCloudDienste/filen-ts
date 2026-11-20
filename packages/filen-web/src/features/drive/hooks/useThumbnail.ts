@@ -1,8 +1,10 @@
 import { use, useEffect, useEffectEvent, useRef, useState } from "react"
+import type { FileVerdict } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { getThumbnailUrl, peekThumbnailUrl } from "@/features/drive/lib/thumbnails"
 import { thumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 import { ThumbnailRankContext } from "@/features/drive/lib/thumbnailRank"
+import { ThumbnailSourceContext, type ThumbnailSource } from "@/features/drive/lib/thumbnailSource"
 import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 
 // side-effect: registers the sdk/video/pdf generators against the thumbnail service — upload.ts is
@@ -11,10 +13,18 @@ import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 // is a clean null, never a throw).
 import "@/features/drive/lib/thumbGenerators"
 
-// What a cell can show without asking the service: null for a category with no thumbnail story
-// (directory, unrecognized/svg extension, oversize, undecryptable), the cached url, else undefined.
-function initialThumbnail(item: DriveItem): string | null | undefined {
-	return thumbnailCategory(item) === "none" ? null : (peekThumbnailUrl(item.data.uuid) ?? undefined)
+// Whether `source` makes a thumbnail of the item at all: a directory, an unrecognized extension, an oversize or
+// undecryptable file has none, nor a category the source does not produce.
+function producedBy(source: ThumbnailSource, item: DriveItem, verdict?: FileVerdict): boolean {
+	const category = thumbnailCategory(item, verdict)
+
+	return category !== "none" && source.produces(category)
+}
+
+// What a cell can show without asking the service: null for an item its source makes no thumbnail of, the cached
+// url, else undefined.
+function initialThumbnail(source: ThumbnailSource, item: DriveItem): string | null | undefined {
+	return producedBy(source, item) ? (peekThumbnailUrl(item.data.uuid) ?? undefined) : null
 }
 
 // Bridges the thumbnail service's async getThumbnailUrl into render state for one drive item: the url,
@@ -32,13 +42,15 @@ function initialThumbnail(item: DriveItem): string | null | undefined {
 // virtualized listing, which ranks its generation against the rest while it waits for a slot.
 export function useThumbnail(item: DriveItem, index?: number): string | null | undefined {
 	const uuid = item.data.uuid
+	// The drive's own unless the listing says otherwise (a public link's: the public-link client, in memory only).
+	const source = use(ThumbnailSourceContext)
 	// A verdict landing later (a `.ts` read as a transport stream) can give the item a thumbnail story.
-	const wanted = thumbnailCategory(item, useFileKindVerdict(uuid)) !== "none"
-	const [state, setState] = useState(() => ({ uuid, wanted, url: initialThumbnail(item) }))
+	const wanted = producedBy(source, item, useFileKindVerdict(uuid))
+	const [state, setState] = useState(() => ({ uuid, wanted, url: initialThumbnail(source, item) }))
 	let current = state
 
 	if (state.uuid !== uuid || state.wanted !== wanted) {
-		current = { uuid, wanted, url: initialThumbnail(item) }
+		current = { uuid, wanted, url: initialThumbnail(source, item) }
 		setState(current)
 	}
 
@@ -52,7 +64,7 @@ export function useThumbnail(item: DriveItem, index?: number): string | null | u
 	}, [rankOf, index])
 
 	const resolve = useEffectEvent((signal: AbortSignal) =>
-		getThumbnailUrl(item, undefined, signal, () => {
+		getThumbnailUrl(item, source.deps, signal, () => {
 			const { rankOf: rankAt, index: at } = placement.current
 
 			return rankAt === null || at === undefined ? 0 : rankAt(at)

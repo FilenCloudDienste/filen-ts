@@ -12,7 +12,6 @@ import {
 	touchTapIntent
 } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 import { useListboxTypeAhead } from "@/features/drive/hooks/useListboxTypeAhead"
 import { toggleSelection, type BrowseSelection } from "@/features/publicLinks/lib/browse.logic"
 import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
@@ -26,6 +25,10 @@ interface UsePublicListboxNavParams {
 	onOpen: (index: number) => void
 	// The row the cursor and the range anchor start on, by uuid; null for none yet.
 	initialKey: string | null
+	// Items per virtual row (1 in the list, the grid's column count) and that row's height: Up/Down move a row, Left/Right
+	// an item in a grid, and PageUp/PageDown a screenful of rows.
+	columns: number
+	rowHeight: number
 }
 
 export interface PublicListboxNav {
@@ -46,7 +49,8 @@ function keysOf(items: readonly DriveItem[]): BrowseSelection {
 // drive's store: plain arrows, Home/End and PageUp/PageDown move the cursor, Shift extends a range from the anchor,
 // Space toggles, type-ahead jumps by name; a click selects, Ctrl/Cmd toggles, Shift selects a range, and a touch
 // tap opens or, once something is selected, toggles. Open, select-all and clear-selection are the drive.* keymap
-// actions the browser registers. One level per mount: the browser remounts the list on navigation.
+// actions the browser registers. In a grid, Up/Down move a row of tiles and Left/Right one tile. One level per mount: the
+// browser remounts the list on navigation.
 export function usePublicListboxNav({
 	items,
 	selection,
@@ -54,7 +58,9 @@ export function usePublicListboxNav({
 	virtualizer,
 	focusItem,
 	onOpen,
-	initialKey
+	initialKey,
+	columns,
+	rowHeight
 }: UsePublicListboxNavParams): PublicListboxNav {
 	// By uuid, not position: a sort or a filter keystroke reorders the rows under the cursor.
 	const [activeKey, setActiveKey] = useState<string | null>(initialKey)
@@ -80,7 +86,8 @@ export function usePublicListboxNav({
 		const next = clampListboxIndex(nextIndexRaw, items.length)
 
 		setActiveKey(keys[next] ?? null)
-		virtualizer.scrollToIndex(next, { align: "auto" })
+		// The virtualizer lays out rows: a grid's tile scrolls in with its row.
+		virtualizer.scrollToIndex(Math.floor(next / columns), { align: "auto" })
 		focusItem(next)
 
 		return next
@@ -163,9 +170,9 @@ export function usePublicListboxNav({
 					event.key,
 					safeActiveIndex,
 					items.length,
-					1,
-					false,
-					listboxPageStep(event.currentTarget.clientHeight, ROW_HEIGHT, 1)
+					columns,
+					columns > 1,
+					listboxPageStep(event.currentTarget.clientHeight, rowHeight, columns)
 				)
 
 		if (target === null) {

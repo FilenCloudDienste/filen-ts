@@ -40,12 +40,14 @@ describe("resolveSidebarKind", () => {
 		expect(resolveSidebarKind("/settings/security")).toBe("settings")
 	})
 
-	it("matches /contacts", () => {
+	it("matches /contacts and its sections", () => {
 		expect(resolveSidebarKind("/contacts")).toBe("contacts")
+		expect(resolveSidebarKind("/contacts/blocked")).toBe("contacts")
 	})
 
-	it("matches /playlists", () => {
+	it("matches /playlists and one playlist", () => {
 		expect(resolveSidebarKind("/playlists")).toBe("playlists")
+		expect(resolveSidebarKind("/playlists/1a2b3c4d-0000-0000-0000-000000000000")).toBe("playlists")
 	})
 
 	it("matches /videos and every route under it", () => {

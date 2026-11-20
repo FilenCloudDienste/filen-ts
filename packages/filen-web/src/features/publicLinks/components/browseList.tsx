@@ -1,9 +1,24 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent, type Ref } from "react"
+import {
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useMemo,
+	useRef,
+	useState,
+	type CSSProperties,
+	type MouseEvent,
+	type Ref
+} from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
-import { ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
+import { type DriveViewMode } from "@/features/drive/lib/preferences"
+import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH, columnsForWidth } from "@/features/drive/lib/gridLayout"
+import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
+import { rowRank } from "@/features/drive/lib/thumbnails.logic"
+import { ThumbnailRankContext } from "@/features/drive/lib/thumbnailRank"
+import { ThumbnailSourceContext } from "@/features/drive/lib/thumbnailSource"
 import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { ListColumnHeader } from "@/features/drive/components/listColumnHeader"
 import { MarqueeRect } from "@/features/drive/components/marqueeRect"
@@ -11,6 +26,8 @@ import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
 import { usePublicListboxNav } from "@/features/publicLinks/hooks/usePublicListboxNav"
 import { BrowseRow, SelectionBox } from "@/features/publicLinks/components/browseRow"
+import { BrowseTile } from "@/features/publicLinks/components/browseTile"
+import { LINK_THUMBNAIL_SOURCE } from "@/features/publicLinks/lib/thumbnails"
 import {
 	DEFAULT_PUBLIC_SORT,
 	selectionCheck,
@@ -21,10 +38,14 @@ import {
 	type BrowseSelection
 } from "@/features/publicLinks/lib/browse.logic"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { useElementSize } from "@/lib/useElementSize"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 const LIST_OVERSCAN = 8
+const GRID_OVERSCAN = 3
+// The grid's inset between the tiles and the pane's edges, as the drive's grid has it.
+const GRID_LISTBOX_STYLE: CSSProperties = { padding: GRID_INSET }
 
 export interface BrowseListHandle {
 	// The filter's ArrowDown: the list takes focus on its cursor row.
@@ -49,6 +70,8 @@ export interface BrowseListProps {
 	onSelectionChange: (next: BrowseSelection) => void
 	sort: DriveSortBy
 	onSortChange: (next: DriveSortBy) => void
+	// Rows under drive's column header, or drive's tiles with their thumbnails.
+	viewMode: DriveViewMode
 	downloadable: boolean
 	downloadBusy: boolean
 	saveable: boolean
@@ -56,9 +79,10 @@ export interface BrowseListProps {
 	onAction: (entry: BrowseEntry, action: BrowseEntryAction) => void
 }
 
-// The level's entries as drive's list view: its column header with a select-all box ahead, a virtualized
-// listbox with drive's keyboard and pointer selection, and its marquee over blank space. The browser remounts
-// it per level, so the cursor and scroll start fresh, and as an opened file closes, which resumes them.
+// The level's entries as drive's list view (its column header with a select-all box ahead) or its grid view (a
+// select-all bar over rows of tiles, image thumbnails read through the public-link client), one virtualized listbox
+// with drive's keyboard and pointer selection and its marquee over blank space either way. The browser remounts it per
+// level and per view, so the cursor and scroll start fresh, and as an opened file closes, which resumes them.
 //
 // useVirtualizer opts this component out of the React Compiler, so what the rows get is memoized by hand: the
 // row handlers never change identity.
@@ -71,6 +95,7 @@ export function BrowseList({
 	onSelectionChange,
 	sort,
 	onSortChange,
+	viewMode,
 	downloadable,
 	downloadBusy,
 	saveable,
@@ -83,16 +108,31 @@ export function BrowseList({
 	const pendingResume = useRef(resume)
 	const { registerRef, focusItem } = useRovingItemRefs()
 	const items = useMemo<DriveItem[]>(() => entries.map(entry => entry.item), [entries])
-	const getItemKey = useCallback((index: number) => items[index]?.data.uuid ?? index, [items])
+	const grid = viewMode === "grid"
+	const { width: contentWidth, height: contentHeight } = useElementSize(scrollElement)
+	const columns = grid ? columnsForWidth(contentWidth, TILE_WIDTH) : 1
+	const rowHeight = grid ? TILE_ROW_HEIGHT : ROW_HEIGHT
+	// A list row is keyed by its entry; a grid row by its index (its tiles carry their own keys).
+	const getItemKey = useCallback((index: number) => (grid ? index : (items[index]?.data.uuid ?? index)), [grid, items])
 
 	const virtualizer = useVirtualizer({
-		count: items.length,
+		count: Math.ceil(items.length / columns),
 		getScrollElement: () => scrollElement,
 		observeElementOffset: observeElementOffsetFromAttach,
-		estimateSize: () => ROW_HEIGHT,
-		overscan: LIST_OVERSCAN,
+		estimateSize: () => rowHeight,
+		overscan: grid ? GRID_OVERSCAN : LIST_OVERSCAN,
+		// The grid's padding shifts every row down by GRID_INSET, which the offsets do not know about.
+		scrollPaddingEnd: grid ? GRID_INSET * 2 : 0,
 		getItemKey
 	})
+
+	// The thumbnail service's objectURL cache holds what this listing can show.
+	useEffect(() => {
+		setThumbnailViewport(contentWidth, contentHeight, viewMode)
+	}, [contentWidth, contentHeight, viewMode])
+
+	// Stable while scrolling: the range is read as a generation slot frees.
+	const rankThumbnail = useCallback((index: number) => rowRank(Math.floor(index / columns), virtualizer.range), [columns, virtualizer])
 
 	const nav = usePublicListboxNav({
 		items,
@@ -107,14 +147,16 @@ export function BrowseList({
 				onOpen(entry)
 			}
 		},
-		initialKey: resume?.key ?? null
+		initialKey: resume?.key ?? null,
+		columns,
+		rowHeight
 	})
 
 	const marquee = useMarqueeSelection({
 		items,
-		viewMode: "list",
-		columns: 1,
-		geometry: { rowHeight: ROW_HEIGHT, tileWidth: TILE_WIDTH },
+		viewMode,
+		columns,
+		geometry: { rowHeight, tileWidth: TILE_WIDTH },
 		selection: {
 			read: () => items.filter(item => selection.has(item.data.uuid)),
 			write: next => {
@@ -133,16 +175,19 @@ export function BrowseList({
 	// The rows' handlers read the latest render through one ref, so a row only re-renders for its own values.
 	const latest = useLatestRef({ nav, entries, selection, onSelectionChange, onOpen, onAction, onResumed })
 
+	// A grid knows its columns once its width is measured; before that a tile's row would be read as a one-column one.
+	const laidOut = !grid || contentWidth > 0
+
 	// Back from an opened file: the keys go on from its row (already in view at the restored offset).
 	useEffect(() => {
-		if (scrollElement === null || pendingResume.current === null) {
+		if (scrollElement === null || !laidOut || pendingResume.current === null) {
 			return
 		}
 
 		pendingResume.current = null
 		latest.current.nav.focusCursor()
 		latest.current.onResumed()
-	}, [scrollElement, latest])
+	}, [scrollElement, laidOut, latest])
 	const handlePointerSelect = useCallback(
 		(index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => {
 			latest.current.nav.handlePointerSelect(index, event, pointerType)
@@ -225,31 +270,74 @@ export function BrowseList({
 	)
 
 	const headerCheck = selectionCheck(entries, selection)
+	const selectAll = (
+		<button
+			type="button"
+			role="checkbox"
+			aria-checked={headerCheck === "mixed" ? "mixed" : headerCheck === "on"}
+			aria-label={t("publicLinks:selectAll")}
+			disabled={entries.length === 0}
+			className="flex shrink-0 rounded-[4px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+			onClick={() => {
+				onSelectionChange(toggleAllSelection(entries, selection))
+			}}
+		>
+			<SelectionBox check={headerCheck} />
+		</button>
+	)
+
+	function renderEntry(index: number, start: number) {
+		const entry = entries[index]
+
+		if (entry === undefined) {
+			return null
+		}
+
+		const cell = {
+			entry,
+			index,
+			total: entries.length,
+			selected: selection.has(entry.item.data.uuid),
+			active: index === nav.safeActiveIndex,
+			downloadable,
+			downloadBusy,
+			saveable,
+			onPointerSelect: handlePointerSelect,
+			onOpen: handleOpen,
+			onToggle: handleToggle,
+			onAction: handleAction,
+			registerRef
+		}
+
+		return grid ? (
+			<BrowseTile
+				key={entry.item.data.uuid}
+				{...cell}
+			/>
+		) : (
+			<BrowseRow
+				key={entry.item.data.uuid}
+				{...cell}
+				start={start}
+			/>
+		)
+	}
 
 	return (
 		<>
-			<ListColumnHeader
-				sort={sort}
-				onSortChange={next => {
-					onSortChange(next ?? DEFAULT_PUBLIC_SORT)
-				}}
-				disabled={false}
-				leading={
-					<button
-						type="button"
-						role="checkbox"
-						aria-checked={headerCheck === "mixed" ? "mixed" : headerCheck === "on"}
-						aria-label={t("publicLinks:selectAll")}
-						disabled={entries.length === 0}
-						className="flex shrink-0 rounded-[4px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-						onClick={() => {
-							onSelectionChange(toggleAllSelection(entries, selection))
-						}}
-					>
-						<SelectionBox check={headerCheck} />
-					</button>
-				}
-			/>
+			{grid ? (
+				// The grid has no columns to sort by (the sort menu beside the filter does it): only the select-all box.
+				<div className="flex h-10 shrink-0 items-center border-b border-border px-4">{selectAll}</div>
+			) : (
+				<ListColumnHeader
+					sort={sort}
+					onSortChange={next => {
+						onSortChange(next ?? DEFAULT_PUBLIC_SORT)
+					}}
+					disabled={false}
+					leading={selectAll}
+				/>
+			)}
 			<div
 				ref={listboxRef}
 				role="listbox"
@@ -259,40 +347,41 @@ export function BrowseList({
 				onKeyDown={nav.handleKeyDown}
 				onPointerDown={marquee.onPointerDown}
 				className="min-h-0 flex-1 overflow-y-auto"
+				style={grid ? GRID_LISTBOX_STYLE : undefined}
 			>
-				<div
-					role="presentation"
-					style={{ position: "relative", width: "100%", height: virtualizer.getTotalSize() }}
-				>
-					<MarqueeRect store={marquee.rectStore} />
-					{virtualizer.getVirtualItems().map(virtualRow => {
-						const entry = entries[virtualRow.index]
-
-						if (entry === undefined) {
-							return null
-						}
-
-						return (
-							<BrowseRow
-								key={virtualRow.key}
-								entry={entry}
-								index={virtualRow.index}
-								total={entries.length}
-								start={virtualRow.start}
-								selected={selection.has(entry.item.data.uuid)}
-								active={virtualRow.index === nav.safeActiveIndex}
-								downloadable={downloadable}
-								downloadBusy={downloadBusy}
-								saveable={saveable}
-								onPointerSelect={handlePointerSelect}
-								onOpen={handleOpen}
-								onToggle={handleToggle}
-								onAction={handleAction}
-								registerRef={registerRef}
-							/>
-						)
-					})}
-				</div>
+				<ThumbnailSourceContext value={LINK_THUMBNAIL_SOURCE}>
+					<ThumbnailRankContext value={rankThumbnail}>
+						<div
+							role="presentation"
+							style={{ position: "relative", width: "100%", height: virtualizer.getTotalSize() }}
+						>
+							<MarqueeRect store={marquee.rectStore} />
+							{virtualizer.getVirtualItems().map(virtualRow =>
+								grid ? (
+									<div
+										key={virtualRow.key}
+										role="presentation"
+										style={{
+											position: "absolute",
+											top: 0,
+											left: 0,
+											width: "100%",
+											transform: `translateY(${String(virtualRow.start)}px)`,
+											display: "grid",
+											gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
+										}}
+									>
+										{Array.from({ length: columns }, (_, column) =>
+											renderEntry(virtualRow.index * columns + column, 0)
+										)}
+									</div>
+								) : (
+									renderEntry(virtualRow.index, virtualRow.start)
+								)
+							)}
+						</div>
+					</ThumbnailRankContext>
+				</ThumbnailSourceContext>
 			</div>
 		</>
 	)

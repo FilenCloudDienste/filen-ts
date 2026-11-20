@@ -16,6 +16,7 @@ import { useMessageActions, type MessageActionsHandle } from "@/features/chats/c
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
 import { linksFromSegments, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
+import { messageAddressing } from "@/features/chats/lib/mentions.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { useChatSendState } from "@/features/chats/store/useChatsInflight"
@@ -95,6 +96,11 @@ export interface MessageRowProps {
 const ROW_HIGHLIGHT = "hover:bg-muted data-popup-open:bg-muted has-[[data-popup-open]]:bg-muted"
 const FAILED_ROW_HIGHLIGHT =
 	"bg-destructive/6 hover:bg-destructive/10 data-popup-open:bg-destructive/10 has-[[data-popup-open]]:bg-destructive/10"
+// A message addressed to the reader (an @mention of them or @everyone, or a reply to them): a faint accent tint and a
+// thin accent bar on the leading edge, deepened on hover like the others. The reason is also spoken (sr-only), so the
+// tint is never the only signal.
+const ADDRESSED_ROW_HIGHLIGHT =
+	"bg-chat-own/8 before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:bg-chat-own hover:bg-chat-own/14 data-popup-open:bg-chat-own/14 has-[[data-popup-open]]:bg-chat-own/14"
 
 // One message as a full-width row, everyone's left-aligned: a run opens with the avatar in the gutter and
 // the name and time on the first line, and each later line sits under the name with its time in the gutter
@@ -133,6 +139,7 @@ export function MessageRow({
 	const segments = segmentMessage(message.message)
 	const embedCandidates = message.embedDisabled ? [] : embedCandidatesForLinks(linksFromSegments(segments))
 	const hasEmbeds = embedCandidates.length > 0
+	const addressing = messageAddressing(message, segments, chat.participants, currentUserId)
 
 	const [confirmingDelete, setConfirmingDelete] = useState(false)
 	const [deletePending, setDeletePending] = useState(false)
@@ -227,8 +234,8 @@ export function MessageRow({
 								tabIndex={active ? 0 : -1}
 								className={cn(
 									"group relative px-4 py-px focus-ring-row outline-none focus-visible:ring-inset",
-									failed ? FAILED_ROW_HIGHLIGHT : ROW_HIGHLIGHT,
-									replying && (failed ? "bg-destructive/10" : "bg-muted")
+									failed ? FAILED_ROW_HIGHLIGHT : addressing !== null ? ADDRESSED_ROW_HIGHLIGHT : ROW_HIGHLIGHT,
+									replying && (failed ? "bg-destructive/10" : addressing !== null ? "bg-chat-own/14" : "bg-muted")
 								)}
 							>
 								{message.replyTo !== undefined ? (
@@ -274,6 +281,11 @@ export function MessageRow({
 													<span className="sr-only">{sentLabel}</span>
 												</time>
 											</div>
+										) : null}
+										{addressing !== null ? (
+											<span className="sr-only select-none">
+												{addressing === "mention" ? t("chatMessageMentionsYou") : t("chatMessageRepliesToYou")}
+											</span>
 										) : null}
 										<div className={cn("min-w-0 text-sm leading-5 select-text", sending && "opacity-60")}>
 											{undecryptable ? (

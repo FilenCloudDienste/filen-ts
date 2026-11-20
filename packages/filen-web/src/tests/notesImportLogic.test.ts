@@ -5,7 +5,14 @@
 // shares this exact rationale for export's own rich branch.
 
 import { describe, expect, it } from "vitest"
-import { detectImportNoteType, importAcceptAttribute, sanitizeImportedContent, titleFromFilename } from "@/features/notes/lib/import.logic"
+import { checklistParser } from "@filen/shared"
+import {
+	detectImportNoteType,
+	importAcceptAttribute,
+	noteContentFromText,
+	sanitizeImportedContent,
+	titleFromFilename
+} from "@/features/notes/lib/import.logic"
 
 describe("detectImportNoteType — extension-based, widened to accept text/markdown/html/code files", () => {
 	it("maps .txt to text", () => {
@@ -97,5 +104,27 @@ describe("titleFromFilename", () => {
 
 	it("falls back to the whole name when there's no real extension (a dotfile)", () => {
 		expect(titleFromFilename(".gitignore")).toBe(".gitignore")
+	})
+})
+
+describe("noteContentFromText", () => {
+	it("makes one checklist row per non-blank line, checked where the line says so", () => {
+		const rows = checklistParser.parse(noteContentFromText("checklist", "[x] passport\n- [ ] socks <wool>\n\nmap"))
+
+		expect(rows.map(({ checked, content }) => ({ checked, content }))).toEqual([
+			{ checked: true, content: "passport" },
+			{ checked: false, content: "socks <wool>" },
+			{ checked: false, content: "map" }
+		])
+	})
+
+	it("makes one escaped paragraph per line of a rich note, so the text never becomes markup", () => {
+		expect(noteContentFromText("rich", "a <b>\n\nc")).toBe("<p>a &lt;b&gt;</p><p><br></p><p>c</p>")
+		expect(noteContentFromText("rich", "")).toBe("")
+	})
+
+	it("keeps text, Markdown and code as written", () => {
+		expect(noteContentFromText("md", "# a\n<b>")).toBe("# a\n<b>")
+		expect(noteContentFromText("code", "x < 1")).toBe("x < 1")
 	})
 })

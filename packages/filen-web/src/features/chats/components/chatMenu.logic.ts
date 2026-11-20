@@ -10,7 +10,7 @@ import type { ChatsKey } from "@/lib/i18n"
 // never through a chatMenuActions descriptor.
 export type ChatActionDialogKind = "rename" | "delete" | "leave" | "participants"
 
-export type ChatActionId = "markRead" | "mute" | "participants" | "rename" | "delete" | "leave"
+export type ChatActionId = "markRead" | "mute" | "participants" | "rename" | "copyId" | "delete" | "leave"
 
 // `enabled` mirrors itemMenu.logic.ts's own field; only applyOfflineGate below ever sets it.
 export type ChatActionDescriptor = ActionDescriptor<ChatsKey, ChatActionId, ChatActionDialogKind> & { enabled?: boolean }
@@ -23,6 +23,8 @@ const PARTICIPANTS: ChatActionDescriptor = {
 	dialogKind: "participants"
 }
 const RENAME: ChatActionDescriptor = { id: "rename", ...CHAT_ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
+// Read-only clipboard utility (old-web parity): the uuid is known even for an undecryptable conversation.
+const COPY_ID: ChatActionDescriptor = { id: "copyId", ...CHAT_ACTION_DEFS.copyId, run: "direct" }
 const DELETE_CHAT: ChatActionDescriptor = { id: "delete", ...CHAT_ACTION_DEFS.delete, run: "dialog", dialogKind: "delete" }
 const LEAVE_CHAT: ChatActionDescriptor = { id: "leave", ...CHAT_ACTION_DEFS.leave, run: "dialog", dialogKind: "leave" }
 
@@ -39,10 +41,10 @@ export function chatMenuActions(chat: Chat, currentUserId: bigint | undefined, h
 	const owner = isChatOwner(chat, currentUserId)
 
 	// An undecryptable conversation (group key didn't decrypt) can only be left or deleted — mute/
-	// rename/participants/markRead all need decrypted state this chat doesn't have (mirrors mobile's
+	// rename/participants/markRead all need decrypted state this chat doesn't have; Copy ID needs only the uuid (mirrors mobile's
 	// own undecryptable menu branch, list/chat/menu.tsx: `isOwner ? [delete] : [leave]`).
 	if (isChatUndecryptable(chat)) {
-		return [owner ? DELETE_CHAT : LEAVE_CHAT]
+		return [COPY_ID, owner ? DELETE_CHAT : LEAVE_CHAT]
 	}
 
 	const actions: ChatActionDescriptor[] = []
@@ -58,6 +60,8 @@ export function chatMenuActions(chat: Chat, currentUserId: bigint | undefined, h
 	if (owner) {
 		actions.push(RENAME)
 	}
+
+	actions.push(COPY_ID)
 
 	// Delete (owner) vs. Leave (non-owner self-remove) — mutually exclusive, the two ways a conversation
 	// can vanish from an owner's vs. a participant's own list.

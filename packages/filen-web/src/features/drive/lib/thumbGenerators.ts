@@ -150,6 +150,24 @@ export const generateSdkThumb: ThumbGenerator = async item => {
 	}
 }
 
+// generateSdkThumb for a public link's file, through the public-link client: the same decode and the same answers.
+export const generateLinkedSdkThumb: ThumbGenerator = async item => {
+	try {
+		const result = await sdkApi.makeLinkedSdkThumbnailAnon(
+			narrowToAnyFile(item),
+			THUMB_MAX_DIM,
+			THUMB_SDK_MAX_HEIGHT,
+			THUMB_SDK_LOSSY_QUALITY
+		)
+
+		return asGenerationResult(result)
+	} catch (e) {
+		log.warn("thumb-generators", "generateLinkedSdkThumb: sdk call failed", item.data.uuid, e)
+
+		return { type: "failed" }
+	}
+}
+
 // Thumbnails a file the client STILL HOLDS, straight after its upload lands, so the freshly-patched
 // listing row never triggers a download of bytes that are already on this machine. Seeded into the
 // thumbnail service (seedThumbnail) rather than merely written to OPFS: the row's tile asks for its

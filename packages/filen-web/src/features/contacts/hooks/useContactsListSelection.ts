@@ -13,7 +13,7 @@ import {
 } from "@/features/contacts/lib/selection"
 
 export interface UseContactsListSelectionParams {
-	// The route's own `section` search param. A fresh section view must never inherit the previous
+	// The route's own `section` path param. A fresh section view must never inherit the previous
 	// one's selection/anchor — the contacts twin of useNotesListSelection's resetKey (viewMode) and
 	// useDriveListboxNav's [variant, splat].
 	resetKey: string

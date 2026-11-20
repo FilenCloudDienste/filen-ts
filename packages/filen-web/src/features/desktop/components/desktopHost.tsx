@@ -100,7 +100,7 @@ export function DesktopHost(): null {
 			void performLogout({ forced: true })
 		})
 		const unsubscribeOpenPair = bridge.sync.onOpenPair(pairId => {
-			void navigate({ to: "/sync/$pairId", params: { pairId }, search: { tab: "issues" } })
+			void navigate({ to: "/sync/$pairId/$tab", params: { pairId, tab: "issues" } })
 		})
 
 		return () => {
@@ -163,7 +163,7 @@ export function DesktopHost(): null {
 				},
 				`contact-request-${event.inner.uuid}`,
 				() => {
-					void navigate({ to: "/contacts", search: { section: "requests" } })
+					void navigate({ to: "/contacts/$section", params: { section: "requests" } })
 				}
 			)
 		})

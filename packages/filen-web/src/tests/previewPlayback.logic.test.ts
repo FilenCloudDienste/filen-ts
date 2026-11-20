@@ -3,7 +3,6 @@ import type { LadderDecision, MediaCodec, VideoProbe } from "@filen/shared/video
 import {
 	cannotStream,
 	confirmedGap,
-	embeddedTextContainer,
 	initialVideoRoute,
 	mseFailureKind,
 	mseOpenFailureKind,
@@ -114,16 +113,10 @@ describe("confirmedGap", () => {
 	})
 })
 
-describe("silentAudioCodec / embeddedTextContainer", () => {
+describe("silentAudioCodec", () => {
 	it("names the chosen track's codec, else the first", () => {
 		expect(silentAudioCodec(probeOf("h264", ["aac", "dts"]), 1)).toBe("dts")
 		expect(silentAudioCodec(probeOf("h264", ["eac3"]), -1)).toBe("eac3")
-	})
-
-	it("taps text subtitles from Matroska only", () => {
-		expect(embeddedTextContainer(probeOf("h264", [], "mkv"))).toBe(true)
-		expect(embeddedTextContainer(probeOf("h264", [], "webm"))).toBe(true)
-		expect(embeddedTextContainer(probeOf("h264", [], "mp4"))).toBe(false)
 	})
 })
 

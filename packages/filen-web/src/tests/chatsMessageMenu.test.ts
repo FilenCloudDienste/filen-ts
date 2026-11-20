@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon, UserXIcon } from "lucide-react"
+import { CornerUpLeftIcon, CopyIcon, HashIcon, PencilIcon, Trash2Icon, UserXIcon } from "lucide-react"
 import type { ChatMessage } from "@filen/sdk-rs"
 import { deriveBlockedUsers } from "@filen/shared"
 
@@ -35,16 +35,16 @@ function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message
 }
 
 describe("messageMenuActions", () => {
-	it("reply + copy + block, for a confirmed decryptable message from someone else", () => {
+	it("reply + copy + copyId + block, for a confirmed decryptable message from someone else", () => {
 		const message = mockMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "block"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "copyId", "block"])
 	})
 
-	it("reply + copy + edit + delete, for a confirmed decryptable own message (sender-only edit/delete)", () => {
+	it("reply + copy + copyId + edit + delete, for a confirmed decryptable own message (sender-only edit/delete)", () => {
 		const message = mockMessage({ senderId: 1 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "copyId", "edit", "delete"])
 	})
 
 	it("adds disableEmbed between edit and delete when the caller reports the message has an active embed", () => {
@@ -53,6 +53,7 @@ describe("messageMenuActions", () => {
 		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual([
 			"reply",
 			"copy",
+			"copyId",
 			"edit",
 			"disableEmbed",
 			"delete"
@@ -62,19 +63,19 @@ describe("messageMenuActions", () => {
 	it("omits disableEmbed for someone else's message even when hasEmbeds is true (sender-only), still offers block", () => {
 		const message = mockMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual(["reply", "copy", "block"])
+		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual(["reply", "copy", "copyId", "block"])
 	})
 
 	it("omits disableEmbed by default (hasEmbeds defaults to false)", () => {
 		const message = mockMessage({ senderId: 1 })
 
-		expect(messageMenuActions(message, 1n, "confirmed").map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
+		expect(messageMenuActions(message, 1n, "confirmed").map(d => d.id)).toEqual(["reply", "copy", "copyId", "edit", "delete"])
 	})
 
 	it("coerces senderId (number) to BigInt before comparing to the bigint userId — not a raw ===", () => {
 		const message = mockMessage({ senderId: 42 })
 
-		expect(messageMenuActions(message, 42n).map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
+		expect(messageMenuActions(message, 42n).map(d => d.id)).toEqual(["reply", "copy", "copyId", "edit", "delete"])
 	})
 
 	it("a pending send offers copy only (no reply/edit — its uuid is not a server uuid yet)", () => {
@@ -97,24 +98,24 @@ describe("messageMenuActions", () => {
 		expect(messageMenuActions(message, 1n, "sending").map(d => d.id)).toEqual(["copy"])
 	})
 
-	it("an undecryptable own message offers delete only (no reply/copy/edit — no text)", () => {
+	it("an undecryptable own message offers copyId + delete only (no reply/copy/edit — no text)", () => {
 		const message = mockUndecryptableMessage({ senderId: 1 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["delete"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["copyId", "delete"])
 	})
 
-	it("an undecryptable message from someone else offers only block (you block a person, not content)", () => {
+	it("an undecryptable message from someone else offers copyId + block (you block a person, not content)", () => {
 		const message = mockUndecryptableMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["block"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["copyId", "block"])
 	})
 
-	it("with an unresolved currentUserId a confirmed decryptable message offers reply + copy but NEVER block (can't tell whose message it is)", () => {
+	it("with an unresolved currentUserId a confirmed decryptable message offers reply + copy + copyId but NEVER block (can't tell whose message it is)", () => {
 		const decryptable = mockMessage({ senderId: 1 })
 		const undecryptable = mockUndecryptableMessage({ senderId: 1 })
 
-		expect(messageMenuActions(decryptable, undefined).map(d => d.id)).toEqual(["reply", "copy"])
-		expect(messageMenuActions(undecryptable, undefined)).toEqual([])
+		expect(messageMenuActions(decryptable, undefined).map(d => d.id)).toEqual(["reply", "copy", "copyId"])
+		expect(messageMenuActions(undecryptable, undefined).map(d => d.id)).toEqual(["copyId"])
 	})
 
 	it("never offers block on your own message", () => {
@@ -127,7 +128,7 @@ describe("messageMenuActions", () => {
 		const message = mockMessage({ senderId: 5, senderEmail: "peer@x.io" })
 		const blocked = deriveBlockedUsers([{ userId: 5n, email: "peer@x.io" }])
 
-		expect(messageMenuActions(message, 1n, "confirmed", false, blocked).map(d => d.id)).toEqual(["reply", "copy"])
+		expect(messageMenuActions(message, 1n, "confirmed", false, blocked).map(d => d.id)).toEqual(["reply", "copy", "copyId"])
 	})
 
 	it("block matches a blocked sender by EMAIL even when the userId differs (email fallback)", () => {
@@ -158,6 +159,7 @@ describe("messageMenuActions", () => {
 		expect(descriptors).toEqual([
 			{ id: "reply", labelKey: "chatMessageActionReply", icon: CornerUpLeftIcon, run: "direct" },
 			{ id: "copy", labelKey: "chatMessageActionCopy", icon: CopyIcon, run: "direct" },
+			{ id: "copyId", labelKey: "chatMessageActionCopyId", icon: HashIcon, run: "direct" },
 			{ id: "edit", labelKey: "chatMessageActionEdit", icon: PencilIcon, run: "direct" },
 			{ id: "delete", labelKey: "chatMessageActionDelete", icon: Trash2Icon, run: "dialog", destructive: true }
 		])
