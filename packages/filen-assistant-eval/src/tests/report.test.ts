@@ -83,11 +83,11 @@ describe("regradeLanguage", () => {
 	})
 
 	it("re-detects a shipped write case graded as a reply, and leaves its pass alone", () => {
-		const id = "simple-create-note-en"
+		const id = "multiple-add-track-en"
 
 		expect(corpusCase(id).expectsText).toBeUndefined()
 
-		const record = stored({ id, preset: "shipped", answer: "I can't create notes here; open Notes to add one." })
+		const record = stored({ id, preset: "shipped", answer: "I can't add tracks to playlists here; open the playlist to add it." })
 		const stale: MainRecord = { ...record, grade: { ...record.grade, detectedLanguage: "de", languageOk: false } }
 		const regraded = regradeLanguage(stale)
 
@@ -201,9 +201,9 @@ describe("summarizeMain", () => {
 	it("keeps writes the shipped app does not run out of the shipped preset's pass rate", () => {
 		// In German to an English request: graded on its language, apart.
 		const write = stored({
-			id: "simple-create-note-en",
+			id: "multiple-add-track-en",
 			preset: "shipped",
-			answer: "Ich kann hier leider keine Notizen anlegen. Öffne dafür bitte die Notizen und lege sie dort selbst an."
+			answer: "Ich kann hier leider keine Titel zu Playlists hinzufügen. Öffne dafür bitte die Playlist und füge ihn dort selbst hinzu."
 		})
 		const read = stored({ id: "language-2-de", preset: "shipped", answer: GERMAN, calls: [call("read_note", { handle: "n2" })] })
 		const shipped = [write, read]

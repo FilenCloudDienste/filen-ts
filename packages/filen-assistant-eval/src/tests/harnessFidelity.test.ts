@@ -127,14 +127,14 @@ describe("graders", () => {
 	})
 
 	it("fails an unavailable write that was misrouted, and lists it apart", () => {
-		const move = EVAL_CASES.find(item => item.id === "multi-move-telekom-de")
+		const favorite = EVAL_CASES.find(item => item.id === "multiple-favorite-note-de")
 
-		if (move === undefined) {
+		if (favorite === undefined) {
 			throw new Error("no case")
 		}
 
-		const shipped = shippedCase(move)
-		const app = new FakeApp(move.context)
+		const shipped = shippedCase(favorite)
+		const app = new FakeApp(favorite.context)
 		const before = structuredClone(app.state)
 
 		expect(shipped.unavailableWrite).toBe(true)
@@ -142,7 +142,7 @@ describe("graders", () => {
 			false
 		)
 		expect(
-			gradeCase({ evalCase: shipped, transcript: transcript({ route: "organize", answer: "Das kann ich hier nicht." }), app, before })
+			gradeCase({ evalCase: shipped, transcript: transcript({ route: "notes", answer: "Das kann ich hier nicht." }), app, before })
 				.pass
 		).toBe(true)
 	})

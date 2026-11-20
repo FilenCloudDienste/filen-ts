@@ -29,7 +29,7 @@ import {
 	type LlamaModel
 } from "node-llama-cpp"
 import type { CallRecord, CallStatus, Timings, Transcript, TurnTimings } from "./agent"
-import type { EvalCase } from "./cases/types"
+import type { EvalCase, StateCheck } from "./cases/types"
 import type { FakeApp } from "./fakeApp"
 import { allHandles } from "./fixture"
 import { EVAL_NOW, EVAL_TIME_ZONE, PROMPT_CANARY } from "./prompts"
@@ -38,8 +38,8 @@ import { EVAL_NOW, EVAL_TIME_ZONE, PROMPT_CANARY } from "./prompts"
 // grounding, taint, quarantine, reply screen, history and context handling, over node-llama-cpp and the
 // fake app. agent.ts stays for the presets that switch mitigations off, which the shipping loop cannot.
 
-// "shipped": the tools the web app runs (its writes are not offered and the prompt says so). "loop": every
-// tool, as an app with all write adapters would run them.
+// "shipped": the tools the web app runs (the writes it has no card for are not offered and the prompt says so).
+// "loop": every tool, as an app with all write adapters would run them.
 export const LOOP_PRESETS = {
 	shipped: {
 		supports: (tool: AssistantTool) => isAssistantWebTool(tool.name)
@@ -485,16 +485,26 @@ export async function runLoopTurns({
 	}
 }
 
+// Whether the web app's tools can make a change the case expects: a note's pin, favorite or archive flag
+// (set_note_flags) and a playlist's tracks (add_tracks_to_playlist) are not among them.
+function webChanges(check: StateCheck): boolean {
+	if ("note" in check) {
+		return check.pinned === undefined && check.favorite === undefined && check.archived === undefined
+	}
+
+	return !("playlist" in check)
+}
+
 // A case as the web app can pass it: one that needs a write the app does not run asks for a plain reply
 // instead (the prompt tells the model the action is not available), with no change to the data, routed as the
-// request would be (`unavailableWrite`; the report lists these apart from the pass rate). Reads and drafts
-// are graded as written.
+// request would be (`unavailableWrite`; the report lists these apart from the pass rate). Reads, drafts and
+// the writes the app runs are graded as written.
 export function shippedCase(evalCase: EvalCase): EvalCase {
 	const tools = (evalCase.calls ?? []).flatMap(option => ("anyOf" in option ? option.anyOf.map(call => call.tool) : [option.tool]))
-	const writesState = (evalCase.state ?? []).some(check => !("screen" in check) && !("playing" in check) && !("draft" in check))
+	const unreachableState = (evalCase.state ?? []).some(check => !webChanges(check))
 	const unsupported = tools.some(tool => !(ASSISTANT_WEB_TOOLS as readonly string[]).includes(tool))
 
-	if (!unsupported && !writesState) {
+	if (!unsupported && !unreachableState) {
 		return evalCase
 	}
 
