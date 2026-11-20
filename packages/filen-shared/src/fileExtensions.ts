@@ -1,7 +1,7 @@
 // Lowercase, dot-less source-code extensions that route a preview to a syntax-highlighted "code"
 // viewer rather than plain text/markdown — the verified intersection of both apps' independently
 // hand-maintained lists (mobile's previewType.ts "code" switch-arm minus {md, markdown, log}, which
-// web's own preview.logic.ts list already equals byte-for-byte). Each app composes its own superset
+// web's own preview.logic.ts list already equals byte-for-byte), plus AutoHotkey's ahk. Each app composes its own superset
 // on top for its own semantics: mobile bundles {md, markdown, log} back in (its single "code" preview
 // category has no separate markdown/text split), web's icon classifier bundles {md, markdown, log} in
 // too (its file-type ICON reads as code even where its PREVIEW category splits markdown/text out).
@@ -58,7 +58,8 @@ export const CODE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
 	"bat",
 	"ps",
 	"protobuf",
-	"proto"
+	"proto",
+	"ahk"
 ])
 
 // Index of the dot that starts `name`'s extension, or -1 when it has none: a leading dot (a dotfile) or

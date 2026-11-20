@@ -60,7 +60,6 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("rs", stubSets)).toBe("code")
 		expect(fileIconKey("md", stubSets)).toBe("code")
 		expect(fileIconKey("log", stubSets)).toBe("code")
-		// .ahk is settled as code for the icon classifier only — see fileIcon.ts's own comment.
 		expect(fileIconKey("ahk", stubSets)).toBe("code")
 		expect(fileIconKey("exe", stubSets)).toBe("exe")
 		expect(fileIconKey("apk", stubSets)).toBe("android")

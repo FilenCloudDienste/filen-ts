@@ -671,8 +671,8 @@ describe("runAssistantTurn", () => {
 	it("pins the longest message the web app's tools leave room for", () => {
 		const web = (tool: AssistantTool) => isAssistantWebTool(tool.name)
 
-		expect(messageFitsContext("a".repeat(26_070), 8192, web)).toBe(true)
-		expect(messageFitsContext("a".repeat(26_071), 8192, web)).toBe(false)
+		expect(messageFitsContext("a".repeat(25_050), 8192, web)).toBe(true)
+		expect(messageFitsContext("a".repeat(25_051), 8192, web)).toBe(false)
 	})
 
 	it("names the tools only when the prompt shows more than the request may call", async () => {

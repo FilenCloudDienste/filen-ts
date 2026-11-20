@@ -71,6 +71,8 @@ export type LadderReason =
 	| "audio-track-needs-remux"
 	| "subtitle-needs-remux"
 	| "subtitle-image-unsupported"
+	// An embedded text track was asked for but no remux rung plays the file: it plays direct, without that track.
+	| "subtitle-embedded-unavailable"
 	| "no-media-source"
 	| "remux-video-unsupported"
 	| "remux-decode-unsupported"
@@ -331,7 +333,21 @@ export function isAudioDecodable(codec: string): boolean {
 }
 
 // Pure playback path decision: direct (service worker range), remux to fMP4 over MSE, remux with audio transcode, video only, or unsupported.
+// An embedded text track never costs a file its picture or sound: when only the remux could show it and no remux
+// rung plays the file whole, the file plays direct without it (reason "subtitle-embedded-unavailable").
 export function decidePlayback(probe: LadderProbe, selection: LadderSelection, caps: PlaybackCapabilities): LadderDecision {
+	const decision = decideRung(probe, selection, caps)
+
+	if (selection.subtitle !== "embedded-text" || (decision.path !== "unsupported" && decision.path !== "video-only")) {
+		return decision
+	}
+
+	const without = decideRung(probe, { ...selection, subtitle: "none" }, caps)
+
+	return without.path === "direct" ? { ...without, reasons: [...without.reasons, "subtitle-embedded-unavailable"] } : decision
+}
+
+function decideRung(probe: LadderProbe, selection: LadderSelection, caps: PlaybackCapabilities): LadderDecision {
 	const video = probe.video
 
 	if (video === null) {

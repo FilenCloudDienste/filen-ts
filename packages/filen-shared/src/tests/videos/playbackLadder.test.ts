@@ -234,6 +234,26 @@ describe("rung A: direct", () => {
 		})
 	})
 
+	it("plays a file direct without its embedded text track when no remux rung plays it whole", () => {
+		const mime = mp4("avc1.640028", "mp4a.40.2")
+		const noMse = decidePlayback(probe("mp4", H264, AAC), sel(0, "embedded-text"), caps({ playable: [mime], mediaSource: false }))
+
+		expect(noMse).toMatchObject({ path: "direct", reasons: ["subtitle-embedded-unavailable"], audio: { mode: "native" } })
+
+		// The remux would drop the sound (no AC-3 copy, no encoder): direct keeps it.
+		const ac3 = mp4("avc1.640028", "ac-3")
+		const silent = decidePlayback(
+			probe("mp4", H264, AC3),
+			sel(0, "embedded-text"),
+			caps({ playable: [ac3], file: { [ac3]: yes }, mse: [mp4("avc1.640028")] })
+		)
+
+		expect(silent).toMatchObject({ path: "direct", reasons: ["subtitle-embedded-unavailable"] })
+
+		// Nothing plays it direct either: the decision stands.
+		expect(decidePlayback(probe("mp4", H264, AAC), sel(0, "embedded-text"), caps({ mediaSource: false })).path).toBe("unsupported")
+	})
+
 	it("flags an image subtitle without changing the path", () => {
 		const decision = decidePlayback(
 			probe("mp4", H264, AAC),

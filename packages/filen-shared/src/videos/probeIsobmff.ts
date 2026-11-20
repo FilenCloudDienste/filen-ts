@@ -90,7 +90,7 @@ interface Walk {
 	// The moov walk stopped early: at the tier's read budget (an incomplete track list) or at a broken
 	// box (every track before it stands, if there were any).
 	cut: "budget" | "malformed" | null
-	// Locate the picture track's sample tables too (walkContainer's `keyframes`).
+	// Locate the picture and subtitle tracks' sample tables too (walkContainer's `keyframes`).
 	keyframes: boolean
 }
 
@@ -689,7 +689,12 @@ async function walkTrak(walk: Walk, trak: Box): Promise<ParsedTrack | null> {
 					state.handler = ascii(await payload(walk, child, 12), 8, 12)
 				} else if (child.type === "minf") {
 					// hdlr precedes minf, so only a picture track pays for locating its tables and reading its frame duration.
-					state.entry = await firstSampleEntry(walk, child, walk.keyframes && state.handler === "vide", state.handler === "vide")
+					state.entry = await firstSampleEntry(
+						walk,
+						child,
+						walk.keyframes && (state.handler === "vide" || SUBTITLE_HANDLERS.has(state.handler)),
+						state.handler === "vide"
+					)
 				}
 			})
 
@@ -732,7 +737,8 @@ async function walkTrak(walk: Walk, trak: Box): Promise<ParsedTrack | null> {
 				def: header.enabled,
 				forced: false,
 				hi: false
-			}
+			},
+			...(entry.tables === null ? {} : { tables: { ...entry.tables, timescale: state.timescale } })
 		}
 	}
 

@@ -154,7 +154,7 @@ export interface ByteRange {
 	end: number
 }
 
-// The sample tables of an MP4 picture track, located but not read.
+// The sample tables of an MP4 picture or text track, located but not read.
 export interface SampleTables {
 	// mdhd's ticks per second, which the tables count in.
 	timescale: number
@@ -192,12 +192,14 @@ export type ParsedTrack =
 	// `config`: the decoder configuration no browser decoder takes from elsewhere (ALAC's magic cookie, the
 	// WAVEFORMATEX of an AVI or ASF stream); never part of a stored probe.
 	| { kind: "audio"; enabled: boolean; audio: ProbeAudio; config?: Uint8Array | null }
-	// `frames`: how a Matroska track's frames are compressed (zlib = algorithm 0, header stripping = 3).
+	// `frames`: how a Matroska track's frames are compressed (zlib = algorithm 0, header stripping = 3). `tables`: an
+	// MP4 text track's sample tables, located only by a walk asked for keyframes.
 	| {
 			kind: "subtitle"
 			enabled: boolean
 			sub: ProbeSubtitle
 			frames?: { algorithm: number; settings: Uint8Array } | "unsupported" | null
+			tables?: SampleTables
 	  }
 
 // A container walker's result, before a tier's record is cut from it.

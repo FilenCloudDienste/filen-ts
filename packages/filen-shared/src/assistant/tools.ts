@@ -938,9 +938,9 @@ export function assistantToolByName(name: string): AssistantTool | undefined {
 	return ASSISTANT_TOOLS.find(tool => tool.name === name)
 }
 
-// The tools the web app runs: reads, navigation and chat drafts. Its writes come with confirmation cards
-// later; until then they are not offered, and the prompt says they are not available. Kept here so the
-// eval measures what the web app ships.
+// The tools the web app runs: reads, navigation, chat drafts and the drive and note writes its confirmation cards
+// spell out. Pinning, favoriting or archiving a note and adding to a playlist have no card yet, so they are not
+// offered and the prompt says they are not available. Kept here so the eval measures what the web app ships.
 export const ASSISTANT_WEB_TOOLS = [
 	"get_context",
 	"search_items",
@@ -953,9 +953,16 @@ export const ASSISTANT_WEB_TOOLS = [
 	"get_sharing",
 	"read_text_file",
 	"reveal_item",
+	"set_favorite",
+	"create_directory",
+	"rename_item",
+	"move_items",
+	"copy_items",
+	"trash_items",
 	"list_notes",
 	"read_note",
 	"open_note",
+	"create_note",
 	"list_chats",
 	"read_chat",
 	"open_chat",

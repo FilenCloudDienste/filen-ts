@@ -37,7 +37,7 @@ function rows(key: FileIconKey, extensions: readonly string[]): (readonly [strin
 }
 
 // Every non-media, non-code extension plus the extensions this ICON classifier treats as code even
-// where an app's own PREVIEW category splits them out (md/markdown/log/ahk — none of which are in the
+// where an app's own PREVIEW category splits them out (md/markdown/log — none of which are in the
 // shared preview set; see CODE_FILE_EXTENSIONS' own comment). Groups are disjoint, so a single lookup
 // replaces an ordered chain.
 const ICON_KEY_BY_EXTENSION: ReadonlyMap<string, FileIconKey> = new Map<string, FileIconKey>([
@@ -133,8 +133,7 @@ const ICON_KEY_BY_EXTENSION: ReadonlyMap<string, FileIconKey> = new Map<string, 
 	...rows("iso", ["img", "vhdx", "vmdk"]),
 	["md", "code"],
 	["markdown", "code"],
-	["log", "code"],
-	["ahk", "code"]
+	["log", "code"]
 ])
 
 // Extensions only a read of the file gives a meaning (fileKind.ts): their glyph once the read found that meaning, the

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 import { CODE_FILE_EXTENSIONS, extensionOf, extensionStart, fileStem } from "@filen/shared"
 
 describe("CODE_FILE_EXTENSIONS", () => {
-	it("is the verified 53-entry intersection, lowercase and dot-less", () => {
-		expect(CODE_FILE_EXTENSIONS.size).toBe(53)
+	it("is the verified 54-entry set, lowercase and dot-less", () => {
+		expect(CODE_FILE_EXTENSIONS.size).toBe(54)
 
 		for (const ext of CODE_FILE_EXTENSIONS) {
 			expect(ext).toBe(ext.toLowerCase())
@@ -25,8 +25,8 @@ describe("CODE_FILE_EXTENSIONS", () => {
 		expect(CODE_FILE_EXTENSIONS.has("log")).toBe(false)
 	})
 
-	it("excludes ahk — left to the icon classifier batch to decide", () => {
-		expect(CODE_FILE_EXTENSIONS.has("ahk")).toBe(false)
+	it("includes ahk, so AutoHotkey scripts open as code on web and mobile", () => {
+		expect(CODE_FILE_EXTENSIONS.has("ahk")).toBe(true)
 	})
 })
 
