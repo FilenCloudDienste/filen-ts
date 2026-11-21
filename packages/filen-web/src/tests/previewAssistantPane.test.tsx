@@ -246,7 +246,7 @@ describe("the assistant in a preview", () => {
 		expect(document.querySelectorAll("#assistant-panel")).toHaveLength(1)
 	})
 
-	it.each<DriveVariant>(["recents", "favorites", "trash", "links", "sharedIn", "sharedOut"])(
+	it.each<DriveVariant>(["recents", "favorites", "links", "sharedIn", "sharedOut"])(
 		"shows the panel in a %s preview too",
 		async variant => {
 			useAssistantStore.setState({ panelOpen: true })
@@ -258,6 +258,15 @@ describe("the assistant in a preview", () => {
 			expect(useAssistantStore.getState().previewHosted).toBe(true)
 		}
 	)
+
+	it("offers nothing in a trash preview, which leaves the panel to the shell", async () => {
+		useAssistantStore.setState({ panelOpen: true })
+		renderPreview("trash")
+		await screen.findByRole("button", { name: "cell" })
+
+		expect(within(previewDialog()).queryByRole("button", { name: "Assistant" })).toBeNull()
+		expect(useAssistantStore.getState().previewHosted).toBe(false)
+	})
 
 	it("offers nothing for a chat's or a note's linked file, which leaves the panel to the shell", async () => {
 		const uuid = "44444444-4444-4444-4444-444444444444"

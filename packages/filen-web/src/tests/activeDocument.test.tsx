@@ -157,7 +157,7 @@ describe("the preview's publishing scope", () => {
 	}
 
 	it("offers every signed-in preview's file: the drive, Recents, Favorites and both shared screens", () => {
-		for (const variant of ["drive", "recents", "favorites", "sharedIn", "sharedOut"] as const) {
+		for (const variant of ["drive", "recents", "favorites", "links", "sharedIn", "sharedOut"] as const) {
 			expect(previewDocumentItem(item, variant), variant).toBe(item)
 		}
 	})
@@ -173,14 +173,16 @@ describe("the preview's publishing scope", () => {
 		expect(getActiveDocument()?.item).toBe(item)
 	})
 
-	it("publishes nothing for a chat's linked file, outside any overlay, or for an archive's entry", async () => {
-		expect(previewDocumentItem(item, "links")).toBeNull()
+	it("publishes nothing for a chat's linked file, in the trash, outside any overlay, or for an archive's entry", async () => {
+		const embedded = mockFileItem({ uuid: "dddd-d-d-d", parent: "dddd-d-d-d" })
+
+		expect(previewDocumentItem(embedded, "links")).toBeNull()
 		expect(previewDocumentItem(item, "trash")).toBeNull()
 		renderHook(
 			() => {
 				usePublishPreviewDocument(publication(1))
 			},
-			{ wrapper: scoped(previewDocumentItem(item, "links")) }
+			{ wrapper: scoped(previewDocumentItem(embedded, "links")) }
 		)
 		renderHook(() => {
 			usePublishPreviewDocument(publication(1))
