@@ -89,19 +89,13 @@ export const ASSISTANT_CLOSING_NUDGE = "(No more tools are available in this req
 
 // The router's input: the user's message, and for a follow-up the user's earlier message, after it, so a
 // first message reads exactly as the eval measured it. A long message (a pasted text) is routed by its start
-// and its end, where people put the request: the router's prompt then always fits its share of the context.
+// and its end, where people put the request: the router's prompt then always fits its share of the context
+// (ROUTER_CONTEXT_TOKENS in loop.ts). The router reads shorter edges than the extraction, which keeps that
+// share small; the eval routed long messages as well by these edges as by a larger share at the extraction's.
 const EARLIER_MAX_CHARS = 240
 const MESSAGE_EDGE_CHARS = 300
 
-// How the router's prompt keeps fitting as its groups grow: "context" gives the router a larger share of the
-// engine's context (ROUTER_CONTEXT_TOKENS in loop.ts), "edges" routes a long message by shorter edges
-// (ROUTER_EDGE_CHARS) in the old share. The extraction reads MESSAGE_EDGE_CHARS edges either way. The eval
-// measures both; the other one goes once it has.
-export type AssistantRouterRoom = "context" | "edges"
-
-export const ROUTER_ROOM = "context" as AssistantRouterRoom
-
-export const ROUTER_EDGE_CHARS = ROUTER_ROOM === "edges" ? 200 : MESSAGE_EDGE_CHARS
+export const ROUTER_EDGE_CHARS = 200
 
 // A message's start and end only, when it is long; also what a content extraction reads as the request.
 export function messageEdges(message: string, edgeChars = MESSAGE_EDGE_CHARS): string {
@@ -110,17 +104,8 @@ export function messageEdges(message: string, edgeChars = MESSAGE_EDGE_CHARS): s
 	return chars.length > edgeChars * 2 ? `${chars.slice(0, edgeChars).join("")} … ${chars.slice(-edgeChars).join("")}` : message
 }
 
-// `edgeChars` only for a test measuring the other ROUTER_ROOM.
-export function routerRequest({
-	message,
-	earlier,
-	edgeChars = ROUTER_EDGE_CHARS
-}: {
-	message: string
-	earlier?: string | undefined
-	edgeChars?: number
-}): string {
-	const routed = messageEdges(message, edgeChars)
+export function routerRequest({ message, earlier }: { message: string; earlier?: string | undefined }): string {
+	const routed = messageEdges(message, ROUTER_EDGE_CHARS)
 
 	if (earlier === undefined) {
 		return routed

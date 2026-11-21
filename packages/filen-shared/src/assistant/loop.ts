@@ -11,7 +11,6 @@ import {
 	assistantUserPrompt,
 	messageEdges,
 	ROUTER_GRAMMAR,
-	ROUTER_ROOM,
 	ROUTER_SYSTEM_PROMPT,
 	routerRequest
 } from "./prompts"
@@ -434,9 +433,9 @@ const ACTING_ROUTES: ReadonlySet<AssistantRoute> = new Set(["audio", "navigation
 
 // What the router and the content extraction may fill of an engine's context besides the main loop's
 // `contextTokens`. An engine that keeps the three in one cache sizes it to the sum: when they overflow it,
-// the engine clears idle slots, and the router's cached system prompt goes first. The router's share depends
-// on ROUTER_ROOM (prompts.ts): 256 more tokens (about 8 MiB of cache) or shorter message edges.
-export const ROUTER_CONTEXT_TOKENS = ROUTER_ROOM === "context" ? 2304 : 2048
+// the engine clears idle slots, and the router's cached system prompt goes first. The router reads a long
+// message by ROUTER_EDGE_CHARS edges (prompts.ts) to stay within its share.
+export const ROUTER_CONTEXT_TOKENS = 2048
 export const QUARANTINE_CONTEXT_TOKENS = 2048
 
 // Tool-call syntax a model wrote as text instead of as a call: template markup, or a call to one of the

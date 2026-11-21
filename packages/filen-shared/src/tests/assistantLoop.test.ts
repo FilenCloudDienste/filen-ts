@@ -23,8 +23,6 @@ import {
 	QUARANTINE_CONTEXT_TOKENS,
 	QUARANTINE_MAX_TOKENS,
 	ROUTER_CONTEXT_TOKENS,
-	ROUTER_EDGE_CHARS,
-	ROUTER_ROOM,
 	routerRequest,
 	ROUTER_GRAMMAR,
 	ROUTER_SYSTEM_PROMPT,
@@ -1997,24 +1995,7 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 		expect(estimateTokens(ROUTER_SYSTEM_PROMPT) + estimateTokens(longest) + MESSAGE_OVERHEAD_TOKENS * 4 + 8).toBeLessThanOrEqual(
 			ROUTER_CONTEXT_TOKENS
 		)
-
-		// Either ROUTER_ROOM fits, so the eval can measure both: a larger share at full edges, or shorter edges in
-		// the old share.
-		for (const [edgeChars, share] of [
-			[300, 2304],
-			[200, 2048]
-		] as const) {
-			const worst = routerRequest({ message: "語".repeat(10_000), earlier: "語".repeat(10_000), edgeChars })
-
-			expect(estimateTokens(ROUTER_SYSTEM_PROMPT) + estimateTokens(worst) + MESSAGE_OVERHEAD_TOKENS * 4 + 8).toBeLessThanOrEqual(
-				share
-			)
-		}
-
-		expect([ROUTER_ROOM === "context" ? 2304 : 2048, ROUTER_ROOM === "context" ? 300 : 200]).toEqual([
-			ROUTER_CONTEXT_TOKENS,
-			ROUTER_EDGE_CHARS
-		])
+		expect(ROUTER_CONTEXT_TOKENS).toBe(2048)
 	})
 
 	it("renders today's date in the user's turn and keeps the system prompt the same on every turn", async () => {
