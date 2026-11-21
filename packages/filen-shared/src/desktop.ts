@@ -235,6 +235,9 @@ export interface DesktopAssistantInspection {
 	complete: boolean
 }
 
+// One chunk of a shard imported from the page's own copy: more to come, the shard verified, or already there.
+export type DesktopAssistantImport = "more" | "verified" | "present"
+
 export interface DesktopAssistantLoaded {
 	specialTokens: string[]
 	// The llama.cpp backend that loaded the model ("metal", "cuda", "vulkan" or "cpu").
@@ -272,6 +275,16 @@ export interface DesktopAssistant {
 	// Resumable; settles once every shard is on disk and verified.
 	download(model: DesktopAssistantModel, baseUrl: string): Promise<DesktopAssistantResult<null>>
 	cancelDownload(): void
+	// The page's verified copy of a shard, from `offset`, in order: main writes and hashes it, and keeps it only once it
+	// matches the pinned manifest (`last`: the shard's final chunk). Offset 0 starts the shard over, or answers
+	// "present" when the engine has it verified already.
+	importChunk(
+		model: DesktopAssistantModel,
+		file: string,
+		offset: number,
+		bytes: Uint8Array,
+		last: boolean
+	): Promise<DesktopAssistantResult<DesktopAssistantImport>>
 	load(model: DesktopAssistantModel, options: DesktopAssistantLoadOptions): Promise<DesktopAssistantResult<DesktopAssistantLoaded>>
 	// `updates`: stream text, prompt progress and tool calls as events of this id.
 	generate(id: number, request: AssistantGenerateRequest, updates: boolean): Promise<DesktopAssistantResult<AssistantGenerateResult>>

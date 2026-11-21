@@ -1,23 +1,10 @@
 import { createHash } from "node:crypto"
-import {
-	createReadStream,
-	closeSync,
-	fstatSync,
-	fsyncSync,
-	ftruncateSync,
-	openSync,
-	readSync,
-	renameSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-	writeSync
-} from "node:fs"
+import { createReadStream, closeSync, fstatSync, fsyncSync, ftruncateSync, openSync, readSync, rmSync, statSync, writeSync } from "node:fs"
 import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import type { ShardFile, ShardStore } from "@filen/shared/dom/assistantModel/download"
 import type { AssistantModelFile, AssistantModelFiles } from "@filen/shared/dom/assistantModel/manifest"
-import { checkpointName, readVerified, VERIFIED_FILE } from "./modelDir.ts"
+import { checkpointName, readVerified, replaceVerified } from "./modelDir.ts"
 
 // The shared download's store over plain files in the engine's process (synchronous calls, as on OPFS sync access
 // handles; the process does nothing else meanwhile).
@@ -99,14 +86,9 @@ export interface EngineShardStore extends ShardStore {
 	discard(shard: AssistantModelFile): void
 }
 
-// The record is replaced whole (written beside it, then renamed over it), so it is never torn.
 function writeVerified(dir: string, verified: ReadonlyMap<string, string>): void {
-	const target = path.join(dir, VERIFIED_FILE)
-	const staged = `${target}.tmp`
-
 	try {
-		writeFileSync(staged, JSON.stringify(Object.fromEntries(verified)), { mode: 0o600 })
-		renameSync(staged, target)
+		replaceVerified(dir, verified)
 	} catch (error) {
 		throw writeError(error)
 	}

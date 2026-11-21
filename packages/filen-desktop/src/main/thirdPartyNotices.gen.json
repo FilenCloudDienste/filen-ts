@@ -113,234 +113,162 @@
 			"version": "0.5.10",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Hugging Face"
-			],
+			"copyright": ["Copyright (c) 2023 Hugging Face"],
 			"repository": "https://github.com/huggingface/huggingface.js.git",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@kwsites/file-exists",
 			"version": "1.1.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2015 Steve King"
-			],
+			"copyright": ["Copyright (c) 2015 Steve King"],
 			"repository": "git@github.com:kwsites/file-exists.git",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "@kwsites/promise-deferred",
 			"version": "1.1.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2018 kwsites"
-			],
+			"copyright": ["Copyright (c) 2018 kwsites"],
 			"repository": "git://github.com/kwsites/promise-deferred.git",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-asym-key",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Peculiar Ventures, LLC"
-			],
+			"copyright": ["Copyright (c) 2023 Peculiar Ventures, LLC"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-cms",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-csr",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-ecc",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-pfx",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-pkcs8",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-pkcs9",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-rsa",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-schema",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-x509",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-x509-attr",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020"
-			],
+			"copyright": ["Copyright (c) 2020"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/asn1-x509-post-quantum",
 			"version": "2.11.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Peculiar Ventures, LLC"
-			],
+			"copyright": ["Copyright (c) 2023 Peculiar Ventures, LLC"],
 			"repository": "https://github.com/PeculiarVentures/asn1-schema",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/utils",
 			"version": "2.0.3",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2017-2026 Peculiar Ventures, LLC"
-			],
+			"copyright": ["Copyright (c) 2017-2026 Peculiar Ventures, LLC"],
 			"repository": "https://github.com/PeculiarVentures/pvtsutils",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@peculiar/x509",
 			"version": "2.2.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Peculiar Ventures. All rights reserved."
-			],
+			"copyright": ["Copyright (c) Peculiar Ventures. All rights reserved."],
 			"repository": "https://github.com/PeculiarVentures/x509",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "@simple-git/args-pathspec",
 			"version": "1.0.4",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2025 Steve King"
-			],
+			"copyright": ["Copyright (c) 2025 Steve King"],
 			"repository": "https://github.com/steveukx/git-js",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "@simple-git/argv-parser",
@@ -356,145 +284,99 @@
 			"version": "2.2.4",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2020 v 1 r t l"
-			],
+			"copyright": ["Copyright (c) 2020 v 1 r t l"],
 			"repository": "https://github.com/tinyhttp/tinyhttp",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "ansi-escapes",
 			"version": "6.2.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/ansi-escapes",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "ansi-styles",
 			"version": "6.2.3",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "chalk/ansi-styles",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "async-retry",
 			"version": "1.3.3",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2021 Vercel, Inc."
-			],
+			"copyright": ["Copyright (c) 2021 Vercel, Inc."],
 			"repository": "vercel/async-retry",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "bazil.org/fuse",
 			"version": "v0.0.0-20230120002735-62a210ff1fd5",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013-2019 Tommi Virtanen.",
-				"Copyright (c) 2009, 2011, 2012 The Go Authors."
-			],
+			"copyright": ["Copyright (c) 2013-2019 Tommi Virtanen.", "Copyright (c) 2009, 2011, 2012 The Go Authors."],
 			"repository": "https://pkg.go.dev/bazil.org/fuse@v0.0.0-20230120002735-62a210ff1fd5",
-			"texts": [
-				9
-			]
+			"texts": [9]
 		},
 		{
 			"name": "bitflags",
 			"version": "2.13.2",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) 2014 The Rust Project Developers"
-			],
+			"copyright": ["Copyright (c) 2014 The Rust Project Developers"],
 			"repository": "https://github.com/bitflags/bitflags",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "builder-util-runtime",
 			"version": "9.7.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2015 Loopline Systems"
-			],
+			"copyright": ["Copyright (c) 2015 Loopline Systems"],
 			"repository": "https://github.com/electron-userland/electron-builder",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "chmodrp",
 			"version": "1.0.2",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Leon Si <contact@leonzalion.com> (https://leonzalion.com)"
-			],
+			"copyright": ["Copyright (c) Leon Si <contact@leonzalion.com> (https://leonzalion.com)"],
 			"repository": "https://github.com/leonzalion/chmodrp",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "Chromium",
 			"version": "156.0.8078.48",
 			"license": "BSD-3-Clause",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright 2015 The Chromium Authors"
-			],
+			"copyright": ["Copyright 2015 The Chromium Authors"],
 			"repository": "https://source.chromium.org/chromium",
-			"texts": [
-				4,
-				41
-			]
+			"texts": [4, 41]
 		},
 		{
 			"name": "ci-info",
 			"version": "4.4.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2016 Thomas Watson Steen"
-			],
+			"copyright": ["Copyright (c) 2016 Thomas Watson Steen"],
 			"repository": "github:watson/ci-info",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "cli-spinners",
 			"version": "3.4.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/cli-spinners",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "cloud.google.com/go/auth",
@@ -503,9 +385,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/cloud.google.com/go/auth@v0.20.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "cloud.google.com/go/auth/oauth2adapt",
@@ -514,9 +394,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/cloud.google.com/go/auth/oauth2adapt@v0.2.8",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "cloud.google.com/go/compute/metadata",
@@ -525,129 +403,88 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/cloud.google.com/go/compute/metadata@v0.9.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "Electron",
 			"version": "45.0.0",
 			"license": "MIT",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright (c) Electron contributors",
-				"Copyright (c) 2013-2020 GitHub Inc."
-			],
+			"copyright": ["Copyright (c) Electron contributors", "Copyright (c) 2013-2020 GitHub Inc."],
 			"repository": "https://github.com/electron/electron",
-			"texts": [
-				59,
-				41
-			]
+			"texts": [59, 41]
 		},
 		{
 			"name": "electron-updater",
 			"version": "6.8.11",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2015 Loopline Systems"
-			],
+			"copyright": ["Copyright (c) 2015 Loopline Systems"],
 			"repository": "https://github.com/electron-userland/electron-builder",
-			"texts": [
-				53,
-				80
-			]
+			"texts": [53, 80]
 		},
 		{
 			"name": "env-var",
 			"version": "7.5.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2016, 2024 Evan Shortiss"
-			],
+			"copyright": ["Copyright (c) 2016, 2024 Evan Shortiss"],
 			"repository": "https://github.com/evanshortiss/env-var",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "filename-reserved-regex",
 			"version": "3.0.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/filename-reserved-regex",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "filenamify",
 			"version": "6.0.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/filenamify",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "fs-extra",
 			"version": "10.1.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2011-2017 JP Richardson"
-			],
+			"copyright": ["Copyright (c) 2011-2017 JP Richardson"],
 			"repository": "https://github.com/jprichardson/node-fs-extra",
-			"texts": [
-				3
-			]
+			"texts": [3]
 		},
 		{
 			"name": "github.com/a1ex3/zstd-seekable-format-go/pkg",
 			"version": "v0.10.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2022 Alexey Ivanov"
-			],
+			"copyright": ["Copyright (c) 2022 Alexey Ivanov"],
 			"repository": "https://pkg.go.dev/github.com/a1ex3/zstd-seekable-format-go/pkg@v0.10.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/a8m/tree",
 			"version": "v0.0.0-20240104212747-2c8764a5f17e",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015-2017 Ariel Mashraki"
-			],
+			"copyright": ["Copyright (c) 2015-2017 Ariel Mashraki"],
 			"repository": "https://pkg.go.dev/github.com/a8m/tree@v0.0.0-20240104212747-2c8764a5f17e",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/aalpar/deheap",
 			"version": "v1.1.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2019-2026 Aaron H. Alpar"
-			],
+			"copyright": ["Copyright 2019-2026 Aaron H. Alpar"],
 			"repository": "https://pkg.go.dev/github.com/aalpar/deheap@v1.1.2",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/abbot/go-http-auth",
@@ -656,35 +493,25 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/abbot/go-http-auth@v0.4.0",
-			"texts": [
-				27
-			]
+			"texts": [27]
 		},
 		{
 			"name": "github.com/adrg/xdg",
 			"version": "v0.5.3",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Adrian-George Bostan <adrg@epistack.com>"
-			],
+			"copyright": ["Copyright (c) 2014 Adrian-George Bostan <adrg@epistack.com>"],
 			"repository": "https://pkg.go.dev/github.com/adrg/xdg@v0.5.3",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/anacrolix/dms",
 			"version": "v1.7.2",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012, Matt Joiner <anacrolix@gmail.com>."
-			],
+			"copyright": ["Copyright (c) 2012, Matt Joiner <anacrolix@gmail.com>."],
 			"repository": "https://pkg.go.dev/github.com/anacrolix/dms@v1.7.2",
-			"texts": [
-				16
-			]
+			"texts": [16]
 		},
 		{
 			"name": "github.com/anacrolix/generics",
@@ -693,9 +520,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/anacrolix/generics@v0.2.0",
-			"texts": [
-				54
-			]
+			"texts": [54]
 		},
 		{
 			"name": "github.com/anacrolix/log",
@@ -704,89 +529,61 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/anacrolix/log@v0.17.0",
-			"texts": [
-				54
-			]
+			"texts": [54]
 		},
 		{
 			"name": "github.com/anchore/go-lzo",
 			"version": "v0.1.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2025 Anchore, Inc"
-			],
+			"copyright": ["Copyright (c) 2025 Anchore, Inc"],
 			"repository": "https://pkg.go.dev/github.com/anchore/go-lzo@v0.1.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/andybalholm/brotli",
 			"version": "v1.2.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors."
-			],
+			"copyright": ["Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors."],
 			"repository": "https://pkg.go.dev/github.com/andybalholm/brotli@v1.2.0",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/andybalholm/cascadia",
 			"version": "v1.3.3",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2011 Andy Balholm. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2011 Andy Balholm. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/andybalholm/cascadia@v1.3.3",
-			"texts": [
-				68
-			]
+			"texts": [68]
 		},
 		{
 			"name": "github.com/appscode/go-querystring",
 			"version": "v0.0.0-20170504095604-0126cfb3f1dc",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Google. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2013 Google. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/appscode/go-querystring@v0.0.0-20170504095604-0126cfb3f1dc",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/atotto/clipboard",
 			"version": "v0.1.4",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Ato Araki. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2013 Ato Araki. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/atotto/clipboard@v0.1.4",
-			"texts": [
-				69
-			]
+			"texts": [69]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2",
 			"version": "v1.41.5",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.",
-				"Copyright 2014-2015 Stripe, Inc."
-			],
+			"copyright": ["Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.", "Copyright 2014-2015 Stripe, Inc."],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2@v1.41.5",
-			"texts": [
-				22,
-				6
-			]
+			"texts": [22, 6]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
@@ -795,9 +592,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream@v1.7.8",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/config",
@@ -806,9 +601,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config@v1.32.14",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/credentials",
@@ -817,9 +610,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/credentials@v1.19.14",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
@@ -828,9 +619,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/feature/ec2/imds@v1.18.21",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/feature/s3/manager",
@@ -839,9 +628,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/feature/s3/manager@v1.22.13",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
@@ -850,9 +637,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/internal/configsources@v1.4.21",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
@@ -861,9 +646,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@v2.7.21",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/internal/ini",
@@ -872,9 +655,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/internal/ini@v1.8.6",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/internal/v4a",
@@ -883,9 +664,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/internal/v4a@v1.4.22",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
@@ -894,9 +673,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding@v1.13.7",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/internal/checksum",
@@ -905,9 +682,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/internal/checksum@v1.9.13",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
@@ -916,9 +691,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/internal/presigned-url@v1.13.21",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/internal/s3shared",
@@ -927,9 +700,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/internal/s3shared@v1.19.21",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/s3",
@@ -938,9 +709,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/s3@v1.99.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/signin",
@@ -949,9 +718,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/signin@v1.0.9",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/sso",
@@ -960,9 +727,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/sso@v1.30.15",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
@@ -971,9 +736,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/ssooidc@v1.35.19",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/aws-sdk-go-v2/service/sts",
@@ -982,492 +745,340 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/sts@v1.41.10",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/aws/smithy-go",
 			"version": "v1.24.3",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."
-			],
+			"copyright": ["Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."],
 			"repository": "https://pkg.go.dev/github.com/aws/smithy-go@v1.24.3",
-			"texts": [
-				18
-			]
+			"texts": [18]
 		},
 		{
 			"name": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
 			"version": "v1.21.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azcore@v1.21.0",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "github.com/Azure/azure-sdk-for-go/sdk/azidentity",
 			"version": "v1.13.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity@v1.13.1",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "github.com/Azure/azure-sdk-for-go/sdk/internal",
 			"version": "v1.11.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/internal@v1.11.2",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob",
 			"version": "v1.6.4",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation. All rights reserved."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/storage/azblob@v1.6.4",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "github.com/Azure/azure-sdk-for-go/sdk/storage/azfile",
 			"version": "v1.5.4",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation. All rights reserved."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/storage/azfile@v1.5.4",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "github.com/Azure/go-ntlmssp",
 			"version": "v0.1.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Microsoft"
-			],
+			"copyright": ["Copyright (c) 2016 Microsoft"],
 			"repository": "https://pkg.go.dev/github.com/Azure/go-ntlmssp@v0.1.1",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/AzureAD/microsoft-authentication-library-for-go",
 			"version": "v1.6.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://pkg.go.dev/github.com/AzureAD/microsoft-authentication-library-for-go@v1.6.0",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "github.com/bahlo/generic-list-go",
 			"version": "v0.2.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2009 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/bahlo/generic-list-go@v0.2.0",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/beorn7/perks",
 			"version": "v1.0.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (C) 2013 Blake Mizerany"
-			],
+			"copyright": ["Copyright (C) 2013 Blake Mizerany"],
 			"repository": "https://pkg.go.dev/github.com/beorn7/perks@v1.0.1",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/bodgit/plumbing",
 			"version": "v1.3.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019, Matt Dainty"
-			],
+			"copyright": ["Copyright (c) 2019, Matt Dainty"],
 			"repository": "https://pkg.go.dev/github.com/bodgit/plumbing@v1.3.0",
-			"texts": [
-				31
-			]
+			"texts": [31]
 		},
 		{
 			"name": "github.com/bodgit/sevenzip",
 			"version": "v1.6.1",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020, Matt Dainty"
-			],
+			"copyright": ["Copyright (c) 2020, Matt Dainty"],
 			"repository": "https://pkg.go.dev/github.com/bodgit/sevenzip@v1.6.1",
-			"texts": [
-				31
-			]
+			"texts": [31]
 		},
 		{
 			"name": "github.com/bodgit/windows",
 			"version": "v1.0.1",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020, Matt Dainty"
-			],
+			"copyright": ["Copyright (c) 2020, Matt Dainty"],
 			"repository": "https://pkg.go.dev/github.com/bodgit/windows@v1.0.1",
-			"texts": [
-				31
-			]
+			"texts": [31]
 		},
 		{
 			"name": "github.com/boombuler/barcode",
 			"version": "v1.1.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Florian Sundermann"
-			],
+			"copyright": ["Copyright (c) 2014 Florian Sundermann"],
 			"repository": "https://pkg.go.dev/github.com/boombuler/barcode@v1.1.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/bradenaw/juniper",
 			"version": "v0.15.3",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2021 Braden Walker"
-			],
+			"copyright": ["Copyright (c) 2021 Braden Walker"],
 			"repository": "https://pkg.go.dev/github.com/bradenaw/juniper@v0.15.3",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/bradfitz/iter",
 			"version": "v0.0.0-20191230175014-e8f45d346db8",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2014 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/bradfitz/iter@v0.0.0-20191230175014-e8f45d346db8",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/buengese/sgzip",
 			"version": "v0.1.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Klaus Post"
-			],
+			"copyright": ["Copyright (c) 2014 Klaus Post"],
 			"repository": "https://pkg.go.dev/github.com/buengese/sgzip@v0.1.1",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/buger/jsonparser",
 			"version": "v1.1.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Leonid Bugaev"
-			],
+			"copyright": ["Copyright (c) 2016 Leonid Bugaev"],
 			"repository": "https://pkg.go.dev/github.com/buger/jsonparser@v1.1.2",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/calebcase/tmpfile",
 			"version": "v1.0.3",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2019 Caleb Case <calebcase@gmail.com>"
-			],
+			"copyright": ["Copyright 2019 Caleb Case <calebcase@gmail.com>"],
 			"repository": "https://pkg.go.dev/github.com/calebcase/tmpfile@v1.0.3",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/cespare/xxhash/v2",
 			"version": "v2.3.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Caleb Spare"
-			],
+			"copyright": ["Copyright (c) 2016 Caleb Spare"],
 			"repository": "https://pkg.go.dev/github.com/cespare/xxhash/v2@v2.3.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/chilts/sid",
 			"version": "v0.0.0-20190607042430-660e94789ec9",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017 Andrew Chilton <andychilton@gmail.com>"
-			],
+			"copyright": ["Copyright (c) 2017 Andrew Chilton <andychilton@gmail.com>"],
 			"repository": "https://pkg.go.dev/github.com/chilts/sid@v0.0.0-20190607042430-660e94789ec9",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/clipperhouse/uax29/v2",
 			"version": "v2.7.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020 Matt Sherman"
-			],
+			"copyright": ["Copyright (c) 2020 Matt Sherman"],
 			"repository": "https://pkg.go.dev/github.com/clipperhouse/uax29/v2@v2.7.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/cloudflare/circl",
 			"version": "v1.6.3",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Cloudflare. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2019 Cloudflare. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/cloudflare/circl@v1.6.3",
-			"texts": [
-				70
-			]
+			"texts": [70]
 		},
 		{
 			"name": "github.com/cloudinary/cloudinary-go/v2",
 			"version": "v2.15.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2021 Cloudinary"
-			],
+			"copyright": ["Copyright (c) 2021 Cloudinary"],
 			"repository": "https://pkg.go.dev/github.com/cloudinary/cloudinary-go/v2@v2.15.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/cloudsoda/go-smb2",
 			"version": "v0.0.0-20260701064823-d8c5600d73b8",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Hiroshi Ioka. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2016 Hiroshi Ioka. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/cloudsoda/go-smb2@v0.0.0-20260701064823-d8c5600d73b8",
-			"texts": [
-				68
-			]
+			"texts": [68]
 		},
 		{
 			"name": "github.com/cloudsoda/sddl",
 			"version": "v0.0.0-20250224235906-926454e91efc",
 			"license": "LGPL-3.0-only",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>"
-			],
+			"copyright": ["Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>"],
 			"repository": "https://pkg.go.dev/github.com/cloudsoda/sddl@v0.0.0-20250224235906-926454e91efc",
-			"texts": [
-				44
-			]
+			"texts": [44]
 		},
 		{
 			"name": "github.com/colinmarc/hdfs/v2",
 			"version": "v2.4.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Colin Marc (colinmarc@gmail.com)"
-			],
+			"copyright": ["Copyright (c) 2014 Colin Marc (colinmarc@gmail.com)"],
 			"repository": "https://pkg.go.dev/github.com/colinmarc/hdfs/v2@v2.4.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/coreos/go-semver",
 			"version": "v0.3.1",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2018 CoreOS, Inc"
-			],
+			"copyright": ["Copyright 2018 CoreOS, Inc"],
 			"repository": "https://pkg.go.dev/github.com/coreos/go-semver@v0.3.1",
-			"texts": [
-				22,
-				39
-			]
+			"texts": [22, 39]
 		},
 		{
 			"name": "github.com/coreos/go-systemd/v22",
 			"version": "v22.6.0",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2018 CoreOS, Inc"
-			],
+			"copyright": ["Copyright 2018 CoreOS, Inc"],
 			"repository": "https://pkg.go.dev/github.com/coreos/go-systemd/v22@v22.6.0",
-			"texts": [
-				28,
-				39
-			]
+			"texts": [28, 39]
 		},
 		{
 			"name": "github.com/cpuguy83/go-md2man/v2",
 			"version": "v2.0.7",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Brian Goff"
-			],
+			"copyright": ["Copyright (c) 2014 Brian Goff"],
 			"repository": "https://pkg.go.dev/github.com/cpuguy83/go-md2man/v2@v2.0.7",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/creasty/defaults",
 			"version": "v1.8.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017-present Yuki Iwanaga"
-			],
+			"copyright": ["Copyright (c) 2017-present Yuki Iwanaga"],
 			"repository": "https://pkg.go.dev/github.com/creasty/defaults@v1.8.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/cronokirby/saferith",
 			"version": "v0.33.1-0.20250226174546-1f11f94ce488",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2021 Lúcás Meier"
-			],
+			"copyright": ["Copyright (c) 2021 Lúcás Meier"],
 			"repository": "https://pkg.go.dev/github.com/cronokirby/saferith@v0.33.1-0.20250226174546-1f11f94ce488",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/davecgh/go-spew",
 			"version": "v1.1.2-0.20180830191138-d8f796af33cc",
 			"license": "ISC",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012-2016 Dave Collins <dave@davec.name>"
-			],
+			"copyright": ["Copyright (c) 2012-2016 Dave Collins <dave@davec.name>"],
 			"repository": "https://pkg.go.dev/github.com/davecgh/go-spew@v1.1.2-0.20180830191138-d8f796af33cc",
-			"texts": [
-				46
-			]
+			"texts": [46]
 		},
 		{
 			"name": "github.com/diskfs/go-diskfs",
 			"version": "v1.7.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017 Avi Deitcher"
-			],
+			"copyright": ["Copyright (c) 2017 Avi Deitcher"],
 			"repository": "https://pkg.go.dev/github.com/diskfs/go-diskfs@v1.7.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/dromara/dongle",
 			"version": "v1.0.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2023 gouguoyin"
-			],
+			"copyright": ["Copyright (c) 2023 gouguoyin"],
 			"repository": "https://pkg.go.dev/github.com/dromara/dongle@v1.0.1",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/dropbox/dropbox-sdk-go-unofficial/v6",
 			"version": "v6.0.5",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009-2016 Dropbox Inc., http://www.dropbox.com/"
-			],
+			"copyright": ["Copyright (c) 2009-2016 Dropbox Inc., http://www.dropbox.com/"],
 			"repository": "https://pkg.go.dev/github.com/dropbox/dropbox-sdk-go-unofficial/v6@v6.0.5",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/dsnet/compress",
 			"version": "v0.0.2-0.20230904184137-39efe44ab707",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright © 2015, Joe Tsai and The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright © 2015, Joe Tsai and The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/dsnet/compress@v0.0.2-0.20230904184137-39efe44ab707",
-			"texts": [
-				76
-			]
+			"texts": [76]
 		},
 		{
 			"name": "github.com/ebitengine/purego",
@@ -1476,74 +1087,52 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/ebitengine/purego@v0.10.0",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/emersion/go-message",
 			"version": "v0.18.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 emersion"
-			],
+			"copyright": ["Copyright (c) 2016 emersion"],
 			"repository": "https://pkg.go.dev/github.com/emersion/go-message@v0.18.2",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/emersion/go-vcard",
 			"version": "v0.0.0-20241024213814-c9703dde27ff",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017 emersion"
-			],
+			"copyright": ["Copyright (c) 2017 emersion"],
 			"repository": "https://pkg.go.dev/github.com/emersion/go-vcard@v0.0.0-20241024213814-c9703dde27ff",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/felixge/httpsnoop",
 			"version": "v1.0.4",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Felix Geisendörfer (felix@debuggable.com)"
-			],
+			"copyright": ["Copyright (c) 2016 Felix Geisendörfer (felix@debuggable.com)"],
 			"repository": "https://pkg.go.dev/github.com/felixge/httpsnoop@v1.0.4",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/FilenCloudDienste/filen-sdk-go",
 			"version": "v0.0.39",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (C) 2025 by Filen Cloud Dienste UG (haftungsbeschränkt)"
-			],
+			"copyright": ["Copyright (C) 2025 by Filen Cloud Dienste UG (haftungsbeschränkt)"],
 			"repository": "https://pkg.go.dev/github.com/FilenCloudDienste/filen-sdk-go@v0.0.39",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/Files-com/files-sdk-go/v3",
 			"version": "v3.3.82",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019- Action Verb, LLC (https://www.files.com)"
-			],
+			"copyright": ["Copyright (c) 2019- Action Verb, LLC (https://www.files.com)"],
 			"repository": "https://pkg.go.dev/github.com/Files-com/files-sdk-go/v3@v3.3.82",
-			"texts": [
-				78
-			]
+			"texts": [78]
 		},
 		{
 			"name": "github.com/flynn/noise",
@@ -1552,22 +1141,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/flynn/noise@v1.1.0",
-			"texts": [
-				43
-			]
+			"texts": [43]
 		},
 		{
 			"name": "github.com/gabriel-vasile/mimetype",
 			"version": "v1.4.13",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018 Gabriel Vasile"
-			],
+			"copyright": ["Copyright (c) 2018 Gabriel Vasile"],
 			"repository": "https://pkg.go.dev/github.com/gabriel-vasile/mimetype@v1.4.13",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/gdamore/encoding",
@@ -1576,9 +1159,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/gdamore/encoding@v1.0.1",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/gdamore/tcell/v2",
@@ -1587,48 +1168,34 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/gdamore/tcell/v2@v2.9.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/geoffgarside/ber",
 			"version": "v1.2.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2009 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/geoffgarside/ber@v1.2.0",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/go-chi/chi/v5",
 			"version": "v5.2.5",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015-present Peter Kieltyka (https://github.com/pkieltyka), Google Inc."
-			],
+			"copyright": ["Copyright (c) 2015-present Peter Kieltyka (https://github.com/pkieltyka), Google Inc."],
 			"repository": "https://pkg.go.dev/github.com/go-chi/chi/v5@v5.2.5",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/go-darwin/apfs",
 			"version": "v0.0.0-20211011131704-f84b94dbf348",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017, The go-darwin Authors."
-			],
+			"copyright": ["Copyright (c) 2017, The go-darwin Authors."],
 			"repository": "https://pkg.go.dev/github.com/go-darwin/apfs@v0.0.0-20211011131704-f84b94dbf348",
-			"texts": [
-				31
-			]
+			"texts": [31]
 		},
 		{
 			"name": "github.com/go-git/go-billy/v5",
@@ -1637,9 +1204,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/go-git/go-billy/v5@v5.9.0",
-			"texts": [
-				25
-			]
+			"texts": [25]
 		},
 		{
 			"name": "github.com/go-logr/logr",
@@ -1648,9 +1213,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/go-logr/logr@v1.4.3",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/go-logr/stdr",
@@ -1659,22 +1222,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/go-logr/stdr@v1.2.2",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/go-ole/go-ole",
 			"version": "v1.3.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright © 2013-2017 Yasuhiro Matsumoto, <mattn.jp@gmail.com>"
-			],
+			"copyright": ["Copyright © 2013-2017 Yasuhiro Matsumoto, <mattn.jp@gmail.com>"],
 			"repository": "https://pkg.go.dev/github.com/go-ole/go-ole@v1.3.0",
-			"texts": [
-				81
-			]
+			"texts": [81]
 		},
 		{
 			"name": "github.com/go-openapi/errors",
@@ -1683,9 +1240,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/go-openapi/errors@v0.22.6",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/go-openapi/strfmt",
@@ -1694,129 +1249,88 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/go-openapi/strfmt@v0.25.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/go-playground/locales",
 			"version": "v0.14.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Go Playground"
-			],
+			"copyright": ["Copyright (c) 2016 Go Playground"],
 			"repository": "https://pkg.go.dev/github.com/go-playground/locales@v0.14.1",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/go-playground/universal-translator",
 			"version": "v0.18.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Go Playground"
-			],
+			"copyright": ["Copyright (c) 2016 Go Playground"],
 			"repository": "https://pkg.go.dev/github.com/go-playground/universal-translator@v0.18.1",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/go-playground/validator/v10",
 			"version": "v10.30.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015 Dean Karn"
-			],
+			"copyright": ["Copyright (c) 2015 Dean Karn"],
 			"repository": "https://pkg.go.dev/github.com/go-playground/validator/v10@v10.30.1",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/go-resty/resty/v2",
 			"version": "v2.17.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015-2024 Jeevanandam M., https://myjeeva.com <jeeva@myjeeva.com>"
-			],
+			"copyright": ["Copyright (c) 2015-2024 Jeevanandam M., https://myjeeva.com <jeeva@myjeeva.com>"],
 			"repository": "https://pkg.go.dev/github.com/go-resty/resty/v2@v2.17.2",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/go-viper/mapstructure/v2",
 			"version": "v2.5.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Mitchell Hashimoto"
-			],
+			"copyright": ["Copyright (c) 2013 Mitchell Hashimoto"],
 			"repository": "https://pkg.go.dev/github.com/go-viper/mapstructure/v2@v2.5.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/gofrs/flock",
 			"version": "v0.13.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018-2025, The Gofrs",
-				"Copyright (c) 2015-2020, Tim Heckman"
-			],
+			"copyright": ["Copyright (c) 2018-2025, The Gofrs", "Copyright (c) 2015-2020, Tim Heckman"],
 			"repository": "https://pkg.go.dev/github.com/gofrs/flock@v0.13.0",
-			"texts": [
-				11
-			]
+			"texts": [11]
 		},
 		{
 			"name": "github.com/gogo/protobuf",
 			"version": "v1.3.2",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013, The GoGo Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2013, The GoGo Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/gogo/protobuf@v1.3.2",
-			"texts": [
-				67
-			]
+			"texts": [67]
 		},
 		{
 			"name": "github.com/golang-jwt/jwt/v4",
 			"version": "v4.5.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012 Dave Grijalva",
-				"Copyright (c) 2021 golang-jwt maintainers"
-			],
+			"copyright": ["Copyright (c) 2012 Dave Grijalva", "Copyright (c) 2021 golang-jwt maintainers"],
 			"repository": "https://pkg.go.dev/github.com/golang-jwt/jwt/v4@v4.5.2",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/golang-jwt/jwt/v5",
 			"version": "v5.3.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012 Dave Grijalva",
-				"Copyright (c) 2021 golang-jwt maintainers"
-			],
+			"copyright": ["Copyright (c) 2012 Dave Grijalva", "Copyright (c) 2021 golang-jwt maintainers"],
 			"repository": "https://pkg.go.dev/github.com/golang-jwt/jwt/v5@v5.3.1",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/google/btree",
@@ -1825,9 +1339,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/google/btree@v1.1.3",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/google/s2a-go",
@@ -1836,22 +1348,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/google/s2a-go@v0.1.9",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/google/uuid",
 			"version": "v1.6.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009,2014 Google Inc. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2009,2014 Google Inc. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/google/uuid@v1.6.0",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/googleapis/enterprise-certificate-proxy",
@@ -1860,48 +1366,34 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/googleapis/enterprise-certificate-proxy@v0.3.14",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/googleapis/gax-go/v2",
 			"version": "v2.21.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2016, Google Inc."
-			],
+			"copyright": ["Copyright 2016, Google Inc."],
 			"repository": "https://pkg.go.dev/github.com/googleapis/gax-go/v2@v2.21.0",
-			"texts": [
-				15
-			]
+			"texts": [15]
 		},
 		{
 			"name": "github.com/gorilla/schema",
 			"version": "v1.4.1",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2023 The Gorilla Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2023 The Gorilla Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/gorilla/schema@v1.4.1",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/hanwen/go-fuse/v2",
 			"version": "v2.9.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2010 the Go-FUSE Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2010 the Go-FUSE Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/hanwen/go-fuse/v2@v2.9.0",
-			"texts": [
-				57
-			]
+			"texts": [57]
 		},
 		{
 			"name": "github.com/hashicorp/errwrap",
@@ -1910,9 +1402,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/hashicorp/errwrap@v1.1.0",
-			"texts": [
-				56
-			]
+			"texts": [56]
 		},
 		{
 			"name": "github.com/hashicorp/go-cleanhttp",
@@ -1921,9 +1411,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/hashicorp/go-cleanhttp@v0.5.2",
-			"texts": [
-				55
-			]
+			"texts": [55]
 		},
 		{
 			"name": "github.com/hashicorp/go-multierror",
@@ -1932,48 +1420,34 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/hashicorp/go-multierror@v1.1.1",
-			"texts": [
-				56
-			]
+			"texts": [56]
 		},
 		{
 			"name": "github.com/hashicorp/go-retryablehttp",
 			"version": "v0.7.8",
 			"license": "MPL-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015 HashiCorp, Inc."
-			],
+			"copyright": ["Copyright (c) 2015 HashiCorp, Inc."],
 			"repository": "https://pkg.go.dev/github.com/hashicorp/go-retryablehttp@v0.7.8",
-			"texts": [
-				55
-			]
+			"texts": [55]
 		},
 		{
 			"name": "github.com/hashicorp/go-uuid",
 			"version": "v1.0.3",
 			"license": "MPL-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright © 2015-2022 HashiCorp, Inc."
-			],
+			"copyright": ["Copyright © 2015-2022 HashiCorp, Inc."],
 			"repository": "https://pkg.go.dev/github.com/hashicorp/go-uuid@v1.0.3",
-			"texts": [
-				55
-			]
+			"texts": [55]
 		},
 		{
 			"name": "github.com/hashicorp/golang-lru/v2",
 			"version": "v2.0.7",
 			"license": "MPL-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 HashiCorp, Inc."
-			],
+			"copyright": ["Copyright (c) 2014 HashiCorp, Inc."],
 			"repository": "https://pkg.go.dev/github.com/hashicorp/golang-lru/v2@v2.0.7",
-			"texts": [
-				55
-			]
+			"texts": [55]
 		},
 		{
 			"name": "github.com/IBM/go-sdk-core/v5",
@@ -1982,9 +1456,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/IBM/go-sdk-core/v5@v5.21.2",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/inconshreveable/mousetrap",
@@ -1993,22 +1465,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/inconshreveable/mousetrap@v1.1.0",
-			"texts": [
-				21
-			]
+			"texts": [21]
 		},
 		{
 			"name": "github.com/internxt/rclone-adapter",
 			"version": "v0.0.0-20260331173834-036f908d0160",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2025 StarHack https://github.com/StarHack/"
-			],
+			"copyright": ["Copyright (c) 2025 StarHack https://github.com/StarHack/"],
 			"repository": "https://pkg.go.dev/github.com/internxt/rclone-adapter@v0.0.0-20260331173834-036f908d0160",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/jcmturner/aescts/v2",
@@ -2017,9 +1483,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/jcmturner/aescts/v2@v2.0.0",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/jcmturner/dnsutils/v2",
@@ -2028,22 +1492,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/jcmturner/dnsutils/v2@v2.0.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/jcmturner/gofork",
 			"version": "v1.7.6",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2009 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/jcmturner/gofork@v1.7.6",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/jcmturner/goidentity/v6",
@@ -2052,9 +1510,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/jcmturner/goidentity/v6@v6.0.1",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/jcmturner/gokrb5/v8",
@@ -2063,9 +1519,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/jcmturner/gokrb5/v8@v8.4.4",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/jcmturner/rpc/v2",
@@ -2074,127 +1528,88 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/jcmturner/rpc/v2@v2.0.3",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/jlaffaye/ftp",
 			"version": "v0.2.1-0.20251026020404-6602e981a1bb",
 			"license": "ISC",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2011-2013, Julien Laffaye <jlaffaye@FreeBSD.org>"
-			],
+			"copyright": ["Copyright (c) 2011-2013, Julien Laffaye <jlaffaye@FreeBSD.org>"],
 			"repository": "https://pkg.go.dev/github.com/jlaffaye/ftp@v0.2.1-0.20251026020404-6602e981a1bb",
-			"texts": [
-				64
-			]
+			"texts": [64]
 		},
 		{
 			"name": "github.com/jtolio/noiseconn",
 			"version": "v0.0.0-20231127013910-f6d9ecbf1de7",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2022 JT Olio"
-			],
+			"copyright": ["Copyright (c) 2022 JT Olio"],
 			"repository": "https://pkg.go.dev/github.com/jtolio/noiseconn@v0.0.0-20231127013910-f6d9ecbf1de7",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/jzelinskie/whirlpool",
 			"version": "v0.0.0-20201016144138-0675e54bb004",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012, Jimmy Zelinskie"
-			],
+			"copyright": ["Copyright (c) 2012, Jimmy Zelinskie"],
 			"repository": "https://pkg.go.dev/github.com/jzelinskie/whirlpool@v0.0.0-20201016144138-0675e54bb004",
-			"texts": [
-				16
-			]
+			"texts": [16]
 		},
 		{
 			"name": "github.com/klauspost/compress",
 			"version": "v1.18.5",
 			"license": "Apache-2.0 AND BSD-3-Clause AND MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012 The Go Authors. All rights reserved.",
-				"Copyright (c) 2019 Klaus Post. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2012 The Go Authors. All rights reserved.", "Copyright (c) 2019 Klaus Post. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/klauspost/compress@v1.18.5",
-			"texts": [
-				72
-			]
+			"texts": [72]
 		},
 		{
 			"name": "github.com/klauspost/cpuid/v2",
 			"version": "v2.3.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015 Klaus Post"
-			],
+			"copyright": ["Copyright (c) 2015 Klaus Post"],
 			"repository": "https://pkg.go.dev/github.com/klauspost/cpuid/v2@v2.3.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/klauspost/pgzip",
 			"version": "v1.2.6",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Klaus Post"
-			],
+			"copyright": ["Copyright (c) 2014 Klaus Post"],
 			"repository": "https://pkg.go.dev/github.com/klauspost/pgzip@v1.2.6",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/koofr/go-httpclient",
 			"version": "v0.0.0-20240520111329-e20f8f203988",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Koofr"
-			],
+			"copyright": ["Copyright (c) 2014 Koofr"],
 			"repository": "https://pkg.go.dev/github.com/koofr/go-httpclient@v0.0.0-20240520111329-e20f8f203988",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/koofr/go-koofrclient",
 			"version": "v0.0.0-20221207135200-cbd7fc9ad6a6",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Koofr"
-			],
+			"copyright": ["Copyright (c) 2014 Koofr"],
 			"repository": "https://pkg.go.dev/github.com/koofr/go-koofrclient@v0.0.0-20221207135200-cbd7fc9ad6a6",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/kr/fs",
 			"version": "v0.1.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2012 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/kr/fs@v0.1.0",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/kylelemons/godebug",
@@ -2203,9 +1618,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/kylelemons/godebug@v1.1.0",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/lanrat/extsort",
@@ -2214,152 +1627,106 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/lanrat/extsort@v1.4.2",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/leodido/go-urn",
 			"version": "v1.4.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018 Leonardo Di Donato"
-			],
+			"copyright": ["Copyright (c) 2018 Leonardo Di Donato"],
 			"repository": "https://pkg.go.dev/github.com/leodido/go-urn@v1.4.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/lpar/date",
 			"version": "v1.0.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016, IBM Corp. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2016, IBM Corp. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/lpar/date@v1.0.0",
-			"texts": [
-				75
-			]
+			"texts": [75]
 		},
 		{
 			"name": "github.com/lucasb-eyer/go-colorful",
 			"version": "v1.3.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Lucas Beyer"
-			],
+			"copyright": ["Copyright (c) 2013 Lucas Beyer"],
 			"repository": "https://pkg.go.dev/github.com/lucasb-eyer/go-colorful@v1.3.0",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/mailru/easyjson",
 			"version": "v0.9.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Mail.Ru Group"
-			],
+			"copyright": ["Copyright (c) 2016 Mail.Ru Group"],
 			"repository": "https://pkg.go.dev/github.com/mailru/easyjson@v0.9.1",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/mattn/go-colorable",
 			"version": "v0.1.14",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Yasuhiro Matsumoto"
-			],
+			"copyright": ["Copyright (c) 2016 Yasuhiro Matsumoto"],
 			"repository": "https://pkg.go.dev/github.com/mattn/go-colorable@v0.1.14",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/mattn/go-isatty",
 			"version": "v0.0.20",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) Yasuhiro MATSUMOTO <mattn.jp@gmail.com>"
-			],
+			"copyright": ["Copyright (c) Yasuhiro MATSUMOTO <mattn.jp@gmail.com>"],
 			"repository": "https://pkg.go.dev/github.com/mattn/go-isatty@v0.0.20",
-			"texts": [
-				52
-			]
+			"texts": [52]
 		},
 		{
 			"name": "github.com/mattn/go-runewidth",
 			"version": "v0.0.22",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Yasuhiro Matsumoto"
-			],
+			"copyright": ["Copyright (c) 2016 Yasuhiro Matsumoto"],
 			"repository": "https://pkg.go.dev/github.com/mattn/go-runewidth@v0.0.22",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/Max-Sum/base32768",
 			"version": "v0.0.0-20230304063302-18e6ce5945fd",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Max Sum"
-			],
+			"copyright": ["Copyright (c) 2019 Max Sum"],
 			"repository": "https://pkg.go.dev/github.com/Max-Sum/base32768@v0.0.0-20230304063302-18e6ce5945fd",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/mholt/archives",
 			"version": "v0.1.5",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Matthew Holt"
-			],
+			"copyright": ["Copyright (c) 2016 Matthew Holt"],
 			"repository": "https://pkg.go.dev/github.com/mholt/archives@v0.1.5",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/Microsoft/go-winio",
 			"version": "v0.6.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015 Microsoft"
-			],
+			"copyright": ["Copyright (c) 2015 Microsoft"],
 			"repository": "https://pkg.go.dev/github.com/Microsoft/go-winio@v0.6.2",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/mikelolasagasti/xz",
 			"version": "v1.0.1",
 			"license": "ISC",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (C) 2015-2017 Michael Cross <https://github.com/xi2>"
-			],
+			"copyright": ["Copyright (C) 2015-2017 Michael Cross <https://github.com/xi2>"],
 			"repository": "https://pkg.go.dev/github.com/mikelolasagasti/xz@v1.0.1",
-			"texts": [
-				65
-			]
+			"texts": [65]
 		},
 		{
 			"name": "github.com/minio/minlz",
@@ -2368,35 +1735,25 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/minio/minlz@v1.0.1",
-			"texts": [
-				27
-			]
+			"texts": [27]
 		},
 		{
 			"name": "github.com/minio/xxml",
 			"version": "v0.0.3",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2009 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/minio/xxml@v0.0.3",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/mitchellh/go-homedir",
 			"version": "v1.1.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Mitchell Hashimoto"
-			],
+			"copyright": ["Copyright (c) 2013 Mitchell Hashimoto"],
 			"repository": "https://pkg.go.dev/github.com/mitchellh/go-homedir@v1.1.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/moby/sys/mountinfo",
@@ -2405,48 +1762,34 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/moby/sys/mountinfo@v0.7.2",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/munnerz/goautoneg",
 			"version": "v0.0.0-20191010083416-a7dc8b61c822",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2011, Open Knowledge Foundation Ltd."
-			],
+			"copyright": ["Copyright (c) 2011, Open Knowledge Foundation Ltd."],
 			"repository": "https://pkg.go.dev/github.com/munnerz/goautoneg@v0.0.0-20191010083416-a7dc8b61c822",
-			"texts": [
-				7
-			]
+			"texts": [7]
 		},
 		{
 			"name": "github.com/ncw/swift/v2",
 			"version": "v2.0.5",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (C) 2012 by Nick Craig-Wood http://www.craig-wood.com/nick/"
-			],
+			"copyright": ["Copyright (C) 2012 by Nick Craig-Wood http://www.craig-wood.com/nick/"],
 			"repository": "https://pkg.go.dev/github.com/ncw/swift/v2@v2.0.5",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/nwaples/rardecode/v2",
 			"version": "v2.2.2",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015, Nicholas Waples"
-			],
+			"copyright": ["Copyright (c) 2015, Nicholas Waples"],
 			"repository": "https://pkg.go.dev/github.com/nwaples/rardecode/v2@v2.2.2",
-			"texts": [
-				13
-			]
+			"texts": [13]
 		},
 		{
 			"name": "github.com/oklog/ulid",
@@ -2455,9 +1798,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/oklog/ulid@v1.3.1",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/oracle/oci-go-sdk/v65",
@@ -2469,35 +1810,25 @@
 				"Copyright (c) 2016, 2018, 2026, Oracle and/or its affiliates."
 			],
 			"repository": "https://pkg.go.dev/github.com/oracle/oci-go-sdk/v65@v65.111.0",
-			"texts": [
-				84
-			]
+			"texts": [84]
 		},
 		{
 			"name": "github.com/panjf2000/ants/v2",
 			"version": "v2.11.5",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018 Andy Pan"
-			],
+			"copyright": ["Copyright (c) 2018 Andy Pan"],
 			"repository": "https://pkg.go.dev/github.com/panjf2000/ants/v2@v2.11.5",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/patrickmn/go-cache",
 			"version": "v2.1.0+incompatible",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012-2017 Patrick Mylund Nielsen and the go-cache contributors"
-			],
+			"copyright": ["Copyright (c) 2012-2017 Patrick Mylund Nielsen and the go-cache contributors"],
 			"repository": "https://pkg.go.dev/github.com/patrickmn/go-cache@v2.1.0+incompatible",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/pengsrc/go-shared",
@@ -2506,74 +1837,52 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/pengsrc/go-shared@v0.2.1-0.20190131101655-1999055a4a14",
-			"texts": [
-				20
-			]
+			"texts": [20]
 		},
 		{
 			"name": "github.com/peterh/liner",
 			"version": "v1.2.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright © 2012 Peter Harris"
-			],
+			"copyright": ["Copyright © 2012 Peter Harris"],
 			"repository": "https://pkg.go.dev/github.com/peterh/liner@v1.2.2",
-			"texts": [
-				60
-			]
+			"texts": [60]
 		},
 		{
 			"name": "github.com/pierrec/lz4/v4",
 			"version": "v4.1.25",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015, Pierre Curto"
-			],
+			"copyright": ["Copyright (c) 2015, Pierre Curto"],
 			"repository": "https://pkg.go.dev/github.com/pierrec/lz4/v4@v4.1.25",
-			"texts": [
-				12
-			]
+			"texts": [12]
 		},
 		{
 			"name": "github.com/pkg/browser",
 			"version": "v0.0.0-20240102092130-5ac0b6a4141c",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014, Dave Cheney <dave@cheney.net>"
-			],
+			"copyright": ["Copyright (c) 2014, Dave Cheney <dave@cheney.net>"],
 			"repository": "https://pkg.go.dev/github.com/pkg/browser@v0.0.0-20240102092130-5ac0b6a4141c",
-			"texts": [
-				13
-			]
+			"texts": [13]
 		},
 		{
 			"name": "github.com/pkg/errors",
 			"version": "v0.9.1",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015, Dave Cheney <dave@cheney.net>"
-			],
+			"copyright": ["Copyright (c) 2015, Dave Cheney <dave@cheney.net>"],
 			"repository": "https://pkg.go.dev/github.com/pkg/errors@v0.9.1",
-			"texts": [
-				13
-			]
+			"texts": [13]
 		},
 		{
 			"name": "github.com/pkg/sftp",
 			"version": "v1.13.10",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013, Dave Cheney"
-			],
+			"copyright": ["Copyright (c) 2013, Dave Cheney"],
 			"repository": "https://pkg.go.dev/github.com/pkg/sftp@v1.13.10",
-			"texts": [
-				13
-			]
+			"texts": [13]
 		},
 		{
 			"name": "github.com/pkg/xattr",
@@ -2585,50 +1894,34 @@
 				"Copyright (c) 2014 Kuba Podgórski. All rights reserved."
 			],
 			"repository": "https://pkg.go.dev/github.com/pkg/xattr@v0.4.12",
-			"texts": [
-				68
-			]
+			"texts": [68]
 		},
 		{
 			"name": "github.com/pmezard/go-difflib",
 			"version": "v1.0.1-0.20181226105442-5d4384ee4fb2",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013, Patrick Mezard"
-			],
+			"copyright": ["Copyright (c) 2013, Patrick Mezard"],
 			"repository": "https://pkg.go.dev/github.com/pmezard/go-difflib@v1.0.1-0.20181226105442-5d4384ee4fb2",
-			"texts": [
-				8
-			]
+			"texts": [8]
 		},
 		{
 			"name": "github.com/pquerna/otp",
 			"version": "v1.5.0",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014, Paul Querna"
-			],
+			"copyright": ["Copyright (c) 2014, Paul Querna"],
 			"repository": "https://pkg.go.dev/github.com/pquerna/otp@v1.5.0",
-			"texts": [
-				22,
-				89
-			]
+			"texts": [22, 89]
 		},
 		{
 			"name": "github.com/prometheus/client_golang",
 			"version": "v1.23.2",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2012-2015 The Prometheus Authors"
-			],
+			"copyright": ["Copyright 2012-2015 The Prometheus Authors"],
 			"repository": "https://pkg.go.dev/github.com/prometheus/client_golang@v1.23.2",
-			"texts": [
-				22,
-				66
-			]
+			"texts": [22, 66]
 		},
 		{
 			"name": "github.com/prometheus/client_model",
@@ -2637,10 +1930,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/prometheus/client_model@v0.6.2",
-			"texts": [
-				22,
-				40
-			]
+			"texts": [22, 40]
 		},
 		{
 			"name": "github.com/prometheus/common",
@@ -2649,10 +1939,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/prometheus/common@v0.67.5",
-			"texts": [
-				22,
-				37
-			]
+			"texts": [22, 37]
 		},
 		{
 			"name": "github.com/prometheus/procfs",
@@ -2661,10 +1948,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/prometheus/procfs@v0.19.2",
-			"texts": [
-				22,
-				90
-			]
+			"texts": [22, 90]
 		},
 		{
 			"name": "github.com/ProtonMail/bcrypt",
@@ -2677,193 +1961,133 @@
 				"Copyright (c) 2011 ZooWar.com, All rights reserved."
 			],
 			"repository": "https://pkg.go.dev/github.com/ProtonMail/bcrypt@v0.0.0-20211005172633-e235017c1baf",
-			"texts": [
-				74
-			]
+			"texts": [74]
 		},
 		{
 			"name": "github.com/ProtonMail/gluon",
 			"version": "v0.17.1-0.20230724134000-308be39be96e",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020 James Houlahan",
-				"Copyright (c) 2021 Proton AG"
-			],
+			"copyright": ["Copyright (c) 2020 James Houlahan", "Copyright (c) 2021 Proton AG"],
 			"repository": "https://pkg.go.dev/github.com/ProtonMail/gluon@v0.17.1-0.20230724134000-308be39be96e",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/ProtonMail/go-crypto",
 			"version": "v1.4.1",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2009 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2009 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/ProtonMail/go-crypto@v1.4.1",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/ProtonMail/go-mime",
 			"version": "v0.0.0-20230322103455-7d82a3887f2f",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Proton Technologies AG"
-			],
+			"copyright": ["Copyright (c) 2019 Proton Technologies AG"],
 			"repository": "https://pkg.go.dev/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f",
-			"texts": [
-				2
-			]
+			"texts": [2]
 		},
 		{
 			"name": "github.com/ProtonMail/go-srp",
 			"version": "v0.0.7",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Proton Technologies AG"
-			],
+			"copyright": ["Copyright (c) 2019 Proton Technologies AG"],
 			"repository": "https://pkg.go.dev/github.com/ProtonMail/go-srp@v0.0.7",
-			"texts": [
-				78
-			]
+			"texts": [78]
 		},
 		{
 			"name": "github.com/ProtonMail/gopenpgp/v2",
 			"version": "v2.9.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Proton Technologies AG"
-			],
+			"copyright": ["Copyright (c) 2019 Proton Technologies AG"],
 			"repository": "https://pkg.go.dev/github.com/ProtonMail/gopenpgp/v2@v2.9.0",
-			"texts": [
-				2
-			]
+			"texts": [2]
 		},
 		{
 			"name": "github.com/PuerkitoBio/goquery",
 			"version": "v1.11.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012-2021, Martin Angers & Contributors"
-			],
+			"copyright": ["Copyright (c) 2012-2021, Martin Angers & Contributors"],
 			"repository": "https://pkg.go.dev/github.com/PuerkitoBio/goquery@v1.11.0",
-			"texts": [
-				14
-			]
+			"texts": [14]
 		},
 		{
 			"name": "github.com/putdotio/go-putio/putio",
 			"version": "v0.0.0-20200123120452-16d982cac2b8",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 H. İbrahim Güngör"
-			],
+			"copyright": ["Copyright (c) 2016 H. İbrahim Güngör"],
 			"repository": "https://pkg.go.dev/github.com/putdotio/go-putio/putio@v0.0.0-20200123120452-16d982cac2b8",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/rasky/go-xdr",
 			"version": "v0.0.0-20170124162913-1a41d1a06c93",
 			"license": "ISC",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012-2014 Dave Collins <dave@davec.name>"
-			],
+			"copyright": ["Copyright (c) 2012-2014 Dave Collins <dave@davec.name>"],
 			"repository": "https://pkg.go.dev/github.com/rasky/go-xdr@v0.0.0-20170124162913-1a41d1a06c93",
-			"texts": [
-				63
-			]
+			"texts": [63]
 		},
 		{
 			"name": "github.com/rclone/go-proton-api",
 			"version": "v1.0.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020 James Houlahan",
-				"Copyright (c) 2022 Proton AG"
-			],
+			"copyright": ["Copyright (c) 2020 James Houlahan", "Copyright (c) 2022 Proton AG"],
 			"repository": "https://pkg.go.dev/github.com/rclone/go-proton-api@v1.0.2",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/rclone/gofakes3",
 			"version": "v0.0.6",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2016 Johannes Boyne"
-			],
+			"copyright": ["Copyright (c) 2016 Johannes Boyne"],
 			"repository": "https://pkg.go.dev/github.com/rclone/gofakes3@v0.0.6",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/rclone/Proton-API-Bridge",
 			"version": "v1.0.3",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2023 Chun-Hung Tseng"
-			],
+			"copyright": ["Copyright (c) 2023 Chun-Hung Tseng"],
 			"repository": "https://pkg.go.dev/github.com/rclone/Proton-API-Bridge@v1.0.3",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/relvacode/iso8601",
 			"version": "v1.7.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017-2020 Jason Kingsbury"
-			],
+			"copyright": ["Copyright (c) 2017-2020 Jason Kingsbury"],
 			"repository": "https://pkg.go.dev/github.com/relvacode/iso8601@v1.7.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/rfjakob/eme",
 			"version": "v1.2.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015 Jakob Unterwurzacher"
-			],
+			"copyright": ["Copyright (c) 2015 Jakob Unterwurzacher"],
 			"repository": "https://pkg.go.dev/github.com/rfjakob/eme@v1.2.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/rivo/uniseg",
 			"version": "v0.4.7",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Oliver Kuederle"
-			],
+			"copyright": ["Copyright (c) 2019 Oliver Kuederle"],
 			"repository": "https://pkg.go.dev/github.com/rivo/uniseg@v0.4.7",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/russross/blackfriday/v2",
@@ -2872,9 +2096,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/russross/blackfriday/v2@v2.1.0",
-			"texts": [
-				33
-			]
+			"texts": [33]
 		},
 		{
 			"name": "github.com/ryszard/goskiplist",
@@ -2883,35 +2105,25 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/ryszard/goskiplist@v0.0.0-20150312221310-2dfbae5fcf46",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/sabhiram/go-gitignore",
 			"version": "v0.0.0-20210923224102-525f6e181f06",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2015 Shaba Abhiram"
-			],
+			"copyright": ["Copyright (c) 2015 Shaba Abhiram"],
 			"repository": "https://pkg.go.dev/github.com/sabhiram/go-gitignore@v0.0.0-20210923224102-525f6e181f06",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/samber/lo",
 			"version": "v1.52.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2022-2025 Samuel Berthe"
-			],
+			"copyright": ["Copyright (c) 2022-2025 Samuel Berthe"],
 			"repository": "https://pkg.go.dev/github.com/samber/lo@v1.52.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/shirou/gopsutil/v4",
@@ -2920,48 +2132,34 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/shirou/gopsutil/v4@v4.26.3",
-			"texts": [
-				88
-			]
+			"texts": [88]
 		},
 		{
 			"name": "github.com/sirupsen/logrus",
 			"version": "v1.9.4",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Simon Eskildsen"
-			],
+			"copyright": ["Copyright (c) 2014 Simon Eskildsen"],
 			"repository": "https://pkg.go.dev/github.com/sirupsen/logrus@v1.9.4",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/skratchdot/open-golang",
 			"version": "v0.0.0-20200116055534-eef842397966",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 skratchdot"
-			],
+			"copyright": ["Copyright (c) 2013 skratchdot"],
 			"repository": "https://pkg.go.dev/github.com/skratchdot/open-golang@v0.0.0-20200116055534-eef842397966",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "github.com/sony/gobreaker",
 			"version": "v1.0.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2015 Sony Corporation"
-			],
+			"copyright": ["Copyright 2015 Sony Corporation"],
 			"repository": "https://pkg.go.dev/github.com/sony/gobreaker@v1.0.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/sorairolake/lzip-go",
@@ -2970,9 +2168,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/sorairolake/lzip-go@v0.3.8",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/spacemonkeygo/monkit/v3",
@@ -2981,9 +2177,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/spacemonkeygo/monkit/v3@v3.0.25-0.20251022131615-eb24eb109368",
-			"texts": [
-				28
-			]
+			"texts": [28]
 		},
 		{
 			"name": "github.com/spf13/afero",
@@ -2992,9 +2186,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/spf13/afero@v1.15.0",
-			"texts": [
-				18
-			]
+			"texts": [18]
 		},
 		{
 			"name": "github.com/spf13/cobra",
@@ -3003,101 +2195,70 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/spf13/cobra@v1.10.2",
-			"texts": [
-				18
-			]
+			"texts": [18]
 		},
 		{
 			"name": "github.com/spf13/pflag",
 			"version": "v1.0.10",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012 Alex Ogier. All rights reserved.",
-				"Copyright (c) 2012 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2012 Alex Ogier. All rights reserved.", "Copyright (c) 2012 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/github.com/spf13/pflag@v1.0.10",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "github.com/STARRY-S/zip",
 			"version": "v0.2.3",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2023, Starry"
-			],
+			"copyright": ["Copyright (c) 2023, Starry"],
 			"repository": "https://pkg.go.dev/github.com/STARRY-S/zip@v0.2.3",
-			"texts": [
-				30
-			]
+			"texts": [30]
 		},
 		{
 			"name": "github.com/stretchr/testify",
 			"version": "v1.11.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012-2020 Mat Ryer, Tyler Bunnell and contributors."
-			],
+			"copyright": ["Copyright (c) 2012-2020 Mat Ryer, Tyler Bunnell and contributors."],
 			"repository": "https://pkg.go.dev/github.com/stretchr/testify@v1.11.1",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/t3rm1n4l/go-mega",
 			"version": "v0.0.0-20260630094356-4de2f127f34a",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2019 Sarath Lakshman"
-			],
+			"copyright": ["Copyright (c) 2019 Sarath Lakshman"],
 			"repository": "https://pkg.go.dev/github.com/t3rm1n4l/go-mega@v0.0.0-20260630094356-4de2f127f34a",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/tklauser/go-sysconf",
 			"version": "v0.3.16",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018-2022, Tobias Klauser"
-			],
+			"copyright": ["Copyright (c) 2018-2022, Tobias Klauser"],
 			"repository": "https://pkg.go.dev/github.com/tklauser/go-sysconf@v0.3.16",
-			"texts": [
-				31
-			]
+			"texts": [31]
 		},
 		{
 			"name": "github.com/tyler-smith/go-bip39",
 			"version": "v1.1.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014-2018 Tyler Smith and contributors"
-			],
+			"copyright": ["Copyright (c) 2014-2018 Tyler Smith and contributors"],
 			"repository": "https://pkg.go.dev/github.com/tyler-smith/go-bip39@v1.1.0",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/ulikunitz/xz",
 			"version": "v0.5.15",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014-2022  Ulrich Kunitz"
-			],
+			"copyright": ["Copyright (c) 2014-2022  Ulrich Kunitz"],
 			"repository": "https://pkg.go.dev/github.com/ulikunitz/xz@v0.5.15",
-			"texts": [
-				10
-			]
+			"texts": [10]
 		},
 		{
 			"name": "github.com/unknwon/goconfig",
@@ -3106,9 +2267,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/unknwon/goconfig@v1.0.0",
-			"texts": [
-				28
-			]
+			"texts": [28]
 		},
 		{
 			"name": "github.com/willscott/go-nfs",
@@ -3117,35 +2276,25 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/willscott/go-nfs@v0.0.4",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "github.com/willscott/go-nfs-client",
 			"version": "v0.0.0-20251022144359-801f10d98886",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright � 2017 VMware, Inc.  All rights reserved"
-			],
+			"copyright": ["Copyright � 2017 VMware, Inc.  All rights reserved"],
 			"repository": "https://pkg.go.dev/github.com/willscott/go-nfs-client@v0.0.0-20251022144359-801f10d98886",
-			"texts": [
-				45
-			]
+			"texts": [45]
 		},
 		{
 			"name": "github.com/winfsp/cgofuse",
 			"version": "v1.6.1-0.20260126094232-f2c4fccdb286",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017-2022 Bill Zissimopoulos"
-			],
+			"copyright": ["Copyright (c) 2017-2022 Bill Zissimopoulos"],
 			"repository": "https://pkg.go.dev/github.com/winfsp/cgofuse@v1.6.1-0.20260126094232-f2c4fccdb286",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/wk8/go-ordered-map/v2",
@@ -3154,9 +2303,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/wk8/go-ordered-map/v2@v2.1.8",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/xanzy/ssh-agent",
@@ -3165,22 +2312,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/xanzy/ssh-agent@v0.3.3",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "github.com/youmark/pkcs8",
 			"version": "v0.0.0-20240726163527-a2c0da244d78",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 youmark"
-			],
+			"copyright": ["Copyright (c) 2014 youmark"],
 			"repository": "https://pkg.go.dev/github.com/youmark/pkcs8@v0.0.0-20240726163527-a2c0da244d78",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/yunify/qingstor-sdk-go/v3",
@@ -3189,22 +2330,16 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/yunify/qingstor-sdk-go/v3@v3.2.0",
-			"texts": [
-				24
-			]
+			"texts": [24]
 		},
 		{
 			"name": "github.com/yusufpapurcu/wmi",
 			"version": "v1.2.4",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Stack Exchange"
-			],
+			"copyright": ["Copyright (c) 2013 Stack Exchange"],
 			"repository": "https://pkg.go.dev/github.com/yusufpapurcu/wmi@v1.2.4",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "github.com/zeebo/blake3",
@@ -3213,63 +2348,43 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/github.com/zeebo/blake3@v0.2.4",
-			"texts": [
-				85
-			]
+			"texts": [85]
 		},
 		{
 			"name": "github.com/zeebo/errs",
 			"version": "v1.4.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2017 The Authors"
-			],
+			"copyright": ["Copyright (c) 2017 The Authors"],
 			"repository": "https://pkg.go.dev/github.com/zeebo/errs@v1.4.0",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "github.com/zeebo/xxh3",
 			"version": "v1.1.0",
 			"license": "BSD-2-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2012-2014, Yann Collet",
-				"Copyright (c) 2019, Jeff Wendling"
-			],
+			"copyright": ["Copyright (c) 2012-2014, Yann Collet", "Copyright (c) 2019, Jeff Wendling"],
 			"repository": "https://pkg.go.dev/github.com/zeebo/xxh3@v1.1.0",
-			"texts": [
-				29
-			]
+			"texts": [29]
 		},
 		{
 			"name": "Go standard library",
 			"version": "1.26.5",
 			"license": "BSD-3-Clause",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://github.com/golang/go/tree/go1.26.5",
-			"texts": [
-				49,
-				73
-			]
+			"texts": [49, 73]
 		},
 		{
 			"name": "go.etcd.io/bbolt",
 			"version": "v1.4.3",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2013 Ben Johnson"
-			],
+			"copyright": ["Copyright (c) 2013 Ben Johnson"],
 			"repository": "https://pkg.go.dev/go.etcd.io/bbolt@v1.4.3",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "go.mongodb.org/mongo-driver",
@@ -3278,9 +2393,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go.mongodb.org/mongo-driver@v1.17.9",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "go.opentelemetry.io/auto/sdk",
@@ -3289,9 +2402,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go.opentelemetry.io/auto/sdk@v1.2.1",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
@@ -3300,9 +2411,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@v0.67.0",
-			"texts": [
-				23
-			]
+			"texts": [23]
 		},
 		{
 			"name": "go.opentelemetry.io/otel",
@@ -3311,9 +2420,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go.opentelemetry.io/otel@v1.43.0",
-			"texts": [
-				23
-			]
+			"texts": [23]
 		},
 		{
 			"name": "go.opentelemetry.io/otel/metric",
@@ -3322,9 +2429,7 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go.opentelemetry.io/otel/metric@v1.43.0",
-			"texts": [
-				23
-			]
+			"texts": [23]
 		},
 		{
 			"name": "go.opentelemetry.io/otel/trace",
@@ -3333,37 +2438,25 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go.opentelemetry.io/otel/trace@v1.43.0",
-			"texts": [
-				23
-			]
+			"texts": [23]
 		},
 		{
 			"name": "go.yaml.in/yaml/v2",
 			"version": "v2.4.3",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2011-2016 Canonical Ltd."
-			],
+			"copyright": ["Copyright 2011-2016 Canonical Ltd."],
 			"repository": "https://pkg.go.dev/go.yaml.in/yaml/v2@v2.4.3",
-			"texts": [
-				26,
-				48
-			]
+			"texts": [26, 48]
 		},
 		{
 			"name": "go.yaml.in/yaml/v3",
 			"version": "v3.0.4",
 			"license": "Apache-2.0 AND MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2011-2016 Canonical Ltd."
-			],
+			"copyright": ["Copyright 2011-2016 Canonical Ltd."],
 			"repository": "https://pkg.go.dev/go.yaml.in/yaml/v3@v3.0.4",
-			"texts": [
-				83,
-				48
-			]
+			"texts": [83, 48]
 		},
 		{
 			"name": "go4.org",
@@ -3372,165 +2465,115 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/go4.org@v0.0.0-20260112195520-a5071408f32f",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "goftp.io/server/v2",
 			"version": "v2.0.2",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018 Goftp Authors"
-			],
+			"copyright": ["Copyright (c) 2018 Goftp Authors"],
 			"repository": "https://pkg.go.dev/goftp.io/server/v2@v2.0.2",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "golang.org/x/crypto",
 			"version": "v0.52.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/crypto@v0.52.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/exp",
 			"version": "v0.0.0-20260410095643-746e56fc9e2f",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/exp@v0.0.0-20260410095643-746e56fc9e2f",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/image",
 			"version": "v0.43.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/image@v0.43.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/net",
 			"version": "v0.55.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/net@v0.55.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/oauth2",
 			"version": "v0.36.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/oauth2@v0.36.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/sync",
 			"version": "v0.21.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/sync@v0.21.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/sys",
 			"version": "v0.45.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/sys@v0.45.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/term",
 			"version": "v0.43.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/term@v0.43.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/text",
 			"version": "v0.38.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/text@v0.38.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "golang.org/x/time",
 			"version": "v0.15.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2009 The Go Authors."
-			],
+			"copyright": ["Copyright 2009 The Go Authors."],
 			"repository": "https://pkg.go.dev/golang.org/x/time@v0.15.0",
-			"texts": [
-				73
-			]
+			"texts": [73]
 		},
 		{
 			"name": "google.golang.org/api",
 			"version": "v0.275.0",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2011 Google Inc. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2011 Google Inc. All rights reserved."],
 			"repository": "https://pkg.go.dev/google.golang.org/api@v0.275.0",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "google.golang.org/genproto/googleapis/rpc",
@@ -3539,49 +2582,34 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/google.golang.org/genproto/googleapis/rpc@v0.0.0-20260401024825-9d38bb4040a9",
-			"texts": [
-				22
-			]
+			"texts": [22]
 		},
 		{
 			"name": "google.golang.org/grpc",
 			"version": "v1.80.0",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2014 gRPC authors."
-			],
+			"copyright": ["Copyright 2014 gRPC authors."],
 			"repository": "https://pkg.go.dev/google.golang.org/grpc@v1.80.0",
-			"texts": [
-				22,
-				48
-			]
+			"texts": [22, 48]
 		},
 		{
 			"name": "google.golang.org/protobuf",
 			"version": "v1.36.11",
 			"license": "BSD-3-Clause",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2018 The Go Authors. All rights reserved."
-			],
+			"copyright": ["Copyright (c) 2018 The Go Authors. All rights reserved."],
 			"repository": "https://pkg.go.dev/google.golang.org/protobuf@v1.36.11",
-			"texts": [
-				71
-			]
+			"texts": [71]
 		},
 		{
 			"name": "gopkg.in/natefinch/lumberjack.v2",
 			"version": "v2.2.1",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Nate Finch"
-			],
+			"copyright": ["Copyright (c) 2014 Nate Finch"],
 			"repository": "https://pkg.go.dev/gopkg.in/natefinch/lumberjack.v2@v2.2.1",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "gopkg.in/validator.v2",
@@ -3590,76 +2618,52 @@
 			"ecosystem": "go",
 			"copyright": [],
 			"repository": "https://pkg.go.dev/gopkg.in/validator.v2@v2.0.1",
-			"texts": [
-				26
-			]
+			"texts": [26]
 		},
 		{
 			"name": "gopkg.in/yaml.v2",
 			"version": "v2.4.0",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2011-2016 Canonical Ltd."
-			],
+			"copyright": ["Copyright 2011-2016 Canonical Ltd."],
 			"repository": "https://pkg.go.dev/gopkg.in/yaml.v2@v2.4.0",
-			"texts": [
-				26,
-				48
-			]
+			"texts": [26, 48]
 		},
 		{
 			"name": "gopkg.in/yaml.v3",
 			"version": "v3.0.1",
 			"license": "Apache-2.0 AND MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2011-2016 Canonical Ltd."
-			],
+			"copyright": ["Copyright 2011-2016 Canonical Ltd."],
 			"repository": "https://pkg.go.dev/gopkg.in/yaml.v3@v3.0.1",
-			"texts": [
-				83,
-				48
-			]
+			"texts": [83, 48]
 		},
 		{
 			"name": "has-flag",
 			"version": "4.0.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)"],
 			"repository": "sindresorhus/has-flag",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "ipull",
 			"version": "3.9.5",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Ido S."
-			],
+			"copyright": ["Copyright (c) 2023 Ido S."],
 			"repository": "https://github.com/ido-pluto/ipull",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "is-fullwidth-code-point",
 			"version": "5.1.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/is-fullwidth-code-point",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "isexe",
@@ -3668,22 +2672,16 @@
 			"ecosystem": "npm",
 			"copyright": [],
 			"repository": "https://github.com/isaacs/isexe",
-			"texts": [
-				0
-			]
+			"texts": [0]
 		},
 		{
 			"name": "js-yaml",
 			"version": "4.3.2",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (C) 2011-2015 by Vitaly Puzrin"
-			],
+			"copyright": ["Copyright (C) 2011-2015 by Vitaly Puzrin"],
 			"repository": "nodeca/js-yaml",
-			"texts": [
-				2
-			]
+			"texts": [2]
 		},
 		{
 			"name": "lazy-val",
@@ -3699,199 +2697,135 @@
 			"version": "0.2.191",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) The Rust Project Developers"
-			],
+			"copyright": ["Copyright (c) The Rust Project Developers"],
 			"repository": "https://github.com/rust-lang/libc",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "lifecycle-utils",
 			"version": "2.1.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Gilad S."
-			],
+			"copyright": ["Copyright (c) 2023 Gilad S."],
 			"repository": "https://github.com/giladgd/lifecycle-utils",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "lifecycle-utils",
 			"version": "4.5.2",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Gilad S."
-			],
+			"copyright": ["Copyright (c) 2023 Gilad S."],
 			"repository": "https://github.com/giladgd/lifecycle-utils",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "llama.cpp",
 			"version": "v0.5.0",
 			"license": "MIT",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright (c) 2023-2026 The ggml authors"
-			],
+			"copyright": ["Copyright (c) 2023-2026 The ggml authors"],
 			"repository": "https://github.com/ggml-org/llama.cpp",
-			"texts": [
-				51,
-				38
-			]
+			"texts": [51, 38]
 		},
 		{
 			"name": "lodash.debounce",
 			"version": "4.0.8",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright jQuery Foundation and other contributors <https://jquery.org/>"
-			],
+			"copyright": ["Copyright jQuery Foundation and other contributors <https://jquery.org/>"],
 			"repository": "lodash/lodash",
-			"texts": [
-				32
-			]
+			"texts": [32]
 		},
 		{
 			"name": "lodash.escaperegexp",
 			"version": "4.1.2",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright jQuery Foundation and other contributors <https://jquery.org/>"
-			],
+			"copyright": ["Copyright jQuery Foundation and other contributors <https://jquery.org/>"],
 			"repository": "lodash/lodash",
-			"texts": [
-				32
-			]
+			"texts": [32]
 		},
 		{
 			"name": "log-symbols",
 			"version": "7.0.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/log-symbols",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "moul.io/http2curl/v2",
 			"version": "v2.3.0",
 			"license": "Apache-2.0",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright 2015-2021 Manfred Touron and other http2curl Developers."
-			],
+			"copyright": ["Copyright 2015-2021 Manfred Touron and other http2curl Developers."],
 			"repository": "https://pkg.go.dev/moul.io/http2curl/v2@v2.3.0",
-			"texts": [
-				19,
-				47
-			]
+			"texts": [19, 47]
 		},
 		{
 			"name": "nanoid",
 			"version": "5.1.16",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright 2017 Andrey Sitnik <andrey@sitnik.es>"
-			],
+			"copyright": ["Copyright 2017 Andrey Sitnik <andrey@sitnik.es>"],
 			"repository": "ai/nanoid",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "node-api-headers",
 			"version": "1.9.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2021 Node.js"
-			],
+			"copyright": ["Copyright (c) 2021 Node.js"],
 			"repository": "git://github.com/nodejs/node-api-headers",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "node-llama-cpp",
 			"version": "3.22.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2023 Gilad S."
-			],
+			"copyright": ["Copyright (c) 2023 Gilad S."],
 			"repository": "https://github.com/withcatai/node-llama-cpp",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "node-llama-cpp prebuilt backends",
 			"version": "3.22.1",
 			"license": "MIT",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright (c) 2024 Gilad S."
-			],
+			"copyright": ["Copyright (c) 2024 Gilad S."],
 			"repository": "https://github.com/withcatai/node-llama-cpp",
-			"texts": [
-				51,
-				34
-			]
+			"texts": [51, 34]
 		},
 		{
 			"name": "Node.js",
 			"version": "24.22.0",
 			"license": "MIT",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright Node.js contributors. All rights reserved."
-			],
+			"copyright": ["Copyright Node.js contributors. All rights reserved."],
 			"repository": "https://github.com/nodejs/node",
-			"texts": [
-				61,
-				41
-			]
+			"texts": [61, 41]
 		},
 		{
 			"name": "ora",
 			"version": "9.4.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/ora",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "parse-ms",
 			"version": "3.0.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/parse-ms",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "pin-project-lite",
@@ -3900,62 +2834,43 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/taiki-e/pin-project-lite",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "pretty-bytes",
 			"version": "6.1.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/pretty-bytes",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "pretty-ms",
 			"version": "8.0.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/pretty-ms",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "proper-lockfile",
 			"version": "4.1.2",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2018 Made With MOXY Lda <hello@moxy.studio>"
-			],
+			"copyright": ["Copyright (c) 2018 Made With MOXY Lda <hello@moxy.studio>"],
 			"repository": "git@github.com:moxystudio/node-proper-lockfile",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "rclone",
 			"version": "1.74.4",
 			"license": "MIT",
 			"ecosystem": "vendored",
-			"copyright": [
-				"Copyright (C) 2012 by Nick Craig-Wood http://www.craig-wood.com/nick/"
-			],
+			"copyright": ["Copyright (C) 2012 by Nick Craig-Wood http://www.craig-wood.com/nick/"],
 			"repository": "https://github.com/rclone/rclone/tree/v1.74.4",
-			"texts": [
-				62,
-				36
-			]
+			"texts": [62, 36]
 		},
 		{
 			"name": "reflect-metadata",
@@ -3964,35 +2879,25 @@
 			"ecosystem": "npm",
 			"copyright": [],
 			"repository": "https://github.com/rbuckton/reflect-metadata",
-			"texts": [
-				17
-			]
+			"texts": [17]
 		},
 		{
 			"name": "retry",
 			"version": "0.12.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2011:"
-			],
+			"copyright": ["Copyright (c) 2011:"],
 			"repository": "git://github.com/tim-kos/node-retry",
-			"texts": [
-				86
-			]
+			"texts": [86]
 		},
 		{
 			"name": "retry",
 			"version": "0.13.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2011:"
-			],
+			"copyright": ["Copyright (c) 2011:"],
 			"repository": "git://github.com/tim-kos/node-retry",
-			"texts": [
-				86
-			]
+			"texts": [86]
 		},
 		{
 			"name": "rustc-hash",
@@ -4001,9 +2906,7 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/rust-lang/rustc-hash",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "rustls-webpki",
@@ -4012,9 +2915,7 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/rustls/webpki",
-			"texts": [
-				42
-			]
+			"texts": [42]
 		},
 		{
 			"name": "sax",
@@ -4023,9 +2924,7 @@
 			"ecosystem": "npm",
 			"copyright": [],
 			"repository": "ssh://git@github.com/isaacs/sax-js",
-			"texts": [
-				0
-			]
+			"texts": [0]
 		},
 		{
 			"name": "semver",
@@ -4034,35 +2933,25 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/dtolnay/semver",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "semver",
 			"version": "7.7.4",
 			"license": "ISC",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Isaac Z. Schlueter and Contributors"
-			],
+			"copyright": ["Copyright (c) Isaac Z. Schlueter and Contributors"],
 			"repository": "https://github.com/npm/node-semver",
-			"texts": [
-				77
-			]
+			"texts": [77]
 		},
 		{
 			"name": "sigs.k8s.io/yaml",
 			"version": "v1.6.0",
 			"license": "Apache-2.0 AND BSD-3-Clause AND MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2014 Sam Ghods"
-			],
+			"copyright": ["Copyright (c) 2014 Sam Ghods"],
 			"repository": "https://pkg.go.dev/sigs.k8s.io/yaml@v1.6.0",
-			"texts": [
-				79
-			]
+			"texts": [79]
 		},
 		{
 			"name": "simple-git",
@@ -4078,26 +2967,18 @@
 			"version": "0.4.12",
 			"license": "MIT",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) 2019 Carl Lerche"
-			],
+			"copyright": ["Copyright (c) 2019 Carl Lerche"],
 			"repository": "https://github.com/tokio-rs/slab",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "sleep-promise",
 			"version": "9.1.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2015 Jan Brummelte"
-			],
+			"copyright": ["Copyright (c) 2015 Jan Brummelte"],
 			"repository": "https://github.com/brummelte/sleep-promise",
-			"texts": [
-				80
-			]
+			"texts": [80]
 		},
 		{
 			"name": "slice-ansi",
@@ -4109,9 +2990,7 @@
 				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
 			],
 			"repository": "chalk/slice-ansi",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "slice-ansi",
@@ -4123,74 +3002,52 @@
 				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
 			],
 			"repository": "chalk/slice-ansi",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "stdin-discarder",
 			"version": "0.3.2",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/stdin-discarder",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "stdout-update",
 			"version": "4.0.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) 2022 Daniil Ryazanov <kein@tagproject.ru>"
-			],
+			"copyright": ["Copyright (c) 2022 Daniil Ryazanov <kein@tagproject.ru>"],
 			"repository": "https://github.com/keindev/stdout-update",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "storj.io/common",
 			"version": "v0.0.0-20260225132117-99155641c30a",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020 Storj Labs, Inc."
-			],
+			"copyright": ["Copyright (c) 2020 Storj Labs, Inc."],
 			"repository": "https://pkg.go.dev/storj.io/common@v0.0.0-20260225132117-99155641c30a",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "storj.io/drpc",
 			"version": "v0.0.35-0.20250513201419-f7819ea69b55",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020 Storj Labs, Inc."
-			],
+			"copyright": ["Copyright (c) 2020 Storj Labs, Inc."],
 			"repository": "https://pkg.go.dev/storj.io/drpc@v0.0.35-0.20250513201419-f7819ea69b55",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "storj.io/eventkit",
 			"version": "v0.0.0-20250410172343-61f26d3de156",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2022 JT Olio"
-			],
+			"copyright": ["Copyright (c) 2022 JT Olio"],
 			"repository": "https://pkg.go.dev/storj.io/eventkit@v0.0.0-20250410172343-61f26d3de156",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "storj.io/infectious",
@@ -4207,61 +3064,43 @@
 				"Copyright (C) 1996-1998 Luigi Rizzo (luigi@iet.unipi.it)"
 			],
 			"repository": "https://pkg.go.dev/storj.io/infectious@v0.0.2",
-			"texts": [
-				5
-			]
+			"texts": [5]
 		},
 		{
 			"name": "storj.io/picobuf",
 			"version": "v0.0.4",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2021 Storj Labs, Inc."
-			],
+			"copyright": ["Copyright (c) 2021 Storj Labs, Inc."],
 			"repository": "https://pkg.go.dev/storj.io/picobuf@v0.0.4",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "storj.io/uplink",
 			"version": "v1.14.0",
 			"license": "MIT",
 			"ecosystem": "go",
-			"copyright": [
-				"Copyright (c) 2020 Storj Labs, Inc."
-			],
+			"copyright": ["Copyright (c) 2020 Storj Labs, Inc."],
 			"repository": "https://pkg.go.dev/storj.io/uplink@v1.14.0",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "string-width",
 			"version": "8.3.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "sindresorhus/string-width",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "supports-color",
 			"version": "8.1.1",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"
-			],
+			"copyright": ["Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)"],
 			"repository": "chalk/supports-color",
-			"texts": [
-				51
-			]
+			"texts": [51]
 		},
 		{
 			"name": "syn",
@@ -4270,9 +3109,7 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/dtolnay/syn",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "syn",
@@ -4281,51 +3118,34 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/dtolnay/syn",
-			"texts": [
-				58
-			]
+			"texts": [58]
 		},
 		{
 			"name": "tslib",
 			"version": "1.14.1",
 			"license": "0BSD",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/Microsoft/tslib",
-			"texts": [
-				65
-			]
+			"texts": [65]
 		},
 		{
 			"name": "tsyringe",
 			"version": "4.10.0",
 			"license": "MIT",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation. All rights reserved."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation. All rights reserved."],
 			"repository": "https://github.com/Microsoft/tsyringe",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "unicode-ident",
 			"version": "1.0.27",
 			"license": "(MIT OR Apache-2.0) AND Unicode-3.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"COPYRIGHT AND PERMISSION NOTICE",
-				"Copyright © 1991-2023 Unicode, Inc."
-			],
+			"copyright": ["COPYRIGHT AND PERMISSION NOTICE", "Copyright © 1991-2023 Unicode, Inc."],
 			"repository": "https://github.com/dtolnay/unicode-ident",
-			"texts": [
-				27,
-				58,
-				87
-			]
+			"texts": [27, 58, 87]
 		},
 		{
 			"name": "webpki-roots",
@@ -4334,166 +3154,115 @@
 			"ecosystem": "rust",
 			"copyright": [],
 			"repository": "https://github.com/rustls/webpki-roots",
-			"texts": [
-				1
-			]
+			"texts": [1]
 		},
 		{
 			"name": "which",
 			"version": "6.0.1",
 			"license": "ISC",
 			"ecosystem": "npm",
-			"copyright": [
-				"Copyright (c) Isaac Z. Schlueter and Contributors"
-			],
+			"copyright": ["Copyright (c) Isaac Z. Schlueter and Contributors"],
 			"repository": "https://github.com/npm/node-which",
-			"texts": [
-				77
-			]
+			"texts": [77]
 		},
 		{
 			"name": "windows",
 			"version": "0.62.2",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-collections",
 			"version": "0.3.2",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-core",
 			"version": "0.62.2",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-future",
 			"version": "0.3.2",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-implement",
 			"version": "0.60.2",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-interface",
 			"version": "0.59.3",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-numerics",
 			"version": "0.3.1",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-result",
 			"version": "0.4.1",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-strings",
 			"version": "0.5.1",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "windows-threading",
 			"version": "0.2.1",
 			"license": "MIT OR Apache-2.0",
 			"ecosystem": "rust",
-			"copyright": [
-				"Copyright (c) Microsoft Corporation."
-			],
+			"copyright": ["Copyright (c) Microsoft Corporation."],
 			"repository": "https://github.com/microsoft/windows-rs",
-			"texts": [
-				50
-			]
+			"texts": [50]
 		},
 		{
 			"name": "WinFsp",
 			"version": "2.1.25156",
 			"license": "GPL-3.0-only WITH WinFsp-FLOSS-exception",
 			"ecosystem": "vendored",
-			"copyright": [
-				"WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos"
-			],
+			"copyright": ["WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos"],
 			"repository": "https://github.com/winfsp/winfsp",
-			"texts": [
-				82,
-				35
-			]
+			"texts": [82, 35]
 		}
 	]
 }

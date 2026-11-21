@@ -192,6 +192,7 @@ export const ASSISTANT_CALLS = [
 	"deleteModels",
 	"download",
 	"cancelDownload",
+	"importChunk",
 	"load",
 	"generate",
 	"cancel",

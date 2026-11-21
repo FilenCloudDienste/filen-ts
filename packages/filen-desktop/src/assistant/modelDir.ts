@@ -1,3 +1,4 @@
+import { renameSync, writeFileSync } from "node:fs"
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises"
 import path from "node:path"
 import type { AssistantModelFile, AssistantModelFiles } from "@filen/shared/dom/assistantModel/manifest"
@@ -37,7 +38,17 @@ export async function readVerified(dir: string): Promise<Map<string, string>> {
 	}
 }
 
-async function sizeOf(file: string): Promise<number> {
+// The record is replaced whole (written beside it, then renamed over it), so it is never torn. Synchronous: a few
+// hundred bytes, written by one writer at a time (the engine's download, or main's import).
+export function replaceVerified(dir: string, verified: ReadonlyMap<string, string>): void {
+	const target = path.join(dir, VERIFIED_FILE)
+	const staged = `${target}.tmp`
+
+	writeFileSync(staged, JSON.stringify(Object.fromEntries(verified)), { mode: 0o600 })
+	renameSync(staged, target)
+}
+
+export async function sizeOf(file: string): Promise<number> {
 	try {
 		return (await stat(file)).size
 	} catch (error) {

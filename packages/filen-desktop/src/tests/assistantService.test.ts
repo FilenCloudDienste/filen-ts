@@ -325,6 +325,7 @@ describe("assistant ipc", () => {
 			deleteModels: vi.fn(() => Promise.resolve()),
 			download: vi.fn(() => Promise.resolve({ ok: true as const, value: null })),
 			cancelDownload: vi.fn(),
+			importChunk: vi.fn(() => Promise.resolve({ ok: true as const, value: "more" as const })),
 			load: vi.fn(),
 			generate: vi.fn(() => Promise.resolve({ ok: true as const, value: { content: "", toolCalls: [] } })),
 			cancel: vi.fn(),
@@ -370,6 +371,20 @@ describe("assistant ipc", () => {
 			invoke("inspect", event(), { ...MODEL, shards: [{ file: "../m.gguf", size: 4, sha256: "a".repeat(64) }] })
 		).rejects.toThrow("invalid assistant payload")
 		await expect(invoke("deleteModels", event(), "..")).rejects.toThrow("invalid assistant payload")
+	})
+
+	it("takes an imported shard as bytes of at most 16 MiB a chunk, for a file the manifest names", async () => {
+		const { invoke, event, service } = wired()
+
+		await invoke("importChunk", event(), MODEL, "m.gguf", 0, new Uint8Array(8), true)
+		expect(service.importChunk).toHaveBeenCalledWith(expect.anything(), MODEL, "m.gguf", 0, new Uint8Array(8), true)
+		await expect(invoke("importChunk", event(), MODEL, "m.gguf", 0, new Uint8Array(16 * 1024 * 1024 + 1), false)).rejects.toThrow(
+			"invalid assistant payload"
+		)
+		await expect(invoke("importChunk", event(), MODEL, "m.gguf", 0, "bytes", false)).rejects.toThrow("invalid assistant payload")
+		await expect(invoke("importChunk", event(), MODEL, "m.gguf", -1, new Uint8Array(8), false)).rejects.toThrow(
+			"invalid assistant payload"
+		)
 	})
 
 	it("downloads from https (or a loopback dev server) only", async () => {

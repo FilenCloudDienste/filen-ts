@@ -38,6 +38,9 @@ const requestSchema = type({
 	"+": "reject"
 })
 
+// A chunk of an imported shard; the page sends 8 MiB.
+const IMPORT_CHUNK_MAX = 16 * 1024 * 1024
+
 const genSchema = type("0 <= number.integer <= 9007199254740991")
 
 const idSchema = type(/^\w[\w.-]*$/)
@@ -86,6 +89,16 @@ const CALLS: Record<AssistantCall, CheckedCall<AssistantService>> = {
 	cancelDownload: call(type([]), (service, page) => {
 		service.cancelDownload(page)
 	}),
+	importChunk: call(
+		type([
+			"object",
+			"string <= 256",
+			"0 <= number.integer <= 9007199254740991",
+			type.instanceOf(Uint8Array).narrow((bytes, ctx) => bytes.byteLength <= IMPORT_CHUNK_MAX || ctx.mustBe("at most 16 MiB")),
+			"boolean"
+		]),
+		(service, page, [model, file, offset, bytes, last]) => service.importChunk(page, modelFiles(model), file, offset, bytes, last)
+	),
 	load: call(type(["object", loadOptionsSchema]), (service, page, [model, options]) => service.load(page, modelFiles(model), options)),
 	generate: call(type([genSchema, requestSchema, "boolean"]), (service, page, [gen, request, updates]) =>
 		// The tools' parameters are checked as objects; node-llama-cpp reads them as the JSON schemas they are.

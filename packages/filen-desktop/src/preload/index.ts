@@ -300,6 +300,7 @@ const bridge: DesktopBridge = {
 		cancelDownload: () => {
 			assistantInvoke("cancelDownload").catch(() => undefined)
 		},
+		importChunk: (model, file, offset, bytes, last) => assistantInvoke("importChunk", model, file, offset, ownBytes(bytes), last),
 		load: (model, options) => assistantInvoke("load", model, options),
 		generate: (id, request, updates) => assistantInvoke("generate", id, request, updates),
 		cancel: id => {

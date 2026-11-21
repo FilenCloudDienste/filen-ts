@@ -3,6 +3,7 @@ import { type } from "arktype"
 import type { AssistantGenerateRequest, AssistantGenerateResult } from "@filen/shared/assistant"
 import type {
 	DesktopAssistantEvent,
+	DesktopAssistantImport,
 	DesktopAssistantInspection,
 	DesktopAssistantLoaded,
 	DesktopAssistantLoadOptions,
@@ -25,6 +26,7 @@ import { serialQueue } from "../../shared/serial.ts"
 import type { AtomicFile } from "../atomicFile.ts"
 import type { Page } from "../pages.ts"
 import { redact } from "../redact.ts"
+import { createModelImporter } from "./importer.ts"
 
 // Main's side of the assistant's native engine: starts the "Filen Assistant" utility process for the page that asks
 // (a download or a load) and ends it when that page lets go, navigates or goes away, so an idle app holds none of its
@@ -61,6 +63,14 @@ export interface AssistantService {
 	deleteModels(keep: string | null): Promise<void>
 	download(page: Page, model: AssistantModelFiles, baseUrl: string): Promise<DesktopAssistantResult<null>>
 	cancelDownload(page: Page): void
+	importChunk(
+		page: Page,
+		model: AssistantModelFiles,
+		file: string,
+		offset: number,
+		bytes: Uint8Array,
+		last: boolean
+	): Promise<DesktopAssistantResult<DesktopAssistantImport>>
 	load(
 		page: Page,
 		model: AssistantModelFiles,
@@ -113,6 +123,7 @@ export function createAssistantService(deps: AssistantServiceDeps): AssistantSer
 	const serial = serialQueue()
 	let child: Child | null = null
 	let state: EngineState | null = null
+	const importer = createModelImporter(deps.modelsRoot)
 
 	async function readState(): Promise<EngineState> {
 		if (state !== null) {
@@ -380,6 +391,7 @@ export function createAssistantService(deps: AssistantServiceDeps): AssistantSer
 		cancelDownload: page => {
 			owned(page)?.proc.postMessage({ t: "cancelDownload" })
 		},
+		importChunk: (page, model, file, offset, bytes, last) => serial(() => importer.chunk(page.id, model, file, offset, bytes, last)),
 		load: (page, model, options) => load(page, model, options),
 		generate: async (page, gen, request, updates) => {
 			const current = owned(page)
@@ -411,6 +423,8 @@ export function createAssistantService(deps: AssistantServiceDeps): AssistantSer
 			if (child !== null && child.page.id === pageId) {
 				kill(child)
 			}
+
+			void serial(() => importer.abandon(pageId))
 		},
 		stop: () => {
 			if (child !== null) {
@@ -421,6 +435,8 @@ export function createAssistantService(deps: AssistantServiceDeps): AssistantSer
 			if (child !== null) {
 				kill(child)
 			}
+
+			await serial(() => importer.abandon())
 
 			await serial(() => deleteModels(deps.modelsRoot, null))
 		}
