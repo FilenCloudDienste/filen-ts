@@ -45,8 +45,8 @@ const ASSISTANT_RAW_SDK = "The assistant goes through the feature modules the us
 // The assistant's dispatcher runs calls a model produced, and a shared note or chat message can
 // steer that model. What the assistant can import it may one day call, so permanent deletion,
 // restoring from the trash or a version, sending, sharing, public links, adding participants, every
-// contact action, leaving, unsharing, account security, the session, logout and stopping or pausing
-// transfers are kept out of its reach at the import level, whatever the guard decides at runtime.
+// contact action, leaving, unsharing, account security, the session, logout, the desktop bridge and stopping or
+// pausing transfers are kept out of its reach at the import level, whatever the guard decides at runtime.
 // Chats are draft-only: nothing that sends, queues or drops a message. The trash, transfers and settings it only reads or opens.
 const ASSISTANT_RESTRICTED_PATHS = [
 	{
@@ -99,11 +99,33 @@ const ASSISTANT_RESTRICTED_PATHS = [
 		importNames: ["persistSession", "clearSession", "resumeSession", "broadcastAuth"],
 		message: ASSISTANT_FORBIDDEN
 	},
+	// The desktop bridge holds the session vault and every sync, mount, transfer, lock and app control; the
+	// assistant asks isDesktopApp() and reads the held sync and mount stores instead.
+	{ name: "@/lib/desktop", importNames: ["desktopBridge"], message: ASSISTANT_FORBIDDEN },
+	{ name: "@/features/sync/lib/syncStore", importNames: ["syncApi", "openAddPair", "closeAddPair"], message: ASSISTANT_FORBIDDEN },
+	{ name: "@/features/mounts/lib/mountsStore", importNames: ["mountsApi", "confirmMountsSignOut"], message: ASSISTANT_FORBIDDEN },
 	{ name: "@/lib/logout", message: ASSISTANT_FORBIDDEN },
 	{ name: "@/features/shell/lib/performLogout", message: ASSISTANT_FORBIDDEN },
 	{ name: "@/lib/sdk/client", message: ASSISTANT_RAW_SDK },
 	{ name: "@/workers/sdk.worker", allowTypeImports: true, message: ASSISTANT_RAW_SDK },
 	{ name: "@filen/sdk-rs", allowTypeImports: true, message: ASSISTANT_RAW_SDK }
+]
+
+// The preload's global is the bridge desktopBridge() returns, reachable without an import.
+const DESKTOP_GLOBAL_MESSAGE = `The desktop bridge is out of the assistant's reach. ${ASSISTANT_FORBIDDEN}`
+const ASSISTANT_NO_DESKTOP_GLOBAL = [
+	{
+		selector: "MemberExpression[object.name=/^(window|globalThis|self)$/][property.name='desktop']",
+		message: DESKTOP_GLOBAL_MESSAGE
+	},
+	{
+		selector: "MemberExpression[object.name=/^(window|globalThis|self)$/][property.value='desktop']",
+		message: DESKTOP_GLOBAL_MESSAGE
+	},
+	{
+		selector: "VariableDeclarator[init.name=/^(window|globalThis|self)$/] > ObjectPattern > Property[key.name='desktop']",
+		message: DESKTOP_GLOBAL_MESSAGE
+	}
 ]
 
 const ASSISTANT_RESTRICTED_PATTERNS = [
@@ -226,6 +248,7 @@ export default defineConfig([
 			"no-restricted-syntax": [
 				"error",
 				{ selector: "ImportExpression", message: "A dynamic import would slip past the assistant's import restrictions." },
+				...ASSISTANT_NO_DESKTOP_GLOBAL,
 				...NO_LAZY_LOADING
 			]
 		}

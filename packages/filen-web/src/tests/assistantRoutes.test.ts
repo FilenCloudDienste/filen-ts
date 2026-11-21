@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-vi.mock("@/lib/desktop", () => ({ desktopBridge: () => undefined }))
+vi.mock("@/lib/desktop", () => ({ isDesktopApp: () => false, desktopBridge: () => undefined }))
 
 const { screenOfPath } = await import("@/features/assistant/tools/routes")
 

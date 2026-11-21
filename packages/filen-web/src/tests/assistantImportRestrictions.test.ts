@@ -66,17 +66,20 @@ const FORBIDDEN = [
 	'import { performLogout } from "@/features/shell/lib/performLogout"',
 	'import { ChangePassword } from "@/features/settings/components/security/changePassword"',
 	'import { setTheme } from "@/features/settings/lib/theme"',
-	'import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"'
+	'import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"',
+	'import { desktopBridge } from "@/lib/desktop"',
+	'import { syncApi, openAddPair, closeAddPair } from "@/features/sync/lib/syncStore"',
+	'import { mountsApi, confirmMountsSignOut } from "@/features/mounts/lib/mountsStore"'
 ]
 
 describe("assistant import restrictions", () => {
 	it.each(["src/features/assistant/runtime/loop.ts", "src/features/assistant/tools/drive.ts", "src/workers/assistant.worker.ts"])(
-		"keeps deleting, restoring, sending, queueing, sharing, settings, transfer control, the session and logout out of reach in %s",
+		"keeps deleting, restoring, sending, queueing, sharing, settings, transfer control, the session, logout and the desktop bridge out of reach in %s",
 		async file => {
 			const messages = await lintImports(file, FORBIDDEN.join("\n"))
 
 			// One per banned name, or per statement for a module banned whole; trashItems passes.
-			expect(messages).toHaveLength(36)
+			expect(messages).toHaveLength(42)
 			expect(messages.every(message => message.includes("irreversible or security-critical"))).toBe(true)
 
 			for (const line of FORBIDDEN) {
@@ -112,6 +115,38 @@ describe("assistant import restrictions", () => {
 				lintImports(
 					file,
 					'import type { Note } from "@filen/sdk-rs"\nimport { type Chat } from "@filen/sdk-rs"\nimport type { ArchiveNameInfo } from "@/workers/sdk.worker"'
+				)
+			).resolves.toEqual([])
+		}
+	)
+
+	it.each(["src/features/assistant/tools/routes.ts", "src/workers/assistant.worker.ts"])(
+		"keeps the desktop bridge's global out of reach in %s, allowing only the value-free checks and the held stores",
+		async file => {
+			const globals = [
+				"void window.desktop",
+				'void window["desktop"]',
+				"void globalThis.desktop?.session.get()",
+				"void self.desktop",
+				"const { desktop } = window"
+			]
+
+			for (const line of globals) {
+				const messages = await lintImports(file, line)
+
+				expect(messages, line).toHaveLength(1)
+				expect(messages[0], line).toContain("The desktop bridge is out of the assistant's reach.")
+			}
+
+			await expect(
+				lintImports(
+					file,
+					[
+						'import { isDesktopApp, desktopPlatform } from "@/lib/desktop"',
+						'import { useSyncStore } from "@/features/sync/lib/syncStore"',
+						'import { useMountsStore } from "@/features/mounts/lib/mountsStore"',
+						"void window.location"
+					].join("\n")
 				)
 			).resolves.toEqual([])
 		}

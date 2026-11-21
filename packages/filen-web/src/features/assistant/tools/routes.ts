@@ -3,7 +3,7 @@ import { openRoute, type AssistantSignal } from "@filen/shared/assistant"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 import { navigateChecked } from "@/features/assistant/tools/navigation"
-import { desktopBridge } from "@/lib/desktop"
+import { isDesktopApp } from "@/lib/desktop"
 
 export type AssistantRouteName = (typeof openRoute.input.route.type)["infer"]
 
@@ -46,7 +46,7 @@ export function screenOfPath(pathname: string): AssistantRouteName | "other" {
 // Sections that exist in the shared tool but not in this app: no camera upload on the web, and the desktop app sells
 // no plans (its Plans URL lands on Billing).
 export const UNAVAILABLE_ROUTES: ReadonlySet<AssistantRouteName> = new Set(
-	desktopBridge() === undefined ? ["settings_camera_upload"] : ["settings_camera_upload", "settings_plans"]
+	isDesktopApp() ? ["settings_camera_upload", "settings_plans"] : ["settings_camera_upload"]
 )
 
 // The same navigations the icon rail and the settings sidebar make. False when the section does not

@@ -23,6 +23,12 @@ export function desktopBridge(): DesktopBridge | undefined {
 	return bridge
 }
 
+// Whether this page runs inside the desktop app, without handing out the bridge: code that may not reach the
+// bridge's controls (the assistant) asks this.
+export function isDesktopApp(): boolean {
+	return bridge !== undefined
+}
+
 export function desktopPlatform(): DesktopPlatform | undefined {
 	return bridge?.platform
 }
