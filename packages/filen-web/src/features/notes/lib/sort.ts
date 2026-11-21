@@ -1,5 +1,5 @@
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { matchesNameSearch, nameSearchKey } from "@filen/shared"
+import { compareIds, fastLocaleCompare, matchesNameSearch, nameSearchKey } from "@filen/shared"
 
 // Port of mobile's notesSorter.sort (src/lib/sort.ts) onto the wasm Note shape. `editedTimestamp`
 // is a bigint on this surface — every comparison below stays in bigint (`<`/`>`), never Number(): a
@@ -44,6 +44,11 @@ function noteSearchTitle(note: Note): string {
 
 export function tagDisplayName(tag: NoteTag): string {
 	return tag.name ?? tag.uuid
+}
+
+// Tags by display name, then uuid: the tags view's name order, used by every other tag list (chips, submenus).
+export function compareTagsByName(a: NoteTag, b: NoteTag): number {
+	return fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)) || compareIds(a.uuid, b.uuid)
 }
 
 // A note whose metadata never decrypted for this account — the SDK leaves `encryptionKey` undefined
