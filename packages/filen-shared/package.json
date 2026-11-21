@@ -18,6 +18,8 @@
 		"./dom/formHardening": "./src/dom/formHardening.ts",
 		"./dom/formFieldNames": "./src/dom/formFieldNames.ts",
 		"./dom/scheduleIdle": "./src/dom/scheduleIdle.ts",
+		"./dom/assistantModel/manifest": "./src/dom/assistantModel/manifest.ts",
+		"./dom/assistantModel/download": "./src/dom/assistantModel/download.ts",
 		"./pdfSignatures": "./src/pdfSignatures.ts",
 		"./emojis": "./src/emojis/index.ts",
 		"./tooling": "./src/tooling/licenseNotices.ts",
