@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { FolderPlusIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveActivity, performMove } from "@/features/drive/lib/dnd"
 import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
@@ -14,7 +13,7 @@ import { isCopyConfirmDisabled, isMoveConfirmDisabled, isMoveRowDisabled } from 
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell } from "@/features/drive/components/directoryPicker"
 import { useDirectoryPicker, useDirectoryPickerFilter } from "@/features/drive/hooks/useDirectoryPicker"
-import { NewDirectoryDialog } from "@/features/drive/components/newDirectory"
+import { usePickerNewDirectory } from "@/features/drive/hooks/usePickerNewDirectory"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -62,15 +61,17 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 	const { items, onClose, mode, initialPath } = props
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
-	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the
-	// entry point was gated when it was clicked, but the connection can drop while the picker is open.
-	// A form's pick writes nothing; the form gates its own submit.
+	// The confirm re-checks connectivity here (the in-place create hides itself offline): the entry point was
+	// gated when it was clicked, but the connection can drop while the picker is open. A form's pick writes
+	// nothing; the form gates its own submit.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const confirmOfflineGated = !isOnline && (props.mode !== "pick" || props.startsWork === true)
-	const { pathStack, targetUuid, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker(initialPath)
+	const picker = useDirectoryPicker(initialPath)
+	const { pathStack, targetUuid, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = picker
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [pending, setPending] = useState(false)
-	const [newFolderOpen, setNewFolderOpen] = useState(false)
+	// Lands inside whichever directory is open and opens it, so the new destination is the pick at once.
+	const newDirectory = usePickerNewDirectory({ picker, available: true, disabled: pending })
 	const directories = rows.filter(item => item.type === "directory")
 	// Same instant local name filter the non-"drive" listing variants use — this picker is a pure
 	// breadcrumb browser (never wired to the cache-backed engine), so a filtered folder tree is the only
@@ -154,39 +155,20 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 					onRoot={goRoot}
 					onJump={goTo}
 				/>
-				<div className="flex items-center gap-2">
-					<div className="min-w-0 flex-1">
-						{directories.length > 0 ? (
-							<ListFilterInput
-								value={filter}
-								onChange={setFilter}
-								placeholder={t("driveMoveDialogFilterPlaceholder")}
-								ariaLabel={t("driveMoveDialogFilterPlaceholder")}
-							/>
-						) : null}
-					</div>
-					{/* Create-directory-in-place — lands inside whichever directory is currently open (targetUuid),
-					so the new destination is immediately browsable/pickable without leaving the picker (mobile
-					parity: driveSelectToolbar.tsx's own in-picker create). */}
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						disabled={pending || !isOnline}
-						title={offlineTitle}
-						onClick={() => {
-							setNewFolderOpen(true)
-						}}
-					>
-						<FolderPlusIcon />
-						{t("driveMoveDialogNewDirectory")}
-					</Button>
-				</div>
+				{directories.length > 0 ? (
+					<ListFilterInput
+						value={filter}
+						onChange={setFilter}
+						placeholder={t("driveMoveDialogFilterPlaceholder")}
+						ariaLabel={t("driveMoveDialogFilterPlaceholder")}
+					/>
+				) : null}
 				<PickerListShell
 					listingQuery={listingQuery}
 					noResults={filter.trim().length > 0}
 					filteredOutMessage={rows.length > 0 ? t("driveTreeMenuNoDirectories") : undefined}
 					count={filteredDirectories.length}
+					leading={newDirectory.leading}
 					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 					renderRow={index => {
 						const directory = filteredDirectories[index]
@@ -201,9 +183,11 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 					}}
 				/>
 				<DialogFooter>
+					{newDirectory.button}
 					<Button
 						disabled={
 							pending ||
+							newDirectory.pending ||
 							confirmOfflineGated ||
 							listingQuery.status !== "success" ||
 							(mode === "copy" || mode === "pick"
@@ -222,16 +206,6 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 					</Button>
 				</DialogFooter>
 			</DialogContent>
-			{/* Nested inside the outer Dialog (Base UI's own "Nested dialogs" support — same pattern as
-			versionsDialog.tsx's nested ConfirmDialog) rather than a sibling, for the stacked focus-trap/
-			backdrop behavior. It patches the "drive" listing this picker browses, so the new row is
-			immediately descendable/pickable. */}
-			<NewDirectoryDialog
-				open={newFolderOpen}
-				onOpenChange={setNewFolderOpen}
-				parentUuid={targetUuid}
-				hiddenNotice={false}
-			/>
 		</Dialog>
 	)
 }

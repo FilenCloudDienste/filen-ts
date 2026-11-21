@@ -15,7 +15,8 @@ import { LIST_DIALOG_BODY_CLASS } from "@/components/dialogs/listDialog"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Shared UI of the in-dialog drive pickers (move/copy, photos root, chat attach, playlist tracks); their
-// state lives in hooks/useDirectoryPicker.ts. Row gating and selection stay per dialog. The list is a window over
+// state lives in hooks/useDirectoryPicker.ts, their new-directory row in hooks/usePickerNewDirectory.tsx. Row gating and
+// selection stay per dialog. The list is a window over
 // fixed-height rows: a directory of tens of thousands of files mounts what is in view.
 
 export const PICKER_ROW_CLASS =
@@ -77,9 +78,9 @@ export function PickerBreadcrumb({ pathStack, names, onRoot, onJump }: PickerBre
 }
 
 // A single-line PICKER_ROW_CLASS button (py-2 around a 20px line) and the 2px gap below it.
-const PICKER_ROW_HEIGHT = 38
+export const PICKER_ROW_HEIGHT = 38
 // The list's padding, inside the scroll box.
-const PICKER_LIST_PADDING = 8
+export const PICKER_LIST_PADDING = 8
 const PICKER_OVERSCAN = 8
 
 export interface PickerListShellProps {
@@ -93,9 +94,16 @@ export interface PickerListShellProps {
 	rowKey: (index: number) => string
 	// The row at `index`: a single-line PICKER_ROW_CLASS button; the shell gives it its list item.
 	renderRow: (index: number) => ReactNode
+	// Pinned over the rows while they scroll (the new-directory row), at a fixed height that includes the list's top padding.
+	leading?: PickerLeading | undefined
 }
 
-export function PickerListShell({ listingQuery, noResults, filteredOutMessage, count, rowKey, renderRow }: PickerListShellProps) {
+export interface PickerLeading {
+	node: ReactNode
+	height: number
+}
+
+export function PickerListShell({ listingQuery, noResults, filteredOutMessage, count, rowKey, renderRow, leading }: PickerListShellProps) {
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
 	return (
@@ -113,7 +121,7 @@ export function PickerListShell({ listingQuery, noResults, filteredOutMessage, c
 						void listingQuery.refetch()
 					}}
 				/>
-			) : count === 0 ? (
+			) : count === 0 && leading === undefined ? (
 				noResults === true ? (
 					<NoResultsMessage />
 				) : filteredOutMessage !== undefined ? (
@@ -128,12 +136,23 @@ export function PickerListShell({ listingQuery, noResults, filteredOutMessage, c
 					/>
 				)
 			) : (
-				<PickerRows
-					scrollElement={scrollElement}
-					count={count}
-					rowKey={rowKey}
-					renderRow={renderRow}
-				/>
+				<>
+					{leading === undefined ? null : (
+						<div
+							className="sticky top-0 z-10 shrink-0 bg-popover px-2 pt-2"
+							style={{ height: leading.height }}
+						>
+							{leading.node}
+						</div>
+					)}
+					<PickerRows
+						scrollElement={scrollElement}
+						count={count}
+						rowKey={rowKey}
+						renderRow={renderRow}
+						leadingHeight={leading?.height ?? 0}
+					/>
+				</>
 			)}
 		</div>
 	)
@@ -144,12 +163,15 @@ function PickerRows({
 	scrollElement,
 	count,
 	rowKey,
-	renderRow
+	renderRow,
+	leadingHeight
 }: {
 	scrollElement: HTMLDivElement | null
 	count: number
 	rowKey: (index: number) => string
 	renderRow: (index: number) => ReactNode
+	// The pinned row above the list: the rows start below it, and it holds the top padding already.
+	leadingHeight: number
 }) {
 	"use no memo"
 
@@ -158,7 +180,8 @@ function PickerRows({
 		getScrollElement: () => scrollElement,
 		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => PICKER_ROW_HEIGHT,
-		paddingStart: PICKER_LIST_PADDING,
+		paddingStart: leadingHeight > 0 ? 0 : PICKER_LIST_PADDING,
+		scrollMargin: leadingHeight,
 		paddingEnd: PICKER_LIST_PADDING,
 		overscan: PICKER_OVERSCAN,
 		getItemKey: rowKey
@@ -173,7 +196,7 @@ function PickerRows({
 				<li
 					key={row.key}
 					className="absolute top-0 right-2 left-2"
-					style={{ height: PICKER_ROW_HEIGHT, transform: `translateY(${String(row.start)}px)` }}
+					style={{ height: PICKER_ROW_HEIGHT, transform: `translateY(${String(row.start - leadingHeight)}px)` }}
 				>
 					{renderRow(row.index)}
 				</li>

@@ -34,6 +34,12 @@ export function useDirectoryPicker(initialPath?: readonly string[]) {
 		setPathStack(prev => [...prev, uuid])
 	}
 
+	// Into `uuid` only while `parentUuid` is still the one open: an answer that arrives after the user browsed
+	// elsewhere leaves the picker where they went.
+	function enter(parentUuid: string | null, uuid: string): void {
+		setPathStack(prev => ((prev.at(-1) ?? null) === parentUuid ? [...prev, uuid] : prev))
+	}
+
 	function goRoot(): void {
 		setPathStack([])
 	}
@@ -42,8 +48,10 @@ export function useDirectoryPicker(initialPath?: readonly string[]) {
 		setPathStack(prev => prev.slice(0, index + 1))
 	}
 
-	return { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo }
+	return { pathStack, targetUuid, listingQuery, items, namesQuery, descend, enter, goRoot, goTo }
 }
+
+export type DirectoryPicker = ReturnType<typeof useDirectoryPicker>
 
 // A filter scoped to one directory must never carry over and hide everything in the next, so it resets
 // on every path change. Reset in render (react.dev's "adjusting state when a prop changes"), not an effect.

@@ -118,7 +118,8 @@ describe("MoveTargetDialog picking", () => {
 		render(createElement(MoveTargetDialog, { mode: "pick", items: [], pickLabels: LABELS, onPick: vi.fn(), onClose: vi.fn() }))
 
 		expect(screen.getByRole("button", { name: "Save here" })).toHaveProperty("disabled", false)
-		expect(screen.getByRole("button", { name: "New directory" })).toHaveProperty("disabled", true)
+		// Creating writes: offline it is not offered at all.
+		expect(screen.queryByRole("button", { name: "New directory" })).toBeNull()
 	})
 
 	it("won't pick offline when the pick itself starts the work", () => {

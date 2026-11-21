@@ -526,8 +526,10 @@ export const drive = {
 	driveMoveHereAction: "Move here",
 	/** Move/copy dialog — filter box placeholder and aria-label over the currently listed directories (shared with the copy dialog below, same picker component) */
 	driveMoveDialogFilterPlaceholder: "Filter directories",
-	/** Move/copy dialog — button creating a new destination directory in place, right inside the directory currently open in the picker */
+	/** Every directory picker (move, copy, save or extract to, Photos/Videos directories, sync remote directory) — footer button opening a name row for a new directory inside the one currently open in the picker */
 	driveMoveDialogNewDirectory: "New directory",
+	/** Every directory picker — aria-label of the name field in the new-directory row at the top of the listing */
+	drivePickerNewDirectoryName: "Name of the new directory",
 
 	// ── Copy dialog (the move dialog's destination picker in its copy mode, see moveTargetDialog.tsx) ──
 	/** Copy dialog — title of the destination-directory picker (driveActionCopy) */
