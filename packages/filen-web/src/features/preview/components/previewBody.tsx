@@ -40,7 +40,7 @@ export interface PreviewBodyProps {
 	editable: boolean
 	// Read-only because a rename changed the save format: the spreadsheet grid says so.
 	renamedReadOnly: boolean
-	// Outside the drive nothing is ever editable, so a spreadsheet keeps only what it shows.
+	// A file the user cannot write (ownsWritableFile) is never editable, so a spreadsheet keeps only what it shows.
 	neverEditable: boolean
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean

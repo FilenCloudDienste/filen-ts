@@ -5,6 +5,7 @@ import { createElement, useEffect } from "react"
 import { cleanup, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
+import type { DriveVariant } from "@/features/drive/lib/preferences"
 
 // A rename of the file on screen (from the header menu or another device) must never swap its viewer:
 // the unsaved edits live in that viewer. A rename to another format leaves it read-only, offering no save.
@@ -71,7 +72,7 @@ function named(name: string, uuid = "file") {
 }
 
 // A second slot to step to and back from, when `index` is given.
-function overlay(name: string, index = 0, variant: "drive" | "recents" = "drive") {
+function overlay(name: string, index = 0, variant: DriveVariant = "drive") {
 	return createElement(PreviewOverlay, {
 		variant,
 		items: [named(name), named("other.pdf", "other")],
@@ -174,14 +175,26 @@ describe("PreviewOverlay — a rename of the open file", () => {
 		expect((await screen.findByTestId("spreadsheet")).dataset["editable"]).toBe("true")
 	})
 
-	it("opens a spreadsheet outside the drive as never editable, so it keeps only what it shows", async () => {
-		const { unmount } = render(overlay("budget.xlsx", 0, "recents"))
+	it("opens a spreadsheet in the trash or a share received as never editable, so it keeps only what it shows", async () => {
+		for (const variant of ["trash", "sharedIn"] as const) {
+			const { unmount } = render(overlay("budget.xlsx", 0, variant))
 
-		expect((await screen.findByTestId("spreadsheet")).dataset["neverEditable"]).toBe("true")
+			expect((await screen.findByTestId("spreadsheet")).dataset["neverEditable"], variant).toBe("true")
 
-		unmount()
-		render(overlay("budget.xlsx"))
+			unmount()
+		}
+	})
 
-		expect((await screen.findByTestId("spreadsheet")).dataset["neverEditable"]).toBe("false")
+	// Regression: a file opened from the user's own public links list (or recents, favorites, shared out) was read-only.
+	it("opens the user's own spreadsheet editable from every listing of it", async () => {
+		for (const variant of ["drive", "links", "recents", "favorites", "sharedOut"] as const) {
+			const { unmount } = render(overlay("budget.xlsx", 0, variant))
+			const sheet = await screen.findByTestId("spreadsheet")
+
+			expect(sheet.dataset["neverEditable"], variant).toBe("false")
+			expect(sheet.dataset["editable"], variant).toBe("true")
+
+			unmount()
+		}
 	})
 })

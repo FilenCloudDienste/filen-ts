@@ -108,10 +108,10 @@ describe("canEditVideo and the in-place video gate", () => {
 		expect(canEditVideo(videoFile("a.ogv"), "drive")).toBe(false)
 	})
 
-	it("never edits outside the drive, an undecryptable file, or a container nothing reads", () => {
+	it("never edits a share received, the trash, an undecryptable file, or a container nothing reads", () => {
 		expect(canEditVideo(videoFile("a.mp4"), "sharedIn")).toBe(false)
 		expect(canEditVideo(videoFile("a.mp4"), "trash")).toBe(false)
-		expect(canEditVideo(videoFile("a.mp4"), "recents")).toBe(false)
+		expect(canEditVideo(videoFile("a.mp4"), "recents")).toBe(true)
 		expect(canEditVideo(videoFile("a.mp4", { meta: { type: "encrypted", data: "x" } }), "drive")).toBe(false)
 		expect(canEditVideo(videoFile("a.avi"), "drive")).toBe(false)
 	})

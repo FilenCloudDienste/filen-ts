@@ -321,7 +321,8 @@ describe("presentation save on the page", () => {
 		for (const name of ["a.pptx", "a.pptm", "a.potx", "a.ppsx", "a.odp", "a.otp"])
 			expect(isEditable(deckItem(name), "drive"), name).toBe(true)
 		for (const name of ["a.ppt", "a.pps", "a.pot"]) expect(isEditable(deckItem(name), "drive"), name).toBe(false)
-		expect(isEditable(deckItem("a.pptx"), "recents")).toBe(false)
+		expect(isEditable(deckItem("a.pptx"), "recents")).toBe(true)
+		expect(isEditable(deckItem("a.pptx"), "sharedIn")).toBe(false)
 	})
 
 	it("uploads a port's stream through uploadFileFromPort and re-keys the listing onto the rotated uuid", async () => {

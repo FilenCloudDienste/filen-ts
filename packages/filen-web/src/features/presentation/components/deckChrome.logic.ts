@@ -2,8 +2,8 @@ import type { KeyboardEvent } from "react"
 import type { TFunction } from "i18next"
 import type { Action, GateReason, SlideRef } from "@filen/office/core/presentation"
 import type { PresentationLayoutInfo, SlideLayer } from "@filen/office/dom/presentation"
-import type { DriveVariant } from "@/features/drive/lib/preferences"
-import { docxContextReason, viewOnlyReasonKey, type DocxContextReason } from "@/features/preview/components/docxViewer.logic"
+import type { ReadOnlyOrigin } from "@/features/drive/lib/previewSave.logic"
+import { viewOnlyReasonKey, type DocxContextReason } from "@/features/preview/components/docxViewer.logic"
 import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -80,10 +80,9 @@ export type PresentationViewOnlyReason = GateReason | DocxContextReason | "legac
 export function presentationViewOnlyReasons(
 	gate: readonly GateReason[],
 	format: string | undefined,
-	variant: DriveVariant | undefined,
+	where: ReadOnlyOrigin | null,
 	editing: { readonly writable: boolean; readonly renamed: boolean }
 ): PresentationViewOnlyReason[] {
-	const where = docxContextReason({ anon: false, archive: false, linked: false, variant })
 	const out: PresentationViewOnlyReason[] = [
 		...(where === null ? [] : [where]),
 		...(format === "ppt" ? (["legacy"] as const) : []),

@@ -16,7 +16,7 @@ import type {
 import type { BalloonLayout, DocxDocument } from "@filen/office/react/docx"
 import { isCompoundFile } from "@filen/office/core/cfb"
 import type { DriveItem } from "@/features/drive/lib/item"
-import type { DriveVariant } from "@/features/drive/lib/preferences"
+import type { ReadOnlyOrigin } from "@/features/drive/lib/previewSave.logic"
 import { extensionOf, itemFileKind } from "@/features/drive/lib/preview.logic"
 import type { PreviewKey } from "@/lib/i18n"
 import type { ZoomFit } from "@/features/preview/components/commandBar.logic"
@@ -226,8 +226,8 @@ export interface DocxOpenContext {
 	archive: boolean
 	// Someone else's file reached through their link (a chat's link card): its listing variant says nothing.
 	linked: boolean
-	// The drive listing it was opened from; undefined outside the drive.
-	variant: DriveVariant | undefined
+	// Why the listing it was opened from never saves it (readOnlyOrigin); null for the user's own file, or outside the drive.
+	origin: ReadOnlyOrigin | null
 }
 
 export function docxContextReason(context: DocxOpenContext): DocxContextReason | null {
@@ -243,19 +243,7 @@ export function docxContextReason(context: DocxOpenContext): DocxContextReason |
 		return "linkedFile"
 	}
 
-	switch (context.variant) {
-		case "trash":
-			return "trash"
-		case "sharedIn":
-			return "sharedIn"
-		case "recents":
-		case "favorites":
-		case "links":
-		case "sharedOut":
-			return "notInDrive"
-		default:
-			return null
-	}
+	return context.origin
 }
 
 export function viewOnlyReasons(gate: readonly DocxGateReason[], context: DocxOpenContext): DocxViewOnlyReason[] {

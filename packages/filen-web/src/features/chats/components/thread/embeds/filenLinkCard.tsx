@@ -83,9 +83,9 @@ function LinkCardShell({
 	)
 }
 
-// The single linked file in the SAME PreviewOverlay every owned drive file uses. `variant="links"` (not
-// "drive"): the item is neither owned nor a real tree member, so this keeps the overlay's inline-editor save
-// path inert (isEditable gates on variant==="drive") on top of the overlay's own isLinkedEmbedItem menu gate.
+// The single linked file in the SAME PreviewOverlay every owned drive file uses. `variant="links"`: the item is
+// neither owned nor a real tree member, and the item itself keeps the overlay's save path inert (readOnlyOrigin's
+// isLinkedEmbedItem check) as it keeps the menu off.
 function LinkedPreviewOverlay({ item, downloadable, onClose }: { item: DriveItem; downloadable: boolean; onClose: () => void }) {
 	return (
 		<PreviewOverlay

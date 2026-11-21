@@ -28,6 +28,7 @@ import { uploadConvertedCopy } from "@/features/drive/lib/convertedCopy"
 import { driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
+import { readOnlyOrigin } from "@/features/drive/lib/previewSave.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, useProvidedPreviewOrigin } from "@/features/preview/lib/accessMode"
 import { DOCX_FONT_URLS, docxHost, docxLegacy, docxProtection, prewarmDocxWorker } from "@/features/preview/lib/docxEngine"
@@ -152,6 +153,7 @@ function DocxViewerBody({ item, alt, variant, editing, canSaveCopy, onOpenFile }
 	const downloading = result.status === "pending"
 	const anon = usePreviewAccessMode() === "anon"
 	const archive = useProvidedPreviewOrigin() !== null
+	const origin = variant === undefined ? null : readOnlyOrigin(item, variant)
 
 	// The worker starts while the file downloads; a buffer already cached, or a failed download, starts none.
 	// The editor lays out on this thread and needs no worker.
@@ -180,7 +182,7 @@ function DocxViewerBody({ item, alt, variant, editing, canSaveCopy, onOpenFile }
 							name={alt}
 						>
 							{(content, key, conversion) => {
-								const context = { anon, archive, linked: isLinkedEmbedItem(item), variant }
+								const context = { anon, archive, linked: isLinkedEmbedItem(item), origin }
 
 								// A Word 97–2003 document is shown from its conversion, read-only.
 								if (conversion !== null) {
@@ -273,7 +275,7 @@ function DocxViewerBody({ item, alt, variant, editing, canSaveCopy, onOpenFile }
 									alt={alt}
 									format="docx"
 									encrypted={undefined}
-									context={{ anon, archive, linked: isLinkedEmbedItem(item), variant }}
+									context={{ anon, archive, linked: isLinkedEmbedItem(item), origin }}
 								/>
 							)
 

@@ -54,6 +54,16 @@ export function mockFileItem(overrides: Partial<File> = {}): Extract<DriveItem, 
 	return item
 }
 
+// The user's own file by name and mime, as a drive listing holds it (a real parent, unlike linkedFileItem's).
+export function ownedFileItem(name: string, mime: string, overrides: Partial<File> = {}): Extract<DriveItem, { type: "file" }> {
+	const size = overrides.size ?? 1_024n
+
+	return mockFileItem({
+		meta: { type: "decoded", data: { name, mime, modified: 1_700_000_000_000n, size, key: "key", version: 2 } },
+		...overrides
+	})
+}
+
 // The wasm runtime hands a SharingRole over internally tagged, `{ type, email, id }`; the generated
 // .d.ts types it externally tagged, a shape no runtime value has. Fixtures build the runtime one, so
 // every reader is tested against what it actually receives (shareRoleKind/shareIdentityFromRole).

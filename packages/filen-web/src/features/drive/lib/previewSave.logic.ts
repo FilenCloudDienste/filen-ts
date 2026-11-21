@@ -4,7 +4,14 @@ import type { File as SdkFile } from "@filen/sdk-rs"
 import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
 import { abortSavePort, savePortAnnounced } from "@filen/shared/savePort"
 import { driveItemName, type QuotaVerdict } from "@filen/shared"
-import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
+import {
+	asDirectoryOrFile,
+	isLinkedEmbedItem,
+	isSharedRootDriveItem,
+	narrowItem,
+	upsertDriveItem,
+	type DriveItem
+} from "@/features/drive/lib/item"
 import {
 	CATEGORY_POLICY,
 	extensionOf,
@@ -27,12 +34,35 @@ import type { PreviewKey } from "@/lib/i18n"
 import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 
-// Whether a new file may be written beside this one (a converted copy): any readable file in the user's
-// own drive, whatever its format — unlike isEditable, which also needs the file's own format to save.
+// Why a preview never writes its file back, by where it was reached: the trash, a share received, someone else's file
+// through their link (a chat's or a note's link card), or a file shared out on its own (its listing names no
+// directory to save into). Null for the user's own file with a known directory, whichever listing showed it: My
+// Drive, Photos, search, recents, favorites, links, a directory shared out. Judged from the item and listing alone.
+export type ReadOnlyOrigin = "trash" | "sharedIn" | "linkedFile" | "notInDrive"
+
+export function readOnlyOrigin(item: DriveItem, variant: DriveVariant): ReadOnlyOrigin | null {
+	if (isLinkedEmbedItem(item)) {
+		return "linkedFile"
+	}
+
+	if (variant === "trash" || variant === "sharedIn") {
+		return variant
+	}
+
+	return isSharedRootDriveItem(item) ? "notInDrive" : null
+}
+
+// The one gate every preview save, edit and copy beside the file passes (readOnlyOrigin).
+export function ownsWritableFile(item: DriveItem, variant: DriveVariant): boolean {
+	return readOnlyOrigin(item, variant) === null
+}
+
+// Whether a new file may be written beside this one (a converted copy): any readable file the user owns, whatever its
+// format — unlike isEditable, which also needs the file's own format to save.
 export function canSaveCopyBeside(item: DriveItem, variant: DriveVariant): boolean {
 	const base = asDirectoryOrFile(item)
 
-	return variant === "drive" && base.type === "file" && !base.data.undecryptable
+	return ownsWritableFile(item, variant) && base.type === "file" && !base.data.undecryptable
 }
 
 // A save an editor refused before anything was uploaded (its own check of the file it wrote failed); the
@@ -60,13 +90,11 @@ export class SaveRefusedError extends Error {
 const DOCX_EDITABLE_EXTENSIONS: ReadonlySet<string> = new Set(["docx", "docm", "dotx", "dotm", "rtf", "odt", "ott"])
 
 // Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file, spreadsheet, Word document, deck or image
-// inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
-// writable parent context, or a variant this app never lets a write reach), never an undecryptable
-// row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
-// which mounts the same CodeMirror surface text/code use; its rendered arm is never an editing
-// surface.
+// the user owns (ownsWritableFile), never an undecryptable row (nothing to encode a diff against). Markdown is edited
+// through the viewer's own source mode, which mounts the same CodeMirror surface text/code use; its rendered arm is
+// never an editing surface.
 export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
-	if (variant !== "drive") {
+	if (!ownsWritableFile(item, variant)) {
 		return false
 	}
 
@@ -111,10 +139,10 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 	return isTextCategory(category) && base.data.size <= TEXT_MAX_BYTES && !VIEW_ONLY_TEXT_EXTENSIONS.has(itemTypeExtension(item))
 }
 
-// Whether the preview offers the image editor: any decodable still in the user's own drive, saved in place or, for
-// a format the editor cannot write, as a copy beside it. Never an SVG (markup, not pixels) or a camera RAW.
+// Whether the preview offers the image editor: any decodable still the user owns, saved in place or, for a format
+// the editor cannot write, as a copy beside it. Never an SVG (markup, not pixels) or a camera RAW.
 export function canEditImage(item: DriveItem, variant: DriveVariant): boolean {
-	if (variant !== "drive") {
+	if (!ownsWritableFile(item, variant)) {
 		return false
 	}
 
@@ -152,7 +180,13 @@ export function isViewOnlyPdf(item: DriveItem): boolean {
 function pdfEditable(item: DriveItem, variant: DriveVariant): boolean {
 	const base = asDirectoryOrFile(item)
 
-	return variant === "drive" && base.type === "file" && !base.data.undecryptable && previewType(item) === "pdf" && !isViewOnlyPdf(item)
+	return (
+		ownsWritableFile(item, variant) &&
+		base.type === "file" &&
+		!base.data.undecryptable &&
+		previewType(item) === "pdf" &&
+		!isViewOnlyPdf(item)
+	)
 }
 
 function pdfOverEditLimit(item: DriveItem, maxBytes: number): boolean {
@@ -167,11 +201,11 @@ const VIDEO_EDIT_EXTENSIONS: ReadonlySet<string> = new Set(
 	[...VIDEO_CONTAINERS].filter(([, row]) => row.editorReads).map(([extension]) => extension)
 )
 
-// Whether the preview offers the video editor: a video in the user's own drive in a container the export reads, saved
-// in place as MP4/MOV or as an MP4 copy beside it. Shared-in, public, trash and recents never edit (variant "drive"
-// only), nor does an undecryptable file. Whether this browser can show its frames is the editor's own check.
+// Whether the preview offers the video editor: a video the user owns (ownsWritableFile) in a container the export
+// reads, saved in place as MP4/MOV or as an MP4 copy beside it; never an undecryptable file. Whether this browser can
+// show its frames is the editor's own check.
 export function canEditVideo(item: DriveItem, variant: DriveVariant): boolean {
-	if (variant !== "drive") {
+	if (!ownsWritableFile(item, variant)) {
 		return false
 	}
 

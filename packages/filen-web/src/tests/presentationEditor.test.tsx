@@ -21,7 +21,7 @@ import { registerAllActions } from "@/lib/keymap/actions"
 import { chordText } from "@/lib/keymap/keyText"
 import { clearUserCombo, comboFor, setUserCombo, unbindAction } from "@/lib/keymap/registry"
 import { parseCombo } from "@filen/shared/keymap"
-import { linkedFileItem } from "@/tests/fixtures/sdk"
+import { ownedFileItem } from "@/tests/fixtures/sdk"
 import type { PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
 
@@ -303,9 +303,8 @@ function emit(event: PresentationEvent): Promise<void> {
 async function openEditor(change: Partial<OpenInfo> = {}, edit = editing(), name = "deck.pptx", inOverlay = false) {
 	const viewer = (
 		<PresentationViewer
-			item={linkedFileItem(name, {
+			item={ownedFileItem(name, "application/vnd.openxmlformats-officedocument.presentationml.presentation", {
 				uuid: UUID,
-				mime: { Decrypted: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
 				size: 5000n
 			})}
 			alt={name}

@@ -14,7 +14,7 @@ import type {
 import type { PresentationConnection } from "@filen/office/react/presentation"
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
-import { linkedFileItem } from "@/tests/fixtures/sdk"
+import { ownedFileItem } from "@/tests/fixtures/sdk"
 import type { PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
 
@@ -130,9 +130,8 @@ function emit(event: PresentationEvent): Promise<void> {
 async function open(writable: boolean): Promise<void> {
 	render(
 		<PresentationViewer
-			item={linkedFileItem("deck.pptx", {
+			item={ownedFileItem("deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", {
 				uuid: UUID,
-				mime: { Decrypted: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
 				size: 5000n
 			})}
 			alt="deck.pptx"

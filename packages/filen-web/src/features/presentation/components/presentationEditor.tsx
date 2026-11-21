@@ -30,6 +30,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
+import { readOnlyOrigin } from "@/features/drive/lib/previewSave.logic"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { onRibbonEscape, ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
@@ -475,7 +476,12 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const { scale, setScale, zoomMode, zoomBy } = usePresentationZoom(canvasRef)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const info = deck.info
-	const reasons = presentationViewOnlyReasons(info?.gate ?? [], info?.format, variant, { writable, renamed })
+	const reasons = presentationViewOnlyReasons(
+		info?.gate ?? [],
+		info?.format,
+		variant === undefined ? null : readOnlyOrigin(item, variant),
+		{ writable, renamed }
+	)
 	const editor = usePresentationSession({
 		store,
 		document: deck,

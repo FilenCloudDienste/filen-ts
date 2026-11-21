@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { SAVE_PORT_CHUNK, SavePortAbortedError, savePortWriter } from "@filen/shared/savePort"
-import type { File as SdkFile } from "@filen/sdk-rs"
+import type { File as SdkFile, SharedFile } from "@filen/sdk-rs"
 import {
 	canEditImage,
 	canEditPdf,
@@ -9,7 +9,9 @@ import {
 	isEditable,
 	isUnresolvableParentError,
 	isViewOnlyPdf,
+	ownsWritableFile,
 	pdfTooLargeToEdit,
+	readOnlyOrigin,
 	runPreviewSave,
 	settledStorageRefusal,
 	type PreviewSaveDeps
@@ -176,11 +178,13 @@ describe("isEditable", () => {
 
 		expect(isEditable(fileItem({ meta: decodedMeta("old.doc") }), "drive")).toBe(false)
 
-		// By their own extensions and types, and only in the user's own drive.
+		// By their own extensions and types, and only in the user's own drive, whichever listing showed it.
 		for (const name of ["macro.docm", "letter.dotx", "normal.dotm"]) {
-			expect(isEditable(fileItem({ meta: decodedMeta(name) }), "drive")).toBe(true)
+			for (const variant of ["drive", "sharedOut", "links", "recents", "favorites"] as const) {
+				expect(isEditable(fileItem({ meta: decodedMeta(name) }), variant)).toBe(true)
+			}
 
-			for (const variant of ["sharedIn", "sharedOut", "links", "recents", "favorites", "trash"] as const) {
+			for (const variant of ["sharedIn", "trash"] as const) {
 				expect(isEditable(fileItem({ meta: decodedMeta(name) }), variant)).toBe(false)
 			}
 		}
@@ -196,9 +200,9 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.markdown") }), "drive")).toBe(true)
 	})
 
-	it("is false for markdown outside the drive variant — the variant gate is untouched", () => {
+	it("is false for markdown in the trash or a share received, true from favorites", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "trash")).toBe(false)
-		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "favorites")).toBe(false)
+		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "favorites")).toBe(true)
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "sharedIn")).toBe(false)
 	})
 
@@ -208,6 +212,63 @@ describe("isEditable", () => {
 
 	it("is false for a directory", () => {
 		expect(isEditable(dirItem(), "drive")).toBe(false)
+	})
+})
+
+describe("readOnlyOrigin", () => {
+	const OWNED_VARIANTS = ["drive", "recents", "favorites", "links", "sharedOut"] as const
+
+	function sharedRootFile(): DriveItem {
+		const raw: SharedFile = {
+			uuid: testUuid("shared-root"),
+			size: 1_024n,
+			region: "de-1",
+			bucket: "filen-1",
+			chunks: 1n,
+			timestamp: 1_700_000_000_000n,
+			meta: decodedMeta("notes.txt"),
+			sharingRole: { type: "receiver", email: "a@example.com", id: 1n },
+			sharedTag: true,
+			canMakeThumbnail: false
+		}
+
+		return narrowItem(raw)
+	}
+
+	it("writes the user's own file back from every listing of it", () => {
+		for (const variant of OWNED_VARIANTS) {
+			expect(readOnlyOrigin(fileItem(), variant), variant).toBeNull()
+			expect(ownsWritableFile(fileItem(), variant), variant).toBe(true)
+		}
+	})
+
+	it("keeps a file in the trash or a share received read-only", () => {
+		expect(readOnlyOrigin(fileItem(), "trash")).toBe("trash")
+		expect(readOnlyOrigin(fileItem(), "sharedIn")).toBe("sharedIn")
+	})
+
+	it("keeps someone else's linked file read-only, whichever listing variant its overlay was given", () => {
+		const linked = fileItem({ parent: testUuid("file") })
+
+		for (const variant of OWNED_VARIANTS) {
+			expect(readOnlyOrigin(linked, variant), variant).toBe("linkedFile")
+		}
+	})
+
+	it("keeps a file shared out on its own read-only: its listing names no directory to save into", () => {
+		expect(readOnlyOrigin(sharedRootFile(), "sharedOut")).toBe("notInDrive")
+	})
+
+	// Regression: the user's own public links list opened every file read-only.
+	it("edits, annotates and copies a file opened from the links list", () => {
+		const text = fileItem()
+		const pdf = fileItem({ meta: byMime("form.pdf", "application/pdf") })
+		const image = fileItem({ meta: byMime("photo.png", "image/png") })
+
+		expect(isEditable(text, "links")).toBe(true)
+		expect(canSaveCopyBeside(text, "links")).toBe(true)
+		expect(canEditPdf(pdf, "links", 1_000_000)).toBe(true)
+		expect(canEditImage(image, "links")).toBe(true)
 	})
 })
 
@@ -291,8 +352,11 @@ describe("canEditPdf / pdfTooLargeToEdit", () => {
 		expect(pdfTooLargeToEdit(fileItem({ size: 4_097n, meta: decodedMeta("notes.txt") }), "drive", LIMIT)).toBe(false)
 	})
 
-	it("never outside the drive, for a non-PDF, a directory or an undecryptable row", () => {
-		for (const variant of ["sharedIn", "sharedOut", "trash", "recents", "favorites"] as const) {
+	it("never in the trash or a share received, for a non-PDF, a directory or an undecryptable row", () => {
+		for (const variant of ["sharedOut", "recents", "favorites", "links"] as const) {
+			expect(canEditPdf(pdf(1_024n), variant, LIMIT), variant).toBe(true)
+		}
+		for (const variant of ["sharedIn", "trash"] as const) {
 			expect(canEditPdf(pdf(1_024n), variant, LIMIT), variant).toBe(false)
 		}
 		expect(canEditPdf(fileItem({ meta: decodedMeta("notes.txt") }), "drive", LIMIT)).toBe(false)

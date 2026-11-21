@@ -354,14 +354,14 @@ describe("object presses", () => {
 
 describe("view-only paths for templates and macro-enabled documents", () => {
 	it("keeps a template read-only where every document is: a public link, an archive, another's link, shared", () => {
-		const where = { anon: false, archive: false, linked: false, variant: undefined }
+		const where = { anon: false, archive: false, linked: false, origin: null }
 
 		// No reason of its own any more (the package no longer gates templates).
-		expect(viewOnlyReasons([], { ...where, variant: "drive" })).toEqual([])
+		expect(viewOnlyReasons([], where)).toEqual([])
 		expect(viewOnlyReasons([], { ...where, anon: true })).toEqual(["publicLink"])
 		expect(viewOnlyReasons([], { ...where, archive: true })).toEqual(["archive"])
 		expect(viewOnlyReasons([], { ...where, linked: true })).toEqual(["linkedFile"])
-		expect(viewOnlyReasons([], { ...where, variant: "sharedIn" })).toEqual(["sharedIn"])
+		expect(viewOnlyReasons([], { ...where, origin: "sharedIn" })).toEqual(["sharedIn"])
 		expect(viewOnlyReasons(["protected"], { ...where, anon: true })).toEqual(["publicLink", "protected"])
 	})
 })
