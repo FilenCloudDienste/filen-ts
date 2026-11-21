@@ -29,7 +29,7 @@ import {
 
 export const CATALOG_MAGIC = 0x54435646 // "FVCT" read as a little-endian u32
 // Bump when the views it stores change shape or meaning (view.logic, catalog.logic's derived selections).
-export const CATALOG_FORMAT_VERSION = 1
+export const CATALOG_FORMAT_VERSION = 2
 export const CATALOG_HEADER_BYTES = 88
 
 // Titles, videos, refs or strings written between yields of encodeCatalogSteps.

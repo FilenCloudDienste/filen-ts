@@ -1,4 +1,4 @@
-import { fastLocaleCompare } from "@filen/shared"
+import { compareIds, compareNames } from "@filen/shared"
 import {
 	selectSeriesPrimaryAction,
 	type ContinueWatchingCard,
@@ -320,8 +320,10 @@ function latestEpisodeCards(source: HomeRowsSource): VideoCardModel[] {
 	return out
 }
 
+// The library's name order, shared by the grid, the home rows and post-play: the drive's natural, case-insensitive
+// name order, then year (a remake after the original), then id.
 export function byTitleName(a: VideoTitleView, b: VideoTitleView): number {
-	return fastLocaleCompare(a.sortName, b.sortName) || a.year - b.year || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+	return compareNames(a.sortName, b.sortName) || a.year - b.year || compareIds(a.id, b.id)
 }
 
 export function newestFirst(a: VideoTitleView, b: VideoTitleView): number {

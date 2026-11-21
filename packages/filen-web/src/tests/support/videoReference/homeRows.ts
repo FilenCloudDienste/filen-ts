@@ -1,7 +1,7 @@
 // Frozen copy of the page-side logic from when the page held the whole library: an independent reference the
 // worker's catalog must match. Never edited to follow the product code.
 
-import { fastLocaleCompare } from "@filen/shared"
+import { compareIds, compareNames } from "@filen/shared"
 import {
 	buildContinueWatchingRow,
 	selectContinueWatching,
@@ -319,7 +319,7 @@ function latestEpisodeCards(data: HomeData, byStable: ReadonlyMap<string, VideoH
 }
 
 function byTitleName(a: VideoTitleView, b: VideoTitleView): number {
-	return fastLocaleCompare(a.sortName, b.sortName) || a.year - b.year || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+	return compareNames(a.sortName, b.sortName) || a.year - b.year || compareIds(a.id, b.id)
 }
 
 function newestFirst(a: VideoTitleView, b: VideoTitleView): number {

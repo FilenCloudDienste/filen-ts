@@ -2,7 +2,7 @@
 // worker's catalog must match. Never edited to follow the product code.
 
 import { type } from "arktype"
-import { fastLocaleCompare } from "@filen/shared"
+import { compareIds, compareNames } from "@filen/shared"
 import type { VideoTitleView } from "@/workers/videoIndex/view.logic"
 import { titleWatchOf, type TitleWatch, type WatchCategory } from "@/features/videos/lib/titleWatch.logic"
 
@@ -126,7 +126,7 @@ function shuffleKey(id: string, seed: number): number {
 }
 
 function byName(a: VideoTitleView, b: VideoTitleView): number {
-	return fastLocaleCompare(a.sortName, b.sortName) || a.year - b.year || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+	return compareNames(a.sortName, b.sortName) || a.year - b.year || compareIds(a.id, b.id)
 }
 
 // Unknown values (null) last, whatever the direction.

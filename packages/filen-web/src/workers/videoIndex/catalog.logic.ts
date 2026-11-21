@@ -67,7 +67,7 @@ import {
 	type VideoSearchIndex
 } from "@/features/videos/lib/search.logic"
 import { videoKindCounts, type VideoKindCounts } from "@/features/videos/lib/libraryView.logic"
-import { naturalTitleOrder, nextMovieInDirectory } from "@/features/videos/lib/player/postPlay.logic"
+import { nextMovieInDirectory } from "@/features/videos/lib/player/postPlay.logic"
 
 export function gridKey(query: GridQuery): string {
 	return JSON.stringify([query.source, query.prefs, query.query, query.seed])
@@ -1658,11 +1658,22 @@ export class VideoCatalog {
 
 		yield* this.builtTitlesSteps()
 
+		// Post-play walks the name order the catalog already holds: the movies picked out of it, no sort of their own.
 		const content = this.content
-		const movies = yield* sortSteps(
-			this.shown().filter(title => title.kind === "movie"),
-			naturalTitleOrder
-		)
+		const { nameOrder } = content.derived
+		const movies: VideoTitleView[] = []
+
+		for (let at = 0; at < nameOrder.length; at++) {
+			const title = content.titles.at(nameOrder[at] ?? 0)
+
+			if (title?.kind === "movie") {
+				movies.push(title)
+			}
+
+			if (at % (PASS_STEP * 4) === PASS_STEP * 4 - 1) {
+				yield
+			}
+		}
 
 		if (this.content === content) {
 			this.naturalMovies = movies
