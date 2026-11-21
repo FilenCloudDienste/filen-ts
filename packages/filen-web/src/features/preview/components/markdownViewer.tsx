@@ -41,6 +41,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 			renderer={source => renderMarkdown(source, alt)}
 			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 			formatting
+			publishes
 			labels={{ view: t("previewCommandBarMarkdownView"), rendered: t("previewCommandBarRendered") }}
 			{...(editable === undefined ? {} : { editable })}
 			{...(onDirtyChange === undefined ? {} : { onDirtyChange })}

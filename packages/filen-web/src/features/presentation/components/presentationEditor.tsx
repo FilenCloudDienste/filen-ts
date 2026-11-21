@@ -101,6 +101,7 @@ import { parseCombo } from "@filen/shared/keymap"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import type { PreviewKey } from "@/lib/i18n"
 import { PresentationMotionPaths } from "@/features/presentation/components/ribbon/motionPaths"
+import { usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
 
 // The presentation editor: the ribbon (File, then the tabs whose groups the deck offers: in a deck that can only be
 // viewed that is the View tab and the read-only groups of others), the slide list with its edit commands (selection,
@@ -484,6 +485,9 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	})
 	const count = deck.slides.length
 	const index = editor.current
+
+	usePresentationActiveDocument(deck, index, editor.editable)
+
 	const ref: SlideRef | undefined = editor.currentRef
 	const render = ref === undefined ? undefined : deck.renders.get(ref)
 	const size = info?.size ?? DEFAULT_SLIDE_SIZE

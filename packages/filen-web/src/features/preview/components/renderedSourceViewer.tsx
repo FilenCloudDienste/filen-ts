@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
+import { usePreviewTextDocument } from "@/features/preview/hooks/usePreviewTextDocument"
 import type { TextBuffer, TextFile } from "@/features/preview/lib/textFile"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import {
@@ -46,6 +47,8 @@ export interface RenderedSourceViewerProps {
 	onTextState?: (state: TextState) => void
 	// The codepage this version is known to be in (this open saved it so): read without asking the detector again.
 	readAs?: string | null
+	// Published as the open document (markdown; not the formats that render data, such as a calendar).
+	publishes?: boolean
 }
 
 // A text-family file shown rendered, with its source a toggle away (markdown; diagrams, calendars and the like render
@@ -66,9 +69,13 @@ export function RenderedSourceViewer({
 	contentRef,
 	locked,
 	onTextState,
-	readAs
+	readAs,
+	publishes
 }: RenderedSourceViewerProps) {
 	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
+
+	usePreviewTextDocument(text, contentRef, editable === true, publishes === true)
+
 	const download = usePreviewDownload()
 
 	useLeaveViewerFullScreen()

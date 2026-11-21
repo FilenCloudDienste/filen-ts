@@ -25,6 +25,7 @@ import { ReadOnlyViewer } from "@/features/preview/components/readOnlyPreviewBod
 import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
+import { PreviewDocumentContext, previewDocumentItem } from "@/features/preview/lib/activeDocumentScope"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
 import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
 import { PresentationViewer } from "@/features/presentation/components/presentationViewer"
@@ -80,7 +81,17 @@ export interface PreviewBodyProps {
 // iWork package and an unsupported file); every other category is ReadOnlyViewer's, the one definition the read-only
 // body shares. A missing category arm cannot ship as a silently blank overlay: ReadOnlyViewer's exhaustive `default`
 // arm is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
-export function PreviewBody({
+//
+// The viewer publishes its document as the open one (activeDocument.ts) only in the drive variant.
+export function PreviewBody(props: PreviewBodyProps): ReactNode {
+	return (
+		<PreviewDocumentContext value={previewDocumentItem(props.item, props.variant)}>
+			<PreviewBodyContent {...props} />
+		</PreviewDocumentContext>
+	)
+}
+
+function PreviewBodyContent({
 	item,
 	variant,
 	category: pinnedCategory,
@@ -129,6 +140,7 @@ export function PreviewBody({
 			<LargeTextViewer
 				item={item}
 				alt={alt}
+				publishes={category === "text" || category === "code" || category === "markdown"}
 			/>
 		)
 	}

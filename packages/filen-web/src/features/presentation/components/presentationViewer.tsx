@@ -77,6 +77,7 @@ import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
 import type { PreviewKey } from "@/lib/i18n"
 import { openRefusalKey } from "@/features/presentation/lib/openRefusal"
+import { usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
 
 // A presentation in the preview: the slide in view (fit inside the canvas), the slide list beside it (a strip under
 // it at phone widths), the speaker notes under it and a read-only command bar (slides, Present, the list and notes
@@ -570,6 +571,9 @@ function DeckSurface({
 	const count = deck.slides.length
 	const index = Math.min(current, Math.max(0, count - 1))
 	const ref: SlideRef | undefined = deck.slides[index]?.ref
+
+	usePresentationActiveDocument(deck, index, false)
+
 	const render = ref === undefined ? undefined : deck.renders.get(ref)
 	const size = deck.info?.size ?? DEFAULT_SLIDE_SIZE
 

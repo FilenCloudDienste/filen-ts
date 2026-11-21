@@ -7,8 +7,13 @@ import { previewCacheScope } from "@/features/preview/lib/accessMode"
 
 // A signed-in drive file's whole buffer through the preview's own read (usePreviewBytes) for a caller
 // without its lifecycle hook (the assistant): served from, joined with and stored in the same preview
-// byte cache, and cancelled through the same token registry when `signal` aborts.
-export async function loadDriveFileBytes(item: DriveItem, signal?: AbortSignal): Promise<Uint8Array> {
+// byte cache, and cancelled through the same token registry when `signal` aborts. `cache: false` (a closed
+// document read once): served from the cache when there, otherwise neither kept nor evicting a viewer's bytes.
+export async function loadDriveFileBytes(
+	item: DriveItem,
+	signal?: AbortSignal,
+	options?: { readonly cache?: boolean }
+): Promise<Uint8Array> {
 	const file = narrowToAnyFile(item)
 	const token = crypto.randomUUID()
 
@@ -24,7 +29,10 @@ export async function loadDriveFileBytes(item: DriveItem, signal?: AbortSignal):
 			item.data.uuid,
 			Number(file.size),
 			() => runOp(sdkApi.downloadFileBytes(file, token)),
-			signal === undefined ? undefined : { signal }
+			{
+				...(signal === undefined ? {} : { signal }),
+				...(options?.cache === false ? { store: false, reserve: false } : {})
+			}
 		)
 	} finally {
 		signal?.removeEventListener("abort", cancel)

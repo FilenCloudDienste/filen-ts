@@ -59,6 +59,8 @@ import { DocxFileMenu } from "@/features/preview/components/docxFileMenu"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { useDocxPdfExport, type DocxPdfExportTarget } from "@/features/preview/hooks/useDocxPdfExport"
+import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
+import { docxDocumentReader } from "@/features/preview/lib/documentReaders"
 import { DownloadAsItemProvider } from "@/features/drive/components/editorDownloadAs"
 import { DocxToolbar, type DocxLegacyInfo, type PasswordIntegrity } from "@/features/preview/components/docxToolbar"
 import { RtfDocument } from "@/features/preview/components/rtfDocument"
@@ -923,6 +925,20 @@ function DocxPageList({
 	const aside = column && balloonsFit(width) ? BALLOON_COLUMN_WIDTH : 0
 	const viewer = useDocxViewer(document, { gap: PAGE_GAP, aside })
 	const { state, dispatch } = viewer
+
+	// The laid-out pages' text, as the viewer holds them (nothing is read again).
+	usePublishPreviewDocument(
+		document.pages.length === 0
+			? null
+			: {
+					kind: "docx",
+					position: { page: state.page + 1, pages: state.pageCount },
+					selection: null,
+					editable: false,
+					reader: docxDocumentReader(document)
+				}
+	)
+
 	const dispatchRef = useLatestRef(dispatch)
 	const [active, setActive] = useState<DocxBalloonKey | null>(null)
 	const [findFocus, setFindFocus] = useState(0)

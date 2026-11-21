@@ -60,6 +60,8 @@ import { insertSheetBefore } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { SheetStatusBar } from "@/features/spreadsheet/components/sheetStatusBar"
 import { CircularWarning } from "@/features/spreadsheet/components/circularWarning"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
+import { sheetDocumentReader } from "@/features/spreadsheet/lib/sheetDocumentReader"
+import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { isLegacySheetKind } from "@/features/spreadsheet/lib/sheetKind"
 import { saveAsXlsxBodyKey } from "@/features/spreadsheet/save/sheetSaveAs"
@@ -229,6 +231,18 @@ export function SheetBody({
 	const dirty = grid.state.dirty || entryChanged
 	const shown = grid.sheets.find(sheet => sheet.id === grid.sheet)
 	const sheetName = shown?.name ?? ""
+	// The sheets a reader may read (a very hidden sheet is the file's machinery, not content the user sees).
+	const readable = grid.sheets.filter(sheet => sheet.state !== "veryHidden")
+
+	// Each sheet's cells through the session's read-only text query, cut in the worker.
+	usePublishPreviewDocument({
+		kind: "sheet",
+		position: { sheet: sheetName, sheets: readable.map(sheet => sheet.name) },
+		selection: null,
+		editable: canEdit,
+		reader: sheetDocumentReader(handle.session, readable)
+	})
+
 	// A chartsheet or dialog sheet has no cells; a macro sheet's are shown, not edited (the session refuses both).
 	const cellless = celllessSheet(grid)
 	const cellsWritable = canEdit && cellsEditable(grid)

@@ -201,6 +201,7 @@ function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signature
 			ranged={source.kind === "ranges" && !fullyRead}
 			onReopen={reopen}
 			signatures={signatures}
+			publishes={signatures.kind === "current"}
 		/>
 	)
 }

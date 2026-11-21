@@ -27,6 +27,8 @@ import { useTextPagerSession, type TextPagerReading } from "@/features/preview/h
 import { originServesRanges } from "@/features/drive/lib/preview.logic"
 import { usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
+import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
+import { pagerDocumentReader } from "@/features/preview/lib/documentReaders"
 import { searchPattern } from "@/features/preview/lib/textPager/search.logic"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
@@ -66,9 +68,25 @@ function Position({ position, size }: { position: PositionStore; size: number })
 	return <span>{t("previewLargeTextPosition", { percent: size === 0 ? 100 : Math.floor((at / size) * 100) })}</span>
 }
 
-function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: string }) {
+function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReading; alt: string; publishes: boolean }) {
 	const { t } = useTranslation(["preview", "common"])
 	const { pager, size, fail } = reading
+
+	// Read from the file's start through the pager's rows, as far as a reader asks.
+	usePublishPreviewDocument(
+		publishes
+			? {
+					kind: "text",
+					position: {},
+					selection: null,
+					editable: false,
+					reader: pagerDocumentReader(reading.start, (from, continuation, count) =>
+						pager.run(remote => remote.after(from, continuation, count, null))
+					)
+				}
+			: null
+	)
+
 	const settings = useCodeViewSettings()
 	const download = usePreviewDownload()
 	const [position] = useState(positionStore)
@@ -442,7 +460,7 @@ function LargeTextReader({ reading, alt }: { reading: TextPagerReading; alt: str
 	)
 }
 
-function LargeTextSession({ item, alt }: { item: DriveItem; alt: string }) {
+function LargeTextSession({ item, alt, publishes }: { item: DriveItem; alt: string; publishes: boolean }) {
 	const session = useTextPagerSession(item)
 
 	switch (session.status) {
@@ -471,14 +489,16 @@ function LargeTextSession({ item, alt }: { item: DriveItem; alt: string }) {
 					key={session.reading.label}
 					reading={session.reading}
 					alt={alt}
+					publishes={publishes}
 				/>
 			)
 	}
 }
 
 // Never editable. Read in ranges from any origin that serves them (originServesRanges); an archive entry the SDK worker
-// would have to hold whole past its buffer cap is too large to show.
-export function LargeTextViewer({ item, alt }: { item: DriveItem; alt: string }) {
+// would have to hold whole past its buffer cap is too large to show. `publishes`: a text, code or markdown file, published
+// as the open document.
+export function LargeTextViewer({ item, alt, publishes }: { item: DriveItem; alt: string; publishes?: boolean }) {
 	const { t } = useTranslation("preview")
 	const origin = usePreviewOrigin(item)
 
@@ -497,6 +517,7 @@ export function LargeTextViewer({ item, alt }: { item: DriveItem; alt: string })
 		<LargeTextSession
 			item={item}
 			alt={alt}
+			publishes={publishes === true}
 		/>
 	)
 }

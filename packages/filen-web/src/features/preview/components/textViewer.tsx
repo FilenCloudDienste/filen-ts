@@ -2,6 +2,7 @@ import { type RefObject } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
 import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
+import { usePreviewTextDocument } from "@/features/preview/hooks/usePreviewTextDocument"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
@@ -43,6 +44,7 @@ export interface TextViewerProps {
 export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: TextViewerProps) {
 	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
 
+	usePreviewTextDocument(text, contentRef, editable === true, true)
 	useLeaveViewerFullScreen()
 
 	switch (text.status) {

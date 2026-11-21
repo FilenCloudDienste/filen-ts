@@ -149,6 +149,20 @@ describe("React Compiler coverage", () => {
 		).toEqual([])
 	})
 
+	it("compiles the open-document publishers, so a viewer's render re-publishes nothing that did not change", () => {
+		for (const [file, fnName] of [
+			["src/lib/activeDocument.ts", "usePublishActiveDocument"],
+			["src/features/preview/lib/activeDocumentScope.ts", "usePublishPreviewDocument"],
+			["src/features/preview/hooks/usePreviewTextDocument.ts", "usePreviewTextDocument"],
+			["src/features/presentation/hooks/usePresentationActiveDocument.ts", "usePresentationActiveDocument"]
+		] as const) {
+			const events = compile(file)
+
+			expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName)).toBe(true)
+		}
+	})
+
 	it("compiles the DOCX viewer and @filen/office's page list, so a scroll step re-renders only the pages that changed", () => {
 		for (const [file, fnName] of [
 			["src/features/preview/components/docxViewer.tsx", "DocxPageList"],

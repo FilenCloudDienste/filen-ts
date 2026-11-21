@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next"
 import { loadPdfOutline, type PdfOutlineItem, type PdfViewerCommand, type PdfViewport } from "@filen/office/dom/pdf"
 import { PdfPages, usePdfViewer, type PdfDomDocument } from "@filen/office/react/pdf"
 import { PDFJS } from "@/features/preview/lib/pdfjsModule"
+import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
+import { pdfDocumentReader } from "@/features/preview/lib/documentReaders"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePdfFullReadGuard } from "@/features/preview/hooks/usePdfFullReadGuard"
 import { usePdfScrollRoom } from "@/features/preview/hooks/usePdfScrollRoom"
@@ -101,6 +103,8 @@ export interface PdfReaderShellProps {
 	onPagesResize?: (width: number, height: number) => void
 	// False for a document without text (an image's pages): no Find, and its keys stay the browser's.
 	searchable?: boolean
+	// The drive file's PDF itself (not a signed version, a draft or a book): published as the open document.
+	publishes?: boolean
 }
 
 // The signature status of the document shown: its verifier (null: none), and either the way to open the byte prefix a
@@ -130,11 +134,27 @@ export function PdfReaderShell({
 	renderProperties,
 	fullReadGuard,
 	onPagesResize,
-	searchable
+	searchable,
+	publishes
 }: PdfReaderShellProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
+	const finder = viewer.finder
+
+	// The pages' text as find reads and keeps it: the editor's document (its changes and applied OCR) once it took over.
+	usePublishPreviewDocument(
+		publishes === true
+			? {
+					kind: "pdf",
+					position: { page: state.page, pages: document.numPages },
+					selection: null,
+					editable: edit?.toolContext.editable === true,
+					reader: pdfDocumentReader(document.numPages, async page => (await finder.pageText(page)).text)
+				}
+			: null
+	)
+
 	// A host restoring a position (a relayout's anchor): straight there, never smooth-scrolling through the pages between.
 	const goToHostPage = useEffectEvent((page: number) => {
 		viewer.dispatch({ type: "page.goto", page, instant: true })
