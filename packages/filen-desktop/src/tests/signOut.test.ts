@@ -102,6 +102,15 @@ function setup(options: { mountsGo?: boolean; failing?: Set<string>; profile?: P
 
 			await rm(lockFile, { force: true })
 		}),
+		clearAssistant: vi.fn(async () => {
+			order.push("clearAssistant")
+
+			if (failing.has(at("assistant"))) {
+				throw busy()
+			}
+
+			await removeTree(at("assistant"))
+		}),
 		clearLogs: vi.fn(async () => {
 			order.push("clearLogs")
 
@@ -138,8 +147,15 @@ async function marker(): Promise<unknown> {
 	return existsSync(at("signOut.pending")) ? JSON.parse(await readFile(at("signOut.pending"), "utf8")) : null
 }
 
-function pendingOf(fields: { users?: Record<string, string[]>; stash?: boolean; lock?: boolean; logs?: boolean; profile?: boolean }) {
-	return { version: 1, users: {}, stash: false, lock: false, logs: false, profile: false, ...fields }
+function pendingOf(fields: {
+	users?: Record<string, string[]>
+	stash?: boolean
+	lock?: boolean
+	assistant?: boolean
+	logs?: boolean
+	profile?: boolean
+}) {
+	return { version: 1, users: {}, stash: false, lock: false, assistant: false, logs: false, profile: false, ...fields }
 }
 
 describe("sign-out", () => {
@@ -184,6 +200,7 @@ describe("sign-out", () => {
 			`remove ${path.join("mounts", USER)}`,
 			"discardStash",
 			"resetLock",
+			"clearAssistant",
 			"clearLogs"
 		])
 		expect(forgotten).toEqual([[USER, ["sync", "mounts"]]])
@@ -226,7 +243,7 @@ describe("sign-out", () => {
 		await signOut.signOut(null)
 
 		expect(steps.mounts).not.toHaveBeenCalled()
-		expect(order).toEqual(["fileProvider", "host exited", "discardStash", "resetLock", "clearLogs"])
+		expect(order).toEqual(["fileProvider", "host exited", "discardStash", "resetLock", "clearAssistant", "clearLogs"])
 		expect(existsSync(at("lock.vault"))).toBe(false)
 		expect(await marker()).toEqual(pendingOf({ profile: true }))
 		expect(existsSync(at("sync-engine", USER, "baseline.db"))).toBe(true)

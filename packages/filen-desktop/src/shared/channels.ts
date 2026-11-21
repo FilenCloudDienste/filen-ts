@@ -1,4 +1,5 @@
 import type {
+	DesktopAssistant,
 	DesktopDrag,
 	DesktopFileProvider,
 	DesktopMounts,
@@ -60,7 +61,9 @@ export const CHANNELS = {
 	transfersEvents: "transfers:events",
 	dragSubscribe: "drag:subscribe",
 	// Payload: DesktopDragState, to the page that prepared the id only.
-	dragState: "drag:state"
+	dragState: "drag:state",
+	// Payload: DesktopAssistantEvent, to the page whose engine it is only.
+	assistantEvent: "assistant:event"
 } as const
 
 // The sync bridge's requests, each answered on its own channel (syncChannel).
@@ -178,6 +181,28 @@ export type FileProviderCall = (typeof FILE_PROVIDER_CALLS)[number]
 
 export function fileProviderChannel(call: FileProviderCall): string {
 	return `fileProvider:${call}`
+}
+
+// The assistant engine's requests, each answered on its own channel (assistantChannel); `onEvent` listens on
+// assistantEvent.
+export const ASSISTANT_CALLS = [
+	"available",
+	"inspect",
+	"otherModels",
+	"deleteModels",
+	"download",
+	"cancelDownload",
+	"load",
+	"generate",
+	"cancel",
+	"unload",
+	"release"
+] as const satisfies readonly Exclude<keyof DesktopAssistant, "onEvent">[]
+
+export type AssistantCall = (typeof ASSISTANT_CALLS)[number]
+
+export function assistantChannel(call: AssistantCall): string {
+	return `assistant:${call}`
 }
 
 // What a page listens to: the overview, the stats, or both.

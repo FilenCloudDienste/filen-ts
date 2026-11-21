@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 import type {
+	DesktopAssistantEvent,
 	DesktopBridge,
 	DesktopDragState,
 	DesktopLockAttempt,
@@ -19,6 +20,8 @@ import type {
 	WindowState
 } from "@filen/shared/desktop"
 import {
+	type AssistantCall,
+	assistantChannel,
 	CHANNELS,
 	type DragCall,
 	dragChannel,
@@ -228,6 +231,19 @@ function dragInvoke(call: DragCall, ...args: unknown[]): Promise<never> {
 	return ipcRenderer.invoke(dragChannel(call), ...args) as Promise<never>
 }
 
+function assistantInvoke(call: AssistantCall, ...args: unknown[]): Promise<never> {
+	return ipcRenderer.invoke(assistantChannel(call), ...args) as Promise<never>
+}
+
+// Main sends the engine's events to the page whose engine it is, whether or not it listens yet.
+const assistantListeners = new Set<(event: DesktopAssistantEvent) => void>()
+
+ipcRenderer.on(CHANNELS.assistantEvent, (_event, event: DesktopAssistantEvent) => {
+	for (const listener of assistantListeners) {
+		listener(event)
+	}
+})
+
 // A view into a larger buffer would send the whole buffer: only the PNG's own bytes cross.
 function ownBytes(bytes: Uint8Array): Uint8Array {
 	return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice()
@@ -275,6 +291,32 @@ const upload: DesktopTransfers["upload"] = async (files, parent, options) => {
 
 const bridge: DesktopBridge = {
 	platform: process.platform,
+	assistant: {
+		available: () => assistantInvoke("available"),
+		inspect: model => assistantInvoke("inspect", model),
+		otherModels: id => assistantInvoke("otherModels", id),
+		deleteModels: keep => assistantInvoke("deleteModels", keep),
+		download: (model, baseUrl) => assistantInvoke("download", model, baseUrl),
+		cancelDownload: () => {
+			assistantInvoke("cancelDownload").catch(() => undefined)
+		},
+		load: (model, options) => assistantInvoke("load", model, options),
+		generate: (id, request, updates) => assistantInvoke("generate", id, request, updates),
+		cancel: id => {
+			assistantInvoke("cancel", id).catch(() => undefined)
+		},
+		unload: () => assistantInvoke("unload"),
+		release: () => {
+			assistantInvoke("release").catch(() => undefined)
+		},
+		onEvent: callback => {
+			assistantListeners.add(callback)
+
+			return () => {
+				assistantListeners.delete(callback)
+			}
+		}
+	},
 	session: {
 		get: () => ipcRenderer.invoke(CHANNELS.sessionGet) as Promise<SessionRead>,
 		set: async blob => {

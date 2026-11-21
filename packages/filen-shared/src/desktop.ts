@@ -1,6 +1,7 @@
 // The contract between the Filen web app and the desktop shell's preload, exposed as `window.desktop`.
 // Types only: the browser build pays nothing for it, and an absent `window.desktop` means a plain browser.
 
+import type { AssistantGenerateRequest, AssistantGenerateResult } from "./assistant/loop"
 import type { DesktopLockAfterSeconds } from "./desktopLock"
 import type { DesktopShellStringsPayload } from "./desktopShellStrings"
 
@@ -202,8 +203,89 @@ export interface DesktopLogs {
 	export(webLog: string): Promise<DesktopLogsExport>
 }
 
+// The assistant's native engine (llama.cpp in a utility process of its own): only the model's files and the
+// AssistantModel's requests cross here, never an engine handle. Results travel as data, as an IPC handler's error
+// reaches the page only as a wrapped message.
+
+// A model's files as its manifest lists them (the manifest itself is accepted; main keeps only these).
+export interface DesktopAssistantModel {
+	readonly id: string
+	readonly shards: readonly { readonly file: string; readonly size: number; readonly sha256: string }[]
+}
+
+// "unavailable": the engine cannot run on this machine (no backend loads), and the page uses its own engine instead.
+export type DesktopAssistantError =
+	| "unavailable"
+	| "missing"
+	| "out-of-memory"
+	| "load-failed"
+	| "crashed"
+	| "aborted"
+	| "network"
+	| "integrity"
+	| "storage-full"
+	| "failed"
+
+export type DesktopAssistantResult<T> = { ok: true; value: T } | { ok: false; error: DesktopAssistantError; message: string }
+
+// Sizes and the verified record only; no file content is read.
+export interface DesktopAssistantInspection {
+	presentBytes: number
+	verifiedBytes: number
+	complete: boolean
+}
+
+export interface DesktopAssistantLoaded {
+	specialTokens: string[]
+	// The llama.cpp backend that loaded the model ("metal", "cuda", "vulkan" or "cpu").
+	backend: string
+	// One prompt batch's time while priming, for the page's Stop watchdog.
+	promptBatchMs?: number
+}
+
+export interface DesktopAssistantLoadOptions {
+	// The cache of each of the three slots (router, main loop, extraction), which have one sequence each.
+	sequenceTokens: number
+	// The router's system prompt, read as the last step of the load.
+	primeSystem: string
+}
+
+export type DesktopAssistantUpdate =
+	{ type: "text"; text: string } | { type: "progress"; processed: number; total: number } | { type: "call"; index: number; name: string }
+
+export type DesktopAssistantEvent =
+	| { kind: "download"; receivedBytes: number; waiting: boolean }
+	// Shards have to be hashed before the model can load.
+	| { kind: "verifying" }
+	| { kind: "update"; id: number; update: DesktopAssistantUpdate }
+	// The engine's process ended (a crash, or a stop): whatever it held is gone.
+	| { kind: "exited" }
+
+export interface DesktopAssistant {
+	// The engine is shipped and has not failed on this machine in this version of the app.
+	available(): Promise<boolean>
+	inspect(model: DesktopAssistantModel): Promise<DesktopAssistantInspection>
+	// The models on disk other than `id`, and their bytes.
+	otherModels(id: string): Promise<{ present: boolean; bytes: number }>
+	// Removes every model but `keep` (null: all of them).
+	deleteModels(keep: string | null): Promise<void>
+	// Resumable; settles once every shard is on disk and verified.
+	download(model: DesktopAssistantModel, baseUrl: string): Promise<DesktopAssistantResult<null>>
+	cancelDownload(): void
+	load(model: DesktopAssistantModel, options: DesktopAssistantLoadOptions): Promise<DesktopAssistantResult<DesktopAssistantLoaded>>
+	// `updates`: stream text, prompt progress and tool calls as events of this id.
+	generate(id: number, request: AssistantGenerateRequest, updates: boolean): Promise<DesktopAssistantResult<AssistantGenerateResult>>
+	cancel(id: number): void
+	unload(): Promise<void>
+	// Ends the engine's process and everything it holds, at once.
+	release(): void
+	// Returns the unsubscribe.
+	onEvent(callback: (event: DesktopAssistantEvent) => void): () => void
+}
+
 export interface DesktopBridge {
 	readonly platform: DesktopPlatform
+	readonly assistant: DesktopAssistant
 	readonly session: DesktopSessionVault
 	readonly prefs: DesktopPrefsStore
 	readonly app: DesktopApp

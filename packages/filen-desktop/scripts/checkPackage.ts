@@ -207,6 +207,27 @@ for (const arch of archs) {
 	}
 
 	const addon = path.join(resources, "native", "sdk-rs.node")
+	const llama = path.join(resources, "native", "llama")
+	const backends = path.join(llama, "node_modules", "@node-llama-cpp")
+
+	for (const file of [path.join(llama, "engine.js"), path.join(llama, "node-llama-cpp", "package.json")]) {
+		if (!existsSync(file)) {
+			failures.push(`${app}: ${file} is missing`)
+		}
+	}
+
+	// Every backend's Node-API binding, built for this arch (an extension package, as CUDA's, adds libraries only).
+	for (const name of existsSync(backends) ? readdirSync(backends) : []) {
+		const binding = path.join(backends, name, "bins", name, "llama-addon.node")
+
+		if (existsSync(path.dirname(binding))) {
+			checkBinary(app, binding, arch, { authenticode: values.signed && platform === "win" })
+		}
+	}
+
+	if (!existsSync(backends) || readdirSync(backends).length === 0) {
+		failures.push(`${app}: no assistant engine backend in ${backends}`)
+	}
 
 	if (checkBinary(app, addon, arch, { authenticode: false }) && values.signed && platform === "mac") {
 		failures.push(...macSignatureProblems(addon))

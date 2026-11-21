@@ -4,7 +4,16 @@ import { defineConfig, globalIgnores } from "eslint/config"
 import eslintConfigPrettier from "eslint-config-prettier/flat"
 
 export default defineConfig(
-	globalIgnores(["dist", "release", "docs", "filen-ios-file-provider", "filen-rs", "build/assistant-bench"]),
+	globalIgnores([
+		"dist",
+		"release",
+		"docs",
+		"filen-ios-file-provider",
+		"filen-rs",
+		"build/assistant-bench",
+		"build/assistant-engine",
+		"build/native"
+	]),
 	js.configs.recommended,
 	...tseslint.configs.recommended,
 	{
@@ -51,8 +60,9 @@ export default defineConfig(
 		}
 	},
 	{
-		// The native host runs in its own process and talks to main only through the validated protocol in src/shared.
-		files: ["src/native/**"],
+		// The native host and the assistant's engine run in processes of their own and talk to main only through the
+		// validated protocols in src/shared.
+		files: ["src/native/**", "src/assistant/**"],
 		rules: {
 			"no-restricted-imports": [
 				"error",

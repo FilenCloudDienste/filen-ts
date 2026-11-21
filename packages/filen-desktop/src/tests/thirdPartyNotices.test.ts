@@ -112,6 +112,18 @@ describe("desktop third-party notices drift guard", () => {
 		)
 	})
 
+	it("describes the assistant engine's prebuilt backends and the llama.cpp in them, at the installed node-llama-cpp", () => {
+		const llama = installedVersion("node-llama-cpp")
+		const { tag } = JSON.parse(
+			readFileSync(path.join(packageDir, "node_modules", "node-llama-cpp", "llama", "llama.cpp.info.json"), "utf8")
+		) as {
+			tag: string
+		}
+
+		expect(find("vendored", "node-llama-cpp prebuilt backends")?.version).toBe(llama)
+		expect(find("vendored", "llama.cpp")?.version).toBe(tag)
+	})
+
 	it("describes the installed Electron, and the Chromium and Node.js it includes", () => {
 		const electron = installedVersion("electron")
 

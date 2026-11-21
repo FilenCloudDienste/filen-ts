@@ -45,6 +45,8 @@ import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
 import type { NativeAggregate } from "../shared/nativeProtocol.ts"
 import { type AppLock, inactivityLock, loadAppLock } from "./appLock.ts"
+import { registerAssistantIpc } from "./assistant/ipc.ts"
+import { createAssistantService } from "./assistant/service.ts"
 import { atomicFile, codedError, errorCode, errorMessage } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
@@ -95,7 +97,7 @@ import {
 	type PurgeOutcome,
 	purgeBeforeReady
 } from "./migration.ts"
-import { addonPath, type AddonPathContext, macAddonPath } from "./native/addonPath.ts"
+import { addonPath, type AddonPathContext, macAddonPath, nativeFilePath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
 import { registerMountsIpc } from "./mounts/ipc.ts"
@@ -264,6 +266,8 @@ const syncEngineRoot = path.join(userDataPath, "sync-engine")
 // Mounts: config, credentials and certificates per user, beside the user's rclone cache.
 const mountsRoot = path.join(userDataPath, "mounts")
 const lockFilePath = path.join(userDataPath, "lock.vault")
+// The assistant's native engine: its downloaded models, and what failed of it on this machine.
+const assistantRoot = path.join(userDataPath, "assistant")
 const signOutMarkerPath = path.join(userDataPath, "signOut.pending")
 
 // What a sign-out deletes (signOut.ts). Its steps run only once startup has finished.
@@ -302,6 +306,7 @@ const signOutFlow = createSignOut({
 			await (await appLockLoading).reset()
 			lockChanged()
 		},
+		clearAssistant: () => assistantService.wipe(),
 		clearLogs: () => fileLog.clear(removeTree)
 	},
 	syncRoot: syncEngineRoot,
@@ -518,6 +523,26 @@ function startTimer(run: () => void, ms: number, { unref }: { unref: boolean }):
 
 // The bundled rclone (on Linux with the digest the build baked in) and the FUSE installer shipped beside it.
 const rclone = rclonePaths({ ...nativeFiles, sha256: bakedRcloneSha256 })
+
+// The assistant's engine (llama.cpp through node-llama-cpp) ships beside the asar with its prebuilt backends
+// (scripts/stageLlama.ts), in a utility process of its own: its crash or out-of-memory kill takes nothing else down.
+const assistantEngine = path.join("llama", "engine.js")
+const assistantService = createAssistantService({
+	shipped: () => nativeFilePath(nativeFiles, assistantEngine) !== null,
+	fork: () => {
+		const engine = nativeFilePath(nativeFiles, assistantEngine)
+
+		if (engine === null) {
+			throw new Error("no assistant engine")
+		}
+
+		return utilityProcess.fork(engine, [], { serviceName: "Filen Assistant", stdio: "pipe" })
+	},
+	modelsRoot: path.join(assistantRoot, "models"),
+	stateFile: atomicFile(path.join(assistantRoot, "engine.json")),
+	version: app.getVersion(),
+	log: { info, warn }
+})
 const fuseContext: FuseContext = {
 	platform: process.platform,
 	arch: process.arch,
@@ -1283,14 +1308,16 @@ function createWindow(): void {
 		}
 	})
 
-	// A new document or none: the old page's sync subscription and plans go.
+	// A new document or none: the old page's sync subscription and plans go, and its assistant engine.
 	window.webContents.on("did-navigate", () => {
+		assistantService.pageGone(contentsId)
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
 		transfersService.pageGone(contentsId)
 		foregroundRendering.pageGone(contentsId)
 	})
 	window.webContents.on("destroyed", () => {
+		assistantService.pageGone(contentsId)
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
 		transfersService.pageGone(contentsId)
@@ -1336,6 +1363,7 @@ function createWindow(): void {
 
 	window.webContents.on("render-process-gone", (_event, details) => {
 		resetPageState()
+		assistantService.pageGone(contentsId)
 		dragOut.pageGone(contentsId)
 		foregroundRendering.pageGone(contentsId)
 
@@ -1786,8 +1814,9 @@ if (!instanceLock.held) {
 	app.on("will-quit", event => {
 		shuttingDown = true
 		// The windows closed and the page agreed: drags end (Finder's waiting writes and Explorer's reads fail) before
-		// the host stops; their temp goes once it has.
+		// the host stops; their temp goes once it has. The assistant's engine holds nothing to close.
 		dragOut.quit()
+		assistantService.stop()
 
 		if (nativeSupervisor.active()) {
 			event.preventDefault()
@@ -2163,6 +2192,7 @@ if (!instanceLock.held) {
 	registerMountsIpc(ipcMain, mountsService, isTrustedUrl)
 	registerTransfersIpc(ipcMain, transfersService, isTrustedUrl)
 	registerDragOutIpc(ipcMain, dragOut, isTrustedUrl)
+	registerAssistantIpc(ipcMain, assistantService, isTrustedUrl)
 	registerFileProviderIpc(ipcMain, fileProvider, isTrustedUrl)
 	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, isTrustedUrl)
 	// The session exists only after ready, which every page call comes after.

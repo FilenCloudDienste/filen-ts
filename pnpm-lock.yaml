@@ -299,6 +299,9 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      hash-wasm:
+        specifier: 4.12.0
+        version: 4.12.0
       node-api-headers:
         specifier: 1.9.0
         version: 1.9.0

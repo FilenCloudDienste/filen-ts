@@ -8,7 +8,8 @@ import { serialQueue } from "../shared/serial.ts"
 // A sign-out takes the signed-out user's local data with the session: the sync engine's state (`sync-engine/<userId>`:
 // the baseline and cache databases name every synced file, shell.json holds the pairs), the network drive and servers
 // (`mounts/<userId>`: their config and credentials, rclone's cache and state), the old client's stash (its pairs and
-// mounts not imported yet), the app lock's PIN record and, last, the shell's logs. The files go once the native host
+// mounts not imported yet), the app lock's PIN record, the assistant's downloaded model (as the page's copy goes with
+// the browser profile) and, last, the shell's logs. The files go once the native host
 // has exited, so nothing holds them open. A drive cache that may still hold files not uploaded yet keeps its whole
 // directory: they upload at the user's next sign-in. The browser profile (the page's storage, cookies and caches) is
 // deleted on the next launch, before ready, when Chromium holds none of it open and the page cannot race it. Whatever
@@ -17,10 +18,11 @@ import { serialQueue } from "../shared/serial.ts"
 
 export type WipePart = "sync" | "mounts"
 
-// What a sign-out deletes once, whoever signed out: the stash, the PIN record, the logs and the browser profile.
-type Global = "stash" | "lock" | "logs" | "profile"
+// What a sign-out deletes once, whoever signed out: the stash, the PIN record, the assistant's model, the logs and the
+// browser profile.
+type Global = "stash" | "lock" | "assistant" | "logs" | "profile"
 
-const GLOBALS: readonly Global[] = ["stash", "lock", "logs", "profile"]
+const GLOBALS: readonly Global[] = ["stash", "lock", "assistant", "logs", "profile"]
 
 export interface SignOutSteps {
 	// Filen in Finder goes for the user (null: not known).
@@ -35,6 +37,8 @@ export interface SignOutSteps {
 	discardStash(): Promise<void>
 	// Removes the PIN record and unlocks, in memory too.
 	resetLock(): Promise<void>
+	// Stops the assistant's engine and deletes its downloaded models.
+	clearAssistant(): Promise<void>
 	// Deletes the shell's logs directory (main.log, rclone.log) through the file log, which starts a new one.
 	clearLogs(): Promise<void>
 }
@@ -184,6 +188,7 @@ const markerSchema = type({
 	users: type({ "[string]": type("'sync' | 'mounts'").array() }),
 	lock: "boolean",
 	"stash?": "boolean",
+	"assistant?": "boolean",
 	"logs?": "boolean",
 	"profile?": "boolean",
 	"+": "delete"
@@ -199,6 +204,7 @@ const LABELS: Record<WipePart | Global, string> = {
 	mounts: "network drive data",
 	stash: "old client's stash",
 	lock: "app lock",
+	assistant: "assistant model",
 	logs: "logs",
 	profile: "browser profile"
 }
@@ -355,6 +361,10 @@ export function createSignOut(deps: SignOutDeps): SignOut {
 			log.info(`sign-out: ${LABELS.lock} removed`)
 		}
 
+		if (await clear("assistant", when, steps.clearAssistant)) {
+			log.info(`sign-out: ${LABELS.assistant} deleted`)
+		}
+
 		log.info(`sign-out: the ${LABELS.profile} is deleted on the next launch`)
 		// Last: what the wipe logged goes with them.
 		await clear("logs", when, steps.clearLogs)
@@ -433,6 +443,10 @@ export function createSignOut(deps: SignOutDeps): SignOut {
 			log.info(`sign-out: ${LABELS.lock} left by a sign-out removed`)
 		}
 
+		if (pending.globals.has("assistant") && (await clear("assistant", when, steps.clearAssistant))) {
+			log.info(`sign-out: ${LABELS.assistant} left by a sign-out deleted`)
+		}
+
 		recordProfile()
 
 		// Last, so the lines above go with them.
@@ -470,6 +484,12 @@ export function createSignOut(deps: SignOutDeps): SignOut {
 		if (pending.globals.has("lock")) {
 			await clear("lock", when, steps.resetLock)
 			pending.globals.delete("lock")
+		}
+
+		// What the new session downloads from now on is its own.
+		if (pending.globals.has("assistant")) {
+			await clear("assistant", when, steps.clearAssistant)
+			pending.globals.delete("assistant")
 		}
 
 		// The profile and the logs are the new session's from now on.

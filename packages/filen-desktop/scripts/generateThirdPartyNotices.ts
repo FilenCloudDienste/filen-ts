@@ -22,6 +22,9 @@ import {
 	workspacePatches,
 	type CollectedNotice
 } from "@filen/shared/tooling"
+import { BUILDER_OS } from "../src/shared/buildLayout.ts"
+import { nodeLlamaCppDir } from "./bundles.ts"
+import { backendPackages } from "./stageLlama.ts"
 import { ARCHS, OS, pinnedRclone, rcloneRelease, readVersions } from "./stageRclone.ts"
 import {
 	bundledNpmPackages,
@@ -46,12 +49,13 @@ import {
  * - rust: the crates of the sync addon (@filen/sdk-rs's napi build, from the filen-rs workspace Cargo.lock at the
  *   release tag of the installed @filen/sdk-rs), of the macOS File Provider extension (the same lockfile at the commit
  *   desktop's filen-rs submodule pins) and of Explorer drag-out (native/dragOut/win/Cargo.lock).
- * - npm: the packages esbuild bundles into dist/ (main, native host, preload), plus the Node-API headers the Swift
- *   addons compile with.
+ * - npm: the packages esbuild bundles (main, native host, preload, the assistant engine), plus the Node-API headers the
+ *   Swift addons compile with.
  * - go: the Go modules linked into the bundled rclone, read from the build info of every pinned release binary, and the
  *   Go standard library at the toolchain version they were built with.
  * - vendored: Electron, the Chromium and Node.js it includes (their full credits ship as LICENSES.chromium.html, which
- *   electron-builder keeps in every package), rclone, and the WinFsp installer bundled on Windows.
+ *   electron-builder keeps in every package), rclone, the WinFsp installer bundled on Windows, and the assistant
+ *   engine's prebuilt node-llama-cpp backends with the llama.cpp compiled into them.
  *
  * CANNOT RUN IN CI: it needs a filen-rs checkout, the local cargo caches (cargo fetch in the filen-rs checkout, at the
  * submodule's commit and in native/dragOut/win), Go on PATH and the network (rclone release zips, Go modules, the
@@ -468,6 +472,73 @@ add(
 			terms: [
 				winfspLicense.trim(),
 				`Bundled unmodified on Windows: the WinFsp installer ${path.basename(new URL(rcloneVersions.winfspUrl).pathname)} (SHA-256 ${rcloneVersions.winfspSha256}) as released by the WinFsp project at ${rcloneVersions.winfspUrl}, which this app's installer runs. Its source is https://github.com/winfsp/winfsp/tree/${winfspTag}.`
+			]
+		},
+		"vendored"
+	)
+)
+
+// --- the assistant engine: llama.cpp and node-llama-cpp's prebuilt backends -------------------------------------------
+
+// node-llama-cpp's own code is bundled (npm, above); its prebuilt backends ship as published (scripts/stageLlama.ts),
+// every one for the OSes and CPUs the app builds for, and are llama.cpp compiled at the release node-llama-cpp names.
+const llamaDir = nodeLlamaCppDir()
+const llamaVersion = stringOf(packageJson(llamaDir), "version", "node-llama-cpp")
+const llamaCpp = JSON.parse(readFileSync(path.join(llamaDir, "llama", "llama.cpp.info.json"), "utf8")) as {
+	tag: string
+	llamaCppGithubRepo: string
+}
+const optional = Object.keys((packageJson(llamaDir)["optionalDependencies"] ?? {}) as Record<string, string>)
+const published = optional.map(name => name.replace("@node-llama-cpp/", ""))
+const backendNames = [
+	...new Set(ARCHS.flatMap(arch => Object.values(BUILDER_OS).flatMap(os => backendPackages(published, os, arch))))
+].sort()
+const backendLicenses = new Map<string, string>()
+
+for (const name of backendNames) {
+	backendLicenses.set(name, await fetchText(`https://unpkg.com/@node-llama-cpp/${name}@${llamaVersion}/LICENSE`))
+}
+
+const backendLicense = [...new Set(backendLicenses.values())]
+
+if (backendLicense.length !== 1 || backendLicense[0] === undefined) {
+	throw new Error(`node-llama-cpp ${llamaVersion}'s prebuilt backends no longer share one license; list them one by one`)
+}
+
+const backendTerms = splitCopyright(backendLicense[0])
+
+add(
+	vendoredNotice(
+		{
+			name: "node-llama-cpp prebuilt backends",
+			version: llamaVersion,
+			license: "MIT",
+			copyright: backendTerms.copyright,
+			repository: "https://github.com/withcatai/node-llama-cpp",
+			terms: [
+				backendTerms.terms,
+				`Bundled unmodified for the assistant's on-device model, each on the systems it is built for: ${backendNames.map(name => `@node-llama-cpp/${name}@${llamaVersion}`).join(", ")}.`
+			]
+		},
+		"vendored"
+	)
+)
+
+const llamaCppLicense = splitCopyright(
+	await fetchText(`https://raw.githubusercontent.com/${llamaCpp.llamaCppGithubRepo}/${llamaCpp.tag}/LICENSE`)
+)
+
+add(
+	vendoredNotice(
+		{
+			name: "llama.cpp",
+			version: llamaCpp.tag,
+			license: "MIT",
+			copyright: llamaCppLicense.copyright,
+			repository: `https://github.com/${llamaCpp.llamaCppGithubRepo}`,
+			terms: [
+				llamaCppLicense.terms,
+				`Compiled into node-llama-cpp ${llamaVersion}'s prebuilt backends (the ggml and llama libraries, with their Metal, CUDA, Vulkan and CPU code), from https://github.com/${llamaCpp.llamaCppGithubRepo}/tree/${llamaCpp.tag}.`
 			]
 		},
 		"vendored"

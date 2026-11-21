@@ -55,8 +55,10 @@ const config: Configuration = {
 	},
 	// Runtime dependencies are empty: esbuild bundles main and preload into dist.
 	files: ["dist/**/*", "!dist/**/*.map", "package.json"],
-	// The sync addon and rclone sit beside the asar, not unpacked from it: the native host loads the addon and runs
-	// rclone by path. scripts/stageNapi.ts and scripts/stageRclone.ts stage them per arch.
+	// The sync addon, the assistant's engine (llama/: its bundle and node-llama-cpp's prebuilt backends) and rclone sit
+	// beside the asar, not unpacked from it: the native host loads the addon, the assistant's utility process runs from
+	// its directory and rclone is run by path. scripts/stageNapi.ts, scripts/stageLlama.ts and scripts/stageRclone.ts
+	// stage them per arch.
 	extraResources: [
 		{ from: webDist, to: "web" },
 		{ from: "build/tray", to: "tray" },
@@ -65,13 +67,19 @@ const config: Configuration = {
 	],
 	// A missing extraResources source is skipped silently; an app without its addon cannot sync, one without rclone
 	// cannot mount or serve, a Windows one without WinFsp's installer cannot mount, a macOS one without the File
-	// Provider addon and extension cannot offer Filen in Finder, one without filen-mac.node cannot quarantine downloads, and
-	// a Windows one without filen-drag.node cannot drag items out to Explorer.
+	// Provider addon and extension cannot offer Filen in Finder, one without filen-mac.node cannot quarantine downloads,
+	// a Windows one without filen-drag.node cannot drag items out to Explorer, and one without the assistant's engine runs
+	// the assistant on the page's own (WebGPU) engine only.
 	beforePack: context => {
 		const os = context.packager.platform.buildConfigurationKey
 		const staged = `${os}-${Arch[context.arch]}`
 		const required = [
 			{ file: path.join(packageDir, "build", "native", staged, "sdk-rs.node"), stage: "scripts/stageNapi.ts" },
+			{ file: path.join(packageDir, "build", "native", staged, "llama", "engine.js"), stage: "scripts/stageLlama.ts" },
+			{
+				file: path.join(packageDir, "build", "native", staged, "llama", "node-llama-cpp", "package.json"),
+				stage: "scripts/stageLlama.ts"
+			},
 			{
 				file: path.join(packageDir, "build", "rclone", staged, os === "win" ? "rclone.exe" : "rclone"),
 				stage: "scripts/stageRclone.ts"
@@ -162,8 +170,9 @@ const config: Configuration = {
 		// WinFsp's installer for the network drive; the NSIS installer and the app run it. It keeps its own publisher's
 		// signature (only .exe and signExts files are signed).
 		extraResources: [{ from: "build/deps/win", to: "deps" }],
-		// The sync addon is code the app loads, so it is signed like the executables (rclone.exe among them).
-		signExts: [".node"],
+		// The sync addon and the assistant engine's backends (llama.cpp's DLLs) are code the app loads, so they are signed
+		// like the executables (rclone.exe among them).
+		signExts: [".node", ".dll"],
 		// The default, kept explicit: app-update.yml then names azureSignOptions.publisherName, and electron-updater
 		// installs only an update signed by that publisher.
 		verifyUpdateCodeSignature: true
