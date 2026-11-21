@@ -9,6 +9,7 @@ import { cn } from "@filen/shared"
 import { useAccountQuery } from "@/queries/account"
 import { log } from "@/lib/log"
 import { useDirectoryPicker } from "@/features/drive/hooks/useDirectoryPicker"
+import { usePickerNewDirectory } from "@/features/drive/hooks/usePickerNewDirectory"
 import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -104,6 +105,8 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 	const [addError, setAddError] = useState<string | null>(null)
 	const [busy, setBusy] = useState<Busy>(null)
 	const [added, setAdded] = useState<AddedPair | null>(null)
+	// The remote step's new directory, created in the directory open there and opened, so it becomes the pick.
+	const newDirectory = usePickerNewDirectory({ picker, available: step === "remote" && added === null, disabled: busy !== null })
 	// The dry run expired and planning again found none to page (unconverged): its totals stay, its lists go.
 	const [listsGone, setListsGone] = useState(false)
 	// A plan asked for again, while it is out: a second click must not leave a plan nothing releases.
@@ -345,6 +348,7 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 						<RemoteDirectoryChooser
 							picker={picker}
 							disabled={busy !== null}
+							leading={newDirectory.leading}
 						/>
 						{picker.pathStack.length === 0 ? (
 							<Field orientation="horizontal">
@@ -469,10 +473,11 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 						</DialogHeader>
 						{renderStep()}
 						<DialogFooter className="mt-auto">
+							{newDirectory.button}
 							{back === null ? null : (
 								<Button
 									variant="outline"
-									disabled={busy !== null}
+									disabled={busy !== null || newDirectory.pending}
 									onClick={() => {
 										setStep(back)
 									}}
@@ -492,7 +497,7 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 								</Button>
 							) : (
 								<Button
-									disabled={busy !== null || !canAdvance(step, form)}
+									disabled={busy !== null || newDirectory.pending || !canAdvance(step, form)}
 									onClick={() => {
 										setStep(forward)
 									}}

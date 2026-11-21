@@ -13,6 +13,7 @@ import { photosChooserChoice, photosPickVerdict } from "@/features/photos/compon
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell } from "@/features/drive/components/directoryPicker"
 import { useDirectoryPicker, useDirectoryPickerFilter } from "@/features/drive/hooks/useDirectoryPicker"
+import { usePickerNewDirectory } from "@/features/drive/hooks/usePickerNewDirectory"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { addPhotosRoot } from "@/features/photos/lib/library"
 import { ListFilterInput } from "@/components/listFilterInput"
@@ -47,11 +48,12 @@ const BROWSE: ChooserStep = { kind: "browse" }
 // ancestry). A pick goes through the Videos chooser's checks (rootChooser.logic.ts), except that a directory
 // inside a photos directory can't be picked at all (it is read already; the picker's path is its ancestry):
 // Filen's own directory never shows, and one holding photos directories is offered as their replacement. The
-// picker browses the own drive only, so a shared-in directory never shows. No create-directory-in-place: unlike
-// a move destination, a photos directory doesn't need one carved out on the spot.
+// picker browses the own drive only, so a shared-in directory never shows. A new directory is offered only where it
+// could be picked: never in a read-only library, inside a photos directory, or while a pick is being checked.
 export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryChooserDialogProps) {
 	const { t, i18n } = useTranslation(["photos", "drive"])
-	const { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const picker = useDirectoryPicker()
+	const { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo } = picker
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const driveRoot = useAccountQuery().data?.rootDirUuid
 	const [step, setStep] = useState<ChooserStep>(BROWSE)
@@ -67,6 +69,11 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 		roots
 	})
 	const busy = step.kind === "checking" || step.kind === "saving"
+	const newDirectory = usePickerNewDirectory({
+		picker,
+		available: step.kind === "browse" && !readOnly && hint.kind === "none",
+		disabled: busy
+	})
 	const pickName = targetUuid === null ? t("drive:driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "")
 
 	const handleOpenChange = pendingGuardedOpenChange(busy, next => {
@@ -174,6 +181,7 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 					noResults={filter.trim().length > 0}
 					filteredOutMessage={items.length > 0 ? t("drive:driveTreeMenuNoDirectories") : undefined}
 					count={filteredDirectories.length}
+					leading={newDirectory.leading}
 					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 					renderRow={index => {
 						const directory = filteredDirectories[index]
@@ -204,6 +212,7 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 					</div>
 				)}
 				<DialogFooter className="items-center">
+					{newDirectory.button}
 					{step.kind === "browse" && readOnly ? (
 						<p className="mr-auto text-xs text-muted-foreground">{t("photosLibraryReadOnly")}</p>
 					) : null}
@@ -236,7 +245,7 @@ export function DirectoryChooserDialog({ roots, readOnly, onClose }: DirectoryCh
 						</>
 					) : (
 						<Button
-							disabled={busy || readOnly || choice === null || hint.kind !== "none"}
+							disabled={busy || newDirectory.pending || readOnly || choice === null || hint.kind !== "none"}
 							onClick={() => {
 								if (choice !== null) {
 									void confirm(choice)

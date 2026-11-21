@@ -13,6 +13,7 @@ import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell } from "@/features/drive/components/directoryPicker"
 import { useDirectoryPicker, useDirectoryPickerFilter } from "@/features/drive/hooks/useDirectoryPicker"
+import { usePickerNewDirectory } from "@/features/drive/hooks/usePickerNewDirectory"
 import { DIRECTORY_SIZE_STALE_TIME, directorySizeQueryKey, directorySizeQueryOptions } from "@/features/drive/queries/drive"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { sdkApi } from "@/lib/sdk/client"
@@ -71,7 +72,8 @@ async function readEntries({
 // directories never show here: the picker browses the own drive only.
 export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 	const { t } = useTranslation(["videos", "drive", "common"])
-	const { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const picker = useDirectoryPicker()
+	const { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo } = picker
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const driveRoot = useAccountQuery().data?.rootDirUuid
 	const { roots } = useVideoLibraryView()
@@ -95,6 +97,8 @@ export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 		roots: chooserRoots
 	})
 	const busy = step.kind === "checking" || step.kind === "sizing" || step.kind === "saving"
+	// Not inside a library directory, nor while a pick is being checked.
+	const newDirectory = usePickerNewDirectory({ picker, available: step.kind === "browse" && hint.kind === "none", disabled: busy })
 	const openedItem = targetUuid === null ? undefined : opened[targetUuid]
 	const pickName =
 		targetUuid === null
@@ -222,6 +226,7 @@ export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 					noResults={filter.trim().length > 0}
 					filteredOutMessage={items.length > 0 ? t("drive:driveTreeMenuNoDirectories") : undefined}
 					count={filteredDirectories.length}
+					leading={newDirectory.leading}
 					rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 					renderRow={index => {
 						const directory = filteredDirectories[index]
@@ -259,6 +264,7 @@ export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 					</div>
 				)}
 				<DialogFooter className="items-center">
+					{newDirectory.button}
 					{step.kind === "browse" && hint.kind !== "none" ? (
 						<p className="mr-auto text-xs text-muted-foreground">
 							{hint.kind === "alreadyRoot"
@@ -292,7 +298,7 @@ export function AddDirectoryDialog({ replacing }: { replacing: string[] }) {
 						</>
 					) : (
 						<Button
-							disabled={busy || pick === null || hint.kind === "alreadyRoot"}
+							disabled={busy || newDirectory.pending || pick === null || hint.kind === "alreadyRoot"}
 							className="max-w-full min-w-0"
 							onClick={() => {
 								if (pick !== null) {

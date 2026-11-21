@@ -1,17 +1,24 @@
 import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
-import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell } from "@/features/drive/components/directoryPicker"
-import { useDirectoryPickerFilter, type useDirectoryPicker } from "@/features/drive/hooks/useDirectoryPicker"
+import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell, type PickerLeading } from "@/features/drive/components/directoryPicker"
+import { useDirectoryPickerFilter, type DirectoryPicker } from "@/features/drive/hooks/useDirectoryPicker"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { isHiddenRemoteRow } from "@/features/sync/components/addPairDialog.logic"
 
-export type DirectoryPicker = ReturnType<typeof useDirectoryPicker>
-
 // The add-pair dialog's remote step: the shared drive picker pieces over the own drive. The directory open in it
 // is the pick (the whole drive only when the dialog's switch says so); Filen's own `.filen` directory, which the
-// engine reserves, is hidden. The picker state lives in the dialog, so going back to this step keeps the path.
-export function RemoteDirectoryChooser({ picker, disabled }: { picker: DirectoryPicker; disabled: boolean }) {
+// engine reserves, is hidden. The picker state lives in the dialog, so going back to this step keeps the path; so
+// does its new-directory row (`leading`), whose button sits in the dialog's footer.
+export function RemoteDirectoryChooser({
+	picker,
+	disabled,
+	leading
+}: {
+	picker: DirectoryPicker
+	disabled: boolean
+	leading?: PickerLeading | undefined
+}) {
 	const { t } = useTranslation(["sync", "drive"])
 	const { pathStack, listingQuery, items, namesQuery, descend, goRoot, goTo } = picker
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
@@ -40,6 +47,7 @@ export function RemoteDirectoryChooser({ picker, disabled }: { picker: Directory
 				noResults={filter.trim().length > 0}
 				filteredOutMessage={items.length > 0 ? t("drive:driveTreeMenuNoDirectories") : undefined}
 				count={filteredDirectories.length}
+				leading={leading}
 				rowKey={index => filteredDirectories[index]?.data.uuid ?? String(index)}
 				renderRow={index => {
 					const directory = filteredDirectories[index]

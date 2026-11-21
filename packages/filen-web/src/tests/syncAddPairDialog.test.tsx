@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { ComponentType } from "react"
+import type { ComponentType, ReactNode } from "react"
 import "@/lib/i18n"
 
 // Leaving the Sync section while addPair is still answering: the pair it answers with is removed (its plan released),
@@ -32,9 +32,18 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { rootDirUuid: "root-uuid" } }) }))
 vi.mock("@/features/drive/hooks/useDirectoryPicker", () => ({
-	useDirectoryPicker: () => ({ targetUuid: "remote-uuid", pathStack: ["remote-uuid"], namesQuery: { data: { "remote-uuid": "Work" } } })
+	useDirectoryPicker: () => ({
+		targetUuid: "remote-uuid",
+		pathStack: ["remote-uuid"],
+		listingQuery: { status: "success", data: [] },
+		namesQuery: { data: { "remote-uuid": "Work" } },
+		enter: vi.fn()
+	})
 }))
-vi.mock("@/features/sync/components/remoteDirectoryChooser", () => ({ RemoteDirectoryChooser: () => null }))
+// Only the new-directory row the dialog hands it.
+vi.mock("@/features/sync/components/remoteDirectoryChooser", () => ({
+	RemoteDirectoryChooser: ({ leading }: { leading?: { node: ReactNode } | undefined }) => leading?.node ?? null
+}))
 vi.mock("@/features/sync/components/reviewCard", () => ({ ReviewSummary: () => null }))
 
 const { AddPairDialog } = await import("@/features/sync/components/addPairDialog")
@@ -78,6 +87,27 @@ describe("AddPairDialog", () => {
 
 		expect(api.releasePlan).toHaveBeenCalledWith("plan-1")
 		expect(api.removePair).toHaveBeenCalledWith("pair-1")
+	})
+})
+
+describe("AddPairDialog new directory", () => {
+	it("is offered on the remote step only, its name row over the remote listing", async () => {
+		api.chooseLocalDirectory.mockResolvedValue({ status: "ok", id: "token", path: "/Users/a/Projects", name: "Projects", warnings: [] })
+
+		render(<AddPairDialog onClose={vi.fn()} />)
+
+		expect(screen.queryByRole("button", { name: "New directory" })).toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: "Choose directory" }))
+		await screen.findByText("/Users/a/Projects")
+		fireEvent.click(screen.getByRole("button", { name: "Next" }))
+		fireEvent.click(screen.getByRole("button", { name: "New directory" }))
+
+		expect(screen.getByRole("textbox", { name: "Name of the new directory" })).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Next" }))
+
+		expect(screen.queryByRole("button", { name: "New directory" })).toBeNull()
 	})
 })
 
