@@ -19,5 +19,17 @@ export const settingsAssistant = {
 	/** Settings > Assistant — Keep conversations choice */
 	settingsAssistantRetention30Days: "30 days",
 	/** Settings > Assistant — Keep conversations choice: never removed by age */
-	settingsAssistantRetentionForever: "Forever"
+	settingsAssistantRetentionForever: "Forever",
+	/** Settings > Assistant — confirmation before a Keep conversations choice that removes saved conversations: title */
+	settingsAssistantRetentionConfirmTitle: "Remove saved conversations?",
+	/** Settings > Assistant — confirmation body; {{count}} is how many saved conversations the new choice removes */
+	settingsAssistantRetentionConfirmBody_one: "{{count}} saved conversation is removed from this device. This can't be undone.",
+	settingsAssistantRetentionConfirmBody_other: "{{count}} saved conversations are removed from this device. This can't be undone.",
+	/** Settings > Assistant — confirmation body for Off when the number of saved conversations is not known yet */
+	settingsAssistantRetentionConfirmOffBody: "Every saved conversation is removed from this device. This can't be undone.",
+	/** Settings > Assistant — confirmation body for a shorter limit when the number of saved conversations is not known yet */
+	settingsAssistantRetentionConfirmShorterBody:
+		"Saved conversations older than the new limit are removed from this device. This can't be undone.",
+	/** Settings > Assistant — confirmation button that applies the choice and removes the conversations */
+	settingsAssistantRetentionConfirm: "Remove"
 } as const

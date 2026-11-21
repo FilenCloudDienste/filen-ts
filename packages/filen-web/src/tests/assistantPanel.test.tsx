@@ -1016,4 +1016,74 @@ describe("RetentionRow", () => {
 
 		expect(screen.getByRole("combobox", { name: "Keep conversations" }).textContent).toContain("7 days")
 	})
+
+	function pick(name: string): void {
+		fireEvent.click(screen.getByRole("combobox", { name: "Keep conversations" }))
+
+		const option = screen.getByRole("option", { name })
+
+		fireEvent.pointerDown(option, { pointerType: "mouse", button: 0 })
+		fireEvent.mouseDown(option, { button: 0 })
+		fireEvent.pointerUp(option, { pointerType: "mouse", button: 0 })
+		fireEvent.mouseUp(option, { button: 0 })
+		fireEvent.click(option)
+	}
+
+	const day = 24 * 60 * 60 * 1000
+
+	function held(id: string, updatedAt: number) {
+		return { id, title: id, createdAt: updatedAt, updatedAt, bytes: 10, rev: `r-${id}` }
+	}
+
+	it("asks before a choice that removes held conversations, saying how many; Cancel keeps the old value", () => {
+		retentionPreference.adopt("forever")
+		useAssistantHistoryStore.setState({
+			conversations: [held("a", Date.now() - 10 * day), held("b", Date.now() - 2 * day), held("c", Date.now())],
+			currentId: null
+		})
+		render(<RetentionRow />)
+
+		pick("7 days")
+
+		const dialog = screen.getByRole("alertdialog")
+
+		expect(within(dialog).getByText("1 saved conversation is removed from this device. This can't be undone.")).toBeDefined()
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+		expect(retentionPreference.get()).toBe("forever")
+
+		pick("Off")
+		expect(
+			within(screen.getByRole("alertdialog")).getByText("3 saved conversations are removed from this device. This can't be undone.")
+		).toBeDefined()
+		fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }))
+
+		expect(retentionPreference.get()).toBe("off")
+	})
+
+	it("applies a choice that removes nothing at once, and asks without a count for a stricter one when no list is held", () => {
+		retentionPreference.adopt("7d")
+		useAssistantHistoryStore.setState({ conversations: [held("c", Date.now())], currentId: null })
+		render(<RetentionRow />)
+
+		pick("1 day")
+
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(retentionPreference.get()).toBe("1d")
+
+		act(() => {
+			useAssistantHistoryStore.setState({ conversations: null })
+		})
+		pick("Forever")
+
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(retentionPreference.get()).toBe("forever")
+
+		pick("Off")
+
+		expect(
+			within(screen.getByRole("alertdialog")).getByText("Every saved conversation is removed from this device. This can't be undone.")
+		).toBeDefined()
+	})
 })

@@ -45,6 +45,33 @@ export function retentionLimitsAge(retention: HistoryRetention): boolean {
 	return RETENTION_DAYS[retention] !== null
 }
 
+// How many of the held conversations switching to `next` removes: all of them for Off, else those last active
+// before its cutoff except `keep` (the one on screen, which pruning spares). Null when none are held (the list was
+// never opened): then whether any goes is unknown without a read, and only a stricter choice can remove any.
+export function retentionRemovals(
+	metas: readonly ConversationMeta[] | null,
+	next: HistoryRetention,
+	now: number,
+	keep: string | null
+): number | null {
+	if (metas === null) {
+		return null
+	}
+
+	if (next === "off") {
+		return metas.length
+	}
+
+	const cutoff = retentionCutoff(next, now)
+
+	return cutoff === null ? 0 : metas.filter(meta => meta.updatedAt < cutoff && meta.id !== keep).length
+}
+
+// Whether `next` keeps conversations for less time than `current`.
+export function retentionIsStricter(next: HistoryRetention, current: HistoryRetention): boolean {
+	return HISTORY_RETENTION_VALUES.indexOf(next) < HISTORY_RETENTION_VALUES.indexOf(current)
+}
+
 // Conversations last active before this go; null when age removes none.
 export function retentionCutoff(retention: HistoryRetention, now: number): number | null {
 	const days = RETENTION_DAYS[retention]

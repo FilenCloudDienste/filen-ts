@@ -60,6 +60,8 @@ import {
 	planHistoryPrune,
 	restoreConversation,
 	retentionCutoff,
+	retentionIsStricter,
+	retentionRemovals,
 	serializeConversation,
 	HISTORY_KV_PREFIX,
 	HISTORY_RETENTION_KEY,
@@ -350,6 +352,21 @@ describe("history budget", () => {
 		const many = Array.from({ length: HISTORY_MAX_CONVERSATIONS + 1 }, (_, index) => meta(`c${String(index)}`, 100 + index))
 
 		expect(planHistoryPrune([meta("aged", 1), ...many], new Set(), 50)).toEqual(["aged", "c0"])
+	})
+
+	it("counts what a retention choice removes from the held list, sparing the conversation on screen", () => {
+		const now = 40 * DAY
+		const metas = [meta("old", now - 10 * DAY), meta("week", now - 3 * DAY), meta("screen", now - 20 * DAY)]
+
+		expect(retentionRemovals(metas, "off", now, "screen")).toBe(3)
+		expect(retentionRemovals(metas, "7d", now, "screen")).toBe(1)
+		expect(retentionRemovals(metas, "1d", now, "screen")).toBe(2)
+		expect(retentionRemovals(metas, "30d", now, null)).toBe(0)
+		expect(retentionRemovals(metas, "forever", now, null)).toBe(0)
+		expect(retentionRemovals(null, "off", now, null)).toBeNull()
+		expect(retentionIsStricter("7d", "30d")).toBe(true)
+		expect(retentionIsStricter("off", "1d")).toBe(true)
+		expect(retentionIsStricter("forever", "7d")).toBe(false)
 	})
 
 	it("turns each retention into a cutoff; Off and Forever remove nothing by age", () => {
