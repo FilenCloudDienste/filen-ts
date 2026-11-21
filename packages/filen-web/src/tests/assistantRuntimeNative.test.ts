@@ -28,6 +28,7 @@ const { remote, opfs, bridge, listeners } = vi.hoisted(() => {
 			deleteModels: vi.fn(() => Promise.resolve()),
 			download: vi.fn(() => Promise.resolve({ ok: true as const, value: null })),
 			cancelDownload: vi.fn(),
+			importChunk: vi.fn(() => Promise.resolve({ ok: true as const, value: "present" as const })),
 			load: vi.fn<DesktopAssistant["load"]>(() =>
 				Promise.resolve({ ok: true, value: { specialTokens: ["<|native|>"], backend: "metal" } })
 			),

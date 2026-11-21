@@ -6,11 +6,16 @@ import { QWEN35_4B } from "@/features/assistant/runtime/models"
 
 // The desktop app's native engine behind the worker's API, against a scripted bridge: the names the client reads off
 // its errors (and so the fallback to the page's own engine), the events routed to the call they belong to, the page's
-// OPFS copy freed once the native download verified, and which store the client's model checks read.
+// OPFS copy imported instead of downloaded again and freed once the native download verified, and which store the
+// client's model checks read.
 
-const { opfs, bridge } = vi.hoisted(() => ({
+const { opfs, bridge, pageFiles } = vi.hoisted(() => ({
+	// The page's OPFS copy: each shard's bytes and whether its record lists it as verified.
+	pageFiles: new Map<string, { bytes: Uint8Array<ArrayBuffer>; sha256: string | null }>(),
 	opfs: {
 		deleteModels: vi.fn(() => Promise.resolve()),
+		modelDirectory: vi.fn(() => Promise.resolve({})),
+		readVerified: vi.fn(() => Promise.resolve(new Map<string, string>())),
 		inspectModel: vi.fn(() => Promise.resolve({ presentBytes: 1, verifiedBytes: 0, complete: false })),
 		otherModels: vi.fn(() => Promise.resolve({ present: false, bytes: 0 })),
 		deleteModelDirectory: vi.fn(() => Promise.resolve())
@@ -36,6 +41,7 @@ function fakeBridge() {
 		deleteModels: vi.fn(() => Promise.resolve()),
 		download: vi.fn<DesktopAssistant["download"]>(() => Promise.resolve({ ok: true, value: null })),
 		cancelDownload: vi.fn(),
+		importChunk: vi.fn<DesktopAssistant["importChunk"]>(() => Promise.resolve({ ok: true, value: "more" })),
 		load: vi.fn<DesktopAssistant["load"]>(() =>
 			Promise.resolve({ ok: true, value: { specialTokens: ["<|im_end|>"], backend: "metal" } })
 		),
@@ -226,5 +232,155 @@ describe("engine host", () => {
 
 		await host.selectEngine()
 		expect(host.nativeEngineActive()).toBe(false)
+	})
+})
+
+describe("native engine: importing the page's copy", () => {
+	const BIG = 8 * 1024 * 1024 + 5
+	const shardA = new Uint8Array(BIG).fill(7)
+	const shardB = new Uint8Array(10).fill(3)
+	const shardC = new Uint8Array(4).fill(1)
+
+	async function manifest() {
+		const { parseManifest } = await import("@/features/assistant/runtime/manifest")
+
+		return parseManifest({
+			id: "test-model",
+			label: "Test",
+			license: { name: "MIT", url: "https://example.com" },
+			source: { repo: "r", revision: "v" },
+			shards: [
+				{ file: "t-00001-of-00003.gguf", size: shardA.length, sha256: "a".repeat(64) },
+				{ file: "t-00002-of-00003.gguf", size: shardB.length, sha256: "b".repeat(64) },
+				{ file: "t-00003-of-00003.gguf", size: shardC.length, sha256: "c".repeat(64) }
+			]
+		})
+	}
+
+	beforeEach(() => {
+		pageFiles.clear()
+		pageFiles.set("t-00001-of-00003.gguf", { bytes: shardA, sha256: "a".repeat(64) })
+		pageFiles.set("t-00002-of-00003.gguf", { bytes: shardB, sha256: "b".repeat(64) })
+		// On disk, but never verified by the page: the download fetches it.
+		pageFiles.set("t-00003-of-00003.gguf", { bytes: shardC, sha256: null })
+		opfs.inspectModel.mockResolvedValue({ presentBytes: BIG + 14, verifiedBytes: BIG + 10, complete: false })
+		opfs.readVerified.mockImplementation(() =>
+			Promise.resolve(
+				new Map(
+					[...pageFiles].flatMap(([file, entry]) => (entry.sha256 === null ? [] : [[file, entry.sha256] as [string, string]]))
+				)
+			)
+		)
+		opfs.modelDirectory.mockImplementation(() =>
+			Promise.resolve({
+				getFileHandle: (name: string) => {
+					const entry = pageFiles.get(name)
+
+					return entry === undefined
+						? Promise.reject(new DOMException("missing", "NotFoundError"))
+						: Promise.resolve({ getFile: () => Promise.resolve(new File([entry.bytes], name)) })
+				}
+			})
+		)
+		opfs.deleteModels.mockClear()
+	})
+
+	it("hands every shard the page verified to the engine in chunks before downloading the rest, then frees the copy", async () => {
+		const { assistant, handle } = await engine()
+		const { IMPORT_CHUNK_BYTES } = await import("@/features/assistant/runtime/nativeEngine")
+		const order: string[] = []
+
+		assistant.inspect.mockResolvedValue({ presentBytes: 0, verifiedBytes: 0, complete: false })
+		assistant.importChunk.mockImplementation((_model, file, offset, bytes, last) => {
+			order.push(`${file}@${String(offset)}+${String(bytes.byteLength)}${last ? " last" : ""}`)
+
+			return Promise.resolve({ ok: true, value: last ? "verified" : "more" })
+		})
+		assistant.download.mockImplementation(() => {
+			order.push("download")
+
+			return Promise.resolve({ ok: true, value: null })
+		})
+
+		const progress = vi.fn()
+
+		await handle.remote.download(await manifest(), "https://cdn.filen.io/gguf/", progress)
+
+		expect(order).toEqual([
+			`t-00001-of-00003.gguf@0+${String(IMPORT_CHUNK_BYTES)}`,
+			`t-00001-of-00003.gguf@${String(IMPORT_CHUNK_BYTES)}+5 last`,
+			"t-00002-of-00003.gguf@0+10 last",
+			"download"
+		])
+		expect(progress).toHaveBeenLastCalledWith({ receivedBytes: BIG + 10, waiting: false })
+		expect(opfs.deleteModels).toHaveBeenCalledOnce()
+	})
+
+	it("leaves a shard the engine refused to the download, and skips one it has", async () => {
+		const { assistant, handle } = await engine()
+		const progress = vi.fn()
+
+		assistant.inspect.mockResolvedValue({ presentBytes: 10, verifiedBytes: 10, complete: false })
+		assistant.importChunk.mockImplementation((_model, file, offset) =>
+			Promise.resolve(
+				file === "t-00002-of-00003.gguf"
+					? { ok: true, value: "present" }
+					: offset === 0
+						? { ok: true, value: "more" }
+						: { ok: false, error: "integrity", message: "does not match its published hash" }
+			)
+		)
+
+		await handle.remote.download(await manifest(), "https://cdn.filen.io/gguf/", progress)
+
+		expect(assistant.importChunk).toHaveBeenCalledTimes(3)
+		// The refused shard's bytes are no longer counted; the download reports from there.
+		expect(progress).toHaveBeenLastCalledWith({ receivedBytes: 10 + 8 * 1024 * 1024, waiting: false })
+		expect(assistant.download).toHaveBeenCalledOnce()
+		expect(opfs.deleteModels).toHaveBeenCalledOnce()
+	})
+
+	it("keeps the page's copy when the download after the import failed", async () => {
+		const { assistant, handle } = await engine()
+
+		assistant.inspect.mockResolvedValue({ presentBytes: 0, verifiedBytes: 0, complete: false })
+		assistant.importChunk.mockRejectedValue(new Error("invalid assistant payload"))
+		assistant.download.mockResolvedValueOnce({ ok: false, error: "network", message: "offline" })
+
+		await expect(handle.remote.download(await manifest(), "https://cdn.filen.io/gguf/", vi.fn())).rejects.toMatchObject({
+			name: "ModelDownloadError:network"
+		})
+		expect(opfs.deleteModels).not.toHaveBeenCalled()
+	})
+
+	it("stops an import when the download is cancelled, and downloads nothing", async () => {
+		const { assistant, handle } = await engine()
+		let cancel: () => void = () => undefined
+
+		assistant.inspect.mockResolvedValue({ presentBytes: 0, verifiedBytes: 0, complete: false })
+		assistant.importChunk.mockImplementation(() => {
+			cancel()
+
+			return Promise.resolve({ ok: true, value: "more" })
+		})
+		cancel = () => {
+			void handle.remote.cancelDownload()
+		}
+
+		await expect(handle.remote.download(await manifest(), "https://cdn.filen.io/gguf/", vi.fn())).rejects.toMatchObject({
+			name: "AbortError"
+		})
+		expect(assistant.importChunk).toHaveBeenCalledOnce()
+		expect(assistant.download).not.toHaveBeenCalled()
+		expect(opfs.deleteModels).not.toHaveBeenCalled()
+	})
+
+	it("imports nothing when the page has no verified shard", async () => {
+		const { assistant, handle } = await engine()
+
+		opfs.inspectModel.mockResolvedValue({ presentBytes: 0, verifiedBytes: 0, complete: false })
+		await handle.remote.download(await manifest(), "https://cdn.filen.io/gguf/", vi.fn())
+		expect(assistant.importChunk).not.toHaveBeenCalled()
+		expect(assistant.download).toHaveBeenCalledOnce()
 	})
 })

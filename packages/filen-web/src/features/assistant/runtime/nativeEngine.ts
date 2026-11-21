@@ -4,7 +4,13 @@ import { desktopAssistant } from "@/lib/desktop"
 import type { AssistantWorkerApi } from "@/workers/assistant.worker"
 import { ENGINE_CRASHED, type GenerationUpdate } from "@/features/assistant/runtime/engineMessages"
 import type { ModelDownloadProgress } from "@/features/assistant/runtime/download"
-import { deleteModels as deleteOpfsModels } from "@/features/assistant/runtime/modelStore"
+import type { AssistantModelManifest } from "@/features/assistant/runtime/manifest"
+import {
+	deleteModels as deleteOpfsModels,
+	inspectModel as inspectOpfsModel,
+	modelDirectory as opfsModelDirectory,
+	readVerified as readOpfsVerified
+} from "@/features/assistant/runtime/modelStore"
 import { log } from "@/lib/log"
 
 // The desktop app's native engine (llama.cpp in a utility process of its own, desktop/src/assistant) behind the
@@ -75,9 +81,78 @@ function unwrap<T>(result: DesktopAssistantResult<T>, failure: (error: DesktopAs
 	return result.value
 }
 
+// One chunk in flight, so the page holds at most this much of the model while it imports its copy.
+export const IMPORT_CHUNK_BYTES = 8 * 1024 * 1024
+
+// The page's own copy (OPFS) of the model, the shards it verified, handed to the native engine's directory instead of
+// downloaded again. Main keeps a shard only once its sha256 matches the pinned manifest; one that does not, or any
+// failure, leaves it to the download that follows. Reads one chunk at a time.
+async function importPageCopy({
+	bridge,
+	manifest,
+	signal,
+	onProgress
+}: {
+	bridge: DesktopAssistant
+	manifest: AssistantModelManifest
+	signal: AbortSignal
+	onProgress: (progress: ModelDownloadProgress) => void
+}): Promise<void> {
+	if ((await inspectOpfsModel(manifest)).verifiedBytes === 0) {
+		return
+	}
+
+	const directory = await opfsModelDirectory(manifest.id)
+	const verified = await readOpfsVerified(directory)
+	let received = (await bridge.inspect(manifest)).verifiedBytes
+
+	for (const shard of manifest.shards) {
+		const file =
+			verified.get(shard.file) === shard.sha256
+				? await directory
+						.getFileHandle(shard.file)
+						.then(handle => handle.getFile())
+						.catch(() => null)
+				: null
+
+		if (file?.size !== shard.size) {
+			continue
+		}
+
+		for (let at = 0; ;) {
+			signal.throwIfAborted()
+
+			const end = Math.min(at + IMPORT_CHUNK_BYTES, shard.size)
+			const bytes = new Uint8Array(await file.slice(at, end).arrayBuffer())
+			const result = await bridge.importChunk(manifest, shard.file, at, bytes, end === shard.size)
+
+			if (!result.ok) {
+				log.warn("assistant", `importing ${shard.file} from the browser's copy failed; it is downloaded instead`, result.message)
+				received -= at
+
+				break
+			}
+
+			if (result.value === "present") {
+				break
+			}
+
+			received += end - at
+			onProgress({ receivedBytes: received, waiting: false })
+
+			if (result.value === "verified") {
+				break
+			}
+
+			at = end
+		}
+	}
+}
+
 // The engine's calls over the bridge, alive until `stop`; `onLost` runs when its process ends on its own.
 export function createNativeEngine(bridge: DesktopAssistant, onLost: () => void): { remote: EngineApi; stop(): void } {
 	let onDownload: ((progress: ModelDownloadProgress) => void) | null = null
+	let importing: AbortController | null = null
 	let onVerifying: (() => void) | null = null
 	const updates = new Map<number, (update: GenerationUpdate) => void>()
 	const unsubscribe = bridge.onEvent((event: DesktopAssistantEvent) => {
@@ -99,9 +174,26 @@ export function createNativeEngine(bridge: DesktopAssistant, onLost: () => void)
 
 	const remote: EngineApi = {
 		download: async (manifest, baseUrl, onProgress) => {
+			const controller = new AbortController()
+
+			importing = controller
+
+			try {
+				await importPageCopy({ bridge, manifest, signal: controller.signal, onProgress }).catch((e: unknown) => {
+					if (controller.signal.aborted) {
+						throw named("AbortError", "The download was stopped")
+					}
+
+					log.warn("assistant", "importing the browser's model copy failed; it is downloaded instead", e)
+				})
+			} finally {
+				importing = null
+			}
+
 			onDownload = onProgress
 
 			try {
+				// Whatever the import left (nothing, when it brought every shard) comes from the model host.
 				unwrap(await bridge.download(manifest, baseUrl), downloadFailure)
 			} finally {
 				onDownload = null
@@ -113,6 +205,7 @@ export function createNativeEngine(bridge: DesktopAssistant, onLost: () => void)
 			})
 		},
 		cancelDownload: () => {
+			importing?.abort()
 			bridge.cancelDownload()
 
 			return Promise.resolve()
