@@ -60,6 +60,7 @@ export const {
 	noteBulkActionAvailability,
 	partitionNotesByBucket,
 	parsePlaylist,
+	comparePlaylists,
 	createPlaylist,
 	renamePlaylist,
 	addTracksToPlaylist,

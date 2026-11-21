@@ -9,7 +9,7 @@ import Button from "@/components/ui/button"
 import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
 import { router } from "@/lib/router"
 import usePlaylistsQuery from "@/features/audio/queries/usePlaylists.query"
-import { run, pruneSelection, createPlaylist } from "@filen/shared"
+import { run, pruneSelection, createPlaylist, comparePlaylists } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import audio, { type PlaylistWithItems } from "@/features/audio/audio"
 import { inputPrompt } from "@/lib/promptFlow"
@@ -48,7 +48,7 @@ export function Playlists() {
 	useClearSelectionOnFocusChange(clearSelectedPlaylists)
 
 	const allPlaylists =
-		playlistsQuery.data ? [...playlistsQuery.data].sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
+		playlistsQuery.data ? [...playlistsQuery.data].sort(comparePlaylists) : ([] as PlaylistWithItems[])
 
 	// Read the DATA, not the last fetch's verdict (#103).
 	const playlistsData = playlistsQuery.data ?? null
