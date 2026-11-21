@@ -538,7 +538,7 @@ add(
 			repository: `https://github.com/${llamaCpp.llamaCppGithubRepo}`,
 			terms: [
 				llamaCppLicense.terms,
-				`Compiled into node-llama-cpp ${llamaVersion}'s prebuilt backends (the ggml and llama libraries, with their Metal, CUDA, Vulkan and CPU code), from https://github.com/${llamaCpp.llamaCppGithubRepo}/tree/${llamaCpp.tag}.`
+				`Compiled into node-llama-cpp ${llamaVersion}'s prebuilt backends (the ggml and llama libraries, with their Metal, Vulkan and CPU code), from https://github.com/${llamaCpp.llamaCppGithubRepo}/tree/${llamaCpp.tag}.`
 			]
 		},
 		"vendored"

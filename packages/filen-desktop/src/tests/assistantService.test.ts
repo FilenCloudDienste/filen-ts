@@ -183,27 +183,27 @@ describe("assistant service", () => {
 		const loading = service.load(page(1), MODEL, OPTIONS)
 
 		await engineCalled(processes, 0)
-		processes[0]?.emit({ t: "trying", backend: "cuda" })
+		processes[0]?.emit({ t: "trying", backend: "vulkan" })
 		processes[0]?.exit(-1)
 		await engineCalled(processes, 1)
 
 		expect(processes).toHaveLength(2)
-		expect(processes[1]?.sent[0]).toMatchObject({ op: "load", exclude: ["cuda"] })
-		processes[1]?.emit({ t: "trying", backend: "vulkan" })
+		expect(processes[1]?.sent[0]).toMatchObject({ op: "load", exclude: ["vulkan"] })
+		processes[1]?.emit({ t: "trying", backend: "cpu" })
 		processes[1]?.emit({
 			t: "reply",
 			id: processes[1].lastCall(),
 			result: { ok: true, value: { specialTokens: [], backend: "vulkan" } }
 		})
 		expect(await loading).toMatchObject({ ok: true, value: { backend: "vulkan" } })
-		expect(JSON.parse(stateFile.data?.toString("utf8") ?? "null")).toEqual({ version: "4.0.0", crashed: ["cuda"], unusable: false })
+		expect(JSON.parse(stateFile.data?.toString("utf8") ?? "null")).toEqual({ version: "4.0.0", crashed: ["vulkan"], unusable: false })
 
 		// The next start reads it back.
 		const next = setup({ stateFile })
 		const again = next.service.load(next.page(1), MODEL, OPTIONS)
 
 		await engineCalled(next.processes, 0)
-		expect(next.processes[0]?.sent[0]).toMatchObject({ exclude: ["cuda"] })
+		expect(next.processes[0]?.sent[0]).toMatchObject({ exclude: ["vulkan"] })
 		next.processes[0]?.emit({ t: "reply", id: 1, result: { ok: false, error: "missing", message: "gone" } })
 		expect(await again).toMatchObject({ ok: false, error: "missing" })
 	})

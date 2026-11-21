@@ -10,7 +10,7 @@ import { ARCHS, packageDir } from "./paths.ts"
 //   engine.js                       the engine's utility process (src/assistant/main.ts) with node-llama-cpp bundled,
 //                                   as scripts/build.ts bundled it
 //   node-llama-cpp/                 what node-llama-cpp reads beside its own code: its package.json and llama/*.json
-//   node_modules/@node-llama-cpp/   every prebuilt backend published for <os>-<arch> (Metal; CUDA, Vulkan, CPU), as is
+//   node_modules/@node-llama-cpp/   every prebuilt backend published for <os>-<arch> but CUDA's (Metal; Vulkan, CPU), as is
 //
 // The backends are node-llama-cpp's optional dependencies, installed for both CPUs (pnpm-workspace.yaml
 // supportedArchitectures). An architecture without one is skipped; electron-builder's beforePack refuses to package it.
@@ -27,9 +27,13 @@ const PACKAGE_FILES = [
 	path.join("llama", "llama.cpp.info.json")
 ]
 
-// The backends published for `os` and `arch`, as installed beside node-llama-cpp.
+// CUDA's builds need the CUDA toolkit's cuBLAS on the system and take ~300 MiB of an x64 installer; Vulkan runs those
+// GPUs (src/shared/assistantProtocol.ts ENGINE_BACKENDS).
+const UNSHIPPED = /-cuda(-ext)?$/
+
+// The backends published for `os` and `arch` that the app ships, as installed beside node-llama-cpp.
 export function backendPackages(installed: readonly string[], os: string, arch: string): string[] {
-	return installed.filter(name => name === `${os}-${arch}` || name.startsWith(`${os}-${arch}-`)).sort()
+	return installed.filter(name => (name === `${os}-${arch}` || name.startsWith(`${os}-${arch}-`)) && !UNSHIPPED.test(name)).sort()
 }
 
 export function stageLlama(options: { dev: boolean }): void {

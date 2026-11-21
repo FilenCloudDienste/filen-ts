@@ -6,8 +6,10 @@ import type { AssistantModelFiles } from "@filen/shared/dom/assistantModel/manif
 // The messages between main and the assistant's engine (the "Filen Assistant" utility process running llama.cpp
 // through node-llama-cpp). Main validates what the engine sends; the engine takes what main sends as is.
 
-// node-llama-cpp's prebuilt backends, "cpu" for its `gpu: false`.
-export const ENGINE_BACKENDS = ["metal", "cuda", "vulkan", "cpu"] as const
+// The node-llama-cpp prebuilt backends the app ships, "cpu" for its `gpu: false`. Not CUDA: its builds need the CUDA
+// toolkit's cuBLAS on the system and would add ~300 MiB to each x64 Windows and Linux installer; NVIDIA and AMD GPUs
+// run on Vulkan (there is no ROCm build).
+export const ENGINE_BACKENDS = ["metal", "vulkan", "cpu"] as const
 
 export type EngineBackend = (typeof ENGINE_BACKENDS)[number]
 

@@ -100,7 +100,7 @@ function engineWith(overrides: Partial<EngineDeps>) {
 	return { sent, call, engine }
 }
 
-function loadCall(exclude: ("metal" | "cuda" | "vulkan" | "cpu")[] = []) {
+function loadCall(exclude: ("metal" | "vulkan" | "cpu")[] = []) {
 	return { op: "load" as const, model: MODEL, dir, exclude, sequenceTokens: 8192, primeSystem: "route" }
 }
 
@@ -124,10 +124,10 @@ function failingLlama(supported: (false | "metal" | "cuda" | "vulkan")[], failur
 
 describe("assistant engine: backends", () => {
 	it("tries the fastest backends first and the CPU last, leaving out the excluded ones", () => {
-		expect(backendOrder(["cpu", "vulkan", "cuda"], [])).toEqual(["cuda", "vulkan", "cpu"])
+		expect(backendOrder(["cpu", "vulkan"], [])).toEqual(["vulkan", "cpu"])
 		expect(backendOrder(["metal", "cpu"], [])).toEqual(["metal", "cpu"])
-		expect(backendOrder(["cuda", "vulkan", "cpu"], ["cuda"])).toEqual(["vulkan", "cpu"])
-		expect(backendOrder(["cuda"], ["cuda"])).toEqual([])
+		expect(backendOrder(["vulkan", "cpu"], ["vulkan"])).toEqual(["cpu"])
+		expect(backendOrder(["vulkan"], ["vulkan"])).toEqual([])
 	})
 })
 
@@ -219,13 +219,13 @@ describe("assistant engine: load", () => {
 		const { sent, call } = engineWith({ llama: () => Promise.resolve(llama) })
 		const result = await call(loadCall())
 
+		// CUDA, which this machine supports, is not shipped: never tried.
 		expect(sent.filter(message => message.t === "trying")).toEqual([
-			{ t: "trying", backend: "cuda" },
 			{ t: "trying", backend: "vulkan" },
 			{ t: "trying", backend: "cpu" }
 		])
-		expect(llama.getLlama).toHaveBeenNthCalledWith(1, expect.objectContaining({ gpu: "cuda", build: "never" }))
-		expect(llama.getLlama).toHaveBeenNthCalledWith(3, expect.objectContaining({ gpu: false }))
+		expect(llama.getLlama).toHaveBeenNthCalledWith(1, expect.objectContaining({ gpu: "vulkan", build: "never" }))
+		expect(llama.getLlama).toHaveBeenNthCalledWith(2, expect.objectContaining({ gpu: false }))
 		expect(result).toMatchObject({ ok: false, error: "unavailable" })
 		// Every shard was read again for damage before giving up: none was.
 		expect(await inspectModel(root, MODEL)).toMatchObject({ complete: true })
@@ -238,7 +238,7 @@ describe("assistant engine: load", () => {
 			llama: () => Promise.resolve(failingLlama(["cuda", "vulkan", false], () => new Error("no binary")))
 		})
 
-		await call(loadCall(["cuda", "vulkan"]))
+		await call(loadCall(["vulkan"]))
 		expect(sent.filter(message => message.t === "trying")).toEqual([{ t: "trying", backend: "cpu" }])
 	})
 

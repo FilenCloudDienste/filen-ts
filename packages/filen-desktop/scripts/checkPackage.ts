@@ -216,7 +216,7 @@ for (const arch of archs) {
 		}
 	}
 
-	// Every backend's Node-API binding, built for this arch (an extension package, as CUDA's, adds libraries only).
+	// Every backend's Node-API binding, built for this arch (an extension package would add libraries only).
 	for (const name of existsSync(backends) ? readdirSync(backends) : []) {
 		const binding = path.join(backends, name, "bins", name, "llama-addon.node")
 

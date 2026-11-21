@@ -29,8 +29,11 @@ export function backendOrder(supported: readonly EngineBackend[], exclude: reado
 	return ENGINE_BACKENDS.filter(backend => supported.includes(backend) && !exclude.includes(backend))
 }
 
-export function toBackend(gpu: LlamaGpuType): EngineBackend {
-	return gpu === false ? "cpu" : gpu
+// null for a backend the app does not ship (CUDA).
+export function toBackend(gpu: LlamaGpuType): EngineBackend | null {
+	const backend = gpu === false ? "cpu" : gpu
+
+	return ENGINE_BACKENDS.find(shipped => shipped === backend) ?? null
 }
 
 function toGpu(backend: EngineBackend): LlamaGpuType {
@@ -254,7 +257,7 @@ export function createEngine(deps: EngineDeps): Engine {
 		}
 
 		const module = await deps.llama()
-		const supported = (await module.getLlamaGpuTypes("supported")).map(toBackend)
+		const supported = (await module.getLlamaGpuTypes("supported")).flatMap(gpu => toBackend(gpu) ?? [])
 		const errors: string[] = []
 
 		for (const backend of backendOrder([...supported, "cpu"], call.exclude)) {
