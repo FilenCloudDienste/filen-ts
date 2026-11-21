@@ -36,8 +36,9 @@ import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { Route } from "@/routes/_app/settings/security"
+import { testUserInfo } from "@/tests/support/userInfo"
 
-const ACCOUNT = { email: "user@example.com" } as UserInfo
+const ACCOUNT = testUserInfo({ email: "user@example.com" })
 const SecurityPage = Route.options.component as ComponentType
 
 function renderPage(): void {

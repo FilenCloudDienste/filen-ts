@@ -47,8 +47,9 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { Route as AccountRoute } from "@/routes/_app/settings/account"
 import { Route as BillingRoute } from "@/routes/_app/settings/billing"
+import { testUserInfo } from "@/tests/support/userInfo"
 
-const ACCOUNT = { email: "user@example.com" } as UserInfo
+const ACCOUNT = testUserInfo({ email: "user@example.com" })
 
 function renderPage(page: ComponentType): void {
 	render(createElement(QueryClientProvider, { client: queryClient }, createElement(page)))

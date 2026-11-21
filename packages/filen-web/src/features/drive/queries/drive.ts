@@ -1533,15 +1533,19 @@ export function useDirectorySizeQuery(item: DirectorySizeItem): UseQueryResult<D
 	return useQuery(directorySizeQueryOptions(item))
 }
 
-// Versions panel primitive: an on-demand read of a single file's version history, newest first (the
-// SDK sorts server-side — see filen-sdk-rs's list_file_versions). Keyed on the file's own (current)
-// uuid, same rationale as itemInfoQueryKey.
+// Versions panel primitive: an on-demand read of a single file's version history, newest first, then uuid
+// (compareVersionsNewestFirst, once per read; the cache's patches only filter). Keyed on the file's own
+// (current) uuid, same rationale as itemInfoQueryKey.
 export function fileVersionsQueryKey(uuid: string) {
 	return ["drive", "fileVersions", uuid] as const
 }
 
+export function compareVersionsNewestFirst(a: FileVersion, b: FileVersion): number {
+	return a.timestamp === b.timestamp ? compareIds(a.uuid, b.uuid) : a.timestamp > b.timestamp ? -1 : 1
+}
+
 export async function fetchFileVersions(file: File): Promise<FileVersion[]> {
-	return sdkApi.listFileVersionsOp(file)
+	return (await sdkApi.listFileVersionsOp(file)).sort(compareVersionsNewestFirst)
 }
 
 export function useFileVersionsQuery(file: File): UseQueryResult<FileVersion[]> {

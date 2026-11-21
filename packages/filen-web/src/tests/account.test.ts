@@ -9,6 +9,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserInfo } }))
 
 import { queryClient } from "@/queries/client"
 import { accountQueryGet, accountQueryUpdate, fetchAccount, markAccountStale, ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { testUserInfo } from "@/tests/support/userInfo"
 
 describe("account query", () => {
 	it("queryKey is the stable, exact tuple every consumer imports", () => {
@@ -16,7 +17,7 @@ describe("account query", () => {
 	})
 
 	it("fetchAccount delegates to sdkApi.getUserInfo and returns its result verbatim", async () => {
-		const info = { email: "user@example.com", twoFactorEnabled: false } as UserInfo
+		const info = testUserInfo({ email: "user@example.com", twoFactorEnabled: false })
 		getUserInfo.mockResolvedValueOnce(info)
 
 		await expect(fetchAccount()).resolves.toBe(info)
@@ -35,7 +36,7 @@ describe("account query", () => {
 		queryClient.clear()
 		expect(accountQueryGet()).toBeUndefined()
 
-		const info = { id: 7n } as UserInfo
+		const info = testUserInfo({ id: 7n })
 		queryClient.setQueryData(ACCOUNT_QUERY_KEY, info)
 		expect(accountQueryGet()).toBe(info)
 
@@ -82,7 +83,7 @@ describe("account read recency", () => {
 
 		expect(account.isAccountReadRecent()).toBe(false)
 
-		getUserInfo.mockResolvedValueOnce({ storageUsed: 1n } as UserInfo)
+		getUserInfo.mockResolvedValueOnce(testUserInfo({ storageUsed: 1n }))
 		await account.fetchAccount()
 
 		expect(account.isAccountReadRecent()).toBe(true)
@@ -97,7 +98,7 @@ describe("account read recency", () => {
 		const read = account.fetchAccount()
 
 		account.markAccountStale()
-		resolve({ storageUsed: 1n } as UserInfo)
+		resolve(testUserInfo({ storageUsed: 1n }))
 		await read
 
 		expect(account.isAccountReadRecent()).toBe(false)

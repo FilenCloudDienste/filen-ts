@@ -54,6 +54,7 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { uploadBatchControl } from "@/features/drive/lib/upload"
 import { cancelTransfers } from "@/features/transfers/lib/control"
 import { testUuid } from "@/tests/support/uuid"
+import { testUserInfo } from "@/tests/support/userInfo"
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -198,7 +199,7 @@ function mockDirEntry(name: string, reader: FileSystemDirectoryReader): FileSyst
 
 beforeEach(async () => {
 	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
-	getUserInfo.mockResolvedValueOnce({})
+	getUserInfo.mockResolvedValueOnce(testUserInfo({}))
 	await fetchAccount()
 	getUserInfo.mockClear()
 	vi.clearAllMocks()
@@ -1105,7 +1106,7 @@ describe("startDirectoryUpload — a drop's directory rows", () => {
 	it("removes the scanning row when the quota blocks the upload, creating nothing", async () => {
 		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 10n })
 		// The pre-flight re-reads a cached account that does not fit before it blocks.
-		getUserInfo.mockResolvedValue({ storageUsed: 0n, maxStorage: 10n })
+		getUserInfo.mockResolvedValue(testUserInfo({ storageUsed: 0n, maxStorage: 10n }))
 
 		const root = mockDirEntry("photos", mockDirectoryReader([mockFileEntry("a.jpg", mockBrowserFile("a.jpg", 100))]))
 

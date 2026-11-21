@@ -54,6 +54,7 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
+import { testUserInfo } from "@/tests/support/userInfo"
 
 function mockDir(uuid: string): Dir {
 	return {
@@ -124,7 +125,7 @@ function mockDirPublicLinkRW(overrides: Partial<DirPublicLinkRW> = {}): DirPubli
 beforeEach(async () => {
 	vi.clearAllMocks()
 	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
-	getUserInfo.mockResolvedValueOnce({} as UserInfo)
+	getUserInfo.mockResolvedValueOnce(testUserInfo({}))
 	await fetchAccount()
 	getUserInfo.mockClear()
 	useTransfersStore.setState({ transfers: [] })
@@ -152,7 +153,7 @@ describe("preflightAttachments", () => {
 	it("checks the pick as one total: refused after exactly one fresh read, with a single message", async () => {
 		// Each file alone fits; together they do not.
 		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 1_000n, maxStorage: 2_500n })
-		getUserInfo.mockResolvedValueOnce({ storageUsed: 1_000n, maxStorage: 2_500n } as UserInfo)
+		getUserInfo.mockResolvedValueOnce(testUserInfo({ storageUsed: 1_000n, maxStorage: 2_500n }))
 
 		expect(await preflightAttachments([mockBrowserFile("a.jpg", 1_024), mockBrowserFile("b.jpg", 1_024)])).toBe(false)
 		expect(getUserInfo).toHaveBeenCalledOnce()

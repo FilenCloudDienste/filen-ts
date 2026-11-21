@@ -40,6 +40,7 @@ import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { testUuid } from "@/tests/support/uuid"
 import { counts } from "@/tests/fixtures/copyJob"
 import { drain } from "@/tests/support/drain"
+import { testUserInfo } from "@/tests/support/userInfo"
 
 const ROOT = testUuid("root")
 const TOP = testUuid("top")
@@ -100,7 +101,7 @@ function copyEchoes(): void {
 
 beforeEach(async () => {
 	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
-	getUserInfo.mockResolvedValueOnce({} as UserInfo)
+	getUserInfo.mockResolvedValueOnce(testUserInfo({}))
 	await fetchAccount()
 	getUserInfo.mockClear()
 	queryClient.clear()

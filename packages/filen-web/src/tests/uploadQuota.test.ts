@@ -46,10 +46,11 @@ import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { i18n } from "@/lib/i18n"
 import { testUuid } from "@/tests/support/uuid"
+import { testUserInfo } from "@/tests/support/userInfo"
 
 // The pre-flight reads only the two storage counters.
 function account(storageUsed: bigint, maxStorage: bigint): UserInfo {
-	return { storageUsed, maxStorage } as UserInfo
+	return testUserInfo({ storageUsed, maxStorage })
 }
 
 function cachedAccount(): UserInfo | undefined {

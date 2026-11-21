@@ -1,5 +1,6 @@
 import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query"
-import type { UserInfo } from "@filen/sdk-rs"
+import type { UserAccountSubs, UserAccountSubsInvoices, UserInfo } from "@filen/sdk-rs"
+import { compareIds } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { cachedQuery, cancelInFlightIfCached, patchQuery } from "@/queries/patch"
@@ -24,9 +25,36 @@ export type AccountQuerySuccess = Extract<UseQueryResult<UserInfo>, { data: User
 // change made elsewhere while the app was closed.
 let readThisSession = false
 
+// Newer bigint first; a missing one (a start the backend has not recorded) last.
+function newestFirst(a: bigint | undefined, b: bigint | undefined): number {
+	if (a === b) {
+		return 0
+	}
+
+	if (a === undefined || b === undefined) {
+		return a === undefined ? 1 : -1
+	}
+
+	return a > b ? -1 : 1
+}
+
+// The billing lists' order, set once per server read (local patches map in place): newest first, then id, never
+// the server's order.
+export function compareSubsNewestFirst(a: UserAccountSubs, b: UserAccountSubs): number {
+	return newestFirst(a.startTimestamp, b.startTimestamp) || compareIds(a.id, b.id)
+}
+
+export function compareInvoicesNewestFirst(a: UserAccountSubsInvoices, b: UserAccountSubsInvoices): number {
+	return newestFirst(a.timestamp, b.timestamp) || compareIds(a.id, b.id)
+}
+
 // The one server read every account path goes through; it notes the session as verified on its first success.
 async function readUserInfo(): Promise<UserInfo> {
 	const info = await sdkApi.getUserInfo()
+
+	// Fresh arrays from the worker: sorted in place, once per read.
+	info.subs.sort(compareSubsNewestFirst)
+	info.subsInvoices.sort(compareInvoicesNewestFirst)
 
 	// The first authed request of the page that succeeded: the stored session works.
 	if (!readThisSession) {

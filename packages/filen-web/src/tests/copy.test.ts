@@ -49,6 +49,7 @@ import { discardListingPatches, driveListingQueryKey, flushListingCreates } from
 import { testUuid } from "@/tests/support/uuid"
 import { copyJobFixtures, counts } from "@/tests/fixtures/copyJob"
 import { sdkErrorDTO } from "@/tests/support/sdkError"
+import { testUserInfo } from "@/tests/support/userInfo"
 
 const ROOT = testUuid("root")
 const DESTINATION = { uuid: null, name: "My Drive" }
@@ -155,7 +156,7 @@ function row(id = "job") {
 
 beforeEach(async () => {
 	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
-	getUserInfo.mockResolvedValueOnce({} as UserInfo)
+	getUserInfo.mockResolvedValueOnce(testUserInfo({}))
 	await fetchAccount()
 	getUserInfo.mockClear()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
@@ -577,7 +578,7 @@ describe("runCopyJob quota", () => {
 		})
 
 		addAccountStorageUsed(50n)
-		fresh.resolve({ maxStorage: 1_000n, storageUsed: 0n } as UserInfo)
+		fresh.resolve(testUserInfo({ maxStorage: 1_000n, storageUsed: 0n }))
 
 		const job = await running
 

@@ -20,8 +20,9 @@ import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
+import { testUserInfo } from "@/tests/support/userInfo"
 
-const ACCOUNT = { storageUsed: 1024n, maxStorage: 1024n * 1024n } as UserInfo
+const ACCOUNT = testUserInfo({ storageUsed: 1024n, maxStorage: 1024n * 1024n })
 
 function renderMeter(): void {
 	render(createElement(QueryClientProvider, { client: queryClient }, createElement(StorageMeter)))
