@@ -105,6 +105,18 @@ describe("main cases", () => {
 		}
 	})
 
+	// Long enough that the router reads them by their edges under either share, in every language.
+	it("has long pasted-text cases of 400 to 1200 characters in every language", () => {
+		const long = EVAL_CASES.filter(item => item.category === "long")
+
+		for (const item of long) {
+			expect(Array.from(item.prompt).length, item.id).toBeGreaterThanOrEqual(400)
+			expect(Array.from(item.prompt).length, item.id).toBeLessThanOrEqual(1200)
+		}
+
+		expect(new Set(long.map(item => item.lang))).toEqual(new Set(LANGUAGES))
+	})
+
 	it.each(EVAL_CASES.map(item => [item.id, item] as const))("%s is solvable against the fixture", (_id, item) => {
 		const app = new FakeApp(item.context)
 

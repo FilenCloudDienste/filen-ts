@@ -3,6 +3,7 @@ import { CONVERSATION_CASES } from "./conversation"
 import { DATE_CASES } from "./dates"
 import { DATE_FILTER_CASES, INSIGHTS_CASES } from "./insights"
 import { LANGUAGE_CASES } from "./language"
+import { LONG_CASES } from "./long"
 import { MULTI_STEP_CASES } from "./multiStep"
 import { PROMPTING_CASES } from "./prompting"
 import { MULTIPLE_CASES, PARALLEL_CASES, SIMPLE_CASES } from "./single"
@@ -23,5 +24,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
 	...DATE_CASES,
 	...DATE_FILTER_CASES,
 	...INSIGHTS_CASES,
-	...SOURCES_CASES
+	...SOURCES_CASES,
+	...LONG_CASES
 ]
