@@ -4,7 +4,6 @@ import {
 	runAssistantTurn,
 	transformText,
 	windowHistory,
-	type AssistantChatMessage,
 	type AssistantGenerateRequest,
 	type AssistantGenerateResult,
 	type AssistantHistoryTurn,
@@ -15,20 +14,8 @@ import {
 	type AssistantToolExecutor,
 	type AssistantToolOutcome
 } from "@filen/shared/assistant"
-import {
-	LlamaChat,
-	LlamaText,
-	TokenBias,
-	type ChatHistoryItem,
-	type ChatModelFunctionCall,
-	type ChatModelFunctions,
-	type ChatModelResponse,
-	type ChatWrapper,
-	type Llama,
-	type LlamaContextSequence,
-	type LlamaGrammar,
-	type LlamaModel
-} from "node-llama-cpp"
+import { LlamaSlotModel, toHistory } from "@filen/assistant-node"
+import type { ChatWrapper, Llama, LlamaContextSequence } from "node-llama-cpp"
 import type { CallRecord, CallStatus, Timings, Transcript, TurnTimings } from "./agent"
 import type { EvalCase } from "./cases/types"
 import type { FakeApp } from "./fakeApp"
@@ -66,82 +53,10 @@ export type LoopRuntime = {
 	contextTokens: number
 }
 
-function parseJson(text: string): unknown {
-	try {
-		return JSON.parse(text) as unknown
-	} catch {
-		return text
-	}
-}
+// The loop's messages as node-llama-cpp's chat history, as the desktop app's engine maps them.
+export { toHistory }
 
-// The loop's engine-neutral messages as node-llama-cpp's chat history: a tool result goes onto the call it
-// answers, inside the model turn that made it.
-export function toHistory(messages: readonly AssistantChatMessage[], parallel: boolean): ChatHistoryItem[] {
-	const history: ChatHistoryItem[] = []
-	const pending = new Map<string, ChatModelFunctionCall>()
-
-	for (const message of messages) {
-		switch (message.role) {
-			case "system":
-				history.push({ type: "system", text: message.content })
-				break
-			case "user":
-				history.push({ type: "user", text: message.content })
-				break
-			case "assistant": {
-				const response: ChatModelResponse["response"] = message.content.length > 0 ? [message.content] : []
-
-				for (const [index, call] of (message.toolCalls ?? []).entries()) {
-					const functionCall: ChatModelFunctionCall = {
-						type: "functionCall",
-						name: call.name,
-						params: parseJson(call.arguments),
-						result: null,
-						...(index === 0 && parallel ? { startsNewChunk: true } : {})
-					}
-
-					pending.set(call.id, functionCall)
-					response.push(functionCall)
-				}
-
-				history.push({ type: "model", response })
-				break
-			}
-			case "tool": {
-				const functionCall = pending.get(message.toolCallId)
-
-				if (functionCall !== undefined) {
-					functionCall.result = parseJson(message.content)
-				}
-
-				break
-			}
-		}
-	}
-
-	// A request ends on the user's turn; the template opens the model's.
-	return history
-}
-
-// A request that must call: the web worker's engine opens the reply with the template's call opener and
-// constrains the rest to a call (tool_choice "required"). node-llama-cpp has neither, so the opener is made
-// the first token and the model writes the call itself, in the tokens it would have chosen ("=list" is one
-// token; an injected "<function=" would split it and change which tool the model picks).
-const OPENER_LOGIT = 100
-
-function openerBias(model: LlamaModel, wrapper: ChatWrapper): TokenBias {
-	const opener = LlamaText(wrapper.settings.functions.call.prefix).tokenize(model.tokenizer, "trimLeadingSpace")[0]
-
-	// A token of its own, as Qwen's "<tool_call>": a plain first character would open far more than calls.
-	if (opener === undefined || model.detokenize([opener], true).length < 2) {
-		throw new Error(`${wrapper.wrapperName} opens calls without a token of their own; a required call needs its own handling`)
-	}
-
-	return new TokenBias(model.tokenizer).set(opener, { logit: OPENER_LOGIT })
-}
-
-// AssistantModel over node-llama-cpp: one sequence per kind of request, as the web worker keeps one slot
-// per kind, and the same measurements agent.ts takes.
+// The desktop app's engine (LlamaSlotModel, @filen/assistant-node) with the eval's timings around each request.
 export class LlamaAssistantModel implements AssistantModel {
 	readonly contextTokens: number
 	readonly specialTokens: readonly string[]
@@ -157,99 +72,42 @@ export class LlamaAssistantModel implements AssistantModel {
 	}
 	mainGenerations = 0
 	extractions = 0
-	private readonly runtime: LoopRuntime
-	private readonly wrapper: ChatWrapper
-	private readonly chats: Record<AssistantGenerateRequest["slot"], LlamaChat>
-	private opener: TokenBias | undefined
-	private readonly grammars = new Map<string, Promise<LlamaGrammar>>()
+	private readonly slots: LlamaSlotModel
 
 	constructor(runtime: LoopRuntime) {
-		this.runtime = runtime
 		this.contextTokens = runtime.contextTokens
 		this.specialTokens = runtime.specialTokens
-		this.wrapper = runtime.createWrapper()
-		this.chats = {
-			router: new LlamaChat({ contextSequence: runtime.routerSequence, chatWrapper: this.wrapper, autoDisposeSequence: false }),
-			main: new LlamaChat({ contextSequence: runtime.mainSequence, chatWrapper: this.wrapper, autoDisposeSequence: false }),
-			extraction: new LlamaChat({
-				contextSequence: runtime.quarantineSequence,
-				chatWrapper: this.wrapper,
-				autoDisposeSequence: false
-			})
-		}
+		this.slots = new LlamaSlotModel({
+			llama: runtime.llama,
+			sequences: { router: runtime.routerSequence, main: runtime.mainSequence, extraction: runtime.quarantineSequence },
+			wrapper: runtime.createWrapper()
+		})
 	}
 
 	dispose(): void {
-		for (const chat of Object.values(this.chats)) {
-			chat.dispose({ disposeSequence: false })
-		}
-	}
-
-	private grammar(source: string): Promise<LlamaGrammar> {
-		let grammar = this.grammars.get(source)
-
-		if (grammar === undefined) {
-			grammar = this.runtime.llama.createGrammar({ grammar: source })
-			this.grammars.set(source, grammar)
-		}
-
-		return grammar
+		this.slots.dispose()
 	}
 
 	async generate(
 		request: AssistantGenerateRequest,
 		{ signal, onText }: { signal: AssistantSignal; onText?: (text: string) => void }
 	): Promise<AssistantGenerateResult> {
-		const functions: ChatModelFunctions | undefined =
-			request.tools === undefined || request.tools.length === 0
-				? undefined
-				: Object.fromEntries(request.tools.map(tool => [tool.name, { description: tool.description, params: tool.parameters }]))
-		const chat = this.chats[request.slot]
-		const sequence = chat.sequence
-		// Only the first token is the opener's; the rest is sampled as usual.
-		let opening =
-			request.toolChoice === "required" && functions !== undefined
-				? (this.opener ??= openerBias(sequence.model, this.wrapper))
-				: undefined
-		const unbiased = new TokenBias(sequence.model.tokenizer)
-		const grammar = request.grammar === undefined ? undefined : await this.grammar(request.grammar)
+		const sequence = this.slots.sequence(request.slot)
 		const inputBefore = sequence.tokenMeter.usedInputTokens
 		const outputBefore = sequence.tokenMeter.usedOutputTokens
 		const started = performance.now()
 		let first: number | null = null
-		let text = ""
-		const onFirst = () => {
-			first ??= performance.now()
-		}
-		const history = toHistory(request.messages, this.wrapper.settings.functions.parallelism !== undefined)
-		const common = {
-			temperature: 0,
-			maxTokens: request.maxTokens,
-			budgets: { thoughtTokens: 0 },
-			...(signal instanceof AbortSignal ? { signal } : {}),
-			...(opening === undefined
-				? {}
-				: {
-						tokenBias: () => {
-							const bias = opening ?? unbiased
-
-							opening = undefined
-
-							return bias
-						}
-					}),
-			onToken: onFirst,
-			onTextChunk: (chunk: string) => {
-				text += chunk
-				onText?.(text)
+		const result = await this.slots.generate(request, {
+			signal,
+			onFirstToken: () => {
+				first ??= performance.now()
+			},
+			onUpdate: update => {
+				if (update.type === "text") {
+					onText?.(update.text)
+				}
 			}
-		}
-		const response =
-			grammar !== undefined
-				? await chat.generateResponse(history, { ...common, grammar })
-				: functions !== undefined
-					? await chat.generateResponse(history, { ...common, functions, onFunctionCallParamsChunk: onFirst })
-					: await chat.generateResponse(history, common)
+		})
 		const ended = performance.now()
 		const ttft = first === null ? null : first - started
 
@@ -271,26 +129,7 @@ export class LlamaAssistantModel implements AssistantModel {
 			this.extractions++
 		}
 
-		// A request that may call nothing (toolChoice "none") gets its calls back as text, as an engine that
-		// parses no calls hands them back; the loop drops call syntax from it.
-		const parsed = response.functionCalls ?? []
-		const none = request.toolChoice === "none"
-		const calls = none ? [] : parsed
-		const written = none
-			? parsed
-					.map(call => `<tool_call>\n${JSON.stringify({ name: call.functionName, arguments: call.params ?? {} })}\n</tool_call>`)
-					.join("\n")
-			: ""
-
-		return {
-			content: written.length === 0 ? response.response : `${response.response}\n${written}`.trim(),
-			toolCalls: calls.map((call, index) => ({
-				id: `nl_${String(this.timings.generations)}_${String(index)}`,
-				name: call.functionName,
-				arguments: JSON.stringify(call.params ?? {})
-			})),
-			...(response.metadata.stopReason === "maxTokens" ? { truncated: true } : {})
-		}
+		return result
 	}
 }
 

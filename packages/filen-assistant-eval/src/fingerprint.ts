@@ -10,7 +10,7 @@ const SHARED_ASSISTANT = new URL("../../filen-shared/src/assistant/", import.met
 const SHARED_HELPERS = ["misc", "storageQuota"]
 
 // The eval sources that decide what a case measures: the fake app and its data, both loops, the chat
-// wrappers, the prompts and the worker's context settings. Not the cases (each record hashes its own), the
+// wrappers, the prompts and the worker's context settings (and, below, @filen/assistant-node's model mapping). Not the cases (each record hashes its own), the
 // graders (a grading change needs --fresh or another --out), the report or the CLI.
 const EVAL_SOURCES = ["agent", "chatWrappers", "decoys", "fakeApp", "fixture", "loopHarness", "prompts", "worker"]
 
@@ -28,6 +28,8 @@ const PROMPTS_AND_TOOLS = JSON.stringify({
 		.map(file => [file, readFileSync(new URL(file, SHARED_ASSISTANT), "utf8")]),
 	helpers: SHARED_HELPERS.map(file => readFileSync(new URL(`../../filen-shared/src/${file}.ts`, import.meta.url), "utf8")),
 	eval: EVAL_SOURCES.map(file => readFileSync(new URL(`./${file}.ts`, import.meta.url), "utf8")),
+	// The node-llama-cpp mapping the desktop app's engine shares.
+	adapter: readFileSync(new URL("../../filen-assistant-node/src/llamaModel.ts", import.meta.url), "utf8"),
 	engine: (
 		JSON.parse(readFileSync(new URL("../node_modules/node-llama-cpp/package.json", import.meta.url), "utf8")) as {
 			version: string

@@ -1,0 +1,32 @@
+{
+	"name": "@filen/assistant-node",
+	"version": "0.0.1",
+	"description": "The Filen assistant's AssistantModel over node-llama-cpp, for Node runtimes (the desktop app's engine, the eval harness)",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc -p tsconfig.json",
+		"test": "vitest run",
+		"lint": "eslint src/ && prettier --check \"src/**/*.ts\""
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"license": "AGPLv3",
+	"dependencies": {
+		"@filen/shared": "workspace:*",
+		"node-llama-cpp": "3.22.1"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.39.3",
+		"@types/node": "^24.0.0",
+		"eslint": "^9.39.3",
+		"prettier": "^3.9.6",
+		"typescript": "~6.0.3",
+		"typescript-eslint": "^8.56.1",
+		"vitest": "^4.1.11"
+	}
+}

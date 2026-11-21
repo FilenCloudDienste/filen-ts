@@ -5,7 +5,7 @@ import { downloadModelShards, ModelDownloadError, type Connectivity, type Stream
 import type { AssistantModelFiles } from "@filen/shared/dom/assistantModel/manifest"
 import type { Llama, LlamaContext, LlamaGpuType, LlamaModel } from "node-llama-cpp"
 import { ENGINE_BACKENDS, failure, type EngineBackend, type FromEngine, type ToEngine } from "../shared/assistantProtocol.ts"
-import { LlamaSlotModel, type GenerateUpdate } from "./llamaModel.ts"
+import { LlamaSlotModel, type GenerateUpdate } from "@filen/assistant-node"
 import { hashFile, shardStore, type EngineShardStore } from "./shardFiles.ts"
 
 // The assistant's engine: runs in the "Filen Assistant" utility process, apart from sync, mounts and transfers, so a
@@ -193,7 +193,6 @@ export function createEngine(deps: EngineDeps): Engine {
 			const context = await model.createContext({ contextSize: sequenceTokens, sequences: 3 })
 			const slots = new LlamaSlotModel({
 				llama,
-				model,
 				sequences: { router: context.getSequence(), main: context.getSequence(), extraction: context.getSequence() }
 			})
 			const specialTokens: string[] = []

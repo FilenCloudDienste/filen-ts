@@ -1,7 +1,6 @@
 import {
 	ChatMLChatWrapper,
 	LlamaText,
-	QwenChatWrapper,
 	resolveChatWrapper,
 	SpecialTokensText,
 	type ChatModelFunctions,
@@ -10,6 +9,7 @@ import {
 	type LlamaModel
 } from "node-llama-cpp"
 import type { ModelEntry } from "./models"
+import { qwen35ChatWrapper } from "@filen/assistant-node"
 
 // LFM2's template lists tools as JSON in the system prompt and the model writes Pythonic calls
 // between <|tool_call_start|> and <|tool_call_end|>. node-llama-cpp only constrains JSON params, so
@@ -49,12 +49,9 @@ export class Lfm2ChatWrapper extends ChatMLChatWrapper {
 }
 
 export function createChatWrapper({ entry, model }: { entry: ModelEntry; model: LlamaModel }): ChatWrapper {
+	// The desktop app's own wrapper for Qwen3.5 (non-thinking).
 	if (entry.chatWrapper === "qwen3.5") {
-		// Non-thinking mode: the small Qwen3.5 models loop when allowed to think.
-		return new QwenChatWrapper({
-			variation: "3.5",
-			thoughts: "discourage"
-		})
+		return qwen35ChatWrapper()
 	}
 
 	if (entry.chatWrapper === "lfm2") {
