@@ -19,7 +19,7 @@ import type {
 	GetItemPathResult,
 	SharingRole
 } from "@filen/sdk-rs"
-import { fastLocaleCompare, driveItemName, isDotFilenName, removeByUuid, upsertItems } from "@filen/shared"
+import { compareIds, fastLocaleCompare, driveItemName, isDotFilenName, removeByUuid, upsertItems } from "@filen/shared"
 import {
 	narrowItem,
 	asDirectoryOrFile,
@@ -287,7 +287,7 @@ export function projectTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
 		}
 	}
 
-	return children.sort((a, b) => fastLocaleCompare(a.name, b.name))
+	return children.sort((a, b) => fastLocaleCompare(a.name, b.name) || compareIds(a.uuid, b.uuid))
 }
 
 // Reads the drive listing's own cache entry rather than a slice of its own: listDirectory returns a

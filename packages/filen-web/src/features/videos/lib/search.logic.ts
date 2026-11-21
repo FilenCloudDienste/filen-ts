@@ -1,4 +1,4 @@
-import { fastLocaleCompare } from "@filen/shared"
+import { compareIds, fastLocaleCompare } from "@filen/shared"
 import type { VideoHomeItem, VideoTitleView } from "@/workers/videoIndex/view.logic"
 
 // Library search: an in-memory index over what the library already holds (titles, series titles, years, directory
@@ -334,7 +334,9 @@ export function searchVideos({
 			(a, b) =>
 				Number(b.name.startsWith(whole)) - Number(a.name.startsWith(whole)) ||
 				fastLocaleCompare(a.name, b.name) ||
-				fastLocaleCompare(a.title.sortName, b.title.sortName)
+				fastLocaleCompare(a.title.sortName, b.title.sortName) ||
+				compareIds(a.title.id, b.title.id) ||
+				compareIds(a.item?.stableUuid ?? "", b.item?.stableUuid ?? "")
 		)
 		out.push({
 			kind,

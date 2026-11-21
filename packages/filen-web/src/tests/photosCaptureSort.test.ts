@@ -4,7 +4,7 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { captureTimestamp, sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
 import { testUuid } from "@/tests/support/uuid"
 
-function photo(uuid: string, timestamp: bigint, created?: bigint, modified?: bigint): PhotoItem {
+function photo(uuid: string, timestamp: bigint, created?: bigint, modified?: bigint, name = "photo.jpg"): PhotoItem {
 	const item = narrowItem({
 		uuid: testUuid(uuid),
 		stableUUID: undefined,
@@ -19,7 +19,7 @@ function photo(uuid: string, timestamp: bigint, created?: bigint, modified?: big
 		meta: {
 			type: "decoded",
 			data: {
-				name: "photo.jpg",
+				name,
 				mime: "image/jpeg",
 				...(created !== undefined ? { created } : {}),
 				modified: modified ?? timestamp,
@@ -67,6 +67,14 @@ describe("sortPhotosByCaptureDesc", () => {
 
 		expect(sortPhotosByCaptureDesc([b, a]).map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
 		expect(sortPhotosByCaptureDesc([a, b]).map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
+	})
+
+	it("breaks a tie by natural name before the uuid", () => {
+		const tenth = photo("aaaaaaaa", 5_000n, undefined, undefined, "IMG_10.jpg")
+		const second = photo("bbbbbbbb", 5_000n, undefined, undefined, "img_2.jpg")
+
+		expect(sortPhotosByCaptureDesc([tenth, second]).map(item => item.data.uuid)).toEqual([second.data.uuid, tenth.data.uuid])
+		expect(sortPhotosByCaptureDesc([second, tenth]).map(item => item.data.uuid)).toEqual([second.data.uuid, tenth.data.uuid])
 	})
 
 	it("does not mutate the input array", () => {
