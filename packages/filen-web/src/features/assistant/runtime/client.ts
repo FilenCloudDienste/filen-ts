@@ -1,6 +1,4 @@
 import * as Comlink from "comlink"
-import AssistantWorker from "@/workers/assistant.worker.ts?worker"
-import type { AssistantWorkerApi } from "@/workers/assistant.worker"
 import {
 	AssistantAbortError,
 	type AssistantGenerateRequest,
@@ -16,7 +14,19 @@ import type { AssistantModelInfo, AssistantModelState } from "@/features/assista
 import { DEFAULT_MODEL_BASE_URL, manifestBytes, parseManifest, type AssistantModelManifest } from "@/features/assistant/runtime/manifest"
 import { QWEN35_4B } from "@/features/assistant/runtime/models"
 import { probeDevice, recommendRuntime, type AssistantBackend, type RuntimeRecommendation } from "@/features/assistant/runtime/deviceCheck"
-import { MODEL_LOCK, deleteModelDirectory, deleteModels, inspectModel, otherModels } from "@/features/assistant/runtime/modelStore"
+import { MODEL_LOCK } from "@/features/assistant/runtime/modelStore"
+import {
+	deleteModelDirectory,
+	deleteModels,
+	fallBackToWorker,
+	inspectModel,
+	nativeEngineActive,
+	otherModels,
+	selectEngine,
+	spawnEngine,
+	type EngineHandle
+} from "@/features/assistant/runtime/engineHost"
+import { NATIVE_UNAVAILABLE } from "@/features/assistant/runtime/nativeEngine"
 import { autoStartIntent, readDownloadIntent, writeDownloadIntent } from "@/features/assistant/runtime/downloadIntent"
 import type { ModelDownloadProgress } from "@/features/assistant/runtime/download"
 import { ENGINE_CRASHED, type GenerationUpdate } from "@/features/assistant/runtime/engineMessages"
@@ -58,12 +68,8 @@ const STOP_WATCHDOG_MAX_MS = 180_000
 
 type Settled = AssistantModelState["kind"]
 
-interface WorkerHandle {
-	worker: Worker
-	remote: Comlink.Remote<AssistantWorkerApi>
-	// Aborted when the worker is stopped or fails: a call to it can never be answered after that.
-	closed: AbortController
-}
+// The page's worker, or the desktop app's native engine (engineHost.ts).
+type WorkerHandle = EngineHandle
 
 const WORKER_CLOSED = "WorkerClosedError"
 
@@ -112,11 +118,9 @@ function delay(ms: number): Promise<void> {
 }
 
 // Everything the worker held goes with it: the engine's own worker and its thread pool are nested workers,
-// so their wasm memory and the WebGPU device are released too.
+// so their wasm memory and the WebGPU device are released too (the desktop app's native engine: its process).
 function stopWorker(handle: WorkerHandle): void {
-	handle.closed.abort()
-	handle.remote[Comlink.releaseProxy]()
-	handle.worker.terminate()
+	handle.stop()
 }
 
 // The signed-in account the download's opt-in belongs to. The shell reads the account anyway, so this
@@ -265,6 +269,8 @@ export class AssistantRuntime implements AssistantModel {
 
 	private async refresh(): Promise<void> {
 		this.checkFailed = false
+
+		await selectEngine()
 
 		const resolved = await resolveModel()
 
@@ -429,17 +435,16 @@ export class AssistantRuntime implements AssistantModel {
 
 	private worker(): WorkerHandle {
 		if (this.handle === null) {
-			const worker = new AssistantWorker()
-			const handle: WorkerHandle = { worker, remote: Comlink.wrap<AssistantWorkerApi>(worker), closed: new AbortController() }
 			// A worker that failed to start (a deploy removed its old file, appUpdate.ts) or threw at the top level
 			// answers nothing more: whatever it was doing fails now, rather than waiting forever with the lock held.
-			const failed = () => {
-				recoverIfNewerBuild()
-				this.workerLost(handle)
-			}
+			const handle: WorkerHandle = spawnEngine(() => {
+				if (!nativeEngineActive()) {
+					recoverIfNewerBuild()
+				}
 
-			worker.addEventListener("error", failed)
-			worker.addEventListener("messageerror", failed)
+				this.workerLost(handle)
+			})
+
 			this.handle = handle
 		}
 
@@ -901,7 +906,12 @@ export class AssistantRuntime implements AssistantModel {
 		} catch (e) {
 			const name = errorName(e)
 
-			if (recommendation.backend !== "webgpu" || name === "ModelLoadError:missing" || name === WORKER_CLOSED) {
+			if (
+				nativeEngineActive() ||
+				recommendation.backend !== "webgpu" ||
+				name === "ModelLoadError:missing" ||
+				name === WORKER_CLOSED
+			) {
 				throw e
 			}
 
@@ -963,6 +973,18 @@ export class AssistantRuntime implements AssistantModel {
 			log.error("assistant", "model load failed", e)
 
 			const name = errorName(e)
+
+			// The desktop app's native engine runs on no backend here: this page's own engine takes over, from its own
+			// copy of the model when there is one.
+			if (name === NATIVE_UNAVAILABLE && fallBackToWorker()) {
+				await this.refresh()
+
+				if (this.state.kind === "downloaded") {
+					await this.runLoad()
+				}
+
+				return
+			}
 
 			if (name === "ModelLoadError:missing" && (await this.settleMissing())) {
 				return

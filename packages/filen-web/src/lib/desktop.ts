@@ -1,4 +1,4 @@
-import type { DesktopBridge, DesktopPlatform } from "@filen/shared/desktop"
+import type { DesktopAssistant, DesktopBridge, DesktopPlatform } from "@filen/shared/desktop"
 
 // The one reader of window.desktop. The preload defines it before any page script runs, so it never
 // appears or disappears mid-session and is read once. Modules reporting to the shell (unloadGuard, the
@@ -27,6 +27,12 @@ export function desktopBridge(): DesktopBridge | undefined {
 // bridge's controls (the assistant) asks this.
 export function isDesktopApp(): boolean {
 	return bridge !== undefined
+}
+
+// The assistant's native engine only (model files and AssistantModel requests), the one part of the bridge the
+// assistant's runtime may reach.
+export function desktopAssistant(): DesktopAssistant | undefined {
+	return bridge?.assistant
 }
 
 export function desktopPlatform(): DesktopPlatform | undefined {
