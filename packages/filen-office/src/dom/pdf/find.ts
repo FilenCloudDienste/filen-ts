@@ -155,7 +155,8 @@ export class PdfFinder {
 		this.slicing = slicing
 	}
 
-	private async pageText(pageNumber: number): Promise<PdfPageText> {
+	// A page's text (1-based), read once and kept for the next query or reader.
+	async pageText(pageNumber: number): Promise<PdfPageText> {
 		const known = this.texts[pageNumber - 1]
 
 		if (known !== undefined) return known

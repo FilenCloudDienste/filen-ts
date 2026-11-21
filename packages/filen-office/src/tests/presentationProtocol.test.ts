@@ -163,6 +163,8 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 		redo: () => Promise.resolve({ ok: true, revision: 5, dirty: true }),
 		retract: (_context, revision) => Promise.resolve({ ok: true, revision: revision + 1, dirty: false }),
 		find: (_context, query) => Promise.resolve(new Int32Array([0, 2, 0, 0, query.length, 0])),
+		text: (_context, from, to, maxChars) =>
+			Promise.resolve({ slides: [{ index: from, text: `to ${String(to)}`, notes: "" }], truncated: maxChars < 4 }),
 		media: (_context, part, media) => {
 			media.postMessage({ part })
 
@@ -335,6 +337,7 @@ describe("the presentation protocol", () => {
 			height: 96
 		})
 		expect(await session.call("find", "point", { caseSensitive: true }).answer).toEqual(new Int32Array([0, 2, 0, 0, 5, 0]))
+		expect(await session.call("text", 1, 2, 3).answer).toEqual({ slides: [{ index: 1, text: "to 2", notes: "" }], truncated: true })
 
 		const media = port()
 		const mediaMessage = new Promise(resolve =>
@@ -484,6 +487,7 @@ describe("the presentation protocol", () => {
 			redo: () => session.call("redo").answer,
 			retract: () => session.call("retract", 1).answer,
 			find: () => session.call("find", "x").answer,
+			text: () => session.call("text", 0, 0, 10).answer,
 			media: () => session.call("media", "/ppt/media/media1.mp4", ports()).answer,
 			registerMedia: () =>
 				session.call("registerMedia", { kind: "range", port: ports(), size: 1, checked: false, name: "a.mp4", type: "video/mp4" })
@@ -516,6 +520,7 @@ describe("the presentation protocol", () => {
 			"save",
 			"commitSaved",
 			"find",
+			"text",
 			"smartArtInfo",
 			"shade",
 			"registerMedia",

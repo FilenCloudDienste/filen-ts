@@ -42,6 +42,7 @@ import { textShiftFeature } from "./shift/text"
 import { textMoveFeature } from "./move/text"
 import { axisMoveOrder, moveAxisSpans } from "./axisSpans"
 import { textSortFeature } from "./sort/text"
+import { sheetText } from "./readText"
 import { defineSheetFeature, sheetRegistry, type SheetChangeSink, type SheetFeature, type SheetHandled } from "./registry"
 import { RenderStyleTable, SheetSession, sessionFeature, type SheetEntrySink, type SheetSessionDocument } from "./session"
 
@@ -584,6 +585,30 @@ function copyTexts(document: TextSheetDocument, range: SheetRange, cut: boolean)
 	return { clip: id, text }
 }
 
+// The "text" query: the cells as the file holds them, the held copy untouched.
+function fileText(document: TextSheetDocument, range: SheetRange | undefined, maxChars: number): SheetQueryResult<"text"> {
+	const rows = document.rows
+
+	return sheetText(
+		{
+			rows: rows.length,
+			cols: document.width,
+			cells: (area, visit) => {
+				const last = Math.min(area.endRow, rows.length - 1)
+
+				for (let row = area.startRow; row <= last; row++) {
+					const values = rows[row] ?? []
+					const end = Math.min(area.endCol, values.length - 1)
+
+					for (let col = area.startCol; col <= end; col++) visit(row, col, values[col] ?? "")
+				}
+			}
+		},
+		range,
+		maxChars
+	)
+}
+
 function lineEnds(text: string): string {
 	return text.replace(/\r\n?/g, "\n")
 }
@@ -772,6 +797,7 @@ export const textFeature = defineSheetFeature<TextSheetDocument>({
 	},
 	queries: {
 		copy: { run: (context, request) => copyTexts(context.doc, request.range, request.cut) },
+		text: { run: (context, request) => fileText(context.doc, request.range, request.maxChars) },
 		fitSample: { run: (context, request) => fitTexts(context.doc, request.axis, request.index, request.limit) }
 	}
 })

@@ -30,7 +30,7 @@ export {
 } from "./protection"
 export { inThreadDocxProtection } from "./protectionWorker"
 export { DocxEngine, type DocxEmit, type DocxEngineOptions, type DocxEngineServices } from "./engine"
-export { findMatches, lineOf, type FindablePage } from "./find"
+export { docxPageText, findMatches, lineOf, type FindablePage } from "./find"
 export {
 	docxWorkerPool,
 	inThreadDocxHost,

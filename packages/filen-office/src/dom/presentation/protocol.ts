@@ -204,6 +204,14 @@ export interface FindOptions {
 
 export const PRESENTATION_FIND_LIMIT = 10_000
 
+// Slides' text for a reader (the assistant), by index in the deck: each slide's shapes (tables cell by cell, groups
+// entered, SmartArt points) a line per paragraph, and its speaker notes.
+export interface SlideTexts {
+	readonly slides: readonly { readonly index: number; readonly text: string; readonly notes: string }[]
+	// Cut at the characters asked for: the last slide's text (or notes) ends early and the slides after it are left out.
+	readonly truncated: boolean
+}
+
 // Per match: slide index, shape id, paragraph, start, end, flags (FIND_IN_*).
 export const PRESENTATION_FIND_INTS = 6
 export const FIND_IN_NOTES = 1
@@ -324,6 +332,9 @@ export interface PresentationSessionApi {
 	retract(revision: number): Promise<CommandResult>
 	// PRESENTATION_FIND_INTS per match.
 	find(query: string, options?: FindOptions): Promise<Int32Array>
+	// The text of slides `from` to `to` (indices in the deck, inclusive), at most `maxChars` characters of it. Reads
+	// slides as find does: no edit state starts.
+	text(from: number, to: number, maxChars: number): Promise<SlideTexts>
 	media(part: string, port: PortLike): Promise<PortStreamMeta | MediaRefusal>
 	// Registers a medium for media.insert (InsertedMedia without poster or duration: the page probes those).
 	registerMedia(source: MediaInsertSource): Promise<InsertedMedia | MediaRefusal>
@@ -391,6 +402,7 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"redo",
 	"retract",
 	"find",
+	"text",
 	"media",
 	"registerMedia",
 	"image",

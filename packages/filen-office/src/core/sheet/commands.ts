@@ -2,7 +2,7 @@ import type { ByteSource } from "../opc/io"
 import { openXlsx, sheetOpenFailure, XlsxReadError } from "../xlsx/read/index"
 import { XlsxDocument } from "../xlsx/edit/document"
 import { clearCells, setCells } from "../xlsx/edit/cells"
-import { copyCells, pasteCells } from "../xlsx/edit/clipboard"
+import { copyCells, pasteCells, sheetCellsText } from "../xlsx/edit/clipboard"
 import { applyFormat } from "../xlsx/edit/format"
 import { notesFeature } from "../xlsx/comments/feature"
 import { linksFeature } from "../xlsx/hyperlinks/feature"
@@ -144,7 +144,8 @@ export const clipboardFeature = defineSheetFeature<XlsxDocument>({
 		}
 	},
 	queries: {
-		copy: { run: (context, request) => copyCells(context.doc, request.sheet, request.range, request.cut) }
+		copy: { run: (context, request) => copyCells(context.doc, request.sheet, request.range, request.cut) },
+		text: { run: (context, request) => sheetCellsText(context.doc, request.sheet, request.range, request.maxChars) }
 	}
 })
 

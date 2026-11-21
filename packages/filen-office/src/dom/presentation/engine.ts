@@ -92,6 +92,7 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	redo: "priority",
 	retract: "priority",
 	find: "background",
+	text: "background",
 	media: "background",
 	registerMedia: "background",
 	image: "background",
@@ -177,7 +178,7 @@ export type EditCapability = Capability<"command" | "undo" | "redo" | "retract">
 export type SaveCapability = Capability<"save" | "commitSaved">
 export type MediaCapability = Capability<"media" | "registerMedia">
 export type ShowCapability = Capability<"timegraph" | "layers">
-export type FindCapability = Capability<"find">
+export type FindCapability = Capability<"find" | "text">
 export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
 export type ReviewCapability = Capability<"review">

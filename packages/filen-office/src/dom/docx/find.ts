@@ -15,6 +15,32 @@ export interface FindablePage {
 	readonly lineInts: Int32Array
 }
 
+// The text a laid-out page shows, in line order: the part of each paragraph on its lines (a paragraph split over two
+// pages carries its whole text on both), a line break between paragraphs.
+export function docxPageText(page: FindablePage): string {
+	let text = ""
+	let source = -1
+	let end = -1
+
+	for (let line = 0; line < page.lineCount; line++) {
+		const i = line * LINE_INTS
+		const lineSource = page.lineInts[i + LineInt.SOURCE] ?? -1
+		const start = page.lineInts[i + LineInt.TEXT_START] ?? 0
+		const lineEnd = page.lineInts[i + LineInt.TEXT_END] ?? 0
+		const part = (page.sourceTexts[lineSource] ?? "").slice(start, lineEnd)
+
+		if (lineSource !== source) {
+			if (source >= 0) text += "\n"
+		} else if (start !== end) text += " "
+
+		text += part
+		source = lineSource
+		end = lineEnd
+	}
+
+	return text
+}
+
 // The page's line that holds offset `at` of `source`, or -1.
 export function lineOf(page: FindablePage, source: number, at: number): number {
 	for (let line = 0; line < page.lineCount; line++) {

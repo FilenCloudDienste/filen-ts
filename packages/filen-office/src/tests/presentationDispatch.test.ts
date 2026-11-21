@@ -76,6 +76,7 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"save",
 	"commitSaved",
 	"find",
+	"text",
 	"smartArtInfo",
 	"registerMedia",
 	"chartData",

@@ -2,6 +2,8 @@ import { parseDataModel, SmartArtError } from "../../../core/smartart/data"
 import { partKey, sliceClock, type SliceClock } from "../../../core/opc/index"
 import { matcherOf, matchesIn, paragraphMatches, type Matcher } from "../../../core/presentation/edit/find"
 import { PresentationError, type Deck, type ShapeNode, type SlideNode, type TextBody } from "../../../core/presentation/model"
+import { shapeText } from "../../../core/presentation/edit/clip"
+import { notesText } from "../../../core/presentation/notes"
 import {
 	FIND_IN_NOTES,
 	FIND_IN_SMARTART,
@@ -9,7 +11,8 @@ import {
 	FIND_LOCKED,
 	PRESENTATION_FIND_INTS,
 	PRESENTATION_FIND_LIMIT,
-	type FindOptions
+	type FindOptions,
+	type SlideTexts
 } from "../protocol"
 import type { CallContext, FindCapability } from "../engine"
 import { viewParts, type ViewParts } from "./view"
@@ -93,8 +96,9 @@ function searchBody(search: Search, body: TextBody, slide: number, shape: number
 
 const TEXT_POINTS: ReadonlySet<string> = new Set(["node", "asst"])
 
-// The texts of a diagram's node and assistant points in data order; empty when the data part cannot be read.
-async function diagramTexts(search: Search, part: string): Promise<readonly string[]> {
+// The texts of a diagram's node and assistant points in data order; empty when the data part cannot be read. Kept in
+// `diagrams`, so one walk reads each data part once.
+async function diagramTexts(search: Pick<Search, "parts" | "clock" | "diagrams">, part: string): Promise<readonly string[]> {
 	const held = search.diagrams.get(part)
 
 	if (held !== undefined) return held
@@ -220,6 +224,67 @@ export async function findInDeck(context: CallContext, query: string, options: F
 	return results.finish()
 }
 
+// SmartArt points' texts of `shapes` (groups entered), a line each, after the shapes' own (shapeText).
+async function diagramLines(
+	walk: Pick<Search, "parts" | "clock" | "diagrams">,
+	shapes: readonly ShapeNode[],
+	out: string[]
+): Promise<void> {
+	for (const shape of shapes) {
+		if (shape.children !== undefined) await diagramLines(walk, shape.children, out)
+		if (shape.frame?.kind === "smartart") out.push(...(await diagramTexts(walk, shape.frame.data)))
+	}
+}
+
+// The text of slides `from` to `to` (deck indices), cut at `maxChars`: read as find reads them (a slide parsed as it is
+// reached, never an edit state), yielding between slides once the slice is used.
+export async function textOfSlides(context: CallContext, from: number, to: number, maxChars: number): Promise<SlideTexts> {
+	const deck = context.session.deck
+	const walk = { parts: viewParts(deck), clock: sliceClock(context.slicing), diagrams: new Map<string, readonly string[]>() }
+	const slides: { index: number; text: string; notes: string }[] = []
+	let room = Math.max(0, Math.trunc(maxChars))
+
+	for (let index = Math.max(0, from); index <= to && index < deck.slides.length; index++) {
+		if (context.signal.aborted) throw new PresentationError("aborted", "text")
+		if (walk.clock.due) await walk.clock.pause()
+
+		const node = await slideNode(deck, walk.parts, index, walk.clock)
+
+		if (node === undefined) continue
+
+		const lines: string[] = []
+
+		for (const shape of node.shapes) shapeText(shape, lines)
+
+		await diagramLines(walk, node.shapes, lines)
+
+		const fullText = lines.join("\n")
+		const text = cut(fullText, room)
+
+		room -= text.length
+
+		const fullNotes = notesText(deck, node)
+		const notes = cut(fullNotes, room)
+
+		room -= notes.length
+		slides.push({ index, text, notes })
+
+		if (text.length < fullText.length || notes.length < fullNotes.length) return { slides, truncated: true }
+	}
+
+	return { slides, truncated: false }
+}
+
+// `text` cut to `room` units, never between the halves of a surrogate pair.
+function cut(text: string, room: number): string {
+	if (text.length <= room) return text
+
+	const code = text.charCodeAt(room - 1)
+
+	return text.slice(0, code >= 0xd800 && code <= 0xdbff ? room - 1 : room)
+}
+
 export const findCapability: FindCapability = {
-	find: (context, query, options) => findInDeck(context, query, options)
+	find: (context, query, options) => findInDeck(context, query, options),
+	text: (context, from, to, maxChars) => textOfSlides(context, from, to, maxChars)
 }

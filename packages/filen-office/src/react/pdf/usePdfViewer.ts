@@ -31,6 +31,8 @@ export interface PdfViewer {
 	// The page to keep in place (a host laying the document out again): one a navigation is still scrolling to, else
 	// the page in view. A smooth scroll passes through the pages between, which are not where the reader is going.
 	readonly anchorPage: () => number
+	// The document's text by page, as Find reads and keeps it (a new one per document).
+	readonly finder: PdfFinder
 }
 
 interface FindState {
@@ -522,6 +524,7 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 		state,
 		dispatch,
 		anchorPage: stepFrom,
+		finder: finder.finder,
 		pages: {
 			document,
 			scale,

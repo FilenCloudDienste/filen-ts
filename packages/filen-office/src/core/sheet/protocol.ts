@@ -690,6 +690,13 @@ export interface SheetQueryMap {
 		}
 		result: { readonly enabled: readonly boolean[]; readonly reasons: readonly (SheetRefusalReason | null)[] }
 	}
+	// A sheet's cells as shown, tab-separated with a line per row, for a reader (the assistant): the used area (or
+	// `range` within it), rows a filter hides included, cut at `maxChars` in the worker. Changes nothing (never the
+	// session's held copy).
+	text: {
+		request: { readonly sheet: SheetId; readonly range?: SheetRange; readonly maxChars: number }
+		result: { readonly text: string; readonly truncated: boolean }
+	}
 }
 
 export interface SheetCellDetail {

@@ -22,6 +22,7 @@ import {
 	type ClipValue
 } from "../../sheet/clipboard/html"
 import { r1c1ToA1 } from "../../sheet/clipboard/r1c1"
+import { sheetText } from "../../sheet/readText"
 import { clipRows, parseTsv, pastedCells, pasteRepeats, type GridClip } from "../../sheet/clipboard/tsv"
 import { cellKey } from "../../sheet/model/model"
 import { rowHidden, visibleRanges, type RowSpan } from "../../sheet/visibleRows"
@@ -94,6 +95,32 @@ export async function copyCells(
 	document.clip = clip
 
 	return { clip: clip.id, text: clip.grid.tsv }
+}
+
+// The "text" query: a sheet's cells as shown, every row (a filter's hidden ones too), the session's held copy untouched.
+export async function sheetCellsText(
+	document: XlsxDocument,
+	sheet: SheetId,
+	range: SheetRange | undefined,
+	maxChars: number
+): Promise<SheetQueryResult<"text">> {
+	if (document.workbook.sheet(sheet) === undefined) return { text: "", truncated: false }
+
+	const store = (await document.ready(sheet)).store as SheetStore
+
+	return sheetText(
+		{
+			rows: store.rowExtent,
+			cols: store.colExtent,
+			cells: (area, visit) => {
+				store.forEachCell(area, (row, col) => {
+					visit(row, col, document.cellView(sheet, row, col).text)
+				})
+			}
+		},
+		range,
+		maxChars
+	)
 }
 
 interface CopiedRows {

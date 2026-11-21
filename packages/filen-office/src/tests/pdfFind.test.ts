@@ -139,6 +139,16 @@ describe("PdfFinder", () => {
 		expect(reads.mock.calls).toEqual([[1], [2], [3]])
 	})
 
+	it("hands a reader a page's text, read once and kept for find", async () => {
+		const { document, reads } = documentOf([[item("alpha beta")], new Error("damaged")])
+		const finder = new PdfFinder(document)
+
+		expect((await finder.pageText(1)).text).toBe("alpha beta")
+		expect((await finder.pageText(2)).text).toBe("")
+		expect(Array.from((await finder.search("beta", false, { aborted: false }))?.matches ?? [])).toEqual([1, 0, 6, 0, 10])
+		expect(reads.mock.calls).toEqual([[1], [2]])
+	})
+
 	it("reports the limit and that there are more", async () => {
 		const { document } = documentOf([[item("x x x x x")]])
 		const result = await new PdfFinder(document).search("x", false, { aborted: false }, 3)
