@@ -1,4 +1,4 @@
-import { driveItemName, fastLocaleCompare, formatBytes } from "@filen/shared"
+import { compareIds, driveItemName, fastLocaleCompare, formatBytes } from "@filen/shared"
 import { looksLikeText } from "@filen/shared/textEncoding"
 import {
 	ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS,
@@ -129,7 +129,9 @@ export function inDriveSelection(item: DriveItem, selection: DateSelection): boo
 
 export type ListingSort = "name" | "largest" | "smallest" | "newest" | "oldest"
 
-const byItemName = (a: DriveItem, b: DriveItem) => fastLocaleCompare(driveItemName(a), driveItemName(b))
+// Name, then uuid: a file and a directory can share a name.
+const byItemName = (a: DriveItem, b: DriveItem) =>
+	fastLocaleCompare(driveItemName(a), driveItemName(b)) || compareIds(a.data.uuid, b.data.uuid)
 
 function byKey(key: (item: DriveItem) => number, ascending: boolean): (a: DriveItem, b: DriveItem) => number {
 	return (a, b) => (ascending ? key(a) - key(b) : key(b) - key(a)) || byItemName(a, b)
@@ -362,7 +364,8 @@ export const searchItemsTool: ToolAdapter = async (input, scope) => {
 				b.score - a.score ||
 				Number(normalizeText(driveItemName(b.item)) === wanted) - Number(normalizeText(driveItemName(a.item)) === wanted) ||
 				driveItemName(a.item).length - driveItemName(b.item).length ||
-				Number(lastModifiedOf(b.item) - lastModifiedOf(a.item))
+				Number(lastModifiedOf(b.item) - lastModifiedOf(a.item)) ||
+				byItemName(a.item, b.item)
 		)
 		.slice(0, SEARCH_RESULT_ITEMS)
 	const shown = all.length > 0 ? all.length : scored.length

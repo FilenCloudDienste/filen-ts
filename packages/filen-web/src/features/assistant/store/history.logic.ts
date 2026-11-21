@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { compareIds } from "@filen/shared"
 import {
 	applyAssistantEvent,
 	proposalEntryId,
@@ -62,6 +63,12 @@ export const conversationMetaSchema = type({
 })
 
 export type ConversationMeta = typeof conversationMetaSchema.infer
+
+// The history list's order: most recently active first, then id, so two saved in the same millisecond keep one
+// order whatever order the index was read in.
+export function compareConversationsNewestFirst(a: ConversationMeta, b: ConversationMeta): number {
+	return b.updatedAt - a.updatedAt || compareIds(a.id, b.id)
+}
 
 const STEP_STATUS = "'active' | 'queued' | 'waiting' | 'done' | 'failed' | 'stopped' | 'discarded'"
 const STEP_TIMES = { status: STEP_STATUS, startedAt: "number", endedAt: "number | null" } as const
@@ -374,7 +381,7 @@ export function conversationTitle(content: ConversationContent): string {
 // The conversations to delete so the rest fit the budget, active longest ago first. `keep` (the one just
 // saved, the one on screen) is never among them.
 export function planHistoryPrune(metas: readonly ConversationMeta[], keep: ReadonlySet<string>): string[] {
-	const oldestFirst = [...metas].sort((a, b) => a.updatedAt - b.updatedAt)
+	const oldestFirst = [...metas].sort((a, b) => compareConversationsNewestFirst(b, a))
 	let count = oldestFirst.length
 	let bytes = oldestFirst.reduce((sum, meta) => sum + meta.bytes, 0)
 	const pruned: string[] = []
@@ -417,7 +424,7 @@ export function groupConversations(
 	const week = startOfDay(now, 7)
 	const groups = new Map<HistoryGroup, ConversationMeta[]>()
 
-	for (const meta of [...metas].sort((a, b) => b.updatedAt - a.updatedAt)) {
+	for (const meta of [...metas].sort(compareConversationsNewestFirst)) {
 		const group: HistoryGroup =
 			meta.updatedAt >= today
 				? "today"

@@ -9,6 +9,7 @@ import {
 	conversationTitle,
 	historyBodyKey,
 	historyMetaKey,
+	compareConversationsNewestFirst,
 	historyRowId,
 	planHistoryPrune,
 	serializeConversation,
@@ -347,7 +348,7 @@ export async function loadConversationIndex(): Promise<void> {
 		const metas = await readIndex()
 
 		if (load === indexLoads && !closed) {
-			useAssistantHistoryStore.setState({ conversations: metas.sort((a, b) => b.updatedAt - a.updatedAt) })
+			useAssistantHistoryStore.setState({ conversations: metas.sort(compareConversationsNewestFirst) })
 		}
 	} catch (error) {
 		log.warn("assistant", "failed to load the conversation history", error)

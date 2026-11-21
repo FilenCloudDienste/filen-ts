@@ -51,6 +51,7 @@ vi.mock("@/lib/sdk/session", () => ({
 }))
 
 import {
+	compareConversationsNewestFirst,
 	conversationBodySchema,
 	conversationTitle,
 	groupConversations,
@@ -274,6 +275,20 @@ describe("conversation serialization", () => {
 
 		expect(text).toBe(`${"あ".repeat(16_383)}…`)
 		expect(text.slice(0, -1)).not.toMatch(loneHighSurrogate)
+	})
+})
+
+describe("history order", () => {
+	it("lists the most recently active first, then a same-millisecond tie by id", () => {
+		const metas = [meta("b", 5), meta("old", 1), meta("a", 5)]
+
+		expect(metas.toSorted(compareConversationsNewestFirst).map(item => item.id)).toEqual(["a", "b", "old"])
+		expect(
+			metas
+				.toReversed()
+				.toSorted(compareConversationsNewestFirst)
+				.map(item => item.id)
+		).toEqual(["a", "b", "old"])
 	})
 })
 
