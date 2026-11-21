@@ -66,6 +66,7 @@ export function RetentionRow() {
 				label={t("settingsAssistantRetention")}
 				description={t("settingsAssistantRetentionDescription")}
 				id="assistant-retention"
+				helpId="assistantRetention"
 				options={HISTORY_RETENTION_VALUES.map(value => ({ value, label: t(RETENTION_LABEL_KEYS[value]) }))}
 				value={retention}
 				disabled={false}

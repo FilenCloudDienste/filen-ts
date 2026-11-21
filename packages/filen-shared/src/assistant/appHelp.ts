@@ -2,7 +2,8 @@
 // locale keys those pages render (namespace:key), so the help text is the text on screen. Data only: the apps build
 // their search index from it, the eval's fake app reads the same ids and routes.
 
-export type AppHelpSection = "account" | "security" | "appearance" | "keyboard" | "office" | "audio" | "advanced" | "billing" | "desktop"
+export type AppHelpSection =
+	"account" | "security" | "appearance" | "keyboard" | "office" | "audio" | "assistant" | "advanced" | "billing" | "desktop"
 
 type AppHelpRow = {
 	readonly id: string
@@ -271,6 +272,12 @@ const APP_HELP_ROWS = [
 		section: "audio",
 		titleKey: "settings:settingsAudioMatchLoudness",
 		descriptionKey: "settings:settingsAudioMatchLoudnessDescription"
+	},
+	{
+		id: "assistantRetention",
+		section: "assistant",
+		titleKey: "settings:settingsAssistantRetention",
+		descriptionKey: "settings:settingsAssistantRetentionDescription"
 	},
 	{
 		id: "transfers",
