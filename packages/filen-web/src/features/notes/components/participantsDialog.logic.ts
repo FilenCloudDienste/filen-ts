@@ -1,5 +1,5 @@
 import type { Note, NoteParticipant } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { compareParticipantsByName, isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { noteRowParticipants } from "@/features/notes/lib/noteRow.logic"
 
 // Pure gating/derivation helpers for participantsDialog.tsx, kept out of the component so the owner-
@@ -20,9 +20,8 @@ export interface ParticipantRowModel {
 // noteParticipants.tsx exactly (`note.participants.filter(p => p.userId !== stringifiedClient?.userId)`):
 // self-management stays the note menu's own "Leave" dialog, never a row here. A note with no OTHER
 // participants (the common single-owner case) therefore renders the dialog's own empty state, not a
-// solo self-row. Owner's row first among what remains, then the rest in their existing (server) order —
-// mirrors mobile's crown-first convention without needing a second sort key, since the SDK never
-// returns more than one owner. `blocked` defaults to the empty set so every pre-existing call site
+// solo self-row. Owner's row first among what remains (mobile's crown-first convention), then the rest
+// by name and user id (compareParticipantsByName), never the server's order. `blocked` defaults to the empty set so every pre-existing call site
 // (older owner-gating tests written before the block/unblock control existed) keeps working unchanged.
 export function participantRows(
 	note: Note,
@@ -30,7 +29,9 @@ export function participantRows(
 	viewerIsOwner: boolean,
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): ParticipantRowModel[] {
-	const sorted = noteRowParticipants(note, currentUserId).sort((a, b) => Number(b.isOwner) - Number(a.isOwner))
+	const sorted = noteRowParticipants(note, currentUserId).sort(
+		(a, b) => Number(b.isOwner) - Number(a.isOwner) || compareParticipantsByName(a, b)
+	)
 
 	return sorted.map(participant => ({
 		participant,

@@ -1,5 +1,5 @@
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { compareParticipantsByName, isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { isChatOwner } from "@/features/chats/lib/sort"
 import { applyOfflineGate, chatMenuActions, type ChatActionDescriptor } from "@/features/chats/components/chatMenu.logic"
 
@@ -20,7 +20,7 @@ export interface ChatInfoParticipantRow {
 
 export type ParticipantRowActionId = "remove" | "block" | "unblock"
 
-// The viewer's own row first, then the owner's, then everyone else in the chat's own order.
+// The viewer's own row first, then the owner's, then everyone else by name (compareParticipantsByName).
 function rowRank(participant: ChatParticipant, chat: Chat, currentUserId: bigint | undefined): number {
 	if (participant.userId === currentUserId) {
 		return 0
@@ -35,7 +35,9 @@ export function chatInfoParticipantRows(
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): ChatInfoParticipantRow[] {
 	const viewerIsOwner = isChatOwner(chat, currentUserId)
-	const sorted = [...chat.participants].sort((a, b) => rowRank(a, chat, currentUserId) - rowRank(b, chat, currentUserId))
+	const sorted = [...chat.participants].sort(
+		(a, b) => rowRank(a, chat, currentUserId) - rowRank(b, chat, currentUserId) || compareParticipantsByName(a, b)
+	)
 
 	return sorted.map(participant => {
 		const isSelf = participant.userId === currentUserId
