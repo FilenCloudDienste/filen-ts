@@ -5,6 +5,7 @@ import { SparklesIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { i18n, type AssistantKey } from "@/lib/i18n"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
@@ -21,6 +22,7 @@ import { downloadingPercent } from "@/features/assistant/components/assistant.lo
 import { useResumeInterruptedDownload } from "@/features/assistant/components/assistantDownloadResume"
 import {
 	ASSISTANT_PANEL_ID,
+	ASSISTANT_PREVIEW_TOGGLE_ID,
 	ASSISTANT_TOGGLE_ID,
 	assistantKeyIgnored,
 	moveFocusOutOfAssistant
@@ -103,6 +105,15 @@ function useHiddenTurnOutcome(): boolean {
 	return finishedUnseen
 }
 
+// Closing the inline panel unmounts it, so focus inside it moves to a toggle first.
+function toggleFromButton(narrow: boolean, visible: boolean): void {
+	if (visible && !narrow) {
+		moveFocusOutOfAssistant()
+	}
+
+	toggleAssistant(narrow)
+}
+
 // Opens the inline panel at desktop widths and the drawer below them; pressed while the panel shows. The
 // rail owns the visual recipe (`itemClass`), so the toggle looks like every other rail entry. A model
 // download shows on it as the Transfers entry shows its own, panel open or not: it can run unasked (resumed).
@@ -126,15 +137,12 @@ export function AssistantToggle({ itemClass }: { itemClass: (active: boolean) =>
 	useResumeInterruptedDownload()
 
 	function toggle(): void {
-		if (visible && !narrow) {
-			moveFocusOutOfAssistant()
-		}
-
-		toggleAssistant(narrow)
+		toggleFromButton(narrow, visible)
 	}
 
 	// Like the rail's route-nav actions, an open dialog or menu owns the keyboard, except the narrow drawer the
-	// assistant itself is shown in, which its own key closes.
+	// assistant itself is shown in, which its own key closes, and an open drive preview, which shows the panel in its
+	// dialog (PreviewAssistantPane). The one handler for both: the macOS menu takes one handler per action.
 	useAction(
 		"app.toggleAssistant",
 		() => {
@@ -178,5 +186,27 @@ export function AssistantToggle({ itemClass }: { itemClass: (active: boolean) =>
 				<Kbd action="app.toggleAssistant" />
 			</TooltipContent>
 		</Tooltip>
+	)
+}
+
+// The open drive preview's ✨ in its header, beside the panel it shows (PreviewAssistantPane): the rail's toggle sits
+// under the preview's modal dialog. Its key stays the rail's (one handler per action), which the preview lets through.
+export function PreviewAssistantToggle() {
+	const { t } = useTranslation("common")
+	const narrow = useIsNarrowViewport()
+	const visible = useAssistantVisible(narrow)
+
+	return (
+		<TooltipIconButton
+			id={ASSISTANT_PREVIEW_TOGGLE_ID}
+			label={t("toggleAssistant")}
+			pressed={visible}
+			shortcut={<Kbd action="app.toggleAssistant" />}
+			onClick={() => {
+				toggleFromButton(narrow, visible)
+			}}
+		>
+			<SparklesIcon />
+		</TooltipIconButton>
 	)
 }

@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useRef } from "react"
-import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { dialogLayerOf, keyForEditor, KEY_LAYER_PROPS } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 
 // An editor's keys in the layer it is shown in: pressed in the editor, or on anything else in that layer (the preview
@@ -75,5 +75,48 @@ describe("keys for an editor in its layer", () => {
 		fireEvent.keyDown(screen.getByLabelText("In editor"), { key: "F6" })
 
 		expect(onKey.mock.calls).toEqual([["F6"], ["F5"]])
+	})
+
+	it("never belong to the editor from a key layer region beside it in its layer (the assistant panel)", () => {
+		render(
+			<div
+				role="dialog"
+				data-open=""
+			>
+				<div aria-label="Editor" />
+				<aside
+					aria-label="Assistant"
+					{...KEY_LAYER_PROPS}
+				>
+					<button type="button">New conversation</button>
+				</aside>
+			</div>
+		)
+
+		const editor = screen.getByLabelText("Editor")
+		const button = screen.getByRole("button", { name: "New conversation" })
+
+		expect(keyForEditor(editor, button)).toBe(false)
+		expect(dialogLayerOf(button)).toBe(screen.getByRole("complementary", { name: "Assistant" }))
+	})
+
+	it("never belong to a page editor from a key layer region on the page", () => {
+		render(
+			<>
+				<div aria-label="Editor" />
+				<aside
+					aria-label="Assistant"
+					{...KEY_LAYER_PROPS}
+				>
+					<button type="button">New conversation</button>
+				</aside>
+				<button type="button">Elsewhere</button>
+			</>
+		)
+
+		const editor = screen.getByLabelText("Editor")
+
+		expect(keyForEditor(editor, screen.getByRole("button", { name: "New conversation" }))).toBe(false)
+		expect(keyForEditor(editor, screen.getByRole("button", { name: "Elsewhere" }))).toBe(true)
 	})
 })

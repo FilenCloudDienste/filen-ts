@@ -11,7 +11,12 @@ export const LAYOUT_BREAKPOINT_QUERY = "(min-width: 48rem)"
 // themeProvider only touches matchMedia inside a function.
 let mediaQuery: MediaQueryList | null = null
 
-function getMediaQuery(): MediaQueryList {
+// None in a DOM without media queries (jsdom), which reads as wide, as useIsNarrowViewport's server value.
+function getMediaQuery(): MediaQueryList | null {
+	if (typeof window.matchMedia !== "function") {
+		return null
+	}
+
 	mediaQuery ??= window.matchMedia(LAYOUT_BREAKPOINT_QUERY)
 
 	return mediaQuery
@@ -20,7 +25,7 @@ function getMediaQuery(): MediaQueryList {
 // True below the layout breakpoint, where the shell hosts the contextual sidebar in a drawer instead of
 // the row.
 export function isNarrowViewport(): boolean {
-	return !getMediaQuery().matches
+	return getMediaQuery()?.matches === false
 }
 
 // External-store subscription shape, consumed both by useIsNarrowViewport (to read the value) and by
@@ -28,9 +33,9 @@ export function isNarrowViewport(): boolean {
 export function subscribeToLayoutBreakpoint(listener: () => void): () => void {
 	const query = getMediaQuery()
 
-	query.addEventListener("change", listener)
+	query?.addEventListener("change", listener)
 
 	return () => {
-		query.removeEventListener("change", listener)
+		query?.removeEventListener("change", listener)
 	}
 }

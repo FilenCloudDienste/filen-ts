@@ -24,12 +24,16 @@ interface AssistantStore extends TranscriptState {
 	panelOpen: boolean
 	// The drawer below the layout breakpoint. Never persisted: the shell closes it on every navigation.
 	drawerOpen: boolean
+	// A drive preview is open and shows the panel (inline or as the drawer, by the two flags above) in its modal
+	// dialog, which covers the shell: the shell mounts neither while it is set, so the conversation shows once.
+	previewHosted: boolean
 	draft: string
 	// Set by a user-initiated open of the inline panel; its first focus target takes focus once and clears
 	// it. A panel restored open at boot never steals focus. The drawer has Base UI's own initial focus.
 	focusRequested: boolean
 	setPanelOpen: (open: boolean) => void
 	setDrawerOpen: (open: boolean) => void
+	setPreviewHosted: (hosted: boolean) => void
 	setDraft: (draft: string) => void
 	takeFocusRequest: () => boolean
 	applyEvent: (event: AssistantEvent) => void
@@ -48,6 +52,7 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
 	...INITIAL_TRANSCRIPT_STATE,
 	panelOpen: false,
 	drawerOpen: false,
+	previewHosted: false,
 	draft: "",
 	focusRequested: false,
 	setPanelOpen: open => {
@@ -57,6 +62,9 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
 	},
 	setDrawerOpen: open => {
 		set({ drawerOpen: open })
+	},
+	setPreviewHosted: hosted => {
+		set({ previewHosted: hosted })
 	},
 	setDraft: draft => {
 		set({ draft })

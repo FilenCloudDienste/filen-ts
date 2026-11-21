@@ -112,6 +112,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { dialogLayerOf, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
+import { PreviewAssistantPane } from "@/features/assistant/components/assistantPanel"
+import { PreviewAssistantToggle } from "@/features/assistant/components/assistantToggle"
 
 const IS_MAC = isMacPlatform()
 // The two actions an Escape the dialog dismisses on may be: closing, and leaving the image editor.
@@ -230,6 +232,9 @@ export function PreviewOverlay({
 	// Not a parameter default: the React Compiler skips a component that has one.
 	const downloadable = downloadableProp !== false
 	const asText = asTextProp === true
+	// The assistant panel moves into an owned file's preview, which covers the shell's (PreviewAssistantPane). Never into
+	// a chat's or a note's linked file, nor a listing of files the user does not own.
+	const hostsAssistant = variant === "drive"
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	// The drive item at this slot BEFORE any per-slot save override — undefined only for an out-of-range
@@ -1322,6 +1327,7 @@ export function PreviewOverlay({
 											<DownloadIcon />
 										</TooltipIconButton>
 									) : null}
+									{hostsAssistant ? <PreviewAssistantToggle /> : null}
 									{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
 						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
@@ -1408,111 +1414,114 @@ export function PreviewOverlay({
 							)}
 						</header>
 					)}
-					<div className="min-h-0 flex-1">
-						<ArchiveListingScope>
-							{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
-							{editing !== null ? (
-								<PreviewErrorBoundary key={`edit:${editing.uuid}`}>
-									<ImageEditor
-										source={editing.source}
-										info={editing.info}
-										locked={saving}
-										onDirtyChange={setPreviewDirty}
-										onLoadFailed={() => {
-											exitImageEdit()
-											toast.error(t("previewImageSaveOpenFailed"))
-										}}
-										saveRef={imageSaveRef}
-										commandsRef={imageCommandsRef}
-										session={editing.session}
-										capabilities={editing.capabilities}
-									/>
-								</PreviewErrorBoundary>
-							) : videoEditing !== null ? (
-								<PreviewErrorBoundary key={`videoEdit:${videoEditing.uuid}`}>
-									<VideoEditor
-										client={videoEditing.client}
-										info={videoEditing.info}
-										item={driveItem}
-										name={name}
-										title={
-											<DialogPrimitive.Title className="min-w-0">
-												<SplitTitle
-													text={name}
-													tailLength={16}
-												/>
-											</DialogPrimitive.Title>
-										}
-										onDirtyChange={setPreviewDirty}
-										onCancel={requestExitVideoEdit}
-										onExit={exitVideoEdit}
-										onSaveStarted={videoSaveStarted}
-										onSaveFrame={saveVideoFrame}
-										commandsRef={videoCommandsRef}
-									/>
-								</PreviewErrorBoundary>
-							) : !slotSettled ? (
-								<PreviewLoading />
-							) : (
-								<PreviewErrorBoundary key={slotKey}>
-									<PreviewDownloadableProvider
-										downloadable={previewDownloadable(downloadable, variant)}
-										onDownload={download}
-									>
-										<ContentSniffGate
-											item={driveItem}
-											asText={asText}
-											render={() => (
-												<PreviewReplaceContext value={replaceInSlot}>
-													<PasswordDraftContext value={passwordDraft.draft}>
-														<PreviewBody
-															item={driveItem}
-															variant={variant}
-															category={pin?.category}
-															documentKey={currentDocumentKey}
-															editable={slotWritable}
-															renamedReadOnly={renamedReadOnly}
-															neverEditable={variant !== "drive" || isViewOnlyPdf(driveItem)}
-															locked={saving}
-															onDirtyChange={setPreviewDirty}
-															readAs={readAs}
-															onTextState={state => {
-																if (rawDriveItem !== undefined) {
-																	const forUuid = rawDriveItem.data.uuid
-
-																	setTextState(current =>
-																		current?.forUuid === forUuid &&
-																		current.writable === state.writable &&
-																		current.encoding === state.encoding &&
-																		current.readEncoding === state.readEncoding
-																			? current
-																			: { ...state, forUuid }
-																	)
-																}
-															}}
-															contentRef={contentRef}
-															spreadsheetRef={spreadsheetRef}
-															docxRef={docxRef}
-															presentationRef={presentationRef}
-															imageRef={imageRef}
-															imagePageRef={imagePageRef}
-															onSave={() => performSaveRef.current()}
-															onAutosave={() => performSaveRef.current(true)}
-															canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-															onOpenFile={opened => {
-																if (rawDriveItem !== undefined) {
-																	commitSaved(rawDriveItem.data.uuid, opened)
-																}
-															}}
-														/>
-													</PasswordDraftContext>
-												</PreviewReplaceContext>
-											)}
+					<div className="flex min-h-0 flex-1">
+						<div className="min-h-0 min-w-0 flex-1">
+							<ArchiveListingScope>
+								{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
+								{editing !== null ? (
+									<PreviewErrorBoundary key={`edit:${editing.uuid}`}>
+										<ImageEditor
+											source={editing.source}
+											info={editing.info}
+											locked={saving}
+											onDirtyChange={setPreviewDirty}
+											onLoadFailed={() => {
+												exitImageEdit()
+												toast.error(t("previewImageSaveOpenFailed"))
+											}}
+											saveRef={imageSaveRef}
+											commandsRef={imageCommandsRef}
+											session={editing.session}
+											capabilities={editing.capabilities}
 										/>
-									</PreviewDownloadableProvider>
-								</PreviewErrorBoundary>
-							)}
-						</ArchiveListingScope>
+									</PreviewErrorBoundary>
+								) : videoEditing !== null ? (
+									<PreviewErrorBoundary key={`videoEdit:${videoEditing.uuid}`}>
+										<VideoEditor
+											client={videoEditing.client}
+											info={videoEditing.info}
+											item={driveItem}
+											name={name}
+											title={
+												<DialogPrimitive.Title className="min-w-0">
+													<SplitTitle
+														text={name}
+														tailLength={16}
+													/>
+												</DialogPrimitive.Title>
+											}
+											onDirtyChange={setPreviewDirty}
+											onCancel={requestExitVideoEdit}
+											onExit={exitVideoEdit}
+											onSaveStarted={videoSaveStarted}
+											onSaveFrame={saveVideoFrame}
+											commandsRef={videoCommandsRef}
+										/>
+									</PreviewErrorBoundary>
+								) : !slotSettled ? (
+									<PreviewLoading />
+								) : (
+									<PreviewErrorBoundary key={slotKey}>
+										<PreviewDownloadableProvider
+											downloadable={previewDownloadable(downloadable, variant)}
+											onDownload={download}
+										>
+											<ContentSniffGate
+												item={driveItem}
+												asText={asText}
+												render={() => (
+													<PreviewReplaceContext value={replaceInSlot}>
+														<PasswordDraftContext value={passwordDraft.draft}>
+															<PreviewBody
+																item={driveItem}
+																variant={variant}
+																category={pin?.category}
+																documentKey={currentDocumentKey}
+																editable={slotWritable}
+																renamedReadOnly={renamedReadOnly}
+																neverEditable={variant !== "drive" || isViewOnlyPdf(driveItem)}
+																locked={saving}
+																onDirtyChange={setPreviewDirty}
+																readAs={readAs}
+																onTextState={state => {
+																	if (rawDriveItem !== undefined) {
+																		const forUuid = rawDriveItem.data.uuid
+
+																		setTextState(current =>
+																			current?.forUuid === forUuid &&
+																			current.writable === state.writable &&
+																			current.encoding === state.encoding &&
+																			current.readEncoding === state.readEncoding
+																				? current
+																				: { ...state, forUuid }
+																		)
+																	}
+																}}
+																contentRef={contentRef}
+																spreadsheetRef={spreadsheetRef}
+																docxRef={docxRef}
+																presentationRef={presentationRef}
+																imageRef={imageRef}
+																imagePageRef={imagePageRef}
+																onSave={() => performSaveRef.current()}
+																onAutosave={() => performSaveRef.current(true)}
+																canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+																onOpenFile={opened => {
+																	if (rawDriveItem !== undefined) {
+																		commitSaved(rawDriveItem.data.uuid, opened)
+																	}
+																}}
+															/>
+														</PasswordDraftContext>
+													</PreviewReplaceContext>
+												)}
+											/>
+										</PreviewDownloadableProvider>
+									</PreviewErrorBoundary>
+								)}
+							</ArchiveListingScope>
+						</div>
+						{hostsAssistant ? <PreviewAssistantPane /> : null}
 					</div>
 					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally
 					(see versionsDialog.tsx's own identical precedent); this must stay a child of the outer

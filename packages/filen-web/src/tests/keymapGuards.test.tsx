@@ -13,7 +13,8 @@ vi.mock("@/lib/keymap/registry", () => ({
 
 const { OUTSIDE_OVERLAYS, useAction, shouldIgnoreEvent } = await import("@/lib/keymap/useAction")
 const { isOverlayOpenBesides } = await import("@/lib/keymap/dialogGuard")
-const { assistantKeyIgnored, ASSISTANT_PANEL_ID } = await import("@/features/assistant/components/assistantFocus")
+const { assistantKeyIgnored, ASSISTANT_PANEL_ID, ASSISTANT_PREVIEW_HOST_ID } =
+	await import("@/features/assistant/components/assistantFocus")
 const { transportKeyIgnored } = await import("@/features/audio/lib/transportKeys")
 const { MediaSessionOwners } = await import("@/lib/media/mediaSessionOwner")
 const { toggledTheme } = await import("@/providers/themeProvider")
@@ -117,6 +118,18 @@ describe("isOverlayOpenBesides", () => {
 		expect(isOverlayOpenBesides(panel)).toBe(true)
 	})
 
+	it("skips an overlay holding any of several nodes", () => {
+		const preview = overlay("dialog")
+		const drawer = overlay("dialog")
+		const host = document.createElement("div")
+		const panel = document.createElement("aside")
+
+		preview.append(host)
+		drawer.append(panel)
+		expect(isOverlayOpenBesides(panel, host)).toBe(false)
+		expect(isOverlayOpenBesides(panel, null)).toBe(true)
+	})
+
 	it("counts every open overlay without a node", () => {
 		expect(isOverlayOpenBesides(null)).toBe(false)
 		overlay("menu")
@@ -134,6 +147,47 @@ describe("app.toggleAssistant's guard", () => {
 		drawer.append(panel)
 
 		expect(assistantKeyIgnored(PLAIN)).toBe(false)
+	})
+
+	it("lets the key through in a drive preview hosting the panel, shown or not, and not under a menu over it", () => {
+		const preview = overlay("dialog")
+		const host = document.createElement("div")
+
+		host.id = ASSISTANT_PREVIEW_HOST_ID
+		preview.append(host)
+
+		expect(assistantKeyIgnored(PLAIN)).toBe(false)
+
+		const panel = document.createElement("aside")
+
+		panel.id = ASSISTANT_PANEL_ID
+		host.append(panel)
+
+		expect(assistantKeyIgnored(PLAIN)).toBe(false)
+
+		overlay("menu")
+
+		expect(assistantKeyIgnored(PLAIN)).toBe(true)
+	})
+
+	it("lets the key close the drawer a hosting preview stacked over itself", () => {
+		const preview = overlay("dialog")
+		const host = document.createElement("div")
+		const drawer = overlay("dialog")
+		const panel = document.createElement("aside")
+
+		host.id = ASSISTANT_PREVIEW_HOST_ID
+		preview.append(host)
+		panel.id = ASSISTANT_PANEL_ID
+		drawer.append(panel)
+
+		expect(assistantKeyIgnored(PLAIN)).toBe(false)
+	})
+
+	it("stands down in a preview that does not host the panel (a chat's linked file)", () => {
+		overlay("dialog")
+
+		expect(assistantKeyIgnored(PLAIN)).toBe(true)
 	})
 
 	it("stands down under any other dialog or menu, the inline panel shown or not", () => {

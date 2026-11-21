@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
 import { SIDE_PANEL_SURFACE_CLASS, SidePanelDrawer } from "@/components/sidePanel"
 import { toastSideObstructionRef } from "@/lib/toastClearance"
+import { KEY_LAYER_PROPS } from "@/lib/keymap/dialogGuard"
+import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from "@/features/shell/lib/sidebarWidth"
@@ -16,13 +18,15 @@ import { AssistantHistory } from "@/features/assistant/components/assistantHisto
 import { useAssistantHistoryStore } from "@/features/assistant/store/conversationHistory"
 import {
 	ASSISTANT_PANEL_ID,
+	ASSISTANT_PREVIEW_HOST_ID,
 	ASSISTANT_TITLE_ID,
 	assistantInitialFocusTarget,
 	moveFocusOutOfAssistant
 } from "@/features/assistant/components/assistantFocus"
 
 // The shared side-panel surface (sidePanel.tsx). tabIndex -1 makes the panel itself the focus fallback when it holds
-// no focusable control yet.
+// no focusable control yet. A key layer of its own: a key pressed in it is never an editor's beside it (the preview
+// overlay's viewer, a note), whose keys otherwise follow focus anywhere in their layer.
 
 function AssistantSurface({
 	className,
@@ -46,6 +50,7 @@ function AssistantSurface({
 			aria-labelledby={ASSISTANT_TITLE_ID}
 			className={cn(SIDE_PANEL_SURFACE_CLASS, className)}
 			style={style}
+			{...KEY_LAYER_PROPS}
 		>
 			<AssistantHeader onClose={onClose} />
 			{historyOpen ? (
@@ -174,5 +179,51 @@ export function AssistantDrawer({ open, narrow }: { open: boolean; narrow: boole
 				/>
 			</SidebarPanelVisibilityProvider>
 		</SidePanelDrawer>
+	)
+}
+
+// Module scope, so React keeps one stable ref callback: while the preview's slot is mounted the preview hosts the
+// panel, and the shell drops its own (appShell.tsx).
+function attachPreviewHost(element: HTMLElement | null): (() => void) | undefined {
+	if (element === null) {
+		return undefined
+	}
+
+	useAssistantStore.getState().setPreviewHosted(true)
+
+	return () => {
+		useAssistantStore.getState().setPreviewHosted(false)
+	}
+}
+
+// The panel inside an open drive preview (PreviewOverlay), whose full-screen modal dialog covers the shell's: the same
+// panel and conversation, moved into the dialog while it is open. At desktop widths a pane after the viewer, which only
+// gets a narrower box; below the breakpoint the drawer, nested in the preview's dialog so it stacks over it with its own
+// focus trap. The same open flags as in the shell, so the panel stays open or closed across the preview. It renders
+// only once the slot has registered (previewHosted), so the shell's panel has unmounted by then and the two never show
+// at once. Subscribes on its own, so opening or closing it never re-renders the preview.
+export function PreviewAssistantPane() {
+	const narrow = useIsNarrowViewport()
+	const hosted = useAssistantStore(state => state.previewHosted)
+	const panelOpen = useAssistantStore(state => state.panelOpen)
+	const drawerOpen = useAssistantStore(state => state.drawerOpen)
+
+	return (
+		<>
+			{/* The gap before it holds the panel's leading-edge resize handle, as in the shell's row. */}
+			<div
+				id={ASSISTANT_PREVIEW_HOST_ID}
+				ref={attachPreviewHost}
+				className="relative ml-2 flex shrink-0 pr-2 pb-2 empty:hidden"
+			>
+				{hosted && !narrow && panelOpen ? <AssistantSidePanel /> : null}
+			</div>
+			{hosted ? (
+				<AssistantDrawer
+					open={narrow && drawerOpen}
+					narrow={narrow}
+				/>
+			) : null}
+		</>
 	)
 }

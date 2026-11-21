@@ -98,6 +98,9 @@ export function AppShell() {
 	const sidebarHidden = useSidebarHidden()
 	const assistantPanelOpen = useAssistantStore(state => state.panelOpen)
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
+	// An open drive preview shows the panel in its own dialog (PreviewAssistantPane); the shell's is never mounted
+	// beside it.
+	const assistantInPreview = useAssistantStore(state => state.previewHosted)
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
 	const [sidePanelSlot, setSidePanelSlot] = useState<HTMLDivElement | null>(null)
 
@@ -208,10 +211,12 @@ export function AppShell() {
 				panel={sidebar}
 				onOpenChange={setSidebarOpen}
 			/>
-			<AssistantDrawer
-				open={narrow && assistantDrawerOpen}
-				narrow={narrow}
-			/>
+			{assistantInPreview ? null : (
+				<AssistantDrawer
+					open={narrow && assistantDrawerOpen}
+					narrow={narrow}
+				/>
+			)}
 			<div className="relative flex min-h-0 flex-1 gap-2 overflow-hidden p-2 app-region-drag">
 				<WindowBarSlotContext value={windowBarSlot}>
 					<SidePanelSlotContext value={sidePanelSlot}>
@@ -244,7 +249,7 @@ export function AppShell() {
 						/>
 						{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
 					    leading-edge drag handle in the gap before it. Below the breakpoint it lives in its drawer. */}
-						{narrow || !assistantPanelOpen ? null : (
+						{narrow || !assistantPanelOpen || assistantInPreview ? null : (
 							<div
 								data-shell-pane="assistant"
 								className="relative flex shrink-0"

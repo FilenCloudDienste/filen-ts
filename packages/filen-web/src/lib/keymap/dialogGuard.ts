@@ -23,10 +23,17 @@ export function isAnyDialogOpen(): boolean {
 	return document.querySelector(OPEN_DIALOG_SELECTOR) !== null
 }
 
-// The dialog a node is shown in (the preview overlay, a dialog over it), or null on the page itself: a key belongs to
-// an editor only when it was pressed in the editor's own layer, whatever dialogs that layer is.
+// A region that owns the keys pressed in it without being a dialog: the assistant panel, which can sit beside an editor
+// in the editor's own layer (the preview overlay's split pane) and whose keys are never the editor's.
+const KEY_LAYER_ATTRIBUTE = "data-key-layer"
+
+// Spread onto the region's element.
+export const KEY_LAYER_PROPS = { [KEY_LAYER_ATTRIBUTE]: "" } as const
+
+// The dialog a node is shown in (the preview overlay, a dialog over it) or the key layer region holding it, else null
+// on the page itself: a key belongs to an editor only when it was pressed in the editor's own layer.
 export function dialogLayerOf(node: Element): Element | null {
-	return node.closest('[role="dialog"], [role="alertdialog"]')
+	return node.closest(`[role="dialog"], [role="alertdialog"], [${KEY_LAYER_ATTRIBUTE}]`)
 }
 
 // Base UI menus (dropdown AND context) carry `role="menu"` + the same `data-open` marker while open.
@@ -50,11 +57,11 @@ export function isAnyOverlayOpen(): boolean {
 	return document.querySelector(OPEN_OVERLAY_SELECTOR) !== null
 }
 
-// Whether a dialog or menu is open other than the one holding `node`: a drawer's own toggle may close it, but not
-// from under a confirm the drawer opened.
-export function isOverlayOpenBesides(node: Element | null): boolean {
+// Whether a dialog or menu is open other than those holding one of `nodes`: a drawer's own toggle may close it, but
+// not from under a confirm the drawer opened.
+export function isOverlayOpenBesides(...nodes: (Element | null)[]): boolean {
 	for (const overlay of document.querySelectorAll(OPEN_OVERLAY_SELECTOR)) {
-		if (node === null || !overlay.contains(node)) {
+		if (!nodes.some(node => node !== null && overlay.contains(node))) {
 			return true
 		}
 	}

@@ -28,6 +28,7 @@ export function DisabledReason(props: { id: string; reason: string | undefined }
 // An icon-only button whose label is both its accessible name and its tooltip; `shortcut` (a Kbd chip)
 // follows the label in the tooltip. `pressed` stays undefined for a button that is not a toggle.
 export function TooltipIconButton(props: {
+	id?: string | undefined
 	label: string
 	onClick?: ButtonProps["onClick"]
 	onMouseDown?: ButtonProps["onMouseDown"]
@@ -49,6 +50,7 @@ export function TooltipIconButton(props: {
 			<TooltipTrigger
 				render={
 					<Button
+						id={props.id}
 						variant={props.variant ?? "ghost"}
 						size="icon-sm"
 						aria-label={props.label}
