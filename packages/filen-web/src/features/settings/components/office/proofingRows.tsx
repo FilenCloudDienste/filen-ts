@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { DICTIONARY_IDS } from "@filen/spellcheck"
 import type { OfficeSettingKey } from "@filen/shared"
+import type { AppHelpId } from "@filen/shared/assistant"
 import { useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { PreferenceToggleRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
@@ -17,11 +18,31 @@ const PROOFING_LANGUAGES: readonly string[] = DICTIONARY_IDS.map(id => id.replac
 
 type ProofingOption = Extract<OfficeSettingKey, "ignoreUppercase" | "ignoreWordsWithNumbers" | "ignoreAddresses" | "flagRepeatedWords">
 
-const PROOFING_OPTIONS: readonly { key: ProofingOption; title: SettingsKey; description: SettingsKey }[] = [
-	{ key: "ignoreUppercase", title: "settingsOfficeIgnoreUppercase", description: "settingsOfficeIgnoreUppercaseDescription" },
-	{ key: "ignoreWordsWithNumbers", title: "settingsOfficeIgnoreNumbers", description: "settingsOfficeIgnoreNumbersDescription" },
-	{ key: "ignoreAddresses", title: "settingsOfficeIgnoreAddresses", description: "settingsOfficeIgnoreAddressesDescription" },
-	{ key: "flagRepeatedWords", title: "settingsOfficeFlagRepeated", description: "settingsOfficeFlagRepeatedDescription" }
+const PROOFING_OPTIONS: readonly { key: ProofingOption; title: SettingsKey; description: SettingsKey; helpId: AppHelpId }[] = [
+	{
+		key: "ignoreUppercase",
+		title: "settingsOfficeIgnoreUppercase",
+		description: "settingsOfficeIgnoreUppercaseDescription",
+		helpId: "ignoreUppercase"
+	},
+	{
+		key: "ignoreWordsWithNumbers",
+		title: "settingsOfficeIgnoreNumbers",
+		description: "settingsOfficeIgnoreNumbersDescription",
+		helpId: "ignoreNumbers"
+	},
+	{
+		key: "ignoreAddresses",
+		title: "settingsOfficeIgnoreAddresses",
+		description: "settingsOfficeIgnoreAddressesDescription",
+		helpId: "ignoreAddresses"
+	},
+	{
+		key: "flagRepeatedWords",
+		title: "settingsOfficeFlagRepeated",
+		description: "settingsOfficeFlagRepeatedDescription",
+		helpId: "flagRepeated"
+	}
 ]
 
 // Office → Proofing: Word's "Check spelling as you type", the language of text that names none, the proofing options
@@ -38,6 +59,7 @@ export function OfficeProofingRows() {
 		<>
 			<PreferenceToggleRow
 				title={t("settingsOfficeSpellCheck")}
+				helpId="spellCheck"
 				description={t("settingsOfficeSpellCheckDescription")}
 				checked={settings.spellCheck}
 				disabled={disabled}
@@ -48,6 +70,7 @@ export function OfficeProofingRows() {
 			/>
 			<SettingsSelectRow
 				label={t("settingsOfficeProofingLanguage")}
+				helpId="proofingLanguage"
 				description={t("settingsOfficeProofingLanguageDescription")}
 				id="office-proofing-language"
 				options={[
@@ -68,6 +91,7 @@ export function OfficeProofingRows() {
 					checked={settings[option.key]}
 					disabled={disabled || !settings.spellCheck}
 					disabledReason={offlineReason}
+					helpId={option.helpId}
 					onCheckedChange={checked => {
 						saveSyncedOfficeSetting(option.key, checked)
 					}}
@@ -75,6 +99,7 @@ export function OfficeProofingRows() {
 			))}
 			<SettingsRow
 				label={t("settingsOfficeDictionary")}
+				helpId="dictionary"
 				description={t("settingsOfficeDictionaryDescription")}
 			>
 				<Button

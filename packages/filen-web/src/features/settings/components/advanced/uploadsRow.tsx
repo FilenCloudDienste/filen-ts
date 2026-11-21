@@ -19,6 +19,7 @@ function UploadsRow() {
 	return (
 		<PreferenceToggleRow
 			title={t("settingsConvertHeicToJpg")}
+			helpId="heicToJpg"
 			description={t("settingsConvertHeicToJpgDescription")}
 			checked={query.data ?? false}
 			disabled={query.data === undefined}

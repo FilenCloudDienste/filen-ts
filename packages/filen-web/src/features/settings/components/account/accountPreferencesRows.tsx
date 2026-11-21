@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
+import type { AppHelpId } from "@filen/shared/assistant"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -28,6 +29,7 @@ function AccountPreferencesRows({ accountQuery }: AccountPreferencesRowsProps) {
 		<>
 			<AccountToggleRow
 				title={t("settingsVersioningTitle")}
+				helpId="versioning"
 				description={t("settingsVersioningDescription")}
 				checked={versioningEnabled}
 				isOnline={isOnline}
@@ -37,6 +39,7 @@ function AccountPreferencesRows({ accountQuery }: AccountPreferencesRowsProps) {
 			/>
 			<AccountToggleRow
 				title={t("settingsLoginAlertsTitle")}
+				helpId="loginAlerts"
 				description={t("settingsLoginAlertsDescription")}
 				checked={loginAlertsEnabled}
 				isOnline={isOnline}
@@ -47,6 +50,7 @@ function AccountPreferencesRows({ accountQuery }: AccountPreferencesRowsProps) {
 			{/* The server hides the account's presence everywhere on its own; nothing here reads the flag back. */}
 			<AccountToggleRow
 				title={t("settingsAppearOfflineTitle")}
+				helpId="appearOffline"
 				description={t("settingsAppearOfflineDescription")}
 				checked={appearOffline}
 				isOnline={isOnline}
@@ -66,7 +70,8 @@ function AccountToggleRow({
 	isOnline,
 	offlineReason,
 	setEnabled,
-	patchKey
+	patchKey,
+	helpId
 }: {
 	title: string
 	description: string
@@ -75,6 +80,7 @@ function AccountToggleRow({
 	offlineReason: string | undefined
 	setEnabled: (enabled: boolean) => Promise<void>
 	patchKey: "versioningEnabled" | "loginAlertsEnabled" | "appearOffline"
+	helpId: AppHelpId
 }) {
 	const [pending, setPending] = useState(false)
 
@@ -102,6 +108,7 @@ function AccountToggleRow({
 			checked={checked}
 			disabled={pending || !isOnline}
 			disabledReason={offlineReason}
+			helpId={helpId}
 			onCheckedChange={next => {
 				void handleChange(next)
 			}}

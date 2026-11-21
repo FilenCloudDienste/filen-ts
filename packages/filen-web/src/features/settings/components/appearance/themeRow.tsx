@@ -19,6 +19,7 @@ function ThemeRow() {
 	return (
 		<SettingsSelectRow
 			label={t("settingsThemeTitle")}
+			helpId="theme"
 			description={t("settingsThemeDescription")}
 			id="theme-select"
 			options={THEME_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}

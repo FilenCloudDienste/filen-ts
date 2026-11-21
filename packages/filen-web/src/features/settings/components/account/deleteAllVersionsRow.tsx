@@ -21,6 +21,7 @@ function DeleteAllVersionsRow({ accountQuery }: DeleteAllVersionsRowProps) {
 	return (
 		<TypedDeleteRow
 			title={t("settingsDeleteAllVersionsTitle")}
+			helpId="deleteAllVersions"
 			description={t("settingsDeleteAllVersionsDescription", {
 				count: Number(versionedFiles),
 				size: formatBytes(Number(versionedStorage))

@@ -19,6 +19,7 @@ function DotFilenRow() {
 	return (
 		<PreferenceToggleRow
 			title={t("settingsShowDotFilen")}
+			helpId="dotFilen"
 			description={t("settingsShowDotFilenDescription")}
 			checked={query.data ?? DEFAULT_SHOW_DOT_FILEN}
 			disabled={query.data === undefined}

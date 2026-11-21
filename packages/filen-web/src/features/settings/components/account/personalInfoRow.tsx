@@ -48,6 +48,7 @@ function PersonalInfoRow({ accountQuery }: PersonalInfoRowProps) {
 	return (
 		<SettingsRow
 			label={t("settingsPersonalTitle")}
+			helpId="personalInfo"
 			description={t("settingsPersonalDescription")}
 		>
 			<Button

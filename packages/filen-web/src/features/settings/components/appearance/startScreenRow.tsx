@@ -28,6 +28,7 @@ function StartScreenRow() {
 	return (
 		<SettingsSelectRow
 			label={t("settingsStartScreenTitle")}
+			helpId="startScreen"
 			description={t("settingsStartScreenDescription")}
 			id="start-screen-select"
 			options={START_SCREENS.map(screen => ({ value: screen, label: t(START_SCREEN_LABEL_KEYS[screen]) }))}

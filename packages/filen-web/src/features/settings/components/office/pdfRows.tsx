@@ -36,6 +36,7 @@ export function OfficePdfRows() {
 			/>
 			<SettingsRow
 				label={t("settingsOfficeSavedSignatures")}
+				helpId="savedSignatures"
 				description={t("settingsOfficeSavedSignaturesDescription")}
 			>
 				{/* Busy until the synced file is read: "None" and a disabled Manage do not yet mean there are none. */}

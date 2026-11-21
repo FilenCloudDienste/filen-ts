@@ -184,6 +184,7 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 	return (
 		<SettingsRow
 			label={t("twoFactorSectionTitle")}
+			helpId="twoFactor"
 			description={t("twoFactorSectionDescription")}
 		>
 			<span className="text-sm text-muted-foreground">

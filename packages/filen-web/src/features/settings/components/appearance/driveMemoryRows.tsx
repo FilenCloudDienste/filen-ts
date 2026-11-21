@@ -86,6 +86,7 @@ function DriveMemoryRows() {
 		<>
 			<PreferenceToggleRow
 				title={t("settingsRememberSortPerDirectory")}
+				helpId="rememberSort"
 				description={t("settingsRememberSortPerDirectoryDescription")}
 				checked={sortQuery.data?.mode === "perDirectory"}
 				disabled={sortQuery.data === undefined}
@@ -99,6 +100,7 @@ function DriveMemoryRows() {
 			/>
 			<ResetRow
 				title={t("settingsResetSort")}
+				helpId="resetSort"
 				description={t("settingsResetSortDescription")}
 				onReset={() => {
 					setResetTarget("sort")
@@ -106,6 +108,7 @@ function DriveMemoryRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsRememberViewPerDirectory")}
+				helpId="rememberView"
 				description={t("settingsRememberViewPerDirectoryDescription")}
 				checked={viewQuery.data?.mode === "perDirectory"}
 				disabled={viewQuery.data === undefined}
@@ -119,6 +122,7 @@ function DriveMemoryRows() {
 			/>
 			<ResetRow
 				title={t("settingsResetView")}
+				helpId="resetView"
 				description={t("settingsResetViewDescription")}
 				onReset={() => {
 					setResetTarget("view")

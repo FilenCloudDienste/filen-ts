@@ -95,6 +95,7 @@ function ChangePasswordRow() {
 	return (
 		<SettingsRow
 			label={t("settings:settingsPasswordRowTitle")}
+			helpId="password"
 			description={t("changePasswordDescription")}
 		>
 			<Button

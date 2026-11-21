@@ -31,6 +31,7 @@ function LanguageRow() {
 	return (
 		<SettingsSelectRow
 			label={t("settingsLanguageTitle")}
+			helpId="language"
 			description={t("settingsLanguageDescription")}
 			id="language-select"
 			options={options}

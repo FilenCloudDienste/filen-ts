@@ -65,6 +65,7 @@ function DeleteAccountRow({ accountQuery }: DeleteAccountRowProps) {
 	return (
 		<SettingsRow
 			label={t("deleteAccountTitle")}
+			helpId="deleteAccount"
 			description={t("deleteAccountDescription")}
 			destructive
 		>

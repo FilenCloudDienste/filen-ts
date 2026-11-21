@@ -21,6 +21,7 @@ function DefaultNoteTypeRow() {
 	return (
 		<SettingsSelectRow
 			label={t("settingsDefaultNoteTypeTitle")}
+			helpId="defaultNoteType"
 			description={t("settingsDefaultNoteTypeDescription")}
 			id="default-note-type-select"
 			options={NOTE_TYPES.map(noteType => ({ value: noteType, label: t(`notes:${NOTE_TYPE_LABEL_KEYS[noteType]}`) }))}

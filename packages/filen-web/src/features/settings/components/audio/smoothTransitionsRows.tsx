@@ -51,6 +51,7 @@ export function SmoothTransitionsRows() {
 		<>
 			<PreferenceToggleRow
 				title={t("audio:smoothTransitions")}
+				helpId="smoothTransitions"
 				description={t("settingsAudioSmoothTransitionsDescription")}
 				checked={active}
 				disabled={locked}
@@ -72,6 +73,7 @@ export function SmoothTransitionsRows() {
 			/>
 			<SettingsSelectRow
 				label={t("settingsAudioManualSkip")}
+				helpId="manualSkip"
 				description={t("settingsAudioManualSkipDescription")}
 				id="smooth-transitions-manual-skip"
 				options={MANUAL_TRANSITION_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}
@@ -83,6 +85,7 @@ export function SmoothTransitionsRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsAudioMatchLoudness")}
+				helpId="matchLoudness"
 				description={t("settingsAudioMatchLoudnessDescription")}
 				checked={matchLoudness}
 				disabled={!active}

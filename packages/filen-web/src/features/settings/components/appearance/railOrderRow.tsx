@@ -11,6 +11,7 @@ function RailOrderRow() {
 	return (
 		<ResetRow
 			title={t("settingsRailReset")}
+			helpId="railOrder"
 			description={t("settingsRailResetDescription")}
 			onReset={() => {
 				// storeRailOrder shows the error toast itself.

@@ -47,12 +47,14 @@ function BillingPage() {
 						</SettingsGroup>
 						<SettingsGroup
 							title={t("settingsBillingSubscriptionsTitle")}
+							helpId="subscriptions"
 							description={t("settingsBillingSubscriptionsDescription")}
 						>
 							<SubscriptionsBlock accountQuery={accountQuery} />
 						</SettingsGroup>
 						<SettingsGroup
 							title={t("settingsBillingInvoicesTitle")}
+							helpId="invoices"
 							description={t("settingsBillingInvoicesDescription")}
 						>
 							<InvoicesBlock accountQuery={accountQuery} />

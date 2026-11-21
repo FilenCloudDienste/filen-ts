@@ -45,6 +45,7 @@ export function OfficeGeneralRows() {
 		<>
 			<SettingsRow
 				label={t("settingsDocumentsAuthorName")}
+				helpId="authorName"
 				description={t("settingsDocumentsAuthorNameDescription")}
 			>
 				<div className="flex min-w-0 items-center gap-3">
@@ -67,6 +68,7 @@ export function OfficeGeneralRows() {
 			</SettingsRow>
 			<SettingsRow
 				label={t("settingsOfficeAuthorInitials")}
+				helpId="authorInitials"
 				description={t("settingsOfficeAuthorInitialsDescription")}
 			>
 				<div className="flex min-w-0 items-center gap-3">
@@ -89,6 +91,7 @@ export function OfficeGeneralRows() {
 			</SettingsRow>
 			<PreferenceToggleRow
 				title={t("settingsDocumentsAutosave")}
+				helpId="autosave"
 				description={t("settingsOfficeAutosaveDescription")}
 				checked={settings.autosave}
 				disabled={disabled}
@@ -99,6 +102,7 @@ export function OfficeGeneralRows() {
 			/>
 			<SettingsSelectRow
 				label={t("settingsOfficeAutosaveDelay")}
+				helpId="autosaveDelay"
 				description={t("settingsOfficeAutosaveDelayDescription")}
 				id="office-autosave-delay"
 				options={OFFICE_AUTOSAVE_DELAYS_MS.map(delay => ({

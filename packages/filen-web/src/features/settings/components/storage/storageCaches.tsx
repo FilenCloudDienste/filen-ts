@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
+import type { AppHelpId } from "@filen/shared/assistant"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -36,6 +37,16 @@ const ROW_DESCRIPTION_KEY = {
 	browserCache: "storageBrowserCacheDescription",
 	networkDrive: "storageNetworkDriveDescription"
 } as const satisfies Record<CacheRow, string>
+
+const ROW_HELP_ID = {
+	thumbnails: "cacheThumbnails",
+	videos: "cacheVideos",
+	music: "cacheMusic",
+	queryCache: "cacheQuery",
+	model: "cacheModel",
+	browserCache: "cacheBrowser",
+	networkDrive: "cacheNetworkDrive"
+} as const satisfies Record<CacheRow, AppHelpId>
 
 const ROW_BODY_KEY = {
 	thumbnails: "storageThumbnailsBody",
@@ -195,6 +206,7 @@ function StorageCaches() {
 							key={row}
 							label={label}
 							description={t(ROW_DESCRIPTION_KEY[row])}
+							helpId={ROW_HELP_ID[row]}
 						>
 							<RowSizeText size={size} />
 							<div className={ACTION_SLOT_CLASS}>
@@ -216,6 +228,7 @@ function StorageCaches() {
 				{usage.other !== undefined && usage.other > 0 ? (
 					<SettingsRow
 						label={t("storageOther")}
+						helpId="cacheOther"
 						description={t("storageOtherDescription")}
 					>
 						<RowSizeText size={usage.other} />

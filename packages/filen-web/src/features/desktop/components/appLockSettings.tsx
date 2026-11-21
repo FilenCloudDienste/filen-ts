@@ -19,6 +19,7 @@ function LockAfterRow() {
 	return (
 		<SettingsSelectRow
 			label={t("settingsDesktopLockAfter")}
+			helpId="appLockAfter"
 			description={t("settingsDesktopLockAfterDescription")}
 			id="desktop-lock-after"
 			options={DESKTOP_LOCK_AFTER_SECONDS.map(seconds => ({
@@ -66,6 +67,7 @@ export function AppLockSettings() {
 			<SettingsGroup title={t("settingsLockTitle")}>
 				<SettingsRow
 					label={t("settingsLockPin")}
+					helpId="appLockPin"
 					description={t(waiting ? "settingsLockPinWaiting" : "settingsLockPinDescription")}
 				>
 					{lockEnabled ? (
@@ -108,6 +110,7 @@ export function AppLockSettings() {
 				{lockEnabled ? (
 					<SettingsRow
 						label={t("settingsLockNow")}
+						helpId="lockNow"
 						description={t("settingsLockNowDescription")}
 					>
 						<Button

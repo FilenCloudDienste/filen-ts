@@ -61,6 +61,7 @@ function NicknameRow({ accountQuery }: NicknameRowProps) {
 	return (
 		<SettingsRow
 			label={t("settingsNicknameTitle")}
+			helpId="nickname"
 			description={t("settingsNicknameDescription")}
 			htmlFor="nickname-input"
 		>

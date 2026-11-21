@@ -76,6 +76,7 @@ function ChangeEmailRow({ accountQuery }: ChangeEmailRowProps) {
 	return (
 		<SettingsRow
 			label={t("settingsEmailTitle")}
+			helpId="email"
 			description={accountQuery.data.email}
 		>
 			<Button

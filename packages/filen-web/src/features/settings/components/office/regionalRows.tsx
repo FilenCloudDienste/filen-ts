@@ -76,6 +76,7 @@ export function OfficeRegionalRows() {
 		<>
 			<SettingsSelectRow
 				label={t("settingsOfficeRegionalFormat")}
+				helpId="regionalFormat"
 				description={t("settingsOfficeRegionalFormatDescription", { example: formatExample(regional) })}
 				id="office-regional-format"
 				options={[
@@ -90,6 +91,7 @@ export function OfficeRegionalRows() {
 			/>
 			<SettingsSelectRow<PaperChoice>
 				label={t("settingsOfficePaperSize")}
+				helpId="paperSize"
 				description={t("settingsOfficePaperSizeDescription")}
 				id="office-paper-size"
 				options={[

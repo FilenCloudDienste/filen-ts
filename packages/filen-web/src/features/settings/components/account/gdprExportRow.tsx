@@ -35,6 +35,7 @@ function GdprExportRow() {
 	return (
 		<SettingsRow
 			label={t("settingsGdprTitle")}
+			helpId="dataExport"
 			description={t("settingsGdprDescription")}
 		>
 			<Button

@@ -23,6 +23,7 @@ function DeleteAllItemsRow({ accountQuery }: DeleteAllItemsRowProps) {
 	return (
 		<TypedDeleteRow
 			title={t("settingsDeleteAllItemsTitle")}
+			helpId="deleteAllItems"
 			description={t("settingsDeleteAllItemsDescription", { size: formatBytes(Number(storageUsed)) })}
 			submitLabel={t("settingsDeleteAllItemsSubmit")}
 			confirmBody={t("settingsDeleteAllItemsConfirmBody", { phrase })}

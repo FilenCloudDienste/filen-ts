@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
+import type { AppHelpId } from "@filen/shared/assistant"
 import { toast } from "sonner"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -14,13 +15,24 @@ interface TypedDeleteRowProps {
 	confirmBody: string
 	phrase: string
 	successMessage: string
+	helpId: AppHelpId
 	run: () => Promise<void>
 	onDeleted: () => void
 }
 
 // A destructive account-wide wipe behind a TypedConfirmDialog, the same primitive drive's
 // emptyTrashButton uses: its exact-match gate is what keeps the button disabled on a wrong phrase.
-function TypedDeleteRow({ title, description, submitLabel, confirmBody, phrase, successMessage, run, onDeleted }: TypedDeleteRowProps) {
+function TypedDeleteRow({
+	title,
+	description,
+	submitLabel,
+	confirmBody,
+	phrase,
+	successMessage,
+	helpId,
+	run,
+	onDeleted
+}: TypedDeleteRowProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
@@ -44,6 +56,7 @@ function TypedDeleteRow({ title, description, submitLabel, confirmBody, phrase, 
 		<SettingsRow
 			label={title}
 			description={description}
+			helpId={helpId}
 			destructive
 		>
 			<Button

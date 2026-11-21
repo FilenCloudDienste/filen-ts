@@ -45,6 +45,7 @@ function ExportMasterKeysRow({ accountQuery }: ExportMasterKeysRowProps) {
 	return (
 		<SettingsRow
 			label={t("settings:settingsMasterKeysRowTitle")}
+			helpId="masterKeys"
 			description={didExportMasterKeys ? t("exportMasterKeysDescription") : t("settings:settingsMasterKeysNotExportedWarning")}
 		>
 			{!didExportMasterKeys && <Badge variant="destructive">{t("exportMasterKeysNotBackedUp")}</Badge>}

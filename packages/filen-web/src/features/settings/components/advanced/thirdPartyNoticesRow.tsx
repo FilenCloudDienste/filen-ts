@@ -11,6 +11,7 @@ function ThirdPartyNoticesRow() {
 	return (
 		<SettingsRow
 			label={t("settingsThirdPartyNoticesTitle")}
+			helpId="thirdPartyNotices"
 			description={t("settingsThirdPartyNoticesDescription")}
 		>
 			{/* No offline gate: the data is compiled into the bundle, nothing is fetched. */}

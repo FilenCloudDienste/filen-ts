@@ -17,6 +17,7 @@ export function OfficeWordRows() {
 		<>
 			<SettingsSelectRow<DocxMarkupMode>
 				label={t("settingsOfficeMarkupView")}
+				helpId="markupView"
 				description={t("settingsOfficeMarkupViewDescription")}
 				id="office-markup-view"
 				options={DOCX_MARKUP_MODES.map(info => ({ value: info.mode, label: t(`preview:${MARKUP_LABELS[info.mode]}`) }))}
@@ -28,6 +29,7 @@ export function OfficeWordRows() {
 			/>
 			<SettingsSelectRow<DocxOpenView>
 				label={t("settingsOfficeOpenIn")}
+				helpId="openIn"
 				description={t("settingsOfficeOpenInDescription")}
 				id="office-open-in"
 				options={[
@@ -43,6 +45,7 @@ export function OfficeWordRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsOfficeFormattingMarks")}
+				helpId="formattingMarks"
 				description={t("settingsOfficeFormattingMarksDescription")}
 				checked={formattingMarks}
 				disabled={false}
@@ -50,6 +53,7 @@ export function OfficeWordRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsOfficeAutoQuotes")}
+				helpId="autoQuotes"
 				description={t("settingsOfficeAutoQuotesDescription")}
 				checked={view.autoQuotes ?? true}
 				disabled={false}
@@ -59,6 +63,7 @@ export function OfficeWordRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsOfficeAutoLists")}
+				helpId="autoLists"
 				description={t("settingsOfficeAutoListsDescription")}
 				checked={view.autoLists ?? true}
 				disabled={false}
@@ -80,6 +85,7 @@ export function OfficeLayoutRows() {
 		<>
 			<PreferenceToggleRow
 				title={t("settingsOfficeRibbonTabsOnly")}
+				helpId="ribbonTabsOnly"
 				description={t("settingsOfficeRibbonTabsOnlyDescription")}
 				checked={ribbonCollapsed}
 				disabled={false}
@@ -87,6 +93,7 @@ export function OfficeLayoutRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsOfficeSlideRail")}
+				helpId="slideRail"
 				description={t("settingsOfficeSlideRailDescription")}
 				checked={view.slideRail}
 				disabled={false}
@@ -96,6 +103,7 @@ export function OfficeLayoutRows() {
 			/>
 			<PreferenceToggleRow
 				title={t("settingsOfficeNotesPane")}
+				helpId="notesPane"
 				description={t("settingsOfficeNotesPaneDescription")}
 				checked={view.notesPane}
 				disabled={false}

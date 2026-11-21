@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { MonitorIcon } from "lucide-react"
 import type { DesktopPrefs } from "@filen/shared/desktop"
+import type { AppHelpId } from "@filen/shared/assistant"
 import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
 import { SettingsGroup, SettingsPage, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { loadDesktopPrefs, setDesktopPref, useDesktopPrefs } from "@/features/desktop/lib/prefs"
@@ -67,11 +68,12 @@ function DesktopPage() {
 		void loadDesktopPrefs()
 	}, [])
 
-	function toggleRow(key: PrefKey, title: string, description: string) {
+	function toggleRow(key: PrefKey & AppHelpId, title: string, description: string) {
 		return (
 			<PreferenceToggleRow
 				title={title}
 				description={description}
+				helpId={key}
 				checked={prefs?.[key] ?? false}
 				disabled={prefs === null || pending === key}
 				onCheckedChange={checked => {
@@ -119,6 +121,7 @@ function DesktopPage() {
 			<SettingsGroup title={t("desktop:settingsLogsTitle")}>
 				<SettingsRow
 					label={t("desktop:settingsLogsExport")}
+					helpId="logsExport"
 					description={t("desktop:settingsLogsExportDescription")}
 				>
 					<Button

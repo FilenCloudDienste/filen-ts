@@ -1,5 +1,6 @@
 import { useId } from "react"
 import { useTranslation } from "react-i18next"
+import type { AppHelpId } from "@filen/shared/assistant"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -15,11 +16,12 @@ interface PreferenceToggleRowProps {
 	// Why the switch is disabled, as its accessible description, only when that reason is worth telling
 	// (offline); never for a toggle that is merely in flight.
 	disabledReason?: string | undefined
+	helpId?: AppHelpId | undefined
 	onCheckedChange: (checked: boolean) => void
 }
 
 // A settings row whose switch sets the preference its title names.
-function PreferenceToggleRow({ title, description, checked, disabled, disabledReason, onCheckedChange }: PreferenceToggleRowProps) {
+function PreferenceToggleRow({ title, description, checked, disabled, disabledReason, helpId, onCheckedChange }: PreferenceToggleRowProps) {
 	const reasonId = useId()
 	const reason = disabled ? disabledReason : undefined
 
@@ -27,6 +29,7 @@ function PreferenceToggleRow({ title, description, checked, disabled, disabledRe
 		<SettingsRow
 			label={title}
 			description={description}
+			helpId={helpId}
 		>
 			<Switch
 				checked={checked}
@@ -46,18 +49,20 @@ function PreferenceToggleRow({ title, description, checked, disabled, disabledRe
 interface ResetRowProps {
 	title: string
 	description: string
+	helpId?: AppHelpId | undefined
 	onReset: () => void
 }
 
 // A settings row whose button resets the preference its title names. The button reads "Reset" and is
 // named by the title, so several on one page stay distinguishable to assistive tech.
-function ResetRow({ title, description, onReset }: ResetRowProps) {
+function ResetRow({ title, description, helpId, onReset }: ResetRowProps) {
 	const { t } = useTranslation("common")
 
 	return (
 		<SettingsRow
 			label={title}
 			description={description}
+			helpId={helpId}
 		>
 			<Button
 				type="button"
@@ -79,16 +84,27 @@ interface SettingsSelectRowProps<V extends string> {
 	// Undefined while the preference loads; a spinner holds the select's place.
 	value: V | undefined
 	disabled: boolean
+	helpId?: AppHelpId | undefined
 	onChange: (value: V) => void
 }
 
 // A settings row whose select picks the preference its label names.
-function SettingsSelectRow<V extends string>({ label, description, id, options, value, disabled, onChange }: SettingsSelectRowProps<V>) {
+function SettingsSelectRow<V extends string>({
+	label,
+	description,
+	id,
+	options,
+	value,
+	disabled,
+	helpId,
+	onChange
+}: SettingsSelectRowProps<V>) {
 	return (
 		<SettingsRow
 			label={label}
 			description={description}
 			htmlFor={id}
+			helpId={helpId}
 		>
 			{value === undefined ? (
 				<LoadingState

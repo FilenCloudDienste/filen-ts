@@ -29,6 +29,7 @@ function AdvancedPage() {
 		>
 			<SettingsGroup
 				title={t("settingsAdvancedTransferTitle")}
+				helpId="transfers"
 				description={t("settingsAdvancedTransferDescription")}
 			>
 				<TransferConfigRow />
@@ -54,6 +55,7 @@ function AdvancedPage() {
 			<StorageCaches />
 			<SettingsGroup
 				title={t("settingsLogsTitle")}
+				helpId="logs"
 				description={t("settingsLogsDescription", { count: LOG_RING_MAX })}
 			>
 				<LogsBlock />

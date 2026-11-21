@@ -68,6 +68,7 @@ function ArchiveMemoryRow() {
 	return (
 		<SettingsSelectRow
 			label={t("settingsAdvancedArchiveMemory")}
+			helpId="archiveMemory"
 			description={description.join(" ")}
 			id="advanced-archive-memory"
 			options={ARCHIVE_CODEC_MEMORY_MIB.map(size => ({

@@ -10,67 +10,67 @@
    background (the title band, rail, sidebar) draggable; `app-region-no-drag` opts individual
    interactive descendants back out so they stay clickable. */
 @utility app-region-drag {
-    -webkit-app-region: drag;
+	-webkit-app-region: drag;
 }
 
 /* Inert inside an app-region-pane (which already covers it, and whose descendants must build no region) unless
    a drag region sits between the two, as a pane's own header does. */
 @utility app-region-no-drag {
-    &:not(:where(.app-region-pane *)),
-    :where(.app-region-pane :is(.app-region-drag, .app-region-chrome)) & {
-        -webkit-app-region: no-drag;
-    }
+	&:not(:where(.app-region-pane *)),
+	:where(.app-region-pane :is(.app-region-drag, .app-region-chrome)) & {
+		-webkit-app-region: no-drag;
+	}
 }
 
 /* Window chrome — a full-window layer's top bar, a page's bare background: drags the window while every
    control inside stays clickable. */
 @utility app-region-chrome {
-    -webkit-app-region: drag;
+	-webkit-app-region: drag;
 
-    & :is(a, button, input, label, select, textarea, [role="button"], [tabindex]) {
-        -webkit-app-region: no-drag;
-    }
+	& :is(a, button, input, label, select, textarea, [role="button"], [tabindex]) {
+		-webkit-app-region: no-drag;
+	}
 }
 
 /* Chromium builds drag regions regardless of stacking, so a popup over the rail, a sidebar or the title
    band would drag the window instead of taking clicks. Base layer, zero specificity: a drag bar inside
    still wins. */
 @layer base {
-    :where([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]) {
-        -webkit-app-region: no-drag;
-    }
+	:where([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]) {
+		-webkit-app-region: no-drag;
+	}
 
-    /* The region is inherited, and Chromium never clips it to a scroll container: a scrolled list row's
+	/* The region is inherited, and Chromium never clips it to a scroll container: a scrolled list row's
        inherited no-drag box would sit over the header above it and win. Inside a pane nothing builds a
        region unless it opts in (the pane's own no-drag box already covers it). `initial`, not `none`:
        Chromium computes `none` as the inherited value. */
-    :where(.app-region-pane *) {
-        -webkit-app-region: initial;
-    }
+	:where(.app-region-pane *) {
+		-webkit-app-region: initial;
+	}
 
-    /* A drag region swallows the press outside a popup that would close it. Base UI marks the page outside an
+	/* A drag region swallows the press outside a popup that would close it. Base UI marks the page outside an
        open modal popup inert (the popup itself is portalled out of it), so the page builds no region meanwhile. */
-    [data-base-ui-inert],
-    [data-base-ui-inert] * {
-        -webkit-app-region: initial !important;
-    }
+	[data-base-ui-inert],
+	[data-base-ui-inert] * {
+		-webkit-app-region: initial !important;
+	}
 
-    /* The same for an open popover, which marks nothing inert (components/ui/suspendDragRegions.tsx). */
-    :root[data-popover-open] * {
-        -webkit-app-region: initial !important;
-    }
+	/* The same for an open popover, which marks nothing inert (components/ui/suspendDragRegions.tsx). */
+	:root[data-popover-open] * {
+		-webkit-app-region: initial !important;
+	}
 }
 
 /* A content pane inside a drag region (the shell's main card, the inline assistant panel). */
 @utility app-region-pane {
-    -webkit-app-region: no-drag;
+	-webkit-app-region: no-drag;
 }
 
 /* Thumbnails and artwork in grids and rows stay at standard dynamic range, so a grid of HDR photos cannot outshine
    the interface. Only these surfaces: video and every full-size picture keep the initial no-limit. Ignored where
    unsupported. */
 @utility thumbnail-range {
-    dynamic-range-limit: standard;
+	dynamic-range-limit: standard;
 }
 
 /* Desktop window chrome (lib/desktop.ts sets data-desktop; every inset is 0 in a browser). Windows and
@@ -79,26 +79,26 @@
    --window-inset-top above itself and --window-inset-left before its first control; a panel in the
    top-left corner starts --window-inset-corner down. */
 :root {
-    --window-inset-top: env(titlebar-area-height, 0px);
-    --window-inset-left: 0px;
-    --window-inset-corner: var(--window-inset-top);
+	--window-inset-top: env(titlebar-area-height, 0px);
+	--window-inset-left: 0px;
+	--window-inset-corner: var(--window-inset-top);
 }
 
 :root[data-desktop="darwin"]:not([data-window-fullscreen], :has(:fullscreen)) {
-    --window-inset-left: 5rem;
-    --window-inset-corner: 2rem;
+	--window-inset-left: 5rem;
+	--window-inset-corner: 2rem;
 }
 
 /* Windows 10 draws no border around a frameless window (Windows 11 and Linux do); lib/desktop.ts sets the
    attribute only while the window is neither maximized, fullscreen nor snapped. Above every layer, never
    hit-tested. */
 :root[data-window-border]::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: 2147483647;
-    border: 1px solid var(--shell-border);
-    pointer-events: none;
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: 2147483647;
+	border: 1px solid var(--shell-border);
+	pointer-events: none;
 }
 
 /* The app's two focus-ring recipes, named once so a call site can never invent a third. `focus-ring`
@@ -108,313 +108,322 @@
    component whose variants override the ring color (button, badge): tailwind-merge cannot dedupe a
    custom utility, so those keep the classes spelled out. */
 @utility focus-ring {
-    @apply focus-visible:ring-3 focus-visible:ring-ring/30;
+	@apply focus-visible:ring-3 focus-visible:ring-ring/30;
 }
 
 @utility focus-ring-row {
-    @apply focus-visible:ring-2 focus-visible:ring-ring/50;
+	@apply focus-visible:ring-2 focus-visible:ring-ring/50;
 }
 
 @theme inline {
-    --font-heading: var(--font-sans);
-    --font-sans: 'Inter Variable', sans-serif;
-    --color-sidebar-accent-foreground: var(--foreground);
-    --color-sidebar-accent: var(--accent);
-    --color-sidebar-foreground: var(--foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--foreground);
-    --color-card: var(--background);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --color-canvas: var(--canvas);
-    --color-rail-chip: var(--rail-chip);
-    --color-rail-chip-foreground: var(--rail-chip-foreground);
-    --color-rail-hover: var(--rail-hover);
-    --color-shell-border: var(--shell-border);
-    --color-chat-own: var(--chat-own);
-    --color-chat-own-foreground: var(--chat-own-foreground);
-    --color-chat-own-strong: var(--chat-own-strong);
-    --color-chat-other: var(--chat-other);
-    --color-chat-other-strong: var(--chat-other-strong);
-    --color-chat-link: var(--chat-link);
-    --color-warning: var(--warning);
-    --color-warning-foreground: var(--warning-foreground);
-    --color-edit-modified: var(--edit-modified);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
-    --animate-indeterminate: indeterminate 1.6s ease-in-out infinite;
+	--font-heading: var(--font-sans);
+	--font-sans: "Inter Variable", sans-serif;
+	--color-sidebar-accent-foreground: var(--foreground);
+	--color-sidebar-accent: var(--accent);
+	--color-sidebar-foreground: var(--foreground);
+	--color-sidebar: var(--sidebar);
+	--color-chart-2: var(--chart-2);
+	--color-chart-1: var(--chart-1);
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--foreground);
+	--color-card: var(--background);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--color-canvas: var(--canvas);
+	--color-rail-chip: var(--rail-chip);
+	--color-rail-chip-foreground: var(--rail-chip-foreground);
+	--color-rail-hover: var(--rail-hover);
+	--color-shell-border: var(--shell-border);
+	--color-chat-own: var(--chat-own);
+	--color-chat-own-foreground: var(--chat-own-foreground);
+	--color-chat-own-strong: var(--chat-own-strong);
+	--color-chat-other: var(--chat-other);
+	--color-chat-other-strong: var(--chat-other-strong);
+	--color-chat-link: var(--chat-link);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-edit-modified: var(--edit-modified);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+	--animate-indeterminate: indeterminate 1.6s ease-in-out infinite;
 
-    /* An indeterminate bar's segment (a third of its track) sweeping across it. */
-    @keyframes indeterminate {
-        from {
-            transform: translateX(-100%);
-        }
-        to {
-            transform: translateX(300%);
-        }
-    }
+	/* An indeterminate bar's segment (a third of its track) sweeping across it. */
+	@keyframes indeterminate {
+		from {
+			transform: translateX(-100%);
+		}
+		to {
+			transform: translateX(300%);
+		}
+	}
 }
 
 :root {
-    /* Surfaces, lowest to highest: canvas < sidebar < content < popover. The canvas showing
+	/* Surfaces, lowest to highest: canvas < sidebar < content < popover. The canvas showing
        through the page padding and panel gaps separates every zone, never a border line. */
-    --canvas: oklch(0.925 0 0);
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    /* Fills and state layers are translucent ink, not fixed grays: the same token then shifts
+	--canvas: oklch(0.925 0 0);
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.145 0 0);
+	--popover: oklch(1 0 0);
+	--primary: oklch(0.205 0 0);
+	--primary-foreground: oklch(0.985 0 0);
+	/* Fills and state layers are translucent ink, not fixed grays: the same token then shifts
        every surface it lands on by the same amount, so a hover or selection reads equally on the
        sidebar, the content panel and a popover. Hover is the selected fill at half strength. */
-    --secondary: oklch(0 0 0 / 5%);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0 0 0 / 4.5%);
-    --muted-foreground: oklch(0.5 0 0);
-    --accent: oklch(0 0 0 / 7%);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    /* Shared by both themes; .dark inherits them. */
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --radius: 0.625rem;
-    /* Sidebar is recessed a step below the white content panel. */
-    --sidebar: oklch(0.97 0 0);
-    /* Icon rail: active section rides a white chip; inactive glyphs hover onto a canvas-darker fill. */
-    --rail-chip: oklch(1 0 0);
-    --rail-chip-foreground: oklch(0.205 0 0);
-    --rail-hover: oklch(0 0 0 / 6%);
-    /* Edge of the shell surfaces (sidebar, content card, audio bar). Translucent ink, not --border:
+	--secondary: oklch(0 0 0 / 5%);
+	--secondary-foreground: oklch(0.205 0 0);
+	--muted: oklch(0 0 0 / 4.5%);
+	--muted-foreground: oklch(0.5 0 0);
+	--accent: oklch(0 0 0 / 7%);
+	--destructive: oklch(0.577 0.245 27.325);
+	--border: oklch(0.922 0 0);
+	--input: oklch(0.922 0 0);
+	--ring: oklch(0.708 0 0);
+	/* Shared by both themes; .dark inherits them. */
+	--chart-1: oklch(0.87 0 0);
+	--chart-2: oklch(0.556 0 0);
+	--radius: 0.625rem;
+	/* Sidebar is recessed a step below the white content panel. */
+	--sidebar: oklch(0.97 0 0);
+	/* Icon rail: active section rides a white chip; inactive glyphs hover onto a canvas-darker fill. */
+	--rail-chip: oklch(1 0 0);
+	--rail-chip-foreground: oklch(0.205 0 0);
+	--rail-hover: oklch(0 0 0 / 6%);
+	/* Edge of the shell surfaces (sidebar, content card, audio bar). Translucent ink, not --border:
        --border is the canvas gray, so an opaque line vanishes where a surface meets the canvas. */
-    --shell-border: oklch(0 0 0 / 12%);
-    /* Chat: the brand blue in both themes (as on mobile) fills the send buttons and the assistant's own bubbles
+	--shell-border: oklch(0 0 0 / 12%);
+	/* Chat: the brand blue in both themes (as on mobile) fills the send buttons and the assistant's own bubbles
        and tints own message rows; the neutral gray a step off the white panel fills code blocks, link cards and
        the assistant's replies. The -strong shades are their hover and nested fills. */
-    --chat-own: oklch(0.623 0.214 259.815);
-    --chat-own-foreground: oklch(1 0 0);
-    --chat-own-strong: oklch(0.546 0.245 262.881);
-    --chat-other: oklch(0.93 0.002 286);
-    --chat-other-strong: oklch(0.88 0.003 286);
-    /* Links in messages: a blue dark or light enough to keep 4.5:1 on chat-other in each theme. */
-    --chat-link: oklch(0.488 0.243 264.376);
-    /* Transient-degradation notices (e.g. the chat reconnect strip): a tint of --warning behind
+	--chat-own: oklch(0.623 0.214 259.815);
+	--chat-own-foreground: oklch(1 0 0);
+	--chat-own-strong: oklch(0.546 0.245 262.881);
+	--chat-other: oklch(0.93 0.002 286);
+	--chat-other-strong: oklch(0.88 0.003 286);
+	/* Links in messages: a blue dark or light enough to keep 4.5:1 on chat-other in each theme. */
+	--chat-link: oklch(0.488 0.243 264.376);
+	/* Transient-degradation notices (e.g. the chat reconnect strip): a tint of --warning behind
        --warning-foreground text. */
-    --warning: oklch(0.769 0.188 70.08);
-    --warning-foreground: oklch(0.555 0.163 48.998);
-    /* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
-    --scrollbar-thumb: oklch(0 0 0 / 15%);
-    --scrollbar-thumb-hover: oklch(0 0 0 / 28%);
-    /* Image editor: marks a setting moved off its neutral value (a slider's fill, its value, its section's dot).
+	--warning: oklch(0.769 0.188 70.08);
+	--warning-foreground: oklch(0.555 0.163 48.998);
+	/* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
+	--scrollbar-thumb: oklch(0 0 0 / 15%);
+	--scrollbar-thumb-hover: oklch(0 0 0 / 28%);
+	/* Image editor: marks a setting moved off its neutral value (a slider's fill, its value, its section's dot).
        The editor always runs under .dark, so one shade serves both app themes. */
-    --edit-modified: oklch(0.82 0.15 75);
+	--edit-modified: oklch(0.82 0.15 75);
 }
 
 .dark {
-    /* Same ladder as light, lighter meaning higher: canvas < sidebar < content < popover, each step
+	/* Same ladder as light, lighter meaning higher: canvas < sidebar < content < popover, each step
        large enough to read on its own. Fills and state layers are translucent white (see :root). */
-    --canvas: oklch(0.13 0 0);
-    --background: oklch(0.21 0 0);
-    --foreground: oklch(0.985 0 0);
-    --popover: oklch(0.25 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(1 0 0 / 7%);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(1 0 0 / 6%);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(1 0 0 / 8.5%);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    /* Sidebar is recessed a step below the content panel, as in light. */
-    --sidebar: oklch(0.18 0 0);
-    /* Icon rail: elevated chip for the active section; hover a subtle lift on the canvas. */
-    --rail-chip: oklch(0.27 0 0);
-    --rail-chip-foreground: oklch(0.985 0 0);
-    --rail-hover: oklch(1 0 0 / 7%);
-    --shell-border: oklch(1 0 0 / 7%);
-    --chat-other: oklch(0.32 0.003 286);
-    --chat-other-strong: oklch(0.38 0.004 286);
-    --chat-link: oklch(0.707 0.165 254.624);
-    --warning-foreground: oklch(0.828 0.189 84.429);
-    --scrollbar-thumb: oklch(1 0 0 / 15%);
-    --scrollbar-thumb-hover: oklch(1 0 0 / 25%);
+	--canvas: oklch(0.13 0 0);
+	--background: oklch(0.21 0 0);
+	--foreground: oklch(0.985 0 0);
+	--popover: oklch(0.25 0 0);
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--secondary: oklch(1 0 0 / 7%);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(1 0 0 / 6%);
+	--muted-foreground: oklch(0.708 0 0);
+	--accent: oklch(1 0 0 / 8.5%);
+	--destructive: oklch(0.704 0.191 22.216);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: oklch(0.556 0 0);
+	/* Sidebar is recessed a step below the content panel, as in light. */
+	--sidebar: oklch(0.18 0 0);
+	/* Icon rail: elevated chip for the active section; hover a subtle lift on the canvas. */
+	--rail-chip: oklch(0.27 0 0);
+	--rail-chip-foreground: oklch(0.985 0 0);
+	--rail-hover: oklch(1 0 0 / 7%);
+	--shell-border: oklch(1 0 0 / 7%);
+	--chat-other: oklch(0.32 0.003 286);
+	--chat-other-strong: oklch(0.38 0.004 286);
+	--chat-link: oklch(0.707 0.165 254.624);
+	--warning-foreground: oklch(0.828 0.189 84.429);
+	--scrollbar-thumb: oklch(1 0 0 / 15%);
+	--scrollbar-thumb-hover: oklch(1 0 0 / 25%);
 }
 
 /* These feed @filen/office's docx.css: pages are white paper in both themes, only their surroundings follow the app. */
 :root,
 .dark {
-    --fo-canvas: var(--canvas);
-    --fo-page-bg: #fff;
-    --fo-page-shadow: 0 1px 3px oklch(0 0 0 / 12%), 0 1px 2px oklch(0 0 0 / 8%);
-    --fo-page-edge: transparent;
-    --fo-auto-text: #000;
-    --fo-selection: color-mix(in oklab, var(--primary) 22%, transparent);
-    --fo-focus-ring: var(--ring);
-    --fo-find-bg: color-mix(in oklab, var(--warning) 35%, transparent);
-    --fo-find-active-bg: color-mix(in oklab, var(--warning) 70%, transparent);
-    --fo-placeholder-fill: #f1f1f1;
-    --fo-placeholder-stroke: #c8c8c8;
-    --fo-revision-mark: oklch(0.488 0.243 264.376);
-    --fo-revision-bar: oklch(0.488 0.243 264.376);
-    /* Simple Markup marks changed lines with a red margin line, as Word does. */
-    --fo-revision-bar-simple: oklch(0.577 0.245 27.325);
-    /* Reviewers' colours, in the order a document names them (comment balloons, their text, change bars). */
-    --fo-revision-1: oklch(0.577 0.215 27.3);
-    --fo-revision-2: oklch(0.546 0.215 262.9);
-    --fo-revision-3: oklch(0.555 0.15 149.6);
-    --fo-revision-4: oklch(0.558 0.222 303.9);
-    --fo-revision-5: oklch(0.646 0.17 55.9);
-    --fo-revision-6: oklch(0.6 0.11 197.1);
-    --fo-revision-7: oklch(0.592 0.218 0.6);
-    --fo-revision-8: oklch(0.552 0.016 285.9);
-    /* Editing, docx-objects.css: the selection frame and resize handles of a drawing, the outline of a
+	--fo-canvas: var(--canvas);
+	--fo-page-bg: #fff;
+	--fo-page-shadow: 0 1px 3px oklch(0 0 0 / 12%), 0 1px 2px oklch(0 0 0 / 8%);
+	--fo-page-edge: transparent;
+	--fo-auto-text: #000;
+	--fo-selection: color-mix(in oklab, var(--primary) 22%, transparent);
+	--fo-focus-ring: var(--ring);
+	--fo-find-bg: color-mix(in oklab, var(--warning) 35%, transparent);
+	--fo-find-active-bg: color-mix(in oklab, var(--warning) 70%, transparent);
+	--fo-placeholder-fill: #f1f1f1;
+	--fo-placeholder-stroke: #c8c8c8;
+	--fo-revision-mark: oklch(0.488 0.243 264.376);
+	--fo-revision-bar: oklch(0.488 0.243 264.376);
+	/* Simple Markup marks changed lines with a red margin line, as Word does. */
+	--fo-revision-bar-simple: oklch(0.577 0.245 27.325);
+	/* Reviewers' colours, in the order a document names them (comment balloons, their text, change bars). */
+	--fo-revision-1: oklch(0.577 0.215 27.3);
+	--fo-revision-2: oklch(0.546 0.215 262.9);
+	--fo-revision-3: oklch(0.555 0.15 149.6);
+	--fo-revision-4: oklch(0.558 0.222 303.9);
+	--fo-revision-5: oklch(0.646 0.17 55.9);
+	--fo-revision-6: oklch(0.6 0.11 197.1);
+	--fo-revision-7: oklch(0.592 0.218 0.6);
+	--fo-revision-8: oklch(0.552 0.016 285.9);
+	/* Editing, docx-objects.css: the selection frame and resize handles of a drawing, the outline of a
        content control under the pointer. Drawn on the page, so ink on paper in both themes. */
-    --fo-handle-size: 8px;
-    --fo-handle-fill: #fff;
-    --fo-handle-stroke: var(--primary);
-    --fo-object-frame: var(--primary);
-    --fo-object-hover: color-mix(in oklab, var(--primary) 30%, transparent);
-    --fo-control-bg: color-mix(in oklab, var(--primary) 6%, transparent);
-    /* Editing, docx-reflow.css: the reflowed view is paper too (document colours are the document's). */
-    --fo-reflow-bg: #fff;
-    --fo-reflow-gutter: 16px;
-    --fo-reflow-rule: oklch(0 0 0 / 12%);
-    --fo-reflow-note: oklch(0.45 0 0);
+	--fo-handle-size: 8px;
+	--fo-handle-fill: #fff;
+	--fo-handle-stroke: var(--primary);
+	--fo-object-frame: var(--primary);
+	--fo-object-hover: color-mix(in oklab, var(--primary) 30%, transparent);
+	--fo-control-bg: color-mix(in oklab, var(--primary) 6%, transparent);
+	/* Editing, docx-reflow.css: the reflowed view is paper too (document colours are the document's). */
+	--fo-reflow-bg: #fff;
+	--fo-reflow-gutter: 16px;
+	--fo-reflow-rule: oklch(0 0 0 / 12%);
+	--fo-reflow-note: oklch(0.45 0 0);
 }
 
 .dark {
-    --fo-page-shadow: none;
-    --fo-page-edge: var(--border);
-    /* Dark --primary is near-white and would vanish on the page; its foreground is light's --primary. */
-    --fo-selection: color-mix(in oklab, var(--primary-foreground) 22%, transparent);
-    --fo-handle-stroke: var(--primary-foreground);
-    --fo-object-frame: var(--primary-foreground);
-    --fo-object-hover: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
-    --fo-control-bg: color-mix(in oklab, var(--primary-foreground) 6%, transparent);
+	--fo-page-shadow: none;
+	--fo-page-edge: var(--border);
+	/* Dark --primary is near-white and would vanish on the page; its foreground is light's --primary. */
+	--fo-selection: color-mix(in oklab, var(--primary-foreground) 22%, transparent);
+	--fo-handle-stroke: var(--primary-foreground);
+	--fo-object-frame: var(--primary-foreground);
+	--fo-object-hover: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+	--fo-control-bg: color-mix(in oklab, var(--primary-foreground) 6%, transparent);
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-    }
-  /* The standard scrollbar properties override every ::-webkit-scrollbar rule where both exist, and
+	* {
+		@apply border-border outline-ring/50;
+	}
+	/* The standard scrollbar properties override every ::-webkit-scrollbar rule where both exist, and
      they cannot inset the track, so they are left to Firefox, the one engine without the pseudo. */
-  @supports not selector(::-webkit-scrollbar) {
-    * {
-      scrollbar-width: thin;
-      scrollbar-color: var(--scrollbar-thumb) transparent;
-      }
-    }
-  body {
-    @apply bg-canvas text-foreground select-none;
-    }
-  /* Preflight resets buttons to the default cursor; everything clickable shows the pointer instead,
+	@supports not selector(::-webkit-scrollbar) {
+		* {
+			scrollbar-width: thin;
+			scrollbar-color: var(--scrollbar-thumb) transparent;
+		}
+	}
+	body {
+		@apply bg-canvas text-foreground select-none;
+	}
+	/* Preflight resets buttons to the default cursor; everything clickable shows the pointer instead,
      named once here by element and ARIA role so no component has to opt in. Disabled controls keep
      the default cursor. */
-  :is(
-      button,
-      a[href],
-      summary,
-      select,
-      input:is([type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"], [type="button"], [type="submit"], [type="reset"]),
-      [role="button"],
-      [role="link"],
-      [role="option"],
-      [role="menuitem"],
-      [role="menuitemcheckbox"],
-      [role="menuitemradio"],
-      [role="tab"],
-      [role="checkbox"],
-      [role="radio"],
-      [role="switch"],
-      [role="treeitem"],
-      [role="combobox"]:not(input)
-    ):not(:disabled, [aria-disabled="true"], [data-disabled]) {
-    cursor: pointer;
-    }
-  html {
-    @apply font-sans;
-    }
-  /* Opt-in text selection (spec: "restrict selection ONLY to components that actually need it") —
+	:is(
+		button,
+		a[href],
+		summary,
+		select,
+		input:is(
+			[type="checkbox"],
+			[type="radio"],
+			[type="file"],
+			[type="color"],
+			[type="range"],
+			[type="button"],
+			[type="submit"],
+			[type="reset"]
+		),
+		[role="button"],
+		[role="link"],
+		[role="option"],
+		[role="menuitem"],
+		[role="menuitemcheckbox"],
+		[role="menuitemradio"],
+		[role="tab"],
+		[role="checkbox"],
+		[role="radio"],
+		[role="switch"],
+		[role="treeitem"],
+		[role="combobox"]:not(input)
+	):not(:disabled, [aria-disabled="true"], [data-disabled]) {
+		cursor: pointer;
+	}
+	html {
+		@apply font-sans;
+	}
+	/* Opt-in text selection (spec: "restrict selection ONLY to components that actually need it") —
      `body`'s select-none above is the default; inputs/textareas and any contenteditable surface (this
      also covers CodeMirror's .cm-content, which carries the attribute even while read-only) opt back
      in globally since they're native/third-party DOM, not call sites this app's own classNames reach. */
-  input,
-  textarea,
-  [contenteditable] {
-    @apply select-text;
-    }
-  /* Toast title/description (errorLabel() can surface raw server messages worth copying,
+	input,
+	textarea,
+	[contenteditable] {
+		@apply select-text;
+	}
+	/* Toast title/description (errorLabel() can surface raw server messages worth copying,
      same class of support-copy text as the boot-error screen's detail/reason text above) —
      scoped to the text nodes, not the toast's buttons/close/icon chrome. */
-  .cn-toast [data-title],
-  .cn-toast [data-description] {
-    @apply select-text;
-    }
-  /* Thin scrollbars, consistent across themes: a 6px rounded thumb in a 10px gutter. */
-  *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-    }
-  /* The track stops short of both ends, so the thumb clears a rounded corner of the scroll container
+	.cn-toast [data-title],
+	.cn-toast [data-description] {
+		@apply select-text;
+	}
+	/* Thin scrollbars, consistent across themes: a 6px rounded thumb in a 10px gutter. */
+	*::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+	/* The track stops short of both ends, so the thumb clears a rounded corner of the scroll container
      or of the panel clipping it: 10px clears radii up to 18px (the menus') at the thumb's 2px inset. */
-  *::-webkit-scrollbar-track {
-    background: transparent;
-    }
-  *::-webkit-scrollbar-track:vertical {
-    margin-block: 10px;
-    }
-  *::-webkit-scrollbar-track:horizontal {
-    margin-inline: 10px;
-    }
-  *::-webkit-scrollbar-thumb {
-    background-color: var(--scrollbar-thumb);
-    background-clip: padding-box;
-    border: 2px solid transparent;
-    border-radius: 9999px;
-    }
-  *::-webkit-scrollbar-thumb:hover {
-    background-color: var(--scrollbar-thumb-hover);
-    }
-  /* One global motion switch instead of per-component opt-outs. The spinner is exempt: it is
+	*::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	*::-webkit-scrollbar-track:vertical {
+		margin-block: 10px;
+	}
+	*::-webkit-scrollbar-track:horizontal {
+		margin-inline: 10px;
+	}
+	*::-webkit-scrollbar-thumb {
+		background-color: var(--scrollbar-thumb);
+		background-clip: padding-box;
+		border: 2px solid transparent;
+		border-radius: 9999px;
+	}
+	*::-webkit-scrollbar-thumb:hover {
+		background-color: var(--scrollbar-thumb-hover);
+	}
+	/* One global motion switch instead of per-component opt-outs. The spinner is exempt: it is
      the only "work is in progress" signal on every loading state, and a frozen spinner reads as a
      hung app. 0.01ms rather than 0 so transitionend/animationend listeners still fire — Base UI's
      exit animations wait for them, and a hard 0 can leave a popup mounted forever. */
-  @media (prefers-reduced-motion: reduce) {
-    *:not([data-slot="spinner"]),
-    *:not([data-slot="spinner"])::before,
-    *:not([data-slot="spinner"])::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-      scroll-behavior: auto !important;
-      }
-    }
+	@media (prefers-reduced-motion: reduce) {
+		*:not([data-slot="spinner"]),
+		*:not([data-slot="spinner"])::before,
+		*:not([data-slot="spinner"])::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+			scroll-behavior: auto !important;
+		}
+	}
 }
 
 /* Rich-text (Quill) editor theming — restyle the imported `snow` theme over the app's CSS variables so
@@ -422,139 +431,139 @@
    equivalent is variable overrides, no JS theming port). Scoped to `.notes-rich-editor` so nothing else
    is touched. Toolbar is `false`, so only the container/editor surface needs styling. */
 .notes-rich-editor .ql-container.ql-snow {
-    border: none;
-    font-family: inherit;
-    font-size: 0.875rem;
+	border: none;
+	font-family: inherit;
+	font-size: 0.875rem;
 }
 
 .notes-rich-editor .ql-editor {
-    padding: 1rem 1.5rem;
-    color: var(--foreground);
-    line-height: 1.6;
+	padding: 1rem 1.5rem;
+	color: var(--foreground);
+	line-height: 1.6;
 }
 
 .notes-rich-editor .ql-editor.ql-blank::before {
-    left: 1.5rem;
-    right: 1.5rem;
-    color: var(--muted-foreground);
-    font-style: normal;
+	left: 1.5rem;
+	right: 1.5rem;
+	color: var(--muted-foreground);
+	font-style: normal;
 }
 
 .notes-rich-editor .ql-editor a {
-    color: var(--primary);
+	color: var(--primary);
 }
 
 .notes-rich-editor .ql-editor blockquote {
-    border-left: 2px solid var(--border);
-    padding-left: 0.75rem;
-    color: var(--muted-foreground);
-    font-style: italic;
+	border-left: 2px solid var(--border);
+	padding-left: 0.75rem;
+	color: var(--muted-foreground);
+	font-style: italic;
 }
 
 .notes-rich-editor .ql-editor code,
 .notes-rich-editor .ql-editor pre {
-    background-color: var(--muted);
-    color: var(--foreground);
-    border-radius: 0.375rem;
+	background-color: var(--muted);
+	color: var(--foreground);
+	border-radius: 0.375rem;
 }
 
 .notes-rich-editor .ql-editor pre {
-    padding: 0.75rem;
+	padding: 0.75rem;
 }
 
 /* Read-only rich notes (features/notes/components/reader/richReader.tsx). Quill 1 stores nesting as a
    ql-indent-N class on a flat <li>, and numbers each level with its own counter (decimal, then
    lower-alpha, lower-roman, repeating), restarting the deeper levels under every item above them. */
 .notes-rich-reader ol {
-    counter-reset: rich-list-0;
-    list-style: none;
+	counter-reset: rich-list-0;
+	list-style: none;
 }
 
 .notes-rich-reader ol > li {
-    counter-increment: rich-list-0;
-    counter-reset: rich-list-1 rich-list-2 rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+	counter-increment: rich-list-0;
+	counter-reset: rich-list-1 rich-list-2 rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li::before {
-    content: counter(rich-list-0, decimal) ". ";
-    display: inline-block;
-    width: 1.5em;
-    margin-left: -1.5em;
-    padding-right: 0.3em;
-    text-align: right;
-    white-space: nowrap;
+	content: counter(rich-list-0, decimal) ". ";
+	display: inline-block;
+	width: 1.5em;
+	margin-left: -1.5em;
+	padding-right: 0.3em;
+	text-align: right;
+	white-space: nowrap;
 }
 
 .notes-rich-reader ol > li.ql-indent-1 {
-    counter-increment: rich-list-1;
-    counter-reset: rich-list-2 rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+	counter-increment: rich-list-1;
+	counter-reset: rich-list-2 rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-1::before {
-    content: counter(rich-list-1, lower-alpha) ". ";
+	content: counter(rich-list-1, lower-alpha) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-2 {
-    counter-increment: rich-list-2;
-    counter-reset: rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+	counter-increment: rich-list-2;
+	counter-reset: rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-2::before {
-    content: counter(rich-list-2, lower-roman) ". ";
+	content: counter(rich-list-2, lower-roman) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-3 {
-    counter-increment: rich-list-3;
-    counter-reset: rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+	counter-increment: rich-list-3;
+	counter-reset: rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-3::before {
-    content: counter(rich-list-3, decimal) ". ";
+	content: counter(rich-list-3, decimal) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-4 {
-    counter-increment: rich-list-4;
-    counter-reset: rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+	counter-increment: rich-list-4;
+	counter-reset: rich-list-5 rich-list-6 rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-4::before {
-    content: counter(rich-list-4, lower-alpha) ". ";
+	content: counter(rich-list-4, lower-alpha) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-5 {
-    counter-increment: rich-list-5;
-    counter-reset: rich-list-6 rich-list-7 rich-list-8;
+	counter-increment: rich-list-5;
+	counter-reset: rich-list-6 rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-5::before {
-    content: counter(rich-list-5, lower-roman) ". ";
+	content: counter(rich-list-5, lower-roman) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-6 {
-    counter-increment: rich-list-6;
-    counter-reset: rich-list-7 rich-list-8;
+	counter-increment: rich-list-6;
+	counter-reset: rich-list-7 rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-6::before {
-    content: counter(rich-list-6, decimal) ". ";
+	content: counter(rich-list-6, decimal) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-7 {
-    counter-increment: rich-list-7;
-    counter-reset: rich-list-8;
+	counter-increment: rich-list-7;
+	counter-reset: rich-list-8;
 }
 
 .notes-rich-reader ol > li.ql-indent-7::before {
-    content: counter(rich-list-7, lower-alpha) ". ";
+	content: counter(rich-list-7, lower-alpha) ". ";
 }
 
 .notes-rich-reader ol > li.ql-indent-8 {
-    counter-increment: rich-list-8;
-    counter-reset: none;
+	counter-increment: rich-list-8;
+	counter-reset: none;
 }
 
 .notes-rich-reader ol > li.ql-indent-8::before {
-    content: counter(rich-list-8, lower-roman) ". ";
+	content: counter(rich-list-8, lower-roman) ". ";
 }
 
 /* Spring-loading's blink (features/drive/lib/springLoad.ts): the "off" phases hide the hovered
@@ -563,13 +572,28 @@
    drop there (the payload's own parent) has no highlight, so its "on" phases tint it: the blink alone
    is what it shows. Set on that one element only, so nothing else re-renders. */
 [data-spring-blink="off"] {
-    background-color: transparent !important;
-    box-shadow: none !important;
-    outline-color: transparent !important;
+	background-color: transparent !important;
+	box-shadow: none !important;
+	outline-color: transparent !important;
 }
 
 [data-spring-blink="on"] {
-    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+	background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+
+/* An app_help deep link's settings row (features/settings/hooks/useHelpHighlight.ts): the row ring, as an outline so a
+   panel keeps its own ring and shadow, pulsed twice over its 2 s. Under reduced motion the pulse collapses and the
+   ring just shows for that time. */
+[data-help-highlight] {
+	outline: 2px solid color-mix(in oklab, var(--ring) 50%, transparent);
+	outline-offset: -2px;
+	animation: help-highlight 1s ease-in-out 2;
+}
+
+@keyframes help-highlight {
+	50% {
+		outline-color: var(--ring);
+	}
 }
 
 /* A drag of drive items (features/drive/lib/pointerDrag.ts): one cursor over the whole page — grabbing
@@ -577,16 +601,16 @@
    lasts. Classes on <body>, toggled only when the cursor changes. */
 body.pointer-drag,
 body.pointer-drag * {
-    cursor: grabbing !important;
-    user-select: none !important;
+	cursor: grabbing !important;
+	user-select: none !important;
 }
 
 body.pointer-drag-copy,
 body.pointer-drag-copy * {
-    cursor: copy !important;
+	cursor: copy !important;
 }
 
 body.pointer-drag-none,
 body.pointer-drag-none * {
-    cursor: no-drop !important;
+	cursor: no-drop !important;
 }

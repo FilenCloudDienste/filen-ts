@@ -1,6 +1,7 @@
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { ArrowUpRightIcon } from "lucide-react"
 import { cn } from "@filen/shared"
+import { appHelpAnchor, type AppHelpId } from "@filen/shared/assistant"
 import { CARD_SURFACE_CLASS } from "@/components/ui/surface"
 
 type IconType = ComponentType<{ className?: string }>
@@ -61,6 +62,8 @@ interface SettingsGroupProps {
 	// Trailing the title on its line, e.g. a figure for the whole group; the heading's name stays the plain title.
 	aside?: ReactNode
 	variant?: "default" | "danger"
+	// The app_help entry a deep link scrolls to and highlights (helpHighlight.ts), for a group explained as a whole.
+	helpId?: AppHelpId | undefined
 	children: ReactNode
 }
 
@@ -69,9 +72,10 @@ interface SettingsGroupProps {
 // wrapper div) would draw a divider of its own.
 // No destructuring defaults in these primitives: the React Compiler bails on a component whose props
 // pattern carries one.
-function SettingsGroup({ title, description, aside, variant, children }: SettingsGroupProps) {
+function SettingsGroup({ title, description, aside, variant, helpId, children }: SettingsGroupProps) {
 	return (
 		<section
+			id={helpId === undefined ? undefined : appHelpAnchor(helpId)}
 			data-slot="settings-group"
 			className="flex flex-col gap-2"
 		>
@@ -114,16 +118,19 @@ interface SettingsRowProps {
 	// Control slot under the text at every width, full width — for wide content (a bar, a table, an
 	// input with its button) rather than a single trailing control.
 	stacked?: boolean
+	// The app_help entry a deep link scrolls to and highlights (helpHighlight.ts).
+	helpId?: AppHelpId | undefined
 	children?: ReactNode
 }
 
 // Label and description on the left, the control on the right; below `sm` the control drops under
 // the text.
-function SettingsRow({ label, description, htmlFor, labelId, destructive, stacked, children }: SettingsRowProps) {
+function SettingsRow({ label, description, htmlFor, labelId, destructive, stacked, helpId, children }: SettingsRowProps) {
 	const labelClassName = cn("text-sm font-medium", destructive === true && "text-destructive")
 
 	return (
 		<div
+			id={helpId === undefined ? undefined : appHelpAnchor(helpId)}
 			data-slot="settings-row"
 			className={cn(
 				"flex min-h-14 flex-col gap-3 px-5 py-3.5",

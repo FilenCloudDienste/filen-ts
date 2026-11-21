@@ -30,6 +30,7 @@ export function DownloadDirectorySettings() {
 		<SettingsGroup title={t("settingsDesktopDownloadsTitle")}>
 			<SettingsRow
 				label={t("settingsDesktopDownloadLocation")}
+				helpId="downloadLocation"
 				description={t("settingsDesktopDownloadLocationDescription")}
 			>
 				{!loaded ? (
