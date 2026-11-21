@@ -156,6 +156,12 @@ describe("the preview's publishing scope", () => {
 		)
 	}
 
+	it("offers every signed-in preview's file: the drive, Recents, Favorites and both shared screens", () => {
+		for (const variant of ["drive", "recents", "favorites", "sharedIn", "sharedOut"] as const) {
+			expect(previewDocumentItem(item, variant), variant).toBe(item)
+		}
+	})
+
 	it("publishes a drive overlay's file", async () => {
 		renderHook(
 			() => {
@@ -169,6 +175,7 @@ describe("the preview's publishing scope", () => {
 
 	it("publishes nothing for a chat's linked file, outside any overlay, or for an archive's entry", async () => {
 		expect(previewDocumentItem(item, "links")).toBeNull()
+		expect(previewDocumentItem(item, "trash")).toBeNull()
 		renderHook(
 			() => {
 				usePublishPreviewDocument(publication(1))

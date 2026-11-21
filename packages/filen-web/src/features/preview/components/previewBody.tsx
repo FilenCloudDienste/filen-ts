@@ -82,7 +82,7 @@ export interface PreviewBodyProps {
 // body shares. A missing category arm cannot ship as a silently blank overlay: ReadOnlyViewer's exhaustive `default`
 // arm is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
 //
-// The viewer publishes its document as the open one (activeDocument.ts) only in the drive variant.
+// The viewer publishes its document as the open one (activeDocument.ts) in the signed-in variants (previewDocumentItem).
 export function PreviewBody(props: PreviewBodyProps): ReactNode {
 	return (
 		<PreviewDocumentContext value={previewDocumentItem(props.item, props.variant)}>
