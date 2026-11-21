@@ -41,10 +41,10 @@ import {
 } from "./sidecars"
 import { videoSortName } from "./sortName"
 import { groupStacks } from "./stacks"
-import { commonStemPrefix, compareVersionCandidates, compareVideoNames, versionLabel, versionSuffix } from "./versions"
+import { commonStemPrefix, compareVersionCandidates, compareVideoIds, compareVideoNames, versionLabel, versionSuffix } from "./versions"
 
 // Bumped whenever a rule change can classify the same listing differently, so persisted results get rebuilt.
-export const CLASSIFIER_VERSION = 2
+export const CLASSIFIER_VERSION = 3
 
 // "No file" in any file-index slot.
 export const NO_FILE = -1
@@ -2134,13 +2134,21 @@ class LibraryClassifier {
 				label: version.label,
 				parts: version.parts.map(use)
 			}))
+		// Type, then title, then the file's id: two extras can share a type and title, and the walk's order must not
+		// decide between them.
 		const useExtras = (extras: readonly LibraryExtra[]): LibraryExtra[] =>
 			extras
 				.map(extra => ({
-					...extra,
-					video: use(extra.video)
+					extra: { ...extra, video: use(extra.video) },
+					id: this.fileId(this.videoAt(extra.video).file)
 				}))
-				.sort((a, b) => EXTRA_TYPE_ORDER.indexOf(a.type) - EXTRA_TYPE_ORDER.indexOf(b.type) || compareVideoNames(a.title, b.title))
+				.sort(
+					(a, b) =>
+						EXTRA_TYPE_ORDER.indexOf(a.extra.type) - EXTRA_TYPE_ORDER.indexOf(b.extra.type) ||
+						compareVideoNames(a.extra.title, b.extra.title) ||
+						compareVideoIds(a.id, b.id)
+				)
+				.map(entry => entry.extra)
 		const movies: LibraryMovie[] = []
 
 		yield
@@ -2204,6 +2212,8 @@ class LibraryClassifier {
 		useExtras: (extras: readonly LibraryExtra[]) => LibraryExtra[]
 	): LibrarySeries {
 		const episodesBySeason = new Map<number, LibraryEpisode[]>()
+		// Each episode's first file id, for the tie compareEpisodes leaves (unnumbered ones whose titles compare equal).
+		const episodeIds = new Map<LibraryEpisode, string>()
 		let dateAdded = 0
 
 		for (const episode of series.episodes.values()) {
@@ -2222,8 +2232,7 @@ class LibraryClassifier {
 			}
 
 			const list = episodesBySeason.get(episode.season) ?? []
-
-			list.push({
+			const built: LibraryEpisode = {
 				season: episode.season,
 				episode: episode.episode,
 				episodeEnd: episode.episodeEnd,
@@ -2231,7 +2240,11 @@ class LibraryClassifier {
 				title: episode.title,
 				versions,
 				dateAdded: Number.isFinite(added) ? added : 0
-			})
+			}
+			const first = candidates[0]
+
+			episodeIds.set(built, first === undefined ? "" : this.fileId(this.videoAt(first.video).file))
+			list.push(built)
 			episodesBySeason.set(episode.season, list)
 			dateAdded = Math.max(dateAdded, Number.isFinite(added) ? added : 0)
 		}
@@ -2245,7 +2258,7 @@ class LibraryClassifier {
 				continue
 			}
 
-			episodes.sort(compareEpisodes)
+			episodes.sort((a, b) => compareEpisodes(a, b) || compareVideoIds(episodeIds.get(a) ?? "", episodeIds.get(b) ?? ""))
 
 			const art = emptyArt()
 

@@ -18,6 +18,7 @@ import {
 	type VideoLibrary
 } from "./classify"
 import type { LibraryOverride } from "./libraryConfig"
+import { compareVideoIds } from "./versions"
 import { videoSortName } from "./sortName"
 
 // What the classifier made of a corrected item: the values a correction is compared with.
@@ -156,6 +157,13 @@ function partStableUuids(ctx: Context, versions: readonly LibraryVersion[]): str
 	}
 
 	return out
+}
+
+// compareEpisodes, then the first file's stable uuid: a moved episode can share its season and number with one
+// already there, and the walk's order must not decide between them.
+function compareEpisodesById(ctx: Context): (a: LibraryEpisode, b: LibraryEpisode) => number {
+	return (a, b) =>
+		compareEpisodes(a, b) || compareVideoIds(firstStableUuid(ctx, a.versions) ?? "", firstStableUuid(ctx, b.versions) ?? "")
 }
 
 function firstStableUuid(ctx: Context, versions: readonly LibraryVersion[]): string | undefined {
@@ -474,7 +482,7 @@ function applyToEpisodes(ctx: Context, series: LibrarySeries): LibrarySeries {
 				? season
 				: {
 						...season,
-						episodes: episodes.sort(compareEpisodes)
+						episodes: episodes.sort(compareEpisodesById(ctx))
 					}
 		)
 	}
@@ -575,7 +583,7 @@ function finishSeries(ctx: Context, build: SeriesBuild): LibrarySeries | null {
 			.filter(season => season.episodes.length > 0 || season.dirUuid.length > 0)
 			.map(season => ({
 				...season,
-				episodes: [...season.episodes].sort(compareEpisodes)
+				episodes: [...season.episodes].sort(compareEpisodesById(ctx))
 			}))
 			.sort((a, b) => a.number - b.number)
 		let dateAdded = 0

@@ -95,6 +95,11 @@ export function commonStemPrefix(stems: readonly string[]): number {
 	return length
 }
 
+// The last link of the library's comparators: an id (stable uuid, directory uuid) by code unit, 0 only for the same id.
+export function compareVideoIds(a: string, b: string): number {
+	return a < b ? -1 : a > b ? 1 : 0
+}
+
 let collator: Intl.Collator | null = null
 
 export function compareVideoNames(a: string, b: string): number {

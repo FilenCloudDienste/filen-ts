@@ -1189,3 +1189,28 @@ describe("classifyVideoLibrarySteps", () => {
 		expect(step.value.others).toEqual([])
 	})
 })
+
+describe("tie order", () => {
+	it("orders episodes and extras that compare equal by their file, whatever the listing's order", () => {
+		const paths = [
+			"Show (2015)/Season 1/Show S01E01.mkv",
+			"Show (2015)/Season 1/Café.mkv",
+			"Show (2015)/Season 1/Cafe.mkv",
+			"Show (2015)/Featurettes/Interview.mkv",
+			"Show (2015)/Featurettes/interview.mp4"
+		]
+		const forward = classifyPaths([{ name: "TV", paths }]).summary.series
+		const reversed = classifyPaths([{ name: "TV", paths: [...paths].reverse() }]).summary.series
+
+		expect(reversed).toEqual(forward)
+		expect(forward[0]?.seasons[1]).toEqual([
+			"E1  = TV/Show (2015)/Season 1/Show S01E01.mkv",
+			"E0 Cafe = TV/Show (2015)/Season 1/Cafe.mkv",
+			"E0 Café = TV/Show (2015)/Season 1/Café.mkv"
+		])
+		expect(forward[0]?.extras).toEqual([
+			"featurette: TV/Show (2015)/Featurettes/Interview.mkv",
+			"featurette: TV/Show (2015)/Featurettes/interview.mp4"
+		])
+	})
+})

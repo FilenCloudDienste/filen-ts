@@ -2,6 +2,7 @@
 // servers use for Continue Watching, Next Up and Latest. Everything works off one index built in a single pass.
 
 import { deriveWatchState, itemKey, type DerivedWatchState, type ItemRec, type WatchItemClass } from "./watchState"
+import { compareVideoIds } from "./versions"
 
 export interface HomeVideo {
 	// Stable uuid: the watch-state key
@@ -249,12 +250,8 @@ function ranked<T>(values: Iterable<T>, limit: number | undefined, compare: (a: 
 	return out
 }
 
-function byId(a: string, b: string): number {
-	return a < b ? -1 : a > b ? 1 : 0
-}
-
 function newestPlayedFirst(a: HomeEntry, b: HomeEntry): number {
-	return b.state.lastPlayedMs - a.state.lastPlayedMs || byId(a.video.id, b.video.id)
+	return b.state.lastPlayedMs - a.state.lastPlayedMs || compareVideoIds(a.video.id, b.video.id)
 }
 
 // ── Continue Watching ────────────────────────────────────────────────────────
@@ -343,7 +340,7 @@ export interface NextUpEntry {
 }
 
 function newestSeriesFirst(a: NextUpEntry, b: NextUpEntry): number {
-	return b.lastPlayedMs - a.lastPlayedMs || byId(a.seriesId, b.seriesId)
+	return b.lastPlayedMs - a.lastPlayedMs || compareVideoIds(a.seriesId, b.seriesId)
 }
 
 // For each series played within `cutoffDays` (null = no cutoff), newest first: the episode after the highest played
@@ -462,7 +459,7 @@ export function buildContinueWatchingRow({
 // ── Latest ───────────────────────────────────────────────────────────────────
 
 function newestAddedFirst(a: HomeEntry, b: HomeEntry): number {
-	return b.video.dateAdded - a.video.dateAdded || byId(a.video.id, b.video.id)
+	return b.video.dateAdded - a.video.dateAdded || compareVideoIds(a.video.id, b.video.id)
 }
 
 // Movies, newest first, one per version group (its newest version).
@@ -509,7 +506,7 @@ export type LatestEpisodeCard =
 	  }
 
 function newestSeriesAddedFirst(a: HomeSeries, b: HomeSeries): number {
-	return b.newestAddedMs - a.newestAddedMs || byId(a.id, b.id)
+	return b.newestAddedMs - a.newestAddedMs || compareVideoIds(a.id, b.id)
 }
 
 function newestVersion(unit: EpisodeUnit): HomeEntry {
