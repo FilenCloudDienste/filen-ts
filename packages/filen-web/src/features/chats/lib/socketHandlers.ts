@@ -13,7 +13,7 @@ import {
 	markChatMessagesUnsynced
 } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
-import { compareBySentTimestamp } from "@/features/chats/lib/sort"
+import { compareMessagesForDisplay } from "@/features/chats/lib/sort"
 import { newestMessage } from "@filen/shared"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
@@ -338,7 +338,7 @@ function handleMessageNew(msg: ChatMessage): void {
 				// already present (our own send's commit reconciled the optimistic copy, or a prior echo
 				// landed), leave it untouched instead of re-appending a duplicate.
 				chatMessagesQueryAppend(msg.chat, prev =>
-					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, message].sort(compareBySentTimestamp)
+					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, message].sort(compareMessagesForDisplay)
 				)
 
 				// Always refresh lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance

@@ -1,4 +1,4 @@
-import { EMPTY_BLOCKED_USERS, resolveChatParticipantsDisplayName, contactDisplayName, type BlockedUsers } from "@filen/shared"
+import { compareIds, EMPTY_BLOCKED_USERS, resolveChatParticipantsDisplayName, contactDisplayName, type BlockedUsers } from "@filen/shared"
 import type { Chat, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { isSenderBlocked } from "@/features/chats/lib/sender"
@@ -6,6 +6,13 @@ import { isSenderBlocked } from "@/features/chats/lib/sender"
 // Oldest-first message order: send order and thread order both rest on it. Bigint-safe three-way compare.
 export function compareBySentTimestamp(a: { sentTimestamp: bigint }, b: { sentTimestamp: bigint }): number {
 	return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
+}
+
+// A thread's display order: oldest first, then uuid, so two messages from the same millisecond keep one order
+// whatever order a page or socket event delivered them in. Never for the send queue, where a tie keeps the
+// order the messages were typed in.
+export function compareMessagesForDisplay(a: { sentTimestamp: bigint; uuid: string }, b: { sentTimestamp: bigint; uuid: string }): number {
+	return compareBySentTimestamp(a, b) || compareIds(a.uuid, b.uuid)
 }
 
 // A chat's group key failing to decrypt (`Chat.key === undefined`) is this surface's

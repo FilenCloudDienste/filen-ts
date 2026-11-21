@@ -255,4 +255,12 @@ describe("sortContactsByDisplayName", () => {
 		expect(sortContactsByDisplayName(input)).toEqual([anna, bob, zoe])
 		expect(input).toEqual([zoe, bob, anna])
 	})
+
+	it("breaks a shared nickname on the email, whatever the input order", () => {
+		const first = mockContact({ uuid: "11111111-1111-1111-1111-111111111111", email: "a@example.com", nickName: "Sam" })
+		const second = mockContact({ uuid: "22222222-2222-2222-2222-222222222222", email: "b@example.com", nickName: "Sam" })
+
+		expect(sortContactsByDisplayName([second, first])).toEqual([first, second])
+		expect(sortContactsByDisplayName([first, second])).toEqual([first, second])
+	})
 })

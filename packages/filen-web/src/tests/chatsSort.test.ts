@@ -6,6 +6,7 @@ import {
 	chatPreviewTier,
 	chatTitle,
 	compareBySentTimestamp,
+	compareMessagesForDisplay,
 	isChatOwner,
 	isChatUndecryptable,
 	isLastMessageFromBlocked,
@@ -50,6 +51,17 @@ describe("compareBySentTimestamp", () => {
 		expect(compareBySentTimestamp({ sentTimestamp: big }, { sentTimestamp: big + 1n })).toBe(-1)
 		expect(compareBySentTimestamp({ sentTimestamp: big + 1n }, { sentTimestamp: big })).toBe(1)
 		expect(compareBySentTimestamp({ sentTimestamp: big }, { sentTimestamp: big })).toBe(0)
+	})
+})
+
+describe("compareMessagesForDisplay", () => {
+	it("orders oldest first, then a same-millisecond tie by uuid whatever the input order", () => {
+		const first = { sentTimestamp: 5n, uuid: "a" }
+		const second = { sentTimestamp: 5n, uuid: "b" }
+		const older = { sentTimestamp: 0n, uuid: "z" }
+
+		expect([second, first, older].sort(compareMessagesForDisplay)).toEqual([older, first, second])
+		expect([first, older, second].sort(compareMessagesForDisplay)).toEqual([older, first, second])
 	})
 })
 

@@ -5,7 +5,7 @@ import { queryClient } from "@/queries/client"
 import { cachedQuery, patchQuery, replaceOrAppend } from "@/queries/patch"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
-import { compareBySentTimestamp } from "@/features/chats/lib/sort"
+import { compareMessagesForDisplay } from "@/features/chats/lib/sort"
 
 // Per-chat message list, keyed on uuid so switching between two threads never shows a stale read
 // while the new one is still in flight — same rationale as notes' noteContentQueryKey. The cache
@@ -28,7 +28,7 @@ export function chatMessagesQueryKey(chatUuid: string) {
 const INITIAL_CURSOR_OFFSET_MS = 3_600_000 // mirrors mobile's `Date.now() + 1h` initial cursor
 
 function sortAscending(messages: readonly ChatMessage[]): ChatMessage[] {
-	return [...messages].sort(compareBySentTimestamp)
+	return [...messages].sort(compareMessagesForDisplay)
 }
 
 function resolveChat(chatUuid: string): Chat | undefined {
@@ -218,7 +218,7 @@ export function chatMessagesQueryUpsert(chatUuid: string, message: ChatMessage):
 		const next = replaceOrAppend(prev, message, m => m.uuid === message.uuid)
 
 		// Only an append can break the order; next is already a fresh copy, so it sorts in place.
-		return next.length > prev.length ? next.sort(compareBySentTimestamp) : next
+		return next.length > prev.length ? next.sort(compareMessagesForDisplay) : next
 	})
 }
 

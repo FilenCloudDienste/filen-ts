@@ -1,4 +1,4 @@
-import { contactDisplayName, fastLocaleCompare } from "@filen/shared"
+import { compareIds, contactDisplayName, fastLocaleCompare } from "@filen/shared"
 import type { Note, NoteParticipant, NoteTag } from "@filen/sdk-rs"
 import { tagDisplayName } from "@/features/notes/lib/sort"
 import { formatClockTime, formatShortDate, formatShortWeekday } from "@/lib/formatDate"
@@ -26,10 +26,10 @@ export function noteRowSharedByEmail(note: Note, currentUserId: bigint | undefin
 	return note.participants.find(participant => participant.isOwner)?.email ?? null
 }
 
-// The note's own tags, sorted by display name (fastLocaleCompare on tagDisplayName) — the row's tag-chip
+// The note's own tags, sorted by display name (fastLocaleCompare on tagDisplayName), then uuid — the row's tag-chip
 // strip order, matching mobile. Returns a NEW array, never mutates note.tags.
 export function noteRowTags(note: Note): NoteTag[] {
-	return [...note.tags].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
+	return [...note.tags].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)) || compareIds(a.uuid, b.uuid))
 }
 
 // Participants other than the current user — the avatar strip never shows your own avatar (mobile

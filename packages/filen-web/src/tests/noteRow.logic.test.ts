@@ -71,6 +71,15 @@ describe("noteRow.logic — noteRowTags", () => {
 		expect(tags.map(tag => tag.name)).toStrictEqual(["Zebra", "apple", "Mango"])
 	})
 
+	it("breaks a shared name on the uuid, whatever the input order", () => {
+		const first = mockNoteTag({ uuid: testUuid("a"), name: "Work" })
+		const second = mockNoteTag({ uuid: testUuid("b"), name: "Work" })
+		const expected = [first.uuid, second.uuid]
+
+		expect(noteRowTags(mockNote({ tags: [second, first] })).map(tag => tag.uuid)).toStrictEqual(expected)
+		expect(noteRowTags(mockNote({ tags: [first, second] })).map(tag => tag.uuid)).toStrictEqual(expected)
+	})
+
 	it("falls back to the uuid for an undecryptable (nameless) tag", () => {
 		const named = mockNoteTag({ uuid: testUuid("zzz"), name: "beta" })
 		const nameless = tagWithoutName({ uuid: testUuid("aaa") })

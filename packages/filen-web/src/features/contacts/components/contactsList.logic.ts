@@ -1,4 +1,4 @@
-import { fastLocaleCompare, contactDisplayName, matchesNameSearch, nameSearchKey, type ContactLike } from "@filen/shared"
+import { compareIds, fastLocaleCompare, contactDisplayName, matchesNameSearch, nameSearchKey, type ContactLike } from "@filen/shared"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type ContactsKey } from "@/lib/i18n"
 
@@ -62,13 +62,14 @@ export function contactsNotIn(contacts: readonly Contact[], participants: readon
 	return contacts.filter(contact => !excluded.has(contact.userId))
 }
 
-// By the name a row shows (nickname, else email), for the pickers.
+// By the name a row shows (nickname, else email), for the pickers. Shared nicknames fall to the email, which
+// is unique per account.
 export function sortContactsByDisplayName<T extends ContactLike>(items: readonly T[]): T[] {
-	return [...items].sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
+	return [...items].sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)) || compareIds(a.email, b.email))
 }
 
-function sortByEmail<T extends { email: string }>(items: T[]): T[] {
-	return [...items].sort((a, b) => fastLocaleCompare(a.email, b.email))
+function sortByEmail<T extends { email: string; uuid: string }>(items: T[]): T[] {
+	return [...items].sort((a, b) => fastLocaleCompare(a.email, b.email) || compareIds(a.uuid, b.uuid))
 }
 
 // Requests -> Pending -> Contacts -> Blocked, each sorted by email and (when `search` is non-empty)

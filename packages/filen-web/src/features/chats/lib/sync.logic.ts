@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { mergeInflightQueuesByUnion } from "@filen/shared"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId, InflightChatMessageError, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-import { compareBySentTimestamp } from "@/features/chats/lib/sort"
+import { compareBySentTimestamp, compareMessagesForDisplay } from "@/features/chats/lib/sort"
 
 // Pure, testable core of the chat send outbox — a faithful port of filen-mobile's chats sync/store
 // helpers (features/chats/components/sync.tsx mergeInflight + features/chats/utils.ts
@@ -111,7 +111,8 @@ export function composeMessageList({
 			return aPending ? 1 : -1
 		}
 
-		return compareBySentTimestamp(a, b)
+		// Pending ties keep the queue's order (the order they were typed in); confirmed ones break on the uuid.
+		return aPending ? compareBySentTimestamp(a, b) : compareMessagesForDisplay(a, b)
 	})
 }
 
