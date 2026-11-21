@@ -98,7 +98,7 @@ export function AppShell() {
 	const sidebarHidden = useSidebarHidden()
 	const assistantPanelOpen = useAssistantStore(state => state.panelOpen)
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
-	// An open drive preview shows the panel in its own dialog (PreviewAssistantPane); the shell's is never mounted
+	// An open preview shows the panel in its own dialog (PreviewAssistantPane); the shell's is never mounted
 	// beside it.
 	const assistantInPreview = useAssistantStore(state => state.previewHosted)
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)

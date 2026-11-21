@@ -24,7 +24,7 @@ interface AssistantStore extends TranscriptState {
 	panelOpen: boolean
 	// The drawer below the layout breakpoint. Never persisted: the shell closes it on every navigation.
 	drawerOpen: boolean
-	// A drive preview is open and shows the panel (inline or as the drawer, by the two flags above) in its modal
+	// A preview is open and shows the panel (inline or as the drawer, by the two flags above) in its modal
 	// dialog, which covers the shell: the shell mounts neither while it is set, so the conversation shows once.
 	previewHosted: boolean
 	draft: string

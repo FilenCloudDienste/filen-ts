@@ -1,9 +1,10 @@
-import { useSyncExternalStore, type CSSProperties, type Ref } from "react"
+import { useSyncExternalStore, type CSSProperties, type KeyboardEvent, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { SIDE_PANEL_SURFACE_CLASS, SidePanelDrawer } from "@/components/sidePanel"
 import { toastSideObstructionRef } from "@/lib/toastClearance"
-import { KEY_LAYER_PROPS } from "@/lib/keymap/dialogGuard"
+import { dialogLayerOf, isAnyMenuOpen, KEY_LAYER_PROPS } from "@/lib/keymap/dialogGuard"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
@@ -196,7 +197,37 @@ function attachPreviewHost(element: HTMLElement | null): (() => void) | undefine
 	}
 }
 
-// The panel inside an open drive preview (PreviewOverlay), whose full-screen modal dialog covers the shell's: the same
+// Escape in the preview's pane closes the pane, as it closes the drawer, and the next one the preview. What took the
+// key first keeps it: anything inside that cancels it, an open menu (portalled, its keys still bubble here through
+// React) and a dialog over the panel. React hears it before Base UI does at the document, and the preview stands down
+// for a cancelled Escape (previewOverlay.tsx handleOpenChange). Focus goes back to the preview's own layer, the
+// viewer's, before the pane unmounts with it.
+function closePaneOnEscape(event: KeyboardEvent<HTMLDivElement>): void {
+	const target = event.target
+	const host = event.currentTarget
+	const layer = dialogLayerOf(host)
+
+	if (event.key !== "Escape" || event.defaultPrevented || isImeKeydown(event.nativeEvent) || isAnyMenuOpen()) {
+		return
+	}
+
+	// In the pane's DOM (a portalled menu or dialog is not), in the panel or on its resize handle.
+	const targetLayer = target instanceof Element && host.contains(target) ? dialogLayerOf(target) : undefined
+
+	if (targetLayer !== document.getElementById(ASSISTANT_PANEL_ID) && targetLayer !== layer) {
+		return
+	}
+
+	event.preventDefault()
+
+	if (layer instanceof HTMLElement) {
+		layer.focus()
+	}
+
+	useAssistantStore.getState().setPanelOpen(false)
+}
+
+// The panel inside an open preview (PreviewOverlay), whose full-screen modal dialog covers the shell's: the same
 // panel and conversation, moved into the dialog while it is open. At desktop widths a pane after the viewer, which only
 // gets a narrower box; below the breakpoint the drawer, nested in the preview's dialog so it stacks over it with its own
 // focus trap. The same open flags as in the shell, so the panel stays open or closed across the preview. It renders
@@ -215,6 +246,7 @@ export function PreviewAssistantPane() {
 				id={ASSISTANT_PREVIEW_HOST_ID}
 				ref={attachPreviewHost}
 				className="relative ml-2 flex shrink-0 pr-2 pb-2 empty:hidden"
+				onKeyDown={closePaneOnEscape}
 			>
 				{hosted && !narrow && panelOpen ? <AssistantSidePanel /> : null}
 			</div>

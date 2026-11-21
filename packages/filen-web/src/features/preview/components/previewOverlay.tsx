@@ -232,9 +232,11 @@ export function PreviewOverlay({
 	// Not a parameter default: the React Compiler skips a component that has one.
 	const downloadable = downloadableProp !== false
 	const asText = asTextProp === true
-	// The assistant panel moves into an owned file's preview, which covers the shell's (PreviewAssistantPane). Never into
-	// a chat's or a note's linked file, nor a listing of files the user does not own.
-	const hostsAssistant = variant === "drive"
+	// The assistant panel moves into every signed-in preview, which covers the shell's (PreviewAssistantPane), but never
+	// into a chat's or a note's linked file (LinkedPreviewOverlay, its one fabricated item). Public-link pages have no
+	// overlay. A pager list is never mixed, so its first item tells.
+	const firstItem = items[0]
+	const hostsAssistant = firstItem === undefined || !isLinkedEmbedItem(firstItem)
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	// The drive item at this slot BEFORE any per-slot save override — undefined only for an out-of-range

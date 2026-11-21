@@ -141,7 +141,7 @@ export function AssistantToggle({ itemClass }: { itemClass: (active: boolean) =>
 	}
 
 	// Like the rail's route-nav actions, an open dialog or menu owns the keyboard, except the narrow drawer the
-	// assistant itself is shown in, which its own key closes, and an open drive preview, which shows the panel in its
+	// assistant itself is shown in, which its own key closes, and an open preview, which shows the panel in its
 	// dialog (PreviewAssistantPane). The one handler for both: the macOS menu takes one handler per action.
 	useAction(
 		"app.toggleAssistant",
@@ -189,7 +189,7 @@ export function AssistantToggle({ itemClass }: { itemClass: (active: boolean) =>
 	)
 }
 
-// The open drive preview's ✨ in its header, beside the panel it shows (PreviewAssistantPane): the rail's toggle sits
+// The open preview's ✨ in its header, beside the panel it shows (PreviewAssistantPane): the rail's toggle sits
 // under the preview's modal dialog. Its key stays the rail's (one handler per action), which the preview lets through.
 export function PreviewAssistantToggle() {
 	const { t } = useTranslation("common")

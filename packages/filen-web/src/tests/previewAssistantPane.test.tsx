@@ -5,7 +5,7 @@ import { createElement } from "react"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 
-// The assistant panel inside an open drive preview, whose modal dialog covers the shell's: the ✨ in its header opens
+// The assistant panel inside an open preview, whose modal dialog covers the shell's: the ✨ in its header opens
 // the same panel as a pane after the viewer (the drawer below the breakpoint), the viewer is not rendered again for it,
 // and the panel's keys never reach the preview's.
 
@@ -64,11 +64,14 @@ import { withCode } from "@/tests/support/keys"
 
 registerAllActions()
 
-function sheet(uuid: `${string}-${string}-${string}-${string}-${string}`, name: string) {
+type Uuid = `${string}-${string}-${string}-${string}-${string}`
+
+// `parent` the uuid itself: a chat's or a note's linked file (isLinkedEmbedItem).
+function sheet(uuid: Uuid, name: string, parent: Uuid = "22222222-2222-2222-2222-222222222222") {
 	return narrowItem({
 		uuid,
 		stableUUID: undefined,
-		parent: "22222222-2222-2222-2222-222222222222",
+		parent,
 		size: 1_024n,
 		favorited: false,
 		region: "de-1",
@@ -91,16 +94,20 @@ function sheet(uuid: `${string}-${string}-${string}-${string}-${string}`, name: 
 }
 
 const onStep = vi.fn()
+const onClose = vi.fn()
 let unregister: () => void = () => undefined
 
-function renderPreview(variant: DriveVariant) {
+function renderPreview(
+	variant: DriveVariant,
+	items = [sheet("11111111-1111-1111-1111-111111111111", "a.xlsx"), sheet("33333333-3333-3333-3333-333333333333", "b.xlsx")]
+) {
 	return render(
 		createElement(PreviewOverlay, {
 			variant,
-			items: [sheet("11111111-1111-1111-1111-111111111111", "a.xlsx"), sheet("33333333-3333-3333-3333-333333333333", "b.xlsx")],
+			items,
 			index: 0,
 			onStep,
-			onClose: vi.fn(),
+			onClose,
 			onItemRemoved: vi.fn()
 		})
 	)
@@ -118,6 +125,7 @@ beforeEach(() => {
 	viewport.wide = true
 	viewerRenders.count = 0
 	onStep.mockClear()
+	onClose.mockClear()
 	useAssistantStore.setState({
 		...INITIAL_TRANSCRIPT_STATE,
 		panelOpen: false,
@@ -134,7 +142,7 @@ afterEach(() => {
 	cleanup()
 })
 
-describe("the assistant in a drive preview", () => {
+describe("the assistant in a preview", () => {
 	it("hosts the panel while open, so the shell drops its own, and gives it back on close", async () => {
 		const { unmount } = renderPreview("drive")
 
@@ -238,13 +246,88 @@ describe("the assistant in a drive preview", () => {
 		expect(document.querySelectorAll("#assistant-panel")).toHaveLength(1)
 	})
 
-	it.each<DriveVariant>(["links", "sharedIn"])("offers nothing in a %s preview, which leaves the panel to the shell", async variant => {
+	it.each<DriveVariant>(["recents", "favorites", "trash", "links", "sharedIn", "sharedOut"])(
+		"shows the panel in a %s preview too",
+		async variant => {
+			useAssistantStore.setState({ panelOpen: true })
+			renderPreview(variant)
+			await screen.findByRole("button", { name: "cell" })
+
+			expect(sparkle()).toBeDefined()
+			expect(within(previewDialog()).getByRole("complementary", { name: "Assistant" })).toBeDefined()
+			expect(useAssistantStore.getState().previewHosted).toBe(true)
+		}
+	)
+
+	it("offers nothing for a chat's or a note's linked file, which leaves the panel to the shell", async () => {
+		const uuid = "44444444-4444-4444-4444-444444444444"
+
 		useAssistantStore.setState({ panelOpen: true })
-		renderPreview(variant)
+		renderPreview("links", [sheet(uuid, "a.xlsx", uuid)])
 		await screen.findByRole("button", { name: "cell" })
 
 		expect(within(previewDialog()).queryByRole("button", { name: "Assistant" })).toBeNull()
 		expect(screen.queryByRole("complementary", { name: "Assistant" })).toBeNull()
 		expect(useAssistantStore.getState().previewHosted).toBe(false)
+	})
+})
+
+describe("Escape in the preview's pane", () => {
+	it("closes the pane first, focus back on the viewer's layer, and the preview on the next", async () => {
+		useAssistantStore.setState({ panelOpen: true })
+		renderPreview("drive")
+		await screen.findByRole("button", { name: "cell" })
+
+		const composer = within(screen.getByRole("complementary", { name: "Assistant" })).getByRole("textbox")
+
+		act(() => {
+			composer.focus()
+		})
+		fireEvent.keyDown(composer, withCode({ key: "Escape" }))
+
+		expect(useAssistantStore.getState().panelOpen).toBe(false)
+		expect(screen.queryByRole("complementary", { name: "Assistant" })).toBeNull()
+		expect(document.activeElement).toBe(previewDialog())
+		expect(onClose).not.toHaveBeenCalled()
+
+		fireEvent.keyDown(previewDialog(), withCode({ key: "Escape" }))
+
+		await vi.waitFor(() => {
+			expect(onClose).toHaveBeenCalledOnce()
+		})
+	})
+
+	it("leaves an Escape something in the pane took first to it", async () => {
+		useAssistantStore.setState({ panelOpen: true })
+		renderPreview("drive")
+		await screen.findByRole("button", { name: "cell" })
+
+		const composer = within(screen.getByRole("complementary", { name: "Assistant" })).getByRole("textbox")
+
+		composer.addEventListener("keydown", event => {
+			event.preventDefault()
+		})
+		fireEvent.keyDown(composer, withCode({ key: "Escape" }))
+
+		expect(useAssistantStore.getState().panelOpen).toBe(true)
+		expect(onClose).not.toHaveBeenCalled()
+	})
+
+	it("closes a menu opened in the pane first, the pane staying", async () => {
+		useAssistantStore.setState({ panelOpen: true })
+		renderPreview("drive")
+		await screen.findByRole("button", { name: "cell" })
+
+		fireEvent.click(within(screen.getByRole("complementary", { name: "Assistant" })).getByRole("button", { name: "More options" }))
+
+		const menu = await screen.findByRole("menu")
+
+		fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0] ?? menu, withCode({ key: "Escape" }))
+
+		await vi.waitFor(() => {
+			expect(screen.queryByRole("menu")).toBeNull()
+		})
+		expect(useAssistantStore.getState().panelOpen).toBe(true)
+		expect(onClose).not.toHaveBeenCalled()
 	})
 })
