@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { probeDevice, recommendRuntime, storageVerdict, type DeviceProbe } from "@/features/assistant/runtime/deviceCheck"
+import { probeDevice, recommendRuntime, type DeviceProbe } from "@/features/assistant/runtime/deviceCheck"
 import { canRemoveModel } from "@/features/assistant/components/assistant.logic"
 import { manifestBytes, modelFileUrl, parseManifest, type AssistantModelManifest } from "@/features/assistant/runtime/manifest"
 import { QWEN35_4B } from "@/features/assistant/runtime/models"
@@ -176,13 +176,6 @@ describe("probeDevice", () => {
 
 		expect((await probeDevice({ gpu: true })).webgpu).toBeNull()
 		expect(requestAdapter).not.toHaveBeenCalled()
-	})
-})
-
-describe("storageVerdict", () => {
-	it("needs the missing bytes plus a margin", () => {
-		expect(storageVerdict({ quota: 10 * GIB, usage: 1 * GIB, neededBytes: 3 * GIB })).toEqual({ ok: true })
-		expect(storageVerdict({ quota: 4 * GIB, usage: 1 * GIB, neededBytes: 3 * GIB })).toMatchObject({ ok: false })
 	})
 })
 

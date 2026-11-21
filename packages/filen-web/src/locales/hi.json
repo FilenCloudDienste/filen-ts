@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "मॉडल तैयार नहीं है।",
 		"assistantTurnErrorNoReply": "सहायक कोई जवाब नहीं दे सका। अपना अनुरोध दूसरे शब्दों में लिखकर देखें।",
 		"assistantUnavailableInsufficientMemory": "इस डिवाइस में सहायक का मॉडल चलाने के लिए पर्याप्त मेमोरी नहीं है।",
-		"assistantUnavailableInsufficientStorage": "इस डिवाइस पर सहायक के मॉडल के लिए पर्याप्त खाली स्टोरेज नहीं है।",
 		"assistantUnavailableTitle": "सहायक यहाँ नहीं चल सकता",
 		"assistantUnavailableUnsupportedBrowser": "सहायक के मॉडल को ऐसी ग्राफ़िक्स सुविधाएँ चाहिए जो यहाँ उपलब्ध नहीं हैं।",
 		"assistantUnavailableUnsupportedBrowserAdvice": "कंप्यूटर पर Chrome, Edge या Firefox का नया संस्करण आज़माएँ।",

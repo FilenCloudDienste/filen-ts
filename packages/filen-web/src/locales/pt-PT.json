@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "O modelo não está pronto.",
 		"assistantTurnErrorNoReply": "O assistente não conseguiu gerar uma resposta. Tente reformular o seu pedido.",
 		"assistantUnavailableInsufficientMemory": "Este dispositivo não tem memória suficiente para executar o modelo do assistente.",
-		"assistantUnavailableInsufficientStorage": "Não há armazenamento livre suficiente neste dispositivo para o modelo do assistente.",
 		"assistantUnavailableTitle": "O assistente não pode ser executado aqui",
 		"assistantUnavailableUnsupportedBrowser": "O modelo do assistente precisa de funcionalidades gráficas que não estão disponíveis aqui.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Experimente uma versão recente do Chrome, Edge ou Firefox num computador.",

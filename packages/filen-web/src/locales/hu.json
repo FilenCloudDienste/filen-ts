@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "A modell nem áll készen.",
 		"assistantTurnErrorNoReply": "Az asszisztens nem talált választ. Próbálja másként megfogalmazni a kérését.",
 		"assistantUnavailableInsufficientMemory": "Ennek az eszköznek nincs elég memóriája az asszisztens modelljének futtatásához.",
-		"assistantUnavailableInsufficientStorage": "Nincs elég szabad tárhely ezen az eszközön az asszisztens modelljéhez.",
 		"assistantUnavailableTitle": "Az asszisztens itt nem futtatható",
 		"assistantUnavailableUnsupportedBrowser": "Az asszisztens modelljéhez olyan grafikus funkciók kellenek, amelyek itt nem érhetők el.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Próbálja a Chrome, az Edge vagy a Firefox egy friss verziójával, számítógépen.",

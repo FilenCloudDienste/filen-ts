@@ -9914,7 +9914,6 @@
 		"assistantTurnErrorModelUnavailable": "Model nie jest gotowy.",
 		"assistantTurnErrorNoReply": "Asystent nie przygotował odpowiedzi. Spróbuj inaczej sformułować prośbę.",
 		"assistantUnavailableInsufficientMemory": "To urządzenie nie ma wystarczającej ilości pamięci, aby uruchomić model asystenta.",
-		"assistantUnavailableInsufficientStorage": "Na tym urządzeniu brakuje wolnego miejsca na model asystenta.",
 		"assistantUnavailableTitle": "Asystent nie może tu działać",
 		"assistantUnavailableUnsupportedBrowser": "Model asystenta wymaga funkcji graficznych, które nie są tu dostępne.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Wypróbuj aktualną wersję przeglądarki Chrome, Edge lub Firefox na komputerze.",

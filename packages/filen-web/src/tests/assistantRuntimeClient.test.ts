@@ -33,12 +33,11 @@ const { remote, inspections, releaseProxy, workers, locks, prune, device, storag
 	// Whether WebGPU is offered, and whether the CPU path is; how often the device was probed, and `gate`
 	// holds a probe open.
 	device: { gpu: true, cpu: true, probes: 0, gate: null as Promise<void> | null },
-	// Whether the origin's storage is persistent, whether the rest of the model fits, the usage the room was
-	// judged on, and localStorage.
-	storage: { persisted: true, fits: true, judgedUsage: null as number | null, local: new Map<string, string>() },
+	// Whether the origin's storage is persistent, and localStorage.
+	storage: { persisted: true, local: new Map<string, string>() },
 	// Bytes of another model version on disk.
 	stale: { bytes: 0 },
-	// The order pruning, removal and the storage estimate ran in.
+	// The order pruning and removal ran in.
 	order: [] as string[],
 	// Whether the server still deploys this build, how often it was asked, and an answer a test holds back.
 	appUpdate: {
@@ -117,12 +116,7 @@ vi.mock("@/features/assistant/runtime/deviceCheck", () => ({
 			? { supported: true, backend: "webgpu", threads: 4, estimatedSpeed: "fast" }
 			: device.cpu
 				? { supported: true, backend: "cpu", threads: 4, estimatedSpeed: "moderate" }
-				: { supported: false, reason: "unsupported-browser", detail: "", gpuCouldHelp: true },
-	storageVerdict: ({ usage }: { usage: number }) => {
-		storage.judgedUsage = usage
-
-		return storage.fits ? { ok: true } : { ok: false, missingBytes: 1 }
-	}
+				: { supported: false, reason: "unsupported-browser", detail: "", gpuCouldHelp: true }
 }))
 
 vi.mock("@/features/assistant/runtime/modelStore", () => ({
@@ -208,12 +202,7 @@ function stubBrowser(): void {
 		},
 		storage: {
 			persist: () => Promise.resolve(true),
-			persisted: () => Promise.resolve(storage.persisted),
-			estimate: () => {
-				order.push("estimate")
-
-				return Promise.resolve({ quota: 100 * TOTAL, usage: 0 })
-			}
+			persisted: () => Promise.resolve(storage.persisted)
 		}
 	})
 	vi.stubGlobal("localStorage", {
@@ -264,8 +253,6 @@ beforeEach(() => {
 	stale.bytes = 0
 	order.length = 0
 	storage.persisted = true
-	storage.fits = true
-	storage.judgedUsage = null
 	storage.local.clear()
 	appUpdate.recover.mockClear()
 	appUpdate.prompt.mockClear()
@@ -389,7 +376,7 @@ describe("AssistantRuntime download", () => {
 
 		runtime.download()
 		await vi.waitFor(() => {
-			expect(order).toEqual(["estimate", "prune"])
+			expect(order).toEqual(["prune"])
 		})
 		await new Promise(resolve => setTimeout(resolve, 10))
 
@@ -1003,7 +990,7 @@ describe("AssistantRuntime failures", () => {
 		expect((remote.load.mock.lastCall?.[1] as { backend: string }).backend).toBe("cpu")
 	})
 
-	it("offers an earlier model version's files for removal, counts them as room for this one, and prunes them as the download starts", async () => {
+	it("offers an earlier model version's files for removal, and prunes them as the download starts", async () => {
 		deployment("deployed")
 		stale.bytes = 2_700_000_000
 
@@ -1018,28 +1005,8 @@ describe("AssistantRuntime failures", () => {
 		runtime.download()
 		await settled(runtime, "downloaded")
 
-		expect(order).toEqual(["estimate", "prune"])
-		// The estimate's usage (none here) less the earlier version's bytes, never below zero.
-		expect(storage.judgedUsage).toBe(0)
+		expect(order).toEqual(["prune"])
 		expect(appUpdate.update).not.toHaveBeenCalled()
-	})
-
-	it("keeps an earlier model version when the download does not start for want of room", async () => {
-		deployment("deployed")
-		stale.bytes = 2_700_000_000
-		storage.fits = false
-
-		const runtime = new AssistantRuntime()
-
-		await runtime.init()
-		runtime.download()
-		await vi.waitFor(() => {
-			expect(runtime.getState()).toMatchObject({ kind: "unavailable", reason: "insufficient-storage" })
-		})
-
-		expect(order).toEqual(["estimate"])
-		expect(stale.bytes).toBe(2_700_000_000)
-		expect(workers).toHaveLength(0)
 	})
 
 	it("from a replaced build, neither offers nor removes the newer build's model, and asks to update instead of downloading", async () => {
@@ -1085,9 +1052,8 @@ describe("AssistantRuntime failures", () => {
 		runtime.download()
 		await settled(runtime, "downloaded")
 
-		expect(order).toEqual(["estimate"])
+		expect(order).toEqual([])
 		expect(stale.bytes).toBe(2_700_000_000)
-		expect(storage.judgedUsage).toBe(0)
 	})
 
 	it("removes an earlier version kept at the download's start once the server answers as the download ends", async () => {
@@ -1104,7 +1070,7 @@ describe("AssistantRuntime failures", () => {
 		runtime.download()
 		await settled(runtime, "downloaded")
 
-		expect(order).toEqual(["estimate", "prune"])
+		expect(order).toEqual(["prune"])
 		expect(stale.bytes).toBe(0)
 		expect(locks.held).toBe(0)
 	})
@@ -1239,6 +1205,44 @@ describe("AssistantRuntime failures", () => {
 			expect(runtime.getState()).toMatchObject({ kind: "not-downloaded", partialBytes: 1000 })
 		})
 	})
+
+	// Free space is never judged up front (Brave reports a fixed figure): the write that fails is the verdict.
+	it.each([
+		["a shard write", Object.assign(new Error("Storage is full"), { name: "ModelDownloadError:storage-full" })],
+		["creating the model's directory", new DOMException("full", "QuotaExceededError")]
+	])(
+		"reads a full disk from %s as storage-full, keeping the part on disk and freeing the worker and the lock",
+		async (_label, failure) => {
+			const empty: ModelInspection = { presentBytes: 0, verifiedBytes: 0, complete: false }
+
+			deployment("deployed")
+			stale.bytes = 2_700_000_000
+			inspections.push(empty, empty, { presentBytes: 1000, verifiedBytes: 0, complete: false })
+			remote.download.mockRejectedValue(failure)
+
+			const runtime = new AssistantRuntime()
+
+			await runtime.init()
+			runtime.download()
+			await settled(runtime, "error")
+
+			expect(runtime.getState()).toMatchObject({ kind: "error", error: "storage-full", partialBytes: 1000 })
+			// The earlier version still went before anything was fetched.
+			expect(order).toEqual(["prune"])
+			expect(remote.download).toHaveBeenCalledTimes(1)
+			expect(workers[0]?.terminate).toHaveBeenCalledTimes(1)
+			expect(locks.held).toBe(0)
+			expect(readDownloadIntent()).toBeNull()
+
+			// Once space is freed, trying again downloads again.
+			remote.download.mockResolvedValue(undefined)
+			inspections.push({ presentBytes: 1000, verifiedBytes: 0, complete: false })
+			runtime.retry()
+			await settled(runtime, "downloaded")
+
+			expect(remote.download).toHaveBeenCalledTimes(2)
+		}
+	)
 
 	it("frees the worker and the lock at sign-out, and starts nothing afterwards", async () => {
 		inspections.push(COMPLETE)
@@ -1380,7 +1384,7 @@ describe("AssistantRuntime failures", () => {
 })
 
 // A download the user started and a reload, crash or closed tab cut off continues at the next start, only
-// with its opt-in still recorded, part of it on disk, persistent storage and room for the rest.
+// with its opt-in still recorded and part of it on disk.
 describe("AssistantRuntime interrupted download", () => {
 	const PARTIAL: ModelInspection = { presentBytes: 1000, verifiedBytes: 0, complete: false }
 
@@ -1458,7 +1462,7 @@ describe("AssistantRuntime interrupted download", () => {
 		expect(locks.held).toBe(0)
 	})
 
-	// The click's download runs in best-effort storage too; the room for the rest is what decides.
+	// The click's download runs in best-effort storage too.
 	it("continues into storage the browser did not make persistent", async () => {
 		storage.persisted = false
 		optedIn()
@@ -1585,26 +1589,6 @@ describe("AssistantRuntime interrupted download", () => {
 		})
 
 		expect(readDownloadIntent()).toBeNull()
-	})
-
-	it("waits for a click when the rest no longer fits, without reading as unavailable", async () => {
-		optedIn()
-		storage.fits = false
-		inspections.push(PARTIAL, PARTIAL)
-
-		const runtime = new AssistantRuntime()
-
-		runtime.resumeInterruptedDownload()
-		await vi.waitFor(() => {
-			expect(locks.granted).toBe(1)
-			expect(locks.held).toBe(0)
-		})
-
-		expect(runtime.getState()).toMatchObject({ kind: "not-downloaded", partialBytes: 1000 })
-		expect(remote.download).not.toHaveBeenCalled()
-		expect(workers).toHaveLength(0)
-		// Kept: the next start, with room again, still continues it.
-		expect(readDownloadIntent()).toMatchObject({ modelId: QWEN35_4B.id, autoStarts: 0 })
 	})
 
 	// Each start is a new page; the download "takes the page down" by never settling before the next one.

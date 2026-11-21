@@ -15,13 +15,7 @@ import {
 import type { AssistantModelInfo, AssistantModelState } from "@/features/assistant/types"
 import { DEFAULT_MODEL_BASE_URL, manifestBytes, parseManifest, type AssistantModelManifest } from "@/features/assistant/runtime/manifest"
 import { QWEN35_4B } from "@/features/assistant/runtime/models"
-import {
-	probeDevice,
-	recommendRuntime,
-	storageVerdict,
-	type AssistantBackend,
-	type RuntimeRecommendation
-} from "@/features/assistant/runtime/deviceCheck"
+import { probeDevice, recommendRuntime, type AssistantBackend, type RuntimeRecommendation } from "@/features/assistant/runtime/deviceCheck"
 import { MODEL_LOCK, deleteModelDirectory, deleteModels, inspectModel, otherModels } from "@/features/assistant/runtime/modelStore"
 import { autoStartIntent, readDownloadIntent, writeDownloadIntent } from "@/features/assistant/runtime/downloadIntent"
 import type { ModelDownloadProgress } from "@/features/assistant/runtime/download"
@@ -717,11 +711,11 @@ export class AssistantRuntime implements AssistantModel {
 			const before = await inspectModel(this.manifest)
 
 			if (!before.complete) {
-				// An earlier model version is dead weight this build never loads: its bytes count as room for this
-				// one, and it goes (under the lock, so no tab runs it) only once this download starts. A replaced
-				// build fetches nothing the deployed one no longer uses, and leaves that build's model alone. A click
-				// that would download from nothing asks even with no other model on disk: one small request against
-				// gigabytes of a model the deployed build may no longer use.
+				// An earlier model version is dead weight this build never loads: it goes (under the lock, so no tab
+				// runs it) before this download fetches anything. A replaced build fetches nothing the deployed one no
+				// longer uses, and leaves that build's model alone. A click that would download from nothing asks even
+				// with no other model on disk: one small request against gigabytes of a model the deployed build may no
+				// longer use.
 				const other = await this.otherModel(before.presentBytes === 0 && !resumed)
 
 				undecided = other.present && other.deployment === "unknown"
@@ -734,13 +728,6 @@ export class AssistantRuntime implements AssistantModel {
 					return
 				}
 
-				const { quota = 0, usage = 0 } = await navigator.storage.estimate()
-				const verdict = storageVerdict({
-					quota,
-					usage: Math.max(0, usage - (other.stale ? other.bytes : 0)),
-					neededBytes: manifestBytes(this.manifest) - before.presentBytes
-				})
-
 				const account = await signedInAccount()
 				const intent = resumed
 					? autoStartIntent(readDownloadIntent(), { modelId: this.manifest.id, account, presentBytes: before.presentBytes })
@@ -748,23 +735,17 @@ export class AssistantRuntime implements AssistantModel {
 						? null
 						: { modelId: this.manifest.id, account, autoStarts: 0, presentBytes: before.presentBytes }
 
-				// Unasked, nothing starts without the room for the rest, once the part on disk is gone, for another
-				// account, or after starts that kept finding no progress (the opt-in goes; a click records it anew).
-				// An account that could not be read (offline) keeps the opt-in for the next start.
-				if (resumed && (intent === null || !verdict.ok || before.presentBytes === 0)) {
+				// Unasked, nothing starts once the part on disk is gone, for another account, or after starts that
+				// kept finding no progress (the opt-in goes; a click records it anew). An account that could not be
+				// read (offline) keeps the opt-in for the next start. Free space is never judged up front: browsers
+				// report it unreliably (Brave a fixed figure), so a full disk shows as the write that fails.
+				if (resumed && (intent === null || before.presentBytes === 0)) {
 					if ((intent === null && account !== null) || before.presentBytes === 0) {
 						writeDownloadIntent(null)
 					}
 
 					this.unlock()
 					this.settleNotDownloaded(before.presentBytes)
-
-					return
-				}
-
-				if (!verdict.ok) {
-					this.setState({ kind: "unavailable", reason: "insufficient-storage", model: this.info() })
-					this.unlock()
 
 					return
 				}
@@ -823,6 +804,7 @@ export class AssistantRuntime implements AssistantModel {
 				this.settleNotDownloaded(partial)
 			} else {
 				log.error("assistant", "model download failed", e)
+				// A full disk: the worker's write failed (download.ts names it), or creating the model's directory did.
 				this.setState({
 					kind: "error",
 					error: name === "ModelDownloadError:storage-full" || name === "QuotaExceededError" ? "storage-full" : "download-failed",

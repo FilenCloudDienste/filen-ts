@@ -568,20 +568,6 @@ describe("AssistantSidePanel", () => {
 		expect(screen.getByText(/doesn't have enough memory/)).toBeDefined()
 	})
 
-	it("keeps the download clickable when only free space was lacking, so freeing some lets it check again", () => {
-		withSession({ kind: "unavailable", reason: "insufficient-storage", model: MOCK_ASSISTANT_MODEL })
-
-		const download = vi.spyOn(session, "downloadModel")
-
-		render(<AssistantSidePanel />)
-
-		const button = screen.getByRole("button", { name: "Download model" })
-
-		expect(button.hasAttribute("disabled")).toBe(false)
-		fireEvent.click(button)
-		expect(download).toHaveBeenCalledTimes(1)
-	})
-
 	it("offers no action while another tab holds the model", () => {
 		withSession({ kind: "unavailable", reason: "in-use-elsewhere", model: MOCK_ASSISTANT_MODEL })
 		render(<AssistantSidePanel />)

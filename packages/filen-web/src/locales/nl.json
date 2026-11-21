@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "Het model is niet klaar.",
 		"assistantTurnErrorNoReply": "De assistent kwam niet met een antwoord. Probeer je verzoek anders te formuleren.",
 		"assistantUnavailableInsufficientMemory": "Dit apparaat heeft niet genoeg geheugen om het model van de assistent te draaien.",
-		"assistantUnavailableInsufficientStorage": "Er is niet genoeg vrije opslagruimte op dit apparaat voor het model van de assistent.",
 		"assistantUnavailableTitle": "De assistent kan hier niet draaien",
 		"assistantUnavailableUnsupportedBrowser": "Het model van de assistent heeft grafische functies nodig die hier niet beschikbaar zijn.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Probeer een recente versie van Chrome, Edge of Firefox op een computer.",

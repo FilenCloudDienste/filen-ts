@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "Model belum siap.",
 		"assistantTurnErrorNoReply": "Asisten tidak menghasilkan balasan. Coba ungkapkan permintaan Anda dengan cara lain.",
 		"assistantUnavailableInsufficientMemory": "Perangkat ini tidak memiliki cukup memori untuk menjalankan model asisten.",
-		"assistantUnavailableInsufficientStorage": "Ruang penyimpanan kosong di perangkat ini tidak cukup untuk model asisten.",
 		"assistantUnavailableTitle": "Asisten tidak dapat berjalan di sini",
 		"assistantUnavailableUnsupportedBrowser": "Model asisten memerlukan fitur grafis yang tidak tersedia di sini.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Coba versi terbaru Chrome, Edge, atau Firefox di komputer.",

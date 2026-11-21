@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "โมเดลยังไม่พร้อม",
 		"assistantTurnErrorNoReply": "ผู้ช่วยไม่ได้ให้คำตอบ ลองเรียบเรียงคำขอใหม่",
 		"assistantUnavailableInsufficientMemory": "อุปกรณ์นี้มีหน่วยความจำไม่พอสำหรับเรียกใช้โมเดลของผู้ช่วย",
-		"assistantUnavailableInsufficientStorage": "อุปกรณ์นี้มีพื้นที่จัดเก็บว่างไม่พอสำหรับโมเดลของผู้ช่วย",
 		"assistantUnavailableTitle": "ผู้ช่วยทำงานที่นี่ไม่ได้",
 		"assistantUnavailableUnsupportedBrowser": "โมเดลของผู้ช่วยต้องใช้ฟีเจอร์กราฟิกที่ไม่มีที่นี่",
 		"assistantUnavailableUnsupportedBrowserAdvice": "ลองใช้ Chrome, Edge หรือ Firefox เวอร์ชันล่าสุดบนคอมพิวเตอร์",

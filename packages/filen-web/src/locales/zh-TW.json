@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "模型尚未就緒。",
 		"assistantTurnErrorNoReply": "助理未能產生回覆。請嘗試換個方式描述您的請求。",
 		"assistantUnavailableInsufficientMemory": "此裝置的記憶體不足以執行助理的模型。",
-		"assistantUnavailableInsufficientStorage": "此裝置的可用儲存空間不足以存放助理的模型。",
 		"assistantUnavailableTitle": "助理無法在此執行",
 		"assistantUnavailableUnsupportedBrowser": "助理的模型需要此處無法使用的圖形功能。",
 		"assistantUnavailableUnsupportedBrowserAdvice": "請在電腦上改用新版的 Chrome、Edge 或 Firefox。",

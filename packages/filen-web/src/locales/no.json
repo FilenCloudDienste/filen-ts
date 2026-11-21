@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "Modellen er ikke klar.",
 		"assistantTurnErrorNoReply": "Assistenten kom ikke frem til et svar. Prøv å omformulere forespørselen.",
 		"assistantUnavailableInsufficientMemory": "Denne enheten har ikke nok minne til å kjøre assistentens modell.",
-		"assistantUnavailableInsufficientStorage": "Det er ikke nok ledig lagringsplass på denne enheten for assistentens modell.",
 		"assistantUnavailableTitle": "Assistenten kan ikke kjøre her",
 		"assistantUnavailableUnsupportedBrowser": "Assistentens modell trenger grafikkfunksjoner som ikke er tilgjengelige her.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Prøv en nyere versjon av Chrome, Edge eller Firefox på en datamaskin.",

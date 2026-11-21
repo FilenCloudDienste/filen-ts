@@ -9914,7 +9914,6 @@
 		"assistantTurnErrorModelUnavailable": "Модель не готова.",
 		"assistantTurnErrorNoReply": "Ассистенту не удалось составить ответ. Попробуйте переформулировать запрос.",
 		"assistantUnavailableInsufficientMemory": "На этом устройстве недостаточно памяти для работы модели ассистента.",
-		"assistantUnavailableInsufficientStorage": "На этом устройстве недостаточно свободного места для модели ассистента.",
 		"assistantUnavailableTitle": "Ассистент не может работать здесь",
 		"assistantUnavailableUnsupportedBrowser": "Модели ассистента нужны графические возможности, которые здесь недоступны.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Попробуйте свежую версию Chrome, Edge или Firefox на компьютере.",

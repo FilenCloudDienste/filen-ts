@@ -120,17 +120,6 @@ export function recommendRuntime(probe: DeviceProbe): RuntimeRecommendation {
 	return { supported: true, backend: "cpu", threads, estimatedSpeed: threads >= 6 ? "moderate" : "slow" }
 }
 
-export type StorageVerdict = { ok: true } | { ok: false; missingBytes: number }
-
-// Room for the engine's own scratch files and for the estimate's imprecision.
-const STORAGE_MARGIN_BYTES = 256 * 1024 * 1024
-
-export function storageVerdict({ quota, usage, neededBytes }: { quota: number; usage: number; neededBytes: number }): StorageVerdict {
-	const missing = neededBytes + STORAGE_MARGIN_BYTES - (quota - usage)
-
-	return missing > 0 ? { ok: false, missingBytes: missing } : { ok: true }
-}
-
 // Feature probes from wasm-feature-detect (Apache-2.0), as wllama itself runs them.
 const SIMD_MODULE = new Uint8Array([
 	0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11

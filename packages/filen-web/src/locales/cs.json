@@ -9472,7 +9472,6 @@
 		"assistantTurnErrorModelUnavailable": "Model není připraven.",
 		"assistantTurnErrorNoReply": "Asistent nepřišel s odpovědí. Zkuste svůj požadavek přeformulovat.",
 		"assistantUnavailableInsufficientMemory": "Toto zařízení nemá dostatek paměti pro spuštění modelu asistenta.",
-		"assistantUnavailableInsufficientStorage": "V tomto zařízení není dostatek volného místa pro model asistenta.",
 		"assistantUnavailableTitle": "Asistent zde nemůže běžet",
 		"assistantUnavailableUnsupportedBrowser": "Model asistenta vyžaduje grafické funkce, které zde nejsou k dispozici.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Zkuste aktuální verzi prohlížeče Chrome, Edge nebo Firefox na počítači.",

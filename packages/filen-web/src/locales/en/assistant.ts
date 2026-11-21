@@ -111,8 +111,6 @@ export const assistant = {
 	assistantUnavailableUnsupportedBrowserAdvice: "Try a recent version of Chrome, Edge or Firefox on a computer.",
 	/** Unavailable reason — not enough memory */
 	assistantUnavailableInsufficientMemory: "This device doesn't have enough memory to run the assistant's model.",
-	/** Unavailable reason — not enough free storage for the download */
-	assistantUnavailableInsufficientStorage: "There isn't enough free storage on this device for the assistant's model.",
 	/** Another Filen tab or window holds the model; it becomes available here once that one closes it — title */
 	assistantInUseElsewhereTitle: "Already open elsewhere",
 	/** Another Filen tab or window holds the model — explanation; no action is offered */

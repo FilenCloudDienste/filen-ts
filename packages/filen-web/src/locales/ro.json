@@ -9472,7 +9472,6 @@
 		"assistantTurnErrorModelUnavailable": "Modelul nu este pregătit.",
 		"assistantTurnErrorNoReply": "Asistentul nu a găsit un răspuns. Încearcă să reformulezi cererea.",
 		"assistantUnavailableInsufficientMemory": "Acest dispozitiv nu are suficientă memorie pentru a rula modelul asistentului.",
-		"assistantUnavailableInsufficientStorage": "Nu există suficient spațiu liber pe acest dispozitiv pentru modelul asistentului.",
 		"assistantUnavailableTitle": "Asistentul nu poate rula aici",
 		"assistantUnavailableUnsupportedBrowser": "Modelul asistentului necesită funcții grafice care nu sunt disponibile aici.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Încearcă o versiune recentă de Chrome, Edge sau Firefox pe un computer.",

@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "モデルの準備ができていません。",
 		"assistantTurnErrorNoReply": "アシスタントは返信を作成できませんでした。依頼の言い方を変えてお試しください。",
 		"assistantUnavailableInsufficientMemory": "このデバイスには、アシスタントのモデルを実行するのに十分なメモリがありません。",
-		"assistantUnavailableInsufficientStorage": "このデバイスには、アシスタントのモデルを保存するのに十分な空き容量がありません。",
 		"assistantUnavailableTitle": "ここではアシスタントを実行できません",
 		"assistantUnavailableUnsupportedBrowser": "アシスタントのモデルには、ここでは利用できないグラフィックス機能が必要です。",
 		"assistantUnavailableUnsupportedBrowserAdvice": "コンピューターで最新バージョンの Chrome、Edge、または Firefox をお試しください。",

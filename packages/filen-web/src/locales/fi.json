@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "Malli ei ole valmis.",
 		"assistantTurnErrorNoReply": "Avustaja ei keksinyt vastausta. Kokeile muotoilla pyyntösi toisin.",
 		"assistantUnavailableInsufficientMemory": "Tällä laitteella ei ole tarpeeksi muistia avustajan mallin suorittamiseen.",
-		"assistantUnavailableInsufficientStorage": "Tällä laitteella ei ole tarpeeksi vapaata tallennustilaa avustajan mallille.",
 		"assistantUnavailableTitle": "Avustaja ei voi toimia täällä",
 		"assistantUnavailableUnsupportedBrowser": "Avustajan malli tarvitsee grafiikkaominaisuuksia, jotka eivät ole täällä käytettävissä.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Kokeile Chromen, Edgen tai Firefoxin uutta versiota tietokoneella.",

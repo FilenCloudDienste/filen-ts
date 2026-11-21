@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "모델이 준비되지 않았습니다.",
 		"assistantTurnErrorNoReply": "어시스턴트가 답변을 만들지 못했습니다. 요청을 다르게 표현해 보세요.",
 		"assistantUnavailableInsufficientMemory": "이 기기에는 어시스턴트 모델을 실행할 메모리가 부족합니다.",
-		"assistantUnavailableInsufficientStorage": "이 기기에는 어시스턴트 모델을 저장할 여유 공간이 부족합니다.",
 		"assistantUnavailableTitle": "여기에서는 어시스턴트를 실행할 수 없습니다",
 		"assistantUnavailableUnsupportedBrowser": "어시스턴트 모델에 필요한 그래픽 기능을 여기에서 사용할 수 없습니다.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "컴퓨터에서 최신 버전의 Chrome, Edge 또는 Firefox를 사용해 보세요.",

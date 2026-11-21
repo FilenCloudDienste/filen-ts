@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "The model isn't ready.",
 		"assistantTurnErrorNoReply": "The assistant didn't come up with a reply. Try rephrasing your request.",
 		"assistantUnavailableInsufficientMemory": "This device doesn't have enough memory to run the assistant's model.",
-		"assistantUnavailableInsufficientStorage": "There isn't enough free storage on this device for the assistant's model.",
 		"assistantUnavailableTitle": "The assistant can't run here",
 		"assistantUnavailableUnsupportedBrowser": "The assistant's model needs graphics features that aren't available here.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Try a recent version of Chrome, Edge or Firefox on a computer.",

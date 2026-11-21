@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "Model hazır değil.",
 		"assistantTurnErrorNoReply": "Asistan bir yanıt üretemedi. İsteğinizi farklı şekilde ifade etmeyi deneyin.",
 		"assistantUnavailableInsufficientMemory": "Bu cihazda asistanın modelini çalıştırmaya yetecek bellek yok.",
-		"assistantUnavailableInsufficientStorage": "Bu cihazda asistanın modeli için yeterli boş depolama alanı yok.",
 		"assistantUnavailableTitle": "Asistan burada çalışamıyor",
 		"assistantUnavailableUnsupportedBrowser": "Asistanın modeli, burada bulunmayan grafik özelliklerine ihtiyaç duyuyor.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Bir bilgisayarda Chrome, Edge veya Firefox'un güncel bir sürümünü deneyin.",

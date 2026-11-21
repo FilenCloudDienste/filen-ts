@@ -18,7 +18,7 @@ export interface AssistantModelInfo {
 
 // Why the model cannot run here. Terminal for this device, except "in-use-elsewhere": another tab holds the
 // model (one tab loads it), and the runtime re-emits the real state once that tab lets go.
-export type AssistantUnavailableReason = "unsupported-browser" | "insufficient-memory" | "insufficient-storage" | "in-use-elsewhere"
+export type AssistantUnavailableReason = "unsupported-browser" | "insufficient-memory" | "in-use-elsewhere"
 
 export type AssistantModelError = "download-failed" | "load-failed" | "out-of-memory" | "storage-full"
 

@@ -9030,7 +9030,6 @@
 		"assistantTurnErrorModelUnavailable": "Mô hình chưa sẵn sàng.",
 		"assistantTurnErrorNoReply": "Trợ lý không đưa ra được phản hồi. Hãy thử diễn đạt lại yêu cầu.",
 		"assistantUnavailableInsufficientMemory": "Thiết bị này không đủ bộ nhớ để chạy mô hình của trợ lý.",
-		"assistantUnavailableInsufficientStorage": "Thiết bị này không đủ dung lượng trống cho mô hình của trợ lý.",
 		"assistantUnavailableTitle": "Trợ lý không thể chạy ở đây",
 		"assistantUnavailableUnsupportedBrowser": "Mô hình của trợ lý cần các tính năng đồ họa không có ở đây.",
 		"assistantUnavailableUnsupportedBrowserAdvice": "Hãy thử phiên bản mới của Chrome, Edge hoặc Firefox trên máy tính.",

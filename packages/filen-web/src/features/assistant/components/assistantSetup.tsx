@@ -18,8 +18,7 @@ type TerminalReason = Exclude<AssistantUnavailableReason, "in-use-elsewhere">
 
 const UNAVAILABLE_KEYS: Record<TerminalReason, AssistantKey> = {
 	"unsupported-browser": "assistantUnavailableUnsupportedBrowser",
-	"insufficient-memory": "assistantUnavailableInsufficientMemory",
-	"insufficient-storage": "assistantUnavailableInsufficientStorage"
+	"insufficient-memory": "assistantUnavailableInsufficientMemory"
 }
 
 const ERROR_KEYS: Record<AssistantModelError, AssistantKey> = {
@@ -67,12 +66,9 @@ function FirstRun({ model, unavailable }: { model: AssistantModelInfo | null; un
 							? ` ${t("assistantUnavailableUnsupportedBrowserAdvice")}`
 							: null}
 					</p>
-					{/* Free space can change: every click checks the storage again, so only the device's own limits disable it. */}
 					<Button
-						ref={keepAssistantFocus}
-						disabled={unavailable !== "insufficient-storage"}
+						disabled
 						aria-describedby={UNAVAILABLE_REASON_ID}
-						onClick={downloadAssistantModel}
 					>
 						{t("assistantDownload")}
 					</Button>
