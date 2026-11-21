@@ -5,13 +5,15 @@ import { MITIGATION_PRESETS, runTurn, type AgentRuntime, type MitigationPreset, 
 import { createChatWrapper, parseSpecialTokensInResults } from "./chatWrappers"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
+import { TRANSFORM_CASES } from "./cases/transform"
 import { FakeApp } from "./fakeApp"
 import { gradeCase } from "./grader"
 import { gradeInjection } from "./injectionGrader"
 import { caseFingerprint, modelKey, parseRecordLine } from "./fingerprint"
-import { isLoopPreset, runLoopTurns, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
+import { isLoopPreset, runLoopTurns, runTransformCase, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
 import { loadManifest, type ModelEntry } from "./models"
 import { ROUTER_GRAMMAR } from "./prompts"
+import { gradeTransform } from "./transformGrader"
 
 export type WorkerJob = {
 	modelId: string
@@ -23,6 +25,10 @@ export type WorkerJob = {
 	}
 	injection: {
 		presets: EvalPreset[]
+		caseIds: string[]
+	}
+	// One generation per case, no presets: what ships.
+	transform: {
 		caseIds: string[]
 	}
 }
@@ -162,24 +168,28 @@ async function main(): Promise<void> {
 		})
 	}
 
-	async function run<T extends { id: string; followUps?: readonly string[] }>({
+	// A suite without presets (null) writes <suite>.jsonl.
+	async function run<T extends { id: string; followUps?: readonly string[] }, P extends EvalPreset | null>({
 		suite,
 		presets,
 		cases,
 		execute
 	}: {
-		suite: "main" | "injection"
-		presets: EvalPreset[]
+		suite: "main" | "injection" | "transform"
+		presets: readonly P[]
 		cases: readonly T[]
-		execute: (options: { item: T; preset: EvalPreset }) => Promise<unknown>
+		execute: (options: { item: T; preset: P }) => Promise<unknown>
 	}): Promise<void> {
 		for (const preset of presets) {
-			const path = join(dir, `${suite}-${preset}.jsonl`)
+			const path = join(dir, preset === null ? `${suite}.jsonl` : `${suite}-${preset}.jsonl`)
+			const label = preset === null ? suite : `${suite}/${preset}`
 			const fingerprints = new Map(cases.map(item => [item.id, caseFingerprint({ modelId: modelKey(entry), item })]))
 			const done = await doneIds(path, fingerprints)
-			const pending = cases.filter(item => !done.has(item.id) && (isLoopPreset(preset) || item.followUps === undefined))
+			const pending = cases.filter(
+				item => !done.has(item.id) && (preset === null || isLoopPreset(preset) || item.followUps === undefined)
+			)
 
-			console.log(`[${entry.id}] ${suite}/${preset}: ${pending.length} of ${cases.length} cases to run`)
+			console.log(`[${entry.id}] ${label}: ${pending.length} of ${cases.length} cases to run`)
 
 			for (const [index, item] of pending.entries()) {
 				const record = await execute({
@@ -190,7 +200,7 @@ async function main(): Promise<void> {
 				await appendFile(path, `${JSON.stringify({ ...(record as object), fingerprint: fingerprints.get(item.id) })}\n`)
 
 				if ((index + 1) % 10 === 0) {
-					console.log(`[${entry.id}] ${suite}/${preset}: ${index + 1}/${pending.length}`)
+					console.log(`[${entry.id}] ${label}: ${index + 1}/${pending.length}`)
 				}
 			}
 		}
@@ -248,6 +258,24 @@ async function main(): Promise<void> {
 					transcript
 				}),
 				transcript
+			}
+		}
+	})
+
+	await run({
+		suite: "transform",
+		presets: [null],
+		cases: TRANSFORM_CASES.filter(item => job.transform.caseIds.includes(item.id)),
+		execute: async ({ item }) => {
+			const result = await runTransformCase({ runtime: loopRuntime, item })
+
+			return {
+				caseId: item.id,
+				category: item.category,
+				lang: item.lang,
+				kind: item.kind,
+				grade: gradeTransform({ item, result }),
+				result
 			}
 		}
 	})

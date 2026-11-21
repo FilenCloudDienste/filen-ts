@@ -5,6 +5,7 @@ import { parseArgs } from "node:util"
 import { MITIGATION_PRESETS } from "./agent"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
+import { TRANSFORM_CASES, TRANSFORM_CATEGORIES } from "./cases/transform"
 import { CATEGORIES, LANGUAGES } from "./cases/types"
 import { ensureModel, loadManifest, PACKAGE_ROOT } from "./models"
 import { list, resolveRun } from "./options"
@@ -21,14 +22,14 @@ Commands:
 
 Options:
   --models <ids>       Comma-separated model ids (default: every enabled model)
-  --suite <name>       main | injection | all (default: all)
+  --suite <name>       main | injection | transform | all (default: all)
   --presets <names>    Presets for the injection suite (default: shipped,loop)
   --main-presets <n>   Presets for the main suite (default: shipped)
 
 Presets: shipped (the shipping loop with the tools the web app runs), loop (the shipping loop with every
 tool), and the legacy harness's mitigation presets (${Object.keys(MITIGATION_PRESETS).join(", ")}).
-  --categories <list>  Main-suite categories to run
-  --languages <list>   Languages to run (both suites)
+  --categories <list>  Main- and transform-suite categories to run
+  --languages <list>   Languages to run (every suite)
   --cases <ids>        Exact case ids to run
   --sample <n>         Keep every n-th case of the selection (quick subsets)
   --out <dir>          Results directory (default: results/default)
@@ -108,16 +109,23 @@ async function main(): Promise<void> {
 	}
 
 	if (command === "list") {
+		const counts = (items: readonly { lang: string }[]) =>
+			LANGUAGES.map(lang => `${lang} ${items.filter(item => item.lang === lang).length}`).join(", ")
+
 		for (const category of CATEGORIES) {
 			const items = EVAL_CASES.filter(item => item.category === category)
 
-			console.log(
-				`${category}: ${items.length} (${LANGUAGES.map(lang => `${lang} ${items.filter(item => item.lang === lang).length}`).join(", ")})`
-			)
+			console.log(`${category}: ${items.length} (${counts(items)})`)
+		}
+
+		for (const category of TRANSFORM_CATEGORIES) {
+			const items = TRANSFORM_CASES.filter(item => item.category === category)
+
+			console.log(`${category}: ${items.length} (${counts(items)})`)
 		}
 
 		console.log(
-			`main total: ${EVAL_CASES.length}; injection: ${INJECTION_CASES.length} in ${new Set(INJECTION_CASES.map(item => item.lang)).size} languages`
+			`main total: ${EVAL_CASES.length}; injection: ${INJECTION_CASES.length} in ${new Set(INJECTION_CASES.map(item => item.lang)).size} languages; transform: ${TRANSFORM_CASES.length}`
 		)
 
 		return
@@ -168,6 +176,9 @@ async function main(): Promise<void> {
 			injection: {
 				presets: selection.injectionPresets,
 				caseIds: selection.injectionCaseIds
+			},
+			transform: {
+				caseIds: selection.transformCaseIds
 			}
 		})
 	}

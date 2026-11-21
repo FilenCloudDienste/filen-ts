@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { EVAL_CASES } from "../cases"
 import { INJECTION_CASES } from "../cases/injection"
+import { TRANSFORM_CASES } from "../cases/transform"
 import { resolveRun } from "../options"
 
 const MAIN_IDS = new Set(EVAL_CASES.map(item => item.id))
@@ -14,6 +15,51 @@ describe("resolveRun", () => {
 		expect(selection.injectionPresets).toEqual(["shipped", "loop"])
 		expect(selection.mainCaseIds).toEqual(EVAL_CASES.map(item => item.id))
 		expect(selection.injectionCaseIds).toEqual(INJECTION_CASES.map(item => item.id))
+		expect(selection.transformCaseIds).toEqual(TRANSFORM_CASES.map(item => item.id))
+	})
+
+	it("runs only the transform suite with --suite transform", () => {
+		const selection = resolveRun({ suite: "transform" })
+
+		expect(selection.mainCaseIds).toEqual([])
+		expect(selection.injectionCaseIds).toEqual([])
+		expect(selection.transformCaseIds).toEqual(TRANSFORM_CASES.map(item => item.id))
+	})
+
+	it("applies --languages, --categories and --sample to the transform suite", () => {
+		const selection = resolveRun({
+			suite: "transform",
+			languages: "de,ja",
+			categories: "transform_translate,transform_shorten",
+			sample: "2"
+		})
+		const kept = TRANSFORM_CASES.filter(
+			item => ["de", "ja"].includes(item.lang) && ["transform_translate", "transform_shorten"].includes(item.category)
+		)
+
+		expect(selection.transformCaseIds).toEqual(kept.filter((_, index) => index % 2 === 0).map(item => item.id))
+	})
+
+	it("keeps a transform category out of the main suite and a main one out of the transform suite", () => {
+		const transformOnly = resolveRun({ categories: "transform_injection" })
+
+		expect(transformOnly.mainCaseIds).toEqual([])
+		expect(transformOnly.transformCaseIds).toEqual(
+			TRANSFORM_CASES.filter(item => item.category === "transform_injection").map(item => item.id)
+		)
+		expect(resolveRun({ categories: "simple" }).transformCaseIds).toEqual([])
+	})
+
+	it("accepts a transform case id", () => {
+		const id = TRANSFORM_CASES[0]?.id ?? ""
+		const selection = resolveRun({ cases: id })
+
+		expect(selection.transformCaseIds).toEqual([id])
+		expect(selection.mainCaseIds).toEqual([])
+	})
+
+	it("rejects a selection the transform suite cannot keep", () => {
+		expect(() => resolveRun({ suite: "transform", categories: "simple" })).toThrow(/keeps no case/)
 	})
 
 	it("accepts a case id that exists only in the injection suite", () => {

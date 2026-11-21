@@ -2,6 +2,7 @@ import {
 	ASSISTANT_WEB_TOOLS,
 	isAssistantWebTool,
 	runAssistantTurn,
+	transformText,
 	windowHistory,
 	type AssistantChatMessage,
 	type AssistantGenerateRequest,
@@ -501,4 +502,42 @@ export function shippedCase(evalCase: EvalCase): EvalCase {
 	const { calls: _calls, state: _state, mayChange: _mayChange, answerIncludes: _answerIncludes, ...rest } = evalCase
 
 	return { ...rest, expectsText: true, unavailableWrite: true }
+}
+
+// A selection transform as the apps run it: transformText in the extraction slot, no tools, no router, no history.
+export type TransformRun = {
+	output: string
+	truncated: boolean
+	foreignLinks: string[]
+	timings: Timings
+}
+
+export async function runTransformCase({
+	runtime,
+	item
+}: {
+	runtime: LoopRuntime
+	item: Pick<Parameters<typeof transformText>[0], "kind" | "text" | "language">
+}): Promise<TransformRun> {
+	const started = performance.now()
+	const model = new LlamaAssistantModel(runtime)
+
+	try {
+		const result = await transformText({
+			model,
+			kind: item.kind,
+			text: item.text,
+			language: item.language,
+			signal: new AbortController().signal
+		})
+
+		return {
+			output: result.text,
+			truncated: result.truncated,
+			foreignLinks: result.foreignLinks,
+			timings: { ...model.timings, totalMs: performance.now() - started }
+		}
+	} finally {
+		model.dispose()
+	}
 }

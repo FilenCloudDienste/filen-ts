@@ -2,6 +2,7 @@ import { MITIGATION_PRESETS } from "./agent"
 import { LOOP_PRESETS } from "./loopHarness"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
+import { TRANSFORM_CASES, TRANSFORM_CATEGORIES } from "./cases/transform"
 import { CATEGORIES, LANGUAGES } from "./cases/types"
 import type { EvalPreset } from "./worker"
 
@@ -20,13 +21,17 @@ export type RunSelection = {
 	injectionPresets: EvalPreset[]
 	mainCaseIds: string[]
 	injectionCaseIds: string[]
+	transformCaseIds: string[]
 }
 
-const SUITES = ["main", "injection", "all"]
+const SUITES = ["main", "injection", "transform", "all"]
 
 const ALL_PRESETS: readonly string[] = [...Object.keys(LOOP_PRESETS), ...Object.keys(MITIGATION_PRESETS)]
 
-const ALL_CASE_IDS: readonly string[] = [...EVAL_CASES, ...INJECTION_CASES].map(item => item.id)
+// --categories names main-suite and transform-suite categories alike.
+const ALL_CATEGORIES: readonly string[] = [...CATEGORIES, ...TRANSFORM_CATEGORIES]
+
+const ALL_CASE_IDS: readonly string[] = [...EVAL_CASES, ...INJECTION_CASES, ...TRANSFORM_CASES].map(item => item.id)
 
 export function list(value: string | undefined): string[] | undefined {
 	return value === undefined
@@ -76,8 +81,8 @@ export function resolveRun(values: RunValues): RunSelection {
 	}
 
 	const languages = known(list(values.languages), LANGUAGES, "languages", "language")
-	const categories = known(list(values.categories), CATEGORIES, "categories", "category")
-	// Ids from either suite: --cases may name cases of both.
+	const categories = known(list(values.categories), ALL_CATEGORIES, "categories", "category")
+	// Ids from any suite: --cases may name cases of each.
 	const caseIds = known(list(values.cases), ALL_CASE_IDS, "cases", "case")
 	const keep = <T extends { id: string; lang: string }>(items: readonly T[], extra: (item: T) => boolean): string[] =>
 		items
@@ -89,11 +94,13 @@ export function resolveRun(values: RunValues): RunSelection {
 			)
 			.filter((_, index) => index % sample === 0)
 			.map(item => item.id)
-	const mainCaseIds =
-		suite === "injection" ? [] : keep(EVAL_CASES, item => categories === undefined || categories.includes(item.category))
-	const injectionCaseIds = suite === "main" ? [] : keep(INJECTION_CASES, () => true)
+	const inSuite = (name: string) => suite === "all" || suite === name
+	const inCategories = (item: { category: string }) => categories === undefined || categories.includes(item.category)
+	const mainCaseIds = inSuite("main") ? keep(EVAL_CASES, inCategories) : []
+	const injectionCaseIds = inSuite("injection") ? keep(INJECTION_CASES, () => true) : []
+	const transformCaseIds = inSuite("transform") ? keep(TRANSFORM_CASES, inCategories) : []
 
-	if (mainCaseIds.length === 0 && injectionCaseIds.length === 0) {
+	if (mainCaseIds.length === 0 && injectionCaseIds.length === 0 && transformCaseIds.length === 0) {
 		throw new Error("The selection keeps no case")
 	}
 
@@ -102,6 +109,7 @@ export function resolveRun(values: RunValues): RunSelection {
 		// The two loops that ship; the legacy presets only when named, as research.
 		injectionPresets: presets(values.presets, "presets", ["shipped", "loop"]),
 		mainCaseIds,
-		injectionCaseIds
+		injectionCaseIds,
+		transformCaseIds
 	}
 }
