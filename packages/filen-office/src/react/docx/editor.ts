@@ -26,6 +26,7 @@ export {
 	type PageBox
 } from "./edit/objects"
 export { EditSink, plainText, type EditSinkOptions } from "./edit/sink"
+export { plainTextRange, replaceSelectionText, type DocxTextRange, type DocxTextTarget } from "./edit/replace"
 export { paintMath } from "./paint/math"
 export { DOCX_MARK_LABELS, paintMarks, type DocxMarkLabels, type PageMarksContext } from "./paint/marks"
 export { paintThumbnail, thumbnailHeight, type ThumbnailCanvas, type ThumbnailContext } from "./paint/thumbnail"
