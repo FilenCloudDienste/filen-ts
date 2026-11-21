@@ -21,8 +21,9 @@ import { getUuidNumber, getNameParts, comparePartsNumeric, type NamePart } from 
 // string modes resolve ties through a deterministic chain — primary key -> name (numeric-aware,
 // same compare as A-Z) -> numeric-uuid -> uuid string — so equal sizes come out alphabetical, a
 // type/mime sort groups by that key with names ordered within each group, and every ordering is a
-// pure function of the item set. Descending modes invert the WHOLE chain. Timestamp modes keep
-// their own timestamp -> numeric-uuid chain (real-world timestamps don't mass-collide).
+// pure function of the item set. Descending modes invert the WHOLE chain. Timestamp modes follow
+// the same timestamp -> name -> numeric-uuid -> uuid string chain: a batch upload shares one
+// timestamp, and the numeric uuid alone can tie for distinct uuids.
 export interface SortEngineAccessors<T> {
 	getUuid: (item: T) => string
 	getSize: (item: T) => bigint
@@ -91,6 +92,30 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 		return uuidA < uuidB ? -1 : uuidA > uuidB ? 1 : 0
 	}
 
+	// The size and timestamp modes' name tiebreak stays LAZY (resolved on first tie, then memoized
+	// per index): sizes and timestamps are mostly distinct, so precomputing name keys for the whole
+	// partition would tax the common case for the rare tie. The tie-dense cases — directories, whose
+	// sizes are all equal/unknown, or a batch upload sharing one timestamp — resolve each index once
+	// instead of once per tie. Allocated on the first tie only.
+	let nameParts: (NamePart[] | undefined)[] | undefined
+
+	// Reads the slot directly: at() throws on the unresolved (undefined) slots.
+	const namePartsAt = (i: number): NamePart[] => {
+		nameParts ??= new Array<NamePart[] | undefined>(length)
+
+		const cached = nameParts[i]
+
+		if (cached !== undefined) {
+			return cached
+		}
+
+		const parts = getNameParts(nameKey(at(partition, i)))
+
+		nameParts[i] = parts
+
+		return parts
+	}
+
 	if (mode.kind === "size") {
 		const sizes: bigint[] = new Array<bigint>(length)
 
@@ -104,27 +129,6 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 			// Sizes stay bigint end-to-end: Number() conversion would collapse values that differ
 			// beyond 2^53 (pinned by the hardening suite).
 			sizes[i] = known !== undefined && Number.isFinite(known) ? BigInt(Math.trunc(known)) : getSize(item)
-		}
-
-		// The name tiebreak stays LAZY here (resolved on first tie, then memoized per index): file
-		// sizes are mostly distinct, so precomputing name keys for the whole partition would tax
-		// the common case for the rare tie. The tie-dense case this chain exists for — directories,
-		// whose sizes are all equal/unknown — resolves each index once instead of once per tie.
-		const nameParts: (NamePart[] | undefined)[] = new Array<NamePart[] | undefined>(length)
-
-		// Reads the slot directly: at() throws on the unresolved (undefined) slots.
-		const namePartsAt = (i: number): NamePart[] => {
-			const cached = nameParts[i]
-
-			if (cached !== undefined) {
-				return cached
-			}
-
-			const parts = getNameParts(nameKey(at(partition, i)))
-
-			nameParts[i] = parts
-
-			return parts
 		}
 
 		const compareAsc = (a: number, b: number): number => {
@@ -168,7 +172,9 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 				return sign * diff
 			}
 
-			return sign * (getUuidNumber(getUuid(at(partition, a))) - getUuidNumber(getUuid(at(partition, b))))
+			const nameDiff = comparePartsNumeric(namePartsAt(a), namePartsAt(b))
+
+			return sign * (nameDiff !== 0 ? nameDiff : compareUuids(a, b))
 		})
 	} else {
 		const stringKey = mode.stringKey

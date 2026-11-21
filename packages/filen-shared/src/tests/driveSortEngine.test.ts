@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { sortPartition, sortItems, isRootDotFilen, type SortMode, type SortEngineAccessors } from "@filen/shared"
+import { compareNames, sortPartition, sortItems, isRootDotFilen, type SortMode, type SortEngineAccessors } from "@filen/shared"
 
 // Minimal structural fixture — deliberately NOT a DriveItem: the engine is generic over any
 // shape, and these tests pin the engine's own mechanics (mode branches, tiebreak chains,
@@ -322,24 +322,29 @@ describe("sortPartition", () => {
 			expect(bigintItems.map(i => i.uuid)).toEqual(numberItems.map(i => i.uuid))
 		})
 
-		it("ties resolve through the numeric-uuid chain ONLY — no string-uuid fallback (shorter than parts/size)", () => {
-			// Every uuid here shares the same digit runs ("1111"), so getUuidNumber ties at 0 for
-			// every pair. Unlike parts/size mode's compareUuids (which falls back to a string
-			// compare on a numeric tie), timestamp mode stops at the numeric tiebreak — Array.sort
-			// is stable, so a comparator that returns exactly 0 for every pair preserves input order.
+		it("ties resolve by name, then the numeric uuid, then the uuid string, whatever the input order", () => {
+			// Every uuid here shares the same digit runs ("1111"), so getUuidNumber ties at 0 for every pair:
+			// only the string compare separates the same-named ones.
 			const items: FakeItem[] = []
 
 			for (let i = 0; i < 50; i++) {
-				items.push(makeItem({ uuid: `aaaa-1111-${"x".repeat(i % 7)}`, name: `file-${i}.txt`, ts: 5000 }))
+				items.push(makeItem({ uuid: `aaaa-1111-${"x".repeat(i % 7)}`, name: `file-${i % 10}.txt`, ts: 5000 }))
 			}
 
-			const asc = items.slice()
-			sortPartition(asc, timestampAsc, accessors)
-			expect(asc).toEqual(items)
+			const expected = items
+				.slice()
+				.sort((a, b) => compareNames(a.name, b.name) || (a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0))
+				.map(item => `${item.name}|${item.uuid}`)
 
-			const desc = items.slice()
-			sortPartition(desc, timestampDesc, accessors)
-			expect(desc).toEqual(items)
+			for (const input of [items.slice(), items.slice().reverse()]) {
+				const asc = input.slice()
+				sortPartition(asc, timestampAsc, accessors)
+				expect(asc.map(item => `${item.name}|${item.uuid}`)).toEqual(expected)
+
+				const desc = input.slice()
+				sortPartition(desc, timestampDesc, accessors)
+				expect(desc.map(item => `${item.name}|${item.uuid}`)).toEqual(expected.slice().reverse())
+			}
 		})
 
 		it("by contrast, parts/size mode's uuid chain DOES fall back to a string compare on a numeric tie", () => {
