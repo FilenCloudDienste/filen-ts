@@ -1099,9 +1099,10 @@ describe("chats", () => {
 			{ ...chat, uuid: testUuid("mine"), name: "Mine", lastFocus: 5n, lastMessage: lastFrom(self, 9n) }
 		])
 
+		// Same last-message time: the chat list's uuid tiebreak puts "mine" first.
 		expect(json(await call("list_chats", {}))["chats"]).toEqual([
-			expect.objectContaining({ name: "Team", unread: true }),
-			expect.objectContaining({ name: "Mine", lastFrom: "you" })
+			expect.objectContaining({ name: "Mine", lastFrom: "you" }),
+			expect.objectContaining({ name: "Team", unread: true })
 		])
 	})
 

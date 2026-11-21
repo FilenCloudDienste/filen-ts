@@ -1,4 +1,5 @@
 import { fastLocaleCompare } from "./misc"
+import { compareIds } from "./naturalSort"
 
 // Note-tags view sort vocabulary + comparator, shared by mobile (uniffi Note/NoteTag) and web (wasm
 // Note/NoteTag). Tag and note are typed structurally — {uuid, editedTimestamp: bigint} — instead of
@@ -53,7 +54,8 @@ export function sortNoteTags<TTag extends NoteTagsSortEntry, TNote extends NoteT
 	notesByTag: Record<string, readonly TNote[]>,
 	getTagDisplayName: (tag: TTag) => string
 ): TTag[] {
-	const byName = (a: TTag, b: TTag): number => fastLocaleCompare(getTagDisplayName(a), getTagDisplayName(b))
+	// Name, then uuid: two tags can share a name, and the input's order is the listing's.
+	const byName = (a: TTag, b: TTag): number => fastLocaleCompare(getTagDisplayName(a), getTagDisplayName(b)) || compareIds(a.uuid, b.uuid)
 	const sorted = [...tags]
 
 	if (sortBy === "nameAsc") {

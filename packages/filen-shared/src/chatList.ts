@@ -1,5 +1,6 @@
 import { isBlocked, type BlockedUsers } from "./blocking"
 import { parseNumbersFromString } from "./misc"
+import { compareIds } from "./naturalSort"
 
 // The fields the conversation-list rules read, common to both apps' Chat types
 export type ListChat = {
@@ -15,11 +16,16 @@ function listTimestamp(chat: ListChat): number {
 }
 
 // Newest lastMessage first, chats without one last. Ties (typically never-messaged chats) break on the
-// uuid's digits, descending, so the order does not depend on the listing's order across refetches.
+// uuid's digits, descending, then on the whole uuid (the digits keep only the first 16 and can tie), so
+// the order does not depend on the listing's order across refetches.
 export function compareChats(a: ListChat, b: ListChat): number {
 	const diff = listTimestamp(b) - listTimestamp(a)
 
-	return diff !== 0 ? diff : parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid)
+	if (diff !== 0) {
+		return diff
+	}
+
+	return parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid) || compareIds(b.uuid, a.uuid)
 }
 
 // Listed when the viewer owns it or it holds a message: a chat the viewer was merely invited to stays

@@ -108,4 +108,15 @@ describe("sortNoteTags", () => {
 		expect(sortNoteTags(tied, "lastActivityDesc", {}, byName).map(t => t.uuid)).toEqual(["y", "x"])
 		expect(sortNoteTags(tied, "lastActivityDesc", {}, reversed).map(t => t.uuid)).toEqual(["x", "y"])
 	})
+
+	it("breaks a name tie on the uuid, whatever the input order", () => {
+		const twins = [tag("b", "Work", 1n), tag("a", "Work", 1n), tag("c", "Work", 1n)]
+
+		for (const sortBy of NOTE_TAGS_SORT_OPTIONS) {
+			const expected = sortBy === "nameDesc" ? ["c", "b", "a"] : ["a", "b", "c"]
+
+			expect(sortNoteTags(twins, sortBy, {}, byName).map(t => t.uuid)).toEqual(expected)
+			expect(sortNoteTags([...twins].reverse(), sortBy, {}, byName).map(t => t.uuid)).toEqual(expected)
+		}
+	})
 })

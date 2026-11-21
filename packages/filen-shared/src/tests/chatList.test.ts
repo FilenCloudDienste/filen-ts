@@ -48,6 +48,14 @@ describe("compareChats", () => {
 		expect(sorted([a, b])).toEqual(["bbb-222", "aaa-111"])
 		expect(sorted([b, a])).toEqual(["bbb-222", "aaa-111"])
 	})
+
+	it("breaks a digit tie on the whole uuid, independent of input order", () => {
+		const a = chat("aa-12")
+		const b = chat("bb-12")
+
+		expect(sorted([a, b])).toEqual(["bb-12", "aa-12"])
+		expect(sorted([b, a])).toEqual(["bb-12", "aa-12"])
+	})
 })
 
 describe("isListedChat", () => {
