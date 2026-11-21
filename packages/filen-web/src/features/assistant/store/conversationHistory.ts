@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { type } from "arktype"
 import { kvDelete, kvDeletePrefix, kvEntriesJson, kvGetJson, kvKeys, kvSetJson } from "@/lib/storage/adapter"
 import { hasPersistedSession, onAuthBroadcast } from "@/lib/sdk/session"
 import { readSignOutPending } from "@/lib/signOutPending"
@@ -11,7 +12,10 @@ import {
 	historyMetaKey,
 	compareConversationsNewestFirst,
 	historyRowId,
+	historyRetentionSchema,
 	planHistoryPrune,
+	retentionCutoff,
+	retentionLimitsAge,
 	serializeConversation,
 	utf8Bytes,
 	HISTORY_KV_PREFIX,
@@ -19,19 +23,25 @@ import {
 	type ConversationBody,
 	type ConversationContent,
 	type ConversationMeta,
-	type ConversationSnapshot
+	type ConversationSnapshot,
+	type HistoryRetention
 } from "@/features/assistant/store/history.logic"
+import { historyRetention, retentionPreference } from "@/features/assistant/store/historyRetention"
 
 // Saved conversations, on this device only: kv rows, which logout wipes with every other decrypted local
 // cache (so they belong to the signed-in account without a prefix). One body row and one small index row
 // per conversation, so a save rewrites only its own conversation and the list reads only the index. Nothing
 // is read before the history view opens or a save lands. Writes from every tab go through one Web Lock, and
 // a tab overwrites a conversation only while it holds the version it last wrote or read: when another tab
-// changed or deleted it meanwhile, this tab's copy is saved as a conversation of its own.
+// changed or deleted it meanwhile, this tab's copy is saved as a conversation of its own. The retention setting
+// (historyRetention.ts) drops conversations by age at the same points the caps apply, never on a timer: after each
+// save, when the list opens, at boot and when the setting changes; Off saves nothing.
 
 const SAVE_DELAY_MS = 1000
 const LOCK = "filen-web-assistant-history"
 const CHANNEL = "filen-web-assistant-history"
+
+const retentionMessageSchema = type({ kind: "'retention'", retention: historyRetentionSchema })
 
 interface AssistantHistoryStore {
 	// Newest activity first; null until the history view first opens.
@@ -102,9 +112,10 @@ function enqueue(task: () => Promise<void>): Promise<void> {
 	return next
 }
 
-// Opened by the first save or list in this tab: a tab showing the list reloads it when another tab changed
-// the history (a closed list reads it fresh on its next open); an open conversation finds out on its next
-// save.
+// Opened at boot (loadHistoryRetention), else by the first save or list in this tab: a tab showing the list
+// reloads it when another tab changed the history (a closed list reads it fresh on its next open); an open
+// conversation finds out on its next save. A retention another tab set is adopted here; Off is applied again,
+// so a save this tab had queued before the message arrived is removed too.
 function historyChannel(): BroadcastChannel | null {
 	if (closed) {
 		return null
@@ -120,7 +131,19 @@ function historyChannel(): BroadcastChannel | null {
 		return null
 	}
 
-	channel.onmessage = () => {
+	channel.onmessage = (event: MessageEvent) => {
+		const message = retentionMessageSchema(event.data)
+
+		if (!(message instanceof type.errors)) {
+			retentionPreference.adopt(message.retention)
+
+			if (message.retention === "off") {
+				void applyHistoryRetention().catch(() => undefined)
+			}
+
+			return
+		}
+
 		if (useAssistantHistoryStore.getState().open) {
 			void loadConversationIndex()
 		}
@@ -164,8 +187,8 @@ async function removeRows(id: string): Promise<void> {
 
 // Under the lock, so no write is halfway. Rows no valid index row covers (a tab that closed between a
 // body and its index row, an index row that no longer validates) are invisible to the list and the
-// budget, so they go too.
-async function prune(keep: ReadonlySet<string>): Promise<void> {
+// budget, so they go too. True when a conversation went.
+async function prune(keep: ReadonlySet<string>): Promise<boolean> {
 	const [keys, metas] = await Promise.all([kvKeys(HISTORY_KV_PREFIX), readIndex()])
 	const listed = new Set(metas.map(meta => meta.id))
 	const stray = new Set<string>()
@@ -178,7 +201,7 @@ async function prune(keep: ReadonlySet<string>): Promise<void> {
 		}
 	}
 
-	const pruned = planHistoryPrune(metas, keep)
+	const pruned = planHistoryPrune(metas, keep, retentionCutoff(historyRetention(), Date.now()))
 
 	for (const key of stray) {
 		await kvDelete(key)
@@ -191,13 +214,24 @@ async function prune(keep: ReadonlySet<string>): Promise<void> {
 	if (pruned.length > 0) {
 		removeFromIndex(new Set(pruned))
 	}
+
+	return pruned.length > 0
+}
+
+// The conversation on screen stays: its next save is pruned like any other.
+function pruneConversations(): Promise<void> {
+	return enqueue(async () => {
+		if (!closed && (await prune(new Set(slot.id === null ? [] : [slot.id])))) {
+			notifyOtherTabs()
+		}
+	})
 }
 
 async function write(target: Slot, content: ConversationContent, json: string): Promise<void> {
 	// Signing out in this or another tab: a row landing after the wipe would outlive the account. The
 	// session row goes before the kv wipe, and the wipe waits for this lock (withHistoryWritesHeld), so a
-	// write either lands before the wipe or finds no session.
-	if (closed || readSignOutPending() || !(await hasPersistedSession())) {
+	// write either lands before the wipe or finds no session. Off may have been set since the save was queued.
+	if (closed || historyRetention() === "off" || readSignOutPending() || !(await hasPersistedSession())) {
 		if (target.savedJson === json) {
 			target.savedJson = null
 		}
@@ -277,7 +311,7 @@ function listenForPageHide(): void {
 // Called at a turn's start and end and when a card settles, never per streamed token; the write waits for
 // the conversation to go quiet.
 export function scheduleConversationSave(): void {
-	if (closed || capture === null) {
+	if (closed || capture === null || historyRetention() === "off") {
 		return
 	}
 
@@ -293,7 +327,7 @@ export function saveConversationNow(): void {
 	clearTimeout(timer)
 	timer = undefined
 
-	if (closed || capture === null) {
+	if (closed || capture === null || historyRetention() === "off") {
 		return
 	}
 
@@ -389,14 +423,63 @@ export function clearConversations(): Promise<void> {
 }
 
 // Opening the list saves the conversation on screen and reads the index fresh: it is small, and another
-// tab may have changed it unseen.
+// tab may have changed it unseen. With an age limit, it also drops what aged out since the last save (the caps
+// change only on a save).
 export function setHistoryOpen(open: boolean): void {
 	useAssistantHistoryStore.setState({ open })
 
 	if (open) {
 		saveConversationNow()
+
+		if (retentionLimitsAge(historyRetention())) {
+			void pruneConversations().catch(() => undefined)
+		}
+
 		void loadConversationIndex()
 	}
+}
+
+// Off: every saved conversation goes, and the one on screen is kept in memory only (set back, a later change
+// saves it as a new conversation). With an age limit: what aged out goes. Forever drops nothing the caps keep.
+function applyHistoryRetention(): Promise<void> {
+	const retention = historyRetention()
+
+	if (retention === "off") {
+		clearTimeout(timer)
+		timer = undefined
+		slot = emptySlot()
+
+		return clearConversations()
+	}
+
+	return retentionLimitsAge(retention) ? pruneConversations() : Promise.resolve()
+}
+
+// Boot: the stored setting before anything saves, then what it drops. Never rejects (boot waits on it).
+export async function loadHistoryRetention(): Promise<void> {
+	await retentionPreference.load()
+	historyChannel()
+
+	if (historyRetention() !== "forever") {
+		void applyHistoryRetention().catch(() => undefined)
+	}
+}
+
+// The user's pick in Settings: stored, announced to the other tabs, and applied to the saved conversations.
+export function setHistoryRetention(next: HistoryRetention): void {
+	if (closed || next === historyRetention()) {
+		return
+	}
+
+	retentionPreference.set(next)
+
+	try {
+		historyChannel()?.postMessage({ kind: "retention", retention: next })
+	} catch {
+		// A closed channel: the other tabs read the setting at their next boot.
+	}
+
+	void applyHistoryRetention().catch(() => undefined)
 }
 
 // Settles once every write queued so far has landed (or failed).

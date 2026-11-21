@@ -51,13 +51,28 @@ vi.mock("@/features/shell/lib/breakpoints", () => ({
 	subscribeToLayoutBreakpoint: () => () => undefined
 }))
 
+// No router is mounted here: a link renders as a plain anchor to its route.
+vi.mock("@tanstack/react-router", async importOriginal => ({
+	...(await importOriginal<typeof import("@tanstack/react-router")>()),
+	Link: ({ to, children, ...props }: { to: string; children: React.ReactNode }) => (
+		<a
+			href={to}
+			{...props}
+		>
+			{children}
+		</a>
+	)
+}))
+
 import { toast } from "sonner"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { AssistantDrawer, AssistantSidePanel } from "@/features/assistant/components/assistantPanel"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import { INITIAL_TRANSCRIPT_STATE } from "@/features/assistant/store/transcript"
-import { useAssistantHistoryStore } from "@/features/assistant/store/conversationHistory"
+import { setHistoryRetention, useAssistantHistoryStore } from "@/features/assistant/store/conversationHistory"
+import { retentionPreference } from "@/features/assistant/store/historyRetention"
+import { RetentionRow } from "@/features/settings/components/assistant/retentionRow"
 import { registerAssistantSession, sendAssistantMessage } from "@/features/assistant/store/assistantSession"
 import { createMockAssistantSession, MOCK_ASSISTANT_MODEL } from "@/features/assistant/store/mockAssistantSession"
 import type { AssistantModelState, AssistantSession } from "@/features/assistant/types"
@@ -835,6 +850,7 @@ describe("AssistantHistory", () => {
 	// jsdom has no Web Locks; one tab needs none.
 	beforeEach(() => {
 		useAssistantHistoryStore.setState({ open: false, conversations: null })
+		retentionPreference.adopt("forever")
 		Object.defineProperty(navigator, "locks", {
 			configurable: true,
 			value: { request: (_name: string, task: () => Promise<unknown>) => task() }
@@ -960,5 +976,44 @@ describe("AssistantHistory", () => {
 		await showHistory()
 
 		expect(screen.queryByText("No saved conversations yet")).toBeNull()
+	})
+
+	it("says how long conversations are kept and links to that setting; with saving off, says so instead", async () => {
+		vi.useFakeTimers()
+		withSession({ kind: "ready", model: MOCK_ASSISTANT_MODEL })
+		render(<AssistantSidePanel />)
+
+		await ask("find my taxes")
+		await showHistory()
+
+		expect(screen.getByText(/Kept forever/)).toBeDefined()
+		expect(screen.getByRole("link", { name: "Change how long conversations are kept" }).getAttribute("href")).toBe(
+			"/settings/assistant"
+		)
+
+		act(() => {
+			setHistoryRetention("off")
+		})
+		await settle()
+
+		expect(screen.getByText(/Not saved/)).toBeDefined()
+		expect(screen.getByText("Saving is off. A conversation lasts until you start a new one or close the page.")).toBeDefined()
+		expect(screen.getByRole("link", { name: "Change how long conversations are kept" })).toBeDefined()
+		expect([...kvStore.keys()].some(key => key.startsWith("assistant.v1.history."))).toBe(false)
+	})
+})
+
+describe("RetentionRow", () => {
+	it("shows the setting held now and follows a change", () => {
+		retentionPreference.adopt("forever")
+		render(<RetentionRow />)
+
+		expect(screen.getByRole("combobox", { name: "Keep conversations" }).textContent).toContain("Forever")
+
+		act(() => {
+			retentionPreference.adopt("7d")
+		})
+
+		expect(screen.getByRole("combobox", { name: "Keep conversations" }).textContent).toContain("7 days")
 	})
 })

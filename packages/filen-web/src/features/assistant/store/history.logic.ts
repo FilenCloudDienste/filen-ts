@@ -26,6 +26,32 @@ const TITLE_CHARS = 60
 
 export const HISTORY_KV_PREFIX = "assistant.v1.history."
 
+// How long saved conversations are kept after their last activity. Off saves none; Forever keeps them within the
+// caps above only. Stored outside the history prefix, so clearing the history keeps it.
+export const HISTORY_RETENTION_VALUES = ["off", "1d", "7d", "30d", "forever"] as const
+
+export type HistoryRetention = (typeof HISTORY_RETENTION_VALUES)[number]
+
+export const historyRetentionSchema = type.enumerated(...HISTORY_RETENTION_VALUES)
+
+export const HISTORY_RETENTION_KEY = "assistant.v1.retention"
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const RETENTION_DAYS: Record<HistoryRetention, number | null> = { off: null, "1d": 1, "7d": 7, "30d": 30, forever: null }
+
+// Whether conversations go by age (Off clears everything instead).
+export function retentionLimitsAge(retention: HistoryRetention): boolean {
+	return RETENTION_DAYS[retention] !== null
+}
+
+// Conversations last active before this go; null when age removes none.
+export function retentionCutoff(retention: HistoryRetention, now: number): number | null {
+	const days = RETENTION_DAYS[retention]
+
+	return days === null ? null : now - days * DAY_MS
+}
+
 // The index row is small and read for the whole list; the body only when the conversation opens. The
 // body is written first, so an index row always has its body.
 export function historyMetaKey(id: string): string {
@@ -412,16 +438,19 @@ export function conversationTitle(content: ConversationContent): string {
 	return `${(space > TITLE_CHARS / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
-// The conversations to delete so the rest fit the budget, active longest ago first. `keep` (the one just
-// saved, the one on screen) is never among them.
-export function planHistoryPrune(metas: readonly ConversationMeta[], keep: ReadonlySet<string>): string[] {
+// The conversations to delete: every one last active before `cutoff` (retentionCutoff), then, active longest ago
+// first, as many as the rest need to fit the budget. `keep` (the one just saved, the one on screen) is never among
+// them.
+export function planHistoryPrune(metas: readonly ConversationMeta[], keep: ReadonlySet<string>, cutoff: number | null = null): string[] {
 	const oldestFirst = [...metas].sort((a, b) => compareConversationsNewestFirst(b, a))
 	let count = oldestFirst.length
 	let bytes = oldestFirst.reduce((sum, meta) => sum + meta.bytes, 0)
 	const pruned: string[] = []
 
 	for (const meta of oldestFirst) {
-		if (count <= HISTORY_MAX_CONVERSATIONS && bytes <= HISTORY_MAX_TOTAL_BYTES) {
+		const expired = cutoff !== null && meta.updatedAt < cutoff
+
+		if (!expired && count <= HISTORY_MAX_CONVERSATIONS && bytes <= HISTORY_MAX_TOTAL_BYTES) {
 			break
 		}
 

@@ -47,6 +47,7 @@ import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/ind
 import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsAssistantRouteImport } from './routes/_app/settings/assistant'
 import { Route as AppSettingsAudioRouteImport } from './routes/_app/settings/audio'
 import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
 import { Route as AppSettingsDesktopRouteImport } from './routes/_app/settings/desktop'
@@ -262,6 +263,11 @@ const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
   path: '/appearance',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsAssistantRoute = AppSettingsAssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSettingsAudioRoute = AppSettingsAudioRouteImport.update({
   id: '/audio',
   path: '/audio',
@@ -420,6 +426,7 @@ export interface FileRoutesByFullPath {
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/assistant': typeof AppSettingsAssistantRoute
   '/settings/audio': typeof AppSettingsAudioRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/desktop': typeof AppSettingsDesktopRoute
@@ -476,6 +483,7 @@ export interface FileRoutesByTo {
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/assistant': typeof AppSettingsAssistantRoute
   '/settings/audio': typeof AppSettingsAudioRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/desktop': typeof AppSettingsDesktopRoute
@@ -540,6 +548,7 @@ export interface FileRoutesById {
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/_app/settings/assistant': typeof AppSettingsAssistantRoute
   '/_app/settings/audio': typeof AppSettingsAudioRoute
   '/_app/settings/billing': typeof AppSettingsBillingRoute
   '/_app/settings/desktop': typeof AppSettingsDesktopRoute
@@ -606,6 +615,7 @@ export interface FileRouteTypes {
     | '/settings/account'
     | '/settings/advanced'
     | '/settings/appearance'
+    | '/settings/assistant'
     | '/settings/audio'
     | '/settings/billing'
     | '/settings/desktop'
@@ -662,6 +672,7 @@ export interface FileRouteTypes {
     | '/settings/account'
     | '/settings/advanced'
     | '/settings/appearance'
+    | '/settings/assistant'
     | '/settings/audio'
     | '/settings/billing'
     | '/settings/desktop'
@@ -725,6 +736,7 @@ export interface FileRouteTypes {
     | '/_app/settings/account'
     | '/_app/settings/advanced'
     | '/_app/settings/appearance'
+    | '/_app/settings/assistant'
     | '/_app/settings/audio'
     | '/_app/settings/billing'
     | '/_app/settings/desktop'
@@ -1038,6 +1050,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAppearanceRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/assistant': {
+      id: '/_app/settings/assistant'
+      path: '/assistant'
+      fullPath: '/settings/assistant'
+      preLoaderRoute: typeof AppSettingsAssistantRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/settings/audio': {
       id: '/_app/settings/audio'
       path: '/audio'
@@ -1233,6 +1252,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
   AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
+  AppSettingsAssistantRoute: typeof AppSettingsAssistantRoute
   AppSettingsAudioRoute: typeof AppSettingsAudioRoute
   AppSettingsBillingRoute: typeof AppSettingsBillingRoute
   AppSettingsDesktopRoute: typeof AppSettingsDesktopRoute
@@ -1249,6 +1269,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsAccountRoute: AppSettingsAccountRoute,
   AppSettingsAdvancedRoute: AppSettingsAdvancedRoute,
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
+  AppSettingsAssistantRoute: AppSettingsAssistantRoute,
   AppSettingsAudioRoute: AppSettingsAudioRoute,
   AppSettingsBillingRoute: AppSettingsBillingRoute,
   AppSettingsDesktopRoute: AppSettingsDesktopRoute,

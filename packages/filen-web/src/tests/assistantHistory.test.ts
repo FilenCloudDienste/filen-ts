@@ -59,8 +59,10 @@ import {
 	historyMetaKey,
 	planHistoryPrune,
 	restoreConversation,
+	retentionCutoff,
 	serializeConversation,
 	HISTORY_KV_PREFIX,
+	HISTORY_RETENTION_KEY,
 	HISTORY_MAX_CONVERSATION_BYTES,
 	HISTORY_MAX_CONVERSATIONS,
 	HISTORY_MAX_TOTAL_BYTES,
@@ -74,11 +76,13 @@ import {
 	saveConversationNow,
 	scheduleConversationSave,
 	setHistoryOpen,
+	setHistoryRetention,
 	startConversationSlot,
 	useAssistantHistoryStore,
 	whenHistoryWritten,
 	withHistoryWritesHeld
 } from "@/features/assistant/store/conversationHistory"
+import { retentionPreference } from "@/features/assistant/store/historyRetention"
 import {
 	clearAssistantConversations,
 	confirmAssistantProposal,
@@ -157,7 +161,19 @@ beforeEach(() => {
 	kvWrites.length = 0
 	signOut.pending = false
 	signOut.session = true
+	retentionPreference.adopt("forever")
 })
+
+const DAY = 24 * 60 * 60 * 1000
+
+function historyKeys(): string[] {
+	return [...kvStore.keys()].filter(key => key.startsWith(HISTORY_KV_PREFIX))
+}
+
+function storeConversation(id: string, updatedAt: number): void {
+	kvStore.set(historyMetaKey(id), meta(id, updatedAt))
+	kvStore.set(historyBodyKey(id), { v: 1, rev: `r-${id}`, entries: [], history: [] })
+}
 
 describe("conversation serialization", () => {
 	it("saves the batch, restore and help routes and cards", () => {
@@ -323,6 +339,27 @@ describe("history budget", () => {
 		expect(planHistoryPrune(metas, new Set(["kept"]))).toEqual(["old", "mid"])
 		expect(planHistoryPrune(metas, new Set(["kept", "old"]))).toEqual(["mid", "new"])
 		expect(planHistoryPrune(metas.slice(2), new Set())).toEqual([])
+	})
+
+	it("drops every conversation last active before the cutoff, never a kept one, then fits the budget", () => {
+		const metas = [meta("old", 1), meta("kept", 2), meta("recent", 10)]
+
+		expect(planHistoryPrune(metas, new Set(["kept"]), 5)).toEqual(["old"])
+		expect(planHistoryPrune(metas, new Set(), null)).toEqual([])
+
+		const many = Array.from({ length: HISTORY_MAX_CONVERSATIONS + 1 }, (_, index) => meta(`c${String(index)}`, 100 + index))
+
+		expect(planHistoryPrune([meta("aged", 1), ...many], new Set(), 50)).toEqual(["aged", "c0"])
+	})
+
+	it("turns each retention into a cutoff; Off and Forever remove nothing by age", () => {
+		const now = 40 * DAY
+
+		expect(retentionCutoff("1d", now)).toBe(39 * DAY)
+		expect(retentionCutoff("7d", now)).toBe(33 * DAY)
+		expect(retentionCutoff("30d", now)).toBe(10 * DAY)
+		expect(retentionCutoff("forever", now)).toBeNull()
+		expect(retentionCutoff("off", now)).toBeNull()
 	})
 
 	it("groups by the local calendar day of the last activity, newest first", () => {
@@ -510,6 +547,131 @@ describe("saving conversations", () => {
 		await loadConversationIndex()
 
 		expect(useAssistantHistoryStore.getState().conversations).toEqual([])
+	})
+})
+
+describe("retention", () => {
+	let current: ConversationSnapshot
+	const now = new Date(2026, 10, 21, 12).getTime()
+
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(now)
+		current = snapshot(turnEntries("turn-1", "first"))
+		registerConversationSnapshot(() => current)
+		startConversationSlot()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("Off removes every saved conversation and saves none; the one on screen stays in memory and is saved anew once back on", async () => {
+		storeConversation("other", now - DAY)
+		saveConversationNow()
+		await whenHistoryWritten()
+
+		expect(metaRows()).toHaveLength(2)
+
+		setHistoryRetention("off")
+		await whenHistoryWritten()
+
+		expect(historyKeys()).toEqual([])
+		expect(currentConversationId()).toBeNull()
+		expect(kvStore.get(HISTORY_RETENTION_KEY)).toBe("off")
+
+		current = snapshot([...turnEntries("turn-1", "first"), ...turnEntries("turn-2", "more")])
+		scheduleConversationSave()
+		vi.advanceTimersByTime(5000)
+		saveConversationNow()
+		await whenHistoryWritten()
+
+		expect(historyKeys()).toEqual([])
+
+		setHistoryRetention("forever")
+		saveConversationNow()
+		await whenHistoryWritten()
+
+		expect(metaRows()).toMatchObject([{ id: currentConversationId(), title: "first" }])
+	})
+
+	it("drops a save already queued when Off is set meanwhile", async () => {
+		vi.useRealTimers()
+		await withHistoryWritesHeld(async () => {
+			saveConversationNow()
+			await Promise.resolve()
+			// What another tab's broadcast does.
+			retentionPreference.adopt("off")
+		})
+		await whenHistoryWritten()
+
+		expect(historyKeys()).toEqual([])
+	})
+
+	it("removes what aged out at once, on each save and when the list opens, never the conversation on screen", async () => {
+		storeConversation("aged", now - 2 * DAY)
+		storeConversation("recent", now - 60 * 60 * 1000)
+		saveConversationNow()
+		await whenHistoryWritten()
+
+		const id = currentConversationId() ?? ""
+
+		setHistoryRetention("1d")
+		await whenHistoryWritten()
+
+		expect(
+			metaRows()
+				.map(entry => entry.id)
+				.sort()
+		).toEqual([id, "recent"].sort())
+		expect(kvStore.has(historyBodyKey("aged"))).toBe(false)
+
+		storeConversation("aged2", now - 3 * DAY)
+		current = snapshot([...turnEntries("turn-1", "first"), ...turnEntries("turn-2", "more")])
+		saveConversationNow()
+		await whenHistoryWritten()
+
+		expect(kvStore.has(historyMetaKey("aged2"))).toBe(false)
+
+		// Two days on, nothing saved meanwhile: opening the list drops "recent", the conversation on screen stays.
+		vi.setSystemTime(now + 2 * DAY)
+		setHistoryOpen(true)
+		await vi.waitFor(() => {
+			expect(useAssistantHistoryStore.getState().conversations?.map(entry => entry.id)).toEqual([id])
+		})
+		setHistoryOpen(false)
+
+		expect(kvStore.has(historyMetaKey("recent"))).toBe(false)
+	})
+
+	it("drops nothing by age with Forever, the default", async () => {
+		storeConversation("ancient", 1)
+		setHistoryOpen(true)
+		await vi.waitFor(() => {
+			expect(useAssistantHistoryStore.getState().conversations?.map(entry => entry.id)).toContain("ancient")
+		})
+		setHistoryOpen(false)
+
+		expect(kvStore.has(historyMetaKey("ancient"))).toBe(true)
+	})
+
+	it("reads the stored setting at boot and applies it before anything saves", async () => {
+		vi.resetModules()
+
+		// A fresh module: its preference has not been read yet.
+		const history = await import("@/features/assistant/store/conversationHistory")
+		const retention = await import("@/features/assistant/store/historyRetention")
+
+		kvStore.set(HISTORY_RETENTION_KEY, "7d")
+		storeConversation("aged", now - 8 * DAY)
+		storeConversation("recent", now - DAY)
+		await history.loadHistoryRetention()
+		await history.whenHistoryWritten()
+
+		expect(retention.historyRetention()).toBe("7d")
+		expect(metaRows().map(entry => entry.id)).toEqual(["recent"])
+
+		history.resetConversationHistory()
 	})
 })
 

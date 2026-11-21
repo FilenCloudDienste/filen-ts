@@ -8,6 +8,7 @@ import { settingsOffice } from "@/locales/en/settings/office"
 import { settingsOfficePdf } from "@/locales/en/settings/officePdf"
 import { settingsKeyboard } from "@/locales/en/settings/keyboard"
 import { settingsAudio } from "@/locales/en/settings/audio"
+import { settingsAssistant } from "@/locales/en/settings/assistant"
 // English source catalog — "settings" namespace: the settings sidebar (Account / Security /
 // Appearance / Events / Billing sections) plus the Account and Appearance section content. The
 // "auth" namespace keeps the Security section's own copy (forms, dialogs, row titles it already had);
@@ -342,5 +343,6 @@ export const settings = {
 	...settingsOffice,
 	...settingsOfficePdf,
 	...settingsKeyboard,
-	...settingsAudio
+	...settingsAudio,
+	...settingsAssistant
 } as const

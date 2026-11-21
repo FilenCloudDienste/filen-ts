@@ -1,5 +1,6 @@
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { Link } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { HistoryIcon, SquarePenIcon, Trash2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
@@ -18,7 +19,13 @@ import {
 } from "@/features/assistant/store/assistantSession"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import { loadConversationIndex, useAssistantHistoryStore } from "@/features/assistant/store/conversationHistory"
-import { groupConversations, type ConversationMeta, type HistoryGroup } from "@/features/assistant/store/history.logic"
+import { useHistoryRetention } from "@/features/assistant/store/historyRetention"
+import {
+	groupConversations,
+	type ConversationMeta,
+	type HistoryGroup,
+	type HistoryRetention
+} from "@/features/assistant/store/history.logic"
 import { assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
 
 const GROUP_KEYS: Record<HistoryGroup, AssistantKey> = {
@@ -26,6 +33,14 @@ const GROUP_KEYS: Record<HistoryGroup, AssistantKey> = {
 	yesterday: "assistantHistoryYesterday",
 	previous7Days: "assistantHistoryPrevious7Days",
 	older: "assistantHistoryOlder"
+}
+
+const RETENTION_KEYS: Record<HistoryRetention, AssistantKey> = {
+	off: "assistantHistoryNotSaved",
+	"1d": "assistantHistoryKept1Day",
+	"7d": "assistantHistoryKept7Days",
+	"30d": "assistantHistoryKept30Days",
+	forever: "assistantHistoryKeptForever"
 }
 
 const ROW_CLASS = "group flex items-center gap-1 rounded-xl pr-1 transition-colors"
@@ -103,15 +118,16 @@ function ConversationRow({
 }
 
 // The saved conversations, in place of the conversation: a new one, then by last activity grouped by day,
-// and clearing them all. setHistoryOpen reads the index from storage each time the list opens, never before.
-// Shown in every model state so the conversations stay deletable; opening one waits for a usable model,
-// since the setup screen would stand in for it.
+// and clearing them all, with how long they are kept and a link to that setting. setHistoryOpen reads the
+// index from storage each time the list opens, never before. Shown in every model state so the conversations
+// stay deletable; opening one waits for a usable model, since the setup screen would stand in for it.
 export function AssistantHistory() {
 	const { t } = useTranslation("assistant")
 	const { t: tCommon } = useTranslation("common")
 	const openable = useAssistantStore(state => modelAcceptsMessages(state.modelState))
 	const conversations = useAssistantHistoryStore(state => state.conversations)
 	const currentId = useAssistantHistoryStore(state => state.currentId)
+	const retention = useHistoryRetention()
 	const now = useNowMinute()
 	const [deleting, setDeleting] = useState<ConversationMeta | null>(null)
 	const [clearing, setClearing] = useState(false)
@@ -178,7 +194,9 @@ export function AssistantHistory() {
 							className="size-6 text-muted-foreground"
 						/>
 						<p className="text-sm font-medium">{t("assistantHistoryEmpty")}</p>
-						<p className="text-xs text-muted-foreground">{t("assistantHistoryNote")}</p>
+						<p className="text-xs text-muted-foreground">
+							{t(retention === "off" ? "assistantHistoryOffNote" : "assistantHistoryNote")}
+						</p>
 					</div>
 				) : null}
 				{conversations !== null && conversations.length > 0 ? (
@@ -210,23 +228,39 @@ export function AssistantHistory() {
 					</nav>
 				) : null}
 			</div>
-			{conversations !== null && conversations.length > 0 ? (
+			{conversations === null ? null : (
 				<div className="flex shrink-0 flex-col gap-1.5 border-t border-border/60 px-4 pt-2 pb-3">
-					{openable ? null : <p className="text-xs text-muted-foreground">{t("assistantHistoryNeedsModel")}</p>}
-					<p className="text-xs text-muted-foreground">{t("assistantHistoryNote")}</p>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="self-start text-destructive hover:text-destructive"
-						onClick={() => {
-							setClearing(true)
-						}}
-					>
-						<Trash2Icon />
-						{t("assistantHistoryClear")}
-					</Button>
+					{conversations.length > 0 ? (
+						<>
+							{openable ? null : <p className="text-xs text-muted-foreground">{t("assistantHistoryNeedsModel")}</p>}
+							<p className="text-xs text-muted-foreground">{t("assistantHistoryNote")}</p>
+						</>
+					) : null}
+					<p className="text-xs text-muted-foreground">
+						{t(RETENTION_KEYS[retention])} ·{" "}
+						<Link
+							to="/settings/assistant"
+							aria-label={t("assistantHistoryRetentionChangeLabel")}
+							className="rounded-sm text-foreground underline-offset-2 focus-ring outline-none hover:underline"
+						>
+							{t("assistantHistoryRetentionChange")}
+						</Link>
+					</p>
+					{conversations.length > 0 ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="self-start text-destructive hover:text-destructive"
+							onClick={() => {
+								setClearing(true)
+							}}
+						>
+							<Trash2Icon />
+							{t("assistantHistoryClear")}
+						</Button>
+					) : null}
 				</div>
-			) : null}
+			)}
 			<ConfirmDialog
 				open={deleting !== null}
 				pending={pending}

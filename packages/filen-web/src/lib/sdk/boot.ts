@@ -50,6 +50,7 @@ import { loadComicPreferences } from "@/features/comics/lib/comicPreferences"
 import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 import { clearDirectoryTreeState, loadDirectoryTreeOpen } from "@/features/drive/store/useDirectoryTreeStore"
 import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
+import { loadHistoryRetention } from "@/features/assistant/store/conversationHistory"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -202,7 +203,8 @@ function preloadDevicePreferences(): Promise<void> {
 		loadEbookTextSize(),
 		loadComicPreferences(),
 		loadCollapsedChatSections(),
-		loadDirectoryTreeOpen()
+		loadDirectoryTreeOpen(),
+		loadHistoryRetention()
 	]).then(() => undefined)
 }
 

@@ -9,6 +9,8 @@ export interface PreloadedPreference<T> {
 	subscribe: (listener: () => void) => () => void
 	// Shown at once; stored in the background (a failed write is logged and the value holds for this session).
 	set: (next: T) => void
+	// A value another tab stored and announced: shown at once, never stored again.
+	adopt: (next: T) => void
 	// Reads the stored value once; never rejects (an unreadable one leaves the fallback).
 	load: () => Promise<void>
 }
@@ -67,6 +69,12 @@ export function preloadedPreference<T>({
 			preference.set(next).catch((error: unknown) => {
 				log.warn(scope, "preference not saved", { key, error })
 			})
+		},
+		adopt: next => {
+			if (!same(next, value)) {
+				value = next
+				notify()
+			}
 		},
 		load: () => {
 			loading ??= preference.get().then(

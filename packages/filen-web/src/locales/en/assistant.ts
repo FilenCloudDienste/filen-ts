@@ -575,5 +575,23 @@ export const assistant = {
 	/** Composer — send button */
 	assistantSend: "Send",
 	/** Composer — stops the reply being generated */
-	assistantStop: "Stop"
+	assistantStop: "Stop",
+
+	// ── Conversation history: retention ──────────────────────────────────────
+	/** History footer — how long saved conversations are kept (Settings > Assistant > Keep conversations): never removed by age */
+	assistantHistoryKeptForever: "Kept forever",
+	/** History footer — saved conversations are removed 30 days after their last message */
+	assistantHistoryKept30Days: "Kept for 30 days",
+	/** History footer — saved conversations are removed 7 days after their last message */
+	assistantHistoryKept7Days: "Kept for 7 days",
+	/** History footer — saved conversations are removed 1 day after their last message */
+	assistantHistoryKept1Day: "Kept for 1 day",
+	/** History footer — saving conversations is turned off */
+	assistantHistoryNotSaved: "Not saved",
+	/** History footer — link to the setting that decides how long conversations are kept; follows the retention text */
+	assistantHistoryRetentionChange: "Change",
+	/** History footer — accessible name of the Change link */
+	assistantHistoryRetentionChangeLabel: "Change how long conversations are kept",
+	/** History — shown in place of the list while saving is off */
+	assistantHistoryOffNote: "Saving is off. A conversation lasts until you start a new one or close the page."
 } as const
