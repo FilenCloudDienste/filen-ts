@@ -1,4 +1,5 @@
 import { type, type ArkErrors } from "arktype"
+import { compareIds } from "@filen/shared"
 import { useQuery, type QueryClient, type QueryFunctionContext, type UseQueryResult } from "@tanstack/react-query"
 import { kvPreference } from "@/lib/storage/preference"
 import { noDiskPersister } from "@/queries/persist"
@@ -207,11 +208,11 @@ export function useRemotePricingQuery(): UseQueryResult<Pricing | null> {
 
 export type AnnouncementPlatform = "web" | "desktop"
 
-// Active ones for this platform, newest first. Title and message are the server's English plain text.
+// Active ones for this platform, newest first, then by uuid. Title and message are the server's English plain text.
 export function platformAnnouncements(announcements: readonly Announcement[], platform: AnnouncementPlatform): Announcement[] {
 	return announcements
 		.filter(announcement => announcement.active && announcement.platforms.some(value => value === platform || value === "all"))
-		.sort((a, b) => b.timestamp - a.timestamp)
+		.sort((a, b) => b.timestamp - a.timestamp || compareIds(a.uuid, b.uuid))
 }
 
 // One at a time: the newest not yet dismissed.

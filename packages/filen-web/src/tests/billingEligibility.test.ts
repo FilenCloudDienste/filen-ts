@@ -106,6 +106,14 @@ describe("withdrawal window", () => {
 
 		expect(eligibleWithdrawals([late, done, early], local(2026, 10, 10)).map(s => s.id)).toEqual(["early", "late"])
 	})
+
+	it("lists subscriptions sharing a deadline by id", () => {
+		const b = sub({ id: "b", startTimestamp: BigInt(local(2026, 10, 1)) })
+		const a = sub({ id: "a", startTimestamp: BigInt(local(2026, 10, 1)) })
+
+		expect(eligibleWithdrawals([b, a], local(2026, 10, 10)).map(s => s.id)).toEqual(["a", "b"])
+		expect(eligibleWithdrawals([a, b], local(2026, 10, 10)).map(s => s.id)).toEqual(["a", "b"])
+	})
 })
 
 describe("cancel rules", () => {

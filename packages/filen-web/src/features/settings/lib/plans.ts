@@ -118,7 +118,7 @@ export function groupPlans(pricing: Pricing): PlanGroup[] {
 	return PLAN_TAB_ORDER.flatMap(tab => {
 		const cards = byTab.get(tab)
 
-		return cards === undefined ? [] : [{ tab, cards: cards.sort((a, b) => a.plan.storage - b.plan.storage) }]
+		return cards === undefined ? [] : [{ tab, cards: cards.sort((a, b) => a.plan.storage - b.plan.storage || a.plan.id - b.plan.id) }]
 	})
 }
 

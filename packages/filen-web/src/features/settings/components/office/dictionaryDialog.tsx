@@ -8,9 +8,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { LoadingState } from "@/components/loadingState"
 import { log } from "@/lib/log"
+import { compareIds } from "@filen/shared"
 import { DictionaryWords } from "@/features/settings/components/office/dictionaryWords"
 
 const COLLATOR = new Intl.Collator(undefined, { sensitivity: "base" })
+
+// "Apple" and "apple" are both kept and tie under the collator: the word itself decides between them.
+function compareWords(a: string, b: string): number {
+	return COLLATOR.compare(a, b) || compareIds(a, b)
+}
 
 function subscribeWords(listener: () => void): () => void {
 	return userDictionary.subscribe(listener)
@@ -60,7 +66,7 @@ export function DictionaryDialog({
 	}, [open])
 
 	const needle = query.trim().toLocaleLowerCase()
-	const shown = (needle === "" ? [...words] : words.filter(word => word.toLocaleLowerCase().includes(needle))).sort(COLLATOR.compare)
+	const shown = (needle === "" ? [...words] : words.filter(word => word.toLocaleLowerCase().includes(needle))).sort(compareWords)
 
 	function remove(word: string): void {
 		userDictionary.remove(word).catch((error: unknown) => {

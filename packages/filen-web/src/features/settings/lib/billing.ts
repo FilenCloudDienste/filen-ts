@@ -1,4 +1,5 @@
 import type { UserAccountSubs, UserInfo } from "@filen/sdk-rs"
+import { compareIds } from "@filen/shared"
 import type { SettingsKey } from "@/lib/i18n"
 import type { PaymentMethod } from "@/features/settings/lib/plans"
 
@@ -142,9 +143,11 @@ export function isWithdrawalEligible(sub: WithdrawalFields, now: number): boolea
 	return endsAt !== undefined && now < endsAt
 }
 
-// Earliest deadline first, so a single entry point preselects the most urgent one.
-export function eligibleWithdrawals<T extends WithdrawalFields>(subs: readonly T[], now: number): T[] {
-	return subs.filter(sub => isWithdrawalEligible(sub, now)).sort((a, b) => (withdrawalEndsAt(a) ?? 0) - (withdrawalEndsAt(b) ?? 0))
+// Earliest deadline first, then by id, so a single entry point preselects the most urgent one.
+export function eligibleWithdrawals<T extends WithdrawalFields & Pick<UserAccountSubs, "id">>(subs: readonly T[], now: number): T[] {
+	return subs
+		.filter(sub => isWithdrawalEligible(sub, now))
+		.sort((a, b) => (withdrawalEndsAt(a) ?? 0) - (withdrawalEndsAt(b) ?? 0) || compareIds(a.id, b.id))
 }
 
 // The next moment eligibility changes on its own (a window closing, or Cancel becoming available), for one timer.

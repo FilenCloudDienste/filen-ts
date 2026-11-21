@@ -144,6 +144,14 @@ describe("announcement selection", () => {
 		expect(platformAnnouncements(list, "desktop").map(item => item.uuid)).toEqual(["desktop", "new-all"])
 	})
 
+	it("orders announcements sharing a timestamp by uuid", () => {
+		const b = announcement({ uuid: "b", timestamp: 1 })
+		const a = announcement({ uuid: "a", timestamp: 1 })
+
+		expect(platformAnnouncements([b, a], "web").map(item => item.uuid)).toEqual(["a", "b"])
+		expect(platformAnnouncements([a, b], "web").map(item => item.uuid)).toEqual(["a", "b"])
+	})
+
 	it("shows the newest not dismissed", () => {
 		const candidates = [announcement({ uuid: "b", timestamp: 2 }), announcement({ uuid: "a", timestamp: 1 })]
 
