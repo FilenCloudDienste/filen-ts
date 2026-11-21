@@ -1,4 +1,5 @@
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { shutdownAssistantTransformer } from "@/features/assistant/store/assistantTransform"
 import { awaitingConfirmation, pendingProposalIds } from "@/features/assistant/store/transcript"
 import {
 	adoptConversationSlot,
@@ -272,6 +273,7 @@ export function cancelAssistantTurn(): void {
 // Signing out: no turn, card or tool call may run past this point, and the model's memory goes now.
 export function shutdownAssistant(): void {
 	openRequest++
+	shutdownAssistantTransformer()
 
 	if (session !== null) {
 		leaveConversation(session)

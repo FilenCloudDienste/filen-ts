@@ -13,6 +13,10 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // downloads, mod+l address bar, mod+shift+a tab search) or to the editors' own CodeMirror/Quill keys. As a
 // character key it stands down in text fields and goes with the single-key switch (Settings → Keyboard).
 //
+// `app.assistantTransform` (the rewrite menu for the selected text, in notes, Word documents and the chat composer) is
+// Alt+J: Mod+J is the browser's downloads and Word's (and the slides') justify, Mod+Shift+J and Mod+Alt+J open a
+// browser's developer tools. It acts only with focus in one of those editors.
+//
 // `app.openSettings` is Mod+, as in every desktop app; a Mac browser keeps Cmd+, for its own settings, so the web on
 // a Mac leaves it unassigned.
 //
@@ -49,6 +53,7 @@ export const APP_ACTIONS: readonly ActionDef[] = [
 	{ id: "app.openVideos", defaultCombo: "", scope: "global", descriptionKey: "common:moduleVideos" },
 	{ id: "app.openPlaylists", defaultCombo: "", scope: "global", descriptionKey: "common:modulePlaylists" },
 	{ id: "app.toggleAssistant", defaultCombo: "q", scope: "global", descriptionKey: "common:toggleAssistant" },
+	{ id: "app.assistantTransform", defaultCombo: "alt+j", scope: "global", descriptionKey: "common:assistantTransformShortcut" },
 	{ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "common:toggleTheme" },
 	moduleAction("app.openDrive", "common:moduleDrive", 1),
 	moduleAction("app.openNotes", "common:moduleNotes", 2),

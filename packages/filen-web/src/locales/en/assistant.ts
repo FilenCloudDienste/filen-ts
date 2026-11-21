@@ -593,5 +593,72 @@ export const assistant = {
 	/** History footer — accessible name of the Change link */
 	assistantHistoryRetentionChangeLabel: "Change how long conversations are kept",
 	/** History — shown in place of the list while saving is off */
-	assistantHistoryOffNote: "Saving is off. A conversation lasts until you start a new one or close the page."
+	assistantHistoryOffNote: "Saving is off. A conversation lasts until you start a new one or close the page.",
+
+	// ── Selection transform (notes, Word documents, the chat composer) ──────
+	/** Button beside a text selection and the context menu's submenu — opens the rewrite menu */
+	assistantTransformOpen: "Rewrite with assistant",
+	/** Rewrite menu — rewrites the selection more clearly; also the result's heading */
+	assistantTransformRewrite: "Rewrite",
+	/** Rewrite menu — makes the selection shorter; also the result's heading */
+	assistantTransformShorten: "Shorten",
+	/** Rewrite menu — corrects spelling, grammar and punctuation only; also the result's heading */
+	assistantTransformFixGrammar: "Fix grammar",
+	/** Rewrite menu — submenu of target languages */
+	assistantTransformTranslate: "Translate",
+	/** Translate submenu — the full list of languages, after the recently used ones */
+	assistantTransformAllLanguages: "All languages…",
+	/** Result heading for a translation, e.g. "Translate to German" */
+	assistantTransformTranslateTo: "Translate to {{language}}",
+	/** Rewrite context menu — cuts the selection */
+	assistantTransformCut: "Cut",
+	/** Rewrite context menu — copies the selection */
+	assistantTransformCopy: "Copy",
+	/** Result — accessible name of the result popover */
+	assistantTransformResultLabel: "Assistant result",
+	/** Result — replaces the selection with the result */
+	assistantTransformAccept: "Accept",
+	/** Result — runs the same request again */
+	assistantTransformTryAgain: "Try again",
+	/** Result — closes it and leaves the text as it was; also stops one still being written */
+	assistantTransformDiscard: "Discard",
+	/** Result — toggle between the result and its changes against the selection */
+	assistantTransformChanges: "Changes",
+	/** Result — the model is being loaded into memory first */
+	assistantTransformLoading: "Loading the model…",
+	/** Result — the model is reading the selection, before the first word */
+	assistantTransformReading: "Reading the text…",
+	/** Result — the result is being written (screen readers) */
+	assistantTransformWriting: "Writing…",
+	/** Result — the text was edited while the result was written; Accept is off */
+	assistantTransformSelectionChanged: "The text changed since you asked. Select it again for a new result.",
+	/** Result — the result holds links or addresses the selection did not; Accept is off. `links` lists them */
+	assistantTransformForeignLinks: "This adds links or addresses your text didn't have: {{links}}. It can't be applied.",
+	/** Result — the result stopped at its length limit; Accept is off */
+	assistantTransformTruncated: "The result was cut off, so it can't be applied. Select less text.",
+	/** Result — the model wrote nothing */
+	assistantTransformEmpty: "The assistant returned nothing. Try again.",
+	/** Result — the selection is longer than one request takes */
+	assistantTransformTooLong: "This is too long to do in one go. Select a shorter passage.",
+	/** Result — the selection holds a table, field, picture or tracked change, which a plain-text result would lose */
+	assistantTransformUnsupported:
+		"This selection holds more than plain text (a table, field, picture or tracked change), so it can't be rewritten.",
+	/** Result — the generation failed */
+	assistantTransformFailed: "Couldn't do this. Try again.",
+	/** Result — the editor refused the replacement (a protected part, a read-only document) */
+	assistantTransformRefused: "The document didn't accept this change.",
+	/** Result — the model is not on this device yet; the Download button follows */
+	assistantTransformNotDownloaded: "Rewriting runs on this device with the assistant's model, which isn't downloaded yet.",
+	/** Result — downloads the model; `size` is its download size, e.g. "2.4 GiB" */
+	assistantTransformDownload: "Download ({{size}})",
+	/** Result — another tab or window holds the model */
+	assistantTransformInUseElsewhere: "The assistant is in use in another tab or window. It becomes available here once it's closed there.",
+	/** Result — the device or browser cannot run the model */
+	assistantTransformUnavailable: "The assistant can't run on this device.",
+	/** Result — the model failed to download or load; the Try again button follows */
+	assistantTransformModelFailed: "The assistant's model couldn't be loaded.",
+	/** Toast — the result replaced the selection where the editor keeps no undo of it; its Undo button puts the text back */
+	assistantTransformApplied: "Text replaced",
+	/** Toast button — puts the text back as it was before the result replaced it */
+	assistantTransformUndo: "Undo"
 } as const

@@ -1,6 +1,8 @@
 import { startTransition, useEffect, useRef, useState } from "react"
 import { IN_EDITORS, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
+import { useCodeMirrorTransformHost } from "@/features/preview/lib/codeMirrorTransformHost"
+import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { MarkdownSplitPane } from "@/features/notes/components/markdownSplitPane"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
@@ -27,6 +29,7 @@ export function NoteMarkdownEditor({ note, controller }: { note: Note; controlle
 	const [previewHidden, setPreviewHidden] = useState(false)
 	const latestValueRef = useRef(controller.seed)
 	const previewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+	const { host, onView } = useCodeMirrorTransformHost()
 
 	useEffect(() => {
 		return () => {
@@ -65,13 +68,19 @@ export function NoteMarkdownEditor({ note, controller }: { note: Note; controlle
 	return (
 		<MarkdownSplitPane
 			left={
-				<CodeMirrorSource
-					text={controller.seed}
-					tag="markdown"
-					alt={note.title ?? ""}
-					editable
-					onValueChange={handleChange}
-				/>
+				<SelectionTransformRoot
+					host={host}
+					className="contents"
+				>
+					<CodeMirrorSource
+						text={controller.seed}
+						tag="markdown"
+						alt={note.title ?? ""}
+						editable
+						onValueChange={handleChange}
+						onView={onView}
+					/>
+				</SelectionTransformRoot>
 			}
 			right={
 				<MarkdownRenderer

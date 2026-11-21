@@ -1,7 +1,9 @@
 import { registerAssistantSession } from "@/features/assistant/store/assistantSession"
+import { registerAssistantTransformer } from "@/features/assistant/store/assistantTransform"
 import { AssistantRuntime } from "@/features/assistant/runtime/client"
 import { createAssistantSession } from "@/features/assistant/loop/session"
 import { createAssistantToolExecutor } from "@/features/assistant/tools/executor"
+import { createAssistantTransformer } from "@/features/assistant/transform/run"
 
 // Importing this module (main.tsx) plugs the on-device runtime into the assistant UI. Nothing heavy
 // happens here: once the page is idle the runtime checks the browser's features and lists the model's
@@ -11,6 +13,7 @@ export const assistantRuntime = new AssistantRuntime()
 export const assistantSession = createAssistantSession({ runtime: assistantRuntime, executor: createAssistantToolExecutor() })
 
 registerAssistantSession(assistantSession)
+registerAssistantTransformer(createAssistantTransformer(assistantRuntime))
 
 const check = () => {
 	void assistantRuntime.init()

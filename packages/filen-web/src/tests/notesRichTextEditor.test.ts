@@ -25,6 +25,13 @@ import {
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
 const { RichTextEditor } = await import("@/features/notes/components/editor/richTextEditor")
+const { registerAction } = await import("@/lib/keymap/registry")
+const { APP_ACTIONS } = await import("@/features/shell/lib/keymap")
+
+// The editor binds the shell's app.assistantTransform (its selection transform).
+for (const def of APP_ACTIONS) {
+	registerAction(def)
+}
 
 describe("shouldPropagateRichChange — #39 source gate", () => {
 	it("propagates only genuine user edits", () => {

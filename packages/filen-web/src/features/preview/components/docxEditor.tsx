@@ -156,7 +156,14 @@ import { desktopBridge } from "@/lib/desktop"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
-import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS, IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
+import { docxTransform } from "@/features/preview/lib/docxTransformHost"
+import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import type { TransformSelection } from "@/features/assistant/transform/host"
+import { transformOffered } from "@/features/assistant/transform/transform.logic"
+import { TransformMenu, TransformSubmenu } from "@/features/assistant/transform/transformMenu"
+import { CONTEXT_MENU_PARTS, type TransformPick } from "@/features/assistant/transform/transformMenuParts"
+import { TransformPopover, type TransformRequest } from "@/features/assistant/transform/transformPopover"
 import { log } from "@/lib/log"
 import { useElementSize } from "@/lib/useElementSize"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -648,6 +655,40 @@ export function DocxEditView({
 	const mousePressRef = useRef<number | null>(null)
 	// The context menu closed for a press on the Mini toolbar, which keeps it (and the focus it took).
 	const keepMiniRef = useRef(false)
+	// The assistant's selection transform: ✨ in the Mini toolbar, "Rewrite with assistant ▸" in the context menu, its
+	// key; the menu it opens and the result's popover. The host reads the editor of the latest render.
+	const { t: tAssistant } = useTranslation("assistant")
+	const transformOnDevice = useAssistantStore(state => transformOffered(state.modelState))
+	const [transform] = useState(docxTransform)
+	const transformHost = transform.host
+
+	useEffect(() => {
+		transform.attach(editor, handleRef.current)
+	})
+	const [transformMenu, setTransformMenu] = useState<{ anchor: DOMRect; selection: TransformSelection } | null>(null)
+	const [transformRequest, setTransformRequest] = useState<TransformRequest | null>(null)
+	// The selection as the menu opens (or as a pick in the context menu runs); one that is not plain text is refused.
+	const takeTransformSelection = (): TransformSelection | null => {
+		const selection = transformHost.selection()
+
+		if (selection === "unsupported") {
+			toast(tAssistant("assistantTransformUnsupported"))
+		}
+
+		return selection === "unsupported" ? null : selection
+	}
+	const openTransformMenu = (anchor: DOMRect): void => {
+		const selection = takeTransformSelection()
+
+		if (selection !== null) {
+			setMini(null)
+			setTransformMenu({ anchor, selection })
+		}
+	}
+	const pickTransform = (selection: TransformSelection, { kind, language }: TransformPick): void => {
+		setTransformMenu(null)
+		setTransformRequest({ selection, kind, language })
+	}
 
 	if (editor !== undefined && words?.editor !== editor) {
 		setWords({ editor, store: createDocxWordCountStore(editorCountSource(editor)) })
@@ -1796,7 +1837,22 @@ export function DocxEditView({
 	const header = reflow ? null : (toolbarSnapshot?.context.story.header ?? null)
 	const hasSelection = selection !== undefined && !selection.empty
 	const editable = !readOnly && snapshot !== undefined && !snapshot.readOnly
+	const transformAvailable = editable && transformOnDevice
 	const menuIssue = menu?.issue
+
+	useAction(
+		"app.assistantTransform",
+		keyboardEvent => {
+			if (!transformAvailable || !hasSelection || !wrapper?.contains(globalThis.document.activeElement)) {
+				return
+			}
+
+			// Alt+J types a character on a Mac.
+			keyboardEvent.preventDefault()
+			openTransformMenu(transformHost.selectionRect() ?? wrapper.getBoundingClientRect())
+		},
+		IN_EDITORS_AND_FIELDS
+	)
 
 	// Nothing to format: the Mini toolbar goes (and does not come back when the document can change again).
 	if (mini !== null && (!editable || editor === undefined)) {
@@ -2254,6 +2310,21 @@ export function DocxEditView({
 							return !keep
 						}}
 					>
+						{transformAvailable && hasSelection ? (
+							<>
+								<TransformSubmenu
+									parts={CONTEXT_MENU_PARTS}
+									onPick={choice => {
+										const selection = takeTransformSelection()
+
+										if (selection !== null) {
+											pickTransform(selection, choice)
+										}
+									}}
+								/>
+								<ContextMenuSeparator />
+							</>
+						) : null}
 						{menuIssue?.kind === "spelling" && spelling !== undefined && menu !== null ? (
 							<>
 								{menu.suggestions === undefined ? (
@@ -2380,6 +2451,31 @@ export function DocxEditView({
 						styles={current?.styles ?? DOCX_PARAGRAPH_STYLES}
 						theme={current?.theme ?? []}
 						onClose={closeMini}
+						transform={transformAvailable ? openTransformMenu : undefined}
+					/>
+				)}
+				{transformMenu === null ? null : (
+					<TransformMenu
+						anchor={{ getBoundingClientRect: () => transformMenu.anchor }}
+						onPick={choice => {
+							pickTransform(transformMenu.selection, choice)
+						}}
+						onClose={() => {
+							setTransformMenu(null)
+						}}
+					/>
+				)}
+				{transformRequest === null ? null : (
+					<TransformPopover
+						request={transformRequest}
+						anchor={() => wrapper?.getBoundingClientRect() ?? null}
+						onClose={applied => {
+							setTransformRequest(null)
+
+							if (!applied) {
+								focusEditor()
+							}
+						}}
 					/>
 				)}
 			</div>

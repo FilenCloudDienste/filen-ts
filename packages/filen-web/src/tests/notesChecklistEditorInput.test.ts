@@ -7,9 +7,12 @@ import { render, cleanup, fireEvent, screen } from "@testing-library/react"
 import { createElement } from "react"
 import { checklistParser } from "@filen/shared"
 import "@/lib/i18n"
+import { registerAllActions } from "@/lib/keymap/actions"
 import { ChecklistEditor } from "@/features/notes/components/editor/checklistEditor"
 import { serializeChecklist } from "@/features/notes/components/editor/checklistEditor.logic"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
+
+registerAllActions()
 
 function controllerFor(seed: string, onChange: (value: string) => void): NoteEditorController {
 	return {

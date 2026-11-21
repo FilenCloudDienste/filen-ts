@@ -5,7 +5,7 @@
 // Names, paths and free text in here are shown verbatim, as plain text. A step carries the tool's name and
 // at most a short sanitized subject; the UI owns its wording (locales/en/assistant.ts).
 
-import type { AssistantRoute } from "@filen/shared/assistant"
+import type { AssistantRoute, TransformKind, TransformLanguage } from "@filen/shared/assistant"
 
 export interface AssistantModelInfo {
 	// Stable build id (cache directory, logs). Never shown.
@@ -199,5 +199,34 @@ export interface AssistantSession {
 	getHistory: () => readonly AssistantExchange[]
 	// Signing out: stops the running turn, declines every waiting card, frees the model and refuses anything
 	// further; nothing may touch the account's data during the wipe.
+	shutdown: () => void
+}
+
+// A selection transform (rewrite, shorten, fix grammar, translate): one generation over text the user selected in
+// an editor, outside the conversation (no router, no tools, no history). `onText` gets the whole output so far;
+// `onProgress` the share (0..1) of the prompt read, before the first word. The model loads first when it is on disk
+// but not in memory. One runs at a time: a new one stops the one before.
+export interface AssistantTransformRequest {
+	kind: TransformKind
+	text: string
+	// The target of a translation; the other kinds ignore it.
+	language: TransformLanguage
+	signal: AbortSignal
+	onText: (text: string) => void
+	onProgress?: (share: number) => void
+}
+
+// "too-long": the selection does not fit the kind. "model-unavailable": the model could not be loaded (the model
+// state says why). "cancelled": the request's signal, a newer request or signing out stopped it.
+export type AssistantTransformError = "too-long" | "model-unavailable" | "cancelled" | "failed"
+
+// `text` is the model's output as Accept applies it, never rewritten for display; `foreignLinks` are the links and
+// addresses in it the selection did not hold. `truncated`: it stopped at its length limit.
+export type AssistantTransformOutcome =
+	{ ok: true; text: string; truncated: boolean; foreignLinks: readonly string[] } | { ok: false; error: AssistantTransformError }
+
+export interface AssistantTransformer {
+	run: (request: AssistantTransformRequest) => Promise<AssistantTransformOutcome>
+	// Signing out: stops the one running and refuses anything further.
 	shutdown: () => void
 }

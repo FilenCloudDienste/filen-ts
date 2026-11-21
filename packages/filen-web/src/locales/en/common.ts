@@ -65,6 +65,8 @@ export const common = {
 	toggleTheme: "Toggle theme",
 	/** Assistant toggle — icon rail button tooltip/accessible label and the keymap action description shown in shortcut UI */
 	toggleAssistant: "Assistant",
+	/** Keymap action description shown in shortcut UI — opens the assistant's rewrite menu for the selected text */
+	assistantTransformShortcut: "Rewrite selection with assistant",
 	// Rail modules
 	/** Icon rail — narrow-viewport only: opens the drawer holding the current module's sidebar (hidden at desktop widths) */
 	openNavigation: "Open navigation",

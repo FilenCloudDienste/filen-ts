@@ -48,6 +48,10 @@ export interface CodeMirrorSourceProps {
 	changed?: boolean
 	// contentRef's bytes() met a character the format's encoding cannot hold.
 	onUnencodable?: (at: Unencodable) => void
+	// The view once created, null once gone, for a host that reads or edits it from outside (the assistant's selection
+	// transform). Unlike `chrome`, it leaves the editor's own wrapping, line numbers and keys alone. Stable for the
+	// editor's life.
+	onView?: (view: EditorView | null) => void
 }
 
 export interface CodeMirrorChrome {
@@ -122,7 +126,8 @@ export function CodeMirrorSource({
 	chrome,
 	format,
 	changed: changedProp,
-	onUnencodable
+	onUnencodable,
+	onView
 }: CodeMirrorSourceProps) {
 	const changed = changedProp === true
 	const editable = editableProp ?? false
@@ -203,6 +208,7 @@ export function CodeMirrorSource({
 		seedDocRef.current = seedDoc
 		viewRef.current = view
 		chrome?.attach(view)
+		onView?.(view)
 
 		const buffer = textBuffer(
 			() => ({ doc: view.state.doc, breaks: breaks === null ? undefined : view.state.field(breaks.field) }),
@@ -261,6 +267,12 @@ export function CodeMirrorSource({
 			chrome?.attach(null)
 		}
 	}, [chrome])
+
+	useEffect(() => {
+		return () => {
+			onView?.(null)
+		}
+	}, [onView])
 
 	// Before the view exists the buffer is still the seed.
 	useEffect(() => {

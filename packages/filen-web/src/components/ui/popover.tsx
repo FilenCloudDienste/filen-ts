@@ -20,8 +20,11 @@ function PopoverContent({
 	className,
 	align: alignProp,
 	side: sideProp,
+	anchor,
 	...props
-}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "align" | "side">) {
+}: PopoverPrimitive.Popup.Props &
+	// anchor: a popover without a trigger (one shown at a selection).
+	Pick<PopoverPrimitive.Positioner.Props, "align" | "side" | "anchor">) {
 	// Not destructuring defaults, which the React Compiler cannot lower.
 	const align = alignProp ?? "center"
 	const side = sideProp ?? "bottom"
@@ -34,6 +37,7 @@ function PopoverContent({
 				alignOffset={0}
 				side={side}
 				sideOffset={4}
+				anchor={anchor}
 				className="isolate z-50"
 			>
 				<PopoverPrimitive.Popup

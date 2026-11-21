@@ -60,6 +60,8 @@ import {
 	DropdownMenuLabel
 } from "@/components/ui/dropdown-menu"
 import { isDesktopBilling, openWebBilling } from "@/features/settings/lib/billingLinks"
+import { textFieldTransform } from "@/features/assistant/transform/host"
+import { SelectionTransform } from "@/features/assistant/transform/selectionTransform"
 
 // Grow the input with its content up to this many px, then scroll internally (mobile caps at a quarter
 // screen; a fixed desktop cap reads cleaner).
@@ -140,6 +142,18 @@ export function Composer({
 	// fire a premature "up" mid-typing. Written in an effect (not during render — React Compiler forbids
 	// ref writes in render).
 	const chatRef = useRef(chat)
+	// The assistant's selection transform: the browser's own insertText into the field (its undo takes it back, its
+	// input event reaches onChange), else the draft set directly with the selection restored.
+	const [transform] = useState(textFieldTransform)
+	const [transformRoot, setTransformRoot] = useState<HTMLDivElement | null>(null)
+
+	useEffect(() => {
+		transform.attach(textareaRef.current, (value, selection) => {
+			pendingSelectionRef.current = selection
+			setManualClose(false)
+			setDraft(chatUuid, value)
+		})
+	})
 
 	// ── Autocomplete derivation (mention wins over emoji when both could match) ──
 	const mention = activeMentionQuery(draft, caret)
@@ -630,7 +644,14 @@ export function Composer({
 				</div>
 			) : null}
 			{/* The popover is the box's sibling, not its child, so the box's rounded clip never cuts it off. */}
-			<div className="relative">
+			<div
+				ref={setTransformRoot}
+				className="relative"
+			>
+				<SelectionTransform
+					host={transform.host}
+					root={transformRoot}
+				/>
 				{/* Announces that suggestions opened (the listbox itself is driven by aria-activedescendant). */}
 				<div
 					aria-live="polite"

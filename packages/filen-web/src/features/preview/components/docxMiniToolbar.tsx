@@ -11,6 +11,7 @@ import {
 	ListIndentDecreaseIcon,
 	ListIndentIncreaseIcon,
 	ListOrderedIcon,
+	SparklesIcon,
 	UnderlineIcon
 } from "lucide-react"
 import {
@@ -75,6 +76,8 @@ export interface DocxMiniToolbarProps {
 	theme: readonly (readonly DocxSwatch[])[]
 	// Hidden; with focus to the document (Escape) or left where it is.
 	onClose: (focusDocument: boolean) => void
+	// The app's ✨ at the end: opens the assistant's rewrite menu at the button (its box). Absent: no button.
+	transform?: ((anchor: DOMRect) => void) | undefined
 }
 
 const SIZE_STEPS: readonly { type: DocxEditorCommandType; icon: ReactNode }[] = [
@@ -112,7 +115,7 @@ function boundsOf(element: HTMLElement | null): MiniRect {
 }
 
 export function DocxMiniToolbar(props: DocxMiniToolbarProps) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "assistant"])
 	const { request, snapshot, readOnly, elementRef } = props
 	const focus = useCommandMenuFocus()
 	const latest = useLatestRef(props)
@@ -380,6 +383,17 @@ export function DocxMiniToolbar(props: DocxMiniToolbarProps) {
 					</DocxColorButton>
 				)}
 				{PARAGRAPH.map(item => button(item.type, item.icon, item.toggle))}
+				{props.transform === undefined || readOnly ? null : (
+					<TooltipIconButton
+						label={t("assistant:assistantTransformOpen")}
+						onMouseDown={keepFocus}
+						onClick={event => {
+							props.transform?.(event.currentTarget.getBoundingClientRect())
+						}}
+					>
+						<SparklesIcon />
+					</TooltipIconButton>
+				)}
 			</div>
 		</div>
 	)

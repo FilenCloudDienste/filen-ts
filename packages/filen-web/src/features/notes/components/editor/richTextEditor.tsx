@@ -19,6 +19,8 @@ import {
 import { RICH_TEXT_QUILL_FORMATS } from "@filen/shared/dom"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { useLatestRef } from "@/lib/useLatestRef"
+import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
+import { quillTransformHost } from "@/features/notes/components/editor/richTextTransformHost"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -112,6 +114,8 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 	const [formats, setFormats] = useState<RichActiveFormats>(EMPTY_RICH_FORMATS)
 	const [linkOpen, setLinkOpen] = useState(false)
 	const [linkUrl, setLinkUrl] = useState("")
+	// The assistant's selection transform: its host follows the Quill instance (attached at construction).
+	const [transform] = useState(quillTransformHost)
 
 	// #40 enforcement: re-apply read-only when the prop flips (the editor only mounts writable today, but
 	// this keeps a mid-session flip from ever accepting edits that would wedge sync).
@@ -145,6 +149,7 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 		})
 
 		quillRef.current = quill
+		transform.attach(quill)
 
 		// #39 gate: propagate only Quill-source "user" edits (typing/paste/dictation/autocomplete). The
 		// silent seed paste below never reaches onChange.
@@ -163,7 +168,7 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 		// Sanitize-before-seed, pasted "silent" so it never propagates (richText/dom.tsx). Never focus a
 		// read-only editor (#40) — web does not autofocus at all, so there is no caret placement to guard.
 		seedRichEditor(quill, seedRef.current)
-	}, [t, onChangeRef])
+	}, [t, onChangeRef, transform])
 
 	// Restore the editor selection (lost to a focus shift for the popover), run the format, reflect it.
 	function runFormat(action: (quill: Quill) => void): void {
@@ -348,9 +353,13 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 					<UnlinkIcon />
 				</ToolbarButton>
 			</div>
-			<div className="min-h-0 flex-1 overflow-auto">
+			<SelectionTransformRoot
+				host={transform.host}
+				readOnly={controller.readOnly}
+				className="min-h-0 flex-1 overflow-auto"
+			>
 				<div ref={editorRef} />
-			</div>
+			</SelectionTransformRoot>
 		</div>
 	)
 }

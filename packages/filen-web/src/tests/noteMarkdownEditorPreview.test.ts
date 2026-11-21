@@ -41,6 +41,7 @@ vi.mock("@/features/notes/components/markdownSplitPane", () => ({
 
 vi.mock("@/lib/keymap/useAction", () => ({
 	IN_EDITORS: { enableOnContentEditable: true },
+	IN_EDITORS_AND_FIELDS: { enableOnContentEditable: true },
 	OUTSIDE_OVERLAYS: { ignoreEventWhen: overlayGuard },
 	useAction: (id: string, handler: (event: KeyboardEvent) => void, options?: unknown) => {
 		actions.set(id, handler)

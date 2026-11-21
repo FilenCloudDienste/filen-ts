@@ -5,6 +5,9 @@ import { type Checklist, cn, addChecklistLine, removeChecklistItem, patchCheckli
 import { isImeKeydown } from "@filen/shared/keymap"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
+import { textFieldTransform } from "@/features/assistant/transform/host"
+import { SelectionTransform } from "@/features/assistant/transform/selectionTransform"
+import { useLatestRef } from "@/lib/useLatestRef"
 
 // Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
 // leading toggle. Enter on a non-empty row appends a row and focuses it; Backspace on an empty row
@@ -36,6 +39,20 @@ export function ChecklistEditor({
 	// Live input elements by row id, for focus moves after add/remove. A ref (instance state), not
 	// state — the React Compiler keeps it stable and mutating it never triggers a render.
 	const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
+	// The assistant's selection transform, one item's text at a time: the item last focused, edited through the
+	// browser's own insertText (its onChange commits as typing does), else committed directly.
+	const [transform] = useState(textFieldTransform)
+	const [root, setRoot] = useState<HTMLDivElement | null>(null)
+	const contentChangeRef = useLatestRef(handleContentChange)
+
+	function attachTransform(id: string, element: HTMLInputElement): void {
+		transform.attach(element, (value, selection) => {
+			contentChangeRef.current(id, value)
+			requestAnimationFrame(() => {
+				element.setSelectionRange(selection.start, selection.end)
+			})
+		})
+	}
 
 	function commit(next: Checklist): void {
 		setRows(next)
@@ -171,9 +188,15 @@ export function ChecklistEditor({
 
 	return (
 		<div
+			ref={setRoot}
 			role="list"
 			className="flex size-full flex-col gap-0.5 overflow-auto p-4"
 		>
+			<SelectionTransform
+				host={transform.host}
+				root={root}
+				readOnly={controller.readOnly}
+			/>
 			{renderedRows.map(item => (
 				<div
 					key={item.id}
@@ -205,6 +228,9 @@ export function ChecklistEditor({
 						}}
 						type="text"
 						value={item.content}
+						onFocus={event => {
+							attachTransform(item.id, event.currentTarget)
+						}}
 						aria-label={t("noteChecklistRowInput")}
 						placeholder={t("noteChecklistItemPlaceholder")}
 						onChange={event => {
