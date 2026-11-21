@@ -152,6 +152,20 @@ describe("assistant import restrictions", () => {
 		}
 	)
 
+	// The runtime runs the model on the desktop app's native engine through the bridge's assistant calls alone (model
+	// files and AssistantModel requests); the rest of the bridge stays out of its reach.
+	it("lets the runtime reach the desktop app's native engine, and nothing else of the bridge", async () => {
+		const file = "src/features/assistant/runtime/nativeEngine.ts"
+
+		await expect(lintImports(file, 'import { desktopAssistant } from "@/lib/desktop"')).resolves.toEqual([])
+
+		const bridge = await lintImports(file, 'import { desktopAssistant, desktopBridge } from "@/lib/desktop"')
+
+		expect(bridge).toHaveLength(1)
+		expect(bridge[0]).toContain("desktopBridge")
+		await expect(lintImports(file, "void window.desktop?.assistant")).resolves.toHaveLength(1)
+	})
+
 	it("refuses a dynamic import, which the import rules cannot see", async () => {
 		await expect(lintImports("src/features/assistant/loop/x.ts", 'void import("@/lib/sdk/client")')).resolves.toEqual([
 			"A dynamic import would slip past the assistant's import restrictions."
