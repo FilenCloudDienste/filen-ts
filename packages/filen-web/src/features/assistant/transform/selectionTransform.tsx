@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { SparklesIcon } from "lucide-react"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
-import { useLatestRef } from "@/lib/useLatestRef"
-import { log } from "@/lib/log"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import type { TransformHost, TransformSelection } from "@/features/assistant/transform/host"
 import { transformOffered } from "@/features/assistant/transform/transform.logic"
@@ -13,10 +11,10 @@ import { TransformMenu } from "@/features/assistant/transform/transformMenu"
 import type { TransformPick } from "@/features/assistant/transform/transformMenuParts"
 import { TransformPopover, type TransformRequest } from "@/features/assistant/transform/transformPopover"
 
-// The selection transform on a text editor (a note's editor, the chat composer): a ✨ button beside a selection, a
-// right click on one (Shift+right click keeps the browser's menu) and the app.assistantTransform key open the rewrite
-// menu; a pick shows the result's popover. Mounted with the editor; its listeners only read where a selection ends,
-// on selection changes, while focus is in the editor.
+// The selection transform on a text editor (a note's editor, the chat composer): a ✨ button beside a selection and the
+// app.assistantTransform key open the rewrite menu; a pick shows the result's popover. A right click keeps the
+// browser's own menu (paste, spelling). Mounted with the editor; its listeners only read where a selection ends, on
+// selection changes, while focus is in the editor.
 
 const BUTTON_PX = 28
 
@@ -28,8 +26,6 @@ interface MenuState {
 	anchor: Anchor
 	// Taken as the menu opened, before it took focus.
 	selection: TransformSelection | "unsupported"
-	// Opened by a right click: Cut and Copy too.
-	clipboard: boolean
 }
 
 function pointAnchor(x: number, y: number): Anchor {
@@ -72,18 +68,14 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 	const [button, setButton] = useState<{ x: number; y: number } | null>(null)
 	const [menu, setMenu] = useState<MenuState | null>(null)
 	const [request, setRequest] = useState<TransformRequest | null>(null)
-	// Whether a selection existed as the secondary button went down (a Mac selects the word under a right click).
-	const selectedAtPressRef = useRef(false)
 
-	function open(anchor: Anchor, clipboard: boolean): void {
+	function open(anchor: Anchor): void {
 		const selection = host.selection()
 
 		if (selection !== null) {
-			setMenu({ anchor, selection, clipboard })
+			setMenu({ anchor, selection })
 		}
 	}
-
-	const openRef = useLatestRef(open)
 
 	function pick(state: MenuState, { kind, language }: TransformPick): void {
 		setMenu(null)
@@ -96,23 +88,6 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 		}
 
 		setRequest({ selection: state.selection, kind, language })
-	}
-
-	// The browser's Cut and Copy, which the menu stands in for: the text the selection held, as plain text.
-	function clipboard(selection: TransformSelection, cut: boolean): void {
-		setMenu(null)
-		navigator.clipboard.writeText(selection.text).then(
-			() => {
-				if (!cut || selection.replace("") === null) {
-					host.focus()
-				}
-			},
-			(e: unknown) => {
-				log.warn("assistant", "clipboard write failed", e)
-				toast.error(t("assistantTransformFailed"))
-				host.focus()
-			}
-		)
 	}
 
 	useAction(
@@ -130,7 +105,7 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 
 			// Alt+J types a character on a Mac.
 			event.preventDefault()
-			open(pointAnchor(rect.left, rect.bottom), false)
+			open(pointAnchor(rect.left, rect.bottom))
 		},
 		IN_EDITORS_AND_FIELDS
 	)
@@ -151,31 +126,12 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 				setButton(previous => (rect === null ? null : previous?.x === x && previous.y === y ? previous : { x, y }))
 			})
 		}
-		const onPointerDown = (event: PointerEvent) => {
-			if (event.button === 2) {
-				selectedAtPressRef.current = host.selectionRect() !== null
-			}
-		}
-		const onContextMenu = (event: MouseEvent) => {
-			const selected = selectedAtPressRef.current
-
-			selectedAtPressRef.current = false
-
-			if (event.shiftKey || !selected || host.selectionRect() === null) {
-				return
-			}
-
-			event.preventDefault()
-			openRef.current(pointAnchor(event.clientX, event.clientY), true)
-		}
 
 		document.addEventListener("selectionchange", update)
 		root.addEventListener("pointerup", update)
 		root.addEventListener("keyup", update)
 		root.addEventListener("select", update, true)
 		root.addEventListener("focusout", update)
-		root.addEventListener("pointerdown", onPointerDown, true)
-		root.addEventListener("contextmenu", onContextMenu)
 		window.addEventListener("scroll", update, { capture: true, passive: true })
 		window.addEventListener("resize", update)
 
@@ -186,14 +142,10 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 			root.removeEventListener("keyup", update)
 			root.removeEventListener("select", update, true)
 			root.removeEventListener("focusout", update)
-			root.removeEventListener("pointerdown", onPointerDown, true)
-			root.removeEventListener("contextmenu", onContextMenu)
 			window.removeEventListener("scroll", update, true)
 			window.removeEventListener("resize", update)
 		}
-	}, [root, host, offered, openRef])
-
-	const menuSelection = menu?.selection
+	}, [root, host, offered])
 
 	return (
 		<>
@@ -214,7 +166,7 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 							onClick={event => {
 								const rect = event.currentTarget.getBoundingClientRect()
 
-								open(pointAnchor(rect.left, rect.bottom), false)
+								open(pointAnchor(rect.left, rect.bottom))
 							}}
 						>
 							<SparklesIcon
@@ -233,18 +185,6 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 					onClose={() => {
 						setMenu(null)
 					}}
-					{...(menu.clipboard && menuSelection !== undefined && menuSelection !== "unsupported"
-						? {
-								clipboard: {
-									cut: () => {
-										clipboard(menuSelection, true)
-									},
-									copy: () => {
-										clipboard(menuSelection, false)
-									}
-								}
-							}
-						: {})}
 				/>
 			)}
 			{request === null ? null : (

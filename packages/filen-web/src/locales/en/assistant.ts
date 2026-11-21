@@ -610,10 +610,6 @@ export const assistant = {
 	assistantTransformAllLanguages: "All languages…",
 	/** Result heading for a translation, e.g. "Translate to German" */
 	assistantTransformTranslateTo: "Translate to {{language}}",
-	/** Rewrite context menu — cuts the selection */
-	assistantTransformCut: "Cut",
-	/** Rewrite context menu — copies the selection */
-	assistantTransformCopy: "Copy",
 	/** Result — accessible name of the result popover */
 	assistantTransformResultLabel: "Assistant result",
 	/** Result — replaces the selection with the result */

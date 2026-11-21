@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
-import { ClipboardCopyIcon, ScissorsIcon, SparklesIcon } from "lucide-react"
+import { SparklesIcon } from "lucide-react"
 import type { TransformLanguage } from "@filen/shared/assistant"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu"
 import { recentTransformLanguages, TRANSFORM_LANGUAGE_CODES, uiTransformLanguage } from "@/features/assistant/transform/transform.logic"
 import { noteTransformLanguage, useRecentTransformLanguages } from "@/features/assistant/transform/recentLanguages"
 import {
@@ -13,8 +13,8 @@ import {
 } from "@/features/assistant/transform/transformMenuParts"
 
 // The rewrite menu: Rewrite, Shorten, Fix grammar, Translate ▸ (the recently used languages, then all of them). The
-// same entries in a menu of their own (the button beside a selection, the shortcut, a right click in a note or the
-// composer) and inside the Word document editor's context menu.
+// same entries in a menu of their own (the button beside a selection in a note or the composer, the shortcut) and
+// inside the Word document editor's context menu.
 
 const PLAIN_KINDS = ["rewrite", "shorten", "fix_grammar"] as const
 
@@ -97,18 +97,15 @@ export function TransformSubmenu({ parts, onPick }: { parts: TransformMenuParts;
 	)
 }
 
-// The menu at a point: the button beside the selection, the shortcut, a right click (`clipboard`: Cut and Copy too, as
-// the browser's menu it stands in for had them).
+// The menu at a point: the button beside the selection, the shortcut.
 export function TransformMenu({
 	anchor,
 	onPick,
-	onClose,
-	clipboard
+	onClose
 }: {
 	anchor: { getBoundingClientRect: () => DOMRect }
 	onPick: (pick: TransformPick) => void
 	onClose: () => void
-	clipboard?: { cut: (() => void) | null; copy: () => void }
 }) {
 	const { t } = useTranslation("assistant")
 
@@ -125,30 +122,10 @@ export function TransformMenu({
 				anchor={anchor}
 				aria-label={t("assistantTransformOpen")}
 			>
-				{clipboard === undefined ? (
-					<TransformMenuEntries
-						parts={DROPDOWN_PARTS}
-						onPick={onPick}
-					/>
-				) : (
-					<>
-						<TransformSubmenu
-							parts={DROPDOWN_PARTS}
-							onPick={onPick}
-						/>
-						<DropdownMenuSeparator />
-						{clipboard.cut === null ? null : (
-							<DropdownMenuItem onClick={clipboard.cut}>
-								<ScissorsIcon aria-hidden="true" />
-								{t("assistantTransformCut")}
-							</DropdownMenuItem>
-						)}
-						<DropdownMenuItem onClick={clipboard.copy}>
-							<ClipboardCopyIcon aria-hidden="true" />
-							{t("assistantTransformCopy")}
-						</DropdownMenuItem>
-					</>
-				)}
+				<TransformMenuEntries
+					parts={DROPDOWN_PARTS}
+					onPick={onPick}
+				/>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	)
