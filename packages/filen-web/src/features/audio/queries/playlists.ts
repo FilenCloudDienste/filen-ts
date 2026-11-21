@@ -3,7 +3,7 @@ import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import { patchQuery, replaceOrAppend } from "@/queries/patch"
 import { fetchPlaylistEntries, isSettledPlaylistEntry } from "@/features/audio/lib/playlists"
-import type { Playlist } from "@filen/shared"
+import { comparePlaylists, compareNamesThenIds, type Playlist } from "@filen/shared"
 
 // One global playlists list query — the playlists sidebar and screen (and the add-tracks picker they
 // open) and the assistant's tools all read this one cache slice, same one-list-per-session rationale as
@@ -15,6 +15,17 @@ export const PLAYLISTS_QUERY_KEY = ["audio", "playlists"] as const
 // fetchPlaylistEntries), never collapsing the whole screen. `fileUuid` is the DRIVE file's uuid (the
 // only identity available for a file whose body never parsed enough to yield the playlist's OWN uuid).
 export type PlaylistEntry = { status: "ok"; playlist: Playlist } | { status: "degraded"; fileUuid: string; name: string }
+
+// The list's one order, applied to every read and patch so the cache always holds it and no render sorts:
+// playlists by comparePlaylists, then the degraded rows by name and file uuid. Never the listing's order,
+// which changes whenever a save rewrites a file.
+export function comparePlaylistEntries(a: PlaylistEntry, b: PlaylistEntry): number {
+	if (a.status === "ok") {
+		return b.status === "ok" ? comparePlaylists(a.playlist, b.playlist) : -1
+	}
+
+	return b.status === "ok" ? 1 : compareNamesThenIds(a.name, a.fileUuid, b.name, b.fileUuid)
+}
 
 // A read downloads every playlist file in full. Same-tab writes patch the cache and the socket marks it
 // unsynced when anything else touches the Playlists directory (features/audio/lib/socketHandlers.ts), so
@@ -40,7 +51,7 @@ async function fetchPlaylistsQuery(): Promise<PlaylistEntry[]> {
 	const signals = unsyncSignals
 	const patches = patchCount
 	const epoch = currentSocketEpoch()
-	const entries = await fetchPlaylistEntries()
+	const entries = (await fetchPlaylistEntries()).sort(comparePlaylistEntries)
 
 	// A degraded row may be a transient download failure — keep retrying it on mount/focus as before, even
 	// after an earlier clean read. One whose bytes do not parse reads the same every time, so it does not.
@@ -75,10 +86,16 @@ export function playlistsQueryRead(): Promise<PlaylistEntry[]> {
 
 export function playlistsQueryUpdate(updater: (prev: PlaylistEntry[]) => PlaylistEntry[]): void {
 	patchCount++
-	patchQuery<PlaylistEntry[]>(PLAYLISTS_QUERY_KEY, prev => updater(prev ?? []))
+	patchQuery<PlaylistEntry[]>(PLAYLISTS_QUERY_KEY, prev => {
+		const base = prev ?? []
+		const next = updater(base)
+
+		// An updater that changed nothing hands back the cached array, already in order: never sort it in place.
+		return next === base ? next : next.sort(comparePlaylistEntries)
+	})
 }
 
-// Replaces (or appends) a single playlist's "ok" row by uuid, preserving every other row's position —
+// Replaces (or appends) a single playlist's "ok" row by uuid, then the patch puts it in its place —
 // the write path's confirm-then-patch after a successful create/rename/add/remove/reorder/prune save.
 export function playlistsQueryUpsert(playlist: Playlist): void {
 	playlistsQueryUpdate(prev =>

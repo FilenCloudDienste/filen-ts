@@ -259,7 +259,7 @@ describe("usePlaylistsQuery request counts", () => {
 
 		const first = await mountLoaded()
 
-		expect(first.result.current.data?.map(entry => entry.status)).toEqual(["degraded", "degraded", "ok"])
+		expect(first.result.current.data?.map(entry => entry.status)).toEqual(["ok", "degraded", "degraded"])
 
 		first.unmount()
 		await mountLoaded()
