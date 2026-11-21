@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parsePlaylist } from "@filen/shared"
+import { comparePlaylists, parsePlaylist } from "@filen/shared"
 
 function validPlaylistFile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
@@ -90,5 +90,26 @@ describe("parsePlaylist", () => {
 		["missing playlist owner uuid", { playlist: undefined }]
 	])("rejects a playlist whose file entry is malformed — %s", (_label, override) => {
 		expect(parsePlaylist(validPlaylist({ files: [validPlaylistFile(override)] }))).toBeNull()
+	})
+})
+
+describe("comparePlaylists", () => {
+	it("orders most recently edited first, then by natural name, then by uuid", () => {
+		const playlists = [
+			{ uuid: "c", name: "Mix 10", updated: 5 },
+			{ uuid: "b", name: "mix 2", updated: 5 },
+			{ uuid: "z", name: "Old", updated: 1 },
+			{ uuid: "a", name: "MIX 2", updated: 5 },
+			{ uuid: "y", name: "New", updated: 9 }
+		]
+		const expected = ["y", "a", "b", "c", "z"]
+
+		expect([...playlists].sort(comparePlaylists).map(playlist => playlist.uuid)).toEqual(expected)
+		expect(
+			[...playlists]
+				.reverse()
+				.sort(comparePlaylists)
+				.map(playlist => playlist.uuid)
+		).toEqual(expected)
 	})
 })

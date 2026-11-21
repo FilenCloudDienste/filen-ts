@@ -303,3 +303,18 @@ export function compareNames(a: string, b: string): number {
 
 	return aLeft === bLeft ? 0 : aLeft < bLeft ? -1 : 1
 }
+
+/** The last link of every list comparator: a unique id by code unit, 0 only for the same id. */
+export function compareIds(a: string, b: string): number {
+	return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * Natural, case-insensitive name, then the unique id: a total order over any list whose items carry both, so equal
+ * names never fall back to the input's order.
+ */
+export function compareNamesThenIds(aName: string, aId: string, bName: string, bId: string): number {
+	const order = compareNames(aName, bName)
+
+	return order !== 0 ? order : compareIds(aId, bId)
+}

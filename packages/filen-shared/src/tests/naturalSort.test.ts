@@ -6,6 +6,8 @@ import {
 	clearNaturalSortCaches,
 	NATURAL_SORT_CACHE_CAP,
 	compareNames,
+	compareIds,
+	compareNamesThenIds,
 	compareTextRuns,
 	fastLocaleCompare,
 	sortItems,
@@ -344,5 +346,20 @@ describe("natural order across non-ASCII names", () => {
 	it("calls case-only non-ASCII differences equal", () => {
 		expect(compareNames("äpfel", "Äpfel")).toBe(0)
 		expect(comparePartsNumeric(getNameParts("ÄPFEL2"), getNameParts("äpfel2"))).toBe(0)
+	})
+})
+
+describe("compareNamesThenIds", () => {
+	it("breaks a natural, case-insensitive name tie on the id", () => {
+		expect(compareNames("File 01", "file 1")).toBe(0)
+		expect(compareNamesThenIds("File 01", "b", "file 1", "a")).toBe(1)
+		expect(compareNamesThenIds("file 1", "a", "File 01", "b")).toBe(-1)
+		expect(compareNamesThenIds("a 2", "z", "a 10", "a")).toBe(-1)
+	})
+
+	it("is 0 only for the same id", () => {
+		expect(compareIds("x", "x")).toBe(0)
+		expect(compareIds("x", "y")).toBe(-1)
+		expect(compareIds("y", "x")).toBe(1)
 	})
 })

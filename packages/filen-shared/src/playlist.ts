@@ -1,3 +1,5 @@
+import { compareNamesThenIds } from "./naturalSort"
+
 // The on-disk playlist contract stored at `.filen/playlists/${playlistUuid}.json` — every app that
 // reads or writes these files must produce and accept byte-identical JSON. Validation is deliberately
 // hand-rolled (no schema library) so this stays a plain, dependency-free structural check: strict
@@ -26,6 +28,16 @@ export interface Playlist {
 	created: number
 	updated: number
 	files: PlaylistFile[]
+}
+
+// The playlists list order: most recently edited first, then natural name, then uuid. The files come from a
+// directory listing whose order changes whenever a save rewrites one, so the list never follows it.
+export function comparePlaylists(a: Pick<Playlist, "uuid" | "name" | "updated">, b: Pick<Playlist, "uuid" | "name" | "updated">): number {
+	if (a.updated !== b.updated) {
+		return b.updated - a.updated
+	}
+
+	return compareNamesThenIds(a.name, a.uuid, b.name, b.uuid)
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
