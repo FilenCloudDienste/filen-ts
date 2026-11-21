@@ -1,0 +1,9 @@
+{
+  // The assistant bench's page (scripts/assistantBench/page.ts): DOM globals, no Node.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM"],
+    "types": []
+  },
+  "include": ["scripts/assistantBench/page.ts"]
+}

@@ -3,5 +3,7 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src/main", "src/shared", "src/tests", "scripts", "eslint.config.js", "vitest.config.ts", "electron-builder.ts"]
+  "include": ["src/main", "src/shared", "src/tests", "scripts", "eslint.config.js", "vitest.config.ts", "electron-builder.ts"],
+  // A page; tsconfig.bench.json checks it with DOM globals.
+  "exclude": ["scripts/assistantBench/page.ts"]
 }

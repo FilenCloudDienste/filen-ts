@@ -8,3 +8,4 @@ build/deps/
 build/fileProvider/
 build/linux/
 native/dragOut/win/target/
+build/assistant-bench/

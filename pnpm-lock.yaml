@@ -257,6 +257,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
+      '@filen/assistant-eval':
+        specifier: workspace:*
+        version: link:../filen-assistant-eval
       '@filen/sdk-rs':
         specifier: 0.5.33
         version: 0.5.33(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
@@ -269,6 +272,9 @@ importers:
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
+      '@wllama/wllama':
+        specifier: 3.8.1
+        version: 3.8.1(patch_hash=bac6c3dcc6089774f199f36f59a0579762a384be2acd80b97b9633c032a67737)
       arktype:
         specifier: ^2.2.9
         version: 2.2.9
@@ -296,6 +302,9 @@ importers:
       node-api-headers:
         specifier: 1.9.0
         version: 1.9.0
+      node-llama-cpp:
+        specifier: 3.22.1
+        version: 3.22.1(supports-color@8.1.1)(typescript@6.0.3)
       playwright-core:
         specifier: 1.65.0
         version: 1.65.0
