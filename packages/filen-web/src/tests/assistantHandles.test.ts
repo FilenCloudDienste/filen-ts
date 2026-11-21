@@ -81,4 +81,17 @@ describe("AssistantHandleRegistry", () => {
 		expect(registry.register({ kind: "drive", item: directory }, "Docs").handle).toBe("d8")
 		expect(registry.register({ kind: "note", note }, "Plan").handle).toBe("n13")
 	})
+
+	it("hands app help results h handles and sync pairs s handles, numbered past a resumed conversation's", () => {
+		const registry = new AssistantHandleRegistry()
+
+		registry.clear(["Turn it on in h2; the Work pair is s3."])
+
+		const help = registry.register({ kind: "help", id: "two-factor", title: "Two-factor authentication" }, "Two-factor authentication")
+		const pair = registry.register({ kind: "syncPair", pairId: "pair-1", name: "Work" }, "Work")
+
+		expect([help.handle, pair.handle]).toEqual(["h3", "s4"])
+		expect(registry.register({ kind: "syncPair", pairId: "pair-1", name: "Work" }, "Work").handle).toBe("s4")
+		expect(registry.get("s4")?.entity).toEqual({ kind: "syncPair", pairId: "pair-1", name: "Work" })
+	})
 })

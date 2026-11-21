@@ -1008,6 +1008,18 @@ describe("notes", () => {
 		expect(json(await call("list_notes", { only: "any" }))).toMatchObject({ total: 53, more: 13 })
 	})
 
+	it("lists the trashed notes only when asked for them", async () => {
+		const binned = note(testUuid("binned"), "Shopping list", { trash: true })
+
+		sdk.listNotes.mockResolvedValue([binned, plan])
+
+		expect(json(await call("list_notes", { only: "trashed" }))["notes"]).toEqual([
+			expect.objectContaining({ title: "Shopping list", trashed: true })
+		])
+		expect(json(await call("list_notes", { query: "shopping" }))["notes"]).toEqual([])
+		expect(json(await call("list_notes", {}))["notes"]).toEqual([expect.objectContaining({ title: "Trip plan" })])
+	})
+
 	it("reads a note through the editor's content query, as plain text", async () => {
 		sdk.getNoteContent.mockResolvedValue("<p>Flour</p><p>Sugar &amp; salt</p>")
 		await call("list_notes", {})
@@ -1642,7 +1654,7 @@ describe("drive lists, sharing, contacts and transfers", () => {
 
 		expect(json(await call("list_section", { section: "trash" }))).toMatchObject({
 			items: [{ handle: "f1", name: "readme.md", kind: "file" }],
-			note: "Only the user can restore or delete these, in the app. Do not offer to."
+			note: "Only the user can delete these for good, in the app. Do not offer to."
 		})
 		expect(json(await call("list_section", { section: "trash", query: "readme" }))).toMatchObject({ items: [{ handle: "f1" }] })
 		expect(json(await call("list_section", { section: "trash", query: "invoice" }))).toEqual({ section: "trash", items: [] })

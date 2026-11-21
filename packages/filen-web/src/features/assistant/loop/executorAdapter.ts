@@ -26,8 +26,14 @@ export function proposalAction({ tool, args }: { tool: string; args: Record<stri
 			return "copy"
 		case "trash_items":
 			return "trash"
+		case "restore_items":
+			return "restore"
 		case "rename_item":
 			return "rename"
+		case "rename_by_pattern":
+			return "batch-rename"
+		case "organize_by_date":
+			return "organize-by-date"
 		case "set_favorite":
 			return args["favorite"] === true ? "favorite" : "unfavorite"
 		case "create_directory":

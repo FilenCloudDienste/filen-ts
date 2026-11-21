@@ -311,7 +311,9 @@ const KIND_LABELS: Record<AssistantEntityKind, string> = {
 	note: "a note",
 	chat: "a chat",
 	playlist: "a playlist",
-	track: "a track"
+	track: "a track",
+	help: "an app_help result",
+	syncPair: "a sync pair"
 }
 
 const LOOKUP_TOOLS: Record<AssistantEntityKind, string> = {
@@ -320,7 +322,9 @@ const LOOKUP_TOOLS: Record<AssistantEntityKind, string> = {
 	note: "list_notes",
 	chat: "list_chats",
 	playlist: "list_playlists",
-	track: "open_playlist"
+	track: "open_playlist",
+	help: "app_help",
+	syncPair: "get_desktop_status"
 }
 
 export function entityName(entity: AssistantEntity): string {
@@ -337,6 +341,10 @@ export function entityName(entity: AssistantEntity): string {
 			return entity.playlist.name
 		case "track":
 			return entity.track.name
+		case "help":
+			return entity.title
+		case "syncPair":
+			return entity.name
 	}
 }
 
@@ -365,6 +373,10 @@ function entityUuid(entity: AssistantEntity): string {
 			return entity.playlist.uuid
 		case "track":
 			return entity.track.uuid
+		case "help":
+			return entity.id
+		case "syncPair":
+			return entity.pairId
 	}
 }
 

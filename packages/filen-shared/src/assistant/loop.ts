@@ -11,6 +11,7 @@ import {
 	assistantUserPrompt,
 	messageEdges,
 	ROUTER_GRAMMAR,
+	ROUTER_ROOM,
 	ROUTER_SYSTEM_PROMPT,
 	routerRequest
 } from "./prompts"
@@ -433,8 +434,9 @@ const ACTING_ROUTES: ReadonlySet<AssistantRoute> = new Set(["audio", "navigation
 
 // What the router and the content extraction may fill of an engine's context besides the main loop's
 // `contextTokens`. An engine that keeps the three in one cache sizes it to the sum: when they overflow it,
-// the engine clears idle slots, and the router's cached system prompt goes first.
-export const ROUTER_CONTEXT_TOKENS = 2048
+// the engine clears idle slots, and the router's cached system prompt goes first. The router's share depends
+// on ROUTER_ROOM (prompts.ts): 256 more tokens (about 8 MiB of cache) or shorter message edges.
+export const ROUTER_CONTEXT_TOKENS = ROUTER_ROOM === "context" ? 2304 : 2048
 export const QUARANTINE_CONTEXT_TOKENS = 2048
 
 // Tool-call syntax a model wrote as text instead of as a call: template markup, or a call to one of the
@@ -748,15 +750,16 @@ function toModelTools(tools: readonly AssistantTool[]): AssistantModelTool[] {
 // state, which a prompt differing in its first lines leaves none of. Each family stays near the size of its
 // largest group, so a conversation that keeps to one group pays little for the others, and its groups take
 // the same form of every tool they share (insights, which searches and lists by date, is a family of its
-// own). Organize stays alone: shown the drive family, its refusals of writes an app does not run drifted
-// out of the user's language. The answer route renders no tools: shown tools it may not call, the model
-// tries them anyway.
+// own). Organize stays apart from the drive family, with the batch writes beside it: shown the drive family,
+// its refusals of writes an app does not run drifted out of the user's language. Help is small and its own.
+// The answer route renders no tools: shown tools it may not call, the model tries them anyway.
 export const ASSISTANT_PROMPT_FAMILIES: readonly (readonly AssistantToolGroup[])[] = [
-	["files", "trash", "shared"],
-	["organize"],
+	["files", "trash", "shared", "restore"],
+	["organize", "batch"],
 	["insights"],
 	["notes", "chats"],
-	["audio", "navigation"]
+	["audio", "navigation"],
+	["help"]
 ]
 
 // Every tool of a route's family, supported or not, in the family's order: its first group's as that group
@@ -793,14 +796,17 @@ function fixedStepTokens(supports: (tool: AssistantTool) => boolean): number {
 
 				return (
 					Math.max(
-						...[true, false].map(canTrash =>
-							estimateTokens(
-								assistantSystemPrompt({
-									spotlight: spotlightInstruction({ mode: "delimit" }),
-									canary: "x".repeat(32),
-									unavailable,
-									canTrash
-								})
+						...[true, false].flatMap(canTrash =>
+							[true, false].map(canRestore =>
+								estimateTokens(
+									assistantSystemPrompt({
+										spotlight: spotlightInstruction({ mode: "delimit" }),
+										canary: "x".repeat(32),
+										unavailable,
+										canTrash,
+										canRestore
+									})
+								)
 							)
 						)
 					) + estimateTokens(JSON.stringify(toModelTools(family.filter(supports))))
@@ -957,7 +963,9 @@ export async function runAssistantTurn({
 	const instructionSpotlight = spotlightOptions === null ? null : spotlightInstruction(spotlightOptions)
 	const trashTool = assistantToolByName("trash_items")
 	const canTrash = trashTool !== undefined && supports(trashTool)
-	const instructions = assistantInstructionLines(instructionSpotlight, { canTrash })
+	const restoreTool = assistantToolByName("restore_items")
+	const canRestore = restoreTool !== undefined && supports(restoreTool)
+	const instructions = assistantInstructionLines(instructionSpotlight, { canTrash, canRestore })
 	const guard = new AssistantTurnGuard({
 		options: {
 			consequentialAllowed: intent === "change",
@@ -999,7 +1007,8 @@ export async function runAssistantTurn({
 			spotlight: instructionSpotlight,
 			canary,
 			unavailable: family.filter(tool => !supports(tool)).map(tool => tool.title),
-			canTrash
+			canTrash,
+			canRestore
 		})
 	}
 	const promptParts = {

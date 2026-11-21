@@ -599,6 +599,21 @@ describe("FakeApp", () => {
 		})
 	})
 
+	it("lists the trashed notes only when asked for them, like the app", () => {
+		const app = new FakeApp()
+		const binned = app.state.notes.find(note => note.handle === "n2")
+
+		if (binned !== undefined) {
+			binned.trashed = true
+		}
+
+		const handles = (args: Record<string, unknown>) =>
+			(ok(app.execute({ name: "list_notes", args })) as { notes: { handle: string; trashed?: boolean }[] }).notes
+
+		expect(handles({ only: "trashed" })).toEqual([expect.objectContaining({ handle: "n2", trashed: true })])
+		expect(handles({}).map(note => note.handle)).not.toContain("n2")
+	})
+
 	it("lists the Photos timeline by the date taken", () => {
 		const photos = ok(new FakeApp().execute({ name: "list_photos", args: { period: "custom", from: "2024-05", to: "2024-05" } })) as {
 			photos: { handle: string; taken: string }[]

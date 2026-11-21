@@ -160,6 +160,23 @@ beforeEach(() => {
 })
 
 describe("conversation serialization", () => {
+	it("saves the batch, restore and help routes and cards", () => {
+		const cards = (["batch-rename", "organize-by-date", "restore"] as const).map((action, index) => {
+			const route = (["batch", "restore", "help"] as const)[index] ?? "help"
+
+			return turnEntries(`turn-${String(index)}`, action).map(entry =>
+				entry.kind === "proposal"
+					? { ...entry, proposal: { ...entry.proposal, action } }
+					: entry.kind === "steps"
+						? { ...entry, steps: entry.steps.map(step => (step.kind === "routing" ? { ...step, route } : step)) }
+						: entry
+			)
+		})
+		const content = serializeConversation(snapshot(cards.flat()), 10)
+
+		expect(conversationBodySchema({ v: 1, rev: "x", ...content })).not.toBeInstanceOf(Error)
+	})
+
 	it("round-trips a conversation: what a restore gives back saves to exactly the same content", () => {
 		const content = serializeConversation(snapshot([...turnEntries("turn-1", "first"), ...turnEntries("turn-2", "second")]), 10)
 

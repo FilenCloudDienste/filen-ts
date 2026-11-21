@@ -227,7 +227,10 @@ describe("AssistantTurnGuard", () => {
 			"create_note",
 			"draft_chat_message",
 			"move_items",
+			"organize_by_date",
+			"rename_by_pattern",
 			"rename_item",
+			"restore_items",
 			"set_favorite",
 			"set_note_flags",
 			"trash_items"

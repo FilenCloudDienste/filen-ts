@@ -23,6 +23,8 @@ import {
 	QUARANTINE_CONTEXT_TOKENS,
 	QUARANTINE_MAX_TOKENS,
 	ROUTER_CONTEXT_TOKENS,
+	ROUTER_EDGE_CHARS,
+	ROUTER_ROOM,
 	routerRequest,
 	ROUTER_GRAMMAR,
 	ROUTER_SYSTEM_PROMPT,
@@ -638,12 +640,14 @@ describe("runAssistantTurn", () => {
 			"list_directory",
 			"get_item_info",
 			"read_text_file",
+			"read_document",
 			"reveal_item",
 			"list_notes",
 			"trash_items",
 			"list_section",
 			"open_route",
-			"get_sharing"
+			"get_sharing",
+			"restore_items"
 		])
 		expect(shared.requests[1]?.tools).toEqual(shown?.tools)
 		expect(shared.requests[1]?.messages[0]).toEqual(shown?.messages[0])
@@ -653,12 +657,12 @@ describe("runAssistantTurn", () => {
 		expect(names(notes.requests[1])?.slice(0, notesGroup.length)).toEqual(notesGroup)
 		expect(shown?.messages[0]?.content).toContain("Not available in this version of the app: Add or remove favorites.")
 		expect(first.result.prompt).toContain(
-			"Tools for this request: search_items, list_directory, get_item_info, read_text_file, reveal_item."
+			"Tools for this request: search_items, list_directory, get_item_info, read_text_file, read_document, reveal_item."
 		)
 		expect(second.result.prompt).toContain(
 			"Tools for this request: list_section, get_sharing, search_items, list_directory, open_route."
 		)
-		expect(third.result.prompt).toContain("Tools for this request: list_notes, read_note, open_note.")
+		expect(third.result.prompt).toContain("Tools for this request: list_notes, read_note, search_note_text, open_note.")
 		// Rendered, but not in the files group: refused without spending the retry.
 		expect(first.result.calls.map(record => `${record.tool}:${record.status}`)).toEqual(["list_section:blocked"])
 		expect(first.result.calls[0]?.error).toContain("use search_items, list_directory")
@@ -671,8 +675,8 @@ describe("runAssistantTurn", () => {
 	it("pins the longest message the web app's tools leave room for", () => {
 		const web = (tool: AssistantTool) => isAssistantWebTool(tool.name)
 
-		expect(messageFitsContext("a".repeat(25_050), 8192, web)).toBe(true)
-		expect(messageFitsContext("a".repeat(25_051), 8192, web)).toBe(false)
+		expect(messageFitsContext("a".repeat(24_080), 8192, web)).toBe(true)
+		expect(messageFitsContext("a".repeat(24_081), 8192, web)).toBe(false)
 	})
 
 	it("names the tools only when the prompt shows more than the request may call", async () => {
@@ -1948,6 +1952,31 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 		expect(await system(tool => tool.name !== "trash_items")).toContain("You cannot delete anything (not even to the trash)")
 	})
 
+	it("says it cannot restore from the trash only where the app cannot, and never controls sync or mounts", async () => {
+		const system = async (supports: (tool: AssistantTool) => boolean) => {
+			const executor = new FakeExecutor({ items: [] })
+
+			executor.supports = supports
+
+			const model = new ScriptedModel({ route: "restore change", steps: ["No."] })
+
+			await turn({ model, executor, message: "Restore the contract I deleted" })
+
+			return model.requests[1]?.messages[0]?.content ?? ""
+		}
+		const restoring = await system(() => true)
+		const without = await system(tool => tool.name !== "restore_items")
+
+		expect(restoring).toContain("You cannot permanently delete, empty the trash, share,")
+		expect(restoring).not.toContain("restore from it")
+		expect(without).toContain("empty the trash or restore from it")
+		expect(without).toContain("Not available in this version of the app: Restore from trash")
+
+		for (const prompt of [restoring, without]) {
+			expect(prompt).toContain("or pause or control sync, mounts or transfers.")
+		}
+	})
+
 	it("routes a long message by its start and end, within the router's share of the context", () => {
 		const longest = routerRequest({ message: "語".repeat(10_000), earlier: "語".repeat(10_000) })
 
@@ -1956,6 +1985,24 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 		expect(estimateTokens(ROUTER_SYSTEM_PROMPT) + estimateTokens(longest) + MESSAGE_OVERHEAD_TOKENS * 4 + 8).toBeLessThanOrEqual(
 			ROUTER_CONTEXT_TOKENS
 		)
+
+		// Either ROUTER_ROOM fits, so the eval can measure both: a larger share at full edges, or shorter edges in
+		// the old share.
+		for (const [edgeChars, share] of [
+			[300, 2304],
+			[200, 2048]
+		] as const) {
+			const worst = routerRequest({ message: "語".repeat(10_000), earlier: "語".repeat(10_000), edgeChars })
+
+			expect(estimateTokens(ROUTER_SYSTEM_PROMPT) + estimateTokens(worst) + MESSAGE_OVERHEAD_TOKENS * 4 + 8).toBeLessThanOrEqual(
+				share
+			)
+		}
+
+		expect([ROUTER_ROOM === "context" ? 2304 : 2048, ROUTER_ROOM === "context" ? 300 : 200]).toEqual([
+			ROUTER_CONTEXT_TOKENS,
+			ROUTER_EDGE_CHARS
+		])
 	})
 
 	it("renders today's date in the user's turn and keeps the system prompt the same on every turn", async () => {

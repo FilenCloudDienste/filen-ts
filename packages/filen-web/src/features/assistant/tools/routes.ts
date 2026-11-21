@@ -8,7 +8,8 @@ import { isDesktopApp } from "@/lib/desktop"
 export type AssistantRouteName = (typeof openRoute.input.route.type)["infer"]
 
 // Where each open_route section lives, most specific first so a settings page beats "settings". The
-// web app has no camera upload, so that section has no path and opens nothing.
+// web app has no camera upload, so that section has no path and opens nothing; sync, mounts and the desktop
+// settings exist only in the desktop app (UNAVAILABLE_ROUTES).
 const ROUTE_PATHS: readonly (readonly [AssistantRouteName, string])[] = [
 	["drive", "/drive"],
 	["recents", "/recents"],
@@ -23,6 +24,9 @@ const ROUTE_PATHS: readonly (readonly [AssistantRouteName, string])[] = [
 	["contacts", "/contacts"],
 	["audio", "/playlists"],
 	["transfers", "/transfers"],
+	["videos", "/videos"],
+	["sync", "/sync"],
+	["mounts", "/mounts"],
 	["settings_account", "/settings/account"],
 	["settings_security", "/settings/security"],
 	["settings_appearance", "/settings/appearance"],
@@ -33,6 +37,7 @@ const ROUTE_PATHS: readonly (readonly [AssistantRouteName, string])[] = [
 	["settings_plans", "/settings/plans"],
 	["settings_billing", "/settings/billing"],
 	["settings_advanced", "/settings/advanced"],
+	["settings_desktop", "/settings/desktop"],
 	// The local caches live on Advanced now; after settings_advanced so that page reports itself.
 	["settings_storage", "/settings/advanced"],
 	["settings", "/settings"]
@@ -43,10 +48,10 @@ export function screenOfPath(pathname: string): AssistantRouteName | "other" {
 	return ROUTE_PATHS.find(([, root]) => pathIsUnder(pathname, root))?.[0] ?? "other"
 }
 
-// Sections that exist in the shared tool but not in this app: no camera upload on the web, and the desktop app sells
-// no plans (its Plans URL lands on Billing).
+// Sections that exist in the shared tool but not in this app: no camera upload anywhere, no sync, mounts or desktop
+// settings on the web, and the desktop app sells no plans (its Plans URL lands on Billing).
 export const UNAVAILABLE_ROUTES: ReadonlySet<AssistantRouteName> = new Set(
-	isDesktopApp() ? ["settings_camera_upload", "settings_plans"] : ["settings_camera_upload"]
+	isDesktopApp() ? ["settings_camera_upload", "settings_plans"] : ["settings_camera_upload", "sync", "mounts", "settings_desktop"]
 )
 
 // The same navigations the icon rail and the settings sidebar make. False when the section does not
@@ -109,6 +114,15 @@ async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName):
 		case "transfers":
 			await router.navigate({ to: "/transfers" })
 			break
+		case "videos":
+			await router.navigate({ to: "/videos" })
+			break
+		case "sync":
+			await router.navigate({ to: "/sync" })
+			break
+		case "mounts":
+			await router.navigate({ to: "/mounts" })
+			break
 		case "settings":
 			await router.navigate({ to: "/settings" })
 			break
@@ -142,6 +156,9 @@ async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName):
 		case "settings_storage":
 		case "settings_advanced":
 			await router.navigate({ to: "/settings/advanced" })
+			break
+		case "settings_desktop":
+			await router.navigate({ to: "/settings/desktop" })
 			break
 		case "settings_camera_upload":
 			break

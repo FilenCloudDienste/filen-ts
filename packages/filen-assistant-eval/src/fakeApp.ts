@@ -560,6 +560,11 @@ export class FakeApp {
 				? {
 						archived: true
 					}
+				: {}),
+			...(item.trashed
+				? {
+						trashed: true
+					}
 				: {})
 		}
 	}
@@ -1229,7 +1234,7 @@ export class FakeApp {
 				const only = optionalStr("only") ?? "any"
 				const matches = this.state.notes.filter(item => {
 					if (
-						item.trashed ||
+						item.trashed !== (only === "trashed") ||
 						(only === "pinned" && !item.pinned) ||
 						(only === "favorite" && !item.favorite) ||
 						(only === "archived" && !item.archived)
@@ -1816,6 +1821,21 @@ export class FakeApp {
 				this.state.opened = null
 
 				return screenOpened(str("route"))
+			}
+
+			// Their tracks give these their fixture behaviour; until then a call reads as a failure that changes nothing.
+			case "read_document":
+			case "rename_by_pattern":
+			case "organize_by_date":
+			case "restore_items":
+			case "search_note_text":
+			case "app_help": {
+				throw new CallError(`${name} is not available in this app yet`, false)
+			}
+
+			// The eval runs the web app, where there is no sync or mount.
+			case "get_desktop_status": {
+				throw new CallError("Sync and mounts are only in the desktop app", false)
 			}
 
 			default: {

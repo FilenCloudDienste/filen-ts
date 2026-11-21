@@ -68,7 +68,7 @@ function plainContent(note: Note, content: string): string {
 	}
 }
 
-// A date filter and `only` (pinned, favorite, archived) apply before the cut, so notes past the first rows
+// A date filter and `only` (pinned, favorite, archived, or the trashed notes no other filter lists) apply before the cut, so notes past the first rows
 // (archived notes sort last, favorites are not lifted) are still found. Small models add a period nobody asked for, so one that alone empties a search by words gives
 // way: the notes matching the words come back, with a note that none is dated in the period.
 export const listNotesTool: ToolAdapter = async (input, scope) => {
@@ -78,7 +78,7 @@ export const listNotesTool: ToolAdapter = async (input, scope) => {
 	const matching = sortNotes(filterNotesByBlockedOwner(await notesQueryRead(), blockedUsers()))
 		.filter(
 			note =>
-				!note.trash &&
+				note.trash === (only === "trashed") &&
 				(only === "pinned" ? note.pinned : only === "favorite" ? note.favorite : only === "archived" ? note.archive : true)
 		)
 		.map(note => ({
@@ -105,7 +105,8 @@ export const listNotesTool: ToolAdapter = async (input, scope) => {
 					...(tags.length > 0 ? { tags } : {}),
 					...(note.pinned ? { pinned: true } : {}),
 					...(note.favorite ? { favorite: true } : {}),
-					...(note.archive ? { archived: true } : {})
+					...(note.archive ? { archived: true } : {}),
+					...(note.trash ? { trashed: true } : {})
 				}
 			}),
 			...listRest(notes.length, NOTES_ITEMS),

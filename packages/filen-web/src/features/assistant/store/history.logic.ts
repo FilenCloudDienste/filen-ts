@@ -71,13 +71,47 @@ export function compareConversationsNewestFirst(a: ConversationMeta, b: Conversa
 }
 
 const STEP_STATUS = "'active' | 'queued' | 'waiting' | 'done' | 'failed' | 'stopped' | 'discarded'"
+// Too many alternatives for one arktype string: its type instantiation runs too deep.
+const STORED_ROUTE = type
+	.enumerated(
+		"files",
+		"insights",
+		"shared",
+		"organize",
+		"batch",
+		"trash",
+		"restore",
+		"notes",
+		"chats",
+		"audio",
+		"navigation",
+		"help",
+		"answer"
+	)
+	.or("null")
+const STORED_PROPOSAL_ACTION = type.enumerated(
+	"draft-message",
+	"move",
+	"copy",
+	"trash",
+	"restore",
+	"rename",
+	"batch-rename",
+	"organize-by-date",
+	"favorite",
+	"unfavorite",
+	"create-directory",
+	"create-note",
+	"note-flags",
+	"add-to-playlist"
+)
 const STEP_TIMES = { status: STEP_STATUS, startedAt: "number", endedAt: "number | null" } as const
 
 // What a step showed: its kind, status, subject and counts, never a tool's output.
 const storedStepSchema = type({ kind: "'loading' | 'thinking' | 'replying'", ...STEP_TIMES })
 	.or({
 		kind: "'routing'",
-		route: "'files' | 'insights' | 'shared' | 'organize' | 'trash' | 'notes' | 'chats' | 'audio' | 'navigation' | 'answer' | null",
+		route: STORED_ROUTE,
 		...STEP_TIMES
 	})
 	.or({
@@ -107,7 +141,7 @@ const storedEntrySchema = type({ kind: "'user'", turn: "number", text: "string" 
 	.or({
 		kind: "'proposal'",
 		turn: "number",
-		action: "'draft-message' | 'move' | 'copy' | 'trash' | 'rename' | 'favorite' | 'unfavorite' | 'create-directory' | 'create-note' | 'note-flags' | 'add-to-playlist'",
+		action: STORED_PROPOSAL_ACTION,
 		targets: type({ handle: "string", name: "string", "recipients?": "string[]" }).array(),
 		destination: "string | null",
 		text: "Record<string, string>",

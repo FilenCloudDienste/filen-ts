@@ -16,6 +16,9 @@ export type AssistantEntity =
 	| { kind: "playlist"; playlist: Playlist }
 	// `playlist`: the playlist it was listed from, which a play queues from this track on.
 	| { kind: "track"; track: QueueTrack; playlist?: Playlist }
+	// An app_help result (its registry id) and a desktop sync pair (its id), named as the result showed them.
+	| { kind: "help"; id: string; title: string }
+	| { kind: "syncPair"; pairId: string; name: string }
 
 export type AssistantEntityKind = AssistantEntity["kind"]
 
@@ -42,6 +45,10 @@ function entityKey(entity: AssistantEntity): string {
 			return `playlist:${entity.playlist.uuid}`
 		case "track":
 			return `track:${entity.track.uuid}`
+		case "help":
+			return `help:${entity.id}`
+		case "syncPair":
+			return `syncPair:${entity.pairId}`
 	}
 }
 
@@ -59,6 +66,10 @@ function handlePrefix(entity: AssistantEntity): string {
 			return "p"
 		case "track":
 			return "t"
+		case "help":
+			return "h"
+		case "syncPair":
+			return "s"
 	}
 }
 
@@ -130,7 +141,7 @@ export class AssistantHandleRegistry {
 		this.byKey.clear()
 
 		for (const text of texts) {
-			for (const [, prefix, number] of text.matchAll(/\b([dfncpt])(\d{1,9})\b/g)) {
+			for (const [, prefix, number] of text.matchAll(/\b([dfncptsh])(\d{1,9})\b/g)) {
 				if (prefix !== undefined && number !== undefined) {
 					this.counters.set(prefix, Math.max(this.counters.get(prefix) ?? 0, Number(number)))
 				}

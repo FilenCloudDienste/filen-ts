@@ -183,7 +183,16 @@ describe("assistant tool registry", () => {
 			ASSISTANT_TOOLS.filter(tool => tool.effect === "modifying")
 				.map(tool => tool.name)
 				.sort()
-		).toEqual(["move_items", "rename_item", "set_favorite", "set_note_flags", "trash_items"])
+		).toEqual([
+			"move_items",
+			"organize_by_date",
+			"rename_by_pattern",
+			"rename_item",
+			"restore_items",
+			"set_favorite",
+			"set_note_flags",
+			"trash_items"
+		])
 		expect(ASSISTANT_TOOL_GROUPS.trash.tools.filter(isConsequentialTool).map(tool => tool.name)).toEqual(["trash_items"])
 	})
 
@@ -201,7 +210,10 @@ describe("assistant tool registry", () => {
 			"create_note",
 			"draft_chat_message",
 			"move_items",
+			"organize_by_date",
+			"rename_by_pattern",
 			"rename_item",
+			"restore_items",
 			"set_favorite",
 			"set_note_flags",
 			"trash_items"
@@ -237,12 +249,14 @@ describe("assistant tool registry", () => {
 	it("marks every tool that returns other people's text as untrusted", () => {
 		const content = ASSISTANT_TOOLS.filter(tool => tool.untrustedOutput === "content").map(tool => tool.name)
 
-		expect(content.sort()).toEqual(["read_chat", "read_note", "read_text_file"])
+		expect(content.sort()).toEqual(["read_chat", "read_document", "read_note", "read_text_file"])
 
 		for (const tool of ASSISTANT_TOOLS) {
 			// audio_control names the track now playing, which may be someone else's file name; get_storage reads
-			// only the account's own counters.
-			expect(tool.untrustedOutput === "none", tool.name).toBe(tool.name === "open_route" || tool.name === "get_storage")
+			// only the account's own counters, app_help only the app's own bundled text.
+			expect(tool.untrustedOutput === "none", tool.name).toBe(
+				tool.name === "open_route" || tool.name === "get_storage" || tool.name === "app_help"
+			)
 		}
 	})
 })

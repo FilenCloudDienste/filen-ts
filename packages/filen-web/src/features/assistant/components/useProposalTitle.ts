@@ -17,8 +17,14 @@ export function useProposalTitle(): (proposal: AssistantProposal) => string {
 				return t("assistantProposalCopy", { count })
 			case "trash":
 				return t("assistantProposalTrash", { count })
+			case "restore":
+				return t("assistantProposalRestore", { count })
 			case "rename":
 				return t("assistantProposalRename", { count })
+			case "batch-rename":
+				return t("assistantProposalBatchRename", { count })
+			case "organize-by-date":
+				return t("assistantProposalOrganizeByDate", { count })
 			case "favorite":
 				return t("assistantProposalFavorite", { count })
 			case "unfavorite":

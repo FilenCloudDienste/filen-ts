@@ -5,7 +5,8 @@ import { isRecord } from "./internal"
 // "modifying" change stored data and are executed only after the user confirms.
 export type AssistantToolEffect = "read" | "navigate" | "additive" | "modifying"
 
-export type AssistantToolGroup = "files" | "insights" | "shared" | "organize" | "trash" | "notes" | "chats" | "audio" | "navigation"
+export type AssistantToolGroup =
+	"files" | "insights" | "shared" | "organize" | "batch" | "trash" | "restore" | "notes" | "chats" | "audio" | "navigation" | "help"
 
 // "answer" routes a request to a plain text reply without any tools.
 export type AssistantRoute = AssistantToolGroup | "answer"

@@ -234,8 +234,12 @@ export const assistant = {
 	assistantStepRoutedShared: "Checking favorites and shares",
 	/** Step — the request was understood as creating, renaming, moving or copying files */
 	assistantStepRoutedOrganize: "Organizing your files",
+	/** Step — the request was understood as renaming or sorting many files at once by a pattern or date */
+	assistantStepRoutedBatch: "Working with many files at once",
 	/** Step — the request was understood as being about the trash */
 	assistantStepRoutedTrash: "Working with the trash",
+	/** Step — the request was understood as restoring items from the trash */
+	assistantStepRoutedRestore: "Restoring from the trash",
 	/** Step — the request was understood as being about notes */
 	assistantStepRoutedNotes: "Working with your notes",
 	/** Step — the request was understood as being about chats */
@@ -244,6 +248,8 @@ export const assistant = {
 	assistantStepRoutedAudio: "Working with your music",
 	/** Step — the request was understood as opening a part of the app */
 	assistantStepRoutedNavigation: "Working with the app",
+	/** Step — the request was understood as asking how the app works, or about desktop sync and mount status */
+	assistantStepRoutedHelp: "Looking up app help and status",
 	/** Step — the request needs no tools; the assistant answers from the conversation */
 	assistantStepRoutedAnswer: "Answering directly",
 	/** Step — the model decides what to do next */
@@ -260,6 +266,8 @@ export const assistant = {
 	assistantStepGetSharing: 'Checking how "{{subject}}" is shared',
 	/** Step — read_text_file; subject is the file's name */
 	assistantStepReadTextFile: 'Reading "{{subject}}"',
+	/** Step — read_document; subject is the document's name */
+	assistantStepReadDocument: 'Reading "{{subject}}"',
 	/** Step — reveal_item; subject is the item's name */
 	assistantStepRevealItem: 'Showing "{{subject}}" in your drive',
 	/** Step — set_favorite; subject is the item's name */
@@ -272,12 +280,20 @@ export const assistant = {
 	assistantStepMoveItems: 'Moving "{{subject}}"',
 	/** Step — copy_items; subject is the item's name */
 	assistantStepCopyItems: 'Copying "{{subject}}"',
+	/** Step — rename_by_pattern; subject is the directory's name, the one file's name or the text added */
+	assistantStepRenameByPattern: 'Renaming files by a pattern ("{{subject}}")',
+	/** Step — organize_by_date; subject is the directory's name */
+	assistantStepOrganizeByDate: 'Sorting "{{subject}}" into subdirectories by date',
 	/** Step — trash_items; subject is the item's name */
 	assistantStepTrashItems: 'Moving "{{subject}}" to the trash',
+	/** Step — restore_items; subject is the item's name */
+	assistantStepRestoreItems: 'Restoring "{{subject}}" from the trash',
 	/** Step — list_notes; subject is the search text */
 	assistantStepListNotes: 'Searching notes for "{{subject}}"',
 	/** Step — read_note; subject is the note's title */
 	assistantStepReadNote: 'Reading the note "{{subject}}"',
+	/** Step — search_note_text; subject is the search text */
+	assistantStepSearchNoteText: 'Searching the text of your notes for "{{subject}}"',
 	/** Step — open_note; subject is the note's title */
 	assistantStepOpenNote: 'Opening the note "{{subject}}"',
 	/** Step — create_note; subject is the new note's title */
@@ -376,6 +392,8 @@ export const assistant = {
 	assistantToolGetSharing: "Checking links and shares",
 	/** Activity — read_text_file */
 	assistantToolReadTextFile: "Reading a file",
+	/** Activity — read_document */
+	assistantToolReadDocument: "Reading a document",
 	/** Activity — reveal_item */
 	assistantToolRevealItem: "Showing an item in your drive",
 	/** Activity — set_favorite */
@@ -388,12 +406,20 @@ export const assistant = {
 	assistantToolMoveItems: "Moving items",
 	/** Activity — copy_items */
 	assistantToolCopyItems: "Copying items",
+	/** Activity — rename_by_pattern */
+	assistantToolRenameByPattern: "Renaming files",
+	/** Activity — organize_by_date */
+	assistantToolOrganizeByDate: "Sorting files into subdirectories by date",
 	/** Activity — trash_items */
 	assistantToolTrashItems: "Moving items to the trash",
+	/** Activity — restore_items */
+	assistantToolRestoreItems: "Restoring items from the trash",
 	/** Activity — list_notes */
 	assistantToolListNotes: "Listing your notes",
 	/** Activity — read_note */
 	assistantToolReadNote: "Reading a note",
+	/** Activity — search_note_text */
+	assistantToolSearchNoteText: "Searching the text of your notes",
 	/** Activity — open_note */
 	assistantToolOpenNote: "Opening a note",
 	/** Activity — create_note */
@@ -422,6 +448,10 @@ export const assistant = {
 	assistantToolAddTracksToPlaylist: "Adding tracks to a playlist",
 	/** Activity — get_transfers */
 	assistantToolGetTransfers: "Checking your transfers",
+	/** Activity — app_help */
+	assistantToolAppHelp: "Looking up help",
+	/** Activity — get_desktop_status */
+	assistantToolGetDesktopStatus: "Checking sync and mounts",
 	/** Activity — open_route */
 	assistantToolOpenRoute: "Opening a screen",
 	/** Activity — a tool this version has no wording for */
@@ -452,6 +482,18 @@ export const assistant = {
 	assistantProposalTrash_one: "Move {{count}} item to the trash",
 	/** Card title — trash */
 	assistantProposalTrash_other: "Move {{count}} items to the trash",
+	/** Card title — restore from the trash */
+	assistantProposalRestore_one: "Restore {{count}} item from the trash",
+	/** Card title — restore from the trash */
+	assistantProposalRestore_other: "Restore {{count}} items from the trash",
+	/** Card title — rename many files by a pattern or their dates */
+	assistantProposalBatchRename_one: "Rename {{count}} file",
+	/** Card title — rename many files by a pattern or their dates */
+	assistantProposalBatchRename_other: "Rename {{count}} files",
+	/** Card title — sort a directory's files into subdirectories by year, month or day */
+	assistantProposalOrganizeByDate_one: "Sort {{count}} file into subdirectories by date",
+	/** Card title — sort a directory's files into subdirectories by year, month or day */
+	assistantProposalOrganizeByDate_other: "Sort {{count}} files into subdirectories by date",
 	/** Card title — rename */
 	assistantProposalRename_one: "Rename {{count}} item",
 	/** Card title — rename */
