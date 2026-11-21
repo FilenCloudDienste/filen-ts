@@ -5,7 +5,10 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { SliderVisual } from "@/components/media/sliderVisual"
 import { MEDIA_VOLUME_STEP } from "@/lib/media/mediaKeys.logic"
-import { setMediaVolume, toggleMediaMuted, useMediaVolumeStore, warmMediaVolume } from "@/lib/media/mediaVolume"
+import { setMediaVolume, stepMediaVolume, toggleMediaMuted, useMediaVolumeStore, warmMediaVolume } from "@/lib/media/mediaVolume"
+
+// The arrow keys on the slider move by the players' volume step, as the media keys do.
+const VOLUME_KEY_DIRECTION: Partial<Record<string, 1 | -1>> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }
 
 // Mute toggle plus level slider over the shared media volume, so every player shows and sets the same
 // level. The slider writes the store on every step; the store itself debounces the persisted write.
@@ -36,7 +39,8 @@ export function VolumeControl({ className, sliderClassName }: { className?: stri
 					type="range"
 					min={0}
 					max={1}
-					step={MEDIA_VOLUME_STEP}
+					// Dragging sets any level; the arrow keys keep the players' volume step.
+					step="any"
 					value={level}
 					aria-label={t("volume")}
 					aria-valuetext={t("common:mediaVolumePercent", { percent: Math.round(level * 100) })}
@@ -44,6 +48,16 @@ export function VolumeControl({ className, sliderClassName }: { className?: stri
 					className="peer absolute inset-0 z-10 size-full cursor-pointer appearance-none bg-transparent opacity-0 [&::-moz-range-thumb]:size-0 [&::-moz-range-thumb]:border-0 [&::-webkit-slider-thumb]:size-0 [&::-webkit-slider-thumb]:appearance-none"
 					onChange={event => {
 						setMediaVolume(Number(event.target.value))
+					}}
+					onKeyDown={event => {
+						const direction = VOLUME_KEY_DIRECTION[event.key]
+
+						if (direction === undefined) {
+							return
+						}
+
+						event.preventDefault()
+						stepMediaVolume(direction * MEDIA_VOLUME_STEP)
 					}}
 				/>
 				<SliderVisual percent={level * 100} />

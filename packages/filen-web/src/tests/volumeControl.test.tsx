@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 
 vi.mock("@/lib/storage/adapter", () => ({
@@ -36,5 +36,29 @@ describe("VolumeControl mute button", () => {
 		const button = screen.getByRole("button", { name: "Unmute" })
 
 		expect(button.hasAttribute("aria-pressed")).toBe(false)
+	})
+})
+
+// Dragging sets any level; the arrow keys keep the players' 5% step.
+describe("VolumeControl slider", () => {
+	it("takes a level between the keyboard's steps", () => {
+		render(<VolumeControl />)
+
+		fireEvent.change(screen.getByRole("slider", { name: "Volume" }), { target: { value: "0.37" } })
+
+		expect(useMediaVolumeStore.getState().volume).toBeCloseTo(0.37)
+	})
+
+	it("steps by 5% on the arrow keys", () => {
+		useMediaVolumeStore.setState({ volume: 0.5, muted: false })
+		render(<VolumeControl />)
+
+		const slider = screen.getByRole("slider", { name: "Volume" })
+
+		fireEvent.keyDown(slider, { key: "ArrowUp" })
+		expect(useMediaVolumeStore.getState().volume).toBeCloseTo(0.55)
+		fireEvent.keyDown(slider, { key: "ArrowLeft" })
+		fireEvent.keyDown(slider, { key: "ArrowLeft" })
+		expect(useMediaVolumeStore.getState().volume).toBeCloseTo(0.45)
 	})
 })
