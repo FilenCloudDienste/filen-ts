@@ -1063,16 +1063,15 @@ export type AssistantGroupDefinition = {
 export const ASSISTANT_TOOL_GROUPS: Readonly<Record<AssistantToolGroup, AssistantGroupDefinition>> = {
 	files: {
 		description:
-			"find files and directories (folders) by name or location, list, read, summarize or show them, also PDFs, Word documents, spreadsheets and presentations",
+			"find files and directories (folders) by name or location, list, read, summarize or show them, or tell when one named item changed or how big it is, also PDFs, Word documents, spreadsheets and presentations",
 		tools: [searchItemsByName, listDirectoryPlain, getItemInfo, readTextFile, readDocument, revealItem]
 	},
 	organize: {
-		description: "create directories (folders), rename, move or copy files and directories",
+		description: "change files and directories: create directories (folders), rename, move or copy them",
 		tools: [searchItemsByName, listDirectoryPlain, createDirectory, renameItem, moveItems, copyItems]
 	},
 	batch: {
-		description:
-			"rename many files at once by a pattern or their dates, or sort a directory's files into subdirectories by year, month or day",
+		description: "rename many files at once by a pattern or date, or sort a directory's files into subdirectories by date",
 		tools: [searchItemsByName, listDirectoryPlain, renameByPattern, organizeByDate]
 	},
 	trash: {
@@ -1088,7 +1087,8 @@ export const ASSISTANT_TOOL_GROUPS: Readonly<Record<AssistantToolGroup, Assistan
 		tools: [listNotes, readNote, searchNoteText, openNote, createNote, setNoteFlags]
 	},
 	chats: {
-		description: "anything about chats and messages: read, summarize, open, or write a message to someone; look up a contact",
+		description:
+			"anything about chats and messages: read, summarize, open, or write a message to someone; look up a contact or their email address",
 		tools: [listChats, readChat, openChat, draftChatMessage, findContacts]
 	},
 	audio: {
@@ -1110,7 +1110,7 @@ export const ASSISTANT_TOOL_GROUPS: Readonly<Record<AssistantToolGroup, Assistan
 	},
 	shared: {
 		description:
-			"sharing: whether an item is shared or has a public link, items shared with or by the user, public links; favorites (list, add or remove); also requests to share, stop sharing or make something public, which only the user can do",
+			"sharing: whether an item is shared or has a public link, items shared with or by the user; favorites (list, add or remove); also requests to share, stop sharing or make something public, which only the user can do",
 		tools: [listSection, getSharing, searchItemsByName, listDirectoryPlain, setFavorite, openRoute]
 	}
 }
@@ -1133,7 +1133,7 @@ export const ASSISTANT_ROUTES: readonly AssistantRoute[] = [
 
 export function assistantRouteDescription(route: AssistantRoute): string {
 	return route === "answer"
-		? "small talk and general knowledge that needs none of the user's data, or requests no group can do"
+		? "small talk, general knowledge, or summarizing, translating or rewriting text pasted in the message; requests no group can do"
 		: ASSISTANT_TOOL_GROUPS[route].description
 }
 

@@ -31,10 +31,8 @@ const ROUTER_EXAMPLES = [
 	["How much storage space do I have left?", "insights read"],
 	["Show my favorites", "shared read"],
 	["What did Anna share with me?", "shared read"],
-	["Is my CV shared or does it have a public link?", "shared read"],
-	["Is budget.xlsx shared with anyone?", "shared read"],
+	["Is budget.xlsx shared or does it have a public link?", "shared read"],
 	["Stop sharing my holiday photos", "shared read"],
-	["Who can see my tax return?", "shared read"],
 	["What's in the trash?", "trash read"],
 	["Restore the contract I deleted", "restore change"],
 	["Is my upload finished?", "navigation read"],
@@ -46,14 +44,14 @@ const ROUTER_EXAMPLES = [
 // Fixed text: the web worker reads it once per load ahead of every router request, so anything per turn
 // belongs in the user turn.
 export const ROUTER_SYSTEM_PROMPT = [
-	"You route requests for the assistant of Filen, an encrypted cloud drive app with the user's files, notes, chats and music.",
+	"You route requests for the assistant of Filen, a cloud drive app with the user's files, notes, chats and music.",
 	"Groups:",
 	...ASSISTANT_ROUTES.map(route => `- ${route}: ${assistantRouteDescription(route)}`),
-	"A request that mentions the user's own files, folders, notes, chats, messages, people they chat with, songs or playlists always goes to one of the tool groups, never to answer.",
+	"A request about the user's own files, folders, notes, chats, messages, people they chat with, songs or playlists always goes to one of the tool groups, never to answer.",
 	"After the group write read if the request only finds, reads, summarizes, shows, opens, plays or controls playback, or change if it asks to create, rename, move, copy, trash, restore, favorite, pin, archive, add to a playlist or write a message.",
 	"Requests come in any language. Examples:",
 	...ROUTER_EXAMPLES.map(([request, route]) => `${request} -> ${route}`),
-	"Reply with the group and read or change. For the answer group reply only: answer"
+	"Reply with the group and read or change, or only: answer"
 ].join("\n")
 
 // GBNF for llama.cpp: the router can only ever produce a known group and intent.

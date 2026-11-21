@@ -1290,15 +1290,16 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 		}
 	})
 
-	it("routes a read that names a file to files, whatever word for mail pulled the router to chats", async () => {
-		for (const message of [
-			"¿Qué dice el primer correo de avisos.mbox?",
-			"Was steht in der Nachricht Rechnung_Oktober.eml?",
-			"打ち合わせ.emlのメールには何が書いてありますか？",
-			"Summarize the message in notes.txt."
-		]) {
+	it("routes a read that names a file to files, whatever word for mail or a note pulled the router elsewhere", async () => {
+		for (const [route, message] of [
+			["chats read", "¿Qué dice el primer correo de avisos.mbox?"],
+			["chats read", "Was steht in der Nachricht Rechnung_Oktober.eml?"],
+			["chats read", "打ち合わせ.emlのメールには何が書いてありますか？"],
+			["chats read", "Summarize the message in notes.txt."],
+			["notes read", "De quoi parle le fichier meeting_notes_2025-09-30.txt ?"]
+		] as const) {
 			const { result } = await turn({
-				model: new ScriptedModel({ route: "chats read", steps: ["Done."] }),
+				model: new ScriptedModel({ route, steps: ["Done."] }),
 				executor: new FakeExecutor({ items: [] }),
 				message
 			})
@@ -1307,11 +1308,12 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 		}
 	})
 
-	it("keeps chats for a change that names a file, and for a read that names only addresses", async () => {
+	it("keeps chats and notes for a change that names a file, and for a read that names only addresses", async () => {
 		for (const [route, message] of [
 			["chats change", "Tell Tom that avisos.mbox is ready"],
 			["chats read", "What did carlos.ruiz@example.com write about https://filen.io?"],
-			["chats read", "Was hat Tom z.B. über die 1.240 EUR geschrieben?"]
+			["chats read", "Was hat Tom z.B. über die 1.240 EUR geschrieben?"],
+			["notes change", "Save what todo.txt says as a note"]
 		] as const) {
 			const { result } = await turn({
 				model: new ScriptedModel({ route, steps: ["Done."] }),
@@ -1319,8 +1321,18 @@ describe("runAssistantTurn follow-ups, context and limits", () => {
 				message
 			})
 
-			expect(result.route).toBe("chats")
+			expect(result.route).toBe(route.split(" ")[0])
 		}
+	})
+
+	it("routes a change routed to files, which only reads, to organize", async () => {
+		const { result } = await turn({
+			model: new ScriptedModel({ route: "files change", steps: ["Done."] }),
+			executor: new FakeExecutor({ items: [] }),
+			message: "Renombra este archivo a factura_hetzner.pdf"
+		})
+
+		expect(result).toMatchObject({ route: "organize", intent: "change" })
 	})
 
 	it("routes a short follow-up to a request that named a file to files", async () => {

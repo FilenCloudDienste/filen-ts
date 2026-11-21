@@ -587,11 +587,18 @@ function namesFile(text: string): boolean {
 
 type ParsedRoute = ReturnType<typeof parseRoute>
 
-// A request that names a file (avisos.mbox, Rechnung_Oktober.eml, notas.txt) reads that file, whatever word for mail
-// or a message ("correo", "Nachricht") pulled the router to chats: decided on the user's own words, as the route is.
-// A change stays with chats, where the file is what a message to someone is about.
+// A request that names a file (avisos.mbox, Rechnung_Oktober.eml, meeting_notes.txt) reads that file, whatever word
+// for mail, a message or a note ("correo", "Nachricht", "notes") pulled the router to chats or notes: decided on the
+// user's own words, as the route is. A change stays there, where the file is what a message or note is about. Files
+// only reads, so a change routed there (rename, move, copy) goes to organize, the group that changes the drive.
 function fileRoute(routed: ParsedRoute, userWords: readonly string[]): ParsedRoute {
-	return routed.route === "chats" && routed.intent === "read" && userWords.some(namesFile) ? { route: "files", intent: "read" } : routed
+	if (routed.route === "files" && routed.intent === "change") {
+		return { route: "organize", intent: "change" }
+	}
+
+	return (routed.route === "chats" || routed.route === "notes") && routed.intent === "read" && userWords.some(namesFile)
+		? { route: "files", intent: "read" }
+		: routed
 }
 
 // Every handle a tool result exposes, with the name or title next to it.
