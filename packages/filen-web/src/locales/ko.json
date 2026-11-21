@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "텍스트가 다른 텍스트 상자로 이어지므로 여기서 편집할 수 없습니다.",
 		"previewDocxViewOnlyLockedTextbox": "그대로 유지되는 문서 부분에 있습니다.",
 		"previewDocxViewOnlyMalformed": "일부가 손상되어 있어 그대로 유지됩니다.",
-		"previewDocxViewOnlyNotInDrive": "편집하려면 드라이브의 해당 디렉터리에서 여세요.",
 		"previewDocxViewOnlyNotWritable": "이 파일에 더 이상 변경 사항을 저장할 수 없습니다.",
 		"previewDocxViewOnlyProtected": "Word에서 편집이 제한되어 있습니다.",
 		"previewDocxViewOnlyPublicLink": "공개 링크에서 열었습니다.",

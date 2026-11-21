@@ -3,7 +3,7 @@ import { currentRootUuid } from "@/features/drive/lib/actions"
 import { convertedCopyName } from "@/features/drive/lib/copyName"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { takenNamesInDirectory } from "@/features/drive/lib/nameTaken"
-import { runPreviewSave } from "@/features/drive/lib/previewSave.logic"
+import { directoryGoneDTO, runPreviewSave, withOwnDirectory } from "@/features/drive/lib/previewSave.logic"
 import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -15,21 +15,28 @@ import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 export type ConvertedCopyOutcome = { status: "saved"; item: DriveItem; name: string } | { status: "error"; dto: ErrorDTO | null }
 
 export async function uploadConvertedCopy(item: DriveItem, converted: Uint8Array, extension: string): Promise<ConvertedCopyOutcome> {
-	const base = asDirectoryOrFile(item)
-
-	if (base.type !== "file") {
+	if (asDirectoryOrFile(item).type !== "file") {
 		return { status: "error", dto: null }
 	}
 
 	const rootUuid = currentRootUuid()
-	const parent = normalizeParentUuid(base.data.parent, rootUuid)
+	let own: DriveItem
 	let name: string
 
-	// The directory's names read once (its cached listing when current), every candidate answered from them.
+	// The directory found (withOwnDirectory) and its names read once (its cached listing when current), every candidate
+	// answered from them.
 	try {
-		const taken = await takenNamesInDirectory(parent)
+		const found = await withOwnDirectory(item)
 
-		name = await convertedCopyName(driveItemName(base), extension, candidate => Promise.resolve(taken.has(nameCollisionKey(candidate))))
+		if (found === undefined) {
+			return { status: "error", dto: directoryGoneDTO(item.data.uuid) }
+		}
+
+		own = found
+
+		const taken = await takenNamesInDirectory(normalizeParentUuid(own.data.parent, rootUuid))
+
+		name = await convertedCopyName(driveItemName(own), extension, candidate => Promise.resolve(taken.has(nameCollisionKey(candidate))))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -41,7 +48,7 @@ export async function uploadConvertedCopy(item: DriveItem, converted: Uint8Array
 			patchListing: driveListingQueryUpdate,
 			rootUuid
 		},
-		{ item, content: converted, asNewFile: name }
+		{ item: own, content: converted, asNewFile: name }
 	)
 
 	return outcome.status === "error" ? { status: "error", dto: outcome.dto } : { status: "saved", item: outcome.item, name }

@@ -212,7 +212,7 @@ export const docxSessionKey: (document: DocxUnlockedDocument) => DocxSessionKey 
 // Why a document opens view-only: the file's own gate reasons (protection, signature, template, Strict
 // markup, damage) and where the file was opened from.
 export type DocxGateReason = DocxOpenInfo["gate"][number]
-export type DocxContextReason = "publicLink" | "archive" | "linkedFile" | "trash" | "sharedIn" | "notInDrive"
+export type DocxContextReason = "publicLink" | "archive" | "linkedFile" | "trash" | "sharedIn"
 // Opened for editing, then read-only: renamed to another format, or no longer savable (its directory went),
 // or a text box that cannot be edited (its text flows on into another box, its copy for older readers does not
 // match it, or the block holding it is locked).
@@ -274,8 +274,6 @@ export function viewOnlyReasonKey(reason: DocxViewOnlyReason): PreviewKey {
 			return "previewDocxViewOnlyTrash"
 		case "sharedIn":
 			return "previewDocxViewOnlySharedIn"
-		case "notInDrive":
-			return "previewDocxViewOnlyNotInDrive"
 		case "renamed":
 			return "previewDocxViewOnlyRenamed"
 		case "notWritable":

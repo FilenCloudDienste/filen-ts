@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "它的文本延续到另一个文本框中，因此无法在此处编辑。",
 		"previewDocxViewOnlyLockedTextbox": "它位于文档中保持原样的部分。",
 		"previewDocxViewOnlyMalformed": "它的部分内容已损坏，因此保持原样。",
-		"previewDocxViewOnlyNotInDrive": "请从云盘中它所在的目录打开以进行编辑。",
 		"previewDocxViewOnlyNotWritable": "无法再将更改保存到此文件。",
 		"previewDocxViewOnlyProtected": "它在 Word 中受到编辑保护。",
 		"previewDocxViewOnlyPublicLink": "它是通过公开链接打开的。",

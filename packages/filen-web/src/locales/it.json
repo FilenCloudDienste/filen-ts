@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Il suo testo continua in un'altra casella di testo, quindi non può essere modificata qui.",
 		"previewDocxViewOnlyLockedTextbox": "Si trova in una parte del documento che viene mantenuta invariata.",
 		"previewDocxViewOnlyMalformed": "Alcune sue parti sono danneggiate, quindi viene lasciato invariato.",
-		"previewDocxViewOnlyNotInDrive": "Aprilo dalla sua directory nel tuo drive per modificarlo.",
 		"previewDocxViewOnlyNotWritable": "Non è più possibile salvare le modifiche in questo file.",
 		"previewDocxViewOnlyProtected": "È protetto dalle modifiche in Word.",
 		"previewDocxViewOnlyPublicLink": "È stato aperto da un link pubblico.",

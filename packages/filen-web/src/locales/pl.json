@@ -2738,7 +2738,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Jego tekst jest kontynuowany w innym polu tekstowym, więc nie można go tutaj edytować.",
 		"previewDocxViewOnlyLockedTextbox": "Znajduje się w części dokumentu, która pozostaje bez zmian.",
 		"previewDocxViewOnlyMalformed": "Jego części są uszkodzone, więc pozostaje bez zmian.",
-		"previewDocxViewOnlyNotInDrive": "Otwórz go z jego katalogu na dysku, aby go edytować.",
 		"previewDocxViewOnlyNotWritable": "Nie można już zapisywać zmian w tym pliku.",
 		"previewDocxViewOnlyProtected": "Jest chroniony przed edycją w programie Word.",
 		"previewDocxViewOnlyPublicLink": "Został otwarty z linku publicznego.",

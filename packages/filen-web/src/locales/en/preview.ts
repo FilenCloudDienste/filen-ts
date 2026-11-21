@@ -572,8 +572,6 @@ export const preview = {
 	previewDocxViewOnlyTrash: "It's in the trash.",
 	/** Docx viewer — view-only reason: someone else shared the file with you */
 	previewDocxViewOnlySharedIn: "It was shared with you.",
-	/** Docx viewer — view-only reason: opened from Recents, Favorites, Links or Shared, not from its directory in the drive */
-	previewDocxViewOnlyNotInDrive: "Open it from its directory in your drive to edit it.",
 	/** Docx editor — view-only reason: the text box being edited continues its text in another text box */
 	previewDocxViewOnlyLinkedTextbox: "Its text continues in another text box, so it can't be edited here.",
 	/** Docx editor — view-only reason: the text box's copy kept for older versions of Word doesn't match it */

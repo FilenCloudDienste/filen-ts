@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Its text continues in another text box, so it can't be edited here.",
 		"previewDocxViewOnlyLockedTextbox": "It's in a part of the document that's kept as it is.",
 		"previewDocxViewOnlyMalformed": "Parts of it are damaged, so it's left as it is.",
-		"previewDocxViewOnlyNotInDrive": "Open it from its directory in your drive to edit it.",
 		"previewDocxViewOnlyNotWritable": "Changes can't be saved to this file any more.",
 		"previewDocxViewOnlyProtected": "It's protected against editing in Word.",
 		"previewDocxViewOnlyPublicLink": "It was opened from a public link.",

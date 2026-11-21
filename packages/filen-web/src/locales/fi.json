@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Sen teksti jatkuu toisessa tekstiruudussa, joten sitä ei voi muokata täällä.",
 		"previewDocxViewOnlyLockedTextbox": "Se on asiakirjan osassa, joka säilytetään ennallaan.",
 		"previewDocxViewOnlyMalformed": "Osa siitä on vioittunut, joten se jätetään ennalleen.",
-		"previewDocxViewOnlyNotInDrive": "Muokkaa sitä avaamalla se sen hakemistosta asemallasi.",
 		"previewDocxViewOnlyNotWritable": "Tähän tiedostoon ei voi enää tallentaa muutoksia.",
 		"previewDocxViewOnlyProtected": "Se on suojattu muokkaukselta Wordissa.",
 		"previewDocxViewOnlyPublicLink": "Se avattiin julkisesta linkistä.",

@@ -2738,7 +2738,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Его текст продолжается в другом текстовом поле, поэтому здесь его нельзя изменить.",
 		"previewDocxViewOnlyLockedTextbox": "Оно находится в части документа, которая сохраняется без изменений.",
 		"previewDocxViewOnlyMalformed": "Часть его повреждена, поэтому он остаётся без изменений.",
-		"previewDocxViewOnlyNotInDrive": "Чтобы редактировать его, откройте его из его каталога в облачном диске.",
 		"previewDocxViewOnlyNotWritable": "Изменения в этом файле больше нельзя сохранить.",
 		"previewDocxViewOnlyProtected": "Он защищён от редактирования в Word.",
 		"previewDocxViewOnlyPublicLink": "Он открыт по публичной ссылке.",

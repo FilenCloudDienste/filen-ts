@@ -3,7 +3,13 @@ import { savePortReader } from "@filen/shared/savePort"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { editedCopyName } from "@/features/drive/lib/copyName"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { editedSaveTimes, runPreviewSave, type PreviewSaveDeps } from "@/features/drive/lib/previewSave.logic"
+import {
+	directoryGoneDTO,
+	editedSaveTimes,
+	runPreviewSave,
+	withOwnDirectory,
+	type PreviewSaveDeps
+} from "@/features/drive/lib/previewSave.logic"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
@@ -76,14 +82,26 @@ export async function writeEditedCopy(
 		return null
 	}
 
-	const taken = await takenNamesInDirectory(normalizeParentUuid(base.data.parent, currentRootUuid())).catch((e: unknown) => {
+	const own = await withOwnDirectory(item).catch((e: unknown) => {
+		closePort()
+
+		throw e
+	})
+
+	if (own === undefined) {
+		closePort()
+
+		return { outcome: { status: "error", dto: directoryGoneDTO(base.data.uuid) }, name: driveItemName(base) }
+	}
+
+	const taken = await takenNamesInDirectory(normalizeParentUuid(own.data.parent, currentRootUuid())).catch((e: unknown) => {
 		closePort()
 
 		throw e
 	})
 	const name = editedCopyName(driveItemName(base), extension, suffix, taken)
 	const outcome = await runPreviewSave("blob" in content ? imageSaveDeps() : portSaveDeps(), {
-		item,
+		item: own,
 		content,
 		asNewFile: name,
 		mime: "",

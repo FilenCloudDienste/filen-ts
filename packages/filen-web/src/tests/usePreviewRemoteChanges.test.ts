@@ -32,12 +32,11 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { nameExistsInDirectory, uploadFileBytes: vi.fn() } }))
-vi.mock("@/features/drive/lib/previewSave.logic", async () => ({
-	SaveRefusedError: (
-		await vi.importActual<typeof import("@/features/drive/lib/previewSave.logic")>("@/features/drive/lib/previewSave.logic")
-	).SaveRefusedError,
-	runPreviewSave
-}))
+vi.mock("@/features/drive/lib/previewSave.logic", async () => {
+	const actual = await vi.importActual<typeof import("@/features/drive/lib/previewSave.logic")>("@/features/drive/lib/previewSave.logic")
+
+	return { SaveRefusedError: actual.SaveRefusedError, withOwnDirectory: actual.withOwnDirectory, runPreviewSave }
+})
 vi.mock("@/lib/log", () => ({ log: { error: logError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root" }))
 vi.mock("@/features/drive/queries/drive", () => ({

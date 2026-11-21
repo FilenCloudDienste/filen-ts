@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "O texto continua noutra caixa de texto, por isso não pode ser editado aqui.",
 		"previewDocxViewOnlyLockedTextbox": "Está numa parte do documento que é mantida tal como está.",
 		"previewDocxViewOnlyMalformed": "Partes dele estão danificadas, por isso é mantido tal como está.",
-		"previewDocxViewOnlyNotInDrive": "Abra-o a partir do respetivo diretório no seu drive para o editar.",
 		"previewDocxViewOnlyNotWritable": "Já não é possível guardar alterações neste ficheiro.",
 		"previewDocxViewOnlyProtected": "Está protegido contra edição no Word.",
 		"previewDocxViewOnlyPublicLink": "Foi aberto a partir de uma ligação pública.",

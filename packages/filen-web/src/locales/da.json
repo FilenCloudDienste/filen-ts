@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Dets tekst fortsætter i et andet tekstfelt, så det kan ikke redigeres her.",
 		"previewDocxViewOnlyLockedTextbox": "Det ligger i en del af dokumentet, der bevares, som den er.",
 		"previewDocxViewOnlyMalformed": "Dele af det er beskadiget, så det efterlades, som det er.",
-		"previewDocxViewOnlyNotInDrive": "Åbn det fra dets mappe i dit drev for at redigere det.",
 		"previewDocxViewOnlyNotWritable": "Ændringer kan ikke længere gemmes i denne fil.",
 		"previewDocxViewOnlyProtected": "Det er beskyttet mod redigering i Word.",
 		"previewDocxViewOnlyPublicLink": "Det blev åbnet fra et offentligt link.",

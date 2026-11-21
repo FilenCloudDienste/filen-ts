@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "De tekst loopt door in een ander tekstvak, dus het kan hier niet worden bewerkt.",
 		"previewDocxViewOnlyLockedTextbox": "Het staat in een deel van het document dat ongewijzigd blijft.",
 		"previewDocxViewOnlyMalformed": "Delen ervan zijn beschadigd, dus het blijft zoals het is.",
-		"previewDocxViewOnlyNotInDrive": "Open het vanuit de directory in je drive om het te bewerken.",
 		"previewDocxViewOnlyNotWritable": "Wijzigingen kunnen niet meer in dit bestand worden opgeslagen.",
 		"previewDocxViewOnlyProtected": "Het is in Word beveiligd tegen bewerken.",
 		"previewDocxViewOnlyPublicLink": "Het is geopend via een openbare link.",

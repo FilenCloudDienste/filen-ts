@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "इसका टेक्स्ट किसी दूसरे टेक्स्ट बॉक्स में जारी रहता है, इसलिए इसे यहाँ संपादित नहीं किया जा सकता।",
 		"previewDocxViewOnlyLockedTextbox": "यह दस्तावेज़ के ऐसे हिस्से में है जिसे जैसा है वैसा ही रखा जाता है।",
 		"previewDocxViewOnlyMalformed": "इसके कुछ हिस्से क्षतिग्रस्त हैं, इसलिए इसे जैसा है वैसा ही छोड़ा गया है।",
-		"previewDocxViewOnlyNotInDrive": "इसे संपादित करने के लिए अपनी ड्राइव में इसकी डायरेक्टरी से खोलें।",
 		"previewDocxViewOnlyNotWritable": "इस फ़ाइल में अब बदलाव सहेजे नहीं जा सकते।",
 		"previewDocxViewOnlyProtected": "यह Word में संपादन से सुरक्षित है।",
 		"previewDocxViewOnlyPublicLink": "इसे सार्वजनिक लिंक से खोला गया था।",

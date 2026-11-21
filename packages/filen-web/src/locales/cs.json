@@ -2552,7 +2552,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Jeho text pokračuje v jiném textovém poli, proto jej zde nelze upravit.",
 		"previewDocxViewOnlyLockedTextbox": "Je v části dokumentu, která zůstává beze změny.",
 		"previewDocxViewOnlyMalformed": "Některé jeho části jsou poškozené, proto zůstává beze změny.",
-		"previewDocxViewOnlyNotInDrive": "Chcete-li jej upravit, otevřete jej z jeho adresáře na disku.",
 		"previewDocxViewOnlyNotWritable": "Do tohoto souboru již nelze ukládat změny.",
 		"previewDocxViewOnlyProtected": "Je ve Wordu chráněn proti úpravám.",
 		"previewDocxViewOnlyPublicLink": "Byl otevřen z veřejného odkazu.",

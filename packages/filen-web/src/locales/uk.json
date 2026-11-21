@@ -2738,7 +2738,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Його текст продовжується в іншому текстовому полі, тому тут його не можна редагувати.",
 		"previewDocxViewOnlyLockedTextbox": "Воно знаходиться в частині документа, яка залишається без змін.",
 		"previewDocxViewOnlyMalformed": "Частини документа пошкоджено, тому його залишено без змін.",
-		"previewDocxViewOnlyNotInDrive": "Щоб редагувати його, відкрийте його з його каталогу на вашому диску.",
 		"previewDocxViewOnlyNotWritable": "Зміни більше неможливо зберегти в цей файл.",
 		"previewDocxViewOnlyProtected": "Його захищено від редагування у Word.",
 		"previewDocxViewOnlyPublicLink": "Його відкрито за публічним посиланням.",

@@ -33,23 +33,20 @@ import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
+import { sdkApi } from "@/lib/sdk/client"
 
-// Why a preview never writes its file back, by where it was reached: the trash, a share received, someone else's file
-// through their link (a chat's or a note's link card), or a file shared out on its own (its listing names no
-// directory to save into). Null for the user's own file with a known directory, whichever listing showed it: My
-// Drive, Photos, search, recents, favorites, links, a directory shared out. Judged from the item and listing alone.
-export type ReadOnlyOrigin = "trash" | "sharedIn" | "linkedFile" | "notInDrive"
+// Why a preview never writes its file back, by where it was reached: the trash, a share received (always read-only:
+// a share grants no writes), or someone else's file through their link (a chat's or a note's link card). Null for the
+// user's own file, whichever listing showed it: My Drive, Photos, search, recents, favorites, links, shared out (a
+// file shared out on its own finds its directory as it saves, ownFileOf). Judged from the item and listing alone.
+export type ReadOnlyOrigin = "trash" | "sharedIn" | "linkedFile"
 
 export function readOnlyOrigin(item: DriveItem, variant: DriveVariant): ReadOnlyOrigin | null {
 	if (isLinkedEmbedItem(item)) {
 		return "linkedFile"
 	}
 
-	if (variant === "trash" || variant === "sharedIn") {
-		return variant
-	}
-
-	return isSharedRootDriveItem(item) ? "notInDrive" : null
+	return variant === "trash" || variant === "sharedIn" ? variant : null
 }
 
 // The one gate every preview save, edit and copy beside the file passes (readOnlyOrigin).
@@ -265,6 +262,9 @@ export interface PreviewSaveDeps {
 	// The storage pre-flight; left out, the account's (checkUploadQuota). Every save, copy and converted copy runs
 	// through here, so this is the one place it is made.
 	checkQuota?: (neededBytes: bigint) => Promise<QuotaVerdict>
+	// The user's own file by uuid, how a file shared out on its own finds its directory as it saves (ownFileOf); left
+	// out, the SDK worker's.
+	getFile?: (uuid: string) => Promise<SdkFile | undefined>
 	// The account's own root uuid — a real Dir.parent is never null (see sdk.worker.ts's own
 	// ListDirectoryTarget comment), so a root-level item's parent must collapse back to the `null`
 	// sentinel before it can resolve worker-side (resolveNormalDirParent) or key the right listing.
@@ -324,8 +324,6 @@ export async function runPreviewSave(
 	const name = asNewFile ?? driveItemName(base)
 	const mime = args.mime ?? base.data.decryptedMeta?.mime ?? ""
 	const options: UploadTimes = times === undefined ? {} : { ...times, noExifOverride: true }
-	// Root-sentinel collapse inlined: the one-line uuid compare is all normalizeParentUuid (queries/drive.ts) does.
-	const targetParent = base.data.parent === deps.rootUuid ? null : base.data.parent
 
 	// Encoded once: the pre-flight and the upload both need the bytes.
 	const body = typeof content === "string" ? new TextEncoder().encode(content) : content
@@ -346,9 +344,30 @@ export async function runPreviewSave(
 		}
 	}
 
+	let own: DriveItem | undefined
+	let lookupError: ErrorDTO | null = null
+	try {
+		own = await withOwnDirectory(item, deps.getFile)
+	} catch (e) {
+		lookupError = asErrorDTO(e)
+	}
+
+	const file = own === undefined ? undefined : asDirectoryOrFile(own)
+
+	if (file?.type !== "file") {
+		// Nothing reads the port yet: its writer is released as the quota refusal releases it.
+		if (!(body instanceof Uint8Array) && "port" in body) {
+			abortSavePort(body.port, "upload")
+		}
+
+		return { status: "error", dto: lookupError ?? directoryGoneDTO(base.data.uuid) }
+	}
+
+	// Root-sentinel collapse inlined: the one-line uuid compare is all normalizeParentUuid (queries/drive.ts) does.
+	const targetParent = file.data.parent === deps.rootUuid ? null : file.data.parent
 	let uploaded: SdkFile
 	try {
-		uploaded = await runOp(upload(deps, base.data, targetParent, body, name, mime, options))
+		uploaded = await runOp(upload(deps, file.data, targetParent, body, name, mime, options))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -363,6 +382,29 @@ export async function runPreviewSave(
 	)
 
 	return { status: "success", item: newItem }
+}
+
+// The file a save writes over or beside, with its directory: the item itself, but for a file shared out on its own
+// (its listing's SharedFile names no directory) the user's file, looked up once as it saves and never kept. Undefined
+// when it is gone. A caller that needs the directory before runPreviewSave (a copy's free name) passes on what this
+// returned, so the lookup is never made twice. `getFile`: left out, the SDK worker's.
+export async function withOwnDirectory(
+	item: DriveItem,
+	getFile?: (uuid: string) => Promise<SdkFile | undefined>
+): Promise<DriveItem | undefined> {
+	if (!isSharedRootDriveItem(item)) {
+		return item
+	}
+
+	const found = await (getFile === undefined ? sdkApi.getFile(item.data.uuid) : getFile(item.data.uuid))
+
+	return found === undefined ? undefined : narrowItem(found)
+}
+
+// A file gone before its save found its directory: the unresolvable-parent class (isUnresolvableParentError), so the
+// editor goes read-only rather than offering a retry that can only fail again.
+export function directoryGoneDTO(fileUuid: string): ErrorDTO {
+	return plainErrorDTO(`${PARENT_NOT_FOUND_PREFIX}${fileUuid}`)
 }
 
 // What a save adds to the account: the bytes, the Blob, or for an Orientation rewrite the file itself (only its head

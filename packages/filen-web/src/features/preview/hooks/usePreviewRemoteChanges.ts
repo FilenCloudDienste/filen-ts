@@ -10,6 +10,7 @@ import {
 	editedSaveTimes,
 	runPreviewSave,
 	SaveRefusedError,
+	withOwnDirectory,
 	type ImageSaveEdits,
 	type PresentationSaveEdits,
 	type PreviewSaveContent
@@ -34,7 +35,7 @@ import { dropPreviewBuffer, usePreviewUnsavedGuardStore } from "@/features/previ
 import { queryClient } from "@/queries/client"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import type { ErrorDTO } from "@/lib/sdk/errors"
+import { PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { i18n } from "@/lib/i18n"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
@@ -474,14 +475,23 @@ async function writeAsNewFile(
 	const extension = "kind" in content && content.kind === "blob" ? content.extension : null
 
 	const rootUuid = currentRootUuid()
-	const parent = normalizeParentUuid(base.data.parent, rootUuid)
 	const original = extension === null ? driveItemName(base) : withExtension(driveItemName(base), extension)
+	let own: DriveItem
 	let name: string
 
-	// The directory's names read once (its cached listing when current), the original and every conflict name answered
-	// from them. A deck's session already writes: a failed read releases it before the failure is told.
+	// The directory found (withOwnDirectory) and its names read once (its cached listing when current), the original and
+	// every conflict name answered from them. A deck's session already writes: a failed read releases it before the
+	// failure is told.
 	try {
-		const names = await takenNamesInDirectory(parent)
+		const found = await withOwnDirectory(item)
+
+		if (found === undefined) {
+			throw new Error(`${PARENT_NOT_FOUND_PREFIX}${item.data.uuid}`)
+		}
+
+		own = found
+
+		const names = await takenNamesInDirectory(normalizeParentUuid(own.data.parent, rootUuid))
 		const taken = (candidate: string) => Promise.resolve(names.has(nameCollisionKey(candidate)))
 
 		name =
@@ -497,10 +507,10 @@ async function writeAsNewFile(
 	}
 
 	const outcome = !("kind" in content)
-		? await uploadCopy(item, content, name, rootUuid)
+		? await uploadCopy(own, content, name, rootUuid)
 		: content.kind === "port"
-			? await uploadDeckCopy(item, content, name, rootUuid)
-			: await uploadCopy(item, { blob: content.blob }, name, rootUuid, {
+			? await uploadDeckCopy(own, content, name, rootUuid)
+			: await uploadCopy(own, { blob: content.blob }, name, rootUuid, {
 					times: editedSaveTimes(item, Date.now()),
 					...(extension === null ? {} : { mime: "" })
 				})

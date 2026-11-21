@@ -215,25 +215,26 @@ describe("isEditable", () => {
 	})
 })
 
+// A file shared out on its own, as the Shared by me root lists it: a SharedFile, which names no directory.
+function sharedRootFile(): DriveItem {
+	const raw: SharedFile = {
+		uuid: testUuid("shared-root"),
+		size: 1_024n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 1n,
+		timestamp: 1_700_000_000_000n,
+		meta: decodedMeta("notes.txt"),
+		sharingRole: { type: "receiver", email: "a@example.com", id: 1n },
+		sharedTag: true,
+		canMakeThumbnail: false
+	}
+
+	return narrowItem(raw)
+}
+
 describe("readOnlyOrigin", () => {
 	const OWNED_VARIANTS = ["drive", "recents", "favorites", "links", "sharedOut"] as const
-
-	function sharedRootFile(): DriveItem {
-		const raw: SharedFile = {
-			uuid: testUuid("shared-root"),
-			size: 1_024n,
-			region: "de-1",
-			bucket: "filen-1",
-			chunks: 1n,
-			timestamp: 1_700_000_000_000n,
-			meta: decodedMeta("notes.txt"),
-			sharingRole: { type: "receiver", email: "a@example.com", id: 1n },
-			sharedTag: true,
-			canMakeThumbnail: false
-		}
-
-		return narrowItem(raw)
-	}
 
 	it("writes the user's own file back from every listing of it", () => {
 		for (const variant of OWNED_VARIANTS) {
@@ -255,8 +256,10 @@ describe("readOnlyOrigin", () => {
 		}
 	})
 
-	it("keeps a file shared out on its own read-only: its listing names no directory to save into", () => {
-		expect(readOnlyOrigin(sharedRootFile(), "sharedOut")).toBe("notInDrive")
+	it("edits a file shared out on its own, and never a share received", () => {
+		expect(readOnlyOrigin(sharedRootFile(), "sharedOut")).toBeNull()
+		expect(isEditable(sharedRootFile(), "sharedOut")).toBe(true)
+		expect(readOnlyOrigin(sharedRootFile(), "sharedIn")).toBe("sharedIn")
 	})
 
 	// Regression: the user's own public links list opened every file read-only.
@@ -569,6 +572,59 @@ describe("runPreviewSave (injected deps, no worker or query client)", () => {
 			}
 		})
 		expect(h.patchListing).not.toHaveBeenCalled()
+	})
+})
+
+describe("runPreviewSave of a file shared out on its own", () => {
+	const OWN_PARENT_UUID = testUuid("own-parent")
+
+	it("looks its directory up once, as it saves, and uploads into it", async () => {
+		const h = makeHarness()
+		const getFile = vi.fn<NonNullable<PreviewSaveDeps["getFile"]>>(() =>
+			Promise.resolve(mockFile({ uuid: testUuid("shared-root"), parent: OWN_PARENT_UUID }))
+		)
+		h.uploadFileBytes.mockResolvedValue(mockFile({ uuid: testUuid("new"), parent: OWN_PARENT_UUID }))
+
+		const outcome = await runPreviewSave({ ...h.deps, getFile }, { item: sharedRootFile(), content: "edited" })
+
+		expect(getFile).toHaveBeenCalledExactlyOnceWith(testUuid("shared-root"))
+		expect(h.uploadFileBytes).toHaveBeenCalledWith(OWN_PARENT_UUID, expect.any(Uint8Array), "notes.txt", "text/plain", {})
+		expect(h.patchListing).toHaveBeenCalledWith(OWN_PARENT_UUID, expect.any(Function), { writeNow: true })
+		expect(outcome).toMatchObject({ status: "success", item: { type: "file", data: { uuid: testUuid("new") } } })
+	})
+
+	it("reads the root uuid it finds as the drive root", async () => {
+		const h = makeHarness()
+		const getFile = vi.fn<NonNullable<PreviewSaveDeps["getFile"]>>(() =>
+			Promise.resolve(mockFile({ uuid: testUuid("shared-root"), parent: ROOT_UUID }))
+		)
+		h.uploadFileBytes.mockResolvedValue(mockFile({ uuid: testUuid("new"), parent: ROOT_UUID }))
+
+		await runPreviewSave({ ...h.deps, getFile }, { item: sharedRootFile(), content: "edited" })
+
+		expect(h.uploadFileBytes).toHaveBeenCalledWith(null, expect.any(Uint8Array), "notes.txt", "text/plain", {})
+	})
+
+	it("uploads nothing when the file is gone, as an unresolvable parent the editor goes read-only on", async () => {
+		const h = makeHarness()
+		const getFile = vi.fn<NonNullable<PreviewSaveDeps["getFile"]>>(() => Promise.resolve(undefined))
+
+		const outcome = await runPreviewSave({ ...h.deps, getFile }, { item: sharedRootFile(), content: "edited" })
+
+		expect(h.uploadFileBytes).not.toHaveBeenCalled()
+		expect(h.patchListing).not.toHaveBeenCalled()
+		expect(outcome.status === "error" && isUnresolvableParentError(outcome.dto)).toBe(true)
+	})
+
+	it("never looks up a file whose listing names its directory", async () => {
+		const h = makeHarness()
+		const getFile = vi.fn<NonNullable<PreviewSaveDeps["getFile"]>>()
+		h.uploadFileBytes.mockResolvedValue(mockFile({ uuid: testUuid("new") }))
+
+		await runPreviewSave({ ...h.deps, getFile }, { item: fileItem(), content: "edited" })
+
+		expect(getFile).not.toHaveBeenCalled()
+		expect(h.uploadFileBytes).toHaveBeenCalledWith(OTHER_PARENT_UUID, expect.any(Uint8Array), "notes.txt", "text/plain", {})
 	})
 })
 

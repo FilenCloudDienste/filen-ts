@@ -2,7 +2,7 @@ import type { File as SdkFile } from "@filen/sdk-rs"
 import { driveItemName, type QuotaVerdict } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { editedCopyName } from "@/features/drive/lib/copyName"
-import { editedSaveTimes, runPreviewSave, type PreviewSaveDeps } from "@/features/drive/lib/previewSave.logic"
+import { editedSaveTimes, runPreviewSave, withOwnDirectory, type PreviewSaveDeps } from "@/features/drive/lib/previewSave.logic"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
 import type { Transfer, TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
@@ -297,7 +297,14 @@ async function runSave(
 		return refused("target", `${target} is not offered for this file`)
 	}
 
-	const parent = base.data.parent === deps.rootUuid() ? null : base.data.parent
+	// A file shared out on its own finds its directory now (withOwnDirectory), once: the upload takes what it found.
+	const own = await withOwnDirectory(item, deps.saveDeps.getFile)
+
+	if (own === undefined) {
+		return { status: "remoteChanged", currentUuid: null }
+	}
+
+	const parent = own.data.parent === deps.rootUuid() ? null : own.data.parent
 
 	// A new version must be of the version the edit was made on.
 	if (target === "inPlace" && base.data.stableUUID !== undefined) {
@@ -446,7 +453,7 @@ async function runSave(
 			const upload = runPreviewSave(
 				{ ...deps.saveDeps, checkQuota: deps.checkQuota },
 				{
-					item,
+					item: own,
 					content: { port: save.port2, quotaBytes: plan.estimateBytes * QUOTA_MARGIN, transferId: id },
 					...(copyName === null ? {} : { asNewFile: copyName }),
 					times: editedSaveTimes(item, deps.now()),

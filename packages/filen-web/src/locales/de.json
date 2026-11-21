@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Sein Text wird in einem anderen Textfeld fortgesetzt, daher kann es hier nicht bearbeitet werden.",
 		"previewDocxViewOnlyLockedTextbox": "Es befindet sich in einem Teil des Dokuments, der unverändert bleibt.",
 		"previewDocxViewOnlyMalformed": "Teile davon sind beschädigt, daher bleibt es unverändert.",
-		"previewDocxViewOnlyNotInDrive": "Zum Bearbeiten aus seinem Verzeichnis in der Cloud Drive öffnen.",
 		"previewDocxViewOnlyNotWritable": "Änderungen können nicht mehr in dieser Datei gespeichert werden.",
 		"previewDocxViewOnlyProtected": "Es ist in Word gegen Bearbeitung geschützt.",
 		"previewDocxViewOnlyPublicLink": "Es wurde über einen öffentlichen Link geöffnet.",

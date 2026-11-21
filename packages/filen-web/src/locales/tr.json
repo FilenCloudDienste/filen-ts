@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Metni başka bir metin kutusunda devam ediyor, bu yüzden burada düzenlenemez.",
 		"previewDocxViewOnlyLockedTextbox": "Belgenin olduğu gibi tutulan bir bölümünde.",
 		"previewDocxViewOnlyMalformed": "Bazı bölümleri hasarlı, bu yüzden olduğu gibi bırakılıyor.",
-		"previewDocxViewOnlyNotInDrive": "Düzenlemek için sürücünüzdeki dizininden açın.",
 		"previewDocxViewOnlyNotWritable": "Değişiklikler artık bu dosyaya kaydedilemez.",
 		"previewDocxViewOnlyProtected": "Word'de düzenlemeye karşı korunuyor.",
 		"previewDocxViewOnlyPublicLink": "Herkese açık bir bağlantıdan açıldı.",

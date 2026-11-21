@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Văn bản của nó tiếp tục trong một hộp văn bản khác nên không thể chỉnh sửa tại đây.",
 		"previewDocxViewOnlyLockedTextbox": "Nó nằm trong một phần của tài liệu được giữ nguyên.",
 		"previewDocxViewOnlyMalformed": "Một số phần của tài liệu bị hỏng nên được giữ nguyên.",
-		"previewDocxViewOnlyNotInDrive": "Hãy mở tài liệu từ thư mục chứa nó trong ổ đĩa của bạn để chỉnh sửa.",
 		"previewDocxViewOnlyNotWritable": "Không thể lưu thay đổi vào tệp này nữa.",
 		"previewDocxViewOnlyProtected": "Tài liệu được bảo vệ chống chỉnh sửa trong Word.",
 		"previewDocxViewOnlyPublicLink": "Tài liệu được mở từ một liên kết công khai.",

@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "它的文字接續到另一個文字方塊中，因此無法在此編輯。",
 		"previewDocxViewOnlyLockedTextbox": "它位於文件中保持原樣的部分。",
 		"previewDocxViewOnlyMalformed": "它的部分內容已損毀，因此保持原樣。",
-		"previewDocxViewOnlyNotInDrive": "請從雲端硬碟中它所在的目錄開啟，才能編輯它。",
 		"previewDocxViewOnlyNotWritable": "已無法再將變更儲存到此檔案。",
 		"previewDocxViewOnlyProtected": "它在 Word 中受到編輯保護。",
 		"previewDocxViewOnlyPublicLink": "它是從公開連結開啟的。",

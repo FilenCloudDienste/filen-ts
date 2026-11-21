@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "テキストが別のテキスト ボックスに続いているため、ここでは編集できません。",
 		"previewDocxViewOnlyLockedTextbox": "ドキュメント内のそのまま保持される部分にあります。",
 		"previewDocxViewOnlyMalformed": "一部が破損しているため、そのままの状態で保持されます。",
-		"previewDocxViewOnlyNotInDrive": "編集するには、ドライブ内の保存先ディレクトリから開いてください。",
 		"previewDocxViewOnlyNotWritable": "このファイルには変更を保存できなくなりました。",
 		"previewDocxViewOnlyProtected": "Word で編集が制限されています。",
 		"previewDocxViewOnlyPublicLink": "公開リンクから開かれました。",

@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Dess text fortsätter i en annan textruta, så den kan inte redigeras här.",
 		"previewDocxViewOnlyLockedTextbox": "Den ligger i en del av dokumentet som behålls som den är.",
 		"previewDocxViewOnlyMalformed": "Delar av det är skadade, så det lämnas som det är.",
-		"previewDocxViewOnlyNotInDrive": "Öppna det från dess katalog i din Drive för att redigera det.",
 		"previewDocxViewOnlyNotWritable": "Ändringar kan inte längre sparas i den här filen.",
 		"previewDocxViewOnlyProtected": "Det är skyddat mot redigering i Word.",
 		"previewDocxViewOnlyPublicLink": "Det öppnades från en offentlig länk.",

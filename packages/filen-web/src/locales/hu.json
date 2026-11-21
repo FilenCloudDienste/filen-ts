@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "A szövege egy másik szövegdobozban folytatódik, ezért itt nem szerkeszthető.",
 		"previewDocxViewOnlyLockedTextbox": "A dokumentum egy olyan részében van, amely változatlanul marad.",
 		"previewDocxViewOnlyMalformed": "Egyes részei sérültek, ezért változatlanul marad.",
-		"previewDocxViewOnlyNotInDrive": "A szerkesztéshez nyissa meg a meghajtóján lévő könyvtárából.",
 		"previewDocxViewOnlyNotWritable": "Ebbe a fájlba már nem menthetők módosítások.",
 		"previewDocxViewOnlyProtected": "A Wordben szerkesztés ellen védett.",
 		"previewDocxViewOnlyPublicLink": "Nyilvános hivatkozásból nyitották meg.",

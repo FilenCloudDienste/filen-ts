@@ -2366,7 +2366,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Son texte se poursuit dans une autre zone de texte, elle ne peut donc pas être modifiée ici.",
 		"previewDocxViewOnlyLockedTextbox": "Elle se trouve dans une partie du document conservée telle quelle.",
 		"previewDocxViewOnlyMalformed": "Certaines de ses parties sont endommagées, il est donc laissé tel quel.",
-		"previewDocxViewOnlyNotInDrive": "Ouvrez-le depuis son répertoire dans votre drive pour le modifier.",
 		"previewDocxViewOnlyNotWritable": "Les modifications ne peuvent plus être enregistrées dans ce fichier.",
 		"previewDocxViewOnlyProtected": "Il est protégé contre la modification dans Word.",
 		"previewDocxViewOnlyPublicLink": "Il a été ouvert depuis un lien public.",

@@ -2552,7 +2552,6 @@
 		"previewDocxViewOnlyLinkedTextbox": "Textul său continuă într-o altă casetă de text, așa că nu poate fi editat aici.",
 		"previewDocxViewOnlyLockedTextbox": "Se află într-o parte a documentului care este păstrată neschimbată.",
 		"previewDocxViewOnlyMalformed": "Unele părți sunt deteriorate, așa că este lăsat neschimbat.",
-		"previewDocxViewOnlyNotInDrive": "Deschide-l din directorul său din drive pentru a-l edita.",
 		"previewDocxViewOnlyNotWritable": "Modificările nu mai pot fi salvate în acest fișier.",
 		"previewDocxViewOnlyProtected": "Este protejat împotriva editării în Word.",
 		"previewDocxViewOnlyPublicLink": "A fost deschis dintr-un link public.",
