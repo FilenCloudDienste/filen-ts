@@ -182,11 +182,40 @@ describe("form fields over the page", () => {
 			comb: false,
 			multiSelect: false,
 			editable: false,
+			hidden: false,
 			locked: true
 		}
 		const [field] = engineFields([widget, { ...widget, id: 10, type: "signature" }])
 
 		expect(field).toMatchObject({ id: 9, kind: "radio", readOnly: true })
 		expect(field === undefined ? true : fieldChecked(field)).toBe(false)
+	})
+
+	it("leaves out the editor's hidden widgets, as the viewer's are", () => {
+		const widget: PdfWidgetSummary = {
+			id: 9,
+			page: 0,
+			rect: [0, 0, 100, 20],
+			type: "text",
+			field: "name",
+			label: "Name",
+			value: "",
+			selected: [],
+			onState: null,
+			options: [],
+			maxLength: 0,
+			readOnly: false,
+			required: false,
+			multiline: false,
+			password: false,
+			comb: false,
+			multiSelect: false,
+			editable: false,
+			hidden: false,
+			locked: false
+		}
+
+		expect(engineFields([widget, { ...widget, id: 10, field: "trap", hidden: true }]).map(field => field.id)).toEqual([9])
+		expect(pdfjsFields([{ subtype: "Widget", id: "10R", rect: [0, 0, 100, 20], fieldType: "Tx", hidden: true }])).toEqual([])
 	})
 })

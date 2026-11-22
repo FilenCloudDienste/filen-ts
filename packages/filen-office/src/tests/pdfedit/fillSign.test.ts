@@ -21,6 +21,8 @@ import {
 } from "../../dom/pdfedit/fillSign"
 import { normalizeStrokes, type PdfPageRect, type PdfSignatureImage } from "../../core/pdfedit/visualSignature"
 import { collectFields } from "../../dom/pdfedit/fields"
+import { pageWidgets } from "../../dom/pdfedit/formState"
+import { PDF_UNSIGNED } from "../../core/pdfedit/signaturePolicy"
 import { parseSignFieldArgs } from "../../dom/pdfedit/commands/sign"
 
 // Fill & Sign over real MuPDF: every widget type set, saved, reopened in MuPDF and in pdf.js (another parser), and
@@ -148,6 +150,34 @@ describe("form fields", () => {
 		expect(byName.get("reset@0")).toMatchObject({ kind: "button" })
 		expect(byName.get("signature@0")).toMatchObject({ kind: "signature" })
 		expect(byName.get("page2@1")).toMatchObject({ kind: "text", label: "Second page" })
+	})
+
+	it("reads a widget hidden by its Hidden or NoView flag as hidden, in the editor's summaries too", () => {
+		const document = load("acroform.pdf")
+		const page = document.loadPage(0)
+		const widgets = page.getWidgets()
+		const byName = (name: string) => {
+			const widget = widgets.find(item => item.getName() === name)
+
+			if (widget === undefined) throw new Error(`no widget ${name}`)
+
+			return widget
+		}
+
+		byName("name").setFlags(byName("name").getFlags() | (1 << 1))
+		byName("zip").setFlags(byName("zip").getFlags() | (1 << 5))
+
+		const read = new Map(readPageFields(page, 0).map(item => [item.name, item]))
+
+		expect(read.get("name")?.hidden).toBe(true)
+		expect(read.get("zip")?.hidden).toBe(true)
+		expect(read.get("notes")?.hidden).toBe(false)
+
+		const summaries = new Map(pageWidgets(document, page, 0, PDF_UNSIGNED).map(item => [item.field, item]))
+
+		expect(summaries.get("name")?.hidden).toBe(true)
+		expect(summaries.get("notes")?.hidden).toBe(false)
+		page.destroy()
 	})
 
 	it("sets every field type; MuPDF and pdf.js read the values back after a save", async () => {

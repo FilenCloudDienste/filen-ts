@@ -67,6 +67,7 @@ export function widgetSummary(
 		comb: field.comb,
 		multiSelect: field.multiSelect,
 		editable: field.editable,
+		hidden: field.hidden,
 		locked: !fieldEditable(signatures, field.name)
 	}
 }

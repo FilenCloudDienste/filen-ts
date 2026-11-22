@@ -47,7 +47,13 @@ export interface PdfFormField {
 	// An editable combo box accepts text that is not an option.
 	readonly editable: boolean
 	readonly options: readonly PdfFieldOption[]
+	// The widget's annotation flags hide it (Hidden or NoView, PDF 32000-1 Table 165): viewers draw nothing there, so
+	// no control is drawn over it and nothing fills it unseen.
+	readonly hidden: boolean
 }
+
+const FLAG_HIDDEN = 1 << 1
+const FLAG_NO_VIEW = 1 << 5
 
 export type PdfFieldValue =
 	| { readonly kind: "text"; readonly text: string }
@@ -215,7 +221,8 @@ export function describeWidget(widget: PDFWidget, page: number): PdfFormField {
 		maxLength: kind === "text" ? Math.max(0, widget.getMaxLen()) : 0,
 		multiSelect: kind === "list" && (flags & FF_MULTI_SELECT) !== 0,
 		editable: kind === "combo" && (flags & FF_EDIT) !== 0,
-		options: choice ? optionsOf(widget) : []
+		options: choice ? optionsOf(widget) : [],
+		hidden: (widget.getFlags() & (FLAG_HIDDEN | FLAG_NO_VIEW)) !== 0
 	}
 }
 

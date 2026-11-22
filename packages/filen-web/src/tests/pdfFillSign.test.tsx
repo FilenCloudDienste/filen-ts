@@ -299,6 +299,7 @@ describe("form fields from either engine", () => {
 			comb: false,
 			multiSelect: true,
 			editable: false,
+			hidden: false,
 			locked: true
 		}
 

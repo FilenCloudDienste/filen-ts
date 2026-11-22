@@ -46,6 +46,8 @@ export interface PdfWidgetSummary {
 	readonly multiSelect: boolean
 	// A combo box that takes text of its own.
 	readonly editable: boolean
+	// Hidden or NoView (annotation flags): drawn by no viewer, so given no control.
+	readonly hidden: boolean
 	// A signature locks the field.
 	readonly locked: boolean
 }

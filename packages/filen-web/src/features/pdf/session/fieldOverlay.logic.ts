@@ -135,12 +135,13 @@ const ENGINE_KINDS: Readonly<Partial<Record<PdfWidgetSummary["type"], PdfFormCon
 	listbox: "list"
 }
 
-// The editor's widgets in tab order; a field a signature locks is read-only.
+// The editor's widgets in tab order; a field a signature locks is read-only. Hidden widgets are left out, as pdf.js
+// leaves them out before the swap: no control is drawn where the page shows nothing.
 export function engineFields(widgets: readonly PdfWidgetSummary[]): OverlayField[] {
 	return widgets.flatMap(widget => {
 		const kind = ENGINE_KINDS[widget.type]
 
-		return kind === undefined
+		return kind === undefined || widget.hidden
 			? []
 			: [
 					{
