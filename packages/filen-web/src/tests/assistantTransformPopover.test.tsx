@@ -11,12 +11,15 @@ import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import type { TransformSelection } from "@/features/assistant/transform/host"
 import { TransformPopover } from "@/features/assistant/transform/transformPopover"
 import {
+	assistantRunsHere,
 	diffSegments,
 	recentTransformLanguages,
 	transformOffered,
 	uiTransformLanguage,
 	withRecentLanguage
 } from "@/features/assistant/transform/transform.logic"
+import { PDF_TOOLS, PDF_TOOLS_WITHOUT_ASSISTANT } from "@/features/pdf/tools"
+import { FORM_FILL_TOOL_ID } from "@/features/pdf/tools/formFill.tool"
 import type { AssistantModelState, AssistantTransformOutcome, AssistantTransformRequest } from "@/features/assistant/types"
 
 const MODEL = { id: "m", name: "Model", sizeBytes: 2_600_000_000 }
@@ -165,6 +168,17 @@ describe("transform logic", () => {
 		expect(transformOffered({ kind: "unavailable", reason: "unsupported-browser", model: null })).toBe(false)
 		expect(transformOffered({ kind: "unavailable", reason: "in-use-elsewhere", model: null })).toBe(true)
 		expect(transformOffered({ kind: "not-downloaded", model: MODEL })).toBe(true)
+	})
+
+	it("tells a device that can never run the model from one where it is only not ready", () => {
+		expect(assistantRunsHere({ kind: "unavailable", reason: "unsupported-browser", model: null })).toBe(false)
+		expect(assistantRunsHere({ kind: "unavailable", reason: "insufficient-memory", model: null })).toBe(false)
+		expect(assistantRunsHere({ kind: "unavailable", reason: "in-use-elsewhere", model: null })).toBe(true)
+		expect(assistantRunsHere({ kind: "checking", model: null })).toBe(true)
+		expect(assistantRunsHere({ kind: "not-downloaded", model: MODEL })).toBe(true)
+		expect(PDF_TOOLS_WITHOUT_ASSISTANT.map(tool => tool.id)).toEqual(
+			PDF_TOOLS.filter(tool => tool.id !== FORM_FILL_TOOL_ID).map(tool => tool.id)
+		)
 	})
 
 	it("diffs the result against the selection into runs that rebuild both", () => {

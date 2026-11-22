@@ -25,10 +25,16 @@ export function withRecentLanguage(recent: readonly TransformLanguage[], picked:
 	return [picked, ...recent.filter(language => language !== picked)].slice(0, RECENT_LANGUAGES)
 }
 
+// Whether the device can run the model at all: not when the startup check found the browser unsupported or the memory
+// too small. Another tab holding it is not that (it is explained on use).
+export function assistantRunsHere(state: AssistantModelState): boolean {
+	return !(state.kind === "unavailable" && state.reason !== "in-use-elsewhere")
+}
+
 // Whether a transform can be offered at all: the model runs, or can be downloaded or loaded, here. Not before the
-// startup check answers, nor where the device can never run it; another tab holding it is explained on use.
+// startup check answers, nor where the device can never run it.
 export function transformOffered(state: AssistantModelState): boolean {
-	return state.kind !== "checking" && !(state.kind === "unavailable" && state.reason !== "in-use-elsewhere")
+	return state.kind !== "checking" && assistantRunsHere(state)
 }
 
 export interface DiffSegment {

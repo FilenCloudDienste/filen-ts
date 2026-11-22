@@ -59,9 +59,8 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { useKeyboardLayout } from "@/lib/keymap/layout"
 import { useBindings } from "@/lib/keymap/registry"
-import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
-import { transformOffered } from "@/features/assistant/transform/transform.logic"
 import { TransformMenuEntries } from "@/features/assistant/transform/transformMenu"
 import { CONTEXT_MENU_PARTS, type TransformPick } from "@/features/assistant/transform/transformMenuParts"
 import { ShapeTransformPopover, type ShapeTransformRequest } from "@/features/presentation/components/shapeTransformPopover"
@@ -359,7 +358,7 @@ function AssistantSubmenu({
 	const { t } = useTranslation("assistant")
 	// Never on a public link's page: the assistant is the signed-in user's.
 	const signedIn = usePreviewAccessMode() === "authed"
-	const offered = useAssistantStore(state => transformOffered(state.modelState)) && signedIn
+	const offered = useTransformOffered() && signedIn
 
 	if (!offered) return null
 

@@ -159,9 +159,8 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { IN_EDITORS, IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { docxTransform } from "@/features/preview/lib/docxTransformHost"
 import { DocxEditDocument } from "@/features/preview/components/docxEditDocument"
-import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import type { TransformSelection } from "@/features/assistant/transform/host"
-import { transformOffered } from "@/features/assistant/transform/transform.logic"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import { TransformMenu, TransformSubmenu } from "@/features/assistant/transform/transformMenu"
 import { CONTEXT_MENU_PARTS, type TransformPick } from "@/features/assistant/transform/transformMenuParts"
 import { TransformPopover, type TransformRequest } from "@/features/assistant/transform/transformPopover"
@@ -659,7 +658,7 @@ export function DocxEditView({
 	// The assistant's selection transform: ✨ in the Mini toolbar, "Rewrite with assistant ▸" in the context menu, its
 	// key; the menu it opens and the result's popover. The host reads the editor of the latest render.
 	const { t: tAssistant } = useTranslation("assistant")
-	const transformOnDevice = useAssistantStore(state => transformOffered(state.modelState))
+	const transformOnDevice = useTransformOffered()
 	const [transform] = useState(docxTransform)
 	const transformHost = transform.host
 

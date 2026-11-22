@@ -174,6 +174,8 @@ export interface PdfTool {
 	readonly Panel?: ComponentType<PdfToolPanelProps>
 	// Where its Panel sits: beside the pages (default), or above them ("top": a bar, or a view laid over the pages).
 	readonly panelSlot?: PdfToolPanelSlot
+	// Runs the assistant's model: not offered on a device that can never run it.
+	readonly assistant?: true
 }
 
 export type PdfToolPanelSlot = "top" | "side"

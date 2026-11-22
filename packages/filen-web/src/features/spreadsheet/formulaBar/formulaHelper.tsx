@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { modelAcceptsMessages } from "@/features/assistant/store/assistantSession"
 import { writeAssistantFormula } from "@/features/assistant/store/assistantTransform"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
-import { transformOffered } from "@/features/assistant/transform/transform.logic"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import { ModelNotReady } from "@/features/assistant/transform/transformPopover"
 import type { AssistantFormulaValue } from "@/features/assistant/types"
 import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
@@ -52,6 +52,7 @@ export function FormulaHelper({ grid }: { grid: SheetGridState }) {
 	const language = useRegionalLanguage()
 	const locale = sheetLocaleOf(language)
 	const modelState = useAssistantStore(state => state.modelState)
+	const offered = useTransformOffered()
 	const [open, setOpen] = useState(false)
 	const [ask, setAsk] = useState("")
 	const [phase, setPhase] = useState<Phase>({ kind: "ask" })
@@ -66,7 +67,7 @@ export function FormulaHelper({ grid }: { grid: SheetGridState }) {
 		[]
 	)
 
-	if (!transformOffered(modelState)) {
+	if (!offered) {
 		return null
 	}
 

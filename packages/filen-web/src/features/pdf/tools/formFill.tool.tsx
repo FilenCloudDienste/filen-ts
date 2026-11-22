@@ -17,5 +17,6 @@ export const FORM_FILL_TOOL: PdfTool = {
 	enabledWhen: policy => toolEnabled("formFill", policy),
 	commands: ["forms.setField"],
 	Overlay: FormFillOverlay,
-	Panel: whileActive(FormFillPanel)
+	Panel: whileActive(FormFillPanel),
+	assistant: true
 }

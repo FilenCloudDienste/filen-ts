@@ -44,3 +44,6 @@ export const PDF_TOOLS: readonly PdfTool[] = [
 	OCR_TOOL,
 	SIGN_CERTIFICATE_TOOL
 ]
+
+// The tools on a device that can never run the assistant's model (the ribbon leaves the assistant's out).
+export const PDF_TOOLS_WITHOUT_ASSISTANT: readonly PdfTool[] = PDF_TOOLS.filter(tool => tool.assistant !== true)

@@ -9,7 +9,7 @@ import { modelAcceptsMessages } from "@/features/assistant/store/assistantSessio
 import { draftAssistantNotes } from "@/features/assistant/store/assistantTransform"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import type { AssistantNotesOutcome } from "@/features/assistant/types"
-import { transformOffered } from "@/features/assistant/transform/transform.logic"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import { ModelNotReady } from "@/features/assistant/transform/transformPopover"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 
@@ -23,7 +23,7 @@ const SLIDE_TEXT_MAX_CHARS = 4000
 // The empty notes' offer to draft them; only where the model can run.
 export function NotesDraftButton({ onDraft }: { onDraft: () => void }) {
 	const { t } = useTranslation("assistant")
-	const offered = useAssistantStore(state => transformOffered(state.modelState))
+	const offered = useTransformOffered()
 
 	if (!offered) return null
 

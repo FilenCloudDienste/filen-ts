@@ -17,6 +17,7 @@ import {
 	useAssistantStore,
 	useAssistantVisible
 } from "@/features/assistant/store/useAssistantStore"
+import { useAssistantRunsHere } from "@/features/assistant/store/useAssistantOnDevice"
 import { awaitingConfirmation, type TranscriptState } from "@/features/assistant/store/transcript"
 import { downloadingPercent } from "@/features/assistant/components/assistant.logic"
 import { useResumeInterruptedDownload } from "@/features/assistant/components/assistantDownloadResume"
@@ -195,6 +196,12 @@ export function PreviewAssistantToggle() {
 	const { t } = useTranslation("common")
 	const narrow = useIsNarrowViewport()
 	const visible = useAssistantVisible(narrow)
+	// None on a device that can never run the model.
+	const runs = useAssistantRunsHere()
+
+	if (!runs) {
+		return null
+	}
 
 	return (
 		<TooltipIconButton

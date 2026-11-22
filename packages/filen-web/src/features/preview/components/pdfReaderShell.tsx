@@ -37,7 +37,8 @@ import { PdfFieldOverlay } from "@/features/pdf/session/fieldOverlay"
 import { PdfFormNotices } from "@/features/pdf/forms/formNotices"
 import { FORM_FILL_TOOL, FORM_FILL_TOOL_ID } from "@/features/pdf/tools/formFill.tool"
 import { PdfRibbon } from "@/features/pdf/ribbon/pdfRibbon"
-import { PDF_TOOLS } from "@/features/pdf/tools"
+import { PDF_TOOLS, PDF_TOOLS_WITHOUT_ASSISTANT } from "@/features/pdf/tools"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import { PdfToolOverlay, PdfToolPanels } from "@/features/pdf/tools/toolHost"
 import { PdfLiveRegion } from "@/features/pdf/tools/pdfLiveRegion"
 import { PdfPagesNotices, PdfPagesSide } from "@/features/pdf/pages/pagesSurface"
@@ -278,6 +279,8 @@ export function PdfReaderShell({
 	const paneOpen = usePdfOutlinePaneOpen()
 	const railOpen = usePdfPagesRailOpen()
 	const phone = usePhoneWidth()
+	// The assistant's tools (Fill this page) only where its model can run.
+	const transformOffered = useTransformOffered()
 	const medium = useMediumWidth()
 	const [properties, setProperties] = useState(false)
 	const linkGate = useTrustedLinkGate()
@@ -627,7 +630,7 @@ export function PdfReaderShell({
 					}}
 					pageInputRef={pageInputRef}
 					scrollRoom={scrollRoom}
-					tools={PDF_TOOLS}
+					tools={transformOffered ? PDF_TOOLS : PDF_TOOLS_WITHOUT_ASSISTANT}
 					policy={edit.policy}
 					toolContext={edit.toolContext}
 					activeTool={edit.activeTool}

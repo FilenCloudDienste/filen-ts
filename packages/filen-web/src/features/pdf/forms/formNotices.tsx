@@ -13,8 +13,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import type { PdfFormSaveChoice } from "@/features/pdf/forms/formSave"
-import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
-import { transformOffered } from "@/features/assistant/transform/transform.logic"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 // The form's one-line notices under the ribbon: the document has form fields (with a button to the first one; until
@@ -70,7 +69,8 @@ export function PdfFormNotices({ document, snapshot, scrollerRef, onFill }: PdfF
 	const { t } = useTranslation("preview")
 	// Never on a public link's page: the assistant is the signed-in user's.
 	const signedIn = usePreviewAccessMode() === "authed"
-	const fillOffered = useAssistantStore(state => transformOffered(state.modelState)) && signedIn && onFill !== undefined
+	const offered = useTransformOffered()
+	const fillOffered = offered && signedIn && onFill !== undefined
 	const [read, setRead] = useState<{ readonly document: PdfDomDocument; readonly info: FormInfo } | null>(null)
 	const info = read?.document === document ? read.info : null
 

@@ -4,9 +4,8 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { SparklesIcon } from "lucide-react"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
-import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import type { TransformHost, TransformSelection } from "@/features/assistant/transform/host"
-import { transformOffered } from "@/features/assistant/transform/transform.logic"
 import { TransformMenu } from "@/features/assistant/transform/transformMenu"
 import type { TransformPick } from "@/features/assistant/transform/transformMenuParts"
 import { TransformPopover, type TransformRequest } from "@/features/assistant/transform/transformPopover"
@@ -64,7 +63,7 @@ export function SelectionTransformRoot({
 
 export function SelectionTransform({ host, root, readOnly }: { host: TransformHost; root: HTMLElement | null; readOnly?: boolean }) {
 	const { t } = useTranslation("assistant")
-	const offered = useAssistantStore(state => transformOffered(state.modelState)) && readOnly !== true
+	const offered = useTransformOffered() && readOnly !== true
 	const [button, setButton] = useState<{ x: number; y: number } | null>(null)
 	const [menu, setMenu] = useState<MenuState | null>(null)
 	const [request, setRequest] = useState<TransformRequest | null>(null)
