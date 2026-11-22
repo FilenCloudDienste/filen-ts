@@ -892,6 +892,7 @@ export function SheetBody({
 					gridRef={gridRef}
 					canEdit={cellsWritable}
 					formula={formula}
+					formulaHelper={!text}
 				>
 					{grid.failed !== null ? (
 						<span

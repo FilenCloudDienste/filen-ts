@@ -260,6 +260,7 @@ export function SheetFormulaBar({
 	gridRef,
 	canEdit,
 	formula,
+	formulaHelper,
 	children
 }: {
 	grid: SheetGridState
@@ -267,6 +268,8 @@ export function SheetFormulaBar({
 	canEdit: boolean
 	// The formula typing extension (AutoSum's button, the references' colours); none for a view without it.
 	formula?: SheetFormulaExtension
+	// The assistant writes formulas here (a workbook whose formulas this app calculates, never a text file).
+	formulaHelper?: boolean
 	children: ReactNode
 }) {
 	const { t } = useTranslation("preview")
@@ -311,7 +314,7 @@ export function SheetFormulaBar({
 					Σ
 				</Button>
 			) : null}
-			{editable && formula !== undefined ? <FormulaHelper grid={grid} /> : null}
+			{editable && formula !== undefined && formulaHelper === true ? <FormulaHelper grid={grid} /> : null}
 			{editable ? (
 				<div className="relative flex h-7 min-w-0 flex-1 rounded-md focus-within:bg-muted/60">
 					{colored ? (
