@@ -2,8 +2,9 @@
 
 import "@/tests/support/officeKeys"
 import type { ComponentType } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { stubElementSize } from "@/tests/stubElementSize"
 import {
 	DOCX_EDITOR_COMMANDS,
 	NO_REVIEW,
@@ -136,6 +137,17 @@ async function choose(label: string, option: string): Promise<void> {
 	fireEvent.mouseUp(item, { button: 0 })
 	fireEvent.click(item)
 }
+
+// The bookmark list is virtualized: the DOM test environment lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 224, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 afterEach(() => {
 	cleanup()

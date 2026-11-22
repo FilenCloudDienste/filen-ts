@@ -1,5 +1,6 @@
 import { useId, useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
+import { DocxBookmarkRows } from "@/features/preview/components/docxBookmarkRows"
 import {
 	DOCX_NOTE_NUMBER_FORMATS,
 	FIELD_CATALOGUE,
@@ -802,28 +803,12 @@ function BookmarkDialog({ editor, enabled, run, close }: DialogProps) {
 				{list.length === 0 ? (
 					<p className="text-sm text-muted-foreground">{t("previewDocxBookmarkNone")}</p>
 				) : (
-					<ul
-						aria-label={t("previewDocxBookmarkList")}
-						className="flex max-h-56 flex-col gap-0.5 overflow-y-auto rounded-xl border p-1"
-					>
-						{list.map(bookmark => (
-							<li key={bookmark.name}>
-								<button
-									type="button"
-									aria-pressed={selected === bookmark.name}
-									className={cn(
-										"w-full truncate rounded-lg px-2 py-1 text-left text-sm hover:bg-accent",
-										selected === bookmark.name && "bg-accent text-accent-foreground"
-									)}
-									onClick={() => {
-										setSelected(bookmark.name)
-									}}
-								>
-									{bookmark.name}
-								</button>
-							</li>
-						))}
-					</ul>
+					<DocxBookmarkRows
+						names={list.map(bookmark => bookmark.name)}
+						label={t("previewDocxBookmarkList")}
+						selected={selected}
+						onSelect={setSelected}
+					/>
 				)}
 				<DialogFooter className="flex-wrap">
 					<Button
