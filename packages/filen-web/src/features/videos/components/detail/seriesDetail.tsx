@@ -11,7 +11,6 @@ import { log } from "@/lib/log"
 import { noDiskPersister } from "@/queries/persist"
 import { useVideoArt } from "@/features/videos/hooks/useVideoArt"
 import { useTitleWatch } from "@/features/videos/hooks/useTitleWatch"
-import { useRowsInSlices } from "@/features/videos/hooks/useRowsInSlices"
 import { watchState } from "@/features/videos/lib/watchState"
 import { probeRecords } from "@/features/videos/lib/records"
 import { CardObserver, visibleCardObserver } from "@/features/videos/lib/cardObserver"
@@ -33,6 +32,7 @@ import { episodeSubject, titleSubject, type CorrectionSubject } from "@/features
 import { useLastSeasonQuery, useNfoQuery, rememberSeason } from "@/features/videos/queries/detail"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { DetailHeader } from "@/features/videos/components/detail/detailHeader"
+import { EpisodeRows } from "@/features/videos/components/detail/episodeRows"
 import { TitleMenu } from "@/features/videos/components/detail/titleMenu"
 import { ArtImage } from "@/features/videos/components/videoCard"
 import { Button } from "@/components/ui/button"
@@ -98,7 +98,7 @@ function EpisodeRow({
 	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
 	const report = useWatchToast()
-	const [element, setElement] = useState<HTMLLIElement | null>(null)
+	const [element, setElement] = useState<HTMLDivElement | null>(null)
 	const [stillElement, setStillElement] = useState<HTMLDivElement | null>(null)
 	const [near, setNear] = useState(false)
 	const [seen, setSeen] = useState(false)
@@ -149,7 +149,7 @@ function EpisodeRow({
 	const remaining = remainingSec === null ? null : timeLeftText(remainingSec, t)
 
 	return (
-		<li
+		<div
 			ref={setElement}
 			className="group/episode flex items-start gap-3 py-3 md:gap-4"
 		>
@@ -300,7 +300,7 @@ function EpisodeRow({
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>
-		</li>
+		</div>
 	)
 }
 
@@ -317,17 +317,27 @@ function EpisodeList({
 	observer: CardObserver | null
 	onEdit: (subject: CorrectionSubject) => void
 }) {
-	// A season of hundreds of episodes mounts in slices rather than in one long render.
-	const shown = useRowsInSlices(season.episodes.length)
+	const episodes = season.episodes
+
+	function rowKey(index: number): string {
+		return episodes[index]?.versions[0]?.parts[0]?.file.stableUuid ?? `${String(season.number)}:${String(index)}`
+	}
 
 	return (
-		<ul className="flex flex-col divide-y divide-border/60">
-			{season.episodes.slice(0, shown).map((episode, index) => {
+		<EpisodeRows
+			count={episodes.length}
+			rowKey={rowKey}
+			renderRow={index => {
+				const episode = episodes[index]
+
+				if (episode === undefined) {
+					return null
+				}
+
 				const watch = episodeWatch(episode.versions, entries)
 
 				return (
 					<EpisodeRow
-						key={episode.versions[0]?.parts[0]?.file.stableUuid ?? String(index)}
 						seriesId={detail.title.id}
 						seriesTitle={detail.title.title}
 						episode={episode}
@@ -339,8 +349,8 @@ function EpisodeList({
 						onEdit={onEdit}
 					/>
 				)
-			})}
-		</ul>
+			}}
+		/>
 	)
 }
 

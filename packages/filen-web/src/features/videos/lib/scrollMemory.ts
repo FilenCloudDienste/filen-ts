@@ -22,10 +22,33 @@ export function recallScroll(key: string): number | undefined {
 	return positions.get(key)
 }
 
+// Measured heights of windowed rows by row key. A list mounted again lays out the rows it measured before at their
+// real heights, not its estimate, so a remembered scroll position lands on the same row.
+const MAX_ROW_SIZES = 5000
+
+const rowSizes = new Map<string, number>()
+
+export function rememberRowSize(key: string, size: number): void {
+	rowSizes.delete(key)
+	rowSizes.set(key, size)
+
+	if (rowSizes.size > MAX_ROW_SIZES) {
+		const oldest = rowSizes.keys().next().value
+
+		if (oldest !== undefined) {
+			rowSizes.delete(oldest)
+		}
+	}
+}
+
+export function recallRowSize(key: string): number | undefined {
+	return rowSizes.get(key)
+}
+
 const USER_SCROLL_EVENTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const
 
-// Scrolls `element` to `offset`, and again as its content grows (rows mounted in slices) until it gets there or the
-// user takes over. Returns the stop.
+// Scrolls `element` to `offset`, and again as its content grows (a list mounting, its rows measured) until it gets
+// there or the user takes over. Returns the stop.
 export function restoreScroll(element: HTMLElement, offset: number): () => void {
 	element.scrollTop = offset
 

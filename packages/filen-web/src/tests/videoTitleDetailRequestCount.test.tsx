@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
 import { createElement, type ReactNode } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { AnyFile } from "@filen/sdk-rs"
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 import type { VideoFileRef, VideoPartView, VideoTitleDetail } from "@/workers/videoIndex/view.logic"
 
 // What opening a movie's page costs: the title's full probe (one), its NFO (one read), and art only for what is on
@@ -222,6 +223,17 @@ async function flush(): Promise<void> {
 		await vi.advanceTimersByTimeAsync(0)
 	})
 }
+
+// The episode lists are virtualized: jsdom lays nothing out, so they get a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 800, clientWidth: 800 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 beforeEach(() => {
 	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })

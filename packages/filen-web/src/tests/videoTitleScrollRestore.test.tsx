@@ -1,42 +1,10 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, renderHook } from "@testing-library/react"
-import { FIRST_SLICE_ROWS, SLICE_ROWS, useRowsInSlices } from "@/features/videos/hooks/useRowsInSlices"
 import { restoreScroll } from "@/features/videos/lib/scrollMemory"
 
 afterEach(() => {
-	vi.useRealTimers()
 	vi.unstubAllGlobals()
-})
-
-describe("a long season's rows", () => {
-	it("mounts the first screen at once and the rest in idle slices, in order", () => {
-		vi.useFakeTimers()
-
-		const { result } = renderHook(() => useRowsInSlices(1000))
-
-		expect(result.current).toBe(FIRST_SLICE_ROWS)
-
-		act(() => {
-			vi.advanceTimersByTime(20)
-		})
-		expect(result.current).toBe(FIRST_SLICE_ROWS + SLICE_ROWS)
-
-		for (let i = 0; i < 20; i++) {
-			act(() => {
-				vi.advanceTimersByTime(20)
-			})
-		}
-
-		expect(result.current).toBe(1000)
-	})
-
-	it("mounts a short season whole", () => {
-		const { result } = renderHook(() => useRowsInSlices(12))
-
-		expect(result.current).toBe(12)
-	})
 })
 
 describe("restoring a title page's scroll position", () => {

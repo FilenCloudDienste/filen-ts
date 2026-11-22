@@ -7,6 +7,7 @@ import { useVideoLibrary, useVideoTitleDetailQuery } from "@/features/videos/que
 import { useCatalogSeriesQuery, useCatalogTitleQuery } from "@/features/videos/queries/catalog"
 import { useHistoryEntryKey } from "@/features/videos/hooks/useHistoryEntryKey"
 import { recallScroll, rememberScroll, restoreScroll } from "@/features/videos/lib/scrollMemory"
+import { TitleScrollContext } from "@/features/videos/lib/titleScroll"
 import { titleSubject, type CorrectionSubject } from "@/features/videos/lib/corrections.logic"
 import { detailHeaderMode } from "@/features/videos/lib/titleDetail.logic"
 import { probeLandscapeCover } from "@/features/videos/lib/artwork.logic"
@@ -131,13 +132,16 @@ export function VideoTitleScreen({ titleId }: { titleId: string }) {
 			}}
 		>
 			{detail.kind === "series" ? (
-				<SeriesDetail
-					key={detail.title.id}
-					detail={detail}
-					headerMode={headerMode}
-					onBack={back}
-					onEdit={setEditing}
-				/>
+				// The episode lists window their rows over this scroller.
+				<TitleScrollContext value={scroller}>
+					<SeriesDetail
+						key={detail.title.id}
+						detail={detail}
+						headerMode={headerMode}
+						onBack={back}
+						onEdit={setEditing}
+					/>
+				</TitleScrollContext>
 			) : (
 				<MovieDetail
 					key={detail.title.id}
