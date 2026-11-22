@@ -1,6 +1,8 @@
 // A small multilingual account. Handles are fixed so expected calls can name them; the fake app
 // still refuses a handle until a tool result or the context has shown it to the model.
 
+import type { AssistantDocumentKind } from "@filen/shared/assistant"
+
 export type DriveItem = {
 	handle: string
 	kind: "file" | "directory"
@@ -20,6 +22,23 @@ export type DriveItem = {
 	sharedWith?: string[]
 	link?: PublicLink
 	content?: string
+	// A PDF's, Word document's, spreadsheet's or deck's text per page, sheet or slide, as read_document reads it.
+	document?: FixtureDocument
+}
+
+export type FixtureDocument = {
+	kind: AssistantDocumentKind
+	// "page 3", "slide 2", or a sheet's name.
+	units: readonly { label: string; text: string }[]
+}
+
+// The document open in a preview: where the user is in it, and the text selected there.
+export type OpenDocument = {
+	handle: string
+	page?: number
+	sheet?: string
+	slide?: number
+	selection?: string
 }
 
 export type PublicLink = {
@@ -84,6 +103,8 @@ export type AppContext = {
 	// The note or chat open on the notes or chats screen.
 	note?: string
 	chat?: string
+	// A document open in a preview (the assistant beside it).
+	openDocument?: OpenDocument
 	playing: Playback | null
 }
 
@@ -170,6 +191,89 @@ function file(
 	}
 }
 
+// The facts the long report's late pages hold, which only a chunked read reaches.
+export const REPORT_FACTS = {
+	churn: { page: 31, text: "Customer churn fell to 2.1% in September, the lowest in two years." },
+	office: { page: 34, text: "The board approved opening a second office in Lisbon in March 2026." },
+	headcount: { page: 38, text: "Headcount at the end of the quarter: 48 people." }
+} as const
+
+const REPORT_TOPICS = ["revenue", "costs", "hiring", "product", "marketing", "support", "infrastructure", "security"]
+
+// A 40-page quarterly report: about 800 characters a page, so a whole read takes several extraction chunks.
+function reportPage(page: number): string {
+	const topic = REPORT_TOPICS[page % REPORT_TOPICS.length] ?? "revenue"
+	const fact = Object.values(REPORT_FACTS).find(entry => entry.page === page)
+	const filler = [
+		`Section ${String(page)}: ${topic}.`,
+		`This page reviews ${topic} for the third quarter of 2025 and compares it with the second quarter.`,
+		`The team tracked ${String(page * 3)} indicators for ${topic}; ${String(page + 4)} of them improved and ${String(page % 5)} declined.`,
+		`Spending on ${topic} came to ${String(10 + page)},${String(100 + page * 7).padStart(3, "0")} EUR, within the plan agreed in June.`,
+		`Risks noted for ${topic}: supplier delays, exchange rates and the holiday season in December.`,
+		`Next steps for ${topic} are listed in the appendix, with owners and dates for each item.`,
+		`No decisions on ${topic} are pending from the board at the time of writing.`
+	].join(" ")
+
+	return fact === undefined ? filler : `${filler} ${fact.text}`
+}
+
+const REPORT_Q3: FixtureDocument = {
+	kind: "pdf",
+	units: Array.from({ length: 40 }, (_, index) => ({ label: `page ${String(index + 1)}`, text: reportPage(index + 1) }))
+}
+
+const EMPLOYMENT_CONTRACT: FixtureDocument = {
+	kind: "pdf",
+	units: [
+		{
+			label: "page 1",
+			text: "Arbeitsvertrag zwischen der Filen Cloud GmbH und Sam Weber. Beginn des Arbeitsverhältnisses: 1. August 2024. Position: Software Engineer, Standort Köln."
+		},
+		{
+			label: "page 2",
+			text: "Vergütung: Das Bruttogehalt beträgt 4.850 EUR monatlich, zahlbar zum Monatsende. Arbeitszeit: 40 Stunden pro Woche, Gleitzeit."
+		},
+		{
+			label: "page 3",
+			text: "Urlaub: 30 Arbeitstage im Kalenderjahr. Kündigungsfrist: drei Monate zum Monatsende. Probezeit: sechs Monate."
+		}
+	]
+}
+
+const CV: FixtureDocument = {
+	kind: "docx",
+	units: [
+		{
+			label: "page 1",
+			text: "Sam Weber, Software Engineer. Experience: Filen Cloud GmbH (2024–today), Rust and TypeScript; Telekom (2019–2024), backend services."
+		},
+		{ label: "page 2", text: "Education: B.Sc. Computer Science, TH Köln, 2019. Languages: German, English, Spanish (B2)." }
+	]
+}
+
+const BUDGET_SHEETS: FixtureDocument = {
+	kind: "sheet",
+	units: [
+		{ label: "Resumen", text: "Concepto\tImporte\nPresupuesto total\t18.500 €\nGastado\t11.240 €\nRestante\t7.260 €" },
+		{
+			label: "Gastos",
+			text: "Fecha\tConcepto\tImporte\n2025-05-02\tVuelos\t2.300 €\n2025-05-10\tHotel Casa Bonay\t4.900 €\n2025-05-20\tCatering\t4.040 €"
+		}
+	]
+}
+
+const KICKOFF_SLIDES: FixtureDocument = {
+	kind: "slides",
+	units: [
+		{ label: "slide 1", text: "Proyecto Barcelona — Kickoff\n\nNotes:\nBienvenida y presentaciones." },
+		{ label: "slide 2", text: "Objetivos: congreso de 120 personas, 12–14 de junio de 2025." },
+		{ label: "slide 3", text: "Equipo: Marta (logística), Jordi (proveedores), Sam (presupuesto)." },
+		{ label: "slide 4", text: "Calendario: reservas antes del 15 de mayo; programa final el 1 de junio." },
+		{ label: "slide 5", text: "Presupuesto: 18.500 € en total.\n\nNotes:\nEl catering es la partida más incierta." },
+		{ label: "slide 6", text: "Próximos pasos: visitar el hotel el 20 de mayo." }
+	]
+}
+
 const DRIVE: DriveItem[] = [
 	dir("d0", "Cloud Drive", null),
 	dir("d1", "Documents", "d0"),
@@ -183,9 +287,10 @@ const DRIVE: DriveItem[] = [
 	file("f6", "Mietvertrag_2023.pdf", "d3", 1.4 * MB, "2023-04-01T10:00:00Z", {
 		uploaded: "2025-09-16T18:00:00Z"
 	}),
-	file("f7", "Arbeitsvertrag_Filen.pdf", "d3", 0.9 * MB, "2024-08-01T10:00:00Z"),
+	file("f7", "Arbeitsvertrag_Filen.pdf", "d3", 0.9 * MB, "2024-08-01T10:00:00Z", { document: EMPLOYMENT_CONTRACT }),
 	file("f8", "CV_2025.docx", "d1", 0.05 * MB, "2025-05-10T20:30:00Z", {
-		favorite: true
+		favorite: true,
+		document: CV
 	}),
 	file("f9", "tax_notes_2024.txt", "d1", 812, "2025-03-02T19:00:00Z", {
 		content:
@@ -247,8 +352,8 @@ const DRIVE: DriveItem[] = [
 	}),
 	file("f29", "logo_final.svg", "d11", 12000, "2025-08-20T10:00:00Z"),
 	dir("d12", "Proyecto Barcelona", "d10"),
-	file("f30", "presupuesto.xlsx", "d12", 0.02 * MB, "2025-06-01T10:00:00Z"),
-	file("f46", "Presentacion_kickoff.pptx", "d12", 2.4 * MB, "2025-05-18T10:00:00Z"),
+	file("f30", "presupuesto.xlsx", "d12", 0.02 * MB, "2025-06-01T10:00:00Z", { document: BUDGET_SHEETS }),
+	file("f46", "Presentacion_kickoff.pptx", "d12", 2.4 * MB, "2025-05-18T10:00:00Z", { document: KICKOFF_SLIDES }),
 	file("f47", "Carta_hotel.doc", "d12", 0.05 * MB, "2025-05-08T10:00:00Z"),
 	file("f31", "itinerario.txt", "d12", 520, "2025-06-02T10:00:00Z", {
 		content:
@@ -257,6 +362,7 @@ const DRIVE: DriveItem[] = [
 	dir("d13", "Downloads", "d0"),
 	file("f32", "setup_installer.dmg", "d13", 96 * MB, "2025-09-15T10:00:00Z"),
 	file("f33", "report_Q3.pdf", "d13", 1.1 * MB, "2025-10-01T10:00:00Z", {
+		document: REPORT_Q3,
 		link: {
 			password: false,
 			downloads: true,

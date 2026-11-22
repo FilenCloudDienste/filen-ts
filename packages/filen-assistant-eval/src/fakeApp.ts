@@ -12,6 +12,10 @@ import {
 	describeDayRange,
 	DIRECTORIES_BY_SIZE_NOTE,
 	DIRECTORY_SIZE_READS,
+	DOCUMENT_READ_MAX_CHARS,
+	DOCUMENT_SELECTION_LABEL,
+	documentRangeText,
+	documentReadRange,
 	DRAFTED_NOTE,
 	engineTokens,
 	inDayRange,
@@ -27,6 +31,7 @@ import {
 	noteTextCoverageNote,
 	NOTES_ITEMS,
 	OUTSIDE_DATES_ITEMS,
+	openDocumentContext,
 	OWN_SHARING_UNCHECKED,
 	PARTIAL_MATCH_NOTE,
 	parseToolInput,
@@ -48,7 +53,15 @@ import {
 	unknownSizesNote,
 	type AssistantPeriodFilter
 } from "@filen/shared/assistant"
-import { createFixtureState, type AppContext, type AppState, type DriveItem, type Note, type NoteType } from "./fixture"
+import {
+	createFixtureState,
+	type AppContext,
+	type AppState,
+	type DriveItem,
+	type FixtureDocument,
+	type Note,
+	type NoteType
+} from "./fixture"
 import { EVAL_NOW, EVAL_TIME_ZONE, evalLocalDay } from "./prompts"
 
 export type Candidate = {
@@ -104,6 +117,9 @@ const EXTENSIONS: Record<string, readonly string[]> = {
 
 // Messages and mailboxes read as their parsed text extract, as the app's read_text_file returns it.
 const TEXT_EXTENSIONS = ["txt", "md", "csv", "json", "eml", "msg", "mbox"]
+
+// Files the app has no reader for (closedDocuments.ts): Keynote, Pages, Numbers, e-books, legacy decks.
+const UNREADABLE_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set(["key", "pages", "numbers", "epub", "ppt", "pps", "doc", "rtf"])
 
 // Screens where the web app's context names a current directory and a selection.
 const DRIVE_SCREENS: ReadonlySet<string> = new Set(["drive"])
@@ -182,6 +198,32 @@ export class FakeApp {
 			parts.push(`open chat: ${contextName(this.chat(chat).name)} (handle ${chat})`)
 		}
 
+		const open = this.state.context.openDocument
+
+		if (open !== undefined) {
+			const item = this.drive(open.handle)
+			const document = this.documentOf(item)
+			const kind = document?.kind ?? "text"
+			const units = document?.units.length
+
+			parts.push(
+				openDocumentContext({
+					name: item.name,
+					handle: open.handle,
+					kind,
+					position:
+						kind === "sheet"
+							? { sheet: open.sheet ?? document?.units[0]?.label, sheets: document?.units.map(unit => unit.label) }
+							: kind === "slides"
+								? { slide: open.slide ?? 1, slides: units }
+								: kind === "text"
+									? {}
+									: { page: open.page ?? 1, pages: units },
+					selectionChars: open.selection === undefined ? null : Array.from(open.selection).length
+				})
+			)
+		}
+
 		parts.push(
 			playing === null
 				? "nothing playing"
@@ -193,7 +235,7 @@ export class FakeApp {
 
 	// The handles the context line names, which ground a call as the user's own (the web executor's context()).
 	contextHandles(): string[] {
-		const { screen, directory, selection, note, chat, playing } = this.state.context
+		const { screen, directory, selection, note, chat, openDocument, playing } = this.state.context
 		const onDrive = DRIVE_SCREENS.has(screen)
 
 		return [
@@ -202,6 +244,7 @@ export class FakeApp {
 				...(onDrive ? [directory, ...selection] : []),
 				...(note === undefined ? [] : [note]),
 				...(chat === undefined ? [] : [chat]),
+				...(openDocument === undefined ? [] : [openDocument.handle]),
 				...(playing === null ? [] : [playing.handle])
 			])
 		]
@@ -1866,8 +1909,11 @@ export class FakeApp {
 				return screenOpened(str("route"))
 			}
 
+			case "read_document": {
+				return this.readDocument(input)
+			}
+
 			// Their tracks give these their fixture behaviour; until then a call reads as a failure that changes nothing.
-			case "read_document":
 			case "rename_by_pattern":
 			case "organize_by_date":
 			case "restore_items":
@@ -1883,6 +1929,95 @@ export class FakeApp {
 			default: {
 				throw new CallError(`Tool "${name}" is not implemented`, true)
 			}
+		}
+	}
+
+	// A drive file's text per page, sheet or slide; a text file's as one unit. Null for a file with none to read.
+	private documentOf(item: DriveItem): FixtureDocument | null {
+		if (item.document !== undefined) {
+			return item.document
+		}
+
+		return TEXT_EXTENSIONS.includes(extension(item.name)) && item.content !== undefined
+			? { kind: "text", units: [{ label: "text", text: item.content }] }
+			: null
+	}
+
+	// As the web app's read_document (features/assistant/tools/documents.ts): the open document's selection, or the
+	// units asked for, cut at DOCUMENT_READ_MAX_CHARS, as document units for the content extraction.
+	private readDocument(input: Record<string, unknown>) {
+		const item = this.driveItem(String(input["handle"]))
+
+		if (item.kind !== "file") {
+			throw new CallError(`"${item.name}" is a directory, not a document`, true)
+		}
+
+		const document = this.documentOf(item)
+
+		if (document === null) {
+			throw new CallError(
+				UNREADABLE_DOCUMENT_EXTENSIONS.has(extension(item.name))
+					? `"${item.name}" cannot be read here; the user can open it in the app`
+					: `"${item.name}" is not a document this can read`,
+				false
+			)
+		}
+
+		const units = document.units.length
+		const base = { handle: item.handle, name: item.name, kind: document.kind, units }
+
+		if (input["part"] === "selection") {
+			const open = this.state.context.openDocument
+
+			if (open?.handle !== item.handle || open.selection === undefined || open.selection.length === 0) {
+				throw new CallError(`Nothing is selected in "${item.name}"`, false)
+			}
+
+			return {
+				...base,
+				range: "the selection",
+				content: [{ unit: 1, label: DOCUMENT_SELECTION_LABEL, text: open.selection.slice(0, DOCUMENT_READ_MAX_CHARS) }]
+			}
+		}
+
+		let span = documentReadRange(input, units) ?? { from: 1, to: units }
+		const sheet = typeof input["sheet"] === "string" ? input["sheet"].trim() : ""
+
+		if (sheet.length > 0 && document.kind === "sheet") {
+			const index = document.units.findIndex(unit => normalizeText(unit.label) === normalizeText(sheet))
+
+			if (index === -1) {
+				throw new CallError(`"${item.name}" has no sheet named "${sheet}"`, false)
+			}
+
+			span = { from: index + 1, to: index + 1 }
+		}
+
+		const content: { unit: number; label: string; text: string }[] = []
+		let room = DOCUMENT_READ_MAX_CHARS
+		let truncated = false
+
+		for (let unit = span.from; unit <= span.to; unit++) {
+			const entry = document.units[unit - 1]
+
+			if (entry === undefined || room <= 0) {
+				truncated = entry !== undefined
+				break
+			}
+
+			const text = entry.text.slice(0, room)
+
+			content.push({ unit, label: entry.label, text })
+			// A blank line between units, as the app's readers join them.
+			room -= text.length + 2
+			truncated = text.length < entry.text.length
+		}
+
+		return {
+			...base,
+			range: documentRangeText(document.kind, span.from, span.to, units),
+			content,
+			...(truncated ? { truncated: true } : {})
 		}
 	}
 

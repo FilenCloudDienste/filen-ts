@@ -760,4 +760,45 @@ describe("FakeApp", () => {
 		expect(transfers).toMatchObject({ running: 2, overall: "23%", failed: 1 })
 		expect(transfers["transfers"]).toContainEqual({ name: "report_Q3.pdf", handle: "f33", kind: "upload", status: "done" })
 	})
+
+	it("names the open document in the context line as the web app does, never its selected text", () => {
+		const app = new FakeApp({ screen: "drive", directory: "d3", openDocument: { handle: "f7", page: 2, selection: "Bruttogehalt" } })
+
+		expect(app.describeContext()).toContain(
+			`open document: ${JSON.stringify("Arbeitsvertrag_Filen.pdf")} (handle f7), PDF, page 2 of 3, 12 characters selected`
+		)
+		expect(app.describeContext()).not.toContain("Bruttogehalt")
+		expect(app.contextHandles()).toContain("f7")
+		expect(new FakeApp({ openDocument: { handle: "f30", sheet: "Gastos" } }).describeContext()).toContain(
+			`open document: ${JSON.stringify("presupuesto.xlsx")} (handle f30), spreadsheet, sheet ${JSON.stringify("Gastos")} (2 of 2)`
+		)
+	})
+
+	it("reads document units by range, sheet and selection", () => {
+		const app = new FakeApp({ screen: "drive", directory: "d3", openDocument: { handle: "f7", page: 1, selection: "Probezeit" } })
+		const pages = ok(app.execute({ name: "read_document", args: { handle: "f7", from: 2, to: 9 } }))
+
+		expect(pages).toMatchObject({ kind: "pdf", units: 3, range: "pages 2–3 of 3" })
+		expect((pages["content"] as { unit: number; label: string }[]).map(unit => unit.label)).toEqual(["page 2", "page 3"])
+		expect(ok(app.execute({ name: "read_document", args: { handle: "f7", part: "selection" } }))["content"]).toEqual([
+			{ unit: 1, label: "selection", text: "Probezeit" }
+		])
+
+		app.exposed.add("f30")
+
+		const sheet = ok(app.execute({ name: "read_document", args: { handle: "f30", sheet: "gastos" } }))
+
+		expect(sheet["range"]).toBe("sheet 2 of 2")
+		expect(app.execute({ name: "read_document", args: { handle: "f30", part: "selection" } })).toMatchObject({ ok: false })
+	})
+
+	it("reads the whole long report within the read cap, so a chunked extraction reaches its last pages", () => {
+		const app = new FakeApp({ openDocument: { handle: "f33", page: 1 } })
+		const read = ok(app.execute({ name: "read_document", args: { handle: "f33" } }))
+		const content = read["content"] as { label: string; text: string }[]
+
+		expect(read["truncated"]).toBeUndefined()
+		expect(content).toHaveLength(40)
+		expect(content[30]?.text).toContain("2.1%")
+	})
 })
