@@ -1,7 +1,7 @@
-import { useState, type ReactNode, type SyntheticEvent } from "react"
+import { useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { FileIcon, FolderIcon } from "lucide-react"
-import { formatBytes, type FilenPublicLink } from "@filen/shared"
+import { cn, formatBytes, type FilenPublicLink } from "@filen/shared"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 import { asDirectoryOrFile, linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { DirectoryGlyph, ItemIcon } from "@/features/drive/components/itemIcon"
@@ -23,11 +23,25 @@ import { noop } from "@/lib/utils"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
 import { formatShortDate } from "@/lib/formatDate"
 import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
-import { inlinesEmbedImage } from "@/features/chats/lib/embeds.logic"
+import {
+	embedMediaFrame,
+	inlinesEmbedImage,
+	rememberedEmbedMediaSize,
+	rememberEmbedMediaSize,
+	type EmbedMediaSize
+} from "@/features/chats/lib/embeds.logic"
 
 // Cards sit under the message text on the neutral chat surface; media sits bare.
 const CARD_CLASS =
 	"flex max-w-sm min-w-0 items-center gap-2.5 rounded-2xl bg-chat-other px-3 py-2 text-sm focus-ring transition-colors outline-none hover:bg-chat-other-strong"
+
+// The rounded clip box inline image/video media fills (absolute, size-full). Its explicit width keeps the
+// column's stretch off it, and max-w-full + aspect-ratio scale the whole box down in a narrow thread.
+const MEDIA_FRAME_CLASS = "relative block max-w-full flex-none overflow-hidden rounded-2xl bg-chat-other"
+
+function mediaFrameStyle(frame: EmbedMediaSize): CSSProperties {
+	return { width: frame.width, aspectRatio: frame.width / frame.height }
+}
 
 // Icon + name + subtitle, either a plain new-tab anchor (`href`) or a click-to-preview button
 // (`onClick`) — the one shared shell every FilenLinkCard branch below renders through, so the visual
@@ -169,16 +183,29 @@ function FilenStreamedInlineMedia({
 	const [previewOpen, setPreviewOpen] = useState(false)
 	const result = usePreviewStreamUrl(item, name, contentType)
 	const [image, setImage] = useState<HTMLImageElement | null>(null)
+	const { uuid } = asDirectoryOrFile(item).data
+	// Seeded from the size memo, so a remounted row reserves its final frame from the first paint.
+	const [naturalSize, setNaturalSize] = useState(() => rememberedEmbedMediaSize(uuid))
+	const frameStyle = mediaFrameStyle(embedMediaFrame(naturalSize))
 
 	// A message scrolled out of the thread stops loading its image.
 	useReleaseOnUnmount(image)
 
+	function handleNaturalSize(size: EmbedMediaSize): void {
+		if (size.width > 0 && size.height > 0) {
+			rememberEmbedMediaSize(uuid, size)
+			setNaturalSize(size)
+		}
+	}
+
 	if (result.status === "pending") {
 		return (
-			<LoadingState
-				size="sm"
-				className="h-40 w-64 flex-none rounded-2xl bg-chat-other"
-			/>
+			<div
+				style={frameStyle}
+				className={MEDIA_FRAME_CLASS}
+			>
+				<LoadingState size="sm" />
+			</div>
 		)
 	}
 
@@ -196,6 +223,8 @@ function FilenStreamedInlineMedia({
 				name={name}
 				downloadable={downloadable}
 				fallback={fallback}
+				frameStyle={frameStyle}
+				onNaturalSize={handleNaturalSize}
 			/>
 		)
 	}
@@ -210,14 +239,18 @@ function FilenStreamedInlineMedia({
 				onClick={() => {
 					setPreviewOpen(true)
 				}}
-				className="block max-w-sm overflow-hidden rounded-2xl focus-ring outline-none"
+				style={frameStyle}
+				className={cn(MEDIA_FRAME_CLASS, "focus-ring outline-none")}
 			>
 				<img
 					ref={setImage}
 					src={result.url}
 					alt={name}
 					loading="lazy"
-					className="max-h-72 w-auto object-contain"
+					onLoad={event => {
+						handleNaturalSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+					}}
+					className="absolute inset-0 size-full object-scale-down"
 				/>
 			</button>
 			{previewOpen ? (
@@ -241,7 +274,9 @@ function FilenInlinePlayer({
 	size,
 	name,
 	downloadable,
-	fallback
+	fallback,
+	frameStyle,
+	onNaturalSize
 }: {
 	category: "video" | "audio"
 	url: string
@@ -249,6 +284,8 @@ function FilenInlinePlayer({
 	name: string
 	downloadable: boolean
 	fallback: ReactNode
+	frameStyle: CSSProperties
+	onNaturalSize: (size: EmbedMediaSize) => void
 }) {
 	const [source] = useState(() => new BlockSource(size, urlReadRange(url)))
 	const [failure, setFailure] = useState<MediaFailureKind | null>(null)
@@ -275,16 +312,24 @@ function FilenInlinePlayer({
 
 	if (category === "video") {
 		return (
-			<video
-				ref={setMedia}
-				onError={handleError}
-				src={url}
-				controls
-				controlsList={mediaControlsList(downloadable)}
-				preload="metadata"
-				aria-label={name}
-				className="max-h-72 max-w-sm rounded-2xl"
-			/>
+			<div
+				style={frameStyle}
+				className={MEDIA_FRAME_CLASS}
+			>
+				<video
+					ref={setMedia}
+					onError={handleError}
+					onLoadedMetadata={event => {
+						onNaturalSize({ width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })
+					}}
+					src={url}
+					controls
+					controlsList={mediaControlsList(downloadable)}
+					preload="metadata"
+					aria-label={name}
+					className="absolute inset-0 size-full object-contain"
+				/>
+			</div>
 		)
 	}
 

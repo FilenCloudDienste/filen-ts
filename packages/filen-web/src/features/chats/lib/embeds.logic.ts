@@ -72,3 +72,58 @@ export function embedCandidatesForLinks(urls: readonly string[]): EmbedCandidate
 
 	return candidates
 }
+
+export interface EmbedMediaSize {
+	width: number
+	height: number
+}
+
+// The inline image/video frame's bounds in CSS px. A frame never shrinks below the minimum edge, so a tiny or
+// extreme-aspect file still gets a box its rounded-2xl corners fit.
+export const EMBED_MEDIA_MAX_WIDTH = 384
+export const EMBED_MEDIA_MAX_HEIGHT = 288
+export const EMBED_MEDIA_MIN_EDGE = 48
+
+// Reserved while the media's own dimensions are unknown: neither the link metadata nor the message carries
+// them, so the first load is the only point they become known.
+export const EMBED_MEDIA_PLACEHOLDER: EmbedMediaSize = { width: 256, height: 160 }
+
+// The frame an inline image/video embed renders in: its natural size scaled down (never up) to fit the
+// bounds, aspect kept, each edge clamped to the minimum. The frame IS the rounded clip box and the media
+// fills it, so no media edge can sit inside or outside the rounded corners. A clamped edge (a tiny or
+// extreme-aspect file) letterboxes on the frame's own background instead.
+export function embedMediaFrame(natural: EmbedMediaSize | null): EmbedMediaSize {
+	if (natural === null || !(natural.width > 0) || !(natural.height > 0) || !Number.isFinite(natural.width + natural.height)) {
+		return EMBED_MEDIA_PLACEHOLDER
+	}
+
+	const scale = Math.min(1, EMBED_MEDIA_MAX_WIDTH / natural.width, EMBED_MEDIA_MAX_HEIGHT / natural.height)
+
+	return {
+		width: Math.min(EMBED_MEDIA_MAX_WIDTH, Math.max(EMBED_MEDIA_MIN_EDGE, Math.round(natural.width * scale))),
+		height: Math.min(EMBED_MEDIA_MAX_HEIGHT, Math.max(EMBED_MEDIA_MIN_EDGE, Math.round(natural.height * scale)))
+	}
+}
+
+// Natural sizes already seen, by linked-file uuid, so a row the virtualized thread remounts (or a second
+// message with the same link) reserves its final frame at once instead of reflowing from the placeholder.
+// Bounded, oldest entry out first. The one piece of module state here.
+const MAX_REMEMBERED_MEDIA_SIZES = 256
+const rememberedMediaSizes = new Map<string, EmbedMediaSize>()
+
+export function rememberedEmbedMediaSize(uuid: string): EmbedMediaSize | null {
+	return rememberedMediaSizes.get(uuid) ?? null
+}
+
+export function rememberEmbedMediaSize(uuid: string, size: EmbedMediaSize): void {
+	rememberedMediaSizes.delete(uuid)
+	rememberedMediaSizes.set(uuid, size)
+
+	if (rememberedMediaSizes.size > MAX_REMEMBERED_MEDIA_SIZES) {
+		const oldest = rememberedMediaSizes.keys().next()
+
+		if (oldest.done !== true) {
+			rememberedMediaSizes.delete(oldest.value)
+		}
+	}
+}
