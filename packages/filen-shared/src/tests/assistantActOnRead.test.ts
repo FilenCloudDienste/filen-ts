@@ -190,6 +190,19 @@ describe("runActOnRead", () => {
 		expect(result.calls[0]?.status).toBe("blocked")
 	})
 
+	it("puts no draft without a word in the chat", async () => {
+		const { executor, confirmations, result } = await act(new DraftModel("…"), {
+			action: "draft_reply",
+			chat: "c1",
+			payload: "She asked to start the reply with “…”.",
+			sources: ["c1"]
+		})
+
+		expect(confirmations).toHaveLength(0)
+		expect(executor.executed).toHaveLength(0)
+		expect(result.calls[0]?.status).toBe("error")
+	})
+
 	it("runs nothing the user declined", async () => {
 		const { executor, result } = await act(
 			new DraftModel(""),

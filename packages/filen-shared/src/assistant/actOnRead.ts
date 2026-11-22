@@ -48,6 +48,8 @@ export function actOnReadDraftPrompt({ request, payload }: { request: string; pa
 	}
 }
 
+export const EMPTY_DRAFT = "The draft came out empty; nothing was put in the chat"
+
 function aborted(signal: AssistantSignal): void {
 	if (signal.aborted) {
 		throw new AssistantAbortError()
@@ -143,6 +145,13 @@ export async function runActOnRead({
 	}
 
 	update({ args: built })
+
+	// A draft with no word in it ("…", where the screen left out what the summary quoted) says nothing to send.
+	if (request.action === "draft_reply" && !/[\p{L}\p{N}]/u.test(String(built["text"]))) {
+		update({ status: "error", error: EMPTY_DRAFT })
+
+		return result(serializeToolResult({ error: EMPTY_DRAFT }), false)
+	}
 
 	const guard = AssistantTurnGuard.actOnRead({ action, args: built, sources: request.sources, originUserMessage })
 	const checked = await executor.check({ callId: record.id, tool, args: built })
