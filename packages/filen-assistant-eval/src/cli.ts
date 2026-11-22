@@ -5,6 +5,7 @@ import { parseArgs } from "node:util"
 import { MITIGATION_PRESETS } from "./agent"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
+import { FORMULA_CASES, FORMULA_CATEGORIES } from "./cases/formula"
 import { TRANSFORM_CASES, TRANSFORM_CATEGORIES } from "./cases/transform"
 import { CATEGORIES, LANGUAGES } from "./cases/types"
 import { ensureModel, loadManifest, PACKAGE_ROOT } from "./models"
@@ -22,13 +23,13 @@ Commands:
 
 Options:
   --models <ids>       Comma-separated model ids (default: every enabled model)
-  --suite <name>       main | injection | transform | all (default: all)
+  --suite <name>       main | injection | transform | formula | all (default: all)
   --presets <names>    Presets for the injection suite (default: shipped,loop)
   --main-presets <n>   Presets for the main suite (default: shipped)
 
 Presets: shipped (the shipping loop with the tools the web app runs), loop (the shipping loop with every
 web tool), desktop (the desktop app's tools; runs only the desktop cases), and the legacy harness's mitigation presets (${Object.keys(MITIGATION_PRESETS).join(", ")}).
-  --categories <list>  Main- and transform-suite categories to run
+  --categories <list>  Main-, transform- and formula-suite categories to run
   --languages <list>   Languages to run (every suite)
   --cases <ids>        Exact case ids to run
   --sample <n>         Keep every n-th case of the selection (quick subsets)
@@ -124,8 +125,14 @@ async function main(): Promise<void> {
 			console.log(`${category}: ${items.length} (${counts(items)})`)
 		}
 
+		for (const category of FORMULA_CATEGORIES) {
+			const items = FORMULA_CASES.filter(item => item.category === category)
+
+			console.log(`${category}: ${items.length} (${counts(items)})`)
+		}
+
 		console.log(
-			`main total: ${EVAL_CASES.length}; injection: ${INJECTION_CASES.length} in ${new Set(INJECTION_CASES.map(item => item.lang)).size} languages; transform: ${TRANSFORM_CASES.length}`
+			`main total: ${EVAL_CASES.length}; injection: ${INJECTION_CASES.length} in ${new Set(INJECTION_CASES.map(item => item.lang)).size} languages; transform: ${TRANSFORM_CASES.length}; formula: ${FORMULA_CASES.length}`
 		)
 
 		return
@@ -176,6 +183,9 @@ async function main(): Promise<void> {
 			injection: {
 				presets: selection.injectionPresets,
 				caseIds: selection.injectionCaseIds
+			},
+			formula: {
+				caseIds: selection.formulaCaseIds
 			},
 			transform: {
 				caseIds: selection.transformCaseIds

@@ -2,6 +2,7 @@ import { MITIGATION_PRESETS } from "./agent"
 import { LOOP_PRESETS } from "./loopHarness"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
+import { FORMULA_CASES, FORMULA_CATEGORIES } from "./cases/formula"
 import { TRANSFORM_CASES, TRANSFORM_CATEGORIES } from "./cases/transform"
 import { CATEGORIES, LANGUAGES } from "./cases/types"
 import type { EvalPreset } from "./worker"
@@ -22,16 +23,17 @@ export type RunSelection = {
 	mainCaseIds: string[]
 	injectionCaseIds: string[]
 	transformCaseIds: string[]
+	formulaCaseIds: string[]
 }
 
-const SUITES = ["main", "injection", "transform", "all"]
+const SUITES = ["main", "injection", "transform", "formula", "all"]
 
 const ALL_PRESETS: readonly string[] = [...Object.keys(LOOP_PRESETS), ...Object.keys(MITIGATION_PRESETS)]
 
-// --categories names main-suite and transform-suite categories alike.
-const ALL_CATEGORIES: readonly string[] = [...CATEGORIES, ...TRANSFORM_CATEGORIES]
+// --categories names main-, transform- and formula-suite categories alike.
+const ALL_CATEGORIES: readonly string[] = [...CATEGORIES, ...TRANSFORM_CATEGORIES, ...FORMULA_CATEGORIES]
 
-const ALL_CASE_IDS: readonly string[] = [...EVAL_CASES, ...INJECTION_CASES, ...TRANSFORM_CASES].map(item => item.id)
+const ALL_CASE_IDS: readonly string[] = [...EVAL_CASES, ...INJECTION_CASES, ...TRANSFORM_CASES, ...FORMULA_CASES].map(item => item.id)
 
 export function list(value: string | undefined): string[] | undefined {
 	return value === undefined
@@ -99,8 +101,9 @@ export function resolveRun(values: RunValues): RunSelection {
 	const mainCaseIds = inSuite("main") ? keep(EVAL_CASES, inCategories) : []
 	const injectionCaseIds = inSuite("injection") ? keep(INJECTION_CASES, () => true) : []
 	const transformCaseIds = inSuite("transform") ? keep(TRANSFORM_CASES, inCategories) : []
+	const formulaCaseIds = inSuite("formula") ? keep(FORMULA_CASES, inCategories) : []
 
-	if (mainCaseIds.length === 0 && injectionCaseIds.length === 0 && transformCaseIds.length === 0) {
+	if (mainCaseIds.length === 0 && injectionCaseIds.length === 0 && transformCaseIds.length === 0 && formulaCaseIds.length === 0) {
 		throw new Error("The selection keeps no case")
 	}
 
@@ -110,6 +113,7 @@ export function resolveRun(values: RunValues): RunSelection {
 		injectionPresets: presets(values.presets, "presets", ["shipped", "loop"]),
 		mainCaseIds,
 		injectionCaseIds,
-		transformCaseIds
+		transformCaseIds,
+		formulaCaseIds
 	}
 }

@@ -16,6 +16,7 @@
 	"license": "AGPLv3",
 	"dependencies": {
 		"@filen/assistant-node": "workspace:*",
+		"@filen/office": "workspace:*",
 		"@filen/shared": "workspace:*",
 		"arktype": "2.2.9",
 		"franc-min": "6.2.0",

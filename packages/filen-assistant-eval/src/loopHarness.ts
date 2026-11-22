@@ -6,6 +6,7 @@ import {
 	runAssistantTurn,
 	transformText,
 	windowHistory,
+	writeCheckedFormula,
 	type AssistantActOnReadAction,
 	type AssistantActOnReadRequest,
 	type AssistantGenerateRequest,
@@ -17,14 +18,18 @@ import {
 	type AssistantToolCallRecord,
 	type AssistantToolExecutor,
 	type AssistantToolOutcome,
-	type AssistantTurnResult
+	type AssistantTurnResult,
+	type FormulaProblem
 } from "@filen/shared/assistant"
 import { LlamaSlotModel, toHistory } from "@filen/assistant-node"
 import type { ChatWrapper, Llama, LlamaContextSequence } from "node-llama-cpp"
 import type { CallRecord, CallStatus, Timings, Transcript, TurnTimings } from "./agent"
+import type { FormulaPreviewValue } from "@filen/office/core/sheet"
+import type { FormulaCase } from "./cases/formula"
 import type { EvalCase } from "./cases/types"
 import type { FakeApp } from "./fakeApp"
 import { allHandles } from "./fixture"
+import { formulaCaseContext, formulaCheck, sheetEngine } from "./formulaSheet"
 import { EVAL_NOW, EVAL_TIME_ZONE, PROMPT_CANARY } from "./prompts"
 
 // The eval driving the loop the apps ship (@filen/shared/assistant runAssistantTurn): its router, guard,
@@ -457,6 +462,49 @@ export async function runTransformCase({
 			timings: { ...model.timings, totalMs: performance.now() - started }
 		}
 	} finally {
+		model.dispose()
+	}
+}
+
+// The spreadsheet formula helper as the web app runs it: writeCheckedFormula in the extraction slot over the case's
+// sheet described as the app describes it, every formula checked and calculated as the app does (formulaSheet.ts).
+export type FormulaRun = {
+	outcome: { ok: true; formula: string; value: FormulaPreviewValue } | { ok: false; formula: string; problem: FormulaProblem }
+	// Each formula the check saw, in order, with why it was refused (null: accepted).
+	checked: { formula: string; problem: FormulaProblem | null }[]
+	timings: Timings
+}
+
+export async function runFormulaCase({
+	runtime,
+	item
+}: {
+	runtime: LoopRuntime
+	item: Pick<FormulaCase, "sheet" | "cell" | "ask">
+}): Promise<FormulaRun> {
+	const started = performance.now()
+	const model = new LlamaAssistantModel(runtime)
+	const engine = sheetEngine(item.sheet)
+	const check = formulaCheck(engine, item)
+	const checked: FormulaRun["checked"] = []
+
+	try {
+		const outcome = await writeCheckedFormula({
+			model,
+			context: formulaCaseContext(item),
+			signal: new AbortController().signal,
+			check: async formula => {
+				const result = await check(formula)
+
+				checked.push({ formula, problem: result.ok ? null : result.problem })
+
+				return result
+			}
+		})
+
+		return { outcome, checked, timings: { ...model.timings, totalMs: performance.now() - started } }
+	} finally {
+		engine.destroy()
 		model.dispose()
 	}
 }

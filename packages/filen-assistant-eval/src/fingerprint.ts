@@ -12,7 +12,10 @@ const SHARED_HELPERS = ["misc", "storageQuota"]
 // The eval sources that decide what a case measures: the fake app and its data, both loops, the chat
 // wrappers, the prompts and the worker's context settings (and, below, @filen/assistant-node's model mapping). Not the cases (each record hashes its own), the
 // graders (a grading change needs --fresh or another --out), the report or the CLI.
-const EVAL_SOURCES = ["agent", "chatWrappers", "decoys", "fakeApp", "fixture", "loopHarness", "prompts", "worker"]
+const EVAL_SOURCES = ["agent", "chatWrappers", "decoys", "fakeApp", "fixture", "formulaSheet", "loopHarness", "prompts", "worker"]
+
+// The formula check and preview the formula suite runs every written formula through.
+const OFFICE_SOURCES = ["input/formulaCheck", "formula/preview"]
 
 // What a stored result was measured against: every source of the shared assistant (prompts, tools and
 // their titles and guard metadata, the loop, guard, sanitizing, dates, budgets), the shared helpers and eval
@@ -28,6 +31,7 @@ const PROMPTS_AND_TOOLS = JSON.stringify({
 		.map(file => [file, readFileSync(new URL(file, SHARED_ASSISTANT), "utf8")]),
 	helpers: SHARED_HELPERS.map(file => readFileSync(new URL(`../../filen-shared/src/${file}.ts`, import.meta.url), "utf8")),
 	eval: EVAL_SOURCES.map(file => readFileSync(new URL(`./${file}.ts`, import.meta.url), "utf8")),
+	office: OFFICE_SOURCES.map(file => readFileSync(new URL(`../../filen-office/src/core/sheet/${file}.ts`, import.meta.url), "utf8")),
 	// The node-llama-cpp mapping the desktop app's engine shares.
 	adapter: readFileSync(new URL("../../filen-assistant-node/src/llamaModel.ts", import.meta.url), "utf8"),
 	engine: (

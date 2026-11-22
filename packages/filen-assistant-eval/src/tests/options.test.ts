@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { EVAL_CASES } from "../cases"
+import { FORMULA_CASES } from "../cases/formula"
 import { INJECTION_CASES } from "../cases/injection"
 import { TRANSFORM_CASES } from "../cases/transform"
 import { resolveRun } from "../options"
@@ -48,6 +49,21 @@ describe("resolveRun", () => {
 			TRANSFORM_CASES.filter(item => item.category === "transform_injection").map(item => item.id)
 		)
 		expect(resolveRun({ categories: "simple" }).transformCaseIds).toEqual([])
+	})
+
+	it("runs only the formula suite with --suite formula, and keeps its categories to it", () => {
+		const selection = resolveRun({ suite: "formula" })
+
+		expect(selection.mainCaseIds).toEqual([])
+		expect(selection.transformCaseIds).toEqual([])
+		expect(selection.formulaCaseIds).toEqual(FORMULA_CASES.map(item => item.id))
+		expect(resolveRun({}).formulaCaseIds).toEqual(FORMULA_CASES.map(item => item.id))
+
+		const injection = resolveRun({ categories: "formula_injection" })
+
+		expect(injection.mainCaseIds).toEqual([])
+		expect(injection.transformCaseIds).toEqual([])
+		expect(injection.formulaCaseIds).toEqual(FORMULA_CASES.filter(item => item.category === "formula_injection").map(item => item.id))
 	})
 
 	it("accepts a transform case id", () => {

@@ -6,14 +6,16 @@ import { MITIGATION_PRESETS, runTurn, type AgentRuntime, type MitigationPreset, 
 import { createChatWrapper, parseSpecialTokensInResults } from "./chatWrappers"
 import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
+import { FORMULA_CASES } from "./cases/formula"
 import { TRANSFORM_CASES } from "./cases/transform"
 import { FakeApp } from "./fakeApp"
 import { gradeCase } from "./grader"
 import { gradeInjection } from "./injectionGrader"
 import { caseFingerprint, modelKey, parseRecordLine } from "./fingerprint"
-import { isLoopPreset, presetRunsCase, runLoopTurns, runTransformCase, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
+import { isLoopPreset, presetRunsCase, runFormulaCase, runLoopTurns, runTransformCase, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
 import { loadManifest, type ModelEntry } from "./models"
 import { ROUTER_GRAMMAR } from "./prompts"
+import { gradeFormula } from "./formulaGrader"
 import { gradeTransform } from "./transformGrader"
 
 export type WorkerJob = {
@@ -30,6 +32,10 @@ export type WorkerJob = {
 	}
 	// One generation per case, no presets: what ships.
 	transform: {
+		caseIds: string[]
+	}
+	// One or two generations per case (a refused formula is written again), no presets.
+	formula: {
 		caseIds: string[]
 	}
 }
@@ -182,7 +188,7 @@ async function main(): Promise<void> {
 		cases,
 		execute
 	}: {
-		suite: "main" | "injection" | "transform"
+		suite: "main" | "injection" | "transform" | "formula"
 		presets: readonly P[]
 		cases: readonly T[]
 		execute: (options: { item: T; preset: P }) => Promise<unknown>
@@ -285,6 +291,23 @@ async function main(): Promise<void> {
 				lang: item.lang,
 				kind: item.kind,
 				grade: gradeTransform({ item, result }),
+				result
+			}
+		}
+	})
+
+	await run({
+		suite: "formula",
+		presets: [null],
+		cases: FORMULA_CASES.filter(item => job.formula.caseIds.includes(item.id)),
+		execute: async ({ item }) => {
+			const result = await runFormulaCase({ runtime: loopRuntime, item })
+
+			return {
+				caseId: item.id,
+				category: item.category,
+				lang: item.lang,
+				grade: gradeFormula({ item, result }),
 				result
 			}
 		}

@@ -214,6 +214,9 @@ importers:
       '@filen/assistant-node':
         specifier: workspace:*
         version: link:../filen-assistant-node
+      '@filen/office':
+        specifier: workspace:*
+        version: link:../filen-office
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
