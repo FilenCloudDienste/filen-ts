@@ -1,5 +1,6 @@
 import { resultItemCount, toolCallSubject } from "./activity"
 import { clipData, estimateTokens, MESSAGE_OVERHEAD_TOKENS, messageLines, serializeToolResult } from "./budget"
+import { documentUnits, documentUnitsText } from "./documents"
 import { AssistantTurnGuard } from "./guard"
 import { foreignTokens, replyHandles, replyWithHandles, replyWithoutHandles, settledReply } from "./handles"
 import {
@@ -474,6 +475,17 @@ function stripCallSyntax(text: string, toolNames: readonly string[]): string {
 }
 
 const CONTENT_FIELDS = ["content", "messages"]
+
+// A content field as the extraction reads it: a document's units each under its label (documents.ts).
+function contentText(value: unknown): string {
+	if (typeof value === "string") {
+		return value
+	}
+
+	const units = documentUnits(value)
+
+	return units === null ? JSON.stringify(value) : documentUnitsText(units)
+}
 
 const STUB_TEXT = "Result dropped to fit the context; call the tool again if it is still needed."
 
@@ -1795,7 +1807,7 @@ async function quarantine({
 		("content" in record ? undefined : messageLines(record["messages"], budget)) ??
 		clipData(
 			CONTENT_FIELDS.filter(field => field in record)
-				.map(field => (typeof record[field] === "string" ? String(record[field]) : JSON.stringify(record[field])))
+				.map(field => contentText(record[field]))
 				.join("\n"),
 			budget,
 			"messages" in record

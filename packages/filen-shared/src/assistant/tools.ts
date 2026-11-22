@@ -1194,7 +1194,8 @@ export const ASSISTANT_WEB_TOOLS = [
 	"add_tracks_to_playlist",
 	"get_transfers",
 	"open_route",
-	"search_note_text"
+	"search_note_text",
+	"read_document"
 ] as const satisfies readonly AssistantToolName[]
 
 export type AssistantWebToolName = (typeof ASSISTANT_WEB_TOOLS)[number]

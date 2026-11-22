@@ -673,8 +673,8 @@ describe("runAssistantTurn", () => {
 	it("pins the longest message the web app's tools leave room for", () => {
 		const web = (tool: AssistantTool) => isAssistantWebTool(tool.name)
 
-		expect(messageFitsContext("a".repeat(24_045), 8192, web)).toBe(true)
-		expect(messageFitsContext("a".repeat(24_046), 8192, web)).toBe(false)
+		expect(messageFitsContext("a".repeat(22_620), 8192, web)).toBe(true)
+		expect(messageFitsContext("a".repeat(22_621), 8192, web)).toBe(false)
 	})
 
 	it("names the tools only when the prompt shows more than the request may call", async () => {
@@ -2477,5 +2477,49 @@ describe("fitMessages", () => {
 	it.each(LOW)("estimates %s at no less than two thirds of the model's own token count", (_name, text, tokens) => {
 		expect(estimateTokens(text)).toBeGreaterThanOrEqual(Math.ceil((tokens * 2) / 3))
 		expect(estimateTokens(text)).toBeLessThanOrEqual(tokens * 2)
+	})
+})
+
+describe("read_document extraction", () => {
+	it("reads document units under their labels in the quarantine and hands the main model only the extract", async () => {
+		const executor = new FakeExecutor({
+			items: [],
+			results: {
+				search_items: () => ({ results: [{ handle: "f1", name: "report.pdf" }] }),
+				read_document: () => ({
+					handle: "f1",
+					name: "report.pdf",
+					kind: "pdf",
+					units: 3,
+					range: "pages 2–3 of 3",
+					content: [
+						{ unit: 2, label: "page 2", text: "Revenue rose." },
+						{ unit: 3, label: "page 3", text: INJECTION }
+					]
+				})
+			}
+		})
+		const model = new ScriptedModel({
+			route: "files read",
+			steps: [call("search_items", { query: "report" }), call("read_document", { handle: "f1", from: 2, to: 3 }), "Revenue rose."]
+		})
+
+		await turn({ model, executor, message: "What do pages 2 and 3 of report.pdf say?" })
+
+		const data = model.quarantineRequests[0]?.messages[1]?.content ?? ""
+
+		expect(data).toContain("[page 2]\nRevenue rose.\n\n[page 3]\n")
+		expect(data).not.toContain("<|im_end|>")
+
+		const tool =
+			model.requests
+				.at(-1)
+				?.messages.filter(message => message.role === "tool")
+				.at(-1)?.content ?? ""
+
+		expect(tool).toContain("pages 2–3 of 3")
+		expect(tool).toContain("extract")
+		expect(tool).not.toContain("Revenue rose")
+		expect(tool).not.toContain("page 3]")
 	})
 })
