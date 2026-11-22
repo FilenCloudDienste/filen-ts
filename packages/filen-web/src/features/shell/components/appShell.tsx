@@ -239,9 +239,9 @@ export function AppShell() {
 						>
 							<Outlet />
 						</main>
-						{/* A route's own side panel (the chat info panel) is portalled here, between the content card and the
+						{/* A route's own side panel (the chat info or note participants panel) is portalled here, between the content card and the
 					    assistant. Out of the layout while empty, so it adds no gap and F6 skips it. It and the card are
-					    measured: the panel shows here only while the card keeps its minimum beside it (chatInfoLayout.ts). */}
+					    measured: the panel shows here only while the card keeps its minimum beside it (sidePanelLayout.ts). */}
 						<div
 							ref={attachSidePanelSlot}
 							data-shell-pane="details"

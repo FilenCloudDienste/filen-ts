@@ -29,7 +29,7 @@ class FakeResizeObserver {
 }
 
 const { contentRoomRef, contentRoomWidth } = await import("@/features/shell/lib/contentRoom")
-const { isChatInfoNarrow, subscribeToChatInfoBreakpoint } = await import("@/features/chats/lib/chatInfoLayout")
+const { isSidePanelNarrow, subscribeToSidePanelBreakpoint } = await import("@/features/shell/lib/sidePanelLayout")
 
 function element(width: number): HTMLElement {
 	return { getBoundingClientRect: () => ({ width }) } as unknown as HTMLElement
@@ -60,54 +60,54 @@ function attach(part: "main" | "slot", width: number): HTMLElement {
 	return target
 }
 
-describe("chat info layout", () => {
+describe("side panel layout", () => {
 	it("is a sheet while nothing is measured (outside the shell)", () => {
 		expect(contentRoomWidth()).toBe(0)
-		expect(isChatInfoNarrow()).toBe(true)
+		expect(isSidePanelNarrow()).toBe(true)
 	})
 
 	it("goes inline only while the card keeps 560px beside the 320px panel and the gap", () => {
 		const main = attach("main", 887)
 
-		expect(isChatInfoNarrow()).toBe(true)
+		expect(isSidePanelNarrow()).toBe(true)
 
 		resize(main, 888)
 
-		expect(isChatInfoNarrow()).toBe(false)
+		expect(isSidePanelNarrow()).toBe(false)
 	})
 
 	it("counts the shown panel back in, so showing it never flips the answer", () => {
 		const main = attach("main", 900)
 		const slot = attach("slot", 0)
 
-		expect(isChatInfoNarrow()).toBe(false)
+		expect(isSidePanelNarrow()).toBe(false)
 
 		// The panel mounts in the slot and the card gives up its width.
 		resize(slot, 320)
 		resize(main, 572)
 
 		expect(contentRoomWidth()).toBe(900)
-		expect(isChatInfoNarrow()).toBe(false)
+		expect(isSidePanelNarrow()).toBe(false)
 	})
 
 	it("turns into the sheet when the assistant (or a wider sidebar) takes the card's room, telling listeners once", () => {
 		const main = attach("main", 572)
 		const slot = attach("slot", 320)
 		const listener = vi.fn()
-		const unsubscribe = subscribeToChatInfoBreakpoint(listener)
+		const unsubscribe = subscribeToSidePanelBreakpoint(listener)
 
 		resize(main, 560)
 		expect(listener).not.toHaveBeenCalled()
 
 		// The assistant opens: the card would keep 400px beside the panel.
 		resize(main, 400)
-		expect(isChatInfoNarrow()).toBe(true)
+		expect(isSidePanelNarrow()).toBe(true)
 		expect(listener).toHaveBeenCalledTimes(1)
 
 		// The panel leaves the slot and the card takes its room back: still the sheet, no second call.
 		resize(slot, 0)
 		resize(main, 728)
-		expect(isChatInfoNarrow()).toBe(true)
+		expect(isSidePanelNarrow()).toBe(true)
 		expect(listener).toHaveBeenCalledTimes(1)
 
 		unsubscribe()

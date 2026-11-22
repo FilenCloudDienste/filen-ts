@@ -1,18 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type Ref } from "react"
-import { createPortal } from "react-dom"
+import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import {
-	MoreHorizontalIcon,
-	PencilIcon,
-	PlusIcon,
-	UserCheckIcon,
-	UserMinusIcon,
-	UsersIcon,
-	UserXIcon,
-	VolumeOffIcon,
-	XIcon
-} from "lucide-react"
+import { MoreHorizontalIcon, PencilIcon, PlusIcon, UserCheckIcon, UserMinusIcon, UsersIcon, UserXIcon, VolumeOffIcon } from "lucide-react"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { cn, contactDisplayName, toggleInSet, type BlockedUsers } from "@filen/shared"
 import { chatAvatarUrl, chatTitle, isChatUndecryptable } from "@/features/chats/lib/sort"
@@ -27,28 +16,24 @@ import {
 	type ChatInfoParticipantRow
 } from "@/features/chats/components/chatInfoPanel.logic"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
-import { isChatInfoNarrow, subscribeToChatInfoBreakpoint, useIsChatInfoNarrow } from "@/features/chats/lib/chatInfoLayout"
+import { isSidePanelNarrow, useIsSidePanelNarrow } from "@/features/shell/lib/sidePanelLayout"
 import {
 	CHAT_INFO_PANEL_ID,
-	CHAT_INFO_TITLE_ID,
 	CHAT_INFO_TOGGLE_ID,
+	chatInfoPanel,
 	closeChatInfoDrawer,
 	closeChatInfoPanel,
 	openChatInfo,
-	takeChatInfoFocusRequest,
-	useChatInfoOpen,
-	useChatInfoStore
+	useChatInfoOpen
 } from "@/features/chats/store/useChatInfoStore"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
 import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
 import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
-import { useSidePanelSlot } from "@/features/shell/lib/sidePanelSlot"
+import { DockedSidePanel, SidePanelSurface, type DockedSurfaceProps } from "@/features/shell/components/dockedSidePanel"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { toastSideObstructionRef } from "@/lib/toastClearance"
-import { SIDE_PANEL_SURFACE_CLASS, SidePanelDrawer } from "@/components/sidePanel"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
@@ -151,20 +136,7 @@ function ParticipantRowMenu({
 // per-row actions (remove for the owner, block/unblock for anyone), adding participants from contacts (owner), and
 // Leave or Delete. Every write is offline-disabled, as the chat menu's are. Remounted per conversation (keyed by the
 // host), so add mode and pending state never carry over.
-function ChatInfoSurface({
-	chat,
-	currentUserId,
-	blocked,
-	className,
-	ref,
-	onKeyDown,
-	onClose
-}: ChatInfoProps & {
-	className: string
-	ref?: Ref<HTMLElement>
-	onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
-	onClose: () => void
-}) {
+function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDown, onClose }: ChatInfoProps & DockedSurfaceProps) {
 	const { t } = useTranslation(["chats", "common", "contacts"])
 	const isOnline = useIsOnline()
 	// The thread's own dialog host is outside the sheet; one rendered in here keeps rename/leave/delete nested in it.
@@ -467,29 +439,15 @@ function ChatInfoSurface({
 	}
 
 	return (
-		<aside
-			id={CHAT_INFO_PANEL_ID}
-			data-chat-uuid={chat.uuid}
+		<SidePanelSurface
+			controller={chatInfoPanel}
+			itemKey={chat.uuid}
+			title={t("chatInfoTitle")}
+			className={className}
 			ref={ref}
-			tabIndex={-1}
-			aria-labelledby={CHAT_INFO_TITLE_ID}
-			className={cn(SIDE_PANEL_SURFACE_CLASS, className)}
 			onKeyDown={onKeyDown}
+			onClose={onClose}
 		>
-			<header className="flex h-12 shrink-0 items-center gap-2 pr-2 pl-4">
-				<h2
-					id={CHAT_INFO_TITLE_ID}
-					className="min-w-0 flex-1 truncate text-sm font-semibold"
-				>
-					{t("chatInfoTitle")}
-				</h2>
-				<TooltipIconButton
-					label={t("common:close")}
-					onClick={onClose}
-				>
-					<XIcon />
-				</TooltipIconButton>
-			</header>
 			{mode === "list" ? renderListView() : renderAddView()}
 			<ConfirmDialog
 				open={removing !== null}
@@ -530,125 +488,33 @@ function ChatInfoSurface({
 				}}
 			/>
 			{dialogHost.renderActiveDialog()}
-		</aside>
+		</SidePanelSurface>
 	)
 }
 
-// Closing unmounts the inline panel; focus inside it would fall back to the document body, so it goes to the thread
-// header's toggle first. Focus elsewhere stays where the user put it.
-function closeInlinePanel(): void {
-	if (document.getElementById(CHAT_INFO_PANEL_ID)?.contains(document.activeElement) === true) {
-		document.getElementById(CHAT_INFO_TOGGLE_ID)?.focus()
-	}
-
-	closeChatInfoPanel()
-}
-
-// Escape closes the inline panel while focus is inside it. Only for keys from the panel's own DOM: a row menu or a
-// confirm is portalled out of it and closes itself first.
-function handleInlineKeyDown(event: KeyboardEvent<HTMLElement>): void {
-	if (
-		event.key !== "Escape" ||
-		event.defaultPrevented ||
-		!(event.target instanceof Node) ||
-		!event.currentTarget.contains(event.target)
-	) {
-		return
-	}
-
-	event.preventDefault()
-	// Never also a document-level Escape action (the sidebar's clear-selection).
-	event.stopPropagation()
-	closeInlinePanel()
-}
-
-// Module scope, so React keeps one stable ref callback: while mounted the panel is a right-docked toast obstruction, and
-// it takes focus when the user (not a panel left open from another conversation) opened it.
-function attachInlinePanel(element: HTMLElement | null): (() => void) | undefined {
-	if (element === null) {
-		return undefined
-	}
-
-	if (takeChatInfoFocusRequest(element.dataset["chatUuid"])) {
-		element.focus()
-	}
-
-	return toastSideObstructionRef(element)
-}
-
-// The sheet itself (focusable via tabIndex -1), like the inline panel: its first control is the close button, whose
-// tooltip would otherwise open over the panel on every open.
-function drawerInitialFocus(): HTMLElement | true {
-	return document.getElementById(CHAT_INFO_PANEL_ID) ?? true
-}
-
-function setDrawerOpen(open: boolean): void {
-	if (!open) {
-		closeChatInfoDrawer()
-	}
-}
-
-// Mounted by the thread. From the chat info breakpoint up the panel is portalled into the shell's side-panel slot,
+// Mounted by the thread. From the side panel breakpoint up the panel is portalled into the shell's side-panel slot,
 // beside the content card; below it the panel is a sheet from the right. Either mounts only while open, and never for
 // an undecryptable conversation (the menu offers only Leave/Delete there).
 export function ChatInfoHost(props: ChatInfoProps) {
 	const { t } = useTranslation("chats")
-	const narrow = useIsChatInfoNarrow()
-	const slot = useSidePanelSlot()
-	const chatUuid = props.chat.uuid
-	const open = useChatInfoOpen(chatUuid, narrow)
-
-	// The sheet survives neither a crossing of the breakpoint (it would reappear by itself the next time the window
-	// narrows) nor the thread leaving this conversation.
-	useEffect(() => {
-		const unsubscribe = subscribeToChatInfoBreakpoint(closeChatInfoDrawer)
-
-		return () => {
-			unsubscribe()
-
-			if (useChatInfoStore.getState().drawerChatUuid === chatUuid) {
-				closeChatInfoDrawer()
-			}
-		}
-	}, [chatUuid])
 
 	if (isChatUndecryptable(props.chat)) {
 		return null
 	}
 
-	if (narrow) {
-		return (
-			<SidePanelDrawer
-				open={open}
-				onOpenChange={setDrawerOpen}
-				label={t("chatInfoTitle")}
-				initialFocus={drawerInitialFocus}
-				className="w-80"
-			>
+	return (
+		<DockedSidePanel
+			controller={chatInfoPanel}
+			itemKey={props.chat.uuid}
+			label={t("chatInfoTitle")}
+			renderSurface={surface => (
 				<ChatInfoSurface
-					key={chatUuid}
+					key={props.chat.uuid}
 					{...props}
-					className="w-full flex-1"
-					onClose={closeChatInfoDrawer}
+					{...surface}
 				/>
-			</SidePanelDrawer>
-		)
-	}
-
-	if (!open || slot === null) {
-		return null
-	}
-
-	return createPortal(
-		<ChatInfoSurface
-			key={chatUuid}
-			{...props}
-			ref={attachInlinePanel}
-			className="w-80 shrink-0 app-region-pane"
-			onKeyDown={handleInlineKeyDown}
-			onClose={closeInlinePanel}
-		/>,
-		slot
+			)}
+		/>
 	)
 }
 
@@ -656,7 +522,7 @@ export function ChatInfoHost(props: ChatInfoProps) {
 // it writes nothing, so it stays enabled offline; the writes inside are gated one by one.
 export function ChatInfoToggle({ chat }: { chat: Chat }) {
 	const { t } = useTranslation("chats")
-	const narrow = useIsChatInfoNarrow()
+	const narrow = useIsSidePanelNarrow()
 	const open = useChatInfoOpen(chat.uuid, narrow)
 	const label = t(CHAT_ACTION_DEFS.participants.labelKey)
 
@@ -676,7 +542,7 @@ export function ChatInfoToggle({ chat }: { chat: Chat }) {
 			onClick={() => {
 				if (!open) {
 					openChatInfo(chat.uuid)
-				} else if (isChatInfoNarrow()) {
+				} else if (isSidePanelNarrow()) {
 					closeChatInfoDrawer()
 				} else {
 					closeChatInfoPanel()

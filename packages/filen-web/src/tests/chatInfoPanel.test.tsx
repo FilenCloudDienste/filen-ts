@@ -32,10 +32,10 @@ vi.mock("@/queries/client", async () => {
 
 	return { queryClient: new QueryClient() }
 })
-vi.mock("@/features/chats/lib/chatInfoLayout", () => ({
-	isChatInfoNarrow: () => !viewport.wide,
-	subscribeToChatInfoBreakpoint: () => () => undefined,
-	useIsChatInfoNarrow: () => !viewport.wide
+vi.mock("@/features/shell/lib/sidePanelLayout", () => ({
+	isSidePanelNarrow: () => !viewport.wide,
+	subscribeToSidePanelBreakpoint: () => () => undefined,
+	useIsSidePanelNarrow: () => !viewport.wide
 }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => online.current }))
 vi.mock("@/features/contacts/queries/contacts", () => ({ useContactsQuery: () => ({ status: "success", ...contacts }) }))
@@ -109,7 +109,7 @@ beforeEach(() => {
 	viewport.wide = true
 	online.current = true
 	contacts.data = { contacts: [], blocked: [] }
-	useChatInfoStore.setState({ panelOpen: false, drawerChatUuid: null, focusRequestedFor: null })
+	useChatInfoStore.setState({ panelOpen: false, drawerKey: null, focusRequestedFor: null })
 })
 
 afterEach(() => {
@@ -453,6 +453,6 @@ describe("chat info panel — below the breakpoint", () => {
 		await act(() => new Promise(resolve => setTimeout(resolve, 50)))
 
 		expect(screen.queryByRole("dialog", { name: "Chat info" })).toBeNull()
-		expect(useChatInfoStore.getState().drawerChatUuid).toBeNull()
+		expect(useChatInfoStore.getState().drawerKey).toBeNull()
 	})
 })

@@ -1,6 +1,6 @@
 // The room the shell row leaves for the content card and a route's side panel together: the card's width, plus the
 // side-panel slot's and the gap before it while the slot holds a panel. A side panel decides from this whether it fits
-// beside the card (chatInfoLayout.ts); counting the slot back in keeps that answer stable while the panel shows.
+// beside the card (sidePanelLayout.ts); counting the slot back in keeps that answer stable while the panel shows.
 // Measured by one ResizeObserver on the two elements (layout-driven, never per frame); listeners hear every change and
 // derive their own answer, so a consumer re-renders only when that answer flips.
 

@@ -4,7 +4,7 @@ import { cn } from "@filen/shared"
 import { SCRIM_CLASS } from "@/components/ui/surface"
 
 // A right-hand side panel's floating surface, the same as the left sidebars' (rounded-xl, --shell-border outline,
-// bg-sidebar): the assistant and the chat info panel. Rendered as an <aside> labelled by its heading, a
+// bg-sidebar): the assistant, the chat info panel and the note participants panel. Rendered as an <aside> labelled by its heading, a
 // complementary landmark and deliberately NOT a dialog, because an open role="dialog" makes isAnyDialogOpen
 // (lib/keymap/dialogGuard.ts) stand down every shortcut in the app.
 export const SIDE_PANEL_SURFACE_CLASS =
