@@ -116,15 +116,11 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 		...(writable ? [TYPE] : [])
 	]
 
-	// Participants management is owner-only, matching both mobile and old-web — a participant sees no
-	// entry for a dialog they could never act on. History stays open to any participant (mobile parity —
-	// anyone with access can view a note's history; only restoring a version is gated further, by the
-	// restore-from-history dialog itself).
-	if (owner) {
-		actions.push(PARTICIPANTS)
-	}
-
-	actions.push(HISTORY)
+	// Participants opens the participants panel for anyone on the note: a participant sees who else is on it,
+	// read-only (managing them stays the owner's, inside the panel). History stays open to any participant
+	// (mobile parity — anyone with access can view a note's history; only restoring a version is gated further,
+	// by the restore-from-history dialog itself).
+	actions.push(PARTICIPANTS, HISTORY)
 
 	// Archive/restore are mutually exclusive with each other, not with the rest of the menu — an
 	// archived note keeps rename/duplicate/pin/favorite/tags/type, just swaps Archive for Restore.

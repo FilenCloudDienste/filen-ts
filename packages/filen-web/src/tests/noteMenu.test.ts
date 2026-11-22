@@ -68,7 +68,7 @@ describe("noteMenuActions — owner, normal (not trashed/archived) note", () => 
 })
 
 describe("noteMenuActions — non-owner (participant), normal note", () => {
-	it("omits participants and archive; ends in leave instead of trash", () => {
+	it("keeps participants, omits archive; ends in leave instead of trash", () => {
 		expect(ids(sharedNote(true), 2n)).toEqual([
 			"rename",
 			"duplicate",
@@ -79,6 +79,7 @@ describe("noteMenuActions — non-owner (participant), normal note", () => {
 			"favorite",
 			"tags",
 			"type",
+			"participants",
 			"history",
 			"leave"
 		])
@@ -93,6 +94,7 @@ describe("noteMenuActions — non-owner (participant), normal note", () => {
 			"pin",
 			"favorite",
 			"tags",
+			"participants",
 			"history",
 			"leave"
 		])
@@ -170,6 +172,7 @@ describe("noteMenuActions — archived (not trashed) note", () => {
 			"favorite",
 			"tags",
 			"type",
+			"participants",
 			"history",
 			"restore",
 			"leave"
