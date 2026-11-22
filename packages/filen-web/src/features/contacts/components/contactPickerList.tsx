@@ -1,10 +1,10 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { CheckIcon, UsersIcon } from "lucide-react"
+import { UsersIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type { ContactsQueryData } from "@/features/contacts/queries/contacts"
 import { contactsNotIn, filterContactsBySearch, sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
-import { ContactRow } from "@/features/contacts/components/contactRow"
+import { ContactPickerRows } from "@/features/contacts/components/contactPickerRows"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { blockingQueryError } from "@/queries/blockingError"
 import { Button } from "@/components/ui/button"
@@ -89,34 +89,12 @@ export function ContactPickerList({
 		}
 
 		return (
-			<div
-				role="listbox"
-				aria-multiselectable="true"
-				aria-label={ariaLabel}
-				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
-			>
-				{filtered.map(contact => {
-					const isSelected = selected.has(contact.uuid)
-
-					return (
-						<ContactRow
-							key={contact.uuid}
-							contact={contact}
-							selected={isSelected}
-							onToggleSelect={() => {
-								onToggle(contact.uuid)
-							}}
-						>
-							{isSelected ? (
-								<CheckIcon
-									aria-hidden="true"
-									className="size-4 shrink-0 text-primary"
-								/>
-							) : null}
-						</ContactRow>
-					)
-				})}
-			</div>
+			<ContactPickerRows
+				contacts={filtered}
+				selected={selected}
+				onToggle={onToggle}
+				ariaLabel={ariaLabel}
+			/>
 		)
 	}
 

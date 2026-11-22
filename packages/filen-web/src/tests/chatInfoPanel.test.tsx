@@ -3,7 +3,7 @@
 // The chat info panel: opening and closing it beside the thread or as a sheet, what each role sees, the per-row menus,
 // the add picker, mute and the Leave/Delete confirms. The writes themselves are stubbed; chatsParticipants and
 // chatsActions cover them.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { useState } from "react"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
@@ -12,6 +12,7 @@ import { testUuid } from "@/tests/support/uuid"
 import { mockChat, mockChatParticipant, mockUndecryptableChat } from "@/tests/fixtures/sdk"
 import { mockBlockedContact, mockContact } from "@/tests/support/contactFixtures"
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 
 const { viewport, online, contacts, participants, block, directActions, actions, navigate, router } = vi.hoisted(() => ({
 	viewport: { wide: true },
@@ -91,6 +92,17 @@ function openPanel(): HTMLElement {
 
 	return screen.getByRole("complementary", { name: "Chat info" })
 }
+
+// The contact picker is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 beforeEach(() => {
 	vi.clearAllMocks()

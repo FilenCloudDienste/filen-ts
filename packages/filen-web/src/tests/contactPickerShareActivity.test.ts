@@ -3,11 +3,12 @@
 // Sharing from the contact picker runs as an activity: a share of several items, or of a directory
 // (its tree re-encrypts per contact), closes the picker at once and shows its progress in the toast; one
 // file keeps the picker's spinner and toasts only its result.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react"
 import type { Contact, Dir, File, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 
 const { shareItems, toast } = vi.hoisted(() => ({
 	shareItems: vi.fn(),
@@ -80,6 +81,17 @@ function pick(email: string): void {
 function share(): void {
 	fireEvent.click(screen.getByRole("button", { name: "Share" }))
 }
+
+// The contact picker is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 beforeEach(() => {
 	vi.clearAllMocks()

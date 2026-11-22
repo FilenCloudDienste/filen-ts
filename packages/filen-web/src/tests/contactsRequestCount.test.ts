@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { focusManager, onlineManager } from "@tanstack/react-query"
@@ -45,6 +45,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import {
@@ -155,6 +156,17 @@ function pastWindow(): void {
 	const now = Date.now()
 	vi.spyOn(Date, "now").mockReturnValue(now + CONTACTS_STALE_TIME + 1)
 }
+
+// The contact picker and version list are virtualized: jsdom lays nothing out, so they get a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 beforeEach(() => {
 	queryClient.clear()

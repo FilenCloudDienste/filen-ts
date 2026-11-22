@@ -16,8 +16,8 @@ export interface ContactRowProps {
 	// Selection state, shared by both contracts below; meaningless without one of them.
 	selected?: boolean | undefined
 	// Contract A — bounded dialog picker (ContactPickerList): the row owns its own Enter/Space toggle and
-	// is unconditionally tabbable. Correct where the list is short, fixed-height and its trailing slot
-	// holds a glyph rather than controls.
+	// is unconditionally tabbable. Correct where the list is fixed-height and its trailing slot holds a
+	// glyph rather than controls (the picker virtualizes: a focused row scrolls the next one in).
 	onToggleSelect?: (() => void) | undefined
 	// Contract B — the contacts page's section listbox: the container owns key handling (it is the only
 	// scope holding the section's uuid array), so the row takes a click handler, a roving cursor flag and
@@ -28,12 +28,26 @@ export interface ContactRowProps {
 	onLongPress?: (() => void) | undefined
 	active?: boolean | undefined
 	rowRef?: ((element: HTMLDivElement | null) => void) | undefined
+	// The row's 1-based place among all of its list's rows, for a virtualized list that mounts only a window of them.
+	posInSet?: number | undefined
+	setSize?: number | undefined
 	// Trailing slot: the per-row action buttons/menu (accept/deny, cancel, remove/block, unblock), or a
 	// picker's non-interactive check glyph.
 	children?: ReactNode
 }
 
-export function ContactRow({ contact, selected, onToggleSelect, onSelect, onLongPress, active, rowRef, children }: ContactRowProps) {
+export function ContactRow({
+	contact,
+	selected,
+	onToggleSelect,
+	onSelect,
+	onLongPress,
+	active,
+	rowRef,
+	posInSet,
+	setSize,
+	children
+}: ContactRowProps) {
 	const displayName = contactDisplayName(contact)
 	const roving = onSelect !== undefined
 	const selectable = roving || onToggleSelect !== undefined
@@ -61,6 +75,8 @@ export function ContactRow({ contact, selected, onToggleSelect, onSelect, onLong
 			ref={rowRef}
 			role={selectable ? "option" : undefined}
 			aria-selected={selectable ? selected === true : undefined}
+			aria-posinset={posInSet}
+			aria-setsize={setSize}
 			tabIndex={resolveTabIndex()}
 			{...(roving ? press.handlers : {})}
 			onClick={event => {

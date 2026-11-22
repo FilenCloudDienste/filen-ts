@@ -8,12 +8,13 @@
 // renders one representative control per surface family (drive/contacts/settings) and asserts the
 // shared "common:offlineActionDisabled" copy shows up as its native title exactly while offline, and
 // is absent once back online.
-import { describe, it, expect, afterEach, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Contact, File, FileVersion } from "@filen/sdk-rs"
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 import { onlineManager } from "@tanstack/react-query"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -104,6 +105,17 @@ function versionedFileItem(): FileItem {
 
 	return item
 }
+
+// The contact picker and version list are virtualized: jsdom lays nothing out, so they get a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 afterEach(() => {
 	cleanup()

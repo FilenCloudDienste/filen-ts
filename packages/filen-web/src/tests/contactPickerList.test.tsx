@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { UseQueryResult } from "@tanstack/react-query"
@@ -18,6 +18,18 @@ vi.mock("@/lib/i18n/errorLabel", () => ({ errorLabel: () => "Network error" }))
 import "@/lib/i18n"
 import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
 import { testUuid } from "@/tests/support/uuid"
+import { stubElementSize } from "@/tests/stubElementSize"
+
+// The list is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 function contact(label: string, email: string, userId: bigint): Contact {
 	return { uuid: testUuid(label), userId, email, nickName: undefined, lastActive: 0n, timestamp: 0n, publicKey: "key" }
