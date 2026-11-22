@@ -1,5 +1,5 @@
 import { handleArguments, isConsequentialTool, type AssistantTool, type AssistantUntrustedOutput } from "./tool"
-import { foreignLinks } from "./untrusted"
+import { foreignLinks, statusMarkers } from "./untrusted"
 
 // Deterministic injection policy, enforced by the dispatcher whatever the model says:
 //
@@ -200,6 +200,11 @@ export class AssistantTurnGuard {
 
 					if (typeof text === "string" && foreignLinks({ text, userMessage: originUserMessage }).length > 0) {
 						return { allowed: false, reason: "The text holds a link or address that does not come from the user's message" }
+					}
+
+					// "✅ Saved to your drive: …" in a reply the user sends would vouch for what the app never did.
+					if (typeof text === "string" && statusMarkers(text).some(claim => !originUserMessage.includes(claim))) {
+						return { allowed: false, reason: "The text holds a status line that does not come from the user's message" }
 					}
 				}
 
@@ -458,12 +463,14 @@ export class AssistantTurnGuard {
 		}
 	}
 
-	// Call after a tool ran. `returned` lists the handles its result exposed, with display names.
+	// Call after a tool ran. `returned` lists the handles its result exposed, with display names. `listed` is the
+	// directory a listing showed the contents of.
 	record({
 		tool,
 		args,
 		returned,
-		created = []
+		created = [],
+		listed
 	}: {
 		tool: AssistantTool
 		args: Record<string, unknown>
@@ -472,18 +479,32 @@ export class AssistantTurnGuard {
 			name: string
 		}[]
 		created?: readonly string[]
+		listed?: string | undefined
 	}): void {
 		if (TAINT_ORDER.indexOf(tool.untrustedOutput) > TAINT_ORDER.indexOf(this.taintLevel)) {
 			this.taintLevel = tool.untrustedOutput
 		}
 
 		for (const { handle, name } of returned) {
-			this.names.set(handle, name)
+			// A handle shown without a name stands for itself: it does not replace the name an earlier result gave.
+			if (name !== handle || !this.names.has(handle)) {
+				this.names.set(handle, name)
+			}
 		}
 
 		// A consequential call only got here grounded, so what it created is the user's too.
 		for (const handle of created) {
 			this.grounded.add(handle)
+		}
+
+		// The contents of a directory the user named or sees, whatever else the call said (a path beside the handle):
+		// the directory itself must trace back to the user directly, so this grounds one level and never chains.
+		if (tool.effect === "read" && listed !== undefined && this.handleGrounded(listed, { lookups: false })) {
+			for (const { handle } of returned) {
+				this.lookupGrounded.add(handle)
+			}
+
+			return
 		}
 
 		const handleKeyed = (tool.grounded.handles ?? []).some(key => args[key] !== undefined)

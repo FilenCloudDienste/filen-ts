@@ -18,6 +18,7 @@ import {
 	readChat,
 	readNote,
 	readTextFile,
+	renameByPattern,
 	renameItem,
 	sanitizeUntrustedText,
 	screenAssistantReply,
@@ -305,6 +306,44 @@ describe("AssistantTurnGuard", () => {
 
 		expect(turn.check({ tool: moveItems, args: { handles: ["f9"], destination: "d7" } }).allowed).toBe(false)
 		expect(turn.check({ tool: moveItems, args: { handles: ["f9"], destination: "d6" } }).allowed).toBe(true)
+	})
+
+	it("grounds the files a listing shows of a directory the user named, whatever path the call added", () => {
+		const turn = guard("Number the photos in Lisbon 2024 as Lisbon 1, Lisbon 2", {}, [])
+
+		turn.record({ tool: searchItems, args: { query: "Lisbon 2024" }, returned: [{ handle: "d5", name: "Lisbon 2024" }] })
+		// The path names a parent the user never wrote: the listed directory is still the one they named.
+		turn.record({
+			tool: listDirectory,
+			args: { handle: "d5", path: "/Photos/Lisbon 2024" },
+			returned: [
+				{ handle: "d5", name: "d5" },
+				{ handle: "f11", name: "IMG_2041.jpg" },
+				{ handle: "d8", name: "Extras" }
+			],
+			listed: "d5"
+		})
+
+		expect(turn.check({ tool: renameByPattern, args: { handles: ["f11"], scheme: "number", text: "Lisbon" } }).allowed).toBe(true)
+
+		// One level only: a subdirectory it listed grounds nothing it lists in turn.
+		turn.record({ tool: listDirectory, args: { handle: "d8" }, returned: [{ handle: "f12", name: "x.jpg" }], listed: "d8" })
+
+		expect(turn.check({ tool: trashItems, args: { handles: ["f12"] } }).allowed).toBe(false)
+	})
+
+	it("grounds nothing a listing shows of a directory the user did not name", () => {
+		const turn = guard("Rename my holiday photos by date", {}, [])
+
+		turn.record({ tool: listSection, args: { section: "trash" }, returned: [{ handle: "d49", name: "Screenshots 2023" }] })
+		turn.record({
+			tool: listDirectory,
+			args: { handle: "d49" },
+			returned: [{ handle: "f2", name: "a.png" }],
+			listed: "d49"
+		})
+
+		expect(turn.check({ tool: renameByPattern, args: { handles: ["f2"], scheme: "date_prefix" } }).allowed).toBe(false)
 	})
 
 	it("needs every word of a lookup's query in the message, short ones as whole words", () => {
@@ -697,7 +736,7 @@ describe("untrusted text", () => {
 		expect(screened("<HTTPS:evil.example>")).toBe("<HxxPS:evil[.]example>")
 		expect(screened("[a][1]\n\n[1]: https:/evil.example")).toBe("[a][1]\n\n[1]: hxxps:/evil[.]example")
 		expect(screened("[Mail](mailto:a@evil.example?body=secret)")).toBe("[Mail](mailto[:]a[@]evil[.]example?body=secret)")
-		expect(screened("write to support@filen-verify.example")).toBe("write to support[@]filen-verify.example")
+		expect(screened("write to support@filen-verify.example")).toBe("write to support[@]filen-verify[.]example")
 		expect(screened("write to bob@example.com", "Tell bob@example.com hi")).toBe("write to bob@example.com")
 		// An encoded "&" stays encoded, so the renderer shows "&#116;" as text (the host after "//" still reads as
 		// one); unknown named references stay literal.
@@ -732,7 +771,7 @@ describe("untrusted text", () => {
 		expect(screened("e.g. z.B. U.S.A. Qwen3.5 v1.2.3 at 10.30")).toBe("e.g. z.B. U.S.A. Qwen3.5 v1.2.3 at 10.30")
 		expect(screened("READ.ME")).toBe("READ[.]ME")
 		// An address keeps its dotted local part, typed by the user or not.
-		expect(screened("Her address is lena.hoffmann@example.com")).toBe("Her address is lena.hoffmann[@]example.com")
+		expect(screened("Her address is lena.hoffmann@example.com")).toBe("Her address is lena.hoffmann[@]example[.]com")
 		expect(screened("Wrote to lena.hoffmann@example.com", "tell lena.hoffmann@example.com hi")).toBe(
 			"Wrote to lena.hoffmann@example.com"
 		)

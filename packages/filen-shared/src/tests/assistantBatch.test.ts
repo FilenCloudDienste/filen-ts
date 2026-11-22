@@ -108,7 +108,7 @@ describe("planBatchRename", () => {
 	it("asks for the arguments a scheme needs", () => {
 		expect(
 			planBatchRename({ names: DRIVE_NAME_RULES, items: [item("f1", "a")], taken: new Map(), scheme: "add_prefix" })
-		).toMatchObject({ ok: false })
+		).toMatchObject({ ok: false, invalid: true })
 		expect(
 			planBatchRename({ names: DRIVE_NAME_RULES, items: [item("f1", "a")], taken: new Map(), scheme: "replace_text", text: "x" })
 		).toMatchObject({
@@ -119,7 +119,11 @@ describe("planBatchRename", () => {
 	it("refuses more than the cap instead of cutting", () => {
 		const items = Array.from({ length: BATCH_MAX_ITEMS + 1 }, (_, index) => item(`f${String(index)}`, `${String(index)}.txt`))
 
-		expect(planBatchRename({ names: DRIVE_NAME_RULES, items, taken: new Map(), scheme: "lowercase" }).ok).toBe(false)
+		// A valid call the app refuses: the model is not told to correct it.
+		expect(planBatchRename({ names: DRIVE_NAME_RULES, items, taken: new Map(), scheme: "lowercase" })).toMatchObject({
+			ok: false,
+			invalid: false
+		})
 	})
 })
 

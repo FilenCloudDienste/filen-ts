@@ -11,6 +11,7 @@ import {
 	parseToolInput,
 	portableSchemaViolations,
 	readChat,
+	renameByPattern,
 	isConsequentialTool,
 	toolInputJsonSchema
 } from "@filen/shared/assistant"
@@ -89,6 +90,32 @@ describe("assistant tool input parsing", () => {
 			ok: true,
 			args: { handle: "c1" }
 		})
+	})
+
+	it("leaves out optional arguments written without a value, as a grammar that requires every property makes them", () => {
+		expect(
+			parseToolInput(renameByPattern, { scope: "d5", handles: ["d5"], kind: "image", scheme: "date_prefix", text: "", find: " " })
+		).toEqual({ ok: true, args: { scope: "d5", kind: "image", scheme: "date_prefix" } })
+		expect(parseToolInput(renameByPattern, { scope: "d5", handles: [], scheme: "number", text: "Lisbon" })).toEqual({
+			ok: true,
+			args: { scope: "d5", scheme: "number", text: "Lisbon" }
+		})
+		// Files beside the directory are a choice, not a repeat.
+		expect(parseToolInput(renameByPattern, { scope: "d5", handles: ["f11"], scheme: "lowercase" })).toEqual({
+			ok: true,
+			args: { scope: "d5", handles: ["f11"], scheme: "lowercase" }
+		})
+		// A handle of another kind than the argument takes is a filled-in blank.
+		expect(parseToolInput(openRoute, { route: "settings_security", help: "d1", pair: "null" })).toEqual({
+			ok: true,
+			args: { route: "settings_security" }
+		})
+		expect(parseToolInput(openRoute, { route: "sync", help: "", pair: "s2" })).toEqual({
+			ok: true,
+			args: { route: "sync", pair: "s2" }
+		})
+		// A required argument stays, whatever it holds: the check refuses it.
+		expect(parseToolInput(readChat, { handle: "" })).toEqual({ ok: true, args: { handle: "" } })
 	})
 
 	it("names every problem for the model to correct", () => {

@@ -80,7 +80,9 @@ export interface BatchNameRules {
 	compare: (a: string, b: string) => number
 }
 
-export type BatchPlanResult<Plan> = { ok: true; plan: Plan } | { ok: false; error: string }
+// `invalid`: the call itself is wrong (a scheme without its text), so the model corrects it; else the app refuses a
+// valid call (more files than a batch may change).
+export type BatchPlanResult<Plan> = { ok: true; plan: Plan } | { ok: false; error: string; invalid: boolean }
 
 // The date a file is named or sorted by: the asked one, else the first it carries of taken, created, modified, and
 // the upload as the last resort.
@@ -145,7 +147,7 @@ function schemeName(
 	item: BatchItem,
 	index: number,
 	width: number
-): { ok: true; name: string } | { ok: false; error: string } {
+): { ok: true; name: string } | { ok: false; error: string; invalid: true } {
 	const { stem, extension } = splitName(item.name)
 	const text = request.text ?? ""
 	const day = () => localIsoDay(batchDate(item, request.date), request.timeZone)
@@ -165,17 +167,17 @@ function schemeName(
 		}
 		case "add_prefix":
 			return text.length === 0
-				? { ok: false, error: "Pass the text to add as text" }
+				? { ok: false, error: "Pass the text to add as text", invalid: true }
 				: { ok: true, name: item.name.startsWith(text) ? item.name : `${text}${item.name}` }
 		case "add_suffix":
 			return text.length === 0
-				? { ok: false, error: "Pass the text to add as text" }
+				? { ok: false, error: "Pass the text to add as text", invalid: true }
 				: { ok: true, name: stem.endsWith(text) ? item.name : `${stem}${text}${extension}` }
 		case "replace_text": {
 			const find = request.find ?? ""
 
 			return find.length === 0
-				? { ok: false, error: "Pass the text to replace as find" }
+				? { ok: false, error: "Pass the text to replace as find", invalid: true }
 				: { ok: true, name: `${stem.replace(new RegExp(escapeRegExp(find), "giu"), () => text)}${extension}` }
 		}
 		case "lowercase":
@@ -190,7 +192,8 @@ export function planBatchRename(request: BatchRenameRequest): BatchPlanResult<Ba
 	if (request.items.length > BATCH_MAX_ITEMS) {
 		return {
 			ok: false,
-			error: `That is ${String(request.items.length)} files; at most ${String(BATCH_MAX_ITEMS)} can be renamed at once. Narrow it down (a kind, or fewer files).`
+			error: `That is ${String(request.items.length)} files; at most ${String(BATCH_MAX_ITEMS)} can be renamed at once. Narrow it down (a kind, or fewer files).`,
+			invalid: false
 		}
 	}
 
@@ -266,7 +269,8 @@ export function planOrganizeByDate(request: BatchOrganizeRequest): BatchPlanResu
 	if (request.items.length > BATCH_MAX_ITEMS) {
 		return {
 			ok: false,
-			error: `That is ${String(request.items.length)} files; at most ${String(BATCH_MAX_ITEMS)} can be sorted at once. Narrow it down (a kind).`
+			error: `That is ${String(request.items.length)} files; at most ${String(BATCH_MAX_ITEMS)} can be sorted at once. Narrow it down (a kind).`,
+			invalid: false
 		}
 	}
 

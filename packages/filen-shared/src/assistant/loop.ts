@@ -13,6 +13,7 @@ import {
 } from "./documents"
 import { AssistantTurnGuard } from "./guard"
 import { foreignTokens, replyHandles, replyWithHandles, replyWithoutHandles, settledReply } from "./handles"
+import { isRecord } from "./internal"
 import {
 	ASSISTANT_CLOSING_NUDGE,
 	ASSISTANT_MALFORMED_RETRY,
@@ -48,6 +49,7 @@ import {
 	type ScreenedReply,
 	spotlightInstruction,
 	spotlightText,
+	statusMarkers,
 	type SpotlightMode,
 	type SpotlightOptions
 } from "./untrusted"
@@ -671,6 +673,25 @@ function fileRoute(routed: ParsedRoute, userWords: readonly string[]): ParsedRou
 }
 
 // Every handle a tool result exposes, with the name or title next to it.
+// A listing names its directory by path only ("/Photos/Lisbon 2024"): the last segment is its name.
+function pathName(path: unknown): string | undefined {
+	if (typeof path !== "string") {
+		return undefined
+	}
+
+	const segments = path.split("/").filter(segment => segment.length > 0)
+
+	return segments.at(-1) ?? (path.startsWith("/") ? "/" : undefined)
+}
+
+// The directory a listing result shows the contents of: its `directory` entry's handle.
+function listedDirectory(result: unknown): string | undefined {
+	const directory = isRecord(result) ? result["directory"] : undefined
+	const handle = isRecord(directory) ? directory["handle"] : undefined
+
+	return typeof handle === "string" ? handle : undefined
+}
+
 function handlesIn(value: unknown, found = new Map<string, string>()): Map<string, string> {
 	if (Array.isArray(value)) {
 		for (const item of value) {
@@ -679,7 +700,7 @@ function handlesIn(value: unknown, found = new Map<string, string>()): Map<strin
 	} else if (typeof value === "object" && value !== null) {
 		const record = value as Record<string, unknown>
 		const handle = record["handle"]
-		const name = record["name"] ?? record["title"]
+		const name = record["name"] ?? record["title"] ?? pathName(record["path"])
 
 		if (typeof handle === "string") {
 			found.set(handle, typeof name === "string" ? name : handle)
@@ -713,17 +734,20 @@ function normalizeForEcho(text: string): string {
 const ECHO_FRAGMENT = 40
 
 // Withholds a reply that repeats the canary or any instruction line (from its first words on), and
-// defangs links the user did not type. Runs on partial replies too, so nothing unscreened is shown.
+// defangs links the user did not type and leaves out the status claims read content held (`markers`). Runs on partial
+// replies too, so nothing unscreened is shown.
 export function screenReply({
 	reply,
 	userMessage,
 	canary,
-	instructions
+	instructions,
+	markers = []
 }: {
 	reply: string
 	userMessage: string
 	canary: string
 	instructions: readonly string[]
+	markers?: readonly string[]
 }): ScreenedReply {
 	const normalized = normalizeForEcho(reply)
 	const echoes = instructions.some(line => {
@@ -736,7 +760,8 @@ export function screenReply({
 		// An echo is withheld exactly like a canary hit.
 		reply: echoes ? canary : reply,
 		userMessage,
-		canary
+		canary,
+		markers
 	})
 }
 
@@ -1137,6 +1162,8 @@ export async function runAssistantTurn({
 	const seen = new Set([...context.handles, ...historyHandles])
 	// Tokens like a handle that the user typed or content read this turn holds ("room c12", "p1: fix login").
 	const foreign = new Set(replyHandles(userText))
+	// Status claims ("✅ Saved to your drive: …") in what this turn read: other people's, never the app's.
+	const markers = new Set<string>()
 	const shownName = (handle: string) => {
 		const name = seen.has(handle) || handedOut.has(handle) ? (nameOf(handle) ?? handedOut.get(handle)) : undefined
 
@@ -1154,7 +1181,8 @@ export async function runAssistantTurn({
 			reply: handles ? text : replyWithoutHandles(text, shownName, { foreign, invented }),
 			userMessage: userText,
 			canary,
-			instructions
+			instructions,
+			markers: [...markers]
 		})
 	}
 	const replyEvent = (text: string, final: boolean): AssistantTurnEvent => {
@@ -1175,7 +1203,15 @@ export async function runAssistantTurn({
 	const sanitized = (value: unknown) => {
 		foreignTokens(value, foreign)
 
-		return mapUntrustedStrings(value, text => sanitizeUntrustedText(text, specialTokens, { keepJoiners: true }))
+		return mapUntrustedStrings(value, text => {
+			const clean = sanitizeUntrustedText(text, specialTokens, { keepJoiners: true })
+
+			for (const marker of statusMarkers(clean)) {
+				markers.add(marker)
+			}
+
+			return clean
+		})
 	}
 	const untrusted = (value: unknown) =>
 		spotlightOptions === null ? sanitized(value) : mapUntrustedStrings(sanitized(value), text => spotlightText(text, spotlightOptions))
@@ -1641,7 +1677,8 @@ export async function runAssistantTurn({
 									tool,
 									args,
 									returned,
-									created: outcome.created ?? []
+									created: outcome.created ?? [],
+									listed: listedDirectory(outcome.result)
 								})
 								handOut(returned)
 								// The call reads as running until its content is extracted, which is a generation of its own.

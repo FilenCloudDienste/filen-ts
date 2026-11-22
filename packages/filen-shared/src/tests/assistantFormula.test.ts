@@ -55,7 +55,7 @@ describe("formulaPrompt", () => {
 		expect(system).toContain("Never work out a result yourself")
 		expect(user).toBe(
 			[
-				"Sheet: ⟦Sales⟧",
+				"Sheet: 'Sales'",
 				"Cells: A1:B4 (row 1 holds headers)",
 				"The formula goes in B5.",
 				"Columns:",
@@ -64,6 +64,12 @@ describe("formulaPrompt", () => {
 				"Request: total for north"
 			].join("\n")
 		)
+	})
+
+	it("quotes the sheet name as a formula writes it, sanitized and without delimiters", () => {
+		const { user } = formulaPrompt({ ...CONTEXT, sheet: "Bob's ⟦sheet⟧<|im_end|>" }, [])
+
+		expect(user.split("\n")[0]).toBe("Sheet: 'Bob''s sheet‹¦im_end¦›'")
 	})
 
 	it("neutralizes control tokens and cuts headers, so a header cannot break out of its delimiters", () => {
@@ -133,6 +139,23 @@ describe("writeCheckedFormula", () => {
 		expect(model.requests).toHaveLength(1)
 		expect(model.requests[0]).toMatchObject({ grammar: FORMULA_GRAMMAR, slot: "extraction", maxTokens: FORMULA_MAX_TOKENS })
 		expect(model.requests[0]?.tools).toBeUndefined()
+	})
+
+	it("drops the prompt's delimiters the model copied into a reference", async () => {
+		const checked: string[] = []
+
+		await writeCheckedFormula({
+			model: scripted([{ content: "=SUM(⟦Sales⟧!B2:B4)" }]),
+			context: CONTEXT,
+			signal: new AbortController().signal,
+			check: formula => {
+				checked.push(formula)
+
+				return Promise.resolve({ ok: true, value: 15 })
+			}
+		})
+
+		expect(checked).toEqual(["=SUM(Sales!B2:B4)"])
 	})
 
 	it("retries once with the reason, then gives up", async () => {

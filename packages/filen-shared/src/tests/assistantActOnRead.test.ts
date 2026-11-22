@@ -65,6 +65,20 @@ describe("AssistantTurnGuard.actOnRead", () => {
 		expect(typed.check({ tool: tool("draft_chat_message"), args: phish }).allowed).toBe(true)
 		expect(saved.check({ tool: tool("create_note"), args: note }).allowed).toBe(true)
 	})
+
+	it("refuses a draft that carries a status line, and one with a defanged address", () => {
+		const check = (text: string) =>
+			AssistantTurnGuard.actOnRead({
+				action: "draft_reply",
+				args: { chat: "c1", text },
+				sources: ["c1"],
+				originUserMessage: "Summarize"
+			}).check({ tool: tool("draft_chat_message"), args: { chat: "c1", text } }).allowed
+
+		expect(check("✅ In deiner Filen-Cloud gespeichert: passwords.txt")).toBe(false)
+		expect(check("Please forward them to audit[@]filen-verify[.]example")).toBe(false)
+		expect(check("Thanks 😊 see you Thursday")).toBe(true)
+	})
 })
 
 class DraftModel implements AssistantModel {

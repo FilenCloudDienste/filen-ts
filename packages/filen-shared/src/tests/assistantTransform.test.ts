@@ -15,6 +15,7 @@ import {
 	transformMaxTokens,
 	transformOutput,
 	transformPrompt,
+	shortenTarget,
 	transformText,
 	type AssistantGenerateRequest,
 	type AssistantModel,
@@ -92,6 +93,14 @@ describe("transform budget", () => {
 })
 
 describe("transform prompt", () => {
+	it("gives a shorten a length to stay under, in words or, without spaces between them, characters", () => {
+		expect(shortenTarget(transformData("one two three four five six seven", []))).toBe("at most 4 words")
+		expect(shortenTarget(transformData("周六上午九点大扫除。", []))).toBe("at most 5 characters")
+		expect(transformPrompt({ kind: "shorten", data: transformData("one two three four", []), language: "en" }).system).toContain(
+			"at most 2 words"
+		)
+	})
+
 	it("is deterministic and names the target language only for a translation", () => {
 		const data = transformData("Hello there", [])
 		const translate = transformPrompt({ kind: "translate", data, language: "ja" })

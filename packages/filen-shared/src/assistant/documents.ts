@@ -19,6 +19,17 @@ export const DOCUMENT_SELECTION_LABEL = "selection"
 // A read that found no text, as a scanned PDF without recognized text has none.
 export const DOCUMENT_NO_TEXT_NOTE = "No text in these pages: a scanned document without recognized text has none."
 
+// One reading tool per file type: read_document for PDF, Office files and presentations, read_text_file for text,
+// markdown, CSV, code and e-mail. Each refuses the other's files with a pointer to it. read_document still reads the
+// selection in an open text file, and a text file too large for read_text_file, in chunks.
+export function readWithTextFile(name: string): string {
+	return `"${name}" is a text file; read it with read_text_file`
+}
+
+export function readWithDocument(name: string): string {
+	return `"${name}" is not a text file; read a PDF, Word document, spreadsheet or presentation with read_document`
+}
+
 // The word a unit of each kind reads as: "pages 3–7 of 41". A text is one unit, cut in parts only when chunked.
 export const DOCUMENT_UNIT_WORDS: Readonly<Record<AssistantDocumentKind, { one: string; many: string }>> = {
 	pdf: { one: "page", many: "pages" },

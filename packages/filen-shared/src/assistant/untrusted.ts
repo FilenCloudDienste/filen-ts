@@ -150,7 +150,8 @@ const TRUSTED_KEYS = new Set([
 	"expirySetting",
 	"section",
 	"sharing",
-	"shown"
+	"shown",
+	"searched"
 ])
 
 export function isAppResultKey(key: string): boolean {
@@ -352,6 +353,13 @@ const IPV4 =
 
 function defangAddress(token: string): string {
 	return token.replace(/\./g, "[.]")
+}
+
+// The local part stays readable ("lena.hoffmann[@]example[.]com"); the domain is a host a reader could type.
+function defangEmail(address: string): string {
+	const at = address.lastIndexOf("@")
+
+	return `${address.slice(0, at)}[@]${defangAddress(address.slice(at + 1))}`
 }
 
 function screenHost(token: string): string {
@@ -576,6 +584,36 @@ export function foreignLinks({ text, userMessage }: { text: string; userMessage:
 	)
 }
 
+// The symbols an app's own status line starts with (done, failed, warning, locked, saved). Other people's text that
+// opens a line or a quote with one ("✅ Saved to your Filen drive: passwords.txt") fakes an outcome the app never had.
+const STATUS_SYMBOL =
+	"[\\u2705\\u2611\\u2713\\u2714\\u2717\\u2718\\u274C\\u274E\\u26A0\\u26D4\\u2139\\u{1F6AB}\\u{1F510}\\u{1F512}\\u{1F513}\\u{1F4BE}\\u{1F4C1}\\u{1F4C2}\\u{1F514}\\u{1F6E1}]\\uFE0F?"
+
+// The claim after the symbol, up to the end of its line or quote.
+const STATUS_MARKER = new RegExp(`${STATUS_SYMBOL}[ \\t]*([^\\n"“”„«»‹›「」『』]+)`, "gu")
+
+const MARKER_MIN_CHARS = 6
+
+// The status claims `text` holds (statusMarker's claim part, trimmed of closing punctuation), for the reply screen to
+// leave out where a reply repeats one.
+export function statusMarkers(text: string): string[] {
+	return [...text.matchAll(STATUS_MARKER)]
+		.map(match => (match[1] ?? "").replace(/[\s.。!！,，;；:：]+$/u, "").trim())
+		.filter(claim => Array.from(claim).length >= MARKER_MIN_CHARS)
+}
+
+// A repeated claim, with the status symbol in front of it if it kept one, becomes "…": the reply can still say that
+// the content held such a line, never what it claims.
+function withoutMarkers(text: string, markers: readonly string[]): string {
+	if (markers.length === 0) {
+		return text
+	}
+
+	const claims = [...new Set(markers)].toSorted((a, b) => b.length - a.length).map(escapeRegExp)
+
+	return text.replace(new RegExp(`(?:${STATUS_SYMBOL}[ \\t]*)?(?:${claims.join("|")})`, "giu"), "…")
+}
+
 export type ScreenedReply = {
 	text: string
 	// The reply repeated the assistant's instructions and is not shown; `text` is then empty, and the app
@@ -586,15 +624,18 @@ export type ScreenedReply = {
 // The reply is shown to the user as markdown, so it is screened like any other output: links and e-mail
 // addresses the user did not type themselves are defanged (other people's text can plant phishing links
 // in a summary), and a reply that repeats the system prompt's canary is withheld. The renderer keeps its
-// own link policy too; this is the layer every platform shares.
+// own link policy too; this is the layer every platform shares. `markers` are the status claims content read this turn
+// held (statusMarkers): a reply repeating one shows "…" in its place.
 export function screenAssistantReply({
 	reply,
 	userMessage,
-	canary
+	canary,
+	markers = []
 }: {
 	reply: string
 	userMessage: string
 	canary?: string
+	markers?: readonly string[]
 }): ScreenedReply {
 	if (canary !== undefined && reply.includes(canary)) {
 		return {
@@ -606,11 +647,11 @@ export function screenAssistantReply({
 	const typed = linkView(userMessage).toLowerCase()
 	// Characters that split a link invisibly go, except the joiners a word's or an emoji's spelling needs, which
 	// the patterns read past (foldHosts).
-	const text = withoutInvisible(decodeForLinks(reply), { keepJoiners: true })
+	const text = withoutMarkers(withoutInvisible(decodeForLinks(reply), { keepJoiners: true }), markers)
 
 	let shown = replaceFolded(text, LINK, link => (typedWhole(typed, link) ? link : defangLink(link)))
 
-	shown = replaceFolded(shown, EMAIL, address => (typedWhole(typed, address) ? address : address.replace("@", "[@]")))
+	shown = replaceFolded(shown, EMAIL, address => (typedWhole(typed, address) ? address : defangEmail(address)))
 	shown = replaceFolded(shown, BARE_HOST, host => (typedWhole(typed, host) ? host : screenHost(host)))
 	shown = replaceFolded(shown, IPV4, address => (typedWhole(typed, address) ? address : defangAddress(address)))
 

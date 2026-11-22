@@ -33,6 +33,12 @@ export type AssistantToolArg = {
 	readonly optional?: boolean
 	// A string enum's values in the order the model reads them; arktype sorts a union's values.
 	readonly values?: readonly string[]
+	// An optional handle argument of one kind: the letters its handles start with ("h" for app_help results). A value
+	// of another kind is left out (parseToolInput).
+	readonly handleKinds?: string
+	// An optional argument that only repeats this other argument's handle (`handles: ["d5"]` beside `scope: "d5"`) is
+	// left out.
+	readonly repeats?: string
 }
 
 export function oneOf<const Values extends readonly [string, ...string[]]>(values: Values) {
@@ -296,7 +302,36 @@ function validatorOf(input: AssistantToolInput): (data: unknown) => unknown {
 	return validator
 }
 
+// What a grammar that makes every property required (node-llama-cpp's) has the model write for an optional argument
+// it has no value for: "" for a string, [] for a list, a handle of the wrong kind ("help": "d0") or another
+// argument's handle again. Such a value means absent.
+function absentValue({ arg, value, args }: { arg: AssistantToolArg; value: unknown; args: Record<string, unknown> }): boolean {
+	if ((typeof value === "string" && value.trim().length === 0) || (Array.isArray(value) && value.length === 0)) {
+		return true
+	}
+
+	if (arg.handleKinds !== undefined && typeof value === "string" && !handleOfKinds(value, arg.handleKinds)) {
+		return true
+	}
+
+	if (arg.repeats === undefined) {
+		return false
+	}
+
+	const other = args[arg.repeats]
+
+	return typeof other === "string" && (Array.isArray(value) ? value : [value]).every(entry => entry === other)
+}
+
+function handleOfKinds(value: string, kinds: string): boolean {
+	const trimmed = value.trim()
+
+	return kinds.includes(trimmed.charAt(0)) && /^[a-z]\d+$/.test(trimmed)
+}
+
 // Rejects undeclared arguments. arktype counts an array as an object, so anything but a plain object is refused first.
+// Optional arguments written without a value (absentValue) are left out here, once for every tool, before any check,
+// card or grounding reads the call.
 export function parseToolInput(tool: AssistantTool, input: unknown): AssistantToolInputParse {
 	if (!isRecord(input)) {
 		return {
@@ -305,7 +340,13 @@ export function parseToolInput(tool: AssistantTool, input: unknown): AssistantTo
 		}
 	}
 
-	const result = validatorOf(tool.input)(input)
+	const absent = new Set(
+		Object.entries(tool.input)
+			.filter(([name, arg]) => arg.optional === true && name in input && absentValue({ arg, value: input[name], args: input }))
+			.map(([name]) => name)
+	)
+	const args = absent.size === 0 ? input : Object.fromEntries(Object.entries(input).filter(([name]) => !absent.has(name)))
+	const result = validatorOf(tool.input)(args)
 
 	if (result instanceof type.errors) {
 		return {
@@ -316,6 +357,6 @@ export function parseToolInput(tool: AssistantTool, input: unknown): AssistantTo
 
 	return {
 		ok: true,
-		args: input
+		args
 	}
 }
