@@ -1,5 +1,6 @@
-import { useRef, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import {
 	BringToFrontIcon,
 	ClipboardPasteIcon,
@@ -13,6 +14,7 @@ import {
 	RotateCcwIcon,
 	ScissorsIcon,
 	SendToBackIcon,
+	SparklesIcon,
 	TextCursorInputIcon,
 	TextQuoteIcon,
 	Trash2Icon,
@@ -57,6 +59,12 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { useKeyboardLayout } from "@/lib/keymap/layout"
 import { useBindings } from "@/lib/keymap/registry"
+import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { transformOffered } from "@/features/assistant/transform/transform.logic"
+import { TransformMenuEntries } from "@/features/assistant/transform/transformMenu"
+import { CONTEXT_MENU_PARTS, type TransformPick } from "@/features/assistant/transform/transformMenuParts"
+import { ShapeTransformPopover, type ShapeTransformRequest } from "@/features/presentation/components/shapeTransformPopover"
+import { readShapeTexts, SHAPE_TRANSFORM_MAX_BODIES, shapeTransformTargets } from "@/features/presentation/lib/shapeTextTransform"
 
 // The slide list's context menu (right click, or a long press on touch): the slide commands on the selection, as in
 // PowerPoint's slide pane: Cut, Copy, Paste, New, Duplicate, Delete, Layout, Reset, Hide, Move (the way touch moves slides) and the
@@ -338,8 +346,43 @@ function inText(target: EventTarget | null): boolean {
 // How long after a key opened the menu the browser's own menu event for that key is still taken as its echo.
 const KEY_ECHO_MS = 1000
 
+// "✨ Assistant ▸": the rewrite menu's entries on the selected shapes' text, or on every text box of the slide; only
+// where the model can run.
+function AssistantSubmenu({ onTransform }: { onTransform: (pick: TransformPick) => void }) {
+	const { t } = useTranslation("assistant")
+	const offered = useAssistantStore(state => transformOffered(state.modelState))
+
+	if (!offered) return null
+
+	return (
+		<>
+			<ContextMenuSeparator />
+			<ContextMenuSub>
+				<ContextMenuSubTrigger>
+					<SparklesIcon aria-hidden="true" />
+					{t("assistantMenuAssistant")}
+				</ContextMenuSubTrigger>
+				<ContextMenuSubContent data-preview-surface>
+					<TransformMenuEntries
+						parts={CONTEXT_MENU_PARTS}
+						onPick={onTransform}
+					/>
+				</ContextMenuSubContent>
+			</ContextMenuSub>
+		</>
+	)
+}
+
 // The menu's items; their dialogs show in the ribbon's dialog host, which outlives the menu.
-function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEditor; onEditText: () => void }) {
+function CanvasMenuItems({
+	ribbon,
+	onEditText,
+	onTransform
+}: {
+	ribbon: PresentationRibbonEditor
+	onEditText: () => void
+	onTransform: (pick: TransformPick) => void
+}) {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
 	const openDialog = useRibbonDialog(ribbon).open
@@ -444,6 +487,7 @@ function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEdi
 					<MousePointerClickIcon />
 					{t("previewPptxAction")}
 				</ContextMenuItem>
+				<AssistantSubmenu onTransform={onTransform} />
 			</>
 		)
 	}
@@ -509,6 +553,7 @@ function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEdi
 				<PaintBucketIcon />
 				{t("previewPptxDesignFormatBackground")}
 			</ContextMenuItem>
+			{current === undefined ? null : <AssistantSubmenu onTransform={onTransform} />}
 		</>
 	)
 }
@@ -527,7 +572,11 @@ export function SlideCanvasContextMenu({
 	onEditText: (shape: ShapeRef) => void
 	children: ReactNode
 }) {
+	const { t } = useTranslation("assistant")
 	const editable = usePresentationEditor()?.editor.editable === true
+	// Where the menu last opened (client px): the assistant's result shows there.
+	const pointRef = useRef({ x: 0, y: 0 })
+	const [shapeTransform, setShapeTransform] = useState<{ readonly request: ShapeTransformRequest; readonly at: DOMRect } | null>(null)
 	// The menu event a key dispatched, and when the key was pressed (the browser may send its own event for it).
 	const ownRef = useRef<Event | null>(null)
 	const keyedRef = useRef<number | undefined>(undefined)
@@ -591,6 +640,8 @@ export function SlideCanvasContextMenu({
 				onContextMenu={event => {
 					if (ribbon === undefined || !editable || disabled || !inside(event)) return
 
+					pointRef.current = { x: event.clientX, y: event.clientY }
+
 					if (inText(event.target)) {
 						// Kept from the menu's handler and from its listener on the document.
 						event.preventBaseUIHandler()
@@ -629,9 +680,39 @@ export function SlideCanvasContextMenu({
 							keepFocusRef.current = true
 							onEditText({ slide: state.slide, id })
 						}}
+						onTransform={pick => {
+							const render = ribbon.render
+
+							if (render === undefined) return
+
+							const state = ribbon.selection.getSnapshot()
+							const targets = shapeTransformTargets(render, state.slide === render.ref ? state.ids : [])
+							const at = new DOMRect(pointRef.current.x, pointRef.current.y, 0, 0)
+
+							void readShapeTexts(ribbon.session, targets, pick.kind).then(read => {
+								if (!read.ok) {
+									toast(t("assistantShapeTransformTooMany", { count: read.count, max: SHAPE_TRANSFORM_MAX_BODIES }))
+								} else if (read.items.length === 0) {
+									toast(t("assistantShapeTransformNothing"))
+								} else {
+									setShapeTransform({ request: { items: read.items, skipped: read.skipped, ...pick }, at })
+								}
+							})
+						}}
 					/>
 				)}
 			</ContextMenuContent>
+			{shapeTransform === null || ribbon === undefined ? null : (
+				<ShapeTransformPopover
+					request={shapeTransform.request}
+					session={ribbon.session}
+					command={op => ribbon.command(op)}
+					anchor={() => shapeTransform.at}
+					onClose={() => {
+						setShapeTransform(null)
+					}}
+				/>
+			)}
 		</ContextMenu>
 	)
 }

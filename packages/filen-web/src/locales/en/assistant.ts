@@ -830,5 +830,41 @@ export const assistant = {
 	/** Formula helper — another cell was selected since asking; Insert is off. `cell` is where the formula was written for */
 	assistantFormulaCellChanged: "Select {{cell}} again to insert the formula there.",
 	/** Formula helper button — puts the formula into the formula bar, where Enter writes it to the cell */
-	assistantFormulaInsert: "Insert"
+	assistantFormulaInsert: "Insert",
+
+	// ── Slides: whole text boxes ──────────────────────────────────────────────
+	/** Slide context menu — submenu of what the assistant can do with the selected boxes or the slide */
+	assistantMenuAssistant: "Assistant",
+	/** Result over several text boxes — how many are done, e.g. "2 of 5" */
+	assistantShapeTransformProgress: "{{done}} of {{total}}",
+	/** Result — a box's name: a layout placeholder (title, body…), numbered in the slide's order */
+	assistantShapeTransformPlaceholder: "Placeholder {{n}}",
+	/** Result — a box's name: a text box, numbered in the slide's order */
+	assistantShapeTransformTextBox: "Text box {{n}}",
+	/** Result — a box's name: a shape with text, numbered in the slide's order */
+	assistantShapeTransformShape: "Shape {{n}}",
+	/** Result — the boxes left as they are; `boxes` lists them with the reason */
+	assistantShapeTransformSkipped: "Not changed: {{boxes}}",
+	/** Result — a box left out because it holds a field; `box` is its name */
+	assistantShapeTransformSkipField: "{{box}} (holds a slide number, date or equation)",
+	/** Result — a box left out because its text is too long; `box` is its name */
+	assistantShapeTransformSkipTooLong: "{{box}} (too long)",
+	/** Result — a box left out because it has no text; `box` is its name */
+	assistantShapeTransformSkipEmpty: "{{box}} (no text)",
+	/** Result — a box left out because its text could not be read; `box` is its name */
+	assistantShapeTransformSkipUnreadable: "{{box}} (couldn't be read)",
+	/** Result — a box's result failed or came back empty; Accept all is off. `box` is its name */
+	assistantShapeTransformRowFailed: "{{box}}: couldn't do this. Try again.",
+	/** Result — a box's result holds links or addresses its text did not; Accept all is off */
+	assistantShapeTransformRowLinks: "{{box}} adds links or addresses its text didn't have: {{links}}. It can't be applied.",
+	/** Result — a box's result stopped at its length limit; Accept all is off */
+	assistantShapeTransformRowTruncated: "{{box}}: the result was cut off, so it can't be applied.",
+	/** Result — a box was edited since asking; nothing was applied */
+	assistantShapeTransformChanged: "The slide changed since you asked. Try again for a new result.",
+	/** Result — applies every box's result as one change (one undo takes it back) */
+	assistantShapeTransformAcceptAll: "Accept all",
+	/** Toast — more boxes than one request takes; `count` is how many, `max` the most */
+	assistantShapeTransformTooMany: "That's {{count}} text boxes; the assistant changes up to {{max}} at a time. Select fewer boxes.",
+	/** Toast — nothing selected (or on the slide) holds text the assistant can change */
+	assistantShapeTransformNothing: "There's no text here the assistant can change."
 } as const

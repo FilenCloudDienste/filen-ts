@@ -85,6 +85,7 @@ export {
 	type RenderEffect,
 	type RenderEffects,
 	type SlideLayer,
+	type ShapeBodyKind,
 	type SlideMediaInfo,
 	type SlideRender,
 	type TextPage,
