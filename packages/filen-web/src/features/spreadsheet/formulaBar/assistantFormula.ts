@@ -6,7 +6,7 @@ import {
 	parseCellInput,
 	parseTsv,
 	rangeName,
-	writtenFormulaProblem,
+	checkWrittenFormula,
 	type SheetId,
 	type SheetLocale,
 	type SheetRange
@@ -143,28 +143,19 @@ export async function formulaRequestContext(
 	}
 }
 
-// The check a written formula passes: the app's (functions it calculates, references into this workbook, never the
-// target cell), then the engine's calculation, written to no cell. #NAME? means a name the workbook lacks.
+// The check a written formula passes (checkWrittenFormula): the app's (functions it calculates, references into this
+// workbook, never the target cell), then the session engine's calculation, written to no cell.
 export function formulaChecker(
 	model: SheetGridModel,
 	target: FormulaTarget
 ): (formula: string) => Promise<FormulaCheck<AssistantFormulaValue>> {
-	return async formula => {
-		const problem = writtenFormulaProblem(formula, {
-			sheets: target.sheets,
-			sheet: target.sheetName,
-			cell: { row: target.row, col: target.col }
-		})
-
-		if (problem !== null) return { ok: false, problem }
-
-		const result = await model.session
-			.query("formulaPreview", { sheet: target.sheet, formula })
-			.catch(() => ({ refused: "unavailable" as const }))
-
-		if ("refused" in result) return { ok: false, problem: { kind: "engine" } }
-		if (result.error && result.value === "#NAME?") return { ok: false, problem: { kind: "name" } }
-
-		return { ok: true, value: result }
-	}
+	return formula =>
+		checkWrittenFormula(
+			formula,
+			{ sheets: target.sheets, sheet: target.sheetName, cell: { row: target.row, col: target.col } },
+			written =>
+				model.session
+					.query("formulaPreview", { sheet: target.sheet, formula: written })
+					.catch(() => ({ refused: "unavailable" as const }))
+		)
 }
