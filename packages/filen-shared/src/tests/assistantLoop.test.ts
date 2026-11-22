@@ -2537,6 +2537,36 @@ describe("read_document extraction", () => {
 		expect(tool).not.toContain("page 3]")
 	})
 
+	it("names what the turn read and keeps the reply's links for a saved note while the shown reply defangs them", async () => {
+		const executor = new FakeExecutor({
+			items: [],
+			results: {
+				search_items: () => ({ results: [{ handle: "f1", name: "report.pdf" }] }),
+				read_document: () => ({
+					handle: "f1",
+					name: "report.pdf",
+					kind: "pdf",
+					units: 1,
+					range: "page 1 of 1",
+					content: [{ unit: 1, label: "page 1", text: "x" }]
+				})
+			}
+		})
+		const model = new ScriptedModel({
+			route: "files read",
+			steps: [
+				call("search_items", { query: "report" }),
+				call("read_document", { handle: "f1" }),
+				"Details at https://evil.example/q3​."
+			]
+		})
+		const { result } = await turn({ model, executor, message: "Summarize report.pdf" })
+
+		expect(result.readSources).toEqual([{ tool: "read_document", handle: "f1" }])
+		expect(result.noteText).toBe("Details at https://evil.example/q3.")
+		expect(result.reply).not.toContain("https://evil.example/q3")
+	})
+
 	// A 40-page report of about 900 characters a page: far more than one extraction reads.
 	const longReport = (truncated = false) => ({
 		handle: "f1",

@@ -419,6 +419,10 @@ export type AssistantTurnResult = {
 	historyReply: string
 	// For AssistantHistoryTurn.calls.
 	historyCalls: AssistantHistoryCall[]
+	// The content the turn read (file text, notes, chats), which its reply can be acted on from (actOnRead.ts).
+	readSources: AssistantReadSource[]
+	// The reply as a saved note holds it: without handles and invisible characters, its links as the model wrote them.
+	noteText: string
 	// The user's turn as the model read it, for AssistantHistoryTurn.prompt.
 	prompt: string
 	withheld: boolean
@@ -427,6 +431,26 @@ export type AssistantTurnResult = {
 	calls: AssistantToolCallRecord[]
 	unrecovered: boolean
 	stepCapHit: boolean
+}
+
+export type AssistantReadSource = {
+	tool: string
+	handle: string
+}
+
+// The reads of content that succeeded, once each.
+function readSources(calls: readonly AssistantToolCallRecord[]): AssistantReadSource[] {
+	const sources = new Map<string, AssistantReadSource>()
+
+	for (const record of calls) {
+		const handle = record.args["handle"]
+
+		if (record.status === "ok" && assistantToolByName(record.tool)?.untrustedOutput === "content" && typeof handle === "string") {
+			sources.set(`${record.tool}:${handle}`, { tool: record.tool, handle })
+		}
+	}
+
+	return [...sources.values()]
 }
 
 export class AssistantAbortError extends Error {
@@ -1800,6 +1824,17 @@ export async function runAssistantTurn({
 		reply: final.type === "reply" ? final.text : "",
 		historyReply: withheld ? "" : replyWithHandles(screen(answer, { handles: true }).text, handedOut),
 		historyCalls: withheld ? [] : ran,
+		readSources: withheld ? [] : readSources(calls),
+		// The shown reply before screening for display: what a saved note holds, links kept as written.
+		noteText: withheld
+			? ""
+			: sanitizeUntrustedText(
+					replyWithoutHandles(answer.replace(SPOTLIGHT_DELIMITER, ""), shownName, { foreign, invented }),
+					specialTokens,
+					{
+						keepJoiners: true
+					}
+				).trim(),
 		prompt,
 		withheld,
 		route,

@@ -140,7 +140,74 @@ function extensionOf(value: string): string | undefined {
 	return EXTENSION.exec(value.trim())?.[0].toLowerCase()
 }
 
+// Acting on what a turn read (Save as note, Draft reply): the user clicked a button under a reply that showed the
+// payload, which grounds its text. The call is built by code, never by the model from the read content.
+export type AssistantActOnReadAction = "save_note" | "draft_reply"
+
+export const ACT_ON_READ_TOOLS: Readonly<Record<AssistantActOnReadAction, string>> = {
+	save_note: "create_note",
+	draft_reply: "draft_chat_message"
+}
+
+export interface AssistantActOnReadGuard {
+	check(call: { tool: AssistantTool; args: Record<string, unknown> }): AssistantGuardDecision
+}
+
+// Keys in order, so two argument objects compare by content.
+function canonical(value: unknown): string {
+	return JSON.stringify(value, (_key, entry: unknown) =>
+		typeof entry === "object" && entry !== null && !Array.isArray(entry)
+			? Object.fromEntries(Object.entries(entry).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+			: entry
+	)
+}
+
 export class AssistantTurnGuard {
+	// The act-on-read mode: only the action's own tool, only with the code-built arguments; a draft only to a chat
+	// that was read, and never with a link or address the user did not type in the request that read it. A saved
+	// note keeps its links: it reaches no one else.
+	static actOnRead({
+		action,
+		args,
+		sources,
+		originUserMessage
+	}: {
+		action: AssistantActOnReadAction
+		args: Record<string, unknown>
+		// The handles of the chats (draft) or items (note) the turn read.
+		sources: readonly string[]
+		originUserMessage: string
+	}): AssistantActOnReadGuard {
+		const expected = canonical(args)
+
+		return {
+			check: ({ tool, args: called }) => {
+				if (tool.name !== ACT_ON_READ_TOOLS[action]) {
+					return { allowed: false, reason: "Only the action the user clicked can run." }
+				}
+
+				if (canonical(called) !== expected) {
+					return { allowed: false, reason: "The call differs from what the user was shown." }
+				}
+
+				if (action === "draft_reply") {
+					const chat = called["chat"]
+					const text = called["text"]
+
+					if (typeof chat !== "string" || !sources.includes(chat)) {
+						return { allowed: false, reason: "A reply goes only to the chat that was read." }
+					}
+
+					if (typeof text === "string" && foreignLinks({ text, userMessage: originUserMessage }).length > 0) {
+						return { allowed: false, reason: "The text holds a link or address that does not come from the user's message" }
+					}
+				}
+
+				return { allowed: true }
+			}
+		}
+	}
+
 	private readonly message: string
 	private readonly messageWords: string[]
 	private readonly messageStrictWords: string[]
