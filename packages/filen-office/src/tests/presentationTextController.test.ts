@@ -9,6 +9,7 @@ import { transferableLayout } from "../core/presentation/text/transfer"
 import { MeasureCache } from "../core/text/index"
 import type { CommandResult, PresentationSessionApi } from "../dom/presentation/protocol"
 import { TextEditController, TYPING_GROUP_MS } from "../react/presentation/edit/text/controller"
+import { replaceSlideText } from "../react/presentation/edit/text/replace"
 import { FakeMeasurer, testFont } from "./textFixtures"
 
 const CONTEXT: BodyContext = { listStyles: [], bodyPr: [], fonts: { color: () => rgba("000000"), typeface: typeface => typeface } }
@@ -336,5 +337,32 @@ describe("presentation text controller format", () => {
 		expect(format.run.sz).toBe(4400)
 		expect(format.run.latin?.typeface).toBe("Calibri")
 		expect(format.paragraph.algn).toBe("ctr")
+	})
+})
+
+describe("presentation text controller with a selection transform's replacement", () => {
+	it("sends the replacement as one setText of its own burst, after the typing before it", async () => {
+		const s = slowSession()
+		const controller = new TextEditController(
+			s.api,
+			seedOf(plain("Hello World")),
+			new MeasureCache(new FakeMeasurer()),
+			() => undefined
+		)
+
+		controller.dispatch(controller.state.tr.insertText("A", 1), true)
+
+		const tr = replaceSlideText(controller.state, { from: 1, to: controller.state.doc.content.size - 1 }, "Hallo Welt")
+
+		expect(tr).not.toBeNull()
+
+		if (tr !== null) controller.dispatch(tr)
+		await controller.flush()
+
+		const sets = s.ops.filter(op => op.family === "text" && op.kind === "setText")
+		const bursts = sets.map(op => (op.family === "text" && op.kind === "setText" ? op.burst : undefined))
+
+		expect(sets.map(textOf)).toEqual(["AHello World", "Hallo Welt"])
+		expect(bursts[1]).not.toBe(bursts[0])
 	})
 })

@@ -1,7 +1,7 @@
 import { Fragment, Slice, type Node, type ResolvedPos } from "prosemirror-model"
 import { AllSelection, TextSelection, type EditorState, type Transaction } from "prosemirror-state"
 import { canJoin } from "prosemirror-transform"
-import type { Action, Bullet, ParaProps, RunProps } from "../../model"
+import type { Action, Bullet, Paragraph, ParaProps, RunProps, TextBody } from "../../model"
 import { NO_ORIGIN, RUN_MARK, presentationTextSchema, runPropsOf } from "../../text/schema"
 import { presentationHref, xmlSafeText } from "../xmlText"
 
@@ -680,6 +680,21 @@ export function plainTextSlice(text: string, base: RunProps, endRPr: RunProps | 
 	})
 
 	return new Slice(Fragment.from(paragraphs), 1, 1)
+}
+
+// Plain text as a body of its own (speaker notes drafted for a slide): one paragraph per line, no paragraph or run
+// properties, so the body's master styles it; what XML cannot carry taken out.
+export function plainTextBody(text: string): TextBody {
+	const paragraphs: Paragraph[] = text
+		.replace(/\r\n?/gu, "\n")
+		.split("\n")
+		.map(line => {
+			const safe = xmlSafeText(line)
+
+			return { pPr: {}, runs: safe.length === 0 ? [] : [{ kind: "r", text: safe, rPr: {} }] }
+		})
+
+	return { bodyPr: {}, paragraphs }
 }
 
 // One word character's base, a whole code point (sticky: tested at lastIndex), and a mark. A mark (Thai vowels and

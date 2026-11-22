@@ -70,6 +70,7 @@ export { OBJECT_COMMANDS, type ObjectCommand, type ObjectKeyBindings } from "./e
 export { PresentationTextEditor, type PresentationTextEditorProps, type TextEditorLabels } from "./edit/text/TextEditor"
 export { TextEditController, COMMIT_IDLE_MS, type TextEditFormat } from "./edit/text/controller"
 export { createTextEditing, formatShapesOp, useTextEditing, type TextEditing } from "./edit/text/editing"
+export { bodyPlainText, replaceBodyText, replaceSlideText, slidePlainRange, slideRangeText, type TextRange } from "./edit/text/replace"
 export {
 	disposeFormatPainter,
 	formatPainterOf,

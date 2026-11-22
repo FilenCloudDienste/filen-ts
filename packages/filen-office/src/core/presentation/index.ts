@@ -263,6 +263,7 @@ export {
 	effectiveRunProps,
 	mapParaProps,
 	mapRunProps,
+	plainTextBody,
 	selectionParaProps,
 	selectionRunProps,
 	setBullet,
