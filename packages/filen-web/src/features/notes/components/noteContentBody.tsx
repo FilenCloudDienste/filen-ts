@@ -57,6 +57,7 @@ function BodyByType({
 			return (
 				<RichTextEditor
 					key={controller.remountKey}
+					note={note}
 					controller={controller}
 				/>
 			)
@@ -64,6 +65,7 @@ function BodyByType({
 			return (
 				<ChecklistEditor
 					key={controller.remountKey}
+					note={note}
 					controller={controller}
 					hideCompleted={hideCompletedChecklist}
 				/>

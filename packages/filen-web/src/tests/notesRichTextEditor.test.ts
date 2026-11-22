@@ -9,6 +9,7 @@ import { act, cleanup, render } from "@testing-library/react"
 import Quill from "quill"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
+import { mockNote } from "@/tests/fixtures/notes"
 import {
 	shouldPropagateRichChange,
 	seedRichEditor,
@@ -22,7 +23,11 @@ import {
 	EMPTY_RICH_FORMATS
 } from "@/features/notes/components/editor/richTextEditor.logic"
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+// The i18n plugin too: the editor publishes the open note, whose reader reaches the app's i18n setup.
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
+	initReactI18next: { type: "3rdParty", init: () => undefined }
+}))
 
 const { RichTextEditor } = await import("@/features/notes/components/editor/richTextEditor")
 const { registerAction } = await import("@/lib/keymap/registry")
@@ -156,7 +161,7 @@ function mountEditor(seed: string): Quill {
 		sizeReached: false,
 		onChange: () => undefined
 	}
-	const { container } = render(createElement(RichTextEditor, { controller }))
+	const { container } = render(createElement(RichTextEditor, { note: mockNote({ noteType: "rich" }), controller }))
 	const node = container.querySelector(".ql-container")
 	const quill = node ? Quill.find(node) : null
 

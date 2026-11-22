@@ -11,6 +11,7 @@ import { registerAllActions } from "@/lib/keymap/actions"
 import { ChecklistEditor } from "@/features/notes/components/editor/checklistEditor"
 import { serializeChecklist } from "@/features/notes/components/editor/checklistEditor.logic"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
+import { mockNote } from "@/tests/fixtures/notes"
 
 registerAllActions()
 
@@ -33,7 +34,13 @@ function seedOf(rows: { checked: boolean; content: string }[]): string {
 function renderEditor(seed: string, hideCompleted = false) {
 	const onChange = vi.fn<(value: string) => void>()
 
-	render(createElement(ChecklistEditor, { controller: controllerFor(seed, onChange), hideCompleted }))
+	render(
+		createElement(ChecklistEditor, {
+			note: mockNote({ noteType: "checklist" }),
+			controller: controllerFor(seed, onChange),
+			hideCompleted
+		})
+	)
 
 	return onChange
 }

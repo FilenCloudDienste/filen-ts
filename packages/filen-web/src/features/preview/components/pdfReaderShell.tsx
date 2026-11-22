@@ -6,6 +6,7 @@ import { PdfPages, usePdfViewer, type PdfDomDocument } from "@filen/office/react
 import { PDFJS } from "@/features/preview/lib/pdfjsModule"
 import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
 import { pdfDocumentReader } from "@/features/preview/lib/documentReaders"
+import { elementSelection } from "@/lib/activeDocument"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePdfFullReadGuard } from "@/features/preview/hooks/usePdfFullReadGuard"
 import { usePdfScrollRoom } from "@/features/preview/hooks/usePdfScrollRoom"
@@ -141,6 +142,13 @@ export function PdfReaderShell({
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
 	const finder = viewer.finder
+	const scroller = viewer.pages.scrollerRef
+	// The text selected in the pages' text layer.
+	const [selection] = useState(elementSelection)
+
+	useEffect(() => {
+		selection.attach(scroller.current)
+	})
 
 	// The pages' text as find reads and keeps it: the editor's document (its changes and applied OCR) once it took over.
 	usePublishPreviewDocument(
@@ -148,7 +156,7 @@ export function PdfReaderShell({
 			? {
 					kind: "pdf",
 					position: { page: state.page, pages: document.numPages },
-					selection: null,
+					selection: selection.reader,
 					editable: edit?.toolContext.editable === true,
 					reader: pdfDocumentReader(document.numPages, async page => (await finder.pageText(page)).text)
 				}
@@ -187,7 +195,6 @@ export function PdfReaderShell({
 	const pagesResized = useEffectEvent((width: number, height: number) => {
 		onPagesResize?.(width, height)
 	})
-	const scroller = viewer.pages.scrollerRef
 	const scrollRoom = usePdfScrollRoom(scroller)
 
 	useEffect(() => {

@@ -4,6 +4,7 @@ import { itemTypeExtension, codeMirrorLanguageFor } from "@/features/drive/lib/p
 import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import { usePreviewTextDocument } from "@/features/preview/hooks/usePreviewTextDocument"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
+import { useCodeMirrorTransformHost } from "@/features/preview/lib/codeMirrorTransformHost"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -43,8 +44,10 @@ export interface TextViewerProps {
 // No parameter defaults: the React Compiler skips a component that has them.
 export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: TextViewerProps) {
 	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
+	// The editor's selection, for the open document.
+	const { host, onView } = useCodeMirrorTransformHost()
 
-	usePreviewTextDocument(text, contentRef, editable === true, true)
+	usePreviewTextDocument(text, contentRef, editable === true, true, host)
 	useLeaveViewerFullScreen()
 
 	switch (text.status) {
@@ -83,6 +86,7 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 					locked={locked ?? false}
 					onDirtyChange={onDirtyChange}
 					contentRef={contentRef}
+					onView={onView}
 				/>
 			)
 	}

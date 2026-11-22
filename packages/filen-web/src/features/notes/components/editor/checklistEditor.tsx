@@ -8,6 +8,8 @@ import { serializeChecklist, visibleChecklistRows } from "@/features/notes/compo
 import { textFieldTransform } from "@/features/assistant/transform/host"
 import { SelectionTransform } from "@/features/assistant/transform/selectionTransform"
 import { useLatestRef } from "@/lib/useLatestRef"
+import { usePublishNoteDocument } from "@/features/notes/hooks/usePublishNoteDocument"
+import type { Note } from "@filen/sdk-rs"
 
 // Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
 // leading toggle. Enter on a non-empty row appends a row and focuses it; Backspace on an empty row
@@ -20,9 +22,11 @@ import { useLatestRef } from "@/lib/useLatestRef"
 // initializer, never via a hydration effect that writes-then-propagates, so every onChange call
 // originates from a genuine user event and none is spurious.
 export function ChecklistEditor({
+	note,
 	controller,
 	hideCompleted: hideCompletedProp
 }: {
+	note: Note
 	controller: NoteEditorController
 	// "Hide completed items" filters checked rows out of the RENDER only; the underlying `rows` state
 	// (and every edit handler below, which all look up by id against the full array) is untouched by this.
@@ -43,6 +47,8 @@ export function ChecklistEditor({
 	// browser's own insertText (its onChange commits as typing does), else committed directly.
 	const [transform] = useState(textFieldTransform)
 	const [root, setRoot] = useState<HTMLDivElement | null>(null)
+
+	usePublishNoteDocument(note, transform.host)
 	const contentChangeRef = useLatestRef(handleContentChange)
 
 	function attachTransform(id: string, element: HTMLInputElement): void {

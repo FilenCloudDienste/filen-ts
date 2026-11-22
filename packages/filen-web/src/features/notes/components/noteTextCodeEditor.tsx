@@ -1,6 +1,7 @@
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { useCodeMirrorTransformHost } from "@/features/preview/lib/codeMirrorTransformHost"
 import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
+import { usePublishNoteDocument } from "@/features/notes/hooks/usePublishNoteDocument"
 import { codeMirrorTagForNote } from "@/features/notes/components/reader/reader.logic"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import type { Note } from "@filen/sdk-rs"
@@ -12,6 +13,8 @@ import type { Note } from "@filen/sdk-rs"
 // The assistant's selection transform edits through the view; its edits reach the outbox as typing does.
 export function NoteTextCodeEditor({ note, controller }: { note: Note; controller: NoteEditorController }) {
 	const { host, onView } = useCodeMirrorTransformHost()
+
+	usePublishNoteDocument(note, host)
 
 	return (
 		<SelectionTransformRoot

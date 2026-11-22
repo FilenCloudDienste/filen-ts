@@ -60,7 +60,7 @@ import { insertSheetBefore } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { SheetStatusBar } from "@/features/spreadsheet/components/sheetStatusBar"
 import { CircularWarning } from "@/features/spreadsheet/components/circularWarning"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
-import { sheetDocumentReader } from "@/features/spreadsheet/lib/sheetDocumentReader"
+import { sheetDocumentReader, sheetSelectionReader } from "@/features/spreadsheet/lib/sheetDocumentReader"
 import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { isLegacySheetKind } from "@/features/spreadsheet/lib/sheetKind"
@@ -234,14 +234,24 @@ export function SheetBody({
 	// The sheets a reader may read (a very hidden sheet is the file's machinery, not content the user sees).
 	const readable = grid.sheets.filter(sheet => sheet.state !== "veryHidden")
 
+	// The selected cells, read when the selection changes (its size) and when a reader asks (its text).
+	const [selection] = useState(() => sheetSelectionReader(handle.session))
+
 	// Each sheet's cells through the session's read-only text query, cut in the worker.
-	usePublishPreviewDocument({
+	const selectionChanged = usePublishPreviewDocument({
 		kind: "sheet",
 		position: { sheet: sheetName, sheets: readable.map(sheet => sheet.name) },
-		selection: null,
+		selection: selection.reader,
 		editable: canEdit,
 		reader: sheetDocumentReader(handle.session, readable)
 	})
+	const selectedSheet = grid.sheet
+	const selectedRanges = grid.selection.ranges
+
+	useEffect(() => {
+		selection.set({ sheet: selectedSheet, ranges: selectedRanges })
+		selectionChanged()
+	}, [selection, selectedSheet, selectedRanges, selectionChanged])
 
 	// A chartsheet or dialog sheet has no cells; a macro sheet's are shown, not edited (the session refuses both).
 	const cellless = celllessSheet(grid)

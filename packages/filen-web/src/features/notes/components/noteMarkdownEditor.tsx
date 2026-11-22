@@ -3,6 +3,7 @@ import { IN_EDITORS, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { useCodeMirrorTransformHost } from "@/features/preview/lib/codeMirrorTransformHost"
 import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
+import { usePublishNoteDocument } from "@/features/notes/hooks/usePublishNoteDocument"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { MarkdownSplitPane } from "@/features/notes/components/markdownSplitPane"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
@@ -30,6 +31,8 @@ export function NoteMarkdownEditor({ note, controller }: { note: Note; controlle
 	const latestValueRef = useRef(controller.seed)
 	const previewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 	const { host, onView } = useCodeMirrorTransformHost()
+
+	usePublishNoteDocument(note, host)
 
 	useEffect(() => {
 		return () => {

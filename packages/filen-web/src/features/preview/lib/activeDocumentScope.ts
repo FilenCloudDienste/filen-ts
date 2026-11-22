@@ -22,10 +22,10 @@ export function previewDocumentItem(item: DriveItem, variant: DriveVariant): Dri
 }
 
 // Publishes the viewer's document for the file the overlay shows; an archive's entry (bytes from the archive, not a
-// drive file) publishes nothing.
-export function usePublishPreviewDocument(publication: ActiveDocumentPublication | null): void {
+// drive file) publishes nothing. Returns what an editor drawing its own selection calls on a selection change.
+export function usePublishPreviewDocument(publication: ActiveDocumentPublication | null): () => void {
 	const item = useContext(PreviewDocumentContext)
 	const entry = useProvidedPreviewOrigin()
 
-	usePublishActiveDocument(entry === null ? item : null, publication)
+	return usePublishActiveDocument(entry === null ? item : null, publication)
 }

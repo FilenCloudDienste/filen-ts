@@ -1,3 +1,5 @@
+import type { SelectionReader } from "@/lib/activeDocument"
+
 // An editor's side of the selection transform, implemented beside each editor (CodeMirror, Quill, a text field, the
 // Word document editor). The transform UI reads the selection through it and applies the result through it, as one
 // step of the editor's own undo. Also what reads the selection for the assistant's document context.
@@ -21,7 +23,11 @@ export interface TransformSelection {
 	rect(): DOMRect | null
 }
 
-export interface TransformHost {
+// The selection reader (selectedChars, selectedText) reads read-only editors too: what the assistant's document
+// context says is selected, never copied for the size where the editor can count it.
+export interface TransformHost extends SelectionReader {
+	selectedChars(): number
+	selectedText(maxChars: number): string
 	// The selection now. Null when nothing is selected (or the editor cannot be edited); "unsupported" for one the
 	// editor cannot replace as plain text (a table, a field, several checklist items).
 	selection(): TransformSelection | "unsupported" | null
@@ -57,8 +63,25 @@ export function textFieldTransform(): { host: TransformHost; attach: (field: Tex
 	let field: TextField | null = null
 	let write: TextFieldWrite = () => undefined
 	const attached = () => (field?.isConnected === true ? field : null)
+	const selected = (): { start: number; end: number; element: TextField } | null => {
+		const element = attached()
+		const start = element?.selectionStart ?? 0
+		const end = element?.selectionEnd ?? start
+
+		return element === null || start === end ? null : { start, end, element }
+	}
 
 	const host: TransformHost = {
+		selectedChars: () => {
+			const range = selected()
+
+			return range === null ? 0 : range.end - range.start
+		},
+		selectedText: maxChars => {
+			const range = selected()
+
+			return range === null ? "" : range.element.value.slice(range.start, Math.min(range.end, range.start + maxChars + 1))
+		},
 		selection: () => {
 			const element = attached()
 

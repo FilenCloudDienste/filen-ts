@@ -935,7 +935,6 @@ function DocxPageList({
 			: {
 					kind: "docx",
 					position: { page: state.page + 1, pages: state.pageCount },
-					selection: null,
 					editable: false,
 					reader: docxDocumentReader(document)
 				}

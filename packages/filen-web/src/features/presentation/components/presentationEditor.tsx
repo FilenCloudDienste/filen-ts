@@ -492,7 +492,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const count = deck.slides.length
 	const index = editor.current
 
-	usePresentationActiveDocument(deck, index, editor.editable)
+	usePresentationActiveDocument(deck, index, editor.editable, text)
 
 	const ref: SlideRef | undefined = editor.currentRef
 	const render = ref === undefined ? undefined : deck.renders.get(ref)

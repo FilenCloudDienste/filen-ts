@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
+import type { EditorView } from "@codemirror/view"
 import { isCodeLanguageId, type CodeLanguageId } from "@filen/office/core/code"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { CodeCommandBar, type MarkdownBar } from "@/features/preview/components/codeCommandBar"
@@ -37,6 +38,8 @@ export interface CodeSurfaceProps {
 	markdown?: MarkdownBar | undefined
 	// The status bar's encoding menu (Reopen with, Convert to UTF-8).
 	encoding?: TextEncodingControls | undefined
+	// The editor's view as it is created and gone (null): its selection's reader (CodeMirrorSource's own prop).
+	onView?: ((view: EditorView | null) => void) | undefined
 }
 
 // "12" or "12:5" (line, column), within the file.
@@ -61,7 +64,8 @@ export function CodeSurface({
 	contentRef,
 	autoFocus,
 	markdown,
-	encoding
+	encoding,
+	onView
 }: CodeSurfaceProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const settings = useCodeViewSettings()
@@ -306,6 +310,7 @@ export function CodeSurface({
 					onDirtyChange={setDirty}
 					// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely.
 					{...(contentRef !== undefined ? { contentRef } : {})}
+					{...(onView !== undefined ? { onView } : {})}
 				/>
 			</div>
 			<InputDialog

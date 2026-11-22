@@ -78,7 +78,6 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 			? {
 					kind: "text",
 					position: {},
-					selection: null,
 					editable: false,
 					reader: pagerDocumentReader(reading.start, (from, continuation, count) =>
 						pager.run(remote => remote.after(from, continuation, count, null))

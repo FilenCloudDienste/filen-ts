@@ -209,3 +209,58 @@ describe("Quill host", () => {
 		expect(selection.replace("1")).toBeNull()
 	})
 })
+
+// The hosts double as the open document's selection reader: a size without copying where the editor can count, the
+// text on demand, read-only editors included.
+describe("hosts as selection readers", () => {
+	it("a text field: the selected span, nothing for a caret", () => {
+		const element = document.createElement("input")
+		const transform = textFieldTransform()
+
+		element.value = "hello world"
+		element.readOnly = true
+		document.body.append(element)
+		transform.attach(element, () => undefined)
+		element.setSelectionRange(6, 11)
+		expect(transform.host.selectedChars()).toBe(5)
+		expect(transform.host.selectedText(100)).toBe("world")
+		element.setSelectionRange(3, 3)
+		expect(transform.host.selectedChars()).toBe(0)
+		expect(transform.host.selectedText(100)).toBe("")
+	})
+
+	it("CodeMirror: the main range, a read-only view too, read no further than asked", () => {
+		const locked = new EditorView({
+			parent: document.body,
+			state: EditorState.create({
+				doc: "abcdefgh",
+				selection: EditorSelection.single(1, 7),
+				extensions: [EditorState.readOnly.of(true)]
+			})
+		})
+		const host = codeMirrorTransformHost(() => locked)
+
+		expect(host.selectedChars()).toBe(6)
+		expect(host.selectedText(100)).toBe("bcdefg")
+		// One past the room, so the reader's cut (which keeps surrogate pairs whole) decides.
+		expect(host.selectedText(2)).toBe("bcd")
+		locked.destroy()
+		expect(codeMirrorTransformHost(() => null).selectedChars()).toBe(0)
+	})
+
+	it("Quill: the last selection while the editor reports none (focus moved to the assistant)", () => {
+		const container = document.createElement("div")
+
+		document.body.append(container)
+
+		const editor = new Quill(container, { modules: { toolbar: false } })
+		const transform = quillTransformHost()
+
+		editor.setText("one two three\n", "silent")
+		transform.attach(editor)
+		editor.setSelection(4, 3, "user")
+		vi.spyOn(editor, "getSelection").mockReturnValue(null)
+		expect(transform.host.selectedChars()).toBe(3)
+		expect(transform.host.selectedText(100)).toBe("two")
+	})
+})

@@ -31,7 +31,16 @@ export function quillTransformHost(): { host: TransformHost; attach: (quill: Qui
 	// Counts every change of the text, so a selection taken earlier knows whether it still holds.
 	let revision = 0
 
+	// The selection, or the last one while the editor is not focused (the user turned to the assistant).
+	const range = (): Range | null => quill?.getSelection() ?? last
+
 	const host: TransformHost = {
+		selectedChars: () => range()?.length ?? 0,
+		selectedText: maxChars => {
+			const selected = range()
+
+			return quill === null || selected === null ? "" : quill.getText(selected.index, Math.min(selected.length, maxChars + 1))
+		},
 		selection: () => {
 			const editor = quill
 			const range = editor?.getSelection() ?? last

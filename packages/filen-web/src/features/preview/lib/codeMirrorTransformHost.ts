@@ -17,9 +17,25 @@ function viewRect(view: EditorView, from: number, to: number): DOMRect | null {
 }
 
 // The selection transform's side of a CodeMirror editor (CodeMirrorSource's onView): the main selection range, replaced
-// as an undo step of its own.
+// as an undo step of its own; read (not replaced) in a read-only view too.
 export function codeMirrorTransformHost(view: () => EditorView | null): TransformHost {
 	return {
+		selectedChars: () => {
+			const main = view()?.state.selection.main
+
+			return main === undefined ? 0 : main.to - main.from
+		},
+		selectedText: maxChars => {
+			const state = view()?.state
+
+			if (state === undefined) {
+				return ""
+			}
+
+			const { from, to } = state.selection.main
+
+			return state.doc.sliceString(from, Math.min(to, from + maxChars + 1))
+		},
 		selection: () => {
 			const current = view()
 

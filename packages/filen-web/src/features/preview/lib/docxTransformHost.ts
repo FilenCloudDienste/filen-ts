@@ -34,7 +34,18 @@ export function docxTransform(): {
 	let editor: PagedEditor | undefined
 	let view: DocxTransformView | null = null
 
+	// The selected text of the story being edited, whatever it holds (a table's cells as lines), list numbers left out.
+	const selectedText = (): string => {
+		const selection = editor?.selection()
+
+		return editor === undefined || selection === undefined || selection.empty
+			? ""
+			: plainText(editor.state.doc, selection.from, selection.to, () => "", editor.view)
+	}
+
 	const host: TransformHost = {
+		selectedChars: () => selectedText().length,
+		selectedText,
 		selection: () => {
 			const current = editor
 			const selection = current?.selection()

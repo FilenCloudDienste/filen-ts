@@ -21,6 +21,8 @@ import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
 import { quillTransformHost } from "@/features/notes/components/editor/richTextTransformHost"
+import { usePublishNoteDocument } from "@/features/notes/hooks/usePublishNoteDocument"
+import type { Note } from "@filen/sdk-rs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -98,7 +100,7 @@ function ToolbarButton({
 // instance directly (no WebView bridge). A custom React toolbar calls quill.format(...) and reflects
 // active formats from the selection. The CALLER keys this on controller.remountKey so the seed freezes
 // at mount and only a real reseed remounts it (the EDITOR INVARIANT).
-export function RichTextEditor({ controller }: { controller: NoteEditorController }) {
+export function RichTextEditor({ note, controller }: { note: Note; controller: NoteEditorController }) {
 	const { t } = useTranslation("notes")
 	const editorRef = useRef<HTMLDivElement | null>(null)
 	const quillRef = useRef<Quill | null>(null)
@@ -116,6 +118,8 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 	const [linkUrl, setLinkUrl] = useState("")
 	// The assistant's selection transform: its host follows the Quill instance (attached at construction).
 	const [transform] = useState(quillTransformHost)
+
+	usePublishNoteDocument(note, transform.host)
 
 	// #40 enforcement: re-apply read-only when the prop flips (the editor only mounts writable today, but
 	// this keeps a mid-session flip from ever accepting edits that would wedge sync).

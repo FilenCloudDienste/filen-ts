@@ -1,17 +1,13 @@
 import type { PresentationSessionApi } from "@filen/office/dom/presentation"
-import { noSelection, type DocumentReader } from "@/lib/activeDocument"
+import type { UnitReader } from "@/lib/activeDocument"
 import { DocumentTextBuilder, unitRange } from "@/lib/documentText"
 
 // A deck's slides for a reader (activeDocument.ts): each slide's text and speaker notes through the session's
 // read-only "text" request (no edit state), cut in the worker at the characters asked for.
-export function slidesDocumentReader(session: Pick<PresentationSessionApi, "text">, slides: number): DocumentReader {
+export function slidesDocumentReader(session: Pick<PresentationSessionApi, "text">, slides: number): UnitReader {
 	return {
 		units: () => Promise.resolve(slides),
 		text: async (range, signal, maxChars) => {
-			if (range === "selection") {
-				return noSelection()
-			}
-
 			const builder = new DocumentTextBuilder(maxChars)
 			const span = unitRange(range, slides)
 

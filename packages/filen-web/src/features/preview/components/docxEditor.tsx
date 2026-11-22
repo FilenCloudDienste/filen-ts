@@ -158,6 +158,7 @@ import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { IN_EDITORS, IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { docxTransform } from "@/features/preview/lib/docxTransformHost"
+import { DocxEditDocument } from "@/features/preview/components/docxEditDocument"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import type { TransformSelection } from "@/features/assistant/transform/host"
 import { transformOffered } from "@/features/assistant/transform/transform.logic"
@@ -2479,6 +2480,12 @@ export function DocxEditView({
 					/>
 				)}
 			</div>
+			<DocxEditDocument
+				editor={editor}
+				pages={pages}
+				selection={transformHost}
+				editable={!readOnly}
+			/>
 			<DocxWordCountDialog
 				editor={editor}
 				store={wordStore}

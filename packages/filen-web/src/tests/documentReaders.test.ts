@@ -3,12 +3,26 @@ import { LINE_INTS } from "@filen/office/core/text"
 import type { DocxDocument } from "@filen/office/react/docx"
 import type { SheetSessionApi } from "@filen/office/core/sheet"
 import { DocumentTextBuilder, unitRange } from "@/lib/documentText"
-import { docxDocumentReader, pagerDocumentReader, pdfDocumentReader, textDocumentReader } from "@/features/preview/lib/documentReaders"
+import type { PagedEditor } from "@filen/office/core/docx/paged"
+import type { TextEditing } from "@filen/office/react/presentation"
+import {
+	docxDocumentReader,
+	docxEditDocumentReader,
+	pagerDocumentReader,
+	pdfDocumentReader,
+	textDocumentReader
+} from "@/features/preview/lib/documentReaders"
 import { heldText } from "@/features/preview/hooks/usePreviewTextDocument"
 import type { PagerRowView } from "@/features/preview/workers/textPager.worker"
 import type { TextBuffer, TextFile } from "@/features/preview/lib/textFile"
-import { sheetDocumentReader } from "@/features/spreadsheet/lib/sheetDocumentReader"
+import { SHEET_SELECTION_COUNT_MAX, sheetDocumentReader, sheetSelectionReader } from "@/features/spreadsheet/lib/sheetDocumentReader"
 import { slidesDocumentReader } from "@/features/presentation/lib/slidesDocumentReader"
+import { slideTextSelection } from "@/features/presentation/hooks/usePresentationActiveDocument"
+
+// The editor's plain text over the body (its marker first), here over a string standing for the body.
+vi.mock("@filen/office/react/docx/editor", () => ({
+	plainText: (doc: string, from: number, to: number, marker: (pos: number) => string) => marker(from) + doc.slice(from, to)
+}))
 
 // The readers the viewers publish as the open document: each reads its engine's held state for the units asked for,
 // labels where each starts, and stops at the characters asked for.
@@ -40,14 +54,13 @@ describe("the document text builder", () => {
 })
 
 describe("the PDF reader", () => {
-	it("reads the pages asked for through the viewer's page text, and nothing for a selection", async () => {
+	it("reads the pages asked for through the viewer's page text", async () => {
 		const pageText = vi.fn((page: number) => Promise.resolve(`text ${String(page)}`))
 		const reader = pdfDocumentReader(41, pageText)
 
 		expect(await reader.units()).toBe(41)
 		expect((await reader.text({ from: 40, to: 99 }, signal(), 1000)).text).toBe("text 40\n\ntext 41")
 		expect(pageText.mock.calls).toEqual([[40], [41]])
-		expect(await reader.text("selection", signal(), 1000)).toEqual({ text: "", units: [], truncated: false })
 	})
 
 	it("stops reading pages once full, and gives up on an aborted read", async () => {
@@ -195,5 +208,84 @@ describe("the slides reader", () => {
 			truncated: false
 		})
 		expect(text).toHaveBeenCalledWith(1, 2, 500)
+	})
+})
+
+describe("the Word document editor's reader", () => {
+	// The body as a string: plainText (mocked above) slices it.
+	function editor(settled: boolean): PagedEditor {
+		const ranges = [{ from: 0, to: 4 }, { from: 2, to: 8 }, undefined]
+
+		return {
+			pageCount: 3,
+			settled,
+			view: 0,
+			body: {
+				session: { state: { doc: "AAAABBBBCCCC" } },
+				geometry: { pageRange: (index: number) => ranges[index], markerText: (pos: number) => (pos === 0 ? "1.\t" : "") }
+			}
+		} as unknown as PagedEditor
+	}
+
+	it("reads the body by page, a paragraph across a page break on its first page only, list numbers as drawn", async () => {
+		const reader = docxEditDocumentReader(editor(true))
+
+		expect(await reader.units()).toBe(3)
+		expect(await reader.text({ from: 1, to: 2 }, signal(), 100)).toEqual({
+			text: "1.\tAAAA\n\nBBBB",
+			units: [
+				{ label: "page 1", start: 0 },
+				{ label: "page 2", start: 9 }
+			],
+			truncated: false
+		})
+	})
+
+	it("says a read to the last page was cut short while layout is still behind", async () => {
+		const read = await docxEditDocumentReader(editor(false)).text({ from: 3, to: 3 }, signal(), 100)
+
+		expect(read).toEqual({ text: "", units: [{ label: "page 3", start: 0 }], truncated: true })
+	})
+})
+
+describe("the spreadsheet's selection", () => {
+	it("is nothing for the cursor's one cell, asked of the worker for a range, ranges a blank line apart", async () => {
+		const query = vi.fn((_name: "text", request: { range?: { startRow: number }; maxChars: number }) =>
+			Promise.resolve({ text: `rows from ${String(request.range?.startRow)}`, truncated: false })
+		)
+		const { reader, set } = sheetSelectionReader({ query } as unknown as Pick<SheetSessionApi, "query">)
+
+		expect(await reader.selectedChars(signal())).toBe(0)
+		set({ sheet: 0, ranges: [{ startRow: 2, startCol: 2, endRow: 2, endCol: 2 }] })
+		expect(await reader.selectedChars(signal())).toBe(0)
+		expect(query).not.toHaveBeenCalled()
+
+		set({
+			sheet: 0,
+			ranges: [
+				{ startRow: 0, startCol: 0, endRow: 3, endCol: 1 },
+				{ startRow: 7, startCol: 0, endRow: 7, endCol: 0 }
+			]
+		})
+		expect(await reader.selectedText(100, signal())).toBe("rows from 0\n\nrows from 7")
+		expect(query.mock.calls.map(call => call[1].maxChars)).toEqual([100, 87])
+		query.mockClear()
+		expect(await reader.selectedChars(signal())).toBe(24)
+		expect(query.mock.calls[0]?.[1].maxChars).toBe(SHEET_SELECTION_COUNT_MAX)
+	})
+})
+
+describe("a slide's text selection", () => {
+	it("reads the body being edited, paragraphs as lines, and nothing without one or with a caret", () => {
+		const textBetween = vi.fn(() => "Title\nBody")
+		const editing = { active: { state: { selection: { empty: false, from: 1, to: 11 }, doc: { textBetween } } } }
+		const reader = slideTextSelection(editing as unknown as TextEditing)
+
+		expect(reader.selectedChars(signal())).toBe(10)
+		expect(reader.selectedText(100, signal())).toBe("Title\nBody")
+		expect(textBetween).toHaveBeenCalledWith(1, 11, "\n")
+		editing.active.state.selection.empty = true
+		expect(reader.selectedChars(signal())).toBe(0)
+		expect(slideTextSelection({ active: undefined } as unknown as TextEditing).selectedText(100, signal())).toBe("")
 	})
 })

@@ -3,6 +3,8 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewTextFile, type TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import { usePreviewTextDocument } from "@/features/preview/hooks/usePreviewTextDocument"
 import type { TextBuffer, TextFile } from "@/features/preview/lib/textFile"
+import { useCodeMirrorTransformHost } from "@/features/preview/lib/codeMirrorTransformHost"
+import { elementSelection } from "@/lib/activeDocument"
 import { CodeSurface } from "@/features/preview/components/codeSurface"
 import {
 	MarkdownRenderedBar,
@@ -73,9 +75,6 @@ export function RenderedSourceViewer({
 	publishes
 }: RenderedSourceViewerProps) {
 	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
-
-	usePreviewTextDocument(text, contentRef, editable === true, publishes === true)
-
 	const download = usePreviewDownload()
 
 	useLeaveViewerFullScreen()
@@ -128,6 +127,14 @@ export function RenderedSourceViewer({
 	// The rendered pane: the host's own focus stop, so Escape and F6 land somewhere whatever the renderer draws. Null in
 	// Source, whose editor surface answers both keys itself.
 	const renderedRef = useRef<HTMLDivElement>(null)
+	// The selection for the open document: the source editor's, or the rendered pane's text.
+	const { host: sourceSelection, onView } = useCodeMirrorTransformHost()
+	const [rendered] = useState(elementSelection)
+
+	useEffect(() => {
+		rendered.attach(renderedRef.current)
+	})
+	usePreviewTextDocument(text, contentRef, editable === true, publishes === true, mode === "source" ? sourceSelection : rendered.reader)
 
 	// The renderer's top document when it is focusable itself (markdown's), else the pane. Only the first document
 	// counts: one nested in a non-focusable document (a notebook's markdown cell) is not the landing.
@@ -211,6 +218,7 @@ export function RenderedSourceViewer({
 					markdown={bar}
 					onDirtyChange={onDirtyChange}
 					contentRef={contentRef}
+					onView={onView}
 				/>
 			) : (
 				<>

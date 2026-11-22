@@ -154,7 +154,9 @@ describe("React Compiler coverage", () => {
 			["src/lib/activeDocument.ts", "usePublishActiveDocument"],
 			["src/features/preview/lib/activeDocumentScope.ts", "usePublishPreviewDocument"],
 			["src/features/preview/hooks/usePreviewTextDocument.ts", "usePreviewTextDocument"],
-			["src/features/presentation/hooks/usePresentationActiveDocument.ts", "usePresentationActiveDocument"]
+			["src/features/presentation/hooks/usePresentationActiveDocument.ts", "usePresentationActiveDocument"],
+			["src/features/notes/hooks/usePublishNoteDocument.ts", "usePublishNoteDocument"],
+			["src/features/preview/components/docxEditDocument.tsx", "DocxEditDocument"]
 		] as const) {
 			const events = compile(file)
 

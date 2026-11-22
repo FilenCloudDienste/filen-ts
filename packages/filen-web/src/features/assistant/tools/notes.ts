@@ -16,7 +16,7 @@ import { isNoteUndecryptable, sortNotes, tagDisplayName } from "@/features/notes
 import { filterNotesByBlockedOwner } from "@/features/notes/components/notesSidebar.logic"
 import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
 import { noteIsEditing, useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
-import { checklistToMarkdown } from "@/features/notes/lib/export.logic"
+import { notePlainText } from "@/features/notes/lib/notePlainText"
 import { tabNoteContent } from "@/features/notes/lib/tabEditors"
 import { assistantRouter, navigateChecked } from "@/features/assistant/tools/navigation"
 import {
@@ -56,29 +56,6 @@ async function resolveNote(scope: ToolScope, handle: string): Promise<Note> {
 	}
 
 	return note
-}
-
-// Block breaks become line breaks, then the markup goes: what the reader would show, as plain text.
-function richTextToPlain(html: string): string {
-	const marked = html.replace(/<\/(p|li|h[1-6]|div|blockquote|pre)>|<br\s*\/?>/gi, "$&\n")
-
-	return new DOMParser()
-		.parseFromString(marked, "text/html")
-		.body.textContent.replace(/\n{3,}/g, "\n\n")
-		.trim()
-}
-
-function plainContent(note: Note, content: string): string {
-	switch (note.noteType) {
-		case "rich":
-			return richTextToPlain(content)
-		case "checklist":
-			return checklistToMarkdown(content)
-		case "text":
-		case "md":
-		case "code":
-			return content
-	}
 }
 
 // A date filter and `only` (pinned, favorite, archived, or the trashed notes no other filter lists) apply before the cut, so notes past the first rows
@@ -150,7 +127,7 @@ export const readNoteTool: ToolAdapter = async (input, scope) => {
 		throw new AssistantToolError(`"${title}" is still loading in the editor; try again in a moment`)
 	}
 
-	const { text, truncated } = clipText(plainContent(note, content), NOTE_MAX_CHARS)
+	const { text, truncated } = clipText(notePlainText(note, content), NOTE_MAX_CHARS)
 
 	return {
 		value: {
