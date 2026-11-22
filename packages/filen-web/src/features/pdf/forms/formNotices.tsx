@@ -1,5 +1,6 @@
 import { useEffect, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
+import { SparklesIcon } from "lucide-react"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import type { PdfEditSnapshot } from "@filen/office/react/pdfedit"
 import {
@@ -12,6 +13,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import type { PdfFormSaveChoice } from "@/features/pdf/forms/formSave"
+import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { transformOffered } from "@/features/assistant/transform/transform.logic"
 
 // The form's one-line notices under the ribbon: the document has form fields (with a button to the first one; until
 // the first change), its scripts never run (once the editor read them), or it is an XFA-only form, which can only be
@@ -58,10 +61,13 @@ export interface PdfFormNoticesProps {
 	// The editor's snapshot once it has the document.
 	readonly snapshot: PdfEditSnapshot | null
 	readonly scrollerRef: RefObject<HTMLElement | null>
+	// Opens the assistant's form fill for the page in view; absent where the form cannot be filled.
+	readonly onFill?: (() => void) | undefined
 }
 
-export function PdfFormNotices({ document, snapshot, scrollerRef }: PdfFormNoticesProps) {
+export function PdfFormNotices({ document, snapshot, scrollerRef, onFill }: PdfFormNoticesProps) {
 	const { t } = useTranslation("preview")
+	const fillOffered = useAssistantStore(state => transformOffered(state.modelState)) && onFill !== undefined
 	const [read, setRead] = useState<{ readonly document: PdfDomDocument; readonly info: FormInfo } | null>(null)
 	const info = read?.document === document ? read.info : null
 
@@ -112,6 +118,16 @@ export function PdfFormNotices({ document, snapshot, scrollerRef }: PdfFormNotic
 					>
 						{t("previewPdfFormBannerFocus")}
 					</Button>
+					{fillOffered ? (
+						<Button
+							variant="outline"
+							size="xs"
+							onClick={onFill}
+						>
+							<SparklesIcon aria-hidden="true" />
+							{t("previewPdfFormBannerFill")}
+						</Button>
+					) : null}
 				</div>
 			) : null}
 			{form?.scripts === true ? (

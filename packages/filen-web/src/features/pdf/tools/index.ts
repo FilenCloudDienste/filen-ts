@@ -1,6 +1,7 @@
 import { CROP_TOOL } from "@/features/pdf/tools/crop.tool"
 import { FILL_SIGN_TOOLS } from "@/features/pdf/tools/fillSign.tool"
 import { FORMS_TOOL } from "@/features/pdf/tools/forms.tool"
+import { FORM_FILL_TOOL } from "@/features/pdf/tools/formFill.tool"
 import { OCR_TOOL } from "@/features/pdf/tools/ocr.tool"
 import { PROTECT_DOCUMENT_TOOL } from "@/features/pdf/tools/protect.tool"
 import { REDACT_AREA_TOOL, REDACT_FIND_TOOL, REDACT_TEXT_TOOL } from "@/features/pdf/tools/redact.tool"
@@ -20,6 +21,7 @@ import type { PdfTool } from "@/features/pdf/tools/registry"
 // Every PDF tool, one line per feature module.
 export const PDF_TOOLS: readonly PdfTool[] = [
 	FORMS_TOOL,
+	FORM_FILL_TOOL,
 	...FILL_SIGN_TOOLS,
 	SELECT_TOOL,
 	HAND_TOOL,

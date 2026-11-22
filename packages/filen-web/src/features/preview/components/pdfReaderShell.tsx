@@ -35,6 +35,7 @@ import { type PdfSignatureVerify } from "@/features/pdf/signatures/useSignatureV
 import { type PdfEditView } from "@/features/pdf/session/usePdfEdit"
 import { PdfFieldOverlay } from "@/features/pdf/session/fieldOverlay"
 import { PdfFormNotices } from "@/features/pdf/forms/formNotices"
+import { FORM_FILL_TOOL, FORM_FILL_TOOL_ID } from "@/features/pdf/tools/formFill.tool"
 import { PdfRibbon } from "@/features/pdf/ribbon/pdfRibbon"
 import { PDF_TOOLS } from "@/features/pdf/tools"
 import { PdfToolOverlay, PdfToolPanels } from "@/features/pdf/tools/toolHost"
@@ -646,6 +647,13 @@ export function PdfReaderShell({
 					document={document}
 					snapshot={edit.snapshot}
 					scrollerRef={viewer.pages.scrollerRef}
+					onFill={
+						FORM_FILL_TOOL.enabledWhen(edit.policy).enabled
+							? () => {
+									edit.setActiveTool(FORM_FILL_TOOL_ID)
+								}
+							: undefined
+					}
 				/>
 			)}
 			{signatures.kind === "current" ? (
