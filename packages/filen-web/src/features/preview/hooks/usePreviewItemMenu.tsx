@@ -71,6 +71,8 @@ export function usePreviewItemMenu({
 	// driveItemActions only ever offers Color for a directory, which never opens this overlay, and Open
 	// as text only to a surface that opens items (this header menu has its item open already).
 	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
+	// Where its destination picker (move, copy, extract to) opens: the tree menu level whose More… opened it.
+	const [menuStartPath, setMenuStartPath] = useState<readonly string[] | undefined>(undefined)
 	const [menuPending, setMenuPending] = useState(false)
 	// The header item menu's dropdown. A save closes it and holds it shut (its trigger disabled, as its keys are):
 	// the save writes by the item it read, so a rename, move or trash meanwhile would see the upload re-create the file.
@@ -211,6 +213,7 @@ export function usePreviewItemMenu({
 				return (
 					<MoveTargetDialog
 						items={[driveItem]}
+						initialPath={menuStartPath}
 						onClose={closeMenuDialog}
 					/>
 				)
@@ -226,6 +229,7 @@ export function usePreviewItemMenu({
 					<ItemDialog
 						kind={menuDialogKind}
 						items={[driveItem]}
+						startPath={menuStartPath}
 						variant={variant}
 						onClose={closeMenuDialog}
 						onSourcesDisposing={onSourcesDisposing}
@@ -290,9 +294,14 @@ export function usePreviewItemMenu({
 		}
 	}
 
+	function openMenuDialog(kind: ItemActionDialogKind, startPath?: readonly string[]): void {
+		setMenuStartPath(startPath)
+		setMenuDialogKind(kind)
+	}
+
 	return {
 		menuDialogKind,
-		setMenuDialogKind,
+		openMenuDialog,
 		menuOpen,
 		setMenuOpen,
 		handleMenuFavoriteToggled,

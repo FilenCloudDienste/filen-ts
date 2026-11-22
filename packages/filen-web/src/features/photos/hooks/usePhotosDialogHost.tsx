@@ -24,12 +24,14 @@ type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "lin
 // The preview arm holds the frozen pager snapshot + position usePreviewDialogState folds events into
 // — a DriveItem[], since a reconciled rename re-narrows its item.
 type ActivePhotosDialog =
-	{ kind: Exclude<PhotosDialogKind, "preview">; items: PhotoItem[] } | { kind: "preview"; items: DriveItem[]; index: number }
+	// `startPath`: the copy picker opened from a tree menu level's More… opens at that level.
+	| { kind: Exclude<PhotosDialogKind, "preview">; items: PhotoItem[]; startPath?: readonly string[] | undefined }
+	| { kind: "preview"; items: DriveItem[]; index: number }
 
 export interface PhotosDialogHost {
 	isDialogOpen: boolean
-	handleItemAction: (kind: ItemActionDialogKind, item: PhotoItem) => void
-	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
+	handleItemAction: (kind: ItemActionDialogKind, item: PhotoItem, startPath?: readonly string[]) => void
+	handleBulkDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 	openPreview: (items: DriveItem[], index: number) => void
 	renderActiveDialog: () => ReactNode
 }
@@ -71,7 +73,7 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 	// dispatch move/color/unshare/delete/import too) — a photos item under PHOTOS_HIDDEN_ACTION_IDS never
 	// gets a descriptor carrying one of those, so this narrows defensively and no-ops rather than
 	// widening the type.
-	function handleItemAction(kind: ItemActionDialogKind, item: PhotoItem): void {
+	function handleItemAction(kind: ItemActionDialogKind, item: PhotoItem, startPath?: readonly string[]): void {
 		if (
 			kind !== "rename" &&
 			kind !== "copy" &&
@@ -85,15 +87,15 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 			return
 		}
 
-		setActiveDialog({ kind, items: [item] })
+		setActiveDialog({ kind, items: [item], startPath })
 	}
 
-	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
+	function handleBulkDialogAction(kind: BulkDialogActionKind, startPath?: readonly string[]): void {
 		if (kind !== "copy" && kind !== "trash" && kind !== "share" && kind !== "compress") {
 			return
 		}
 
-		setActiveDialog({ kind, items: selectedItems })
+		setActiveDialog({ kind, items: selectedItems, startPath })
 	}
 
 	// What a share succeeded on, or a compress is to remove, leaves the photos selection, not drive's.
@@ -158,6 +160,7 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 					<ItemDialog
 						kind={activeDialog.kind}
 						items={activeDialog.items}
+						startPath={activeDialog.startPath}
 						// A photos item is always an owned, non-trashed file under the user's own drive, so it
 						// carries no sharing counterparty row, and a compress may remove it afterwards.
 						variant="drive"

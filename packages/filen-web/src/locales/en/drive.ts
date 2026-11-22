@@ -372,6 +372,8 @@ export const drive = {
 	driveMoveChooseDestination: "Choose destination…",
 	/** Item menu — disabled row in a directory-tree submenu (Move) when the directory has no subdirectories; also the move/copy picker's line for a directory holding files only */
 	driveTreeMenuNoDirectories: "No directories",
+	/** Item menu — last row of a directory-tree submenu level (Move, Copy, Extract to) holding more subdirectories than it lists; opens the destination picker at that directory */
+	driveTreeMenuMore: "More…",
 	/** Item menu — move the selected item(s) to the trash; also the trash-confirm dialog's confirm button */
 	driveActionTrash: "Trash",
 	/** Item menu — restore the selected item(s) out of the trash; also the bulk-restore confirm dialog's confirm button */

@@ -462,7 +462,7 @@ export function PreviewOverlay({
 	// screen while it holds unsaved edits: shown in place, or asked about (RemoteChangeDialog below).
 	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, readEdits, onItemRemoved })
 	// The header's item menu: its dropdown, the dialog an entry opened, and what each entry runs on the slot on screen.
-	const { menuDialogKind, setMenuDialogKind, menuOpen, setMenuOpen, handleMenuFavoriteToggled, handleMenuRestored, renderMenuDialog } =
+	const { menuDialogKind, openMenuDialog, menuOpen, setMenuOpen, handleMenuFavoriteToggled, handleMenuRestored, renderMenuDialog } =
 		usePreviewItemMenu({
 			variant,
 			driveItem,
@@ -1135,7 +1135,7 @@ export function PreviewOverlay({
 			remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
 		}
 
-		setMenuDialogKind(kind)
+		openMenuDialog(kind)
 	}
 
 	if (driveItem === undefined) {
@@ -1369,7 +1369,7 @@ export function PreviewOverlay({
 											<DriveDropdownMenuContent
 												item={driveItem}
 												variant={variant}
-												onItemAction={kind => {
+												onItemAction={(kind, _item, startPath) => {
 													if (saving) return
 
 													// The move and version-restore dialogs report no outcome, so their echo, whenever it
@@ -1379,7 +1379,7 @@ export function PreviewOverlay({
 														remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
 													}
 
-													setMenuDialogKind(kind)
+													openMenuDialog(kind, startPath)
 												}}
 												onFavoriteToggled={handleMenuFavoriteToggled}
 												onRestored={handleMenuRestored}

@@ -270,7 +270,7 @@ describe("Move submenu", () => {
 		expect(move.getAttribute("aria-haspopup")).toBe("menu")
 
 		fireEvent.click(screen.getByRole("menuitem", { name: /^Choose destination…\s*drive\.move$/ }))
-		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("move", item)
+		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("move", item, undefined)
 	})
 
 	it("the bulk menu offers the same submenu, its picker entry dispatching the bulk move", async () => {

@@ -1,6 +1,6 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { type LucideIcon } from "lucide-react"
+import { FolderSearchIcon, type LucideIcon } from "lucide-react"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { Spinner } from "@/components/ui/spinner"
@@ -64,6 +64,10 @@ export interface DirectoryTreeTarget {
 
 const ROOT_TARGET: DirectoryTreeTarget = { uuid: null, ancestry: [] }
 
+// The subdirectories a level lists before its More… entry: every one is a submenu with a popup of its own, so a
+// directory of thousands would mount thousands of them. The rest are a pick in the destination picker away.
+export const DIRECTORY_TREE_MENU_LIMIT = 50
+
 interface DirectoryTreeActions {
 	family: DirectoryTreeMenuFamily
 	// The per-directory entry ("Move here") that acts on the directory whose submenu it heads.
@@ -74,6 +78,9 @@ interface DirectoryTreeActions {
 	isTargetDisabled: (target: DirectoryTreeTarget) => boolean
 	// Greys out a directory's own submenu trigger, so nothing below it can be reached either.
 	isBrowseDisabled: (target: DirectoryTreeTarget) => boolean
+	// A level with more than DIRECTORY_TREE_MENU_LIMIT subdirectories ends in More…: the destination picker, opened
+	// at that level.
+	onMore: (target: DirectoryTreeTarget) => void
 }
 
 export interface DirectoryTreeSubmenuProps extends DirectoryTreeActions {
@@ -145,30 +152,43 @@ function DirectoryTreeSubmenuLevel({ target, ...actions }: DirectoryTreeActions 
 			) : query.data.length === 0 ? (
 				<Item disabled>{t("driveTreeMenuNoDirectories")}</Item>
 			) : (
-				query.data.map(child => {
-					const childTarget: DirectoryTreeTarget = { uuid: child.uuid, ancestry: [...target.ancestry, child.uuid] }
+				<>
+					{query.data.slice(0, DIRECTORY_TREE_MENU_LIMIT).map(child => {
+						const childTarget: DirectoryTreeTarget = { uuid: child.uuid, ancestry: [...target.ancestry, child.uuid] }
 
-					return (
-						<Sub key={child.uuid}>
-							<SubTrigger
-								label={child.name}
-								disabled={actions.isBrowseDisabled(childTarget)}
-							>
-								<DirectoryGlyph
-									color={child.color}
-									className="size-4 shrink-0"
-								/>
-								<span className="min-w-0 flex-1 truncate">{child.name}</span>
-							</SubTrigger>
-							<SubContent className="max-w-72">
-								<DirectoryTreeSubmenuLevel
-									{...actions}
-									target={childTarget}
-								/>
-							</SubContent>
-						</Sub>
-					)
-				})
+						return (
+							<Sub key={child.uuid}>
+								<SubTrigger
+									label={child.name}
+									disabled={actions.isBrowseDisabled(childTarget)}
+								>
+									<DirectoryGlyph
+										color={child.color}
+										className="size-4 shrink-0"
+									/>
+									<span className="min-w-0 flex-1 truncate">{child.name}</span>
+								</SubTrigger>
+								<SubContent className="max-w-72">
+									<DirectoryTreeSubmenuLevel
+										{...actions}
+										target={childTarget}
+									/>
+								</SubContent>
+							</Sub>
+						)
+					})}
+					{query.data.length > DIRECTORY_TREE_MENU_LIMIT ? (
+						<Item
+							disabled={actions.isBrowseDisabled(target)}
+							onClick={() => {
+								actions.onMore(target)
+							}}
+						>
+							<FolderSearchIcon aria-hidden="true" />
+							{t("driveTreeMenuMore")}
+						</Item>
+					) : null}
+				</>
 			)}
 		</>
 	)

@@ -89,9 +89,21 @@ export interface ItemDialogProps {
 	onSourcesDisposing?: ((uuids: string[]) => void) | undefined
 	// How several items' archive is named after their directory (photos knows its own).
 	compressParentNaming?: ParentNaming | undefined
+	// Where a destination picker (copy, extract to) opens: the root-to-directory uuid chain a tree menu level's
+	// More… was on; the root when absent.
+	startPath?: readonly string[] | undefined
 }
 
-export function ItemDialog({ kind, items, variant, onClose, onShared, onSourcesDisposing, compressParentNaming }: ItemDialogProps) {
+export function ItemDialog({
+	kind,
+	items,
+	variant,
+	onClose,
+	onShared,
+	onSourcesDisposing,
+	compressParentNaming,
+	startPath
+}: ItemDialogProps) {
 	const item = items[0]
 
 	if (!item) {
@@ -105,6 +117,7 @@ export function ItemDialog({ kind, items, variant, onClose, onShared, onSourcesD
 				<MoveTargetDialog
 					items={items}
 					mode="copy"
+					initialPath={startPath}
 					onClose={onClose}
 				/>
 			)
@@ -161,6 +174,7 @@ export function ItemDialog({ kind, items, variant, onClose, onShared, onSourcesD
 				<ExtractDestinationDialog
 					items={items}
 					variant={variant}
+					initialPath={startPath}
 					onClose={onClose}
 				/>
 			)

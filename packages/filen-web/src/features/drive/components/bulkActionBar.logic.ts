@@ -223,7 +223,7 @@ export async function runBulkFavorite(items: DriveItem[]): Promise<void> {
 export function runBulkDescriptor(
 	descriptor: BulkActionDescriptor,
 	items: DriveItem[],
-	onDialogAction: (kind: BulkDialogActionKind) => void
+	onDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 ): void {
 	if (descriptor.id === "download") {
 		void startDownloads(items)

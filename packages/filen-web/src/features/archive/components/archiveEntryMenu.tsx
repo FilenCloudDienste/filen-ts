@@ -17,7 +17,7 @@ interface ExtractSubmenuProps {
 	host: EntryMenuHost
 	disabled: boolean
 	onPick: (target: ExtractTarget) => void
-	onChooseDestination: () => void
+	onChooseDestination: (startPath?: readonly string[]) => void
 }
 
 // Extract, with the footer's destinations.
@@ -83,8 +83,8 @@ function EntryMenuEntries({ family, host, slot }: { family: DirectoryTreeMenuFam
 				onPick={target => {
 					host.onAction(slot, { type: "extract", target })
 				}}
-				onChooseDestination={() => {
-					host.onAction(slot, { type: "chooseDestination" })
+				onChooseDestination={startPath => {
+					host.onAction(slot, { type: "chooseDestination", startPath })
 				}}
 			/>
 		</>
@@ -130,8 +130,8 @@ export function ArchiveRowContextMenuContent({ menu }: { menu: RowMenu }) {
 			onPick={target => {
 				host.onSelectionAction({ type: "extract", target })
 			}}
-			onChooseDestination={() => {
-				host.onSelectionAction({ type: "chooseDestination" })
+			onChooseDestination={startPath => {
+				host.onSelectionAction({ type: "chooseDestination", startPath })
 			}}
 		/>
 	)

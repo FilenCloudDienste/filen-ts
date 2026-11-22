@@ -23,8 +23,9 @@ export interface TransferSubmenuProps {
 	family: DirectoryTreeMenuFamily
 	// The whole selection for the bulk menu, the one item otherwise.
 	items: DriveItem[]
-	// Opens the full destination picker (moveTargetDialog.tsx) in this mode on the same items.
-	onChooseDestination: (mode: TransferMode) => void
+	// Opens the full destination picker (moveTargetDialog.tsx) in this mode on the same items, at `startPath` (the
+	// root-to-directory uuid chain) when a tree level's More… asks for it.
+	onChooseDestination: (mode: TransferMode, startPath?: readonly string[]) => void
 	// The actions whose keys the clipboard entry (the drive listing's cut or copy otherwise) and the destination picker
 	// show, where the surface's keys run them.
 	clipboardShortcut?: string | undefined
@@ -121,6 +122,9 @@ export function TransferSubmenu({
 			actionIcon={config.def.icon}
 			isBrowseDisabled={target => !isOnline || gates.isBrowseDisabled(target)}
 			isTargetDisabled={target => !isOnline || gates.isTargetDisabled(target)}
+			onMore={target => {
+				onChooseDestination(mode, target.ancestry)
+			}}
 			onSelect={target => {
 				config.select(items, { uuid: target.uuid, name: targetName(target, t("driveMyDrive")) })
 			}}

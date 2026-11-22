@@ -3,10 +3,15 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import type { RowRef } from "@/features/archive/lib/sortedChildren"
 
-export type EntryMenuAction =
-	{ type: "open" } | { type: "download" } | { type: "extract"; target: ExtractTarget } | { type: "chooseDestination" }
+// The destination picker, at `startPath` (the root-to-directory uuid chain) when a tree level's More… asks for it.
+interface ChooseDestinationAction {
+	type: "chooseDestination"
+	startPath?: readonly string[] | undefined
+}
 
-export type SelectionMenuAction = { type: "extract"; target: ExtractTarget } | { type: "chooseDestination" }
+export type EntryMenuAction = { type: "open" } | { type: "download" } | { type: "extract"; target: ExtractTarget } | ChooseDestinationAction
+
+export type SelectionMenuAction = { type: "extract"; target: ExtractTarget } | ChooseDestinationAction
 
 export interface EntryOffers {
 	open: boolean

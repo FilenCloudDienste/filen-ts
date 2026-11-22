@@ -45,7 +45,8 @@ export function ArchiveExtractMenu({
 	disabledTitle,
 	onPick
 }: ArchiveExtractMenuProps) {
-	const [picking, setPicking] = useState(false)
+	// The destination picker while open, with the directory it opens at (the root's empty chain otherwise).
+	const [picking, setPicking] = useState<readonly string[] | null>(null)
 
 	return (
 		<>
@@ -74,17 +75,18 @@ export function ArchiveExtractMenu({
 						source={source}
 						newFolderName={newFolderName}
 						onPick={onPick}
-						onChooseDestination={() => {
-							setPicking(true)
+						onChooseDestination={startPath => {
+							setPicking(startPath ?? [])
 						}}
 					/>
 				</DropdownMenuContent>
 			</DropdownMenu>
-			{picking ? (
+			{picking !== null ? (
 				<ArchiveExtractPicker
+					initialPath={picking}
 					onPick={onPick}
 					onClose={() => {
-						setPicking(false)
+						setPicking(null)
 					}}
 				/>
 			) : null}
@@ -98,8 +100,9 @@ export interface ArchiveExtractItemsProps {
 	source: ArchiveSource
 	newFolderName: string | null
 	onPick: (target: ExtractTarget) => void
-	// The destination picker is the host's: a row's menu may unmount with its row while it is open.
-	onChooseDestination: () => void
+	// The destination picker is the host's: a row's menu may unmount with its row while it is open. At `startPath`
+	// when a tree level's More… asks for it.
+	onChooseDestination: (startPath?: readonly string[]) => void
 }
 
 // The places an extract goes, as the entries of a menu (the footer's, or a row's Extract submenu).
@@ -140,6 +143,9 @@ export function ArchiveExtractItems({ family, source, newFolderName, onPick, onC
 				actionIcon={ACTION_DEFS.extract.icon}
 				isBrowseDisabled={() => !isOnline}
 				isTargetDisabled={() => !isOnline}
+				onMore={target => {
+					onChooseDestination(target.ancestry)
+				}}
 				onSelect={target => {
 					onPick({
 						type: "directory",
@@ -150,7 +156,11 @@ export function ArchiveExtractItems({ family, source, newFolderName, onPick, onC
 					})
 				}}
 			/>
-			<Item onClick={onChooseDestination}>
+			<Item
+				onClick={() => {
+					onChooseDestination()
+				}}
+			>
 				<FolderSearchIcon aria-hidden="true" />
 				{t("archive:archiveExtractChooseDestination")}
 			</Item>
@@ -159,12 +169,14 @@ export function ArchiveExtractItems({ family, source, newFolderName, onPick, onC
 }
 
 export interface ArchiveExtractPickerProps {
+	// The root-to-directory uuid chain it opens at; the root when absent.
+	initialPath?: readonly string[] | undefined
 	onPick: (target: ExtractTarget) => void
 	onClose: () => void
 }
 
 // "Choose destination…": the drive's directory picker, any directory of the Cloud Drive.
-export function ArchiveExtractPicker({ onPick, onClose }: ArchiveExtractPickerProps) {
+export function ArchiveExtractPicker({ initialPath, onPick, onClose }: ArchiveExtractPickerProps) {
 	const { t } = useTranslation("archive")
 
 	return (
@@ -172,6 +184,7 @@ export function ArchiveExtractPicker({ onPick, onClose }: ArchiveExtractPickerPr
 			mode="pick"
 			// An archive's contents may land anywhere.
 			items={[]}
+			initialPath={initialPath}
 			pickLabels={{ title: t("archiveExtractPickTitle"), confirm: t("archiveExtractPickConfirm") }}
 			onPick={destination => {
 				onPick({ type: "directory", destination })

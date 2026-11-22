@@ -7,12 +7,14 @@ import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 export interface ExtractDestinationDialogProps {
 	items: DriveItem[]
 	variant: DriveVariant
+	// The root-to-directory uuid chain it opens at; the root when absent.
+	initialPath?: readonly string[] | undefined
 	onClose: () => void
 }
 
 // "Choose destination…" for one archive or several: the drive picker, each archive then extracting into
 // a new directory of its own there. Mounted-when-active by the dialog host.
-export function ExtractDestinationDialog({ items, variant, onClose }: ExtractDestinationDialogProps) {
+export function ExtractDestinationDialog({ items, variant, initialPath, onClose }: ExtractDestinationDialogProps) {
 	const { t } = useTranslation("archive")
 
 	return (
@@ -20,6 +22,7 @@ export function ExtractDestinationDialog({ items, variant, onClose }: ExtractDes
 			mode="pick"
 			// An archive's contents may land anywhere, its own directory included.
 			items={[]}
+			initialPath={initialPath}
 			pickLabels={{ title: t("archiveExtractPickTitle"), confirm: t("archiveExtractPickConfirm") }}
 			// The pick starts the extracts.
 			startsWork

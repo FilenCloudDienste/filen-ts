@@ -134,7 +134,17 @@ export function CompressSubmenu({ family, disabled, ...entries }: CompressMenuEn
 }
 
 // "Extract to ▸": the Cloud Drive tree, every level offering "Extract here" for its own directory.
-function ExtractToTree({ family, items, variant }: { family: DirectoryTreeMenuFamily; items: DriveItem[]; variant: DriveVariant }) {
+function ExtractToTree({
+	family,
+	items,
+	variant,
+	onChooseDestination
+}: {
+	family: DirectoryTreeMenuFamily
+	items: DriveItem[]
+	variant: DriveVariant
+	onChooseDestination: (startPath?: readonly string[]) => void
+}) {
 	const { t } = useTranslation(["archive", "drive"])
 	const isOnline = useIsOnline()
 
@@ -147,6 +157,9 @@ function ExtractToTree({ family, items, variant }: { family: DirectoryTreeMenuFa
 			actionIcon={ACTION_DEFS.extract.icon}
 			isBrowseDisabled={() => !isOnline}
 			isTargetDisabled={() => !isOnline}
+			onMore={target => {
+				onChooseDestination(target.ancestry)
+			}}
 			onSelect={target => {
 				void extractQuick(items, variant, treeDestination(target, t("drive:driveMyDrive")))
 			}}
@@ -157,8 +170,9 @@ function ExtractToTree({ family, items, variant }: { family: DirectoryTreeMenuFa
 export interface ExtractSubmenuProps extends SubmenuTriggerProps {
 	item: DriveItem
 	variant: DriveVariant
-	// The destination picker (extractDestinationDialog.tsx) on this archive.
-	onChooseDestination: () => void
+	// The destination picker (extractDestinationDialog.tsx) on this archive, at `startPath` when a tree level's More…
+	// asks for it.
+	onChooseDestination: (startPath?: readonly string[]) => void
 	// The options dialog (extractDialog.tsx) on this archive.
 	onOptions: () => void
 	// The archive browser; the entry exists only where a surface can open it.
@@ -209,10 +223,13 @@ function ExtractMenuEntries({ family, item, variant, onChooseDestination, onOpti
 				family={family}
 				items={[item]}
 				variant={variant}
+				onChooseDestination={onChooseDestination}
 			/>
 			<Item
 				disabled={!isOnline}
-				onClick={onChooseDestination}
+				onClick={() => {
+					onChooseDestination()
+				}}
 			>
 				<FolderSearchIcon aria-hidden="true" />
 				{t("archiveExtractChooseDestination")}
@@ -252,8 +269,8 @@ export interface BulkExtractMenuEntriesProps {
 	// Every one an archive (DriveSelectionFlags.everyArchive); one queued job each.
 	items: DriveItem[]
 	variant: DriveVariant
-	// The destination picker on the whole selection.
-	onChooseDestination: () => void
+	// The destination picker on the whole selection, at `startPath` when a tree level's More… asks for it.
+	onChooseDestination: (startPath?: readonly string[]) => void
 }
 
 export function BulkExtractMenuEntries({ family, items, variant, onChooseDestination }: BulkExtractMenuEntriesProps) {
@@ -288,10 +305,13 @@ export function BulkExtractMenuEntries({ family, items, variant, onChooseDestina
 				family={family}
 				items={items}
 				variant={variant}
+				onChooseDestination={onChooseDestination}
 			/>
 			<Item
 				disabled={!isOnline}
-				onClick={onChooseDestination}
+				onClick={() => {
+					onChooseDestination()
+				}}
 			>
 				<FolderSearchIcon aria-hidden="true" />
 				{t("archiveExtractChooseDestination")}

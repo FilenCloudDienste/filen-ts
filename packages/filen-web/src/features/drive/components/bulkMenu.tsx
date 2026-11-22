@@ -24,7 +24,7 @@ import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-men
 export interface DriveBulkMenuProps {
 	variant: DriveVariant
 	selectedItems: DriveItem[]
-	onBulkAction: (kind: BulkDialogActionKind) => void
+	onBulkAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 }
 
 // Right-clicking a row that is part of a 2+ selection opens THIS menu instead of the single-item one
@@ -94,8 +94,8 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 							disabled={offlineDisabled}
 							items={selectedItems}
 							variant={variant}
-							onChooseDestination={() => {
-								onBulkAction("extractTo")
+							onChooseDestination={startPath => {
+								onBulkAction("extractTo", startPath)
 							}}
 						/>
 					)
@@ -125,7 +125,7 @@ export interface DriveCellContextMenuContentProps extends DriveBulkMenuProps {
 	// Right-clicked inside a 2+ selection: the bulk menu over it rather than this item's own.
 	bulkMenu: boolean
 	item: DriveItem
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	onItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
 	searchHit: boolean
 	onOpen: () => void
 	destination: ItemDestination

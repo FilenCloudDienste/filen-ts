@@ -42,10 +42,10 @@ export interface DriveItemCellProps {
 	// half of a right-click or a touch long-press, neither of which reaches onPointerSelect.
 	onCursorMove: (index: number) => void
 	onOpen: (index: number) => void
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	onItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
 	// The listing's create/upload host (useDirectoryDestination), for a directory cell's New submenu.
 	destinationActions: (uuid: string | null) => DestinationActions
-	onBulkAction: (kind: BulkDialogActionKind) => void
+	onBulkAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
 

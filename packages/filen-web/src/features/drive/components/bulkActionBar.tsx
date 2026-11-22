@@ -21,7 +21,7 @@ import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/co
 export interface BulkActionBarProps {
 	variant: DriveVariant
 	selectedItems: DriveItem[]
-	onDialogAction: (kind: BulkDialogActionKind) => void
+	onDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 }
 
 // Floating selection bar (directoryListing.tsx portals it into the shell's window bar slot while a
@@ -93,8 +93,8 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 									family={DROPDOWN_TREE_MENU_FAMILY}
 									items={selectedItems}
 									variant={variant}
-									onChooseDestination={() => {
-										onDialogAction("extractTo")
+									onChooseDestination={startPath => {
+										onDialogAction("extractTo", startPath)
 									}}
 								/>
 							)}

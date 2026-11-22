@@ -362,8 +362,8 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 	const [passwordAsk, setPasswordAsk] = useState<PasswordAsk | null>(null)
 	const [linkAsk, setLinkAsk] = useState<LinkTargetsAsk | null>(null)
 	// A row's "Choose destination…" (for its entry, or for the selection from its context menu), kept here:
-	// the row may unmount while the picker is open.
-	const [rowPick, setRowPick] = useState<EntryTarget | "selection" | null>(null)
+	// the row may unmount while the picker is open. `startPath` is the directory a tree level's More… opens it at.
+	const [rowPick, setRowPick] = useState<{ target: EntryTarget | "selection"; startPath: readonly string[] | undefined } | null>(null)
 	const [viewStore, setViewStore] = useState(store)
 	const entries = useEntryActions({
 		source,
@@ -710,7 +710,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 
 				break
 			case "chooseDestination":
-				setRowPick(entry)
+				setRowPick({ target: entry, startPath: action.startPath })
 
 				break
 		}
@@ -723,7 +723,7 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 
 				break
 			case "chooseDestination":
-				setRowPick("selection")
+				setRowPick({ target: "selection", startPath: action.startPath })
 
 				break
 		}
@@ -1157,11 +1157,12 @@ function ArchiveLevelBrowser({ source, deps, extractable, active, outer, revisit
 			{entries.dialogs}
 			{rowPick === null ? null : (
 				<ArchiveExtractPicker
+					initialPath={rowPick.startPath}
 					onPick={target => {
-						if (rowPick === "selection") {
+						if (rowPick.target === "selection") {
 							extractSelected(target)
 						} else {
-							extractEntry(target, rowPick)
+							extractEntry(target, rowPick.target)
 						}
 					}}
 					onClose={() => {

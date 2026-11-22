@@ -46,7 +46,7 @@ export interface ItemMenuContentProps {
 	// Fires for every "dialog"-run descriptor (rename/move/color/versions/info/link/trash/delete) —
 	// the listing-level dialog host (directoryListing.tsx) owns turning this into an open dialog.
 	// "direct"-run descriptors (favorite/restore) never call this — they resolve fully in place below.
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	onItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
 	// For a surface whose items live outside the drive listings: the preview overlay (its own per-slot
 	// item override map) and photos (its own listing cache) need the updated item the instant a
 	// "direct" descriptor resolves.
@@ -178,8 +178,8 @@ function ItemMenuEntries({
 							mode={descriptor.id}
 							family={family}
 							items={[item]}
-							onChooseDestination={mode => {
-								onItemAction(mode, item)
+							onChooseDestination={(mode, startPath) => {
+								onItemAction(mode, item, startPath)
 							}}
 							clipboardShortcut={descriptor.id === "copy" ? shortcuts?.copyToClipboard : undefined}
 							destinationShortcut={itemMenuShortcut(shortcuts, descriptor.id, deleteTarget)}
@@ -207,8 +207,8 @@ function ItemMenuEntries({
 							disabled={descriptor.enabled === false}
 							item={item}
 							variant={variant}
-							onChooseDestination={() => {
-								onItemAction("extractTo", item)
+							onChooseDestination={startPath => {
+								onItemAction("extractTo", item, startPath)
 							}}
 							onOptions={() => {
 								onItemAction("extract", item)

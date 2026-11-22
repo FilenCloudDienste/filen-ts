@@ -38,7 +38,12 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => {
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryKey, projectTreeChildren } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
-import { DROPDOWN_TREE_MENU_FAMILY, DirectoryTreeSubmenu, type DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
+import {
+	DIRECTORY_TREE_MENU_LIMIT,
+	DROPDOWN_TREE_MENU_FAMILY,
+	DirectoryTreeSubmenu,
+	type DirectoryTreeTarget
+} from "@/features/drive/components/directoryTreeSubmenu"
 import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -155,6 +160,7 @@ afterEach(() => {
 describe("DirectoryTreeSubmenu", () => {
 	function renderGeneric(overrides: Partial<Parameters<typeof DirectoryTreeSubmenu>[0]> = {}) {
 		const onSelect = vi.fn<(target: DirectoryTreeTarget) => void>()
+		const onMore = vi.fn<(target: DirectoryTreeTarget) => void>()
 
 		inOpenMenu(
 			createElement(DirectoryTreeSubmenu, {
@@ -166,11 +172,12 @@ describe("DirectoryTreeSubmenu", () => {
 				isBrowseDisabled: () => false,
 				isTargetDisabled: () => false,
 				onSelect,
+				onMore,
 				...overrides
 			})
 		)
 
-		return { onSelect }
+		return { onSelect, onMore }
 	}
 
 	it("offers the root action first, then the root's directories as submenus", async () => {
@@ -246,6 +253,45 @@ describe("DirectoryTreeSubmenu", () => {
 		expect(isDisabled(menuItem("Send here"))).toBe(true)
 		expect(isDisabled(menuItem("photos"))).toBe(true)
 		expect(isDisabled(menuItem("docs"))).toBe(false)
+	})
+
+	it("lists a level's first directories, then More… opening the picker at that level", async () => {
+		const many = Array.from({ length: DIRECTORY_TREE_MENU_LIMIT + 5 }, (_, index) =>
+			dirItem(`dir${String(index).padStart(3, "0")}`, "root")
+		)
+
+		seedLevel(null, [DOCS, PHOTOS])
+		seedLevel(DOCS.data.uuid, many)
+		const { onMore } = renderGeneric()
+
+		await openSubmenu("Send")
+
+		// The root holds two: every one listed, no More….
+		expect(screen.queryByRole("menuitem", { name: "More…" })).toBeNull()
+
+		await openSubmenu("docs")
+
+		const names = screen.getAllByRole("menuitem").map(item => item.textContent)
+
+		expect(names.filter(name => name.startsWith("dir"))).toHaveLength(DIRECTORY_TREE_MENU_LIMIT)
+		expect(names).not.toContain(`dir${String(DIRECTORY_TREE_MENU_LIMIT).padStart(3, "0")}`)
+
+		fireEvent.click(menuItem("More…"))
+
+		expect(onMore).toHaveBeenCalledExactlyOnceWith({ uuid: DOCS.data.uuid, ancestry: [DOCS.data.uuid] })
+	})
+
+	it("disables More… where its level cannot be browsed", async () => {
+		const many = Array.from({ length: DIRECTORY_TREE_MENU_LIMIT + 1 }, (_, index) =>
+			dirItem(`dir${String(index).padStart(3, "0")}`, "root")
+		)
+
+		seedLevel(null, many)
+		renderGeneric({ isBrowseDisabled: () => true })
+
+		await openSubmenu("Send")
+
+		expect(isDisabled(menuItem("More…"))).toBe(true)
 	})
 
 	it("renders the leading entries above the tree", async () => {
@@ -397,6 +443,28 @@ describe("TransferSubmenu (move)", () => {
 		fireEvent.click(menuItemByText(CUT_ENTRY))
 
 		expect(useDriveClipboardStore.getState().entry?.mode).toBe("cut")
+	})
+})
+
+describe("TransferSubmenu More…", () => {
+	it("opens the destination picker in its mode at the level it ends", async () => {
+		const many = Array.from({ length: DIRECTORY_TREE_MENU_LIMIT + 1 }, (_, index) =>
+			dirItem(`dir${String(index).padStart(3, "0")}`, "docs")
+		)
+
+		seedLevel(null, [DOCS, PHOTOS])
+		seedLevel(DOCS.data.uuid, many)
+		const onChooseDestination = vi.fn()
+
+		inOpenMenu(
+			createElement(TransferSubmenu, { mode: "copy", family: DROPDOWN_TREE_MENU_FAMILY, items: [REPORT], onChooseDestination })
+		)
+
+		await openSubmenu("Copy")
+		await openSubmenu("docs")
+		fireEvent.click(menuItem("More…"))
+
+		expect(onChooseDestination).toHaveBeenCalledExactlyOnceWith("copy", [DOCS.data.uuid])
 	})
 })
 

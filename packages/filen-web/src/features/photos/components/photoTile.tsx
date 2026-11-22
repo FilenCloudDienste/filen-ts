@@ -34,7 +34,7 @@ export interface PhotoTileProps {
 	onTileClick: (index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => void
 	// A touch long-press: toggles the tile like a Ctrl/Cmd+click, where a mouse would right-click.
 	onTileToggle: (index: number) => void
-	onItemAction: (kind: ItemActionDialogKind, item: PhotoItem) => void
+	onItemAction: (kind: ItemActionDialogKind, item: PhotoItem, startPath?: readonly string[]) => void
 }
 
 // Square media tile — mirrors driveTile.tsx's own face/badge composition (thumbnail-or-icon, a
@@ -135,8 +135,8 @@ export function PhotoTile({
 									hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
 									shortcuts={PHOTOS_ITEM_SHORTCUTS}
 									compressParentNaming={compressParentNaming}
-									onItemAction={kind => {
-										onItemAction(kind, item)
+									onItemAction={(kind, _item, startPath) => {
+										onItemAction(kind, item, startPath)
 									}}
 									onFavoriteToggled={updated => {
 										patchPhoto(rootUuids, updated)
@@ -153,8 +153,8 @@ export function PhotoTile({
 				hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
 				shortcuts={PHOTOS_ITEM_SHORTCUTS}
 				compressParentNaming={compressParentNaming}
-				onItemAction={kind => {
-					onItemAction(kind, item)
+				onItemAction={(kind, _item, startPath) => {
+					onItemAction(kind, item, startPath)
 				}}
 				onFavoriteToggled={updated => {
 					patchPhoto(rootUuids, updated)

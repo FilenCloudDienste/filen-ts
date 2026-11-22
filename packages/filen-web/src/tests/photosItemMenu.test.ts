@@ -119,7 +119,7 @@ describe("photos item menu", () => {
 		await openCopySubmenu()
 		fireEvent.click(screen.getByRole("menuitem", { name: "Choose destination…" }))
 
-		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("copy", PHOTO)
+		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("copy", PHOTO, undefined)
 	})
 
 	it("puts the photo on the drive clipboard from the submenu's Copy entry", async () => {

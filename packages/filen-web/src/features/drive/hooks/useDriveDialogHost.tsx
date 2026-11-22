@@ -47,12 +47,15 @@ interface ActiveDialog {
 	asText?: boolean
 	// kind:"rename" of the root `.filen`: its name was typed, so the rename dialog follows.
 	dotFilenConfirmed?: boolean
+	// A destination picker (move, copy, extract to) opened from a tree menu level's More…: that level's
+	// root-to-directory uuid chain.
+	startPath?: readonly string[] | undefined
 }
 
 export interface DriveDialogHost {
 	isDialogOpen: boolean
-	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
-	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
+	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
+	handleBulkDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 	handleEmptyTrash: () => void
 	openPreview: (items: DriveItem[], index: number) => void
 	renderActiveDialog: () => ReactNode
@@ -86,7 +89,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
 	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
 	// restore) resolve fully inside itemMenu.tsx and never reach here.
-	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem): void {
+	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]): void {
 		// Just this file, with no pager: the siblings it would page through are the previewable files,
 		// which it is not one of.
 		if (kind === "openAsText") {
@@ -95,7 +98,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 			return
 		}
 
-		setActiveDialog({ kind, items: [item] })
+		setActiveDialog({ kind, items: [item], startPath })
 	}
 
 	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
@@ -144,8 +147,8 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
 	// mirrors the drive.trash keymap command's identical setActiveDialog({kind:"trash", items:
 	// selectedItems}).
-	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
-		setActiveDialog({ kind, items: selectedItems })
+	function handleBulkDialogAction(kind: BulkDialogActionKind, startPath?: readonly string[]): void {
+		setActiveDialog({ kind, items: selectedItems, startPath })
 	}
 
 	// Trash toolbar's own trigger — targets the WHOLE trash, never a selection, so unlike
@@ -317,6 +320,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 				return activeDialog.items.length > 0 ? (
 					<MoveTargetDialog
 						items={activeDialog.items}
+						initialPath={activeDialog.startPath}
 						onClose={closeActiveDialog}
 					/>
 				) : null
@@ -349,6 +353,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						kind={activeDialog.kind}
 						items={activeDialog.items}
 						variant={variant}
+						startPath={activeDialog.startPath}
 						onClose={closeActiveDialog}
 					/>
 				)
