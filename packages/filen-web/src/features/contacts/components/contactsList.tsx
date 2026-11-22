@@ -15,7 +15,6 @@ import {
 	filterContactSections,
 	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,
-	type ContactSection,
 	type ContactsSectionFilter
 } from "@/features/contacts/components/contactsList.logic"
 import {
@@ -58,12 +57,12 @@ import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { cn, contactDisplayName, type ContactLike } from "@filen/shared"
-import { SURFACE_RING } from "@/components/ui/surface"
+import { contactDisplayName, type ContactLike } from "@filen/shared"
+import { ContactSectionsList, type ContactSectionView } from "@/features/contacts/components/contactSectionsList"
 
-// Every section's rows sit in one of these: a rounded, ringed panel (ui/card.tsx's ring language) with
-// hairline dividers between rows.
-const SECTION_PANEL_CLASS = "flex flex-col divide-y overflow-hidden rounded-2xl ring-1"
+// Room below the last row for the floating bulk bar (pb-16), or the list's own pb-6.
+const BULK_BAR_PADDING = 64
+const LIST_PADDING_BOTTOM = 24
 
 // The per-kind dialog payload threaded through useDialogHost, widened with a `bulk` flag: every kind
 // here can be reached either from a single row's own action (bulk: false, a 1-length items array) or
@@ -93,7 +92,14 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
 	const searchRef = useRef<HTMLInputElement | null>(null)
-	const selection = useContactsListSelection({ resetKey: section })
+	// The virtualized list's scroll-into-view, set by it once mounted: the arrow keys reveal a row outside its window.
+	const revealRef = useRef<((key: ContactSectionKey, index: number) => void) | null>(null)
+	const selection = useContactsListSelection({
+		resetKey: section,
+		revealRow: (key, index) => {
+			revealRef.current?.(key, index)
+		}
+	})
 	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveContactDialog>()
 	// Accept has no confirm dialog to carry a pending state, and its row stays until the op resolves: a
@@ -484,44 +490,51 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		}
 	}
 
-	// One row per section item, dispatched on the section's own key — the key already discriminates
-	// `items`' concrete type (see contactsList.logic.ts's ContactSection), so no per-item type tag is
-	// needed the way mobile's flat single-list rendering requires one. Every row is permanently a
-	// listbox option AND permanently shows its own actions; only the cursor row (and its controls) is
-	// tabbable, so the section's Tab cost stays 1 regardless of how many contacts an account has.
-	function renderSectionItems(contactSection: ContactSection, uuids: string[]): ReactNode {
+	// One row of a section, dispatched on the section's own key — the key already discriminates `items`'
+	// concrete type (see contactsList.logic.ts's ContactSection), so no per-item type tag is needed the way
+	// mobile's flat single-list rendering requires one. Every row is permanently a listbox option AND
+	// permanently shows its own actions; only the cursor row (and its controls) is tabbable, so the
+	// section's Tab cost stays 1 regardless of how many contacts an account has.
+	function renderRow(view: ContactSectionView, index: number, active: boolean): ReactNode {
+		const { section: contactSection, uuids } = view
 		const key = contactSection.key
-		const activeIndex = selection.activeIndexFor(key, uuids)
+		const uuid = uuids[index]
 
-		function rowProps(uuid: string, index: number) {
-			return {
-				selected: selection.selection[key].has(uuid),
-				active: index === activeIndex,
-				rowRef: (element: HTMLDivElement | null) => {
-					selection.registerRowRef(key, uuid, element)
-				},
-				onSelect: (event: MouseEvent<HTMLDivElement>, pointerType: string) => {
-					selection.handlePointerSelect(key, uuids, index, event, pointerType)
-				},
-				onLongPress: () => {
-					selection.toggleAt(key, uuids, index)
-				}
-			}
+		if (uuid === undefined) {
+			return null
 		}
 
+		const rowProps = {
+			selected: selection.selection[key].has(uuid),
+			active,
+			posInSet: index + 1,
+			setSize: uuids.length,
+			rowRef: (element: HTMLDivElement | null) => {
+				selection.registerRowRef(key, uuid, element)
+			},
+			onSelect: (event: MouseEvent<HTMLDivElement>, pointerType: string) => {
+				selection.handlePointerSelect(key, uuids, index, event, pointerType)
+			},
+			onLongPress: () => {
+				selection.toggleAt(key, uuids, index)
+			}
+		}
+		const tabIndex = active ? 0 : -1
+
 		switch (contactSection.key) {
-			case "requests":
-				return contactSection.items.map((request, index) => (
+			case "requests": {
+				const request = contactSection.items[index]
+
+				return request === undefined ? null : (
 					<ContactRow
-						key={request.uuid}
 						contact={request}
-						{...rowProps(request.uuid, index)}
+						{...rowProps}
 					>
 						<IncomingRequestActions
 							request={request}
 							disabled={!isOnline || accepting.inFlight.has(request.uuid)}
 							title={offlineTitle}
-							tabIndex={index === activeIndex ? 0 : -1}
+							tabIndex={tabIndex}
 							onAccept={item => {
 								handleAccept([item])
 							}}
@@ -530,37 +543,41 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							}}
 						/>
 					</ContactRow>
-				))
-			case "pending":
-				return contactSection.items.map((request, index) => (
+				)
+			}
+			case "pending": {
+				const request = contactSection.items[index]
+
+				return request === undefined ? null : (
 					<ContactRow
-						key={request.uuid}
 						contact={request}
-						{...rowProps(request.uuid, index)}
+						{...rowProps}
 					>
 						<OutgoingRequestActions
 							request={request}
 							disabled={!isOnline}
 							title={offlineTitle}
-							tabIndex={index === activeIndex ? 0 : -1}
+							tabIndex={tabIndex}
 							onCancel={item => {
 								setActiveDialog({ kind: "cancel", bulk: false, items: [item] })
 							}}
 						/>
 					</ContactRow>
-				))
-			case "contacts":
-				return contactSection.items.map((contact, index) => (
+				)
+			}
+			case "contacts": {
+				const contact = contactSection.items[index]
+
+				return contact === undefined ? null : (
 					<ContactRow
-						key={contact.uuid}
 						contact={contact}
-						{...rowProps(contact.uuid, index)}
+						{...rowProps}
 					>
 						<ContactActions
 							contact={contact}
 							disabled={!isOnline}
 							title={offlineTitle}
-							tabIndex={index === activeIndex ? 0 : -1}
+							tabIndex={tabIndex}
 							onMessage={item => {
 								void handleMessage(item)
 							}}
@@ -572,79 +589,51 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							}}
 						/>
 					</ContactRow>
-				))
-			case "blocked":
-				return contactSection.items.map((blocked, index) => (
+				)
+			}
+			case "blocked": {
+				const blocked = contactSection.items[index]
+
+				return blocked === undefined ? null : (
 					<ContactRow
-						key={blocked.uuid}
 						contact={blocked}
-						{...rowProps(blocked.uuid, index)}
+						{...rowProps}
 					>
 						<BlockedActions
 							contact={blocked}
 							disabled={!isOnline}
 							title={offlineTitle}
-							tabIndex={index === activeIndex ? 0 : -1}
+							tabIndex={tabIndex}
 							onUnblock={item => {
 								setActiveDialog({ kind: "unblock", bulk: false, items: [item] })
 							}}
 						/>
 					</ContactRow>
-				))
+				)
+			}
 		}
 	}
 
 	// "all" stacks every section, so each one carries its own heading: incoming requests as a tinted
 	// callout (they wait on the reader), the rest as a quiet labelled group. A single-section view is
 	// already named by the page's <h1>, so it gets the bare panel.
-	function renderSection(contactSection: ContactSection): ReactNode {
-		// One array identity per render, shared by the container's key handler and its rows.
-		const uuids = contactSection.items.map(item => item.uuid)
+	const sectionViews: ContactSectionView[] = sections.map(contactSection => {
 		const label = t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])
 		const callout = section === "all" && contactSection.key === "requests"
-		const listbox = (
-			<div
-				role="listbox"
-				aria-multiselectable="true"
-				aria-label={label}
-				// One roving Tab stop per section: the cursor row (and only its controls) is tabbable,
-				// Arrow/Home/End move it, Space/Enter toggle it. Same contract as drive's listbox —
-				// contacts renders every row of every section at once, so a Tab stop per row would scale
-				// with the account.
-				onKeyDown={event => {
-					selection.handleKeyDown(contactSection.key, uuids, event)
-				}}
-				className={callout ? "flex flex-col divide-y divide-primary/10" : cn(SECTION_PANEL_CLASS, "divide-border", SURFACE_RING)}
-			>
-				{renderSectionItems(contactSection, uuids)}
-			</div>
-		)
 
-		if (callout) {
-			return (
-				<section
-					key={contactSection.key}
-					className={cn(SECTION_PANEL_CLASS, "bg-primary/3 ring-primary/15 dark:bg-primary/5")}
-				>
-					<h2 className="px-3 pt-3 pb-2 text-sm font-medium">
-						{t("contactsRequestsCalloutTitle", { count: contactSection.items.length })}
-					</h2>
-					{listbox}
-				</section>
-			)
+		return {
+			section: contactSection,
+			uuids: contactSection.items.map(item => item.uuid),
+			label,
+			callout,
+			heading:
+				section !== "all"
+					? null
+					: callout
+						? t("contactsRequestsCalloutTitle", { count: contactSection.items.length })
+						: t("contactsSectionHeading", { section: label, count: contactSection.items.length })
 		}
-
-		return (
-			<section key={contactSection.key}>
-				{section === "all" ? (
-					<h2 className="px-1 pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-						{t("contactsSectionHeading", { section: label, count: contactSection.items.length })}
-					</h2>
-				) : null}
-				{listbox}
-			</section>
-		)
-	}
+	})
 
 	const searching = search.trim().length > 0
 
@@ -769,17 +758,14 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</Empty>
 					</div>
 				) : (
-					<div className="flex-1 scrollbar-gutter-stable overflow-y-auto px-4">
-						<div
-							className={cn(
-								"mx-auto flex w-full max-w-3xl flex-col gap-6 pt-1",
-								// Room for the floating bulk bar, so it never covers the last row.
-								selected.total >= BULK_BAR_MIN_SELECTION ? "pb-16" : "pb-6"
-							)}
-						>
-							{sections.map(renderSection)}
-						</div>
-					</div>
+					<ContactSectionsList
+						sections={sectionViews}
+						bottomPadding={selected.total >= BULK_BAR_MIN_SELECTION ? BULK_BAR_PADDING : LIST_PADDING_BOTTOM}
+						activeIndexFor={selection.activeIndexFor}
+						onKeyDown={selection.handleKeyDown}
+						renderRow={renderRow}
+						revealRef={revealRef}
+					/>
 				)}
 			</div>
 			{renderActiveDialog()}

@@ -17,6 +17,9 @@ export interface UseContactsListSelectionParams {
 	// one's selection/anchor — the contacts twin of useNotesListSelection's resetKey (viewMode) and
 	// useDriveListboxNav's [variant, splat].
 	resetKey: string
+	// Scrolls the virtualized list until the row at `index` of `section` is mounted, for the arrow keys to move focus
+	// to a row outside the window.
+	revealRow?: ((section: ContactSectionKey, index: number) => void) | undefined
 }
 
 export interface ContactsListSelection {
@@ -65,15 +68,15 @@ function parseRowKey(key: string): { section: ContactSectionKey; uuid: string } 
 }
 
 // The contacts-page counterpart of useNotesListSelection, extended with drive's roving cursor: each
-// section is its own listbox with its own single Tab stop, because contacts renders every row of every
-// section at once (no virtualizer) and every row carries its own action controls — a Tab stop per row
-// would scale with the account. Selection state stays local to the page; nothing outside it reads a
-// contacts selection, so a store would be YAGNI.
-export function useContactsListSelection({ resetKey }: UseContactsListSelectionParams): ContactsListSelection {
+// section is its own listbox with its own single Tab stop, because every row carries its own action
+// controls — a Tab stop per row would scale with the account. The list is virtualized, so a cursor row
+// outside the window is scrolled in (revealRow) before it takes focus. Selection state stays local to the
+// page; nothing outside it reads a contacts selection, so a store would be YAGNI.
+export function useContactsListSelection({ resetKey, revealRow }: UseContactsListSelectionParams): ContactsListSelection {
 	const [state, setState] = useState<ContactSelectionState>(EMPTY_CONTACT_SELECTION_STATE)
 	const [cursors, setCursors] = useState<Record<ContactSectionKey, string | null>>(EMPTY_CURSORS)
-	// Identity-keyed, so an index shift can never focus the wrong row. No rAF poll (drive's exists only
-	// because a virtualized target may be unmounted) — every contacts row is already in the DOM.
+	// Identity-keyed, so an index shift can never focus the wrong row. Only mounted rows are here: a row
+	// scrolled in from outside the window registers a frame or two later (focusRow's retry).
 	const rowRefs = useRef(new Map<string, HTMLDivElement>())
 
 	const [seenKey, setSeenKey] = useState(resetKey)
@@ -86,9 +89,8 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 		setCursors(EMPTY_CURSORS)
 	}
 
-	// The 0 fallback (rather than drive's tracked last-position one) is deliberate: contacts lists are
-	// short and unvirtualized, so a vanished cursor row snapping to the top of its section is both cheap
-	// and unsurprising, and the extra state drive needs exists only because of its virtualizer.
+	// The 0 fallback (rather than drive's tracked last-position one) is deliberate: a vanished cursor row
+	// snapping to the top of its section is cheap and unsurprising.
 	function activeIndexFor(section: ContactSectionKey, uuids: readonly string[]): number {
 		return resolveCursorIndex(cursors[section], uuids, 0)
 	}
@@ -188,7 +190,25 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 		}
 
 		moveCursor(section, nextUuid)
-		rowRefs.current.get(rowKey(section, nextUuid))?.focus()
+
+		if (!rowRefs.current.has(rowKey(section, nextUuid))) {
+			revealRow?.(section, nextIndex)
+		}
+
+		focusRow(rowKey(section, nextUuid), 3)
+	}
+
+	// A row scrolled in from outside the window mounts on a later frame; a few are plenty.
+	function focusRow(key: string, framesLeft: number): void {
+		const element = rowRefs.current.get(key)
+
+		if (element !== undefined) {
+			element.focus()
+		} else if (framesLeft > 0) {
+			requestAnimationFrame(() => {
+				focusRow(key, framesLeft - 1)
+			})
+		}
 	}
 
 	function clearSelection(): void {

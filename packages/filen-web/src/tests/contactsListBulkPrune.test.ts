@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
@@ -63,8 +63,20 @@ vi.mock("@/features/contacts/queries/contacts", () => ({
 }))
 
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 import { EMPTY_CONTACT_SELECTION } from "@/features/contacts/lib/selection"
 import { ContactsList } from "@/features/contacts/components/contactsList"
+
+// The list is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 600, clientWidth: 600 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 function contact(uuid: string, email: string): Contact {
 	return { uuid, userId: 1n, email, nickName: email, avatar: undefined, lastActive: 0n, timestamp: 0n } as unknown as Contact
