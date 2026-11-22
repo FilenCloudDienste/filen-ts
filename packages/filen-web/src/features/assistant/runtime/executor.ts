@@ -32,8 +32,6 @@ export type AssistantToolExecution = AssistantToolOutcome
 // An item a call acts on; a chat with the addresses of the people a draft to it reaches.
 export interface AssistantPreviewTarget extends AssistantHandleRef {
 	recipients?: string[]
-	// A restored file's or directory's destination path.
-	where?: string
 }
 
 // The arguments naming where a move, copy, create or playlist addition lands, or the directory a batch works in. The

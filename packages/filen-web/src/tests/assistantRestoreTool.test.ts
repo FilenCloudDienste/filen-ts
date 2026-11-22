@@ -78,9 +78,10 @@ function note(uuid: string, title: string, trash: boolean): Note {
 	} as unknown as Note
 }
 
-// In the trash: a draft from Docs and one from a directory the app holds no row of.
-const draftRaw = rawFile(testUuid("draft"), "old_draft.docx", DOCS)
-const strayRaw = rawFile(testUuid("stray"), "stray.pdf", testUuid("gone"))
+// In the trash. The web SDK renders a trashed item's parent as "trash", whatever its original directory (filen-types
+// ParentUuid::to_str), so the card cannot name that directory.
+const draftRaw = rawFile(testUuid("draft"), "old_draft.docx", "trash")
+const strayRaw = rawFile(testUuid("stray"), "stray.pdf", "trash")
 const liveRaw = rawFile(testUuid("live"), "live.pdf", ROOT)
 const packing = note(testUuid("packing"), "Packing list", true)
 const groceries = note(testUuid("groceries"), "Groceries", false)
@@ -129,7 +130,7 @@ beforeEach(async () => {
 })
 
 describe("restore_items", () => {
-	it("lists every item with where it returns, and restores nothing until confirmed", async () => {
+	it("lists every item, reads nothing more for the card, and restores nothing until confirmed", async () => {
 		const args = { handles: ["f1", "f2", "n1"] }
 		const checked = await executor.check({ callId: "c", tool: tool("restore_items"), args })
 
@@ -144,11 +145,12 @@ describe("restore_items", () => {
 		expect(buildProposal({ id: "p", tool: tool("restore_items"), args, preview })).toMatchObject({
 			action: "restore",
 			targets: [
-				{ handle: "f1", name: "old_draft.docx", where: "/Docs" },
+				{ handle: "f1", name: "old_draft.docx" },
 				{ handle: "f2", name: "stray.pdf" },
 				{ handle: "n1", name: "Packing list" }
 			]
 		})
+		expect(sdk.getItemInfo).not.toHaveBeenCalled()
 		expect(await execute("restore_items", args)).toMatchObject({ ok: false, error: "This needs the user's confirmation first" })
 		expect(sdk.restoreFile).not.toHaveBeenCalled()
 		expect(sdk.restoreNote).not.toHaveBeenCalled()

@@ -77,7 +77,6 @@ import {
 	moveItemsTool,
 	renameItemTool,
 	restoreItemsTool,
-	restoreLocation,
 	setFavoriteTool,
 	setNoteFlagsTool,
 	trashItemsTool,
@@ -555,20 +554,6 @@ export function createAssistantToolExecutor(): ToolExecutor {
 						text: { ...(text === undefined ? {} : { text }), ...(find === undefined ? {} : { find }) },
 						batch: await batchPreview(tool.name, scope, args)
 					}
-				}
-
-				if (tool.name === "restore_items") {
-					// Each item with where it returns.
-					const placed = await Promise.all(
-						targets.map(async target => {
-							const entity = registry.get(target.handle)?.entity
-							const where = entity === undefined ? undefined : await restoreLocation(entity)
-
-							return where === undefined ? target : { ...target, where }
-						})
-					)
-
-					return { ok: true, title: tool.title, targets: placed, text: resolved.text }
 				}
 
 				return { ok: true, title: tool.title, targets, text: resolved.text }

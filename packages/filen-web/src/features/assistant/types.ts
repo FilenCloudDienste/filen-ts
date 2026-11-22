@@ -152,8 +152,6 @@ export interface AssistantProposalTarget {
 	// A chat's: the addresses of the people a draft to it reaches. Its name is whatever a contact or a group's
 	// owner chose, so it alone cannot tell two chats apart.
 	recipients?: readonly string[]
-	// Where a restored file or directory returns: its directory's path, when known.
-	where?: string
 }
 
 // A consequential call waiting for the user. Nothing happens until its card is confirmed. `targets` are

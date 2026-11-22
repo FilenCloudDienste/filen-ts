@@ -41,7 +41,6 @@ import {
 	optionalString,
 	requiredString,
 	resolveHandle,
-	rootDirUuid,
 	shareDirection,
 	showDrive,
 	type ToolAdapter,
@@ -610,25 +609,6 @@ async function restoreTargets(scope: ToolScope, handles: readonly string[]): Pro
 	}
 
 	return { items: [...items.values()], notes: [...notes.values()] }
-}
-
-// Where a trashed file or directory returns, as the card names it: the root, or its directory's path while that
-// directory is held and not trashed itself. Undefined when not known without a request (the card says it returns to
-// its original directory), and for a note (it returns to Notes).
-export async function restoreLocation(entity: AssistantEntity): Promise<string | undefined> {
-	if (entity.kind !== "drive") {
-		return undefined
-	}
-
-	const parent = freshDriveItem(entity.item).data.parent
-
-	if (parent === rootDirUuid()) {
-		return "/"
-	}
-
-	const directory = findOwnedListingItem(parent)?.item
-
-	return directory === undefined || isTrashed(directory) ? undefined : await destinationPath({ kind: "drive", item: directory })
 }
 
 // Back from the trash to where each item was, as the trash screen's and the notes menu's Restore run it.
