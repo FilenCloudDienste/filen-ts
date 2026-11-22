@@ -1,5 +1,6 @@
 import { IRRELEVANCE_CASES, MISSING_PARAM_CASES, SAFETY_CASES } from "./behaviour"
 import { CONVERSATION_CASES } from "./conversation"
+import { ACT_ON_READ_CASES } from "./actOnRead"
 import { DATE_CASES } from "./dates"
 import { DOCUMENT_CASES } from "./documents"
 import { DATE_FILTER_CASES, INSIGHTS_CASES } from "./insights"
@@ -27,5 +28,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
 	...INSIGHTS_CASES,
 	...SOURCES_CASES,
 	...LONG_CASES,
-	...DOCUMENT_CASES
+	...DOCUMENT_CASES,
+	...ACT_ON_READ_CASES
 ]

@@ -1,4 +1,4 @@
-import type { AssistantRoute, AssistantToolName } from "@filen/shared/assistant"
+import type { AssistantActOnReadAction, AssistantRoute, AssistantToolName } from "@filen/shared/assistant"
 import type { AppContext, AppState, NoteType } from "../fixture"
 
 export const CATEGORIES = [
@@ -145,6 +145,8 @@ export type EvalCase = {
 	expectsText?: boolean
 	// The last message needs no tool (thanks, "what did you just say?"): its turn may call none.
 	lastTurnCallsNothing?: boolean
+	// After the last turn the user clicks this button under the reply (Save as note, Draft reply), when offered.
+	actOnRead?: AssistantActOnReadAction
 	// Set by the shipped preset on a case whose write the app does not run: graded on its route and on changing
 	// nothing, and reported apart from the pass rate.
 	unavailableWrite?: boolean

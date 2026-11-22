@@ -1,9 +1,12 @@
 import {
 	ASSISTANT_WEB_TOOLS,
 	isAssistantWebTool,
+	runActOnRead,
 	runAssistantTurn,
 	transformText,
 	windowHistory,
+	type AssistantActOnReadAction,
+	type AssistantActOnReadRequest,
 	type AssistantGenerateRequest,
 	type AssistantGenerateResult,
 	type AssistantHistoryTurn,
@@ -12,7 +15,8 @@ import {
 	type AssistantTool,
 	type AssistantToolCallRecord,
 	type AssistantToolExecutor,
-	type AssistantToolOutcome
+	type AssistantToolOutcome,
+	type AssistantTurnResult
 } from "@filen/shared/assistant"
 import { LlamaSlotModel, toHistory } from "@filen/assistant-node"
 import type { ChatWrapper, Llama, LlamaContextSequence } from "node-llama-cpp"
@@ -237,12 +241,15 @@ export async function runLoopTurns({
 	runtime,
 	app,
 	prompts,
-	preset
+	preset,
+	actOnRead
 }: {
 	runtime: LoopRuntime
 	app: FakeApp
 	prompts: readonly string[]
 	preset: LoopPreset
+	// After the last turn, the user clicks this button under its reply (when the reply offers it).
+	actOnRead?: AssistantActOnReadAction | undefined
 }): Promise<Transcript> {
 	const started = performance.now()
 	const model = new LlamaAssistantModel(runtime)
@@ -300,6 +307,26 @@ export async function runLoopTurns({
 
 			last = result
 		}
+
+		if (actOnRead !== undefined && last !== null) {
+			const request = actOnReadRequest({ action: actOnRead, result: last, executor })
+
+			if (request !== null) {
+				const offset = calls.reduce((max, call) => Math.max(max, call.step), 0)
+				const acted = await runActOnRead({
+					model,
+					executor,
+					request,
+					originUserMessage: prompts.at(-1) ?? "",
+					label: ACT_ON_READ_LABELS[actOnRead],
+					signal: new AbortController().signal,
+					onEvent: () => undefined,
+					confirm: () => Promise.resolve(true)
+				})
+
+				calls.push(...acted.calls.map(record => callRecord(record, offset)))
+			}
+		}
 	} finally {
 		model.dispose()
 	}
@@ -323,6 +350,40 @@ export async function runLoopTurns({
 		timings: model.timings,
 		turns
 	}
+}
+
+// How a click reads in the conversation, as the web app's buttons label it.
+const ACT_ON_READ_LABELS: Readonly<Record<AssistantActOnReadAction, string>> = {
+	save_note: "[Save as note]",
+	draft_reply: "[Draft reply]"
+}
+
+// The button's request as the web session builds it (features/assistant/loop/session.ts): offered only under a
+// reply written from content the turn read, Draft reply only after a chat was read. Null when not offered.
+export function actOnReadRequest({
+	action,
+	result,
+	executor
+}: {
+	action: AssistantActOnReadAction
+	result: AssistantTurnResult
+	executor: FakeAppExecutor
+}): AssistantActOnReadRequest | null {
+	if (result.withheld || result.readSources.length === 0 || result.reply.trim().length === 0) {
+		return null
+	}
+
+	const sources = result.readSources.map(source => source.handle)
+	const first = result.readSources[0]
+	const chat = result.readSources.findLast(source => source.tool === "read_chat")
+
+	if (action === "save_note") {
+		const name = first === undefined ? undefined : executor.name(first.handle)
+
+		return { action, title: name === undefined ? "Assistant summary" : `${name} – summary`, text: result.noteText, sources }
+	}
+
+	return chat === undefined ? null : { action, chat: chat.handle, payload: result.reply, sources }
 }
 
 // A case as the web app can pass it: one that calls a tool the app does not run asks for a plain reply instead

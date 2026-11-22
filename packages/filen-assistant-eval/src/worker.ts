@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getLlama, type Token } from "node-llama-cpp"
+import type { AssistantActOnReadAction } from "@filen/shared/assistant"
 import { MITIGATION_PRESETS, runTurn, type AgentRuntime, type MitigationPreset, type Transcript } from "./agent"
 import { createChatWrapper, parseSpecialTokensInResults } from "./chatWrappers"
 import { EVAL_CASES } from "./cases"
@@ -130,12 +131,18 @@ async function main(): Promise<void> {
 		injectionTools
 	}: {
 		app: FakeApp
-		item: { prompt: string; followUps?: readonly string[] }
+		item: { prompt: string; followUps?: readonly string[]; actOnRead?: AssistantActOnReadAction }
 		preset: EvalPreset
 		injectionTools: boolean
 	}): Promise<Transcript> {
 		if (isLoopPreset(preset)) {
-			return runLoopTurns({ runtime: loopRuntime, app, prompts: [item.prompt, ...(item.followUps ?? [])], preset })
+			return runLoopTurns({
+				runtime: loopRuntime,
+				app,
+				prompts: [item.prompt, ...(item.followUps ?? [])],
+				preset,
+				actOnRead: item.actOnRead
+			})
 		}
 
 		const mitigations = MITIGATION_PRESETS[preset]

@@ -3,7 +3,7 @@ import { assistantToolByName, type AssistantTool } from "@filen/shared/assistant
 import { EVAL_CASES } from "../cases"
 import type { EvalCase } from "../cases/types"
 import { FakeApp } from "../fakeApp"
-import { FakeAppExecutor, LOOP_PRESETS, shippedCase, toHistory } from "../loopHarness"
+import { actOnReadRequest, FakeAppExecutor, LOOP_PRESETS, shippedCase, toHistory } from "../loopHarness"
 
 function tool(name: string): AssistantTool {
 	const found = assistantToolByName(name)
@@ -16,6 +16,37 @@ function tool(name: string): AssistantTool {
 }
 
 describe("loop harness", () => {
+	it("clicks act-on-read as the web session offers it: Draft reply only after a chat was read", () => {
+		const executor = new FakeAppExecutor(new FakeApp(), LOOP_PRESETS.shipped.supports)
+		const turn = (tool: string, handle: string) => ({
+			reply: "Anna asks about Friday.",
+			historyReply: "",
+			historyCalls: [],
+			readSources: [{ tool, handle }],
+			noteText: "Anna asks about Friday.",
+			prompt: "",
+			withheld: false,
+			route: null,
+			intent: null,
+			calls: [],
+			unrecovered: false,
+			stepCapHit: false
+		})
+
+		expect(actOnReadRequest({ action: "draft_reply", result: turn("read_chat", "c1"), executor })).toEqual({
+			action: "draft_reply",
+			chat: "c1",
+			payload: "Anna asks about Friday.",
+			sources: ["c1"]
+		})
+		expect(actOnReadRequest({ action: "save_note", result: turn("read_chat", "c1"), executor })).toMatchObject({
+			title: "Anna Schmidt – summary",
+			text: "Anna asks about Friday."
+		})
+		expect(actOnReadRequest({ action: "draft_reply", result: turn("read_note", "n1"), executor })).toBeNull()
+		expect(actOnReadRequest({ action: "save_note", result: { ...turn("read_note", "n1"), withheld: true }, executor })).toBeNull()
+	})
+
 	it("puts each tool result onto the call it answers, in the model turn that made it", () => {
 		expect(
 			toHistory(
