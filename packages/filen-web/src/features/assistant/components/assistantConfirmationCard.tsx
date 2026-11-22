@@ -227,6 +227,13 @@ function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 									className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
 								/>
 								<span className="min-w-0 wrap-anywhere">{target.name}</span>
+								{proposal.action === "restore" ? (
+									<span className="ml-auto shrink-0 pl-2 text-muted-foreground">
+										{proposalTargetKind(target.handle) === "note"
+											? t("assistantProposalRestoreToNotes")
+											: (target.where ?? t("assistantProposalRestoreToOriginal"))}
+									</span>
+								) : null}
 							</li>
 						)
 					})}
@@ -268,6 +275,8 @@ function useConfirmLabel(): (proposal: AssistantProposal) => string {
 				return t("assistantConfirmTrash")
 			case "draft-message":
 				return t("assistantConfirmDraft")
+			case "restore":
+				return t("assistantConfirmRestore", { count: proposal.targets.length })
 			case "batch-rename":
 				return t("assistantConfirmBatchRename", { count: proposal.batch === undefined ? 0 : batchChangeCount(proposal.batch) })
 			case "organize-by-date":

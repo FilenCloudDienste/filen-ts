@@ -1196,7 +1196,8 @@ export const ASSISTANT_WEB_TOOLS = [
 	"search_note_text",
 	"read_document",
 	"rename_by_pattern",
-	"organize_by_date"
+	"organize_by_date",
+	"restore_items"
 ] as const satisfies readonly AssistantToolName[]
 
 export type AssistantWebToolName = (typeof ASSISTANT_WEB_TOOLS)[number]

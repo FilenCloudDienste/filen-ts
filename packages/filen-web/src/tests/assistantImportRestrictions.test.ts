@@ -57,9 +57,7 @@ const FORBIDDEN = [
 	'import { blockContact, sendContactRequest, acceptRequest, messageContact } from "@/features/contacts/lib/actions"',
 	'import { requestJobCancel } from "@/features/transfers/lib/control"',
 	'import { cancelTransfers, setTransfersPaused } from "@/features/transfers/lib/control"',
-	'import { restoreItems, restoreVersion } from "@/features/drive/lib/actions"',
-	'import { restoreNote } from "@/features/notes/lib/actions"',
-	'import { restoreNotes } from "@/features/notes/lib/bulk"',
+	'import { restoreVersion } from "@/features/drive/lib/actions"',
 	'import { restoreNoteFromHistory } from "@/features/notes/lib/history"',
 	'import { clearSession, persistSession, resumeSession, broadcastAuth } from "@/lib/sdk/session"',
 	'import { runLogout } from "@/lib/logout"',
@@ -74,12 +72,12 @@ const FORBIDDEN = [
 
 describe("assistant import restrictions", () => {
 	it.each(["src/features/assistant/runtime/loop.ts", "src/features/assistant/tools/drive.ts", "src/workers/assistant.worker.ts"])(
-		"keeps deleting, restoring, sending, queueing, sharing, settings, transfer control, the session, logout and the desktop bridge out of reach in %s",
+		"keeps deleting, restoring a version, sending, queueing, sharing, settings, transfer control, the session, logout and the desktop bridge out of reach in %s",
 		async file => {
 			const messages = await lintImports(file, FORBIDDEN.join("\n"))
 
 			// One per banned name, or per statement for a module banned whole; trashItems passes.
-			expect(messages).toHaveLength(42)
+			expect(messages).toHaveLength(39)
 			expect(messages.every(message => message.includes("irreversible or security-critical"))).toBe(true)
 
 			for (const line of FORBIDDEN) {
@@ -88,11 +86,16 @@ describe("assistant import restrictions", () => {
 		}
 	)
 
-	it("still allows the trash, which the user can undo, and reading a draft", async () => {
+	it("still allows the trash, which the user can undo, restoring from it, and reading a draft", async () => {
 		await expect(
 			lintImports(
 				"src/features/assistant/tools/drive.ts",
-				'import { trashItems } from "@/features/drive/lib/actions"\nimport { loadDraft } from "@/features/chats/lib/drafts"'
+				[
+					'import { trashItems, restoreItems } from "@/features/drive/lib/actions"',
+					'import { restoreNote } from "@/features/notes/lib/actions"',
+					'import { restoreNotes } from "@/features/notes/lib/bulk"',
+					'import { loadDraft } from "@/features/chats/lib/drafts"'
+				].join("\n")
 			)
 		).resolves.toEqual([])
 	})

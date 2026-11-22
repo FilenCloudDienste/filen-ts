@@ -44,17 +44,17 @@ const ASSISTANT_RAW_SDK = "The assistant goes through the feature modules the us
 
 // The assistant's dispatcher runs calls a model produced, and a shared note or chat message can
 // steer that model. What the assistant can import it may one day call, so permanent deletion,
-// restoring from the trash or a version, sending, sharing, public links, adding participants, every
-// contact action, leaving, unsharing, account security, the session, logout, the desktop bridge and stopping or
-// pausing transfers are kept out of its reach at the import level, whatever the guard decides at runtime.
-// Chats are draft-only: nothing that sends, queues or drops a message. The trash, transfers and settings it only reads or opens.
+// restoring a version, sending, sharing, public links, adding participants, every contact action, leaving,
+// unsharing, account security, the session, logout, the desktop bridge and stopping or pausing transfers are kept
+// out of its reach at the import level, whatever the guard decides at runtime. Chats are draft-only: nothing that
+// sends, queues or drops a message. Restoring from the trash is reachable: it only undoes a trash, behind a card
+// naming every item. Transfers and settings it only reads or opens.
 const ASSISTANT_RESTRICTED_PATHS = [
 	{
 		name: "@/features/drive/lib/actions",
 		importNames: [
 			"deleteItemsPermanently",
 			"emptyTrash",
-			"restoreItems",
 			"restoreVersion",
 			"deleteVersion",
 			"deleteVersions",
@@ -66,12 +66,8 @@ const ASSISTANT_RESTRICTED_PATHS = [
 		message: ASSISTANT_FORBIDDEN
 	},
 	{ name: "@/features/drive/lib/share/actions", message: ASSISTANT_FORBIDDEN },
-	{ name: "@/features/notes/lib/actions", importNames: ["deleteNote", "leaveNote", "restoreNote"], message: ASSISTANT_FORBIDDEN },
-	{
-		name: "@/features/notes/lib/bulk",
-		importNames: ["deleteNotesPermanently", "leaveNotes", "restoreNotes"],
-		message: ASSISTANT_FORBIDDEN
-	},
+	{ name: "@/features/notes/lib/actions", importNames: ["deleteNote", "leaveNote"], message: ASSISTANT_FORBIDDEN },
+	{ name: "@/features/notes/lib/bulk", importNames: ["deleteNotesPermanently", "leaveNotes"], message: ASSISTANT_FORBIDDEN },
 	// Restoring a note's older version overwrites its current text.
 	{ name: "@/features/notes/lib/history", importNames: ["restoreNoteFromHistory"], message: ASSISTANT_FORBIDDEN },
 	{ name: "@/features/notes/lib/tags", importNames: ["deleteNoteTag"], message: ASSISTANT_FORBIDDEN },

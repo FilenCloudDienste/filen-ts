@@ -9,6 +9,7 @@ import { LANGUAGE_CASES } from "./language"
 import { LONG_CASES } from "./long"
 import { MULTI_STEP_CASES } from "./multiStep"
 import { PROMPTING_CASES } from "./prompting"
+import { RESTORE_CASES } from "./restore"
 import { MULTIPLE_CASES, PARALLEL_CASES, SIMPLE_CASES } from "./single"
 import { SOURCES_CASES } from "./sources"
 import type { EvalCase } from "./types"
@@ -31,5 +32,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
 	...LONG_CASES,
 	...DOCUMENT_CASES,
 	...ACT_ON_READ_CASES,
-	...BATCH_CASES
+	...BATCH_CASES,
+	...RESTORE_CASES
 ]

@@ -5,8 +5,8 @@ import { runBulkActivity } from "@/lib/activity/activity"
 import type { ActivityKeys } from "@/lib/activity/activity.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
-import { createDirectory, renameItem, setFavoritedItems, trashItems } from "@/features/drive/lib/actions"
-import { driveActivity, DRIVE_TRASH, favoriteKeys } from "@/features/drive/lib/activity"
+import { createDirectory, renameItem, restoreItems, setFavoritedItems, trashItems } from "@/features/drive/lib/actions"
+import { driveActivity, DRIVE_RESTORE, DRIVE_TRASH, favoriteKeys } from "@/features/drive/lib/activity"
 import { moveActivity } from "@/features/drive/lib/dnd"
 import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
@@ -20,7 +20,7 @@ import {
 	NOTES_UNFAVORITE,
 	NOTES_UNPIN
 } from "@/features/notes/lib/activity"
-import { archiveNotes, setFavoritedNotes, setPinnedNotes, trashNotes, unarchiveNotes } from "@/features/notes/lib/bulk"
+import { archiveNotes, restoreNotes, setFavoritedNotes, setPinnedNotes, trashNotes, unarchiveNotes } from "@/features/notes/lib/bulk"
 import { createNoteWithContent } from "@/features/notes/lib/import"
 import { noteContentFromText } from "@/features/notes/lib/import.logic"
 import { exceedsNoteSizeCap } from "@/features/notes/hooks/useNoteEditor.logic"
@@ -41,6 +41,7 @@ import {
 	optionalString,
 	requiredString,
 	resolveHandle,
+	rootDirUuid,
 	shareDirection,
 	showDrive,
 	type ToolAdapter,
@@ -362,6 +363,11 @@ export const WRITE_PRECHECKS: Readonly<Record<string, (scope: ToolScope, input: 
 
 		return null
 	},
+	restore_items: async (scope, input) => {
+		await restoreTargets(scope, handleList(input, "handles"))
+
+		return null
+	},
 	create_note: (_scope, input) => {
 		const { title, content } = noteRequest(input)
 
@@ -563,6 +569,88 @@ export const trashItemsTool: ToolAdapter = async (input, scope) => {
 	const { done, failed } = bulkResult(outcome, name => name)
 
 	return { value: { trashed: done, restorable: true, ...(failed === undefined ? {} : { failed }) } }
+}
+
+// What restore_items brings back: only what is in the trash now, and only the user's own notes (only the owner
+// trashes one, so only the owner restores it).
+async function restoreTargets(scope: ToolScope, handles: readonly string[]): Promise<TrashTargets> {
+	const notes = new Map<string, Note>()
+	const items = new Map<string, DriveItem>()
+
+	for (const handle of handles) {
+		const entity = await resolveHandle(scope, handle, ["drive", "note"])
+
+		if (entity.kind === "note") {
+			const note = freshNote(entity.note)
+
+			if (!note.trash) {
+				throw new AssistantToolError(`"${noteTitle(note)}" is not in the trash`)
+			}
+
+			if (!isNoteOwner(note, currentUserId())) {
+				throw new AssistantToolError(`"${noteTitle(note)}" is shared with the user; its owner manages it`)
+			}
+
+			notes.set(note.uuid, note)
+		} else if (entity.kind === "drive") {
+			const item = freshDriveItem(entity.item)
+
+			if (!isTrashed(item)) {
+				throw new AssistantToolError(`"${driveName(item)}" is not in the trash`)
+			}
+
+			const problem = itemProblem(item)
+
+			if (problem !== null) {
+				throw new AssistantToolError(problem)
+			}
+
+			items.set(item.data.uuid, item)
+		}
+	}
+
+	return { items: [...items.values()], notes: [...notes.values()] }
+}
+
+// Where a trashed file or directory returns, as the card names it: the root, or its directory's path while that
+// directory is held and not trashed itself. Undefined when not known without a request (the card says it returns to
+// its original directory), and for a note (it returns to Notes).
+export async function restoreLocation(entity: AssistantEntity): Promise<string | undefined> {
+	if (entity.kind !== "drive") {
+		return undefined
+	}
+
+	const parent = freshDriveItem(entity.item).data.parent
+
+	if (parent === rootDirUuid()) {
+		return "/"
+	}
+
+	const directory = findOwnedListingItem(parent)?.item
+
+	return directory === undefined || isTrashed(directory) ? undefined : await destinationPath({ kind: "drive", item: directory })
+}
+
+// Back from the trash to where each item was, as the trash screen's and the notes menu's Restore run it.
+export const restoreItemsTool: ToolAdapter = async (input, scope) => {
+	const { items, notes } = await restoreTargets(scope, handleList(input, "handles"))
+
+	throwIfStopped(scope)
+
+	const [driveOutcome, notesOutcome] = await Promise.all([
+		items.length === 0 ? null : runBulkActivity(driveActivity(items, DRIVE_RESTORE, restoreItems)),
+		notes.length === 0 ? null : runBulkActivity(notesActivity(notes, NOTES_RESTORE, restoreNotes))
+	])
+	const outcome: BulkOutcome<string> = {
+		succeeded: [...(driveOutcome?.succeeded.map(driveName) ?? []), ...(notesOutcome?.succeeded.map(noteTitle) ?? [])],
+		failed: [
+			...(driveOutcome?.failed.map(failure => ({ item: driveName(failure.item), error: failure.error })) ?? []),
+			...(notesOutcome?.failed.map(failure => ({ item: noteTitle(failure.item), error: failure.error })) ?? [])
+		]
+	}
+	const { done, failed } = bulkResult(outcome, name => name)
+
+	return { value: { restored: done, ...(failed === undefined ? {} : { failed }) } }
 }
 
 export const createNoteTool: ToolAdapter = async (input, scope) => {

@@ -76,6 +76,8 @@ import {
 	destinationPath,
 	moveItemsTool,
 	renameItemTool,
+	restoreItemsTool,
+	restoreLocation,
 	setFavoriteTool,
 	setNoteFlagsTool,
 	trashItemsTool,
@@ -116,7 +118,8 @@ const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly As
 	add_tracks_to_playlist: { playlist: ["playlist"], handles: ["drive", "track"] },
 	read_document: { handle: ["drive"] },
 	rename_by_pattern: { scope: ["root", "drive"], handles: ["drive"] },
-	organize_by_date: { scope: ["root", "drive"] }
+	organize_by_date: { scope: ["root", "drive"] },
+	restore_items: { handles: ["drive", "note"] }
 }
 
 // A path the model is told to list a directory by is copied back whole, so it is never shortened: past this it
@@ -302,7 +305,8 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	search_note_text: searchNoteTextTool,
 	read_document: readDocumentTool,
 	rename_by_pattern: renameByPatternTool,
-	organize_by_date: organizeByDateTool
+	organize_by_date: organizeByDateTool,
+	restore_items: restoreItemsTool
 }
 
 interface ResolvedArgs {
@@ -465,9 +469,9 @@ export function createAssistantToolExecutor(): ToolExecutor {
 				const live = freshEntity(entity)
 				const name = entityName(live)
 
-				// The trash is read-only to the assistant: a move or a favorite there would restore or change what the
-				// user threw away.
-				if (isConsequentialTool(tool) && live.kind === "drive" && isTrashed(live.item)) {
+				// The trash is read-only to the assistant but for restore_items: a move or a favorite there would restore
+				// or change what the user threw away.
+				if (isConsequentialTool(tool) && tool.name !== "restore_items" && live.kind === "drive" && isTrashed(live.item)) {
 					throw new AssistantToolError(`"${name}" is in the trash; only the user can restore or change it, in the app`)
 				}
 				const resolved = scope.show(entity, name)
@@ -551,6 +555,20 @@ export function createAssistantToolExecutor(): ToolExecutor {
 						text: { ...(text === undefined ? {} : { text }), ...(find === undefined ? {} : { find }) },
 						batch: await batchPreview(tool.name, scope, args)
 					}
+				}
+
+				if (tool.name === "restore_items") {
+					// Each item with where it returns.
+					const placed = await Promise.all(
+						targets.map(async target => {
+							const entity = registry.get(target.handle)?.entity
+							const where = entity === undefined ? undefined : await restoreLocation(entity)
+
+							return where === undefined ? target : { ...target, where }
+						})
+					)
+
+					return { ok: true, title: tool.title, targets: placed, text: resolved.text }
 				}
 
 				return { ok: true, title: tool.title, targets, text: resolved.text }

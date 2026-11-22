@@ -131,6 +131,9 @@ const UNREADABLE_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set(["key", "pag
 // Screens where the web app's context names a current directory and a selection.
 const DRIVE_SCREENS: ReadonlySet<string> = new Set(["drive"])
 
+// Like the web app's trash screen: a selection there is named, with no current directory.
+const SELECTION_SCREENS: ReadonlySet<string> = new Set(["trash"])
+
 // Like the app's Recents screen, which ages files out by upload time.
 const RECENT_DAYS = 45
 
@@ -195,6 +198,8 @@ export class FakeApp {
 					? "nothing selected"
 					: `selected: ${selection.map(handle => `${contextName(this.drive(handle).name)} (handle ${handle})`).join(", ")}`
 			)
+		} else if (SELECTION_SCREENS.has(screen) && selection.length > 0) {
+			parts.push(`selected: ${selection.map(handle => `${contextName(this.drive(handle).name)} (handle ${handle})`).join(", ")}`)
 		}
 
 		if (note !== undefined) {
@@ -248,7 +253,7 @@ export class FakeApp {
 		return [
 			...new Set([
 				"d0",
-				...(onDrive ? [directory, ...selection] : []),
+				...(onDrive ? [directory, ...selection] : SELECTION_SCREENS.has(screen) ? selection : []),
 				...(note === undefined ? [] : [note]),
 				...(chat === undefined ? [] : [chat]),
 				...(openDocument === undefined ? [] : [openDocument.handle]),
@@ -2081,8 +2086,38 @@ export class FakeApp {
 				}
 			}
 
+			case "restore_items": {
+				// Like the app: every handle resolves before anything changes, and only what is in the trash comes back.
+				const targets = [...new Set(list("handles"))].map(handle => {
+					const isNote = handle.startsWith("n")
+
+					this.known(handle, isNote ? "note" : "drive")
+
+					const item = isNote
+						? this.state.notes.find(candidate => candidate.handle === handle)
+						: this.state.drive.find(candidate => candidate.handle === handle)
+
+					if (item === undefined) {
+						throw new CallError(`"${handle}" is not a file, directory or note`, true)
+					}
+
+					if (!item.trashed) {
+						throw new CallError(`"${"title" in item ? item.title : item.name}" is not in the trash`, false)
+					}
+
+					return item
+				})
+
+				for (const item of targets) {
+					item.trashed = false
+				}
+
+				return {
+					restored: targets.map(item => ("title" in item ? item.title : item.name))
+				}
+			}
+
 			// Their tracks give these their fixture behaviour; until then a call reads as a failure that changes nothing.
-			case "restore_items":
 			case "app_help": {
 				throw new CallError(`${name} is not available in this app yet`, false)
 			}

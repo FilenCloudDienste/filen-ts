@@ -281,6 +281,31 @@ describe("AssistantConfirmationCard", () => {
 	})
 })
 
+describe("restore card", () => {
+	it("lists each item with where it returns", () => {
+		renderCard({
+			id: "p4",
+			action: "restore",
+			targets: [
+				{ handle: "f1", name: "old_draft.docx", where: "/Documents" },
+				{ handle: "f2", name: "stray.pdf" },
+				{ handle: "n1", name: "Packing list" }
+			],
+			destination: null,
+			text: {}
+		})
+
+		const card = screen.getByRole("group", { name: "Restore 3 items from the trash" })
+
+		expect(
+			within(within(card).getByRole("list", { name: "Items" }))
+				.getAllByRole("listitem")
+				.map(item => item.textContent)
+		).toEqual(["old_draft.docx/Documents", "stray.pdfto its original directory", "Packing listto Notes"])
+		expect(within(card).getByRole("button", { name: "Restore 3" })).toBeDefined()
+	})
+})
+
 describe("batch cards", () => {
 	const RENAMES: AssistantProposal = {
 		id: "p2",

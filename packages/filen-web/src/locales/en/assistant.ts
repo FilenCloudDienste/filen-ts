@@ -610,6 +610,14 @@ export const assistant = {
 	assistantConfirmOrganize_one: "Move {{count}}",
 	/** Sort card — runs the moves */
 	assistantConfirmOrganize_other: "Move {{count}}",
+	/** Restore card — where a restored note returns: the notes list */
+	assistantProposalRestoreToNotes: "to Notes",
+	/** Restore card — where a restored file or directory returns when its directory's path is not known */
+	assistantProposalRestoreToOriginal: "to its original directory",
+	/** Restore card — runs the restore */
+	assistantConfirmRestore_one: "Restore {{count}}",
+	/** Restore card — runs the restore */
+	assistantConfirmRestore_other: "Restore {{count}}",
 	/** Card — runs the action */
 	assistantConfirm: "Confirm",
 	/** Card — runs a trash action */

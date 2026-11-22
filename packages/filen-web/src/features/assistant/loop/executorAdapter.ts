@@ -88,10 +88,11 @@ export function buildProposal({
 		action,
 		targets: preview.targets
 			.filter(target => batch === undefined && !destinationHandles.has(target.handle))
-			.map(({ handle, name, recipients }) => ({
+			.map(({ handle, name, recipients, where }) => ({
 				handle,
 				name: cardName(name),
-				...(recipients === undefined ? {} : { recipients: recipients.map(cardName) })
+				...(recipients === undefined ? {} : { recipients: recipients.map(cardName) }),
+				...(where === undefined ? {} : { where: cardName(where) })
 			})),
 		destination: destination === undefined ? null : cardName(destination.name),
 		text: action === "note-flags" ? noteFlagText(args) : preview.text,
