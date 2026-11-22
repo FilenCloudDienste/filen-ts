@@ -1,16 +1,124 @@
 import { formatBytesFixed } from "@filen/shared"
+import type { AssistantDocumentCoverage, AssistantDocumentKind } from "@filen/shared/assistant"
 import type { AssistantKey } from "@/lib/i18n"
 import type { TranscriptEntry, TranscriptStep } from "@/features/assistant/store/transcript"
 import {
 	NOTE_FLAG_ARGS,
 	type AssistantModelState,
+	type AssistantStepExtract,
 	type AssistantStepFailure,
 	type AssistantStepRoute,
 	type AssistantTurnError,
 	type NoteFlagArg
 } from "@/features/assistant/types"
 
-export type TranscriptRow = TranscriptEntry | { kind: "thinking"; id: "thinking" }
+// A document read that covered only part of what it asked for, under the reply it led to; `subject` is the
+// document's name.
+export interface CoverageNote {
+	id: string
+	subject: string | null
+	coverage: AssistantDocumentCoverage
+}
+
+export type TranscriptRow =
+	| TranscriptEntry
+	| { kind: "thinking"; id: "thinking" }
+	| { kind: "footer"; id: string; turnId: string; coverage: readonly CoverageNote[] }
+
+type DocumentUnitWord = "page" | "slide" | "sheet" | "part"
+
+const UNIT_WORDS: Readonly<Record<AssistantDocumentKind, DocumentUnitWord>> = {
+	pdf: "page",
+	docx: "page",
+	slides: "slide",
+	sheet: "sheet",
+	text: "part"
+}
+
+type ExtractKey = Extract<AssistantKey, `assistantStepReading${string}`>
+type CoveredKey = Extract<AssistantKey, `assistantCovered${string}`>
+type ReadRestKey = Extract<AssistantKey, `assistantReadRest${string}`>
+
+const EXTRACT_KEYS: Readonly<Record<DocumentUnitWord, { one: ExtractKey; many: ExtractKey }>> = {
+	page: { one: "assistantStepReadingPage", many: "assistantStepReadingPages" },
+	slide: { one: "assistantStepReadingSlide", many: "assistantStepReadingSlides" },
+	sheet: { one: "assistantStepReadingSheet", many: "assistantStepReadingSheets" },
+	part: { one: "assistantStepReadingPart", many: "assistantStepReadingPart" }
+}
+
+// "Reading pages 9–14 (2 of 6)"; a text in parts, "Reading part 2 of 6".
+export function extractStepKey({ kind, from, to }: AssistantStepExtract): ExtractKey {
+	const keys = EXTRACT_KEYS[UNIT_WORDS[kind]]
+
+	return from === to ? keys.one : keys.many
+}
+
+const COVERED_KEYS: Readonly<
+	Record<DocumentUnitWord, { range: CoveredKey; part: CoveredKey; rest: Exclude<ReadRestKey, "assistantReadRest"> }>
+> = {
+	page: { range: "assistantCoveredPages", part: "assistantCoveredPartOfPage", rest: "assistantReadRestPages" },
+	slide: { range: "assistantCoveredSlides", part: "assistantCoveredPartOfSlide", rest: "assistantReadRestSlides" },
+	sheet: { range: "assistantCoveredSheets", part: "assistantCoveredPartOfSheet", rest: "assistantReadRestSheets" },
+	part: { range: "assistantCoveredPages", part: "assistantCoveredPartOfPage", rest: "assistantReadRestPages" }
+}
+
+// "Covered pages 1–23 of 41.", and the message [Read the rest] sends: from the first unit not covered.
+export function coverageKeys(coverage: AssistantDocumentCoverage): {
+	note: CoveredKey
+	rest: Exclude<ReadRestKey, "assistantReadRest">
+	restFrom: number
+} {
+	const keys = COVERED_KEYS[UNIT_WORDS[coverage.kind]]
+
+	return {
+		note: coverage.to < coverage.from ? keys.part : keys.range,
+		rest: keys.rest,
+		restFrom: Math.max(coverage.from, coverage.to + 1)
+	}
+}
+
+// The partial reads of a completed turn, for the note under its last reply.
+function coverageNotes(entry: StepsEntry): CoverageNote[] {
+	return entry.steps.flatMap(step =>
+		step.kind === "tool" && step.coverage !== undefined ? [{ id: step.id, subject: step.subject, coverage: step.coverage }] : []
+	)
+}
+
+// Each completed turn whose reads covered only part of a document gets a footer row right after its last reply.
+function withFooters(entries: readonly TranscriptEntry[]): readonly TranscriptRow[] {
+	const footers = new Map<string, CoverageNote[]>()
+	const lastReply = new Map<string, number>()
+
+	for (const [index, entry] of entries.entries()) {
+		if (entry.kind === "reply") {
+			lastReply.set(entry.turnId, index)
+		} else if (entry.kind === "steps" && entry.outcome === "complete") {
+			const notes = coverageNotes(entry)
+
+			if (notes.length > 0) {
+				footers.set(entry.turnId, notes)
+			}
+		}
+	}
+
+	if (footers.size === 0) {
+		return entries
+	}
+
+	const rows: TranscriptRow[] = []
+
+	for (const [index, entry] of entries.entries()) {
+		rows.push(entry)
+
+		const notes = footers.get(entry.turnId)
+
+		if (notes !== undefined && lastReply.get(entry.turnId) === index) {
+			rows.push({ kind: "footer", id: `footer:${entry.turnId}`, turnId: entry.turnId, coverage: notes })
+		}
+	}
+
+	return rows
+}
 
 type DownloadingState = Extract<AssistantModelState, { kind: "downloading" }>
 
@@ -88,8 +196,10 @@ export function removableModelBytes(state: AssistantModelState): number {
 // The waiting bubble shows only until the turn's step list or reply appears: the list says what is
 // happening from then on.
 export function transcriptRows(entries: readonly TranscriptEntry[], activeTurnId: string | null): readonly TranscriptRow[] {
+	const rows = withFooters(entries)
+
 	if (activeTurnId === null) {
-		return entries
+		return rows
 	}
 
 	for (let index = entries.length - 1; index >= 0; index--) {
@@ -100,11 +210,11 @@ export function transcriptRows(entries: readonly TranscriptEntry[], activeTurnId
 		}
 
 		if (entry.kind === "steps" || entry.kind === "reply") {
-			return entries
+			return rows
 		}
 	}
 
-	return [...entries, { kind: "thinking", id: "thinking" }]
+	return [...rows, { kind: "thinking", id: "thinking" }]
 }
 
 type StepsEntry = Extract<TranscriptEntry, { kind: "steps" }>

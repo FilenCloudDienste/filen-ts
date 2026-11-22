@@ -3,6 +3,8 @@ import { ASSISTANT_TOOLS } from "@filen/shared/assistant"
 import { EN_CATALOGS } from "@/lib/i18n/catalog"
 import {
 	canRemoveModel,
+	coverageKeys,
+	extractStepKey,
 	currentStep,
 	downloadByteFigures,
 	durationFigure,
@@ -147,6 +149,44 @@ describe("transcriptRows", () => {
 		expect(transcriptRows([user, streaming], "t1")).toHaveLength(2)
 		expect(transcriptRows([user, steps], "t1")).toHaveLength(2)
 		expect(transcriptRows([user, steps, next], "t2")).toHaveLength(4)
+	})
+
+	it("notes a completed turn's partial document read under its last reply", () => {
+		const coverage = { kind: "pdf" as const, from: 1, to: 23, units: 41, end: 41 }
+		const read: TranscriptStep = {
+			id: "t1:call",
+			kind: "tool",
+			status: "done",
+			progress: null,
+			tool: "read_document",
+			subject: "report.pdf",
+			resultCount: null,
+			resultMore: false,
+			failure: null,
+			coverage,
+			startedAt: 0,
+			endedAt: 1
+		}
+		const steps: TranscriptEntry = {
+			kind: "steps",
+			id: "steps:t1",
+			turnId: "t1",
+			steps: [read],
+			startedAt: 0,
+			lastAt: 1,
+			outcome: "complete",
+			expanded: null
+		}
+		const first: TranscriptEntry = { kind: "reply", id: "reply:a", turnId: "t1", text: "Reading.", final: true }
+		const last: TranscriptEntry = { kind: "reply", id: "reply:b", turnId: "t1", text: "Done.", final: true }
+		const rows = transcriptRows([user, steps, first, last], null)
+
+		expect(rows.map(row => row.id)).toEqual(["user:t1", "steps:t1", "reply:a", "reply:b", "footer:t1"])
+		expect(rows.at(-1)).toMatchObject({ kind: "footer", coverage: [{ subject: "report.pdf", coverage }] })
+		expect(coverageKeys(coverage)).toEqual({ note: "assistantCoveredPages", rest: "assistantReadRestPages", restFrom: 24 })
+		expect(transcriptRows([user, { ...steps, outcome: null }, first], "t1").some(row => row.kind === "footer")).toBe(false)
+		expect(extractStepKey({ kind: "slides", from: 3, to: 3, chunk: 1, chunks: 2 })).toBe("assistantStepReadingSlide")
+		expect(extractStepKey({ kind: "pdf", from: 9, to: 14, chunk: 2, chunks: 6 })).toBe("assistantStepReadingPages")
 	})
 })
 

@@ -666,5 +666,41 @@ export const assistant = {
 	/** Chip — where the user is in a presentation */
 	assistantDocumentChipSlide: "slide {{slide}}",
 	/** Chip button — leaves the open document out of the next question; `name` is the document's name */
-	assistantDocumentChipRemove: "Don't ask about {{name}} in the next question"
+	assistantDocumentChipRemove: "Don't ask about {{name}} in the next question",
+
+	// ── Reading a long document in parts ────────────────────────────────────
+	/** Step — reading one page of a long document; `chunk` of `chunks` parts read one after the other */
+	assistantStepReadingPage: "Reading page {{from}} ({{chunk}} of {{chunks}})",
+	/** Step — reading pages `from` to `to` of a long document */
+	assistantStepReadingPages: "Reading pages {{from}}–{{to}} ({{chunk}} of {{chunks}})",
+	/** Step — reading one slide of a long presentation */
+	assistantStepReadingSlide: "Reading slide {{from}} ({{chunk}} of {{chunks}})",
+	/** Step — reading slides `from` to `to` of a long presentation */
+	assistantStepReadingSlides: "Reading slides {{from}}–{{to}} ({{chunk}} of {{chunks}})",
+	/** Step — reading one sheet of a large spreadsheet */
+	assistantStepReadingSheet: "Reading sheet {{from}} ({{chunk}} of {{chunks}})",
+	/** Step — reading sheets `from` to `to` of a large spreadsheet */
+	assistantStepReadingSheets: "Reading sheets {{from}}–{{to}} ({{chunk}} of {{chunks}})",
+	/** Step — reading a long text in parts */
+	assistantStepReadingPart: "Reading part {{chunk}} of {{chunks}}",
+	/** Note under a reply — the answer is based on pages `from` to `to` of a document of `units` pages */
+	assistantCoveredPages: "Covered pages {{from}}–{{to}} of {{units}}.",
+	/** Note under a reply — the answer is based on part of one page */
+	assistantCoveredPartOfPage: "Covered part of page {{from}} of {{units}}.",
+	/** Note under a reply — slides covered */
+	assistantCoveredSlides: "Covered slides {{from}}–{{to}} of {{units}}.",
+	/** Note under a reply — part of one slide covered */
+	assistantCoveredPartOfSlide: "Covered part of slide {{from}} of {{units}}.",
+	/** Note under a reply — sheets covered */
+	assistantCoveredSheets: "Covered sheets {{from}}–{{to}} of {{units}}.",
+	/** Note under a reply — part of one sheet covered */
+	assistantCoveredPartOfSheet: "Covered part of sheet {{from}} of {{units}}.",
+	/** Button after the note — asks the assistant to read the pages it did not cover */
+	assistantReadRest: "Read the rest",
+	/** The message Read the rest sends; `name` is the document's name */
+	assistantReadRestPages: "Read {{name}} from page {{from}} to {{to}}",
+	/** The message Read the rest sends for a presentation */
+	assistantReadRestSlides: "Read {{name}} from slide {{from}} to {{to}}",
+	/** The message Read the rest sends for a spreadsheet */
+	assistantReadRestSheets: "Read {{name}} from sheet {{from}} to {{to}}"
 } as const

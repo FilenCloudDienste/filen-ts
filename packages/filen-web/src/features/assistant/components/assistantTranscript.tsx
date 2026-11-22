@@ -7,6 +7,7 @@ import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisib
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { AssistantConfirmationCard } from "@/features/assistant/components/assistantConfirmationCard"
 import { AssistantSteps } from "@/features/assistant/components/assistantSteps"
+import { AssistantReplyFooter } from "@/features/assistant/components/assistantReplyFooter"
 import { TURN_END_KEYS, type TranscriptRow } from "@/features/assistant/components/assistant.logic"
 import { stepsExpanded } from "@/features/assistant/store/transcript"
 
@@ -21,6 +22,8 @@ function estimateRowSize(row: TranscriptRow | undefined): number {
 		case "user":
 		case "thinking":
 			return 48
+		case "footer":
+			return 8 + 20 * row.coverage.length
 		default:
 			return 28
 	}
@@ -107,6 +110,8 @@ function TranscriptRowContent({ row }: { row: TranscriptRow }) {
 					{t(TURN_END_KEYS[row.outcome])}
 				</p>
 			)
+		case "footer":
+			return <AssistantReplyFooter coverage={row.coverage} />
 		case "thinking":
 			return (
 				<div

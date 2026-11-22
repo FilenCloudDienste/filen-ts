@@ -738,6 +738,38 @@ describe("assistant session", () => {
 		])
 	})
 
+	it("shows the chunk a long document's extraction reads, its bar over all chunks, and what it covered", () => {
+		const emitted: AssistantEvent[] = []
+		const steps = turnSteps({ turnId: "t", emit: event => emitted.push(event), now: () => 0 })
+		const record = {
+			id: "call_1_0",
+			step: 1,
+			tool: "read_document",
+			title: "Read document",
+			effect: "read" as const,
+			consequential: false,
+			args: {},
+			subject: "report.pdf"
+		}
+		const coverage = { kind: "pdf" as const, from: 1, to: 23, units: 41, end: 41 }
+
+		steps.event({ type: "phase", phase: "tool" })
+		steps.event({ type: "call", call: { ...record, status: "running" } })
+		steps.event({ type: "extract", callId: "call_1_0", kind: "pdf", from: 9, to: 14, chunk: 2, chunks: 4 })
+		steps.event({ type: "progress", progress: { processed: 50, total: 100 } })
+		steps.event({ type: "call", call: { ...record, status: "ok", coverage } })
+
+		const rows = emitted.flatMap(event => (event.type === "step" && event.step.kind === "tool" ? [event.step] : []))
+
+		expect(rows.map(row => [row.status, row.progress, row.extract?.chunk])).toEqual([
+			["active", null, undefined],
+			["active", 0.25, 2],
+			["active", 0.375, 2],
+			["done", null, undefined]
+		])
+		expect(rows.at(-1)?.coverage).toEqual(coverage)
+	})
+
 	it("drops what reaches a turn's steps after it closed", () => {
 		const emitted: AssistantEvent[] = []
 		const steps = turnSteps({ turnId: "t", emit: event => emitted.push(event), now: () => 0 })

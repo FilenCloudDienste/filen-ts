@@ -6,6 +6,8 @@ import {
 	type AssistantModel,
 	type AssistantPromptProgress,
 	type AssistantSignal,
+	EXTRACTION_CPU_MAX_CHUNKS,
+	EXTRACTION_MAX_CHUNKS,
 	QUARANTINE_CONTEXT_TOKENS,
 	ROUTER_CONTEXT_TOKENS,
 	ROUTER_SYSTEM_PROMPT
@@ -207,6 +209,11 @@ export class AssistantRuntime implements AssistantModel {
 
 	get model(): AssistantModel {
 		return this
+	}
+
+	// Each chunk of a long document's extraction is a full prompt read: the CPU path reads fewer.
+	get extractionChunkCap(): number {
+		return this.backend === "cpu" ? EXTRACTION_CPU_MAX_CHUNKS : EXTRACTION_MAX_CHUNKS
 	}
 
 	getState(): AssistantModelState {

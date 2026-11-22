@@ -124,8 +124,11 @@ export function turnSteps({ turnId, emit, now }: { turnId: string; emit: (event:
 		put(phase)
 	}
 
-	const progress = (share: number) => {
+	const progress = (prompt: number) => {
 		const target = inTool && runningTool !== null ? steps.get(runningTool) : phase
+		// A chunked extraction's bar runs over all its chunks.
+		const extract = target?.kind === "tool" ? target.extract : undefined
+		const share = extract === undefined ? prompt : (extract.chunk - 1 + prompt) / extract.chunks
 
 		if (target?.status !== "active" || target.progress === share) {
 			return
@@ -195,22 +198,40 @@ export function turnSteps({ turnId, emit, now }: { turnId: string; emit: (event:
 
 					break
 				}
+				case "extract": {
+					const target = steps.get(`${turnId}:${event.callId}`)
+
+					if (target?.kind !== "tool" || target.status !== "active") {
+						break
+					}
+
+					const { kind, from, to, chunk, chunks } = event
+
+					put({ ...target, extract: { kind, from, to, chunk, chunks }, progress: (chunk - 1) / chunks })
+
+					break
+				}
 				case "call": {
 					endPhase("done")
 
 					const id = `${turnId}:${event.call.id}`
+					const previous = steps.get(id)
+					const status = STEP_STATUS[event.call.status]
+					// The chunk a running extraction reads stays until the call ends.
+					const extract = previous?.kind === "tool" && status === "active" ? previous.extract : undefined
 					const step: AssistantStep = {
 						id,
 						kind: "tool",
-						status: STEP_STATUS[event.call.status],
+						status,
 						progress: null,
 						tool: event.call.tool,
 						subject: event.call.subject ?? null,
 						resultCount: event.call.resultCount ?? null,
 						resultMore: event.call.resultMore ?? false,
-						failure: STEP_FAILURES.get(event.call.status) ?? null
+						failure: STEP_FAILURES.get(event.call.status) ?? null,
+						...(extract === undefined ? {} : { extract }),
+						...(event.call.coverage === undefined ? {} : { coverage: event.call.coverage })
 					}
-					const previous = steps.get(id)
 
 					runningTool = event.call.status === "running" ? id : runningTool === id ? null : runningTool
 

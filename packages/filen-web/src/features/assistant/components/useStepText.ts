@@ -4,6 +4,7 @@ import {
 	ROUTE_KEYS,
 	STEP_FAILURE_KEYS,
 	durationFigure,
+	extractStepKey,
 	stepCountNoun,
 	toolActivityKey,
 	toolSubjectKey
@@ -90,7 +91,11 @@ export function useStepText(): (step: TranscriptStep) => StepText {
 			case "tool": {
 				const subjectKey = toolSubjectKey(step.tool)
 				const label =
-					subjectKey !== null && step.subject !== null ? t(subjectKey, { subject: step.subject }) : t(toolActivityKey(step.tool))
+					step.status === "active" && step.extract !== undefined
+						? t(extractStepKey(step.extract), { ...step.extract })
+						: subjectKey !== null && step.subject !== null
+							? t(subjectKey, { subject: step.subject })
+							: t(toolActivityKey(step.tool))
 				let detail: string | null
 
 				if (step.status === "waiting") {

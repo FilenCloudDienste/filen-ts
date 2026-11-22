@@ -5,7 +5,13 @@
 // Names, paths and free text in here are shown verbatim, as plain text. A step carries the tool's name and
 // at most a short sanitized subject; the UI owns its wording (locales/en/assistant.ts).
 
-import type { AssistantRoute, TransformKind, TransformLanguage } from "@filen/shared/assistant"
+import type {
+	AssistantDocumentCoverage,
+	AssistantDocumentKind,
+	AssistantRoute,
+	TransformKind,
+	TransformLanguage
+} from "@filen/shared/assistant"
 
 export interface AssistantModelInfo {
 	// Stable build id (cache directory, logs). Never shown.
@@ -81,7 +87,19 @@ export type AssistantStep =
 			failure: AssistantStepFailure | null
 			// While a long call runs (a search waiting for the drive's index): how many it has found so far.
 			found?: number
+			// While a long document's extraction runs: the chunk it reads, units `from` to `to`.
+			extract?: AssistantStepExtract
+			// A document read that covered only part of what it asked for.
+			coverage?: AssistantDocumentCoverage
 	  }
+
+export interface AssistantStepExtract {
+	kind: AssistantDocumentKind
+	from: number
+	to: number
+	chunk: number
+	chunks: number
+}
 
 // A row its turn ended under: "stopped" when the user stopped the turn, "failed" (with an error) when the
 // turn failed.
