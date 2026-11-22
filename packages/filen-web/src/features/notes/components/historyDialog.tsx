@@ -20,6 +20,10 @@ import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { SURFACE_RING } from "@/components/ui/surface"
 import { LIST_DIALOG_BODY_CLASS, LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
+import { DialogListRows } from "@/components/dialogListRows"
+
+// A row's two lines (20px and 16px) in its py-2.
+const HISTORY_ROW_HEIGHT = 52
 
 export interface HistoryDialogProps {
 	note: Note
@@ -132,15 +136,15 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 		}
 
 		return (
-			<ul className={`flex flex-col gap-0.5 overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}>
-				{sorted.map(history => {
+			<DialogListRows
+				items={sorted}
+				itemKey={history => history.id.toString()}
+				estimateSize={HISTORY_ROW_HEIGHT}
+				renderItem={history => {
 					const { icon: Icon, colorClass } = noteTypeIcon(history.noteType)
 
 					return (
-						<li
-							key={history.id.toString()}
-							className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm"
-						>
+						<div className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm">
 							<Icon className={`size-4 shrink-0 ${colorClass}`} />
 							<div className="min-w-0 flex-1">
 								<p className="truncate font-medium">{formatDateTime(history.editedTimestamp)}</p>
@@ -168,10 +172,10 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 							>
 								<RotateCcwIcon aria-hidden="true" />
 							</Button>
-						</li>
+						</div>
 					)
-				})}
-			</ul>
+				}}
+			/>
 		)
 	}
 
