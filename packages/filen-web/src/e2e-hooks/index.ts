@@ -19,6 +19,12 @@ import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
 import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
 import { withLevel } from "@/features/drive/lib/archiveFormats"
 import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
+import {
+	assistantStubRequests,
+	setAssistantStubScript,
+	type AssistantStubRequest,
+	type AssistantStubScript
+} from "@/e2e-hooks/assistantStub"
 import { driveListingQueryUpdate, patchedListingsWritten } from "@/features/drive/queries/drive"
 import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 import { clearPhotosRoots } from "@/e2e-hooks/photosLibrary"
@@ -231,6 +237,10 @@ interface E2eHooks {
 	// Once the boot probes answered, has the device profile say this browser decodes neither HEIC nor JPEG XL, so the
 	// next image opened takes the route of a browser without them (our own decoders).
 	forceDecodedImages: () => Promise<void>
+	// Puts the scripted assistant model (assistantStub.ts) in place of the on-device one, or sets its next script.
+	assistantStub: (script: AssistantStubScript) => void
+	// What the scripted model was asked so far, oldest first.
+	assistantStubRequests: () => AssistantStubRequest[]
 }
 
 interface ArchiveCatalogueRow {
@@ -587,6 +597,8 @@ export function installE2eHooks(): void {
 		forceDecodedImages: async () => {
 			await Promise.all([probeNativeImage("heic"), probeNativeImage("jxl")])
 			refineDeviceProfile({ heicNative: "no", jxlNative: "no" })
-		}
+		},
+		assistantStub: setAssistantStubScript,
+		assistantStubRequests
 	}
 }

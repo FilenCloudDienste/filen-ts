@@ -43,11 +43,12 @@ const BASE_URL = e2eBaseUrl()
 // creating a scratch directory and uploading its own files. Provisioning was the only reason those
 // specs ever took the lock.
 const READ_SPECS =
-	/\/(archive-browse|archive-dialogs|archive-nested|archive-rar|auth|boot|bootCost|comics|contacts|docx-a11y|docx-equation|docx-insert|docx-smoke|docx-touch|downloads|drive|drive-marquee|ebookLayout|keymap|narrow-viewport|nativeImageDecode|no-coi|no-opfs|pdf-print|preview-iwork|preview-legacy-bframes|preview-legacy-media|preview-media|preview-media-formats|preview-rich|preview-text-read|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch|turnstile-frame|w7-webgl-probe)\.spec\.ts$/
+	/\/(archive-browse|archive-dialogs|assistant-preview|assistant-settings|assistant-transform|archive-nested|archive-rar|auth|boot|bootCost|comics|contacts|docx-a11y|docx-equation|docx-insert|docx-smoke|docx-touch|downloads|drive|drive-marquee|ebookLayout|keymap|narrow-viewport|nativeImageDecode|no-coi|no-opfs|pdf-print|preview-iwork|preview-legacy-bframes|preview-legacy-media|preview-media|preview-media-formats|preview-rich|preview-text-read|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch|turnstile-frame|w7-webgl-probe)\.spec\.ts$/
 // Own surfaces, own limits: notes hits the free plan's 10-note cap, chats the conversation-create rate
 // limiter. Neither touches the drive lock, but both race THEMSELVES, so each owns a serial lane.
-const NOTES_SPEC = /\/notes\.spec\.ts$/
-const CHATS_SPEC = /\/chats\.spec\.ts$/
+// The assistant's specs that create notes or read chats share those lanes and their locks.
+const NOTES_SPEC = /\/(notes|assistant-notes)\.spec\.ts$/
+const CHATS_SPEC = /\/(chats|assistant-chats)\.spec\.ts$/
 
 // Every lane runs on every browser. The three share the setup projects and the one fixture tree, and the
 // writers among them share the one account: a write lane's tests hold that resource's cross-process

@@ -67,6 +67,25 @@ interface E2eHooks {
 	clearPhotosRoots: () => Promise<number>
 	nativeImageSupport: () => Promise<{ heic: boolean; jxl: boolean }>
 	forceDecodedImages: () => Promise<void>
+	assistantStub: (script: AssistantStubScript) => void
+	assistantStubRequests: () => AssistantStubRequest[]
+}
+
+// The scripted assistant model (src/e2e-hooks/assistantStub.ts), mirrored: plain JSON across the bridge.
+export interface AssistantStubScript {
+	route?: string
+	steps?: readonly (readonly { name: string; args: Record<string, unknown> }[])[]
+	reply?: string
+	draft?: string
+	extract?: string
+	transform?: string
+	formula?: string
+}
+
+export interface AssistantStubRequest {
+	kind: "router" | "step" | "reply" | "draft" | "extract" | "transform" | "formula"
+	tools: string[]
+	last: string
 }
 
 // `.filen/videos` as a Videos spec found it (src/e2e-hooks/videosSync.ts): plain strings, so it crosses the
