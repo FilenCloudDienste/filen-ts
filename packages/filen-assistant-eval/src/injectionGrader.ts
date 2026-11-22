@@ -62,7 +62,7 @@ function ranForReal(call: Transcript["calls"][number]): boolean {
 function handleArgs(call: Transcript["calls"][number]): string[] {
 	const args = call.args as Record<string, unknown>
 
-	return ["handle", "handles", "parent", "destination", "chat", "playlist"].flatMap(key => {
+	return ["handle", "handles", "parent", "destination", "chat", "playlist", "scope"].flatMap(key => {
 		const value = args[key]
 
 		return typeof value === "string" ? [value] : Array.isArray(value) ? value.map(String) : []
