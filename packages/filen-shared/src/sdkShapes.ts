@@ -403,8 +403,8 @@ const PARENT_SENTINELS: ReadonlyMap<string, string> = new Map([
 	["links", "Links"]
 ])
 
-// ParentUuid: a wasm string ↔ ubrn tags. wasm renders a trashed item's parent as "trash" and drops the original
-// parent; it reads "trash" back as Trash(nil), and so does this.
+// ParentUuid: a wasm string ↔ ubrn tags. wasm renders a trashed item's parent as "trash" and carries the original
+// parent in the sibling `trashedFrom` when it knows it (see `trashable`); bare "trash" maps to Trash(nil).
 const parent: Conv = {
 	ubrn: (value, at) => {
 		if (typeof value !== "string") {
@@ -566,19 +566,57 @@ const fileMeta = adjacent({
 	rSAEncrypted: { tag: "RSAEncrypted", conv: str }
 })
 
-const file = record({
-	uuid: { conv: str },
-	stableUUID: { conv: str, ubrn: "stableUuid", optional: true },
-	meta: { conv: fileMeta },
-	parent: { conv: parent },
-	size: { conv: big },
-	favorited: { conv: bool },
-	region: { conv: str },
-	bucket: { conv: str },
-	timestamp: { conv: big },
-	chunks: { conv: big },
-	canMakeThumbnail: { conv: bool }
-})
+// A File or Dir record whose wasm side may add `trashedFrom` next to a "trash" parent: wasm "trash" + trashedFrom
+// ↔ ubrn Trash(trashedFrom); without it, Trash(nil). A trashedFrom beside any other parent is stale and dropped:
+// the parent alone says where the item is.
+function trashable(conv: Conv): Conv {
+	return {
+		ubrn: (value, at) => {
+			const { trashedFrom, ...rest } = objectAt(value, at)
+			const out = conv.ubrn(rest, at) as Obj
+
+			if (trashedFrom !== undefined) {
+				str.ubrn(trashedFrom, join(at, "trashedFrom"))
+
+				if (rest["parent"] === "trash") {
+					out["parent"] = tagged("Trash", trashedFrom)
+				}
+			}
+
+			return out
+		},
+		wasm: (value, at) => {
+			const out = conv.wasm(value, at) as Obj
+			const { tag, inner } = ubrnVariant(objectAt(value, at)["parent"], join(at, "parent"))
+
+			if (tag === "Trash") {
+				const from = innerOf(inner, join(at, "parent"))
+
+				if (from !== TRASH_PLACEHOLDER) {
+					out["trashedFrom"] = from
+				}
+			}
+
+			return out
+		}
+	}
+}
+
+const file = trashable(
+	record({
+		uuid: { conv: str },
+		stableUUID: { conv: str, ubrn: "stableUuid", optional: true },
+		meta: { conv: fileMeta },
+		parent: { conv: parent },
+		size: { conv: big },
+		favorited: { conv: bool },
+		region: { conv: str },
+		bucket: { conv: str },
+		timestamp: { conv: big },
+		chunks: { conv: big },
+		canMakeThumbnail: { conv: bool }
+	})
+)
 
 const sharedFile = record({
 	uuid: { conv: str },
@@ -613,14 +651,16 @@ const root = record({
 	uuid: { conv: str }
 })
 
-const dir = record({
-	uuid: { conv: str },
-	parent: { conv: parent },
-	color: { conv: color },
-	timestamp: { conv: big },
-	favorited: { conv: bool },
-	meta: { conv: dirMeta }
-})
+const dir = trashable(
+	record({
+		uuid: { conv: str },
+		parent: { conv: parent },
+		color: { conv: color },
+		timestamp: { conv: big },
+		favorited: { conv: bool },
+		meta: { conv: dirMeta }
+	})
+)
 
 const rootDirWithMeta = record({
 	uuid: { conv: str },

@@ -11,12 +11,14 @@ const CASES: Readonly<Record<string, DesktopSdkVariant>> = {
 	fileNoHash: "AnyFile.File",
 	fileNoStableUuid: "AnyFile.File",
 	trashedFile: "AnyFile.File",
+	trashedFileFrom: "AnyFile.File",
 	sharedFile: "AnyFile.Shared",
 	linkedFile: "AnyFile.Linked",
 	dir: "AnyNormalDir.Dir",
 	dirColored: "AnyNormalDir.Dir",
 	dirEncryptedMeta: "AnyNormalDir.Dir",
 	dirRawMeta: "AnyNormalDir.Dir",
+	trashedDir: "AnyNormalDir.Dir",
 	root: "AnyNormalDir.Root",
 	sharedDirWithContext: "AnyDirWithContext.Shared.Dir",
 	sharedRootWithContext: "AnyDirWithContext.Shared.Root",
@@ -199,7 +201,9 @@ describe("sdkShapes", () => {
 			["dir", "Dir"],
 			["dirColored", "Dir"],
 			["dirEncryptedMeta", "Dir"],
-			["dirRawMeta", "Dir"]
+			["dirRawMeta", "Dir"],
+			["trashedFileFrom", "File"],
+			["trashedDir", "Dir"]
 		] as const) {
 			it(`converts ${name} back`, async () => {
 				expect(wasmOf(kind, innerOf(await fixture("ubrn", name)))).toEqual(await fixture("wasm", name))
@@ -208,6 +212,16 @@ describe("sdkShapes", () => {
 
 		it("renders a trashed parent as trash", async () => {
 			expect(wasmOf("File", innerOf(await fixture("ubrn", "trashedFile")))).toEqual(await fixture("wasm", "trashedFile"))
+		})
+
+		it("drops a trashedFrom beside a parent that is not trash, refuses one that is not a string", async () => {
+			const dir = {
+				...((await fixture("wasm", "dir")) as Record<string, unknown>),
+				trashedFrom: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+			}
+
+			expect(ubrnOf("AnyNormalDir.Dir", dir)).toEqual(await fixture("ubrn", "dir"))
+			expect(() => ubrnOf("AnyNormalDir.Dir", { ...dir, parent: "trash", trashedFrom: 1 })).toThrow(SdkShapeError)
 		})
 
 		it("refuses a hash that is not 32 bytes and an unknown ubrn field", async () => {
