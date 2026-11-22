@@ -143,8 +143,9 @@ async function readSource(source: DocumentSource, input: Record<string, unknown>
 
 	if (input["part"] === "selection") {
 		const open = source.open
+		const selected = open?.selection ?? null
 
-		if (open === null || open.selection === null) {
+		if (open === null || selected === null) {
 			throw new AssistantToolError(`Nothing is selected in "${name}"`)
 		}
 
