@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { DIRECTORIES_BY_SIZE_NOTE, LISTING_PAGE_ITEMS } from "@filen/shared/assistant"
+import { DIRECTORIES_BY_SIZE_NOTE, LISTING_PAGE_ITEMS, readWithTextFile } from "@filen/shared/assistant"
 import { FakeApp } from "../fakeApp"
 
 function ok(result: ReturnType<FakeApp["execute"]>): Record<string, unknown> {
@@ -315,9 +315,9 @@ describe("FakeApp", () => {
 		const app = new FakeApp()
 
 		expect(ok(app.execute({ name: "search_note_text", args: { query: "pricing page" } }))).toEqual({
+			searched: "all 15 notes",
 			notes: [{ handle: "n3", title: "Meeting 2025-10-01", tokensMatched: 2 }],
-			queryTokens: 2,
-			note: "Searched 15 of 15 notes (notes whose text is saved on this device)."
+			queryTokens: 2
 		})
 		expect(app.exposed.has("n3")).toBe(true)
 
@@ -328,8 +328,42 @@ describe("FakeApp", () => {
 		const partial = ok(app.execute({ name: "search_note_text", args: { query: "pricing" } }))
 
 		expect(partial["notes"]).toEqual([])
-		expect(partial["note"]).toContain("Searched 1 of 15 notes")
+		expect(partial["searched"]).toContain("only 1 of 15 notes")
+		expect(partial["note"]).toContain("list_notes")
 		expect(app.execute({ name: "search_note_text", args: { query: "?" } })).toMatchObject({ ok: false, invalid: true })
+	})
+
+	it("sends a search for words only in note titles to list_notes", () => {
+		const app = new FakeApp()
+		const titled = app.state.notes.find(note => note.title.length > 0 && !note.trashed)
+		const word = titled?.title
+			.split(/\s+/u)
+			.find(part => part.length >= 4 && !titled.content.toLowerCase().includes(part.toLowerCase()))
+
+		expect(word).toBeDefined()
+		expect(app.execute({ name: "search_note_text", args: { query: word ?? "" } })).toMatchObject({
+			ok: false,
+			invalid: true,
+			error: expect.stringContaining("list_notes") as unknown
+		})
+	})
+
+	it("keeps one reading tool per file type, each pointing at the other", () => {
+		const app = new FakeApp()
+
+		app.exposed.add("f27")
+		app.exposed.add("f7")
+
+		expect(app.execute({ name: "read_document", args: { handle: "f27" } })).toMatchObject({
+			ok: false,
+			invalid: true,
+			error: readWithTextFile("roadmap.md")
+		})
+		expect(app.execute({ name: "read_text_file", args: { handle: "f7" } })).toMatchObject({
+			ok: false,
+			invalid: true,
+			error: expect.stringContaining("read_document") as unknown
+		})
 	})
 
 	it("lists playlists and describes the context on request", () => {

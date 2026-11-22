@@ -39,8 +39,10 @@ import {
 	NO_TRANSFERS_NOTE,
 	normalizeText,
 	matchScore,
+	NOTE_TEXT_IN_TITLES,
 	NOTE_TEXT_NEEDS_WORDS,
-	noteTextCoverageNote,
+	NOTE_TEXT_NO_MATCH_NOTE,
+	noteTextCoverage,
 	NOTES_ITEMS,
 	OUTSIDE_DATES_ITEMS,
 	openDocumentContext,
@@ -52,6 +54,8 @@ import {
 	planOrganizeByDate,
 	rankAppHelp,
 	rawSearchTokens,
+	readWithDocument,
+	readWithTextFile,
 	RECENT_ITEMS,
 	recentsReachNote,
 	resolveDateFilter,
@@ -64,7 +68,7 @@ import {
 	searchTokens,
 	SHARED_WITH_YOU_NOTE,
 	tokenMatches,
-	TRASH_NOTE,
+	trashSectionNote,
 	unknownSizesNote,
 	type AssistantPeriodFilter,
 	type BatchDateField,
@@ -1204,7 +1208,10 @@ export class FakeApp {
 				const item = this.driveItem(str("handle"))
 
 				if (item.kind !== "file" || !TEXT_EXTENSIONS.includes(extension(item.name)) || item.content === undefined) {
-					throw new CallError(`"${item.name}" is not a text file`, false)
+					// As the app: a document gets a pointer to read_document, any other file is no text.
+					throw item.kind === "file" && item.document !== undefined
+						? new CallError(readWithDocument(item.name), true)
+						: new CallError(`"${item.name}" is not a text file`, false)
 				}
 
 				return {
@@ -1425,12 +1432,18 @@ export class FakeApp {
 					.filter(item => !item.trashed)
 					.toSorted((a, b) => rank(a) - rank(b) || Date.parse(b.edited) - Date.parse(a.edited))
 				const held = notes.filter(item => item.textOnDevice !== false)
+				// As the app: the text only; words only in titles or tags ask for list_notes.
 				const hits = held
-					.map(item => ({ item, tokensMatched: matchScore(`${item.title}\n${item.content}`, tokens) }))
+					.map(item => ({ item, tokensMatched: matchScore(item.content, tokens) }))
 					.filter(({ tokensMatched }) => tokensMatched > 0)
 					.toSorted((a, b) => b.tokensMatched - a.tokensMatched)
 
+				if (hits.length === 0 && notes.some(item => matchScore(`${item.title} ${item.tags.join(" ")}`, tokens) > 0)) {
+					throw new CallError(NOTE_TEXT_IN_TITLES, true)
+				}
+
 				return {
+					...noteTextCoverage({ searched: held.length, total: notes.length, cut: false }),
 					notes: hits.slice(0, SEARCH_RESULT_ITEMS).map(({ item, tokensMatched }) => {
 						this.exposed.add(item.handle)
 
@@ -1447,7 +1460,7 @@ export class FakeApp {
 					}),
 					queryTokens: tokens.length,
 					...listRest(hits.length, SEARCH_RESULT_ITEMS),
-					note: noteTextCoverageNote({ searched: held.length, total: notes.length, cut: false })
+					...(hits.length === 0 ? { note: NOTE_TEXT_NO_MATCH_NOTE } : {})
 				}
 			}
 
@@ -1816,11 +1829,7 @@ export class FakeApp {
 						}
 					}),
 					...listRest(kept.length, MAX_ARRAY_ITEMS),
-					...(section === "trash" && kept.length > 0
-						? {
-								note: TRASH_NOTE
-							}
-						: {})
+					...(section === "trash" ? trashSectionNote(kept.length) : {})
 				}
 			}
 
@@ -2088,7 +2097,7 @@ export class FakeApp {
 				})
 
 				if (!result.ok) {
-					throw new CallError(result.error, true)
+					throw new CallError(result.error, result.invalid)
 				}
 
 				if (result.plan.changes.length === 0) {
@@ -2132,7 +2141,7 @@ export class FakeApp {
 				})
 
 				if (!result.ok) {
-					throw new CallError(result.error, true)
+					throw new CallError(result.error, result.invalid)
 				}
 
 				if (batchOrganizeCount(result.plan) === 0) {
@@ -2322,6 +2331,12 @@ export class FakeApp {
 					: `"${item.name}" is not a document this can read`,
 				false
 			)
+		}
+
+		// As the app: a text file is read_text_file's, except the selection in an open one (the fixture's text files are
+		// all small enough for read_text_file).
+		if (document.kind === "text" && input["part"] !== "selection") {
+			throw new CallError(readWithTextFile(item.name), true)
 		}
 
 		const units = document.units.length

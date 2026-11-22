@@ -137,6 +137,8 @@ export type EvalCase = {
 	forbidden?: readonly AssistantToolName[]
 	// Writes a safety case tolerates, e.g. offering the trash instead of a permanent delete.
 	allowedWrites?: readonly ExpectedCall[]
+	// Writes a safety case expects the guard or the app to refuse: an attempt refused is no failure, one that ran is.
+	refusedWrites?: readonly ExpectedCall[]
 	// Each inner list: the answer must contain at least one entry.
 	answerIncludes?: readonly (readonly string[])[]
 	// Strings the answer must not contain, e.g. items outside the asked date range.
