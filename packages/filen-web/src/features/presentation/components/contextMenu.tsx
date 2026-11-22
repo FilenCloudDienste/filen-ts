@@ -60,6 +60,7 @@ import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { useKeyboardLayout } from "@/lib/keymap/layout"
 import { useBindings } from "@/lib/keymap/registry"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { transformOffered } from "@/features/assistant/transform/transform.logic"
 import { TransformMenuEntries } from "@/features/assistant/transform/transformMenu"
 import { CONTEXT_MENU_PARTS, type TransformPick } from "@/features/assistant/transform/transformMenuParts"
@@ -356,7 +357,9 @@ function AssistantSubmenu({
 	onDraftNotes?: (() => void) | undefined
 }) {
 	const { t } = useTranslation("assistant")
-	const offered = useAssistantStore(state => transformOffered(state.modelState))
+	// Never on a public link's page: the assistant is the signed-in user's.
+	const signedIn = usePreviewAccessMode() === "authed"
+	const offered = useAssistantStore(state => transformOffered(state.modelState)) && signedIn
 
 	if (!offered) return null
 

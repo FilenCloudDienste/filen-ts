@@ -105,6 +105,7 @@ import { PresentationMotionPaths } from "@/features/presentation/components/ribb
 import { usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
 import { slideTransform } from "@/features/presentation/lib/slideTransformHost"
 import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 // The presentation editor: the ribbon (File, then the tabs whose groups the deck offers: in a deck that can only be
 // viewed that is the View tab and the read-only groups of others), the slide list with its edit commands (selection,
@@ -494,7 +495,10 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const count = deck.slides.length
 	const index = editor.current
 
-	const editable = editor.editable
+	// The assistant's edits (✨, the slide's Assistant menu, the notes draft): the signed-in user's, never on a public link's
+	// page.
+	const assisted = usePreviewAccessMode() === "authed"
+	const editable = editor.editable && assisted
 	// The body being edited as the selection transform's host (✨, Alt+J), also what is selected in it for the open
 	// document.
 	const transformHost = slideTransform(text, () => editable)
@@ -510,7 +514,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 
 	// A draft is offered for a slide of an editable deck with text of its own and no notes.
 	const notesDraftOffered =
-		editor.editable && render?.notesText === "" && render.layers.some(layer => layer.box !== undefined && layer.text !== undefined)
+		editable && render?.notesText === "" && render.layers.some(layer => layer.box !== undefined && layer.text !== undefined)
 	const startNotesDraft = (): void => {
 		if (ref === undefined) return
 
@@ -941,7 +945,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					)}
 					<SelectionTransformRoot
 						host={transformHost}
-						readOnly={!editor.editable}
+						readOnly={!editable}
 						className="flex min-h-0 min-w-0 flex-1 flex-col"
 					>
 						<SlideCanvasContextMenu

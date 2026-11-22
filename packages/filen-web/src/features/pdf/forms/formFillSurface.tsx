@@ -26,6 +26,7 @@ import {
 import { engineFields, formOverlaySession, pdfjsFields } from "@/features/pdf/session/fieldOverlay.logic"
 import { PdfSidePanel } from "@/features/pdf/tools/pdfSidePanel"
 import { withPdfSession, type PdfToolOverlayProps, type PdfToolPanelProps } from "@/features/pdf/tools/registry"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 // The assistant's form fill, in the preview's side slot while its tool is active: the page in view's empty text fields
 // and choices, the user's details typed or pasted (kept in this panel only: never stored or logged), the assistant's
@@ -69,7 +70,9 @@ export function FormFillPanel({ context, document }: PdfToolPanelProps) {
 	const engine = isMupdfDocument(document)
 	const widgets = engine ? (context.snapshot?.widgets.get(page) ?? null) : null
 	const modelState = useAssistantStore(state => state.modelState)
-	const startable = modelAcceptsMessages(modelState)
+	// Never on a public link's page: the assistant is the signed-in user's.
+	const signedIn = usePreviewAccessMode() === "authed"
+	const startable = modelAcceptsMessages(modelState) && signedIn
 	const [read, setRead] = useState<{ readonly key: object; readonly page: number; readonly view: FormFillPage } | null>(null)
 	const [details, setDetails] = useState("")
 	const [phase, setPhase] = useState<Phase>({ kind: "details" })
