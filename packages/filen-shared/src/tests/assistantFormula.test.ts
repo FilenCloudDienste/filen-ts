@@ -153,8 +153,8 @@ describe("writeCheckedFormula", () => {
 		expect(model.requests[1]?.messages.at(-1)?.content).toContain("SUMX is not a function this app calculates")
 	})
 
-	it("never checks a formula cut at its length limit", async () => {
-		const model = scripted([{ content: "=SUM(B2", truncated: true }, { content: "=SUM(B2:B4)" }])
+	it("never checks a formula cut at its length limit or past the longest taken", async () => {
+		const model = scripted([{ content: "=SUM(B2", truncated: true }, { content: `=${"1+".repeat(FORMULA_MAX_CHARS)}1` }])
 		const checked: string[] = []
 		const outcome = await writeCheckedFormula({
 			model,
@@ -167,8 +167,8 @@ describe("writeCheckedFormula", () => {
 			}
 		})
 
-		expect(outcome).toEqual({ ok: true, formula: "=SUM(B2:B4)", value: 35 })
-		expect(checked).toEqual(["=SUM(B2:B4)"])
+		expect(outcome).toEqual({ ok: false, formula: `=${"1+".repeat(FORMULA_MAX_CHARS)}1`, problem: { kind: "malformed" } })
+		expect(checked).toEqual([])
 	})
 
 	it("stops when cancelled", async () => {

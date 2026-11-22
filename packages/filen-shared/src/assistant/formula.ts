@@ -7,12 +7,13 @@ import { sanitizeUntrustedText, spotlightText } from "./untrusted"
 // the formula, in the file's (en-US) syntax; code checks it and the formula engine calculates what it gives, so no
 // number the model works out ever reaches the user. A refused formula is asked for once more with the reason.
 
-// The output: "=" and one line, at most this long (the grammar holds it).
+// The output: "=" and one line (the grammar holds it), at most this long (longer is refused: a bounded repetition
+// this long would make the grammar hundreds of rules, which every sampled token walks).
 export const FORMULA_MAX_CHARS = 400
 
 export const FORMULA_MAX_TOKENS = 160
 
-export const FORMULA_GRAMMAR = `root ::= "=" [^\\n]{1,${String(FORMULA_MAX_CHARS - 1)}}`
+export const FORMULA_GRAMMAR = 'root ::= "=" [^\\n]+'
 
 // What the prompt takes of the request, the columns described and each header.
 export const FORMULA_ASK_MAX_CHARS = 300
@@ -186,7 +187,7 @@ export type FormulaOutcome<V> =
 	| { ok: false; formula: string; problem: FormulaProblem }
 
 // Writes a formula and checks it (`check`: the app's check, then the engine's evaluation); a refused one is written
-// once more with the reason, then given up on. `check` never sees a truncated formula.
+// once more with the reason, then given up on. `check` never sees a truncated or overlong formula.
 export async function writeCheckedFormula<V>({
 	model,
 	context,
@@ -215,7 +216,10 @@ export async function writeCheckedFormula<V>({
 			throw new AssistantAbortError()
 		}
 
-		const checked: FormulaCheck<V> = written.truncated ? { ok: false, problem: { kind: "malformed" } } : await check(written.formula)
+		const checked: FormulaCheck<V> =
+			written.truncated || written.formula.length > FORMULA_MAX_CHARS
+				? { ok: false, problem: { kind: "malformed" } }
+				: await check(written.formula)
 
 		if (signal.aborted) {
 			throw new AssistantAbortError()
