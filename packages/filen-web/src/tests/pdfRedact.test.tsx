@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { RedactionFailure, RedactionFinding, RedactionMark, RedactionQuery } from "@filen/office/core/pdfedit/redactVerify"
 import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
@@ -204,6 +204,8 @@ describe("redaction controls", () => {
 	})
 
 	it("lists the marks, removes one and opens the apply dialog", () => {
+		const viewport = sizedViewport()
+
 		const onRemove = vi.fn()
 		const onApply = vi.fn()
 		const marks = [{ ...mark(7, "text", 0), text: "Ada" }, mark(9, "area", 2)]
@@ -228,9 +230,12 @@ describe("redaction controls", () => {
 		expect(onRemove).toHaveBeenCalledWith(marks[1])
 		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApply" }))
 		expect(onApply).toHaveBeenCalled()
+		viewport.restore()
 	})
 
 	it("moves focus to the mark in a removed one's place, then the one before, then the heading", () => {
+		const viewport = sizedViewport()
+
 		const marks = [mark(1, "area", 0), mark(2, "area", 0), mark(3, "page", 1)]
 		const props = { onRemove: vi.fn(), onApply: vi.fn() }
 		const { rerender } = render(
@@ -274,6 +279,7 @@ describe("redaction controls", () => {
 			/>
 		)
 		expect(document.activeElement).toBe(screen.getByRole("heading", { name: 'previewPdfRedactMarked {"count":0}' }))
+		viewport.restore()
 	})
 
 	it("disables Apply while nothing is marked", () => {
@@ -577,6 +583,8 @@ describe("the marks list in the panel", () => {
 	})
 
 	it("shows a mark's page when its row is chosen", async () => {
+		const viewport = sizedViewport()
+
 		const { session } = historySession({ marks: [mark(4, "area", 0), mark(5, "area", 2)] })
 		const show = vi.fn()
 		const context = {
@@ -596,6 +604,49 @@ describe("the marks list in the panel", () => {
 		fireEvent.click(row)
 		expect(show).toHaveBeenCalledWith(2)
 		view.unmount()
+		viewport.restore()
+	})
+})
+
+describe("the marks list with many marks", () => {
+	it("mounts a window of the marks, and moves focus to the mark in a removed far one's place", () => {
+		const viewport = sizedViewport()
+		const marks = Array.from({ length: 5_000 }, (_, index) => mark(index + 1, "area", index))
+		const props = { onRemove: vi.fn(), onApply: vi.fn() }
+		const { rerender } = render(
+			<RedactionMarksList
+				marks={marks}
+				{...props}
+			/>
+		)
+
+		expect(screen.getAllByRole("listitem").length).toBeLessThan(40)
+
+		const scroller = screen.getAllByRole("listitem")[0]?.closest("ul")?.parentElement
+
+		if (scroller === null || scroller === undefined) throw new Error("no scroller")
+
+		act(() => {
+			scroller.scrollTop = 5_000 * 44
+			scroller.dispatchEvent(new Event("scroll"))
+		})
+
+		const last = screen.getAllByRole("listitem").find(row => row.getAttribute("aria-posinset") === "5000")
+		const remove = last?.querySelector<HTMLElement>("[data-mark-remove]")
+
+		if (remove === null || remove === undefined) throw new Error("last mark not mounted")
+
+		remove.focus()
+		fireEvent.click(remove)
+		expect(props.onRemove).toHaveBeenCalledWith(marks[4_999])
+		rerender(
+			<RedactionMarksList
+				marks={marks.slice(0, -1)}
+				{...props}
+			/>
+		)
+		expect(document.activeElement?.closest("li")?.getAttribute("aria-posinset")).toBe("4999")
+		viewport.restore()
 	})
 })
 
