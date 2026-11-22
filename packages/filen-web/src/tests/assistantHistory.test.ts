@@ -195,6 +195,23 @@ describe("conversation serialization", () => {
 		expect(conversationBodySchema({ v: 1, rev: "x", ...content })).not.toBeInstanceOf(Error)
 	})
 
+	it("keeps a batch card's plan", () => {
+		const batch = {
+			rule: { by: "month" },
+			groups: [{ directory: "2026-11", isNew: true, items: [{ from: "a.jpg", to: "a (2).jpg" }, { from: "b.jpg" }] }],
+			skipped: [{ name: "c.jpg", reason: "destination-is-file" as const }]
+		}
+		const entries = turnEntries("turn-1", "sort").map(entry =>
+			entry.kind === "proposal" ? { ...entry, proposal: { ...entry.proposal, action: "organize-by-date" as const, batch } } : entry
+		)
+		const content = serializeConversation(snapshot(entries), 10)
+
+		expect(conversationBodySchema({ v: 1, rev: "x", ...content })).not.toBeInstanceOf(Error)
+		expect(restoreConversation(content, "saved2").entries.find(entry => entry.kind === "proposal")).toMatchObject({
+			proposal: { batch }
+		})
+	})
+
 	it("round-trips a conversation: what a restore gives back saves to exactly the same content", () => {
 		const content = serializeConversation(snapshot([...turnEntries("turn-1", "first"), ...turnEntries("turn-2", "second")]), 10)
 

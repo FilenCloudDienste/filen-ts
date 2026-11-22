@@ -1,3 +1,4 @@
+import { BATCH_CASES } from "./batch"
 import { IRRELEVANCE_CASES, MISSING_PARAM_CASES, SAFETY_CASES } from "./behaviour"
 import { CONVERSATION_CASES } from "./conversation"
 import { ACT_ON_READ_CASES } from "./actOnRead"
@@ -29,5 +30,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
 	...SOURCES_CASES,
 	...LONG_CASES,
 	...DOCUMENT_CASES,
-	...ACT_ON_READ_CASES
+	...ACT_ON_READ_CASES,
+	...BATCH_CASES
 ]

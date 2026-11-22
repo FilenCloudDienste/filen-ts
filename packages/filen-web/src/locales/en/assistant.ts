@@ -546,6 +546,70 @@ export const assistant = {
 	assistantProposalText: "Text",
 	/** Card — accessible name of the affected-items list */
 	assistantProposalItems: "Items",
+	/** Card field — the text a batch rename replaces in each name */
+	assistantProposalFind: "Replace",
+	/** Batch card summary — the rule: today's date goes before each name ({{date}} is which date, e.g. "date taken") */
+	assistantBatchRuleDatePrefix: "Date before the name ({{date}})",
+	/** Batch card summary — the rule: each file is named by its date ({{date}} is which date) */
+	assistantBatchRuleDateName: "Date as the name ({{date}})",
+	/** Batch card summary — the rule: the files are numbered */
+	assistantBatchRuleNumber: "Numbered",
+	/** Batch card summary — the rule: text is added before each name */
+	assistantBatchRuleAddPrefix: "Text added before the name",
+	/** Batch card summary — the rule: text is added after each name, before the extension */
+	assistantBatchRuleAddSuffix: "Text added after the name",
+	/** Batch card summary — the rule: text in each name is replaced */
+	assistantBatchRuleReplaceText: "Text replaced",
+	/** Batch card summary — the rule: names become lowercase */
+	assistantBatchRuleLowercase: "Lowercase",
+	/** Sort card summary — files go into a subdirectory per year ({{date}} is which date) */
+	assistantBatchRuleByYear: "By year ({{date}})",
+	/** Sort card summary — files go into a subdirectory per month ({{date}} is which date) */
+	assistantBatchRuleByMonth: "By month ({{date}})",
+	/** Sort card summary — files go into a subdirectory per day ({{date}} is which date) */
+	assistantBatchRuleByDay: "By day ({{date}})",
+	/** Batch card summary — which date: when the photo or video was taken, else the file's own date */
+	assistantBatchDateTaken: "date taken",
+	/** Batch card summary — which date: the file's creation date */
+	assistantBatchDateCreated: "date created",
+	/** Batch card summary — which date: the file's last modification */
+	assistantBatchDateModified: "date modified",
+	/** Batch card summary — which date: when the file was uploaded */
+	assistantBatchDateUploaded: "date uploaded",
+	/** Batch card summary — how many files stay as they are */
+	assistantBatchSkipped_one: "{{count}} skipped",
+	/** Batch card summary — how many files stay as they are */
+	assistantBatchSkipped_other: "{{count}} skipped",
+	/** Batch card summary — how many files got " (2)" etc. because their new name was taken */
+	assistantBatchSuffixed_one: "{{count}} numbered to avoid a clash",
+	/** Batch card summary — how many files got " (2)" etc. because their new name was taken */
+	assistantBatchSuffixed_other: "{{count}} numbered to avoid a clash",
+	/** Batch card row tag — this file's new name got " (2)" etc. because the name was taken */
+	assistantBatchSuffixedTag: "numbered",
+	/** Batch card row — a file left as it is, because its new name would not be a valid one */
+	assistantBatchSkipInvalidName: "skipped: not a valid name",
+	/** Sort card row — a file left where it is, because a file already has its subdirectory's name */
+	assistantBatchSkipDestinationIsFile: "skipped: a file has the subdirectory's name",
+	/** Sort card group — the subdirectory will be created */
+	assistantBatchGroupNew: "new",
+	/** Sort card group — the subdirectory exists already */
+	assistantBatchGroupExists: "exists",
+	/** Sort card group — how many files go into this subdirectory */
+	assistantBatchGroupCount_one: "{{count}} file",
+	/** Sort card group — how many files go into this subdirectory */
+	assistantBatchGroupCount_other: "{{count}} files",
+	/** Sort card note — files whose name the subdirectory already holds move under a numbered name */
+	assistantBatchRenamedOnMove_one: "{{count}} file moves under a numbered name, as its name is taken there",
+	/** Sort card note — files whose name the subdirectory already holds move under a numbered name */
+	assistantBatchRenamedOnMove_other: "{{count}} files move under a numbered name, as their names are taken there",
+	/** Batch card — runs the renames */
+	assistantConfirmBatchRename_one: "Rename {{count}}",
+	/** Batch card — runs the renames */
+	assistantConfirmBatchRename_other: "Rename {{count}}",
+	/** Sort card — runs the moves */
+	assistantConfirmOrganize_one: "Move {{count}}",
+	/** Sort card — runs the moves */
+	assistantConfirmOrganize_other: "Move {{count}}",
 	/** Card — runs the action */
 	assistantConfirm: "Confirm",
 	/** Card — runs a trash action */

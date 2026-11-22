@@ -928,6 +928,50 @@ export const drive = {
 	driveMovePartial_one: "Moved {{count}} item to {{destination}}, {{failed}} failed",
 	/** Activity toast — moving to a directory ({{destination}}) partly failed; {{count}} succeeded, {{failed}} failed */
 	driveMovePartial_other: "Moved {{count}} items to {{destination}}, {{failed}} failed",
+	/** Activity toast — renaming several items at once running; one item named ({{name}}) */
+	driveRenameRunningNamed: "Renaming {{name}}",
+	/** Activity toast — renaming several items at once running; {{count}} items */
+	driveRenameRunning_one: "Renaming {{count}} item",
+	/** Activity toast — renaming several items at once running; {{count}} items */
+	driveRenameRunning_other: "Renaming {{count}} items",
+	/** Activity toast — renaming several items at once finished; one item named ({{name}}, its old name) */
+	driveRenameDoneNamed: "Renamed {{name}}",
+	/** Activity toast — renaming several items at once finished; {{count}} items */
+	driveRenameDone_one: "Renamed {{count}} item",
+	/** Activity toast — renaming several items at once finished; {{count}} items */
+	driveRenameDone_other: "Renamed {{count}} items",
+	/** Activity toast — renaming several items at once failed for every item; one item named ({{name}}) */
+	driveRenameFailedNamed: "Couldn't rename {{name}}",
+	/** Activity toast — renaming several items at once failed for every item; {{count}} items */
+	driveRenameFailed_one: "Couldn't rename {{count}} item",
+	/** Activity toast — renaming several items at once failed for every item; {{count}} items */
+	driveRenameFailed_other: "Couldn't rename {{count}} items",
+	/** Activity toast — renaming several items at once partly failed; {{count}} succeeded, {{failed}} failed */
+	driveRenamePartial_one: "Renamed {{count}} item, {{failed}} failed",
+	/** Activity toast — renaming several items at once partly failed; {{count}} succeeded, {{failed}} failed */
+	driveRenamePartial_other: "Renamed {{count}} items, {{failed}} failed",
+	/** Activity toast — sorting a directory's ({{destination}}) files into subdirectories by date running; one item named ({{name}}) */
+	driveSortByDateRunningNamed: "Sorting {{name}} into a subdirectory of {{destination}}",
+	/** Activity toast — sorting a directory's ({{destination}}) files into subdirectories by date running; {{count}} items */
+	driveSortByDateRunning_one: "Sorting {{count}} item into subdirectories of {{destination}}",
+	/** Activity toast — sorting a directory's ({{destination}}) files into subdirectories by date running; {{count}} items */
+	driveSortByDateRunning_other: "Sorting {{count}} items into subdirectories of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date finished; one item named ({{name}}) */
+	driveSortByDateDoneNamed: "Sorted {{name}} into a subdirectory of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date finished; {{count}} items */
+	driveSortByDateDone_one: "Sorted {{count}} item into subdirectories of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date finished; {{count}} items */
+	driveSortByDateDone_other: "Sorted {{count}} items into subdirectories of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date failed for every item; one item named ({{name}}) */
+	driveSortByDateFailedNamed: "Couldn't sort {{name}} into a subdirectory of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date failed for every item; {{count}} items */
+	driveSortByDateFailed_one: "Couldn't sort {{count}} item into subdirectories of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date failed for every item; {{count}} items */
+	driveSortByDateFailed_other: "Couldn't sort {{count}} items into subdirectories of {{destination}}",
+	/** Activity toast — sorting into subdirectories by date partly failed; {{count}} succeeded, {{failed}} failed */
+	driveSortByDatePartial_one: "Sorted {{count}} item into subdirectories of {{destination}}, {{failed}} failed",
+	/** Activity toast — sorting into subdirectories by date partly failed; {{count}} succeeded, {{failed}} failed */
+	driveSortByDatePartial_other: "Sorted {{count}} items into subdirectories of {{destination}}, {{failed}} failed",
 	/** Activity toast — adding to favorites running; one item named ({{name}}) */
 	driveFavoriteRunningNamed: "Adding {{name}} to favorites",
 	/** Activity toast — adding to favorites running; {{count}} items */

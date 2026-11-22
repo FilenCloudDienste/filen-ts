@@ -228,7 +228,7 @@ function sameName(a: string, b: string): boolean {
 	return normalizedString(a) === normalizedString(b)
 }
 
-function checkState({ check, app, diff, lang }: { check: StateCheck; app: FakeApp; diff: Diff; lang: Language }): string | null {
+export function checkState({ check, app, diff, lang }: { check: StateCheck; app: FakeApp; diff: Diff; lang: Language }): string | null {
 	const state = app.state
 
 	if ("item" in check) {

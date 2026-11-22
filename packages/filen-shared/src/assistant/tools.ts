@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { BATCH_DATE_FIELDS, BATCH_ORGANIZE_BY, BATCH_RENAME_SCHEMES } from "./batch"
 import { ASSISTANT_PERIOD_FILTERS } from "./dates"
 import { defineTool, oneOf, type AssistantRoute, type AssistantTool, type AssistantToolArg, type AssistantToolGroup } from "./tool"
 
@@ -517,9 +518,6 @@ export const copyItems = defineTool({
 	}
 })
 
-// The dates a batch names or sorts files by; "taken" is a photo's or video's capture date.
-const BATCH_DATES = ["taken", "created", "modified", "uploaded"] as const
-
 export const renameByPattern = defineTool({
 	name: "rename_by_pattern",
 	title: "Rename by pattern",
@@ -538,12 +536,12 @@ export const renameByPattern = defineTool({
 		handles: optional(handles("the files to rename, instead of a directory")),
 		kind: anyKind,
 		scheme: {
-			...oneOf(["date_prefix", "date_name", "number", "add_prefix", "add_suffix", "replace_text", "lowercase"]),
+			...oneOf(BATCH_RENAME_SCHEMES),
 			description:
 				"date_prefix puts the date before the name, date_name makes the date the name, number numbers them, add_prefix and add_suffix add text, replace_text replaces find with text"
 		},
 		date: optional({
-			...oneOf(BATCH_DATES),
+			...oneOf(BATCH_DATE_FIELDS),
 			description: "Date for the date schemes, default taken"
 		}),
 		text: optional({
@@ -572,9 +570,9 @@ export const organizeByDate = defineTool({
 	input: {
 		scope: handle("the directory whose files are sorted"),
 		kind: anyKind,
-		by: oneOf(["year", "month", "day"]),
+		by: oneOf(BATCH_ORGANIZE_BY),
 		date: optional({
-			...oneOf(BATCH_DATES),
+			...oneOf(BATCH_DATE_FIELDS),
 			description: "Date to sort by, default taken, else created, else modified"
 		})
 	}
@@ -1196,7 +1194,9 @@ export const ASSISTANT_WEB_TOOLS = [
 	"get_transfers",
 	"open_route",
 	"search_note_text",
-	"read_document"
+	"read_document",
+	"rename_by_pattern",
+	"organize_by_date"
 ] as const satisfies readonly AssistantToolName[]
 
 export type AssistantWebToolName = (typeof ASSISTANT_WEB_TOOLS)[number]

@@ -39,7 +39,13 @@ import { confirmAssistantProposal, rejectAssistantProposal } from "@/features/as
 import { isTrustedActivation } from "@/features/assistant/components/userActivation"
 import { useProposalTitle } from "@/features/assistant/components/useProposalTitle"
 import { assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
-import { noteFlagChangeKeys, proposalTargetKind, type ProposalTargetKind } from "@/features/assistant/components/assistant.logic"
+import { AssistantBatchPlanList } from "@/features/assistant/components/assistantBatchPlan"
+import {
+	batchChangeCount,
+	noteFlagChangeKeys,
+	proposalTargetKind,
+	type ProposalTargetKind
+} from "@/features/assistant/components/assistant.logic"
 import type { AssistantProposal, AssistantProposalAction } from "@/features/assistant/types"
 
 const ACTION_ICONS: Record<AssistantProposalAction, LucideIcon> = {
@@ -82,7 +88,8 @@ const TEXT_LABEL_KEYS = new Map<string, AssistantKey>([
 	["name", "assistantProposalName"],
 	["new_name", "assistantProposalNewName"],
 	["title", "assistantProposalNoteTitle"],
-	["type", "assistantProposalNoteType"]
+	["type", "assistantProposalNoteType"],
+	["find", "assistantProposalFind"]
 ])
 
 function SettledStatus({ status }: { status: Exclude<ProposalStatus, "pending"> }) {
@@ -201,6 +208,7 @@ function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 
 	return (
 		<>
+			{proposal.batch === undefined ? null : <AssistantBatchPlanList plan={proposal.batch} />}
 			{proposal.targets.length > 0 ? (
 				<ul
 					aria-label={t("assistantProposalItems")}
@@ -250,14 +258,23 @@ function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 	)
 }
 
-function confirmLabelKey(action: AssistantProposalAction): AssistantKey {
-	switch (action) {
-		case "trash":
-			return "assistantConfirmTrash"
-		case "draft-message":
-			return "assistantConfirmDraft"
-		default:
-			return "assistantConfirm"
+// The confirm button's words; a batch card counts the files it changes.
+function useConfirmLabel(): (proposal: AssistantProposal) => string {
+	const { t } = useTranslation("assistant")
+
+	return proposal => {
+		switch (proposal.action) {
+			case "trash":
+				return t("assistantConfirmTrash")
+			case "draft-message":
+				return t("assistantConfirmDraft")
+			case "batch-rename":
+				return t("assistantConfirmBatchRename", { count: proposal.batch === undefined ? 0 : batchChangeCount(proposal.batch) })
+			case "organize-by-date":
+				return t("assistantConfirmOrganize", { count: proposal.batch === undefined ? 0 : batchChangeCount(proposal.batch) })
+			default:
+				return t("assistantConfirm")
+		}
 	}
 }
 
@@ -269,6 +286,7 @@ export function AssistantConfirmationCard({ proposal, status }: { proposal: Assi
 	const { t } = useTranslation("assistant")
 	const titleId = useId()
 	const title = useProposalTitle()(proposal)
+	const confirmLabel = useConfirmLabel()
 	const Icon = ACTION_ICONS[proposal.action]
 	const destructive = proposal.action === "trash"
 
@@ -321,7 +339,7 @@ export function AssistantConfirmationCard({ proposal, status }: { proposal: Assi
 							size="sm"
 							onClick={onConfirm}
 						>
-							{t(confirmLabelKey(proposal.action))}
+							{confirmLabel(proposal)}
 						</Button>
 					</>
 				) : (

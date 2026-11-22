@@ -82,6 +82,15 @@ import {
 	WRITE_ARGS,
 	WRITE_PRECHECKS
 } from "@/features/assistant/tools/writes"
+import {
+	BATCH_PRECHECKS,
+	BATCH_WRITE_ARGS,
+	batchPreview,
+	clearBatchPlan,
+	isBatchTool,
+	organizeByDateTool,
+	renameByPatternTool
+} from "@/features/assistant/tools/batch"
 
 // Which items each handle argument may name.
 const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly AssistantEntityKind[]>>> = {
@@ -105,7 +114,9 @@ const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly As
 	open_playlist: { handle: ["playlist"] },
 	play: { handle: ["drive", "playlist", "track"] },
 	add_tracks_to_playlist: { playlist: ["playlist"], handles: ["drive", "track"] },
-	read_document: { handle: ["drive"] }
+	read_document: { handle: ["drive"] },
+	rename_by_pattern: { scope: ["root", "drive"], handles: ["drive"] },
+	organize_by_date: { scope: ["root", "drive"] }
 }
 
 // A path the model is told to list a directory by is copied back whole, so it is never shortened: past this it
@@ -289,7 +300,9 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	get_transfers: getTransfersTool,
 	open_route: openRouteTool,
 	search_note_text: searchNoteTextTool,
-	read_document: readDocumentTool
+	read_document: readDocumentTool,
+	rename_by_pattern: renameByPatternTool,
+	organize_by_date: organizeByDateTool
 }
 
 interface ResolvedArgs {
@@ -334,7 +347,16 @@ async function isDrivePath(path: unknown): Promise<boolean> {
 // Checks a tool needs before its confirmation card shows, so the user never confirms a call that then fails.
 const PRECHECKS: Partial<Record<AssistantToolName, (scope: ToolScope, input: Record<string, unknown>) => Promise<string | null>>> = {
 	...WRITE_PRECHECKS,
-	draft_chat_message: draftChatProblem
+	draft_chat_message: draftChatProblem,
+	...BATCH_PRECHECKS
+}
+
+// The arguments a checked call runs with, where a tool cuts them to what it changes.
+const CHECKED_ARGS: Partial<
+	Record<AssistantToolName, (scope: ToolScope, input: Record<string, unknown>) => Promise<Record<string, unknown>>>
+> = {
+	...WRITE_ARGS,
+	...BATCH_WRITE_ARGS
 }
 
 // Free-text arguments the card shows exactly as the call will use them.
@@ -490,7 +512,7 @@ export function createAssistantToolExecutor(): ToolExecutor {
 
 			try {
 				const full = (await resolveArgs(tool, args, scope)).args
-				const resolved = (await WRITE_ARGS[tool.name]?.(scope, full)) ?? full
+				const resolved = (await CHECKED_ARGS[tool.name]?.(scope, full)) ?? full
 				const problem = await PRECHECKS[tool.name]?.(scope, resolved)
 
 				return problem === undefined || problem === null ? { ok: true, args: resolved } : failureOf(new AssistantToolError(problem))
@@ -505,7 +527,8 @@ export function createAssistantToolExecutor(): ToolExecutor {
 
 		preview: async ({ tool, args }) => {
 			try {
-				const resolved = await resolveArgs(tool, args, scopeFor(undefined, new Map()))
+				const scope = scopeFor(undefined, new Map())
+				const resolved = await resolveArgs(tool, args, scope)
 				const destinations = new Set<unknown>(DESTINATION_ARGS.map(key => resolved.args[key]))
 				// A destination by its path: two directories may share a name, never a path.
 				const targets = await Promise.all(
@@ -516,6 +539,19 @@ export function createAssistantToolExecutor(): ToolExecutor {
 						return path === undefined ? target : { ...target, name: path }
 					})
 				)
+
+				if (isBatchTool(tool.name)) {
+					// The plan lists every file; the scope directory heads the card. Only the call's own text shows.
+					const { text, find } = resolved.text
+
+					return {
+						ok: true,
+						title: tool.title,
+						targets: targets.filter(target => destinations.has(target.handle)),
+						text: { ...(text === undefined ? {} : { text }), ...(find === undefined ? {} : { find }) },
+						batch: await batchPreview(tool.name, scope, args)
+					}
+				}
 
 				return { ok: true, title: tool.title, targets, text: resolved.text }
 			} catch (e) {
@@ -567,6 +603,7 @@ export function createAssistantToolExecutor(): ToolExecutor {
 
 		reset: (history: readonly AssistantHistoryTurn[] = []) => {
 			generation++
+			clearBatchPlan()
 			registry.clear(history.flatMap(({ user, reply }) => [user, reply]))
 		}
 	}

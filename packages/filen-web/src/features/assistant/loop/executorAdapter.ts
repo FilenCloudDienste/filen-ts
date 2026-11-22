@@ -11,7 +11,7 @@ import {
 	type AssistantToolPreview,
 	type ToolExecutor
 } from "@/features/assistant/runtime/executor"
-import { NOTE_FLAG_ARGS, type AssistantProposal, type AssistantProposalAction } from "@/features/assistant/types"
+import { NOTE_FLAG_ARGS, type AssistantBatchPlan, type AssistantProposal, type AssistantProposalAction } from "@/features/assistant/types"
 import type { UserCalendar } from "@/features/assistant/tools/dates"
 import { AssistantToolError, unlessStopped } from "@/features/assistant/tools/format"
 
@@ -80,18 +80,51 @@ export function buildProposal({
 	const destinationHandles = new Set(DESTINATION_ARGS.map(key => args[key]).filter(value => typeof value === "string"))
 	const destination = preview.targets.find(target => destinationHandles.has(target.handle))
 
+	// A batch card lists its plan, which names every file; its scope heads the card.
+	const batch = preview.batch === undefined ? undefined : cardBatch(preview.batch)
+
 	return {
 		id,
 		action,
 		targets: preview.targets
-			.filter(target => !destinationHandles.has(target.handle))
+			.filter(target => batch === undefined && !destinationHandles.has(target.handle))
 			.map(({ handle, name, recipients }) => ({
 				handle,
 				name: cardName(name),
 				...(recipients === undefined ? {} : { recipients: recipients.map(cardName) })
 			})),
 		destination: destination === undefined ? null : cardName(destination.name),
-		text: action === "note-flags" ? noteFlagText(args) : preview.text
+		text: action === "note-flags" ? noteFlagText(args) : preview.text,
+		...(batch === undefined ? {} : { batch })
+	}
+}
+
+// A batch plan's names as the card shows names.
+function cardBatch(plan: AssistantBatchPlan): AssistantBatchPlan {
+	return {
+		rule: plan.rule,
+		...(plan.changes === undefined
+			? {}
+			: {
+					changes: plan.changes.map(change => ({
+						from: cardName(change.from),
+						to: cardName(change.to),
+						suffixed: change.suffixed
+					}))
+				}),
+		...(plan.groups === undefined
+			? {}
+			: {
+					groups: plan.groups.map(group => ({
+						directory: cardName(group.directory),
+						isNew: group.isNew,
+						items: group.items.map(item => ({
+							from: cardName(item.from),
+							...(item.to === undefined ? {} : { to: cardName(item.to) })
+						}))
+					}))
+				}),
+		skipped: plan.skipped.map(skip => ({ name: cardName(skip.name), reason: skip.reason }))
 	}
 }
 

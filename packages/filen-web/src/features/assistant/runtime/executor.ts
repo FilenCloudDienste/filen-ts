@@ -7,6 +7,7 @@ import type {
 	AssistantToolProgress
 } from "@filen/shared/assistant"
 import type { UserCalendar } from "@/features/assistant/tools/dates"
+import type { AssistantBatchPlan } from "@/features/assistant/types"
 
 // The web app's side of the agent loop (@filen/shared/assistant's loop): the loop owns routing, the
 // guard and the model; the executor owns everything that touches the app. The implementation is
@@ -33,9 +34,9 @@ export interface AssistantPreviewTarget extends AssistantHandleRef {
 	recipients?: string[]
 }
 
-// The arguments naming where a move, copy, create or playlist addition lands. The card shows it apart from the
-// items: a directory by its path, a playlist by its name.
-export const DESTINATION_ARGS = ["destination", "parent", "playlist"] as const
+// The arguments naming where a move, copy, create or playlist addition lands, or the directory a batch works in. The
+// card shows it apart from the items: a directory by its path, a playlist by its name.
+export const DESTINATION_ARGS = ["destination", "parent", "playlist", "scope"] as const
 
 // A confirmation card's content for a call check() passed.
 export type AssistantToolPreview =
@@ -46,6 +47,8 @@ export type AssistantToolPreview =
 			targets: AssistantPreviewTarget[]
 			// Free-text arguments (new names, message text), verbatim.
 			text: Record<string, string>
+			// A batch call's plan, which is what runs.
+			batch?: AssistantBatchPlan
 	  }
 	| {
 			ok: false

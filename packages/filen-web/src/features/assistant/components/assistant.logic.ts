@@ -4,6 +4,7 @@ import type { AssistantKey } from "@/lib/i18n"
 import type { TranscriptEntry, TranscriptStep, TurnActions } from "@/features/assistant/store/transcript"
 import {
 	NOTE_FLAG_ARGS,
+	type AssistantBatchPlan,
 	type AssistantModelState,
 	type AssistantStepExtract,
 	type AssistantStepFailure,
@@ -471,4 +472,9 @@ export function proposalTargetKind(handle: string): ProposalTargetKind {
 // Markdown punctuation a screen reader would otherwise spell out.
 export function spokenText(markdown: string): string {
 	return markdown.replace(/[*`]/g, "").replace(/^[#>]+\s*/gm, "")
+}
+
+// How many files a batch card changes: what its title and its confirm button count.
+export function batchChangeCount(plan: AssistantBatchPlan): number {
+	return plan.changes?.length ?? plan.groups?.reduce((sum, group) => sum + group.items.length, 0) ?? 0
 }

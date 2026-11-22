@@ -13,3 +13,5 @@ export * from "./appHelp"
 export * from "./transform"
 export * from "./documents"
 export * from "./actOnRead"
+
+export * from "./batch"

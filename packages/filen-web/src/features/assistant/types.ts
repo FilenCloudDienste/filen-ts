@@ -125,6 +125,20 @@ export type AssistantProposalAction =
 	| "note-flags"
 	| "add-to-playlist"
 
+// Why a batch leaves a file as it is: the new name would not be a valid one, or a file holds the name of the
+// subdirectory it would go into.
+export type AssistantBatchSkipReason = "invalid-name" | "destination-is-file"
+
+// A batch card's plan, which code worked out and which is exactly what runs. `rule` is the call's scheme
+// ("scheme" or "by") and "date"; a rename lists every change, a sort every destination subdirectory, new or reused,
+// with each file that goes there (`to` when it moves under another name to avoid a clash).
+export interface AssistantBatchPlan {
+	rule: Readonly<Record<string, string>>
+	changes?: readonly { from: string; to: string; suffixed: boolean }[]
+	groups?: readonly { directory: string; isNew: boolean; items: readonly { from: string; to?: string }[] }[]
+	skipped: readonly { name: string; reason: AssistantBatchSkipReason }[]
+}
+
 // The flags a note-flags card changes, in the order the card lists them and the call applies them.
 export const NOTE_FLAG_ARGS = ["pinned", "favorite", "archived"] as const
 
@@ -151,6 +165,7 @@ export interface AssistantProposal {
 	targets: readonly AssistantProposalTarget[]
 	destination: string | null
 	text: Readonly<Record<string, string>>
+	batch?: AssistantBatchPlan
 }
 
 // "message-too-long": the message alone does not fit the model. "no-reply": the turn ended without any

@@ -1,7 +1,8 @@
-import { formatBytes, storageSummary } from "@filen/shared"
+import { DRIVE_NAME_RULES, estimateCaptureTimestamp, formatBytes, storageSummary } from "@filen/shared"
 import {
 	ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS,
 	assistantToolByName,
+	batchOrganizeCount,
 	composerBusyMessage,
 	CONTACT_NEEDS_WORDS,
 	CONTACT_WITHOUT_CHAT_NOTE,
@@ -36,6 +37,8 @@ import {
 	PARTIAL_MATCH_NOTE,
 	parseToolInput,
 	PHOTOS_ITEMS,
+	planBatchRename,
+	planOrganizeByDate,
 	rawSearchTokens,
 	RECENT_ITEMS,
 	recentsReachNote,
@@ -51,7 +54,11 @@ import {
 	tokenMatches,
 	TRASH_NOTE,
 	unknownSizesNote,
-	type AssistantPeriodFilter
+	type AssistantPeriodFilter,
+	type BatchDateField,
+	type BatchItem,
+	type BatchOrganizeBy,
+	type BatchRenameScheme
 } from "@filen/shared/assistant"
 import {
 	createFixtureState,
@@ -549,6 +556,39 @@ export class FakeApp {
 		}
 
 		return item
+	}
+
+	// An item of the user's own drive a write may change, as the app's menus offer it: never the root, nor one
+	// someone else shares.
+	private ownItem(handle: string, kind?: "directory"): DriveItem {
+		const item = kind === "directory" ? this.directory(handle) : this.driveItem(handle)
+
+		if (item.sharedBy !== undefined || !this.inMyDrive(item)) {
+			throw new CallError(`"${item.name}" is shared with the user; its owner manages it`, false)
+		}
+
+		if (item.parent === null && kind !== "directory") {
+			throw new CallError("The drive root cannot be renamed", false)
+		}
+
+		return item
+	}
+
+	// A file as the batch planner sees it, as the app builds it: fixture files carry no creation date of their own,
+	// and a photo's or video's capture date is the Photos timeline's estimate.
+	private batchItem(item: DriveItem): BatchItem {
+		const uploaded = Date.parse(item.uploaded ?? item.modified)
+		const modified = Date.parse(item.modified)
+		const media = this.matchesKind(item, "image") || this.matchesKind(item, "video")
+
+		return {
+			id: item.handle,
+			name: item.name,
+			parent: item.parent ?? "",
+			uploaded,
+			modified,
+			...(media ? { taken: estimateCaptureTimestamp(uploaded, undefined, modified) } : {})
+		}
 	}
 
 	private noteItem(handle: string): Note {
@@ -1913,9 +1953,135 @@ export class FakeApp {
 				return this.readDocument(input)
 			}
 
+			case "rename_by_pattern": {
+				const handles = list("handles")
+				const scope = optionalStr("scope")
+				let files: DriveItem[]
+
+				if (handles.length > 0) {
+					files = [...new Set(handles)].map(handle => this.ownItem(handle))
+				} else if (scope !== undefined) {
+					const directory = this.ownItem(scope, "directory")
+
+					files = this.children(directory.handle).filter(
+						item => item.kind === "file" && this.matchesKind(item, optionalStr("kind"))
+					)
+				} else {
+					throw new CallError("Pass scope (a directory) or handles (the files)", true)
+				}
+
+				const result = planBatchRename({
+					names: DRIVE_NAME_RULES,
+					items: files.map(item => this.batchItem(item)),
+					taken: new Map(
+						[...new Set(files.map(item => item.parent ?? ""))].map(parent => [
+							parent,
+							this.children(parent).map(item => item.name)
+						])
+					),
+					scheme: str("scheme") as BatchRenameScheme,
+					date: optionalStr("date") as BatchDateField | undefined,
+					text: optionalStr("text"),
+					find: optionalStr("find"),
+					timeZone: EVAL_TIME_ZONE
+				})
+
+				if (!result.ok) {
+					throw new CallError(result.error, true)
+				}
+
+				if (result.plan.changes.length === 0) {
+					throw new CallError("No file would get a new name; nothing to rename", false)
+				}
+
+				for (const change of result.plan.changes) {
+					const item = files.find(candidate => candidate.handle === change.id)
+
+					if (item !== undefined) {
+						item.name = change.to
+					}
+				}
+
+				return {
+					renamed: result.plan.changes.length,
+					...(result.plan.skipped.length > 0
+						? {
+								skipped: result.plan.skipped.map(({ name: skippedName, reason }) => ({ name: skippedName, reason }))
+							}
+						: {})
+				}
+			}
+
+			case "organize_by_date": {
+				const directory = this.ownItem(str("scope"), "directory")
+				const children = this.children(directory.handle)
+				const files = children.filter(item => item.kind === "file" && this.matchesKind(item, optionalStr("kind")))
+				const result = planOrganizeByDate({
+					names: DRIVE_NAME_RULES,
+					items: files.map(item => this.batchItem(item)),
+					children: children.map(item => ({ id: item.handle, name: item.name, directory: item.kind === "directory" })),
+					destinationNames: new Map(
+						children
+							.filter(item => item.kind === "directory")
+							.map(item => [item.handle, this.children(item.handle).map(child => child.name)])
+					),
+					by: str("by") as BatchOrganizeBy,
+					date: optionalStr("date") as BatchDateField | undefined,
+					timeZone: EVAL_TIME_ZONE
+				})
+
+				if (!result.ok) {
+					throw new CallError(result.error, true)
+				}
+
+				if (batchOrganizeCount(result.plan) === 0) {
+					throw new CallError("No file to sort into a subdirectory; nothing to move", false)
+				}
+
+				let created = 0
+
+				for (const group of result.plan.groups) {
+					let destination = group.existing
+
+					if (destination === undefined) {
+						destination = this.nextHandle("d")
+						created++
+						this.state.drive.push({
+							handle: destination,
+							kind: "directory",
+							name: group.directory,
+							parent: directory.handle,
+							size: 0,
+							modified: "2025-10-07T12:00:00Z",
+							favorite: false,
+							trashed: false,
+							shared: false
+						})
+					}
+
+					for (const move of group.items) {
+						const item = files.find(candidate => candidate.handle === move.id)
+
+						if (item !== undefined) {
+							item.name = move.to ?? item.name
+							item.parent = destination
+						}
+					}
+				}
+
+				return {
+					moved: batchOrganizeCount(result.plan),
+					created,
+					in: this.pathOf(directory),
+					...(result.plan.skipped.length > 0
+						? {
+								skipped: result.plan.skipped.map(({ name: skippedName, reason }) => ({ name: skippedName, reason }))
+							}
+						: {})
+				}
+			}
+
 			// Their tracks give these their fixture behaviour; until then a call reads as a failure that changes nothing.
-			case "rename_by_pattern":
-			case "organize_by_date":
 			case "restore_items":
 			case "app_help": {
 				throw new CallError(`${name} is not available in this app yet`, false)

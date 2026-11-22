@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next"
 import type { AssistantProposal } from "@/features/assistant/types"
+import { batchChangeCount } from "@/features/assistant/components/assistant.logic"
 
 // A card's title, also what the live region announces when the card appears.
 export function useProposalTitle(): (proposal: AssistantProposal) => string {
@@ -22,9 +23,9 @@ export function useProposalTitle(): (proposal: AssistantProposal) => string {
 			case "rename":
 				return t("assistantProposalRename", { count })
 			case "batch-rename":
-				return t("assistantProposalBatchRename", { count })
+				return t("assistantProposalBatchRename", { count: proposal.batch === undefined ? 0 : batchChangeCount(proposal.batch) })
 			case "organize-by-date":
-				return t("assistantProposalOrganizeByDate", { count })
+				return t("assistantProposalOrganizeByDate", { count: proposal.batch === undefined ? 0 : batchChangeCount(proposal.batch) })
 			case "favorite":
 				return t("assistantProposalFavorite", { count })
 			case "unfavorite":

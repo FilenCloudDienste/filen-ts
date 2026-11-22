@@ -19,6 +19,10 @@ export const DRIVE_DISABLE_LINK = activityKeys("drive:driveDisableLink")
 
 export const DRIVE_MOVE = activityKeys("drive:driveMove")
 
+export const DRIVE_RENAME = activityKeys("drive:driveRename")
+
+export const DRIVE_SORT_BY_DATE = activityKeys("drive:driveSortByDate")
+
 export const DRIVE_FAVORITE = activityKeys("drive:driveFavorite")
 
 export const DRIVE_UNFAVORITE = activityKeys("drive:driveUnfavorite")

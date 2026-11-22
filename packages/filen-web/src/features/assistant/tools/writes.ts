@@ -68,7 +68,7 @@ function nameProblem(name: string): string | null {
 
 // Why the assistant may not change a drive item, or null. Someone else's item is theirs to manage; the root `.filen`
 // (Filen's own synced settings) is changed only after the user types its name, which a card cannot ask for.
-function itemProblem(item: DriveItem): string | null {
+export function itemProblem(item: DriveItem): string | null {
 	const name = driveName(item)
 
 	if (item.data.undecryptable) {
@@ -82,7 +82,7 @@ function itemProblem(item: DriveItem): string | null {
 	return isRootDotFilenItem(item) ? `"${name}" holds Filen's own settings; only the user can change it, in the app` : null
 }
 
-async function driveItemsOf(scope: ToolScope, handles: readonly string[]): Promise<DriveItem[]> {
+export async function driveItemsOf(scope: ToolScope, handles: readonly string[]): Promise<DriveItem[]> {
 	const items: DriveItem[] = []
 	const seen = new Set<string>()
 
@@ -109,20 +109,20 @@ async function driveItemsOf(scope: ToolScope, handles: readonly string[]): Promi
 	return items
 }
 
-function handleList(input: Record<string, unknown>, key: string): string[] {
+export function handleList(input: Record<string, unknown>, key: string): string[] {
 	const value = input[key]
 
 	return Array.isArray(value) ? value.map(String) : []
 }
 
-interface Destination {
+export interface Destination {
 	uuid: string | null
 	name: string
 	entity: AssistantEntity
 }
 
 // A directory of the user's own drive to put items in: the root, or a directory they own.
-async function destinationOf(scope: ToolScope, handle: string): Promise<Destination> {
+export async function destinationOf(scope: ToolScope, handle: string): Promise<Destination> {
 	const entity = await resolveHandle(scope, handle, ["root", "drive"])
 
 	if (entity.kind === "root") {
@@ -388,7 +388,10 @@ export async function destinationPath(entity: AssistantEntity): Promise<string |
 
 // A run's result for the model: the names it changed and, for any that failed, why. One where nothing succeeded
 // fails the call, so the card says so too.
-function bulkResult<T>(outcome: BulkOutcome<T>, name: (item: T) => string): { done: string[]; failed?: { name: string; error: string }[] } {
+export function bulkResult<T>(
+	outcome: BulkOutcome<T>,
+	name: (item: T) => string
+): { done: string[]; failed?: { name: string; error: string }[] } {
 	const [first] = outcome.failed
 
 	if (outcome.succeeded.length === 0 && first !== undefined) {

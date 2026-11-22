@@ -11,7 +11,7 @@ import {
 	type TranscriptStep
 } from "@/features/assistant/store/transcript"
 import { clipText } from "@/features/assistant/tools/format"
-import type { AssistantExchange } from "@/features/assistant/types"
+import type { AssistantBatchPlan, AssistantExchange } from "@/features/assistant/types"
 
 // Saved conversations, as plain text. A turn is a few KB (the message, replies capped by the model's
 // output budget, the step labels), so 100 conversations within 4 MiB keep the kv store and the index read
@@ -179,6 +179,18 @@ const storedStepSchema = type({ kind: "'loading' | 'thinking' | 'replying'", ...
 
 type StoredStep = typeof storedStepSchema.infer
 
+// A batch card's plan, as the card lists it.
+const storedBatchSchema = type({
+	rule: "Record<string, string>",
+	"changes?": type({ from: "string", to: "string", suffixed: "boolean" }).array(),
+	"groups?": type({
+		directory: "string",
+		isNew: "boolean",
+		items: type({ from: "string", "to?": "string" }).array()
+	}).array(),
+	skipped: type({ name: "string", reason: "'invalid-name' | 'destination-is-file'" }).array()
+})
+
 // Entries carry their turn's position instead of ids: restoring mints fresh ids, so a restored turn can
 // never share one with a turn of this page's session.
 const storedEntrySchema = type({ kind: "'user'", turn: "number", text: "string" })
@@ -198,6 +210,7 @@ const storedEntrySchema = type({ kind: "'user'", turn: "number", text: "string" 
 		targets: type({ handle: "string", name: "string", "recipients?": "string[]" }).array(),
 		destination: "string | null",
 		text: "Record<string, string>",
+		"batch?": storedBatchSchema,
 		// Never "pending" or "running": see storedProposalStatus.
 		status: "'done' | 'failed' | 'cancelled' | 'expired' | 'interrupted'"
 	})
@@ -208,6 +221,19 @@ const storedEntrySchema = type({ kind: "'user'", turn: "number", text: "string" 
 	})
 
 type StoredEntry = typeof storedEntrySchema.infer
+
+type StoredBatch = typeof storedBatchSchema.infer
+
+function storedBatch(plan: AssistantBatchPlan): StoredBatch {
+	return {
+		rule: { ...plan.rule },
+		...(plan.changes === undefined ? {} : { changes: plan.changes.map(change => ({ ...change })) }),
+		...(plan.groups === undefined
+			? {}
+			: { groups: plan.groups.map(group => ({ ...group, items: group.items.map(item => ({ ...item })) })) }),
+		skipped: plan.skipped.map(skip => ({ ...skip }))
+	}
+}
 
 export const conversationBodySchema = type({
 	v: "1",
@@ -300,6 +326,7 @@ function storedEntry(entry: TranscriptEntry, turn: number): StoredEntry {
 				})),
 				destination: entry.proposal.destination,
 				text: Object.fromEntries(Object.entries(entry.proposal.text).map(([key, value]) => [key, capText(value)])),
+				...(entry.proposal.batch === undefined ? {} : { batch: storedBatch(entry.proposal.batch) }),
 				status: storedProposalStatus(entry.status)
 			}
 		case "turnEnd":
@@ -436,7 +463,14 @@ export function restoreConversation(
 					kind: "proposal",
 					id: proposalEntryId(id),
 					turnId,
-					proposal: { id, action: entry.action, targets: entry.targets, destination: entry.destination, text: entry.text },
+					proposal: {
+						id,
+						action: entry.action,
+						targets: entry.targets,
+						destination: entry.destination,
+						text: entry.text,
+						...(entry.batch === undefined ? {} : { batch: entry.batch })
+					},
 					status: entry.status
 				})
 				break

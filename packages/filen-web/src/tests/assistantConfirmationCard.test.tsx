@@ -280,3 +280,55 @@ describe("AssistantConfirmationCard", () => {
 		expect(screen.getByText("This may have finished after you left. Check before asking again.")).toBeDefined()
 	})
 })
+
+describe("batch cards", () => {
+	const RENAMES: AssistantProposal = {
+		id: "p2",
+		action: "batch-rename",
+		targets: [],
+		destination: "/Photos",
+		text: {},
+		batch: {
+			rule: { scheme: "date_prefix" },
+			changes: Array.from({ length: 500 }, (_, index) => ({
+				from: `IMG_${String(index)}.jpg`,
+				to: `2026-11-21 IMG_${String(index)}${index === 0 ? " (2)" : ""}.jpg`,
+				suffixed: index === 0
+			})),
+			skipped: [{ name: "a/b", reason: "invalid-name" }]
+		}
+	}
+
+	it("counts every file of a 500-file plan, sums it up, and draws only the rows in view", () => {
+		renderCard(RENAMES)
+
+		const card = screen.getByRole("group", { name: "Rename 500 files" })
+
+		expect(within(card).getByText("Date before the name (date taken) · 1 skipped · 1 numbered to avoid a clash")).toBeDefined()
+		expect(within(card).getByRole("button", { name: "Rename 500" })).toBeDefined()
+		expect(within(card).getByRole("list", { name: "Changes" }).querySelectorAll("li").length).toBeLessThan(500)
+	})
+
+	it("groups a sort by subdirectory, new or existing, with its renamed-on-move note", () => {
+		renderCard({
+			id: "p3",
+			action: "organize-by-date",
+			targets: [],
+			destination: "/Photos",
+			text: {},
+			batch: {
+				rule: { by: "year" },
+				groups: [
+					{ directory: "2023", isNew: false, items: [{ from: "beach.jpg", to: "beach (2).jpg" }] },
+					{ directory: "2024", isNew: true, items: [{ from: "hike.jpg" }, { from: "notes.txt" }] }
+				],
+				skipped: []
+			}
+		})
+
+		const card = screen.getByRole("group", { name: "Sort 3 files into subdirectories by date" })
+
+		expect(within(card).getByText("1 file moves under a numbered name, as its name is taken there")).toBeDefined()
+		expect(within(card).getByRole("button", { name: "Move 3" })).toBeDefined()
+	})
+})

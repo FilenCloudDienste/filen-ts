@@ -91,6 +91,46 @@ export function createDirectory(parentUuid: string | null, name: string): Promis
 // ── Rename ───────────────────────────────────────────────────────────────
 
 export async function renameItem(item: DriveItem, newName: string): Promise<ActionOutcome> {
+	const outcome = await renameAndPatch(item, newName)
+
+	if (outcome.status === "success") {
+		invalidateNames()
+	}
+
+	return outcome
+}
+
+// Many items, each to its own new name (`names`, by uuid), as one bulk run: the breadcrumb names are read again once
+// at the end instead of once per item.
+export async function renameItems(
+	items: DriveItem[],
+	names: ReadonlyMap<string, string>,
+	onSettled?: BulkProgress
+): Promise<BulkOutcome<DriveItem>> {
+	const outcome = await runBulkOutcomes(
+		items,
+		async item => {
+			const name = names.get(item.data.uuid)
+
+			return name === undefined ? { status: "error", dto: plainErrorDTO("No new name") } : await renameAndPatch(item, name)
+		},
+		onSettled
+	)
+
+	if (outcome.succeeded.length > 0) {
+		invalidateNames()
+	}
+
+	return outcome
+}
+
+// Breadcrumb name cache — a renamed uuid may appear as an ancestor segment on some open path. Fire-and-forget: the
+// optimistic patch already covers the success outcome, so a rejection here must not delay it or escape uncaught.
+function invalidateNames(): void {
+	void queryClient.invalidateQueries({ queryKey: ["drive", "names"] })
+}
+
+async function renameAndPatch(item: DriveItem, newName: string): Promise<ActionOutcome> {
 	const base = asDirectoryOrFile(item)
 	const outcome = await attemptOp<Dir | File>(
 		base.type === "directory" ? sdkApi.renameDirectory(base.data, newName) : sdkApi.renameFile(base.data, newName)
@@ -106,10 +146,6 @@ export async function renameItem(item: DriveItem, newName: string): Promise<Acti
 	// same row, which a narrow per-parent patch never reached; each row takes only the name.
 	driveListingQueryUpdateGlobal({ type: "replace", uuid: updated.data.uuid, replace: row => withNameOf(row, updated) })
 	followClipboardItem(updated)
-	// Breadcrumb name cache — this item's uuid may appear as an ancestor segment on some open path.
-	// Fire-and-forget: the optimistic patch above already covers the success outcome, so a rejection
-	// here must not delay it or escape renameItem uncaught.
-	void queryClient.invalidateQueries({ queryKey: ["drive", "names"] })
 
 	return { status: "success", item: updated }
 }

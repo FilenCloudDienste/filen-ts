@@ -1,3 +1,5 @@
+import { compareNames } from "./naturalSort"
+
 // Extra fields every DriveItem carries beyond its raw wasm shape (mirrors filen-mobile's
 // ExtraData): `size` is synthetic for directories (Dir has no native size field — sort.ts's bigint
 // size compare needs one so dirs group uniformly against files), `uuid` restates the item's own
@@ -32,3 +34,7 @@ export function driveItemName(item: DriveItemLike): string {
 export function nameCollisionKey(name: string): string {
 	return name.toLowerCase()
 }
+
+// How the names of one directory relate: the key two names collide on, and the drive's natural name order. What the
+// assistant's batch planner (assistant/batch.ts) is handed, as the assistant subpath cannot import it.
+export const DRIVE_NAME_RULES = { key: nameCollisionKey, compare: compareNames } as const
