@@ -71,6 +71,7 @@ export { PresentationTextEditor, type PresentationTextEditorProps, type TextEdit
 export { TextEditController, COMMIT_IDLE_MS, type TextEditFormat } from "./edit/text/controller"
 export { createTextEditing, formatShapesOp, useTextEditing, type TextEditing } from "./edit/text/editing"
 export { bodyPlainText, replaceBodyText, replaceSlideText, slidePlainRange, slideRangeText, type TextRange } from "./edit/text/replace"
+export { bodyToDoc } from "../../core/presentation/text/schema"
 export {
 	disposeFormatPainter,
 	formatPainterOf,

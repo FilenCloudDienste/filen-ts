@@ -4,7 +4,7 @@ import type { DocxDocument } from "@filen/office/react/docx"
 import type { SheetSessionApi } from "@filen/office/core/sheet"
 import { DocumentTextBuilder, unitRange } from "@/lib/documentText"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
-import type { TextEditing } from "@filen/office/react/presentation"
+import { bodyToDoc, type TextEditing } from "@filen/office/react/presentation"
 import {
 	docxDocumentReader,
 	docxEditDocumentReader,
@@ -17,7 +17,8 @@ import type { PagerRowView } from "@/features/preview/workers/textPager.worker"
 import type { TextBuffer, TextFile } from "@/features/preview/lib/textFile"
 import { SHEET_SELECTION_COUNT_MAX, sheetDocumentReader, sheetSelectionReader } from "@/features/spreadsheet/lib/sheetDocumentReader"
 import { slidesDocumentReader } from "@/features/presentation/lib/slidesDocumentReader"
-import { slideTextSelection } from "@/features/presentation/hooks/usePresentationActiveDocument"
+import { slideTransform } from "@/features/presentation/lib/slideTransformHost"
+import { EditorState, TextSelection } from "prosemirror-state"
 
 // The editor's plain text over the body (its marker first), here over a string standing for the body.
 vi.mock("@filen/office/react/docx/editor", () => ({
@@ -277,15 +278,21 @@ describe("the spreadsheet's selection", () => {
 
 describe("a slide's text selection", () => {
 	it("reads the body being edited, paragraphs as lines, and nothing without one or with a caret", () => {
-		const textBetween = vi.fn(() => "Title\nBody")
-		const editing = { active: { state: { selection: { empty: false, from: 1, to: 11 }, doc: { textBetween } } } }
-		const reader = slideTextSelection(editing as unknown as TextEditing)
+		const { doc } = bodyToDoc({
+			bodyPr: {},
+			paragraphs: [
+				{ pPr: {}, runs: [{ kind: "r", text: "Title", rPr: {} }] },
+				{ pPr: {}, runs: [{ kind: "r", text: "Body", rPr: {} }] }
+			]
+		})
+		const all = EditorState.create({ doc, selection: TextSelection.create(doc, 1, 12) })
+		const editing = { active: { state: all } }
+		const reader = slideTransform(editing as unknown as TextEditing, () => false)
 
-		expect(reader.selectedChars(signal())).toBe(10)
-		expect(reader.selectedText(100, signal())).toBe("Title\nBody")
-		expect(textBetween).toHaveBeenCalledWith(1, 11, "\n")
-		editing.active.state.selection.empty = true
-		expect(reader.selectedChars(signal())).toBe(0)
-		expect(slideTextSelection({ active: undefined } as unknown as TextEditing).selectedText(100, signal())).toBe("")
+		expect(reader.selectedChars()).toBe(10)
+		expect(reader.selectedText(100)).toBe("Title\nBody")
+		editing.active.state = EditorState.create({ doc })
+		expect(reader.selectedChars()).toBe(0)
+		expect(slideTransform({ active: undefined } as unknown as TextEditing, () => true).selectedText(100)).toBe("")
 	})
 })

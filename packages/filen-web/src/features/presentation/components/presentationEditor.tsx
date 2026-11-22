@@ -102,7 +102,9 @@ import { parseCombo } from "@filen/shared/keymap"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import type { PreviewKey } from "@/lib/i18n"
 import { PresentationMotionPaths } from "@/features/presentation/components/ribbon/motionPaths"
-import { slideTextSelection, usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
+import { usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
+import { slideTransform } from "@/features/presentation/lib/slideTransformHost"
+import { SelectionTransformRoot } from "@/features/assistant/transform/selectionTransform"
 
 // The presentation editor: the ribbon (File, then the tabs whose groups the deck offers: in a deck that can only be
 // viewed that is the View tab and the read-only groups of others), the slide list with its edit commands (selection,
@@ -461,8 +463,6 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const shapeState = useShapeSelection(shapes)
 	// The body open in the text editor (one store per deck: the ribbon's text groups read it), and its shape.
 	const [text] = useState(createTextEditing)
-	// What is selected in the body being edited, for the open document.
-	const [textSelection] = useState(() => slideTextSelection(text))
 	// The Selection Pane's state, this editor's own (closed when the deck opens).
 	const [selectionPane] = useState(createSelectionPane)
 	const [editingText, setEditingText] = useState<ShapeRef | undefined>(undefined)
@@ -494,7 +494,12 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const count = deck.slides.length
 	const index = editor.current
 
-	usePresentationActiveDocument(deck, index, editor.editable, textSelection, text)
+	const editable = editor.editable
+	// The body being edited as the selection transform's host (✨, Alt+J), also what is selected in it for the open
+	// document.
+	const transformHost = slideTransform(text, () => editable)
+
+	usePresentationActiveDocument(deck, index, editor.editable, transformHost, text)
 
 	const ref: SlideRef | undefined = editor.currentRef
 	const render = ref === undefined ? undefined : deck.renders.get(ref)
@@ -919,7 +924,11 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 							phone={phone}
 						/>
 					)}
-					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+					<SelectionTransformRoot
+						host={transformHost}
+						readOnly={!editor.editable}
+						className="flex min-h-0 min-w-0 flex-1 flex-col"
+					>
 						<SlideCanvasContextMenu
 							editor={slideEditor}
 							disabled={show.showing}
@@ -1051,7 +1060,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 									: {})}
 							/>
 						) : null}
-					</div>
+					</SelectionTransformRoot>
 					{show.showing ? null : (
 						<AnimationPane
 							editor={slideEditor}
