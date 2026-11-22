@@ -50,7 +50,7 @@ import {
 } from "@/features/assistant/tools/drive"
 import { getSharingTool, listSectionTool } from "@/features/assistant/tools/sharing"
 import { getTransfersTool } from "@/features/assistant/tools/transfers"
-import { listNotesTool, openNoteTool, readNoteTool } from "@/features/assistant/tools/notes"
+import { listNotesTool, openNoteTool, readNoteTool, searchNoteTextTool } from "@/features/assistant/tools/notes"
 import { getStorageTool, listPhotosTool, recentItemsTool } from "@/features/assistant/tools/insights"
 import { userCalendar, type UserCalendar } from "@/features/assistant/tools/dates"
 import {
@@ -240,7 +240,8 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	audio_control: audioControlTool,
 	add_tracks_to_playlist: addTracksToPlaylistTool,
 	get_transfers: getTransfersTool,
-	open_route: openRouteTool
+	open_route: openRouteTool,
+	search_note_text: searchNoteTextTool
 }
 
 interface ResolvedArgs {

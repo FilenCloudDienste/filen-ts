@@ -42,6 +42,10 @@ export type Note = {
 	archived: boolean
 	trashed: boolean
 	edited: string
+	// search_note_text only reads text this device holds: false for a note whose text was never read here.
+	textOnDevice?: false
+	// Text restored from the device's cache and not read since, so it may be older than the cloud's.
+	maybeStale?: true
 }
 
 export type ChatMessage = {

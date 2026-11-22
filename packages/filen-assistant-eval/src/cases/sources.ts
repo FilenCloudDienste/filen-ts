@@ -1,4 +1,34 @@
-import type { EvalCase } from "./types"
+import type { EvalCase, Language } from "./types"
+
+// A note text search over the 4 of 15 notes whose text this device holds (n1-n4): the answer says how much
+// it searched, whether or not a held note matched, rather than that no note mentions the words.
+function partialNoteTextCases(): EvalCase[] {
+	const table: [Language, string, string[], string[][]][] = [
+		["en", "Which of my notes mention the launch?", ["launch"], [["meeting"]]],
+		["de", "Welche meiner Notizen erwähnen Brot?", ["brot"], [["einkaufsliste"]]],
+		["es", "¿Qué notas mencionan el hotel Atlantis?", ["atlantis", "hotel"], []],
+		["ru", "В каких заметках есть слово стоматолог?", ["стоматолог"], []],
+		["zh", "哪些笔记提到了《活着》？", ["活着"], []],
+		["ar", "ما الملاحظات التي تذكر دبي؟", ["دبي"], []]
+	]
+
+	return table.map(([lang, prompt, query, answer]) => ({
+		id: `sources-search-note-text-partial-${lang}`,
+		category: "sources",
+		lang,
+		prompt,
+		setup: state => {
+			for (const note of state.notes.slice(4)) {
+				note.textOnDevice = false
+			}
+		},
+		routes: ["notes"],
+		calls: [{ tool: "search_note_text", args: { query: { $includes: query } } }],
+		// "4 of 15", in whatever words: both counts.
+		answerIncludes: [...answer, ["4"], ["15"]],
+		expectsText: true
+	}))
+}
 
 // The drive's own lists (favorites, trash, shared with and by the user, public links), an item's sharing
 // state, the transfers in this tab, contact lookups and settings sections. Fixture: favorites f8 CV_2025.docx
@@ -935,5 +965,6 @@ export const SOURCES_CASES: EvalCase[] = [
 		calls: [{ tool: "list_directory" }],
 		answerIncludes: [["kickoff"], ["carta_hotel", "carta hotel"]],
 		expectsText: true
-	}
+	},
+	...partialNoteTextCases()
 ]

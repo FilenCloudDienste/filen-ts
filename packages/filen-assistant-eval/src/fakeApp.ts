@@ -22,6 +22,9 @@ import {
 	NO_CONTACT_NOTE,
 	NO_TRANSFERS_NOTE,
 	normalizeText,
+	matchScore,
+	NOTE_TEXT_NEEDS_WORDS,
+	noteTextCoverageNote,
 	NOTES_ITEMS,
 	OUTSIDE_DATES_ITEMS,
 	OWN_SHARING_UNCHECKED,
@@ -1271,6 +1274,46 @@ export class FakeApp {
 				}
 			}
 
+			// Like the app: only the text the device holds, in the sidebar's order, most words matched first;
+			// handles and titles, never the text.
+			case "search_note_text": {
+				const tokens = searchTokens(str("query"))
+
+				if (tokens.length === 0) {
+					throw new CallError(NOTE_TEXT_NEEDS_WORDS, true)
+				}
+
+				const rank = (item: Note) => (item.pinned ? 0 : item.archived ? 2 : 1)
+				const notes = this.state.notes
+					.filter(item => !item.trashed)
+					.toSorted((a, b) => rank(a) - rank(b) || Date.parse(b.edited) - Date.parse(a.edited))
+				const held = notes.filter(item => item.textOnDevice !== false)
+				const hits = held
+					.map(item => ({ item, tokensMatched: matchScore(`${item.title}\n${item.content}`, tokens) }))
+					.filter(({ tokensMatched }) => tokensMatched > 0)
+					.toSorted((a, b) => b.tokensMatched - a.tokensMatched)
+
+				return {
+					notes: hits.slice(0, SEARCH_RESULT_ITEMS).map(({ item, tokensMatched }) => {
+						this.exposed.add(item.handle)
+
+						return {
+							handle: item.handle,
+							title: item.title,
+							tokensMatched,
+							...(item.maybeStale === true
+								? {
+										maybeStale: true
+									}
+								: {})
+						}
+					}),
+					queryTokens: tokens.length,
+					...listRest(hits.length, SEARCH_RESULT_ITEMS),
+					note: noteTextCoverageNote({ searched: held.length, total: notes.length, cut: false })
+				}
+			}
+
 			case "read_note": {
 				const item = this.noteItem(str("handle"))
 
@@ -1828,7 +1871,6 @@ export class FakeApp {
 			case "rename_by_pattern":
 			case "organize_by_date":
 			case "restore_items":
-			case "search_note_text":
 			case "app_help": {
 				throw new CallError(`${name} is not available in this app yet`, false)
 			}

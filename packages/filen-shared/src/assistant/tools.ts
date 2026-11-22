@@ -215,6 +215,21 @@ export const ROOT_NOT_SHAREABLE = "The drive root cannot be shared or linked; as
 export const SHARED_WITH_YOU_NOTE = "Its owner manages its links and shares."
 export const NO_TRANSFERS_NOTE = "No uploads or downloads in this tab since it was opened."
 
+// search_note_text reads only the note text already on this device, never fetching one, and stops past this
+// many characters of it in one call.
+export const NOTE_TEXT_SCAN_MAX_CHARS = 2_000_000
+export const NOTE_TEXT_NEEDS_WORDS = "Pass words the note's text contains"
+
+// How much of the user's notes a text search covered: a small model told nothing reports "no note mentions it"
+// for a search that never saw most of them.
+export function noteTextCoverageNote({ searched, total, cut }: { searched: number; total: number; cut: boolean }): string {
+	const covered = `Searched ${String(searched)} of ${String(total)} notes (notes whose text is saved on this device)`
+
+	return searched >= total
+		? `${covered}.`
+		: `${covered}${cut ? ", stopping at the search limit" : ""}. The others may contain the words too; tell the user the search was partial.`
+}
+
 const listDirectoryPlain = defineTool({
 	...listDirectory,
 	description: 'List the contents of a directory, given its handle or its path ("/" is the drive root). Can sort by size or date.',
@@ -1178,7 +1193,8 @@ export const ASSISTANT_WEB_TOOLS = [
 	"audio_control",
 	"add_tracks_to_playlist",
 	"get_transfers",
-	"open_route"
+	"open_route",
+	"search_note_text"
 ] as const satisfies readonly AssistantToolName[]
 
 export type AssistantWebToolName = (typeof ASSISTANT_WEB_TOOLS)[number]

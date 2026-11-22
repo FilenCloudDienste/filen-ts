@@ -1089,6 +1089,68 @@ describe("notes", () => {
 	})
 })
 
+describe("search_note_text", () => {
+	it("searches only the note text this device holds, as plain text, and never fetches or returns it", async () => {
+		const packing = note(testUuid("packing"), "Packing")
+
+		sdk.listNotes.mockResolvedValue([plan, recipe, packing])
+		queryClient.setQueryData(noteContentQueryKey(recipe.uuid), "<p>Flour</p><p>Sugar &amp; salt</p>")
+		queryClient.setQueryData(noteContentQueryKey(plan.uuid), "Day 1: Lisbon, buy salt")
+
+		const result = await call("search_note_text", { query: "sugar & salt" })
+
+		expect(json(result)).toEqual({
+			notes: [
+				{ handle: "n1", title: "Recipe", tokensMatched: 2, maybeStale: true },
+				{ handle: "n2", title: "Trip plan", tokensMatched: 1, maybeStale: true }
+			],
+			queryTokens: 2,
+			note: "Searched 2 of 3 notes (notes whose text is saved on this device). The others may contain the words too; tell the user the search was partial."
+		})
+		expect(sdk.getNoteContent).not.toHaveBeenCalled()
+	})
+
+	it("searches what the editor and the outbox hold over the cache, and calls it current", async () => {
+		sdk.listNotes.mockResolvedValue([plan, recipe])
+		queryClient.setQueryData(noteContentQueryKey(plan.uuid), "Day 1: Lisbon")
+		seedTabEditor(plan.uuid, "key", "Day 1: Lisbon", "Day 1: Lisbon")
+		tabEditorChanged(plan.uuid, "Day 1: Lisbon\nDay 2: Porto")
+		useNotesInflightStore.setState({
+			inflightContent: { [recipe.uuid]: [{ timestamp: 1, content: "<p>Porto wine</p>", note: recipe }] },
+			editingSessions: {}
+		})
+
+		expect(json(await call("search_note_text", { query: "porto" }))).toEqual({
+			notes: [
+				{ handle: "n1", title: "Trip plan", tokensMatched: 1 },
+				{ handle: "n2", title: "Recipe", tokensMatched: 1 }
+			],
+			queryTokens: 1,
+			note: "Searched 2 of 2 notes (notes whose text is saved on this device)."
+		})
+	})
+
+	it("stops past the scan cap and says the search was cut, skipping trashed notes", async () => {
+		const binned = note(testUuid("binned"), "Binned", { trash: true })
+
+		sdk.listNotes.mockResolvedValue([plan, recipe, binned])
+		queryClient.setQueryData(noteContentQueryKey(plan.uuid), `${"a ".repeat(800_000)}lisbon`)
+		queryClient.setQueryData(noteContentQueryKey(recipe.uuid), `${"b ".repeat(800_000)}lisbon`)
+		queryClient.setQueryData(noteContentQueryKey(binned.uuid), "lisbon")
+
+		const result = json(await call("search_note_text", { query: "lisbon" }))
+
+		expect(result["notes"]).toEqual([expect.objectContaining({ title: "Trip plan" })])
+		expect(result["note"]).toBe(
+			"Searched 1 of 2 notes (notes whose text is saved on this device), stopping at the search limit. The others may contain the words too; tell the user the search was partial."
+		)
+	})
+
+	it("refuses a query without words as an invalid call", async () => {
+		expect(await call("search_note_text", { query: " ?! " })).toMatchObject({ ok: false, invalid: true })
+	})
+})
+
 describe("chats", () => {
 	it("lists chats the way the sidebar does, by participant too", async () => {
 		const result = await call("list_chats", { query: "anna" })

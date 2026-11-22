@@ -88,6 +88,15 @@ function noteContentIsCurrent(uuid: string, cached: string | undefined): boolean
 	return read !== undefined && socketLiveSince(read.epoch) && cached === read.content
 }
 
+// Whether `content`, a note's text as this tab holds it, is the cached body with no read confirming it
+// current since (the persister restored it, or the socket could have missed an edit). Unsynced local
+// text is never stale: it is newer than the cloud's.
+export function heldNoteContentMaybeStale(uuid: string, content: string): boolean {
+	const cached = queryClient.getQueryData<string>(noteContentQueryKey(uuid))
+
+	return content === cached && !noteContentIsCurrent(uuid, cached)
+}
+
 // A note's content for a caller outside the editor (the assistant), under the editor's own key: the
 // cache while it is current, else one tracked read. The caller must never read a note being edited:
 // a read landing then would advance the editor's remount key (see useNoteContentQuery).

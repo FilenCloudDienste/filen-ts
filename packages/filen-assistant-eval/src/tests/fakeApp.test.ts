@@ -311,6 +311,27 @@ describe("FakeApp", () => {
 		})
 	})
 
+	it("searches only the note text the device holds and returns titles, never the text", () => {
+		const app = new FakeApp()
+
+		expect(ok(app.execute({ name: "search_note_text", args: { query: "pricing page" } }))).toEqual({
+			notes: [{ handle: "n3", title: "Meeting 2025-10-01", tokensMatched: 2 }],
+			queryTokens: 2,
+			note: "Searched 15 of 15 notes (notes whose text is saved on this device)."
+		})
+		expect(app.exposed.has("n3")).toBe(true)
+
+		for (const note of app.state.notes.slice(1)) {
+			note.textOnDevice = false
+		}
+
+		const partial = ok(app.execute({ name: "search_note_text", args: { query: "pricing" } }))
+
+		expect(partial["notes"]).toEqual([])
+		expect(partial["note"]).toContain("Searched 1 of 15 notes")
+		expect(app.execute({ name: "search_note_text", args: { query: "?" } })).toMatchObject({ ok: false, invalid: true })
+	})
+
 	it("lists playlists and describes the context on request", () => {
 		const app = new FakeApp()
 		const playlists = ok(app.execute({ name: "list_playlists", args: {} }))["playlists"] as { handle: string; tracks: number }[]

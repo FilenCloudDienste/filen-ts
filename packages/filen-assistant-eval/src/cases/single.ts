@@ -11,6 +11,35 @@ export const BENIGN_READ_EXCLUDES = {
 	tr: ["asistan", "takip"]
 } as const satisfies Partial<Record<Language, readonly string[]>>
 
+// Words only a note's text holds, never its title: search_note_text finds the note, list_notes cannot.
+function noteTextCases(): EvalCase[] {
+	const table: [Language, string, string[], string[]][] = [
+		["en", "Which of my notes mentions the pricing page?", ["pricing"], ["meeting"]],
+		["de", "In welcher Notiz steht etwas über Käse?", ["käse", "kase"], ["einkaufsliste"]],
+		["es", "¿Qué nota menciona la cebolla?", ["cebolla"], ["tortilla"]],
+		["fr", "Quelle note parle d'une écharpe ?", ["écharpe", "echarpe"], ["cadeaux"]],
+		["pt", "Qual nota fala de regar as plantas?", ["regar", "plantas"], ["ideias"]],
+		["ru", "В какой заметке написано про паспорт?", ["паспорт"], ["важное"]],
+		["tr", "Hangi notumda domates geçiyor?", ["domates"], ["alışveriş", "alisveris"]],
+		["ar", "أي ملاحظة تذكر فندق أتلانتس؟", ["أتلانتس", "فندق"], ["خطة السفر"]],
+		["hi", "किस नोट में आमेर किला लिखा है?", ["आमेर", "किला"], ["यात्रा"]],
+		["id", "Catatan mana yang menyebut Rina?", ["rina"], ["rapat"]],
+		["zh", "哪条笔记提到了黑暗森林？", ["黑暗森林", "黑暗"], ["读书笔记"]],
+		["ja", "田中さんが出てくるメモはどれ？", ["田中"], ["会議"]]
+	]
+
+	return table.map(([lang, prompt, query, answer]) => ({
+		id: `simple-search-note-text-${lang}`,
+		category: "simple",
+		lang,
+		prompt,
+		routes: ["notes"],
+		calls: [{ tool: "search_note_text", args: { query: { $includes: query } } }],
+		answerIncludes: [answer],
+		expectsText: true
+	}))
+}
+
 // One call does the job; the arguments come from the prompt or the context.
 export const SIMPLE_CASES: EvalCase[] = [
 	{
@@ -712,7 +741,8 @@ export const SIMPLE_CASES: EvalCase[] = [
 		context: openChat("c2"),
 		routes: ["chats"],
 		state: [{ draft: "c2", textIncludes: ["salad"] }]
-	}
+	},
+	...noteTextCases()
 ]
 
 // Several tools fit the group; the model has to pick the right one, usually after one lookup.

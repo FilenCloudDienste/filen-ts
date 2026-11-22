@@ -1,7 +1,17 @@
-import { datedElsewhereNote, listRest, matchScore, NOTES_ITEMS, searchTokens } from "@filen/shared/assistant"
+import {
+	datedElsewhereNote,
+	listRest,
+	matchScore,
+	NOTE_TEXT_NEEDS_WORDS,
+	NOTE_TEXT_SCAN_MAX_CHARS,
+	noteTextCoverageNote,
+	NOTES_ITEMS,
+	SEARCH_RESULT_ITEMS,
+	searchTokens
+} from "@filen/shared/assistant"
 import type { Note } from "@filen/sdk-rs"
 import { notesQueryRead } from "@/features/notes/queries/notes"
-import { noteContentQueryRead } from "@/features/notes/queries/noteContent"
+import { heldNoteContentMaybeStale, noteContentQueryRead } from "@/features/notes/queries/noteContent"
 import { isNoteUndecryptable, sortNotes, tagDisplayName } from "@/features/notes/lib/sort"
 import { filterNotesByBlockedOwner } from "@/features/notes/components/notesSidebar.logic"
 import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
@@ -20,10 +30,13 @@ import {
 	type ToolAdapter,
 	type ToolScope
 } from "@/features/assistant/tools/entities"
-import { AssistantToolError, clipText, isoDate } from "@/features/assistant/tools/format"
+import { AssistantToolError, clipText, isoDate, throwIfStopped } from "@/features/assistant/tools/format"
 import { dateSelection, datesField, emptyDatesNote, selects } from "@/features/assistant/tools/dates"
 
 export const NOTE_MAX_CHARS = 4_000
+
+// Notes a text search looks at between yields to the event loop, so a long one never holds the main thread.
+const NOTE_TEXT_YIELD_EVERY = 200
 
 async function resolveNote(scope: ToolScope, handle: string): Promise<Note> {
 	const entity = await resolveHandle(scope, handle, ["note"])
@@ -165,4 +178,78 @@ export const openNoteTool: ToolAdapter = async (input, scope) => {
 	})
 
 	return { value: { opened: noteTitle(note) } }
+}
+
+function yieldToMain(): Promise<void> {
+	return "scheduler" in globalThis ? scheduler.yield() : new Promise(resolve => setTimeout(resolve, 0))
+}
+
+// Only the text this tab already holds, never fetched: the editor's typed text, an unsynced edit, else the
+// content cache, which the persister fills at boot with every body read before on this device (about every
+// note once the sidebar searched their text). Sidebar order, so the notes the user sees first are searched
+// first when the cap cuts the scan. A body restored and not read since may be older than the cloud's
+// (maybeStale). Returns handles, titles and how many query words matched, never the text.
+export const searchNoteTextTool: ToolAdapter = async (input, scope) => {
+	const tokens = searchTokens(requiredString(input, "query"))
+
+	if (tokens.length === 0) {
+		throw new AssistantToolError(NOTE_TEXT_NEEDS_WORDS, { invalid: true })
+	}
+
+	const notes = sortNotes(filterNotesByBlockedOwner(await notesQueryRead(), blockedUsers())).filter(
+		note => !note.trash && !isNoteUndecryptable(note)
+	)
+	const hits: { note: Note; tokensMatched: number; maybeStale: boolean }[] = []
+	let searched = 0
+	let scanned = 0
+	let cut = false
+
+	for (const [index, note] of notes.entries()) {
+		if (index > 0 && index % NOTE_TEXT_YIELD_EVERY === 0) {
+			await yieldToMain()
+			throwIfStopped(scope)
+		}
+
+		const content = tabNoteContent(note.uuid)
+
+		if (content === undefined) {
+			continue
+		}
+
+		if (scanned > 0 && scanned + content.length > NOTE_TEXT_SCAN_MAX_CHARS) {
+			cut = true
+
+			break
+		}
+
+		scanned += content.length
+		searched++
+
+		const tokensMatched = matchScore(`${noteTitle(note)}\n${plainContent(note, content)}`, tokens)
+
+		if (tokensMatched > 0) {
+			hits.push({ note, tokensMatched, maybeStale: heldNoteContentMaybeStale(note.uuid, content) })
+		}
+	}
+
+	// Notes matching the most words first, each count in the sidebar's order.
+	const ranked = hits.toSorted((a, b) => b.tokensMatched - a.tokensMatched)
+
+	return {
+		value: {
+			notes: ranked.slice(0, SEARCH_RESULT_ITEMS).map(({ note, tokensMatched, maybeStale }) => {
+				const title = noteTitle(note)
+
+				return {
+					handle: scope.show({ kind: "note", note }, title),
+					title,
+					tokensMatched,
+					...(maybeStale ? { maybeStale: true } : {})
+				}
+			}),
+			queryTokens: tokens.length,
+			...listRest(ranked.length, SEARCH_RESULT_ITEMS),
+			note: noteTextCoverageNote({ searched, total: notes.length, cut })
+		}
+	}
 }
