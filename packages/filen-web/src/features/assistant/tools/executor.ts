@@ -15,6 +15,7 @@ import {
 	type AssistantWebToolName
 } from "@filen/shared/assistant"
 import type { Note } from "@filen/sdk-rs"
+import type { RegisteredRouter } from "@tanstack/react-router"
 import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { findCachedListingItem } from "@/features/drive/queries/drive"
@@ -44,7 +45,8 @@ import { readAssistantContext } from "@/features/assistant/tools/context"
 import { readDocumentTool } from "@/features/assistant/tools/documents"
 import { getActiveDocument } from "@/lib/activeDocument"
 import { assistantRouter } from "@/features/assistant/tools/navigation"
-import { navigateToRoute, UNAVAILABLE_ROUTES, type AssistantRouteName } from "@/features/assistant/tools/routes"
+import { navigateToRoute, navigateToSyncPairIssues, UNAVAILABLE_ROUTES, type AssistantRouteName } from "@/features/assistant/tools/routes"
+import { useSyncStore } from "@/features/sync/lib/syncStore"
 import {
 	getItemInfoTool,
 	isTrashed,
@@ -118,7 +120,8 @@ const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly As
 	read_document: { handle: ["drive"] },
 	rename_by_pattern: { scope: ["root", "drive"], handles: ["drive"] },
 	organize_by_date: { scope: ["root", "drive"] },
-	restore_items: { handles: ["drive", "note"] }
+	restore_items: { handles: ["drive", "note"] },
+	open_route: { pair: ["syncPair"] }
 }
 
 // A path the model is told to list a directory by is copied back whole, so it is never shortened: past this it
@@ -248,16 +251,40 @@ function describeContext(scope: ToolScope, { withoutDocument = false }: Assistan
 	return parts.join("; ")
 }
 
+function routeUnavailable(route: string): AssistantToolError {
+	return new AssistantToolError(`"${route}" is not available in this app`)
+}
+
+// A sync pair handle opens that pair's Issues tab, whatever section the call names: the pair is the more specific.
+async function openSyncPair(router: RegisteredRouter, pairId: string, scope: ToolScope): Promise<Record<string, unknown>> {
+	if (UNAVAILABLE_ROUTES.has("sync")) {
+		throw routeUnavailable("sync")
+	}
+
+	if (useSyncStore.getState().overview?.pairs.some(pair => pair.id === pairId) !== true) {
+		throw new AssistantToolError("That sync pair no longer exists")
+	}
+
+	await navigateToSyncPairIssues(router, pairId, scope.signal)
+
+	return { ...screenOpened("sync"), tab: "issues" }
+}
+
 const openRouteTool: ToolAdapter = async (input, scope) => {
 	const router = assistantRouter()
 	const route = input["route"] as AssistantRouteName
+	const pair = typeof input["pair"] === "string" ? scope.registry.get(input["pair"])?.entity : undefined
 
 	if (router === null) {
 		throw new AssistantToolError("The app cannot navigate right now")
 	}
 
+	if (pair?.kind === "syncPair") {
+		return { value: await openSyncPair(router, pair.pairId, scope) }
+	}
+
 	if (!(await navigateToRoute(router, route, scope.signal))) {
-		throw new AssistantToolError(`"${route}" is not available in the web app`)
+		throw routeUnavailable(route)
 	}
 
 	return { value: screenOpened(route) }
@@ -513,7 +540,7 @@ export function createAssistantToolExecutor(): ToolExecutor {
 			}
 
 			if (tool.name === "open_route" && UNAVAILABLE_ROUTES.has(args["route"] as AssistantRouteName)) {
-				return failureOf(new AssistantToolError(`"${String(args["route"])}" is not available in the web app`))
+				return failureOf(routeUnavailable(String(args["route"])))
 			}
 
 			try {

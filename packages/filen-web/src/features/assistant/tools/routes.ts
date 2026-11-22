@@ -74,6 +74,19 @@ export async function navigateToRoute(router: RegisteredRouter, route: Assistant
 	return true
 }
 
+// A sync pair's Issues tab, where its conflicts, held deletions and failures are: the desktop app only. A pair id can
+// hold a ":" (a pair the engine does not hold yet), which the location may show encoded.
+export async function navigateToSyncPairIssues(router: RegisteredRouter, pairId: string, signal?: AssistantSignal): Promise<void> {
+	const paths = new Set([`/sync/${pairId}/issues`, `/sync/${encodeURIComponent(pairId)}/issues`])
+
+	await navigateChecked({
+		router,
+		navigate: () => router.navigate({ to: "/sync/$pairId/$tab", params: { pairId, tab: "issues" } }),
+		landed: pathname => paths.has(pathname),
+		signal
+	})
+}
+
 async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName): Promise<void> {
 	switch (route) {
 		case "drive":
