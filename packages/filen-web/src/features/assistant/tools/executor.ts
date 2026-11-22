@@ -1,4 +1,5 @@
 import {
+	ASSISTANT_DESKTOP_ONLY_TOOLS,
 	contextName,
 	isAssistantWebTool,
 	isConsequentialTool,
@@ -49,6 +50,8 @@ import { navigateToRoute, navigateToSyncPairIssues, UNAVAILABLE_ROUTES, type Ass
 import { useSyncStore } from "@/features/sync/lib/syncStore"
 import { requestSettingsHighlight } from "@/lib/settingsHighlight"
 import { appHelpTool, freeAppHelpIndex, shownHelpEntry } from "@/features/assistant/tools/help"
+import { getDesktopStatusTool } from "@/features/assistant/tools/desktop"
+import { isDesktopApp } from "@/lib/desktop"
 import {
 	getItemInfoTool,
 	isTrashed,
@@ -358,7 +361,14 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	rename_by_pattern: renameByPatternTool,
 	organize_by_date: organizeByDateTool,
 	restore_items: restoreItemsTool,
-	app_help: appHelpTool
+	app_help: appHelpTool,
+	get_desktop_status: getDesktopStatusTool
+}
+
+// The web tools this app runs: the desktop-only ones only in the desktop app; elsewhere the loop tells the model they
+// are not available here.
+function runsHere(name: string): name is AssistantWebToolName {
+	return isAssistantWebTool(name) && (isDesktopApp() || !(ASSISTANT_DESKTOP_ONLY_TOOLS as readonly string[]).includes(name))
 }
 
 interface ResolvedArgs {
@@ -555,13 +565,13 @@ export function createAssistantToolExecutor(): ToolExecutor {
 			return Promise.resolve({ description, handles: [ROOT_HANDLE, ...shown.keys()] })
 		},
 
-		supports: tool => isAssistantWebTool(tool.name),
+		supports: tool => runsHere(tool.name),
 
 		check: async ({ tool, args }) => {
 			const shown = new Map<string, AssistantHandleRef>()
 			const scope = scopeFor(undefined, shown)
 
-			if (!isAssistantWebTool(tool.name)) {
+			if (!runsHere(tool.name)) {
 				return failureOf(notAvailable(tool))
 			}
 
@@ -621,7 +631,7 @@ export function createAssistantToolExecutor(): ToolExecutor {
 		execute: async ({ tool, args, confirmed, signal, onProgress, calendar, withoutDocument }) => {
 			const shown = new Map<string, AssistantHandleRef>()
 			const scope = { ...scopeFor(signal, shown, onProgress, calendar), ...(withoutDocument === true ? { withoutDocument } : {}) }
-			if (!isAssistantWebTool(tool.name)) {
+			if (!runsHere(tool.name)) {
 				return failureOf(notAvailable(tool))
 			}
 

@@ -1198,7 +1198,8 @@ export const ASSISTANT_WEB_TOOLS = [
 	"rename_by_pattern",
 	"organize_by_date",
 	"restore_items",
-	"app_help"
+	"app_help",
+	"get_desktop_status"
 ] as const satisfies readonly AssistantToolName[]
 
 export type AssistantWebToolName = (typeof ASSISTANT_WEB_TOOLS)[number]
@@ -1206,3 +1207,6 @@ export type AssistantWebToolName = (typeof ASSISTANT_WEB_TOOLS)[number]
 export function isAssistantWebTool(name: string): name is AssistantWebToolName {
 	return (ASSISTANT_WEB_TOOLS as readonly string[]).includes(name)
 }
+
+// Web tools only the desktop app runs (sync and mount status): elsewhere they are not offered.
+export const ASSISTANT_DESKTOP_ONLY_TOOLS: readonly AssistantWebToolName[] = ["get_desktop_status"]

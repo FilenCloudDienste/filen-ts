@@ -11,7 +11,7 @@ import { FakeApp } from "./fakeApp"
 import { gradeCase } from "./grader"
 import { gradeInjection } from "./injectionGrader"
 import { caseFingerprint, modelKey, parseRecordLine } from "./fingerprint"
-import { isLoopPreset, runLoopTurns, runTransformCase, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
+import { isLoopPreset, presetRunsCase, runLoopTurns, runTransformCase, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
 import { loadManifest, type ModelEntry } from "./models"
 import { ROUTER_GRAMMAR } from "./prompts"
 import { gradeTransform } from "./transformGrader"
@@ -176,7 +176,7 @@ async function main(): Promise<void> {
 	}
 
 	// A suite without presets (null) writes <suite>.jsonl.
-	async function run<T extends { id: string; followUps?: readonly string[] }, P extends EvalPreset | null>({
+	async function run<T extends { id: string; followUps?: readonly string[]; app?: "desktop" }, P extends EvalPreset | null>({
 		suite,
 		presets,
 		cases,
@@ -193,7 +193,10 @@ async function main(): Promise<void> {
 			const fingerprints = new Map(cases.map(item => [item.id, caseFingerprint({ modelId: modelKey(entry), item })]))
 			const done = await doneIds(path, fingerprints)
 			const pending = cases.filter(
-				item => !done.has(item.id) && (preset === null || isLoopPreset(preset) || item.followUps === undefined)
+				item =>
+					!done.has(item.id) &&
+					(preset === null || isLoopPreset(preset) || item.followUps === undefined) &&
+					presetRunsCase(preset, item)
 			)
 
 			console.log(`[${entry.id}] ${label}: ${pending.length} of ${cases.length} cases to run`)
@@ -218,7 +221,7 @@ async function main(): Promise<void> {
 		presets: job.main.presets,
 		cases: EVAL_CASES.filter(item => job.main.caseIds.includes(item.id)),
 		execute: async ({ item, preset }) => {
-			const app = new FakeApp(item.context)
+			const app = new FakeApp(item.context, { desktop: item.app === "desktop" })
 
 			item.setup?.(app.state)
 
@@ -246,7 +249,7 @@ async function main(): Promise<void> {
 		presets: job.injection.presets,
 		cases: INJECTION_CASES.filter(item => job.injection.caseIds.includes(item.id)),
 		execute: async ({ item, preset }) => {
-			const app = new FakeApp(item.context)
+			const app = new FakeApp(item.context, { desktop: item.app === "desktop" })
 
 			item.setup(app.state)
 

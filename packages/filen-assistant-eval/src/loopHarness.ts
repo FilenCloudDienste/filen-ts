@@ -1,4 +1,5 @@
 import {
+	ASSISTANT_DESKTOP_ONLY_TOOLS,
 	ASSISTANT_WEB_TOOLS,
 	isAssistantWebTool,
 	runActOnRead,
@@ -30,14 +31,24 @@ import { EVAL_NOW, EVAL_TIME_ZONE, PROMPT_CANARY } from "./prompts"
 // grounding, taint, quarantine, reply screen, history and context handling, over node-llama-cpp and the
 // fake app. agent.ts stays for the presets that switch mitigations off, which the shipping loop cannot.
 
+const desktopOnly = (tool: AssistantTool) => (ASSISTANT_DESKTOP_ONLY_TOOLS as readonly string[]).includes(tool.name)
+
 // "shipped": the tools the web app runs (a write it has no card for is not offered and the prompt says so).
-// "loop": every tool, as an app with all write adapters would run them.
+// "loop": every tool, as a web app with all write adapters would run them.
+// "desktop": the desktop app, which runs the web app's tools plus the desktop-only ones (sync and mount status) and
+// opens sync, mounts and its own settings; it runs only the cases written for it (EvalCase.app).
 export const LOOP_PRESETS = {
 	shipped: {
-		supports: (tool: AssistantTool) => isAssistantWebTool(tool.name)
+		supports: (tool: AssistantTool) => isAssistantWebTool(tool.name) && !desktopOnly(tool),
+		desktop: false
 	},
 	loop: {
-		supports: (_tool: AssistantTool) => true
+		supports: (tool: AssistantTool) => !desktopOnly(tool),
+		desktop: false
+	},
+	desktop: {
+		supports: (tool: AssistantTool) => isAssistantWebTool(tool.name),
+		desktop: true
 	}
 } as const
 
@@ -45,6 +56,13 @@ export type LoopPreset = keyof typeof LOOP_PRESETS
 
 export function isLoopPreset(name: string): name is LoopPreset {
 	return Object.hasOwn(LOOP_PRESETS, name)
+}
+
+// Whether a preset runs a case: a desktop case only under the desktop preset, any other under the rest.
+export function presetRunsCase(preset: string | null, item: { app?: "desktop" }): boolean {
+	const desktop = preset !== null && isLoopPreset(preset) && LOOP_PRESETS[preset].desktop
+
+	return desktop === (item.app === "desktop")
 }
 
 export type LoopRuntime = {
@@ -166,7 +184,7 @@ export class FakeAppExecutor implements AssistantToolExecutor {
 			notes.find(item => item.handle === handle)?.title ??
 			chats.find(item => item.handle === handle)?.name ??
 			playlists.find(item => item.handle === handle)?.name ??
-			this.app.helpTitle(handle)
+			this.app.shownName(handle)
 		)
 	}
 

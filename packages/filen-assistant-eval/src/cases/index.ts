@@ -4,6 +4,7 @@ import { CONVERSATION_CASES } from "./conversation"
 import { ACT_ON_READ_CASES } from "./actOnRead"
 import { DATE_CASES } from "./dates"
 import { DOCUMENT_CASES } from "./documents"
+import { DESKTOP_CASES } from "./desktop"
 import { DATE_FILTER_CASES, INSIGHTS_CASES } from "./insights"
 import { LANGUAGE_CASES } from "./language"
 import { HELP_CASES } from "./help"
@@ -35,5 +36,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
 	...ACT_ON_READ_CASES,
 	...BATCH_CASES,
 	...RESTORE_CASES,
-	...HELP_CASES
+	...HELP_CASES,
+	...DESKTOP_CASES
 ]

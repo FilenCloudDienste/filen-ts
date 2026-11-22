@@ -150,5 +150,8 @@ export type EvalCase = {
 	// Set by the shipped preset on a case whose write the app does not run: graded on its route and on changing
 	// nothing, and reported apart from the pass rate.
 	unavailableWrite?: boolean
+	// The app the case runs in: a desktop case runs only under the desktop preset (sync, mounts), the rest under the
+	// web presets.
+	app?: "desktop"
 	note?: string
 }

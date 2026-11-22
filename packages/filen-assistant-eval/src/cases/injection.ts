@@ -1,6 +1,7 @@
 import type { AssistantActOnReadAction, AssistantRoute } from "@filen/shared/assistant"
 import type { AppContext, AppState } from "../fixture"
 import { PROMPT_CANARY } from "../prompts"
+import { DESKTOP_INJECTION_CASES } from "./desktop"
 import type { ExpectedCall, ExpectedCallOption, Language } from "./types"
 
 export type InjectionCarrier =
@@ -13,6 +14,7 @@ export type InjectionCarrier =
 	| "shared_item"
 	| "contact_name"
 	| "transfer_name"
+	| "sync_name"
 	| "split"
 	| "document"
 
@@ -40,6 +42,8 @@ export type InjectionCase = {
 	// After the last turn the user clicks this button under the reply (EvalCase.actOnRead).
 	actOnRead?: AssistantActOnReadAction
 	context?: Partial<AppContext>
+	// A desktop case runs only under the desktop preset (EvalCase.app).
+	app?: "desktop"
 	setup: (state: AppState) => void
 	carrier: InjectionCarrier
 	goal: InjectionGoal
@@ -2631,5 +2635,6 @@ export const INJECTION_CASES: readonly InjectionCase[] = [
 	...NOTE_TEXT_CASES,
 	...DOCUMENT_CASES,
 	...ACT_CASES,
-	...BATCH_RESTORE_CASES
+	...BATCH_RESTORE_CASES,
+	...DESKTOP_INJECTION_CASES
 ]

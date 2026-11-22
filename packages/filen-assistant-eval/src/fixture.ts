@@ -1,4 +1,5 @@
 import type { AppHelpId, AppHelpSection } from "@filen/shared/assistant"
+import type { DesktopMountsOverview, DesktopSyncOverview, DesktopSyncPair } from "@filen/shared/desktop"
 
 // A small multilingual account. Handles are fixed so expected calls can name them; the fake app
 // still refuses a handle until a tool result or the context has shown it to the model.
@@ -152,6 +153,14 @@ export type AppState = {
 	// Chats whose message box holds text the user has not sent: a draft there is refused.
 	busyComposers: string[]
 	opened: string | null
+	desktop: DesktopState
+}
+
+// What the desktop app holds of sync and mounts; `remoteNames` are the pairs' remote directory names it has read.
+export type DesktopState = {
+	sync: DesktopSyncOverview
+	mounts: DesktopMountsOverview
+	remoteNames: Record<string, string>
 }
 
 const MB = 1024 * 1024
@@ -615,8 +624,148 @@ export const DEFAULT_CONTEXT: AppContext = {
 
 const GB = 1024 * MB
 
+function syncPair(fields: Partial<DesktopSyncPair> & Pick<DesktopSyncPair, "id" | "name" | "localRoot" | "remoteRoot">): DesktopSyncPair {
+	return {
+		mode: "twoWay",
+		paused: false,
+		phase: "idle",
+		progress: null,
+		transfers: [],
+		lastSyncedAt: null,
+		lastError: null,
+		issues: {
+			conflicts: 0,
+			heldDeletions: 0,
+			unsyncable: 0,
+			skippedSymlinks: 0,
+			failed: 0
+		},
+		degraded: {
+			local: false,
+			remote: false
+		},
+		stage: null,
+		halted: null,
+		refused: null,
+		review: null,
+		notices: [],
+		rootProblem: null,
+		holds: [],
+		info: [],
+		...fields
+	}
+}
+
+// The desktop app's held overviews: one pair with conflicts and an error, one whose remote directory the app has not
+// read the name of, a paused one, and the network drive mounted with uploads pending.
+const DESKTOP: DesktopState = {
+	sync: {
+		host: {
+			state: "running"
+		},
+		pairs: [
+			syncPair({
+				id: "pair-work",
+				name: "Work",
+				localRoot: "/Users/me/Work",
+				remoteRoot: "remote-work",
+				phase: "syncing",
+				progress: {
+					done: 12,
+					total: 40
+				},
+				lastSyncedAt: Date.parse("2025-10-08T07:30:00Z"),
+				lastError: "Permission denied: /Users/me/Work/Budget 2025.xlsx",
+				issues: {
+					conflicts: 2,
+					heldDeletions: 0,
+					unsyncable: 0,
+					skippedSymlinks: 0,
+					failed: 1
+				}
+			}),
+			syncPair({
+				id: "pair-photos",
+				name: "Fotos",
+				localRoot: "/Users/me/Pictures",
+				remoteRoot: "remote-photos",
+				lastSyncedAt: Date.parse("2025-10-08T06:00:00Z")
+			}),
+			syncPair({
+				id: "pair-music",
+				name: "Music backup",
+				localRoot: "/Users/me/Music",
+				remoteRoot: "remote-music",
+				mode: "localBackup",
+				paused: true,
+				phase: "paused",
+				lastSyncedAt: Date.parse("2025-10-01T18:45:00Z")
+			})
+		],
+		importNote: null
+	},
+	mounts: {
+		host: {
+			state: "running"
+		},
+		available: true,
+		fuse: {
+			state: "ready",
+			provider: "macFuse"
+		},
+		fuseGap: null,
+		drive: {
+			enabled: true,
+			state: "running",
+			mountPoint: "/Volumes/Filen",
+			driveLetter: null,
+			readOnly: false,
+			error: null
+		},
+		serves: [
+			{
+				protocol: "webdav",
+				enabled: true,
+				state: "error",
+				address: "127.0.0.1",
+				addressKind: "loopback",
+				port: 8080,
+				httpsCapable: true,
+				https: false,
+				readOnly: false,
+				authenticated: true,
+				url: null,
+				tlsFingerprint: null,
+				error: {
+					code: "portInUse"
+				}
+			}
+		],
+		protocols: ["webdav", "s3", "ftp", "sftp"],
+		cache: {
+			usedBytes: 3 * GB,
+			freeBytes: 47 * GB,
+			pendingUploads: 4,
+			erroredFiles: 0
+		},
+		tuning: {
+			cacheMaxGiB: 50,
+			cacheMinFreeGiB: 5,
+			cacheMaxAgeHours: 24,
+			dirCacheSeconds: 60
+		},
+		notices: []
+	},
+	// The pair "Fotos"'s remote directory is not among them.
+	remoteNames: {
+		"remote-work": "Work",
+		"remote-music": "Backups/Music"
+	}
+}
+
 export function createFixtureState(context: Partial<AppContext> = {}): AppState {
 	return structuredClone({
+		desktop: DESKTOP,
 		account: {
 			storageUsed: Math.round(3.2 * GB),
 			maxStorage: 10 * GB,

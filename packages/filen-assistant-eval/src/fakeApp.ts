@@ -1,4 +1,4 @@
-import { DRIVE_NAME_RULES, estimateCaptureTimestamp, formatBytes, storageSummary } from "@filen/shared"
+import { DESKTOP_ONLY_ERROR, DRIVE_NAME_RULES, estimateCaptureTimestamp, formatBytes, mountsStatus, storageSummary, syncStatus } from "@filen/shared"
 import {
 	APP_HELP,
 	APP_HELP_NO_MATCH_NOTE,
@@ -179,14 +179,19 @@ const UNAVAILABLE_ROUTES = {
 	desktop: ["settings_camera_upload", "settings_plans"]
 } as const
 
+function routeUnavailable(route: string): CallError {
+	return new CallError(`"${route}" is not available in this app`, false)
+}
+
 export class FakeApp {
 	readonly state: AppState
 	readonly exposed = new Set<string>()
 	// The desktop app (sync, mounts and its own settings) rather than the web app.
 	readonly desktop: boolean
 	private returned: Candidate[] | null = null
-	// app_help results by registry id, numbered as the app hands them out.
+	// app_help results by registry id and sync pairs by id, numbered as the app hands them out.
 	private readonly helpHandles = new Map<string, string>()
+	private readonly pairHandles = new Map<string, string>()
 
 	constructor(context: Partial<AppContext> = {}, { desktop = false }: { desktop?: boolean } = {}) {
 		this.state = createFixtureState(context)
@@ -197,11 +202,21 @@ export class FakeApp {
 		}
 	}
 
-	// The title an app_help handle was shown with.
-	helpTitle(handle: string): string | undefined {
-		const id = [...this.helpHandles].find(([, shown]) => shown === handle)?.[0]
+	// The name an app_help or sync pair handle was shown with.
+	shownName(handle: string): string | undefined {
+		const help = [...this.helpHandles].find(([, shown]) => shown === handle)?.[0]
+		const pair = [...this.pairHandles].find(([, shown]) => shown === handle)?.[0]
 
-		return HELP_ROWS.find(row => row.id === id)?.title
+		return HELP_ROWS.find(row => row.id === help)?.title ?? this.state.desktop.sync.pairs.find(row => row.id === pair)?.name
+	}
+
+	private pairHandle(id: string): string {
+		const handle = this.pairHandles.get(id) ?? `s${String(this.pairHandles.size + 1)}`
+
+		this.pairHandles.set(id, handle)
+		this.exposed.add(handle)
+
+		return handle
 	}
 
 	// One line for the system prompt, so "this file" or "here" resolve without a get_context round trip. As the
@@ -1974,6 +1989,32 @@ export class FakeApp {
 
 			case "open_route": {
 				const help = typeof input["help"] === "string" && input["help"].trim().length > 0 ? input["help"].trim() : null
+				const pair = typeof input["pair"] === "string" && input["pair"].trim().length > 0 ? input["pair"].trim() : null
+
+				// A pair handle opens that pair's Issues tab, whatever the route says.
+				if (pair !== null) {
+					if (!this.desktop) {
+						throw routeUnavailable("sync")
+					}
+
+					const id = [...this.pairHandles].find(([, handle]) => handle === pair)?.[0]
+
+					if (id === undefined) {
+						throw new CallError(`Unknown handle "${pair}". Find it first with get_desktop_status.`, true)
+					}
+
+					if (!this.state.desktop.sync.pairs.some(candidate => candidate.id === id)) {
+						throw new CallError("That sync pair no longer exists", false)
+					}
+
+					this.state.context.screen = "sync"
+					this.state.opened = `pair:${id}`
+
+					return {
+						...screenOpened("sync"),
+						tab: "issues"
+					}
+				}
 
 				// A help handle opens its setting's section, whatever the route says, and rings the setting there.
 				if (help !== null) {
@@ -1991,7 +2032,7 @@ export class FakeApp {
 				}
 
 				if ((UNAVAILABLE_ROUTES[this.desktop ? "desktop" : "web"] as readonly string[]).includes(str("route"))) {
-					throw new CallError(`"${str("route")}" is not available in this app`, false)
+					throw routeUnavailable(str("route"))
 				}
 
 				this.state.context.screen = str("route")
@@ -2198,9 +2239,22 @@ export class FakeApp {
 				}
 			}
 
-			// The eval runs the web app, where there is no sync or mount.
 			case "get_desktop_status": {
-				throw new CallError("Sync and mounts are only in the desktop app", false)
+				if (!this.desktop) {
+					throw new CallError(DESKTOP_ONLY_ERROR, false)
+				}
+
+				if (str("section") === "mounts") {
+					return mountsStatus(this.state.desktop.mounts)
+				}
+
+				return syncStatus({
+					overview: this.state.desktop.sync,
+					query: typeof input["query"] === "string" ? input["query"] : undefined,
+					handle: pair => this.pairHandle(pair.id),
+					remoteName: pair => this.state.desktop.remoteNames[pair.remoteRoot] ?? null,
+					timeZone: EVAL_TIME_ZONE
+				})
 			}
 
 			default: {

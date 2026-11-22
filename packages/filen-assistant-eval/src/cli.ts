@@ -27,7 +27,7 @@ Options:
   --main-presets <n>   Presets for the main suite (default: shipped)
 
 Presets: shipped (the shipping loop with the tools the web app runs), loop (the shipping loop with every
-tool), and the legacy harness's mitigation presets (${Object.keys(MITIGATION_PRESETS).join(", ")}).
+web tool), desktop (the desktop app's tools; runs only the desktop cases), and the legacy harness's mitigation presets (${Object.keys(MITIGATION_PRESETS).join(", ")}).
   --categories <list>  Main- and transform-suite categories to run
   --languages <list>   Languages to run (every suite)
   --cases <ids>        Exact case ids to run
