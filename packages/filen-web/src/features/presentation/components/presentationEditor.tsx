@@ -503,6 +503,21 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 
 	const ref: SlideRef | undefined = editor.currentRef
 	const render = ref === undefined ? undefined : deck.renders.get(ref)
+	// Speaker notes being drafted for the slide in view (its notes pane shows the draft); another slide ends it.
+	const [notesDraft, setNotesDraft] = useState<SlideRef | null>(null)
+
+	if (notesDraft !== null && notesDraft !== ref) setNotesDraft(null)
+
+	// A draft is offered for a slide of an editable deck with text of its own and no notes.
+	const notesDraftOffered =
+		editor.editable && render?.notesText === "" && render.layers.some(layer => layer.box !== undefined && layer.text !== undefined)
+	const startNotesDraft = (): void => {
+		if (ref === undefined) return
+
+		setEditingText(undefined)
+		setNotesOpen(true)
+		setNotesDraft(ref)
+	}
 	const size = info?.size ?? DEFAULT_SLIDE_SIZE
 
 	useEffect(() => {
@@ -932,6 +947,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 						<SlideCanvasContextMenu
 							editor={slideEditor}
 							disabled={show.showing}
+							onDraftNotes={notesDraftOffered ? startNotesDraft : undefined}
 							onEditText={shape => {
 								setTextAt(undefined)
 								setEditingText(shape)
@@ -1055,6 +1071,14 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 											otherEditing: editingText !== undefined,
 											onEditStart: () => {
 												setEditingText(undefined)
+												setNotesDraft(null)
+											},
+											draft: {
+												active: notesDraft !== null && notesDraft === ref,
+												onStart: notesDraftOffered ? startNotesDraft : undefined,
+												onClose: () => {
+													setNotesDraft(null)
+												}
 											}
 										}
 									: {})}

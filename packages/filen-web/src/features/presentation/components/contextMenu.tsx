@@ -348,7 +348,13 @@ const KEY_ECHO_MS = 1000
 
 // "✨ Assistant ▸": the rewrite menu's entries on the selected shapes' text, or on every text box of the slide; only
 // where the model can run.
-function AssistantSubmenu({ onTransform }: { onTransform: (pick: TransformPick) => void }) {
+function AssistantSubmenu({
+	onTransform,
+	onDraftNotes
+}: {
+	onTransform: (pick: TransformPick) => void
+	onDraftNotes?: (() => void) | undefined
+}) {
 	const { t } = useTranslation("assistant")
 	const offered = useAssistantStore(state => transformOffered(state.modelState))
 
@@ -367,6 +373,12 @@ function AssistantSubmenu({ onTransform }: { onTransform: (pick: TransformPick) 
 						parts={CONTEXT_MENU_PARTS}
 						onPick={onTransform}
 					/>
+					{onDraftNotes === undefined ? null : (
+						<>
+							<ContextMenuSeparator />
+							<ContextMenuItem onClick={onDraftNotes}>{t("assistantMenuDraftNotes")}</ContextMenuItem>
+						</>
+					)}
 				</ContextMenuSubContent>
 			</ContextMenuSub>
 		</>
@@ -377,11 +389,13 @@ function AssistantSubmenu({ onTransform }: { onTransform: (pick: TransformPick) 
 function CanvasMenuItems({
 	ribbon,
 	onEditText,
-	onTransform
+	onTransform,
+	onDraftNotes
 }: {
 	ribbon: PresentationRibbonEditor
 	onEditText: () => void
 	onTransform: (pick: TransformPick) => void
+	onDraftNotes: (() => void) | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
@@ -553,7 +567,12 @@ function CanvasMenuItems({
 				<PaintBucketIcon />
 				{t("previewPptxDesignFormatBackground")}
 			</ContextMenuItem>
-			{current === undefined ? null : <AssistantSubmenu onTransform={onTransform} />}
+			{current === undefined ? null : (
+				<AssistantSubmenu
+					onTransform={onTransform}
+					onDraftNotes={onDraftNotes}
+				/>
+			)}
 		</>
 	)
 }
@@ -563,6 +582,7 @@ export function SlideCanvasContextMenu({
 	editor: ribbon,
 	disabled,
 	onEditText,
+	onDraftNotes,
 	children
 }: {
 	// The slide's editor (undefined until the deck has a session).
@@ -570,6 +590,8 @@ export function SlideCanvasContextMenu({
 	// The show is running.
 	disabled: boolean
 	onEditText: (shape: ShapeRef) => void
+	// Offered while the slide has text and no notes: drafts its speaker notes.
+	onDraftNotes?: (() => void) | undefined
 	children: ReactNode
 }) {
 	const { t } = useTranslation("assistant")
@@ -680,6 +702,7 @@ export function SlideCanvasContextMenu({
 							keepFocusRef.current = true
 							onEditText({ slide: state.slide, id })
 						}}
+						onDraftNotes={onDraftNotes}
 						onTransform={pick => {
 							const render = ribbon.render
 

@@ -16,6 +16,7 @@ import { focusSettled } from "@/features/office/components/commentThreads.logic"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { refusalKey } from "@/features/presentation/hooks/usePresentationSession"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
+import { NotesDraft, NotesDraftButton } from "@/features/presentation/components/notesDraft"
 
 // How long the pane's height stays unchanged before it is stored: a drag of the resize handle (or a run of keyboard
 // steps) is stored once, when it ends.
@@ -35,12 +36,15 @@ function NotesEditor({
 	editor,
 	text,
 	otherEditing,
-	onEditStart
+	onEditStart,
+	onDraft
 }: {
 	editor: PresentationRibbonEditor
 	text: string
 	otherEditing: boolean
 	onEditStart?: () => void
+	// Offered on empty notes: drafts them from the slide's text.
+	onDraft?: (() => void) | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const bindings = usePresentationTextBindings()
@@ -303,7 +307,10 @@ function NotesEditor({
 			}}
 		>
 			{paragraphs.length === 0 ? (
-				<p className="text-muted-foreground">{t("previewPptxNotesAdd")}</p>
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<p className="text-muted-foreground">{t("previewPptxNotesAdd")}</p>
+					{onDraft === undefined || notes !== undefined ? null : <NotesDraftButton onDraft={onDraft} />}
+				</div>
 			) : (
 				<>
 					{paragraphs.map((paragraph, index) => (
@@ -330,7 +337,8 @@ function NotesEditor({
 // ribbon's notes button and the pane's own chevron change the one flag through `onCollapsedChange`); the pane keeps
 // only its height. In an editable deck they are edited in place (`editor`); `otherEditing`: a body on the slide is
 // open in the text editor (the notes editor closes, one body is edited at a time), `onEditStart`: the notes editor
-// opens (the slide's closes).
+// opens (the slide's closes). `draft`: speaker notes drafted from the slide (`active`: shown in place of the notes;
+// `onStart`: offered on empty notes).
 export function PresentationNotesPane({
 	text,
 	phone,
@@ -338,7 +346,8 @@ export function PresentationNotesPane({
 	onCollapsedChange,
 	editor,
 	otherEditing = false,
-	onEditStart
+	onEditStart,
+	draft
 }: {
 	text: string
 	phone: boolean
@@ -347,6 +356,11 @@ export function PresentationNotesPane({
 	editor?: PresentationRibbonEditor | undefined
 	otherEditing?: boolean
 	onEditStart?: () => void
+	draft?: {
+		readonly active: boolean
+		readonly onStart: (() => void) | undefined
+		readonly onClose: () => void
+	}
 }) {
 	const { t } = useTranslation("preview")
 	// As read during boot.
@@ -409,14 +423,24 @@ export function PresentationNotesPane({
 				{...(editor === undefined || collapsed
 					? {}
 					: {
-							children: (
-								<NotesEditor
-									editor={editor}
-									text={text}
-									otherEditing={otherEditing}
-									{...(onEditStart === undefined ? {} : { onEditStart })}
-								/>
-							)
+							children:
+								draft?.active === true && editor.render !== undefined ? (
+									<NotesDraft
+										editor={editor}
+										slide={editor.render.ref}
+										index={editor.render.index}
+										notesEmpty={text === ""}
+										onClose={draft.onClose}
+									/>
+								) : (
+									<NotesEditor
+										editor={editor}
+										text={text}
+										otherEditing={otherEditing}
+										onDraft={draft?.onStart}
+										{...(onEditStart === undefined ? {} : { onEditStart })}
+									/>
+								)
 						})}
 			/>
 		</div>

@@ -866,5 +866,25 @@ export const assistant = {
 	/** Toast — more boxes than one request takes; `count` is how many, `max` the most */
 	assistantShapeTransformTooMany: "That's {{count}} text boxes; the assistant changes up to {{max}} at a time. Select fewer boxes.",
 	/** Toast — nothing selected (or on the slide) holds text the assistant can change */
-	assistantShapeTransformNothing: "There's no text here the assistant can change."
+	assistantShapeTransformNothing: "There's no text here the assistant can change.",
+
+	// ── Slides: speaker notes draft ───────────────────────────────────────────
+	/** Empty notes pane button — drafts speaker notes from the slide's text */
+	assistantNotesDraft: "Draft from slide",
+	/** Slide context menu (Assistant submenu) — drafts speaker notes from the slide's text */
+	assistantMenuDraftNotes: "Draft speaker notes",
+	/** Notes pane — accessible name of the draft and its buttons */
+	assistantNotesDraftLabel: "Speaker notes draft",
+	/** Notes draft — the model is reading the slide, before the first word */
+	assistantNotesDraftReading: "Reading the slide…",
+	/** Notes draft — the model is not on this device yet; the Download button follows */
+	assistantNotesDraftNotDownloaded: "Notes are drafted on this device with the assistant's model, which isn't downloaded yet.",
+	/** Notes draft — the slide holds no text to draft from */
+	assistantNotesDraftNoText: "This slide has no text to draft notes from.",
+	/** Notes draft — the slide got notes since asking; Accept is off */
+	assistantNotesDraftChanged: "This slide has notes now, so the draft can't be added.",
+	/** Notes draft — the draft stopped at its length limit; Accept is off */
+	assistantNotesDraftTruncated: "The draft was cut off, so it can't be added. Try again.",
+	/** Notes draft — the draft holds links, addresses or numbers the slide does not; Accept is off. `items` lists them */
+	assistantNotesDraftForeign: "This adds links, addresses or numbers the slide doesn't have: {{items}}. It can't be added."
 } as const
