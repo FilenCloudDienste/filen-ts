@@ -12,7 +12,16 @@ import { FakeApp } from "./fakeApp"
 import { gradeCase } from "./grader"
 import { gradeInjection } from "./injectionGrader"
 import { caseFingerprint, modelKey, parseRecordLine } from "./fingerprint"
-import { isLoopPreset, presetRunsCase, runFormulaCase, runLoopTurns, runTransformCase, shippedCase, type LoopPreset, type LoopRuntime } from "./loopHarness"
+import {
+	isLoopPreset,
+	presetRunsCase,
+	runFormulaCase,
+	runLoopTurns,
+	runTransformCase,
+	shippedCase,
+	type LoopPreset,
+	type LoopRuntime
+} from "./loopHarness"
 import { loadManifest, type ModelEntry } from "./models"
 import { ROUTER_GRAMMAR } from "./prompts"
 import { gradeFormula } from "./formulaGrader"

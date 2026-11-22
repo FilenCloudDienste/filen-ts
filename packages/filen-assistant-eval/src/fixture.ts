@@ -1,10 +1,8 @@
-import type { AppHelpId, AppHelpSection } from "@filen/shared/assistant"
+import type { AppHelpId, AppHelpSection, AssistantDocumentKind } from "@filen/shared/assistant"
 import type { DesktopMountsOverview, DesktopSyncOverview, DesktopSyncPair } from "@filen/shared/desktop"
 
 // A small multilingual account. Handles are fixed so expected calls can name them; the fake app
 // still refuses a handle until a tool result or the context has shown it to the model.
-
-import type { AssistantDocumentKind } from "@filen/shared/assistant"
 
 export type DriveItem = {
 	handle: string

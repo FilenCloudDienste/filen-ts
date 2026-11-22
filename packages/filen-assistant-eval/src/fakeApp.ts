@@ -1,4 +1,12 @@
-import { DESKTOP_ONLY_ERROR, DRIVE_NAME_RULES, estimateCaptureTimestamp, formatBytes, mountsStatus, storageSummary, syncStatus } from "@filen/shared"
+import {
+	DESKTOP_ONLY_ERROR,
+	DRIVE_NAME_RULES,
+	estimateCaptureTimestamp,
+	formatBytes,
+	mountsStatus,
+	storageSummary,
+	syncStatus
+} from "@filen/shared"
 import {
 	APP_HELP,
 	APP_HELP_NO_MATCH_NOTE,
