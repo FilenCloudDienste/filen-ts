@@ -201,7 +201,7 @@ export function ChecklistEditor({
 				<div
 					key={item.id}
 					role="listitem"
-					className="flex items-start gap-2.5 rounded-md px-2 py-1.5"
+					className="flex items-center gap-2.5 rounded-md px-2 py-1.5"
 				>
 					<button
 						type="button"
@@ -212,7 +212,7 @@ export function ChecklistEditor({
 							handleToggle(item.id, !item.checked)
 						}}
 						className={cn(
-							"mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+							"flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
 							item.checked ? "border-primary bg-primary text-primary-foreground" : "border-input"
 						)}
 					>
