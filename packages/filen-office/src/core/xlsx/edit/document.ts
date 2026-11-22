@@ -8,6 +8,8 @@ import {
 	CYCLE,
 	FormulaEngine,
 	HeldResult,
+	previewable,
+	previewFormula,
 	UNPARSEABLE,
 	type EngineCell,
 	type EngineName,
@@ -77,9 +79,7 @@ import {
 	legacyIntersections,
 	MAX_RANGE_CELLS,
 	sameSheet,
-	shownFormula,
-	storedFormula,
-	wellFormedFormula
+	shownFormula
 } from "../../sheet/refs/formulaRefs"
 import { localizedInput } from "../../sheet/input/locale"
 import { sheetFunction } from "../../sheet/functions/catalogue"
@@ -1832,7 +1832,7 @@ export class XlsxDocument {
 		slicing?: Slicing,
 		signal?: SheetAbortSignal
 	): Promise<SheetQueryResult<"formulaPreview">> {
-		if (!wellFormedFormula(formula) || holdsBracket(formula)) return { refused: "formula" }
+		if (!previewable(formula)) return { refused: "formula" }
 
 		if (this.engine === null) {
 			if (!this.allReady) await this.readyAllSheets(slicing, signal)
@@ -1846,14 +1846,10 @@ export class XlsxDocument {
 
 		const engine = this.engine
 		const index = this.engineIndex(sheet)
-		const text = engineArrayFormula(storedFormula(formula), this.nameAliases, this.lambdaNames)
 
-		if (engine === null || index < 0) return { refused: "unavailable" }
-		if (text === null) return { refused: "formula" }
-
-		const result = engine.preview(index, text)
-
-		return result === null ? { refused: "formula" } : result === "busy" ? { refused: "busy" } : result
+		return engine === null || index < 0
+			? { refused: "unavailable" }
+			: previewFormula(engine, index, formula, this.nameAliases, this.lambdaNames)
 	}
 
 	// The cell metadata a new dynamic array is written with (the metadata part made for it first), or null when the

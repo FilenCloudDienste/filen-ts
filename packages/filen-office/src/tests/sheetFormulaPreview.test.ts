@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { writtenFormulaProblem } from "../core/sheet/input/formulaCheck"
+import { FormulaEngine, previewFormula } from "../core/sheet/formula/index"
+import { checkWrittenFormula, writtenFormulaProblem } from "../core/sheet/input/formulaCheck"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
 
 // The assistant's formula helper: a written formula checked (functions this app calculates, references into this
@@ -95,5 +96,43 @@ describe("the formulaPreview query", () => {
 		expect(await session.query("formulaPreview", { sheet: 0, formula: "plain text" })).toEqual({ refused: "formula" })
 		expect(await session.query("formulaPreview", { sheet: 0, formula: "=SUM(Table1[Amount])" })).toEqual({ refused: "formula" })
 		session.close()
+	})
+})
+
+describe("checkWrittenFormula", () => {
+	it("checks first, then reads the engine's value, #NAME? as a refusal", async () => {
+		const engine = new FormulaEngine(
+			[
+				{
+					name: "Sales",
+					rows: [
+						["Region", "Amount"],
+						["north", 10],
+						["south", 20],
+						["north", 5]
+					],
+					formulas: []
+				}
+			],
+			[]
+		)
+		const asked: string[] = []
+		const preview = (formula: string) => {
+			asked.push(formula)
+
+			return Promise.resolve(previewFormula(engine, 0, formula.slice(1)))
+		}
+
+		try {
+			await expect(checkWrittenFormula('=SUMIF(A2:A4,"north",B2:B4)', TARGET, preview)).resolves.toEqual({
+				ok: true,
+				value: { value: 15, error: false, rows: 1, cols: 1 }
+			})
+			await expect(checkWrittenFormula("=SUM(Rate)", TARGET, preview)).resolves.toEqual({ ok: false, problem: { kind: "name" } })
+			await expect(checkWrittenFormula("=SUM(B:B)", TARGET, preview)).resolves.toEqual({ ok: false, problem: { kind: "circular" } })
+			expect(asked).toEqual(['=SUMIF(A2:A4,"north",B2:B4)', "=SUM(Rate)"])
+		} finally {
+			engine.destroy()
+		}
 	})
 })

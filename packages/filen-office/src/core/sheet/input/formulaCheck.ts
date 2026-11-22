@@ -1,4 +1,4 @@
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetQueryResult } from "../protocol"
 import { functionSupport } from "../functions/catalogue"
 import { calledFunctions, formulaInputs, holdsBracket, sameSheet, wellFormedFormula } from "../refs/formulaRefs"
 import { parseCellInput } from "./cellInput"
@@ -68,4 +68,31 @@ export function writtenFormulaProblem(input: string, target: WrittenFormulaTarge
 	}
 
 	return null
+}
+
+export type FormulaPreviewValue = Exclude<SheetQueryResult<"formulaPreview">, { readonly refused: unknown }>
+
+export type WrittenFormulaRefusal =
+	| WrittenFormulaProblem
+	// The engine could not calculate it, or it reads a name the workbook lacks (#NAME?).
+	| { readonly kind: "engine" }
+	| { readonly kind: "name" }
+
+// The whole check a written formula passes before it is offered: writtenFormulaProblem, then the engine's calculation
+// (`preview`: the formulaPreview query, or what answers as it does), only for a formula the first allows.
+export async function checkWrittenFormula(
+	input: string,
+	target: WrittenFormulaTarget,
+	preview: (formula: string) => Promise<SheetQueryResult<"formulaPreview">>
+): Promise<{ ok: true; value: FormulaPreviewValue } | { ok: false; problem: WrittenFormulaRefusal }> {
+	const problem = writtenFormulaProblem(input, target)
+
+	if (problem !== null) return { ok: false, problem }
+
+	const result = await preview(input)
+
+	if ("refused" in result) return { ok: false, problem: { kind: "engine" } }
+	if (result.error && result.value === "#NAME?") return { ok: false, problem: { kind: "name" } }
+
+	return { ok: true, value: result }
 }

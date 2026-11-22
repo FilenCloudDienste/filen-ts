@@ -11,3 +11,4 @@ export {
 	type RecalculatedCell
 } from "./formulaEngine"
 export type { SpillSize } from "./functions/spill"
+export { previewable, previewFormula } from "./preview"

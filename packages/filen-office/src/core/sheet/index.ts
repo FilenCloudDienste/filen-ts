@@ -72,7 +72,14 @@ export {
 	type RefArea
 } from "./refs/formulaRefs"
 export { malformedFormula, parseCellInput, type ParsedInput } from "./input/cellInput"
-export { writtenFormulaProblem, type WrittenFormulaProblem, type WrittenFormulaTarget } from "./input/formulaCheck"
+export {
+	checkWrittenFormula,
+	writtenFormulaProblem,
+	type FormulaPreviewValue,
+	type WrittenFormulaProblem,
+	type WrittenFormulaRefusal,
+	type WrittenFormulaTarget
+} from "./input/formulaCheck"
 export {
 	MAX_COL_WIDTH,
 	MAX_RESIZE_TARGETS,
