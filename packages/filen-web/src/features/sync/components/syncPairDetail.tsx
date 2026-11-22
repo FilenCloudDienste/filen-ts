@@ -359,7 +359,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 					</TooltipIconButton>
 				</div>
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+			<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto">
 				<div className="flex flex-col gap-3 px-4 pt-4 pb-5 sm:px-6">
 					<PairHero pair={pair} />
 					<HoldBanner

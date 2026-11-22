@@ -339,7 +339,8 @@ export function ArchiveEntryList({
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			<div className="flex h-8 shrink-0 items-center gap-3 border-b border-border px-3 text-xs text-muted-foreground">
+			{/* The same stable scrollbar gutter as the listbox below, so the columns stay over the rows'. */}
+			<div className="flex h-8 shrink-0 scrollbar-gutter-stable items-center gap-3 overflow-hidden border-b border-border px-3 text-xs text-muted-foreground">
 				<button
 					type="button"
 					role="checkbox"
@@ -414,7 +415,7 @@ export function ArchiveEntryList({
 							aria-multiselectable="true"
 							aria-activedescendant={cursorShown && cursorIndex >= 0 ? rowElementId(listId, rows.at(cursorIndex)) : undefined}
 							tabIndex={0}
-							className="group min-h-0 flex-1 overflow-y-auto outline-none"
+							className="group min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto outline-none"
 							onKeyDown={handleKeyDown}
 							onContextMenuCapture={handleContextMenuCapture}
 							onPointerDown={marquee.onPointerDown}

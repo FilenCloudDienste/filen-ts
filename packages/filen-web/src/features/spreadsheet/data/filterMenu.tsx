@@ -487,7 +487,7 @@ export function FilterMenu({
 							ref={listRef}
 							role="group"
 							aria-label={t("previewSheetFilterValues")}
-							className="relative mx-1 overflow-y-auto rounded-xl border border-border"
+							className="relative mx-1 scrollbar-gutter-stable overflow-y-auto rounded-xl border border-border"
 							style={{ height: `${String(ROW * ROWS)}px` }}
 							onScroll={event => {
 								setScroll(event.currentTarget.scrollTop)

@@ -769,7 +769,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</Empty>
 					</div>
 				) : (
-					<div className="flex-1 overflow-y-auto px-4">
+					<div className="flex-1 scrollbar-gutter-stable overflow-y-auto px-4">
 						<div
 							className={cn(
 								"mx-auto flex w-full max-w-3xl flex-col gap-6 pt-1",

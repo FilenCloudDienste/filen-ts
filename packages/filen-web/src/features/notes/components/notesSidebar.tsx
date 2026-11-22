@@ -921,7 +921,7 @@ export function NotesSidebar() {
 			<div className="relative flex min-h-0 flex-1 flex-col">
 				<div
 					ref={setScrollElement}
-					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
+					className="flex flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
 					style={headerIndices.length > 0 ? { scrollPaddingTop: HEADER_ROW_HEIGHT } : undefined}
 				>
 					<NotesSidebarList

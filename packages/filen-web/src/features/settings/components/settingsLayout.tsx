@@ -39,7 +39,7 @@ function SettingsPage({ icon, title, wide, children }: SettingsPageProps) {
 				icon={icon}
 				title={title}
 			/>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-2 pb-12 sm:px-6">
+			<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-4 pt-2 pb-12 sm:px-6">
 				<div className={cn("mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8", wide === true && "max-w-6xl")}>{children}</div>
 			</div>
 		</>

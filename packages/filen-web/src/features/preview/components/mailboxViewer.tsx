@@ -469,7 +469,7 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 					ref={setScrollElement}
 					role="list"
 					aria-label={t("previewMailboxList")}
-					className="min-h-0 flex-1 overflow-y-auto"
+					className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 					onKeyDown={event => {
 						const at = Number((event.target as HTMLElement).closest("[data-row]")?.getAttribute("data-row") ?? Number.NaN)
 						const next =

@@ -35,7 +35,7 @@ export function LogsList({ entries }: { entries: readonly LogEntry[] }) {
 	return (
 		<div
 			ref={setScrollElement}
-			className="max-h-72 overflow-y-auto rounded-2xl bg-muted/40 px-3 font-mono text-xs"
+			className="max-h-72 scrollbar-gutter-stable overflow-y-auto rounded-2xl bg-muted/40 px-3 font-mono text-xs"
 		>
 			<div
 				className="relative w-full"

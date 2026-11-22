@@ -359,7 +359,7 @@ export function CanvasViewerShell<Status = never, Notice = never>({
 				) : null}
 			</div>
 			{sidePanel !== undefined ? (
-				<aside className="w-72 shrink-0 overflow-y-auto border-s max-sm:max-h-[45%] max-sm:w-full max-sm:border-s-0 max-sm:border-t">
+				<aside className="w-72 shrink-0 scrollbar-gutter-stable overflow-y-auto border-s max-sm:max-h-[45%] max-sm:w-full max-sm:border-s-0 max-sm:border-t">
 					{sidePanel}
 				</aside>
 			) : null}

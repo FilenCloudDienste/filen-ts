@@ -109,7 +109,7 @@ export function PickerListShell({ listingQuery, noResults, filteredOutMessage, c
 	return (
 		<div
 			ref={setScrollElement}
-			className={`flex flex-col overflow-y-auto rounded-xl ${SURFACE_RING} ${LIST_DIALOG_BODY_CLASS}`}
+			className={`flex scrollbar-gutter-stable flex-col overflow-y-auto rounded-xl ${SURFACE_RING} ${LIST_DIALOG_BODY_CLASS}`}
 		>
 			{listingQuery.status === "pending" ? (
 				<LoadingState size="md" />

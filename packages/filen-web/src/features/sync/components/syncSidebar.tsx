@@ -144,7 +144,7 @@ export function SyncSidebar() {
 				<HostBanner />
 				<ImportNote />
 			</div>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane">
+			<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-1.5 pb-3 app-region-pane">
 				{pairIds === null ? (
 					<LoadingState size="md" />
 				) : pairIds.length === 0 ? (

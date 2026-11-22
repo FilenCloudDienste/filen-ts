@@ -122,7 +122,7 @@ export function DicomTagTree({
 			ref={setScrollElement}
 			role="tree"
 			aria-label={t("previewDicomTagsLabel")}
-			className="size-full overflow-y-auto"
+			className="size-full scrollbar-gutter-stable overflow-y-auto"
 		>
 			<ul
 				role="none"

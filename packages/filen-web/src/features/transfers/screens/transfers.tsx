@@ -588,7 +588,7 @@ function TransfersList({
 			onKeyDown={handleKeyDown}
 			onFocus={handleFocus}
 			// The rows' offsetParent, so their offsets (useGroupMoves) do not move as it scrolls.
-			className="relative flex-1 overflow-y-auto px-2 pb-4"
+			className="relative flex-1 scrollbar-gutter-stable overflow-y-auto px-2 pb-4"
 		>
 			{sections.map((section, sectionIndex) => {
 				const rowsStart = (headings[sectionIndex] ?? 0) + 1

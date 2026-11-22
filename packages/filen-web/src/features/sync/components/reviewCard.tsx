@@ -154,7 +154,7 @@ function PlanLists({
 					</button>
 				))}
 			</div>
-			<div className={cn("max-h-80 divide-y divide-border/60 overflow-y-auto rounded-xl", SURFACE_RING)}>
+			<div className={cn("max-h-80 scrollbar-gutter-stable divide-y divide-border/60 overflow-y-auto rounded-xl", SURFACE_RING)}>
 				{paged.entries.map(row => (
 					<PlanRowView
 						key={row.entry.relPath}

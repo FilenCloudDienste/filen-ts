@@ -454,7 +454,7 @@ export function ChatsSidebar() {
 			>
 				<div
 					ref={setScrollElement}
-					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
+					className="flex flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
 				>
 					<ChatsVirtualList
 						items={list.items}

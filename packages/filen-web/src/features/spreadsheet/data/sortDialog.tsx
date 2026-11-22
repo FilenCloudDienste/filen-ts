@@ -190,7 +190,7 @@ export function SortDialog({ model, open, run }: { model: SheetGridModel; open: 
 				</div>
 				<div
 					role="list"
-					className="flex max-h-64 flex-col gap-2 overflow-y-auto"
+					className="flex max-h-64 scrollbar-gutter-stable flex-col gap-2 overflow-y-auto"
 				>
 					{levels.map((level, index) => (
 						<div

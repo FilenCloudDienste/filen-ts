@@ -140,7 +140,7 @@ function ContactList({ file, selected, onSelect }: { file: ContactFile; selected
 				ref={setScrollElement}
 				role="listbox"
 				aria-label={label}
-				className="min-h-0 flex-1 overflow-y-auto"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 				onKeyDown={onKeyDown}
 			>
 				<div

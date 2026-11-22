@@ -762,7 +762,7 @@ export function CommentThreads<C extends ThreadComment>({
 					</div>
 					<div
 						ref={setScroller}
-						className="min-h-0 flex-1 overflow-y-auto [contain:content]"
+						className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto [contain:content]"
 					>
 						<ThreadView
 							key={opened.root.id}
@@ -797,7 +797,7 @@ export function CommentThreads<C extends ThreadComment>({
 						listElement.current = element
 						setList(element)
 					}}
-					className="min-h-0 flex-1 overflow-y-auto p-1 [contain:content]"
+					className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto p-1 [contain:content]"
 					onScroll={event => {
 						const top = event.currentTarget.scrollTop
 

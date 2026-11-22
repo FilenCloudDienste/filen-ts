@@ -800,7 +800,7 @@ function ThreadList({
 				onScroll={handleScroll}
 				onKeyDown={handleKeyDown}
 				onFocus={handleFocus}
-				className="flex flex-1 flex-col-reverse overflow-y-auto focus-ring-row outline-none [overflow-anchor:none] focus-visible:ring-inset"
+				className="flex flex-1 scrollbar-gutter-stable flex-col-reverse overflow-y-auto focus-ring-row outline-none [overflow-anchor:none] focus-visible:ring-inset"
 			>
 				{/* First in the DOM, like it is on screen: order-1 lifts it above the rows in a column-reverse
 				    box, and appearing there cannot move the bottom-anchored rows. */}

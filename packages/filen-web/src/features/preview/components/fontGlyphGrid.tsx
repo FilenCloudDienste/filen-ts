@@ -25,7 +25,7 @@ export function GlyphGrid({ family, glyphs, settings }: { family: string; glyphs
 	return (
 		<div
 			ref={setScrollElement}
-			className="min-h-0 flex-1 overflow-y-auto px-4"
+			className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto px-4"
 		>
 			<div
 				role="list"

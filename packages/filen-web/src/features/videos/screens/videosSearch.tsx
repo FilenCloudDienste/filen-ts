@@ -212,7 +212,7 @@ export function VideosSearchScreen() {
 			</div>
 			<div
 				ref={setScrollElement}
-				className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pb-6"
+				className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col gap-6 overflow-y-auto px-4 pb-6"
 			>
 				{trimmed.length === 0 ? (
 					<EmptyMessage

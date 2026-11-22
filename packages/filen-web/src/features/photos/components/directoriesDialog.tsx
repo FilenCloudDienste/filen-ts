@@ -68,7 +68,7 @@ export function PhotosDirectoriesDialog({
 						<DialogTitle>{t("photosDirectoriesTitle")}</DialogTitle>
 						<DialogDescription>{readOnly ? t("photosLibraryReadOnly") : t("photosDirectoriesDescription")}</DialogDescription>
 					</DialogHeader>
-					<div className="flex min-h-0 flex-col overflow-y-auto">
+					<div className="flex min-h-0 scrollbar-gutter-stable flex-col overflow-y-auto">
 						{roots.length === 0 ? (
 							<p className="py-8 text-center text-sm text-muted-foreground">{t("photosDirectoriesNone")}</p>
 						) : (

@@ -346,7 +346,7 @@ export function BrowseList({
 				tabIndex={-1}
 				onKeyDown={nav.handleKeyDown}
 				onPointerDown={marquee.onPointerDown}
-				className="min-h-0 flex-1 overflow-y-auto"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 				style={grid ? GRID_LISTBOX_STYLE : undefined}
 			>
 				<ThumbnailSourceContext value={LINK_THUMBNAIL_SOURCE}>

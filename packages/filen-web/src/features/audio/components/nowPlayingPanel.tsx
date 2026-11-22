@@ -125,7 +125,7 @@ function QueueList({
 	return (
 		<ul
 			ref={listRef}
-			className="-mx-1 min-h-0 overflow-y-auto"
+			className="-mx-1 min-h-0 scrollbar-gutter-stable overflow-y-auto"
 			style={{
 				paddingTop: firstRow?.start ?? 0,
 				paddingBottom: lastRow !== undefined ? virtualizer.getTotalSize() - lastRow.end : 0

@@ -299,7 +299,7 @@ function EventDetailContent({
 			<div
 				ref={scrollRef}
 				tabIndex={-1}
-				className="-mx-6 -mt-2 flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pt-2 outline-none"
+				className="-mx-6 -mt-2 flex min-h-0 flex-1 scrollbar-gutter-stable flex-col gap-5 overflow-y-auto px-6 pt-2 outline-none"
 			>
 				<div className="flex min-w-0 flex-col items-center gap-3 pt-2 text-center">
 					<EventHeroTile

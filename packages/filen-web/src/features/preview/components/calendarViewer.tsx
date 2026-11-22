@@ -312,7 +312,7 @@ function AgendaRows({ rows, zones }: { rows: readonly Row[]; zones: ZoneTable })
 	return (
 		<div
 			ref={setScrollElement}
-			className="min-h-0 flex-1 overflow-y-auto"
+			className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 		>
 			<div
 				className="relative w-full"

@@ -45,7 +45,7 @@ export function ContactPickerRows({
 			role="listbox"
 			aria-multiselectable="true"
 			aria-label={ariaLabel}
-			className="flex-1 overflow-y-auto px-2"
+			className="flex-1 scrollbar-gutter-stable overflow-y-auto px-2"
 		>
 			<div
 				role="none"

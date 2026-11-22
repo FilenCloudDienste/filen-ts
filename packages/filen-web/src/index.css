@@ -385,7 +385,10 @@
 	.cn-toast [data-description] {
 		@apply select-text;
 	}
-	/* Thin scrollbars, consistent across themes: a 6px rounded thumb in a 10px gutter. */
+	/* Thin scrollbars, consistent across themes: a 6px rounded thumb in a 10px gutter. A styled scrollbar is a classic
+     one in Chromium and WebKit on every platform, so it takes its 10px from the content as it appears. A scroller
+     whose content grows or shrinks while shown keeps that room reserved with Tailwind's `scrollbar-gutter-stable`
+     (never an arbitrary property); Firefox's overlay scrollbars reserve nothing. */
 	*::-webkit-scrollbar {
 		width: 10px;
 		height: 10px;

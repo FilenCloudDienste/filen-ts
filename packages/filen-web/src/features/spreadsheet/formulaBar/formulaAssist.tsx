@@ -119,7 +119,7 @@ export function FormulaAssist({
 					id={listId}
 					role="listbox"
 					aria-label={t("previewSheetFormulaSuggestions")}
-					className="pointer-events-auto max-h-56 w-64 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+					className="pointer-events-auto max-h-56 w-64 scrollbar-gutter-stable overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
 				>
 					{suggestions.map((suggestion, index) => (
 						<li

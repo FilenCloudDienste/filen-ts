@@ -696,7 +696,7 @@ export function ChartPanel(props: ChartPanelProps) {
 					<XIcon />
 				</TooltipIconButton>
 			</header>
-			<div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
+			<div className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto">{body}</div>
 		</aside>
 	)
 }

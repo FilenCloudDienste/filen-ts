@@ -106,7 +106,7 @@ export function EventsTimeline({
 			ref={scrollRef}
 			role="region"
 			aria-label={t("settingsSectionEvents")}
-			className="min-h-0 w-full scroll-pt-8 overflow-y-auto px-1.5 pb-1.5"
+			className="min-h-0 w-full scroll-pt-8 scrollbar-gutter-stable overflow-y-auto px-1.5 pb-1.5"
 			onScroll={event => {
 				syncPinned(event.currentTarget)
 

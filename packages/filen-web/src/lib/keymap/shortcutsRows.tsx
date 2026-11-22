@@ -43,7 +43,7 @@ export function ShortcutsRows<R extends VirtualRow>({
 	return (
 		<div
 			ref={setScrollElement}
-			className={cn("min-h-0 overflow-y-auto", className)}
+			className={cn("min-h-0 scrollbar-gutter-stable overflow-y-auto", className)}
 		>
 			<ul
 				aria-label={label}

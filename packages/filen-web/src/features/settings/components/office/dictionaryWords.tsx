@@ -35,7 +35,7 @@ export function DictionaryWords({
 	return (
 		<div
 			ref={setScrollElement}
-			className="h-80 overflow-y-auto"
+			className="h-80 scrollbar-gutter-stable overflow-y-auto"
 		>
 			<ul
 				className="relative w-full"

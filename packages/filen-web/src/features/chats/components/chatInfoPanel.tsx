@@ -367,7 +367,7 @@ function ChatInfoSurface({
 
 	function renderListView() {
 		return (
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-3">
+			<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-3 pb-3">
 				<div className="flex flex-col items-center gap-1 px-2 pt-2 pb-4 text-center">
 					<UserAvatar
 						src={chatAvatarUrl(chat, currentUserId)}

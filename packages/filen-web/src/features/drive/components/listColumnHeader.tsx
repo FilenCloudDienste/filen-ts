@@ -63,8 +63,10 @@ function ColumnButton({
 export function ListColumnHeader(props: ListColumnHeaderProps) {
 	const { t } = useTranslation("drive")
 
+	// The listing below keeps a stable scrollbar gutter: the header reserves the same one, so its columns stay over the
+	// rows' whether or not the listing overflows.
 	return (
-		<div className="flex h-8 shrink-0 items-center gap-3 border-b border-border/50 px-3 text-xs font-medium text-muted-foreground">
+		<div className="flex h-8 shrink-0 scrollbar-gutter-stable items-center gap-3 overflow-hidden border-b border-border/50 px-3 text-xs font-medium text-muted-foreground">
 			{props.leading}
 			<span
 				aria-hidden="true"

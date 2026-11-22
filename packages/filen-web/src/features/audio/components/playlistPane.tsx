@@ -109,7 +109,7 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 		<section
 			ref={setScrollElement}
 			aria-labelledby={headingId}
-			className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+			className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto"
 		>
 			<header
 				ref={setHeaderElement}

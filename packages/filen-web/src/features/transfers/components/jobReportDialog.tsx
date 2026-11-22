@@ -204,7 +204,7 @@ function JobReportBody({ job, onClose }: { job: DriveJob; onClose: () => void })
 			) : null}
 			<div
 				ref={setScrollElement}
-				className="h-96 overflow-y-auto"
+				className="h-96 scrollbar-gutter-stable overflow-y-auto"
 			>
 				<div
 					className="relative w-full"

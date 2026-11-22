@@ -356,7 +356,7 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 			<SelectionTransformRoot
 				host={transform.host}
 				readOnly={controller.readOnly}
-				className="min-h-0 flex-1 overflow-auto"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-auto"
 			>
 				<div ref={editorRef} />
 			</SelectionTransformRoot>

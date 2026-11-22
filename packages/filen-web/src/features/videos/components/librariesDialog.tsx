@@ -345,7 +345,7 @@ export function LibrariesDialog() {
 						<DialogTitle>{t("videosLibrariesTitle")}</DialogTitle>
 						<DialogDescription>{t("videosLibrariesDescription")}</DialogDescription>
 					</DialogHeader>
-					<div className="flex min-h-0 flex-col overflow-y-auto">
+					<div className="flex min-h-0 scrollbar-gutter-stable flex-col overflow-y-auto">
 						{roots.length === 0 ? (
 							<p className="py-8 text-center text-sm text-muted-foreground">{t("videosLibrariesNone")}</p>
 						) : (

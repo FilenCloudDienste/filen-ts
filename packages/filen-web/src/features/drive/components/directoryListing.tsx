@@ -1212,7 +1212,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							onPointerDown={marquee.onPointerDown}
 							// A drag of drive items resting near its edge scrolls the listing (pointerDrag.ts).
 							data-filen-drag-scroll=""
-							className="min-h-0 flex-1 overflow-y-auto"
+							className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 							style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
 						>
 							{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps

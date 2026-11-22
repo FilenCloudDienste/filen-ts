@@ -195,7 +195,7 @@ export function DriveSidebar() {
 				ref={setScrollElement}
 				// A drag of drive items resting near its edge scrolls the tree (pointerDrag.ts).
 				data-filen-drag-scroll=""
-				className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col overflow-y-auto px-3 pt-1 pb-3 app-region-pane"
+				className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-3 pt-1 pb-3 app-region-pane"
 			>
 				{/* The Cloud Drive row (a link, the sidebar's stable landmark for the drive root, with its own disclosure
 					button) and below it the ARIA tree of its directories (directoryTree.tsx), one menu for both. */}

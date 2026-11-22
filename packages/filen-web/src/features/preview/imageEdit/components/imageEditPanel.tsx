@@ -253,7 +253,7 @@ export function ImageEditPanel(props: EditPanelProps) {
 				id={ids.panel}
 				role="tabpanel"
 				aria-labelledby={ids.tab}
-				className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-4"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto overscroll-contain px-4 pt-3 pb-4"
 			>
 				{props.tab === "adjust" ? (
 					<div className="flex flex-col">

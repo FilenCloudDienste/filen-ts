@@ -646,7 +646,7 @@ function TableView({
 			</TabsContent>
 			<TabsContent
 				value="schema"
-				className="min-h-0 flex-1 overflow-auto px-3 pb-3"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-auto px-3 pb-3"
 			>
 				{table.kind === "view" ? <p className="pb-2 text-sm text-muted-foreground">{t("previewSqliteViewNotRun")}</p> : null}
 				{table.kind === "virtual" ? (

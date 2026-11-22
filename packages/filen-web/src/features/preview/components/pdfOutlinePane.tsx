@@ -192,7 +192,7 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 				role="tree"
 				aria-label={t("previewPdfOutlinePane")}
 				tabIndex={focusedRendered ? -1 : 0}
-				className="min-h-0 flex-1 overflow-y-auto py-1 outline-none"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto py-1 outline-none"
 				onKeyDown={onKeyDown}
 				onFocus={event => {
 					if (event.target !== event.currentTarget) return

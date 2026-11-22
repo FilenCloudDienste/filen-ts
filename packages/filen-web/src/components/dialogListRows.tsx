@@ -45,7 +45,7 @@ export function DialogListRows<T>({ items, itemKey, estimateSize, renderItem }: 
 	return (
 		<div
 			ref={setScrollElement}
-			className={`overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}
+			className={`scrollbar-gutter-stable overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}
 		>
 			<ul
 				className="relative w-full"

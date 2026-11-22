@@ -37,7 +37,7 @@ export function DocxBookmarkRows({
 	return (
 		<div
 			ref={setScrollElement}
-			className="max-h-56 overflow-y-auto rounded-xl border px-1"
+			className="max-h-56 scrollbar-gutter-stable overflow-y-auto rounded-xl border px-1"
 		>
 			<ul
 				aria-label={label}

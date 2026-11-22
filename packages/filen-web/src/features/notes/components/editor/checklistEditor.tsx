@@ -190,7 +190,7 @@ export function ChecklistEditor({
 		<div
 			ref={setRoot}
 			role="list"
-			className="flex size-full flex-col gap-0.5 overflow-auto p-4"
+			className="flex size-full scrollbar-gutter-stable flex-col gap-0.5 overflow-auto p-4"
 		>
 			<SelectionTransform
 				host={transform.host}

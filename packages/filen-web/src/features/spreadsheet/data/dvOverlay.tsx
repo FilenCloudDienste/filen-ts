@@ -410,7 +410,7 @@ function ListItems({
 			aria-label={t(source === "validation" ? "previewSheetValidationListLabel" : "previewSheetAutoCompleteListLabel")}
 			aria-busy={list.status === "loading"}
 			aria-activedescendant={items.length === 0 ? undefined : `${id}-${String(active)}`}
-			className="overflow-y-auto outline-hidden"
+			className="scrollbar-gutter-stable overflow-y-auto outline-hidden"
 			style={list.status === "ready" ? { height: `${String(listHeight(items.length))}px` } : undefined}
 			onKeyDown={onKeyDown}
 			onScroll={event => {

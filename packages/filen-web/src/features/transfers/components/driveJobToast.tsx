@@ -404,7 +404,7 @@ function JobDetails({ job, model, onRetried }: { job: DriveJob; model: JobCardMo
 	}
 
 	return (
-		<div className="flex max-h-60 flex-col gap-3 overflow-y-auto border-t pt-2 text-xs">
+		<div className="flex max-h-60 scrollbar-gutter-stable flex-col gap-3 overflow-y-auto border-t pt-2 text-xs">
 			{active.length > 0 ? (
 				<section
 					aria-live="off"

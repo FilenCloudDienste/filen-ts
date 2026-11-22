@@ -34,7 +34,7 @@ export function MountsOverview() {
 			{controls === null ? (
 				<LoadingState size="lg" />
 			) : (
-				<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-6 pb-12 sm:px-6">
+				<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-4 pt-6 pb-12 sm:px-6">
 					<div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
 						{PRIMARY_ROLES.map(role =>
 							role === FINDER_ROLE ? (

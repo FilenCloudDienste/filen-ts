@@ -122,7 +122,7 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 						) : (
 							<div
 								ref={setScrollElement}
-								className="h-96 overflow-y-auto"
+								className="h-96 scrollbar-gutter-stable overflow-y-auto"
 							>
 								<div
 									className="relative w-full"
@@ -188,7 +188,7 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 							</a>
 						)}
 						{/* License prose is long-form text a user may want to copy, and the app body is select-none. */}
-						<div className="flex h-96 flex-col gap-3 overflow-y-auto rounded-2xl bg-muted/40 p-3 text-xs select-text">
+						<div className="flex h-96 scrollbar-gutter-stable flex-col gap-3 overflow-y-auto rounded-2xl bg-muted/40 p-3 text-xs select-text">
 							{selected.copyright.map(line => (
 								<p key={line}>{line}</p>
 							))}

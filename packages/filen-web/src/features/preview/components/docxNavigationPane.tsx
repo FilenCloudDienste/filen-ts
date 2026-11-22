@@ -478,7 +478,7 @@ function HeadingList({
 	return (
 		<div
 			ref={setScroller}
-			className="min-h-0 flex-1 overflow-y-auto py-1"
+			className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto py-1"
 		>
 			<ul
 				aria-label={t("previewDocxNavigationHeadings")}
@@ -683,7 +683,7 @@ function PagesTab({ editor, handleRef, pages, focusEditor }: TabProps & { pages:
 	return (
 		<div
 			ref={setScroller}
-			className="min-h-0 flex-1 overflow-y-auto py-2"
+			className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto py-2"
 		>
 			<div
 				className="relative"
@@ -753,7 +753,7 @@ function ResultsTab({
 	return (
 		<div
 			ref={setScroller}
-			className="min-h-0 flex-1 overflow-y-auto py-1"
+			className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto py-1"
 		>
 			<ul
 				aria-label={t("previewDocxNavigationResults")}

@@ -300,7 +300,7 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 				const warnings = fields.local === null ? [] : fields.local.warnings
 
 				return (
-					<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+					<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col gap-3 overflow-y-auto">
 						{fields.local === null ? null : (
 							<div
 								className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5", SURFACE_RING)}
@@ -513,7 +513,7 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 							<DialogTitle>{t("reviewTitleNew")}</DialogTitle>
 							<DialogDescription>{t("reviewDescriptionNew")}</DialogDescription>
 						</DialogHeader>
-						<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+						<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto">
 							<ReviewSummary
 								summary={added.plan?.summary ?? null}
 								findings={[]}

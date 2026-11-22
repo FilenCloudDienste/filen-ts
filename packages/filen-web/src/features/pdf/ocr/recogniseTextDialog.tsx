@@ -82,7 +82,7 @@ function PageRows({ pages }: { pages: readonly OcrPageState[] }) {
 	return (
 		<div
 			ref={setScrollElement}
-			className="max-h-48 overflow-y-auto"
+			className="max-h-48 scrollbar-gutter-stable overflow-y-auto"
 		>
 			<ul
 				className="relative w-full"

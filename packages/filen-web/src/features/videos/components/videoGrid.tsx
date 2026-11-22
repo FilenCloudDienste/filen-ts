@@ -527,7 +527,7 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 					ref={setScrollElement}
 					role="list"
 					aria-label={t("videosGridLabel", { name })}
-					className="min-h-0 flex-1 overflow-y-auto px-4 pb-6"
+					className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto px-4 pb-6"
 					style={{ paddingTop: rowLiftPadding(artHeight) }}
 					onKeyDown={handleKeyDown}
 					onScroll={event => {

@@ -24,7 +24,7 @@ export function MountsPage({ role, title, children }: { role: MountsRole; title:
 				/>
 				<h1 className="truncate font-heading text-base font-medium tracking-tight">{title}</h1>
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-6 pb-12 sm:px-6">
+			<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto px-4 pt-6 pb-12 sm:px-6">
 				<div className="mx-auto flex w-full max-w-3xl flex-col gap-8">{children}</div>
 			</div>
 		</>

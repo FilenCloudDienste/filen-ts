@@ -261,7 +261,7 @@ function FindingRows({
 	return (
 		<div
 			ref={setScrollElement}
-			className="min-h-0 flex-1 overflow-y-auto"
+			className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 		>
 			<ul
 				className="relative w-full"

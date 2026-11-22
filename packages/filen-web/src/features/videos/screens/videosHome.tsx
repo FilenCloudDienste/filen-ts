@@ -224,7 +224,7 @@ export function VideosHomeScreen() {
 	return (
 		<div
 			ref={setScrollElement}
-			className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+			className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto"
 		>
 			{view.notices.length > 0 ? (
 				<ul className="flex shrink-0 flex-col gap-2 px-4 pt-1 pb-3">
