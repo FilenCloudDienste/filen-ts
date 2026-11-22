@@ -67,12 +67,15 @@ export function ShapeTransformPopover({
 	request,
 	session,
 	command,
+	flush,
 	anchor,
 	onClose
 }: {
 	request: ShapeTransformRequest
 	session: Pick<PresentationSessionApi, "textSeed">
 	command: (op: DeckOp) => Promise<CommandResult>
+	// Sends the open body's pending text (the deck's text editing).
+	flush: () => Promise<void>
 	anchor: () => DOMRect
 	onClose: () => void
 }) {
@@ -174,6 +177,8 @@ export function ShapeTransformPopover({
 		}
 
 		setApplying(true)
+		// A body open in the text editor sends what was typed into it first, so the check below reads it.
+		await flush()
 
 		const op = await shapeTransformOp(
 			session,

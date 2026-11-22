@@ -712,15 +712,18 @@ export function SlideCanvasContextMenu({
 							const targets = shapeTransformTargets(render, state.slide === render.ref ? state.ids : [])
 							const at = new DOMRect(pointRef.current.x, pointRef.current.y, 0, 0)
 
-							void readShapeTexts(ribbon.session, targets, pick.kind).then(read => {
-								if (!read.ok) {
-									toast(t("assistantShapeTransformTooMany", { count: read.count, max: SHAPE_TRANSFORM_MAX_BODIES }))
-								} else if (read.items.length === 0) {
-									toast(t("assistantShapeTransformNothing"))
-								} else {
-									setShapeTransform({ request: { items: read.items, skipped: read.skipped, ...pick }, at })
-								}
-							})
+							// Text typed into an open body is sent first, so its seed holds it.
+							void (ribbon.text?.flush() ?? Promise.resolve())
+								.then(() => readShapeTexts(ribbon.session, targets, pick.kind))
+								.then(read => {
+									if (!read.ok) {
+										toast(t("assistantShapeTransformTooMany", { count: read.count, max: SHAPE_TRANSFORM_MAX_BODIES }))
+									} else if (read.items.length === 0) {
+										toast(t("assistantShapeTransformNothing"))
+									} else {
+										setShapeTransform({ request: { items: read.items, skipped: read.skipped, ...pick }, at })
+									}
+								})
 						}}
 					/>
 				)}
@@ -730,6 +733,7 @@ export function SlideCanvasContextMenu({
 					request={shapeTransform.request}
 					session={ribbon.session}
 					command={op => ribbon.command(op)}
+					flush={() => ribbon.text?.flush() ?? Promise.resolve()}
 					anchor={() => shapeTransform.at}
 					onClose={() => {
 						setShapeTransform(null)
