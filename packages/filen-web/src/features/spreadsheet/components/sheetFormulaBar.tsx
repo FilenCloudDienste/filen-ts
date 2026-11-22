@@ -19,6 +19,7 @@ import {
 	type NameBoxTarget
 } from "@/features/spreadsheet/lib/nameBox.logic"
 import type { SheetFormulaExtension } from "@/features/spreadsheet/formulaBar/useSheetFormula"
+import { FormulaHelper } from "@/features/spreadsheet/formulaBar/formulaHelper"
 
 // A sheet's layout once it is the one shown; null when another is shown first.
 function shownLayout(model: SheetGridModel, sheet: SheetId): Promise<SheetLayout | null> {
@@ -310,6 +311,7 @@ export function SheetFormulaBar({
 					Σ
 				</Button>
 			) : null}
+			{editable && formula !== undefined ? <FormulaHelper grid={grid} /> : null}
 			{editable ? (
 				<div className="relative flex h-7 min-w-0 flex-1 rounded-md focus-within:bg-muted/60">
 					{colored ? (

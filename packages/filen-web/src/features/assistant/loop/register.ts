@@ -1,8 +1,9 @@
 import { registerAssistantSession } from "@/features/assistant/store/assistantSession"
-import { registerAssistantTransformer } from "@/features/assistant/store/assistantTransform"
+import { registerAssistantFormulaWriter, registerAssistantTransformer } from "@/features/assistant/store/assistantTransform"
 import { AssistantRuntime } from "@/features/assistant/runtime/client"
 import { createAssistantSession } from "@/features/assistant/loop/session"
 import { createAssistantToolExecutor } from "@/features/assistant/tools/executor"
+import { createAssistantFormulaWriter } from "@/features/assistant/transform/formula"
 import { createAssistantTransformer } from "@/features/assistant/transform/run"
 
 // Importing this module (main.tsx) plugs the on-device runtime into the assistant UI. Nothing heavy
@@ -14,6 +15,7 @@ export const assistantSession = createAssistantSession({ runtime: assistantRunti
 
 registerAssistantSession(assistantSession)
 registerAssistantTransformer(createAssistantTransformer(assistantRuntime))
+registerAssistantFormulaWriter(createAssistantFormulaWriter(assistantRuntime))
 
 const check = () => {
 	void assistantRuntime.init()

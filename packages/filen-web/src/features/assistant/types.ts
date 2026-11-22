@@ -9,6 +9,8 @@ import type {
 	AssistantDocumentCoverage,
 	AssistantDocumentKind,
 	AssistantRoute,
+	FormulaCheck,
+	FormulaContext,
 	TransformKind,
 	TransformLanguage
 } from "@filen/shared/assistant"
@@ -270,6 +272,35 @@ export type AssistantTransformOutcome =
 
 export interface AssistantTransformer {
 	run: (request: AssistantTransformRequest) => Promise<AssistantTransformOutcome>
+	// Signing out: stops the one running and refuses anything further.
+	shutdown: () => void
+}
+
+// What a sheet's formula engine calculated for a formula, written to no cell: an array's first value with its size.
+export interface AssistantFormulaValue {
+	readonly value: number | string | boolean | null
+	readonly error: boolean
+	readonly rows: number
+	readonly cols: number
+}
+
+// The spreadsheet formula helper: one generation (and one more when the sheet refuses the first) writing a formula
+// in en-US syntax for a request about the described cells. `check` is the sheet's: the formula checked, then
+// calculated by its engine; only a formula it accepts comes back. One runs at a time: a new one stops the one before.
+export interface AssistantFormulaRequest {
+	context: FormulaContext
+	check: (formula: string) => Promise<FormulaCheck<AssistantFormulaValue>>
+	signal: AbortSignal
+	onProgress?: (share: number) => void
+}
+
+// "invalid": both attempts were refused. "model-unavailable", "cancelled", "failed": as for a transform.
+export type AssistantFormulaOutcome =
+	| { ok: true; formula: string; value: AssistantFormulaValue }
+	| { ok: false; error: "invalid" | "model-unavailable" | "cancelled" | "failed" }
+
+export interface AssistantFormulaWriter {
+	run: (request: AssistantFormulaRequest) => Promise<AssistantFormulaOutcome>
 	// Signing out: stops the one running and refuses anything further.
 	shutdown: () => void
 }

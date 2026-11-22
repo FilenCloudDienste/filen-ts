@@ -44,14 +44,16 @@ const FAILURE_KEYS: Readonly<Record<Exclude<Failure, "cancelled" | "model-unavai
 	refused: "assistantTransformRefused"
 }
 
-function ModelNotReady({ state }: { state: AssistantModelState }) {
+// A model that is not ready, explained with the one action that fits (also the formula helper's). `notDownloaded`
+// says what the model would do here.
+export function ModelNotReady({ state, notDownloaded }: { state: AssistantModelState; notDownloaded?: AssistantKey }) {
 	const { t } = useTranslation("assistant")
 
 	switch (state.kind) {
 		case "not-downloaded":
 			return (
 				<div className="flex flex-col gap-3">
-					<p className="text-muted-foreground">{t("assistantTransformNotDownloaded")}</p>
+					<p className="text-muted-foreground">{t(notDownloaded ?? "assistantTransformNotDownloaded")}</p>
 					<Button
 						size="sm"
 						className="self-start"

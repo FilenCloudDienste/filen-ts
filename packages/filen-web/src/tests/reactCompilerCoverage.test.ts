@@ -890,6 +890,7 @@ describe("React Compiler coverage of the spreadsheet grid and its shell", () => 
 		["src/features/spreadsheet/components/sheetBody.tsx", "SheetBody"],
 		["src/features/spreadsheet/components/sheetFormulaBar.tsx", "SheetFormulaBar"],
 		["src/features/spreadsheet/components/sheetFormulaBar.tsx", "NameBox"],
+		["src/features/spreadsheet/formulaBar/formulaHelper.tsx", "FormulaHelper"],
 		["src/features/spreadsheet/components/sheetGridMenu.tsx", "SheetGridMenu"],
 		["src/features/spreadsheet/components/sheetGridMenu.tsx", "ResetItems"],
 		["src/features/spreadsheet/toolbar/sheetToolbar.tsx", "SheetToolbar"],

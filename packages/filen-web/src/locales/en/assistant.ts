@@ -798,5 +798,35 @@ export const assistant = {
 	/** How a Save as note click reads in the conversation */
 	assistantActSaveNote: "[Save as note]",
 	/** How a Draft reply click reads in the conversation */
-	assistantActDraftReply: "[Draft reply]"
+	assistantActDraftReply: "[Draft reply]",
+
+	// ── Spreadsheet formula helper ───────────────────────────────────────────
+	/** Spreadsheet formula bar button — opens the field to ask the assistant for a formula */
+	assistantFormulaOpen: "Write a formula with the assistant",
+	/** Formula helper — accessible name of its popover */
+	assistantFormulaLabel: "Formula from the assistant",
+	/** Formula helper — label of the field describing the formula wanted */
+	assistantFormulaAskLabel: "Describe the formula",
+	/** Formula helper — placeholder of the field describing the formula wanted */
+	assistantFormulaAskPlaceholder: "e.g. total of Amount where Region is North",
+	/** Formula helper button — asks the assistant for the formula described */
+	assistantFormulaWrite: "Write",
+	/** Formula helper — while the formula is being written and checked */
+	assistantFormulaWriting: "Writing the formula…",
+	/** Formula helper — what the spreadsheet calculated for the formula; `cell` is where it goes ("E2"), `value` the result */
+	assistantFormulaResult: "Result for {{cell}}: {{value}}",
+	/** Formula helper — a result of several cells; `value` is its first one, `rows` × `cols` its size */
+	assistantFormulaSpills: "{{value}} (spills over {{rows}} × {{cols}} cells)",
+	/** Formula helper — the formula's result is an empty cell */
+	assistantFormulaEmpty: "empty",
+	/** Formula helper — the assistant's formula was refused twice; the Try again button follows */
+	assistantFormulaInvalid: "Not a valid formula.",
+	/** Formula helper — the generation failed; the Try again button follows */
+	assistantFormulaFailed: "Couldn't write a formula.",
+	/** Formula helper — the model is not on this device yet; the Download button follows */
+	assistantFormulaNotDownloaded: "Formulas are written on this device with the assistant's model, which isn't downloaded yet.",
+	/** Formula helper — another cell was selected since asking; Insert is off. `cell` is where the formula was written for */
+	assistantFormulaCellChanged: "Select {{cell}} again to insert the formula there.",
+	/** Formula helper button — puts the formula into the formula bar, where Enter writes it to the cell */
+	assistantFormulaInsert: "Insert"
 } as const
