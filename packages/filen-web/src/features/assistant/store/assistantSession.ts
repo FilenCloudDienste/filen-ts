@@ -15,6 +15,7 @@ import {
 } from "@/features/assistant/store/conversationHistory"
 import { restoreConversation, serializeConversation, type ConversationMeta } from "@/features/assistant/store/history.logic"
 import type { AssistantEvent, AssistantModelState, AssistantSession } from "@/features/assistant/types"
+import { activeDocumentKey, getActiveDocument } from "@/lib/activeDocument"
 
 // Where the runtime plugs in: it calls registerAssistantSession once at import, and the store follows its
 // events from then on, panel open or not (a download keeps reporting progress with the panel closed).
@@ -246,13 +247,20 @@ export function sendAssistantMessage(text: string): boolean {
 	}
 
 	const held: AssistantEvent[] = []
+	const open = getActiveDocument()
+	// Detached (the chip's ×) for this one question; the chip is back for the next.
+	const withoutDocument = open !== null && store.detachedDocument === activeDocumentKey(open)
 	let turnId: string
 
 	flushPending()
 	heldDuringSend = held
 
+	if (store.detachedDocument !== null) {
+		store.setDetachedDocument(null)
+	}
+
 	try {
-		turnId = session.send(message)
+		turnId = session.send(message, withoutDocument ? { withoutDocument } : undefined)
 	} finally {
 		heldDuringSend = null
 	}

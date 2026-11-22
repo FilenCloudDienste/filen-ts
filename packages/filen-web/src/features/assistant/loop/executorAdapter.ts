@@ -114,23 +114,27 @@ export function turnExecutor({
 	executor,
 	signal,
 	actionSignal,
-	calendar
+	calendar,
+	withoutDocument = false
 }: {
 	executor: ToolExecutor
 	signal: AssistantSignal
 	actionSignal: AssistantSignal
 	calendar: UserCalendar
+	// The user detached the open document from this turn's question.
+	withoutDocument?: boolean
 }): TurnExecutor {
 	const started = new Map<string, Promise<AssistantToolExecution>>()
+	const contextOptions = withoutDocument ? { withoutDocument } : {}
 
 	const run = (
 		call: { callId: string; tool: AssistantTool; args: Record<string, unknown>; confirmed: boolean },
 		callSignal: AssistantSignal = signal
-	) => executor.execute({ ...call, signal: callSignal, calendar })
+	) => executor.execute({ ...call, signal: callSignal, calendar, ...contextOptions })
 
 	return {
 		shared: {
-			context: () => executor.context(),
+			context: () => executor.context(contextOptions),
 
 			name: handle => executor.name?.(handle),
 

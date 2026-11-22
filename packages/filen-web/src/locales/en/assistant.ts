@@ -656,5 +656,15 @@ export const assistant = {
 	/** Toast — the result replaced the selection where the editor keeps no undo of it; its Undo button puts the text back */
 	assistantTransformApplied: "Text replaced",
 	/** Toast button — puts the text back as it was before the result replaced it */
-	assistantTransformUndo: "Undo"
+	assistantTransformUndo: "Undo",
+
+	// ── Open document chip ───────────────────────────────────────────────────
+	/** Chip above the composer — screen-reader prefix before the open document's name */
+	assistantDocumentChipLabel: "Asking about",
+	/** Chip — where the user is in a PDF or Word document */
+	assistantDocumentChipPage: "p. {{page}}",
+	/** Chip — where the user is in a presentation */
+	assistantDocumentChipSlide: "slide {{slide}}",
+	/** Chip button — leaves the open document out of the next question; `name` is the document's name */
+	assistantDocumentChipRemove: "Don't ask about {{name}} in the next question"
 } as const

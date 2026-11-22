@@ -95,6 +95,11 @@ function itemKey(item: ActiveDocument["item"]): string {
 	return "note" in item ? `note:${item.note.uuid}` : `item:${item.data.uuid}`
 }
 
+// Which document an entry is, across its publishers and positions.
+export function activeDocumentKey(entry: Pick<ActiveDocument, "item">): string {
+	return itemKey(entry.item)
+}
+
 // Two entries a subscriber cannot tell apart (the reader aside, which reads the publisher's latest engine) share one.
 function signatureOf(entry: Omit<ActiveDocument, "token" | "reader">): string {
 	return JSON.stringify([itemKey(entry.item), entry.kind, entry.position, entry.selection?.chars ?? null, entry.editable])

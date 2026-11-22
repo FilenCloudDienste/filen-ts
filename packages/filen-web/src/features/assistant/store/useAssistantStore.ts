@@ -28,6 +28,10 @@ interface AssistantStore extends TranscriptState {
 	// dialog, which covers the shell: the shell mounts neither while it is set, so the conversation shows once.
 	previewHosted: boolean
 	draft: string
+	// The open document (activeDocumentKey) the user detached from the next question with the chip's ×; cleared when
+	// a message is sent. Another document opening shows its chip again, the key no longer matching.
+	detachedDocument: string | null
+	setDetachedDocument: (key: string | null) => void
 	// Set by a user-initiated open of the inline panel; its first focus target takes focus once and clears
 	// it. A panel restored open at boot never steals focus. The drawer has Base UI's own initial focus.
 	focusRequested: boolean
@@ -54,7 +58,11 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
 	drawerOpen: false,
 	previewHosted: false,
 	draft: "",
+	detachedDocument: null,
 	focusRequested: false,
+	setDetachedDocument: key => {
+		set({ detachedDocument: key })
+	},
 	setPanelOpen: open => {
 		panelOpenUserModified = true
 		set({ panelOpen: open, focusRequested: open })

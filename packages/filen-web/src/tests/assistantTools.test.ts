@@ -82,6 +82,19 @@ vi.mock("@/features/preview/lib/previewCache", async importOriginal => {
 
 	return { ...actual, loadPreviewBytes: vi.fn(actual.loadPreviewBytes) }
 })
+// A closed document's engine, stood in for by its pages' texts.
+const closedDocument = vi.hoisted(() => ({ close: vi.fn(), pages: [] as string[] }))
+
+vi.mock("@/features/preview/lib/closedDocuments", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/preview/lib/closedDocuments")>()
+
+	return {
+		...actual,
+		openClosedDocument: vi.fn(() =>
+			Promise.resolve({ reader: actual.pageTextsReader(closedDocument.pages), close: closedDocument.close })
+		)
+	}
+})
 // A mailbox's start, read through a range source over the bytes the test's SDK serves.
 const { mailboxBytes } = vi.hoisted(() => ({ mailboxBytes: { current: new Uint8Array(0) } }))
 
@@ -144,6 +157,8 @@ import { userCalendar } from "@/features/assistant/tools/dates"
 import { photosListingQueryOptions } from "@/features/photos/queries/photos"
 import type { AssistantToolExecution, ToolExecutor } from "@/features/assistant/runtime/executor"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { clearActiveDocument, publishActiveDocument, type DocumentReader } from "@/lib/activeDocument"
+import { DocumentTextBuilder } from "@/lib/documentText"
 
 const ROOT = testUuid("root")
 const ME = 1n
@@ -971,8 +986,80 @@ describe("read_text_file", () => {
 		const result = await call("read_text_file", { handle: "f1" })
 
 		expect(result).toMatchObject({ ok: false })
-		expect(json(result)).toEqual({ error: '"Invoice_2024.pdf" is not a text file' })
+		expect(json(result)).toEqual({
+			error: '"Invoice_2024.pdf" is not a text file; read a PDF, Word document, spreadsheet or presentation with read_document'
+		})
 		expect(sdk.downloadFileBytes).not.toHaveBeenCalled()
+	})
+})
+
+describe("read_document", () => {
+	const token = Symbol("viewer")
+	const pages = ["Contract start", "Salary 4,850 EUR", "Notice: three months"]
+	const reader: DocumentReader = {
+		units: () => Promise.resolve(pages.length),
+		text: (range, _signal, maxChars) => {
+			if (range === "selection") {
+				return Promise.resolve({ text: "Salary", units: [{ label: "selection", start: 0 }], truncated: false })
+			}
+
+			const builder = new DocumentTextBuilder(maxChars)
+
+			for (let page = range.from; page <= range.to; page++) {
+				builder.add(`page ${String(page)}`, pages[page - 1] ?? "")
+			}
+
+			return Promise.resolve(builder.result())
+		}
+	}
+
+	function openInvoice(selection: { chars: number } | null = null): void {
+		publishActiveDocument({ token, item: invoice, kind: "pdf", position: { page: 2, pages: 3 }, selection, editable: false, reader })
+	}
+
+	afterEach(() => {
+		clearActiveDocument(token)
+	})
+
+	it("names the open document in the context line with the selection's size, and leaves it out when detached", async () => {
+		openInvoice({ chars: 6 })
+
+		const { description, handles } = await executor.context()
+
+		expect(description).toMatch(/open document: "Invoice_2024\.pdf" \(handle (f\d+)\), PDF, page 2 of 3, 6 characters selected/)
+		expect(description).not.toContain("Salary")
+		expect(handles.length).toBeGreaterThan(1)
+		expect((await executor.context({ withoutDocument: true })).description).not.toContain("open document")
+	})
+
+	it("reads the open document through its viewer's reader, downloading nothing", async () => {
+		openInvoice({ chars: 6 })
+
+		const handle = /handle (f\d+)\), PDF/.exec((await executor.context()).description)?.[1] ?? ""
+		const read = json(await call("read_document", { handle, part: "pages", from: 2, to: 3 }))
+
+		expect(read).toMatchObject({ name: "Invoice_2024.pdf", kind: "pdf", units: 3, range: "pages 2–3 of 3" })
+		expect(read["content"]).toEqual([
+			{ unit: 2, label: "page 2", text: "Salary 4,850 EUR" },
+			{ unit: 3, label: "page 3", text: "Notice: three months" }
+		])
+		expect(json(await call("read_document", { handle, part: "selection" }))["content"]).toEqual([
+			{ unit: 1, label: "selection", text: "Salary" }
+		])
+		expect(sdk.downloadFileBytes).not.toHaveBeenCalled()
+	})
+
+	it("reads a closed document once without keeping its bytes in the preview cache", async () => {
+		closedDocument.pages = ["Page one", "Page two"]
+		sdk.downloadFileBytes.mockResolvedValue(new Uint8Array([37, 80, 68, 70]))
+		await call("list_directory", { path: "/Docs" })
+
+		const read = json(await call("read_document", { handle: "f1" }))
+
+		expect(read).toMatchObject({ kind: "pdf", units: 2, range: "pages 1–2 of 2" })
+		expect(vi.mocked(loadPreviewBytes).mock.calls.at(-1)?.[4]).toMatchObject({ store: false, reserve: false })
+		expect(closedDocument.close).toHaveBeenCalledTimes(1)
+		expect(await call("read_document", { handle: "f1", part: "selection" })).toMatchObject({ ok: false })
 	})
 })
 

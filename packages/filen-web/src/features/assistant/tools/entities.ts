@@ -45,6 +45,8 @@ export interface ToolScope {
 	calendar: UserCalendar
 	show: (entity: AssistantEntity, name: string) => string
 	progress?: ((progress: AssistantToolProgress) => void) | undefined
+	// The user detached the open document from this turn's question.
+	withoutDocument?: boolean
 }
 
 export interface ToolOutput {

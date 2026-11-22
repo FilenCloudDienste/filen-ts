@@ -336,11 +336,13 @@ export function createAssistantSession({
 	async function runTurn({
 		turnId,
 		message,
-		controller
+		controller,
+		withoutDocument
 	}: {
 		turnId: string
 		message: string
 		controller: AbortController
+		withoutDocument: boolean
 	}): Promise<void> {
 		// Refused before anything loads: a message too long for even a first step would load ~4 GB for nothing.
 		if (!messageFitsContext(message, runtime.model.contextTokens, supportedTools(executor))) {
@@ -357,7 +359,7 @@ export function createAssistantSession({
 		const turnConversation = conversation
 		// One calendar per turn: the prompt's date line and every date filter its tools resolve.
 		const calendar = userCalendar()
-		const turn = turnExecutor({ executor, signal: controller.signal, actionSignal: actions.signal, calendar })
+		const turn = turnExecutor({ executor, signal: controller.signal, actionSignal: actions.signal, calendar, withoutDocument })
 		let segment = 0
 		let segmentHasText = false
 		const steps = turnSteps({ turnId, emit, now })
@@ -583,7 +585,7 @@ export function createAssistantSession({
 			await runtime.deleteModel()
 		},
 
-		send: message => {
+		send: (message, options) => {
 			const turnId = `turn-${String(++turnCount)}`
 			const controller = new AbortController()
 
@@ -594,7 +596,7 @@ export function createAssistantSession({
 			}
 
 			active = controller
-			void runTurn({ turnId, message, controller })
+			void runTurn({ turnId, message, controller, withoutDocument: options?.withoutDocument === true })
 
 			return turnId
 		},

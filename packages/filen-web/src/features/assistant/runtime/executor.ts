@@ -52,17 +52,26 @@ export type AssistantToolPreview =
 			error: string
 	  }
 
+// What one turn's context leaves out: `withoutDocument` when the user detached the open document from the question
+// (the chip above the composer), so neither the context line nor get_context names it.
+export interface AssistantTurnContextOptions {
+	withoutDocument?: boolean
+}
+
 export interface ToolExecutor extends AssistantToolExecutor {
+	context(options?: AssistantTurnContextOptions): ReturnType<AssistantToolExecutor["context"]>
 	// `calendar`: the turn's, which its prompt's date line was written by; the current one when absent.
-	execute(call: {
-		callId: string
-		tool: AssistantTool
-		args: Record<string, unknown>
-		confirmed: boolean
-		signal: AssistantSignal
-		onProgress?: (progress: AssistantToolProgress) => void
-		calendar?: UserCalendar
-	}): Promise<AssistantToolExecution>
+	execute(
+		call: {
+			callId: string
+			tool: AssistantTool
+			args: Record<string, unknown>
+			confirmed: boolean
+			signal: AssistantSignal
+			onProgress?: (progress: AssistantToolProgress) => void
+			calendar?: UserCalendar
+		} & AssistantTurnContextOptions
+	): Promise<AssistantToolExecution>
 	preview(call: { tool: AssistantTool; args: Record<string, unknown> }): Promise<AssistantToolPreview>
 	// A new conversation: forgets every handle. `history` is a resumed conversation's exchanges, whose replies
 	// may name handles from an earlier page; those are never handed out again.

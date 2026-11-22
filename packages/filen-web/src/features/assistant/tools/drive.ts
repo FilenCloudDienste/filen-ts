@@ -637,11 +637,13 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 
 	// CSV and TSV preview as spreadsheets but are text.
 	if (!CATEGORY_POLICY[previewType(item)].textFamily && csv !== "csv" && csv !== "tsv") {
-		throw new AssistantToolError(`"${name}" is not a text file`)
+		throw new AssistantToolError(
+			`"${name}" is not a text file; read a PDF, Word document, spreadsheet or presentation with read_document`
+		)
 	}
 
 	if (item.data.size > TEXT_FILE_MAX_BYTES) {
-		throw new AssistantToolError(`"${name}" is too large to read (${formatBytes(Number(item.data.size))})`)
+		throw new AssistantToolError(`"${name}" is too large to read here (${formatBytes(Number(item.data.size))}); read_document reads it`)
 	}
 
 	const bytes = await loadDriveFileBytes(item, abortSignalOf(scope.signal))

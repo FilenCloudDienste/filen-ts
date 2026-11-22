@@ -10,6 +10,7 @@ import { TURN_END_KEYS, currentStep, spokenText, transcriptRows } from "@/featur
 import { useStepText } from "@/features/assistant/components/useStepText"
 import { useProposalTitle } from "@/features/assistant/components/useProposalTitle"
 import { AssistantComposer } from "@/features/assistant/components/assistantComposer"
+import { AssistantDocumentChip } from "@/features/assistant/components/assistantDocumentChip"
 import { AssistantModelStatus } from "@/features/assistant/components/assistantModelStatus"
 
 const EXAMPLE_KEYS: readonly AssistantKey[] = [
@@ -132,6 +133,7 @@ export function AssistantConversation() {
 			{entries.length === 0 ? <EmptyConversation /> : <AssistantTranscript rows={transcriptRows(entries, activeTurnId)} />}
 			<Announcer entries={entries} />
 			<AssistantModelStatus />
+			<AssistantDocumentChip />
 			<AssistantComposer />
 		</>
 	)

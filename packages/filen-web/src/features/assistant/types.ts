@@ -183,8 +183,9 @@ export interface AssistantSession {
 	// Frees the disk space; settles with the model back in "not-downloaded".
 	deleteModel: () => Promise<void>
 	// Starts a turn and returns its id; a model not in memory is loaded first, within the turn. Only called
-	// while the model is downloaded, loading or ready, and no turn is running.
-	send: (message: string) => string
+	// while the model is downloaded, loading or ready, and no turn is running. `withoutDocument`: the user detached
+	// the open document (the chip above the composer), so this turn's context leaves it out.
+	send: (message: string, options?: { withoutDocument?: boolean }) => string
 	// Stops the running turn; it still ends with a "turn-end" event (outcome "cancelled").
 	cancel: () => void
 	// Runs the proposal. Called inside the trusted click handler of the Confirm button, so it MUST start the

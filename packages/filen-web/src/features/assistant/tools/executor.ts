@@ -2,6 +2,7 @@ import {
 	contextName,
 	isAssistantWebTool,
 	isConsequentialTool,
+	openDocumentContext,
 	sanitizeUntrustedText,
 	screenOpened,
 	toolInputJsonSchema,
@@ -13,6 +14,7 @@ import {
 	type AssistantToolProgress,
 	type AssistantWebToolName
 } from "@filen/shared/assistant"
+import type { Note } from "@filen/sdk-rs"
 import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { findCachedListingItem } from "@/features/drive/queries/drive"
@@ -21,6 +23,7 @@ import {
 	DESTINATION_ARGS,
 	type AssistantHandleRef,
 	type AssistantPreviewTarget,
+	type AssistantTurnContextOptions,
 	type ToolExecutor
 } from "@/features/assistant/runtime/executor"
 import { AssistantHandleRegistry, ROOT_HANDLE, type AssistantEntityKind } from "@/features/assistant/tools/handles"
@@ -38,6 +41,8 @@ import {
 	type ToolScope
 } from "@/features/assistant/tools/entities"
 import { readAssistantContext } from "@/features/assistant/tools/context"
+import { readDocumentTool } from "@/features/assistant/tools/documents"
+import { getActiveDocument } from "@/lib/activeDocument"
 import { assistantRouter } from "@/features/assistant/tools/navigation"
 import { navigateToRoute, UNAVAILABLE_ROUTES, type AssistantRouteName } from "@/features/assistant/tools/routes"
 import {
@@ -99,7 +104,8 @@ const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly As
 	draft_chat_message: { chat: ["chat"] },
 	open_playlist: { handle: ["playlist"] },
 	play: { handle: ["drive", "playlist", "track"] },
-	add_tracks_to_playlist: { playlist: ["playlist"], handles: ["drive", "track"] }
+	add_tracks_to_playlist: { playlist: ["playlist"], handles: ["drive", "track"] },
+	read_document: { handle: ["drive"] }
 }
 
 // A path the model is told to list a directory by is copied back whole, so it is never shortened: past this it
@@ -121,7 +127,41 @@ function shownDrive(scope: ToolScope, item: DriveItem, { shared, path }: { share
 	)
 }
 
-function describeContext(scope: ToolScope): string {
+// The document open in a preview (or the note editor), as the context line names it. A note already open on the
+// notes screen is named there.
+function openDocumentPart(scope: ToolScope, openNote: Note | undefined): string | null {
+	const open = getActiveDocument()
+
+	if (open === null) {
+		return null
+	}
+
+	if ("note" in open.item) {
+		if (openNote?.uuid === open.item.note.uuid) {
+			return null
+		}
+
+		const note = open.item.note
+
+		return openDocumentContext({
+			name: noteTitle(note),
+			handle: scope.show({ kind: "note", note }, noteTitle(note)),
+			kind: "text",
+			position: open.position,
+			selectionChars: open.selection?.chars ?? null
+		})
+	}
+
+	return openDocumentContext({
+		name: driveName(open.item),
+		handle: shownDrive(scope, open.item, {}),
+		kind: open.kind === "note" ? "text" : open.kind,
+		position: open.position,
+		selectionChars: open.selection?.chars ?? null
+	})
+}
+
+function describeContext(scope: ToolScope, { withoutDocument = false }: AssistantTurnContextOptions = {}): string {
 	const { screen, directory, selection, note, chat, playing } = readAssistantContext()
 	const parts = [`screen: ${screen}`]
 	const sharedIn = directory?.variant === "sharedIn" ? directory.chain : null
@@ -174,6 +214,12 @@ function describeContext(scope: ToolScope): string {
 		parts.push(`open chat: ${contextName(chatName(chat))} (handle ${scope.show({ kind: "chat", chat }, chatName(chat))})`)
 	}
 
+	const document = withoutDocument ? null : openDocumentPart(scope, note)
+
+	if (document !== null) {
+		parts.push(document)
+	}
+
 	if (playing === null) {
 		parts.push("nothing playing")
 	} else {
@@ -207,7 +253,8 @@ const openRouteTool: ToolAdapter = async (input, scope) => {
 // Exactly the tools @filen/shared lists as the web app's (ASSISTANT_WEB_TOOLS, which the eval measures). Any
 // other is not offered: the loop tells the model it is not available in this app.
 const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
-	get_context: (_input, scope) => Promise.resolve({ value: { context: describeContext(scope) } }),
+	get_context: (_input, scope) =>
+		Promise.resolve({ value: { context: describeContext(scope, { withoutDocument: scope.withoutDocument === true }) } }),
 	search_items: searchItemsTool,
 	list_directory: listDirectoryTool,
 	get_item_info: getItemInfoTool,
@@ -241,7 +288,8 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	add_tracks_to_playlist: addTracksToPlaylistTool,
 	get_transfers: getTransfersTool,
 	open_route: openRouteTool,
-	search_note_text: searchNoteTextTool
+	search_note_text: searchNoteTextTool,
+	read_document: readDocumentTool
 }
 
 interface ResolvedArgs {
@@ -419,9 +467,9 @@ export function createAssistantToolExecutor(): ToolExecutor {
 	}
 
 	return {
-		context: () => {
+		context: options => {
 			const shown = new Map<string, AssistantHandleRef>()
-			const description = describeContext(scopeFor(undefined, shown))
+			const description = describeContext(scopeFor(undefined, shown), options)
 
 			return Promise.resolve({ description, handles: [ROOT_HANDLE, ...shown.keys()] })
 		},
@@ -475,9 +523,9 @@ export function createAssistantToolExecutor(): ToolExecutor {
 			}
 		},
 
-		execute: async ({ tool, args, confirmed, signal, onProgress, calendar }) => {
+		execute: async ({ tool, args, confirmed, signal, onProgress, calendar, withoutDocument }) => {
 			const shown = new Map<string, AssistantHandleRef>()
-			const scope = scopeFor(signal, shown, onProgress, calendar)
+			const scope = { ...scopeFor(signal, shown, onProgress, calendar), ...(withoutDocument === true ? { withoutDocument } : {}) }
 			if (!isAssistantWebTool(tool.name)) {
 				return failureOf(notAvailable(tool))
 			}
