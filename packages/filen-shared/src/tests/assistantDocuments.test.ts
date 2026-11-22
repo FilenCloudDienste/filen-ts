@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+	documentChunks,
+	documentCoveredText,
 	documentRangeText,
 	documentReadRange,
 	documentUnits,
 	documentUnitsText,
+	estimateTokens,
 	openDocumentContext,
 	splitDocumentText
 } from "@filen/shared/assistant"
@@ -86,5 +89,49 @@ describe("openDocumentContext", () => {
 		expect(openDocumentContext({ name: "notes.md", handle: "f4", kind: "text", position: {}, selectionChars: null })).toBe(
 			'open document: "notes.md" (handle f4), text'
 		)
+	})
+})
+
+describe("documentChunks", () => {
+	const page = (unit: number, text: string) => ({ unit, label: `page ${String(unit)}`, text })
+
+	it("packs whole units in order, each chunk within the budget", () => {
+		const units = Array.from({ length: 10 }, (_, index) => page(index + 1, "word ".repeat(40)))
+		const chunks = documentChunks(units, 120)
+
+		expect(chunks.length).toBeGreaterThan(1)
+		expect(chunks[0]?.first).toBe(1)
+		expect(chunks.at(-1)?.last).toBe(10)
+
+		for (const [index, chunk] of chunks.entries()) {
+			expect(estimateTokens(chunk.text)).toBeLessThanOrEqual(120)
+			expect(chunk.whole).toBe(true)
+			expect(chunk.text.startsWith(`[page ${String(chunk.first)}]`)).toBe(true)
+
+			if (index > 0) {
+				expect(chunk.first).toBe((chunks[index - 1]?.last ?? 0) + 1)
+			}
+		}
+	})
+
+	it("splits a unit too long for one chunk at line ends, then inside a line, labelling its parts", () => {
+		const long = ["line ".repeat(40), "x".repeat(2000), "end"].join("\n")
+		const chunks = documentChunks([page(1, "short"), page(2, long), page(3, "after")], 100)
+		const parts = chunks.filter(chunk => chunk.text.includes("[page 2 (part "))
+
+		expect(parts.length).toBeGreaterThan(2)
+		expect(parts.slice(0, -1).every(chunk => !chunk.whole)).toBe(true)
+		expect(chunks.every(chunk => estimateTokens(chunk.text) <= 100)).toBe(true)
+		expect(
+			chunks
+				.map(chunk => chunk.text)
+				.join("")
+				.replace(/\[page \d( \(part \d+\))?\]\n|\n/g, "")
+		).toBe(`short${long.replaceAll("\n", "")}after`)
+	})
+
+	it("words what a cut-short read covered", () => {
+		expect(documentCoveredText({ kind: "pdf", from: 1, to: 23, units: 41, end: 41 })).toBe("pages 1–23 of 41")
+		expect(documentCoveredText({ kind: "pdf", from: 12, to: 11, units: 41, end: 41 })).toBe("part of page 12 of 41")
 	})
 })

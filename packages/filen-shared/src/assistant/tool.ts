@@ -56,6 +56,8 @@ export type AssistantTool<Name extends string = string, Input extends AssistantT
 	// Moves the user's data, or words about it, to other people.
 	readonly exfiltrates: boolean
 	readonly grounded: AssistantGroundedArgs
+	// Its content (document units, documents.ts) too long for one extraction is read in chunks, then combined.
+	readonly chunked?: true
 }
 
 export function defineTool<const Name extends string, const Input extends AssistantToolInput>(

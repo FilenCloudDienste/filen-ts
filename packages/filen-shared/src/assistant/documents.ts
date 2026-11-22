@@ -1,3 +1,4 @@
+import { estimateTokens } from "./budget"
 import { isRecord } from "./internal"
 import { contextName } from "./search"
 
@@ -100,9 +101,152 @@ export function splitDocumentText(
 	})
 }
 
+// What a read's extraction covered when it did not cover all that was asked: units `from` to `to` of `units`, the
+// rest running to `end`. `to` below `from`: only part of the first unit.
+export type AssistantDocumentCoverage = {
+	kind: AssistantDocumentKind
+	from: number
+	to: number
+	units: number
+	end: number
+}
+
+// "pages 1–23 of 41", or "part of page 12 of 41".
+export function documentCoveredText({ kind, from, to, units }: AssistantDocumentCoverage): string {
+	return to < from ? `part of ${documentRangeText(kind, from, from, units)}` : documentRangeText(kind, from, to, units)
+}
+
 // Units as one text for an extraction: each under its label.
 export function documentUnitsText(units: readonly AssistantDocumentUnit[]): string {
 	return units.map(unit => `[${unit.label}]\n${unit.text}`).join("\n\n")
+}
+
+// A run of units one extraction reads in a chunked read: `first` to `last` (1-based in the document), the last
+// read whole unless `whole` is false (a unit too long for one extraction goes in parts, "page 12 (part 2)").
+export type AssistantDocumentChunk = {
+	first: number
+	last: number
+	whole: boolean
+	text: string
+}
+
+// The longest start of `chars` within `maxTokens`, at least one character.
+function fittingChars(chars: readonly string[], maxTokens: number): number {
+	let low = 1
+	let high = chars.length
+
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2)
+
+		if (estimateTokens(chars.slice(0, middle).join("")) <= maxTokens) {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+
+	return low
+}
+
+// A unit's text in parts of at most `maxTokens`, cut at line ends where it can, else inside a line.
+function unitParts(text: string, maxTokens: number): string[] {
+	const parts: string[] = []
+	let lines: string[] = []
+	let tokens = 0
+
+	const flush = () => {
+		if (lines.length > 0) {
+			parts.push(lines.join("\n"))
+			lines = []
+			tokens = 0
+		}
+	}
+
+	for (const line of text.split("\n")) {
+		const lineTokens = estimateTokens(line) + 1
+
+		if (lineTokens > maxTokens) {
+			flush()
+
+			let rest = Array.from(line)
+
+			while (rest.length > 0) {
+				const cut = fittingChars(rest, maxTokens)
+
+				parts.push(rest.slice(0, cut).join(""))
+				rest = rest.slice(cut)
+			}
+
+			continue
+		}
+
+		if (tokens + lineTokens > maxTokens) {
+			flush()
+		}
+
+		lines.push(line)
+		tokens += lineTokens
+	}
+
+	flush()
+
+	return parts
+}
+
+// Units packed in order into chunks of at most `maxTokens` each (as estimateTokens counts their labelled text), a
+// unit too long for one alone split into parts of its own.
+export function documentChunks(units: readonly AssistantDocumentUnit[], maxTokens: number): AssistantDocumentChunk[] {
+	const chunks: AssistantDocumentChunk[] = []
+	// The chunk being filled: empty or one.
+	const open: { first: number; last: number; whole: boolean; pieces: string[]; tokens: number }[] = []
+
+	const close = () => {
+		const current = open.pop()
+
+		if (current !== undefined) {
+			chunks.push({ first: current.first, last: current.last, whole: current.whole, text: current.pieces.join("\n\n") })
+		}
+	}
+
+	const add = (unit: number, piece: string, tokens: number, whole: boolean) => {
+		const current = open[0]
+
+		// A blank line joins two pieces.
+		if (current === undefined || current.tokens + 1 + tokens > maxTokens) {
+			close()
+			open.push({ first: unit, last: unit, whole, pieces: [piece], tokens })
+
+			return
+		}
+
+		current.pieces.push(piece)
+		current.tokens += 1 + tokens
+		current.last = unit
+		current.whole = whole
+	}
+
+	for (const unit of units) {
+		const piece = documentUnitsText([unit])
+		const tokens = estimateTokens(piece)
+
+		if (tokens <= maxTokens) {
+			add(unit.unit, piece, tokens, true)
+
+			continue
+		}
+
+		const parts = unitParts(unit.text, Math.max(1, maxTokens - estimateTokens(`[${unit.label} (part 999)]\n`)))
+
+		for (const [index, part] of parts.entries()) {
+			const labelled = `[${unit.label} (part ${String(index + 1)})]\n${part}`
+
+			add(unit.unit, labelled, estimateTokens(labelled), index === parts.length - 1)
+		}
+	}
+
+	close()
+
+	return chunks
 }
 
 // Where the user is in the open document, as the context line says it.

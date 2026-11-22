@@ -1,6 +1,16 @@
 import { resultItemCount, toolCallSubject } from "./activity"
 import { clipData, estimateTokens, MESSAGE_OVERHEAD_TOKENS, messageLines, serializeToolResult } from "./budget"
-import { documentUnits, documentUnitsText } from "./documents"
+import {
+	documentChunks,
+	documentCoveredText,
+	documentRangeText,
+	documentUnits,
+	documentUnitsText,
+	isDocumentKind,
+	type AssistantDocumentCoverage,
+	type AssistantDocumentKind,
+	type AssistantDocumentUnit
+} from "./documents"
 import { AssistantTurnGuard } from "./guard"
 import { foreignTokens, replyHandles, replyWithHandles, replyWithoutHandles, settledReply } from "./handles"
 import {
@@ -32,6 +42,7 @@ import {
 	extractionSource,
 	mapUntrustedStrings,
 	quarantinedExtractionPrompt,
+	quarantinedReducePrompt,
 	sanitizeUntrustedText,
 	screenAssistantReply,
 	type ScreenedReply,
@@ -129,6 +140,8 @@ export interface AssistantModel {
 	readonly contextTokens: number
 	// The loaded model's own special-token strings, for sanitizeUntrustedText.
 	readonly specialTokens: readonly string[]
+	// The most chunks a long document's extraction maps (EXTRACTION_MAX_CHUNKS when absent).
+	readonly extractionChunkCap?: number
 	// `onText` receives the whole text content generated so far, never a delta. `onProgress` reports the
 	// prompt being read, before the first token; `onToolCall` reports a tool call as soon as its complete
 	// name is known, by its position among the calls this generation returns, before its arguments are
@@ -236,6 +249,8 @@ export type AssistantToolCallRecord = {
 	subject?: string
 	resultCount?: number
 	resultMore?: boolean
+	// A document read whose extraction covered only part of what it asked for.
+	coverage?: AssistantDocumentCoverage
 }
 
 export type AssistantConfirmationRequest = {
@@ -275,6 +290,16 @@ export type AssistantTurnEvent =
 			// reply) being read.
 			type: "progress"
 			progress: AssistantPromptProgress
+	  }
+	| {
+			// A long document's extraction starts on its `chunk`th of `chunks` chunks: units `from` to `to`.
+			type: "extract"
+			callId: string
+			kind: AssistantDocumentKind
+			from: number
+			to: number
+			chunk: number
+			chunks: number
 	  }
 	| {
 			// The running call's own progress, as its executor reports it.
@@ -426,6 +451,15 @@ export const STEP_MAX_TOKENS = 384
 // The most a step that writes the user's own text may generate.
 export const STEP_TEXT_MAX_TOKENS = 1536
 export const QUARANTINE_MAX_TOKENS = 200
+// A chunked read: each chunk's extract, and the answer combining them.
+export const QUARANTINE_MAP_MAX_TOKENS = 150
+export const QUARANTINE_REDUCE_MAX_TOKENS = 320
+// The most chunks one read maps, unless the model says otherwise (AssistantModel.extractionChunkCap): every chunk
+// is a full prompt read, so a slow engine takes fewer.
+export const EXTRACTION_MAX_CHUNKS = 8
+export const EXTRACTION_CPU_MAX_CHUNKS = 4
+// The label above each extract in the reduce ("[pages 9–14 of 41]") and the blank line after it.
+const CHUNK_LABEL_TOKENS = 16
 const ROUTER_MAX_TOKENS = 8
 
 // Routes whose read requests mostly act (play, pause, open a screen): a call forced there is an action the
@@ -1587,7 +1621,7 @@ export async function runAssistantTurn({
 								})
 								handOut(returned)
 								// The call reads as running until its content is extracted, which is a generation of its own.
-								result =
+								const quarantined =
 									tool.untrustedOutput === "content"
 										? await quarantine({
 												model,
@@ -1597,9 +1631,17 @@ export async function runAssistantTurn({
 												// Sanitized first: the quarantine prompt is rendered and tokenized like any other.
 												result: sanitized(outcome.result),
 												signal,
-												onProgress
+												onProgress,
+												chunked: tool.chunked === true,
+												onChunk: chunk => {
+													onEvent({ type: "extract", callId: record.id, ...chunk })
+												}
 											})
-										: outcome.result
+										: null
+
+								result = quarantined === null ? outcome.result : quarantined.result
+
+								const coverage = quarantined?.coverage ?? null
 
 								if (tool.effect !== "read") {
 									ran.push({ name: call.name, arguments: call.arguments })
@@ -1617,7 +1659,8 @@ export async function runAssistantTurn({
 										: {
 												resultCount: listed.count,
 												resultMore: listed.more
-											})
+											}),
+									...(coverage === null ? {} : { coverage })
 								})
 							} else {
 								record = update(record, {
@@ -1767,16 +1810,7 @@ export async function runAssistantTurn({
 	}
 }
 
-// Runs the extraction over a result's content fields with no tools; only its answer reaches the main loop.
-async function quarantine({
-	model,
-	request,
-	earlier,
-	source,
-	result,
-	signal,
-	onProgress
-}: {
+type QuarantineOptions = {
 	model: AssistantModel
 	request: string
 	// The user's previous message, for a reply to a clarifying question.
@@ -1785,45 +1819,18 @@ async function quarantine({
 	result: unknown
 	signal: AssistantSignal
 	onProgress: (progress: AssistantPromptProgress) => void
-}): Promise<unknown> {
-	if (typeof result !== "object" || result === null) {
-		return result
-	}
+	// A chunked tool's document (documents.ts) too long for one extraction is read a chunk at a time.
+	chunked: boolean
+	onChunk: (chunk: Omit<Extract<AssistantTurnEvent, { type: "extract" }>, "type" | "callId">) => void
+}
 
-	const record = result as Record<string, unknown>
-	// A pasted text as the request would crowd out the content; its start and end carry the ask.
-	const asked = messageEdges(request)
-	const background = earlier === undefined ? undefined : messageEdges(earlier.replace(/\s+/g, " ").trim())
-	const frame = quarantinedExtractionPrompt({
-		request: asked,
-		earlier: background,
-		source,
-		data: ""
-	})
-	const budget =
-		QUARANTINE_CONTEXT_TOKENS - QUARANTINE_MAX_TOKENS - estimateTokens(frame.system + frame.user) - MESSAGE_OVERHEAD_TOKENS * 2
-	// A clipped chat keeps its newest messages, other content its start.
-	const { data, clipped } =
-		("content" in record ? undefined : messageLines(record["messages"], budget)) ??
-		clipData(
-			CONTENT_FIELDS.filter(field => field in record)
-				.map(field => contentText(record[field]))
-				.join("\n"),
-			budget,
-			"messages" in record
-		)
-
-	if (data.length === 0 && !clipped) {
-		return result
-	}
-
-	const { system, user } = quarantinedExtractionPrompt({
-		request: asked,
-		earlier: background,
-		source,
-		data
-	})
-	const extracted = await generateSettled(
+function extraction(
+	model: AssistantModel,
+	{ system, user }: { system: string; user: string },
+	maxTokens: number,
+	{ signal, onProgress }: Pick<QuarantineOptions, "signal" | "onProgress">
+): Promise<AssistantGenerateResult> {
+	return generateSettled(
 		model,
 		{
 			messages: [
@@ -1837,22 +1844,193 @@ async function quarantine({
 				}
 			],
 			slot: "extraction",
-			maxTokens: QUARANTINE_MAX_TOKENS
+			maxTokens
 		},
 		{
 			signal,
 			onProgress
 		}
 	)
+}
+
+// What of a document read the extraction covered, when not all of it: from its first unit to the last one read
+// whole. Null for a read that covered all it asked for, and for a text (one unit, no pages to name).
+function documentCoverage(
+	record: Record<string, unknown>,
+	units: readonly AssistantDocumentUnit[],
+	lastWhole: number
+): AssistantDocumentCoverage | null {
+	const kind = record["kind"]
+	const total = record["units"]
+	const first = units[0]
+	const last = units.at(-1)
+
+	if (!isDocumentKind(kind) || kind === "text" || typeof total !== "number" || first === undefined || last === undefined) {
+		return null
+	}
+
+	// A reader that stopped short read its last unit only in part, and the read asked for the rest of the document.
+	const truncated = record["truncated"] === true
+	const to = truncated ? Math.min(lastWhole, last.unit - 1) : lastWhole
+	const end = truncated ? total : last.unit
+
+	return to >= end ? null : { kind, from: first.unit, to: Math.max(first.unit - 1, to), units: total, end }
+}
+
+// Runs the extraction over a result's content fields with no tools; only its answer reaches the main loop. A long
+// document of a chunked tool is mapped chunk by chunk (each chunk a full extraction of its own, under the same
+// frame), and the chunks' extracts are reduced to one answer; past the cap, the extract says which pages it covers.
+async function quarantine(options: QuarantineOptions): Promise<{ result: unknown; coverage: AssistantDocumentCoverage | null }> {
+	const { model, request, earlier, source, result, chunked } = options
+
+	if (typeof result !== "object" || result === null) {
+		return { result, coverage: null }
+	}
+
+	const record = result as Record<string, unknown>
+	// A pasted text as the request would crowd out the content; its start and end carry the ask.
+	const asked = messageEdges(request)
+	const background = earlier === undefined ? undefined : messageEdges(earlier.replace(/\s+/g, " ").trim())
+	const frame = quarantinedExtractionPrompt({
+		request: asked,
+		earlier: background,
+		source,
+		data: ""
+	})
+	const frameTokens = estimateTokens(frame.system + frame.user) + MESSAGE_OVERHEAD_TOKENS * 2
+	const budget = QUARANTINE_CONTEXT_TOKENS - QUARANTINE_MAX_TOKENS - frameTokens
+	const units = chunked ? documentUnits(record["content"]) : null
+	const rest = Object.fromEntries(Object.entries(record).filter(([key]) => !CONTENT_FIELDS.includes(key) && key !== "truncated"))
+
+	if (units !== null && estimateTokens(documentUnitsText(units)) > budget) {
+		return await chunkedQuarantine({ options, record, units, rest, asked, background, frameTokens })
+	}
+
+	// A clipped chat keeps its newest messages, other content its start.
+	const { data, clipped } =
+		("content" in record ? undefined : messageLines(record["messages"], budget)) ??
+		clipData(
+			CONTENT_FIELDS.filter(field => field in record)
+				.map(field => contentText(record[field]))
+				.join("\n"),
+			budget,
+			"messages" in record
+		)
+
+	if (data.length === 0 && !clipped) {
+		return { result, coverage: null }
+	}
+
+	const extracted = await extraction(
+		model,
+		quarantinedExtractionPrompt({
+			request: asked,
+			earlier: background,
+			source,
+			data
+		}),
+		QUARANTINE_MAX_TOKENS,
+		options
+	)
+	const coverage = units === null ? null : documentCoverage(record, units, units.at(-1)?.unit ?? 0)
 
 	return {
-		...Object.fromEntries(Object.entries(record).filter(([key]) => !CONTENT_FIELDS.includes(key))),
-		extract: extracted.content.trim(),
-		// Tells the model the extract covers only part of the content, or stopped at its length limit.
-		...(clipped || extracted.truncated === true
-			? {
-					extract_incomplete: true
-				}
-			: {})
+		result: {
+			...(units === null ? Object.fromEntries(Object.entries(record).filter(([key]) => !CONTENT_FIELDS.includes(key))) : rest),
+			extract: extracted.content.trim(),
+			// Tells the model the extract covers only part of the content, or stopped at its length limit.
+			...(clipped || extracted.truncated === true || coverage !== null
+				? {
+						extract_incomplete: true
+					}
+				: {}),
+			...(coverage === null ? {} : { covered: documentCoveredText(coverage) })
+		},
+		coverage
+	}
+}
+
+// The chunks a chunked read maps, as many as let their extracts fit the reduce beside its frame, at most the model's
+// cap. Each extract is at most QUARANTINE_MAP_MAX_TOKENS under a label of a few tokens.
+export function extractionChunkCount({ request, earlier, cap }: { request: string; earlier?: string | undefined; cap: number }): number {
+	const frame = quarantinedReducePrompt({ request, earlier, extracts: "" })
+	const room =
+		QUARANTINE_CONTEXT_TOKENS - QUARANTINE_REDUCE_MAX_TOKENS - estimateTokens(frame.system + frame.user) - MESSAGE_OVERHEAD_TOKENS * 2
+
+	return Math.max(1, Math.min(cap, Math.floor(room / (QUARANTINE_MAP_MAX_TOKENS + CHUNK_LABEL_TOKENS))))
+}
+
+async function chunkedQuarantine({
+	options,
+	record,
+	units,
+	rest,
+	asked,
+	background,
+	frameTokens
+}: {
+	options: QuarantineOptions
+	record: Record<string, unknown>
+	units: readonly AssistantDocumentUnit[]
+	rest: Record<string, unknown>
+	asked: string
+	background: string | undefined
+	frameTokens: number
+}): Promise<{ result: unknown; coverage: AssistantDocumentCoverage | null }> {
+	const { model, source, signal, onChunk } = options
+	const kind = isDocumentKind(record["kind"]) ? record["kind"] : "text"
+	const total = typeof record["units"] === "number" ? record["units"] : (units.at(-1)?.unit ?? 1)
+	const all = documentChunks(units, QUARANTINE_CONTEXT_TOKENS - QUARANTINE_MAP_MAX_TOKENS - frameTokens)
+	const chunks = all.slice(
+		0,
+		extractionChunkCount({ request: asked, earlier: background, cap: model.extractionChunkCap ?? EXTRACTION_MAX_CHUNKS })
+	)
+	const extracts: string[] = []
+	let cut = false
+
+	for (const [index, chunk] of chunks.entries()) {
+		checkAborted(signal)
+		onChunk({ kind, from: chunk.first, to: chunk.last, chunk: index + 1, chunks: chunks.length })
+
+		const mapped = await extraction(
+			model,
+			quarantinedExtractionPrompt({ request: asked, earlier: background, source, data: chunk.text }),
+			QUARANTINE_MAP_MAX_TOKENS,
+			options
+		)
+		// Model-written, from other people's text: sanitized like the text itself before the reduce reads it.
+		const text = sanitizeUntrustedText(mapped.content.trim(), model.specialTokens, { keepJoiners: true })
+
+		cut ||= mapped.truncated === true
+		extracts.push(`[${documentRangeText(kind, chunk.first, chunk.last, total)}]\n${text}`)
+	}
+
+	checkAborted(signal)
+
+	const last = chunks.at(-1)
+	const lastWhole = last === undefined ? 0 : last.whole ? last.last : last.last - 1
+	const coverage = chunks.length < all.length || record["truncated"] === true ? documentCoverage(record, units, lastWhole) : null
+	let answer = extracts[0]?.replace(/^\[[^\]\n]*\]\n/, "") ?? ""
+
+	if (extracts.length > 1) {
+		const reduced = await extraction(
+			model,
+			quarantinedReducePrompt({ request: asked, earlier: background, extracts: extracts.join("\n\n") }),
+			QUARANTINE_REDUCE_MAX_TOKENS,
+			options
+		)
+
+		cut ||= reduced.truncated === true
+		answer = reduced.content.trim()
+	}
+
+	return {
+		result: {
+			...rest,
+			extract: answer,
+			...(cut || coverage !== null ? { extract_incomplete: true } : {}),
+			...(coverage === null ? {} : { covered: documentCoveredText(coverage) })
+		},
+		coverage
 	}
 }

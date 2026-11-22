@@ -10,6 +10,9 @@ import {
 	assistantUserPrompt,
 	capToolResult,
 	estimateTokens,
+	EXTRACTION_CPU_MAX_CHUNKS,
+	EXTRACTION_MAX_CHUNKS,
+	extractionChunkCount,
 	fitMessages,
 	isAssistantWebTool,
 	LISTING_PAGE_ITEMS,
@@ -18,10 +21,14 @@ import {
 	localeWeekStart,
 	messageLines,
 	MESSAGE_OVERHEAD_TOKENS,
+	messageEdges,
 	messageFitsContext,
 	parseRoute,
 	QUARANTINE_CONTEXT_TOKENS,
+	QUARANTINE_MAP_MAX_TOKENS,
 	QUARANTINE_MAX_TOKENS,
+	QUARANTINE_REDUCE_MAX_TOKENS,
+	quarantinedReducePrompt,
 	ROUTER_CONTEXT_TOKENS,
 	routerRequest,
 	ROUTER_GRAMMAR,
@@ -51,6 +58,7 @@ class ScriptedModel implements AssistantModel {
 	readonly contextTokens: number
 	readonly specialTokens = ["<|im_end|>", "<my_custom_token>"]
 	readonly requests: AssistantGenerateRequest[] = []
+	readonly extractionChunkCap?: number
 	private readonly steps: Step[]
 	private readonly routes: string[]
 	private readonly extract: string
@@ -62,25 +70,29 @@ class ScriptedModel implements AssistantModel {
 		steps,
 		extract = "summary",
 		contextTokens = 8192,
-		reports = false
+		reports = false,
+		chunkCap
 	}: {
 		route: string | readonly string[]
 		steps: Step[]
 		extract?: string
 		contextTokens?: number
 		reports?: boolean
+		chunkCap?: number
 	}) {
 		this.routes = typeof route === "string" ? [route] : route.slice()
 		this.steps = steps.slice()
 		this.extract = extract
 		this.contextTokens = contextTokens
 		this.reports = reports
+
+		if (chunkCap !== undefined) {
+			this.extractionChunkCap = chunkCap
+		}
 	}
 
 	get quarantineRequests(): AssistantGenerateRequest[] {
-		return this.requests.filter(request =>
-			request.messages[0]?.content.startsWith("Answer the user's request using only the data below")
-		)
+		return this.requests.filter(request => request.messages[0]?.content.startsWith("Answer the user's request using only the"))
 	}
 
 	generate(request: AssistantGenerateRequest, options: Parameters<AssistantModel["generate"]>[1]): Promise<AssistantGenerateResult> {
@@ -837,6 +849,8 @@ function trail(events: readonly AssistantTurnEvent[]): string[] {
 				return `progress ${String(event.progress.processed)}/${String(event.progress.total)}`
 			case "callProgress":
 				return `callProgress ${event.callId} ${String(event.progress.share)} ${String(event.progress.found)}`
+			case "extract":
+				return `extract ${event.callId} ${String(event.from)}-${String(event.to)} ${String(event.chunk)}/${String(event.chunks)}`
 			case "reply":
 				return event.final ? "reply final" : "reply"
 			case "call": {
@@ -2521,5 +2535,133 @@ describe("read_document extraction", () => {
 		expect(tool).toContain("extract")
 		expect(tool).not.toContain("Revenue rose")
 		expect(tool).not.toContain("page 3]")
+	})
+
+	// A 40-page report of about 900 characters a page: far more than one extraction reads.
+	const longReport = (truncated = false) => ({
+		handle: "f1",
+		name: "report.pdf",
+		kind: "pdf",
+		units: 40,
+		range: "pages 1–40 of 40",
+		content: Array.from({ length: 40 }, (_, index) => ({
+			unit: index + 1,
+			label: `page ${String(index + 1)}`,
+			text: `Page ${String(index + 1)} reviews the quarter. `.repeat(30)
+		})),
+		...(truncated ? { truncated: true } : {})
+	})
+
+	function reportTurn({ cap, truncated = false, signal }: { cap?: number; truncated?: boolean; signal?: AbortSignal }) {
+		const executor = new FakeExecutor({
+			items: [],
+			results: {
+				search_items: () => ({ results: [{ handle: "f1", name: "report.pdf" }] }),
+				read_document: () => longReport(truncated)
+			}
+		})
+		const model = new ScriptedModel({
+			route: "files read",
+			steps: [call("search_items", { query: "report" }), call("read_document", { handle: "f1" }), "Churn fell."],
+			extract: "Part summary.",
+			...(cap === undefined ? {} : { chunkCap: cap })
+		})
+
+		return { model, run: turn({ model, executor, message: "Summarize report.pdf", ...(signal === undefined ? {} : { signal }) }) }
+	}
+
+	it("maps a long document chunk by chunk within the extraction's context, then reduces the extracts", async () => {
+		const { model, run } = reportTurn({})
+		const { result, events } = await run
+		const extracts = events.flatMap(event => (event.type === "extract" ? [event] : []))
+		const [reduce, ...maps] = [...model.quarantineRequests].reverse()
+
+		expect(extracts.length).toBeGreaterThan(1)
+		expect(extracts.map(event => event.chunk)).toEqual(extracts.map((_event, index) => index + 1))
+		expect(extracts[0]).toMatchObject({ kind: "pdf", from: 1, chunks: extracts.length })
+		expect(extracts.at(-1)?.to).toBe(40)
+		expect(maps).toHaveLength(extracts.length)
+
+		for (const map of maps) {
+			expect(map.maxTokens).toBe(QUARANTINE_MAP_MAX_TOKENS)
+			expect(
+				map.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0) + QUARANTINE_MAP_MAX_TOKENS
+			).toBeLessThanOrEqual(QUARANTINE_CONTEXT_TOKENS)
+		}
+
+		expect(reduce?.maxTokens).toBe(QUARANTINE_REDUCE_MAX_TOKENS)
+		expect(reduce?.messages[1]?.content).toContain("[pages 1–")
+		expect(reduce?.messages[1]?.content).not.toContain("reviews the quarter")
+		expect(result.calls.find(record => record.tool === "read_document")?.coverage).toBeUndefined()
+
+		const tool =
+			model.requests
+				.at(-1)
+				?.messages.filter(message => message.role === "tool")
+				.at(-1)?.content ?? ""
+
+		expect(tool).toContain("Part summary.")
+		expect(tool).not.toContain("extract_incomplete")
+		expect(tool).not.toContain("reviews the quarter")
+	})
+
+	it("stops at the model's chunk cap and says which pages the extract covers", async () => {
+		const { model, run } = reportTurn({ cap: 2 })
+		const { result, events } = await run
+		const extracts = events.flatMap(event => (event.type === "extract" ? [event] : []))
+		const coverage = result.calls.find(record => record.tool === "read_document")?.coverage
+		const tool =
+			model.requests
+				.at(-1)
+				?.messages.filter(message => message.role === "tool")
+				.at(-1)?.content ?? ""
+
+		expect(extracts).toHaveLength(2)
+		expect(coverage).toMatchObject({ kind: "pdf", from: 1, units: 40, end: 40 })
+		expect(coverage?.to).toBeLessThan(40)
+		expect(tool).toContain("extract_incomplete")
+		expect(tool).toContain(`pages 1–${String(coverage?.to)} of 40`)
+	})
+
+	it("counts a reader's cut-short last page as not covered", async () => {
+		const { result } = await reportTurn({ truncated: true }).run
+
+		expect(result.calls.find(record => record.tool === "read_document")?.coverage).toMatchObject({ from: 1, to: 39, end: 40 })
+	})
+
+	it("checks for Stop between chunks", async () => {
+		const controller = new AbortController()
+		const { model, run } = reportTurn({ signal: controller.signal })
+		const generate = model.generate.bind(model)
+
+		// Stop lands while the first chunk is read.
+		model.generate = (request, options) => {
+			if (request.slot === "extraction") {
+				controller.abort()
+			}
+
+			return generate(request, options)
+		}
+
+		await expect(run).rejects.toBeInstanceOf(AssistantAbortError)
+		expect(model.quarantineRequests).toHaveLength(1)
+	})
+
+	it("sizes the chunk count so the reduce fits beside a long CJK request", () => {
+		const request = "请".repeat(600)
+		const earlier = "前".repeat(240)
+		const count = extractionChunkCount({ request: messageEdges(request), earlier, cap: EXTRACTION_MAX_CHUNKS })
+		const frame = quarantinedReducePrompt({ request: messageEdges(request), earlier, extracts: "" })
+
+		expect(count).toBeGreaterThanOrEqual(1)
+		expect(count).toBeLessThan(EXTRACTION_MAX_CHUNKS)
+		expect(
+			estimateTokens(frame.system + frame.user) +
+				MESSAGE_OVERHEAD_TOKENS * 2 +
+				count * (QUARANTINE_MAP_MAX_TOKENS + 16) +
+				QUARANTINE_REDUCE_MAX_TOKENS
+		).toBeLessThanOrEqual(QUARANTINE_CONTEXT_TOKENS)
+		expect(extractionChunkCount({ request: "Summarize this", cap: EXTRACTION_MAX_CHUNKS })).toBe(EXTRACTION_MAX_CHUNKS)
+		expect(extractionChunkCount({ request: "Summarize this", cap: EXTRACTION_CPU_MAX_CHUNKS })).toBe(EXTRACTION_CPU_MAX_CHUNKS)
 	})
 })

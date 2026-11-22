@@ -380,6 +380,7 @@ export const readDocument = defineTool({
 	effect: "read",
 	untrustedOutput: "content",
 	exfiltrates: false,
+	chunked: true,
 	grounded: {
 		handles: ["handle"]
 	},
