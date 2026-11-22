@@ -435,7 +435,7 @@ export function NotesSidebar() {
 	}
 
 	// Def in features/notes/lib/keymap.ts. Every notes action stands down under any open dialog or menu
-	// (OUTSIDE_OVERLAYS): a note dialog (rename/delete/leave/createTag), History or Participants, or a
+	// (OUTSIDE_OVERLAYS): a note dialog (rename/delete/leave/createTag) or History, or a
 	// row's menu, whose own Escape closes it without also clearing the selection. A new note is also
 	// gated on the same connectivity flag the button is disabled by, so the two can never disagree —
 	// drive.newDirectory guards its own hotkey identically.

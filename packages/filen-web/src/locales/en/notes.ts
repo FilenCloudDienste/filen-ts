@@ -219,7 +219,7 @@ export const notes = {
 	noteActionCreateTag: "New tag",
 	/** Note menu — opens the type submenu (text/md/code/rich/checklist) */
 	noteActionType: "Change type",
-	/** Note menu — opens the participants dialog (owner only) */
+	/** Note menu — opens or closes the participants panel (owner only) */
 	noteActionParticipants: "Participants",
 	/** Note menu — opens the history dialog */
 	noteActionHistory: "History",
@@ -327,12 +327,26 @@ export const notes = {
 	/** Toast when the open note, with no local changes, now shows a newer version saved elsewhere */
 	noteUpdatedElsewhere: "Updated with changes saved elsewhere.",
 
-	// ── Participants dialog ────────────────────────────────────────────────────
-	/** Participants dialog — accessible label on a row's permission switch; {{email}} = the participant's email */
-	noteParticipantsCanEditLabel: "{{email}} can edit",
-	/** Participants dialog — empty state when the note has no participants besides the current user */
-	noteParticipantsEmpty: "No other participants yet",
-	/** Participants dialog — remove confirm dialog body; {{email}} = the participant's email */
+	// ── Participants panel ─────────────────────────────────────────────────────
+	/** Participants panel — heading; {{number}} = how many people are on the note, the viewer included */
+	noteParticipantsPanelTitle: "Participants ({{number}})",
+	/** Participants panel — one muted line under the heading */
+	noteParticipantsPanelDescription: "People who can open this note",
+	/** Participants panel — the viewer's own row; {{name}} = their display name */
+	noteParticipantSelf: "{{name}} (you)",
+	/** Participants panel — permission option and read-only label: the participant may edit the note */
+	noteParticipantCanEdit: "Can edit",
+	/** Participants panel — permission option and read-only label: the participant may only read the note */
+	noteParticipantCanView: "Can view",
+	/** Participants panel — accessible label on a row's permission select; {{name}} = the participant's display name */
+	noteParticipantPermissionLabel: "Permission for {{name}}",
+	/** Participants panel — tooltip and accessible label on a row's remove button; {{name}} = the participant's display name */
+	noteParticipantRemoveAction: "Remove {{name}}",
+	/** Participants panel — tooltip and accessible label on a row's block button; {{name}} = the participant's display name */
+	noteParticipantBlockAction: "Block {{name}}",
+	/** Participants panel — tooltip and accessible label on a row's unblock button; {{name}} = the participant's display name */
+	noteParticipantUnblockAction: "Unblock {{name}}",
+	/** Participants panel — remove confirm dialog body; {{email}} = the participant's email */
 	noteParticipantRemoveDialogBody: "{{email}} will lose access to this note.",
 	/** Add-participants sub-view — body above the contact list */
 	noteParticipantsAddDialogBody: "Choose one or more contacts to add to this note.",
@@ -388,7 +402,7 @@ export const notes = {
 	notesCommandExport: "Export note",
 	/** Keymap — description for the action that opens the focused or open note's version history */
 	notesCommandHistory: "Show note history",
-	/** Keymap — description for the action that opens the focused or open note's participants dialog */
+	/** Keymap — description for the action that opens or closes the focused or open note's participants panel */
 	notesCommandParticipants: "Manage note participants",
 	/** Keymap — description for the action that exports every note as a zip */
 	notesCommandExportAll: "Export all notes",

@@ -2,8 +2,8 @@ import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { MoreHorizontalIcon, PencilIcon, PlusIcon, UserCheckIcon, UserMinusIcon, UsersIcon, UserXIcon, VolumeOffIcon } from "lucide-react"
-import type { Chat, ChatParticipant } from "@filen/sdk-rs"
-import { cn, contactDisplayName, toggleInSet, type BlockedUsers } from "@filen/shared"
+import type { Chat, ChatParticipant, Contact } from "@filen/sdk-rs"
+import { cn, contactDisplayName, type BlockedUsers } from "@filen/shared"
 import { chatAvatarUrl, chatTitle, isChatUndecryptable } from "@/features/chats/lib/sort"
 import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
 import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib/participants"
@@ -28,8 +28,7 @@ import {
 } from "@/features/chats/store/useChatInfoStore"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
-import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
-import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
+import { ParticipantsAddView } from "@/features/contacts/components/participantsAddView"
 import { DockedSidePanel, SidePanelSurface, type DockedSurfaceProps } from "@/features/shell/components/dockedSidePanel"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { plainErrorDTO } from "@/lib/sdk/errors"
@@ -151,9 +150,6 @@ function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDo
 	const [removing, setRemoving] = useState<ChatParticipant | null>(null)
 	// Block confirms first, as everywhere else it is offered (it also drops the contact); unblock does not.
 	const [blocking, setBlocking] = useState<ChatParticipant | null>(null)
-	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
-	const [filter, setFilter] = useState("")
-	const [addPending, setAddPending] = useState(false)
 	// Leaving add mode unmounts the control that had focus; the Add button takes it back.
 	const refocusAddButton = useRef(false)
 
@@ -164,8 +160,6 @@ function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDo
 	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
 
 	function showList(): void {
-		setSelected(new Set())
-		setFilter("")
 		setMode("list")
 		refocusAddButton.current = true
 	}
@@ -218,16 +212,8 @@ function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDo
 		}
 	}
 
-	async function handleAddSelected(): Promise<void> {
-		const chosen = resolveSelectedContacts(contactsQuery.data?.contacts ?? [], selected)
-
-		if (chosen.length === 0) {
-			return
-		}
-
-		setAddPending(true)
+	async function handleAdd(chosen: Contact[]): Promise<void> {
 		const outcome = await addChatParticipants(chat, chosen)
-		setAddPending(false)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -243,56 +229,6 @@ function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDo
 			refocusAddButton.current = false
 			element.focus()
 		}
-	}
-
-	// Entering add mode unmounts the Add button; focus goes to the picker's filter box, or Cancel without one.
-	function focusAddView(element: HTMLDivElement | null): void {
-		element?.querySelector<HTMLElement>("input, button:not([disabled])")?.focus()
-	}
-
-	function renderAddView() {
-		return (
-			<div
-				ref={focusAddView}
-				className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3"
-			>
-				<div className="px-1">
-					<h3 className="text-sm font-medium">{t("common:participantsAddDialogTitle")}</h3>
-					<p className="text-xs text-muted-foreground">{t("chatParticipantsAddDialogBody")}</p>
-				</div>
-				<ContactPickerList
-					contactsQuery={contactsQuery}
-					filter={filter}
-					onFilterChange={setFilter}
-					selected={selected}
-					onToggle={uuid => {
-						setSelected(prev => toggleInSet(prev, uuid))
-					}}
-					ariaLabel={t("common:participantsAddDialogTitle")}
-					emptyTitle={t("common:participantsAddEmpty")}
-					exclude={chat.participants}
-				/>
-				<div className="flex justify-end gap-2">
-					<Button
-						variant="outline"
-						disabled={addPending}
-						onClick={showList}
-					>
-						{t("common:cancel")}
-					</Button>
-					<Button
-						disabled={selected.size === 0 || addPending || !isOnline}
-						title={offlineTitle}
-						onClick={() => {
-							void handleAddSelected()
-						}}
-					>
-						{addPending && <Spinner data-icon="inline-start" />}
-						{t("common:participantsAddSubmit")}
-					</Button>
-				</div>
-			</div>
-		)
 	}
 
 	function renderRow(row: ChatInfoParticipantRow) {
@@ -402,7 +338,6 @@ function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDo
 							disabled={!isOnline}
 							title={offlineTitle}
 							onClick={() => {
-								setSelected(new Set())
 								setMode("add")
 							}}
 						>
@@ -448,7 +383,17 @@ function ChatInfoSurface({ chat, currentUserId, blocked, className, ref, onKeyDo
 			onKeyDown={onKeyDown}
 			onClose={onClose}
 		>
-			{mode === "list" ? renderListView() : renderAddView()}
+			{mode === "list" ? (
+				renderListView()
+			) : (
+				<ParticipantsAddView
+					contactsQuery={contactsQuery}
+					exclude={chat.participants}
+					body={t("chatParticipantsAddDialogBody")}
+					onAdd={handleAdd}
+					onCancel={showList}
+				/>
+			)}
 			<ConfirmDialog
 				open={removing !== null}
 				pending={removing !== null && pending.has(participantPendingKey("remove", removing.userId))}

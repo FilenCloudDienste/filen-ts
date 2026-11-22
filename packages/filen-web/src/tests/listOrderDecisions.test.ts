@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { FileVersion, UserAccountSubs, UserAccountSubsInvoices } from "@filen/sdk-rs"
 import { chatInfoParticipantRows } from "@/features/chats/components/chatInfoPanel.logic"
-import { participantRows } from "@/features/notes/components/participantsDialog.logic"
+import { participantRows } from "@/features/notes/components/noteParticipantsPanel.logic"
 import { compareTagsByName } from "@/features/notes/lib/sort"
 import { compareInvoicesNewestFirst, compareSubsNewestFirst } from "@/queries/account"
 import { compareVersionsNewestFirst } from "@/features/drive/queries/drive"
@@ -36,16 +36,17 @@ describe("chat info participants", () => {
 })
 
 describe("note participants", () => {
-	it("lists the owner, then everyone else by name and user id", () => {
+	it("lists the viewer, the owner, then everyone else by name and user id", () => {
 		const owner = mockNoteParticipant({ userId: 2n, isOwner: true, nickName: "Zoe" })
 		const bob = mockNoteParticipant({ userId: 3n, nickName: "bob" })
 		const amy = mockNoteParticipant({ userId: 4n, nickName: "Amy" })
 		const amyTwin = mockNoteParticipant({ userId: 5n, nickName: "amy" })
+		const self = mockNoteParticipant({ userId: 1n, nickName: "Zz" })
 
-		for (const rows of bothWays([bob, amyTwin, owner, amy], participants =>
+		for (const rows of bothWays([bob, amyTwin, self, owner, amy], participants =>
 			participantRows(mockNote({ participants: [...participants] }), 1n, false)
 		)) {
-			expect(rows.map(row => row.participant.userId)).toEqual([2n, 4n, 5n, 3n])
+			expect(rows.map(row => row.participant.userId)).toEqual([1n, 2n, 4n, 5n, 3n])
 		}
 	})
 })

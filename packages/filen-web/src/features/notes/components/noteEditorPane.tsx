@@ -9,6 +9,7 @@ import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { NoteRemoteEditDialog } from "@/features/notes/components/noteRemoteEditDialog"
+import { NoteParticipantsHost } from "@/features/notes/components/noteParticipantsPanel"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
@@ -247,6 +248,8 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 					/>
 				</div>
 			)}
+			{/* The participants panel, portalled beside the card (or a sheet); only where the menu offers it. */}
+			{undecryptable || note.trash ? null : <NoteParticipantsHost note={note} />}
 			{dialogHost.renderActiveDialog()}
 		</div>
 	)

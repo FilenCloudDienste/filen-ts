@@ -14,7 +14,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { type NoteBulkDialogActionKind } from "@/features/notes/components/notesBulkActionBar.logic"
-import { ParticipantsDialog } from "@/features/notes/components/participantsDialog"
+import { noteParticipantsPanel } from "@/features/notes/store/useNoteParticipantsPanel"
 import { HistoryDialog } from "@/features/notes/components/historyDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -26,9 +26,10 @@ import { singleOrCountKey } from "@/lib/i18n"
 // is its own fourth kind, disjoint from the note-scoped "createTag" above: it carries no note at all —
 // a user with zero notes can still reach it (the sidebar header's "..." menu and the tags empty-state
 // button, neither of which has a note to tag along the way). `createdTag` is createTag's retry memory:
-// the tag an attempt created before tagging the note failed, gone with the dialog.
+// the tag an attempt created before tagging the note failed, gone with the dialog. "participants" is no dialog: it
+// toggles the participants panel (openNoteDialog below).
 type ActiveNoteDialog =
-	| { kind: NoteActionDialogKind; note: Note; createdTag?: CreatedTag }
+	| { kind: Exclude<NoteActionDialogKind, "participants">; note: Note; createdTag?: CreatedTag }
 	| { kind: NoteTagDialogKind; tag: NoteTag }
 	| { kind: NoteBulkDialogActionKind; notes: Note[] }
 	| { kind: "createStandaloneTag" }
@@ -52,8 +53,20 @@ export function useNoteDialogHost(): NoteDialogHost {
 	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogPending, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveNoteDialog>()
 
+	// "participants" opens or closes the participants panel beside the note, opening the note first when the entry came
+	// from another note's row.
 	function openNoteDialog(kind: NoteActionDialogKind, note: Note): void {
-		setActiveDialog({ kind, note })
+		if (kind !== "participants") {
+			setActiveDialog({ kind, note })
+
+			return
+		}
+
+		noteParticipantsPanel.toggle(note.uuid)
+
+		if (note.uuid !== selectedNoteUuidFromPath(router.state.location.pathname)) {
+			void navigate({ to: "/notes/$uuid", params: { uuid: note.uuid } })
+		}
 	}
 
 	function openTagDialog(kind: NoteTagDialogKind, tag: NoteTag): void {
@@ -327,13 +340,6 @@ export function useNoteDialogHost(): NoteDialogHost {
 						onConfirm={() => {
 							void handleDeleteTagConfirm(activeDialog.tag)
 						}}
-					/>
-				)
-			case "participants":
-				return (
-					<ParticipantsDialog
-						note={activeDialog.note}
-						onClose={closeActiveDialog}
 					/>
 				)
 			case "history":

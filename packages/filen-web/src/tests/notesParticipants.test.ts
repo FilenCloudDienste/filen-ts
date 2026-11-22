@@ -21,7 +21,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
-import { participantRows } from "@/features/notes/components/participantsDialog.logic"
+import { participantRows } from "@/features/notes/components/noteParticipantsPanel.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainContact } from "@/tests/support/contactFixtures"
 
@@ -148,29 +148,34 @@ describe("setNoteParticipantPermission — patches the LIVE cache row, not a sta
 	})
 })
 
-describe("participantRows — self-exclusion, ordering, and owner/participant view gating", () => {
+describe("participantRows — self row, ordering, and owner/participant view gating", () => {
 	const owner = mockNoteParticipant({ userId: 1n, isOwner: true })
 	const participantA = mockNoteParticipant({ userId: 2n, isOwner: false })
 	const participantB = mockNoteParticipant({ userId: 3n, isOwner: false })
 	const note = mockNote({ ownerId: 1n, participants: [participantA, owner, participantB] })
 
-	it("excludes the viewer's own row entirely (mirrors mobile: self-management stays the menu's own Leave dialog)", () => {
-		expect(participantRows(note, 2n, false).map(r => r.participant.userId)).toEqual([1n, 3n])
+	it("lists the viewer's own row first, flagged as theirs", () => {
+		const rows = participantRows(note, 2n, false)
+
+		expect(rows.map(r => r.participant.userId)).toEqual([2n, 1n, 3n])
+		expect(rows.map(r => r.isSelf)).toEqual([true, false, false])
 	})
 
-	it("a note with no OTHER participants (the solo-owner case) returns an empty list, not a self-row", () => {
-		expect(participantRows(mockNote({ ownerId: 1n, participants: [owner] }), 1n, true)).toEqual([])
+	it("a solo-owner note lists the owner's own row alone", () => {
+		const rows = participantRows(mockNote({ ownerId: 1n, participants: [owner] }), 1n, true)
+
+		expect(rows.map(r => [r.participant.userId, r.isSelf, r.canManage])).toEqual([[1n, true, false]])
 	})
 
-	it("sorts the owner's row first among what remains", () => {
-		expect(participantRows(note, 3n, false).map(r => r.participant.userId)).toEqual([1n, 2n])
+	it("sorts the owner's row right after the viewer's", () => {
+		expect(participantRows(note, 3n, false).map(r => r.participant.userId)).toEqual([3n, 1n, 2n])
 	})
 
-	it("owner viewer: canManage is true on every remaining (non-owner) row", () => {
+	it("owner viewer: canManage on every other row, never on their own", () => {
 		const rows = participantRows(note, 1n, true)
 
-		expect(rows.map(r => r.participant.userId)).toEqual([2n, 3n])
-		expect(rows.every(r => r.canManage)).toBe(true)
+		expect(rows.map(r => r.participant.userId)).toEqual([1n, 2n, 3n])
+		expect(rows.map(r => r.canManage)).toEqual([false, true, true])
 	})
 
 	it("participant viewer: canManage is false on every row, including the owner's", () => {
@@ -179,15 +184,7 @@ describe("participantRows — self-exclusion, ordering, and owner/participant vi
 		expect(rows.every(r => !r.canManage)).toBe(true)
 	})
 
-	it("the owner's row never gets canManage even when it survives another owner-viewer's self-filter", () => {
-		// A third participant viewing an owned note they don't own themselves: the owner's row is
-		// present (not self) but still never manageable — only a genuinely non-owner row ever is.
-		const rows = participantRows(note, 3n, false)
-
-		expect(rows.find(r => r.participant.userId === 1n)?.canManage).toBe(false)
-	})
-
-	it("blocked defaults to false when no blocked-users set is passed (callers predating this field are unaffected)", () => {
+	it("blocked defaults to false when no blocked-users set is passed", () => {
 		const rows = participantRows(note, 1n, true)
 
 		expect(rows.every(r => !r.blocked)).toBe(true)
@@ -209,5 +206,11 @@ describe("participantRows — blocked cross-reference", () => {
 
 		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(true)
 		expect(rows.find(r => r.participant.userId === 1n)?.blocked).toBe(false)
+	})
+
+	it("never flags the viewer's own row, even when their identity is in the set", () => {
+		const blocked = deriveBlockedUsers([{ userId: 3n, email: "regular@x.io" }])
+
+		expect(participantRows(note, 3n, false, blocked).find(r => r.isSelf)?.blocked).toBe(false)
 	})
 })

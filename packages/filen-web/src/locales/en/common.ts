@@ -204,14 +204,8 @@ export const common = {
 	participantsDialogTitle: "Participants",
 	/** Participants dialogs — owner-only button that opens the add-participants picker */
 	participantsAddAction: "Add participants",
-	/** Participants dialogs — accessible label on the crown icon next to the owner's row */
+	/** Participants panels — the label on the owner's row */
 	participantOwnerBadge: "Owner",
-	/** Participants dialogs — accessible label on a row's remove button; {{email}} = the participant's email */
-	participantRemoveAction: "Remove {{email}}",
-	/** Participants dialogs — accessible label on a row's block button; {{email}} = the participant's email */
-	participantBlockAction: "Block {{email}}",
-	/** Participants dialogs — accessible label on a row's unblock button; {{email}} = the participant's email */
-	participantUnblockAction: "Unblock {{email}}",
 	/** Participants dialogs — the blocked-contact record moved (e.g. unblocked in another tab) between render and click */
 	participantBlockStale: "This contact's block status just changed. Please try again.",
 	/** Participants dialogs — remove confirm title */

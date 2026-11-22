@@ -151,7 +151,7 @@ export function noteOffersPinAndFavorite(note: Note): boolean {
 
 // Ids whose dispatch is an unconditional SDK write — offline they can only fail. Read entries stay
 // enabled: export/copyId/copyContent are cache-first reads, and participants/history only OPEN a
-// readable dialog — the mutating controls INSIDE those dialogs carry their own offline gate.
+// readable panel or dialog — the mutating controls INSIDE them carry their own offline gate.
 const OFFLINE_GATED_IDS: ReadonlySet<NoteActionId> = new Set<NoteActionId>([
 	"rename",
 	"duplicate",

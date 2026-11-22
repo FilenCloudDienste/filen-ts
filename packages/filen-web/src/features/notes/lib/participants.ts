@@ -6,7 +6,7 @@ import { contactsNotIn } from "@/features/contacts/components/contactsList.logic
 
 export type { ActionOutcome }
 
-// Note-participant actions — the participants-dialog counterpart to lib/tags.ts, same confirm-then-
+// Note-participant actions — the participants panel's counterpart to lib/tags.ts, same confirm-then-
 // patch shape. Mirrors filen-mobile's notesParticipants.ts semantics exactly (this file's own doc
 // comments name the mobile call each function ports).
 
