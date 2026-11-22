@@ -2,6 +2,7 @@ import { formatBytes } from "@filen/shared"
 import {
 	APP_HELP,
 	APP_HELP_NO_MATCH_NOTE,
+	APP_HELP_UNBOUND,
 	appHelpWords,
 	rankAppHelp,
 	type AppHelpEntry,
@@ -14,11 +15,18 @@ import type { AppKey } from "@/lib/i18n/appKey"
 import { isDesktopApp } from "@/lib/desktop"
 import { LOG_RING_MAX } from "@/lib/log"
 import { accountQueryGet } from "@/queries/account"
+import { parseCombo } from "@filen/shared/keymap"
+import { ALL_ACTIONS } from "@/lib/keymap/actions"
+import { availableOn, CURRENT_PLATFORM, currentKeymapRecord, effectiveCombo, type ActionDef } from "@/lib/keymap/registry"
+import { chordText } from "@/lib/keymap/keyText"
+import { keyboardLayout } from "@/lib/keymap/layout"
+import { SHORTCUT_SCOPE_LABEL_KEYS } from "@/lib/keymap/shortcutsCatalog"
 import type { ToolAdapter } from "@/features/assistant/tools/entities"
 
-// app_help over the registry (@filen/shared/assistant appHelp.ts): the bundled text of each setting the Settings pages
-// show, searched in the app's language and in English. Built on the first call, freed with the conversation; no
-// request.
+// app_help over the registry (@filen/shared/assistant appHelp.ts) and the keymap: the bundled text of each setting the
+// Settings pages show and the name of each keyboard shortcut, searched in the app's language and in English. Built on
+// the first call, freed with the conversation; no request. A shortcut's keys are read at the call, so a key the user
+// changed since shows as changed.
 
 // The Settings sidebar's label of each section.
 const SECTION_LABELS: Readonly<Record<AppHelpSection, AppKey>> = {
@@ -52,8 +60,10 @@ const DESCRIPTION_VALUES: Partial<Record<AppHelpId, () => HelpValues | null>> = 
 	}
 }
 
+type HelpTarget = { kind: "setting"; entry: AppHelpEntry } | { kind: "shortcut"; action: ActionDef }
+
 interface IndexedRow {
-	entry: AppHelpEntry
+	target: HelpTarget
 	words: AppHelpWords[]
 }
 
@@ -80,10 +90,22 @@ function helpIndex(): IndexedRow[] {
 
 		index = {
 			language,
-			rows: APP_HELP.filter(shownHere).map(entry => ({
-				entry,
-				words: languages.map(lng => appHelpWords(searchText(entry.titleKey, lng), searchText(entry.descriptionKey, lng)))
-			}))
+			rows: [
+				...APP_HELP.filter(shownHere).map(entry => ({
+					target: { kind: "setting" as const, entry },
+					words: languages.map(lng => appHelpWords(searchText(entry.titleKey, lng), searchText(entry.descriptionKey, lng)))
+				})),
+				// Every shortcut this platform has, by its name, where it works and its hint.
+				...ALL_ACTIONS.filter(action => availableOn(action, CURRENT_PLATFORM)).map(action => ({
+					target: { kind: "shortcut" as const, action },
+					words: languages.map(lng =>
+						appHelpWords(
+							searchText(action.descriptionKey, lng),
+							`${searchText(SHORTCUT_SCOPE_LABEL_KEYS[action.scope], lng)} ${action.hintKey === undefined ? "" : searchText(action.hintKey, lng)}`
+						)
+					)
+				}))
+			]
 		}
 	}
 
@@ -102,6 +124,15 @@ function description(entry: AppHelpEntry): string | null {
 	return values === null ? null : i18n.t(entry.descriptionKey, { defaultValue: "", ...values })
 }
 
+// A shortcut's keys in effect now (the user's own binding, less single keys while those are off), as the app shows them
+// on this platform: "⌘⇧Z" on a Mac, "Ctrl+Shift+Z" elsewhere; alternatives joined by "or".
+export function shortcutKeys(action: ActionDef): string | null {
+	const chords = parseCombo(effectiveCombo(action, currentKeymapRecord(), CURRENT_PLATFORM))
+	const layout = keyboardLayout()
+
+	return chords.length === 0 ? null : chords.map(chord => chordText(chord, layout)).join(" or ")
+}
+
 export const appHelpTool: ToolAdapter = (input, scope) => {
 	const rows = rankAppHelp(helpIndex(), String(input["query"]), row => row.words)
 	const settings = i18n.t("common:settings")
@@ -112,7 +143,21 @@ export const appHelpTool: ToolAdapter = (input, scope) => {
 
 	return Promise.resolve({
 		value: {
-			results: rows.map(({ entry }) => {
+			results: rows.map(({ target }) => {
+				if (target.kind === "shortcut") {
+					const { action } = target
+
+					return {
+						shortcut: i18n.t(action.descriptionKey, { defaultValue: "" }),
+						keys: shortcutKeys(action) ?? APP_HELP_UNBOUND,
+						where: i18n.t(SHORTCUT_SCOPE_LABEL_KEYS[action.scope]),
+						...(action.hintKey === undefined ? {} : { when: i18n.t(action.hintKey, { defaultValue: "" }) }),
+						// Where it can be changed.
+						route: "settings_keyboard"
+					}
+				}
+
+				const { entry } = target
 				const title = i18n.t(entry.titleKey, { defaultValue: "" })
 				const text = description(entry)
 

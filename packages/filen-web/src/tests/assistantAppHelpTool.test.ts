@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { RegisteredRouter } from "@tanstack/react-router"
-import { assistantToolByName, parseToolInput, type AssistantToolFailure } from "@filen/shared/assistant"
+import { APP_HELP_UNBOUND, assistantToolByName, parseToolInput, type AssistantToolFailure } from "@filen/shared/assistant"
 
 const desktop = vi.hoisted(() => ({ app: false }))
 
@@ -13,6 +13,23 @@ vi.mock("@/lib/log", async importOriginal => ({
 	...(await importOriginal<typeof import("@/lib/log")>()),
 	log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), dump: () => [] }
 }))
+// The keymap's saved overrides, in memory.
+const { kvStore } = vi.hoisted(() => ({ kvStore: new Map<string, unknown>() }))
+
+vi.mock("@/lib/storage/adapter", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/storage/adapter")>()),
+	kvGetJson: (key: string) => Promise.resolve(kvStore.get(key) ?? null),
+	kvSetJson: (key: string, value: unknown) => {
+		kvStore.set(key, value)
+
+		return Promise.resolve()
+	},
+	kvDelete: (key: string) => {
+		kvStore.delete(key)
+
+		return Promise.resolve()
+	}
+}))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }))
 
 const { queryClient } = await import("@/queries/client")
@@ -20,6 +37,7 @@ const { ACCOUNT_QUERY_KEY } = await import("@/queries/account")
 const { setAssistantRouter } = await import("@/features/assistant/tools/navigation")
 const { createAssistantToolExecutor } = await import("@/features/assistant/tools/executor")
 const { takeSettingsHighlight } = await import("@/lib/settingsHighlight")
+const { setUserCombo, unbindAction } = await import("@/lib/keymap/registry")
 
 type Executor = ReturnType<typeof createAssistantToolExecutor>
 type Outcome = Awaited<ReturnType<Executor["execute"]>> | AssistantToolFailure
@@ -119,6 +137,47 @@ describe("app_help", () => {
 
 		expect(held?.description).toContain("2 KiB")
 		expect(held?.description).not.toContain("{{")
+	})
+})
+
+describe("app_help shortcuts", () => {
+	interface ShortcutResult {
+		shortcut: string
+		keys: string
+		where: string
+		route: string
+	}
+
+	async function shortcut(query: string, name: string): Promise<ShortcutResult | undefined> {
+		const outcome = await call("app_help", { query })
+
+		if (!outcome.ok) {
+			throw new Error(outcome.error)
+		}
+
+		return (outcome.result as { results: ShortcutResult[] }).results.find(
+			result => result.shortcut === name && result.where === "Cloud Drive"
+		)
+	}
+
+	it("finds a shortcut by its name with its keys on this platform, where it works and where to change it", async () => {
+		expect(await shortcut("shortcut to rename in Cloud Drive", "Rename")).toEqual({
+			shortcut: "Rename",
+			keys: "F2",
+			where: "Cloud Drive",
+			route: "settings_keyboard"
+		})
+	})
+
+	it("reports the keys the user set, read at the call", async () => {
+		await help("rename")
+		await setUserCombo("drive.rename", "mod+shift+r")
+
+		expect((await shortcut("rename in cloud drive", "Rename"))?.keys).toBe("Ctrl+Shift+R")
+
+		await unbindAction("drive.rename")
+
+		expect((await shortcut("rename in cloud drive", "Rename"))?.keys).toBe(APP_HELP_UNBOUND)
 	})
 })
 

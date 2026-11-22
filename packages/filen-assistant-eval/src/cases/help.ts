@@ -166,4 +166,28 @@ const ROUTER_HOW_TO: EvalCase[] = HOW_TO.map(([lang, prompt], index) => ({
 	expectsText: true
 }))
 
-export const HELP_CASES: EvalCase[] = [...SIMPLE, ...MULTI_STEP, ...IRRELEVANCE, ...ROUTER_OPEN, ...ROUTER_HOW_TO]
+// Keyboard shortcuts: looked up with their current keys (fixture.ts SHORTCUT_ROWS), which the reply names.
+const SHORTCUTS: readonly (readonly [Language, string, readonly string[]])[] = [
+	["en", "What's the keyboard shortcut to rename a file?", ["f2"]],
+	["en", "Is there a shortcut to show or hide the sidebar?", ["ctrl+\\"]],
+	["de", "Mit welcher Tastenkombination erstelle ich eine neue Notiz?", ["n"]],
+	["es", "¿Qué atajo de teclado abre la lista de atajos?", ["shift+/"]],
+	["fr", "Quel raccourci clavier duplique une note ?", ["ctrl+shift+d"]],
+	["ru", "Какое сочетание клавиш переключает тему?", ["d"]],
+	["zh", "用什么快捷键打开助手？", ["q"]],
+	["ja", "ノートを検索するショートカットキーは？", ["ctrl+f"]]
+]
+
+const SHORTCUT_ASKS: EvalCase[] = SHORTCUTS.map(([lang, prompt, keys], index) => ({
+	id: `help-shortcut-${String(index + 1)}-${lang}`,
+	category: "simple",
+	lang,
+	prompt,
+	routes: ["help"],
+	calls: [{ tool: "app_help" }],
+	// A single-letter key is too short to find in a reply; those cases grade the lookup only.
+	...(keys.every(key => key.length > 1) ? { answerIncludes: [keys] } : {}),
+	expectsText: true
+}))
+
+export const HELP_CASES: EvalCase[] = [...SIMPLE, ...MULTI_STEP, ...IRRELEVANCE, ...ROUTER_OPEN, ...ROUTER_HOW_TO, ...SHORTCUT_ASKS]

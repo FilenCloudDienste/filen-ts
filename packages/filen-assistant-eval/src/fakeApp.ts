@@ -68,6 +68,7 @@ import {
 	createFixtureState,
 	HELP_ROWS,
 	HELP_SECTION_LABELS,
+	SHORTCUT_ROWS,
 	type AppContext,
 	type AppState,
 	type DriveItem,
@@ -2205,14 +2206,20 @@ export class FakeApp {
 			}
 
 			case "app_help": {
-				const shown = HELP_ROWS.flatMap(row => {
+				// Settings and shortcuts in one ranking, as the app's index holds them.
+				const settings = HELP_ROWS.flatMap(row => {
 					const entry = APP_HELP.find(candidate => candidate.id === row.id)
 
 					return entry !== undefined && (entry.platform === undefined || entry.platform === (this.desktop ? "desktop" : "web"))
-						? [{ row, entry, words: [appHelpWords(row.title, row.description)] }]
+						? [{ kind: "setting" as const, row, entry, words: [appHelpWords(row.title, row.description)] }]
 						: []
 				})
-				const found = rankAppHelp(shown, str("query"), candidate => candidate.words)
+				const shortcuts = SHORTCUT_ROWS.map(row => ({
+					kind: "shortcut" as const,
+					row,
+					words: [appHelpWords(row.shortcut, row.where)]
+				}))
+				const found = rankAppHelp([...settings, ...shortcuts], str("query"), candidate => candidate.words)
 
 				if (found.length === 0) {
 					return {
@@ -2222,7 +2229,15 @@ export class FakeApp {
 				}
 
 				return {
-					results: found.map(({ row, entry }) => {
+					results: found.map(found => {
+						if (found.kind === "shortcut") {
+							return {
+								...found.row,
+								route: "settings_keyboard"
+							}
+						}
+
+						const { row, entry } = found
 						const handle = this.helpHandles.get(row.id) ?? `h${String(this.helpHandles.size + 1)}`
 
 						this.helpHandles.set(row.id, handle)

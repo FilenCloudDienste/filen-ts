@@ -100,6 +100,24 @@ const ASSISTANT_RESTRICTED_PATHS = [
 	{ name: "@/lib/desktop", importNames: ["desktopBridge"], message: ASSISTANT_FORBIDDEN },
 	{ name: "@/features/sync/lib/syncStore", importNames: ["syncApi", "openAddPair", "closeAddPair"], message: ASSISTANT_FORBIDDEN },
 	{ name: "@/features/mounts/lib/mountsStore", importNames: ["mountsApi", "confirmMountsSignOut"], message: ASSISTANT_FORBIDDEN },
+	// app_help reads the keymap for a shortcut's keys; rebinding them is the user's, in Settings.
+	{
+		name: "@/lib/keymap/registry",
+		importNames: [
+			"registerAction",
+			"updateOverrides",
+			"setUserCombo",
+			"clearUserCombo",
+			"unbindAction",
+			"resetOverrides",
+			"setCharacterKeys",
+			"bindKeymapAccount",
+			"beginRecording",
+			"endRecording"
+		],
+		message: ASSISTANT_FORBIDDEN
+	},
+	{ name: "@/lib/keymap/recording", message: ASSISTANT_FORBIDDEN },
 	{ name: "@/lib/logout", message: ASSISTANT_FORBIDDEN },
 	{ name: "@/features/shell/lib/performLogout", message: ASSISTANT_FORBIDDEN },
 	{ name: "@/lib/sdk/client", message: ASSISTANT_RAW_SDK },

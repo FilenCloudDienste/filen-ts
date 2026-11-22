@@ -47,6 +47,17 @@ describe("app_help in the fake app", () => {
 		expect(app.state.opened).toBe("help:twoFactor")
 	})
 
+	it("finds keyboard shortcuts with their keys among the settings", () => {
+		const outcome = new FakeApp().execute({ name: "app_help", args: { query: "shortcut to duplicate a note" } })
+
+		expect(outcome.ok && (outcome.result as { results: unknown[] }).results[0]).toEqual({
+			shortcut: "Duplicate note",
+			where: "Notes",
+			keys: "Ctrl+Shift+D",
+			route: "settings_keyboard"
+		})
+	})
+
 	it("refuses a help handle no result showed", () => {
 		expect(new FakeApp().execute({ name: "open_route", args: { route: "settings", help: "h4" } })).toMatchObject({
 			ok: false,

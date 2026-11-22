@@ -447,6 +447,9 @@ export const APP_HELP_RESULTS = 5
 export const APP_HELP_NO_MATCH_NOTE =
 	"No setting matches these words. Answer from what you know about the app only if you are sure; otherwise say you could not find it."
 
+// A keyboard shortcut result's keys when the shortcut has none.
+export const APP_HELP_UNBOUND = "not set"
+
 // A row's words in one language, its title's and its description's, folded as a query's are.
 export type AppHelpWords = { readonly title: readonly string[]; readonly description: readonly string[] }
 

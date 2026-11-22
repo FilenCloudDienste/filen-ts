@@ -60,6 +60,8 @@ const FORBIDDEN = [
 	'import { restoreVersion } from "@/features/drive/lib/actions"',
 	'import { restoreNoteFromHistory } from "@/features/notes/lib/history"',
 	'import { clearSession, persistSession, resumeSession, broadcastAuth } from "@/lib/sdk/session"',
+	'import { setUserCombo, updateOverrides, resetOverrides, setCharacterKeys } from "@/lib/keymap/registry"',
+	'import { commitRecordedChord } from "@/lib/keymap/recording"',
 	'import { runLogout } from "@/lib/logout"',
 	'import { performLogout } from "@/features/shell/lib/performLogout"',
 	'import { ChangePassword } from "@/features/settings/components/security/changePassword"',
@@ -77,7 +79,7 @@ describe("assistant import restrictions", () => {
 			const messages = await lintImports(file, FORBIDDEN.join("\n"))
 
 			// One per banned name, or per statement for a module banned whole; trashItems passes.
-			expect(messages).toHaveLength(39)
+			expect(messages).toHaveLength(44)
 			expect(messages.every(message => message.includes("irreversible or security-critical"))).toBe(true)
 
 			for (const line of FORBIDDEN) {
@@ -94,7 +96,8 @@ describe("assistant import restrictions", () => {
 					'import { trashItems, restoreItems } from "@/features/drive/lib/actions"',
 					'import { restoreNote } from "@/features/notes/lib/actions"',
 					'import { restoreNotes } from "@/features/notes/lib/bulk"',
-					'import { loadDraft } from "@/features/chats/lib/drafts"'
+					'import { loadDraft } from "@/features/chats/lib/drafts"',
+					'import { currentKeymapRecord, effectiveCombo } from "@/lib/keymap/registry"'
 				].join("\n")
 			)
 		).resolves.toEqual([])

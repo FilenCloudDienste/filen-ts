@@ -884,6 +884,26 @@ export const HELP_ROWS: readonly HelpRow[] = [
 	{ id: "downloadLocation", title: "Save downloads to", description: "Where downloaded files and directories are saved." }
 ]
 
+// A sample of the keymap's shortcuts as app_help reports them on Windows and Linux with the default keys: the English
+// name, where it works, and the keys.
+export type ShortcutRow = {
+	shortcut: string
+	where: string
+	keys: string
+}
+
+export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
+	{ shortcut: "Keyboard shortcuts", where: "Everywhere", keys: "Shift+/" },
+	{ shortcut: "Toggle theme", where: "Everywhere", keys: "D" },
+	{ shortcut: "Assistant", where: "Everywhere", keys: "Q" },
+	{ shortcut: "Show or hide the sidebar", where: "Everywhere", keys: "Ctrl+\\" },
+	{ shortcut: "Rename", where: "Cloud Drive", keys: "F2" },
+	{ shortcut: "Select all", where: "Cloud Drive", keys: "Ctrl+A" },
+	{ shortcut: "New note", where: "Notes", keys: "N" },
+	{ shortcut: "Duplicate note", where: "Notes", keys: "Ctrl+Shift+D" },
+	{ shortcut: "Search notes", where: "Notes", keys: "Ctrl+F" }
+]
+
 // The Settings sidebar's English section labels.
 export const HELP_SECTION_LABELS: Readonly<Record<AppHelpSection, string>> = {
 	account: "Account",
