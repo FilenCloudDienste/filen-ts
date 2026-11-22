@@ -4,7 +4,13 @@ import type { Language } from "./types"
 // Selection transforms (transformText in @filen/shared/assistant): the text a user selected in an editor and the
 // edit asked for. Fictional people, places and amounts throughout.
 
-export const TRANSFORM_CATEGORIES = ["transform_fidelity", "transform_shorten", "transform_translate", "transform_injection"] as const
+export const TRANSFORM_CATEGORIES = [
+	"transform_fidelity",
+	"transform_shorten",
+	"transform_translate",
+	"transform_injection",
+	"transform_lines"
+] as const
 
 export type TransformCategory = (typeof TRANSFORM_CATEGORIES)[number]
 
@@ -27,6 +33,8 @@ export type TransformCase = {
 	marker?: string
 	// Injection: what an answer to the planted question holds and the selection does not.
 	answers?: readonly string[]
+	// Lines: the output keeps the selection's line count (each line a slide paragraph keeping its level and bullet).
+	lines?: number
 }
 
 type Draft = {
@@ -721,6 +729,167 @@ const INJECTION: readonly InjectionDraft[] = [
 	}
 ]
 
+// 24, two per language, one rewrite and one translation each: a slide body's 3-6 bulleted lines (one paragraph each),
+// which a slide transform puts back line by line, so the line count must hold.
+const LINES: readonly (Omit<Draft, "kind"> & { kind: "rewrite" | "translate"; to?: TransformLanguage })[] = [
+	{
+		lang: "en",
+		kind: "rewrite",
+		text: "• Q3 sales up 12% in the Northfield region\n• Priya Raman takes over the Halden account from 4 March\n• 3 new hires start at the Leeds office next month\n• budget review with Otto Fenwick moved to 18 April",
+		keep: ["12", "Northfield", "Priya Raman", "Halden", "Otto Fenwick", "18"]
+	},
+	{
+		lang: "en",
+		kind: "translate",
+		to: "es",
+		text: "- Kick-off meeting with 8 partner schools\n- 250 tablets delivered by the end of May\n- Training for 40 teachers in two rounds\n- Final report due after 6 months",
+		keep: ["8", "250", "40", "6"]
+	},
+	{
+		lang: "de",
+		kind: "rewrite",
+		text: "1. Umsatz im Werk Kappeln um 7 % gestiegen\n2. Lena Hofstätter leitet ab Juli das Team Logistik\n3. Neue Halle in Wittenbrück fertig bis Oktober\n4. 23 offene Stellen, vor allem in der Montage",
+		keep: ["Kappeln", "7", "Lena Hofstätter", "Wittenbrück", "23"]
+	},
+	{
+		lang: "de",
+		kind: "translate",
+		to: "fr",
+		text: "• Sommerfest am Samstag im Stadtpark\n• 120 Gäste haben schon zugesagt\n• Eintritt 5 Euro, Kinder frei\n• Aufbau ab 14 Uhr durch 9 Helfer",
+		keep: ["120", "5", "14", "9"]
+	},
+	{
+		lang: "es",
+		kind: "rewrite",
+		text: "• Inauguración de la sede de Valdemora en mayo\n• Carmen Ibarra dirigirá el equipo de 15 personas\n• Presupuesto inicial: 48.000 euros\n• Primeros clientes: Bodegas Larrumbe y Grupo Tesalia",
+		keep: ["Valdemora", "Carmen Ibarra", "15", "48.000", "Bodegas Larrumbe", "Grupo Tesalia"]
+	},
+	{
+		lang: "es",
+		kind: "translate",
+		to: "pt",
+		text: "- Taller de fotografía para principiantes\n- 6 sesiones los martes por la tarde\n- Grupo máximo de 12 personas\n- Precio: 90 euros por persona",
+		keep: ["6", "12", "90"]
+	},
+	{
+		lang: "fr",
+		kind: "rewrite",
+		text: "• Lancement de l'application Marelle le 14 octobre\n• 320 utilisateurs inscrits pendant la phase de test\n• Équipe menée par Hugo Delaunay et Inès Ferrand\n• Prochaine étape : version pour tablettes en janvier",
+		keep: ["Marelle", "14", "320", "Hugo Delaunay", "Inès Ferrand"]
+	},
+	{
+		lang: "fr",
+		kind: "translate",
+		to: "de",
+		text: "1. Rénovation de la bibliothèque de Saint-Arlès\n2. Durée des travaux : 8 mois\n3. 2 salles de lecture fermées pendant l'été\n4. Réouverture prévue avec 600 nouveaux livres",
+		keep: ["8", "2", "600"]
+	},
+	{
+		lang: "pt",
+		kind: "rewrite",
+		text: "• Reunião com a equipa de Vila Serrana na sexta-feira\n• Beatriz Monteiro apresenta os resultados de março\n• Vendas cresceram 18% face ao ano anterior\n• Abertura de 2 novas lojas em Campo Ventoso",
+		keep: ["Vila Serrana", "Beatriz Monteiro", "18", "2", "Campo Ventoso"]
+	},
+	{
+		lang: "pt",
+		kind: "translate",
+		to: "ja",
+		text: "- Feira do livro na praça central\n- 35 editoras confirmadas\n- Entrada gratuita nos 3 dias\n- Sessões de autógrafos às 16 horas",
+		keep: ["35", "3", "16"]
+	},
+	{
+		lang: "ru",
+		kind: "rewrite",
+		text: "• Открытие склада в Северогорске в сентябре\n• Руководитель проекта: Анна Белозёрова\n• 45 сотрудников переходят из старого офиса\n• Бюджет на переезд: 900 тысяч рублей",
+		keep: ["Северогорск", "Анна Белозёрова", "45", "900"]
+	},
+	{
+		lang: "ru",
+		kind: "translate",
+		to: "tr",
+		text: "- Зимний турнир по шахматам\n- 64 участника из 7 городов\n- Призовой фонд 300 тысяч рублей\n- Финал пройдёт 28 января",
+		keep: ["64", "7", "300", "28"]
+	},
+	{
+		lang: "tr",
+		kind: "rewrite",
+		text: "• Ege bölgesinde satışlar %9 arttı\n• Murat Kaplanoğlu haziran ayından beri Kuzeykent şubesini yönetiyor\n• 14 yeni bayi ile sözleşme imzalandı\n• Yıl sonu hedefi: 2 yeni depo",
+		keep: ["9", "Murat Kaplanoğlu", "Kuzeykent", "14", "2"]
+	},
+	{
+		lang: "tr",
+		kind: "translate",
+		to: "en",
+		text: "1. Mahalle kütüphanesi yeniden açılıyor\n2. 400 yeni kitap rafta\n3. Haftada 5 gün açık\n4. Çocuklar için her cumartesi 2 etkinlik",
+		keep: ["400", "5", "2"]
+	},
+	{
+		lang: "ar",
+		kind: "rewrite",
+		text: "• افتتاح فرع جديد في مدينة الوادي الأخضر في مارس\n• المدير الجديد: سامي الحداد\n• توظيف 25 موظفًا خلال الربع الأول\n• ميزانية الفرع 150 ألف دينار",
+		keep: ["الوادي الأخضر", "سامي الحداد", "25", "150"]
+	},
+	{
+		lang: "ar",
+		kind: "translate",
+		to: "hi",
+		text: "- مسابقة القراءة للمدارس\n- 30 مدرسة مشاركة\n- 4 جوائز للفائزين\n- الحفل الختامي في 20 مايو",
+		keep: ["30", "4", "20"]
+	},
+	{
+		lang: "hi",
+		kind: "rewrite",
+		text: "• नवगढ़ शाखा का उद्घाटन अगस्त में\n• टीम की प्रमुख: कविता मल्होत्रा\n• पहले महीने में 60 नए ग्राहक\n• अगला लक्ष्य: 3 और शाखाएँ",
+		keep: ["नवगढ़", "कविता मल्होत्रा", "60", "3"]
+	},
+	{
+		lang: "hi",
+		kind: "translate",
+		to: "id",
+		text: "- गाँव में स्वास्थ्य शिविर\n- 3 दिन तक मुफ़्त जाँच\n- 12 डॉक्टर और 20 स्वयंसेवक\n- लगभग 500 लोगों के आने की उम्मीद",
+		keep: ["3", "12", "20", "500"]
+	},
+	{
+		lang: "id",
+		kind: "rewrite",
+		text: "• Peluncuran Kopi Sentosa di Bandar Lestari bulan Juni\n• Penanggung jawab: Rina Wulandari\n• Target penjualan 8.000 bungkus per bulan\n• 4 mitra distribusi baru di Sumatra",
+		keep: ["Kopi Sentosa", "Bandar Lestari", "Rina Wulandari", "8.000", "4"]
+	},
+	{
+		lang: "id",
+		kind: "translate",
+		to: "zh",
+		text: "1. Lomba lari amal di taman kota\n2. Jarak 5 dan 10 kilometer\n3. Sudah 700 peserta terdaftar\n4. Semua hasil untuk 2 panti asuhan",
+		keep: ["5", "10", "700", "2"]
+	},
+	{
+		lang: "zh",
+		kind: "rewrite",
+		text: "• 青林分公司第三季度营收增长15%\n• 陈思远自7月起负责华东区销售\n• 新仓库预计11月投入使用\n• 年底前招聘20名工程师",
+		keep: ["青林", "15", "陈思远", "11", "20"]
+	},
+	{
+		lang: "zh",
+		kind: "translate",
+		to: "ru",
+		text: "- 社区读书会每周六举行\n- 目前有45名会员\n- 每月推荐3本新书\n- 年会定于12月举办",
+		keep: ["45", "3", "12"]
+	},
+	{
+		lang: "ja",
+		kind: "rewrite",
+		text: "• 桜川工場の生産量が前年比8%増加\n• 4月から山本美咲さんが品質管理を担当\n• 新ラインの導入費用は約300万円\n• 次回の見学会は6月12日",
+		keep: ["桜川", "8", "山本美咲", "300", "12"]
+	},
+	{
+		lang: "ja",
+		kind: "translate",
+		to: "en",
+		text: "1. 地域清掃ボランティアの募集\n2. 年に6回、日曜日に実施\n3. 参加者は毎回約50名\n4. 軍手とごみ袋は無料で配布",
+		keep: ["6", "50"]
+	}
+]
+
 // Ids number the cases of a category per language, in the order written.
 function numbered<T extends { lang: Language }>(
 	items: readonly T[],
@@ -777,5 +946,15 @@ export const TRANSFORM_CASES: readonly TransformCase[] = [
 		...(marker === undefined ? {} : { marker }),
 		...(answers === undefined ? {} : { answers }),
 		...(keep === undefined ? {} : { keep })
+	})),
+	...numbered(LINES, "lines", ({ lang, kind, to, text, keep }, id) => ({
+		id,
+		category: "transform_lines",
+		lang,
+		kind,
+		text,
+		language: to ?? lang,
+		keep,
+		lines: text.split("\n").length
 	}))
 ]

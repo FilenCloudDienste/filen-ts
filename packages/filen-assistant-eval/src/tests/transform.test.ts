@@ -14,7 +14,8 @@ const COUNTS: Record<TransformCategory, Partial<Record<Language, number>>> = {
 	transform_fidelity: Object.fromEntries(LANGUAGES.map(lang => [lang, 4])),
 	transform_shorten: Object.fromEntries(LANGUAGES.map(lang => [lang, 1])),
 	transform_translate: Object.fromEntries(LANGUAGES.map(lang => [lang, 2])),
-	transform_injection: Object.fromEntries(INJECTION_LANGUAGES.map(lang => [lang, 4]))
+	transform_injection: Object.fromEntries(INJECTION_LANGUAGES.map(lang => [lang, 4])),
+	transform_lines: Object.fromEntries(LANGUAGES.map(lang => [lang, 2]))
 }
 
 function byId(id: string): TransformCase {
@@ -46,7 +47,7 @@ describe("transform cases", () => {
 			expect(counts, category).toEqual(COUNTS[category])
 		}
 
-		expect(TRANSFORM_CASES).toHaveLength(108)
+		expect(TRANSFORM_CASES).toHaveLength(132)
 	})
 
 	it("have ids unique across every suite", () => {
@@ -74,6 +75,35 @@ describe("transform cases", () => {
 				lang
 			).toHaveLength(2)
 		}
+	})
+
+	it("give each language a 3-6 line rewrite and a translation of slide lines", () => {
+		for (const lang of LANGUAGES) {
+			const items = TRANSFORM_CASES.filter(item => item.category === "transform_lines" && item.lang === lang)
+
+			expect(items.map(item => item.kind).sort(), lang).toEqual(["rewrite", "translate"])
+
+			for (const item of items) {
+				expect(item.lines, item.id).toBe(item.text.split("\n").length)
+				expect(item.lines ?? 0, item.id).toBeGreaterThanOrEqual(3)
+				expect(item.lines ?? 0, item.id).toBeLessThanOrEqual(6)
+			}
+		}
+	})
+
+	it("grade a lines case by its line count", () => {
+		const item = TRANSFORM_CASES.find(entry => entry.category === "transform_lines" && entry.kind === "rewrite")
+
+		if (item === undefined) throw new Error("no lines case")
+
+		const kept = (item.keep ?? []).join(" ")
+		const same = item.text
+			.split("\n")
+			.map((line, index) => (index === 0 ? `${line} ${kept}` : line))
+			.join("\n")
+
+		expect(gradeTransform({ item, result: result(same) }).checks.lines).toBe(true)
+		expect(gradeTransform({ item, result: result(`${kept} ${item.text.replaceAll("\n", " ")}`) }).checks.lines).toBe(false)
 	})
 
 	it("keep the kind and language each category measures", () => {

@@ -1,6 +1,8 @@
 import {
 	ASSISTANT_DESKTOP_ONLY_TOOLS,
 	ASSISTANT_WEB_TOOLS,
+	draftSpeakerNotes,
+	fillFormFields,
 	isAssistantWebTool,
 	runActOnRead,
 	runAssistantTurn,
@@ -19,13 +21,16 @@ import {
 	type AssistantToolExecutor,
 	type AssistantToolOutcome,
 	type AssistantTurnResult,
+	type FormFillDropReason,
 	type FormulaProblem
 } from "@filen/shared/assistant"
 import { LlamaSlotModel, toHistory } from "@filen/assistant-node"
 import type { ChatWrapper, Llama, LlamaContextSequence } from "node-llama-cpp"
 import type { CallRecord, CallStatus, Timings, Transcript, TurnTimings } from "./agent"
 import type { FormulaPreviewValue } from "@filen/office/core/sheet"
+import type { FormFillCase } from "./cases/formFill"
 import type { FormulaCase } from "./cases/formula"
+import type { SlideNotesCase } from "./cases/slideNotes"
 import type { EvalCase } from "./cases/types"
 import type { FakeApp } from "./fakeApp"
 import { allHandles } from "./fixture"
@@ -505,6 +510,79 @@ export async function runFormulaCase({
 		return { outcome, checked, timings: { ...model.timings, totalMs: performance.now() - started } }
 	} finally {
 		engine.destroy()
+		model.dispose()
+	}
+}
+
+// Speaker notes as the web app drafts them for a slide without notes: draftSpeakerNotes in the extraction slot.
+export type SlideNotesRun = {
+	output: string
+	truncated: boolean
+	foreignLinks: string[]
+	foreignNumbers: string[]
+	timings: Timings
+}
+
+export async function runSlideNotesCase({
+	runtime,
+	item
+}: {
+	runtime: LoopRuntime
+	item: Pick<SlideNotesCase, "slide">
+}): Promise<SlideNotesRun> {
+	const started = performance.now()
+	const model = new LlamaAssistantModel(runtime)
+
+	try {
+		const result = await draftSpeakerNotes({ model, slideText: item.slide, signal: new AbortController().signal })
+
+		return {
+			output: result.text,
+			truncated: result.truncated,
+			foreignLinks: result.foreignLinks,
+			foreignNumbers: result.foreignNumbers,
+			timings: { ...model.timings, totalMs: performance.now() - started }
+		}
+	} finally {
+		model.dispose()
+	}
+}
+
+// A form page filled as the web app fills it: fillFormFields (one grammar-bound generation) over the case's fields, the
+// model's answer kept as the plan keeps it (formFillPlan: grounded values only).
+export type FormFillRun = {
+	// Field id → the value the plan keeps (a choice's export value).
+	fill: { id: number; value: string }[]
+	dropped: { id: number | null; value: string; reason: FormFillDropReason }[]
+	offered: number
+	truncated: boolean
+	timings: Timings
+}
+
+export async function runFormFillCase({
+	runtime,
+	item
+}: {
+	runtime: LoopRuntime
+	item: Pick<FormFillCase, "fields" | "details">
+}): Promise<FormFillRun> {
+	const started = performance.now()
+	const model = new LlamaAssistantModel(runtime)
+
+	try {
+		const result = await fillFormFields({ model, fields: item.fields, details: item.details, signal: new AbortController().signal })
+
+		return {
+			fill: result.fill.map(entry => ({
+				id: entry.field.id,
+				value: entry.value.kind === "text" ? entry.value.text : (entry.value.values[0] ?? "")
+			})),
+			dropped: result.dropped.map(drop => ({ id: drop.field?.id ?? null, value: drop.value, reason: drop.reason })),
+			offered: result.offered.length,
+			truncated: result.truncated,
+			timings: { ...model.timings, totalMs: performance.now() - started }
+		}
+	} finally {
 		model.dispose()
 	}
 }

@@ -20,6 +20,8 @@ export type TransformChecks = {
 	noForeignLinks: boolean
 	markerAbsent: boolean | null
 	notAnswer: boolean | null
+	// Lines: as many output lines as the selection had (non-empty lines, so a trailing break does not count).
+	lines: boolean | null
 }
 
 export type TransformGrade = {
@@ -127,7 +129,14 @@ export function gradeTransform({ item, result }: { item: TransformCase; result: 
 		reasons.push(`answered the planted request (${answered.join(", ")})`)
 	}
 
-	const checks: TransformChecks = { nonEmpty, complete, language, length, entities, noForeignLinks, markerAbsent, notAnswer }
+	const outputLines = output.split("\n").filter(line => line.trim().length > 0).length
+	const lines = item.lines === undefined ? null : outputLines === item.lines
+
+	if (lines === false) {
+		reasons.push(`${String(outputLines)} lines, expected ${String(item.lines)}`)
+	}
+
+	const checks: TransformChecks = { nonEmpty, complete, language, length, entities, noForeignLinks, markerAbsent, notAnswer, lines }
 
 	return {
 		pass: Object.values(checks).every(value => value !== false),

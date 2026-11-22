@@ -4,6 +4,8 @@ import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
 import { FORMULA_CASES, FORMULA_CATEGORIES } from "./cases/formula"
 import { TRANSFORM_CASES, TRANSFORM_CATEGORIES } from "./cases/transform"
+import { SLIDE_NOTES_CASES, SLIDE_NOTES_CATEGORIES } from "./cases/slideNotes"
+import { FORM_FILL_CASES, FORM_FILL_CATEGORIES } from "./cases/formFill"
 import { CATEGORIES, LANGUAGES } from "./cases/types"
 import type { EvalPreset } from "./worker"
 
@@ -24,16 +26,31 @@ export type RunSelection = {
 	injectionCaseIds: string[]
 	transformCaseIds: string[]
 	formulaCaseIds: string[]
+	slideNotesCaseIds: string[]
+	formFillCaseIds: string[]
 }
 
-const SUITES = ["main", "injection", "transform", "formula", "all"]
+const SUITES = ["main", "injection", "transform", "formula", "slide_notes", "form_fill", "all"]
 
 const ALL_PRESETS: readonly string[] = [...Object.keys(LOOP_PRESETS), ...Object.keys(MITIGATION_PRESETS)]
 
-// --categories names main-, transform- and formula-suite categories alike.
-const ALL_CATEGORIES: readonly string[] = [...CATEGORIES, ...TRANSFORM_CATEGORIES, ...FORMULA_CATEGORIES]
+// --categories names main-, transform-, formula-, slide_notes- and form_fill-suite categories alike.
+const ALL_CATEGORIES: readonly string[] = [
+	...CATEGORIES,
+	...TRANSFORM_CATEGORIES,
+	...FORMULA_CATEGORIES,
+	...SLIDE_NOTES_CATEGORIES,
+	...FORM_FILL_CATEGORIES
+]
 
-const ALL_CASE_IDS: readonly string[] = [...EVAL_CASES, ...INJECTION_CASES, ...TRANSFORM_CASES, ...FORMULA_CASES].map(item => item.id)
+const ALL_CASE_IDS: readonly string[] = [
+	...EVAL_CASES,
+	...INJECTION_CASES,
+	...TRANSFORM_CASES,
+	...FORMULA_CASES,
+	...SLIDE_NOTES_CASES,
+	...FORM_FILL_CASES
+].map(item => item.id)
 
 export function list(value: string | undefined): string[] | undefined {
 	return value === undefined
@@ -102,8 +119,12 @@ export function resolveRun(values: RunValues): RunSelection {
 	const injectionCaseIds = inSuite("injection") ? keep(INJECTION_CASES, () => true) : []
 	const transformCaseIds = inSuite("transform") ? keep(TRANSFORM_CASES, inCategories) : []
 	const formulaCaseIds = inSuite("formula") ? keep(FORMULA_CASES, inCategories) : []
+	const slideNotesCaseIds = inSuite("slide_notes") ? keep(SLIDE_NOTES_CASES, inCategories) : []
+	const formFillCaseIds = inSuite("form_fill") ? keep(FORM_FILL_CASES, inCategories) : []
 
-	if (mainCaseIds.length === 0 && injectionCaseIds.length === 0 && transformCaseIds.length === 0 && formulaCaseIds.length === 0) {
+	if (
+		[mainCaseIds, injectionCaseIds, transformCaseIds, formulaCaseIds, slideNotesCaseIds, formFillCaseIds].every(ids => ids.length === 0)
+	) {
 		throw new Error("The selection keeps no case")
 	}
 
@@ -114,6 +135,8 @@ export function resolveRun(values: RunValues): RunSelection {
 		mainCaseIds,
 		injectionCaseIds,
 		transformCaseIds,
-		formulaCaseIds
+		formulaCaseIds,
+		slideNotesCaseIds,
+		formFillCaseIds
 	}
 }

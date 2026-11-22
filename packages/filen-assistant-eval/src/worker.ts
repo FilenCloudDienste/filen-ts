@@ -8,6 +8,8 @@ import { EVAL_CASES } from "./cases"
 import { INJECTION_CASES } from "./cases/injection"
 import { FORMULA_CASES } from "./cases/formula"
 import { TRANSFORM_CASES } from "./cases/transform"
+import { SLIDE_NOTES_CASES } from "./cases/slideNotes"
+import { FORM_FILL_CASES } from "./cases/formFill"
 import { FakeApp } from "./fakeApp"
 import { gradeCase } from "./grader"
 import { gradeInjection } from "./injectionGrader"
@@ -15,8 +17,10 @@ import { caseFingerprint, modelKey, parseRecordLine } from "./fingerprint"
 import {
 	isLoopPreset,
 	presetRunsCase,
+	runFormFillCase,
 	runFormulaCase,
 	runLoopTurns,
+	runSlideNotesCase,
 	runTransformCase,
 	shippedCase,
 	type LoopPreset,
@@ -26,6 +30,8 @@ import { loadManifest, type ModelEntry } from "./models"
 import { ROUTER_GRAMMAR } from "./prompts"
 import { gradeFormula } from "./formulaGrader"
 import { gradeTransform } from "./transformGrader"
+import { gradeSlideNotes } from "./slideNotesGrader"
+import { gradeFormFill } from "./formFillGrader"
 
 export type WorkerJob = {
 	modelId: string
@@ -45,6 +51,14 @@ export type WorkerJob = {
 	}
 	// One or two generations per case (a refused formula is written again), no presets.
 	formula: {
+		caseIds: string[]
+	}
+	// One generation per case, no presets.
+	slideNotes: {
+		caseIds: string[]
+	}
+	// One grammar-bound generation per case, no presets.
+	formFill: {
 		caseIds: string[]
 	}
 }
@@ -197,7 +211,7 @@ async function main(): Promise<void> {
 		cases,
 		execute
 	}: {
-		suite: "main" | "injection" | "transform" | "formula"
+		suite: "main" | "injection" | "transform" | "formula" | "slide_notes" | "form_fill"
 		presets: readonly P[]
 		cases: readonly T[]
 		execute: (options: { item: T; preset: P }) => Promise<unknown>
@@ -317,6 +331,40 @@ async function main(): Promise<void> {
 				category: item.category,
 				lang: item.lang,
 				grade: gradeFormula({ item, result }),
+				result
+			}
+		}
+	})
+
+	await run({
+		suite: "slide_notes",
+		presets: [null],
+		cases: SLIDE_NOTES_CASES.filter(item => job.slideNotes.caseIds.includes(item.id)),
+		execute: async ({ item }) => {
+			const result = await runSlideNotesCase({ runtime: loopRuntime, item })
+
+			return {
+				caseId: item.id,
+				category: item.category,
+				lang: item.lang,
+				grade: gradeSlideNotes({ item, result }),
+				result
+			}
+		}
+	})
+
+	await run({
+		suite: "form_fill",
+		presets: [null],
+		cases: FORM_FILL_CASES.filter(item => job.formFill.caseIds.includes(item.id)),
+		execute: async ({ item }) => {
+			const result = await runFormFillCase({ runtime: loopRuntime, item })
+
+			return {
+				caseId: item.id,
+				category: item.category,
+				lang: item.lang,
+				grade: gradeFormFill({ item, result }),
 				result
 			}
 		}
