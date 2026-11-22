@@ -207,7 +207,7 @@ const storedEntrySchema = type({ kind: "'user'", turn: "number", text: "string" 
 		kind: "'proposal'",
 		turn: "number",
 		action: STORED_PROPOSAL_ACTION,
-		targets: type({ handle: "string", name: "string", "recipients?": "string[]" }).array(),
+		targets: type({ handle: "string", name: "string", "recipients?": "string[]", "restoreTo?": "string" }).array(),
 		destination: "string | null",
 		text: "Record<string, string>",
 		"batch?": storedBatchSchema,
@@ -319,10 +319,11 @@ function storedEntry(entry: TranscriptEntry, turn: number): StoredEntry {
 				kind: "proposal",
 				turn,
 				action: entry.proposal.action,
-				targets: entry.proposal.targets.map(({ handle, name, recipients }) => ({
+				targets: entry.proposal.targets.map(({ handle, name, recipients, restoreTo }) => ({
 					handle,
 					name,
-					...(recipients === undefined ? {} : { recipients: [...recipients] })
+					...(recipients === undefined ? {} : { recipients: [...recipients] }),
+					...(restoreTo === undefined ? {} : { restoreTo })
 				})),
 				destination: entry.proposal.destination,
 				text: Object.fromEntries(Object.entries(entry.proposal.text).map(([key, value]) => [key, capText(value)])),

@@ -29,9 +29,11 @@ export interface AssistantHandleRef {
 // model's own special tokens.
 export type AssistantToolExecution = AssistantToolOutcome
 
-// An item a call acts on; a chat with the addresses of the people a draft to it reaches.
+// An item a call acts on; a chat with the addresses of the people a draft to it reaches; a trashed item a restore brings
+// back with the path of the directory it returns to, when the cached listings hold it.
 export interface AssistantPreviewTarget extends AssistantHandleRef {
 	recipients?: string[]
+	restoreTo?: string
 }
 
 // The arguments naming where a move, copy, create or playlist addition lands, or the directory a batch works in. The

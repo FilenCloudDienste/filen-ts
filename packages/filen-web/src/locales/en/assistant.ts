@@ -612,6 +612,8 @@ export const assistant = {
 	assistantConfirmOrganize_other: "Move {{count}}",
 	/** Restore card — where a restored note returns: the notes list */
 	assistantProposalRestoreToNotes: "to Notes",
+	/** Restore card — where a restored file or directory returns; {{path}} is that directory's path, e.g. /Documents/Work */
+	assistantProposalRestoreToPath: "to {{path}}",
 	/** Restore card — where a restored file or directory returns when its directory's path is not known */
 	assistantProposalRestoreToOriginal: "to its original directory",
 	/** Restore card — runs the restore */

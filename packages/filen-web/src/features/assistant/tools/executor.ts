@@ -31,6 +31,7 @@ import {
 import { AssistantHandleRegistry, ROOT_HANDLE, type AssistantEntityKind } from "@/features/assistant/tools/handles"
 import { AssistantToolError, sanitizeStrings, unlessStopped } from "@/features/assistant/tools/format"
 import {
+	cachedRestorePath,
 	chatName,
 	chatRecipients,
 	driveName,
@@ -540,9 +541,15 @@ export function createAssistantToolExecutor(): ToolExecutor {
 					throw new AssistantToolError(`"${name}" is in the trash; only the user can restore or change it, in the app`)
 				}
 				const resolved = scope.show(entity, name)
+				const restoreTo = tool.name === "restore_items" && live.kind === "drive" ? cachedRestorePath(live.item) : undefined
 
 				handles.push(resolved)
-				targets.push({ handle: resolved, name, ...(live.kind === "chat" ? { recipients: chatRecipients(live.chat) } : {}) })
+				targets.push({
+					handle: resolved,
+					name,
+					...(live.kind === "chat" ? { recipients: chatRecipients(live.chat) } : {}),
+					...(restoreTo === undefined ? {} : { restoreTo })
+				})
 			}
 
 			if (superseded) {

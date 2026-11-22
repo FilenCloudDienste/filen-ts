@@ -200,6 +200,40 @@ export function ancestorsStillAt(path: string, parent: string): boolean {
 	return index === -1
 }
 
+// A directory's path from the cached listings alone, each row's parent walked up to the root: no request. Undefined
+// once a directory on the way is not cached, or sits in the trash itself.
+export function cachedDirectoryPath(uuid: string): string | undefined {
+	const root = rootDirUuid()
+	const names: string[] = []
+	let current = uuid
+
+	while (current !== root) {
+		const row = findOwnedListingItem(current)?.item
+
+		// The cap breaks a cycle stale rows could form.
+		if (root === undefined || row?.type !== "directory" || names.length > 256) {
+			return undefined
+		}
+
+		names.push(driveItemName(row))
+		current = row.data.parent
+	}
+
+	return `/${names.reverse().join("/")}`
+}
+
+// Where restoring a trashed item puts it, by path, while the cached listings hold that directory. `trashedFrom`
+// counts only while the row is in the trash.
+export function cachedRestorePath(item: DriveItem): string | undefined {
+	if (item.type !== "directory" && item.type !== "file") {
+		return undefined
+	}
+
+	const { parent, trashedFrom } = item.data
+
+	return parent === "trash" && trashedFrom !== undefined ? cachedDirectoryPath(trashedFrom) : undefined
+}
+
 export function rootDirUuid(): string | undefined {
 	return accountQueryGet()?.rootDirUuid
 }

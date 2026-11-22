@@ -231,7 +231,9 @@ function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 									<span className="ml-auto shrink-0 pl-2 text-muted-foreground">
 										{proposalTargetKind(target.handle) === "note"
 											? t("assistantProposalRestoreToNotes")
-											: t("assistantProposalRestoreToOriginal")}
+											: target.restoreTo === undefined
+												? t("assistantProposalRestoreToOriginal")
+												: t("assistantProposalRestoreToPath", { path: target.restoreTo })}
 									</span>
 								) : null}
 							</li>

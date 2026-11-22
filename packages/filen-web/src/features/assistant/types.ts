@@ -154,6 +154,8 @@ export interface AssistantProposalTarget {
 	// A chat's: the addresses of the people a draft to it reaches. Its name is whatever a contact or a group's
 	// owner chose, so it alone cannot tell two chats apart.
 	recipients?: readonly string[]
+	// A restore card's file or directory: the path of the directory it returns to, when the cached listings held it.
+	restoreTo?: string
 }
 
 // A consequential call waiting for the user. Nothing happens until its card is confirmed. `targets` are

@@ -27,6 +27,7 @@ import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { narrowItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { createAssistantToolExecutor } from "@/features/assistant/tools/executor"
+import { cachedRestorePath } from "@/features/assistant/tools/entities"
 import { buildProposal } from "@/features/assistant/loop/executorAdapter"
 import type { ToolExecutor } from "@/features/assistant/runtime/executor"
 
@@ -43,11 +44,12 @@ const docsRaw = {
 	meta: { type: "decoded", data: { name: "Docs" } }
 } as Dir
 
-function rawFile(uuid: string, name: string, parent: string): File {
+function rawFile(uuid: string, name: string, parent: string, trashedFrom?: string): File {
 	return {
 		uuid,
 		stableUUID: undefined,
 		parent,
+		...(trashedFrom === undefined ? {} : { trashedFrom }),
 		size: 64n,
 		favorited: false,
 		region: "de-1",
@@ -78,10 +80,10 @@ function note(uuid: string, title: string, trash: boolean): Note {
 	} as unknown as Note
 }
 
-// In the trash. The web SDK renders a trashed item's parent as "trash", whatever its original directory (filen-types
-// ParentUuid::to_str), so the card cannot name that directory.
-const draftRaw = rawFile(testUuid("draft"), "old_draft.docx", "trash")
-const strayRaw = rawFile(testUuid("stray"), "stray.pdf", "trash")
+// In the trash. The web SDK renders a trashed item's parent as "trash" and names its original directory in
+// `trashedFrom`: Docs is in the cached root listing, so the card names its path; the other one is not cached.
+const draftRaw = rawFile(testUuid("draft"), "old_draft.docx", "trash", testUuid("uncached"))
+const strayRaw = rawFile(testUuid("stray"), "stray.pdf", "trash", DOCS)
 const liveRaw = rawFile(testUuid("live"), "live.pdf", ROOT)
 const packing = note(testUuid("packing"), "Packing list", true)
 const groceries = note(testUuid("groceries"), "Groceries", false)
@@ -119,7 +121,8 @@ beforeEach(async () => {
 	)
 	sdk.getItemInfo.mockResolvedValue({ path: "/Docs", ancestors: [] })
 	sdk.listNotes.mockResolvedValue([packing, groceries])
-	sdk.restoreFile.mockImplementation((file: File) => Promise.resolve(file))
+	// Back in the directory it came from, which drops trashedFrom.
+	sdk.restoreFile.mockImplementation(({ trashedFrom, ...file }: File) => Promise.resolve({ ...file, parent: trashedFrom ?? ROOT }))
 	sdk.restoreNote.mockImplementation((target: Note) => Promise.resolve({ ...target, trash: false }))
 	useDriveStore.setState({ selectedItems: [], pendingReveal: null })
 	executor = createAssistantToolExecutor()
@@ -146,10 +149,11 @@ describe("restore_items", () => {
 			action: "restore",
 			targets: [
 				{ handle: "f1", name: "old_draft.docx" },
-				{ handle: "f2", name: "stray.pdf" },
+				{ handle: "f2", name: "stray.pdf", restoreTo: "/Docs" },
 				{ handle: "n1", name: "Packing list" }
 			]
 		})
+		expect(preview.targets[0]).not.toHaveProperty("restoreTo")
 		expect(sdk.getItemInfo).not.toHaveBeenCalled()
 		expect(await execute("restore_items", args)).toMatchObject({ ok: false, error: "This needs the user's confirmation first" })
 		expect(sdk.restoreFile).not.toHaveBeenCalled()
@@ -176,6 +180,21 @@ describe("restore_items", () => {
 		})
 		expect(sdk.restoreFile).not.toHaveBeenCalled()
 		expect(sdk.restoreNote).not.toHaveBeenCalled()
+	})
+
+	it("names a restore path only from the cached listings, and only while the item is in the trash", () => {
+		const work = { ...docsRaw, uuid: testUuid("work"), parent: DOCS, meta: { type: "decoded", data: { name: "Work" } } } as Dir
+
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: DOCS }), [narrowItem(work)])
+
+		expect(cachedRestorePath(narrowItem(rawFile(testUuid("a"), "a.pdf", "trash", work.uuid)))).toBe("/Docs/Work")
+		expect(cachedRestorePath(narrowItem(rawFile(testUuid("b"), "b.pdf", "trash", ROOT)))).toBe("/")
+		expect(cachedRestorePath(narrowItem(rawFile(testUuid("c"), "c.pdf", "trash")))).toBeUndefined()
+		// Stale: a row that left the trash keeps no claim on where it came from.
+		expect(cachedRestorePath(narrowItem(rawFile(testUuid("d"), "d.pdf", ROOT, work.uuid)))).toBeUndefined()
+		// A directory on the way that is itself in the trash has no path.
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: DOCS }), [narrowItem({ ...work, parent: "trash" })])
+		expect(cachedRestorePath(narrowItem(rawFile(testUuid("e"), "e.pdf", "trash", work.uuid)))).toBeUndefined()
 	})
 
 	it("still keeps every other write out of the trash", async () => {

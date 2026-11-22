@@ -212,6 +212,22 @@ describe("conversation serialization", () => {
 		})
 	})
 
+	it("keeps a restore card's paths", () => {
+		const targets = [
+			{ handle: "f1", name: "a.pdf", restoreTo: "/Docs" },
+			{ handle: "f2", name: "b.pdf" }
+		]
+		const entries = turnEntries("turn-1", "restore").map(entry =>
+			entry.kind === "proposal" ? { ...entry, proposal: { ...entry.proposal, action: "restore" as const, targets } } : entry
+		)
+		const content = serializeConversation(snapshot(entries), 10)
+
+		expect(conversationBodySchema({ v: 1, rev: "x", ...content })).not.toBeInstanceOf(Error)
+		expect(restoreConversation(content, "saved3").entries.find(entry => entry.kind === "proposal")).toMatchObject({
+			proposal: { targets }
+		})
+	})
+
 	it("round-trips a conversation: what a restore gives back saves to exactly the same content", () => {
 		const content = serializeConversation(snapshot([...turnEntries("turn-1", "first"), ...turnEntries("turn-2", "second")]), 10)
 

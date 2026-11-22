@@ -288,20 +288,21 @@ describe("restore card", () => {
 			action: "restore",
 			targets: [
 				{ handle: "f2", name: "stray.pdf" },
+				{ handle: "d3", name: "Receipts", restoreTo: "/Docs/Work" },
 				{ handle: "n1", name: "Packing list" }
 			],
 			destination: null,
 			text: {}
 		})
 
-		const card = screen.getByRole("group", { name: "Restore 2 items from the trash" })
+		const card = screen.getByRole("group", { name: "Restore 3 items from the trash" })
 
 		expect(
 			within(within(card).getByRole("list", { name: "Items" }))
 				.getAllByRole("listitem")
 				.map(item => item.textContent)
-		).toEqual(["stray.pdfto its original directory", "Packing listto Notes"])
-		expect(within(card).getByRole("button", { name: "Restore 2" })).toBeDefined()
+		).toEqual(["stray.pdfto its original directory", "Receiptsto /Docs/Work", "Packing listto Notes"])
+		expect(within(card).getByRole("button", { name: "Restore 3" })).toBeDefined()
 	})
 })
 
