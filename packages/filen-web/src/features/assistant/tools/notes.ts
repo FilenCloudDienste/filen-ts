@@ -202,7 +202,7 @@ export const searchNoteTextTool: ToolAdapter = async (input, scope) => {
 		scanned += content.length
 		searched++
 
-		const tokensMatched = matchScore(`${noteTitle(note)}\n${plainContent(note, content)}`, tokens)
+		const tokensMatched = matchScore(`${noteTitle(note)}\n${notePlainText(note, content)}`, tokens)
 
 		if (tokensMatched > 0) {
 			hits.push({ note, tokensMatched, maybeStale: heldNoteContentMaybeStale(note.uuid, content) })

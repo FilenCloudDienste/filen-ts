@@ -9,7 +9,7 @@ import {
 	splitDocumentText,
 	type AssistantDocumentKind
 } from "@filen/shared/assistant"
-import { getActiveDocument, type ActiveDocument, type DocumentReader, type DocumentText } from "@/lib/activeDocument"
+import { getActiveDocument, type ActiveDocument, type DocumentText, type UnitReader } from "@/lib/activeDocument"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { CATEGORY_POLICY, extensionOf, previewType } from "@/features/drive/lib/preview.logic"
 import { spreadsheetFileKind } from "@/features/spreadsheet/lib/fileKind"
@@ -47,9 +47,9 @@ function openDocumentOf(item: DriveItem): ActiveDocument | null {
 
 interface DocumentSource {
 	kind: AssistantDocumentKind
-	reader: DocumentReader
+	reader: UnitReader
 	sheets: readonly string[] | undefined
-	// Only the open document has a selection.
+	// Only the open document has a selection, read through its entry.
 	open: ActiveDocument | null
 	close: () => void
 }
@@ -142,11 +142,13 @@ async function readSource(source: DocumentSource, input: Record<string, unknown>
 	const wantedSheet = typeof input["sheet"] === "string" && input["sheet"].trim().length > 0 ? input["sheet"].trim() : undefined
 
 	if (input["part"] === "selection") {
-		if ((source.open?.selection ?? null) === null) {
+		const open = source.open
+
+		if (open === null || open.selection === null) {
 			throw new AssistantToolError(`Nothing is selected in "${name}"`)
 		}
 
-		const read = await source.reader.text("selection", signal, DOCUMENT_READ_MAX_CHARS)
+		const read = await open.reader.text("selection", signal, DOCUMENT_READ_MAX_CHARS)
 
 		return { units, range: "the selection", read, first: 1 }
 	}

@@ -4,7 +4,7 @@ import { bytesSource, type ByteSource } from "@filen/office/core/opc"
 import { docxPageText, type DocxEvent, type DocxHost, type DocxSessionApi } from "@filen/office/dom/docx"
 import { openPdf, pdfPageText } from "@filen/office/dom/pdf"
 import type { PresentationEvent } from "@filen/office/dom/presentation"
-import { noSelection, type DocumentReader } from "@/lib/activeDocument"
+import type { UnitReader } from "@/lib/activeDocument"
 import { DocumentTextBuilder, unitRange } from "@/lib/documentText"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, itemTypeExtension, previewType } from "@/features/drive/lib/preview.logic"
@@ -28,7 +28,7 @@ import { slidesDocumentReader } from "@/features/presentation/lib/slidesDocument
 export type ClosedDocumentKind = "pdf" | "docx" | "sheet" | "slides"
 
 export interface ClosedDocument {
-	readonly reader: DocumentReader
+	readonly reader: UnitReader
 	// A workbook's sheet names, in the reader's unit order.
 	readonly sheets?: readonly string[]
 	close(): void
@@ -106,14 +106,10 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () =
 }
 
 // Pages held as text, read like the open viewers' readers.
-export function pageTextsReader(texts: readonly string[]): DocumentReader {
+export function pageTextsReader(texts: readonly string[]): UnitReader {
 	return {
 		units: () => Promise.resolve(texts.length),
 		text: (range, signal, maxChars) => {
-			if (range === "selection") {
-				return noSelection()
-			}
-
 			signal.throwIfAborted()
 
 			const builder = new DocumentTextBuilder(maxChars)
@@ -163,10 +159,6 @@ async function openPdfDocument(name: string, bytes: Uint8Array, signal: AbortSig
 		reader: {
 			units: () => Promise.resolve(pages),
 			text: async (range, readSignal, maxChars) => {
-				if (range === "selection") {
-					return noSelection()
-				}
-
 				const builder = new DocumentTextBuilder(maxChars)
 				const span = unitRange(range, pages)
 
