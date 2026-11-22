@@ -5,8 +5,8 @@ import { createListenerSet } from "@/lib/listenerSet"
 import { DocumentTextBuilder } from "@/lib/documentText"
 import { log } from "@/lib/log"
 
-// The document the user has open (a previewed PDF, Word document, spreadsheet, deck or text file, or a note): one entry,
-// written only by the viewer showing it. Its reader reads the viewer's own engine when asked, so no text is held here.
+// The document the user has open (a previewed PDF, Word document, spreadsheet, deck or text file, or a note): the latest
+// mounted publisher's entry, written only by the viewer showing it. Its reader reads the viewer's own engine when asked, so no text is held here.
 
 export type ActiveDocumentKind = "pdf" | "docx" | "sheet" | "slides" | "text" | "note"
 
@@ -70,9 +70,26 @@ export interface ActiveDocument {
 	readonly reader: DocumentReader
 }
 
+// Every mounted publisher's entry, in the order each first published: the last one is the open document. One shadowed
+// by a later publisher (a note under a preview overlay) keeps its entry current, and is the open document again as
+// soon as the one above it clears.
+const entries = new Map<symbol, { readonly entry: ActiveDocument; readonly signature: string }>()
 let current: ActiveDocument | null = null
-let currentSignature: string | null = null
 const listeners = createListenerSet("activeDocument")
+
+// The open document is the top entry again; subscribers hear only when it is another entry.
+function settleTop(): void {
+	let top: ActiveDocument | null = null
+
+	for (const held of entries.values()) {
+		top = held.entry
+	}
+
+	if (top !== current) {
+		current = top
+		listeners.emit()
+	}
+}
 
 function itemKey(item: ActiveDocument["item"]): string {
 	return "note" in item ? `note:${item.note.uuid}` : `item:${item.data.uuid}`
@@ -91,28 +108,30 @@ export function subscribeActiveDocument(listener: () => void): () => void {
 	return listeners.subscribe(listener)
 }
 
-// Replaces the entry; telling subscribers only when what they see changed.
-export function publishActiveDocument(entry: ActiveDocument): void {
-	const signature = signatureOf(entry)
-
-	if (current?.token === entry.token && current.reader === entry.reader && currentSignature === signature) {
-		return
-	}
-
-	current = entry
-	currentSignature = signature
-	listeners.emit()
+// The entry `token` published, shown or shadowed.
+export function heldActiveDocument(token: symbol): ActiveDocument | null {
+	return entries.get(token)?.entry ?? null
 }
 
-// Clears the entry if it is still `token`'s: a viewer going away never clears the one that replaced it.
-export function clearActiveDocument(token: symbol): void {
-	if (current?.token !== token) {
+// Replaces the publisher's entry (a new publisher's goes on top); telling subscribers only when what they see changed.
+export function publishActiveDocument(entry: ActiveDocument): void {
+	const signature = signatureOf(entry)
+	const held = entries.get(entry.token)
+
+	if (held?.entry.reader === entry.reader && held.signature === signature) {
 		return
 	}
 
-	current = null
-	currentSignature = null
-	listeners.emit()
+	entries.set(entry.token, { entry, signature })
+	settleTop()
+}
+
+// Clears `token`'s entry: the one it shadowed, if any, is the open document again; clearing a shadowed entry changes
+// nothing subscribers see.
+export function clearActiveDocument(token: symbol): void {
+	if (entries.delete(token)) {
+		settleTop()
+	}
 }
 
 export function useActiveDocument(): ActiveDocument | null {
@@ -252,9 +271,9 @@ export function usePublishActiveDocument(item: ActiveDocument["item"] | null, pu
 	const [measure] = useState(
 		() =>
 			new SelectionMeasure(chars => {
-				const held = getActiveDocument()
+				const held = heldActiveDocument(token)
 
-				if (held?.token === token) {
+				if (held !== null) {
 					publishActiveDocument({ ...held, selection: selectionOf(chars) })
 				}
 			})

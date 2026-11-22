@@ -61,6 +61,7 @@ import { useLeaveViewerFullScreen } from "@/features/preview/components/commandB
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { useDocxPdfExport, type DocxPdfExportTarget } from "@/features/preview/hooks/useDocxPdfExport"
 import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
+import { elementSelection } from "@/lib/activeDocument"
 import { docxDocumentReader } from "@/features/preview/lib/documentReaders"
 import { DownloadAsItemProvider } from "@/features/drive/components/editorDownloadAs"
 import { DocxToolbar, type DocxLegacyInfo, type PasswordIntegrity } from "@/features/preview/components/docxToolbar"
@@ -927,6 +928,12 @@ function DocxPageList({
 	const aside = column && balloonsFit(width) ? BALLOON_COLUMN_WIDTH : 0
 	const viewer = useDocxViewer(document, { gap: PAGE_GAP, aside })
 	const { state, dispatch } = viewer
+	// The text selected in the pages' text layer.
+	const [selection] = useState(elementSelection)
+
+	useEffect(() => {
+		selection.attach(wrapper)
+	}, [selection, wrapper])
 
 	// The laid-out pages' text, as the viewer holds them (nothing is read again).
 	usePublishPreviewDocument(
@@ -935,6 +942,7 @@ function DocxPageList({
 			: {
 					kind: "docx",
 					position: { page: state.page + 1, pages: state.pageCount },
+					selection: selection.reader,
 					editable: false,
 					reader: docxDocumentReader(document)
 				}

@@ -102,7 +102,7 @@ import { parseCombo } from "@filen/shared/keymap"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import type { PreviewKey } from "@/lib/i18n"
 import { PresentationMotionPaths } from "@/features/presentation/components/ribbon/motionPaths"
-import { usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
+import { slideTextSelection, usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
 
 // The presentation editor: the ribbon (File, then the tabs whose groups the deck offers: in a deck that can only be
 // viewed that is the View tab and the read-only groups of others), the slide list with its edit commands (selection,
@@ -461,6 +461,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const shapeState = useShapeSelection(shapes)
 	// The body open in the text editor (one store per deck: the ribbon's text groups read it), and its shape.
 	const [text] = useState(createTextEditing)
+	// What is selected in the body being edited, for the open document.
+	const [textSelection] = useState(() => slideTextSelection(text))
 	// The Selection Pane's state, this editor's own (closed when the deck opens).
 	const [selectionPane] = useState(createSelectionPane)
 	const [editingText, setEditingText] = useState<ShapeRef | undefined>(undefined)
@@ -492,7 +494,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const count = deck.slides.length
 	const index = editor.current
 
-	usePresentationActiveDocument(deck, index, editor.editable, text)
+	usePresentationActiveDocument(deck, index, editor.editable, textSelection, text)
 
 	const ref: SlideRef | undefined = editor.currentRef
 	const render = ref === undefined ? undefined : deck.renders.get(ref)

@@ -48,9 +48,8 @@ async function frames(): Promise<void> {
 }
 
 afterEach(() => {
-	const held = getActiveDocument()
-
-	if (held !== null) {
+	// Shadowed entries surface as the top one clears.
+	for (let held = getActiveDocument(); held !== null; held = getActiveDocument()) {
 		clearActiveDocument(held.token)
 	}
 })
@@ -77,6 +76,28 @@ describe("the active document store", () => {
 		clearActiveDocument(theirs)
 		expect(getActiveDocument()).toBeNull()
 		expect(listener).toHaveBeenCalledTimes(4)
+		off()
+	})
+
+	it("shows a shadowed publisher's entry, kept current meanwhile, as soon as the one above it clears", () => {
+		const note = Symbol("note")
+		const overlay = Symbol("overlay")
+		const listener = vi.fn()
+		const off = subscribeActiveDocument(listener)
+
+		publishActiveDocument({ ...publication(1), selection: null, item, token: note })
+		publishActiveDocument({ ...publication(5), selection: null, item: other, token: overlay })
+		expect(getActiveDocument()?.token).toBe(overlay)
+		expect(listener).toHaveBeenCalledTimes(2)
+
+		// The shadowed publisher updates its own entry: nothing subscribers see changes, and it stays under.
+		publishActiveDocument({ ...publication(2), selection: { chars: 4 }, item, token: note })
+		expect(getActiveDocument()?.token).toBe(overlay)
+		expect(listener).toHaveBeenCalledTimes(2)
+
+		clearActiveDocument(overlay)
+		expect(getActiveDocument()).toMatchObject({ token: note, position: { page: 2 }, selection: { chars: 4 } })
+		expect(listener).toHaveBeenCalledTimes(3)
 		off()
 	})
 })

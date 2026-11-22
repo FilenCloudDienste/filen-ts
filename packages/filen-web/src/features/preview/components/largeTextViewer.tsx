@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslation } from "react-i18next"
 import * as Comlink from "comlink"
 import { ListOrderedIcon, LockIcon, SearchIcon, SlidersHorizontalIcon, TextCursorInputIcon } from "lucide-react"
@@ -28,6 +28,7 @@ import { originServesRanges } from "@/features/drive/lib/preview.logic"
 import { usePreviewDownload, usePreviewOrigin } from "@/features/preview/lib/accessMode"
 import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
 import { usePublishPreviewDocument } from "@/features/preview/lib/activeDocumentScope"
+import { elementSelection } from "@/lib/activeDocument"
 import { pagerDocumentReader } from "@/features/preview/lib/documentReaders"
 import { searchPattern } from "@/features/preview/lib/textPager/search.logic"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
@@ -71,6 +72,8 @@ function Position({ position, size }: { position: PositionStore; size: number })
 function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReading; alt: string; publishes: boolean }) {
 	const { t } = useTranslation(["preview", "common"])
 	const { pager, size, fail } = reading
+	// The text selected in the rows shown (only those are in the page: a selection past them reads as far as shown).
+	const [selection] = useState(elementSelection)
 
 	// Read from the file's start through the pager's rows, as far as a reader asks.
 	usePublishPreviewDocument(
@@ -78,6 +81,7 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 			? {
 					kind: "text",
 					position: {},
+					selection: selection.reader,
 					editable: false,
 					reader: pagerDocumentReader(reading.start, (from, continuation, count) =>
 						pager.run(remote => remote.after(from, continuation, count, null))
@@ -100,6 +104,10 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 	// Every scan started: its own progress and end touch the status only while it is the one shown.
 	const scans = useRef(0)
 	const rootRef = useRef<HTMLDivElement | null>(null)
+
+	useEffect(() => {
+		selection.attach(rootRef.current)
+	})
 	const pattern = find.open && find.query !== "" ? searchPattern(find.query, find.caseSensitive) : null
 	const rowsAbove = 3
 

@@ -78,6 +78,7 @@ import { log } from "@/lib/log"
 import type { PreviewKey } from "@/lib/i18n"
 import { openRefusalKey } from "@/features/presentation/lib/openRefusal"
 import { usePresentationActiveDocument } from "@/features/presentation/hooks/usePresentationActiveDocument"
+import { elementSelection } from "@/lib/activeDocument"
 
 // A presentation in the preview: the slide in view (fit inside the canvas), the slide list beside it (a strip under
 // it at phone widths), the speaker notes under it and a read-only command bar (slides, Present, the list and notes
@@ -571,8 +572,13 @@ function DeckSurface({
 	const count = deck.slides.length
 	const index = Math.min(current, Math.max(0, count - 1))
 	const ref: SlideRef | undefined = deck.slides[index]?.ref
+	// The text selected on the slide shown, for the open document.
+	const [selection] = useState(elementSelection)
 
-	usePresentationActiveDocument(deck, index, false)
+	useEffect(() => {
+		selection.attach(canvasRef.current)
+	})
+	usePresentationActiveDocument(deck, index, false, selection.reader)
 
 	const render = ref === undefined ? undefined : deck.renders.get(ref)
 	const size = deck.info?.size ?? DEFAULT_SLIDE_SIZE
