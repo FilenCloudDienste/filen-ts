@@ -2219,7 +2219,12 @@ export class FakeApp {
 					row,
 					words: [appHelpWords(row.shortcut, row.where)]
 				}))
-				const found = rankAppHelp([...settings, ...shortcuts], str("query"), candidate => candidate.words)
+				const found = rankAppHelp(
+					[...settings, ...shortcuts],
+					str("query"),
+					candidate => candidate.words,
+					candidate => candidate.kind === "shortcut" && candidate.row.screen === this.state.context.screen
+				)
 
 				if (found.length === 0) {
 					return {
@@ -2231,8 +2236,10 @@ export class FakeApp {
 				return {
 					results: found.map(found => {
 						if (found.kind === "shortcut") {
+							const { screen: _screen, ...row } = found.row
+
 							return {
-								...found.row,
+								...row,
 								route: "settings_keyboard"
 							}
 						}

@@ -885,11 +885,13 @@ export const HELP_ROWS: readonly HelpRow[] = [
 ]
 
 // A sample of the keymap's shortcuts as app_help reports them on Windows and Linux with the default keys: the English
-// name, where it works, and the keys.
+// name, where it works, and the keys. `screen`: the screen whose shortcut it is, which ranks it first there among
+// shortcuts named alike.
 export type ShortcutRow = {
 	shortcut: string
 	where: string
 	keys: string
+	screen?: string
 }
 
 export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
@@ -897,11 +899,13 @@ export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
 	{ shortcut: "Toggle theme", where: "Everywhere", keys: "D" },
 	{ shortcut: "Assistant", where: "Everywhere", keys: "Q" },
 	{ shortcut: "Show or hide the sidebar", where: "Everywhere", keys: "Ctrl+\\" },
-	{ shortcut: "Rename", where: "Cloud Drive", keys: "F2" },
-	{ shortcut: "Select all", where: "Cloud Drive", keys: "Ctrl+A" },
-	{ shortcut: "New note", where: "Notes", keys: "N" },
-	{ shortcut: "Duplicate note", where: "Notes", keys: "Ctrl+Shift+D" },
-	{ shortcut: "Search notes", where: "Notes", keys: "Ctrl+F" }
+	{ shortcut: "Rename", where: "Cloud Drive", keys: "F2", screen: "drive" },
+	{ shortcut: "Rename", where: "Chats", keys: "F2", screen: "chats" },
+	{ shortcut: "Rename", where: "Photos", keys: "F2", screen: "photos" },
+	{ shortcut: "Select all", where: "Cloud Drive", keys: "Ctrl+A", screen: "drive" },
+	{ shortcut: "New note", where: "Notes", keys: "N", screen: "notes" },
+	{ shortcut: "Duplicate note", where: "Notes", keys: "Ctrl+Shift+D", screen: "notes" },
+	{ shortcut: "Search notes", where: "Notes", keys: "Ctrl+F", screen: "notes" }
 ]
 
 // The Settings sidebar's English section labels.

@@ -169,6 +169,26 @@ describe("app_help shortcuts", () => {
 		})
 	})
 
+	it("ranks the shortcut of the screen the user is on first where several screens name one alike", async () => {
+		async function firstRename(pathname: string): Promise<string | undefined> {
+			router.state.location.pathname = pathname
+
+			const outcome = await call("app_help", { query: "rename shortcut" })
+
+			if (!outcome.ok) {
+				throw new Error(outcome.error)
+			}
+
+			return (outcome.result as { results: { shortcut?: string; where: string }[] }).results.find(
+				result => result.shortcut === "Rename"
+			)?.where
+		}
+
+		expect(await firstRename("/chats")).toBe("Chats")
+		expect(await firstRename("/drive/")).toBe("Cloud Drive")
+		expect(await firstRename("/photos")).toBe("Photos")
+	})
+
 	it("reports the keys the user set, read at the call", async () => {
 		await help("rename")
 		await setUserCombo("drive.rename", "mod+shift+r")

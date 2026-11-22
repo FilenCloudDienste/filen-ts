@@ -17,11 +17,13 @@ import { LOG_RING_MAX } from "@/lib/log"
 import { accountQueryGet } from "@/queries/account"
 import { parseCombo } from "@filen/shared/keymap"
 import { ALL_ACTIONS } from "@/lib/keymap/actions"
-import { availableOn, CURRENT_PLATFORM, currentKeymapRecord, effectiveCombo, type ActionDef } from "@/lib/keymap/registry"
+import { availableOn, CURRENT_PLATFORM, currentKeymapRecord, effectiveCombo, type ActionDef, type ActionScope } from "@/lib/keymap/registry"
 import { chordText } from "@/lib/keymap/keyText"
 import { keyboardLayout } from "@/lib/keymap/layout"
 import { SHORTCUT_SCOPE_LABEL_KEYS } from "@/lib/keymap/shortcutsCatalog"
 import type { ToolAdapter } from "@/features/assistant/tools/entities"
+import { assistantRouter } from "@/features/assistant/tools/navigation"
+import { screenOfPath, type AssistantRouteName } from "@/features/assistant/tools/routes"
 
 // app_help over the registry (@filen/shared/assistant appHelp.ts) and the keymap: the bundled text of each setting the
 // Settings pages show and the name of each keyboard shortcut, searched in the app's language and in English. Built on
@@ -133,8 +135,41 @@ export function shortcutKeys(action: ActionDef): string | null {
 	return chords.length === 0 ? null : chords.map(chord => chordText(chord, layout)).join(" or ")
 }
 
+// The shortcut scope of each screen whose actions have their own: a shortcut several screens name alike (Rename) is
+// ranked first for the screen the user is on.
+const SCREEN_SCOPES: Partial<Record<AssistantRouteName, ActionScope>> = {
+	drive: "drive",
+	recents: "drive",
+	favorites: "drive",
+	shared_with_me: "drive",
+	shared_by_me: "drive",
+	trash: "drive",
+	photos: "photos",
+	videos: "videos",
+	notes: "notes",
+	chats: "chats",
+	contacts: "contacts",
+	audio: "playlists",
+	transfers: "transfers",
+	sync: "sync",
+	mounts: "mounts"
+}
+
+function currentScope(): ActionScope | undefined {
+	const pathname = assistantRouter()?.state.location.pathname
+	const screen = pathname === undefined ? "other" : screenOfPath(pathname)
+
+	return screen === "other" ? undefined : (SCREEN_SCOPES[screen] ?? (screen.startsWith("settings") ? "settings" : undefined))
+}
+
 export const appHelpTool: ToolAdapter = (input, scope) => {
-	const rows = rankAppHelp(helpIndex(), String(input["query"]), row => row.words)
+	const here = currentScope()
+	const rows = rankAppHelp(
+		helpIndex(),
+		String(input["query"]),
+		row => row.words,
+		row => row.target.kind === "shortcut" && row.target.action.scope === here
+	)
 	const settings = i18n.t("common:settings")
 
 	if (rows.length === 0) {

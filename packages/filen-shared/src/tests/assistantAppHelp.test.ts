@@ -46,6 +46,22 @@ describe("app_help registry", () => {
 		expect(ids("on to a")).toEqual([])
 	})
 
+	it("puts the preferred of rows that score alike first, keeping registry order otherwise", () => {
+		const rows = ["drive", "notes", "chats"].map(screen => ({ screen, texts: [appHelpWords("Rename", screen)] }))
+		const screens = (query: string, on: string) =>
+			rankAppHelp(
+				rows,
+				query,
+				row => row.texts,
+				row => row.screen === on
+			).map(row => row.screen)
+
+		expect(screens("rename", "chats")).toEqual(["chats", "drive", "notes"])
+		// Naming a screen outscores the preference.
+		expect(screens("rename notes", "chats")).toEqual(["notes", "chats", "drive"])
+		expect(rankAppHelp(rows, "rename", row => row.texts).map(row => row.screen)).toEqual(["drive", "notes", "chats"])
+	})
+
 	it("returns at most APP_HELP_RESULTS rows", () => {
 		const rows = Array.from({ length: 8 }, (_, index) => ({ id: index, texts: [appHelpWords(`Cache ${String(index)}`, "")] }))
 

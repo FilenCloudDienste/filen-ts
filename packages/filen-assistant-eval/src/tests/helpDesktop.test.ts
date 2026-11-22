@@ -58,6 +58,24 @@ describe("app_help in the fake app", () => {
 		})
 	})
 
+	it("ranks the shortcut of the screen the user is on first among shortcuts named alike", () => {
+		const firstRename = (screen: string) => {
+			const outcome = new FakeApp({ screen }).execute({ name: "app_help", args: { query: "rename shortcut" } })
+
+			return outcome.ok
+				? (outcome.result as { results: { shortcut?: string; where: string }[] }).results.find(
+						result => result.shortcut === "Rename"
+					)?.where
+				: undefined
+		}
+
+		expect(firstRename("chats")).toBe("Chats")
+		expect(firstRename("photos")).toBe("Photos")
+		expect(firstRename("drive")).toBe("Cloud Drive")
+		// Nowhere in particular: registry order.
+		expect(firstRename("settings")).toBe("Cloud Drive")
+	})
+
 	it("refuses a help handle no result showed", () => {
 		expect(new FakeApp().execute({ name: "open_route", args: { route: "settings", help: "h4" } })).toMatchObject({
 			ok: false,
