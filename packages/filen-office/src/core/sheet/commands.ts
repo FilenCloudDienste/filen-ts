@@ -30,6 +30,7 @@ import { namesFeature } from "../xlsx/edit/names"
 import { chartsFeature } from "../xlsx/charts/feature"
 import { drawingsFeature } from "../xlsx/drawings/feature"
 import { saveAsFormatFeature } from "../ods/convert/feature"
+import { parseCellInput } from "./input/cellInput"
 import { defineSheetFeature, sheetRegistry, type SheetFeature } from "./registry"
 import { RenderStyleTable, SheetSession, sessionFeature } from "./session"
 
@@ -55,6 +56,17 @@ export const cellsFeature = defineSheetFeature<XlsxDocument>({
 					context.changes,
 					context.slicing
 				)
+		}
+	},
+	queries: {
+		formulaPreview: {
+			run: (context, request) => {
+				const parsed = parseCellInput(request.formula)
+
+				return parsed.type === "formula"
+					? context.doc.previewFormula(request.sheet, parsed.formula, context.slicing, context.signal)
+					: { refused: "formula" }
+			}
 		}
 	}
 })

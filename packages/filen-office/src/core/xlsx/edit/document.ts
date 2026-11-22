@@ -49,6 +49,7 @@ import {
 	type SheetPane,
 	type SheetProtectedAction,
 	type SheetProtectionState,
+	type SheetQueryResult,
 	type SheetRefusal,
 	type SheetRange,
 	type SheetRenderStyle,
@@ -76,7 +77,9 @@ import {
 	legacyIntersections,
 	MAX_RANGE_CELLS,
 	sameSheet,
-	shownFormula
+	shownFormula,
+	storedFormula,
+	wellFormedFormula
 } from "../../sheet/refs/formulaRefs"
 import { localizedInput } from "../../sheet/input/locale"
 import { sheetFunction } from "../../sheet/functions/catalogue"
@@ -1817,6 +1820,40 @@ export class XlsxDocument {
 			engine === null || index < 0 || holdsBracket(formula) ? null : engineArrayFormula(formula, this.nameAliases, this.lambdaNames)
 
 		return text !== null && engine !== null && engine.givesArray(index, text)
+	}
+
+	// A formula typed on a sheet (the file's syntax, without its "=") calculated as the engine would now, written to no
+	// cell: the formulaPreview query. The engine is built from the cells as they stand when none is, as a first typed
+	// formula builds it (setCells), without a change sink: a workbook that needs one to show results has it built for
+	// editing already (needsPreparing), so only one an edit dropped it from is built here again.
+	async previewFormula(
+		sheet: SheetId,
+		formula: string,
+		slicing?: Slicing,
+		signal?: SheetAbortSignal
+	): Promise<SheetQueryResult<"formulaPreview">> {
+		if (!wellFormedFormula(formula) || holdsBracket(formula)) return { refused: "formula" }
+
+		if (this.engine === null) {
+			if (!this.allReady) await this.readyAllSheets(slicing, signal)
+			if (this.closed || !this.allReady) return { refused: "unavailable" }
+
+			await this.loadTables()
+
+			if (this.closed) return { refused: "unavailable" }
+			if (this.engine === null) this.buildEngine()
+		}
+
+		const engine = this.engine
+		const index = this.engineIndex(sheet)
+		const text = engineArrayFormula(storedFormula(formula), this.nameAliases, this.lambdaNames)
+
+		if (engine === null || index < 0) return { refused: "unavailable" }
+		if (text === null) return { refused: "formula" }
+
+		const result = engine.preview(index, text)
+
+		return result === null ? { refused: "formula" } : result === "busy" ? { refused: "busy" } : result
 	}
 
 	// The cell metadata a new dynamic array is written with (the metadata part made for it first), or null when the

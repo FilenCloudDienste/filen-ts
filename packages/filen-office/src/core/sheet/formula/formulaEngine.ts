@@ -2939,6 +2939,35 @@ export class FormulaEngine {
 		}
 	}
 
+	// A formula's value on a sheet (as givesArray takes it), written to no cell: an array's first value with its size.
+	// "busy" while evaluation is held; null where the engine cannot calculate it.
+	preview(
+		sheet: number,
+		formula: string
+	): { value: RecalculatedCell["value"]; error: boolean; rows: number; cols: number } | "busy" | null {
+		const id = this.sheetIds[sheet]
+
+		if (id === undefined) return null
+		if (this.deferred !== null) return "busy"
+		if (
+			(formula.includes(":") || formula.includes("!")) &&
+			unreadable(spanned(formula, this.sheetNames), this.sheetExtents(), sheet) !== null
+		)
+			return null
+
+		try {
+			const value = this.run(() => this.engine.calculateFormula(formula, id))
+			const rows = Array.isArray(value) ? value.length : 1
+			const cols = Array.isArray(value) ? (value[0]?.length ?? 0) : 1
+			const first: unknown = Array.isArray(value) ? value[0]?.[0] : value
+			const shown = typeof first === "number" ? heldNumber(first) : first
+
+			return { value: exported(shown), error: shown instanceof DetailedCellError, rows, cols }
+		} catch {
+			return null
+		}
+	}
+
 	// The engine's sheets as far as it has seen them, by grid sheet index.
 	private sheetExtents(): SheetExtent[] {
 		return this.sheetIds.map(sheetId => {

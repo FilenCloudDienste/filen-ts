@@ -697,6 +697,22 @@ export interface SheetQueryMap {
 		request: { readonly sheet: SheetId; readonly range?: SheetRange; readonly maxChars: number }
 		result: { readonly text: string; readonly truncated: boolean }
 	}
+	// A formula's value on a sheet as the engine calculates it now, written to no cell (the assistant's formula
+	// preview). `formula` is in the file's (en-US) syntax, "=" first; relative references resolve as from A1. An
+	// array gives its first value and its size. Builds the engine when none is (as a first typed formula would).
+	// Refused: "formula" when the engine cannot take it, "busy" while a calculation is held, "unavailable" when the
+	// workbook calculates nothing here.
+	formulaPreview: {
+		request: { readonly sheet: SheetId; readonly formula: string }
+		result:
+			| {
+					readonly value: number | string | boolean | null
+					readonly error: boolean
+					readonly rows: number
+					readonly cols: number
+			  }
+			| { readonly refused: "formula" | "busy" | "unavailable" }
+	}
 }
 
 export interface SheetCellDetail {
