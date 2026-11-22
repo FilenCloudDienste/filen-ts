@@ -165,7 +165,8 @@ export class FakeAppExecutor implements AssistantToolExecutor {
 			drive.find(item => item.handle === handle)?.name ??
 			notes.find(item => item.handle === handle)?.title ??
 			chats.find(item => item.handle === handle)?.name ??
-			playlists.find(item => item.handle === handle)?.name
+			playlists.find(item => item.handle === handle)?.name ??
+			this.app.helpTitle(handle)
 		)
 	}
 

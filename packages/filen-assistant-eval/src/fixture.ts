@@ -1,3 +1,5 @@
+import type { AppHelpId, AppHelpSection } from "@filen/shared/assistant"
+
 // A small multilingual account. Handles are fixed so expected calls can name them; the fake app
 // still refuses a handle until a tool result or the context has shown it to the model.
 
@@ -642,4 +644,107 @@ export const HANDLE_PREFIXES = ["f", "d", "n", "c", "p"] as const
 // Every drive item and note, the entities a turn can create.
 export function allHandles(state: AppState): Set<string> {
 	return new Set([...state.drive.map(item => item.handle), ...state.notes.map(item => item.handle)])
+}
+
+// app_help's settings as the apps show them in English: a sample of the shared registry's rows (its ids give the
+// section and route), titles and descriptions as the English locale words them.
+export type HelpRow = {
+	id: AppHelpId
+	title: string
+	description: string
+}
+
+export const HELP_ROWS: readonly HelpRow[] = [
+	{ id: "nickname", title: "Nickname", description: "An optional display name shown to your contacts instead of your email" },
+	{ id: "email", title: "Email address", description: "The address you sign in with" },
+	{ id: "versioning", title: "File versioning", description: "Keep previous versions of files when they're overwritten" },
+	{ id: "loginAlerts", title: "Login alerts", description: "Get an email whenever a new device signs in to your account" },
+	{ id: "appearOffline", title: "Appear offline", description: "Your contacts and chat partners see you as offline." },
+	{ id: "dataExport", title: "Export your data", description: "Download a copy of your account and activity data as a JSON file" },
+	{ id: "password", title: "Password", description: "Update your account password" },
+	{ id: "twoFactor", title: "Two-factor authentication", description: "Require a code from your authenticator app when signing in" },
+	{ id: "masterKeys", title: "Master keys", description: "Back up your master keys to restore access if you forget your password" },
+	{ id: "deleteAccount", title: "Delete account", description: "Permanently delete your account and all of its data" },
+	{ id: "theme", title: "Theme", description: "Choose how Filen looks on this device" },
+	{ id: "language", title: "Language", description: "The language of the app. Dates and numbers follow your browser's region." },
+	{ id: "startScreen", title: "Start screen", description: "Choose which section Filen opens to when it starts" },
+	{
+		id: "defaultNoteType",
+		title: "Default note type",
+		description: "The type a new note starts with. You can change it on each note later."
+	},
+	{
+		id: "shortcuts",
+		title: "Keyboard",
+		description: "Every keyboard shortcut in Filen, grouped by where it applies. Select keys to change them, or + to add more."
+	},
+	{ id: "autosave", title: "Save automatically", description: "Saves a new version once you pause editing." },
+	{
+		id: "spellCheck",
+		title: "Check spelling as you type",
+		description: "Marks misspelled and repeated words. Dictionaries are downloaded only while this is on."
+	},
+	{ id: "proofingLanguage", title: "Proofing language", description: "For text the document gives no language." },
+	{ id: "paperSize", title: "Paper size for new files", description: "For new documents and spreadsheets." },
+	{ id: "smoothTransitions", title: "Smooth transitions", description: "Blend the end of each track into the next one." },
+	{ id: "matchLoudness", title: "Match loudness", description: "Uses ReplayGain; untagged tracks play 6 dB quieter." },
+	{
+		id: "assistantRetention",
+		title: "Keep conversations",
+		description:
+			"How long conversations stay saved on this device after their last message. A shorter choice removes older ones right away; Off removes them all and saves none."
+	},
+	{
+		id: "transfers",
+		title: "Transfer performance",
+		description:
+			"Tune how many transfers Filen runs in parallel and how much memory they may use. Desktop sync and network drives have their own settings."
+	},
+	{
+		id: "heicToJpg",
+		title: "Convert HEIC/HEIF to JPG",
+		description: "Upload HEIC and HEIF photos as JPG, so they open on devices and apps without HEIC support"
+	},
+	{
+		id: "dotFilen",
+		title: "Show .filen directory",
+		description:
+			"The .filen directory holds the settings Filen syncs between your devices. While this is off, it is left out of your drive, search and directory pickers"
+	},
+	{ id: "cacheThumbnails", title: "Thumbnails", description: "Previews of images and videos, and audio covers" },
+	{ id: "cacheModel", title: "AI model", description: "The assistant's language model, shared by every account on this device" },
+	{ id: "subscriptions", title: "Subscriptions", description: "Every plan contributing to your account's total storage" },
+	{ id: "invoices", title: "Invoices", description: "Your billing history" },
+	{ id: "launchAtLogin", title: "Open at login", description: "Start Filen in the background when you sign in to your computer." },
+	{
+		id: "minimizeToTray",
+		title: "Keep running in the tray",
+		description: "Closing the window keeps Filen running in the tray instead of quitting."
+	},
+	{
+		id: "syncNotifications",
+		title: "Sync and drive alerts",
+		description: "Notify you when a sync needs your attention, or when sync, the network drive or a server stops."
+	},
+	{
+		id: "appLockPin",
+		title: "PIN lock",
+		description:
+			"Ask for a PIN when Filen opens and after it hasn't been used for a while. Background sync and drives keep running while Filen is locked."
+	},
+	{ id: "downloadLocation", title: "Save downloads to", description: "Where downloaded files and directories are saved." }
+]
+
+// The Settings sidebar's English section labels.
+export const HELP_SECTION_LABELS: Readonly<Record<AppHelpSection, string>> = {
+	account: "Account",
+	security: "Security",
+	appearance: "Appearance",
+	keyboard: "Keyboard",
+	office: "Office",
+	audio: "Audio",
+	assistant: "Assistant",
+	advanced: "Advanced",
+	billing: "Billing",
+	desktop: "Desktop"
 }

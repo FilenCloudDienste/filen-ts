@@ -47,6 +47,8 @@ import { getActiveDocument } from "@/lib/activeDocument"
 import { assistantRouter } from "@/features/assistant/tools/navigation"
 import { navigateToRoute, navigateToSyncPairIssues, UNAVAILABLE_ROUTES, type AssistantRouteName } from "@/features/assistant/tools/routes"
 import { useSyncStore } from "@/features/sync/lib/syncStore"
+import { requestSettingsHighlight } from "@/lib/settingsHighlight"
+import { appHelpTool, freeAppHelpIndex, shownHelpEntry } from "@/features/assistant/tools/help"
 import {
 	getItemInfoTool,
 	isTrashed,
@@ -121,7 +123,7 @@ const HANDLE_KINDS: Partial<Record<AssistantToolName, Record<string, readonly As
 	rename_by_pattern: { scope: ["root", "drive"], handles: ["drive"] },
 	organize_by_date: { scope: ["root", "drive"] },
 	restore_items: { handles: ["drive", "note"] },
-	open_route: { pair: ["syncPair"] }
+	open_route: { pair: ["syncPair"], help: ["help"] }
 }
 
 // A path the model is told to list a directory by is copied back whole, so it is never shortened: past this it
@@ -270,10 +272,29 @@ async function openSyncPair(router: RegisteredRouter, pairId: string, scope: Too
 	return { ...screenOpened("sync"), tab: "issues" }
 }
 
+// An app_help handle opens the section its setting is on, whatever section the call names, and rings the setting once
+// the page shows it.
+async function openHelp(router: RegisteredRouter, id: string, scope: ToolScope): Promise<Record<string, unknown>> {
+	const entry = shownHelpEntry(id)
+
+	if (entry === undefined) {
+		throw new AssistantToolError("That setting is not in this app")
+	}
+
+	if (UNAVAILABLE_ROUTES.has(entry.route) || !(await navigateToRoute(router, entry.route, scope.signal))) {
+		throw routeUnavailable(entry.route)
+	}
+
+	requestSettingsHighlight(entry.id)
+
+	return screenOpened(entry.route)
+}
+
 const openRouteTool: ToolAdapter = async (input, scope) => {
 	const router = assistantRouter()
 	const route = input["route"] as AssistantRouteName
 	const pair = typeof input["pair"] === "string" ? scope.registry.get(input["pair"])?.entity : undefined
+	const help = typeof input["help"] === "string" ? scope.registry.get(input["help"])?.entity : undefined
 
 	if (router === null) {
 		throw new AssistantToolError("The app cannot navigate right now")
@@ -281,6 +302,10 @@ const openRouteTool: ToolAdapter = async (input, scope) => {
 
 	if (pair?.kind === "syncPair") {
 		return { value: await openSyncPair(router, pair.pairId, scope) }
+	}
+
+	if (help?.kind === "help") {
+		return { value: await openHelp(router, help.id, scope) }
 	}
 
 	if (!(await navigateToRoute(router, route, scope.signal))) {
@@ -332,7 +357,8 @@ const ADAPTERS: Record<AssistantWebToolName, ToolAdapter> = {
 	read_document: readDocumentTool,
 	rename_by_pattern: renameByPatternTool,
 	organize_by_date: organizeByDateTool,
-	restore_items: restoreItemsTool
+	restore_items: restoreItemsTool,
+	app_help: appHelpTool
 }
 
 interface ResolvedArgs {
@@ -637,6 +663,7 @@ export function createAssistantToolExecutor(): ToolExecutor {
 		reset: (history: readonly AssistantHistoryTurn[] = []) => {
 			generation++
 			clearBatchPlan()
+			freeAppHelpIndex()
 			registry.clear(history.flatMap(({ user, reply }) => [user, reply]))
 		}
 	}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { APP_HELP, appHelpAnchor, openRoute } from "@filen/shared/assistant"
+import { APP_HELP, APP_HELP_RESULTS, appHelpAnchor, appHelpWords, openRoute, rankAppHelp } from "@filen/shared/assistant"
 
 describe("app_help registry", () => {
 	it("names every row, anchor and key once", () => {
@@ -26,6 +26,36 @@ describe("app_help registry", () => {
 				expect(routes, entry.id).toContain(entry.route)
 			}
 		}
+	})
+
+	it("ranks rows by the query's words, title words first, in the best of their languages", () => {
+		const rows = [
+			{ id: "theme", texts: [appHelpWords("Theme", "Light, dark or the system's")] },
+			{ id: "twoFactor", texts: [appHelpWords("Two-factor authentication", "Ask for a code at sign-in")] },
+			{ id: "password", texts: [appHelpWords("Password", "Change the password you sign in with")] },
+			{ id: "language", texts: [appHelpWords("Sprache", "Die Sprache der App"), appHelpWords("Language", "The app's language")] }
+		]
+		const ids = (query: string) => rankAppHelp(rows, query, row => row.texts).map(row => row.id)
+
+		expect(ids("How do I turn on two-factor authentication?")).toEqual(["twoFactor"])
+		// "passwords" folds to "password"; the title outranks a description that only mentions signing in.
+		expect(ids("change my passwords sign")).toEqual(["password", "twoFactor"])
+		expect(ids("Sprache ändern")).toEqual(["language"])
+		expect(ids("app language")).toEqual(["language"])
+		// Words of one or two Latin letters match nearly everything.
+		expect(ids("on to a")).toEqual([])
+	})
+
+	it("returns at most APP_HELP_RESULTS rows", () => {
+		const rows = Array.from({ length: 8 }, (_, index) => ({ id: index, texts: [appHelpWords(`Cache ${String(index)}`, "")] }))
+
+		expect(rankAppHelp(rows, "cache", row => row.texts).map(row => row.id)).toEqual([0, 1, 2, 3, 4].slice(0, APP_HELP_RESULTS))
+	})
+
+	it("matches words of scripts written without spaces inside longer ones", () => {
+		const rows = [{ id: "language", texts: [appHelpWords("言語", "アプリの表示言語")] }]
+
+		expect(rankAppHelp(rows, "表示言語を変えたい", row => row.texts).map(row => row.id)).toEqual(["language"])
 	})
 
 	it("marks the desktop section desktop-only", () => {

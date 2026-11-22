@@ -6,6 +6,7 @@ import { DATE_CASES } from "./dates"
 import { DOCUMENT_CASES } from "./documents"
 import { DATE_FILTER_CASES, INSIGHTS_CASES } from "./insights"
 import { LANGUAGE_CASES } from "./language"
+import { HELP_CASES } from "./help"
 import { LONG_CASES } from "./long"
 import { MULTI_STEP_CASES } from "./multiStep"
 import { PROMPTING_CASES } from "./prompting"
@@ -33,5 +34,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
 	...DOCUMENT_CASES,
 	...ACT_ON_READ_CASES,
 	...BATCH_CASES,
-	...RESTORE_CASES
+	...RESTORE_CASES,
+	...HELP_CASES
 ]

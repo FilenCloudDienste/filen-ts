@@ -1,6 +1,9 @@
+import { searchTokens } from "./search"
+
 // The settings app_help can explain and open: one row per setting the web and desktop apps' Settings pages show, by the
-// locale keys those pages render (namespace:key), so the help text is the text on screen. Data only: the apps build
-// their search index from it, the eval's fake app reads the same ids and routes.
+// locale keys those pages render (namespace:key), so the help text is the text on screen. The apps build their
+// search index from it and rank it with rankAppHelp; the eval's fake app reads the same ids and routes and ranks the
+// same way.
 
 export type AppHelpSection =
 	"account" | "security" | "appearance" | "keyboard" | "office" | "audio" | "assistant" | "advanced" | "billing" | "desktop"
@@ -437,3 +440,61 @@ export const APP_HELP: readonly AppHelpEntry[] = APP_HELP_ROWS.map((row: AppHelp
 	route: `settings_${row.section}`,
 	anchor: appHelpAnchor(row.id)
 }))
+
+// How many rows one app_help call returns.
+export const APP_HELP_RESULTS = 5
+
+export const APP_HELP_NO_MATCH_NOTE =
+	"No setting matches these words. Answer from what you know about the app only if you are sure; otherwise say you could not find it."
+
+// A row's words in one language, its title's and its description's, folded as a query's are.
+export type AppHelpWords = { readonly title: readonly string[]; readonly description: readonly string[] }
+
+export function appHelpWords(title: string, description: string): AppHelpWords {
+	return { title: searchTokens(title), description: searchTokens(description) }
+}
+
+const UNSPACED_WORD = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u
+
+// A query word finds a row word it begins ("notif" finds "notifications"), its plural folded ("passwords" finds
+// "password"); in a script written without spaces, where the two sides may be cut into words differently, anywhere
+// in one.
+function wordMatches(words: readonly string[], token: string): boolean {
+	if (UNSPACED_WORD.test(token)) {
+		return words.some(word => word.includes(token) || (UNSPACED_WORD.test(word) && token.includes(word)))
+	}
+
+	const stem =
+		token.length > 4 && token.endsWith("es") ? token.slice(0, -2) : token.length > 3 && token.endsWith("s") ? token.slice(0, -1) : token
+
+	return words.some(word => word.startsWith(stem))
+}
+
+// The rows that hold the most of the query's words, best first, at most APP_HELP_RESULTS; ties keep the registry's
+// order. A word in the title counts double, and a row scores its best language (the app's or English). A word of one
+// or two Latin letters or digits matches too much to count.
+export function rankAppHelp<T>(rows: readonly T[], query: string, words: (row: T) => readonly AppHelpWords[]): T[] {
+	const tokens = [...new Set(searchTokens(query))].filter(token => UNSPACED_WORD.test(token) || token.length > 2)
+
+	if (tokens.length === 0) {
+		return []
+	}
+
+	return rows
+		.map((row, index) => ({
+			row,
+			index,
+			score: Math.max(
+				0,
+				...words(row).map(
+					language =>
+						tokens.filter(token => wordMatches(language.title, token)).length * 2 +
+						tokens.filter(token => wordMatches(language.description, token)).length
+				)
+			)
+		}))
+		.filter(scored => scored.score > 0)
+		.sort((a, b) => b.score - a.score || a.index - b.index)
+		.slice(0, APP_HELP_RESULTS)
+		.map(scored => scored.row)
+}

@@ -1,5 +1,8 @@
 import { DRIVE_NAME_RULES, estimateCaptureTimestamp, formatBytes, storageSummary } from "@filen/shared"
 import {
+	APP_HELP,
+	APP_HELP_NO_MATCH_NOTE,
+	appHelpWords,
 	ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS,
 	assistantToolByName,
 	batchOrganizeCount,
@@ -39,6 +42,7 @@ import {
 	PHOTOS_ITEMS,
 	planBatchRename,
 	planOrganizeByDate,
+	rankAppHelp,
 	rawSearchTokens,
 	RECENT_ITEMS,
 	recentsReachNote,
@@ -62,6 +66,8 @@ import {
 } from "@filen/shared/assistant"
 import {
 	createFixtureState,
+	HELP_ROWS,
+	HELP_SECTION_LABELS,
 	type AppContext,
 	type AppState,
 	type DriveItem,
@@ -166,17 +172,36 @@ function extension(name: string): string {
 	return dot === -1 ? "" : name.slice(dot + 1).toLowerCase()
 }
 
+// Sections the app has no screen for: no camera upload anywhere, no sync, mounts or desktop settings on the web, and
+// no plans in the desktop app (as the web app's routes.ts UNAVAILABLE_ROUTES).
+const UNAVAILABLE_ROUTES = {
+	web: ["settings_camera_upload", "sync", "mounts", "settings_desktop"],
+	desktop: ["settings_camera_upload", "settings_plans"]
+} as const
+
 export class FakeApp {
 	readonly state: AppState
 	readonly exposed = new Set<string>()
+	// The desktop app (sync, mounts and its own settings) rather than the web app.
+	readonly desktop: boolean
 	private returned: Candidate[] | null = null
+	// app_help results by registry id, numbered as the app hands them out.
+	private readonly helpHandles = new Map<string, string>()
 
-	constructor(context: Partial<AppContext> = {}) {
+	constructor(context: Partial<AppContext> = {}, { desktop = false }: { desktop?: boolean } = {}) {
 		this.state = createFixtureState(context)
+		this.desktop = desktop
 
 		for (const handle of this.contextHandles()) {
 			this.exposed.add(handle)
 		}
+	}
+
+	// The title an app_help handle was shown with.
+	helpTitle(handle: string): string | undefined {
+		const id = [...this.helpHandles].find(([, shown]) => shown === handle)?.[0]
+
+		return HELP_ROWS.find(row => row.id === id)?.title
 	}
 
 	// One line for the system prompt, so "this file" or "here" resolve without a get_context round trip. As the
@@ -1948,6 +1973,27 @@ export class FakeApp {
 			}
 
 			case "open_route": {
+				const help = typeof input["help"] === "string" && input["help"].trim().length > 0 ? input["help"].trim() : null
+
+				// A help handle opens its setting's section, whatever the route says, and rings the setting there.
+				if (help !== null) {
+					const id = [...this.helpHandles].find(([, handle]) => handle === help)?.[0]
+					const entry = APP_HELP.find(candidate => candidate.id === id)
+
+					if (entry === undefined) {
+						throw new CallError(`Unknown handle "${help}". Find it first with app_help.`, true)
+					}
+
+					this.state.context.screen = entry.route
+					this.state.opened = `help:${entry.id}`
+
+					return screenOpened(entry.route)
+				}
+
+				if ((UNAVAILABLE_ROUTES[this.desktop ? "desktop" : "web"] as readonly string[]).includes(str("route"))) {
+					throw new CallError(`"${str("route")}" is not available in this app`, false)
+				}
+
 				this.state.context.screen = str("route")
 				this.state.opened = null
 
@@ -2117,9 +2163,39 @@ export class FakeApp {
 				}
 			}
 
-			// Their tracks give these their fixture behaviour; until then a call reads as a failure that changes nothing.
 			case "app_help": {
-				throw new CallError(`${name} is not available in this app yet`, false)
+				const shown = HELP_ROWS.flatMap(row => {
+					const entry = APP_HELP.find(candidate => candidate.id === row.id)
+
+					return entry !== undefined && (entry.platform === undefined || entry.platform === (this.desktop ? "desktop" : "web"))
+						? [{ row, entry, words: [appHelpWords(row.title, row.description)] }]
+						: []
+				})
+				const found = rankAppHelp(shown, str("query"), candidate => candidate.words)
+
+				if (found.length === 0) {
+					return {
+						results: [],
+						note: APP_HELP_NO_MATCH_NOTE
+					}
+				}
+
+				return {
+					results: found.map(({ row, entry }) => {
+						const handle = this.helpHandles.get(row.id) ?? `h${String(this.helpHandles.size + 1)}`
+
+						this.helpHandles.set(row.id, handle)
+						this.exposed.add(handle)
+
+						return {
+							handle,
+							title: row.title,
+							description: row.description,
+							where: `Settings → ${HELP_SECTION_LABELS[entry.section]}`,
+							route: entry.route
+						}
+					})
+				}
 			}
 
 			// The eval runs the web app, where there is no sync or mount.
