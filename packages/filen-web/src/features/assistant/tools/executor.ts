@@ -383,6 +383,9 @@ export function createAssistantToolExecutor(): ToolExecutor {
 	// registry items it never showed (a handle the model then guesses would name one).
 	let generation = 0
 
+	// A plan an earlier conversation's executor held is not this one's.
+	clearBatchPlan()
+
 	function scopeFor(
 		signal: AssistantSignal | undefined,
 		shown: Map<string, AssistantHandleRef>,

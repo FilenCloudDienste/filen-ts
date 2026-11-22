@@ -232,11 +232,12 @@ async function planOrganize(scope: ToolScope, args: Record<string, unknown>, key
 	}
 }
 
-// The plan for these arguments: the one held when it matches, else worked out now and held.
-async function planFor(tool: BatchTool, scope: ToolScope, args: Record<string, unknown>): Promise<Plan> {
+// The plan for these arguments. A check always plans afresh, from the listings as they are now; the card that
+// follows reuses the plan the check held.
+async function planFor(tool: BatchTool, scope: ToolScope, args: Record<string, unknown>, { fresh }: { fresh: boolean }): Promise<Plan> {
 	const key = planKey(tool, args)
 
-	if (held?.key === key) {
+	if (!fresh && held?.key === key) {
 		return held
 	}
 
@@ -254,12 +255,12 @@ function changeCount(plan: Plan): number {
 // Refused before a card when nothing would change.
 export const BATCH_PRECHECKS: Readonly<Record<BatchTool, (scope: ToolScope, input: Record<string, unknown>) => Promise<string | null>>> = {
 	rename_by_pattern: async (scope, input) => {
-		const plan = await planFor("rename_by_pattern", scope, input)
+		const plan = await planFor("rename_by_pattern", scope, input, { fresh: true })
 
 		return changeCount(plan) > 0 ? null : "No file would get a new name; nothing to rename"
 	},
 	organize_by_date: async (scope, input) => {
-		const plan = await planFor("organize_by_date", scope, input)
+		const plan = await planFor("organize_by_date", scope, input, { fresh: true })
 
 		return changeCount(plan) > 0 ? null : "No file to sort into a subdirectory; nothing to move"
 	}
@@ -271,7 +272,7 @@ export function isBatchTool(name: string): name is BatchTool {
 
 // What the card lists.
 export async function batchPreview(tool: BatchTool, scope: ToolScope, args: Record<string, unknown>): Promise<AssistantBatchPlan> {
-	const plan = await planFor(tool, scope, args)
+	const plan = await planFor(tool, scope, args, { fresh: false })
 	const rule = Object.fromEntries(
 		(["scheme", "by", "date"] as const).flatMap(key => (typeof args[key] === "string" ? [[key, args[key]]] : []))
 	)

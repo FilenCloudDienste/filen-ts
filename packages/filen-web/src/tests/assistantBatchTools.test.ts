@@ -24,7 +24,8 @@ vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), err
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CONTACTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
-import { driveListingQueryKey } from "@/features/drive/queries/drive"
+import { driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { createAssistantToolExecutor } from "@/features/assistant/tools/executor"
@@ -209,6 +210,16 @@ describe("rename_by_pattern", () => {
 		expect(sdk.renameFile).toHaveBeenCalledOnce()
 	})
 
+	it("plans a repeated request afresh, never from the plan an earlier card held", async () => {
+		await run("rename_by_pattern", { scope: "d1", kind: "image", scheme: "add_suffix", text: "_x" })
+		// hike.jpg is gone by the time the user asks again.
+		sdk.listDirectory.mockResolvedValue({ dirs: [oldRaw], files: [beachRaw, notesRaw] })
+
+		const again = await run("rename_by_pattern", { scope: "d1", kind: "image", scheme: "add_suffix", text: "_x" })
+
+		expect(again.preview?.batch?.changes).toEqual([{ from: "beach.jpg", to: "beach_x.jpg", suffixed: false }])
+	})
+
 	it("never runs without the plan its card showed", async () => {
 		const call = await run("rename_by_pattern", { scope: "d1", kind: "image", scheme: "add_suffix", text: "_x" })
 
@@ -216,6 +227,31 @@ describe("rename_by_pattern", () => {
 
 		expect(await call.execute()).toMatchObject({ ok: false })
 		expect(sdk.renameFile).not.toHaveBeenCalled()
+	})
+})
+
+describe("listing reads", () => {
+	it("plans from the listings the drive holds current, reading none again", async () => {
+		// The user has Photos and its 2023 subdirectory open under a live socket: the drive UI keeps those listings as
+		// they are, with every change since patched in.
+		socketAuthenticated()
+
+		for (const uuid of [PHOTOS, OLD]) {
+			queryClient.removeQueries({ queryKey: driveListingQueryKey({ variant: "drive", uuid }) })
+			await queryClient.query(driveListingQueryOptions("drive", uuid))
+		}
+
+		sdk.listDirectory.mockClear()
+
+		const rename = await run("rename_by_pattern", { scope: "d1", kind: "image", scheme: "date_prefix" })
+
+		expect(await rename.execute()).toMatchObject({ ok: true })
+
+		const sort = await run("organize_by_date", { scope: "d1", by: "year" })
+
+		expect(sort.preview).toMatchObject({ action: "organize-by-date" })
+		expect(sdk.listDirectory).not.toHaveBeenCalled()
+		socketDropped()
 	})
 })
 
