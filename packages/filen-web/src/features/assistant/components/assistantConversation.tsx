@@ -127,10 +127,11 @@ function Announcer({ entries }: { entries: readonly TranscriptEntry[] }) {
 export function AssistantConversation() {
 	const entries = useAssistantStore(state => state.entries)
 	const activeTurnId = useAssistantStore(state => state.activeTurnId)
+	const actions = useAssistantStore(state => state.actions)
 
 	return (
 		<>
-			{entries.length === 0 ? <EmptyConversation /> : <AssistantTranscript rows={transcriptRows(entries, activeTurnId)} />}
+			{entries.length === 0 ? <EmptyConversation /> : <AssistantTranscript rows={transcriptRows(entries, activeTurnId, actions)} />}
 			<Announcer entries={entries} />
 			<AssistantModelStatus />
 			<AssistantDocumentChip />

@@ -185,6 +185,10 @@ describe("transcriptRows", () => {
 		expect(rows.at(-1)).toMatchObject({ kind: "footer", coverage: [{ subject: "report.pdf", coverage }] })
 		expect(coverageKeys(coverage)).toEqual({ note: "assistantCoveredPages", rest: "assistantReadRestPages", restFrom: 24 })
 		expect(transcriptRows([user, { ...steps, outcome: null }, first], "t1").some(row => row.kind === "footer")).toBe(false)
+		expect(
+			transcriptRows([user, { ...steps, steps: [] }, last], null, { t1: { sourceName: "Team", draftChat: "Team" } }).at(-1)
+		).toMatchObject({ kind: "footer", coverage: [], actions: { draftChat: "Team" }, reply: "Done." })
+		expect(transcriptRows([user, { ...last, final: false }], null, { t1: { sourceName: null, draftChat: null } })).toHaveLength(2)
 		expect(extractStepKey({ kind: "slides", from: 3, to: 3, chunk: 1, chunks: 2 })).toBe("assistantStepReadingSlide")
 		expect(extractStepKey({ kind: "pdf", from: 9, to: 14, chunk: 2, chunks: 6 })).toBe("assistantStepReadingPages")
 	})

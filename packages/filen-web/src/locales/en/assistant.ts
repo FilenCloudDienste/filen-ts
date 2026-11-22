@@ -702,5 +702,29 @@ export const assistant = {
 	/** The message Read the rest sends for a presentation */
 	assistantReadRestSlides: "Read {{name}} from slide {{from}} to {{to}}",
 	/** The message Read the rest sends for a spreadsheet */
-	assistantReadRestSheets: "Read {{name}} from sheet {{from}} to {{to}}"
+	assistantReadRestSheets: "Read {{name}} from sheet {{from}} to {{to}}",
+
+	// ── Acting on what was read ──────────────────────────────────────────────
+	/** Accessible name of the buttons under a reply written from a file, note or chat */
+	assistantReplyActions: "Use this reply",
+	/** Button under a reply — copies the reply as shown */
+	assistantReplyCopy: "Copy",
+	/** Toast — the reply was copied */
+	assistantReplyCopied: "Copied",
+	/** Toast — copying failed (no clipboard access) */
+	assistantReplyCopyFailed: "Couldn't copy the reply",
+	/** Button under a reply — saves it as a new note, after a confirmation card */
+	assistantReplySaveNote: "Save as note",
+	/** Button under a reply written from a chat — drafts a reply in that chat; `chat` is its name */
+	assistantReplyDraft: 'Draft reply in "{{chat}}"',
+	/** Button under a reply written from a chat whose name is unknown */
+	assistantReplyDraftUnnamed: "Draft reply",
+	/** The saved note's title; `name` is the file, note or chat the reply was written from */
+	assistantSavedNoteTitle: "{{name}} – summary",
+	/** The saved note's title when the source has no name */
+	assistantSavedNoteTitleFallback: "Assistant summary",
+	/** How a Save as note click reads in the conversation */
+	assistantActSaveNote: "[Save as note]",
+	/** How a Draft reply click reads in the conversation */
+	assistantActDraftReply: "[Draft reply]"
 } as const

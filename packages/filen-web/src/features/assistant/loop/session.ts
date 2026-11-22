@@ -3,8 +3,11 @@ import {
 	AssistantContextError,
 	AssistantMessageTooLongError,
 	messageFitsContext,
+	runActOnRead,
 	runAssistantTurn,
 	windowHistory,
+	type AssistantActOnReadRequest,
+	type AssistantReadSource,
 	type AssistantConfirmationRequest,
 	type AssistantHistoryTurn,
 	type AssistantModel,
@@ -354,19 +357,45 @@ export function createAssistantSession({
 		emit({ type: "model", state })
 	})
 
+	// The turns of this conversation whose reply was written from content they read, which their action row acts on.
+	const readTurns = new Map<string, { message: string; reply: string; noteText: string; sources: readonly AssistantReadSource[] }>()
+
+	// A reply written from what its turn read gets the act-on-read row: Copy and Save as note, and Draft reply when a
+	// chat was read.
+	function offerActions({ turnId, message, result }: { turnId: string; message: string; result: AssistantTurnResult }): void {
+		if (result.withheld || result.readSources.length === 0 || result.reply.trim().length === 0) {
+			return
+		}
+
+		const chat = result.readSources.findLast(source => source.tool === "read_chat")
+		const first = result.readSources[0]
+
+		readTurns.set(turnId, { message, reply: result.reply, noteText: result.noteText, sources: result.readSources })
+		emit({
+			type: "turn-actions",
+			turnId,
+			sourceName: first === undefined ? null : (executor.name?.(first.handle) ?? null),
+			draftChat: chat === undefined ? null : (executor.name?.(chat.handle) ?? "")
+		})
+	}
+
 	async function runTurn({
 		turnId,
 		message,
 		controller,
-		withoutDocument
+		withoutDocument,
+		act
 	}: {
 		turnId: string
+		// The user's message, or how an act-on-read click reads in the conversation ("[Save as note]").
 		message: string
 		controller: AbortController
 		withoutDocument: boolean
+		// A click under an earlier reply: runs that action instead of a routed turn.
+		act?: { request: AssistantActOnReadRequest; origin: string }
 	}): Promise<void> {
 		// Refused before anything loads: a message too long for even a first step would load ~4 GB for nothing.
-		if (!messageFitsContext(message, runtime.model.contextTokens, supportedTools(executor))) {
+		if (act === undefined && !messageFitsContext(message, runtime.model.contextTokens, supportedTools(executor))) {
 			if (active === controller) {
 				active = null
 			}
@@ -486,27 +515,40 @@ export function createAssistantSession({
 				return
 			}
 
-			const run = runAssistantTurn({
-				model: runtime.model,
-				executor: turn.shared,
-				history,
-				message,
-				signal: controller.signal,
-				onEvent,
-				confirm,
-				nonce,
-				secrets,
-				now: calendar.now,
-				timeZone: calendar.timeZone,
-				weekStart: calendar.weekStart
-			})
+			const run =
+				act === undefined
+					? runAssistantTurn({
+							model: runtime.model,
+							executor: turn.shared,
+							history,
+							message,
+							signal: controller.signal,
+							onEvent,
+							confirm,
+							nonce,
+							secrets,
+							now: calendar.now,
+							timeZone: calendar.timeZone,
+							weekStart: calendar.weekStart
+						})
+					: runActOnRead({
+							model: runtime.model,
+							executor: turn.shared,
+							request: act.request,
+							originUserMessage: act.origin,
+							label: message,
+							signal: controller.signal,
+							onEvent,
+							confirm
+						})
 
 			// Stop ends the turn at once, even while a tool still waits on something that ignores the signal (a
 			// paused offline fetch, a navigation a dialog blocked); the loop winds down behind it.
 			winding = run
 
 			const result: AssistantTurnResult = await unlessAborted(run, controller.signal)
-			const replied = result.withheld || result.reply.trim().length > 0
+			// An act-on-read turn answers with its card (or the step saying why there is none), not a reply.
+			const replied = act !== undefined || result.withheld || result.reply.trim().length > 0
 
 			if (turnConversation === conversation && replied) {
 				// A withheld reply is not shown, so the model does not read it back either.
@@ -514,6 +556,7 @@ export function createAssistantSession({
 
 				shownReplies.set(exchange, result.withheld ? "" : result.reply)
 				history = windowHistory([...history, exchange])
+				offerActions({ turnId, message, result })
 			}
 
 			steps.close("done")
@@ -622,6 +665,34 @@ export function createAssistantSession({
 			return turnId
 		},
 
+		act: (sourceTurnId, action, label) => {
+			const read = readTurns.get(sourceTurnId)
+			const chat = read?.sources.findLast(source => source.tool === "read_chat")
+
+			if (read === undefined || shutDown || (action.action === "draft-reply" && chat === undefined)) {
+				return null
+			}
+
+			const handles = read.sources.map(source => source.handle)
+			const request: AssistantActOnReadRequest =
+				action.action === "save-note" || chat === undefined
+					? {
+							action: "save_note",
+							title: action.action === "save-note" ? action.title : "",
+							text: read.noteText,
+							sources: handles
+						}
+					: { action: "draft_reply", chat: chat.handle, payload: read.reply, sources: handles }
+			const turnId = `turn-${String(++turnCount)}`
+			const controller = new AbortController()
+
+			active?.abort()
+			active = controller
+			void runTurn({ turnId, message: label, controller, withoutDocument: false, act: { request, origin: read.message } })
+
+			return turnId
+		},
+
 		cancel: () => {
 			active?.abort()
 		},
@@ -662,6 +733,7 @@ export function createAssistantSession({
 		reset: (resumed = []) => {
 			active?.abort()
 			conversation++
+			readTurns.clear()
 			secrets = conversationSecrets()
 			history = windowHistory(resumed.map(({ user, reply }) => ({ user, reply })))
 			executor.reset(history)

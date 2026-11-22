@@ -41,9 +41,16 @@ export type TranscriptEntry =
 	| { kind: "proposal"; id: string; turnId: string; proposal: AssistantProposal; status: ProposalStatus }
 	| { kind: "turnEnd"; id: string; turnId: string; outcome: "cancelled" | AssistantTurnError }
 
+// A reply's action row (Copy, Save as note, Draft reply), by its turn; this session's only, never saved.
+export interface TurnActions {
+	sourceName: string | null
+	draftChat: string | null
+}
+
 export interface TranscriptState {
 	modelState: AssistantModelState
 	entries: readonly TranscriptEntry[]
+	actions: Readonly<Record<string, TurnActions>>
 	// The turn still producing output; the composer shows Stop while it is set.
 	activeTurnId: string | null
 	// The last turn to finish, read by the polite live region. A counter rather than the id alone, so a
@@ -56,6 +63,7 @@ export const INITIAL_MODEL_STATE: AssistantModelState = { kind: "checking", mode
 export const INITIAL_TRANSCRIPT_STATE: TranscriptState = {
 	modelState: INITIAL_MODEL_STATE,
 	entries: [],
+	actions: {},
 	activeTurnId: null,
 	settled: null
 }
@@ -226,6 +234,10 @@ export function applyAssistantEvent(state: TranscriptState, event: AssistantEven
 
 		case "proposal-settled": {
 			return { ...state, entries: setProposalStatus(state.entries, event.proposalId, event.outcome) }
+		}
+
+		case "turn-actions": {
+			return { ...state, actions: { ...state.actions, [event.turnId]: { sourceName: event.sourceName, draftChat: event.draftChat } } }
 		}
 
 		case "turn-end": {

@@ -23,7 +23,7 @@ function estimateRowSize(row: TranscriptRow | undefined): number {
 		case "thinking":
 			return 48
 		case "footer":
-			return 8 + 20 * row.coverage.length
+			return 8 + 20 * row.coverage.length + (row.actions === null ? 0 : 32)
 		default:
 			return 28
 	}
@@ -111,7 +111,7 @@ function TranscriptRowContent({ row }: { row: TranscriptRow }) {
 				</p>
 			)
 		case "footer":
-			return <AssistantReplyFooter coverage={row.coverage} />
+			return <AssistantReplyFooter row={row} />
 		case "thinking":
 			return (
 				<div

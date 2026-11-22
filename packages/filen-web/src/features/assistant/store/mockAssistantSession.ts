@@ -376,6 +376,8 @@ export function createMockAssistantSession({
 		cancelDownload,
 		deleteModel,
 		send,
+		// The scripted turns read nothing, so no reply offers an action row.
+		act: () => null,
 		cancel,
 		confirm,
 		reject,

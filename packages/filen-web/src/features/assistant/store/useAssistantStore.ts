@@ -107,7 +107,7 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
 		set({ ...INITIAL_TRANSCRIPT_STATE, modelState })
 	},
 	loadConversation: entries => {
-		set({ entries, activeTurnId: null, settled: null })
+		set({ entries, actions: {}, activeTurnId: null, settled: null })
 	}
 }))
 

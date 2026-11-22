@@ -193,6 +193,58 @@ describe("assistant session", () => {
 		])
 	})
 
+	it("offers act-on-read after a chat was read, and drafts the reply into that chat only through its card", async () => {
+		const model = new ScriptedModel({
+			route: "chats read",
+			steps: [
+				call("list_chats", { query: "Maria" }),
+				call("read_chat", { handle: "c1" }),
+				"Maria asks whether Thursday works.",
+				// The draft's own generation, after the click.
+				"Thursday works for me."
+			]
+		})
+		const executor = fakeExecutor({
+			list_chats: { chats: [{ handle: "c1", name: "Maria" }] },
+			read_chat: { handle: "c1", messages: [{ from: "Maria", text: "Does Thursday work?" }] }
+		})
+		const session = createAssistantSession({ runtime: fakeRuntime(model), executor })
+		const events: AssistantEvent[] = []
+
+		session.subscribe(event => events.push(event))
+
+		const read = session.send("What did Maria write?")
+
+		await waitFor(events, event => event.type === "turn-end")
+
+		expect(events).toContainEqual({ type: "turn-actions", turnId: read, sourceName: null, draftChat: "" })
+		expect(session.act("turn-unknown", { action: "draft-reply" }, "[Draft reply]")).toBeNull()
+
+		const draft = session.act(read, { action: "draft-reply" }, "[Draft reply]")
+		const proposal = await waitFor(events, event => event.type === "proposal")
+
+		if (proposal.type !== "proposal") {
+			throw new Error("no proposal")
+		}
+
+		expect(proposal.turnId).toBe(draft)
+		expect(proposal.proposal).toMatchObject({
+			action: "draft-message",
+			targets: [{ handle: "c1" }],
+			text: { text: "Thursday works for me." }
+		})
+		expect(executor.executed.map(entry => entry.call.name)).toEqual(["list_chats", "read_chat"])
+
+		session.confirm(proposal.proposal.id)
+		await waitFor(events, event => event.type === "turn-end" && event.turnId === draft)
+
+		expect(executor.executed.at(-1)).toEqual({
+			call: { name: "draft_chat_message", args: { chat: "c1", text: "Thursday works for me." } },
+			confirmed: true
+		})
+		expect(session.getHistory().at(-1)).toMatchObject({ user: "[Draft reply]" })
+	})
+
 	it("never asks about a consequential call its check refused", async () => {
 		const model = new ScriptedModel({
 			route: "notes change",

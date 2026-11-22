@@ -1,7 +1,7 @@
 import { formatBytesFixed } from "@filen/shared"
 import type { AssistantDocumentCoverage, AssistantDocumentKind } from "@filen/shared/assistant"
 import type { AssistantKey } from "@/lib/i18n"
-import type { TranscriptEntry, TranscriptStep } from "@/features/assistant/store/transcript"
+import type { TranscriptEntry, TranscriptStep, TurnActions } from "@/features/assistant/store/transcript"
 import {
 	NOTE_FLAG_ARGS,
 	type AssistantModelState,
@@ -23,7 +23,15 @@ export interface CoverageNote {
 export type TranscriptRow =
 	| TranscriptEntry
 	| { kind: "thinking"; id: "thinking" }
-	| { kind: "footer"; id: string; turnId: string; coverage: readonly CoverageNote[] }
+	| {
+			kind: "footer"
+			id: string
+			turnId: string
+			coverage: readonly CoverageNote[]
+			// The act-on-read row, and the reply it acts on as shown.
+			actions: TurnActions | null
+			reply: string
+	  }
 
 type DocumentUnitWord = "page" | "slide" | "sheet" | "part"
 
@@ -84,8 +92,9 @@ function coverageNotes(entry: StepsEntry): CoverageNote[] {
 	)
 }
 
-// Each completed turn whose reads covered only part of a document gets a footer row right after its last reply.
-function withFooters(entries: readonly TranscriptEntry[]): readonly TranscriptRow[] {
+// Each completed turn whose reads covered only part of a document, or whose reply can be acted on, gets a footer row
+// right after its last reply.
+function withFooters(entries: readonly TranscriptEntry[], actions: Readonly<Record<string, TurnActions>>): readonly TranscriptRow[] {
 	const footers = new Map<string, CoverageNote[]>()
 	const lastReply = new Map<string, number>()
 
@@ -101,7 +110,7 @@ function withFooters(entries: readonly TranscriptEntry[]): readonly TranscriptRo
 		}
 	}
 
-	if (footers.size === 0) {
+	if (footers.size === 0 && Object.keys(actions).length === 0) {
 		return entries
 	}
 
@@ -111,9 +120,17 @@ function withFooters(entries: readonly TranscriptEntry[]): readonly TranscriptRo
 		rows.push(entry)
 
 		const notes = footers.get(entry.turnId)
+		const offered = actions[entry.turnId] ?? null
 
-		if (notes !== undefined && lastReply.get(entry.turnId) === index) {
-			rows.push({ kind: "footer", id: `footer:${entry.turnId}`, turnId: entry.turnId, coverage: notes })
+		if ((notes !== undefined || offered !== null) && entry.kind === "reply" && entry.final && lastReply.get(entry.turnId) === index) {
+			rows.push({
+				kind: "footer",
+				id: `footer:${entry.turnId}`,
+				turnId: entry.turnId,
+				coverage: notes ?? [],
+				actions: offered,
+				reply: entry.text
+			})
 		}
 	}
 
@@ -195,8 +212,12 @@ export function removableModelBytes(state: AssistantModelState): number {
 
 // The waiting bubble shows only until the turn's step list or reply appears: the list says what is
 // happening from then on.
-export function transcriptRows(entries: readonly TranscriptEntry[], activeTurnId: string | null): readonly TranscriptRow[] {
-	const rows = withFooters(entries)
+export function transcriptRows(
+	entries: readonly TranscriptEntry[],
+	activeTurnId: string | null,
+	actions: Readonly<Record<string, TurnActions>> = {}
+): readonly TranscriptRow[] {
+	const rows = withFooters(entries, actions)
 
 	if (activeTurnId === null) {
 		return rows

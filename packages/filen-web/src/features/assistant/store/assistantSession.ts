@@ -228,50 +228,80 @@ export async function removeAssistantModel(): Promise<void> {
 // Returns whether a turn started. Earlier unanswered cards are rejected first (beginTurn expires them in
 // the transcript), so the runtime never holds a proposal the UI can no longer confirm. A turn that only waits
 // for its card is replaced: the session stops it, and it winds down without writing a closing reply.
-export function sendAssistantMessage(text: string): boolean {
-	const store = useAssistantStore.getState()
-	const message = text.trim()
+// Whether a new turn may start now: a session, no turn running except one waiting on its card, a model that takes
+// messages.
+function canStartTurn(store: ReturnType<typeof useAssistantStore.getState>, active: AssistantSession | null): active is AssistantSession {
+	return active !== null && (store.activeTurnId === null || awaitingConfirmation(store)) && modelAcceptsMessages(store.modelState)
+}
 
-	if (
-		session === null ||
-		message.length === 0 ||
-		(store.activeTurnId !== null && !awaitingConfirmation(store)) ||
-		!modelAcceptsMessages(store.modelState)
-	) {
-		return false
-	}
+// Starts a turn: cards still waiting are answered with no, the events the session emits synchronously wait until the
+// user's row is in the transcript.
+function startTurn(active: AssistantSession, text: string, start: () => string | null): boolean {
+	const store = useAssistantStore.getState()
 
 	for (const proposalId of pendingProposalIds(store.entries)) {
 		liveProposals.delete(proposalId)
-		session.reject(proposalId)
+		active.reject(proposalId)
 	}
 
 	const held: AssistantEvent[] = []
-	const open = getActiveDocument()
-	// Detached (the chip's ×) for this one question; the chip is back for the next.
-	const withoutDocument = open !== null && store.detachedDocument === activeDocumentKey(open)
-	let turnId: string
+	let turnId: string | null
 
 	flushPending()
 	heldDuringSend = held
 
-	if (store.detachedDocument !== null) {
-		store.setDetachedDocument(null)
-	}
-
 	try {
-		turnId = session.send(message, withoutDocument ? { withoutDocument } : undefined)
+		turnId = start()
 	} finally {
 		heldDuringSend = null
 	}
 
+	if (turnId === null) {
+		return false
+	}
+
 	openRequest++
-	store.beginTurn(turnId, message)
+	store.beginTurn(turnId, text)
 
 	store.applyEvents(held)
 	scheduleConversationSave()
 
 	return true
+}
+
+export function sendAssistantMessage(text: string): boolean {
+	const store = useAssistantStore.getState()
+	const message = text.trim()
+	const active = session
+
+	if (message.length === 0 || !canStartTurn(store, active)) {
+		return false
+	}
+
+	const open = getActiveDocument()
+	// Detached (the chip's ×) for this one question; the chip is back for the next.
+	const withoutDocument = open !== null && store.detachedDocument === activeDocumentKey(open)
+
+	if (store.detachedDocument !== null) {
+		store.setDetachedDocument(null)
+	}
+
+	return startTurn(active, message, () => active.send(message, withoutDocument ? { withoutDocument } : undefined))
+}
+
+// A click in a reply's action row: Save as note or Draft reply, a turn of its own that reads as `label`.
+export function actOnAssistantReply(
+	turnId: string,
+	action: { action: "save-note"; title: string } | { action: "draft-reply" },
+	label: string
+): boolean {
+	const active = session
+
+	if (!canStartTurn(useAssistantStore.getState(), active)) {
+		return false
+	}
+
+	return startTurn(active, label, () => active.act(turnId, action, label))
 }
 
 export function cancelAssistantTurn(): void {

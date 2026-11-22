@@ -176,6 +176,10 @@ export type AssistantEvent =
 	| { type: "proposal"; turnId: string; proposal: AssistantProposal }
 	// A confirmed proposal finished. Rejected and expired proposals are settled by the UI itself.
 	| { type: "proposal-settled"; proposalId: string; outcome: "done" | "failed" }
+	// The turn's reply was written from content it read (a file, note or chat): its action row offers Copy and Save as
+	// note, and Draft reply in `draftChat` when a chat was read. `sourceName` names the first thing read, for a note's
+	// title. Never saved with the conversation: the actions act on this session's turn.
+	| { type: "turn-actions"; turnId: string; sourceName: string | null; draftChat: string | null }
 	// `at`: when the turn ended (Date.now()), which closes its duration.
 	| { type: "turn-end"; turnId: string; at: number; outcome: "complete" | "cancelled" }
 	| { type: "turn-end"; turnId: string; at: number; outcome: "error"; error: AssistantTurnError }
@@ -204,6 +208,11 @@ export interface AssistantSession {
 	// while the model is downloaded, loading or ready, and no turn is running. `withoutDocument`: the user detached
 	// the open document (the chip above the composer), so this turn's context leaves it out.
 	send: (message: string, options?: { withoutDocument?: boolean }) => string
+	// A click in a reply's action row ("turn-actions"): starts a turn that saves the reply as a note or drafts a reply
+	// to the chat that was read, through the usual confirmation card; `label` is how the click reads in the
+	// conversation ("[Save as note]"), `title` the note's. Returns the new turn's id, or null when `turnId` offers
+	// no such action. Same conditions as send.
+	act: (turnId: string, action: { action: "save-note"; title: string } | { action: "draft-reply" }, label: string) => string | null
 	// Stops the running turn; it still ends with a "turn-end" event (outcome "cancelled").
 	cancel: () => void
 	// Runs the proposal. Called inside the trusted click handler of the Confirm button, so it MUST start the
