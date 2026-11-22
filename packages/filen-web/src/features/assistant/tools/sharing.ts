@@ -5,7 +5,7 @@ import {
 	ROOT_NOT_SHAREABLE,
 	searchTokens,
 	SHARED_WITH_YOU_NOTE,
-	TRASH_NOTE,
+	trashSectionNote,
 	type ASSISTANT_DRIVE_SECTIONS
 } from "@filen/shared/assistant"
 import { queryClient } from "@/queries/client"
@@ -122,7 +122,7 @@ export const listSectionTool: ToolAdapter = async (input, scope) => {
 				}
 			}),
 			...listRest(sorted.length),
-			...(section === "trash" && sorted.length > 0 ? { note: TRASH_NOTE } : {})
+			...(section === "trash" ? trashSectionNote(sorted.length) : {})
 		}
 	}
 }

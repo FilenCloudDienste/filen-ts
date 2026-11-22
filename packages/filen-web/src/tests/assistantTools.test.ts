@@ -8,7 +8,10 @@ import {
 	assistantToolByName,
 	DIRECTORIES_BY_SIZE_NOTE,
 	LISTING_PAGE_ITEMS,
+	NOTE_TEXT_IN_TITLES,
+	NOTE_TEXT_NO_MATCH_NOTE,
 	parseToolInput,
+	TRASHED_NOTES_NOTE,
 	type AssistantToolFailure
 } from "@filen/shared/assistant"
 import { testUuid } from "@/tests/support/uuid"
@@ -1061,6 +1064,17 @@ describe("read_document", () => {
 		expect(closedDocument.close).toHaveBeenCalledTimes(1)
 		expect(await call("read_document", { handle: "f1", part: "selection" })).toMatchObject({ ok: false })
 	})
+
+	it("sends a text file to read_text_file without downloading it", async () => {
+		await call("list_directory", {})
+
+		expect(await call("read_document", { handle: "f1" })).toMatchObject({
+			ok: false,
+			invalid: true,
+			error: '"readme.md" is a text file; read it with read_text_file'
+		})
+		expect(sdk.downloadFileBytes).not.toHaveBeenCalled()
+	})
 })
 
 describe("reveal_item", () => {
@@ -1187,12 +1201,13 @@ describe("search_note_text", () => {
 		const result = await call("search_note_text", { query: "sugar & salt" })
 
 		expect(json(result)).toEqual({
+			searched:
+				"only 2 of 3 notes, those whose text is saved on this device. The others may contain the words too: tell the user that only 2 of the 3 notes were searched.",
 			notes: [
 				{ handle: "n1", title: "Recipe", tokensMatched: 2, maybeStale: true },
 				{ handle: "n2", title: "Trip plan", tokensMatched: 1, maybeStale: true }
 			],
-			queryTokens: 2,
-			note: "Searched 2 of 3 notes (notes whose text is saved on this device). The others may contain the words too; tell the user the search was partial."
+			queryTokens: 2
 		})
 		expect(sdk.getNoteContent).not.toHaveBeenCalled()
 	})
@@ -1208,13 +1223,26 @@ describe("search_note_text", () => {
 		})
 
 		expect(json(await call("search_note_text", { query: "porto" }))).toEqual({
+			searched: "all 2 notes",
 			notes: [
 				{ handle: "n1", title: "Trip plan", tokensMatched: 1 },
 				{ handle: "n2", title: "Recipe", tokensMatched: 1 }
 			],
-			queryTokens: 1,
-			note: "Searched 2 of 2 notes (notes whose text is saved on this device)."
+			queryTokens: 1
 		})
+	})
+
+	it("sends words only in titles to list_notes, and points there when nothing matches", async () => {
+		sdk.listNotes.mockResolvedValue([plan, recipe])
+		queryClient.setQueryData(noteContentQueryKey(plan.uuid), "Day 1: Lisbon")
+		queryClient.setQueryData(noteContentQueryKey(recipe.uuid), "Flour")
+
+		expect(await call("search_note_text", { query: "recipe" })).toMatchObject({
+			ok: false,
+			invalid: true,
+			error: NOTE_TEXT_IN_TITLES
+		})
+		expect(json(await call("search_note_text", { query: "porto" }))).toMatchObject({ notes: [], note: NOTE_TEXT_NO_MATCH_NOTE })
 	})
 
 	it("stops past the scan cap and says the search was cut, skipping trashed notes", async () => {
@@ -1228,8 +1256,8 @@ describe("search_note_text", () => {
 		const result = json(await call("search_note_text", { query: "lisbon" }))
 
 		expect(result["notes"]).toEqual([expect.objectContaining({ title: "Trip plan" })])
-		expect(result["note"]).toBe(
-			"Searched 1 of 2 notes (notes whose text is saved on this device), stopping at the search limit. The others may contain the words too; tell the user the search was partial."
+		expect(result["searched"]).toBe(
+			"only 1 of 2 notes, those whose text is saved on this device up to the search limit. The others may contain the words too: tell the user that only 1 of the 2 notes were searched."
 		)
 	})
 
@@ -1803,10 +1831,14 @@ describe("drive lists, sharing, contacts and transfers", () => {
 
 		expect(json(await call("list_section", { section: "trash" }))).toMatchObject({
 			items: [{ handle: "f1", name: "readme.md", kind: "file" }],
-			note: "Only the user can delete these for good, in the app. Do not offer to."
+			note: "Only the user can delete these for good, in the app. Do not offer to. Trashed notes are not listed here; list_notes with only trashed lists them."
 		})
 		expect(json(await call("list_section", { section: "trash", query: "readme" }))).toMatchObject({ items: [{ handle: "f1" }] })
-		expect(json(await call("list_section", { section: "trash", query: "invoice" }))).toEqual({ section: "trash", items: [] })
+		expect(json(await call("list_section", { section: "trash", query: "invoice" }))).toEqual({
+			section: "trash",
+			items: [],
+			note: TRASHED_NOTES_NOTE
+		})
 
 		const tool = assistantToolByName("move_items")
 

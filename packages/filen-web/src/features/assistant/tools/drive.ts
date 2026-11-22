@@ -13,6 +13,7 @@ import {
 	normalizeText,
 	OWN_SHARING_UNCHECKED,
 	PARTIAL_MATCH_NOTE,
+	readWithDocument,
 	rawSearchTokens,
 	SEARCH_ENGINE_WORDS,
 	SEARCH_NEEDS_WORDS,
@@ -637,9 +638,7 @@ export const readTextFileTool: ToolAdapter = async (input, scope) => {
 
 	// CSV and TSV preview as spreadsheets but are text.
 	if (!CATEGORY_POLICY[previewType(item)].textFamily && csv !== "csv" && csv !== "tsv") {
-		throw new AssistantToolError(
-			`"${name}" is not a text file; read a PDF, Word document, spreadsheet or presentation with read_document`
-		)
+		throw new AssistantToolError(readWithDocument(name), { invalid: true })
 	}
 
 	if (item.data.size > TEXT_FILE_MAX_BYTES) {

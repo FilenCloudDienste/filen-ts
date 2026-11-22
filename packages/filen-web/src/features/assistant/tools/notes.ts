@@ -3,8 +3,10 @@ import {
 	listRest,
 	matchScore,
 	NOTE_TEXT_NEEDS_WORDS,
+	NOTE_TEXT_IN_TITLES,
+	NOTE_TEXT_NO_MATCH_NOTE,
 	NOTE_TEXT_SCAN_MAX_CHARS,
-	noteTextCoverageNote,
+	noteTextCoverage,
 	NOTES_ITEMS,
 	SEARCH_RESULT_ITEMS,
 	searchTokens
@@ -58,6 +60,11 @@ async function resolveNote(scope: ToolScope, handle: string): Promise<Note> {
 	return note
 }
 
+// What list_notes searches by words.
+function noteTitleAndTags(note: Note): string {
+	return `${noteTitle(note)} ${note.tags.map(tagDisplayName).join(" ")}`
+}
+
 // A date filter and `only` (pinned, favorite, archived, or the trashed notes no other filter lists) apply before the cut, so notes past the first rows
 // (archived notes sort last, favorites are not lifted) are still found. Small models add a period nobody asked for, so one that alone empties a search by words gives
 // way: the notes matching the words come back, with a note that none is dated in the period.
@@ -73,7 +80,7 @@ export const listNotesTool: ToolAdapter = async (input, scope) => {
 		)
 		.map(note => ({
 			note,
-			score: tokens.length === 0 ? 0 : matchScore(`${noteTitle(note)} ${note.tags.map(tagDisplayName).join(" ")}`, tokens)
+			score: tokens.length === 0 ? 0 : matchScore(noteTitleAndTags(note), tokens)
 		}))
 		.filter(({ score }) => tokens.length === 0 || score > 0)
 	const dated = matching.filter(({ note }) => selects(selection, Number(note.editedTimestamp)))
@@ -202,11 +209,16 @@ export const searchNoteTextTool: ToolAdapter = async (input, scope) => {
 		scanned += content.length
 		searched++
 
-		const tokensMatched = matchScore(`${noteTitle(note)}\n${notePlainText(note, content)}`, tokens)
+		const tokensMatched = matchScore(notePlainText(note, content), tokens)
 
 		if (tokensMatched > 0) {
 			hits.push({ note, tokensMatched, maybeStale: heldNoteContentMaybeStale(note.uuid, content) })
 		}
+	}
+
+	// Words only in titles or tags ask for list_notes: every title is held, so this costs no read.
+	if (hits.length === 0 && notes.some(note => matchScore(noteTitleAndTags(note), tokens) > 0)) {
+		throw new AssistantToolError(NOTE_TEXT_IN_TITLES, { invalid: true })
 	}
 
 	// Notes matching the most words first, each count in the sidebar's order.
@@ -214,6 +226,7 @@ export const searchNoteTextTool: ToolAdapter = async (input, scope) => {
 
 	return {
 		value: {
+			...noteTextCoverage({ searched, total: notes.length, cut }),
 			notes: ranked.slice(0, SEARCH_RESULT_ITEMS).map(({ note, tokensMatched, maybeStale }) => {
 				const title = noteTitle(note)
 
@@ -226,7 +239,7 @@ export const searchNoteTextTool: ToolAdapter = async (input, scope) => {
 			}),
 			queryTokens: tokens.length,
 			...listRest(ranked.length, SEARCH_RESULT_ITEMS),
-			note: noteTextCoverageNote({ searched, total: notes.length, cut })
+			...(ranked.length === 0 ? { note: NOTE_TEXT_NO_MATCH_NOTE } : {})
 		}
 	}
 }

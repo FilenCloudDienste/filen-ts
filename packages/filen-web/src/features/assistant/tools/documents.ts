@@ -6,6 +6,7 @@ import {
 	documentRangeText,
 	documentReadRange,
 	normalizeText,
+	readWithTextFile,
 	splitDocumentText,
 	type AssistantDocumentKind
 } from "@filen/shared/assistant"
@@ -27,6 +28,7 @@ import {
 	showDrive,
 	type ToolAdapter
 } from "@/features/assistant/tools/entities"
+import { TEXT_FILE_MAX_BYTES } from "@/features/assistant/tools/drive"
 import { AssistantToolError } from "@/features/assistant/tools/format"
 
 // A closed document is downloaded whole and parsed once for a read; past this it is refused (the user can open it,
@@ -91,6 +93,11 @@ async function closedSource(item: DriveItem, name: string, signal: AbortSignal):
 
 		if (!CATEGORY_POLICY[type].textFamily && csv !== "csv" && csv !== "tsv") {
 			throw new AssistantToolError(`"${name}" is not a document this can read`)
+		}
+
+		// One lane per type: read_text_file reads text files, except one too large for it, which is read here in chunks.
+		if (item.data.size <= TEXT_FILE_MAX_BYTES) {
+			throw new AssistantToolError(readWithTextFile(name), { invalid: true })
 		}
 
 		return await closedTextSource(item, name, signal)
@@ -195,6 +202,12 @@ export const readDocumentTool: ToolAdapter = async (input, scope) => {
 
 	const signal = abortSignalOf(scope.signal) ?? new AbortController().signal
 	const open = openDocumentOf(item)
+
+	// An open text file's selection is read here; the file itself by read_text_file, unless it is too large for that.
+	if (open !== null && documentKind(open.kind) === "text" && input["part"] !== "selection" && item.data.size <= TEXT_FILE_MAX_BYTES) {
+		throw new AssistantToolError(readWithTextFile(name), { invalid: true })
+	}
+
 	const source: DocumentSource =
 		open === null
 			? await closedSource(item, name, signal)

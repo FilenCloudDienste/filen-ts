@@ -178,7 +178,7 @@ async function planRename(scope: ToolScope, args: Record<string, unknown>, key: 
 	})
 
 	if (!result.ok) {
-		throw new AssistantToolError(result.error, { invalid: true })
+		throw new AssistantToolError(result.error, { invalid: result.invalid })
 	}
 
 	return {
@@ -205,7 +205,7 @@ async function planOrganize(scope: ToolScope, args: Record<string, unknown>, key
 	const first = planOrganizeByDate({ ...request, destinationNames: new Map() })
 
 	if (!first.ok) {
-		throw new AssistantToolError(first.error, { invalid: true })
+		throw new AssistantToolError(first.error, { invalid: first.invalid })
 	}
 
 	const destinationNames = new Map<string, readonly string[]>()
@@ -219,7 +219,7 @@ async function planOrganize(scope: ToolScope, args: Record<string, unknown>, key
 	const result = destinationNames.size === 0 ? first : planOrganizeByDate({ ...request, destinationNames })
 
 	if (!result.ok) {
-		throw new AssistantToolError(result.error, { invalid: true })
+		throw new AssistantToolError(result.error, { invalid: result.invalid })
 	}
 
 	return {
