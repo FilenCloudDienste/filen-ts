@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { AssistantGenerateRequest } from "@filen/shared/assistant"
+import { formFillPrompt, speakerNotesPrompt, type AssistantGenerateRequest } from "@filen/shared/assistant"
 import { assistantStubGenerate, assistantStubRequests, loadAssistantStubScript } from "@/e2e-hooks/assistantStubModel"
 
 // The e2e suite's scripted model (e2e-hooks/assistantStubModel.ts): each request kind answers from its part of the script,
@@ -64,6 +64,38 @@ describe("assistant e2e stub", () => {
 				.slice(before)
 				.map(request => request.kind)
 		).toEqual(["router", "formula", "transform", "extract", "draft", "reply", "step"])
+	})
+
+	it("drafts speaker notes and fills a form's fields by their labels, over the real prompts", async () => {
+		const before = assistantStubRequests().length
+		const notes = speakerNotesPrompt("⟦Q3 results⟧")
+		const form = formFillPrompt(
+			[
+				{ id: 7, kind: "text", label: "Full name", options: [], editable: false, multiline: false, maxLength: 0 },
+				{ id: 8, kind: "text", label: "City", options: [], editable: false, multiline: false, maxLength: 0 }
+			],
+			"Jane Doe from Berlin"
+		)
+
+		loadAssistantStubScript({ notes: "Revenue grew this quarter.", form: { City: "Berlin" } })
+
+		const asked = (system: string, user: string, extra: Partial<AssistantGenerateRequest> = {}): AssistantGenerateRequest => ({
+			messages: [
+				{ role: "system", content: system },
+				{ role: "user", content: user }
+			],
+			slot: "extraction",
+			maxTokens: 8,
+			...extra
+		})
+
+		expect((await generate(asked(notes.system, notes.user))).content).toBe("Revenue grew this quarter.")
+		expect((await generate(asked(form.system, form.user, { grammar: "root ::= x" }))).content).toBe("2: Berlin\n")
+		expect(
+			assistantStubRequests()
+				.slice(before)
+				.map(request => request.kind)
+		).toEqual(["notes", "form"])
 	})
 
 	it("plays its steps in order, resolving handles from the context line and rows, then replies", async () => {

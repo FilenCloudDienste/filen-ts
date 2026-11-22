@@ -2,9 +2,16 @@ import type { AssistantModel } from "@filen/shared/assistant"
 import { ASSISTANT_CONTEXT_TOKENS } from "@/features/assistant/runtime/client"
 import { createAssistantSession, type AssistantRuntimeLike } from "@/features/assistant/loop/session"
 import { registerAssistantSession } from "@/features/assistant/store/assistantSession"
-import { registerAssistantFormulaWriter, registerAssistantTransformer } from "@/features/assistant/store/assistantTransform"
+import {
+	registerAssistantFormFiller,
+	registerAssistantFormulaWriter,
+	registerAssistantNotesWriter,
+	registerAssistantTransformer
+} from "@/features/assistant/store/assistantTransform"
 import { createAssistantToolExecutor } from "@/features/assistant/tools/executor"
+import { createAssistantFormFiller } from "@/features/assistant/transform/formFill"
 import { createAssistantFormulaWriter } from "@/features/assistant/transform/formula"
+import { createAssistantNotesWriter } from "@/features/assistant/transform/speakerNotes"
 import { createAssistantTransformer } from "@/features/assistant/transform/run"
 import type { AssistantModelState } from "@/features/assistant/types"
 import { assistantStubGenerate, loadAssistantStubScript, type AssistantStubScript } from "@/e2e-hooks/assistantStubModel"
@@ -51,7 +58,7 @@ const stubRuntime: AssistantRuntimeLike = {
 }
 
 // loadAssistantStubScript; the first call also plugs the stub in place of the on-device runtime: a new session over
-// the real tool executor, the transform and the formula writer.
+// the real tool executor, the transform, the formula writer, the notes writer and the form filler.
 export function setAssistantStubScript(next: AssistantStubScript): void {
 	loadAssistantStubScript(next)
 
@@ -63,4 +70,6 @@ export function setAssistantStubScript(next: AssistantStubScript): void {
 	registerAssistantSession(createAssistantSession({ runtime: stubRuntime, executor: createAssistantToolExecutor() }))
 	registerAssistantTransformer(createAssistantTransformer(stubRuntime))
 	registerAssistantFormulaWriter(createAssistantFormulaWriter(stubRuntime))
+	registerAssistantNotesWriter(createAssistantNotesWriter(stubRuntime))
+	registerAssistantFormFiller(createAssistantFormFiller(stubRuntime))
 }

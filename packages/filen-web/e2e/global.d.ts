@@ -80,10 +80,13 @@ export interface AssistantStubScript {
 	extract?: string
 	transform?: string
 	formula?: string
+	notes?: string
+	// A PDF form fill: each field's value by its label.
+	form?: Record<string, string>
 }
 
 export interface AssistantStubRequest {
-	kind: "router" | "step" | "reply" | "draft" | "extract" | "transform" | "formula"
+	kind: "router" | "step" | "reply" | "draft" | "extract" | "transform" | "formula" | "notes" | "form"
 	tools: string[]
 	last: string
 }

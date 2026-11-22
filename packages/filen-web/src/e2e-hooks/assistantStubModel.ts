@@ -18,7 +18,10 @@ import {
 //   - act-on-read draft: `draft`;
 //   - content extraction (a read file, note, chat or document, and its chunk combine): `extract`;
 //   - selection transform: `transform`;
-//   - spreadsheet formula: `formula`.
+//   - spreadsheet formula: `formula`;
+//   - speaker notes drafted from a slide: `notes`;
+//   - PDF form fill: `form`, the value for each field by its label (the stub answers "N: value" for the fields the
+//     request numbers with those labels, so a spec need not know the page's tab order).
 // A string argument "{{handle:NAME}}" becomes the handle the request shows for an item named NAME (a listing row,
 // the screen context line, by name or as a path's last part, or a single-item result), as the model would copy it.
 export interface AssistantStubScript {
@@ -29,9 +32,11 @@ export interface AssistantStubScript {
 	extract?: string
 	transform?: string
 	formula?: string
+	notes?: string
+	form?: Record<string, string>
 }
 
-export type AssistantStubRequestKind = "router" | "step" | "reply" | "draft" | "extract" | "transform" | "formula"
+export type AssistantStubRequestKind = "router" | "step" | "reply" | "draft" | "extract" | "transform" | "formula" | "notes" | "form"
 
 // What the stub was asked, for specs to assert on: what a tool returned reaches the next step's messages.
 export interface AssistantStubRequest {
@@ -56,8 +61,16 @@ function kindOf(request: AssistantGenerateRequest): AssistantStubRequestKind {
 		case "router":
 			return "router"
 		case "extraction":
+			if (system.startsWith("You fill in a form")) {
+				return "form"
+			}
+
 			if (request.grammar !== undefined) {
 				return "formula"
+			}
+
+			if (system.startsWith("Write short speaker notes")) {
+				return "notes"
 			}
 
 			return system.startsWith("You edit text the user selected.") ? "transform" : "extract"
@@ -129,6 +142,19 @@ function resolveArgs(request: AssistantGenerateRequest, value: unknown): unknown
 	return value
 }
 
+// "N: value" lines for the fields the request numbers ("N. kind ⟦label⟧…") whose label the script gives a value.
+function formAnswer(request: AssistantGenerateRequest, values: Readonly<Record<string, string>>): string {
+	const user = request.messages.at(-1)?.content ?? ""
+
+	return [...user.matchAll(/^(\d+)\. \w+ ⟦([^⟧]*)⟧/gmu)]
+		.flatMap(([, index, label]) => {
+			const value = label === undefined ? undefined : values[label]
+
+			return index === undefined || value === undefined ? [] : [`${index}: ${value}\n`]
+		})
+		.join("")
+}
+
 function answer(request: AssistantGenerateRequest, kind: AssistantStubRequestKind): AssistantGenerateResult {
 	const text = (content: string | undefined, fallback: string): AssistantGenerateResult => ({
 		content: content ?? fallback,
@@ -146,6 +172,10 @@ function answer(request: AssistantGenerateRequest, kind: AssistantStubRequestKin
 			return text(script.transform, "")
 		case "formula":
 			return text(script.formula, "=1")
+		case "notes":
+			return text(script.notes, "")
+		case "form":
+			return text(formAnswer(request, script.form ?? {}), "")
 		case "reply":
 			return text(script.reply, "Done.")
 		case "step": {
