@@ -2,21 +2,14 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { RotateCwIcon } from "lucide-react"
-import { cn } from "@filen/shared"
 import { log, type LogEntry } from "@/lib/log"
-import { collectLogs, formatLogEntry, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
+import { collectLogs, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
 import { sdkApi } from "@/lib/sdk/client"
 import { storage } from "@/lib/storage/adapter"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { Button } from "@/components/ui/button"
+import { LogsList } from "@/features/settings/components/advanced/logsList"
 import { SettingsBlock } from "@/features/settings/components/settingsLayout"
-
-const LEVEL_CLASS: Record<string, string> = {
-	debug: "text-muted-foreground",
-	info: "text-foreground",
-	warn: "text-yellow-500",
-	error: "text-destructive"
-}
 
 // Renders this tab's ring merged with the SDK worker's, the db worker's and the service worker's (collectLogs, see
 // features/settings/lib/logs.ts). The page's own entries show at once; the pull fills in the rest. No live
@@ -56,16 +49,7 @@ function LogsBlock() {
 			{entries.length === 0 ? (
 				<p className="text-sm text-muted-foreground">{t("settingsLogsEmpty")}</p>
 			) : (
-				<div className="max-h-72 overflow-y-auto rounded-2xl bg-muted/40 p-3 font-mono text-xs">
-					{entries.map((entry, index) => (
-						<p
-							key={index}
-							className={cn("truncate", LEVEL_CLASS[entry.level] ?? "text-foreground")}
-						>
-							{formatLogEntry(entry)}
-						</p>
-					))}
-				</div>
+				<LogsList entries={entries} />
 			)}
 			<div className="flex justify-end gap-2">
 				<Button
