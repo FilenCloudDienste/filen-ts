@@ -9,6 +9,8 @@ import type {
 	AssistantDocumentCoverage,
 	AssistantDocumentKind,
 	AssistantRoute,
+	FormFillField,
+	FormFillResult,
 	FormulaCheck,
 	FormulaContext,
 	TransformKind,
@@ -303,6 +305,44 @@ export type AssistantFormulaOutcome =
 
 export interface AssistantFormulaWriter {
 	run: (request: AssistantFormulaRequest) => Promise<AssistantFormulaOutcome>
+	// Signing out: stops the one running and refuses anything further.
+	shutdown: () => void
+}
+
+// Speaker notes drafted from a slide's text (one generation, as a transform): `onText` gets the whole draft so far.
+export interface AssistantNotesRequest {
+	slideText: string
+	signal: AbortSignal
+	onText: (text: string) => void
+	onProgress?: (share: number) => void
+}
+
+// `foreignLinks` and `foreignNumbers`: what the draft holds that the slide does not (Accept is off with any).
+export type AssistantNotesOutcome =
+	| { ok: true; text: string; truncated: boolean; foreignLinks: readonly string[]; foreignNumbers: readonly string[] }
+	| { ok: false; error: "model-unavailable" | "cancelled" | "failed" }
+
+export interface AssistantNotesWriter {
+	run: (request: AssistantNotesRequest) => Promise<AssistantNotesOutcome>
+	// Signing out: stops the one running and refuses anything further.
+	shutdown: () => void
+}
+
+// A form page filled from details the user typed (one grammar-bound generation): only values the user wrote come
+// back, each for a field offered. The details are never kept.
+export interface AssistantFormFillRequest {
+	fields: readonly FormFillField[]
+	details: string
+	signal: AbortSignal
+	onProgress?: (share: number) => void
+}
+
+// "too-long": the details do not fit.
+export type AssistantFormFillOutcome =
+	({ ok: true } & FormFillResult) | { ok: false; error: "too-long" | "model-unavailable" | "cancelled" | "failed" }
+
+export interface AssistantFormFiller {
+	run: (request: AssistantFormFillRequest) => Promise<AssistantFormFillOutcome>
 	// Signing out: stops the one running and refuses anything further.
 	shutdown: () => void
 }
