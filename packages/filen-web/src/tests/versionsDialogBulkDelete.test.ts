@@ -2,12 +2,13 @@
 
 // Deleting several versions runs as an activity whose running state the panel's own spinner shows: only
 // its result toasts, and the panel stays open.
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, FileVersion } from "@filen/sdk-rs"
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 
 const { deleteVersions, toast, versions } = vi.hoisted(() => {
 	function version(uuid: string, timestamp: bigint): FileVersion {
@@ -76,6 +77,17 @@ const file = asFileItem({
 		type: "decoded",
 		data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
 	}
+})
+
+// The version list is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
 })
 
 afterEach(() => {

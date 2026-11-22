@@ -24,7 +24,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { cn } from "@filen/shared"
 import { EmptyMessage } from "@/components/emptyMessage"
-import { LIST_DIALOG_BODY_CLASS, LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
+import { DialogListRows } from "@/components/dialogListRows"
+
+// A row's two lines (20px and 16px) in its py-2.
+const VERSION_ROW_HEIGHT = 52
 
 export interface VersionsDialogProps {
 	file: FileItem
@@ -230,8 +234,11 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 						title={t("driveVersionsEmpty")}
 					/>
 				) : (
-					<ul className={`flex flex-col gap-0.5 overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}>
-						{versions.map(version => {
+					<DialogListRows
+						items={versions}
+						itemKey={version => version.uuid}
+						estimateSize={VERSION_ROW_HEIGHT}
+						renderItem={version => {
 							// The live version can't be usefully restored (it's already current) nor safely
 							// deleted (its uuid IS the file's own current storage blob — deleting it would
 							// destroy the file's live content, not just history).
@@ -247,62 +254,58 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 								</div>
 							)
 
-							return (
-								<li key={version.uuid}>
-									{selectMode ? (
-										<button
-											type="button"
-											disabled={pending || current}
-											aria-pressed={isSelected}
-											onClick={() => {
-												toggleVersionSelected(version.uuid)
-											}}
-											className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none not-aria-pressed:hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
-										>
-											<span
-												aria-hidden="true"
-												className={cn(
-													"flex size-5 shrink-0 items-center justify-center rounded-full ring-1 ring-foreground/25",
-													isSelected && "bg-primary ring-primary"
-												)}
-											>
-												{isSelected ? <CheckIcon className="size-3.5 text-primary-foreground" /> : null}
-											</span>
-											{meta}
-										</button>
-									) : (
-										<div className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm">
-											{meta}
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												disabled={pending || current || !isOnline}
-												aria-label={t("driveVersionsRestoreAction")}
-												title={offlineTitle}
-												onClick={() => {
-													setConfirming({ kind: "restore", version })
-												}}
-											>
-												<RotateCcwIcon />
-											</Button>
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												disabled={pending || current || !isOnline}
-												aria-label={t("driveVersionsDeleteAction")}
-												title={offlineTitle}
-												onClick={() => {
-													setConfirming({ kind: "delete", version })
-												}}
-											>
-												<Trash2Icon />
-											</Button>
-										</div>
-									)}
-								</li>
+							return selectMode ? (
+								<button
+									type="button"
+									disabled={pending || current}
+									aria-pressed={isSelected}
+									onClick={() => {
+										toggleVersionSelected(version.uuid)
+									}}
+									className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none not-aria-pressed:hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+								>
+									<span
+										aria-hidden="true"
+										className={cn(
+											"flex size-5 shrink-0 items-center justify-center rounded-full ring-1 ring-foreground/25",
+											isSelected && "bg-primary ring-primary"
+										)}
+									>
+										{isSelected ? <CheckIcon className="size-3.5 text-primary-foreground" /> : null}
+									</span>
+									{meta}
+								</button>
+							) : (
+								<div className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm">
+									{meta}
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										disabled={pending || current || !isOnline}
+										aria-label={t("driveVersionsRestoreAction")}
+										title={offlineTitle}
+										onClick={() => {
+											setConfirming({ kind: "restore", version })
+										}}
+									>
+										<RotateCcwIcon />
+									</Button>
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										disabled={pending || current || !isOnline}
+										aria-label={t("driveVersionsDeleteAction")}
+										title={offlineTitle}
+										onClick={() => {
+											setConfirming({ kind: "delete", version })
+										}}
+									>
+										<Trash2Icon />
+									</Button>
+								</div>
 							)
-						})}
-					</ul>
+						}}
+					/>
 				)}
 				{candidates.length > 0 ? (
 					<DialogFooter>

@@ -2,12 +2,13 @@
 
 // The versions panel judges "current" against the file as it was when the panel opened, so it closes once
 // a newer version lands or the file leaves the drive, never while one of its own writes is in flight.
-import { describe, it, expect, afterEach, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, FileVersion } from "@filen/sdk-rs"
 import "@/lib/i18n"
+import { stubElementSize } from "@/tests/stubElementSize"
 
 const { deleteFileVersionOp, liveFile, olderVersion } = vi.hoisted(() => {
 	const file = {
@@ -69,6 +70,17 @@ function asFileItem(file: File): FileItem {
 }
 
 const newerRevision = asFileItem({ ...liveFile, uuid: "66666666-6666-6666-6666-666666666666" })
+
+// The version list is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 afterEach(() => {
 	cleanup()
