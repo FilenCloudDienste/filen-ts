@@ -96,9 +96,9 @@ function closeInlinePanel(): void {
 }
 
 // At most 40% of the viewport, so a wide persisted width cannot squeeze the content card away on a laptop
-// screen with the module sidebar open too. A route's side panel keeps the same promise on its own side: the chat info
-// panel turns into its sheet once the card would drop below its minimum (chatInfoLayout.ts). Clamped in JS rather than by a CSS max-width so the resize
-// handle's drag and key bases and its reported value match the width on screen.
+// screen with the module sidebar open too. A route's side panel keeps the same promise on its own side: it turns into
+// its sheet once the card would drop below its minimum (shell/lib/sidePanelLayout.ts). Clamped in JS rather than by a
+// CSS max-width so the resize handle's drag and key bases and its reported value match the width on screen.
 function assistantPanelMaxWidth(viewportWidth: number): number {
 	return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, Math.floor(viewportWidth * 0.4)))
 }
