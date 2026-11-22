@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { stubElementSize } from "@/tests/stubElementSize"
 import { fakeToolContext } from "@/tests/support/pdfToolContext"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 
@@ -32,6 +33,17 @@ vi.mock("@/features/pdf/ocr/ocrSession", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/pdf/ocr/ocrSession")>()),
 	recogniseDocument: (options: { signal: AbortSignal }) => pipeline.run(options.signal)
 }))
+
+// The page list is virtualized: jsdom lays nothing out, so it gets a box to window over.
+let restoreSize: () => void = () => undefined
+
+beforeAll(() => {
+	restoreSize = stubElementSize({ clientHeight: 192, clientWidth: 400 })
+})
+
+afterAll(() => {
+	restoreSize()
+})
 
 const { RecogniseTextDialog } = await import("@/features/pdf/ocr/recogniseTextDialog")
 const { OcrLanguagesRow } = await import("@/features/pdf/ocr/ocrLanguagesRow")
@@ -254,6 +266,30 @@ describe("RecogniseTextDialog", () => {
 		expect(screen.getByText('previewPdfOcrPageWords {"count":3}')).toBeTruthy()
 		expect(screen.getByText("previewPdfOcrPageWorking")).toBeTruthy()
 		expect(screen.getByText('previewPdfPageNumber {"page":4}')).toBeTruthy()
+	})
+
+	it("mounts a window of a long scan's pages, the last one reachable by scrolling", () => {
+		dialog({
+			run: {
+				phase: "recognising",
+				pages: Array.from({ length: 1_000 }, (_, page) => ({ page, status: "waiting" as const, words: 0 }))
+			}
+		})
+
+		const rows = screen.getAllByRole("listitem")
+
+		expect(rows.length).toBeLessThan(40)
+
+		const scroller = rows[0]?.closest("ul")?.parentElement
+
+		if (scroller === null || scroller === undefined) throw new Error("no scroller")
+
+		act(() => {
+			scroller.scrollTop = 1_000 * 29
+			scroller.dispatchEvent(new Event("scroll"))
+		})
+
+		expect(screen.getByText('previewPdfPageNumber {"page":1000}')).toBeTruthy()
 	})
 
 	it("sums up a finished run with its failures", () => {

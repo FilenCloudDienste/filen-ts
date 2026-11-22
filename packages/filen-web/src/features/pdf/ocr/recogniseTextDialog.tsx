@@ -1,4 +1,5 @@
 import { useId, useState } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,7 @@ import {
 	type OcrPageState,
 	type OcrPagesForm
 } from "@/features/pdf/ocr/recogniseText.logic"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 export interface RecogniseTextDialogProps {
 	pageCount: number
@@ -49,10 +51,58 @@ function PageRow({ state }: { state: OcrPageState }) {
 					: t("previewPdfOcrPageFailed")
 
 	return (
-		<li className="flex items-center justify-between gap-3 py-1 text-sm">
+		<>
 			<span>{t("previewPdfPageNumber", { page: state.page + 1 })}</span>
 			<span className={state.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{status}</span>
-		</li>
+		</>
+	)
+}
+
+// A row's line (20px) in its py-1, and the hairline between two rows.
+const PAGE_ROW_HEIGHT = 28
+const PAGE_ROW_DIVIDER = 1
+
+// A scan of a thousand pages lists a thousand rows, each re-rendered as its page progresses: a window over fixed-height
+// rows. Its own component, as useVirtualizer opts its host out of the React Compiler.
+function PageRows({ pages }: { pages: readonly OcrPageState[] }) {
+	"use no memo"
+
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	// divide-y's hairline: below every row but the last, inside its box.
+	const rowHeight = (index: number): number => PAGE_ROW_HEIGHT + (index < pages.length - 1 ? PAGE_ROW_DIVIDER : 0)
+	const virtualizer = useVirtualizer({
+		count: pages.length,
+		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
+		estimateSize: rowHeight,
+		overscan: 10,
+		getItemKey: index => pages[index]?.page ?? index
+	})
+
+	return (
+		<div
+			ref={setScrollElement}
+			className="max-h-48 overflow-y-auto"
+		>
+			<ul
+				className="relative w-full"
+				style={{ height: virtualizer.getTotalSize() }}
+			>
+				{virtualizer.getVirtualItems().map(row => {
+					const state = pages[row.index]
+
+					return state === undefined ? null : (
+						<li
+							key={row.key}
+							className={`absolute top-0 left-0 flex w-full items-center justify-between gap-3 py-1 text-sm ${row.index < pages.length - 1 ? "border-b" : ""}`}
+							style={{ height: rowHeight(row.index), transform: `translateY(${String(row.start)}px)` }}
+						>
+							<PageRow state={state} />
+						</li>
+					)
+				})}
+			</ul>
+		</div>
 	)
 }
 
@@ -103,14 +153,7 @@ function RunProgress({ run }: { run: Exclude<OcrDialogRun, { phase: "modelsFaile
 					{failed > 0 ? <p className="text-destructive">{t("previewPdfOcrFailed", { count: failed })}</p> : null}
 				</div>
 			)}
-			<ul className="max-h-48 divide-y overflow-y-auto">
-				{run.pages.map(state => (
-					<PageRow
-						key={state.page}
-						state={state}
-					/>
-				))}
-			</ul>
+			<PageRows pages={run.pages} />
 		</div>
 	)
 }
