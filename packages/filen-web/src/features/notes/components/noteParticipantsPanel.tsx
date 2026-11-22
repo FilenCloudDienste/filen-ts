@@ -1,7 +1,7 @@
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { MinusIcon, PlusIcon, UserCheckIcon, UserXIcon } from "lucide-react"
+import { MinusIcon, PlusIcon, UserCheckIcon, UsersIcon, UserXIcon } from "lucide-react"
 import type { Contact, Note, NoteParticipant } from "@filen/sdk-rs"
 import { contactDisplayName, deriveBlockedUsers } from "@filen/shared"
 import { isNoteOwner } from "@/features/notes/lib/sort"
@@ -12,18 +12,25 @@ import {
 	type ParticipantPermission,
 	type ParticipantRowModel
 } from "@/features/notes/components/noteParticipantsPanel.logic"
-import { noteParticipantsPanel } from "@/features/notes/store/useNoteParticipantsPanel"
+import {
+	NOTE_PARTICIPANTS_PANEL_ID,
+	NOTE_PARTICIPANTS_TOGGLE_ID,
+	noteParticipantsPanel
+} from "@/features/notes/store/useNoteParticipantsPanel"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
 import { ParticipantsAddView } from "@/features/contacts/components/participantsAddView"
 import { DockedSidePanel, SidePanelSurface, type DockedSurfaceProps } from "@/features/shell/components/dockedSidePanel"
+import { useIsSidePanelNarrow } from "@/features/shell/lib/sidePanelLayout"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
 import { UserAvatar } from "@/components/userAvatar"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -334,8 +341,9 @@ function NoteParticipantsSurface({ note, className, ref, onKeyDown, onClose }: {
 	)
 }
 
-// Mounted by the note editor pane for a readable, untrashed note (the menu offers Participants on no other). From the
-// side panel breakpoint up the panel docks beside the note; below it the panel is a sheet from the right.
+// Mounted by the note editor pane for a readable, untrashed note (the menu offers Participants on no other), for
+// everyone on it. From the side panel breakpoint up the panel docks beside the note; below it the panel is a sheet from
+// the right.
 export function NoteParticipantsHost({ note }: { note: Note }) {
 	const { t } = useTranslation("notes")
 
@@ -352,5 +360,39 @@ export function NoteParticipantsHost({ note }: { note: Note }) {
 				/>
 			)}
 		/>
+	)
+}
+
+// The note header's toggle, beside the ⋮ menu: the participant count with a people icon. Mounted where the host is.
+// Opening it writes nothing, so it stays enabled offline; the writes inside are gated one by one.
+export function NoteParticipantsToggle({ note }: { note: Note }) {
+	const { t } = useTranslation("notes")
+	const narrow = useIsSidePanelNarrow()
+	const open = noteParticipantsPanel.useOpen(note.uuid, narrow)
+	const label = t("noteActionParticipants")
+
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						id={NOTE_PARTICIPANTS_TOGGLE_ID}
+						variant="ghost"
+						size="sm"
+						aria-label={label}
+						aria-expanded={open}
+						aria-controls={open ? NOTE_PARTICIPANTS_PANEL_ID : undefined}
+						className="shrink-0 gap-1 px-2 text-muted-foreground tabular-nums"
+						onClick={() => {
+							noteParticipantsPanel.toggle(note.uuid)
+						}}
+					>
+						<UsersIcon data-icon="inline-start" />
+						{note.participants.length}
+					</Button>
+				}
+			/>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
 	)
 }

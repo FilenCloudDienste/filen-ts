@@ -43,11 +43,9 @@ export interface SidePanelController {
 	setDrawerOpen: (open: boolean) => void
 }
 
-// `returnFocusId`: the control focus goes back to when the inline panel closes with focus inside it (a header toggle).
-// Without one, focus goes back to where it was when the panel took it, if that is still on the page.
-export function createSidePanelController({ panelId, returnFocusId }: { panelId: string; returnFocusId?: string }): SidePanelController {
+// `returnFocusId`: the header toggle focus goes back to when the inline panel closes with focus inside it.
+export function createSidePanelController({ panelId, returnFocusId }: { panelId: string; returnFocusId: string }): SidePanelController {
 	const useStore = create<SidePanelState>(() => ({ panelOpen: false, drawerKey: null, focusRequestedFor: null }))
-	let focusedBefore: HTMLElement | null = null
 
 	function shownPanel(key: string): HTMLElement | null {
 		const panel = document.getElementById(panelId)
@@ -88,14 +86,9 @@ export function createSidePanelController({ panelId, returnFocusId }: { panelId:
 	// Focus elsewhere stays where the user put it.
 	function closeInlinePanel(): void {
 		if (document.getElementById(panelId)?.contains(document.activeElement) === true) {
-			const target = returnFocusId === undefined ? focusedBefore : document.getElementById(returnFocusId)
-
-			if (target?.isConnected === true) {
-				target.focus()
-			}
+			document.getElementById(returnFocusId)?.focus()
 		}
 
-		focusedBefore = null
 		closePanel()
 	}
 
@@ -139,8 +132,6 @@ export function createSidePanelController({ panelId, returnFocusId }: { panelId:
 		}
 
 		if (takeFocusRequest(element.getAttribute(PANEL_KEY_ATTRIBUTE) ?? undefined)) {
-			focusedBefore =
-				document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
 			element.focus()
 		}
 

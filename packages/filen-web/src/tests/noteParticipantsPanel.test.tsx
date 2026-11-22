@@ -42,7 +42,7 @@ vi.mock("@/features/notes/lib/participants", () => participants)
 vi.mock("@/features/contacts/lib/actions", () => block)
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => router, useRouterState: () => "" }))
 
-const { NoteParticipantsHost } = await import("@/features/notes/components/noteParticipantsPanel")
+const { NoteParticipantsHost, NoteParticipantsToggle } = await import("@/features/notes/components/noteParticipantsPanel")
 const { noteParticipantsPanel } = await import("@/features/notes/store/useNoteParticipantsPanel")
 const { useNoteDialogHost } = await import("@/features/notes/hooks/useNoteDialogHost")
 const { SidePanelSlotContext } = await import("@/features/shell/lib/sidePanelSlot")
@@ -52,7 +52,8 @@ const TOM = mockNoteParticipant({ userId: 2n, nickName: "Tom", email: "tom@x.io"
 const JO = mockNoteParticipant({ userId: 3n, nickName: "Jo", email: "jo@x.io", permissionsWrite: false })
 const NOTE = mockNote({ ownerId: 1n, participants: [JO, ANNA, TOM] })
 
-// The note pane's host, a stand-in for the menu's Participants entry, and the shell's side-panel slot beside them.
+// The note header's toggle, the pane's host, a stand-in for the menu's Participants entry, and the shell's side-panel
+// slot beside them.
 function NotePane({ note }: { note: Note }) {
 	const [slot, setSlot] = useState<HTMLDivElement | null>(null)
 	const dialogHost = useNoteDialogHost()
@@ -67,6 +68,7 @@ function NotePane({ note }: { note: Note }) {
 			>
 				Menu entry
 			</button>
+			<NoteParticipantsToggle note={note} />
 			<NoteParticipantsHost note={note} />
 			<div ref={setSlot} />
 		</SidePanelSlotContext>
@@ -337,24 +339,20 @@ describe("note participants panel — toggling", () => {
 		expect(noteParticipantsPanel.useStore.getState().panelOpen).toBe(false)
 	})
 
-	it("closes from its close button and on Escape from inside", () => {
+	it("closes from its close button and on Escape from inside, handing focus to the header toggle", () => {
 		renderPane()
 
-		const entry = screen.getByRole("button", { name: "Menu entry" })
-
-		entry.focus()
 		fireEvent.click(within(openPanel()).getByRole("button", { name: "Close" }))
 
 		expect(screen.queryByRole("complementary")).toBeNull()
-
-		entry.focus()
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Participants" }))
 
 		const panel = openPanel()
 
 		fireEvent.keyDown(within(panel).getByRole("button", { name: "Close" }), { key: "Escape" })
 
 		expect(screen.queryByRole("complementary")).toBeNull()
-		expect(document.activeElement).toBe(entry)
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Participants" }))
 	})
 
 	it("stays open for the next note in the session", () => {
@@ -382,5 +380,50 @@ describe("note participants panel — toggling", () => {
 
 		expect(await screen.findByRole("dialog", { name: "Participants" })).toBeTruthy()
 		expect(noteParticipantsPanel.useStore.getState().drawerKey).toBe(NOTE.uuid)
+	})
+})
+
+describe("note participants panel — header toggle", () => {
+	it("shows the participant count and toggles the panel, reporting itself expanded", () => {
+		renderPane()
+
+		const toggle = screen.getByRole("button", { name: "Participants" })
+
+		expect(toggle.textContent).toBe("3")
+		expect(toggle.getAttribute("aria-expanded")).toBe("false")
+
+		fireEvent.click(toggle)
+
+		const panel = screen.getByRole("complementary", { name: "Participants (3)" })
+
+		expect(document.activeElement).toBe(panel)
+		expect(toggle.getAttribute("aria-expanded")).toBe("true")
+		expect(toggle.getAttribute("aria-controls")).toBe(panel.id)
+
+		fireEvent.click(toggle)
+
+		expect(screen.queryByRole("complementary")).toBeNull()
+		expect(toggle.getAttribute("aria-expanded")).toBe("false")
+	})
+
+	it("opens the read-only panel for a participant who does not own the note", () => {
+		account.id = 2n
+		renderPane()
+
+		fireEvent.click(screen.getByRole("button", { name: "Participants" }))
+
+		const panel = screen.getByRole("complementary", { name: "Participants (3)" })
+
+		expect(within(panel).queryByRole("combobox")).toBeNull()
+		expect(within(panel).queryByRole("button", { name: "Add participants" })).toBeNull()
+	})
+
+	it("opens the sheet below the breakpoint", async () => {
+		viewport.wide = false
+		renderPane()
+
+		fireEvent.click(screen.getByRole("button", { name: "Participants" }))
+
+		expect(await screen.findByRole("dialog", { name: "Participants" })).toBeTruthy()
 	})
 })

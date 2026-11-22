@@ -219,7 +219,7 @@ export const notes = {
 	noteActionCreateTag: "New tag",
 	/** Note menu — opens the type submenu (text/md/code/rich/checklist) */
 	noteActionType: "Change type",
-	/** Note menu — opens or closes the participants panel (owner only) */
+	/** Note menu and the note header's participants button (its tooltip and accessible name) — opens or closes the participants panel */
 	noteActionParticipants: "Participants",
 	/** Note menu — opens the history dialog */
 	noteActionHistory: "History",

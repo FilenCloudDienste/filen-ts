@@ -9,7 +9,7 @@ import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { NoteRemoteEditDialog } from "@/features/notes/components/noteRemoteEditDialog"
-import { NoteParticipantsHost } from "@/features/notes/components/noteParticipantsPanel"
+import { NoteParticipantsHost, NoteParticipantsToggle } from "@/features/notes/components/noteParticipantsPanel"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
@@ -173,6 +173,7 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 						aria-label={t("noteSyncing")}
 					/>
 				) : null}
+				{undecryptable || note.trash ? null : <NoteParticipantsToggle note={note} />}
 				<DropdownMenu>
 					{/* Menu trigger suppressed while inflight — disabled-not-hidden (mobile suppresses the menu
 					entirely mid-sync): acting on a note whose content is mid-flight is blocked, but the
