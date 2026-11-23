@@ -168,7 +168,8 @@ export function proveOdpSlide(input: OdpProofInput): ProofTally {
 	const attempts: { readonly shape: ShapeNode; readonly bytes: Uint8Array }[] = []
 
 	for (const shape of slide.shapes) {
-		if (shape.synthetic === true || shape.lock !== undefined) continue
+		// A shape the session made (an inserted picture, on a page copied since) has no source to prove against.
+		if (shape.synthetic === true || shape.lock !== undefined || shape.src === undefined) continue
 		if (shape.frame !== undefined && shape.frame.kind !== "unknown") continue
 
 		if (!boxProves(fragment, shape)) {
