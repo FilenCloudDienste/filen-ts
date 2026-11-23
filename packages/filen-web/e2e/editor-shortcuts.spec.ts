@@ -32,14 +32,14 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 		const appMod = await resolveModKey(page)
 		const editorMod = await resolveEditorModKey(page)
 
-		// Rendered first; the toggle shortcut opens the source.
-		await expect(dialog.getByText("plain words here")).toBeVisible({ timeout: 30_000 })
-		await page.keyboard.press(`${appMod}+Shift+V`)
-
+		// An editable file opens in live preview; its key switches the same editor to the source.
 		const content = dialog.locator(".cm-content")
 
-		await expect(content).toBeVisible({ timeout: 30_000 })
+		await expect(dialog.locator(".cm-editor.cm-lp")).toBeVisible({ timeout: 30_000 })
 		await focusEditorSurface(content)
+		await page.keyboard.press(`${appMod}+Alt+V`)
+		await expect(dialog.locator(".cm-editor.cm-lp")).toHaveCount(0)
+		await expect(content).toBeFocused()
 
 		// Find opens the command bar's find field, not the listing's search nor CodeMirror's panel; Escape
 		// closes it and leaves the file open.
@@ -105,10 +105,11 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 		await page.keyboard.press(`${appMod}+S`)
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// The saved version opens rendered, and the toggle, unlocked now, goes back to its source.
-		await expect(dialog.getByRole("link", { name: "plain words here" })).toBeVisible({ timeout: 30_000 })
+		// The saved version opens in the editing view last chosen (Source), and the toggle, unlocked now, reads it.
+		await expect(content).toContainText("[plain **words** here](https://filen.io)", { timeout: 30_000 })
+		await focusEditorSurface(content)
 		await page.keyboard.press(`${appMod}+Shift+V`)
-		await expect(content).toContainText("[plain **words** here](https://filen.io)")
+		await expect(dialog.getByRole("link", { name: "plain words here" })).toBeVisible({ timeout: 30_000 })
 	} finally {
 		await page.keyboard.press("Escape").catch(() => undefined)
 		await trashScratchDirectory(page, scratchName)

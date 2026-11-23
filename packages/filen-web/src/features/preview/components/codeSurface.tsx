@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { EditorView } from "@codemirror/view"
+import type { Extension } from "@codemirror/state"
 import { isCodeLanguageId, type CodeLanguageId } from "@filen/office/core/code"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { CodeCommandBar, type MarkdownBar } from "@/features/preview/components/codeCommandBar"
@@ -40,6 +41,8 @@ export interface CodeSurfaceProps {
 	encoding?: TextEncodingControls | undefined
 	// The editor's view as it is created and gone (null): its selection's reader (CodeMirrorSource's own prop).
 	onView?: ((view: EditorView | null) => void) | undefined
+	// The markdown editor's live preview, or null (or omitted) for its source (CodeMirrorSource's own prop).
+	livePreview?: Extension | null | undefined
 }
 
 // "12" or "12:5" (line, column), within the file.
@@ -65,7 +68,8 @@ export function CodeSurface({
 	autoFocus,
 	markdown,
 	encoding,
-	onView
+	onView,
+	livePreview
 }: CodeSurfaceProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const settings = useCodeViewSettings()
@@ -308,6 +312,7 @@ export function CodeSurface({
 					changed={encoding?.converted ?? false}
 					onUnencodable={setUnencodable}
 					onDirtyChange={setDirty}
+					livePreview={livePreview ?? null}
 					// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely.
 					{...(contentRef !== undefined ? { contentRef } : {})}
 					{...(onView !== undefined ? { onView } : {})}

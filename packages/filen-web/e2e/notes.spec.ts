@@ -575,11 +575,12 @@ type NoteTypeUnderTest = Parameters<Window["__filenE2E"]["createTestNoteWithCont
 // content mismatch several steps on.
 async function expectEditorFor(page: Page, noteType: NoteTypeUnderTest): Promise<void> {
 	const main = page.getByRole("main")
-	const mdSplit = main.getByRole("separator", { name: "Resize markdown preview", exact: true })
+	// The md editor's view switch: no other editor has one.
+	const mdSwitch = main.getByRole("button", { name: "Read", exact: true })
 	const surface = {
 		text: main.locator(".cm-content"),
 		code: main.locator(".cm-content"),
-		md: mdSplit,
+		md: mdSwitch,
 		rich: main.locator(".ql-editor"),
 		checklist: main.getByRole("textbox", { name: "Checklist item", exact: true }).first()
 	}[noteType]
@@ -587,9 +588,9 @@ async function expectEditorFor(page: Page, noteType: NoteTypeUnderTest): Promise
 	// Boot budget: behind it are the list read and the content fetch, not UI responsiveness.
 	await expect(surface, `the ${noteType} editor did not open`).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
-	// CodeMirror also backs the md editor, whose split commits with it.
+	// CodeMirror also backs the md editor, whose view switch commits with it.
 	if (noteType === "text" || noteType === "code") {
-		await expect(mdSplit, `a ${noteType} note opened in the md editor`).toHaveCount(0)
+		await expect(mdSwitch, `a ${noteType} note opened in the md editor`).toHaveCount(0)
 	}
 }
 
@@ -644,15 +645,18 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("md note renders both the raw source split and the live preview", async ({ page }) => {
+	test("md note opens in live preview and reads rendered", async ({ page }) => {
 		const content = "# E2E Heading\n\nSome **bold** text."
 		const { uuid } = await createAndOpenTestNote(page, "md", content, "e2e md")
 		const main = page.getByRole("main")
+		const live = main.locator(".cm-editor.cm-lp")
 
 		try {
-			// Left pane: raw markdown source (CodeMirror, read-only).
-			await expect(main.getByText("# E2E Heading", { exact: true })).toBeVisible()
-			// Right pane: the rendered preview — the same heading text, as a real heading element.
+			// Live preview: the source styled in place, its marks hidden until the cursor reaches them.
+			await expect(live.locator(".cm-lp-h1")).toHaveText("E2E Heading")
+			await expect(live.locator(".cm-lp-strong")).toHaveText("bold")
+			// Read: the rendered note — the same heading text, as a real heading element.
+			await main.getByRole("button", { name: "Read", exact: true }).click()
 			await expect(main.getByRole("heading", { level: 1, name: "E2E Heading" })).toBeVisible()
 			await expect(main.locator("strong", { hasText: "bold" })).toBeVisible()
 		} finally {
@@ -740,10 +744,12 @@ async function readServerContent(page: Page, uuid: string): Promise<string> {
 // and Escape leaving the editor for the note's row. The editor keys go through CodeMirror, whose "mod"
 // can differ from the app's under Playwright's device emulation (helpers/modkey.ts).
 test.describe("notes: editor shortcuts", () => {
-	test("a markdown note formats, saves, hides its preview and leaves the editor on its shortcuts", async ({ page }) => {
+	test("a markdown note formats, saves, reads and leaves the editor on its shortcuts", async ({ page }) => {
 		const { uuid } = await createAndOpenTestNote(page, "md", "", "e2e md-keys")
 		const main = page.getByRole("main")
 		const content = main.locator(".cm-content")
+		// Live preview's bold, and Read's.
+		const liveBold = content.locator(".cm-lp-strong", { hasText: "bold" })
 		const bold = main.locator("strong", { hasText: "bold" })
 		const appMod = await resolveModKey(page)
 
@@ -756,19 +762,21 @@ test.describe("notes: editor shortcuts", () => {
 			}
 
 			await page.keyboard.press(`${appMod}+B`)
+			// The selection is in the bold span: live preview shows its marks.
 			await expect(content).toContainText("make this **bold**")
-			await expect(bold).toBeVisible()
+			await expect(liveBold).toBeVisible()
 
 			await page.keyboard.press(`${appMod}+S`)
 			await expect.poll(() => readServerContent(page, uuid), { timeout: 30_000 }).toBe("make this **bold**")
 
-			// The preview pane goes and comes back; the editor keeps its text throughout (never remounted).
+			// Read and back; the editor keeps its text and selection throughout (never remounted) and takes focus back.
+			await page.keyboard.press(`${appMod}+Shift+V`)
+			await expect(bold).toBeVisible()
+			await expect(content).toBeHidden()
 			await page.keyboard.press(`${appMod}+Shift+V`)
 			await expect(bold).toHaveCount(0)
 			await expect(content).toContainText("make this **bold**")
 			await expect(content).toBeFocused()
-			await page.keyboard.press(`${appMod}+Shift+V`)
-			await expect(bold).toBeVisible()
 
 			// The first Escape is the editor's own, collapsing the selection the formatting left; the next
 			// one leaves the editor.
@@ -827,20 +835,20 @@ test.describe("notes: live editors", () => {
 		}
 	})
 
-	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page }) => {
+	test("md edit persists through the debounce and both views reflect it after reload", async ({ page }) => {
 		const headingText = `ReloadHeading-${uniqueSuffix()}`
 		const typed = `# ${headingText}`
 		const { uuid } = await createAndOpenTestNote(page, "md", "", "e2e md-edit")
 		const main = page.getByRole("main")
 
 		try {
-			// Type a markdown heading into the editable LEFT pane.
+			// Type a markdown heading into the editor (live preview, its marks shown on the cursor's line).
 			const editor = main.locator(".cm-content")
 			await focusEditorSurface(editor)
 			await page.keyboard.type(typed)
 
-			// The WHOLE heading is in the EDITABLE pane — scoped to the CodeMirror surface, not to `main`,
-			// which also carries the rendered preview — before anything waits on the server. Without this
+			// The WHOLE heading is in the editor — scoped to the CodeMirror surface, not to `main` — before anything
+			// waits on the server. Without this
 			// an editor torn down mid-word — its remount key advancing under the caret, the rest of the
 			// keystrokes landing on document.body — surfaces 30s later as a server-content mismatch with
 			// nothing to say which layer dropped the text. The sibling kill-path test's
@@ -858,9 +866,10 @@ test.describe("notes: live editors", () => {
 			// on mount (the content query's refetchOnMount:"always" overrides its persisted stale value).
 			await reloadToNote(page)
 
-			// Left pane: the raw markdown source (CodeMirror). Right pane: the rendered heading. Boot
-			// budget on the first one: it is waiting on a cold boot plus that refetch.
-			await expect(main.getByText(typed, { exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			// Live preview: the heading's text in place, its "# " hidden. Read: the rendered heading. Boot budget on
+			// the first one: it is waiting on a cold boot plus that refetch.
+			await expect(main.locator(".cm-lp-h1")).toHaveText(headingText, { timeout: BOOT_SETTLE_TIMEOUT_MS })
+			await main.getByRole("button", { name: "Read", exact: true }).click()
 			await expect(main.getByRole("heading", { level: 1, name: headingText })).toBeVisible()
 		} finally {
 			await deleteNoteQuietly(page, uuid)

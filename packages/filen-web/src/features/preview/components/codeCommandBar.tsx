@@ -58,6 +58,8 @@ import { CODE_FONT_SIZES, setCodeViewSettings, type CodeViewSettings } from "@/f
 import { TEXT_ENCODINGS, textEncodingLabel } from "@filen/shared/textEncoding"
 import { encodingOptionLabel, encodingShortName, type TextFileFormat } from "@/features/preview/lib/textFile"
 import type { TextEncodingControls } from "@/features/preview/hooks/usePreviewTextFile"
+import { MarkdownViewSwitch } from "@/features/preview/components/markdownViewSwitch"
+import type { MarkdownEditMode } from "@/features/preview/lib/markdownView"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { Kbd } from "@/lib/keymap/kbd"
 
@@ -201,7 +203,8 @@ export function EncodingMenu({
 	)
 }
 
-export type MarkdownMode = "rendered" | "source"
+// The rendered view, the source, or (a markdown document's) the source in live preview.
+export type MarkdownMode = "rendered" | "source" | "live"
 
 // Rendered | Source. Switching is locked while the source has unsaved edits (switching would drop the editor that
 // holds them); the switch says why in its tooltip.
@@ -212,10 +215,10 @@ function MarkdownModeSwitch({
 	onMode,
 	switchRef
 }: {
-	mode: MarkdownMode
+	mode: Exclude<MarkdownMode, "live">
 	labels: RenderedViewLabels
 	locked: boolean
-	onMode: (mode: MarkdownMode) => void
+	onMode: (mode: Exclude<MarkdownMode, "live">) => void
 	// The button that switches away from `mode`, focused after a keyboard switch from the editor.
 	switchRef: RefObject<HTMLButtonElement | null> | undefined
 }) {
@@ -286,24 +289,45 @@ export interface MarkdownBar {
 	readonly locked: boolean
 	readonly onMode: (mode: MarkdownMode) => void
 	readonly switchRef?: RefObject<HTMLButtonElement | null>
+	// A markdown document's editing views: the switch is Read and the editing view's menu (markdownViewSwitch.tsx), in
+	// place of Rendered | Source. `editMode`: the editing view Read returns to.
+	readonly live?: { readonly editMode: MarkdownEditMode; readonly available: boolean } | undefined
 }
 
 function markdownGroup(markdown: MarkdownBar, phone: boolean): RibbonGroup {
+	const live = markdown.live
+	const mode = markdown.mode
+
 	return {
 		id: "markdownView",
 		label: markdown.labels.view,
 		icon: EyeIcon,
-		width: phone ? 2 * BAR_BUTTON : 170,
+		width: phone ? 2 * BAR_BUTTON : live === undefined ? 170 : 220,
 		priority: Infinity,
-		content: (
-			<MarkdownModeSwitch
-				mode={markdown.mode}
-				labels={markdown.labels}
-				locked={markdown.locked}
-				onMode={markdown.onMode}
-				switchRef={markdown.switchRef}
-			/>
-		)
+		content:
+			live === undefined ? (
+				<MarkdownModeSwitch
+					// "live" is a markdown document's alone (`live` set).
+					mode={mode === "live" ? "source" : mode}
+					labels={markdown.labels}
+					locked={markdown.locked}
+					onMode={markdown.onMode}
+					switchRef={markdown.switchRef}
+				/>
+			) : (
+				<MarkdownViewSwitch
+					reading={mode === "rendered"}
+					editMode={mode === "rendered" ? live.editMode : mode}
+					liveAvailable={live.available}
+					readLocked={markdown.locked}
+					onRead={reading => {
+						markdown.onMode(reading ? "rendered" : live.editMode)
+					}}
+					onEditMode={markdown.onMode}
+					readRef={markdown.switchRef}
+					viewLabel={markdown.labels.view}
+				/>
+			)
 	}
 }
 

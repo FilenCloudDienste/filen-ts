@@ -1,0 +1,168 @@
+/* The live preview's look (livePreview.ts): prose in the app's sans font, code in the editor's monospace, the elements
+   sized and drawn as the Read view draws them (markdownRenderer.tsx), on the app's tokens in both themes. */
+.cm-editor.cm-lp .cm-content {
+	font-family: var(--font-sans);
+	font-size: 1.08em;
+	line-height: 1.65;
+	--fo-code-heading: currentColor;
+	--fo-code-heading-decoration: none;
+	--fo-code-link: currentColor;
+	--fo-code-link-decoration: none;
+	--fo-code-meta: var(--muted-foreground);
+}
+
+.cm-lp .cm-lp-heading {
+	font-weight: 700;
+}
+
+.cm-lp .cm-lp-h1 {
+	font-size: 1.6em;
+	line-height: 1.4;
+}
+
+.cm-lp .cm-lp-h2 {
+	font-size: 1.35em;
+	line-height: 1.4;
+}
+
+.cm-lp .cm-lp-h3 {
+	font-size: 1.18em;
+	font-weight: 600;
+}
+
+.cm-lp .cm-lp-h4,
+.cm-lp .cm-lp-h5,
+.cm-lp .cm-lp-h6 {
+	font-size: 1em;
+	font-weight: 600;
+}
+
+.cm-lp .cm-lp-setext-mark {
+	color: var(--muted-foreground);
+}
+
+.cm-lp .cm-lp-strong {
+	font-weight: 700;
+}
+
+.cm-lp .cm-lp-em {
+	font-style: italic;
+}
+
+.cm-lp .cm-lp-strike {
+	text-decoration: line-through;
+}
+
+.cm-lp .cm-lp-code {
+	border-radius: 0.25rem;
+	background: var(--muted);
+	padding: 0.1em 0.25em;
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.85em;
+}
+
+.cm-lp .cm-lp-link {
+	color: var(--primary);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.cm-lp .cm-lp-footnote {
+	vertical-align: super;
+	font-size: 0.75em;
+	color: var(--primary);
+}
+
+.cm-lp .cm-lp-definition,
+.cm-lp .cm-lp-list-number {
+	color: var(--muted-foreground);
+}
+
+.cm-lp .cm-lp-bullet {
+	display: inline-block;
+	min-width: 0.75em;
+	color: var(--muted-foreground);
+}
+
+.cm-lp .cm-lp-task {
+	margin: 0 0.4em 0 0;
+	vertical-align: middle;
+	cursor: pointer;
+}
+
+.cm-lp .cm-lp-task:disabled {
+	cursor: default;
+}
+
+.cm-lp .cm-lp-quote {
+	border-left: 2px solid var(--border);
+	padding-left: 0.75rem;
+	color: var(--muted-foreground);
+	font-style: italic;
+}
+
+.cm-lp .cm-lp-hr {
+	background: linear-gradient(var(--border), var(--border)) center / 100% 1px no-repeat;
+}
+
+.cm-lp .cm-lp-fence,
+.cm-lp .cm-lp-codeblock,
+.cm-lp .cm-lp-table-source {
+	background: var(--muted);
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.85em;
+}
+
+.cm-lp .cm-lp-fence-start {
+	border-top-left-radius: 0.5rem;
+	border-top-right-radius: 0.5rem;
+}
+
+.cm-lp .cm-lp-fence-end {
+	border-bottom-left-radius: 0.5rem;
+	border-bottom-right-radius: 0.5rem;
+}
+
+.cm-lp .cm-lp-fence-label {
+	color: var(--muted-foreground);
+	font-size: 0.85em;
+}
+
+.cm-lp .cm-lp-image {
+	display: inline-block;
+	max-width: 100%;
+	border-radius: 0.25rem;
+	vertical-align: bottom;
+}
+
+.cm-lp .cm-lp-image-missing {
+	color: var(--muted-foreground);
+	font-style: italic;
+}
+
+.cm-lp .cm-lp-table {
+	overflow-x: auto;
+	padding: 0.25rem 0;
+}
+
+.cm-lp .cm-lp-table table {
+	border-collapse: collapse;
+	font-size: 0.9em;
+}
+
+.cm-lp .cm-lp-table th,
+.cm-lp .cm-lp-table td {
+	border: 1px solid var(--border);
+	padding: 0.25rem 0.5rem;
+	text-align: left;
+}
+
+.cm-lp .cm-lp-table th {
+	background: var(--muted);
+	font-weight: 500;
+}
+
+.cm-lp .cm-lp-embed-block {
+	display: block;
+	padding: 0.25rem 0;
+}

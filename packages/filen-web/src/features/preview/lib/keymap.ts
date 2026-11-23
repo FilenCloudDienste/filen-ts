@@ -404,6 +404,14 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 		descriptionKey: "preview:previewEditorTogglePreview",
 		hintKey: "settings:keyboardHintMarkdown"
 	},
+	{
+		id: "editor.toggleLivePreview",
+		defaultCombo: "mod+alt+v",
+		scope: "editor",
+		section: "code",
+		descriptionKey: "preview:previewEditorToggleLivePreview",
+		hintKey: "settings:keyboardHintMarkdown"
+	},
 	// The image on screen into editing mode; outside a text field, as a bare letter.
 	{
 		id: "preview.editImage",

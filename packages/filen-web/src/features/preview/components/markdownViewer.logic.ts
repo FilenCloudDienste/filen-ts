@@ -23,6 +23,12 @@ export function markdownUrlTransform(url: string): string | undefined {
 
 const DATA_IMAGE = /^data:image\//i
 
+// The file preview's image policy: an image embedded as a data: URL shows (it loads nothing); any other is named
+// instead, never fetched.
+export function previewImageSource(url: string): string | null {
+	return DATA_IMAGE.test(url) ? url : null
+}
+
 // The file preview's: an image's data: URL survives too (it loads nothing; the CSP admits data: images). Any other
 // image is never fetched: the preview names it instead (previewMarkdown.tsx).
 export function previewMarkdownUrlTransform(url: string, key: string): string | undefined {

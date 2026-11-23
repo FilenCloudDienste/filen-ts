@@ -133,8 +133,10 @@ export const preview = {
 	previewEditorCode: "Inline code (markdown)",
 	/** Shortcuts list — turns the selection into a markdown link (markdown editors only) */
 	previewEditorLink: "Insert link (markdown)",
-	/** Shortcuts list — switches a markdown file between its rendered and source views, or shows/hides a markdown note's preview pane */
+	/** Shortcuts list — switches a markdown document between its rendered (Read) view and its editing view */
 	previewEditorTogglePreview: "Toggle markdown preview",
+	/** Shortcuts list — switches a markdown document's editing view between live preview and source */
+	previewEditorToggleLivePreview: "Toggle markdown live preview",
 
 	// ── Body ─────────────────────────────────────────────────────────────────
 	/** Preview overlay body — shown in place of a viewer for a previewable category with no renderer built yet */

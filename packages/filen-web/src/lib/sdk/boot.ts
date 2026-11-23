@@ -40,6 +40,7 @@ import { loadOfficeViewSettings } from "@/features/office/lib/officeViewSettings
 import { loadRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
 import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
 import { loadCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
+import { loadMarkdownView } from "@/features/preview/lib/markdownView"
 import { loadPresentationNotesLayout } from "@/features/presentation/components/commentsPane.logic"
 import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
@@ -196,6 +197,7 @@ function preloadDevicePreferences(): Promise<void> {
 		loadRibbonCollapsed(),
 		loadDocxFormattingMarks(),
 		loadCodeViewSettings(),
+		loadMarkdownView(),
 		loadSidebarHidden(),
 		loadOcrLanguages(),
 		loadPdfPagesRailOpen(),

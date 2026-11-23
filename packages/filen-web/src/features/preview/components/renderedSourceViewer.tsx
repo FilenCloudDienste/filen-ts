@@ -21,6 +21,8 @@ import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { PreviewErrorState, PreviewLoading, PreviewNotTextState } from "@/features/preview/components/previewErrorState"
+import type { LivePreviewHost } from "@/features/preview/hooks/useLivePreview"
+import { getMarkdownView, livePreviewFits, setMarkdownView, type MarkdownViewChoice } from "@/features/preview/lib/markdownView"
 
 // What the rendered view is drawn from: the file's bytes and its text, decoded once and shared with Source.
 export interface RenderedSource {
@@ -51,6 +53,9 @@ export interface RenderedSourceViewerProps {
 	readAs?: string | null
 	// Published as the open document (markdown; not the formats that render data, such as a calendar).
 	publishes?: boolean
+	// A markdown document's live preview (useLivePreview): its editing view is Live preview or Source, the switch Read
+	// and that view's menu (markdownView.ts). Without it: Rendered | Source.
+	livePreview?: LivePreviewHost
 }
 
 // A text-family file shown rendered, with its source a toggle away (markdown; diagrams, calendars and the like render
@@ -72,13 +77,38 @@ export function RenderedSourceViewer({
 	locked,
 	onTextState,
 	readAs,
-	publishes
+	publishes,
+	livePreview
 }: RenderedSourceViewerProps) {
 	const text = usePreviewTextFile(item, editable === true, onTextState, readAs ?? null)
 	const download = usePreviewDownload()
 
 	useLeaveViewerFullScreen()
-	const [mode, setMode] = useState<MarkdownMode>("rendered")
+	// Rendered | Source, without a live preview.
+	const [plainMode, setPlainMode] = useState<MarkdownMode>("rendered")
+	// With one: the device's choice as this open found it, then the user's here; `chosen` once they switched (until
+	// then a file that cannot be edited opens in Read).
+	const [choice, setChoice] = useState<MarkdownViewChoice>(getMarkdownView)
+	const [chosen, setChosen] = useState(false)
+	const loaded = text.status === "success" ? text : null
+	const canEdit = editable === true && loaded?.writable === true
+	const liveAvailable = loaded === null || livePreviewFits(loaded.file.text)
+	const editMode = liveAvailable ? choice.edit : "source"
+	const reading = chosen ? choice.read : !canEdit || choice.read
+	const mode: MarkdownMode = livePreview === undefined ? plainMode : reading ? "rendered" : editMode
+	const setMode = (next: MarkdownMode): void => {
+		if (livePreview === undefined) {
+			setPlainMode(next === "live" ? "source" : next)
+
+			return
+		}
+
+		const nextChoice: MarkdownViewChoice = next === "rendered" ? { edit: choice.edit, read: true } : { edit: next, read: false }
+
+		setChosen(true)
+		setChoice(nextChoice)
+		setMarkdownView(nextChoice)
+	}
 	// Where focus goes after a keyboard toggle: into the source editor, or onto the command bar's switch when
 	// the toggle unmounted the editor that had it.
 	const [focusAfterToggle, setFocusAfterToggle] = useState<"editor" | "toggle" | null>(null)
@@ -112,10 +142,36 @@ export function RenderedSourceViewer({
 			const focusInside = containerRef.current?.contains(document.activeElement) ?? false
 
 			setFocusAfterToggle(mode === "rendered" ? "editor" : focusInside ? "toggle" : null)
-			setMode(mode === "rendered" ? "source" : "rendered")
+			setMode(mode === "rendered" ? editMode : "rendered")
 		},
 		IN_EDITORS,
-		[dirty, mode]
+		[dirty, mode, editMode, choice, chosen]
+	)
+
+	// Live preview and Source, one editor reconfigured: never locked. From Read, into the other editing view.
+	useAction(
+		"editor.toggleLivePreview",
+		keyboardEvent => {
+			const root = containerRef.current
+
+			if (livePreview === undefined || root === null || !keyForEditor(root, keyboardEvent.target)) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+
+			if (!liveAvailable) {
+				return
+			}
+
+			if (mode === "rendered") {
+				setFocusAfterToggle("editor")
+			}
+
+			setMode(editMode === "live" ? "source" : "live")
+		},
+		IN_EDITORS,
+		[livePreview, liveAvailable, mode, editMode, choice]
 	)
 
 	useEffect(() => {
@@ -134,7 +190,7 @@ export function RenderedSourceViewer({
 	useEffect(() => {
 		rendered.attach(renderedRef.current)
 	})
-	usePreviewTextDocument(text, contentRef, editable === true, publishes === true, mode === "source" ? sourceSelection : rendered.reader)
+	usePreviewTextDocument(text, contentRef, editable === true, publishes === true, mode === "rendered" ? rendered.reader : sourceSelection)
 
 	// The renderer's top document when it is focusable itself (markdown's), else the pane. Only the first document
 	// counts: one nested in a non-focusable document (a notebook's markdown cell) is not the landing.
@@ -186,7 +242,8 @@ export function RenderedSourceViewer({
 		onMode: next => {
 			setFocusAfterToggle(null)
 			setMode(next)
-		}
+		},
+		live: livePreview === undefined ? undefined : { editMode, available: liveAvailable }
 	}
 
 	return (
@@ -204,7 +261,8 @@ export function RenderedSourceViewer({
 					onCommandBarF6(event, event.currentTarget, focusDocument)
 			}}
 		>
-			{mode === "source" ? (
+			{livePreview?.node}
+			{mode !== "rendered" ? (
 				<CodeSurface
 					// Reopened with another encoding: a new text, so a new editor.
 					key={encoding.chosen ?? ""}
@@ -219,6 +277,7 @@ export function RenderedSourceViewer({
 					onDirtyChange={onDirtyChange}
 					contentRef={contentRef}
 					onView={onView}
+					livePreview={mode === "live" ? livePreview?.extension : null}
 				/>
 			) : (
 				<>

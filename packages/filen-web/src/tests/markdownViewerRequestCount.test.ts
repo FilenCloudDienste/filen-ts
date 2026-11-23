@@ -76,6 +76,7 @@ import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
 import { registerAction } from "@/lib/keymap/registry"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
+import { setMarkdownView } from "@/features/preview/lib/markdownView"
 
 const ALT = "readme.md"
 const ORIGINAL = "# Original heading\n\nbody"
@@ -106,8 +107,9 @@ function bytes(text: string): Uint8Array {
 	return new TextEncoder().encode(text)
 }
 
-function toggle(name: "Source" | "Rendered"): void {
-	fireEvent.click(screen.getByRole("button", { name }))
+// Read on or off: off, the editing view (live preview, the device's choice here).
+function toggleRead(): void {
+	fireEvent.click(screen.getByRole("button", { name: "Read" }))
 }
 
 async function sourceEditor(): Promise<HTMLTextAreaElement> {
@@ -124,6 +126,7 @@ beforeAll(() => {
 beforeEach(() => {
 	downloadFileBytes.mockReset()
 	usePreviewUnsavedGuardStore.getState().clear()
+	setMarkdownView({ edit: "live", read: false })
 })
 
 afterEach(() => {
@@ -131,26 +134,27 @@ afterEach(() => {
 })
 
 describe("MarkdownViewer request count", () => {
-	it("rendered -> source -> rendered -> source reuses the one download", async () => {
+	it("read -> editing view -> read -> editing view reuses the one download", async () => {
 		downloadFileBytes.mockResolvedValue(bytes(ORIGINAL))
 		render(createElement(MarkdownViewer, { item: mdFile("readonly"), alt: ALT }), {
 			wrapper: queryClientWrapper(createTestQueryClient())
 		})
 
+		// A read-only file opens in Read.
 		await screen.findByRole("heading", { name: "Original heading" })
-		toggle("Source")
+		toggleRead()
 		expect((await sourceEditor()).value).toBe(ORIGINAL)
 		expect((await sourceEditor()).readOnly).toBe(true)
 
-		toggle("Rendered")
+		toggleRead()
 		await screen.findByRole("heading", { name: "Original heading" })
-		toggle("Source")
+		toggleRead()
 		expect((await sourceEditor()).value).toBe(ORIGINAL)
 
 		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
 	})
 
-	it("source mode keeps editing, dirty tracking and the save buffer, and shows the saved text after a save", async () => {
+	it("the editing view keeps editing, dirty tracking and the save buffer, and shows the saved text after a save", async () => {
 		// Served by uuid, so the saved revision's bytes only ever come from the rotated item.
 		downloadFileBytes.mockImplementation(file =>
 			Promise.resolve(bytes((file as { uuid: string }).uuid.startsWith("after") ? SAVED : ORIGINAL))
@@ -161,8 +165,7 @@ describe("MarkdownViewer request count", () => {
 			wrapper: queryClientWrapper(createTestQueryClient())
 		})
 
-		await screen.findByRole("heading", { name: "Original heading" })
-		toggle("Source")
+		// An editable file opens in its editing view.
 		const editor = await sourceEditor()
 		expect(editor.readOnly).toBe(false)
 		await waitFor(() => {
@@ -177,7 +180,7 @@ describe("MarkdownViewer request count", () => {
 		expect(contentRef.current?.text()).toBe(SAVED)
 
 		// Locked while dirty: the unsaved buffer stays mounted.
-		toggle("Rendered")
+		toggleRead()
 		expect((await sourceEditor()).value).toBe(SAVED)
 
 		// The overlay's save success: dirty reset, buffer released, body re-keyed onto the rotated uuid.
@@ -187,13 +190,11 @@ describe("MarkdownViewer request count", () => {
 		contentRef.current = null
 		rerender(createElement(MarkdownViewer, { key: "after", item: mdFile("after"), ...props }))
 
-		await screen.findByRole("heading", { name: "Saved heading" })
-		toggle("Source")
 		expect((await sourceEditor()).value).toBe(SAVED)
 		expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(false)
-		toggle("Rendered")
+		toggleRead()
 		await screen.findByRole("heading", { name: "Saved heading" })
-		toggle("Source")
+		toggleRead()
 		expect((await sourceEditor()).value).toBe(SAVED)
 
 		// One download per uuid, none per toggle.

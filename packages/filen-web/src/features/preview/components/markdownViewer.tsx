@@ -6,6 +6,8 @@ import type { TextState } from "@/features/preview/hooks/usePreviewTextFile"
 import type { TextBuffer } from "@/features/preview/lib/textFile"
 import { PreviewMarkdown } from "@/features/preview/components/previewMarkdown"
 import { RenderedSourceViewer, type RenderedSource } from "@/features/preview/components/renderedSourceViewer"
+import { useLivePreview } from "@/features/preview/hooks/useLivePreview"
+import { MermaidScopeContext } from "@/features/preview/lib/mermaidScope"
 
 export interface MarkdownViewerProps {
 	item: DriveItem
@@ -29,26 +31,32 @@ function renderMarkdown(source: RenderedSource, alt: string) {
 	)
 }
 
-// A markdown file: rendered (math, images that are not loaded), with its source a toggle away.
+// A markdown file: edited in live preview or as source, or read rendered (math, images that are not loaded); an editable
+// file opens in the device's choice, a read-only one in Read (markdownView.ts).
 // No parameter defaults: the React Compiler skips a component that has them.
 export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked, onTextState, readAs }: MarkdownViewerProps) {
 	const { t } = useTranslation("preview")
+	const livePreview = useLivePreview("preview")
 
+	// The Read view draws its diagrams in the live preview's frame (PreviewMarkdown takes an outer scope): one a document.
 	return (
-		<RenderedSourceViewer
-			item={item}
-			alt={alt}
-			renderer={source => renderMarkdown(source, alt)}
-			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
-			formatting
-			publishes
-			labels={{ view: t("previewCommandBarMarkdownView"), rendered: t("previewCommandBarRendered") }}
-			{...(editable === undefined ? {} : { editable })}
-			{...(onDirtyChange === undefined ? {} : { onDirtyChange })}
-			{...(contentRef === undefined ? {} : { contentRef })}
-			{...(locked === undefined ? {} : { locked })}
-			{...(onTextState === undefined ? {} : { onTextState })}
-			{...(readAs === undefined ? {} : { readAs })}
-		/>
+		<MermaidScopeContext value={livePreview.mermaidScope}>
+			<RenderedSourceViewer
+				item={item}
+				alt={alt}
+				renderer={source => renderMarkdown(source, alt)}
+				tag={codeMirrorLanguageFor(itemTypeExtension(item))}
+				formatting
+				publishes
+				livePreview={livePreview}
+				labels={{ view: t("previewCommandBarMarkdownView"), rendered: t("previewCommandBarRendered") }}
+				{...(editable === undefined ? {} : { editable })}
+				{...(onDirtyChange === undefined ? {} : { onDirtyChange })}
+				{...(contentRef === undefined ? {} : { contentRef })}
+				{...(locked === undefined ? {} : { locked })}
+				{...(onTextState === undefined ? {} : { onTextState })}
+				{...(readAs === undefined ? {} : { readAs })}
+			/>
+		</MermaidScopeContext>
 	)
 }

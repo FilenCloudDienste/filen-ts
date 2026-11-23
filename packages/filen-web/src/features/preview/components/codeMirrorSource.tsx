@@ -52,6 +52,9 @@ export interface CodeMirrorSourceProps {
 	// transform). Unlike `chrome`, it leaves the editor's own wrapping, line numbers and keys alone. Stable for the
 	// editor's life.
 	onView?: (view: EditorView | null) => void
+	// A markdown editor's live preview (lib/livePreview), or null for its plain source. Switched on the live view in a
+	// compartment of its own: the buffer, selection and history carry on.
+	livePreview?: Extension | null
 }
 
 export interface CodeMirrorChrome {
@@ -127,7 +130,8 @@ export function CodeMirrorSource({
 	format,
 	changed: changedProp,
 	onUnencodable,
-	onView
+	onView,
+	livePreview
 }: CodeMirrorSourceProps) {
 	const changed = changedProp === true
 	const editable = editableProp ?? false
@@ -136,6 +140,7 @@ export function CodeMirrorSource({
 	// Find, replace and (in markdown) formatting, on the user's own shortcuts.
 	const editorKeymap = useEditorKeymap(tag === "markdown", chrome?.keymap)
 	const [lock] = useState(emptyCompartment)
+	const [live] = useState(emptyCompartment)
 	// Holds the change listener, installed once the view exists (handleCreateEditor).
 	const [changes] = useState(emptyCompartment)
 	const viewRef = useRef<EditorView | null>(null)
@@ -166,6 +171,7 @@ export function CodeMirrorSource({
 				chrome.extensions,
 				editorKeymap,
 				lock.initial,
+				live.initial,
 				changes.initial,
 				breaksExtension
 			]
@@ -179,6 +185,7 @@ export function CodeMirrorSource({
 					EditorView.lineWrapping,
 					editorKeymap,
 					lock.initial,
+					live.initial,
 					changes.initial,
 					breaksExtension
 				]
@@ -190,6 +197,7 @@ export function CodeMirrorSource({
 					EditorView.lineWrapping,
 					editorKeymap,
 					lock.initial,
+					live.initial,
 					changes.initial,
 					breaksExtension
 				]
@@ -199,6 +207,13 @@ export function CodeMirrorSource({
 	useEffect(() => {
 		viewRef.current?.dispatch({ effects: lock.compartment.reconfigure(isLocked ? LOCKED : []) })
 	}, [lock, isLocked])
+
+	const liveExtension = livePreview ?? null
+
+	// Live preview on or off (or rebuilt) on the live view; a view created with it takes it in handleCreateEditor.
+	useEffect(() => {
+		viewRef.current?.dispatch({ effects: live.compartment.reconfigure(liveExtension ?? []) })
+	}, [live, liveExtension])
 
 	function handleCreateEditor(view: EditorView): void {
 		// Dirty compares against the doc the view was created with, in the editor's own structure, so
@@ -240,9 +255,11 @@ export function CodeMirrorSource({
 		})
 
 		view.dispatch({
-			effects: isLocked
-				? [changes.compartment.reconfigure(listener), lock.compartment.reconfigure(LOCKED)]
-				: changes.compartment.reconfigure(listener)
+			effects: [
+				changes.compartment.reconfigure(listener),
+				...(isLocked ? [lock.compartment.reconfigure(LOCKED)] : []),
+				...(liveExtension === null ? [] : [live.compartment.reconfigure(liveExtension)])
+			]
 		})
 	}
 

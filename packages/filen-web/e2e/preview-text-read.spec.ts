@@ -108,7 +108,16 @@ test("markdown math renders as MathML and its remote images are never fetched", 
 	await listbox.getByRole("option", { name: FORMULAS }).dblclick()
 
 	const dialog = page.getByRole("dialog")
+	const live = dialog.locator(".cm-editor.cm-lp")
 
+	// The fixture is the user's own, so it opens in live preview: the formulas painted in place, the images named.
+	await expect(live).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(live.locator("span[role=math]")).toHaveCount(2)
+	await expect(live.getByText("[image: chart] (not loaded)", { exact: true })).toBeVisible()
+	await expect(live.locator("img")).toHaveCount(0)
+
+	// Read: the rendered page.
+	await dialog.getByRole("button", { name: "Read", exact: true }).click()
 	await expect(dialog.getByRole("heading", { name: "Formulas", level: 1 })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	// Inline and display formulas, each a MathML tree; prices stay text.
@@ -334,6 +343,17 @@ test("Mermaid diagrams draw in their frame and nothing they name is ever fetched
 	const dialog = page.getByRole("dialog")
 
 	await itemRow(listbox, DIAGRAMS).dblclick()
+
+	// The fixture is the user's own, so it opens in live preview, its diagrams judged as Read judges them (the first one
+	// refused) and drawn in the same frame.
+	const live = dialog.locator(".cm-editor.cm-lp")
+
+	await expect(live).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(live.getByText("This diagram uses images or links, which previews don't load.").first()).toBeVisible({
+		timeout: LAZY_VIEWER_TIMEOUT_MS
+	})
+
+	await dialog.getByRole("button", { name: "Read", exact: true }).click()
 	await expect(dialog.getByRole("heading", { name: "Diagrams", level: 1 })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	const surface = page.getByRole("document", { name: DIAGRAMS })

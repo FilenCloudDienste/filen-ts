@@ -1,29 +1,43 @@
 // @vitest-environment jsdom
 
-// The md editor's live preview parses the whole document on every render it gets, so it must follow
-// typing only once typing pauses, and not at all while hidden. CodeMirror, the split pane and the
-// renderer are stubbed down to what carries that contract.
+// The md note editor's views, as the file preview's markdown has them: Live preview or Source in the one editor, or
+// Read, the rendered note. The editor stays mounted while reading (its buffer is the note's), Read renders the value
+// last typed, and the choice is the device's. CodeMirror, the live preview and the renderer are stubbed down to what
+// carries that contract.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { createElement, type ReactNode } from "react"
+import { createElement } from "react"
 import type { Note } from "@filen/sdk-rs"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
+import "@/lib/i18n"
 
-const { renderedPreviews, actions, actionOptions, overlayGuard } = vi.hoisted(() => ({
+const { renderedPreviews, actions, actionOptions, overlayGuard, LIVE } = vi.hoisted(() => ({
 	renderedPreviews: [] as string[],
 	actions: new Map<string, (event: KeyboardEvent) => void>(),
 	actionOptions: new Map<string, unknown>(),
-	overlayGuard: () => true
+	overlayGuard: () => true,
+	LIVE: { live: true }
+}))
+
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	kvDelete: () => Promise.resolve()
 }))
 
 vi.mock("@/features/preview/components/codeMirrorSource", () => ({
-	CodeMirrorSource: ({ onValueChange }: { onValueChange: (value: string) => void }) =>
+	CodeMirrorSource: ({ onValueChange, livePreview }: { onValueChange: (value: string) => void; livePreview: unknown }) =>
 		createElement("textarea", {
 			"aria-label": "source",
+			"data-live": livePreview === LIVE ? "on" : "off",
 			onChange: (event: { target: { value: string } }) => {
 				onValueChange(event.target.value)
 			}
 		})
+}))
+
+vi.mock("@/features/preview/hooks/useLivePreview", () => ({
+	useLivePreview: () => ({ extension: LIVE, node: null })
 }))
 
 vi.mock("@/features/preview/components/markdownRenderer", () => ({
@@ -32,11 +46,6 @@ vi.mock("@/features/preview/components/markdownRenderer", () => ({
 
 		return createElement("output", null, text)
 	}
-}))
-
-vi.mock("@/features/notes/components/markdownSplitPane", () => ({
-	MarkdownSplitPane: ({ left, right, rightHidden }: { left: ReactNode; right: ReactNode; rightHidden: boolean }) =>
-		createElement("div", null, left, rightHidden ? null : right)
 }))
 
 vi.mock("@/lib/keymap/useAction", () => ({
@@ -50,6 +59,7 @@ vi.mock("@/lib/keymap/useAction", () => ({
 }))
 
 const { NoteMarkdownEditor } = await import("@/features/notes/components/noteMarkdownEditor")
+const { getMarkdownView, setMarkdownView } = await import("@/features/preview/lib/markdownView")
 
 const note: Note = {
 	uuid: "note-0000-0000-0000-000000000000",
@@ -81,65 +91,90 @@ const controller: NoteEditorController = {
 	onChange
 }
 
-function type(value: string): void {
-	fireEvent.change(screen.getByLabelText("source"), { target: { value } })
+function editor(): HTMLTextAreaElement {
+	return screen.getByLabelText<HTMLTextAreaElement>("source")
 }
 
-function togglePreview(): void {
+function type(value: string): void {
+	fireEvent.change(editor(), { target: { value } })
+}
+
+function press(action: string): void {
 	act(() => {
-		actions.get("editor.togglePreview")?.(new KeyboardEvent("keydown"))
+		actions.get(action)?.(new KeyboardEvent("keydown"))
 	})
 }
 
 beforeEach(() => {
-	vi.useFakeTimers()
 	renderedPreviews.length = 0
 	onChange.mockClear()
-	render(createElement(NoteMarkdownEditor, { note, controller }))
+	setMarkdownView({ edit: "live", read: false })
 })
 
 afterEach(() => {
 	cleanup()
-	vi.useRealTimers()
 })
 
-describe("NoteMarkdownEditor — preview", () => {
-	it("enqueues every keystroke but renders the preview once, after typing pauses", () => {
+describe("NoteMarkdownEditor — views", () => {
+	it("opens in live preview, enqueuing every keystroke and rendering nothing", () => {
+		render(createElement(NoteMarkdownEditor, { note, controller }))
+
 		type("# a")
 		type("# ab")
-		type("# abc")
 
-		expect(onChange.mock.calls.map(([value]) => value)).toEqual(["# a", "# ab", "# abc"])
-		expect(screen.getByRole("status").textContent).toBe("# seed")
-
-		act(() => {
-			vi.advanceTimersByTime(200)
-		})
-
-		expect(screen.getByRole("status").textContent).toBe("# abc")
-		expect(renderedPreviews.filter(text => text !== "# seed")).toEqual(["# abc"])
+		expect(onChange.mock.calls.map(([value]) => value)).toEqual(["# a", "# ab"])
+		expect(editor().dataset["live"]).toBe("on")
+		expect(renderedPreviews).toEqual([])
 	})
 
-	it("skips the preview while hidden and catches up when shown again", () => {
-		togglePreview()
-		type("# hidden edit")
+	it("reads the value last typed, keeping the editor mounted, and remembers the choice", () => {
+		render(createElement(NoteMarkdownEditor, { note, controller }))
 
-		act(() => {
-			vi.advanceTimersByTime(1000)
-		})
+		type("# typed")
+		fireEvent.click(screen.getByRole("button", { name: "Read" }))
+
+		expect(screen.getByRole("status").textContent).toBe("# typed")
+		expect(editor().closest(".hidden")).not.toBeNull()
+		expect(getMarkdownView()).toEqual({ edit: "live", read: true })
+
+		press("editor.togglePreview")
 
 		expect(screen.queryByRole("status")).toBeNull()
-		expect(renderedPreviews).toEqual(["# seed"])
+		expect(editor().closest(".hidden")).toBeNull()
+		expect(getMarkdownView()).toEqual({ edit: "live", read: false })
+	})
 
-		togglePreview()
+	it("switches live preview and source in the one editor", () => {
+		render(createElement(NoteMarkdownEditor, { note, controller }))
 
-		expect(screen.getByRole("status").textContent).toBe("# hidden edit")
+		const before = editor()
+
+		press("editor.toggleLivePreview")
+
+		expect(editor()).toBe(before)
+		expect(editor().dataset["live"]).toBe("off")
+		expect(getMarkdownView()).toEqual({ edit: "source", read: false })
+
+		press("editor.toggleLivePreview")
+
+		expect(editor().dataset["live"]).toBe("on")
+	})
+
+	it("opens in the device's choice", () => {
+		setMarkdownView({ edit: "source", read: true })
+		render(createElement(NoteMarkdownEditor, { note, controller }))
+
+		expect(screen.getByRole("status").textContent).toBe("# seed")
+		expect(editor().dataset["live"]).toBe("off")
 	})
 })
 
 // A dialog or menu over the note keeps the key (Ctrl+Shift+V pastes there): the guard runs before any preventDefault.
-describe("NoteMarkdownEditor — preview key", () => {
-	it("works in the editor and stands down under an open dialog or menu", () => {
+describe("NoteMarkdownEditor — view keys", () => {
+	it("work in the editor and stand down under an open dialog or menu", () => {
+		render(createElement(NoteMarkdownEditor, { note, controller }))
+
 		expect(actionOptions.get("editor.togglePreview")).toEqual({ enableOnContentEditable: true, ignoreEventWhen: overlayGuard })
+		expect(actionOptions.get("editor.toggleLivePreview")).toEqual({ enableOnContentEditable: true, ignoreEventWhen: overlayGuard })
 	})
 })

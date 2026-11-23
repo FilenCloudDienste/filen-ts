@@ -111,15 +111,17 @@ function DiagramState({ state, source }: { state: Exclude<MermaidDiagramState, {
 }
 
 // A markdown fence, the document's `ordinal`th diagram (its scope counts across a notebook's cells). Without a scope (no
-// diagram host above) it stays its source.
-export function MermaidFence({ source, ordinal: ownOrdinal }: { source: string; ordinal: number }) {
+// diagram host above) it stays its source. `uncounted`: drawn as `ordinal` without taking a place in the scope's count (a
+// live preview's fence, drawn again whenever the editor scrolls back to it; the editor draws only those near its
+// viewport, which bounds them as the count does).
+export function MermaidFence({ source, ordinal: ownOrdinal, uncounted }: { source: string; ordinal: number; uncounted?: boolean }) {
 	const { t } = useTranslation("preview")
 	const scope = useContext(MermaidScopeContext)
 	const [near, setNear] = useState(false)
 	const [asked, setAsked] = useState(false)
 	const ref = useRef<HTMLDivElement>(null)
 	const key = useId()
-	const ordinal = scope === null ? ownOrdinal : scope.ordinalFor(key)
+	const ordinal = scope === null || uncounted === true ? ownOrdinal : scope.ordinalFor(key)
 	const automatic = ordinal < MERMAID_AUTO_RENDER_LIMIT
 
 	useEffect(() => {

@@ -307,10 +307,11 @@ test("code preview renders with syntax highlighting, no CSP console errors", asy
 	expect(cspViolations).toEqual([])
 })
 
-// Proves the react-markdown + remark-gfm rendered view (a real <h1>, a safe external link with
-// target="_blank"/rel="noreferrer"), the view-source toggle (falls back to the same CodeMirror surface
-// the text/code legs above prove), and toggling back — the whole read-only markdown surface end to end.
-test("markdown preview renders GFM content and its view-source toggle round-trips, no CSP console errors", async ({ page }) => {
+// Proves the markdown editing views end to end: an editable file opens in live preview (the source styled in place),
+// Read shows the react-markdown + remark-gfm rendered view (a real <h1>, a safe external link with
+// target="_blank"/rel="noreferrer"), and the editing view's menu switches the same CodeMirror surface the text/code
+// legs above prove to its plain source.
+test("markdown preview renders GFM content and its editing views round-trip, no CSP console errors", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
 	await withScratchDirectory(page, "preview-md", async ({ listbox, runId }) => {
@@ -319,9 +320,18 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await uploadFiles(page, [{ name: nameMd, mimeType: "text/markdown", buffer: MARKDOWN_BYTES }], listbox)
 
 		const row = listbox.getByRole("option", { name: nameMd })
+		const dialog = page.getByRole("dialog")
+		const live = dialog.locator(".cm-editor.cm-lp")
+		const viewRead = dialog.getByRole("button", { name: "Read", exact: true })
 
-		// Opens the react-markdown + remark-gfm lazy chunk for the first time this run.
+		// Live preview: the heading's text in place, its "# " hidden until the cursor reaches it.
 		await row.dblclick()
+		await expect(live).toBeVisible({ timeout: 30_000 })
+		await expect(live.locator(".cm-lp-h1")).toHaveText("Hello Markdown")
+		await expect(live.locator(".cm-lp-link")).toHaveText("safe link")
+
+		// Read: the rendered page (the react-markdown + remark-gfm chunk's first use this run).
+		await viewRead.click()
 		const heading = page.getByRole("heading", { name: "Hello Markdown", level: 1 })
 		await expect(heading).toBeVisible({ timeout: 30_000 })
 
@@ -329,27 +339,20 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await expect(link).toHaveAttribute("target", "_blank")
 		await expect(link).toHaveAttribute("rel", "noreferrer")
 
-		// The Source view — mounts the same CodeMirror surface the text/code legs use, this run's first use
-		// of it since this file never opened via the text/code path.
-		const viewSource = page.getByRole("button", { name: "Source", exact: true })
-		const viewRendered = page.getByRole("button", { name: "Rendered", exact: true })
-
-		await viewSource.click()
-		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
+		// Back to live preview, then to Source through the editing view's menu.
+		await viewRead.click()
+		await expect(live).toBeVisible({ timeout: 15_000 })
 		await expect(heading).toHaveCount(0)
+		await dialog.getByRole("button", { name: "Editing view: Live preview", exact: true }).click()
+		await page.getByRole("menuitemradio", { name: "Source", exact: true }).click()
+		await expect(live).toHaveCount(0)
+		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
 
-		// Back to rendered.
-		await viewRendered.click()
-		await expect(heading).toBeVisible({ timeout: 15_000 })
-
-		// Editing the source: the toggle LOCKS while the buffer is dirty (flipping back to rendered
-		// unmounts the editor, which would discard the buffer and strand the dirty flag), and the header's
-		// Save button appears. The whole toggle/unmount interplay is DOM-only, so this is its only proof.
-		const dialog = page.getByRole("dialog")
+		// Editing the source: Read LOCKS while the buffer is dirty (it unmounts the editor, which would discard the
+		// buffer and strand the dirty flag), and the header's Save button appears. The whole toggle/unmount interplay
+		// is DOM-only, so this is its only proof.
 		const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
 
-		await viewSource.click()
-		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
 		// The FIRST line specifically (a center click on .cm-content could land on the blank second line),
 		// so the typed character lands in the heading and the saved result is observable as one — which is
 		// also why focusEditorSurface is not used here: it clicks the surface, not a chosen line. The
@@ -359,19 +362,21 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await expect(dialog.locator(".cm-content")).toBeFocused()
 		await page.keyboard.press("End")
 		await page.keyboard.type("!")
-		await expect(viewRendered).toBeDisabled()
+		await expect(viewRead).toBeDisabled()
 		await expect(saveButton).toBeVisible()
 
-		// A save rotates the file uuid, which re-keys the body and remounts the viewer in its default
-		// rendered mode — "save, then see the rendered result" is the shipped behavior.
+		// A save rotates the file uuid, which re-keys the body and remounts the viewer in the editing view last
+		// chosen on this device (Source).
 		await saveButton.click()
-		await expect(page.getByRole("heading", { name: "Hello Markdown!", level: 1 })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(page.getByText("# Hello Markdown!")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		// The dirty reset: without it both the Save button and the locked toggle stay in their dirty state
 		// forever, and Escape below would pop a phantom "Unsaved changes" prompt instead of closing. On the
-		// write budget like the heading above, not the expect default — all three close on the same
+		// write budget like the text above, not the expect default — all three close on the same
 		// uuid-rotation remount, so a slow save leaves them arriving together, well past 10s.
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(viewSource).toBeEnabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(viewRead).toBeEnabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await viewRead.click()
+		await expect(page.getByRole("heading", { name: "Hello Markdown!", level: 1 })).toBeVisible({ timeout: 30_000 })
 
 		await page.keyboard.press("Escape")
 		await expect(page.getByRole("alertdialog", { name: "Unsaved changes" })).toHaveCount(0)

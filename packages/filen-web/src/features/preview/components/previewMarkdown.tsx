@@ -5,7 +5,7 @@ import { MarkdownCode, MarkdownPre, MarkdownRenderer } from "@/features/preview/
 import { MathFormula } from "@/features/preview/components/mathFormula"
 import { HighlightedFence } from "@/features/preview/components/highlightedFence"
 import { FenceBudgetContext, newFenceBudget, type FenceBudget } from "@/features/preview/lib/fenceBudget"
-import { previewMarkdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
+import { previewImageSource, previewMarkdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
 import { MermaidFence } from "@/features/preview/components/mermaidDiagram"
 import { useMermaidScope } from "@/features/preview/hooks/useMermaidDiagram"
 import { MermaidScopeContext } from "@/features/preview/lib/mermaidScope"
@@ -75,10 +75,12 @@ const PreviewPre: MarkdownComponents["pre"] = ({ node, children }) => {
 function PreviewImage({ src, alt }: { src?: string | Blob | undefined; alt?: string | undefined }) {
 	const { t } = useTranslation("preview")
 
-	if (typeof src === "string" && src.startsWith("data:image/")) {
+	const source = typeof src === "string" ? previewImageSource(src) : null
+
+	if (source !== null) {
 		return (
 			<img
-				src={src}
+				src={source}
 				alt={alt}
 				className="max-w-full rounded"
 			/>
