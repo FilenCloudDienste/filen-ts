@@ -24,12 +24,13 @@ function canvas(page: Page): Locator {
 
 // A line of the slide as painted (the body being edited paints its own page in the same way).
 function slideLine(page: Page, text: string): Locator {
-	return canvas(page).locator(".fo-docx-line").filter({ hasText: text }).first()
+	return canvas(page).locator(".fo-docx-line").filter({ hasText: text })
 }
 
-// A painted line is a zero-size anchor (docx.css .fo-docx-line) that never counts as visible: its first run does.
+// A painted line is a zero-size anchor (docx.css .fo-docx-line) that never counts as visible: its runs do. While a body is
+// being edited the slide keeps a hidden painting of it under the editor's own, so the first visible run is the one shown.
 function shown(line: Locator): Locator {
-	return line.locator(".fo-docx-run").first()
+	return line.locator(".fo-docx-run").filter({ visible: true }).first()
 }
 
 // The slide's object layer: Tab selects the next object, Enter edits its text with all of it selected.
