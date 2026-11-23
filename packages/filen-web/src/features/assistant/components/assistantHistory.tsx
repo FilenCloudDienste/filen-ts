@@ -185,7 +185,7 @@ export function AssistantHistory() {
 			</div>
 			<div
 				aria-busy={conversations === null}
-				className="min-h-0 flex-1 overflow-y-auto px-3 pb-2"
+				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto px-3 pb-2"
 			>
 				{conversations !== null && conversations.length === 0 ? (
 					<div className="flex flex-col items-center gap-2 px-4 py-10 text-center">

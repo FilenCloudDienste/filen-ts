@@ -289,7 +289,7 @@ export function TransformPopover({
 					</div>
 				) : (
 					<div
-						className="max-h-64 overflow-auto rounded-lg bg-muted/50 px-2.5 py-2 break-words whitespace-pre-wrap"
+						className="max-h-64 scrollbar-gutter-stable overflow-auto rounded-lg bg-muted/50 px-2.5 py-2 break-words whitespace-pre-wrap"
 						aria-busy={writing}
 					>
 						{showChanges && done !== null

@@ -163,7 +163,7 @@ function DraftBody({ proposal }: { proposal: AssistantProposal }) {
 			{recipients.length > 0 ? <DraftRecipients recipients={recipients} /> : null}
 			<p
 				aria-label={t("assistantProposalDraftText")}
-				className="max-h-48 overflow-y-auto rounded-xl bg-muted/60 px-2.5 py-2 text-xs leading-5 wrap-anywhere whitespace-pre-wrap select-text"
+				className="max-h-48 scrollbar-gutter-stable overflow-y-auto rounded-xl bg-muted/60 px-2.5 py-2 text-xs leading-5 wrap-anywhere whitespace-pre-wrap select-text"
 			>
 				{proposal.text["text"] ?? ""}
 			</p>
@@ -212,7 +212,7 @@ function WriteBody({ proposal }: { proposal: AssistantProposal }) {
 			{proposal.targets.length > 0 ? (
 				<ul
 					aria-label={t("assistantProposalItems")}
-					className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl bg-muted/60 px-2.5 py-2"
+					className="flex max-h-40 scrollbar-gutter-stable flex-col gap-1 overflow-y-auto rounded-xl bg-muted/60 px-2.5 py-2"
 				>
 					{proposal.targets.map(target => {
 						const TargetIcon = TARGET_ICONS[proposalTargetKind(target.handle)]

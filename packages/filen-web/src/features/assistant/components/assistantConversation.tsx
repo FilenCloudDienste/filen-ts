@@ -24,7 +24,7 @@ function EmptyConversation() {
 	const { t } = useTranslation("assistant")
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto px-6 py-8 text-center">
+		<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col items-center justify-center gap-3 overflow-y-auto px-6 py-8 text-center">
 			<div
 				aria-hidden="true"
 				className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground"
