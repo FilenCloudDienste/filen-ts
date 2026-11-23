@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page, TestInfo } from "@playwright/test"
 import { test, expect, readFixtureManifest, runChatNamePrefix } from "./fixtures"
 import {
+	assistantConversation,
 	assistantPanel,
 	assistantRequests,
 	openAssistantPanel,
@@ -209,7 +210,8 @@ async function readOpenChat(page: Page, testInfo: TestInfo, seed: string): Promi
 
 	const panel = assistantPanel(page)
 
-	await expect(panel.getByText(READ_REPLY, { exact: true })).toBeVisible()
+	// In the transcript: the settled turn's polite announcement (sr-only, outside it) holds the same words.
+	await expect(assistantConversation(page).getByText(READ_REPLY, { exact: true })).toBeVisible()
 
 	// The real read_chat adapter read the server's messages: the extraction the stub was asked for holds the seed.
 	await expect

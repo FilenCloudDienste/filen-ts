@@ -45,7 +45,7 @@ const DOCX_TEXT = DOCX_FIXTURE_TEXT[DOCX_SOURCE]
 const PREVIEW_TOGGLE = "#assistant-preview-toggle"
 
 function docxPageText(scope: Page | Locator): Locator {
-	return scope.locator(".fo-docx-page").getByText(DOCX_TEXT, { exact: true }).first()
+	return scope.locator(".fo-docx-page").getByText(DOCX_TEXT).first()
 }
 
 // Opens `name` from a non-drive section's listing (Links, Trash). Those accumulate every run's items and virtualize,

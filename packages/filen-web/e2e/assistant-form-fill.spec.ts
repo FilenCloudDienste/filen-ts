@@ -76,7 +76,8 @@ test("the form fill panel fills the page's labelled fields from the details as o
 		await expect(panel).toHaveCount(0, { timeout: SWAP_TIMEOUT_MS })
 
 		const fullName = page.getByRole("textbox", { name: "Full name" })
-		const city = page.getByRole("textbox", { name: "City" })
+		// City is an editable combo box in the fixture (pdf-forms.spec.ts types into it).
+		const city = page.getByRole("combobox", { name: "City" })
 
 		await expect(fullName).toHaveValue("Jane Doe", { timeout: SWAP_TIMEOUT_MS })
 		await expect(city).toHaveValue("Berlin")

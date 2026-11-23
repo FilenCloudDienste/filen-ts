@@ -22,6 +22,11 @@ function line(page: Page, text: string): Locator {
 	return page.locator(".fo-docx-page .fo-docx-line").filter({ hasText: text }).first()
 }
 
+// A painted line is a zero-size anchor (docx.css .fo-docx-line) that never counts as visible: its first run does.
+function shown(line: Locator): Locator {
+	return line.locator(".fo-docx-run").first()
+}
+
 function resultPopover(page: Page): Locator {
 	return page.locator("[data-assistant-transform]")
 }
@@ -37,7 +42,7 @@ async function openDocument(page: Page): Promise<void> {
 	}
 
 	await row.dblclick()
-	await expect(line(page, ORIGINAL)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(shown(line(page, ORIGINAL))).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByRole("button", { name: preview.previewDocxBold, exact: true })).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
@@ -104,7 +109,7 @@ test.describe("assistant selection transform in a DOCX", () => {
 		await expect(accept).toBeEnabled()
 		await accept.click()
 		await expect(popover).toHaveCount(0)
-		await expect(line(page, SHORTENED)).toBeVisible()
+		await expect(shown(line(page, SHORTENED))).toBeVisible()
 		await expect(line(page, ORIGINAL)).toHaveCount(0)
 
 		// One undo step: the whole replacement goes back.
@@ -117,7 +122,7 @@ test.describe("assistant selection transform in a DOCX", () => {
 
 		await page.mouse.click(box.x + box.width - 1, box.y + box.height / 2)
 		await page.keyboard.press(`${mod}+z`)
-		await expect(line(page, ORIGINAL)).toBeVisible()
+		await expect(shown(line(page, ORIGINAL))).toBeVisible()
 		await expect(line(page, SHORTENED)).toHaveCount(0)
 		expect(cspViolations).toEqual([])
 	})
@@ -135,7 +140,7 @@ test.describe("assistant selection transform in a DOCX", () => {
 		await expect(popover.getByRole("button", { name: assistant.assistantTransformAccept })).toBeEnabled()
 		await popover.getByRole("button", { name: assistant.assistantTransformDiscard, exact: true }).click()
 		await expect(popover).toHaveCount(0)
-		await expect(line(page, ORIGINAL)).toBeVisible()
+		await expect(shown(line(page, ORIGINAL))).toBeVisible()
 		await expect(line(page, SHORTENED)).toHaveCount(0)
 	})
 
@@ -153,6 +158,6 @@ test.describe("assistant selection transform in a DOCX", () => {
 		await expect(popover.getByRole("button", { name: assistant.assistantTransformAccept })).toBeDisabled()
 		await popover.getByRole("button", { name: assistant.assistantTransformDiscard, exact: true }).click()
 		await expect(popover).toHaveCount(0)
-		await expect(line(page, ORIGINAL)).toBeVisible()
+		await expect(shown(line(page, ORIGINAL))).toBeVisible()
 	})
 })

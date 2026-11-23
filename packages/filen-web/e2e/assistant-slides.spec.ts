@@ -27,6 +27,11 @@ function slideLine(page: Page, text: string): Locator {
 	return canvas(page).locator(".fo-docx-line").filter({ hasText: text }).first()
 }
 
+// A painted line is a zero-size anchor (docx.css .fo-docx-line) that never counts as visible: its first run does.
+function shown(line: Locator): Locator {
+	return line.locator(".fo-docx-run").first()
+}
+
 // The slide's object layer: Tab selects the next object, Enter edits its text with all of it selected.
 function objectLayer(page: Page): Locator {
 	return page.getByRole("application", { name: preview.previewPptxCanvasLabel, exact: true })
@@ -46,7 +51,7 @@ async function openDeck(page: Page, listbox: Locator, runId: string): Promise<vo
 
 	await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 	await row.dblclick()
-	await expect(slideLine(page, TITLE)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(shown(slideLine(page, TITLE))).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(objectLayer(page)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
@@ -83,12 +88,12 @@ test("Alt+J rewrites the selected text of the body being edited, as one undo ste
 		await expect(accept).toBeEnabled()
 		await accept.click()
 		await expect(popover).toHaveCount(0)
-		await expect(slideLine(page, REWRITTEN)).toBeVisible()
+		await expect(shown(slideLine(page, REWRITTEN))).toBeVisible()
 		expect((await assistantRequests(page)).filter(request => request.kind === "transform").at(-1)?.last).toContain(TITLE)
 
 		// One step of the deck's undo takes the replacement back.
 		await undoButton(page).click()
-		await expect(slideLine(page, TITLE)).toBeVisible()
+		await expect(shown(slideLine(page, TITLE))).toBeVisible()
 		await expect(slideLine(page, REWRITTEN)).toHaveCount(0)
 	})
 	expect(cspViolations).toEqual([])
@@ -112,10 +117,10 @@ test("the slide's Assistant menu rewrites a selected text box; one undo restores
 		await expect(acceptAll).toBeEnabled()
 		await acceptAll.click()
 		await expect(popover).toHaveCount(0)
-		await expect(slideLine(page, REWRITTEN)).toBeVisible()
+		await expect(shown(slideLine(page, REWRITTEN))).toBeVisible()
 
 		await undoButton(page).click()
-		await expect(slideLine(page, TITLE)).toBeVisible()
+		await expect(shown(slideLine(page, TITLE))).toBeVisible()
 		await expect(slideLine(page, REWRITTEN)).toHaveCount(0)
 	})
 })

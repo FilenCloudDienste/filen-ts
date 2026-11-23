@@ -46,6 +46,12 @@ function retentionSelect(page: Page) {
 	return page.getByRole("combobox", { name: RETENTION_TITLE })
 }
 
+// The choice the select shows: its value slot, without the trigger's chevron (Base UI's Select.Icon puts a "▼" text
+// node in it, which the trigger's own text would carry).
+function retentionValue(page: Page) {
+	return retentionSelect(page).locator('[data-slot="select-value"]')
+}
+
 // Opened from the keyboard, as settings.spec.ts's theme switch does: a pointer release can re-select the current item.
 async function chooseRetention(page: Page, label: string): Promise<void> {
 	await expect(page.getByRole("listbox")).toHaveCount(0)
@@ -112,7 +118,7 @@ test.describe("assistant and settings", () => {
 
 		await gotoSettings(page)
 		await openSettingsSection(page, "Assistant")
-		await expect(retentionSelect(page)).toHaveText("Forever")
+		await expect(retentionValue(page)).toHaveText("Forever")
 
 		const confirm = page.getByRole("alertdialog", { name: "Remove saved conversations?" })
 
@@ -122,14 +128,14 @@ test.describe("assistant and settings", () => {
 		await expect(confirm).toContainText(/removed from this device/u)
 		await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
 		await expect(confirm).toHaveCount(0)
-		await expect(retentionSelect(page)).toHaveText("Forever")
+		await expect(retentionValue(page)).toHaveText("Forever")
 
 		// Confirmed, the choice applies and the saved conversation is gone.
 		await chooseRetention(page, "Off")
 		await expect(confirm).toBeVisible()
 		await confirm.getByRole("button", { name: "Remove", exact: true }).click()
 		await expect(confirm).toHaveCount(0)
-		await expect(retentionSelect(page)).toHaveText("Off")
+		await expect(retentionValue(page)).toHaveText("Off")
 
 		await scriptAssistant(page)
 		await openAssistantPanel(page)

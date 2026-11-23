@@ -233,8 +233,18 @@ export async function clickSidebarLink(page: Page, name: string, urlPattern: Reg
 	await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(name, { timeout: BOOT_SETTLE_TIMEOUT_MS })
 }
 
-// From anywhere, down `path` from the drive root; returns the listbox of the directory reached.
+// From anywhere, down `path` from the drive root; returns the listbox of the directory reached. Outside the drive
+// sections the sidebar is another section's (Media's, Notes'…) and has no Cloud Drive link: the icon rail's takes
+// the page to the drive first.
 export async function gotoDirectory(page: Page, path: readonly string[]): Promise<Locator> {
+	if ((await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).count()) === 0) {
+		await clickLinkUntilUrl(
+			page,
+			page.getByRole("navigation", { name: "Filen" }).getByRole("link", { name: "Cloud Drive", exact: true }).last(),
+			/\/drive/
+		)
+	}
+
 	await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 
 	const { listbox } = await waitForListingSettled(page)
