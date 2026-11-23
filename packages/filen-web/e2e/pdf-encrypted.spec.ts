@@ -84,9 +84,12 @@ test("keeps an owner-restricted file's tools off until the owner password unlock
 		const dialog = await openPdf(page, listbox, name)
 
 		await protectTab(dialog)
-		// Choosing a tool starts the editor, which reads the author's restrictions.
+		// Choosing a tool starts the editor, which reads the author's restrictions. The notice is its status line: each
+		// switched-off tool carries the same words as its sr-only description.
+		const restrictedNotice = dialog.getByRole("status").filter({ hasText: preview.previewPdfOwnerRestricted })
+
 		await dialog.getByRole("button", { name: preview.previewPdfSecurityTitle }).click()
-		await expect(dialog.getByText(preview.previewPdfOwnerRestricted)).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(restrictedNotice).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 		await page.keyboard.press("Escape")
 		await expect(dialog.getByRole("button", { name: preview.previewPdfRedactArea })).toBeDisabled()
 
@@ -100,7 +103,7 @@ test("keeps an owner-restricted file's tools off until the owner password unlock
 		await unlock.getByLabel(preview.previewPdfSecurityUnlockLabel).fill("owner pw")
 		await unlock.getByRole("button", { name: preview.previewPdfSecurityUnlockAction }).click()
 		await expect(unlock).toBeHidden()
-		await expect(dialog.getByText(preview.previewPdfOwnerRestricted)).toBeHidden()
+		await expect(restrictedNotice).toBeHidden()
 		await expect(dialog.getByRole("button", { name: preview.previewPdfRedactArea })).toBeEnabled()
 	})
 })

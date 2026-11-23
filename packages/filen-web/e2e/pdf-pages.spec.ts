@@ -101,7 +101,8 @@ test("organises pages with the keyboard alone and saves them", async ({ page }) 
 		await expect(live).toHaveText("2 pages deleted")
 		await expect(options).toHaveCount(1)
 		await page.keyboard.press("Delete")
-		await expect(page.getByText(preview.previewPdfPagesLastPage)).toBeVisible()
+		// Its toast; the switched-off Delete button carries the same words as its sr-only description.
+		await expect(page.getByRole("region", { name: "Notifications" }).getByText(preview.previewPdfPagesLastPage)).toBeVisible()
 		await expect(options).toHaveCount(1)
 
 		// Undo brings the pages back.

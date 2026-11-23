@@ -654,7 +654,18 @@ test.describe("archive compress", () => {
 
 			const browser = await openArchive(page, listbox, archiveName(firstJob))
 			const title = browser.overlay.locator("h2").first()
-			const slotName = async (): Promise<string> => ((await title.textContent()) ?? "").trim()
+			// The title as it is read out: a long one renders twice, whole for assistive technology and split in two
+			// aria-hidden halves on screen (splitTitle.tsx), so its raw textContent holds the name twice.
+			const slotName = (): Promise<string> =>
+				title.evaluate(element => {
+					const copy = element.cloneNode(true) as Element
+
+					for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+						hidden.remove()
+					}
+
+					return copy.textContent.trim()
+				})
 			const previous = browser.overlay.getByRole("button", { name: "Previous file", exact: true })
 			const next = browser.overlay.getByRole("button", { name: "Next file", exact: true })
 			const step = async (button: Locator): Promise<void> => {
