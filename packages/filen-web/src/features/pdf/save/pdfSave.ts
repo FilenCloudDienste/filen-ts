@@ -353,8 +353,10 @@ export function savePdfCopy(
 	})
 }
 
-// The engine's digests answered by the signer worker, over a channel the signing save holds.
-function signerChannel(job: PdfSignedSaveJob): MessagePort {
+// The engine's digests answered by the signer worker, over a channel the signing save holds: the caller keeps its end
+// here referenced until the signing settles, then closes it. Referenced by its listener alone, a port can be collected
+// while the engine still computes the digest (WebKit), and the signing then waits for that digest for good.
+function signerChannel(job: PdfSignedSaveJob): { readonly port: MessagePort; close(): void } {
 	const channel = new MessageChannel()
 
 	channel.port2.onmessage = (event: MessageEvent<{ readonly digest: Uint8Array }>) => {
@@ -368,7 +370,12 @@ function signerChannel(job: PdfSignedSaveJob): MessagePort {
 		)
 	}
 
-	return channel.port1
+	return {
+		port: channel.port1,
+		close: () => {
+			channel.port2.close()
+		}
+	}
 }
 
 // The last segment of a field's name: its own name (/T), as pdf.js reports a signature.
@@ -390,10 +397,11 @@ async function signedVersion(
 	job: PdfSignedSaveJob,
 	release: () => void
 ): Promise<PresentationSaveEdits> {
-	const port = signerChannel(job)
+	const signer = signerChannel(job)
 	const begun = await deps.engine.client
-		.call("signBegin", { inputBytes: deps.fileBytes, memory: deps.memory, digest: job.digest, signer: port }, [port])
+		.call("signBegin", { inputBytes: deps.fileBytes, memory: deps.memory, digest: job.digest, signer: signer.port }, [signer.port])
 		.finally(() => {
+			signer.close()
 			job.signer.terminate()
 		})
 
