@@ -6,13 +6,14 @@ export interface PdfByteSource {
 	read(offset: number, length: number): Promise<Uint8Array>
 }
 
-// An incremental hash: WebCrypto has no streaming digest.
+// An incremental hash (WebCrypto has no streaming digest). update() copies or consumes its bytes before it returns.
 export interface PdfDigest {
 	update(bytes: Uint8Array): void
-	digest(): Uint8Array
+	digest(): Promise<Uint8Array>
 }
 
-export type PdfDigestFactory = (name: PdfDigestName) => Promise<PdfDigest>
+// `length`, when known, is the number of bytes that will be hashed: what lets a small input be hashed in one call.
+export type PdfDigestFactory = (name: PdfDigestName, length?: number) => Promise<PdfDigest>
 
 // Digests stream through runs of this size: large enough to amortise a read, small enough to never matter.
 export const DIGEST_RUN_BYTES = 4 * 1024 * 1024
@@ -61,8 +62,8 @@ export async function digestRanges(
 	createDigest: PdfDigestFactory,
 	signal?: { readonly aborted: boolean }
 ): Promise<Map<PdfDigestName, Uint8Array>> {
-	const unique = [...new Set(names)]
-	const digests = await Promise.all(unique.map(name => createDigest(name)))
+	const total = ranges.reduce((sum, [, length]) => sum + Math.max(0, length), 0)
+	const digests = await Promise.all([...new Set(names)].map(async name => [name, await createDigest(name, total)] as const))
 
 	for (const [start, length] of ranges) {
 		for (let at = start; at < start + length; at += DIGEST_RUN_BYTES) {
@@ -70,15 +71,15 @@ export async function digestRanges(
 
 			const run = await readExactly(source, at, Math.min(DIGEST_RUN_BYTES, start + length - at))
 
-			for (const digest of digests) digest.update(run)
+			for (const [, digest] of digests) digest.update(run)
 		}
 	}
 
-	return new Map(unique.map((name, i) => [name, digests[i]?.digest() ?? new Uint8Array(0)]))
+	return new Map(await Promise.all(digests.map(async ([name, digest]) => [name, await digest.digest()] as const)))
 }
 
 export async function digestBytes(bytes: Uint8Array, name: PdfDigestName, createDigest: PdfDigestFactory): Promise<Uint8Array> {
-	const digest = await createDigest(name)
+	const digest = await createDigest(name, bytes.length)
 
 	digest.update(bytes)
 

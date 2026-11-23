@@ -28,7 +28,7 @@ import {
 import { budget } from "./timing"
 
 async function digestOf(bytes: Uint8Array, identity: PdfSigningIdentity): Promise<Uint8Array> {
-	const digest = await createPdfDigest(identity.scheme.digest)
+	const digest = await createPdfDigest(identity.scheme.digest, bytes.length)
 
 	digest.update(bytes)
 

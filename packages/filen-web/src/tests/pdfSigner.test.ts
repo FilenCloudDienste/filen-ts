@@ -46,7 +46,7 @@ describe("pdf signer core", () => {
 		hasher.update(file.subarray(0, 4))
 		hasher.update(file.subarray(6))
 
-		const cms = await api.sign(hasher.digest())
+		const cms = await api.sign(await hasher.digest())
 		const source = {
 			length: file.length,
 			read: (offset: number, length: number) => Promise.resolve(file.slice(offset, offset + length))

@@ -193,7 +193,16 @@ export function verifySignaturesRequest(subtle: PdfSubtle, step?: (name: string)
 					},
 					{
 						subtle: checked,
-						createDigest: name => traced(`digest ${name}`, () => createPdfDigest(name)),
+						createDigest: async (name, length) => {
+							const digest = await traced(`digest ${name}`, () => createPdfDigest(name, length))
+
+							return {
+								update: bytes => {
+									digest.update(bytes)
+								},
+								digest: () => traced(`digest ${name} result`, () => digest.digest())
+							}
+						},
 						// Unlocked like the current document: an encrypted revision read undecrypted would differ from it
 						// everywhere. One that stays locked makes its signature unverifiable.
 						openRevision: length => traced("open revision", () => openUnlocked(mupdf, bytes.handle(length), password)),
