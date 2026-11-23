@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
@@ -280,7 +280,10 @@ describe("TextViewer — editing only what a save writes back", () => {
 		renderEditable(bytes, onTextState)
 
 		expect((await screen.findByTestId("source")).dataset["editable"]).toBe("true")
-		expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding, readEncoding: encoding })
+		// The state is told from an effect, which a render the detector's guess resolved commits after the editor shows.
+		await waitFor(() => {
+			expect(onTextState).toHaveBeenLastCalledWith({ writable: true, encoding, readEncoding: encoding })
+		})
 	})
 
 	it.each([
@@ -293,6 +296,8 @@ describe("TextViewer — editing only what a save writes back", () => {
 		renderEditable(bytes, onTextState)
 
 		expect((await screen.findByTestId("source")).dataset["editable"]).toBe("false")
-		expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
+		await waitFor(() => {
+			expect(onTextState).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }))
+		})
 	})
 })
