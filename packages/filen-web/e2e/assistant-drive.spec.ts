@@ -1,6 +1,13 @@
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { assistantPanel, openAssistantPanel, scriptAssistant, sendAssistantMessage, waitForAssistantTurnEnd } from "./helpers/assistant"
+import {
+	assistantConversation,
+	assistantPanel,
+	openAssistantPanel,
+	scriptAssistant,
+	sendAssistantMessage,
+	waitForAssistantTurnEnd
+} from "./helpers/assistant"
 import { trackCspViolations } from "./helpers/csp"
 import {
 	descendInto,
@@ -12,7 +19,7 @@ import {
 	waitForListingSettled,
 	withScratchDirectory
 } from "./helpers/listing"
-import { leadingNamePattern, namePattern } from "./helpers/rows"
+import { leadingNamePattern, namePattern, revealPickerRow } from "./helpers/rows"
 
 // The assistant's drive writes, end to end over the scripted model (src/e2e-hooks/assistantStub.ts): the real loop,
 // guard, batch planner, cards and drive actions run; only the model's choices are scripted. Every name a call
@@ -92,7 +99,7 @@ test.describe("assistant drive writes", () => {
 			}
 
 			await expect(listbox.getByRole("option")).toHaveCount(2)
-			await expect(assistantPanel(page).getByText("Renamed both files.")).toBeVisible()
+			await expect(assistantConversation(page).getByText("Renamed both files.")).toBeVisible()
 		})
 
 		expect(cspViolations).toEqual([])
@@ -197,7 +204,7 @@ test.describe("assistant drive writes", () => {
 	test("creates a directory inside the move picker and moves a file into it", async ({ page }) => {
 		const cspViolations = trackCspViolations(page)
 
-		await withScratchDirectory(page, "ai-movepick", async ({ listbox, runId }) => {
+		await withScratchDirectory(page, "ai-movepick", async ({ listbox, scratchName, runId }) => {
 			const tag = runId.slice(0, 8)
 			const name = `moved-${tag}.txt`
 			const directoryName = `picked-${tag}`
@@ -214,6 +221,13 @@ test.describe("assistant drive writes", () => {
 
 			await expect(dialog).toBeVisible()
 
+			// The bulk Move picker opens on the drive root: walked into the scratch directory first, so the new directory
+			// lands inside it (and the scratch teardown takes it along) instead of in the shared root.
+			const breadcrumb = dialog.getByRole("navigation", { name: "Breadcrumb" })
+
+			await (await revealPickerRow(dialog, dialog.getByRole("button", { name: namePattern(scratchName) }))).dblclick()
+			await expect(breadcrumb.getByText(scratchName, { exact: true })).toBeVisible()
+
 			// Filtered by its icon: a directory row named "New directory" would match the name alone.
 			await dialog
 				.getByRole("button", { name: "New directory", exact: true })
@@ -226,7 +240,7 @@ test.describe("assistant drive writes", () => {
 			await field.press("Enter")
 
 			// Entered once created; the picker's breadcrumb names it.
-			await expect(dialog.getByRole("navigation", { name: "Breadcrumb" }).getByText(directoryName, { exact: true })).toBeVisible({
+			await expect(breadcrumb.getByText(directoryName, { exact: true })).toBeVisible({
 				timeout: LIVE_WRITE_TIMEOUT_MS
 			})
 
