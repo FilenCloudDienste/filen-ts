@@ -84,9 +84,10 @@ test("keeps an owner-restricted file's tools off until the owner password unlock
 		const dialog = await openPdf(page, listbox, name)
 
 		await protectTab(dialog)
-		// Choosing a tool starts the editor, which reads the author's restrictions. The notice is its status line: each
-		// switched-off tool carries the same words as its sr-only description.
-		const restrictedNotice = dialog.getByRole("status").filter({ hasText: preview.previewPdfOwnerRestricted })
+		// Choosing a tool starts the editor, which reads the author's restrictions. The notice is its status line (each
+		// switched-off tool carries the same words as its sr-only description), found by CSS: the security dialog the
+		// tool opens is modal, so everything behind it is out of the accessibility tree until Escape closes it.
+		const restrictedNotice = dialog.locator('[role="status"]').filter({ hasText: preview.previewPdfOwnerRestricted })
 
 		await dialog.getByRole("button", { name: preview.previewPdfSecurityTitle }).click()
 		await expect(restrictedNotice).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
