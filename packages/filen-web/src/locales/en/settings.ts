@@ -313,6 +313,14 @@ export const settings = {
 
 	// ── Advanced: about / legal ────────────────────────────────────────────────
 	settingsAboutTitle: "About",
+	/** Advanced settings — About row label next to the build identifier of the web app */
+	settingsVersionTitle: "Version",
+	/** Advanced settings — Version row value for a build made outside the release pipeline */
+	settingsVersionLocal: "Local build",
+	/** Advanced settings — aria-label of the button copying the version */
+	settingsVersionCopy: "Copy version",
+	/** Advanced settings — toast after the version was copied */
+	settingsVersionCopied: "Version copied",
 
 	// ── Advanced: third party notices ─────────────────────────────────────────
 	/** Advanced settings — row title for the third-party attribution surface */

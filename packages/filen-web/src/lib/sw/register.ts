@@ -1,5 +1,6 @@
 import { SW_MSG_ACTIVE_STREAMS, SW_MSG_BUILD, SW_MSG_CLAIM, SW_PROTOCOL_VERSION, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
 import { log } from "@/lib/log"
+import { buildId } from "@/lib/buildId"
 
 let started = false
 let registration: ServiceWorkerRegistration | null = null
@@ -33,7 +34,7 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 // sw.js and the page are built together, so a worker of this page's own build is never an update: a
 // first install, a second registration of the same origin, or the worker a reload into a new deploy
 // already runs. Only a different build prompts. Absent in local builds, where every worker matches.
-const PAGE_BUILD = import.meta.env.VITE_BUILD_ID ?? null
+const PAGE_BUILD = buildId()
 // A worker answers from its own message handler, so silence this long means it cannot be compared:
 // one older than this protocol, or one gone redundant.
 const BUILD_QUERY_TIMEOUT_MS = 5_000

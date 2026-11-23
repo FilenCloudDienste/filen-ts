@@ -28,6 +28,17 @@ export function formatLogEntries(entries: readonly LogEntry[]): string {
 	return entries.map(formatLogEntry).join("\n")
 }
 
+export interface LogsExportContext {
+	build: string
+	userAgent: string
+	exportedAt: Date
+}
+
+// The exported file opens with the build and browser it came from, so a report names its version without being asked.
+export function logsExportText(entries: readonly LogEntry[], { build, userAgent, exportedAt }: LogsExportContext): string {
+	return `Filen web ${build}\n${userAgent}\nExported ${exportedAt.toISOString()}\n\n${formatLogEntries(entries)}`
+}
+
 export function logsExportFilename(): string {
 	return `filen-web-logs.${String(Date.now())}.txt`
 }

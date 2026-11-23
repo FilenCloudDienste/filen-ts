@@ -6,6 +6,7 @@ import { ArchiveMemoryRow } from "@/features/settings/components/advanced/archiv
 import { UploadsRow } from "@/features/settings/components/advanced/uploadsRow"
 import { LogsBlock } from "@/features/settings/components/advanced/logsBlock"
 import { AboutRows } from "@/features/settings/components/advanced/aboutRows"
+import { VersionRow } from "@/features/settings/components/advanced/versionRow"
 import { ThirdPartyNoticesRow } from "@/features/settings/components/advanced/thirdPartyNoticesRow"
 import { DotFilenRow } from "@/features/settings/components/advanced/dotFilenRow"
 import { StorageCaches } from "@/features/settings/components/storage/storageCaches"
@@ -61,6 +62,7 @@ function AdvancedPage() {
 				<LogsBlock />
 			</SettingsGroup>
 			<SettingsGroup title={t("settingsAboutTitle")}>
+				<VersionRow />
 				<AboutRows />
 				<ThirdPartyNoticesRow />
 			</SettingsGroup>

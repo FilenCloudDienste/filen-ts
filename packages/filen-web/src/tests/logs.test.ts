@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import { LOG_RING_MAX, log, type LogEntry } from "@/lib/log"
-import { collectLogs, formatLogEntry, formatLogEntries, logsExportFilename, mergeLogEntries } from "@/features/settings/lib/logs"
+import {
+	collectLogs,
+	formatLogEntry,
+	formatLogEntries,
+	logsExportFilename,
+	logsExportText,
+	mergeLogEntries
+} from "@/features/settings/lib/logs"
 
 // The global setup mocks this module; the ring buffer test needs the real one.
 vi.unmock("@/lib/log")
@@ -31,6 +38,19 @@ describe("formatLogEntries", () => {
 
 	it("is an empty string for no entries", () => {
 		expect(formatLogEntries([])).toBe("")
+	})
+})
+
+describe("logsExportText", () => {
+	it("opens with the build, the browser and the export time, then the entries", () => {
+		const first = entry({ msg: "first" })
+		const text = logsExportText([first], {
+			build: "abc123",
+			userAgent: "TestBrowser/1.0",
+			exportedAt: new Date("2026-03-04T05:06:07.000Z")
+		})
+
+		expect(text).toBe(`Filen web abc123\nTestBrowser/1.0\nExported 2026-03-04T05:06:07.000Z\n\n${formatLogEntry(first)}`)
 	})
 })
 

@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { RotateCwIcon } from "lucide-react"
 import { log, type LogEntry } from "@/lib/log"
-import { collectLogs, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
+import { collectLogs, logsExportFilename, logsExportText } from "@/features/settings/lib/logs"
+import { buildLabel } from "@/lib/buildId"
 import { sdkApi } from "@/lib/sdk/client"
 import { storage } from "@/lib/storage/adapter"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
@@ -40,7 +41,10 @@ function LogsBlock() {
 	async function handleExport(): Promise<void> {
 		const merged = await refresh()
 
-		downloadTextFile(logsExportFilename(), formatLogEntries(merged))
+		downloadTextFile(
+			logsExportFilename(),
+			logsExportText(merged, { build: buildLabel(), userAgent: navigator.userAgent, exportedAt: new Date() })
+		)
 		toast.success(t("settingsLogsExportSuccess"))
 	}
 

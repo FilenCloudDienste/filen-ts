@@ -18,6 +18,7 @@ vi.mock("@/features/settings/components/advanced/archiveMemoryRow", () => ({ Arc
 vi.mock("@/features/settings/components/advanced/uploadsRow", () => ({ UploadsRow: () => null }))
 vi.mock("@/features/settings/components/advanced/logsBlock", () => ({ LogsBlock: () => null }))
 vi.mock("@/features/settings/components/advanced/aboutRows", () => ({ AboutRows: () => null }))
+vi.mock("@/features/settings/components/advanced/versionRow", () => ({ VersionRow: () => null }))
 vi.mock("@/features/settings/components/advanced/thirdPartyNoticesRow", () => ({ ThirdPartyNoticesRow: () => null }))
 vi.mock("@/features/settings/components/advanced/dotFilenRow", () => ({ DotFilenRow: () => null }))
 vi.mock("@/features/settings/components/storage/storageCaches", () => ({ StorageCaches: () => null }))
