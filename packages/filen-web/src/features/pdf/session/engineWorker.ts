@@ -80,7 +80,12 @@ function spawn(module: WebAssembly.Module): { readonly client: PdfEngineClient; 
 		// Every operation goes through `call`: its first argument names it.
 		client:
 			import.meta.env.VITE_E2E === "1"
-				? trackWorkerCalls(client, "pdf-engine", (method, args) => (method === "call" ? String(args[0]) : method))
+				? trackWorkerCalls(
+						client,
+						"pdf-engine",
+						(method, args) => (method === "call" ? String(args[0]) : method),
+						() => (client.waitingForBytes() ? "waiting for bytes" : "not waiting for bytes")
+					)
 				: client,
 		gone: owned.gone
 	}

@@ -159,12 +159,17 @@ export class PdfEngineClient {
 		this.terminate()
 	}
 
+	// Whether the engine waits for bytes of its file right now.
+	waitingForBytes(): boolean {
+		return this.channels.some(buffer => syncRangeWaiting(buffer))
+	}
+
 	private checkWatchdog(): void {
 		if (this.terminated) return
 
 		const now = this.now()
 		// Time spent waiting for bytes has its own deadline (the reader's).
-		const waiting = this.channels.some(buffer => syncRangeWaiting(buffer))
+		const waiting = this.waitingForBytes()
 
 		for (const pending of this.pending.values()) {
 			if (pending.started === null) continue

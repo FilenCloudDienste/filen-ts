@@ -7,6 +7,8 @@
 interface PendingCall {
 	readonly method: string
 	readonly startedAt: number
+	// What the worker is doing, read when the calls are reported.
+	readonly state?: () => string
 }
 
 let sdkCalls: Map<number, PendingCall> | null = null
@@ -14,7 +16,12 @@ const workerCalls = new Map<number, PendingCall>()
 let nextId = 0
 
 // A proxy of `remote` whose method calls are in `calls`, as `name(method, args)`, until they settle.
-function tracked<T extends object>(remote: T, calls: Map<number, PendingCall>, name: (method: string, args: unknown[]) => string): T {
+function tracked<T extends object>(
+	remote: T,
+	calls: Map<number, PendingCall>,
+	name: (method: string, args: unknown[]) => string,
+	state?: () => string
+): T {
 	return new Proxy(remote, {
 		get(target, property, receiver) {
 			const value: unknown = Reflect.get(target, property, receiver)
@@ -27,7 +34,7 @@ function tracked<T extends object>(remote: T, calls: Map<number, PendingCall>, n
 			return (...args: unknown[]) => {
 				const id = nextId++
 
-				calls.set(id, { method: name(property, args), startedAt: Date.now() })
+				calls.set(id, { method: name(property, args), startedAt: Date.now(), ...(state === undefined ? {} : { state }) })
 
 				const result: unknown = Reflect.apply(value, target, args)
 
@@ -53,20 +60,27 @@ export function trackSdkCalls<T extends object>(remote: T): T {
 	return tracked(remote, calls, method => method)
 }
 
-// `worker` names the worker in the report, and `call` the call when its method does not: "pdf-engine signBegin".
+// `worker` names the worker in the report, `call` the call when its method does not ("pdf-engine signBegin"), and
+// `state` what the worker is doing, appended to each of its calls when they are reported.
 export function trackWorkerCalls<T extends object>(
 	remote: T,
 	worker: string,
-	call: (method: string, args: unknown[]) => string = method => method
+	call: (method: string, args: unknown[]) => string = method => method,
+	state?: () => string
 ): T {
-	return tracked(remote, workerCalls, (method, args) => `${worker} ${call(method, args)}`)
+	return tracked(remote, workerCalls, (method, args) => `${worker} ${call(method, args)}`, state)
 }
 
 // Oldest first.
 function pending(calls: Iterable<PendingCall>): { method: string; ageMs: number }[] {
 	const now = Date.now()
 
-	return [...calls].sort((a, b) => a.startedAt - b.startedAt).map(({ method, startedAt }) => ({ method, ageMs: now - startedAt }))
+	return [...calls]
+		.sort((a, b) => a.startedAt - b.startedAt)
+		.map(({ method, startedAt, state }) => ({
+			method: state === undefined ? method : `${method} (${state()})`,
+			ageMs: now - startedAt
+		}))
 }
 
 export function pendingSdkCalls(): { method: string; ageMs: number }[] {
