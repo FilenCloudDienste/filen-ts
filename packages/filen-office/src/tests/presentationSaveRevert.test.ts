@@ -198,40 +198,43 @@ describe("a save refused for one edit", () => {
 
 		// The save held a copied slide's delete; undone, the copy is back. Every step held is one the save held too: none
 		// is taken back (the copy that made it, the text typed after), and the delete can still be redone.
-		it(`${format}: undone past the save, a refusal for what the undone steps took away takes nothing back`, async () => {
-			let detail = ""
-			const events: { type: string; notice?: unknown }[] = []
-			const d = await driveSession(deckBytes(format), format, events, { dependencies: refusingOnce(format, () => detail) })
-			const slide = d.session.deck.slides[0] as SlideRef
+		for (const named of [true, false])
+			it(`${format}: undone past the save, a refusal for what the undone steps took away takes nothing back${named ? "" : " (by part)"}`, async () => {
+				let detail = ""
+				const events: { type: string; notice?: unknown }[] = []
+				const d = await driveSession(deckBytes(format), format, events, { dependencies: refusingOnce(format, () => detail) })
+				const slide = d.session.deck.slides[0] as SlideRef
 
-			await review(d.context, slide)
-			expect((await d.command({ family: "slide", kind: "duplicate", slide })).ok).toBe(true)
+				await review(d.context, slide)
+				expect((await d.command({ family: "slide", kind: "duplicate", slide })).ok).toBe(true)
 
-			const copy = d.session.deck.slides[1] as SlideRef
-			const node = (ref: SlideRef): SlideNode => d.session.deck.nodes.get(ref) as SlideNode
-			const shape = node(slide).shapes[0] as ShapeNode
+				const copy = d.session.deck.slides[1] as SlideRef
+				const node = (ref: SlideRef): SlideNode => d.session.deck.nodes.get(ref) as SlideNode
+				const shape = node(slide).shapes[0] as ShapeNode
 
-			expect((await d.command({ family: "text", kind: "setText", target: { slide, id: shape.id }, body: typed("Typed") })).ok).toBe(
-				true
-			)
-			expect((await d.command({ family: "slide", kind: "delete", slides: [copy] })).ok).toBe(true)
-			expect((await d.save()).result.kind).toBe("written")
-			expect((await d.undo()).ok).toBe(true)
+				expect(
+					(await d.command({ family: "text", kind: "setText", target: { slide, id: shape.id }, body: typed("Typed") })).ok
+				).toBe(true)
+				expect((await d.command({ family: "slide", kind: "delete", slides: [copy] })).ok).toBe(true)
+				expect((await d.save()).result.kind).toBe("written")
+				expect((await d.undo()).ok).toBe(true)
 
-			const slides = [...d.session.deck.slides]
-			const copied = node(copy)
-			const first = copied.shapes[0] as ShapeNode
+				const slides = [...d.session.deck.slides]
+				const copied = node(copy)
+				const first = copied.shapes[0] as ShapeNode
 
-			detail =
-				format === "pptx"
-					? `${copied.part} reads back differently at .shapes[0].kind`
-					: `page 2 (${copied.part}) reads back differently: shape 0 (${String(first.name)}) kind`
-			expect((await d.save()).result).toMatchObject({ kind: "refused", reason: "proofFailed" })
-			expect(events.some(event => (event.notice as { kind?: string } | undefined)?.kind === "saveReverted")).toBe(false)
-			expect(d.session.deck.slides).toEqual(slides)
-			expect(textOf(node(slide).shapes[0])).toBe("Typed")
-			expect((await d.redo()).ok).toBe(true)
-			expect(d.session.deck.slides).not.toContain(copy)
-		})
+				// By part: a detail that names no shape of the deck (the revert then goes by the parts named).
+				const at = named ? 0 : 99
+				detail =
+					format === "pptx"
+						? `${copied.part} reads back differently at .shapes[${String(at)}].kind`
+						: `page 2 (${copied.part}) reads back differently: shape ${String(at)} (${String(first.name)}) kind`
+				expect((await d.save()).result).toMatchObject({ kind: "refused", reason: "proofFailed" })
+				expect(events.some(event => (event.notice as { kind?: string } | undefined)?.kind === "saveReverted")).toBe(false)
+				expect(d.session.deck.slides).toEqual(slides)
+				expect(textOf(node(slide).shapes[0])).toBe("Typed")
+				expect((await d.redo()).ok).toBe(true)
+				expect(d.session.deck.slides).not.toContain(copy)
+			})
 	}
 })
