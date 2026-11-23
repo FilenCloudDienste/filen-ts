@@ -71,7 +71,7 @@ export function PresentationSlideRail({
 				}}
 				orientation={phone ? "horizontal" : "vertical"}
 				thumbWidth={phone ? STRIP_THUMB_WIDTH : RAIL_THUMB_WIDTH}
-				className={phone ? "size-full" : "size-full [scrollbar-gutter:stable]"}
+				className={phone ? "size-full" : "size-full scrollbar-gutter-stable"}
 				{...(sections.length === 0 ? {} : { sections })}
 				{...(edit ?? {})}
 			/>

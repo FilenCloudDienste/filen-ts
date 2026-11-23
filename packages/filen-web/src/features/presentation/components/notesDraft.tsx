@@ -172,7 +172,7 @@ export function NotesDraft({
 			data-assistant-notes-draft
 			aria-label={t("assistantNotesDraftLabel")}
 			role="group"
-			className="flex size-full flex-col gap-2 overflow-auto p-2 text-sm"
+			className="flex size-full scrollbar-gutter-stable flex-col gap-2 overflow-auto p-2 text-sm"
 			onKeyDown={event => {
 				if (event.key === "Escape") {
 					event.preventDefault()

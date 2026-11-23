@@ -453,7 +453,7 @@ export function SmartArtTextPane({
 					</Button>
 				</div>
 			) : (
-				<ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+				<ul className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col gap-1 overflow-y-auto p-2">
 					{info.nodes.map((node, index) => (
 						<NodeField
 							key={node.id}

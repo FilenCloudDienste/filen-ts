@@ -568,7 +568,7 @@ export function SelectionPane({
 					aria-label={t("previewPptxSelectionList")}
 					aria-describedby={keysId}
 					aria-multiselectable
-					className="min-h-0 flex-1 overflow-y-auto p-1"
+					className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto p-1"
 					onClick={(event: MouseEvent<HTMLDivElement>) => {
 						const element = rowElement(event.target)
 						const row = element === null ? undefined : byId.get(Number(element.dataset["outline"]))

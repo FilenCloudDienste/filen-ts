@@ -230,7 +230,7 @@ function NotesEditor({
 				data-fo-text-opening=""
 				tabIndex={0}
 				aria-label={t("previewPptxNotesPage")}
-				className="relative size-full overflow-auto outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+				className="relative size-full scrollbar-gutter-stable overflow-auto outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
 				onKeyDown={event => {
 					// An Escape the editor's view did not take (it has not focused yet): the notes close, the file stays.
 					if (event.key !== "Escape" || event.defaultPrevented) return
@@ -282,7 +282,7 @@ function NotesEditor({
 			ref={setHost}
 			tabIndex={0}
 			{...(paragraphs.length === 0 ? {} : { "aria-describedby": hintId })}
-			className="size-full cursor-text overflow-auto p-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+			className="size-full cursor-text scrollbar-gutter-stable overflow-auto p-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
 			onClick={event => {
 				const rect = event.currentTarget.getBoundingClientRect()
 

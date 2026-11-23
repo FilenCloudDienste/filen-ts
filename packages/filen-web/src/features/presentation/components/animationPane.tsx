@@ -444,7 +444,7 @@ export function AnimationPane({
 						listRef.current = element
 						setList(element)
 					}}
-					className="min-h-0 flex-1 overflow-y-auto px-1 [contain:content]"
+					className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto px-1 [contain:content]"
 					onScroll={event => {
 						const top = event.currentTarget.scrollTop
 
