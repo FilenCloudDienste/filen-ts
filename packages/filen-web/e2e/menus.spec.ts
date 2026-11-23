@@ -47,6 +47,7 @@ const DIRECTORY_MENU_IDS: ActionId[] = [
 	"favorite",
 	"color",
 	"info",
+	"copyId",
 	"download",
 	"share",
 	"publicLink",
@@ -61,13 +62,14 @@ const FILE_MENU_IDS: ActionId[] = [
 	"favorite",
 	"versions",
 	"info",
+	"copyId",
 	"download",
 	"share",
 	"publicLink",
 	"trash"
 ]
 // Trash variant, either type (itemMenu.test.ts's own "trash variant" case) — the maximally-reduced set.
-const TRASH_MENU_IDS: ActionId[] = ["restore", "deletePermanently", "info"]
+const TRASH_MENU_IDS: ActionId[] = ["restore", "deletePermanently", "info", "copyId"]
 // Bulk bar, plain drive-variant selection (bulkActionBar.test.ts's own "drive variant" case) — no
 // color/versions id exists in the bulk builder at all, per-type or not.
 const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "copy", "compress", "share", "download", "trash"]
