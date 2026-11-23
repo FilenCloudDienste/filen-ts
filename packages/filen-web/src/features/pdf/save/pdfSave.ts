@@ -354,8 +354,7 @@ export function savePdfCopy(
 }
 
 // The engine's digests answered by the signer worker, over a channel the signing save holds: the caller keeps its end
-// here referenced until the signing settles, then closes it. Referenced by its listener alone, a port can be collected
-// while the engine still computes the digest (WebKit), and the signing then waits for that digest for good.
+// here until the signing settles, then closes it.
 function signerChannel(job: PdfSignedSaveJob): { readonly port: MessagePort; close(): void } {
 	const channel = new MessageChannel()
 

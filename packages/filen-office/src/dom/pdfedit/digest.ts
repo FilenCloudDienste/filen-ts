@@ -1,26 +1,30 @@
-import { createSHA256, createSHA384, createSHA512, type IHasher } from "hash-wasm"
+import { sha256, sha384, sha512 } from "@noble/hashes/sha2.js"
 import type { PdfDigest, PdfDigestName } from "../../core/pdfsign"
 
-// Incremental SHA-2 for signature digests (WebCrypto hashes only whole buffers). hash-wasm keeps one small wasm
-// instance per algorithm; each digest gets its own hasher state.
+// Incremental SHA-2 for signature digests (WebCrypto hashes only whole buffers), in plain JS: made synchronously, so a
+// check or a signing never waits on a WebAssembly compile. WebKit's on Linux sometimes never settled one in the engine
+// worker (hash-wasm compiled its module there on each digest), and the check or signing then waited for good.
 
-const FACTORIES: Readonly<Record<PdfDigestName, () => Promise<IHasher>>> = {
-	"SHA-256": createSHA256,
-	"SHA-384": createSHA384,
-	"SHA-512": createSHA512
+interface Hasher {
+	update(bytes: Uint8Array): unknown
+	digest(): Uint8Array
 }
 
-export async function createPdfDigest(name: PdfDigestName): Promise<PdfDigest> {
-	const hasher = await FACTORIES[name]()
+const HASHES: Readonly<Record<PdfDigestName, () => Hasher>> = {
+	"SHA-256": () => sha256.create(),
+	"SHA-384": () => sha384.create(),
+	"SHA-512": () => sha512.create()
+}
 
-	hasher.init()
+export function createPdfDigest(name: PdfDigestName): Promise<PdfDigest> {
+	const hasher = HASHES[name]()
 
-	return {
+	return Promise.resolve({
 		update(bytes: Uint8Array): void {
 			hasher.update(bytes)
 		},
 		digest(): Uint8Array {
-			return hasher.digest("binary")
+			return hasher.digest()
 		}
-	}
+	})
 }

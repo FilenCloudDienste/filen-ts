@@ -6,7 +6,7 @@ export interface PdfByteSource {
 	read(offset: number, length: number): Promise<Uint8Array>
 }
 
-// An incremental hash (hash-wasm on web): WebCrypto has no streaming digest.
+// An incremental hash: WebCrypto has no streaming digest.
 export interface PdfDigest {
 	update(bytes: Uint8Array): void
 	digest(): Uint8Array
