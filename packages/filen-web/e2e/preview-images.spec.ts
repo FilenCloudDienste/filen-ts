@@ -4,6 +4,7 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, wit
 import { FIXTURE_FILES, gotoFixture, openFixtureRows } from "./helpers/fixtures"
 import { itemRow, openArchive, openRowMenu } from "./helpers/archive"
 import { menuItemName } from "./helpers/menu"
+import { revealPickerRow } from "./helpers/rows"
 import { trackCspViolations } from "./helpers/csp"
 import { observeEgest, trackForeignRequests, type EgestObserver } from "./helpers/requests"
 import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
@@ -264,21 +265,21 @@ test("a PDF stamp takes a TIFF's and a QOI's picture from Filen, and is never of
 
 		// A gzipped SVG is not offered (markup, not pixels); its directory shows no file.
 		await place(0.3)
-		await picker.getByRole("button", { name: "images-svgz" }).click()
+		await (await revealPickerRow(picker, picker.getByRole("button", { name: "images-svgz" }))).click()
 		await expect(picker.getByRole("button", { name: /\.svgz$/u })).toHaveCount(0)
 		await page.keyboard.press("Escape")
 		await expect(picker).toHaveCount(0)
 
 		// A TIFF's first page, drawn by an engine of its own.
 		await place(0.3)
-		await picker.getByRole("button", { name: "images-tiff" }).click()
+		await (await revealPickerRow(picker, picker.getByRole("button", { name: "images-tiff" }))).click()
 		await picker.getByRole("button", { name: FIXTURE_FILES["images-tiff"][0], exact: true }).click()
 		await expect(picker).toHaveCount(0, { timeout: ENGINE_TIMEOUT_MS })
 		await expect(stamps).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
 
 		// A QOI, decoded in the raster decode pool.
 		await place(0.7)
-		await picker.getByRole("button", { name: "images-qoi" }).click()
+		await (await revealPickerRow(picker, picker.getByRole("button", { name: "images-qoi" }))).click()
 		await picker.getByRole("button", { name: QOI, exact: true }).click()
 		await expect(picker).toHaveCount(0, { timeout: ENGINE_TIMEOUT_MS })
 		await expect(stamps).toHaveCount(2, { timeout: ENGINE_TIMEOUT_MS })

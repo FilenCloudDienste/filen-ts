@@ -1,4 +1,5 @@
 import type { Locator } from "@playwright/test"
+import { expect } from "../fixtures"
 
 // Row lookup by name and the listing scroll step, shared by listing.ts and archive.ts (archive.ts imports
 // listing.ts, so neither can hold them for the other).
@@ -53,4 +54,25 @@ export function scrollListing(listbox: Locator, to: "top" | "next"): Promise<boo
 
 		return target.scrollTop !== before
 	}, to)
+}
+
+// A row of an in-dialog picker (directoryPicker.tsx's PickerListShell), scrolled into the DOM first: the list is
+// virtualized, so a row further down a long directory is not mounted until its list scrolls near it. Steps down the
+// list a screen at a time, back to its top at its end (a listing that just replaced the previous directory's starts
+// over), until `row` resolves or `timeout` passes, then returns it for the caller to act on (and time out on).
+export async function revealPickerRow(dialog: Locator, row: Locator, timeout = 15_000): Promise<Locator> {
+	const anyRow = dialog.getByRole("listitem").first()
+	const deadline = Date.now() + timeout
+
+	await expect(anyRow).toBeVisible({ timeout })
+
+	while ((await row.count()) === 0 && Date.now() < deadline) {
+		const moved = await scrollListing(anyRow, "next").catch(() => false)
+
+		if (!moved) {
+			await scrollListing(anyRow, "top").catch(() => false)
+		}
+	}
+
+	return row
 }

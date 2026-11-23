@@ -12,7 +12,7 @@ import {
 } from "./listing"
 import { gotoSettings, openSettingsSection } from "./settings"
 import { menuItemName } from "./menu"
-import { escapeRegExp, leadingNamePattern, namePattern, scrollListing } from "./rows"
+import { escapeRegExp, leadingNamePattern, namePattern, revealPickerRow, scrollListing } from "./rows"
 
 export { escapeRegExp, leadingNamePattern, namePattern }
 
@@ -130,7 +130,7 @@ export async function pickDestination(
 	await expect(root).toBeDisabled()
 
 	for (const directory of path) {
-		await dialog.getByRole("button", { name: namePattern(directory) }).dblclick()
+		await (await revealPickerRow(dialog, dialog.getByRole("button", { name: namePattern(directory) }))).dblclick()
 		await expect(dialog.getByRole("navigation", { name: "Breadcrumb" }).getByText(directory, { exact: true })).toBeVisible()
 	}
 

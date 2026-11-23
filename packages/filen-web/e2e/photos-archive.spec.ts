@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test"
 import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect, readFixtureManifest, settleLeases } from "./fixtures"
 import { namePattern, openSubmenu, selectionBar, waitForCompressDialog } from "./helpers/archive"
+import { revealPickerRow } from "./helpers/rows"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES } from "./helpers/fixtures"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
@@ -59,7 +60,7 @@ async function choosePhotosRoot(page: Page, path: readonly string[], expectTiles
 	await expect(chooser).toBeVisible()
 
 	for (const directory of path) {
-		await chooser.getByRole("button", { name: namePattern(directory) }).dblclick()
+		await (await revealPickerRow(chooser, chooser.getByRole("button", { name: namePattern(directory) }))).dblclick()
 		await expect(chooser.getByRole("navigation", { name: "Breadcrumb" }).getByText(directory, { exact: true })).toBeVisible()
 	}
 
