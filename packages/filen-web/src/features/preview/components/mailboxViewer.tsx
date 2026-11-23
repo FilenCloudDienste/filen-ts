@@ -239,6 +239,9 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 		}
 
 		let live = true
+		// Progress comes over the callback's own port, which keeps no order with the result's: a report that arrives after
+		// the result would add its matches a second time.
+		let ended = false
 		const timer = setTimeout(() => {
 			setSearch({ query, matches: [], searched: 0, end: null })
 			pager
@@ -246,7 +249,7 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 					remote.mboxSearch(
 						query,
 						Comlink.proxy((searched: number, found: readonly number[]) => {
-							if (!live) return
+							if (!live || ended) return
 
 							// An empty stretch keeps the matches as they are: the rows in view are not read again.
 							setSearch(current =>
@@ -261,6 +264,8 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 				)
 				.then(
 					result => {
+						ended = true
+
 						if (!live) return
 
 						setSearch({ query, matches: result.matches, searched: result.searched, end: result.end })
@@ -377,21 +382,26 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 	}
 
 	const countAll = (): void => {
+		// As a search's: a progress report that arrives after the count would take it back.
+		let ended = false
+
 		setCounting(true)
 		pager
 			.run(remote =>
 				remote.mboxCountAll(
 					Comlink.proxy((progress: MboxCount) => {
-						setCount(progress)
+						if (!ended) setCount(progress)
 					})
 				)
 			)
 			.then(
 				counted => {
+					ended = true
 					setCount(counted)
 					setCounting(false)
 				},
 				(e: unknown) => {
+					ended = true
 					log.error("preview", "counting a mailbox failed", e)
 					fail(e)
 					setCounting(false)

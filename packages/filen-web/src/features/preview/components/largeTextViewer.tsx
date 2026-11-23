@@ -164,10 +164,13 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 
 		// The first match at or after the view's top is shown as soon as the search reaches it.
 		let shown = false
+		// Progress comes over the callback's own port, which keeps no order with the result's: a report after the result
+		// would put back an earlier count.
+		let settled = false
 		const from = position.get()
 		const id = startScan("search")
 		const onProgress = Comlink.proxy((at: number, count: number, first: number) => {
-			if (searches.current !== seq) {
+			if (searches.current !== seq || settled) {
 				return
 			}
 
@@ -183,6 +186,8 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 		void pager
 			.run(remote => remote.search(query, caseSensitive, from, onProgress))
 			.then(result => {
+				settled = true
+
 				if (searches.current !== seq) {
 					return
 				}

@@ -264,6 +264,33 @@ describe("MailboxViewer", () => {
 		expect(screen.getByText("One")).toBeTruthy()
 	})
 
+	it("ignores a search's progress that arrives after its result", async () => {
+		const driven: NonNullable<typeof searching.current> = { progress: null, readable: true }
+
+		searching.current = driven
+		mount()
+
+		fireEvent.change(await screen.findByRole("searchbox", { name: "Search senders and subjects" }), { target: { value: "thr" } })
+
+		await vi.waitFor(() => {
+			expect(driven.progress).toBeTypeOf("function")
+		})
+
+		await act(async () => {
+			driven.finish?.({ matches: [2], searched: 3, end: "done" })
+			await Promise.resolve()
+		})
+		expect(await screen.findByText("Three")).toBeTruthy()
+
+		// The progress callback's own port keeps no order with the result's: its report comes in last.
+		await act(async () => {
+			driven.progress?.(3, [2])
+			await Promise.resolve()
+		})
+		expect(screen.getAllByText("Three")).toHaveLength(1)
+		expect(screen.getAllByText("1 match").length).toBeGreaterThan(0)
+	})
+
 	it("names a row still being read by its place in the list, and lets it take focus", async () => {
 		view.current = 1
 		searching.current = { progress: null }
