@@ -94,6 +94,9 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// Mirrors whether pushState.hits is non-empty, written at every place the hits change, so a
 	// heartbeat can pick the watchdog ceiling without reading state through a (must-be-pure) updater.
 	const hasHitsRef = useRef(false)
+	// The newest snapshot of the current open applied (its seq; -1 none). Its result and its pushes come over
+	// different ports in no set order: an older one that lands later is dropped.
+	const snapshotSeqRef = useRef(-1)
 
 	function clearTimers(): void {
 		if (graceTimerRef.current !== null) {
@@ -149,6 +152,11 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		}
 
 		if (push.type === "snapshot") {
+			if (push.seq <= snapshotSeqRef.current) {
+				return
+			}
+
+			snapshotSeqRef.current = push.seq
 			hasHitsRef.current = push.hits.length > 0
 			setPushState(prev => ({ ...prev, hits: push.hits, total: push.total, live: push.live, hasSnapshot: true }))
 			armGrace()
@@ -184,6 +192,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		const generation = ++generationRef.current
 
 		hasHitsRef.current = false
+		snapshotSeqRef.current = -1
 		setPushState(INITIAL_PUSH_STATE)
 		armGrace()
 		armWatchdog(false)
@@ -201,10 +210,16 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 			}
 
 			engagedRef.current = true
-			hasHitsRef.current = snapshot.hits.length > 0
-			setPushState(prev => ({ ...prev, hits: snapshot.hits, total: snapshot.total, live: snapshot.live, hasSnapshot: true }))
+
+			// A newer snapshot the worker pushed may have come in ahead of this one.
+			if (snapshot.seq > snapshotSeqRef.current) {
+				snapshotSeqRef.current = snapshot.seq
+				hasHitsRef.current = snapshot.hits.length > 0
+				setPushState(prev => ({ ...prev, hits: snapshot.hits, total: snapshot.total, live: snapshot.live, hasSnapshot: true }))
+			}
+
 			armGrace()
-			armWatchdog(snapshot.hits.length > 0)
+			armWatchdog(hasHitsRef.current)
 		} catch (e) {
 			if (generation !== generationRef.current) {
 				return

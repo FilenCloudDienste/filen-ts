@@ -142,7 +142,7 @@ import {
 	type SearchPush,
 	type SearchQueryProgress,
 	type SearchQueryResult,
-	type SearchSnapshotDTO
+	type SequencedSnapshotDTO
 } from "@/workers/searchEngine"
 import { createListBatcher } from "@/workers/archiveListPacker"
 import { createArchiveReaders, readerClosed, settleEntryReport } from "@/workers/archiveReaders"
@@ -3321,7 +3321,7 @@ const api = {
 	// Comlink.proxy, same shape as uploadFile/downloadFileToWriter's onProgress above; the engine
 	// stores and calls it directly and never hands it to a wasm call itself, so no extra wrap
 	// belongs at this boundary (see searchEngine.ts's own statusListener/listener comments).
-	searchOpen(params: { rootUuid: string | null; name: string }, onPush: (p: SearchPush) => void): Promise<SearchSnapshotDTO> {
+	searchOpen(params: { rootUuid: string | null; name: string }, onPush: (p: SearchPush) => void): Promise<SequencedSnapshotDTO> {
 		return searchEngine.open(requireClient(), params, onPush)
 	},
 	// ── Videos library index ─────────────────────────────────────────────────

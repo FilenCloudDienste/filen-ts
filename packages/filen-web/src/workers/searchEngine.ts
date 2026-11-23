@@ -36,8 +36,12 @@ export interface SearchSnapshotDTO {
 	live: boolean
 }
 
+// An open search's snapshot, ordered by `seq` within that open: its result and its pushes travel on different ports,
+// so the page keeps only the newest. The window's own first snapshot is 0; each the listener delivers is one more.
+export type SequencedSnapshotDTO = SearchSnapshotDTO & { seq: number }
+
 export type SearchPush =
-	({ type: "snapshot" } & SearchSnapshotDTO) | { type: "resync"; resyncing: boolean } | { type: "heartbeat" } | { type: "rootDeleted" }
+	({ type: "snapshot" } & SequencedSnapshotDTO) | { type: "resync"; resyncing: boolean } | { type: "heartbeat" } | { type: "rootDeleted" }
 
 // `keepMs`: how long the queries' handle stays registered after the last one, so the next costs no resync.
 export interface QueryTiming {
@@ -431,7 +435,7 @@ export function createSearchEngine() {
 		client: Client,
 		{ rootUuid, name }: { rootUuid: string | null; name: string },
 		push: (p: SearchPush) => void
-	): Promise<SearchSnapshotDTO> {
+	): Promise<SequencedSnapshotDTO> {
 		// Supersede synchronously, before any await, so a close() or a newer open() racing this call
 		// always observes the flip. The installed window is superseded too: its deliveries are dropped
 		// main-side from here on, so its listener stops building them now rather than when this open
@@ -496,7 +500,9 @@ export function createSearchEngine() {
 		// directory verifiably still returns a present-but-empty eager snapshot rather than undefined,
 		// so this fallback is defensive, not the common path. Once consumed it's nulled so later
 		// deliveries push normally instead of re-resolving an already-settled promise.
-		let firstSnapshotResolve: ((dto: SearchSnapshotDTO) => void) | null = null
+		let firstSnapshotResolve: ((dto: SequencedSnapshotDTO) => void) | null = null
+		// The window's snapshot at registration is 0; every delivery is later than it.
+		let seq = 0
 
 		// Plain, per-open closure handed to getRange — same "never a raw proxy into wasm" rule as
 		// statusListener above; it calls the caller's `push` proxy, never forwards it.
@@ -505,7 +511,9 @@ export function createSearchEngine() {
 				return
 			}
 
-			const dto = toSnapshotDTO(snapshot)
+			seq++
+
+			const dto: SequencedSnapshotDTO = { ...toSnapshotDTO(snapshot), seq }
 			const resolveFirst = firstSnapshotResolve
 
 			if (resolveFirst !== null) {
@@ -567,10 +575,10 @@ export function createSearchEngine() {
 		if (eager !== undefined) {
 			resyncGate.snapshot(eager.total)
 
-			return toSnapshotDTO(eager)
+			return { ...toSnapshotDTO(eager), seq: 0 }
 		}
 
-		return new Promise<SearchSnapshotDTO>((resolve, reject) => {
+		return new Promise<SequencedSnapshotDTO>((resolve, reject) => {
 			firstSnapshotResolve = resolve
 			token.abandon = () => {
 				reject(new SearchSupersededError())

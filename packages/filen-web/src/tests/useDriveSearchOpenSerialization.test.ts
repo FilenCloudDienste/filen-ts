@@ -16,7 +16,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { searchOpen, searchSetName, search
 
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 
-const EMPTY_SNAPSHOT = { hits: [], total: 0n, live: true }
+const EMPTY_SNAPSHOT = { hits: [], total: 0n, live: true, seq: 0 }
 
 beforeEach(() => {
 	vi.useFakeTimers()

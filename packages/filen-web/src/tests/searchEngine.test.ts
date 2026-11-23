@@ -138,7 +138,7 @@ describe("createSearchEngine — open", () => {
 
 		const result = await engine.open(client, { rootUuid: null, name: "" }, push)
 
-		expect(result).toEqual({ hits: [{ parentPath: "sub", item: hit.result.dir }], total: 1n, live: true })
+		expect(result).toEqual({ hits: [{ parentPath: "sub", item: hit.result.dir }], total: 1n, live: true, seq: 0 })
 	})
 
 	it("maps a file hit's result arm the same way a directory hit's is mapped", async () => {
@@ -174,7 +174,7 @@ describe("createSearchEngine — open", () => {
 
 		capturedListener?.(snapshot({ total: 2n }))
 
-		await expect(openPromise).resolves.toEqual({ hits: [], total: 2n, live: true })
+		await expect(openPromise).resolves.toEqual({ hits: [], total: 2n, live: true, seq: 1 })
 	})
 
 	it("does not re-push the delivery that resolved the fallback — only later deliveries reach push", async () => {
@@ -201,7 +201,7 @@ describe("createSearchEngine — open", () => {
 
 		capturedListener?.(snapshot({ total: 2n }))
 
-		expect(pushes).toEqual([{ type: "snapshot", hits: [], total: 2n, live: true }])
+		expect(pushes).toEqual([{ type: "snapshot", hits: [], total: 2n, live: true, seq: 2 }])
 	})
 
 	it("configures the cache exactly once across two sequential opens", async () => {
@@ -279,7 +279,7 @@ describe("createSearchEngine — open", () => {
 
 		const openB = engine.open(client, { rootUuid: null, name: "b" }, pushB)
 
-		await expect(openB).resolves.toEqual({ hits: [], total: 0n, live: true })
+		await expect(openB).resolves.toEqual({ hits: [], total: 0n, live: true, seq: 0 })
 
 		deferredRange.resolve(windowA)
 
@@ -309,7 +309,7 @@ describe("createSearchEngine — open", () => {
 		const { push: pushB } = collectPushes()
 		const openB = engine.open(client, { rootUuid: null, name: "b" }, pushB)
 
-		await expect(openB).resolves.toEqual({ hits: [], total: 0n, live: true })
+		await expect(openB).resolves.toEqual({ hits: [], total: 0n, live: true, seq: 0 })
 
 		const searchA = fakeSearchResolving(makeFakeWindow(snapshot()))
 
@@ -433,7 +433,7 @@ describe("createSearchEngine — open", () => {
 
 		capturedListener?.(snapshot({ total: 4n }))
 
-		expect(pushes).toEqual([{ type: "snapshot", hits: [], total: 4n, live: true }])
+		expect(pushes).toEqual([{ type: "snapshot", hits: [], total: 4n, live: true, seq: 1 }])
 	})
 
 	it("silences the installed window's listener as soon as a reopen starts, before that reopen installs", async () => {
@@ -478,7 +478,7 @@ describe("createSearchEngine — open", () => {
 		const second = engine.open(client, { rootUuid: null, name: "b" }, push)
 
 		await expect(first).rejects.toBeInstanceOf(SearchSupersededError)
-		await expect(second).resolves.toEqual({ hits: [], total: 0n, live: true })
+		await expect(second).resolves.toEqual({ hits: [], total: 0n, live: true, seq: 0 })
 	})
 
 	it("rejects an open still waiting on its first delivery once the engine is closed", async () => {

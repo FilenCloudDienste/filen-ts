@@ -19,7 +19,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { searchOpen, searchSetName, search
 
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { GRACE_MS, WATCHDOG_MS, STALL_CEILING_MS } from "@/features/drive/lib/searchStatus.logic"
-import type { SearchPush, SearchHitDTO, SearchSnapshotDTO as SnapshotDTO } from "@/workers/searchEngine"
+import type { SearchPush, SearchHitDTO, SequencedSnapshotDTO as SnapshotDTO } from "@/workers/searchEngine"
 import { testUuid } from "@/tests/support/uuid"
 
 function hit(label: string): SearchHitDTO {
@@ -35,7 +35,7 @@ function hit(label: string): SearchHitDTO {
 	return { parentPath: "/", item: dir }
 }
 
-const EMPTY_SNAPSHOT: SnapshotDTO = { hits: [], total: 0n, live: true }
+const EMPTY_SNAPSHOT: SnapshotDTO = { hits: [], total: 0n, live: true, seq: 0 }
 
 // The push callback the hook handed the engine for the CURRENT open.
 function pushFn(): (push: SearchPush) => void {
@@ -90,7 +90,7 @@ describe("useDriveSearch — grace window", () => {
 	})
 
 	it("shows a non-empty result set immediately — grace only ever gates the empty case", async () => {
-		searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true }))
+		searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true, seq: 0 }))
 
 		const { result } = renderHook(() => useDriveSearch(null, true))
 
@@ -149,7 +149,7 @@ describe("useDriveSearch — watchdog ceilings", () => {
 	})
 
 	it("uses the shorter stall backstop once results are on screen, and finalizes instead of failing", async () => {
-		searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true }))
+		searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true, seq: 0 }))
 
 		const { result } = renderHook(() => useDriveSearch(null, true))
 
@@ -223,7 +223,7 @@ describe("useDriveSearch — watchdog ceilings", () => {
 			let delays: number[] = []
 
 			act(() => {
-				push({ type: "snapshot", hits: [hit("a")], total: 1n, live: true })
+				push({ type: "snapshot", hits: [hit("a")], total: 1n, live: true, seq: 1 })
 				delays = watchdogDelaysDuring(() => {
 					push({ type: "heartbeat" })
 				})
@@ -233,7 +233,7 @@ describe("useDriveSearch — watchdog ceilings", () => {
 		})
 
 		it("a heartbeat after a reset arms the no-results ceiling", async () => {
-			searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true }))
+			searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a")], total: 1n, live: true, seq: 0 }))
 
 			const { result, rerender } = renderHook(({ root }: { root: string | null }) => useDriveSearch(root, true), {
 				initialProps: { root: null as string | null }
@@ -343,7 +343,7 @@ describe("useDriveSearch — post-resync finalize", () => {
 		expect(result.current.status).toBe("searching-empty")
 
 		act(() => {
-			push({ type: "snapshot", hits: [hit("a")], total: 1n, live: true })
+			push({ type: "snapshot", hits: [hit("a")], total: 1n, live: true, seq: 1 })
 			push({ type: "resync", resyncing: false })
 		})
 
@@ -370,5 +370,47 @@ describe("useDriveSearch — post-resync finalize", () => {
 		})
 
 		expect(result.current.status).toBe("settled")
+	})
+})
+
+// An open's result and its pushes come over different ports in no set order: the newest snapshot wins.
+describe("useDriveSearch — snapshot order", () => {
+	it("keeps a pushed snapshot that came in ahead of the open's older result", async () => {
+		const inFlight = Promise.withResolvers<SnapshotDTO>()
+
+		searchOpen.mockImplementation(() => inFlight.promise)
+
+		const { result } = renderHook(() => useDriveSearch(null, true))
+
+		await typeQuery(result.current.setInput)
+
+		const push = pushFn()
+
+		act(() => {
+			push({ type: "snapshot", hits: [hit("a"), hit("b")], total: 2n, live: true, seq: 1 })
+		})
+
+		await act(async () => {
+			inFlight.resolve({ hits: [hit("a")], total: 1n, live: true, seq: 0 })
+			await Promise.resolve()
+		})
+
+		expect(result.current.results.length).toBe(2)
+	})
+
+	it("drops a push older than the open's result that lands after it", async () => {
+		searchOpen.mockImplementation(() => Promise.resolve({ hits: [hit("a"), hit("b")], total: 2n, live: true, seq: 2 }))
+
+		const { result } = renderHook(() => useDriveSearch(null, true))
+
+		await typeQuery(result.current.setInput)
+
+		expect(result.current.results.length).toBe(2)
+
+		act(() => {
+			pushFn()({ type: "snapshot", hits: [hit("a")], total: 1n, live: true, seq: 1 })
+		})
+
+		expect(result.current.results.length).toBe(2)
 	})
 })
