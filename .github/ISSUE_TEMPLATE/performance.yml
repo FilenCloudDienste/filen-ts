@@ -1,0 +1,70 @@
+name: Performance
+description: Something is slow, freezes or uses too much memory or battery
+labels: ["performance"]
+body:
+  - type: dropdown
+    id: app
+    attributes:
+      label: App
+      options:
+        - Web
+        - Desktop — macOS
+        - Desktop — Windows
+        - Desktop — Linux
+        - iOS
+        - Android
+        - Several / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Web: Settings › Advanced › About › Version. Desktop: Settings › Desktop › About."
+    validations:
+      required: true
+
+  - type: textarea
+    id: doing
+    attributes:
+      label: What were you doing?
+      placeholder: "Opening a directory with 20,000 photos"
+    validations:
+      required: true
+
+  - type: input
+    id: data-size
+    attributes:
+      label: How much data?
+      description: Number of files, directories or notes involved, and their total size.
+      placeholder: "20,000 files, 150 GB"
+    validations:
+      required: false
+
+  - type: input
+    id: device
+    attributes:
+      label: Device, system and browser
+      description: Include RAM and CPU.
+      placeholder: "MacBook Air M1, 8 GB RAM, macOS 26.1, Firefox 145"
+    validations:
+      required: true
+
+  - type: textarea
+    id: timings
+    attributes:
+      label: How slow?
+      description: Rough timings, for example "the list takes 40 seconds to appear, the scroll stutters".
+    validations:
+      required: true
+
+  - type: textarea
+    id: memory
+    attributes:
+      label: Memory and CPU use
+      description: >
+        If you can, the numbers from your system's task manager (Activity Monitor, Task Manager, System Monitor)
+        or the browser's own (Chrome: Shift+Esc) while it's slow.
+    validations:
+      required: false

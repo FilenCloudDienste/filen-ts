@@ -1,0 +1,58 @@
+name: Translation issue
+description: Wrong, missing or awkward text in your language
+labels: ["i18n"]
+body:
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      placeholder: "German"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: app
+    attributes:
+      label: App
+      options:
+        - Web
+        - Desktop — macOS
+        - Desktop — Windows
+        - Desktop — Linux
+        - iOS
+        - Android
+        - Several / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where does the text appear?
+      placeholder: "Drive › right-click a file › Share"
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current text
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested
+    attributes:
+      label: Suggested text
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Drag an image here. Hide anything private first.
+    validations:
+      required: false

@@ -1,26 +1,50 @@
 name: Feature request
-description: Suggest an improvement or new functionality
+description: Suggest an improvement or something new
 labels: ["enhancement"]
 body:
   - type: dropdown
-    id: package
+    id: app
     attributes:
-      label: Which app or package is this about?
+      label: App
       options:
-        - Mobile - iOS
-        - Mobile - Android
-        - Web (filen-web)
-        - Desktop (@filen/desktop)
-        - Shared (@filen/shared)
-        - Multiple / general
+        - Web
+        - Desktop — macOS
+        - Desktop — Windows
+        - Desktop — Linux
+        - iOS
+        - Android
+        - Several / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Drive & files
+        - Photos
+        - Videos
+        - Audio
+        - Notes
+        - Chats & contacts
+        - Office documents, spreadsheets, presentations, PDF
+        - Previews
+        - Sync
+        - Network drive (mounts)
+        - Transfers
+        - Assistant
+        - Settings & account
+        - Login & sign-up
+        - Other
     validations:
       required: true
 
   - type: textarea
     id: problem
     attributes:
-      label: What's missing or annoying today?
-      description: Describe the problem or friction, not just the solution - it helps us judge alternatives.
+      label: What's missing or getting in your way?
+      description: Describe the problem, not only the solution. It helps us weigh alternatives.
     validations:
       required: true
 
@@ -31,17 +55,10 @@ body:
     validations:
       required: true
 
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Workarounds or alternatives you've considered
-    validations:
-      required: false
-
   - type: checkboxes
     id: confirmations
     attributes:
-      label: Before submitting
+      label: Before you submit
       options:
-        - label: I searched existing issues and didn't find this request already.
+        - label: I searched the existing issues and this isn't requested yet.
           required: true

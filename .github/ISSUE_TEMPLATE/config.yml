@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Account, billing and login help
+    url: https://support.filen.io
+    about: Questions about your account, plan, payments or signing in go to Filen support, not GitHub.
+  - name: Security reports
+    url: https://support.filen.io
+    about: Report security issues privately through Filen support. Please don't open a public issue.

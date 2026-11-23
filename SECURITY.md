@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-The latest release version of filen-ts/packages/\*_/_ is currently being supported with security updates
+The latest release of every Filen app in this repository receives security updates.
 
 ## Reporting a Vulnerability
 
-Security is very important to us. If you have discovered a security issue with filen-ts/packages/\*_/_,
-please read our responsible disclosure guidelines and contact us at [https://support.filen.io](https://support.filen.io).
+Security is very important to us. If you have discovered a security issue in any Filen app or package in this repository,
+please don't open a public issue. Read our responsible disclosure guidelines and contact us at [https://support.filen.io](https://support.filen.io).
 Your report should include:
 
 - Product version

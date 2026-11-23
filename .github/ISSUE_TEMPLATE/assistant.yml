@@ -1,0 +1,62 @@
+name: Assistant
+description: The assistant answered wrongly, did the wrong thing or failed to run
+labels: ["bug", "assistant"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The assistant runs on your device, so we can't see your conversations. Only share what you're comfortable making public: **never paste private file contents, notes, chat messages, names or passwords.** Rewrite the request with made-up details if needed.
+
+  - type: dropdown
+    id: app
+    attributes:
+      label: App
+      options:
+        - Web
+        - Desktop — macOS
+        - Desktop — Windows
+        - Desktop — Linux
+        - iOS
+        - Android
+        - Several / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Web: Settings › Advanced › About › Version. Desktop: Settings › Desktop › About."
+    validations:
+      required: true
+
+  - type: textarea
+    id: request
+    attributes:
+      label: What did you ask?
+      description: Your request, with any private details replaced.
+    validations:
+      required: true
+
+  - type: textarea
+    id: result
+    attributes:
+      label: What did it do, and what did you expect?
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: The model name, if the app shows it. Leave empty if you don't know.
+    validations:
+      required: false
+
+  - type: input
+    id: device
+    attributes:
+      label: Device, system and browser
+      placeholder: "Windows 11, 16 GB RAM, RTX 3060, Chrome 142"
+    validations:
+      required: true
