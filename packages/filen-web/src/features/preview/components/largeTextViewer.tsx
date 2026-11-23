@@ -35,6 +35,7 @@ import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { settleGuard } from "@/lib/workers/settleGuard"
 
 // A text file too large to load whole, read-only in ranges (textPager.worker.ts): the command bar (File, Find with go to
 // line, View with Count lines), the size, position, encoding and a read-only badge, then the rows. Line numbers show
@@ -164,13 +165,11 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 
 		// The first match at or after the view's top is shown as soon as the search reaches it.
 		let shown = false
-		// Progress comes over the callback's own port, which keeps no order with the result's: a report after the result
-		// would put back an earlier count.
-		let settled = false
 		const from = position.get()
 		const id = startScan("search")
-		const onProgress = Comlink.proxy((at: number, count: number, first: number) => {
-			if (searches.current !== seq || settled) {
+		// A report that arrives after the result would put back an earlier count.
+		const progress = settleGuard((at: number, count: number, first: number) => {
+			if (searches.current !== seq) {
 				return
 			}
 
@@ -184,10 +183,9 @@ function LargeTextReader({ reading, alt, publishes }: { reading: TextPagerReadin
 		})
 
 		void pager
-			.run(remote => remote.search(query, caseSensitive, from, onProgress))
+			.run(remote => remote.search(query, caseSensitive, from, Comlink.proxy(progress.callback)))
+			.finally(progress.settle)
 			.then(result => {
-				settled = true
-
 				if (searches.current !== seq) {
 					return
 				}

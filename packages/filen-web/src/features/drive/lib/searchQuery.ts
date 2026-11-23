@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import { sdkApi } from "@/lib/sdk/client"
+import { settleGuard } from "@/lib/workers/settleGuard"
 import { buildSearchResults, type SearchResults } from "@/features/drive/hooks/useDriveSearch.logic"
 import { GRACE_MS } from "@/features/drive/lib/searchStatus.logic"
 import type { SearchQueryProgress } from "@/workers/searchEngine"
@@ -40,17 +41,21 @@ export async function searchDriveOnce(
 		void sdkApi.searchQueryCancel(id)
 	}
 
+	// A report that arrives after the result would show this search's figures over the caller's next one.
+	const progress = onProgress === undefined ? undefined : settleGuard(onProgress)
+
 	signal?.addEventListener("abort", onAbort, { once: true })
 
 	try {
 		const result = await sdkApi.searchQuery(
 			{ rootUuid: null, names, itemType },
 			{ settleMs: GRACE_MS, stallMs, capMs, keepMs, id },
-			onProgress === undefined ? undefined : Comlink.proxy(onProgress)
+			progress === undefined ? undefined : Comlink.proxy(progress.callback)
 		)
 
 		return { ...buildSearchResults(result.snapshot.hits), total: result.snapshot.total, settled: result.settled, name: result.name }
 	} finally {
+		progress?.settle()
 		signal?.removeEventListener("abort", onAbort)
 	}
 }

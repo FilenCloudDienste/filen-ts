@@ -1373,6 +1373,27 @@ describe("createLink", () => {
 		expect(seen).toEqual([[50, 100]])
 	})
 
+	it.each([
+		["made", () => Promise.resolve(mockDirLink())],
+		["refused", () => Promise.reject(new Error("refused"))]
+	])("directory: ignores progress that arrives after the link was %s", async (_label, answer) => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		let late: (a: number, b: number | undefined) => void = () => undefined
+
+		createDirectoryLink.mockImplementationOnce((_dir: Dir, onProgress: (a: number, b: number | undefined) => void) => {
+			late = onProgress
+
+			return answer()
+		})
+		const onProgress = vi.fn()
+
+		await createLink(dir, onProgress)
+		// The callback's own port keeps no order with the result's: its report comes in last.
+		late(90, 100)
+
+		expect(onProgress).not.toHaveBeenCalled()
+	})
+
 	it("file: calls createFileLink (no progress callback), not createDirectoryLink", async () => {
 		const file = fileItem({ uuid: testUuid("f") })
 		const status = mockFileLink()

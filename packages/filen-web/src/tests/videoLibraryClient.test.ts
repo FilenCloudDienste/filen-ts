@@ -153,6 +153,23 @@ describe("video library client", () => {
 		expect(queryClient.getQueryState([...VIDEO_TITLE_DETAIL_KEY_PREFIX, "b"])?.isInvalidated).toBe(false)
 	})
 
+	it("ignores an update the worker sent before a sign-out reset, arriving after it", () => {
+		const before = listener.current
+		const total = { movies: 2, shows: 1, other: 0, episodes: 10 }
+
+		if (before === null) {
+			throw new Error("not subscribed")
+		}
+
+		videoLibrary.reset()
+
+		// The callback's own port keeps no order with the reset's call: the update comes in last.
+		before({ type: "catalog", version: 3, titles: null, summary: { titleCount: 3, total, byRoot: [["r", total]], hiddenCount: 1 } })
+
+		expect(videoLibrary.getSnapshot()).toMatchObject({ loaded: false })
+		expect(videoLibrary.getSnapshot().summary.titleCount).toBe(0)
+	})
+
 	it("writes snapshots only once it holds the writer lock, and gives it up at logout", async () => {
 		const pending: (() => Promise<void> | undefined)[] = []
 		let released = false

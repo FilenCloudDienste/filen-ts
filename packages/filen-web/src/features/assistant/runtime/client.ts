@@ -36,6 +36,7 @@ import { buildDeployment, recoverIfNewerBuild, showUpdateReadyToast, updateToNew
 import { ACCOUNT_QUERY_KEY, accountQueryGet, fetchAccount } from "@/queries/account"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
+import { settleGuard } from "@/lib/workers/settleGuard"
 
 // The page side of the on-device model: decides the model state, owns the worker (spawned only to
 // download or to run the model, terminated otherwise, so an idle app holds none of its memory), and holds
@@ -779,24 +780,25 @@ export class AssistantRuntime implements AssistantModel {
 
 				writeDownloadIntent(intent)
 				this.setState({ kind: "downloading", model: this.info(), receivedBytes: before.presentBytes, waiting: false, resumed })
-				await untilClosed(
-					handle,
-					handle.remote.download(
-						this.manifest,
-						this.baseUrl,
-						Comlink.proxy(({ receivedBytes, waiting }: ModelDownloadProgress) => {
-							if (this.state.kind === "downloading") {
-								this.setState({
-									kind: "downloading",
-									model: this.info(),
-									receivedBytes: Math.min(sizeBytes, Math.max(0, receivedBytes)),
-									waiting,
-									resumed
-								})
-							}
+
+				// A report that arrives after the download ended would take the bar back while pruning, or show it waiting.
+				const progress = settleGuard(({ receivedBytes, waiting }: ModelDownloadProgress) => {
+					if (this.state.kind === "downloading") {
+						this.setState({
+							kind: "downloading",
+							model: this.info(),
+							receivedBytes: Math.min(sizeBytes, Math.max(0, receivedBytes)),
+							waiting,
+							resumed
 						})
-					)
-				)
+					}
+				})
+
+				try {
+					await untilClosed(handle, handle.remote.download(this.manifest, this.baseUrl, Comlink.proxy(progress.callback)))
+				} finally {
+					progress.settle()
+				}
 
 				if (this.state.kind === "downloading" && (this.state.receivedBytes < sizeBytes || this.state.waiting)) {
 					this.setState({ kind: "downloading", model: this.info(), receivedBytes: sizeBytes, waiting: false, resumed })
@@ -1164,36 +1166,30 @@ export class AssistantRuntime implements AssistantModel {
 
 		// One port for every kind of update, opened only when someone listens. Updates travel on that port and
 		// the result on the worker's own, in no guaranteed order: one that lands after the result is stale.
-		let settled = false
 		let lastProgressAt: number | null = null
+		const updates = settleGuard((update: GenerationUpdate) => {
+			switch (update.type) {
+				case "text":
+					onText?.(update.text)
+					break
+				case "progress": {
+					const at = performance.now()
+
+					if (lastProgressAt !== null && handle === this.handle) {
+						this.slowestBatchMs = Math.max(this.slowestBatchMs, at - lastProgressAt)
+					}
+
+					lastProgressAt = at
+					onProgress?.({ processed: update.processed, total: update.total })
+					break
+				}
+				case "call":
+					onToolCall?.({ index: update.index, name: update.name })
+					break
+			}
+		})
 		const onUpdate =
-			onText === undefined && onProgress === undefined && onToolCall === undefined
-				? undefined
-				: Comlink.proxy((update: GenerationUpdate) => {
-						if (settled) {
-							return
-						}
-
-						switch (update.type) {
-							case "text":
-								onText?.(update.text)
-								break
-							case "progress": {
-								const at = performance.now()
-
-								if (lastProgressAt !== null && handle === this.handle) {
-									this.slowestBatchMs = Math.max(this.slowestBatchMs, at - lastProgressAt)
-								}
-
-								lastProgressAt = at
-								onProgress?.({ processed: update.processed, total: update.total })
-								break
-							}
-							case "call":
-								onToolCall?.({ index: update.index, name: update.name })
-								break
-						}
-					})
+			onText === undefined && onProgress === undefined && onToolCall === undefined ? undefined : Comlink.proxy(updates.callback)
 
 		signal.addEventListener("abort", cancel)
 
@@ -1229,7 +1225,7 @@ export class AssistantRuntime implements AssistantModel {
 
 			throw errorName(e) === "AbortError" || isAborted(signal) ? new AssistantAbortError() : e
 		} finally {
-			settled = true
+			updates.settle()
 			signal.removeEventListener("abort", cancel)
 		}
 	}

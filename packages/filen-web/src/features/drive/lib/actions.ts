@@ -3,6 +3,7 @@ import type { Dir, DirColor, File, FileVersion } from "@filen/sdk-rs"
 import { removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
+import { settleGuard } from "@/lib/workers/settleGuard"
 import { queryClient } from "@/queries/client"
 import { accountQueryGet, markAccountStale } from "@/queries/account"
 import {
@@ -507,15 +508,19 @@ export async function createLink(
 	onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void
 ): Promise<LinkActionOutcome> {
 	const base = asDirectoryOrFile(item)
+	// A report that arrives after the link was made (or failed) would show it being made again.
+	const progress = settleGuard(onProgress)
 	let link: DriveItemLinkStatus
 
 	try {
 		link =
 			base.type === "directory"
-				? { type: "directory", status: await runOp(sdkApi.createDirectoryLink(base.data, Comlink.proxy(onProgress))) }
+				? { type: "directory", status: await runOp(sdkApi.createDirectoryLink(base.data, Comlink.proxy(progress.callback))) }
 				: { type: "file", status: await runOp(sdkApi.createFileLink(base.data)) }
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
+	} finally {
+		progress.settle()
 	}
 
 	driveItemLinkStatusQueryUpdate(item.data.uuid, link)

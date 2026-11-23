@@ -3,6 +3,7 @@ import type { ArchiveEntryId } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
+import { settleGuard } from "@/lib/workers/settleGuard"
 import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import type { ListReportDTO } from "@/lib/sdk/jobErrors"
 import type { EntryReadPlan, PackedEntryBatch } from "@/lib/sdk/archiveListing"
@@ -158,8 +159,20 @@ export interface EntryLeaseRequest {
 export function leaseEntry(request: EntryLeaseRequest, deps: ArchiveHandleDeps = defaultArchiveHandleDeps): () => void {
 	const reader = deps.acquireReader(request.target, request.password)
 	let leased = true
+	// An event that arrives after the release (a read the worker reported before it heard of it) belongs to no lease.
+	const { events } = request
 
-	deps.leaseEntry(request.leaseId, reader.id, request.plan, request.events)
+	deps.leaseEntry(request.leaseId, reader.id, request.plan, {
+		phase: phase => {
+			if (leased) events.phase(phase)
+		},
+		verified: () => {
+			if (leased) events.verified()
+		},
+		failed: error => {
+			if (leased) events.failed(error)
+		}
+	})
 
 	return () => {
 		if (leased) {
@@ -259,13 +272,17 @@ export function openArchiveHandle(
 			const cancel = (): void => {
 				deps.cancelJob(jobId)
 			}
-			const listed = deps.listArchive(reader.id, jobId, { deliverEntries: true, keepReportEntries: false }, event => {
+			// An event that arrives after the report would hand its batch over a second time.
+			const events = settleGuard((event: ListJobEvent) => {
 				if (event.type === "entries") {
 					onBatch(event.batch)
 				} else {
 					onWaiting?.(event.update.phase === "waitingForWorker")
 				}
 			})
+			const listed = deps
+				.listArchive(reader.id, jobId, { deliverEntries: true, keepReportEntries: false }, events.callback)
+				.finally(events.settle)
 
 			// An abort before the job started cancels it as soon as it does.
 			if (signal.aborted) {

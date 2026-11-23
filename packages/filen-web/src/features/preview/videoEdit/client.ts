@@ -15,6 +15,7 @@ import { idleResource } from "@/lib/idleResource"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { isAppleMobile } from "@/lib/appleMobile"
 import { sdkApi } from "@/lib/sdk/client"
+import { settleGuard } from "@/lib/workers/settleGuard"
 import { editedCopySuffix } from "@/features/preview/components/previewOverlay.logic"
 
 // The page side of the video editor. Its preview worker (exact frames, filmstrip, waveform) is spun up on the first
@@ -484,12 +485,14 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 		waveform: (range: TimeRange, columns: number, onUpdate: (peaks: Float32Array) => void) => {
 			const id = nextId++
 			const watch = { stopped: false }
+			// The worker stops only once it hears of the stop: peaks it sent meanwhile are another view's.
+			const updates = settleGuard(onUpdate)
 
 			void (async () => {
 				await loadSource()
 
 				if (!watch.stopped) {
-					await callWithSource(remote => remote.watchWaveform(id, range, columns, Comlink.proxy(onUpdate)))
+					await callWithSource(remote => remote.watchWaveform(id, range, columns, Comlink.proxy(updates.callback)))
 				}
 			})().catch(() => undefined)
 
@@ -499,6 +502,7 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 				}
 
 				watch.stopped = true
+				updates.settle()
 
 				// Only on the worker held now: a lost one took its watches with it.
 				const current = hold

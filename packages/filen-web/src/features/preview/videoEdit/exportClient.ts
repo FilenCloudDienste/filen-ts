@@ -8,6 +8,7 @@ import type {
 } from "@/features/preview/videoEdit/worker/exportApi"
 import { idleResource } from "@/lib/idleResource"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import { settleGuard } from "@/lib/workers/settleGuard"
 
 // The page's handle on the export worker, spun up for an export (or a plan) and torn down once idle: the demuxer, the
 // codecs and the GPU pass are freed with it.
@@ -57,6 +58,8 @@ export const exporter: Exporter = {
 	run(args, onProgress) {
 		let live: ExportWorkerResource | null = null
 		let cancelled = false
+		// A report that arrives after the export ended would show it running again.
+		const progress = settleGuard(onProgress)
 		const result = exportWorker.use(async resource => {
 			live = resource
 
@@ -68,13 +71,13 @@ export const exporter: Exporter = {
 			}
 
 			return await Promise.race([
-				resource.remote.startExport(Comlink.transfer(args, [args.source, args.output]), Comlink.proxy(onProgress)),
+				resource.remote.startExport(Comlink.transfer(args, [args.source, args.output]), Comlink.proxy(progress.callback)),
 				resource.lost.then((message): ExportWorkerResult => ({ status: "error", message, refusal: null, cause: "workerLost" }))
 			])
 		})
 
 		return {
-			result: result.catch((error: unknown): ExportWorkerResult => ({
+			result: result.finally(progress.settle).catch((error: unknown): ExportWorkerResult => ({
 				status: "error",
 				message: error instanceof Error ? error.message : String(error),
 				refusal: null

@@ -19,6 +19,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { formatDateTime } from "@/lib/formatDate"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { log } from "@/lib/log"
+import { settleGuard } from "@/lib/workers/settleGuard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -239,33 +240,27 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 		}
 
 		let live = true
-		// Progress comes over the callback's own port, which keeps no order with the result's: a report that arrives after
-		// the result would add its matches a second time.
-		let ended = false
 		const timer = setTimeout(() => {
+			// A report that arrives after the result would add its matches a second time.
+			const progress = settleGuard((searched: number, found: readonly number[]) => {
+				if (!live) return
+
+				// An empty stretch keeps the matches as they are: the rows in view are not read again.
+				setSearch(current =>
+					current?.query !== query
+						? current
+						: found.length === 0
+							? { ...current, searched }
+							: { ...current, searched, matches: [...current.matches, ...found] }
+				)
+			})
+
 			setSearch({ query, matches: [], searched: 0, end: null })
 			pager
-				.run(remote =>
-					remote.mboxSearch(
-						query,
-						Comlink.proxy((searched: number, found: readonly number[]) => {
-							if (!live || ended) return
-
-							// An empty stretch keeps the matches as they are: the rows in view are not read again.
-							setSearch(current =>
-								current?.query !== query
-									? current
-									: found.length === 0
-										? { ...current, searched }
-										: { ...current, searched, matches: [...current.matches, ...found] }
-							)
-						})
-					)
-				)
+				.run(remote => remote.mboxSearch(query, Comlink.proxy(progress.callback)))
+				.finally(progress.settle)
 				.then(
 					result => {
-						ended = true
-
 						if (!live) return
 
 						setSearch({ query, matches: result.matches, searched: result.searched, end: result.end })
@@ -382,26 +377,21 @@ function MailboxReader({ item, pager, fail }: { item: DriveItem; pager: TextPage
 	}
 
 	const countAll = (): void => {
-		// As a search's: a progress report that arrives after the count would take it back.
-		let ended = false
+		// A progress report that arrives after the count would take it back.
+		const progress = settleGuard((reached: MboxCount) => {
+			setCount(reached)
+		})
 
 		setCounting(true)
 		pager
-			.run(remote =>
-				remote.mboxCountAll(
-					Comlink.proxy((progress: MboxCount) => {
-						if (!ended) setCount(progress)
-					})
-				)
-			)
+			.run(remote => remote.mboxCountAll(Comlink.proxy(progress.callback)))
+			.finally(progress.settle)
 			.then(
 				counted => {
-					ended = true
 					setCount(counted)
 					setCounting(false)
 				},
 				(e: unknown) => {
-					ended = true
 					log.error("preview", "counting a mailbox failed", e)
 					fail(e)
 					setCounting(false)

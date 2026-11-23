@@ -572,6 +572,39 @@ describe("search_items", () => {
 		expect(onProgress.mock.calls).toEqual([[{ share: 0.25, found: 40 }], [{ share: null, found: 41 }]])
 	})
 
+	it("ignores a search's progress that arrives after its result", async () => {
+		const tool = assistantToolByName("search_items")
+
+		if (tool === undefined) {
+			throw new Error("no tool")
+		}
+
+		let late: (progress: { indexed: number | null; candidates: bigint }) => void = () => undefined
+
+		sdk.searchQuery.mockImplementation(
+			(_params: unknown, _options: unknown, onProgress: (progress: { indexed: number | null; candidates: bigint }) => void) => {
+				late = onProgress
+
+				return Promise.resolve(engineResult([], 41n, "x"))
+			}
+		)
+
+		const onProgress = vi.fn()
+
+		await executor.execute({
+			callId: "call",
+			tool,
+			args: { query: "x" },
+			confirmed: false,
+			signal: new AbortController().signal,
+			onProgress
+		})
+		// The callback's own port keeps no order with the result's: its report comes in last.
+		late({ indexed: 0.5, candidates: 7n })
+
+		expect(onProgress).not.toHaveBeenCalled()
+	})
+
 	it("gives a turn's searches one budget, so a retry does not wait out the same index build again", async () => {
 		const tool = assistantToolByName("search_items")
 

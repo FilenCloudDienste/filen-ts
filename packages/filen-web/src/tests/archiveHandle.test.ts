@@ -192,6 +192,65 @@ describe("acquireArchiveHandle", () => {
 		handle.release()
 	})
 
+	it("ignores a listing's batch that arrives after its report", async () => {
+		const { deps, list } = harness()
+		const handle = opened(fileOrigin(), deps)
+		const store = createEntryStore()
+		const listed = handle.list(
+			batch => {
+				store.append(batch)
+			},
+			{ signal: new AbortController().signal }
+		)
+		const [batch] = packEntries(["preview.jpg"])
+
+		if (batch === undefined) {
+			throw new Error("no batch")
+		}
+
+		list(0).emit({ type: "entries", batch })
+		list(0).resolve(report())
+		await listed
+
+		// The callback's own port keeps no order with the result's: the batch comes in again, last.
+		list(0).emit({ type: "entries", batch })
+
+		expect(store.entryCount).toBe(1)
+		handle.release()
+	})
+
+	it("ignores an entry lease's events that arrive after its release", async () => {
+		const { deps, leases } = harness()
+		const handle = opened(fileOrigin(), deps)
+		const store = storeOf([{ path: "preview.jpg", index: 7, size: 2048, access: DIRECT }])
+		const phases: string[] = []
+		const verified = vi.fn()
+		const failed = vi.fn()
+		const lease = await handle.origin(store, 0, {
+			phase: phase => {
+				phases.push(phase)
+			},
+			verified,
+			failed
+		})
+		const [held] = [...leases.values()]
+
+		if (held === undefined) {
+			throw new Error("no lease")
+		}
+
+		held.events.phase("reading")
+		lease.release()
+		held.events.phase("waitingForWorker")
+		held.events.verified()
+		held.events.failed({ species: "sdk", kind: "Cancelled", label: "", message: "" })
+
+		expect(phases).toEqual(["reading"])
+		expect(verified).not.toHaveBeenCalled()
+		expect(failed).not.toHaveBeenCalled()
+		handle.release()
+	})
+
 	it("rejects with the listing's error, and cancels its job on abort", async () => {
 		const { deps, list } = harness()
 		const handle = opened(fileOrigin(), deps)

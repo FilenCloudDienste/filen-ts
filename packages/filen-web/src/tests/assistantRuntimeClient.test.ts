@@ -309,6 +309,40 @@ describe("AssistantRuntime download", () => {
 		expect(locks.held).toBe(0)
 	})
 
+	it("ignores a download's progress that arrives after it ended, while the earlier version is pruned", async () => {
+		let late: (progress: ModelDownloadProgress) => void = () => undefined
+		let answer: () => void = () => undefined
+
+		// Kept, as the server could not be asked: asked again at the download's end, which a test holds open.
+		stale.bytes = 1000
+		remote.download.mockImplementation((_manifest, _baseUrl, onProgress) => {
+			late = onProgress
+			onProgress({ receivedBytes: TOTAL - 1, waiting: false })
+			appUpdate.gate = new Promise(resolve => {
+				answer = resolve
+			})
+
+			return Promise.resolve()
+		})
+
+		const runtime = new AssistantRuntime()
+
+		runtime.download()
+		await vi.waitFor(() => {
+			expect(runtime.getState()).toMatchObject({ kind: "downloading", receivedBytes: TOTAL, waiting: false })
+		})
+		await new Promise(resolve => setTimeout(resolve, 10))
+		expect(runtime.getState().kind).toBe("downloading")
+
+		// The callback's own port keeps no order with the result's: its report comes in last.
+		late({ receivedBytes: 1000, waiting: true })
+
+		expect(runtime.getState()).toMatchObject({ kind: "downloading", receivedBytes: TOTAL, waiting: false })
+
+		answer()
+		await settled(runtime, "downloaded")
+	})
+
 	it("reports a start that checks the files, and downloads again just the shards found damaged", async () => {
 		const states: AssistantModelState[] = []
 

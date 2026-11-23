@@ -58,14 +58,19 @@ const remote = vi.hoisted(() => ({
 	// Scans settle when a test says so.
 	countLines: () => scans.count.promise,
 	lineStart: () => scans.lineStart.promise,
-	search: () => scans.search.promise,
+	search: (_query: string, _caseSensitive: boolean, _from: number, onProgress: (at: number, count: number, first: number) => void) => {
+		scans.searchProgress = onProgress
+
+		return scans.search.promise
+	},
 	match: () => Promise.resolve({ offset: 11, line: 2 })
 }))
 
 const scans = vi.hoisted(() => ({
 	count: Promise.withResolvers<{ lines: number; complete: boolean; frontier: number }>(),
 	lineStart: Promise.withResolvers<number | null>(),
-	search: Promise.withResolvers<{ lines: number; complete: boolean; frontier: number; end: string; count: number; first: number }>()
+	search: Promise.withResolvers<{ lines: number; complete: boolean; frontier: number; end: string; count: number; first: number }>(),
+	searchProgress: null as ((at: number, count: number, first: number) => void) | null
 }))
 
 // One worker per key, as useOwnedWorker starts a new one for a new key (a retry's).
@@ -123,6 +128,7 @@ afterEach(() => {
 	scans.count = Promise.withResolvers()
 	scans.lineStart = Promise.withResolvers()
 	scans.search = Promise.withResolvers()
+	scans.searchProgress = null
 	workers.clear()
 	state.failLocate = false
 	state.opens = 0
@@ -248,6 +254,28 @@ describe("LargeTextViewer", () => {
 			await Promise.resolve()
 		})
 		expect(await screen.findByText("1/4+")).toBeTruthy()
+	})
+
+	it("ignores a search's progress that arrives after its result", async () => {
+		await renderViewer()
+		await screen.findByText("first line")
+		fireEvent.click(screen.getByRole("button", { name: "Find" }))
+		fireEvent.change(await screen.findByRole("searchbox", { name: "Find" }), { target: { value: "line" } })
+		await screen.findByText(/^Searching/, undefined, { timeout: 2000 })
+
+		await act(async () => {
+			scans.search.resolve({ lines: 2, complete: true, frontier: 100, end: "done", count: 4, first: 0 })
+			await Promise.resolve()
+		})
+		expect(await screen.findByText("1/4")).toBeTruthy()
+
+		// The callback's own port keeps no order with the result's: its report comes in last.
+		await act(async () => {
+			scans.searchProgress?.(50, 2, 0)
+			await Promise.resolve()
+		})
+		expect(screen.getByText("1/4")).toBeTruthy()
+		expect(screen.queryByText(/^Searching/)).toBeNull()
 	})
 
 	it("guesses a legacy file's encoding once, from the first block's copy", async () => {

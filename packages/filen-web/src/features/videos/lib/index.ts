@@ -4,6 +4,7 @@ import { activeLibraryOverrides, activeLibraryRoots, type ItemRec, type LibraryC
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
+import { settleGuard } from "@/lib/workers/settleGuard"
 import { kvEntriesJsonInSlices } from "@/lib/storage/adapter"
 import { nextTask } from "@/lib/nextTask"
 import { createListenerSet } from "@/lib/listenerSet"
@@ -325,11 +326,12 @@ class VideoLibraryClient {
 
 		this.attached = true
 
-		void sdkApi.videoIndexSubscribe(
-			Comlink.proxy((update: VideoIndexUpdate) => {
-				this.apply(update)
-			})
-		)
+		// Detached at sign-out: an update the worker sent before it dropped its index would bring the account's back.
+		const updates = settleGuard((update: VideoIndexUpdate) => {
+			this.apply(update)
+		})
+
+		void sdkApi.videoIndexSubscribe(Comlink.proxy(updates.callback))
 
 		const flush = (): void => {
 			if (readSignOutPending()) {
@@ -384,6 +386,7 @@ class VideoLibraryClient {
 		this.sendWatch()
 
 		this.detach = () => {
+			updates.settle()
 			unwatchVerdicts()
 			unwatchState()
 			unwatchProbes()

@@ -16,6 +16,7 @@ import { acquireArchiveReader, type ArchiveReaderRef } from "@/features/archive/
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 import { openByteReader } from "@/features/preview/lib/origin/byteReader"
 import { log } from "@/lib/log"
+import { settleGuard } from "@/lib/workers/settleGuard"
 
 // One archive's listing for the browser: which phase it is in, and the entries read so far. Each run is a
 // job of its own id, through the archive's reader for the run's password (archiveReaders.ts); the session holds the
@@ -379,7 +380,8 @@ export function openListingSession(
 	}
 
 	const execute = async (current: Run, password: string | undefined): Promise<void> => {
-		const onEvent = (event: ListJobEvent): void => {
+		// An event that arrives after the report would append its entries a second time, or show the run reading again.
+		const events = settleGuard((event: ListJobEvent): void => {
 			if (!isCurrent(current)) {
 				return
 			}
@@ -426,15 +428,17 @@ export function openListingSession(
 
 					break
 			}
-		}
+		})
 
 		try {
-			const report = await deps.listArchive(
-				current.reader.id,
-				current.id,
-				{ keepReportEntries: false, deliverEntries: current.kind === "full" },
-				onEvent
-			)
+			const report = await deps
+				.listArchive(
+					current.reader.id,
+					current.id,
+					{ keepReportEntries: false, deliverEntries: current.kind === "full" },
+					events.callback
+				)
+				.finally(events.settle)
 
 			if (!isCurrent(current)) {
 				return

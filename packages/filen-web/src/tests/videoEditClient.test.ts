@@ -204,13 +204,24 @@ describe("createVideoEditClient", () => {
 
 		await flush()
 
-		expect(preview.watchWaveform).toHaveBeenCalledWith(expect.any(Number), { start: 0, end: 10 }, 200, onUpdate)
+		expect(preview.watchWaveform).toHaveBeenCalledWith(expect.any(Number), { start: 0, end: 10 }, 200, expect.any(Function))
+
+		const peaks = new Float32Array([0.5])
+		const sent = (preview.watchWaveform.mock.calls[0] as unknown[] | undefined)?.[3] as (peaks: Float32Array) => void
+
+		sent(peaks)
+		expect(onUpdate).toHaveBeenCalledTimes(1)
+		expect(onUpdate.mock.calls[0]?.[0]).toBe(peaks)
 
 		stop()
 		stop()
 		await flush()
 
 		expect(preview.unwatchWaveform).toHaveBeenCalledTimes(1)
+
+		// Sent before the worker heard of the stop, arriving after it: another view's peaks.
+		sent(new Float32Array([0.9]))
+		expect(onUpdate).toHaveBeenCalledTimes(1)
 		client.dispose()
 	})
 

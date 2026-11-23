@@ -325,6 +325,29 @@ describe("openListingSession", () => {
 		expect(listener).toHaveBeenCalledTimes(3)
 	})
 
+	it("ignores events that arrive after the report: no batch twice, no reading again", async () => {
+		const { call, deps } = harness()
+		const session = openListingSession(source("a.zip", 10), deps)
+
+		session.start()
+
+		const { emit, resolve } = call(0)
+		const store = session.getSnapshot().store
+
+		emit(entriesEvent(["a", "b"]))
+		resolve(report())
+		await settled()
+
+		expect(session.getSnapshot().phase.type).toBe("done")
+
+		// The callback's own port keeps no order with the result's: these come in last.
+		emit(entriesEvent(["a", "b"]))
+		emit(update("reading", { bytesRead: 40n, entries: 2n }))
+
+		expect(store.entryCount).toBe(2)
+		expect(session.getSnapshot().phase.type).toBe("done")
+	})
+
 	it("cancels on stop, releases only once the run settled, and keeps what was read", async () => {
 		const { call, deps } = harness(nameInfo({ type: "tar", codec: undefined }))
 		const session = openListingSession(source("a.tar", 100 * MiB), deps)
