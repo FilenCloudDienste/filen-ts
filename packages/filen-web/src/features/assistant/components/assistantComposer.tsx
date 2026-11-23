@@ -34,7 +34,7 @@ function sizeRestoredDraft(element: HTMLDivElement | null): void {
 // composition's own Enter (confirming a candidate, which Safari delivers after the composition ended) is
 // left to the IME. While a reply streams, Stop replaces Send; the draft stays editable so the next question
 // can be typed meanwhile. While the turn only waits for its card, Send is back: a new message answers the
-// card with no.
+// card with no. A line under it says the assistant can be wrong.
 export function AssistantComposer() {
 	const { t } = useTranslation("assistant")
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -118,6 +118,8 @@ export function AssistantComposer() {
 					</Button>
 				)}
 			</div>
+			{/* Plain text, outside the pill and named by nothing, so no control's accessible name takes it in. */}
+			<p className="mt-1.5 px-2 text-center text-xs text-muted-foreground">{t("assistantComposerDisclaimer")}</p>
 		</div>
 	)
 }

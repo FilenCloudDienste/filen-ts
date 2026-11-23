@@ -815,6 +815,47 @@ describe("AssistantSidePanel", () => {
 	})
 })
 
+describe("the composer's disclaimer", () => {
+	const DISCLAIMER = "The assistant can make mistakes. Check its answers and changes."
+
+	function expectUnderComposer(scope: HTMLElement): void {
+		const composer = within(scope).getByRole("textbox", { name: "Ask the assistant" })
+		const note = within(scope).getByText(DISCLAIMER)
+
+		expect(note.tagName).toBe("P")
+		expect(composer.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+		// Plain text: in no control's accessible name or description, and no link.
+		expect(composer.getAttribute("aria-describedby")).toBeNull()
+		expect(note.closest("a, button, label")).toBeNull()
+		expect(within(scope).queryByRole("button", { name: new RegExp(DISCLAIMER) })).toBeNull()
+	}
+
+	it("shows under the composer in the panel, with or without a conversation", () => {
+		withSession({ kind: "ready", model: MOCK_ASSISTANT_MODEL })
+		render(<AssistantSidePanel />)
+
+		expectUnderComposer(document.body)
+
+		act(() => {
+			sendAssistantMessage("find my taxes")
+		})
+
+		expectUnderComposer(document.body)
+	})
+
+	it("shows under the composer in the narrow drawer", async () => {
+		withSession({ kind: "ready", model: MOCK_ASSISTANT_MODEL })
+		render(
+			<AssistantDrawer
+				open={true}
+				narrow={true}
+			/>
+		)
+
+		expectUnderComposer(await screen.findByRole("dialog", { name: "Assistant" }))
+	})
+})
+
 describe("AssistantDrawer", () => {
 	it("leaves nothing behind when the window widens with the drawer open and narrows again", async () => {
 		withSession({ kind: "ready", model: MOCK_ASSISTANT_MODEL })

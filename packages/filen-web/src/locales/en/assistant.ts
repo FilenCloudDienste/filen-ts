@@ -650,6 +650,8 @@ export const assistant = {
 	assistantSend: "Send",
 	/** Composer — stops the reply being generated */
 	assistantStop: "Stop",
+	/** Under the composer, always shown: a reminder that the assistant's answers and changes can be wrong */
+	assistantComposerDisclaimer: "The assistant can make mistakes. Check its answers and changes.",
 
 	// ── Conversation history: retention ──────────────────────────────────────
 	/** History footer — how long saved conversations are kept (Settings > Assistant > Keep conversations): never removed by age */
