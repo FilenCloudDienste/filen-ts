@@ -916,9 +916,14 @@ describe("DocxEditor input", () => {
 		if (box === undefined) throw new Error("no caret")
 
 		const point = clientPoint(editor, box.page, box.x + 1, box.top + box.height / 2)
+		// Presses 100 ms apart, whatever the machine's speed: within the click window however slow the test runs.
+		let time = 1_000
 		const press = (init: PointerEventInit = {}): void =>
 			act(() => {
-				content.dispatchEvent(pointer("pointerdown", point, init))
+				const down = pointer("pointerdown", point, init)
+
+				Object.defineProperty(down, "timeStamp", { value: (time += 100) })
+				content.dispatchEvent(down)
 				content.dispatchEvent(pointer("pointerup", point, init))
 			})
 		const paragraph = editor.state.doc.child(1)
