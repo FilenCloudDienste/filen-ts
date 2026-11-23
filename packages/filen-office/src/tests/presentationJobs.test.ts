@@ -540,6 +540,7 @@ describe("a jobs worker that posts no outcome", () => {
 	function silentWorker(): {
 		readonly worker: PresentationJobsWorkerLike
 		readonly fire: (type: "error" | "messageerror") => void
+		readonly send: (data: unknown) => void
 		readonly posted: unknown[]
 	} {
 		const listeners = new Map<string, ((event: { readonly data: unknown }) => void)[]>()
@@ -558,6 +559,9 @@ describe("a jobs worker that posts no outcome", () => {
 			fire: type => {
 				for (const listener of listeners.get(type) ?? []) listener({ data: undefined })
 			},
+			send: data => {
+				for (const listener of listeners.get("message") ?? []) listener({ data })
+			},
 			posted
 		}
 	}
@@ -572,6 +576,26 @@ describe("a jobs worker that posts no outcome", () => {
 
 		expect(await handle.done).toEqual({ kind: "refused", reason: "failed", detail: "job" })
 		await expect(handle.output.read()).rejects.toMatchObject({ reason: "failed" })
+		handle.close()
+	})
+
+	it("passes progress on until the job ended, and none the worker posts after", async () => {
+		const fake = silentWorker()
+		const progress = vi.fn()
+		const handle = presentationJobsClient(() => fake.worker)(
+			"pdf",
+			{ layout: "slides", includeHidden: false, protect: false },
+			session,
+			progress
+		)
+
+		fake.send({ t: "progress", id: 1, done: 1, total: 4 })
+		fake.fire("error")
+		await handle.done
+		// A worker that never heard of the job's end still reports.
+		fake.send({ t: "progress", id: 1, done: 2, total: 4 })
+
+		expect(progress.mock.calls).toEqual([[1, 4]])
 		handle.close()
 	})
 

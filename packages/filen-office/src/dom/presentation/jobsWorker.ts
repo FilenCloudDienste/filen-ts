@@ -279,8 +279,11 @@ export function presentationJobsClient(
 
 			if (typeof message !== "object" || message === null || message.id !== id) return
 
-			if (message.t === "progress") onProgress?.(message.done, message.total)
-			else if (message.t === "done") finish(message.outcome)
+			// A job given up on (an abort past its grace, a failure) still reports until its worker hears of it: the caller
+			// is done with it.
+			if (message.t === "progress") {
+				if (!settled) onProgress?.(message.done, message.total)
+			} else if (message.t === "done") finish(message.outcome)
 		})
 		worker.addEventListener("error", fail)
 		worker.addEventListener("messageerror", fail)
