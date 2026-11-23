@@ -143,23 +143,63 @@ export const signatureHintsRequest: PdfRequestHandler<"signatureHints"> = contex
 	}
 }
 
-export function verifySignaturesRequest(subtle: PdfSubtle): PdfRequestHandler<"verifySignatures"> {
+// `step` is told each step of a check as it starts and ends (reads, digests, WebCrypto calls, revision opens), for a
+// host's diagnostics of a check that never ends.
+export function verifySignaturesRequest(subtle: PdfSubtle, step?: (name: string) => void): PdfRequestHandler<"verifySignatures"> {
+	const traced = <T>(name: string, run: () => T): T => {
+		step?.(`${name} started`)
+
+		const result = run()
+
+		if (result instanceof Promise) {
+			return result.then(
+				value => {
+					step?.(`${name} ended`)
+
+					return value
+				},
+				(error: unknown) => {
+					step?.(`${name} failed`)
+
+					throw error
+				}
+			) as T
+		}
+
+		step?.(`${name} ended`)
+
+		return result
+	}
+	const checked: PdfSubtle =
+		step === undefined
+			? subtle
+			: {
+					importKey: (...args) => traced("importKey", () => subtle.importKey(...args)),
+					verify: (...args) => traced("verify", () => subtle.verify(...args))
+				}
+
 	return async (context, { fields }) => {
 		const { mupdf } = context
-		const { open, bytes, document, password } = savedFile(context)
+		const { open, bytes, document, password } = traced("open saved file", () => savedFile(context))
 
 		try {
-			const report = await verifyPdfSignatures(
-				document,
-				{ length: bytes.length, read: (offset, length) => Promise.resolve(bytes.read(offset, length)) },
-				{
-					subtle,
-					createDigest: createPdfDigest,
-					// Unlocked like the current document: an encrypted revision read undecrypted would differ from it
-					// everywhere. One that stays locked makes its signature unverifiable.
-					openRevision: length => openUnlocked(mupdf, bytes.handle(length), password),
-					expectedFields: fields
-				}
+			const report = await traced("check", () =>
+				verifyPdfSignatures(
+					document,
+					{
+						length: bytes.length,
+						read: (offset, length) =>
+							traced(`read ${String(length)} at ${String(offset)}`, () => Promise.resolve(bytes.read(offset, length)))
+					},
+					{
+						subtle: checked,
+						createDigest: name => traced(`digest ${name}`, () => createPdfDigest(name)),
+						// Unlocked like the current document: an encrypted revision read undecrypted would differ from it
+						// everywhere. One that stays locked makes its signature unverifiable.
+						openRevision: length => traced("open revision", () => openUnlocked(mupdf, bytes.handle(length), password)),
+						expectedFields: fields
+					}
+				)
 			)
 
 			return { value: report }

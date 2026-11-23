@@ -6,6 +6,7 @@ import { test as base, expect, type BrowserContext, type BrowserType, type Page,
 import { fixtureManifestName } from "@/e2e-hooks/runManifest"
 import { SESSION_BINDING } from "@/e2e-hooks/sessionSeed"
 import { E2E_AUTOSAVE_KEY } from "@/e2e-hooks/storageKeys"
+import { E2E_TRACE } from "@/e2e-hooks/trace"
 import { common } from "@/locales/en/common"
 import { silenceMediaElements } from "./helpers/muteMedia"
 import { attachTopScreenshots, pageStateLines, stateReport } from "./helpers/pageState"
@@ -386,7 +387,9 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 		const tab = `tab${String(context.pages().indexOf(page))}`
 
 		page.on("console", message => {
-			if (message.type() === "error" || message.type() === "warning") {
+			// Workers' messages included. The app's e2e trace lines (debug, E2E_TRACE) name each step of work that
+			// may never end.
+			if (message.type() === "error" || message.type() === "warning" || message.text().startsWith(E2E_TRACE)) {
 				log(`${tab} console.${message.type()}: ${message.text().slice(0, 500)}`)
 			}
 		})

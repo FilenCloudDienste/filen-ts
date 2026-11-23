@@ -9,6 +9,7 @@ import { fetchOfficePdfFontSync, officePdfFontAssets } from "@/features/office/l
 import { log } from "@/lib/log"
 import { verifyRedactionRequest } from "@filen/office/dom/pdfedit/protectRequests"
 import { RANGE_READ_TIMEOUT_MS } from "@/lib/media/rangePort"
+import { E2E_TRACE } from "@/e2e-hooks/trace"
 
 // The PDF engine worker (one per open document): MuPDF with the document, reading the file synchronously from the
 // sync range bridge the SDK worker fills (lib/media/syncRange.ts), served over @filen/office's PDF engine protocol.
@@ -27,7 +28,15 @@ servePdfEngine(mupdf, engineScope, {
 		}
 	},
 	requests: {
-		verifySignatures: verifySignaturesRequest(crypto.subtle),
+		// E2E builds report each step of a check to the page's console, for a failed test's diagnostics (e2e/fixtures.ts).
+		verifySignatures: verifySignaturesRequest(
+			crypto.subtle,
+			import.meta.env.VITE_E2E === "1"
+				? step => {
+						console.debug(`${E2E_TRACE} pdf-engine verify: ${step}`)
+					}
+				: undefined
+		),
 		signatureHints: signatureHintsRequest,
 		verifyRedaction: verifyRedactionRequest,
 		textPrepare: textPrepareRequest(officePdfFontAssets)
