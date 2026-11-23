@@ -823,7 +823,10 @@ describe("FakeApp", () => {
 		const sheet = ok(app.execute({ name: "read_document", args: { handle: "f30", sheet: "gastos" } }))
 
 		expect(sheet["range"]).toBe("sheet 2 of 2")
-		expect(app.execute({ name: "read_document", args: { handle: "f30", part: "selection" } })).toMatchObject({ ok: false })
+		expect(app.execute({ name: "read_document", args: { handle: "f30", part: "selection" } })).toMatchObject({
+			ok: false,
+			invalid: true
+		})
 	})
 
 	it("reads the whole long report within the read cap, so a chunked extraction reaches its last pages", () => {

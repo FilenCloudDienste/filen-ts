@@ -38,6 +38,7 @@ import {
 	NO_CONTACT_NOTE,
 	NO_TRANSFERS_NOTE,
 	normalizeText,
+	nothingSelected,
 	matchScore,
 	NOTE_TEXT_IN_TITLES,
 	NOTE_TEXT_NEEDS_WORDS,
@@ -2346,7 +2347,7 @@ export class FakeApp {
 			const open = this.state.context.openDocument
 
 			if (open?.handle !== item.handle || open.selection === undefined || open.selection.length === 0) {
-				throw new CallError(`Nothing is selected in "${item.name}"`, false)
+				throw new CallError(nothingSelected(item.name, document.kind), true)
 			}
 
 			return {

@@ -6,6 +6,7 @@ import {
 	documentRangeText,
 	documentReadRange,
 	normalizeText,
+	nothingSelected,
 	readWithTextFile,
 	splitDocumentText,
 	type AssistantDocumentKind
@@ -153,7 +154,7 @@ async function readSource(source: DocumentSource, input: Record<string, unknown>
 		const selected = open?.selection ?? null
 
 		if (open === null || selected === null) {
-			throw new AssistantToolError(`Nothing is selected in "${name}"`)
+			throw new AssistantToolError(nothingSelected(name, source.kind), { invalid: true })
 		}
 
 		const read = await open.reader.text("selection", signal, DOCUMENT_READ_MAX_CHARS)

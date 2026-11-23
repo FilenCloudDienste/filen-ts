@@ -1062,7 +1062,11 @@ describe("read_document", () => {
 		expect(read).toMatchObject({ kind: "pdf", units: 2, range: "pages 1–2 of 2" })
 		expect(vi.mocked(loadPreviewBytes).mock.calls.at(-1)?.[4]).toMatchObject({ store: false, reserve: false })
 		expect(closedDocument.close).toHaveBeenCalledTimes(1)
-		expect(await call("read_document", { handle: "f1", part: "selection" })).toMatchObject({ ok: false })
+		expect(await call("read_document", { handle: "f1", part: "selection" })).toMatchObject({
+			ok: false,
+			invalid: true,
+			error: expect.stringContaining(`part "all"`) as unknown
+		})
 	})
 
 	it("sends a text file to read_text_file without downloading it", async () => {

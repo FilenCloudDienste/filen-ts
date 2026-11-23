@@ -30,6 +30,14 @@ export function readWithDocument(name: string): string {
 	return `"${name}" is not a text file; read a PDF, Word document, spreadsheet or presentation with read_document`
 }
 
+// A read of the selection with nothing selected: an invalid call, so the model retries with a read of the file itself
+// (read_text_file for an open text file, its pages or all of it otherwise) instead of telling the user it found nothing.
+export function nothingSelected(name: string, kind: AssistantDocumentKind): string {
+	return kind === "text"
+		? `Nothing is selected in "${name}"; read the file with read_text_file instead`
+		: `Nothing is selected in "${name}"; read its ${DOCUMENT_UNIT_WORDS[kind].many} with part "pages" and from/to, or all of it with part "all"`
+}
+
 // The word a unit of each kind reads as: "pages 3–7 of 41". A text is one unit, cut in parts only when chunked.
 export const DOCUMENT_UNIT_WORDS: Readonly<Record<AssistantDocumentKind, { one: string; many: string }>> = {
 	pdf: { one: "page", many: "pages" },

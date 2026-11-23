@@ -7,6 +7,7 @@ import {
 	documentUnits,
 	documentUnitsText,
 	estimateTokens,
+	nothingSelected,
 	openDocumentContext,
 	splitDocumentText
 } from "@filen/shared/assistant"
@@ -133,5 +134,15 @@ describe("documentChunks", () => {
 	it("words what a cut-short read covered", () => {
 		expect(documentCoveredText({ kind: "pdf", from: 1, to: 23, units: 41, end: 41 })).toBe("pages 1–23 of 41")
 		expect(documentCoveredText({ kind: "pdf", from: 12, to: 11, units: 41, end: 41 })).toBe("part of page 12 of 41")
+	})
+})
+
+describe("nothingSelected", () => {
+	it("points a document's read at its pages or all of it, and an open text file's at read_text_file", () => {
+		expect(nothingSelected("deck.pptx", "slides")).toBe(
+			'Nothing is selected in "deck.pptx"; read its slides with part "pages" and from/to, or all of it with part "all"'
+		)
+		expect(nothingSelected("report.pdf", "pdf")).toContain('read its pages with part "pages"')
+		expect(nothingSelected("todo.txt", "text")).toBe('Nothing is selected in "todo.txt"; read the file with read_text_file instead')
 	})
 })
