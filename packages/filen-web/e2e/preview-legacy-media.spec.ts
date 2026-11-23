@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, LAZY_VIEWER_TIMEOUT_MS, setDesktopViewport } from "./helpers/listing"
 import { openFixtureRows } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 
@@ -61,6 +61,8 @@ test("AVI, ASF and MPEG-PS files play, and a transport stream's MP2 plays with s
 
 	const { rows } = await openFixtureRows(page, "preview-legacy-media")
 
+	await setDesktopViewport(page)
+
 	for (const row of rows) {
 		await row.dblclick()
 		// No "No sound" notice once a second and a half has played, past where a silent track is found out: the sound
@@ -88,6 +90,7 @@ test("picking an MP4's second audio track plays it, in place on WebKit's direct 
 		rows: [row]
 	} = await openFixtureRows(page, "preview-audio-tracks")
 
+	await setDesktopViewport(page)
 	await row.dblclick()
 	await playing(page)
 

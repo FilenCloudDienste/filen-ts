@@ -1,6 +1,7 @@
 import { basename } from "node:path"
 import type { Locator, Page } from "@playwright/test"
-import { expect, settleLeases } from "../fixtures"
+import { expect, settleLeases, test } from "../fixtures"
+import { attachStateAtFailure } from "./pageState"
 import { waitForE2eHooks } from "./e2eHooks"
 import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
 import { menuItemName } from "./menu"
@@ -323,6 +324,12 @@ export async function openTransfers(page: Page): Promise<void> {
 // than driving synthetic scroll/wheel events against an unknown scroll container to hunt for one row.
 export async function setTallListingViewport(page: Page): Promise<void> {
 	await page.setViewportSize({ width: 1280, height: 8000 })
+}
+
+// A desktop window, for a test past the listing it needed tall: in the tall one a document or a player lays out over
+// 8000px, which WebKit paints in software, and the failure video shrinks the page to a sliver nobody can read.
+export async function setDesktopViewport(page: Page): Promise<void> {
+	await page.setViewportSize({ width: 1280, height: 900 })
 }
 
 // The upload picker: the first type=file input in DOM order (uploadMenu.tsx).
@@ -895,7 +902,14 @@ export async function withScratchDirectory(
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		await body({ listbox, scratchName, runId })
+		try {
+			await body({ listbox, scratchName, runId })
+		} catch (error) {
+			// The trash below leaves the page at the root listing.
+			await attachStateAtFailure(page, test.info())
+
+			throw error
+		}
 	} finally {
 		await trashScratchDirectory(page, scratchName)
 	}

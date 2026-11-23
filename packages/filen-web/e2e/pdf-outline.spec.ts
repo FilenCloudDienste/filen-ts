@@ -3,7 +3,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { LARGE_UPLOAD_TIMEOUT_MS, LAZY_VIEWER_TIMEOUT_MS, uploadDiskFiles, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import {
+	LARGE_UPLOAD_TIMEOUT_MS,
+	LAZY_VIEWER_TIMEOUT_MS,
+	setDesktopViewport,
+	uploadDiskFiles,
+	uploadFiles,
+	withScratchDirectory
+} from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { observeEgest } from "./helpers/requests"
 import { writePdf, type PdfObject } from "../scripts/pdf-fixtures/view/pdfWriter"
@@ -75,12 +82,6 @@ function shownPage(page: Page, number: number): Locator {
 	return page.locator(`[data-page="${String(number)}"]`)
 }
 
-// A normal window for the document: the listing's tall one (setTallListingViewport) fits every page at once, so the
-// page in view never moves and every outline row is near the view.
-async function normalWindow(page: Page): Promise<void> {
-	await page.setViewportSize({ width: 1280, height: 900 })
-}
-
 test("the outline goes to a chapter, follows the page and works with the keys", async ({ page }) => {
 	test.slow()
 
@@ -92,7 +93,7 @@ test("the outline goes to a chapter, follows the page and works with the keys", 
 		const name = `e2e-pdf-outline-${runId}.pdf`
 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(outlinedPdf()) }], listbox)
-		await normalWindow(page)
+		await setDesktopViewport(page)
 		await listbox.getByRole("option", { name }).dblclick()
 		await expect(page.getByRole("region", { name: new RegExp(`Page 1 of ${String(PAGES)}`, "u") })).toBeVisible({
 			timeout: LAZY_VIEWER_TIMEOUT_MS
@@ -211,7 +212,7 @@ test("the outline resolves the destinations of the rows near the view only, on a
 
 			const egest = observeEgest(page.context())
 
-			await normalWindow(page)
+			await setDesktopViewport(page)
 			await listbox.getByRole("option", { name }).dblclick()
 			await expect(page.locator('[data-page="1"][data-rendered="true"]')).toBeAttached({ timeout: LARGE_UPLOAD_TIMEOUT_MS })
 

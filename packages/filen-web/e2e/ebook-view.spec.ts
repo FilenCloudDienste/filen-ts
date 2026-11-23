@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { LAZY_VIEWER_TIMEOUT_MS, setDesktopViewport, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { trackForeignRequests } from "./helpers/requests"
 import { resolveModKey } from "./helpers/modkey"
@@ -89,7 +89,7 @@ function mobi(): Buffer {
 
 async function open(page: Page, listbox: Locator, name: string): Promise<Locator> {
 	// A normal window for the book: the listing's tall one (setTallListingViewport) lays every chapter out on one page.
-	await page.setViewportSize({ width: 1280, height: 900 })
+	await setDesktopViewport(page)
 	await listbox.getByRole("option", { name }).dblclick()
 
 	const first = page.getByRole("region", { name: /Page 1 of \d+/u })

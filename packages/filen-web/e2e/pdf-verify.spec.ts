@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { LAZY_VIEWER_TIMEOUT_MS, setDesktopViewport, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { preview } from "@/locales/en/preview"
 
@@ -26,6 +26,7 @@ function status(page: Page): Locator {
 }
 
 async function open(page: Page, listbox: Locator, name: string): Promise<void> {
+	await setDesktopViewport(page)
 	await listbox.getByRole("option", { name }).dblclick()
 	await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }

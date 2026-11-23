@@ -18,7 +18,7 @@ import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
 import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
 import { withLevel } from "@/features/drive/lib/archiveFormats"
-import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
+import { pendingSdkCalls, pendingWorkerCalls } from "@/e2e-hooks/sdkCalls"
 import {
 	assistantStubRequests,
 	setAssistantStubScript,
@@ -217,6 +217,8 @@ interface E2eHooks {
 	// The SDK worker calls in flight, oldest first, for a failed test's diagnostics. Synchronous and
 	// main-thread only, so it answers even while the worker is stuck.
 	pendingSdkCalls: () => { method: string; ageMs: number }[]
+	// The same for the other workers' calls (the PDF engine's, the signer's), each named "<worker> <method>".
+	pendingWorkerCalls: () => { method: string; ageMs: number }[]
 	// Whether every drive listing a write patched is on disk, so a reload restores it as the write left it
 	// rather than as last read (features/drive/queries/drive.ts).
 	patchedListingsWritten: () => boolean
@@ -583,6 +585,7 @@ export function installE2eHooks(): void {
 			)
 		}),
 		pendingSdkCalls,
+		pendingWorkerCalls,
 		patchedListingsWritten,
 		videosSyncSnapshot: ready(videosSyncSnapshot),
 		videosSyncRestore: ready(videosSyncRestore),

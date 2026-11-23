@@ -8,6 +8,7 @@ import { SESSION_BINDING } from "@/e2e-hooks/sessionSeed"
 import { E2E_AUTOSAVE_KEY } from "@/e2e-hooks/storageKeys"
 import { common } from "@/locales/en/common"
 import { silenceMediaElements } from "./helpers/muteMedia"
+import { attachTopScreenshots, pageStateLines, stateReport } from "./helpers/pageState"
 
 // The session blob is secret-equivalent and lives ONLY here (gitignored, mode 0600) and in the page
 // binding that serves it (seedSession) — it is never typed into a page, passed as a call argument or
@@ -319,93 +320,6 @@ function stallProbe(updateToastText: string): void {
 			})
 		}
 	}, 1000)
-}
-
-// What each open page still had in flight inside the SDK worker, and the state of every dialog it still holds:
-// whether one asked to close is still mounted, and which animation it waits on (the failure screenshot shows only
-// the top of an 8000px viewport, where no dialog is). Bounded, because a wedged main thread never answers an
-// evaluate.
-async function pageStateLines(context: BrowserContext): Promise<{ sdkCalls: string[]; overlays: string[] }> {
-	const pages = await Promise.all(
-		context.pages().map(async (page, index) => {
-			const tab = `tab${String(index)}`
-			const state = await Promise.race([
-				page
-					.evaluate(() => {
-						const hooks = (window as unknown as { __filenE2E?: Partial<Window["__filenE2E"]> }).__filenE2E
-						const overlays = [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')].map(
-							element => {
-								const labelledBy = element.getAttribute("aria-labelledby")
-								const name =
-									(labelledBy === null ? null : document.getElementById(labelledBy)?.textContent) ??
-									element.getAttribute("aria-label") ??
-									""
-								const flags = ["data-open", "data-closed", "data-starting-style", "data-ending-style"].filter(flag =>
-									element.hasAttribute(flag)
-								)
-								const animations = element.getAnimations().map(animation => {
-									const label =
-										animation instanceof CSSAnimation
-											? animation.animationName
-											: animation instanceof CSSTransition
-												? `transition ${animation.transitionProperty}`
-												: "animation"
-
-									return `${label} ${animation.playState}${animation.pending ? " pending" : ""} at ${String(Math.round(Number(animation.currentTime ?? 0)))}ms`
-								})
-
-								return `${String(element.getAttribute("role"))} "${name.slice(0, 60)}" ${flags.join(" ") || "(no state)"}${element.closest("[inert]") === null ? "" : " inert"}${element.checkVisibility() ? "" : " invisible"}; animations: ${animations.join(", ") || "none"}`
-							}
-						)
-
-						// A page without the app (a blank start page) has no sdk calls to report.
-						return { calls: hooks?.pendingSdkCalls?.() ?? [], overlays }
-					})
-					.catch(() => ({ calls: [], overlays: [] })),
-				new Promise<null>(resolve => {
-					setTimeout(() => {
-						resolve(null)
-					}, 2_000)
-				})
-			])
-
-			if (state === null) {
-				return { sdkCalls: [`${tab} sdk calls: (the page did not answer)`], overlays: [] }
-			}
-
-			return {
-				sdkCalls: state.calls.map(({ method, ageMs }) => `${tab} sdk call ${method} pending ${String(ageMs)}ms`),
-				overlays: state.overlays.map(line => `${tab} ${line}`)
-			}
-		})
-	)
-
-	return { sdkCalls: pages.flatMap(page => page.sdkCalls), overlays: pages.flatMap(page => page.overlays) }
-}
-
-// Only the top of the page: the helpers stretch the viewport to 8000px for virtualization, and the full
-// capture (and the video) shrinks that to a sliver nobody can read.
-const FAILURE_SCREENSHOT_HEIGHT = 900
-
-async function attachTopScreenshots(context: BrowserContext, testInfo: TestInfo): Promise<void> {
-	for (const [index, page] of context.pages().entries()) {
-		const size = page.viewportSize()
-
-		if (size === null || page.isClosed()) {
-			continue
-		}
-
-		try {
-			const body = await page.screenshot({
-				clip: { x: 0, y: 0, width: size.width, height: Math.min(size.height, FAILURE_SCREENSHOT_HEIGHT) },
-				timeout: 5_000
-			})
-
-			await testInfo.attach(`screenshot-top-tab${String(index)}`, { body, contentType: "image/png" })
-		} catch {
-			// A page that cannot paint any more has nothing to show.
-		}
-	}
 }
 
 interface Diagnostics {
@@ -979,14 +893,7 @@ export const test = base.extend<{
 			const failed = testInfo.status !== testInfo.expectedStatus
 
 			if (failed || diagnostics.updateToastSeen()) {
-				const { sdkCalls, overlays } = await pageStateLines(context)
-				const body = [
-					diagnostics.report(),
-					...(sdkCalls.length === 0 ? [] : ["-- sdk calls pending at the end --", ...sdkCalls]),
-					...(overlays.length === 0 ? [] : ["-- dialogs at the end --", ...overlays])
-				]
-					.join("\n")
-					.trim()
+				const body = [diagnostics.report(), ...stateReport(await pageStateLines(context), "at the end")].join("\n").trim()
 
 				await testInfo.attach("diagnostics", { body: body || "(nothing recorded)", contentType: "text/plain" })
 				await attachTopScreenshots(context, testInfo)

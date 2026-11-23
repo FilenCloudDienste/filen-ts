@@ -4,6 +4,7 @@ import PdfSignerWorker from "@/features/pdf/workers/pdfSigner.worker.ts?worker"
 import PdfSignerLegacyWorker from "@/features/pdf/workers/pdfSignerLegacy.worker.ts?worker"
 import type { PdfSignerApi, PdfSignerLoadFailure, PdfSignerUnlock } from "@/features/pdf/workers/pdfSignerCore"
 import { sdkApi } from "@/lib/sdk/client"
+import { trackWorkerCalls } from "@/e2e-hooks/sdkCalls"
 import { log } from "@/lib/log"
 
 // The page side of the certificate signer: one signer worker per signing. The container goes from the drive (the SDK
@@ -32,7 +33,9 @@ interface SignerWorker {
 
 function startSigner(legacy: boolean): SignerWorker {
 	const worker = legacy ? new PdfSignerLegacyWorker({ name: "pdf-signer-legacy" }) : new PdfSignerWorker({ name: "pdf-signer" })
-	const remote = Comlink.wrap<PdfSignerApi>(worker)
+	const wrapped = Comlink.wrap<PdfSignerApi>(worker)
+	// E2E builds count its calls in flight (e2e-hooks/sdkCalls.ts); a normal build drops the branch.
+	const remote = import.meta.env.VITE_E2E === "1" ? trackWorkerCalls(wrapped, legacy ? "pdf-signer-legacy" : "pdf-signer") : wrapped
 
 	return {
 		remote,

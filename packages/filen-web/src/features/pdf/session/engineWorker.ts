@@ -20,6 +20,7 @@ import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { log } from "@/lib/log"
 import { transferList } from "@/lib/transferList"
 import { createOwnedWorker } from "@/lib/workers/ownedWorker"
+import { trackWorkerCalls } from "@/e2e-hooks/sdkCalls"
 import { originKey, originSize, originWhole, type ByteOrigin, type OriginAccess } from "@/lib/sdk/byteOrigin"
 import { openOriginSyncSource } from "@/features/preview/lib/origin/syncSource"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
@@ -53,7 +54,8 @@ export interface OpenPdfEngineOptions {
 	readonly onPoisoned?: (message: string) => void
 }
 
-// The engine's client, and `gone`: rejects once the worker is gone (a break, sign-out, or the client's own terminate).
+// The engine's client, and `gone`: rejects once the worker is gone (a break, sign-out, or the client's own terminate). E2E
+// builds count its calls in flight (e2e-hooks/sdkCalls.ts); a normal build drops the branch.
 function spawn(module: WebAssembly.Module): { readonly client: PdfEngineClient; readonly gone: Promise<never> } {
 	const owned = createOwnedWorker<object>(() => new PdfEngineWorker({ name: "pdf-engine" }), "pdf-engine")
 	const { worker } = owned
@@ -74,7 +76,7 @@ function spawn(module: WebAssembly.Module): { readonly client: PdfEngineClient; 
 		}
 	})
 
-	return { client, gone: owned.gone }
+	return { client: import.meta.env.VITE_E2E === "1" ? trackWorkerCalls(client, "pdf-engine") : client, gone: owned.gone }
 }
 
 // Where an engine reads its file: a drive file through the SDK worker, a channel another engine serves (a written

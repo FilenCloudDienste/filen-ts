@@ -59,6 +59,7 @@ interface E2eHooks {
 	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 	archiveCatalogueReport: () => Promise<ArchiveCatalogueRow[]>
 	pendingSdkCalls: () => { method: string; ageMs: number }[]
+	pendingWorkerCalls: () => { method: string; ageMs: number }[]
 	patchedListingsWritten: () => boolean
 	videosSyncSnapshot: () => Promise<VideosSyncSnapshot>
 	videosSyncRestore: (snapshot: VideosSyncSnapshot) => Promise<void>
