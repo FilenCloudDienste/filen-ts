@@ -76,6 +76,7 @@ import { RetentionRow } from "@/features/settings/components/assistant/retention
 import { registerAssistantSession, sendAssistantMessage } from "@/features/assistant/store/assistantSession"
 import { createMockAssistantSession, MOCK_ASSISTANT_MODEL } from "@/features/assistant/store/mockAssistantSession"
 import type { AssistantModelState, AssistantSession } from "@/features/assistant/types"
+import { stubElementSize } from "@/tests/stubElementSize"
 
 let session: AssistantSession
 let unregister: () => void = () => undefined
@@ -847,8 +848,15 @@ describe("AssistantDrawer", () => {
 })
 
 describe("AssistantHistory", () => {
-	// jsdom has no Web Locks; one tab needs none.
+	// The list is virtualized: it windows over this size. jsdom has no Web Locks; one tab needs none.
+	let restoreSize: () => void = () => undefined
+
+	afterEach(() => {
+		restoreSize()
+	})
+
 	beforeEach(() => {
+		restoreSize = stubElementSize({ clientHeight: 480, clientWidth: 320 })
 		useAssistantHistoryStore.setState({ open: false, conversations: null })
 		retentionPreference.adopt("forever")
 		Object.defineProperty(navigator, "locks", {

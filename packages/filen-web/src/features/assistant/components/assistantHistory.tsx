@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useRef, useState, type CSSProperties } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { toast } from "sonner"
@@ -27,6 +27,7 @@ import {
 	type HistoryRetention
 } from "@/features/assistant/store/history.logic"
 import { assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
+import { AssistantHistoryList } from "@/features/assistant/components/assistantHistoryList"
 
 const GROUP_KEYS: Record<HistoryGroup, AssistantKey> = {
 	today: "assistantHistoryToday",
@@ -68,18 +69,21 @@ function ConversationRow({
 	meta,
 	current,
 	openable,
-	onDelete
+	onDelete,
+	style
 }: {
 	meta: ConversationMeta
 	current: boolean
 	openable: boolean
 	onDelete: (meta: ConversationMeta) => void
+	style: CSSProperties
 }) {
 	const { t } = useTranslation("assistant")
 	const title = meta.title.length > 0 ? meta.title : t("assistantHistoryUntitled")
 
 	return (
 		<li
+			style={style}
 			className={cn(
 				ROW_CLASS,
 				current
@@ -132,6 +136,7 @@ export function AssistantHistory() {
 	const [deleting, setDeleting] = useState<ConversationMeta | null>(null)
 	const [clearing, setClearing] = useState(false)
 	const [pending, setPending] = useState(false)
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const newConversationRef = useRef<HTMLButtonElement | null>(null)
 	// Set once a delete went through: the button that opened the dialog went with its row.
 	const removedRef = useRef(false)
@@ -184,6 +189,7 @@ export function AssistantHistory() {
 				</button>
 			</div>
 			<div
+				ref={setScrollElement}
 				aria-busy={conversations === null}
 				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto px-3 pb-2"
 			>
@@ -200,32 +206,22 @@ export function AssistantHistory() {
 					</div>
 				) : null}
 				{conversations !== null && conversations.length > 0 ? (
-					<nav aria-label={t("assistantHistoryListLabel")}>
-						{groupConversations(conversations, now).map(({ group, conversations: rows }) => (
-							<section
-								key={group}
-								aria-labelledby={`assistant-history-${group}`}
-							>
-								<h3
-									id={`assistant-history-${group}`}
-									className="truncate px-2.5 pt-3 pb-1 text-xs font-semibold text-muted-foreground"
-								>
-									{t(GROUP_KEYS[group])}
-								</h3>
-								<ul className="flex flex-col gap-0.5">
-									{rows.map(meta => (
-										<ConversationRow
-											key={meta.id}
-											meta={meta}
-											current={meta.id === currentId}
-											openable={openable}
-											onDelete={setDeleting}
-										/>
-									))}
-								</ul>
-							</section>
-						))}
-					</nav>
+					<AssistantHistoryList
+						scrollElement={scrollElement}
+						groups={groupConversations(conversations, now)}
+						label={t("assistantHistoryListLabel")}
+						groupLabel={group => t(GROUP_KEYS[group])}
+						renderRow={(meta, style) => (
+							<ConversationRow
+								key={meta.id}
+								meta={meta}
+								current={meta.id === currentId}
+								openable={openable}
+								onDelete={setDeleting}
+								style={style}
+							/>
+						)}
+					/>
 				) : null}
 			</div>
 			{conversations === null ? null : (
