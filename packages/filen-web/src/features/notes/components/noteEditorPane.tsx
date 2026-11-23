@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon } from "lucide-react"
@@ -12,6 +12,7 @@ import { NoteRemoteEditDialog } from "@/features/notes/components/noteRemoteEdit
 import { NoteParticipantsHost, NoteParticipantsToggle } from "@/features/notes/components/noteParticipantsPanel"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
+import { NoteHeaderSlotContext } from "@/features/notes/lib/noteHeaderSlot"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
@@ -82,6 +83,8 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	const hideCompleted = hideCompletedQuery.data ?? false
 
 	const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
+	// Where the editor puts its own header controls (NoteHeaderSlotContext).
+	const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null)
 
 	// Which note is on screen, so a reload of it with changes saved elsewhere is announced (socketHandlers).
 	const openNoteUuid = note?.uuid ?? null
@@ -173,6 +176,11 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 						aria-label={t("noteSyncing")}
 					/>
 				) : null}
+				{/* The md editor's view switch, portalled in; empty (and gapless) for every other note. */}
+				<div
+					ref={setHeaderSlot}
+					className="flex shrink-0 items-center gap-0.5 empty:hidden"
+				/>
 				{undecryptable || note.trash ? null : <NoteParticipantsToggle note={note} />}
 				<DropdownMenu>
 					{/* Menu trigger suppressed while inflight — disabled-not-hidden (mobile suppresses the menu
@@ -241,12 +249,14 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 						}
 					}}
 				>
-					<NoteContentBody
-						key={note.uuid}
-						note={note}
-						currentUserId={accountQuery.data?.id}
-						hideCompletedChecklist={showHideCompletedToggle && hideCompleted}
-					/>
+					<NoteHeaderSlotContext value={headerSlot}>
+						<NoteContentBody
+							key={note.uuid}
+							note={note}
+							currentUserId={accountQuery.data?.id}
+							hideCompletedChecklist={showHideCompletedToggle && hideCompleted}
+						/>
+					</NoteHeaderSlotContext>
 				</div>
 			)}
 			{/* The participants panel, portalled beside the card (or a sheet); only where the menu offers it. */}

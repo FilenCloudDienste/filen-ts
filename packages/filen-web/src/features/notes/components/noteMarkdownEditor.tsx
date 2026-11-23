@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import type { EditorView } from "@codemirror/view"
 import { useTranslation } from "react-i18next"
 import { IN_EDITORS, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
@@ -11,6 +12,7 @@ import { MarkdownViewSwitch } from "@/features/preview/components/markdownViewSw
 import { useLivePreview } from "@/features/preview/hooks/useLivePreview"
 import { getMarkdownView, livePreviewFits, setMarkdownView, type MarkdownViewChoice } from "@/features/preview/lib/markdownView"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
+import { NoteHeaderSlotContext } from "@/features/notes/lib/noteHeaderSlot"
 import type { Note } from "@filen/sdk-rs"
 
 // In the editor too; never under a dialog or menu, which keeps the key.
@@ -22,13 +24,15 @@ const TOGGLE_OPTIONS = { ...IN_EDITORS, ...OUTSIDE_OVERLAYS }
 // value last typed and returning picks up where the cursor was. The CALLER keys this on controller.remountKey, so a
 // real reseed remounts it all.
 //
-// editor.togglePreview switches Read on and off, editor.toggleLivePreview Live preview and Source.
+// The view switch sits in the note's header (NoteHeaderSlotContext), compact. editor.togglePreview switches Read on and
+// off, editor.toggleLivePreview Live preview and Source.
 export function NoteMarkdownEditor({ note, controller }: { note: Note; controller: NoteEditorController }) {
 	const { t } = useTranslation("preview")
 	const [choice, setChoice] = useState<MarkdownViewChoice>(getMarkdownView)
 	// What Read shows: the buffer as it was when Read was entered (nothing is typed while reading).
 	const [readValue, setReadValue] = useState(controller.seed)
 	const latestValueRef = useRef(controller.seed)
+	const headerSlot = useContext(NoteHeaderSlotContext)
 	const { host, onView } = useCodeMirrorTransformHost()
 	const livePreview = useLivePreview("plain")
 	// A note is at most 1 MiB, within live preview's size; checked on the seed all the same.
@@ -91,21 +95,25 @@ export function NoteMarkdownEditor({ note, controller }: { note: Note; controlle
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			<div className="flex shrink-0 items-center justify-end gap-1 px-3 py-1">
-				<MarkdownViewSwitch
-					reading={choice.read}
-					editMode={editMode}
-					liveAvailable={liveAvailable}
-					readLocked={false}
-					onRead={read => {
-						choose({ edit: choice.edit, read })
-					}}
-					onEditMode={edit => {
-						choose({ edit, read: false })
-					}}
-					viewLabel={t("previewCommandBarMarkdownView")}
-				/>
-			</div>
+			{headerSlot === null
+				? null
+				: createPortal(
+						<MarkdownViewSwitch
+							compact
+							reading={choice.read}
+							editMode={editMode}
+							liveAvailable={liveAvailable}
+							readLocked={false}
+							onRead={read => {
+								choose({ edit: choice.edit, read })
+							}}
+							onEditMode={edit => {
+								choose({ edit, read: false })
+							}}
+							viewLabel={t("previewCommandBarMarkdownView")}
+						/>,
+						headerSlot
+					)}
 			{livePreview.node}
 			<div className={choice.read ? "hidden" : "min-h-0 flex-1"}>
 				<SelectionTransformRoot

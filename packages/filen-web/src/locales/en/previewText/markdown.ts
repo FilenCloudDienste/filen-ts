@@ -11,6 +11,8 @@ export const previewTextMarkdown = {
 	previewMarkdownEditingView: "Editing view: {{mode}}",
 	/** Markdown editor — editing view: the source styled in place, its syntax shown only where the cursor is */
 	previewMarkdownLivePreview: "Live preview",
+	/** Markdown editor — the editing view's menu button in a note's header, short for "Live preview" */
+	previewMarkdownLiveShort: "Live",
 	/** Markdown editor — editing view: the plain markdown source */
 	previewMarkdownSource: "Source",
 	/** Markdown editor — why Live preview is unavailable for a very large document */

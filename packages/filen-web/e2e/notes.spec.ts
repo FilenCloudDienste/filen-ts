@@ -575,7 +575,7 @@ type NoteTypeUnderTest = Parameters<Window["__filenE2E"]["createTestNoteWithCont
 // content mismatch several steps on.
 async function expectEditorFor(page: Page, noteType: NoteTypeUnderTest): Promise<void> {
 	const main = page.getByRole("main")
-	// The md editor's view switch: no other editor has one.
+	// The md editor's view switch, in the note's header: no other editor has one.
 	const mdSwitch = main.getByRole("button", { name: "Read", exact: true })
 	const surface = {
 		text: main.locator(".cm-content"),
