@@ -187,11 +187,7 @@ export async function runS1({ target, nextDir, nextVersion, signed, work, artifa
 			}
 		}
 	} finally {
-		try {
-			target.reset()
-		} catch (error) {
-			console.log(`cleanup: ${errorMessage(error)}`)
-		}
+		await target.reset().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
 
 		xvfb?.kill()
 	}

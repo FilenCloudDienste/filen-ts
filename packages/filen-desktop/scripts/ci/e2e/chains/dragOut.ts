@@ -168,6 +168,8 @@ async function dropped(dir: string): Promise<Snapshot> {
 
 // How long a page call may hold the chain: Windows' drag loop stalls CDP.
 const PAGE_CALL_TIMEOUT_MS = 10_000
+// One step of the wrap-up that bounds nothing of its own.
+const CLEANUP_STEP_MS = 60_000
 
 export async function runDragOut(options: DragOutOptions): Promise<void> {
 	const { target, platform, work, artifacts } = options
@@ -208,13 +210,21 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 	// A row's centre on the screen, in OS units.
 	const rowPoint = async (name: string): Promise<Point> => {
-		const box = (await row(name).boundingBox()) ?? fail(`the ${name} row has no box`)
+		const box = (await row(name).boundingBox({ timeout: PAGE_CALL_TIMEOUT_MS })) ?? fail(`the ${name} row has no box`)
 
 		return toScreen(calibration ?? fail("not calibrated"), { x: box.x + Math.min(box.width / 2, 120), y: box.y + box.height / 2 })
 	}
 
 	const viewport = async (): Promise<{ width: number; height: number }> =>
-		JSON.parse(String(await page().evaluate("JSON.stringify({ width: innerWidth, height: innerHeight })"))) as {
+		JSON.parse(
+			String(
+				await within(
+					"read the viewport",
+					PAGE_CALL_TIMEOUT_MS,
+					page().evaluate("JSON.stringify({ width: innerWidth, height: innerHeight })")
+				)
+			)
+		) as {
 			width: number
 			height: number
 		}
@@ -309,7 +319,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 		const since = Date.now()
 		const size = await viewport()
 		const cal = calibration ?? fail("not calibrated")
-		const box = (await row(from).boundingBox()) ?? fail(`the ${from} row has no box`)
+		const box = (await row(from).boundingBox({ timeout: PAGE_CALL_TIMEOUT_MS })) ?? fail(`the ${from} row has no box`)
 		const start = toScreen(cal, { x: box.x + Math.min(box.width / 2, 120), y: box.y + box.height / 2 })
 		// Past the window's right edge on the row's line, then over the file manager.
 		const exit = toScreen(cal, { x: size.width + 12, y: box.y + box.height / 2 })
@@ -455,18 +465,22 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 		findings.attach(`${NAME}-drops.txt`, inventory(drops))
 		await shot("last")
 
-		for (const cleanup of [
-			async () => chain.renderer?.browser.close(),
-			() => desktop.stop(),
-			async () => os.forceKill(pidsOf(await os.appProcesses(target))),
-			async () => target.reset(),
-			() => cloud.purge(cloudDir),
-			async () => rmSync(drops, { recursive: true, force: true })
-		]) {
+		// The app goes first: a drag it never ended (Windows' drag loop holds main, and CDP with it) ends with it. A step
+		// that bounds nothing of its own gets CLEANUP_STEP_MS; reset() and the purge bound each of their commands.
+		const steps: [string, () => Promise<unknown>, boolean][] = [
+			["end the app", async () => os.forceKill(pidsOf(await os.appProcesses(target))), true],
+			["close the page connection", async () => chain.renderer?.browser.close(), true],
+			["stop the drag desktop", () => desktop.stop(), true],
+			["reset the machine", () => target.reset(), false],
+			["purge the cloud directory", () => cloud.purge(cloudDir), false],
+			["remove the drops", async () => rmSync(drops, { recursive: true, force: true }), false]
+		]
+
+		for (const [what, cleanup, bound] of steps) {
 			try {
-				await cleanup()
+				await (bound ? within(what, CLEANUP_STEP_MS, cleanup()) : cleanup())
 			} catch (error) {
-				console.log(`cleanup: ${errorMessage(error)}`)
+				console.log(`cleanup: ${what}: ${errorMessage(error)}`)
 			}
 		}
 
@@ -479,7 +493,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 	const setUp = async (): Promise<boolean> => {
 		await findings.must("D0 N installed on its own", async () => {
-			installFrom(target, path.join(options.nextDir, target.installer), options.nextVersion, options.signed)
+			await installFrom(target, path.join(options.nextDir, target.installer), options.nextVersion, options.signed)
 
 			return `${target.installedVersion()} at ${target.executable}`
 		})

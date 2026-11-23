@@ -50,6 +50,9 @@ export interface RunOptions {
 	verbatim?: boolean
 	// Logged instead of the command line (an encoded script, say).
 	display?: string
+	// The command is killed after this long and the run fails by name. Only for commands that start nothing that
+	// outlives them (a child's own children keep running): installers go through runBounded, which ends the tree.
+	timeoutMs?: number
 }
 
 export interface RunResult {
@@ -66,11 +69,16 @@ export function run(command: string, args: readonly string[], options: RunOption
 		env: options.env ?? process.env,
 		cwd: options.cwd ?? process.cwd(),
 		windowsVerbatimArguments: options.verbatim ?? false,
-		maxBuffer: 64 * 1024 * 1024
+		maxBuffer: 64 * 1024 * 1024,
+		...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs, killSignal: "SIGKILL" as const })
 	})
 
 	if (result.error) {
-		fail(`${command}: ${result.error.message}`)
+		fail(
+			"code" in result.error && result.error.code === "ETIMEDOUT"
+				? `${command} timed out after ${String(Math.round((options.timeoutMs ?? 0) / 1000))} s`
+				: `${command}: ${result.error.message}`
+		)
 	}
 
 	if (result.status !== 0 && options.allowFailure !== true) {
@@ -111,6 +119,18 @@ export interface BoundedResult extends RunResult {
 	timedOut: boolean
 }
 
+export interface BoundedOptions {
+	env?: NodeJS.ProcessEnv
+	input?: string
+	cwd?: string
+	display?: string
+	onStdout?: (chunk: Buffer) => void
+	// Windows only: the arguments reach the program exactly as given (cmd.exe /s /c "..." command lines).
+	verbatim?: boolean
+	// At the timeout, before the kill: evidence of what the command was waiting on (bounded itself).
+	onTimeout?: () => Promise<void>
+}
+
 /**
  * A command that must never hold up the harness (system tools that can block on a daemon or a prompt): after
  * `timeoutMs` its whole process group is killed, and the result says it timed out instead of the run hanging. With
@@ -120,7 +140,7 @@ export async function runBounded(
 	command: string,
 	args: readonly string[],
 	timeoutMs: number,
-	options: { env?: NodeJS.ProcessEnv; input?: string; cwd?: string; display?: string; onStdout?: (chunk: Buffer) => void } = {}
+	options: BoundedOptions = {}
 ): Promise<BoundedResult> {
 	console.log(`$ ${options.display ?? `${command} ${args.join(" ")}`}`)
 
@@ -129,7 +149,8 @@ export async function runBounded(
 		detached: group,
 		stdio: "pipe",
 		env: options.env ?? process.env,
-		cwd: options.cwd ?? process.cwd()
+		cwd: options.cwd ?? process.cwd(),
+		windowsVerbatimArguments: options.verbatim ?? false
 	})
 
 	// Never logged: the input may be a secret (rclone obscure reads one). Without one, stdin is at its end at once.
@@ -153,9 +174,12 @@ export async function runBounded(
 	})
 
 	let grace: NodeJS.Timeout | undefined
+	let closed = false
 	const status = await new Promise<number | null>(resolve => {
-		const timer = setTimeout(() => {
-			timedOut = true
+		const kill = () => {
+			if (closed) {
+				return
+			}
 
 			try {
 				if (group && child.pid !== undefined) {
@@ -178,15 +202,30 @@ export async function runBounded(
 				child.stderr.destroy()
 				resolve(null)
 			}, 2000)
+		}
+		const timer = setTimeout(() => {
+			timedOut = true
+
+			const { onTimeout } = options
+
+			if (onTimeout === undefined) {
+				kill()
+			} else {
+				void onTimeout()
+					.catch((error: unknown) => console.log(`on timeout: ${errorMessage(error)}`))
+					.finally(kill)
+			}
 		}, timeoutMs)
 
 		child.once("error", error => {
 			clearTimeout(timer)
+			closed = true
 			stderr += error.message
 			resolve(null)
 		})
 		child.once("close", code => {
 			clearTimeout(timer)
+			closed = true
 			resolve(code)
 		})
 	})
@@ -549,8 +588,16 @@ export function powershellEnv(): NodeJS.ProcessEnv {
 	return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"))
 }
 
+// Bounded: a sync query that never returns would stop the harness's timers (a chain's budget among them) with it.
+const POWERSHELL_TIMEOUT_MS = 2 * 60 * 1000
+
 export function powershell(script: string, options: Pick<RunOptions, "allowFailure"> = {}): RunResult {
-	const result = run("powershell.exe", powershellArgs(script), { ...options, env: powershellEnv(), display: `powershell.exe ${script}` })
+	const result = run("powershell.exe", powershellArgs(script), {
+		...options,
+		env: powershellEnv(),
+		display: `powershell.exe ${script}`,
+		timeoutMs: POWERSHELL_TIMEOUT_MS
+	})
 
 	if (result.stderr.trim() !== "") {
 		console.log(`powershell.exe stderr: ${powershellErrorText(result.stderr).slice(-2000)}`)
@@ -607,6 +654,23 @@ export async function powershellBounded(script: string, timeoutMs: number): Prom
 	})
 
 	return { ...result, stderr: powershellErrorText(result.stderr) }
+}
+
+// Every process on the machine (pid, parent, start, image path; no command lines, which can carry a secret) and, on
+// Windows, the services caught starting or stopping: the evidence of what a timed-out command was waiting on.
+export async function processTable(): Promise<string> {
+	const result =
+		process.platform === "win32"
+			? await powershellBounded(
+					'Get-CimInstance Win32_Process | Sort-Object ProcessId | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate)`t$($_.Name)`t$($_.ExecutablePath)" }\n' +
+						"Get-Service | Where-Object { $_.Status -notin 'Running', 'Stopped' } | ForEach-Object { \"service $($_.Name) $($_.Status)\" }",
+					60_000
+				)
+			: await runBounded("ps", ["-eo", "pid,ppid,lstart,comm"], 60_000)
+
+	return result.status === 0
+		? result.stdout.trim()
+		: `the process table: ${result.timedOut ? "timed out" : `exit ${String(result.status)}`} ${result.stderr.trim().slice(-1000)}`
 }
 
 // PowerShell writes its error stream to a redirected stderr as CLIXML ("#< CLIXML" and <S S="Error"> records, line

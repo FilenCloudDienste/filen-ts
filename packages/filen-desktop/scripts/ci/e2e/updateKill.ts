@@ -133,7 +133,7 @@ async function killWindowsInstaller({ target, findings, options, token }: Runnin
 	await findings.check("update-kill: a manual reinstall of N recovers the install and keeps the app data", async () => {
 		target.kill(target.mainProcesses().map(found => found.pid))
 		// Over what the killed installer left (installFrom would reset the machine first).
-		target.install(path.join(options.nextDir, target.installer))
+		await target.install(path.join(options.nextDir, target.installer))
 		target.verifyInstall(options.signed)
 
 		const installed = target.installedVersion()
@@ -356,7 +356,7 @@ export async function runUpdateKill(options: UpdateKillOptions): Promise<void> {
 	let feed: FeedServer | null = null
 
 	try {
-		installFrom(target, path.join(prevDir, target.installer), prevVersion, signed)
+		await installFrom(target, path.join(prevDir, target.installer), prevVersion, signed)
 
 		const token = writeMarker(target)
 		const original = format === "AppImage" ? ((await hashFile(target.executable))?.sha512 ?? fail("no AppImage installed")) : ""
@@ -428,11 +428,7 @@ export async function runUpdateKill(options: UpdateKillOptions): Promise<void> {
 			await runBounded("sudo", ["--non-interactive", "dpkg", "--purge", "--force-all", "filen"], 5 * 60 * 1000)
 		}
 
-		try {
-			target.reset()
-		} catch (error) {
-			console.log(`cleanup: ${errorMessage(error)}`)
-		}
+		await target.reset().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
 
 		await feed?.close()
 		xvfb?.kill()

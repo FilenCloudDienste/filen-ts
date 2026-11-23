@@ -34,7 +34,7 @@ export function installedBy(target: Target, pin: LegacyPin): Target {
 		launch: (env, args = [], output) => detached(executable, args, env, output),
 		launchEnv: env => env,
 		mainProcesses,
-		reset() {
+		async reset() {
 			for (const { pid } of mainProcesses()) {
 				try {
 					process.kill(pid, "SIGKILL")
@@ -43,7 +43,7 @@ export function installedBy(target: Target, pin: LegacyPin): Target {
 				}
 			}
 
-			target.reset()
+			await target.reset()
 		},
 		verifyInstall() {
 			if (!existsSync(executable)) {

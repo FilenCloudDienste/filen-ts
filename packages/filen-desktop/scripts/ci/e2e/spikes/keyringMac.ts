@@ -169,7 +169,7 @@ export async function runKeyringMac({ target, nextDir, nextVersion, signed, work
 		})
 
 		await findings.must(`${LEGACY_VERSION} installed and given the synthetic signed-in profile`, async () => {
-			installFrom(target, await legacyInstaller(target, work), LEGACY_VERSION, true)
+			await installFrom(target, await legacyInstaller(target, work), LEGACY_VERSION, true)
 
 			const launched = await launchDebuggable(target, true, appOutput, block.via ?? undefined)
 
@@ -196,10 +196,10 @@ export async function runKeyringMac({ target, nextDir, nextVersion, signed, work
 			output(await security(["find-generic-password", "-s", "Filen Safe Storage", keychain]))
 		)
 
-		await findings.must("N installed over it (no updater)", () => {
+		await findings.must("N installed over it (no updater)", async () => {
 			// The disk image is copied over the old bundle as a whole, as a user replacing the app does.
 			rmSync(path.resolve(target.executable, "..", "..", ".."), { recursive: true, force: true })
-			target.install(path.join(nextDir, target.installer))
+			await target.install(path.join(nextDir, target.installer))
 			target.verifyInstall(true)
 
 			return `${target.installedVersion()} (expected ${nextVersion})`

@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSyn
 import os from "node:os"
 import path from "node:path"
 import { assertDisposableMachine } from "./e2e/context.ts"
-import { asarVersion, fail, powershell, run } from "./support.ts"
+import { asarVersion, fail, powershell, processTable, psQuote, run, runBounded } from "./support.ts"
 
 // One install format on the runner it is tested on: how a user installs it, where its files and userData land, how
 // it is launched and how its running main process is found. Names and locations are the frozen 3.x ones,
@@ -31,9 +31,9 @@ export interface Target {
 	readonly userData: string
 	// electron-updater's cache for this install (its downloads land in pending/).
 	readonly updaterCache: string
-	install(artifact: string): void
+	install(artifact: string): Promise<void>
 	// The machine without the app, its data or its updater caches; safe when nothing is installed.
-	reset(): void
+	reset(): Promise<void>
 	// `args` reach the app after any the format itself needs; the child is the started process (the app's main process,
 	// or the AppImage runtime that starts it). `output`: a file descriptor for its stdout and stderr (else discarded).
 	launch(env: NodeJS.ProcessEnv, args?: readonly string[], output?: number): ChildProcess
@@ -219,6 +219,42 @@ function powershellText(script: string): string {
 	return powershell(script).stdout.trim()
 }
 
+// Windows installs and resets wait on installers, uninstallers and Windows Installer, any of which can hang (a file in
+// use, a busy installer service): each such command is bounded, its whole tree ended at the timeout, and the run fails
+// by name with the machine's process table as it was then, well inside a chain's budget.
+const TASKKILL_TIMEOUT_MS = 60_000
+const INSTALLER_TIMEOUT_MS = 10 * 60 * 1000
+const UNINSTALLER_TIMEOUT_MS = 5 * 60 * 1000
+const MSIEXEC_TIMEOUT_MS = 5 * 60 * 1000
+
+async function bounded(
+	what: string,
+	command: string,
+	args: readonly string[],
+	timeoutMs: number,
+	verbatim = false
+): Promise<number | null> {
+	let processes = ""
+	const result = await runBounded(command, args, timeoutMs, {
+		verbatim,
+		onTimeout: async () => {
+			processes = await processTable()
+		}
+	})
+
+	if (result.timedOut) {
+		fail(`${what} timed out after ${String(Math.round(timeoutMs / 1000))} s; the processes then:\n${processes}`)
+	}
+
+	const output = `${result.stdout}\n${result.stderr}`.trim()
+
+	if (output !== "") {
+		console.log(output.slice(-4000))
+	}
+
+	return result.status
+}
+
 function windows(): Target {
 	const installDir = path.join(process.env["ProgramFiles"] ?? "C:\\Program Files", "Filen")
 	const executable = path.join(installDir, "Filen.exe")
@@ -241,6 +277,18 @@ function windows(): Target {
 
 		return dll !== null && existsSync(dll) ? dll : null
 	}
+	// Anything still running from the install (the drive's rclone.exe among it) holds its files and WinFsp's.
+	const installProcesses = (): number[] =>
+		powershellText(
+			`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(${psQuote(path.join(installDir, path.sep))}, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $($_.ExecutablePath)" }`
+		)
+			.split(/\r?\n/)
+			.filter(line => line.trim() !== "")
+			.map(line => {
+				console.log(`still running from the install: ${line}`)
+
+				return Number(line.split(" ")[0])
+			})
 	const mainProcesses = (): AppProcess[] =>
 		powershellText(
 			'Get-CimInstance Win32_Process -Filter "Name=\'Filen.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.ExecutablePath)`t$($_.CommandLine)" }'
@@ -262,20 +310,34 @@ function windows(): Target {
 		executable,
 		userData: path.join(appData, "@filen", "desktop"),
 		updaterCache: path.join(localAppData, UPDATER_CACHE),
-		install(artifact) {
+		async install(artifact) {
 			// Silent, from the already elevated runner shell: the per-machine install a user confirms through UAC.
-			run(artifact, ["/S"])
+			const status = await bounded(`the installer ${path.basename(artifact)}`, artifact, ["/S"], INSTALLER_TIMEOUT_MS)
+
+			if (status !== 0) {
+				fail(`${artifact} exited with ${String(status)}`)
+			}
 		},
-		reset() {
-			run("taskkill.exe", ["/F", "/T", "/IM", "Filen.exe"], { allowFailure: true })
+		async reset() {
+			await bounded("taskkill Filen.exe", "taskkill.exe", ["/F", "/T", "/IM", "Filen.exe"], TASKKILL_TIMEOUT_MS)
 			// The rclone 3.0.47's network drive leaves running from <appData>/@filen/network-drive, which N keeps.
-			run("taskkill.exe", ["/F", "/T", "/IM", "filen_rclone_win32_*"], { allowFailure: true })
+			await bounded("taskkill rclone", "taskkill.exe", ["/F", "/T", "/IM", "filen_rclone_win32_*"], TASKKILL_TIMEOUT_MS)
+
+			for (const pid of installProcesses()) {
+				await bounded(`taskkill ${String(pid)}`, "taskkill.exe", ["/F", "/T", "/PID", String(pid)], TASKKILL_TIMEOUT_MS)
+			}
 
 			const uninstaller = path.join(installDir, "Uninstall Filen.exe")
 
 			if (existsSync(uninstaller)) {
 				// _?= runs the uninstaller in place (synchronously) and must reach NSIS unquoted to the end of the line.
-				run("cmd.exe", ["/d", "/s", "/c", `""${uninstaller}" /S _?=${installDir}"`], { verbatim: true, allowFailure: true })
+				await bounded(
+					"the NSIS uninstaller",
+					"cmd.exe",
+					["/d", "/s", "/c", `""${uninstaller}" /S _?=${installDir}"`],
+					UNINSTALLER_TIMEOUT_MS,
+					true
+				)
 			}
 
 			// WinFsp outlives the app's uninstaller; removed so that every install has to bring it.
@@ -286,7 +348,14 @@ function windows(): Target {
 			)
 
 			for (const product of new Set(winFsp.split(/\r?\n/).filter(line => line !== ""))) {
-				run("msiexec.exe", ["/x", product, "/qn", "/norestart"], { allowFailure: true })
+				const status = await bounded(
+					`msiexec /x ${product} (WinFsp)`,
+					"msiexec.exe",
+					["/x", product, "/qn", "/norestart"],
+					MSIEXEC_TIMEOUT_MS
+				)
+
+				console.log(`msiexec /x ${product}: exit ${String(status)}`)
 			}
 
 			// All of <appData>/@filen, as on macOS and Linux: N leaves 3.0.47's network-drive, s3 and webdav directories.
@@ -361,7 +430,7 @@ function mac(arch: Arch): Target {
 		executable,
 		userData: path.join(support, "@filen", "desktop"),
 		updaterCache: path.join(caches, UPDATER_CACHE),
-		install(artifact) {
+		async install(artifact) {
 			// Mount, drag to Applications, eject: what a user does with the website's disk image.
 			const mountpoint = mkdtempSync(path.join(os.tmpdir(), "filen-dmg-"))
 
@@ -376,7 +445,7 @@ function mac(arch: Arch): Target {
 				}
 			}
 		},
-		reset() {
+		async reset() {
 			run("pkill", ["-9", "-f", app], { allowFailure: true })
 			remove(app, path.join(support, "@filen"))
 
@@ -473,12 +542,12 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 			executable,
 			userData,
 			updaterCache: path.join(cache, UPDATER_CACHE),
-			install(artifact) {
+			async install(artifact) {
 				mkdirSync(path.dirname(executable), { recursive: true })
 				copyFileSync(artifact, executable)
 				chmodSync(executable, 0o755)
 			},
-			reset() {
+			async reset() {
 				killAll(mainProcesses())
 				run("pkill", ["-9", "-f", executable], { allowFailure: true })
 				remove(executable)
@@ -547,14 +616,14 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 		executable,
 		userData,
 		updaterCache: path.join(cache, UPDATER_CACHE),
-		install(artifact) {
+		async install(artifact) {
 			if (deb) {
 				sudo("env", ["DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "--yes", path.resolve(artifact)])
 			} else {
 				sudo("dnf", ["install", "--assumeyes", path.resolve(artifact)])
 			}
 		},
-		reset() {
+		async reset() {
 			killAll(mainProcesses())
 
 			if (packageVersion() !== null) {

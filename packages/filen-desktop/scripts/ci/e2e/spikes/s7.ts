@@ -53,7 +53,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 	const reached: { renderer?: Renderer; submitted?: boolean } = {}
 
 	const drive = async (): Promise<void> => {
-		installFrom(target, path.join(nextDir, target.installer), nextVersion, true)
+		await installFrom(target, path.join(nextDir, target.installer), nextVersion, true)
 		findings.info("macOS", (await tool("sw_vers", ["-productVersion"])).stdout.trim())
 
 		await findings.check("the installed app carries no quarantine", async () => {
@@ -191,11 +191,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 
 		await renderer?.browser.close().catch(() => undefined)
 
-		try {
-			target.reset()
-		} catch (error) {
-			console.log(`cleanup: ${errorMessage(error)}`)
-		}
+		await target.reset().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
 	}
 
 	findings.finish()

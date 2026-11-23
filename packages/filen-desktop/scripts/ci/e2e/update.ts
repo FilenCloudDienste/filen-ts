@@ -328,10 +328,10 @@ export function processesAt(target: Target): AppProcess[] {
 	return all.filter(entry => samePath(entry.path, target.executable))
 }
 
-export function installFrom(target: Target, artifact: string, version: string, payloadSigned: boolean): void {
+export async function installFrom(target: Target, artifact: string, version: string, payloadSigned: boolean): Promise<void> {
 	section(`install ${path.basename(artifact)} (${version})`)
-	target.reset()
-	target.install(artifact)
+	await target.reset()
+	await target.install(artifact)
 	target.verifyInstall(payloadSigned)
 
 	const installed = target.installedVersion()
@@ -423,7 +423,7 @@ export async function runUpdate({
 
 	try {
 		// 3.x is a signed release on Windows and macOS.
-		installFrom(from, installer, fromVersion, legacy ? platform !== "linux" : signed)
+		await installFrom(from, installer, fromVersion, legacy ? platform !== "linux" : signed)
 
 		const token = writeMarker(target)
 
@@ -783,11 +783,7 @@ export async function runUpdate({
 			hooks?.findings?.attach(path.basename(output), tail(output, 3000))
 		}
 
-		try {
-			target.reset()
-		} catch (error) {
-			console.log(`cleanup: ${errorMessage(error)}`)
-		}
+		await target.reset().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
 
 		await feed?.close()
 		xvfb?.kill()

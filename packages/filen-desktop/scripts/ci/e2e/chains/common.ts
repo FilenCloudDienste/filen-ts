@@ -13,11 +13,11 @@ import type {
 } from "@filen/shared/desktop"
 import type { StringifiedClient } from "@filen/sdk-rs"
 import type { Page } from "playwright-core"
-import { errorMessage, fail, waitFor, WaitTimeout } from "../../support.ts"
+import { errorMessage, fail, processTable, waitFor, WaitTimeout } from "../../support.ts"
 import { PROFILE_ENTRIES } from "../../../../src/main/signOut.ts"
 import { ACTIVITY_PER_PAIR } from "../../../../src/main/sync/activity.ts"
 import type { Target } from "../../targets.ts"
-import { APP_ORIGIN, desktop, desktopCall, signOut } from "../app.ts"
+import { APP_ORIGIN, desktop, desktopCall, signOut, within } from "../app.ts"
 import { listTargets } from "../cdp/inspector.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { openCloud, runDir, type Cloud } from "../cloud.ts"
@@ -412,23 +412,41 @@ export function inventory(root: string): string {
 	return lines.sort().join("\n") || "(empty)"
 }
 
+// Once the budget ran out: how long the evidence may take, then the cleanup. The process table takes at most a minute
+// of its own (processTable). Whatever is still pending then is left: the run exits inside the step's timeout (five
+// minutes past the budget), so the workflow's evidence upload still runs.
+export const WATCHDOG_EVIDENCE_MS = 60_000
+export const WATCHDOG_CLEANUP_MS = 2 * 60 * 1000
+
 // The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout): once it is spent, the
 // evidence so far is written and the run fails by name, instead of the step being cut off with nothing kept. In order:
-// `evidence`, the failing check, `cleanup`, the findings, the exit. Undefined without a budget; the caller clears it.
+// the machine's process table, `evidence`, the failing check, `cleanup`, the findings, the exit; the evidence and the
+// cleanup are each given a bound (a stalled page or a hung uninstaller never holds the exit). It fires only while the
+// event loop runs, so every wait in a chain is asynchronous and every synchronous command bounded. Undefined without a
+// budget; the caller clears it.
 export function budgetWatchdog(
 	name: string,
 	findings: Findings,
 	{ evidence, cleanup }: { evidence?: () => Promise<unknown>; cleanup: () => Promise<unknown> }
 ): NodeJS.Timeout | undefined {
 	const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
+	const bounded = (what: string, timeoutMs: number, step: () => Promise<unknown>) =>
+		within(`the watchdog's ${what}`, timeoutMs, step()).catch((error: unknown) =>
+			console.error(`::error::${name}: ${errorMessage(error)}`)
+		)
 
 	return budgetMinutes > 0
 		? setTimeout(() => {
 				void (async () => {
 					console.error(`::error::${name}: the chain's ${String(budgetMinutes)}-minute budget ran out`)
-					await evidence?.()
+
+					const processes = await processTable()
+
+					console.log(`the processes when the budget ran out:\n${processes}`)
+					findings.attach(`${name}-processes.txt`, processes)
+					await bounded("evidence", WATCHDOG_EVIDENCE_MS, async () => evidence?.())
 					await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () => fail("it did not"))
-					await cleanup()
+					await bounded("cleanup", WATCHDOG_CLEANUP_MS, cleanup)
 
 					try {
 						findings.finish()
