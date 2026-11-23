@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { CORPUS, WORD_EXTENSIONS, corpusFiles, expectedRefusal, fuzzConfig, limitedProtection, runJobs, summarize } from "./config"
 import { savesConfig, writeManifest } from "./saves"
@@ -18,6 +19,19 @@ const config = fuzzConfig()
 const saves = savesConfig()
 const views = (process.env["FILEN_OFFICE_FUZZ_VIEWS"] || "").split(",").filter(view => view !== "")
 const JOB_TIMEOUT_MS = 1_800_000
+// Runs that once failed, run by every fuzz run whose filter keeps their file: file under the corpus, seed, mode, view.
+const SEED_174: readonly string[] = [
+	"docx/govuk__Sample_attestation_form.docx",
+	"docx/lo__tdf150438.docx",
+	"docx/oxsdk__Line_numbers-Continuous.docx",
+	"docx/oxsdk__Line_numbers-Continuous__2.docx",
+	"docx/oxsdk__PageBorder-3D.docx",
+	"docx/oxsdk__SmartArt1.docx",
+	"docx/poi__endnotes.docx",
+	"docx/poi__rtl.docx",
+	"docm/poi__45690.docm"
+]
+const REGRESSIONS: readonly (readonly [string, number, string, string])[] = SEED_174.map(file => [file, 174, "sync", "final"])
 
 describe.skipIf(config === undefined || !existsSync(CORPUS))("paged editing fuzz over the corpus", () => {
 	it("shows what a fresh layout of the saved file shows", { timeout: 86_400_000 }, async () => {
@@ -26,12 +40,22 @@ describe.skipIf(config === undefined || !existsSync(CORPUS))("paged editing fuzz
 		const modes = config.modes ?? ["sync", "race"]
 		const narrowed = config.families !== undefined || config.ops !== undefined
 		const jobs: string[][] = []
+		const files = corpusFiles(WORD_EXTENSIONS, config.filter)
 
-		for (const file of corpusFiles(WORD_EXTENSIONS, config.filter))
+		for (const file of files)
 			for (let seed = config.seed; seed < config.seed + config.runs; seed++)
 				for (const mode of modes)
 					if (views.length === 0) jobs.push(["paged", file, String(seed), mode])
 					else for (const view of views) jobs.push(["paged", file, String(seed), mode, view])
+
+		const listed = new Set(jobs.map(job => [...job.slice(1, 4), job[4] ?? config.view ?? "final"].join(" ")))
+		const fuzzed = new Set(files)
+
+		for (const [name, seed, mode, view] of REGRESSIONS) {
+			const file = join(CORPUS, name)
+
+			if (fuzzed.has(file) && !listed.has([file, seed, mode, view].join(" "))) jobs.push(["paged", file, String(seed), mode, view])
+		}
 
 		expect(jobs.length, "no corpus file matches").toBeGreaterThan(0)
 

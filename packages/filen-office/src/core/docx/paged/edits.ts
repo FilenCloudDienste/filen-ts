@@ -1236,7 +1236,7 @@ export class StoryEdits {
 	private readonly holders = new Map<number, TopEntry | TopEntry[]>()
 	// While ownership is set right (reconcile): an entry earlier in the document takes a source over.
 	private ordered = false
-	// Entries built by the edit being applied, not in `entries` yet.
+	// Entries built or kept by the edit being applied, not in `entries` (at their index) yet.
 	private readonly building = new Set<TopEntry>()
 	// Page indexes over the story (see PageIndex.replace).
 	private readonly indexes = new Set<{ replace(pairs: readonly (readonly [TopEntry, TopEntry])[]): void }>()
@@ -1448,6 +1448,8 @@ export class StoryEdits {
 				// Unchanged by this edit: no cells of an earlier one.
 				kept.cells = undefined
 				kept.moved = undefined
+				// Live at its new index before `entries` has it there: a block built after it never takes its source.
+				this.building.add(kept)
 				fresh.push(kept)
 
 				if (removed[k - first] !== kept) structural = true

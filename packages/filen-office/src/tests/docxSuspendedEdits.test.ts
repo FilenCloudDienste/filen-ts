@@ -112,3 +112,33 @@ describe("a paragraph's place as laid out", () => {
 		editor.dispose()
 	})
 })
+
+describe("copies of a block on both sides of it in one change", () => {
+	// Two pastes ending inside the block, one before it (moving it down) and one after it: each leaves a paragraph
+	// with the block's source. Taken as one change (suspended, the applies fold), the block is kept and the copy
+	// after it never takes its source, so no two entries lay that source out (layout showed a line twice).
+	it("lay its source out once", async () => {
+		const { editor, pkg, context } = await pagedEditor(buildDocx({ body: `${p("Alpha")}${p("Source block")}${p("Omega")}` }))
+		const session = editor.body.session
+		const doc = session.state.doc
+		const alpha = doc.child(0).nodeSize
+		const omega = alpha + doc.child(1).nodeSize
+		// From inside Alpha to inside the block: its open end carries the block's attributes.
+		const slice = doc.slice(3, alpha + 4)
+
+		editor.suspend()
+		session.dispatch(session.state.tr.replace(omega + 3, omega + 3, slice))
+		session.dispatch(session.state.tr.replace(3, 3, slice))
+		editor.resume()
+		await settleAll(editor)
+
+		const bases = editor.body.edits.entries.flatMap(entry => entry.base)
+
+		expect(new Set(bases).size).toBe(bases.length)
+
+		const saved = await saveDocx({ pkg, context, sessions: editor.sessions })
+
+		expect(pageDigest(editor.layout)).toEqual(await savedDigest(saved.bytes as Uint8Array))
+		editor.dispose()
+	})
+})
