@@ -1265,38 +1265,42 @@ test.describe("notes: participants and history dialogs", () => {
 	// The FREE shared e2e account currently has zero established contacts (contacts.spec.ts's own
 	// waitForContactsSettled finds it empty) — a genuine cross-account add needs a second real account
 	// this fixture doesn't have, so this test is graceful-render only: the owner management surface
-	// (the dialog itself, its own "Add participants" affordance, and the add sub-view's terminal state,
+	// (the side panel, its own "Add participants" affordance, and the add view's terminal state,
 	// whichever of empty/populated it turns out to be) renders without ever asserting a specific
-	// outcome past that point, mirroring contacts.spec.ts's own hasContacts-agnostic pattern. Dismissed
-	// via Escape, never submitted — no outward-facing add on the shared account.
-	test("participants dialog renders the owner management surface", async ({ page }) => {
+	// outcome past that point, mirroring contacts.spec.ts's own hasContacts-agnostic pattern. Closed
+	// with the panel's own button, never submitted — no outward-facing add on the shared account.
+	test("participants panel renders the owner management surface", async ({ page }) => {
 		const { uuid } = await createAndOpenTestNote(page, "text", "", "e2e participants")
 		const main = page.getByRole("main")
 
 		try {
 			const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
-			await runMenuAction(page, menuTrigger, "Participants", { dialogTitled: "Participants" })
+			await runMenuAction(page, menuTrigger, "Participants", "menuClosed")
 
-			const dialog = page.getByRole("dialog")
-			await expect(dialog.getByRole("heading", { name: "Participants", exact: true })).toBeVisible()
-			// A freshly-created note has no OTHER participants — the owner-only empty state renders,
-			// never a crash/blank panel.
-			await expect(dialog.getByText("No other participants yet", { exact: true })).toBeVisible()
+			// Docked beside the note, or a sheet where the window leaves too little room: an <aside> named by its
+			// heading ("Participants (n)") either way (dockedSidePanel.tsx).
+			const panel = page.getByRole("complementary", { name: /^Participants \(\d+\)$/u })
+			await expect(panel).toBeVisible()
+			await expect(panel.getByRole("heading", { name: "Participants (1)", exact: true })).toBeVisible()
+			// A freshly-created note has only its owner, the viewer, listed first and badged.
+			await expect(panel.getByRole("listitem")).toHaveCount(1)
+			await expect(panel.getByRole("listitem").getByText(/ \(you\)$/u)).toBeVisible()
+			await expect(panel.getByRole("listitem").getByText("Owner", { exact: true })).toBeVisible()
 
 			// The owner-only add affordance is present (this account owns every note it creates).
-			const addButton = dialog.getByRole("button", { name: "Add participants", exact: true })
+			const addButton = panel.getByRole("button", { name: "Add participants", exact: true })
 			await expect(addButton).toBeVisible()
 			await addButton.click()
 
-			await expect(dialog.getByRole("heading", { name: "Add participants", exact: true })).toBeVisible()
+			await expect(panel.getByRole("heading", { name: "Add participants", exact: true })).toBeVisible()
 			// Terminal state only, either is acceptable (see the test's own doc comment above) — proves
 			// the picker settled instead of hanging on a stuck loading spinner.
-			const noContacts = dialog.getByText("No contacts available to add", { exact: true })
-			const contactOption = dialog.getByRole("option").first()
+			const noContacts = panel.getByText("No contacts available to add", { exact: true })
+			const contactOption = panel.getByRole("option").first()
 			await expect(noContacts.or(contactOption)).toBeVisible({ timeout: 15_000 })
 
-			await page.keyboard.press("Escape")
-			await expect(dialog).toHaveCount(0)
+			await panel.getByRole("button", { name: "Close", exact: true }).click()
+			await expect(panel).toHaveCount(0)
 		} finally {
 			await deleteNoteQuietly(page, uuid)
 		}

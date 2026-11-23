@@ -80,7 +80,7 @@ test.describe("drive bulk actions", () => {
 		// "Move here" can only ever assert the offline arm: this picker opened on the drive root, which is
 		// where the selected item already lives, so isMoveNoOp (moveTargetDialog.logic.ts) keeps the
 		// confirm disabled online too — it can never be the re-enable probe. The in-picker create button
-		// (gated on `pending` alone before this pass) is the control whose state tracks connectivity.
+		// is the control that tracks connectivity: offline it is not offered at all (usePickerNewDirectory).
 		// Filtered by its FolderPlusIcon: the picker's own directory rows are plain <button>s carrying
 		// their directory name, so a live account whose drive root happens to hold a directory literally
 		// named "New directory" would strict-mode-violate a name-only locator. lucide-react stamps every
@@ -96,7 +96,7 @@ test.describe("drive bulk actions", () => {
 		// cache while offline, so the confirm's own status arm never confounds the assertion.
 		await waitForE2eHooks(page)
 		await page.context().setOffline(true)
-		await expect(createButton).toBeDisabled()
+		await expect(createButton).toHaveCount(0)
 		await expect(dialog.getByRole("button", { name: "Move here", exact: true })).toBeDisabled()
 
 		await page.context().setOffline(false)

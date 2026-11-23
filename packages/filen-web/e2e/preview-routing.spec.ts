@@ -42,7 +42,7 @@ async function openText(page: Page, listbox: Locator, name: string, text: string
 	await expect(page.getByText(text)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
-// A subtitle opens on its cue table; its text is a toggle away.
+// A subtitle opens on its cue table and a message in the email viewer; their text is a toggle away.
 async function toSource(page: Page): Promise<void> {
 	await page.getByRole("dialog").getByRole("button", { name: "Source", exact: true }).click()
 	await expect(editorContent(page)).toBeVisible()
@@ -94,8 +94,10 @@ test("code and text open in the editor, writable when a save writes them back as
 	await expect(editorContent(page)).toHaveAttribute("contenteditable", "true")
 	await closeText(page)
 
-	// A message is kept as it arrived.
-	await openText(page, listbox, MAIL, "Subject: Routing probe")
+	// A message opens in the email viewer on its text body; its source, a toggle away, is kept as it arrived.
+	await openText(page, listbox, MAIL, "Hello from a message")
+	await toSource(page)
+	await expect(page.getByText("Subject: Routing probe")).toBeVisible()
 	await expect(editorContent(page)).toHaveAttribute("contenteditable", "false")
 	await closeText(page)
 
