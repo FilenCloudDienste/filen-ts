@@ -47,6 +47,17 @@ const { values } = parseArgs({
 	}
 })
 
+// Under a step deadline (scripts/ci/deepSession.sh), a line a minute: where the log stops is when the event loop did.
+if (Number(process.env["E2E_STEP_DEADLINE_MINUTES"] ?? "") > 0) {
+	const started = Date.now()
+
+	setInterval(() => {
+		console.log(
+			`heartbeat: ${String(Math.round((Date.now() - started) / 60_000))} min, rss ${String(Math.round(process.memoryUsage.rss() / 2 ** 20))} MiB`
+		)
+	}, 60_000).unref()
+}
+
 function oneOf<T extends string>(name: string, value: string | undefined, allowed: readonly T[]): T {
 	const match = allowed.find(candidate => candidate === value)
 

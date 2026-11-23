@@ -413,8 +413,8 @@ export function inventory(root: string): string {
 }
 
 // Once the budget ran out: how long the evidence may take, then the cleanup. The process table takes at most a minute
-// of its own (processTable). Whatever is still pending then is left: the run exits inside the step's timeout (five
-// minutes past the budget), so the workflow's evidence upload still runs.
+// of its own (processTable). Whatever is still pending then is left: the run exits before the step's deadline
+// (E2E_STEP_DEADLINE_MINUTES, scripts/ci/deepSession.sh), so the workflow's evidence upload still runs.
 export const WATCHDOG_EVIDENCE_MS = 60_000
 export const WATCHDOG_CLEANUP_MS = 2 * 60 * 1000
 

@@ -134,7 +134,10 @@ describe("desktop e2e workflow chain K", () => {
 		expect(chain).toContain(
 			"run: bash scripts/ci/deepSession.sh --scenario dragout --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts"
 		)
-		expect(chain).toContain("E2E_CHAIN_BUDGET_MINUTES: 40")
+		// The budget and its watchdog's bounds end before the deadline (deepSession.sh), which ends before the timeout.
+		expect(chain).toContain("timeout-minutes: 45")
+		expect(chain).toContain("E2E_CHAIN_BUDGET_MINUTES: 38")
+		expect(chain).toContain("E2E_STEP_DEADLINE_MINUTES: 43")
 		expect(step("Prepare the Linux desktop")).toContain("DRAG_PACKAGES: ${{ matrix.dragout && 'thunar' || '' }}")
 		expect(text.match(/description: Comma-separated subset of [a-z,-]*\bdragout\b/g)).toHaveLength(2)
 	})

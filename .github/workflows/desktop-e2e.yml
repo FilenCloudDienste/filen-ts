@@ -810,6 +810,7 @@ jobs:
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
           E2E_CHAIN_BUDGET_MINUTES: 150
+          E2E_STEP_DEADLINE_MINUTES: 160
           E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
           # On unless a dispatch turns it off: a scheduled or release run has no such input.
           E2E_NAMES_CHECK: ${{ format('{0}', inputs.names_check) == 'false' && '0' || '1' }}
@@ -837,6 +838,7 @@ jobs:
           E2E_SIGN_IN: ${{ matrix.signInLegacy }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           E2E_CHAIN_BUDGET_MINUTES: 105
+          E2E_STEP_DEADLINE_MINUTES: 115
         run: bash scripts/ci/deepSession.sh --scenario legacy --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: 3.0.53 -> N (Fedora container)
         if: ${{ !cancelled() && matrix.legacy && matrix.format == 'rpm' }}
@@ -865,6 +867,7 @@ jobs:
           E2E_SIGN_IN: ${{ matrix.signInOlder }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           E2E_CHAIN_BUDGET_MINUTES: 105
+          E2E_STEP_DEADLINE_MINUTES: 115
         run: bash scripts/ci/deepSession.sh --scenario older --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       # Every release run, and by hand when `scenarios` names update-kill: N-1's update installer killed mid-install
       # (Windows installer, ShipIt, dpkg; on the AppImage a failing mv), then what a user is left with must work
@@ -897,7 +900,8 @@ jobs:
           FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
           FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
           E2E_SIGN_IN: seeded
-          E2E_CHAIN_BUDGET_MINUTES: 40
+          E2E_CHAIN_BUDGET_MINUTES: 38
+          E2E_STEP_DEADLINE_MINUTES: 43
         run: bash scripts/ci/deepSession.sh --scenario dragout --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       # The account's credentials reach spike s7 only, and only this step (deep entries: the signed-in and seeded steps above).
       # Bounded so a hang never holds a runner for the job's whole budget.
