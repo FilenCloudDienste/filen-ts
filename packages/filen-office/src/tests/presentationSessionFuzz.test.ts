@@ -207,12 +207,13 @@ const DECKS = ["synthetic.pptx", "lo__tdf149551_SmartArt_Pie.pptx", "lo__smartar
 // saved, the delete undone and the chart edited, could not be written again; both SmartArt decks 1104: a save refused
 // for a picture inserted after undoing past the last save, its id one the save held, undid and redid every step;
 // synthetic.pptx 1014: one refused for a slide whose delete the save held, undone and its branch discarded, undid
-// unrelated steps; synthetic.odp 2193: a picture inserted, its page copied, was locked on the copy, and lost the lock
-// when the copy was made again).
+// unrelated steps; synthetic.pptx 2164 and the picture strip 2076: the same delete undone with the save still ahead,
+// undid and applied again steps the save held; synthetic.odp 2193: a picture inserted, its page copied, was locked on
+// the copy, and lost the lock when the copy was made again).
 const REGRESSIONS: Readonly<Record<string, readonly number[]>> = {
-	"synthetic.pptx": [1014, 5066, 10298],
+	"synthetic.pptx": [1014, 2164, 5066, 10298],
 	"lo__tdf149551_SmartArt_Pie.pptx": [1104],
-	"lo__smartart-picture-strip.pptx": [1104],
+	"lo__smartart-picture-strip.pptx": [1104, 2076],
 	"synthetic.odp": [2193]
 }
 

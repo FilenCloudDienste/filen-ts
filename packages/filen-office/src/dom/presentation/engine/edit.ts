@@ -2084,34 +2084,25 @@ async function revert(
 	}
 	// The steps since the anchor, also once the saved state left the timeline (undone past and its branch discarded):
 	// against the saved state, a shape made since in place of one the save held (its id taken again) reads changed,
-	// never made, so no step undone would take it back and the revert would undo and apply again every step.
+	// never made, so no step undone would take it back and the revert would undo and apply again every step. None while
+	// the saved state lies ahead (undone past it): every step held, the save held too.
 	const since = history.sinceAnchor
-	const window = since === undefined ? undefined : history.steps().slice(history.depth.undo - since, history.depth.undo)
+	const window = since === undefined ? [] : history.steps().slice(history.depth.undo - since, history.depth.undo)
 	const dirty = (): readonly { readonly key: string; readonly made: boolean }[] =>
 		[...history.dirtyTouchKeys()].map(key => ({ key, made: history.savedFingerprint(key)?.exists === false }))
-	const names = (test: (key: string, made: boolean) => boolean): boolean =>
-		window !== undefined
-			? window.some(entry => keysOf(entry).some(each => test(each.key, each.made)))
-			: dirty().some(each => test(each.key, each.made))
 	const tiers = edits === undefined ? [] : [edits.changes, edits.alters, edits.makes]
-	const named = tiers.find(test => names(test))
+	const named = tiers.find(test => window.some(entry => keysOf(entry).some(each => test(each.key, each.made))))
 
-	// What was refused differs from the saved state only by steps that left the timeline (a slide delete the save held,
-	// undone and its branch discarded): no step held takes it back, so nothing is reverted.
-	if (
-		named === undefined &&
-		window !== undefined &&
-		history.sinceSaved === undefined &&
-		tiers.some(test => dirty().some(each => test(each.key, each.made)))
-	)
+	// What was refused differs from the saved state only by steps outside those since it (undone past it, or a slide
+	// delete the save held, undone and its branch discarded): no step held takes it back, so nothing is reverted.
+	if (named === undefined && history.sinceSaved === undefined && tiers.some(test => dirty().some(each => test(each.key, each.made))))
 		return 0
 
 	const related = (entry: HistoryStep): boolean =>
 		named !== undefined ? keysOf(entry).some(each => named(each.key, each.made)) : [...stepParts(entry)].some(part => parts.has(part))
-	let left = named === undefined || window === undefined ? undefined : window.filter(related).length
+	let left = named === undefined ? undefined : window.filter(related).length
 	const touched = (): boolean => {
 		if (left !== undefined) return left > 0
-		if (named !== undefined) return dirty().some(each => named(each.key, each.made))
 
 		for (const part of deckChanges(session.deck, history, state.fingerprint).parts.keys()) if (parts.has(part)) return true
 
