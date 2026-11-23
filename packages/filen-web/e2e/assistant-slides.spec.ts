@@ -75,6 +75,8 @@ test("Alt+J rewrites the selected text of the body being edited, as one undo ste
 		// Enter: the title's text, all of it selected.
 		await page.keyboard.press("Enter")
 		await expect(page.locator("[data-fo-text-editor]")).toBeVisible()
+		// Alt+J acts once the body holds the focus and its selection (selectionTransform.tsx), which the ✨ beside it shows.
+		await expect(page.getByRole("button", { name: assistant.assistantTransformOpen, exact: true })).toBeVisible()
 		await page.keyboard.press("Alt+j")
 
 		const menu = page.getByRole("menu", { name: assistant.assistantTransformOpen })

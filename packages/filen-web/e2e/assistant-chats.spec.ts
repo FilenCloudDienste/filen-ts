@@ -302,7 +302,10 @@ test.describe("assistant act-on-read in chats", () => {
 			await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled()
 
 			// Nothing was sent: no bubble in the thread, no "Sending…", and the server holds what it held before.
-			const thread = page.getByRole("main")
+			// The thread's messages region (named for the chat): the composer below it holds the draft as its value.
+			const thread = page.getByRole("main").getByRole("region", { name, exact: true })
+
+			await expect(thread).toBeVisible()
 
 			await expect(thread.getByText(DRAFT_TEXT, { exact: true })).toHaveCount(0)
 			await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)

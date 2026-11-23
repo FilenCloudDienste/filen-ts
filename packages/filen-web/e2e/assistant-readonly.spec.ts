@@ -104,8 +104,8 @@ test.describe("read-only matrix", () => {
 
 				const dialog = await openFromSection(page, "Links", /\/links$/, name)
 
-				// Editable: the editor's ribbon, and no view-only badge.
-				await expect(dialog.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toBeVisible({
+				// Editable: the editor's formatting, and no view-only badge.
+				await expect(dialog.getByRole("button", { name: preview.previewDocxBold, exact: true })).toBeEnabled({
 					timeout: LAZY_VIEWER_TIMEOUT_MS
 				})
 				await expect(dialog.getByRole("button", { name: preview.previewDocxViewOnly, exact: true })).toHaveCount(0)
@@ -153,8 +153,8 @@ test.describe("read-only matrix", () => {
 			await page.keyboard.press("Escape")
 			await expect(reason).toHaveCount(0)
 
-			// No editor, no assistant: the trash stays hands-off.
-			await expect(dialog.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
+			// No editor (the viewer's own command bar has no formatting), no assistant: the trash stays hands-off.
+			await expect(dialog.getByRole("button", { name: preview.previewDocxBold, exact: true })).toHaveCount(0)
 			await expect(page.locator(PREVIEW_TOGGLE)).toHaveCount(0)
 			await expect(assistantPanel(page)).toHaveCount(0)
 

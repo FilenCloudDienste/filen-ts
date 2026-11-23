@@ -1,7 +1,7 @@
 import type { BrowserContext, Locator, Page } from "@playwright/test"
 import { test, expect, settleLeases } from "./fixtures"
 import { focusEditorSurface } from "./helpers/editor"
-import { resolveEditorModKey } from "./helpers/modkey"
+import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { trackCspViolations } from "./helpers/csp"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
@@ -151,7 +151,9 @@ test.describe("assistant selection transform in a note", () => {
 
 			// One undo step: the original comes back whole, and reaches the server as it was.
 			await focusEditorSurface(editor)
-			await page.keyboard.press(`${await resolveEditorModKey(page)}+z`)
+			// Undo is the app's keymap binding (editor.undo, codeMirrorShared.ts), which reads "mod" from the user agent,
+			// not CodeMirror's own platform check: they disagree on Playwright's WebKit (a Mac user agent on Linux).
+			await page.keyboard.press(`${await resolveModKey(page)}+z`)
 			await expect(editor).toHaveText(NOTE_TEXT)
 			await expect.poll(() => readServerContent(page, uuid), { timeout: LIVE_WRITE_TIMEOUT_MS }).toBe(NOTE_TEXT)
 		})
