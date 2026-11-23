@@ -209,15 +209,17 @@ public static class FilenE2eDrag {
 		string capture = GetGUIThreadInfo(0, ref info) ? Owner(info.hwndCapture) : "not read";
 		return "at " + at.X + "," + at.Y + ": " + Owner(WindowFromPoint(at)) + "; foreground: " + Owner(GetForegroundWindow()) + "; capture: " + capture;
 	}
-	// Ends the processes whose top-level window covers x,y over process pid's, up to three (the windows-11-arm image
-	// shows its first-logon privacy screen over the whole desktop); never the shell's or the session's own, never a
-	// console or terminal host or the runner's own processes, and never one in keepPids (this helper's ancestry, the
-	// runner among it): ending one of those ends the runner, and the job with it, without a trace. First, every
+	// Clears what covers x,y over process pid's window, up to three windows (the windows-11-arm image shows its
+	// first-logon privacy screen over the whole desktop). The shell's and the session's own windows are left: covered.
+	// A console or terminal host, the runner's processes and this helper's ancestry (keepPids) are minimized, never
+	// ended: the hosted runner's agent runs in a Windows Terminal (hosted-compute-agent), which can come up over the
+	// app, and ending it takes the runner down without a trace. Anything else is ended. First, every
 	// "install WSL" console of that image, wherever it is: its wsl.exe client outlives an ended terminal, whose window
 	// comes back and takes the foreground (keys, Escape included, go there) or the mouse capture.
 	public static string Uncover(uint pid, int x, int y, int[] keepPids) {
 		var ended = new List<string>();
-		string[] keep = { "explorer", "dwm", "csrss", "winlogon", "svchost", "sihost", "system", "idle", "?", "conhost", "openconsole", "windowsterminal", "cmd", "powershell", "pwsh", "bash", "sh", "node", "runner.listener", "runner.worker", "provisioner" };
+		string[] session = { "explorer", "dwm", "csrss", "winlogon", "svchost", "sihost", "system", "idle", "?" };
+		string[] hosts = { "conhost", "openconsole", "windowsterminal", "cmd", "powershell", "pwsh", "bash", "sh", "node", "runner.listener", "runner.worker", "provisioner", "hosted-compute-agent" };
 		foreach (var client in System.Diagnostics.Process.GetProcessesByName("wsl")) {
 			try { client.Kill(); ended.Add("wsl " + client.Id); } catch (Exception) { }
 		}
@@ -230,14 +232,19 @@ public static class FilenE2eDrag {
 			POINT at; at.X = x; at.Y = y;
 			IntPtr root = GetAncestor(WindowFromPoint(at), 2);
 			uint owner = Pid(root);
-			string after = ended.Count == 0 ? "" : " after ending " + string.Join(", ", ended);
-			if (owner == pid) return ended.Count == 0 ? "nothing over the app" : "ended " + string.Join(", ", ended);
+			string after = ended.Count == 0 ? "" : " after " + string.Join(", ", ended);
+			if (owner == pid) return ended.Count == 0 ? "nothing over the app" : "cleared: " + string.Join(", ", ended);
 			string name;
 			try { name = System.Diagnostics.Process.GetProcessById((int)owner).ProcessName; } catch (Exception) { name = "?"; }
 			string what = name + " " + owner + " (" + Class(root) + " '" + Title(root) + "')";
-			if (round == 3 || Array.IndexOf(keep, name.ToLowerInvariant()) >= 0 || Array.IndexOf(keepPids, (int)owner) >= 0) return "covered by " + what + after;
-			try { System.Diagnostics.Process.GetProcessById((int)owner).Kill(); } catch (Exception error) { return "covered by " + what + after + ": " + error.Message; }
-			ended.Add(what);
+			if (round == 3 || Array.IndexOf(session, name.ToLowerInvariant()) >= 0) return "covered by " + what + after;
+			if (Array.IndexOf(hosts, name.ToLowerInvariant()) >= 0 || Array.IndexOf(keepPids, (int)owner) >= 0) {
+				ShowWindow(root, 6);
+				ended.Add("minimized " + what);
+			} else {
+				try { System.Diagnostics.Process.GetProcessById((int)owner).Kill(); } catch (Exception error) { return "covered by " + what + after + ": " + error.Message; }
+				ended.Add(what);
+			}
 			Thread.Sleep(2000);
 		}
 		return "covered";
