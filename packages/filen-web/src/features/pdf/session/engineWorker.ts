@@ -76,7 +76,14 @@ function spawn(module: WebAssembly.Module): { readonly client: PdfEngineClient; 
 		}
 	})
 
-	return { client: import.meta.env.VITE_E2E === "1" ? trackWorkerCalls(client, "pdf-engine") : client, gone: owned.gone }
+	return {
+		// Every operation goes through `call`: its first argument names it.
+		client:
+			import.meta.env.VITE_E2E === "1"
+				? trackWorkerCalls(client, "pdf-engine", (method, args) => (method === "call" ? String(args[0]) : method))
+				: client,
+		gone: owned.gone
+	}
 }
 
 // Where an engine reads its file: a drive file through the SDK worker, a channel another engine serves (a written

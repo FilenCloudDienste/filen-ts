@@ -13,8 +13,8 @@ let sdkCalls: Map<number, PendingCall> | null = null
 const workerCalls = new Map<number, PendingCall>()
 let nextId = 0
 
-// A proxy of `remote` whose method calls are in `calls`, as `name(method)`, until they settle.
-function tracked<T extends object>(remote: T, calls: Map<number, PendingCall>, name: (method: string) => string): T {
+// A proxy of `remote` whose method calls are in `calls`, as `name(method, args)`, until they settle.
+function tracked<T extends object>(remote: T, calls: Map<number, PendingCall>, name: (method: string, args: unknown[]) => string): T {
 	return new Proxy(remote, {
 		get(target, property, receiver) {
 			const value: unknown = Reflect.get(target, property, receiver)
@@ -27,7 +27,7 @@ function tracked<T extends object>(remote: T, calls: Map<number, PendingCall>, n
 			return (...args: unknown[]) => {
 				const id = nextId++
 
-				calls.set(id, { method: name(property), startedAt: Date.now() })
+				calls.set(id, { method: name(property, args), startedAt: Date.now() })
 
 				const result: unknown = Reflect.apply(value, target, args)
 
@@ -53,9 +53,13 @@ export function trackSdkCalls<T extends object>(remote: T): T {
 	return tracked(remote, calls, method => method)
 }
 
-// `worker` names the worker in the report: "pdf-engine open".
-export function trackWorkerCalls<T extends object>(remote: T, worker: string): T {
-	return tracked(remote, workerCalls, method => `${worker} ${method}`)
+// `worker` names the worker in the report, and `call` the call when its method does not: "pdf-engine signBegin".
+export function trackWorkerCalls<T extends object>(
+	remote: T,
+	worker: string,
+	call: (method: string, args: unknown[]) => string = method => method
+): T {
+	return tracked(remote, workerCalls, (method, args) => `${worker} ${call(method, args)}`)
 }
 
 // Oldest first.
