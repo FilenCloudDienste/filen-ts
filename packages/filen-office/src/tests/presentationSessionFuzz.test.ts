@@ -204,8 +204,15 @@ async function checked(d: Drive, format: Format, when: string): Promise<string[]
 const DECKS = ["synthetic.pptx", "lo__tdf149551_SmartArt_Pie.pptx", "lo__smartart-picture-strip.pptx", "synthetic.odp"]
 // Seeds that found a fault once, run every time (synthetic.pptx 5066: a diagram restyled on a saved copy, then undone
 // to the start and redone, lost its drawing relationship; 10298: a chart inserted and saved, its slide deleted and
-// saved, the delete undone and the chart edited, could not be written again).
-const REGRESSIONS: Readonly<Record<string, readonly number[]>> = { "synthetic.pptx": [5066, 10298] }
+// saved, the delete undone and the chart edited, could not be written again; both SmartArt decks 1104: a save refused
+// for a picture inserted after undoing past the last save, its id one the save held, undid and redid every step;
+// synthetic.pptx 1014: one refused for a slide whose delete the save held, undone and its branch discarded, undid
+// unrelated steps).
+const REGRESSIONS: Readonly<Record<string, readonly number[]>> = {
+	"synthetic.pptx": [1014, 5066, 10298],
+	"lo__tdf149551_SmartArt_Pie.pptx": [1104],
+	"lo__smartart-picture-strip.pptx": [1104]
+}
 
 function seedsOf(name: string): number[] {
 	const seeds = Array.from({ length: SEEDS }, (_, at) => FROM + at)

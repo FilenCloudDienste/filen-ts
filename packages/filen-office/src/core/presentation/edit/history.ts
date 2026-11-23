@@ -207,6 +207,13 @@ export class DeckHistory {
 		return this.savedReachable && this.saved.pos <= this.cursor ? this.cursor - this.saved.pos : undefined
 	}
 
+	// Steps applied on top of the saved anchor's place in this timeline: those since the saved state, or, once its branch
+	// was discarded or trimmed away, those since the point it left (the anchor's baseline holds the rest); undefined
+	// when it lies ahead (undone past it).
+	get sinceAnchor(): number | undefined {
+		return this.saved.pos <= this.cursor ? this.cursor - this.saved.pos : undefined
+	}
+
 	get atSaved(): boolean {
 		return this.savedReachable && this.saved.pos === this.cursor && this.saved.baseline.size === 0
 	}
