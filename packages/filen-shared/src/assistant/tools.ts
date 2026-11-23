@@ -403,8 +403,8 @@ export const readDocument = defineTool({
 	input: {
 		handle: handle("a PDF, Word, spreadsheet or presentation file, or the open document"),
 		part: optional({
-			...oneOf(["all", "selection", "pages"]),
-			description: "What to read, default all; pages reads from/to"
+			...oneOf(["all", "pages", "selection"]),
+			description: "What to read, default all; pages reads from/to; selection only when the open document has characters selected"
 		}),
 		from: optional({
 			type: integer,
