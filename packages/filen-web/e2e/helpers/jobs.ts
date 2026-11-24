@@ -28,6 +28,14 @@ export function jobCard(page: Page, title: string | RegExp): Locator {
 		.filter({ hasText: title })
 }
 
+// Puts the pointer on a card, which is what stops sonner's countdowns (a mouse move over the toaster expands
+// it). Forced: only the pointer's place matters, and a card restacks and resizes as it is issued again
+// (jobToast.tsx), so on a runner whose frames stall for a second the hover's stability wait outlasted a
+// settled card's 4 s countdown, and the card left before the pointer reached it.
+function parkPointer(card: Locator): Promise<void> {
+	return card.hover({ force: true, timeout: 2_000 })
+}
+
 // Waits for the card and hovers it, one retried step, so its auto-close stands still while the caller reads
 // it: a settled card is issued again with its timed duration (jobToast.tsx), which replaces its element, and a
 // separate visibility wait left that countdown running until the hover landed.
@@ -35,7 +43,7 @@ export async function expectJobCard(page: Page, title: string | RegExp, timeout:
 	const card = jobCard(page, title)
 
 	await expect(async () => {
-		await card.hover({ timeout: 2_000 })
+		await parkPointer(card)
 	}).toPass({ timeout })
 
 	return card
@@ -66,10 +74,10 @@ export async function expectExactJobCard(
 		// One retried step, as in expectJobCard: a settled card's element is replaced as its countdown starts.
 		await expect(async () => {
 			if (!(await card.isVisible())) {
-				await running.hover({ timeout: 2_000 }).catch(() => undefined)
+				await parkPointer(running).catch(() => undefined)
 			}
 
-			await card.hover({ timeout: 2_000 })
+			await parkPointer(card)
 		}).toPass({ timeout })
 	} else {
 		await expect(card).toBeVisible({ timeout })
@@ -102,9 +110,7 @@ export async function settledExtractCard(page: Page, archive: string, timeout: n
 					// The pointer rests on the card while the job runs, so the settled card's countdown never
 					// starts before the caller reads it.
 					if (!hovered && text.length > 0) {
-						hovered = await cards
-							.first()
-							.hover({ timeout: 2_000 })
+						hovered = await parkPointer(cards.first())
 							.then(() => true)
 							.catch(() => false)
 					}
