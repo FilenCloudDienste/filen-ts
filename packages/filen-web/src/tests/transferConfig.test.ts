@@ -52,7 +52,7 @@ describe("buildJsClientConfig", () => {
 			const { fileIoMemoryBudget } = buildJsClientConfig({ preset })
 
 			expect(fileIoMemoryBudget).toBe(DESKTOP_WEB_TRANSFER_PRESET_VALUES[preset].chunks * FULL_CHUNK_BYTES)
-			expect(Math.floor((fileIoMemoryBudget ?? 0) / FULL_CHUNK_BYTES)).toBe(DESKTOP_WEB_TRANSFER_PRESET_VALUES[preset].chunks)
+			expect(Math.floor(fileIoMemoryBudget / FULL_CHUNK_BYTES)).toBe(DESKTOP_WEB_TRANSFER_PRESET_VALUES[preset].chunks)
 		}
 
 		expect(FULL_CHUNK_BYTES).toBe(1_048_604)

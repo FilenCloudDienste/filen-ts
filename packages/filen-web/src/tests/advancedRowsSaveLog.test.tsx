@@ -17,7 +17,13 @@ const { setHeic, setDotFilen, setTransfer, setArchive, refetch } = vi.hoisted(()
 
 vi.mock("@/features/drive/lib/heicUpload", () => ({ setHeicUploadConvertPreference: setHeic }))
 vi.mock("@/features/drive/lib/preferences", () => ({ DEFAULT_SHOW_DOT_FILEN: false, setShowDotFilen: setDotFilen }))
-vi.mock("@/features/settings/lib/transferConfig", () => ({ setTransferPreferences: setTransfer }))
+vi.mock("@/features/settings/lib/transferConfig", () => ({
+	setTransferPreferences: setTransfer,
+	buildJsClientConfig: () => ({ concurrency: 1, fileIoMemoryBudget: 1, rateLimitPerSec: 1 }),
+	rememberAppliedTransferConfig: vi.fn()
+}))
+vi.mock("@/features/drive/lib/saveDownload", () => ({ forgetSwClientHandoff: vi.fn() }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { applyTransferConfig: () => Promise.resolve() } }))
 vi.mock("@/features/settings/lib/archiveConfig", () => ({
 	setArchivePreferences: setArchive,
 	ARCHIVE_CODEC_MEMORY_MIB: [64, 128],

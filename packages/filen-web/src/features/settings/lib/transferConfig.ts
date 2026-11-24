@@ -15,10 +15,10 @@ import {
 // native host's sync client and its uploads/downloads client take their own preset and bandwidth limits from
 // Settings › Desktop › Speed, applied live, on the same ladder as this one.
 //
-// This app applies a change when the worker next builds its client, at the next full page load (see
-// sdk.worker.ts's `setClientConfig`/`clientConfig`), not live, and the UI says so as an info toast. The
-// wasm `Client` has live setters for all three knobs (`setConcurrency`, `setFileIoMemoryBudget`,
-// `setRequestRateLimit`), which this preset does not use yet.
+// A change applies at once: the worker sets it on the signed-in client through the wasm `Client`'s live
+// setters (`setConcurrency`, `setFileIoMemoryBudget`, `setRequestRateLimit`; sdk.worker.ts's
+// `applyTransferConfig`), and the service worker's download client is handed over again with it before the
+// next download (features/drive/lib/saveDownload.ts).
 //
 // No bandwidth cap here: the wasm build compiles the SDK's bandwidth limiter out entirely, while
 // concurrency, the file-IO memory budget and the request rate carry no such gate and are honored
@@ -46,9 +46,17 @@ export const { get: getTransferPreferences, set: setTransferPreferences } = kvPr
 	fallback: DEFAULT_TRANSFER_PREFERENCES
 })
 
+// The JsClientConfig fields a preset sets, every one present: what the client is built with at boot and
+// what the worker's applyTransferConfig sets on the running client.
+export interface TransferClientConfig {
+	concurrency: number
+	fileIoMemoryBudget: number
+	rateLimitPerSec: number
+}
+
 // Pure preset -> JsClientConfig mapping, called from boot.ts (main thread, after the preference is
-// read from kv) and unit-tested without touching the worker or wasm at all.
-export function buildJsClientConfig(prefs: TransferPreferences): JsClientConfig {
+// read from kv) and from the settings row, and unit-tested without touching the worker or wasm at all.
+export function buildJsClientConfig(prefs: TransferPreferences): TransferClientConfig {
 	const { chunks, concurrency, rateLimitPerSec } = DESKTOP_WEB_TRANSFER_PRESET_VALUES[prefs.preset]
 
 	return {

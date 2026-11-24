@@ -241,7 +241,9 @@ export const settings = {
 	settingsAdvancedPresetBalanced: "Balanced",
 	settingsAdvancedPresetPerformance: "Performance",
 	settingsAdvancedPresetMaximum: "Maximum",
-	/** Shown after a preset change — the wasm client only reads these at startup, there is no live setter */
+	/** Toast: a stored transfer preset could not be applied to the running client; it applies the next time Filen starts */
+	settingsAdvancedTransferApplyFailed: "Couldn't apply this now. It takes effect the next time Filen starts.",
+	/** Shown after a change to a setting read only at startup (archive memory) */
 	settingsAdvancedRestartRequired: "This takes effect the next time Filen starts.",
 
 	// ── Advanced: archives ───────────────────────────────────────────────────

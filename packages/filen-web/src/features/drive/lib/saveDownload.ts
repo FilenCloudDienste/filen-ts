@@ -196,6 +196,12 @@ export function ensureSwClientReady(): Promise<void> {
 	return swClientReady
 }
 
+// The transfer preset changed: the next download hands the session over again, so the service worker's
+// client is built with the new one (handoffs read it when they send). Downloads running keep their client.
+export function forgetSwClientHandoff(): void {
+	swClientReady = null
+}
+
 // The single registration seam for every SW-served route (download, zip, preview). It also heals the
 // one failure the page cannot otherwise see: a service worker is terminated whenever it goes idle and
 // restarts with empty module globals, so the session Client handed over once per tab is gone while the

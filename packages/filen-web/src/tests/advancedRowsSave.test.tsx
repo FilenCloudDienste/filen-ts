@@ -5,19 +5,30 @@ import { createElement, type ComponentType } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
 // Each Advanced row writes one locally stored setting: a failed write must say so, and the restart note
-// is only for a value that was stored. The row primitives are stubbed down to one button that fires the
+// (archive memory; the transfer preset applies at once) is only for a value that was stored. The row primitives are stubbed down to one button that fires the
 // change, so the rows' own write handling is what runs.
-const { setHeic, setDotFilen, setTransfer, setArchive, refetch } = vi.hoisted(() => ({
+const { setHeic, setDotFilen, setTransfer, setArchive, refetch, applyTransferConfig, remember, forgetHandoff } = vi.hoisted(() => ({
 	setHeic: vi.fn<(next: boolean) => Promise<void>>(),
 	setDotFilen: vi.fn<(next: boolean) => Promise<void>>(),
 	setTransfer: vi.fn<(next: unknown) => Promise<void>>(),
 	setArchive: vi.fn<(next: unknown) => Promise<void>>(),
-	refetch: vi.fn()
+	refetch: vi.fn(),
+	applyTransferConfig: vi.fn<(config: unknown) => Promise<void>>(),
+	remember: vi.fn(),
+	forgetHandoff: vi.fn()
 }))
+
+const MAXIMUM_CONFIG = { concurrency: 160, fileIoMemoryBudget: 1, rateLimitPerSec: 640 }
 
 vi.mock("@/features/drive/lib/heicUpload", () => ({ setHeicUploadConvertPreference: setHeic }))
 vi.mock("@/features/drive/lib/preferences", () => ({ DEFAULT_SHOW_DOT_FILEN: false, setShowDotFilen: setDotFilen }))
-vi.mock("@/features/settings/lib/transferConfig", () => ({ setTransferPreferences: setTransfer }))
+vi.mock("@/features/settings/lib/transferConfig", () => ({
+	setTransferPreferences: setTransfer,
+	buildJsClientConfig: (prefs: { preset: string }) => (prefs.preset === "maximum" ? MAXIMUM_CONFIG : null),
+	rememberAppliedTransferConfig: remember
+}))
+vi.mock("@/features/drive/lib/saveDownload", () => ({ forgetSwClientHandoff: forgetHandoff }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { applyTransferConfig } }))
 vi.mock("@/features/settings/lib/archiveConfig", () => ({
 	setArchivePreferences: setArchive,
 	ARCHIVE_CODEC_MEMORY_MIB: [64, 128],
@@ -71,7 +82,7 @@ import { ArchiveMemoryRow } from "@/features/settings/components/advanced/archiv
 const ROWS: [string, ComponentType, typeof setHeic | typeof setTransfer, boolean][] = [
 	["uploads", UploadsRow, setHeic, false],
 	["dot-filen", DotFilenRow, setDotFilen, false],
-	["transfer preset", TransferConfigRow, setTransfer, true],
+	["transfer preset", TransferConfigRow, setTransfer, false],
 	["archive memory", ArchiveMemoryRow, setArchive, true]
 ]
 
@@ -86,6 +97,8 @@ beforeEach(() => {
 	for (const set of [setHeic, setDotFilen, setTransfer, setArchive]) {
 		set.mockResolvedValue(undefined)
 	}
+
+	applyTransferConfig.mockResolvedValue(undefined)
 })
 
 describe.each(ROWS)("the %s row", (_, Row, set, restartNote) => {
@@ -112,5 +125,41 @@ describe.each(ROWS)("the %s row", (_, Row, set, restartNote) => {
 		if (restartNote) {
 			expect(toastInfo).toHaveBeenCalledExactlyOnceWith(EN_SETTINGS.settingsAdvancedRestartRequired)
 		}
+	})
+})
+
+// The transfer preset applies to the running clients once stored: the worker's client through its setters,
+// the service worker's at the next handoff.
+describe("the transfer preset row's live apply", () => {
+	it("applies the stored preset to the worker's client and the next service worker handoff", async () => {
+		render(createElement(TransferConfigRow))
+
+		await change()
+
+		expect(remember).toHaveBeenCalledExactlyOnceWith(MAXIMUM_CONFIG)
+		expect(forgetHandoff).toHaveBeenCalledOnce()
+		expect(applyTransferConfig).toHaveBeenCalledExactlyOnceWith(MAXIMUM_CONFIG)
+		expect(toastError).not.toHaveBeenCalled()
+		expect(toastInfo).not.toHaveBeenCalled()
+	})
+
+	it("applies nothing when the preset was not stored", async () => {
+		setTransfer.mockRejectedValue(new Error("storage"))
+		render(createElement(TransferConfigRow))
+
+		await change()
+
+		expect(applyTransferConfig).not.toHaveBeenCalled()
+		expect(remember).not.toHaveBeenCalled()
+		expect(forgetHandoff).not.toHaveBeenCalled()
+	})
+
+	it("says when the running client did not take it", async () => {
+		applyTransferConfig.mockRejectedValue(new Error("InvalidState"))
+		render(createElement(TransferConfigRow))
+
+		await change()
+
+		expect(toastError).toHaveBeenCalledExactlyOnceWith(EN_SETTINGS.settingsAdvancedTransferApplyFailed)
 	})
 })

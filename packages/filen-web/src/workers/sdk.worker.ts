@@ -148,6 +148,7 @@ import { createListBatcher } from "@/workers/archiveListPacker"
 import { createArchiveReaders, readerClosed, settleEntryReport } from "@/workers/archiveReaders"
 import { readAheadBudget, type EntryReadPlan } from "@/lib/sdk/archiveListing"
 import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
+import type { TransferClientConfig } from "@/features/settings/lib/transferConfig"
 import { readAudioMetadata as parseAudioMetadata, type AudioMetadataDeps, type AudioMetadataResult } from "@/workers/audioMetadata"
 import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
 import { probeSource, probeVideo, type ProbeTier, type VideoProbe } from "@filen/shared/videos"
@@ -234,14 +235,11 @@ export type BootResult =
 
 let client: Client | null = null
 
-// Concurrency/bandwidth/I-O-memory-budget knobs the wasm surface only accepts at UnauthClient
-// construction time (verified against the generated .d.ts — Client exposes no live bandwidth
-// setter, unlike the RN uniffi client mobile builds against). Every UnauthClient this worker ever
-// creates (withUnauth, injectClient) reads this one module-level value, so a single
-// setClientConfig call before boot's first login/session-resume is enough to make the persisted
-// Advanced-settings preference (features/settings/lib/transferConfig.ts, read on the main thread
-// since it needs kv access) apply for the whole worker lifetime. A change made while already signed
-// in only takes effect on the next full reload — there is no live setter to call instead.
+// The config every UnauthClient this worker creates (withUnauth, injectClient) is built with: boot's one
+// setClientConfig call, before the first login/session-resume, sets it from the persisted Advanced settings
+// (features/settings/lib/transferConfig.ts, read on the main thread since it needs kv access). A transfer
+// preset changed later reaches the signed-in client through its live setters (applyTransferConfig) and is
+// merged in here for every client built after it.
 let clientConfig: JsClientConfig = {}
 
 // Single instance for this worker's lifetime — the cache-backed search's own handle registry, token
@@ -3554,11 +3552,34 @@ const api = {
 		}
 	},
 	// Called once, by boot.ts (after storage() resolves, before resumeSession()), with the persisted
-	// Advanced-settings transfer and archive config. The settings page only stores a new preference,
-	// which applies at the next page load (see `clientConfig`'s own comment). Synchronous and
-	// side-effect-free otherwise: never touches the live `client`.
+	// Advanced-settings transfer and archive config. Synchronous and side-effect-free otherwise: never
+	// touches the live `client`.
 	setClientConfig(config: JsClientConfig): void {
 		clientConfig = config
+	},
+	// A transfer preset the user just chose: merged into the config later clients are built with, and set
+	// on the signed-in client at once. Transfers already running keep the width they fan out to; their
+	// chunks go through the new limits.
+	async applyTransferConfig(config: TransferClientConfig): Promise<void> {
+		clientConfig = { ...clientConfig, ...config }
+
+		const current = client
+
+		if (current === null) {
+			return
+		}
+
+		const r = await run(async () => {
+			await Promise.all([
+				current.setConcurrency(config.concurrency),
+				current.setRequestRateLimit(config.rateLimitPerSec),
+				current.setFileIoMemoryBudget(BigInt(config.fileIoMemoryBudget))
+			])
+		})
+
+		if (!r.success) {
+			throw r.error
+		}
 	},
 	// This realm's log ring (lib/log.ts), pulled by the page's Logs view and export (features/settings/lib/logs.ts).
 	dumpLogs(): LogEntry[] {
