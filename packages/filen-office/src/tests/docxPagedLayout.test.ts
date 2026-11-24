@@ -318,6 +318,46 @@ describe("paged layout of edits", { timeout: 60_000 }, () => {
 		await expectSaved(edited)
 	})
 
+	it("lays out an autofit table from its start when an edit in a later row changes its grid", async () => {
+		// Cells' preferred widths size an autofit table's grid; rows of three cells over several pages.
+		const cell = (width: number, text: string): string =>
+			`<w:tc><w:tcPr><w:tcW w:w="${String(width)}" w:type="dxa"/></w:tcPr>${para(text)}</w:tc>`
+		const rows = Array.from(
+			{ length: 30 },
+			(_, r) =>
+				`<w:tr><w:trPr><w:cantSplit/></w:trPr>${cell(2000, `first ${String(r)} ${words(4, r)}`)}${cell(2000, `second ${String(r)} ${words(30, r)}`)}${cell(3000, `third ${String(r)} ${words(4, r + 1)}`)}</w:tr>`
+		).join("")
+		const edited = await editedLayout(
+			buildDocx({
+				body: `<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/><w:gridCol w:w="3000"/></w:tblGrid>${rows}</w:tbl>${para(words(10))}<w:sectPr>${PAGE}</w:sectPr>`
+			})
+		)
+		const cellAt = (text: string): number => {
+			const found = paragraphs(edited.session.state.doc, true, 1).find(entry => entry.node.textContent.startsWith(text))
+
+			if (found === undefined) throw new Error(`no ${text}`)
+
+			return found.pos + 1 + text.length
+		}
+
+		expect(edited.layout.pages.length).toBeGreaterThan(3)
+
+		// A keystroke leaves the grid as it was: layout restarts in the table, at the row's page.
+		await edited.edit(edited.session.state.tr.insertText("x", cellAt("first 25 ")))
+		expect(edited.last.restart).toBeGreaterThan(0)
+		await expectSaved(edited)
+
+		// Deleted from its first cell into its second, the row keeps its first and third cells: the third's width
+		// now sizes the second column of every row, those on the pages before it too.
+		const tr = edited.session.state.tr
+
+		await edited.edit(tr.setSelection(TextSelection.create(tr.doc, cellAt("first 25 "), cellAt("second 25 "))).deleteSelection())
+		const cellsOf = (row: number): number => edited.session.state.doc.firstChild?.child(row).childCount ?? 0
+
+		expect(cellsOf(25)).toBe(2)
+		await expectSaved(edited)
+	})
+
 	it("draws the caret in rows of a long table on pages an edit in another row kept", async () => {
 		const { editor } = await pagedEditor(longTableDocument())
 		const session = editor.body.session

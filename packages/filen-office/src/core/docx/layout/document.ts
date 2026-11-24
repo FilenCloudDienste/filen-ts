@@ -51,7 +51,7 @@ import {
 	sectionBreakFlags
 } from "./output"
 import { DecorationTable, RunStyles, borderWidth, type DecorationValue, type FontSource, type RunStyleInfo } from "./styles"
-import { laidRows, sameNumbers, type TableSnapshot } from "./table"
+import { laidRows, sameNumbers, tableGrid, type TableSnapshot } from "./table"
 import { EPSILON, points, twips } from "./units"
 
 export interface LayoutOptions {
@@ -2314,9 +2314,12 @@ class Paginator {
 	// For edits to paragraphs in table cells alone (every dirty block has cells), a later page to restart at
 	// than `page` (the first page showing a changed table, or the one before): the last page opening in the
 	// table before the first row holding a changed paragraph, or the one before the first page that row opens
-	// (it may now fit there). Rows before it lay out as they did. Undefined otherwise.
+	// (it may now fit there). Rows before it lay out as they did, unless the grid the table's cells give changed
+	// (a row's cells came or went, or their widths changed): it is computed once, where the table starts.
+	// Undefined otherwise.
 	cellsRestart(page: number, dirty: readonly DirtyBlock[]): number | undefined {
 		const anchors = this.layout.anchors
+		const engine = this.engine
 		let best = Infinity
 
 		if (dirty.length === 0) return undefined
@@ -2345,6 +2348,7 @@ class Paginator {
 			let at = -1
 			let inTable = false
 			let headers = -1
+			let laid: TableSnapshot | undefined
 
 			for (let index = Math.max(0, page); index < anchors.length; index++) {
 				const anchor = anchors[index]
@@ -2357,7 +2361,11 @@ class Paginator {
 				}
 
 				inTable = true
-				headers = this.snapshots[index]?.flow.table?.headerRows ?? headers
+
+				const table = this.snapshots[index]?.flow.table
+
+				headers = table?.headerRows ?? headers
+				laid ??= table
 
 				if (anchor.row >= first) {
 					if (anchor.row === first) at = index - 1
@@ -2369,6 +2377,18 @@ class Paginator {
 			}
 
 			if (at < 0 || headers < 0 || first < headers) return undefined
+
+			// The grid a restart in the table continues with (every page in it carries the one it started with).
+			if (laid !== undefined) {
+				const props = engine.resolver.table(
+					engine.store.tableLook(part.document, part.tables.tblPr[part.aux[item] ?? -1] ?? -1)
+				).props
+				const grid = tableGrid(engine, part, item, rows, props, laid.gridArea, (from, cell) =>
+					engine.store.cellLook(from.document, from.cells.tcPr[from.aux[cell] ?? -1] ?? -1)
+				)
+
+				if (!sameNumbers(grid, laid.grid)) return undefined
+			}
 
 			best = Math.min(best, at, this.keepFrom(at))
 		}

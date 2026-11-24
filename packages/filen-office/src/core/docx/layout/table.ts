@@ -358,6 +358,8 @@ export interface TableSnapshot {
 	readonly placed: boolean
 	readonly repeated: boolean
 	readonly grid: readonly number[]
+	// The width of the area the grid was computed for (see tableGrid).
+	readonly gridArea: number
 	readonly gridX: readonly number[]
 	readonly left: number
 	readonly width: number
@@ -529,6 +531,129 @@ export function sameNumbers(a: readonly number[], b: readonly number[]): boolean
 	return true
 }
 
+// The widths of the grid columns of table `item` (its rows `laid`, properties `props`) in an area `areaWidth`
+// wide: w:tblGrid, or an autofit table's cells' preferred widths (w:tcW) where they give one, fitted to the
+// table's preferred width. An autofit table is laid out from its cells' preferred widths; its w:tblGrid is only
+// the grid last computed from them (§17.4.53), stale in files from other generators. Per grid column the widest
+// single column cell's, while every cell gives one; cells spanning columns as (column, span, width).
+export function tableGrid(
+	engine: Engine,
+	part: StoryPart,
+	item: number,
+	laid: LaidRows,
+	props: TableFormat["props"],
+	areaWidth: number,
+	cellProps: (part: StoryPart, cell: number) => TableCellProps
+): number[] {
+	const document = part.document
+	const reader = part.reader
+	const grid: number[] = []
+	const tableRow = part.aux[item] ?? -1
+	const tblGrid = part.tables.tblGrid[tableRow] ?? -1
+
+	if (tblGrid >= 0) {
+		for (let child = document.firstChildElement(tblGrid); child >= 0; child = document.nextSiblingElement(child)) {
+			if (document.localName(child) === "gridCol") grid.push(Math.max(0, twips(reader.int(child, Ns.W, "w", 0))))
+		}
+	}
+
+	const wanted = widthPx(props.width, areaWidth)
+	const preferred: number[] = []
+	const spanned: number[] = []
+	const rows = laid.items
+	let usable = props.layout === "autofit"
+	let columns = 0
+
+	for (let k = 0; k < rows.length && k < 32; k++) {
+		const row = rows[k] ?? -1
+		const from = laid.partAt(k)
+		const rowProps = engine.store.rowLook(from.document, from.rows.trPr[from.aux[row] ?? -1] ?? -1)
+		let column = rowProps.gridBefore ?? 0
+
+		for (const cell of cellItems(from, row, engine.view)) {
+			const own = cellProps(from, cell)
+			const span = own.gridSpan ?? 1
+
+			if (usable && column < MAX_TABLE_COLUMNS) {
+				const width = widthPx(own.width, wanted > 0 ? wanted : areaWidth)
+
+				if (width <= 0) usable = false
+				else if (span <= 1) preferred[column] = Math.max(preferred[column] ?? 0, width)
+				else spanned.push(column, span, width)
+			}
+
+			column += span
+		}
+
+		columns = Math.max(columns, column + (rowProps.gridAfter ?? 0))
+	}
+
+	// Spans are bounded each, not together: past the bound a row's cells go without columns of their own.
+	while (grid.length < Math.min(columns, MAX_TABLE_COLUMNS)) grid.push(0)
+
+	if (usable) preferGrid(grid, preferred, spanned, wanted)
+
+	const known = grid.reduce((sum, w) => sum + w, 0)
+	const zero = grid.filter(w => w <= 0).length
+
+	if (zero > 0) {
+		const share = Math.max(0, (wanted > 0 ? wanted : areaWidth) - known) / zero
+
+		for (let c = 0; c < grid.length; c++) if ((grid[c] ?? 0) <= 0) grid[c] = Math.max(share, 8)
+	} else if (
+		wanted > 0 &&
+		known > 0 &&
+		(props.width.type === "pct" || (props.layout === "fixed" && Math.abs(wanted - known) > 1) || wanted > known + 1)
+	) {
+		const scale = wanted / known
+
+		for (let c = 0; c < grid.length; c++) grid[c] = (grid[c] ?? 0) * scale
+	}
+
+	return grid
+}
+
+// Replaces the grid's columns with the cells' preferred widths (see tableGrid) when any differs from it by
+// more than a point: a cell spanning columns gives the columns no single column cell sized their share of what
+// those did not take. `wanted`: the table's preferred width (0 for none).
+function preferGrid(grid: number[], preferred: number[], spanned: readonly number[], wanted: number): void {
+	for (let s = 0; s < spanned.length; s += 3) {
+		const column = spanned[s] ?? 0
+		const end = Math.min(grid.length, column + (spanned[s + 1] ?? 1))
+		let taken = 0
+		let open = 0
+
+		for (let c = column; c < end; c++) {
+			const width = preferred[c]
+
+			if (width === undefined) open++
+			else taken += width
+		}
+
+		const share = open > 0 ? ((spanned[s + 2] ?? 0) - taken) / open : 0
+
+		if (share <= 0) continue
+
+		for (let c = column; c < end; c++) if (preferred[c] === undefined) preferred[c] = share
+	}
+
+	let differs = false
+	let total = 0
+
+	for (let c = 0; c < grid.length; c++) {
+		const width = preferred[c]
+
+		total += width ?? grid[c] ?? 0
+
+		if (width !== undefined && Math.abs(width - (grid[c] ?? 0)) > POINT) differs = true
+	}
+
+	// Cells wider or narrower together than the table's own preferred width are no truer than the grid.
+	if (!differs || (wanted > 0 && Math.abs(total - wanted) > POINT)) return
+
+	for (let c = 0; c < grid.length; c++) grid[c] = preferred[c] ?? grid[c] ?? 0
+}
+
 export class TableLayout {
 	readonly flow: BlockFlow
 	readonly engine: Engine
@@ -548,6 +673,7 @@ export class TableLayout {
 	private readonly floating: FloatingTablePosition | undefined
 	private grid: number[] = []
 	private gridX: number[] = []
+	private gridArea = 0
 	private tableX = 0
 	private tableWidth = 0
 	private headerRows = 0
@@ -614,6 +740,7 @@ export class TableLayout {
 		}
 
 		this.grid = resume.grid as number[]
+		this.gridArea = resume.gridArea
 		this.gridX = resume.gridX as number[]
 		this.tableX = resume.left
 		this.tableWidth = resume.width
@@ -660,6 +787,7 @@ export class TableLayout {
 			placed: this.rowsPlaced > 0,
 			repeated: this.repeatedOn === this.token,
 			grid: this.grid,
+			gridArea: this.gridArea,
 			gridX: this.gridX,
 			left: this.tableX,
 			width: this.tableWidth,
@@ -698,74 +826,11 @@ export class TableLayout {
 	}
 
 	private computeGrid(area: Area): void {
-		const part = this.part
-		const document = part.document
-		const reader = part.reader
-		const grid = this.grid
-		const tableRow = part.aux[this.item] ?? -1
-		const tblGrid = part.tables.tblGrid[tableRow] ?? -1
-
-		if (tblGrid >= 0) {
-			for (let child = document.firstChildElement(tblGrid); child >= 0; child = document.nextSiblingElement(child)) {
-				if (document.localName(child) === "gridCol") grid.push(Math.max(0, twips(reader.int(child, Ns.W, "w", 0))))
-			}
-		}
-
 		const props = this.direct.props
-		const wanted = widthPx(props.width, area.width)
-		// An autofit table is laid out from its cells' preferred widths (w:tcW); its w:tblGrid is only the grid last
-		// computed from them (§17.4.53), stale in files from other generators. Per grid column the widest single
-		// column cell's, while every cell gives one; cells spanning columns as (column, span, width).
-		const preferred: number[] = []
-		const spanned: number[] = []
-		let usable = props.layout === "autofit"
-		let columns = 0
+		const grid = tableGrid(this.engine, this.part, this.item, this.laid, props, area.width, (part, cell) => this.cellProps(part, cell))
 
-		for (let k = 0; k < this.rows.length && k < 32; k++) {
-			const row = this.rows[k] ?? -1
-			const from = this.laid.partAt(k)
-			const rowProps = this.engine.store.rowLook(from.document, from.rows.trPr[from.aux[row] ?? -1] ?? -1)
-			let column = rowProps.gridBefore ?? 0
-
-			for (const cell of this.cellItems(from, row)) {
-				const own = this.cellProps(from, cell)
-				const span = own.gridSpan ?? 1
-
-				if (usable && column < MAX_TABLE_COLUMNS) {
-					const width = widthPx(own.width, wanted > 0 ? wanted : area.width)
-
-					if (width <= 0) usable = false
-					else if (span <= 1) preferred[column] = Math.max(preferred[column] ?? 0, width)
-					else spanned.push(column, span, width)
-				}
-
-				column += span
-			}
-
-			columns = Math.max(columns, column + (rowProps.gridAfter ?? 0))
-		}
-
-		// Spans are bounded each, not together: past the bound a row's cells go without columns of their own.
-		while (grid.length < Math.min(columns, MAX_TABLE_COLUMNS)) grid.push(0)
-
-		if (usable) this.preferGrid(preferred, spanned, wanted)
-
-		const known = grid.reduce((sum, w) => sum + w, 0)
-		const zero = grid.filter(w => w <= 0).length
-
-		if (zero > 0) {
-			const share = Math.max(0, (wanted > 0 ? wanted : area.width) - known) / zero
-
-			for (let c = 0; c < grid.length; c++) if ((grid[c] ?? 0) <= 0) grid[c] = Math.max(share, 8)
-		} else if (
-			wanted > 0 &&
-			known > 0 &&
-			(props.width.type === "pct" || (props.layout === "fixed" && Math.abs(wanted - known) > 1) || wanted > known + 1)
-		) {
-			const scale = wanted / known
-
-			for (let c = 0; c < grid.length; c++) grid[c] = (grid[c] ?? 0) * scale
-		}
+		this.grid = grid
+		this.gridArea = area.width
 
 		let x = 0
 
@@ -811,49 +876,6 @@ export class TableLayout {
 		}
 
 		this.tableX = left
-	}
-
-	// Replaces the grid's columns with the cells' preferred widths (see computeGrid) when any differs from it by
-	// more than a point: a cell spanning columns gives the columns no single column cell sized their share of what
-	// those did not take. `wanted`: the table's preferred width (0 for none).
-	private preferGrid(preferred: number[], spanned: readonly number[], wanted: number): void {
-		const grid = this.grid
-
-		for (let s = 0; s < spanned.length; s += 3) {
-			const column = spanned[s] ?? 0
-			const end = Math.min(grid.length, column + (spanned[s + 1] ?? 1))
-			let taken = 0
-			let open = 0
-
-			for (let c = column; c < end; c++) {
-				const width = preferred[c]
-
-				if (width === undefined) open++
-				else taken += width
-			}
-
-			const share = open > 0 ? ((spanned[s + 2] ?? 0) - taken) / open : 0
-
-			if (share <= 0) continue
-
-			for (let c = column; c < end; c++) if (preferred[c] === undefined) preferred[c] = share
-		}
-
-		let differs = false
-		let total = 0
-
-		for (let c = 0; c < grid.length; c++) {
-			const width = preferred[c]
-
-			total += width ?? grid[c] ?? 0
-
-			if (width !== undefined && Math.abs(width - (grid[c] ?? 0)) > POINT) differs = true
-		}
-
-		// Cells wider or narrower together than the table's own preferred width are no truer than the grid.
-		if (!differs || (wanted > 0 && Math.abs(total - wanted) > POINT)) return
-
-		for (let c = 0; c < grid.length; c++) grid[c] = preferred[c] ?? grid[c] ?? 0
 	}
 
 	// w:tblpPr as Word applies it, when the table floats.
