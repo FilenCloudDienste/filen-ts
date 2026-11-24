@@ -95,7 +95,7 @@ export function DetailHeader({ mode, titleId, title, headingId, eyebrow, onBack,
 	const backdrop = useVideoArt({ titleId, stableUuid: null, slot: "b", title, near: cinematic, element: backdropElement })
 	const text = (
 		<div className={cn("flex min-w-0 flex-1 flex-col gap-1", narrow && "items-center text-center")}>
-			<p className={cn("text-xs font-medium tracking-wide text-muted-foreground uppercase", cinematic && "sr-only")}>{eyebrow}</p>
+			<p className={cn("text-xs font-medium text-muted-foreground", cinematic && "sr-only")}>{eyebrow}</p>
 			<h1
 				id={headingId}
 				title={title}

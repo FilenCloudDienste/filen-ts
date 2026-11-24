@@ -47,7 +47,7 @@ function RadioColumn({
 			aria-label={label}
 			className="flex min-w-0 flex-col gap-0.5"
 		>
-			<p className="px-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
+			<p className="px-2 pb-1 text-xs font-medium text-muted-foreground">{label}</p>
 			{options.map((option, index) => {
 				const checked = option.id === value
 

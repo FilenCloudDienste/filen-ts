@@ -539,7 +539,7 @@ function ChatSectionHeader({
 			aria-controls={listboxId}
 			disabled={disabled}
 			onClick={onToggle}
-			className="flex h-full w-full items-end gap-1 rounded-md px-1 pb-1.5 text-left text-[11px] leading-4 font-semibold tracking-wide text-muted-foreground uppercase focus-ring-row transition-colors outline-none app-region-no-drag enabled:hover:text-foreground"
+			className="flex h-full w-full items-end gap-1 rounded-md px-1 pb-1.5 text-left text-xs leading-4 font-medium text-muted-foreground focus-ring-row transition-colors outline-none app-region-no-drag enabled:hover:text-foreground"
 		>
 			<ChevronDownIcon
 				aria-hidden="true"

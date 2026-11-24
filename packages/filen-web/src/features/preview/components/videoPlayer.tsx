@@ -391,7 +391,7 @@ export function VideoPlayer({
 							type="button"
 							aria-label={t("audio:play")}
 							className={cn(
-								"absolute flex size-16 items-center justify-center rounded-full transition-transform duration-150 outline-none hover:scale-105 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+								"absolute flex size-16 items-center justify-center rounded-full transition-[background-color,scale] duration-150 outline-none hover:bg-black/80 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-97 motion-reduce:transition-none",
 								MEDIA_GLASS_SURFACE_CLASS
 							)}
 							onClick={() => {

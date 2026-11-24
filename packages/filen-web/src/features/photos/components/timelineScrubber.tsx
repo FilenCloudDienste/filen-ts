@@ -174,8 +174,8 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 			})}
 			<div
 				className={cn(
-					"absolute right-[9px] w-[5px] -translate-y-1/2 rounded-full shadow-sm transition-[height,background-color] duration-150",
-					dragging ? "h-8 bg-foreground" : "h-5 bg-foreground/55 group-hover:bg-foreground/80"
+					"absolute right-[9px] h-8 w-[5px] -translate-y-1/2 rounded-full shadow-sm transition-[scale,background-color] duration-150",
+					dragging ? "bg-foreground" : "scale-y-[0.625] bg-foreground/55 group-hover:bg-foreground/80"
 				)}
 				style={{ top: handleY }}
 			/>

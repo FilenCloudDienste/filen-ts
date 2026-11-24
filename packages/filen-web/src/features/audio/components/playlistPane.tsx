@@ -122,7 +122,7 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 					iconClassName="size-12 sm:size-14"
 				/>
 				<div className="flex min-w-0 flex-1 flex-col gap-1">
-					<p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{t("playlistEyebrow")}</p>
+					<p className="text-xs font-medium text-muted-foreground">{t("playlistEyebrow")}</p>
 					<h1
 						id={headingId}
 						title={playlist.name}

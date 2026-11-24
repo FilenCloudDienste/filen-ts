@@ -987,7 +987,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				<div className="flex min-w-0 flex-1 items-baseline gap-1.5">
 					<h1
 						id={titleId}
-						className="min-w-0 truncate text-sm font-semibold"
+						className="min-w-0 truncate text-sm font-medium"
 					>
 						{headerTitle}
 					</h1>

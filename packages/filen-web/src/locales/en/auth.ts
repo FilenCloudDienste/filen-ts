@@ -120,7 +120,7 @@ export const auth = {
 
 	// ── Free-storage eligibility banner (register screen) ───────────────────────
 	/** Register screen — eligibility banner shown when the region/IP IS eligible for the free-storage signup bonus */
-	registerCheckEligible: "You are eligible for 10 GiB of free storage!",
+	registerCheckEligible: "You are eligible for 10 GiB of free storage",
 	/** Register screen — link on the eligibility banner opening the explainer article */
 	registerCheckLearnMore: "Learn more",
 

@@ -91,7 +91,7 @@ export function SkippedSymlinksSection({ pairId, count, lastSyncedAt }: { pairId
 					className="mt-0.5 size-4 shrink-0"
 				/>
 				<span className="flex min-w-0 flex-1 flex-col gap-1">
-					<span className="text-xs font-medium tracking-wider uppercase">{t("skippedSymlinksTitle", { count })}</span>
+					<span className="text-xs font-medium">{t("skippedSymlinksTitle", { count })}</span>
 					<span className="text-sm">{t("skippedSymlinksDescription")}</span>
 				</span>
 				<ChevronRightIcon

@@ -41,7 +41,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 
-const SECTION_HEADING_CLASS = "text-xs font-medium tracking-wide text-muted-foreground uppercase"
+const SECTION_HEADING_CLASS = "text-xs font-medium text-muted-foreground"
 
 interface ChatInfoProps {
 	chat: Chat

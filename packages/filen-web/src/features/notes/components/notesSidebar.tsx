@@ -104,18 +104,14 @@ const TAG_ROW_ESTIMATE = 40
 // so a focused row is never left beneath it.
 const HEADER_ROW_HEIGHT = 32
 
-// A notes-view section header: a small uppercase label. A plain label: the flat row model puts it beside the
+// A notes-view section header: a small muted label. A plain label: the flat row model puts it beside the
 // rows it introduces rather than around them, so it claims no ownership of them. Opaque, since the one for
 // the section in view is pinned over the rows scrolling beneath it (NotesSidebarList).
 function NotesGroupHeader({ row }: { row: Extract<NotesSidebarRow, { kind: "header" }> }) {
 	const { t } = useTranslation("notes")
 	const label = row.label.kind === "key" ? t(row.label.key) : row.label.text
 
-	return (
-		<div className="truncate bg-sidebar px-3 pt-3 pb-1 text-[11px] leading-4 font-medium tracking-wide text-muted-foreground uppercase">
-			{label}
-		</div>
-	)
+	return <div className="truncate bg-sidebar px-3 pt-3 pb-1 text-xs leading-4 font-medium text-muted-foreground">{label}</div>
 }
 
 function segmentClass(active: boolean): string {
@@ -787,7 +783,7 @@ export function NotesSidebar() {
 				className="flex flex-col gap-2 p-3"
 			>
 				<div className="flex items-center justify-between gap-2">
-					<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
+					<h2 className="truncate px-1 text-[15px] font-medium">{t("notesSidebarTitle")}</h2>
 					<div className="flex items-center gap-0.5">
 						<Button
 							variant="ghost"

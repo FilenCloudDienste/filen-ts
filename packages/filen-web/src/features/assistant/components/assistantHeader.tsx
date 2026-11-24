@@ -156,7 +156,7 @@ export function AssistantHeader({ onClose }: { onClose: () => void }) {
 		<div className="flex shrink-0 items-center gap-2 p-3 app-region-drag">
 			<h2
 				id={ASSISTANT_TITLE_ID}
-				className="truncate px-1 text-[15px] font-semibold"
+				className="truncate px-1 text-[15px] font-medium"
 			>
 				{t("assistantTitle")}
 			</h2>

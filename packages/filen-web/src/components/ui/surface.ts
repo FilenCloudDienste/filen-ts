@@ -21,7 +21,7 @@ export const CARD_SURFACE_CLASS = `overflow-hidden rounded-[min(var(--radius-4xl
 
 // Shared by Input and SelectTrigger.
 export const FIELD_CONTROL_CLASS =
-	"rounded-2xl border border-transparent bg-input/50 focus-ring transition-[color,box-shadow] duration-200 outline-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50"
+	"rounded-md border border-transparent bg-input/50 focus-ring transition-[color,box-shadow] duration-200 outline-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50"
 
 export const INVALID_RING_CLASS =
 	"aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"

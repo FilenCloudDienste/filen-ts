@@ -61,9 +61,7 @@ export function MountsOverview() {
 							)
 						)}
 						<section className="flex flex-col gap-2">
-							<h2 className="px-5 text-xs font-medium tracking-wider text-muted-foreground uppercase">
-								{t("mountsServersHeading")}
-							</h2>
+							<h2 className="px-5 text-xs font-medium text-muted-foreground">{t("mountsServersHeading")}</h2>
 							<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
 								{PROTOCOLS.map(protocol => (
 									<ServeTile

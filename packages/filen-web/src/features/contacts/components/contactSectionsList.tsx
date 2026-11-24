@@ -244,7 +244,7 @@ export function ContactSectionsList({
 				{view.heading === null ? null : view.callout ? (
 					<h2 className="truncate border-b px-3 pt-3 pb-2 text-sm font-medium">{view.heading}</h2>
 				) : (
-					<h2 className="truncate px-1 pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">{view.heading}</h2>
+					<h2 className="truncate px-1 pb-2 text-xs font-medium text-muted-foreground">{view.heading}</h2>
 				)}
 				{listbox}
 			</section>

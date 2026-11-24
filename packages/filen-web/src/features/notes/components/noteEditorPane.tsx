@@ -159,7 +159,7 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4 app-region-chrome">
 				<Icon className={`size-5 shrink-0 ${colorClass}`} />
-				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+				<h1 className="min-w-0 flex-1 truncate text-base font-medium">{title}</h1>
 				{viewOnly ? (
 					<span className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
 						<EyeIcon

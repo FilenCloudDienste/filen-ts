@@ -48,7 +48,7 @@ function PathIcon({ relPath, directory }: { relPath: string; directory: boolean 
 }
 
 function SectionLabel({ children }: { children: string }) {
-	return <h2 className="px-4 pt-4 pb-1.5 text-xs font-medium tracking-wider text-muted-foreground uppercase sm:px-6">{children}</h2>
+	return <h2 className="px-4 pt-4 pb-1.5 text-xs font-medium text-muted-foreground sm:px-6">{children}</h2>
 }
 
 // The latest of the transfers the running pass is on (the transfers screen lists them all), with their progress.

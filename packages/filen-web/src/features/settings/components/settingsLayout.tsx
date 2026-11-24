@@ -83,12 +83,7 @@ function SettingsGroup({ title, description, aside, variant, helpId, children }:
 				<div className="flex flex-col gap-1 px-5">
 					{title !== undefined && (
 						<div className="flex items-center justify-between gap-4">
-							<h2
-								className={cn(
-									"text-xs font-medium tracking-wider uppercase",
-									variant === "danger" ? "text-destructive" : "text-muted-foreground"
-								)}
-							>
+							<h2 className={cn("text-xs font-medium", variant === "danger" ? "text-destructive" : "text-muted-foreground")}>
 								{title}
 							</h2>
 							{aside}

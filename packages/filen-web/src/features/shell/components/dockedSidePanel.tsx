@@ -52,7 +52,7 @@ export function SidePanelSurface({
 			<header className="flex h-12 shrink-0 items-center gap-1 pr-2 pl-4">
 				<h2
 					id={controller.titleId}
-					className="min-w-0 flex-1 truncate text-sm font-semibold"
+					className="min-w-0 flex-1 truncate text-sm font-medium"
 				>
 					{title}
 				</h2>

@@ -325,7 +325,7 @@ function ChapterItems({ chapters, media }: { chapters: readonly StageChapter[]; 
 }
 
 // The section headings: AUDIO, SUBTITLES, CHAPTERS.
-const SECTION_LABEL_CLASS = "text-[11px] font-medium tracking-wide uppercase"
+const SECTION_LABEL_CLASS = "text-xs font-medium"
 
 // A menu that goes away while open (its tracks or chapters went with a new probe) still reports itself closed, so the
 // controls it held shown can hide again.

@@ -129,7 +129,7 @@ export function SyncSidebar() {
 		>
 			<div className="flex flex-col gap-2 p-3">
 				<div className="flex items-center justify-between gap-2">
-					<h2 className="truncate px-1 text-[15px] font-semibold">{t("common:moduleSync")}</h2>
+					<h2 className="truncate px-1 text-[15px] font-medium">{t("common:moduleSync")}</h2>
 					<Button
 						variant="ghost"
 						size="icon-sm"

@@ -168,7 +168,7 @@ export function MountsSidebar() {
 			resizeLabel={t("mountsSidebarResize")}
 		>
 			<nav className="flex flex-1 flex-col overflow-y-auto p-3 app-region-pane">
-				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("common:moduleMounts")}</h2>
+				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-medium">{t("common:moduleMounts")}</h2>
 				<HostBanner />
 				<div className="flex flex-col gap-0.5">
 					<Link

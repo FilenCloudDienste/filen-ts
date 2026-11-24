@@ -188,7 +188,7 @@ export function DriveSidebar() {
 			{/* Pinned outside the scroll area. Inside that flex column its `truncate` (overflow: hidden)
 				    zeroes its automatic minimum height, so an overflowing tree squeezes it and the first row
 				    paints over its text. */}
-			<h2 className="shrink-0 truncate px-5.5 pt-4 pb-1.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
+			<h2 className="shrink-0 truncate px-5.5 pt-4 pb-1.5 text-[15px] font-medium">{t("driveMyDrive")}</h2>
 			{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. A stable gutter:
 				    a scrollbar coming and going as levels open would reflow every row. */}
 			<div

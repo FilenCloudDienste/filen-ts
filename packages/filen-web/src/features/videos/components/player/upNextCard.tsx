@@ -99,7 +99,7 @@ export function UpNextCard({
 
 	return (
 		<StageCornerCard label={t("upNextLabel")}>
-			<p className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t("upNextLabel")}</p>
+			<p className="mb-2 text-xs font-medium text-muted-foreground">{t("upNextLabel")}</p>
 			<div className="flex gap-3">
 				<div className="aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-white/10">
 					{still === null ? null : (
