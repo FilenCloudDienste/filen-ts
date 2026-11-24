@@ -13,7 +13,7 @@ import {
 	type PageDisplayList
 } from "@filen/office/core/docx"
 import { FRAGMENT_FLOATS, FRAGMENT_INTS, LINE_FLOATS, LINE_INTS, LineInt } from "@filen/office/core/text"
-import { layOut } from "../layoutFixtures"
+import { LAYOUT_DATE, layOut } from "../layoutFixtures"
 import { pageDigest } from "../pagedFixtures"
 
 // Page digests: the paged fuzz compares what the editor shows with a fresh layout of the saved file, and the
@@ -245,7 +245,7 @@ export function firstDifference(shown: readonly string[], fresh: readonly string
 // A file's page count and a hash of its pages (pagedFixtures' digest), or why it does not lay out.
 export async function viewerDigest(file: string): Promise<string> {
 	try {
-		const pages = pageDigest(await layOut(new Uint8Array(readFileSync(file))))
+		const pages = pageDigest(await layOut(new Uint8Array(readFileSync(file)), { date: LAYOUT_DATE }))
 
 		return `${pages.length}:${createHash("sha1").update(pages.join("\n")).digest("hex")}`
 	} catch (error) {

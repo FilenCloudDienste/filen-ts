@@ -217,6 +217,10 @@ export async function loadDocx(bytes: Uint8Array, settings?: (settings: StyleSet
 	return { model, resolver, store, fonts }
 }
 
+// The time DATE and TIME fields show where two layouts of a document are compared (an editor's and a fresh one
+// of its save, a baseline and a later run): layout otherwise reads the wall clock as it starts.
+export const LAYOUT_DATE = Date.UTC(2026, 0, 1)
+
 export async function layOut(
 	bytes: Uint8Array,
 	options: LayoutOptions = {},

@@ -34,7 +34,7 @@ import { DocxSaveError, saveDocx, writerProof } from "@filen/office/core/docx/wr
 import { HitTester } from "@filen/office/core/text"
 import { writtenJustification } from "../../core/docx/write/paragraph"
 import { SCHEMA_CACHE, transitionalSchemas } from "../../scripts/wmlOrder"
-import { HmtxMeasurer, loadDocx, type LoadedDocx } from "../layoutFixtures"
+import { HmtxMeasurer, LAYOUT_DATE, loadDocx, type LoadedDocx } from "../layoutFixtures"
 import type { FuzzConfig } from "./config"
 import { digestPage } from "./digest"
 
@@ -98,7 +98,11 @@ export async function openPaged(bytes: Uint8Array, mode: PagedMode, view: View):
 		return { refused: `unopenable (${error instanceof Error ? error.message.slice(0, 120) : String(error)})` }
 	}
 
-	const context = await openDocxEditContext(opened.package, loaded.model, { store: loaded.store, resolver: loaded.resolver })
+	const context = await openDocxEditContext(opened.package, loaded.model, {
+		store: loaded.store,
+		resolver: loaded.resolver,
+		clock: () => LAYOUT_DATE
+	})
 
 	if (context.gate.length > 0) return { refused: `view-only (${context.gate.join(", ")})` }
 
@@ -112,6 +116,7 @@ export async function openPaged(bytes: Uint8Array, mode: PagedMode, view: View):
 		store: loaded.store,
 		sliceMs: race ? 2 : Infinity,
 		recordMaps: true,
+		date: LAYOUT_DATE,
 		edits,
 		...revisionView(view),
 		...(race ? { now: () => clock++, yield: () => new Promise<void>(resolve => setImmediate(resolve)) } : {})
@@ -173,14 +178,14 @@ export function shownPages(editor: PagedEditor, source: Uint8Array): string[] {
 	return out
 }
 
-// A fresh layout of `bytes`.
 // A fresh layout of `bytes` in the view the editor shows.
 export async function freshPages(bytes: Uint8Array, editor: PagedEditor): Promise<string[]> {
 	const loaded = await loadDocx(bytes)
 	const layout = layoutDocument(loaded.model, loaded.resolver, loaded.fonts, new HmtxMeasurer(), {
 		sliceMs: Infinity,
 		store: loaded.store,
-		view: editor.view
+		view: editor.view,
+		date: LAYOUT_DATE
 	})
 
 	await layout.done

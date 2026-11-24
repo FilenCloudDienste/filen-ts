@@ -22,7 +22,7 @@ import {
 	LINE_INTS,
 	LineInt
 } from "@filen/office/core/text"
-import { HmtxMeasurer, layOut, loadDocx } from "./layoutFixtures"
+import { HmtxMeasurer, LAYOUT_DATE, layOut, loadDocx } from "./layoutFixtures"
 
 async function partXml(pkg: DocxPackage, kind: string): Promise<XmlDocument | undefined> {
 	const name = pkg.part(kind)
@@ -63,6 +63,7 @@ export async function editedLayout(bytes: Uint8Array): Promise<EditedLayout> {
 		store: loaded.store,
 		sliceMs: Infinity,
 		recordMaps: true,
+		date: LAYOUT_DATE,
 		edits
 	})
 
@@ -224,7 +225,7 @@ function digestPage(layout: DocumentLayout, page: PageDisplayList): string {
 
 // A fresh layout of `bytes` (what was saved), digested.
 export async function savedDigest(bytes: Uint8Array): Promise<string[]> {
-	return pageDigest(await layOut(bytes))
+	return pageDigest(await layOut(bytes, { date: LAYOUT_DATE }))
 }
 
 // A paged editor over a laid-out document, measured with the test fonts' metrics.
@@ -246,6 +247,7 @@ export async function pagedEditor(
 		store: loaded.store,
 		sliceMs: Infinity,
 		recordMaps: true,
+		date: LAYOUT_DATE,
 		edits
 	})
 
