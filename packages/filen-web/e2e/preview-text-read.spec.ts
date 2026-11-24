@@ -114,7 +114,8 @@ test("markdown math renders as MathML and its remote images are never fetched", 
 	await expect(live).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(live.locator("span[role=math]")).toHaveCount(2)
 	await expect(live.getByText("[image: chart] (not loaded)", { exact: true })).toBeVisible()
-	await expect(live.locator("img")).toHaveCount(0)
+	// CodeMirror brackets every inline widget with an empty cm-widgetBuffer img for the cursor; any other img is a loaded image.
+	await expect(live.locator("img:not(.cm-widgetBuffer)")).toHaveCount(0)
 
 	// Read: the rendered page.
 	await dialog.getByRole("button", { name: "Read", exact: true }).click()
