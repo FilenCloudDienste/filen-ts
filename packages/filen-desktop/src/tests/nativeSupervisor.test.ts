@@ -13,6 +13,7 @@ import {
 } from "../main/native/supervisor.ts"
 import type { SessionRead } from "../shared/channels.ts"
 import type { FromNative, ToNative } from "../shared/nativeProtocol.ts"
+import { SPEED } from "./nativeFakes.ts"
 
 const ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
 
@@ -95,6 +96,7 @@ function harness(read: SessionRead = { status: "present", blob: SESSION_OF("1") 
 		dirFor: (userId: string) => Promise.resolve(`/data/sync-engine/${userId}`),
 		holdRemotes: () => Promise.resolve(["7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"]),
 		demand: vi.fn<NativeSupervisorDeps["demand"]>(() => Promise.resolve(true)),
+		speed: vi.fn<NativeSupervisorDeps["speed"]>(() => Promise.resolve(SPEED)),
 		log: { info: vi.fn(), warn: vi.fn() },
 		onMessage: vi.fn<NativeSupervisorDeps["onMessage"]>(),
 		onState: (state: DesktopSyncHostState) => {
@@ -166,7 +168,8 @@ describe("createNativeSupervisor", () => {
 			session: SESSION_OF("1"),
 			logLevel: "Info",
 			holdRemotes: ["7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"],
-			macAddonPath: "/app/native/filen-mac.node"
+			macAddonPath: "/app/native/filen-mac.node",
+			speed: SPEED
 		})
 		expect(supervisor.state()).toEqual({ state: "starting" })
 
@@ -444,6 +447,38 @@ describe("createNativeSupervisor", () => {
 		await settle()
 		supervisor.reconnectSocket()
 		expect(reconnects()).toHaveLength(2)
+	})
+
+	it("sends a speed change to a running host, never starts one for it, and starts the next host with it", async () => {
+		const { supervisor, forks, deps, last } = harness()
+		const changed = { ...SPEED, transfers: { preset: "maximum" as const, uploadKbps: 500, downloadKbps: 0 } }
+		const speeds = () => last().sent.filter(message => message.t === "speed")
+
+		deps.demand.mockResolvedValue(false)
+		supervisor.setSpeed(changed)
+		await settle()
+		expect(forks).toHaveLength(0)
+
+		deps.demand.mockResolvedValue(true)
+		supervisor.ensure("launch")
+		await settle()
+		// Newer than the stored speed the start read.
+		expect(last().sent[0]).toMatchObject({ t: "init", speed: changed })
+
+		const later = { ...changed, sync: { preset: "batterySaver" as const, uploadKbps: 0, downloadKbps: 100 } }
+
+		supervisor.setSpeed(later)
+		expect(speeds()).toEqual([{ t: "speed", speed: later }])
+	})
+
+	it("starts the host with the stored speed", async () => {
+		const { supervisor, deps, last } = harness()
+		const stored = { ...SPEED, sync: { preset: "performance" as const, uploadKbps: 16, downloadKbps: 32 } }
+
+		deps.speed.mockResolvedValue(stored)
+		supervisor.ensure("launch")
+		await settle()
+		expect(last().sent[0]).toMatchObject({ t: "init", speed: stored })
 	})
 
 	it("mounts stats are a topic of their own", async () => {

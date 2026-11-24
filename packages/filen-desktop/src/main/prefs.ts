@@ -1,9 +1,12 @@
 import { type } from "arktype"
-import type { DesktopPrefs } from "@filen/shared/desktop"
+import type { DesktopClientSpeed, DesktopPrefs } from "@filen/shared/desktop"
 import { DEFAULT_DESKTOP_LOCK_AFTER_SECONDS, DESKTOP_LOCK_AFTER_SECONDS } from "@filen/shared/desktopLock"
 import { type AtomicFile, readStoreFile } from "./atomicFile.ts"
-import { absolutePathSchema } from "../shared/nativeProtocol.ts"
+import { DEFAULT_TRANSFER_PERFORMANCE_PRESET } from "@filen/shared/transferPresets"
+import { absolutePathSchema, speedSchema } from "../shared/nativeProtocol.ts"
 import { serialQueue } from "../shared/serial.ts"
+
+const DEFAULT_CLIENT_SPEED: DesktopClientSpeed = { preset: DEFAULT_TRANSFER_PERFORMANCE_PRESET, uploadKbps: 0, downloadKbps: 0 }
 
 export const DEFAULT_PREFS: DesktopPrefs = {
 	minimizeToTray: false,
@@ -15,7 +18,8 @@ export const DEFAULT_PREFS: DesktopPrefs = {
 	syncNotifications: true,
 	// Silent unless the user opts in: notifications carry no sound by default.
 	notificationSound: false,
-	downloadDirectory: null
+	downloadDirectory: null,
+	speed: { sync: DEFAULT_CLIENT_SPEED, transfers: DEFAULT_CLIENT_SPEED }
 }
 
 // What the renderer may send: known fields only, each optional. It may reset the download directory to "ask", never
@@ -30,6 +34,7 @@ export const prefsPatchSchema = type({
 	"syncNotifications?": "boolean",
 	"notificationSound?": "boolean",
 	"downloadDirectory?": "null",
+	"speed?": speedSchema,
 	"+": "reject"
 })
 

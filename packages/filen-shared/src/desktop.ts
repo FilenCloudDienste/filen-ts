@@ -4,6 +4,7 @@
 import type { AssistantGenerateRequest, AssistantGenerateResult } from "./assistant/loop"
 import type { DesktopLockAfterSeconds } from "./desktopLock"
 import type { DesktopShellStringsPayload } from "./desktopShellStrings"
+import type { TransferPerformancePreset } from "./transferPresets"
 
 export type DesktopPlatform = "darwin" | "win32" | "linux"
 
@@ -50,7 +51,8 @@ export interface DesktopSessionVault {
 // `contactNotifications` also keeps the hidden window's page alive, since it owns the socket those come from;
 // `syncNotifications` covers main's own sync and mount alerts. `notificationSound` lets both play the OS sound.
 // `lockAfterSeconds` applies only while a PIN is set. `downloadDirectory`: where downloads go without asking, null to ask
-// every time; only main's own directory picker sets a path.
+// every time; only main's own directory picker sets a path. `speed`: the native host's sync client and its uploads and
+// downloads client, each with its own preset and limits; changes apply to the running host at once.
 export interface DesktopPrefs {
 	minimizeToTray: boolean
 	startMinimized: boolean
@@ -61,7 +63,25 @@ export interface DesktopPrefs {
 	syncNotifications: boolean
 	notificationSound: boolean
 	downloadDirectory: string | null
+	speed: DesktopSpeed
 }
+
+// One SDK client's speed: its preset (concurrency, file-IO budget, request rate) and bandwidth limits in KB/s, 0 for
+// unlimited, at most DESKTOP_SPEED_KBPS_MAX.
+export interface DesktopClientSpeed {
+	preset: TransferPerformancePreset
+	uploadKbps: number
+	downloadKbps: number
+}
+
+// `sync`: the sync engine's client; `transfers`: the drive's uploads and downloads (rclone, which serves the network
+// drive, transfers on its own and is limited by neither).
+export interface DesktopSpeed {
+	sync: DesktopClientSpeed
+	transfers: DesktopClientSpeed
+}
+
+export const DESKTOP_SPEED_KBPS_MAX = 10_000_000
 
 // What the page may change: any pref, except that the download directory can only go back to null (ask every time).
 export type DesktopPrefsPatch = Partial<Omit<DesktopPrefs, "downloadDirectory">> & { downloadDirectory?: null }

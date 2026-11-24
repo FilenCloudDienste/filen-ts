@@ -579,6 +579,7 @@ const nativeSupervisor = createNativeSupervisor({
 			async () => (await mountsStoreFor(userId)).anyEnabled(),
 			() => legacyMounts.wanted(userId)
 		]),
+	speed: async () => (await prefsLoading).get().speed,
 	log: { info, warn },
 	onMessage: (message, userId) => {
 		if (message.t === "transfers") {
@@ -1952,6 +1953,11 @@ if (!instanceLock.held) {
 
 		if (next.lockAfterSeconds !== previous) {
 			lockInactivity.rearm()
+		}
+
+		// The host applies only what changed.
+		if (patch.speed !== undefined) {
+			nativeSupervisor.setSpeed(next.speed)
 		}
 
 		return next

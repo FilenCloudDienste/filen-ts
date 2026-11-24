@@ -33,6 +33,7 @@ import {
 	REMOTE_ROOT,
 	sdkError,
 	sdkErrorValue,
+	SPEED,
 	wasmDir,
 	wasmFile
 } from "./nativeFakes.ts"
@@ -45,7 +46,7 @@ vi.mock("../native/addon.ts", async () => {
 
 	return { loadAddon: () => ({ ...fakes.fakeSdk, ...fakes.fakeTransferSdk }) }
 })
-vi.mock("../native/client.ts", () => ({ clientFromSession: () => hoisted.client }))
+vi.mock("../native/client.ts", () => ({ clientsFromSession: () => ({ sync: {}, transfers: hoisted.client }) }))
 vi.mock("../native/engine.ts", () => ({ openEngine: () => new Promise(() => undefined) }))
 
 const DIR = path.resolve("downloads")
@@ -1045,7 +1046,8 @@ describe("native host", () => {
 			session: "s",
 			logLevel: "Info",
 			holdRemotes: [],
-			macAddonPath: null
+			macAddonPath: null,
+			speed: SPEED
 		})
 		await flush()
 		send({ t: "call", id: 1, op: "transfersStart", args: { specs: [downloadFile()] } })

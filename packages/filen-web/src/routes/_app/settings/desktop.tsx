@@ -10,6 +10,7 @@ import { SettingsGroup, SettingsPage, SettingsRow } from "@/features/settings/co
 import { loadDesktopPrefs, setDesktopPref, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { AppLockSettings } from "@/features/desktop/components/appLockSettings"
 import { DownloadDirectorySettings } from "@/features/desktop/components/downloadDirectorySettings"
+import { SpeedSettings } from "@/features/desktop/components/speedSettings"
 import { collectLogs, formatLogEntries } from "@/features/settings/lib/logs"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -118,6 +119,7 @@ function DesktopPage() {
 			</SettingsGroup>
 			<AppLockSettings />
 			<DownloadDirectorySettings />
+			<SpeedSettings />
 			<SettingsGroup title={t("desktop:settingsLogsTitle")}>
 				<SettingsRow
 					label={t("desktop:settingsLogsExport")}

@@ -61,7 +61,11 @@ describe("parsePrefs", () => {
 			contactNotifications: true,
 			syncNotifications: true,
 			notificationSound: false,
-			downloadDirectory: null
+			downloadDirectory: null,
+			speed: {
+				sync: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 },
+				transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 }
+			}
 		})
 	})
 })
@@ -88,6 +92,37 @@ describe("prefsPatchSchema", () => {
 		expect(prefsPatchSchema({ lockAfterSeconds: 86400 })).toEqual({ lockAfterSeconds: 86400 })
 		expect(prefsPatchSchema({ lockAfterSeconds: 7200 })).toBeInstanceOf(type.errors)
 		expect(prefsPatchSchema({ lockAfterSeconds: "300" })).toBeInstanceOf(type.errors)
+	})
+})
+
+describe("speed", () => {
+	const speed = {
+		sync: { preset: "batterySaver", uploadKbps: 0, downloadKbps: 500 },
+		transfers: { preset: "maximum", uploadKbps: 1000, downloadKbps: 0 }
+	} as const
+
+	it("the page sets both clients' speed, validated", () => {
+		expect(prefsPatchSchema({ speed })).toEqual({ speed })
+		expect(prefsPatchSchema({ speed: { sync: speed.sync } })).toBeInstanceOf(type.errors)
+		expect(prefsPatchSchema({ speed: { ...speed, sync: { ...speed.sync, preset: "turbo" } } })).toBeInstanceOf(type.errors)
+		expect(prefsPatchSchema({ speed: { ...speed, sync: { ...speed.sync, uploadKbps: -5 } } })).toBeInstanceOf(type.errors)
+		expect(prefsPatchSchema({ speed: { ...speed, sync: { ...speed.sync, uploadKbps: 10_000_001 } } })).toBeInstanceOf(type.errors)
+	})
+
+	it("reads a stored speed, and an invalid one as the defaults", () => {
+		expect(parsePrefs(JSON.stringify({ speed }))).toEqual({ ...DEFAULT_PREFS, speed })
+		expect(parsePrefs(JSON.stringify({ speed: { ...speed, transfers: { preset: "maximum" } }, minimizeToTray: true }))).toEqual({
+			...DEFAULT_PREFS,
+			minimizeToTray: true
+		})
+	})
+
+	it("persists a set speed", async () => {
+		const file = memoryFile()
+		const store = await loadPrefs(file, vi.fn())
+
+		await expect(store.set({ speed })).resolves.toEqual({ ...DEFAULT_PREFS, speed })
+		expect(parsePrefs(file.text())).toEqual({ ...DEFAULT_PREFS, speed })
 	})
 })
 

@@ -3,12 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { OpenedEngine } from "../native/engine.ts"
 import { type HostPort, startHost } from "../native/index.ts"
 import type { FromNative } from "../shared/nativeProtocol.ts"
-import { FakeTransferClient, fakeEngine, fakeSdk, sdkError } from "./nativeFakes.ts"
+import { FakeTransferClient, fakeEngine, fakeSdk, sdkError, SPEED } from "./nativeFakes.ts"
 
 // The host's message loop (native/index.ts) on an injected port: its addon, client and engine are controlled here.
 const hoisted = vi.hoisted(() => ({
 	addonFails: false,
 	client: null as unknown,
+	transfersClient: null as unknown,
 	open: (() => new Promise(() => undefined)) as () => Promise<unknown>
 }))
 
@@ -25,7 +26,9 @@ vi.mock("../native/addon.ts", async () => {
 		}
 	}
 })
-vi.mock("../native/client.ts", () => ({ clientFromSession: () => hoisted.client }))
+vi.mock("../native/client.ts", () => ({
+	clientsFromSession: () => (hoisted.client === null ? null : { sync: hoisted.client, transfers: hoisted.transfersClient })
+}))
 vi.mock("../native/engine.ts", () => ({ openEngine: () => hoisted.open() }))
 
 const SESSION = "session-blob-that-must-never-be-logged"
@@ -40,6 +43,7 @@ function init(overrides: Record<string, unknown> = {}) {
 		logLevel: "Info",
 		holdRemotes: [],
 		macAddonPath: null,
+		speed: SPEED,
 		...overrides
 	}
 }
@@ -78,6 +82,7 @@ beforeEach(() => {
 	logged = []
 	hoisted.addonFails = false
 	hoisted.client = new FakeTransferClient()
+	hoisted.transfersClient = new FakeTransferClient()
 	hoisted.open = () => new Promise(() => undefined)
 
 	for (const method of ["log", "error"] as const) {
@@ -90,6 +95,16 @@ beforeEach(() => {
 afterEach(() => {
 	vi.restoreAllMocks()
 })
+
+// A client with the speed setters newer addons have.
+function withSetters<T extends object>(client: T) {
+	return Object.assign(client, {
+		setConcurrency: vi.fn(() => Promise.resolve()),
+		setRequestRateLimit: vi.fn(() => Promise.resolve()),
+		setFileIoMemoryBudget: vi.fn(() => Promise.resolve()),
+		setBandwidthLimits: vi.fn(() => Promise.resolve())
+	})
+}
 
 // An engine that opens with no pairs.
 function opensEngine() {
@@ -156,6 +171,39 @@ describe("native host", () => {
 		await vi.waitFor(() => {
 			expect(host.of("fatal")).toEqual([{ t: "fatal", reason: "session" }])
 		})
+	})
+
+	it("applies a speed change to the client it is for, through its setters, and only what changed", async () => {
+		const sync = withSetters(new FakeTransferClient())
+		const transfers = withSetters(new FakeTransferClient())
+
+		hoisted.client = sync
+		hoisted.transfersClient = transfers
+
+		const host = setup()
+
+		host.send(init())
+		host.send({ t: "speed", speed: { ...SPEED, transfers: { preset: "maximum", uploadKbps: 8, downloadKbps: 2000 } } })
+		await vi.waitFor(() => {
+			expect(transfers.setBandwidthLimits).toHaveBeenCalled()
+		})
+
+		expect(transfers.setConcurrency).toHaveBeenCalledWith(160)
+		expect(transfers.setRequestRateLimit).toHaveBeenCalledWith(640)
+		expect(transfers.setFileIoMemoryBudget).toHaveBeenCalledWith(BigInt(128 * 1_048_604))
+		expect(transfers.setBandwidthLimits).toHaveBeenCalledWith(16, 2000)
+		expect(sync.setConcurrency).not.toHaveBeenCalled()
+		expect(sync.setBandwidthLimits).not.toHaveBeenCalled()
+	})
+
+	it("ignores a speed change before init, and drops a malformed one", () => {
+		const host = setup()
+
+		host.send({ t: "speed", speed: SPEED })
+		host.send({ t: "speed", speed: { ...SPEED, sync: { preset: "turbo", uploadKbps: 0, downloadKbps: 0 } } })
+
+		expect(host.posts).toEqual([])
+		expect(logged).toEqual(["rejected a malformed message"])
 	})
 
 	it("ignores a second init", async () => {

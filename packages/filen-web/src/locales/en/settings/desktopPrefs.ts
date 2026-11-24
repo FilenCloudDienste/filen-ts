@@ -31,6 +31,24 @@ export const settingsDesktopPrefs = {
 	/** Toast: the directory picker for the download location failed */
 	settingsDesktopDownloadChooseFailed: "Couldn't change the download directory",
 
+	// ── Speed ─────────────────────────────────────────────────────────────
+	/** Desktop settings — group title: how fast sync and the drive's uploads and downloads may go */
+	settingsDesktopSpeedTitle: "Speed",
+	/** Desktop settings, Speed group — subheading: the settings for file sync */
+	settingsDesktopSpeedSync: "Sync",
+	/** Desktop settings, Speed group — subheading: the settings for drive uploads and downloads (not sync, not the network drive) */
+	settingsDesktopSpeedTransfers: "Uploads & downloads",
+	/** Desktop settings, Speed group — select label: the performance preset (Battery saver … Maximum) */
+	settingsDesktopSpeedPreset: "Performance",
+	/** Desktop settings, Speed group — input label: the upload bandwidth limit in kilobytes per second */
+	settingsDesktopSpeedUploadLimit: "Upload limit",
+	/** Desktop settings, Speed group — input label: the download bandwidth limit in kilobytes per second */
+	settingsDesktopSpeedDownloadLimit: "Download limit",
+	/** Desktop settings, Speed group — unit after a limit input: kilobytes per second */
+	settingsDesktopSpeedUnit: "KB/s",
+	/** Desktop settings, Speed group — note under the group: a limit of 0 means no limit, and changes take effect immediately */
+	settingsDesktopSpeedNote: "0 = unlimited. Applies at once.",
+
 	// ── App lock: lock after ──────────────────────────────────────────────
 	/** Desktop settings, App lock group — select: how long without use before Filen locks itself */
 	settingsDesktopLockAfter: "Lock after",

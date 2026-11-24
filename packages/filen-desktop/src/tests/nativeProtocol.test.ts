@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { type } from "arktype"
-import type { DesktopMountsError, DesktopMountsStats, DesktopTransferError, DesktopVfsTuning } from "@filen/shared/desktop"
+import {
+	DESKTOP_SPEED_KBPS_MAX,
+	type DesktopMountsError,
+	type DesktopMountsStats,
+	type DesktopTransferError,
+	type DesktopVfsTuning
+} from "@filen/shared/desktop"
+import { SPEED } from "./nativeFakes.ts"
 import {
 	fromNativeSchema,
 	isTransfersOp,
@@ -157,7 +164,8 @@ describe("toNativeSchema", () => {
 				session: "{}",
 				logLevel: "Info",
 				holdRemotes: [UUID],
-				macAddonPath: "/app/native/filen-mac.node"
+				macAddonPath: "/app/native/filen-mac.node",
+				speed: SPEED
 			})
 		).toBe(true)
 		expect(
@@ -168,13 +176,15 @@ describe("toNativeSchema", () => {
 				session: "{}",
 				logLevel: "Info",
 				holdRemotes: [],
-				macAddonPath: null
+				macAddonPath: null,
+				speed: SPEED
 			})
 		).toBe(true)
 		expect(accepts(toNativeSchema, { t: "subscribe", overview: true, mounts: false })).toBe(true)
 		expect(accepts(toNativeSchema, { t: "shutdown" })).toBe(true)
 		expect(accepts(toNativeSchema, { t: "reconnectSocket" })).toBe(true)
 		expect(accepts(toNativeSchema, { t: "reconnectSocket", force: true })).toBe(false)
+		expect(accepts(toNativeSchema, { t: "speed", speed: SPEED })).toBe(true)
 
 		for (const op of Object.keys(NATIVE_OPS) as NativeOp[]) {
 			expect(accepts(toNativeSchema, call(op, ARGS[op])), op).toBe(true)
@@ -204,7 +214,8 @@ describe("toNativeSchema", () => {
 				session: "",
 				logLevel: "Info",
 				holdRemotes: [],
-				macAddonPath: null
+				macAddonPath: null,
+				speed: SPEED
 			})
 		).toBe(false)
 		expect(
@@ -215,7 +226,8 @@ describe("toNativeSchema", () => {
 				session: "{}",
 				logLevel: "Info",
 				holdRemotes: ["/x"],
-				macAddonPath: null
+				macAddonPath: null,
+				speed: SPEED
 			})
 		).toBe(false)
 		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Trace" })).toBe(false)
@@ -230,9 +242,40 @@ describe("toNativeSchema", () => {
 				session: "{}",
 				logLevel: "Info",
 				holdRemotes: [],
-				macAddonPath: ""
+				macAddonPath: "",
+				speed: SPEED
 			})
 		).toBe(false)
+	})
+
+	it("speed takes an offered preset and whole KB/s from 0 to the maximum, both clients, nothing else", () => {
+		const speed = (sync: unknown, transfers: unknown = SPEED.transfers) =>
+			accepts(toNativeSchema, { t: "speed", speed: { sync, transfers } })
+		const client = (overrides: Record<string, unknown>) => ({ ...SPEED.sync, ...overrides })
+
+		expect(speed(client({ preset: "maximum", uploadKbps: DESKTOP_SPEED_KBPS_MAX, downloadKbps: 1 }))).toBe(true)
+		expect(speed(client({ preset: "turbo" }))).toBe(false)
+		expect(speed(client({ uploadKbps: -1 }))).toBe(false)
+		expect(speed(client({ uploadKbps: 1.5 }))).toBe(false)
+		expect(speed(client({ downloadKbps: DESKTOP_SPEED_KBPS_MAX + 1 }))).toBe(false)
+		expect(speed(client({ downloadKbps: "0" }))).toBe(false)
+		expect(speed(client({ extra: 1 }))).toBe(false)
+		expect(accepts(toNativeSchema, { t: "speed", speed: { sync: SPEED.sync } })).toBe(false)
+		expect(accepts(toNativeSchema, { t: "speed", speed: { ...SPEED, mounts: SPEED.sync } })).toBe(false)
+		expect(accepts(toNativeSchema, { t: "speed", speed: SPEED, extra: 1 })).toBe(false)
+
+		const { speed: _omitted, ...withoutSpeed } = {
+			t: "init",
+			addonPath: "/a",
+			dir: "/d",
+			session: "{}",
+			logLevel: "Info",
+			holdRemotes: [],
+			macAddonPath: null,
+			speed: SPEED
+		}
+
+		expect(accepts(toNativeSchema, withoutSpeed)).toBe(false)
 	})
 
 	it("relPath rejects NUL and > 4096", () => {

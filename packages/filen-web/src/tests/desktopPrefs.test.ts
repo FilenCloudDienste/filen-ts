@@ -15,7 +15,11 @@ const PREFS: DesktopPrefs = {
 	contactNotifications: true,
 	syncNotifications: true,
 	notificationSound: true,
-	downloadDirectory: null
+	downloadDirectory: null,
+	speed: {
+		sync: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 },
+		transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 }
+	}
 }
 
 const prefs = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }))
@@ -25,6 +29,7 @@ vi.mock("@/lib/desktop", () => ({ desktopBridge: () => ({ prefs, transfers }) })
 
 const { loadDesktopPrefs, setDesktopPref, useDesktopPrefs } = await import("@/features/desktop/lib/prefs")
 const { DownloadDirectorySettings } = await import("@/features/desktop/components/downloadDirectorySettings")
+const { SpeedSettings } = await import("@/features/desktop/components/speedSettings")
 
 afterEach(() => {
 	cleanup()
@@ -116,5 +121,55 @@ describe("download directory row", () => {
 		})
 		expect(useDesktopPrefs.getState().prefs?.downloadDirectory).toBe("/Users/me/Downloads")
 		expect(screen.getByText("/Users/me/Downloads")).toBeTruthy()
+	})
+})
+
+describe("speed group", () => {
+	function renderGroup() {
+		useDesktopPrefs.setState({ prefs: PREFS })
+		prefs.set.mockReset()
+		render(createElement(SpeedSettings))
+	}
+
+	it("shows both clients with their preset and limits, and the note", () => {
+		renderGroup()
+
+		expect(screen.getByText("Sync")).toBeTruthy()
+		expect(screen.getByText("Uploads & downloads")).toBeTruthy()
+		expect(screen.getAllByText("Performance")).toHaveLength(2)
+		expect(screen.getAllByText("KB/s")).toHaveLength(4)
+		expect(screen.getByText("0 = unlimited. Applies at once.")).toBeTruthy()
+		expect((document.getElementById("desktop-speed-transfers-upload") as HTMLInputElement).value).toBe("0")
+	})
+
+	it("stores a limit for its own client on Enter, the other client unchanged", async () => {
+		renderGroup()
+		prefs.set.mockImplementation((patch: Partial<DesktopPrefs>) => Promise.resolve({ ...PREFS, ...patch }))
+
+		const input = document.getElementById("desktop-speed-transfers-download") as HTMLInputElement
+
+		fireEvent.change(input, { target: { value: "2500" } })
+		fireEvent.keyDown(input, { key: "Enter" })
+
+		await waitFor(() => {
+			expect(useDesktopPrefs.getState().prefs?.speed.transfers.downloadKbps).toBe(2500)
+		})
+		expect(prefs.set).toHaveBeenCalledWith({
+			speed: { sync: PREFS.speed.sync, transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 2500 } }
+		})
+	})
+
+	it("stores nothing for a value that is no whole number in range, and shows the stored one again", () => {
+		renderGroup()
+
+		const input = document.getElementById("desktop-speed-sync-upload") as HTMLInputElement
+
+		for (const value of ["-1", "1.5", "abc", "10000001", "", "0"]) {
+			fireEvent.change(input, { target: { value } })
+			fireEvent.blur(input)
+		}
+
+		expect(prefs.set).not.toHaveBeenCalled()
+		expect(input.value).toBe("0")
 	})
 })

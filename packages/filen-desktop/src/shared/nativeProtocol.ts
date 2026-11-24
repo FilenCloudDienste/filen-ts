@@ -1,38 +1,42 @@
 import { type, type Type } from "arktype"
 import path from "node:path"
-import type {
-	DesktopMountsError,
-	DesktopMountsErrorCode,
-	DesktopMountsRole,
-	DesktopMountsRoleState,
-	DesktopMountsStats,
-	DesktopSdkRef,
-	DesktopServeProtocol,
-	DesktopSyncActivity,
-	DesktopSyncActivityKind,
-	DesktopSyncConflict,
-	DesktopSyncConflictResolved,
-	DesktopSyncError,
-	DesktopSyncErrorCode,
-	DesktopSyncHeldConflict,
-	DesktopSyncHeldDeletions,
-	DesktopSyncHeldReason,
-	DesktopSyncIgnored,
-	DesktopSyncIssueCounts,
-	DesktopSyncMode,
-	DesktopSyncPlanAction,
-	DesktopSyncPlanList,
-	DesktopSyncPlanPage,
-	DesktopSyncPlanSummary,
-	DesktopSyncResolution,
-	DesktopSyncScanGap,
-	DesktopSyncSkippedSymlink,
-	DesktopSyncStage,
-	DesktopSyncTransfer,
-	DesktopSyncUnsyncable,
-	DesktopTransferError,
-	DesktopVfsTuning
+import {
+	DESKTOP_SPEED_KBPS_MAX,
+	type DesktopMountsError,
+	type DesktopMountsErrorCode,
+	type DesktopMountsRole,
+	type DesktopMountsRoleState,
+	type DesktopMountsStats,
+	type DesktopSdkRef,
+	type DesktopServeProtocol,
+	type DesktopSyncActivity,
+	type DesktopSyncActivityKind,
+	type DesktopSyncConflict,
+	type DesktopSyncConflictResolved,
+	type DesktopSyncError,
+	type DesktopSyncErrorCode,
+	type DesktopSyncHeldConflict,
+	type DesktopSyncHeldDeletions,
+	type DesktopSyncHeldReason,
+	type DesktopSyncIgnored,
+	type DesktopSyncIssueCounts,
+	type DesktopSyncMode,
+	type DesktopSyncPlanAction,
+	type DesktopSyncPlanList,
+	type DesktopSyncPlanPage,
+	type DesktopSyncPlanSummary,
+	type DesktopSyncResolution,
+	type DesktopSyncScanGap,
+	type DesktopSyncSkippedSymlink,
+	type DesktopSyncStage,
+	type DesktopSyncTransfer,
+	type DesktopSyncUnsyncable,
+	type DesktopClientSpeed,
+	type DesktopSpeed,
+	type DesktopTransferError,
+	type DesktopVfsTuning
 } from "@filen/shared/desktop"
+import { TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared/transferPresets"
 import { SESSION_BLOB_MAX_LENGTH, TRANSFER_ITEMS_MAX } from "./channels.ts"
 
 // The messages between main and the native host (the utility process that owns the sync engine), validated on both
@@ -848,6 +852,20 @@ const opSchema = type.enumerated(...(Object.keys(NATIVE_OPS) as NativeOp[]))
 
 export const callIdSchema = countSchema
 
+const kbpsSchema = type.number.divisibleBy(1).atLeast(0).atMost(DESKTOP_SPEED_KBPS_MAX)
+
+const clientSpeedSchema = pinned<DesktopClientSpeed>()(
+	type({
+		preset: type.enumerated(...TRANSFER_PERFORMANCE_PRESETS),
+		uploadKbps: kbpsSchema,
+		downloadKbps: kbpsSchema,
+		"+": "reject"
+	})
+)
+
+// Both clients' speed, as main stores it and the host applies it.
+export const speedSchema = pinned<DesktopSpeed>()(type({ sync: clientSpeedSchema, transfers: clientSpeedSchema, "+": "reject" }))
+
 export interface NativeInit {
 	t: "init"
 	addonPath: string
@@ -860,14 +878,21 @@ export interface NativeInit {
 	holdRemotes: string[]
 	// filen-mac.node on macOS (it quarantines downloads); null elsewhere and when the build has none.
 	macAddonPath: string | null
+	// What both clients are built with; later changes come as `speed`.
+	speed: DesktopSpeed
 }
 
 export type NativeCall = { [K in NativeOp]: { t: "call"; id: number; op: K; args: NativeOpArgs<K> } }[NativeOp]
 
 // `overview`: the sync runtime; `mounts`: mounts stats at 1 Hz. `reconnectSocket`: the network may be back, so the
-// client's socket cuts a reconnect backoff short; no reply.
+// client's socket cuts a reconnect backoff short; no reply. `speed`: the user changed the clients' speed, applied live.
 export type ToNative =
-	NativeInit | NativeCall | { t: "subscribe"; overview: boolean; mounts: boolean } | { t: "reconnectSocket" } | { t: "shutdown" }
+	| NativeInit
+	| NativeCall
+	| { t: "subscribe"; overview: boolean; mounts: boolean }
+	| { t: "reconnectSocket" }
+	| { t: "speed"; speed: DesktopSpeed }
+	| { t: "shutdown" }
 
 const initSchema = pinned<NativeInit>()(
 	type({
@@ -878,6 +903,7 @@ const initSchema = pinned<NativeInit>()(
 		logLevel: "'Info' | 'Debug'",
 		holdRemotes: type("string.uuid").array(),
 		macAddonPath: localPathSchema.or("null"),
+		speed: speedSchema,
 		"+": "reject"
 	})
 )
@@ -892,6 +918,7 @@ export const toNativeSchema = initSchema
 	.or(callSchema)
 	.or({ t: "'subscribe'", overview: "boolean", mounts: "boolean", "+": "reject" })
 	.or({ t: "'reconnectSocket'", "+": "reject" })
+	.or({ t: "'speed'", speed: speedSchema, "+": "reject" })
 	.or({ t: "'shutdown'", "+": "reject" })
 	.as<ToNative>()
 

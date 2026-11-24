@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline"
 import { type } from "arktype"
-import type { DesktopSyncHostState } from "@filen/shared/desktop"
+import type { DesktopSpeed, DesktopSyncHostState } from "@filen/shared/desktop"
 import { parseSessionBlob } from "@filen/shared/session"
 import type { SessionRead } from "../../shared/channels.ts"
 import {
@@ -71,6 +71,8 @@ export interface NativeSupervisorDeps {
 	holdRemotes(userId: string): Promise<string[]>
 	// The user has work for the host: sync pairs or mounts, or old ones waiting to be imported.
 	demand(userId: string): Promise<boolean>
+	// The stored speed of the host's clients, read for each start.
+	speed(): Promise<DesktopSpeed>
 	log: { info(message: string): void; warn(message: string): void }
 	onMessage(message: NativeEvent, userId: string): void
 	onState(state: DesktopSyncHostState): void
@@ -106,6 +108,9 @@ export interface NativeSupervisor {
 	// The network may be back (a wake from sleep, the page going online): a running host's socket cuts a reconnect
 	// backoff short. Never starts a host.
 	reconnectSocket(): void
+	// The user changed the clients' speed: a running host applies it at once, a later start is built with it. Never
+	// starts a host.
+	setSpeed(speed: DesktopSpeed): void
 	// After a failure: start again from a clean slate.
 	retry(): void
 	// The signed-in user, from the vault; null when signed out or unreadable.
@@ -162,6 +167,8 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 	let retryTimer: NodeJS.Timeout | undefined
 	let idleTimer: NodeJS.Timeout | undefined
 	let sessionTimer: NodeJS.Timeout | undefined
+	// The last speed set, newer than a stored one a start read before it.
+	let latestSpeed: DesktopSpeed | null = null
 	const readyWaiters = new Set<(ready: boolean) => void>()
 
 	function setState(next: DesktopSyncHostState): void {
@@ -342,11 +349,13 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 
 		let dir: string
 		let holdRemotes: string[]
+		let storedSpeed: DesktopSpeed
 
 		try {
 			dir = await deps.dirFor(user.userId)
 			holdRemotes = await deps.holdRemotes(user.userId)
 			await deps.forkReady()
+			storedSpeed = await deps.speed()
 		} catch (error) {
 			deps.log.warn(`native: engine directory or pair store unavailable: ${errorCode(error)}`)
 			crashed(null)
@@ -390,7 +399,16 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		proc.on("exit", code => {
 			onExit(child, code)
 		})
-		send(child, { t: "init", addonPath, dir, session: blob, logLevel: "Info", holdRemotes, macAddonPath: deps.macAddonPath() })
+		send(child, {
+			t: "init",
+			addonPath,
+			dir,
+			session: blob,
+			logLevel: "Info",
+			holdRemotes,
+			macAddonPath: deps.macAddonPath(),
+			speed: latestSpeed ?? storedSpeed
+		})
 	}
 
 	function pipeLines(stream: NodeJS.ReadableStream | null, write: (message: string) => void): void {
@@ -648,6 +666,14 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		reconnectSocket: () => {
 			if (current?.ready === true && !current.revoked) {
 				send(current, { t: "reconnectSocket" })
+			}
+		},
+		setSpeed: speed => {
+			latestSpeed = speed
+
+			// The host applies it whenever its clients exist; init, sent first, builds them.
+			if (current !== null) {
+				send(current, { t: "speed", speed })
 			}
 		},
 		retry: () => {

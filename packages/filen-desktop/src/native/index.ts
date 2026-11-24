@@ -21,7 +21,7 @@ import {
 } from "../shared/nativeProtocol.ts"
 import type { JsClient } from "@filen/sdk-rs"
 import { loadAddon, type NativeSdk, type SyncEngine } from "./addon.ts"
-import { clientFromSession } from "./client.ts"
+import { clientsFromSession } from "./client.ts"
 import { createConvergence } from "./convergence.ts"
 import { openEngine } from "./engine.ts"
 import { classify } from "./errors.ts"
@@ -33,6 +33,7 @@ import { createPlanRegistry } from "./plans.ts"
 import { createRuntimeFeed, type RuntimeFeed } from "./reducer.ts"
 import { createQuarantine, type MacAddon, type Quarantine } from "./quarantine.ts"
 import { closeWithin } from "./shutdown.ts"
+import { createSpeedApplier, type SpeedApplier } from "./speed.ts"
 import { classifyTransfer } from "./transferErrors.ts"
 import {
 	createTransferRegistry,
@@ -43,8 +44,9 @@ import {
 	type TransferSdk
 } from "./transfers.ts"
 
-// The native host: a utility process that owns the account's one SDK client and sync engine and runs every engine call
-// main asks for. Everything crossing to main is validated there; what comes in is validated here.
+// The native host: a utility process that owns the account's two SDK clients (sync; drive transfers and rclone, each
+// with its own speed) and its sync engine, and runs every engine call main asks for. Everything crossing to main is
+// validated there; what comes in is validated here.
 
 // How long a shutdown waits for the engine to close (a transfer in flight finishes first, then the account's
 // drive-write lock is released, else it blocks other devices until it expires) and rclone to stop; main kills at 25 s.
@@ -114,7 +116,9 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	let feed: RuntimeFeed | null = null
 	let engine: SyncEngine | null = null
 	let host: HostEngine | null = null
+	// The sync engine's client: the cache, the engine and the socket.
 	let client: JsClient | null = null
+	let speed: SpeedApplier | null = null
 	// The engine open in flight, to the engine it opens: a shutdown waits for it, so an engine that opens late is closed.
 	let opening: Promise<SyncEngine | null> | null = null
 	let mounts: MountsHost | null = null
@@ -191,17 +195,20 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		sdk = addon
 
-		const sessionClient = clientFromSession(addon, message.session, message.logLevel)
+		const clients = clientsFromSession(addon, message.session, message.logLevel, message.speed)
 
-		if (sessionClient === null) {
+		if (clients === null) {
 			fatal("session")
 
 			return
 		}
 
-		client = sessionClient
+		const sessionClient = clients.sync
 
-		const bindings = transferBindings(addon, sessionClient)
+		client = sessionClient
+		speed = createSpeedApplier(clients, message.speed, log)
+
+		const bindings = transferBindings(addon, clients.transfers)
 
 		if (bindings === null) {
 			log.warn("the addon has no transfer exports: transfers are unavailable")
@@ -222,7 +229,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		mounts = createMountsHost({
 			sdk: addon,
-			client: sessionClient,
+			client: clients.transfers,
 			platform: process.platform,
 			userAgent: USER_AGENT,
 			verifyBinary: createBinaryCheck({
@@ -475,6 +482,11 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 				return
 			case "reconnectSocket":
 				reconnectSocket()
+
+				return
+			// Before init built the clients there is nothing to apply it to: main sends it only after init.
+			case "speed":
+				void speed?.apply(message.speed)
 
 				return
 			case "shutdown":
