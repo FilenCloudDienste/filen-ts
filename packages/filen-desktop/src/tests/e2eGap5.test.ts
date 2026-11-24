@@ -674,7 +674,7 @@ describe("e2e workflow: the gap-5 checks", () => {
 	it("keeps the chain's budget below its step's timeout, and both chains below the job's", () => {
 		const budget = Number(/E2E_CHAIN_BUDGET_MINUTES: (\d+)/.exec(step)?.[1])
 		const timeout = Number(/timeout-minutes: (\d+)/.exec(step)?.[1])
-		const legacy = text.slice(text.indexOf("- name: 3.0.54 -> N, signed in"))
+		const legacy = text.slice(text.indexOf("- name: 3.0.55 -> N, signed in"))
 		const legacyTimeout = Number(/timeout-minutes: (\d+)/.exec(legacy)?.[1])
 
 		expect(budget).toBeLessThan(timeout)

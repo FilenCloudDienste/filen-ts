@@ -16,14 +16,14 @@ import { pidsOf } from "./common.ts"
 
 // Gap 1 in chain L (scripts/ci/e2e/chains/legacy.ts): what older 3.x clients left behind, and chain L run from one.
 //
-// From 3.0.54 (free coverage, no extra run): two shapes clients before 3.0.39 stored are planted among the five pairs.
+// From 3.0.55 (free coverage, no extra run): two shapes clients before 3.0.39 stored are planted among the five pairs.
 // One pair has neither `excludeDotFiles` nor `localTrashDisabled` (the old engine read both by truthiness: both off),
 // and the sync config sits in desktopConfig only, without the account's entry in the per-user map (the old web fell
 // back to desktopConfig then; 4.x's effectiveConfig and the stash's fallback). Another account's pair in that map
 // must not come along (the fallback belongs to the account that was signed in).
 //
 // From 3.0.47 (scripts/ci/legacy.ts OLDER_PIN): L1-L10, L13 and L15-L17 with its inventory; L11, L12, L14 and the
-// profile wipe test N alone, which chain L does from 3.0.54, and are recorded as not run. 3.0.47's web (0.1.87) turns
+// profile wipe test N alone, which chain L does from 3.0.55, and are recorded as not run. 3.0.47's web (0.1.87) turns
 // the network drive off when it fails to start, so where it cannot mount N must import it off. On macOS its start waits
 // on FUSE-T's administrator prompt instead, a known 3.0.47 limitation (FUSE_T_PROMPT_ISSUE): the drive stays on.
 // Its @filen/sync (0.1.101) leaves 0-byte files out (LegacyPin.syncsEmptyFiles): it converges without each pair's empty
@@ -42,7 +42,7 @@ export function sdkConfigShapeOf(pin: LegacyPin): readonly string[] {
 	return pin === OLDER_PIN ? OLDER_SDK_CONFIG_SHAPE : LEGACY_SDK_CONFIG_SHAPE
 }
 
-// Checks that test N only and run in chain L from 3.0.54 (name prefixes).
+// Checks that test N only and run in chain L from 3.0.55 (name prefixes).
 export const OLDER_SKIPPED: readonly string[] = [
 	"L11 ",
 	"L12 ",
@@ -52,7 +52,7 @@ export const OLDER_SKIPPED: readonly string[] = [
 	"L15 old profile entries"
 ]
 
-// The chain's findings for a pin: from 3.0.54 as they are; from an older release the skipped checks recorded as
+// The chain's findings for a pin: from 3.0.55 as they are; from an older release the skipped checks recorded as
 // information, and the attachments chain L names "legacy-..." under the chain's own name (both chains can share a job's
 // artifacts).
 export function findingsFor(findings: Findings, pin: LegacyPin, name: string): Findings {
@@ -80,7 +80,7 @@ export function findingsFor(findings: Findings, pin: LegacyPin, name: string): F
 	}
 }
 
-// The planted shapes (from 3.0.54 only): the bare pair, the sync config in desktopConfig only, and another account's
+// The planted shapes (from 3.0.55 only): the bare pair, the sync config in desktopConfig only, and another account's
 // pair in the map. That account is any id but this one.
 export function plantedShape(pairs: readonly LegacySyncPair[], userId: bigint, localDir: string, cloudDir: string): LegacyOldShape {
 	const bare = pairs.find(pair => pair.name === BARE_PAIR) ?? fail(`no pair ${BARE_PAIR}`)
@@ -207,7 +207,7 @@ export const FUSE_T_PROMPT_ISSUE =
 
 // 3.0.47's drive once its start settled: mounted, or turned off by its web (where it cannot mount, that is the
 // expected outcome, a check). Waits at most `timeoutMs`; neither by then is the outcome too (its start still hangs:
-// the drive stays configured, as 3.0.54's does where it cannot mount, and N gets it on); on macOS that hang is
+// the drive stays configured, as 3.0.55's does where it cannot mount, and N gets it on); on macOS that hang is
 // FUSE_T_PROMPT_ISSUE, recorded as known.
 export async function olderDrive(
 	page: Pick<Page, "evaluate">,

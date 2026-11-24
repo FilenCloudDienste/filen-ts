@@ -1,28 +1,28 @@
 // The last 3.x release, which every installed client runs before it updates to 4.x. Its installers come from the old
-// repository's GitHub release (the same files cdn.filen.io serves as the 3.0.54 feed); the sha512 values are copied
+// repository's GitHub release (the same files cdn.filen.io serves as the 3.0.55 feed); the sha512 values are copied
 // from that release's latest*.yml, so a replaced or corrupted download fails instead of being tested.
 //
-// 3.0.54 carries its own CI hook (filen-desktop src/lib/updater.ts): FILEN_E2E_UPDATER=1 with a loopback
+// 3.0.55 carries its own CI hook (filen-desktop src/lib/updater.ts): FILEN_E2E_UPDATER=1 with a loopback
 // FILEN_E2E_UPDATE_FEED makes it check that feed right after start and install a downloaded update without the user's
 // click, once per FILEN_E2E_ONCE_FILE. Its log is <appData>/@filen/logs/desktop.log.
 
-export const LEGACY_VERSION = "3.0.54"
-export const LEGACY_RELEASE_URL = "https://github.com/FilenCloudDienste/filen-desktop/releases/download/v3.0.54/"
+export const LEGACY_VERSION = "3.0.55"
+export const LEGACY_RELEASE_URL = "https://github.com/FilenCloudDienste/filen-desktop/releases/download/v3.0.55/"
 export const LEGACY_E2E_BANNER = "Updater E2E mode enabled"
 
 export const LEGACY_SHA512: Readonly<Record<string, string>> = {
-	"Filen_win.exe": "CBeEG9y2HKaOPhN6YCH4Ki4UXEZjSBuHd3vAFRqnftvWo4C8aMFdJFnG+hJAt/CthJz5y9glRzjbJNyG9dcg8A==",
-	"Filen_mac_x64.dmg": "OvBSEX/KEdIzBYNEX5pw5/qM/5TCljqlxhtpgR0L4KmOWJGgaJx7edyt9n2Cva79OpgswiD+MmDqq2cw2GU1PQ==",
-	"Filen_mac_arm64.dmg": "t58Go8q9Gq3cjvz3dnS9/Bqs7pTe0A/ilmbaS7fZcsWhNvikSY51LAtaR01t7K+hAm6RE2aSM4eAmnjLazoEyg==",
-	"Filen_linux_x86_64.AppImage": "chkLB2jciwaN/4iglA50M/h713NAK/cf7S3Ba2pOjvq2ZFSrsPRuSTrDLe4mRRFBI7R1/e64pyr1eVLr5YTnkw==",
-	"Filen_linux_arm64.AppImage": "7vRqBxFhKmAdtWhwdYkV7HDT8SBaB5l5NGxov6NIgbSB3kS2tL7bw21gVBesLEFcjqch1ZmahGKxOK2QmOGMfw==",
-	"Filen_linux_amd64.deb": "Jjq48AmDydWF8ubxwUMzVnxNHwMD/DwaMWKZP0D9NsuhfmUSM11WweofJFDRZ/dFWLpLZ9Fn0gHGMMPZE6ZwQw==",
-	"Filen_linux_arm64.deb": "lVJCDQWw7uhsxy1BoKNAB4aK7nVAr3fKHflAYOwFG6LBT3ZkDwXg5p6lM6QyHooZtCNSBf8S+Qu40MoUvmjURw==",
-	"Filen_linux_x86_64.rpm": "apk9JRkDZernKbz0KnK0WLFBPTURBLYzvN6C11ifHXQbPdDTZEMAtd6Yw/GW3EddDc0JahmcM/lWu2qFGD5hxg==",
-	"Filen_linux_aarch64.rpm": "JfxTdvTECs0r6RNCKhn8Ut2Wt8fOOpJhKpvlePmgaqPC4fVwAm7qZtEPsC7/0aswiASPXGptpeK39ywRvEm2Ow=="
+	"Filen_win.exe": "4+ZqAO1V8NwSO1QBhufz7QHlL36rrPGfW9IDI2lKGzREl+cyhNiGwAfxJR1KnnaDiVT+izJX6B6mWDAa0aF6oQ==",
+	"Filen_mac_x64.dmg": "EbzbGYh+lGVtLWqlTv3BovF5y8vrEYOn4oGRBDxoIM2dXrnjqKgfRzSsk8s1tfInq4iHusOsHqOkJixJAGab7w==",
+	"Filen_mac_arm64.dmg": "xgzSB3mvALzjFeXKMq0XTvgrwnPttCAYIEtdQrvOg3USh8wgzX2Md7MeRZIs0r6KuJ7NBe39d4H7XFIYxAAbhA==",
+	"Filen_linux_x86_64.AppImage": "5vjvWNuAaMPH2x6c9LjxK7HigK0VqmUrJaLUeYEYtyq81RITOsPhbkE9SodHzA5xRya1uiejuNa90tVryuBVOw==",
+	"Filen_linux_arm64.AppImage": "GdeiGKBNF/S6kslhOL6CUFDpvgzLjwvMwyVl7NjRsjfcmCOkL89tf8kiki4KIVGmuY3gSpYx09swhaJjd4Mjug==",
+	"Filen_linux_amd64.deb": "jany3OyURry+1RQeyCRh9ovufbMU0HA+mzbnZs7VGPWKLBIKFn+sqwSufc0SdCD7HvEzFa42W++orI0rk3XyNA==",
+	"Filen_linux_arm64.deb": "FOuq1OSXDFKESDtQ2/s3z62Ch71OGjRDiRofMN7HUsUfV0DBl3WDK4/RHIMNFf+n8jG425wWCz8RbkAvX4aCXw==",
+	"Filen_linux_x86_64.rpm": "fI+rZ5Iu3s3AZyBF47a+SRlsQJU+CrBq6bwQIOnJpVTSZvO9IC1IvD7vnPgAkm3ylZD2B9HsiaoPiH1QU8uKOQ==",
+	"Filen_linux_aarch64.rpm": "ZF15bnKudTh59f56z2DSoNOmqVRk43gkySt/py4o7H7KDW1k8GV7ZAu9gx/tL7D4oqwoT13ingnlLelE1UQQcw=="
 }
 
-// Every old release the e2e tests install, by scenario: chain L's 3.0.54, and 3.0.47 (gap 1), an older 3.x that still
+// Every old release the e2e tests install, by scenario: chain L's 3.0.55, and 3.0.47 (gap 1), an older 3.x that still
 // updates straight to 4.x (the feed has no channel). Each is pinned the same way: its old repository's release, the
 // installers' sha512 from that release's latest*.yml. What differs between them is what the harness has to make up
 // for: 3.0.47 has no E2E hook (its update launch gets one through its Node inspector, scripts/ci/e2e/legacyHook.ts),
@@ -47,7 +47,7 @@ export interface LegacyPin {
 	// Its sync carries 0-byte files. @filen/sync before 0.3.1 (3.0.47 ships 0.1.101) leaves them out of both trees
 	// (ignored, reason "empty"), so they stay on the side they were made on.
 	syncsEmptyFiles: boolean
-	// How a user quits it. 3.0.54's tray Exit runs app.quit(), whose before-quit lets the window close and will-quit
+	// How a user quits it. 3.0.55's tray Exit runs app.quit(), whose before-quit lets the window close and will-quit
 	// stops the sync worker and rclone. 3.0.47 cancels app.quit() while minimize to tray is on (its window's close
 	// handler minimizes instead and nothing marks the quit), and every quit it offers (the tray's Exit, the last window
 	// closing) is app.exit(0), which ends the worker with the process; rclone's monitor follows the process out (not on
@@ -73,7 +73,7 @@ export type LegacyQuit = "app.quit()" | "app.exit(0)"
 
 export const LEGACY_PIN: LegacyPin = {
 	version: LEGACY_VERSION,
-	released: "2026-11-23",
+	released: "2026-11-24",
 	releaseUrl: LEGACY_RELEASE_URL,
 	sha512: LEGACY_SHA512,
 	hasE2eHook: true,

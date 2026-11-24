@@ -20,7 +20,7 @@ import {
 import { serialQueue } from "../shared/serial.ts"
 import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 
-// The one-time import from the old client (3.0.54). A marker file in userData records where
+// The one-time import from the old client (3.0.55). A marker file in userData records where
 // it got to:
 //   started   a read began; `failedStarts` counts the attempts that never reached `imported`. Without secure storage
 //             (`volatileStash`) a read that worked stays here: its stash lives in memory only, so every launch reads

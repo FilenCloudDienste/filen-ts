@@ -37,7 +37,7 @@ import { installFrom, legacyInstaller, sameVersion, START_TIMEOUT_MS, tail } fro
 import { budgetWatchdog, endLeftovers, EXIT_TIMEOUT_MS, inventory, json, pidsOf, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
 
 // Chain K (gap 2, proving fix B1 in src/main/migration.ts, sessionVault.ts and appLock.ts): the 3.x import when the
-// keyring is missing, locked or comes back, on Linux deb with no sign-in at all. 3.0.54 is installed and given a
+// keyring is missing, locked or comes back, on Linux deb with no sign-in at all. 3.0.55 is installed and given a
 // synthetic signed-in profile (scripts/ci/e2e/keyringData.ts: random keys and userIds, a PIN with its timeout, both
 // window prefs on, sync, drive and WebDAV settings of a second user); N is then installed over it as a package
 // upgrade (no updater: chain L covers that) and that profile copied aside (k-base). Every launch of N runs behind the
@@ -120,7 +120,7 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 	// Branch A's keyring (K2, K3) and branch B's, each its own login keyring.
 	const keyringA = keyring("a")
 	const keyringB = keyring("b")
-	// The launch's Secret Service and the launch itself, while there is one; whether 3.0.54 left its logs directory.
+	// The launch's Secret Service and the launch itself, while there is one; whether 3.0.55 left its logs directory.
 	const state: { service: SecretService | null; current: Launch | null; legacyLogs: boolean } = {
 		service: null,
 		current: null,
@@ -321,7 +321,7 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 				})
 			}
 
-			// What 3.0.54 leaves running past its main process (a helper or crash handler) is hard-killed once its storage
+			// What 3.0.55 leaves running past its main process (a helper or crash handler) is hard-killed once its storage
 			// has gone quiet, as chain L does.
 			const lingering = await endLeftovers(
 				os,

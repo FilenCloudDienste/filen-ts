@@ -8,7 +8,7 @@ import { type LegacyAnonymous, legacyAnonymous, legacySeed } from "./seed.ts"
 // Chain K's synthetic 3.x account (scripts/ci/e2e/chains/keyring.ts) and what its checks read. No real account is
 // involved: the keys are random (the private key a real RSA key, which the web's session resume parses), the userIds
 // random, and every launch of N runs behind the offline block, so the API never sees any of it. The values are written
-// where 3.0.54's login and settings write them (seed.ts legacySeed for sdkConfig and desktopConfig), so N's migration
+// where 3.0.55's login and settings write them (seed.ts legacySeed for sdkConfig and desktopConfig), so N's migration
 // reads them as it reads a real profile.
 
 export interface KeyringSeed {
@@ -43,7 +43,7 @@ export function keyringSeed(): KeyringSeed {
 	}
 }
 
-// The public key 3.0.54 kept beside the private one (SPKI, as legacySeed writes it).
+// The public key 3.0.55 kept beside the private one (SPKI, as legacySeed writes it).
 function publicKeyOf(seed: KeyringSeed): string {
 	return createPublicKey(createPrivateKey({ key: Buffer.from(seed.client.privateKey, "base64"), format: "der", type: "pkcs8" }))
 		.export({ type: "spki", format: "der" })
@@ -68,7 +68,7 @@ export function seedRedacted(seed: KeyringSeed): string[] {
 	return [...seedSecrets(seed), seed.pin, seed.client.email, seed.client.rootUuid, String(seed.client.userId), String(seed.otherUserId)]
 }
 
-// The localStorage writes on top of 3.0.54's signed-out start: the account as its login stores it, the PIN with a lock
+// The localStorage writes on top of 3.0.55's signed-out start: the account as its login stores it, the PIN with a lock
 // timeout, both window prefs on, and sync pairs, a drive and WebDAV as its settings store them, for the other user.
 export function keyringWrites(seed: KeyringSeed, anonymous: LegacyAnonymous): Record<string, string> {
 	const { sdkConfig, desktopConfig } = legacySeed(seed.client, anonymous)
@@ -117,7 +117,7 @@ export function keyringWrites(seed: KeyringSeed, anonymous: LegacyAnonymous): Re
 	}
 }
 
-// The seed, on 3.0.54's sign-in screen once its signed-out setup stored the anonymous config. The values cross CDP as
+// The seed, on 3.0.55's sign-in screen once its signed-out setup stored the anonymous config. The values cross CDP as
 // an evaluate argument; the page is not reloaded, so the old app never acts on the account. Returns the keys written.
 export async function seedKeyringLegacy(page: Page, seed: KeyringSeed, timeoutMs: number): Promise<string[]> {
 	const anonymous = await legacyAnonymous(page, timeoutMs)

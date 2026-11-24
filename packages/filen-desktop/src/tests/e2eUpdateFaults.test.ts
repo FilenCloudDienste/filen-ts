@@ -289,7 +289,7 @@ describe("e2e update install start", () => {
 			log: () => "",
 			needles: INSTALL_SIGNS.legacy,
 			installers: () => Promise.resolve([]),
-			installedVersion: () => "3.0.54",
+			installedVersion: () => "3.0.55",
 			startedVersions: () => [],
 			...overrides
 		}
@@ -311,7 +311,7 @@ describe("e2e update install start", () => {
 			kind: "stalled",
 			sinceMs: INSTALL_START_TIMEOUT_MS
 		})
-		// 3.0.54 dead 2 s into its update launch on Windows: a minute later, not five.
+		// 3.0.55 dead 2 s into its update launch on Windows: a minute later, not five.
 		const gone = started + 2000
 
 		expect(installStartEnd(gone + GONE_GRACE_MS - 1, started, null, gone)).toBeNull()
@@ -327,24 +327,24 @@ describe("e2e update install start", () => {
 
 	it("finds no sign in a fetched download alone, the case where 3.x died during its update", async () => {
 		await expect(
-			installSigns(probe({ log: () => "[info] Checking for update\n[info] Update available\n" }), "3.0.54", "4.0.1")
+			installSigns(probe({ log: () => "[info] Checking for update\n[info] Update available\n" }), "3.0.55", "4.0.1")
 		).resolves.toEqual([])
 	})
 
 	it("takes 3.x's own log lines, an installer from the updater cache, a changed install or N started", async () => {
-		await expect(installSigns(probe({ log: () => "[info] Update downloaded: {}\n" }), "3.0.54", "4.0.1")).resolves.toEqual([
+		await expect(installSigns(probe({ log: () => "[info] Update downloaded: {}\n" }), "3.0.55", "4.0.1")).resolves.toEqual([
 			'logged "Update downloaded"'
 		])
-		await expect(installSigns(probe({ log: () => "[info] Installing update\n" }), "3.0.54", "4.0.1")).resolves.toEqual([
+		await expect(installSigns(probe({ log: () => "[info] Installing update\n" }), "3.0.55", "4.0.1")).resolves.toEqual([
 			'logged "Installing update"'
 		])
 		await expect(
-			installSigns(probe({ installers: () => Promise.resolve(["412 C:\\Users\\e2e\\Filen_win.exe --updated"]) }), "3.0.54", "4.0.1")
+			installSigns(probe({ installers: () => Promise.resolve(["412 C:\\Users\\e2e\\Filen_win.exe --updated"]) }), "3.0.55", "4.0.1")
 		).resolves.toEqual(["an installer runs: 412 C:\\Users\\e2e\\Filen_win.exe --updated"])
-		await expect(installSigns(probe({ installedVersion: () => "4.0.1" }), "3.0.54", "4.0.1")).resolves.toEqual([
+		await expect(installSigns(probe({ installedVersion: () => "4.0.1" }), "3.0.55", "4.0.1")).resolves.toEqual([
 			"the installed app is 4.0.1"
 		])
-		await expect(installSigns(probe({ startedVersions: () => ["4.0.1"] }), "3.0.54", "4.0.1")).resolves.toEqual(["4.0.1 started"])
+		await expect(installSigns(probe({ startedVersions: () => ["4.0.1"] }), "3.0.55", "4.0.1")).resolves.toEqual(["4.0.1 started"])
 	})
 
 	it("reads electron-updater's lines for N-1 -> N, and nothing from 3.x's", async () => {
@@ -369,11 +369,11 @@ describe("e2e update install start", () => {
 						throw new Error("app.asar is missing")
 					}
 				}),
-				"3.0.54",
+				"3.0.55",
 				"4.0.1"
 			)
 		).resolves.toEqual([])
-		await expect(installSigns(probe({ installedVersion: null }), "3.0.54", "4.0.1")).resolves.toEqual([])
+		await expect(installSigns(probe({ installedVersion: null }), "3.0.55", "4.0.1")).resolves.toEqual([])
 	})
 
 	it("lists every main process, those without a readable path too, and counts only those at the executable", () => {

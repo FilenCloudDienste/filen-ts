@@ -9,10 +9,10 @@ import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 // .github/workflows/desktop-e2e.yml).
 //
 //   previous   N-1 -> N through the app's own updater (scripts/ci/e2e/update.ts)
-//   legacy     3.0.54 -> N through 3.0.54's own updater (scripts/ci/e2e/update.ts)
+//   legacy     3.0.55 -> N through 3.0.55's own updater (scripts/ci/e2e/update.ts)
 //   update-kill  N-1 -> N with the installer killed mid-install, install depth (scripts/ci/e2e/updateKill.ts)
 //   older      3.0.47 -> N through 3.0.47's own updater, hooked to the local feed (scripts/ci/e2e/update.ts)
-//   spike-s1   can the packaged 3.0.54 and N be driven over their debugging ports (scripts/ci/e2e/spikes/s1.ts)
+//   spike-s1   can the packaged 3.0.55 and N be driven over their debugging ports (scripts/ci/e2e/spikes/s1.ts)
 //   spike-s7   can Filen in Finder be switched on with nobody at the Mac (scripts/ci/e2e/spikes/s7.ts)
 //   keyring    chain K: the 3.x import without, with a locked and with an unlocked keyring, no sign-in (Linux deb;
 //              scripts/ci/e2e/chains/keyring.ts)

@@ -4,7 +4,7 @@ import { sessionEnvelopeSchema } from "@filen/shared/session"
 import { convertLegacySession, LEGACY_SESSION_KEYS, LEGACY_USER_ID, type LegacySessionFailure } from "@filen/shared/legacySession"
 import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
 
-// What the old client (3.0.54) kept in its renderer's localStorage on filendesktop://bundle. Its web app wrote every
+// What the old client (3.0.55) kept in its renderer's localStorage on filendesktop://bundle. Its web app wrote every
 // value with JSON.stringify (usehooks' useLocalStorage), so each raw string is JSON, `authed` included ("true").
 export const LEGACY_KEYS = {
 	authed: LEGACY_SESSION_KEYS.authed,

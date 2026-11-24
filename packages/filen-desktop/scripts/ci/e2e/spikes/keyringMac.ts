@@ -18,8 +18,8 @@ import { installFrom, legacyInstaller, START_TIMEOUT_MS } from "../update.ts"
 
 // Spike keyring-mac (gap 2): what Electron 45's safeStorage does on macOS when the keychain holding "Filen Safe
 // Storage" is locked as N starts, and what B1's import (src/main/migration.ts) makes of it. A dedicated keychain with a
-// random password is made the default (and first in the search list) before 3.0.54 runs, so every item of the run lands
-// there and nothing touches the runner's login keychain. 3.0.54 gets chain K's synthetic signed-in profile
+// random password is made the default (and first in the search list) before 3.0.55 runs, so every item of the run lands
+// there and nothing touches the runner's login keychain. 3.0.55 gets chain K's synthetic signed-in profile
 // (keyringData.ts; no account, no sign-in), N is installed over it (no updater), the keychain is locked, and N
 // starts behind the offline block. Recorded as information, sampled every few seconds: whether SecurityAgent (the
 // keychain's unlock prompt) runs, what main logged about safeStorage and the import, and the marker; screenshots of the
@@ -151,7 +151,7 @@ export async function runKeyringMac({ target, nextDir, nextVersion, signed, work
 			async () => `${await block.prepare()}; ${await block.block(target, [])}`
 		)
 
-		await findings.must("a dedicated keychain with a random password, the default before 3.0.54 runs", async () => {
+		await findings.must("a dedicated keychain with a random password, the default before 3.0.55 runs", async () => {
 			reached.before = {
 				default: keychainPaths(await mustSecurity(["default-keychain", "-d", "user"]))[0] ?? "",
 				list: keychainPaths(await mustSecurity(["list-keychains", "-d", "user"]))

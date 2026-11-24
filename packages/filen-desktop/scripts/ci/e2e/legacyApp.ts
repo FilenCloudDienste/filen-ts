@@ -6,7 +6,7 @@ import type { LegacyMode } from "./fixtures.ts"
 import { exitWithin, type Launched } from "./launch.ts"
 import { inspector, legacyUpdateHook } from "./legacyHook.ts"
 
-// The old client (3.0.54), driven from outside: its page over --remote-debugging-port, its main process over its Node
+// The old client (3.0.55), driven from outside: its page over --remote-debugging-port, its main process over its Node
 // inspector (it has no fuses). Its page keeps everything in localStorage under the keys 4.x imports (LEGACY_KEYS); the
 // settings are written there exactly as its own web app's setters write them (JSON values, the account's per-user
 // maps beside desktopConfig, a storage event per key), so its hooks re-read them and hand the config to main as a

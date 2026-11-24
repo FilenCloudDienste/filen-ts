@@ -6,7 +6,7 @@ import type { FirstRunDeps } from "./firstRun.ts"
 import { basename, rootKey } from "./mirror.ts"
 import { PAIR_NAME_MAX, type ShellPair } from "./store.ts"
 
-// The old client's (3.0.54) sync pairs: its config, and each pair's ignore file. Its engine state under
+// The old client's (3.0.55) sync pairs: its config, and each pair's ignore file. Its engine state under
 // userData/sync is never read; a migrated pair's first run proves what is in sync from both sides (see firstRun.ts).
 
 const MODES = {

@@ -116,7 +116,7 @@ describe("desktop e2e workflow chain K", () => {
 		// A budget below the step's timeout, so an overrun keeps its evidence; the job's timeout (the plan's) counts it.
 		expect(chain).toContain("timeout-minutes: 45")
 		expect(chain).toContain("E2E_CHAIN_BUDGET_MINUTES: 40")
-		expect(text.indexOf("- name: Keyring chain K, no sign-in")).toBeGreaterThan(text.indexOf("- name: 3.0.54 -> N, signed in"))
+		expect(text.indexOf("- name: Keyring chain K, no sign-in")).toBeGreaterThan(text.indexOf("- name: 3.0.55 -> N, signed in"))
 		expect(step("Prepare the keyring chain")).toContain("dbus-bin")
 		// A keyring-only entry is deep (the harness) without a session to download.
 		expect(text).toContain(

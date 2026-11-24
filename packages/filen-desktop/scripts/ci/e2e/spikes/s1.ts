@@ -9,7 +9,7 @@ import { installFrom, legacyInstaller, legacyLogOf, START_TIMEOUT_MS, tail } fro
 import { createFindings, type Findings, type SpikeOptions } from "../findings.ts"
 
 // Spike S1: can the packaged apps be driven from outside? Both run with devTools disabled, so the question is whether
-// their pages are still listed and evaluable over --remote-debugging-port and playwright-core attaches; for 3.0.54 also
+// their pages are still listed and evaluable over --remote-debugging-port and playwright-core attaches; for 3.0.55 also
 // whether its main process answers --inspect (it has no fuses) and quits through app.quit() from there; for N whether
 // SIGTERM quits it gracefully (exit code 0, no signal), which is how the e2e will quit it on macOS and Linux.
 
@@ -165,7 +165,7 @@ export async function runS1({ target, nextDir, nextVersion, signed, work, artifa
 			slug: "legacy",
 			origin: "filendesktop://bundle",
 			legacy: true,
-			// 3.0.54 is a signed release on Windows and macOS.
+			// 3.0.55 is a signed release on Windows and macOS.
 			install: async () => installFrom(target, await legacyInstaller(target, work), LEGACY_VERSION, target.platform !== "linux")
 		},
 		{

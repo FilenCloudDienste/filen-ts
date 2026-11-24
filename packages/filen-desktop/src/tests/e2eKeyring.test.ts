@@ -376,7 +376,7 @@ describe("chain K's Secret Service and files", () => {
 	})
 })
 
-describe("chain K's quit of 3.0.54", () => {
+describe("chain K's quit of 3.0.55", () => {
 	const target = { platform: "linux" } as unknown as Target
 
 	it("waits for nothing when the old app ended whole", async () => {

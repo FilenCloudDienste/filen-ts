@@ -7,7 +7,7 @@ import { asarVersion, fail, powershell, processTable, psQuote, run, runBounded }
 
 // One install format on the runner it is tested on: how a user installs it, where its files and userData land, how
 // it is launched and how its running main process is found. Names and locations are the frozen 3.x ones,
-// so the same target serves the 3.0.54 artifacts and the new ones.
+// so the same target serves the 3.0.55 artifacts and the new ones.
 
 export type Platform = "win" | "mac" | "linux"
 export type Arch = "x64" | "arm64"
@@ -49,7 +49,7 @@ export interface Target {
 	// The version the OS's package database or uninstall entry records, null where there is none.
 	registeredVersion(): string | null
 	// Checks run after every install: location, registration and the payload's signature when signed; on Windows also
-	// WinFsp, which every installer (3.0.54's and the new one) installs.
+	// WinFsp, which every installer (3.0.55's and the new one) installs.
 	verifyInstall(signed: boolean): void
 	// Hands `use` a file of the installed app's resources directory (an AppImage's is extracted for the call).
 	resource<T>(relative: string, use: (file: string) => T): T
