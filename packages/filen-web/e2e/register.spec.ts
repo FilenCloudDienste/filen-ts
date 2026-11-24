@@ -85,7 +85,7 @@ test.describe("register", { tag: "@no-sdk" }, () => {
 	test("shows the eligibility banner when registerCheck reports eligible", async ({ page }) => {
 		await gotoRegister(page, route => route.fulfill({ json: { status: true, data: { ok: true } } }))
 
-		await expect(page.getByText("You are eligible for 10 GiB of free storage!")).toBeVisible()
+		await expect(page.getByText("You are eligible for 10 GiB of free storage")).toBeVisible()
 		await expect(page.getByRole("link", { name: "Learn more", exact: true })).toBeVisible()
 	})
 
@@ -115,7 +115,7 @@ test.describe("register", { tag: "@no-sdk" }, () => {
 		await expect(page.locator("html[data-e2e-register-check]")).toBeAttached()
 		await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
 
-		await expect(page.getByText("You are eligible for 10 GiB of free storage!")).toHaveCount(0)
+		await expect(page.getByText("You are eligible for 10 GiB of free storage")).toHaveCount(0)
 		await expect(page.getByText("You are not eligible", { exact: false })).toHaveCount(0)
 	})
 
