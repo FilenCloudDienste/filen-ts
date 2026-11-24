@@ -14,7 +14,9 @@ const FILES = FIXTURE_FILES["preview-legacy-bframes"]
 // How long each file is watched, and how often.
 const WATCH_MS = 15_000
 const SAMPLE_MS = 500
-// Played this far, a file is through: the streams run two seconds.
+// Played this far, a file is through: the streams run two seconds. Read from the element's played ranges, not its
+// currentTime: the preview loops, so a sampled currentTime can wrap past the mark between two samples every time
+// (WebKit holds each loop's first picture a while, which locked the samples to the loop's period).
 const PLAYED_SECONDS = 1.5
 // Samples read back per SourceBuffer.
 const SAMPLES = 40
@@ -26,6 +28,8 @@ interface Moment {
 	readyState: number
 	networkState: number
 	buffered: [number, number][]
+	// The furthest point any played range reached.
+	playedTo: number
 	error: { code: number; message: string } | null
 	quality: { total: number; dropped: number; corrupted: number } | null
 }
@@ -82,6 +86,12 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 						buffered.push([element.buffered.start(range), element.buffered.end(range)])
 					}
 
+					let playedTo = 0
+
+					for (let range = 0; range < element.played.length; range++) {
+						playedTo = Math.max(playedTo, element.played.end(range))
+					}
+
 					return {
 						at,
 						currentTime: element.currentTime,
@@ -89,6 +99,7 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 						readyState: element.readyState,
 						networkState: element.networkState,
 						buffered,
+						playedTo,
 						error: element.error === null ? null : { code: element.error.code, message: element.error.message },
 						quality:
 							quality === null
@@ -105,7 +116,7 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 			if (moment !== null) {
 				moments.push(moment)
 
-				if (moment.currentTime >= PLAYED_SECONDS || moment.error !== null) {
+				if (moment.playedTo >= PLAYED_SECONDS || moment.error !== null) {
 					break
 				}
 			}
@@ -129,7 +140,7 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 		})
 
 		console.log(
-			`[bframes] ${browserName} ${name}: currentTime ${String(last?.currentTime)} of buffered ${JSON.stringify(last?.buffered)}, ` +
+			`[bframes] ${browserName} ${name}: played to ${String(last?.playedTo)}, currentTime ${String(last?.currentTime)} of buffered ${JSON.stringify(last?.buffered)}, ` +
 				`readyState ${String(last?.readyState)}, quality ${JSON.stringify(last?.quality)}, error ${JSON.stringify(last?.error)}, ` +
 				`SourceBuffer events ${JSON.stringify(mse.events)}`
 		)
@@ -155,8 +166,8 @@ test("B-frame AVI, ASF and MPEG-PS play, every picture decoded before it is pres
 			failures.push(`${name}: the element reported error ${JSON.stringify(errored.error)} at ${String(errored.at)} ms`)
 		}
 
-		if (!moments.some(moment => moment.currentTime >= PLAYED_SECONDS)) {
-			failures.push(`${name}: played to ${String(last?.currentTime)} s, not ${String(PLAYED_SECONDS)}, in ${String(WATCH_MS)} ms`)
+		if (!moments.some(moment => moment.playedTo >= PLAYED_SECONDS)) {
+			failures.push(`${name}: played to ${String(last?.playedTo)} s, not ${String(PLAYED_SECONDS)}, in ${String(WATCH_MS)} ms`)
 		}
 
 		// The first trak only is read, so an audio buffer or one whose kept bytes hold no fragment has none: one with
