@@ -32,7 +32,7 @@ import { installerProcesses, logMark, logSince, runFaultLaunch } from "./updateF
 // version, at the same install location, with the same userData and a marker file in it intact.
 //
 //   previous   the installed app is N-1, a build of the same commit with a lower version
-//   legacy     the installed app is the real 3.0.53 release, the version the whole fleet updates from
+//   legacy     the installed app is the real 3.0.54 release, the version the whole fleet updates from
 //   older      the installed app is the real 3.0.47 release (scripts/ci/legacy.ts OLDER_PIN): no E2E hook, so its
 //              update launch is hooked through its inspector (scripts/ci/e2e/legacyHook.ts); on Linux it runs as
 //              /opt/Filen/@filendesktop, which its updater relaunches, so N must come back through 4.x's link there
@@ -347,7 +347,7 @@ export async function installFrom(target: Target, artifact: string, version: str
 	}
 }
 
-// The pinned old installer for this target (3.0.53 unless `pin` says otherwise), downloaded into `work` and checked
+// The pinned old installer for this target (3.0.54 unless `pin` says otherwise), downloaded into `work` and checked
 // against its release hash.
 export async function legacyInstaller(target: Target, work: string, pin: LegacyPin = LEGACY_PIN): Promise<string> {
 	const pinned = pin.sha512[target.installer]

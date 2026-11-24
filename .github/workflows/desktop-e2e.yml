@@ -10,7 +10,7 @@
 #                 run against each other. Before its update, N-1 runs once against its own feed, which fails each
 #                 check in another way (500, 404, a cut, a flipped byte, a truncated zip on macOS, a stall, an end
 #                 mid-download; scripts/ci/e2e/updateFaults.ts).
-#   3.0.53 -> N   the real last 3.x release, downloaded from the old repository's GitHub release and checked against
+#   3.0.54 -> N   the real last 3.x release, downloaded from the old repository's GitHub release and checked against
 #                 pinned hashes: the path the whole installed fleet takes to 4.x. It is its old updater and its old
 #                 NSIS uninstaller (run with --updated, which is what keeps %APPDATA%\@filen\desktop) that do the work.
 #   3.0.47 -> N   an older 3.x (scenario `older`, scripts/ci/olderPlan.ts), which has no E2E hook: its update launch is
@@ -28,7 +28,7 @@
 # Depth (input `depth`, scripts/ci/e2ePlan.ts): install is the above. Deep also signs in and drives the apps around
 # both updates. N-1 -> N (scripts/ci/e2e/chains/previous.ts): first run on a clean machine through N-1's page and the
 # native folder chooser, three pairs, the drive, WebDAV, preferences and a PIN; after the update every one must hold
-# with nothing transferred or rewritten. 3.0.53 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.53 signed in through its
+# with nothing transferred or rewritten. 3.0.54 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.54 signed in through its
 # own page, given prefs, a PIN, the drive, WebDAV and five pairs (one per mode), settled, edited once on disk and once
 # in the cloud while closed, then updated by its own updater; N must migrate it all with the two edits as the only
 # changes. Chain P also fills a small local volume, syncs through a loopback CONNECT proxy only (direct egress blocked)
@@ -38,7 +38,7 @@
 # names it in `formats`; the rest run at install depth with a notice. Logins are rate-limited (90 an hour per IP) and
 # an account's API key outlives every sign-out, so job `session` keeps one session per account slot in the Actions
 # cache and logs in (@filen/sdk-rs) only when there is none usable, then hands the session, sealed, to every job that
-# reaches the cloud or signs an app in. Per OS one 4.x chain (N-1 -> N) and one 3.0.53 chain (3.0.53 -> N) sign in
+# reaches the cloud or signs an app in. Per OS one 4.x chain (N-1 -> N) and one 3.0.54 chain (3.0.54 -> N) sign in
 # through their real forms (rotated by the day at night, fixed otherwise; input `signin` real signs in every one),
 # spaced by the plan's stagger, and one 3.0.47 chain a run; every other deep chain is seeded with the handed session as
 # a sign-in stores it (scripts/ci/e2e/seed.ts). Job `session` first checks that the account's auth version is one every
@@ -48,7 +48,7 @@
 # than a day, even after a failure.
 #
 # Chain K (scenario keyring, scripts/ci/e2e/chains/keyring.ts) runs on linux-x64-deb in every nightly and release run
-# and by hand when `scenarios` names it: 3.0.53 given a synthetic signed-in profile, N installed over it, and N's 3.x
+# and by hand when `scenarios` names it: 3.0.54 given a synthetic signed-in profile, N installed over it, and N's 3.x
 # import without a Secret Service, with a locked keyring whose prompt nobody answers, once it is unlocked, and after the
 # 7-day wait for the wipe. No sign-in and no cloud: every launch of N runs behind the offline block, on a D-Bus session
 # and Secret Service of its own.
@@ -70,7 +70,7 @@
 #
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
-#   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
+#   s1   are the packaged 3.0.54 and N drivable over --remote-debugging-port (3.0.54 also over --inspect), and does
 #        SIGTERM quit N gracefully
 #   s7   Filen in Finder on signed macOS: sign-in, enable, off/on round trip, domain registration (userEnabled stays
 #        false without a person; reported as information). Signs in once with the e2e account and signs out after
@@ -109,7 +109,7 @@ on:
         type: string
         default: windows,mac,linux
       legacy:
-        description: Also test the updates from 3.0.53 (and 3.0.47, scripts/ci/olderPlan.ts)
+        description: Also test the updates from 3.0.54 (and 3.0.47, scripts/ci/olderPlan.ts)
         type: boolean
         default: true
       profile:
@@ -139,7 +139,7 @@ on:
         type: string
         default: windows,mac,linux
       legacy:
-        description: Also test the updates from 3.0.53 (and 3.0.47, scripts/ci/olderPlan.ts)
+        description: Also test the updates from 3.0.54 (and 3.0.47, scripts/ci/olderPlan.ts)
         type: boolean
         default: true
       profile:
@@ -823,10 +823,10 @@ jobs:
           -w /work/packages/filen-desktop "${FEDORA_IMAGE}"
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario previous ${{ env.TEST_ARGS }}
-      - name: 3.0.53 -> N
+      - name: 3.0.54 -> N
         if: ${{ !cancelled() && matrix.legacy && !matrix.deepLegacy && matrix.format != 'rpm' }}
         run: node scripts/ci/e2e.ts --scenario legacy ${{ env.TEST_ARGS }}
-      - name: 3.0.53 -> N, signed in
+      - name: 3.0.54 -> N, signed in
         if: ${{ !cancelled() && matrix.deepLegacy }}
         shell: bash
         timeout-minutes: 120
@@ -840,7 +840,7 @@ jobs:
           E2E_CHAIN_BUDGET_MINUTES: 105
           E2E_STEP_DEADLINE_MINUTES: 115
         run: bash scripts/ci/deepSession.sh --scenario legacy --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
-      - name: 3.0.53 -> N (Fedora container)
+      - name: 3.0.54 -> N (Fedora container)
         if: ${{ !cancelled() && matrix.legacy && matrix.format == 'rpm' }}
         run: >-
           docker run --rm --shm-size=2g -e GITHUB_ACTIONS
@@ -876,7 +876,7 @@ jobs:
         if: ${{ !cancelled() && matrix.updateKill }}
         timeout-minutes: 45
         run: node scripts/ci/e2e.ts --scenario update-kill ${{ env.TEST_ARGS }}
-      # Chain K starts its own D-Bus sessions and talks to them with dbus-send. After chain L, whose 3.0.53 download it
+      # Chain K starts its own D-Bus sessions and talks to them with dbus-send. After chain L, whose 3.0.54 download it
       # reuses where the two share a job (matrix.lane); it signs nothing in, so it gets no secret.
       - name: Prepare the keyring chain
         timeout-minutes: 10

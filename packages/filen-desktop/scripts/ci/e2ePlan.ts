@@ -28,7 +28,7 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 //
 // Deep entries are signed in: `session` tells the workflow to provide the run's sessions (job `session`: cached, or one
 // harness login per slot), and each deep chain signs in through its app's real form or is seeded with that session
-// (scripts/ci/e2e/seed.ts). Logins are rate-limited (90 an hour per IP), so per OS one 4.x and one 3.0.53 chain sign in
+// (scripts/ci/e2e/seed.ts). Logins are rate-limited (90 an hour per IP), so per OS one 4.x and one 3.0.54 chain sign in
 // for real, on different entries where the OS has more than one: rotated by the day at night, so every entry's form
 // is exercised within days, and fixed in release and custom runs. Entries whose chains sign in for real get a
 // `stagger` (seconds) that spaces those sign-ins between parallel jobs. `logins` is the run's worst case (every slot
@@ -235,7 +235,7 @@ export const QUOTA_ENTRY = "linux-x64-deb"
 export const MAX_LOGINS_PER_RUN = 10
 
 // The test job's step timeouts (desktop-e2e.yml; the tests hold the two to each other) and the minutes around them
-// (checkout, installs, downloads). The install-depth N-1 and 3.0.53 steps have no timeout of their own: `install`.
+// (checkout, installs, downloads). The install-depth N-1 and 3.0.54 steps have no timeout of their own: `install`.
 export const STEP_MINUTES = {
 	previousDeep: 165,
 	legacyDeep: 120,
@@ -507,7 +507,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		)
 	}
 
-	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.53, the next entry along for 3.0.53, so the
+	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.54, the next entry along for 3.0.54, so the
 	// two land on different entries where there are two. At night the turn is the day's; otherwise the first.
 	const turn = profile === "nightly" ? input.day : 0
 	const real = (chain: "deepPrevious" | "deepLegacy", offset: number): Set<Entry> =>

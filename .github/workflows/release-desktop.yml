@@ -419,7 +419,7 @@ jobs:
           retention-days: 7
           compression-level: 0
 
-  # Installs N-1 and 3.0.53 on every platform and architecture and updates them to these exact artifacts through the
+  # Installs N-1 and 3.0.54 on every platform and architecture and updates them to these exact artifacts through the
   # apps' own updaters, before any of it is published.
   e2e:
     needs: [mac, windows, linux]

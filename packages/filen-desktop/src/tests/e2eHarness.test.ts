@@ -237,7 +237,7 @@ describe("e2e sign-in seeds", () => {
 		apiKey: "a".repeat(64),
 		authVersion: 2
 	}
-	// What 3.0.53's signed-out start stores (filen-web 0.2.3 setup() for a fresh install): @filen/sdk 0.4.2's
+	// What 3.0.54's signed-out start stores (filen-web 0.2.3 setup() for a fresh install): @filen/sdk 0.4.2's
 	// ANONYMOUS_SDK_CONFIG with connectToSocket and metadataCache on, and DEFAULT_DESKTOP_CONFIG around a copy.
 	const anonymousSdk = {
 		email: "anonymous@filen.io",
@@ -275,7 +275,7 @@ describe("e2e sign-in seeds", () => {
 		expect(describeStored(envelope, "b".repeat(64)).sameKey).toBe(false)
 	})
 
-	it("seeds 3.0.53 with what its login stores, in a real sign-in's shape, which 4.x then migrates", () => {
+	it("seeds 3.0.54 with what its login stores, in a real sign-in's shape, which 4.x then migrates", () => {
 		const seed = legacySeed(client, anonymous)
 		const sdkConfig = JSON.parse(seed.sdkConfig) as Record<string, unknown>
 		const desktopConfig = JSON.parse(seed.desktopConfig) as Record<string, unknown>

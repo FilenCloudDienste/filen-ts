@@ -95,7 +95,7 @@ import {
 	sdkConfigShapeOf
 } from "./older.ts"
 
-// Chain L at deep depth: the real 3.0.53 is signed in through its own page (or seeded with the run's session where the
+// Chain L at deep depth: the real 3.0.54 is signed in through its own page (or seeded with the run's session where the
 // plan says so: what its login stores, scripts/ci/e2e/seed.ts) and given what a user sets up (prefs, a PIN with a lock
 // timeout, the network drive, WebDAV and five sync pairs, one per mode, the dot-file and local-trash switches mixed),
 // syncs until it settles, and quits. While it is closed one file changes on disk and one in the cloud, and in the two-way
@@ -148,7 +148,7 @@ import {
 // The old app's tray and notifications are not observed. Linux deb and AppImage, Windows NSIS and macOS dmg so far; what
 // differs per OS is behind scripts/ci/e2e/os.ts.
 //
-// Gap 1 (scripts/ci/e2e/chains/older.ts): from 3.0.53 the pairs also carry two shapes older clients stored (L8, L9);
+// Gap 1 (scripts/ci/e2e/chains/older.ts): from 3.0.54 the pairs also carry two shapes older clients stored (L8, L9);
 // the same chain runs from 3.0.47 (scenario `older`), without L11, L12 and L14 and with its drive as 3.0.47 leaves it.
 
 const CONVERGE_TIMEOUT_MS = 6 * 60 * 1000
@@ -181,10 +181,10 @@ interface ShellState {
 
 export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
 	if (!["linux deb", "linux AppImage", "win nsis", "mac dmg"].includes(`${options.target.platform} ${options.target.format}`)) {
-		fail("the deep 3.0.53 -> N chain runs on Linux deb and AppImage, Windows NSIS and macOS dmg only so far")
+		fail("the deep 3.0.54 -> N chain runs on Linux deb and AppImage, Windows NSIS and macOS dmg only so far")
 	}
 
-	// The old release the chain starts from (3.0.53, or 3.0.47 for scenario `older`), and its install as it left it.
+	// The old release the chain starts from (3.0.54, or 3.0.47 for scenario `older`), and its install as it left it.
 	const release = pinFor(options.scenario) ?? fail(`chain L starts from an old release, not from ${options.scenario}`)
 	const LEGACY_VERSION = release.version
 	const chain = await openChain(release === LEGACY_PIN ? "legacy" : options.scenario, options, artifacts)
@@ -200,7 +200,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		local: { ...LEGACY_EDITS.local, sha256: sha256(LEGACY_EDITS.local.bytes) },
 		cloud: { ...LEGACY_EDITS.cloud, sha256: sha256(LEGACY_EDITS.cloud.bytes) }
 	}
-	// The empty files the old client leaves out (none from 3.0.53), which N fills in, and every change N may make.
+	// The empty files the old client leaves out (none from 3.0.54), which N fills in, and every change N may make.
 	const fills = legacyEmptyFills(release.syncsEmptyFiles)
 	const deltas = [...LEGACY_DELTAS, ...fills]
 	const marker = () => readJson(userData("migration.json")) as MigrationMarker | null
@@ -242,11 +242,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 	const setUp = async (): Promise<void> => {
 		const launched = await launchDebuggable(installed, true, chain.appOutput)
 
-		if (!release.hasE2eHook) {
-			await findings.must(`${LEGACY_VERSION}'s updater kept off the production feed while it is set up`, async () =>
-				quietUpdater(launched.inspectPort ?? fail("the old app runs without its inspector"))
-			)
-		}
+		// Hooked or not, the setup launch runs without the hook's env, so a newer 3.x on the production feed would prompt
+		// over the sign-in form.
+		await findings.must(`${LEGACY_VERSION}'s updater kept off the production feed while it is set up`, async () =>
+			quietUpdater(launched.inspectPort ?? fail("the old app runs without its inspector"))
+		)
 
 		state.legacy = { launched, renderer: await connectRenderer(launched.debugPort, LEGACY_ORIGIN, START_TIMEOUT_MS) }
 
@@ -418,7 +418,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		})
 
 		await findings.must(`${LEGACY_VERSION}: the network drive is mounted and WebDAV answers`, async () => {
-			// Where 3.0.53 cannot mount (FUSE-T on macOS needs an administrator's install), its drive stays configured and
+			// Where 3.0.54 cannot mount (FUSE-T on macOS needs an administrator's install), its drive stays configured and
 			// enabled, which is what migrates; 4.x then mounts it its own way (L5). 3.0.47 turns it off instead where its
 			// start fails (scripts/ci/e2e/chains/older.ts), which migrates too.
 			const older = release === LEGACY_PIN ? null : await olderDrive(legacyPage(), chain.os, drive.root, findings, SETUP_TIMEOUT_MS)
@@ -430,7 +430,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					? older.detail
 					: chain.os.legacyDriveLive
 						? await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => chain.os.driveMounted(drive.root))
-						: `configured only (3.0.53 cannot mount on this runner; ${(await chain.os.driveMounted(drive.root)) ?? "nothing"} mounted)`
+						: `configured only (3.0.54 cannot mount on this runner; ${(await chain.os.driveMounted(drive.root)) ?? "nothing"} mounted)`
 			const response = await fetch(`http://127.0.0.1:${String(webdav.port)}/`, {
 				method: "PROPFIND",
 				headers: { Depth: "1", Authorization: `Basic ${Buffer.from(`${webdav.username}:${webdav.password}`).toString("base64")}` },

@@ -215,7 +215,7 @@ export async function legacyUpdateHook(options: HookOptions): Promise<UpdateLaun
 	}
 }
 
-// The old app's setup launch (--inspect), for a release without an E2E hook: its updater checks the production feed 15
+// The old app's setup launch (--inspect), which runs without the E2E hook's env: its updater checks the production feed 15
 // s after its window opens and, finding a newer 3.x there, downloads it and tells the page, which may then prompt over
 // the forms the chain fills. Its checks are switched off before that (no event follows); the update launch hooks its
 // own instance. Returns what it did.

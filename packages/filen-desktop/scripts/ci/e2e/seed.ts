@@ -16,7 +16,7 @@ import { canonicalClient } from "./session.ts"
 //   4.x     the envelope filen-web's persistSession hands window.desktop.session.set (stringifyEnvelope of the
 //           StringifiedClient), passed as an evaluate argument and never as script text; then the page reloads and
 //           resumes it as on any start
-//   3.0.53  sdkConfig, desktopConfig and authed in its localStorage, as its login (filen-web 0.2.3 login.tsx) writes
+//   3.0.54  sdkConfig, desktopConfig and authed in its localStorage, as its login (filen-web 0.2.3 login.tsx) writes
 //           them, on top of what its own signed-out start wrote; then the page reloads and its setup takes the account
 //           as after a restart
 //
@@ -54,7 +54,7 @@ export const SESSION_SHAPE: readonly string[] = [
 	"authVersion: number"
 ]
 
-// What 3.0.53's signed-out start writes before anyone signs in (its setup(), for a fresh install): the JS SDK's
+// What 3.0.54's signed-out start writes before anyone signs in (its setup(), for a fresh install): the JS SDK's
 // anonymous config with connectToSocket and metadataCache on, and desktopConfig's defaults around a copy of it.
 export interface LegacyAnonymous {
 	sdkConfig: Record<string, unknown>
@@ -67,7 +67,7 @@ export interface LegacySeed {
 	desktopConfig: string
 }
 
-// The 3.0.53 seed. Its login spreads the SDK's config, which init() always builds as {...ANONYMOUS_SDK_CONFIG,
+// The 3.0.54 seed. Its login spreads the SDK's config, which init() always builds as {...ANONYMOUS_SDK_CONFIG,
 // ...params}: every key keeps the anonymous config's position, so the page's own signed-out config is the base, its
 // tmpPath (whatever the browser build's os.tmpdir() gives) included. The fields are what @filen/sdk 0.4.2's login()
 // sets: password and twoFactorCode "redacted", the master keys in sdk-rs's order (the derived key first, then the
@@ -97,7 +97,7 @@ export function legacySeed(client: Sdk.StringifiedClient, anonymous: LegacyAnony
 	return { sdkConfig: JSON.stringify(sdkConfig), desktopConfig: JSON.stringify({ ...anonymous.desktopConfig, sdkConfig }) }
 }
 
-// What a real 3.0.53 sign-in stores in sdkConfig, keys and value types in order: @filen/sdk 0.4.2's
+// What a real 3.0.54 sign-in stores in sdkConfig, keys and value types in order: @filen/sdk 0.4.2's
 // ANONYMOUS_SDK_CONFIG order.
 export const LEGACY_SDK_CONFIG_SHAPE: readonly string[] = [
 	"email: string",
@@ -163,7 +163,7 @@ export function describeVault(page: Page, expected: string): Promise<StoredDescr
 	)
 }
 
-// 3.0.53's sdkConfig as the page holds it.
+// 3.0.54's sdkConfig as the page holds it.
 export function describeLegacy(page: Page, expected: string): Promise<StoredDescription | null> {
 	return storedDescription(
 		page,
@@ -192,7 +192,7 @@ export async function seedSession(page: Page, client: Sdk.StringifiedClient, tim
 	return "seeded through session.set; the reloaded page resumed it"
 }
 
-// 3.0.53's anonymous config, once its signed-out setup stored it on the sign-in screen; fails unless it is the
+// 3.0.54's anonymous config, once its signed-out setup stored it on the sign-in screen; fails unless it is the
 // signed-out one.
 export async function legacyAnonymous(page: Page, timeoutMs: number): Promise<LegacyAnonymous> {
 	await page.locator("input#email").waitFor({ state: "visible", timeout: timeoutMs })
@@ -220,7 +220,7 @@ export async function legacyAnonymous(page: Page, timeoutMs: number): Promise<Le
 	return anonymous
 }
 
-// The 3.0.53 seed, on its sign-in screen once its signed-out setup has stored the anonymous config: the account written
+// The 3.0.54 seed, on its sign-in screen once its signed-out setup has stored the anonymous config: the account written
 // as its login writes it, then a reload. Done when its setup took the account (it leaves the sign-in route only then);
 // returns the userId.
 export async function seedLegacy(page: Page, client: Sdk.StringifiedClient, timeoutMs: number): Promise<number> {

@@ -31,7 +31,7 @@ export interface DriveLocation {
 }
 
 export interface DesktopOs {
-	// Whether the old client (3.0.53) can mount its drive here: it mounts with FUSE-T on macOS, which needs an installer
+	// Whether the old client (3.0.54) can mount its drive here: it mounts with FUSE-T on macOS, which needs an installer
 	// run as an administrator and is not on hosted runners. Where it cannot, its drive settings are migrated all the same.
 	readonly legacyDriveLive: boolean
 	// Once per chain, before anything launches (crash dump registration, say).

@@ -156,7 +156,7 @@ describe("e2ePlan depth", () => {
 		expect(nightly.tests.some(entry => entry.platform === "mac" && entry.arch === "x64")).toBe(true)
 		// No rotation: every deep format every night, all of them deep.
 		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
-		// Both slots at worst, then one 4.x and one 3.0.53 form sign-in per OS (the other chains are seeded), and the
+		// Both slots at worst, then one 4.x and one 3.0.54 form sign-in per OS (the other chains are seeded), and the
 		// cloud-full check's one on the quota account.
 		expect(nightly.logins).toBe(SESSION_SLOTS + 6 + 1)
 		expect(nightly.tests.filter(entry => entry.quota).map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)).toEqual([
@@ -590,7 +590,7 @@ describe("e2ePlan job timeouts", () => {
 
 	it("counts each step at the workflow's timeout for it", () => {
 		expect(stepTimeout("N-1 -> N, signed in")).toBe(STEP_MINUTES.previousDeep)
-		expect(stepTimeout("3.0.53 -> N, signed in")).toBe(STEP_MINUTES.legacyDeep)
+		expect(stepTimeout("3.0.54 -> N, signed in")).toBe(STEP_MINUTES.legacyDeep)
 		expect(stepTimeout("3.0.47 -> N, signed in")).toBe(STEP_MINUTES.olderDeep)
 		expect(stepTimeout("3.0.47 -> N")).toBe(STEP_MINUTES.olderInstall)
 		expect(stepTimeout("N-1 -> N, installer killed")).toBe(STEP_MINUTES.updateKill)

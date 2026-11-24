@@ -102,7 +102,7 @@ describe("3.0.47's update wizard on Windows", () => {
 })
 
 describe("3.0.47 pin", () => {
-	it("pins every installer 3.0.53's table has, by the same names, from the 3.0.47 release", () => {
+	it("pins every installer 3.0.54's table has, by the same names, from the 3.0.47 release", () => {
 		expect(Object.keys(OLDER_PIN.sha512).sort()).toEqual(Object.keys(LEGACY_SHA512).sort())
 		expect(OLDER_PIN.releaseUrl).toBe("https://github.com/FilenCloudDienste/filen-desktop/releases/download/v3.0.47/")
 		expect(Object.values(OLDER_PIN.sha512).every(hash => /^[A-Za-z0-9+/]{86}==$/.test(hash))).toBe(true)
@@ -123,18 +123,18 @@ describe("3.0.47 pin", () => {
 	})
 
 	it("drops only 3.0.47's chain for an account whose auth version it cannot sign in to, failing nothing", () => {
-		expect(authVersionCheck(2, "3.0.53,3.0.47")).toEqual({ dropOlder: null, problem: null })
-		expect(authVersionCheck(3, "3.0.53")).toEqual({ dropOlder: null, problem: null })
+		expect(authVersionCheck(2, "3.0.54,3.0.47")).toEqual({ dropOlder: null, problem: null })
+		expect(authVersionCheck(3, "3.0.54")).toEqual({ dropOlder: null, problem: null })
 		expect(authVersionCheck(3, "")).toEqual({ dropOlder: null, problem: null })
 
-		const check = authVersionCheck(3, "3.0.53,3.0.47")
+		const check = authVersionCheck(3, "3.0.54,3.0.47")
 
 		expect(check.problem).toBeNull()
 		expect(check.dropOlder).toMatch(/auth v3, which 3\.0\.47 \(v1, v2 only\) cannot sign in to: its signed-in chain is dropped/)
 		expect(check.dropOlder).toMatch(/install-only update runs instead/)
-		expect(authVersionCheck(4, "3.0.53,3.0.47")).toMatchObject({
+		expect(authVersionCheck(4, "3.0.54,3.0.47")).toMatchObject({
 			dropOlder: expect.stringMatching(/3\.0\.47/) as unknown,
-			problem: expect.stringMatching(/auth v4, which 3\.0\.53 \(v1, v2, v3 only\) cannot sign in to/) as unknown
+			problem: expect.stringMatching(/auth v4, which 3\.0\.54 \(v1, v2, v3 only\) cannot sign in to/) as unknown
 		})
 	})
 })
@@ -148,10 +148,10 @@ describe("3.0.47 in the plan", () => {
 		expect(older.every(entry => entry.deepOlder && entry.deep)).toBe(true)
 		expect(older.map(entry => entry.signInOlder)).toEqual(["real", "seeded", "seeded"])
 		expect(result.tests.filter(entry => !entry.older).every(entry => !entry.deepOlder && entry.signInOlder === "")).toBe(true)
-		// Two session slots, one 4.x and one 3.0.53 form per OS, one 3.0.47 form, the quota account's form.
+		// Two session slots, one 4.x and one 3.0.54 form per OS, one 3.0.47 form, the quota account's form.
 		expect(result.logins).toBe(10)
 		expect(result.logins).toBeLessThanOrEqual(MAX_LOGINS_PER_RUN)
-		expect(result.pins).toBe("3.0.53,3.0.47")
+		expect(result.pins).toBe("3.0.54,3.0.47")
 		// The real 3.0.47 sign-in is spaced like the others.
 		const staggers = result.tests.filter(entry => entry.stagger > 0 || entry.signInOlder === "real").map(entry => entry.stagger)
 
@@ -455,7 +455,7 @@ describe("3.0.47 on Linux", () => {
 })
 
 describe("3.x quit", () => {
-	it("quits 3.0.53 through app.quit() and 3.0.47 through app.exit(0), its page storage flushed first", () => {
+	it("quits 3.0.54 through app.quit() and 3.0.47 through app.exit(0), its page storage flushed first", () => {
 		const calls: string[] = []
 		const timers: (() => void)[] = []
 		const electron = {
@@ -538,7 +538,7 @@ describe("older shapes planted in chain L", () => {
 		localTrashDisabled: pair.localTrashDisabled
 	}))
 
-	// configureLegacy's page script against a localStorage as 3.0.53 holds it once signed in.
+	// configureLegacy's page script against a localStorage as 3.0.54 holds it once signed in.
 	const configured = async (shape: ReturnType<typeof plantedShape> | undefined) => {
 		const store = new Map<string, string>([
 			[
