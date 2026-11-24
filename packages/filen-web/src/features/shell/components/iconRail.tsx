@@ -59,7 +59,8 @@ import { log } from "@/lib/log"
 import { desktopBridge, desktopPlatform } from "@/lib/desktop"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { Badge } from "@/components/ui/badge"
 import {
 	DropdownMenu,
@@ -99,6 +100,7 @@ export function AccountMenu() {
 	const { toggleTheme } = useTheme()
 	const accountQuery = useAccountQuery()
 	const keysNotExported = accountQuery.data?.didExportMasterKeys === false
+	const avatarSrc = safeAvatarUrl(accountQuery.data?.avatarUrl)
 	const hasUnsyncedWork = useHasUnsyncedWork()
 	const hasActiveTransfers = useHasActiveTransfers()
 	const [menuOpen, setMenuOpen] = useState(false)
@@ -165,6 +167,14 @@ export function AccountMenu() {
 							className="relative rounded-full app-region-no-drag"
 						>
 							<Avatar size="sm">
+								{/* CORS-mode request: require-corp COEP (see UserAvatar). */}
+								{avatarSrc !== undefined ? (
+									<AvatarImage
+										src={avatarSrc}
+										alt=""
+										crossOrigin="anonymous"
+									/>
+								) : null}
 								<AvatarFallback>
 									<UserIcon className="size-4" />
 								</AvatarFallback>
