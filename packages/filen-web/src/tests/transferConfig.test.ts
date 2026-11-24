@@ -19,11 +19,9 @@ import {
 	getTransferPreferences,
 	setTransferPreferences,
 	DEFAULT_TRANSFER_PREFERENCES,
-	FULL_CHUNK_BYTES,
-	WEB_TRANSFER_PRESET_VALUES,
 	type TransferPreferences
 } from "@/features/settings/lib/transferConfig"
-import { TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared"
+import { DESKTOP_WEB_TRANSFER_PRESET_VALUES, FULL_CHUNK_BYTES, TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared"
 
 beforeEach(() => {
 	kvStore.clear()
@@ -39,7 +37,7 @@ describe("buildJsClientConfig", () => {
 	})
 
 	it("pins the web ladder", () => {
-		expect(WEB_TRANSFER_PRESET_VALUES).toEqual({
+		expect(DESKTOP_WEB_TRANSFER_PRESET_VALUES).toEqual({
 			batterySaver: { chunks: 8, concurrency: 12, rateLimitPerSec: 64 },
 			balanced: { chunks: 32, concurrency: 48, rateLimitPerSec: 160 },
 			performance: { chunks: 64, concurrency: 96, rateLimitPerSec: 320 },
@@ -53,15 +51,15 @@ describe("buildJsClientConfig", () => {
 		for (const preset of TRANSFER_PERFORMANCE_PRESETS) {
 			const { fileIoMemoryBudget } = buildJsClientConfig({ preset })
 
-			expect(fileIoMemoryBudget).toBe(WEB_TRANSFER_PRESET_VALUES[preset].chunks * FULL_CHUNK_BYTES)
-			expect(Math.floor((fileIoMemoryBudget ?? 0) / FULL_CHUNK_BYTES)).toBe(WEB_TRANSFER_PRESET_VALUES[preset].chunks)
+			expect(fileIoMemoryBudget).toBe(DESKTOP_WEB_TRANSFER_PRESET_VALUES[preset].chunks * FULL_CHUNK_BYTES)
+			expect(Math.floor((fileIoMemoryBudget ?? 0) / FULL_CHUNK_BYTES)).toBe(DESKTOP_WEB_TRANSFER_PRESET_VALUES[preset].chunks)
 		}
 
 		expect(FULL_CHUNK_BYTES).toBe(1_048_604)
 	})
 
 	it("leaves every preset more requests than chunks, so listings still get through", () => {
-		for (const values of Object.values(WEB_TRANSFER_PRESET_VALUES)) {
+		for (const values of Object.values(DESKTOP_WEB_TRANSFER_PRESET_VALUES)) {
 			expect(values.concurrency).toBeGreaterThan(values.chunks)
 		}
 	})

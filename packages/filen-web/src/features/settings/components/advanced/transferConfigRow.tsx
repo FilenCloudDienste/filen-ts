@@ -3,21 +3,13 @@ import { toast } from "sonner"
 import { saveSetting } from "@/lib/saveSetting"
 import { useTransferPreferencesQuery } from "@/features/settings/queries/preferences"
 import { setTransferPreferences, type TransferPreferences } from "@/features/settings/lib/transferConfig"
-import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset } from "@filen/shared"
-import type { SettingsKey } from "@/lib/i18n"
+import { TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
+import { PRESET_LABEL_KEYS } from "@/features/settings/lib/presetLabels"
 
-const PRESET_LABEL_KEYS: Record<TransferPerformancePreset, SettingsKey> = {
-	batterySaver: "settingsAdvancedPresetBatterySaver",
-	balanced: "settingsAdvancedPresetBalanced",
-	performance: "settingsAdvancedPresetPerformance",
-	maximum: "settingsAdvancedPresetMaximum"
-}
-
-// Advanced → transfer performance preset. The wasm client has no live setter for concurrency or
-// file-IO memory budget (see transferConfig.ts) and no bandwidth limiter at all — every change here
-// only takes effect the next time Filen loads, said up front in the row and again as an info toast
-// rather than pretended as immediate.
+// Advanced → transfer performance preset. A change takes effect the next time Filen loads (see
+// transferConfig.ts), said up front in the row and again as an info toast rather than pretended as
+// immediate; the wasm client has no bandwidth limiter at all.
 function TransferConfigRow() {
 	const { t } = useTranslation("settings")
 	const query = useTransferPreferencesQuery()

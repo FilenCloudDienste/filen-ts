@@ -22,7 +22,8 @@ vi.mock("@/queries/persist", () => ({ restorePersistedQueries: vi.fn(), purgePer
 
 import { bootSdk } from "@/lib/sdk/boot"
 import { useBootStore } from "@/stores/boot"
-import { buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES, FULL_CHUNK_BYTES } from "@/features/settings/lib/transferConfig"
+import { buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES } from "@/features/settings/lib/transferConfig"
+import { FULL_CHUNK_BYTES } from "@filen/shared"
 
 const MIB = 1024 * 1024
 

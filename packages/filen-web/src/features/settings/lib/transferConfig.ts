@@ -1,46 +1,32 @@
 import { type, type Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
 import { kvPreference } from "@/lib/storage/preference"
-import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset, DEFAULT_TRANSFER_PERFORMANCE_PRESET } from "@filen/shared"
+import {
+	DESKTOP_WEB_TRANSFER_PRESET_VALUES,
+	FULL_CHUNK_BYTES,
+	TRANSFER_PERFORMANCE_PRESETS,
+	type TransferPerformancePreset,
+	DEFAULT_TRANSFER_PERFORMANCE_PRESET
+} from "@filen/shared"
 
 // Advanced settings → transfer performance preset. Scoped to THIS web app's own uploads/downloads
 // (the worker-held wasm Client every drive/notes/chats transfer runs through) — worded that way
-// everywhere this reaches the UI, since the app also serves as the Electron frontend and the desktop
-// client's file-sync/network-drive engine carries its own, separate bandwidth/concurrency settings.
+// everywhere this reaches the UI, since the app also serves as the Electron frontend. In the desktop app the
+// native host's sync client and its uploads/downloads client take their own preset and bandwidth limits from
+// Settings › Desktop › Speed, applied live, on the same ladder as this one.
 //
-// The wasm `Client` exposes no live concurrency setter (unlike the RN uniffi client mobile builds
-// against, which has `setBandwidthLimits`) — every one of these knobs is a `JsClientConfig` field
-// `UnauthClient.from_config()` only reads at construction time. So a change here can only apply the
-// next time the worker builds a client: at the next full page load (see sdk.worker.ts's
-// `setClientConfig`/`clientConfig`), not live. The UI surfaces that as an
-// info toast rather than pretending the change is immediate.
+// This app applies a change when the worker next builds its client, at the next full page load (see
+// sdk.worker.ts's `setClientConfig`/`clientConfig`), not live, and the UI says so as an info toast. The
+// wasm `Client` has live setters for all three knobs (`setConcurrency`, `setFileIoMemoryBudget`,
+// `setRequestRateLimit`), which this preset does not use yet.
 //
 // No bandwidth cap here: the wasm build compiles the SDK's bandwidth limiter out entirely, while
 // concurrency, the file-IO memory budget and the request rate carry no such gate and are honored
 // unconditionally.
 //
 // The preset NAMES come from @filen/shared, so a stored choice and its label mean the same on every
-// client; the numbers behind them are the web's own. Mobile's ladder is held low by the iOS
-// file-descriptor ceiling, which a browser tab does not have.
-
-// One full chunk as the SDK's file-IO budget counts it (FULL_CHUNK_BYTES: 1 MiB of data plus the
-// 28-byte encryption overhead), so a budget of N of these buys exactly N chunks, not N - 1.
-export const FULL_CHUNK_BYTES = 1024 * 1024 + 28
-
-// chunks: the file-IO budget, in full chunks. concurrency: the cap on in-flight chunk transfers; the SDK
-// keeps four request slots beyond it (and a pool of its own for locks), so listings still get requests
-// while transfers fill the budget.
-// rateLimitPerSec: requests started per second across the whole client; the SDK's own 64 would cap
-// transfers near 64 MiB/s on every preset above battery saver.
-export const WEB_TRANSFER_PRESET_VALUES: Record<
-	TransferPerformancePreset,
-	{ chunks: number; concurrency: number; rateLimitPerSec: number }
-> = {
-	batterySaver: { chunks: 8, concurrency: 12, rateLimitPerSec: 64 },
-	balanced: { chunks: 32, concurrency: 48, rateLimitPerSec: 160 },
-	performance: { chunks: 64, concurrency: 96, rateLimitPerSec: 320 },
-	maximum: { chunks: 128, concurrency: 160, rateLimitPerSec: 640 }
-}
+// client; the numbers behind them are DESKTOP_WEB_TRANSFER_PRESET_VALUES (@filen/shared), shared with the
+// desktop shell. Mobile's ladder is held low by the iOS file-descriptor ceiling, which a browser tab does not have.
 
 export interface TransferPreferences {
 	preset: TransferPerformancePreset
@@ -63,7 +49,7 @@ export const { get: getTransferPreferences, set: setTransferPreferences } = kvPr
 // Pure preset -> JsClientConfig mapping, called from boot.ts (main thread, after the preference is
 // read from kv) and unit-tested without touching the worker or wasm at all.
 export function buildJsClientConfig(prefs: TransferPreferences): JsClientConfig {
-	const { chunks, concurrency, rateLimitPerSec } = WEB_TRANSFER_PRESET_VALUES[prefs.preset]
+	const { chunks, concurrency, rateLimitPerSec } = DESKTOP_WEB_TRANSFER_PRESET_VALUES[prefs.preset]
 
 	return {
 		concurrency,

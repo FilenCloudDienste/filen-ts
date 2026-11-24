@@ -36,6 +36,7 @@
 		"./linkPolicy": "./src/linkPolicy.ts",
 		"./desktop": "./src/desktop.ts",
 		"./desktopLock": "./src/desktopLock.ts",
+		"./transferPresets": "./src/transferPresets.ts",
 		"./localName": "./src/localName.ts",
 		"./sdkShapes": "./src/sdkShapes.ts",
 		"./desktopShellStrings": "./src/desktopShellStrings.ts",
