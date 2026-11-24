@@ -53,7 +53,7 @@
 		"@cornerstonejs/codec-openjph": "2.4.11",
 		"@filen/encoding-detect": "workspace:*",
 		"@filen/office": "workspace:*",
-		"@filen/sdk-rs": "0.5.34",
+		"@filen/sdk-rs": "0.5.35",
 		"@filen/shared": "workspace:*",
 		"@filen/spellcheck": "workspace:*",
 		"@fontsource-variable/inter": "^5.3.0",

@@ -1,10 +1,10 @@
 {
 	"generated": {
-		"sdkVersion": "0.5.34",
-		"filenRsRef": "filen-js@0.5.34",
+		"sdkVersion": "0.5.35",
+		"filenRsRef": "filen-js@0.5.35",
 		"web": {
-			"sdkVersion": "0.5.34",
-			"filenRsRef": "filen-js@0.5.34"
+			"sdkVersion": "0.5.35",
+			"filenRsRef": "filen-js@0.5.35"
 		},
 		"fileProviderFilenRs": "4cbe2df72324bf0ca313a6faa9c606f7e13f461c",
 		"electron": "45.0.0",

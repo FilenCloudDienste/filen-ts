@@ -32,7 +32,7 @@
 		"@eslint/js": "^10.0.1",
 		"@filen/assistant-eval": "workspace:*",
 		"@filen/assistant-node": "workspace:*",
-		"@filen/sdk-rs": "0.5.34",
+		"@filen/sdk-rs": "0.5.35",
 		"@filen/shared": "workspace:*",
 		"@peculiar/x509": "^2.2.0",
 		"@types/node": "^24.19.2",
