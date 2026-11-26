@@ -128,6 +128,53 @@ describe("AnimatedImagePlayback", () => {
 		playback.stop()
 	})
 
+	it("reports each loop's end once its last frame has shown its duration, never ahead", async () => {
+		const { playback } = setup(3, Number.POSITIVE_INFINITY)
+		const ended = vi.fn<() => void>()
+
+		playback.onLoopEnded(ended)
+		// The prefetch of the next loop's first frame reports nothing.
+		await vi.advanceTimersByTimeAsync(149)
+		expect(ended).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(ended).toHaveBeenCalledOnce()
+
+		await vi.advanceTimersByTimeAsync(150)
+		expect(ended).toHaveBeenCalledTimes(2)
+		playback.stop()
+	})
+
+	it("reports the end of a file that plays once", async () => {
+		const { playback } = setup(2, 0)
+		const ended = vi.fn<() => void>()
+		const unsubscribe = playback.onLoopEnded(ended)
+
+		await vi.advanceTimersByTimeAsync(1_000)
+		expect(ended).toHaveBeenCalledOnce()
+		expect(playback.getSnapshot().playing).toBe(false)
+
+		unsubscribe()
+		playback.play()
+		await vi.advanceTimersByTimeAsync(1_000)
+		expect(ended).toHaveBeenCalledOnce()
+		playback.stop()
+	})
+
+	it("reports a loop's end when a frame cannot be decoded", async () => {
+		const { playback, decode } = setup(3, Number.POSITIVE_INFINITY)
+		const ended = vi.fn<() => void>()
+
+		playback.onLoopEnded(ended)
+		// Frame 1 was decoded ahead already; frame 2 is not.
+		decode.mockImplementation(() => Promise.reject(new Error("corrupt")))
+		await vi.advanceTimersByTimeAsync(100)
+
+		expect(ended).toHaveBeenCalledOnce()
+		expect(playback.getSnapshot().playing).toBe(false)
+		playback.stop()
+	})
+
 	it("stands still once paused, and a step pauses and shows the neighbouring frame", async () => {
 		const { playback, drawn } = setup(5, Number.POSITIVE_INFINITY)
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent } from "react"
+import { use, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { MaximizeIcon, MinimizeIcon, PauseIcon, PictureInPicture2Icon, PlayIcon, XIcon } from "lucide-react"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
@@ -51,6 +51,8 @@ import {
 } from "@/features/preview/components/mediaFailureState"
 import { PreviewDownloadButton } from "@/features/preview/components/previewErrorState"
 import { RepeatButton } from "@/features/preview/components/repeatButton"
+import { ImageShownContext } from "@/features/preview/lib/imageDisplay"
+import { SlideSignalsContext } from "@/features/preview/lib/slideSignals"
 
 const HAS_METADATA = mediaValue(
 	["loadedmetadata", "emptied"],
@@ -173,7 +175,7 @@ function useSeekCoalescer(video: HTMLVideoElement | null): {
 
 // The preview's video player: our own controls on a glass bar floating over the picture, hidden while
 // playback runs untouched. Loops unless its repeat is turned off; a chat's inline embed keeps the browser's
-// controls.
+// controls. Under a slideshow it plays once, its repeat set aside but not changed, and reports its end or failure.
 export function VideoPlayer({
 	item,
 	alt,
@@ -196,6 +198,8 @@ export function VideoPlayer({
 	useVideoContinuity(video, positionKey)
 	const { controller, snapshot } = usePreviewVideo(item, video, positionKey)
 	const repeat = useVideoRepeat("preview")
+	const signals = use(SlideSignalsContext)
+	const shown = use(ImageShownContext)
 	const subtitles = usePreviewSubtitles(item, controller, snapshot)
 	const status = snapshot?.status ?? "active"
 	const failedContainer = unplayableContainer(snapshot?.probe ?? null, snapshot?.decision ?? null)
@@ -223,8 +227,44 @@ export function VideoPlayer({
 
 	// The controller loops in the element's place (previewVideo.ts), so the element never gets `loop`.
 	useEffect(() => {
-		controller?.setLoop(repeat)
-	}, [controller, repeat])
+		controller?.setLoop(repeat && signals === null)
+	}, [controller, repeat, signals])
+
+	useEffect(() => {
+		if (controller === null || signals === null) {
+			return
+		}
+
+		return controller.onEnded(signals.mediaEnded)
+	}, [controller, signals])
+
+	// A video that cannot play ends its slide rather than holding the slideshow.
+	useEffect(() => {
+		if (failed && signals !== null) {
+			signals.mediaEnded()
+		}
+	}, [failed, signals])
+
+	// Shown on its first picture in motion, with its frame size.
+	useEffect(() => {
+		if (video === null || shown === null) {
+			return
+		}
+
+		const element = video
+		const report = shown
+
+		function handlePlaying(): void {
+			element.removeEventListener("playing", handlePlaying)
+			report({ width: element.videoWidth, height: element.videoHeight })
+		}
+
+		element.addEventListener("playing", handlePlaying)
+
+		return () => {
+			element.removeEventListener("playing", handlePlaying)
+		}
+	}, [video, shown])
 
 	// Playback starting shows the controls for one idle period before they fade.
 	useEffect(() => {
@@ -490,7 +530,7 @@ export function VideoPlayer({
 							container={fullscreen ? container : null}
 							onOpenChange={setMenuOpen}
 						/>
-						<RepeatButton />
+						{signals === null ? <RepeatButton /> : null}
 						<PlaybackSpeedMenu
 							media={video}
 							// Only a fullscreen player needs the menu inside it; elsewhere it portals as usual.

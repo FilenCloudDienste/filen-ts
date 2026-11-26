@@ -133,6 +133,7 @@ function userLanguages(): readonly string[] {
 export class PreviewVideo {
 	private readonly options: PreviewVideoOptions
 	private readonly changes = createListenerSet("preview.video")
+	private readonly ends = createListenerSet("preview.video")
 	private readonly elementListeners: [string, EventListener][] = []
 	private readonly abort = new AbortController()
 	private snapshot: PreviewVideoSnapshot
@@ -169,6 +170,11 @@ export class PreviewVideo {
 
 	public readonly getSnapshot = (): PreviewVideoSnapshot => this.snapshot
 
+	// Calls `listener` each time the video ends without looping; returns the unsubscribe.
+	public onEnded(listener: () => void): () => void {
+		return this.ends.subscribe(listener)
+	}
+
 	public constructor(options: PreviewVideoOptions) {
 		this.options = options
 		this.lastTime = options.startTime
@@ -200,9 +206,15 @@ export class PreviewVideo {
 	private readonly loopBack = (): void => {
 		const video = this.video
 
-		if (video !== null && this.loops) {
+		if (video === null) {
+			return
+		}
+
+		if (this.loops) {
 			video.currentTime = this.playback?.firstTime() ?? 0
 			void video.play().catch(() => undefined)
+		} else {
+			this.ends.emit()
 		}
 	}
 
@@ -535,6 +547,7 @@ export class PreviewVideo {
 		this.clearElementListeners()
 		this.clearPoster()
 		this.changes.clear()
+		this.ends.clear()
 
 		const video = this.video
 

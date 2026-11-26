@@ -1,4 +1,5 @@
 import { frameDelayMs, nextFramePosition, stepFrameIndex, type FramePosition } from "@/features/preview/lib/animatedImage.logic"
+import { createListenerSet } from "@/lib/listenerSet"
 import { log } from "@/lib/log"
 
 // The animated image player's clock: decodes frames one at a time as they come due (and at most the next one ahead),
@@ -30,6 +31,7 @@ export class AnimatedImagePlayback {
 	public readonly height: number
 	private readonly decoder: PlaybackDecoder
 	private readonly listeners = new Set<() => void>()
+	private readonly loopEnds = createListenerSet("preview")
 	private readonly holds = new Set<PlaybackHold>()
 	private snapshot: PlaybackSnapshot
 	private context: CanvasRenderingContext2D | null = null
@@ -73,6 +75,12 @@ export class AnimatedImagePlayback {
 	}
 
 	public readonly getSnapshot = (): PlaybackSnapshot => this.snapshot
+
+	// Calls `listener` each time a loop's last frame has shown its duration (the file's last loop included), and when a
+	// frame cannot be decoded, which ends the loop where it stands; returns the unsubscribe.
+	public onLoopEnded(listener: () => void): () => void {
+		return this.loopEnds.subscribe(listener)
+	}
 
 	// The canvas frames are drawn to; null when it goes.
 	public attach(context: CanvasRenderingContext2D | null): void {
@@ -392,8 +400,13 @@ export class AnimatedImagePlayback {
 		if (due === null) {
 			this.ended = true
 			this.update({ playing: false })
+			this.loopEnds.emit()
 
 			return
+		}
+
+		if (due.position.plays > this.position.plays) {
+			this.loopEnds.emit()
 		}
 
 		const generation = this.generation
@@ -441,5 +454,6 @@ export class AnimatedImagePlayback {
 		log.warn("preview", "decoding an animation frame failed", error)
 		this.halt()
 		this.update({ playing: false })
+		this.loopEnds.emit()
 	}
 }

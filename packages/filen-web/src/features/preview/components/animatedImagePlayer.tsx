@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode } from "react"
+import { use, useEffect, useEffectEvent, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon } from "lucide-react"
 import { cn } from "@filen/shared"
@@ -14,6 +14,7 @@ import { imageDecoderAvailable, openAnimation, type AnimationSource } from "@/fe
 import { AnimatedImagePlayback } from "@/features/preview/lib/animatedImagePlayback"
 import { ZoomableCanvas } from "@/features/preview/components/zoomableImage"
 import { PlaybackRateMenu } from "@/features/preview/components/playbackRateMenu"
+import { SlideSignalsContext } from "@/features/preview/lib/slideSignals"
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer } from "@/lib/media/autoHide.logic"
 import { mediaKeyAction, mediaKeyRepeats } from "@/lib/media/mediaKeys.logic"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
@@ -102,10 +103,12 @@ function AnimationProbe({ item, url, alt, children }: { item: DriveItem; url: st
 
 // The animation on a canvas inside the zoom, with the video preview's glass bar: play/pause, a frame either way, the
 // frame scrubber and counter, and the speed. Plays on open and loops as the file says; the bar hides while it plays
-// untouched. The clock stands still while the tab is hidden or the picture off screen.
+// untouched. The clock stands still while the tab is hidden or the picture off screen. Under a slideshow it says it
+// animates and reports the end of its first loop, looping on as the file says.
 export function AnimatedImagePlayer({ source, alt }: { source: AnimationSource; alt: string }) {
 	const { t } = useTranslation(["preview", "audio"])
 	const [playback] = useState(() => new AnimatedImagePlayback(source.decoder, source.first, true))
+	const signals = use(SlideSignalsContext)
 	const snapshot = useSyncExternalStore(playback.subscribe, playback.getSnapshot)
 	const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
 	const [pointerActive, setPointerActive] = useState(false)
@@ -128,6 +131,21 @@ export function AnimatedImagePlayer({ source, alt }: { source: AnimationSource; 
 			idleTimer.stop()
 		}
 	}, [playback, idleTimer])
+
+	useEffect(() => {
+		if (signals === null) {
+			return
+		}
+
+		signals.animating()
+
+		const unsubscribe = playback.onLoopEnded(() => {
+			unsubscribe()
+			signals.mediaEnded()
+		})
+
+		return unsubscribe
+	}, [playback, signals])
 
 	useEffect(() => {
 		function handleVisibility(): void {

@@ -612,6 +612,25 @@ describe("PreviewVideo — the ladder", () => {
 		expect(harness.video.plays).toBe(plays)
 	})
 
+	it("reports its end only when it does not loop, and no more once disposed", async () => {
+		const harness = setUp({ route: "ladder" })
+		const ended = vi.fn<() => void>()
+
+		await flush()
+		harness.controller.onEnded(ended)
+		harness.controller.setLoop(true)
+		harness.video.emit("ended")
+		expect(ended).not.toHaveBeenCalled()
+
+		harness.controller.setLoop(false)
+		harness.video.emit("ended")
+		expect(ended).toHaveBeenCalledOnce()
+
+		harness.controller.dispose()
+		harness.video.emit("ended")
+		expect(ended).toHaveBeenCalledOnce()
+	})
+
 	it("disposes the playback and empties the element", async () => {
 		const harness = setUp({ route: "ladder" })
 
