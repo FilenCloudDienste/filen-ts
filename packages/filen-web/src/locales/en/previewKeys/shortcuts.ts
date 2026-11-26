@@ -13,6 +13,10 @@ export const previewKeysShortcuts = {
 	previewKeyLast: "Last file",
 	/** Shortcuts list — the preview's key closing it */
 	previewKeyClose: "Close the preview",
+	/** Shortcuts list — the preview's key starting a slideshow over the files of its listing */
+	previewKeySlideshow: "Start a slideshow",
+	/** Shortcuts list — the key that pauses a running slideshow and resumes a paused one */
+	previewKeySlideshowPause: "Pause or resume the slideshow",
 	/** Shortcuts list — the preview's key downloading the file shown (one that cannot be edited) */
 	previewKeyDownload: "Download the file",
 	/** Shortcuts list — the preview's key renaming the file shown */

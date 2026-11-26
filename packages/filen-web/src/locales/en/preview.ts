@@ -36,6 +36,7 @@ import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewImageEditor } from "@/locales/en/previewImage/editor"
 import { previewImageSave } from "@/locales/en/previewImage/save"
 import { previewImageView } from "@/locales/en/previewImage/view"
+import { previewSlideshowBar } from "@/locales/en/previewSlideshow/bar"
 import { previewRichShell } from "@/locales/en/previewRich/shell"
 import { previewRichFont } from "@/locales/en/previewRich/font"
 import { previewRichSqlite } from "@/locales/en/previewRich/sqlite"
@@ -1301,6 +1302,7 @@ export const preview = {
 	...previewImageEditor,
 	...previewImageSave,
 	...previewImageView,
+	...previewSlideshowBar,
 	...previewVideoEditKeys,
 	...previewVideoEditor,
 	...previewVideoSave,
