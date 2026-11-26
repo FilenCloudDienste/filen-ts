@@ -17,6 +17,7 @@ interface WriterParams {
 const { exposed, fakeClient, fakeUnauth } = vi.hoisted(() => {
 	const fakeUnauth = {
 		downloadFileToWriter: vi.fn<(params: WriterParams) => Promise<void>>(),
+		makeThumbnailFromStream: vi.fn<(params: { reader: ReadableStream<Uint8Array>; knownSize: number }) => Promise<unknown>>(),
 		downloadFile: vi.fn(),
 		free: vi.fn()
 	}
@@ -122,6 +123,83 @@ describe("sdk worker whole-buffer preview reads", () => {
 		expect(fakeUnauth.downloadFileToWriter.mock.calls[0]?.[0]).toMatchObject({ start: 0n, end: 3n })
 		expect(fakeUnauth.downloadFile).not.toHaveBeenCalled()
 		expect(fakeUnauth.free).toHaveBeenCalledTimes(1)
+	})
+
+	it("reads an anon byte range through the linked unauth client and frees it", async () => {
+		fakeUnauth.downloadFileToWriter.mockClear()
+		fakeUnauth.free.mockClear()
+		fakeUnauth.downloadFileToWriter.mockImplementation(params => writeFrames(params, [[4, 5]]))
+
+		const bytes = await api.readLinkedFileBytesRangeAnon(fileOf(10), 3, 5, "p5")
+
+		expect(Array.from(bytes)).toEqual([4, 5])
+		expect(fakeUnauth.downloadFileToWriter.mock.calls[0]?.[0]).toMatchObject({ start: 3n, end: 5n })
+		expect(fakeUnauth.free).toHaveBeenCalledTimes(1)
+	})
+
+	it("aborts an anon byte range through its preview token", async () => {
+		let signal: AbortSignal | undefined
+
+		fakeUnauth.downloadFileToWriter.mockImplementation(params => {
+			signal = params.managedFuture.abortSignal
+
+			return new Promise<void>((_resolve, reject) => {
+				params.managedFuture.abortSignal.addEventListener("abort", () => {
+					reject(new Error("Cancelled"))
+				})
+			})
+		})
+
+		const pending = api.readLinkedFileBytesRangeAnon(fileOf(10), 0, 4, "p6")
+
+		await vi.waitFor(() => {
+			expect(signal).toBeDefined()
+		})
+		await api.cancelPreviewDownload("p6")
+
+		await expect(pending).rejects.toThrow("Cancelled")
+		expect(signal?.aborted).toBe(true)
+	})
+
+	it("finishes an anon whole read past the commit fraction, as the session's does", async () => {
+		let signal: AbortSignal | undefined
+		const done = Promise.withResolvers<undefined>()
+
+		fakeUnauth.downloadFileToWriter.mockImplementation(async params => {
+			signal = params.managedFuture.abortSignal
+
+			const w = params.writer.getWriter()
+
+			await w.write(new Uint8Array([1, 2, 3]))
+			await done.promise
+			await w.write(new Uint8Array([4]))
+			await w.close()
+		})
+
+		const pending = api.downloadLinkedFileBytesAnon(fileOf(4), "p7")
+
+		await vi.waitFor(() => {
+			expect(signal).toBeDefined()
+		})
+		await api.cancelPreviewDownloadIfEarly("p7", 0.5)
+		done.resolve(undefined)
+
+		expect(Array.from(await pending)).toEqual([1, 2, 3, 4])
+		expect(signal?.aborted).toBe(false)
+	})
+
+	it("decodes bytes in hand through the linked unauth client", async () => {
+		fakeUnauth.makeThumbnailFromStream.mockResolvedValue({ type: "unsupported" })
+
+		await expect(api.makeLinkedSdkThumbnailFromFileAnon(new File([new Uint8Array(3)], "a.jpg"), 1, 1, 1)).resolves.toEqual({
+			type: "unsupported"
+		})
+		expect(fakeUnauth.makeThumbnailFromStream.mock.calls[0]?.[0]).toMatchObject({ knownSize: 3 })
+		expect(fakeClient.makeThumbnailFromStream).not.toHaveBeenCalled()
+	})
+
+	it("refuses to store a public link thumbnail outside a tab's directory", async () => {
+		await expect(api.storeLinkedThumbnail("../thumbnails", "u1", new Uint8Array(1))).rejects.toThrow()
 	})
 })
 

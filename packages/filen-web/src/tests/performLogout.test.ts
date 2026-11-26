@@ -25,6 +25,7 @@ const {
 	socketStop,
 	toastWarning,
 	wipeThumbnailStore,
+	wipeLinkThumbnailStore,
 	wipeArtStore,
 	wipeVideoIndexStore,
 	resetVideoSession,
@@ -74,6 +75,7 @@ const {
 		socketStop: vi.fn(record("socketBridge.stop", () => Promise.resolve())),
 		toastWarning: vi.fn(),
 		wipeThumbnailStore: vi.fn(() => Promise.resolve()),
+		wipeLinkThumbnailStore: vi.fn(() => Promise.resolve()),
 		wipeArtStore: vi.fn(() => Promise.resolve()),
 		wipeVideoIndexStore: vi.fn(() => Promise.resolve()),
 		resetVideoSession: vi.fn(record("resetVideoSession", () => undefined)),
@@ -150,6 +152,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvDelete: () => Promise.resolve()
 }))
 vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore, readThumbnailBlob: vi.fn(), deleteThumbnail: vi.fn() }))
+vi.mock("@/features/publicLinks/lib/thumbCache", () => ({ wipeLinkThumbnailStore }))
 vi.mock("@/features/videos/lib/artStore", () => ({ wipeArtStore }))
 vi.mock("@/features/videos/lib/indexStore", () => ({ wipeVideoIndexStore }))
 vi.mock("@/features/videos/lib/session", () => ({ resetVideoSession }))
@@ -337,11 +340,12 @@ describe("performLogout", () => {
 		expect(modules.kvClear).toHaveBeenCalledTimes(1)
 	})
 
-	it("hands the wipe every OPFS cache: drive thumbnails, Videos artwork and the Videos index", async () => {
+	it("hands the wipe every OPFS cache: drive and public link thumbnails, Videos artwork and the Videos index", async () => {
 		await performLogout()
 		await runLogout.mock.calls[0]?.[0].wipeThumbnails()
 
 		expect(wipeThumbnailStore).toHaveBeenCalledTimes(1)
+		expect(wipeLinkThumbnailStore).toHaveBeenCalledTimes(1)
 		expect(wipeArtStore).toHaveBeenCalledTimes(1)
 		expect(wipeVideoIndexStore).toHaveBeenCalledTimes(1)
 	})

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 	kvDeletePrefix: vi.fn<(prefix: string) => Promise<void>>(),
 	opfsTreeBytes: vi.fn<(segments: readonly string[]) => Promise<number>>(),
 	wipeThumbnailStore: vi.fn<() => Promise<void>>(),
+	wipeLinkThumbnailStore: vi.fn<() => Promise<void>>(),
 	removeAssistantModel: vi.fn<() => Promise<void>>(),
 	finishWithReload: vi.fn<(reports: unknown) => boolean>(),
 	showReports: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 vi.mock("@/lib/storage/opfs", () => ({ opfsTreeBytes: mocks.opfsTreeBytes }))
 vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore: mocks.wipeThumbnailStore }))
+vi.mock("@/features/publicLinks/lib/thumbCache", () => ({ wipeLinkThumbnailStore: mocks.wipeLinkThumbnailStore }))
 vi.mock("@/features/videos/lib/artStore", () => ({ wipeArtStore: () => Promise.resolve() }))
 vi.mock("@/features/videos/lib/indexStore", () => ({ wipeVideoIndexStore: () => Promise.resolve() }))
 vi.mock("@/features/audio/store/useTrackTagsStore", () => ({ resetTrackTags: vi.fn() }))
@@ -99,6 +101,7 @@ beforeEach(() => {
 	mocks.kvDeletePrefix.mockReset().mockResolvedValue(undefined)
 	mocks.opfsTreeBytes.mockReset().mockImplementation(segments => Promise.resolve(TREE_BYTES[segments.join("/")] ?? 0))
 	mocks.wipeThumbnailStore.mockReset().mockResolvedValue(undefined)
+	mocks.wipeLinkThumbnailStore.mockReset().mockResolvedValue(undefined)
 	mocks.removeAssistantModel.mockReset().mockResolvedValue(undefined)
 	mocks.finishWithReload.mockReset().mockReturnValue(true)
 	mocks.showReports.mockReset()

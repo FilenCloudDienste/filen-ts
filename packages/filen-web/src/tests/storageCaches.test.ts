@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 	vacuumDatabase: vi.fn<() => Promise<number>>(),
 	opfsTreeBytes: vi.fn<(segments: readonly string[]) => Promise<number>>(),
 	wipeThumbnailStore: vi.fn<() => Promise<void>>(),
+	wipeLinkThumbnailStore: vi.fn<() => Promise<void>>(),
 	wipeArtStore: vi.fn<() => Promise<void>>(),
 	wipeVideoIndexStore: vi.fn<() => Promise<void>>(),
 	resetTrackTags: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 vi.mock("@/lib/storage/opfs", () => ({ opfsTreeBytes: mocks.opfsTreeBytes }))
 vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore: mocks.wipeThumbnailStore }))
+vi.mock("@/features/publicLinks/lib/thumbCache", () => ({ wipeLinkThumbnailStore: mocks.wipeLinkThumbnailStore }))
 vi.mock("@/features/videos/lib/artStore", () => ({ wipeArtStore: mocks.wipeArtStore }))
 vi.mock("@/features/videos/lib/indexStore", () => ({ wipeVideoIndexStore: mocks.wipeVideoIndexStore }))
 vi.mock("@/features/audio/store/useTrackTagsStore", () => ({ resetTrackTags: mocks.resetTrackTags }))
@@ -86,7 +88,13 @@ function locksGranting(granted: boolean) {
 beforeEach(() => {
 	vi.unstubAllGlobals()
 
-	for (const spy of [mocks.kvDeletePrefix, mocks.wipeThumbnailStore, mocks.wipeArtStore, mocks.wipeVideoIndexStore]) {
+	for (const spy of [
+		mocks.kvDeletePrefix,
+		mocks.wipeThumbnailStore,
+		mocks.wipeLinkThumbnailStore,
+		mocks.wipeArtStore,
+		mocks.wipeVideoIndexStore
+	]) {
 		spy.mockReset().mockResolvedValue(undefined)
 	}
 
@@ -115,8 +123,8 @@ describe("video cache prefixes", () => {
 
 describe("measureRow", () => {
 	it("measures the trees each wipe removes, at their roots", async () => {
-		expect(await measureRow("thumbnails")).toBe(100)
-		expect(mocks.opfsTreeBytes).toHaveBeenLastCalledWith(["thumbnails"], undefined)
+		expect(await measureRow("thumbnails")).toBe(200)
+		expect(mocks.opfsTreeBytes.mock.calls.map(([segments]) => segments)).toEqual([["thumbnails"], ["linkThumbnails"]])
 		expect(await measureRow("model")).toBe(100)
 		expect(mocks.opfsTreeBytes).toHaveBeenLastCalledWith(["models"], undefined)
 	})
@@ -155,9 +163,10 @@ describe("measureRow", () => {
 })
 
 describe("clearRow", () => {
-	it("wipes the whole thumbnail tree and nothing in kv", async () => {
+	it("wipes the whole thumbnail tree, public links' too, and nothing in kv", async () => {
 		await expect(clearRow("thumbnails")).resolves.toEqual({ kind: "cleared" })
 		expect(mocks.wipeThumbnailStore).toHaveBeenCalledOnce()
+		expect(mocks.wipeLinkThumbnailStore).toHaveBeenCalledOnce()
 		expect(mocks.kvDeletePrefix).not.toHaveBeenCalled()
 		expect(mocks.vacuumDatabase).not.toHaveBeenCalled()
 	})

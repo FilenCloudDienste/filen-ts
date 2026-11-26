@@ -1330,6 +1330,19 @@ describe("getThumbnailUrl — persisted thumbnails are served from disk", () => 
 		expect(differs.createObjectUrl).not.toHaveBeenCalledWith(partial)
 		expect(failed.readThumbnailBlob).toHaveBeenCalledTimes(1)
 	})
+
+	it("serves the bytes in hand, reading nothing back, from a store that reads back into memory anyway", async () => {
+		const deps = {
+			...depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1, 2, 3]) })),
+			readBackStored: false
+		}
+
+		await expect(getThumbnailUrl(imageItem(), deps)).resolves.not.toBeNull()
+
+		expect(deps.storeThumbnail).toHaveBeenCalledTimes(1)
+		// The cache read before generating, and none after the persist.
+		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("invalidateThumbnail", () => {

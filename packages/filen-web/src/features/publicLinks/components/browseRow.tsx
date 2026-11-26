@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { CheckIcon, MinusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
-import { ItemIcon } from "@/features/drive/components/itemIcon"
+import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
 import { LIST_MODIFIED_COLUMN_CLASS, LIST_NAME_CLASS, LIST_ROW_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
 import {
@@ -62,7 +62,7 @@ export function SelectionBox({ check }: { check: SelectionCheck }) {
 	)
 }
 
-// One entry of a public directory's listbox: drive's row (driveRow.tsx) with a selection box ahead of the icon,
+// One entry of a public directory's listbox: drive's row (driveRow.tsx) with a selection box ahead of the thumbnail,
 // and one per-item menu behind both a right-click and the ⋯ trigger.
 export function BrowseRow({
 	entry,
@@ -138,9 +138,11 @@ export function BrowseRow({
 						>
 							<SelectionBox check={selected ? "on" : "off"} />
 						</span>
-						<ItemIcon
+						<ItemThumbnail
 							item={entry.item}
-							className="size-6 shrink-0"
+							index={index}
+							imgClassName="size-6 shrink-0 rounded-md object-cover"
+							iconClassName="size-6 shrink-0"
 						/>
 						<span className={LIST_NAME_CLASS}>{entryName(entry)}</span>
 						<span className={cn(LIST_SIZE_COLUMN_CLASS, "text-right text-xs text-muted-foreground tabular-nums")}>

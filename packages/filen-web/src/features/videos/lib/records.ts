@@ -1,5 +1,5 @@
 import { kvDelete, kvDeleteIfAt, kvEntriesJsonInSlices, kvGetJson, kvKeys, kvSetJson } from "@/lib/storage/adapter"
-import { RecordStore, type RecordStoreKv } from "@/features/videos/lib/recordStore.logic"
+import { RecordStore, type RecordStoreKv, type StoredRecord } from "@/features/videos/lib/recordStore.logic"
 import { PROBE_KV_PREFIX, PROBE_MAX_RECORDS, probeRecordSchema } from "@/features/videos/lib/probeService.logic"
 import { ART_KV_PREFIX, ART_MAX_RECORDS, artRecordSchema } from "@/features/videos/lib/artwork.logic"
 import { FRAME_HINT_KV_PREFIX, FRAME_HINT_MAX_RECORDS, frameHintSchema } from "@/features/videos/lib/frames.logic"
@@ -48,3 +48,44 @@ export const frameHints = new RecordStore({
 	scope: "videos",
 	kv
 })
+
+// Nothing on disk: what a store over it holds lives in the tab's memory alone.
+const NO_KV: RecordStoreKv = {
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	kvKeys: () => Promise.resolve([]),
+	kvEntriesJson: () => Promise.resolve([]),
+	kvDelete: () => Promise.resolve()
+}
+
+function memoryOnly<T extends StoredRecord>(store: RecordStore<T>): RecordStore<T> {
+	store.hold()
+
+	return store
+}
+
+// A public link's keyframe reads keep their probes and frame hints for the tab only: what a visitor's reads said
+// about someone else's files is never written to kv, nor read from what the drive kept there.
+export const linkProbeRecords = memoryOnly(
+	new RecordStore({
+		prefix: PROBE_KV_PREFIX,
+		schema: probeRecordSchema,
+		maxRecords: PROBE_MAX_RECORDS,
+		memoryRecords: 1024,
+		writesPerSweep: WRITES_PER_SWEEP,
+		scope: "videos",
+		kv: NO_KV
+	})
+)
+
+export const linkFrameHints = memoryOnly(
+	new RecordStore({
+		prefix: FRAME_HINT_KV_PREFIX,
+		schema: frameHintSchema,
+		maxRecords: FRAME_HINT_MAX_RECORDS,
+		memoryRecords: 256,
+		writesPerSweep: WRITES_PER_SWEEP,
+		scope: "videos",
+		kv: NO_KV
+	})
+)

@@ -1,5 +1,7 @@
 import { THUMB_DIR_ROOT } from "@/features/drive/lib/thumbnails.logic"
 import { wipeThumbnailStore } from "@/features/drive/lib/thumbCache"
+import { LINK_THUMB_DIR_ROOT } from "@/features/publicLinks/lib/thumbCache.logic"
+import { wipeLinkThumbnailStore } from "@/features/publicLinks/lib/thumbCache"
 import { ART_DIR_ROOT } from "@/features/videos/lib/artStore.logic"
 import { wipeArtStore } from "@/features/videos/lib/artStore"
 import { INDEX_DIR_ROOT } from "@/features/videos/lib/indexStore.logic"
@@ -64,8 +66,11 @@ function sum(values: readonly number[]): number {
 // Bytes on disk, or null when this build's storage leader cannot measure kv rows yet (another tab on an older build).
 export async function measureRow(row: MeasuredRow, signal?: AbortSignal): Promise<number | null> {
 	switch (row) {
-		case "thumbnails":
-			return opfsTreeBytes(THUMB_DIR_ROOT, signal)
+		case "thumbnails": {
+			const [drive, links] = await Promise.all([opfsTreeBytes(THUMB_DIR_ROOT, signal), opfsTreeBytes(LINK_THUMB_DIR_ROOT, signal)])
+
+			return drive + links
+		}
 		case "videos": {
 			const [art, index, kv] = await Promise.all([
 				opfsTreeBytes(ART_DIR_ROOT, signal),
@@ -126,7 +131,7 @@ async function settleAll(work: readonly Promise<unknown>[]): Promise<void> {
 async function clearRowNow(row: ClearableRow): Promise<ClearOutcome> {
 	switch (row) {
 		case "thumbnails":
-			await wipeThumbnailStore()
+			await settleAll([wipeThumbnailStore(), wipeLinkThumbnailStore()])
 			break
 		case "videos":
 			await settleAll([wipeArtStore(), wipeVideoIndexStore(), ...VIDEO_CACHE_KV_PREFIXES.map(prefix => kvDeletePrefix(prefix))])

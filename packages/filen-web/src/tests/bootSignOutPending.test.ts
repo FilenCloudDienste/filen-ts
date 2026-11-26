@@ -8,6 +8,7 @@ const {
 	kvClear,
 	clearSessionOutsideKv,
 	wipeThumbnailStore,
+	wipeLinkThumbnailStore,
 	wipeArtStore,
 	wipeVideoIndexStore,
 	wipeSwClient,
@@ -32,6 +33,11 @@ const {
 		}),
 		wipeThumbnailStore: vi.fn(() => {
 			calls.push("wipeThumbnails")
+
+			return Promise.resolve()
+		}),
+		wipeLinkThumbnailStore: vi.fn(() => {
+			calls.push("wipeLinkThumbnails")
 
 			return Promise.resolve()
 		}),
@@ -87,6 +93,7 @@ vi.mock("@/lib/sdk/session", async importOriginal => ({
 vi.mock("@/queries/client", () => ({ queryClient: {} }))
 vi.mock("@/queries/persist", () => ({ restorePersistedQueries: vi.fn(), purgePersistedQueries: () => Promise.resolve() }))
 vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore }))
+vi.mock("@/features/publicLinks/lib/thumbCache", () => ({ wipeLinkThumbnailStore }))
 vi.mock("@/features/videos/lib/artStore", () => ({ wipeArtStore }))
 vi.mock("@/features/videos/lib/indexStore", () => ({ wipeVideoIndexStore }))
 vi.mock("@/features/drive/lib/saveDownload", () => ({ wipeSwClient }))
@@ -104,6 +111,7 @@ const WIPES = [
 	{ call: "kvClear", mock: kvClear },
 	{ call: "clearSession", mock: clearSessionOutsideKv },
 	{ call: "wipeThumbnails", mock: wipeThumbnailStore },
+	{ call: "wipeLinkThumbnails", mock: wipeLinkThumbnailStore },
 	{ call: "wipeArt", mock: wipeArtStore },
 	{ call: "wipeVideoIndex", mock: wipeVideoIndexStore },
 	{ call: "wipeServiceWorker", mock: wipeSwClient },

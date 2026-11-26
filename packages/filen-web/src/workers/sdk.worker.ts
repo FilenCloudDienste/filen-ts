@@ -135,9 +135,11 @@ import {
 	removeStaleThumbGenerations,
 	storeCapSweeper,
 	writeStoreEntry,
-	writeThumb
+	writeThumb,
+	type StoreCapSweeper
 } from "@/workers/thumbStore"
 import { ART_CACHE_CAP, ART_STORE, type ArtSlotCode } from "@/features/videos/lib/artStore.logic"
+import { isLinkThumbTab, linkThumbStore } from "@/features/publicLinks/lib/thumbCache.logic"
 import {
 	createSearchEngine,
 	type QueryTiming,
@@ -605,6 +607,21 @@ function noteThumbWrites(count: number): void {
 
 // The Videos artwork store: its own directory and cap, never drive's thumbnail tree.
 const artSweeper = storeCapSweeper(ART_STORE, ART_CACHE_CAP, THUMB_WRITES_PER_SWEEP)
+
+// A public link's sealed thumbnails, per tab directory (in practice the one tab this worker serves), held to the
+// drive's cap.
+const linkThumbSweepers = new Map<string, StoreCapSweeper>()
+
+function linkThumbSweeper(tab: string): StoreCapSweeper {
+	let sweeper = linkThumbSweepers.get(tab)
+
+	if (sweeper === undefined) {
+		sweeper = storeCapSweeper(linkThumbStore(tab), THUMB_CACHE_CAP, THUMB_WRITES_PER_SWEEP)
+		linkThumbSweepers.set(tab, sweeper)
+	}
+
+	return sweeper
+}
 
 // One range of a file's decrypted bytes, written straight into a buffer of the known size. `progress`
 // tracks how much has landed, for a caller that decides on it whether a cancel is still worth it.
@@ -2614,12 +2631,30 @@ const api = {
 	async downloadLinkedFileBytesAnon(file: AnyFile, previewToken: string): Promise<Uint8Array> {
 		return withLinkedUnauth(async unauth => {
 			const controller = new AbortController()
+			const progress: PreviewProgress = { received: 0, total: Number(file.size) }
 			registerPreviewAbort(previewToken, controller)
+			previewProgress.set(previewToken, progress)
 			try {
-				const bytes = await readFileRange(unauth, file, 0, Number(file.size), controller.signal)
+				const bytes = await readFileRange(unauth, file, 0, progress.total, controller.signal, progress)
 				return Comlink.transfer(bytes, [bytes.buffer])
 			} finally {
 				previewAborts.delete(previewToken)
+				previewProgress.delete(previewToken)
+			}
+		})
+	},
+	// The anon mirror of readFileBytesRange: bytes [start, end) of a linked file, cancelled through the same token.
+	async readLinkedFileBytesRangeAnon(file: AnyFile, start: number, end: number, previewToken: string): Promise<Uint8Array> {
+		return withLinkedUnauth(async unauth => {
+			const controller = new AbortController()
+			registerPreviewAbort(previewToken, controller)
+			try {
+				const bytes = await readFileRange(unauth, file, start, end, controller.signal)
+				return Comlink.transfer(bytes, [bytes.buffer])
+			} finally {
+				if (previewAborts.get(previewToken) === controller) {
+					previewAborts.delete(previewToken)
+				}
 			}
 		})
 	},
@@ -2644,8 +2679,8 @@ const api = {
 	fetchLinkedRawPreviewAnon(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
 		return withLinkedUnauth(unauth => writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file, ...params })))
 	},
-	// The anon mirror of makeSdkThumbnail, for a public directory's grid: the same decode through the public-link client.
-	// Never persisted (no thumbnail sweep armed): a visitor's thumbnails stay in the page's memory.
+	// The anon mirror of makeSdkThumbnail, for a public directory's listing: the same decode through the public-link
+	// client. Arms no drive sweep: a link's thumbnails go to their own sealed store (storeLinkedThumbnail).
 	async makeLinkedSdkThumbnailAnon(
 		file: AnyFile,
 		maxWidth: number,
@@ -2655,6 +2690,33 @@ const api = {
 		return withLinkedUnauth(async unauth =>
 			asThumbnailResult(await unauth.makeThumbnailInMemory({ file, maxWidth, maxHeight, lossyQuality }))
 		)
+	},
+	// The anon mirror of makeSdkThumbnailFromFile, for the preview a public link's Photoshop or EPS file embeds: bytes
+	// already in hand, decoded by the public-link client.
+	async makeLinkedSdkThumbnailFromFileAnon(
+		file: BrowserFile,
+		maxWidth: number,
+		maxHeight: number,
+		lossyQuality: number
+	): Promise<SdkThumbnailResult> {
+		return withLinkedUnauth(async unauth =>
+			asThumbnailResult(
+				await unauth.makeThumbnailFromStream({ reader: file.stream(), maxWidth, maxHeight, knownSize: file.size, lossyQuality })
+			)
+		)
+	},
+	// Persists a public link's thumbnail, already sealed by the page under its tab's key, in that tab's own directory
+	// (publicLinks/lib/thumbCache.ts), never the drive's store. A name that is no tab's is refused.
+	async storeLinkedThumbnail(tab: string, uuid: string, sealed: Uint8Array): Promise<void> {
+		if (!isLinkThumbTab(tab)) {
+			throw new Error("not a public link thumbnail directory")
+		}
+
+		const sweeper = linkThumbSweeper(tab)
+
+		sweeper.arm()
+		sweeper.noteWrites(1)
+		await writeStoreEntry(linkThumbStore(tab), uuid, sealed)
 	},
 	// Anon single-file save — the streaming mirror of downloadFileToWriter, same transferId convention
 	// so cancelTransfer/pauseTransfer/resumeTransfer reach an anon transfer with no changes of their own. The WritableStream sink arrives via Comlink.transfer;

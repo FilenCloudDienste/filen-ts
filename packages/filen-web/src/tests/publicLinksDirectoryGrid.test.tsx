@@ -11,21 +11,27 @@ import { mockViewportHeight } from "@/tests/support/viewport"
 import { withCode } from "@/tests/support/keys"
 import "@/lib/i18n"
 
-// The directory link's grid: drive's tiles with the list's selection and keys, one view choice per browser, and image
-// thumbnails decoded through the public-link client, never the session's.
+// The directory link's grid: drive's tiles with the list's selection and keys, one view choice per browser, and
+// thumbnails, in the list's rows too, read through the public-link client, never the session's.
 
 interface StoredViewMode {
 	mode: DriveViewMode
 	writes: DriveViewMode[]
 }
 
-const { stored, makeLinkedSdkThumbnailAnon } = vi.hoisted(() => {
+const { stored, makeLinkedSdkThumbnailAnon, downloadLinkedFileBytesAnon } = vi.hoisted(() => {
 	const initial: StoredViewMode = { mode: "list", writes: [] }
 
-	return { stored: initial, makeLinkedSdkThumbnailAnon: vi.fn() }
+	return {
+		stored: initial,
+		makeLinkedSdkThumbnailAnon: vi.fn(),
+		downloadLinkedFileBytesAnon: vi.fn<() => Promise<Uint8Array>>()
+	}
 })
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { makeLinkedSdkThumbnailAnon } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { makeLinkedSdkThumbnailAnon, downloadLinkedFileBytesAnon, cancelPreviewDownloadIfEarly: vi.fn() }
+}))
 vi.mock("@/features/publicLinks/lib/viewMode", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/publicLinks/lib/viewMode")>()),
 	getPublicViewMode: () => Promise.resolve(stored.mode),
@@ -149,6 +155,8 @@ beforeEach(() => {
 	shown.listing = LISTING
 	// The service's url cache outlives a test: each starts with the photo's thumbnail not made yet.
 	invalidateThumbnail(PHOTO.uuid, LINK_THUMBNAIL_SOURCE.deps)
+	invalidateThumbnail(PDF.uuid, LINK_THUMBNAIL_SOURCE.deps)
+	downloadLinkedFileBytesAnon.mockRejectedValue(new Error("network"))
 	makeLinkedSdkThumbnailAnon.mockResolvedValue({ type: "thumbnail", bytes: new Uint8Array([1, 2, 3]), width: 1, height: 1 })
 })
 
@@ -275,7 +283,7 @@ describe("DirectoryBrowser — the grid", () => {
 		expect(screen.getByRole("listbox").scrollTop).toBe(offset)
 	})
 
-	it("thumbnails an image through the public-link client and asks nothing for the other kinds", async () => {
+	it("thumbnails an image and a pdf through the public-link client and asks nothing for a kind with none", async () => {
 		stored.mode = "grid"
 		renderBrowser()
 
@@ -284,7 +292,26 @@ describe("DirectoryBrowser — the grid", () => {
 		})
 		expect(makeLinkedSdkThumbnailAnon).toHaveBeenCalledTimes(1)
 		expect(makeLinkedSdkThumbnailAnon.mock.calls[0]?.[0]).toMatchObject({ uuid: PHOTO.uuid })
-		// Its icon, no thumbnail.
+		// A small pdf is read whole, through the same client; this one's read fails and it keeps its icon.
+		await waitFor(() => {
+			expect(downloadLinkedFileBytesAnon).toHaveBeenCalled()
+		})
+		expect((downloadLinkedFileBytesAnon.mock.calls as unknown as [{ uuid: string }][]).every(([file]) => file.uuid === PDF.uuid)).toBe(
+			true
+		)
 		expect(option("b-paper.pdf").querySelector("img")?.getAttribute("src")).not.toBe("blob:thumb")
+		expect(option("c-notes.txt").querySelector("img")?.getAttribute("src")).not.toBe("blob:thumb")
+	})
+
+	it("shows the thumbnail in a list row as drive's row does", async () => {
+		renderBrowser()
+
+		await waitFor(() => {
+			expect(option("a-photo.jpg").querySelector("img")?.getAttribute("src")).toBe("blob:thumb")
+		})
+		expect(option("a-photo.jpg").querySelector("img")?.className.split(" ")).toEqual(
+			expect.arrayContaining(["size-6", "shrink-0", "rounded-md", "object-cover"])
+		)
+		expect(makeLinkedSdkThumbnailAnon).toHaveBeenCalledTimes(1)
 	})
 })

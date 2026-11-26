@@ -82,6 +82,9 @@ export interface ThumbnailServiceDeps extends ObjectUrlFns {
 	storeThumbnail: (uuid: string, bytes: Uint8Array) => Promise<void>
 	copyThumbnails: (copies: ThumbnailCopy[]) => Promise<void>
 	getGenerator: (category: ThumbGeneratorCategory) => ThumbGenerator | undefined
+	// False where a stored thumbnail reads back as a copy in memory anyway (a sealed store decrypts it): the bytes in
+	// hand are served and the read-back is skipped. Absent: it reads back backed by disk, which is served instead.
+	readBackStored?: boolean
 }
 
 // The real wiring: readThumbnailBlob/deleteThumbnail go straight to the main-thread OPFS read side
@@ -331,7 +334,7 @@ async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, byte
 			return false
 		}
 	)
-	const stored = persisted ? await deps.readThumbnailBlob(uuid).catch(() => null) : null
+	const stored = persisted && deps.readBackStored !== false ? await deps.readThumbnailBlob(uuid).catch(() => null) : null
 
 	return finalize(deps, uuid, stored !== null && stored.size === blob.size ? stored : blob)
 }

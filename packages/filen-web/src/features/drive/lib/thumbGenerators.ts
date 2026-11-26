@@ -1,7 +1,7 @@
 import { runTimeout, driveItemName, Semaphore, type DeferFn, type FileVerdict, type Result } from "@filen/shared"
 import * as Comlink from "comlink"
 import { onlineManager } from "@tanstack/react-query"
-import type { File as SdkFile } from "@filen/sdk-rs"
+import type { AnyFile, File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
@@ -12,6 +12,7 @@ import {
 	withGenerationSlot,
 	type ThumbGenerationResult,
 	type ThumbGenerator,
+	type ThumbGeneratorCategory,
 	type ThumbSeedResult
 } from "@/features/drive/lib/thumbnails"
 import {
@@ -47,7 +48,7 @@ import { driveItemMime, narrowItem, type BaseFileItem, type DriveItem } from "@/
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, PDFWorker } from "pdfjs-dist"
 import { openPdf, PdfReadError, type PdfDocument, type PdfJs, type PdfSource } from "@filen/office/dom/pdf"
-import { BLOCK_BYTES, ReadBudgetError } from "@filen/shared/videos"
+import { BLOCK_BYTES, ReadBudgetError, type ProbeTier, type VideoProbe } from "@filen/shared/videos"
 import { PDF_WORKER_SRC, pdfViewerSetup } from "@/features/preview/lib/pdfViewerSetup"
 import { openOriginRangeSource, type OriginRangeSource } from "@/features/preview/lib/origin/rangeSource"
 import { MAX_RUN_BLOCKS } from "@/lib/media/blockCache"
@@ -56,11 +57,16 @@ import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import type { MediaFailureKind } from "@/lib/media/mediaFailure"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
+import type { PreviewAccess } from "@/features/preview/lib/previewStream"
 import { PROBE_RANK } from "@/features/videos/lib/probeService.logic"
 import { frameEligible, isSettledMiss } from "@/features/videos/lib/frames.logic"
 import { ProbeService } from "@/features/videos/lib/probeService"
 import { FrameGenerator } from "@/features/videos/lib/frames"
 import { frameHints, probeRecords } from "@/features/videos/lib/records"
+import type { RecordStore } from "@/features/videos/lib/recordStore.logic"
+import type { ProbeRecord } from "@/features/videos/lib/probeService.logic"
+import type { FrameHint } from "@/features/videos/lib/frames.logic"
+import type { ByteOrigin, OriginAccess } from "@/lib/sdk/byteOrigin"
 import FrameWorker from "@/features/videos/workers/frame.worker.ts?worker"
 import type { FrameCaptureParams, FrameCaptureResult, FrameWorkerApi } from "@/features/videos/workers/frame.worker"
 import { rangeReads } from "@/lib/media/rangeReads"
@@ -81,11 +87,48 @@ import { thumbnail } from "@/lib/pixelBudget"
 // rest costs less than starting over the next time the cell scrolls into view.
 const DOWNLOAD_COMMIT_FRACTION = 0.5
 
+// Every read a generator makes of a file, through the client that may read it: the session's for the drive
+// (DRIVE_THUMB_READERS), the public-link client's for a public directory link's files. One set of generators runs
+// over either (thumbGeneratorsWith); a cancel goes by token, which both clients' reads register under.
+export interface ThumbByteReaders {
+	// The client the origin reads (a content sniff, a pdf's range source, a video's stream) go through. Also whether
+	// what a read says about a file is kept past the tab: never for a public link's.
+	readonly access: OriginAccess
+	// The preview cache scope (previewCacheScope) whose bytes a generation reuses instead of reading; null for none.
+	readonly heldScope: string | null
+	readonly downloadFileBytes: (file: AnyFile, token: string) => Promise<Uint8Array>
+	readonly readFileBytesRange: (file: AnyFile, start: number, end: number, token: string) => Promise<Uint8Array>
+	readonly readVideoProbe: (file: AnyFile, uuid: string, tier: ProbeTier, token: string) => Promise<VideoProbe | null>
+	readonly openRangePort: (port: MessagePort, file: AnyFile, token: string) => Promise<void>
+	readonly makeSdkThumbnail: (file: AnyFile, maxWidth: number, maxHeight: number, lossyQuality: number) => Promise<SdkThumbnailResult>
+	readonly makeSdkThumbnailFromFile: (
+		file: File,
+		maxWidth: number,
+		maxHeight: number,
+		lossyQuality: number
+	) => Promise<SdkThumbnailResult>
+	// The keyframe read's probe records and frame hints: kv-backed for the drive, the tab's memory for a link.
+	readonly keyframeRecords: () => { probes: RecordStore<ProbeRecord>; hints: RecordStore<FrameHint> }
+}
+
+export const DRIVE_THUMB_READERS: ThumbByteReaders = {
+	access: "authed",
+	heldScope: previewCacheScope("authed", undefined),
+	downloadFileBytes: (file, token) => sdkApi.downloadFileBytes(file, token),
+	readFileBytesRange: (file, start, end, token) => sdkApi.readFileBytesRange(file, start, end, token),
+	readVideoProbe: (file, uuid, tier, token) => sdkApi.readVideoProbe(file, uuid, tier, token),
+	openRangePort: (port, file, token) => sdkApi.openRangePort(port, file, token),
+	makeSdkThumbnail: (file, maxWidth, maxHeight, lossyQuality) => sdkApi.makeSdkThumbnail(file, maxWidth, maxHeight, lossyQuality),
+	makeSdkThumbnailFromFile: (file, maxWidth, maxHeight, lossyQuality) =>
+		sdkApi.makeSdkThumbnailFromFile(file, maxWidth, maxHeight, lossyQuality),
+	keyframeRecords: () => ({ probes: probeRecords, hints: frameHints })
+}
+
 // svg and a small pdf are the generations that pull a whole file into JS memory, through the same buffered
 // download the preview overlay uses (usePreviewBytes) — or straight from the bytes a preview already
 // holds. The returned buffer is the caller's own, so a consumer may transfer it.
-async function downloadWholeFile(item: BaseFileItem, signal: AbortSignal): Promise<Uint8Array> {
-	const held = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
+async function downloadWholeFile(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<Uint8Array> {
+	const held = getPreviewBytes(readers.heldScope, item.data.uuid)
 
 	if (held !== undefined) {
 		return held.slice()
@@ -101,7 +144,7 @@ async function downloadWholeFile(item: BaseFileItem, signal: AbortSignal): Promi
 	signal.addEventListener("abort", stop, { once: true })
 
 	try {
-		return await runOp(sdkApi.downloadFileBytes(narrowToAnyFile(item), token))
+		return await runOp(readers.downloadFileBytes(narrowToAnyFile(item), token))
 	} finally {
 		signal.removeEventListener("abort", stop)
 	}
@@ -138,9 +181,9 @@ function asGenerationResult(result: SdkThumbnailResult): ThumbGenerationResult {
 //
 // Never stopped once started: the SDK's in-memory thumbnail call takes no ManagedFuture, and it is
 // usually a couple of range reads anyway.
-export const generateSdkThumb: ThumbGenerator = async item => {
+async function sdkThumb(readers: ThumbByteReaders, item: BaseFileItem): Promise<ThumbGenerationResult> {
 	try {
-		const result = await sdkApi.makeSdkThumbnail(narrowToAnyFile(item), THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
+		const result = await readers.makeSdkThumbnail(narrowToAnyFile(item), THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 
 		return asGenerationResult(result)
 	} catch (e) {
@@ -150,23 +193,7 @@ export const generateSdkThumb: ThumbGenerator = async item => {
 	}
 }
 
-// generateSdkThumb for a public link's file, through the public-link client: the same decode and the same answers.
-export const generateLinkedSdkThumb: ThumbGenerator = async item => {
-	try {
-		const result = await sdkApi.makeLinkedSdkThumbnailAnon(
-			narrowToAnyFile(item),
-			THUMB_MAX_DIM,
-			THUMB_SDK_MAX_HEIGHT,
-			THUMB_SDK_LOSSY_QUALITY
-		)
-
-		return asGenerationResult(result)
-	} catch (e) {
-		log.warn("thumb-generators", "generateLinkedSdkThumb: sdk call failed", item.data.uuid, e)
-
-		return { type: "failed" }
-	}
-}
+export const generateSdkThumb: ThumbGenerator = item => sdkThumb(DRIVE_THUMB_READERS, item)
 
 // Thumbnails a file the client STILL HOLDS, straight after its upload lands, so the freshly-patched
 // listing row never triggers a download of bytes that are already on this machine. Seeded into the
@@ -542,9 +569,11 @@ interface KeyframeServices {
 	probes: ProbeService
 	frames: FrameGenerator
 	worker: IdleResource<KeyframeWorker>
+	hints: RecordStore<FrameHint>
 }
 
-let keyframeServices: KeyframeServices | null = null
+// One set per client: every reader set of an access reads through that client's same calls.
+const keyframeServices = new Map<OriginAccess, KeyframeServices>()
 
 function keyframeWorker(FrameWorker: new () => Worker): IdleResource<KeyframeWorker> {
 	const resource = idleResource<KeyframeWorker>(
@@ -589,22 +618,28 @@ function captureKeyframe(resource: IdleResource<KeyframeWorker>, params: FrameCa
 }
 
 // Made on first use; the frame worker starts only once a capture needs it.
-function keyframeServicesNow(): KeyframeServices {
-	keyframeServices ??= createKeyframeServices()
+function keyframeServicesNow(readers: ThumbByteReaders): KeyframeServices {
+	let services = keyframeServices.get(readers.access)
 
-	return keyframeServices
+	if (services === undefined) {
+		services = createKeyframeServices(readers)
+		keyframeServices.set(readers.access, services)
+	}
+
+	return services
 }
 
-function createKeyframeServices(): KeyframeServices {
+function createKeyframeServices(readers: ThumbByteReaders): KeyframeServices {
 	const worker = keyframeWorker(FrameWorker)
+	const records = readers.keyframeRecords()
 	const probes = new ProbeService({
-		readProbe: (file, uuid, tier, token) => sdkApi.readVideoProbe(file, uuid, tier, token),
+		readProbe: (file, uuid, tier, token) => readers.readVideoProbe(file, uuid, tier, token),
 		cancel: (token, finishWithin) => {
 			void (finishWithin === undefined
 				? sdkApi.cancelPreviewDownload(token)
 				: sdkApi.cancelPreviewDownloadUnlessFinishing(token, finishWithin))
 		},
-		records: probeRecords,
+		records: records.probes,
 		reads: rangeReads,
 		isOnline: () => onlineManager.isOnline(),
 		now: () => Date.now()
@@ -616,7 +651,7 @@ function createKeyframeServices(): KeyframeServices {
 		openPort: async (file, token) => {
 			const { port1, port2 } = new MessageChannel()
 
-			await sdkApi.openRangePort(Comlink.transfer(port1, [port1]), file, token)
+			await readers.openRangePort(Comlink.transfer(port1, [port1]), file, token)
 
 			return port2
 		},
@@ -624,7 +659,7 @@ function createKeyframeServices(): KeyframeServices {
 			void sdkApi.cancelPreviewDownload(token)
 		},
 		capture: params => captureKeyframe(worker, params),
-		hints: frameHints,
+		hints: records.hints,
 		reads: {
 			acquire: rank => rangeReads.acquire(rank),
 			release: () => {
@@ -643,16 +678,16 @@ function createKeyframeServices(): KeyframeServices {
 		}
 	})
 
-	return { probes, frames, worker }
+	return { probes, frames, worker, hints: records.hints }
 }
 
-// Logout: drive's probes and frames abort, their session spending and verdicts go, and the frame worker's
-// heap goes once idle. Makes nothing never used.
+// Logout: drive's probes and frames abort (a public link's too), their session spending and verdicts go, and the
+// frame workers' heaps go once idle. Makes nothing never used.
 export function resetDriveKeyframes(): void {
-	if (keyframeServices !== null) {
-		keyframeServices.probes.reset()
-		keyframeServices.frames.reset()
-		keyframeServices.worker.disposeIfIdle()
+	for (const services of keyframeServices.values()) {
+		services.probes.reset()
+		services.frames.reset()
+		services.worker.disposeIfIdle()
 	}
 }
 
@@ -661,7 +696,7 @@ export function resetDriveKeyframes(): void {
 // SDK worker's range port and decoded with VideoDecoder, within drive's own session budget. A file with
 // no frame to find (no video track, no keyframe index, a codec without a decoder) is a settled verdict;
 // everything else (offline, budgets spent, a failed read) is a failure.
-async function keyframeThumb(item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
+async function keyframeThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	// No WebCodecs video decoding (no frame could be decoded): no card probe is spent, and the verdict is the
 	// session's only, so a browser update is picked up.
 	if (typeof VideoDecoder === "undefined") {
@@ -670,7 +705,7 @@ async function keyframeThumb(item: BaseFileItem, signal: AbortSignal): Promise<T
 
 	// A function, so each check reads the signal anew across the awaits.
 	const stopped = (): boolean => signal.aborted
-	const { probes, frames } = keyframeServicesNow()
+	const { probes, frames, hints } = keyframeServicesNow(readers)
 	const uuid = item.data.uuid
 	const file = narrowToAnyFile(item)
 	const record = await probes.request({ uuid, file }, "card", { signal, rank: keyframeRank })
@@ -683,7 +718,9 @@ async function keyframeThumb(item: BaseFileItem, signal: AbortSignal): Promise<T
 
 	// A read that ran anyway: what it says about the file's kind is kept (an audio-only .webm loses its
 	// video glyph and its thumbnail attempts).
-	recordProbeVerdict({ uuid, name: driveItemName(item), mime: driveItemMime(item), size: item.data.size }, probe)
+	recordProbeVerdict({ uuid, name: driveItemName(item), mime: driveItemMime(item), size: item.data.size }, probe, {
+		memoryOnly: readers.access !== "authed"
+	})
 
 	if (probe === null || !frameEligible(probe)) {
 		return { type: "unavailable", reason: "unsupported" }
@@ -705,7 +742,7 @@ async function keyframeThumb(item: BaseFileItem, signal: AbortSignal): Promise<T
 		return { type: "failed" }
 	}
 
-	return isSettledMiss(await frameHints.get(uuid)) ? { type: "unavailable", reason: "unsupported" } : { type: "failed" }
+	return isSettledMiss(await hints.get(uuid)) ? { type: "unavailable", reason: "unsupported" } : { type: "failed" }
 }
 
 // MEDIA_ERR_SRC_NOT_SUPPORTED on the worker's stream is also what a fetch that failed before the metadata
@@ -748,7 +785,7 @@ async function streamedVideoError(code: number, url: string, signal: AbortSignal
 // The hidden <video> on the SW's Range stream first, where it can play the file; the keyframe read
 // where it cannot, or once it has failed to decode it. A failed or timed-out stream is not retried
 // through the keyframe read, which would only double the reads.
-export const generateVideoThumb: ThumbGenerator = async (item, signal) => {
+async function videoThumbOf(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	const stopped = (): boolean => signal.aborted
 
 	if (stopped()) {
@@ -772,7 +809,7 @@ export const generateVideoThumb: ThumbGenerator = async (item, signal) => {
 					releasePreviewStream(id)
 				})
 
-				return previewStreamUrl(narrowToAnyFile(item), driveItemName(item), contentType, id, { transient: true })
+				return previewStreamUrl(narrowToAnyFile(item), driveItemName(item), contentType, id, streamOptions(readers.access))
 			},
 			streamedVideoError,
 			signal
@@ -791,8 +828,16 @@ export const generateVideoThumb: ThumbGenerator = async (item, signal) => {
 		}
 	}
 
-	return await keyframeThumb(item, signal)
+	return await keyframeThumb(readers, item, signal)
 }
+
+// A one-frame registration, in the worker's transient bucket so it can never evict a player's; a public link's file
+// is served through the public-link client.
+function streamOptions(access: PreviewAccess): { transient: true; access?: PreviewAccess } {
+	return access === "authed" ? { transient: true } : { transient: true, access }
+}
+
+export const generateVideoThumb: ThumbGenerator = (item, signal) => videoThumbOf(DRIVE_THUMB_READERS, item, signal)
 
 const SVG_RENDER_TIMEOUT_MS = 10_000
 
@@ -893,11 +938,11 @@ async function svgThumbOf(bytes: Uint8Array, gzipped: boolean): Promise<ThumbGen
 
 // Small by construction (THUMB_SVG_SIZE_GATE), so the whole document is read like a small pdf's: the
 // rasteriser needs the markup, not a stream. Once the markup is in hand the render always runs.
-export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
+async function svgThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	let bytes: Uint8Array
 
 	try {
-		bytes = await downloadWholeFile(item, signal)
+		bytes = await downloadWholeFile(readers, item, signal)
 	} catch (e) {
 		if (!signal.aborted) {
 			log.warn("thumb-generators", "generateSvgThumb: download failed", item.data.uuid, e)
@@ -909,12 +954,20 @@ export const generateSvgThumb: ThumbGenerator = async (item, signal) => {
 	return await svgThumbOf(bytes, itemTypeExtension(item) === "svgz")
 }
 
+export const generateSvgThumb: ThumbGenerator = (item, signal) => svgThumb(DRIVE_THUMB_READERS, item, signal)
+
 // What a raster thumbnail reads of a larger file before deciding to read it whole: every header sits within it.
 const RASTER_THUMB_HEAD_BYTES = 64 * 1024
 
 // The file's bytes `start` to `end` (or those a preview already holds), stopped when `signal` aborts.
-async function readFileRange(item: BaseFileItem, start: number, end: number, signal: AbortSignal): Promise<Uint8Array> {
-	const held = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
+async function readFileRange(
+	readers: ThumbByteReaders,
+	item: BaseFileItem,
+	start: number,
+	end: number,
+	signal: AbortSignal
+): Promise<Uint8Array> {
+	const held = getPreviewBytes(readers.heldScope, item.data.uuid)
 
 	if (held !== undefined) {
 		return held.subarray(start, end)
@@ -930,7 +983,7 @@ async function readFileRange(item: BaseFileItem, start: number, end: number, sig
 	signal.addEventListener("abort", stop, { once: true })
 
 	try {
-		return await runOp(sdkApi.readFileBytesRange(narrowToAnyFile(item), start, end, token))
+		return await runOp(readers.readFileBytesRange(narrowToAnyFile(item), start, end, token))
 	} finally {
 		signal.removeEventListener("abort", stop)
 	}
@@ -945,7 +998,7 @@ function isUndecodable(e: unknown): boolean {
 // elsewhere it has no thumbnail, as no decoder of ours is run for one. Its whole bytes, at most THUMB_RASTER_READ_MAX,
 // its header checked against the thumbnail pixel budget before anything is decoded, then drawn in the raster
 // thumbnail worker.
-export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
+async function rasterThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	if (!(await supportsNativeImage("jxl"))) {
 		return { type: "unavailable", reason: "unsupported" }
 	}
@@ -961,14 +1014,14 @@ export const generateRasterThumb: ThumbGenerator = async (item, signal) => {
 	try {
 		// Its header first, from a head read: one past the budget costs that, not the whole file. A small file's head is
 		// the file.
-		const head = size <= RASTER_THUMB_HEAD_BYTES ? null : await readFileRange(item, 0, RASTER_THUMB_HEAD_BYTES, signal)
+		const head = size <= RASTER_THUMB_HEAD_BYTES ? null : await readFileRange(readers, item, 0, RASTER_THUMB_HEAD_BYTES, signal)
 		const headed = head === null ? null : sniffJxlUpright(head, size)
 
 		if (headed !== null && headed.width * headed.height > thumbnail()) {
 			return { type: "unavailable", reason: "overBudget" }
 		}
 
-		bytes = await downloadWholeFile(item, signal)
+		bytes = await downloadWholeFile(readers, item, signal)
 		// Upright: the browser turns it by its orientation before scaling it to the tile.
 		header = headed ?? sniffJxlUpright(bytes, bytes.length)
 	} catch (e) {
@@ -1008,11 +1061,11 @@ const PSD_THUMB_RESOURCES_MAX = 16 * 1024 * 1024
 // reads (the head, then on to the image resources section's end, at most 16 MiB in all) and decoded by the SDK.
 // Nothing is decoded of the image itself; one without that resource has none. Photoshop 4.0's BGR thumbnail (1033) is
 // not used.
-export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
+async function psdThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	const size = Number(item.data.size)
 
 	try {
-		let head = await readFileRange(item, 0, Math.min(size, PSD_THUMB_HEAD_BYTES), signal)
+		let head = await readFileRange(readers, item, 0, Math.min(size, PSD_THUMB_HEAD_BYTES), signal)
 		let psd = sniffPsd(head, size)
 
 		if (psd !== null && psd.thumbnail?.id !== 1036 && psd.resources === "needsMore") {
@@ -1020,7 +1073,7 @@ export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
 
 			if (reach > head.length) {
 				// On from the head's end: the head is not read again.
-				const rest = await readFileRange(item, head.length, reach, signal)
+				const rest = await readFileRange(readers, item, head.length, reach, signal)
 				const whole = new Uint8Array(head.length + rest.length)
 
 				whole.set(head)
@@ -1041,8 +1094,9 @@ export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
 		}
 
 		const end = thumbnail.offset + thumbnail.length
-		const jpeg = end <= head.length ? head.slice(thumbnail.offset, end) : await readFileRange(item, thumbnail.offset, end, signal)
-		const result = await sdkApi.makeSdkThumbnailFromFile(
+		const jpeg =
+			end <= head.length ? head.slice(thumbnail.offset, end) : await readFileRange(readers, item, thumbnail.offset, end, signal)
+		const result = await readers.makeSdkThumbnailFromFile(
 			new File([jpeg as Uint8Array<ArrayBuffer>], "thumbnail.jpg", { type: "image/jpeg" }),
 			THUMB_MAX_DIM,
 			THUMB_SDK_MAX_HEIGHT,
@@ -1062,13 +1116,13 @@ export const generatePsdThumb: ThumbGenerator = async (item, signal) => {
 // An Illustrator file no read has settled: its first kilobyte tells whether a PDF is inside (the verdict is kept, so
 // the next ask goes to the pdf generator or to none), and only then is its first page drawn as a PDF's. PostScript
 // alone has none.
-export const generateIllustratorThumb: ThumbGenerator = async (item, signal) => {
+async function illustratorThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	let verdict: FileVerdict
 
 	try {
-		verdict = await runContentSniff("pdfCompatible", { kind: "file", file: narrowToAnyFile(item) }, crypto.randomUUID(), {
-			access: "authed",
-			scope: previewCacheScope("authed", undefined),
+		verdict = await runContentSniff("pdfCompatible", fileOrigin(readers, item), crypto.randomUUID(), {
+			access: readers.access,
+			scope: readers.heldScope,
 			signal
 		})
 	} catch (e) {
@@ -1082,21 +1136,23 @@ export const generateIllustratorThumb: ThumbGenerator = async (item, signal) => 
 	const meta = item.data.decryptedMeta
 
 	if (meta !== null) {
-		recordContentVerdict({ uuid: item.data.uuid, name: meta.name, mime: meta.mime, size: item.data.size }, verdict)
+		recordContentVerdict({ uuid: item.data.uuid, name: meta.name, mime: meta.mime, size: item.data.size }, verdict, {
+			memoryOnly: readers.access !== "authed"
+		})
 	}
 
-	return verdict === "pdfCompatible" ? await generatePdfThumb(item, signal) : { type: "unavailable", reason: "unsupported" }
+	return verdict === "pdfCompatible" ? await pdfThumb(readers, item, signal) : { type: "unavailable", reason: "unsupported" }
 }
 
 // An EPS file's preview picture, read by range: a DOS EPS's TIFF section (within the size the SDK's from-file path
 // decodes whole) handed to the SDK, an EPSI preview decoded in the raster decode pool straight to the tile's size. One
 // with neither has none: its PostScript is never run.
-export const generateEpsThumb: ThumbGenerator = async (item, signal) => {
+async function epsThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
 	const size = Number(item.data.size)
 
 	try {
 		const preview = await epsPreview(
-			{ size, read: (offset, length, stop) => readFileRange(item, offset, Math.min(size, offset + length), stop ?? signal) },
+			{ size, read: (offset, length, stop) => readFileRange(readers, item, offset, Math.min(size, offset + length), stop ?? signal) },
 			signal,
 			Number(THUMB_WARM_SIZE_GATE)
 		)
@@ -1104,7 +1160,7 @@ export const generateEpsThumb: ThumbGenerator = async (item, signal) => {
 		switch (preview.kind) {
 			case "tiff":
 				return asGenerationResult(
-					await sdkApi.makeSdkThumbnailFromFile(
+					await readers.makeSdkThumbnailFromFile(
 						new File([preview.bytes as Uint8Array<ArrayBuffer>], "preview.tif", { type: "image/tiff" }),
 						THUMB_MAX_DIM,
 						THUMB_SDK_MAX_HEIGHT,
@@ -1317,8 +1373,8 @@ function heldPdfSource(held: Uint8Array): PdfSource {
 // Page 1 of a drive pdf. A small file is read whole; a larger one by range, from the bytes a preview already holds or
 // else through the SDK worker, aligned to its blocks and taking a background read permit per read, so page 1 of a
 // large file costs a few blocks. The range source ends (and its downloads with it) once the generation settles.
-export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
-	const held = getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid)
+async function pdfThumb(readers: ThumbByteReaders, item: BaseFileItem, signal: AbortSignal): Promise<ThumbGenerationResult> {
+	const held = getPreviewBytes(readers.heldScope, item.data.uuid)
 
 	if (held !== undefined && held.byteLength > PDF_THUMB_WHOLE_READ_MAX) {
 		return signal.aborted ? { type: "failed" } : await renderPdfThumb(heldPdfSource(held), item.data.uuid, signal)
@@ -1328,7 +1384,7 @@ export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
 		let bytes: Uint8Array
 
 		try {
-			bytes = await downloadWholeFile(item, signal)
+			bytes = await downloadWholeFile(readers, item, signal)
 		} catch (e) {
 			if (!signal.aborted) {
 				log.warn("thumb-generators", "generatePdfThumb: download failed", item.data.uuid, e)
@@ -1347,8 +1403,8 @@ export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
 	let range: OriginRangeSource
 
 	try {
-		range = await openOriginRangeSource({ kind: "file", file: narrowToAnyFile(item) }, crypto.randomUUID(), {
-			access: "authed",
+		range = await openOriginRangeSource(fileOrigin(readers, item), crypto.randomUUID(), {
+			access: readers.access,
 			budget: rangeReads
 		})
 	} catch (e) {
@@ -1375,6 +1431,34 @@ export const generatePdfThumb: ThumbGenerator = async (item, signal) => {
 		reads.abort()
 		range.close()
 	}
+}
+
+export const generateRasterThumb: ThumbGenerator = (item, signal) => rasterThumb(DRIVE_THUMB_READERS, item, signal)
+export const generatePsdThumb: ThumbGenerator = (item, signal) => psdThumb(DRIVE_THUMB_READERS, item, signal)
+export const generateIllustratorThumb: ThumbGenerator = (item, signal) => illustratorThumb(DRIVE_THUMB_READERS, item, signal)
+export const generateEpsThumb: ThumbGenerator = (item, signal) => epsThumb(DRIVE_THUMB_READERS, item, signal)
+export const generatePdfThumb: ThumbGenerator = (item, signal) => pdfThumb(DRIVE_THUMB_READERS, item, signal)
+
+// The file as the byte layer reads it through `readers`' client.
+function fileOrigin(readers: ThumbByteReaders, item: BaseFileItem): ByteOrigin {
+	const file = narrowToAnyFile(item)
+
+	return readers.access === "authed" ? { kind: "file", file } : { kind: "linkedFile", file }
+}
+
+// Every category's generator over `readers`, for a surface that reads its files through another client (a public
+// directory link's). The drive registers its own (DRIVE_THUMB_READERS) below.
+export function thumbGeneratorsWith(readers: ThumbByteReaders): ReadonlyMap<ThumbGeneratorCategory, ThumbGenerator> {
+	return new Map<ThumbGeneratorCategory, ThumbGenerator>([
+		["sdk", item => sdkThumb(readers, item)],
+		["video", (item, signal) => videoThumbOf(readers, item, signal)],
+		["pdf", (item, signal) => pdfThumb(readers, item, signal)],
+		["svg", (item, signal) => svgThumb(readers, item, signal)],
+		["raster", (item, signal) => rasterThumb(readers, item, signal)],
+		["psd", (item, signal) => psdThumb(readers, item, signal)],
+		["illustrator", (item, signal) => illustratorThumb(readers, item, signal)],
+		["eps", (item, signal) => epsThumb(readers, item, signal)]
+	])
 }
 
 // Module scope, not inside a function: runs exactly once per module evaluation. features/drive/lib/thumbnails.ts (the service)
