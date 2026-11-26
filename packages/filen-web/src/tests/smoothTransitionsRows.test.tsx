@@ -52,6 +52,25 @@ describe("Settings › Audio smooth transitions", () => {
 		expect(masterSwitch().hasAttribute("aria-describedby")).toBe(false)
 	})
 
+	it("keeps Match loudness off by default and changeable while tracks do not blend", () => {
+		setSmooth(false, null)
+		render(createElement(SmoothTransitionsRows))
+
+		const loudness = screen.getByRole("switch", { name: "Match loudness" })
+
+		expect(loudness.getAttribute("aria-checked")).toBe("false")
+		expect(loudness.hasAttribute("disabled") || loudness.getAttribute("aria-disabled") === "true").toBe(false)
+
+		fireEvent.click(loudness)
+
+		expect(useSmoothTransitionsStore.getState().prefs.matchLoudness).toBe(true)
+		expect(loudness.getAttribute("aria-checked")).toBe("true")
+
+		fireEvent.click(loudness)
+
+		expect(useSmoothTransitionsStore.getState().prefs.matchLoudness).toBe(false)
+	})
+
 	it("offers the preset lengths as one radio group named by the row's label", () => {
 		setSmooth(true, null, 9)
 		render(createElement(SmoothTransitionsRows))

@@ -63,7 +63,7 @@ describe("smooth transition prefs", () => {
 	})
 
 	it("defaults to off, a 6 s fade, cut skips and matched loudness", () => {
-		expect(DEFAULT_SMOOTH_TRANSITIONS_PREFS).toEqual({ enabled: false, fadeSeconds: 6, manualTransition: "cut", matchLoudness: true })
+		expect(DEFAULT_SMOOTH_TRANSITIONS_PREFS).toEqual({ enabled: false, fadeSeconds: 6, manualTransition: "cut", matchLoudness: false })
 	})
 
 	it("applies at once and persists in its own row, leaving the shuffle and loop prefs alone", async () => {

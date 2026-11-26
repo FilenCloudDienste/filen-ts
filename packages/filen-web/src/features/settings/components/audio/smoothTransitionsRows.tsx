@@ -29,9 +29,9 @@ const MANUAL_TRANSITION_OPTIONS = [
 	{ value: "fade", labelKey: "settingsAudioManualSkipFade" }
 ] as const satisfies readonly { value: ManualTransition; labelKey: string }[]
 
-// The one Smooth transitions card: the switch, then the rows it governs (disabled while it is off). The switch shows
-// whether tracks blend now and flips the stored pref; a cause the feature cannot run shows inline under it, only while
-// there is one.
+// The one Smooth transitions card: the switch, then the rows it governs (disabled while it is off, except Match loudness,
+// a saved choice that is always changeable and applies whenever tracks blend). The switch shows whether tracks blend now
+// and flips the stored pref; a cause the feature cannot run shows inline under it, only while there is one.
 export function SmoothTransitionsRows() {
 	const { t } = useTranslation(["settings", "audio"])
 	const { enabled, fadeSeconds, manualTransition, matchLoudness, unavailable } = useSmoothTransitionsStore(
@@ -88,7 +88,7 @@ export function SmoothTransitionsRows() {
 				helpId="matchLoudness"
 				description={t("settingsAudioMatchLoudnessDescription")}
 				checked={matchLoudness}
-				disabled={!active}
+				disabled={false}
 				onCheckedChange={checked => {
 					setSmoothTransitionsPrefs({ matchLoudness: checked })
 				}}

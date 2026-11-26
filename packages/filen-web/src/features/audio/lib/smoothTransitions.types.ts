@@ -27,7 +27,7 @@ export const DEFAULT_SMOOTH_TRANSITIONS_PREFS: SmoothTransitionsPrefs = {
 	enabled: false,
 	fadeSeconds: FADE_SECONDS_DEFAULT,
 	manualTransition: "cut",
-	matchLoudness: true
+	matchLoudness: false
 }
 
 // Why the feature cannot run right now: the device stopped the mixer this session, or the browser cannot route the
