@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, Component, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, Component, type KeyboardEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
@@ -514,6 +514,9 @@ export function PreviewOverlay({
 	const [openingItems, setOpeningItems] = useState<DriveItem[] | null>(null)
 	const [treeLoading, setTreeLoading] = useState(false)
 	const treeAbortRef = useRef<AbortController | null>(null)
+	// The file on screen when the slideshow started, and whether it runs as of the last commit.
+	const startedFromRef = useRef<string | undefined>(undefined)
+	const wasRunningRef = useRef(false)
 	const subfoldersAvailable = slideshowSource !== undefined && onItemsReplaced !== undefined
 
 	const holdsOpening = openingItems !== null
@@ -544,13 +547,15 @@ export function PreviewOverlay({
 		})
 	}, [holdsOpening])
 
-	// Swaps the pager's list, kept on the file on screen when the new list has it, else on its first item; never away
-	// from a slot that cannot be left. False when it did not swap.
-	function replaceItems(next: DriveItem[]): boolean {
+	// Swaps the pager's list, kept on the file on screen when the new list has it, else on `fallbackUuid`'s file when it
+	// has that, else on its first item; never away from a slot that cannot be left. False when it did not swap.
+	function replaceItems(next: DriveItem[], fallbackUuid?: string): boolean {
 		const shown = rawDriveItem?.data.uuid
-		const at = shown === undefined ? -1 : next.findIndex(item => item.data.uuid === shown)
+		const indexOf = (uuid: string | undefined): number => (uuid === undefined ? -1 : next.findIndex(item => item.data.uuid === uuid))
+		const own = indexOf(shown)
+		const at = own === -1 ? indexOf(fallbackUuid) : own
 
-		if (onItemsReplaced === undefined || (at === -1 && (dirty || saving))) {
+		if (onItemsReplaced === undefined || (own === -1 && (dirty || saving))) {
 			return false
 		}
 
@@ -597,8 +602,8 @@ export function PreviewOverlay({
 		)
 	}
 
-	// Back to the list the overlay was opened with.
-	function dropSubfolders(): void {
+	// Back to the list the overlay was opened with (at `fallbackUuid`'s file when the one on screen is not in it).
+	function dropSubfolders(fallbackUuid?: string): void {
 		treeAbortRef.current?.abort()
 		treeAbortRef.current = null
 		setTreeLoading(false)
@@ -608,7 +613,7 @@ export function PreviewOverlay({
 		}
 
 		// Every file of the opening list is gone: the slideshow's list stays.
-		if (openingItems.length === 0 || replaceItems(openingItems)) {
+		if (openingItems.length === 0 || replaceItems(openingItems, fallbackUuid)) {
 			setOpeningItems(null)
 		}
 	}
@@ -629,6 +634,7 @@ export function PreviewOverlay({
 			return
 		}
 
+		startedFromRef.current = rawDriveItem?.data.uuid
 		slideshow.start()
 
 		if (slideshowPrefs.subfolders && subfoldersAvailable) {
@@ -636,13 +642,29 @@ export function PreviewOverlay({
 		}
 	}
 
-	// The header (▶) or the bar (✕) that held focus goes with a start or an end: focus stays in the dialog, for its keys.
-	useEffect(() => {
+	// A start or an end, by whatever path (the bar, Escape, full screen left, too few slides left).
+	const onRunningChange = useEffectEvent((running: boolean) => {
 		const popup = popupRef.current
 
+		// The header (▶) or the bar (✕) that held focus is gone: focus stays in the dialog, for its keys.
 		if (popup !== null && !popup.contains(document.activeElement)) {
 			popup.focus()
 		}
+
+		// The subdirectories' list is the slideshow's alone: a load under way never lands, and the opening list comes
+		// back (the stored preference stays).
+		if (!running) {
+			dropSubfolders(startedFromRef.current)
+		}
+	})
+
+	useEffect(() => {
+		if (wasRunningRef.current === slideshow.running) {
+			return
+		}
+
+		wasRunningRef.current = slideshow.running
+		onRunningChange(slideshow.running)
 	}, [slideshow.running])
 
 	// Neither does a new edit mode while one is open, being entered, or saving, nor under a slideshow.

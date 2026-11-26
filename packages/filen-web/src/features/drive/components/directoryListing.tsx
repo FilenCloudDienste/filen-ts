@@ -84,7 +84,7 @@ import {
 	reconcileSelectedItems,
 	resolveListingDisplayItems
 } from "@/features/drive/components/directoryListing.logic"
-import { currentRootUuid } from "@/features/drive/lib/actions"
+import { useDriveRootUuidQuery } from "@/queries/driveRoot"
 import type { SlideshowSource } from "@/features/preview/lib/slideshowTree"
 import { Breadcrumb } from "@/features/drive/components/breadcrumb"
 import { SortMenu } from "@/features/drive/components/sortMenu"
@@ -475,6 +475,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Where a slideshow opened from here takes its subdirectories from (the listing's own hide rules).
 	const listingSearchActive = search.active || localSearchActive
+	const driveRootUuid = useDriveRootUuidQuery().data ?? ""
 	const slideshowSource = useMemo(
 		() =>
 			listingSlideshowSource({
@@ -483,9 +484,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				searchActive: listingSearchActive,
 				hideDotFiles: hideHidden,
 				dotFilenRoot,
-				rootUuid: currentRootUuid()
+				rootUuid: driveRootUuid
 			}),
-		[variant, splat, listingSearchActive, hideHidden, dotFilenRoot]
+		[variant, splat, listingSearchActive, hideHidden, dotFilenRoot, driveRootUuid]
 	)
 
 	const handleOpen = useListingOpen({

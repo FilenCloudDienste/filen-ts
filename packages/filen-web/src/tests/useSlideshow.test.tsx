@@ -781,12 +781,21 @@ describe("SlideshowSlot", () => {
 				<Child />
 			</SlideshowSlot>
 		)
+		const outer = view.container.firstElementChild
+		const inner = view.getByTestId("child").parentElement
+
+		// Outside a slideshow the wrappers lay nothing out.
+		expect(outer?.className).toBe("contents")
+		expect(inner?.className).toBe("contents")
 
 		view.rerender(
 			<SlideshowSlot value={value}>
 				<Child />
 			</SlideshowSlot>
 		)
+		expect(view.container.firstElementChild).toBe(outer)
+		expect(outer?.className).toContain("size-full")
+		expect(view.getByTestId("child").parentElement).toBe(inner)
 		view.rerender(
 			<SlideshowSlot value={null}>
 				<Child />

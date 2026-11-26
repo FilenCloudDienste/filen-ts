@@ -147,6 +147,19 @@ function subfoldersToggle(): HTMLElement | null {
 	return screen.queryByRole("button", { name: /Include subdirectories/ })
 }
 
+// Throws, naming the toggle, when it is missing.
+function clickSubfolders(): void {
+	fireEvent.click(screen.getByRole("button", { name: /Include subdirectories/ }))
+}
+
+// Starts the slideshow with the subdirectories preference on, the tree landing as it starts.
+async function startWithTree(): Promise<void> {
+	await act(async () => {
+		fireEvent.click(await screen.findByRole("button", { name: /^Slideshow/ }))
+		await Promise.resolve()
+	})
+}
+
 function popup(): HTMLElement {
 	return screen.getByRole("dialog")
 }
@@ -244,7 +257,7 @@ describe("PreviewOverlay slideshow", () => {
 		fireEvent.click(await screen.findByRole("button", { name: /^Slideshow/ }))
 
 		await act(async () => {
-			fireEvent.click(subfoldersToggle() ?? document.body)
+			clickSubfolders()
 			await Promise.resolve()
 		})
 
@@ -257,46 +270,102 @@ describe("PreviewOverlay slideshow", () => {
 		setSlideshowPrefs({ subfolders: true })
 		tree.fetch.mockResolvedValue([SUB, A, B])
 
-		const host = renderOverlay([A, B], 0, { slideshowSource: SOURCE })
+		// Started on the opening list's last file, which the tree holds elsewhere.
+		const host = renderOverlay([DOC, A, B], 2, { slideshowSource: SOURCE })
 
 		withReplace(host)
-
-		// On with the preference already set, the tree loads as the slideshow starts.
-		await act(async () => {
-			fireEvent.click(await screen.findByRole("button", { name: /^Slideshow/ }))
-			await Promise.resolve()
-		})
+		await startWithTree()
 
 		expect(host.props.items).toEqual([SUB, A, B])
-		expect(host.props.index).toBe(1)
+		expect(host.props.index).toBe(2)
 
-		// Stepped onto a file the opening list does not hold: back at that list's first item.
-		act(() => {
-			host.props.onStep(-1)
+		// Off on a file of the opening list: back at that file.
+		clickSubfolders()
+		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([DOC, A, B], 2)
+
+		await act(async () => {
+			clickSubfolders()
+			await Promise.resolve()
 		})
-		expect(host.props.index).toBe(0)
+		expect(host.props.items).toEqual([SUB, A, B])
 
-		fireEvent.click(subfoldersToggle() ?? document.body)
-
-		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([A, B], 0)
-		expect(host.props.items).toEqual([A, B])
+		// Off on a file only the tree holds: back at the opening list's first item.
+		act(() => {
+			host.props.onStep(-2)
+		})
+		clickSubfolders()
+		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([DOC, A, B], 0)
+		expect(host.props.items).toEqual([DOC, A, B])
 	})
 
-	it("keeps the current file when subfolders go off on a file of the opening list", async () => {
+	it("ending the slideshow restores the opening list at the current file", async () => {
 		setSlideshowPrefs({ subfolders: true })
 		tree.fetch.mockResolvedValue([SUB, A, B])
 
-		const host = renderOverlay([A, B], 1, { slideshowSource: SOURCE })
+		const host = renderOverlay([DOC, A, B], 1, { slideshowSource: SOURCE })
 
 		withReplace(host)
+		await startWithTree()
+		expect(host.props.index).toBe(1)
+
+		act(() => {
+			host.props.onStep(1)
+		})
+		fireEvent.click(screen.getByRole("button", { name: "End slideshow" }))
+
+		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([DOC, A, B], 2)
+		expect(host.props.items).toEqual([DOC, A, B])
+		expect(bar()).toBeNull()
+	})
+
+	it("ending on a file only the tree holds restores the file it started from", async () => {
+		setSlideshowPrefs({ subfolders: true })
+		tree.fetch.mockResolvedValue([SUB, A, B])
+
+		const host = renderOverlay([DOC, A, B], 2, { slideshowSource: SOURCE })
+
+		withReplace(host)
+		await startWithTree()
+
+		act(() => {
+			host.props.onStep(-2)
+		})
+		expect(host.props.items[host.props.index]).toBe(SUB)
+
+		fireEvent.keyDown(popup(), withCode({ key: "Escape" }))
+
+		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([DOC, A, B], 2)
+		expect(host.props.onClose).not.toHaveBeenCalled()
+	})
+
+	it("a tree still loading when the slideshow ends never swaps in", async () => {
+		setSlideshowPrefs({ subfolders: true })
+
+		let land: (items: DriveItem[]) => void = () => undefined
+
+		tree.fetch.mockReturnValue(
+			new Promise(resolve => {
+				land = resolve
+			})
+		)
+
+		const host = renderOverlay([A, B], 0, { slideshowSource: SOURCE })
+
+		withReplace(host)
+		fireEvent.click(await screen.findByRole("button", { name: /^Slideshow/ }))
+		expect(tree.fetch).toHaveBeenCalledOnce()
+
+		fireEvent.keyDown(popup(), withCode({ key: "Escape" }))
+		expect(bar()).toBeNull()
+		expect(tree.fetch.mock.calls[0]?.[1].aborted).toBe(true)
 
 		await act(async () => {
-			fireEvent.click(await screen.findByRole("button", { name: /^Slideshow/ }))
+			land([SUB, A, B])
 			await Promise.resolve()
 		})
 
-		fireEvent.click(subfoldersToggle() ?? document.body)
-		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([A, B], 1)
+		expect(host.props.onItemsReplaced).not.toHaveBeenCalled()
+		expect(host.props.items).toEqual([A, B])
 	})
 
 	it("a file removed while subfolders are on never comes back with the opening list", async () => {
@@ -315,7 +384,7 @@ describe("PreviewOverlay slideshow", () => {
 		act(() => {
 			emitPreviewItemRemoved(DOC.data.uuid)
 		})
-		fireEvent.click(subfoldersToggle() ?? document.body)
+		clickSubfolders()
 
 		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([A, B], 0)
 	})

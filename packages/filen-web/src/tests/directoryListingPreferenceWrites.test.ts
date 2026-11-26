@@ -114,6 +114,11 @@ vi.mock("@/features/drive/components/uploadDropzone", () => ({
 vi.mock("@/features/drive/components/driveRow", () => ({ DriveRow: () => null }))
 vi.mock("@/features/drive/components/driveTile", () => ({ DriveTile: () => null }))
 vi.mock("@/features/drive/components/bulkActionBar", () => ({ BulkActionBar: () => null }))
+// The session's drive root, read from the worker in the app.
+vi.mock("@/queries/driveRoot", async importOriginal => ({
+	...(await importOriginal<typeof import("@/queries/driveRoot")>()),
+	useDriveRootUuidQuery: () => ({ data: "root-uuid" })
+}))
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
 	useDirectoryListingQuery: () => ({ data: [], status: "success", isRefetchError: false, error: null, refetch: vi.fn() }),

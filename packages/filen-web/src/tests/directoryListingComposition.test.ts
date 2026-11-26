@@ -188,6 +188,11 @@ const { listingQuery, hiddenPref } = vi.hoisted(() => ({
 	hiddenPref: { current: false }
 }))
 
+// The session's drive root, read from the worker in the app.
+vi.mock("@/queries/driveRoot", async importOriginal => ({
+	...(await importOriginal<typeof import("@/queries/driveRoot")>()),
+	useDriveRootUuidQuery: () => ({ data: "root-uuid" })
+}))
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
 	useDirectoryListingQuery: () => ({ ...listingQuery.current, refetch: vi.fn() }),
