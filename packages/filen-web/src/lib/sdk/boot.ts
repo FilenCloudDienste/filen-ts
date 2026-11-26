@@ -48,6 +48,7 @@ import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 import { loadPdfOutlinePreferences } from "@/features/preview/lib/pdfOutlineOpen"
 import { loadEbookTextSize } from "@/features/preview/lib/ebookTextSize"
 import { loadVideoRepeat } from "@/lib/media/videoRepeat"
+import { loadSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
 import { loadComicPreferences } from "@/features/comics/lib/comicPreferences"
 import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 import { clearDirectoryTreeState, loadDirectoryTreeOpen } from "@/features/drive/store/useDirectoryTreeStore"
@@ -205,6 +206,7 @@ function preloadDevicePreferences(): Promise<void> {
 		loadPdfOutlinePreferences(),
 		loadEbookTextSize(),
 		loadVideoRepeat(),
+		loadSlideshowPrefs(),
 		loadComicPreferences(),
 		loadCollapsedChatSections(),
 		loadDirectoryTreeOpen(),
