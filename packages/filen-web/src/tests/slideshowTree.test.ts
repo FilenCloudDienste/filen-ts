@@ -14,15 +14,13 @@ import type {
 import type { SharedPathHint } from "@/features/drive/lib/sharedPath"
 import type { SharedNestedListing } from "@/workers/sdk.worker"
 
-const { listSlideshowOwned, listSlideshowShared, listSlideshowLinked, driveRootUuidGet } = vi.hoisted(() => ({
+const { listSlideshowOwned, listSlideshowShared, listSlideshowLinked } = vi.hoisted(() => ({
 	listSlideshowOwned: vi.fn<(dirUuid: string) => Promise<NormalDirsAndFiles>>(),
 	listSlideshowShared: vi.fn<(dirUuid: string, hint?: SharedPathHint) => Promise<SharedNestedListing>>(),
-	listSlideshowLinked: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>(),
-	driveRootUuidGet: vi.fn<() => string | undefined>()
+	listSlideshowLinked: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listSlideshowOwned, listSlideshowShared, listSlideshowLinked } }))
-vi.mock("@/queries/driveRoot", () => ({ driveRootUuidGet }))
 
 import { fetchSlideshowTree } from "@/features/preview/lib/slideshowTree"
 import { driveItemName } from "@filen/shared"
@@ -67,7 +65,6 @@ function signal(): AbortSignal {
 
 beforeEach(() => {
 	vi.clearAllMocks()
-	driveRootUuidGet.mockReturnValue(ROOT)
 })
 
 describe("fetchSlideshowTree", () => {
@@ -77,7 +74,7 @@ describe("fetchSlideshowTree", () => {
 			files: [mockFile("a", ROOT, "a.jpg"), mockFile("b", ROOT, "b.mp4", "video/mp4")]
 		})
 
-		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false }, signal())
+		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
 
 		expect(listSlideshowOwned).toHaveBeenCalledTimes(1)
 		expect(listSlideshowOwned).toHaveBeenCalledWith(ROOT)
@@ -140,7 +137,7 @@ describe("fetchSlideshowTree", () => {
 			]
 		})
 
-		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false }, signal())
+		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
 
 		expect(items.map(item => item.data.uuid)).toEqual(["f5", "f4", "f3", "f2", "f7", "f6", "f1"].map(testUuid))
 	})
@@ -160,31 +157,39 @@ describe("fetchSlideshowTree", () => {
 
 		listSlideshowOwned.mockResolvedValueOnce(listing())
 
-		const hidden = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: true }, signal())
+		const hidden = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: true, dotFilenRoot: null }, signal())
 
 		expect(names(hidden)).toEqual(["a.jpg"])
 
 		listSlideshowOwned.mockResolvedValueOnce(listing())
 
-		const shown = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false }, signal())
+		const shown = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
 
 		expect(names(shown)).toEqual([".b.jpg", "a.jpg", "c.jpg", "d.jpg"])
 	})
 
-	it("drops the root .filen even when dot-files show", async () => {
+	it("drops the root .filen when the listing hides it, and keeps it when the listing shows it", async () => {
 		const dotFilen = mockDir("dotfilen", ROOT, ".filen")
 		const photos = mockDir("photos", dotFilen.uuid, "photos")
-		const nested = mockDir("nested", testUuid("other"), ".filen")
 		const other = mockDir("other", ROOT, "Other")
-
-		listSlideshowOwned.mockResolvedValueOnce({
-			dirs: [dotFilen, photos, other, { ...nested, parent: other.uuid }],
+		const nested = mockDir("nested", other.uuid, ".filen")
+		const listing = (): NormalDirsAndFiles => ({
+			dirs: [dotFilen, photos, other, nested],
 			files: [mockFile("a", photos.uuid, "a.jpg"), mockFile("b", nested.uuid, "b.jpg"), mockFile("c", ROOT, "c.jpg")]
 		})
 
-		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false }, signal())
+		listSlideshowOwned.mockResolvedValueOnce(listing())
 
-		expect(names(items)).toEqual(["c.jpg", "b.jpg"])
+		const hidden = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: ROOT }, signal())
+
+		// Only the root's own `.filen`: one nested elsewhere stays.
+		expect(names(hidden)).toEqual(["c.jpg", "b.jpg"])
+
+		listSlideshowOwned.mockResolvedValueOnce(listing())
+
+		const shown = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
+
+		expect(names(shown)).toEqual(["c.jpg", "a.jpg", "b.jpg"])
 	})
 
 	it("an aborted fetch resolves to nothing applied", async () => {
@@ -196,7 +201,9 @@ describe("fetchSlideshowTree", () => {
 			return Promise.resolve({ dirs: [], files: [mockFile("a", ROOT, "a.jpg")] })
 		})
 
-		await expect(fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false }, controller.signal)).resolves.toEqual([])
+		await expect(
+			fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, controller.signal)
+		).resolves.toEqual([])
 	})
 
 	it("never lists when already aborted", async () => {
@@ -204,7 +211,9 @@ describe("fetchSlideshowTree", () => {
 
 		controller.abort()
 
-		await expect(fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false }, controller.signal)).resolves.toEqual([])
+		await expect(
+			fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, controller.signal)
+		).resolves.toEqual([])
 		expect(listSlideshowOwned).not.toHaveBeenCalled()
 	})
 })

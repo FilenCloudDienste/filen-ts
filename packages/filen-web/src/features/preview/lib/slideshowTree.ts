@@ -2,14 +2,14 @@ import type { AnyLinkedDir, Dir, DirPublicLink, File } from "@filen/sdk-rs"
 import { driveItemName, isHiddenName, isRootDotFilen } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sdkApi } from "@/lib/sdk/client"
-import { driveRootUuidGet } from "@/queries/driveRoot"
 
 // A slideshow's "include subdirectories" list: every slideable file below one directory, in directory path then
 // natural name order. The worker returns slideable files only, so this never sees the rest of the tree.
 
-// `hideDotFiles` is the opening listing's own rule; a public link never hides.
+// `hideDotFiles` and `dotFilenRoot` are the opening listing's own rules (`dotFilenRoot` is the drive root uuid
+// while the root `.filen` is hidden, else null); a public link never hides.
 export type SlideshowSource =
-	| { kind: "owned"; uuid: string; hideDotFiles: boolean }
+	| { kind: "owned"; uuid: string; hideDotFiles: boolean; dotFilenRoot: string | null }
 	| { kind: "shared"; variant: "sharedIn" | "sharedOut"; uuid: string; path: readonly string[]; hideDotFiles: boolean }
 	| { kind: "linked"; dir: AnyLinkedDir; link: DirPublicLink }
 
@@ -78,8 +78,8 @@ export async function fetchSlideshowTree(source: SlideshowSource, signal: AbortS
 	const { dirs, files, narrow } = listing
 
 	const hideDotFiles = source.kind !== "linked" && source.hideDotFiles
-	// The root `.filen` holds the app's own data, never a slide; only an owned walk can reach it.
-	const rootUuid = source.kind === "owned" ? (driveRootUuidGet() ?? null) : null
+	// Only an owned walk can reach the root `.filen`.
+	const rootUuid = source.kind === "owned" ? source.dotFilenRoot : null
 	const dirByUuid = new Map<string, Dir>()
 
 	for (const dir of dirs) {
