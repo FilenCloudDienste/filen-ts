@@ -83,13 +83,13 @@ describe("applyLibraryOverrides", () => {
 		expect(library.others.map(other => other.id)).toEqual(["M/Heat (1995)"])
 	})
 
-	it("makes a movie an episode of an existing series, or of a new series of its own", () => {
+	it("makes a movie an episode of an existing series, keeping its title, or of a new series of its own", () => {
 		const into = corrected([MOVIES, SHOWS], {
 			"s:M/Arrival (2016).mkv": { kind: "episode", season: 2, episode: 5, mergeInto: "d:S/Andor" }
 		})
 
 		expect(into.library.movies.map(movie => movie.id)).not.toContain("M/Arrival (2016).mkv")
-		expect(into.summary.series[0]?.seasons[2]).toEqual(["E1  = S/Andor/Season 2/Andor S02E01.mkv", "E5  = M/Arrival (2016).mkv"])
+		expect(into.summary.series[0]?.seasons[2]).toEqual(["E1  = S/Andor/Season 2/Andor S02E01.mkv", "E5 Arrival = M/Arrival (2016).mkv"])
 
 		const own = corrected([MOVIES], { "d:M/Heat (1995)": { kind: "episode", season: 1, episode: 1, title: "Pilot" } })
 
@@ -247,12 +247,16 @@ describe("applyLibraryOverrides: corrections against the classification", () => 
 
 		expect(series?.title).toBe("Arrival Shorts")
 		expect(into.hidden.has(own)).toBe(true)
-		expect(into.summary.series.find(item => item.title === "Arrival Shorts")?.seasons[1]).toHaveLength(2)
+		// Made episodes keep their own titles: a movie's and an other video's.
+		expect(into.summary.series.find(item => item.title === "Arrival Shorts")?.seasons[1]).toEqual([
+			"E1 Arrival = M/Arrival (2016).mkv",
+			"E2 Loose Clip = M/Loose Clip.mp4"
+		])
 
 		const merged = corrected(roots, { [arrival]: { kind: "episode", season: 3, episode: 1 }, [`d:${own}`]: { mergeInto: "d:S/Andor" } })
 
 		expect(merged.library.series.map(item => item.id)).toEqual(["S/Andor"])
-		expect(merged.summary.series[0]?.seasons[3]).toEqual(["E1  = M/Arrival (2016).mkv"])
+		expect(merged.summary.series[0]?.seasons[3]).toEqual(["E1 Arrival = M/Arrival (2016).mkv"])
 	})
 
 	it("groups the same way whatever order the files were listed in", () => {

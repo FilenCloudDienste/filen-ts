@@ -306,7 +306,8 @@ function applyToMovies(ctx: Context): void {
 					episode: override.episode,
 					episodeEnd: spanEnd(override, 0),
 					date: 0,
-					title: override.title ?? "",
+					// Its own name, unless the correction gives another: the series it joins shows it beside the code.
+					title: override.title ?? movie.title,
 					versions: movie.versions,
 					dateAdded: movie.dateAdded
 				},
@@ -362,7 +363,7 @@ function applyToOthers(ctx: Context): void {
 					episode: override.episode,
 					episodeEnd: spanEnd(override, 0),
 					date: 0,
-					title: override.title ?? "",
+					title: override.title ?? other.title,
 					versions,
 					dateAdded: other.dateAdded
 				},
