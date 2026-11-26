@@ -112,7 +112,8 @@ import {
 	getCachedDir,
 	getCachedName,
 	getSharedDirContext,
-	isOutsideRoot
+	isOutsideRoot,
+	type SharedDirContext
 } from "@/features/drive/lib/cache"
 import {
 	coalesceSharedPathDeps,
@@ -123,8 +124,9 @@ import {
 	type SharedPathInFlight
 } from "@/features/drive/lib/sharedPath"
 import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
-import { narrowItem } from "@/features/drive/lib/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoCandidate } from "@/features/photos/lib/predicate"
+import { slideKindOf } from "@/features/preview/lib/slideshow.logic"
 import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/flatListing"
 import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import {
@@ -1109,14 +1111,34 @@ export interface ItemInfoResult {
 // NonRootDirTagged union (the same shape a shared/linked walk returns through this call), so this
 // narrows defensively rather than trusting that by construction. The narrowed arm is structurally a
 // `Dir` (the `type` tag is additive), assignable straight through to NormalDirsAndFiles.
-// Only photo files are returned (every dir is kept and cached for folder paths and isOutsideRoot), so
-// non-photo files of a whole-drive walk are never structured-cloned to the main thread.
-function narrowOwnedWalk({ dirs, files }: { dirs: NonRootDirTagged[]; files: NormalDirsAndFiles["files"] }): NormalDirsAndFiles {
+// Only the files `keep` admits are returned (every dir is kept and cached for folder paths and isOutsideRoot), so
+// the other files of a whole-drive walk are never structured-cloned to the main thread.
+function narrowOwnedWalk(
+	{ dirs, files }: { dirs: NonRootDirTagged[]; files: NormalDirsAndFiles["files"] },
+	keep: (item: DriveItem) => boolean
+): NormalDirsAndFiles {
 	const normalDirs = dirs.filter((d): d is Extract<NonRootDirTagged, { type: "normal" }> => d.type === "normal")
 
 	cacheDirs(normalDirs)
 
-	return { dirs: normalDirs, files: files.filter(file => isPhotoCandidate(narrowItem(file))) }
+	return { dirs: normalDirs, files: files.filter(file => keep(narrowItem(file))) }
+}
+
+// What a slideshow shows, judged without verdicts (the worker holds none).
+function isSlideable(item: DriveItem): boolean {
+	return slideKindOf(item, null) !== null
+}
+
+// A shared directory's dir+role: the one cached from a prior shared listing, else resolved along `hint`.
+async function sharedDirContextOf(c: Client, uuid: string, hint: SharedPathHint | undefined): Promise<SharedDirContext> {
+	const context =
+		hint === undefined ? getSharedDirContext(uuid) : await resolveSharedDirContext(sharedPathDeps(c, hint.variant), uuid, hint.path)
+
+	if (context === undefined) {
+		throw new Error(`shared directory not found: ${uuid}`)
+	}
+
+	return context
 }
 
 // What a save's upload takes beyond its bytes: a deadline and a cancel token (see uploadFileBytes), and the new
@@ -1657,7 +1679,12 @@ const api = {
 	// note), never a worker-side cancel. Returns every dir of the root but only its photo files
 	// (narrowOwnedWalk).
 	async listPhotosRecursive(rootUuid: string): Promise<NormalDirsAndFiles> {
-		return narrowOwnedWalk(await walkCoordinator.walk(rootUuid))
+		return narrowOwnedWalk(await walkCoordinator.walk(rootUuid), isPhotoCandidate)
+	},
+	// A slideshow's "include subdirectories" list: the same walk (a settled one is reused), every dir but only
+	// slideable files.
+	async listSlideshowOwned(dirUuid: string): Promise<NormalDirsAndFiles> {
+		return narrowOwnedWalk(await walkCoordinator.walk(dirUuid), isSlideable)
 	},
 	// Photos' socket scoping: whether every dir provably sits outside `rootUuid`, judged from the dir cache
 	// alone. Deciding to skip a refetch must never cost a round trip of its own.
@@ -2571,6 +2598,12 @@ const api = {
 			})
 		)
 	},
+	// A slideshow's "include subdirectories" list of a public directory link: every dir, only slideable files.
+	async listSlideshowLinked(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		const result = await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined))
+
+		return { dirs: result.dirs, files: result.files.filter(file => isSlideable(narrowItem(file))) }
+	},
 	getLinkedDirSizeAnon(dir: AnyLinkedDirWithContext): Promise<DirSizeResponse> {
 		return withLinkedUnauth(unauth => unauth.getDirSize(dir))
 	},
@@ -2936,16 +2969,26 @@ const api = {
 	// by-uuid resolver on the wasm surface to fall back to.
 	async listSharedDirectory(uuid: string, hint?: SharedPathHint): Promise<SharedNestedListing> {
 		const c = requireClient()
-		const context =
-			hint === undefined ? getSharedDirContext(uuid) : await resolveSharedDirContext(sharedPathDeps(c, hint.variant), uuid, hint.path)
-		if (context === undefined) {
-			throw new Error(`shared directory not found: ${uuid}`)
-		}
+		const context = await sharedDirContextOf(c, uuid, hint)
 		const result = await c.listSharedDir(context.dir, context.role)
 		for (const dir of result.dirs) {
 			cacheSharedDirContext(dir.inner.uuid, { dir, role: context.role })
 		}
 		return { dirs: result.dirs, files: result.files, role: context.role }
+	},
+	// A slideshow's "include subdirectories" list of a shared directory: the whole subtree in one listing, every dir
+	// (cached for descent like listSharedDirectory's) but only slideable files.
+	async listSlideshowShared(dirUuid: string, hint?: SharedPathHint): Promise<SharedNestedListing> {
+		const c = requireClient()
+		const context = await sharedDirContextOf(c, dirUuid, hint)
+		const result = await c.listDirRecursive({ dir: context.dir, shareInfo: context.role }, () => undefined)
+		const dirs = result.dirs.filter((d): d is Extract<NonRootDirTagged, { type: "shared" }> => d.type === "shared")
+
+		for (const dir of dirs) {
+			cacheSharedDirContext(dir.inner.uuid, { dir, role: context.role })
+		}
+
+		return { dirs, files: result.files.filter(file => isSlideable(narrowItem(file))), role: context.role }
 	},
 	// Stops sharing a shared-root item (a directory shared out, or an item shared in the caller wants
 	// gone).
