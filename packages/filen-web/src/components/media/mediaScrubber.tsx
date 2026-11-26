@@ -24,6 +24,10 @@ interface MediaScrubberProps {
 	tooltip?: boolean | undefined
 	// Start-ordered chapters: a tick at each start, and the tip names the chapter under the pointer.
 	markers?: readonly StageChapter[] | undefined
+	// What one arrow key moves, in the value's unit (MEDIA_SEEK_STEP_SECONDS by default).
+	step?: number | undefined
+	// The spoken value, for a scrubber over something other than time (an animation's frames).
+	valueText?: ((value: number) => string) | undefined
 	className?: string | undefined
 }
 
@@ -41,6 +45,8 @@ export function MediaScrubber({
 	onScrub,
 	tooltip,
 	markers,
+	step,
+	valueText,
 	className
 }: MediaScrubberProps) {
 	const { t } = useTranslation("common")
@@ -107,7 +113,7 @@ export function MediaScrubber({
 	}
 
 	function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-		const target = scrubberKeyTarget(event.key, shown, duration, MEDIA_SEEK_STEP_SECONDS)
+		const target = scrubberKeyTarget(event.key, shown, duration, step ?? MEDIA_SEEK_STEP_SECONDS)
 
 		if (target === null) {
 			return
@@ -152,16 +158,18 @@ export function MediaScrubber({
 				disabled={disabled}
 				aria-label={label}
 				aria-valuetext={
-					shownChapter === null
-						? t("mediaTimeOf", {
-								current: formatSecondsToMediaClock(shown),
-								total: formatSecondsToMediaClock(Math.max(duration, 0))
-							})
-						: t("mediaTimeOfInChapter", {
-								current: formatSecondsToMediaClock(shown),
-								total: formatSecondsToMediaClock(Math.max(duration, 0)),
-								chapter: chapterName(markers ?? [], shownChapter, t)
-							})
+					valueText !== undefined
+						? valueText(shown)
+						: shownChapter === null
+							? t("mediaTimeOf", {
+									current: formatSecondsToMediaClock(shown),
+									total: formatSecondsToMediaClock(Math.max(duration, 0))
+								})
+							: t("mediaTimeOfInChapter", {
+									current: formatSecondsToMediaClock(shown),
+									total: formatSecondsToMediaClock(Math.max(duration, 0)),
+									chapter: chapterName(markers ?? [], shownChapter, t)
+								})
 				}
 				className="peer pointer-events-none absolute inset-0 size-full appearance-none opacity-0"
 				onKeyDown={handleKeyDown}

@@ -20,6 +20,7 @@ import { DecodedImage, HeldImageGate, SvgzImage } from "@/features/preview/compo
 import { MupdfImage } from "@/features/preview/components/mupdfImage"
 import { EpsImage } from "@/features/preview/components/epsImage"
 import { NativeSizeGate } from "@/features/preview/components/nativeSizeGate"
+import { AnimatableImage } from "@/features/preview/components/animatedImagePlayer"
 import { NATIVE_VIEW_SNIFF_FROM_BYTES, nativeViewCrash } from "@/lib/pixelBudget"
 import type { ImagePageSlot } from "@/features/preview/lib/imagePageSource"
 
@@ -350,13 +351,20 @@ export function ImageViewer({ item, alt, imageRef, pageSourceRef }: ImageViewerP
 						}
 					: undefined
 			}
+			// An animation the browser's ImageDecoder plays gets the animated image player.
 			render={(url, onError) => (
-				<ZoomableImage
+				<AnimatableImage
+					item={item}
 					url={url}
 					alt={alt}
-					onError={onError}
-					imageRef={imageRef}
-				/>
+				>
+					<ZoomableImage
+						url={url}
+						alt={alt}
+						onError={onError}
+						imageRef={imageRef}
+					/>
+				</AnimatableImage>
 			)}
 		/>
 	)

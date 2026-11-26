@@ -24,5 +24,15 @@ export const previewImageView = {
 	/** Image preview — an EPS file without an embedded preview picture (PostScript is never run to draw one) */
 	previewEpsNoPreview: "This EPS file has no preview to show.",
 	/** Image editing header — beside the save button when the image has several pages: the copy holds the page shown */
-	previewImageSaveCopyPage: "Current page only"
+	previewImageSaveCopyPage: "Current page only",
+	/** Animated image player (GIF, animated WebP/PNG/AVIF) — button showing the previous frame; it pauses playback */
+	previewAnimationPreviousFrame: "Previous frame",
+	/** Animated image player — button showing the next frame; it pauses playback */
+	previewAnimationNextFrame: "Next frame",
+	/** Animated image player — accessible name of the slider that picks a frame */
+	previewAnimationFrameSlider: "Frame",
+	/** Animated image player — the frame on screen and how many there are, shown beside the slider, e.g. 12/48 */
+	previewAnimationFrameCounter: "{{frame, number}}/{{count, number}}",
+	/** Animated image player — the frame slider's spoken position, e.g. "Frame 12 of 48" */
+	previewAnimationFrameOf: "Frame {{frame, number}} of {{count, number}}"
 } as const

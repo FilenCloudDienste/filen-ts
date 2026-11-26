@@ -351,3 +351,41 @@ export function BitmapImage({ bitmap, width, height, alt }: { bitmap: ImageBitma
 		</div>
 	)
 }
+
+// A canvas its owner keeps drawing (an animation's frames), `width`×`height` in size, zoomed like the others.
+export function ZoomableCanvas({
+	width,
+	height,
+	alt,
+	canvasRef
+}: {
+	width: number
+	height: number
+	alt: string
+	canvasRef: (canvas: HTMLCanvasElement | null) => void
+}) {
+	const { containerRef, binding } = useZoom({ width, height })
+	const shown = use(ImageShownContext)
+
+	return (
+		<div
+			ref={containerRef}
+			className={CONTAINER_CLASS}
+		>
+			<canvas
+				ref={canvas => {
+					canvasRef(canvas)
+
+					if (canvas !== null) {
+						shown?.({ width, height })
+					}
+				}}
+				width={width}
+				height={height}
+				role="img"
+				aria-label={alt}
+				{...binding}
+			/>
+		</div>
+	)
+}
