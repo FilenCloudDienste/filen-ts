@@ -59,6 +59,8 @@ interface Show {
 	readonly shuffle: boolean
 	readonly order: SlideshowOrder
 	readonly upcoming: SlideshowOrder
+	// The host index last looked up in the order, so an item that is no slide is looked up once, not every render.
+	readonly looked: number
 }
 
 interface Slide {
@@ -69,9 +71,18 @@ interface Slide {
 	shownAt: number | null
 	animating: boolean
 	mediaEnded: boolean
+	// Shown without its report: the show paused on it, or it never showed in time (an error state is seen then).
+	revealed: boolean
+	readonly listeners: Set<() => void>
 }
 
-const IDLE_SLOT: SlideshowSlotValue = { shown: () => undefined, signals: null, placeholderUrl: null }
+const IDLE_SLOT: SlideshowSlotValue = {
+	shown: () => undefined,
+	signals: null,
+	placeholderUrl: null,
+	visible: () => true,
+	subscribe: () => () => undefined
+}
 
 // The timing side, outside React so a viewer's signal costs no render: a clock that runs only while the show runs
 // unpaused in a visible tab, the current slide's record, one timer to its next due check, the wake lock, full
@@ -92,6 +103,8 @@ class SlideClock {
 	private menuOpen = false
 	private menuClosedAt = Number.NEGATIVE_INFINITY
 	private sessions = 0
+	// The session begun and not ended yet (0: none).
+	private live = 0
 	private preShown = -1
 	public fullscreenEntered = false
 
@@ -124,18 +137,29 @@ class SlideClock {
 	// A new session; `preShown`: its first slide is on screen already (the one it started on).
 	public begin(preShown: boolean): number {
 		this.sessions++
+		this.live = this.sessions
 		this.preShown = preShown ? this.sessions : -1
 		this.fullscreenEntered = false
 
 		return this.sessions
 	}
 
+	public end(): void {
+		this.live = 0
+		this.fullscreenEntered = false
+	}
+
 	public isSession(session: number): boolean {
-		return this.running && this.sessions === session
+		return this.live === session
 	}
 
 	// The slot of the slide `key` (session and file), the same object while the key is.
 	public slot(key: string, session: number, kind: SlideKind | null, placeholderUrl: string | null): SlideshowSlotValue {
+		// The current slide's record survives a discarded render that made another slide's.
+		if (this.current?.key === key) {
+			return this.current.value
+		}
+
 		if (this.latest?.key === key) {
 			return this.latest.value
 		}
@@ -153,10 +177,13 @@ class SlideClock {
 			shownAt,
 			animating: false,
 			mediaEnded: false,
+			revealed: false,
+			listeners: new Set(),
 			value: {
 				shown: () => {
 					if (slide.shownAt === null) {
 						slide.shownAt = this.now()
+						notify(slide)
 						this.changed(slide)
 					}
 				},
@@ -178,7 +205,15 @@ class SlideClock {
 									}
 								}
 							},
-				placeholderUrl
+				placeholderUrl,
+				visible: () => slide.shownAt !== null || slide.revealed,
+				subscribe: listener => {
+					slide.listeners.add(listener)
+
+					return () => {
+						slide.listeners.delete(listener)
+					}
+				}
 			}
 		}
 
@@ -189,14 +224,29 @@ class SlideClock {
 
 	// The slot on screen now (IDLE_SLOT outside a show).
 	public enter(value: SlideshowSlotValue): void {
-		const slide = this.latest?.value === value ? this.latest : null
+		const slide = this.latest?.value === value ? this.latest : this.current?.value === value ? this.current : null
 
 		if (slide !== null && slide.mountedAt === null) {
 			slide.mountedAt = this.now()
 		}
 
 		this.current = slide
+
+		if (this.paused) {
+			this.reveal()
+		}
+
 		this.schedule()
+	}
+
+	// The current slide shown though it has not reported so.
+	private reveal(): void {
+		const slide = this.current
+
+		if (slide !== null && !slide.revealed) {
+			slide.revealed = true
+			notify(slide)
+		}
 	}
 
 	private changed(slide: Slide): void {
@@ -212,9 +262,13 @@ class SlideClock {
 			this.intervalMs = intervalMs
 
 			if (!running) {
-				this.fullscreenEntered = false
+				this.end()
 			}
 		})
+
+		if (running && paused) {
+			this.reveal()
+		}
 	}
 
 	public setMenuOpen(open: boolean): void {
@@ -261,6 +315,11 @@ class SlideClock {
 				this.timer = undefined
 
 				if (this.nextCheck() === 0) {
+					// A slide that never showed is seen as it goes (and stays seen should the step not happen).
+					if (this.current?.shownAt === null) {
+						this.reveal()
+					}
+
 					this.due()
 				} else {
 					this.schedule()
@@ -339,6 +398,12 @@ class SlideClock {
 	}
 }
 
+function notify(slide: Slide): void {
+	for (const listener of slide.listeners) {
+		listener()
+	}
+}
+
 function kindsOf(items: readonly DriveItem[]): (SlideKind | null)[] {
 	return items.map(item => slideKindOf(item))
 }
@@ -377,7 +442,11 @@ function rebuild(show: Show, items: readonly DriveItem[], index: number, shuffle
 			}
 		}
 
-		kept.push(...at.values())
+		// One by one: a spread of tens of thousands of arguments overflows the stack.
+		for (const index of at.values()) {
+			kept.push(index)
+		}
+
 		order = { order: kept, position: position < kept.length ? position : 0 }
 	} else {
 		order = slideshowOrder(kinds, index, shuffle)
@@ -387,7 +456,7 @@ function rebuild(show: Show, items: readonly DriveItem[], index: number, shuffle
 		return null
 	}
 
-	return { ...show, items, shuffle, order, upcoming: nextSlide(order, 1, shuffle) }
+	return { ...show, items, shuffle, order, upcoming: nextSlide(order, 1, shuffle), looked: -1 }
 }
 
 export function useSlideshow(host: SlideshowHost): Slideshow {
@@ -403,14 +472,16 @@ export function useSlideshow(host: SlideshowHost): Slideshow {
 		current = rebuild(current, host.items, host.index, prefs.shuffle)
 	}
 
-	// Paged by the host itself (its arrows): the order follows when it landed on a slide.
-	if (current !== null && current.order.order[current.order.position] !== host.index) {
+	// Paged by the host itself (its arrows): the order follows when it landed on a slide. Looked up once per index.
+	if (current !== null && current.order.order[current.order.position] !== host.index && current.looked !== host.index) {
 		const position = current.order.order.indexOf(host.index)
 
-		if (position !== -1) {
+		if (position === -1) {
+			current = { ...current, looked: host.index }
+		} else {
 			const order = { order: current.order.order, position }
 
-			current = { ...current, order, upcoming: nextSlide(order, 1, current.shuffle) }
+			current = { ...current, order, upcoming: nextSlide(order, 1, current.shuffle), looked: host.index }
 		}
 	}
 
@@ -467,8 +538,27 @@ export function useSlideshow(host: SlideshowHost): Slideshow {
 	}
 
 	function stop(): void {
+		clock.end()
 		setShow(null)
 		setPaused(false)
+	}
+
+	// Onto the order's slide when the host is elsewhere (a show started, or resumed, on an item that is no slide).
+	// Never past a slot that cannot be left: that would ask to discard it.
+	function land(show: Show): boolean {
+		const to = show.order.order[show.order.position]
+
+		if (to === undefined || to === host.index) {
+			return true
+		}
+
+		if (!host.canLeave()) {
+			return false
+		}
+
+		host.step(to - host.index)
+
+		return true
 	}
 
 	const onDue = useEffectEvent(() => {
@@ -529,12 +619,18 @@ export function useSlideshow(host: SlideshowHost): Slideshow {
 			const session = clock.begin(first === host.index)
 			const wasFullscreen = document.fullscreenElement === document.documentElement
 
-			setShow({ session, items: host.items, shuffle: prefs.shuffle, order, upcoming: nextSlide(order, 1, prefs.shuffle) })
-			setPaused(false)
-
-			if (first !== host.index) {
-				host.step(first - host.index)
+			const started: Show = {
+				session,
+				items: host.items,
+				shuffle: prefs.shuffle,
+				order,
+				upcoming: nextSlide(order, 1, prefs.shuffle),
+				looked: -1
 			}
+
+			setShow(started)
+			// Started on an unsaved slot that is no slide: paused there until the user resumes.
+			setPaused(!land(started))
 
 			void enterViewerFullScreen().then(entered => {
 				if (entered && !wasFullscreen && clock.isSession(session)) {
@@ -544,7 +640,11 @@ export function useSlideshow(host: SlideshowHost): Slideshow {
 		},
 		stop,
 		togglePause: () => {
-			setPaused(previous => !previous)
+			if (paused && current !== null && !land(current)) {
+				return
+			}
+
+			setPaused(!paused)
 		},
 		go: step,
 		setMenuOpen: open => {

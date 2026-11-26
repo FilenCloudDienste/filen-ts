@@ -102,6 +102,9 @@ describe("prefetchPreviewImage", () => {
 
 		const id = stream.hold.mock.calls[0]?.[0]
 
+		// Kept before the registration answers: a slot mounted meanwhile reuses it.
+		expect(getPreviewStreamId("authed", item.data.uuid, "image/jpeg")).toBe(id)
+
 		await settle()
 
 		expect(stream.url).toHaveBeenCalledWith(expect.anything(), "beach.jpg", "image/jpeg", id, { access: "authed" })

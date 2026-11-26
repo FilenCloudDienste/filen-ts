@@ -44,18 +44,17 @@ export function prefetchPreviewImage(
 		return null
 	}
 
-	const epoch = previewCacheEpoch()
 	const id = getPreviewStreamId(scope, uuid, contentType) ?? crypto.randomUUID()
 	let image: HTMLImageElement | null = null
 	let disposed = false
 
 	holdPreviewStream(id)
+	// Kept at once, as a viewer's registration is: a slot mounted while this registers reuses the id (and registers it
+	// again whatever came of this load).
+	setPreviewStreamId(scope, uuid, contentType, id, previewCacheEpoch())
 
 	previewStreamUrl(narrowToAnyFile(item), driveItemName(item), contentType, id, { access }).then(
 		url => {
-			// Kept as a viewer's registration is: the viewer registers this id again whatever came of the load.
-			setPreviewStreamId(scope, uuid, contentType, id, epoch)
-
 			if (disposed) {
 				return
 			}

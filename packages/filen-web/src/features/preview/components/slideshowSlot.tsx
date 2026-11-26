@@ -1,50 +1,47 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 import { cn } from "@filen/shared"
-import { ImageShownContext, type ShownImage } from "@/features/preview/lib/imageDisplay"
+import { ImageShownContext } from "@/features/preview/lib/imageDisplay"
 import { SlideSignalsContext, type SlideshowSlotValue } from "@/features/preview/lib/slideSignals"
 
-interface SlotState {
-	readonly value: SlideshowSlotValue
-	// One per slide, for the viewers' effects that depend on it.
-	readonly report: (image: ShownImage) => void
-	readonly shown: boolean
+// How long a slide fades in; the thumbnail under it goes after.
+const FADE_MS = 200
+
+function subscribeNothing(): () => void {
+	return () => undefined
+}
+
+function alwaysVisible(): boolean {
+	return true
 }
 
 // Where a pager's viewer shows under a running slideshow (`value` from useSlideshow; null outside one). The same
-// elements whatever `value` is, so the viewer under it never remounts. A slide paged to is hidden until its viewer
-// reports it shown, the grid's thumbnail under it meanwhile, then fades in; the thumbnail goes once the fade is done.
+// elements whatever `value` is, so the viewer under it never remounts. A slide is hidden until it is to be seen
+// (value.visible), the grid's thumbnail under it meanwhile, then fades in; the thumbnail is dropped once the fade is
+// done. An item that is no slide (paged to by hand) shows as it always does.
 export function SlideshowSlot({ value, children }: { value: SlideshowSlotValue | null; children: ReactNode }) {
-	const [state, setState] = useState<SlotState | null>(null)
-	let current = state
+	const slide = value !== null && value.signals !== null ? value : null
+	const visible = useSyncExternalStore(slide?.subscribe ?? subscribeNothing, slide?.visible ?? alwaysVisible, alwaysVisible)
+	const [faded, setFaded] = useState<SlideshowSlotValue | null>(null)
 
-	if (value === null) {
-		current = null
-	} else if (state?.value !== value) {
-		const slide = value
-
-		current = {
-			value: slide,
-			// The slide a slideshow starts on (after none, or after an item that is no slide) is on screen already.
-			shown: (state?.value.signals ?? null) === null,
-			report: image => {
-				slide.shown(image)
-				setState(previous => (previous?.value === slide && !previous.shown ? { ...previous, shown: true } : previous))
-			}
+	useEffect(() => {
+		if (slide === null || !visible) {
+			return
 		}
-	}
 
-	if (current !== state) {
-		setState(current)
-	}
+		const timer = setTimeout(() => {
+			setFaded(slide)
+		}, FADE_MS)
 
-	// An item that is no slide (paged to by hand) shows as it always does.
-	const slide = current !== null && current.value.signals !== null ? current : null
-	const revealed = slide === null || slide.shown
-	const placeholder = slide === null ? null : slide.value.placeholderUrl
+		return () => {
+			clearTimeout(timer)
+		}
+	}, [slide, visible])
+
+	const placeholder = slide !== null && faded !== slide ? slide.placeholderUrl : null
 
 	return (
-		<ImageShownContext value={current?.report ?? null}>
-			<SlideSignalsContext value={current?.value.signals ?? null}>
+		<ImageShownContext value={value?.shown ?? null}>
+			<SlideSignalsContext value={value?.signals ?? null}>
 				<div className="relative size-full">
 					{placeholder === null ? null : (
 						<img
@@ -52,16 +49,13 @@ export function SlideshowSlot({ value, children }: { value: SlideshowSlotValue |
 							alt=""
 							aria-hidden
 							draggable={false}
-							className={cn(
-								"pointer-events-none absolute inset-0 size-full object-contain",
-								revealed && "opacity-0 transition-opacity delay-200 duration-0 motion-reduce:delay-0"
-							)}
+							className="pointer-events-none absolute inset-0 size-full object-contain"
 						/>
 					)}
 					<div
 						className={cn(
 							"relative size-full",
-							revealed ? "opacity-100 transition-opacity duration-200 motion-reduce:transition-none" : "opacity-0"
+							visible ? "opacity-100 transition-opacity duration-200 motion-reduce:transition-none" : "opacity-0"
 						)}
 					>
 						{children}

@@ -20,4 +20,8 @@ export interface SlideshowSlotValue {
 	readonly signals: SlideSignals | null
 	// The grid's thumbnail, drawn under the slide until it shows.
 	readonly placeholderUrl: string | null
+	// Whether the slide is to be seen: it reported shown, or the show paused on it or it never showed in time (so its
+	// error state is seen); with its subscription, for useSyncExternalStore.
+	readonly visible: () => boolean
+	readonly subscribe: (listener: () => void) => () => void
 }

@@ -34,6 +34,7 @@ vi.mock("@/features/drive/lib/thumbnails", () => ({ peekThumbnailUrl: (uuid: str
 
 const { useSlideshow } = await import("@/features/preview/hooks/useSlideshow")
 const { SlideshowSlot } = await import("@/features/preview/components/slideshowSlot")
+const { setSlideshowPrefs } = await import("@/features/preview/lib/slideshowPrefs")
 
 type Slideshow = ReturnType<typeof useSlideshow>
 
@@ -90,8 +91,19 @@ function Viewer({ uuid }: { uuid: string }) {
 	return <div data-testid="viewer">{uuid}</div>
 }
 
+// A pager as the hosts are: a replaced list keeps the open item where it still is, else the same index.
 function Host({ items, start }: { items: readonly DriveItem[]; start: number }) {
 	const [current, setCurrent] = useState(start)
+	const [listed, setListed] = useState(items)
+
+	if (listed !== items) {
+		const open = listed[current]?.data.uuid
+		const kept = items.findIndex(item => item.data.uuid === open)
+
+		setListed(items)
+		setCurrent(kept === -1 ? Math.min(current, Math.max(0, items.length - 1)) : kept)
+	}
+
 	const slideshow = useSlideshow({
 		items,
 		index: current,
@@ -153,6 +165,10 @@ function shownNow(): void {
 	})
 }
 
+function seenUuid(): string {
+	return seen.uuid
+}
+
 function startShow(): void {
 	act(() => {
 		show.start()
@@ -195,6 +211,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	setSlideshowPrefs({ shuffle: false })
 	vi.useRealTimers()
 	Reflect.deleteProperty(document, "fullscreenElement")
 	Reflect.deleteProperty(document, "fullscreenEnabled")
@@ -571,7 +588,180 @@ describe("useSlideshow", () => {
 		})
 		expect(prefetch.log).toContain("dispose c")
 	})
+	it("shows a slide that has not reported shown once the show pauses on it", () => {
+		mount([DOC, A, B])
+		startShow()
+		expect(index).toBe(1)
+
+		const content = (): string => document.querySelector("[data-testid=viewer]")?.parentElement?.className ?? ""
+
+		expect(content()).toContain("opacity-0")
+
+		act(() => {
+			show.togglePause()
+		})
+		expect(content()).toContain("opacity-100")
+	})
+
+	it("shows a slide that never showed when its time runs out", () => {
+		mount([DOC, A, B])
+		startShow()
+
+		const slot = show.slot
+
+		expect(slot.visible()).toBe(false)
+
+		advance(15_000)
+		expect(index).toBe(2)
+		expect(slot.visible()).toBe(true)
+	})
+
+	it("starts paused without paging when the item it starts on cannot be left", () => {
+		leavable = false
+		mount([DOC, A, B])
+		startShow()
+		expect(show.running).toBe(true)
+		expect(show.paused).toBe(true)
+		expect(index).toBe(0)
+
+		// Still dirty: resuming does not page either.
+		act(() => {
+			show.togglePause()
+		})
+		expect(show.paused).toBe(true)
+		expect(index).toBe(0)
+
+		leavable = true
+		act(() => {
+			show.togglePause()
+		})
+		expect(show.paused).toBe(false)
+		expect(index).toBe(1)
+	})
+
+	it("a shuffled order keeps its sequence when an item goes and another comes", () => {
+		const D = fileNamed("d.jpg")
+		const E = fileNamed("e.jpg")
+		const view = mount([A, B, C, D])
+
+		act(() => {
+			setSlideshowPrefs({ shuffle: true })
+		})
+		startShow()
+
+		const lap = [seenUuid()]
+
+		for (let i = 0; i < 3; i++) {
+			act(() => {
+				show.go(1)
+			})
+			lap.push(seenUuid())
+		}
+
+		expect(lap[0]).toBe(A.data.uuid)
+		expect([...lap].sort()).toEqual([A, B, C, D].map(item => item.data.uuid).sort())
+
+		// The second slide of the lap goes, a new item comes.
+		const gone = lap[1]
+		const remaining = [A, B, C, D].filter(item => item.data.uuid !== gone)
+
+		view.update([...remaining, E])
+		expect(show.total).toBe(4)
+
+		act(() => {
+			show.go(1)
+		})
+		expect(seenUuid()).toBe(E.data.uuid)
+
+		const back: string[] = []
+
+		for (let i = 0; i < 3; i++) {
+			act(() => {
+				show.go(-1)
+			})
+			back.push(seenUuid())
+		}
+
+		expect(back).toEqual([lap[3], lap[2], lap[0]])
+	})
+
+	it("toggling shuffle while running keeps the current slide", () => {
+		const D = fileNamed("d.jpg")
+
+		mount([A, B, C, D], 1)
+		startShow()
+		expect(show.position).toBe(2)
+
+		act(() => {
+			setSlideshowPrefs({ shuffle: true })
+		})
+		expect(show.running).toBe(true)
+		expect(index).toBe(1)
+		expect(show.position).toBe(1)
+		expect(show.total).toBe(4)
+
+		act(() => {
+			setSlideshowPrefs({ shuffle: false })
+		})
+		expect(index).toBe(1)
+		expect(show.position).toBe(2)
+	})
+
+	it("goes on from the host's new index when the current item is removed", () => {
+		const view = mount([A, B, C])
+
+		startShow()
+		// The host keeps its index: B is there now.
+		view.update([B, C])
+		expect(show.running).toBe(true)
+		expect(show.position).toBe(1)
+		expect(seenUuid()).toBe(B.data.uuid)
+
+		shownNow()
+		advance(5_000)
+		expect(seenUuid()).toBe(C.data.uuid)
+	})
+
+	it("stops when the list empties", () => {
+		const view = mount([A, B, C])
+
+		startShow()
+		view.update([])
+		expect(show.running).toBe(false)
+
+		advance(60_000)
+		expect(lock.set).toHaveBeenLastCalledWith(false)
+	})
 })
+
+// A slot value whose visibility the test sets, as the hook's records do.
+function slotValue(visible: boolean): { value: SlideshowSlotValue; show: () => void; shown: ReturnType<typeof vi.fn> } {
+	let seenNow = visible
+	const listeners = new Set<() => void>()
+	const shown = vi.fn()
+
+	return {
+		value: {
+			shown,
+			signals: { active: true, mediaEnded: vi.fn(), animating: vi.fn() },
+			placeholderUrl: "blob:thumb",
+			visible: () => seenNow,
+			subscribe: listener => {
+				listeners.add(listener)
+
+				return () => {
+					listeners.delete(listener)
+				}
+			}
+		},
+		show: () => {
+			seenNow = true
+
+			for (const listener of listeners) listener()
+		},
+		shown
+	}
+}
 
 describe("SlideshowSlot", () => {
 	it("SlideshowSlot keeps its child mounted across renders", () => {
@@ -585,11 +775,7 @@ describe("SlideshowSlot", () => {
 			return <span data-testid="child" />
 		}
 
-		const value: SlideshowSlotValue = {
-			shown: vi.fn(),
-			signals: { active: true, mediaEnded: vi.fn(), animating: vi.fn() },
-			placeholderUrl: "blob:thumb"
-		}
+		const { value } = slotValue(false)
 		const view = render(
 			<SlideshowSlot value={null}>
 				<Child />
@@ -609,7 +795,7 @@ describe("SlideshowSlot", () => {
 		expect(mounts).toBe(1)
 	})
 
-	it("shows the thumbnail under a slide until it is shown, then fades the slide in", () => {
+	it("shows the thumbnail under a slide until it is to be seen, fades the slide in, then drops the thumbnail", () => {
 		let report: ((image: ShownImage) => void) | null = null
 
 		function Child() {
@@ -622,38 +808,42 @@ describe("SlideshowSlot", () => {
 			return <span data-testid="child" />
 		}
 
-		const shown = vi.fn()
-		const value: SlideshowSlotValue = {
-			shown,
-			signals: { active: true, mediaEnded: vi.fn(), animating: vi.fn() },
-			placeholderUrl: "blob:thumb"
-		}
-		const first: SlideshowSlotValue = { ...value, shown: vi.fn() }
+		const slide = slotValue(false)
 		const view = render(
-			<SlideshowSlot value={first}>
-				<Child />
-			</SlideshowSlot>
-		)
-
-		// The slide it starts on is on screen already.
-		expect(view.getByTestId("child").parentElement?.className).toContain("opacity-100")
-
-		view.rerender(
-			<SlideshowSlot value={value}>
+			<SlideshowSlot value={slide.value}>
 				<Child />
 			</SlideshowSlot>
 		)
 		const content = view.getByTestId("child").parentElement
-		const thumbnail = view.container.querySelector("img")
 
-		expect(thumbnail?.getAttribute("src")).toBe("blob:thumb")
+		expect(view.container.querySelector("img")?.getAttribute("src")).toBe("blob:thumb")
 		expect(content?.className).toContain("opacity-0")
 
 		act(() => {
 			report?.({ width: 1, height: 1 })
 		})
-		expect(shown).toHaveBeenCalledWith({ width: 1, height: 1 })
+		expect(slide.shown).toHaveBeenCalledWith({ width: 1, height: 1 })
+
+		act(() => {
+			slide.show()
+		})
 		expect(content?.className).toContain("opacity-100")
 		expect(content?.className).toContain("duration-200")
+		expect(view.container.querySelector("img")).not.toBeNull()
+
+		advance(200)
+		expect(view.container.querySelector("img")).toBeNull()
+	})
+
+	it("an item that is no slide is never hidden", () => {
+		const value: SlideshowSlotValue = { ...slotValue(false).value, signals: null }
+		const view = render(
+			<SlideshowSlot value={value}>
+				<span data-testid="child" />
+			</SlideshowSlot>
+		)
+
+		expect(view.getByTestId("child").parentElement?.className).toContain("opacity-100")
+		expect(view.container.querySelector("img")).toBeNull()
 	})
 })
