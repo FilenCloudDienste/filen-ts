@@ -540,13 +540,13 @@ export function PreviewOverlay({
 
 	// Swaps the pager's list, kept on the file on screen when the new list has it, else on `fallbackUuid`'s file when it
 	// has that, else on its first item; never away from a slot that cannot be left. False when it did not swap.
-	function replaceItems(next: DriveItem[], fallbackUuid?: string): boolean {
-		const shown = rawDriveItem?.data.uuid
+	function replaceItems(next: DriveItem[], fallbackUuid?: string, on: ShownSlot = shownSlot): boolean {
+		const { shown, locked } = on
 		const indexOf = (uuid: string | undefined): number => (uuid === undefined ? -1 : next.findIndex(item => item.data.uuid === uuid))
 		const own = indexOf(shown)
 		const at = own === -1 ? indexOf(fallbackUuid) : own
 
-		if (onItemsReplaced === undefined || (own === -1 && (dirty || saving))) {
+		if (onItemsReplaced === undefined || (own === -1 && locked)) {
 			return false
 		}
 
@@ -554,6 +554,10 @@ export function PreviewOverlay({
 
 		return true
 	}
+
+	// The slot on screen, as of this render and as of the last commit (for a tree that lands after the show moved on).
+	const shownSlot: ShownSlot = { shown: rawDriveItem?.data.uuid, locked: dirty || saving }
+	const shownSlotRef = useLatestRef(shownSlot)
 
 	function loadSubfolders(): void {
 		if (slideshowSource === undefined || openingItems !== null || treeAbortRef.current !== null) {
@@ -576,7 +580,7 @@ export function PreviewOverlay({
 				setTreeLoading(false)
 
 				// Fewer than two slides would end the slideshow: the list stays.
-				if (hasTwoSlides(tree) && replaceItems(tree)) {
+				if (hasTwoSlides(tree) && replaceItems(tree, undefined, shownSlotRef.current)) {
 					setOpeningItems(opening)
 				}
 			},
@@ -1815,6 +1819,12 @@ export function PreviewOverlay({
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
 	)
+}
+
+interface ShownSlot {
+	shown: string | undefined
+	// Unsaved edits or a save under way: never swapped away from.
+	locked: boolean
 }
 
 // Middle-ish ellipsis for a long filename: the head truncates with a CSS ellipsis while the tail

@@ -338,6 +338,37 @@ describe("PreviewOverlay slideshow", () => {
 		expect(host.props.onClose).not.toHaveBeenCalled()
 	})
 
+	it("a tree that lands after the show moved on keeps the file on screen", async () => {
+		setSlideshowPrefs({ subfolders: true })
+
+		let land: (items: DriveItem[]) => void = () => undefined
+
+		tree.fetch.mockReturnValue(
+			new Promise(resolve => {
+				land = resolve
+			})
+		)
+
+		const host = renderOverlay([DOC, A, B], 1, { slideshowSource: SOURCE })
+
+		withReplace(host)
+		fireEvent.click(await screen.findByRole("button", { name: /^Slideshow/ }))
+
+		// The show moves on to B while the tree loads.
+		act(() => {
+			host.props.onStep(1)
+		})
+		expect(host.props.items[host.props.index]).toBe(B)
+
+		await act(async () => {
+			land([SUB, A, B])
+			await Promise.resolve()
+		})
+
+		expect(host.props.onItemsReplaced).toHaveBeenLastCalledWith([SUB, A, B], 2)
+		expect(host.props.items[host.props.index]).toBe(B)
+	})
+
 	it("a tree still loading when the slideshow ends never swaps in", async () => {
 		setSlideshowPrefs({ subfolders: true })
 
