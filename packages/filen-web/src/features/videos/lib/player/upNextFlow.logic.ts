@@ -28,8 +28,10 @@ export function upNextTiming(duration: number, creditsStart: number | null): UpN
 	return { showAt, autoplayAt: Math.min(duration, showAt + upNextLeadSeconds(duration)) }
 }
 
-// Up Next for the item playing: only an episode with a next one, and on a stack only during its last part.
+// Up Next for the item playing: only an episode with a next one, and on a stack only during its last part; never on
+// repeat, where the item plays again instead.
 export function upNextTimingFor(params: {
+	repeat: boolean
 	hasNext: boolean
 	isEpisode: boolean
 	part: number
@@ -37,7 +39,7 @@ export function upNextTimingFor(params: {
 	duration: number
 	creditsStart: number | null
 }): UpNextTiming | null {
-	if (!params.hasNext || !params.isEpisode || params.part < params.parts - 1) {
+	if (params.repeat || !params.hasNext || !params.isEpisode || params.part < params.parts - 1) {
 		return null
 	}
 
@@ -70,6 +72,33 @@ export function upNextState(params: {
 	const visible = shown ? position >= timing.showAt : shouldShowUpNext(position, duration, creditsStart)
 
 	return { visible, countdown: visible ? Math.max(0, Math.ceil(timing.autoplayAt - position)) : 0 }
+}
+
+// What follows when the whole item ended: on repeat the item again; with nothing next, post-play; in native
+// fullscreen (no page shown) the next item at once; after "Watch credits" or over a card, post-play offering the
+// next; else the next by itself (or still watching).
+export type ItemEndAction = "replay" | "postPlay" | "playNext" | "offerNext" | "autoAdvance"
+
+export function itemEndAction(params: {
+	repeat: boolean
+	hasNext: boolean
+	nativeFullscreen: boolean
+	upNextDismissed: boolean
+	cardShown: boolean
+}): ItemEndAction {
+	if (params.repeat) {
+		return "replay"
+	}
+
+	if (!params.hasNext) {
+		return "postPlay"
+	}
+
+	if (params.nativeFullscreen) {
+		return "playNext"
+	}
+
+	return params.upNextDismissed || params.cardShown ? "offerNext" : "autoAdvance"
 }
 
 // What happens when the next item is due by itself (the countdown ran out, or the file ended).

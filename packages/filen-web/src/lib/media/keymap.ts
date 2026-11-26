@@ -47,6 +47,7 @@ export const MEDIA_ACTIONS = [
 	playerKey("media.frameForward", "period", "videos:mediaKeyFrameForward", IN_VIDEO),
 	playerKey("media.fullscreen", "f", "videos:playerKeyFullscreen", IN_VIDEO),
 	playerKey("media.pictureInPicture", "i", "videos:playerKeyPictureInPicture", IN_VIDEO),
+	playerKey("media.repeat", "r", "videos:mediaKeyRepeat", IN_VIDEO),
 	playerKey("media.previous", "shift+p", "videos:mediaKeyPrevious"),
 	playerKey("media.next", "shift+n", "videos:mediaKeyNext"),
 	playerKey("media.chapterPrevious", "pageup", "videos:mediaKeyChapterPrevious", IN_VIDEO),

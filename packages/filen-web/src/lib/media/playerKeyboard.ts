@@ -16,6 +16,7 @@ import {
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import type { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { stepMediaVolume, toggleMediaMuted } from "@/lib/media/mediaVolume"
+import { toggleVideoRepeat } from "@/lib/media/videoRepeat"
 import { chapterTarget, frameDuration, FrameIntervalMeter, stepPlaybackRate } from "@/lib/media/videoKeys.logic"
 import { mediaDuration, seekMedia, setPlaybackRate, toggleMediaPlayback } from "@/lib/media/useMediaState"
 
@@ -42,7 +43,8 @@ const PREVIEW_VIDEO_ACTIONS: readonly MediaAction[] = [
 	"media.normalSpeed",
 	"media.frameBack",
 	"media.frameForward",
-	"media.pictureInPicture"
+	"media.pictureInPicture",
+	"media.repeat"
 ]
 
 const PREVIEW_VIDEO_ACTIONS_FULLSCREEN: readonly MediaAction[] = [...PREVIEW_VIDEO_ACTIONS, "media.fullscreen"]
@@ -280,6 +282,9 @@ function runPreviewAction(
 			break
 		case "media.pictureInPicture":
 			togglePictureInPicture(video)
+			break
+		case "media.repeat":
+			toggleVideoRepeat("preview")
 			break
 		case "media.chapterPrevious":
 		case "media.chapterNext": {

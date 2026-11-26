@@ -786,6 +786,8 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	// The signature tool's S likewise: S skips and splits only in a player or the video editor.
 	["pdf.tool.sign", "media.skip"],
 	["pdf.tool.sign", "preview.videoSplit"],
+	// The redaction tool's R likewise: R turns repeat on or off only in a video player.
+	["pdf.tool.redact", "media.repeat"],
 	// A PDF tool letter acts only with focus on the pages in the preview overlay; a chat message's letters only with focus
 	// on the message, and the chat stands down while the preview is the open dialog.
 	["pdf.tool.redact", "chats.message.reply"],

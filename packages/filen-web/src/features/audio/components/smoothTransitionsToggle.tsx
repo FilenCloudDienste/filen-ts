@@ -9,7 +9,7 @@ import {
 	smoothTransitionsLocked,
 	toggleSmoothTransitionsByUser
 } from "@/features/audio/lib/smoothTransitionsUi"
-import { TOGGLE_ON_CLASS } from "@/features/audio/components/queueToggles"
+import { TOGGLE_ON_CLASS } from "@/components/media/toggleOn"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@filen/shared"

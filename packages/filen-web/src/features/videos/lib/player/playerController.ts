@@ -398,6 +398,30 @@ export class PlayerController {
 		void watchState.reportStop({ item, pos: position.pos, dur: position.dur, ended: true })
 	}
 
+	// The item ended and plays again from its start (repeat), as a new watch session: the one that ended was reported
+	// already. One part goes back on the playback it has, as the preview's loop does; a stack opens its first part.
+	public replay(): void {
+		const target = this.snapshot.target
+		const video = this.video
+		const playback = this.playback
+
+		if (target === null || video === null) {
+			return
+		}
+
+		if (playback === null || target.parts.length > 1) {
+			void this.open({ target, start: "start", autoplay: true })
+
+			return
+		}
+
+		this.finished = false
+		this.lastReported = null
+		this.update({ resumedAt: null, epoch: this.snapshot.epoch + 1 })
+		video.currentTime = playback.firstTime()
+		this.playWhenReady(this.generation)
+	}
+
 	public async selectAudio(index: number): Promise<void> {
 		const playback = this.playback
 		const target = this.snapshot.target

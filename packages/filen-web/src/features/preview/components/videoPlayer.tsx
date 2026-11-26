@@ -6,21 +6,15 @@ import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { MediaCurrentTime, MediaDuration } from "@/components/media/mediaTime"
 import { VolumeControl } from "@/components/media/volumeControl"
 import { Button } from "@/components/ui/button"
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuLabel,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu"
 import type { StageChapter } from "@/components/media/video/stage.logic"
 import { Spinner } from "@/components/ui/spinner"
-import { MEDIA_GLASS_SURFACE_CLASS, MEDIA_GLASS_TONE_CLASS } from "@/components/ui/surface"
+import { MEDIA_GLASS_SURFACE_CLASS } from "@/components/ui/surface"
+import { PlaybackRateMenu } from "@/features/preview/components/playbackRateMenu"
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer } from "@/lib/media/autoHide.logic"
 import { fullscreenSupported, toggleFullscreen, useIsFullscreen } from "@/lib/media/fullscreen"
 import { handlePlayerKeyDown, measureFrameInterval, seekPlayerTo } from "@/lib/media/playerKeyboard"
 import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
+import { useVideoRepeat } from "@/lib/media/videoRepeat"
 import { useBindings } from "@/lib/keymap/registry"
 import {
 	mediaDuration,
@@ -56,8 +50,7 @@ import {
 	MediaPlaybackFailure
 } from "@/features/preview/components/mediaFailureState"
 import { PreviewDownloadButton } from "@/features/preview/components/previewErrorState"
-
-const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const
+import { RepeatButton } from "@/features/preview/components/repeatButton"
 
 const HAS_METADATA = mediaValue(
 	["loadedmetadata", "emptied"],
@@ -86,8 +79,9 @@ function useVideoContinuity(video: HTMLVideoElement | null, positionKey: string)
 
 		const element = video
 
+		// A video that ran to its end starts over next time.
 		function handlePause(): void {
-			setVideoPosition(positionKey, element.currentTime)
+			setVideoPosition(positionKey, element.ended ? 0 : element.currentTime)
 		}
 
 		element.addEventListener("pause", handlePause)
@@ -96,7 +90,7 @@ function useVideoContinuity(video: HTMLVideoElement | null, positionKey: string)
 			element.removeEventListener("pause", handlePause)
 			// Stepping away mid-playback fires no pause. Read before the controller empties the element.
 			if (element.readyState >= HTMLMediaElement.HAVE_METADATA) {
-				setVideoPosition(positionKey, element.currentTime)
+				setVideoPosition(positionKey, element.ended ? 0 : element.currentTime)
 			}
 		}
 	}, [video, positionKey])
@@ -178,8 +172,8 @@ function useSeekCoalescer(video: HTMLVideoElement | null): {
 }
 
 // The preview's video player: our own controls on a glass bar floating over the picture, hidden while
-// playback runs untouched. Loops, like the rest of the full preview experience; a chat's inline embed
-// keeps the browser's controls.
+// playback runs untouched. Loops unless its repeat is turned off; a chat's inline embed keeps the browser's
+// controls.
 export function VideoPlayer({
 	item,
 	alt,
@@ -201,6 +195,7 @@ export function VideoPlayer({
 	// Before usePreviewVideo, whose cleanup empties the element this cleanup reads the position of.
 	useVideoContinuity(video, positionKey)
 	const { controller, snapshot } = usePreviewVideo(item, video, positionKey)
+	const repeat = useVideoRepeat("preview")
 	const subtitles = usePreviewSubtitles(item, controller, snapshot)
 	const status = snapshot?.status ?? "active"
 	const failedContainer = unplayableContainer(snapshot?.probe ?? null, snapshot?.decision ?? null)
@@ -225,6 +220,11 @@ export function VideoPlayer({
 
 	useSyncedMediaVolume(video)
 	useHoldReadsWhilePlaying(video)
+
+	// The controller loops in the element's place (previewVideo.ts), so the element never gets `loop`.
+	useEffect(() => {
+		controller?.setLoop(repeat)
+	}, [controller, repeat])
 
 	// Playback starting shows the controls for one idle period before they fade.
 	useEffect(() => {
@@ -342,7 +342,6 @@ export function VideoPlayer({
 						aria-label={alt}
 						// Also drops the native context menu's own download entry.
 						controlsList={mediaControlsList(downloadable)}
-						loop
 						playsInline
 						preload="metadata"
 						// Focusable, so a click on the picture hands the player the keyboard.
@@ -491,6 +490,7 @@ export function VideoPlayer({
 							container={fullscreen ? container : null}
 							onOpenChange={setMenuOpen}
 						/>
+						<RepeatButton />
 						<PlaybackSpeedMenu
 							media={video}
 							// Only a fullscreen player needs the menu inside it; elsewhere it portals as usual.
@@ -560,51 +560,19 @@ function PlaybackSpeedMenu({
 	container: HTMLElement | null
 	onOpenChange: (open: boolean) => void
 }) {
-	const { t } = useTranslation("preview")
 	const rate = useMediaPlaybackRate(media)
-	const rateLabel = t("previewMediaSpeedRate", { rate })
 
 	return (
-		<DropdownMenu onOpenChange={onOpenChange}>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="sm"
-						aria-label={t("previewMediaPlaybackSpeedLabel", { rate: rateLabel })}
-						className="px-2 tabular-nums @max-xs:hidden"
-					>
-						{rateLabel}
-					</Button>
+		<PlaybackRateMenu
+			rate={rate}
+			onRate={next => {
+				if (media !== null) {
+					setPlaybackRate(media, next)
 				}
-			/>
-			<DropdownMenuContent
-				side="top"
-				align="end"
-				container={container ?? undefined}
-				// The menu opens over the picture, so it wears the controls' dark tone rather than the app's glass.
-				className={cn(MEDIA_GLASS_TONE_CLASS, "w-auto min-w-36 before:backdrop-saturate-100")}
-			>
-				<DropdownMenuRadioGroup
-					value={String(rate)}
-					onValueChange={(next: string) => {
-						if (media !== null) {
-							setPlaybackRate(media, Number(next))
-						}
-					}}
-				>
-					<DropdownMenuLabel>{t("previewMediaPlaybackSpeed")}</DropdownMenuLabel>
-					{PLAYBACK_RATES.map(option => (
-						<DropdownMenuRadioItem
-							key={option}
-							value={String(option)}
-						>
-							{option === 1 ? t("previewMediaNormalSpeed") : t("previewMediaSpeedRate", { rate: option })}
-						</DropdownMenuRadioItem>
-					))}
-				</DropdownMenuRadioGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
+			}}
+			container={container}
+			onOpenChange={onOpenChange}
+		/>
 	)
 }
 

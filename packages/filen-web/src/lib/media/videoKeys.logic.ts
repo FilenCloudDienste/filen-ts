@@ -31,6 +31,7 @@ export type VideoKeyAction =
 	| { type: "subtitleDelay"; seconds: number }
 	| { type: "resetSubtitleDelay" }
 	| { type: "togglePictureInPicture" }
+	| { type: "toggleRepeat" }
 	| { type: "shortcuts" }
 	// What is open over the picture first (a panel, Up Next), then the player itself.
 	| { type: "dismiss" }
@@ -57,6 +58,7 @@ export const STAGE_MEDIA_ACTIONS: readonly MediaAction[] = [
 	"media.frameForward",
 	"media.fullscreen",
 	"media.pictureInPicture",
+	"media.repeat",
 	"media.previous",
 	"media.next",
 	"media.chapterPrevious",
@@ -90,6 +92,7 @@ const STAGE_ACTIONS: Partial<Record<MediaAction, VideoKeyAction>> = {
 	"media.frameForward": { type: "frameStep", direction: 1 },
 	"media.fullscreen": { type: "toggleFullscreen" },
 	"media.pictureInPicture": { type: "togglePictureInPicture" },
+	"media.repeat": { type: "toggleRepeat" },
 	"media.previous": { type: "previous" },
 	"media.next": { type: "next" },
 	"media.chapterPrevious": { type: "chapter", direction: -1 },

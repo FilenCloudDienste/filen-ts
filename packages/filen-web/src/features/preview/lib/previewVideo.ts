@@ -192,8 +192,10 @@ export class PreviewVideo {
 		}
 	}
 
-	// Whether the element was asked to loop (its `loop` attribute), which loopBack does in its place.
+	// Whether the element was asked to loop (its `loop` attribute, or setLoop), which loopBack does in its place.
 	private loops = false
+	// The element's own `loop` when opened, handed back on dispose.
+	private elementLoops = false
 
 	private readonly loopBack = (): void => {
 		const video = this.video
@@ -218,6 +220,7 @@ export class PreviewVideo {
 		video.addEventListener("timeupdate", this.trackPosition)
 		// Looped here rather than by the element: WebKit's GStreamer build never finishes the seek its own loop
 		// makes, on a direct stream or a MediaSource alike, and the playhead stays at 0.
+		this.elementLoops = video.loop
 		this.loops = video.loop
 		video.loop = false
 		video.addEventListener("ended", this.loopBack)
@@ -227,6 +230,11 @@ export class PreviewVideo {
 		} else {
 			void this.openLadder({ time: this.options.startTime, play: true, allowDirect: true })
 		}
+	}
+
+	// Whether the video plays again from its start when it ends; takes effect at the next end.
+	public setLoop(loop: boolean): void {
+		this.loops = loop
 	}
 
 	// Plays again from where it last was, after a failure.
@@ -533,7 +541,7 @@ export class PreviewVideo {
 		if (video !== null) {
 			video.removeEventListener("timeupdate", this.trackPosition)
 			video.removeEventListener("ended", this.loopBack)
-			video.loop = this.loops
+			video.loop = this.elementLoops
 			// Removing the attribute empties the element; `src = ""` would load the page itself as media.
 			video.removeAttribute("src")
 			video.load()

@@ -25,6 +25,7 @@ import type { StageChapter } from "@/components/media/video/stage.logic"
 import { clampSubtitleDelay, formatSubtitleDelay } from "@/lib/media/subtitles/subtitleStyle.logic"
 import type { VideoKeyAction } from "@/lib/media/videoKeys.logic"
 import { toggleMediaMuted, useMediaVolumeStore } from "@/lib/media/mediaVolume"
+import { toggleVideoRepeat, useVideoRepeat } from "@/lib/media/videoRepeat"
 import { seekMedia } from "@/lib/media/useMediaState"
 import { isVideoNativeFullscreen } from "@/lib/media/fullscreen"
 import { sdkApi } from "@/lib/sdk/client"
@@ -43,7 +44,13 @@ import { RESUME_PILL_MS } from "@/features/videos/lib/player/resume.logic"
 import { cancelPrewarm, prewarmPlayback } from "@/lib/media/playback/sources"
 import { playbackEnvironment } from "@/lib/media/playback/capabilities"
 import { SkipPromptTracker, creditsStart } from "@/features/videos/lib/player/skipPrompts.logic"
-import { StillWatchingCounter, autoAdvance, upNextState, upNextTimingFor } from "@/features/videos/lib/player/upNextFlow.logic"
+import {
+	StillWatchingCounter,
+	autoAdvance,
+	itemEndAction,
+	upNextState,
+	upNextTimingFor
+} from "@/features/videos/lib/player/upNextFlow.logic"
 import {
 	adjacentEpisode,
 	allEpisodes,
@@ -69,6 +76,7 @@ import {
 import { EpisodesPanel } from "@/features/videos/components/player/episodesPanel"
 import { UpNextCard } from "@/features/videos/components/player/upNextCard"
 import { PlayerTracks } from "@/features/videos/components/player/playerTracks"
+import { RepeatButton } from "@/features/videos/components/player/repeatButton"
 import { audioTrackNotice, subtitleTrackNotice } from "@/features/videos/lib/player/trackLabels.logic"
 import { useUpNextStill } from "@/features/videos/components/player/useTitleStill"
 import type { VideoTitleDetail } from "@/workers/videoIndex/view.logic"
@@ -208,6 +216,8 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const [edlSegments, setEdlSegments] = useState<{ uuid: string; segments: SkipSegment[] } | null>(null)
 	const online = useIsOnline()
 	const muted = useMediaVolumeStore(state => state.muted)
+	// The item plays again when it ends, in place of Up Next, the next episode or post-play.
+	const repeat = useVideoRepeat("videos")
 	const advanceRef = useRef<Advance | null>(null)
 	const targetRef = useRef<WatchItemTarget | null>(null)
 	const subtitleRef = useRef<PlayerSubtitleTrack | null>(null)
@@ -267,6 +277,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const segmentsKey = segments.map(segment => `${String(segment.start)}-${String(segment.end)}-${segment.kind}`).join(",")
 	const credits = creditsStart(segments, duration)
 	const timing = upNextTimingFor({
+		repeat,
 		hasNext: next !== null,
 		isEpisode: target?.kind === "episode",
 		part: snap.part,
@@ -638,7 +649,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 		}
 	}, [subtitleNotice])
 
-	// What happens when the item ends: the next episode (or still watching), else post-play.
+	// What happens when the whole item ended (reported as watched to its end already, on repeat too).
 	useEffect(() => {
 		endedRef.current = () => {
 			const current = targetRef.current
@@ -647,29 +658,29 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				return
 			}
 
-			if (next === null) {
+			const action = itemEndAction({
+				repeat,
+				hasNext: next !== null,
+				nativeFullscreen: video !== null && isVideoNativeFullscreen(video),
+				upNextDismissed: upNextRef.current.dismissed,
+				cardShown: card !== null
+			})
+
+			if (action === "replay") {
+				controller.replay()
+			} else if (next === null || action === "postPlay") {
 				void postPlayNext(current).then(choice => {
 					if (targetRef.current === current) {
 						setCard({ kind: "postPlay", next: choice })
 					}
 				})
-
-				return
-			}
-
-			if (video !== null && isVideoNativeFullscreen(video)) {
+			} else if (action === "playNext") {
 				playItem(next, "auto")
-
-				return
-			}
-
-			if (upNextRef.current.dismissed || card !== null) {
+			} else if (action === "offerNext") {
 				setCard({ kind: "postPlay", next: { kind: "episode", target: next } })
-
-				return
+			} else {
+				playNext("auto")
 			}
-
-			playNext("auto")
 		}
 	})
 
@@ -685,10 +696,10 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 
 	// The 700 ms check: skip prompts, Up Next and its autoplay, and the next episode's probe from half time. It
 	// reads this render's values through `latest`, so a re-render never restarts the clock.
-	const latest = useRef({ segments, segmentsKey, timing, credits, duration, next, card, controlsVisible })
+	const latest = useRef({ segments, segmentsKey, timing, credits, duration, next, card, controlsVisible, repeat })
 
 	useEffect(() => {
-		latest.current = { segments, segmentsKey, timing, credits, duration, next, card, controlsVisible }
+		latest.current = { segments, segmentsKey, timing, credits, duration, next, card, controlsVisible, repeat }
 	})
 
 	useEffect(() => {
@@ -762,7 +773,8 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				endedRef.current()
 			}
 
-			const upcoming = now.next
+			// On repeat the next item is not what plays next.
+			const upcoming = now.repeat ? null : now.next
 
 			if (upcoming !== null && prewarmed.current !== upcoming.key && elementDuration > 0 && time > elementDuration / 2) {
 				prewarmed.current = upcoming.key
@@ -888,6 +900,10 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 
 				return true
 			}
+			case "toggleRepeat":
+				toggleVideoRepeat("videos")
+
+				return true
 			case "episodes":
 				if (episodes.length < 2 || target === null) {
 					return false
@@ -1203,6 +1219,14 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 					}
 
 					items.push({ id: "mute", label: muted ? t("playerUnmute") : t("playerMute"), onSelect: toggleMediaMuted })
+					items.push({
+						id: "repeat",
+						label: repeat ? t("playerRepeatTurnOff") : t("playerRepeatTurnOn"),
+						shortcuts: ["media.repeat"],
+						onSelect: () => {
+							toggleVideoRepeat("videos")
+						}
+					})
 
 					if (video !== null && document.pictureInPictureEnabled) {
 						items.push({
@@ -1281,6 +1305,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 							video={video}
 							items={items}
 						/>
+						{phone ? null : <RepeatButton />}
 					</>
 				)
 			}}

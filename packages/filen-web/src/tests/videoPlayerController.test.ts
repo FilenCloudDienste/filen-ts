@@ -207,6 +207,7 @@ beforeEach(() => {
 					return () => entry.listeners.delete(listener)
 				},
 				selectAudio: () => Promise.resolve(),
+				firstTime: () => 0.5,
 				dispose: () => {
 					entry.disposed = true
 				}
@@ -299,6 +300,36 @@ describe("PlayerController and the watch state", () => {
 		await controller.open({ target: TARGET, start: "resume", autoplay: false }, { part: 0, position: 10 })
 		expect(mocks.watchOpen).not.toHaveBeenCalled()
 		expect(mocks.openPlayback).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("PlayerController repeat", () => {
+	it("reports the ended item watched once, then plays it again from its start on the same playback as a new session", async () => {
+		controller.setOnEnded(() => {
+			controller.replay()
+		})
+		await openPlaying(3599)
+
+		const epoch = controller.getSnapshot().epoch
+
+		video.paused = true
+		video.ended = true
+		video.currentTime = 3600
+		video.dispatchEvent(new Event("ended"))
+
+		expect(mocks.reportStop).toHaveBeenCalledTimes(1)
+		expect(mocks.reportStop).toHaveBeenCalledWith(expect.objectContaining({ pos: 3600, ended: true }))
+		expect(mocks.openPlayback).toHaveBeenCalledTimes(1)
+		expect(video.currentTime).toBe(0.5)
+		expect(video.play).toHaveBeenCalled()
+		expect(controller.getSnapshot().epoch).toBe(epoch + 1)
+		expect(controller.getSnapshot().resumedAt).toBeNull()
+
+		mocks.reportProgress.mockClear()
+		video.ended = false
+		video.tick(5)
+
+		expect(mocks.reportProgress).toHaveBeenCalledWith(expect.objectContaining({ pos: 5 }))
 	})
 })
 

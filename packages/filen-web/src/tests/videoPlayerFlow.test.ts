@@ -13,6 +13,7 @@ import { SkipPromptTracker, creditsStart } from "@/features/videos/lib/player/sk
 import {
 	StillWatchingCounter,
 	autoAdvance,
+	itemEndAction,
 	upNextState,
 	upNextTiming,
 	upNextTimingFor
@@ -143,6 +144,25 @@ describe("still watching", () => {
 	})
 })
 
+describe("the end of an item", () => {
+	const base = { repeat: false, hasNext: true, nativeFullscreen: false, upNextDismissed: false, cardShown: false }
+
+	it("advances, offers the next or shows post-play while repeat is off", () => {
+		expect(itemEndAction(base)).toBe("autoAdvance")
+		expect(itemEndAction({ ...base, nativeFullscreen: true })).toBe("playNext")
+		expect(itemEndAction({ ...base, upNextDismissed: true })).toBe("offerNext")
+		expect(itemEndAction({ ...base, cardShown: true })).toBe("offerNext")
+		expect(itemEndAction({ ...base, hasNext: false })).toBe("postPlay")
+	})
+
+	it("plays the item again on repeat, whatever comes next", () => {
+		expect(itemEndAction({ ...base, repeat: true })).toBe("replay")
+		expect(itemEndAction({ ...base, repeat: true, nativeFullscreen: true })).toBe("replay")
+		expect(itemEndAction({ ...base, repeat: true, upNextDismissed: true, cardShown: true })).toBe("replay")
+		expect(itemEndAction({ ...base, repeat: true, hasNext: false })).toBe("replay")
+	})
+})
+
 describe("skip prompts", () => {
 	const intro: SkipSegment = { kind: "intro", start: 60, end: 150, source: "skipType" }
 	const outro: SkipSegment = { kind: "outro", start: 1500, end: 1800, source: "skipType" }
@@ -196,12 +216,14 @@ describe("skip prompts", () => {
 
 describe("Up Next on stacks and backoff jitter", () => {
 	it("times Up Next on an episode's last part only", () => {
-		const base = { hasNext: true, isEpisode: true, duration: 1200, creditsStart: null }
+		const base = { repeat: false, hasNext: true, isEpisode: true, duration: 1200, creditsStart: null }
 
 		expect(upNextTimingFor({ ...base, part: 0, parts: 2 })).toBeNull()
 		expect(upNextTimingFor({ ...base, part: 1, parts: 2 })).toEqual({ showAt: 1170, autoplayAt: 1200 })
 		expect(upNextTimingFor({ ...base, part: 0, parts: 1, isEpisode: false })).toBeNull()
 		expect(upNextTimingFor({ ...base, part: 0, parts: 1, hasNext: false })).toBeNull()
+		// On repeat the episode plays again instead.
+		expect(upNextTimingFor({ ...base, part: 0, parts: 1, repeat: true })).toBeNull()
 	})
 
 	it("adds up to a quarter of jitter to a backoff", () => {

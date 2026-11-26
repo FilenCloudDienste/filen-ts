@@ -410,6 +410,8 @@ export const videos = {
 	playerPictureInPicture: "Picture in picture",
 	/** Player — picture-in-picture button while active */
 	playerExitPictureInPicture: "Exit picture in picture",
+	/** Player — repeat toggle: plays the video again when it ends */
+	playerRepeat: "Repeat",
 	/** Player — fullscreen button */
 	playerFullscreen: "Fullscreen",
 	/** Player — fullscreen button while fullscreen */
@@ -426,6 +428,10 @@ export const videos = {
 	playerMute: "Mute",
 	/** Settings menu — unmute toggle on a phone */
 	playerUnmute: "Unmute",
+	/** Settings menu — turns the repeat toggle on, on a phone */
+	playerRepeatTurnOn: "Turn on repeat",
+	/** Settings menu — turns the repeat toggle off, on a phone */
+	playerRepeatTurnOff: "Turn off repeat",
 	/** Player — keyboard shortcuts button and sheet */
 	playerShortcuts: "Keyboard shortcuts",
 	/** Keyboard shortcuts — where a media key works: in any player */
@@ -462,6 +468,7 @@ export const videos = {
 	mediaKeyFrameForward: "Frame forward (paused)",
 	playerKeyFullscreen: "Fullscreen",
 	playerKeyPictureInPicture: "Picture in picture",
+	mediaKeyRepeat: "Repeat on or off",
 	mediaKeyPrevious: "Previous episode or track",
 	mediaKeyNext: "Next episode or track",
 	mediaKeyChapterPrevious: "Previous chapter",

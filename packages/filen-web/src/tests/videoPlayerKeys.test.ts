@@ -47,6 +47,7 @@ describe("the Videos player's keys", () => {
 		expect(key("KeyE", "e")).toEqual({ type: "episodes" })
 		expect(key("KeyS", "s")).toEqual({ type: "skip" })
 		expect(key("KeyI", "i")).toEqual({ type: "togglePictureInPicture" })
+		expect(key("KeyR", "r")).toEqual({ type: "toggleRepeat" })
 		expect(key("KeyG", "g")).toEqual({ type: "subtitleDelay", seconds: -0.1 })
 		expect(key("KeyH", "h")).toEqual({ type: "subtitleDelay", seconds: 0.1 })
 		expect(key("Home", "Home")).toEqual({ type: "seekToStart" })

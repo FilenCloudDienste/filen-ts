@@ -571,6 +571,33 @@ describe("PreviewVideo — the ladder", () => {
 		expect(harness.video.currentTime).toBe(1.41)
 	})
 
+	it("follows the player's repeat at the next end, and hands back the element's own loop on dispose", async () => {
+		const harness = setUp({ route: "direct" })
+
+		await flush()
+		harness.controller.setLoop(true)
+
+		const plays = harness.video.plays
+
+		harness.video.currentTime = 2.5
+		harness.video.emit("ended")
+
+		expect(harness.video.currentTime).toBe(0)
+		expect(harness.video.plays).toBe(plays + 1)
+
+		harness.controller.setLoop(false)
+		harness.video.currentTime = 2.5
+		harness.video.emit("ended")
+
+		expect(harness.video.currentTime).toBe(2.5)
+		expect(harness.video.plays).toBe(plays + 1)
+
+		harness.controller.setLoop(true)
+		harness.controller.dispose()
+
+		expect(harness.video.loop).toBe(false)
+	})
+
 	it("leaves an element that does not loop ended", async () => {
 		const harness = setUp({ route: "ladder" })
 
