@@ -117,6 +117,20 @@ function swallowNextClick(): void {
 	}, 0)
 }
 
+function sameIndices(a: readonly number[], b: readonly number[]): boolean {
+	if (a.length !== b.length) {
+		return false
+	}
+
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 function uuidKey(item: MarqueeItem): string {
 	return item.data.uuid
 }
@@ -176,6 +190,12 @@ interface MarqueeDrag {
 	lastClientY: number
 	// highest index the rectangle covered — cursor fallback when the drag ends over a gutter
 	lastHitIndex: number
+	// The indices the selection was last set from (null before the first) and the render's params they were
+	// read against, so a rectangle still covering the same items of the same listing writes nothing.
+	covered: readonly number[] | null
+	coveredParams: unknown
+	// The pointer moved since the rectangle was last applied: the frame loop applies it then.
+	moved: boolean
 	// Read ONCE at pointer-down (one getComputedStyle per drag, never per pointermove — paddings do not
 	// change mid-drag in any layout this app renders). The live clientWidth is still re-read on every
 	// move, so a mid-drag resize re-measures exactly as before.
@@ -273,7 +293,16 @@ export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueePar
 		const indices = latestRef.current.hitTest.indices(marqueeRect, box.width)
 
 		drag.lastHitIndex = indices.at(-1) ?? -1
-		drag.arm.cover(indices)
+		drag.moved = false
+
+		const { params: current } = latestRef.current
+
+		if (drag.covered === null || drag.coveredParams !== current || !sameIndices(drag.covered, indices)) {
+			drag.covered = indices
+			drag.coveredParams = current
+			drag.arm.cover(indices)
+		}
+
 		rectStoreRef.current.set(marqueeRect)
 	}
 
@@ -316,8 +345,10 @@ export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueePar
 		rectStoreRef.current.set(null)
 	}
 
-	// rAF edge auto-scroll: while the pointer sits in an edge zone, advance scrollTop and re-hit-test at
-	// the same viewport point (the fixed content anchor makes the rectangle stretch as content moves).
+	// The drag's frame loop: applies the pointer's latest position once per frame (Firefox delivers pointermove
+	// at the mouse's own rate, up to 1000 Hz, where Chromium aligns it to frames), and while the pointer sits in
+	// an edge zone advances scrollTop and re-hit-tests at the same viewport point (the fixed content anchor makes
+	// the rectangle stretch as content moves).
 	function tickAutoScroll(): void {
 		const el = latestRef.current.scrollElement
 		const drag = dragRef.current
@@ -342,8 +373,12 @@ export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueePar
 
 			if (nextTop !== el.scrollTop) {
 				el.scrollTop = nextTop
-				computeAndApply(drag.lastClientX, drag.lastClientY)
+				drag.moved = true
 			}
+		}
+
+		if (drag.moved) {
+			computeAndApply(drag.lastClientX, drag.lastClientY)
 		}
 
 		rafRef.current = requestAnimationFrame(tickAutoScroll)
@@ -371,7 +406,7 @@ export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueePar
 			}
 		}
 
-		computeAndApply(event.clientX, event.clientY)
+		drag.moved = true
 	}
 
 	function onUp(event: PointerEvent): void {
@@ -523,6 +558,9 @@ export function useMarqueeSelection<T extends MarqueeItem, S>(params: MarqueePar
 			lastClientX: event.clientX,
 			lastClientY: event.clientY,
 			lastHitIndex: -1,
+			covered: null,
+			coveredParams: null,
+			moved: false,
 			paddingLeft,
 			paddingTop,
 			paddingRight

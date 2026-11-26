@@ -1,14 +1,43 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, renderHook } from "@testing-library/react"
 import { createElement, type PointerEvent as ReactPointerEvent } from "react"
 import { MARQUEE_SKIP_PROPS, useMarqueeSelection, type MarqueeItem } from "@/features/drive/hooks/useMarqueeSelection"
 import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 
+// Animation frames run when a test says so: the marquee applies the pointer once per frame.
+const frames = new Map<number, FrameRequestCallback>()
+let nextFrame = 1
+
+beforeEach(() => {
+	vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+		const id = nextFrame++
+
+		frames.set(id, callback)
+
+		return id
+	})
+	vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+		frames.delete(id)
+	})
+})
+
 afterEach(() => {
 	cleanup()
+	frames.clear()
+	vi.unstubAllGlobals()
 })
+
+function runFrame(): void {
+	const due = [...frames.values()]
+
+	frames.clear()
+
+	for (const callback of due) {
+		callback(performance.now())
+	}
+}
 
 // jsdom lays nothing out, so the container reports the client box a real 400x400 listbox would.
 function container(): HTMLDivElement {
@@ -73,9 +102,11 @@ function pressAt(el: HTMLDivElement, onPointerDown: (event: ReactPointerEvent<HT
 	} as unknown as ReactPointerEvent<HTMLDivElement>)
 }
 
+// A move, then the frame that applies it.
 function dragTo(x: number, y: number): void {
 	act(() => {
 		window.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y }))
+		runFrame()
 	})
 }
 
@@ -169,6 +200,46 @@ describe("useMarqueeSelection — rectangle updates", () => {
 
 		expect(result.current.rectStore.get()).toBeNull()
 		expect(view.queryByTestId("marquee-rect")).toBeNull()
+	})
+
+	// Firefox delivers pointermove at the mouse's own rate (up to 1000 Hz); Chromium aligns it to frames.
+	it("applies the moves of one frame once, and writes nothing while the same rows stay covered", () => {
+		const el = container()
+		const { result, write } = renderMarquee(el)
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown)
+		})
+
+		act(() => {
+			for (let y = 20; y <= 60; y += 2) {
+				window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: y }))
+			}
+		})
+
+		expect(write).not.toHaveBeenCalled()
+		expect(result.current.rectStore.get()).toBeNull()
+
+		act(() => {
+			runFrame()
+		})
+
+		expect(write).toHaveBeenCalledTimes(1)
+		expect(write.mock.lastCall?.[0].map(item => item.row)).toEqual(["a", "b"])
+		expect(result.current.rectStore.get()?.bottom).toBe(60)
+
+		dragTo(12, 70)
+
+		expect(write).toHaveBeenCalledTimes(1)
+		expect(result.current.rectStore.get()?.bottom).toBe(70)
+
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointerup", { clientX: 12, clientY: 30 }))
+		})
+
+		// The release applies its own position at once.
+		expect(write).toHaveBeenCalledTimes(2)
+		expect(write.mock.lastCall?.[0].map(item => item.row)).toEqual(["a"])
 	})
 })
 

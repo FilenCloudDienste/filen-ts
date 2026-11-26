@@ -200,6 +200,18 @@ afterEach(() => {
 	cleanup()
 })
 
+// A drag's move, then the frame the marquee applies it in.
+async function dragTo(clientX: number, clientY: number): Promise<void> {
+	await act(async () => {
+		window.dispatchEvent(new PointerEvent("pointermove", { clientX, clientY }))
+		await new Promise<void>(resolve => {
+			requestAnimationFrame(() => {
+				resolve()
+			})
+		})
+	})
+}
+
 describe("ArchiveSourceBrowser states", () => {
 	it("opens the session on mount and disposes it on unmount", () => {
 		const fake = fakeSession(done(), storeOf(TREE))
@@ -785,9 +797,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		const name = screen.getByText("readme.md")
 
 		fireEvent.pointerDown(name, { pointerType: "mouse", button: 0, clientX: 10, clientY: 40 })
-		act(() => {
-			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
-		})
+		await dragTo(10, 100)
 
 		expect(selectedNames()).toEqual([expect.stringContaining("readme.md"), expect.stringContaining("z.bin")])
 		expect(screen.getByText("2 files selected · 2 B")).toBeTruthy()
@@ -802,9 +812,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 
 		// Covering the whole directory selects it as one rule; Escape mid-drag puts the selection back.
 		fireEvent.pointerDown(screen.getByText("docs"), { pointerType: "mouse", button: 0, clientX: 10, clientY: 10 })
-		act(() => {
-			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
-		})
+		await dragTo(10, 100)
 
 		expect(screen.getByRole("checkbox", { name: "Select all" }).getAttribute("aria-checked")).toBe("true")
 
@@ -821,7 +829,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		expect(selectedNames()).toEqual([])
 	})
 
-	it("adds the rows a drag covers to the selection under the toggle modifier, never starting on the checkbox", () => {
+	it("adds the rows a drag covers to the selection under the toggle modifier, never starting on the checkbox", async () => {
 		show(fakeSession(done(), storeOf(TREE)))
 		Object.defineProperty(list(), "scrollHeight", { configurable: true, value: 108 })
 
@@ -842,9 +850,7 @@ describe("ArchiveSourceBrowser keys and navigation", () => {
 		expect(selectedNames()).toEqual([expect.stringContaining("docs")])
 
 		fireEvent.pointerDown(screen.getByText("z.bin"), { pointerType: "mouse", button: 0, clientX: 10, clientY: 80, ctrlKey: true })
-		act(() => {
-			window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 100 }))
-		})
+		await dragTo(10, 100)
 
 		expect(selectedNames()).toEqual([expect.stringContaining("docs"), expect.stringContaining("z.bin")])
 	})
