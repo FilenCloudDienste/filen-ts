@@ -114,10 +114,11 @@ export interface SlideDueState {
 }
 
 // An image is due once its interval ran from the moment it showed (and, when animated, its loop ended); a
-// video once it ended. Any slide that has not shown is due after SHOW_TIMEOUT_MS from its mount.
+// video once it ended, at once when it ended before it showed (it failed before playing). Any other slide that
+// has not shown is due after SHOW_TIMEOUT_MS from its mount.
 export function slideDue(state: SlideDueState): boolean {
 	if (state.shownAt === null) {
-		return state.now - state.mountedAt >= SHOW_TIMEOUT_MS
+		return (state.kind === "video" && state.mediaEnded) || state.now - state.mountedAt >= SHOW_TIMEOUT_MS
 	}
 
 	if (state.kind === "video") {

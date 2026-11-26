@@ -148,6 +148,13 @@ describe("slideDue", () => {
 		expect(slideDue({ ...unshown, kind: "image", now: SHOW_TIMEOUT_MS })).toBe(true)
 		expect(slideDue({ ...unshown, kind: "video", now: SHOW_TIMEOUT_MS })).toBe(true)
 	})
+
+	it("a video that ended before it showed (it failed before playing) is due at once", () => {
+		const unshown = { ...base, shownAt: null }
+
+		expect(slideDue({ ...unshown, kind: "video", mediaEnded: true, now: 1 })).toBe(true)
+		expect(slideDue({ ...unshown, kind: "image", mediaEnded: true, now: 1 })).toBe(false)
+	})
 })
 
 describe("constants", () => {

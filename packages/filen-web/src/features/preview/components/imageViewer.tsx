@@ -1,9 +1,9 @@
 import { useEffect, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { imageDecodeFor, imageMupdfFormat, needsImageTransform, pendingImageProbe } from "@/features/drive/lib/preview.logic"
+import { imageDecodeFor, imageMupdfFormat, pendingImageProbe } from "@/features/drive/lib/preview.logic"
+import { routeFor, type ImageRoute } from "@/features/preview/lib/imageRoute"
 import { useDeviceProfile } from "@/lib/useDeviceProfile"
-import type { DeviceProfile } from "@/lib/deviceProfile"
 import type { PreviewKey } from "@/lib/i18n"
 import { probeNativeImage } from "@/lib/nativeImageSupport"
 import { transformHeicBytes } from "@/features/preview/lib/rasterDecode"
@@ -223,14 +223,6 @@ export function RawImageViewer({ item, alt }: ImageViewerProps) {
 			}
 		</PreviewGate>
 	)
-}
-
-// How an image is shown: as the browser decodes it (streamed, or from its buffered fallback), decoded by our own code
-// first, or decoded by our own code after the browser failed to decode the whole file.
-type ImageRoute = "native" | "decoded" | "undecodable"
-
-function routeFor(item: DriveItem, profile: DeviceProfile): ImageRoute {
-	return needsImageTransform(item, profile) ? "decoded" : "native"
 }
 
 // The decoded route: the format's own decoder.

@@ -16,6 +16,7 @@ import { DeckSlideShow } from "@/features/presentation/components/slideshow/deck
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
+import { MENU_ESCAPE_MS } from "@/lib/media/menuEscape"
 import { log } from "@/lib/log"
 import { SetUpShowHost } from "@/features/presentation/components/slideshow/setUpHost"
 import { useChosenShowOptions } from "@/features/presentation/components/slideshow/showSettings"
@@ -35,9 +36,6 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // How long the note about a refused action stays.
 const REFUSED_NOTE_MS = 4000
-
-// How long after Escape closed the show menu the browser may leave full screen for that same key.
-const MENU_ESCAPE_MS = 1000
 
 // The ribbon command a show is started from (undefined: none, as for a key).
 function showOrigin(): RibbonOrigin | undefined {

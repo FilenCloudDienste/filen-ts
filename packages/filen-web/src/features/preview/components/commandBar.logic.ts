@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { toggleFullscreen } from "@/lib/media/fullscreen"
+import { fullscreenSupported, toggleFullscreen } from "@/lib/media/fullscreen"
 
 // ribbonFit's width estimates for the document viewers' command bars (commandBarControls.tsx): an icon button with
 // its gap, a dropdown button, the page number field with its total, the zoom menu's button.
@@ -36,9 +36,37 @@ export function toggleViewerFullScreen(): Promise<void> {
 	return toggleFullscreen(document.documentElement)
 }
 
-// In every document viewer, from its first render (before its file has loaded).
-export function useLeaveViewerFullScreen(): void {
+// The page's full screen for a slideshow, asked for inside its starting gesture. One already on stays as it is;
+// resolves whether the page is in full screen (false where the browser has none, as on an iPhone).
+export function enterViewerFullScreen(): Promise<boolean> {
+	if (document.fullscreenElement === document.documentElement) {
+		return Promise.resolve(true)
+	}
+
+	if (!fullscreenSupported()) {
+		return Promise.resolve(false)
+	}
+
+	entered = true
+
+	return toggleFullscreen(document.documentElement).then(
+		() => true,
+		() => {
+			entered = false
+
+			return false
+		}
+	)
+}
+
+// While `holding`: keeps the page's full screen across paging, as a document viewer does (a running slideshow holds
+// it, so paging to a photo keeps it).
+export function useViewerFullScreenHolder(holding: boolean): void {
 	useEffect(() => {
+		if (!holding) {
+			return
+		}
+
 		viewers++
 
 		return () => {
@@ -52,5 +80,10 @@ export function useLeaveViewerFullScreen(): void {
 				}
 			})
 		}
-	}, [])
+	}, [holding])
+}
+
+// In every document viewer, from its first render (before its file has loaded).
+export function useLeaveViewerFullScreen(): void {
+	useViewerFullScreenHolder(true)
 }
