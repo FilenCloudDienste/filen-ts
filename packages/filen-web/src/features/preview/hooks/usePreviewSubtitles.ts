@@ -57,10 +57,18 @@ export function usePreviewSubtitles(
 	const provided = usePreviewSiblings()
 	const [selected, setSelected] = useState("off")
 	const [loaded, setLoaded] = useState<ReadonlyMap<string, SidecarState>>(() => new Map())
-	// Looked up once per file: the listing held when the preview opened is the one beside it.
-	const [sidecars] = useState(() =>
+	// Looked up once per file: the listing held when the preview opened is the one beside it. A listing the host provides
+	// later (a public link's subdirectory, listed as its video shows) brings its files then, the video never waiting.
+	const [sidecarsFrom, setSidecarsFrom] = useState(provided)
+	const [sidecars, setSidecars] = useState(() =>
 		previewSidecars(driveItemName(item), provided ?? (access === "authed" ? cachedSiblings(item.data.uuid) : []))
 	)
+
+	if (provided !== sidecarsFrom && provided !== null) {
+		setSidecarsFrom(provided)
+		setSidecars(previewSidecars(driveItemName(item), provided))
+	}
+
 	const probe = snapshot?.probe ?? null
 	const blocked = snapshot?.embeddedTextBlocked === true
 	const fps = probe?.video?.fps ?? null

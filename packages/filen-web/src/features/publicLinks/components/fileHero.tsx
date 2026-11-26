@@ -24,7 +24,6 @@ import { PublicArchiveActions, PublicArchiveBrowser, PublicComic } from "@/featu
 import { DownloadTooLargeNote } from "@/features/publicLinks/components/publicLinkStates"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
-import { LoadingState } from "@/components/loadingState"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import type { Slideshow } from "@/features/preview/hooks/useSlideshow"
 import { SlideshowBar } from "@/features/preview/components/slideshowBar"
@@ -72,7 +71,6 @@ export function FileHero({
 	archiveFile,
 	siblings,
 	references,
-	siblingsPending,
 	pager
 }: {
 	item: DriveItem
@@ -88,8 +86,6 @@ export function FileHero({
 	siblings?: readonly DriveItem[] | undefined
 	// Where a model's referenced files are found (a directory link's listings).
 	references?: ReferenceSourceFactory | undefined
-	// `siblings` are still being listed: the preview waits for them (it looks a video's subtitles up once, as it mounts).
-	siblingsPending?: boolean | undefined
 	pager?: HeroPager | undefined
 }) {
 	const { t } = useTranslation(["publicLinks", "preview"])
@@ -328,8 +324,6 @@ export function FileHero({
 								setShowContents(true)
 							}}
 						/>
-					) : siblingsPending === true ? (
-						<LoadingState size="md" />
 					) : (
 						<PublicPreview
 							key={uuid}

@@ -24,6 +24,8 @@ import { log } from "@/lib/log"
 
 const IS_MAC = isMacPlatform()
 
+const NO_SIBLINGS: readonly DriveItem[] = []
+
 type LinkedSource = Extract<SlideshowSource, { kind: "linked" }>
 
 // A directory link's opened file with its pager: ‹ › and the arrows step through `pager` (the level's files, or a
@@ -93,7 +95,8 @@ export function PagedFileHero({
 	const endedAtRef = useRef(Number.NEGATIVE_INFINITY)
 	// The file on screen as of the last commit, for a list that lands later.
 	const shownRef = useRef(uuid)
-	// A video from below the level finds its subtitles in its own directory's listing, asked once it is shown.
+	// A video from below the level finds its subtitles in its own directory's listing, asked once it is shown; the video
+	// plays meanwhile, and its subtitles come with the listing.
 	const deepDir = treeDirs !== null && slideKindOf(entry.item) === "video" ? (treeDirs.get(entry.file.parent) ?? null) : null
 	const deepListing = usePublicDirListing({
 		levelUuid: deepDir === null ? null : entry.file.parent,
@@ -101,7 +104,11 @@ export function PagedFileHero({
 		link: deepDir === null ? null : (source?.link ?? null)
 	})
 	const shownSiblings =
-		deepDir === null ? siblings : deepListing.data === undefined ? [] : toBrowseEntries(deepListing.data).map(item => item.item)
+		deepDir === null
+			? siblings
+			: deepListing.data === undefined
+				? NO_SIBLINGS
+				: toBrowseEntries(deepListing.data).map(item => item.item)
 
 	useEffect(() => {
 		shownRef.current = uuid
@@ -302,7 +309,6 @@ export function PagedFileHero({
 			saveItem={saveItem}
 			archiveFile={entry.file}
 			siblings={shownSiblings}
-			siblingsPending={deepDir !== null && deepListing.status === "pending"}
 			references={references}
 			pager={
 				pager.entries.length < 2

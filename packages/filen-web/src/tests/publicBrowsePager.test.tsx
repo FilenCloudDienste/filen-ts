@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement } from "react"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { createElement, useContext, useEffect, type ReactNode } from "react"
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import type { DirPublicInfo, DirPublicLink, File as SdkFile, LinkedDir, LinkedDirsAndFiles, LinkedFile } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 
@@ -17,7 +17,7 @@ interface Tree {
 const { tree, linkedFile, zoom, listings } = vi.hoisted(() => ({
 	tree: { fetch: vi.fn<(source: unknown, signal: AbortSignal) => Promise<Tree>>() },
 	// The listing by level uuid, where a test sets one.
-	listings: { byLevel: new Map<string, unknown>() },
+	listings: { byLevel: new Map<string, unknown>(), pending: new Set<string>() },
 	linkedFile: { current: undefined as LinkedFile | undefined },
 	zoom: {
 		keys: (event: KeyboardEvent): void => {
@@ -31,7 +31,7 @@ const { tree, linkedFile, zoom, listings } = vi.hoisted(() => ({
 vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	useLinkSaveable: () => false,
 	usePublicDirListing: ({ levelUuid }: { levelUuid: string | null }) =>
-		levelUuid === null
+		levelUuid === null || listings.pending.has(levelUuid)
 			? { status: "pending", data: undefined, refetch: vi.fn() }
 			: { status: "success", data: listings.byLevel.get(levelUuid) ?? LISTING, refetch: vi.fn() },
 	usePublicDirSize: () => ({ data: undefined }),
@@ -64,6 +64,7 @@ vi.mock("@/features/preview/components/readOnlyPreviewBody", () => ({
 			null,
 			createElement("p", null, `viewer ${alt}`),
 			createElement(SiblingNames),
+			createElement(ReportShown),
 			createElement("video", { "data-testid": "video", tabIndex: 0 }),
 			createElement(
 				"button",
@@ -84,7 +85,9 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
 import { setSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
-import { usePreviewSiblings } from "@/features/preview/lib/accessMode"
+import { PreviewAccessModeProvider, PreviewSiblingsProvider, usePreviewSiblings } from "@/features/preview/lib/accessMode"
+import { ImageShownContext } from "@/features/preview/lib/imageDisplay"
+import { usePreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
 import { driveItemName } from "@filen/shared"
 import { mockLinkedFile } from "@/tests/fixtures/sdk"
 import { withCode } from "@/tests/support/keys"
@@ -138,6 +141,17 @@ const DEEP_VIDEO = makeFile("deep.mp4", "video/mp4", testUuid("sub"))
 const DEEP_LISTING: LinkedDirsAndFiles = { dirs: [], files: [DEEP_VIDEO, makeFile("deep.srt", "text/plain", testUuid("sub"))] }
 const A_JPG = narrowItem(makeFile("a.jpg", "image/jpeg"))
 const B_PNG = narrowItem(makeFile("b.png", "image/png"))
+
+// A viewer puts its picture on screen as it mounts.
+function ReportShown() {
+	const shown = useContext(ImageShownContext)
+
+	useEffect(() => {
+		shown?.({ width: 1, height: 1 })
+	}, [shown])
+
+	return null
+}
 
 function SiblingNames() {
 	const siblings = usePreviewSiblings()
@@ -208,6 +222,7 @@ beforeEach(() => {
 	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
 	tree.fetch.mockReset()
 	listings.byLevel.clear()
+	listings.pending.clear()
 	setFullscreen(null)
 	Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true })
 	requestFullscreen.mockClear()
@@ -220,6 +235,7 @@ beforeEach(() => {
 afterEach(() => {
 	document.removeEventListener("keydown", zoom.keys, true)
 	cleanup()
+	vi.useRealTimers()
 	Reflect.deleteProperty(document, "fullscreenElement")
 	Reflect.deleteProperty(document, "fullscreenEnabled")
 })
@@ -473,5 +489,42 @@ describe("a public directory link's pager", () => {
 
 		expect(screen.queryByText(/^viewer /)).toBeNull()
 		expect(exitFullscreen).toHaveBeenCalledTimes(1)
+	})
+	it("a subdirectory's video plays while its directory is still listed, and is not skipped for it", async () => {
+		listings.pending.add(SUB_DIR.inner.uuid)
+		tree.fetch.mockResolvedValue(treeOf(A_JPG, narrowItem(DEEP_VIDEO)))
+		openFile("a.jpg")
+		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
+		fireEvent.click(screen.getByRole("button", { name: /^Include subdirectories/ }))
+		await flush()
+
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] })
+		key(document.body, { key: "ArrowRight" })
+		expect(viewer()).toBe("viewer deep.mp4")
+
+		// Past the time an unshown slide gets: a video waits for its end.
+		act(() => {
+			vi.advanceTimersByTime(16_000)
+		})
+		expect(viewer()).toBe("viewer deep.mp4")
+	})
+
+	it("a video's subtitles come with a listing provided after it mounted", () => {
+		let siblings: readonly DriveItem[] = []
+		const video = narrowItem(DEEP_VIDEO)
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(PreviewAccessModeProvider, {
+				mode: "anon",
+				linkScope: "scope",
+				children: createElement(PreviewSiblingsProvider, { siblings, children })
+			})
+		const { result, rerender } = renderHook(() => usePreviewSubtitles(video, null, null), { wrapper })
+
+		expect(result.current.options).toEqual([])
+
+		siblings = DEEP_LISTING.files.map(file => narrowItem(file))
+		rerender()
+
+		expect(result.current.options.map(option => option.id)).toEqual([`s:${testUuid("deepsrt")}`])
 	})
 })
