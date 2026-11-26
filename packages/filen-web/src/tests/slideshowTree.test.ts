@@ -22,7 +22,7 @@ const { listSlideshowOwned, listSlideshowShared, listSlideshowLinked } = vi.hois
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listSlideshowOwned, listSlideshowShared, listSlideshowLinked } }))
 
-import { fetchSlideshowTree } from "@/features/preview/lib/slideshowTree"
+import { fetchLinkedSlideshowTree, fetchSlideshowTree } from "@/features/preview/lib/slideshowTree"
 import { driveItemName } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -115,6 +115,19 @@ describe("fetchSlideshowTree", () => {
 		expect(items.map(item => item.type)).toEqual(["file", "file"])
 		// A link never hides: the file inside the dot-directory stays.
 		expect(names(items)).toEqual(["a.jpg", "b.jpg"])
+	})
+
+	it("linked: keeps the link's directories beside its files", async () => {
+		const link = { linkUuid: testUuid("link") } as unknown as DirPublicLink
+		const root: LinkedDir = { inner: mockDir("lroot", testUuid("p"), "Public"), linkedTag: true }
+		const sub: LinkedDir = { inner: mockDir("lsub", root.inner.uuid, "Sub"), linkedTag: true }
+
+		listSlideshowLinked.mockResolvedValueOnce({ dirs: [sub], files: [mockFile("b", sub.inner.uuid, "b.jpg")] })
+
+		const tree = await fetchLinkedSlideshowTree({ kind: "linked", dir: root, link }, signal())
+
+		expect(names(tree.items)).toEqual(["b.jpg"])
+		expect(tree.dirs.get(sub.inner.uuid)).toBe(sub)
 	})
 
 	it("orders by directory path then natural name", async () => {

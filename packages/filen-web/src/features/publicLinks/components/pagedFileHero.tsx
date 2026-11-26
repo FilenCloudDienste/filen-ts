@@ -1,18 +1,20 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { toast } from "sonner"
 import { isImeKeydown } from "@filen/shared/keymap"
-import type { AnyItemWithContext } from "@filen/sdk-rs"
+import type { AnyItemWithContext, LinkedDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
-import { entryKey } from "@/features/publicLinks/lib/browse.logic"
+import { entryKey, toBrowseEntries } from "@/features/publicLinks/lib/browse.logic"
+import { usePublicDirListing } from "@/features/publicLinks/queries/publicLink"
 import { browsePagerList, stepEntry, treeEntries, type BrowsePagerList, type FileEntry } from "@/features/publicLinks/lib/browsePager.logic"
 import type { ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
 import { useSlideshow } from "@/features/preview/hooks/useSlideshow"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
-import { hasTwoSlides } from "@/features/preview/lib/slideshow.logic"
+import { hasTwoSlides, slideKindOf } from "@/features/preview/lib/slideshow.logic"
 import { setSlideshowPrefs, useSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
-import { fetchSlideshowTree, type SlideshowSource } from "@/features/preview/lib/slideshowTree"
-import { isMediaTarget, isTextEditingTarget, previewOverlayKey } from "@/features/preview/components/previewOverlay.logic"
+import { fetchLinkedSlideshowTree, type SlideshowSource } from "@/features/preview/lib/slideshowTree"
+import { isMediaTarget, isTextEditingTarget, pagerDelta, previewOverlayKey } from "@/features/preview/components/previewOverlay.logic"
+import { MENU_ESCAPE_MS } from "@/lib/media/menuEscape"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
@@ -22,11 +24,14 @@ import { log } from "@/lib/log"
 
 const IS_MAC = isMacPlatform()
 
+type LinkedSource = Extract<SlideshowSource, { kind: "linked" }>
+
 // A directory link's opened file with its pager: ‹ › and the arrows step through `pager` (the level's files, or a
-// slideshow's subdirectories' list standing in), ▶ and S run a slideshow over it, Space pauses one, Escape ends one
-// before it leaves the file. The arrows and S stand down for a focused video or audio, a text field, a surface with
-// arrows of its own and a zoomed-in image (which takes them first). `source` is the level's directory, the one whose
-// subdirectories a slideshow may include (none while the level is filtered).
+// slideshow's subdirectories' list standing in), Home and End go to its ends, ▶ and S run a slideshow over it, Space
+// pauses one, and Escape ends one before it leaves the file (an Escape just after one ended stays too: the browser may
+// pass on the one it left full screen with). The keys stand down for a focused video or audio, a text field, a surface
+// with arrows of its own and a zoomed-in image (which takes them first). `source` is the level's directory, the one
+// whose subdirectories a slideshow may include (none while the level is filtered).
 export function PagedFileHero({
 	entry,
 	pager,
@@ -46,7 +51,7 @@ export function PagedFileHero({
 	// The pager's list swapped, at `entry`.
 	onPagerReplaced: (pager: BrowsePagerList, entry: FileEntry) => void
 	onBack: () => void
-	source: SlideshowSource | undefined
+	source: LinkedSource | undefined
 	downloadEnabled: boolean
 	linkScope: string
 	saveItem: AnyItemWithContext | undefined
@@ -75,14 +80,32 @@ export function PagedFileHero({
 		access: "anon"
 	})
 	const slideshowPrefs = useSlideshowPrefs()
-	const slideshowOffered = hasTwoSlides(pager.items)
-	// The level's list while a slideshow's subdirectories' list stands in for it.
+	const slideshowOffered = pager.twoSlides
+	// The level's list while a slideshow's subdirectories' list stands in for it, and that list's directories.
 	const [opening, setOpening] = useState<BrowsePagerList | null>(null)
+	const [treeDirs, setTreeDirs] = useState<ReadonlyMap<string, LinkedDir> | null>(null)
 	const [treeLoading, setTreeLoading] = useState(false)
 	const treeAbortRef = useRef<AbortController | null>(null)
 	// The file on screen when the slideshow started, and whether it runs as of the last commit.
 	const startedFromRef = useRef<string | undefined>(undefined)
 	const wasRunningRef = useRef(false)
+	// When the last slideshow ended: an Escape just after it (one the browser also left full screen with) stays here.
+	const endedAtRef = useRef(Number.NEGATIVE_INFINITY)
+	// The file on screen as of the last commit, for a list that lands later.
+	const shownRef = useRef(uuid)
+	// A video from below the level finds its subtitles in its own directory's listing, asked once it is shown.
+	const deepDir = treeDirs !== null && slideKindOf(entry.item) === "video" ? (treeDirs.get(entry.file.parent) ?? null) : null
+	const deepListing = usePublicDirListing({
+		levelUuid: deepDir === null ? null : entry.file.parent,
+		dir: deepDir,
+		link: deepDir === null ? null : (source?.link ?? null)
+	})
+	const shownSiblings =
+		deepDir === null ? siblings : deepListing.data === undefined ? [] : toBrowseEntries(deepListing.data).map(item => item.item)
+
+	useEffect(() => {
+		shownRef.current = uuid
+	}, [uuid])
 
 	useEffect(
 		() => () => {
@@ -93,10 +116,10 @@ export function PagedFileHero({
 
 	// Swaps the pager's list, kept on the file on screen when the new list has it, else on `fallbackUuid`'s file when it
 	// has that, else on its first file. False when there is nothing to swap to.
-	function replacePager(next: BrowsePagerList, fallbackUuid?: string): boolean {
+	function replacePager(next: BrowsePagerList, shown: string, fallbackUuid?: string): boolean {
 		const at = (key: string | undefined): FileEntry | undefined =>
 			key === undefined ? undefined : next.entries.find(candidate => entryKey(candidate) === key)
-		const landing = at(uuid) ?? at(fallbackUuid) ?? next.entries[0]
+		const landing = at(shown) ?? at(fallbackUuid) ?? next.entries[0]
 
 		if (landing === undefined) {
 			return false
@@ -118,7 +141,7 @@ export function PagedFileHero({
 		treeAbortRef.current = controller
 		setTreeLoading(true)
 
-		void fetchSlideshowTree(source, controller.signal).then(
+		void fetchLinkedSlideshowTree(source, controller.signal).then(
 			tree => {
 				if (controller.signal.aborted) {
 					return
@@ -127,9 +150,11 @@ export function PagedFileHero({
 				treeAbortRef.current = null
 				setTreeLoading(false)
 
-				// Fewer than two slides would end the slideshow: the list stays.
-				if (hasTwoSlides(tree) && replacePager(browsePagerList(treeEntries(tree)))) {
+				// Fewer than two slides would end the slideshow: the list stays. It lands on the file on screen now, which
+				// the slideshow may have moved on from since the load began.
+				if (hasTwoSlides(tree.items) && replacePager(browsePagerList(treeEntries(tree.items)), shownRef.current)) {
 					setOpening(held)
+					setTreeDirs(tree.dirs)
 				}
 			},
 			(error: unknown) => {
@@ -151,8 +176,9 @@ export function PagedFileHero({
 		treeAbortRef.current = null
 		setTreeLoading(false)
 
-		if (opening !== null && replacePager(opening, fallbackUuid)) {
+		if (opening !== null && replacePager(opening, uuid, fallbackUuid)) {
 			setOpening(null)
+			setTreeDirs(null)
 		}
 	}
 
@@ -184,6 +210,7 @@ export function PagedFileHero({
 	// slideshow's alone, so a load under way never lands and the level's list comes back (the stored preference stays).
 	const onRunningChange = useEffectEvent((running: boolean) => {
 		if (!running) {
+			endedAtRef.current = performance.now()
 			dropSubfolders(startedFromRef.current)
 		}
 	})
@@ -204,7 +231,7 @@ export function PagedFileHero({
 		() => {
 			if (slideshow.running) {
 				slideshow.stop()
-			} else {
+			} else if (performance.now() - endedAtRef.current >= MENU_ESCAPE_MS) {
 				onBack()
 			}
 		},
@@ -226,13 +253,15 @@ export function PagedFileHero({
 
 		const action = previewOverlayKey(event, bindings, IS_MAC)
 
-		if (action === "preview.prev" || action === "preview.next") {
-			if (pager.entries.length < 2) {
+		if (action === "preview.prev" || action === "preview.next" || action === "preview.first" || action === "preview.last") {
+			const delta = pager.entries.length < 2 ? null : pagerDelta(action, Math.max(index, 0), pager.entries.length)
+
+			if (delta === null) {
 				return
 			}
 
 			event.preventDefault()
-			step(action === "preview.prev" ? -1 : 1)
+			step(delta)
 		} else if (
 			action === "preview.slideshow"
 				? slideshowOffered && !slideshow.running
@@ -272,7 +301,8 @@ export function PagedFileHero({
 			onBack={onBack}
 			saveItem={saveItem}
 			archiveFile={entry.file}
-			siblings={siblings}
+			siblings={shownSiblings}
+			siblingsPending={deepDir !== null && deepListing.status === "pending"}
 			references={references}
 			pager={
 				pager.entries.length < 2

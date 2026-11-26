@@ -1,4 +1,4 @@
-import type { AnyLinkedDir, Dir, DirPublicLink, File } from "@filen/sdk-rs"
+import type { AnyLinkedDir, Dir, DirPublicLink, File, LinkedDir } from "@filen/sdk-rs"
 import { driveItemName, isHiddenName, isRootDotFilen } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sdkApi } from "@/lib/sdk/client"
@@ -17,6 +17,16 @@ interface TreeListing {
 	dirs: readonly Dir[]
 	files: readonly File[]
 	narrow: (file: File) => DriveItem
+	// A link's directories as listed, for the listings beside its files (a video's subtitles).
+	linkedDirs: readonly LinkedDir[]
+}
+
+type LinkedSource = Extract<SlideshowSource, { kind: "linked" }>
+
+// A link's tree: its slideable files in order, and its directories by uuid.
+export interface LinkedSlideshowTree {
+	items: DriveItem[]
+	dirs: ReadonlyMap<string, LinkedDir>
 }
 
 // A directory's place in the tree: its ancestry's names from the listed root down, and whether that ancestry hides it.
@@ -34,17 +44,17 @@ async function listTree(source: SlideshowSource): Promise<TreeListing> {
 		case "owned": {
 			const { dirs, files } = await sdkApi.listSlideshowOwned(source.uuid)
 
-			return { dirs, files, narrow: narrowItem }
+			return { dirs, files, narrow: narrowItem, linkedDirs: [] }
 		}
 		case "shared": {
 			const { dirs, files, role } = await sdkApi.listSlideshowShared(source.uuid, { variant: source.variant, path: [...source.path] })
 
-			return { dirs: dirs.map(dir => dir.inner), files, narrow: file => narrowItem({ ...file, sharingRole: role }) }
+			return { dirs: dirs.map(dir => dir.inner), files, narrow: file => narrowItem({ ...file, sharingRole: role }), linkedDirs: [] }
 		}
 		case "linked": {
 			const { dirs, files } = await sdkApi.listSlideshowLinked(source.dir, source.link)
 
-			return { dirs: dirs.map(dir => dir.inner), files, narrow: narrowItem }
+			return { dirs: dirs.map(dir => dir.inner), files, narrow: narrowItem, linkedDirs: dirs }
 		}
 	}
 }
@@ -71,10 +81,21 @@ function compareSegments(a: readonly string[], b: readonly string[]): number {
 export async function fetchSlideshowTree(source: SlideshowSource, signal: AbortSignal): Promise<DriveItem[]> {
 	const listing = signal.aborted ? null : await listTree(source)
 
+	return listing === null || signal.aborted ? [] : orderTree(source, listing)
+}
+
+// fetchSlideshowTree for a link, with its directories (which it lists anyway) kept beside the files.
+export async function fetchLinkedSlideshowTree(source: LinkedSource, signal: AbortSignal): Promise<LinkedSlideshowTree> {
+	const listing = signal.aborted ? null : await listTree(source)
+
 	if (listing === null || signal.aborted) {
-		return []
+		return { items: [], dirs: new Map() }
 	}
 
+	return { items: orderTree(source, listing), dirs: new Map(listing.linkedDirs.map(dir => [dir.inner.uuid, dir])) }
+}
+
+function orderTree(source: SlideshowSource, listing: TreeListing): DriveItem[] {
 	const { dirs, files, narrow } = listing
 
 	const hideDotFiles = source.kind !== "linked" && source.hideDotFiles
