@@ -1,9 +1,8 @@
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { driveItemName, formatBytes, type CopyJobGlyph } from "@filen/shared"
+import { driveItemName, formatBytes, nameSearchKey, type CopyJobGlyph } from "@filen/shared"
 import { ChevronRightIcon, DownloadIcon } from "lucide-react"
-import type { AnyItemWithContext, DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-rs"
-import { type DriveItem } from "@/features/drive/lib/item"
+import type { AnyItemWithContext, DirPublicInfo, DirPublicLink } from "@filen/sdk-rs"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
@@ -52,7 +51,8 @@ import {
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
-import { FileHero } from "@/features/publicLinks/components/fileHero"
+import { PagedFileHero } from "@/features/publicLinks/components/pagedFileHero"
+import { browsePagerList, pagerEntries, type BrowsePagerList, type FileEntry } from "@/features/publicLinks/lib/browsePager.logic"
 import { linkReferences } from "@/features/publicLinks/lib/linkReferences"
 import { SaveToDriveButton, SaveToDriveDialog } from "@/features/publicLinks/components/saveToDrive"
 import { SaveAsArchiveButton } from "@/features/publicLinks/components/publicArchive"
@@ -89,12 +89,13 @@ interface SaveTarget {
 // current level's already-fetched entries in drive's list or grid view (one choice per browser), a selection over them,
 // and a flag-gated
 // whole-directory zip download. An opened file shows the shared FileHero in-place (same session, password
-// carried) rather than hard-navigating to /f/ (which would need a per-file link that does not exist).
+// carried) rather than hard-navigating to /f/ (which would need a per-file link that does not exist), paging through
+// the level's files as listed (pagerEntries), held as they were when it opened.
 export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: DirPublicLink }) {
 	const { t } = useTranslation(["publicLinks", "common"])
 	const isOnline = useIsOnline()
 	const [stack, setStack] = useState<BrowseCrumb[]>(() => [rootCrumb(info)])
-	const [selected, setSelected] = useState<{ item: DriveItem; file: SdkFile } | null>(null)
+	const [selected, setSelected] = useState<{ entry: FileEntry; pager: BrowsePagerList } | null>(null)
 	const [filter, setFilter] = useState("")
 	const [sort, setSort] = useState<DriveSortBy>(DEFAULT_PUBLIC_SORT)
 	const [selection, setSelection] = useState<BrowseSelection>(EMPTY_SELECTION)
@@ -117,7 +118,9 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const viewMode = viewModeQuery.data ?? DEFAULT_PUBLIC_VIEW_MODE
 
 	// An abuse report names where in the link the visitor is.
-	useReportViewing(selected === null ? stack.map(crumb => crumb.name) : [...stack.map(crumb => crumb.name), driveItemName(selected.item)])
+	useReportViewing(
+		selected === null ? stack.map(crumb => crumb.name) : [...stack.map(crumb => crumb.name), driveItemName(selected.entry.item)]
+	)
 
 	const sorted = listing.data === undefined ? [] : sortEntries(toBrowseEntries(listing.data), sort)
 	// The sort is stable and the filter order-preserving, so a keystroke narrows the sorted level as it is.
@@ -143,8 +146,23 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 			setResume(null)
 			dropDownloadNotice()
 		} else {
-			setResume({ key: entryKey(entry), scrollOffset: listRef.current?.scrollOffset() ?? 0 })
-			setSelected({ item: entry.item, file: entry.file })
+			const key = entryKey(entry)
+			const pager = pagerEntries(visible, link.enableDownload)
+
+			setResume({ key, scrollOffset: listRef.current?.scrollOffset() ?? 0 })
+			// A file the pager does not step onto opens alone.
+			setSelected({ entry, pager: browsePagerList(pager.some(candidate => entryKey(candidate) === key) ? pager : [entry]) })
+		}
+	}
+
+	// The list comes back on the file last shown when the level lists it (a slideshow's list reaches below it).
+	function showEntry(entry: FileEntry, pager?: BrowsePagerList): void {
+		const key = entryKey(entry)
+
+		setSelected(prev => (prev === null ? prev : { entry, pager: pager ?? prev.pager }))
+
+		if (visible.some(candidate => entryKey(candidate) === key)) {
+			setResume(prev => (prev === null ? prev : { ...prev, key }))
 		}
 	}
 
@@ -224,16 +242,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	useClickAwayDeselect(selected === null && selection.size > 0, clearSelection)
 
 	// Defs in features/publicLinks/lib/keymap.ts. Every one stands down under a dialog or menu and in a text field.
-	// Escape and Alt+↑ leave an opened file for its directory, Alt+↑ goes up a level from there; / (the filter box's
-	// own) and Mod+S act on the directory on screen (the opened file takes its own Mod+S).
-	useAction(
-		"links.back",
-		() => {
-			setSelected(null)
-		},
-		{ ...OUTSIDE_OVERLAYS, enabled: selected !== null }
-	)
-
+	// Escape (PagedFileHero's) and Alt+↑ leave an opened file for its directory, Alt+↑ goes up a level from there; / (the
+	// filter box's own) and Mod+S act on the directory on screen (the opened file takes its own Mod+S).
 	useAction(
 		"links.up",
 		event => {
@@ -298,15 +308,21 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	// returns when it is dismissed, its list resumed (scroll, cursor, focus) rather than kept mounted out of sight.
 	if (selected !== null) {
 		return (
-			<FileHero
-				item={selected.item}
-				downloadEnabled={link.enableDownload}
-				linkScope={linkScope}
+			<PagedFileHero
+				entry={selected.entry}
+				pager={selected.pager}
+				onStep={showEntry}
+				onPagerReplaced={(pager, entry) => {
+					showEntry(entry, pager)
+				}}
 				onBack={() => {
 					setSelected(null)
 				}}
-				saveItem={saveable ? selected.file : undefined}
-				archiveFile={selected.file}
+				// A filtered level is a search's result: no subdirectories to add to it.
+				source={nameSearchKey(filter).length === 0 ? { kind: "linked", dir: current.dir, link } : undefined}
+				downloadEnabled={link.enableDownload}
+				linkScope={linkScope}
+				saveItem={saveable ? selected.entry.file : undefined}
 				siblings={sorted.map(entry => entry.item)}
 				references={linkReferences(sorted, link)}
 			/>

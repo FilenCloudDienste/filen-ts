@@ -1,0 +1,272 @@
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import type { DirPublicInfo, DirPublicLink, File as SdkFile, LinkedFile } from "@filen/sdk-rs"
+import type { DriveItem } from "@/features/drive/lib/item"
+
+// A directory link's opened file pages through the level's files (‹ › and the arrows) and runs a slideshow over them,
+// with the link's subdirectories on request. A single file's link has no pager.
+
+const { tree, linkedFile, zoom } = vi.hoisted(() => ({
+	tree: { fetch: vi.fn<(source: unknown, signal: AbortSignal) => Promise<DriveItem[]>>() },
+	linkedFile: { current: undefined as LinkedFile | undefined },
+	zoom: {
+		keys: (event: KeyboardEvent): void => {
+			if (event.key.startsWith("Arrow")) {
+				event.preventDefault()
+			}
+		}
+	}
+}))
+
+vi.mock("@/features/publicLinks/queries/publicLink", () => ({
+	useLinkSaveable: () => false,
+	usePublicDirListing: () => ({ status: "success", data: LISTING, refetch: vi.fn() }),
+	usePublicDirSize: () => ({ data: undefined }),
+	usePublicVisitorSignedIn: () => ({ data: false }),
+	usePublicViewModeQuery: () => ({ data: "list", refetch: () => Promise.resolve() }),
+	usePublicFile: () => ({ status: "success", data: linkedFile.current, error: null, refetch: vi.fn() })
+}))
+vi.mock("@/features/publicLinks/lib/download", () => ({
+	startAnonDirZipDownload: vi.fn(),
+	startAnonFileDownload: vi.fn(),
+	startAnonItemsZipDownload: vi.fn()
+}))
+vi.mock("@/features/publicLinks/components/saveToDrive", () => ({ SaveToDriveButton: () => null, SaveToDriveDialog: () => null }))
+vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+vi.mock("@/lib/media/wakeLock", () => ({ createScreenWakeLock: () => ({ set: vi.fn(), dispose: vi.fn() }) }))
+vi.mock("@/features/preview/lib/previewPrefetch", () => ({ prefetchPreviewImage: () => null }))
+vi.mock("@/features/drive/lib/thumbnails", async () => ({
+	...(await vi.importActual<typeof import("@/features/drive/lib/thumbnails")>("@/features/drive/lib/thumbnails")),
+	peekThumbnailUrl: () => null
+}))
+vi.mock("@/features/preview/lib/slideshowTree", () => ({ fetchSlideshowTree: tree.fetch }))
+vi.mock("@/features/preview/components/contentSniffGate", () => ({ ContentSniffGate: ({ render }: { render: () => unknown }) => render() }))
+
+// The viewer: its file's name, a video element, and a zoom that takes the arrows first as ZoomableImage does.
+vi.mock("@/features/preview/components/readOnlyPreviewBody", () => ({
+	ReadOnlyPreviewBody: ({ alt }: { alt: string }) =>
+		createElement(
+			"div",
+			null,
+			createElement("p", null, `viewer ${alt}`),
+			createElement("video", { "data-testid": "video", tabIndex: 0 }),
+			createElement(
+				"button",
+				{
+					type: "button",
+					onClick: () => {
+						document.addEventListener("keydown", zoom.keys, true)
+					}
+				},
+				"zoom in"
+			)
+		)
+}))
+
+import "@/lib/i18n"
+import { registerAllActions } from "@/lib/keymap/actions"
+import { narrowItem } from "@/features/drive/lib/item"
+import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
+import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
+import { setSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
+import { mockLinkedFile } from "@/tests/fixtures/sdk"
+import { withCode } from "@/tests/support/keys"
+import { mockViewportHeight } from "@/tests/support/viewport"
+import { testUuid } from "@/tests/support/uuid"
+
+registerAllActions()
+
+const ROOT_UUID = testUuid("root")
+
+function makeFile(name: string, mime: string, parent: SdkFile["parent"] = ROOT_UUID): SdkFile {
+	return {
+		uuid: testUuid(name.replace(/\W/g, "")),
+		stableUUID: undefined,
+		meta: { type: "decoded", data: { name, mime, size: 1024n, key: "k", version: 2, modified: 1n } },
+		parent,
+		size: 1024n,
+		favorited: false,
+		region: "",
+		bucket: "",
+		timestamp: 1n,
+		chunks: 1n,
+		canMakeThumbnail: false
+	}
+}
+
+const LISTING = {
+	dirs: [
+		{
+			inner: {
+				uuid: testUuid("sub"),
+				parent: ROOT_UUID,
+				color: "default",
+				timestamp: 0n,
+				favorited: false,
+				meta: { type: "decoded", data: { name: "Sub" } }
+			},
+			linkedTag: true
+		}
+	],
+	files: [
+		makeFile("a.jpg", "image/jpeg"),
+		makeFile("b.png", "image/png"),
+		makeFile("doc.pdf", "application/pdf"),
+		makeFile("song.mp3", "audio/mpeg")
+	]
+}
+const DEEP = narrowItem(makeFile("deep.jpg", "image/jpeg", testUuid("sub")))
+const INFO = { root: { inner: { uuid: ROOT_UUID, meta: { type: "decoded", data: { name: "Photos" } } } } } as unknown as DirPublicInfo
+const LINK = { enableDownload: true, linkKey: "key", password: undefined } as unknown as DirPublicLink
+
+function openFile(name: string): void {
+	render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+	fireEvent.doubleClick(screen.getByRole("option", { name: new RegExp(`^${name}`) }))
+}
+
+function viewer(): string {
+	return screen.getByText(/^viewer /).textContent
+}
+
+function key(target: Element | Document, init: { key: string }): void {
+	fireEvent.keyDown(target, withCode(init))
+}
+
+async function flush(): Promise<void> {
+	await act(async () => {
+		await new Promise(resolve => setTimeout(resolve, 0))
+	})
+}
+
+beforeEach(() => {
+	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
+	tree.fetch.mockReset()
+	setSlideshowPrefs({ subfolders: false, shuffle: false })
+})
+
+afterEach(() => {
+	document.removeEventListener("keydown", zoom.keys, true)
+	cleanup()
+})
+
+describe("a public directory link's pager", () => {
+	it("the hero pages with ‹ › and the arrow keys", () => {
+		openFile("a.jpg")
+
+		expect(viewer()).toBe("viewer a.jpg")
+		expect(screen.getByRole("button", { name: /^Previous file/ }).hasAttribute("disabled")).toBe(true)
+
+		fireEvent.click(screen.getByRole("button", { name: /^Next file/ }))
+		expect(viewer()).toBe("viewer b.png")
+
+		key(document.body, { key: "ArrowRight" })
+		expect(viewer()).toBe("viewer doc.pdf")
+
+		// The audio file is not a stop; the end clamps.
+		expect(screen.getByRole("button", { name: /^Next file/ }).hasAttribute("disabled")).toBe(true)
+		key(document.body, { key: "ArrowRight" })
+		expect(viewer()).toBe("viewer doc.pdf")
+
+		key(document.body, { key: "ArrowLeft" })
+		expect(viewer()).toBe("viewer b.png")
+	})
+
+	it("arrow keys inside a video's controls or on a zoomed image do not page", () => {
+		openFile("a.jpg")
+
+		key(screen.getByTestId("video"), { key: "ArrowRight" })
+		expect(viewer()).toBe("viewer a.jpg")
+
+		fireEvent.click(screen.getByRole("button", { name: "zoom in" }))
+		key(document.body, { key: "ArrowRight" })
+		expect(viewer()).toBe("viewer a.jpg")
+	})
+
+	it("a file the pager does not step onto opens alone", () => {
+		openFile("song.mp3")
+
+		expect(screen.queryByRole("button", { name: /^Next file/ })).toBeNull()
+		expect(screen.queryByRole("button", { name: /^Slideshow/ })).toBeNull()
+	})
+
+	it("a single-file link shows no pager", () => {
+		linkedFile.current = mockLinkedFile()
+		render(createElement(FileLinkView, { uuid: testUuid("link"), linkKey: "key" }))
+
+		expect(screen.queryByRole("button", { name: /^Next file/ })).toBeNull()
+		expect(screen.queryByRole("button", { name: /^Previous file/ })).toBeNull()
+		expect(screen.queryByRole("button", { name: /^Slideshow/ })).toBeNull()
+	})
+
+	it("▶ starts a slideshow over the visible files", () => {
+		openFile("a.jpg")
+
+		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
+
+		// The two images; the PDF and the audio file are no slides.
+		expect(screen.getByText("1/2")).toBeDefined()
+		// The header gives way to the bar.
+		expect(screen.queryByRole("button", { name: /^Hide preview/ })).toBeNull()
+		expect(screen.getByRole("button", { name: /^End slideshow/ })).toBeDefined()
+
+		fireEvent.click(screen.getByRole("button", { name: /^End slideshow/ }))
+		expect(screen.getByRole("button", { name: /^Slideshow/ })).toBeDefined()
+		expect(viewer()).toBe("viewer a.jpg")
+	})
+
+	it("s starts it and Escape ends it without leaving the file", () => {
+		openFile("b.png")
+
+		key(document.body, { key: "s" })
+		expect(screen.getByRole("button", { name: /^End slideshow/ })).toBeDefined()
+
+		key(document.body, { key: "Escape" })
+		expect(screen.queryByRole("button", { name: /^End slideshow/ })).toBeNull()
+		expect(viewer()).toBe("viewer b.png")
+
+		// Then Escape leaves the file for the list.
+		key(document.body, { key: "Escape" })
+		expect(screen.queryByText(/^viewer /)).toBeNull()
+		expect(screen.getByRole("option", { name: /^a\.jpg/ })).toBeDefined()
+	})
+
+	it("subfolders lists the link level recursively", async () => {
+		const [a] = LISTING.files
+
+		if (a === undefined) {
+			throw new Error("a.jpg expected")
+		}
+
+		tree.fetch.mockResolvedValue([narrowItem(a), DEEP])
+		openFile("a.jpg")
+
+		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
+		fireEvent.click(screen.getByRole("button", { name: /^Include subdirectories/ }))
+		await flush()
+
+		expect(tree.fetch).toHaveBeenCalledWith({ kind: "linked", dir: INFO.root, link: LINK }, expect.any(AbortSignal))
+		expect(viewer()).toBe("viewer a.jpg")
+		expect(screen.getByText("1/2")).toBeDefined()
+
+		key(document.body, { key: "ArrowRight" })
+		expect(viewer()).toBe("viewer deep.jpg")
+
+		// Ending it brings the level's list back, at the file it started from (deep.jpg is not in it).
+		fireEvent.click(screen.getByRole("button", { name: /^End slideshow/ }))
+		expect(viewer()).toBe("viewer a.jpg")
+		expect(screen.getByRole("button", { name: /^Next file/ }).hasAttribute("disabled")).toBe(false)
+	})
+
+	it("offers no subdirectories over a filtered level", () => {
+		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+		fireEvent.change(screen.getByRole("searchbox"), { target: { value: "." } })
+		fireEvent.doubleClick(screen.getByRole("option", { name: /^a\.jpg/ }))
+
+		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
+
+		expect(screen.queryByRole("button", { name: /^Include subdirectories/ })).toBeNull()
+	})
+})

@@ -127,3 +127,16 @@ export function slideDue(state: SlideDueState): boolean {
 
 	return state.now - state.shownAt >= state.intervalMs && (!state.animating || state.mediaEnded)
 }
+
+// Whether a list holds at least two slides (a slideshow is offered over it); stops counting at the second.
+export function hasTwoSlides(items: readonly DriveItem[]): boolean {
+	let slides = 0
+
+	for (const item of items) {
+		if (slideKindOf(item) !== null && ++slides === 2) {
+			return true
+		}
+	}
+
+	return false
+}

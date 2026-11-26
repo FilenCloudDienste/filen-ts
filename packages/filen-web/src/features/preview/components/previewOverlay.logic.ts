@@ -49,7 +49,7 @@ export function previewMenuHiddenActionIds(extra?: ReadonlySet<ItemActionId>, do
 // only, not caret/selection movement, so a read-only text/code preview keeps its native arrow-key
 // navigation once focus is inside it too — the pager buttons (or stepping back out to the listing)
 // remain how you page one of those instead, exactly like a focused <video>/<audio> scrubber already
-// claims Left/Right for seeking (see previewOverlay.tsx's own isMediaTarget).
+// claims Left/Right for seeking (see isMediaTarget below).
 //
 // Any text field too (a caret moves there as well), and a surface marked `data-preview-surface`: one that
 // takes its own clicks and arrow keys, as the spreadsheet grid does, where an arrow at the sheet's edge
@@ -58,6 +58,16 @@ export const PREVIEW_SURFACE = "[data-preview-surface]"
 
 export function isTextEditingTarget(target: EventTarget | null): boolean {
 	return hasClosest(target) && target.closest(`.cm-editor, input, textarea, ${PREVIEW_SURFACE}`) !== null
+}
+
+// True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
+// Left/Right as a seek, so the pager must not steal them. `instanceof` also covers the "target
+// can be a non-Element EventTarget" case for free (null/Document/etc. all just return false), unlike a
+// closest() call that would need its own Element check first. The user-agent shadow root the native
+// `controls` UI renders into retargets any bubbled event's `target` back to this host element anyway,
+// so no tree walk is needed even for a click on the scrubber itself.
+export function isMediaTarget(target: EventTarget | null): boolean {
+	return target instanceof HTMLMediaElement
 }
 
 // A field that takes typing (a slider's range input does not): a key there is the field's.

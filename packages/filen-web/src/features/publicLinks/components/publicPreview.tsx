@@ -6,6 +6,8 @@ import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPrevi
 import { ContentSniffGate } from "@/features/preview/components/contentSniffGate"
 import { IworkPreview } from "@/features/iwork/components/iworkPreview"
 import { PreviewReferenceSourceContext, type ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
+import { SlideshowSlot } from "@/features/preview/components/slideshowSlot"
+import type { SlideshowSlotValue } from "@/features/preview/lib/slideSignals"
 
 const NO_SIBLINGS: readonly DriveItem[] = []
 
@@ -19,13 +21,14 @@ const NO_SIBLINGS: readonly DriveItem[] = []
 // disallows downloads still previews, with no viewer's own way to save the file. `siblings` are the
 // other files of the link's directory, where a video's subtitles are found. A Pages, Numbers or Keynote document shows
 // the rendering its package carries, the package listed and that one entry read through the public-link client's
-// archive reader, as the drive's preview does.
+// archive reader, as the drive's preview does. `slot` is a running slideshow's (useSlideshow, in the hero's pager).
 export function PublicPreview({
 	item,
 	linkScope,
 	downloadable,
 	siblings,
-	references
+	references,
+	slot
 }: {
 	item: DriveItem
 	linkScope: string
@@ -33,6 +36,7 @@ export function PublicPreview({
 	siblings?: readonly DriveItem[] | undefined
 	// Where a model's referenced files are found; none on a single file's link.
 	references?: ReferenceSourceFactory | undefined
+	slot?: SlideshowSlotValue | undefined
 }) {
 	const base = asDirectoryOrFile(item)
 
@@ -50,28 +54,30 @@ export function PublicPreview({
 			<PreviewDownloadableProvider downloadable={downloadable}>
 				<PreviewSiblingsProvider siblings={siblings ?? NO_SIBLINGS}>
 					<PreviewReferenceSourceContext value={references ?? null}>
-						<div className="size-full">
-							<ContentSniffGate
-								item={item}
-								asText={false}
-								render={() => {
-									const category = previewType(item)
+						<SlideshowSlot value={slot ?? null}>
+							<div className="size-full">
+								<ContentSniffGate
+									item={item}
+									asText={false}
+									render={() => {
+										const category = previewType(item)
 
-									return category === "iwork" ? (
-										<IworkPreview
-											item={item}
-											alt={alt}
-										/>
-									) : (
-										<ReadOnlyPreviewBody
-											item={item}
-											category={category}
-											alt={alt}
-										/>
-									)
-								}}
-							/>
-						</div>
+										return category === "iwork" ? (
+											<IworkPreview
+												item={item}
+												alt={alt}
+											/>
+										) : (
+											<ReadOnlyPreviewBody
+												item={item}
+												category={category}
+												alt={alt}
+											/>
+										)
+									}}
+								/>
+							</div>
+						</SlideshowSlot>
 					</PreviewReferenceSourceContext>
 				</PreviewSiblingsProvider>
 			</PreviewDownloadableProvider>

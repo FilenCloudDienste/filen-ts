@@ -64,6 +64,7 @@ import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
+	isMediaTarget,
 	isTextEditingTarget,
 	previewDownloadable,
 	previewMenuHiddenActionIds,
@@ -99,7 +100,7 @@ import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/l
 import { useSlideshow } from "@/features/preview/hooks/useSlideshow"
 import { SlideshowSlot } from "@/features/preview/components/slideshowSlot"
 import { SlideshowBar } from "@/features/preview/components/slideshowBar"
-import { slideKindOf } from "@/features/preview/lib/slideshow.logic"
+import { hasTwoSlides } from "@/features/preview/lib/slideshow.logic"
 import { setSlideshowPrefs, useSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
 import { fetchSlideshowTree, type SlideshowSource } from "@/features/preview/lib/slideshowTree"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -176,16 +177,6 @@ export interface PreviewOverlayProps {
 	// Swaps the host's frozen pager list (as opening it with `items` at `index` would): a slideshow's subdirectories'
 	// files, and back.
 	onItemsReplaced?: ((items: DriveItem[], index: number) => void) | undefined
-}
-
-// True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
-// Left/Right as a seek, so the pager below must not steal them. `instanceof` also covers the "target
-// can be a non-Element EventTarget" case for free (null/Document/etc. all just return false), unlike a
-// closest() call that would need its own Element check first. The user-agent shadow root the native
-// `controls` UI renders into retargets any bubbled event's `target` back to this host element anyway,
-// so no tree walk is needed even for a click on the scrubber itself.
-function isMediaTarget(target: EventTarget | null): boolean {
-	return target instanceof HTMLMediaElement
 }
 
 interface PreviewErrorBoundaryState {
@@ -1247,8 +1238,8 @@ export function PreviewOverlay({
 			return
 		}
 
-		// A focused media scrubber wins over the pager — native seek expectation (see isMediaTarget
-		// above). A focused CodeMirror surface wins too — its own arrow bindings move the cursor/
+		// A focused media scrubber wins over the pager — native seek expectation (see
+		// previewOverlay.logic.ts's isMediaTarget). A focused CodeMirror surface wins too — its own arrow bindings move the cursor/
 		// selection and never stopPropagation, so without this a Left/Right meant for the caret would
 		// also page the overlay (or pop the unsaved-changes prompt on every press) — see
 		// previewOverlay.logic.ts's own isTextEditingTarget for why this checks read-only CodeMirror
@@ -1824,18 +1815,6 @@ export function PreviewOverlay({
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
 	)
-}
-
-function hasTwoSlides(items: readonly DriveItem[]): boolean {
-	let slides = 0
-
-	for (const item of items) {
-		if (slideKindOf(item) !== null && ++slides === 2) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // Middle-ish ellipsis for a long filename: the head truncates with a CSS ellipsis while the tail
