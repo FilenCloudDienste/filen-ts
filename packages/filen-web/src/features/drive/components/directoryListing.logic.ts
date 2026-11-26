@@ -4,6 +4,7 @@ import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { rootDotFilenFilter } from "@/features/drive/lib/hiddenItems"
+import type { SlideshowSource } from "@/features/preview/lib/slideshowTree"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
 // returns null — the item isn't shared, or its role couldn't be read) always KEEPS the item; only a
@@ -202,4 +203,41 @@ export function reconcileSelectedItems<T extends DriveItem>(selectedItems: T[], 
 	}
 
 	return reconciled ?? selectedItems
+}
+
+// The one directory a slideshow opened from this listing may take its subdirectories from: an owned directory (My
+// Drive's root included, `rootUuid`) or a shared one inside a share. None for the shared roots (lists of shares), the
+// flat listings and search results.
+export function listingSlideshowSource({
+	variant,
+	pathUuids,
+	searchActive,
+	hideDotFiles,
+	dotFilenRoot,
+	rootUuid
+}: {
+	variant: DriveVariant
+	pathUuids: readonly string[]
+	searchActive: boolean
+	hideDotFiles: boolean
+	dotFilenRoot: string | null
+	rootUuid: string
+}): SlideshowSource | undefined {
+	if (searchActive) {
+		return undefined
+	}
+
+	const uuid = pathUuids.at(-1)
+
+	if (variant === "drive") {
+		const owned = uuid ?? rootUuid
+
+		return owned === "" ? undefined : { kind: "owned", uuid: owned, hideDotFiles, dotFilenRoot }
+	}
+
+	if ((variant === "sharedIn" || variant === "sharedOut") && uuid !== undefined) {
+		return { kind: "shared", variant, uuid, path: pathUuids, hideDotFiles }
+	}
+
+	return undefined
 }

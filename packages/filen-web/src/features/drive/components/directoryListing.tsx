@@ -80,9 +80,12 @@ import {
 	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
+	listingSlideshowSource,
 	reconcileSelectedItems,
 	resolveListingDisplayItems
 } from "@/features/drive/components/directoryListing.logic"
+import { currentRootUuid } from "@/features/drive/lib/actions"
+import type { SlideshowSource } from "@/features/preview/lib/slideshowTree"
 import { Breadcrumb } from "@/features/drive/components/breadcrumb"
 import { SortMenu } from "@/features/drive/components/sortMenu"
 import { ListColumnHeader } from "@/features/drive/components/listColumnHeader"
@@ -145,12 +148,21 @@ interface ListingOpenOptions {
 	splat: string
 	searchActive: boolean
 	clearSearch: () => void
-	openPreview: (items: DriveItem[], index: number) => void
+	openPreview: (items: DriveItem[], index: number, slideshowSource?: SlideshowSource) => void
+	slideshowSource: SlideshowSource | undefined
 }
 
 // Outside DirectoryListing so the React Compiler memoizes the handler on its inputs ("use no memo" is
 // per function): a fresh one each listing render would bust every mounted row's cached menu subtree.
-function useListingOpen({ items, variant, splat, searchActive, clearSearch, openPreview }: ListingOpenOptions): (index: number) => void {
+function useListingOpen({
+	items,
+	variant,
+	splat,
+	searchActive,
+	clearSearch,
+	openPreview,
+	slideshowSource
+}: ListingOpenOptions): (index: number) => void {
 	const navigate = useNavigate()
 
 	const handOff = (item: DriveItem): void => {
@@ -181,7 +193,7 @@ function useListingOpen({ items, variant, splat, searchActive, clearSearch, open
 			openPreview: () => {
 				const target = previewOpenTarget(items, item)
 
-				openPreview(target.siblings, target.index)
+				openPreview(target.siblings, target.index, slideshowSource)
 			},
 			onReadFailed: error => {
 				log.warn("drive.open", "the content read before opening failed", error)
@@ -222,7 +234,7 @@ function useListingOpen({ items, variant, splat, searchActive, clearSearch, open
 
 			const target = previewOpenTarget(items, item)
 
-			openPreview(target.siblings, target.index)
+			openPreview(target.siblings, target.index, slideshowSource)
 
 			return
 		}
@@ -461,13 +473,29 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		}
 	}, [pendingHeight, pendingParentUuid, scrollElement])
 
+	// Where a slideshow opened from here takes its subdirectories from (the listing's own hide rules).
+	const listingSearchActive = search.active || localSearchActive
+	const slideshowSource = useMemo(
+		() =>
+			listingSlideshowSource({
+				variant,
+				pathUuids: splatToUuids(splat),
+				searchActive: listingSearchActive,
+				hideDotFiles: hideHidden,
+				dotFilenRoot,
+				rootUuid: currentRootUuid()
+			}),
+		[variant, splat, listingSearchActive, hideHidden, dotFilenRoot]
+	)
+
 	const handleOpen = useListingOpen({
 		items: sortedItems,
 		variant,
 		splat,
 		searchActive: search.active,
 		clearSearch: search.clear,
-		openPreview
+		openPreview,
+		slideshowSource
 	})
 
 	const { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor, focusCursor } = useDriveListboxNav({

@@ -101,6 +101,8 @@ export type PreviewOverlayAction =
 	| "preview.trash"
 	| "preview.openMenu"
 	| "preview.favorite"
+	| "preview.slideshow"
+	| "preview.slideshowPause"
 
 function overlayAction(
 	id: PreviewOverlayAction,
@@ -116,6 +118,23 @@ function overlayAction(
 		section: "viewer",
 		descriptionKey,
 		hintKey: "settings:keyboardHintPreview"
+	}
+}
+
+// A slideshow's keys are a clicker's: they stay on with single-key shortcuts off.
+function slideshowAction(
+	id: PreviewOverlayAction,
+	defaultCombo: string,
+	descriptionKey: ActionDef["descriptionKey"]
+): Def<PreviewOverlayAction> {
+	return {
+		id,
+		defaultCombo,
+		scope: "editor",
+		section: "viewer",
+		descriptionKey,
+		hintKey: "settings:keyboardHintSlideshow",
+		keepsCharacterKeys: true
 	}
 }
 
@@ -136,7 +155,11 @@ export const PREVIEW_OVERLAY_ACTIONS: readonly Def<PreviewOverlayAction>[] = [
 	overlayAction("preview.openMenu", "shift+f10", "preview:previewKeyOpenMenu"),
 	// No key every app agrees on, and F (the photos grid's) is the viewers' full screen here: unassigned, so it can be
 	// bound.
-	overlayAction("preview.favorite", "", "preview:previewKeyFavorite")
+	overlayAction("preview.favorite", "", "preview:previewKeyFavorite"),
+	// F5 is the presentation show's start in the same scope.
+	slideshowAction("preview.slideshow", "s", "preview:previewKeySlideshow"),
+	// Only while a slideshow runs; a focused video keeps its own Space.
+	slideshowAction("preview.slideshowPause", "space", "preview:previewKeySlideshowPause")
 ]
 
 // The image viewer's zoom, as the PDF viewer's (the browser's zoom keys by character first, browserZoom.ts), 1 for the

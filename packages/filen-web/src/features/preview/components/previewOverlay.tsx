@@ -10,7 +10,8 @@ import {
 	DownloadIcon,
 	SaveIcon,
 	MoreHorizontalIcon,
-	PencilIcon
+	PencilIcon,
+	PlayIcon
 } from "lucide-react"
 import { toast } from "sonner"
 import { driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
@@ -94,7 +95,15 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
-import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { useSlideshow } from "@/features/preview/hooks/useSlideshow"
+import { SlideshowSlot } from "@/features/preview/components/slideshowSlot"
+import { SlideshowBar } from "@/features/preview/components/slideshowBar"
+import { slideKindOf } from "@/features/preview/lib/slideshow.logic"
+import { setSlideshowPrefs, useSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
+import { fetchSlideshowTree, type SlideshowSource } from "@/features/preview/lib/slideshowTree"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { usePreviewItemMenu } from "@/features/preview/hooks/usePreviewItemMenu"
 import { usePreviewDismissal } from "@/features/preview/hooks/usePreviewDismissal"
@@ -161,6 +170,12 @@ export interface PreviewOverlayProps {
 	downloadable?: boolean
 	// Opened through the item menu's "Open as text": the file shows in the text viewer, view-only.
 	asText?: boolean
+	// The one directory the pager's list is from, whose subdirectories a slideshow may include. None for a list that is
+	// no directory's (photos, recents, favorites, links, trash, search results, the shared roots).
+	slideshowSource?: SlideshowSource | undefined
+	// Swaps the host's frozen pager list (as opening it with `items` at `index` would): a slideshow's subdirectories'
+	// files, and back.
+	onItemsReplaced?: ((items: DriveItem[], index: number) => void) | undefined
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -229,7 +244,9 @@ export function PreviewOverlay({
 	compressParentNaming,
 	onSourcesDisposing,
 	downloadable: downloadableProp,
-	asText: asTextProp
+	asText: asTextProp,
+	slideshowSource,
+	onItemsReplaced
 }: PreviewOverlayProps) {
 	// Not a parameter default: the React Compiler skips a component that has one.
 	const downloadable = downloadableProp !== false
@@ -263,6 +280,7 @@ export function PreviewOverlay({
 	// The open video editor's commands (Mod+S opens its Save popover; the remote-change dialog's copy is its export).
 	const videoCommandsRef = useRef<VideoEditorCommands | null>(null)
 	const cacheScope = usePreviewCacheScope()
+	const access = usePreviewAccessMode()
 
 	// The open editor's unsaved edits: encoded, for a deck (never held here as bytes, it may be gigabytes) a save its
 	// session streams to an upload, or an edited image's export.
@@ -480,8 +498,155 @@ export function PreviewOverlay({
 	// A question is up: the remote-change one, a menu action's dialog, or the unsaved-changes prompt an in-app intent
 	// opened. Nothing starts behind it.
 	const dialogOpen = remote.prompt !== null || pendingIntent !== null || menuDialogKind !== null
-	// Neither does a new edit mode while one is open, being entered, or saving.
-	const editStartBlocked = anyEditing || enteringEdit || saving || dialogOpen
+	// A slideshow over the pager; it never steps away from a slot that cannot be left (requestOrRun's conditions).
+	const slideshow = useSlideshow({
+		items,
+		index,
+		step: onStep,
+		canLeave: () => !dirty && !saving,
+		cacheScope,
+		access
+	})
+	const slideshowPrefs = useSlideshowPrefs()
+	// Offered over at least two slides of the list.
+	const slideshowOffered = hasTwoSlides(items)
+	// The list the overlay was opened with while a slideshow's subdirectories' list stands in for it.
+	const [openingItems, setOpeningItems] = useState<DriveItem[] | null>(null)
+	const [treeLoading, setTreeLoading] = useState(false)
+	const treeAbortRef = useRef<AbortController | null>(null)
+	const subfoldersAvailable = slideshowSource !== undefined && onItemsReplaced !== undefined
+
+	const holdsOpening = openingItems !== null
+
+	useEffect(
+		() => () => {
+			treeAbortRef.current?.abort()
+		},
+		[]
+	)
+
+	// The opening list follows the files removed, moved or renamed meanwhile, as the host's list does.
+	useEffect(() => {
+		if (!holdsOpening) {
+			return
+		}
+
+		return subscribePreviewReconcile(event => {
+			setOpeningItems(held => {
+				if (held === null) {
+					return held
+				}
+
+				const next = reconcilePreviewSources({ items: held, index: 0 }, event)
+
+				return next === null ? [] : next.items
+			})
+		})
+	}, [holdsOpening])
+
+	// Swaps the pager's list, kept on the file on screen when the new list has it, else on its first item; never away
+	// from a slot that cannot be left. False when it did not swap.
+	function replaceItems(next: DriveItem[]): boolean {
+		const shown = rawDriveItem?.data.uuid
+		const at = shown === undefined ? -1 : next.findIndex(item => item.data.uuid === shown)
+
+		if (onItemsReplaced === undefined || (at === -1 && (dirty || saving))) {
+			return false
+		}
+
+		onItemsReplaced(next, Math.max(at, 0))
+
+		return true
+	}
+
+	function loadSubfolders(): void {
+		if (slideshowSource === undefined || openingItems !== null || treeAbortRef.current !== null) {
+			return
+		}
+
+		const controller = new AbortController()
+		const opening = items
+
+		treeAbortRef.current = controller
+		setTreeLoading(true)
+
+		void fetchSlideshowTree(slideshowSource, controller.signal).then(
+			tree => {
+				if (controller.signal.aborted) {
+					return
+				}
+
+				treeAbortRef.current = null
+				setTreeLoading(false)
+
+				// Fewer than two slides would end the slideshow: the list stays.
+				if (hasTwoSlides(tree) && replaceItems(tree)) {
+					setOpeningItems(opening)
+				}
+			},
+			(error: unknown) => {
+				if (controller.signal.aborted) {
+					return
+				}
+
+				treeAbortRef.current = null
+				setTreeLoading(false)
+				log.warn("preview", "the slideshow's subdirectories could not be listed", error)
+				toast.error(errorLabel(error))
+			}
+		)
+	}
+
+	// Back to the list the overlay was opened with.
+	function dropSubfolders(): void {
+		treeAbortRef.current?.abort()
+		treeAbortRef.current = null
+		setTreeLoading(false)
+
+		if (openingItems === null) {
+			return
+		}
+
+		// Every file of the opening list is gone: the slideshow's list stays.
+		if (openingItems.length === 0 || replaceItems(openingItems)) {
+			setOpeningItems(null)
+		}
+	}
+
+	function handleSubfoldersChange(on: boolean): void {
+		setSlideshowPrefs({ subfolders: on })
+
+		if (on) {
+			loadSubfolders()
+		} else {
+			dropSubfolders()
+		}
+	}
+
+	// Inside the click or key gesture (full screen is entered there).
+	function startSlideshow(): void {
+		if (!slideshowOffered || slideshow.running) {
+			return
+		}
+
+		slideshow.start()
+
+		if (slideshowPrefs.subfolders && subfoldersAvailable) {
+			loadSubfolders()
+		}
+	}
+
+	// The header (▶) or the bar (✕) that held focus goes with a start or an end: focus stays in the dialog, for its keys.
+	useEffect(() => {
+		const popup = popupRef.current
+
+		if (popup !== null && !popup.contains(document.activeElement)) {
+			popup.focus()
+		}
+	}, [slideshow.running])
+
+	// Neither does a new edit mode while one is open, being entered, or saving, nor under a slideshow.
+	const editStartBlocked = anyEditing || enteringEdit || saving || dialogOpen || slideshow.running
 
 	// Opens the image on screen in the editor, or says why it cannot. Not while anything else is under way or asked.
 	function startImageEdit(): void {
@@ -975,6 +1140,14 @@ export function PreviewOverlay({
 			return
 		}
 
+		// A running slideshow's Escape ends it; the preview stays open on the file.
+		if (escape && slideshow.running) {
+			details.cancel()
+			slideshow.stop()
+
+			return
+		}
+
 		if (escape && !pressed(CLOSE)) {
 			details.cancel()
 
@@ -1065,6 +1238,27 @@ export function PreviewOverlay({
 
 		// Escape closes through the dialog's own dismissal (handleOpenChange), which knows about the layers over it.
 		if (action === "preview.close" && event.key === "Escape") {
+			return
+		}
+
+		// S starts a slideshow; Space pauses one only while it runs, and is otherwise left to what has focus.
+		if (action === "preview.slideshow" || action === "preview.slideshowPause") {
+			if (action === "preview.slideshow" ? !slideshowOffered || slideshow.running : !slideshow.running) {
+				return
+			}
+
+			event.preventDefault()
+
+			if (event.repeat) {
+				return
+			}
+
+			if (action === "preview.slideshow") {
+				startSlideshow()
+			} else {
+				slideshow.togglePause()
+			}
+
 			return
 		}
 
@@ -1174,7 +1368,8 @@ export function PreviewOverlay({
 				>
 					{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. The video
 					    editor brings its own header. */}
-					{videoEditing !== null ? null : (
+					{slideshow.running ? <DialogPrimitive.Title className="sr-only">{name}</DialogPrimitive.Title> : null}
+					{videoEditing !== null || slideshow.running ? null : (
 						<header className="flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center gap-1 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] app-region-chrome">
 							{editing !== null && imagePrimaryTarget !== null ? (
 								<>
@@ -1319,6 +1514,15 @@ export function PreviewOverlay({
 									>
 										<ChevronRightIcon />
 									</TooltipIconButton>
+									{slideshowOffered ? (
+										<TooltipIconButton
+											label={t("previewSlideshowStart")}
+											shortcut={<Kbd action="preview.slideshow" />}
+											onClick={startSlideshow}
+										>
+											<PlayIcon />
+										</TooltipIconButton>
+									) : null}
 									{download !== null ? (
 										<TooltipIconButton
 											label={t("previewDownloadAction")}
@@ -1418,7 +1622,7 @@ export function PreviewOverlay({
 						</header>
 					)}
 					<div className="flex min-h-0 flex-1">
-						<div className="min-h-0 min-w-0 flex-1">
+						<div className="relative min-h-0 min-w-0 flex-1">
 							<ArchiveListingScope>
 								{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
 								{editing !== null ? (
@@ -1465,66 +1669,76 @@ export function PreviewOverlay({
 									<PreviewLoading />
 								) : (
 									<PreviewErrorBoundary key={slotKey}>
-										<PreviewDownloadableProvider
-											downloadable={previewDownloadable(downloadable, variant)}
-											onDownload={download}
-										>
-											<ContentSniffGate
-												item={driveItem}
-												asText={asText}
-												render={() => (
-													<PreviewReplaceContext value={replaceInSlot}>
-														<PasswordDraftContext value={passwordDraft.draft}>
-															<PreviewBody
-																item={driveItem}
-																variant={variant}
-																category={pin?.category}
-																documentKey={currentDocumentKey}
-																editable={slotWritable}
-																renamedReadOnly={renamedReadOnly}
-																neverEditable={
-																	!ownsWritableFile(driveItem, variant) || isViewOnlyPdf(driveItem)
-																}
-																locked={saving}
-																onDirtyChange={setPreviewDirty}
-																readAs={readAs}
-																onTextState={state => {
-																	if (rawDriveItem !== undefined) {
-																		const forUuid = rawDriveItem.data.uuid
+										<SlideshowSlot value={slideshow.running ? slideshow.slot : null}>
+											<PreviewDownloadableProvider
+												downloadable={previewDownloadable(downloadable, variant)}
+												onDownload={download}
+											>
+												<ContentSniffGate
+													item={driveItem}
+													asText={asText}
+													render={() => (
+														<PreviewReplaceContext value={replaceInSlot}>
+															<PasswordDraftContext value={passwordDraft.draft}>
+																<PreviewBody
+																	item={driveItem}
+																	variant={variant}
+																	category={pin?.category}
+																	documentKey={currentDocumentKey}
+																	editable={slotWritable}
+																	renamedReadOnly={renamedReadOnly}
+																	neverEditable={
+																		!ownsWritableFile(driveItem, variant) || isViewOnlyPdf(driveItem)
+																	}
+																	locked={saving}
+																	onDirtyChange={setPreviewDirty}
+																	readAs={readAs}
+																	onTextState={state => {
+																		if (rawDriveItem !== undefined) {
+																			const forUuid = rawDriveItem.data.uuid
 
-																		setTextState(current =>
-																			current?.forUuid === forUuid &&
-																			current.writable === state.writable &&
-																			current.encoding === state.encoding &&
-																			current.readEncoding === state.readEncoding
-																				? current
-																				: { ...state, forUuid }
-																		)
-																	}
-																}}
-																contentRef={contentRef}
-																spreadsheetRef={spreadsheetRef}
-																docxRef={docxRef}
-																presentationRef={presentationRef}
-																imageRef={imageRef}
-																imagePageRef={imagePageRef}
-																onSave={() => performSaveRef.current()}
-																onAutosave={() => performSaveRef.current(true)}
-																canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-																onOpenFile={opened => {
-																	if (rawDriveItem !== undefined) {
-																		commitSaved(rawDriveItem.data.uuid, opened)
-																	}
-																}}
-															/>
-														</PasswordDraftContext>
-													</PreviewReplaceContext>
-												)}
-											/>
-										</PreviewDownloadableProvider>
+																			setTextState(current =>
+																				current?.forUuid === forUuid &&
+																				current.writable === state.writable &&
+																				current.encoding === state.encoding &&
+																				current.readEncoding === state.readEncoding
+																					? current
+																					: { ...state, forUuid }
+																			)
+																		}
+																	}}
+																	contentRef={contentRef}
+																	spreadsheetRef={spreadsheetRef}
+																	docxRef={docxRef}
+																	presentationRef={presentationRef}
+																	imageRef={imageRef}
+																	imagePageRef={imagePageRef}
+																	onSave={() => performSaveRef.current()}
+																	onAutosave={() => performSaveRef.current(true)}
+																	canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+																	onOpenFile={opened => {
+																		if (rawDriveItem !== undefined) {
+																			commitSaved(rawDriveItem.data.uuid, opened)
+																		}
+																	}}
+																/>
+															</PasswordDraftContext>
+														</PreviewReplaceContext>
+													)}
+												/>
+											</PreviewDownloadableProvider>
+										</SlideshowSlot>
 									</PreviewErrorBoundary>
 								)}
 							</ArchiveListingScope>
+							{/* On the stage it watches the pointer over. */}
+							{slideshow.running ? (
+								<SlideshowBar
+									slideshow={slideshow}
+									subfolders={{ available: subfoldersAvailable, loading: treeLoading }}
+									onSubfoldersChange={handleSubfoldersChange}
+								/>
+							) : null}
 						</div>
 						{hostsAssistant ? <PreviewAssistantPane /> : null}
 					</div>
@@ -1588,6 +1802,18 @@ export function PreviewOverlay({
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
 	)
+}
+
+function hasTwoSlides(items: readonly DriveItem[]): boolean {
+	let slides = 0
+
+	for (const item of items) {
+		if (slideKindOf(item) !== null && ++slides === 2) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Middle-ish ellipsis for a long filename: the head truncates with a CSS ellipsis while the tail

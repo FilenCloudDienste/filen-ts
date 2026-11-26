@@ -21,6 +21,7 @@ import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ColorDialog } from "@/features/drive/components/colorDialog"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
+import type { SlideshowSource } from "@/features/preview/lib/slideshowTree"
 import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
@@ -45,6 +46,8 @@ interface ActiveDialog {
 	index?: number
 	// kind:"preview" opened through "Open as text".
 	asText?: boolean
+	// kind:"preview" opened from one directory's listing: where a slideshow takes its subdirectories from.
+	slideshowSource?: SlideshowSource | undefined
 	// kind:"rename" of the root `.filen`: its name was typed, so the rename dialog follows.
 	dotFilenConfirmed?: boolean
 	// A destination picker (move, copy, extract to) opened from a tree menu level's More…: that level's
@@ -57,7 +60,7 @@ export interface DriveDialogHost {
 	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
 	handleBulkDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 	handleEmptyTrash: () => void
-	openPreview: (items: DriveItem[], index: number) => void
+	openPreview: (items: DriveItem[], index: number, slideshowSource?: SlideshowSource) => void
 	renderActiveDialog: () => ReactNode
 }
 
@@ -82,8 +85,13 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	const { stepPreview, removeCurrentPreviewItem } = usePreviewDialogState(setActiveDialog)
 
 	// Opens the preview overlay for a frozen item snapshot at the given position.
-	function openPreview(items: DriveItem[], index: number): void {
-		setActiveDialog({ kind: "preview", items, index })
+	function openPreview(items: DriveItem[], index: number, slideshowSource?: SlideshowSource): void {
+		setActiveDialog({ kind: "preview", items, index, slideshowSource })
+	}
+
+	// A slideshow's swap of the frozen pager list (its subdirectories' files, and back).
+	function replacePreviewItems(items: DriveItem[], index: number): void {
+		setActiveDialog(prev => (prev?.kind === "preview" ? { ...prev, items, index } : prev))
 	}
 
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
@@ -425,6 +433,8 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						onClose={closeActiveDialog}
 						onItemRemoved={removeCurrentPreviewItem}
 						asText={activeDialog.asText === true}
+						slideshowSource={activeDialog.slideshowSource}
+						onItemsReplaced={replacePreviewItems}
 					/>
 				)
 			}

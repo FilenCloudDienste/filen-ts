@@ -816,7 +816,22 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["annotations.draw", "app.toggleTheme"],
 	["annotations.hand", "media.subtitleLater"],
 	["annotations.hand", "presentation.show.nextHidden"],
-	["annotations.note", "media.subtitles"]
+	["annotations.note", "media.subtitles"],
+	// The overlay's slideshow keys take only a key no body took (its handler skips a prevented key).
+	// Space pauses only a running slideshow; the archive browser stops its Space first.
+	["preview.slideshowPause", "archive.toggle"],
+	// The video editor takes every key of its own; the overlay passes every key on while it is open.
+	["preview.slideshowPause", "preview.videoPlayPause"],
+	// A running presentation show stops every key its stage takes.
+	["preview.slideshowPause", "presentation.show.next"],
+	// The players take Space only with focus inside one, and stop it there.
+	["preview.slideshowPause", "media.playPause"],
+	// The players take S only with focus inside one, and stop it there.
+	["preview.slideshow", "media.skip"],
+	// The PDF tools' letters act on the page surface only, which prevents the key it takes.
+	["preview.slideshow", "pdf.tool.sign"],
+	// The video editor takes every key of its own; the overlay passes every key on while it is open.
+	["preview.slideshow", "preview.videoSplit"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {
