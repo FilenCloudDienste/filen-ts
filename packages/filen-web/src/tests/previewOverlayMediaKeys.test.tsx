@@ -21,6 +21,12 @@ vi.mock("@tanstack/react-router", () => ({
 	useRouterState: () => "/drive"
 }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+// Rename's name check asks the SDK worker, which this test does not run: every name is taken as valid.
+vi.mock("@/features/drive/lib/archiveHelpers", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/archiveHelpers")>()),
+	cachedItemNameError: () => null,
+	itemNameError: () => Promise.resolve(null)
+}))
 vi.mock("@/features/presentation/components/presentationViewer", async () => {
 	const { use } = await vi.importActual<typeof import("react")>("react")
 	const { PreviewMediaPagerContext } =
